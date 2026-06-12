@@ -1,0 +1,11 @@
+{
+  "notFound": {
+    "kicker": "404 — not here",
+    "title": "Lost the thread.",
+    "body": "The page you were after isn't here. It may have been renamed, deleted, or never existed in the first place. No harm done — let's find your way back.",
+    "back": "Back to home"
+  },
+  "boundary": {
+    "title": "Something went sideways."
+  }
+}

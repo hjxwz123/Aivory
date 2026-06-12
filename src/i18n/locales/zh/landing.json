@@ -1,0 +1,103 @@
+{
+  "badgeNew": "新 · Aurelia Reason 正式上线",
+  "hero": {
+    "titleLine1": "一位克制而细腻的 AI 伙伴",
+    "titleLine2": "与你真正的思考方式同频。",
+    "subtitle": "Aurelia 是一处安静的写作、推理与阅读之所。围绕你的对话本身，而非背后的模型。",
+    "placeholder": "试试看：为「专注是一种道德能力」拟一份文章提纲"
+  },
+  "capabilities": {
+    "eyebrow": "能力",
+    "title": "产品本身，就是写作。",
+    "body": "Aurelia 在三件事上做得更好。其余的部分，是围绕它们的安静的外壳。",
+    "items": {
+      "writing": {
+        "title": "与你一同思考的写作",
+        "body": "提纲、修改、长文起草都在同一线程内。Aurelia 会读你之前写过的内容，并尊重它。"
+      },
+      "research": {
+        "title": "可追溯的研究模式",
+        "body": "深度研究模式调度小型的来源面板，将引用以行内标签的形式呈现，让每一句结论都可追踪。"
+      },
+      "code": {
+        "title": "克制的代码呈现",
+        "body": "精炼的语法、一键复制、语言标签。读起来像学术期刊，而不是命令行。"
+      }
+    }
+  },
+  "how": {
+    "eyebrow": "体验",
+    "title": "做减法，做得高级。",
+    "body": "我们去掉了气泡。去掉了加载圈。去掉了冷蓝色调。剩下的，是认真对待思考的空间——也尊重你的。",
+    "principles": {
+      "noDefaults": {
+        "title": "不留默认样式",
+        "body": "每个组件都基于 token 重新构建，整体浑然一体。"
+      },
+      "readingFirst": {
+        "title": "阅读优先",
+        "body": "宽裕的行高、克制的色彩、唯一的强调色。一处真正适合驻留的地方。"
+      },
+      "youOwnIt": {
+        "title": "对话归你所有",
+        "body": "编辑、重新生成、分支、导出——你的存档，归你所有。"
+      }
+    },
+    "quote": "它不像在使用一个工具，更像在一间安静的房间里，与一位读过同样书的人一起写作。",
+    "quoteSource": "一位早期读者，爱丁堡"
+  },
+  "useCases": {
+    "eyebrow": "为这些人而做",
+    "title": "四类人正在以它思考。",
+    "items": {
+      "writers": { "title": "长文作者", "body": "随笔、书稿、讲稿。拒绝模板。" },
+      "researchers": { "title": "研究者", "body": "多源综述，结论可追溯。" },
+      "engineers": { "title": "工程师", "body": "代码审阅、重构、配对思考。" },
+      "thinkers": { "title": "安静的思考者", "body": "决策矩阵、阅读清单、规划。" }
+    }
+  },
+  "models": {
+    "eyebrow": "模型",
+    "title": "为不同的工作，选择不同的声音。",
+    "body": "Aurelia 提供一个精挑细选的小型模型阵容。每个对话可以独立切换；我们会记住。",
+    "tiers": {
+      "standard": "标准",
+      "pro": "Pro",
+      "max": "Max"
+    },
+    "lockedNote": "Max 套餐可用"
+  },
+  "safety": {
+    "eyebrow": "安全与隐私",
+    "title": "你的对话归你所有。",
+    "body": "Aurelia 默认不会使用你的对话训练模型。记忆可编辑、可导出。企业空间可隔离，并支持自定义留存规则。",
+    "rows": {
+      "noTraining": { "title": "不使用你的对话训练", "body": "你需要主动选择加入，而非退出。所有人默认关闭。" },
+      "export": { "title": "随时导出", "body": "你的存档，归你所有。Markdown、JSON、纯文本。" },
+      "memory": { "title": "可编辑的记忆", "body": "Aurelia 学到的每一条事实，都是一条你可以编辑或删除的记录。" }
+    }
+  },
+  "cta": {
+    "title": "打开工作区。",
+    "body": "一处安静的写作、推理与阅读之所。免费试用。然后，归你所有。",
+    "primary": "开始一段对话"
+  },
+  "footer": {
+    "tagline": "一位克制而细腻的 AI 伙伴。为思考而生，不为喧哗。"
+  },
+  "preview": {
+    "today": "今天",
+    "yesterday": "昨天",
+    "essayTitle": "关于专注的长文提纲",
+    "essayLead": "为你拟了一份关于 {{topic}} 的 2000 字文章提纲。我故意让结构留出空间，让每一节都能呼吸。",
+    "essayTopic": "把专注作为一种道德能力",
+    "section1": "1. 开篇 — {{italic}}",
+    "section1Italic": "为何应当认真对待「专注」",
+    "section1Body": "一个具体的小图景，再落到一句论点。",
+    "section2": "2. 「专注」究竟意味着什么",
+    "section2Body": "认知的、感知的、道德的。",
+    "readingList": "复杂理论入门书单",
+    "newsletterName": "为一份评论性的简报命名",
+    "askPlaceholder": "随便问点什么…"
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "title": "Knowledge",
+  "lead": "Long-lived libraries that any conversation can call into. Upload documents once, ask anywhere.",
+  "new": "New library",
+  "emptyTitle": "No libraries yet",
+  "emptyBody": "A library binds a set of documents to one embedding model. Create one to get started.",
+  "createFirst": "Create your first library",
+  "stats": {
+    "dim": "{{dim}}-dim embeddings",
+    "created": "created {{when}}"
+  },
+  "dialog": {
+    "title": "New knowledge library",
+    "body": "The embedding model is locked once you upload the first document — it determines the vector space.",
+    "name": "Name",
+    "namePlaceholder": "House style guide",
+    "description": "Description",
+    "embeddingModel": "Embedding model",
+    "pickModel": "Pick a model",
+    "create": "Create",
+    "created": "Knowledge base created",
+    "nameRequired": "Name required"
+  },
+  "detail": {
+    "uploadButton": "Upload document",
+    "noDocs": "No documents yet",
+    "noDocsBody": "Upload a PDF, Markdown or text file and Aurelia indexes it for retrieval.",
+    "rename": "Rename library",
+    "delete": "Delete library",
+    "deleteConfirm": "Delete this library and all its documents?",
+    "uploaded": "Document uploaded",
+    "uploadFailed": "Upload failed",
+    "status": {
+      "pending": "Queued",
+      "parsing": "Parsing",
+      "embedding": "Embedding",
+      "ready": "Ready",
+      "failed": "Failed"
+    },
+    "tableHeaders": {
+      "filename": "File",
+      "status": "Status",
+      "chunks": "Chunks",
+      "added": "Added"
+    },
+    "removeDocConfirm": "Remove \"{{name}}\" from this library?",
+    "removed": "Document removed"
+  }
+}

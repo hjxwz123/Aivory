@@ -1,0 +1,103 @@
+{
+  "badgeNew": "New · Aurelia Reason is here",
+  "hero": {
+    "titleLine1": "A thoughtful AI companion",
+    "titleLine2": "for the way you actually think.",
+    "subtitle": "Aurelia is a calm place to write, reason, and read. Built around your conversation, not the model behind it.",
+    "placeholder": "Try: outline an essay on attention as a moral skill"
+  },
+  "capabilities": {
+    "eyebrow": "Capabilities",
+    "title": "The product is the writing.",
+    "body": "Three things Aurelia does better than its alternatives. Everything else is calm chrome around them.",
+    "items": {
+      "writing": {
+        "title": "Writing that thinks with you",
+        "body": "Outlines, edits, and long-form drafts in a single thread. Aurelia reads what you wrote before, and respects it."
+      },
+      "research": {
+        "title": "Research with sources",
+        "body": "Deep research mode runs a small panel of sources, surfaces citations as inline chips, and lets you trace any claim."
+      },
+      "code": {
+        "title": "Code that doesn't shout",
+        "body": "Refined syntax, copy-to-clipboard, language tags. Reads like a journal article, not a terminal."
+      }
+    }
+  },
+  "how": {
+    "eyebrow": "How it feels",
+    "title": "Premium by subtraction.",
+    "body": "We removed the bubble. We removed the loading spinner. We removed the cold blue accent. What's left is a place that takes thinking seriously — and respects yours.",
+    "principles": {
+      "noDefaults": {
+        "title": "No defaults left intact",
+        "body": "Every component was rebuilt from tokens so the product feels of-a-piece."
+      },
+      "readingFirst": {
+        "title": "Reading first",
+        "body": "Generous line height, restrained color, single accent. Made to be lived in."
+      },
+      "youOwnIt": {
+        "title": "You own the conversation",
+        "body": "Edit anything, regenerate, branch, export. Your archive is yours."
+      }
+    },
+    "quote": "It feels less like talking to a tool and more like writing in a quiet room with someone who has been reading the same things you have.",
+    "quoteSource": "An early reader, Edinburgh"
+  },
+  "useCases": {
+    "eyebrow": "Made for",
+    "title": "Four ways people are using it.",
+    "items": {
+      "writers": { "title": "Long-form writers", "body": "Essays, books, talks. Resists templating." },
+      "researchers": { "title": "Researchers", "body": "Multi-source synthesis with traceable claims." },
+      "engineers": { "title": "Engineers", "body": "Code review, refactors, paired thinking." },
+      "thinkers": { "title": "Quiet thinkers", "body": "Decision matrices, reading lists, planning." }
+    }
+  },
+  "models": {
+    "eyebrow": "Models",
+    "title": "Pick the voice that fits the work.",
+    "body": "Aurelia ships with a small, considered lineup. Switch models per conversation; we remember.",
+    "tiers": {
+      "standard": "Standard",
+      "pro": "Pro",
+      "max": "Max"
+    },
+    "lockedNote": "Available on Max plan"
+  },
+  "safety": {
+    "eyebrow": "Safety & privacy",
+    "title": "Your conversations are yours.",
+    "body": "Aurelia does not train on your conversations by default. Memory is editable and exportable. Workspaces can be enterprise-isolated with custom retention rules.",
+    "rows": {
+      "noTraining": { "title": "No training on your chats", "body": "You opt in, not out. Off by default for everyone." },
+      "export": { "title": "Export anything", "body": "Your archive is yours. Markdown, JSON, plain text." },
+      "memory": { "title": "Editable memory", "body": "Every fact Aurelia learns is a row you can edit or delete." }
+    }
+  },
+  "cta": {
+    "title": "Open the workspace.",
+    "body": "A quiet place to write, reason, and read. Free to try. Yours, after.",
+    "primary": "Start a conversation"
+  },
+  "footer": {
+    "tagline": "A thoughtful AI companion. Made for thinking, not for shouting."
+  },
+  "preview": {
+    "today": "Today",
+    "yesterday": "Yesterday",
+    "essayTitle": "A long-form essay on attention",
+    "essayLead": "Here's a working outline for a 2,000-word essay on {{topic}}. I've kept the structure spacious so each section can breathe.",
+    "essayTopic": "attention as a moral skill",
+    "section1": "1. Opening — {{italic}}",
+    "section1Italic": "the case for taking attention seriously",
+    "section1Body": "A small particular image, then a thesis sentence.",
+    "section2": "2. What we mean by attention",
+    "section2Body": "Cognitive, perceptual, moral.",
+    "readingList": "Reading list on complexity",
+    "newsletterName": "Naming an editorial newsletter",
+    "askPlaceholder": "Ask anything…"
+  }
+}

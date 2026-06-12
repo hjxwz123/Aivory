@@ -1,0 +1,28 @@
+node_modules
+dist
+dist-ssr
+.cache
+.vite
+*.local
+.DS_Store
+.env
+.env.local
+.env.*.local
+*.log
+.idea
+.vscode/*
+!.vscode/extensions.json
+
+# Backend
+server/data/
+server/aurelia
+server/.env
+
+# Sandbox sidecar — tracked separately in its own repository.
+sandbox-service/
+
+# Claude Code session state (local tooling, never committed).
+.claude/
+
+__pycache__/
+*.pyc

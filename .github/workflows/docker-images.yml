@@ -1,0 +1,110 @@
+name: Build & push API + Web images
+
+# Builds the two application images and pushes them to GitHub Container
+# Registry (ghcr.io) on every push to main and on semver tags. The sandbox
+# images have their own workflow (sandbox-image.yml).
+#
+# Images produced:
+#   ghcr.io/<owner>/aurelia-api:latest     ← Go HTTP API server
+#   ghcr.io/<owner>/aurelia-web:latest     ← built SPA served by nginx
+#
+# Tagging strategy (handled by docker/metadata-action):
+#   - push to main          → :latest        + :sha-<short>
+#   - push tag v1.2.3       → :1.2.3 + :1.2 + :1 + :latest
+#   - PR                    → :pr-<n>        (image is NOT pushed)
+#
+# Multi-arch: linux/amd64 + linux/arm64. ARM build uses QEMU under the hood,
+# so it's slower — disable arm64 by editing PLATFORMS below if you don't
+# need it.
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*.*.*']
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'sandbox-service/**'           # has its own workflow
+      - '.github/workflows/sandbox-image.yml'
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+  workflow_dispatch: {}
+
+env:
+  REGISTRY: ghcr.io
+  PLATFORMS: linux/amd64,linux/arm64
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: aurelia-api
+            dockerfile: deploy/Dockerfile.server
+            context: .
+          - name: aurelia-web
+            dockerfile: deploy/Dockerfile.web
+            context: .
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # ghcr image paths must be lowercase; the owner may contain capitals.
+      - name: Compute lowercase owner
+        id: vars
+        run: echo "owner=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        # Skip login on PRs — they can't push anyway and forks have no
+        # write-token. Build still runs as a smoke test.
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ steps.vars.outputs.owner }}/${{ matrix.name }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha,prefix=sha-,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
+          labels: |
+            org.opencontainers.image.title=${{ matrix.name }}
+            org.opencontainers.image.description=Aurelia — multi-model AI chat platform
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.licenses=MIT
+
+      - name: Build and push ${{ matrix.name }}
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          platforms: ${{ env.PLATFORMS }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}

@@ -1,0 +1,37 @@
+{
+  "title": "Memory",
+  "lead": "Aurelia learns lasting facts about you across conversations. Anything here is fair game for future replies.",
+  "empty": "No memories yet.",
+  "emptyBody": "After a few conversations Aurelia will surface things worth remembering. You can also save them by hand.",
+  "new": "Add memory",
+  "addDialogTitle": "New memory",
+  "addDialogBody": "A short, durable fact about you. Aurelia will treat it as ground truth.",
+  "fields": {
+    "text": "Memory",
+    "slot": "Slot (optional)",
+    "value": "Value (optional)"
+  },
+  "actions": {
+    "edit": "Edit",
+    "save": "Save",
+    "delete": "Forget",
+    "markStale": "Mark stale",
+    "markActive": "Mark active"
+  },
+  "status": {
+    "ACTIVE": "Active",
+    "STALE": "Stale",
+    "UNKNOWN_CURRENT": "Unsure",
+    "HISTORICAL_ONLY": "Historical",
+    "QUERY_DEPENDENT": "Context-dependent"
+  },
+  "created": "Memory saved",
+  "updated": "Memory updated",
+  "deleted": "Memory forgotten",
+  "deleteConfirm": "Forget this memory?",
+  "filters": {
+    "all": "All",
+    "active": "Active",
+    "stale": "Stale"
+  }
+}

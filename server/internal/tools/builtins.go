@@ -1,0 +1,984 @@
+package tools
+
+import (
+	"bytes"
+	"context"
+	"database/sql"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"mime/multipart"
+	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"time"
+
+	"aurelia/server/internal/config"
+	"aurelia/server/internal/llm"
+	"aurelia/server/internal/rag"
+	"aurelia/server/internal/sandbox"
+	"aurelia/server/internal/store"
+)
+
+// webSearchTool implements §4.4 via a pluggable Searcher. When no backend is
+// configured it returns a polite placeholder so callers never crash.
+type webSearchTool struct {
+	cfg      config.Config
+	searcher Searcher
+}
+
+func (t *webSearchTool) Name() string { return "web_search" }
+func (t *webSearchTool) Description() string {
+	return "Search the public web for current information. Use when the answer depends on news, prices, recent events, or anything time-sensitive. Returns a list of titled snippets with URLs."
+}
+func (t *webSearchTool) InputSchema() json.RawMessage {
+	return json.RawMessage(`{"type":"object","properties":{"query":{"type":"string","description":"Search query"}},"required":["query"]}`)
+}
+
+type webSearchInput struct {
+	Query string `json:"query"`
+	TopK  int    `json:"top_k"`
+}
+
+func (t *webSearchTool) Execute(ctx context.Context, input []byte, _ *llm.ToolContext) (string, []llm.Citation, error) {
+	var in webSearchInput
+	_ = json.Unmarshal(input, &in)
+	if in.Query == "" {
+		return "", nil, errors.New("query required")
+	}
+	if in.TopK <= 0 {
+		in.TopK = 5
+	}
+	if t.searcher == nil {
+		// Fallback "result" so the model can still respond gracefully.
+		fake := []llm.Citation{
+			{ID: "w1", Index: 1, Title: "Aurelia local-only mode", URL: "https://example.com/aurelia-local-mode", Snippet: "No SEARCH_API_KEY configured. Configure one to enable real web_search results.", Source: "web"},
+		}
+		return "Search not yet configured. Reply based on training knowledge or ask the user to configure SEARCH_API_KEY.", fake, nil
+	}
+	return t.searcher.Search(ctx, in.Query, in.TopK)
+}
+
+// webFetchTool implements §4.4 with the SSRF guards.
+type webFetchTool struct{}
+
+func (t *webFetchTool) Name() string { return "web_fetch" }
+func (t *webFetchTool) Description() string {
+	return "Fetch the main text content of a URL. Use after web_search to read a specific page. SSRF-guarded: internal IPs blocked."
+}
+func (t *webFetchTool) InputSchema() json.RawMessage {
+	return json.RawMessage(`{"type":"object","properties":{"url":{"type":"string"}},"required":["url"]}`)
+}
+
+type webFetchInput struct {
+	URL string `json:"url"`
+}
+
+func (t *webFetchTool) Execute(ctx context.Context, input []byte, _ *llm.ToolContext) (string, []llm.Citation, error) {
+	var in webFetchInput
+	_ = json.Unmarshal(input, &in)
+	u, err := url.Parse(in.URL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return "", nil, errors.New("invalid URL")
+	}
+	// Reject non-web ports up-front (defence in depth — the dialer re-checks
+	// the resolved IP + port on every hop, defeating redirects/rebinding).
+	if p := u.Port(); p != "" && p != "80" && p != "443" {
+		return "", nil, errors.New("blocked non-web port")
+	}
+	req, _ := http.NewRequestWithContext(ctx, "GET", in.URL, nil)
+	req.Header.Set("user-agent", "AureliaBot/1.0")
+	resp, err := ssrfSafeClient().Do(req)
+	if err != nil {
+		return "", nil, err
+	}
+	defer resp.Body.Close()
+	// Truncate after 256 KB — keeps tokens bounded.
+	limited := io.LimitReader(resp.Body, 256*1024)
+	body, _ := io.ReadAll(limited)
+	text := stripHTML(string(body))
+	// Roughly cap at ~8K tokens (≈32K chars) per §4.4.
+	if len(text) > 32000 {
+		text = text[:32000] + "\n…[truncated]"
+	}
+	return text, nil, nil
+}
+
+// scriptStyleRe removes <script>/<style>/<noscript>/<svg> blocks before tag
+// stripping. Adding noscript+svg eliminates a large class of decorative noise
+// that survives plain tag stripping.
+var scriptStyleRe = regexp.MustCompile(`(?is)<(script|style|noscript|svg|nav|aside|header|footer|form|iframe)[^>]*>.*?</(script|style|noscript|svg|nav|aside|header|footer|form|iframe)>`)
+
+// readabilityContainerRe extracts the inner HTML of the most likely "main
+// content" container — <article>, <main>, or a <div role="main">. If one is
+// found we restrict stripHTML to its body so the snippet stops including site
+// chrome (navigation, sidebars, related-article lists).
+var readabilityContainerRe = regexp.MustCompile(`(?is)<(article|main)[^>]*>(.*?)</(article|main)>`)
+
+// htmlEntities are the handful of named entities worth decoding for readability.
+var htmlEntities = strings.NewReplacer(
+	"&nbsp;", " ", "&amp;", "&", "&lt;", "<", "&gt;", ">", "&quot;", "\"",
+	"&#39;", "'", "&apos;", "'", "&mdash;", "—", "&ndash;", "–", "&hellip;", "…",
+)
+
+// stripHTML extracts readable text from a web page. We approximate the
+// readability algorithm:
+//  1. drop script/style/nav/aside/header/footer/form/iframe blocks
+//  2. prefer the inner HTML of an <article> / <main> container when present
+//  3. strip tags, decode entities, collapse whitespace
+//
+// Not a full DOM parser but a vast improvement over the old "strip every tag"
+// path for the web_fetch tool — boilerplate (cookie banners, sidebars,
+// "related articles") now disappears and the model sees a cleaner article.
+func stripHTML(s string) string {
+	s = scriptStyleRe.ReplaceAllString(s, " ")
+	// Prefer the main article body when present.
+	if m := readabilityContainerRe.FindStringSubmatch(s); len(m) >= 3 {
+		s = m[2]
+	}
+	out := strings.Builder{}
+	inTag := false
+	for _, c := range s {
+		switch c {
+		case '<':
+			inTag = true
+		case '>':
+			inTag = false
+		default:
+			if !inTag {
+				out.WriteRune(c)
+			}
+		}
+	}
+	text := htmlEntities.Replace(out.String())
+	// Collapse runs of blank lines / spaces.
+	text = regexp.MustCompile(`[ \t]+`).ReplaceAllString(text, " ")
+	text = regexp.MustCompile(`\n[ \t]*\n[ \t\n]*`).ReplaceAllString(text, "\n\n")
+	return strings.TrimSpace(text)
+}
+
+// pythonExecuteTool — design.md §4.5. Proxies to the configured sandbox
+// service (the single dependency point). When no sandbox is configured it
+// falls back to a safe-mode arithmetic evaluator so dev stays usable.
+type pythonExecuteTool struct {
+	sandbox     sandbox.Service
+	artifactDir string
+}
+
+func (t *pythonExecuteTool) Name() string { return "python_execute" }
+func (t *pythonExecuteTool) Description() string {
+	return "Run Python code in a sandboxed environment for math, data analysis, plotting, file processing, and generating downloadable files (PDF/PPTX/DOCX/PNG). The session preserves /workspace files across calls. User-uploaded data files are available under /workspace/uploads/. Write outputs to /workspace/outputs to return them as downloadable artifacts. Stdout/stderr is returned."
+}
+func (t *pythonExecuteTool) InputSchema() json.RawMessage {
+	return json.RawMessage(`{"type":"object","properties":{"code":{"type":"string"}},"required":["code"]}`)
+}
+
+type pyInput struct {
+	Code string `json:"code"`
+}
+
+func (t *pythonExecuteTool) Execute(ctx context.Context, input []byte, tc *llm.ToolContext) (string, []llm.Citation, error) {
+	var in pyInput
+	_ = json.Unmarshal(input, &in)
+	if strings.TrimSpace(in.Code) == "" {
+		return "", nil, errors.New("code required")
+	}
+
+	// Safe-mode fallback when no sandbox backend is wired in.
+	if t.sandbox == nil || !t.sandbox.Enabled() {
+		if answer := tryQuickArithmetic(in.Code); answer != "" {
+			return "stdout:\n" + answer + "\n(local arithmetic evaluator; configure the sandbox in Admin → settings for real Python execution)", nil, nil
+		}
+		return "[python_execute is in safe-mode] Configure a sandbox URL + key in Admin settings to execute real Python.", nil, nil
+	}
+
+	// Reuse the conversation's persistent session (§4.5) so /workspace files
+	// carry across calls; provision one on first use.
+	sessionID := ""
+	if tc != nil && tc.DB != nil && tc.ConvID != "" {
+		sessionID, _ = store.GetConvProviderStateKey(ctx, tc.DB, tc.ConvID, "sandbox_id")
+	}
+	if sessionID == "" {
+		sid, err := t.sandbox.NewSession(ctx)
+		if err != nil {
+			return "", nil, fmt.Errorf("sandbox session: %w", err)
+		}
+		sessionID = sid
+		if tc != nil && tc.DB != nil && tc.ConvID != "" {
+			_ = store.SetConvProviderStateKey(ctx, tc.DB, tc.ConvID, "sandbox_id", sessionID)
+		}
+	}
+
+	// Stage the conversation's uploaded data files into /workspace/uploads so
+	// the code can read them (§4.5). Best-effort and idempotent — the sandbox
+	// overwrites same-path files.
+	stageFiles := func(sid string) {
+		if tc == nil || tc.DB == nil || tc.ConvID == "" {
+			return
+		}
+		if files, err := store.ListFilesByConversation(ctx, tc.DB, tc.ConvID, tc.UserID); err == nil {
+			for _, f := range files {
+				if f.Kind != "sheet" && f.Kind != "text" && f.Kind != "code" && f.Kind != "pdf" {
+					continue
+				}
+				if f.SizeBytes > 20*1024*1024 {
+					continue
+				}
+				data, err := os.ReadFile(f.StoragePath)
+				if err != nil {
+					continue
+				}
+				_ = t.sandbox.PutFile(ctx, sid, "/workspace/uploads/"+filepath.Base(f.Filename), data)
+			}
+		}
+		// Stage skill assets too (§4.17) so use_skill can reference scripts/data
+		// from /workspace/skills/<name>/.
+		if tc.DB != nil && tc.UserID != "" {
+			if skillIDs, err := store.SkillsForUser(ctx, tc.DB, tc.UserID); err == nil {
+				for _, sid2 := range skillIDs {
+					sk, err := store.GetSkill(ctx, tc.DB, sid2)
+					if err != nil || sk == nil || !sk.Enabled {
+						continue
+					}
+					assets, err := store.ListSkillAssets(ctx, tc.DB, sk.ID)
+					if err != nil {
+						continue
+					}
+					for _, a := range assets {
+						data, err := os.ReadFile(a.StoragePath)
+						if err != nil {
+							continue
+						}
+						_ = t.sandbox.PutFile(ctx, sid, "/workspace/skills/"+sk.Name+"/"+a.Filename, data)
+					}
+				}
+			}
+		}
+	}
+	stageFiles(sessionID)
+
+	res, err := t.sandbox.Exec(ctx, sessionID, in.Code)
+	if err != nil {
+		// §4.5 reaper recovery: if the upstream reaped the session container
+		// while we were idle, Exec returns 404. Provision a fresh session,
+		// re-stage uploads + skills, and retry once before bubbling the error.
+		if isSandboxSessionGone(err) {
+			if tc != nil && tc.DB != nil && tc.ConvID != "" {
+				_ = store.SetConvProviderStateKey(ctx, tc.DB, tc.ConvID, "sandbox_id", "")
+			}
+			sid2, sErr := t.sandbox.NewSession(ctx)
+			if sErr != nil {
+				return "", nil, fmt.Errorf("sandbox session (rebuild): %w", sErr)
+			}
+			sessionID = sid2
+			if tc != nil && tc.DB != nil && tc.ConvID != "" {
+				_ = store.SetConvProviderStateKey(ctx, tc.DB, tc.ConvID, "sandbox_id", sessionID)
+			}
+			// §4.5 workspace restore: if a prior run archived /workspace, the
+			// sandbox-service auto-restores on session creation. We re-stage
+			// uploads (always cheap) so the new container has user data.
+			stageFiles(sessionID)
+			res, err = t.sandbox.Exec(ctx, sessionID, in.Code)
+		}
+	}
+	if err != nil {
+		return "", nil, err
+	}
+
+	// Persist produced files as artifacts + surface them to the orchestrator.
+	for _, f := range res.Files {
+		saveArtifact(ctx, tc, t.artifactDir, f.Name, f.MimeType, f.Data)
+	}
+
+	// Pitfall A5: truncate sandbox output at 32KB so a huge stdout can't flood
+	// the model context and blow up single-turn cost (§4.5).
+	out := strings.Builder{}
+	if res.Stdout != "" {
+		out.WriteString("stdout:\n" + truncateOutput(res.Stdout, 32*1024) + "\n")
+	}
+	if res.Stderr != "" {
+		out.WriteString("stderr:\n" + truncateOutput(res.Stderr, 32*1024) + "\n")
+	}
+	if len(res.Files) > 0 {
+		out.WriteString("\nProduced files:\n")
+		for _, f := range res.Files {
+			fmt.Fprintf(&out, "- %s (%s)\n", f.Name, f.MimeType)
+		}
+	}
+	if out.Len() == 0 {
+		out.WriteString("(no output)")
+	}
+	return out.String(), nil, nil
+}
+
+// saveArtifact writes a tool-produced file to ArtifactDir, records it, and
+// notifies the orchestrator so it streams an artifact event + persists a block.
+// Shared by python_execute (sandbox outputs) and image_generate.
+func saveArtifact(ctx context.Context, tc *llm.ToolContext, artifactDir, name, mime string, data []byte) *store.Artifact {
+	if tc == nil || tc.DB == nil || tc.MessageID == "" {
+		return nil
+	}
+	dir := artifactDir
+	if dir == "" {
+		dir = "./data/artifacts"
+	}
+	_ = os.MkdirAll(dir, 0o755)
+	safe := filepath.Base(name)
+	path := filepath.Join(dir, tc.MessageID+"_"+safe)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return nil
+	}
+	art, err := store.CreateArtifact(ctx, tc.DB, store.Artifact{
+		MessageID:   tc.MessageID,
+		Filename:    safe,
+		StoragePath: path,
+		MimeType:    mime,
+		SizeBytes:   int64(len(data)),
+	})
+	if err != nil || art == nil {
+		return nil
+	}
+	if tc.OnArtifact != nil {
+		tc.OnArtifact(llm.ArtifactRef{
+			ID: art.ID, Filename: safe, URL: "/api/artifacts/" + art.ID,
+			MimeType: mime, Size: int64(len(data)),
+		})
+	}
+	return art
+}
+
+// tryQuickArithmetic returns the result of a single `print(expr)` line.
+func tryQuickArithmetic(code string) string {
+	code = strings.TrimSpace(code)
+	if !strings.HasPrefix(code, "print(") || !strings.HasSuffix(code, ")") {
+		return ""
+	}
+	inner := strings.TrimSuffix(strings.TrimPrefix(code, "print("), ")")
+	if strings.ContainsAny(inner, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ") {
+		return ""
+	}
+	v, ok := evalArith(inner)
+	if !ok {
+		return ""
+	}
+	return fmt.Sprintf("%g", v)
+}
+
+func evalArith(expr string) (float64, bool) {
+	// Tiny shunting-yard for + - * / and parens.
+	tokens := tokenizeArith(expr)
+	out := []string{}
+	ops := []string{}
+	prec := map[string]int{"+": 1, "-": 1, "*": 2, "/": 2}
+	for _, t := range tokens {
+		switch {
+		case isNumber(t):
+			out = append(out, t)
+		case t == "(":
+			ops = append(ops, t)
+		case t == ")":
+			for len(ops) > 0 && ops[len(ops)-1] != "(" {
+				out = append(out, ops[len(ops)-1])
+				ops = ops[:len(ops)-1]
+			}
+			if len(ops) == 0 {
+				return 0, false
+			}
+			ops = ops[:len(ops)-1]
+		case prec[t] > 0:
+			for len(ops) > 0 && prec[ops[len(ops)-1]] >= prec[t] {
+				out = append(out, ops[len(ops)-1])
+				ops = ops[:len(ops)-1]
+			}
+			ops = append(ops, t)
+		default:
+			return 0, false
+		}
+	}
+	for len(ops) > 0 {
+		out = append(out, ops[len(ops)-1])
+		ops = ops[:len(ops)-1]
+	}
+	stack := []float64{}
+	for _, t := range out {
+		if isNumber(t) {
+			var n float64
+			fmt.Sscanf(t, "%f", &n)
+			stack = append(stack, n)
+			continue
+		}
+		if len(stack) < 2 {
+			return 0, false
+		}
+		b := stack[len(stack)-1]
+		a := stack[len(stack)-2]
+		stack = stack[:len(stack)-2]
+		switch t {
+		case "+":
+			stack = append(stack, a+b)
+		case "-":
+			stack = append(stack, a-b)
+		case "*":
+			stack = append(stack, a*b)
+		case "/":
+			if b == 0 {
+				return 0, false
+			}
+			stack = append(stack, a/b)
+		}
+	}
+	if len(stack) != 1 {
+		return 0, false
+	}
+	return stack[0], true
+}
+func tokenizeArith(s string) []string {
+	out := []string{}
+	cur := strings.Builder{}
+	flush := func() {
+		if cur.Len() > 0 {
+			out = append(out, cur.String())
+			cur.Reset()
+		}
+	}
+	for _, c := range s {
+		switch {
+		case c == ' ' || c == '\t':
+			flush()
+		case c == '+' || c == '-' || c == '*' || c == '/' || c == '(' || c == ')':
+			flush()
+			out = append(out, string(c))
+		case (c >= '0' && c <= '9') || c == '.':
+			cur.WriteRune(c)
+		default:
+			flush()
+		}
+	}
+	flush()
+	return out
+}
+func isNumber(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, c := range s {
+		if !((c >= '0' && c <= '9') || c == '.') {
+			return false
+		}
+	}
+	return true
+}
+
+// imageGenerateTool — design.md §4.12. Dual-channel (Gemini generateContent /
+// OpenAI Images API) image generation routed by the user's pre-selected image
+// model. Implemented in full below.
+type imageGenerateTool struct {
+	db          *sql.DB
+	artifactDir string
+}
+
+func (t *imageGenerateTool) Name() string { return "image_generate" }
+func (t *imageGenerateTool) Description() string {
+	return "Generate or edit an image from a textual prompt. Use when the user explicitly asks for an illustration, poster, diagram, or photo. Returns the image as a downloadable artifact."
+}
+func (t *imageGenerateTool) InputSchema() json.RawMessage {
+	return json.RawMessage(`{"type":"object","properties":{"prompt":{"type":"string","description":"What to draw"},"n":{"type":"integer","default":1},"size":{"type":"string","enum":["256x256","512x512","1024x1024","1792x1024","1024x1792"],"default":"1024x1024"},"input_images":{"type":"array","items":{"type":"string"},"description":"Artifact ids of images to edit (image-to-image)"}},"required":["prompt"]}`)
+}
+
+type imgInput struct {
+	Prompt      string   `json:"prompt"`
+	N           int      `json:"n"`
+	Size        string   `json:"size"`
+	InputImages []string `json:"input_images"`
+}
+
+func (t *imageGenerateTool) Execute(ctx context.Context, input []byte, tc *llm.ToolContext) (string, []llm.Citation, error) {
+	var in imgInput
+	_ = json.Unmarshal(input, &in)
+	if strings.TrimSpace(in.Prompt) == "" {
+		return "", nil, errors.New("prompt required")
+	}
+	if in.N <= 0 {
+		in.N = 1
+	}
+	if in.N > 4 {
+		in.N = 4
+	}
+	if in.Size == "" {
+		in.Size = "1024x1024"
+	}
+
+	// §4.12-E 内容安全: 生成前 prompt 过审。
+	if err := moderateImagePrompt(in.Prompt); err != nil {
+		return "", nil, err
+	}
+
+	// §8.2 每用户每日图像张数限额（按 usage_logs 当日累计）。
+	if tc != nil && tc.DB != nil {
+		if err := t.checkDailyImageLimit(ctx, tc.UserID, in.N); err != nil {
+			return "", nil, err
+		}
+	}
+
+	// Resolve the image model: the user's pre-selected one (§4.12-B) first,
+	// else the first enabled kind=image model.
+	model, err := t.resolveImageModel(ctx, tc)
+	if err != nil {
+		return "", nil, err
+	}
+	channel, err := store.GetChannel(ctx, t.db, model.ChannelID)
+	if err != nil {
+		return "", nil, err
+	}
+	if channel.APIKey == "" {
+		return "No API key on the image channel — ask an admin to configure it.", nil, nil
+	}
+
+	// §4.12-C/D 图生图: load explicit input images (artifact ids); for Gemini,
+	// fall back to the conversation's image_session so multi-turn edits stay
+	// anchored on the previous generation.
+	inputImgs := t.loadInputImages(ctx, tc, in.InputImages)
+	isGemini := channel.Type == "google" || channel.Type == "gemini"
+	if isGemini && len(inputImgs) == 0 && tc != nil && tc.DB != nil && tc.ConvID != "" {
+		if sessRef, _ := store.GetConvProviderStateKey(ctx, tc.DB, tc.ConvID, "image_session"); sessRef != "" {
+			inputImgs = t.loadInputImages(ctx, tc, []string{sessRef})
+		}
+	}
+
+	var images []imageBytes
+	switch {
+	case isGemini:
+		images, err = geminiGenerateImages(ctx, channel.BaseURL, channel.APIKey, model.RequestID, in, inputImgs)
+	case channel.Type == "openai":
+		images, err = openaiGenerateImages(ctx, channel.BaseURL, channel.APIKey, model.RequestID, in, inputImgs)
+	default:
+		return "", nil, fmt.Errorf("image generation not supported for channel type %q", channel.Type)
+	}
+	if err != nil {
+		return "", nil, err
+	}
+	if len(images) == 0 {
+		return "The image model returned no images.", nil, nil
+	}
+
+	lastArtifactID := ""
+	for i, img := range images {
+		ext := extForMime(img.mime)
+		name := fmt.Sprintf("image_%d%s", i+1, ext)
+		if art := saveArtifact(ctx, tc, t.artifactDir, name, img.mime, img.data); art != nil {
+			lastArtifactID = art.ID
+		}
+	}
+	// §4.12-D Gemini 多轮编辑: remember the latest generation on the
+	// conversation so the next image_generate call edits it by default.
+	if isGemini && lastArtifactID != "" && tc != nil && tc.DB != nil && tc.ConvID != "" {
+		_ = store.SetConvProviderStateKey(ctx, tc.DB, tc.ConvID, "image_session", lastArtifactID)
+	}
+
+	// Record cost (§8.3) — one usage row, images_count = N.
+	if tc != nil && tc.DB != nil {
+		_ = store.LogUsage(ctx, t.db, store.UsageLog{
+			UserID:         tc.UserID,
+			ConversationID: tc.ConvID,
+			MessageID:      tc.MessageID,
+			ModelID:        model.ID,
+			Purpose:        "image",
+			ImagesCount:    len(images),
+			Cost:           float64(len(images)) * model.PricePerImage,
+			Currency:       model.Currency,
+		})
+	}
+	return fmt.Sprintf("Generated %d image(s) for: %s. They are attached as downloadable artifacts.", len(images), in.Prompt), nil, nil
+}
+
+// resolveImageModel picks the user's pre-selected image model, falling back to
+// the first enabled kind=image model.
+func (t *imageGenerateTool) resolveImageModel(ctx context.Context, tc *llm.ToolContext) (*store.Model, error) {
+	if tc != nil && tc.ImageModelID != "" {
+		if m, err := store.GetModel(ctx, t.db, tc.ImageModelID); err == nil && m.Enabled && m.Kind == "image" {
+			return m, nil
+		}
+	}
+	models, err := store.ListModels(ctx, t.db, "image", true)
+	if err != nil {
+		return nil, err
+	}
+	if len(models) == 0 {
+		return nil, errors.New("no image model configured — an admin must add one (kind=image)")
+	}
+	m := models[0]
+	return &m, nil
+}
+
+type imageBytes struct {
+	data []byte
+	mime string
+}
+
+// moderateImagePrompt is the §4.12-E pre-generation prompt screen. The word
+// list is intentionally minimal — production deployments should call a real
+// moderation API here (the single hook point is this function).
+var imagePromptBlocklist = []string{
+	"child sexual", "csam", "幼女", "儿童色情", "炸弹制作", "如何制造炸药",
+}
+
+func moderateImagePrompt(prompt string) error {
+	low := strings.ToLower(prompt)
+	for _, w := range imagePromptBlocklist {
+		if strings.Contains(low, w) {
+			return errors.New("image prompt rejected by content policy")
+		}
+	}
+	return nil
+}
+
+// checkDailyImageLimit enforces the per-user daily image quota (§8.2) from the
+// usage_logs ledger — robust across restarts and multi-process deployments.
+func (t *imageGenerateTool) checkDailyImageLimit(ctx context.Context, userID string, n int) error {
+	limit := 30
+	if raw, err := store.GetSetting(t.db, "daily_image_limit"); err == nil {
+		_ = json.Unmarshal(raw, &limit)
+	}
+	if limit <= 0 {
+		return nil
+	}
+	dayStart := time.Now().Truncate(24 * time.Hour).Unix()
+	var used int
+	_ = t.db.QueryRowContext(ctx,
+		`SELECT COALESCE(SUM(images_count),0) FROM usage_logs WHERE user_id=? AND purpose='image' AND created_at>=?`,
+		userID, dayStart).Scan(&used)
+	if used+n > limit {
+		return fmt.Errorf("daily image limit reached (%d/%d)", used, limit)
+	}
+	return nil
+}
+
+// loadInputImages resolves artifact ids to raw image bytes (ownership-checked)
+// for image-to-image workflows (§4.12-C).
+func (t *imageGenerateTool) loadInputImages(ctx context.Context, tc *llm.ToolContext, ids []string) []imageBytes {
+	if tc == nil || tc.DB == nil {
+		return nil
+	}
+	out := []imageBytes{}
+	for _, id := range ids {
+		art, err := store.GetArtifact(ctx, t.db, id, tc.UserID)
+		if err != nil || art == nil || !strings.HasPrefix(art.MimeType, "image/") {
+			continue
+		}
+		data, err := os.ReadFile(art.StoragePath)
+		if err != nil {
+			continue
+		}
+		out = append(out, imageBytes{data: data, mime: art.MimeType})
+		if len(out) >= 3 {
+			break
+		}
+	}
+	return out
+}
+
+// geminiGenerateImages calls generateContent with an image-capable model and
+// extracts inlineData parts (§4.12-C). Input images (explicit image-to-image
+// or the conversation's image_session) ride along as inline_data parts so the
+// model edits rather than starts fresh (§4.12-D).
+func geminiGenerateImages(ctx context.Context, baseURL, apiKey, requestID string, in imgInput, inputImgs []imageBytes) ([]imageBytes, error) {
+	base := strings.TrimRight(baseURL, "/")
+	if base == "" {
+		base = "https://generativelanguage.googleapis.com"
+	}
+	parts := []map[string]any{}
+	for _, img := range inputImgs {
+		parts = append(parts, map[string]any{
+			"inline_data": map[string]any{
+				"mime_type": img.mime,
+				"data":      base64.StdEncoding.EncodeToString(img.data),
+			},
+		})
+	}
+	parts = append(parts, map[string]any{"text": in.Prompt})
+	body := map[string]any{
+		"contents":         []map[string]any{{"role": "user", "parts": parts}},
+		"generationConfig": map[string]any{"responseModalities": []string{"IMAGE"}},
+	}
+	raw, _ := json.Marshal(body)
+	url := fmt.Sprintf("%s/v1beta/models/%s:generateContent?key=%s", base, requestID, apiKey)
+	req, _ := http.NewRequestWithContext(ctx, "POST", url, strings.NewReader(string(raw)))
+	req.Header.Set("content-type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		b, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("gemini image %d: %s", resp.StatusCode, string(b))
+	}
+	var parsed map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
+		return nil, err
+	}
+	out := []imageBytes{}
+	cands, _ := parsed["candidates"].([]any)
+	for _, c := range cands {
+		cm, _ := c.(map[string]any)
+		content, _ := cm["content"].(map[string]any)
+		ps, _ := content["parts"].([]any)
+		for _, p := range ps {
+			pm, _ := p.(map[string]any)
+			inl, _ := pm["inlineData"].(map[string]any)
+			if inl == nil {
+				inl, _ = pm["inline_data"].(map[string]any)
+			}
+			if inl == nil {
+				continue
+			}
+			b64, _ := inl["data"].(string)
+			mime, _ := inl["mimeType"].(string)
+			if mime == "" {
+				mime, _ = inl["mime_type"].(string)
+			}
+			data, err := base64.StdEncoding.DecodeString(b64)
+			if err == nil && len(data) > 0 {
+				out = append(out, imageBytes{data: data, mime: orDefaultStr(mime, "image/png")})
+			}
+		}
+	}
+	return out, nil
+}
+
+// openaiGenerateImages calls the Images API (§4.12-C): plain generation via
+// /v1/images/generations, or — when input images are supplied — image editing
+// via the multipart /v1/images/edits endpoint.
+func openaiGenerateImages(ctx context.Context, baseURL, apiKey, requestID string, in imgInput, inputImgs []imageBytes) ([]imageBytes, error) {
+	base := strings.TrimRight(baseURL, "/")
+	if base == "" {
+		base = "https://api.openai.com"
+	}
+
+	var req *http.Request
+	if len(inputImgs) > 0 {
+		// Image edit (图生图): multipart form with the source image + prompt.
+		var buf bytes.Buffer
+		mw := multipart.NewWriter(&buf)
+		_ = mw.WriteField("model", requestID)
+		_ = mw.WriteField("prompt", in.Prompt)
+		_ = mw.WriteField("n", fmt.Sprintf("%d", in.N))
+		_ = mw.WriteField("size", in.Size)
+		_ = mw.WriteField("response_format", "b64_json")
+		fw, err := mw.CreateFormFile("image", "input"+extForMime(inputImgs[0].mime))
+		if err != nil {
+			return nil, err
+		}
+		if _, err := fw.Write(inputImgs[0].data); err != nil {
+			return nil, err
+		}
+		_ = mw.Close()
+		req, _ = http.NewRequestWithContext(ctx, "POST", base+"/v1/images/edits", &buf)
+		req.Header.Set("content-type", mw.FormDataContentType())
+	} else {
+		body := map[string]any{
+			"model":           requestID,
+			"prompt":          in.Prompt,
+			"n":               in.N,
+			"size":            in.Size,
+			"response_format": "b64_json",
+		}
+		raw, _ := json.Marshal(body)
+		req, _ = http.NewRequestWithContext(ctx, "POST", base+"/v1/images/generations", strings.NewReader(string(raw)))
+		req.Header.Set("content-type", "application/json")
+	}
+	req.Header.Set("authorization", "Bearer "+apiKey)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		b, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("openai image %d: %s", resp.StatusCode, string(b))
+	}
+	var parsed struct {
+		Data []struct {
+			B64JSON string `json:"b64_json"`
+			URL     string `json:"url"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
+		return nil, err
+	}
+	out := []imageBytes{}
+	for _, d := range parsed.Data {
+		if d.B64JSON != "" {
+			if data, err := base64.StdEncoding.DecodeString(d.B64JSON); err == nil {
+				out = append(out, imageBytes{data: data, mime: "image/png"})
+			}
+		}
+	}
+	return out, nil
+}
+
+// truncateOutput clips s to max bytes with an explicit marker (pitfall A5).
+func truncateOutput(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "\n…[output truncated at 32KB]"
+}
+
+// isSandboxSessionGone is true for the upstream "session not found" responses
+// the sandbox-service returns after the reaper recycled a container (§4.5).
+// We detect by string match because the HTTPSandbox wraps every non-2xx in a
+// generic "sandbox <code>: <body>" — fragile but the surface is tiny + ours.
+func isSandboxSessionGone(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "sandbox 404") {
+		return true
+	}
+	if strings.Contains(msg, "session not found") || strings.Contains(msg, "no such session") || strings.Contains(msg, "session_gone") {
+		return true
+	}
+	return false
+}
+
+func extForMime(mime string) string {
+	switch {
+	case strings.Contains(mime, "png"):
+		return ".png"
+	case strings.Contains(mime, "jpeg"), strings.Contains(mime, "jpg"):
+		return ".jpg"
+	case strings.Contains(mime, "webp"):
+		return ".webp"
+	default:
+		return ".png"
+	}
+}
+
+func orDefaultStr(s, def string) string {
+	if s == "" {
+		return def
+	}
+	return s
+}
+
+// searchKnowledgeBaseTool — design.md §4.11 (optional tool-mode path). Calls
+// the same rag.Retrieve the orchestrator uses for the always-on inject path.
+type searchKnowledgeBaseTool struct {
+	rag *rag.Service
+}
+
+func (t *searchKnowledgeBaseTool) Name() string { return "search_knowledge_base" }
+func (t *searchKnowledgeBaseTool) Description() string {
+	return "Search the user's attached knowledge bases or conversation files. Use when the question is about uploaded documents. Returns numbered snippets."
+}
+func (t *searchKnowledgeBaseTool) InputSchema() json.RawMessage {
+	return json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"},"top_k":{"type":"integer","default":5}},"required":["query"]}`)
+}
+
+type kbInput struct {
+	Query string `json:"query"`
+	TopK  int    `json:"top_k"`
+}
+
+func (t *searchKnowledgeBaseTool) Execute(ctx context.Context, input []byte, tc *llm.ToolContext) (string, []llm.Citation, error) {
+	var in kbInput
+	_ = json.Unmarshal(input, &in)
+	if in.TopK <= 0 {
+		in.TopK = 5
+	}
+	snippets, err := tc.RAG.Retrieve(ctx, tc.UserID, tc.ConvID, tc.KBIDs, in.Query, in.TopK)
+	if err != nil {
+		return "", nil, err
+	}
+	out := strings.Builder{}
+	cites := []llm.Citation{}
+	for _, c := range snippets {
+		out.WriteString(fmt.Sprintf("[%d] %s\n%s\n\n", c.Index, c.Title, c.Snippet))
+		cites = append(cites, llm.Citation{ID: c.ID, Index: c.Index, Title: c.Title, URL: c.URL, Snippet: c.Snippet, Source: c.Source})
+	}
+	if out.Len() == 0 {
+		return "No matching content found in the user's documents.", nil, nil
+	}
+	return out.String(), cites, nil
+}
+
+// useSkillTool — design.md §4.17.
+type useSkillTool struct {
+	db *sql.DB
+}
+
+func (t *useSkillTool) Name() string { return "use_skill" }
+func (t *useSkillTool) Description() string {
+	return "Load the full instructions for one of the skills the user/admin has registered (returned text contains the skill's complete how-to)."
+}
+func (t *useSkillTool) InputSchema() json.RawMessage {
+	return json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}`)
+}
+
+type skillInput struct {
+	Name string `json:"name"`
+}
+
+func (t *useSkillTool) Execute(ctx context.Context, input []byte, _ *llm.ToolContext) (string, []llm.Citation, error) {
+	var in skillInput
+	_ = json.Unmarshal(input, &in)
+	if in.Name == "" {
+		return "", nil, errors.New("name required")
+	}
+	skills, err := store.ListSkills(ctx, t.db, true)
+	if err != nil {
+		return "", nil, err
+	}
+	for _, s := range skills {
+		if strings.EqualFold(s.Name, in.Name) {
+			return "Skill: " + s.Name + "\n\n" + s.Instructions, nil, nil
+		}
+	}
+	return "Skill not found: " + in.Name, nil, nil
+}
+
+// saveMemoryTool — design.md §4.16 (synchronous explicit-write path).
+type saveMemoryTool struct {
+	db *sql.DB
+}
+
+func (t *saveMemoryTool) Name() string { return "save_memory" }
+func (t *saveMemoryTool) Description() string {
+	return "Save a durable fact about the user into long-term memory. Use ONLY when the user explicitly says \"remember…\" or asks you to. Status defaults to ACTIVE."
+}
+func (t *saveMemoryTool) InputSchema() json.RawMessage {
+	return json.RawMessage(`{"type":"object","properties":{"memory_text":{"type":"string"},"slot":{"type":"string"},"value":{"type":"string"}},"required":["memory_text"]}`)
+}
+
+type memInput struct {
+	MemoryText string `json:"memory_text"`
+	Slot       string `json:"slot"`
+	Value      string `json:"value"`
+}
+
+func (t *saveMemoryTool) Execute(ctx context.Context, input []byte, tc *llm.ToolContext) (string, []llm.Citation, error) {
+	var in memInput
+	_ = json.Unmarshal(input, &in)
+	if in.MemoryText == "" {
+		return "", nil, errors.New("memory_text required")
+	}
+	_, err := store.CreateMemory(ctx, t.db, store.Memory{
+		UserID:     tc.UserID,
+		MemoryText: in.MemoryText,
+		Slot:       in.Slot,
+		Value:      in.Value,
+		Status:     "ACTIVE",
+		Confidence: 0.95,
+	})
+	if err != nil {
+		return "", nil, err
+	}
+	return "Memory saved.", nil, nil
+}

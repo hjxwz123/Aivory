@@ -1,0 +1,157 @@
+import { lazy, Suspense, useEffect } from 'react'
+import { Route, Routes, useLocation, useNavigate } from 'react-router-dom'
+import { TooltipProvider } from '@/components/ui/tooltip'
+import { Toaster } from '@/components/ui/toaster'
+import { CommandMenu } from '@/components/command-menu/command-menu'
+import { AuthGate } from '@/components/auth/auth-gate'
+import { useCommandMenu } from '@/hooks/use-command-menu'
+import { useHotkeys } from '@/hooks/use-hotkeys'
+import { useSettings } from '@/store/settings'
+import { useConversations } from '@/store/conversations'
+
+const Landing = lazy(() => import('@/pages/Landing'))
+const ChatLayout = lazy(() => import('@/pages/chat/ChatLayout'))
+const ChatHome = lazy(() => import('@/pages/chat/ChatHome'))
+const ChatThread = lazy(() => import('@/pages/chat/ChatThread'))
+const ProjectsList = lazy(() => import('@/pages/projects/ProjectsList'))
+const ProjectDetail = lazy(() => import('@/pages/projects/ProjectDetail'))
+const KnowledgeBasesList = lazy(() => import('@/pages/kb/KnowledgeBasesList'))
+const KnowledgeBaseDetail = lazy(() => import('@/pages/kb/KnowledgeBaseDetail'))
+const MemoryView = lazy(() => import('@/pages/memory/MemoryView'))
+const AuthLayout = lazy(() => import('@/pages/auth/AuthLayout'))
+const Login = lazy(() => import('@/pages/auth/Login'))
+const Register = lazy(() => import('@/pages/auth/Register'))
+const ForgotPassword = lazy(() => import('@/pages/auth/ForgotPassword'))
+const SettingsLayout = lazy(() => import('@/pages/settings/SettingsLayout'))
+const SettingsAccount = lazy(() => import('@/pages/settings/Account'))
+const SettingsAppearance = lazy(() => import('@/pages/settings/Appearance'))
+const SettingsModels = lazy(() => import('@/pages/settings/Models'))
+const SettingsPrivacy = lazy(() => import('@/pages/settings/Privacy'))
+const SettingsShortcuts = lazy(() => import('@/pages/settings/Shortcuts'))
+const SettingsBilling = lazy(() => import('@/pages/settings/Billing'))
+const AdminLayout = lazy(() => import('@/pages/admin/AdminLayout'))
+const AdminChannels = lazy(() => import('@/pages/admin/AdminChannels'))
+const AdminModels = lazy(() => import('@/pages/admin/AdminModels'))
+const AdminSkills = lazy(() => import('@/pages/admin/AdminSkills'))
+const AdminUsers = lazy(() => import('@/pages/admin/AdminUsers'))
+const AdminUserConversations = lazy(() => import('@/pages/admin/AdminUserConversations'))
+const AdminUserConversation = lazy(() => import('@/pages/admin/AdminUserConversation'))
+const AdminUsage = lazy(() => import('@/pages/admin/AdminUsage'))
+const AdminSettings = lazy(() => import('@/pages/admin/AdminSettings'))
+const NotFound = lazy(() => import('@/pages/NotFound'))
+
+function GlobalShortcuts() {
+  const toggle = useCommandMenu((s) => s.toggle)
+  const setOpen = useCommandMenu((s) => s.setOpen)
+  const toggleSidebar = useSettings((s) => s.toggleSidebar)
+  const createConversation = useConversations((s) => s.createConversation)
+  const navigate = useNavigate()
+
+  useHotkeys([
+    { combo: 'mod+k', whenInputFocused: true, handler: () => toggle() },
+    { combo: 'mod+b', whenInputFocused: false, handler: () => toggleSidebar() },
+    { combo: 'mod+,', whenInputFocused: false, handler: () => navigate('/settings/account') },
+    {
+      combo: 'mod+shift+o',
+      whenInputFocused: false,
+      handler: () => {
+        void (async () => {
+          const c = await createConversation()
+          if (c) navigate(`/chat/${c.id}`)
+        })()
+      },
+    },
+    {
+      combo: 'mod+/',
+      whenInputFocused: false,
+      handler: () => navigate('/settings/shortcuts'),
+    },
+    {
+      combo: 'escape',
+      whenInputFocused: true,
+      handler: () => setOpen(false),
+      preventDefault: false,
+    },
+  ])
+
+  return null
+}
+
+function RouteFallback() {
+  return (
+    <div className="min-h-svh w-full flex items-center justify-center text-[var(--color-fg-subtle)] text-sm">
+      <span className="inline-block size-4 rounded-full border-2 border-[var(--color-fg-faint)] border-r-transparent animate-[spin_900ms_linear_infinite]" />
+    </div>
+  )
+}
+
+function ScrollToTop() {
+  const { pathname } = useLocation()
+  useEffect(() => {
+    window.scrollTo(0, 0)
+  }, [pathname])
+  return null
+}
+
+export default function App() {
+  return (
+    <TooltipProvider delayDuration={280} skipDelayDuration={120}>
+      <ScrollToTop />
+      <AuthGate>
+        <GlobalShortcuts />
+        <Suspense fallback={<RouteFallback />}>
+          <Routes>
+            <Route path="/welcome" element={<Landing />} />
+            <Route path="/" element={<ChatLayout />}>
+              <Route index element={<ChatHome />} />
+              <Route path="chat/:id" element={<ChatThread />} />
+            </Route>
+            <Route path="/chat" element={<ChatLayout />}>
+              <Route index element={<ChatHome />} />
+              <Route path=":id" element={<ChatThread />} />
+            </Route>
+            <Route path="/projects" element={<ChatLayout />}>
+              <Route index element={<ProjectsList />} />
+              <Route path=":id" element={<ProjectDetail />} />
+            </Route>
+            <Route path="/kb" element={<ChatLayout />}>
+              <Route index element={<KnowledgeBasesList />} />
+              <Route path=":id" element={<KnowledgeBaseDetail />} />
+            </Route>
+            <Route path="/memory" element={<ChatLayout />}>
+              <Route index element={<MemoryView />} />
+            </Route>
+            <Route element={<AuthLayout />}>
+              <Route path="/login" element={<Login />} />
+              <Route path="/register" element={<Register />} />
+              <Route path="/forgot-password" element={<ForgotPassword />} />
+            </Route>
+            <Route path="/settings" element={<SettingsLayout />}>
+              <Route index element={<SettingsAccount />} />
+              <Route path="account" element={<SettingsAccount />} />
+              <Route path="appearance" element={<SettingsAppearance />} />
+              <Route path="models" element={<SettingsModels />} />
+              <Route path="privacy" element={<SettingsPrivacy />} />
+              <Route path="shortcuts" element={<SettingsShortcuts />} />
+              <Route path="billing" element={<SettingsBilling />} />
+            </Route>
+            <Route path="/admin" element={<AdminLayout />}>
+              <Route index element={<AdminChannels />} />
+              <Route path="channels" element={<AdminChannels />} />
+              <Route path="models" element={<AdminModels />} />
+              <Route path="skills" element={<AdminSkills />} />
+              <Route path="users" element={<AdminUsers />} />
+              <Route path="users/:id/conversations" element={<AdminUserConversations />} />
+              <Route path="users/:id/conversations/:cid" element={<AdminUserConversation />} />
+              <Route path="usage" element={<AdminUsage />} />
+              <Route path="settings" element={<AdminSettings />} />
+            </Route>
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </Suspense>
+        <CommandMenu />
+        <Toaster />
+      </AuthGate>
+    </TooltipProvider>
+  )
+}
