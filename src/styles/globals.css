@@ -1,0 +1,384 @@
+@import './tokens.css';
+@import 'tailwindcss';
+
+/* Tailwind v4 needs to know what files to scan for class names. */
+@source "../**/*.{ts,tsx,html}";
+@source "../../index.html";
+
+/* Treat `.dark` (or any descendant) as the dark-mode signal. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ============================================================================
+ * Tailwind v4 @theme — map design tokens to Tailwind's design system
+ * ============================================================================ */
+@theme inline {
+  --color-bg: var(--color-bg);
+  --color-bg-muted: var(--color-bg-muted);
+  --color-surface: var(--color-surface);
+  --color-surface-raised: var(--color-surface-raised);
+  --color-surface-sunken: var(--color-surface-sunken);
+  --color-overlay: var(--color-overlay);
+
+  --color-fg: var(--color-fg);
+  --color-fg-muted: var(--color-fg-muted);
+  --color-fg-subtle: var(--color-fg-subtle);
+  --color-fg-faint: var(--color-fg-faint);
+  --color-fg-inverted: var(--color-fg-inverted);
+
+  --color-border: var(--color-border);
+  --color-border-strong: var(--color-border-strong);
+  --color-border-subtle: var(--color-border-subtle);
+  --color-divider: var(--color-divider);
+
+  --color-accent: var(--color-accent);
+  --color-accent-hover: var(--color-accent-hover);
+  --color-accent-soft: var(--color-accent-soft);
+  --color-accent-fg: var(--color-accent-fg);
+  --color-secondary: var(--color-secondary);
+  --color-secondary-soft: var(--color-secondary-soft);
+
+  --color-success: var(--color-success);
+  --color-success-soft: var(--color-success-soft);
+  --color-warning: var(--color-warning);
+  --color-warning-soft: var(--color-warning-soft);
+  --color-danger: var(--color-danger);
+  --color-danger-soft: var(--color-danger-soft);
+  --color-info: var(--color-info);
+  --color-info-soft: var(--color-info-soft);
+
+  --color-ring: var(--color-ring);
+
+  --color-user-bubble: var(--color-user-bubble);
+  --color-user-bubble-border: var(--color-user-bubble-border);
+  --color-code-bg: var(--color-code-bg);
+  --color-code-fg: var(--color-code-fg);
+  --color-kbd-bg: var(--color-kbd-bg);
+  --color-kbd-border: var(--color-kbd-border);
+
+  --font-serif: var(--font-serif);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+
+  --radius-xs: var(--radius-xs);
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+  --radius-xl: var(--radius-xl);
+  --radius-2xl: var(--radius-2xl);
+  --radius-3xl: var(--radius-3xl);
+
+  --shadow-xs: var(--shadow-xs);
+  --shadow-sm: var(--shadow-sm);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
+  --shadow-xl: var(--shadow-xl);
+  --shadow-2xl: var(--shadow-2xl);
+  --shadow-popover: var(--shadow-popover);
+
+  /* Type scale — proxied so Tailwind utilities (text-xs etc.) honor our tokens. */
+  --text-xs: var(--text-xs);
+  --text-sm: var(--text-sm);
+  --text-base: var(--text-base);
+  --text-md: var(--text-md);
+  --text-lg: var(--text-lg);
+  --text-xl: var(--text-xl);
+  --text-2xl: var(--text-2xl);
+  --text-3xl: var(--text-3xl);
+  --text-4xl: var(--text-4xl);
+  --text-5xl: var(--text-5xl);
+  --text-6xl: var(--text-6xl);
+
+  /* Motion */
+  --ease-standard: var(--ease-standard);
+  --ease-out: var(--ease-out);
+  --ease-in: var(--ease-in);
+  --ease-bounce: var(--ease-bounce);
+  --duration-instant: var(--duration-instant);
+  --duration-fast: var(--duration-fast);
+  --duration-base: var(--duration-base);
+  --duration-slow: var(--duration-slow);
+  --duration-slower: var(--duration-slower);
+
+  --animate-fade-in: fade-in var(--duration-base) var(--ease-out);
+  --animate-fade-out: fade-out var(--duration-fast) var(--ease-in);
+  --animate-slide-up: slide-up var(--duration-slow) var(--ease-out);
+  --animate-slide-down: slide-down var(--duration-base) var(--ease-out);
+  --animate-pop-in: pop-in var(--duration-base) var(--ease-bounce);
+  --animate-shimmer: shimmer 2s linear infinite;
+  --animate-typing: typing 1.4s var(--ease-standard) infinite;
+  --animate-streaming-pulse: streaming-pulse 1.6s ease-in-out infinite;
+}
+
+/* ============================================================================
+ * Global resets & base
+ * ============================================================================ */
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+    text-rendering: optimizeLegibility;
+    font-feature-settings: 'ss01', 'cv11';
+  }
+
+  body {
+    background-color: var(--color-bg);
+    color: var(--color-fg);
+    font-family: var(--font-sans);
+    font-size: var(--text-base);
+    line-height: var(--leading-normal);
+    letter-spacing: -0.005em;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overflow-x: hidden;
+  }
+
+  ::selection {
+    background-color: color-mix(in oklch, var(--color-accent) 25%, transparent);
+    color: var(--color-fg);
+  }
+
+  :focus {
+    outline: none;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
+  }
+
+  button,
+  [role='button'] {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  [role='button'][aria-disabled='true'] {
+    cursor: not-allowed;
+  }
+
+  /* Refined custom scrollbar */
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: color-mix(in oklch, var(--color-fg-faint) 30%, transparent);
+    border-radius: var(--radius-full);
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in oklch, var(--color-fg-faint) 55%, transparent);
+    background-clip: padding-box;
+    border: 2px solid transparent;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-serif);
+    font-weight: 400;
+    letter-spacing: var(--tracking-tight);
+    color: var(--color-fg);
+  }
+
+  code, kbd, pre, samp {
+    font-family: var(--font-mono);
+    font-size: 0.92em;
+  }
+}
+
+/* ============================================================================
+ * Keyframes
+ * ============================================================================ */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes slide-down {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes pop-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes shimmer {
+  0% { background-position: -1000px 0; }
+  100% { background-position: 1000px 0; }
+}
+@keyframes typing {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30% { transform: translateY(-4px); opacity: 1; }
+}
+@keyframes streaming-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.85); }
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Indeterminate progress bar (used by KB document processing status). */
+@keyframes indeterminate {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+
+/* Soft enter for new list items / messages. Respects prefers-reduced-motion. */
+@keyframes message-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Sheet slide animations */
+@keyframes sheet-in-l { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+@keyframes sheet-out-l { from { transform: translateX(0); } to { transform: translateX(-100%); } }
+@keyframes sheet-in-r { from { transform: translateX(100%); } to { transform: translateX(0); } }
+@keyframes sheet-out-r { from { transform: translateX(0); } to { transform: translateX(100%); } }
+@keyframes sheet-in-t { from { transform: translateY(-100%); } to { transform: translateY(0); } }
+@keyframes sheet-out-t { from { transform: translateY(0); } to { transform: translateY(-100%); } }
+@keyframes sheet-in-b { from { transform: translateY(100%); } to { transform: translateY(0); } }
+@keyframes sheet-out-b { from { transform: translateY(0); } to { transform: translateY(100%); } }
+
+/* ============================================================================
+ * Utilities
+ * ============================================================================ */
+@layer utilities {
+  .text-balance { text-wrap: balance; }
+  .text-pretty { text-wrap: pretty; }
+
+  .grain {
+    position: relative;
+  }
+  .grain::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background-image: url("data:image/svg+xml;utf8,<svg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/><feColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.5 0'/></filter><rect width='100%' height='100%' filter='url(%23n)' opacity='0.4'/></svg>");
+    opacity: 0.02;
+    mix-blend-mode: overlay;
+  }
+
+  .scrollbar-none {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar { width: 6px; height: 6px; }
+
+  .mask-fade-bottom {
+    mask-image: linear-gradient(to bottom, black 70%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to bottom, black 70%, transparent 100%);
+  }
+  .mask-fade-top {
+    mask-image: linear-gradient(to top, black 70%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to top, black 70%, transparent 100%);
+  }
+
+  .interactive {
+    transition-property: background-color, color, border-color, box-shadow, transform, opacity;
+    transition-duration: var(--duration-fast);
+    transition-timing-function: var(--ease-out);
+  }
+}
+
+/* ============================================================================
+ * Reduced motion
+ * ============================================================================ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ============================================================================
+ * Prose — for assistant markdown output
+ * ============================================================================ */
+.prose-aurelia {
+  color: var(--color-fg);
+  font-size: var(--text-base);
+  line-height: var(--leading-relaxed);
+  max-width: var(--layout-prose-max-w);
+}
+.prose-aurelia > * + * { margin-top: 1em; }
+.prose-aurelia h1 { font-size: var(--text-2xl); margin-top: 1.4em; }
+.prose-aurelia h2 { font-size: var(--text-xl); margin-top: 1.4em; }
+.prose-aurelia h3 { font-size: var(--text-lg); margin-top: 1.2em; }
+.prose-aurelia h4 { font-size: var(--text-md); font-family: var(--font-sans); font-weight: 600; }
+.prose-aurelia p { margin-top: 0.75em; }
+.prose-aurelia ul, .prose-aurelia ol { padding-left: 1.5em; }
+.prose-aurelia ul { list-style: disc; }
+.prose-aurelia ol { list-style: decimal; }
+.prose-aurelia li { margin-top: 0.35em; }
+.prose-aurelia a {
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+  text-decoration-color: color-mix(in oklch, var(--color-accent) 50%, transparent);
+  transition: text-decoration-color var(--duration-fast);
+}
+.prose-aurelia a:hover { text-decoration-color: var(--color-accent); }
+.prose-aurelia strong { font-weight: 600; color: var(--color-fg); }
+.prose-aurelia em { font-style: italic; }
+.prose-aurelia code:not(pre code) {
+  background: var(--color-code-bg);
+  color: var(--color-code-fg);
+  padding: 0.12em 0.4em;
+  border-radius: var(--radius-xs);
+  font-size: 0.86em;
+  border: 1px solid var(--color-border-subtle);
+}
+.prose-aurelia blockquote {
+  border-left: 2px solid var(--color-border-strong);
+  padding-left: 1em;
+  color: var(--color-fg-muted);
+  font-style: italic;
+}
+.prose-aurelia hr { border: none; border-top: 1px solid var(--color-divider); margin: 2em 0; }
+.prose-aurelia table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+.prose-aurelia th, .prose-aurelia td {
+  text-align: left;
+  padding: 0.5em 0.75em;
+  border-bottom: 1px solid var(--color-divider);
+}
+.prose-aurelia th { font-weight: 600; color: var(--color-fg); background: var(--color-bg-muted); }
+
+/* §1.1 syntax highlighting — the highlighter writes <span class="hl-…">; the
+ * tokens here are defined in tokens.css so light/dark inherit correctly. */
+.hl-comment { color: var(--color-syntax-comment); font-style: italic; }
+.hl-string  { color: var(--color-syntax-string); }
+.hl-keyword { color: var(--color-syntax-keyword); font-weight: 600; }
+.hl-number  { color: var(--color-syntax-number); }
+.hl-type    { color: var(--color-syntax-type); }
+.hl-fn      { color: var(--color-syntax-fn); }

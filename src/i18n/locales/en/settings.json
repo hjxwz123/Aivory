@@ -1,0 +1,180 @@
+{
+  "title": "Settings",
+  "tabs": {
+    "account": "Account",
+    "appearance": "Appearance",
+    "models": "Models",
+    "privacy": "Privacy",
+    "shortcuts": "Shortcuts",
+    "billing": "Billing"
+  },
+  "account": {
+    "title": "Account",
+    "subtitle": "Your profile and security.",
+    "profile": "Profile",
+    "rows": {
+      "avatar": "Avatar",
+      "avatarBody": "A friendly initials chip is used by default.",
+      "name": "Display name",
+      "nameBody": "Shown to people you share conversations with.",
+      "email": "Email",
+      "emailBody": "Used for sign-in and important notices."
+    },
+    "security": "Security",
+    "securityRows": {
+      "password": "Password",
+      "passwordBody": "Last changed 3 months ago.",
+      "twoFactor": "Two-factor auth",
+      "twoFactorBody": "Use an authenticator app for an extra layer.",
+      "sessions": "Active sessions",
+      "sessionsBody": "You're signed in here. We'd list other devices."
+    },
+    "danger": "Danger zone",
+    "dangerBody": "Permanent actions. We won't ask twice.",
+    "dangerRows": {
+      "delete": "Delete account",
+      "deleteBody": "Removes your conversations, memories, and account. Irreversible.",
+      "dialogTitle": "Delete your account?",
+      "dialogBody": "This will permanently remove all your conversations, memories, and account data. In this build the action is mocked, but the flow is real.",
+      "confirm": "Delete forever",
+      "queued": "We've queued your account for deletion (mock)."
+    },
+    "saved": "Profile saved.",
+    "passwordMocked": "Password change is mocked.",
+    "twoFactorMocked": "2FA is mocked in this build.",
+    "sessionsMocked": "Session list is mocked."
+  },
+  "appearance": {
+    "title": "Appearance",
+    "subtitle": "Tune the way Aurelia looks at you.",
+    "theme": "Theme",
+    "themeBody": "Aurelia's dark mode is reimagined for warm graphite tones.",
+    "colorTheme": "Color theme",
+    "colorThemeBody": "Pick the surface you want to live in.",
+    "light": "Light",
+    "dark": "Dark",
+    "system": "System",
+    "density": "Density",
+    "densityBody": "More breathing room or more on screen.",
+    "spacing": "Spacing",
+    "spacingBody": "Cozy uses tighter padding everywhere.",
+    "cozy": "Cozy",
+    "comfortable": "Comfortable",
+    "fontSize": "Font size",
+    "fontSizeBody": "Affects message body and prose.",
+    "language": "Language",
+    "languageBody": "Switch the interface language. Affects all surfaces."
+  },
+  "models": {
+    "title": "Models",
+    "subtitle": "Set defaults; switch any time inside a conversation.",
+    "defaultModel": "Default model",
+    "default": "Default",
+    "defaultBody": "Used when starting a new chat without picking a model.",
+    "responseLength": "Response length",
+    "responseLengthBody": "Aurelia will lean toward this when there's a choice.",
+    "concise": "Concise",
+    "balanced": "Balanced",
+    "detailed": "Detailed",
+    "custom": "Custom instructions",
+    "customBody": "Aurelia reads this at the start of every conversation.",
+    "customPlaceholder": "What should Aurelia know about you? How would you like it to respond? (Visible only to you.)",
+    "customSaved": "Custom instructions saved.",
+    "charactersOf": "{{used}} / {{max}} characters",
+    "available": "Available models",
+    "locked": "Locked",
+    "upgradeMocked": "Plan upgrade is mocked."
+  },
+  "privacy": {
+    "title": "Privacy & data",
+    "subtitle": "Your conversations are yours.",
+    "controls": "Data controls",
+    "improve": "Improve the model",
+    "improveBody": "Aurelia uses anonymized excerpts to improve. Off by default.",
+    "keep": "Keep conversation history",
+    "keepBody": "When off, conversations are removed after 30 days.",
+    "memory": "Memory",
+    "memoryBody": "Aurelia remembers facts you share to be useful in later conversations. Always editable.",
+    "exportPurge": "Export & purge",
+    "exportAll": "Export all data",
+    "exportAllBody": "Get a JSON archive of all your conversations and memory.",
+    "exportQueued": "Export queued (mock).",
+    "clearAll": "Clear all conversations",
+    "clearAllBody": "Permanently removes every conversation. Memory is not affected.",
+    "clearAllConfirm": "Clear every conversation?",
+    "clearAllConfirmBody": "This removes every conversation in your archive. We won't ask again.",
+    "clearAllConfirmAction": "Clear everything",
+    "cleared": "All conversations cleared (mock)."
+  },
+  "shortcuts": {
+    "title": "Keyboard shortcuts",
+    "subtitle": "A short list. The product is mostly keyboard-driven.",
+    "groups": {
+      "global": "Global",
+      "composer": "Composer",
+      "sidebar": "Sidebar"
+    },
+    "items": {
+      "cmd-k": "Open command menu",
+      "send": "Send message",
+      "newline": "New line",
+      "sidebar": "Toggle sidebar",
+      "esc": "Close any overlay",
+      "settings": "Open settings",
+      "new-chat": "New chat",
+      "shortcuts": "Show keyboard shortcuts",
+      "focus-composer": "Focus composer"
+    }
+  },
+  "billing": {
+    "title": "Billing",
+    "subtitle": "Plans, usage, and invoices.",
+    "current": "Current plan",
+    "currentFree": "You're on the free plan.",
+    "currentPaid": "Your subscription renews next month.",
+    "payment": "Payment method",
+    "paymentBody": "No real card is stored in this build.",
+    "paymentMocked": "Card update is mocked.",
+    "invoices": "Invoice history",
+    "invoicesBody": "We'd show your last 12 invoices here.",
+    "invoicesMocked": "Invoices are mocked.",
+    "switchPlan": "Switch plan",
+    "tiers": {
+      "free": {
+        "name": "Free",
+        "blurb": "For occasional conversations.",
+        "features": ["Aurelia Prose", "20 conversations / day", "Standard speed"]
+      },
+      "pro": {
+        "name": "Pro",
+        "blurb": "For people who think for a living.",
+        "features": [
+          "Aurelia Prose & Reason",
+          "Canvas mode",
+          "Priority response",
+          "Unlimited conversations",
+          "Export to Markdown"
+        ]
+      },
+      "max": {
+        "name": "Max",
+        "blurb": "For research, code, and long deliberation.",
+        "features": [
+          "Everything in Pro",
+          "Aurelia Deep with citations",
+          "Higher rate limits",
+          "Team workspace",
+          "Custom retention"
+        ]
+      }
+    },
+    "switchTo": "Switch to {{name}}",
+    "switchMocked": "Plan switch to {{name}} is mocked."
+  },
+  "user": {
+    "menuAria": "Account",
+    "settings": "Settings",
+    "managePlan": "Manage plan",
+    "signOut": "Sign out"
+  }
+}

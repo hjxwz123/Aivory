@@ -1,0 +1,168 @@
+{
+  "greeting": {
+    "morning": "早上好",
+    "afternoon": "下午好",
+    "evening": "晚上好",
+    "stillUp": "夜深了"
+  },
+  "empty": {
+    "subtitle": "在想些什么？",
+    "lead": "随便问点什么——提纲、代码、决策、阅读，Aurelia 会与你一起思考。",
+    "disclaimer": "Aurelia 也会出错。重要的内容请自行核验。"
+  },
+  "composer": {
+    "placeholder": "随便问点什么——或把你的思考粘进来。",
+    "attach": "添加附件",
+    "addImage": "添加图片",
+    "voice": "语音输入（即将上线）",
+    "voiceMocked": "语音输入为模拟",
+    "voiceMockedBody": "本版本未接入麦克风采集。",
+    "research": "研究",
+    "researchTooltip": "深度研究模式",
+    "canvas": "画布",
+    "canvasTooltip": "画布模式",
+    "send": "发送（{{kbd}} + Enter）",
+    "stop": "停止生成",
+    "tooLongTitle": "消息过长",
+    "tooLongBody": "请将消息控制在 {{max}} 个字符以内。",
+    "attachedSingle": "已附加 {{count}} 个文件",
+    "attachedMultiple": "已附加 {{count}} 个文件",
+    "attachedHint": "本版本中附件仅用于视觉展示。",
+    "uploadFailed": "上传失败"
+  },
+  "assistant": "Aurelia",
+  "thinking": "思考中",
+  "actions": {
+    "copy": "复制",
+    "copied": "已复制",
+    "regenerate": "重新生成",
+    "helpful": "有帮助",
+    "notHelpful": "无帮助",
+    "edit": "编辑",
+    "more": "更多",
+    "copyMessage": "复制消息",
+    "readAloud": "朗读",
+    "readAloudMocked": "朗读功能为模拟。",
+    "shareMocked": "分享为模拟。",
+    "branch": "切换分支",
+    "prevBranch": "上一个分支",
+    "nextBranch": "下一个分支"
+  },
+  "tools": {
+    "web_search": "网页搜索",
+    "code_interpreter": "代码解释器",
+    "deep_research": "深度研究"
+  },
+  "modePill": {
+    "deepResearch": "深度研究",
+    "canvas": "画布"
+  },
+  "sidebar": {
+    "newChat": "新对话",
+    "search": "搜索",
+    "actions": "会话操作",
+    "rename": "重命名",
+    "renameTitle": "重命名会话",
+    "renameHint": "起一个之后能找回的名字。",
+    "renamed": "会话已重命名",
+    "share": "分享",
+    "archive": "归档",
+    "archived": "会话已归档",
+    "delete": "删除",
+    "deleteTitle": "删除这段会话？",
+    "deleteBody": "会同时删除该会话及其全部消息，无法撤销。",
+    "deleted": "会话已删除",
+    "empty": "还没有会话。",
+    "starred": "已收藏"
+  },
+  "topbar": {
+    "shareTooltip": "分享"
+  },
+  "thread": {
+    "modelSwitched": "已切换模型",
+    "modelSwitchedBody": "之后的消息将使用新模型。",
+    "renamed": "已重命名",
+    "deleted": "已删除",
+    "notFoundTitle": "找不到这段会话。",
+    "notFoundBody": "它可能已被删除，或链接有误。",
+    "goToChat": "前往对话",
+    "jumpToLatest": "跳到最新",
+    "deleteUndone": "此操作无法撤销。"
+  },
+  "buckets": {
+    "today": "今天",
+    "yesterday": "昨天",
+    "last_7": "近 7 天",
+    "last_30": "近 30 天",
+    "older": "更早"
+  },
+  "modelPicker": {
+    "section": "模型",
+    "moreSoon": "更多模型即将上线",
+    "current": "当前模型",
+    "label": "模型：{{name}}"
+  },
+  "commandMenu": {
+    "placeholder": "搜索会话，或执行命令…",
+    "noMatch": "没有匹配项。",
+    "groups": {
+      "actions": "操作",
+      "theme": "主题",
+      "conversations": "会话",
+      "help": "帮助",
+      "language": "语言"
+    },
+    "actions": {
+      "newChat": "新对话",
+      "goToChat": "前往对话",
+      "openSettings": "打开设置",
+      "toggleSidebar": "折叠 / 展开侧边栏",
+      "light": "浅色主题",
+      "dark": "深色主题",
+      "system": "跟随系统",
+      "shortcuts": "键盘快捷键",
+      "switchLanguage": "切换到 {{language}}"
+    },
+    "title": "命令菜单"
+  },
+  "signedOut": "你已退出登录。",
+  "userMenu": {
+    "memory": "记忆",
+    "knowledge": "知识库",
+    "admin": "管理后台"
+  },
+  "suggestions": {
+    "outline-essay": {
+      "title": "为长文拟提纲",
+      "prompt": "帮我拟一份 2000 字的文章提纲，题目是「专注作为一种道德能力」。"
+    },
+    "study-plan": {
+      "title": "设计一份学习计划",
+      "prompt": "为我设计一份为期四周的复杂理论入门阅读计划。"
+    },
+    "debug-snippet": {
+      "title": "陪我读一段代码",
+      "prompt": "我有一个 TypeScript 函数，每次重渲染后输入框就失去焦点 —— 帮我排查一下。"
+    },
+    "research-brief": {
+      "title": "草拟一份研究综述",
+      "prompt": "总结一下「全民基本收入」最有力的反驳意见。"
+    },
+    "travel-idea": {
+      "title": "规划一次慢旅行",
+      "prompt": "我十月份有十天假期，帮我勾画一条在葡萄牙慢行的安静路线。"
+    },
+    "creative-brief": {
+      "title": "认真为一件事命名",
+      "prompt": "给我 8 个备选名字：一份评论性气候金融简报。"
+    },
+    "difficult-decision": {
+      "title": "推一遍一个决定",
+      "prompt": "帮我推一遍是否应当辞职专心写作的决策矩阵。"
+    },
+    "library-curation": {
+      "title": "推荐一份小书单",
+      "prompt": "推荐 5 本关于「孤独」的短篇好书——不同传统，不要重复。"
+    }
+  }
+}

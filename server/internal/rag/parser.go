@@ -1,0 +1,583 @@
+package rag
+
+import (
+	"archive/zip"
+	"bytes"
+	"context"
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"path"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"time"
+
+	"aurelia/server/internal/sandbox"
+	"aurelia/server/internal/storage"
+	"aurelia/server/internal/store"
+)
+
+// MinerUResult is the structured output we get back from MinerU. Markdown is
+// the body of `full.md` from the zip with image refs rewritten to the
+// `mineru://filename` markers the existing chunker recognises (§4.11-C image
+// embed). Images is the per-image metadata pulled from the same zip — caption,
+// page number, filename — so the citation UI can link back to the source
+// image when an image_caption chunk is retrieved.
+type MinerUResult struct {
+	Markdown string
+	Images   []MinerUImage
+}
+
+// MinerUImage is one image extracted from a non-text document. Caption may be
+// blank — the orchestrator can route blank captions through a VLM later if
+// needed. Filename is the basename inside the zip (e.g. `foo.png`), used as
+// the `image_ref` on the resulting image_caption chunk and matched against
+// the inline `mineru://filename` markers in the markdown.
+type MinerUImage struct {
+	PageNo   int
+	Caption  string
+	Filename string
+	MimeType string
+}
+
+// parseDocument extracts text from a document (§4.11-C). The decision rule:
+//
+//   - mime says text/* / json / xml / csv / markdown → local read (MinerU
+//     does not accept these formats anyway).
+//   - PDF/DOC/PPT/XLS/image/HTML → MinerU cloud API: upload bytes to the
+//     admin-configured bucket (S3 or Aliyun OSS), hand the presigned URL to
+//     MinerU's submit endpoint, poll, download the zip, unpack `full.md`.
+//     Pipeline model with OCR on per the project requirement.
+//   - When MinerU isn't configured (no token) or the bucket isn't configured,
+//     binary files fall back to a placeholder so the ingest pipeline still
+//     completes without a hard failure.
+//
+// Live-config: the MinerU URL/token + storage block are passed in by the
+// caller (rag.runPipeline) which re-reads them from admin settings on every
+// ingest, so admin changes apply on the very next document without a server
+// restart.
+func parseDocument(
+	ctx context.Context,
+	docPath, mime, filename string,
+	mineruURL, mineruToken string,
+	sb *storage.Client,
+) (string, error) {
+	if docPath == "" {
+		return "", nil
+	}
+	if isProbablyText(mime, docPath) {
+		b, err := os.ReadFile(docPath)
+		if err != nil {
+			return "", err
+		}
+		return string(b), nil
+	}
+	// Binary — try MinerU when it's wired AND there's a bucket to host the file.
+	if mineruURL != "" && mineruToken != "" && sb.Enabled() {
+		if res, err := minerUExtractViaCloud(ctx, docPath, filename, mime, mineruURL, mineruToken, sb); err == nil && strings.TrimSpace(res.Markdown) != "" {
+			b := strings.Builder{}
+			b.WriteString(res.Markdown)
+			// Append per-image markers AFTER the body in case the zip layout
+			// didn't already embed them — duplicates are harmless because the
+			// chunker dedupes by content.
+			for _, im := range res.Images {
+				if strings.Contains(b.String(), "mineru://"+im.Filename) {
+					continue
+				}
+				caption := strings.TrimSpace(im.Caption)
+				if caption == "" {
+					caption = im.Filename
+				}
+				fmt.Fprintf(&b, "\n\n<!-- mineru-image page=%d -->\n![%s](mineru://%s)\n", im.PageNo, caption, im.Filename)
+			}
+			return b.String(), nil
+		}
+	}
+	info, _ := os.Stat(docPath)
+	size := int64(0)
+	if info != nil {
+		size = info.Size()
+	}
+	return filepath.Base(docPath) + " — binary document, " + formatBytes(size) + " (configure MinerU + object storage in admin settings to extract content).", nil
+}
+
+// minerUExtractViaCloud runs the four-step pipeline against the MinerU cloud
+// API (https://mineru.net):
+//
+//  1. Upload the document bytes to the admin-configured bucket (S3 or OSS)
+//     via the sidecar's /storage/put → returns a 1-hour presigned GET URL.
+//  2. POST /api/v4/extract/task {url, model_version: pipeline, is_ocr: true}.
+//  3. Poll GET /api/v4/extract/task/{task_id} until state == "done" or
+//     "failed". Pipeline model returns within minutes for typical PDFs;
+//     we cap at 20 minutes (200-page ceiling, 6s/page worst case).
+//  4. Download the full_zip_url, unpack `full.md` + image files in-memory,
+//     rewrite image references to `mineru://filename` markers.
+//
+// The uploaded object is best-effort deleted at the end so the bucket doesn't
+// accumulate sources. Failure to delete is logged but doesn't fail the parse.
+func minerUExtractViaCloud(
+	ctx context.Context,
+	docPath, filename, mime string,
+	baseURL, token string,
+	sb *storage.Client,
+) (*MinerUResult, error) {
+	body, err := os.ReadFile(docPath)
+	if err != nil {
+		return nil, err
+	}
+	if len(body) == 0 {
+		return nil, fmt.Errorf("mineru: empty document")
+	}
+
+	// Upload — key is mineru/<short-id>/<safe-name> so the bucket layout is
+	// inspectable and the prefix is owned by the parser. The sidecar adds the
+	// admin-configured storage_prefix in front.
+	safe := filepath.Base(filename)
+	if safe == "" {
+		safe = filepath.Base(docPath)
+	}
+	key := "mineru/" + store.GenID("u") + "/" + safe
+	if mime == "" {
+		mime = "application/octet-stream"
+	}
+	put, err := sb.Put(ctx, key, body, mime, 0)
+	if err != nil {
+		return nil, fmt.Errorf("mineru: upload: %w", err)
+	}
+	// Always clean up — even on a poll failure the source object should die.
+	defer func() {
+		// Use a fresh context so client-cancel doesn't skip cleanup.
+		dctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		_ = sb.Delete(dctx, put.Key)
+	}()
+
+	// Submit the task. MinerU requires the file URL to be reachable from
+	// their side — presigned S3/OSS URLs do that without making the bucket
+	// public.
+	taskID, err := minerUSubmitTask(ctx, baseURL, token, put.URL)
+	if err != nil {
+		return nil, fmt.Errorf("mineru: submit: %w", err)
+	}
+
+	// Poll until done or failed. 5s interval keeps a tight feedback loop; cap
+	// at 20 minutes — anything longer than that is an operational failure
+	// rather than slow processing.
+	zipURL, perr := minerUPollTask(ctx, baseURL, token, taskID, 5*time.Second, 20*time.Minute)
+	if perr != nil {
+		return nil, fmt.Errorf("mineru: poll: %w", perr)
+	}
+
+	// Download and unpack.
+	res, err := minerUDownloadAndUnpack(ctx, zipURL)
+	if err != nil {
+		return nil, fmt.Errorf("mineru: unpack: %w", err)
+	}
+	return res, nil
+}
+
+// minerUSubmitTask creates one extract task. We hard-code:
+//   - model_version: "pipeline" (project requirement; PDF/DOC/PPT/IMG work
+//     here, HTML would need "MinerU-HTML" but the existing classifier puts
+//     html into the local-text bucket).
+//   - is_ocr: true (project requirement — guarantees scanned PDFs work).
+//
+// MinerU 限速 hint: 1000 high-prio pages/day. We don't try to throttle from
+// the client — the queue's natural concurrency cap (4 workers) keeps the
+// flow well below MinerU's per-token rate limits.
+func minerUSubmitTask(ctx context.Context, baseURL, token, fileURL string) (string, error) {
+	payload := map[string]any{
+		"url":            fileURL,
+		"model_version":  "pipeline",
+		"is_ocr":         true,
+		"enable_formula": true,
+		"enable_table":   true,
+	}
+	body, _ := json.Marshal(payload)
+	endpoint := strings.TrimRight(baseURL, "/") + "/api/v4/extract/task"
+	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("content-type", "application/json")
+	req.Header.Set("accept", "*/*")
+	req.Header.Set("authorization", "Bearer "+token)
+	resp, err := mineruClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		b, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("status %d: %s", resp.StatusCode, truncateAtN(string(b), 256))
+	}
+	var parsed struct {
+		Code    int             `json:"code"`
+		Msg     string          `json:"msg"`
+		TraceID string          `json:"trace_id"`
+		Data    json.RawMessage `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
+		return "", err
+	}
+	if parsed.Code != 0 {
+		return "", fmt.Errorf("mineru code=%d msg=%s", parsed.Code, parsed.Msg)
+	}
+	var d struct {
+		TaskID string `json:"task_id"`
+	}
+	if err := json.Unmarshal(parsed.Data, &d); err != nil {
+		return "", err
+	}
+	if d.TaskID == "" {
+		return "", fmt.Errorf("mineru: empty task_id")
+	}
+	return d.TaskID, nil
+}
+
+// minerUPollTask polls /api/v4/extract/task/{task_id} until state ∈
+// {done, failed} or the deadline expires. Returns the full_zip_url on done.
+func minerUPollTask(ctx context.Context, baseURL, token, taskID string, interval, max time.Duration) (string, error) {
+	deadline := time.Now().Add(max)
+	endpoint := strings.TrimRight(baseURL, "/") + "/api/v4/extract/task/" + taskID
+	for {
+		req, err := http.NewRequestWithContext(ctx, "GET", endpoint, nil)
+		if err != nil {
+			return "", err
+		}
+		req.Header.Set("accept", "*/*")
+		req.Header.Set("authorization", "Bearer "+token)
+		resp, err := mineruClient.Do(req)
+		if err != nil {
+			return "", err
+		}
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode >= 400 {
+			return "", fmt.Errorf("status %d: %s", resp.StatusCode, truncateAtN(string(bodyBytes), 256))
+		}
+		var parsed struct {
+			Code int `json:"code"`
+			Msg  string
+			Data struct {
+				TaskID      string `json:"task_id"`
+				State       string `json:"state"`
+				FullZipURL  string `json:"full_zip_url"`
+				ErrMsg      string `json:"err_msg"`
+				ExtractProg struct {
+					ExtractedPages int    `json:"extracted_pages"`
+					TotalPages     int    `json:"total_pages"`
+					StartTime      string `json:"start_time"`
+				} `json:"extract_progress"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(bodyBytes, &parsed); err != nil {
+			return "", fmt.Errorf("decode: %w", err)
+		}
+		if parsed.Code != 0 {
+			return "", fmt.Errorf("mineru code=%d msg=%s", parsed.Code, parsed.Msg)
+		}
+		switch parsed.Data.State {
+		case "done":
+			if parsed.Data.FullZipURL == "" {
+				return "", fmt.Errorf("mineru: done without full_zip_url")
+			}
+			return parsed.Data.FullZipURL, nil
+		case "failed":
+			return "", fmt.Errorf("mineru parse failed: %s", parsed.Data.ErrMsg)
+		case "pending", "running", "converting", "waiting-file", "":
+			// keep polling
+		default:
+			// Unknown state — keep polling but be defensive about ttl.
+		}
+		if time.Now().After(deadline) {
+			return "", fmt.Errorf("mineru: poll timed out after %s (last state=%s)", max, parsed.Data.State)
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(interval):
+		}
+	}
+}
+
+// minerUDownloadAndUnpack pulls the zip and extracts `full.md` plus every
+// image file referenced from it. The zip layout per MinerU's docs:
+//   - `full.md` — the markdown result. Image refs are relative paths like
+//     `images/foo.png` pointing at the same zip's `images/` directory.
+//   - `images/` — image files (png/jpg/etc.).
+//   - `*_content_list.json`, `*_layout.json`, `*_model.json` — metadata, ignored.
+//
+// We rewrite `![alt](images/foo.png)` → `![alt](mineru://foo.png)` so the
+// existing chunker's `mineruImageMarker` regex picks them up as image_caption
+// chunks.
+func minerUDownloadAndUnpack(ctx context.Context, zipURL string) (*MinerUResult, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", zipURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := mineruClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("zip download status %d", resp.StatusCode)
+	}
+	// Cap the download at 500 MiB — zips for normal documents are <100 MiB;
+	// anything bigger is a runaway and we'd rather error than OOM the server.
+	const maxZip = 500 * 1024 * 1024
+	zipBytes, err := io.ReadAll(io.LimitReader(resp.Body, maxZip+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(zipBytes)) > maxZip {
+		return nil, fmt.Errorf("zip too large (>%d bytes)", maxZip)
+	}
+
+	zr, err := zip.NewReader(bytes.NewReader(zipBytes), int64(len(zipBytes)))
+	if err != nil {
+		return nil, err
+	}
+
+	// Walk once: pick the `*.md` body and collect image entries.
+	var markdown string
+	type imgEntry struct {
+		basename string
+		mimeType string
+	}
+	var images []imgEntry
+	for _, f := range zr.File {
+		// Real zip-slip defence: per-segment check. `path.Clean` would resolve
+		// a leading `..` against the rooted prefix and hide the traversal, so
+		// we split and reject any `..`, empty segment, or absolute path. Today
+		// we never write zip entries to disk (only read full.md + harvest
+		// basenames), but the next change might — keep the guard honest.
+		if !zipNameIsSafe(f.Name) {
+			continue
+		}
+		base := path.Base(f.Name)
+		if base == "" || strings.HasSuffix(f.Name, "/") {
+			continue
+		}
+		lower := strings.ToLower(f.Name)
+		switch {
+		case lower == "full.md" || strings.HasSuffix(lower, "/full.md"):
+			rc, err := f.Open()
+			if err != nil {
+				continue
+			}
+			b, err := io.ReadAll(io.LimitReader(rc, 32*1024*1024))
+			rc.Close()
+			if err == nil {
+				markdown = string(b)
+			}
+		case strings.HasPrefix(lower, "images/") || strings.Contains(lower, "/images/"):
+			images = append(images, imgEntry{basename: base, mimeType: guessImageMime(base)})
+		}
+	}
+	if strings.TrimSpace(markdown) == "" {
+		return nil, fmt.Errorf("mineru: no full.md in zip")
+	}
+
+	// Rewrite ![alt](images/...filename) → ![alt](mineru://filename).
+	// We anchor the regex on either `images/` or `./images/` since the zip
+	// layout has occasionally appeared with both — and we drop everything
+	// before the basename so the chunker's marker regex matches.
+	markdown = mineruImagesPathRe.ReplaceAllStringFunc(markdown, func(m string) string {
+		sub := mineruImagesPathRe.FindStringSubmatch(m)
+		if len(sub) < 3 {
+			return m
+		}
+		alt := sub[1]
+		fname := path.Base(sub[2])
+		return "![" + alt + "](mineru://" + fname + ")"
+	})
+
+	out := &MinerUResult{Markdown: markdown}
+	// We don't reorder images — the markdown already has them in document
+	// order. We attach the list so the ingest pipeline can persist
+	// image_caption rows with the right `image_ref` even when the markdown
+	// rewriter missed a path (defensive — appended at the bottom by
+	// parseDocument).
+	seen := map[string]bool{}
+	for _, im := range images {
+		if seen[im.basename] {
+			continue
+		}
+		seen[im.basename] = true
+		out.Images = append(out.Images, MinerUImage{
+			Filename: im.basename,
+			MimeType: im.mimeType,
+		})
+	}
+	return out, nil
+}
+
+// mineruImagesPathRe matches `![alt](images/foo.png)` and `![alt](./images/foo.png)`.
+// Capture (1) = alt text, (2) = full path so we can take the basename.
+var mineruImagesPathRe = regexp.MustCompile(`!\[([^\]]*)\]\(((?:\./)?images/[^)\s]+)\)`)
+
+// zipNameIsSafe returns true when the zip entry's name has no traversal
+// segments, no empty/absolute prefix, and no Windows-y backslashes. We don't
+// use `path.Clean` because Clean *resolves* leading `..` against the rooted
+// prefix and hides the traversal entirely (so its output never contains `..`
+// no matter how malicious the input).
+func zipNameIsSafe(name string) bool {
+	if name == "" || strings.HasPrefix(name, "/") || strings.Contains(name, "\\") {
+		return false
+	}
+	for _, seg := range strings.Split(name, "/") {
+		if seg == ".." || seg == "" {
+			// empty segment = `a//b` or trailing slash on a dir entry; let the
+			// caller handle the directory case separately (we test HasSuffix
+			// after). Trailing-slash-only names land here too — reject and the
+			// `HasSuffix "/"` branch in the walker is now dead but harmless.
+			if seg == "" && strings.HasSuffix(name, "/") && strings.Count(name, "/") == 1 {
+				continue
+			}
+			return false
+		}
+	}
+	return true
+}
+
+// mineruClient is a long-timeout HTTP client used for the submit + poll +
+// download legs of the cloud API. 60s connect + a per-call deadline via the
+// request context keeps individual round-trips honest while the larger
+// poll-loop ceiling is enforced in minerUPollTask.
+var mineruClient = &http.Client{Timeout: 5 * time.Minute}
+
+func guessImageMime(name string) string {
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".png":
+		return "image/png"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".gif":
+		return "image/gif"
+	case ".webp":
+		return "image/webp"
+	case ".bmp":
+		return "image/bmp"
+	case ".svg":
+		return "image/svg+xml"
+	}
+	return "image/png"
+}
+
+func truncateAtN(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
+}
+
+// isProbablyText narrows on mime types AND known text-friendly extensions.
+// MinerU rejects raw text formats — and there's no parse work to do anyway —
+// so we keep them on the local read path.
+func isProbablyText(mime, p string) bool {
+	mime = strings.ToLower(mime)
+	if strings.HasPrefix(mime, "text/") || strings.Contains(mime, "json") || strings.Contains(mime, "xml") || strings.Contains(mime, "csv") || strings.Contains(mime, "markdown") {
+		return true
+	}
+	switch strings.ToLower(filepath.Ext(p)) {
+	case ".txt", ".md", ".markdown", ".csv", ".log", ".json", ".yaml", ".yml", ".xml":
+		return true
+	}
+	return false
+}
+
+func formatBytes(n int64) string {
+	if n < 1024 {
+		return formatInt(n) + " B"
+	}
+	if n < 1024*1024 {
+		return formatFloat(float64(n)/1024) + " KB"
+	}
+	return formatFloat(float64(n)/1024/1024) + " MB"
+}
+
+func formatInt(n int64) string {
+	if n == 0 {
+		return "0"
+	}
+	neg := false
+	if n < 0 {
+		neg = true
+		n = -n
+	}
+	out := []byte{}
+	for n > 0 {
+		out = append([]byte{byte('0' + n%10)}, out...)
+		n /= 10
+	}
+	if neg {
+		out = append([]byte{'-'}, out...)
+	}
+	return string(out)
+}
+
+func formatFloat(f float64) string {
+	if f >= 100 {
+		return formatInt(int64(f + 0.5))
+	}
+	intPart := int64(f)
+	frac := int64((f-float64(intPart))*10 + 0.5)
+	return formatInt(intPart) + "." + formatInt(frac)
+}
+
+// storageBlockFromSettings reads the admin-configured S3 / OSS block from the
+// settings table. Returns nil when no provider is set or required fields are
+// missing — caller treats that as "no upload bucket; MinerU disabled".
+func storageBlockFromSettings(db *sql.DB) *sandbox.StorageConfig {
+	if db == nil {
+		return nil
+	}
+	provider := readSettingString(db, "storage_provider", "")
+	if provider != "s3" && provider != "aliyun_oss" {
+		return nil
+	}
+	cfg := &sandbox.StorageConfig{
+		Provider: provider,
+		Prefix:   readSettingString(db, "storage_prefix", "workspaces/"),
+	}
+	switch provider {
+	case "s3":
+		cfg.S3Bucket = readSettingString(db, "storage_s3_bucket", "")
+		cfg.S3Region = readSettingString(db, "storage_s3_region", "")
+		cfg.S3Endpoint = readSettingString(db, "storage_s3_endpoint", "")
+		cfg.S3AccessKey = readSettingString(db, "storage_s3_access_key", "")
+		cfg.S3SecretKey = readSettingString(db, "storage_s3_secret_key", "")
+	case "aliyun_oss":
+		cfg.OSSBucket = readSettingString(db, "storage_aliyun_bucket", "")
+		cfg.OSSEndpoint = readSettingString(db, "storage_aliyun_endpoint", "")
+		cfg.OSSAccessKeyID = readSettingString(db, "storage_aliyun_access_key_id", "")
+		cfg.OSSAccessKeySecret = readSettingString(db, "storage_aliyun_access_key_secret", "")
+	}
+	if !cfg.Effective() {
+		return nil
+	}
+	return cfg
+}
+
+// readSettingString reads one setting key as a JSON string. When the row is
+// missing (admin never touched it), returns `def`. When the row exists,
+// returns whatever the admin saved — including an empty string. That's the
+// explicit "clear / disable" gesture from the UI; falling back to env in
+// that case would silently keep the feature alive against the admin's intent.
+func readSettingString(db *sql.DB, key, def string) string {
+	raw, err := store.GetSetting(db, key)
+	if err != nil {
+		return def
+	}
+	var v string
+	if json.Unmarshal(raw, &v) != nil {
+		return def
+	}
+	return strings.TrimSpace(v)
+}

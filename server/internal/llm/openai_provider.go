@@ -1,0 +1,720 @@
+package llm
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"strings"
+)
+
+// OpenAIProvider supports both the Chat Completions ("chat") and Responses
+// API ("responses") formats — the channel's api_format decides at request
+// time. When no api_key is set the implementation falls back to the mock
+// provider so the orchestrator never errors mid-stream because of missing
+// credentials.
+type OpenAIProvider struct {
+	logger *log.Logger
+}
+
+// ID returns "openai".
+func (p *OpenAIProvider) ID() string { return "openai" }
+
+// Stream runs one model turn against either OpenAI format.
+func (p *OpenAIProvider) Stream(ctx context.Context, req UnifiedChatRequest, tools ToolRunner, onEvent func(SseEvent)) (*UnifiedResult, error) {
+	if req.Model.APIKey == "" {
+		return (&MockProvider{logger: p.logger}).Stream(ctx, req, tools, onEvent)
+	}
+	switch req.Model.APIFormat {
+	case "responses":
+		return p.streamResponses(ctx, req, tools, onEvent)
+	default:
+		return p.streamChat(ctx, req, tools, onEvent)
+	}
+}
+
+func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest, tools ToolRunner, onEvent func(SseEvent)) (*UnifiedResult, error) {
+	base := strings.TrimRight(req.Model.BaseURL, "/")
+	if base == "" {
+		base = "https://api.openai.com"
+	}
+
+	// §4.13 prompt-mode: no native function calling — drive the text protocol.
+	if req.ToolModePrompt {
+		_, blocks, usage, cites, err := RunPromptToolLoop(
+			ctx, req.SystemPrompt, req.History, req.Tools,
+			p.promptRunOnce(base, req), tools, onEvent,
+		)
+		if err != nil {
+			return nil, err
+		}
+		return &UnifiedResult{Blocks: blocks, StopReason: "end_turn", Usage: usage, Citations: cites}, nil
+	}
+
+	messages := []map[string]any{}
+	if req.SystemPrompt != "" {
+		messages = append(messages, map[string]any{"role": "system", "content": req.SystemPrompt})
+	}
+	for _, m := range req.History {
+		if m.Role != "user" && m.Role != "assistant" {
+			continue
+		}
+		// Same-vendor raw replay (§2.3-C).
+		if m.Role == "assistant" && len(m.Raw) > 2 {
+			var turns []map[string]any
+			if err := json.Unmarshal(m.Raw, &turns); err == nil && len(turns) > 0 && turns[0]["role"] != nil {
+				messages = append(messages, turns...)
+				continue
+			}
+		}
+		text := renderBlocksAsText(m.Blocks)
+		// Image attachments → multimodal content array (data URI form).
+		imgParts := []map[string]any{}
+		for _, b := range m.Blocks {
+			if b.Kind == "image" && b.Data != "" {
+				imgParts = append(imgParts, map[string]any{
+					"type":      "image_url",
+					"image_url": map[string]any{"url": "data:" + b.MimeType + ";base64," + b.Data},
+				})
+			}
+			// PDF / document blocks: send as a file part so document-capable
+			// chat-completions models (e.g. gpt-5-turbo) receive the file.
+			if b.Kind == "document" && b.Data != "" {
+				imgParts = append(imgParts, map[string]any{
+					"type": "file",
+					"file": map[string]any{
+						"filename":  b.Title,
+						"file_data": "data:" + b.MimeType + ";base64," + b.Data,
+					},
+				})
+			}
+		}
+		if len(imgParts) > 0 {
+			content := append([]map[string]any{{"type": "text", "text": text}}, imgParts...)
+			messages = append(messages, map[string]any{"role": m.Role, "content": content})
+		} else {
+			messages = append(messages, map[string]any{"role": m.Role, "content": text})
+		}
+	}
+
+	const maxIter = 12
+	historyLen := len(messages)
+	allText := strings.Builder{}
+	allBlocks := []UnifiedBlock{}
+	allCitations := []Citation{}
+	usage := Usage{}
+
+	for i := 0; i < maxIter; i++ {
+		body := map[string]any{
+			"model":    req.Model.RequestID,
+			"messages": messages,
+			"stream":   true,
+		}
+		if req.MaxOutputTokens > 0 {
+			body["max_tokens"] = req.MaxOutputTokens
+		}
+		if len(req.Tools) > 0 && !req.ToolModePrompt {
+			openAITools := []map[string]any{}
+			for _, t := range req.Tools {
+				openAITools = append(openAITools, map[string]any{
+					"type": "function",
+					"function": map[string]any{
+						"name":        t.Name,
+						"description": t.Description,
+						"parameters":  json.RawMessage(t.InputSchema),
+					},
+				})
+			}
+			body["tools"] = openAITools
+		}
+		if req.ToolModePrompt {
+			body["stop"] = []string{PromptToolStopSequence()}
+		}
+		body = MergeParamControls(body, req.ParamControls, req.ParamOverrides)
+		raw, _ := json.Marshal(body)
+		httpReq, _ := http.NewRequestWithContext(ctx, "POST", base+"/v1/chat/completions", bytes.NewReader(raw))
+		httpReq.Header.Set("authorization", "Bearer "+req.Model.APIKey)
+		httpReq.Header.Set("content-type", "application/json")
+		httpReq.Header.Set("accept", "text/event-stream")
+		resp, err := http.DefaultClient.Do(httpReq)
+		if err != nil {
+			return nil, err
+		}
+		if resp.StatusCode >= 400 {
+			b, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			return nil, fmt.Errorf("openai %d: %s", resp.StatusCode, string(b))
+		}
+		text, calls, finish, u, err := readOpenAIChatStream(resp.Body, onEvent)
+		resp.Body.Close()
+		if err != nil {
+			return nil, err
+		}
+		allText.WriteString(text)
+		if text != "" {
+			allBlocks = append(allBlocks, UnifiedBlock{Kind: "text", Text: text})
+		}
+		usage.InputTokens += u.InputTokens
+		usage.OutputTokens += u.OutputTokens
+
+		assistant := map[string]any{"role": "assistant", "content": text}
+		if len(calls) > 0 {
+			toolCalls := []map[string]any{}
+			for _, c := range calls {
+				toolCalls = append(toolCalls, map[string]any{
+					"id":   c.ID,
+					"type": "function",
+					"function": map[string]any{
+						"name":      c.Name,
+						"arguments": string(c.Input),
+					},
+				})
+			}
+			assistant["tool_calls"] = toolCalls
+		}
+		messages = append(messages, assistant)
+
+		if finish != "tool_calls" || len(calls) == 0 {
+			raw, _ := json.Marshal(messages[historyLen:])
+			return &UnifiedResult{
+				Blocks:     allBlocks,
+				Raw:        raw,
+				StopReason: finish,
+				Usage:      usage,
+				Citations:  allCitations,
+			}, nil
+		}
+
+		specs := make([]toolCallSpec, len(calls))
+		for i, tc := range calls {
+			specs[i] = toolCallSpec{ID: tc.ID, Name: tc.Name, Input: tc.Input}
+		}
+		results := runToolsConcurrent(ctx, tools, specs, onEvent)
+		for i, tc := range calls {
+			r := results[i]
+			out := r.Output
+			status := "complete"
+			if r.Err != nil {
+				status = "error"
+				out = "Error: " + r.Err.Error()
+			}
+			allCitations = append(allCitations, r.Citations...)
+			onEvent(SseEvent{Type: "tool_result", Name: tc.Name, ID: tc.ID, Summary: truncate(out, 240), Status: status})
+			allBlocks = append(allBlocks, UnifiedBlock{
+				Kind: "tool_call", ToolName: tc.Name, ToolID: tc.ID,
+				Input: tc.Input, Summary: truncate(out, 240),
+			})
+			messages = append(messages, map[string]any{
+				"role":         "tool",
+				"tool_call_id": tc.ID,
+				"content":      out,
+			})
+		}
+	}
+	raw, _ := json.Marshal(messages[historyLen:])
+	return &UnifiedResult{
+		Blocks:     allBlocks,
+		Raw:        raw,
+		StopReason: "max_iterations",
+		Usage:      usage,
+		Citations:  allCitations,
+	}, nil
+}
+
+// promptRunOnce returns a PromptToolRunner performing ONE Chat Completions
+// call (no native tools, stop on </tool_call>) for §4.13 prompt-mode.
+func (p *OpenAIProvider) promptRunOnce(base string, req UnifiedChatRequest) PromptToolRunner {
+	return func(ctx context.Context, history []UnifiedMessage, system string) (string, Usage, error) {
+		messages := []map[string]any{}
+		if system != "" {
+			messages = append(messages, map[string]any{"role": "system", "content": system})
+		}
+		for _, m := range history {
+			if m.Role != "user" && m.Role != "assistant" {
+				continue
+			}
+			text := strings.Builder{}
+			for _, b := range m.Blocks {
+				if b.Kind == "text" {
+					text.WriteString(b.Text)
+					text.WriteString("\n")
+				}
+			}
+			messages = append(messages, map[string]any{"role": m.Role, "content": strings.TrimRight(text.String(), "\n")})
+		}
+		body := map[string]any{
+			"model":    req.Model.RequestID,
+			"messages": messages,
+			"stream":   true,
+			"stop":     []string{PromptToolStopSequence()},
+		}
+		if req.MaxOutputTokens > 0 {
+			body["max_tokens"] = req.MaxOutputTokens
+		}
+		body = MergeParamControls(body, req.ParamControls, req.ParamOverrides)
+		raw, _ := json.Marshal(body)
+		httpReq, _ := http.NewRequestWithContext(ctx, "POST", base+"/v1/chat/completions", bytes.NewReader(raw))
+		httpReq.Header.Set("authorization", "Bearer "+req.Model.APIKey)
+		httpReq.Header.Set("content-type", "application/json")
+		httpReq.Header.Set("accept", "text/event-stream")
+		resp, err := http.DefaultClient.Do(httpReq)
+		if err != nil {
+			return "", Usage{}, err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode >= 400 {
+			b, _ := io.ReadAll(resp.Body)
+			return "", Usage{}, fmt.Errorf("openai %d: %s", resp.StatusCode, string(b))
+		}
+		text, _, _, u, err := readOpenAIChatStream(resp.Body, func(SseEvent) {})
+		return text, u, err
+	}
+}
+
+type openAIToolCall struct {
+	ID    string
+	Name  string
+	Input json.RawMessage
+}
+
+func readOpenAIChatStream(body io.Reader, onEvent func(SseEvent)) (string, []openAIToolCall, string, Usage, error) {
+	scanner := bufio.NewScanner(body)
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	text := strings.Builder{}
+	usage := Usage{}
+	finish := "end_turn"
+	// Tool calls are accumulated by index — OpenAI streams partial args.
+	toolByIdx := map[int]*openAIToolCall{}
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if payload == "" || payload == "[DONE]" {
+			continue
+		}
+		var ev map[string]any
+		if err := json.Unmarshal([]byte(payload), &ev); err != nil {
+			continue
+		}
+		choices, _ := ev["choices"].([]any)
+		for _, c := range choices {
+			ch, _ := c.(map[string]any)
+			delta, _ := ch["delta"].(map[string]any)
+			if s, _ := delta["content"].(string); s != "" {
+				text.WriteString(s)
+				onEvent(SseEvent{Type: "text_delta", Text: s})
+			}
+			if tcs, ok := delta["tool_calls"].([]any); ok {
+				for _, raw := range tcs {
+					tc, _ := raw.(map[string]any)
+					idx := intOf(tc["index"])
+					cur, isExisting := toolByIdx[idx]
+					if !isExisting {
+						cur = &openAIToolCall{}
+						toolByIdx[idx] = cur
+					}
+					if id, _ := tc["id"].(string); id != "" {
+						cur.ID = id
+					}
+					if fn, _ := tc["function"].(map[string]any); fn != nil {
+						if n, _ := fn["name"].(string); n != "" {
+							if !isExisting {
+								// First slice that names the tool — emit tool_start.
+								onEvent(SseEvent{Type: "tool_start", Name: n, ID: cur.ID})
+							}
+							cur.Name = n
+						}
+						if a, _ := fn["arguments"].(string); a != "" {
+							cur.Input = append(cur.Input, []byte(a)...)
+							// Surface partial JSON to the frontend so the
+							// search term / code / etc renders as it arrives.
+							onEvent(SseEvent{Type: "tool_input", ID: cur.ID, Name: cur.Name, PartialJson: a})
+						}
+					}
+				}
+			}
+			if fr, _ := ch["finish_reason"].(string); fr != "" {
+				finish = fr
+			}
+		}
+		if u, ok := ev["usage"].(map[string]any); ok {
+			usage.InputTokens = intOf(u["prompt_tokens"])
+			usage.OutputTokens = intOf(u["completion_tokens"])
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return "", nil, "", usage, err
+	}
+	calls := []openAIToolCall{}
+	for _, c := range toolByIdx {
+		if len(c.Input) == 0 {
+			c.Input = []byte("{}")
+		}
+		calls = append(calls, *c)
+	}
+	return text.String(), calls, finish, usage, nil
+}
+
+// streamResponses drives the OpenAI Responses API (`POST /v1/responses`),
+// which has a distinct request/response shape from Chat Completions: messages
+// become `input` items, tool calls are `function_call` output items, and tool
+// results are fed back as `function_call_output` input items (§2.3-E).
+//
+// §4.10-E compliance:
+//   - We use the streaming Responses endpoint so text/reasoning deltas reach
+//     the user in real-time (the non-streaming form blocks the whole turn).
+//   - `store: false` is REQUIRED by the design: we manage our own conversation
+//     state, OpenAI must NOT persist it server-side. Without this flag,
+//     reasoning items leak across sessions and billing surprises follow.
+//   - `arguments` is the JSON-STRING form expected by the wire protocol; we
+//     pass `json.RawMessage(c.Input)` so it's emitted as a string literal,
+//     not double-encoded to `"\"{\\\"x\\\":1}\""` (which the upstream rejects).
+//   - reasoning summary deltas (`response.output_text.delta` for type=summary)
+//     are emitted as `thinking_delta` events so the UI's collapsed-thinking
+//     pane updates live.
+func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatRequest, tools ToolRunner, onEvent func(SseEvent)) (*UnifiedResult, error) {
+	if req.ToolModePrompt {
+		return p.streamChat(ctx, req, tools, onEvent)
+	}
+	base := strings.TrimRight(req.Model.BaseURL, "/")
+	if base == "" {
+		base = "https://api.openai.com"
+	}
+
+	// Build the input list from history.
+	input := []map[string]any{}
+	for _, m := range req.History {
+		if m.Role != "user" && m.Role != "assistant" {
+			continue
+		}
+		text := strings.Builder{}
+		for _, b := range m.Blocks {
+			if b.Kind == "text" {
+				text.WriteString(b.Text)
+				text.WriteString("\n")
+			}
+		}
+		ctype := "input_text"
+		if m.Role == "assistant" {
+			ctype = "output_text"
+		}
+		parts := []map[string]any{{"type": ctype, "text": strings.TrimRight(text.String(), "\n")}}
+		// Multimodal: pass image + PDF document blocks through so vision /
+		// document-capable Responses models receive them.
+		for _, b := range m.Blocks {
+			if b.Kind == "image" && b.Data != "" {
+				parts = append(parts, map[string]any{
+					"type":      "input_image",
+					"image_url": "data:" + b.MimeType + ";base64," + b.Data,
+				})
+			}
+			if b.Kind == "document" && b.Data != "" {
+				parts = append(parts, map[string]any{
+					"type":      "input_file",
+					"filename":  b.Title,
+					"file_data": "data:" + b.MimeType + ";base64," + b.Data,
+				})
+			}
+		}
+		input = append(input, map[string]any{
+			"role":    m.Role,
+			"content": parts,
+		})
+	}
+
+	var respTools []map[string]any
+	for _, t := range req.Tools {
+		respTools = append(respTools, map[string]any{
+			"type":        "function",
+			"name":        t.Name,
+			"description": t.Description,
+			"parameters":  json.RawMessage(t.InputSchema),
+		})
+	}
+
+	const maxIter = 12
+	historyLen := len(input)
+	allText := strings.Builder{}
+	allBlocks := []UnifiedBlock{}
+	allCitations := []Citation{}
+	usage := Usage{}
+
+	for i := 0; i < maxIter; i++ {
+		body := map[string]any{
+			"model": req.Model.RequestID,
+			"input": input,
+			// §4.10-E hard rule: do NOT let OpenAI persist conversation state.
+			"store":  false,
+			"stream": true,
+		}
+		if req.SystemPrompt != "" {
+			body["instructions"] = req.SystemPrompt
+		}
+		if req.MaxOutputTokens > 0 {
+			body["max_output_tokens"] = req.MaxOutputTokens
+		}
+		if len(respTools) > 0 {
+			body["tools"] = respTools
+		}
+		body = MergeParamControls(body, req.ParamControls, req.ParamOverrides)
+		raw, _ := json.Marshal(body)
+		httpReq, _ := http.NewRequestWithContext(ctx, "POST", base+"/v1/responses", bytes.NewReader(raw))
+		httpReq.Header.Set("authorization", "Bearer "+req.Model.APIKey)
+		httpReq.Header.Set("content-type", "application/json")
+		httpReq.Header.Set("accept", "text/event-stream")
+		resp, err := http.DefaultClient.Do(httpReq)
+		if err != nil {
+			return nil, err
+		}
+		if resp.StatusCode >= 400 {
+			b, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			return nil, fmt.Errorf("openai responses %d: %s", resp.StatusCode, string(b))
+		}
+
+		text, calls, u, err := readOpenAIResponsesStream(resp.Body, onEvent)
+		resp.Body.Close()
+		if err != nil {
+			return nil, err
+		}
+		usage.InputTokens += u.InputTokens
+		usage.OutputTokens += u.OutputTokens
+		if text != "" {
+			allText.WriteString(text)
+			allBlocks = append(allBlocks, UnifiedBlock{Kind: "text", Text: text})
+			input = append(input, map[string]any{
+				"role":    "assistant",
+				"content": []map[string]any{{"type": "output_text", "text": text}},
+			})
+		}
+
+		if len(calls) == 0 {
+			raw, _ := json.Marshal(input[historyLen:])
+			return &UnifiedResult{
+				Blocks:     allBlocks,
+				Raw:        raw,
+				StopReason: "end_turn",
+				Usage:      usage,
+				Citations:  allCitations,
+			}, nil
+		}
+
+		// Insert the function_call items the model emitted (echo them back
+		// alongside their outputs — required by the Responses protocol).
+		for _, c := range calls {
+			input = append(input, map[string]any{
+				"type":      "function_call",
+				"call_id":   c.ID,
+				"name":      c.Name,
+				"arguments": json.RawMessage(c.Input), // wire = JSON string
+			})
+		}
+
+		// Execute tools concurrently, then feed function_call_output items.
+		specs := make([]toolCallSpec, len(calls))
+		for j, c := range calls {
+			specs[j] = toolCallSpec{ID: c.ID, Name: c.Name, Input: c.Input}
+		}
+		results := runToolsConcurrent(ctx, tools, specs, onEvent)
+		for j, c := range calls {
+			r := results[j]
+			out := r.Output
+			status := "complete"
+			if r.Err != nil {
+				status = "error"
+				out = "Error: " + r.Err.Error()
+			}
+			allCitations = append(allCitations, r.Citations...)
+			onEvent(SseEvent{Type: "tool_result", Name: c.Name, ID: c.ID, Summary: truncate(out, 240), Status: status})
+			allBlocks = append(allBlocks, UnifiedBlock{
+				Kind: "tool_call", ToolName: c.Name, ToolID: c.ID,
+				Input: c.Input, Summary: truncate(out, 240),
+			})
+			input = append(input, map[string]any{
+				"type":    "function_call_output",
+				"call_id": c.ID,
+				"output":  out,
+			})
+		}
+	}
+	raw, _ := json.Marshal(input[historyLen:])
+	return &UnifiedResult{
+		Blocks:     allBlocks,
+		Raw:        raw,
+		StopReason: "max_iterations",
+		Usage:      usage,
+		Citations:  allCitations,
+	}, nil
+}
+
+// readOpenAIResponsesStream consumes the Responses SSE event stream. The event
+// taxonomy is:
+//   - response.output_text.delta — visible text delta (forward as text_delta)
+//   - response.reasoning_summary_text.delta — reasoning summary delta (forward
+//     as thinking_delta so the collapsed pane updates live)
+//   - response.output_item.added (type=function_call) — start of a tool call
+//   - response.function_call_arguments.delta — partial JSON for tool args
+//   - response.completed — final response with usage + finalized items
+//
+// The function returns the joined visible text, the parsed function-call list,
+// and the input/output token counts.
+func readOpenAIResponsesStream(body io.Reader, onEvent func(SseEvent)) (string, []openAIToolCall, Usage, error) {
+	scanner := bufio.NewScanner(body)
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	text := strings.Builder{}
+	usage := Usage{}
+	type callBuf struct {
+		ID, Name string
+		Args     strings.Builder
+		Started  bool
+	}
+	callsByItem := map[string]*callBuf{} // item_id → buffer
+	order := []string{}
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if payload == "" || payload == "[DONE]" {
+			continue
+		}
+		var ev map[string]any
+		if err := json.Unmarshal([]byte(payload), &ev); err != nil {
+			continue
+		}
+		typ, _ := ev["type"].(string)
+		switch typ {
+		case "response.output_text.delta":
+			if s, _ := ev["delta"].(string); s != "" {
+				text.WriteString(s)
+				onEvent(SseEvent{Type: "text_delta", Text: s})
+			}
+		case "response.reasoning_summary_text.delta", "response.reasoning.delta":
+			if s, _ := ev["delta"].(string); s != "" {
+				onEvent(SseEvent{Type: "thinking_delta", Text: s})
+			}
+		case "response.output_item.added":
+			it, _ := ev["item"].(map[string]any)
+			if it == nil {
+				continue
+			}
+			if t, _ := it["type"].(string); t == "function_call" {
+				itemID, _ := it["id"].(string)
+				callID, _ := it["call_id"].(string)
+				name, _ := it["name"].(string)
+				cb := &callBuf{ID: callID, Name: name, Started: true}
+				callsByItem[itemID] = cb
+				order = append(order, itemID)
+				onEvent(SseEvent{Type: "tool_start", Name: name, ID: callID})
+			}
+		case "response.function_call_arguments.delta":
+			itemID, _ := ev["item_id"].(string)
+			cb := callsByItem[itemID]
+			if cb == nil {
+				continue
+			}
+			if d, _ := ev["delta"].(string); d != "" {
+				cb.Args.WriteString(d)
+				onEvent(SseEvent{Type: "tool_input", ID: cb.ID, Name: cb.Name, PartialJson: d})
+			}
+		case "response.function_call_arguments.done":
+			itemID, _ := ev["item_id"].(string)
+			cb := callsByItem[itemID]
+			if cb == nil {
+				continue
+			}
+			if a, _ := ev["arguments"].(string); a != "" && cb.Args.Len() == 0 {
+				cb.Args.WriteString(a)
+			}
+		case "response.completed":
+			r, _ := ev["response"].(map[string]any)
+			if r != nil {
+				if u, ok := r["usage"].(map[string]any); ok {
+					usage.InputTokens = intOf(u["input_tokens"])
+					usage.OutputTokens = intOf(u["output_tokens"])
+				}
+			}
+		case "response.failed":
+			r, _ := ev["response"].(map[string]any)
+			if r != nil {
+				if errObj, ok := r["error"].(map[string]any); ok {
+					msg, _ := errObj["message"].(string)
+					return text.String(), nil, usage, fmt.Errorf("openai responses error: %s", msg)
+				}
+			}
+			return text.String(), nil, usage, fmt.Errorf("openai responses failed")
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return "", nil, usage, err
+	}
+	calls := []openAIToolCall{}
+	for _, itemID := range order {
+		cb := callsByItem[itemID]
+		if cb == nil {
+			continue
+		}
+		args := strings.TrimSpace(cb.Args.String())
+		if args == "" {
+			args = "{}"
+		}
+		calls = append(calls, openAIToolCall{ID: cb.ID, Name: cb.Name, Input: json.RawMessage(args)})
+	}
+	return text.String(), calls, usage, nil
+}
+
+// parseResponsesOutput is retained for callers that need a non-streaming JSON
+// decode of a /v1/responses payload (e.g. tests, batch jobs). The streaming
+// path uses readOpenAIResponsesStream instead.
+func parseResponsesOutput(b []byte) (string, []openAIToolCall, Usage) {
+	var parsed struct {
+		Output []struct {
+			Type    string `json:"type"`
+			Content []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"content"`
+			CallID    string          `json:"call_id"`
+			ID        string          `json:"id"`
+			Name      string          `json:"name"`
+			Arguments json.RawMessage `json:"arguments"`
+		} `json:"output"`
+		Usage struct {
+			InputTokens  int `json:"input_tokens"`
+			OutputTokens int `json:"output_tokens"`
+		} `json:"usage"`
+	}
+	if err := json.Unmarshal(b, &parsed); err != nil {
+		return "", nil, Usage{}
+	}
+	text := ""
+	calls := []openAIToolCall{}
+	for _, item := range parsed.Output {
+		switch item.Type {
+		case "message":
+			for _, c := range item.Content {
+				if c.Type == "output_text" {
+					text += c.Text
+				}
+			}
+		case "function_call":
+			id := item.CallID
+			if id == "" {
+				id = item.ID
+			}
+			args := item.Arguments
+			if len(args) == 0 {
+				args = json.RawMessage("{}")
+			}
+			calls = append(calls, openAIToolCall{ID: id, Name: item.Name, Input: args})
+		}
+	}
+	return text, calls, Usage{InputTokens: parsed.Usage.InputTokens, OutputTokens: parsed.Usage.OutputTokens}
+}

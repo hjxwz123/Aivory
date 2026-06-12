@@ -1,0 +1,137 @@
+# Aurelia — production stack: Postgres + Redis + Qdrant + Go API + nginx SPA.
+#
+# Two ways to bring this up:
+#
+#   1) Pull prebuilt images from ghcr.io (recommended for deploys):
+#        cd deploy
+#        cp .env.example .env          # then edit secrets
+#        docker compose -f docker-compose.prod.yml pull
+#        docker compose -f docker-compose.prod.yml up -d
+#
+#   2) Build locally from source (recommended for development / CI smoke tests):
+#        cd deploy
+#        cp .env.example .env
+#        docker compose -f docker-compose.prod.yml up -d --build
+#
+# The api / web services declare BOTH `image:` and `build:`. Compose picks the
+# image when present, falls back to build otherwise — so the same file serves
+# both flows without duplicating the topology.
+#
+# The API auto-detects its backends from the URLs below: postgres:// →
+# Postgres, REDIS_URL set → Redis, QDRANT_URL set → Qdrant. Unset any of them
+# and that subsystem falls back (SQLite / in-memory / brute-force vectors) —
+# which is how local dev runs with nothing installed.
+
+name: aurelia
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-aurelia}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-aurelia}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aurelia} -d ${POSTGRES_DB:-aurelia}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [internal]
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # Password-protected + append-only persistence for the kill-signal pub/sub
+    # and rate-limit counters.
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    networks: [internal]
+
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    restart: unless-stopped
+    environment:
+      # When set, the API must send the same key (QDRANT_API_KEY below).
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:-}
+    volumes:
+      - qdrantdata:/qdrant/storage
+    networks: [internal]
+
+  api:
+    # Prebuilt image from the docker-images.yml workflow. Override IMAGE_OWNER
+    # in .env if you forked into a different account.
+    image: ghcr.io/${IMAGE_OWNER:-hjxwz123}/aurelia-api:${IMAGE_TAG:-latest}
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.server
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    environment:
+      AURELIA_LISTEN: ":8787"
+      AURELIA_ENV: production
+      # --- Backends (auto-detected by URL scheme) ---
+      DATABASE_URL: "postgres://${POSTGRES_USER:-aurelia}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-aurelia}?sslmode=disable"
+      REDIS_URL: "redis://:${REDIS_PASSWORD}@redis:6379/0"
+      QDRANT_URL: "http://qdrant:6333"
+      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
+      # --- Auth / app ---
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      ALLOWED_ORIGINS: ${PUBLIC_ORIGIN:-http://localhost}
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@aurelia.local}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:?set SEED_ADMIN_PASSWORD in .env}
+      ENABLE_MOCK_PROVIDER: ${ENABLE_MOCK_PROVIDER:-false}
+      # --- Optional integrations (channel keys live in the DB, not here) ---
+      SEARCH_PROVIDER: ${SEARCH_PROVIDER:-}
+      SEARCH_API_KEY: ${SEARCH_API_KEY:-}
+      SEARCH_BASE_URL: ${SEARCH_BASE_URL:-}
+      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-}
+      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+      EMBEDDING_DIM: ${EMBEDDING_DIM:-1536}
+      MINERU_API_URL: ${MINERU_API_URL:-}
+      MINERU_API_KEY: ${MINERU_API_KEY:-}
+    volumes:
+      # Uploads + artifacts are filesystem-backed regardless of DB backend.
+      - apidata:/app/data
+    networks: [internal]
+
+  web:
+    image: ghcr.io/${IMAGE_OWNER:-hjxwz123}/aurelia-web:${IMAGE_TAG:-latest}
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.web
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_started
+    ports:
+      - "${WEB_PORT:-80}:80"
+    networks: [internal]
+
+volumes:
+  pgdata:
+  redisdata:
+  qdrantdata:
+  apidata:
+
+networks:
+  internal:
+    driver: bridge
+

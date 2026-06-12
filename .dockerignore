@@ -1,0 +1,35 @@
+# Shared by every image built from the repo-root context (server + web).
+# Keep BOTH server/ source and the frontend source — only prune heavy or
+# environment-specific artifacts.
+
+.git
+.github
+**/.DS_Store
+*.log
+
+# Node
+node_modules
+dist
+dist-ssr
+.cache
+.vite
+
+# Local secrets / env
+.env
+.env.local
+.env.*.local
+deploy/.env
+
+# Backend local state (SQLite db, uploads, artifacts, dev binary)
+server/data
+server/aurelia
+server/.env
+
+# Sandbox sidecar local dev state (it ships from its own repo/compose)
+sandbox-service/.venv
+**/__pycache__
+*.pyc
+
+# Editor
+.idea
+.vscode

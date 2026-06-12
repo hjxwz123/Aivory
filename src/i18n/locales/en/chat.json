@@ -1,0 +1,168 @@
+{
+  "greeting": {
+    "morning": "Good morning",
+    "afternoon": "Good afternoon",
+    "evening": "Good evening",
+    "stillUp": "Still up"
+  },
+  "empty": {
+    "subtitle": "What's on your mind?",
+    "lead": "Ask anything. Outlines, code, decisions, reading — Aurelia will think alongside you.",
+    "disclaimer": "Aurelia can make mistakes. Check anything important."
+  },
+  "composer": {
+    "placeholder": "Ask anything — or paste your thinking.",
+    "attach": "Attach files",
+    "addImage": "Add image",
+    "voice": "Voice input (coming soon)",
+    "voiceMocked": "Voice input is mocked",
+    "voiceMockedBody": "We have not wired a microphone capture in this build.",
+    "research": "Research",
+    "researchTooltip": "Deep research mode",
+    "canvas": "Canvas",
+    "canvasTooltip": "Canvas mode",
+    "send": "Send ({{kbd}} + Enter)",
+    "stop": "Stop generating",
+    "tooLongTitle": "Message too long",
+    "tooLongBody": "Keep messages under {{max}} characters.",
+    "attachedSingle": "Attached {{count}} file",
+    "attachedMultiple": "Attached {{count}} files",
+    "attachedHint": "Attachments are visual-only in this build.",
+    "uploadFailed": "Upload failed"
+  },
+  "assistant": "Aurelia",
+  "thinking": "Thinking",
+  "actions": {
+    "copy": "Copy",
+    "copied": "Copied",
+    "regenerate": "Regenerate",
+    "helpful": "Helpful",
+    "notHelpful": "Not helpful",
+    "edit": "Edit",
+    "more": "More",
+    "copyMessage": "Copy message",
+    "readAloud": "Read aloud",
+    "readAloudMocked": "Reading aloud is mocked in this build.",
+    "shareMocked": "Share is mocked in this build.",
+    "branch": "Switch branch",
+    "prevBranch": "Previous branch",
+    "nextBranch": "Next branch"
+  },
+  "tools": {
+    "web_search": "Web search",
+    "code_interpreter": "Code interpreter",
+    "deep_research": "Deep research"
+  },
+  "modePill": {
+    "deepResearch": "Deep research",
+    "canvas": "Canvas"
+  },
+  "sidebar": {
+    "newChat": "New chat",
+    "search": "Search",
+    "actions": "Conversation actions",
+    "rename": "Rename",
+    "renameTitle": "Rename conversation",
+    "renameHint": "Give it a name you'll find later.",
+    "renamed": "Conversation renamed",
+    "share": "Share",
+    "archive": "Archive",
+    "archived": "Conversation archived",
+    "delete": "Delete",
+    "deleteTitle": "Delete this conversation?",
+    "deleteBody": "This will remove the conversation and all its messages. This can't be undone.",
+    "deleted": "Conversation deleted",
+    "empty": "No conversations yet.",
+    "starred": "Starred"
+  },
+  "topbar": {
+    "shareTooltip": "Share"
+  },
+  "thread": {
+    "modelSwitched": "Model switched",
+    "modelSwitchedBody": "Future messages will use the new model.",
+    "renamed": "Renamed",
+    "deleted": "Deleted",
+    "notFoundTitle": "That conversation isn't here.",
+    "notFoundBody": "It may have been deleted, or the link is wrong.",
+    "goToChat": "Go to chat",
+    "jumpToLatest": "Jump to latest",
+    "deleteUndone": "This can't be undone."
+  },
+  "buckets": {
+    "today": "Today",
+    "yesterday": "Yesterday",
+    "last_7": "Previous 7 days",
+    "last_30": "Previous 30 days",
+    "older": "Older"
+  },
+  "modelPicker": {
+    "section": "Models",
+    "moreSoon": "More models coming soon",
+    "current": "Current model",
+    "label": "Model: {{name}}"
+  },
+  "commandMenu": {
+    "placeholder": "Search conversations, run a command…",
+    "noMatch": "No matches.",
+    "groups": {
+      "actions": "Actions",
+      "theme": "Theme",
+      "conversations": "Conversations",
+      "help": "Help",
+      "language": "Language"
+    },
+    "actions": {
+      "newChat": "New chat",
+      "goToChat": "Go to chat",
+      "openSettings": "Open settings",
+      "toggleSidebar": "Toggle sidebar",
+      "light": "Light theme",
+      "dark": "Dark theme",
+      "system": "System theme",
+      "shortcuts": "Keyboard shortcuts",
+      "switchLanguage": "Switch to {{language}}"
+    },
+    "title": "Command menu"
+  },
+  "signedOut": "You've been signed out.",
+  "userMenu": {
+    "memory": "Memory",
+    "knowledge": "Knowledge",
+    "admin": "Admin"
+  },
+  "suggestions": {
+    "outline-essay": {
+      "title": "Outline a long-form essay",
+      "prompt": "Help me outline a 2,000-word essay on attention as a moral skill."
+    },
+    "study-plan": {
+      "title": "Design a study plan",
+      "prompt": "Design a four-week reading plan to learn about complexity theory."
+    },
+    "debug-snippet": {
+      "title": "Read this code with me",
+      "prompt": "I have a TypeScript function that loses focus after a re-render — help me debug it."
+    },
+    "research-brief": {
+      "title": "Draft a research brief",
+      "prompt": "Summarize the strongest counterarguments to universal basic income."
+    },
+    "travel-idea": {
+      "title": "Plan a slow trip",
+      "prompt": "I have ten days in October. Help me sketch a slow, quiet route through Portugal."
+    },
+    "creative-brief": {
+      "title": "Name something carefully",
+      "prompt": "Give me 8 candidate names for an editorial newsletter about climate finance."
+    },
+    "difficult-decision": {
+      "title": "Think through a decision",
+      "prompt": "Walk me through a decision matrix for whether I should leave my job to write."
+    },
+    "library-curation": {
+      "title": "Recommend a small library",
+      "prompt": "Suggest 5 short books on solitude — different traditions, no overlap."
+    }
+  }
+}

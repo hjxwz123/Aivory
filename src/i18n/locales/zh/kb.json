@@ -1,0 +1,49 @@
+{
+  "title": "知识库",
+  "lead": "长期保留的知识库,所有对话都可以检索。文档上传一次,各处都能引用。",
+  "new": "新建知识库",
+  "emptyTitle": "暂无知识库",
+  "emptyBody": "知识库把一组文档绑定到一个嵌入模型。先建一个开始使用。",
+  "createFirst": "创建第一个知识库",
+  "stats": {
+    "dim": "{{dim}} 维向量",
+    "created": "创建于 {{when}}"
+  },
+  "dialog": {
+    "title": "新建知识库",
+    "body": "嵌入模型在你上传第一个文档后锁定 — 它决定向量空间。",
+    "name": "名称",
+    "namePlaceholder": "公司写作风格指南",
+    "description": "描述",
+    "embeddingModel": "嵌入模型",
+    "pickModel": "选择一个模型",
+    "create": "创建",
+    "created": "知识库已创建",
+    "nameRequired": "请填写名称"
+  },
+  "detail": {
+    "uploadButton": "上传文档",
+    "noDocs": "尚无文档",
+    "noDocsBody": "上传 PDF / Markdown / 纯文本文件,Aurelia 会异步建索引以供检索。",
+    "rename": "重命名",
+    "delete": "删除知识库",
+    "deleteConfirm": "删除这个知识库及其所有文档?",
+    "uploaded": "文档已上传",
+    "uploadFailed": "上传失败",
+    "status": {
+      "pending": "排队中",
+      "parsing": "解析中",
+      "embedding": "嵌入中",
+      "ready": "就绪",
+      "failed": "失败"
+    },
+    "tableHeaders": {
+      "filename": "文件",
+      "status": "状态",
+      "chunks": "切片数",
+      "added": "添加时间"
+    },
+    "removeDocConfirm": "从这个知识库移除\"{{name}}\"?",
+    "removed": "已移除文档"
+  }
+}

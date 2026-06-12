@@ -1,0 +1,351 @@
+package api
+
+import (
+	"encoding/json"
+	"errors"
+	"net/http"
+	"strconv"
+	"strings"
+
+	"aurelia/server/internal/store"
+)
+
+// listConversationsHandler returns the user's conversations.
+func listConversationsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	u := authUser(r)
+	projectID := r.URL.Query().Get("project_id")
+	rows, err := store.ListConversations(r.Context(), d.DB, u.ID, projectID, "active")
+	if err != nil {
+		writeError(w, 500, err)
+		return
+	}
+	writeJSON(w, 200, rows)
+}
+
+type createConversationReq struct {
+	ModelID   string `json:"model_id"`
+	ProjectID string `json:"project_id"`
+	Title     string `json:"title"`
+}
+
+// createConversationHandler creates a fresh conversation.
+func createConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	u := authUser(r)
+	var req createConversationReq
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, 400, errInvalidInput)
+		return
+	}
+	if req.ModelID == "" {
+		// Take default.
+		if raw, err := store.GetSetting(d.DB, "default_model_id"); err == nil {
+			_ = json.Unmarshal(raw, &req.ModelID)
+		}
+	}
+	// Validate the project belongs to this user before attaching (don't trust
+	// the client-supplied project_id).
+	if req.ProjectID != "" {
+		if _, err := store.GetProject(r.Context(), d.DB, req.ProjectID, u.ID); err != nil {
+			writeError(w, 404, errors.New("project not found"))
+			return
+		}
+	}
+	conv, err := store.CreateConversation(r.Context(), d.DB, store.Conversation{
+		UserID:    u.ID,
+		ProjectID: req.ProjectID,
+		Title:     strings.TrimSpace(req.Title),
+		ModelID:   req.ModelID,
+	})
+	if err != nil {
+		writeError(w, 500, err)
+		return
+	}
+	writeJSON(w, 201, conv)
+}
+
+// getConversationHandler reads one conversation + path messages.
+func getConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	u := authUser(r)
+	id := pathParam(r, "id")
+	conv, err := store.GetConversation(r.Context(), d.DB, id, u.ID)
+	if err != nil {
+		writeError(w, 404, errNotFound)
+		return
+	}
+	msgs, _ := store.ListMessages(r.Context(), d.DB, conv.ID, conv.ActiveLeafID)
+	writeJSON(w, 200, map[string]any{
+		"conversation": conv,
+		"messages":     msgs,
+	})
+}
+
+// updateConversationHandler edits selected fields (title, project, archive…).
+func updateConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	u := authUser(r)
+	id := pathParam(r, "id")
+	var p store.ConversationPatch
+	if err := decodeJSON(r, &p); err != nil {
+		writeError(w, 400, errInvalidInput)
+		return
+	}
+	conv, err := store.UpdateConversation(r.Context(), d.DB, id, u.ID, p)
+	if err != nil {
+		writeError(w, 404, errNotFound)
+		return
+	}
+	writeJSON(w, 200, conv)
+}
+
+// deleteConversationHandler removes a conversation.
+func deleteConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	u := authUser(r)
+	id := pathParam(r, "id")
+	if err := store.DeleteConversation(r.Context(), d.DB, id, u.ID); err != nil {
+		writeError(w, 404, errNotFound)
+		return
+	}
+	// Conversation uploads cascade-delete (documents.conversation_id ON DELETE
+	// CASCADE); drop their vectors too.
+	if err := d.RAG.OnConversationDeleted(r.Context(), id); err != nil {
+		d.Logger.Printf("rag: drop vectors for conversation %s: %v", id, err)
+	}
+	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
+// listMessagesHandler returns either the active path or the full tree.
+func listMessagesHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	u := authUser(r)
+	id := pathParam(r, "id")
+	if _, err := store.GetConversation(r.Context(), d.DB, id, u.ID); err != nil {
+		writeError(w, 404, errNotFound)
+		return
+	}
+	mode := r.URL.Query().Get("mode")
+	if mode == "tree" {
+		msgs, err := store.ListAllMessages(r.Context(), d.DB, id)
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		// Enrich each message with sibling indexes so the frontend can render
+		// branch pickers without a second roundtrip.
+		writeJSON(w, 200, enrichWithSiblings(d, r, msgs))
+		return
+	}
+	conv, _ := store.GetConversation(r.Context(), d.DB, id, u.ID)
+	msgs, err := store.ListMessages(r.Context(), d.DB, id, conv.ActiveLeafID)
+	if err != nil {
+		writeError(w, 500, err)
+		return
+	}
+
+	// §6.1 cursor reverse-pagination over the active path: ?before=<id>&limit=N
+	// returns the trailing window oldest-first. Cursor metadata travels in
+	// headers so the response stays a plain array (backward compatible).
+	before := r.URL.Query().Get("before")
+	limit := 30
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, perr := strconv.Atoi(l); perr == nil && n > 0 && n <= 200 {
+			limit = n
+		}
+	}
+	if before != "" {
+		cut := len(msgs)
+		for i, m := range msgs {
+			if m.ID == before {
+				cut = i
+				break
+			}
+		}
+		msgs = msgs[:cut]
+	}
+	hasMore := false
+	if len(msgs) > limit {
+		hasMore = true
+		msgs = msgs[len(msgs)-limit:]
+	}
+	w.Header().Set("X-Has-More", strconv.FormatBool(hasMore))
+	if hasMore && len(msgs) > 0 {
+		w.Header().Set("X-Next-Before", msgs[0].ID)
+	}
+	writeJSON(w, 200, enrichWithSiblings(d, r, msgs))
+}
+
+type enrichedMessage struct {
+	store.Message
+	BranchIndex int      `json:"branch_index"`
+	BranchCount int      `json:"branch_count"`
+	Siblings    []string `json:"siblings"`
+}
+
+func enrichWithSiblings(d Deps, r *http.Request, msgs []store.Message) []enrichedMessage {
+	out := []enrichedMessage{}
+	for _, m := range msgs {
+		ids, _ := store.SiblingsOf(r.Context(), d.DB, m)
+		idx := 0
+		for i, id := range ids {
+			if id == m.ID {
+				idx = i
+				break
+			}
+		}
+		out = append(out, enrichedMessage{
+			Message:     m,
+			BranchIndex: idx,
+			BranchCount: len(ids),
+			Siblings:    ids,
+		})
+	}
+	return out
+}
+
+type setActiveLeafReq struct {
+	LeafID string `json:"leaf_id"`
+}
+
+// setActiveLeafHandler updates conversations.active_leaf_id; the front-end
+// passes the deepest descendant of the picked sibling so the UI renders the
+// full branch.
+func setActiveLeafHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	u := authUser(r)
+	id := pathParam(r, "id")
+	var req setActiveLeafReq
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, 400, errInvalidInput)
+		return
+	}
+	if req.LeafID == "" {
+		writeError(w, 400, errors.New("leaf_id required"))
+		return
+	}
+	target, err := store.LatestAssistantInSubtree(r.Context(), d.DB, id, req.LeafID)
+	if err != nil {
+		writeError(w, 500, err)
+		return
+	}
+	conv, err := store.UpdateConversation(r.Context(), d.DB, id, u.ID, store.ConversationPatch{ActiveLeafID: &target})
+	if err != nil {
+		writeError(w, 404, errNotFound)
+		return
+	}
+	msgs, _ := store.ListMessages(r.Context(), d.DB, id, conv.ActiveLeafID)
+	writeJSON(w, 200, map[string]any{
+		"conversation": conv,
+		"messages":     enrichWithSiblings(d, r, msgs),
+	})
+}
+
+// forkConversationHandler copies the path ending at leaf_id into a brand new
+// conversation, leaving the original intact. This implements §4.15's
+// "fork to new conversation".
+func forkConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	u := authUser(r)
+	id := pathParam(r, "id")
+	conv, err := store.GetConversation(r.Context(), d.DB, id, u.ID)
+	if err != nil {
+		writeError(w, 404, errNotFound)
+		return
+	}
+	var body struct {
+		LeafID string `json:"leaf_id"`
+		Title  string `json:"title"`
+	}
+	_ = decodeJSON(r, &body)
+	if body.LeafID == "" {
+		body.LeafID = conv.ActiveLeafID
+	}
+	if body.LeafID == "" {
+		writeError(w, 400, errors.New("leaf_id required"))
+		return
+	}
+	path, err := store.ListMessages(r.Context(), d.DB, conv.ID, body.LeafID)
+	if err != nil {
+		writeError(w, 500, err)
+		return
+	}
+	title := strings.TrimSpace(body.Title)
+	if title == "" {
+		title = conv.Title + " (fork)"
+	}
+	newConv, err := store.CreateConversation(r.Context(), d.DB, store.Conversation{
+		UserID:    u.ID,
+		ProjectID: conv.ProjectID,
+		Title:     title,
+		Provider:  conv.Provider,
+		ModelID:   conv.ModelID,
+		KBIDs:     conv.KBIDs,
+	})
+	if err != nil {
+		writeError(w, 500, err)
+		return
+	}
+	parent := ""
+	for _, m := range path {
+		copied, err := store.CreateMessage(r.Context(), d.DB, store.Message{
+			ConversationID: newConv.ID,
+			ParentID:       parent,
+			Role:           m.Role,
+			Provider:       m.Provider,
+			ModelID:        m.ModelID,
+			Blocks:         m.Blocks,
+			Raw:            m.Raw,
+			StopReason:     m.StopReason,
+			Attachments:    m.Attachments,
+			Citations:      m.Citations,
+			InputTokens:    m.InputTokens,
+			OutputTokens:   m.OutputTokens,
+			Cost:           m.Cost,
+			Currency:       m.Currency,
+			Status:         "complete",
+		})
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		parent = copied.ID
+	}
+	writeJSON(w, 201, newConv)
+}
+
+// promoteDocumentHandler moves a conversation document into the project KB.
+func promoteDocumentHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	u := authUser(r)
+	convID := pathParam(r, "id")
+	docID := pathParam(r, "docId")
+	conv, err := store.GetConversation(r.Context(), d.DB, convID, u.ID)
+	if err != nil {
+		writeError(w, 404, errNotFound)
+		return
+	}
+	if conv.ProjectID == "" {
+		writeError(w, 400, errors.New("conversation is not in a project"))
+		return
+	}
+	p, err := store.GetProject(r.Context(), d.DB, conv.ProjectID, u.ID)
+	if err != nil || p.KBID == "" {
+		writeError(w, 400, errors.New("project has no knowledge base"))
+		return
+	}
+	doc, err := store.GetDocument(r.Context(), d.DB, docID)
+	if err != nil || doc.ConversationID != conv.ID {
+		writeError(w, 404, errNotFound)
+		return
+	}
+	if err := store.PromoteDocumentToKB(r.Context(), d.DB, docID, p.KBID); err != nil {
+		writeError(w, 500, err)
+		return
+	}
+	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
+// stopHandler signals a generation cancel for the conversation.
+func stopHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	u := authUser(r)
+	id := pathParam(r, "id")
+	if _, err := store.GetConversation(r.Context(), d.DB, id, u.ID); err != nil {
+		writeError(w, 404, errNotFound)
+		return
+	}
+	d.Cache.Publish("conv:"+id+":stop", "1")
+	writeJSON(w, 200, map[string]bool{"ok": true})
+}
