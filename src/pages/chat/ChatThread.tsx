@@ -175,7 +175,10 @@ export default function ChatThread() {
         <Tooltip content={t('chat:topbar.shareTooltip')}>
           <button
             type="button"
-            onClick={() => toast.info(t('chat:actions.shareMocked'))}
+            onClick={() => {
+              void navigator.clipboard?.writeText(`${window.location.origin}/chat/${conversation.id}`)
+              toast.success(t('chat:actions.shareCopied'))
+            }}
             aria-label={t('chat:sidebar.share')}
             className="inline-flex items-center justify-center size-8 rounded-[8px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
           >

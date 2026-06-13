@@ -8,7 +8,7 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { adminApi, ApiError } from '@/api'
-import type { ApiModel, ApiUsageReportRow } from '@/api/types'
+import type { ApiUsageReportRow } from '@/api/types'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from '@/hooks/use-toast'
 
@@ -54,7 +54,9 @@ export default function AdminUsage() {
   }
 
   function purposeLabel(purpose: string): string {
-    const key = `usage.purposes.${purpose}`
+    // Backend purposes like "task.title" contain dots; i18next treats "." as a
+    // key separator, so normalise to "task_title" to match the flat keys.
+    const key = `usage.purposes.${purpose.replace(/\./g, '_')}`
     const translated = t(key, { defaultValue: '' })
     return translated || purpose
   }

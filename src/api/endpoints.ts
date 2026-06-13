@@ -100,6 +100,11 @@ export const conversationsApi = {
     api<ApiMessage[]>(
       `/conversations/${encodeURIComponent(id)}/messages${mode === 'tree' ? '?mode=tree' : ''}`,
     ),
+  editMessage: (id: string, msgId: string, text: string) =>
+    api<ApiMessage>(
+      `/conversations/${encodeURIComponent(id)}/messages/${encodeURIComponent(msgId)}`,
+      { method: 'PATCH', body: { text } },
+    ),
   stop: (id: string) => api<{ ok: true }>(`/conversations/${encodeURIComponent(id)}/stop`, { method: 'POST' }),
   setActiveLeaf: (id: string, leaf_id: string) =>
     api<{ conversation: ApiConversation; messages: ApiMessage[] }>(

@@ -422,6 +422,14 @@ func FinishMessage(ctx context.Context, db *sql.DB, id string, p MessageFinishPa
 	return err
 }
 
+// UpdateMessageContent overwrites a message's blocks in place — used by the
+// user "save edit" action that edits a question WITHOUT branching. The caller
+// must verify ownership (conversation belongs to the user) first.
+func UpdateMessageContent(ctx context.Context, db *sql.DB, id string, blocks json.RawMessage) error {
+	_, err := db.ExecContext(ctx, `UPDATE messages SET blocks=? WHERE id=?`, string(blocks), id)
+	return err
+}
+
 // SiblingsOf returns ids of messages sharing the same parent and role (or the
 // same nil parent for roots), used by the frontend to render the < n/m >
 // branch picker.

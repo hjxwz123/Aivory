@@ -16,6 +16,7 @@ export function MessageList({ conversation }: MessageListProps) {
   const regenerate = useConversations((s) => s.regenerate)
   const setActiveLeaf = useConversations((s) => s.setActiveLeaf)
   const fork = useConversations((s) => s.fork)
+  const editMessageInPlace = useConversations((s) => s.editMessageInPlace)
 
   // Build an id → message lookup so we can find the parent of an edited
   // message without scanning per-row.
@@ -49,6 +50,11 @@ export function MessageList({ conversation }: MessageListProps) {
     })
   }
 
+  // "Save" — overwrite the question text in place (no branch, no regenerate).
+  function handleSaveEdit(id: string, newContent: string) {
+    void editMessageInPlace(conversation.id, id, newContent)
+  }
+
   function handleBranchSwitch(leafId: string) {
     void setActiveLeaf(conversation.id, leafId)
   }
@@ -70,6 +76,7 @@ export function MessageList({ conversation }: MessageListProps) {
           message={m}
           onRegenerate={handleRegenerate}
           onEdit={handleEdit}
+          onSaveEdit={handleSaveEdit}
           onLike={() => undefined}
           onDislike={() => undefined}
           onBranchSwitch={handleBranchSwitch}

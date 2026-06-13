@@ -16,26 +16,31 @@
 :root {
   /* ---------- LIGHT THEME ----------------------------------------------- */
 
-  /* Backgrounds — cool porcelain with a lilac undertone */
-  --color-bg: oklch(98.4% 0.006 280);            /* #F6F5FA — page */
-  --color-bg-muted: oklch(96.5% 0.008 280);      /* slightly recessed */
-  --color-surface: oklch(99.2% 0.004 280);       /* cards, popovers */
-  --color-surface-raised: oklch(99.6% 0.003 280);/* dialogs, command */
-  --color-surface-sunken: oklch(95% 0.010 280);  /* code wells, inputs */
-  --color-overlay: oklch(18% 0.03 270 / 0.42);   /* dim layer */
+  /* Hue (oklch) that drives EVERY neutral surface, so switching the accent
+     re-tints the whole UI — background, cards, borders, text — not just the
+     buttons. Overridden per accent preset at the bottom of this file. */
+  --accent-hue: 290;
 
-  /* Foreground — indigo ink */
-  --color-fg: oklch(22% 0.040 270);              /* primary text */
-  --color-fg-muted: oklch(44% 0.030 270);        /* secondary text */
-  --color-fg-subtle: oklch(58% 0.025 270);       /* hint text */
-  --color-fg-faint: oklch(72% 0.020 270);        /* placeholder */
-  --color-fg-inverted: oklch(98.4% 0.006 280);   /* on dark surfaces */
+  /* Backgrounds — porcelain tinted by --accent-hue */
+  --color-bg: oklch(98.4% 0.010 var(--accent-hue));            /* page */
+  --color-bg-muted: oklch(96.5% 0.016 var(--accent-hue));      /* slightly recessed */
+  --color-surface: oklch(99.2% 0.007 var(--accent-hue));       /* cards, popovers */
+  --color-surface-raised: oklch(99.6% 0.005 var(--accent-hue));/* dialogs, command */
+  --color-surface-sunken: oklch(95% 0.018 var(--accent-hue));  /* code wells, inputs */
+  --color-overlay: oklch(18% 0.03 var(--accent-hue) / 0.42);   /* dim layer */
 
-  /* Borders & dividers — cool, low-chroma */
-  --color-border: oklch(89% 0.012 270);
-  --color-border-strong: oklch(80% 0.018 270);
-  --color-border-subtle: oklch(93% 0.010 270);
-  --color-divider: oklch(91% 0.012 270);
+  /* Foreground — ink tinted by --accent-hue */
+  --color-fg: oklch(22% 0.040 var(--accent-hue));              /* primary text */
+  --color-fg-muted: oklch(44% 0.030 var(--accent-hue));        /* secondary text */
+  --color-fg-subtle: oklch(58% 0.025 var(--accent-hue));       /* hint text */
+  --color-fg-faint: oklch(72% 0.020 var(--accent-hue));        /* placeholder */
+  --color-fg-inverted: oklch(98.4% 0.010 var(--accent-hue));   /* on dark surfaces */
+
+  /* Borders & dividers — tinted by --accent-hue */
+  --color-border: oklch(89% 0.018 var(--accent-hue));
+  --color-border-strong: oklch(80% 0.024 var(--accent-hue));
+  --color-border-subtle: oklch(93% 0.014 var(--accent-hue));
+  --color-divider: oklch(91% 0.016 var(--accent-hue));
 
   /* Accents — electric violet, owned and unmistakable */
   --color-accent: oklch(58% 0.225 290);          /* #6A4DE6-ish */
@@ -61,8 +66,8 @@
   --color-ring: oklch(58% 0.225 290 / 0.55);
 
   /* Chat-specific */
-  --color-user-bubble: oklch(95% 0.018 285);
-  --color-user-bubble-border: oklch(88% 0.020 285);
+  --color-user-bubble: oklch(95% 0.022 var(--accent-hue));
+  --color-user-bubble-border: oklch(88% 0.026 var(--accent-hue));
   --color-assistant-bubble: transparent;
   --color-code-bg: oklch(95% 0.010 280);
   --color-code-fg: oklch(28% 0.045 270);
@@ -268,23 +273,23 @@
  * Deep midnight indigo, porcelain ink, brighter violet.
  * ============================================================================ */
 .dark {
-  --color-bg: oklch(15% 0.025 275);              /* deep midnight indigo */
-  --color-bg-muted: oklch(18% 0.025 275);
-  --color-surface: oklch(20% 0.030 275);
-  --color-surface-raised: oklch(23% 0.032 275);
-  --color-surface-sunken: oklch(13% 0.022 275);
-  --color-overlay: oklch(8% 0.020 275 / 0.66);
+  --color-bg: oklch(15% 0.025 var(--accent-hue));              /* deep tinted midnight */
+  --color-bg-muted: oklch(18% 0.025 var(--accent-hue));
+  --color-surface: oklch(20% 0.030 var(--accent-hue));
+  --color-surface-raised: oklch(23% 0.032 var(--accent-hue));
+  --color-surface-sunken: oklch(13% 0.022 var(--accent-hue));
+  --color-overlay: oklch(8% 0.020 var(--accent-hue) / 0.66);
 
-  --color-fg: oklch(95% 0.010 280);
-  --color-fg-muted: oklch(74% 0.020 280);
-  --color-fg-subtle: oklch(60% 0.022 275);
-  --color-fg-faint: oklch(44% 0.022 275);
-  --color-fg-inverted: oklch(22% 0.040 270);
+  --color-fg: oklch(95% 0.010 var(--accent-hue));
+  --color-fg-muted: oklch(74% 0.020 var(--accent-hue));
+  --color-fg-subtle: oklch(60% 0.022 var(--accent-hue));
+  --color-fg-faint: oklch(44% 0.022 var(--accent-hue));
+  --color-fg-inverted: oklch(22% 0.040 var(--accent-hue));
 
-  --color-border: oklch(30% 0.030 275);
-  --color-border-strong: oklch(40% 0.035 275);
-  --color-border-subtle: oklch(25% 0.026 275);
-  --color-divider: oklch(28% 0.028 275);
+  --color-border: oklch(30% 0.030 var(--accent-hue));
+  --color-border-strong: oklch(40% 0.035 var(--accent-hue));
+  --color-border-subtle: oklch(25% 0.026 var(--accent-hue));
+  --color-divider: oklch(28% 0.028 var(--accent-hue));
 
   --color-accent: oklch(72% 0.215 290);
   --color-accent-hover: oklch(78% 0.215 290);
@@ -305,8 +310,8 @@
 
   --color-ring: oklch(72% 0.215 290 / 0.50);
 
-  --color-user-bubble: oklch(26% 0.045 285);
-  --color-user-bubble-border: oklch(34% 0.050 285);
+  --color-user-bubble: oklch(26% 0.045 var(--accent-hue));
+  --color-user-bubble-border: oklch(34% 0.050 var(--accent-hue));
   --color-assistant-bubble: transparent;
   --color-code-bg: oklch(12% 0.020 275);
   --color-code-fg: oklch(90% 0.020 280);
@@ -373,6 +378,7 @@
 
 /* --- Violet (default) — electric violet ---------------------------------- */
 :root[data-accent="violet"] {
+  --accent-hue: 290;
   --color-accent: oklch(58% 0.225 290);
   --color-accent-hover: oklch(52% 0.235 290);
   --color-accent-soft: oklch(94% 0.045 290);
@@ -387,6 +393,7 @@
 
 /* --- Lagoon — cool teal --------------------------------------------------- */
 :root[data-accent="lagoon"] {
+  --accent-hue: 200;
   --color-accent: oklch(58% 0.130 200);
   --color-accent-hover: oklch(52% 0.140 200);
   --color-accent-soft: oklch(94% 0.035 200);
@@ -401,6 +408,7 @@
 
 /* --- Ember — warm amber-red ---------------------------------------------- */
 :root[data-accent="ember"] {
+  --accent-hue: 40;
   --color-accent: oklch(62% 0.170 40);
   --color-accent-hover: oklch(56% 0.180 40);
   --color-accent-soft: oklch(95% 0.040 40);
@@ -415,6 +423,7 @@
 
 /* --- Moss — calm sage green ---------------------------------------------- */
 :root[data-accent="moss"] {
+  --accent-hue: 145;
   --color-accent: oklch(54% 0.125 145);
   --color-accent-hover: oklch(48% 0.135 145);
   --color-accent-soft: oklch(94% 0.040 145);
@@ -429,6 +438,7 @@
 
 /* --- Indigo — deep editorial blue ---------------------------------------- */
 :root[data-accent="indigo"] {
+  --accent-hue: 260;
   --color-accent: oklch(54% 0.180 260);
   --color-accent-hover: oklch(48% 0.190 260);
   --color-accent-soft: oklch(94% 0.045 260);
@@ -443,6 +453,7 @@
 
 /* --- Rose — soft magenta-pink -------------------------------------------- */
 :root[data-accent="rose"] {
+  --accent-hue: 5;
   --color-accent: oklch(60% 0.180 5);
   --color-accent-hover: oklch(54% 0.190 5);
   --color-accent-soft: oklch(94% 0.045 5);

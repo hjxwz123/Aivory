@@ -564,10 +564,13 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 		// alongside their outputs — required by the Responses protocol).
 		for _, c := range calls {
 			input = append(input, map[string]any{
-				"type":      "function_call",
-				"call_id":   c.ID,
-				"name":      c.Name,
-				"arguments": json.RawMessage(c.Input), // wire = JSON string
+				"type":    "function_call",
+				"call_id": c.ID,
+				"name":    c.Name,
+				// Responses requires `arguments` to be a JSON STRING. Passing
+				// json.RawMessage serialises it as an OBJECT and the API rejects
+				// it with "expected a string, got an object" on input[N].arguments.
+				"arguments": string(c.Input),
 			})
 		}
 

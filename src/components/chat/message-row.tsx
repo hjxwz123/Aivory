@@ -41,7 +41,10 @@ interface MessageRowProps {
   message: Message
   userName?: string
   onRegenerate?: (id: string) => void
+  /** "Save & resend" — edit a question into a NEW branch and regenerate. */
   onEdit?: (id: string, content: string) => void
+  /** "Save" — overwrite the question text in place, no branch, no regenerate. */
+  onSaveEdit?: (id: string, content: string) => void
   onLike?: (id: string, liked: boolean) => void
   onDislike?: (id: string, disliked: boolean) => void
   /** Called when the user clicks `<` / `>` to switch between sibling
@@ -51,7 +54,7 @@ interface MessageRowProps {
   onFork?: (leafId: string) => void
 }
 
-export function MessageRow({ message, userName, onRegenerate, onEdit, onLike, onDislike, onBranchSwitch, onFork }: MessageRowProps) {
+export function MessageRow({ message, userName, onRegenerate, onEdit, onSaveEdit, onLike, onDislike, onBranchSwitch, onFork }: MessageRowProps) {
   const isUser = message.role === 'user'
   // §7.2-6: assistant 气泡标注生成它的模型名 + 图标。
   const model = useModels((s) => (message.modelId ? s.getById(message.modelId) : undefined))
@@ -85,6 +88,14 @@ export function MessageRow({ message, userName, onRegenerate, onEdit, onLike, on
     const next = draft.trim()
     if (!next) return
     onEdit?.(message.id, next)
+    setEditing(false)
+  }
+
+  // "Save" — overwrite the message text in place (no new branch / regenerate).
+  function saveInPlace() {
+    const next = draft.trim()
+    if (!next) return
+    onSaveEdit?.(message.id, next)
     setEditing(false)
   }
 
@@ -136,29 +147,34 @@ export function MessageRow({ message, userName, onRegenerate, onEdit, onLike, on
 
         {/* Body */}
         {editing && isUser ? (
-          <div className="flex flex-col gap-2 w-full max-w-[80%] sm:max-w-[68%]">
-            <Textarea
-              ref={editRef}
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.nativeEvent.isComposing || e.keyCode === 229) return
-                if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-                  e.preventDefault()
-                  commitEdit()
-                }
-                if (e.key === 'Escape') {
-                  e.preventDefault()
-                  setEditing(false)
-                }
-              }}
-              className="min-h-[56px] text-sm"
-            />
+          <div className="flex w-full flex-col gap-3">
+            <div className="rounded-[16px] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-4 py-3 shadow-[var(--shadow-sm)] transition-colors focus-within:border-[var(--color-accent)]">
+              <Textarea
+                ref={editRef}
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.nativeEvent.isComposing || e.keyCode === 229) return
+                  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                    e.preventDefault()
+                    commitEdit()
+                  }
+                  if (e.key === 'Escape') {
+                    e.preventDefault()
+                    setEditing(false)
+                  }
+                }}
+                className="min-h-[120px] resize-none border-none bg-transparent p-0 text-[0.9375rem] leading-relaxed focus:ring-0"
+              />
+            </div>
             <div className="flex items-center justify-end gap-2">
               <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>
                 {t('actions.cancelEdit', { defaultValue: 'Cancel' })}
               </Button>
-              <Button size="sm" variant="secondary" onClick={commitEdit}>
+              <Button size="sm" variant="secondary" onClick={saveInPlace}>
+                {t('actions.saveInPlace', { defaultValue: 'Save' })}
+              </Button>
+              <Button size="sm" variant="primary" onClick={commitEdit}>
                 {t('actions.saveEdit', { defaultValue: 'Save & resend' })}
               </Button>
             </div>
@@ -380,7 +396,12 @@ export function MessageRow({ message, userName, onRegenerate, onEdit, onLike, on
                         {t('actions.readAloud')}
                       </DropdownMenuItem>
                     )}
-                    <DropdownMenuItem onClick={() => toast.info(t('actions.shareMocked'))}>
+                    <DropdownMenuItem
+                      onClick={() => {
+                        void navigator.clipboard?.writeText(window.location.href)
+                        toast.success(t('actions.shareCopied'))
+                      }}
+                    >
                       <Share2 size={13} aria-hidden />
                       {t('sidebar.share')}
                     </DropdownMenuItem>

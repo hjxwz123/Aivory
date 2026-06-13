@@ -66,6 +66,9 @@ interface ConversationStore {
     branch?: boolean
   }) => Promise<void>
   regenerate: (conversationId: string, assistantId: string, modelId?: string) => Promise<void>
+  /** Edit a user message's text IN PLACE — overwrite, no new branch, no
+   *  regeneration (§4.15 "save" vs "save & resend"). */
+  editMessageInPlace: (conversationId: string, messageId: string, text: string) => Promise<void>
   abortStream: (assistantMessageId: string) => void
 
   getConversation: (id: string) => Conversation | undefined
@@ -352,6 +355,10 @@ export const useConversations = create<ConversationStore>((set, get) => ({
           text: input.text,
           model_id: input.modelId,
           parent_id: input.parentId,
+          // §4.15: tell the backend this is a branch edit so an empty parent
+          // (editing the root question) stays a root sibling instead of being
+          // appended to the active leaf.
+          branch: input.branch,
           attachments: input.attachments?.map(attachmentToApi),
           params: input.params,
         },
@@ -677,6 +684,25 @@ export const useConversations = create<ConversationStore>((set, get) => ({
       await get().reloadActivePath(conversationId)
     } finally {
       streamControllers.delete(assistantId + '-regen')
+    }
+  },
+
+  async editMessageInPlace(conversationId, messageId, text) {
+    // Optimistic overwrite of the visible content; persist in the background.
+    set((s) => ({
+      conversations: s.conversations.map((c) =>
+        c.id !== conversationId
+          ? c
+          : {
+              ...c,
+              messages: c.messages.map((m) => (m.id === messageId ? { ...m, content: text } : m)),
+            },
+      ),
+    }))
+    try {
+      await conversationsApi.editMessage(conversationId, messageId, text)
+    } catch {
+      /* keep the optimistic copy if the PATCH fails */
     }
   },
 

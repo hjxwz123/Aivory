@@ -17,6 +17,7 @@ type postMessageReq struct {
 	Text           string           `json:"text"`
 	ModelID        string           `json:"model_id"`
 	ParentID       string           `json:"parent_id"`
+	Branch         bool             `json:"branch"`
 	Attachments    []llm.Attachment `json:"attachments"`
 	ParamOverrides map[string]any   `json:"params"`
 }
@@ -106,6 +107,7 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		UserText:       req.Text,
 		Attachments:    req.Attachments,
 		ParentID:       req.ParentID,
+		Branch:         req.Branch,
 		ParamOverrides: req.ParamOverrides,
 	}, func(ev llm.SseEvent) {
 		_ = writer.Send(ev, ev.Type)
@@ -246,4 +248,40 @@ func checkDailyMessageLimit(d Deps, userID string) bool {
 	key := "quota:" + userID + ":" + time.Now().Format("2006-01-02")
 	n := d.Cache.Incr(key, 24*time.Hour)
 	return int(n) <= limit
+}
+
+// editMessageHandler edits a user message's text IN PLACE (no new branch, no
+// regeneration) — the "save edit" action. Only the conversation owner may edit,
+// and only their own `user` messages.
+func editMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	u := authUser(r)
+	convID := pathParam(r, "id")
+	msgID := pathParam(r, "msgId")
+	if _, err := store.GetConversation(r.Context(), d.DB, convID, u.ID); err != nil {
+		writeError(w, 404, errNotFound)
+		return
+	}
+	var body struct {
+		Text string `json:"text"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, 400, errInvalidInput)
+		return
+	}
+	if strings.TrimSpace(body.Text) == "" {
+		writeError(w, 400, errors.New("text required"))
+		return
+	}
+	msg, err := store.GetMessage(r.Context(), d.DB, msgID)
+	if err != nil || msg.ConversationID != convID || msg.Role != "user" {
+		writeError(w, 404, errNotFound)
+		return
+	}
+	blocks, _ := json.Marshal([]llm.UnifiedBlock{{Kind: "text", Text: body.Text}})
+	if err := store.UpdateMessageContent(r.Context(), d.DB, msgID, blocks); err != nil {
+		writeError(w, 500, err)
+		return
+	}
+	updated, _ := store.GetMessage(r.Context(), d.DB, msgID)
+	writeJSON(w, 200, updated)
 }

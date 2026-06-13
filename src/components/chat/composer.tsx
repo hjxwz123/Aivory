@@ -137,6 +137,9 @@ export function Composer({
       params: Object.keys(params).length > 0 ? params : undefined,
     })
     setValue('')
+    attachments.forEach((a) => {
+      if (a.previewUrl) URL.revokeObjectURL(a.previewUrl)
+    })
     setAttachments([])
     setMode('default')
   }
@@ -156,6 +159,8 @@ export function Composer({
             : /sheet|csv|xls/i.test(f.type)
               ? 'sheet'
               : 'other',
+      // Local thumbnail so images preview instantly; revoked on remove/submit.
+      previewUrl: f.type.startsWith('image/') ? URL.createObjectURL(f) : undefined,
       uploading: true,
     }))
     setAttachments((s) => [...s, ...additions])
@@ -198,7 +203,11 @@ export function Composer({
   }
 
   function removeAttachment(id: string) {
-    setAttachments((s) => s.filter((a) => a.id !== id))
+    setAttachments((s) => {
+      const target = s.find((a) => a.id === id)
+      if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl)
+      return s.filter((a) => a.id !== id)
+    })
   }
 
   return (
@@ -227,25 +236,48 @@ export function Composer({
               </button>
             </span>
           )}
-          {attachments.map((a) => (
-            <span
-              key={a.id}
-              className="inline-flex items-center gap-1.5 rounded-[8px] bg-[var(--color-bg-muted)] border border-[var(--color-border-subtle)] px-2 py-1 text-[11px] text-[var(--color-fg-muted)] max-w-[200px]"
-            >
-              {a.uploading ? (
-                <Loader2 size={10} className="animate-spin shrink-0" aria-hidden />
-              ) : null}
-              <span className="truncate">{a.name}</span>
-              <button
-                type="button"
-                aria-label={`Remove ${a.name}`}
-                onClick={() => removeAttachment(a.id)}
-                className="inline-flex items-center justify-center rounded-full hover:text-[var(--color-fg)]"
+          {attachments.map((a) =>
+            a.kind === 'image' && a.previewUrl ? (
+              <span key={a.id} className="group/att relative inline-block">
+                <img
+                  src={a.previewUrl}
+                  alt={a.name}
+                  className="size-16 rounded-[10px] border border-[var(--color-border-subtle)] object-cover"
+                />
+                {a.uploading ? (
+                  <span className="absolute inset-0 grid place-items-center rounded-[10px] bg-[var(--color-overlay)]">
+                    <Loader2 size={14} className="animate-spin text-white" aria-hidden />
+                  </span>
+                ) : null}
+                <button
+                  type="button"
+                  aria-label={`Remove ${a.name}`}
+                  onClick={() => removeAttachment(a.id)}
+                  className="absolute -right-1.5 -top-1.5 inline-flex size-5 items-center justify-center rounded-full bg-[var(--color-fg)] text-[var(--color-fg-inverted)] shadow-[var(--shadow-sm)] opacity-0 interactive group-hover/att:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                >
+                  <X size={11} aria-hidden />
+                </button>
+              </span>
+            ) : (
+              <span
+                key={a.id}
+                className="inline-flex items-center gap-1.5 rounded-[8px] bg-[var(--color-bg-muted)] border border-[var(--color-border-subtle)] px-2 py-1 text-[11px] text-[var(--color-fg-muted)] max-w-[200px]"
               >
-                <X size={10} aria-hidden />
-              </button>
-            </span>
-          ))}
+                {a.uploading ? (
+                  <Loader2 size={10} className="animate-spin shrink-0" aria-hidden />
+                ) : null}
+                <span className="truncate">{a.name}</span>
+                <button
+                  type="button"
+                  aria-label={`Remove ${a.name}`}
+                  onClick={() => removeAttachment(a.id)}
+                  className="inline-flex items-center justify-center rounded-full hover:text-[var(--color-fg)]"
+                >
+                  <X size={10} aria-hidden />
+                </button>
+              </span>
+            ),
+          )}
         </div>
       )}
 
@@ -273,6 +305,19 @@ export function Composer({
             e.preventDefault()
             handleSubmit()
           }
+        }}
+        onPaste={(e) => {
+          // Support pasting an image from the clipboard (screenshot / copied
+          // picture) — upload it as an attachment just like a file pick.
+          const imgs = Array.from(e.clipboardData?.items ?? [])
+            .filter((it) => it.kind === 'file' && it.type.startsWith('image/'))
+            .map((it) => it.getAsFile())
+            .filter((f): f is File => f !== null)
+          if (imgs.length === 0) return
+          e.preventDefault()
+          const dt = new DataTransfer()
+          imgs.forEach((f) => dt.items.add(f))
+          void handleAttach(dt.files)
         }}
         placeholder={effectivePlaceholder}
         rows={compact ? 1 : 2}
@@ -361,11 +406,11 @@ export function Composer({
         {/* §7.2-7 📚 知识库选择器 — 绑定 kb_ids 到当前会话 */}
         {onKBChange ? (
           <Popover>
-            <Tooltip content="Knowledge bases">
+            <Tooltip content={t('composer.knowledgeBases')}>
               <PopoverTrigger asChild>
                 <button
                   type="button"
-                  aria-label="Knowledge bases"
+                  aria-label={t('composer.knowledgeBases')}
                   className={cn(
                     'inline-flex items-center gap-1.5 h-8 px-2 rounded-[8px] text-[12px] font-medium interactive',
                     (kbIds?.length ?? 0) > 0
@@ -381,10 +426,10 @@ export function Composer({
             </Tooltip>
             <PopoverContent align="start" className="w-64 p-2" onOpenAutoFocus={() => void loadKBList()}>
               <p className="px-2 pb-1 pt-0.5 text-[11px] font-medium uppercase tracking-wider text-[var(--color-fg-subtle)]">
-                Knowledge bases
+                {t('composer.knowledgeBases')}
               </p>
               {kbList.length === 0 ? (
-                <p className="px-2 py-2 text-sm text-[var(--color-fg-muted)]">No knowledge bases yet.</p>
+                <p className="px-2 py-2 text-sm text-[var(--color-fg-muted)]">{t('composer.noKnowledgeBases')}</p>
               ) : (
                 kbList.map((kb) => {
                   const checked = kbIds?.includes(kb.id) ?? false

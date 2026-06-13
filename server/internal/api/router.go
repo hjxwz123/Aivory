@@ -91,6 +91,7 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("DELETE", "/api/conversations/:id", requireAuth(d, deleteConversationHandler))
 	mux.handle("GET", "/api/conversations/:id/messages", requireAuth(d, listMessagesHandler))
 	mux.handle("POST", "/api/conversations/:id/messages", requireAuth(d, postMessageHandler))
+	mux.handle("PATCH", "/api/conversations/:id/messages/:msgId", requireAuth(d, editMessageHandler))
 	mux.handle("POST", "/api/conversations/:id/stop", requireAuth(d, stopHandler))
 	mux.handle("POST", "/api/conversations/:id/regenerate", requireAuth(d, regenerateHandler))
 	mux.handle("PATCH", "/api/conversations/:id/active-leaf", requireAuth(d, setActiveLeafHandler))

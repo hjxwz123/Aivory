@@ -28,7 +28,9 @@
     "attachedSingle": "Attached {{count}} file",
     "attachedMultiple": "Attached {{count}} files",
     "attachedHint": "Attachments are visual-only in this build.",
-    "uploadFailed": "Upload failed"
+    "uploadFailed": "Upload failed",
+    "knowledgeBases": "Knowledge bases",
+    "noKnowledgeBases": "No knowledge bases yet."
   },
   "assistant": "Aurelia",
   "thinking": "Thinking",
@@ -46,11 +48,13 @@
     "edit": "Edit",
     "cancelEdit": "Cancel",
     "saveEdit": "Save & resend",
+    "saveInPlace": "Save",
     "more": "More",
     "copyMessage": "Copy message",
     "readAloud": "Read aloud",
     "readAloudMocked": "Reading aloud is mocked in this build.",
     "shareMocked": "Share is mocked in this build.",
+    "shareCopied": "Share link copied",
     "branch": "Switch branch",
     "prevBranch": "Previous branch",
     "nextBranch": "Next branch"
@@ -80,7 +84,8 @@
     "previewTitle": "HTML preview",
     "previewRefresh": "Reload",
     "previewClose": "Close preview",
-    "previewSandboxHint": "Rendered in an isolated sandbox — page scripts cannot reach your data."
+    "previewSandboxHint": "Rendered in an isolated sandbox — page scripts cannot reach your data.",
+    "mermaidFailed": "Could not render this diagram — showing source."
   },
   "modePill": {
     "deepResearch": "Deep research",

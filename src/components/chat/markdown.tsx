@@ -1,6 +1,7 @@
 import { memo, useDeferredValue, useEffect, useMemo, useState } from 'react'
 import { tokenizeMarkdown, inlineMarkdownToHtml } from '@/lib/markdown'
 import { CodeBlock } from './code-block'
+import { MermaidDiagram } from './mermaid-diagram'
 import { cn } from '@/lib/utils'
 
 interface MarkdownProps {
@@ -91,6 +92,9 @@ export const Markdown = memo(function Markdown({ content, className, live = fals
               />
             )
           case 'code':
+            if ((b.lang ?? '').toLowerCase() === 'mermaid') {
+              return <MermaidDiagram key={i} code={b.content} live={live} className={blockAnim} />
+            }
             return (
               <CodeBlock
                 key={i}

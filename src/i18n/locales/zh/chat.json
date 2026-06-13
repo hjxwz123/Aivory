@@ -28,7 +28,9 @@
     "attachedSingle": "已附加 {{count}} 个文件",
     "attachedMultiple": "已附加 {{count}} 个文件",
     "attachedHint": "本版本中附件仅用于视觉展示。",
-    "uploadFailed": "上传失败"
+    "uploadFailed": "上传失败",
+    "knowledgeBases": "知识库",
+    "noKnowledgeBases": "还没有知识库。"
   },
   "assistant": "Aurelia",
   "thinking": "思考中",
@@ -45,11 +47,13 @@
     "edit": "编辑",
     "cancelEdit": "取消",
     "saveEdit": "保存并重新发送",
+    "saveInPlace": "直接保存",
     "more": "更多",
     "copyMessage": "复制消息",
     "readAloud": "朗读",
     "readAloudMocked": "朗读功能为模拟。",
     "shareMocked": "分享为模拟。",
+    "shareCopied": "分享链接已复制",
     "branch": "切换分支",
     "prevBranch": "上一个分支",
     "nextBranch": "下一个分支"
@@ -79,7 +83,8 @@
     "previewTitle": "HTML 预览",
     "previewRefresh": "重新加载",
     "previewClose": "关闭预览",
-    "previewSandboxHint": "在隔离沙箱中渲染 — 页面脚本无法访问你的数据。"
+    "previewSandboxHint": "在隔离沙箱中渲染 — 页面脚本无法访问你的数据。",
+    "mermaidFailed": "无法渲染该图表，已显示源代码。"
   },
   "modePill": {
     "deepResearch": "深度研究",

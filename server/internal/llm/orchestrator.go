@@ -122,6 +122,11 @@ type RunRequest struct {
 	Attachments    []Attachment
 	ParentID       string
 	ParamOverrides map[string]any
+	// Branch is true when the user edits a past question into a NEW sibling
+	// branch. It stops Run from falling back to the active leaf when ParentID is
+	// empty (i.e. editing the ROOT question), so the edit opens a sibling root
+	// instead of being appended to the conversation tail (§4.15).
+	Branch bool
 	// ReuseExistingUserMessage is true when the caller (regenerate) passes the
 	// id of an EXISTING user message in ParentID and wants the new assistant
 	// turn parented to it directly — no new user sibling is created. §4.15:
@@ -172,7 +177,10 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	}
 
 	parentID := req.ParentID
-	if parentID == "" {
+	// Only a normal append falls back to the active leaf. A branch edit with an
+	// empty parent (editing the root question) must stay a root sibling (§4.15)
+	// rather than being grafted onto the conversation tail.
+	if parentID == "" && !req.Branch {
 		parentID = conv.ActiveLeafID
 	}
 
@@ -484,8 +492,19 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			finalAssistant, _ := store.GetMessage(ctx, o.db, assistantMsg.ID)
 			return &RunResult{UserMessage: userMsg, AssistantMessage: finalAssistant}, nil
 		}
+		// Preserve any artifacts already produced this turn (e.g. a saved .pptx)
+		// so a late provider error doesn't blank the message the user was
+		// watching — they still get the downloadable file.
+		errBlocks := []UnifiedBlock{}
+		for _, a := range producedArtifacts {
+			errBlocks = append(errBlocks, UnifiedBlock{
+				Kind: "artifact", FileRef: a.ID, Title: a.Filename, URL: a.URL,
+				Summary: a.MimeType, Artifacts: []ArtifactRef{a},
+			})
+		}
+		errBlocksJSON, _ := json.Marshal(errBlocks)
 		_ = store.FinishMessage(ctx, o.db, assistantMsg.ID, store.MessageFinishPatch{
-			Blocks: []byte("[]"), Citations: []byte("[]"),
+			Blocks: errBlocksJSON, Citations: []byte("[]"),
 			Status: "error", Error: err.Error(),
 		})
 		onEvent(SseEvent{Type: "error", Message: err.Error()})
