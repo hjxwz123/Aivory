@@ -110,7 +110,9 @@
       "when": "When to use (one sentence)",
       "whenHint": "This goes into the system index — write it as a trigger condition for the model.",
       "instructions": "Instructions (Markdown)",
-      "enabled": "Enabled"
+      "enabled": "Enabled",
+      "importMd": "Import from SKILL.md",
+      "importMdHint": "Paste an official-format SKILL.md (frontmatter with name / description) to auto-fill the fields below."
     },
     "editorTitle": "Edit skill",
     "newTitle": "New skill",
@@ -119,6 +121,9 @@
     "created": "Skill created",
     "updated": "Skill updated",
     "removed": "Skill removed",
+    "importApply": "Parse & fill",
+    "importDone": "Filled from SKILL.md",
+    "importFailed": "Couldn't parse — check the SKILL.md format (needs --- frontmatter ---).",
     "errors": {
       "missingFields": "Name, description and instructions are required."
     }

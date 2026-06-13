@@ -166,7 +166,18 @@ export default function AdminChannels() {
                 <Field label={t('admin:channels.fields.type')} htmlFor="ch-type">
                   <Select
                     value={editor.draft.type ?? 'openai'}
-                    onValueChange={(v) => setEditor({ ...editor, draft: { ...editor.draft, type: v as ApiChannel['type'] } })}
+                    onValueChange={(v) => {
+                      const type = v as ApiChannel['type']
+                      // api_format only applies to OpenAI; clear it for others.
+                      setEditor({
+                        ...editor,
+                        draft: {
+                          ...editor.draft,
+                          type,
+                          api_format: type === 'openai' ? (editor.draft.api_format ?? 'chat') : '',
+                        },
+                      })
+                    }}
                   >
                     <SelectTrigger id="ch-type">
                       <SelectValue />

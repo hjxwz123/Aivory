@@ -86,15 +86,16 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
         .slice(0, 5),
     [projects],
   )
-  const create = useConversations((s) => s.createConversation)
   const setOpen = useCommandMenu((s) => s.setOpen)
   const collapsed = useSettings((s) => s.sidebarCollapsed) && variant === 'desktop'
   const toggleSidebar = useSettings((s) => s.toggleSidebar)
   const [newProjectOpen, setNewProjectOpen] = useState(false)
 
-  async function startNewChat() {
-    const conv = await create()
-    if (conv) navigate(`/chat/${conv.id}`)
+  function startNewChat() {
+    // Go to the empty home screen — the conversation is created only when the
+    // user sends the first message, so clicking "New chat" never piles up blank
+    // conversations.
+    navigate('/')
     onClose?.()
   }
 

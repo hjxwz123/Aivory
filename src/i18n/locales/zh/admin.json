@@ -110,7 +110,9 @@
       "when": "何时使用(一句话)",
       "whenHint": "这一句会注入 system prompt 索引,直接影响模型召回率,写成触发条件。",
       "instructions": "完整指令(Markdown)",
-      "enabled": "启用"
+      "enabled": "启用",
+      "importMd": "从 SKILL.md 导入",
+      "importMdHint": "粘贴符合官方格式的 SKILL.md(含 name / description 的 frontmatter),自动填充下方字段。"
     },
     "editorTitle": "编辑技能",
     "newTitle": "新建技能",
@@ -119,6 +121,9 @@
     "created": "技能已创建",
     "updated": "技能已更新",
     "removed": "技能已删除",
+    "importApply": "解析并填充",
+    "importDone": "已从 SKILL.md 填充",
+    "importFailed": "无法解析,请检查 SKILL.md 格式(需含 --- frontmatter ---)。",
     "errors": {
       "missingFields": "请填写名称、描述和指令。"
     }

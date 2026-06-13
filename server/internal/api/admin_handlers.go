@@ -38,6 +38,12 @@ func createChannelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errors.New("name and type required"))
 		return
 	}
+	// api_format only applies to OpenAI channels — drop it for other types
+	// instead of rejecting, so adding a Claude/Gemini channel never errors on a
+	// default value carried over from the form (§2.3-B).
+	if req.Type != "openai" {
+		req.APIFormat = ""
+	}
 	if err := validateChannelType(req.Type, req.APIFormat); err != nil {
 		writeError(w, 400, err)
 		return
@@ -71,6 +77,13 @@ func updateChannelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	effFmt := existing.APIFormat
 	if p.APIFormat != nil {
 		effFmt = *p.APIFormat
+	}
+	// Non-OpenAI channels don't use api_format — force it empty rather than
+	// rejecting a stale value carried over from the form (§2.3-B).
+	if effType != "openai" {
+		effFmt = ""
+		empty := ""
+		p.APIFormat = &empty
 	}
 	if err := validateChannelType(effType, effFmt); err != nil {
 		writeError(w, 400, err)

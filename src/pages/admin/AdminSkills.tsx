@@ -26,6 +26,27 @@ import { Badge } from '@/components/ui/badge'
 type Draft = Partial<ApiSkill>
 const defaultDraft: Draft = { enabled: true }
 
+/**
+ * parseSkillMd reads an Anthropic-style SKILL.md: a YAML frontmatter block
+ * (--- … ---) carrying `name` + `description` (the "when to use" line), followed
+ * by the markdown body which becomes the instructions. With no frontmatter the
+ * whole text is treated as instructions.
+ */
+function parseSkillMd(md: string): { name?: string; description?: string; instructions: string } {
+  const m = md.match(/^\s*---\s*\n([\s\S]*?)\n---\s*\n?([\s\S]*)$/)
+  if (!m) return { instructions: md.trim() }
+  const fm = m[1]
+  const body = m[2].trim()
+  const unquote = (s: string) => s.trim().replace(/^["']|["']$/g, '').trim()
+  const nameLine = fm.match(/^\s*name:\s*(.+)$/m)?.[1]
+  const descLine = fm.match(/^\s*description:\s*(.+)$/m)?.[1]
+  return {
+    name: nameLine ? unquote(nameLine) : undefined,
+    description: descLine ? unquote(descLine) : undefined,
+    instructions: body,
+  }
+}
+
 export default function AdminSkills() {
   const { t } = useTranslation(['admin', 'common'])
   const [rows, setRows] = useState<ApiSkill[]>([])
@@ -35,6 +56,7 @@ export default function AdminSkills() {
     draft: defaultDraft,
   })
   const [confirmDelete, setConfirmDelete] = useState<ApiSkill | null>(null)
+  const [importMd, setImportMd] = useState('')
 
   async function load() {
     setLoading(true)
@@ -52,10 +74,31 @@ export default function AdminSkills() {
   }, [])
 
   function openNew() {
+    setImportMd('')
     setEditor({ open: true, draft: { ...defaultDraft } })
   }
   function openEdit(row: ApiSkill) {
+    setImportMd('')
     setEditor({ open: true, row, draft: { ...row } })
+  }
+
+  // Parse a pasted SKILL.md and fill name / description / instructions.
+  function applyImport() {
+    const parsed = parseSkillMd(importMd)
+    if (!importMd.trim() || (!parsed.name && !parsed.description && !parsed.instructions)) {
+      toast.error(t('admin:skills.importFailed'))
+      return
+    }
+    setEditor((ed) => ({
+      ...ed,
+      draft: {
+        ...ed.draft,
+        name: parsed.name ?? ed.draft.name,
+        description: parsed.description ?? ed.draft.description,
+        instructions: parsed.instructions || ed.draft.instructions,
+      },
+    }))
+    toast.success(t('admin:skills.importDone'))
   }
 
   async function submit() {
@@ -139,6 +182,20 @@ export default function AdminSkills() {
           </DialogHeader>
           <DialogBody>
             <div className="grid gap-4">
+              <Field label={t('admin:skills.fields.importMd')} hint={t('admin:skills.fields.importMdHint')}>
+                <Textarea
+                  rows={4}
+                  value={importMd}
+                  onChange={(e) => setImportMd(e.target.value)}
+                  placeholder={'---\nname: make_ppt\ndescription: Use when the user asks for slides or a deck.\n---\n\n# How to build a deck\n…'}
+                  className="font-mono text-[12px]"
+                />
+                <div className="mt-2 flex justify-end">
+                  <Button size="sm" variant="secondary" onClick={applyImport}>
+                    {t('admin:skills.importApply')}
+                  </Button>
+                </div>
+              </Field>
               <Field label={t('admin:skills.fields.name')} htmlFor="s-name">
                 <Input
                   id="s-name"

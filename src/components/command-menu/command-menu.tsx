@@ -59,7 +59,6 @@ export function CommandMenu() {
         .slice(0, 5),
     [projects],
   )
-  const createConversation = useConversations((s) => s.createConversation)
   const setTheme = useTheme((s) => s.setPref)
   const toggleSidebar = useSettings((s) => s.toggleSidebar)
   const currentLang = useLanguage((s) => s.lang)
@@ -101,14 +100,7 @@ export function CommandMenu() {
             <CommandList>
               <CommandEmpty>{t('chat:commandMenu.noMatch')}</CommandEmpty>
               <CommandGroup heading={t('chat:commandMenu.groups.actions')}>
-                <CommandItem
-                  onSelect={() =>
-                    run(async () => {
-                      const c = await createConversation()
-                      if (c) navigate(`/chat/${c.id}`)
-                    })
-                  }
-                >
+                <CommandItem onSelect={() => run(() => navigate('/'))}>
                   <Plus size={14} aria-hidden />
                   {t('chat:commandMenu.actions.newChat')}
                   <CommandShortcut>{modKey()} Shift O</CommandShortcut>
