@@ -31,6 +31,14 @@ const OWNED_KEYS = [
   'signup_open',
   'daily_message_limit',
   'daily_image_limit',
+  'email_verification_required',
+  'email_domain_whitelist',
+  'smtp_host',
+  'smtp_port',
+  'smtp_user',
+  'smtp_password',
+  'smtp_from',
+  'smtp_tls',
 ] as const
 
 export default function AdminSettings() {
@@ -190,6 +198,90 @@ export default function AdminSettings() {
               />
             </Field>
           </div>
+
+          {/* Email verification + domain whitelist */}
+          <ToggleRow
+            label={t('admin:settings.fields.emailVerificationRequired')}
+            checked={readBool('email_verification_required')}
+            onChange={(v) => setDraft({ ...draft, email_verification_required: v })}
+          />
+          {readBool('email_verification_required') && (
+            <p className="text-xs text-[var(--color-fg-subtle)] -mt-3 pl-1">{t('admin:settings.fields.emailVerificationHint')}</p>
+          )}
+
+          <Field
+            label={t('admin:settings.fields.domainWhitelist')}
+            htmlFor="domain-wl"
+            hint={t('admin:settings.fields.domainWhitelistHint')}
+          >
+            <Input
+              id="domain-wl"
+              value={readString('email_domain_whitelist')}
+              placeholder="example.com, company.io"
+              onChange={(e) => setDraft({ ...draft, email_domain_whitelist: e.target.value })}
+            />
+          </Field>
+
+          {/* SMTP section */}
+          <div className="pt-4 border-t border-[var(--color-divider)]">
+            <h2 className="font-serif text-xl tracking-tight text-[var(--color-fg)]">{t('admin:settings.fields.smtpSection')}</h2>
+            <p className="mt-1 text-xs text-[var(--color-fg-muted)]">{t('admin:settings.fields.smtpLead')}</p>
+          </div>
+
+          <div className="grid grid-cols-3 gap-4">
+            <Field label={t('admin:settings.fields.smtpHost')} htmlFor="smtp-host" className="col-span-2" hint={t('admin:settings.fields.smtpHostHint')}>
+              <Input
+                id="smtp-host"
+                value={readString('smtp_host')}
+                placeholder="smtp.example.com"
+                onChange={(e) => setDraft({ ...draft, smtp_host: e.target.value })}
+              />
+            </Field>
+            <Field label={t('admin:settings.fields.smtpPort')} htmlFor="smtp-port" hint={t('admin:settings.fields.smtpPortHint')}>
+              <Input
+                id="smtp-port"
+                value={readString('smtp_port', '587')}
+                placeholder="587"
+                onChange={(e) => setDraft({ ...draft, smtp_port: e.target.value })}
+              />
+            </Field>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <Field label={t('admin:settings.fields.smtpUser')} htmlFor="smtp-user">
+              <Input
+                id="smtp-user"
+                value={readString('smtp_user')}
+                onChange={(e) => setDraft({ ...draft, smtp_user: e.target.value })}
+              />
+            </Field>
+            <Field label={t('admin:settings.fields.smtpPassword')} htmlFor="smtp-pw" hint={t('admin:settings.fields.smtpPasswordHint')}>
+              <Input
+                id="smtp-pw"
+                type="password"
+                value={readString('smtp_password')}
+                onChange={(e) => setDraft({ ...draft, smtp_password: e.target.value })}
+              />
+            </Field>
+          </div>
+
+          <Field label={t('admin:settings.fields.smtpFrom')} htmlFor="smtp-from" hint={t('admin:settings.fields.smtpFromHint')}>
+            <Input
+              id="smtp-from"
+              value={readString('smtp_from')}
+              placeholder="noreply@example.com"
+              onChange={(e) => setDraft({ ...draft, smtp_from: e.target.value })}
+            />
+          </Field>
+
+          <ToggleRow
+            label={t('admin:settings.fields.smtpTls')}
+            checked={readBool('smtp_tls')}
+            onChange={(v) => setDraft({ ...draft, smtp_tls: v })}
+          />
+          {readBool('smtp_tls') && (
+            <p className="text-xs text-[var(--color-fg-subtle)] -mt-3 pl-1">{t('admin:settings.fields.smtpTlsHint')}</p>
+          )}
 
           <div className="flex justify-end">
             <Button loading={saving} onClick={() => void save()}>

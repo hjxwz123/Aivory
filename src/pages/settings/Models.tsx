@@ -122,7 +122,7 @@ export default function Models() {
                 max: (2000).toLocaleString(),
               })}
             </p>
-            <Button onClick={() => toast.success(t('settings:models.customSaved'))}>
+            <Button variant="secondary" onClick={() => toast.success(t('settings:models.customSaved'))}>
               {t('common:actions.save')}
             </Button>
           </div>

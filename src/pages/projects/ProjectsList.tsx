@@ -68,6 +68,7 @@ export default function ProjectsList() {
             </p>
           </div>
           <Button
+            variant="secondary"
             leadingIcon={<Plus size={15} aria-hidden />}
             onClick={() => setCreateOpen(true)}
             className="self-start sm:self-auto"
@@ -151,6 +152,7 @@ export default function ProjectsList() {
             description={t('projects:list.emptyBody')}
             action={
               <Button
+                variant="secondary"
                 leadingIcon={<Plus size={15} aria-hidden />}
                 onClick={() => setCreateOpen(true)}
               >

@@ -15,6 +15,7 @@ import (
 	"aurelia/server/internal/cache"
 	"aurelia/server/internal/config"
 	"aurelia/server/internal/llm"
+	"aurelia/server/internal/mail"
 	"aurelia/server/internal/queue"
 	"aurelia/server/internal/rag"
 	"aurelia/server/internal/tools"
@@ -27,6 +28,7 @@ type Deps struct {
 	Cache        cache.Cache
 	Queue        queue.Queue
 	Auth         *auth.Service
+	Mailer       mail.Sender
 	Providers    *llm.Registry
 	Tools        *tools.Registry
 	RAG          *rag.Service
@@ -47,6 +49,9 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("POST", "/api/auth/logout", wrap(d, logoutHandler))
 	mux.handle("POST", "/api/auth/refresh", rateLimitedIP(d, "auth", 30, 60*time.Second, wrap(d, refreshHandler)))
 	mux.handle("POST", "/api/auth/verify-email", rateLimitedIP(d, "auth", 20, 60*time.Second, wrap(d, verifyEmailHandler)))
+	mux.handle("POST", "/api/auth/send-code", rateLimitedIP(d, "auth", 3, 60*time.Second, wrap(d, sendCodeHandler)))
+	mux.handle("POST", "/api/auth/forgot-password", rateLimitedIP(d, "auth", 3, 60*time.Second, wrap(d, forgotPasswordHandler)))
+	mux.handle("POST", "/api/auth/reset-password", rateLimitedIP(d, "auth", 5, 60*time.Second, wrap(d, resetPasswordHandler)))
 	mux.handle("GET", "/api/health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, 200, map[string]any{"ok": true})
 	})

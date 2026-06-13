@@ -376,6 +376,11 @@ var settingsKeys = []string{
 	// "use the safe default allowlist" (see api.defaultUploadExtensions).
 	// Enforced on /api/files and /api/kbs/:id/documents BEFORE bytes touch disk.
 	"upload_allowed_extensions",
+	// SMTP mail — live-reloaded on each send (see internal/mail).
+	"smtp_host", "smtp_port", "smtp_user", "smtp_password",
+	"smtp_from", "smtp_tls",
+	"email_verification_required",
+	"email_domain_whitelist",
 }
 
 func adminSettingsGet(d Deps, w http.ResponseWriter, _ *http.Request) {

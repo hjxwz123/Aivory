@@ -317,7 +317,7 @@ export default function ProjectDetail() {
                   >
                     {t('common:actions.cancel')}
                   </Button>
-                  <Button size="sm" leadingIcon={<Save size={13} aria-hidden />} onClick={saveInstructions}>
+                  <Button size="sm" variant="secondary" leadingIcon={<Save size={13} aria-hidden />} onClick={saveInstructions}>
                     {t('projects:detail.instructionsSave')}
                   </Button>
                 </div>

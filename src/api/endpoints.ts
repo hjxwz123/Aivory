@@ -27,7 +27,7 @@ export const authApi = {
   login: (email: string, password: string) =>
     api<ApiAuthResponse>('/auth/login', { method: 'POST', body: { email, password } }),
   register: (email: string, password: string, name: string) =>
-    api<ApiAuthResponse>('/auth/register', { method: 'POST', body: { email, password, name } }),
+    api<ApiAuthResponse | { verification_required: boolean; email: string }>('/auth/register', { method: 'POST', body: { email, password, name } }),
   refresh: () => api<ApiAuthResponse>('/auth/refresh', { method: 'POST' }),
   logout: () => api<{ ok: true }>('/auth/logout', { method: 'POST' }),
   updateProfile: (patch: { name?: string; email?: string }) =>
@@ -38,6 +38,16 @@ export const authApi = {
   updateSettings: (patch: Record<string, unknown>) =>
     api<Record<string, unknown>>('/me/settings', { method: 'PATCH', body: patch }),
   usage: () => api<{ days: number; cost: number; messages: number }>('/me/usage'),
+  // Email verification
+  verifyEmail: (email: string, code: string) =>
+    api<ApiAuthResponse>('/auth/verify-email', { method: 'POST', body: { email, code } }),
+  sendCode: (email: string, purpose: 'verify' | 'reset') =>
+    api<{ ok: true }>('/auth/send-code', { method: 'POST', body: { email, purpose } }),
+  // Password reset
+  forgotPassword: (email: string) =>
+    api<{ ok: true }>('/auth/forgot-password', { method: 'POST', body: { email } }),
+  resetPassword: (email: string, code: string, new_password: string) =>
+    api<{ ok: true }>('/auth/reset-password', { method: 'POST', body: { email, code, new_password } }),
 }
 
 // ----- Models / skills -----------------------------------------------------

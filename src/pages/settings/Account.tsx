@@ -103,7 +103,7 @@ export default function Account() {
           <Button variant="ghost" onClick={() => { setName(user?.name ?? ''); setEmail(user?.email ?? '') }}>
             {t('common:actions.reset')}
           </Button>
-          <Button onClick={() => void save()} loading={saving}>
+          <Button variant="secondary" onClick={() => void save()} loading={saving}>
             {t('common:actions.save')}
           </Button>
         </div>

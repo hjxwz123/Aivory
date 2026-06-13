@@ -39,6 +39,8 @@
     "helpful": "Helpful",
     "notHelpful": "Not helpful",
     "edit": "Edit",
+    "cancelEdit": "Cancel",
+    "saveEdit": "Save & resend",
     "more": "More",
     "copyMessage": "Copy message",
     "readAloud": "Read aloud",

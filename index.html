@@ -32,6 +32,13 @@
           var accent = localStorage.getItem('aurelia.accent')
           var ok = ['violet', 'lagoon', 'ember', 'moss', 'indigo', 'rose']
           document.documentElement.dataset.accent = ok.indexOf(accent) >= 0 ? accent : 'violet'
+          // Density + font-size from settings store
+          var settings = JSON.parse(localStorage.getItem('aurelia.settings') || '{}')
+          var ap = settings.appearance || {}
+          var density = ap.density === 'cozy' ? 'cozy' : 'comfortable'
+          var fs = ap.fontSize === 'sm' ? 'sm' : ap.fontSize === 'lg' ? 'lg' : 'md'
+          document.documentElement.dataset.density = density
+          document.documentElement.dataset.fontsize = fs
         } catch (_) {}
       })()
     </script>

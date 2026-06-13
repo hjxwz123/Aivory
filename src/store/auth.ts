@@ -15,14 +15,17 @@ interface AuthState {
   status: 'idle' | 'authenticating' | 'authenticated' | 'unauthenticated'
   error: string | null
   signupOpen: boolean
+  /** Set when registration returns verification_required — drives the code UI. */
+  pendingVerification: string | null
 
   hydrate: () => Promise<void>
   login: (email: string, password: string) => Promise<boolean>
-  register: (email: string, password: string, name: string) => Promise<boolean>
+  register: (email: string, password: string, name: string) => Promise<boolean | 'verify'>
   logout: () => Promise<void>
   updateProfile: (patch: { name?: string; email?: string }) => Promise<void>
   setUser: (user: ApiUser | null) => void
   setSignupOpen: (open: boolean) => void
+  clearPendingVerification: () => void
 }
 
 export const useAuth = create<AuthState>((set, get) => ({
@@ -30,12 +33,16 @@ export const useAuth = create<AuthState>((set, get) => ({
   status: 'idle',
   error: null,
   signupOpen: true,
+  pendingVerification: null,
 
   setUser(user) {
     set({ user, status: user ? 'authenticated' : 'unauthenticated' })
   },
   setSignupOpen(open) {
     set({ signupOpen: open })
+  },
+  clearPendingVerification() {
+    set({ pendingVerification: null })
   },
 
   async hydrate() {
@@ -74,6 +81,11 @@ export const useAuth = create<AuthState>((set, get) => ({
       return true
     } catch (e) {
       const msg = e instanceof ApiError ? e.message : 'Login failed'
+      // If the backend says "email not verified", flip to verification flow
+      if (e instanceof ApiError && msg.toLowerCase().includes('not verified')) {
+        set({ error: msg, status: 'unauthenticated', pendingVerification: email })
+        return false
+      }
       set({ error: msg, status: 'unauthenticated' })
       return false
     }
@@ -83,8 +95,13 @@ export const useAuth = create<AuthState>((set, get) => ({
     set({ status: 'authenticating', error: null })
     try {
       const resp = await authApi.register(email, password, name)
-      setAccessToken(resp.access_token)
-      set({ user: resp.user, status: 'authenticated' })
+      if ('verification_required' in resp && resp.verification_required) {
+        set({ pendingVerification: resp.email as string, status: 'unauthenticated' })
+        return 'verify'
+      }
+      const auth = resp as { user: ApiUser; access_token: string }
+      setAccessToken(auth.access_token)
+      set({ user: auth.user, status: 'authenticated' })
       return true
     } catch (e) {
       const msg = e instanceof ApiError ? e.message : 'Registration failed'

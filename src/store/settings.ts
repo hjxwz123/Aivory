@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { AppearanceSettings, ModelSettings, PrivacySettings } from '@/types/settings'
+import type { AppearanceSettings, DensityPref, FontSizePref, ModelSettings, PrivacySettings } from '@/types/settings'
 
 interface SettingsState {
   appearance: AppearanceSettings
@@ -99,3 +99,30 @@ export const useSettings = create<SettingsState>((set) => ({
     })
   },
 }))
+
+/* ---------- DOM side-effects for density + fontSize -------------------- */
+
+function applyDensity(d: DensityPref) {
+  if (typeof document === 'undefined') return
+  document.documentElement.dataset.density = d
+}
+
+function applyFontSize(f: FontSizePref) {
+  if (typeof document === 'undefined') return
+  document.documentElement.dataset.fontsize = f
+}
+
+// Apply on boot
+const boot = useSettings.getState().appearance
+applyDensity(boot.density)
+applyFontSize(boot.fontSize)
+
+// Re-apply whenever appearance changes
+useSettings.subscribe((state, prev) => {
+  if (state.appearance.density !== prev.appearance.density) {
+    applyDensity(state.appearance.density)
+  }
+  if (state.appearance.fontSize !== prev.appearance.fontSize) {
+    applyFontSize(state.appearance.fontSize)
+  }
+})

@@ -24,6 +24,7 @@ import (
 	"aurelia/server/internal/cache"
 	"aurelia/server/internal/config"
 	"aurelia/server/internal/llm"
+	"aurelia/server/internal/mail"
 	"aurelia/server/internal/queue"
 	"aurelia/server/internal/rag"
 	"aurelia/server/internal/store"
@@ -101,6 +102,7 @@ func main() {
 		Cache:        cacheLayer,
 		Queue:        q,
 		Auth:         authSvc,
+		Mailer:       mail.NewSMTPSender(db, logger),
 		Providers:    providers,
 		Tools:        toolRegistry,
 		RAG:          ragSvc,

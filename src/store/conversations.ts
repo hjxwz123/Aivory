@@ -85,9 +85,24 @@ export const useConversations = create<ConversationStore>((set, get) => ({
       const resp = await conversationsApi.get(id)
       const conv = toLocalConversation(resp.conversation)
       conv.messages = resp.messages.map(toLocalMessage)
-      set((s) => ({
-        conversations: replaceOrPrepend(s.conversations, conv),
-      }))
+      set((s) => {
+        // Guard against a race where sendMessage already optimistically
+        // appended messages (including a streaming assistant placeholder)
+        // before loadOne's response arrives. If the local copy has any
+        // streaming message, keep the local messages — they're more
+        // up-to-date than what the backend returned.
+        const existing = s.conversations.find((c) => c.id === id)
+        if (existing && existing.messages.length > 0 && existing.messages.some((m) => m.streaming)) {
+          // Merge metadata (title, modelId, etc.) but keep local messages.
+          const merged: Conversation = {
+            ...conv,
+            messages: existing.messages,
+            lastParams: existing.lastParams,
+          }
+          return { conversations: replaceOrPrepend(s.conversations, merged) }
+        }
+        return { conversations: replaceOrPrepend(s.conversations, conv) }
+      })
       return conv
     } catch {
       return undefined

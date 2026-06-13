@@ -55,6 +55,26 @@
   --color-kbd-bg: var(--color-kbd-bg);
   --color-kbd-border: var(--color-kbd-border);
 
+  /* Project accents */
+  --color-project-violet-tint: var(--color-project-violet-tint);
+  --color-project-violet-bar: var(--color-project-violet-bar);
+  --color-project-violet-text: var(--color-project-violet-text);
+  --color-project-sage-tint: var(--color-project-sage-tint);
+  --color-project-sage-bar: var(--color-project-sage-bar);
+  --color-project-sage-text: var(--color-project-sage-text);
+  --color-project-amber-tint: var(--color-project-amber-tint);
+  --color-project-amber-bar: var(--color-project-amber-bar);
+  --color-project-amber-text: var(--color-project-amber-text);
+  --color-project-rose-tint: var(--color-project-rose-tint);
+  --color-project-rose-bar: var(--color-project-rose-bar);
+  --color-project-rose-text: var(--color-project-rose-text);
+  --color-project-slate-tint: var(--color-project-slate-tint);
+  --color-project-slate-bar: var(--color-project-slate-bar);
+  --color-project-slate-text: var(--color-project-slate-text);
+  --color-project-teal-tint: var(--color-project-teal-tint);
+  --color-project-teal-bar: var(--color-project-teal-bar);
+  --color-project-teal-text: var(--color-project-teal-text);
+
   --font-serif: var(--font-serif);
   --font-sans: var(--font-sans);
   --font-mono: var(--font-mono);

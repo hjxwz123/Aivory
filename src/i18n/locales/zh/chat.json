@@ -39,6 +39,8 @@
     "helpful": "有帮助",
     "notHelpful": "无帮助",
     "edit": "编辑",
+    "cancelEdit": "取消",
+    "saveEdit": "保存并重新发送",
     "more": "更多",
     "copyMessage": "复制消息",
     "readAloud": "朗读",

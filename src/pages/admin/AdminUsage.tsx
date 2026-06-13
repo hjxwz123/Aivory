@@ -1,10 +1,14 @@
 /**
  * AdminUsage — aggregated cost / token report from usage_logs.
+ *
+ * Fetches the model list alongside usage data so model_id → label lookup
+ * renders human names instead of raw IDs. Purpose values (chat/task/image/
+ * embedding) are translated via i18n keys.
  */
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { adminApi, ApiError } from '@/api'
-import type { ApiUsageReportRow } from '@/api/types'
+import type { ApiModel, ApiUsageReportRow } from '@/api/types'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from '@/hooks/use-toast'
 
@@ -14,13 +18,22 @@ export default function AdminUsage() {
   const { t } = useTranslation('admin')
   const [days, setDays] = useState('30')
   const [rows, setRows] = useState<ApiUsageReportRow[]>([])
+  const [modelMap, setModelMap] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
 
   async function load() {
     setLoading(true)
     try {
-      const r = await adminApi.usage(Number(days))
+      const [r, models] = await Promise.all([
+        adminApi.usage(Number(days)),
+        adminApi.models(),
+      ])
       setRows(r.rows)
+      const map: Record<string, string> = {}
+      for (const m of models) {
+        map[m.id] = m.label
+      }
+      setModelMap(map)
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t('common.failed'))
     } finally {
@@ -35,6 +48,16 @@ export default function AdminUsage() {
 
   const totalCost = rows.reduce((a, b) => a + b.cost, 0)
   const totalCalls = rows.reduce((a, b) => a + b.calls, 0)
+
+  function modelLabel(id: string): string {
+    return modelMap[id] || id
+  }
+
+  function purposeLabel(purpose: string): string {
+    const key = `usage.purposes.${purpose}`
+    const translated = t(key, { defaultValue: '' })
+    return translated || purpose
+  }
 
   return (
     <div>
@@ -90,8 +113,8 @@ export default function AdminUsage() {
                 {rows.map((r, i) => (
                   <tr key={i} className="border-t border-[var(--color-divider)]">
                     <td className="py-2 px-4 truncate max-w-[12rem]">{r.user_email || r.user_id}</td>
-                    <td className="py-2 px-4 font-mono text-[12px]">{r.model_id}</td>
-                    <td className="py-2 px-4 text-[var(--color-fg-muted)]">{r.purpose}</td>
+                    <td className="py-2 px-4 text-[12px]">{modelLabel(r.model_id)}</td>
+                    <td className="py-2 px-4 text-[var(--color-fg-muted)]">{purposeLabel(r.purpose)}</td>
                     <td className="py-2 px-4 text-right">{r.input_tokens}</td>
                     <td className="py-2 px-4 text-right">{r.output_tokens}</td>
                     <td className="py-2 px-4 text-right">{r.calls}</td>

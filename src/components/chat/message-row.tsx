@@ -17,6 +17,7 @@ import {
 } from 'lucide-react'
 import type { Message } from '@/types/chat'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { ModelIcon } from '@/components/chat/model-icon'
 import { Tooltip } from '@/components/ui/tooltip'
 import {
   DropdownMenu,
@@ -52,8 +53,8 @@ interface MessageRowProps {
 
 export function MessageRow({ message, userName, onRegenerate, onEdit, onLike, onDislike, onBranchSwitch, onFork }: MessageRowProps) {
   const isUser = message.role === 'user'
-  // §7.2-6: assistant 气泡标注生成它的模型名。
-  const modelLabel = useModels((s) => (message.modelId ? s.getById(message.modelId)?.label : undefined))
+  // §7.2-6: assistant 气泡标注生成它的模型名 + 图标。
+  const model = useModels((s) => (message.modelId ? s.getById(message.modelId) : undefined))
   const { t } = useTranslation('chat')
   const displayUserName = userName ?? t('common.you', { ns: 'common' })
   const [hovered, setHovered] = useState(false)
@@ -105,14 +106,17 @@ export function MessageRow({ message, userName, onRegenerate, onEdit, onLike, on
         )}
       >
         {!isUser && (
-          <div className="flex items-center gap-2.5 mb-2">
-            <Avatar size="sm" tone="sage">
-              <AvatarFallback>A</AvatarFallback>
-            </Avatar>
-            <span className="font-serif text-[15px] tracking-tight text-[var(--color-fg)]">{t('assistant')}</span>
-            {modelLabel ? (
-              <span className="text-[11px] text-[var(--color-fg-subtle)]">· {modelLabel}</span>
-            ) : null}
+          <div className="flex items-center gap-2 mb-2">
+            {model ? (
+              <ModelIcon icon={model.icon} size={16} />
+            ) : (
+              <Avatar size="sm" tone="sage">
+                <AvatarFallback>A</AvatarFallback>
+              </Avatar>
+            )}
+            <span className="font-serif text-[15px] tracking-tight text-[var(--color-fg)]">
+              {model?.label ?? t('assistant')}
+            </span>
             {!message.streaming && typeof message.cost === 'number' && message.cost > 0 ? (
               <span
                 className="text-[11px] text-[var(--color-fg-subtle)] tabular-nums"
@@ -132,7 +136,7 @@ export function MessageRow({ message, userName, onRegenerate, onEdit, onLike, on
 
         {/* Body */}
         {editing && isUser ? (
-          <div className="flex flex-col gap-2 rounded-[16px] border border-[var(--color-border-strong)] bg-[var(--color-surface)] p-2.5 w-full">
+          <div className="flex flex-col gap-2 w-full max-w-[80%] sm:max-w-[68%]">
             <Textarea
               ref={editRef}
               value={draft}
@@ -148,14 +152,14 @@ export function MessageRow({ message, userName, onRegenerate, onEdit, onLike, on
                   setEditing(false)
                 }
               }}
-              className="bg-transparent border-none focus:ring-0 focus:bg-transparent p-1.5 text-sm"
+              className="min-h-[56px] text-sm"
             />
             <div className="flex items-center justify-end gap-2">
               <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>
-                Cancel
+                {t('actions.cancelEdit', { defaultValue: 'Cancel' })}
               </Button>
-              <Button size="sm" onClick={commitEdit}>
-                Save & regenerate
+              <Button size="sm" variant="secondary" onClick={commitEdit}>
+                {t('actions.saveEdit', { defaultValue: 'Save & resend' })}
               </Button>
             </div>
           </div>

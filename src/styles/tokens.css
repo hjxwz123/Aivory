@@ -179,6 +179,39 @@
   --z-tooltip: 90;
   --z-max: 9999;
 
+  /* ---------- PROJECT ACCENTS ------------------------------------------- */
+  /* Per-project color accents — tint (soft bg), bar (strong bg), text. */
+
+  /* violet */
+  --color-project-violet-tint: oklch(94% 0.045 290);
+  --color-project-violet-bar: oklch(58% 0.225 290);
+  --color-project-violet-text: oklch(38% 0.150 290);
+
+  /* sage */
+  --color-project-sage-tint: oklch(94% 0.035 150);
+  --color-project-sage-bar: oklch(60% 0.085 150);
+  --color-project-sage-text: oklch(36% 0.070 150);
+
+  /* amber */
+  --color-project-amber-tint: oklch(95% 0.045 75);
+  --color-project-amber-bar: oklch(68% 0.150 75);
+  --color-project-amber-text: oklch(38% 0.100 70);
+
+  /* rose */
+  --color-project-rose-tint: oklch(95% 0.045 18);
+  --color-project-rose-bar: oklch(62% 0.180 18);
+  --color-project-rose-text: oklch(40% 0.140 18);
+
+  /* slate */
+  --color-project-slate-tint: oklch(93% 0.012 270);
+  --color-project-slate-bar: oklch(52% 0.040 270);
+  --color-project-slate-text: oklch(32% 0.030 270);
+
+  /* teal */
+  --color-project-teal-tint: oklch(94% 0.040 200);
+  --color-project-teal-bar: oklch(60% 0.110 200);
+  --color-project-teal-text: oklch(36% 0.080 200);
+
   /* ---------- LAYOUT --------------------------------------------------- */
   --layout-sidebar-w: 17.5rem;        /* 280 */
   --layout-sidebar-w-collapsed: 3.5rem;
@@ -187,6 +220,42 @@
   --layout-content-max-w: 76rem;
   --layout-prose-max-w: 44rem;
   --layout-message-max-w: 48rem;
+}
+
+/* ============================================================================
+ * DENSITY — cozy shrinks spacing & radii for a denser layout.
+ * Default "comfortable" uses the base tokens above. "cozy" overrides below.
+ * ============================================================================ */
+:root[data-density="cozy"] {
+  --text-base: 0.875rem;          /* 14 — tighter body text */
+  --leading-normal: 1.45;
+  --leading-relaxed: 1.55;
+  --space-3: 0.5rem;
+  --space-4: 0.75rem;
+  --space-5: 1rem;
+  --space-6: 1.25rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
+  --radius-2xl: 1rem;
+  --layout-topbar-h: 3rem;
+}
+
+/* ============================================================================
+ * FONT-SIZE SCALE — sm / md (default) / lg.
+ * ============================================================================ */
+:root[data-fontsize="sm"] {
+  --text-xs: 0.6875rem;           /* 11 */
+  --text-sm: 0.75rem;             /* 12 */
+  --text-base: 0.8125rem;         /* 13 */
+  --text-md: 0.875rem;            /* 14 */
+  --text-lg: 1rem;                /* 16 */
+}
+:root[data-fontsize="lg"] {
+  --text-xs: 0.8125rem;           /* 13 */
+  --text-sm: 0.875rem;            /* 14 */
+  --text-base: 1rem;              /* 16 */
+  --text-md: 1.0625rem;           /* 17 */
+  --text-lg: 1.25rem;             /* 20 */
 }
 
 /* ============================================================================
@@ -245,6 +314,31 @@
   --color-syntax-fn:      oklch(78% 0.120 245);
   --color-kbd-bg: oklch(23% 0.030 275);
   --color-kbd-border: oklch(36% 0.035 275);
+
+  /* Project accents — dark overrides */
+  --color-project-violet-tint: oklch(28% 0.090 290);
+  --color-project-violet-bar: oklch(72% 0.215 290);
+  --color-project-violet-text: oklch(82% 0.180 290);
+
+  --color-project-sage-tint: oklch(28% 0.050 150);
+  --color-project-sage-bar: oklch(74% 0.105 150);
+  --color-project-sage-text: oklch(82% 0.090 150);
+
+  --color-project-amber-tint: oklch(28% 0.060 75);
+  --color-project-amber-bar: oklch(78% 0.135 75);
+  --color-project-amber-text: oklch(84% 0.120 75);
+
+  --color-project-rose-tint: oklch(28% 0.065 18);
+  --color-project-rose-bar: oklch(74% 0.170 18);
+  --color-project-rose-text: oklch(84% 0.150 18);
+
+  --color-project-slate-tint: oklch(26% 0.025 275);
+  --color-project-slate-bar: oklch(70% 0.030 275);
+  --color-project-slate-text: oklch(84% 0.020 275);
+
+  --color-project-teal-tint: oklch(26% 0.060 200);
+  --color-project-teal-bar: oklch(74% 0.110 200);
+  --color-project-teal-text: oklch(84% 0.100 200);
 
   --shadow-xs: 0 1px 2px 0 oklch(0% 0 0 / 0.22);
   --shadow-sm: 0 1px 3px 0 oklch(0% 0 0 / 0.32), 0 1px 2px -1px oklch(0% 0 0 / 0.22);
