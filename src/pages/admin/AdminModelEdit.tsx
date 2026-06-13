@@ -25,9 +25,13 @@ import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { IconUploader } from '@/components/admin/icon-uploader'
 import { toast } from '@/hooks/use-toast'
+import { cn } from '@/lib/utils'
 
 const KINDS = ['chat', 'image', 'embedding'] as const
 const TOOL_MODES = ['native', 'prompt', 'none'] as const
+// OpenAI Responses hosted tools the admin can enable (§2.3-B). Names are the
+// wire `type` values OpenAI expects.
+const OFFICIAL_TOOLS = ['web_search', 'code_interpreter', 'image_generation'] as const
 
 type Draft = Partial<ApiModel> & { param_controls_text: string }
 
@@ -88,6 +92,12 @@ export default function AdminModelEdit() {
   function patch(p: Partial<Draft>) {
     setDraft((d) => (d ? { ...d, ...p } : d))
   }
+
+  // §2.3-B: the official/system tool switch only applies to an OpenAI channel
+  // running the Responses API.
+  const channel = channels.find((c) => c.id === draft?.channel_id)
+  const isOpenAIResponses = channel?.type === 'openai' && channel?.api_format === 'responses'
+  const officialTools = draft?.official_tools ?? []
 
   async function save() {
     if (!draft) return
@@ -276,6 +286,52 @@ export default function AdminModelEdit() {
                     onChange={(e) => patch({ param_controls_text: e.target.value })}
                   />
                 </Field>
+
+                {/* §2.3-B: OpenAI Responses — official (hosted) vs system tools. */}
+                {isOpenAIResponses && (
+                  <Field label={t('admin:models.fields.officialToolsLabel')} className="col-span-2">
+                    <div className="rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3 py-2.5">
+                      <label className="flex items-center justify-between">
+                        <span className="text-sm">{t('admin:models.fields.useOfficialTools')}</span>
+                        <Switch
+                          checked={officialTools.length > 0}
+                          onCheckedChange={(v) => patch({ official_tools: v ? ['web_search'] : [] })}
+                        />
+                      </label>
+                      {officialTools.length > 0 && (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {OFFICIAL_TOOLS.map((name) => {
+                            const on = officialTools.includes(name)
+                            return (
+                              <button
+                                key={name}
+                                type="button"
+                                onClick={() =>
+                                  patch({
+                                    official_tools: on
+                                      ? officialTools.filter((x) => x !== name)
+                                      : [...officialTools, name],
+                                  })
+                                }
+                                className={cn(
+                                  'rounded-[8px] border px-2.5 py-1 font-mono text-[12px] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+                                  on
+                                    ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
+                                    : 'border-[var(--color-border)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface)]',
+                                )}
+                              >
+                                {name}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      )}
+                      <p className="mt-2 text-[11px] text-[var(--color-fg-subtle)]">
+                        {t('admin:models.fields.officialToolsHint')}
+                      </p>
+                    </div>
+                  </Field>
+                )}
               </div>
             </section>
           )}

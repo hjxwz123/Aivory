@@ -67,6 +67,11 @@ type UnifiedChatRequest struct {
 	History      []UnifiedMessage
 	Model        ModelInfo
 	Tools        []ToolDef
+	// OfficialTools, when non-empty, switches an OpenAI Responses model to
+	// OpenAI-hosted tools (web_search / code_interpreter / image_generation)
+	// instead of the system's self-built tools (§2.3-B). The provider attaches
+	// them to the request; OpenAI executes them server-side.
+	OfficialTools []string
 	// ToolModePrompt is true when §4.13 prompt-injection mode is on.
 	ToolModePrompt bool
 	ProjectFiles   []ProjectFileSummary

@@ -80,7 +80,7 @@ export default function KnowledgeBasesList() {
             </h1>
             <p className="mt-4 text-[var(--color-fg-muted)] text-[15px] leading-relaxed">{t('kb:lead')}</p>
           </div>
-          <Button leadingIcon={<Plus size={15} aria-hidden />} onClick={() => setOpen(true)}>
+          <Button variant="secondary" leadingIcon={<Plus size={15} aria-hidden />} onClick={() => setOpen(true)}>
             {t('kb:new')}
           </Button>
         </header>
@@ -93,7 +93,7 @@ export default function KnowledgeBasesList() {
               icon={<Database size={20} aria-hidden />}
               title={t('kb:emptyTitle')}
               description={t('kb:emptyBody')}
-              action={<Button onClick={() => setOpen(true)}>{t('kb:createFirst')}</Button>}
+              action={<Button variant="secondary" onClick={() => setOpen(true)}>{t('kb:createFirst')}</Button>}
             />
           ) : (
             <ul className="flex flex-col divide-y divide-[var(--color-divider)]">

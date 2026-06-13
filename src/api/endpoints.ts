@@ -88,6 +88,7 @@ export const projectsApi = {
 export const conversationsApi = {
   list: (projectId?: string) =>
     api<ApiConversation[]>(`/conversations${projectId ? `?project_id=${encodeURIComponent(projectId)}` : ''}`),
+  listArchived: () => api<ApiConversation[]>('/conversations?archived=only'),
   get: (id: string) =>
     api<{ conversation: ApiConversation; messages: ApiMessage[] }>(`/conversations/${encodeURIComponent(id)}`),
   create: (body: { model_id?: string; project_id?: string; title?: string }) =>

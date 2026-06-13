@@ -11,7 +11,7 @@ import { toast } from '@/hooks/use-toast'
 import { useAuth } from '@/store/auth'
 import { authApi, setAccessToken, ApiError } from '@/api'
 
-const ease = [0.2, 0.8, 0.2, 1]
+const ease: [number, number, number, number] = [0.2, 0.8, 0.2, 1]
 const stagger = { hidden: {}, visible: { transition: { staggerChildren: 0.06, delayChildren: 0.04 } } }
 const fadeUp = {
   hidden: { opacity: 0, y: 14 },

@@ -255,12 +255,22 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// 5. Resolve tools for this model BEFORE composing the system prompt so the
 	//    tool-guidance segment (and the §4.13 prompt preamble) match the real,
 	//    enabled tool list instead of a hardcoded set.
+	// §2.3-B: an OpenAI Responses model can opt into OpenAI-hosted tools instead
+	// of the system's self-built ones. When official tools are configured we
+	// attach NEITHER the system tools NOR the tool-guidance / document recipes —
+	// OpenAI runs its own tools server-side.
+	var officialTools []string
+	if channel.Type == "openai" && channel.APIFormat == "responses" && len(model.OfficialTools) > 0 {
+		_ = json.Unmarshal(model.OfficialTools, &officialTools)
+	}
+	useOfficial := len(officialTools) > 0
+
 	toolDefs := []ToolDef{}
 	toolMode := model.ToolMode
 	if toolMode == "" {
 		toolMode = "native"
 	}
-	if toolMode != "none" {
+	if toolMode != "none" && !useOfficial {
 		toolDefs = o.tools.List(model.ID)
 	}
 	toolNames := make([]string, 0, len(toolDefs))
@@ -368,7 +378,8 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			APIFormat: channel.APIFormat,
 		},
 		Tools:          toolDefs,
-		ToolModePrompt: toolMode == "prompt",
+		OfficialTools:  officialTools,
+		ToolModePrompt: toolMode == "prompt" && !useOfficial,
 		ProjectFiles:   projectFiles,
 		RAGSnippets:    ragSnippets,
 		ParamOverrides: req.ParamOverrides,
@@ -798,30 +809,48 @@ HTML(string=html).write_pdf("/workspace/outputs/report.pdf",
 ` + "```\n" +
 				`Write semantic HTML (h1/h2/p/ul/table/blockquote) — not divs with classes. WeasyPrint handles page breaks, fonts, and tables natively.
 
-**PPT:** HTML slide → playwright screenshot → python-pptx
+**PPT (.pptx):** author semantic HTML slides, then map them to native PPTX shapes with BeautifulSoup + python-pptx — NO browser, NO screenshots (the sandbox has no headless Chromium, so any playwright/screenshot route fails)
 ` + "```python\n" +
-				`# 1) render each slide as a 1280x720 HTML page
-from playwright.sync_api import sync_playwright
+				`# Author each slide as semantic HTML, then PARSE it to native PPTX shapes.
+# No browser, no screenshot — runs purely on bs4 + python-pptx.
+from bs4 import BeautifulSoup
 from pptx import Presentation
-from pptx.util import Inches
-import os
-slides_html = [...]  # one HTML string per slide; CSS sets html,body { width:1280px; height:720px; margin:0; }
+from pptx.util import Inches, Pt
+from pptx.dml.color import RGBColor
+CJK = "Noto Sans CJK SC"
+slides_html = [
+    "<h1>Deck title</h1><p>Subtitle</p>",
+    "<h2>Section</h2><ul><li>First point</li><li>Second point</li></ul>",
+]  # one HTML string per slide; for charts add <img src='/workspace/outputs/chart.png'>
 prs = Presentation()
 prs.slide_width, prs.slide_height = Inches(13.33), Inches(7.5)
-os.makedirs("/workspace/outputs/_shots", exist_ok=True)
-with sync_playwright() as p:
-    browser = p.chromium.launch()
-    page = browser.new_page(viewport={"width":1280, "height":720})
-    for i, html in enumerate(slides_html):
-        page.set_content(html)
-        path = f"/workspace/outputs/_shots/{i}.png"
-        page.screenshot(path=path, full_page=False)
-        slide = prs.slides.add_slide(prs.slide_layouts[6])  # blank
-        slide.shapes.add_picture(path, 0, 0, width=prs.slide_width, height=prs.slide_height)
-    browser.close()
+def emit(tf, text, size, bold=False, color="1f2937"):
+    p = tf.add_paragraph() if tf.paragraphs[0].runs else tf.paragraphs[0]
+    r = p.add_run(); r.text = text
+    r.font.name = CJK; r.font.size = Pt(size); r.font.bold = bold
+    r.font.color.rgb = RGBColor.from_string(color)
+for html in slides_html:
+    soup = BeautifulSoup(html, "html.parser")
+    slide = prs.slides.add_slide(prs.slide_layouts[6])  # blank
+    tf = slide.shapes.add_textbox(Inches(0.8), Inches(0.6), Inches(11.7), Inches(6)).text_frame
+    tf.word_wrap = True
+    for el in soup.find_all(["h1", "h2", "p", "li", "img", "table"]):
+        if el.name in ("h1", "h2"):
+            emit(tf, el.get_text(), 40 if el.name == "h1" else 28, bold=True, color="0f172a")
+        elif el.name in ("p", "li"):
+            emit(tf, ("• " if el.name == "li" else "") + el.get_text(), 18)
+        elif el.name == "img" and el.get("src"):
+            slide.shapes.add_picture(el["src"], Inches(1), Inches(2.2), width=Inches(8))
+        elif el.name == "table":
+            rows = el.find_all("tr"); ncol = len(rows[0].find_all(["td", "th"]))
+            tbl = slide.shapes.add_table(len(rows), ncol, Inches(1), Inches(2.4),
+                                         Inches(11), Inches(0.4 * len(rows))).table
+            for ri, tr in enumerate(rows):
+                for ci, cell in enumerate(tr.find_all(["td", "th"])):
+                    tbl.cell(ri, ci).text = cell.get_text()
 prs.save("/workspace/outputs/deck.pptx")
 ` + "```\n" +
-				`The screenshot route is preferred over raw python-pptx because it preserves typography, colors, layouts, and CJK characters exactly as the HTML renders.
+				`Authoring slides as HTML keeps structure natural; parsing maps headings → bold title runs, <ul><li> → bullets, <table> → a native PPTX table, <img src> → add_picture. This is the same no-screenshot approach common PPT-builder skills use — it needs no browser, so it runs in the sandbox. For charts/diagrams, render a matplotlib PNG first and reference it with <img src='/workspace/outputs/chart.png'>.
 
 **Word (.docx):** python-docx
 ` + "```python\n" +
@@ -838,11 +867,11 @@ doc.add_paragraph("…")
 # images: doc.add_picture("/workspace/outputs/chart.png", width=Inches(5.5))
 doc.save("/workspace/outputs/report.docx")
 ` + "```\n" +
-				`**Visual QA loop (mandatory for every document you generate):**
-1. After writing the file, screenshot the first page (PDF: pdf2image / pypdf + playwright; PPT/Word: convert via the same render path you used).
-2. Open the screenshot in your next reply with the image_generate tool's vision capability or describe it textually.
-3. If it looks broken (overflowing text, missing CJK glyphs, table breaking off the page, ugly colors), fix the recipe and re-render. Iterate up to 3 times.
-4. Only present the artifact to the user once the screenshot looks correct.
+				`**Self-check before presenting (NO screenshots — the sandbox has no browser):**
+1. Confirm the file was written and is non-empty: os.path.getsize("/workspace/outputs/<file>") > 0.
+2. Reopen and validate structurally — PDF: pypdf, assert len(reader.pages) matches and extract_text() on page 1 shows the expected content (and CJK glyphs); PPTX: python-pptx, assert len(prs.slides) matches and the title/bullet text is present; DOCX/XLSX likewise.
+3. Set Noto Sans CJK fonts in every recipe so Chinese never renders as tofu boxes (□□□).
+4. If a check fails, fix the recipe and re-render (up to 3 times) before presenting the artifact.
 
 **Excel (.xlsx):** openpyxl or xlsxwriter (charts, conditional formatting, frozen panes all supported).
 `)

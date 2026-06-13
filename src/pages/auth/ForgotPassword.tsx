@@ -9,7 +9,7 @@ import { Field } from '@/components/ui/label'
 import { toast } from '@/hooks/use-toast'
 import { authApi, ApiError } from '@/api'
 
-const ease = [0.2, 0.8, 0.2, 1]
+const ease: [number, number, number, number] = [0.2, 0.8, 0.2, 1]
 const stagger = { hidden: {}, visible: { transition: { staggerChildren: 0.06, delayChildren: 0.04 } } }
 const fadeUp = {
   hidden: { opacity: 0, y: 14 },

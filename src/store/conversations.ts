@@ -20,7 +20,7 @@ import type {
   ApiMessage,
   ApiSseEvent,
 } from '@/api/types'
-import type { Attachment, Citation, Conversation, Message, ToolCall } from '@/types/chat'
+import type { Attachment, Citation, Conversation, Message, ReasoningItem, ToolCall } from '@/types/chat'
 import { uid } from '@/lib/utils'
 
 interface ConversationStore {
@@ -38,9 +38,16 @@ interface ConversationStore {
   togglePin: (id: string) => Promise<void>
   toggleStar: (id: string) => Promise<void>
   archiveConversation: (id: string) => Promise<void>
+  unarchiveConversation: (id: string) => Promise<void>
+  /** Fetch the user's archived conversations (NOT merged into the active cache). */
+  loadArchived: () => Promise<Conversation[]>
   setProject: (id: string, projectId: string | undefined) => Promise<void>
   setActiveLeaf: (id: string, leafId: string) => Promise<void>
   fork: (id: string, leafId?: string, title?: string) => Promise<Conversation | null>
+  /** Re-fetch the canonical active-path (enriched with sibling metadata) and
+   *  swap it into the cache. Called after a stream completes so branch pickers
+   *  appear and optimistic flat-append siblings collapse into the tree (§4.15). */
+  reloadActivePath: (id: string) => Promise<void>
   setModel: (id: string, modelId: string) => Promise<void>
   /** Bind knowledge bases to the conversation (§7.2-7 composer 📚 selector). */
   setKBs: (id: string, kbIds: string[]) => Promise<void>
@@ -53,6 +60,10 @@ interface ConversationStore {
     attachments?: Attachment[]
     parentId?: string
     params?: Record<string, unknown>
+    /** True when this message opens a NEW branch (edit-a-past-question, §4.15).
+     *  The optimistic update then truncates the visible path to `parentId`
+     *  before appending, instead of stacking onto the active leaf. */
+    branch?: boolean
   }) => Promise<void>
   regenerate: (conversationId: string, assistantId: string, modelId?: string) => Promise<void>
   abortStream: (assistantMessageId: string) => void
@@ -191,6 +202,28 @@ export const useConversations = create<ConversationStore>((set, get) => ({
     }
   },
 
+  async unarchiveConversation(id) {
+    set((s) => ({
+      conversations: s.conversations.map((c) => (c.id === id ? { ...c, archived: false } : c)),
+    }))
+    try {
+      await conversationsApi.update(id, { archived: false })
+      // Re-pull the active list so the restored chat reappears in the sidebar.
+      await get().load()
+    } catch {
+      /* ignore */
+    }
+  },
+
+  async loadArchived() {
+    try {
+      const rows = await conversationsApi.listArchived()
+      return rows.map(toLocalConversation)
+    } catch {
+      return []
+    }
+  },
+
   async setProject(id, projectId) {
     set((s) => ({
       conversations: s.conversations.map((c) => (c.id === id ? { ...c, projectId } : c)),
@@ -221,6 +254,28 @@ export const useConversations = create<ConversationStore>((set, get) => ({
       return conv
     } catch {
       return null
+    }
+  },
+
+  async reloadActivePath(id) {
+    // Never clobber an in-flight stream — only reconcile once nothing in this
+    // conversation is still streaming.
+    const cur = get().conversations.find((c) => c.id === id)
+    if (!cur || cur.messages.some((m) => m.streaming)) return
+    try {
+      const resp = await conversationsApi.get(id)
+      const messages = resp.messages.map(toLocalMessage)
+      set((s) => ({
+        conversations: s.conversations.map((c) =>
+          c.id !== id
+            ? c
+            : // Keep client-only fields (lastParams); swap in the canonical
+              // tree path + any freshly generated title.
+              { ...c, title: resp.conversation.title || c.title, messages },
+        ),
+      }))
+    } catch {
+      /* keep the optimistic copy if the reconcile fetch fails */
     }
   },
 
@@ -265,23 +320,26 @@ export const useConversations = create<ConversationStore>((set, get) => ({
       modelId: input.modelId || get().conversations.find((c) => c.id === input.conversationId)?.modelId,
     }
     streamControllers.set(assistantId, abort)
-    // Optimistically append to local cache.
+    // Optimistically update the local cache. For a normal turn we append to the
+    // active leaf; for an edit-branch (§4.15) we truncate the visible path to
+    // the edited message's parent first, so the new question REPLACES the old
+    // sub-tree on screen instead of stacking beneath it.
     set((s) => ({
-      conversations: s.conversations.map((c) =>
-        c.id === input.conversationId
-          ? {
-              ...c,
-              messages: [...c.messages, userMsg, assistantMsg],
-              updatedAt: Date.now(),
-              // Remember the param_controls selection so regenerate reuses it.
-              lastParams: input.params ?? c.lastParams,
-              title:
-                c.messages.length === 0 && c.title === 'New conversation'
-                  ? input.text.replace(/\n+/g, ' ').slice(0, 60)
-                  : c.title,
-            }
-          : c,
-      ),
+      conversations: s.conversations.map((c) => {
+        if (c.id !== input.conversationId) return c
+        const base = input.branch ? truncateToParent(c.messages, input.parentId) : c.messages
+        return {
+          ...c,
+          messages: [...base, userMsg, assistantMsg],
+          updatedAt: Date.now(),
+          // Remember the param_controls selection so regenerate reuses it.
+          lastParams: input.params ?? c.lastParams,
+          title:
+            c.messages.length === 0 && c.title === 'New conversation'
+              ? input.text.replace(/\n+/g, ' ').slice(0, 60)
+              : c.title,
+        }
+      }),
     }))
     try {
       let serverAssistantId = assistantId
@@ -317,10 +375,10 @@ export const useConversations = create<ConversationStore>((set, get) => ({
             }))
             break
           case 'thinking_delta':
-            // Accumulate into a separate, collapsible thinking buffer (§1.1).
+            // Extend the current thinking run inside the ordered trace (§7.1-4).
             updateAssistant(set, input.conversationId, serverAssistantId, (m) => ({
               ...m,
-              thinking: (m.thinking ?? '') + (ev.text ?? ''),
+              reasoning: appendThinkingDelta(m.reasoning ?? [], ev.text ?? ''),
             }))
             break
           case 'artifact':
@@ -360,65 +418,60 @@ export const useConversations = create<ConversationStore>((set, get) => ({
             break
           }
           case 'tool_start': {
-            // §6.2 dedupe: tool_start arrives once per tool-use round, but in
-            // the wild some providers emit it twice (Anthropic's first delta
-            // + an early input chunk both trigger a start). The frontend
-            // tracks by id so a second emission updates rather than appends.
-            const existing = ev.id ? toolCallsById.get(ev.id) : undefined
-            if (existing) break
+            // §6.2 dedupe: a round can emit tool_start twice. Track by id and
+            // append into the ordered trace at the spot it occurred (§7.1-4).
+            const tid = ev.id ?? uid('tc')
+            if (toolCallsById.has(tid)) break
             const tc: ToolCall = {
-              id: ev.id ?? uid('tc'),
+              id: tid,
               name: ev.name,
               label: prettyToolLabel(ev.name),
               status: 'running',
               startedAt: Date.now(),
               input: (ev.input as Record<string, unknown>) ?? undefined,
             }
-            toolCallsById.set(tc.id, tc)
+            toolCallsById.set(tid, tc)
             updateAssistant(set, input.conversationId, serverAssistantId, (m) => ({
               ...m,
-              toolCalls: [...(m.toolCalls ?? []), tc],
+              reasoning: appendToolStart(m.reasoning ?? [], tc),
             }))
             break
           }
           case 'tool_input': {
             if (!ev.id) break
-            const tc = toolCallsById.get(ev.id)
-            if (!tc) break
+            const tid = ev.id
             // §6.2: partial_json streams JSON fragments — accumulate and parse
-            // opportunistically so the card shows the input as it forms.
+            // opportunistically so the trace shows the query/code as it forms.
+            let nextInput: Record<string, unknown> | undefined
             if (ev.partial_json) {
-              const buf = (toolInputBuffers.get(ev.id) ?? '') + ev.partial_json
-              toolInputBuffers.set(ev.id, buf)
+              const buf = (toolInputBuffers.get(tid) ?? '') + ev.partial_json
+              toolInputBuffers.set(tid, buf)
               try {
-                tc.input = JSON.parse(buf) as Record<string, unknown>
+                nextInput = JSON.parse(buf) as Record<string, unknown>
               } catch {
                 // incomplete JSON — keep accumulating
               }
             } else if (ev.input) {
-              tc.input = ev.input as Record<string, unknown>
+              nextInput = ev.input as Record<string, unknown>
             }
+            if (!nextInput) break
             updateAssistant(set, input.conversationId, serverAssistantId, (m) => ({
               ...m,
-              toolCalls: m.toolCalls?.map((t) => (t.id === tc.id ? { ...t, input: tc.input } : t)),
+              reasoning: patchReasoningTool(m.reasoning ?? [], tid, { input: nextInput }),
             }))
             break
           }
           case 'tool_result': {
-            const tc = ev.id ? toolCallsById.get(ev.id) : undefined
-            if (tc) {
-              tc.output = ev.summary
-              tc.status = ev.status === 'error' ? 'error' : 'complete'
-              tc.endedAt = Date.now()
-              updateAssistant(set, input.conversationId, serverAssistantId, (m) => ({
-                ...m,
-                toolCalls: m.toolCalls?.map((t) =>
-                  t.id === tc.id
-                    ? { ...t, output: tc.output, status: tc.status, endedAt: tc.endedAt }
-                    : t,
-                ),
-              }))
-            }
+            if (!ev.id) break
+            const tid = ev.id
+            updateAssistant(set, input.conversationId, serverAssistantId, (m) => ({
+              ...m,
+              reasoning: patchReasoningTool(m.reasoning ?? [], tid, {
+                output: ev.summary,
+                status: ev.status === 'error' ? 'error' : 'complete',
+                endedAt: Date.now(),
+              }),
+            }))
             break
           }
           case 'citation': {
@@ -453,6 +506,9 @@ export const useConversations = create<ConversationStore>((set, get) => ({
             break
         }
       }
+      // Stream finished cleanly — reconcile to the canonical tree path so the
+      // user/assistant siblings collapse and the `< n/m >` picker appears.
+      await get().reloadActivePath(input.conversationId)
     } catch (e) {
       updateAssistant(set, input.conversationId, assistantId, (m) => ({
         ...m,
@@ -470,26 +526,31 @@ export const useConversations = create<ConversationStore>((set, get) => ({
     const conv = get().conversations.find((c) => c.id === conversationId)
     streamControllers.set(assistantId + '-regen', abort)
     try {
-      // Optimistic placeholder for the new assistant sibling.
+      // §4.15: regenerate forks at the assistant — the new reply is a SIBLING
+      // of the old one under the same user turn, not an append. Truncate the
+      // visible path to that user parent (dropping the old reply and anything
+      // below it) before showing the streaming placeholder, so the screen never
+      // stacks two replies. The post-stream reconcile then restores the old
+      // sibling behind the `< n/m >` picker.
+      const oldAssistant = conv?.messages.find((m) => m.id === assistantId)
+      const userParentId = oldAssistant?.parentId
       const placeholderId = uid('m')
+      const placeholder: Message = {
+        id: placeholderId,
+        role: 'assistant',
+        content: '',
+        createdAt: Date.now(),
+        streaming: true,
+        modelId: modelId ?? conv?.modelId,
+      }
       set((s) => ({
-        conversations: s.conversations.map((c) =>
-          c.id === conversationId
-            ? {
-                ...c,
-                messages: [
-                  ...c.messages,
-                  {
-                    id: placeholderId,
-                    role: 'assistant' as const,
-                    content: '',
-                    createdAt: Date.now(),
-                    streaming: true,
-                  },
-                ],
-              }
-            : c,
-        ),
+        conversations: s.conversations.map((c) => {
+          if (c.id !== conversationId) return c
+          const base = userParentId
+            ? truncateToParent(c.messages, userParentId)
+            : c.messages.filter((m) => m.id !== assistantId)
+          return { ...c, messages: [...base, placeholder] }
+        }),
       }))
       let serverAssistantId = placeholderId
       const toolCallsById = new Map<string, ToolCall>()
@@ -503,59 +564,56 @@ export const useConversations = create<ConversationStore>((set, get) => ({
         const ev = frame.data as ApiSseEvent
         switch (ev.type) {
           case 'tool_start': {
-            const existing = ev.id ? toolCallsById.get(ev.id) : undefined
-            if (existing) break
+            const tid = ev.id ?? uid('tc')
+            if (toolCallsById.has(tid)) break
             const tc: ToolCall = {
-              id: ev.id ?? uid('tc'),
+              id: tid,
               name: ev.name,
               label: prettyToolLabel(ev.name),
               status: 'running',
               startedAt: Date.now(),
               input: (ev.input as Record<string, unknown>) ?? undefined,
             }
-            toolCallsById.set(tc.id, tc)
+            toolCallsById.set(tid, tc)
             updateAssistant(set, conversationId, serverAssistantId, (m) => ({
               ...m,
-              toolCalls: [...(m.toolCalls ?? []), tc],
+              reasoning: appendToolStart(m.reasoning ?? [], tc),
             }))
             break
           }
           case 'tool_input': {
             if (!ev.id) break
-            const tc = toolCallsById.get(ev.id)
-            if (!tc) break
+            const tid = ev.id
+            let nextInput: Record<string, unknown> | undefined
             if (ev.partial_json) {
-              const buf = (toolInputBuffers.get(ev.id) ?? '') + ev.partial_json
-              toolInputBuffers.set(ev.id, buf)
+              const buf = (toolInputBuffers.get(tid) ?? '') + ev.partial_json
+              toolInputBuffers.set(tid, buf)
               try {
-                tc.input = JSON.parse(buf) as Record<string, unknown>
+                nextInput = JSON.parse(buf) as Record<string, unknown>
               } catch {
                 /* incomplete JSON — keep accumulating */
               }
             } else if (ev.input) {
-              tc.input = ev.input as Record<string, unknown>
+              nextInput = ev.input as Record<string, unknown>
             }
+            if (!nextInput) break
             updateAssistant(set, conversationId, serverAssistantId, (m) => ({
               ...m,
-              toolCalls: m.toolCalls?.map((t) => (t.id === tc.id ? { ...t, input: tc.input } : t)),
+              reasoning: patchReasoningTool(m.reasoning ?? [], tid, { input: nextInput }),
             }))
             break
           }
           case 'tool_result': {
-            const tc = ev.id ? toolCallsById.get(ev.id) : undefined
-            if (tc) {
-              tc.output = ev.summary
-              tc.status = ev.status === 'error' ? 'error' : 'complete'
-              tc.endedAt = Date.now()
-              updateAssistant(set, conversationId, serverAssistantId, (m) => ({
-                ...m,
-                toolCalls: m.toolCalls?.map((t) =>
-                  t.id === tc.id
-                    ? { ...t, output: tc.output, status: tc.status, endedAt: tc.endedAt }
-                    : t,
-                ),
-              }))
-            }
+            if (!ev.id) break
+            const tid = ev.id
+            updateAssistant(set, conversationId, serverAssistantId, (m) => ({
+              ...m,
+              reasoning: patchReasoningTool(m.reasoning ?? [], tid, {
+                output: ev.summary,
+                status: ev.status === 'error' ? 'error' : 'complete',
+                endedAt: Date.now(),
+              }),
+            }))
             break
           }
           case 'citation': {
@@ -583,7 +641,7 @@ export const useConversations = create<ConversationStore>((set, get) => ({
           case 'thinking_delta':
             updateAssistant(set, conversationId, serverAssistantId, (m) => ({
               ...m,
-              thinking: (m.thinking ?? '') + (ev.text ?? ''),
+              reasoning: appendThinkingDelta(m.reasoning ?? [], ev.text ?? ''),
             }))
             break
           case 'artifact':
@@ -614,6 +672,9 @@ export const useConversations = create<ConversationStore>((set, get) => ({
             break
         }
       }
+      // Reconcile so the freshly generated reply and the previous one show up as
+      // siblings with a `< n/m >` picker instead of two stacked bubbles (§4.15).
+      await get().reloadActivePath(conversationId)
     } finally {
       streamControllers.delete(assistantId + '-regen')
     }
@@ -671,18 +732,57 @@ function toLocalConversation(c: ApiConversation): Conversation {
 // Exported so the admin thread viewer (AdminUserConversation) can reuse the
 // exact same ApiMessage → UI Message mapping the chat surface relies on —
 // keeps tool-call/citation/artifact rendering identical across both surfaces.
+// --- reasoning-trace builders (§7.1-4) -------------------------------------
+// The assistant's thinking runs and tool rounds arrive interleaved over SSE;
+// these keep them in arrival order inside ONE ordered list so the UI can render
+// "think → search → think → run" faithfully.
+
+function appendThinkingDelta(reasoning: ReasoningItem[], text: string): ReasoningItem[] {
+  if (!text) return reasoning
+  const last = reasoning[reasoning.length - 1]
+  if (last && last.kind === 'thinking') {
+    return [...reasoning.slice(0, -1), { ...last, text: last.text + text }]
+  }
+  return [...reasoning, { kind: 'thinking', id: uid('rt'), text }]
+}
+
+function appendToolStart(reasoning: ReasoningItem[], tool: ToolCall): ReasoningItem[] {
+  if (reasoning.some((it) => it.kind === 'tool' && it.id === tool.id)) return reasoning
+  return [...reasoning, { kind: 'tool', id: tool.id, tool }]
+}
+
+function patchReasoningTool(
+  reasoning: ReasoningItem[],
+  id: string,
+  patch: Partial<ToolCall>,
+): ReasoningItem[] {
+  return reasoning.map((it) =>
+    it.kind === 'tool' && it.id === id ? { ...it, tool: { ...it.tool, ...patch } } : it,
+  )
+}
+
 export function toLocalMessage(m: ApiMessage): Message {
-  // Extract text content from blocks (skipping tool_call summary blocks, those
-  // become toolCalls below).
-  const toolCalls: ToolCall[] = []
+  // Walk blocks IN ORDER so the reasoning trace interleaves thinking runs and
+  // tool rounds exactly as they occurred (§7.1-4). Text blocks accumulate into
+  // the final answer; artifacts are collected separately.
+  const reasoning: ReasoningItem[] = []
   const artifacts: Message['artifacts'] = []
   let content = ''
-  let thinking = ''
+  let idx = 0
   for (const b of m.blocks ?? []) {
+    idx++
     if (b.kind === 'text') {
       content += b.text ?? ''
     } else if (b.kind === 'thinking') {
-      thinking += b.text ?? ''
+      const text = b.text ?? ''
+      if (!text) continue
+      const last = reasoning[reasoning.length - 1]
+      if (last && last.kind === 'thinking') {
+        // Merge consecutive thinking blocks into one run.
+        last.text += text
+      } else {
+        reasoning.push({ kind: 'thinking', id: `${m.id}-r${idx}`, text })
+      }
     } else if (b.kind === 'artifact') {
       artifacts.push({
         id: b.file_ref ?? uid('art'),
@@ -696,14 +796,25 @@ export function toLocalMessage(m: ApiMessage): Message {
         mimeType: b.summary ?? '',
       })
     } else if (b.kind === 'tool_call') {
-      toolCalls.push({
-        id: b.tool_id ?? uid('tc'),
-        name: b.tool_name ?? 'tool',
-        label: prettyToolLabel(b.tool_name ?? 'tool'),
-        status: 'complete',
-        startedAt: m.created_at * 1000,
-        endedAt: m.created_at * 1000,
-        output: b.summary,
+      const id = b.tool_id ?? `${m.id}-r${idx}`
+      reasoning.push({
+        kind: 'tool',
+        id,
+        tool: {
+          id,
+          name: b.tool_name ?? 'tool',
+          label: prettyToolLabel(b.tool_name ?? 'tool'),
+          status: 'complete',
+          startedAt: m.created_at * 1000,
+          endedAt: m.created_at * 1000,
+          output: b.summary,
+          // Reloaded tool rounds keep their input so the subtitle (query/code)
+          // still renders (§7.1-4).
+          input:
+            b.input && typeof b.input === 'object'
+              ? (b.input as Record<string, unknown>)
+              : undefined,
+        },
       })
     }
   }
@@ -712,14 +823,13 @@ export function toLocalMessage(m: ApiMessage): Message {
     parentId: m.parent_id || undefined,
     role: m.role,
     content,
-    thinking: thinking || undefined,
+    reasoning: reasoning.length > 0 ? reasoning : undefined,
     artifacts: artifacts.length > 0 ? artifacts : undefined,
     modelId: m.model_id || undefined,
     createdAt: m.created_at * 1000,
     streaming: m.status === 'streaming',
     cost: m.cost > 0 ? m.cost : undefined,
     currency: m.currency || undefined,
-    toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
     citations:
       m.citations && m.citations.length > 0
         ? m.citations.map((c) => ({
@@ -766,6 +876,18 @@ export interface SendInput {
   parentId?: string
   /** param_controls values (§2.3-G). */
   params?: Record<string, unknown>
+}
+
+// truncateToParent returns the visible path up to and INCLUDING `parentId`,
+// dropping everything after it — the optimistic basis for opening a new branch
+// (§4.15 edit / regenerate). An empty/undefined parent means "branch from the
+// root", so the whole path is cleared. A parent that isn't on the current path
+// (shouldn't happen) falls back to keeping the path intact.
+function truncateToParent(messages: Message[], parentId: string | undefined): Message[] {
+  if (!parentId) return []
+  const idx = messages.findIndex((m) => m.id === parentId)
+  if (idx < 0) return messages.slice()
+  return messages.slice(0, idx + 1)
 }
 
 function replaceOrPrepend(list: Conversation[], next: Conversation): Conversation[] {

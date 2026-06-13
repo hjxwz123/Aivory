@@ -281,6 +281,43 @@ type openAIToolCall struct {
 	Input json.RawMessage
 }
 
+// hostedToolCall records an OpenAI-hosted tool round (web_search etc.) the model
+// ran server-side, so we can persist it as a tool_call block (§2.3-B).
+type hostedToolCall struct {
+	ID, Name, Summary string
+}
+
+// officialToolSpec maps a configured official-tool name to its Responses API
+// tool spec. Unknown names return nil (skipped). §2.3-B.
+func officialToolSpec(name string) map[string]any {
+	switch name {
+	case "web_search":
+		return map[string]any{"type": "web_search"}
+	case "code_interpreter":
+		return map[string]any{"type": "code_interpreter", "container": map[string]any{"type": "auto"}}
+	case "image_generation":
+		return map[string]any{"type": "image_generation"}
+	}
+	return nil
+}
+
+// hostedToolName maps a Responses hosted-tool output item type (e.g.
+// "web_search_call") to the system tool name the frontend already has an icon
+// and label for, so hosted rounds render identically to self-built ones.
+func hostedToolName(itemType string) string {
+	switch itemType {
+	case "web_search_call":
+		return "web_search"
+	case "code_interpreter_call":
+		return "python_execute"
+	case "image_generation_call":
+		return "image_generate"
+	case "file_search_call":
+		return "search_knowledge_base"
+	}
+	return strings.TrimSuffix(itemType, "_call")
+}
+
 func readOpenAIChatStream(body io.Reader, onEvent func(SseEvent)) (string, []openAIToolCall, string, Usage, error) {
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
@@ -429,13 +466,24 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 	}
 
 	var respTools []map[string]any
-	for _, t := range req.Tools {
-		respTools = append(respTools, map[string]any{
-			"type":        "function",
-			"name":        t.Name,
-			"description": t.Description,
-			"parameters":  json.RawMessage(t.InputSchema),
-		})
+	if len(req.OfficialTools) > 0 {
+		// §2.3-B: attach OpenAI-hosted tools; OpenAI executes them server-side.
+		// We attach NO function tools — the loop below just streams the answer,
+		// and hosted-tool rounds surface as tool_start/tool_result events.
+		for _, name := range req.OfficialTools {
+			if spec := officialToolSpec(name); spec != nil {
+				respTools = append(respTools, spec)
+			}
+		}
+	} else {
+		for _, t := range req.Tools {
+			respTools = append(respTools, map[string]any{
+				"type":        "function",
+				"name":        t.Name,
+				"description": t.Description,
+				"parameters":  json.RawMessage(t.InputSchema),
+			})
+		}
 	}
 
 	const maxIter = 12
@@ -478,13 +526,20 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 			return nil, fmt.Errorf("openai responses %d: %s", resp.StatusCode, string(b))
 		}
 
-		text, calls, u, err := readOpenAIResponsesStream(resp.Body, onEvent)
+		text, calls, hosted, u, err := readOpenAIResponsesStream(resp.Body, onEvent)
 		resp.Body.Close()
 		if err != nil {
 			return nil, err
 		}
 		usage.InputTokens += u.InputTokens
 		usage.OutputTokens += u.OutputTokens
+		// Persist OpenAI-hosted tool rounds as tool_call blocks so reloads show
+		// the same steps the user saw live (§2.3-B).
+		for _, h := range hosted {
+			allBlocks = append(allBlocks, UnifiedBlock{
+				Kind: "tool_call", ToolName: h.Name, ToolID: h.ID, Summary: h.Summary,
+			})
+		}
 		if text != "" {
 			allText.WriteString(text)
 			allBlocks = append(allBlocks, UnifiedBlock{Kind: "text", Text: text})
@@ -564,7 +619,7 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 //
 // The function returns the joined visible text, the parsed function-call list,
 // and the input/output token counts.
-func readOpenAIResponsesStream(body io.Reader, onEvent func(SseEvent)) (string, []openAIToolCall, Usage, error) {
+func readOpenAIResponsesStream(body io.Reader, onEvent func(SseEvent)) (string, []openAIToolCall, []hostedToolCall, Usage, error) {
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 	text := strings.Builder{}
@@ -576,6 +631,8 @@ func readOpenAIResponsesStream(body io.Reader, onEvent func(SseEvent)) (string, 
 	}
 	callsByItem := map[string]*callBuf{} // item_id → buffer
 	order := []string{}
+	hostedByItem := map[string]*hostedToolCall{} // item_id → hosted tool round
+	hostedOrder := []string{}
 	for scanner.Scan() {
 		line := scanner.Text()
 		if !strings.HasPrefix(line, "data:") {
@@ -605,7 +662,8 @@ func readOpenAIResponsesStream(body io.Reader, onEvent func(SseEvent)) (string, 
 			if it == nil {
 				continue
 			}
-			if t, _ := it["type"].(string); t == "function_call" {
+			t, _ := it["type"].(string)
+			if t == "function_call" {
 				itemID, _ := it["id"].(string)
 				callID, _ := it["call_id"].(string)
 				name, _ := it["name"].(string)
@@ -613,6 +671,27 @@ func readOpenAIResponsesStream(body io.Reader, onEvent func(SseEvent)) (string, 
 				callsByItem[itemID] = cb
 				order = append(order, itemID)
 				onEvent(SseEvent{Type: "tool_start", Name: name, ID: callID})
+			} else if strings.HasSuffix(t, "_call") {
+				// §2.3-B OpenAI-hosted tool round (web_search_call, …). OpenAI
+				// runs it server-side; surface a live tool step to the UI.
+				itemID, _ := it["id"].(string)
+				name := hostedToolName(t)
+				hostedByItem[itemID] = &hostedToolCall{ID: itemID, Name: name}
+				hostedOrder = append(hostedOrder, itemID)
+				onEvent(SseEvent{Type: "tool_start", Name: name, ID: itemID})
+			}
+		case "response.output_item.done":
+			it, _ := ev["item"].(map[string]any)
+			if it == nil {
+				continue
+			}
+			itemID, _ := it["id"].(string)
+			if h := hostedByItem[itemID]; h != nil {
+				status := "complete"
+				if s, _ := it["status"].(string); s != "" && s != "completed" {
+					status = "error"
+				}
+				onEvent(SseEvent{Type: "tool_result", Name: h.Name, ID: itemID, Status: status})
 			}
 		case "response.function_call_arguments.delta":
 			itemID, _ := ev["item_id"].(string)
@@ -646,14 +725,14 @@ func readOpenAIResponsesStream(body io.Reader, onEvent func(SseEvent)) (string, 
 			if r != nil {
 				if errObj, ok := r["error"].(map[string]any); ok {
 					msg, _ := errObj["message"].(string)
-					return text.String(), nil, usage, fmt.Errorf("openai responses error: %s", msg)
+					return text.String(), nil, nil, usage, fmt.Errorf("openai responses error: %s", msg)
 				}
 			}
-			return text.String(), nil, usage, fmt.Errorf("openai responses failed")
+			return text.String(), nil, nil, usage, fmt.Errorf("openai responses failed")
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return "", nil, usage, err
+		return "", nil, nil, usage, err
 	}
 	calls := []openAIToolCall{}
 	for _, itemID := range order {
@@ -667,7 +746,13 @@ func readOpenAIResponsesStream(body io.Reader, onEvent func(SseEvent)) (string, 
 		}
 		calls = append(calls, openAIToolCall{ID: cb.ID, Name: cb.Name, Input: json.RawMessage(args)})
 	}
-	return text.String(), calls, usage, nil
+	hosted := []hostedToolCall{}
+	for _, itemID := range hostedOrder {
+		if h := hostedByItem[itemID]; h != nil {
+			hosted = append(hosted, *h)
+		}
+	}
+	return text.String(), calls, hosted, usage, nil
 }
 
 // parseResponsesOutput is retained for callers that need a non-streaming JSON

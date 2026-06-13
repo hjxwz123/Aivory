@@ -32,6 +32,11 @@
   },
   "assistant": "Aurelia",
   "thinking": "Thinking",
+  "reasoning": {
+    "title": "Reasoning",
+    "steps_one": "{{count}} step",
+    "steps_other": "{{count}} steps"
+  },
   "actions": {
     "copy": "Copy",
     "copied": "Copied",
@@ -55,6 +60,28 @@
     "code_interpreter": "Code interpreter",
     "deep_research": "Deep research"
   },
+  "code": {
+    "run": "Run",
+    "rerun": "Run again",
+    "stop": "Stop",
+    "phaseQueued": "Queued…",
+    "phaseBoot": "Loading Python engine…",
+    "phasePackages": "Resolving packages…",
+    "phaseRunning": "Running…",
+    "result": "Result",
+    "noOutput": "Finished with no output.",
+    "stopped": "Run stopped.",
+    "timeout": "Run exceeded {{seconds}}s and was terminated.",
+    "engineFailed": "Could not load the Python engine — check your connection and retry.",
+    "figureAlt": "Figure {{index}}",
+    "poweredBy": "Executed in your browser by Pyodide",
+    "clear": "Clear",
+    "preview": "Preview",
+    "previewTitle": "HTML preview",
+    "previewRefresh": "Reload",
+    "previewClose": "Close preview",
+    "previewSandboxHint": "Rendered in an isolated sandbox — page scripts cannot reach your data."
+  },
   "modePill": {
     "deepResearch": "Deep research",
     "canvas": "Canvas"
@@ -70,6 +97,11 @@
     "share": "Share",
     "archive": "Archive",
     "archived": "Conversation archived",
+    "archivedTitle": "Archived chats",
+    "archivedBody": "Unarchive to bring a chat back to your list.",
+    "archivedEmpty": "No archived chats.",
+    "unarchive": "Unarchive",
+    "unarchived": "Chat unarchived",
     "delete": "Delete",
     "deleteTitle": "Delete this conversation?",
     "deleteBody": "This will remove the conversation and all its messages. This can't be undone.",

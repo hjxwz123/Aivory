@@ -6,7 +6,11 @@
 >
 > 技术基线：前端 react + TypeScript，**后端 Go**。容量目标：**10W+ 同时在线**（见 §11）。
 >
-> 文档版本：v1.7（2026-06-12）
+> 文档版本：v1.8（2026-06-13）
+>
+> **v1.8 变更要点**
+> - §7.2 新增**前端代码块运行 + HTML 实时预览**（纯前端能力，已实装于本仓库前端）：assistant 输出的 ```python 代码块带「运行」按钮，Pyodide（CPython→wasm）在专用 Web Worker 内执行，流式 stdout/stderr、末尾表达式 repr、matplotlib 图表回显；```html 代码块在流式输出时右侧自动弹出抽屉实时渲染。与 §4.5 的服务端 `python_execute` 工具沙箱互补，互不替代。
+> - §8.2 增补两条对应攻击面与缓解：执行 Worker 的**同源网络封锁**（fetch/importScripts 仅放行 Pyodide CDN 源；XHR/WebSocket/EventSource/BroadcastChannel/indexedDB/caches 一律移除）与预览 iframe 的**不透明源沙箱**（仅 `allow-scripts`，绝不加 `allow-same-origin`）。
 >
 > **v1.7 变更要点**
 > - §4.4 web_search 后端改为**管理员后台配置 + 实时生效**：`search_provider` ∈ {searxng, serper, brave}，SearXNG 只填 `search_base_url` 自部署即可零密钥；env 仅作 boot-time 兜底。
@@ -1718,6 +1722,36 @@ type SseEvent =
 6. **模型切换 + 参数控件**：顶栏 `ModelSelector` 随时可切；会话中途跨厂商切换时轻提示历史降级（§2.3-D）。输入框上方按当前模型的 `param_controls`（§2.3-G）动态渲染开关/选择器（如"深度思考"开关、"思考强度"下拉），发消息时把选值随 `params` 提交。每条 assistant 消息气泡下角标注生成它的模型名。
 7. **知识库**：Composer 工具栏加"📚 知识库"选择器（绑定到当前会话）；RAG 检索过程渲染为"📚 正在检索知识库：{query}"卡片，命中来源（文件名+页码）与 web 搜索引用共用 `CitationList` 组件；`KnowledgeBaseView` 中文档处理状态用进度条 + 失败原因提示。
 
+### 7.2 前端代码块运行（Pyodide）+ HTML 实时预览（已实装）
+
+与 §4.5 的服务端沙箱是**两条互补路径**：`python_execute` 是模型在工具循环里自主调用的后端能力；本节是**用户**对 assistant 已输出的代码块手动触发的纯前端能力——零后端依赖、零成本、即点即跑。
+
+**A. Python 代码块「运行」（`src/lib/pyodide-runner.ts` + `code-block.tsx` / `code-run-output.tsx`）**
+
+| 决策点 | 方案 |
+|---|---|
+| 引擎 | Pyodide v0.28.3，jsDelivr CDN 加载（约 12MB，首次运行才拉，之后常驻） |
+| 执行位置 | **专用 classic Web Worker**（Blob 构建，免打包配置）——主线程永不阻塞；「停止」与 120s 超时（对齐 §4.5 exec 上限）靠 `terminate()` 实现，下次运行透明重启引擎 |
+| 串行化 | 单 Worker 单引擎，多代码块的运行经 promise 队列排队（phase: queued/boot/packages/running 实时回传 UI） |
+| 命名空间 | 每次运行用**全新 dict**——同一块重跑结果确定，块间不漏变量；`sys.modules` 保持热（二次 `import numpy` 即时） |
+| 依赖 | `loadPackagesFromImports` 自动从 CDN 拉 Pyodide 发行版内的包（numpy/pandas/matplotlib…）；不开 micropip |
+| 输出 | stdout/stderr 按行流式回传（stderr 黄色）；末尾表达式经 Python `repr()` 展示；matplotlib 强制 AGG 后端，运行结束收割全部 figure 为 base64 PNG 内联展示后 `close('all')` |
+| 限额 | 流式输出 200KB 截断（Worker 内抛错终止）、repr 20K 截断、figure 最多 12 张 |
+
+**安全（关键）**：Worker 与页面**同源**，而 API 鉴权是 httpOnly cookie（`credentials:'include'`）——不加锁的话恶意代码片段可 `from js import fetch` 带 cookie 调 `/api/*` 或外发数据。因此 Worker 在任何用户代码运行前**先自锁**：
+- `fetch` / `importScripts` 包装为**仅放行 Pyodide CDN 源**（引擎与包下载不受影响），同源/外域/相对路径一律拒绝；
+- `XMLHttpRequest` / `WebSocket` / `EventSource` / `BroadcastChannel` 替换为抛错存根，`indexedDB` / `caches` 置 undefined；
+- wasm 在 Worker 内本就无 DOM/cookie/localStorage 通路，剩余面 = 纯计算 + CDN 下载。
+
+**B. HTML 实时预览抽屉（`src/store/html-preview.ts` + `html-preview-panel.tsx`）**
+
+- **触发**：assistant 流式输出 ```html 块时**自动弹出**（每块每会话至多自动弹一次——用户中途关闭不被下一个 token 重新顶开）；历史消息用代码块头部「预览」按钮手动打开。块身份 = `messageId#blockIndex`，流式期间持续 `syncHtml`，面板 350ms 尾随防抖刷 `srcDoc`（实时但不闪烁），头部提供「重新加载」重跑脚本。
+- **布局**：桌面（≥1024px）为聊天区右缘**内联分栏**（`clamp(22rem,38vw,40rem)`，对话保持可用）；移动端复用 `Sheet` 右侧滑出；路由切换自动关闭。
+- **安全**：模型 HTML 按敌意输入处理，渲染在 `srcDoc` iframe，`sandbox="allow-scripts"` **仅此一项**：
+  - 不加 `allow-same-origin`（与 allow-scripts 同给等于拆掉沙箱，**永远不要加**）→ 不透明源，无 cookie/存储/父 DOM；
+  - 不加 `allow-forms`（防把用户在预览页里输入的内容提交到攻击者 URL 的钓鱼形态；JS 交互不受影响）、不加 popups/modals/top-navigation/downloads；
+  - `referrerPolicy="no-referrer"`；聊天消息流本身的 Markdown 渲染仍走 `stripRawHtml` + 白名单 sanitize 双层（§8.2），预览 iframe 是唯一允许模型 HTML 执行的位置。
+
 ---
 
 ## 8. 安全与成本控制
@@ -1781,6 +1815,8 @@ type SseEvent =
 | 路径穿越（产物落盘） | `path.basename()` + 专用输出目录 |
 | 配额/用量失控 | 计费在外部网关侧；应用侧：① 前缀缓存（少占配额、降 TTFT）② 标题生成用 Haiku ③ 高峰降级切 `claude-sonnet-4-6` ④ **按模型配置价记录每次调用费用**（usage_logs，§8.3）做用量看板与异常告警 |
 | XSS（Markdown 渲染） | markdown-it 关闭 raw HTML，链接加 `rel="noopener"` |
+| 前端 Python 运行越权（§7.2） | 执行 Worker 与页面同源且 API 用 httpOnly cookie——用户代码运行前 Worker 自锁：fetch/importScripts 仅放行 Pyodide CDN 源，XHR/WebSocket/EventSource/BroadcastChannel 抛错，indexedDB/caches 移除；停止/120s 超时 = terminate |
+| 模型 HTML 预览 XSS / 钓鱼（§7.2） | 仅在 `sandbox="allow-scripts"` 的 srcDoc iframe（不透明源）内执行：无 cookie/存储/父 DOM，不给 forms/popups/modals/top-navigation/downloads，`referrerPolicy=no-referrer`；消息流 Markdown 不变，仍是 stripRawHtml + 白名单 sanitize |
 
 错误处理统一用各 SDK 的类型化错误（Go：`errors.As` 取 `*anthropic.Error` 等错误类型后按 `StatusCode`/`Type` 分类，如 `rate_limit_error`、`overloaded_error`），429/5xx 由 SDK 自动指数退避重试（默认 2 次）；对前端统一映射为 §6.2 的 `error` 事件加友好文案。
 

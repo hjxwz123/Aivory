@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { MessageRow } from './message-row'
 import { useConversations } from '@/store/conversations'
 import type { Conversation, Message } from '@/types/chat'
@@ -8,6 +9,7 @@ interface MessageListProps {
 }
 
 export function MessageList({ conversation }: MessageListProps) {
+  const navigate = useNavigate()
   // Pull stable selectors only — keeps this component out of the per-token
   // re-render loop while streaming.
   const sendMessage = useConversations((s) => s.sendMessage)
@@ -40,6 +42,10 @@ export function MessageList({ conversation }: MessageListProps) {
       text: newContent,
       modelId: conversation.modelId,
       parentId,
+      // §4.15: an edit always opens a sibling branch under the same parent —
+      // flag it so the store truncates the visible path (handles editing the
+      // ROOT question too, where parentId is empty and append would be wrong).
+      branch: true,
     })
   }
 
@@ -48,7 +54,12 @@ export function MessageList({ conversation }: MessageListProps) {
   }
 
   function handleFork(leafId: string) {
-    void fork(conversation.id, leafId)
+    // §4.15 "fork to new conversation": copy the path ending at this node into a
+    // fresh conversation and take the user there, so the fork is immediately
+    // usable instead of silently appearing in the sidebar.
+    void fork(conversation.id, leafId).then((created) => {
+      if (created) navigate(`/chat/${created.id}`)
+    })
   }
 
   return (

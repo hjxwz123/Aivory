@@ -8,7 +8,7 @@ import { useTheme } from '@/store/theme'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
 
-const ease = [0.2, 0.8, 0.2, 1]
+const ease: [number, number, number, number] = [0.2, 0.8, 0.2, 1]
 
 export default function AuthLayout() {
   const syncSystem = useTheme((s) => s.syncSystem)

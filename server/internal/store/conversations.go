@@ -51,6 +51,8 @@ func ListConversations(ctx context.Context, db *sql.DB, userID, projectID, archi
 	}
 	if archivedFilter == "active" {
 		q += " AND archived=0"
+	} else if archivedFilter == "archived" {
+		q += " AND archived=1"
 	}
 	q += " ORDER BY pinned DESC, updated_at DESC"
 	rows, err := db.QueryContext(ctx, q, args...)

@@ -77,6 +77,11 @@
   --color-syntax-fn:      oklch(40% 0.095 245);
   --color-kbd-bg: oklch(97% 0.008 280);
   --color-kbd-border: oklch(84% 0.014 270);
+  /* Canvas behind rendered HTML previews / matplotlib figures. Stays paper-
+     light in BOTH themes on purpose: model HTML assumes a browser-default
+     white canvas, and flipping it dark would render its text unreadable.
+     Not pure white (§7) — faint porcelain. */
+  --color-preview-canvas: oklch(99.2% 0.003 280);
 
   /* ---------- TYPOGRAPHY ----------------------------------------------- */
   --font-serif: 'Fraunces', 'Cormorant Garamond', 'Iowan Old Style', Charter, ui-serif, serif;

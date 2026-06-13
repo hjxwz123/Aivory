@@ -52,6 +52,8 @@ export interface ApiModel {
   stream: boolean
   system_prompt: string
   param_controls: unknown
+  /** OpenAI Responses hosted tools to enable; empty/absent = use system tools (§2.3-B). */
+  official_tools?: string[]
   price_input: number
   price_output: number
   price_cache_read: number

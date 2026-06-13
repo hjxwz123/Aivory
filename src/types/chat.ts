@@ -21,6 +21,23 @@ export interface ToolCall {
   endedAt?: number
 }
 
+/**
+ * One ordered step in the assistant's reasoning trace (§7.1-4): either a run of
+ * extended-thinking text or a single tool round. Kept in the exact order they
+ * occurred so the UI can interleave "think → search → think → run" faithfully.
+ */
+export interface ReasoningThinking {
+  kind: 'thinking'
+  id: string
+  text: string
+}
+export interface ReasoningTool {
+  kind: 'tool'
+  id: string
+  tool: ToolCall
+}
+export type ReasoningItem = ReasoningThinking | ReasoningTool
+
 export interface Citation {
   id: string
   index: number
@@ -62,8 +79,10 @@ export interface Message {
   createdAt: number
   /** True while the model is producing tokens. */
   streaming?: boolean
-  /** Extended-thinking text (collapsible), accumulated from thinking_delta. */
-  thinking?: string
+  /** Ordered, interleaved reasoning trace — thinking runs + tool rounds in the
+   *  exact order they happened (§7.1-4), so the UI can render them woven
+   *  together instead of "all thinking, then all tools". */
+  reasoning?: ReasoningItem[]
   /** Files produced by tools during this turn (downloadable). */
   artifacts?: ArtifactRef[]
   /** Set when the model declined to answer (content filter). */
@@ -75,8 +94,6 @@ export interface Message {
   /** Reactions. */
   liked?: boolean
   disliked?: boolean
-  /** Tool calls that ran during this assistant turn. */
-  toolCalls?: ToolCall[]
   /** Citations attached to this assistant turn. */
   citations?: Citation[]
   /** RAG retrieval lifecycle event surfaced live during streaming so the UI

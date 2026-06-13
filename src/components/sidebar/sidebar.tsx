@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   Search,
@@ -53,6 +53,7 @@ import { type DateBucket, bucketFor, modKey, cn, truncate } from '@/lib/utils'
 import { toast } from '@/hooks/use-toast'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
+import type { Conversation } from '@/types/chat'
 
 interface SidebarProps {
   variant?: 'desktop' | 'sheet'
@@ -468,7 +469,9 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
   const logout = useAuth((s) => s.logout)
   const displayName = user?.name || user?.email?.split('@')[0] || 'Aurelia'
   const isAdmin = user?.role === 'admin'
+  const [archivedOpen, setArchivedOpen] = useState(false)
   return (
+    <>
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <button
@@ -511,6 +514,10 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
           <BookText size={13} aria-hidden />
           {t('chat:userMenu.knowledge', { defaultValue: 'Knowledge' })}
         </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => setArchivedOpen(true)}>
+          <Archive size={13} aria-hidden />
+          {t('chat:sidebar.archivedTitle')}
+        </DropdownMenuItem>
         {isAdmin && (
           <DropdownMenuItem onClick={() => navigate('/admin')}>
             <ShieldCheck size={13} aria-hidden />
@@ -531,5 +538,92 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
+    <ArchivedDialog open={archivedOpen} onOpenChange={setArchivedOpen} />
+    </>
+  )
+}
+
+/**
+ * ArchivedDialog — lists the user's archived conversations so they can be found
+ * again, reopened, unarchived (back to the sidebar), or deleted. Archived chats
+ * are fetched on open and live only in this dialog's local state.
+ */
+function ArchivedDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+  const { t } = useTranslation(['chat', 'common'])
+  const navigate = useNavigate()
+  const loadArchived = useConversations((s) => s.loadArchived)
+  const unarchive = useConversations((s) => s.unarchiveConversation)
+  const remove = useConversations((s) => s.deleteConversation)
+  const [rows, setRows] = useState<Conversation[]>([])
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (!open) return
+    setLoading(true)
+    void loadArchived()
+      .then(setRows)
+      .finally(() => setLoading(false))
+  }, [open, loadArchived])
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent size="md">
+        <DialogHeader>
+          <DialogTitle>{t('chat:sidebar.archivedTitle')}</DialogTitle>
+          <DialogDescription>{t('chat:sidebar.archivedBody')}</DialogDescription>
+        </DialogHeader>
+        <DialogBody>
+          {loading ? (
+            <p className="py-4 text-sm text-[var(--color-fg-subtle)]">{t('common:common.loading')}</p>
+          ) : rows.length === 0 ? (
+            <p className="py-4 text-sm text-[var(--color-fg-muted)]">{t('chat:sidebar.archivedEmpty')}</p>
+          ) : (
+            <ul className="flex flex-col divide-y divide-[var(--color-divider)]">
+              {rows.map((c) => (
+                <li key={c.id} className="flex items-center gap-2 py-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigate(`/chat/${c.id}`)
+                      onOpenChange(false)
+                    }}
+                    className="min-w-0 flex-1 truncate rounded-[6px] text-left text-sm text-[var(--color-fg)] interactive hover:text-[var(--color-accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                  >
+                    {truncate(c.title, 60)}
+                  </button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      void unarchive(c.id)
+                      setRows((r) => r.filter((x) => x.id !== c.id))
+                      toast.success(t('chat:sidebar.unarchived'))
+                    }}
+                  >
+                    {t('chat:sidebar.unarchive')}
+                  </Button>
+                  <button
+                    type="button"
+                    aria-label={t('chat:sidebar.delete')}
+                    onClick={() => {
+                      void remove(c.id)
+                      setRows((r) => r.filter((x) => x.id !== c.id))
+                    }}
+                    className="inline-flex size-7 items-center justify-center rounded-[7px] text-[var(--color-fg-subtle)] interactive hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-danger)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                  >
+                    <Trash2 size={13} aria-hidden />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </DialogBody>
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => onOpenChange(false)}>
+            {t('common:common.close', { defaultValue: 'Close' })}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }

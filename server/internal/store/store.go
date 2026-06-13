@@ -81,9 +81,11 @@ func Open(dataSource string) (*sql.DB, error) {
 func Migrate(db *sql.DB) error {
 	schema := schemaSQL
 	addImageRef := `ALTER TABLE chunks ADD COLUMN image_ref TEXT`
+	addOfficialTools := `ALTER TABLE models ADD COLUMN official_tools TEXT NOT NULL DEFAULT '[]'`
 	if usePostgres {
 		schema = schemaPGSQL
 		addImageRef = `ALTER TABLE chunks ADD COLUMN IF NOT EXISTS image_ref TEXT`
+		addOfficialTools = `ALTER TABLE models ADD COLUMN IF NOT EXISTS official_tools TEXT NOT NULL DEFAULT '[]'`
 	}
 	if _, err := db.Exec(schema); err != nil {
 		return fmt.Errorf("apply schema: %w", err)
@@ -92,7 +94,7 @@ func Migrate(db *sql.DB) error {
 	// IF NOT EXISTS won't add columns to a pre-existing table. On SQLite a
 	// duplicate-column error is expected and ignored; Postgres uses IF NOT
 	// EXISTS so it's a clean no-op.
-	for _, ddl := range []string{addImageRef} {
+	for _, ddl := range []string{addImageRef, addOfficialTools} {
 		_, _ = db.Exec(ddl)
 	}
 	return nil

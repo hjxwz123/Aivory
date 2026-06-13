@@ -51,6 +51,10 @@ type Model struct {
 	Stream          bool            `json:"stream"`
 	SystemPrompt    string          `json:"system_prompt"`
 	ParamControls   json.RawMessage `json:"param_controls"`
+	// OfficialTools lists OpenAI Responses hosted tools to enable (e.g.
+	// "web_search"). Empty = use the system's self-built tools (§2.3-B). Only
+	// meaningful for an openai channel with api_format=responses.
+	OfficialTools   json.RawMessage `json:"official_tools"`
 	PriceInput      float64         `json:"price_input"`
 	PriceOutput     float64         `json:"price_output"`
 	PriceCacheRead  float64         `json:"price_cache_read"`

@@ -2,7 +2,7 @@
  * AdminUserConversation — read-only thread view of one conversation belonging
  * to a target user, for support / abuse triage (§8.1).
  *
- * Re-uses the chat surface's <Markdown>, <ToolCallCard>, and <CitationList>
+ * Re-uses the chat surface's <Markdown>, <ReasoningTrace>, and <CitationList>
  * primitives so the rendering matches what the user actually sees — important
  * for triage, where "this looks different here than over there" wastes time.
  *
@@ -19,7 +19,7 @@ import type { Message } from '@/types/chat'
 import { Badge } from '@/components/ui/badge'
 import { toast } from '@/hooks/use-toast'
 import { Markdown } from '@/components/chat/markdown'
-import { ToolCallCard } from '@/components/chat/tool-call-card'
+import { ReasoningTrace } from '@/components/chat/reasoning-trace'
 import { CitationList } from '@/components/chat/citation'
 import { toLocalMessage } from '@/store/conversations'
 
@@ -125,7 +125,6 @@ export default function AdminUserConversation() {
  */
 function AdminMessageRow({ message }: { message: Message }) {
   const { t } = useTranslation('admin')
-  const [showThinking, setShowThinking] = useState(false)
   const isAssistant = message.role === 'assistant'
   const Icon = isAssistant ? Bot : UserIcon
   return (
@@ -151,24 +150,8 @@ function AdminMessageRow({ message }: { message: Message }) {
         </div>
       </header>
 
-      {message.thinking ? (
-        <div className="mb-3">
-          <button
-            type="button"
-            onClick={() => setShowThinking((v) => !v)}
-            className="text-[11.5px] text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)] interactive rounded-[6px] px-2 py-1 -ml-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-          >
-            {showThinking ? t('users.hideThinking') : t('users.showThinking')}
-          </button>
-          {showThinking ? (
-            <div className="mt-2 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-3 text-[12.5px] text-[var(--color-fg-muted)] whitespace-pre-wrap">
-              {message.thinking}
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-
-      {message.toolCalls?.map((tc) => <ToolCallCard key={tc.id} toolCall={tc} />)}
+      {/* Same unified reasoning trace the chat surface uses (read-only here). */}
+      <ReasoningTrace reasoning={message.reasoning} />
 
       {message.content ? (
         <div className="mt-2">

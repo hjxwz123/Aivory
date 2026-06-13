@@ -1,0 +1,69 @@
+name: Build & push sandbox images
+
+# Builds the two sandbox images in the cloud (no local Docker needed) and
+# pushes them to GitHub Container Registry (ghcr.io):
+#   - aurelia-sandbox          (Python runtime each session container runs)
+#   - aurelia-sandbox-sidecar  (FastAPI control service the Go backend calls)
+#
+# Trigger: any push touching sandbox-service/, or manually via the Actions tab
+# ("Run workflow"). Images land at:
+#   ghcr.io/<your-account>/aurelia-sandbox:latest
+#   ghcr.io/<your-account>/aurelia-sandbox-sidecar:latest
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'sandbox-service/**'
+      - '.github/workflows/sandbox-image.yml'
+  workflow_dispatch: {}
+
+env:
+  REGISTRY: ghcr.io
+  # Server arch. Change to linux/arm64 (and DOCKER_CLI_ARCH=aarch64 below) for
+  # ARM servers, or list both for multi-arch.
+  PLATFORMS: linux/amd64
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - name: aurelia-sandbox
+            dockerfile: sandbox-service/Dockerfile.runner
+          - name: aurelia-sandbox-sidecar
+            dockerfile: sandbox-service/Dockerfile.sidecar
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # ghcr image paths must be lowercase; the owner may contain capitals.
+      - name: Compute lowercase owner
+        id: vars
+        run: echo "owner=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push ${{ matrix.name }}
+        uses: docker/build-push-action@v6
+        with:
+          context: sandbox-service
+          file: ${{ matrix.dockerfile }}
+          platforms: ${{ env.PLATFORMS }}
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ steps.vars.outputs.owner }}/${{ matrix.name }}:latest
+            ${{ env.REGISTRY }}/${{ steps.vars.outputs.owner }}/${{ matrix.name }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

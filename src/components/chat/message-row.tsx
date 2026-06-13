@@ -32,7 +32,7 @@ import { useCopy } from '@/hooks/use-clipboard'
 import { useModels } from '@/store/models'
 import { useAutosizeTextarea } from '@/hooks/use-autosize-textarea'
 import { Markdown } from './markdown'
-import { ToolCallCard } from './tool-call-card'
+import { ReasoningTrace } from './reasoning-trace'
 import { CitationList } from './citation'
 import { toast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
@@ -188,19 +188,16 @@ export function MessageRow({ message, userName, onRegenerate, onEdit, onLike, on
           </div>
         ) : (
           <div className="w-full text-[var(--color-fg)]">
-            {/* Extended thinking — collapsible, shimmer not spinner (§1.1) */}
-            {message.thinking && message.thinking.trim() ? (
-              <details className="mb-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-subtle)] px-3 py-2 text-sm text-[var(--color-fg-muted)]">
-                <summary className="cursor-pointer select-none text-[var(--color-fg-muted)]">
-                  Thinking
-                </summary>
-                <div className="mt-2 whitespace-pre-wrap font-mono text-xs leading-relaxed text-[var(--color-fg-faint)]">
-                  {message.thinking}
-                </div>
-              </details>
-            ) : null}
+            {/* Unified reasoning trace — extended thinking + tool rounds in one
+                live, collapsible panel (§7.1-4). Streams open with per-tool
+                pulse + elapsed counters so long searches / sandbox runs never
+                look frozen; collapses once the answer text begins. */}
+            <ReasoningTrace
+              reasoning={message.reasoning}
+              streaming={message.streaming}
+              settled={Boolean(message.content)}
+            />
 
-            {/* Tool calls */}
             {message.ragInjection ? (
               <div className="mb-2 inline-flex items-center gap-1.5 rounded-[8px] border border-[var(--color-secondary)]/30 bg-[var(--color-secondary-soft)] px-2 py-1 text-[11px] text-[var(--color-secondary)]">
                 <span aria-hidden>📚</span>
@@ -216,10 +213,9 @@ export function MessageRow({ message, userName, onRegenerate, onEdit, onLike, on
                 </span>
               </div>
             ) : null}
-            {message.toolCalls?.map((tc) => <ToolCallCard key={tc.id} toolCall={tc} />)}
 
             {/* Streaming placeholder while empty */}
-            {message.streaming && !message.content && (!message.toolCalls || message.toolCalls.length === 0) ? (
+            {message.streaming && !message.content && (!message.reasoning || message.reasoning.length === 0) ? (
               <div className="flex items-center gap-1.5 py-1">
                 <span className="size-1.5 rounded-full bg-[var(--color-fg-faint)] animate-[typing_1400ms_ease-in-out_infinite] [animation-delay:0ms]" />
                 <span className="size-1.5 rounded-full bg-[var(--color-fg-faint)] animate-[typing_1400ms_ease-in-out_infinite] [animation-delay:160ms]" />
@@ -232,7 +228,7 @@ export function MessageRow({ message, userName, onRegenerate, onEdit, onLike, on
                     The model declined to answer this request.
                   </div>
                 ) : null}
-                <Markdown content={message.content} />
+                <Markdown content={message.content} live={Boolean(message.streaming)} blockKeyPrefix={message.id} />
                 {message.streaming ? (
                   <span
                     aria-hidden

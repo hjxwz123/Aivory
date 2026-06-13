@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS models (
   stream            INTEGER NOT NULL DEFAULT 1,
   system_prompt     TEXT NOT NULL DEFAULT '',
   param_controls    TEXT NOT NULL DEFAULT '[]',
+  official_tools    TEXT NOT NULL DEFAULT '[]', -- OpenAI Responses hosted tools; [] = use system tools (§2.3-B)
   price_input       DOUBLE PRECISION NOT NULL DEFAULT 0,
   price_output      DOUBLE PRECISION NOT NULL DEFAULT 0,
   price_cache_read  DOUBLE PRECISION NOT NULL DEFAULT 0,

@@ -14,7 +14,13 @@ import (
 func listConversationsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
 	projectID := r.URL.Query().Get("project_id")
-	rows, err := store.ListConversations(r.Context(), d.DB, u.ID, projectID, "active")
+	// ?archived=only returns the archived chats (for the "Archived" view); the
+	// default hides them.
+	archivedFilter := "active"
+	if r.URL.Query().Get("archived") == "only" {
+		archivedFilter = "archived"
+	}
+	rows, err := store.ListConversations(r.Context(), d.DB, u.ID, projectID, archivedFilter)
 	if err != nil {
 		writeError(w, 500, err)
 		return
@@ -73,9 +79,12 @@ func getConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	msgs, _ := store.ListMessages(r.Context(), d.DB, conv.ID, conv.ActiveLeafID)
+	// Enrich with sibling indexes so the active-path load carries branch_count /
+	// branch_index / siblings — without this the frontend never sees the
+	// `< n/m >` branch picker on a fresh load or post-stream reconcile (§4.15).
 	writeJSON(w, 200, map[string]any{
 		"conversation": conv,
-		"messages":     msgs,
+		"messages":     enrichWithSiblings(d, r, msgs),
 	})
 }
 

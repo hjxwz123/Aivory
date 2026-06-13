@@ -32,6 +32,10 @@
   },
   "assistant": "Aurelia",
   "thinking": "思考中",
+  "reasoning": {
+    "title": "思考过程",
+    "steps_other": "{{count}} 步"
+  },
   "actions": {
     "copy": "复制",
     "copied": "已复制",
@@ -55,6 +59,28 @@
     "code_interpreter": "代码解释器",
     "deep_research": "深度研究"
   },
+  "code": {
+    "run": "运行",
+    "rerun": "重新运行",
+    "stop": "停止",
+    "phaseQueued": "排队中…",
+    "phaseBoot": "正在加载 Python 引擎…",
+    "phasePackages": "正在解析依赖…",
+    "phaseRunning": "运行中…",
+    "result": "返回值",
+    "noOutput": "运行完成,没有输出。",
+    "stopped": "已停止运行。",
+    "timeout": "运行超过 {{seconds}} 秒,已强制终止。",
+    "engineFailed": "Python 引擎加载失败,请检查网络后重试。",
+    "figureAlt": "图表 {{index}}",
+    "poweredBy": "由 Pyodide 在浏览器内执行",
+    "clear": "清除",
+    "preview": "预览",
+    "previewTitle": "HTML 预览",
+    "previewRefresh": "重新加载",
+    "previewClose": "关闭预览",
+    "previewSandboxHint": "在隔离沙箱中渲染 — 页面脚本无法访问你的数据。"
+  },
   "modePill": {
     "deepResearch": "深度研究",
     "canvas": "画布"
@@ -70,6 +96,11 @@
     "share": "分享",
     "archive": "归档",
     "archived": "会话已归档",
+    "archivedTitle": "已归档对话",
+    "archivedBody": "取消归档可让对话重新回到列表。",
+    "archivedEmpty": "没有已归档的对话。",
+    "unarchive": "取消归档",
+    "unarchived": "已取消归档",
     "delete": "删除",
     "deleteTitle": "删除这段会话？",
     "deleteBody": "会同时删除该会话及其全部消息，无法撤销。",

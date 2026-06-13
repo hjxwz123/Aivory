@@ -85,24 +85,26 @@ export default function Models() {
         </SettingsRow>
       </SettingsSection>
 
-      {imageModels.length > 0 && (
-        <SettingsSection title="Image generation">
-          <SettingsRow label="Image model" description="Used when you ask the assistant to generate or edit an image.">
-            <Select value={imageModelId} onValueChange={onPickImageModel}>
-              <SelectTrigger className="w-64" aria-label="Image model">
-                <SelectValue placeholder="Select a model" />
-              </SelectTrigger>
-              <SelectContent>
-                {imageModels.map((m) => (
-                  <SelectItem key={m.id} value={m.id}>
-                    <span className="inline-flex items-center gap-2">{m.label}</span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </SettingsRow>
-        </SettingsSection>
-      )}
+      <SettingsSection title={t('settings:models.imageTitle')}>
+        <SettingsRow label={t('settings:models.imageModel')} description={t('settings:models.imageModelBody')}>
+          <Select value={imageModelId} onValueChange={onPickImageModel} disabled={imageModels.length === 0}>
+            <SelectTrigger className="w-64" aria-label={t('settings:models.imageModel')}>
+              <SelectValue
+                placeholder={
+                  imageModels.length === 0 ? t('settings:models.imageNone') : t('settings:models.imagePick')
+                }
+              />
+            </SelectTrigger>
+            <SelectContent>
+              {imageModels.map((m) => (
+                <SelectItem key={m.id} value={m.id}>
+                  <span className="inline-flex items-center gap-2">{m.label}</span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </SettingsRow>
+      </SettingsSection>
 
       <SettingsSection
         title={t('settings:models.custom')}
