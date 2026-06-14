@@ -1,4 +1,16 @@
 {
+  "setPassword": {
+    "title": "設定密碼",
+    "subtitle": "你是透過第三方帳號登入的，目前還沒有密碼。請現在設定一個密碼以保護帳戶——之後修改設定或直接登入都會用到。",
+    "newLabel": "新密碼",
+    "confirmLabel": "確認密碼",
+    "hint": "至少 8 個字元。",
+    "mismatch": "兩次輸入的密碼不一致。",
+    "tooShort": "密碼至少需要 8 個字元。",
+    "submit": "設定密碼並繼續",
+    "saved": "密碼已設定。",
+    "failed": "設定密碼失敗，請重試。"
+  },
   "intro": {
     "eyebrow": "歡迎來到 Aurelia",
     "title": "更安靜的思考空間。",

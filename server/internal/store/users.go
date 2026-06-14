@@ -18,10 +18,11 @@ func FindUserByEmail(ctx context.Context, db *sql.DB, email string) (*User, erro
 	var u User
 	var settings string
 	var totpEnabled int
+	var passwordSet int
 	err := db.QueryRowContext(ctx,
-		`SELECT id, email, name, role, status, token_ver, settings, group_id, group_expires_at, previous_group_id, totp_secret, totp_enabled, created_at FROM users WHERE email=?`,
+		`SELECT id, email, name, role, status, token_ver, settings, group_id, group_expires_at, previous_group_id, totp_secret, totp_enabled, password_set, created_at FROM users WHERE email=?`,
 		strings.ToLower(strings.TrimSpace(email)),
-	).Scan(&u.ID, &u.Email, &u.Name, &u.Role, &u.Status, &u.TokenVer, &settings, &u.GroupID, &u.GroupExpiresAt, &u.PreviousGroupID, &u.TotpSecret, &totpEnabled, &u.CreatedAt)
+	).Scan(&u.ID, &u.Email, &u.Name, &u.Role, &u.Status, &u.TokenVer, &settings, &u.GroupID, &u.GroupExpiresAt, &u.PreviousGroupID, &u.TotpSecret, &totpEnabled, &passwordSet, &u.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -29,6 +30,7 @@ func FindUserByEmail(ctx context.Context, db *sql.DB, email string) (*User, erro
 		return nil, err
 	}
 	u.TotpEnabled = totpEnabled != 0
+	u.HasPassword = passwordSet != 0
 	u.Settings = json.RawMessage(settings)
 	// Lazy expiry: when the membership window has elapsed, demote back to the
 	// previous group (or the default) and clear the window.
@@ -41,9 +43,10 @@ func FindUserByID(ctx context.Context, db *sql.DB, id string) (*User, error) {
 	var u User
 	var settings string
 	var totpEnabled int
+	var passwordSet int
 	err := db.QueryRowContext(ctx,
-		`SELECT id, email, name, role, status, token_ver, settings, group_id, group_expires_at, previous_group_id, totp_secret, totp_enabled, created_at FROM users WHERE id=?`, id,
-	).Scan(&u.ID, &u.Email, &u.Name, &u.Role, &u.Status, &u.TokenVer, &settings, &u.GroupID, &u.GroupExpiresAt, &u.PreviousGroupID, &u.TotpSecret, &totpEnabled, &u.CreatedAt)
+		`SELECT id, email, name, role, status, token_ver, settings, group_id, group_expires_at, previous_group_id, totp_secret, totp_enabled, password_set, created_at FROM users WHERE id=?`, id,
+	).Scan(&u.ID, &u.Email, &u.Name, &u.Role, &u.Status, &u.TokenVer, &settings, &u.GroupID, &u.GroupExpiresAt, &u.PreviousGroupID, &u.TotpSecret, &totpEnabled, &passwordSet, &u.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -51,6 +54,7 @@ func FindUserByID(ctx context.Context, db *sql.DB, id string) (*User, error) {
 		return nil, err
 	}
 	u.TotpEnabled = totpEnabled != 0
+	u.HasPassword = passwordSet != 0
 	u.Settings = json.RawMessage(settings)
 	maybeExpireGroup(ctx, db, &u)
 	return &u, nil
@@ -235,13 +239,23 @@ func UpdateUserProfile(ctx context.Context, db *sql.DB, userID string, name, ema
 // stolen refresh token survives a password reset and can re-mint a session,
 // defeating the reset.
 func UpdateUserPassword(ctx context.Context, db *sql.DB, userID, newHash string) error {
-	if _, err := db.ExecContext(ctx, `UPDATE users SET password_hash=? WHERE id=?`, newHash, userID); err != nil {
+	if _, err := db.ExecContext(ctx, `UPDATE users SET password_hash=?, password_set=1 WHERE id=?`, newHash, userID); err != nil {
 		return err
 	}
 	if _, err := db.ExecContext(ctx, `UPDATE refresh_tokens SET revoked=1 WHERE user_id=?`, userID); err != nil {
 		return err
 	}
 	return BumpTokenVersion(ctx, db, userID)
+}
+
+// SetInitialPassword writes the first password for an account that never had one
+// (created via OAuth). Unlike UpdateUserPassword it does NOT rotate the token
+// version or revoke refresh tokens — the user is mid-session and we want them to
+// stay logged in and continue straight into the app. It is the caller's job to
+// verify the account currently has no password (password_set=0).
+func SetInitialPassword(ctx context.Context, db *sql.DB, userID, newHash string) error {
+	_, err := db.ExecContext(ctx, `UPDATE users SET password_hash=?, password_set=1 WHERE id=?`, newHash, userID)
+	return err
 }
 
 // SetUserTotp stores the TOTP secret and enabled flag for a user (§ 2FA login).
@@ -281,7 +295,7 @@ func ListUsersPaged(ctx context.Context, db *sql.DB, limit, offset int) ([]User,
 		offset = 0
 	}
 	rows, err := db.QueryContext(ctx,
-		`SELECT id, email, name, role, status, token_ver, settings, group_id, group_expires_at, previous_group_id, totp_secret, totp_enabled, created_at FROM users ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+		`SELECT id, email, name, role, status, token_ver, settings, group_id, group_expires_at, previous_group_id, totp_secret, totp_enabled, password_set, created_at FROM users ORDER BY created_at DESC LIMIT ? OFFSET ?`,
 		limit, offset)
 	if err != nil {
 		return nil, err
@@ -292,10 +306,12 @@ func ListUsersPaged(ctx context.Context, db *sql.DB, limit, offset int) ([]User,
 		var u User
 		var settings string
 		var totpEnabled int
-		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.Role, &u.Status, &u.TokenVer, &settings, &u.GroupID, &u.GroupExpiresAt, &u.PreviousGroupID, &u.TotpSecret, &totpEnabled, &u.CreatedAt); err != nil {
+		var passwordSet int
+		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.Role, &u.Status, &u.TokenVer, &settings, &u.GroupID, &u.GroupExpiresAt, &u.PreviousGroupID, &u.TotpSecret, &totpEnabled, &passwordSet, &u.CreatedAt); err != nil {
 			return nil, err
 		}
 		u.TotpEnabled = totpEnabled != 0
+		u.HasPassword = passwordSet != 0
 		u.Settings = json.RawMessage(settings)
 		out = append(out, u)
 	}

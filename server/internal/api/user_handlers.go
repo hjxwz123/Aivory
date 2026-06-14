@@ -82,6 +82,43 @@ func changePasswordHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
+type setPasswordReq struct {
+	New string `json:"new_password"`
+}
+
+// setPasswordHandler sets the FIRST password for an account that has none
+// (created via OAuth). It requires no current password — the user has one only
+// if they logged in via a third-party provider. It refuses if a password is
+// already set (those users must use changePasswordHandler, which verifies the
+// current one) and does NOT clear cookies, so the user continues straight into
+// the app (§ third-party login has no password).
+func setPasswordHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	u := authUser(r)
+	if u.HasPassword {
+		writeError(w, 409, errors.New("password already set"))
+		return
+	}
+	var req setPasswordReq
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, 400, errInvalidInput)
+		return
+	}
+	if len(req.New) < 8 {
+		writeError(w, 400, errors.New("password must be at least 8 characters"))
+		return
+	}
+	newHash, err := store.HashPassword(req.New)
+	if err != nil {
+		writeError(w, 500, err)
+		return
+	}
+	if err := store.SetInitialPassword(r.Context(), d.DB, u.ID, newHash); err != nil {
+		writeError(w, 500, err)
+		return
+	}
+	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
 // meSettingsHandler returns the user-level settings JSON.
 func meSettingsHandler(_ Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)

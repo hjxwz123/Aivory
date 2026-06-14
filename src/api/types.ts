@@ -23,6 +23,9 @@ export interface ApiUser {
   previous_group_id?: string
   /** True when the account requires a 2FA code at login (§ 2FA). */
   totp_enabled?: boolean
+  /** False for OAuth accounts that have never chosen their own password — the
+   *  client forces a set-password step before letting them into the app. */
+  has_password?: boolean
   created_at: number
 }
 

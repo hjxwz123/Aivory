@@ -100,6 +100,39 @@ func TestExtractOfficeXML_PPTX(t *testing.T) {
 	}
 }
 
+func TestIsProbablyText(t *testing.T) {
+	const ooxmlWord = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+	const ooxmlPpt = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+	const ooxmlXls = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+	cases := []struct {
+		name     string
+		mime     string
+		path     string
+		filename string
+		want     bool
+	}{
+		// OOXML mimes literally contain "xml" ("openxmlformats") — they are ZIP
+		// archives and MUST NOT be read as text (regression: garbled zip bytes).
+		{"docx by mime", ooxmlWord, "/tmp/up_abc", "report.docx", false},
+		{"pptx by mime", ooxmlPpt, "/tmp/up_abc", "deck.pptx", false},
+		{"xlsx by mime", ooxmlXls, "/tmp/up_abc", "book.xlsx", false},
+		// Even with an empty/octet mime, the extension must win.
+		{"docx by ext only", "application/octet-stream", "/tmp/up_abc.docx", "", false},
+		{"pptx by ext only", "", "/tmp/up_abc.pptx", "report.pptx", false},
+		{"pdf", "application/pdf", "/tmp/up_abc", "scan.pdf", false},
+		// Genuine text formats still take the local-read path.
+		{"plain text", "text/plain", "/tmp/up_abc", "notes.txt", true},
+		{"markdown ext", "", "/tmp/up_abc", "README.md", true},
+		{"json mime", "application/json", "/tmp/up_abc", "data", true},
+		{"real xml", "application/xml", "/tmp/up_abc", "feed.xml", true},
+	}
+	for _, c := range cases {
+		if got := isProbablyText(c.mime, c.path, c.filename); got != c.want {
+			t.Errorf("%s: isProbablyText(%q,%q,%q)=%v want %v", c.name, c.mime, c.path, c.filename, got, c.want)
+		}
+	}
+}
+
 func TestIsSpreadsheetData(t *testing.T) {
 	cases := []struct {
 		name string

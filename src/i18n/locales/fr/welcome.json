@@ -1,4 +1,16 @@
 {
+  "setPassword": {
+    "title": "Définir un mot de passe",
+    "subtitle": "Vous vous êtes connecté avec un compte tiers : il n'a donc pas encore de mot de passe. Définissez-en un maintenant pour sécuriser votre compte — il vous servira pour modifier les paramètres ou vous connecter directement.",
+    "newLabel": "Nouveau mot de passe",
+    "confirmLabel": "Confirmer le mot de passe",
+    "hint": "Au moins 8 caractères.",
+    "mismatch": "Les deux mots de passe ne correspondent pas.",
+    "tooShort": "Le mot de passe doit comporter au moins 8 caractères.",
+    "submit": "Définir le mot de passe et continuer",
+    "saved": "Mot de passe défini.",
+    "failed": "Impossible de définir le mot de passe. Veuillez réessayer."
+  },
   "intro": {
     "eyebrow": "Bienvenue sur Aurelia",
     "title": "Un espace plus serein pour penser.",

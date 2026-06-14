@@ -73,6 +73,7 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("PATCH", "/api/me", requireAuth(d, updateMeHandler))
 	mux.handle("DELETE", "/api/me", requireAuth(d, deleteMeHandler))
 	mux.handle("PATCH", "/api/me/password", requireAuth(d, changePasswordHandler))
+	mux.handle("POST", "/api/me/password/set", requireAuth(d, setPasswordHandler))
 	mux.handle("GET", "/api/me/usage", requireAuth(d, meUsageHandler))
 	mux.handle("GET", "/api/me/settings", requireAuth(d, meSettingsHandler))
 	mux.handle("PATCH", "/api/me/settings", requireAuth(d, updateMeSettingsHandler))

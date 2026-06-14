@@ -97,6 +97,8 @@ func Migrate(db *sql.DB) error {
 	// Redeem-code-driven group membership window (§ redeem codes).
 	addGroupExpires := `ALTER TABLE users ADD COLUMN group_expires_at INTEGER NOT NULL DEFAULT 0`
 	addPrevGroup := `ALTER TABLE users ADD COLUMN previous_group_id TEXT NOT NULL DEFAULT ''`
+	// Forced set-password for OAuth accounts (§ third-party login has no password).
+	addPasswordSet := `ALTER TABLE users ADD COLUMN password_set INTEGER NOT NULL DEFAULT 1`
 	if usePostgres {
 		schema = schemaPGSQL
 		addImageRef = `ALTER TABLE chunks ADD COLUMN IF NOT EXISTS image_ref TEXT`
@@ -113,6 +115,7 @@ func Migrate(db *sql.DB) error {
 		addModMode = `ALTER TABLE models ADD COLUMN IF NOT EXISTS moderation_mode TEXT NOT NULL DEFAULT 'keyword'`
 		addGroupExpires = `ALTER TABLE users ADD COLUMN IF NOT EXISTS group_expires_at BIGINT NOT NULL DEFAULT 0`
 		addPrevGroup = `ALTER TABLE users ADD COLUMN IF NOT EXISTS previous_group_id TEXT NOT NULL DEFAULT ''`
+		addPasswordSet = `ALTER TABLE users ADD COLUMN IF NOT EXISTS password_set INTEGER NOT NULL DEFAULT 1`
 	}
 	if _, err := db.Exec(schema); err != nil {
 		return fmt.Errorf("apply schema: %w", err)
@@ -125,9 +128,20 @@ func Migrate(db *sql.DB) error {
 		addImageRef, addOfficialTools, addGroupID, addTotpSecret, addTotpEnabled, addFeedback,
 		addSessUA, addSessIP, addSessLoc, addSessSeen,
 		addModEnabled, addModMode,
-		addGroupExpires, addPrevGroup,
+		addGroupExpires, addPrevGroup, addPasswordSet,
 	} {
 		_, _ = db.Exec(ddl)
+	}
+	// One-time backfill: accounts that exist only because of an OAuth login were
+	// created with a random password they never chose, so mark them as
+	// password-unset to force them through the set-password gate. Guarded by a
+	// settings flag so it runs exactly once — re-running would re-prompt users
+	// who have since set their own password.
+	var pwBackfill string
+	_ = db.QueryRow(`SELECT value FROM settings WHERE key='oauth_pwset_backfill_v1'`).Scan(&pwBackfill)
+	if pwBackfill == "" {
+		_, _ = db.Exec(`UPDATE users SET password_set=0 WHERE id IN (SELECT user_id FROM oauth_identities)`)
+		_, _ = db.Exec(`INSERT INTO settings(key, value) VALUES('oauth_pwset_backfill_v1', '1') ON CONFLICT(key) DO NOTHING`)
 	}
 	return nil
 }

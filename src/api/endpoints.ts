@@ -55,6 +55,10 @@ export const authApi = {
     api<ApiUser>('/me', { method: 'PATCH', body: patch }),
   changePassword: (current_password: string, new_password: string) =>
     api<{ ok: true }>('/me/password', { method: 'PATCH', body: { current_password, new_password } }),
+  /** Set the FIRST password for an OAuth account that has none (no current
+   *  password required; the session stays valid). */
+  setPassword: (new_password: string) =>
+    api<{ ok: true }>('/me/password/set', { method: 'POST', body: { new_password } }),
   getSettings: () => api<Record<string, unknown>>('/me/settings'),
   updateSettings: (patch: Record<string, unknown>) =>
     api<Record<string, unknown>>('/me/settings', { method: 'PATCH', body: patch }),

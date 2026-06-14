@@ -73,7 +73,7 @@ func parseDocument(
 	if docPath == "" {
 		return "", nil
 	}
-	if isProbablyText(mime, docPath) {
+	if isProbablyText(mime, docPath, filename) {
 		b, err := os.ReadFile(docPath)
 		if err != nil {
 			return "", err
@@ -675,10 +675,37 @@ func isSpreadsheetData(filename, mime string) bool {
 
 // isProbablyText narrows on mime types AND known text-friendly extensions.
 // MinerU rejects raw text formats — and there's no parse work to do anyway —
-// so we keep them on the local read path.
-func isProbablyText(mime, p string) bool {
+// so we keep them on the local read path. `p` may be a temp path without the
+// original extension, so `filename` (the upload name) is also consulted.
+func isProbablyText(mime, p, filename string) bool {
 	mime = strings.ToLower(mime)
-	if strings.HasPrefix(mime, "text/") || strings.Contains(mime, "json") || strings.Contains(mime, "xml") || strings.Contains(mime, "csv") || strings.Contains(mime, "markdown") {
+	// Office Open XML containers (docx/pptx/xlsx) are ZIP archives whose mime
+	// type literally contains "xml" — "application/vnd.openxmlformats-…". They
+	// must NEVER be read as text (that returns the raw zip bytes), so bail on
+	// the binary container extensions and office mimes first.
+	switch strings.ToLower(filepath.Ext(filename)) {
+	case ".docx", ".pptx", ".xlsx", ".doc", ".ppt", ".xls", ".pdf", ".zip":
+		return false
+	}
+	switch strings.ToLower(filepath.Ext(p)) {
+	case ".docx", ".pptx", ".xlsx", ".doc", ".ppt", ".xls", ".pdf", ".zip":
+		return false
+	}
+	if strings.Contains(mime, "officedocument") || strings.Contains(mime, "ms-office") ||
+		strings.Contains(mime, "msword") || strings.Contains(mime, "ms-excel") ||
+		strings.Contains(mime, "ms-powerpoint") {
+		return false
+	}
+	if strings.HasPrefix(mime, "text/") || strings.Contains(mime, "json") ||
+		strings.Contains(mime, "csv") || strings.Contains(mime, "markdown") {
+		return true
+	}
+	// Real XML mime types only — not the OOXML container types excluded above.
+	if mime == "application/xml" || mime == "text/xml" || strings.HasSuffix(mime, "+xml") {
+		return true
+	}
+	switch strings.ToLower(filepath.Ext(filename)) {
+	case ".txt", ".md", ".markdown", ".csv", ".log", ".json", ".yaml", ".yml", ".xml":
 		return true
 	}
 	switch strings.ToLower(filepath.Ext(p)) {

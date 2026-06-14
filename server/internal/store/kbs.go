@@ -100,6 +100,15 @@ func CreateKB(ctx context.Context, db *sql.DB, kb KnowledgeBase) (*KnowledgeBase
 	return GetKB(ctx, db, kb.ID, kb.UserID)
 }
 
+// SetKBEmbeddingDim corrects the stored vector width for a KB. Called during
+// ingest when the embedding model's actual output dimension differs from what
+// was configured, so retrieval resolves the same (real) dim and hits the right
+// Qdrant collection instead of falling back to brute-force forever.
+func SetKBEmbeddingDim(ctx context.Context, db *sql.DB, kbID string, dim int) error {
+	_, err := db.ExecContext(ctx, `UPDATE knowledge_bases SET embedding_dim=? WHERE id=?`, dim, kbID)
+	return err
+}
+
 // DeleteKB removes the KB and cascades to documents/chunks.
 func DeleteKB(ctx context.Context, db *sql.DB, id, userID string) error {
 	res, err := db.ExecContext(ctx, `DELETE FROM knowledge_bases WHERE id=? AND user_id=?`, id, userID)

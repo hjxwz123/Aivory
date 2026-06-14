@@ -4,6 +4,7 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import { Toaster } from '@/components/ui/toaster'
 import { CommandMenu } from '@/components/command-menu/command-menu'
 import { WelcomeCard } from '@/components/welcome/welcome-card'
+import { SetPasswordGate } from '@/components/welcome/set-password-gate'
 import { AuthGate } from '@/components/auth/auth-gate'
 import { useCommandMenu } from '@/hooks/use-command-menu'
 import { useHotkeys } from '@/hooks/use-hotkeys'
@@ -176,6 +177,7 @@ export default function App() {
           </Routes>
         </Suspense>
         <CommandMenu />
+        <SetPasswordGate />
         <WelcomeCard />
         <Toaster />
       </AuthGate>

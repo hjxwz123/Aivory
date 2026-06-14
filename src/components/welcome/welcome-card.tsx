@@ -60,7 +60,10 @@ export function WelcomeCard() {
   const setPrivacy = useSettings((s) => s.setPrivacy)
 
   const onboarded = Boolean((user?.settings as Record<string, unknown> | undefined)?.onboarded)
-  const eligible = status === 'authenticated' && Boolean(user) && !onboarded
+  // OAuth accounts must set a password first (SetPasswordGate); hold the wizard
+  // back until they have, so the two mandatory dialogs don't stack.
+  const needsPassword = user?.has_password === false
+  const eligible = status === 'authenticated' && Boolean(user) && !onboarded && !needsPassword
 
   const [mounted, setMounted] = useState(false)
   const [open, setOpen] = useState(false)

@@ -226,5 +226,16 @@ func CreateOAuthUser(ctx context.Context, db *sql.DB, email, name string) (*User
 	if err != nil {
 		return nil, err
 	}
-	return CreateUser(ctx, db, email, name, hash)
+	u, err := CreateUser(ctx, db, email, name, hash)
+	if err != nil {
+		return nil, err
+	}
+	// The hash above is a random throwaway the user never chose — mark the
+	// account password-unset so the client forces a set-password step
+	// (§ third-party login has no password).
+	if _, err := db.ExecContext(ctx, `UPDATE users SET password_set=0 WHERE id=?`, u.ID); err != nil {
+		return nil, err
+	}
+	u.HasPassword = false
+	return u, nil
 }

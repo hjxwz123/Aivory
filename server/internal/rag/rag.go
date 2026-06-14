@@ -245,6 +245,22 @@ func (s *Service) runPipeline(ctx context.Context, docID string) error {
 		if err != nil {
 			return err
 		}
+		// Reconcile the collection dimension with what the model ACTUALLY
+		// returned. The configured dim is only a hint — some endpoints ignore
+		// it and emit their native width (e.g. configured 1536 but the model
+		// returns 1024). Writing wrong-dim vectors makes Qdrant reject the whole
+		// upsert ("Vector dimension error"). Trust the vectors over the config so
+		// ingest just works regardless of misconfiguration.
+		if len(vecs) > 0 && len(vecs[0]) > 0 && len(vecs[0]) != dim {
+			actual := len(vecs[0])
+			s.logger.Printf("rag: embedding model returned dim %d but KB/config expected %d — using %d (doc %s)", actual, dim, actual, docID)
+			dim = actual
+			if d.KBID != "" {
+				if err := store.SetKBEmbeddingDim(ctx, s.db, d.KBID, actual); err != nil {
+					s.logger.Printf("rag: persist corrected embedding_dim for kb %s: %v", d.KBID, err)
+				}
+			}
+		}
 		for i, child := range p.Children {
 			// Classify image_caption strictly: a child chunk must be EXACTLY one
 			// `![…](mineru://…)` marker (optionally preceded by the page-number
@@ -431,6 +447,13 @@ func (s *Service) Retrieve(ctx context.Context, userID, convID string, kbIDs []s
 	qVec, cached, err := s.embedQueryCached(ctx, em, emName, query)
 	if err != nil {
 		return nil, err
+	}
+	// Mirror the ingest-side reconciliation: trust the actual query-vector width
+	// over the configured dim so we search the same Qdrant collection the vectors
+	// were written into (a model that emits 1024 despite a 1536 config still
+	// retrieves correctly).
+	if len(qVec) > 0 && len(qVec) != dim {
+		dim = len(qVec)
 	}
 	// Query embedding is billable (§8.3 purpose=embedding) — but only when we
 	// actually called the API. On a §2.4 query-vector cache hit, no call was made.

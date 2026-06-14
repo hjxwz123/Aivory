@@ -1,4 +1,16 @@
 {
+  "setPassword": {
+    "title": "Set a password",
+    "subtitle": "You signed in with a third-party account, so it has no password yet. Set one now to secure your account — you'll need it to change settings or sign in directly.",
+    "newLabel": "New password",
+    "confirmLabel": "Confirm password",
+    "hint": "At least 8 characters.",
+    "mismatch": "The two passwords don't match.",
+    "tooShort": "Password must be at least 8 characters.",
+    "submit": "Set password & continue",
+    "saved": "Password set.",
+    "failed": "Couldn't set your password. Please try again."
+  },
   "intro": {
     "eyebrow": "Welcome to Aurelia",
     "title": "A calmer place to think.",

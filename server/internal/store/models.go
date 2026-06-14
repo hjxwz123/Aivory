@@ -27,7 +27,11 @@ type User struct {
 	// account page can show the 2FA state (§ 2FA login).
 	TotpSecret  string `json:"-"`
 	TotpEnabled bool   `json:"totp_enabled"`
-	CreatedAt   int64  `json:"created_at"`
+	// HasPassword is false for accounts created via OAuth that have never
+	// chosen a password of their own. The client uses this to force a
+	// set-password step (§ third-party login has no password).
+	HasPassword bool  `json:"has_password"`
+	CreatedAt   int64 `json:"created_at"`
 }
 
 // UserGroup is a membership tier (§ user groups). Features is a JSON array of

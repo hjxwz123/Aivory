@@ -1,4 +1,16 @@
 {
+  "setPassword": {
+    "title": "设置密码",
+    "subtitle": "你是通过第三方账号登录的，目前还没有密码。请现在设置一个密码以保护账户——之后修改设置或直接登录都会用到。",
+    "newLabel": "新密码",
+    "confirmLabel": "确认密码",
+    "hint": "至少 8 个字符。",
+    "mismatch": "两次输入的密码不一致。",
+    "tooShort": "密码至少需要 8 个字符。",
+    "submit": "设置密码并继续",
+    "saved": "密码已设置。",
+    "failed": "设置密码失败，请重试。"
+  },
   "intro": {
     "eyebrow": "欢迎来到 Aurelia",
     "title": "更安静的思考空间。",
