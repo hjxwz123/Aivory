@@ -61,7 +61,9 @@
     "prevBranch": "Previous branch",
     "nextBranch": "Next branch",
     "fork": "Fork to new conversation",
-    "forked": "Forked to a new conversation"
+    "forked": "Forked to a new conversation",
+    "viewImage": "View image",
+    "removeAttachment": "Remove attachment"
   },
   "message": {
     "refused": "The model declined to answer this request.",

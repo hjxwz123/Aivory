@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { MessageRow } from './message-row'
 import { useConversations } from '@/store/conversations'
-import type { Conversation, Message } from '@/types/chat'
+import type { Attachment, Conversation, Message } from '@/types/chat'
 
 interface MessageListProps {
   conversation: Conversation
@@ -31,7 +31,7 @@ export function MessageList({ conversation }: MessageListProps) {
     void regenerate(conversation.id, assistantId, conversation.modelId)
   }
 
-  function handleEdit(id: string, newContent: string) {
+  function handleEdit(id: string, newContent: string, attachments?: Attachment[]) {
     // §4.15 tree semantics: editing a past user message MUST open a NEW
     // BRANCH under the same parent — not append to the active leaf. We pass
     // the edited message's parent_id so the orchestrator creates a sibling.
@@ -39,11 +39,17 @@ export function MessageList({ conversation }: MessageListProps) {
     // orchestrator creates a sibling root.
     const edited = byId.get(id)
     const parentId = edited?.parentId ?? ''
+    // Use the edited row's surviving attachments when the editor passed them
+    // (so a removed image is dropped from the resend). Falling back to the
+    // original message preserves the previous behaviour for callers that
+    // didn't carry an attachments list.
+    const carryAtts = attachments ?? edited?.attachments
     void sendMessage({
       conversationId: conversation.id,
       text: newContent,
       modelId: conversation.modelId,
       parentId,
+      attachments: carryAtts,
       // §4.15: an edit always opens a sibling branch under the same parent —
       // flag it so the store truncates the visible path (handles editing the
       // ROOT question too, where parentId is empty and append would be wrong).

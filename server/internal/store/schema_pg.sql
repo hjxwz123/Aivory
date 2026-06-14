@@ -55,6 +55,36 @@ CREATE TABLE IF NOT EXISTS model_group_quotas (
 );
 CREATE INDEX IF NOT EXISTS idx_mgq_group ON model_group_quotas(group_id);
 
+CREATE TABLE IF NOT EXISTS redeem_codes (
+  id            TEXT PRIMARY KEY,
+  code          TEXT UNIQUE NOT NULL,
+  group_id      TEXT NOT NULL REFERENCES user_groups(id) ON DELETE CASCADE,
+  duration_days INTEGER NOT NULL DEFAULT 30,
+  max_uses      INTEGER NOT NULL DEFAULT 1,
+  used_count    INTEGER NOT NULL DEFAULT 0,
+  expires_at    BIGINT NOT NULL DEFAULT 0,
+  enabled       INTEGER NOT NULL DEFAULT 1,
+  note          TEXT NOT NULL DEFAULT '',
+  batch_name    TEXT NOT NULL DEFAULT '',
+  created_by    TEXT NOT NULL DEFAULT '',
+  created_at    BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
+);
+CREATE INDEX IF NOT EXISTS idx_redeem_codes_code ON redeem_codes(code);
+CREATE INDEX IF NOT EXISTS idx_redeem_codes_batch ON redeem_codes(batch_name);
+
+CREATE TABLE IF NOT EXISTS redeem_redemptions (
+  id              TEXT PRIMARY KEY,
+  code_id         TEXT NOT NULL REFERENCES redeem_codes(id) ON DELETE CASCADE,
+  user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  group_id        TEXT NOT NULL REFERENCES user_groups(id) ON DELETE CASCADE,
+  previous_group_id TEXT NOT NULL DEFAULT '',
+  granted_at      BIGINT NOT NULL,
+  expires_at      BIGINT NOT NULL,
+  UNIQUE(code_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_redemptions_user ON redeem_redemptions(user_id);
+CREATE INDEX IF NOT EXISTS idx_redemptions_code ON redeem_redemptions(code_id);
+
 CREATE TABLE IF NOT EXISTS channels (
   id          TEXT PRIMARY KEY,
   name        TEXT NOT NULL,

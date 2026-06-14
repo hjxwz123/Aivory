@@ -61,7 +61,9 @@
     "prevBranch": "前のブランチ",
     "nextBranch": "次のブランチ",
     "fork": "新しい会話に分岐",
-    "forked": "新しい会話に分岐しました"
+    "forked": "新しい会話に分岐しました",
+    "viewImage": "画像を表示",
+    "removeAttachment": "添付を削除"
   },
   "message": {
     "refused": "モデルはこのリクエストへの回答を控えました。",

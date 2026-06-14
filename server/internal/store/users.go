@@ -19,9 +19,9 @@ func FindUserByEmail(ctx context.Context, db *sql.DB, email string) (*User, erro
 	var settings string
 	var totpEnabled int
 	err := db.QueryRowContext(ctx,
-		`SELECT id, email, name, role, status, token_ver, settings, group_id, totp_secret, totp_enabled, created_at FROM users WHERE email=?`,
+		`SELECT id, email, name, role, status, token_ver, settings, group_id, group_expires_at, previous_group_id, totp_secret, totp_enabled, created_at FROM users WHERE email=?`,
 		strings.ToLower(strings.TrimSpace(email)),
-	).Scan(&u.ID, &u.Email, &u.Name, &u.Role, &u.Status, &u.TokenVer, &settings, &u.GroupID, &u.TotpSecret, &totpEnabled, &u.CreatedAt)
+	).Scan(&u.ID, &u.Email, &u.Name, &u.Role, &u.Status, &u.TokenVer, &settings, &u.GroupID, &u.GroupExpiresAt, &u.PreviousGroupID, &u.TotpSecret, &totpEnabled, &u.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -30,6 +30,9 @@ func FindUserByEmail(ctx context.Context, db *sql.DB, email string) (*User, erro
 	}
 	u.TotpEnabled = totpEnabled != 0
 	u.Settings = json.RawMessage(settings)
+	// Lazy expiry: when the membership window has elapsed, demote back to the
+	// previous group (or the default) and clear the window.
+	maybeExpireGroup(ctx, db, &u)
 	return &u, nil
 }
 
@@ -39,8 +42,8 @@ func FindUserByID(ctx context.Context, db *sql.DB, id string) (*User, error) {
 	var settings string
 	var totpEnabled int
 	err := db.QueryRowContext(ctx,
-		`SELECT id, email, name, role, status, token_ver, settings, group_id, totp_secret, totp_enabled, created_at FROM users WHERE id=?`, id,
-	).Scan(&u.ID, &u.Email, &u.Name, &u.Role, &u.Status, &u.TokenVer, &settings, &u.GroupID, &u.TotpSecret, &totpEnabled, &u.CreatedAt)
+		`SELECT id, email, name, role, status, token_ver, settings, group_id, group_expires_at, previous_group_id, totp_secret, totp_enabled, created_at FROM users WHERE id=?`, id,
+	).Scan(&u.ID, &u.Email, &u.Name, &u.Role, &u.Status, &u.TokenVer, &settings, &u.GroupID, &u.GroupExpiresAt, &u.PreviousGroupID, &u.TotpSecret, &totpEnabled, &u.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -49,7 +52,33 @@ func FindUserByID(ctx context.Context, db *sql.DB, id string) (*User, error) {
 	}
 	u.TotpEnabled = totpEnabled != 0
 	u.Settings = json.RawMessage(settings)
+	maybeExpireGroup(ctx, db, &u)
 	return &u, nil
+}
+
+// maybeExpireGroup downgrades the user's group when group_expires_at has passed.
+// Best-effort: if the DB write fails (concurrent expiry race), the in-memory
+// User still reflects the expired state so the caller sees the right tier.
+func maybeExpireGroup(ctx context.Context, db *sql.DB, u *User) {
+	if u.GroupExpiresAt <= 0 || time.Now().Unix() < u.GroupExpiresAt {
+		return
+	}
+	prev := u.PreviousGroupID
+	if prev == "" {
+		prev = DefaultGroupID
+	}
+	// Verify the target group still exists before flipping — admin could have
+	// deleted the previous group in the meantime, in which case fall back to
+	// the default.
+	if _, err := GetUserGroup(ctx, db, prev); err != nil {
+		prev = DefaultGroupID
+	}
+	_, _ = db.ExecContext(ctx,
+		`UPDATE users SET group_id=?, group_expires_at=0, previous_group_id='' WHERE id=? AND group_expires_at=?`,
+		prev, u.ID, u.GroupExpiresAt)
+	u.GroupID = prev
+	u.GroupExpiresAt = 0
+	u.PreviousGroupID = ""
 }
 
 // PasswordFor reads the bcrypt hash for the user.
@@ -252,7 +281,7 @@ func ListUsersPaged(ctx context.Context, db *sql.DB, limit, offset int) ([]User,
 		offset = 0
 	}
 	rows, err := db.QueryContext(ctx,
-		`SELECT id, email, name, role, status, token_ver, settings, group_id, totp_secret, totp_enabled, created_at FROM users ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+		`SELECT id, email, name, role, status, token_ver, settings, group_id, group_expires_at, previous_group_id, totp_secret, totp_enabled, created_at FROM users ORDER BY created_at DESC LIMIT ? OFFSET ?`,
 		limit, offset)
 	if err != nil {
 		return nil, err
@@ -263,7 +292,7 @@ func ListUsersPaged(ctx context.Context, db *sql.DB, limit, offset int) ([]User,
 		var u User
 		var settings string
 		var totpEnabled int
-		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.Role, &u.Status, &u.TokenVer, &settings, &u.GroupID, &u.TotpSecret, &totpEnabled, &u.CreatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.Role, &u.Status, &u.TokenVer, &settings, &u.GroupID, &u.GroupExpiresAt, &u.PreviousGroupID, &u.TotpSecret, &totpEnabled, &u.CreatedAt); err != nil {
 			return nil, err
 		}
 		u.TotpEnabled = totpEnabled != 0

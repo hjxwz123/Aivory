@@ -18,6 +18,11 @@ type User struct {
 	TokenVer  int             `json:"-"`
 	Settings  json.RawMessage `json:"settings"`
 	GroupID   string          `json:"group_id"`
+	// GroupExpiresAt is the unix seconds at which the current group_id
+	// downgrades back to PreviousGroupID (or ug_free if empty). 0 = no expiry
+	// (permanent membership, set by admin or by a redeem code with duration=0).
+	GroupExpiresAt  int64  `json:"group_expires_at"`
+	PreviousGroupID string `json:"previous_group_id"`
 	// TotpSecret is never serialized to clients. TotpEnabled is exposed so the
 	// account page can show the 2FA state (§ 2FA login).
 	TotpSecret  string `json:"-"`

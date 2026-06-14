@@ -12,5 +12,27 @@
   "upgradeTitle": "切換到 {{name}}",
   "upgradeBody": "使用者組的變更由管理員處理。如需切換到此使用者組，請聯絡工作區管理員。",
   "priceFree": "免費",
-  "loadFailed": "載入使用者組失敗"
+  "loadFailed": "載入使用者組失敗",
+  "expiresOn": "有效期至 {{date}}",
+  "permanent": "永久",
+  "redeem": {
+    "title": "兌換碼",
+    "subtitle": "輸入兌換碼即可啟用或延長會員使用者組。",
+    "inputLabel": "兌換碼",
+    "inputPlaceholder": "XXXX-XXXX-XXXX",
+    "submit": "兌換",
+    "redeeming": "兌換中…",
+    "success": "兌換成功",
+    "successBody": "你已加入 {{group}}。",
+    "successBodyUntil": "你已加入 {{group}}，有效期至 {{date}}。",
+    "errors": {
+      "empty": "請輸入兌換碼",
+      "invalid": "該兌換碼無效。",
+      "alreadyUsed": "該兌換碼已被使用。",
+      "expired": "該兌換碼已過期。",
+      "disabled": "該兌換碼已被管理員作廢。",
+      "alreadyOwned": "你已兌換過此碼。",
+      "generic": "兌換失敗，請稍後再試。"
+    }
+  }
 }

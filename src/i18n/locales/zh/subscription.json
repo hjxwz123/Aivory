@@ -12,5 +12,27 @@
   "upgradeTitle": "切换到 {{name}}",
   "upgradeBody": "用户组的变更由管理员处理。如需切换到此用户组，请联系工作区管理员。",
   "priceFree": "免费",
-  "loadFailed": "加载用户组失败"
+  "loadFailed": "加载用户组失败",
+  "expiresOn": "有效期至 {{date}}",
+  "permanent": "永久",
+  "redeem": {
+    "title": "兑换码",
+    "subtitle": "输入兑换码即可激活或延长会员用户组。",
+    "inputLabel": "兑换码",
+    "inputPlaceholder": "XXXX-XXXX-XXXX",
+    "submit": "兑换",
+    "redeeming": "兑换中…",
+    "success": "兑换成功",
+    "successBody": "你已加入 {{group}}。",
+    "successBodyUntil": "你已加入 {{group}}，有效期至 {{date}}。",
+    "errors": {
+      "empty": "请输入兑换码",
+      "invalid": "该兑换码无效。",
+      "alreadyUsed": "该兑换码已被使用。",
+      "expired": "该兑换码已过期。",
+      "disabled": "该兑换码已被管理员作废。",
+      "alreadyOwned": "你已兑换过此码。",
+      "generic": "兑换失败，请稍后再试。"
+    }
+  }
 }

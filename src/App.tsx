@@ -48,6 +48,7 @@ const AdminDocuments = lazy(() => import('@/pages/admin/AdminDocuments'))
 const AdminTools = lazy(() => import('@/pages/admin/AdminTools'))
 const AdminAudio = lazy(() => import('@/pages/admin/AdminAudio'))
 const AdminOAuth = lazy(() => import('@/pages/admin/AdminOAuth'))
+const AdminRedeemCodes = lazy(() => import('@/pages/admin/AdminRedeemCodes'))
 const NotFound = lazy(() => import('@/pages/NotFound'))
 
 function GlobalShortcuts() {
@@ -159,6 +160,7 @@ export default function App() {
               <Route path="skills" element={<AdminSkills />} />
               <Route path="users" element={<AdminUsers />} />
               <Route path="user-groups" element={<AdminUserGroups />} />
+              <Route path="redeem-codes" element={<AdminRedeemCodes />} />
               <Route path="users/:id/conversations" element={<AdminUserConversations />} />
               <Route path="users/:id/conversations/:cid" element={<AdminUserConversation />} />
               <Route path="usage" element={<AdminUsage />} />

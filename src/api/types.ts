@@ -17,6 +17,10 @@ export interface ApiUser {
   status: 'active' | 'banned' | 'disabled'
   settings: Record<string, unknown>
   group_id?: string
+  /** Unix seconds at which a redeem-code grant lapses back to previous_group_id. 0 = permanent. */
+  group_expires_at?: number
+  /** The tier to fall back to when group_expires_at hits. */
+  previous_group_id?: string
   /** True when the account requires a 2FA code at login (§ 2FA). */
   totp_enabled?: boolean
   created_at: number
@@ -118,6 +122,44 @@ export interface ApiModelQuota {
   period_seconds: number
   limit_type: 'cost' | 'count'
   limit_value: number
+}
+
+/** Redeem code (§ redeem codes). Admins issue these to grant a user_group
+ *  for `duration_days` (0 = permanent). `code` is the human-typeable string. */
+export interface ApiRedeemCode {
+  id: string
+  code: string
+  group_id: string
+  duration_days: number
+  max_uses: number
+  used_count: number
+  /** Unix seconds after which an unredeemed code is rejected. 0 = no deadline. */
+  expires_at: number
+  enabled: boolean
+  note: string
+  batch_name: string
+  created_by: string
+  created_at: number
+}
+
+/** One row in the redeem audit trail. */
+export interface ApiRedeemRedemption {
+  id: string
+  code_id: string
+  user_id: string
+  group_id: string
+  previous_group_id: string
+  granted_at: number
+  expires_at: number
+}
+
+/** Result of POST /api/me/redeem. */
+export interface ApiRedeemResult {
+  ok: true
+  user: ApiUser
+  group_id: string
+  group_name: string
+  expires_at: number
 }
 
 export interface ApiAuthResponse {

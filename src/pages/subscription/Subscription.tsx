@@ -3,16 +3,22 @@
  * Shows the viewer's current group and every available group as editorial price
  * cards (USD / CNY + feature list). Switching is admin-assigned, so the CTA on
  * other tiers opens a short "how to upgrade" note rather than a checkout.
+ *
+ * Also exposes a "Redeem a code" surface (§ redeem codes) — users can paste a
+ * code an admin handed out to flip their group_id + group_expires_at without
+ * an admin round-trip.
  */
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Check, Sparkles } from 'lucide-react'
-import { groupsApi, ApiError } from '@/api'
+import { Check, Sparkles, Ticket } from 'lucide-react'
+import { groupsApi, redeemApi, ApiError } from '@/api'
 import type { ApiUserGroup } from '@/api/types'
 import { useAuth } from '@/store/auth'
 import { ContentHeader } from '@/components/layout/content-header'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
+import { Field } from '@/components/ui/label'
 import {
   Dialog,
   DialogContent,
@@ -22,14 +28,17 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { toast } from '@/hooks/use-toast'
-import { cn } from '@/lib/utils'
+import { cn, formatRelativeDate } from '@/lib/utils'
 
 export default function Subscription() {
   const { t } = useTranslation(['subscription', 'common'])
   const user = useAuth((s) => s.user)
+  const setUser = useAuth((s) => s.setUser)
   const [groups, setGroups] = useState<ApiUserGroup[]>([])
   const [loading, setLoading] = useState(true)
   const [upgrade, setUpgrade] = useState<ApiUserGroup | null>(null)
+  const [redeemCode, setRedeemCode] = useState('')
+  const [redeeming, setRedeeming] = useState(false)
 
   useEffect(() => {
     let active = true
@@ -49,6 +58,66 @@ export default function Subscription() {
     [groups],
   )
   const current = sorted.find((g) => g.id === currentId)
+  // Membership window (set by redeem codes). 0 = permanent or default tier.
+  const expiresAt = user?.group_expires_at ?? 0
+  const expiresLabel =
+    expiresAt > 0
+      ? t('subscription:expiresOn', { date: formatRelativeDate(expiresAt * 1000) })
+      : null
+
+  /**
+   * Maps the backend's `error` codes to a user-facing toast. The backend
+   * uses sentinel strings (code_invalid / code_used / …) so the frontend
+   * can pick the right translation without parsing free-form messages.
+   */
+  function redeemErrorMessage(e: unknown): string {
+    if (e instanceof ApiError) {
+      switch (e.message) {
+        case 'code_invalid':
+          return t('subscription:redeem.errors.invalid')
+        case 'code_expired':
+          return t('subscription:redeem.errors.expired')
+        case 'code_used':
+          return t('subscription:redeem.errors.alreadyUsed')
+        case 'code_disabled':
+          return t('subscription:redeem.errors.disabled')
+        case 'code_already_owned':
+          return t('subscription:redeem.errors.alreadyOwned')
+      }
+      return e.message || t('subscription:redeem.errors.generic')
+    }
+    return t('subscription:redeem.errors.generic')
+  }
+
+  async function submitRedeem() {
+    const code = redeemCode.trim()
+    if (!code) {
+      toast.error(t('subscription:redeem.errors.empty'))
+      return
+    }
+    setRedeeming(true)
+    try {
+      const res = await redeemApi.redeem(code)
+      // Refresh the in-memory auth user so the current-plan strip + card
+      // highlight re-render against the new group_id / group_expires_at.
+      setUser(res.user)
+      // Refetch the catalog in case the redemption unlocked extra group
+      // metadata (rare, but cheap).
+      groupsApi.list().then(setGroups).catch(() => undefined)
+      setRedeemCode('')
+      const date = res.expires_at > 0 ? formatRelativeDate(res.expires_at * 1000) : ''
+      toast.success(
+        t('subscription:redeem.success'),
+        res.expires_at > 0
+          ? t('subscription:redeem.successBodyUntil', { group: res.group_name, date })
+          : t('subscription:redeem.successBody', { group: res.group_name }),
+      )
+    } catch (e) {
+      toast.error(redeemErrorMessage(e))
+    } finally {
+      setRedeeming(false)
+    }
+  }
 
   return (
     <div className="flex-1 min-h-0 flex flex-col bg-[var(--color-bg)] text-[var(--color-fg)]">
@@ -67,11 +136,16 @@ export default function Subscription() {
                 <Sparkles size={13} aria-hidden className="text-[var(--color-secondary)]" />
                 {t('subscription:currentPlan')}
               </div>
-              <div className="mt-1 flex items-center gap-2">
+              <div className="mt-1 flex items-center gap-2 flex-wrap">
                 <span className="font-serif text-xl text-[var(--color-fg)]">{current.name}</span>
                 {current.is_default ? (
                   <Badge size="xs" variant="neutral">
                     {t('subscription:free')}
+                  </Badge>
+                ) : null}
+                {expiresLabel ? (
+                  <Badge size="xs" variant="sage">
+                    {expiresLabel}
                   </Badge>
                 ) : null}
               </div>
@@ -155,6 +229,43 @@ export default function Subscription() {
             })}
           </div>
         )}
+
+        {/* Redeem code */}
+        <section className="mt-14 rounded-[16px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-6">
+          <div className="flex items-start gap-3">
+            <span className="inline-flex items-center justify-center size-9 rounded-full bg-[var(--color-secondary-soft)] text-[var(--color-secondary)]">
+              <Ticket size={16} aria-hidden />
+            </span>
+            <div className="flex-1 min-w-0">
+              <h2 className="font-serif text-xl text-[var(--color-fg)]">{t('subscription:redeem.title')}</h2>
+              <p className="mt-1 text-[13px] leading-relaxed text-[var(--color-fg-muted)] max-w-prose">
+                {t('subscription:redeem.subtitle')}
+              </p>
+            </div>
+          </div>
+          <form
+            className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end"
+            onSubmit={(e) => {
+              e.preventDefault()
+              void submitRedeem()
+            }}
+          >
+            <Field label={t('subscription:redeem.inputLabel')} htmlFor="redeem-code">
+              <Input
+                id="redeem-code"
+                value={redeemCode}
+                onChange={(e) => setRedeemCode(e.target.value.toUpperCase())}
+                placeholder={t('subscription:redeem.inputPlaceholder')}
+                autoComplete="off"
+                spellCheck={false}
+                className="font-mono tracking-[0.15em]"
+              />
+            </Field>
+            <Button type="submit" loading={redeeming} disabled={!redeemCode.trim() || redeeming}>
+              {redeeming ? t('subscription:redeem.redeeming') : t('subscription:redeem.submit')}
+            </Button>
+          </form>
+        </section>
         </div>
       </div>
 

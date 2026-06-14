@@ -12,5 +12,27 @@
   "upgradeTitle": "{{name}} に切り替え",
   "upgradeBody": "グループの変更は管理者が行います。このグループに移るには、ワークスペースの管理者にお問い合わせください。",
   "priceFree": "無料",
-  "loadFailed": "グループを読み込めませんでした"
+  "loadFailed": "グループを読み込めませんでした",
+  "expiresOn": "{{date}} まで有効",
+  "permanent": "永続",
+  "redeem": {
+    "title": "コードを引き換える",
+    "subtitle": "コードを入力してメンバーシップグループを有効化または延長します。",
+    "inputLabel": "コード",
+    "inputPlaceholder": "XXXX-XXXX-XXXX",
+    "submit": "引き換える",
+    "redeeming": "引き換え中…",
+    "success": "引き換え完了",
+    "successBody": "{{group}} に加入しました。",
+    "successBodyUntil": "{{group}} に加入しました — {{date}} まで有効です。",
+    "errors": {
+      "empty": "コードを入力してください",
+      "invalid": "このコードは無効です。",
+      "alreadyUsed": "このコードは既に使用されています。",
+      "expired": "このコードは期限切れです。",
+      "disabled": "このコードは管理者によって無効化されました。",
+      "alreadyOwned": "このコードは既に引き換え済みです。",
+      "generic": "このコードを引き換えられませんでした。"
+    }
+  }
 }

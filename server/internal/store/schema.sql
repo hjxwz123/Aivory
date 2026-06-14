@@ -57,6 +57,45 @@ CREATE TABLE IF NOT EXISTS model_group_quotas (
 );
 CREATE INDEX IF NOT EXISTS idx_mgq_group ON model_group_quotas(group_id);
 
+-- Redeem codes (§ redeem codes). Admin creates codes that grant a specific
+-- user_group for `duration_days` (0 = permanent). `expires_at` is the deadline
+-- by which the code itself must be redeemed (0 = no deadline). `max_uses=1`
+-- (default) makes codes single-use; admins can bump it for shared promo codes.
+-- enabled=0 lets an admin revoke an unredeemed code without deleting the row
+-- (preserves audit history).
+CREATE TABLE IF NOT EXISTS redeem_codes (
+  id            TEXT PRIMARY KEY,
+  code          TEXT UNIQUE NOT NULL,
+  group_id      TEXT NOT NULL REFERENCES user_groups(id) ON DELETE CASCADE,
+  duration_days INTEGER NOT NULL DEFAULT 30,
+  max_uses      INTEGER NOT NULL DEFAULT 1,
+  used_count    INTEGER NOT NULL DEFAULT 0,
+  expires_at    INTEGER NOT NULL DEFAULT 0,
+  enabled       INTEGER NOT NULL DEFAULT 1,
+  note          TEXT NOT NULL DEFAULT '',
+  batch_name    TEXT NOT NULL DEFAULT '',
+  created_by    TEXT NOT NULL DEFAULT '',
+  created_at    INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+);
+CREATE INDEX IF NOT EXISTS idx_redeem_codes_code ON redeem_codes(code);
+CREATE INDEX IF NOT EXISTS idx_redeem_codes_batch ON redeem_codes(batch_name);
+
+-- One row per successful redemption — audit trail + the basis for the user's
+-- group membership window. user_id+code_id is unique so a single user can't
+-- double-redeem the same multi-use code.
+CREATE TABLE IF NOT EXISTS redeem_redemptions (
+  id              TEXT PRIMARY KEY,
+  code_id         TEXT NOT NULL REFERENCES redeem_codes(id) ON DELETE CASCADE,
+  user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  group_id        TEXT NOT NULL REFERENCES user_groups(id) ON DELETE CASCADE,
+  previous_group_id TEXT NOT NULL DEFAULT '',
+  granted_at      INTEGER NOT NULL,
+  expires_at      INTEGER NOT NULL,
+  UNIQUE(code_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_redemptions_user ON redeem_redemptions(user_id);
+CREATE INDEX IF NOT EXISTS idx_redemptions_code ON redeem_redemptions(code_id);
+
 CREATE TABLE IF NOT EXISTS channels (
   id          TEXT PRIMARY KEY,
   name        TEXT NOT NULL,

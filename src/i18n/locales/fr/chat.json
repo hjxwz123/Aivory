@@ -61,7 +61,9 @@
     "prevBranch": "Branche précédente",
     "nextBranch": "Branche suivante",
     "fork": "Dupliquer dans une nouvelle conversation",
-    "forked": "Dupliqué dans une nouvelle conversation"
+    "forked": "Dupliqué dans une nouvelle conversation",
+    "viewImage": "Afficher l’image",
+    "removeAttachment": "Supprimer la pièce jointe"
   },
   "message": {
     "refused": "Le modèle a refusé de répondre à cette demande.",

@@ -12,5 +12,27 @@
   "upgradeTitle": "Passer à {{name}}",
   "upgradeBody": "Les changements de groupe sont gérés par un administrateur. Contactez l'administrateur de votre espace de travail pour rejoindre ce groupe.",
   "priceFree": "Gratuit",
-  "loadFailed": "Impossible de charger les groupes"
+  "loadFailed": "Impossible de charger les groupes",
+  "expiresOn": "Jusqu’au {{date}}",
+  "permanent": "Permanent",
+  "redeem": {
+    "title": "Utiliser un code",
+    "subtitle": "Saisissez un code pour activer ou prolonger un groupe d’adhésion.",
+    "inputLabel": "Code",
+    "inputPlaceholder": "XXXX-XXXX-XXXX",
+    "submit": "Utiliser",
+    "redeeming": "Application en cours…",
+    "success": "Code utilisé",
+    "successBody": "Vous êtes maintenant dans {{group}}.",
+    "successBodyUntil": "Vous êtes maintenant dans {{group}} — valide jusqu’au {{date}}.",
+    "errors": {
+      "empty": "Saisissez un code",
+      "invalid": "Ce code n’est pas valide.",
+      "alreadyUsed": "Ce code a déjà été utilisé.",
+      "expired": "Ce code a expiré.",
+      "disabled": "Ce code a été révoqué par un administrateur.",
+      "alreadyOwned": "Vous avez déjà utilisé ce code.",
+      "generic": "Impossible d’utiliser ce code."
+    }
+  }
 }

@@ -84,6 +84,10 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("POST", "/api/me/memories", requireAuth(d, createMemoryHandler))
 	mux.handle("PATCH", "/api/me/memories/:id", requireAuth(d, updateMemoryHandler))
 	mux.handle("DELETE", "/api/me/memories/:id", requireAuth(d, deleteMemoryHandler))
+	// Redeem a code → grants the user a configured user-group for a configured
+	// duration (§ redeem codes). Tight rate limit so a stolen code can't be
+	// brute-force-typed by an attacker who knows the alphabet.
+	mux.handle("POST", "/api/me/redeem", rateLimitedIP(d, "redeem", 10, 60*time.Second, requireAuth(d, redeemCodeHandler)))
 
 	// Active sessions (§ account → active sessions). Registered under /api/auth
 	// so the refresh-token cookie (scoped to /api/auth) is sent — that's how we
@@ -181,6 +185,14 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("DELETE", "/api/admin/oauth-providers/:id", requireAdmin(d, deleteOAuthProviderAdmin))
 	mux.handle("GET", "/api/admin/settings", requireAdmin(d, adminSettingsGet))
 	mux.handle("PATCH", "/api/admin/settings", requireAdmin(d, adminSettingsSet))
+	// Redeem codes (§ redeem codes). Admin lists/creates/patches/deletes;
+	// individual codes can be revoked (enabled=false) without losing audit.
+	mux.handle("GET", "/api/admin/redeem-codes", requireAdmin(d, listRedeemCodesAdmin))
+	mux.handle("POST", "/api/admin/redeem-codes", requireAdmin(d, createRedeemCodeAdmin))
+	mux.handle("PATCH", "/api/admin/redeem-codes/:id", requireAdmin(d, updateRedeemCodeAdmin))
+	mux.handle("DELETE", "/api/admin/redeem-codes/:id", requireAdmin(d, deleteRedeemCodeAdmin))
+	mux.handle("GET", "/api/admin/redeem-codes/:id/redemptions", requireAdmin(d, listRedeemCodeRedemptionsAdmin))
+	mux.handle("DELETE", "/api/admin/redeem-batches/:name", requireAdmin(d, deleteRedeemBatchAdmin))
 	// Icon upload — admin-only mint, any authenticated user can read. The
 	// stored URL lands in models.icon so the picker can render the image.
 	mux.handle("POST", "/api/admin/icons", requireAdmin(d, uploadIconAdmin))

@@ -60,7 +60,9 @@
     "prevBranch": "上一个分支",
     "nextBranch": "下一个分支",
     "fork": "分支为新对话",
-    "forked": "已分支为新对话"
+    "forked": "已分支为新对话",
+    "viewImage": "查看图片",
+    "removeAttachment": "移除附件"
   },
   "message": {
     "refused": "模型拒绝回答此请求。",

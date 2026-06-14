@@ -5,7 +5,7 @@
 import { useEffect, useState } from 'react'
 import { NavLink, Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { ArrowLeft, BarChart3, Boxes, Cpu, FileText, GaugeCircle, KeyRound, Layers, Menu, Mic, Settings2, ShieldAlert, Sparkles, Users, Wrench } from 'lucide-react'
+import { ArrowLeft, BarChart3, Boxes, Cpu, FileText, GaugeCircle, KeyRound, Layers, Menu, Mic, Settings2, ShieldAlert, Sparkles, Ticket, Users, Wrench } from 'lucide-react'
 import { useAuth } from '@/store/auth'
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet'
 import { cn } from '@/lib/utils'
@@ -45,6 +45,7 @@ export default function AdminLayout() {
     { to: '/admin/oauth', icon: KeyRound, label: t('admin:oauth.title') },
     { to: '/admin/users', icon: Users, label: t('admin:users.title') },
     { to: '/admin/user-groups', icon: Layers, label: t('admin:groups.title') },
+    { to: '/admin/redeem-codes', icon: Ticket, label: t('admin:redeemCodes.title') },
     { to: '/admin/usage', icon: GaugeCircle, label: t('admin:usage.title') },
     { to: '/admin/analytics', icon: BarChart3, label: t('admin:analytics.title') },
     { to: '/admin/moderation', icon: ShieldAlert, label: t('admin:moderation.title') },

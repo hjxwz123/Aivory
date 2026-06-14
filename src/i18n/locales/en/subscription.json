@@ -12,5 +12,27 @@
   "upgradeTitle": "Switch to {{name}}",
   "upgradeBody": "Group changes are handled by an administrator. Contact your workspace admin to move to this group.",
   "priceFree": "Free",
-  "loadFailed": "Couldn’t load groups"
+  "loadFailed": "Couldn’t load groups",
+  "expiresOn": "Until {{date}}",
+  "permanent": "Permanent",
+  "redeem": {
+    "title": "Redeem a code",
+    "subtitle": "Enter a code to activate or extend a membership group.",
+    "inputLabel": "Code",
+    "inputPlaceholder": "XXXX-XXXX-XXXX",
+    "submit": "Redeem",
+    "redeeming": "Redeeming…",
+    "success": "Code redeemed",
+    "successBody": "You're now on {{group}}.",
+    "successBodyUntil": "You're now on {{group}} — valid until {{date}}.",
+    "errors": {
+      "empty": "Enter a code",
+      "invalid": "This code isn't valid.",
+      "alreadyUsed": "This code has already been redeemed.",
+      "expired": "This code has expired.",
+      "disabled": "This code has been revoked by an admin.",
+      "alreadyOwned": "You've already redeemed this code.",
+      "generic": "Couldn't redeem this code."
+    }
+  }
 }

@@ -17,6 +17,9 @@ import type {
   ApiModelQuota,
   ApiOAuthProvider,
   ApiProject,
+  ApiRedeemCode,
+  ApiRedeemRedemption,
+  ApiRedeemResult,
   ApiSession,
   ApiUserGroup,
   ApiPublicOAuthProvider,
@@ -99,6 +102,16 @@ export const skillsApi = {
 export const groupsApi = {
   /** Groups visible to the signed-in user (subscription page). */
   list: () => api<ApiUserGroup[]>('/user-groups'),
+}
+
+// ----- Redeem codes (§ redeem codes) ---------------------------------------
+
+export const redeemApi = {
+  /** Apply a code on behalf of the signed-in user. Throws ApiError on failure
+   *  with `error` field one of: code_invalid | code_expired | code_used |
+   *  code_already_owned | code_disabled. */
+  redeem: (code: string) =>
+    api<ApiRedeemResult>('/me/redeem', { method: 'POST', body: { code } }),
 }
 
 // ----- Audio (speech-to-text) ----------------------------------------------
@@ -276,6 +289,41 @@ export const adminApi = {
   modelQuotas: (id: string) => api<ApiModelQuota[]>(`/admin/models/${encodeURIComponent(id)}/quotas`),
   setModelQuotas: (id: string, quotas: ApiModelQuota[]) =>
     api<{ ok: true }>(`/admin/models/${encodeURIComponent(id)}/quotas`, { method: 'PUT', body: { quotas } }),
+
+  // Redeem codes (§ redeem codes).
+  redeemCodes: (params?: { batch?: string; status?: 'unused' | 'redeemed' | 'disabled' | 'expired'; limit?: number; offset?: number }) => {
+    const q = new URLSearchParams()
+    if (params?.batch) q.set('batch', params.batch)
+    if (params?.status) q.set('status', params.status)
+    if (params?.limit) q.set('limit', String(params.limit))
+    if (params?.offset) q.set('offset', String(params.offset))
+    const qs = q.toString()
+    return api<ApiRedeemCode[]>(`/admin/redeem-codes${qs ? `?${qs}` : ''}`)
+  },
+  createRedeemCode: (body: {
+    group_id: string
+    duration_days: number
+    max_uses?: number
+    expires_at?: number
+    note?: string
+    batch_name?: string
+    code?: string
+    /** When > 1 a bulk batch is generated. */
+    quantity?: number
+  }) => api<ApiRedeemCode | ApiRedeemCode[]>('/admin/redeem-codes', { method: 'POST', body }),
+  updateRedeemCode: (id: string, patch: {
+    enabled?: boolean
+    note?: string
+    batch_name?: string
+    expires_at?: number
+    max_uses?: number
+  }) => api<ApiRedeemCode>(`/admin/redeem-codes/${encodeURIComponent(id)}`, { method: 'PATCH', body: patch }),
+  removeRedeemCode: (id: string) =>
+    api<{ ok: true }>(`/admin/redeem-codes/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  redeemCodeRedemptions: (id: string) =>
+    api<ApiRedeemRedemption[]>(`/admin/redeem-codes/${encodeURIComponent(id)}/redemptions`),
+  removeRedeemBatch: (name: string) =>
+    api<{ ok: true; removed: number }>(`/admin/redeem-batches/${encodeURIComponent(name)}`, { method: 'DELETE' }),
 
   users: () => api<ApiUser[]>('/admin/users'),
   createUser: (body: { email: string; name: string; password: string; role: 'user' | 'admin' }) =>

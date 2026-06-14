@@ -13,8 +13,11 @@ import {
   Download,
   GitBranchPlus,
   AlertTriangle,
+  X,
+  FileText,
+  FileSpreadsheet,
 } from 'lucide-react'
-import type { Message } from '@/types/chat'
+import type { Message, Attachment } from '@/types/chat'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { ModelIcon } from '@/components/chat/model-icon'
 import { Tooltip } from '@/components/ui/tooltip'
@@ -34,6 +37,7 @@ import { Markdown } from './markdown'
 import { ReasoningTrace } from './reasoning-trace'
 import { ResearchPanel } from './research-panel'
 import { CitationList } from './citation'
+import { ImageLightbox } from './image-lightbox'
 import { toast } from '@/hooks/use-toast'
 import { cn, safeHref } from '@/lib/utils'
 
@@ -41,8 +45,12 @@ interface MessageRowProps {
   message: Message
   userName?: string
   onRegenerate?: (id: string) => void
-  /** "Save & resend" — edit a question into a NEW branch and regenerate. */
-  onEdit?: (id: string, content: string) => void
+  /**
+   * "Save & resend" — edit a question into a NEW branch and regenerate.
+   * `attachments` carries the surviving attachments (after the user removed any
+   * in edit mode); when omitted the row keeps the original list.
+   */
+  onEdit?: (id: string, content: string, attachments?: Attachment[]) => void
   /** "Save" — overwrite the question text in place, no branch, no regenerate. */
   onSaveEdit?: (id: string, content: string) => void
   onLike?: (id: string, liked: boolean) => void
@@ -64,6 +72,14 @@ export function MessageRow({ message, userName, onRegenerate, onEdit, onSaveEdit
   const [menuOpen, setMenuOpen] = useState(false)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(message.content)
+  // Attachments the user keeps in the edit dialog. Seeded from the original
+  // message on entering edit mode; removing an item here does NOT touch the
+  // original until the user clicks "Save & resend" (which opens a new branch
+  // with this exact attachment list).
+  const [draftAtts, setDraftAtts] = useState<Attachment[]>(message.attachments ?? [])
+  // Lightbox: which image is being previewed (null = closed). Driven from the
+  // attachment id so the Dialog re-mounts cleanly on each preview.
+  const [lightbox, setLightbox] = useState<{ src: string; alt?: string } | null>(null)
   const editRef = useRef<HTMLTextAreaElement>(null)
   const { copied, copy } = useCopy()
 
@@ -72,7 +88,10 @@ export function MessageRow({ message, userName, onRegenerate, onEdit, onSaveEdit
   // Seed the draft when entering edit mode — but only on the transition,
   // so streaming/external updates to message.content don't overwrite the user's typing.
   useEffect(() => {
-    if (editing) setDraft(message.content)
+    if (editing) {
+      setDraft(message.content)
+      setDraftAtts(message.attachments ?? [])
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editing])
 
@@ -87,7 +106,7 @@ export function MessageRow({ message, userName, onRegenerate, onEdit, onSaveEdit
   function commitEdit() {
     const next = draft.trim()
     if (!next) return
-    onEdit?.(message.id, next)
+    onEdit?.(message.id, next, draftAtts)
     setEditing(false)
   }
 
@@ -97,6 +116,10 @@ export function MessageRow({ message, userName, onRegenerate, onEdit, onSaveEdit
     if (!next) return
     onSaveEdit?.(message.id, next)
     setEditing(false)
+  }
+
+  function removeDraftAtt(id: string) {
+    setDraftAtts((s) => s.filter((a) => a.id !== id))
   }
 
   const visible = hovered || menuOpen || message.liked || message.disliked
@@ -142,7 +165,20 @@ export function MessageRow({ message, userName, onRegenerate, onEdit, onSaveEdit
         {/* Body */}
         {editing && isUser ? (
           <div className="flex w-full flex-col gap-3">
-            <div className="rounded-[16px] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-4 py-3 shadow-[var(--shadow-sm)] transition-colors focus-within:border-[var(--color-accent)]">
+            <div className="rounded-[18px] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-4 py-4 shadow-[var(--shadow-sm)] transition-colors focus-within:border-[var(--color-accent)] focus-within:shadow-[var(--shadow-md)]">
+              {/* Editable attachment strip — images preview as thumbnails with
+                  an X hover affordance; non-images render as compact chips. */}
+              {draftAtts.length > 0 ? (
+                <div className="mb-3 flex flex-wrap gap-2">
+                  {draftAtts.map((a) =>
+                    a.kind === 'image' && a.previewUrl ? (
+                      <EditableImageChip key={a.id} att={a} onRemove={() => removeDraftAtt(a.id)} />
+                    ) : (
+                      <EditableFileChip key={a.id} att={a} onRemove={() => removeDraftAtt(a.id)} />
+                    ),
+                  )}
+                </div>
+              ) : null}
               <Textarea
                 ref={editRef}
                 value={draft}
@@ -183,15 +219,39 @@ export function MessageRow({ message, userName, onRegenerate, onEdit, onSaveEdit
             )}
           >
             {message.attachments && message.attachments.length > 0 ? (
-              <div className="flex flex-wrap gap-1.5 mb-2">
-                {message.attachments.map((a) => (
-                  <span
-                    key={a.id}
-                    className="inline-flex items-center gap-1 rounded-[6px] bg-[var(--color-surface)] border border-[var(--color-border)] px-1.5 py-0.5 text-[11px] text-[var(--color-fg-muted)]"
-                  >
-                    {a.name}
-                  </span>
-                ))}
+              <div className="mb-2 flex flex-wrap gap-2">
+                {message.attachments.map((a) =>
+                  a.kind === 'image' && a.previewUrl ? (
+                    <button
+                      key={a.id}
+                      type="button"
+                      onClick={() => setLightbox({ src: a.previewUrl!, alt: a.name })}
+                      aria-label={t('actions.viewImage', { defaultValue: 'View image' })}
+                      className="block overflow-hidden rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] hover:opacity-90"
+                    >
+                      <img
+                        src={a.previewUrl}
+                        alt={a.name}
+                        className="max-h-56 max-w-[18rem] sm:max-w-[22rem] w-auto h-auto object-cover"
+                        draggable={false}
+                      />
+                    </button>
+                  ) : (
+                    <a
+                      key={a.id}
+                      href={a.previewUrl ?? undefined}
+                      target={a.previewUrl ? '_blank' : undefined}
+                      rel={a.previewUrl ? 'noreferrer' : undefined}
+                      className={cn(
+                        'inline-flex items-center gap-1.5 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-[11.5px] text-[var(--color-fg-muted)] max-w-[18rem]',
+                        a.previewUrl && 'interactive hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
+                      )}
+                    >
+                      <KindIcon kind={a.kind} />
+                      <span className="truncate">{a.name}</span>
+                    </a>
+                  ),
+                )}
                 {/* TODO(#8): when this conversation belongs to a project, offer an
                     "Add to project library" action here that calls
                     conversationsApi.promoteDoc(convId, a.id) then refreshes the
@@ -463,6 +523,13 @@ export function MessageRow({ message, userName, onRegenerate, onEdit, onSaveEdit
           </span>
         )}
       </div>
+      {/* Image lightbox — rendered once per row; opens via setLightbox(). */}
+      <ImageLightbox
+        open={lightbox !== null}
+        onOpenChange={(o) => !o && setLightbox(null)}
+        src={lightbox?.src ?? ''}
+        alt={lightbox?.alt}
+      />
     </div>
   )
 }
@@ -519,5 +586,72 @@ function BranchSwitcher({
       </button>
     </span>
   )
+}
+
+/* ───────────────────────── attachment chips ─────────────────────────── */
+
+/**
+ * EditableImageChip — image thumbnail (~64px square) shown inside the edit
+ * surface. A small ✕ button (top-right, fades in on hover) removes the image
+ * from the resend payload. Tap target is large enough on mobile to avoid
+ * misclicks on the underlying preview.
+ */
+function EditableImageChip({ att, onRemove }: { att: Attachment; onRemove: () => void }) {
+  const { t } = useTranslation('chat')
+  return (
+    <span className="group/att relative inline-block">
+      <img
+        src={att.previewUrl}
+        alt={att.name}
+        className="size-16 rounded-[10px] border border-[var(--color-border-subtle)] object-cover"
+        draggable={false}
+      />
+      <button
+        type="button"
+        aria-label={t('actions.removeAttachment', { defaultValue: 'Remove attachment' })}
+        onClick={onRemove}
+        className="absolute -right-1.5 -top-1.5 inline-flex size-5 items-center justify-center rounded-full bg-[var(--color-fg)] text-[var(--color-fg-inverted)] shadow-[var(--shadow-sm)] opacity-0 interactive group-hover/att:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+      >
+        <X size={11} aria-hidden />
+      </button>
+    </span>
+  )
+}
+
+/**
+ * EditableFileChip — non-image attachment chip with a remove button. Wider
+ * than the inline bubble chip so the filename has breathing room.
+ */
+function EditableFileChip({ att, onRemove }: { att: Attachment; onRemove: () => void }) {
+  const { t } = useTranslation('chat')
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-[10px] bg-[var(--color-bg-muted)] border border-[var(--color-border-subtle)] px-2 py-1 text-[11.5px] text-[var(--color-fg-muted)] max-w-[18rem]">
+      <KindIcon kind={att.kind} />
+      <span className="truncate">{att.name}</span>
+      <button
+        type="button"
+        aria-label={t('actions.removeAttachment', { defaultValue: 'Remove attachment' })}
+        onClick={onRemove}
+        className="inline-flex items-center justify-center rounded-full hover:text-[var(--color-fg)] interactive"
+      >
+        <X size={11} aria-hidden />
+      </button>
+    </span>
+  )
+}
+
+/** KindIcon — small icon for non-image attachment chips. */
+function KindIcon({ kind }: { kind: Attachment['kind'] }) {
+  const iconClass = 'shrink-0 text-[var(--color-fg-subtle)]'
+  switch (kind) {
+    case 'sheet':
+      return <FileSpreadsheet size={12} className={iconClass} aria-hidden />
+    case 'pdf':
+    case 'doc':
+    case 'code':
+    case 'other':
+    default:
+      return <FileText size={12} className={iconClass} aria-hidden />
+  }
 }
 
