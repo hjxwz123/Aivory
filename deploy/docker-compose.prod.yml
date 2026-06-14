@@ -108,14 +108,16 @@ services:
       context: ..
       dockerfile: deploy/Dockerfile.server
     restart: unless-stopped
+    # NOTE: the api does NOT depend_on the sandbox. The sandbox is a soft,
+    # per-request HTTP dependency (only code execution needs it) — making it a
+    # startup dependency would block the whole API (→ nginx 502) whenever the
+    # sandbox image is unavailable or the container is unhealthy.
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
       qdrant:
-        condition: service_started
-      sandbox:
         condition: service_started
     environment:
       AURELIA_LISTEN: ":8787"
