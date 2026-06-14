@@ -392,6 +392,17 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	if ragMode == "" {
 		ragMode = "auto"
 	}
+	// Chat uploads ingest asynchronously (parse → embed → status='ready'). If the
+	// user sends a message the instant they attach a file, ingestion hasn't
+	// finished, so the doc isn't retrievable yet and the model would answer "I
+	// can't see the file" on the FIRST turn (it only worked from the 2nd turn on).
+	// Briefly wait for in-flight ingestion of THIS conversation's docs so the very
+	// first turn can use the upload. Bounded so a slow/failing embed never hangs
+	// the request — on timeout we just proceed (the answer model is told the file
+	// is still indexing via the no-context path).
+	if o.rag != nil {
+		o.waitForPendingDocs(ctx, conv.ID)
+	}
 	// §4.11-B: run inline RAG when a KB is bound OR the conversation itself has an
 	// ingested upload (chat-attached files are conversation-scoped, not in a KB —
 	// without this they'd only be retrievable if the model voluntarily called the
@@ -776,6 +787,40 @@ func storeToUnified(msgs []store.Message, currentProvider string) []UnifiedMessa
 // maxInlineAttachment caps how large a file we inline as base64 (≈10 MB raw →
 // ~13 MB base64), protecting the upstream request size.
 const maxInlineAttachment = 10 * 1024 * 1024
+
+// pendingDocWait bounds how long a turn waits for a just-uploaded chat file to
+// finish async ingestion before answering. Long enough for a normal embed pass
+// (a few batches over the network), short enough that a slow/failing embed
+// can't hang the request — on timeout the turn proceeds without the doc.
+const pendingDocWait = 25 * time.Second
+
+// waitForPendingDocs blocks until this conversation has no documents still being
+// ingested (pending/parsing/embedding), or pendingDocWait elapses, or the
+// request is cancelled. It returns immediately when nothing is in flight, so it
+// adds zero latency to ordinary chats — only the first turn right after an
+// upload pays the (usually small) wait. This is what lets the FIRST message
+// after attaching a file actually use it instead of "I can't see the file".
+func (o *Orchestrator) waitForPendingDocs(ctx context.Context, convID string) {
+	if !store.ConversationHasPendingDocs(ctx, o.db, convID) {
+		return
+	}
+	deadline := time.Now().Add(pendingDocWait)
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if !store.ConversationHasPendingDocs(ctx, o.db, convID) {
+				return
+			}
+			if time.Now().After(deadline) {
+				return
+			}
+		}
+	}
+}
 
 // resolveAttachments loads image/PDF attachments from disk and appends them as
 // base64 blocks to their messages so vision-capable providers can see them

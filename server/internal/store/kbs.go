@@ -134,6 +134,17 @@ func ConversationHasReadyDocs(ctx context.Context, db *sql.DB, convID string) bo
 	return n == 1
 }
 
+// ConversationHasPendingDocs reports whether a conversation has a document still
+// being ingested (pending/parsing/embedding). Used to briefly wait for a
+// just-uploaded chat file to finish indexing before answering, so the very first
+// turn after an upload can actually use the file (§4.11-B chat uploads).
+func ConversationHasPendingDocs(ctx context.Context, db *sql.DB, convID string) bool {
+	var n int
+	_ = db.QueryRowContext(ctx,
+		`SELECT 1 FROM documents WHERE conversation_id=? AND status IN ('pending','parsing','embedding') LIMIT 1`, convID).Scan(&n)
+	return n == 1
+}
+
 // ListIncompleteDocuments returns documents stuck in a non-terminal state —
 // used at boot to requeue ingest jobs lost to a restart (the queue is in-memory).
 func ListIncompleteDocuments(ctx context.Context, db *sql.DB) ([]Document, error) {
