@@ -4,13 +4,46 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
+	"time"
 
 	"aurelia/server/internal/store"
 )
+
+// embedHTTPClient is shared across every httpEmbedder so TLS connections to the
+// embeddings endpoint are pooled and reused between documents. Re-handshaking a
+// slow / far-away endpoint (e.g. dashscope.aliyuncs.com) on every batch is
+// exactly what produces "TLS handshake timeout"; keep-alive avoids most of it.
+// The transport timeouts bound a hung dial/handshake so a stuck connection
+// fails fast (and gets retried) instead of blocking the whole ingest.
+var embedHTTPClient = &http.Client{
+	Timeout: 120 * time.Second, // overall safety net; the request context still applies
+	Transport: &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   15 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          50,
+		MaxIdleConnsPerHost:   10,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   20 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	},
+}
+
+// embeddingResponse is the OpenAI-format /v1/embeddings reply shape.
+type embeddingResponse struct {
+	Data []struct {
+		Embedding []float32 `json:"embedding"`
+	} `json:"data"`
+}
 
 // httpEmbedder calls an OpenAI-format `/v1/embeddings` endpoint (§4.11-D). Any
 // OpenAI-compatible gateway works — the admin configures base_url + key + model
@@ -22,10 +55,15 @@ type httpEmbedder struct {
 	dim     int
 }
 
-// embedBatchMax caps texts per upstream request (§4.11-D: 每批 ≤128).
-const embedBatchMax = 128
+// embedBatchMax caps texts per upstream request. Kept conservative because some
+// OpenAI-compatible providers cap the input array hard — notably Alibaba
+// DashScope (Qwen) text-embedding-v3, whose compatible-mode endpoint rejects
+// batches over 10 with a 400. OpenAI/others tolerate small batches fine (just
+// more requests, cheap now that the HTTP client pools connections), so 10 is the
+// safe universal default.
+const embedBatchMax = 10
 
-// Embed returns one vector per input text, batching upstream calls at 128.
+// Embed returns one vector per input text, batching upstream calls.
 func (e *httpEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
 	if len(texts) > embedBatchMax {
 		out := make([][]float32, 0, len(texts))
@@ -46,35 +84,91 @@ func (e *httpEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, 
 	if base == "" {
 		base = "https://api.openai.com"
 	}
+	// Build the endpoint. Most configs give the API root (…/compatible-mode or
+	// api.openai.com) so we append /v1/embeddings; tolerate a base that already
+	// ends in /v1 so we don't produce …/v1/v1/embeddings.
+	endpoint := base + "/v1/embeddings"
+	if strings.HasSuffix(base, "/v1") {
+		endpoint = base + "/embeddings"
+	}
 	body, _ := json.Marshal(map[string]any{"model": e.model, "input": texts})
-	req, err := http.NewRequestWithContext(ctx, "POST", base+"/v1/embeddings", bytes.NewReader(body))
+	parsed, err := e.postEmbeddings(ctx, endpoint, body)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("authorization", "Bearer "+e.apiKey)
-	req.Header.Set("content-type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		b, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("embeddings %d: %s", resp.StatusCode, string(b))
-	}
-	var parsed struct {
-		Data []struct {
-			Embedding []float32 `json:"embedding"`
-		} `json:"data"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
-		return nil, err
+	if len(parsed.Data) != len(texts) {
+		// A short/over-long reply means we'd misalign vectors with their chunks
+		// (and index out of range downstream). Fail loudly so the doc retries
+		// rather than silently storing the wrong vectors.
+		return nil, fmt.Errorf("embeddings returned %d vectors for %d inputs", len(parsed.Data), len(texts))
 	}
 	out := make([][]float32, len(parsed.Data))
 	for i, d := range parsed.Data {
+		if len(d.Embedding) == 0 {
+			return nil, fmt.Errorf("embeddings returned an empty vector at index %d", i)
+		}
 		out[i] = d.Embedding
 	}
 	return out, nil
+}
+
+// postEmbeddings POSTs one batch, retrying transient failures (TLS handshake
+// timeout, dropped connection, 429/5xx) with backoff. The request body is a
+// []byte so it can be replayed on each attempt. Hard 4xx (bad key, bad model,
+// unsupported dimension) are returned immediately — retrying won't help.
+func (e *httpEmbedder) postEmbeddings(ctx context.Context, url string, body []byte) (embeddingResponse, error) {
+	const maxAttempts = 3
+	var parsed embeddingResponse
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if attempt > 1 {
+			// Linear backoff: 2s, 4s. Honor cancellation while waiting.
+			timer := time.NewTimer(time.Duration(attempt-1) * 2 * time.Second)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return parsed, ctx.Err()
+			case <-timer.C:
+			}
+		}
+		req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
+		if err != nil {
+			return parsed, err
+		}
+		req.Header.Set("authorization", "Bearer "+e.apiKey)
+		req.Header.Set("content-type", "application/json")
+		resp, err := embedHTTPClient.Do(req)
+		if err != nil {
+			// Don't retry if the caller cancelled / timed out the context.
+			if ctx.Err() != nil {
+				return parsed, ctx.Err()
+			}
+			lastErr = err // network / TLS / dial error → transient, retry
+			continue
+		}
+		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
+			b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+			resp.Body.Close()
+			lastErr = fmt.Errorf("embeddings %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+			continue // rate-limited / server-side → retry
+		}
+		if resp.StatusCode >= 400 {
+			b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+			resp.Body.Close()
+			return parsed, fmt.Errorf("embeddings %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+		}
+		err = json.NewDecoder(resp.Body).Decode(&parsed)
+		resp.Body.Close()
+		if err != nil {
+			lastErr = fmt.Errorf("decode embeddings response: %w", err)
+			continue // truncated body / transient → retry
+		}
+		return parsed, nil
+	}
+	if lastErr == nil {
+		lastErr = errors.New("unknown error")
+	}
+	return parsed, fmt.Errorf("embeddings request failed after %d attempts: %w", maxAttempts, lastErr)
 }
 
 // localEmbedDim is the fixed width of the bundled hash-bag embedder.
