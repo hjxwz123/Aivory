@@ -25,6 +25,7 @@
       "name": "名称",
       "type": "类型",
       "apiFormat": "接口格式",
+      "apiFormatHint": "仅影响对话模型，向量模型和图片模型不使用此设置。",
       "baseUrl": "Base URL",
       "baseUrlHint": "留空使用厂商默认端点。",
       "apiKey": "API Key",
@@ -82,6 +83,8 @@
       "systemPrompt": "系统提示词",
       "paramControls": "param_controls (JSON)",
       "dim": "向量维度",
+      "sortOrder": "显示顺序",
+      "sortOrderHint": "数字越小越靠前。也可在模型列表用箭头快速调整。",
       "priceIn": "输入价格 (/1M token)",
       "priceOut": "输出价格 (/1M token)",
       "priceCacheRead": "缓存读取 $/1M",
@@ -101,6 +104,8 @@
     "created": "模型已创建",
     "updated": "模型已更新",
     "removed": "模型已删除",
+    "moveUp": "上移",
+    "moveDown": "下移",
     "errors": {
       "missingFields": "请填写渠道、显示名和 request_id",
       "invalidJSON": "param_controls 不是合法 JSON"

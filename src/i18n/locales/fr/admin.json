@@ -25,6 +25,7 @@
       "name": "Nom",
       "type": "Type",
       "apiFormat": "Format d'API",
+      "apiFormatHint": "N'affecte que les modèles de chat. Les modèles d'embedding et d'image ignorent ce paramètre.",
       "baseUrl": "URL de base",
       "baseUrlHint": "Laissez vide pour utiliser la valeur par défaut du fournisseur.",
       "apiKey": "Clé d'API",
@@ -82,6 +83,8 @@
       "systemPrompt": "Invite système",
       "paramControls": "param_controls (JSON)",
       "dim": "Dimension",
+      "sortOrder": "Ordre d'affichage",
+      "sortOrderHint": "Les valeurs plus faibles apparaissent en premier. Utilisez les flèches dans la liste pour réorganiser rapidement.",
       "priceIn": "Prix en entrée (par 1M de tokens)",
       "priceOut": "Prix en sortie (par 1M de tokens)",
       "priceCacheRead": "Lecture cache $/1M",
@@ -101,6 +104,8 @@
     "created": "Modèle créé",
     "updated": "Modèle mis à jour",
     "removed": "Modèle retiré",
+    "moveUp": "Monter",
+    "moveDown": "Descendre",
     "errors": {
       "missingFields": "Le canal, le libellé et le request_id sont requis",
       "invalidJSON": "param_controls n'est pas un JSON valide"

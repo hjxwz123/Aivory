@@ -25,6 +25,7 @@
       "name": "Name",
       "type": "Type",
       "apiFormat": "API format",
+      "apiFormatHint": "Only affects chat models. Embedding and image models ignore this setting.",
       "baseUrl": "Base URL",
       "baseUrlHint": "Leave blank to use the vendor default.",
       "apiKey": "API key",
@@ -82,6 +83,8 @@
       "systemPrompt": "System prompt",
       "paramControls": "param_controls (JSON)",
       "dim": "Dimension",
+      "sortOrder": "Display order",
+      "sortOrderHint": "Lower numbers appear first. Use the arrows on the model list for quick reordering.",
       "priceIn": "Price in (per 1M token)",
       "priceOut": "Price out (per 1M token)",
       "priceCacheRead": "Cache read $/1M",
@@ -101,6 +104,8 @@
     "created": "Model created",
     "updated": "Model updated",
     "removed": "Model removed",
+    "moveUp": "Move up",
+    "moveDown": "Move down",
     "errors": {
       "missingFields": "Channel, label and request_id are required",
       "invalidJSON": "param_controls is not valid JSON"

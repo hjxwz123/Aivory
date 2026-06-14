@@ -192,7 +192,7 @@ export default function AdminChannels() {
                   </Select>
                 </Field>
                 {editor.draft.type === 'openai' ? (
-                  <Field label={t('admin:channels.fields.apiFormat')} htmlFor="ch-fmt">
+                  <Field label={t('admin:channels.fields.apiFormat')} htmlFor="ch-fmt" hint={t('admin:channels.fields.apiFormatHint')}>
                     <Select
                       value={editor.draft.api_format ?? 'chat'}
                       onValueChange={(v) => setEditor({ ...editor, draft: { ...editor.draft, api_format: v as ApiChannel['api_format'] } })}

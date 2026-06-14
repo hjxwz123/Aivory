@@ -230,6 +230,14 @@ export default function AdminModelEdit() {
                   onCheckedChange={(v) => patch({ enabled: v })}
                 />
               </label>
+              <Field label={t('admin:models.fields.sortOrder')} htmlFor="m-sort" hint={t('admin:models.fields.sortOrderHint')}>
+                <Input
+                  id="m-sort"
+                  type="number"
+                  value={String(draft.sort_order ?? 0)}
+                  onChange={(e) => patch({ sort_order: Number(e.target.value) })}
+                />
+              </Field>
             </div>
           </section>
 

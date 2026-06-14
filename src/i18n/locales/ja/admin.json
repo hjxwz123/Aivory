@@ -25,6 +25,7 @@
       "name": "名前",
       "type": "タイプ",
       "apiFormat": "APIフォーマット",
+      "apiFormatHint": "チャットモデルにのみ影響します。埋め込みモデルや画像モデルはこの設定を使用しません。",
       "baseUrl": "ベースURL",
       "baseUrlHint": "空欄にするとベンダーの既定値を使用します。",
       "apiKey": "APIキー",
@@ -82,6 +83,8 @@
       "systemPrompt": "システムプロンプト",
       "paramControls": "param_controls（JSON）",
       "dim": "次元",
+      "sortOrder": "表示順序",
+      "sortOrderHint": "数値が小さいほど先に表示されます。モデル一覧の矢印でも並び替えできます。",
       "priceIn": "入力料金（100万トークンあたり）",
       "priceOut": "出力料金（100万トークンあたり）",
       "priceCacheRead": "キャッシュ読み取り $/100万",
@@ -101,6 +104,8 @@
     "created": "モデルを作成しました",
     "updated": "モデルを更新しました",
     "removed": "モデルを削除しました",
+    "moveUp": "上に移動",
+    "moveDown": "下に移動",
     "errors": {
       "missingFields": "チャネル、ラベル、request_idは必須です",
       "invalidJSON": "param_controlsが有効なJSONではありません"

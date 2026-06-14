@@ -11,7 +11,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { Plus, Settings as SettingsIcon, Trash2 } from 'lucide-react'
+import { Plus, Settings as SettingsIcon, Trash2, ArrowUp, ArrowDown } from 'lucide-react'
 import { adminApi, ApiError } from '@/api'
 import type { ApiChannel, ApiModel } from '@/api/types'
 import { Button } from '@/components/ui/button'
@@ -137,6 +137,25 @@ export default function AdminModels() {
     }
   }
 
+  async function swapOrder(idx: number, dir: -1 | 1) {
+    const target = idx + dir
+    if (target < 0 || target >= models.length) return
+    const a = models[idx]
+    const b = models[target]
+    // Use index-based order values with gaps so future inserts land between
+    const orderA = a.sort_order ?? idx * 10
+    const orderB = b.sort_order ?? target * 10
+    try {
+      await Promise.all([
+        adminApi.updateModel(a.id, { ...a, sort_order: orderB }),
+        adminApi.updateModel(b.id, { ...b, sort_order: orderA }),
+      ])
+      await load()
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
+    }
+  }
+
   return (
     <div>
       <header className="flex items-end justify-between gap-4">
@@ -158,10 +177,30 @@ export default function AdminModels() {
           </div>
         ) : (
           <ul className="flex flex-col divide-y divide-[var(--color-divider)] rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)]">
-            {models.map((m) => {
+            {models.map((m, idx) => {
               const ch = channels.find((c) => c.id === m.channel_id)
               return (
-                <li key={m.id} className="grid grid-cols-[1fr_auto_auto] gap-3 items-center px-5 py-4">
+                <li key={m.id} className="grid grid-cols-[auto_1fr_auto_auto_auto] gap-2 items-center px-5 py-4">
+                  <div className="flex flex-col gap-0.5">
+                    <button
+                      type="button"
+                      className="rounded p-0.5 text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] disabled:opacity-30 disabled:pointer-events-none transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+                      disabled={idx === 0}
+                      onClick={() => void swapOrder(idx, -1)}
+                      aria-label={t('admin:models.moveUp')}
+                    >
+                      <ArrowUp size={14} strokeWidth={1.5} aria-hidden />
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded p-0.5 text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] disabled:opacity-30 disabled:pointer-events-none transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+                      disabled={idx === models.length - 1}
+                      onClick={() => void swapOrder(idx, 1)}
+                      aria-label={t('admin:models.moveDown')}
+                    >
+                      <ArrowDown size={14} strokeWidth={1.5} aria-hidden />
+                    </button>
+                  </div>
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-medium text-[var(--color-fg)] truncate">{m.label}</span>
