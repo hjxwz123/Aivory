@@ -227,6 +227,9 @@ func uploadFileHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 			ConversationID: conv, Filename: f.Filename, MimeType: f.MimeType,
 			SizeBytes: f.SizeBytes, Status: "pending", StoragePath: f.StoragePath,
 		}); derr == nil && doc != nil {
+			// Surface the doc id so the client can poll its ingest status and
+			// block the first send until it's 'ready' (§ chat uploads).
+			f.DocumentID = doc.ID
 			d.RAG.Ingest(doc.ID)
 		}
 	}

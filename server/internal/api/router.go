@@ -127,6 +127,7 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("POST", "/api/conversations/:id/regenerate", requireAuth(d, regenerateHandler))
 	mux.handle("PATCH", "/api/conversations/:id/active-leaf", requireAuth(d, setActiveLeafHandler))
 	mux.handle("POST", "/api/conversations/:id/fork", requireAuth(d, forkConversationHandler))
+	mux.handle("GET", "/api/conversations/:id/documents", requireAuth(d, listConversationDocsHandler))
 	mux.handle("POST", "/api/conversations/:id/documents/:docId/promote", requireAuth(d, promoteDocumentHandler))
 	mux.handle("GET", "/api/conversations/:id/share", requireAuth(d, getShareHandler))
 	mux.handle("POST", "/api/conversations/:id/share", requireAuth(d, createShareHandler))

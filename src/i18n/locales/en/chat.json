@@ -31,6 +31,9 @@
     "attachedMultiple": "Attached {{count}} files",
     "attachedHint": "Attachments are visual-only in this build.",
     "uploadFailed": "Upload failed",
+    "parsing": "Parsing…",
+    "indexing": "Indexing…",
+    "ingestFailed": "Couldn't read this file",
     "knowledgeBases": "Knowledge bases",
     "noKnowledgeBases": "No knowledge bases yet."
   },

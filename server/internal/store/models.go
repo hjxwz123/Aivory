@@ -284,8 +284,12 @@ type File struct {
 	StoragePath    string          `json:"-"`
 	// URL is filled by the handler (not the DB) so the frontend can render
 	// thumbnails / download links without keeping the blob URL alive.
-	URL       string `json:"url,omitempty"`
-	CreatedAt int64  `json:"created_at"`
+	URL string `json:"url,omitempty"`
+	// DocumentID is filled by the handler (not the DB) when the upload also
+	// created a conversation-scoped RAG document, so the client can poll that
+	// document's ingest status before sending its first question (§ chat uploads).
+	DocumentID string `json:"document_id,omitempty"`
+	CreatedAt  int64  `json:"created_at"`
 }
 
 // Helper: read settings value as JSON. Backed by a short-TTL process-local

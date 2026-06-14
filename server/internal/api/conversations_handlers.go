@@ -405,6 +405,20 @@ func promoteDocumentHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
+// listConversationDocsHandler returns the conversation-scoped documents and
+// their ingest status, so the client can show upload/parse progress and block
+// the first send until a just-attached file is 'ready' (§ chat uploads).
+func listConversationDocsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	u := authUser(r)
+	convID := pathParam(r, "id")
+	if _, err := store.GetConversation(r.Context(), d.DB, convID, u.ID); err != nil {
+		writeError(w, 404, errNotFound)
+		return
+	}
+	docs, _ := store.ListDocuments(r.Context(), d.DB, "conversation", convID)
+	writeJSON(w, 200, docs)
+}
+
 // stopHandler signals a generation cancel for the conversation.
 func stopHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)

@@ -200,6 +200,10 @@ export const conversationsApi = {
     api<{ ok: true }>(`/conversations/${encodeURIComponent(id)}/documents/${encodeURIComponent(docId)}/promote`, {
       method: 'POST',
     }),
+  // Conversation-scoped documents + their ingest status — polled by the composer
+  // to show upload/parse progress and block the first send until 'ready'.
+  listDocs: (id: string) =>
+    api<ApiDocument[]>(`/conversations/${encodeURIComponent(id)}/documents`),
   // Public read-only sharing (§ sharing).
   getShare: (id: string) =>
     api<{ share: ApiShareInfo | null }>(`/conversations/${encodeURIComponent(id)}/share`),

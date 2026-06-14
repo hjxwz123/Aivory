@@ -31,6 +31,9 @@
     "attachedMultiple": "已附加 {{count}} 个文件",
     "attachedHint": "本版本中附件仅用于视觉展示。",
     "uploadFailed": "上传失败",
+    "parsing": "解析中…",
+    "indexing": "索引中…",
+    "ingestFailed": "无法读取此文件",
     "knowledgeBases": "知识库",
     "noKnowledgeBases": "还没有知识库。"
   },

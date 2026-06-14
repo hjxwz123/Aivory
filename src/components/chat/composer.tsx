@@ -25,12 +25,13 @@ import {
   Loader2,
   BookOpen,
   Check,
+  AlertTriangle,
 } from 'lucide-react'
 import type { Attachment } from '@/types/chat'
 import { Textarea } from '@/components/ui/textarea'
 import { Tooltip } from '@/components/ui/tooltip'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { kbsApi, audioApi } from '@/api/endpoints'
+import { kbsApi, audioApi, conversationsApi } from '@/api/endpoints'
 import { ModelPicker } from './model-picker'
 import { ParamControls } from './param-controls'
 import { filterVisibleParams } from './param-controls.utils'
@@ -78,10 +79,13 @@ const MAX_LEN = 12_000
 interface PendingAttachment extends Attachment {
   /** true while POST /api/files is in flight. */
   uploading?: boolean
-  /** Raw file held locally when no conversation exists yet (home screen). The
-   *  upload — and the conversation it needs — is deferred to submit so an
-   *  abandoned draft never creates an orphan conversation (§ first-turn upload). */
-  file?: File
+  /** Server document id for a doc-like upload that is being RAG-ingested, so we
+   *  can poll its status. Absent for images / scope-less uploads. */
+  documentId?: string
+  /** Ingest progress of the conversation-scoped document. While 'parsing' or
+   *  'embedding' the send button is blocked so the FIRST question always lands
+   *  after the file is searchable (§ chat uploads). */
+  ingest?: 'parsing' | 'embedding' | 'ready' | 'failed'
 }
 
 export function Composer({
@@ -116,6 +120,16 @@ export function Composer({
   const ref = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const submittingRef = useRef(false)
+  // Active ingest-status pollers, keyed by attachment id, so they can be
+  // cancelled on remove / submit / unmount.
+  const pollTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
+  useEffect(() => {
+    const timers = pollTimers.current
+    return () => {
+      timers.forEach((tm) => clearTimeout(tm))
+      timers.clear()
+    }
+  }, [])
   // Voice input (§ whisper). Record via MediaRecorder, then transcribe through
   // the admin-configured /audio/transcriptions endpoint and insert the text.
   const [recording, setRecording] = useState(false)
@@ -183,11 +197,17 @@ export function Composer({
   }, [autoFocus])
 
   const uploading = useMemo(() => attachments.some((a) => a.uploading), [attachments])
-  const canSubmit = value.trim().length > 0 && !streaming && !uploading
+  // A doc that is still parsing/embedding isn't searchable yet — block the send
+  // so the FIRST question lands after the file is ready (§ chat uploads).
+  const ingesting = useMemo(
+    () => attachments.some((a) => a.ingest === 'parsing' || a.ingest === 'embedding'),
+    [attachments],
+  )
+  const canSubmit = value.trim().length > 0 && !streaming && !uploading && !ingesting
 
   async function handleSubmit() {
     const text = value.trim()
-    if (!text || streaming || uploading || submittingRef.current) return
+    if (!text || streaming || uploading || ingesting || submittingRef.current) return
     if (text.length > MAX_LEN) {
       toast.warning(
         t('composer.tooLongTitle'),
@@ -195,34 +215,18 @@ export function Composer({
       )
       return
     }
-    // Flush any DEFERRED uploads now: this is the first real commit, so create
-    // the conversation (ensureConversationId) and ingest the held files into it
-    // — no orphan conversation is left behind for an abandoned draft.
-    let finalAttachments: Attachment[] = attachments
-    if (attachments.some((a) => a.file)) {
-      submittingRef.current = true
-      setAttachments((s) => s.map((a) => (a.file ? { ...a, uploading: true } : a)))
-      let scopeId: string | undefined
-      try {
-        scopeId = ensureConversationId ? await ensureConversationId() : undefined
-      } catch {
-        scopeId = undefined
-      }
-      const settled = await Promise.all(
-        attachments.map((a) => (a.file ? uploadAttachment(a.file, a, scopeId) : Promise.resolve(a))),
-      )
-      finalAttachments = settled.filter((a): a is PendingAttachment => a !== null)
-      submittingRef.current = false
-    }
+    // Uploads happen on attach now (so parsing starts immediately and the send is
+    // gated until 'ready'); by here every attachment is already a real backend id.
     const params = filterVisibleParams(paramControls, paramValues)
-    onSubmit(text, finalAttachments, {
+    onSubmit(text, attachments, {
       mode: mode === 'default' ? undefined : mode,
       params: Object.keys(params).length > 0 ? params : undefined,
     })
     setValue('')
-    // Only revoke leftover blob: URLs — uploadAttachment already swapped its
-    // own. Leaves persistent /api/files/… URLs intact so the message bubble
-    // can render the image after submit.
+    // Stop any leftover pollers and revoke blob: URLs — uploadAttachment already
+    // swapped its own. Persistent /api/files/… URLs stay so the bubble can render.
+    pollTimers.current.forEach((tm) => clearTimeout(tm))
+    pollTimers.current.clear()
     attachments.forEach((a) => {
       if (a.previewUrl && a.previewUrl.startsWith('blob:')) URL.revokeObjectURL(a.previewUrl)
     })
@@ -247,7 +251,7 @@ export function Composer({
       const isDocLike = local.kind === 'pdf' || local.kind === 'doc' || local.kind === 'sheet' || /\.txt$|\.md$|\.markdown$/i.test(local.name)
       const ragFlag = (kbIds && kbIds.length > 0) || isDocLike
       const url = `/files${scopeId ? `?conversation_id=${encodeURIComponent(scopeId)}${ragFlag ? '&rag=1' : ''}` : ''}`
-      const res = await api<ApiAttachment & { id: string; url?: string }>(url, { method: 'POST', body: form })
+      const res = await api<ApiAttachment & { id: string; url?: string; document_id?: string }>(url, { method: 'POST', body: form })
       // Persistent URL replaces the blob URL. Fall back to /api/files/<id>
       // when the response omits `url` (older backends).
       const persistentUrl = res.url || `/api/files/${encodeURIComponent(res.id)}`
@@ -259,10 +263,16 @@ export function Composer({
         ...local,
         id: res.id,
         uploading: false,
-        file: undefined,
         previewUrl: persistentUrl,
+        documentId: res.document_id,
+        // A conversation doc was created → it's being parsed/embedded; track it
+        // so the send stays blocked until it's searchable.
+        ingest: res.document_id ? 'parsing' : undefined,
       }
       setAttachments((s) => s.map((a) => (a.id === local.id ? updated : a)))
+      if (res.document_id && scopeId) {
+        startIngestPoll(scopeId, res.document_id, res.id)
+      }
       return updated
     } catch (e) {
       setAttachments((s) => s.filter((a) => a.id !== local.id))
@@ -271,14 +281,51 @@ export function Composer({
     }
   }
 
+  // INGEST_POLL_MS: status poll cadence. INGEST_MAX_MS: cap on how long the send
+  // stays blocked — long enough for a normal parse+embed, but bounded so a slow
+  // MinerU OCR job can't lock the composer; past it we unblock and let the
+  // backend's own brief wait + RAG catch the doc up.
+  const INGEST_POLL_MS = 1200
+  const INGEST_MAX_MS = 90_000
+
+  function startIngestPoll(scopeId: string, docId: string, attId: string) {
+    const started = Date.now()
+    const tick = async () => {
+      pollTimers.current.delete(attId)
+      let done = false
+      try {
+        const docs = await conversationsApi.listDocs(scopeId)
+        const doc = docs.find((dd) => dd.id === docId)
+        if (doc) {
+          if (doc.status === 'ready') {
+            setAttachments((s) => s.map((a) => (a.id === attId ? { ...a, ingest: 'ready' } : a)))
+            done = true
+          } else if (doc.status === 'failed') {
+            setAttachments((s) => s.map((a) => (a.id === attId ? { ...a, ingest: 'failed' } : a)))
+            toast.error(t('composer.ingestFailed', { defaultValue: 'Could not read this file' }), doc.error || undefined)
+            done = true
+          } else {
+            const ing: 'embedding' | 'parsing' = doc.status === 'embedding' ? 'embedding' : 'parsing'
+            setAttachments((s) => s.map((a) => (a.id === attId ? { ...a, ingest: ing } : a)))
+          }
+        }
+      } catch {
+        /* transient network error — keep polling */
+      }
+      if (done) return
+      if (Date.now() - started > INGEST_MAX_MS) {
+        // Stop blocking; mark ready so the user can send (backend waits too).
+        setAttachments((s) => s.map((a) => (a.id === attId && (a.ingest === 'parsing' || a.ingest === 'embedding') ? { ...a, ingest: 'ready' } : a)))
+        return
+      }
+      pollTimers.current.set(attId, setTimeout(() => void tick(), INGEST_POLL_MS))
+    }
+    pollTimers.current.set(attId, setTimeout(() => void tick(), INGEST_POLL_MS))
+  }
+
   async function handleAttach(files: FileList | null) {
     if (!files || !files.length) return
     const list = Array.from(files)
-    // When there's no conversation yet (home screen), DEFER the upload — and the
-    // conversation it would need — to submit time (handleSubmit). Creating the
-    // conversation on attach would litter the backend with an empty conversation
-    // for every draft a user attaches to and then abandons.
-    const deferred = !conversationId
     const additions: PendingAttachment[] = list.map((f) => ({
       id: uid('att'),
       name: f.name,
@@ -294,18 +341,33 @@ export function Composer({
               : 'other',
       // Local thumbnail so images preview instantly; revoked on remove/submit.
       previewUrl: f.type.startsWith('image/') ? URL.createObjectURL(f) : undefined,
-      uploading: !deferred,
-      file: deferred ? f : undefined,
+      uploading: true,
     }))
     setAttachments((s) => [...s, ...additions])
     toast.success(
       t(additions.length === 1 ? 'composer.attachedSingle' : 'composer.attachedMultiple', { count: additions.length }),
     )
-    if (deferred) return // uploaded on submit, once the conversation is committed
-    await Promise.all(list.map((file, idx) => uploadAttachment(file, additions[idx], conversationId)))
+    // Upload immediately so parsing/ingestion starts the moment the file is
+    // attached (the user sees progress and can't send until it's ready). On the
+    // home screen ensureConversationId lazily creates the scope WITHOUT navigating
+    // away; without a scope we fall back to a plain (non-RAG) attachment upload.
+    let scopeId = conversationId
+    if (!scopeId && ensureConversationId) {
+      try {
+        scopeId = await ensureConversationId()
+      } catch {
+        scopeId = undefined
+      }
+    }
+    await Promise.all(list.map((file, idx) => uploadAttachment(file, additions[idx], scopeId)))
   }
 
   function removeAttachment(id: string) {
+    const tm = pollTimers.current.get(id)
+    if (tm) {
+      clearTimeout(tm)
+      pollTimers.current.delete(id)
+    }
     setAttachments((s) => {
       const target = s.find((a) => a.id === id)
       if (target?.previewUrl && target.previewUrl.startsWith('blob:')) URL.revokeObjectURL(target.previewUrl)
@@ -364,12 +426,24 @@ export function Composer({
             ) : (
               <span
                 key={a.id}
-                className="inline-flex items-center gap-1.5 rounded-[8px] bg-[var(--color-bg-muted)] border border-[var(--color-border-subtle)] px-2 py-1 text-[11px] text-[var(--color-fg-muted)] max-w-[200px]"
+                className={cn(
+                  'inline-flex items-center gap-1.5 rounded-[8px] bg-[var(--color-bg-muted)] border px-2 py-1 text-[11px] max-w-[240px]',
+                  a.ingest === 'failed'
+                    ? 'border-[var(--color-danger)]/40 text-[var(--color-danger)]'
+                    : 'border-[var(--color-border-subtle)] text-[var(--color-fg-muted)]',
+                )}
               >
-                {a.uploading ? (
+                {a.uploading || a.ingest === 'parsing' || a.ingest === 'embedding' ? (
                   <Loader2 size={10} className="animate-spin shrink-0" aria-hidden />
+                ) : a.ingest === 'failed' ? (
+                  <AlertTriangle size={10} className="shrink-0" aria-hidden />
                 ) : null}
                 <span className="truncate">{a.name}</span>
+                {a.ingest === 'parsing' || a.ingest === 'embedding' ? (
+                  <span className="shrink-0 text-[10px] text-[var(--color-fg-subtle)]">
+                    {a.ingest === 'embedding' ? t('composer.indexing') : t('composer.parsing')}
+                  </span>
+                ) : null}
                 <button
                   type="button"
                   aria-label={`Remove ${a.name}`}

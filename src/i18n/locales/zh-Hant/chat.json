@@ -31,6 +31,9 @@
     "attachedMultiple": "已附加 {{count}} 個檔案",
     "attachedHint": "本版本中附件僅用於視覺展示。",
     "uploadFailed": "上傳失敗",
+    "parsing": "解析中…",
+    "indexing": "索引中…",
+    "ingestFailed": "無法讀取此檔案",
     "knowledgeBases": "知識庫",
     "noKnowledgeBases": "還沒有知識庫。"
   },

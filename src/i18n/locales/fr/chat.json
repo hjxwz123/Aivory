@@ -31,6 +31,9 @@
     "attachedMultiple": "{{count}} fichiers joints",
     "attachedHint": "Les pièces jointes sont uniquement visuelles dans cette version.",
     "uploadFailed": "Échec du téléversement",
+    "parsing": "Analyse…",
+    "indexing": "Indexation…",
+    "ingestFailed": "Impossible de lire ce fichier",
     "knowledgeBases": "Bases de connaissances",
     "noKnowledgeBases": "Aucune base de connaissances pour l'instant."
   },

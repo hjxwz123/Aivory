@@ -31,6 +31,9 @@
     "attachedMultiple": "{{count}} 件のファイルを添付しました",
     "attachedHint": "このビルドでは添付ファイルは表示のみです。",
     "uploadFailed": "アップロードに失敗しました",
+    "parsing": "解析中…",
+    "indexing": "インデックス作成中…",
+    "ingestFailed": "このファイルを読み取れませんでした",
     "knowledgeBases": "ナレッジベース",
     "noKnowledgeBases": "ナレッジベースはまだありません。"
   },
