@@ -85,6 +85,8 @@ CREATE TABLE IF NOT EXISTS models (
   system_prompt     TEXT NOT NULL DEFAULT '',
   param_controls    TEXT NOT NULL DEFAULT '[]',
   official_tools    TEXT NOT NULL DEFAULT '[]', -- OpenAI Responses hosted tools; [] = use system tools (§2.3-B)
+  moderation_enabled INTEGER NOT NULL DEFAULT 0,      -- screen prompts before generation (§ moderation)
+  moderation_mode   TEXT NOT NULL DEFAULT 'keyword',  -- keyword | model
   price_input       REAL NOT NULL DEFAULT 0,
   price_output      REAL NOT NULL DEFAULT 0,
   price_cache_read  REAL NOT NULL DEFAULT 0,
@@ -214,7 +216,6 @@ CREATE TABLE IF NOT EXISTS files (
   mime_type       TEXT NOT NULL DEFAULT 'application/octet-stream',
   size_bytes      INTEGER NOT NULL DEFAULT 0,
   storage_path    TEXT NOT NULL,
-  provider_refs   TEXT NOT NULL DEFAULT '{}',
   kind            TEXT NOT NULL DEFAULT 'other',
   created_at      INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 );
@@ -314,7 +315,13 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
   user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   expires_at INTEGER NOT NULL,
   revoked    INTEGER NOT NULL DEFAULT 0,
-  created_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+  created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+  -- Device/network context for the "active sessions" view. ip/location are
+  -- best-effort (location is derived from reverse-proxy geo headers, if any).
+  user_agent TEXT NOT NULL DEFAULT '',
+  ip         TEXT NOT NULL DEFAULT '',
+  location   TEXT NOT NULL DEFAULT '',
+  last_seen  INTEGER NOT NULL DEFAULT 0
 );
 
 -- OAuth / social login providers, configured by the admin. Built-in kinds

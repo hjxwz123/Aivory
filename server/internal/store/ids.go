@@ -20,6 +20,15 @@ func genID(prefix string) string {
 // GenID is the exported helper used by handlers when minting new rows.
 func GenID(prefix string) string { return genID(prefix) }
 
+// genToken returns a high-entropy (192-bit) URL-safe token, used where the id
+// doubles as an unguessable capability secret — e.g. public share links (§D1).
+// 48 hex chars vs genID's 12 makes brute-force enumeration infeasible.
+func genToken() string {
+	var b [24]byte
+	_, _ = rand.Read(b[:])
+	return hex.EncodeToString(b[:])
+}
+
 func hashPassword(plain string) (string, error) {
 	h, err := bcrypt.GenerateFromPassword([]byte(plain), bcrypt.DefaultCost)
 	return string(h), err

@@ -84,6 +84,11 @@ type Model struct {
 	// "web_search"). Empty = use the system's self-built tools (§2.3-B). Only
 	// meaningful for an openai channel with api_format=responses.
 	OfficialTools   json.RawMessage `json:"official_tools"`
+	// ModerationEnabled screens each user prompt before generation (§ moderation).
+	// ModerationMode picks the screen: "keyword" (match the admin keyword list)
+	// or "model" (ask the configured moderation model for an ALLOW/BLOCK verdict).
+	ModerationEnabled bool   `json:"moderation_enabled"`
+	ModerationMode    string `json:"moderation_mode"`
 	PriceInput      float64         `json:"price_input"`
 	PriceOutput     float64         `json:"price_output"`
 	PriceCacheRead  float64         `json:"price_cache_read"`
@@ -188,6 +193,7 @@ type Message struct {
 	Currency         string          `json:"currency"`
 	Status           string          `json:"status"`
 	Error            string          `json:"error"`
+	Feedback         string          `json:"feedback"` // "" | "like" | "dislike" (§ message feedback)
 	CreatedAt        int64           `json:"created_at"`
 }
 
@@ -267,22 +273,33 @@ type File struct {
 	SizeBytes      int64           `json:"size_bytes"`
 	Kind           string          `json:"kind"`
 	StoragePath    string          `json:"-"`
-	ProviderRefs   json.RawMessage `json:"provider_refs"`
 	CreatedAt      int64           `json:"created_at"`
 }
 
-// Helper: read settings value as JSON.
+// Helper: read settings value as JSON. Backed by a short-TTL process-local
+// cache (§2.4) — this is one of the hottest reads in the server.
 func GetSetting(db *sql.DB, key string) (json.RawMessage, error) {
+	if val, missing, ok := settingsCacheGet(key); ok {
+		if missing {
+			return nil, sql.ErrNoRows
+		}
+		return val, nil
+	}
 	var raw string
 	err := db.QueryRow("SELECT value FROM settings WHERE key=?", key).Scan(&raw)
 	if err != nil {
+		if err == sql.ErrNoRows {
+			settingsCachePut(key, nil, true) // negative cache absent keys
+		}
 		return nil, err
 	}
+	settingsCachePut(key, json.RawMessage(raw), false)
 	return json.RawMessage(raw), nil
 }
 
 // SetSetting writes the JSON-encoded value (overwrites). If the key did not
-// exist before, the row is created.
+// exist before, the row is created. Invalidates the cache entry on this
+// instance (other instances clear via the cfg:invalidate Pub/Sub).
 func SetSetting(db *sql.DB, key string, value any) error {
 	b, err := json.Marshal(value)
 	if err != nil {
@@ -291,5 +308,8 @@ func SetSetting(db *sql.DB, key string, value any) error {
 	_, err = db.Exec(`INSERT INTO settings(key, value, updated_at) VALUES(?, ?, ?)
 		ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`,
 		key, string(b), time.Now().Unix())
+	if err == nil {
+		invalidateSettingKey(key)
+	}
 	return err
 }

@@ -68,6 +68,38 @@ services:
       - qdrantdata:/qdrant/storage
     networks: [internal]
 
+  # Sandbox — bundled with the stack so a single `docker compose up` carries it;
+  # no separate project, no key to configure. It is deliberately NOT published
+  # to any host port: only the `api` service reaches it over the private
+  # `internal` network, so it is never exposed to the internet.
+  #
+  # It drives the host Docker daemon (mounted socket) to spawn one locked-down
+  # per-session container, and pulls its runtime image from ghcr on boot.
+  # SECURITY: the mounted docker.sock is root-equivalent on the host; keeping
+  # the service internal-only (no ports) is what contains that blast radius.
+  sandbox:
+    image: ghcr.io/${IMAGE_OWNER:-hjxwz123}/aurelia-sandbox-sidecar:${IMAGE_TAG:-latest}
+    build:
+      context: ../sandbox-service
+      dockerfile: Dockerfile.sidecar
+    restart: unless-stopped
+    environment:
+      # Shared internal default — must match the api's SANDBOX_API_KEY above.
+      SANDBOX_API_KEY: ${SANDBOX_API_KEY:-aurelia-bundled-sandbox}
+      # Per-session runtime image, pulled from ghcr on boot so the first call works.
+      SANDBOX_IMAGE: ghcr.io/${IMAGE_OWNER:-hjxwz123}/aurelia-sandbox:${IMAGE_TAG:-latest}
+      SANDBOX_PULL_ON_START: "1"
+      SANDBOX_NETWORK: ${SANDBOX_NETWORK:-none}   # "bridge" only if sandboxed code needs internet
+      SANDBOX_MEMORY: ${SANDBOX_MEMORY:-2g}
+      SANDBOX_CPUS: ${SANDBOX_CPUS:-1}
+      SANDBOX_MAX_SESSIONS: ${SANDBOX_MAX_SESSIONS:-16}
+      SANDBOX_READ_ONLY_ROOTFS: "1"
+      SANDBOX_WORKSPACE_SIZE: ${SANDBOX_WORKSPACE_SIZE:-512m}
+    volumes:
+      # Required: the sidecar spawns sibling session containers via the host daemon.
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks: [internal]
+
   api:
     # Prebuilt image from the docker-images.yml workflow. Override IMAGE_OWNER
     # in .env if you forked into a different account.
@@ -82,6 +114,8 @@ services:
       redis:
         condition: service_healthy
       qdrant:
+        condition: service_started
+      sandbox:
         condition: service_started
     environment:
       AURELIA_LISTEN: ":8787"
@@ -107,6 +141,13 @@ services:
       EMBEDDING_DIM: ${EMBEDDING_DIM:-1536}
       MINERU_API_URL: ${MINERU_API_URL:-}
       MINERU_API_KEY: ${MINERU_API_KEY:-}
+      # --- Sandbox (bundled) ---
+      # The API talks to the in-stack sandbox over the private network. It is
+      # never published to a host port, so it's unreachable from the internet.
+      # The key is a shared internal default — nothing to configure. (Leave the
+      # admin sandbox_base_url / sandbox_api_key fields BLANK so these win.)
+      SANDBOX_BASE_URL: "http://sandbox:8000"
+      SANDBOX_API_KEY: ${SANDBOX_API_KEY:-aurelia-bundled-sandbox}
     volumes:
       # Uploads + artifacts are filesystem-backed regardless of DB backend.
       - apidata:/app/data

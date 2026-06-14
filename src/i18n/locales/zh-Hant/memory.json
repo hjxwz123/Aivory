@@ -1,0 +1,37 @@
+{
+  "title": "記憶",
+  "lead": "Aurelia 會跨對話記住你的長期事實,這裡的內容會在未來回答中被參考。",
+  "empty": "暫無記憶",
+  "emptyBody": "對話幾次之後,Aurelia 會自動捕獲值得記住的內容,你也可以手動新增。",
+  "new": "新增記憶",
+  "addDialogTitle": "新增記憶",
+  "addDialogBody": "關於你的一句簡短、長期有效的事實。Aurelia 會以此為依據。",
+  "fields": {
+    "text": "記憶內容",
+    "slot": "屬性鍵(可選)",
+    "value": "屬性值(可選)"
+  },
+  "actions": {
+    "edit": "編輯",
+    "save": "儲存",
+    "delete": "遺忘",
+    "markStale": "標為過期",
+    "markActive": "標為有效"
+  },
+  "status": {
+    "ACTIVE": "有效",
+    "STALE": "過期",
+    "UNKNOWN_CURRENT": "未知",
+    "HISTORICAL_ONLY": "僅歷史",
+    "QUERY_DEPENDENT": "結合問題判斷"
+  },
+  "created": "已儲存記憶",
+  "updated": "記憶已更新",
+  "deleted": "記憶已遺忘",
+  "deleteConfirm": "確認遺忘這條記憶?",
+  "filters": {
+    "all": "全部",
+    "active": "有效",
+    "stale": "過期"
+  }
+}

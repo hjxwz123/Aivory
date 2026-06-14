@@ -9,4 +9,6 @@ var (
 	errAdminOnly      = errors.New("admin only")
 	errInvalidInput   = errors.New("invalid input")
 	errNotFound       = errors.New("not found")
+
+	errUploadRateLimited = errors.New("upload rate limit exceeded — try again shortly")
 )

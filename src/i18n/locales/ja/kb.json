@@ -1,0 +1,54 @@
+{
+  "title": "ナレッジ",
+  "lead": "どの会話からでも呼び出せる、長く使えるライブラリ。一度アップロードすれば、どこからでも質問できます。",
+  "new": "新しいライブラリ",
+  "emptyTitle": "ライブラリがまだありません",
+  "emptyBody": "ライブラリは、一連のドキュメントを一つの埋め込みモデルに紐づけます。作成して始めましょう。",
+  "createFirst": "最初のライブラリを作成",
+  "stats": {
+    "dim": "{{dim}}次元の埋め込み",
+    "created": "{{when}}に作成"
+  },
+  "dialog": {
+    "title": "新しいナレッジライブラリ",
+    "body": "埋め込みモデルは最初のドキュメントをアップロードすると固定されます。ベクトル空間を決定するためです。",
+    "name": "名前",
+    "namePlaceholder": "ハウススタイルガイド",
+    "description": "説明",
+    "embeddingModel": "埋め込みモデル",
+    "pickModel": "モデルを選択",
+    "create": "作成",
+    "created": "ナレッジベースを作成しました",
+    "nameRequired": "名前は必須です"
+  },
+  "detail": {
+    "uploadButton": "ドキュメントをアップロード",
+    "noDocs": "ドキュメントがまだありません",
+    "noDocsBody": "PDF、Markdown、またはテキストファイルをアップロードすると、Aurelia が検索用にインデックスします。",
+    "rename": "ライブラリの名前を変更",
+    "delete": "ライブラリを削除",
+    "deleteConfirm": "このライブラリとすべてのドキュメントを削除しますか？",
+    "uploaded": "ドキュメントをアップロードしました",
+    "uploadFailed": "アップロードに失敗しました",
+    "failedReason": "インデックスに失敗しました。ドキュメントを削除して、もう一度アップロードしてください。",
+    "status": {
+      "pending": "待機中",
+      "parsing": "解析中",
+      "embedding": "埋め込み中",
+      "ready": "準備完了",
+      "failed": "失敗"
+    },
+    "tableHeaders": {
+      "filename": "ファイル",
+      "status": "ステータス",
+      "chunks": "チャンク",
+      "added": "追加日"
+    },
+    "removeDocConfirm": "「{{name}}」をこのライブラリから削除しますか？",
+    "removed": "ドキュメントを削除しました",
+    "tabPaste": "テキストを貼り付け",
+    "tabUpload": "ファイルをアップロード",
+    "contentLabel": "内容",
+    "clickToChoose": "クリックしてファイルを選択"
+  }
+}

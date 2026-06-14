@@ -30,6 +30,7 @@
     "deleteConfirm": "删除这个知识库及其所有文档?",
     "uploaded": "文档已上传",
     "uploadFailed": "上传失败",
+    "failedReason": "索引失败。请移除该文档后重新上传。",
     "status": {
       "pending": "排队中",
       "parsing": "解析中",

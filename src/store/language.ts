@@ -5,12 +5,17 @@ const STORAGE_KEY = 'aurelia.lang'
 
 function detect(): LanguageCode {
   if (typeof window === 'undefined') return 'en'
+  const codes = SUPPORTED_LANGUAGES.map((l) => l.code) as readonly string[]
   const stored = localStorage.getItem(STORAGE_KEY)
-  if (stored === 'en' || stored === 'zh') return stored
-  // i18next-browser-languagedetector already wrote to localStorage; read what it chose
-  const detected = (i18n.language || 'en').toLowerCase()
-  if (detected.startsWith('zh')) return 'zh'
-  return 'en'
+  if (stored && codes.includes(stored)) return stored as LanguageCode
+  // i18next-browser-languagedetector already wrote to localStorage; read what it
+  // chose. Prefer an exact code (e.g. 'zh-Hant'), else fall back to the base
+  // language (e.g. 'fr-CA' → 'fr', generic 'zh' → 'zh').
+  const detected = i18n.language || 'en'
+  if (codes.includes(detected)) return detected as LanguageCode
+  const base = detected.toLowerCase().split('-')[0]
+  const found = codes.find((c) => c.toLowerCase().split('-')[0] === base)
+  return (found as LanguageCode) ?? 'en'
 }
 
 interface LanguageStore {

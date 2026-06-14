@@ -1,0 +1,54 @@
+{
+  "title": "Connaissances",
+  "lead": "Des bibliothèques durables que n'importe quelle conversation peut consulter. Importez vos documents une fois, interrogez-les partout.",
+  "new": "Nouvelle bibliothèque",
+  "emptyTitle": "Aucune bibliothèque pour l'instant",
+  "emptyBody": "Une bibliothèque associe un ensemble de documents à un seul modèle d'embeddings. Créez-en une pour commencer.",
+  "createFirst": "Créez votre première bibliothèque",
+  "stats": {
+    "dim": "Embeddings à {{dim}} dimensions",
+    "created": "créée {{when}}"
+  },
+  "dialog": {
+    "title": "Nouvelle bibliothèque de connaissances",
+    "body": "Le modèle d'embeddings est verrouillé dès que vous importez le premier document — il détermine l'espace vectoriel.",
+    "name": "Nom",
+    "namePlaceholder": "Guide de style maison",
+    "description": "Description",
+    "embeddingModel": "Modèle d'embeddings",
+    "pickModel": "Choisir un modèle",
+    "create": "Créer",
+    "created": "Base de connaissances créée",
+    "nameRequired": "Nom requis"
+  },
+  "detail": {
+    "uploadButton": "Importer un document",
+    "noDocs": "Aucun document pour l'instant",
+    "noDocsBody": "Importez un fichier PDF, Markdown ou texte, et Aurelia l'indexe pour la recherche.",
+    "rename": "Renommer la bibliothèque",
+    "delete": "Supprimer la bibliothèque",
+    "deleteConfirm": "Supprimer cette bibliothèque et tous ses documents ?",
+    "uploaded": "Document importé",
+    "uploadFailed": "Échec de l'importation",
+    "failedReason": "Échec de l'indexation. Supprimez le document et importez-le à nouveau.",
+    "status": {
+      "pending": "En file d'attente",
+      "parsing": "Analyse",
+      "embedding": "Vectorisation",
+      "ready": "Prêt",
+      "failed": "Échec"
+    },
+    "tableHeaders": {
+      "filename": "Fichier",
+      "status": "Statut",
+      "chunks": "Segments",
+      "added": "Ajouté"
+    },
+    "removeDocConfirm": "Retirer « {{name}} » de cette bibliothèque ?",
+    "removed": "Document retiré",
+    "tabPaste": "Coller du texte",
+    "tabUpload": "Importer un fichier",
+    "contentLabel": "Contenu",
+    "clickToChoose": "Cliquez pour choisir des fichiers"
+  }
+}

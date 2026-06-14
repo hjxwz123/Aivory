@@ -8,12 +8,11 @@ import {
   ThumbsDown,
   Pencil,
   MoreHorizontal,
-  Volume2,
-  Share2,
   ChevronLeft,
   ChevronRight,
   Download,
   GitBranchPlus,
+  AlertTriangle,
 } from 'lucide-react'
 import type { Message } from '@/types/chat'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
@@ -36,7 +35,7 @@ import { ReasoningTrace } from './reasoning-trace'
 import { ResearchPanel } from './research-panel'
 import { CitationList } from './citation'
 import { toast } from '@/hooks/use-toast'
-import { cn } from '@/lib/utils'
+import { cn, safeHref } from '@/lib/utils'
 
 interface MessageRowProps {
   message: Message
@@ -193,6 +192,12 @@ export function MessageRow({ message, userName, onRegenerate, onEdit, onSaveEdit
                     {a.name}
                   </span>
                 ))}
+                {/* TODO(#8): when this conversation belongs to a project, offer an
+                    "Add to project library" action here that calls
+                    conversationsApi.promoteDoc(convId, a.id) then refreshes the
+                    project. Skipped for now — wiring it needs conversationId +
+                    projectId threaded through MessageList (off-limits for this
+                    change), so the clean path is blocked. */}
               </div>
             ) : null}
             {message.content}
@@ -242,6 +247,20 @@ export function MessageRow({ message, userName, onRegenerate, onEdit, onSaveEdit
                 <span className="size-1.5 rounded-full bg-[var(--color-fg-faint)] animate-[typing_1400ms_ease-in-out_infinite] [animation-delay:160ms]" />
                 <span className="size-1.5 rounded-full bg-[var(--color-fg-faint)] animate-[typing_1400ms_ease-in-out_infinite] [animation-delay:320ms]" />
               </div>
+            ) : message.moderation ? (
+              <div
+                role="alert"
+                className="my-1 rounded-xl border border-[var(--color-danger)] bg-[var(--color-danger-soft)] px-4 py-3"
+              >
+                <div className="flex items-center gap-2 text-[var(--color-danger)] font-medium text-sm">
+                  <AlertTriangle size={16} aria-hidden />
+                  {t('message.moderation.title')}
+                </div>
+                <p className="mt-1.5 text-sm text-[var(--color-fg)] leading-relaxed">
+                  {message.content || t('message.moderation.body')}
+                </p>
+                <p className="mt-1.5 text-[12.5px] text-[var(--color-danger)]">{t('message.moderation.cta')}</p>
+              </div>
             ) : (
               <>
                 {message.refused ? (
@@ -262,27 +281,46 @@ export function MessageRow({ message, userName, onRegenerate, onEdit, onSaveEdit
                 {/* Downloadable artifacts produced by tools (§4.5/§4.12) */}
                 {message.artifacts && message.artifacts.length > 0 ? (
                   <div className="mt-3 flex flex-wrap gap-2">
-                    {message.artifacts.map((a) =>
-                      a.mimeType.startsWith('image/') ? (
-                        <a key={a.id} href={a.url} target="_blank" rel="noreferrer" className="block">
-                          <img
-                            src={a.url}
-                            alt={a.filename}
-                            className="max-h-64 rounded-lg border border-[var(--color-border)]"
-                          />
-                        </a>
-                      ) : (
+                    {message.artifacts.map((a) => {
+                      // Artifact URLs are tool/model-controlled (SSE) — vet the
+                      // scheme before it reaches href/src (§ XSS E4).
+                      const href = safeHref(a.url)
+                      if (a.mimeType.startsWith('image/')) {
+                        // No safe URL → render a placeholder chip instead of an
+                        // <img> that could carry a javascript:/data: payload.
+                        if (!href) {
+                          return (
+                            <span
+                              key={a.id}
+                              className="inline-flex items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-subtle)] px-3 py-2 text-sm text-[var(--color-fg-muted)]"
+                            >
+                              <Download className="size-4 text-[var(--color-fg-subtle)]" />
+                              {a.filename}
+                            </span>
+                          )
+                        }
+                        return (
+                          <a key={a.id} href={href} target="_blank" rel="noreferrer" className="block">
+                            <img
+                              src={href}
+                              alt={a.filename}
+                              className="max-h-64 rounded-lg border border-[var(--color-border)]"
+                            />
+                          </a>
+                        )
+                      }
+                      return (
                         <a
                           key={a.id}
-                          href={a.url}
+                          href={href}
                           download={a.filename}
                           className="inline-flex items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-subtle)] px-3 py-2 text-sm text-[var(--color-fg)] hover:bg-[var(--color-bg-muted)]"
                         >
                           <Download className="size-4 text-[var(--color-fg-muted)]" />
                           {a.filename}
                         </a>
-                      ),
-                    )}
+                      )
+                    })}
                   </div>
                 ) : null}
               </>
@@ -394,21 +432,6 @@ export function MessageRow({ message, userName, onRegenerate, onEdit, onSaveEdit
                     <DropdownMenuItem onClick={() => copy(message.content)}>
                       <Copy size={13} aria-hidden />
                       {t('actions.copyMessage')}
-                    </DropdownMenuItem>
-                    {!isUser && (
-                      <DropdownMenuItem onClick={() => toast.info(t('actions.readAloudMocked'))}>
-                        <Volume2 size={13} aria-hidden />
-                        {t('actions.readAloud')}
-                      </DropdownMenuItem>
-                    )}
-                    <DropdownMenuItem
-                      onClick={() => {
-                        void navigator.clipboard?.writeText(window.location.href)
-                        toast.success(t('actions.shareCopied'))
-                      }}
-                    >
-                      <Share2 size={13} aria-hidden />
-                      {t('sidebar.share')}
                     </DropdownMenuItem>
                     {onFork ? (
                       <DropdownMenuItem

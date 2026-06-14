@@ -1,0 +1,124 @@
+{
+  "badgeNew": "新 · Aurelia Reason 正式上線",
+  "hero": {
+    "titleLine1": "一位剋制而細膩的 AI 夥伴",
+    "titleLine2": "與你真正的思考方式同頻。",
+    "subtitle": "Aurelia 是一處安靜的寫作、推理與閱讀之所。圍繞你的對話本身，而非背後的模型。",
+    "placeholder": "試試看：為「專注是一種道德能力」擬一份文章提綱"
+  },
+  "capabilities": {
+    "eyebrow": "能力",
+    "title": "產品本身，就是寫作。",
+    "body": "Aurelia 在三件事上做得更好。其餘的部分，是圍繞它們的安靜的外殼。",
+    "items": {
+      "writing": {
+        "title": "與你一同思考的寫作",
+        "body": "提綱、修改、長文起草都在同一執行緒內。Aurelia 會讀你之前寫過的內容，並尊重它。"
+      },
+      "research": {
+        "title": "可追溯的研究模式",
+        "body": "深度研究模式排程小型的來源面板，將引用以行內標籤的形式呈現，讓每一句結論都可追蹤。"
+      },
+      "code": {
+        "title": "剋制的程式碼呈現",
+        "body": "精煉的語法、一鍵複製、語言標籤。讀起來像學術期刊，而不是命令列。"
+      }
+    }
+  },
+  "how": {
+    "eyebrow": "體驗",
+    "title": "做減法，做得高階。",
+    "body": "我們去掉了氣泡。去掉了載入圈。去掉了冷藍色調。剩下的，是認真對待思考的空間——也尊重你的。",
+    "principles": {
+      "noDefaults": {
+        "title": "不留預設樣式",
+        "body": "每個元件都基於 token 重新構建，整體渾然一體。"
+      },
+      "readingFirst": {
+        "title": "閱讀優先",
+        "body": "寬裕的行高、剋制的色彩、唯一的強調色。一處真正適合駐留的地方。"
+      },
+      "youOwnIt": {
+        "title": "對話歸你所有",
+        "body": "編輯、重新生成、分支、匯出——你的存檔，歸你所有。"
+      }
+    },
+    "quote": "它不像在使用一個工具，更像在一間安靜的房間裡，與一位讀過同樣書的人一起寫作。",
+    "quoteSource": "一位早期讀者，愛丁堡"
+  },
+  "useCases": {
+    "eyebrow": "為這些人而做",
+    "title": "四類人正在以它思考。",
+    "items": {
+      "writers": {
+        "title": "長文作者",
+        "body": "隨筆、書稿、講稿。拒絕模板。"
+      },
+      "researchers": {
+        "title": "研究者",
+        "body": "多源綜述，結論可追溯。"
+      },
+      "engineers": {
+        "title": "工程師",
+        "body": "程式碼審閱、重構、配對思考。"
+      },
+      "thinkers": {
+        "title": "安靜的思考者",
+        "body": "決策矩陣、閱讀清單、規劃。"
+      }
+    }
+  },
+  "models": {
+    "eyebrow": "模型",
+    "title": "為不同的工作，選擇不同的聲音。",
+    "body": "Aurelia 提供一個精挑細選的小型模型陣容。每個對話可以獨立切換；我們會記住。",
+    "tiers": {
+      "standard": "標準",
+      "pro": "Pro",
+      "max": "Max"
+    },
+    "lockedNote": "Max 套餐可用"
+  },
+  "safety": {
+    "eyebrow": "安全與隱私",
+    "title": "你的對話歸你所有。",
+    "body": "Aurelia 預設不會使用你的對話訓練模型。記憶可編輯、可匯出。企業空間可隔離，並支援自定義留存規則。",
+    "rows": {
+      "noTraining": {
+        "title": "不使用你的對話訓練",
+        "body": "你需要主動選擇加入，而非退出。所有人預設關閉。"
+      },
+      "export": {
+        "title": "隨時匯出",
+        "body": "你的存檔，歸你所有。Markdown、JSON、純文字。"
+      },
+      "memory": {
+        "title": "可編輯的記憶",
+        "body": "Aurelia 學到的每一條事實，都是一條你可以編輯或刪除的記錄。"
+      }
+    }
+  },
+  "cta": {
+    "title": "開啟工作區。",
+    "body": "一處安靜的寫作、推理與閱讀之所。免費試用。然後，歸你所有。",
+    "primary": "開始一段對話"
+  },
+  "footer": {
+    "tagline": "一位剋制而細膩的 AI 夥伴。為思考而生，不為喧譁。"
+  },
+  "preview": {
+    "today": "今天",
+    "yesterday": "昨天",
+    "essayTitle": "關於專注的長文提綱",
+    "essayLead": "為你擬了一份關於 {{topic}} 的 2000 字文章提綱。我故意讓結構留出空間，讓每一節都能呼吸。",
+    "essayTopic": "把專注作為一種道德能力",
+    "section1": "1. 開篇 — {{italic}}",
+    "section1Italic": "為何應當認真對待「專注」",
+    "section1Body": "一個具體的小圖景，再落到一句論點。",
+    "section2": "2. 「專注」究竟意味著什麼",
+    "section2Body": "認知的、感知的、道德的。",
+    "readingList": "複雜理論入門書單",
+    "newsletterName": "為一份評論性的簡報命名",
+    "askPlaceholder": "隨便問點什麼…"
+  }
+}

@@ -208,6 +208,43 @@ export default function AdminOAuth() {
                 </Field>
               </div>
 
+              {/* Callback/redirect URI — the value an admin must register in the
+                  provider console. Hoisted to the top of the form (and styled as
+                  a callout) because it's the first thing they go looking for. */}
+              <div className="rounded-[12px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-4 py-3.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-medium text-[var(--color-fg)]">
+                    {t('admin:oauth.fields.redirectUri')}
+                  </span>
+                  {editor.row ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      leadingIcon={copied ? <Check size={13} aria-hidden /> : <Copy size={13} aria-hidden />}
+                      onClick={() => void copyRedirect()}
+                    >
+                      {copied ? t('admin:oauth.copied') : t('admin:oauth.copy')}
+                    </Button>
+                  ) : null}
+                </div>
+                {editor.row ? (
+                  <Input
+                    readOnly
+                    value={redirectUriFor(editor.row.id)}
+                    onFocus={(e) => e.currentTarget.select()}
+                    className="mt-2 font-mono text-[12px]"
+                  />
+                ) : (
+                  <p className="mt-1.5 text-[12px] text-[var(--color-fg-subtle)] leading-relaxed">
+                    {t('admin:oauth.fields.redirectUriNew')}
+                  </p>
+                )}
+                <p className="mt-2 text-[12px] text-[var(--color-fg-subtle)] leading-relaxed">
+                  {t('admin:oauth.fields.redirectUriHint')}
+                </p>
+              </div>
+
               {isOidc ? (
                 <Field label={t('admin:oauth.fields.icon')}>
                   <IconUploader
@@ -316,25 +353,6 @@ export default function AdminOAuth() {
                   </Field>
                 </>
               ) : null}
-
-              {editor.row ? (
-                <Field label={t('admin:oauth.fields.redirectUri')} hint={t('admin:oauth.fields.redirectUriHint')}>
-                  <div className="flex items-center gap-2">
-                    <Input readOnly value={redirectUriFor(editor.row.id)} className="font-mono text-[12px]" />
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="icon-sm"
-                      aria-label={t('admin:oauth.copy')}
-                      onClick={() => void copyRedirect()}
-                    >
-                      {copied ? <Check size={14} aria-hidden /> : <Copy size={14} aria-hidden />}
-                    </Button>
-                  </div>
-                </Field>
-              ) : (
-                <p className="text-[12px] text-[var(--color-fg-subtle)]">{t('admin:oauth.fields.redirectUriNew')}</p>
-              )}
 
               <label className="flex items-center justify-between rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3 py-2.5">
                 <span className="text-sm text-[var(--color-fg)]">{t('admin:oauth.fields.enabled')}</span>

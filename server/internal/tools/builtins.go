@@ -17,6 +17,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 
 	"aurelia/server/internal/config"
 	"aurelia/server/internal/llm"
@@ -513,8 +514,8 @@ func (t *imageGenerateTool) Execute(ctx context.Context, input []byte, tc *llm.T
 		in.Size = "1024x1024"
 	}
 
-	// §4.12-E 内容安全: 生成前 prompt 过审。
-	if err := moderateImagePrompt(in.Prompt); err != nil {
+	// §4.12-E 内容安全: 生成前 prompt 过审（关键词来自管理员配置，非硬编码）。
+	if err := t.moderateImagePrompt(in.Prompt); err != nil {
 		return "", nil, err
 	}
 
@@ -620,33 +621,48 @@ type imageBytes struct {
 	mime string
 }
 
-// moderateImagePrompt is the §4.12-E pre-generation prompt screen. The word
-// list covers the most critical safety categories — production deployments
-// should additionally call a real moderation API here (the single hook point
-// is this function).
-var imagePromptBlocklist = []string{
-	// Child safety
-	"child sexual", "csam", "幼女", "儿童色情", "child abuse", "child porn",
-	"minor sexual", "underage sexual", "child exploitation",
-	// Violence / weapons
-	"炸弹制作", "如何制造炸药", "how to make a bomb", "how to make explosives",
-	"mass shooting", "terrorist attack",
-	// Self-harm
-	"suicide method", "how to kill yourself", "自杀方法",
-	// Non-consensual
-	"non-consensual", "rape", "sexual assault",
-	// Deepfake
-	"deepfake nude", "deepfake porn",
-}
-
-func moderateImagePrompt(prompt string) error {
+// moderateImagePrompt screens an image prompt against the admin-managed keyword
+// blocklist (§ moderation — settings key "moderation_keywords"). There is no
+// hardcoded word list: when the admin hasn't configured any keywords, image
+// prompts pass this pre-filter. Matches both the raw lowercased text and a
+// normalized form (leetspeak/spacing/punctuation folded) to defeat basic
+// evasions. This is a fast PRE-FILTER, not a complete control.
+func (t *imageGenerateTool) moderateImagePrompt(prompt string) error {
+	raw, err := store.GetSetting(t.db, "moderation_keywords")
+	if err != nil || len(raw) == 0 {
+		return nil
+	}
+	var keywords []string
+	if json.Unmarshal(raw, &keywords) != nil || len(keywords) == 0 {
+		return nil
+	}
 	low := strings.ToLower(prompt)
-	for _, w := range imagePromptBlocklist {
-		if strings.Contains(low, w) {
+	norm := normalizeForModeration(prompt)
+	for _, w := range keywords {
+		w = strings.TrimSpace(w)
+		if w == "" {
+			continue
+		}
+		if strings.Contains(low, strings.ToLower(w)) || (norm != "" && strings.Contains(norm, normalizeForModeration(w))) {
 			return errors.New("image prompt rejected by content policy")
 		}
 	}
 	return nil
+}
+
+// normalizeForModeration lowercases, folds common leetspeak to letters, and
+// strips everything except letters/digits (so "c h i l d", "ch1ld", and
+// zero-width-injected variants all collapse to the same token stream).
+func normalizeForModeration(s string) string {
+	s = strings.ToLower(s)
+	s = strings.NewReplacer("0", "o", "1", "i", "3", "e", "4", "a", "5", "s", "7", "t", "@", "a", "$", "s").Replace(s)
+	var b strings.Builder
+	for _, r := range s {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // checkDailyImageLimit enforces the per-user daily image quota (§8.2) from the
@@ -721,7 +737,7 @@ func geminiGenerateImages(ctx context.Context, baseURL, apiKey, requestID string
 	url := fmt.Sprintf("%s/v1beta/models/%s:generateContent?key=%s", base, requestID, apiKey)
 	req, _ := http.NewRequestWithContext(ctx, "POST", url, strings.NewReader(string(raw)))
 	req.Header.Set("content-type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := toolHTTPClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -805,7 +821,7 @@ func openaiGenerateImages(ctx context.Context, baseURL, apiKey, requestID string
 		req.Header.Set("content-type", "application/json")
 	}
 	req.Header.Set("authorization", "Bearer "+apiKey)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := toolHTTPClient.Do(req)
 	if err != nil {
 		return nil, err
 	}

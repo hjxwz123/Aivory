@@ -333,6 +333,38 @@ export default function AdminModelEdit() {
                     </div>
                   </Field>
                 )}
+
+                {/* § moderation: screen each user prompt before generation. */}
+                <Field label={t('admin:models.fields.moderationLabel')} className="col-span-2">
+                  <div className="rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3 py-2.5">
+                    <label className="flex items-center justify-between">
+                      <span className="text-sm">{t('admin:models.fields.moderationEnable')}</span>
+                      <Switch
+                        checked={draft.moderation_enabled ?? false}
+                        onCheckedChange={(v) => patch({ moderation_enabled: v })}
+                      />
+                    </label>
+                    {draft.moderation_enabled && (
+                      <div className="mt-3 max-w-[16rem]">
+                        <Select
+                          value={draft.moderation_mode ?? 'keyword'}
+                          onValueChange={(v) => patch({ moderation_mode: v as ApiModel['moderation_mode'] })}
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="keyword">{t('admin:models.fields.moderationModeKeyword')}</SelectItem>
+                            <SelectItem value="model">{t('admin:models.fields.moderationModeModel')}</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+                    <p className="mt-2 text-[11px] text-[var(--color-fg-subtle)]">
+                      {t('admin:models.fields.moderationHint')}
+                    </p>
+                  </div>
+                </Field>
               </div>
             </section>
           )}

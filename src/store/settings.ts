@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { AppearanceSettings, DensityPref, FontSizePref, ModelSettings, PrivacySettings } from '@/types/settings'
+import type { AppearanceSettings, DensityPref, FontPref, FontSizePref, ModelSettings, PrivacySettings } from '@/types/settings'
 
 interface SettingsState {
   appearance: AppearanceSettings
@@ -48,6 +48,7 @@ export const useSettings = create<SettingsState>((set) => ({
     theme: 'system',
     density: 'comfortable',
     fontSize: 'md',
+    font: 'default',
     ...(initial.appearance ?? {}),
   },
   models: {
@@ -112,10 +113,20 @@ function applyFontSize(f: FontSizePref) {
   document.documentElement.dataset.fontsize = f
 }
 
+// Sets the body typeface via data-font (tokens.css swaps --font-sans). Non-brand
+// faces that need their own file are lazy-loaded only when selected, so the
+// default payload stays lean.
+function applyFont(f: FontPref) {
+  if (typeof document === 'undefined') return
+  document.documentElement.dataset.font = f
+  if (f === 'inter') void import('@fontsource-variable/inter')
+}
+
 // Apply on boot
 const boot = useSettings.getState().appearance
 applyDensity(boot.density)
 applyFontSize(boot.fontSize)
+applyFont(boot.font)
 
 // Re-apply whenever appearance changes
 useSettings.subscribe((state, prev) => {
@@ -124,5 +135,8 @@ useSettings.subscribe((state, prev) => {
   }
   if (state.appearance.fontSize !== prev.appearance.fontSize) {
     applyFontSize(state.appearance.fontSize)
+  }
+  if (state.appearance.font !== prev.appearance.font) {
+    applyFont(state.appearance.font)
   }
 })

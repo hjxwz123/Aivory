@@ -1,0 +1,259 @@
+{
+  "greeting": {
+    "morning": "Bonjour",
+    "afternoon": "Bon après-midi",
+    "evening": "Bonsoir",
+    "stillUp": "Encore debout"
+  },
+  "empty": {
+    "subtitle": "À quoi pensez-vous ?",
+    "lead": "Demandez ce que vous voulez. Plans, code, décisions, lectures — Aurelia réfléchira à vos côtés.",
+    "disclaimer": "Aurelia peut faire des erreurs. Vérifiez tout ce qui est important."
+  },
+  "composer": {
+    "placeholder": "Demandez ce que vous voulez — ou collez vos réflexions.",
+    "attach": "Joindre des fichiers",
+    "addImage": "Ajouter une image",
+    "voice": "Saisie vocale",
+    "voiceStop": "Arrêter l'enregistrement",
+    "voiceUnsupported": "La saisie vocale n'est pas prise en charge dans ce navigateur.",
+    "voicePermission": "L'accès au microphone a été refusé.",
+    "voiceFailed": "Impossible de transcrire l'enregistrement.",
+    "research": "Recherche",
+    "researchTooltip": "Mode recherche approfondie",
+    "canvas": "Canvas",
+    "canvasTooltip": "Mode Canvas",
+    "send": "Envoyer ({{kbd}} + Enter)",
+    "stop": "Arrêter la génération",
+    "tooLongTitle": "Message trop long",
+    "tooLongBody": "Limitez les messages à moins de {{max}} caractères.",
+    "attachedSingle": "{{count}} fichier joint",
+    "attachedMultiple": "{{count}} fichiers joints",
+    "attachedHint": "Les pièces jointes sont uniquement visuelles dans cette version.",
+    "uploadFailed": "Échec du téléversement",
+    "knowledgeBases": "Bases de connaissances",
+    "noKnowledgeBases": "Aucune base de connaissances pour l'instant."
+  },
+  "assistant": "Aurelia",
+  "thinking": "Réflexion",
+  "reasoning": {
+    "title": "Raisonnement",
+    "steps_one": "{{count}} étape",
+    "steps_other": "{{count}} étapes"
+  },
+  "actions": {
+    "copy": "Copier",
+    "copied": "Copié",
+    "regenerate": "Régénérer",
+    "helpful": "Utile",
+    "notHelpful": "Pas utile",
+    "edit": "Modifier",
+    "cancelEdit": "Annuler",
+    "saveEdit": "Enregistrer et renvoyer",
+    "saveInPlace": "Enregistrer",
+    "more": "Plus",
+    "copyMessage": "Copier le message",
+    "readAloud": "Lire à voix haute",
+    "readAloudMocked": "La lecture à voix haute est simulée dans cette version.",
+    "shareMocked": "Lien de partage copié",
+    "shareCopied": "Lien de partage copié",
+    "branch": "Changer de branche",
+    "prevBranch": "Branche précédente",
+    "nextBranch": "Branche suivante",
+    "fork": "Dupliquer dans une nouvelle conversation",
+    "forked": "Dupliqué dans une nouvelle conversation"
+  },
+  "message": {
+    "refused": "Le modèle a refusé de répondre à cette demande.",
+    "ragFullText": "Document(s) intégral/intégraux injecté(s)",
+    "ragFullDoc": "Contexte du document entier",
+    "ragNone": "Récupération ignorée",
+    "ragDefault": "Sources récupérées",
+    "moderation": {
+      "title": "Contenu bloqué",
+      "body": "Votre message peut enfreindre nos conditions d’utilisation.",
+      "cta": "Veuillez modifier votre message et réessayer."
+    }
+  },
+  "tools": {
+    "web_search": "Recherche web",
+    "code_interpreter": "Interpréteur de code",
+    "deep_research": "Recherche approfondie"
+  },
+  "sources": {
+    "label": "Sources",
+    "open": "Ouvrir la source",
+    "fromDocuments": "depuis vos documents"
+  },
+  "research": {
+    "title": "Recherche approfondie",
+    "steps": "{{done}}/{{total}}",
+    "planLabel": "Plan de recherche",
+    "sourcesLabel": "Sources ({{count}})"
+  },
+  "share": {
+    "title": "Partager la conversation",
+    "body": "Créez un lien public vers un instantané en lecture seule de cette conversation. Les messages ultérieurs restent privés.",
+    "bodyShared": "Toute personne disposant de ce lien peut consulter un instantané en lecture seule de cette conversation.",
+    "createCta": "Créer un lien de partage",
+    "revokeCta": "Ne plus partager",
+    "revoked": "Lien de partage révoqué",
+    "failed": "Une erreur s'est produite",
+    "linkCopied": "Lien de partage copié",
+    "publicHint": "Public — aucune connexion requise pour consulter.",
+    "tryCta": "Essayer Aurelia",
+    "missingTitle": "Ce partage n'est pas disponible",
+    "missingBody": "Le lien est peut-être incorrect, ou le propriétaire a cessé de partager cette conversation.",
+    "eyebrow": "Conversation partagée",
+    "untitled": "Conversation sans titre",
+    "roleUser": "Utilisateur",
+    "roleAssistant": "Assistant",
+    "footer": "Partagé depuis Aurelia — un espace de travail IA réfléchi."
+  },
+  "code": {
+    "run": "Exécuter",
+    "rerun": "Réexécuter",
+    "stop": "Arrêter",
+    "phaseQueued": "En file d'attente…",
+    "phaseBoot": "Chargement du moteur Python…",
+    "phasePackages": "Résolution des paquets…",
+    "phaseRunning": "Exécution…",
+    "result": "Résultat",
+    "noOutput": "Terminé sans sortie.",
+    "stopped": "Exécution arrêtée.",
+    "timeout": "L'exécution a dépassé {{seconds}} s et a été interrompue.",
+    "engineFailed": "Impossible de charger le moteur Python — vérifiez votre connexion et réessayez.",
+    "figureAlt": "Figure {{index}}",
+    "poweredBy": "Exécuté dans votre navigateur par Pyodide",
+    "clear": "Effacer",
+    "preview": "Aperçu",
+    "previewTitle": "Aperçu HTML",
+    "previewRefresh": "Recharger",
+    "previewClose": "Fermer l'aperçu",
+    "previewSandboxHint": "Rendu dans un bac à sable isolé — les scripts de la page ne peuvent pas accéder à vos données.",
+    "mermaidFailed": "Impossible d'afficher ce diagramme — affichage de la source."
+  },
+  "modePill": {
+    "deepResearch": "Recherche approfondie",
+    "canvas": "Canvas"
+  },
+  "sidebar": {
+    "newChat": "Nouvelle discussion",
+    "search": "Rechercher",
+    "actions": "Actions de la conversation",
+    "rename": "Renommer",
+    "renameTitle": "Renommer la conversation",
+    "renameHint": "Donnez-lui un nom que vous retrouverez plus tard.",
+    "renamed": "Conversation renommée",
+    "share": "Partager",
+    "archive": "Archiver",
+    "archived": "Conversation archivée",
+    "archivedTitle": "Discussions archivées",
+    "archivedBody": "Désarchivez pour ramener une discussion dans votre liste.",
+    "archivedEmpty": "Aucune discussion archivée.",
+    "unarchive": "Désarchiver",
+    "unarchived": "Discussion désarchivée",
+    "delete": "Supprimer",
+    "deleteTitle": "Supprimer cette conversation ?",
+    "deleteBody": "Cela supprimera la conversation et tous ses messages. Cette action est irréversible.",
+    "deleted": "Conversation supprimée",
+    "empty": "Aucune conversation pour l'instant.",
+    "starred": "Favoris",
+    "recents": "Récents",
+    "moveToProject": "Déplacer vers un projet",
+    "removeFromProject": "Retirer du projet"
+  },
+  "topbar": {
+    "shareTooltip": "Partager"
+  },
+  "thread": {
+    "modelSwitched": "Modèle changé",
+    "modelSwitchedBody": "Les prochains messages utiliseront le nouveau modèle.",
+    "renamed": "Renommé",
+    "deleted": "Supprimé",
+    "notFoundTitle": "Cette conversation est introuvable.",
+    "notFoundBody": "Elle a peut-être été supprimée, ou le lien est incorrect.",
+    "goToChat": "Aller à la discussion",
+    "jumpToLatest": "Aller au plus récent",
+    "deleteUndone": "Cette action est irréversible."
+  },
+  "buckets": {
+    "today": "Aujourd'hui",
+    "yesterday": "Hier",
+    "last_7": "7 derniers jours",
+    "last_30": "30 derniers jours",
+    "older": "Plus ancien"
+  },
+  "modelPicker": {
+    "section": "Modèles",
+    "moreSoon": "D'autres modèles arrivent bientôt",
+    "current": "Modèle actuel",
+    "label": "Modèle : {{name}}",
+    "upgrade": "Mettre à niveau pour débloquer"
+  },
+  "commandMenu": {
+    "placeholder": "Rechercher des conversations, lancer une commande…",
+    "noMatch": "Aucun résultat.",
+    "groups": {
+      "actions": "Actions",
+      "theme": "Thème",
+      "conversations": "Conversations",
+      "help": "Aide",
+      "language": "Langue"
+    },
+    "actions": {
+      "newChat": "Nouvelle discussion",
+      "goToChat": "Aller à la discussion",
+      "openSettings": "Ouvrir les paramètres",
+      "toggleSidebar": "Afficher/masquer la barre latérale",
+      "light": "Thème clair",
+      "dark": "Thème sombre",
+      "system": "Thème système",
+      "shortcuts": "Raccourcis clavier",
+      "switchLanguage": "Passer en {{language}}"
+    },
+    "title": "Menu de commandes"
+  },
+  "signedOut": "Vous avez été déconnecté.",
+  "userMenu": {
+    "personalization": "Personnalisation",
+    "knowledge": "Connaissances",
+    "admin": "Admin",
+    "subscription": "Abonnement",
+    "language": "Langue"
+  },
+  "suggestions": {
+    "outline-essay": {
+      "title": "Structurer un essai long",
+      "prompt": "Aide-moi à structurer un essai de 2 000 mots sur l'attention en tant que compétence morale."
+    },
+    "study-plan": {
+      "title": "Concevoir un plan d'étude",
+      "prompt": "Conçois un plan de lecture de quatre semaines pour découvrir la théorie de la complexité."
+    },
+    "debug-snippet": {
+      "title": "Lire ce code avec moi",
+      "prompt": "J'ai une fonction TypeScript qui perd le focus après un re-rendu — aide-moi à la déboguer."
+    },
+    "research-brief": {
+      "title": "Rédiger une note de recherche",
+      "prompt": "Résume les contre-arguments les plus solides au revenu de base universel."
+    },
+    "travel-idea": {
+      "title": "Planifier un voyage tranquille",
+      "prompt": "J'ai dix jours en octobre. Aide-moi à esquisser un itinéraire lent et paisible à travers le Portugal."
+    },
+    "creative-brief": {
+      "title": "Nommer quelque chose avec soin",
+      "prompt": "Propose-moi 8 noms candidats pour une newsletter éditoriale sur la finance climatique."
+    },
+    "difficult-decision": {
+      "title": "Réfléchir à une décision",
+      "prompt": "Guide-moi à travers une matrice de décision pour savoir si je devrais quitter mon emploi pour écrire."
+    },
+    "library-curation": {
+      "title": "Recommander une petite bibliothèque",
+      "prompt": "Suggère-moi 5 livres courts sur la solitude — différentes traditions, sans chevauchement."
+    }
+  }
+}

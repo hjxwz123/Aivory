@@ -6,11 +6,11 @@
  */
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Check, Sparkles, ArrowLeft } from 'lucide-react'
-import { Link } from 'react-router-dom'
+import { Check, Sparkles } from 'lucide-react'
 import { groupsApi, ApiError } from '@/api'
 import type { ApiUserGroup } from '@/api/types'
 import { useAuth } from '@/store/auth'
+import { ContentHeader } from '@/components/layout/content-header'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -51,27 +51,16 @@ export default function Subscription() {
   const current = sorted.find((g) => g.id === currentId)
 
   return (
-    <div className="flex-1 min-h-0 overflow-y-auto">
-      <div className="mx-auto w-full max-w-[72rem] px-5 sm:px-10 lg:px-14 pt-10 sm:pt-16 pb-24">
-        <Link
-          to="/"
-          className="inline-flex items-center gap-2 text-[12.5px] text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)] interactive rounded-[6px] px-1.5 py-1 -ml-1.5"
-        >
-          <ArrowLeft size={13} aria-hidden />
-          {t('subscription:back')}
-        </Link>
-
-        <header className="mt-6 max-w-[42ch]">
-          <h1 className="font-serif text-[2.5rem] sm:text-[3.25rem] leading-[1.02] tracking-[-0.02em] text-[var(--color-fg)]">
-            {t('subscription:title')}
-          </h1>
-          <p className="mt-4 text-[var(--color-fg-muted)] text-[15px] sm:text-base leading-relaxed">
+    <div className="flex-1 min-h-0 flex flex-col bg-[var(--color-bg)] text-[var(--color-fg)]">
+      <ContentHeader title={t('subscription:title')} backTo="/" backLabel={t('subscription:back')} />
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        <div className="mx-auto w-full max-w-[var(--layout-content-max-w)] px-5 sm:px-8 py-10 pb-24">
+          <p className="max-w-[60ch] text-[var(--color-fg-muted)] text-[15px] leading-relaxed">
             {t('subscription:subtitle')}
           </p>
-        </header>
 
-        {/* Current plan strip */}
-        {current ? (
+          {/* Current plan strip */}
+          {current ? (
           <div className="mt-10 flex flex-col gap-3 rounded-[16px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0">
               <div className="flex items-center gap-2 text-[12px] uppercase tracking-[0.08em] text-[var(--color-fg-subtle)]">
@@ -166,6 +155,7 @@ export default function Subscription() {
             })}
           </div>
         )}
+        </div>
       </div>
 
       {/* Admin-assigned: explain how to switch rather than charging the user. */}

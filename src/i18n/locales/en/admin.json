@@ -87,7 +87,12 @@
       "priceCacheRead": "Cache read $/1M",
       "priceCacheWrite": "Cache write $/1M",
       "priceImage": "Price per image",
-      "enabled": "Enabled (visible to users)"
+      "enabled": "Enabled (visible to users)",
+      "moderationLabel": "Content moderation",
+      "moderationEnable": "Screen prompts before generation",
+      "moderationHint": "When on, each user prompt is screened (no history). Configure the keyword list / moderation model on the Moderation page.",
+      "moderationModeKeyword": "Keyword match",
+      "moderationModeModel": "Moderation model"
     },
     "editorTitle": "Edit model",
     "newTitle": "New model",
@@ -180,7 +185,8 @@
     "copy": "Copy redirect URI",
     "errors": {
       "nameRequired": "Button label required"
-    }
+    },
+    "copied": "Copied"
   },
   "users": {
     "title": "Users",
@@ -426,5 +432,45 @@
     "unlimitedHint": "Set to 0 for unlimited within the window.",
     "capHint": "Cap per window for this group.",
     "save": "Save permissions"
+  },
+  "analytics": {
+    "title": "Analytics",
+    "lead": "Usage trends across the platform — overall, by model, and by user.",
+    "empty": "No usage in this period yet.",
+    "unknownUser": "Unknown user",
+    "metric": {
+      "calls": "Calls",
+      "tokens": "Tokens",
+      "cost": "Cost"
+    },
+    "stats": {
+      "calls": "Total calls",
+      "tokens": "Total tokens",
+      "cost": "Total cost",
+      "users": "Active users"
+    },
+    "sections": {
+      "daily": "Daily usage",
+      "hourly": "Hourly usage",
+      "byModel": "By model",
+      "byUser": "By user"
+    }
+  },
+  "moderation": {
+    "title": "Moderation",
+    "lead": "Screen each user prompt before generation. Per-model on/off and mode are set on each model’s edit page.",
+    "saved": "Moderation settings saved",
+    "keywordsLabel": "Keyword blocklist",
+    "keywordsHint": "One keyword per line. In keyword mode, a prompt containing any of these is blocked. Leave empty to disable keyword screening.",
+    "keywordsPlaceholder": "one keyword per line",
+    "keywordsCount": "{{count}} keywords",
+    "modelLabel": "Moderation model",
+    "modelHint": "Used by models set to “model” mode — the prompt is sent here for an ALLOW/BLOCK verdict before generation.",
+    "modelNone": "None",
+    "categoriesLabel": "Violation categories",
+    "categoriesHint": "One per line. In “model” mode the moderation model screens the prompt against these categories (e.g. politics, pornography, violence).",
+    "categoriesPlaceholder": "one category per line",
+    "messageLabel": "Block message",
+    "messageHint": "Shown to the user when a prompt is blocked."
   }
 }

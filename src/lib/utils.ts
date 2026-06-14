@@ -16,6 +16,34 @@ export function sleep(ms: number): Promise<void> {
 }
 
 /**
+ * Allowlist guard for model/tool-controlled URLs (citations, research sources,
+ * artifacts). SSE events feed these into `<a href>` / `<img src>` verbatim, and
+ * React 19 does NOT block `javascript:` in href — so we must vet the scheme
+ * ourselves. Mirrors the defence applied to rendered markdown in
+ * `lib/markdown.ts`.
+ *
+ * Returns the URL only when it is a root-relative path (`/…`, but not the
+ * protocol-relative `//…`) or parses to an http:, https:, or mailto: scheme.
+ * Anything else (javascript:, vbscript:, data:, blob:, unparsable) → undefined,
+ * so the caller can drop the attribute / render a placeholder.
+ */
+export function safeHref(url?: string): string | undefined {
+  if (!url) return undefined
+  const trimmed = url.trim()
+  if (!trimmed) return undefined
+  // Root-relative internal path — allow, but reject protocol-relative `//host`.
+  if (trimmed.startsWith('/') && !trimmed.startsWith('//')) return trimmed
+  let parsed: URL
+  try {
+    parsed = new URL(trimmed)
+  } catch {
+    return undefined
+  }
+  const allowed = new Set(['http:', 'https:', 'mailto:'])
+  return allowed.has(parsed.protocol) ? trimmed : undefined
+}
+
+/**
  * Stable pseudo-id without crypto deps. For mock data only.
  */
 export function uid(prefix = 'id'): string {

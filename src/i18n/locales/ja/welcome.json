@@ -1,0 +1,39 @@
+{
+  "intro": {
+    "eyebrow": "Aurelia へようこそ",
+    "title": "もっと静かに考える場所。",
+    "subtitle": "数秒だけ、Aurelia をあなた仕様にしましょう。後から設定でいつでも変更できます。",
+    "points": {
+      "write": "ともに考えながら書く",
+      "research": "本物のソースに基づくリサーチ",
+      "own": "会話はあなたのもの。主導権はあなたに"
+    }
+  },
+  "config": {
+    "title": "あなた仕様にする",
+    "subtitle": "いくつかの設定を選ぶか、スキップしてすぐに始めましょう。"
+  },
+  "fields": {
+    "language": "言語",
+    "theme": "外観",
+    "accent": "アクセントカラー",
+    "chatStyle": "返信スタイル",
+    "chatStyleBody": "デフォルトの回答はどのくらい詳しくしますか？",
+    "memory": "メモリー",
+    "memoryBody": "Aurelia がチャットを通じて役立つ詳細を記憶できるようにします。"
+  },
+  "theme": {
+    "light": "ライト",
+    "dark": "ダーク",
+    "system": "システム"
+  },
+  "chatStyle": {
+    "concise": "簡潔",
+    "balanced": "バランス",
+    "detailed": "詳細"
+  },
+  "actions": {
+    "skip": "今はスキップ",
+    "start": "始める"
+  }
+}

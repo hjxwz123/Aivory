@@ -3,6 +3,7 @@ import { Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { Toaster } from '@/components/ui/toaster'
 import { CommandMenu } from '@/components/command-menu/command-menu'
+import { WelcomeCard } from '@/components/welcome/welcome-card'
 import { AuthGate } from '@/components/auth/auth-gate'
 import { useCommandMenu } from '@/hooks/use-command-menu'
 import { useHotkeys } from '@/hooks/use-hotkeys'
@@ -40,7 +41,9 @@ const AdminUserGroups = lazy(() => import('@/pages/admin/AdminUserGroups'))
 const AdminUserConversations = lazy(() => import('@/pages/admin/AdminUserConversations'))
 const AdminUserConversation = lazy(() => import('@/pages/admin/AdminUserConversation'))
 const AdminUsage = lazy(() => import('@/pages/admin/AdminUsage'))
+const AdminAnalytics = lazy(() => import('@/pages/admin/AdminAnalytics'))
 const AdminSettings = lazy(() => import('@/pages/admin/AdminSettings'))
+const AdminModeration = lazy(() => import('@/pages/admin/AdminModeration'))
 const AdminDocuments = lazy(() => import('@/pages/admin/AdminDocuments'))
 const AdminTools = lazy(() => import('@/pages/admin/AdminTools'))
 const AdminAudio = lazy(() => import('@/pages/admin/AdminAudio'))
@@ -134,14 +137,19 @@ export default function App() {
               <Route path="/register" element={<Register />} />
               <Route path="/forgot-password" element={<ForgotPassword />} />
             </Route>
-            <Route path="/settings" element={<SettingsLayout />}>
-              <Route index element={<SettingsAccount />} />
-              <Route path="account" element={<SettingsAccount />} />
-              <Route path="appearance" element={<SettingsAppearance />} />
-              <Route path="models" element={<SettingsModels />} />
-              <Route path="personalization" element={<SettingsPersonalization />} />
-              <Route path="privacy" element={<SettingsPrivacy />} />
-              <Route path="shortcuts" element={<SettingsShortcuts />} />
+            {/* Settings live inside ChatLayout (conversation sidebar on the
+                left, settings on the right) — like Subscription. SettingsLayout
+                supplies the in-panel header + tab nav. */}
+            <Route path="/settings" element={<ChatLayout />}>
+              <Route element={<SettingsLayout />}>
+                <Route index element={<SettingsAccount />} />
+                <Route path="account" element={<SettingsAccount />} />
+                <Route path="appearance" element={<SettingsAppearance />} />
+                <Route path="models" element={<SettingsModels />} />
+                <Route path="personalization" element={<SettingsPersonalization />} />
+                <Route path="privacy" element={<SettingsPrivacy />} />
+                <Route path="shortcuts" element={<SettingsShortcuts />} />
+              </Route>
             </Route>
             <Route path="/admin" element={<AdminLayout />}>
               <Route index element={<AdminChannels />} />
@@ -154,16 +162,19 @@ export default function App() {
               <Route path="users/:id/conversations" element={<AdminUserConversations />} />
               <Route path="users/:id/conversations/:cid" element={<AdminUserConversation />} />
               <Route path="usage" element={<AdminUsage />} />
+              <Route path="analytics" element={<AdminAnalytics />} />
               <Route path="documents" element={<AdminDocuments />} />
               <Route path="tools" element={<AdminTools />} />
               <Route path="audio" element={<AdminAudio />} />
               <Route path="oauth" element={<AdminOAuth />} />
+              <Route path="moderation" element={<AdminModeration />} />
               <Route path="settings" element={<AdminSettings />} />
             </Route>
             <Route path="*" element={<NotFound />} />
           </Routes>
         </Suspense>
         <CommandMenu />
+        <WelcomeCard />
         <Toaster />
       </AuthGate>
     </TooltipProvider>

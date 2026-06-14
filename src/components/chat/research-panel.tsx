@@ -9,7 +9,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Telescope, Globe, Check, Circle, ChevronRight, AlertTriangle } from 'lucide-react'
 import type { ResearchSource, ResearchState } from '@/types/chat'
-import { cn } from '@/lib/utils'
+import { cn, safeHref } from '@/lib/utils'
 
 interface ResearchPanelProps {
   research: ResearchState
@@ -141,7 +141,7 @@ function SourceCard({ source }: { source: ResearchSource }) {
   const kept = source.status === 'kept' || source.status === 'read'
   return (
     <a
-      href={source.url || undefined}
+      href={safeHref(source.url)}
       target="_blank"
       rel="noopener noreferrer"
       className={cn(

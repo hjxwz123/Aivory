@@ -1,9 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import {
-  ArrowLeft,
-  ChevronRight,
   MoreHorizontal,
   Pencil,
   Pin,
@@ -12,23 +10,27 @@ import {
   Sparkles,
   Trash2,
   Save,
+  Upload,
+  Loader2,
   X,
 } from 'lucide-react'
-import type { Conversation } from '@/types/chat'
-import type { ProjectAccent, ProjectFileKind } from '@/types/project'
+import type { Attachment, Conversation } from '@/types/chat'
+import type { ProjectAccent } from '@/types/project'
 import { useProjects } from '@/store/projects'
 import { useConversations } from '@/store/conversations'
 import { useModels } from '@/store/models'
 import { useSettings } from '@/store/settings'
 import { accentClasses, fileKindIcon, formatFileSize, PROJECT_ACCENT_OPTIONS } from '@/lib/project-helpers'
 import { Composer } from '@/components/chat/composer'
+import { ContentHeader } from '@/components/layout/content-header'
+import { MoveToProjectSub } from '@/components/projects/move-to-project-menu'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Input } from '@/components/ui/input'
 import { Field } from '@/components/ui/label'
 import { Tooltip } from '@/components/ui/tooltip'
+import { Switch } from '@/components/ui/switch'
 import { EmptyState } from '@/components/ui/empty-state'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -48,21 +50,27 @@ import {
 import { toast } from '@/hooks/use-toast'
 import { cn, formatRelativeDate, truncate } from '@/lib/utils'
 
-const FILE_KINDS: ProjectFileKind[] = ['text', 'doc', 'pdf', 'sheet', 'code', 'image', 'link', 'other']
-
 export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const { t } = useTranslation(['projects', 'chat', 'common'])
 
   const project = useProjects((s) => s.projects.find((p) => p.id === id))
+  const loadOne = useProjects((s) => s.loadOne)
   const updateProject = useProjects((s) => s.updateProject)
   const renameProject = useProjects((s) => s.renameProject)
   const togglePin = useProjects((s) => s.togglePin)
   const deleteProject = useProjects((s) => s.deleteProject)
-  const addFile = useProjects((s) => s.addFile)
+  const uploadFile = useProjects((s) => s.uploadFile)
   const removeFile = useProjects((s) => s.removeFile)
   const renameFile = useProjects((s) => s.renameFile)
+
+  // Project documents come from the project's knowledge library and are only
+  // returned by GET /projects/:id — hydrate them whenever the id changes so the
+  // file list (and count) is correct on a fresh load.
+  useEffect(() => {
+    if (id) void loadOne(id)
+  }, [id, loadOne])
 
   const allConversations = useConversations((s) => s.conversations)
   const createConversation = useConversations((s) => s.createConversation)
@@ -90,7 +98,8 @@ export default function ProjectDetail() {
     description: string
     accent: ProjectAccent
     emoji: string
-  }>({ name: '', description: '', accent: 'violet', emoji: '' })
+    autoAddUploads: boolean
+  }>({ name: '', description: '', accent: 'violet', emoji: '', autoAddUploads: false })
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [addFileOpen, setAddFileOpen] = useState(false)
   const [renameFileState, setRenameFileState] = useState<{ id: string; draft: string } | null>(null)
@@ -140,16 +149,21 @@ export default function ProjectDetail() {
       description: project.description ?? '',
       accent: project.accent,
       emoji: project.emoji ?? '',
+      autoAddUploads: project.autoAddUploads ?? false,
     })
     setEditOpen(true)
   }
   function submitEdit() {
     if (!project) return
+    // Send empty strings (not undefined) so clearing the description/marker is
+    // actually transmitted — JSON.stringify drops undefined fields, which would
+    // silently keep the old value on the backend.
     updateProject(project.id, {
       name: editDraft.name.trim() || project.name,
-      description: editDraft.description.trim() || undefined,
+      description: editDraft.description.trim(),
       accent: editDraft.accent,
-      emoji: editDraft.emoji.trim().slice(0, 2) || undefined,
+      emoji: editDraft.emoji.trim().slice(0, 2),
+      autoAddUploads: editDraft.autoAddUploads,
     })
     setEditOpen(false)
     toast.success(t('projects:detail.edited'))
@@ -167,7 +181,11 @@ export default function ProjectDetail() {
     navigate('/projects')
   }
 
-  async function startProjectChat(text: string) {
+  async function startProjectChat(
+    text: string,
+    attachments: Attachment[],
+    opts: { mode?: 'default' | 'deep-research' | 'canvas'; params?: Record<string, unknown> } = {},
+  ) {
     if (!project) return
     const conv = await createConversation(defaultModelId, project.id)
     if (!conv) return
@@ -176,55 +194,19 @@ export default function ProjectDetail() {
       conversationId: conv.id,
       text,
       modelId: conv.modelId || defaultModelId,
+      attachments,
+      mode: opts.mode,
+      params: opts.params,
     })
   }
 
   return (
-    <div className="flex-1 min-h-0 overflow-y-auto">
-      <div className="mx-auto w-full max-w-[68rem] px-5 sm:px-10 lg:px-14 pt-6 sm:pt-10 pb-24">
-        {/* Breadcrumb */}
-        <nav className="flex items-center gap-1.5 text-[12px] text-[var(--color-fg-subtle)]">
-          <Link
-            to="/projects"
-            className="inline-flex items-center gap-1 hover:text-[var(--color-fg-muted)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] rounded-[6px] px-1 py-0.5 -mx-1"
-          >
-            <ArrowLeft size={12} aria-hidden />
-            {t('projects:detail.back')}
-          </Link>
-          <ChevronRight size={11} aria-hidden className="opacity-50" />
-          <span className="text-[var(--color-fg-muted)] truncate">{project.name}</span>
-        </nav>
-
-        {/* Hero. 4px accent rule on the left, large Fraunces title, description
-            on a max-w-[60ch]. Pinned + metadata sit as a subtle baseline strip.
-            Right column carries only the actions menu (no decorative chip). */}
-        <header className="mt-6 sm:mt-10 grid grid-cols-[4px_1fr_auto] gap-x-5 sm:gap-x-7 items-start">
-          <span
-            className={cn('self-stretch rounded-full', accent.bar)}
-            aria-hidden
-          />
-          <div className="min-w-0">
-            <h1 className="font-serif text-[2.25rem] sm:text-[3rem] leading-[1.02] tracking-[-0.02em] text-[var(--color-fg)]">
-              {project.name}
-            </h1>
-            {project.description ? (
-              <p className="mt-4 text-[var(--color-fg-muted)] text-[15px] sm:text-[17px] leading-relaxed max-w-[60ch]">
-                {project.description}
-              </p>
-            ) : null}
-            <dl className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11.5px] text-[var(--color-fg-subtle)] tabular-nums">
-              <Meta>{t('projects:card.files', { count: project.files.length })}</Meta>
-              <Meta>{t('projects:card.chats', { count: projectChats.length })}</Meta>
-              <Meta>{t('projects:card.updated', { when: formatRelativeDate(project.updatedAt) })}</Meta>
-              {project.pinned ? (
-                <Meta>
-                  <Pin size={10} className="inline -translate-y-px mr-1" aria-hidden />
-                  {t('projects:list.filterPinned')}
-                </Meta>
-              ) : null}
-            </dl>
-          </div>
-
+    <div className="flex-1 min-h-0 flex flex-col bg-[var(--color-bg)] text-[var(--color-fg)]">
+      <ContentHeader
+        title={project.name}
+        backTo="/projects"
+        backLabel={t('projects:detail.back')}
+        actions={
           <DropdownMenu>
             <Tooltip content={t('chat:actions.more')}>
               <DropdownMenuTrigger asChild>
@@ -257,7 +239,31 @@ export default function ProjectDetail() {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-        </header>
+        }
+      />
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        <div className="mx-auto w-full max-w-[var(--layout-content-max-w)] px-5 sm:px-8 py-8 pb-24">
+          {/* Identity strip: a slim accent rule, the description, and metadata.
+              The name itself lives in the header above, so it isn't repeated. */}
+          <div className="min-w-0">
+            <span className={cn('block h-1 w-10 rounded-full', accent.bar)} aria-hidden />
+            {project.description ? (
+              <p className="mt-4 text-[var(--color-fg-muted)] text-[15px] sm:text-[17px] leading-relaxed max-w-[60ch]">
+                {project.description}
+              </p>
+            ) : null}
+            <dl className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11.5px] text-[var(--color-fg-subtle)] tabular-nums">
+              <Meta>{t('projects:card.files', { count: project.files.length })}</Meta>
+              <Meta>{t('projects:card.chats', { count: projectChats.length })}</Meta>
+              <Meta>{t('projects:card.updated', { when: formatRelativeDate(project.updatedAt) })}</Meta>
+              {project.pinned ? (
+                <Meta>
+                  <Pin size={10} className="inline -translate-y-px mr-1" aria-hidden />
+                  {t('projects:list.filterPinned')}
+                </Meta>
+              ) : null}
+            </dl>
+          </div>
 
         {/* Composer. Centered, with a small inline label so the project
             context is unmistakable. */}
@@ -271,7 +277,7 @@ export default function ProjectDetail() {
               onModelChange={(modelId) =>
                 useSettings.getState().setModels({ defaultModelId: modelId })
               }
-              onSubmit={(text) => void startProjectChat(text)}
+              onSubmit={(text, atts, opts) => void startProjectChat(text, atts, opts)}
             />
           </div>
         </section>
@@ -464,30 +470,48 @@ export default function ProjectDetail() {
             <ul className="mt-3 flex flex-col divide-y divide-[var(--color-divider)] border-t border-[var(--color-divider)]">
               {projectChats.map((c) => (
                 <li key={c.id}>
-                  <Link
-                    to={`/chat/${c.id}`}
-                    aria-label={t('projects:detail.openChatAria', { title: c.title })}
-                    className={cn(
-                      'group/chatrow grid items-baseline grid-cols-[1fr_auto] gap-x-5 py-4 px-2 -mx-2 rounded-[10px] interactive',
-                      'hover:bg-[var(--color-bg-muted)]',
-                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-                    )}
-                  >
-                    <span className="font-serif text-[16px] sm:text-[17px] leading-snug text-[var(--color-fg)] truncate">
-                      {truncate(c.title, 90)}
-                    </span>
-                    <time
-                      className="text-[11.5px] text-[var(--color-fg-subtle)] tabular-nums shrink-0"
-                      dateTime={new Date(c.updatedAt).toISOString()}
+                  <div className="group/chatrow relative -mx-2 rounded-[10px] interactive hover:bg-[var(--color-bg-muted)]">
+                    <Link
+                      to={`/chat/${c.id}`}
+                      aria-label={t('projects:detail.openChatAria', { title: c.title })}
+                      className={cn(
+                        'grid items-baseline grid-cols-[1fr_auto] gap-x-5 py-4 pl-2 pr-11 rounded-[10px]',
+                        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+                      )}
                     >
-                      {formatRelativeDate(c.updatedAt)}
-                    </time>
-                  </Link>
+                      <span className="font-serif text-[16px] sm:text-[17px] leading-snug text-[var(--color-fg)] truncate">
+                        {truncate(c.title, 90)}
+                      </span>
+                      <time
+                        className="text-[11.5px] text-[var(--color-fg-subtle)] tabular-nums shrink-0"
+                        dateTime={new Date(c.updatedAt).toISOString()}
+                      >
+                        {formatRelativeDate(c.updatedAt)}
+                      </time>
+                    </Link>
+                    <div className="absolute right-1 top-1/2 -translate-y-1/2">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            type="button"
+                            aria-label={t('chat:actions.more')}
+                            className="inline-flex items-center justify-center size-7 rounded-[6px] text-[var(--color-fg-faint)] opacity-0 group-hover/chatrow:opacity-100 data-[state=open]:opacity-100 hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg-muted)] interactive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                          >
+                            <MoreHorizontal size={13} aria-hidden />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <MoveToProjectSub conversationId={c.id} currentProjectId={project.id} />
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                  </div>
                 </li>
               ))}
             </ul>
           )}
         </section>
+        </div>
       </div>
 
       {/* Rename dialog */}
@@ -580,6 +604,24 @@ export default function ProjectDetail() {
                 />
               </Field>
             </div>
+            <label
+              htmlFor="ep-auto-add"
+              className="flex items-start justify-between gap-4 rounded-[12px] border border-[var(--color-border)] p-3.5"
+            >
+              <span className="min-w-0">
+                <span className="block text-[13.5px] font-medium text-[var(--color-fg)]">
+                  {t('projects:detail.editAutoAddLabel')}
+                </span>
+                <span className="mt-0.5 block text-[12px] text-[var(--color-fg-subtle)] leading-relaxed">
+                  {t('projects:detail.editAutoAddHint')}
+                </span>
+              </span>
+              <Switch
+                id="ep-auto-add"
+                checked={editDraft.autoAddUploads}
+                onCheckedChange={(v) => setEditDraft((d) => ({ ...d, autoAddUploads: v }))}
+              />
+            </label>
           </DialogBody>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setEditOpen(false)}>
@@ -613,9 +655,17 @@ export default function ProjectDetail() {
         open={addFileOpen}
         onOpenChange={setAddFileOpen}
         projectName={project.name}
-        onAdd={(file) => {
-          void addFile(project.id, file)
-          toast.success(t('projects:detail.filesAdded'))
+        onUpload={async (files) => {
+          let ok = 0
+          for (const file of files) {
+            const res = await uploadFile(project.id, file)
+            if (res) ok += 1
+          }
+          // Re-pull the document list so freshly-uploaded docs (and their
+          // server-assigned size / status) replace the optimistic entries.
+          void loadOne(project.id)
+          if (ok > 0) toast.success(t('projects:detail.filesAdded', { count: ok }))
+          if (ok < files.length) toast.error(t('projects:detail.filesAddFailed'))
         }}
       />
 
@@ -706,99 +756,70 @@ function AddFileDialog({
   open,
   onOpenChange,
   projectName,
-  onAdd,
+  onUpload,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   projectName: string
-  onAdd: (file: { name: string; kind: ProjectFileKind; size: number; excerpt?: string; url?: string }) => void
+  onUpload: (files: File[]) => Promise<void>
 }) {
   const { t } = useTranslation(['projects', 'common'])
-  const [name, setName] = useState('')
-  const [kind, setKind] = useState<ProjectFileKind>('text')
-  const [excerpt, setExcerpt] = useState('')
-  const [url, setUrl] = useState('')
+  const fileInput = useRef<HTMLInputElement>(null)
+  const [uploading, setUploading] = useState(false)
 
-  useEffect(() => {
-    if (open) {
-      setName('')
-      setKind('text')
-      setExcerpt('')
-      setUrl('')
+  async function handleFiles(list: FileList | null) {
+    if (!list || list.length === 0) return
+    setUploading(true)
+    try {
+      await onUpload(Array.from(list))
+      onOpenChange(false)
+    } finally {
+      setUploading(false)
     }
-  }, [open])
-
-  const isLink = kind === 'link'
-
-  function submit() {
-    const trimmedName = name.trim()
-    if (!trimmedName) return
-    onAdd({
-      name: trimmedName,
-      kind,
-      size: excerpt.trim().length || 0,
-      excerpt: excerpt.trim() || undefined,
-      url: isLink ? url.trim() || undefined : undefined,
-    })
-    onOpenChange(false)
   }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent size="lg">
+      <DialogContent size="md">
         <DialogHeader>
           <DialogTitle>{t('projects:detail.filesAddTitle', { name: projectName })}</DialogTitle>
           <DialogDescription>{t('projects:detail.filesAddDescription')}</DialogDescription>
         </DialogHeader>
-        <DialogBody className="flex flex-col gap-4">
-          <Field label={t('projects:detail.filesNameLabel')} htmlFor="af-name">
-            <Input
-              id="af-name"
-              autoFocus
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder={t('projects:detail.filesNamePlaceholder')}
+        <DialogBody>
+          <button
+            type="button"
+            onClick={() => fileInput.current?.click()}
+            disabled={uploading}
+            className={cn(
+              'w-full rounded-[14px] border border-dashed border-[var(--color-border-strong)] bg-[var(--color-bg-muted)] p-10 text-center interactive',
+              'hover:border-[var(--color-accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+              uploading && 'opacity-60 cursor-not-allowed',
+            )}
+          >
+            <input
+              ref={fileInput}
+              type="file"
+              hidden
+              multiple
+              onChange={(e) => {
+                void handleFiles(e.currentTarget.files)
+                e.currentTarget.value = ''
+              }}
             />
-          </Field>
-          <Field label={t('projects:detail.filesKindLabel')}>
-            <Select value={kind} onValueChange={(v) => setKind(v as ProjectFileKind)}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {FILE_KINDS.map((k) => (
-                  <SelectItem key={k} value={k}>
-                    {t(`projects:detail.kinds.${k}`)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </Field>
-          {isLink ? (
-            <Field label={t('projects:detail.filesUrlLabel')} htmlFor="af-url">
-              <Input
-                id="af-url"
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                placeholder={t('projects:detail.filesUrlPlaceholder')}
-              />
-            </Field>
-          ) : null}
-          <Field label={t('projects:detail.filesExcerptLabel')} htmlFor="af-excerpt">
-            <Textarea
-              id="af-excerpt"
-              value={excerpt}
-              onChange={(e) => setExcerpt(e.target.value)}
-              placeholder={t('projects:detail.filesExcerptPlaceholder')}
-              rows={3}
-            />
-          </Field>
+            {uploading ? (
+              <Loader2 size={24} className="mx-auto animate-spin text-[var(--color-fg-subtle)]" aria-hidden />
+            ) : (
+              <Upload size={24} className="mx-auto text-[var(--color-fg-subtle)]" aria-hidden />
+            )}
+            <p className="mt-3 text-[var(--color-fg-muted)] text-sm">
+              {uploading ? t('projects:detail.filesUploading') : t('projects:detail.filesClickToChoose')}
+            </p>
+          </button>
         </DialogBody>
         <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>
+          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={uploading}>
             {t('common:actions.cancel')}
           </Button>
-          <Button onClick={submit}>{t('projects:detail.filesAddCta')}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

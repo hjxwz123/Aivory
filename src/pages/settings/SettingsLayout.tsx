@@ -1,12 +1,8 @@
-import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
-import { useEffect } from 'react'
+import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { ArrowLeft, User, Wand2, Palette, Sparkles, ShieldCheck, Keyboard } from 'lucide-react'
-import { Logo } from '@/components/brand/logo'
-import { ThemeToggle } from '@/components/ui/theme-toggle'
-import { LanguageToggle } from '@/components/ui/language-toggle'
+import { User, Wand2, Palette, Sparkles, ShieldCheck, Keyboard } from 'lucide-react'
+import { ContentHeader } from '@/components/layout/content-header'
 import { cn } from '@/lib/utils'
-import { useTheme } from '@/store/theme'
 
 const tabDefs = [
   { to: '/settings/account', key: 'account', icon: User },
@@ -17,34 +13,18 @@ const tabDefs = [
   { to: '/settings/shortcuts', key: 'shortcuts', icon: Keyboard },
 ] as const
 
+// Renders inside ChatLayout's content panel: the conversation sidebar stays on
+// the left while settings occupy the right, sharing the same ContentHeader as
+// Subscription. The header/tab-row is a fixed flex child; only the body scrolls.
 export default function SettingsLayout() {
-  const syncSystem = useTheme((s) => s.syncSystem)
   const { pathname } = useLocation()
   const { t } = useTranslation(['settings', 'chat'])
-  useEffect(() => syncSystem(), [syncSystem])
 
   return (
-    <div className="min-h-svh bg-[var(--color-bg)] text-[var(--color-fg)]">
-      <header className="border-b border-[var(--color-divider)] sticky top-0 z-30 bg-[var(--color-bg)]/85 backdrop-blur-sm">
-        <div className="mx-auto max-w-[var(--layout-content-max-w)] flex items-center gap-3 px-5 sm:px-8 h-14">
-          <Link
-            to="/chat"
-            className="inline-flex items-center gap-1.5 text-sm text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] interactive"
-            aria-label={t('chat:sidebar.search')}
-          >
-            <ArrowLeft size={14} aria-hidden /> <span className="max-sm:hidden">{t('chat:sidebar.recents')}</span>
-          </Link>
-          <span className="mx-3 h-5 w-px bg-[var(--color-divider)]" aria-hidden />
-          <Logo size="sm" />
-          <span className="mx-2 text-[var(--color-fg-faint)]" aria-hidden>·</span>
-          <h1 className="font-serif tracking-tight text-[var(--color-fg)] text-[17px]">{t('settings:title')}</h1>
-          <div className="ml-auto flex items-center gap-2">
-            <LanguageToggle />
-            <ThemeToggle />
-          </div>
-        </div>
+    <div className="flex-1 min-h-0 flex flex-col bg-[var(--color-bg)] text-[var(--color-fg)]">
+      <ContentHeader title={t('settings:title')} backTo="/chat" backLabel={t('chat:sidebar.recents')}>
         <nav
-          className="mx-auto max-w-[var(--layout-content-max-w)] px-5 sm:px-8 flex items-center gap-1 overflow-x-auto scrollbar-none -mb-px"
+          className="mx-auto w-full max-w-[var(--layout-content-max-w)] px-5 sm:px-8 flex items-center gap-1 overflow-x-auto scrollbar-none -mb-px"
           aria-label={t('settings:title')}
         >
           {tabDefs.map((tab) => (
@@ -68,11 +48,13 @@ export default function SettingsLayout() {
             </NavLink>
           ))}
         </nav>
-      </header>
+      </ContentHeader>
 
-      <main className="mx-auto max-w-[var(--layout-content-max-w)] px-5 sm:px-8 py-10">
-        <Outlet />
-      </main>
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        <main className="mx-auto w-full max-w-[var(--layout-content-max-w)] px-5 sm:px-8 py-10">
+          <Outlet />
+        </main>
+      </div>
     </div>
   )
 }

@@ -267,6 +267,17 @@ func listUsersAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 
 func banUserAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	id := pathParam(r, "id")
+	// §D2: never ban yourself or the last active admin — both lock the platform out.
+	if u := authUser(r); u != nil && u.ID == id {
+		writeError(w, 400, errors.New("you cannot ban your own account"))
+		return
+	}
+	if target, terr := store.FindUserByID(r.Context(), d.DB, id); terr == nil && target.Role == "admin" {
+		if n, _ := store.ActiveAdminCount(r.Context(), d.DB); n <= 1 {
+			writeError(w, 400, errors.New("cannot ban the last remaining admin"))
+			return
+		}
+	}
 	if err := store.SetUserStatus(r.Context(), d.DB, id, "banned"); err != nil {
 		writeError(w, 500, err)
 		return
@@ -380,9 +391,17 @@ func setUserRoleAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errors.New("role must be 'user' or 'admin'"))
 		return
 	}
-	if _, err := store.FindUserByID(r.Context(), d.DB, id); err != nil {
+	target, err := store.FindUserByID(r.Context(), d.DB, id)
+	if err != nil {
 		writeError(w, 404, errNotFound)
 		return
+	}
+	// §D2: don't demote the last active admin to a regular user.
+	if req.Role == "user" && target.Role == "admin" {
+		if n, _ := store.ActiveAdminCount(r.Context(), d.DB); n <= 1 {
+			writeError(w, 400, errors.New("cannot demote the last remaining admin"))
+			return
+		}
 	}
 	if err := store.SetUserRole(r.Context(), d.DB, id, req.Role); err != nil {
 		writeError(w, 500, err)
@@ -478,6 +497,47 @@ func usageReportAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"days": days, "rows": rows, "trend": trend})
 }
 
+// analyticsAdmin powers the admin Analytics dashboard: the overall trend plus
+// per-model and per-user breakdowns and their time series (top keys only, so the
+// payload stays bounded).
+func analyticsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
+	days := 30
+	if s := r.URL.Query().Get("days"); s != "" {
+		if n, err := strconv.Atoi(s); err == nil && n > 0 && n <= 365 {
+			days = n
+		}
+	}
+	ctx := r.Context()
+	totals, err := store.AdminUsageTotals(ctx, d.DB, days)
+	if err != nil {
+		writeError(w, 500, err)
+		return
+	}
+	trend, _ := store.AdminUsageTrend(ctx, d.DB, days)
+	byModel, _ := store.AdminUsageBreakdown(ctx, d.DB, days, "model_id", 8)
+	byUser, _ := store.AdminUsageBreakdown(ctx, d.DB, days, "user_id", 8)
+	modelSeries, _ := store.AdminUsageSeries(ctx, d.DB, days, "model_id", breakdownKeys(byModel))
+	userSeries, _ := store.AdminUsageSeries(ctx, d.DB, days, "user_id", breakdownKeys(byUser))
+	writeJSON(w, 200, map[string]any{
+		"days":         days,
+		"bucket":       store.UsageBucketWidth(days),
+		"totals":       totals,
+		"trend":        trend,
+		"by_model":     byModel,
+		"by_user":      byUser,
+		"model_series": modelSeries,
+		"user_series":  userSeries,
+	})
+}
+
+func breakdownKeys(rows []store.UsageBreakdownRow) []string {
+	keys := make([]string, 0, len(rows))
+	for _, r := range rows {
+		keys = append(keys, r.Key)
+	}
+	return keys
+}
+
 // ===== Settings =====
 
 var settingsKeys = []string{
@@ -485,7 +545,10 @@ var settingsKeys = []string{
 	"keep_recent_rounds", "summary_max_tokens", "compaction_enabled",
 	"compaction_token_trigger",
 	"memory_enabled", "daily_message_limit", "daily_image_limit", "signup_open",
-	"email_verification_required",
+	"email_verification_required", "daily_token_limit", "max_concurrent_generations",
+	// §B6 partial: JSON array of tool names disabled platform-wide (kill-switch),
+	// e.g. ["python_execute","image_generate"].
+	"disabled_tools",
 	"sandbox_base_url", "sandbox_api_key",
 	// §4.5 storage backend: pick exactly one of s3 / aliyun_oss. When blank,
 	// archive/restore is disabled and the sandbox still works (workspaces
@@ -505,6 +568,11 @@ var settingsKeys = []string{
 	// §user-groups: the prompt shown when a model is locked for a user's group or
 	// their windowed quota is exhausted.
 	"quota_exceeded_message",
+	// § moderation: keyword blocklist (JSON array of strings), the dedicated
+	// moderation model id (for model-mode), the violation categories the model
+	// screens for (model-mode), and the message shown when a prompt is blocked.
+	// Per-model toggle + mode live on the model row.
+	"moderation_keywords", "moderation_model_id", "moderation_categories", "moderation_message",
 	// Voice transcription (whisper) — admin-configurable, live-reloaded per call.
 	// base_url defaults to https://api.openai.com; model defaults to whisper-1.
 	"audio_transcribe_base_url", "audio_transcribe_api_key", "audio_transcribe_model",
@@ -551,5 +619,17 @@ func adminSettingsSet(d Deps, w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	broadcastConfigInvalidate(d) // §2.4: clear the settings cache on every instance
 	adminSettingsGet(d, w, r)
+}
+
+// broadcastConfigInvalidate tells every instance (including this one, via the
+// subscriber wired in main) to drop its cached config after an admin write
+// (§2.4 Pub/Sub invalidation). SetSetting already clears the local key; this
+// covers the multi-instance case + the channel/model object caches.
+func broadcastConfigInvalidate(d Deps) {
+	if d.Cache != nil {
+		d.Cache.Publish("cfg:invalidate", "1")
+	}
+	store.InvalidateConfig()
 }

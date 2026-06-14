@@ -1,0 +1,103 @@
+{
+  "badgeNew": "Nouveau · Aurelia Reason est arrivé",
+  "hero": {
+    "titleLine1": "Un compagnon IA réfléchi",
+    "titleLine2": "à la mesure de votre façon de penser.",
+    "subtitle": "Aurelia est un espace serein pour écrire, raisonner et lire. Conçu autour de votre conversation, et non du modèle qui la sous-tend.",
+    "placeholder": "Essayez : esquisser un essai sur l'attention comme vertu morale"
+  },
+  "capabilities": {
+    "eyebrow": "Fonctionnalités",
+    "title": "Le produit, c'est l'écriture.",
+    "body": "Trois choses qu'Aurelia fait mieux que ses alternatives. Tout le reste n'est qu'une discrète mise en valeur autour d'elles.",
+    "items": {
+      "writing": {
+        "title": "Une écriture qui pense avec vous",
+        "body": "Plans, retouches et brouillons longs dans un seul fil. Aurelia relit ce que vous avez écrit, et le respecte."
+      },
+      "research": {
+        "title": "Des recherches sourcées",
+        "body": "Le mode recherche approfondie consulte un panel restreint de sources, fait apparaître les citations sous forme de pastilles intégrées et vous permet de remonter à chaque affirmation."
+      },
+      "code": {
+        "title": "Du code qui ne crie pas",
+        "body": "Syntaxe soignée, copie en un clic, étiquettes de langage. On dirait un article de revue, pas un terminal."
+      }
+    }
+  },
+  "how": {
+    "eyebrow": "Le ressenti",
+    "title": "Le haut de gamme par la soustraction.",
+    "body": "Nous avons supprimé la bulle. Nous avons supprimé l'indicateur de chargement. Nous avons supprimé le bleu froid en accent. Il reste un lieu qui prend la pensée au sérieux — et respecte la vôtre.",
+    "principles": {
+      "noDefaults": {
+        "title": "Aucun réglage par défaut laissé intact",
+        "body": "Chaque composant a été reconstruit à partir de tokens pour que le produit forme un tout cohérent."
+      },
+      "readingFirst": {
+        "title": "La lecture avant tout",
+        "body": "Interlignage généreux, couleur sobre, un seul accent. Conçu pour qu'on s'y installe."
+      },
+      "youOwnIt": {
+        "title": "La conversation vous appartient",
+        "body": "Modifiez tout, régénérez, ramifiez, exportez. Vos archives sont à vous."
+      }
+    },
+    "quote": "On a moins l'impression de parler à un outil que d'écrire dans une pièce paisible, aux côtés de quelqu'un qui a lu les mêmes choses que vous.",
+    "quoteSource": "Un premier lecteur, Édimbourg"
+  },
+  "useCases": {
+    "eyebrow": "Pensé pour",
+    "title": "Quatre façons de l'utiliser.",
+    "items": {
+      "writers": { "title": "Auteurs de textes longs", "body": "Essais, livres, conférences. Résiste à la standardisation." },
+      "researchers": { "title": "Chercheurs", "body": "Synthèse multisource avec des affirmations traçables." },
+      "engineers": { "title": "Ingénieurs", "body": "Revue de code, refactorisations, réflexion à deux." },
+      "thinkers": { "title": "Penseurs discrets", "body": "Matrices de décision, listes de lecture, planification." }
+    }
+  },
+  "models": {
+    "eyebrow": "Modèles",
+    "title": "Choisissez la voix qui convient au travail.",
+    "body": "Aurelia propose une sélection restreinte et réfléchie. Changez de modèle pour chaque conversation ; nous nous en souvenons.",
+    "tiers": {
+      "standard": "Standard",
+      "pro": "Pro",
+      "max": "Max"
+    },
+    "lockedNote": "Disponible avec le forfait Max"
+  },
+  "safety": {
+    "eyebrow": "Sécurité et confidentialité",
+    "title": "Vos conversations vous appartiennent.",
+    "body": "Aurelia n'entraîne pas ses modèles sur vos conversations par défaut. La mémoire est modifiable et exportable. Les espaces de travail peuvent être isolés pour l'entreprise, avec des règles de conservation personnalisées.",
+    "rows": {
+      "noTraining": { "title": "Aucun entraînement sur vos discussions", "body": "Vous l'activez, plutôt que de devoir le désactiver. Désactivé par défaut pour tous." },
+      "export": { "title": "Exportez tout", "body": "Vos archives sont à vous. Markdown, JSON, texte brut." },
+      "memory": { "title": "Une mémoire modifiable", "body": "Chaque fait qu'Aurelia apprend est une ligne que vous pouvez modifier ou supprimer." }
+    }
+  },
+  "cta": {
+    "title": "Ouvrez l'espace de travail.",
+    "body": "Un lieu paisible pour écrire, raisonner et lire. Gratuit à l'essai. À vous, ensuite.",
+    "primary": "Démarrer une conversation"
+  },
+  "footer": {
+    "tagline": "Un compagnon IA réfléchi. Conçu pour penser, pas pour crier."
+  },
+  "preview": {
+    "today": "Aujourd'hui",
+    "yesterday": "Hier",
+    "essayTitle": "Un essai de fond sur l'attention",
+    "essayLead": "Voici un plan de travail pour un essai de 2 000 mots sur {{topic}}. J'ai gardé une structure aérée pour que chaque section puisse respirer.",
+    "essayTopic": "l'attention comme vertu morale",
+    "section1": "1. Ouverture — {{italic}}",
+    "section1Italic": "pourquoi prendre l'attention au sérieux",
+    "section1Body": "Une petite image concrète, puis une phrase de thèse.",
+    "section2": "2. Ce que l'on entend par attention",
+    "section2Body": "Cognitive, perceptive, morale.",
+    "readingList": "Liste de lecture sur la complexité",
+    "newsletterName": "Trouver un nom pour une newsletter éditoriale",
+    "askPlaceholder": "Posez n'importe quelle question…"
+  }
+}

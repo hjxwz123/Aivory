@@ -74,6 +74,25 @@ func (c *redisCache) Incr(key string, ttl time.Duration) int64 {
 	return n
 }
 
+// IncrBy atomically adds delta to key (setting the TTL on creation), flooring
+// at 0. Used for windowed cost quotas in integer micro-units.
+func (c *redisCache) IncrBy(key string, delta int64, ttl time.Duration) int64 {
+	ctx, cancel := context.WithTimeout(c.ctx, 3*time.Second)
+	defer cancel()
+	n, err := c.rdb.IncrBy(ctx, key, delta).Result()
+	if err != nil {
+		return 0
+	}
+	if n == delta && ttl > 0 {
+		_ = c.rdb.Expire(ctx, key, ttl).Err()
+	}
+	if n < 0 {
+		_ = c.rdb.Set(ctx, key, 0, ttl).Err()
+		return 0
+	}
+	return n
+}
+
 // Decr atomically decrements key, flooring at 0.
 func (c *redisCache) Decr(key string) int64 {
 	ctx, cancel := context.WithTimeout(c.ctx, 3*time.Second)

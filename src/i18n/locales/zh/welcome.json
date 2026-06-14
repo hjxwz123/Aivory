@@ -1,0 +1,39 @@
+{
+  "intro": {
+    "eyebrow": "欢迎来到 Aurelia",
+    "title": "更安静的思考空间。",
+    "subtitle": "花几秒钟把 Aurelia 调成你喜欢的样子，这些之后都能在设置里修改。",
+    "points": {
+      "write": "与你一同思考的写作",
+      "research": "基于真实来源的检索",
+      "own": "对话归你所有，掌控权始终在你手中"
+    }
+  },
+  "config": {
+    "title": "个性化设置",
+    "subtitle": "设置几项偏好，或直接跳过开始使用。"
+  },
+  "fields": {
+    "language": "语言",
+    "theme": "外观",
+    "accent": "强调色",
+    "chatStyle": "回复风格",
+    "chatStyleBody": "默认回答的详细程度。",
+    "memory": "记忆",
+    "memoryBody": "让 Aurelia 跨对话记住有用的信息。"
+  },
+  "theme": {
+    "light": "浅色",
+    "dark": "深色",
+    "system": "跟随系统"
+  },
+  "chatStyle": {
+    "concise": "简洁",
+    "balanced": "均衡",
+    "detailed": "详细"
+  },
+  "actions": {
+    "skip": "暂时跳过",
+    "start": "开始使用"
+  }
+}

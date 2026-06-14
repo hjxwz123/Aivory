@@ -2,8 +2,6 @@ import { useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { MessageRow } from './message-row'
 import { useConversations } from '@/store/conversations'
-import { conversationsApi } from '@/api'
-import { toast } from '@/hooks/use-toast'
 import type { Conversation, Message } from '@/types/chat'
 
 interface MessageListProps {
@@ -19,6 +17,7 @@ export function MessageList({ conversation }: MessageListProps) {
   const setActiveLeaf = useConversations((s) => s.setActiveLeaf)
   const fork = useConversations((s) => s.fork)
   const editMessageInPlace = useConversations((s) => s.editMessageInPlace)
+  const setFeedback = useConversations((s) => s.setFeedback)
 
   // Build an id → message lookup so we can find the parent of an edited
   // message without scanning per-row.
@@ -52,9 +51,15 @@ export function MessageList({ conversation }: MessageListProps) {
     })
   }
 
-  // "Save" — overwrite the question text in place (no branch, no regenerate).
+  // "Save" — overwrite the question text in place, then if it already has an
+  // answer, regenerate it (a new branch) so the transcript stays coherent: the
+  // old answer addressed the pre-edit question and would otherwise be orphaned.
+  // The previous answer remains reachable via the `< n/m >` branch switcher.
   function handleSaveEdit(id: string, newContent: string) {
-    void editMessageInPlace(conversation.id, id, newContent)
+    void editMessageInPlace(conversation.id, id, newContent).then(() => {
+      const child = conversation.messages.find((m) => m.parentId === id && m.role === 'assistant')
+      if (child) void regenerate(conversation.id, child.id, conversation.modelId)
+    })
   }
 
   function handleBranchSwitch(leafId: string) {
@@ -70,14 +75,15 @@ export function MessageList({ conversation }: MessageListProps) {
     })
   }
 
-  function handleLike(id: string) {
-    void conversationsApi.feedback(conversation.id, id, 'like')
-      .catch(() => toast.error('Failed to save feedback'))
+  // MessageRow passes the desired NEXT state (toggle). An "off" click clears the
+  // rating (""), so a misclick can be undone. The store optimistically reflects
+  // it and reverts on failure.
+  function handleLike(id: string, liked: boolean) {
+    void setFeedback(conversation.id, id, liked ? 'like' : '')
   }
 
-  function handleDislike(id: string) {
-    void conversationsApi.feedback(conversation.id, id, 'dislike')
-      .catch(() => toast.error('Failed to save feedback'))
+  function handleDislike(id: string, disliked: boolean) {
+    void setFeedback(conversation.id, id, disliked ? 'dislike' : '')
   }
 
   return (

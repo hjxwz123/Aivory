@@ -28,6 +28,36 @@ func ListKBs(ctx context.Context, db *sql.DB, userID string) ([]KnowledgeBase, e
 	return out, rows.Err()
 }
 
+// OwnedKBIDs filters ids down to the ones actually owned by userID (§C1 — the
+// retrieval scope must never include another user's KB). On a DB error it fails
+// closed (returns none) rather than risk leaking another user's chunks.
+func OwnedKBIDs(ctx context.Context, db *sql.DB, userID string, ids []string) []string {
+	if len(ids) == 0 {
+		return ids
+	}
+	ph := make([]string, len(ids))
+	args := make([]any, 0, len(ids)+1)
+	for i, id := range ids {
+		ph[i] = "?"
+		args = append(args, id)
+	}
+	args = append(args, userID)
+	rows, err := db.QueryContext(ctx,
+		`SELECT id FROM knowledge_bases WHERE id IN (`+strings.Join(ph, ",")+`) AND user_id=?`, args...)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	owned := make([]string, 0, len(ids))
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err == nil {
+			owned = append(owned, id)
+		}
+	}
+	return owned
+}
+
 // GetKB reads one row with ownership check.
 func GetKB(ctx context.Context, db *sql.DB, id, userID string) (*KnowledgeBase, error) {
 	row := db.QueryRowContext(ctx,
@@ -85,6 +115,37 @@ func DeleteKB(ctx context.Context, db *sql.DB, id, userID string) error {
 
 // ListDocuments lists documents for either a KB or a conversation. Scope is
 // "kb" or "conversation" — empty returns all the user's own (joined via FK).
+// ConversationHasReadyDocs reports whether a conversation has at least one
+// successfully-ingested (retrievable) document — used to decide whether to run
+// inline RAG even when no knowledge base is bound (§C/§4.11-B chat uploads).
+func ConversationHasReadyDocs(ctx context.Context, db *sql.DB, convID string) bool {
+	var n int
+	_ = db.QueryRowContext(ctx,
+		`SELECT 1 FROM documents WHERE conversation_id=? AND status='ready' LIMIT 1`, convID).Scan(&n)
+	return n == 1
+}
+
+// ListIncompleteDocuments returns documents stuck in a non-terminal state —
+// used at boot to requeue ingest jobs lost to a restart (the queue is in-memory).
+func ListIncompleteDocuments(ctx context.Context, db *sql.DB) ([]Document, error) {
+	rows, err := db.QueryContext(ctx,
+		`SELECT id, COALESCE(kb_id,''), COALESCE(conversation_id,''), filename, mime_type, size_bytes, status, error, chunk_count, storage_path, created_at
+		   FROM documents WHERE status IN ('pending','parsing','embedding') ORDER BY created_at ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Document{}
+	for rows.Next() {
+		var d Document
+		if err := rows.Scan(&d.ID, &d.KBID, &d.ConversationID, &d.Filename, &d.MimeType, &d.SizeBytes, &d.Status, &d.Error, &d.ChunkCount, &d.StoragePath, &d.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
 func ListDocuments(ctx context.Context, db *sql.DB, scope, parentID string) ([]Document, error) {
 	var (
 		rows *sql.Rows
@@ -180,6 +241,14 @@ func DeleteDocument(ctx context.Context, db *sql.DB, id string) error {
 
 // PromoteDocumentToKB switches a conversation-temp doc into a knowledge base
 // without re-embedding (used by "add to project library").
+// DeleteChunksByDocument removes a document's chunk rows. Used when re-embedding
+// a document on promote (§C5) — its vectors are dropped separately via the
+// vector store.
+func DeleteChunksByDocument(ctx context.Context, db *sql.DB, docID string) error {
+	_, err := db.ExecContext(ctx, `DELETE FROM chunks WHERE document_id=?`, docID)
+	return err
+}
+
 func PromoteDocumentToKB(ctx context.Context, db *sql.DB, docID, kbID string) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {

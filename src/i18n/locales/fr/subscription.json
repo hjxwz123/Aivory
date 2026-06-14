@@ -1,0 +1,16 @@
+{
+  "back": "Retour à la discussion",
+  "title": "Abonnement",
+  "subtitle": "Votre groupe d'adhésion détermine les modèles que vous pouvez utiliser et dans quelle mesure.",
+  "currentPlan": "Groupe actuel",
+  "free": "Gratuit",
+  "allPlans": "Tous les groupes",
+  "current": "Actuel",
+  "youreOnThis": "Vous êtes dans ce groupe",
+  "switchCta": "Changer",
+  "upgradeCta": "Passer à un forfait supérieur",
+  "upgradeTitle": "Passer à {{name}}",
+  "upgradeBody": "Les changements de groupe sont gérés par un administrateur. Contactez l'administrateur de votre espace de travail pour rejoindre ce groupe.",
+  "priceFree": "Gratuit",
+  "loadFailed": "Impossible de charger les groupes"
+}

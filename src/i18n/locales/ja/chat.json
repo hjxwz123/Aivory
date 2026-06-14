@@ -1,0 +1,259 @@
+{
+  "greeting": {
+    "morning": "おはようございます",
+    "afternoon": "こんにちは",
+    "evening": "こんばんは",
+    "stillUp": "まだ起きていますね"
+  },
+  "empty": {
+    "subtitle": "何をお考えですか？",
+    "lead": "何でも聞いてください。アウトライン、コード、意思決定、読書まで — Aurelia があなたと一緒に考えます。",
+    "disclaimer": "Aurelia は誤ることがあります。重要な内容は必ず確認してください。"
+  },
+  "composer": {
+    "placeholder": "何でも聞いてください — または考えを貼り付けてください。",
+    "attach": "ファイルを添付",
+    "addImage": "画像を追加",
+    "voice": "音声入力",
+    "voiceStop": "録音を停止",
+    "voiceUnsupported": "このブラウザでは音声入力に対応していません。",
+    "voicePermission": "マイクへのアクセスが拒否されました。",
+    "voiceFailed": "録音を文字起こしできませんでした。",
+    "research": "リサーチ",
+    "researchTooltip": "ディープリサーチモード",
+    "canvas": "キャンバス",
+    "canvasTooltip": "キャンバスモード",
+    "send": "送信（{{kbd}} + Enter）",
+    "stop": "生成を停止",
+    "tooLongTitle": "メッセージが長すぎます",
+    "tooLongBody": "メッセージは {{max}} 文字以内にしてください。",
+    "attachedSingle": "{{count}} 件のファイルを添付しました",
+    "attachedMultiple": "{{count}} 件のファイルを添付しました",
+    "attachedHint": "このビルドでは添付ファイルは表示のみです。",
+    "uploadFailed": "アップロードに失敗しました",
+    "knowledgeBases": "ナレッジベース",
+    "noKnowledgeBases": "ナレッジベースはまだありません。"
+  },
+  "assistant": "Aurelia",
+  "thinking": "思考中",
+  "reasoning": {
+    "title": "推論",
+    "steps_one": "{{count}} ステップ",
+    "steps_other": "{{count}} ステップ"
+  },
+  "actions": {
+    "copy": "コピー",
+    "copied": "コピーしました",
+    "regenerate": "再生成",
+    "helpful": "役に立った",
+    "notHelpful": "役に立たなかった",
+    "edit": "編集",
+    "cancelEdit": "キャンセル",
+    "saveEdit": "保存して再送信",
+    "saveInPlace": "保存",
+    "more": "その他",
+    "copyMessage": "メッセージをコピー",
+    "readAloud": "読み上げ",
+    "readAloudMocked": "このビルドでは読み上げはモックです。",
+    "shareMocked": "共有リンクをコピーしました",
+    "shareCopied": "共有リンクをコピーしました",
+    "branch": "ブランチを切り替え",
+    "prevBranch": "前のブランチ",
+    "nextBranch": "次のブランチ",
+    "fork": "新しい会話に分岐",
+    "forked": "新しい会話に分岐しました"
+  },
+  "message": {
+    "refused": "モデルはこのリクエストへの回答を控えました。",
+    "ragFullText": "ドキュメント全文を挿入しました",
+    "ragFullDoc": "ドキュメント全体のコンテキスト",
+    "ragNone": "検索をスキップしました",
+    "ragDefault": "取得したソース",
+    "moderation": {
+      "title": "コンテンツがブロックされました",
+      "body": "あなたのメッセージは利用規約に違反する可能性があります。",
+      "cta": "メッセージを編集して再度お試しください。"
+    }
+  },
+  "tools": {
+    "web_search": "ウェブ検索",
+    "code_interpreter": "コードインタープリター",
+    "deep_research": "ディープリサーチ"
+  },
+  "sources": {
+    "label": "ソース",
+    "open": "ソースを開く",
+    "fromDocuments": "あなたのドキュメントから"
+  },
+  "research": {
+    "title": "ディープリサーチ",
+    "steps": "{{done}}/{{total}}",
+    "planLabel": "リサーチプラン",
+    "sourcesLabel": "ソース（{{count}}）"
+  },
+  "share": {
+    "title": "会話を共有",
+    "body": "この会話の読み取り専用スナップショットへの公開リンクを作成します。以降のメッセージは非公開のままです。",
+    "bodyShared": "このリンクを知っている人は誰でも、この会話の読み取り専用スナップショットを閲覧できます。",
+    "createCta": "共有リンクを作成",
+    "revokeCta": "共有を解除",
+    "revoked": "共有リンクを取り消しました",
+    "failed": "問題が発生しました",
+    "linkCopied": "共有リンクをコピーしました",
+    "publicHint": "公開 — 閲覧にログインは不要です。",
+    "tryCta": "Aurelia を試す",
+    "missingTitle": "この共有は利用できません",
+    "missingBody": "リンクが誤っているか、所有者がこの会話の共有を解除した可能性があります。",
+    "eyebrow": "共有された会話",
+    "untitled": "無題の会話",
+    "roleUser": "ユーザー",
+    "roleAssistant": "アシスタント",
+    "footer": "Aurelia から共有 — 思慮深い AI ワークスペース。"
+  },
+  "code": {
+    "run": "実行",
+    "rerun": "再実行",
+    "stop": "停止",
+    "phaseQueued": "待機中…",
+    "phaseBoot": "Python エンジンを読み込み中…",
+    "phasePackages": "パッケージを解決中…",
+    "phaseRunning": "実行中…",
+    "result": "結果",
+    "noOutput": "出力なしで完了しました。",
+    "stopped": "実行を停止しました。",
+    "timeout": "実行が {{seconds}} 秒を超えたため中断されました。",
+    "engineFailed": "Python エンジンを読み込めませんでした — 接続を確認して再試行してください。",
+    "figureAlt": "図 {{index}}",
+    "poweredBy": "Pyodide によりブラウザ内で実行",
+    "clear": "クリア",
+    "preview": "プレビュー",
+    "previewTitle": "HTML プレビュー",
+    "previewRefresh": "再読み込み",
+    "previewClose": "プレビューを閉じる",
+    "previewSandboxHint": "隔離されたサンドボックスでレンダリング — ページのスクリプトはあなたのデータにアクセスできません。",
+    "mermaidFailed": "この図をレンダリングできませんでした — ソースを表示しています。"
+  },
+  "modePill": {
+    "deepResearch": "ディープリサーチ",
+    "canvas": "キャンバス"
+  },
+  "sidebar": {
+    "newChat": "新しいチャット",
+    "search": "検索",
+    "actions": "会話の操作",
+    "rename": "名前を変更",
+    "renameTitle": "会話の名前を変更",
+    "renameHint": "後で見つけやすい名前を付けてください。",
+    "renamed": "会話の名前を変更しました",
+    "share": "共有",
+    "archive": "アーカイブ",
+    "archived": "会話をアーカイブしました",
+    "archivedTitle": "アーカイブしたチャット",
+    "archivedBody": "アーカイブを解除すると、チャットがリストに戻ります。",
+    "archivedEmpty": "アーカイブしたチャットはありません。",
+    "unarchive": "アーカイブを解除",
+    "unarchived": "チャットのアーカイブを解除しました",
+    "delete": "削除",
+    "deleteTitle": "この会話を削除しますか？",
+    "deleteBody": "会話とすべてのメッセージが削除されます。この操作は取り消せません。",
+    "deleted": "会話を削除しました",
+    "empty": "会話はまだありません。",
+    "starred": "スター付き",
+    "recents": "最近",
+    "moveToProject": "プロジェクトに移動",
+    "removeFromProject": "プロジェクトから削除"
+  },
+  "topbar": {
+    "shareTooltip": "共有"
+  },
+  "thread": {
+    "modelSwitched": "モデルを切り替えました",
+    "modelSwitchedBody": "今後のメッセージには新しいモデルが使用されます。",
+    "renamed": "名前を変更しました",
+    "deleted": "削除しました",
+    "notFoundTitle": "その会話はここにありません。",
+    "notFoundBody": "削除されたか、リンクが誤っている可能性があります。",
+    "goToChat": "チャットへ移動",
+    "jumpToLatest": "最新へ移動",
+    "deleteUndone": "この操作は取り消せません。"
+  },
+  "buckets": {
+    "today": "今日",
+    "yesterday": "昨日",
+    "last_7": "過去 7 日間",
+    "last_30": "過去 30 日間",
+    "older": "それ以前"
+  },
+  "modelPicker": {
+    "section": "モデル",
+    "moreSoon": "さらに多くのモデルが近日登場",
+    "current": "現在のモデル",
+    "label": "モデル: {{name}}",
+    "upgrade": "アップグレードして解除"
+  },
+  "commandMenu": {
+    "placeholder": "会話を検索、またはコマンドを実行…",
+    "noMatch": "一致するものがありません。",
+    "groups": {
+      "actions": "アクション",
+      "theme": "テーマ",
+      "conversations": "会話",
+      "help": "ヘルプ",
+      "language": "言語"
+    },
+    "actions": {
+      "newChat": "新しいチャット",
+      "goToChat": "チャットへ移動",
+      "openSettings": "設定を開く",
+      "toggleSidebar": "サイドバーの表示切り替え",
+      "light": "ライトテーマ",
+      "dark": "ダークテーマ",
+      "system": "システムテーマ",
+      "shortcuts": "キーボードショートカット",
+      "switchLanguage": "{{language}}に切り替え"
+    },
+    "title": "コマンドメニュー"
+  },
+  "signedOut": "ログアウトしました。",
+  "userMenu": {
+    "personalization": "パーソナライズ",
+    "knowledge": "ナレッジ",
+    "admin": "管理",
+    "subscription": "サブスクリプション",
+    "language": "言語"
+  },
+  "suggestions": {
+    "outline-essay": {
+      "title": "長文エッセイのアウトラインを作る",
+      "prompt": "道徳的なスキルとしての注意力について、2,000 語のエッセイのアウトラインを作るのを手伝ってください。"
+    },
+    "study-plan": {
+      "title": "学習プランを設計する",
+      "prompt": "複雑性理論について学ぶための 4 週間の読書プランを設計してください。"
+    },
+    "debug-snippet": {
+      "title": "このコードを一緒に読む",
+      "prompt": "再レンダリング後にフォーカスを失う TypeScript の関数があります — デバッグを手伝ってください。"
+    },
+    "research-brief": {
+      "title": "リサーチブリーフを作成する",
+      "prompt": "ベーシックインカムに対する最も強力な反論をまとめてください。"
+    },
+    "travel-idea": {
+      "title": "ゆったりした旅を計画する",
+      "prompt": "10 月に 10 日間あります。ポルトガルを巡る、ゆったりと静かなルートを考えるのを手伝ってください。"
+    },
+    "creative-brief": {
+      "title": "慎重に名前を付ける",
+      "prompt": "気候ファイナンスに関する編集ニュースレターの名前の候補を 8 つ挙げてください。"
+    },
+    "difficult-decision": {
+      "title": "決断について考え抜く",
+      "prompt": "執筆のために仕事を辞めるべきかどうかの意思決定マトリクスを一緒に考えてください。"
+    },
+    "library-curation": {
+      "title": "小さなライブラリを推薦する",
+      "prompt": "孤独についての短い本を 5 冊提案してください — 異なる伝統から、重複なしで。"
+    }
+  }
+}

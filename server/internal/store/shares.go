@@ -30,7 +30,7 @@ func CreateShare(ctx context.Context, db *sql.DB, userID, convID, title string, 
 	if _, err := db.ExecContext(ctx, `DELETE FROM conversation_shares WHERE conversation_id=?`, convID); err != nil {
 		return nil, err
 	}
-	id := genID("sh")
+	id := "sh_" + genToken() // §D1: 192-bit unguessable token (public capability URL)
 	if len(snapshot) == 0 {
 		snapshot = []byte("[]")
 	}

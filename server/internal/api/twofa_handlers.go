@@ -111,11 +111,24 @@ type login2faReq struct {
 // password step plus a valid code for a real session.
 func login2faHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	var req login2faReq
-	if err := decodeJSON(r, &req); err != nil || req.Ticket == "" {
+	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, 400, errInvalidInput)
 		return
 	}
-	uid, ok := d.Cache.Get("2fa:" + req.Ticket)
+	// Ticket comes from the JSON body (password-login flow) or, for the OAuth
+	// flow, from the short-lived HttpOnly cookie set by the callback (§A10).
+	ticket := req.Ticket
+	if ticket == "" {
+		if c, cerr := r.Cookie("aurelia_2fa"); cerr == nil {
+			ticket = c.Value
+		}
+	}
+	if ticket == "" {
+		writeError(w, 400, errInvalidInput)
+		return
+	}
+	clear2faCookie(w)
+	uid, ok := d.Cache.Get("2fa:" + ticket)
 	if !ok {
 		writeError(w, 401, errors.New("login session expired, please sign in again"))
 		return
@@ -126,11 +139,27 @@ func login2faHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !auth.VerifyTotp(user.TotpSecret, req.Code) {
+		// §A5: burn the ticket after 5 wrong codes so a captured ticket can't be
+		// brute-forced for its full TTL — the user must redo the password step.
+		if d.Cache.Incr("2fa:fail:"+ticket, 5*time.Minute) >= 5 {
+			d.Cache.Delete("2fa:" + ticket)
+			d.Cache.Delete("2fa:fail:" + ticket)
+		}
 		writeError(w, 401, errors.New("invalid code"))
 		return
 	}
-	d.Cache.Delete("2fa:" + req.Ticket)
-	finaliseSession(d, w, user)
+	d.Cache.Delete("2fa:" + ticket)
+	d.Cache.Delete("2fa:fail:" + ticket)
+	finaliseSession(d, w, r, user, 0)
+}
+
+// clear2faCookie expires the OAuth 2FA handoff cookie (Path must match the one
+// set in the OAuth callback).
+func clear2faCookie(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{
+		Name: "aurelia_2fa", Value: "", Path: "/api/auth",
+		HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode, MaxAge: -1,
+	})
 }
 
 // issueTwofaTicket mints a short-lived ticket that stands in for a verified

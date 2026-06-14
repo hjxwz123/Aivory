@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -80,24 +81,40 @@ func Load() Config {
 	return cfg
 }
 
-// Validate enforces production-only safety guards (§8.1 — JWT_SECRET cannot
-// remain at the dev default in production). Call this from main() right after
-// Load(); it returns an error so the process aborts with a clear message
-// instead of booting with forgeable tokens.
+// Validate refuses to boot with forgeable tokens / a known admin password in
+// anything that looks like a real deployment (§8.1 — A13). Call from main()
+// right after Load(); it returns an error so the process aborts with a clear
+// message.
+//
+// "Looks deployed" = an explicit non-dev AURELIA_ENV (production/prod/staging/…)
+// OR a Postgres DATABASE_URL. The Postgres signal closes the original hole where
+// an operator forgot to set AURELIA_ENV=production (default is "development") and
+// silently booted with the public dev JWT secret: real deployments use Postgres,
+// local dev uses SQLite. SQLite + an explicit dev env still boots with defaults.
 func Validate(cfg Config) error {
-	prod := cfg.Env == "production" || cfg.Env == "prod"
-	if prod {
-		if cfg.JWTSecret == "" || cfg.JWTSecret == defaultDevJWTSecret {
-			return fmt.Errorf("AURELIA_ENV=%s but JWT_SECRET is unset or at the dev default — refuse to start (set a long random JWT_SECRET env var)", cfg.Env)
-		}
-		if len(cfg.JWTSecret) < 32 {
-			return fmt.Errorf("AURELIA_ENV=%s but JWT_SECRET is too short (%d chars; need ≥32)", cfg.Env, len(cfg.JWTSecret))
-		}
-		if cfg.SeedAdminPass == "aurelia-admin" {
-			return fmt.Errorf("AURELIA_ENV=%s but SEED_ADMIN_PASSWORD is the default — set a real password before booting", cfg.Env)
-		}
+	dev := cfg.Env == "" || cfg.Env == "development" || cfg.Env == "dev" || cfg.Env == "test" || cfg.Env == "local"
+	looksDeployed := !dev || isPostgresURL(cfg.DatabaseURL)
+	if !looksDeployed {
+		return nil
+	}
+	if cfg.JWTSecret == "" || cfg.JWTSecret == defaultDevJWTSecret {
+		return fmt.Errorf("refusing to start: JWT_SECRET is unset or at the built-in dev default in a non-development deployment (AURELIA_ENV=%q, Postgres=%v) — set a long random JWT_SECRET", cfg.Env, isPostgresURL(cfg.DatabaseURL))
+	}
+	if len(cfg.JWTSecret) < 32 {
+		return fmt.Errorf("refusing to start: JWT_SECRET is too short (%d chars; need ≥32)", len(cfg.JWTSecret))
+	}
+	if cfg.SeedAdminPass == "" || cfg.SeedAdminPass == "aurelia-admin" {
+		return fmt.Errorf("refusing to start: SEED_ADMIN_PASSWORD is unset or the built-in default in a non-development deployment — set a real password")
 	}
 	return nil
+}
+
+// isPostgresURL reports whether the DSN addresses PostgreSQL (mirrors the
+// store's detection without importing it, to keep config dependency-free).
+func isPostgresURL(dsn string) bool {
+	l := strings.ToLower(strings.TrimSpace(dsn))
+	return strings.HasPrefix(l, "postgres://") || strings.HasPrefix(l, "postgresql://") ||
+		(strings.Contains(l, "host=") && strings.Contains(l, "dbname="))
 }
 
 func getenv(k, def string) string {

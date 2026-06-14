@@ -83,11 +83,14 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 		raw, _ := json.Marshal(body)
 		// §4.10-G stream: streamGenerateContent returns SSE-style JSON-array
 		// chunks; we use alt=sse to get one event per line.
-		streamURL := fmt.Sprintf("%s/v1beta/models/%s:streamGenerateContent?alt=sse&key=%s", base, req.Model.RequestID, req.Model.APIKey)
+		// §B5: API key travels in the x-goog-api-key header, NOT the query string
+		// (URLs leak into proxy/access logs, Referer, and error wrappers).
+		streamURL := fmt.Sprintf("%s/v1beta/models/%s:streamGenerateContent?alt=sse", base, req.Model.RequestID)
 		httpReq, _ := http.NewRequestWithContext(ctx, "POST", streamURL, bytes.NewReader(raw))
 		httpReq.Header.Set("content-type", "application/json")
 		httpReq.Header.Set("accept", "text/event-stream")
-		resp, err := http.DefaultClient.Do(httpReq)
+		httpReq.Header.Set("x-goog-api-key", req.Model.APIKey)
+		resp, err := providerHTTPClient.Do(httpReq)
 		if err != nil {
 			return nil, err
 		}
@@ -100,6 +103,16 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 		text, thinkingText, calls, modelParts, u, err := readGeminiStream(resp.Body, onEvent)
 		resp.Body.Close()
 		if err != nil {
+			// Stop button / kill: preserve the partial (§6.2).
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				if thinkingText != "" {
+					allBlocks = append(allBlocks, UnifiedBlock{Kind: "thinking", Text: thinkingText})
+				}
+				if text != "" {
+					allBlocks = append(allBlocks, UnifiedBlock{Kind: "text", Text: text})
+				}
+				return &UnifiedResult{Blocks: allBlocks, StopReason: "stopped", Usage: totalUsage}, err
+			}
 			return nil, err
 		}
 		if text != "" {
@@ -361,10 +374,11 @@ func (p *GoogleProvider) promptRunOnce(base string, req UnifiedChatRequest) Prom
 		}
 		body = MergeParamControls(body, req.ParamControls, req.ParamOverrides)
 		raw, _ := json.Marshal(body)
-		url := fmt.Sprintf("%s/v1beta/models/%s:generateContent?key=%s", base, req.Model.RequestID, req.Model.APIKey)
+		url := fmt.Sprintf("%s/v1beta/models/%s:generateContent", base, req.Model.RequestID)
 		httpReq, _ := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(raw))
 		httpReq.Header.Set("content-type", "application/json")
-		resp, err := http.DefaultClient.Do(httpReq)
+		httpReq.Header.Set("x-goog-api-key", req.Model.APIKey) // §B5: key in header, not URL
+		resp, err := providerHTTPClient.Do(httpReq)
 		if err != nil {
 			return "", Usage{}, err
 		}

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -16,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"aurelia/server/internal/netsafe"
 	"aurelia/server/internal/sandbox"
 	"aurelia/server/internal/storage"
 	"aurelia/server/internal/store"
@@ -488,12 +490,21 @@ func minerUPollTask(ctx context.Context, baseURL, token, taskID string, interval
 // We rewrite `![alt](images/foo.png)` → `![alt](mineru://foo.png)` so the
 // existing chunker's `mineruImageMarker` regex picks them up as image_caption
 // chunks.
+// mineruZipClient downloads the MinerU result zip. Because the zip URL comes
+// from the API *response* (not admin config), it goes through an SSRF-safe
+// client that blocks private/internal IPs at dial time (§C6).
+var mineruZipClient = netsafe.PrivateBlockClient(5 * time.Minute)
+
 func minerUDownloadAndUnpack(ctx context.Context, zipURL string) (*MinerUResult, error) {
+	// §C6: only fetch http(s) zip URLs; reject file://, gopher://, etc.
+	if u, perr := url.Parse(zipURL); perr != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return nil, fmt.Errorf("mineru: refusing non-http(s) zip url")
+	}
 	req, err := http.NewRequestWithContext(ctx, "GET", zipURL, nil)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := mineruClient.Do(req)
+	resp, err := mineruZipClient.Do(req)
 	if err != nil {
 		return nil, err
 	}

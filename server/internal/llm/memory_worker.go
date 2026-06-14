@@ -101,6 +101,13 @@ func (w *MemoryWorker) Process(ctx context.Context, convID string) error {
 		if err := rows.Scan(&id, &role, &blocks); err != nil {
 			continue
 		}
+		// §B7 memory-poisoning guard: extract durable facts ONLY from the user's
+		// own messages. Assistant/tool text can carry instructions injected via a
+		// fetched document or web page, which must never be promoted into the
+		// long-term memory that is later injected into every system prompt.
+		if role != "user" {
+			continue
+		}
 		msgIDs = append(msgIDs, id)
 		var blks []UnifiedBlock
 		_ = json.Unmarshal([]byte(blocks), &blks)

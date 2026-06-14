@@ -51,6 +51,9 @@ const (
 	// TaskResearchVerify assesses research coverage and proposes follow-up
 	// queries for the next round.
 	TaskResearchVerify TaskKind = "task.research_verify"
+	// TaskModeration screens a single user prompt for policy violations using a
+	// dedicated moderation model (§ moderation).
+	TaskModeration TaskKind = "task.moderation"
 )
 
 // TaskLLM dispatches small internal model calls to the configured task model.
@@ -79,6 +82,9 @@ type RunOpts struct {
 	// MaxOutputTokens is a soft cap surfaced into the upstream request as
 	// max_tokens.
 	MaxOutputTokens int
+	// ModelID, when set, overrides the resolved task model — used to run a
+	// specific model (e.g. the dedicated moderation model) for this call.
+	ModelID string
 }
 
 // Run issues a single non-streaming task model call and returns the raw text
@@ -90,9 +96,13 @@ func (t *TaskLLM) Run(ctx context.Context, kind TaskKind, prompt string, opts Ru
 	if t == nil || t.db == nil {
 		return "", errors.New("task llm not initialised")
 	}
-	modelID, err := resolveTaskModelID(t.db)
-	if err != nil {
-		return "", err
+	modelID := opts.ModelID
+	if modelID == "" {
+		var rerr error
+		modelID, rerr = resolveTaskModelID(t.db)
+		if rerr != nil {
+			return "", rerr
+		}
 	}
 	model, err := store.GetModel(ctx, t.db, modelID)
 	if err != nil {

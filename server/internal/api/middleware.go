@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -37,6 +38,13 @@ func authUser(r *http.Request) *store.User {
 // package — Go won't let a func and an import share a name in the same file.
 func requireAuth(d Deps, h handler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// §A3 CSRF: cookie-authenticated state-changing requests must originate
+		// from an allowed origin. (SameSite=Lax already blocks most cross-site
+		// cookie sends; this is defense-in-depth. Bearer-only requests are exempt.)
+		if !csrfOK(d.Config.AllowedOrigins, r) {
+			writeError(w, http.StatusForbidden, errors.New("cross-site request blocked"))
+			return
+		}
 		token := readAccessToken(r)
 		if token == "" {
 			writeError(w, http.StatusUnauthorized, errAuthRequired)
@@ -75,6 +83,36 @@ func requireAdmin(d Deps, h handler) http.HandlerFunc {
 		}
 		h(d, w, r)
 	})
+}
+
+// csrfOK guards cookie-authenticated, state-changing requests (§A3). Returns
+// true (allow) for: safe methods (GET/HEAD/OPTIONS); requests without an
+// auth_token cookie (Bearer-only — a cross-site page can't set the header);
+// requests with no Origin (non-browser clients); same-origin requests
+// (Origin host == Host); and requests whose Origin is in the configured
+// allow-list. Everything else (a present, foreign, non-allowed Origin on a
+// cookie-authenticated mutation) is blocked.
+func csrfOK(allowed []string, r *http.Request) bool {
+	switch r.Method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return true
+	}
+	if _, err := r.Cookie("auth_token"); err != nil {
+		return true
+	}
+	origin := strings.TrimRight(r.Header.Get("Origin"), "/")
+	if origin == "" {
+		return true
+	}
+	if u, err := url.Parse(origin); err == nil && u.Host == r.Host {
+		return true
+	}
+	for _, a := range allowed {
+		if strings.TrimRight(a, "/") == origin {
+			return true
+		}
+	}
+	return false
 }
 
 func readAccessToken(r *http.Request) string {
@@ -159,6 +197,17 @@ func rateLimitIP(d Deps, r *http.Request, scope string, perWindow int, window ti
 	key := "rl:ip:" + scope + ":" + ip + ":" + r.URL.Path
 	n := d.Cache.Incr(key, window)
 	return int(n) <= perWindow
+}
+
+// rateLimitUser applies a fixed-window per-USER request budget — used for
+// expensive authenticated actions (document upload → MinerU OCR + embeddings)
+// where an IP-keyed limit is the wrong unit (NAT) and the actor is known (§C4).
+func rateLimitUser(d Deps, userID, scope string, perWindow int, window time.Duration) bool {
+	if userID == "" {
+		return true
+	}
+	key := "rl:u:" + scope + ":" + userID
+	return int(d.Cache.Incr(key, window)) <= perWindow
 }
 
 // rateLimitedIP wraps a handler with rateLimitIP enforcement.

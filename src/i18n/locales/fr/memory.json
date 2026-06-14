@@ -1,0 +1,37 @@
+{
+  "title": "Mémoire",
+  "lead": "Aurelia retient des faits durables à votre sujet d'une conversation à l'autre. Tout ce qui figure ici peut nourrir ses futures réponses.",
+  "empty": "Aucune mémoire pour l'instant.",
+  "emptyBody": "Après quelques conversations, Aurelia fera ressortir les éléments qui méritent d'être retenus. Vous pouvez aussi les enregistrer manuellement.",
+  "new": "Ajouter une mémoire",
+  "addDialogTitle": "Nouvelle mémoire",
+  "addDialogBody": "Un fait court et durable à votre sujet. Aurelia le considérera comme une vérité établie.",
+  "fields": {
+    "text": "Mémoire",
+    "slot": "Champ (facultatif)",
+    "value": "Valeur (facultative)"
+  },
+  "actions": {
+    "edit": "Modifier",
+    "save": "Enregistrer",
+    "delete": "Oublier",
+    "markStale": "Marquer comme obsolète",
+    "markActive": "Marquer comme active"
+  },
+  "status": {
+    "ACTIVE": "Active",
+    "STALE": "Obsolète",
+    "UNKNOWN_CURRENT": "Incertaine",
+    "HISTORICAL_ONLY": "Historique",
+    "QUERY_DEPENDENT": "Selon le contexte"
+  },
+  "created": "Mémoire enregistrée",
+  "updated": "Mémoire mise à jour",
+  "deleted": "Mémoire oubliée",
+  "deleteConfirm": "Oublier cette mémoire ?",
+  "filters": {
+    "all": "Toutes",
+    "active": "Actives",
+    "stale": "Obsolètes"
+  }
+}

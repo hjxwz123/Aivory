@@ -14,8 +14,18 @@ import { Field } from '@/components/ui/label'
 import { toast } from '@/hooks/use-toast'
 import { authApi } from '@/api'
 import { useSettings } from '@/store/settings'
+import { FONT_PRESETS, type FontPref } from '@/types/settings'
 import { MemoryManager } from '@/components/settings/memory-manager'
 import { cn } from '@/lib/utils'
+
+// CSS family per preset so each card previews in its own typeface, regardless of
+// the font currently applied to the document.
+const FONT_PREVIEW: Record<FontPref, string> = {
+  default: "'Geist Variable', 'Geist', ui-sans-serif, sans-serif",
+  inter: "'Inter Variable', 'Inter', ui-sans-serif, sans-serif",
+  system: 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif',
+  serif: "'Fraunces Variable', 'Fraunces', ui-serif, Georgia, serif",
+}
 
 // Trait keys MUST match personaTraitPhrases on the backend (orchestrator.go).
 const TRAITS = [
@@ -35,6 +45,14 @@ export default function Personalization() {
   const { t } = useTranslation(['settings', 'memory', 'common'])
   const memoriesEnabled = useSettings((s) => s.privacy.memoriesEnabled)
   const setPrivacy = useSettings((s) => s.setPrivacy)
+  const font = useSettings((s) => s.appearance.font)
+  const setAppearance = useSettings((s) => s.setAppearance)
+
+  // Eager-load Inter so its preview card renders in the real face even before
+  // it's selected (it's otherwise lazy-loaded on selection).
+  useEffect(() => {
+    void import('@fontsource-variable/inter')
+  }, [])
 
   const [traits, setTraits] = useState<string[]>([])
   const [nickname, setNickname] = useState('')
@@ -163,6 +181,44 @@ export default function Personalization() {
               {t('common:actions.save')}
             </Button>
           </div>
+        </div>
+      </section>
+
+      {/* Typeface */}
+      <section className="mb-12">
+        <div className="mb-5">
+          <h2 className="font-serif tracking-tight text-xl text-[var(--color-fg)]">
+            {t('settings:personalization.font.title')}
+          </h2>
+          <p className="mt-1.5 text-sm text-[var(--color-fg-muted)]">
+            {t('settings:personalization.font.subtitle')}
+          </p>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {FONT_PRESETS.map((opt) => {
+            const selected = font === opt
+            return (
+              <button
+                key={opt}
+                type="button"
+                aria-pressed={selected}
+                onClick={() => setAppearance({ font: opt })}
+                style={{ fontFamily: FONT_PREVIEW[opt] }}
+                className={cn(
+                  'flex flex-col items-start gap-1 rounded-[14px] border px-4 py-3.5 text-left interactive',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+                  selected
+                    ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)]'
+                    : 'border-[var(--color-border)] bg-[var(--color-surface)] hover:border-[var(--color-border-strong)]',
+                )}
+              >
+                <span className="text-[15px] font-medium text-[var(--color-fg)]">
+                  {t(`settings:personalization.font.options.${opt}`)}
+                </span>
+                <span className="text-[22px] leading-tight text-[var(--color-fg-muted)]">Ag 字 0123</span>
+              </button>
+            )
+          })}
         </div>
       </section>
 

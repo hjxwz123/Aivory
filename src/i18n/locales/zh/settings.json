@@ -35,7 +35,17 @@
     "memorySubtitle": "助手可以跨对话记住关于你的长期信息。",
     "memoryToggle": "启用记忆",
     "memoryToggleBody": "关闭后,所有对话都不会使用或保存记忆。",
-    "memoryDisabled": "记忆已关闭。开启后可查看和管理已保存的记忆。"
+    "memoryDisabled": "记忆已关闭。开启后可查看和管理已保存的记忆。",
+    "font": {
+      "title": "字体",
+      "subtitle": "选择全站使用的字体。",
+      "options": {
+        "default": "Geist（默认）",
+        "inter": "Inter",
+        "system": "系统字体",
+        "serif": "Fraunces（衬线）"
+      }
+    }
   },
   "account": {
     "title": "账号",
@@ -98,6 +108,21 @@
       "failed": "出错了",
       "codeRequired": "请输入 6 位验证码",
       "invalid": "验证码无效，请重试"
+    },
+    "sessions": {
+      "title": "活跃会话",
+      "subtitle": "当前登录到你账户的设备。",
+      "signOutOthers": "退出其他会话",
+      "thisDevice": "当前设备",
+      "activeNow": "正在使用",
+      "revoke": "退出此会话",
+      "revoked": "已退出该会话",
+      "revokeFailed": "无法退出该会话",
+      "othersRevoked": "已退出所有其他会话",
+      "loadFailed": "无法加载会话",
+      "empty": "暂无活跃会话",
+      "unknownDevice": "未知设备",
+      "localNetwork": "本地网络"
     }
   },
   "appearance": {

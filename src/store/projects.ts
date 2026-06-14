@@ -10,6 +10,7 @@ import { create } from 'zustand'
 import { ApiError, projectsApi } from '@/api'
 import type { ApiDocument, ApiProject } from '@/api/types'
 import type { Project, ProjectAccent, ProjectFile, ProjectFileKind } from '@/types/project'
+import { toast } from '@/hooks/use-toast'
 
 interface ProjectStore {
   projects: Project[]
@@ -22,11 +23,13 @@ interface ProjectStore {
 
   createProject: (init?: Partial<Pick<Project, 'name' | 'description' | 'instructions' | 'accent' | 'emoji'>>) => Promise<Project | null>
   renameProject: (id: string, name: string) => Promise<void>
-  updateProject: (id: string, patch: Partial<Pick<Project, 'name' | 'description' | 'instructions' | 'accent' | 'emoji'>>) => Promise<void>
+  updateProject: (id: string, patch: Partial<Pick<Project, 'name' | 'description' | 'instructions' | 'accent' | 'emoji' | 'autoAddUploads'>>) => Promise<void>
   togglePin: (id: string) => Promise<void>
   deleteProject: (id: string) => Promise<void>
 
   addFile: (id: string, file: Omit<ProjectFile, 'id' | 'addedAt'> & { content?: string }) => Promise<ProjectFile | null>
+  /** Upload a real file (multipart) into the project library. */
+  uploadFile: (id: string, file: File) => Promise<ProjectFile | null>
   removeFile: (id: string, fileId: string) => Promise<void>
   renameFile: (id: string, fileId: string, name: string) => Promise<void>
 
@@ -87,24 +90,29 @@ export const useProjects = create<ProjectStore>((set, get) => ({
   async renameProject(id, name) {
     const trimmed = name.trim()
     if (!trimmed) return
+    const prev = get().projects.find((p) => p.id === id)
     set((s) => ({
       projects: s.projects.map((p) => (p.id === id ? { ...p, name: trimmed, updatedAt: Date.now() } : p)),
     }))
     try {
       await projectsApi.update(id, { name: trimmed })
-    } catch {
-      /* ignore */
+    } catch (e) {
+      // Roll back the optimistic name and surface the failure.
+      if (prev) set((s) => ({ projects: s.projects.map((p) => (p.id === id ? prev : p)) }))
+      toast.error(errorMessage(e, 'Failed to rename project'))
     }
   },
 
   async updateProject(id, patch) {
+    const prev = get().projects.find((p) => p.id === id)
     set((s) => ({
       projects: s.projects.map((p) => (p.id === id ? { ...p, ...patch, updatedAt: Date.now() } : p)),
     }))
     try {
-      await projectsApi.update(id, patch as Partial<ApiProject>)
-    } catch {
-      /* ignore */
+      await projectsApi.update(id, toApiPatch(patch))
+    } catch (e) {
+      if (prev) set((s) => ({ projects: s.projects.map((p) => (p.id === id ? prev : p)) }))
+      toast.error(errorMessage(e, 'Failed to update project'))
     }
   },
 
@@ -116,17 +124,22 @@ export const useProjects = create<ProjectStore>((set, get) => ({
     }))
     try {
       await projectsApi.update(id, { pinned: next })
-    } catch {
-      /* ignore */
+    } catch (e) {
+      // Roll back the toggle on failure.
+      set((s) => ({ projects: s.projects.map((p) => (p.id === id ? { ...p, pinned: !next } : p)) }))
+      toast.error(errorMessage(e, 'Failed to update pin'))
     }
   },
 
   async deleteProject(id) {
+    const prev = get().projects
     set((s) => ({ projects: s.projects.filter((p) => p.id !== id) }))
     try {
       await projectsApi.remove(id)
-    } catch {
-      /* ignore */
+    } catch (e) {
+      // Restore the removed project so the UI doesn't lie about the delete.
+      set({ projects: prev })
+      toast.error(errorMessage(e, 'Failed to delete project'))
     }
   },
 
@@ -156,7 +169,23 @@ export const useProjects = create<ProjectStore>((set, get) => ({
     }
   },
 
+  async uploadFile(id, file) {
+    try {
+      const doc = await projectsApi.uploadDoc(id, file)
+      const f = toLocalFile(doc)
+      set((s) => ({
+        projects: s.projects.map((p) =>
+          p.id === id ? { ...p, files: [f, ...p.files], updatedAt: Date.now() } : p,
+        ),
+      }))
+      return f
+    } catch {
+      return null
+    }
+  },
+
   async removeFile(id, fileId) {
+    const prev = get().projects.find((p) => p.id === id)
     set((s) => ({
       projects: s.projects.map((p) =>
         p.id === id ? { ...p, files: p.files.filter((f) => f.id !== fileId), updatedAt: Date.now() } : p,
@@ -164,14 +193,16 @@ export const useProjects = create<ProjectStore>((set, get) => ({
     }))
     try {
       await projectsApi.removeDoc(id, fileId)
-    } catch {
-      /* ignore */
+    } catch (e) {
+      if (prev) set((s) => ({ projects: s.projects.map((p) => (p.id === id ? prev : p)) }))
+      toast.error(errorMessage(e, 'Failed to remove file'))
     }
   },
 
   async renameFile(id, fileId, name) {
     const trimmed = name.trim()
     if (!trimmed) return
+    const prev = get().projects.find((p) => p.id === id)
     set((s) => ({
       projects: s.projects.map((p) =>
         p.id === id
@@ -185,8 +216,9 @@ export const useProjects = create<ProjectStore>((set, get) => ({
     }))
     try {
       await projectsApi.renameDoc(id, fileId, trimmed)
-    } catch {
-      /* best-effort — local state already updated */
+    } catch (e) {
+      if (prev) set((s) => ({ projects: s.projects.map((p) => (p.id === id ? prev : p)) }))
+      toast.error(errorMessage(e, 'Failed to rename file'))
     }
   },
 
@@ -204,10 +236,21 @@ async function toLocalProject(p: ApiProject, docs: ApiDocument[]): Promise<Proje
     files: docs.map(toLocalFile),
     accent: (p.accent as ProjectAccent) || ACCENT_FALLBACK,
     emoji: p.emoji || undefined,
+    autoAddUploads: p.auto_add_uploads,
     pinned: p.pinned,
     createdAt: p.created_at * 1000,
     updatedAt: p.updated_at * 1000,
   }
+}
+
+/** Translate the local camelCase patch into the backend's snake_case wire shape. */
+function toApiPatch(
+  patch: Partial<Pick<Project, 'name' | 'description' | 'instructions' | 'accent' | 'emoji' | 'autoAddUploads'>>,
+): Partial<ApiProject> {
+  const { autoAddUploads, ...rest } = patch
+  const out: Partial<ApiProject> = { ...(rest as Partial<ApiProject>) }
+  if (autoAddUploads !== undefined) out.auto_add_uploads = autoAddUploads
+  return out
 }
 
 function toLocalFile(d: ApiDocument): ProjectFile {

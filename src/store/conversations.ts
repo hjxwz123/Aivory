@@ -82,6 +82,7 @@ interface ConversationStore {
   /** Edit a user message's text IN PLACE — overwrite, no new branch, no
    *  regeneration (§4.15 "save" vs "save & resend"). */
   editMessageInPlace: (conversationId: string, messageId: string, text: string) => Promise<void>
+  setFeedback: (conversationId: string, messageId: string, next: 'like' | 'dislike' | '') => Promise<void>
   abortStream: (assistantMessageId: string) => void
 
   getConversation: (id: string) => Conversation | undefined
@@ -358,8 +359,13 @@ export const useConversations = create<ConversationStore>((set, get) => ({
         }
       }),
     }))
+    // Hoisted out of the try so the catch below targets the message by its
+    // CURRENT id: after `message_start` the message is re-keyed to the backend
+    // id, and a mid-stream network drop must patch THAT id (else streaming:true
+    // never clears and the spinner spins forever). Falls back to the local id
+    // for a failure before message_start (§ stream-error E7).
+    let serverAssistantId = assistantId
     try {
-      let serverAssistantId = assistantId
       let lastCitations: Citation[] = []
       const toolCallsById = new Map<string, ToolCall>()
       const toolInputBuffers = new Map<string, string>()
@@ -520,6 +526,7 @@ export const useConversations = create<ConversationStore>((set, get) => ({
               url: c.url,
               domain: safeDomain(c.url),
               snippet: c.snippet,
+              source: c.source,
             }
             lastCitations = [...lastCitations, cit]
             updateAssistant(set, input.conversationId, serverAssistantId, (m) => ({
@@ -539,6 +546,7 @@ export const useConversations = create<ConversationStore>((set, get) => ({
             updateAssistant(set, input.conversationId, serverAssistantId, (m) => ({
               ...m,
               streaming: false,
+              moderation: ev.stop_reason === 'content_moderation' ? true : m.moderation,
             }))
             break
         }
@@ -547,12 +555,18 @@ export const useConversations = create<ConversationStore>((set, get) => ({
       // user/assistant siblings collapse and the `< n/m >` picker appears.
       await get().reloadActivePath(input.conversationId)
     } catch (e) {
-      updateAssistant(set, input.conversationId, assistantId, (m) => ({
+      // Target the CURRENT server id so the patch lands even after the
+      // message_start re-key; always clear streaming so the spinner stops.
+      updateAssistant(set, input.conversationId, serverAssistantId, (m) => ({
         ...m,
         streaming: false,
         content:
           m.content + (m.content ? '\n\n' : '') + `*Stream interrupted: ${errorMessage(e)}*`,
       }))
+      // Reconcile to the canonical tree path, same as a clean end — once nothing
+      // is still streaming this collapses optimistic siblings and surfaces the
+      // `< n/m >` picker (no-op if the conversation is gone).
+      await get().reloadActivePath(input.conversationId)
     } finally {
       streamControllers.delete(assistantId)
     }
@@ -562,19 +576,23 @@ export const useConversations = create<ConversationStore>((set, get) => ({
     const abort = new AbortController()
     const conv = get().conversations.find((c) => c.id === conversationId)
     streamControllers.set(assistantId + '-regen', abort)
+    // §4.15: regenerate forks at the assistant — the new reply is a SIBLING
+    // of the old one under the same user turn, not an append. Truncate the
+    // visible path to that user parent (dropping the old reply and anything
+    // below it) before showing the streaming placeholder, so the screen never
+    // stacks two replies. The post-stream reconcile then restores the old
+    // sibling behind the `< n/m >` picker.
+    const oldAssistant = conv?.messages.find((m) => m.id === assistantId)
+    const userParentId = oldAssistant?.parentId
+    // Carry the original turn's mode so regenerating a deep-research reply
+    // re-runs the research engine (and shows the panel) instead of downgrading.
+    const mode = oldAssistant?.mode
+    const placeholderId = uid('m')
+    // Hoisted so the catch can clear the streaming placeholder by its CURRENT
+    // id (re-keyed to the backend id after message_start), mirroring sendMessage
+    // (§ stream-error E7).
+    let serverAssistantId = placeholderId
     try {
-      // §4.15: regenerate forks at the assistant — the new reply is a SIBLING
-      // of the old one under the same user turn, not an append. Truncate the
-      // visible path to that user parent (dropping the old reply and anything
-      // below it) before showing the streaming placeholder, so the screen never
-      // stacks two replies. The post-stream reconcile then restores the old
-      // sibling behind the `< n/m >` picker.
-      const oldAssistant = conv?.messages.find((m) => m.id === assistantId)
-      const userParentId = oldAssistant?.parentId
-      // Carry the original turn's mode so regenerating a deep-research reply
-      // re-runs the research engine (and shows the panel) instead of downgrading.
-      const mode = oldAssistant?.mode
-      const placeholderId = uid('m')
       const placeholder: Message = {
         id: placeholderId,
         role: 'assistant',
@@ -593,7 +611,6 @@ export const useConversations = create<ConversationStore>((set, get) => ({
           return { ...c, messages: [...base, placeholder] }
         }),
       }))
-      let serverAssistantId = placeholderId
       const toolCallsById = new Map<string, ToolCall>()
       const toolInputBuffers = new Map<string, string>()
       let lastCitations: Citation[] = []
@@ -665,7 +682,7 @@ export const useConversations = create<ConversationStore>((set, get) => ({
             const c = ev.citation
             lastCitations = [
               ...lastCitations,
-              { id: c.id, index: c.index, title: c.title, url: c.url, domain: safeDomain(c.url), snippet: c.snippet },
+              { id: c.id, index: c.index, title: c.title, url: c.url, domain: safeDomain(c.url), snippet: c.snippet, source: c.source },
             ]
             updateAssistant(set, conversationId, serverAssistantId, (m) => ({
               ...m,
@@ -714,7 +731,11 @@ export const useConversations = create<ConversationStore>((set, get) => ({
             }))
             break
           case 'done':
-            updateAssistant(set, conversationId, serverAssistantId, (m) => ({ ...m, streaming: false }))
+            updateAssistant(set, conversationId, serverAssistantId, (m) => ({
+              ...m,
+              streaming: false,
+              moderation: ev.stop_reason === 'content_moderation' ? true : m.moderation,
+            }))
             break
           case 'error':
             updateAssistant(set, conversationId, serverAssistantId, (m) => ({
@@ -727,6 +748,18 @@ export const useConversations = create<ConversationStore>((set, get) => ({
       }
       // Reconcile so the freshly generated reply and the previous one show up as
       // siblings with a `< n/m >` picker instead of two stacked bubbles (§4.15).
+      await get().reloadActivePath(conversationId)
+    } catch (e) {
+      // A mid-stream drop on regenerate must clear the placeholder's
+      // streaming state (by its CURRENT id) so the spinner stops, surface a
+      // toast, and reconcile to the canonical path — mirroring sendMessage
+      // (§ stream-error E7).
+      updateAssistant(set, conversationId, serverAssistantId, (m) => ({
+        ...m,
+        streaming: false,
+        content: m.content + (m.content ? '\n\n' : '') + `*Regeneration interrupted: ${errorMessage(e)}*`,
+      }))
+      toast.error(errorMessage(e, 'Regeneration failed'))
       await get().reloadActivePath(conversationId)
     } finally {
       streamControllers.delete(assistantId + '-regen')
@@ -749,6 +782,26 @@ export const useConversations = create<ConversationStore>((set, get) => ({
       await conversationsApi.editMessage(conversationId, messageId, text)
     } catch {
       /* keep the optimistic copy if the PATCH fails */
+    }
+  },
+
+  async setFeedback(conversationId, messageId, next) {
+    // Optimistically reflect the rating (mutually exclusive); revert on failure.
+    const prev = get()
+      .conversations.find((c) => c.id === conversationId)
+      ?.messages.find((m) => m.id === messageId)
+    const prevLiked = prev?.liked ?? false
+    const prevDisliked = prev?.disliked ?? false
+    updateAssistant(set, conversationId, messageId, (m) => ({
+      ...m,
+      liked: next === 'like',
+      disliked: next === 'dislike',
+    }))
+    try {
+      await conversationsApi.feedback(conversationId, messageId, next)
+    } catch {
+      updateAssistant(set, conversationId, messageId, (m) => ({ ...m, liked: prevLiked, disliked: prevDisliked }))
+      toast.error('Failed to save feedback')
     }
   },
 
@@ -1007,6 +1060,7 @@ export function toLocalMessage(m: ApiMessage): Message {
             url: c.url,
             domain: safeDomain(c.url),
             snippet: c.snippet,
+            source: c.source,
           }))
         : undefined,
     attachments:
@@ -1022,6 +1076,14 @@ export function toLocalMessage(m: ApiMessage): Message {
     branchIndex: m.branch_index,
     branchCount: m.branch_count,
     siblings: m.siblings,
+    liked: m.feedback === 'like',
+    disliked: m.feedback === 'dislike',
+    moderation: m.stop_reason === 'content_moderation',
+    refused:
+      m.stop_reason === 'content_moderation' ||
+      m.stop_reason === 'content_filter' ||
+      m.stop_reason === 'refusal' ||
+      m.stop_reason === 'safety',
   }
 }
 

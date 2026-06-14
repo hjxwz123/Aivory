@@ -1,0 +1,39 @@
+{
+  "intro": {
+    "eyebrow": "Bienvenue sur Aurelia",
+    "title": "Un espace plus serein pour penser.",
+    "subtitle": "Prenez quelques secondes pour faire d'Aurelia la vôtre. Vous pourrez modifier tout cela plus tard dans les Paramètres.",
+    "points": {
+      "write": "Une écriture qui pense avec vous",
+      "research": "Des recherches ancrées dans de vraies sources",
+      "own": "Votre conversation — vous gardez le contrôle"
+    }
+  },
+  "config": {
+    "title": "Personnalisez-la",
+    "subtitle": "Réglez quelques préférences, ou passez et lancez-vous directement."
+  },
+  "fields": {
+    "language": "Langue",
+    "theme": "Apparence",
+    "accent": "Couleur d'accent",
+    "chatStyle": "Style de réponse",
+    "chatStyleBody": "Quel niveau de détail les réponses doivent-elles avoir par défaut ?",
+    "memory": "Mémoire",
+    "memoryBody": "Laissez Aurelia retenir des détails utiles au fil de vos discussions."
+  },
+  "theme": {
+    "light": "Clair",
+    "dark": "Sombre",
+    "system": "Système"
+  },
+  "chatStyle": {
+    "concise": "Concis",
+    "balanced": "Équilibré",
+    "detailed": "Détaillé"
+  },
+  "actions": {
+    "skip": "Passer pour l'instant",
+    "start": "Commencer"
+  }
+}

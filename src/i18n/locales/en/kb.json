@@ -30,6 +30,7 @@
     "deleteConfirm": "Delete this library and all its documents?",
     "uploaded": "Document uploaded",
     "uploadFailed": "Upload failed",
+    "failedReason": "Indexing failed. Remove the document and upload it again.",
     "status": {
       "pending": "Queued",
       "parsing": "Parsing",

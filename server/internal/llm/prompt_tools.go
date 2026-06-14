@@ -208,8 +208,11 @@ func RunPromptToolLoop(
 			return full.String(), blocks, usage, citations, nil
 		}
 
-		// Got a tool call — emit events and execute.
-		onEvent(SseEvent{Type: "tool_start", Name: call.Name, Input: call.Arguments})
+		// Got a tool call — emit events and execute. A stable per-round id pairs
+		// tool_start↔tool_result so the frontend trace clears the "running" dot
+		// (the result handler drops events with no id). One tool call per round.
+		toolID := fmt.Sprintf("pt_%d", i)
+		onEvent(SseEvent{Type: "tool_start", ID: toolID, Name: call.Name, Input: call.Arguments})
 		var (
 			output  string
 			cites   []Citation
@@ -229,11 +232,12 @@ func RunPromptToolLoop(
 			summaryStatus = "error"
 		}
 		citations = append(citations, cites...)
-		onEvent(SseEvent{Type: "tool_result", Name: call.Name, Summary: truncate(output, 240), Status: summaryStatus})
+		onEvent(SseEvent{Type: "tool_result", ID: toolID, Name: call.Name, Summary: truncate(output, 240), Status: summaryStatus})
 
 		blocks = append(blocks, UnifiedBlock{
 			Kind:     "tool_call",
 			ToolName: call.Name,
+			ToolID:   toolID,
 			Input:    call.Arguments,
 			Summary:  truncate(output, 240),
 		})

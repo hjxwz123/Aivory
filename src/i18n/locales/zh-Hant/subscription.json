@@ -1,0 +1,16 @@
+{
+  "back": "返回對話",
+  "title": "訂閱",
+  "subtitle": "你所在的使用者組決定了你可以使用哪些模型以及多少額度。",
+  "currentPlan": "當前使用者組",
+  "free": "免費",
+  "allPlans": "全部使用者組",
+  "current": "當前",
+  "youreOnThis": "你正在使用此使用者組",
+  "switchCta": "切換",
+  "upgradeCta": "升級",
+  "upgradeTitle": "切換到 {{name}}",
+  "upgradeBody": "使用者組的變更由管理員處理。如需切換到此使用者組，請聯絡工作區管理員。",
+  "priceFree": "免費",
+  "loadFailed": "載入使用者組失敗"
+}

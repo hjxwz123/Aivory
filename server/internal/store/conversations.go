@@ -312,7 +312,7 @@ func ListMessages(ctx context.Context, db *sql.DB, convID, leafID string) ([]Mes
 // branch — used by clients that render the full tree (sibling counts/branch
 // switching). Sorted by created_at ascending.
 func ListAllMessages(ctx context.Context, db *sql.DB, convID string) ([]Message, error) {
-	rows, err := db.QueryContext(ctx, `SELECT id, conversation_id, COALESCE(parent_id,''), role, provider, model_id, blocks, COALESCE(raw,''), COALESCE(stop_reason,''), attachments, citations, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost, currency, status, error, created_at FROM messages WHERE conversation_id=? ORDER BY created_at ASC`, convID)
+	rows, err := db.QueryContext(ctx, `SELECT id, conversation_id, COALESCE(parent_id,''), role, provider, model_id, blocks, COALESCE(raw,''), COALESCE(stop_reason,''), attachments, citations, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost, currency, status, error, COALESCE(feedback,''), created_at FROM messages WHERE conversation_id=? ORDER BY created_at ASC`, convID)
 	if err != nil {
 		return nil, err
 	}
@@ -330,7 +330,7 @@ func ListAllMessages(ctx context.Context, db *sql.DB, convID string) ([]Message,
 
 // GetMessage returns one row.
 func GetMessage(ctx context.Context, db *sql.DB, id string) (*Message, error) {
-	row := db.QueryRowContext(ctx, `SELECT id, conversation_id, COALESCE(parent_id,''), role, provider, model_id, blocks, COALESCE(raw,''), COALESCE(stop_reason,''), attachments, citations, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost, currency, status, error, created_at FROM messages WHERE id=?`, id)
+	row := db.QueryRowContext(ctx, `SELECT id, conversation_id, COALESCE(parent_id,''), role, provider, model_id, blocks, COALESCE(raw,''), COALESCE(stop_reason,''), attachments, citations, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost, currency, status, error, COALESCE(feedback,''), created_at FROM messages WHERE id=?`, id)
 	m, err := scanMessage(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -344,7 +344,7 @@ func GetMessage(ctx context.Context, db *sql.DB, id string) (*Message, error) {
 func scanMessage(s scanner) (Message, error) {
 	var m Message
 	var blocks, raw, atts, cites string
-	if err := s.Scan(&m.ID, &m.ConversationID, &m.ParentID, &m.Role, &m.Provider, &m.ModelID, &blocks, &raw, &m.StopReason, &atts, &cites, &m.InputTokens, &m.OutputTokens, &m.CacheReadTokens, &m.CacheWriteTokens, &m.Cost, &m.Currency, &m.Status, &m.Error, &m.CreatedAt); err != nil {
+	if err := s.Scan(&m.ID, &m.ConversationID, &m.ParentID, &m.Role, &m.Provider, &m.ModelID, &blocks, &raw, &m.StopReason, &atts, &cites, &m.InputTokens, &m.OutputTokens, &m.CacheReadTokens, &m.CacheWriteTokens, &m.Cost, &m.Currency, &m.Status, &m.Error, &m.Feedback, &m.CreatedAt); err != nil {
 		return m, err
 	}
 	m.Blocks = json.RawMessage(orDefault(blocks, "[]"))

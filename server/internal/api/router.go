@@ -47,7 +47,7 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("POST", "/api/auth/register", rateLimitedIP(d, "auth", 5, 60*time.Second, wrap(d, registerHandler)))
 	mux.handle("POST", "/api/auth/login", rateLimitedIP(d, "auth", 10, 60*time.Second, wrap(d, loginHandler)))
 	mux.handle("POST", "/api/auth/login/2fa", rateLimitedIP(d, "auth", 10, 60*time.Second, wrap(d, login2faHandler)))
-	mux.handle("POST", "/api/auth/logout", wrap(d, logoutHandler))
+	mux.handle("POST", "/api/auth/logout", rateLimitedIP(d, "auth", 30, 60*time.Second, wrap(d, logoutHandler)))
 	mux.handle("POST", "/api/auth/refresh", rateLimitedIP(d, "auth", 30, 60*time.Second, wrap(d, refreshHandler)))
 	mux.handle("POST", "/api/auth/verify-email", rateLimitedIP(d, "auth", 20, 60*time.Second, wrap(d, verifyEmailHandler)))
 	mux.handle("POST", "/api/auth/send-code", rateLimitedIP(d, "auth", 3, 60*time.Second, wrap(d, sendCodeHandler)))
@@ -58,14 +58,15 @@ func NewRouter(d Deps) http.Handler {
 	})
 	mux.handle("GET", "/api/public/signup-open", wrap(d, signupOpenHandler))
 	mux.handle("GET", "/api/public/oauth-providers", wrap(d, oauthProvidersPublicHandler))
-	// Public read-only conversation share (token in the path; no auth).
-	mux.handle("GET", "/api/public/shared/:token", wrap(d, publicSharedHandler))
+	// Public read-only conversation share (token in the path; no auth). Rate
+	// limited (§D1) so the token space can't be swept even though it's now 192-bit.
+	mux.handle("GET", "/api/public/shared/:token", rateLimitedIP(d, "share", 60, 60*time.Second, wrap(d, publicSharedHandler)))
 
 	// OAuth / social login. /start is a top-level browser navigation; /callback
 	// is hit by the provider redirect (GET) or Apple's form_post (POST).
 	mux.handle("GET", "/api/auth/oauth/:id/start", rateLimitedIP(d, "auth", 20, 60*time.Second, wrap(d, oauthStartHandler)))
-	mux.handle("GET", "/api/auth/oauth/:id/callback", wrap(d, oauthCallbackHandler))
-	mux.handle("POST", "/api/auth/oauth/:id/callback", wrap(d, oauthCallbackHandler))
+	mux.handle("GET", "/api/auth/oauth/:id/callback", rateLimitedIP(d, "auth", 20, 60*time.Second, wrap(d, oauthCallbackHandler)))
+	mux.handle("POST", "/api/auth/oauth/:id/callback", rateLimitedIP(d, "auth", 20, 60*time.Second, wrap(d, oauthCallbackHandler)))
 
 	// Authenticated endpoints.
 	mux.handle("GET", "/api/me", requireAuth(d, meHandler))
@@ -83,6 +84,13 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("POST", "/api/me/memories", requireAuth(d, createMemoryHandler))
 	mux.handle("PATCH", "/api/me/memories/:id", requireAuth(d, updateMemoryHandler))
 	mux.handle("DELETE", "/api/me/memories/:id", requireAuth(d, deleteMemoryHandler))
+
+	// Active sessions (§ account → active sessions). Registered under /api/auth
+	// so the refresh-token cookie (scoped to /api/auth) is sent — that's how we
+	// detect which session is the current one.
+	mux.handle("GET", "/api/auth/sessions", requireAuth(d, listSessionsHandler))
+	mux.handle("POST", "/api/auth/sessions/revoke-others", requireAuth(d, revokeOtherSessionsHandler))
+	mux.handle("POST", "/api/auth/sessions/:jti/revoke", requireAuth(d, revokeSessionHandler))
 
 	mux.handle("GET", "/api/models", requireAuth(d, listModelsHandler))
 	mux.handle("GET", "/api/image-models", requireAuth(d, listImageModelsHandler))
@@ -166,6 +174,7 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("GET", "/api/admin/conversations/:id/messages", requireAdmin(d, listConversationMessagesAdmin))
 	mux.handle("DELETE", "/api/admin/conversations/:id", requireAdmin(d, deleteConversationAdmin))
 	mux.handle("GET", "/api/admin/usage", requireAdmin(d, usageReportAdmin))
+	mux.handle("GET", "/api/admin/analytics", requireAdmin(d, analyticsAdmin))
 	mux.handle("GET", "/api/admin/oauth-providers", requireAdmin(d, listOAuthProvidersAdmin))
 	mux.handle("POST", "/api/admin/oauth-providers", requireAdmin(d, createOAuthProviderAdmin))
 	mux.handle("PATCH", "/api/admin/oauth-providers/:id", requireAdmin(d, updateOAuthProviderAdmin))

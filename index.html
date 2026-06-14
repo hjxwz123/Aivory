@@ -9,12 +9,8 @@
     <meta name="theme-color" content="#13111A" media="(prefers-color-scheme: dark)" />
     <meta name="description" content="Aurelia — a thoughtful AI companion for writing, reasoning, and exploration." />
     <title>Aurelia — A thoughtful AI companion</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT,WONK@9..144,300..700,0..100,0..1&family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap"
-      rel="stylesheet"
-    />
+    <!-- Fonts are self-hosted via @fontsource (bundled in the app) so they load
+         without the Google Fonts CDN, which is unreachable in mainland China. -->
     <script>
       // Pre-paint theme + accent to avoid FOUC. Same allowlist as
       // src/types/settings.ts (AccentPref); fallback "violet" matches the
@@ -39,6 +35,8 @@
           var fs = ap.fontSize === 'sm' ? 'sm' : ap.fontSize === 'lg' ? 'lg' : 'md'
           document.documentElement.dataset.density = density
           document.documentElement.dataset.fontsize = fs
+          var fonts = ['default', 'inter', 'system', 'serif']
+          document.documentElement.dataset.font = fonts.indexOf(ap.font) >= 0 ? ap.font : 'default'
         } catch (_) {}
       })()
     </script>

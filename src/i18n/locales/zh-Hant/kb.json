@@ -1,0 +1,54 @@
+{
+  "title": "知識庫",
+  "lead": "長期保留的知識庫,所有對話都可以檢索。文件上傳一次,各處都能引用。",
+  "new": "新建知識庫",
+  "emptyTitle": "暫無知識庫",
+  "emptyBody": "知識庫把一組文件繫結到一個嵌入模型。先建一個開始使用。",
+  "createFirst": "建立第一個知識庫",
+  "stats": {
+    "dim": "{{dim}} 維向量",
+    "created": "建立於 {{when}}"
+  },
+  "dialog": {
+    "title": "新建知識庫",
+    "body": "嵌入模型在你上傳第一個文件後鎖定 — 它決定向量空間。",
+    "name": "名稱",
+    "namePlaceholder": "公司寫作風格指南",
+    "description": "描述",
+    "embeddingModel": "嵌入模型",
+    "pickModel": "選擇一個模型",
+    "create": "建立",
+    "created": "知識庫已建立",
+    "nameRequired": "請填寫名稱"
+  },
+  "detail": {
+    "uploadButton": "上傳文件",
+    "noDocs": "尚無文件",
+    "noDocsBody": "上傳 PDF / Markdown / 純文字檔案,Aurelia 會非同步建索引以供檢索。",
+    "rename": "重新命名",
+    "delete": "刪除知識庫",
+    "deleteConfirm": "刪除這個知識庫及其所有文件?",
+    "uploaded": "文件已上傳",
+    "uploadFailed": "上傳失敗",
+    "failedReason": "索引失敗。請移除該文件後重新上傳。",
+    "status": {
+      "pending": "排隊中",
+      "parsing": "解析中",
+      "embedding": "嵌入中",
+      "ready": "就緒",
+      "failed": "失敗"
+    },
+    "tableHeaders": {
+      "filename": "檔案",
+      "status": "狀態",
+      "chunks": "切片數",
+      "added": "新增時間"
+    },
+    "removeDocConfirm": "從這個知識庫移除\"{{name}}\"?",
+    "removed": "已移除文件",
+    "tabPaste": "貼上文字",
+    "tabUpload": "上傳檔案",
+    "contentLabel": "內容",
+    "clickToChoose": "點選選擇檔案"
+  }
+}

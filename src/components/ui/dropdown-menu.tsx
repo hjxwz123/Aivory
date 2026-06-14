@@ -1,5 +1,5 @@
 import * as DropdownPrimitive from '@radix-ui/react-dropdown-menu'
-import { Check } from 'lucide-react'
+import { Check, ChevronRight } from 'lucide-react'
 import { forwardRef, type ComponentPropsWithoutRef, type ElementRef, type HTMLAttributes } from 'react'
 import { cn } from '@/lib/utils'
 
@@ -57,6 +57,37 @@ export const DropdownMenuItem = forwardRef<
       )}
       {...rest}
     />
+  )
+})
+
+export const DropdownMenuSubTrigger = forwardRef<
+  ElementRef<typeof DropdownPrimitive.SubTrigger>,
+  ComponentPropsWithoutRef<typeof DropdownPrimitive.SubTrigger>
+>(function DropdownMenuSubTrigger({ className, children, ...rest }, ref) {
+  return (
+    <DropdownPrimitive.SubTrigger
+      ref={ref}
+      className={cn(itemClass, 'data-[state=open]:bg-[var(--color-bg-muted)]', className)}
+      {...rest}
+    >
+      {children}
+      <ChevronRight size={14} aria-hidden className="ml-auto text-[var(--color-fg-subtle)]" />
+    </DropdownPrimitive.SubTrigger>
+  )
+})
+
+export const DropdownMenuSubContent = forwardRef<
+  ElementRef<typeof DropdownPrimitive.SubContent>,
+  ComponentPropsWithoutRef<typeof DropdownPrimitive.SubContent>
+>(function DropdownMenuSubContent({ className, ...rest }, ref) {
+  return (
+    <DropdownPrimitive.Portal>
+      <DropdownPrimitive.SubContent
+        ref={ref}
+        className={cn(menuClass, 'max-h-[min(60vh,22rem)] overflow-y-auto', className)}
+        {...rest}
+      />
+    </DropdownPrimitive.Portal>
   )
 })
 

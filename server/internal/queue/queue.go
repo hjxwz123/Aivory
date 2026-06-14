@@ -62,7 +62,7 @@ func (q *InProcess) Enqueue(name string, fn Job) {
 	default:
 		// Backpressure fallback.
 		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 			defer cancel()
 			if err := fn(ctx); err != nil {
 				q.logger.Printf("queue(%s): %v", name, err)
@@ -78,7 +78,11 @@ func (q *InProcess) worker() {
 		case <-q.closed:
 			return
 		case j := <-q.jobs:
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			// 30 min ceiling: document ingest can run a MinerU OCR job that polls
+			// up to 20 min (parser.go), so the job context must outlast it or a
+			// large scan can never finish. There are 4 workers, so one long ingest
+			// doesn't starve title/memory jobs.
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 			if err := j.fn(ctx); err != nil {
 				q.logger.Printf("queue(%s): %v", j.name, err)
 			}

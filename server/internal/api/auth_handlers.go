@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -103,7 +104,7 @@ func registerHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"verification_required": true, "email": req.Email})
 		return
 	}
-	finaliseSession(d, w, user)
+	finaliseSession(d, w, r, user, 0)
 }
 
 // sendCodeHandler resends a 6-digit verification code for a pending account.
@@ -175,7 +176,7 @@ func verifyEmailHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	user.Status = "active"
-	finaliseSession(d, w, user)
+	finaliseSession(d, w, r, user, 0)
 }
 
 // forgotPasswordHandler sends a 6-digit reset code to the email.
@@ -289,7 +290,7 @@ func loginHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"totp_required": true, "ticket": ticket})
 		return
 	}
-	finaliseSession(d, w, user)
+	finaliseSession(d, w, r, user, 0)
 }
 
 // logoutHandler clears the cookies. Also revokes the refresh token if present.
@@ -326,11 +327,18 @@ func refreshHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 401, errAccountBlocked)
 		return
 	}
-	finaliseSession(d, w, user)
+	// §A2 refresh-token rotation: revoke the presented jti before minting the
+	// replacement so a captured refresh token is single-use and can't be replayed
+	// for its full 30-day TTL. (finaliseSession issues a fresh jti below.)
+	// Carry the original sign-in time forward so the session keeps one stable
+	// "signed in" timestamp across rotations instead of resetting every refresh.
+	createdAt := store.RefreshTokenCreatedAt(r.Context(), d.DB, claims.ID)
+	_ = store.RevokeRefreshToken(r.Context(), d.DB, claims.ID)
+	finaliseSession(d, w, r, user, createdAt)
 }
 
-func finaliseSession(d Deps, w http.ResponseWriter, user *store.User) {
-	access, exp, err := issueSessionCookies(d, w, user)
+func finaliseSession(d Deps, w http.ResponseWriter, r *http.Request, user *store.User, inheritCreatedAt int64) {
+	access, exp, err := issueSessionCookies(d, w, r, user, inheritCreatedAt)
 	if err != nil {
 		writeError(w, 500, err)
 		return
@@ -339,10 +347,12 @@ func finaliseSession(d Deps, w http.ResponseWriter, user *store.User) {
 }
 
 // issueSessionCookies mints the access + refresh tokens, persists the refresh
-// jti, and writes both cookies. Shared by finaliseSession (which then returns
-// JSON) and the OAuth callback (which redirects). Returns the access token and
-// its expiry so the JSON path can echo them.
-func issueSessionCookies(d Deps, w http.ResponseWriter, user *store.User) (string, time.Time, error) {
+// jti (with the request's device/network context), and writes both cookies.
+// Shared by finaliseSession (which then returns JSON) and the OAuth callback
+// (which redirects). inheritCreatedAt carries the original sign-in time across
+// refresh rotation (0 = a fresh sign-in). Returns the access token and its
+// expiry so the JSON path can echo them.
+func issueSessionCookies(d Deps, w http.ResponseWriter, r *http.Request, user *store.User, inheritCreatedAt int64) (string, time.Time, error) {
 	access, exp, err := d.Auth.IssueAccess(user.ID, user.Role, user.TokenVer)
 	if err != nil {
 		return "", time.Time{}, err
@@ -351,11 +361,50 @@ func issueSessionCookies(d Deps, w http.ResponseWriter, user *store.User) (strin
 	if err != nil {
 		return "", time.Time{}, err
 	}
-	_ = store.SaveRefreshToken(context.Background(), d.DB, jti, user.ID, refreshExp)
+	ip := clientIP(r)
+	_ = store.SaveRefreshToken(context.Background(), d.DB, jti, user.ID, refreshExp, store.SessionMeta{
+		IP:        ip,
+		UserAgent: r.UserAgent(),
+		Location:  sessionLocation(r, ip),
+		CreatedAt: inheritCreatedAt,
+	})
 
 	setCookie(w, "auth_token", access, exp, false)
 	setCookie(w, "refresh_token", refresh, refreshExp, true)
 	return access, exp, nil
+}
+
+// sessionLocation derives a best-effort human location for the request from the
+// common reverse-proxy geo headers (Cloudflare etc.). We never call an external
+// geo-IP service, so this is empty unless a proxy supplies it; loopback/private
+// peers report a local label so self-hosted setups still show something.
+func sessionLocation(r *http.Request, ip string) string {
+	country := firstHeader(r, "CF-IPCountry", "X-Geo-Country", "X-Country-Code")
+	if country == "XX" || country == "T1" { // Cloudflare sentinels: unknown / Tor
+		country = ""
+	}
+	city := firstHeader(r, "CF-IPCity", "X-Geo-City")
+	switch {
+	case city != "" && country != "":
+		return city + ", " + country
+	case city != "":
+		return city
+	case country != "":
+		return country
+	}
+	if p := net.ParseIP(ip); p != nil && (p.IsLoopback() || p.IsPrivate()) {
+		return "Local network"
+	}
+	return ""
+}
+
+func firstHeader(r *http.Request, names ...string) string {
+	for _, n := range names {
+		if v := strings.TrimSpace(r.Header.Get(n)); v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // externalBaseURL reconstructs the public scheme://host the browser used,

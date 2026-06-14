@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { ArrowLeft, Plus, Trash2, Upload, FileText, Loader2 } from 'lucide-react'
+import { ArrowLeft, Plus, Trash2, Upload, FileText, Loader2, AlertTriangle } from 'lucide-react'
 import { ApiError, kbsApi } from '@/api'
 import type { ApiDocument, ApiKnowledgeBase } from '@/api/types'
 import { api } from '@/api/client'
@@ -41,17 +41,23 @@ export default function KnowledgeBaseDetail() {
   const [tab, setTab] = useState<'paste' | 'upload'>('paste')
   const fileInput = useRef<HTMLInputElement>(null)
 
-  async function load() {
+  // load(silent) refreshes the KB + its docs. Only the FIRST load toggles the
+  // page-level skeleton; the background status poll passes silent=true so the
+  // list refreshes in place without flipping the whole page to "loading…"
+  // every ~2s (which read as a flicker).
+  async function load(silent = false) {
     if (!id) return
-    setLoading(true)
+    if (!silent) setLoading(true)
     try {
       const [list, d] = await Promise.all([kbsApi.list(), kbsApi.listDocs(id)])
       setKB(list.find((k) => k.id === id) ?? null)
       setDocs(d)
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : t('common:common.error'))
+      // A failed background poll shouldn't nag the user — only surface errors
+      // on an explicit (non-silent) load.
+      if (!silent) toast.error(e instanceof ApiError ? e.message : t('common:common.error'))
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }
 
@@ -60,14 +66,14 @@ export default function KnowledgeBaseDetail() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
 
-  // Poll while any document is mid-pipeline.
+  // Poll silently while any document is mid-pipeline.
   useEffect(() => {
     if (!id) return
     const pending = docs.some(
       (d) => d.status === 'pending' || d.status === 'parsing' || d.status === 'embedding',
     )
     if (!pending) return
-    const handle = setInterval(() => void load(), 2200)
+    const handle = setInterval(() => void load(true), 2200)
     return () => clearInterval(handle)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docs, id])
@@ -175,8 +181,13 @@ export default function KnowledgeBaseDetail() {
                     </div>
                     <div className="mt-1 text-[12px] text-[var(--color-fg-subtle)] font-mono">
                       {(d.size_bytes / 1024).toFixed(1)} KB · {d.chunk_count} chunks · {t('kb:stats.created', { when: formatRelativeDate(d.created_at * 1000) })}
-                      {d.error ? ` · ${d.error}` : ''}
                     </div>
+                    {d.status === 'failed' ? (
+                      <p className="mt-1.5 flex items-start gap-1.5 text-[12px] text-[var(--color-danger)] leading-snug">
+                        <AlertTriangle size={12} className="mt-px shrink-0" aria-hidden />
+                        <span>{d.error || t('kb:detail.failedReason')}</span>
+                      </p>
+                    ) : null}
                     {(d.status === 'parsing' || d.status === 'embedding') ? (
                       <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-[var(--color-bg-muted)]">
                         <div className="h-full w-1/3 bg-[var(--color-accent)] animate-[indeterminate_1400ms_linear_infinite]" />
@@ -279,7 +290,8 @@ function StatusBadge({ status, label }: { status: ApiDocument['status']; label: 
     case 'ready':
       return <Badge size="xs" variant="sage">{label}</Badge>
     case 'failed':
-      return <Badge size="xs" variant="neutral">{label}</Badge>
+      // Failed must read as an error, not just "another in-progress state".
+      return <Badge size="xs" variant="danger">{label}</Badge>
     default:
       return <Badge size="xs" variant="neutral">{label}…</Badge>
   }

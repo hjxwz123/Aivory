@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { Composer } from '@/components/chat/composer'
@@ -7,7 +7,7 @@ import { SUGGESTIONS } from '@/data/suggestions'
 import { useConversations } from '@/store/conversations'
 import { useAuth } from '@/store/auth'
 import { useModels } from '@/store/models'
-import type { Attachment } from '@/types/chat'
+import type { Attachment, Conversation } from '@/types/chat'
 
 function fisherYatesPick<T>(arr: T[], count: number): T[] {
   const a = [...arr]
@@ -41,6 +41,24 @@ export default function ChatHome() {
   const [pickedModelId, setPickedModelId] = useState<string | null>(null)
   const modelId = pickedModelId ?? defaultModelId
 
+  // When the user attaches a file BEFORE sending, we must create the
+  // conversation up front so the upload is scoped + RAG-ingested (§4.11.2).
+  // Stash it here so the eventual send reuses the SAME conversation instead of
+  // spawning a second empty one.
+  const pendingConvRef = useRef<Conversation | null>(null)
+
+  // Lazily create (once) the conversation the first attachment will be scoped
+  // to. Idempotent: repeat attaches in the same draft reuse the same id. Does
+  // NOT navigate — that happens on send, so attaching a file doesn't yank the
+  // user off the home screen mid-compose.
+  async function ensureConversation(): Promise<string | undefined> {
+    if (pendingConvRef.current) return pendingConvRef.current.id
+    const conv = await createConversation(modelId)
+    if (!conv) return undefined
+    pendingConvRef.current = conv
+    return conv.id
+  }
+
   const firstName = (user?.name || user?.email?.split('@')[0] || 'friend').split(' ')[0]
   // Greeting depends on the active language; recompute whenever t changes.
   const greeting = useMemo(
@@ -54,7 +72,10 @@ export default function ChatHome() {
     attachments: Attachment[],
     opts: { mode?: 'default' | 'deep-research' | 'canvas'; params?: Record<string, unknown> } = {},
   ) {
-    const conv = await createConversation(modelId)
+    // Reuse the conversation created up front for an attachment (so its uploads
+    // stay scoped/ingested); otherwise create a fresh one now.
+    const conv = pendingConvRef.current ?? (await createConversation(modelId))
+    pendingConvRef.current = null
     if (!conv) return
     navigate(`/chat/${conv.id}`)
     // Fire-and-forget the stream; the ChatThread page will react to store updates.
@@ -87,6 +108,7 @@ export default function ChatHome() {
             modelId={modelId}
             onModelChange={setPickedModelId}
             onSubmit={(text, atts, opts) => void startNew(text, atts, opts)}
+            ensureConversationId={ensureConversation}
             autoFocus
           />
         </div>

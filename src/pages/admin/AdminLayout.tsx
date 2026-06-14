@@ -3,9 +3,9 @@
  * surfaces. Gates access to admins only. Mobile uses a sheet-based nav.
  */
 import { useEffect, useState } from 'react'
-import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { NavLink, Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { ArrowLeft, Boxes, Cpu, FileText, GaugeCircle, KeyRound, Layers, Menu, Mic, Settings2, Sparkles, Users, Wrench } from 'lucide-react'
+import { ArrowLeft, BarChart3, Boxes, Cpu, FileText, GaugeCircle, KeyRound, Layers, Menu, Mic, Settings2, ShieldAlert, Sparkles, Users, Wrench } from 'lucide-react'
 import { useAuth } from '@/store/auth'
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet'
 import { cn } from '@/lib/utils'
@@ -14,17 +14,26 @@ export default function AdminLayout() {
   const navigate = useNavigate()
   const location = useLocation()
   const user = useAuth((s) => s.user)
+  const status = useAuth((s) => s.status)
   const { t } = useTranslation(['admin', 'nav', 'common'])
   const [mobileOpen, setMobileOpen] = useState(false)
-
-  useEffect(() => {
-    if (user && user.role !== 'admin') navigate('/', { replace: true })
-  }, [user, navigate])
 
   // Close mobile nav on route change.
   useEffect(() => {
     setMobileOpen(false)
   }, [location.pathname])
+
+  // Render-gate (not a post-mount effect): a non-admin must never mount the
+  // admin pages or fire their API calls, even for a frame. While auth is still
+  // resolving (hydrate in flight: user null, status idle/authenticating) we
+  // render nothing rather than flashing a redirect.
+  if (user) {
+    if (user.role !== 'admin') return <Navigate to="/" replace />
+  } else if (status === 'unauthenticated') {
+    return <Navigate to="/" replace />
+  } else {
+    return null
+  }
 
   const items = [
     { to: '/admin/channels', icon: Boxes, label: t('admin:channels.title') },
@@ -37,6 +46,8 @@ export default function AdminLayout() {
     { to: '/admin/users', icon: Users, label: t('admin:users.title') },
     { to: '/admin/user-groups', icon: Layers, label: t('admin:groups.title') },
     { to: '/admin/usage', icon: GaugeCircle, label: t('admin:usage.title') },
+    { to: '/admin/analytics', icon: BarChart3, label: t('admin:analytics.title') },
+    { to: '/admin/moderation', icon: ShieldAlert, label: t('admin:moderation.title') },
     { to: '/admin/settings', icon: Settings2, label: t('admin:settings.title') },
   ]
 

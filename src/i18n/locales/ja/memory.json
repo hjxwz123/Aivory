@@ -1,0 +1,37 @@
+{
+  "title": "メモリー",
+  "lead": "Aurelia は会話を通じて、あなたに関する変わらない事実を学びます。ここにあるものは、今後の返信で活用される可能性があります。",
+  "empty": "メモリーがまだありません。",
+  "emptyBody": "何度か会話を重ねると、Aurelia が覚えておく価値のあることを見つけ出します。手動で保存することもできます。",
+  "new": "メモリーを追加",
+  "addDialogTitle": "新しいメモリー",
+  "addDialogBody": "あなたに関する短く変わらない事実。Aurelia はそれを確かな前提として扱います。",
+  "fields": {
+    "text": "メモリー",
+    "slot": "スロット（任意）",
+    "value": "値（任意）"
+  },
+  "actions": {
+    "edit": "編集",
+    "save": "保存",
+    "delete": "忘れる",
+    "markStale": "古い情報にする",
+    "markActive": "有効にする"
+  },
+  "status": {
+    "ACTIVE": "有効",
+    "STALE": "古い情報",
+    "UNKNOWN_CURRENT": "不確か",
+    "HISTORICAL_ONLY": "過去の情報",
+    "QUERY_DEPENDENT": "文脈依存"
+  },
+  "created": "メモリーを保存しました",
+  "updated": "メモリーを更新しました",
+  "deleted": "メモリーを忘れました",
+  "deleteConfirm": "このメモリーを忘れますか？",
+  "filters": {
+    "all": "すべて",
+    "active": "有効",
+    "stale": "古い情報"
+  }
+}

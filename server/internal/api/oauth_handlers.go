@@ -168,10 +168,18 @@ func oauthCallbackHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 			fail("session_error")
 			return
 		}
-		http.Redirect(w, r, base+"/login?twofa_ticket="+url.QueryEscape(ticket), http.StatusFound)
+		// §A10: hand the ticket to the SPA via a short-lived HttpOnly cookie
+		// (Path /api/auth, so it rides only the /auth/login/2fa request) rather
+		// than the URL query string — keeps the bearer secret out of browser
+		// history, Referer headers and access logs. The SPA only sees ?twofa=1.
+		http.SetCookie(w, &http.Cookie{
+			Name: "aurelia_2fa", Value: ticket, Path: "/api/auth",
+			HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode, MaxAge: 300,
+		})
+		http.Redirect(w, r, base+"/login?twofa=1", http.StatusFound)
 		return
 	}
-	if _, _, err := issueSessionCookies(d, w, user); err != nil {
+	if _, _, err := issueSessionCookies(d, w, r, user, 0); err != nil {
 		fail("session_error")
 		return
 	}
@@ -197,13 +205,18 @@ func resolveOAuthUser(ctx context.Context, d Deps, p *store.OAuthProvider, info 
 	}
 
 	if email == "" {
+		// No email from the provider → synthesize a unique, non-colliding
+		// placeholder so the account can still be provisioned.
 		email = p.Kind + "-" + shortHash(p.ID+":"+info.Subject) + "@oauth.local"
-	}
-	// An unverified email that collides with an existing account: link rather
-	// than fail the unique constraint. (Verified collisions were handled above.)
-	if u, err := store.FindUserByEmail(ctx, d.DB, email); err == nil && u != nil {
-		_ = store.LinkOAuthIdentity(ctx, d.DB, p.ID, info.Subject, u.ID, email)
-		return u, nil
+	} else if !info.EmailVerified {
+		// §A1 account-takeover guard: an UNVERIFIED provider email that collides
+		// with an existing account must NOT auto-link — a hostile/misconfigured
+		// (esp. generic oidc) provider could otherwise assert a victim's address
+		// and sign in as them. Refuse; the user can link it from an authenticated
+		// session instead. (Verified collisions were handled above.)
+		if u, err := store.FindUserByEmail(ctx, d.DB, email); err == nil && u != nil {
+			return nil, errors.New("an account with this email already exists — sign in with your password first, then link this provider")
+		}
 	}
 
 	u, err := store.CreateOAuthUser(ctx, d.DB, email, info.Name)

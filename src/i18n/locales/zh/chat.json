@@ -67,7 +67,12 @@
     "ragFullText": "已注入完整文档",
     "ragFullDoc": "全文档上下文",
     "ragNone": "跳过检索",
-    "ragDefault": "已检索来源"
+    "ragDefault": "已检索来源",
+    "moderation": {
+      "title": "内容被拦截",
+      "body": "您的内容可能违反了我们的使用条款。",
+      "cta": "请重新编辑后再试。"
+    }
   },
   "tools": {
     "web_search": "网页搜索",
@@ -75,7 +80,9 @@
     "deep_research": "深度研究"
   },
   "sources": {
-    "label": "来源"
+    "label": "来源",
+    "open": "打开来源",
+    "fromDocuments": "来自你的文档"
   },
   "research": {
     "title": "深度研究",
@@ -151,7 +158,9 @@
     "deleted": "会话已删除",
     "empty": "还没有会话。",
     "starred": "已收藏",
-    "recents": "最近"
+    "recents": "最近",
+    "moveToProject": "移动到项目",
+    "removeFromProject": "移出项目"
   },
   "topbar": {
     "shareTooltip": "分享"
@@ -209,7 +218,8 @@
     "personalization": "个性化",
     "knowledge": "知识库",
     "admin": "管理后台",
-    "subscription": "订阅"
+    "subscription": "订阅",
+    "language": "语言"
   },
   "suggestions": {
     "outline-essay": {

@@ -86,6 +86,14 @@ func Migrate(db *sql.DB) error {
 	addTotpSecret := `ALTER TABLE users ADD COLUMN totp_secret TEXT NOT NULL DEFAULT ''`
 	addTotpEnabled := `ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0`
 	addFeedback := `ALTER TABLE messages ADD COLUMN feedback TEXT NOT NULL DEFAULT ''`
+	// Active-sessions context on refresh tokens (§ account → active sessions).
+	addSessUA := `ALTER TABLE refresh_tokens ADD COLUMN user_agent TEXT NOT NULL DEFAULT ''`
+	addSessIP := `ALTER TABLE refresh_tokens ADD COLUMN ip TEXT NOT NULL DEFAULT ''`
+	addSessLoc := `ALTER TABLE refresh_tokens ADD COLUMN location TEXT NOT NULL DEFAULT ''`
+	addSessSeen := `ALTER TABLE refresh_tokens ADD COLUMN last_seen INTEGER NOT NULL DEFAULT 0`
+	// Per-model content moderation (§ moderation).
+	addModEnabled := `ALTER TABLE models ADD COLUMN moderation_enabled INTEGER NOT NULL DEFAULT 0`
+	addModMode := `ALTER TABLE models ADD COLUMN moderation_mode TEXT NOT NULL DEFAULT 'keyword'`
 	if usePostgres {
 		schema = schemaPGSQL
 		addImageRef = `ALTER TABLE chunks ADD COLUMN IF NOT EXISTS image_ref TEXT`
@@ -94,6 +102,12 @@ func Migrate(db *sql.DB) error {
 		addTotpSecret = `ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_secret TEXT NOT NULL DEFAULT ''`
 		addTotpEnabled = `ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_enabled INTEGER NOT NULL DEFAULT 0`
 		addFeedback = `ALTER TABLE messages ADD COLUMN IF NOT EXISTS feedback TEXT NOT NULL DEFAULT ''`
+		addSessUA = `ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS user_agent TEXT NOT NULL DEFAULT ''`
+		addSessIP = `ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS ip TEXT NOT NULL DEFAULT ''`
+		addSessLoc = `ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS location TEXT NOT NULL DEFAULT ''`
+		addSessSeen = `ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS last_seen BIGINT NOT NULL DEFAULT 0`
+		addModEnabled = `ALTER TABLE models ADD COLUMN IF NOT EXISTS moderation_enabled INTEGER NOT NULL DEFAULT 0`
+		addModMode = `ALTER TABLE models ADD COLUMN IF NOT EXISTS moderation_mode TEXT NOT NULL DEFAULT 'keyword'`
 	}
 	if _, err := db.Exec(schema); err != nil {
 		return fmt.Errorf("apply schema: %w", err)
@@ -102,7 +116,11 @@ func Migrate(db *sql.DB) error {
 	// IF NOT EXISTS won't add columns to a pre-existing table. On SQLite a
 	// duplicate-column error is expected and ignored; Postgres uses IF NOT
 	// EXISTS so it's a clean no-op.
-	for _, ddl := range []string{addImageRef, addOfficialTools, addGroupID, addTotpSecret, addTotpEnabled, addFeedback} {
+	for _, ddl := range []string{
+		addImageRef, addOfficialTools, addGroupID, addTotpSecret, addTotpEnabled, addFeedback,
+		addSessUA, addSessIP, addSessLoc, addSessSeen,
+		addModEnabled, addModMode,
+	} {
 		_, _ = db.Exec(ddl)
 	}
 	return nil
@@ -137,6 +155,10 @@ func Seed(db *sql.DB, cfg config.Config) error {
 		"email_verification_required": `false`,
 		"sandbox_base_url":            `""`,
 		"sandbox_api_key":             `""`,
+		"moderation_keywords":         `[]`,
+		"moderation_model_id":         `""`,
+		"moderation_categories":       `["politics","pornography","violence or gore","terrorism","illegal activity","hate speech","self-harm"]`,
+		"moderation_message":          `"Your message was blocked by content moderation. Please rephrase and try again."`,
 	} {
 		if _, err := db.Exec(`INSERT INTO settings(key, value) VALUES(?, ?)
 			ON CONFLICT(key) DO NOTHING`, k, v); err != nil {

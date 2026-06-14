@@ -201,9 +201,15 @@ func UpdateUserProfile(ctx context.Context, db *sql.DB, userID string, name, ema
 	return FindUserByID(ctx, db, userID)
 }
 
-// UpdateUserPassword writes a new bcrypt hash and rotates the token version.
+// UpdateUserPassword writes a new bcrypt hash, rotates the token version (kills
+// outstanding access tokens) AND revokes all refresh tokens (§A4) — otherwise a
+// stolen refresh token survives a password reset and can re-mint a session,
+// defeating the reset.
 func UpdateUserPassword(ctx context.Context, db *sql.DB, userID, newHash string) error {
 	if _, err := db.ExecContext(ctx, `UPDATE users SET password_hash=? WHERE id=?`, newHash, userID); err != nil {
+		return err
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE refresh_tokens SET revoked=1 WHERE user_id=?`, userID); err != nil {
 		return err
 	}
 	return BumpTokenVersion(ctx, db, userID)
@@ -265,6 +271,14 @@ func ListUsersPaged(ctx context.Context, db *sql.DB, limit, offset int) ([]User,
 		out = append(out, u)
 	}
 	return out, rows.Err()
+}
+
+// ActiveAdminCount returns how many active admin accounts exist — used to refuse
+// banning/demoting the last admin and locking the platform out (§D2).
+func ActiveAdminCount(ctx context.Context, db *sql.DB) (int, error) {
+	var n int
+	err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE role='admin' AND status='active'`).Scan(&n)
+	return n, err
 }
 
 // CountUsers returns the total user count — used to gate the "first user is

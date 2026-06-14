@@ -1,0 +1,259 @@
+{
+  "greeting": {
+    "morning": "早上好",
+    "afternoon": "下午好",
+    "evening": "晚上好",
+    "stillUp": "夜深了"
+  },
+  "empty": {
+    "subtitle": "在想些什麼？",
+    "lead": "隨便問點什麼——提綱、程式碼、決策、閱讀，Aurelia 會與你一起思考。",
+    "disclaimer": "Aurelia 也會出錯。重要的內容請自行核驗。"
+  },
+  "composer": {
+    "placeholder": "隨便問點什麼——或把你的思考粘進來。",
+    "attach": "新增附件",
+    "addImage": "新增圖片",
+    "voice": "語音輸入",
+    "voiceStop": "停止錄音",
+    "voiceUnsupported": "當前瀏覽器不支援語音輸入。",
+    "voicePermission": "麥克風許可權被拒絕。",
+    "voiceFailed": "無法轉寫本次錄音。",
+    "research": "研究",
+    "researchTooltip": "深度研究模式",
+    "canvas": "畫布",
+    "canvasTooltip": "畫布模式",
+    "send": "傳送（{{kbd}} + Enter）",
+    "stop": "停止生成",
+    "tooLongTitle": "訊息過長",
+    "tooLongBody": "請將訊息控制在 {{max}} 個字元以內。",
+    "attachedSingle": "已附加 {{count}} 個檔案",
+    "attachedMultiple": "已附加 {{count}} 個檔案",
+    "attachedHint": "本版本中附件僅用於視覺展示。",
+    "uploadFailed": "上傳失敗",
+    "knowledgeBases": "知識庫",
+    "noKnowledgeBases": "還沒有知識庫。"
+  },
+  "assistant": "Aurelia",
+  "thinking": "思考中",
+  "reasoning": {
+    "title": "思考過程",
+    "steps_one": "{{count}} 步",
+    "steps_other": "{{count}} 步"
+  },
+  "actions": {
+    "copy": "複製",
+    "copied": "已複製",
+    "regenerate": "重新生成",
+    "helpful": "有幫助",
+    "notHelpful": "無幫助",
+    "edit": "編輯",
+    "cancelEdit": "取消",
+    "saveEdit": "儲存並重新傳送",
+    "saveInPlace": "直接儲存",
+    "more": "更多",
+    "copyMessage": "複製訊息",
+    "readAloud": "朗讀",
+    "readAloudMocked": "朗讀功能為模擬。",
+    "shareMocked": "已複製分享連結",
+    "shareCopied": "分享連結已複製",
+    "branch": "切換分支",
+    "prevBranch": "上一個分支",
+    "nextBranch": "下一個分支",
+    "fork": "分支為新對話",
+    "forked": "已分支為新對話"
+  },
+  "message": {
+    "refused": "模型拒絕回答此請求。",
+    "ragFullText": "已注入完整文件",
+    "ragFullDoc": "全文件上下文",
+    "ragNone": "跳過檢索",
+    "ragDefault": "已檢索來源",
+    "moderation": {
+      "title": "內容被攔截",
+      "body": "您的內容可能違反了我們的使用條款。",
+      "cta": "請重新編輯後再試。"
+    }
+  },
+  "tools": {
+    "web_search": "網頁搜尋",
+    "code_interpreter": "程式碼直譯器",
+    "deep_research": "深度研究"
+  },
+  "sources": {
+    "label": "來源",
+    "open": "開啟來源",
+    "fromDocuments": "來自你的文件"
+  },
+  "research": {
+    "title": "深度研究",
+    "steps": "{{done}}/{{total}}",
+    "planLabel": "研究計劃",
+    "sourcesLabel": "來源（{{count}}）"
+  },
+  "share": {
+    "title": "分享對話",
+    "body": "建立一個公開連結，分享此對話的只讀快照。之後的新訊息不會出現在分享中。",
+    "bodyShared": "任何擁有此連結的人都可以檢視此對話的只讀快照。",
+    "createCta": "建立分享連結",
+    "revokeCta": "取消分享",
+    "revoked": "已取消分享",
+    "failed": "出錯了",
+    "linkCopied": "分享連結已複製",
+    "publicHint": "公開 — 無需登入即可檢視。",
+    "tryCta": "體驗 Aurelia",
+    "missingTitle": "該分享不可用",
+    "missingBody": "連結可能有誤，或所有者已取消分享此對話。",
+    "eyebrow": "分享的對話",
+    "untitled": "未命名對話",
+    "roleUser": "使用者",
+    "roleAssistant": "助手",
+    "footer": "由 Aurelia 分享 —— 一個用心的 AI 工作空間。"
+  },
+  "code": {
+    "run": "執行",
+    "rerun": "重新執行",
+    "stop": "停止",
+    "phaseQueued": "排隊中…",
+    "phaseBoot": "正在載入 Python 引擎…",
+    "phasePackages": "正在解析依賴…",
+    "phaseRunning": "執行中…",
+    "result": "返回值",
+    "noOutput": "執行完成,沒有輸出。",
+    "stopped": "已停止執行。",
+    "timeout": "執行超過 {{seconds}} 秒,已強制終止。",
+    "engineFailed": "Python 引擎載入失敗,請檢查網路後重試。",
+    "figureAlt": "圖表 {{index}}",
+    "poweredBy": "由 Pyodide 在瀏覽器內執行",
+    "clear": "清除",
+    "preview": "預覽",
+    "previewTitle": "HTML 預覽",
+    "previewRefresh": "重新載入",
+    "previewClose": "關閉預覽",
+    "previewSandboxHint": "在隔離沙箱中渲染 — 頁面指令碼無法訪問你的資料。",
+    "mermaidFailed": "無法渲染該圖表，已顯示原始碼。"
+  },
+  "modePill": {
+    "deepResearch": "深度研究",
+    "canvas": "畫布"
+  },
+  "sidebar": {
+    "newChat": "新對話",
+    "search": "搜尋",
+    "actions": "會話操作",
+    "rename": "重新命名",
+    "renameTitle": "重新命名會話",
+    "renameHint": "起一個之後能找回的名字。",
+    "renamed": "會話已重新命名",
+    "share": "分享",
+    "archive": "歸檔",
+    "archived": "會話已歸檔",
+    "archivedTitle": "已歸檔對話",
+    "archivedBody": "取消歸檔可讓對話重新回到列表。",
+    "archivedEmpty": "沒有已歸檔的對話。",
+    "unarchive": "取消歸檔",
+    "unarchived": "已取消歸檔",
+    "delete": "刪除",
+    "deleteTitle": "刪除這段會話？",
+    "deleteBody": "會同時刪除該會話及其全部訊息，無法撤銷。",
+    "deleted": "會話已刪除",
+    "empty": "還沒有會話。",
+    "starred": "已收藏",
+    "recents": "最近",
+    "moveToProject": "移動到專案",
+    "removeFromProject": "移出專案"
+  },
+  "topbar": {
+    "shareTooltip": "分享"
+  },
+  "thread": {
+    "modelSwitched": "已切換模型",
+    "modelSwitchedBody": "之後的訊息將使用新模型。",
+    "renamed": "已重新命名",
+    "deleted": "已刪除",
+    "notFoundTitle": "找不到這段會話。",
+    "notFoundBody": "它可能已被刪除，或連結有誤。",
+    "goToChat": "前往對話",
+    "jumpToLatest": "跳到最新",
+    "deleteUndone": "此操作無法撤銷。"
+  },
+  "buckets": {
+    "today": "今天",
+    "yesterday": "昨天",
+    "last_7": "近 7 天",
+    "last_30": "近 30 天",
+    "older": "更早"
+  },
+  "modelPicker": {
+    "section": "模型",
+    "moreSoon": "更多模型即將上線",
+    "current": "當前模型",
+    "label": "模型：{{name}}",
+    "upgrade": "升級套餐解鎖"
+  },
+  "commandMenu": {
+    "placeholder": "搜尋會話，或執行命令…",
+    "noMatch": "沒有匹配項。",
+    "groups": {
+      "actions": "操作",
+      "theme": "主題",
+      "conversations": "會話",
+      "help": "幫助",
+      "language": "語言"
+    },
+    "actions": {
+      "newChat": "新對話",
+      "goToChat": "前往對話",
+      "openSettings": "開啟設定",
+      "toggleSidebar": "摺疊 / 展開側邊欄",
+      "light": "淺色主題",
+      "dark": "深色主題",
+      "system": "跟隨系統",
+      "shortcuts": "鍵盤快捷鍵",
+      "switchLanguage": "切換到 {{language}}"
+    },
+    "title": "命令選單"
+  },
+  "signedOut": "你已退出登入。",
+  "userMenu": {
+    "personalization": "個性化",
+    "knowledge": "知識庫",
+    "admin": "管理後臺",
+    "subscription": "訂閱",
+    "language": "語言"
+  },
+  "suggestions": {
+    "outline-essay": {
+      "title": "為長文擬提綱",
+      "prompt": "幫我擬一份 2000 字的文章提綱，題目是「專注作為一種道德能力」。"
+    },
+    "study-plan": {
+      "title": "設計一份學習計劃",
+      "prompt": "為我設計一份為期四周的複雜理論入門閱讀計劃。"
+    },
+    "debug-snippet": {
+      "title": "陪我讀一段程式碼",
+      "prompt": "我有一個 TypeScript 函式，每次重渲染後輸入框就失去焦點 —— 幫我排查一下。"
+    },
+    "research-brief": {
+      "title": "草擬一份研究綜述",
+      "prompt": "總結一下「全民基本收入」最有力的反駁意見。"
+    },
+    "travel-idea": {
+      "title": "規劃一次慢旅行",
+      "prompt": "我十月份有十天假期，幫我勾畫一條在葡萄牙慢行的安靜路線。"
+    },
+    "creative-brief": {
+      "title": "認真為一件事命名",
+      "prompt": "給我 8 個備選名字：一份評論性氣候金融簡報。"
+    },
+    "difficult-decision": {
+      "title": "推一遍一個決定",
+      "prompt": "幫我推一遍是否應當辭職專心寫作的決策矩陣。"
+    },
+    "library-curation": {
+      "title": "推薦一份小書單",
+      "prompt": "推薦 5 本關於「孤獨」的短篇好書——不同傳統，不要重複。"
+    }
+  }
+}

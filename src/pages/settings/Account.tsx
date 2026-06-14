@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { Mail, User, Lock, AlertTriangle, LogOut, ShieldCheck, Copy } from 'lucide-react'
+import { Mail, User, Lock, AlertTriangle, ShieldCheck, Copy } from 'lucide-react'
 import { SettingsRow, SettingsSection } from './SettingsLayout'
+import { ActiveSessions } from '@/components/settings/active-sessions'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
@@ -201,12 +202,9 @@ export default function Account() {
             </Button>
           )}
         </SettingsRow>
-        <SettingsRow label={t('settings:account.securityRows.sessions')} description={t('settings:account.securityRows.sessionsBody')}>
-          <Button variant="ghost" onClick={() => void (async () => { await logout(); navigate('/login') })()}>
-            <LogOut size={13} aria-hidden /> {t('common:actions.signOut')}
-          </Button>
-        </SettingsRow>
       </SettingsSection>
+
+      <ActiveSessions />
 
       <SettingsSection title={t('settings:account.danger')} description={t('settings:account.dangerBody')}>
         <SettingsRow

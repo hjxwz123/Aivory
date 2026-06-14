@@ -35,7 +35,17 @@
     "memorySubtitle": "The assistant can remember durable facts about you across chats.",
     "memoryToggle": "Enable memory",
     "memoryToggleBody": "When off, no conversation uses or saves memory.",
-    "memoryDisabled": "Memory is off. Turn it on to view and manage saved memories."
+    "memoryDisabled": "Memory is off. Turn it on to view and manage saved memories.",
+    "font": {
+      "title": "Typeface",
+      "subtitle": "Choose the font used across the app.",
+      "options": {
+        "default": "Geist (default)",
+        "inter": "Inter",
+        "system": "System",
+        "serif": "Fraunces (serif)"
+      }
+    }
   },
   "account": {
     "title": "Account",
@@ -98,6 +108,21 @@
       "failed": "Something went wrong",
       "codeRequired": "Enter the 6-digit code",
       "invalid": "That code didn’t work — try again"
+    },
+    "sessions": {
+      "title": "Active sessions",
+      "subtitle": "Devices currently signed in to your account.",
+      "signOutOthers": "Sign out other sessions",
+      "thisDevice": "This device",
+      "activeNow": "Active now",
+      "revoke": "Revoke session",
+      "revoked": "Session signed out",
+      "revokeFailed": "Couldn't sign out that session",
+      "othersRevoked": "Signed out of all other sessions",
+      "loadFailed": "Couldn't load sessions",
+      "empty": "No active sessions",
+      "unknownDevice": "Unknown device",
+      "localNetwork": "Local network"
     }
   },
   "appearance": {

@@ -4,11 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strconv"
 	"time"
 
 	"aurelia/server/internal/store"
 )
+
+// Window cost is accumulated in integer micro-units so it can use the cache's
+// atomic IncrBy (§B3) — a float Get/modify/Set loses concurrent increments.
+func costToMicros(c float64) int64 { return int64(math.Round(c * 1e6)) }
+func microsToCost(m int64) float64 { return float64(m) / 1e6 }
 
 // Per-model, per-group usage quotas (§ user groups). A model with no quota rows
 // is open to everyone. Otherwise a user's group must have a row (else the model
@@ -30,8 +36,16 @@ func quotaWindow(periodSeconds int) (start int64, ttl time.Duration) {
 // (message, false) with the upgrade/over-limit prompt when blocked.
 func (o *Orchestrator) checkModelQuota(ctx context.Context, userID string, model *store.Model) (string, bool) {
 	has, err := store.ModelHasAnyQuota(ctx, o.db, model.ID)
-	if err != nil || !has {
-		return "", true // open to everyone (fail-open on a DB error)
+	if err != nil {
+		// §B11: fail OPEN on a DB error (availability over enforcement) but log it
+		// — a silent fail-open hides both outages and a deliberately-induced bypass.
+		if o.logger != nil {
+			o.logger.Printf("quota: ModelHasAnyQuota(%s) failed, allowing (fail-open): %v", model.ID, err)
+		}
+		return "", true
+	}
+	if !has {
+		return "", true // no quota rows → open to everyone, unlimited
 	}
 	groupID := o.userGroupID(ctx, userID)
 	q, err := store.GetModelQuota(ctx, o.db, model.ID, groupID)
@@ -72,11 +86,8 @@ func (o *Orchestrator) recordQuotaUsage(ctx context.Context, userID string, mode
 		o.cache.Incr(key, ttl)
 		return
 	}
-	cur := 0.0
-	if v, ok := o.cache.Get(key); ok {
-		cur, _ = strconv.ParseFloat(v, 64)
-	}
-	o.cache.Set(key, strconv.FormatFloat(cur+turnCost, 'f', -1, 64), ttl)
+	// §B3: atomic add in micro-units (no Get→add→Set race under concurrent turns).
+	o.cache.IncrBy(key, costToMicros(turnCost), ttl)
 }
 
 // readQuota returns the current window cost/count, preferring the cache and
@@ -89,8 +100,8 @@ func (o *Orchestrator) readQuota(ctx context.Context, userID, modelID string, q 
 				n, _ := strconv.Atoi(v)
 				return 0, n
 			}
-			f, _ := strconv.ParseFloat(v, 64)
-			return f, 0
+			micros, _ := strconv.ParseInt(v, 10, 64)
+			return microsToCost(micros), 0
 		}
 	}
 	cost, count, _ := store.UsageInWindow(ctx, o.db, userID, modelID, start)
@@ -98,14 +109,17 @@ func (o *Orchestrator) readQuota(ctx context.Context, userID, modelID string, q 
 		if q.LimitType == "count" {
 			o.cache.Set(key, strconv.Itoa(count), ttl)
 		} else {
-			o.cache.Set(key, strconv.FormatFloat(cost, 'f', -1, 64), ttl)
+			// Seed the cold cache with the authoritative usage_logs total, in micro-units.
+			o.cache.Set(key, strconv.FormatInt(costToMicros(cost), 10), ttl)
 		}
 	}
 	return cost, count
 }
 
 func quotaKey(userID, modelID string, windowStart int64) string {
-	return fmt.Sprintf("quota:%s:%s:%d", userID, modelID, windowStart)
+	// v2: cost is now stored in integer micro-units (§B3); the version prefix
+	// prevents reading a stale pre-upgrade float string as an int.
+	return fmt.Sprintf("quota:v2:%s:%s:%d", userID, modelID, windowStart)
 }
 
 // userGroupID resolves the user's group, defaulting to the free tier.

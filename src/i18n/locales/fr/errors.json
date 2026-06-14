@@ -1,0 +1,11 @@
+{
+  "notFound": {
+    "kicker": "404 — introuvable",
+    "title": "Le fil est rompu.",
+    "body": "La page que vous cherchiez n'est pas ici. Elle a peut-être été renommée, supprimée, ou n'a jamais existé. Aucun mal — retrouvons votre chemin.",
+    "back": "Retour à l'accueil"
+  },
+  "boundary": {
+    "title": "Quelque chose a déraillé."
+  }
+}

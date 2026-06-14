@@ -59,6 +59,14 @@ interface ComposerProps {
   autoFocus?: boolean
   /** Conversation id (so uploads carry the right scope). */
   conversationId?: string
+  /**
+   * Home screen only: there is no conversation yet when the user attaches a
+   * file. Provide this to lazily create one BEFORE the first upload so the file
+   * is POSTed with `?conversation_id&rag=1` and actually gets ingested for
+   * retrieval (instead of landing at a scope-less `/files` and being
+   * unreachable). Should be idempotent — return the same id on repeat calls.
+   */
+  ensureConversationId?: () => Promise<string | undefined>
   /** Knowledge bases bound to the conversation (§7.2-7 📚 selector). */
   kbIds?: string[]
   /** When provided, the 📚 selector is shown and changes flow up here. */
@@ -70,6 +78,10 @@ const MAX_LEN = 12_000
 interface PendingAttachment extends Attachment {
   /** true while POST /api/files is in flight. */
   uploading?: boolean
+  /** Raw file held locally when no conversation exists yet (home screen). The
+   *  upload — and the conversation it needs — is deferred to submit so an
+   *  abandoned draft never creates an orphan conversation (§ first-turn upload). */
+  file?: File
 }
 
 export function Composer({
@@ -83,6 +95,7 @@ export function Composer({
   compact = false,
   autoFocus = false,
   conversationId,
+  ensureConversationId,
   kbIds,
   onKBChange,
 }: ComposerProps) {
@@ -102,6 +115,7 @@ export function Composer({
   }
   const ref = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  const submittingRef = useRef(false)
   // Voice input (§ whisper). Record via MediaRecorder, then transcribe through
   // the admin-configured /audio/transcriptions endpoint and insert the text.
   const [recording, setRecording] = useState(false)
@@ -171,9 +185,9 @@ export function Composer({
   const uploading = useMemo(() => attachments.some((a) => a.uploading), [attachments])
   const canSubmit = value.trim().length > 0 && !streaming && !uploading
 
-  function handleSubmit() {
+  async function handleSubmit() {
     const text = value.trim()
-    if (!text || streaming || uploading) return
+    if (!text || streaming || uploading || submittingRef.current) return
     if (text.length > MAX_LEN) {
       toast.warning(
         t('composer.tooLongTitle'),
@@ -181,8 +195,27 @@ export function Composer({
       )
       return
     }
+    // Flush any DEFERRED uploads now: this is the first real commit, so create
+    // the conversation (ensureConversationId) and ingest the held files into it
+    // — no orphan conversation is left behind for an abandoned draft.
+    let finalAttachments: Attachment[] = attachments
+    if (attachments.some((a) => a.file)) {
+      submittingRef.current = true
+      setAttachments((s) => s.map((a) => (a.file ? { ...a, uploading: true } : a)))
+      let scopeId: string | undefined
+      try {
+        scopeId = ensureConversationId ? await ensureConversationId() : undefined
+      } catch {
+        scopeId = undefined
+      }
+      const settled = await Promise.all(
+        attachments.map((a) => (a.file ? uploadAttachment(a.file, a, scopeId) : Promise.resolve(a))),
+      )
+      finalAttachments = settled.filter((a): a is PendingAttachment => a !== null)
+      submittingRef.current = false
+    }
     const params = filterVisibleParams(paramControls, paramValues)
-    onSubmit(text, attachments, {
+    onSubmit(text, finalAttachments, {
       mode: mode === 'default' ? undefined : mode,
       params: Object.keys(params).length > 0 ? params : undefined,
     })
@@ -194,9 +227,39 @@ export function Composer({
     setMode('default')
   }
 
+  // Upload one held file into the given conversation scope (rag=1 for doc-like
+  // files), returning the chip updated with the server id, or null on failure.
+  // A blank scopeId falls back to a scope-less upload (attachment only, no RAG).
+  async function uploadAttachment(file: File, local: PendingAttachment, scopeId?: string): Promise<PendingAttachment | null> {
+    try {
+      const form = new FormData()
+      form.append('file', file)
+      // §4.11.2 session-scoped temp docs: ingest doc-like uploads (or anything
+      // when a KB is bound) as conversation-scoped RAG so the user can ask over
+      // what they just shared, without polluting any project KB.
+      const isDocLike = local.kind === 'pdf' || local.kind === 'doc' || local.kind === 'sheet' || /\.txt$|\.md$|\.markdown$/i.test(local.name)
+      const ragFlag = (kbIds && kbIds.length > 0) || isDocLike
+      const url = `/files${scopeId ? `?conversation_id=${encodeURIComponent(scopeId)}${ragFlag ? '&rag=1' : ''}` : ''}`
+      const res = await api<ApiAttachment & { id: string }>(url, { method: 'POST', body: form })
+      const updated: PendingAttachment = { ...local, id: res.id, uploading: false, file: undefined }
+      setAttachments((s) => s.map((a) => (a.id === local.id ? updated : a)))
+      return updated
+    } catch (e) {
+      setAttachments((s) => s.filter((a) => a.id !== local.id))
+      toast.error(t('composer.uploadFailed', { defaultValue: 'Upload failed' }), e instanceof Error ? e.message : undefined)
+      return null
+    }
+  }
+
   async function handleAttach(files: FileList | null) {
     if (!files || !files.length) return
-    const additions: PendingAttachment[] = Array.from(files).map((f) => ({
+    const list = Array.from(files)
+    // When there's no conversation yet (home screen), DEFER the upload — and the
+    // conversation it would need — to submit time (handleSubmit). Creating the
+    // conversation on attach would litter the backend with an empty conversation
+    // for every draft a user attaches to and then abandons.
+    const deferred = !conversationId
+    const additions: PendingAttachment[] = list.map((f) => ({
       id: uid('att'),
       name: f.name,
       size: f.size,
@@ -211,45 +274,15 @@ export function Composer({
               : 'other',
       // Local thumbnail so images preview instantly; revoked on remove/submit.
       previewUrl: f.type.startsWith('image/') ? URL.createObjectURL(f) : undefined,
-      uploading: true,
+      uploading: !deferred,
+      file: deferred ? f : undefined,
     }))
     setAttachments((s) => [...s, ...additions])
     toast.success(
       t(additions.length === 1 ? 'composer.attachedSingle' : 'composer.attachedMultiple', { count: additions.length }),
     )
-
-    await Promise.all(
-      Array.from(files).map(async (file, idx) => {
-        const local = additions[idx]
-        try {
-          const form = new FormData()
-          form.append('file', file)
-          // §4.11.2 session-scoped temp docs: when the conversation has KBs
-          // attached, also ingest the upload as a conversation-scoped RAG
-          // document so the user can ask questions over what they just shared
-          // without it polluting the project KB. Also auto-ingest for PDFs /
-          // text-like files even without an explicit KB, so search_knowledge_base
-          // works against the file in this conversation.
-          const isDocLike = local.kind === 'pdf' || local.kind === 'doc' || local.kind === 'sheet' || /\.txt$|\.md$|\.markdown$/i.test(local.name)
-          const ragFlag = (kbIds && kbIds.length > 0) || isDocLike
-          const url = `/files${conversationId ? `?conversation_id=${encodeURIComponent(conversationId)}${ragFlag ? '&rag=1' : ''}` : ''}`
-          const res = await api<ApiAttachment & { id: string }>(url, { method: 'POST', body: form })
-          setAttachments((s) =>
-            s.map((a) =>
-              a.id === local.id
-                ? { ...a, id: res.id, uploading: false }
-                : a,
-            ),
-          )
-        } catch (e) {
-          setAttachments((s) => s.filter((a) => a.id !== local.id))
-          toast.error(
-            t('composer.uploadFailed', { defaultValue: 'Upload failed' }),
-            e instanceof Error ? e.message : undefined,
-          )
-        }
-      }),
-    )
+    if (deferred) return // uploaded on submit, once the conversation is committed
+    await Promise.all(list.map((file, idx) => uploadAttachment(file, additions[idx], conversationId)))
   }
 
   function removeAttachment(id: string) {
@@ -523,24 +556,9 @@ export function Composer({
           </Popover>
         ) : null}
 
-        <Tooltip content={t('composer.canvasTooltip')}>
-          <button
-            type="button"
-            onClick={() => setMode((m) => (m === 'canvas' ? 'default' : 'canvas'))}
-            aria-pressed={mode === 'canvas'}
-            aria-label={t('composer.canvasTooltip')}
-            className={cn(
-              'inline-flex items-center gap-1.5 h-8 px-2 rounded-[8px] text-[12px] font-medium interactive',
-              mode === 'canvas'
-                ? 'bg-[var(--color-secondary-soft)] text-[var(--color-secondary)]'
-                : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-            )}
-          >
-            <Sparkles size={14} aria-hidden />
-            <span className="max-sm:hidden">{t('composer.canvas')}</span>
-          </button>
-        </Tooltip>
+        {/* Canvas mode is hidden until the backend implements it — arming
+            mode:'canvas' currently produces a normal answer (only deep-research
+            is wired). Deep Research above stays available. */}
 
         <div className="ml-auto flex items-center gap-2">
           <ModelPicker value={modelId} onChange={onModelChange} />

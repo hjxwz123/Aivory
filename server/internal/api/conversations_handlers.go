@@ -97,6 +97,18 @@ func updateConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errInvalidInput)
 		return
 	}
+	// §C1: never let a user attach a KB they don't own — filter kb_ids to the
+	// owned subset at write time (the orchestrator re-filters at read time too).
+	if len(p.KBIDs) > 0 {
+		var ids []string
+		if json.Unmarshal(p.KBIDs, &ids) == nil {
+			owned := store.OwnedKBIDs(r.Context(), d.DB, u.ID, ids)
+			b, _ := json.Marshal(owned)
+			p.KBIDs = b
+		} else {
+			p.KBIDs = json.RawMessage("[]")
+		}
+	}
 	conv, err := store.UpdateConversation(r.Context(), d.DB, id, u.ID, p)
 	if err != nil {
 		writeError(w, 404, errNotFound)
@@ -351,7 +363,9 @@ func promoteDocumentHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, errNotFound)
 		return
 	}
-	if err := store.PromoteDocumentToKB(r.Context(), d.DB, docID, p.KBID); err != nil {
+	// §C5: re-embed with the destination KB's locked embedder (not a raw chunk
+	// move) so the promoted document is actually retrievable in the KB.
+	if err := d.RAG.PromoteDocument(r.Context(), docID, p.KBID); err != nil {
 		writeError(w, 500, err)
 		return
 	}

@@ -148,7 +148,12 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, errNotFound)
 		return
 	}
-	// §8 concurrent-gen + token quotas apply to regenerate too.
+	// §8/§C7 daily-message + token + concurrent-gen quotas apply to regenerate
+	// too — otherwise repeated /regenerate bypasses the per-day message cap.
+	if !checkDailyMessageLimit(d, u.ID) {
+		writeError(w, 429, errors.New("daily message limit reached"))
+		return
+	}
 	if !checkDailyTokenQuota(d, u.ID) {
 		writeError(w, 429, errors.New("daily token quota reached"))
 		return

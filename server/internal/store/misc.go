@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 )
 
@@ -13,16 +15,13 @@ func CreateFile(ctx context.Context, db *sql.DB, f File) (*File, error) {
 	if f.ID == "" {
 		f.ID = genID("f")
 	}
-	if len(f.ProviderRefs) == 0 {
-		f.ProviderRefs = json.RawMessage("{}")
-	}
 	var conv any
 	if f.ConversationID != "" {
 		conv = f.ConversationID
 	}
 	_, err := db.ExecContext(ctx,
-		`INSERT INTO files(id, user_id, conversation_id, filename, mime_type, size_bytes, storage_path, provider_refs, kind, created_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		f.ID, f.UserID, conv, f.Filename, f.MimeType, f.SizeBytes, f.StoragePath, string(f.ProviderRefs), f.Kind, time.Now().Unix())
+		`INSERT INTO files(id, user_id, conversation_id, filename, mime_type, size_bytes, storage_path, kind, created_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		f.ID, f.UserID, conv, f.Filename, f.MimeType, f.SizeBytes, f.StoragePath, f.Kind, time.Now().Unix())
 	if err != nil {
 		return nil, err
 	}
@@ -33,7 +32,7 @@ func CreateFile(ctx context.Context, db *sql.DB, f File) (*File, error) {
 // first) — used to stage data files into the sandbox /workspace/uploads (§4.5).
 func ListFilesByConversation(ctx context.Context, db *sql.DB, convID, userID string) ([]File, error) {
 	rows, err := db.QueryContext(ctx,
-		`SELECT id, user_id, conversation_id, filename, mime_type, size_bytes, storage_path, provider_refs, kind, created_at
+		`SELECT id, user_id, conversation_id, filename, mime_type, size_bytes, storage_path, kind, created_at
 		 FROM files WHERE conversation_id=? AND user_id=? ORDER BY created_at ASC`, convID, userID)
 	if err != nil {
 		return nil, err
@@ -43,12 +42,10 @@ func ListFilesByConversation(ctx context.Context, db *sql.DB, convID, userID str
 	for rows.Next() {
 		var f File
 		var conv sql.NullString
-		var provRefs string
-		if err := rows.Scan(&f.ID, &f.UserID, &conv, &f.Filename, &f.MimeType, &f.SizeBytes, &f.StoragePath, &provRefs, &f.Kind, &f.CreatedAt); err != nil {
+		if err := rows.Scan(&f.ID, &f.UserID, &conv, &f.Filename, &f.MimeType, &f.SizeBytes, &f.StoragePath, &f.Kind, &f.CreatedAt); err != nil {
 			return nil, err
 		}
 		f.ConversationID = conv.String
-		f.ProviderRefs = json.RawMessage(provRefs)
 		out = append(out, f)
 	}
 	return out, rows.Err()
@@ -58,10 +55,9 @@ func ListFilesByConversation(ctx context.Context, db *sql.DB, convID, userID str
 func GetFile(ctx context.Context, db *sql.DB, id, userID string) (*File, error) {
 	var f File
 	var conv sql.NullString
-	var provRefs string
 	err := db.QueryRowContext(ctx,
-		`SELECT id, user_id, conversation_id, filename, mime_type, size_bytes, storage_path, provider_refs, kind, created_at FROM files WHERE id=? AND user_id=?`, id, userID,
-	).Scan(&f.ID, &f.UserID, &conv, &f.Filename, &f.MimeType, &f.SizeBytes, &f.StoragePath, &provRefs, &f.Kind, &f.CreatedAt)
+		`SELECT id, user_id, conversation_id, filename, mime_type, size_bytes, storage_path, kind, created_at FROM files WHERE id=? AND user_id=?`, id, userID,
+	).Scan(&f.ID, &f.UserID, &conv, &f.Filename, &f.MimeType, &f.SizeBytes, &f.StoragePath, &f.Kind, &f.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -69,7 +65,6 @@ func GetFile(ctx context.Context, db *sql.DB, id, userID string) (*File, error) 
 		return nil, err
 	}
 	f.ConversationID = conv.String
-	f.ProviderRefs = json.RawMessage(provRefs)
 	return &f, nil
 }
 
@@ -321,17 +316,238 @@ func AdminUsageTrend(ctx context.Context, db *sql.DB, days int) ([]UsageBucket, 
 	return out, rows.Err()
 }
 
-// SaveRefreshToken records a non-revoked refresh token for the user.
-func SaveRefreshToken(ctx context.Context, db *sql.DB, jti, userID string, expiresAt time.Time) error {
+// UsageBucketWidth mirrors AdminUsageTrend's choice so trend + per-series points
+// share one time axis (hourly for ≤2-day windows, otherwise daily).
+func UsageBucketWidth(days int) int64 {
+	if days <= 2 {
+		return 3600
+	}
+	return 86400
+}
+
+// UsageTotals is the headline aggregate for the analytics dashboard (§ admin
+// analytics).
+type UsageTotals struct {
+	Calls        int     `json:"calls"`
+	InputTokens  int     `json:"input_tokens"`
+	OutputTokens int     `json:"output_tokens"`
+	Cost         float64 `json:"cost"`
+	Users        int     `json:"users"` // distinct active users in the window
+}
+
+// AdminUsageTotals returns the period totals plus the distinct active-user count.
+func AdminUsageTotals(ctx context.Context, db *sql.DB, days int) (UsageTotals, error) {
+	if days <= 0 {
+		days = 7
+	}
+	since := time.Now().Add(-time.Duration(days) * 24 * time.Hour).Unix()
+	var t UsageTotals
+	err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*), COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
+		        COALESCE(SUM(cost),0), COUNT(DISTINCT user_id)
+		 FROM usage_logs WHERE created_at >= ?`, since).
+		Scan(&t.Calls, &t.InputTokens, &t.OutputTokens, &t.Cost, &t.Users)
+	return t, err
+}
+
+// UsageBreakdownRow is one row of a by-model or by-user breakdown. Label holds
+// the user email for the by-user breakdown; model labels are resolved on the
+// frontend from the model list.
+type UsageBreakdownRow struct {
+	Key          string  `json:"key"`
+	Label        string  `json:"label"`
+	InputTokens  int     `json:"input_tokens"`
+	OutputTokens int     `json:"output_tokens"`
+	Calls        int     `json:"calls"`
+	Cost         float64 `json:"cost"`
+}
+
+// AdminUsageBreakdown returns the top-`limit` keys for the dimension (groupCol
+// must be "model_id" or "user_id"), ordered by cost then call volume.
+func AdminUsageBreakdown(ctx context.Context, db *sql.DB, days int, groupCol string, limit int) ([]UsageBreakdownRow, error) {
+	if groupCol != "model_id" && groupCol != "user_id" {
+		return nil, fmt.Errorf("AdminUsageBreakdown: invalid group column %q", groupCol)
+	}
+	if limit <= 0 {
+		limit = 8
+	}
+	if days <= 0 {
+		days = 7
+	}
+	since := time.Now().Add(-time.Duration(days) * 24 * time.Hour).Unix()
+	labelExpr, join, groupBy := "''", "", "u."+groupCol
+	if groupCol == "user_id" {
+		labelExpr = "COALESCE(usr.email,'')"
+		join = "LEFT JOIN users usr ON usr.id = u.user_id"
+		groupBy = "u.user_id, usr.email"
+	}
+	q := fmt.Sprintf(
+		`SELECT u.%s, %s, SUM(u.input_tokens), SUM(u.output_tokens), COUNT(*), SUM(u.cost)
+		 FROM usage_logs u %s WHERE u.created_at >= ?
+		 GROUP BY %s ORDER BY SUM(u.cost) DESC, COUNT(*) DESC LIMIT ?`,
+		groupCol, labelExpr, join, groupBy)
+	rows, err := db.QueryContext(ctx, q, since, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []UsageBreakdownRow{}
+	for rows.Next() {
+		var r UsageBreakdownRow
+		if err := rows.Scan(&r.Key, &r.Label, &r.InputTokens, &r.OutputTokens, &r.Calls, &r.Cost); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// UsageSeriesPoint is one (bucket, key) cell of a per-dimension time series.
+type UsageSeriesPoint struct {
+	BucketStart  int64   `json:"bucket_start"`
+	Key          string  `json:"key"`
+	InputTokens  int     `json:"input_tokens"`
+	OutputTokens int     `json:"output_tokens"`
+	Calls        int     `json:"calls"`
+	Cost         float64 `json:"cost"`
+}
+
+// AdminUsageSeries returns the time series for the given keys of a dimension
+// (groupCol must be "model_id" or "user_id"), sharing AdminUsageTrend's bucket
+// width so the points line up with the overall trend axis. keys is typically
+// the output of AdminUsageBreakdown so the payload stays bounded.
+func AdminUsageSeries(ctx context.Context, db *sql.DB, days int, groupCol string, keys []string) ([]UsageSeriesPoint, error) {
+	if groupCol != "model_id" && groupCol != "user_id" {
+		return nil, fmt.Errorf("AdminUsageSeries: invalid group column %q", groupCol)
+	}
+	if len(keys) == 0 {
+		return []UsageSeriesPoint{}, nil
+	}
+	if days <= 0 {
+		days = 7
+	}
+	bucket := UsageBucketWidth(days)
+	since := time.Now().Add(-time.Duration(days) * 24 * time.Hour).Unix()
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(keys)), ",")
+	args := []any{bucket, bucket, since}
+	for _, k := range keys {
+		args = append(args, k)
+	}
+	q := fmt.Sprintf(
+		`SELECT (created_at / ?) * ? AS b, %s, SUM(input_tokens), SUM(output_tokens), COUNT(*), SUM(cost)
+		 FROM usage_logs WHERE created_at >= ? AND %s IN (%s)
+		 GROUP BY b, %s ORDER BY b ASC`,
+		groupCol, groupCol, placeholders, groupCol)
+	rows, err := db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []UsageSeriesPoint{}
+	for rows.Next() {
+		var p UsageSeriesPoint
+		if err := rows.Scan(&p.BucketStart, &p.Key, &p.InputTokens, &p.OutputTokens, &p.Calls, &p.Cost); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// SessionMeta carries the device/network context recorded alongside a refresh
+// token so the user can review and revoke their active sessions. CreatedAt is
+// preserved across refresh rotation (0 means "now") so the "signed in" time
+// survives; LastSeen is always stamped to now on each issue.
+type SessionMeta struct {
+	IP        string
+	UserAgent string
+	Location  string
+	CreatedAt int64
+}
+
+// SaveRefreshToken records a non-revoked refresh token for the user along with
+// the device/network context in meta.
+func SaveRefreshToken(ctx context.Context, db *sql.DB, jti, userID string, expiresAt time.Time, meta SessionMeta) error {
+	now := time.Now().Unix()
+	created := meta.CreatedAt
+	if created == 0 {
+		created = now
+	}
 	_, err := db.ExecContext(ctx,
-		`INSERT INTO refresh_tokens(jti, user_id, expires_at, revoked, created_at) VALUES(?, ?, ?, 0, ?)`,
-		jti, userID, expiresAt.Unix(), time.Now().Unix())
+		`INSERT INTO refresh_tokens(jti, user_id, expires_at, revoked, created_at, user_agent, ip, location, last_seen)
+		 VALUES(?, ?, ?, 0, ?, ?, ?, ?, ?)`,
+		jti, userID, expiresAt.Unix(), created, meta.UserAgent, meta.IP, meta.Location, now)
 	return err
+}
+
+// RefreshTokenCreatedAt returns the original sign-in time of a refresh token so
+// rotation can preserve it across token swaps. Returns 0 when not found.
+func RefreshTokenCreatedAt(ctx context.Context, db *sql.DB, jti string) int64 {
+	var c int64
+	_ = db.QueryRowContext(ctx, `SELECT created_at FROM refresh_tokens WHERE jti=?`, jti).Scan(&c)
+	return c
 }
 
 // RevokeRefreshToken marks a single refresh token revoked.
 func RevokeRefreshToken(ctx context.Context, db *sql.DB, jti string) error {
 	_, err := db.ExecContext(ctx, `UPDATE refresh_tokens SET revoked=1 WHERE jti=?`, jti)
+	return err
+}
+
+// SessionInfo is the user-facing view of one active session (one non-revoked
+// refresh token = one signed-in device).
+type SessionInfo struct {
+	ID        string `json:"id"` // the jti — opaque handle used to revoke
+	IP        string `json:"ip"`
+	UserAgent string `json:"user_agent"`
+	Location  string `json:"location"`
+	CreatedAt int64  `json:"created_at"`
+	LastSeen  int64  `json:"last_seen"`
+}
+
+// ListUserSessions returns the user's active (non-revoked, unexpired) sessions,
+// most-recently-active first.
+func ListUserSessions(ctx context.Context, db *sql.DB, userID string) ([]SessionInfo, error) {
+	// Tokens issued before this feature have last_seen=0; fall back to created_at
+	// so they don't render as a 1970 timestamp until their next refresh.
+	rows, err := db.QueryContext(ctx,
+		`SELECT jti, ip, user_agent, location, created_at,
+		        CASE WHEN last_seen > 0 THEN last_seen ELSE created_at END AS seen
+		 FROM refresh_tokens
+		 WHERE user_id=? AND revoked=0 AND expires_at > ?
+		 ORDER BY seen DESC`, userID, time.Now().Unix())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []SessionInfo{}
+	for rows.Next() {
+		var s SessionInfo
+		if err := rows.Scan(&s.ID, &s.IP, &s.UserAgent, &s.Location, &s.CreatedAt, &s.LastSeen); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+// RevokeUserSession revokes one refresh token, scoped to its owner. Returns true
+// when a matching active row was revoked.
+func RevokeUserSession(ctx context.Context, db *sql.DB, userID, jti string) (bool, error) {
+	res, err := db.ExecContext(ctx,
+		`UPDATE refresh_tokens SET revoked=1 WHERE jti=? AND user_id=? AND revoked=0`, jti, userID)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
+// RevokeOtherUserSessions revokes every active session for the user except the
+// one identified by keepJTI (the caller's current session).
+func RevokeOtherUserSessions(ctx context.Context, db *sql.DB, userID, keepJTI string) error {
+	_, err := db.ExecContext(ctx,
+		`UPDATE refresh_tokens SET revoked=1 WHERE user_id=? AND jti<>? AND revoked=0`, userID, keepJTI)
 	return err
 }
 

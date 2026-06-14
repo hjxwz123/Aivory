@@ -101,7 +101,7 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 		httpReq.Header.Set("x-api-key", req.Model.APIKey)
 		httpReq.Header.Set("accept", "text/event-stream")
 
-		resp, err := http.DefaultClient.Do(httpReq)
+		resp, err := providerHTTPClient.Do(httpReq)
 		if err != nil {
 			// Context cancel (stop button): return partial result + err so the
 			// orchestrator persists what we got so far (§6.2 partial-content rule).
@@ -241,7 +241,7 @@ func (p *AnthropicProvider) promptRunOnce(base string, req UnifiedChatRequest) P
 		httpReq.Header.Set("anthropic-version", "2023-06-01")
 		httpReq.Header.Set("x-api-key", req.Model.APIKey)
 		httpReq.Header.Set("accept", "text/event-stream")
-		resp, err := http.DefaultClient.Do(httpReq)
+		resp, err := providerHTTPClient.Do(httpReq)
 		if err != nil {
 			return "", Usage{}, err
 		}

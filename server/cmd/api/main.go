@@ -68,6 +68,16 @@ func main() {
 		logger.Printf("cache: in-memory (dev)")
 	}
 
+	// §2.4 config-cache invalidation: an admin config write on any instance
+	// publishes "cfg:invalidate"; every instance drops its settings cache so a
+	// change can't outlive its TTL on another node.
+	go func() {
+		ch, _ := cacheLayer.Subscribe("cfg:invalidate")
+		for range ch {
+			store.InvalidateConfig()
+		}
+	}()
+
 	q := queue.NewInProcess(logger)
 	defer q.Close()
 
@@ -90,6 +100,10 @@ func main() {
 		logger.Printf("vector: disabled (brute-force over %s)", driverName(cfg.DatabaseURL))
 	}
 	toolRegistry := tools.NewRegistry(db, ragSvc, cfg, logger)
+
+	// Re-enqueue any document ingest left half-done by a previous shutdown — the
+	// queue is in-memory, so without this a doc can be stuck "indexing…" forever.
+	go ragSvc.RequeueIncomplete(context.Background())
 
 	taskLLM := llm.NewTaskLLM(db, providers, logger)
 	memoryWorker := llm.NewMemoryWorker(db, taskLLM, logger)

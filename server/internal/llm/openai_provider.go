@@ -141,7 +141,7 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest,
 		httpReq.Header.Set("authorization", "Bearer "+req.Model.APIKey)
 		httpReq.Header.Set("content-type", "application/json")
 		httpReq.Header.Set("accept", "text/event-stream")
-		resp, err := http.DefaultClient.Do(httpReq)
+		resp, err := providerHTTPClient.Do(httpReq)
 		if err != nil {
 			return nil, err
 		}
@@ -153,6 +153,18 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest,
 		text, reasoning, calls, finish, u, err := readOpenAIChatStream(resp.Body, onEvent)
 		resp.Body.Close()
 		if err != nil {
+			// Stop button / kill: preserve what streamed so far (§6.2) instead of
+			// blanking the message.
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				if reasoning != "" {
+					allBlocks = append(allBlocks, UnifiedBlock{Kind: "thinking", Text: reasoning})
+				}
+				if text != "" {
+					allBlocks = append(allBlocks, UnifiedBlock{Kind: "text", Text: text})
+				}
+				raw, _ := json.Marshal(messages[historyLen:])
+				return &UnifiedResult{Blocks: allBlocks, Raw: raw, StopReason: "stopped", Usage: usage, Citations: allCitations}, err
+			}
 			return nil, err
 		}
 		allText.WriteString(text)
@@ -267,7 +279,7 @@ func (p *OpenAIProvider) promptRunOnce(base string, req UnifiedChatRequest) Prom
 		httpReq.Header.Set("authorization", "Bearer "+req.Model.APIKey)
 		httpReq.Header.Set("content-type", "application/json")
 		httpReq.Header.Set("accept", "text/event-stream")
-		resp, err := http.DefaultClient.Do(httpReq)
+		resp, err := providerHTTPClient.Do(httpReq)
 		if err != nil {
 			return "", Usage{}, err
 		}
@@ -549,7 +561,7 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 		httpReq.Header.Set("authorization", "Bearer "+req.Model.APIKey)
 		httpReq.Header.Set("content-type", "application/json")
 		httpReq.Header.Set("accept", "text/event-stream")
-		resp, err := http.DefaultClient.Do(httpReq)
+		resp, err := providerHTTPClient.Do(httpReq)
 		if err != nil {
 			return nil, err
 		}
@@ -562,6 +574,20 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 		text, reasoning, calls, hosted, citations, u, err := readOpenAIResponsesStream(resp.Body, onEvent)
 		resp.Body.Close()
 		if err != nil {
+			// Stop button / kill: preserve the partial (§6.2).
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				allCitations = append(allCitations, citations...)
+				if reasoning != "" {
+					allBlocks = append(allBlocks, UnifiedBlock{Kind: "thinking", Text: reasoning})
+				}
+				for _, h := range hosted {
+					allBlocks = append(allBlocks, UnifiedBlock{Kind: "tool_call", ToolName: h.Name, ToolID: h.ID, Summary: h.Summary})
+				}
+				if text != "" {
+					allBlocks = append(allBlocks, UnifiedBlock{Kind: "text", Text: text})
+				}
+				return &UnifiedResult{Blocks: allBlocks, StopReason: "stopped", Usage: usage, Citations: allCitations}, err
+			}
 			return nil, err
 		}
 		usage.InputTokens += u.InputTokens

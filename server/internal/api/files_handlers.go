@@ -10,9 +10,13 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"aurelia/server/internal/store"
 )
+
+// errFileTooLarge is returned when an upload exceeds MaxUploadBytes (§C3).
+var errFileTooLarge = errors.New("file exceeds the maximum upload size")
 
 // uploadDestPath returns the per-user destination for a fresh upload. We
 // keep one subdirectory per user under UPLOAD_DIR (`uploads/<userID>/…`)
@@ -63,6 +67,10 @@ func receiveDocument(d Deps, r *http.Request, kbID, convID string) (*store.Docum
 		if body.Filename == "" {
 			return nil, errors.New("filename required")
 		}
+		// §C3 size cap on the JSON content path.
+		if int64(len(body.Content)) > d.Config.MaxUploadBytes {
+			return nil, errFileTooLarge
+		}
 		safe, _, verr := policy.validateUpload(body.Filename)
 		if verr != nil {
 			return nil, verr
@@ -104,9 +112,16 @@ func receiveDocument(d Deps, r *http.Request, kbID, convID string) (*store.Docum
 		return nil, err
 	}
 	defer out.Close()
-	n, err := io.Copy(out, file)
+	// §C3: bound the copy so an oversized upload can't fill the disk. ParseMultipartForm's
+	// arg is only the in-memory threshold; the stream itself must be capped here.
+	n, err := io.Copy(out, io.LimitReader(file, d.Config.MaxUploadBytes+1))
 	if err != nil {
 		return nil, err
+	}
+	if n > d.Config.MaxUploadBytes {
+		_ = out.Close()
+		_ = os.Remove(path)
+		return nil, errFileTooLarge
 	}
 	doc := store.Document{
 		KBID: kbID, ConversationID: convID, Filename: safe,
@@ -126,12 +141,19 @@ func receiveDocument(d Deps, r *http.Request, kbID, convID string) (*store.Docum
 // bytes to the filesystem (§4.6).
 func uploadFileHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
+	if !rateLimitUser(d, u.ID, "upload", 20, time.Minute) { // §C4
+		writeError(w, 429, errUploadRateLimited)
+		return
+	}
 	var conv string
 	if v := r.URL.Query().Get("conversation_id"); v != "" {
 		conv = v
 	}
+	// §C3 hard cap: reject the whole request body past the limit (+overhead) so a
+	// huge upload can't exhaust memory/disk before the per-file copy check.
+	r.Body = http.MaxBytesReader(w, r.Body, d.Config.MaxUploadBytes+1<<20)
 	if err := r.ParseMultipartForm(d.Config.MaxUploadBytes); err != nil {
-		writeError(w, 400, err)
+		writeError(w, 413, errFileTooLarge)
 		return
 	}
 	file, header, err := r.FormFile("file")
@@ -157,9 +179,15 @@ func uploadFileHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer out.Close()
-	n, err := io.Copy(out, file)
+	n, err := io.Copy(out, io.LimitReader(file, d.Config.MaxUploadBytes+1))
 	if err != nil {
 		writeError(w, 500, err)
+		return
+	}
+	if n > d.Config.MaxUploadBytes {
+		_ = out.Close()
+		_ = os.Remove(path)
+		writeError(w, 413, errFileTooLarge)
 		return
 	}
 	f, err := store.CreateFile(r.Context(), d.DB, store.File{

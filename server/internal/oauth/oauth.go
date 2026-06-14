@@ -330,6 +330,14 @@ func decodeIDToken(idToken string) (UserInfo, bool) {
 	if err := json.Unmarshal(payload, &m); err != nil {
 		return UserInfo{}, false
 	}
+	// §A7: reject an expired id_token (60s skew). This is NOT a substitute for
+	// JWKS signature verification — for fully-untrusted generic oidc token
+	// endpoints, verifying the RS256/ES256 signature against the provider's JWKS
+	// (and iss/aud) is the proper control; the account-takeover path is otherwise
+	// closed by requiring a VERIFIED email before linking (see resolveOAuthUser).
+	if exp, ok := m["exp"].(float64); ok && time.Now().Unix() > int64(exp)+60 {
+		return UserInfo{}, false
+	}
 	info := UserInfo{
 		Subject:       str(m["sub"]),
 		Email:         str(m["email"]),

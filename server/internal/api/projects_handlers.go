@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"aurelia/server/internal/store"
 )
@@ -139,12 +140,17 @@ func listProjectDocsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 // uploadProjectDocHandler ingests a new document into the project KB.
 func uploadProjectDocHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
+	if !rateLimitUser(d, u.ID, "upload", 20, time.Minute) { // §C4
+		writeError(w, 429, errUploadRateLimited)
+		return
+	}
 	id := pathParam(r, "id")
 	p, err := store.GetProject(r.Context(), d.DB, id, u.ID)
 	if err != nil || p.KBID == "" {
 		writeError(w, 404, errNotFound)
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, d.Config.MaxUploadBytes+1<<20) // §C3
 	doc, err := receiveDocument(d, r, p.KBID, "")
 	if err != nil {
 		writeError(w, 400, err)

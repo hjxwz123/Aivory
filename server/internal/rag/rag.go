@@ -17,6 +17,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"aurelia/server/internal/queue"
 	"aurelia/server/internal/storage"
@@ -104,6 +106,22 @@ type Embedder interface {
 
 // Ingest enqueues the parse/chunk/embed pipeline for a freshly created
 // document. Failures retry up to 3 times before the document is marked
+// RequeueIncomplete re-enqueues documents left in a non-terminal state
+// (pending/parsing/embedding) by a crash or restart — the in-memory queue
+// doesn't survive a restart, so without this a doc would poll "indexing…"
+// forever. Best-effort; call once at boot.
+func (s *Service) RequeueIncomplete(ctx context.Context) {
+	docs, err := store.ListIncompleteDocuments(ctx, s.db)
+	if err != nil {
+		s.logger.Printf("rag: requeue scan failed: %v", err)
+		return
+	}
+	for _, d := range docs {
+		s.logger.Printf("rag: requeueing stuck document %s (was %s)", d.ID, d.Status)
+		s.Ingest(d.ID)
+	}
+}
+
 // `failed` with the last error (§4.11-C-3). The pipeline is idempotent —
 // repeat calls re-write existing chunks.
 func (s *Service) Ingest(docID string) {
@@ -136,8 +154,15 @@ func (s *Service) runPipeline(ctx context.Context, docID string) error {
 	// degrades gracefully (binary docs become a one-line placeholder).
 	mineruURL := readSettingString(s.db, "mineru_api_url", s.mineruURL)
 	mineruKey := readSettingString(s.db, "mineru_api_token", s.mineruKey)
+	// Blank admin setting → fall back to the env/boot default (bundled sandbox).
 	sbURL := readSettingString(s.db, "sandbox_base_url", s.sandboxURL)
+	if strings.TrimSpace(sbURL) == "" {
+		sbURL = s.sandboxURL
+	}
 	sbKey := readSettingString(s.db, "sandbox_api_key", s.sandboxKey)
+	if strings.TrimSpace(sbKey) == "" {
+		sbKey = s.sandboxKey
+	}
 	storageCfg := storageBlockFromSettings(s.db)
 	storageClient := storage.New(sbURL, sbKey, storageCfg)
 
@@ -307,6 +332,58 @@ type Snippet struct {
 // at different dims) — the orchestrator should split the call instead. With
 // no KBs in scope (pure conversation upload), we fall back to the global
 // resolver since conversation uploads are ephemeral and not locked.
+// §2.4 query-vector cache: identical RAG queries (retries, common questions,
+// the same question across users on a shared KB) reuse the embedding instead of
+// re-calling the embedding API. Keyed by embedder name + query so different
+// models/dims never collide. Process-local, short TTL, bounded size.
+const (
+	queryEmbedTTL = 10 * time.Minute
+	queryEmbedMax = 4096
+)
+
+type queryEmbedEntry struct {
+	vec []float32
+	exp int64
+}
+
+var (
+	queryEmbedMu    sync.Mutex
+	queryEmbedStore = map[string]queryEmbedEntry{}
+)
+
+func (s *Service) embedQueryCached(ctx context.Context, em Embedder, emName, query string) (vec []float32, cached bool, err error) {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(emName))
+	_, _ = h.Write([]byte{0})
+	_, _ = h.Write([]byte(query))
+	key := fmt.Sprintf("%x", h.Sum64())
+
+	now := time.Now().UnixNano()
+	queryEmbedMu.Lock()
+	if e, ok := queryEmbedStore[key]; ok && now < e.exp {
+		v := e.vec
+		queryEmbedMu.Unlock()
+		return v, true, nil
+	}
+	queryEmbedMu.Unlock()
+
+	vecs, err := em.Embed(ctx, []string{query})
+	if err != nil {
+		return nil, false, err
+	}
+	if len(vecs) == 0 {
+		return nil, false, fmt.Errorf("rag: embedder returned no vector")
+	}
+	v := vecs[0]
+	queryEmbedMu.Lock()
+	if len(queryEmbedStore) >= queryEmbedMax {
+		queryEmbedStore = map[string]queryEmbedEntry{} // crude cap; cheap to rebuild
+	}
+	queryEmbedStore[key] = queryEmbedEntry{vec: v, exp: time.Now().Add(queryEmbedTTL).UnixNano()}
+	queryEmbedMu.Unlock()
+	return v, false, nil
+}
+
 func (s *Service) Retrieve(ctx context.Context, userID, convID string, kbIDs []string, query string, topK int) ([]Snippet, error) {
 	if strings.TrimSpace(query) == "" {
 		return nil, nil
@@ -336,13 +413,13 @@ func (s *Service) Retrieve(ctx context.Context, userID, convID string, kbIDs []s
 	} else {
 		em, emName, dim = s.resolveEmbedder(ctx)
 	}
-	qvecs, err := em.Embed(ctx, []string{query})
+	qVec, cached, err := s.embedQueryCached(ctx, em, emName, query)
 	if err != nil {
 		return nil, err
 	}
-	qVec := qvecs[0]
-	// Query embedding is billable too (§8.3 purpose=embedding) — best-effort.
-	if !strings.HasPrefix(emName, "aurelia-local") && userID != "" {
+	// Query embedding is billable (§8.3 purpose=embedding) — but only when we
+	// actually called the API. On a §2.4 query-vector cache hit, no call was made.
+	if !cached && !strings.HasPrefix(emName, "aurelia-local") && userID != "" {
 		_ = store.LogUsage(ctx, s.db, store.UsageLog{
 			UserID: userID, ConversationID: convID,
 			ModelID: strings.TrimPrefix(emName, "emb:"),
@@ -512,6 +589,23 @@ func fuseReciprocalRank(cands []retrievalCandidate) []retrievalCandidate {
 // the vector backend is disabled.
 func (s *Service) OnDocumentDeleted(ctx context.Context, documentID string) error {
 	return s.vec.DeleteByDocument(ctx, documentID)
+}
+
+// PromoteDocument moves a conversation-scoped document into a KB and RE-EMBEDS
+// it with that KB's locked embedder (§C5). The old chunks/vectors were embedded
+// with the conversation's (possibly different model/dim) embedder; keeping them
+// would silently break retrieval, so we drop them and re-run the pipeline, which
+// resolves the destination KB's embedder. Re-ingest is async (Ingest enqueues).
+func (s *Service) PromoteDocument(ctx context.Context, docID, kbID string) error {
+	if err := store.PromoteDocumentToKB(ctx, s.db, docID, kbID); err != nil {
+		return err
+	}
+	_ = s.vec.DeleteByDocument(ctx, docID)
+	if err := store.DeleteChunksByDocument(ctx, s.db, docID); err != nil {
+		return err
+	}
+	s.Ingest(docID) // re-parse + re-embed with the KB's locked model
+	return nil
 }
 
 // OnKBDeleted removes every vector belonging to a knowledge base.

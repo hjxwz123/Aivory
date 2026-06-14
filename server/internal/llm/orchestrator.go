@@ -72,6 +72,7 @@ var perTurnToolLimits = map[string]int{
 	"web_search":     8,
 	"web_fetch":      5,
 	"image_generate": 4,
+	"python_execute": 8, // §F10: cap sandbox executions/turn (each up to 120s) to bound abuse/DoS
 }
 
 // deepResearchToolLimits are the much higher per-turn caps used while the Deep
@@ -80,27 +81,67 @@ var deepResearchToolLimits = map[string]int{
 	"web_search":     40,
 	"web_fetch":      25,
 	"image_generate": 4,
+	"python_execute": 8,
 }
 
-// charge increments the per-turn counter for a tool and returns an error when
-// the limit is exceeded.
+// per-turn GLOBAL tool-call ceiling (§B4): bounds a single message's total
+// tool-driven cost across ALL tools, on top of the per-tool caps — the native
+// provider loop (maxIter=12) otherwise lets the model request unbounded tools
+// per round. Deep Research deliberately fans out far more.
+const (
+	maxToolCallsPerTurn     = 24
+	maxToolCallsPerTurnDeep = 90
+)
+
+// filterDisabledTools drops any tool named in the global `disabled_tools`
+// setting (§B6 partial: a platform-wide tool kill-switch — e.g. turn off
+// python_execute or image_generate without per-model config). Per-model
+// allow-lists remain a future enhancement (needs a models column + admin UI).
+func (o *Orchestrator) filterDisabledTools(defs []ToolDef) []ToolDef {
+	raw, err := store.GetSetting(o.db, "disabled_tools")
+	if err != nil || len(raw) == 0 {
+		return defs
+	}
+	var names []string
+	if json.Unmarshal(raw, &names) != nil || len(names) == 0 {
+		return defs
+	}
+	deny := make(map[string]bool, len(names))
+	for _, n := range names {
+		deny[n] = true
+	}
+	out := make([]ToolDef, 0, len(defs))
+	for _, d := range defs {
+		if !deny[d.Name] {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+// charge increments the per-turn counters for a tool and returns an error when
+// either the per-tool or the global per-turn limit is exceeded.
 func (tc *ToolContext) charge(name string) error {
 	limits := perTurnToolLimits
+	totalCap := maxToolCallsPerTurn
 	if tc.DeepResearch {
 		limits = deepResearchToolLimits
-	}
-	limit, ok := limits[name]
-	if !ok || limit == 0 {
-		return nil
+		totalCap = maxToolCallsPerTurnDeep
 	}
 	tc.budgetMu.Lock()
 	defer tc.budgetMu.Unlock()
 	if tc.counts == nil {
 		tc.counts = map[string]int{}
 	}
-	tc.counts[name]++
-	if tc.counts[name] > limit {
-		return fmt.Errorf("%s call limit (%d) reached for this message", name, limit)
+	tc.counts["__total__"]++
+	if tc.counts["__total__"] > totalCap {
+		return fmt.Errorf("tool-call limit (%d) reached for this message", totalCap)
+	}
+	if limit, ok := limits[name]; ok && limit > 0 {
+		tc.counts[name]++
+		if tc.counts[name] > limit {
+			return fmt.Errorf("%s call limit (%d) reached for this message", name, limit)
+		}
 	}
 	return nil
 }
@@ -264,6 +305,20 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		return &RunResult{UserMessage: userMsg, AssistantMessage: assistantMsg}, nil
 	}
 
+	// 2c. Content moderation (§ moderation): screen the new user prompt alone
+	//     (no history) before any provider call. On block, persist a refusal and
+	//     stop — generation never runs.
+	if blocked, msg := o.moderatePrompt(ctx, model, req.UserText, conv.UserID, conv.ID, assistantMsg.ID); blocked {
+		refusalBlocks, _ := json.Marshal([]UnifiedBlock{{Kind: "text", Text: msg}})
+		_ = store.FinishMessage(ctx, o.db, assistantMsg.ID, store.MessageFinishPatch{
+			Blocks: refusalBlocks, Citations: []byte("[]"), StopReason: "content_moderation", Status: "complete",
+		})
+		onEvent(SseEvent{Type: "refusal", MessageID: assistantMsg.ID, Message: msg})
+		onEvent(SseEvent{Type: "done", MessageID: assistantMsg.ID, StopReason: "content_moderation"})
+		assistantMsg.Blocks = refusalBlocks
+		return &RunResult{UserMessage: userMsg, AssistantMessage: assistantMsg}, nil
+	}
+
 	// 3. Build context.
 	projectName := ""
 	projectInstructions := ""
@@ -287,6 +342,13 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		if err := json.Unmarshal(conv.KBIDs, &extra); err == nil {
 			kbIDs = append(kbIDs, extra...)
 		}
+	}
+	// §C1 cross-user isolation: a conversation's kb_ids are user-supplied (PATCH
+	// /conversations/:id writes them verbatim) and the retrieval layer scopes only
+	// by kb_id — so drop any KB the user doesn't own BEFORE it reaches inline RAG
+	// or the search_knowledge_base tool (ToolContext.KBIDs below).
+	if len(kbIDs) > 0 {
+		kbIDs = store.OwnedKBIDs(ctx, o.db, conv.UserID, kbIDs)
 	}
 
 	// 4. Load full path history (the RAG router + compaction both need it).
@@ -314,7 +376,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		toolMode = "native"
 	}
 	if toolMode != "none" && !useOfficial {
-		toolDefs = o.tools.List(model.ID)
+		toolDefs = o.filterDisabledTools(o.tools.List(model.ID))
 	}
 	toolNames := make([]string, 0, len(toolDefs))
 	for _, t := range toolDefs {
@@ -330,7 +392,12 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	if ragMode == "" {
 		ragMode = "auto"
 	}
-	if o.rag != nil && len(kbIDs) > 0 && ragMode != "tool" && req.Mode != ModeDeepResearch {
+	// §4.11-B: run inline RAG when a KB is bound OR the conversation itself has an
+	// ingested upload (chat-attached files are conversation-scoped, not in a KB —
+	// without this they'd only be retrievable if the model voluntarily called the
+	// search tool, so a non-tool model or an unprompted one would never see them).
+	ragScoped := len(kbIDs) > 0 || (o.rag != nil && store.ConversationHasReadyDocs(ctx, o.db, conv.ID))
+	if o.rag != nil && ragScoped && ragMode != "tool" && req.Mode != ModeDeepResearch {
 		recent := recentHistoryStrings(history, 6)
 		var snippets []rag.Snippet
 		var decision rag.RouteDecision
@@ -574,11 +641,18 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			})
 		}
 		errBlocksJSON, _ := json.Marshal(errBlocks)
+		// §B5: the raw error may embed upstream response bodies (org/request ids,
+		// echoed prompt fragments). Log it server-side; show the user a generic
+		// message and persist only that.
+		if o.logger != nil {
+			o.logger.Printf("orchestrator: generation error (conv=%s msg=%s): %v", conv.ID, assistantMsg.ID, err)
+		}
+		const safeErr = "The model provider returned an error. Please try again in a moment."
 		_ = store.FinishMessage(ctx, o.db, assistantMsg.ID, store.MessageFinishPatch{
 			Blocks: errBlocksJSON, Citations: []byte("[]"),
-			Status: "error", Error: err.Error(),
+			Status: "error", Error: safeErr,
 		})
-		onEvent(SseEvent{Type: "error", Message: err.Error()})
+		onEvent(SseEvent{Type: "error", Message: safeErr})
 		return nil, err
 	}
 

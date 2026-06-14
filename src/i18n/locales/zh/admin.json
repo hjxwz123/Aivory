@@ -87,7 +87,12 @@
       "priceCacheRead": "缓存读取 $/1M",
       "priceCacheWrite": "缓存写入 $/1M",
       "priceImage": "单张图片价格",
-      "enabled": "启用(对用户可见)"
+      "enabled": "启用(对用户可见)",
+      "moderationLabel": "内容审核",
+      "moderationEnable": "生成前审核提示",
+      "moderationHint": "开启后会审核每条用户提示（不含历史）。关键词与审核模型在「内容审核」页配置。",
+      "moderationModeKeyword": "关键词匹配",
+      "moderationModeModel": "审核模型"
     },
     "editorTitle": "编辑模型",
     "newTitle": "新建模型",
@@ -180,7 +185,8 @@
     "copy": "复制回调地址",
     "errors": {
       "nameRequired": "请填写按钮文字"
-    }
+    },
+    "copied": "已复制"
   },
   "users": {
     "title": "用户",
@@ -426,5 +432,45 @@
     "unlimitedHint": "填 0 表示该周期内无限制。",
     "capHint": "该用户组每个周期的上限。",
     "save": "保存权限"
+  },
+  "analytics": {
+    "title": "分析",
+    "lead": "平台整体使用趋势 —— 总体、分模型、分用户。",
+    "empty": "该时间段暂无使用记录。",
+    "unknownUser": "未知用户",
+    "metric": {
+      "calls": "调用次数",
+      "tokens": "令牌",
+      "cost": "费用"
+    },
+    "stats": {
+      "calls": "总调用次数",
+      "tokens": "总令牌数",
+      "cost": "总费用",
+      "users": "活跃用户"
+    },
+    "sections": {
+      "daily": "按天使用趋势",
+      "hourly": "按小时使用趋势",
+      "byModel": "分模型使用",
+      "byUser": "分用户使用"
+    }
+  },
+  "moderation": {
+    "title": "内容审核",
+    "lead": "在生成前审核每条用户提示。每个模型的开关与模式在模型编辑页设置。",
+    "saved": "审核设置已保存",
+    "keywordsLabel": "违规关键词",
+    "keywordsHint": "每行一个关键词。关键词模式下，命中任意关键词即拦截。留空则不启用关键词审核。",
+    "keywordsPlaceholder": "每行一个关键词",
+    "keywordsCount": "{{count}} 个关键词",
+    "modelLabel": "审核模型",
+    "modelHint": "供设置为「模型」模式的模型使用——生成前会把提示发给它做放行/拦截判定。",
+    "modelNone": "未选择",
+    "categoriesLabel": "违规类型",
+    "categoriesHint": "每行一个。「模型」模式下，审核模型会按这些类型判定提示（如政治、色情、暴力等）。",
+    "categoriesPlaceholder": "每行一个类型",
+    "messageLabel": "拦截提示语",
+    "messageHint": "提示被拦截时向用户显示的文字。"
   }
 }

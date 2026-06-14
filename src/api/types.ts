@@ -22,6 +22,60 @@ export interface ApiUser {
   created_at: number
 }
 
+/** Admin analytics (§ admin → analytics). */
+export interface ApiUsageTotals {
+  calls: number
+  input_tokens: number
+  output_tokens: number
+  cost: number
+  users: number
+}
+export interface ApiUsageTrendPoint {
+  bucket_start: number
+  input_tokens: number
+  output_tokens: number
+  calls: number
+  cost: number
+}
+export interface ApiUsageBreakdownRow {
+  key: string
+  label: string
+  input_tokens: number
+  output_tokens: number
+  calls: number
+  cost: number
+}
+export interface ApiUsageSeriesPoint {
+  bucket_start: number
+  key: string
+  input_tokens: number
+  output_tokens: number
+  calls: number
+  cost: number
+}
+export interface ApiAnalytics {
+  days: number
+  bucket: number
+  totals: ApiUsageTotals
+  trend: ApiUsageTrendPoint[]
+  by_model: ApiUsageBreakdownRow[]
+  by_user: ApiUsageBreakdownRow[]
+  model_series: ApiUsageSeriesPoint[]
+  user_series: ApiUsageSeriesPoint[]
+}
+
+/** One active sign-in (§ account → active sessions). `id` is the refresh-token
+ * jti, used as the opaque handle to revoke it. `location` is best-effort and may
+ * be empty when no geo-providing proxy is in front of the server. */
+export interface ApiSession {
+  id: string
+  ip: string
+  user_agent: string
+  location: string
+  created_at: number
+  last_seen: number
+}
+
 /** Owner-facing descriptor of a conversation's public share (§ sharing). */
 export interface ApiShareInfo {
   id: string
@@ -130,6 +184,10 @@ export interface ApiModel {
   param_controls: unknown
   /** OpenAI Responses hosted tools to enable; empty/absent = use system tools (§2.3-B). */
   official_tools?: string[]
+  /** Screen each user prompt before generation (§ moderation). */
+  moderation_enabled?: boolean
+  /** Which screen to use when moderation is on: keyword list or a model verdict. */
+  moderation_mode?: 'keyword' | 'model'
   price_input: number
   price_output: number
   price_cache_read: number
@@ -271,6 +329,8 @@ export interface ApiMessage {
   currency: string
   status: 'streaming' | 'complete' | 'error'
   error: string
+  /** User rating on an assistant message: "" | "like" | "dislike". */
+  feedback?: string
   created_at: number
   /** Sibling navigation (only on the path response). */
   branch_index?: number

@@ -5,6 +5,7 @@
  */
 import { api } from './client'
 import type {
+  ApiAnalytics,
   ApiAuthResponse,
   ApiChannel,
   ApiConversation,
@@ -16,6 +17,7 @@ import type {
   ApiModelQuota,
   ApiOAuthProvider,
   ApiProject,
+  ApiSession,
   ApiUserGroup,
   ApiPublicOAuthProvider,
   ApiShareInfo,
@@ -55,6 +57,13 @@ export const authApi = {
     api<Record<string, unknown>>('/me/settings', { method: 'PATCH', body: patch }),
   // Cost is intentionally NOT exposed to users — only message volume.
   usage: () => api<{ days: number; messages: number }>('/me/usage'),
+  // Active sessions (§ account → active sessions). `current` is the jti of the
+  // session making the request, so the UI can mark "This device".
+  sessions: () => api<{ sessions: ApiSession[]; current: string }>('/auth/sessions'),
+  revokeSession: (id: string) =>
+    api<{ ok: true }>(`/auth/sessions/${encodeURIComponent(id)}/revoke`, { method: 'POST' }),
+  revokeOtherSessions: () =>
+    api<{ ok: true }>('/auth/sessions/revoke-others', { method: 'POST' }),
   /** Permanently delete the user's account and all data. Requires password confirmation. */
   deleteAccount: (password: string) =>
     api<{ ok: true }>('/me', { method: 'DELETE', body: { password } }),
@@ -118,6 +127,12 @@ export const projectsApi = {
   listDocs: (id: string) => api<ApiDocument[]>(`/projects/${encodeURIComponent(id)}/documents`),
   addDoc: (id: string, body: { filename: string; content: string; mime_type?: string }) =>
     api<ApiDocument>(`/projects/${encodeURIComponent(id)}/documents`, { method: 'POST', body }),
+  /** Upload a real file (multipart) into the project's knowledge library. */
+  uploadDoc: (id: string, file: File) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    return api<ApiDocument>(`/projects/${encodeURIComponent(id)}/documents`, { method: 'POST', body: fd })
+  },
   removeDoc: (id: string, docId: string) =>
     api<{ ok: true }>(`/projects/${encodeURIComponent(id)}/documents/${encodeURIComponent(docId)}`, {
       method: 'DELETE',
@@ -290,6 +305,7 @@ export const adminApi = {
     api<{ ok: true }>(`/admin/conversations/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 
   usage: (days = 30) => api<{ days: number; rows: ApiUsageReportRow[]; trend: { bucket_start: number; input_tokens: number; output_tokens: number; calls: number; cost: number }[] }>(`/admin/usage?days=${days}`),
+  analytics: (days = 30) => api<ApiAnalytics>(`/admin/analytics?days=${days}`),
 
   settings: () => api<Record<string, unknown>>('/admin/settings'),
   updateSettings: (patch: Record<string, unknown>) =>

@@ -88,10 +88,13 @@
      Not pure white (§7) — faint porcelain. */
   --color-preview-canvas: oklch(99.2% 0.003 280);
 
-  /* ---------- TYPOGRAPHY ----------------------------------------------- */
-  --font-serif: 'Fraunces', 'Cormorant Garamond', 'Iowan Old Style', Charter, ui-serif, serif;
-  --font-sans: 'Geist', 'Geist Sans', 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --font-mono: 'Geist Mono', 'JetBrains Mono', ui-monospace, 'SF Mono', Consolas, monospace;
+  /* ---------- TYPOGRAPHY -----------------------------------------------
+     Primary families are the self-hosted @fontsource *Variable* faces
+     (imported in main.tsx); the non-variable + system names remain as
+     graceful fallbacks. */
+  --font-serif: 'Fraunces Variable', 'Fraunces', 'Cormorant Garamond', 'Iowan Old Style', Charter, ui-serif, serif;
+  --font-sans: 'Geist Variable', 'Geist', 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'Geist Mono Variable', 'Geist Mono', 'JetBrains Mono', ui-monospace, 'SF Mono', Consolas, monospace;
 
   /* Type scale — modular, generous */
   --text-xs: 0.75rem;       /* 12 */
@@ -266,6 +269,20 @@
   --text-base: 1rem;              /* 16 */
   --text-md: 1.0625rem;           /* 17 */
   --text-lg: 1.25rem;             /* 20 */
+}
+
+/* ============================================================================
+ * BODY TYPEFACE — personalization (§ Personalization → font).
+ * Default (no data-font / "default") keeps Geist from the base --font-sans.
+ * ============================================================================ */
+:root[data-font="inter"] {
+  --font-sans: 'Inter Variable', 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+:root[data-font="system"] {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+:root[data-font="serif"] {
+  --font-sans: 'Fraunces Variable', 'Fraunces', 'Iowan Old Style', Charter, ui-serif, Georgia, serif;
 }
 
 /* ============================================================================

@@ -56,6 +56,9 @@ export interface Citation {
   url: string
   domain: string
   snippet?: string
+  /** Origin of the citation: 'web' for an external page, 'kb' for one of the
+   *  user's own indexed documents (rendered as a non-link document chip). */
+  source?: 'web' | 'kb'
 }
 
 /** Live (and persisted) state of a Deep Research turn (§ deep-research mode). */
@@ -124,6 +127,9 @@ export interface Message {
   artifacts?: ArtifactRef[]
   /** Set when the model declined to answer (content filter). */
   refused?: boolean
+  /** Set when the prompt was blocked by content moderation (§ moderation) —
+   *  rendered as a prominent red notice asking the user to re-edit. */
+  moderation?: boolean
   /** Model that generated this assistant message (§7.2-6 “由 … 生成”). */
   modelId?: string
   /** When the user is editing a previously sent message. */

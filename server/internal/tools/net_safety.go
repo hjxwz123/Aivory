@@ -1,61 +1,35 @@
 package tools
 
 import (
-	"errors"
 	"net"
 	"net/http"
-	"syscall"
 	"time"
+
+	"aurelia/server/internal/netsafe"
 )
 
-// isPublicIP rejects loopback, private (RFC1918 + ULA fc00::/7), link-local and
-// unspecified addresses — the destinations an SSRF attack tries to reach.
-func isPublicIP(ip net.IP) bool {
-	if ip == nil {
-		return false
-	}
-	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
-		ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast() {
-		return false
-	}
-	return true
-}
+// isPublicIP rejects loopback/private/link-local/unspecified/multicast plus the
+// CGNAT/NAT64/TEST-NET ranges Go doesn't classify (§F4). Delegates to the shared
+// netsafe package so the tools and rag SSRF guards stay in lockstep.
+func isPublicIP(ip net.IP) bool { return netsafe.IsPublicIP(ip) }
 
-// ssrfSafeClient returns an http.Client that, per design.md §4.4:
-//   - only connects to ports 80/443,
-//   - validates the *resolved* IP at dial time (defeats DNS-rebinding and any
-//     redirect hop, because Control runs for every physical connection),
-//   - caps redirects.
-func ssrfSafeClient() *http.Client {
-	dialer := &net.Dialer{
-		Timeout: 10 * time.Second,
-		Control: func(_, address string, _ syscall.RawConn) error {
-			host, port, err := net.SplitHostPort(address)
-			if err != nil {
-				return err
-			}
-			if port != "80" && port != "443" {
-				return errors.New("blocked non-web port: " + port)
-			}
-			if ip := net.ParseIP(host); !isPublicIP(ip) {
-				return errors.New("blocked private/loopback host")
-			}
-			return nil
-		},
-	}
-	return &http.Client{
-		Timeout: 25 * time.Second,
-		Transport: &http.Transport{
-			DialContext:         dialer.DialContext,
-			MaxIdleConns:        10,
-			IdleConnTimeout:     30 * time.Second,
-			TLSHandshakeTimeout: 10 * time.Second,
-		},
-		CheckRedirect: func(_ *http.Request, via []*http.Request) error {
-			if len(via) >= 5 {
-				return errors.New("too many redirects")
-			}
-			return nil // each hop's IP+port is re-validated by Dialer.Control
-		},
-	}
+// ssrfSafeClient returns an http.Client that only connects to ports 80/443 and
+// validates the resolved IP at dial time (defeats DNS-rebinding + redirects).
+// Use for MODEL-controlled URLs (web_fetch).
+func ssrfSafeClient() *http.Client { return netsafe.SafeClient(25 * time.Second) }
+
+// toolHTTPClient is for ADMIN-configured tool endpoints (web search backends,
+// image-generation gateways). Like the LLM provider client (§B2/§F3) it bounds
+// connect/TLS/response-header time but not the overall body (image gen is slow),
+// and — unlike ssrfSafeClient — it does NOT block private IPs, because these base
+// URLs are admin-set and legitimately point at internal gateways. The query /
+// prompt that the model controls is request DATA, not the destination URL.
+var toolHTTPClient = &http.Client{
+	Transport: &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		DialContext:           (&net.Dialer{Timeout: 10 * time.Second}).DialContext,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 120 * time.Second,
+		IdleConnTimeout:       90 * time.Second,
+	},
 }

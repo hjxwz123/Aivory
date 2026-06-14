@@ -14,6 +14,10 @@ type Cache interface {
 	Set(key, value string, ttl time.Duration)
 	Delete(key string)
 	Incr(key string, ttl time.Duration) int64
+	// IncrBy atomically adds delta to a key (creating it with the TTL if absent),
+	// flooring at 0. Returns the new value. Used for non-negative accumulators
+	// like windowed cost quotas (stored in integer micro-units).
+	IncrBy(key string, delta int64, ttl time.Duration) int64
 	// Decr atomically decrements a key, flooring at 0. Returns the new value.
 	Decr(key string) int64
 	Publish(topic string, payload string)
@@ -88,6 +92,31 @@ func (m *memory) Incr(key string, ttl time.Duration) int64 {
 	}
 	n := parseInt(e.value)
 	n++
+	e.value = formatInt(n)
+	m.store[key] = e
+	return n
+}
+
+func (m *memory) IncrBy(key string, delta int64, ttl time.Duration) int64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	e, ok := m.store[key]
+	if !ok || (e.exp > 0 && time.Now().UnixNano() > e.exp) {
+		v := delta
+		if v < 0 {
+			v = 0
+		}
+		exp := int64(0)
+		if ttl > 0 {
+			exp = time.Now().Add(ttl).UnixNano()
+		}
+		m.store[key] = memoryEntry{value: formatInt(v), exp: exp}
+		return v
+	}
+	n := parseInt(e.value) + delta
+	if n < 0 {
+		n = 0
+	}
 	e.value = formatInt(n)
 	m.store[key] = e
 	return n

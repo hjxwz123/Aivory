@@ -59,7 +59,7 @@ func (s *serperSearcher) Search(ctx context.Context, query string, topK int) (st
 	req, _ := http.NewRequestWithContext(ctx, "POST", "https://google.serper.dev/search", strings.NewReader(string(body)))
 	req.Header.Set("x-api-key", s.apiKey)
 	req.Header.Set("content-type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := toolHTTPClient.Do(req)
 	if err != nil {
 		return "", nil, err
 	}
@@ -101,7 +101,7 @@ func (b *braveSearcher) Search(ctx context.Context, query string, topK int) (str
 	req, _ := http.NewRequestWithContext(ctx, "GET", u, nil)
 	req.Header.Set("X-Subscription-Token", b.apiKey)
 	req.Header.Set("Accept", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := toolHTTPClient.Do(req)
 	if err != nil {
 		return "", nil, err
 	}
@@ -147,7 +147,7 @@ func (s *searxngSearcher) Search(ctx context.Context, query string, topK int) (s
 	req, _ := http.NewRequestWithContext(ctx, "GET", u, nil)
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "AureliaBot/1.0")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := toolHTTPClient.Do(req)
 	if err != nil {
 		return "", nil, err
 	}

@@ -68,7 +68,12 @@
     "ragFullText": "Injected full document(s)",
     "ragFullDoc": "Whole-document context",
     "ragNone": "Skipped retrieval",
-    "ragDefault": "Retrieved sources"
+    "ragDefault": "Retrieved sources",
+    "moderation": {
+      "title": "Content blocked",
+      "body": "Your message may violate our usage terms.",
+      "cta": "Please edit your message and try again."
+    }
   },
   "tools": {
     "web_search": "Web search",
@@ -76,7 +81,9 @@
     "deep_research": "Deep research"
   },
   "sources": {
-    "label": "Sources"
+    "label": "Sources",
+    "open": "Open source",
+    "fromDocuments": "from your documents"
   },
   "research": {
     "title": "Deep research",
@@ -152,7 +159,9 @@
     "deleted": "Conversation deleted",
     "empty": "No conversations yet.",
     "starred": "Starred",
-    "recents": "Recents"
+    "recents": "Recents",
+    "moveToProject": "Move to project",
+    "removeFromProject": "Remove from project"
   },
   "topbar": {
     "shareTooltip": "Share"
@@ -210,7 +219,8 @@
     "personalization": "Personalization",
     "knowledge": "Knowledge",
     "admin": "Admin",
-    "subscription": "Subscription"
+    "subscription": "Subscription",
+    "language": "Language"
   },
   "suggestions": {
     "outline-essay": {

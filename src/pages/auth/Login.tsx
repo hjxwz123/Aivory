@@ -12,6 +12,15 @@ import { useAuth } from '@/store/auth'
 import { useOAuthProviders } from '@/hooks/use-oauth-providers'
 import { OAuthButtons } from '@/components/auth/oauth-buttons'
 
+/**
+ * Only follow a post-login `from` when it's a root-relative internal path
+ * (`/…`). Rejecting the protocol-relative `//evil.com` form (and any absolute
+ * URL) blocks an open-redirect via crafted `location.state` (§ auth E2).
+ */
+function safeRedirect(from: unknown): string {
+  return typeof from === 'string' && from.startsWith('/') && !from.startsWith('//') ? from : '/'
+}
+
 const ease: [number, number, number, number] = [0.2, 0.8, 0.2, 1]
 const stagger = { hidden: {}, visible: { transition: { staggerChildren: 0.06, delayChildren: 0.04 } } }
 const fadeUp = {
@@ -48,13 +57,13 @@ export default function Login() {
     setSearchParams(searchParams, { replace: true })
   }, [searchParams, setSearchParams, t])
 
-  // An OAuth login for a 2FA-enabled account redirects back here with a ticket —
-  // resume the code step (§ 2FA login).
+  // An OAuth login for a 2FA-enabled account redirects back here with ?twofa=1;
+  // the ticket itself rides a short-lived HttpOnly cookie (§A10), so we just flip
+  // to the code step with an empty ticket — the backend reads it from the cookie.
   useEffect(() => {
-    const ticket = searchParams.get('twofa_ticket')
-    if (!ticket) return
-    startTwoFactor(ticket)
-    searchParams.delete('twofa_ticket')
+    if (searchParams.get('twofa') !== '1') return
+    startTwoFactor('')
+    searchParams.delete('twofa')
     setSearchParams(searchParams, { replace: true })
   }, [searchParams, setSearchParams, startTwoFactor])
 
@@ -87,7 +96,7 @@ export default function Login() {
       return
     }
     toast.success(t('login.welcome'), t('login.signingIn'))
-    const from = (location.state as { from?: string } | null)?.from ?? '/'
+    const from = safeRedirect((location.state as { from?: string } | null)?.from)
     navigate(from, { replace: true })
   }
 
@@ -105,7 +114,7 @@ export default function Login() {
       return
     }
     toast.success(t('login.welcome'), t('login.signingIn'))
-    const from = (location.state as { from?: string } | null)?.from ?? '/'
+    const from = safeRedirect((location.state as { from?: string } | null)?.from)
     navigate(from, { replace: true })
   }
 

@@ -4,7 +4,7 @@
  *    conversation runs inside the project (sometimes called custom
  *    instructions or system prompt),
  *  • a small "knowledge" library of files the assistant should treat
- *    as authoritative context (mocked client-side),
+ *    as authoritative context,
  *  • the set of conversations that have been started inside it.
  *
  * Mirrors the shape of ChatGPT Projects / Claude Projects / Gemini
@@ -39,6 +39,9 @@ export interface Project {
   accent: ProjectAccent
   /** Visual marker (one emoji or a single character). */
   emoji?: string
+  /** When true, files uploaded inside a project chat are auto-added to the
+   *  project's knowledge library (backend `auto_add_uploads`). */
+  autoAddUploads?: boolean
   createdAt: number
   updatedAt: number
   pinned?: boolean

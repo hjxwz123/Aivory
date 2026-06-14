@@ -33,8 +33,17 @@ func newSettingsSandbox(db *sql.DB, fallbackURL, fallbackKey string) *settingsSa
 // the session id identifies the session on whatever backend is configured at
 // the time, and config does not change mid-call.
 func (s *settingsSandbox) backend() sandbox.Service {
+	// A blank admin setting means "not configured" → use the env/boot default
+	// (e.g. the bundled localhost sandbox). A non-blank setting always wins, so
+	// an admin can still point at an external sandbox.
 	base := s.settingString("sandbox_base_url", s.fallbackURL)
+	if strings.TrimSpace(base) == "" {
+		base = s.fallbackURL
+	}
 	key := s.settingString("sandbox_api_key", s.fallbackKey)
+	if strings.TrimSpace(key) == "" {
+		key = s.fallbackKey
+	}
 	storage := s.storageConfig()
 	return sandbox.NewWithStorage(base, key, storage)
 }

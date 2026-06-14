@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Plus, Search, FolderKanban } from 'lucide-react'
 import { useProjects } from '@/store/projects'
 import { useConversations } from '@/store/conversations'
+import { ContentHeader } from '@/components/layout/content-header'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
@@ -54,33 +55,30 @@ export default function ProjectsList() {
   const totalVisible = sorted.length
 
   return (
-    <div className="flex-1 min-h-0 overflow-y-auto">
-      <div className="mx-auto w-full max-w-[68rem] px-5 sm:px-10 lg:px-14 pt-10 sm:pt-16 pb-24">
-        {/* Header. Editorial hero: serif headline, single subhead, primary
-            action on the right. No eyebrow, no card chrome. */}
-        <header className="flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
-          <div className="max-w-[34ch]">
-            <h1 className="font-serif text-[2.5rem] sm:text-[3.25rem] leading-[1.02] tracking-[-0.02em] text-[var(--color-fg)]">
-              {t('projects:list.title')}
-            </h1>
-            <p className="mt-4 text-[var(--color-fg-muted)] text-[15px] sm:text-base leading-relaxed">
-              {t('projects:list.subtitle')}
-            </p>
-          </div>
+    <div className="flex-1 min-h-0 flex flex-col bg-[var(--color-bg)] text-[var(--color-fg)]">
+      <ContentHeader
+        title={t('projects:list.title')}
+        actions={
           <Button
             variant="secondary"
+            size="sm"
             leadingIcon={<Plus size={15} aria-hidden />}
             onClick={() => setCreateOpen(true)}
-            className="self-start sm:self-auto"
           >
             {t('projects:list.createCta')}
           </Button>
-        </header>
+        }
+      />
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        <div className="mx-auto w-full max-w-[var(--layout-content-max-w)] px-5 sm:px-8 py-8 pb-24">
+          <p className="max-w-[60ch] text-[var(--color-fg-muted)] text-[15px] leading-relaxed">
+            {t('projects:list.subtitle')}
+          </p>
 
-        {/* Controls strip. Lives directly above the list, separated by a
-            single hairline (Section 4.4: no card containers around tools). */}
-        {projects.length > 0 ? (
-          <div className="mt-12 sm:mt-16 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-b border-[var(--color-divider)] pb-4">
+          {/* Controls strip. Lives directly above the list, separated by a
+              single hairline (Section 4.4: no card containers around tools). */}
+          {projects.length > 0 ? (
+            <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-b border-[var(--color-divider)] pb-4">
             <div className="sm:max-w-xs w-full">
               <Input
                 leadingIcon={<Search size={14} aria-hidden />}
@@ -161,6 +159,7 @@ export default function ProjectsList() {
             }
           />
         )}
+        </div>
       </div>
 
       <NewProjectDialog open={createOpen} onOpenChange={setCreateOpen} />

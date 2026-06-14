@@ -35,6 +35,12 @@ func transcribeAudioHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errors.New("voice transcription is not configured — set it in Admin → Voice"))
 		return
 	}
+	// §D6: per-user rate limit — each call buffers up to 25 MiB and burns the
+	// admin's transcription spend.
+	if u := authUser(r); u != nil && !rateLimitUser(d, u.ID, "audio", 20, time.Minute) {
+		writeError(w, 429, errors.New("transcription rate limit exceeded — try again shortly"))
+		return
+	}
 
 	if err := r.ParseMultipartForm(maxAudioBytes + 1024); err != nil {
 		writeError(w, 400, err)

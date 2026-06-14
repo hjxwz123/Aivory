@@ -56,6 +56,9 @@ export const DialogContent = forwardRef<
         className={cn(
           'fixed left-1/2 top-1/2 z-[60] -translate-x-1/2 -translate-y-1/2 w-[min(96vw,calc(100vw-2rem))]',
           sizeMap[size],
+          // Never exceed the viewport: cap height and let the body scroll while
+          // the header/footer stay pinned (see DialogBody/DialogHeader/Footer).
+          'flex flex-col max-h-[calc(100dvh-2rem)]',
           'rounded-[18px] bg-[var(--color-surface)] border border-[var(--color-border)]',
           'shadow-[var(--shadow-xl)]',
           'data-[state=open]:animate-[pop-in_220ms_var(--ease-out)]',
@@ -85,18 +88,20 @@ export const DialogContent = forwardRef<
 })
 
 export function DialogHeader({ className, ...rest }: HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn('px-6 pt-6 pb-3', className)} {...rest} />
+  return <div className={cn('shrink-0 px-6 pt-6 pb-3', className)} {...rest} />
 }
 
 export function DialogBody({ className, ...rest }: HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn('px-6 pb-4', className)} {...rest} />
+  // The scroll region: takes the slack between header/footer and the capped
+  // content height, scrolling its own overflow so tall forms stay reachable.
+  return <div className={cn('min-h-0 flex-1 overflow-y-auto px-6 pb-4', className)} {...rest} />
 }
 
 export function DialogFooter({ className, ...rest }: HTMLAttributes<HTMLDivElement>) {
   return (
     <div
       className={cn(
-        'px-6 py-4 border-t border-[var(--color-divider)] flex items-center justify-end gap-2',
+        'shrink-0 px-6 py-4 border-t border-[var(--color-divider)] flex items-center justify-end gap-2',
         className,
       )}
       {...rest}

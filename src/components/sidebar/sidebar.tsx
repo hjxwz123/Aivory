@@ -18,6 +18,7 @@ import {
   Wand2,
   ShieldCheck,
   Layers,
+  Languages,
 } from 'lucide-react'
 import { Logo, LogoMark } from '@/components/brand/logo'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
@@ -29,7 +30,12 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import {
@@ -44,10 +50,13 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { NewProjectDialog } from '@/components/projects/new-project-dialog'
+import { MoveToProjectSub } from '@/components/projects/move-to-project-menu'
 import { useConversations } from '@/store/conversations'
 import { useProjects } from '@/store/projects'
 import { useSettings } from '@/store/settings'
 import { useAuth } from '@/store/auth'
+import { useLanguage } from '@/store/language'
+import { SUPPORTED_LANGUAGES } from '@/i18n'
 import { useCommandMenu } from '@/hooks/use-command-menu'
 import { useCopy } from '@/hooks/use-clipboard'
 import { conversationsApi, ApiError } from '@/api'
@@ -408,6 +417,8 @@ function ConversationItem({
                 {t('sidebar.share')}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
+              <MoveToProjectSub conversationId={conversation.id} currentProjectId={conversation.projectId} />
+              <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => archive(conversation.id)}>
                 <Archive size={13} aria-hidden />
                 {t('sidebar.archive')}
@@ -486,6 +497,8 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
   const logout = useAuth((s) => s.logout)
   const displayName = user?.name || user?.email?.split('@')[0] || 'Aurelia'
   const isAdmin = user?.role === 'admin'
+  const lang = useLanguage((s) => s.lang)
+  const setLang = useLanguage((s) => s.setLang)
   const [archivedOpen, setArchivedOpen] = useState(false)
   return (
     <>
@@ -545,6 +558,22 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
             {t('chat:userMenu.admin', { defaultValue: 'Admin' })}
           </DropdownMenuItem>
         )}
+        <DropdownMenuSeparator />
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger>
+            <Languages size={13} aria-hidden />
+            {t('chat:userMenu.language', { defaultValue: 'Language' })}
+          </DropdownMenuSubTrigger>
+          <DropdownMenuSubContent>
+            <DropdownMenuRadioGroup value={lang} onValueChange={(v) => setLang(v as typeof lang)}>
+              {SUPPORTED_LANGUAGES.map((l) => (
+                <DropdownMenuRadioItem key={l.code} value={l.code}>
+                  {l.label}
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
         <DropdownMenuSeparator />
         <DropdownMenuItem
           onClick={() =>
