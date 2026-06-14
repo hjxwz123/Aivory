@@ -1,0 +1,82 @@
+# Aurelia Python sandbox — runtime image (design.md §4.5).
+#
+# This is the image each session container runs. It is a pure-Python runtime
+# (no Node.js) carrying the data-science stack + document-generation deps from
+# §4.5, plus CJK / emoji fonts so matplotlib charts and generated PDF/PPT/DOCX
+# render Chinese without tofu boxes.
+#
+#   docker build -f Dockerfile.runner -t aurelia-sandbox:latest .
+#
+# The container itself does nothing but `sleep infinity`; the sidecar
+# (app.py) runs code inside it via `docker exec`.
+
+FROM python:3.12-slim-bookworm
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    MPLBACKEND=Agg \
+    MPLCONFIGDIR=/home/sandbox/.config/matplotlib
+
+# --- System deps -----------------------------------------------------------
+# weasyprint (HTML->PDF) needs pango/cairo/gdk-pixbuf/harfbuzz; matplotlib &
+# PDF/PPT generation need fonts. `fonts-noto-cjk` is the one that kills the
+# "Chinese shows as boxes" bug (§4.5 镜像清单).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        # weasyprint / cairo / pango runtime
+        libpango-1.0-0 libpangocairo-1.0-0 libcairo2 libgdk-pixbuf-2.0-0 \
+        libffi8 libharfbuzz0b libfribidi0 libjpeg62-turbo libopenjp2-7 \
+        shared-mime-info \
+        # fonts: CJK + emoji + western + math
+        fonts-noto-cjk fonts-noto-cjk-extra fonts-noto-color-emoji \
+        fonts-dejavu fonts-dejavu-extra fonts-noto-core \
+        # handy binaries
+        fontconfig poppler-utils coreutils \
+    && rm -rf /var/lib/apt/lists/* \
+    && fc-cache -f
+
+# --- Python packages -------------------------------------------------------
+# Common data-science + document-generation set (§4.5). Kept to a "batteries
+# included but not 2GB" selection; add heavyweight extras (playwright/chromium,
+# LibreOffice) by uncommenting the blocks at the bottom of this file.
+RUN pip install --upgrade pip && pip install \
+        numpy pandas scipy scikit-learn statsmodels \
+        matplotlib seaborn plotly kaleido \
+        pillow sympy networkx \
+        openpyxl xlsxwriter xlrd pypdf \
+        python-pptx python-docx reportlab weasyprint \
+        tabulate requests lxml beautifulsoup4 markdown jinja2 pyyaml
+
+# --- Non-root user + workspace --------------------------------------------
+RUN useradd --create-home --uid 1000 sandbox \
+    && mkdir -p /workspace/uploads /workspace/outputs \
+                /home/sandbox/.config/matplotlib \
+    && chown -R sandbox:sandbox /workspace /home/sandbox
+
+# matplotlib: default to a CJK-capable font + render minus signs correctly.
+RUN printf '%s\n' \
+        'font.family: sans-serif' \
+        'font.sans-serif: Noto Sans CJK SC, Noto Sans CJK JP, WenQuanYi Zen Hei, DejaVu Sans' \
+        'axes.unicode_minus: False' \
+        'figure.dpi: 120' \
+        'savefig.bbox: tight' \
+    > /home/sandbox/.config/matplotlib/matplotlibrc \
+    && chown sandbox:sandbox /home/sandbox/.config/matplotlib/matplotlibrc
+
+USER sandbox
+WORKDIR /workspace
+
+CMD ["sleep", "infinity"]
+
+# --- Optional heavyweight extras (uncomment if you need them) ---------------
+# Playwright + headless Chromium for HTML screenshots (§4.5.1). Adds ~400MB.
+# USER root
+# RUN pip install playwright && playwright install --with-deps chromium
+# USER sandbox
+#
+# LibreOffice (soffice) for format conversion / rendering pptx. Adds ~500MB.
+# USER root
+# RUN apt-get update && apt-get install -y --no-install-recommends libreoffice-impress libreoffice-writer libreoffice-calc \
+#     && rm -rf /var/lib/apt/lists/*
+# USER sandbox

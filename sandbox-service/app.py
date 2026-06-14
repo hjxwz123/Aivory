@@ -1,0 +1,1186 @@
+"""
+Aurelia local Python sandbox — sidecar service (design.md §4.5).
+
+Speaks the tiny 3-endpoint HTTP protocol that `server/internal/sandbox/
+sandbox.go` already expects, so the Go backend needs zero changes — just point
+SANDBOX_BASE_URL at this service:
+
+    POST /sessions  -> {"session_id": "..."}
+    POST /exec      {session_id, code, timeout_ms}
+                    -> {"stdout", "stderr", "exit_code", "files":[{name,mime_type,data_base64}]}
+    POST /files     {session_id, path, data_base64}  -> {"ok": true}
+
+Each session is one long-lived, locked-down Docker container running the
+`aurelia-sandbox` image (see Dockerfile.runner). /workspace persists across
+exec calls within a session — pip-installed packages, generated files and
+intermediate data survive, matching ChatGPT Code Interpreter behaviour.
+
+Design baselines honoured here (§4.5 安全基线):
+  - non-root, --network none by default, no-new-privileges, dropped caps
+  - memory / cpu / pids / nofile limits
+  - 120s exec timeout (overridable per-call, capped)
+  - stdout/stderr streamed through a 32KB cap before returning to the model
+  - artifacts capped per file, per exec count, and per exec total bytes
+  - 30min idle TTL reaper
+
+This is a DEV / single-host tool. For production swap `docker run` here for a
+gVisor / microVM / E2B backend — the Go side and this HTTP contract do not move.
+"""
+
+from __future__ import annotations
+
+import base64
+import binascii
+from contextlib import contextmanager
+from dataclasses import dataclass
+import mimetypes
+import os
+import re
+import secrets
+import selectors
+import subprocess
+import sys
+import threading
+import time
+import uuid
+from collections.abc import Iterator
+from typing import Any, Optional
+
+from fastapi import Body, FastAPI, HTTPException
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
+
+# --- Config (env-overridable) ----------------------------------------------
+IMAGE = os.environ.get("SANDBOX_IMAGE", "aurelia-sandbox:latest")
+NETWORK = os.environ.get("SANDBOX_NETWORK", "none")  # set "bridge" to allow pip at runtime
+MEMORY = os.environ.get("SANDBOX_MEMORY", "2g")       # §4.5 doc rendering can be heavy
+CPUS = os.environ.get("SANDBOX_CPUS", "1")
+PIDS_LIMIT = os.environ.get("SANDBOX_PIDS_LIMIT", "256")
+API_KEY = os.environ.get("SANDBOX_API_KEY", "")       # required Bearer match (fail-closed; see below)
+# F2: refuse to start with no auth unless the operator explicitly opts out for a
+# trusted localhost-only dev box. Empty/blank key + no opt-out => sys.exit(1).
+ALLOW_NO_AUTH = os.environ.get("SANDBOX_ALLOW_NO_AUTH", "") not in ("", "0", "false")
+EXEC_TIMEOUT_CAP_MS = int(os.environ.get("SANDBOX_EXEC_TIMEOUT_CAP_MS", "120000"))
+IDLE_TTL_SECONDS = int(os.environ.get("SANDBOX_IDLE_TTL_SECONDS", "1800"))  # 30 min
+MAX_SESSIONS = int(os.environ.get("SANDBOX_MAX_SESSIONS", "16"))
+MAX_CONCURRENT_EXECS = int(os.environ.get("SANDBOX_MAX_CONCURRENT_EXECS", "4"))
+MAX_CONCURRENT_CREATES = int(os.environ.get("SANDBOX_MAX_CONCURRENT_CREATES", "2"))
+QUEUE_TIMEOUT_SECONDS = float(os.environ.get("SANDBOX_QUEUE_TIMEOUT_SECONDS", "150"))
+# When truthy, `docker pull` the runtime image once on startup so a fresh
+# server doesn't fail the first /sessions call. Best-effort: logs and continues.
+PULL_ON_START = os.environ.get("SANDBOX_PULL_ON_START", "") not in ("", "0", "false")
+# F6: default the session rootfs to read-only (disk-fill DoS guard). The
+# pip-installed runtime stays read-only; only /workspace (+ /tmp, $HOME) are
+# size-bounded tmpfs mounts, so a session can't fill the host disk. Operators
+# can still force it off with SANDBOX_READ_ONLY_ROOTFS=0.
+READ_ONLY_ROOTFS = os.environ.get("SANDBOX_READ_ONLY_ROOTFS", "1") not in ("", "0", "false")
+TMPFS_SIZE = os.environ.get("SANDBOX_TMPFS_SIZE", "256m")
+# Bounded writable workspace size (tmpfs) when read-only rootfs is on.
+WORKSPACE_SIZE = os.environ.get(
+    "SANDBOX_WORKSPACE_SIZE",
+    os.environ.get("SANDBOX_WORKSPACE_TMPFS_SIZE", "512m"),  # back-compat alias
+)
+NOFILE_ULIMIT = os.environ.get("SANDBOX_NOFILE_ULIMIT", "1024:1024")
+# F6 (best-effort): per-container writable-layer quota. Requires overlay2 +
+# pquota/prjquota; `docker run` errors otherwise, so it is opt-in and applied
+# best-effort (we retry without it on failure rather than crash). Empty = off.
+DISK_SIZE = os.environ.get("SANDBOX_DISK_SIZE", "")
+# F1 (best-effort): pinned seccomp profile for session containers. Opt-in —
+# only added to `docker run` when set (path readable inside the sidecar).
+SECCOMP_PROFILE = os.environ.get("SANDBOX_SECCOMP_PROFILE", "")
+
+MAX_OUTPUT_BYTES = 32 * 1024          # stdout/stderr truncation
+MAX_ARTIFACT_BYTES = 20 * 1024 * 1024  # single produced file cap
+MAX_UPLOAD_BYTES = int(os.environ.get("SANDBOX_MAX_UPLOAD_BYTES", str(20 * 1024 * 1024)))
+MAX_FILES_PER_EXEC = int(os.environ.get("SANDBOX_MAX_FILES_PER_EXEC", "20"))
+MAX_TOTAL_ARTIFACT_BYTES = int(os.environ.get("SANDBOX_MAX_TOTAL_ARTIFACT_BYTES", str(50 * 1024 * 1024)))
+# F5: reject oversized request bodies at the control plane before reading them.
+# Default ~28 MiB comfortably exceeds the 20 MiB upload cap after base64 (+JSON).
+MAX_BODY_BYTES = int(os.environ.get("SANDBOX_MAX_BODY_BYTES", str(28 * 1024 * 1024)))
+# F5: hard cap on the /exec `code` field itself (1 MiB of source).
+MAX_CODE_BYTES = int(os.environ.get("SANDBOX_MAX_CODE_BYTES", str(1 * 1024 * 1024)))
+
+# §4.5: object-storage archive/restore (boto3 / oss2, lazy-imported).
+# Presigned GET URL ttl defaults to 1h, hard-capped at 24h.
+STORAGE_DEFAULT_TTL = int(os.environ.get("SANDBOX_STORAGE_DEFAULT_TTL", "3600"))
+STORAGE_MAX_TTL = int(os.environ.get("SANDBOX_STORAGE_MAX_TTL", "86400"))
+# Default object-key prefix when the storage block omits one (matches the Go
+# side's `storage_prefix` default).
+STORAGE_DEFAULT_PREFIX = "workspaces/"
+# Bound the workspace archive captured from `tar czf -`. If a session's
+# /workspace exceeds this, the archive is skipped (logged) rather than buffered
+# unbounded into the sidecar — the session is still reaped/deleted as before.
+MAX_ARCHIVE_BYTES = int(os.environ.get("SANDBOX_MAX_ARCHIVE_BYTES", str(200 * 1024 * 1024)))
+# /storage/put carries whole documents (the RAG pipeline uploads PDFs up to
+# ~200 MiB, then hands MinerU a presigned URL). Those payloads dwarf the F5
+# control-plane cap that protects /exec & /files, so the body-size guard lets
+# /storage/put through up to this larger ceiling instead. ~300 MiB comfortably
+# fits a 200 MiB object after base64 (+JSON). Other paths keep MAX_BODY_BYTES.
+MAX_STORAGE_BODY_BYTES = int(
+    os.environ.get("SANDBOX_MAX_STORAGE_BODY_BYTES", str(300 * 1024 * 1024))
+)
+
+CONTAINER_PREFIX = "aurelia-sbx-"
+LABEL = "aurelia.sandbox=1"
+WORKSPACE = "/workspace"
+OUTPUTS_DIR = f"{WORKSPACE}/outputs"
+UPLOADS_DIR = f"{WORKSPACE}/uploads"
+
+# session_id -> last-used epoch seconds (for the idle reaper). Container state
+# itself lives in Docker, so a sidecar restart only loses TTL tracking, not
+# sessions.
+_last_used: dict[str, float] = {}
+
+# session_id -> the `storage` block the Go side forwarded on create. The reaper
+# and DELETE consult it to archive /workspace before killing the container. Lost
+# on sidecar restart (so a session created pre-restart won't be archived on a
+# later TTL kill) — acceptable; storage is a best-effort convenience. Guarded by
+# `_state_lock`.
+_session_storage: dict[str, dict] = {}
+
+
+@dataclass
+class _SessionState:
+    lock: threading.Lock
+    refs: int = 0
+
+
+_session_states: dict[str, _SessionState] = {}
+_state_lock = threading.Lock()
+_exec_slots = threading.BoundedSemaphore(MAX_CONCURRENT_EXECS) if MAX_CONCURRENT_EXECS > 0 else None
+_create_slots = threading.BoundedSemaphore(MAX_CONCURRENT_CREATES) if MAX_CONCURRENT_CREATES > 0 else None
+
+app = FastAPI(title="Aurelia Sandbox Sidecar", version="1.0")
+
+
+# --- F2: fail closed on missing auth ---------------------------------------
+# This service drives the host Docker daemon, so an unauthenticated reachable
+# instance is remote code execution on the host. Historically auth was simply
+# off when SANDBOX_API_KEY was blank; refuse to start in that case instead,
+# unless the operator explicitly opts out for a trusted localhost-only dev box.
+if not API_KEY.strip():
+    if ALLOW_NO_AUTH:
+        print(
+            "[sandbox] WARNING: SANDBOX_API_KEY is empty and "
+            "SANDBOX_ALLOW_NO_AUTH=1 — auth is DISABLED. Only acceptable for a "
+            "trusted, localhost-only dev box. Never expose this on a network.",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            "[sandbox] FATAL: SANDBOX_API_KEY is empty/blank. This service "
+            "exposes host Docker control (RCE) and refuses to start without "
+            "auth. Set SANDBOX_API_KEY to a strong secret, or set "
+            "SANDBOX_ALLOW_NO_AUTH=1 for a trusted localhost-only dev box.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+
+# --- Docker helpers ---------------------------------------------------------
+def _container(session_id: str) -> str:
+    return CONTAINER_PREFIX + session_id
+
+
+def _valid_session(session_id: str) -> bool:
+    # session ids we mint are uuid4 hex; never interpolate anything else into a
+    # container name / shell.
+    return bool(re.fullmatch(r"[0-9a-f]{32}", session_id or ""))
+
+
+def _docker(args: list[str], *, input_bytes: Optional[bytes] = None,
+            timeout: Optional[float] = None) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["docker", *args],
+        input=input_bytes,
+        capture_output=True,
+        timeout=timeout,
+    )
+
+
+def _is_running(session_id: str) -> bool:
+    cp = _docker(["inspect", "-f", "{{.State.Running}}", _container(session_id)])
+    return cp.returncode == 0 and cp.stdout.strip() == b"true"
+
+
+@dataclass
+class _BoundedOutput:
+    limit: int = MAX_OUTPUT_BYTES
+    data: bytes = b""
+    truncated: bool = False
+
+    def append(self, chunk: bytes) -> None:
+        if not chunk:
+            return
+        remaining = self.limit - len(self.data)
+        if remaining > 0:
+            self.data += chunk[:remaining]
+        if len(chunk) > remaining:
+            self.truncated = True
+
+    def text(self, label: str) -> str:
+        data = self.data
+        if self.truncated:
+            data += f"\n... [truncated, {label} exceeded {self.limit // 1024}KB]".encode()
+        return data.decode("utf-8", errors="replace")
+
+
+@contextmanager
+def _slot(sem: Optional[threading.BoundedSemaphore], what: str) -> Iterator[None]:
+    if sem is None:
+        yield
+        return
+    if not sem.acquire(timeout=QUEUE_TIMEOUT_SECONDS):
+        raise HTTPException(status_code=429, detail=f"{what} queue is full")
+    try:
+        yield
+    finally:
+        sem.release()
+
+
+@contextmanager
+def _session_lock(session_id: str) -> Iterator[None]:
+    with _state_lock:
+        state = _session_states.setdefault(session_id, _SessionState(threading.Lock()))
+        state.refs += 1
+    if not state.lock.acquire(timeout=QUEUE_TIMEOUT_SECONDS):
+        with _state_lock:
+            state.refs -= 1
+            if state.refs == 0 and session_id not in _last_used:
+                _session_states.pop(session_id, None)
+        raise HTTPException(status_code=429, detail="session is busy")
+    try:
+        yield
+    finally:
+        state.lock.release()
+        with _state_lock:
+            state.refs -= 1
+            if state.refs == 0 and session_id not in _last_used:
+                _session_states.pop(session_id, None)
+
+
+def _touch(session_id: str) -> None:
+    with _state_lock:
+        _last_used[session_id] = time.time()
+        _session_states.setdefault(session_id, _SessionState(threading.Lock()))
+
+
+def _forget(session_id: str) -> None:
+    with _state_lock:
+        _last_used.pop(session_id, None)
+        _session_storage.pop(session_id, None)
+        state = _session_states.get(session_id)
+        if state is not None and state.refs == 0:
+            _session_states.pop(session_id, None)
+
+
+def _remember_storage(session_id: str, storage: Optional[dict]) -> None:
+    """Record (or clear) the session's archive bucket for later reap/delete."""
+    with _state_lock:
+        if storage:
+            _session_storage[session_id] = storage
+        else:
+            _session_storage.pop(session_id, None)
+
+
+def _session_storage_for(session_id: str) -> Optional[dict]:
+    with _state_lock:
+        return _session_storage.get(session_id)
+
+
+def _count_live_sessions() -> int:
+    cp = _docker(["ps", "-q", "--filter", f"label={LABEL}"], timeout=20)
+    if cp.returncode != 0:
+        return len(_last_used)
+    return len([line for line in cp.stdout.splitlines() if line.strip()])
+
+
+def _timeout_arg(seconds: float) -> str:
+    return f"{max(seconds, 1.0):.3f}s"
+
+
+def _discover_sessions() -> None:
+    cp = _docker(
+        [
+            "ps", "-a",
+            "--filter", f"label={LABEL}",
+            "--format", "{{.Names}}\t{{.State}}\t{{.CreatedAt}}",
+        ],
+        timeout=30,
+    )
+    if cp.returncode != 0:
+        print(f"[sandbox] warning: failed to discover existing sessions: "
+              f"{cp.stderr.decode(errors='replace')[:200]}")
+        return
+
+    now = time.time()
+    for line in cp.stdout.decode(errors="replace").splitlines():
+        parts = line.split("\t")
+        if len(parts) < 2:
+            continue
+        name, state = parts[0], parts[1]
+        if not name.startswith(CONTAINER_PREFIX):
+            continue
+        sid = name[len(CONTAINER_PREFIX):]
+        if not _valid_session(sid):
+            continue
+        if state.lower() != "running":
+            _docker(["rm", "-f", name], timeout=30)
+            continue
+        _touch(sid)
+    with _state_lock:
+        recovered = len(_last_used)
+    if recovered:
+        print(f"[sandbox] recovered {recovered} existing session container(s)")
+
+
+def _run_exec_bounded(name: str, cmd: list[str], *, timeout: float) -> tuple[int, str, str]:
+    stdout = _BoundedOutput()
+    stderr = _BoundedOutput()
+    start = time.monotonic()
+    proc = subprocess.Popen(
+        ["docker", "exec", name, *cmd],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    assert proc.stdout is not None
+    assert proc.stderr is not None
+
+    sel = selectors.DefaultSelector()
+    sel.register(proc.stdout, selectors.EVENT_READ, stdout)
+    sel.register(proc.stderr, selectors.EVENT_READ, stderr)
+    timed_out = False
+
+    try:
+        while sel.get_map():
+            if time.monotonic() - start > timeout:
+                timed_out = True
+                proc.kill()
+                break
+            for key, _ in sel.select(timeout=0.2):
+                chunk = key.fileobj.read1(8192)
+                if chunk:
+                    key.data.append(chunk)
+                else:
+                    sel.unregister(key.fileobj)
+                    key.fileobj.close()
+        exit_code = proc.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        proc.kill()
+        exit_code = 124
+    finally:
+        for key in list(sel.get_map().values()):
+            try:
+                sel.unregister(key.fileobj)
+            except Exception:
+                pass
+            try:
+                key.fileobj.close()
+            except Exception:
+                pass
+
+    if timed_out:
+        exit_code = 124
+    return exit_code, stdout.text("stdout"), stderr.text("stderr")
+
+
+# --- Request models ---------------------------------------------------------
+class ExecBody(BaseModel):
+    session_id: str
+    # F5: cap the source length. max_length counts characters; since UTF-8 chars
+    # can be up to 4 bytes, this is a cheap upper guard and the /exec handler
+    # additionally rejects on the exact encoded byte length.
+    code: str = Field(max_length=MAX_CODE_BYTES)
+    timeout_ms: Optional[int] = None
+
+
+class FilesBody(BaseModel):
+    session_id: str
+    path: str
+    data_base64: str
+
+
+class GetFileBody(BaseModel):
+    session_id: str
+    path: str
+
+
+# `storage` is a free-form snake_case block the Go side forwards verbatim
+# (provider, prefix, s3_*, oss_*); all fields optional. Modelling it as a dict
+# keeps the sidecar agnostic to which fields a given provider needs.
+class CreateBody(BaseModel):
+    storage: Optional[dict[str, Any]] = None
+
+
+class DeleteBody(BaseModel):
+    storage: Optional[dict[str, Any]] = None
+
+
+class StoragePutBody(BaseModel):
+    key: str
+    data_base64: str
+    content_type: Optional[str] = None
+    expires_in: Optional[int] = None
+    storage: Optional[dict[str, Any]] = None
+
+
+class StorageDeleteBody(BaseModel):
+    key: str
+    storage: Optional[dict[str, Any]] = None
+
+
+# --- Endpoints --------------------------------------------------------------
+@app.post("/sessions")
+def create_session(body: Optional[CreateBody] = Body(default=None)):
+    # Auth (when SANDBOX_API_KEY is set) is enforced in the middleware below.
+    # The Go side forwards a `storage` block here (or {}); a bare POST is fine.
+    storage = body.storage if body is not None else None
+    with _slot(_create_slots, "session create"):
+        if MAX_SESSIONS > 0 and _count_live_sessions() >= MAX_SESSIONS:
+            raise HTTPException(status_code=429, detail="too many active sessions")
+
+        session_id = uuid.uuid4().hex
+        name = _container(session_id)
+        args = [
+            "run", "-d",
+            "--name", name,
+            "--label", LABEL,
+            "--label", f"aurelia.session_id={session_id}",
+            "--label", f"aurelia.created_at={int(time.time())}",
+            "--network", NETWORK,
+            "--memory", MEMORY,
+            "--memory-swap", MEMORY,
+            "--cpus", CPUS,
+            "--pids-limit", PIDS_LIMIT,
+            "--ulimit", f"nofile={NOFILE_ULIMIT}",
+            "--init",
+            "--user", "1000:1000",
+            "--security-opt", "no-new-privileges",
+            "--cap-drop", "ALL",
+            "-w", WORKSPACE,
+        ]
+        # F1 (opt-in): pin a seccomp profile for the session container. Only
+        # added when configured so the default (docker's built-in profile)
+        # still applies when unset.
+        if SECCOMP_PROFILE:
+            args.extend(["--security-opt", f"seccomp={SECCOMP_PROFILE}"])
+        if READ_ONLY_ROOTFS:
+            # F6: rootfs (the pip-installed runtime) is read-only; only the
+            # working dirs are writable, and each is a size-bounded tmpfs so a
+            # session cannot fill the host disk. /workspace gets mode=1777 so
+            # the non-root sandbox user can create files/outputs under it.
+            args.extend([
+                "--read-only",
+                "--tmpfs", f"/tmp:rw,nosuid,nodev,size={TMPFS_SIZE}",
+                "--tmpfs", f"/home/sandbox:rw,nosuid,nodev,size={TMPFS_SIZE}",
+                "--tmpfs", f"{WORKSPACE}:rw,nosuid,nodev,size={WORKSPACE_SIZE},mode=1777",
+            ])
+        # F6 (opt-in, best-effort): bound the container writable layer. Needs
+        # overlay2 + pquota/prjquota; if the daemon can't honour it, `docker
+        # run` errors, so we retry once without it rather than fail the session.
+        # Flags go before the image; the trailing command stays last.
+        run_cmd = [IMAGE, "sleep", "infinity"]
+        if DISK_SIZE:
+            args.extend(["--storage-opt", f"size={DISK_SIZE}"])
+        cp = _docker([*args, *run_cmd], timeout=60)
+        if cp.returncode != 0 and DISK_SIZE and b"storage-opt" in cp.stderr.lower():
+            print(
+                "[sandbox] warning: --storage-opt size is unsupported by the "
+                "docker storage driver (needs overlay2+prjquota); creating the "
+                "session without a writable-layer quota. "
+                f"({cp.stderr.decode(errors='replace')[:160]})"
+            )
+            # Drop the trailing "--storage-opt size=..." pair and retry. Clear
+            # any half-created container holding the name first (best-effort).
+            _docker(["rm", "-f", name], timeout=30)
+            args = args[:-2]
+            cp = _docker([*args, *run_cmd], timeout=60)
+        if cp.returncode != 0:
+            raise HTTPException(status_code=500, detail=f"docker run failed: {cp.stderr.decode(errors='replace')}")
+        # Make sure the standard dirs exist (image already creates them, but be safe).
+        mk = _docker(["exec", name, "mkdir", "-p", UPLOADS_DIR, OUTPUTS_DIR], timeout=20)
+        if mk.returncode != 0:
+            _docker(["rm", "-f", name], timeout=30)
+            raise HTTPException(status_code=500, detail=f"workspace init failed: {mk.stderr.decode(errors='replace')}")
+        # §4.5: now that /workspace is up, restore a previously-archived
+        # workspace for this session id from the bucket (best-effort; missing
+        # archive or no storage → no-op). Remember the storage block so the
+        # reaper / DELETE can archive it back later.
+        if _storage_effective(storage):
+            _restore_workspace(session_id, storage)
+            _remember_storage(session_id, storage)
+        _touch(session_id)
+        return {"session_id": session_id}
+
+
+@app.post("/exec")
+def exec_code(body: ExecBody):
+    sid = body.session_id
+    if not _valid_session(sid):
+        raise HTTPException(status_code=400, detail="invalid session_id")
+    name = _container(sid)
+
+    # F5: reject oversized source by exact UTF-8 byte length (Field(max_length)
+    # only bounds character count).
+    code_bytes = body.code.encode("utf-8")
+    if len(code_bytes) > MAX_CODE_BYTES:
+        raise HTTPException(status_code=413, detail="code too large")
+
+    timeout_ms = body.timeout_ms or EXEC_TIMEOUT_CAP_MS
+    timeout_ms = max(1000, min(timeout_ms, EXEC_TIMEOUT_CAP_MS))
+    timeout_s = timeout_ms / 1000.0
+
+    with _session_lock(sid), _slot(_exec_slots, "exec"):
+        if not _is_running(sid):
+            raise HTTPException(status_code=404, detail="session not found or not running")
+        cell_path = f"/tmp/aurelia-cell-{uuid.uuid4().hex}.py"
+
+        # Write the cell to a file in the container (stdin avoids arg-length
+        # limits and shell-quoting hazards).
+        w = _docker(["exec", "-i", name, "sh", "-c", f"cat > {_shq(cell_path)}"],
+                    input_bytes=code_bytes, timeout=30)
+        if w.returncode != 0:
+            raise HTTPException(status_code=500, detail=f"write cell failed: {w.stderr.decode(errors='replace')}")
+
+        before = _snapshot_outputs(name)
+
+        # `timeout` kills runaway code inside the container; the host-side
+        # reader keeps stdout/stderr bounded so the sidecar cannot be OOMed by
+        # a print loop.
+        try:
+            exit_code, stdout, stderr = _run_exec_bounded(
+                name,
+                ["timeout", "--kill-after=2s", _timeout_arg(timeout_s), "python", cell_path],
+                timeout=timeout_s + 15,
+            )
+        finally:
+            _docker(["exec", name, "rm", "-f", cell_path], timeout=10)
+
+        if exit_code == 124:  # `timeout` convention
+            stderr = stderr + f"\n[sandbox] execution exceeded {timeout_s:.3f}s and was killed"
+
+        _touch(sid)
+
+        files, artifact_warning = _collect_new_files(name, before)
+        if artifact_warning:
+            stderr = (stderr + "\n" + artifact_warning).strip()
+        return {
+            "stdout": stdout,
+            "stderr": stderr,
+            "exit_code": exit_code,
+            "files": files,
+        }
+
+
+@app.post("/files")
+def put_file(body: FilesBody):
+    sid = body.session_id
+    if not _valid_session(sid):
+        raise HTTPException(status_code=400, detail="invalid session_id")
+    name = _container(sid)
+
+    max_b64_len = ((MAX_UPLOAD_BYTES + 2) // 3) * 4
+    if len(body.data_base64) > max_b64_len:
+        raise HTTPException(status_code=413, detail="file too large")
+    try:
+        data = base64.b64decode(body.data_base64, validate=True)
+    except (binascii.Error, ValueError):
+        raise HTTPException(status_code=400, detail="invalid base64")
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="file too large")
+
+    # Normalise the destination to live under /workspace; reject traversal.
+    path = body.path or ""
+    if not path.startswith("/"):
+        path = f"{WORKSPACE}/{path}"
+    if not _safe_under_workspace(path):
+        raise HTTPException(status_code=400, detail="path must be under /workspace")
+
+    with _session_lock(sid):
+        if not _is_running(sid):
+            raise HTTPException(status_code=404, detail="session not found or not running")
+        parent = path.rsplit("/", 1)[0] or WORKSPACE
+        mk = _docker(["exec", name, "mkdir", "-p", parent], timeout=20)
+        if mk.returncode != 0:
+            raise HTTPException(status_code=500, detail=f"mkdir failed: {mk.stderr.decode(errors='replace')}")
+
+        # F9: the normpath check above is string-only, and `cat >` follows
+        # symlinks — so a symlinked parent (e.g. /workspace/x -> /etc) could let
+        # an upload escape /workspace and clobber host-visible files in the
+        # container. Now that the parent chain exists, resolve the *real* target
+        # inside the container and re-verify it still lives under /workspace.
+        real_path = _resolve_in_container(name, path)
+        if real_path is None or not _safe_under_workspace(real_path):
+            raise HTTPException(status_code=400, detail="path resolves outside /workspace")
+
+        # Write to the resolved real path (not the symlink-bearing input path).
+        w = _docker(["exec", "-i", name, "sh", "-c", f"cat > {_shq(real_path)}"],
+                    input_bytes=data, timeout=60)
+        if w.returncode != 0:
+            raise HTTPException(status_code=500, detail=f"write failed: {w.stderr.decode(errors='replace')}")
+
+        _touch(sid)
+        return {"ok": True}
+
+
+@app.delete("/sessions/{session_id}")
+def delete_session(session_id: str, body: Optional[DeleteBody] = Body(default=None)):
+    if not _valid_session(session_id):
+        raise HTTPException(status_code=400, detail="invalid session_id")
+    # The Go side forwards the same `storage` block here; fall back to what we
+    # remembered at create time if this call didn't carry one.
+    storage = body.storage if body is not None else None
+    if not _storage_effective(storage):
+        storage = _session_storage_for(session_id)
+    with _session_lock(session_id):
+        # §4.5: archive /workspace before tearing the container down (best-
+        # effort; no-op without effective storage — dev: deleted = gone).
+        _archive_workspace(session_id, storage)
+        _docker(["rm", "-f", _container(session_id)], timeout=30)
+        _forget(session_id)
+    return {"ok": True}
+
+
+@app.post("/files/get")
+def get_file(body: GetFileBody):
+    sid = body.session_id
+    if not _valid_session(sid):
+        raise HTTPException(status_code=400, detail="invalid session_id")
+    name = _container(sid)
+
+    # Normalise + confine the source to /workspace (mirrors /files).
+    path = body.path or ""
+    if not path.startswith("/"):
+        path = f"{WORKSPACE}/{path}"
+    if not _safe_under_workspace(path):
+        raise HTTPException(status_code=400, detail="path must be under /workspace")
+
+    with _session_lock(sid):
+        if not _is_running(sid):
+            raise HTTPException(status_code=404, detail="session not found or not running")
+        # F9-style symlink guard: resolve the real target inside the container
+        # and re-verify it stays under /workspace before reading it back out.
+        real_path = _resolve_in_container(name, path)
+        if real_path is None or not _safe_under_workspace(real_path):
+            raise HTTPException(status_code=400, detail="path resolves outside /workspace")
+        # Reject directories / missing files up front so we 404 instead of
+        # streaming a confusing `cat` error.
+        check = _docker(["exec", name, "test", "-f", real_path], timeout=20)
+        if check.returncode != 0:
+            raise HTTPException(status_code=404, detail="file not found")
+        # base64 inside the container avoids piping raw bytes through argv.
+        cp = _docker(["exec", name, "base64", "-w0", "--", real_path], timeout=120)
+        if cp.returncode != 0:
+            raise HTTPException(status_code=500, detail=f"read failed: {cp.stderr.decode(errors='replace')}")
+        _touch(sid)
+        return {"data_base64": cp.stdout.decode(errors="replace").strip()}
+
+
+@app.post("/storage/put")
+def storage_put(body: StoragePutBody):
+    if not _storage_effective(body.storage):
+        raise HTTPException(status_code=400, detail="storage backend not configured")
+    full_key = _storage_full_key(body.storage, body.key)
+    try:
+        data = base64.b64decode(body.data_base64, validate=True)
+    except (binascii.Error, ValueError):
+        raise HTTPException(status_code=400, detail="invalid base64")
+
+    ttl = _storage_ttl(body.expires_in)
+    provider = _storage_provider(body.storage)
+    try:
+        _storage_put_object(body.storage, full_key, data, body.content_type)
+        url = _storage_presign_get(body.storage, full_key, ttl)
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001 - surface SDK errors as 502
+        raise HTTPException(status_code=502, detail=f"storage put failed: {exc}")
+    return {"provider": provider, "key": full_key, "url": url, "expires_in": ttl}
+
+
+@app.post("/storage/delete")
+def storage_delete(body: StorageDeleteBody):
+    if not _storage_effective(body.storage):
+        raise HTTPException(status_code=400, detail="storage backend not configured")
+    prefix = _storage_prefix(body.storage)
+    # The key may be the full (already-prefixed) key returned by /storage/put or
+    # a bare key — normalise to the prefixed form, then refuse to delete
+    # anything outside the admin's namespace.
+    key = (body.key or "").lstrip("/")
+    if not key:
+        raise HTTPException(status_code=400, detail="invalid storage key")
+    if ".." in key or "\x00" in key:
+        raise HTTPException(status_code=400, detail="invalid storage key")
+    norm_prefix = prefix.rstrip("/") + "/"
+    full_key = key if key.startswith(norm_prefix) else norm_prefix + key
+    if not full_key.startswith(norm_prefix):
+        raise HTTPException(status_code=400, detail="key outside storage prefix")
+    try:
+        _storage_delete_object(body.storage, full_key)
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001 - surface SDK errors as 502
+        raise HTTPException(status_code=502, detail=f"storage delete failed: {exc}")
+    return {"ok": True, "key": full_key}
+
+
+@app.get("/healthz")
+def healthz():
+    cp = _docker(["version", "-f", "{{.Server.Version}}"])
+    ok = cp.returncode == 0
+    return JSONResponse(
+        status_code=200 if ok else 503,
+        content={"ok": ok, "docker": cp.stdout.decode(errors="replace").strip(), "image": IMAGE},
+    )
+
+
+# --- Output collection ------------------------------------------------------
+def _snapshot_outputs(name: str) -> dict[str, str]:
+    """Map of path -> "mtime|size" for every file under /workspace/outputs."""
+    cp = _docker(
+        ["exec", name, "sh", "-c",
+         f"find {OUTPUTS_DIR} -type f -printf '%p\\t%T@\\t%s\\n' 2>/dev/null || true"],
+        timeout=20,
+    )
+    snap: dict[str, str] = {}
+    for line in cp.stdout.decode(errors="replace").splitlines():
+        parts = line.split("\t")
+        if len(parts) == 3:
+            snap[parts[0]] = f"{parts[1]}|{parts[2]}"
+    return snap
+
+
+def _collect_new_files(name: str, before: dict[str, str]) -> tuple[list[dict], str]:
+    after = _snapshot_outputs(name)
+    changed = [p for p, meta in after.items() if before.get(p) != meta]
+    changed.sort()
+    files: list[dict] = []
+    total_bytes = 0
+    skipped = 0
+    for path in changed:
+        size = int(after[path].split("|")[1])
+        if size > MAX_ARTIFACT_BYTES:
+            skipped += 1
+            continue  # §4.5: single artifact ≤ 20MB
+        if len(files) >= MAX_FILES_PER_EXEC:
+            skipped += 1
+            continue
+        if total_bytes + size > MAX_TOTAL_ARTIFACT_BYTES:
+            skipped += 1
+            continue  # §4.5: single artifact ≤ 20MB
+        cp = _docker(["exec", name, "base64", "-w0", path], timeout=60)
+        if cp.returncode != 0:
+            skipped += 1
+            continue
+        b64 = cp.stdout.decode(errors="replace").strip()
+        basename = path.rsplit("/", 1)[-1]
+        mime = mimetypes.guess_type(basename)[0] or "application/octet-stream"
+        files.append({"name": basename, "mime_type": mime, "data_base64": b64})
+        total_bytes += size
+    warning = ""
+    if skipped:
+        warning = (
+            f"[sandbox] skipped {skipped} output file(s) because artifact limits "
+            f"are {MAX_FILES_PER_EXEC} files, {MAX_ARTIFACT_BYTES} bytes per file, "
+            f"{MAX_TOTAL_ARTIFACT_BYTES} bytes total"
+        )
+    return files, warning
+
+
+# --- Path safety ------------------------------------------------------------
+def _safe_under_workspace(path: str) -> bool:
+    # collapse and ensure it stays under /workspace (no .. escape)
+    norm = os.path.normpath(path)
+    return norm == WORKSPACE or norm.startswith(WORKSPACE + "/")
+
+
+def _resolve_in_container(name: str, path: str) -> Optional[str]:
+    """Resolve `path`'s real location *inside the container*, following any
+    symlinks in its (already-created) parent chain.
+
+    `realpath -m` canonicalises the path without requiring the final component
+    to exist, so a brand-new upload filename resolves fine while a symlinked
+    ancestor (e.g. /workspace/x -> /etc) is followed and exposed to the caller's
+    re-check. Returns the resolved absolute path, or None if it can't be
+    resolved (treated as unsafe by the caller).
+    """
+    cp = _docker(["exec", name, "realpath", "-m", "--", path], timeout=20)
+    if cp.returncode != 0:
+        return None
+    resolved = cp.stdout.decode(errors="replace").strip()
+    return resolved or None
+
+
+def _shq(s: str) -> str:
+    return "'" + s.replace("'", "'\\''") + "'"
+
+
+# --- Object storage (archive/restore + /storage/*) --------------------------
+# boto3 (s3) and oss2 (aliyun_oss) are LAZY-imported the first time a provider
+# is actually used, so the sidecar starts fine without them installed when no
+# storage backend is configured. Clients are cached keyed by the full creds
+# tuple so repeated calls reuse one connection pool.
+_storage_clients: dict[tuple, Any] = {}
+_storage_clients_lock = threading.Lock()
+
+
+def _storage_get(storage: Optional[dict], key: str) -> str:
+    return str((storage or {}).get(key) or "").strip()
+
+
+def _storage_provider(storage: Optional[dict]) -> str:
+    return _storage_get(storage, "provider")
+
+
+def _storage_prefix(storage: Optional[dict]) -> str:
+    return _storage_get(storage, "prefix") or STORAGE_DEFAULT_PREFIX
+
+
+def _storage_effective(storage: Optional[dict]) -> bool:
+    """Mirror of StorageConfig.Effective() on the Go side: a usable backend
+    needs a known provider plus the bucket (and, for OSS, endpoint + creds)."""
+    provider = _storage_provider(storage)
+    if provider == "s3":
+        return bool(_storage_get(storage, "s3_bucket"))
+    if provider == "aliyun_oss":
+        return bool(
+            _storage_get(storage, "oss_bucket")
+            and _storage_get(storage, "oss_endpoint")
+            and _storage_get(storage, "oss_access_key_id")
+            and _storage_get(storage, "oss_access_key_secret")
+        )
+    return False
+
+
+def _validate_object_key(key: str) -> str:
+    """Reject keys that could escape the configured prefix or break the request
+    (path traversal, absolute paths, embedded NUL). Returns the key unchanged."""
+    if not key or ".." in key or key.startswith("/") or "\x00" in key:
+        raise HTTPException(status_code=400, detail="invalid storage key")
+    return key
+
+
+def _storage_full_key(storage: Optional[dict], key: str) -> str:
+    """Join the admin prefix and the caller key: <prefix>/<key>."""
+    _validate_object_key(key)
+    return _storage_prefix(storage).rstrip("/") + "/" + key
+
+
+def _storage_ttl(expires_in: Optional[int]) -> int:
+    ttl = expires_in or STORAGE_DEFAULT_TTL
+    if ttl <= 0:
+        ttl = STORAGE_DEFAULT_TTL
+    return min(ttl, STORAGE_MAX_TTL)
+
+
+def _s3_creds_key(storage: dict) -> tuple:
+    return (
+        "s3",
+        _storage_get(storage, "s3_bucket"),
+        _storage_get(storage, "s3_region"),
+        _storage_get(storage, "s3_endpoint"),
+        _storage_get(storage, "s3_access_key"),
+        _storage_get(storage, "s3_secret_key"),
+    )
+
+
+def _oss_creds_key(storage: dict) -> tuple:
+    return (
+        "aliyun_oss",
+        _storage_get(storage, "oss_bucket"),
+        _storage_get(storage, "oss_endpoint"),
+        _storage_get(storage, "oss_access_key_id"),
+        _storage_get(storage, "oss_access_key_secret"),
+    )
+
+
+def _storage_client(storage: dict) -> tuple:
+    """Return (provider, client_or_bucket) for the configured backend, caching
+    the underlying SDK object keyed by the full creds tuple. boto3 / oss2 are
+    imported only here, only when a backend is actually used."""
+    provider = _storage_provider(storage)
+    if provider == "s3":
+        cache_key = _s3_creds_key(storage)
+    elif provider == "aliyun_oss":
+        cache_key = _oss_creds_key(storage)
+    else:
+        raise HTTPException(status_code=400, detail=f"unsupported storage provider: {provider or '(none)'}")
+
+    with _storage_clients_lock:
+        cached = _storage_clients.get(cache_key)
+        if cached is not None:
+            return provider, cached
+
+        if provider == "s3":
+            try:
+                import boto3  # type: ignore
+            except ImportError as exc:  # pragma: no cover - dep is pinned
+                raise HTTPException(status_code=500, detail=f"boto3 not installed: {exc}")
+            kwargs: dict[str, Any] = {}
+            region = _storage_get(storage, "s3_region")
+            endpoint = _storage_get(storage, "s3_endpoint")
+            access = _storage_get(storage, "s3_access_key")
+            secret = _storage_get(storage, "s3_secret_key")
+            if region:
+                kwargs["region_name"] = region
+            if endpoint:
+                kwargs["endpoint_url"] = endpoint
+            if access and secret:
+                kwargs["aws_access_key_id"] = access
+                kwargs["aws_secret_access_key"] = secret
+            client: Any = boto3.client("s3", **kwargs)
+        else:  # aliyun_oss
+            try:
+                import oss2  # type: ignore
+            except ImportError as exc:  # pragma: no cover - dep is pinned
+                raise HTTPException(status_code=500, detail=f"oss2 not installed: {exc}")
+            auth = oss2.Auth(
+                _storage_get(storage, "oss_access_key_id"),
+                _storage_get(storage, "oss_access_key_secret"),
+            )
+            client = oss2.Bucket(
+                auth,
+                _storage_get(storage, "oss_endpoint"),
+                _storage_get(storage, "oss_bucket"),
+            )
+
+        _storage_clients[cache_key] = client
+        return provider, client
+
+
+def _storage_put_object(storage: dict, full_key: str, data: bytes,
+                        content_type: Optional[str]) -> None:
+    """Upload bytes under the already-prefixed `full_key`."""
+    provider, client = _storage_client(storage)
+    ctype = content_type or "application/octet-stream"
+    if provider == "s3":
+        client.put_object(
+            Bucket=_storage_get(storage, "s3_bucket"),
+            Key=full_key,
+            Body=data,
+            ContentType=ctype,
+        )
+    else:  # aliyun_oss
+        client.put_object(full_key, data, headers={"Content-Type": ctype})
+
+
+def _storage_presign_get(storage: dict, full_key: str, ttl: int) -> str:
+    """Presigned GET URL for `full_key`, valid for ttl seconds."""
+    provider, client = _storage_client(storage)
+    if provider == "s3":
+        return client.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": _storage_get(storage, "s3_bucket"), "Key": full_key},
+            ExpiresIn=ttl,
+        )
+    # oss2: slash_safe keeps the "/" in the key path un-escaped.
+    return client.sign_url("GET", full_key, ttl, slash_safe=True)
+
+
+def _storage_get_object(storage: dict, full_key: str) -> Optional[bytes]:
+    """Download `full_key`. Returns None when the object is absent (so callers
+    can treat a missing workspace archive as "nothing to restore")."""
+    provider, client = _storage_client(storage)
+    if provider == "s3":
+        try:
+            resp = client.get_object(
+                Bucket=_storage_get(storage, "s3_bucket"), Key=full_key
+            )
+        except Exception as exc:  # noqa: BLE001 - normalise not-found to None
+            if _is_not_found(provider, exc):
+                return None
+            raise
+        body = resp.get("Body")
+        return body.read() if body is not None else b""
+    # aliyun_oss
+    try:
+        resp = client.get_object(full_key)
+    except Exception as exc:  # noqa: BLE001
+        if _is_not_found(provider, exc):
+            return None
+        raise
+    return resp.read()
+
+
+def _storage_delete_object(storage: dict, full_key: str) -> None:
+    """Delete `full_key`, swallowing not-found (idempotent)."""
+    provider, client = _storage_client(storage)
+    try:
+        if provider == "s3":
+            client.delete_object(
+                Bucket=_storage_get(storage, "s3_bucket"), Key=full_key
+            )
+        else:  # aliyun_oss
+            client.delete_object(full_key)
+    except Exception as exc:  # noqa: BLE001
+        if _is_not_found(provider, exc):
+            return
+        raise
+
+
+def _is_not_found(provider: str, exc: Exception) -> bool:
+    """Best-effort 'object does not exist' classifier across both SDKs, so a
+    delete of an absent key is idempotent and a missing archive restores as a
+    no-op."""
+    if type(exc).__name__ in ("NoSuchKey", "NoSuchBucket", "NotFound"):
+        return True
+    if provider == "s3":
+        # botocore.ClientError carries a structured .response dict.
+        resp = getattr(exc, "response", None)
+        if isinstance(resp, dict):
+            code = resp.get("Error", {}).get("Code", "")
+            if code in ("NoSuchKey", "NoSuchBucket", "404", "NotFound"):
+                return True
+            if resp.get("ResponseMetadata", {}).get("HTTPStatusCode") == 404:
+                return True
+        return False
+    # oss2 raises oss2.exceptions.NoSuchKey (subclass of ServerError) with .status
+    return getattr(exc, "status", None) == 404
+
+
+# --- Workspace archive / restore (§4.5) -------------------------------------
+def _workspace_archive_key(storage: dict, session_id: str) -> str:
+    """Object key for a session's workspace tarball:
+    <prefix>/workspaces/<session_id>.tgz."""
+    return _storage_prefix(storage).rstrip("/") + f"/workspaces/{session_id}.tgz"
+
+
+def _archive_workspace(session_id: str, storage: Optional[dict]) -> None:
+    """Best-effort: tar /workspace from the container and upload it. A no-op
+    when storage is absent/ineffective. Never raises — logs and returns so it
+    can't crash reap / delete."""
+    if not _storage_effective(storage):
+        return
+    name = _container(session_id)
+    try:
+        proc = subprocess.Popen(
+            ["docker", "exec", name, "tar", "czf", "-", "-C", WORKSPACE, "."],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        assert proc.stdout is not None
+        buf = bytearray()
+        too_big = False
+        while True:
+            chunk = proc.stdout.read(65536)
+            if not chunk:
+                break
+            if len(buf) + len(chunk) > MAX_ARCHIVE_BYTES:
+                too_big = True
+                proc.kill()
+                break
+            buf.extend(chunk)
+        try:
+            stderr = proc.stderr.read() if proc.stderr is not None else b""
+        finally:
+            rc = proc.wait(timeout=10)
+        if too_big:
+            print(f"[sandbox] warning: workspace for {session_id} exceeds "
+                  f"{MAX_ARCHIVE_BYTES} bytes; skipping archive")
+            return
+        if rc != 0:
+            print(f"[sandbox] warning: tar of workspace {session_id} failed "
+                  f"(rc={rc}): {stderr.decode(errors='replace')[:200]}")
+            return
+        full_key = _workspace_archive_key(storage, session_id)
+        _storage_put_object(storage, full_key, bytes(buf), "application/gzip")
+        print(f"[sandbox] archived workspace {session_id} -> {full_key} "
+              f"({len(buf)} bytes)")
+    except HTTPException as exc:
+        print(f"[sandbox] warning: archive of {session_id} failed: {exc.detail}")
+    except Exception as exc:  # noqa: BLE001 - archive is best-effort
+        print(f"[sandbox] warning: archive of {session_id} failed: {exc}")
+
+
+def _restore_workspace(session_id: str, storage: Optional[dict]) -> None:
+    """Best-effort: download <prefix>/workspaces/<session_id>.tgz and untar it
+    into the live container's /workspace. Missing archive → skip silently.
+    Never raises."""
+    if not _storage_effective(storage):
+        return
+    name = _container(session_id)
+    try:
+        full_key = _workspace_archive_key(storage, session_id)
+        data = _storage_get_object(storage, full_key)
+        if data is None:
+            return  # nothing archived for this session yet
+        cp = _docker(["exec", "-i", name, "tar", "xzf", "-", "-C", WORKSPACE],
+                     input_bytes=data, timeout=120)
+        if cp.returncode != 0:
+            print(f"[sandbox] warning: restore untar for {session_id} failed: "
+                  f"{cp.stderr.decode(errors='replace')[:200]}")
+            return
+        print(f"[sandbox] restored workspace {session_id} from {full_key} "
+              f"({len(data)} bytes)")
+    except HTTPException as exc:
+        print(f"[sandbox] warning: restore of {session_id} failed: {exc.detail}")
+    except Exception as exc:  # noqa: BLE001 - restore is best-effort
+        print(f"[sandbox] warning: restore of {session_id} failed: {exc}")
+
+
+# --- Idle reaper ------------------------------------------------------------
+def _reaper() -> None:
+    while True:
+        time.sleep(300)
+        now = time.time()
+        with _state_lock:
+            stale = [sid for sid, t in _last_used.items() if now - t > IDLE_TTL_SECONDS]
+        for sid in stale:
+            try:
+                with _session_lock(sid):
+                    # §4.5: archive /workspace before the TTL kill so the next
+                    # session for this id can restore it. Best-effort, no-op
+                    # when storage is absent (dev: reaped = gone).
+                    _archive_workspace(sid, _session_storage_for(sid))
+                    _docker(["rm", "-f", _container(sid)], timeout=30)
+                    _forget(sid)
+            except HTTPException:
+                print(f"[sandbox] warning: session {sid} stayed busy during reap")
+
+
+@app.on_event("startup")
+def _start_reaper() -> None:
+    if PULL_ON_START:
+        # Pull the runtime image up front (host daemon; not affected by the
+        # per-session --network none). Don't crash the service if it fails.
+        cp = _docker(["pull", IMAGE], timeout=600)
+        if cp.returncode != 0:
+            print(f"[sandbox] warning: failed to pull {IMAGE}: "
+                  f"{cp.stderr.decode(errors='replace')[:200]}")
+    _discover_sessions()
+    threading.Thread(target=_reaper, daemon=True).start()
+
+
+# --- Bearer-auth middleware -------------------------------------------------
+# F2: with the startup fail-closed guard above, API_KEY is guaranteed non-empty
+# in normal operation (empty only when the operator set SANDBOX_ALLOW_NO_AUTH=1
+# for a trusted localhost-only dev box). The constant-time compare is kept.
+@app.middleware("http")
+async def _auth_mw(request, call_next):
+    if API_KEY and request.url.path not in ("/healthz",):
+        if not secrets.compare_digest(request.headers.get("authorization", ""), f"Bearer {API_KEY}"):
+            return JSONResponse(status_code=401, content={"error": "unauthorized"})
+    return await call_next(request)
+
+
+# --- F5: request body size guard (control-plane OOM) ------------------------
+# Registered last so it runs OUTERMOST — oversized requests are rejected on the
+# Content-Length header before the body (or auth, or any handler) is read.
+@app.middleware("http")
+async def _body_size_mw(request, call_next):
+    # /storage/put carries whole documents (RAG → MinerU), which legitimately
+    # exceed the F5 cap that guards /exec & /files; it gets a higher ceiling.
+    limit = MAX_STORAGE_BODY_BYTES if request.url.path == "/storage/put" else MAX_BODY_BYTES
+    raw_len = request.headers.get("content-length")
+    if raw_len is not None:
+        try:
+            declared = int(raw_len)
+        except ValueError:
+            return JSONResponse(status_code=400, content={"error": "invalid content-length"})
+        if declared > limit:
+            return JSONResponse(
+                status_code=413,
+                content={"error": f"request body exceeds {limit} bytes"},
+            )
+    return await call_next(request)

@@ -1,0 +1,37 @@
+# Aurelia sandbox — sidecar image (the FastAPI control service).
+#
+# This is the small service that the Go backend calls (SANDBOX_BASE_URL). It
+# does NOT run user code itself — it drives the Docker daemon to spawn one
+# locked-down `aurelia-sandbox` container per session. So it needs the docker
+# CLI plus access to a Docker socket at runtime (mount /var/run/docker.sock).
+#
+#   docker build -f Dockerfile.sidecar -t aurelia-sandbox-sidecar:latest .
+#
+# Built for linux/amd64 (typical server). For arm64 servers, change
+# DOCKER_CLI_ARCH to aarch64 and build with --platform linux/arm64.
+
+FROM python:3.12-slim-bookworm
+
+ARG DOCKER_CLI_VERSION=27.3.1
+ARG DOCKER_CLI_ARCH=x86_64
+
+# Install just the docker CLI (static binary) — not the daemon. The sidecar
+# talks to the host daemon over the mounted socket.
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
+    && curl -fsSL "https://download.docker.com/linux/static/stable/${DOCKER_CLI_ARCH}/docker-${DOCKER_CLI_VERSION}.tgz" \
+       | tar xz --strip-components=1 -C /usr/local/bin docker/docker \
+    && apt-get purge -y curl && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/* \
+    && docker --version
+
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY app.py .
+
+# Default points at the GHCR runtime image; override at deploy time.
+ENV SANDBOX_IMAGE=aurelia-sandbox:latest \
+    SANDBOX_NETWORK=none
+
+EXPOSE 8000
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]

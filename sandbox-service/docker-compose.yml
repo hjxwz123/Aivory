@@ -1,0 +1,95 @@
+# Server deployment for the Aurelia sandbox.
+#
+# Pull-and-run on the server (no build needed — images come from ghcr.io):
+#   export OWNER=hjxwz123
+#   export SANDBOX_API_KEY=$(openssl rand -hex 24)
+#   docker compose pull && docker compose up -d
+#
+# Then point the Go backend at it:
+#   SANDBOX_BASE_URL=http://<server>:48217
+#   SANDBOX_API_KEY=<same value as above>
+#
+# The sidecar drives the host Docker daemon (mounted socket) to spawn one
+# locked-down `aurelia-sandbox` container per session. SANDBOX_PULL_ON_START
+# makes it fetch the runtime image on boot so the first /sessions call works.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# SECURITY NOTE — host-takeover risk via docker.sock + root sidecar (F1)
+# ─────────────────────────────────────────────────────────────────────────────
+# This service mounts /var/run/docker.sock and uses it to create/start/exec
+# containers. That socket is root-equivalent on the host: anyone who can drive
+# it (i.e. anyone who reaches this service) can take over the host (mount the
+# host FS into a container, run privileged, etc.). The architecture REQUIRES the
+# socket, so it is intentionally kept — but harden the blast radius:
+#
+#   1. SANDBOX_API_KEY is MANDATORY. The sidecar now refuses to start without it
+#      (set SANDBOX_ALLOW_NO_AUTH=1 only on a trusted localhost-only dev box).
+#   2. Do NOT expose port 48217 to the public internet. Bind it to a private
+#      interface / VPN, or front it with mTLS. The main app reaches it over the
+#      private network only.
+#   3. STRONGLY RECOMMENDED: put a docker-socket-proxy in front of the real
+#      socket instead of mounting it raw, restricted to just the calls this
+#      service makes (container create/start/exec/kill/inspect + image pull):
+#
+#        socket-proxy:
+#          image: tecnativa/docker-socket-proxy
+#          environment:
+#            CONTAINERS: 1    # create / inspect / rm
+#            POST: 1          # required for create/start/exec/kill
+#            EXEC: 1          # docker exec
+#            IMAGES: 1        # docker pull (SANDBOX_PULL_ON_START)
+#            VERSION: 1       # /healthz
+#            # leave everything else at 0 (no SWARM/NETWORKS/VOLUMES/INFO/AUTH…)
+#          volumes:
+#            - /var/run/docker.sock:/var/run/docker.sock:ro
+#          # do not publish this; only the sandbox service should reach it
+#        # then on the sandbox service set: DOCKER_HOST: tcp://socket-proxy:2375
+#        # and mount nothing under /var/run.
+#
+#   4. Pin a seccomp profile on the SESSION containers via SANDBOX_SECCOMP_PROFILE
+#      (path readable INSIDE this sidecar; e.g. mount a profile and point at it).
+#      Combined with the already-set --cap-drop ALL and
+#      --security-opt no-new-privileges this narrows the per-session kernel
+#      attack surface. Leave unset to use docker's built-in default profile.
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  sandbox:
+    image: ghcr.io/${OWNER:-hjxwz123}/aurelia-sandbox-sidecar:latest
+    restart: unless-stopped
+    ports:
+      # Host port is an uncommon high port to avoid clashes with other
+      # services; the in-container port stays 8000.
+      - "48217:8000"
+    environment:
+      SANDBOX_IMAGE: ghcr.io/${OWNER:-hjxwz123}/aurelia-sandbox:latest
+      SANDBOX_PULL_ON_START: "1"
+      SANDBOX_NETWORK: none        # set "bridge" only if code needs runtime internet
+      SANDBOX_MEMORY: 2g
+      SANDBOX_CPUS: "1"
+      SANDBOX_MAX_SESSIONS: "16"
+      SANDBOX_MAX_CONCURRENT_EXECS: "4"
+      SANDBOX_MAX_CONCURRENT_CREATES: "2"
+      SANDBOX_MAX_UPLOAD_BYTES: "20971520"
+      SANDBOX_MAX_FILES_PER_EXEC: "20"
+      SANDBOX_MAX_TOTAL_ARTIFACT_BYTES: "52428800"
+      # F5: control-plane OOM guards (reject oversized requests up front).
+      SANDBOX_MAX_BODY_BYTES: "29360128"   # 28 MiB; > 20 MiB upload after base64
+      SANDBOX_MAX_CODE_BYTES: "1048576"    # 1 MiB cap on /exec `code`
+      # F6: disk-fill DoS guards. Read-only rootfs + size-bounded writable
+      # /workspace tmpfs are ON by default; tune the workspace size here. Set
+      # SANDBOX_DISK_SIZE only on an overlay2+prjquota host (opt-in, best-effort).
+      SANDBOX_READ_ONLY_ROOTFS: "1"
+      SANDBOX_WORKSPACE_SIZE: 512m
+      # SANDBOX_DISK_SIZE: 1g
+      # F1: optional pinned seccomp profile for session containers (path must be
+      # readable INSIDE this sidecar container — mount it and point here).
+      # SANDBOX_SECCOMP_PROFILE: /seccomp/aurelia-sandbox.json
+      # F2: MANDATORY. The sidecar exposes host Docker control (RCE) and refuses
+      # to start without this. Generate with: openssl rand -hex 24
+      SANDBOX_API_KEY: ${SANDBOX_API_KEY:?set SANDBOX_API_KEY (openssl rand -hex 24); the sandbox refuses to start without it}
+    volumes:
+      # The sidecar needs the host daemon to spawn sibling session containers.
+      # See the SECURITY NOTE above: prefer a docker-socket-proxy over the raw
+      # socket, restricted to container create/start/exec/kill + image pull.
+      - /var/run/docker.sock:/var/run/docker.sock
