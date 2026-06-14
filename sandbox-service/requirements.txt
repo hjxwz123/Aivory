@@ -1,0 +1,10 @@
+# Sidecar deps only (the FastAPI service that drives Docker).
+# The sandbox runtime's own packages live in Dockerfile.runner.
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+# Object-storage SDKs for workspace archive/restore + /storage/* (§4.5).
+# Lazy-imported in app.py only when a storage backend is configured, but must
+# be installed so the import succeeds. boto3 covers s3 (incl. S3-compatible via
+# endpoint_url); oss2 covers Aliyun OSS.
+boto3==1.35.99
+oss2==2.19.1

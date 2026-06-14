@@ -18,9 +18,6 @@ server/data/
 server/aurelia
 server/.env
 
-# Sandbox sidecar — tracked separately in its own repository.
-sandbox-service/
-
 # Claude Code session state (local tooling, never committed).
 .claude/
 
