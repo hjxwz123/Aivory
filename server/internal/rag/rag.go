@@ -132,6 +132,18 @@ func (s *Service) Ingest(docID string) {
 				return nil
 			}
 			s.logger.Printf("rag: ingest %s attempt %d/3 failed: %v", docID, attempt, err)
+			// Back off between whole-pipeline retries so a transient upstream
+			// outage (e.g. embeddings TLS timeout) gets a chance to recover
+			// instead of being hammered three times in a row.
+			if attempt < 3 {
+				timer := time.NewTimer(time.Duration(attempt) * 3 * time.Second)
+				select {
+				case <-ctx.Done():
+					timer.Stop()
+					return ctx.Err()
+				case <-timer.C:
+				}
+			}
 		}
 		_ = store.UpdateDocumentStatus(ctx, s.db, docID, "failed", err.Error(), 0)
 		return err
