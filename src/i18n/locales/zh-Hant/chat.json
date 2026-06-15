@@ -177,6 +177,7 @@
     "shareTooltip": "分享"
   },
   "thread": {
+    "loadingEarlier": "正在載入較早的訊息…",
     "modelSwitched": "已切換模型",
     "modelSwitchedBody": "之後的訊息將使用新模型。",
     "renamed": "已重新命名",

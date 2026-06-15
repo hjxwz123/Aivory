@@ -176,6 +176,7 @@
     "shareTooltip": "分享"
   },
   "thread": {
+    "loadingEarlier": "正在加载更早的消息…",
     "modelSwitched": "已切换模型",
     "modelSwitchedBody": "之后的消息将使用新模型。",
     "renamed": "已重命名",
