@@ -594,6 +594,7 @@ export const useConversations = create<ConversationStore>((set, get) => ({
               ...m,
               streaming: false,
               moderation: ev.stop_reason === 'content_moderation' ? true : m.moderation,
+              quotaExceeded: ev.stop_reason === 'quota_exceeded' ? true : m.quotaExceeded,
             }))
             break
         }
@@ -1133,6 +1134,7 @@ export function toLocalMessage(m: ApiMessage): Message {
     liked: m.feedback === 'like',
     disliked: m.feedback === 'dislike',
     moderation: m.stop_reason === 'content_moderation',
+    quotaExceeded: m.stop_reason === 'quota_exceeded',
     refused:
       m.stop_reason === 'content_moderation' ||
       m.stop_reason === 'content_filter' ||

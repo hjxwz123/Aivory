@@ -381,8 +381,12 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		toolDefs = o.filterDisabledTools(o.tools.List(model.ID))
 	}
 	toolNames := make([]string, 0, len(toolDefs))
+	skillToolAvailable := false
 	for _, t := range toolDefs {
 		toolNames = append(toolNames, t.Name)
+		if t.Name == "use_skill" {
+			skillToolAvailable = true
+		}
 	}
 
 	// 6. RAG via the §4.11-B query router (intent-classify + query-rewrite),
@@ -505,6 +509,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		SandboxFiles:        sandboxFiles,
 		Persona:             persona,
 		InlineQuote:         conv.InlineQuote,
+		SkillToolAvailable:  skillToolAvailable,
 	})
 
 	// 11. Title generation (§6.3) — fire-and-forget the first time.
@@ -935,6 +940,11 @@ type systemPromptOpts struct {
 	// InlineQuote is the excerpt a text-selection sub-conversation is anchored to.
 	// When non-empty the assistant is told to focus on explaining/discussing it.
 	InlineQuote string
+	// SkillToolAvailable is true only when the use_skill tool is actually exposed
+	// to the model this turn. When false (official/hosted tools, none mode, or
+	// use_skill disabled), skills are inlined in full so they still take effect
+	// instead of pointing the model at a tool it can't call.
+	SkillToolAvailable bool
 }
 
 // UserPersona is the per-user personalization read from settings.
@@ -1193,17 +1203,20 @@ doc.save("/workspace/outputs/report.docx")
 		}
 	}
 
-	// ③ skills (§4.17). Native tool-mode → slim index + use_skill (progressive
-	// disclosure). prompt/none → no use_skill tool, so inline full instructions.
-	if o.ToolMode == "native" {
-		if len(o.Skills) > 0 {
-			b.WriteString("\n## Skills available (call use_skill(name) to load full instructions)\n")
-			for _, s := range o.Skills {
-				fmt.Fprintf(&b, "- %s: %s\n", s.Name, s.When)
-			}
+	// ③ skills (§4.17). When use_skill is actually exposed → slim index +
+	// progressive disclosure (the model loads a skill on demand). When it is not
+	// (official/hosted tools, none mode, or use_skill disabled) → inline full
+	// instructions so the skill still takes effect instead of pointing the model
+	// at a tool it can't call.
+	if o.SkillToolAvailable && len(o.Skills) > 0 {
+		b.WriteString("\n## Skills available\n")
+		b.WriteString("When the user's request matches one of these skills, you MUST call use_skill(name) to load its full instructions before answering, then follow them.\n")
+		for _, s := range o.Skills {
+			fmt.Fprintf(&b, "- %s: %s\n", s.Name, s.When)
 		}
 	} else if len(o.SkillsFull) > 0 {
 		b.WriteString("\n## Skills\n")
+		b.WriteString("Apply the following skill instructions when relevant to the user's request.\n")
 		for _, s := range o.SkillsFull {
 			fmt.Fprintf(&b, "\n### %s\n%s\n", s.Name, s.Instructions)
 		}

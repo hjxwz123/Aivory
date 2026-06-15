@@ -17,7 +17,9 @@ import {
   X,
   FileText,
   FileSpreadsheet,
+  Sparkles,
 } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import type { Message, Attachment } from '@/types/chat'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { ModelIcon } from '@/components/chat/model-icon'
@@ -325,6 +327,21 @@ export function MessageRow({ message, userName, onRegenerate, onEdit, onSaveEdit
                 <span className="size-1.5 rounded-full bg-[var(--color-fg-faint)] animate-[typing_1400ms_ease-in-out_infinite] [animation-delay:0ms]" />
                 <span className="size-1.5 rounded-full bg-[var(--color-fg-faint)] animate-[typing_1400ms_ease-in-out_infinite] [animation-delay:160ms]" />
                 <span className="size-1.5 rounded-full bg-[var(--color-fg-faint)] animate-[typing_1400ms_ease-in-out_infinite] [animation-delay:320ms]" />
+              </div>
+            ) : message.quotaExceeded ? (
+              <div className="my-1 overflow-hidden rounded-xl border border-[var(--color-secondary)]/40 bg-[var(--color-secondary-soft)]/50 px-4 py-3.5">
+                <div className="flex items-center gap-2 text-[var(--color-secondary)] font-medium text-sm">
+                  <Sparkles size={16} aria-hidden />
+                  {t('message.quota.title', { defaultValue: 'Quota reached' })}
+                </div>
+                <p className="mt-1.5 text-sm text-[var(--color-fg)] leading-relaxed">
+                  {t('message.quota.body', {
+                    defaultValue: "You've used up your group's quota for this model. Upgrade your plan to keep going.",
+                  })}
+                </p>
+                <Button asChild size="sm" variant="secondary" className="mt-3" leadingIcon={<Sparkles size={13} aria-hidden />}>
+                  <Link to="/subscription">{t('message.quota.cta', { defaultValue: 'Upgrade plan' })}</Link>
+                </Button>
               </div>
             ) : message.moderation ? (
               <div

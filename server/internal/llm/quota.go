@@ -35,6 +35,11 @@ func quotaWindow(periodSeconds int) (start int64, ttl time.Duration) {
 // checkModelQuota returns ("", true) when the user may use the model, or
 // (message, false) with the upgrade/over-limit prompt when blocked.
 func (o *Orchestrator) checkModelQuota(ctx context.Context, userID string, model *store.Model) (string, bool) {
+	// Admins are exempt from all usage quotas (§ admin) — they can always test
+	// any model regardless of group limits.
+	if u, err := store.FindUserByID(ctx, o.db, userID); err == nil && u.Role == "admin" {
+		return "", true
+	}
 	has, err := store.ModelHasAnyQuota(ctx, o.db, model.ID)
 	if err != nil {
 		// §B11: fail OPEN on a DB error (availability over enforcement) but log it

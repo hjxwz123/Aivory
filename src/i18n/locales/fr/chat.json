@@ -80,6 +80,11 @@
       "body": "Votre message peut enfreindre nos conditions d’utilisation.",
       "cta": "Veuillez modifier votre message et réessayer."
     },
+    "quota": {
+      "title": "Quota atteint",
+      "body": "Vous avez épuisé le quota de votre groupe pour ce modèle. Améliorez votre offre pour continuer.",
+      "cta": "Améliorer l'offre"
+    },
     "error": {
       "title": "Échec de la réponse — veuillez réessayer",
       "retry": "Réessayer"

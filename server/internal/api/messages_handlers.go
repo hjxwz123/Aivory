@@ -48,15 +48,18 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errors.New("text required"))
 		return
 	}
-	// Limit per day.
-	if !checkDailyMessageLimit(d, u.ID) {
-		writeError(w, 429, errors.New("daily message limit reached"))
-		return
-	}
-	// §8 hard rule: daily token ceiling. 0 = disabled.
-	if !checkDailyTokenQuota(d, u.ID) {
-		writeError(w, 429, errors.New("daily token quota reached"))
-		return
+	// Admins are exempt from all usage quotas (§ admin) — they can test freely.
+	if u.Role != "admin" {
+		// Limit per day.
+		if !checkDailyMessageLimit(d, u.ID) {
+			writeError(w, 429, errors.New("daily message limit reached"))
+			return
+		}
+		// §8 hard rule: daily token ceiling. 0 = disabled.
+		if !checkDailyTokenQuota(d, u.ID) {
+			writeError(w, 429, errors.New("daily token quota reached"))
+			return
+		}
 	}
 	// §8 hard rule: per-user concurrent generation cap. Slot reserved here,
 	// released when the SSE handler returns.

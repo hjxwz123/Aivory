@@ -80,6 +80,11 @@
       "body": "Your message may violate our usage terms.",
       "cta": "Please edit your message and try again."
     },
+    "quota": {
+      "title": "Quota reached",
+      "body": "You've used up your group's quota for this model. Upgrade your plan to keep going.",
+      "cta": "Upgrade plan"
+    },
     "error": {
       "title": "Reply failed — please try again",
       "retry": "Retry"

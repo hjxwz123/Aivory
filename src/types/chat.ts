@@ -133,6 +133,9 @@ export interface Message {
   /** Set when the prompt was blocked by content moderation (§ moderation) —
    *  rendered as a prominent red notice asking the user to re-edit. */
   moderation?: boolean
+  /** Set when the turn was refused because the user's group ran out of quota for
+   *  this model (§ user groups) — rendered as a "quota reached → upgrade" card. */
+  quotaExceeded?: boolean
   /** Model that generated this assistant message (§7.2-6 “由 … 生成”). */
   modelId?: string
   /** When the user is editing a previously sent message. */
