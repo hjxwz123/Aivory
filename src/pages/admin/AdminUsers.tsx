@@ -6,7 +6,7 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
-import { MessageSquare, Plus, Pencil } from 'lucide-react'
+import { MessageSquare, Plus, Pencil, Trash2 } from 'lucide-react'
 import { adminApi, ApiError } from '@/api'
 import type { ApiUser, ApiUserGroup } from '@/api/types'
 import { Button } from '@/components/ui/button'
@@ -56,6 +56,9 @@ export default function AdminUsers() {
   const [editGroup, setEditGroup] = useState('')
   const [editPassword, setEditPassword] = useState('')
   const [saving, setSaving] = useState(false)
+  // Delete-user confirmation.
+  const [deleteRow, setDeleteRow] = useState<ApiUser | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   async function load() {
     setLoading(true)
@@ -91,6 +94,20 @@ export default function AdminUsers() {
       await load()
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
+    }
+  }
+  async function remove() {
+    if (!deleteRow) return
+    setDeleting(true)
+    try {
+      await adminApi.deleteUser(deleteRow.id)
+      toast.success(t('admin:users.deleted'))
+      setDeleteRow(null)
+      await load()
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -244,6 +261,16 @@ export default function AdminUsers() {
                         {t('admin:users.unban')}
                       </Button>
                     )}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={isMe}
+                      leadingIcon={<Trash2 size={12} aria-hidden />}
+                      className="text-[var(--color-danger)] hover:bg-[var(--color-danger-soft)]"
+                      onClick={() => setDeleteRow(u)}
+                    >
+                      {t('admin:common.delete')}
+                    </Button>
                   </div>
                 </li>
               )
@@ -381,6 +408,26 @@ export default function AdminUsers() {
             </Button>
             <Button loading={saving} onClick={() => void submitEdit()}>
               {t('common:actions.save')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete user confirmation */}
+      <Dialog open={Boolean(deleteRow)} onOpenChange={(o) => !o && setDeleteRow(null)}>
+        <DialogContent size="sm">
+          <DialogHeader>
+            <DialogTitle>{t('admin:users.deleteTitle')}</DialogTitle>
+            <DialogDescription>
+              {t('admin:users.deleteBody', { name: deleteRow?.name || deleteRow?.email || '' })}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setDeleteRow(null)}>
+              {t('common:actions.cancel')}
+            </Button>
+            <Button variant="destructive" loading={deleting} onClick={() => void remove()}>
+              {t('admin:common.delete')}
             </Button>
           </DialogFooter>
         </DialogContent>

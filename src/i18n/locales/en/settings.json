@@ -47,7 +47,8 @@
       "name": "Display name",
       "nameBody": "Shown to people you share conversations with.",
       "email": "Email",
-      "emailBody": "Used for sign-in and important notices."
+      "emailBody": "Used for sign-in and important notices.",
+      "emailLocked": "Used for sign-in. Contact an admin to change it."
     },
     "security": "Security",
     "securityRows": {

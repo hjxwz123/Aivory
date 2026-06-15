@@ -47,7 +47,8 @@
       "name": "显示名称",
       "nameBody": "向你分享会话的人会看到这个名字。",
       "email": "邮箱",
-      "emailBody": "用于登录和重要通知。"
+      "emailBody": "用于登录和重要通知。",
+      "emailLocked": "用于登录，如需修改请联系管理员。"
     },
     "security": "安全",
     "securityRows": {

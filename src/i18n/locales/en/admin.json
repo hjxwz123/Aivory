@@ -3,6 +3,7 @@
   "backToChat": "Back to chat",
   "common": {
     "edit": "Edit",
+    "delete": "Delete",
     "remove": "Remove",
     "loading": "Loading…",
     "createFirst": "Create your first {{kind}}",
@@ -232,6 +233,9 @@
     "unban": "Reinstate",
     "banned": "User banned",
     "reinstated": "User reinstated",
+    "deleted": "User deleted",
+    "deleteTitle": "Delete this user?",
+    "deleteBody": "Permanently delete {{name}} and all their conversations, memories and data. This cannot be undone.",
     "viewConversations": "Conversations",
     "backToUsers": "Back to users",
     "backToConversations": "Back to conversations",

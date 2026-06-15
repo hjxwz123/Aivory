@@ -3,6 +3,7 @@
   "backToChat": "Retour au chat",
   "common": {
     "edit": "Modifier",
+    "delete": "Supprimer",
     "remove": "Retirer",
     "loading": "Chargement…",
     "createFirst": "Créez votre premier {{kind}}",
@@ -232,6 +233,9 @@
     "unban": "Réintégrer",
     "banned": "Utilisateur banni",
     "reinstated": "Utilisateur réintégré",
+    "deleted": "Utilisateur supprimé",
+    "deleteTitle": "Supprimer cet utilisateur ?",
+    "deleteBody": "Supprimer définitivement {{name}} et toutes ses conversations, mémoires et données. Irréversible.",
     "viewConversations": "Conversations",
     "backToUsers": "Retour aux utilisateurs",
     "backToConversations": "Retour aux conversations",

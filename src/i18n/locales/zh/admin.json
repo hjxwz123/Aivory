@@ -3,6 +3,7 @@
   "backToChat": "返回聊天",
   "common": {
     "edit": "编辑",
+    "delete": "删除",
     "remove": "删除",
     "loading": "加载中…",
     "createFirst": "创建第一个{{kind}}",
@@ -232,6 +233,9 @@
     "unban": "解封",
     "banned": "已封禁用户",
     "reinstated": "已解封用户",
+    "deleted": "用户已删除",
+    "deleteTitle": "删除该用户？",
+    "deleteBody": "永久删除 {{name}} 及其所有对话、记忆和数据。此操作不可撤销。",
     "viewConversations": "对话记录",
     "backToUsers": "返回用户列表",
     "backToConversations": "返回对话列表",

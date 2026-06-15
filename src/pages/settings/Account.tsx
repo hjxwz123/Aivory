@@ -116,7 +116,7 @@ export default function Account() {
   async function save() {
     setSaving(true)
     try {
-      await updateProfile({ name, email })
+      await updateProfile({ name })
       toast.success(t('settings:account.saved'))
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : 'Failed')
@@ -163,11 +163,12 @@ export default function Account() {
             className="w-64"
           />
         </SettingsRow>
-        <SettingsRow label={t('settings:account.rows.email')} description={t('settings:account.rows.emailBody')}>
+        <SettingsRow label={t('settings:account.rows.email')} description={t('settings:account.rows.emailLocked')}>
           <Input
             type="email"
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            readOnly
+            disabled
             leadingIcon={<Mail size={14} aria-hidden />}
             className="w-64"
           />

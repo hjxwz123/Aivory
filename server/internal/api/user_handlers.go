@@ -27,14 +27,13 @@ func updateMeHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := u.Name
-	email := u.Email
 	if req.Name != nil {
 		name = *req.Name
 	}
-	if req.Email != nil {
-		email = *req.Email
-	}
-	upd, err := store.UpdateUserProfile(r.Context(), d.DB, u.ID, name, email)
+	// Email is immutable for users (it's the account identity / login). Any
+	// email in the request is ignored — only an admin can change it. This keeps
+	// the current address regardless of what the client sends.
+	upd, err := store.UpdateUserProfile(r.Context(), d.DB, u.ID, name, u.Email)
 	if err != nil {
 		writeError(w, 400, err)
 		return

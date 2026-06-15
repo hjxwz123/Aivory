@@ -354,6 +354,8 @@ export const adminApi = {
     api<{ ok: true }>(`/admin/users/${encodeURIComponent(id)}/role`, { method: 'POST', body: { role } }),
   banUser: (id: string) => api<{ ok: true }>(`/admin/users/${encodeURIComponent(id)}/ban`, { method: 'POST' }),
   unbanUser: (id: string) => api<{ ok: true }>(`/admin/users/${encodeURIComponent(id)}/unban`, { method: 'POST' }),
+  /** Permanently delete a user and all their data (§ admin → users). */
+  deleteUser: (id: string) => api<{ ok: true }>(`/admin/users/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   /** Reset (turn off) a user's 2FA — recovery for a lost authenticator (§ 2FA). */
   disableUser2fa: (id: string) =>
     api<{ ok: true }>(`/admin/users/${encodeURIComponent(id)}/2fa/disable`, { method: 'POST' }),

@@ -304,6 +304,29 @@ func banUserAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
+// deleteUserAdmin permanently removes a user and all their data (conversations,
+// messages, memories, tokens, …). Same lockout guards as ban: never delete your
+// own account or the last active admin.
+func deleteUserAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
+	id := pathParam(r, "id")
+	if u := authUser(r); u != nil && u.ID == id {
+		writeError(w, 400, errors.New("you cannot delete your own account"))
+		return
+	}
+	if target, terr := store.FindUserByID(r.Context(), d.DB, id); terr == nil && target.Role == "admin" {
+		if n, _ := store.ActiveAdminCount(r.Context(), d.DB); n <= 1 {
+			writeError(w, 400, errors.New("cannot delete the last remaining admin"))
+			return
+		}
+	}
+	if err := store.DeleteUser(r.Context(), d.DB, id); err != nil {
+		writeError(w, 500, err)
+		return
+	}
+	d.Cache.Publish("user:"+id+":kill", "1") // drop any live sessions immediately
+	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
 func unbanUserAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	id := pathParam(r, "id")
 	if err := store.SetUserStatus(r.Context(), d.DB, id, "active"); err != nil {

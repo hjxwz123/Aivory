@@ -171,6 +171,7 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("DELETE", "/api/admin/skills/:id", requireAdmin(d, deleteSkillAdmin))
 	mux.handle("GET", "/api/admin/users", requireAdmin(d, listUsersAdmin))
 	mux.handle("POST", "/api/admin/users", requireAdmin(d, createUserAdmin))
+	mux.handle("DELETE", "/api/admin/users/:id", requireAdmin(d, deleteUserAdmin))
 	mux.handle("POST", "/api/admin/users/:id/ban", requireAdmin(d, banUserAdmin))
 	mux.handle("POST", "/api/admin/users/:id/unban", requireAdmin(d, unbanUserAdmin))
 	mux.handle("POST", "/api/admin/users/:id/password", requireAdmin(d, setUserPasswordAdmin))

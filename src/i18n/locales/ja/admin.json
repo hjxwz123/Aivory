@@ -3,6 +3,7 @@
   "backToChat": "チャットに戻る",
   "common": {
     "edit": "編集",
+    "delete": "削除",
     "remove": "削除",
     "loading": "読み込み中…",
     "createFirst": "最初の{{kind}}を作成",
@@ -232,6 +233,9 @@
     "unban": "復帰",
     "banned": "ユーザーを禁止しました",
     "reinstated": "ユーザーを復帰しました",
+    "deleted": "ユーザーを削除しました",
+    "deleteTitle": "このユーザーを削除しますか？",
+    "deleteBody": "{{name}} とそのすべての会話・メモリー・データを完全に削除します。元に戻せません。",
     "viewConversations": "会話",
     "backToUsers": "ユーザーに戻る",
     "backToConversations": "会話に戻る",

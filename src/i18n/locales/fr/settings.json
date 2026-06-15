@@ -47,7 +47,8 @@
       "name": "Nom affiché",
       "nameBody": "Affiché aux personnes avec qui vous partagez des conversations.",
       "email": "E-mail",
-      "emailBody": "Utilisé pour la connexion et les avis importants."
+      "emailBody": "Utilisé pour la connexion et les avis importants.",
+      "emailLocked": "Utilisé pour la connexion. Contactez un administrateur pour la modifier."
     },
     "security": "Sécurité",
     "securityRows": {
