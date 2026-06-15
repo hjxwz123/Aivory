@@ -9,8 +9,8 @@ export const SelectValue = SelectPrimitive.Value
 
 export const SelectTrigger = forwardRef<
   ElementRef<typeof SelectPrimitive.Trigger>,
-  ComponentPropsWithoutRef<typeof SelectPrimitive.Trigger>
->(function SelectTrigger({ className, children, ...rest }, ref) {
+  ComponentPropsWithoutRef<typeof SelectPrimitive.Trigger> & { hideChevron?: boolean }
+>(function SelectTrigger({ className, children, hideChevron = false, ...rest }, ref) {
   return (
     <SelectPrimitive.Trigger
       ref={ref}
@@ -28,9 +28,11 @@ export const SelectTrigger = forwardRef<
       {...rest}
     >
       {children}
-      <SelectPrimitive.Icon asChild>
-        <ChevronDown size={14} className="text-[var(--color-fg-muted)]" aria-hidden />
-      </SelectPrimitive.Icon>
+      {hideChevron ? null : (
+        <SelectPrimitive.Icon asChild>
+          <ChevronDown size={14} className="text-[var(--color-fg-muted)]" aria-hidden />
+        </SelectPrimitive.Icon>
+      )}
     </SelectPrimitive.Trigger>
   )
 })

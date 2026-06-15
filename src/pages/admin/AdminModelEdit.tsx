@@ -24,6 +24,7 @@ import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { IconUploader } from '@/components/admin/icon-uploader'
+import { ParamControlsEditor } from '@/components/admin/param-controls-editor'
 import { ModelQuotaEditor } from '@/components/admin/model-quota-editor'
 import { toast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
@@ -287,12 +288,10 @@ export default function AdminModelEdit() {
                     onChange={(e) => patch({ system_prompt: e.target.value })}
                   />
                 </Field>
-                <Field label={t('admin:models.fields.paramControls')} htmlFor="m-pc" className="col-span-2">
-                  <Textarea
-                    id="m-pc"
-                    rows={6}
+                <Field label={t('admin:models.fields.paramControls')} className="col-span-2">
+                  <ParamControlsEditor
                     value={draft.param_controls_text}
-                    onChange={(e) => patch({ param_controls_text: e.target.value })}
+                    onChange={(v) => patch({ param_controls_text: v })}
                   />
                 </Field>
 
