@@ -141,6 +141,12 @@
     "spacingBody": "「紧凑」会让全局内边距收紧。",
     "cozy": "紧凑",
     "comfortable": "宽松",
+    "chatWidth": {
+      "label": "聊天宽度",
+      "body": "全宽占据整个聊天区域；居中则保留版心栏。",
+      "comfortable": "居中",
+      "full": "全宽"
+    },
     "fontSize": "字号",
     "fontSizeBody": "影响消息正文与长文。",
     "language": "语言",

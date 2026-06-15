@@ -141,6 +141,12 @@
     "spacingBody": "コンパクトはあらゆる箇所の余白を狭めます。",
     "cozy": "コンパクト",
     "comfortable": "ゆったり",
+    "chatWidth": {
+      "label": "チャット幅",
+      "body": "全幅はチャット領域全体を使用し、中央寄せは読みやすい列幅を保ちます。",
+      "comfortable": "中央寄せ",
+      "full": "全幅"
+    },
     "fontSize": "フォントサイズ",
     "fontSizeBody": "メッセージ本文と文章に影響します。",
     "language": "言語",
