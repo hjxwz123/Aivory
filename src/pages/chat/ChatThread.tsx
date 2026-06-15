@@ -377,10 +377,11 @@ export default function ChatThread() {
                     readOnly
                     value={shareUrl}
                     onFocus={(e) => e.currentTarget.select()}
-                    className="font-mono text-[12px]"
+                    className="flex-1 min-w-0 font-mono text-[12px]"
                   />
                   <Button
                     variant="secondary"
+                    className="shrink-0"
                     leadingIcon={copied ? <Check size={14} aria-hidden /> : <Copy size={14} aria-hidden />}
                     onClick={() => void copy(shareUrl)}
                   >

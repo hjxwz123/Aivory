@@ -311,7 +311,11 @@ func kindOf(mime, name string) string {
 func downloadArtifactHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
 	id := pathParam(r, "id")
-	a, err := store.GetArtifact(r.Context(), d.DB, id, u.ID)
+	owner := u.ID
+	if u.Role == "admin" {
+		owner = "" // admins may view any user's artifacts (§ triage)
+	}
+	a, err := store.GetArtifact(r.Context(), d.DB, id, owner)
 	if err != nil || a == nil {
 		writeError(w, 404, errNotFound)
 		return
@@ -360,7 +364,13 @@ func downloadArtifactHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 func downloadFileHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
 	id := pathParam(r, "id")
-	f, err := store.GetFile(r.Context(), d.DB, id, u.ID)
+	// Admins may view any user's files (§ admin conversation triage); regular
+	// users stay scoped to their own.
+	owner := u.ID
+	if u.Role == "admin" {
+		owner = ""
+	}
+	f, err := store.GetFile(r.Context(), d.DB, id, owner)
 	if err != nil || f == nil {
 		writeError(w, 404, errNotFound)
 		return

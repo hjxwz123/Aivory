@@ -52,12 +52,19 @@ func ListFilesByConversation(ctx context.Context, db *sql.DB, convID, userID str
 }
 
 // GetFile returns one row with ownership check.
+// GetFile returns a file scoped to userID. An empty userID means "any owner" —
+// reserved for admin triage (an admin viewing another user's conversation).
 func GetFile(ctx context.Context, db *sql.DB, id, userID string) (*File, error) {
 	var f File
 	var conv sql.NullString
-	err := db.QueryRowContext(ctx,
-		`SELECT id, user_id, conversation_id, filename, mime_type, size_bytes, storage_path, kind, created_at FROM files WHERE id=? AND user_id=?`, id, userID,
-	).Scan(&f.ID, &f.UserID, &conv, &f.Filename, &f.MimeType, &f.SizeBytes, &f.StoragePath, &f.Kind, &f.CreatedAt)
+	q := `SELECT id, user_id, conversation_id, filename, mime_type, size_bytes, storage_path, kind, created_at FROM files WHERE id=?`
+	args := []any{id}
+	if userID != "" {
+		q += ` AND user_id=?`
+		args = append(args, userID)
+	}
+	err := db.QueryRowContext(ctx, q, args...).
+		Scan(&f.ID, &f.UserID, &conv, &f.Filename, &f.MimeType, &f.SizeBytes, &f.StoragePath, &f.Kind, &f.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -587,15 +594,20 @@ type Artifact struct {
 	CreatedAt   int64  `json:"created_at"`
 }
 
-// GetArtifact loads one artifact ensuring it belongs to a message belonging
-// to a conversation owned by userID. Returns ErrNotFound otherwise (A12).
+// GetArtifact loads one artifact scoped to userID. An empty userID means "any
+// owner" — for admin triage of another user's conversation (A12).
 func GetArtifact(ctx context.Context, db *sql.DB, id, userID string) (*Artifact, error) {
 	var a Artifact
-	err := db.QueryRowContext(ctx,
-		`SELECT a.id, a.message_id, a.filename, a.storage_path, a.mime_type, a.size_bytes, a.created_at
+	q := `SELECT a.id, a.message_id, a.filename, a.storage_path, a.mime_type, a.size_bytes, a.created_at
 		 FROM artifacts a JOIN messages m ON m.id = a.message_id
 		 JOIN conversations c ON c.id = m.conversation_id
-		 WHERE a.id=? AND c.user_id=?`, id, userID).Scan(
+		 WHERE a.id=?`
+	args := []any{id}
+	if userID != "" {
+		q += ` AND c.user_id=?`
+		args = append(args, userID)
+	}
+	err := db.QueryRowContext(ctx, q, args...).Scan(
 		&a.ID, &a.MessageID, &a.Filename, &a.StoragePath, &a.MimeType, &a.SizeBytes, &a.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound

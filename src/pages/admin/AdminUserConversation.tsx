@@ -12,7 +12,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { ArrowLeft, Bot, User as UserIcon } from 'lucide-react'
+import { ArrowLeft, Bot, FileText } from 'lucide-react'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { initials } from '@/components/ui/avatar.utils'
 import { adminApi, ApiError } from '@/api'
 import type { ApiConversation, ApiModel, ApiUser } from '@/api/types'
 import type { Message } from '@/types/chat'
@@ -72,14 +74,17 @@ export default function AdminUserConversation() {
 
   const headerTitle = useMemo(() => conv?.title || t('users.untitledConversation'), [conv, t])
   // Resolve ids → human-readable names (the raw m_…/u_… ids are useless for triage).
-  const modelName = useMemo(() => {
-    const byId = new Map(models.map((m) => [m.id, m.label]))
-    return (mid?: string) => (mid ? byId.get(mid) ?? mid : '')
+  const modelMeta = useMemo(() => {
+    const byId = new Map(models.map((m) => [m.id, m]))
+    return (mid?: string) => {
+      const m = mid ? byId.get(mid) : undefined
+      return { label: m?.label ?? mid ?? '', icon: m?.icon ?? '' }
+    }
   }, [models])
-  const userLabel = useMemo(() => {
-    const u = users.find((x) => x.id === (conv?.user_id || id))
-    return u?.name || u?.email || ''
-  }, [users, conv, id])
+  const modelName = (mid?: string) => modelMeta(mid).label
+  const convUser = useMemo(() => users.find((x) => x.id === (conv?.user_id || id)), [users, conv, id])
+  const userLabel = convUser?.name || convUser?.email || ''
+  const userAvatar = (convUser?.settings as Record<string, unknown> | undefined)?.avatar_url as string | undefined
 
   return (
     <div>
@@ -123,7 +128,13 @@ export default function AdminUserConversation() {
         ) : (
           <ol className="flex flex-col gap-6">
             {messages.map((m) => (
-              <AdminMessageRow key={m.id} message={m} modelName={modelName} />
+              <AdminMessageRow
+                key={m.id}
+                message={m}
+                modelMeta={modelMeta}
+                userLabel={userLabel}
+                userAvatar={userAvatar}
+              />
             ))}
           </ol>
         )}
@@ -138,26 +149,34 @@ export default function AdminUserConversation() {
  * calls and citations render with their full chat-side components so admins
  * see exactly what the user saw.
  */
-function AdminMessageRow({ message, modelName }: { message: Message; modelName: (id?: string) => string }) {
+function AdminMessageRow({
+  message,
+  modelMeta,
+  userLabel,
+  userAvatar,
+}: {
+  message: Message
+  modelMeta: (id?: string) => { label: string; icon: string }
+  userLabel: string
+  userAvatar?: string
+}) {
   const { t } = useTranslation('admin')
   const isAssistant = message.role === 'assistant'
-  const Icon = isAssistant ? Bot : UserIcon
+  // Assistant → model name + icon; user → their nickname + avatar. No "user/assistant" text.
+  const m = isAssistant ? modelMeta(message.modelId) : null
+  const title = isAssistant ? m?.label || t('users.untitledConversation', { defaultValue: 'Assistant' }) : userLabel || 'User'
+  const iconUrl = isAssistant ? m?.icon : userAvatar
   return (
     <li className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-4">
       <header className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          <span
-            className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)]"
-            aria-hidden
-          >
-            <Icon size={13} />
-          </span>
-          <span className="text-[13px] font-medium text-[var(--color-fg)] capitalize">
-            {message.role}
-          </span>
-          {message.modelId ? (
-            <Badge size="xs" variant="neutral">{modelName(message.modelId)}</Badge>
-          ) : null}
+          <Avatar size="sm" tone={isAssistant ? 'sage' : 'clay'}>
+            {iconUrl ? <AvatarImage src={iconUrl} alt={title} /> : null}
+            <AvatarFallback>
+              {isAssistant ? <Bot size={13} aria-hidden /> : initials(title)}
+            </AvatarFallback>
+          </Avatar>
+          <span className="text-[13px] font-medium text-[var(--color-fg)]">{title}</span>
           {message.refused ? <Badge size="xs" variant="neutral">{t('users.refused')}</Badge> : null}
         </div>
         <div className="text-[11.5px] text-[var(--color-fg-subtle)] font-mono">
@@ -178,6 +197,33 @@ function AdminMessageRow({ message, modelName }: { message: Message; modelName: 
         </div>
       ) : null}
 
+      {/* User uploads (images shown inline, other files as openable chips). */}
+      {message.attachments && message.attachments.length > 0 ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {message.attachments.map((a) =>
+            a.kind === 'image' && a.previewUrl ? (
+              <a key={a.id} href={a.previewUrl} target="_blank" rel="noreferrer" className="block">
+                <img
+                  src={a.previewUrl}
+                  alt={a.name}
+                  className="size-24 rounded-[10px] border border-[var(--color-border-subtle)] object-cover"
+                />
+              </a>
+            ) : (
+              <a
+                key={a.id}
+                href={a.previewUrl ?? '#'}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1.5 text-[12px] rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-2.5 py-1.5 text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] interactive"
+              >
+                <FileText size={13} aria-hidden /> {a.name}
+              </a>
+            ),
+          )}
+        </div>
+      ) : null}
+
       {message.citations && message.citations.length > 0 ? (
         <div className="mt-3">
           <CitationList citations={message.citations} />
@@ -187,11 +233,15 @@ function AdminMessageRow({ message, modelName }: { message: Message; modelName: 
       {message.artifacts && message.artifacts.length > 0 ? (
         <ul className="mt-3 flex flex-wrap gap-2">
           {message.artifacts.map((a) => (
-            <li
-              key={a.id}
-              className="text-[12px] rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-2.5 py-1 text-[var(--color-fg-muted)]"
-            >
-              {a.filename}
+            <li key={a.id}>
+              <a
+                href={a.url ?? `/api/artifacts/${a.id}`}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1.5 text-[12px] rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-2.5 py-1.5 text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] interactive"
+              >
+                <FileText size={13} aria-hidden /> {a.filename}
+              </a>
             </li>
           ))}
         </ul>
