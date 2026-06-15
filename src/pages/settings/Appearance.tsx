@@ -120,6 +120,24 @@ export default function Appearance() {
             </Segment>
           </div>
         </SettingsRow>
+        <SettingsRow label={t('appearance.chatWidth.label')} description={t('appearance.chatWidth.body')}>
+          <div className="inline-flex items-center gap-1 p-0.5 rounded-[10px] bg-[var(--color-bg-muted)] border border-[var(--color-border-subtle)]">
+            <Segment
+              current={appearance.chatWidth}
+              value="comfortable"
+              onClick={() => setAppearance({ chatWidth: 'comfortable' })}
+            >
+              {t('appearance.chatWidth.comfortable')}
+            </Segment>
+            <Segment
+              current={appearance.chatWidth}
+              value="full"
+              onClick={() => setAppearance({ chatWidth: 'full' })}
+            >
+              {t('appearance.chatWidth.full')}
+            </Segment>
+          </div>
+        </SettingsRow>
         <SettingsRow label={t('appearance.fontSize')} description={t('appearance.fontSizeBody')}>
           <div className="inline-flex items-center gap-1 p-0.5 rounded-[10px] bg-[var(--color-bg-muted)] border border-[var(--color-border-subtle)]">
             <Segment current={appearance.fontSize} value="sm" onClick={() => setAppearance({ fontSize: 'sm' })}>

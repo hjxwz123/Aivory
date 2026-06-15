@@ -207,9 +207,14 @@ export function inlineMarkdownToHtml(md: string): string {
     // Should never happen with async:false; fall back to safe escape.
     return escapeHtml(md)
   }
+  // Layer 2: allowlist-sanitize the marked output FIRST (the @@MATH@@
+  // placeholders are inert text and survive), THEN splice in the KaTeX HTML.
+  // KaTeX positions glyphs with inline `style` which the sanitizer strips — and
+  // the math HTML is trusted (KaTeX-generated from the TeX we extracted, not
+  // model-supplied HTML), so it must bypass the sanitizer to render correctly.
+  out = sanitizeHtml(out)
   out = out.replace(/@@MATH(\d+)@@/g, (_, i) => map[Number(i)] ?? '')
-  // Layer 2: allowlist-sanitize the rendered HTML.
-  return sanitizeHtml(out)
+  return out
 }
 
 /**
@@ -225,8 +230,12 @@ export function blockMarkdownToHtml(md: string): string {
   if (typeof out !== 'string') {
     return escapeHtml(md)
   }
+  // Sanitize first (placeholders survive as text), then splice in the trusted
+  // KaTeX HTML so its inline positioning styles aren't stripped — see
+  // inlineMarkdownToHtml for the rationale.
+  out = sanitizeHtml(out)
   out = out.replace(/@@MATH(\d+)@@/g, (_, i) => map[Number(i)] ?? '')
-  return sanitizeHtml(out)
+  return out
 }
 
 /**

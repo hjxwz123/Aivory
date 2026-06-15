@@ -141,6 +141,12 @@
     "spacingBody": "Le mode compact resserre les marges partout.",
     "cozy": "Compact",
     "comfortable": "Confortable",
+    "chatWidth": {
+      "label": "Largeur du chat",
+      "body": "Pleine largeur utilise tout le volet ; centré garde une colonne éditoriale.",
+      "comfortable": "Centré",
+      "full": "Pleine largeur"
+    },
     "fontSize": "Taille de police",
     "fontSizeBody": "Affecte le corps des messages et le texte.",
     "language": "Langue",

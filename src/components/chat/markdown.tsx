@@ -80,15 +80,21 @@ export const Markdown = memo(function Markdown({ content, className, live = fals
             )
           case 'list':
           case 'ordered-list':
+            // Block-parse so `- item` / `1. item` become real <ul>/<ol><li>
+            // markup with line breaks — parseInline would leave the dashes as
+            // literal inline text on one line. The sanitizer strips classes off
+            // the list elements, so bullets/spacing are applied via the wrapper.
             return (
               <div
                 key={i}
                 className={cn(
-                  'space-y-1.5 text-[var(--color-fg)]',
-                  b.type === 'ordered-list' ? 'list-decimal' : 'list-disc',
+                  'my-3 text-[var(--color-fg)] leading-relaxed',
+                  '[&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-5 [&_ol]:pl-5',
+                  '[&_ul]:my-1 [&_ol]:my-1 [&_li]:my-1 [&_li]:pl-0.5',
+                  '[&_ul_ul]:list-[circle] [&_ul_ul]:my-0.5 [&_ol_ol]:my-0.5 [&_li_p]:my-0',
                   blockAnim,
                 )}
-                dangerouslySetInnerHTML={{ __html: inlineMarkdownToHtml(b.content) }}
+                dangerouslySetInnerHTML={{ __html: blockMarkdownToHtml(b.content) }}
               />
             )
           case 'code':

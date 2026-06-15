@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { AppearanceSettings, DensityPref, FontPref, FontSizePref, ModelSettings, PrivacySettings } from '@/types/settings'
+import type { AppearanceSettings, ChatWidthPref, DensityPref, FontPref, FontSizePref, ModelSettings, PrivacySettings } from '@/types/settings'
 
 interface SettingsState {
   appearance: AppearanceSettings
@@ -49,6 +49,7 @@ export const useSettings = create<SettingsState>((set) => ({
     density: 'comfortable',
     fontSize: 'md',
     font: 'default',
+    chatWidth: 'comfortable',
     ...(initial.appearance ?? {}),
   },
   models: {
@@ -122,11 +123,19 @@ function applyFont(f: FontPref) {
   if (f === 'inter') void import('@fontsource-variable/inter')
 }
 
+// Chat content width — data-chat-width="full" overrides --layout-message-max-w
+// in tokens.css so the chat pane uses its full width (keeping only the gutter).
+function applyChatWidth(w: ChatWidthPref) {
+  if (typeof document === 'undefined') return
+  document.documentElement.dataset.chatWidth = w
+}
+
 // Apply on boot
 const boot = useSettings.getState().appearance
 applyDensity(boot.density)
 applyFontSize(boot.fontSize)
 applyFont(boot.font)
+applyChatWidth(boot.chatWidth)
 
 // Re-apply whenever appearance changes
 useSettings.subscribe((state, prev) => {
@@ -138,5 +147,8 @@ useSettings.subscribe((state, prev) => {
   }
   if (state.appearance.font !== prev.appearance.font) {
     applyFont(state.appearance.font)
+  }
+  if (state.appearance.chatWidth !== prev.appearance.chatWidth) {
+    applyChatWidth(state.appearance.chatWidth)
   }
 })

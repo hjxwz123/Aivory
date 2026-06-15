@@ -141,6 +141,12 @@
     "spacingBody": "Cozy uses tighter padding everywhere.",
     "cozy": "Cozy",
     "comfortable": "Comfortable",
+    "chatWidth": {
+      "label": "Chat width",
+      "body": "Full width uses the whole chat pane; centered keeps an editorial column.",
+      "comfortable": "Centered",
+      "full": "Full width"
+    },
     "fontSize": "Font size",
     "fontSizeBody": "Affects message body and prose.",
     "language": "Language",
