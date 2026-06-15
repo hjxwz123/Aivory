@@ -6,7 +6,7 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
-import { MessageSquare, Plus, Pencil, Trash2 } from 'lucide-react'
+import { MessageSquare, Plus, Pencil, Trash2, Search } from 'lucide-react'
 import { adminApi, ApiError } from '@/api'
 import type { ApiUser, ApiUserGroup } from '@/api/types'
 import { Button } from '@/components/ui/button'
@@ -25,7 +25,7 @@ import {
 } from '@/components/ui/dialog'
 import { toast } from '@/hooks/use-toast'
 import { useAuth } from '@/store/auth'
-import { formatRelativeDate, cn } from '@/lib/utils'
+import { formatDateTime, cn } from '@/lib/utils'
 
 // A user counts as online if they made an authenticated request in the last 5
 // minutes (the middleware refreshes last_seen_at at most once/min).
@@ -59,6 +59,7 @@ export default function AdminUsers() {
   // Delete-user confirmation.
   const [deleteRow, setDeleteRow] = useState<ApiUser | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [query, setQuery] = useState('')
 
   async function load() {
     setLoading(true)
@@ -203,12 +204,28 @@ export default function AdminUsers() {
         </Button>
       </header>
 
-      <section className="mt-8">
+      <div className="mt-6">
+        <Input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          leadingIcon={<Search size={14} aria-hidden />}
+          placeholder={t('admin:users.searchPlaceholder')}
+          className="max-w-sm"
+        />
+      </div>
+
+      <section className="mt-5">
         {loading ? (
           <div className="text-sm text-[var(--color-fg-subtle)]">{t('admin:common.loading')}</div>
         ) : (
           <ul className="flex flex-col divide-y divide-[var(--color-divider)] rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)]">
-            {rows.map((u) => {
+            {rows
+              .filter((u) => {
+                const q = query.trim().toLowerCase()
+                if (!q) return true
+                return (u.name ?? '').toLowerCase().includes(q) || (u.email ?? '').toLowerCase().includes(q)
+              })
+              .map((u) => {
               const isMe = me?.id === u.id
               const group = groups.find((g) => g.id === u.group_id)
               const lastSeen = u.last_seen_at ?? 0
@@ -238,7 +255,7 @@ export default function AdminUsers() {
                         {online
                           ? t('admin:users.online')
                           : lastSeen > 0
-                            ? t('admin:users.lastSeen', { when: formatRelativeDate(lastSeen * 1000) })
+                            ? t('admin:users.lastSeen', { when: formatDateTime(lastSeen * 1000) })
                             : t('admin:users.neverSeen')}
                       </span>
                     </div>

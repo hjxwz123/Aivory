@@ -198,6 +198,7 @@
     "title": "Utilisateurs",
     "lead": "Créez des comptes, réinitialisez les mots de passe, modifiez les rôles et suspendez les comptes abusifs (révoque immédiatement les sessions en cours).",
     "you": "vous",
+    "searchPlaceholder": "Rechercher par nom ou e-mail",
     "online": "En ligne",
     "offline": "Hors ligne",
     "lastSeen": "Vu {{when}}",
@@ -483,7 +484,7 @@
     "removeImage": "Retirer",
     "uploadFailed": "Échec du téléversement de l'image",
     "bodyLabel": "Texte",
-    "bodyHint": "Texte brut. Les sauts de ligne sont conservés.",
+    "bodyHint": "Prend en charge le HTML (liens, gras, listes, titres…). Les sauts de ligne nécessitent <br> ou <p>.",
     "bodyPlaceholder": "Que voulez-vous annoncer ?",
     "preview": "Aperçu",
     "saved": "Annonce enregistrée"

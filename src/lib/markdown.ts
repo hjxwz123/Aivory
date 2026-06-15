@@ -92,7 +92,7 @@ function isSafeUrl(url: string): boolean {
  * Performance: parseInline runs per paragraph; sanitize runs once per parsed
  * fragment. Both are linear in fragment size — fine for streaming.
  */
-function sanitizeHtml(html: string): string {
+export function sanitizeHtml(html: string): string {
   if (typeof document === 'undefined') return html
   const tpl = document.createElement('template')
   tpl.innerHTML = html

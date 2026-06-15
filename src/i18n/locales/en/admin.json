@@ -198,6 +198,7 @@
     "title": "Users",
     "lead": "Create accounts, reset passwords, change roles, and suspend abusive accounts (revokes outstanding sessions immediately).",
     "you": "you",
+    "searchPlaceholder": "Search by name or email",
     "online": "Online",
     "offline": "Offline",
     "lastSeen": "Last seen {{when}}",
@@ -483,7 +484,7 @@
     "removeImage": "Remove",
     "uploadFailed": "Image upload failed",
     "bodyLabel": "Text",
-    "bodyHint": "Plain text. Line breaks are preserved.",
+    "bodyHint": "Supports HTML (links, bold, lists, headings…). Line breaks need <br> or <p>.",
     "bodyPlaceholder": "What do you want users to know?",
     "preview": "Preview",
     "saved": "Announcement saved"

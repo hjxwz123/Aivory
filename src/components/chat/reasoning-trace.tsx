@@ -52,7 +52,6 @@ const TOOL_ICON: Record<string, ComponentType<{ size?: number; className?: strin
 export function ReasoningTrace({ reasoning, streaming = false, settled = false }: ReasoningTraceProps) {
   const { t } = useTranslation(['chat', 'common'])
   const items = reasoning ?? []
-  const toolCount = items.reduce((n, it) => (it.kind === 'tool' ? n + 1 : n), 0)
 
   // Active = the reasoning phase is live (streaming and the answer hasn't
   // started). Drives the pulse + auto-expand.
@@ -72,14 +71,15 @@ export function ReasoningTrace({ reasoning, streaming = false, settled = false }
   const headline = active ? t('thinking') : t('reasoning.title')
 
   return (
-    <div className="mb-3 overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-bg-subtle)]">
+    <div className="mb-3">
+      {/* Minimal, box-free disclosure — just an icon + "thinking" label + caret. */}
       <button
         type="button"
         onClick={() => {
           userToggled.current = true
           setExpanded((v) => !v)
         }}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left interactive hover:bg-[var(--color-bg-muted)]/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+        className="flex items-center gap-1.5 -ml-1 px-1 py-0.5 text-left interactive rounded-[6px] text-[var(--color-fg-subtle)] hover:text-[var(--color-fg-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
       >
         <Brain
           size={13}
@@ -89,19 +89,11 @@ export function ReasoningTrace({ reasoning, streaming = false, settled = false }
             active && 'animate-[streaming-pulse_1600ms_ease-in-out_infinite]',
           )}
         />
-        <span className="min-w-0 flex-1 truncate text-[13px] text-[var(--color-fg-muted)]">{headline}</span>
-        {toolCount > 0 ? (
-          <span className="shrink-0 text-[11px] tabular-nums text-[var(--color-fg-subtle)]">
-            {t('reasoning.steps', { count: toolCount })}
-          </span>
-        ) : null}
+        <span className="min-w-0 truncate text-[12.5px]">{headline}</span>
         <ChevronRight
-          size={13}
+          size={12}
           aria-hidden
-          className={cn(
-            'shrink-0 text-[var(--color-fg-subtle)] transition-transform duration-150',
-            expanded && 'rotate-90',
-          )}
+          className={cn('shrink-0 transition-transform duration-150', expanded && 'rotate-90')}
         />
       </button>
 
@@ -114,7 +106,7 @@ export function ReasoningTrace({ reasoning, streaming = false, settled = false }
         )}
       >
         <div className="overflow-hidden">
-          <div className="space-y-2 px-3 pb-3 pt-1">
+          <div className="space-y-2 ml-[6px] mt-1.5 pl-3.5 border-l border-[var(--color-divider)]">
             {items.map((it) => {
               if (it.kind === 'thinking') {
                 return (

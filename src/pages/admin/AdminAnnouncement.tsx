@@ -18,6 +18,7 @@ import { Input } from '@/components/ui/input'
 import { Field } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { toast } from '@/hooks/use-toast'
+import { sanitizeHtml } from '@/lib/markdown'
 
 interface AnnouncementConfig {
   enabled: boolean
@@ -188,9 +189,14 @@ export default function AdminAnnouncement() {
                 ) : (
                   <span aria-hidden className="block w-1 shrink-0 self-stretch bg-[var(--color-accent)]" />
                 )}
-                <div className="flex-1 whitespace-pre-wrap p-5 text-[14px] leading-relaxed text-[var(--color-fg)]">
-                  {body.trim() || <span className="text-[var(--color-fg-subtle)]">{t('admin:announcement.bodyPlaceholder')}</span>}
-                </div>
+                {body.trim() ? (
+                  <div
+                    className="flex-1 p-5 text-[14px] leading-relaxed text-[var(--color-fg)] break-words [&_a]:text-[var(--color-accent)] [&_a]:underline [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5"
+                    dangerouslySetInnerHTML={{ __html: sanitizeHtml(body) }}
+                  />
+                ) : (
+                  <div className="flex-1 p-5 text-[14px] text-[var(--color-fg-subtle)]">{t('admin:announcement.bodyPlaceholder')}</div>
+                )}
               </div>
             </div>
           ) : null}

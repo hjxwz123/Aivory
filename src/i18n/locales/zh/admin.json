@@ -198,6 +198,7 @@
     "title": "用户",
     "lead": "新建账户、重置密码、修改角色,并封禁滥用账户(立即吊销所有 access token)。",
     "you": "你",
+    "searchPlaceholder": "按名称或邮箱搜索",
     "online": "在线",
     "offline": "离线",
     "lastSeen": "上次在线 {{when}}",
@@ -483,7 +484,7 @@
     "removeImage": "移除",
     "uploadFailed": "图片上传失败",
     "bodyLabel": "文字",
-    "bodyHint": "纯文本，保留换行。",
+    "bodyHint": "支持 HTML（链接、加粗、列表、标题等）。换行请用 <br> 或 <p>。",
     "bodyPlaceholder": "想让用户知道什么？",
     "preview": "预览",
     "saved": "公告已保存"

@@ -11,9 +11,13 @@
  * so dialogs never stack.
  */
 import { useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { authApi } from '@/api'
 import { useAuth } from '@/store/auth'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
+import { sanitizeHtml } from '@/lib/markdown'
+import { cn } from '@/lib/utils'
 
 interface AnnouncementData {
   body: string
@@ -25,6 +29,7 @@ interface AnnouncementData {
 const DISMISS_KEY = 'aurelia.announcement.dismissed'
 
 export function AnnouncementPopup() {
+  const { t } = useTranslation('common')
   const user = useAuth((s) => s.user)
   const status = useAuth((s) => s.status)
   const onboarded = Boolean((user?.settings as Record<string, unknown> | undefined)?.onboarded)
@@ -83,19 +88,34 @@ export function AnnouncementPopup() {
     <Dialog open={open} onOpenChange={(o) => { if (!o) close() }}>
       <DialogContent size={hasImage ? 'xl' : 'md'} className="overflow-hidden p-0">
         {/* a11y only — the design intentionally has no visible heading. */}
-        <DialogTitle className="sr-only">Announcement</DialogTitle>
-        <div className="flex flex-col sm:flex-row">
+        <DialogTitle className="sr-only">{t('common.gotIt', { defaultValue: 'Announcement' })}</DialogTitle>
+        <div className="flex flex-col sm:flex-row max-h-[85vh]">
           {hasImage ? (
-            <div className="sm:w-2/5 shrink-0 bg-[var(--color-bg-muted)]">
-              <img src={data.image_url} alt="" className="h-44 w-full object-cover sm:h-full" draggable={false} />
+            <div className="sm:w-[42%] shrink-0 bg-[var(--color-bg-muted)]">
+              <img src={data.image_url} alt="" className="h-48 w-full object-cover sm:h-full" draggable={false} />
             </div>
-          ) : (
-            <span aria-hidden className="hidden sm:block w-1 shrink-0 self-stretch bg-[var(--color-accent)]" />
-          )}
-          <div className="flex-1 min-w-0 px-6 py-6 sm:px-7 sm:py-7">
-            <p className="whitespace-pre-wrap break-words text-[14.5px] leading-relaxed text-[var(--color-fg)]">
-              {data.body}
-            </p>
+          ) : null}
+          <div className="flex-1 min-w-0 flex flex-col">
+            <div
+              className={cn(
+                'flex-1 overflow-y-auto px-7 py-7 text-[14.5px] leading-relaxed text-[var(--color-fg)]',
+                // Themed styling for the admin's HTML body.
+                'prose-announcement break-words',
+                '[&_h1]:font-serif [&_h1]:text-xl [&_h1]:tracking-tight [&_h1]:mb-2',
+                '[&_h2]:font-serif [&_h2]:text-lg [&_h2]:tracking-tight [&_h2]:mt-4 [&_h2]:mb-1.5',
+                '[&_p]:my-2 [&_a]:text-[var(--color-accent)] [&_a]:underline [&_a]:underline-offset-2',
+                '[&_strong]:font-semibold [&_em]:italic',
+                '[&_ul]:list-disc [&_ul]:pl-5 [&_ul]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_ol]:my-2 [&_li]:my-1',
+                '[&_img]:rounded-[10px] [&_img]:my-2 [&_hr]:my-4 [&_hr]:border-[var(--color-divider)]',
+                '[&_code]:font-mono [&_code]:text-[13px] [&_code]:bg-[var(--color-bg-muted)] [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded-[5px]',
+              )}
+              dangerouslySetInnerHTML={{ __html: sanitizeHtml(data.body) }}
+            />
+            <div className="shrink-0 border-t border-[var(--color-divider)] px-7 py-3.5 flex justify-end">
+              <Button size="sm" onClick={close}>
+                {t('common.gotIt', { defaultValue: 'Got it' })}
+              </Button>
+            </div>
           </div>
         </div>
       </DialogContent>

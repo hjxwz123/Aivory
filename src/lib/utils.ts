@@ -67,6 +67,21 @@ export function formatRelativeDate(date: Date | string | number): string {
 }
 
 /**
+ * Absolute date + time (localized, e.g. "2026/06/15 10:42"). For precise
+ * timestamps like a user's last-seen, where a relative "Today" hides the detail.
+ */
+export function formatDateTime(date: Date | string | number): string {
+  const d = typeof date === 'number' || typeof date === 'string' ? new Date(date) : date
+  return d.toLocaleString(undefined, {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+/**
  * Absolute calendar date (localized, e.g. "June 21, 2026" / "2026年6月21日").
  * Use this for FUTURE dates like a subscription expiry — formatRelativeDate is
  * built for past timestamps and collapses any future date to a weekday ("Tue").

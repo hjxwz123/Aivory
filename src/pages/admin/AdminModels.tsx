@@ -20,6 +20,8 @@ import { Input } from '@/components/ui/input'
 import { Field } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
+import { Switch } from '@/components/ui/switch'
+import { Tooltip } from '@/components/ui/tooltip'
 import { IconUploader } from '@/components/admin/icon-uploader'
 import {
   Dialog,
@@ -150,6 +152,18 @@ export default function AdminModels() {
     })
   }
 
+  // Quick show/hide: flip `enabled` inline (optimistic + revert on error).
+  async function toggleEnabled(m: ApiModel) {
+    const next = !m.enabled
+    setModels((list) => list.map((x) => (x.id === m.id ? { ...x, enabled: next } : x)))
+    try {
+      await adminApi.updateModel(m.id, { enabled: next })
+    } catch (e) {
+      setModels((list) => list.map((x) => (x.id === m.id ? { ...x, enabled: m.enabled } : x)))
+      toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
+    }
+  }
+
   function moveBy(idx: number, dir: -1 | 1) {
     const to = idx + dir
     if (to < 0 || to >= models.length) return
@@ -264,6 +278,11 @@ export default function AdminModels() {
                       {m.kind === 'embedding' ? ` · dim ${m.dim}` : ''}
                     </div>
                   </div>
+                  <Tooltip content={t('admin:models.visibleToggle', { defaultValue: m.enabled ? 'Visible to users' : 'Hidden from users' })}>
+                    <span className="shrink-0">
+                      <Switch checked={m.enabled} onCheckedChange={() => void toggleEnabled(m)} aria-label={t('admin:models.visibleToggle', { defaultValue: 'Show in app' })} />
+                    </span>
+                  </Tooltip>
                   <Button
                     variant="ghost"
                     size="sm"
