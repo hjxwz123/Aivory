@@ -98,9 +98,16 @@ func registerHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		code := genCode6()
 		d.Cache.Set("verify:"+req.Email, code, 10*time.Minute)
 		_ = store.SetUserStatus(r.Context(), d.DB, user.ID, "pending")
-		if err := d.Mailer.SendCode(req.Email, code, "verify"); err != nil {
-			d.Logger.Printf("[mail] failed to send verification to %s: %v", req.Email, err)
-		}
+		// Send off the request path: even with timeouts a slow SMTP server would
+		// otherwise make "Create account" spin for seconds. The code is already
+		// cached, so the client can move to the code screen immediately; a failed
+		// send is logged and the user can hit "resend".
+		email := req.Email
+		go func() {
+			if err := d.Mailer.SendCode(email, code, "verify"); err != nil {
+				d.Logger.Printf("[mail] failed to send verification to %s: %v", email, err)
+			}
+		}()
 		writeJSON(w, 200, map[string]any{"verification_required": true, "email": req.Email})
 		return
 	}

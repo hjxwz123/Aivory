@@ -134,40 +134,76 @@ func (s *SMTPSender) send(cfg smtpConfig, to, subject, htmlBody string) error {
 	msg.WriteString(htmlBody)
 
 	auth := smtp.PlainAuth("", cfg.User, cfg.Password, cfg.Host)
+	tlsCfg := &tls.Config{ServerName: cfg.Host}
 
+	// Bound EVERY network step. The standard library's tls.Dial / smtp.SendMail
+	// have NO timeout, so a wrong port or a TLS-mode mismatch (587 expects
+	// STARTTLS, 465 expects implicit TLS) hangs forever — which froze the
+	// register request on an infinite spinner. A 10s dial + a 25s overall
+	// deadline make a misconfigured server fail fast instead.
+	dialer := &net.Dialer{Timeout: 10 * time.Second}
+	deadline := time.Now().Add(25 * time.Second)
+
+	var c *smtp.Client
 	if cfg.TLS || cfg.Port == "465" {
-		// Direct TLS (port 465).
-		conn, err := tls.Dial("tcp", addr, &tls.Config{ServerName: cfg.Host})
+		// Implicit TLS (port 465): the connection is TLS from the first byte.
+		conn, err := tls.DialWithDialer(dialer, "tcp", addr, tlsCfg)
 		if err != nil {
 			return fmt.Errorf("tls dial: %w", err)
 		}
-		defer conn.Close()
-		c, err := smtp.NewClient(conn, cfg.Host)
+		_ = conn.SetDeadline(deadline)
+		c, err = smtp.NewClient(conn, cfg.Host)
 		if err != nil {
+			_ = conn.Close()
 			return fmt.Errorf("smtp client: %w", err)
 		}
-		defer c.Close()
-		if err := c.Auth(auth); err != nil {
-			return fmt.Errorf("smtp auth: %w", err)
-		}
-		if err := c.Mail(cfg.From); err != nil {
-			return fmt.Errorf("smtp mail: %w", err)
-		}
-		if err := c.Rcpt(to); err != nil {
-			return fmt.Errorf("smtp rcpt: %w", err)
-		}
-		w, err := c.Data()
+	} else {
+		// Plain connect, then upgrade with STARTTLS when the server offers it
+		// (port 587 / 25). Auto-detect so the common 587 setup just works.
+		conn, err := dialer.Dial("tcp", addr)
 		if err != nil {
-			return fmt.Errorf("smtp data: %w", err)
+			return fmt.Errorf("dial: %w", err)
 		}
-		if _, err := w.Write(msg.Bytes()); err != nil {
-			return fmt.Errorf("smtp write: %w", err)
+		_ = conn.SetDeadline(deadline)
+		c, err = smtp.NewClient(conn, cfg.Host)
+		if err != nil {
+			_ = conn.Close()
+			return fmt.Errorf("smtp client: %w", err)
 		}
-		return w.Close()
+		if ok, _ := c.Extension("STARTTLS"); ok {
+			if err := c.StartTLS(tlsCfg); err != nil {
+				_ = c.Close()
+				return fmt.Errorf("starttls: %w", err)
+			}
+		}
 	}
+	defer c.Close()
 
-	// STARTTLS (port 587 / 25).
-	return smtp.SendMail(addr, auth, cfg.From, []string{to}, msg.Bytes())
+	// Authenticate only when credentials are set AND the server advertises AUTH.
+	if cfg.User != "" {
+		if ok, _ := c.Extension("AUTH"); ok {
+			if err := c.Auth(auth); err != nil {
+				return fmt.Errorf("smtp auth: %w", err)
+			}
+		}
+	}
+	if err := c.Mail(cfg.From); err != nil {
+		return fmt.Errorf("smtp mail: %w", err)
+	}
+	if err := c.Rcpt(to); err != nil {
+		return fmt.Errorf("smtp rcpt: %w", err)
+	}
+	w, err := c.Data()
+	if err != nil {
+		return fmt.Errorf("smtp data: %w", err)
+	}
+	if _, err := w.Write(msg.Bytes()); err != nil {
+		return fmt.Errorf("smtp write: %w", err)
+	}
+	if err := w.Close(); err != nil {
+		return fmt.Errorf("smtp write close: %w", err)
+	}
+	return c.Quit()
 }
 
 type emailData struct {
