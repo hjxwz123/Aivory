@@ -378,6 +378,8 @@ export interface ApiMessage {
   error: string
   /** User rating on an assistant message: "" | "like" | "dislike". */
   feedback?: string
+  /** Wall-clock generation time for the turn, in ms. */
+  gen_ms?: number
   created_at: number
   /** Sibling navigation (only on the path response). */
   branch_index?: number

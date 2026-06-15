@@ -147,6 +147,8 @@ export interface Message {
   ragInjection?: { strategy: string; summary: string; at: number }
   /** Cost the user spent on this assistant turn (chat + tools + images). §8.3 */
   cost?: number
+  /** Wall-clock generation time for this assistant turn, in ms. */
+  genMs?: number
   /** Currency code for `cost`, e.g. "USD" or "CNY". */
   currency?: string
   /** Attachments on a user turn. */

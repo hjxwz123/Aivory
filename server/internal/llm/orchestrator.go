@@ -274,6 +274,8 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		userMsg = created
 		assistantParent = created.ID
 	}
+	// Turn start — used to record per-reply generation time (gen_ms, shown in UI).
+	turnStart := time.Now()
 	assistantMsg, err := store.CreateMessage(ctx, o.db, store.Message{
 		ConversationID: conv.ID, ParentID: assistantParent, Role: "assistant",
 		Provider: channel.Type, ModelID: model.ID,
@@ -624,6 +626,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 				CacheWriteTokens: usage.CacheWriteTokens,
 				Cost:             computeCost(*model, usage),
 				Status:           "stopped",
+				GenMs:            time.Since(turnStart).Milliseconds(),
 			})
 			// Bill what the model actually produced before we cancelled.
 			if usage.InputTokens > 0 || usage.OutputTokens > 0 {
@@ -707,6 +710,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		CacheWriteTokens: result.Usage.CacheWriteTokens,
 		Cost:             turnTotal,
 		Status:           "complete",
+		GenMs:            time.Since(turnStart).Milliseconds(),
 	})
 	_ = store.LogUsage(ctx, o.db, store.UsageLog{
 		UserID:           conv.UserID,

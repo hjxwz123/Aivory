@@ -86,6 +86,7 @@ func Migrate(db *sql.DB) error {
 	addTotpSecret := `ALTER TABLE users ADD COLUMN totp_secret TEXT NOT NULL DEFAULT ''`
 	addTotpEnabled := `ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0`
 	addFeedback := `ALTER TABLE messages ADD COLUMN feedback TEXT NOT NULL DEFAULT ''`
+	addGenMs := `ALTER TABLE messages ADD COLUMN gen_ms INTEGER NOT NULL DEFAULT 0`
 	// Active-sessions context on refresh tokens (§ account → active sessions).
 	addSessUA := `ALTER TABLE refresh_tokens ADD COLUMN user_agent TEXT NOT NULL DEFAULT ''`
 	addSessIP := `ALTER TABLE refresh_tokens ADD COLUMN ip TEXT NOT NULL DEFAULT ''`
@@ -109,6 +110,7 @@ func Migrate(db *sql.DB) error {
 		addTotpSecret = `ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_secret TEXT NOT NULL DEFAULT ''`
 		addTotpEnabled = `ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_enabled INTEGER NOT NULL DEFAULT 0`
 		addFeedback = `ALTER TABLE messages ADD COLUMN IF NOT EXISTS feedback TEXT NOT NULL DEFAULT ''`
+		addGenMs = `ALTER TABLE messages ADD COLUMN IF NOT EXISTS gen_ms BIGINT NOT NULL DEFAULT 0`
 		addSessUA = `ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS user_agent TEXT NOT NULL DEFAULT ''`
 		addSessIP = `ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS ip TEXT NOT NULL DEFAULT ''`
 		addSessLoc = `ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS location TEXT NOT NULL DEFAULT ''`
@@ -128,7 +130,7 @@ func Migrate(db *sql.DB) error {
 	// duplicate-column error is expected and ignored; Postgres uses IF NOT
 	// EXISTS so it's a clean no-op.
 	for _, ddl := range []string{
-		addImageRef, addOfficialTools, addGroupID, addTotpSecret, addTotpEnabled, addFeedback,
+		addImageRef, addOfficialTools, addGroupID, addTotpSecret, addTotpEnabled, addFeedback, addGenMs,
 		addSessUA, addSessIP, addSessLoc, addSessSeen,
 		addModEnabled, addModMode,
 		addGroupExpires, addPrevGroup, addPasswordSet, addLastSeen,

@@ -229,6 +229,7 @@ CREATE TABLE IF NOT EXISTS messages (
   currency           TEXT NOT NULL DEFAULT 'USD',
   status             TEXT NOT NULL DEFAULT 'complete', -- complete | streaming | error
   error              TEXT NOT NULL DEFAULT '',
+  gen_ms             INTEGER NOT NULL DEFAULT 0,        -- wall-clock generation time (ms)
   created_at         INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 );
 CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id);

@@ -206,7 +206,9 @@ type Message struct {
 	Status           string          `json:"status"`
 	Error            string          `json:"error"`
 	Feedback         string          `json:"feedback"` // "" | "like" | "dislike" (§ message feedback)
-	CreatedAt        int64           `json:"created_at"`
+	// GenMs is the wall-clock time the assistant turn took to generate (ms).
+	GenMs     int64 `json:"gen_ms"`
+	CreatedAt int64 `json:"created_at"`
 }
 
 // KnowledgeBase — §5 knowledge_bases row.

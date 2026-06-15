@@ -1055,6 +1055,7 @@ export function toLocalMessage(m: ApiMessage): Message {
     createdAt: m.created_at * 1000,
     streaming: m.status === 'streaming',
     cost: m.cost > 0 ? m.cost : undefined,
+    genMs: m.gen_ms && m.gen_ms > 0 ? m.gen_ms : undefined,
     currency: m.currency || undefined,
     citations:
       m.citations && m.citations.length > 0

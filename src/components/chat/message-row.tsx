@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import {
   Copy,
   Check,
+  Clock,
   RefreshCw,
   ThumbsUp,
   ThumbsDown,
@@ -61,6 +62,14 @@ interface MessageRowProps {
   onBranchSwitch?: (leafId: string) => void
   /** Called when the user picks "Fork to new conversation" from the menu. */
   onFork?: (leafId: string) => void
+}
+
+// Compact generation time: "3.2s" under a minute, "1m4s" beyond.
+function formatGenMs(ms: number): string {
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`
+  const m = Math.floor(ms / 60_000)
+  const s = Math.round((ms % 60_000) / 1000)
+  return `${m}m${s}s`
 }
 
 export function MessageRow({ message, userName, onRegenerate, onEdit, onSaveEdit, onLike, onDislike, onBranchSwitch, onFork }: MessageRowProps) {
@@ -155,8 +164,13 @@ export function MessageRow({ message, userName, onRegenerate, onEdit, onSaveEdit
             <span className="font-serif text-[15px] tracking-tight text-[var(--color-fg)]">
               {model?.label ?? t('assistant')}
             </span>
-            {/* Per-reply cost is intentionally NOT shown to users — only admins
-                see spend, in /admin/usage. */}
+            {/* Per-reply generation time (§ 用时). Cost stays admin-only. */}
+            {!message.streaming && message.genMs ? (
+              <span className="inline-flex items-center gap-1 text-[11px] text-[var(--color-fg-subtle)] tabular-nums">
+                <Clock size={11} aria-hidden />
+                {formatGenMs(message.genMs)}
+              </span>
+            ) : null}
             {message.streaming ? (
               <span className="ml-1 inline-flex items-center gap-1 text-[11px] text-[var(--color-fg-subtle)]">
                 <span className="inline-block size-1.5 rounded-full bg-[var(--color-secondary)] animate-[streaming-pulse_1600ms_ease-in-out_infinite]" />

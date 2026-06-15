@@ -218,6 +218,7 @@ CREATE TABLE IF NOT EXISTS messages (
   currency           TEXT NOT NULL DEFAULT 'USD',
   status             TEXT NOT NULL DEFAULT 'complete',
   error              TEXT NOT NULL DEFAULT '',
+  gen_ms             BIGINT NOT NULL DEFAULT 0,
   created_at         BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
 );
 CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id);
