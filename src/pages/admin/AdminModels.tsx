@@ -229,7 +229,7 @@ export default function AdminModels() {
                     }
                   }}
                   className={cn(
-                    'grid grid-cols-[auto_auto_1fr_auto_auto] gap-2 items-center px-5 py-4 transition-[background-color,opacity] duration-150',
+                    'grid grid-cols-[auto_auto_1fr_auto_auto_auto] gap-2 items-center px-5 py-4 transition-[background-color,opacity] duration-150',
                     dragIdx === idx && 'bg-[var(--color-bg-muted)] opacity-90',
                   )}
                 >

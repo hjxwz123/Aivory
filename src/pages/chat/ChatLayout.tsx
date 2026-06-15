@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import { Outlet } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { PanelLeftOpen, Menu } from 'lucide-react'
@@ -6,6 +6,7 @@ import { Sidebar } from '@/components/sidebar/sidebar'
 import { HtmlPreviewPanel } from '@/components/chat/html-preview-panel'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { useSettings } from '@/store/settings'
+import { useUI } from '@/store/ui'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { useTheme } from '@/store/theme'
 import { Tooltip } from '@/components/ui/tooltip'
@@ -18,7 +19,9 @@ export default function ChatLayout() {
   const collapsed = useSettings((s) => s.sidebarCollapsed)
   const syncSystem = useTheme((s) => s.syncSystem)
   const { t } = useTranslation('chat')
-  const [drawerOpen, setDrawerOpen] = useState(false)
+  const drawerOpen = useUI((s) => s.navOpen)
+  const setDrawerOpen = useUI((s) => s.setNavOpen)
+  const pageOwnsTopBar = useUI((s) => s.pageOwnsTopBar)
 
   useEffect(() => syncSystem(), [syncSystem])
 
@@ -28,7 +31,7 @@ export default function ChatLayout() {
       whenInputFocused: false,
       handler: () => {
         if (isDesktop) useSettings.getState().toggleSidebar()
-        else setDrawerOpen((o) => !o)
+        else useUI.getState().toggleNav()
       },
     },
   ])
@@ -47,8 +50,9 @@ export default function ChatLayout() {
 
       <main className="relative flex-1 min-w-0 flex">
         <div className="flex-1 min-w-0 flex flex-col">
-          {/* Mobile top bar */}
-          {!isDesktop && (
+          {/* Mobile top bar — suppressed when the page renders its own combined
+              header (e.g. a chat thread) so the two don't stack into two rows. */}
+          {!isDesktop && !pageOwnsTopBar && (
             <div className="flex items-center justify-between h-12 px-3 border-b border-[var(--color-divider)] bg-[var(--color-bg)]/85 backdrop-blur-sm">
               <button
                 type="button"

@@ -91,7 +91,7 @@ export default function ChatHome() {
 
   return (
     <div className="flex-1 flex flex-col overflow-y-auto">
-      <div className="mx-auto w-full max-w-[var(--layout-message-max-w)] px-5 sm:px-8 pt-16 sm:pt-24 pb-8 flex-1 flex flex-col">
+      <div className="mx-auto w-full max-w-[var(--layout-message-max-w)] px-5 sm:px-8 py-12 flex-1 flex flex-col justify-center">
         <header className="text-center">
           <h1 className="font-serif tracking-tight text-[2rem] sm:text-[2.5rem] leading-[1.08] text-[var(--color-fg)] text-balance">
             {greeting}

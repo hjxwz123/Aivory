@@ -177,6 +177,7 @@
     "shareTooltip": "Share"
   },
   "thread": {
+    "loadingEarlier": "Loading earlier messages…",
     "modelSwitched": "Model switched",
     "modelSwitchedBody": "Future messages will use the new model.",
     "renamed": "Renamed",

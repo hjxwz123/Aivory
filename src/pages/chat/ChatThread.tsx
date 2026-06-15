@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { MoreHorizontal, Pencil, Share2, Star, Trash2, Archive, ArrowDown, FolderKanban, Copy, Check, Globe, Loader2 } from 'lucide-react'
+import { MoreHorizontal, Pencil, Share2, Star, Trash2, Archive, ArrowDown, FolderKanban, Copy, Check, Globe, Loader2, Menu } from 'lucide-react'
 import { Composer } from '@/components/chat/composer'
 import { MessageList } from '@/components/chat/message-list'
 import { ModelPicker } from '@/components/chat/model-picker'
@@ -28,6 +28,8 @@ import { Input } from '@/components/ui/input'
 import { useConversations } from '@/store/conversations'
 import { useModels } from '@/store/models'
 import { useProjects } from '@/store/projects'
+import { useUI } from '@/store/ui'
+import { useMediaQuery } from '@/hooks/use-media-query'
 import { conversationsApi, ApiError } from '@/api'
 import type { ApiShareInfo } from '@/api/types'
 import { toast } from '@/hooks/use-toast'
@@ -53,6 +55,15 @@ export default function ChatThread() {
   const project = useProjects((s) =>
     conversation?.projectId ? s.projects.find((p) => p.id === conversation.projectId) : undefined,
   )
+
+  const isDesktop = useMediaQuery('(min-width: 1024px)')
+  const openNav = useUI((s) => s.setNavOpen)
+  // On mobile this page renders one combined bar (menu + title + controls), so
+  // tell the layout to drop its standalone brand bar while we're mounted.
+  useEffect(() => {
+    useUI.getState().setPageOwnsTopBar(true)
+    return () => useUI.getState().setPageOwnsTopBar(false)
+  }, [])
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const [autoFollow, setAutoFollow] = useState(true)
@@ -189,6 +200,16 @@ export default function ChatThread() {
     <div className="flex-1 flex flex-col min-h-0">
       {/* Topbar */}
       <header className="flex items-center gap-3 h-[var(--layout-topbar-h)] px-4 sm:px-6 border-b border-[var(--color-divider)] bg-[var(--color-bg)]/85 backdrop-blur-sm">
+        {!isDesktop ? (
+          <button
+            type="button"
+            aria-label={t('chat:commandMenu.actions.toggleSidebar')}
+            onClick={() => openNav(true)}
+            className="-ml-1 inline-flex items-center justify-center size-9 shrink-0 rounded-[8px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+          >
+            <Menu size={16} aria-hidden />
+          </button>
+        ) : null}
         <div className="flex-1 min-w-0 flex flex-col">
           <h1 className="font-serif tracking-tight text-[var(--color-fg)] text-[15px] sm:text-[17px] truncate">
             {truncate(conversation.title, 80)}
@@ -271,6 +292,7 @@ export default function ChatThread() {
       <div
         ref={scrollRef}
         onScroll={handleScroll}
+        data-scroll-root
         className="flex-1 min-h-0 overflow-y-auto scrollbar-thin"
       >
         <MessageList conversation={conversation} />
