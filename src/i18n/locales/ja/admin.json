@@ -197,6 +197,10 @@
     "title": "ユーザー",
     "lead": "アカウントの作成、パスワードのリセット、ロールの変更、不正なアカウントの停止（有効なセッションを即座に無効化）を行います。",
     "you": "あなた",
+    "online": "オンライン",
+    "offline": "オフライン",
+    "lastSeen": "最終アクティブ {{when}}",
+    "neverSeen": "未ログイン",
     "new": "新規ユーザー",
     "newTitle": "新規ユーザー",
     "newLead": "メール認証なしで直接アカウントを作成します。すぐにサインインできます。",
@@ -460,6 +464,25 @@
       "byModel": "モデル別",
       "byUser": "ユーザー別"
     }
+  },
+  "announcement": {
+    "title": "お知らせ",
+    "lead": "アプリを開いたユーザーに全体お知らせを表示します。画像を設定すると画像お知らせ（左に画像・右にテキスト）になります。",
+    "enabledLabel": "お知らせを表示",
+    "enabledHint": "オフのときは何も表示しません。",
+    "rememberLabel": "閉じた状態を記憶",
+    "rememberHint": "オフにすると、ユーザーが閉じても訪問のたびに再表示します。",
+    "imageLabel": "画像（任意）",
+    "imageHint": "画像URLを貼るかアップロード（PNG/JPG、256KB以下）。画像があると画像お知らせになります。",
+    "imagePlaceholder": "https://… または /api/icons/…",
+    "upload": "アップロード",
+    "removeImage": "削除",
+    "uploadFailed": "画像のアップロードに失敗しました",
+    "bodyLabel": "テキスト",
+    "bodyHint": "プレーンテキスト。改行は保持されます。",
+    "bodyPlaceholder": "ユーザーに伝えたいことは？",
+    "preview": "プレビュー",
+    "saved": "お知らせを保存しました"
   },
   "moderation": {
     "title": "モデレーション",

@@ -122,6 +122,16 @@ export const Markdown = memo(function Markdown({ content, className, live = fals
                 dangerouslySetInnerHTML={{ __html: inlineMarkdownToHtml(b.content) }}
               />
             )
+          case 'math':
+            // Display math, pre-rendered by KaTeX in tokenizeMarkdown (trusted
+            // output). Scrolls horizontally on small screens for wide formulas.
+            return (
+              <div
+                key={i}
+                className={cn('my-3 overflow-x-auto', blockAnim)}
+                dangerouslySetInnerHTML={{ __html: b.content }}
+              />
+            )
           case 'hr':
             return <hr key={i} className={cn('my-6 border-[var(--color-divider)]', blockAnim)} />
           case 'table':

@@ -197,6 +197,10 @@
     "title": "使用者",
     "lead": "新建賬戶、重置密碼、修改角色,並封禁濫用賬戶(立即吊銷所有 access token)。",
     "you": "你",
+    "online": "在線",
+    "offline": "離線",
+    "lastSeen": "上次在線 {{when}}",
+    "neverSeen": "從未登入",
     "new": "新建使用者",
     "newTitle": "新建使用者",
     "newLead": "直接建立賬戶,無需郵箱驗證,建立後即可登入。",
@@ -460,6 +464,25 @@
       "byModel": "分模型使用",
       "byUser": "分使用者使用"
     }
+  },
+  "announcement": {
+    "title": "公告",
+    "lead": "在使用者開啟應用時顯示一條全域公告。設定圖片即為圖片公告（左圖右文）。",
+    "enabledLabel": "顯示公告",
+    "enabledHint": "關閉後不顯示任何公告。",
+    "rememberLabel": "記住使用者的關閉",
+    "rememberHint": "關閉後，即使使用者關掉公告，每次造訪仍會再次顯示。",
+    "imageLabel": "圖片（可選）",
+    "imageHint": "貼上圖片連結或上傳（PNG/JPG，≤256 KB）。設定圖片後即為圖片公告。",
+    "imagePlaceholder": "https://… 或 /api/icons/…",
+    "upload": "上傳",
+    "removeImage": "移除",
+    "uploadFailed": "圖片上傳失敗",
+    "bodyLabel": "文字",
+    "bodyHint": "純文字，保留換行。",
+    "bodyPlaceholder": "想讓使用者知道什麼？",
+    "preview": "預覽",
+    "saved": "公告已儲存"
   },
   "moderation": {
     "title": "內容審核",

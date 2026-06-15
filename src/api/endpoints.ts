@@ -62,6 +62,15 @@ export const authApi = {
   getSettings: () => api<Record<string, unknown>>('/me/settings'),
   updateSettings: (patch: Record<string, unknown>) =>
     api<Record<string, unknown>>('/me/settings', { method: 'PATCH', body: patch }),
+  // Global announcement (§ announcement). enabled=false when none is active.
+  announcement: () =>
+    api<{
+      enabled: boolean
+      body: string
+      image_url: string
+      remember_dismiss: boolean
+      updated_at: number
+    }>('/announcement'),
   // Cost is intentionally NOT exposed to users — only message volume.
   usage: () => api<{ days: number; messages: number }>('/me/usage'),
   // Active sessions (§ account → active sessions). `current` is the jti of the

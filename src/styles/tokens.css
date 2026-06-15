@@ -235,11 +235,12 @@
   --layout-message-max-w: 48rem;
 }
 
-/* Chat width preference (§ appearance → layout). "full" drops the centered
- * editorial column so the chat pane uses its whole width — message containers
+/* Chat width preference (§ appearance → layout). "full" widens the editorial
+ * column toward the whole chat pane, but still capped so very wide screens keep
+ * a comfortable measure (edge-to-edge text is hard to read). Message containers
  * keep their horizontal padding as the safe gutter. */
 [data-chat-width='full'] {
-  --layout-message-max-w: none;
+  --layout-message-max-w: min(62rem, 100%);
 }
 
 /* ============================================================================

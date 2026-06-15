@@ -68,6 +68,16 @@ func requireAuth(d Deps, h handler) http.HandlerFunc {
 			writeError(w, http.StatusUnauthorized, errSessionExpired)
 			return
 		}
+		// Online status (§ admin → users): record activity at most once per minute
+		// per user (cache-throttled) so it's a single cheap UPDATE, off the
+		// request path. user.LastSeenAt reflects the value before this touch.
+		if d.Cache != nil {
+			if _, fresh := d.Cache.Get("seen:" + user.ID); !fresh {
+				d.Cache.Set("seen:"+user.ID, "1", time.Minute)
+				uid := user.ID
+				go store.TouchLastSeen(context.Background(), d.DB, uid, time.Now().Unix())
+			}
+		}
 		ctx := context.WithValue(r.Context(), userCtxKey{}, user)
 		h(d, w, r.WithContext(ctx))
 	}

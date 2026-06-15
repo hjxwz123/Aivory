@@ -99,6 +99,8 @@ func Migrate(db *sql.DB) error {
 	addPrevGroup := `ALTER TABLE users ADD COLUMN previous_group_id TEXT NOT NULL DEFAULT ''`
 	// Forced set-password for OAuth accounts (§ third-party login has no password).
 	addPasswordSet := `ALTER TABLE users ADD COLUMN password_set INTEGER NOT NULL DEFAULT 1`
+	// Online status / last-seen (§ admin → users).
+	addLastSeen := `ALTER TABLE users ADD COLUMN last_seen_at INTEGER NOT NULL DEFAULT 0`
 	if usePostgres {
 		schema = schemaPGSQL
 		addImageRef = `ALTER TABLE chunks ADD COLUMN IF NOT EXISTS image_ref TEXT`
@@ -116,6 +118,7 @@ func Migrate(db *sql.DB) error {
 		addGroupExpires = `ALTER TABLE users ADD COLUMN IF NOT EXISTS group_expires_at BIGINT NOT NULL DEFAULT 0`
 		addPrevGroup = `ALTER TABLE users ADD COLUMN IF NOT EXISTS previous_group_id TEXT NOT NULL DEFAULT ''`
 		addPasswordSet = `ALTER TABLE users ADD COLUMN IF NOT EXISTS password_set INTEGER NOT NULL DEFAULT 1`
+		addLastSeen = `ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at BIGINT NOT NULL DEFAULT 0`
 	}
 	if _, err := db.Exec(schema); err != nil {
 		return fmt.Errorf("apply schema: %w", err)
@@ -128,7 +131,7 @@ func Migrate(db *sql.DB) error {
 		addImageRef, addOfficialTools, addGroupID, addTotpSecret, addTotpEnabled, addFeedback,
 		addSessUA, addSessIP, addSessLoc, addSessSeen,
 		addModEnabled, addModMode,
-		addGroupExpires, addPrevGroup, addPasswordSet,
+		addGroupExpires, addPrevGroup, addPasswordSet, addLastSeen,
 	} {
 		_, _ = db.Exec(ddl)
 	}
@@ -179,6 +182,10 @@ func Seed(db *sql.DB, cfg config.Config) error {
 		"moderation_model_id":         `""`,
 		"moderation_categories":       `["politics","pornography","violence or gore","terrorism","illegal activity","hate speech","self-harm"]`,
 		"moderation_message":          `"Your message was blocked by content moderation. Please rephrase and try again."`,
+		// § announcement: a single global notice shown to users on load. image_url
+		// non-empty → image announcement (image left, text right). remember_dismiss
+		// false → re-show every visit; updated_at doubles as the dismiss version.
+		"announcement": `{"enabled":false,"body":"","image_url":"","remember_dismiss":true,"updated_at":0}`,
 	} {
 		if _, err := db.Exec(`INSERT INTO settings(key, value) VALUES(?, ?)
 			ON CONFLICT(key) DO NOTHING`, k, v); err != nil {

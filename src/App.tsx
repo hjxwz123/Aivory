@@ -5,6 +5,7 @@ import { Toaster } from '@/components/ui/toaster'
 import { CommandMenu } from '@/components/command-menu/command-menu'
 import { WelcomeCard } from '@/components/welcome/welcome-card'
 import { SetPasswordGate } from '@/components/welcome/set-password-gate'
+import { AnnouncementPopup } from '@/components/announcement/announcement-popup'
 import { AuthGate } from '@/components/auth/auth-gate'
 import { useCommandMenu } from '@/hooks/use-command-menu'
 import { useHotkeys } from '@/hooks/use-hotkeys'
@@ -45,6 +46,7 @@ const AdminUsage = lazy(() => import('@/pages/admin/AdminUsage'))
 const AdminAnalytics = lazy(() => import('@/pages/admin/AdminAnalytics'))
 const AdminSettings = lazy(() => import('@/pages/admin/AdminSettings'))
 const AdminModeration = lazy(() => import('@/pages/admin/AdminModeration'))
+const AdminAnnouncement = lazy(() => import('@/pages/admin/AdminAnnouncement'))
 const AdminDocuments = lazy(() => import('@/pages/admin/AdminDocuments'))
 const AdminTools = lazy(() => import('@/pages/admin/AdminTools'))
 const AdminAudio = lazy(() => import('@/pages/admin/AdminAudio'))
@@ -171,6 +173,7 @@ export default function App() {
               <Route path="audio" element={<AdminAudio />} />
               <Route path="oauth" element={<AdminOAuth />} />
               <Route path="moderation" element={<AdminModeration />} />
+              <Route path="announcement" element={<AdminAnnouncement />} />
               <Route path="settings" element={<AdminSettings />} />
             </Route>
             <Route path="*" element={<NotFound />} />
@@ -179,6 +182,7 @@ export default function App() {
         <CommandMenu />
         <SetPasswordGate />
         <WelcomeCard />
+        <AnnouncementPopup />
         <Toaster />
       </AuthGate>
     </TooltipProvider>

@@ -222,6 +222,13 @@ func UpdateUserSettings(ctx context.Context, db *sql.DB, userID string, patch ma
 	return FindUserByID(ctx, db, userID)
 }
 
+// TouchLastSeen records the user's last authenticated activity (online status,
+// § admin → users). Called from the auth middleware, throttled by a cache key so
+// it's at most one cheap UPDATE per user per minute.
+func TouchLastSeen(ctx context.Context, db *sql.DB, userID string, now int64) {
+	_, _ = db.ExecContext(ctx, `UPDATE users SET last_seen_at=? WHERE id=?`, now, userID)
+}
+
 // UpdateUserProfile sets the user-visible profile fields.
 func UpdateUserProfile(ctx context.Context, db *sql.DB, userID string, name, email string) (*User, error) {
 	if email == "" || name == "" {
@@ -295,7 +302,7 @@ func ListUsersPaged(ctx context.Context, db *sql.DB, limit, offset int) ([]User,
 		offset = 0
 	}
 	rows, err := db.QueryContext(ctx,
-		`SELECT id, email, name, role, status, token_ver, settings, group_id, group_expires_at, previous_group_id, totp_secret, totp_enabled, password_set, created_at FROM users ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+		`SELECT id, email, name, role, status, token_ver, settings, group_id, group_expires_at, previous_group_id, totp_secret, totp_enabled, password_set, last_seen_at, created_at FROM users ORDER BY created_at DESC LIMIT ? OFFSET ?`,
 		limit, offset)
 	if err != nil {
 		return nil, err
@@ -307,7 +314,7 @@ func ListUsersPaged(ctx context.Context, db *sql.DB, limit, offset int) ([]User,
 		var settings string
 		var totpEnabled int
 		var passwordSet int
-		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.Role, &u.Status, &u.TokenVer, &settings, &u.GroupID, &u.GroupExpiresAt, &u.PreviousGroupID, &u.TotpSecret, &totpEnabled, &passwordSet, &u.CreatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.Role, &u.Status, &u.TokenVer, &settings, &u.GroupID, &u.GroupExpiresAt, &u.PreviousGroupID, &u.TotpSecret, &totpEnabled, &passwordSet, &u.LastSeenAt, &u.CreatedAt); err != nil {
 			return nil, err
 		}
 		u.TotpEnabled = totpEnabled != 0

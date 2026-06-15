@@ -197,6 +197,10 @@
     "title": "Utilisateurs",
     "lead": "Créez des comptes, réinitialisez les mots de passe, modifiez les rôles et suspendez les comptes abusifs (révoque immédiatement les sessions en cours).",
     "you": "vous",
+    "online": "En ligne",
+    "offline": "Hors ligne",
+    "lastSeen": "Vu {{when}}",
+    "neverSeen": "Jamais connecté",
     "new": "Nouvel utilisateur",
     "newTitle": "Nouvel utilisateur",
     "newLead": "Créez un compte directement — sans vérification d'e-mail. La personne peut se connecter immédiatement.",
@@ -460,6 +464,25 @@
       "byModel": "Par modèle",
       "byUser": "Par utilisateur"
     }
+  },
+  "announcement": {
+    "title": "Annonce",
+    "lead": "Affiche une annonce globale aux utilisateurs à l'ouverture de l'app. Ajoutez une image pour une annonce illustrée (image à gauche, texte à droite).",
+    "enabledLabel": "Afficher l'annonce",
+    "enabledHint": "Désactivé, aucune annonce ne s'affiche.",
+    "rememberLabel": "Mémoriser la fermeture",
+    "rememberHint": "Désactivé, l'annonce réapparaît à chaque visite même après fermeture.",
+    "imageLabel": "Image (optionnelle)",
+    "imageHint": "Collez une URL d'image ou téléversez-en une (PNG/JPG, ≤256 Ko). Avec une image, c'est une annonce illustrée.",
+    "imagePlaceholder": "https://… ou /api/icons/…",
+    "upload": "Téléverser",
+    "removeImage": "Retirer",
+    "uploadFailed": "Échec du téléversement de l'image",
+    "bodyLabel": "Texte",
+    "bodyHint": "Texte brut. Les sauts de ligne sont conservés.",
+    "bodyPlaceholder": "Que voulez-vous annoncer ?",
+    "preview": "Aperçu",
+    "saved": "Annonce enregistrée"
   },
   "moderation": {
     "title": "Modération",

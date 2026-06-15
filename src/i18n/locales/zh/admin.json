@@ -197,6 +197,10 @@
     "title": "用户",
     "lead": "新建账户、重置密码、修改角色,并封禁滥用账户(立即吊销所有 access token)。",
     "you": "你",
+    "online": "在线",
+    "offline": "离线",
+    "lastSeen": "上次在线 {{when}}",
+    "neverSeen": "从未登录",
     "new": "新建用户",
     "newTitle": "新建用户",
     "newLead": "直接创建账户,无需邮箱验证,创建后即可登录。",
@@ -460,6 +464,25 @@
       "byModel": "分模型使用",
       "byUser": "分用户使用"
     }
+  },
+  "announcement": {
+    "title": "公告",
+    "lead": "在用户打开应用时显示一条全局公告。配置图片即为图片公告（左图右文）。",
+    "enabledLabel": "显示公告",
+    "enabledHint": "关闭后不显示任何公告。",
+    "rememberLabel": "记住用户的关闭",
+    "rememberHint": "关闭后，即使用户关掉公告，每次访问仍会再次显示。",
+    "imageLabel": "图片（可选）",
+    "imageHint": "粘贴图片链接或上传（PNG/JPG，≤256 KB）。配置图片后即为图片公告。",
+    "imagePlaceholder": "https://… 或 /api/icons/…",
+    "upload": "上传",
+    "removeImage": "移除",
+    "uploadFailed": "图片上传失败",
+    "bodyLabel": "文字",
+    "bodyHint": "纯文本，保留换行。",
+    "bodyPlaceholder": "想让用户知道什么？",
+    "preview": "预览",
+    "saved": "公告已保存"
   },
   "moderation": {
     "title": "内容审核",

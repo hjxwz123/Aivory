@@ -31,7 +31,10 @@ type User struct {
 	// chosen a password of their own. The client uses this to force a
 	// set-password step (§ third-party login has no password).
 	HasPassword bool  `json:"has_password"`
-	CreatedAt   int64 `json:"created_at"`
+	// LastSeenAt is the unix seconds of the user's last authenticated activity,
+	// updated (throttled) by the auth middleware. Drives the admin online status.
+	LastSeenAt int64 `json:"last_seen_at"`
+	CreatedAt  int64 `json:"created_at"`
 }
 
 // UserGroup is a membership tier (§ user groups). Features is a JSON array of

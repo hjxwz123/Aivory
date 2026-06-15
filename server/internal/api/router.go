@@ -78,6 +78,7 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("GET", "/api/me/settings", requireAuth(d, meSettingsHandler))
 	mux.handle("PATCH", "/api/me/settings", requireAuth(d, updateMeSettingsHandler))
 	mux.handle("GET", "/api/me/upload-policy", requireAuth(d, meUploadPolicyHandler))
+	mux.handle("GET", "/api/announcement", requireAuth(d, announcementHandler))
 	mux.handle("POST", "/api/me/2fa/setup", requireAuth(d, twofaSetupHandler))
 	mux.handle("POST", "/api/me/2fa/enable", requireAuth(d, twofaEnableHandler))
 	mux.handle("POST", "/api/me/2fa/disable", requireAuth(d, twofaDisableHandler))

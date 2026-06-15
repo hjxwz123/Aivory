@@ -197,6 +197,10 @@
     "title": "Users",
     "lead": "Create accounts, reset passwords, change roles, and suspend abusive accounts (revokes outstanding sessions immediately).",
     "you": "you",
+    "online": "Online",
+    "offline": "Offline",
+    "lastSeen": "Last seen {{when}}",
+    "neverSeen": "Never signed in",
     "new": "New user",
     "newTitle": "New user",
     "newLead": "Create an account directly — no email verification. They can sign in immediately.",
@@ -460,6 +464,25 @@
       "byModel": "By model",
       "byUser": "By user"
     }
+  },
+  "announcement": {
+    "title": "Announcement",
+    "lead": "Show a global notice to users when they open the app. Add an image to make it an image announcement (image left, text right).",
+    "enabledLabel": "Show announcement",
+    "enabledHint": "When off, no notice is shown.",
+    "rememberLabel": "Remember when dismissed",
+    "rememberHint": "When off, the notice shows on every visit even after the user closes it.",
+    "imageLabel": "Image (optional)",
+    "imageHint": "Paste an image URL or upload one (PNG/JPG, ≤256 KB). With an image it becomes an image announcement.",
+    "imagePlaceholder": "https://… or /api/icons/…",
+    "upload": "Upload",
+    "removeImage": "Remove",
+    "uploadFailed": "Image upload failed",
+    "bodyLabel": "Text",
+    "bodyHint": "Plain text. Line breaks are preserved.",
+    "bodyPlaceholder": "What do you want users to know?",
+    "preview": "Preview",
+    "saved": "Announcement saved"
   },
   "moderation": {
     "title": "Moderation",

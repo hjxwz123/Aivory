@@ -145,7 +145,7 @@ function sanitizeHtml(html: string): string {
 }
 
 export interface MarkdownBlock {
-  type: 'paragraph' | 'heading' | 'list' | 'ordered-list' | 'code' | 'blockquote' | 'hr' | 'table' | 'html' | 'raw'
+  type: 'paragraph' | 'heading' | 'list' | 'ordered-list' | 'code' | 'blockquote' | 'hr' | 'table' | 'html' | 'raw' | 'math'
   /** Raw inner content (markdown for paragraph; code text for code). */
   content: string
   /** For headings */
@@ -240,10 +240,33 @@ export function blockMarkdownToHtml(md: string): string {
 
 /**
  * Tokenize markdown into a flat block list our React renderer can map over.
+ *
+ * Display math (`$$…$$` / `\[…\]`) is extracted FIRST, before `marked` ever
+ * sees it, and emitted as standalone `math` blocks rendered straight by KaTeX.
+ * Otherwise marked splits multi-line display math across paragraphs (or escapes
+ * `\[` → `[`), which left raw LaTeX like `[ \frac{…} ]` on screen. Inline math
+ * (`$…$` / `\(…\)`) stays on the per-block path in inlineMarkdownToHtml.
  */
 export function tokenizeMarkdown(md: string): MarkdownBlock[] {
-  const tokens = marked.lexer(md, { gfm: true })
   const blocks: MarkdownBlock[] = []
+  const displayMath = /\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]/g
+  let lastIndex = 0
+  let m: RegExpExecArray | null
+  while ((m = displayMath.exec(md)) !== null) {
+    lexInto(blocks, md.slice(lastIndex, m.index))
+    const tex = (m[1] ?? m[2] ?? '').trim()
+    if (tex) blocks.push({ type: 'math', content: renderTex(tex, true) })
+    lastIndex = m.index + m[0].length
+  }
+  lexInto(blocks, md.slice(lastIndex))
+  return blocks
+}
+
+// lexInto runs marked's block lexer over a text segment and appends the mapped
+// blocks. Split out so tokenizeMarkdown can interleave extracted math blocks.
+function lexInto(blocks: MarkdownBlock[], md: string): void {
+  if (!md.trim()) return
+  const tokens = marked.lexer(md, { gfm: true })
 
   for (const t of tokens) {
     switch (t.type) {
@@ -280,5 +303,4 @@ export function tokenizeMarkdown(md: string): MarkdownBlock[] {
         blocks.push({ type: 'raw', content: 'raw' in t ? (t as { raw: string }).raw : '' })
     }
   }
-  return blocks
 }

@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS users (
   totp_secret   TEXT NOT NULL DEFAULT '',
   totp_enabled  INTEGER NOT NULL DEFAULT 0,
   password_set  INTEGER NOT NULL DEFAULT 1,
+  last_seen_at  BIGINT NOT NULL DEFAULT 0,
   created_at    BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
 );
 

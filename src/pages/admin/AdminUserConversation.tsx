@@ -14,7 +14,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { ArrowLeft, Bot, User as UserIcon } from 'lucide-react'
 import { adminApi, ApiError } from '@/api'
-import type { ApiConversation } from '@/api/types'
+import type { ApiConversation, ApiModel, ApiUser } from '@/api/types'
 import type { Message } from '@/types/chat'
 import { Badge } from '@/components/ui/badge'
 import { toast } from '@/hooks/use-toast'
@@ -38,6 +38,8 @@ export default function AdminUserConversation() {
   const { id = '', cid = '' } = useParams<{ id: string; cid: string }>()
   const [conv, setConv] = useState<ApiConversation | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
+  const [models, setModels] = useState<ApiModel[]>([])
+  const [users, setUsers] = useState<ApiUser[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -45,13 +47,17 @@ export default function AdminUserConversation() {
     async function load() {
       setLoading(true)
       try {
-        const [c, msgs] = await Promise.all([
+        const [c, msgs, ms, us] = await Promise.all([
           adminApi.conversation(cid),
           adminApi.conversationMessages(cid),
+          adminApi.models().catch(() => [] as ApiModel[]),
+          adminApi.users().catch(() => [] as ApiUser[]),
         ])
         if (cancelled) return
         setConv(c)
         setMessages(msgs.map(toLocalMessage))
+        setModels(ms)
+        setUsers(us)
       } catch (e) {
         if (!cancelled) toast.error(e instanceof ApiError ? e.message : t('common.failed'))
       } finally {
@@ -65,6 +71,15 @@ export default function AdminUserConversation() {
   }, [cid, t])
 
   const headerTitle = useMemo(() => conv?.title || t('users.untitledConversation'), [conv, t])
+  // Resolve ids → human-readable names (the raw m_…/u_… ids are useless for triage).
+  const modelName = useMemo(() => {
+    const byId = new Map(models.map((m) => [m.id, m.label]))
+    return (mid?: string) => (mid ? byId.get(mid) ?? mid : '')
+  }, [models])
+  const userLabel = useMemo(() => {
+    const u = users.find((x) => x.id === (conv?.user_id || id))
+    return u?.name || u?.email || ''
+  }, [users, conv, id])
 
   return (
     <div>
@@ -87,7 +102,7 @@ export default function AdminUserConversation() {
           ) : null}
         </div>
         <p className="mt-2 text-[var(--color-fg-muted)] text-sm">
-          {conv?.model_id || conv?.provider || '—'}
+          {[userLabel, modelName(conv?.model_id) || conv?.provider].filter(Boolean).join(' · ') || '—'}
           {conv?.updated_at ? ` · ${formatStamp(conv.updated_at * 1000)}` : null}
         </p>
         <Link
@@ -108,7 +123,7 @@ export default function AdminUserConversation() {
         ) : (
           <ol className="flex flex-col gap-6">
             {messages.map((m) => (
-              <AdminMessageRow key={m.id} message={m} />
+              <AdminMessageRow key={m.id} message={m} modelName={modelName} />
             ))}
           </ol>
         )}
@@ -123,7 +138,7 @@ export default function AdminUserConversation() {
  * calls and citations render with their full chat-side components so admins
  * see exactly what the user saw.
  */
-function AdminMessageRow({ message }: { message: Message }) {
+function AdminMessageRow({ message, modelName }: { message: Message; modelName: (id?: string) => string }) {
   const { t } = useTranslation('admin')
   const isAssistant = message.role === 'assistant'
   const Icon = isAssistant ? Bot : UserIcon
@@ -141,7 +156,7 @@ function AdminMessageRow({ message }: { message: Message }) {
             {message.role}
           </span>
           {message.modelId ? (
-            <Badge size="xs" variant="neutral">{message.modelId}</Badge>
+            <Badge size="xs" variant="neutral">{modelName(message.modelId)}</Badge>
           ) : null}
           {message.refused ? <Badge size="xs" variant="neutral">{t('users.refused')}</Badge> : null}
         </div>

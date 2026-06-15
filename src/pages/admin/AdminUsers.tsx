@@ -25,6 +25,11 @@ import {
 } from '@/components/ui/dialog'
 import { toast } from '@/hooks/use-toast'
 import { useAuth } from '@/store/auth'
+import { formatRelativeDate, cn } from '@/lib/utils'
+
+// A user counts as online if they made an authenticated request in the last 5
+// minutes (the middleware refreshes last_seen_at at most once/min).
+const ONLINE_WINDOW_S = 300
 
 type Role = 'user' | 'admin'
 
@@ -189,17 +194,37 @@ export default function AdminUsers() {
             {rows.map((u) => {
               const isMe = me?.id === u.id
               const group = groups.find((g) => g.id === u.group_id)
+              const lastSeen = u.last_seen_at ?? 0
+              const online = lastSeen > 0 && Date.now() / 1000 - lastSeen < ONLINE_WINDOW_S
               return (
                 <li key={u.id} className="grid grid-cols-[1fr_auto] gap-3 items-center px-5 py-4">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
+                      <span
+                        aria-hidden
+                        title={online ? t('admin:users.online') : t('admin:users.offline')}
+                        className={cn(
+                          'size-2 shrink-0 rounded-full',
+                          online ? 'bg-[var(--color-success)]' : 'bg-[var(--color-fg-faint)]',
+                        )}
+                      />
                       <span className="font-medium text-[var(--color-fg)]">{u.name || u.email}</span>
                       <Badge size="xs">{t(`admin:users.role${u.role === 'admin' ? 'Admin' : 'User'}`)}</Badge>
                       {group && !group.is_default ? <Badge size="xs" variant="neutral">{group.name}</Badge> : null}
                       {u.status !== 'active' ? <Badge size="xs" variant="neutral">{u.status}</Badge> : null}
                       {isMe ? <Badge size="xs" variant="neutral">{t('admin:users.you')}</Badge> : null}
                     </div>
-                    <div className="mt-0.5 text-[12px] text-[var(--color-fg-subtle)] font-mono truncate">{u.email}</div>
+                    <div className="mt-0.5 flex items-center gap-2 text-[12px] text-[var(--color-fg-subtle)]">
+                      <span className="font-mono truncate">{u.email}</span>
+                      <span aria-hidden>·</span>
+                      <span className="shrink-0">
+                        {online
+                          ? t('admin:users.online')
+                          : lastSeen > 0
+                            ? t('admin:users.lastSeen', { when: formatRelativeDate(lastSeen * 1000) })
+                            : t('admin:users.neverSeen')}
+                      </span>
+                    </div>
                   </div>
                   <div className="flex items-center gap-2">
                     <Button variant="ghost" size="sm" leadingIcon={<Pencil size={12} aria-hidden />} onClick={() => openEdit(u)}>
