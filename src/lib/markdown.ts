@@ -176,6 +176,61 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
+function escapeAttr(s: string): string {
+  return escapeHtml(s).replace(/"/g, '&quot;')
+}
+
+/** Minimal citation descriptor used to turn inline `[n]` markers into links. */
+export interface CiteRef {
+  index: number
+  url: string
+  title: string
+  domain: string
+  isDoc: boolean
+}
+
+// Skip protected regions so a `[n]` inside code, a code block, or an existing
+// link is never rewritten (e.g. `arr[1]` in a code span stays literal).
+const PROTECTED_HTML = /<(code|pre|a)\b[^>]*>[\s\S]*?<\/\1>|<[^>]+>/gi
+
+/**
+ * linkifyCitations turns `[n]` markers in sanitized inline HTML into small
+ * superscript citation references pointing at the numbered sources (§ citations).
+ * Web sources become links; KB documents (no browsable URL) become a
+ * non-clickable marker with the document name as a tooltip. Only `[n]` where n
+ * is a valid 1-based source index is rewritten, and never inside code/links.
+ */
+export function linkifyCitations(html: string, cites: CiteRef[]): string {
+  if (!cites || cites.length === 0) return html
+  const byIndex = new Map<number, CiteRef>()
+  for (const c of cites) byIndex.set(c.index, c)
+
+  const transform = (text: string): string =>
+    text.replace(/\[(\d{1,3})\]/g, (full, d) => {
+      const n = Number(d)
+      const c = byIndex.get(n)
+      if (!c) return full
+      const isWeb = !c.isDoc && /^https?:\/\//i.test(c.url)
+      if (isWeb) {
+        const tip = escapeAttr((c.domain ? c.domain + ' — ' : '') + c.title)
+        return `<sup class="cite-marker"><a href="${escapeAttr(c.url)}" target="_blank" rel="noopener noreferrer" title="${tip}">${n}</a></sup>`
+      }
+      return `<sup class="cite-marker cite-doc" title="${escapeAttr(c.title)}">${n}</sup>`
+    })
+
+  let out = ''
+  let last = 0
+  PROTECTED_HTML.lastIndex = 0
+  let m: RegExpExecArray | null
+  while ((m = PROTECTED_HTML.exec(html)) !== null) {
+    out += transform(html.slice(last, m.index))
+    out += m[0] // keep protected/tag chunk verbatim
+    last = m.index + m[0].length
+  }
+  out += transform(html.slice(last))
+  return out
+}
+
 /**
  * Extract `$$…$$` / `\[…\]` (display) and `$…$` / `\(…\)` (inline) math, render
  * each with KaTeX, and replace with placeholders so `marked` doesn't mangle the
@@ -198,7 +253,7 @@ function protectMath(md: string): { text: string; map: string[] } {
   return { text, map }
 }
 
-export function inlineMarkdownToHtml(md: string): string {
+export function inlineMarkdownToHtml(md: string, cites?: CiteRef[]): string {
   // Layer 1: strip raw HTML tags from markdown source before marked sees it.
   const cleaned = stripRawHtml(md)
   const { text, map } = protectMath(cleaned)
@@ -214,6 +269,7 @@ export function inlineMarkdownToHtml(md: string): string {
   // model-supplied HTML), so it must bypass the sanitizer to render correctly.
   out = sanitizeHtml(out)
   out = out.replace(/@@MATH(\d+)@@/g, (_, i) => map[Number(i)] ?? '')
+  if (cites && cites.length) out = linkifyCitations(out, cites)
   return out
 }
 
@@ -223,7 +279,7 @@ export function inlineMarkdownToHtml(md: string): string {
  * `table` block — paragraphs/headings stay on the inline path. Same two-layer
  * defence (strip raw HTML → sanitize) and math protection.
  */
-export function blockMarkdownToHtml(md: string): string {
+export function blockMarkdownToHtml(md: string, cites?: CiteRef[]): string {
   const cleaned = stripRawHtml(md)
   const { text, map } = protectMath(cleaned)
   let out = marked.parse(text, { async: false })
@@ -235,6 +291,7 @@ export function blockMarkdownToHtml(md: string): string {
   // inlineMarkdownToHtml for the rationale.
   out = sanitizeHtml(out)
   out = out.replace(/@@MATH(\d+)@@/g, (_, i) => map[Number(i)] ?? '')
+  if (cites && cites.length) out = linkifyCitations(out, cites)
   return out
 }
 
