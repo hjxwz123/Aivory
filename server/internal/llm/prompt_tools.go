@@ -29,7 +29,7 @@ import (
 )
 
 const (
-	promptMaxIter   = 6
+	promptMaxIter   = 10
 	promptMaxRetry  = 2
 	promptStopToken = "</tool_call>"
 )

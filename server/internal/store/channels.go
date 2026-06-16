@@ -259,12 +259,12 @@ func UpdateModel(ctx context.Context, db *sql.DB, id string, m Model) (*Model, e
 		m.ModerationMode = "keyword"
 	}
 	_, err := db.ExecContext(ctx, `UPDATE models SET
-		label=?, description=?, icon=?, request_id=?, kind=?, enabled=?, sort_order=?,
+		channel_id=?, label=?, description=?, icon=?, request_id=?, kind=?, enabled=?, sort_order=?,
 		tool_mode=?, vision=?, stream=?, system_prompt=?, param_controls=?, official_tools=?, moderation_enabled=?, moderation_mode=?,
 		price_input=?, price_output=?, price_cache_read=?, price_cache_write=?, price_per_image=?, currency=?,
 		dim=?, updated_at=?
 		WHERE id=?`,
-		m.Label, m.Description, m.Icon, m.RequestID, m.Kind, boolInt(m.Enabled), m.SortOrder,
+		m.ChannelID, m.Label, m.Description, m.Icon, m.RequestID, m.Kind, boolInt(m.Enabled), m.SortOrder,
 		m.ToolMode, boolInt(m.Vision), boolInt(m.Stream), m.SystemPrompt, string(m.ParamControls), string(m.OfficialTools), boolInt(m.ModerationEnabled), m.ModerationMode,
 		m.PriceInput, m.PriceOutput, m.PriceCacheRead, m.PriceCacheWrite, m.PricePerImage, m.Currency,
 		m.Dim, time.Now().Unix(), id)

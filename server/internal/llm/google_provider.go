@@ -62,7 +62,7 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 		toolsDecl = []map[string]any{{"function_declarations": decls}}
 	}
 
-	const maxIter = 12
+	const maxIter = 20
 	historyLen := len(contents)
 	allText := strings.Builder{}
 	allBlocks := []UnifiedBlock{}

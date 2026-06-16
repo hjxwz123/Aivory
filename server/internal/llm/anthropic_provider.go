@@ -52,7 +52,7 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 		return &UnifiedResult{Blocks: blocks, StopReason: "end_turn", Usage: usage, Citations: cites}, nil
 	}
 
-	const maxIter = 12
+	const maxIter = 20
 	messages := historyToAnthropic(req.History)
 	historyLen := len(messages) // turns beyond this are this run's raw exchange (§2.3-C)
 	allText := strings.Builder{}

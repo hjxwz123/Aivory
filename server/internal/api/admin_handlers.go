@@ -178,7 +178,16 @@ func reorderModelsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 
 func updateModelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	id := pathParam(r, "id")
-	var m store.Model
+	// Load the existing row and decode the request body OVER it, so a PARTIAL
+	// payload (e.g. the inline {"enabled":true} visibility toggle) only changes
+	// the fields it sends and leaves channel_id/label/prices/etc. intact. A full
+	// edit-form payload still overrides everything (channel changes included).
+	existing, err := store.GetModel(r.Context(), d.DB, id)
+	if err != nil {
+		writeError(w, 404, errNotFound)
+		return
+	}
+	m := *existing
 	if err := decodeJSON(r, &m); err != nil {
 		writeError(w, 400, errInvalidInput)
 		return

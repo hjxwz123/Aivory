@@ -102,7 +102,7 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest,
 		}
 	}
 
-	const maxIter = 12
+	const maxIter = 20
 	historyLen := len(messages)
 	allText := strings.Builder{}
 	allBlocks := []UnifiedBlock{}
@@ -526,7 +526,7 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 		}
 	}
 
-	const maxIter = 12
+	const maxIter = 20
 	historyLen := len(input)
 	allText := strings.Builder{}
 	allBlocks := []UnifiedBlock{}

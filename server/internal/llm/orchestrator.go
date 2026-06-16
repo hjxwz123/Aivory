@@ -69,11 +69,11 @@ type ToolContext struct {
 // perTurnToolLimits caps how many times a single tool may run per message
 // (§4.4 — prevents a model from exhausting search/fetch budget). 0 = unlimited.
 var perTurnToolLimits = map[string]int{
-	"web_search":     8,
-	"web_fetch":      5,
-	"fetch_image":    12, // images for a deck/doc — bounded so a turn can't mass-download
-	"image_generate": 4,
-	"python_execute": 8, // §F10: cap sandbox executions/turn (each up to 120s) to bound abuse/DoS
+	"web_search":     16,
+	"web_fetch":      12,
+	"fetch_image":    16, // images for a deck/doc — bounded so a turn can't mass-download
+	"image_generate": 8,
+	"python_execute": 16, // §F10: cap sandbox executions/turn (each up to 120s) to bound abuse/DoS
 }
 
 // deepResearchToolLimits are the much higher per-turn caps used while the Deep
@@ -91,8 +91,8 @@ var deepResearchToolLimits = map[string]int{
 // provider loop (maxIter=12) otherwise lets the model request unbounded tools
 // per round. Deep Research deliberately fans out far more.
 const (
-	maxToolCallsPerTurn     = 24
-	maxToolCallsPerTurnDeep = 90
+	maxToolCallsPerTurn     = 48
+	maxToolCallsPerTurnDeep = 150
 )
 
 // filterDisabledTools drops any tool named in the global `disabled_tools`
