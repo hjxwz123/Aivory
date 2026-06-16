@@ -446,6 +446,15 @@ export function MessageRow({ message, userName, onRegenerate, onEdit, onSaveEdit
           </div>
         )}
 
+        {/* Branch picker during streaming — the action bar below is hidden while
+            tokens arrive, but a freshly-sent edit-branch should show its
+            `< n/m >` immediately (§4.15). */}
+        {!isUser && message.streaming && message.branchCount && message.branchCount > 1 && typeof message.branchIndex === 'number' ? (
+          <div className="mt-2 inline-flex items-center">
+            <BranchSwitcher message={message} onSwitch={onBranchSwitch} t={t} />
+          </div>
+        ) : null}
+
         {/* Actions — always rendered after streaming completes, so the layout
             never jumps when the user hovers in/out. Visibility is controlled
             via opacity + pointer-events so nothing below is pushed around. */}
