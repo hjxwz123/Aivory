@@ -124,6 +124,7 @@ export default function AdminUsage() {
               <tbody>
                 {pageRows.map((r, i) => (
                   <tr key={i} className="border-t border-[var(--color-divider)]">
+                    <td className="py-2 px-4 truncate max-w-[12rem]">{r.user_email || r.user_id}</td>
                     <td className="py-2 px-4 max-w-[14rem]">
                       {r.conversation_id ? (
                         <Link
