@@ -102,6 +102,8 @@ func Migrate(db *sql.DB) error {
 	addPasswordSet := `ALTER TABLE users ADD COLUMN password_set INTEGER NOT NULL DEFAULT 1`
 	// Online status / last-seen (§ admin → users).
 	addLastSeen := `ALTER TABLE users ADD COLUMN last_seen_at INTEGER NOT NULL DEFAULT 0`
+	// Per-group purchase link shown on the subscription page (§ user groups).
+	addGroupBuyURL := `ALTER TABLE user_groups ADD COLUMN buy_url TEXT NOT NULL DEFAULT ''`
 	// Inline-thread linkage (§ text-selection sub-conversations).
 	addInlineSource := `ALTER TABLE conversations ADD COLUMN inline_source_conv TEXT NOT NULL DEFAULT ''`
 	addInlineParent := `ALTER TABLE conversations ADD COLUMN inline_parent_id TEXT NOT NULL DEFAULT ''`
@@ -125,6 +127,7 @@ func Migrate(db *sql.DB) error {
 		addPrevGroup = `ALTER TABLE users ADD COLUMN IF NOT EXISTS previous_group_id TEXT NOT NULL DEFAULT ''`
 		addPasswordSet = `ALTER TABLE users ADD COLUMN IF NOT EXISTS password_set INTEGER NOT NULL DEFAULT 1`
 		addLastSeen = `ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at BIGINT NOT NULL DEFAULT 0`
+		addGroupBuyURL = `ALTER TABLE user_groups ADD COLUMN IF NOT EXISTS buy_url TEXT NOT NULL DEFAULT ''`
 		addInlineSource = `ALTER TABLE conversations ADD COLUMN IF NOT EXISTS inline_source_conv TEXT NOT NULL DEFAULT ''`
 		addInlineParent = `ALTER TABLE conversations ADD COLUMN IF NOT EXISTS inline_parent_id TEXT NOT NULL DEFAULT ''`
 		addInlineQuote = `ALTER TABLE conversations ADD COLUMN IF NOT EXISTS inline_quote TEXT NOT NULL DEFAULT ''`
@@ -141,6 +144,7 @@ func Migrate(db *sql.DB) error {
 		addSessUA, addSessIP, addSessLoc, addSessSeen,
 		addModEnabled, addModMode,
 		addGroupExpires, addPrevGroup, addPasswordSet, addLastSeen,
+		addGroupBuyURL,
 		addInlineSource, addInlineParent, addInlineQuote,
 	} {
 		_, _ = db.Exec(ddl)

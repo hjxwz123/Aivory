@@ -13,13 +13,13 @@ import (
 // DefaultGroupID is the always-present free tier id (seeded in Seed).
 const DefaultGroupID = "ug_free"
 
-const userGroupCols = `id, name, description, features, price_usd, price_cny, is_default, sort_order, created_at, updated_at`
+const userGroupCols = `id, name, description, features, price_usd, price_cny, COALESCE(buy_url,''), is_default, sort_order, created_at, updated_at`
 
 func scanUserGroup(s scanner) (UserGroup, error) {
 	var g UserGroup
 	var features string
 	var def int
-	if err := s.Scan(&g.ID, &g.Name, &g.Description, &features, &g.PriceUSD, &g.PriceCNY, &def, &g.SortOrder, &g.CreatedAt, &g.UpdatedAt); err != nil {
+	if err := s.Scan(&g.ID, &g.Name, &g.Description, &features, &g.PriceUSD, &g.PriceCNY, &g.BuyURL, &def, &g.SortOrder, &g.CreatedAt, &g.UpdatedAt); err != nil {
 		return g, err
 	}
 	g.IsDefault = def == 1
@@ -74,9 +74,9 @@ func CreateUserGroup(ctx context.Context, db *sql.DB, g UserGroup) (*UserGroup, 
 	}
 	now := time.Now().Unix()
 	_, err := db.ExecContext(ctx,
-		`INSERT INTO user_groups(id, name, description, features, price_usd, price_cny, is_default, sort_order, created_at, updated_at)
-		 VALUES(?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
-		g.ID, g.Name, g.Description, string(g.Features), g.PriceUSD, g.PriceCNY, g.SortOrder, now, now)
+		`INSERT INTO user_groups(id, name, description, features, price_usd, price_cny, buy_url, is_default, sort_order, created_at, updated_at)
+		 VALUES(?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+		g.ID, g.Name, g.Description, string(g.Features), g.PriceUSD, g.PriceCNY, g.BuyURL, g.SortOrder, now, now)
 	if err != nil {
 		return nil, err
 	}
@@ -90,6 +90,7 @@ type UserGroupPatch struct {
 	Features    *json.RawMessage `json:"features"`
 	PriceUSD    *float64         `json:"price_usd"`
 	PriceCNY    *float64         `json:"price_cny"`
+	BuyURL      *string          `json:"buy_url"`
 	SortOrder   *int             `json:"sort_order"`
 }
 
@@ -115,6 +116,10 @@ func UpdateUserGroup(ctx context.Context, db *sql.DB, id string, p UserGroupPatc
 	if p.PriceCNY != nil {
 		parts = append(parts, "price_cny=?")
 		args = append(args, *p.PriceCNY)
+	}
+	if p.BuyURL != nil {
+		parts = append(parts, "buy_url=?")
+		args = append(args, *p.BuyURL)
 	}
 	if p.SortOrder != nil {
 		parts = append(parts, "sort_order=?")

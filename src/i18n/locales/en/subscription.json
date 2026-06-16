@@ -34,5 +34,6 @@
       "alreadyOwned": "You've already redeemed this code.",
       "generic": "Couldn't redeem this code."
     }
-  }
+  },
+  "buyCta": "Purchase"
 }

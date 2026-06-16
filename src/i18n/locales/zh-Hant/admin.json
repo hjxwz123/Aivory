@@ -235,16 +235,14 @@
     "banned": "已封禁使用者",
     "reinstated": "已解封使用者",
     "deleted": "使用者已刪除",
-    "deleteTitle": "刪除該使用者？",
-    "deleteBody": "永久刪除 {{name}} 及其所有對話、記憶和資料。此操作無法復原。",
+    "deleteTitle": "刪除對話?",
+    "deleteBody": "將永久刪除「{{title}}」及其全部訊息,此操作不可撤銷。",
     "viewConversations": "對話記錄",
     "backToUsers": "返回使用者列表",
     "backToConversations": "返回對話列表",
     "conversationsTitle": "{{name}} 的對話",
     "conversationsLead": "檢視該使用者的全部對話,用於客服與濫用排查。可刪除對話以清理,但不能編輯、重生成或派生分支。",
     "deleteConversation": "刪除對話",
-    "deleteTitle": "刪除對話?",
-    "deleteBody": "將永久刪除「{{title}}」及其全部訊息,此操作不可撤銷。",
     "conversationDeleted": "對話已刪除",
     "noConversations": "沒有對話記錄。",
     "noMessages": "沒有訊息。",
@@ -279,7 +277,8 @@
       "in": "輸入",
       "out": "輸出",
       "calls": "呼叫",
-      "cost": "費用"
+      "cost": "費用",
+      "conversation": "關聯對話"
     },
     "purposes": {
       "chat": "對話",
@@ -432,7 +431,9 @@
       "research": "深度研究",
       "researchHint": "允許該使用者群組使用深度研究功能。",
       "featuresHint": "每行一條，將在訂閱頁面以清單形式展示。",
-      "featuresPlaceholder": "優先訪問\n更高用量上限\n搶先體驗新功能"
+      "featuresPlaceholder": "優先訪問\n更高用量上限\n搶先體驗新功能",
+      "buyUrl": "購買連結",
+      "buyUrlHint": "可選。將在訂閱頁面顯示為「購買 / 升級」按鈕。"
     },
     "errors": {
       "nameRequired": "請填寫名稱"

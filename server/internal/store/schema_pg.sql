@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS user_groups (
   features    TEXT NOT NULL DEFAULT '[]',
   price_usd   REAL NOT NULL DEFAULT 0,
   price_cny   REAL NOT NULL DEFAULT 0,
+  buy_url     TEXT NOT NULL DEFAULT '',
   is_default  INTEGER NOT NULL DEFAULT 0,
   sort_order  INTEGER NOT NULL DEFAULT 0,
   created_at  BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint),

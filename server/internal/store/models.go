@@ -50,6 +50,9 @@ type UserGroup struct {
 	Features    json.RawMessage `json:"features"`
 	PriceUSD    float64         `json:"price_usd"`
 	PriceCNY    float64         `json:"price_cny"`
+	// BuyURL is an optional external purchase/upgrade link shown on the
+	// subscription page (§ user groups). Empty = no button.
+	BuyURL      string          `json:"buy_url"`
 	IsDefault   bool            `json:"is_default"`
 	SortOrder   int             `json:"sort_order"`
 	CreatedAt   int64           `json:"created_at"`

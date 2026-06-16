@@ -235,16 +235,14 @@
     "banned": "Utilisateur banni",
     "reinstated": "Utilisateur réintégré",
     "deleted": "Utilisateur supprimé",
-    "deleteTitle": "Supprimer cet utilisateur ?",
-    "deleteBody": "Supprimer définitivement {{name}} et toutes ses conversations, mémoires et données. Irréversible.",
+    "deleteTitle": "Supprimer la conversation ?",
+    "deleteBody": "Supprime définitivement « {{title}} » et tous ses messages. Cette action est irréversible.",
     "viewConversations": "Conversations",
     "backToUsers": "Retour aux utilisateurs",
     "backToConversations": "Retour aux conversations",
     "conversationsTitle": "Conversations de {{name}}",
     "conversationsLead": "Vue de triage de toutes les conversations appartenant à cet utilisateur — pour le support et les abus. Vous pouvez supprimer une conversation pour du nettoyage ; pas de modification, de régénération ni de bifurcation ici.",
     "deleteConversation": "Supprimer la conversation",
-    "deleteTitle": "Supprimer la conversation ?",
-    "deleteBody": "Supprime définitivement « {{title}} » et tous ses messages. Cette action est irréversible.",
     "conversationDeleted": "Conversation supprimée",
     "noConversations": "Aucune conversation.",
     "noMessages": "Aucun message.",
@@ -279,7 +277,8 @@
       "in": "Entrée",
       "out": "Sortie",
       "calls": "Appels",
-      "cost": "Coût"
+      "cost": "Coût",
+      "conversation": "Conversation"
     },
     "purposes": {
       "chat": "Chat",
@@ -432,7 +431,9 @@
       "research": "Recherche approfondie",
       "researchHint": "Autoriser ce groupe à utiliser le mode Recherche approfondie.",
       "featuresHint": "Une par ligne. Affichées sous forme de liste de contrôle sur la page d'abonnement.",
-      "featuresPlaceholder": "Accès prioritaire\nLimites d'utilisation plus élevées\nFonctionnalités en avant-première"
+      "featuresPlaceholder": "Accès prioritaire\nLimites d'utilisation plus élevées\nFonctionnalités en avant-première",
+      "buyUrl": "Lien d'achat",
+      "buyUrlHint": "Facultatif. Affiché comme bouton « Acheter / Améliorer » sur la page d'abonnement."
     },
     "errors": {
       "nameRequired": "Le nom est requis"

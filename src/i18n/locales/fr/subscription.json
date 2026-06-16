@@ -34,5 +34,6 @@
       "alreadyOwned": "Vous avez déjà utilisé ce code.",
       "generic": "Impossible d’utiliser ce code."
     }
-  }
+  },
+  "buyCta": "Acheter"
 }

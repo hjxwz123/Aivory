@@ -28,7 +28,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { toast } from '@/hooks/use-toast'
-import { cn, formatAbsoluteDate } from '@/lib/utils'
+import { cn, formatAbsoluteDate, safeHref } from '@/lib/utils'
 
 export default function Subscription() {
   const { t } = useTranslation(['subscription', 'common'])
@@ -216,6 +216,13 @@ export default function Subscription() {
                     {isCurrent ? (
                       <Button variant="secondary" disabled className="w-full">
                         {t('subscription:youreOnThis')}
+                      </Button>
+                    ) : g.buy_url ? (
+                      // External purchase link configured by the admin → buy off-site.
+                      <Button asChild variant="primary" className="w-full">
+                        <a href={safeHref(g.buy_url)} target="_blank" rel="noreferrer noopener">
+                          {t('subscription:buyCta', { defaultValue: 'Purchase' })}
+                        </a>
                       </Button>
                     ) : (
                       <Button

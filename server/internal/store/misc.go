@@ -245,27 +245,32 @@ func SumUsageByUser(ctx context.Context, db *sql.DB, userID string, days int) (f
 
 // UsageRow is a single row of the report.
 type UsageRow struct {
-	UserID       string  `json:"user_id"`
-	UserEmail    string  `json:"user_email"`
-	ModelID      string  `json:"model_id"`
-	Purpose      string  `json:"purpose"`
-	InputTokens  int     `json:"input_tokens"`
-	OutputTokens int     `json:"output_tokens"`
-	Calls        int     `json:"calls"`
-	Cost         float64 `json:"cost"`
-	Currency     string  `json:"currency"`
+	UserID            string  `json:"user_id"`
+	UserEmail         string  `json:"user_email"`
+	ConversationID    string  `json:"conversation_id"`
+	ConversationTitle string  `json:"conversation_title"`
+	ModelID           string  `json:"model_id"`
+	Purpose           string  `json:"purpose"`
+	InputTokens       int     `json:"input_tokens"`
+	OutputTokens      int     `json:"output_tokens"`
+	Calls             int     `json:"calls"`
+	Cost              float64 `json:"cost"`
+	Currency          string  `json:"currency"`
 }
 
-// AdminUsageReport returns an aggregated report across users/models/purpose
-// over the past `days` days.
+// AdminUsageReport returns an aggregated report across users/conversations/
+// models/purpose over the past `days` days. Grouping by conversation lets the
+// admin jump from a usage row to the exact conversation that produced it.
 func AdminUsageReport(ctx context.Context, db *sql.DB, days int) ([]UsageRow, error) {
 	since := time.Now().Add(-time.Duration(days) * 24 * time.Hour).Unix()
 	rows, err := db.QueryContext(ctx,
-		`SELECT u.user_id, COALESCE(usr.email, ''), u.model_id, u.purpose,
+		`SELECT u.user_id, COALESCE(usr.email, ''), COALESCE(u.conversation_id, ''), COALESCE(c.title, ''), u.model_id, u.purpose,
 		        SUM(u.input_tokens), SUM(u.output_tokens), COUNT(*), SUM(u.cost), MAX(u.currency)
-		 FROM usage_logs u LEFT JOIN users usr ON usr.id = u.user_id
+		 FROM usage_logs u
+		 LEFT JOIN users usr ON usr.id = u.user_id
+		 LEFT JOIN conversations c ON c.id = u.conversation_id
 		 WHERE u.created_at >= ?
-		 GROUP BY u.user_id, usr.email, u.model_id, u.purpose
+		 GROUP BY u.user_id, usr.email, u.conversation_id, c.title, u.model_id, u.purpose
 		 ORDER BY SUM(u.cost) DESC`, since)
 	if err != nil {
 		return nil, err
@@ -274,7 +279,7 @@ func AdminUsageReport(ctx context.Context, db *sql.DB, days int) ([]UsageRow, er
 	out := []UsageRow{}
 	for rows.Next() {
 		var r UsageRow
-		if err := rows.Scan(&r.UserID, &r.UserEmail, &r.ModelID, &r.Purpose, &r.InputTokens, &r.OutputTokens, &r.Calls, &r.Cost, &r.Currency); err != nil {
+		if err := rows.Scan(&r.UserID, &r.UserEmail, &r.ConversationID, &r.ConversationTitle, &r.ModelID, &r.Purpose, &r.InputTokens, &r.OutputTokens, &r.Calls, &r.Cost, &r.Currency); err != nil {
 			return nil, err
 		}
 		out = append(out, r)

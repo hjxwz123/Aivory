@@ -235,16 +235,14 @@
     "banned": "已封禁用户",
     "reinstated": "已解封用户",
     "deleted": "用户已删除",
-    "deleteTitle": "删除该用户？",
-    "deleteBody": "永久删除 {{name}} 及其所有对话、记忆和数据。此操作不可撤销。",
+    "deleteTitle": "删除对话?",
+    "deleteBody": "将永久删除「{{title}}」及其全部消息,此操作不可撤销。",
     "viewConversations": "对话记录",
     "backToUsers": "返回用户列表",
     "backToConversations": "返回对话列表",
     "conversationsTitle": "{{name}} 的对话",
     "conversationsLead": "查看该用户的全部对话,用于客服与滥用排查。可删除对话以清理,但不能编辑、重生成或派生分支。",
     "deleteConversation": "删除对话",
-    "deleteTitle": "删除对话?",
-    "deleteBody": "将永久删除「{{title}}」及其全部消息,此操作不可撤销。",
     "conversationDeleted": "对话已删除",
     "noConversations": "没有对话记录。",
     "noMessages": "没有消息。",
@@ -279,7 +277,8 @@
       "in": "输入",
       "out": "输出",
       "calls": "调用",
-      "cost": "费用"
+      "cost": "费用",
+      "conversation": "关联对话"
     },
     "purposes": {
       "chat": "对话",
@@ -432,7 +431,9 @@
       "research": "深度研究",
       "researchHint": "允许该用户组使用深度研究功能。",
       "featuresHint": "每行一条，将在订阅页面以清单形式展示。",
-      "featuresPlaceholder": "优先访问\n更高用量上限\n抢先体验新功能"
+      "featuresPlaceholder": "优先访问\n更高用量上限\n抢先体验新功能",
+      "buyUrl": "购买链接",
+      "buyUrlHint": "可选。将在订阅页面显示为「购买 / 升级」按钮。"
     },
     "errors": {
       "nameRequired": "请填写名称"

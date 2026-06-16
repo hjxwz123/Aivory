@@ -99,6 +99,7 @@ export default function AdminUserGroups() {
       features,
       price_usd: Number(d.price_usd) || 0,
       price_cny: Number(d.price_cny) || 0,
+      buy_url: (d.buy_url ?? '').trim(),
     }
     try {
       if (editor.row) {
@@ -262,6 +263,18 @@ export default function AdminUserGroups() {
                   aria-label={t('admin:groups.fields.research', { defaultValue: 'Deep Research' })}
                 />
               </div>
+              <Field
+                label={t('admin:groups.fields.buyUrl', { defaultValue: 'Purchase link' })}
+                htmlFor="g-buy"
+                hint={t('admin:groups.fields.buyUrlHint', { defaultValue: 'Optional. Shown as a “Buy / Upgrade” button on the subscription page.' })}
+              >
+                <Input
+                  id="g-buy"
+                  value={editor.draft.buy_url ?? ''}
+                  onChange={(e) => setDraft({ buy_url: e.target.value })}
+                  placeholder="https://…"
+                />
+              </Field>
             </div>
           </DialogBody>
           <DialogFooter>

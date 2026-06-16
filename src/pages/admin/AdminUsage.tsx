@@ -6,6 +6,7 @@
  * embedding) are translated via i18n keys.
  */
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { adminApi, ApiError } from '@/api'
 import type { ApiUsageReportRow } from '@/api/types'
@@ -111,6 +112,7 @@ export default function AdminUsage() {
               <thead className="bg-[var(--color-bg-muted)] text-[12px] text-[var(--color-fg-subtle)]">
                 <tr>
                   <th className="text-left py-2.5 px-4 font-medium">{t('usage.table.user')}</th>
+                  <th className="text-left py-2.5 px-4 font-medium">{t('usage.table.conversation', { defaultValue: 'Conversation' })}</th>
                   <th className="text-left py-2.5 px-4 font-medium">{t('usage.table.model')}</th>
                   <th className="text-left py-2.5 px-4 font-medium">{t('usage.table.purpose')}</th>
                   <th className="text-right py-2.5 px-4 font-medium">{t('usage.table.in')}</th>
@@ -122,7 +124,19 @@ export default function AdminUsage() {
               <tbody>
                 {pageRows.map((r, i) => (
                   <tr key={i} className="border-t border-[var(--color-divider)]">
-                    <td className="py-2 px-4 truncate max-w-[12rem]">{r.user_email || r.user_id}</td>
+                    <td className="py-2 px-4 max-w-[14rem]">
+                      {r.conversation_id ? (
+                        <Link
+                          to={`/admin/users/${encodeURIComponent(r.user_id)}/conversations/${encodeURIComponent(r.conversation_id)}`}
+                          className="block truncate text-[var(--color-accent)] hover:underline"
+                          title={r.conversation_title || r.conversation_id}
+                        >
+                          {r.conversation_title || r.conversation_id}
+                        </Link>
+                      ) : (
+                        <span className="text-[var(--color-fg-faint)]">—</span>
+                      )}
+                    </td>
                     <td className="py-2 px-4 text-[12px]">{modelLabel(r.model_id)}</td>
                     <td className="py-2 px-4 text-[var(--color-fg-muted)]">{purposeLabel(r.purpose)}</td>
                     <td className="py-2 px-4 text-right">{r.input_tokens}</td>

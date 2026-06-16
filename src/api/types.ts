@@ -117,6 +117,8 @@ export interface ApiUserGroup {
   features: string[]
   price_usd: number
   price_cny: number
+  /** Optional external purchase/upgrade link shown on the subscription page. */
+  buy_url?: string
   is_default: boolean
   sort_order: number
   created_at: number
@@ -418,6 +420,8 @@ export interface ApiMemory {
 export interface ApiUsageReportRow {
   user_id: string
   user_email: string
+  conversation_id: string
+  conversation_title: string
   model_id: string
   purpose: string
   input_tokens: number

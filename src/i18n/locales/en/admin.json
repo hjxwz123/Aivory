@@ -235,16 +235,14 @@
     "banned": "User banned",
     "reinstated": "User reinstated",
     "deleted": "User deleted",
-    "deleteTitle": "Delete this user?",
-    "deleteBody": "Permanently delete {{name}} and all their conversations, memories and data. This cannot be undone.",
+    "deleteTitle": "Delete conversation?",
+    "deleteBody": "Permanently deletes \"{{title}}\" and all its messages. This cannot be undone.",
     "viewConversations": "Conversations",
     "backToUsers": "Back to users",
     "backToConversations": "Back to conversations",
     "conversationsTitle": "{{name}}'s conversations",
     "conversationsLead": "Triage view of every conversation owned by this user — for support and abuse. You can delete a conversation for cleanup; no edit, regenerate, or fork from here.",
     "deleteConversation": "Delete conversation",
-    "deleteTitle": "Delete conversation?",
-    "deleteBody": "Permanently deletes \"{{title}}\" and all its messages. This cannot be undone.",
     "conversationDeleted": "Conversation deleted",
     "noConversations": "No conversations.",
     "noMessages": "No messages.",
@@ -279,7 +277,8 @@
       "in": "In",
       "out": "Out",
       "calls": "Calls",
-      "cost": "Cost"
+      "cost": "Cost",
+      "conversation": "Conversation"
     },
     "purposes": {
       "chat": "Chat",
@@ -432,7 +431,9 @@
       "research": "Deep Research",
       "researchHint": "Allow this group to use the Deep Research mode.",
       "featuresHint": "One per line. Shown as a checklist on the subscription page.",
-      "featuresPlaceholder": "Priority access\nHigher usage limits\nEarly features"
+      "featuresPlaceholder": "Priority access\nHigher usage limits\nEarly features",
+      "buyUrl": "Purchase link",
+      "buyUrlHint": "Optional. Shown as a “Buy / Upgrade” button on the subscription page."
     },
     "errors": {
       "nameRequired": "Name is required"
