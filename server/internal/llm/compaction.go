@@ -85,8 +85,34 @@ func estimateHistoryTokens(msgs []store.Message) int {
 		for _, b := range blocks {
 			total += estimateTokens(b.Text) + estimateTokens(b.Summary)
 		}
+		// Per-message structural overhead (role markers, block framing): a few
+		// tokens each so deep, short-message histories aren't undercounted.
+		total += 4
 	}
 	return total
+}
+
+// contextTokens reports the best available measure of how big the prompt
+// actually is — used to decide token-triggered compaction (§4.7).
+//
+// Preferred: the provider's OWN count from the most recent assistant turn —
+// input_tokens + cache_read_tokens. That total is exactly what was sent last
+// turn (system prompt + tool defs + RAG + full kept history), so it reflects
+// real context-window pressure with zero estimation error and no extra API
+// call. cache_read_tokens MUST be included: with prompt caching most of the
+// context is billed as cached, so input_tokens alone undercounts heavily.
+//
+// Fallback (first turn, or a freshly-imported history with no recorded usage):
+// the CJK-aware heuristic over the kept history. Returns exact=false so callers
+// know it's only an estimate of the history portion.
+func contextTokens(history []store.Message) (tokens int, exact bool) {
+	for i := len(history) - 1; i >= 0; i-- {
+		m := history[i]
+		if m.Role == "assistant" && m.InputTokens > 0 {
+			return m.InputTokens + m.CacheReadTokens, true
+		}
+	}
+	return estimateHistoryTokens(history), false
 }
 
 // MaybeCompact is called by the orchestrator before assembling a request. It
@@ -130,7 +156,10 @@ func MaybeCompact(
 	if keepRounds <= 0 {
 		keepRounds = 6
 	}
-	tokenTrigger := 12000
+	// Total-context token budget: compact once the real prompt (system + tools +
+	// RAG + history) crosses this. Default sized to keep prompts cheap/cache-
+	// friendly while preserving plenty of recent turns; admin-tunable.
+	tokenTrigger := 32000
 	if raw, err := store.GetSetting(db, "compaction_token_trigger"); err == nil {
 		_ = json.Unmarshal(raw, &tokenTrigger)
 	}
@@ -142,9 +171,11 @@ func MaybeCompact(
 	existing := LoadSummaryBlocks(conv.SummaryBlocks)
 
 	// Dual trigger (§4.7): compact when EITHER the round budget OR the token
-	// budget is exceeded.
+	// budget is exceeded. Token size prefers the provider's real prompt count
+	// from the last turn (input + cached prefix), falling back to a heuristic.
 	keepMsgs := keepRounds * 2
-	if len(history) <= keepMsgs && estimateHistoryTokens(history) <= tokenTrigger {
+	ctxTok, _ := contextTokens(history)
+	if len(history) <= keepMsgs && ctxTok <= tokenTrigger {
 		return history, filterBlocksForPath(existing, history), nil
 	}
 	// Find the cut: the first index that aligns to a round boundary so we
