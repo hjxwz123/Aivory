@@ -3,8 +3,10 @@ package tools
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -523,7 +525,14 @@ func saveArtifact(ctx context.Context, tc *llm.ToolContext, artifactDir, name, m
 	}
 	_ = os.MkdirAll(dir, 0o755)
 	safe := filepath.Base(name)
-	path := filepath.Join(dir, tc.MessageID+"_"+safe)
+	// Unique on-disk name: a single turn can produce several artifacts that share
+	// a display name (e.g. three image_generate calls each emitting "image_1.png").
+	// Keying the path only on messageID+name made them collide → every artifact
+	// row pointed at the last file written. A random token guarantees distinct
+	// files (the display Filename stays `safe`).
+	tok := make([]byte, 6)
+	_, _ = rand.Read(tok)
+	path := filepath.Join(dir, tc.MessageID+"_"+hex.EncodeToString(tok)+"_"+safe)
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		return nil
 	}
