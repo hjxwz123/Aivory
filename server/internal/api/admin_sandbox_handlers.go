@@ -5,6 +5,7 @@ import (
 	"mime"
 	"net/http"
 	"path/filepath"
+	"strings"
 
 	"aurelia/server/internal/store"
 )
@@ -27,6 +28,14 @@ func sandboxFilesAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	files, err := sb.ListFiles(r.Context(), sid)
 	if err != nil {
+		// An old sandbox-sidecar (pre /files/list) returns 404, and a recycled
+		// session is also "gone". Degrade to an empty list + a flag instead of a
+		// scary 502 so the admin UI stays usable across a version skew.
+		msg := err.Error()
+		if strings.Contains(msg, "404") || strings.Contains(strings.ToLower(msg), "not found") {
+			writeJSON(w, 200, map[string]any{"session": sid, "files": []any{}, "unavailable": true})
+			return
+		}
 		writeError(w, 502, err)
 		return
 	}
