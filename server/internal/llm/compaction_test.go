@@ -128,6 +128,52 @@ func TestMaybeCompactTokenTriggerDeepens(t *testing.T) {
 	}
 }
 
+// TestMaybeCompactCutShrinkNoDuplicate covers the edge where the cut shrinks
+// below a prior summary's anchor (e.g. keep_recent_rounds was raised). The
+// already-summarised range must NOT be rolled up again into a duplicate block.
+func TestMaybeCompactCutShrinkNoDuplicate(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT, updated_at INTEGER)`); err != nil {
+		t.Fatal(err)
+	}
+	// Disable the token trigger (also clears any cross-test cached value) and
+	// start with keepRounds=6 (keepMsgs=12).
+	if err := store.SetSetting(db, "compaction_token_trigger", 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetSetting(db, "keep_recent_rounds", 6); err != nil {
+		t.Fatal(err)
+	}
+	conv := &store.Conversation{ID: "c1", UserID: "u1", SummaryBlocks: json.RawMessage("[]")}
+
+	_, blocks1, err := MaybeCompact(context.Background(), db, nil, conv, buildHistory(16))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(blocks1) != 1 || blocks1[0].AnchorMessageID != "m3" {
+		t.Fatalf("pass1 unexpected blocks: %+v", blocks1)
+	}
+	bjson, _ := json.Marshal(blocks1)
+	conv.SummaryBlocks = bjson
+
+	// Raise keep_recent_rounds → keepMsgs=16; with 18 messages the cut is 2,
+	// which is BELOW the prior anchor (m3). Must not duplicate.
+	if err := store.SetSetting(db, "keep_recent_rounds", 8); err != nil {
+		t.Fatal(err)
+	}
+	_, blocks2, err := MaybeCompact(context.Background(), db, nil, conv, buildHistory(18))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(blocks2) != 1 {
+		t.Fatalf("cut shrink created a duplicate summary block: got %d, want 1", len(blocks2))
+	}
+}
+
 func mustSet(t *testing.T, db *sql.DB, key, jsonVal string) {
 	t.Helper()
 	if _, err := db.Exec(`INSERT INTO settings(key, value) VALUES(?, ?)`, key, jsonVal); err != nil {

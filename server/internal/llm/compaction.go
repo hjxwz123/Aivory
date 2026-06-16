@@ -219,19 +219,31 @@ func MaybeCompact(
 	older := history[:cut]
 	keep := history[cut:]
 
-	// High-water mark: the index in `older` immediately AFTER the last message
-	// already summarised on this path. We only feed the model the NEW range,
-	// keeping summary blocks immutable so the cache prefix stays stable
-	// (§4.7 "每块只从原文摘一次", §4.9 cache friendliness).
+	// High-water mark: the index immediately AFTER the last message already
+	// summarised on this path. We only feed the model the NEW range, keeping
+	// summary blocks immutable so the cache prefix stays stable (§4.7 "每块只从
+	// 原文摘一次", §4.9 cache friendliness). The anchor is resolved against the
+	// FULL history, not just `older`: if `keep_recent_rounds` is raised (or a
+	// branch switch moves the path), the cut can shrink so the anchor now sits in
+	// the kept tail — in that case the whole `older` range is already covered and
+	// re-summarising it would duplicate a block. Guard against exactly that.
 	pathExisting := filterBlocksForPath(existing, history)
 	highWater := 0
 	if len(pathExisting) > 0 {
 		anchor := pathExisting[len(pathExisting)-1].AnchorMessageID
-		for i, m := range older {
+		anchorIdx := -1
+		for i, m := range history {
 			if m.ID == anchor {
-				highWater = i + 1
+				anchorIdx = i
 				break
 			}
+		}
+		if anchorIdx >= 0 {
+			if anchorIdx+1 >= cut {
+				// Everything older than the cut is already summarised.
+				return keep, pathExisting, nil
+			}
+			highWater = anchorIdx + 1
 		}
 	}
 	if highWater >= len(older) {
