@@ -1,8 +1,9 @@
 import { memo, useDeferredValue, useEffect, useMemo, useState } from 'react'
-import { tokenizeMarkdown, inlineMarkdownToHtml, blockMarkdownToHtml } from '@/lib/markdown'
+import { tokenizeMarkdown, inlineMarkdownToHtml, blockMarkdownToHtml, type CiteRef } from '@/lib/markdown'
 import { CodeBlock } from './code-block'
 import { MermaidDiagram } from './mermaid-diagram'
-import { cn } from '@/lib/utils'
+import { cn, safeHref } from '@/lib/utils'
+import type { Citation } from '@/types/chat'
 
 interface MarkdownProps {
   content: string
@@ -11,6 +12,8 @@ interface MarkdownProps {
   live?: boolean
   /** Stable prefix (message id) so code blocks keep their identity across remounts. */
   blockKeyPrefix?: string
+  /** Citations for this turn — inline `[n]` markers become source links. */
+  citations?: Citation[]
 }
 
 function HeadingTag({ depth, html, className }: { depth: number; html: string; className?: string }) {
@@ -50,9 +53,22 @@ function useThrottledContent(content: string, intervalMs = 50): string {
   return snap
 }
 
-export const Markdown = memo(function Markdown({ content, className, live = false, blockKeyPrefix }: MarkdownProps) {
+export const Markdown = memo(function Markdown({ content, className, live = false, blockKeyPrefix, citations }: MarkdownProps) {
   const throttled = useThrottledContent(content)
   const blocks = useMemo(() => tokenizeMarkdown(throttled), [throttled])
+  // Map citations to the lib's CiteRef shape once; `inline`/`block` helpers thread
+  // them into the HTML so `[n]` markers become source links.
+  const cites = useMemo<CiteRef[]>(
+    () =>
+      (citations ?? []).map((c) => ({
+        index: c.index,
+        url: c.url,
+        title: c.title,
+        domain: c.domain,
+        isDoc: c.source === 'kb' || c.url.trim().toLowerCase().startsWith('doc:') || !safeHref(c.url),
+      })),
+    [citations],
+  )
   if (!content) return null
 
   // While streaming, each block fades in ONCE when it first appears, so a reply
@@ -75,7 +91,7 @@ export const Markdown = memo(function Markdown({ content, className, live = fals
               <p
                 key={i}
                 className={cn('leading-relaxed text-[var(--color-fg)]', blockAnim)}
-                dangerouslySetInnerHTML={{ __html: inlineMarkdownToHtml(b.content) }}
+                dangerouslySetInnerHTML={{ __html: inlineMarkdownToHtml(b.content, cites) }}
               />
             )
           case 'list':
@@ -94,7 +110,7 @@ export const Markdown = memo(function Markdown({ content, className, live = fals
                   '[&_ul_ul]:list-[circle] [&_ul_ul]:my-0.5 [&_ol_ol]:my-0.5 [&_li_p]:my-0',
                   blockAnim,
                 )}
-                dangerouslySetInnerHTML={{ __html: blockMarkdownToHtml(b.content) }}
+                dangerouslySetInnerHTML={{ __html: blockMarkdownToHtml(b.content, cites) }}
               />
             )
           case 'code':
@@ -119,7 +135,7 @@ export const Markdown = memo(function Markdown({ content, className, live = fals
                   'border-l-2 border-[var(--color-border-strong)] pl-4 text-[var(--color-fg-muted)] italic',
                   blockAnim,
                 )}
-                dangerouslySetInnerHTML={{ __html: inlineMarkdownToHtml(b.content) }}
+                dangerouslySetInnerHTML={{ __html: inlineMarkdownToHtml(b.content, cites) }}
               />
             )
           case 'math':
@@ -150,7 +166,7 @@ export const Markdown = memo(function Markdown({ content, className, live = fals
                   '[&_tr:last-child_td]:border-b-0',
                   blockAnim,
                 )}
-                dangerouslySetInnerHTML={{ __html: blockMarkdownToHtml(b.content) }}
+                dangerouslySetInnerHTML={{ __html: blockMarkdownToHtml(b.content, cites) }}
               />
             )
           default:

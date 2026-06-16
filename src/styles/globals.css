@@ -396,6 +396,26 @@
 .prose-aurelia strong { font-weight: 600; color: var(--color-fg); }
 .prose-aurelia em { font-style: italic; }
 
+/* Inline citation markers (§ citations). A small sage superscript [n] placed
+   right after the cited text; web sources link out, KB docs show a tooltip. */
+.prose-aurelia .cite-marker {
+  font-size: 0.68em;
+  line-height: 0;
+  font-weight: 600;
+  margin-left: 1px;
+  vertical-align: super;
+}
+.prose-aurelia .cite-marker::before { content: "["; }
+.prose-aurelia .cite-marker::after { content: "]"; }
+.prose-aurelia .cite-marker a,
+.prose-aurelia .cite-marker.cite-doc {
+  color: var(--color-secondary);
+  text-decoration: none;
+  cursor: pointer;
+}
+.prose-aurelia .cite-marker.cite-doc { cursor: help; }
+.prose-aurelia .cite-marker a:hover { color: var(--color-accent); text-decoration: underline; }
+
 /* Text-selection sub-conversation markers (§ inline threads). A sage tint +
    dotted underline marks a passage that has its own side conversation; click to
    open the thread drawer. Sage is the "AI moment" accent, fitting here. */

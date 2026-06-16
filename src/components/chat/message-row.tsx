@@ -370,7 +370,7 @@ export function MessageRow({ message, userName, onRegenerate, onEdit, onSaveEdit
                   </div>
                 ) : null}
                 <div data-inline-msg={message.id} data-inline-role={message.role}>
-                  <Markdown content={message.content} live={Boolean(message.streaming)} blockKeyPrefix={message.id} />
+                  <Markdown content={message.content} live={Boolean(message.streaming)} blockKeyPrefix={message.id} citations={message.citations} />
                 </div>
                 {message.streaming ? (
                   <span
