@@ -212,7 +212,13 @@ func (s *Service) runPipeline(ctx context.Context, docID string) error {
 	// context (not embedded), children carry the vectors. The new chunker also
 	// returns image_caption rows for MinerU-extracted images (§4.11-C-1).
 	parents := chunkHierarchical(content)
-	_ = store.UpdateDocumentStatus(ctx, s.db, docID, "embedding", "", 0)
+
+	// A conversation-scoped doc that fits the full-text window is ALWAYS injected
+	// whole (the §4.11-B router skips retrieval for small scopes), so its vectors
+	// would never be queried — skip embedding entirely: instant ingest, no wasted
+	// embedding calls (this is why a small .c/.txt upload no longer "indexes").
+	// KB docs always embed; they're retrieved across many documents.
+	skipEmbed := d.KBID == "" && d.ConversationID != "" && len(content)/4 <= fullTextThresholdTokens
 
 	// §4.11-B2 lock: ingest into a KB MUST use the KB's locked embedding model;
 	// global setting changes never re-route an existing KB's vectors. For pure
@@ -222,19 +228,22 @@ func (s *Service) runPipeline(ctx context.Context, docID string) error {
 		emName string
 		dim    int
 	)
-	if d.KBID != "" {
-		em, emName, dim, err = s.resolveEmbedderForKB(ctx, d.KBID)
-		if err != nil {
-			return err
+	if !skipEmbed {
+		_ = store.UpdateDocumentStatus(ctx, s.db, docID, "embedding", "", 0)
+		if d.KBID != "" {
+			em, emName, dim, err = s.resolveEmbedderForKB(ctx, d.KBID)
+			if err != nil {
+				return err
+			}
+		} else {
+			em, emName, dim = s.resolveEmbedder(ctx)
 		}
-	} else {
-		em, emName, dim = s.resolveEmbedder(ctx)
-	}
-	// Re-ingest is idempotent at the row level (chunks are rewritten); clear any
-	// previous vectors for this document so stale points don't linger in Qdrant.
-	if s.vec.Enabled() {
-		if err := s.vec.DeleteByDocument(ctx, docID); err != nil {
-			s.logger.Printf("rag: clear old vectors for %s: %v", docID, err)
+		// Re-ingest is idempotent at the row level (chunks are rewritten); clear any
+		// previous vectors for this document so stale points don't linger in Qdrant.
+		if s.vec.Enabled() {
+			if err := s.vec.DeleteByDocument(ctx, docID); err != nil {
+				s.logger.Printf("rag: clear old vectors for %s: %v", docID, err)
+			}
 		}
 	}
 	written := 0
@@ -253,9 +262,12 @@ func (s *Service) runPipeline(ctx context.Context, docID string) error {
 			}
 			seq++
 		}
-		vecs, err := em.Embed(ctx, p.Children)
-		if err != nil {
-			return err
+		var vecs [][]float32
+		if !skipEmbed {
+			vecs, err = em.Embed(ctx, p.Children)
+			if err != nil {
+				return err
+			}
 		}
 		// Reconcile the collection dimension with what the model ACTUALLY
 		// returned. The configured dim is only a hint — some endpoints ignore
@@ -293,15 +305,19 @@ func (s *Service) runPipeline(ctx context.Context, docID string) error {
 			}
 			// Keep the vector in Postgres too: it's the brute-force fallback when
 			// Qdrant is disabled, and cheap insurance otherwise.
+			var emb []byte
+			if !skipEmbed {
+				emb = packFloats(vecs[i])
+			}
 			chunkID, err := store.CreateChunkFull(ctx, s.db, store.ChunkInsert{
 				DocumentID: docID, KBID: d.KBID, ConversationID: d.ConversationID,
 				Seq: seq, ParentID: parentID, ChunkType: chunkType, Content: child,
 				ImageRef:  imageRef,
-				Embedding: packFloats(vecs[i]), EmbeddingModel: emName,
+				Embedding: emb, EmbeddingModel: emName,
 			})
 			if err != nil {
 				s.logger.Printf("rag: insert chunk: %v", err)
-			} else if s.vec.Enabled() {
+			} else if !skipEmbed && s.vec.Enabled() {
 				points = append(points, vector.Point{
 					ChunkID: chunkID,
 					Vector:  vecs[i],
@@ -325,8 +341,11 @@ func (s *Service) runPipeline(ctx context.Context, docID string) error {
 			s.logger.Printf("rag: vector upsert for %s failed (%v) — falling back to Postgres brute-force", docID, err)
 		}
 	}
-	// Record embedding spend (§8.3, purpose=embedding) — best-effort.
-	s.logEmbeddingUsage(ctx, d.KBID, d.ConversationID, emName, totalTokens)
+	// Record embedding spend (§8.3, purpose=embedding) — best-effort. Skipped
+	// when we didn't embed (small conversation doc), so the report stays honest.
+	if !skipEmbed {
+		s.logEmbeddingUsage(ctx, d.KBID, d.ConversationID, emName, totalTokens)
+	}
 	return store.UpdateDocumentStatus(ctx, s.db, docID, "ready", "", written)
 }
 
