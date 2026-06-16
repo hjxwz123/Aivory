@@ -387,9 +387,31 @@ export const useConversations = create<ConversationStore>((set, get) => ({
       conversations: s.conversations.map((c) => {
         if (c.id !== input.conversationId) return c
         const base = input.branch ? truncateToParent(c.messages, input.parentId) : c.messages
+        // §4.15: an edit-branch creates a NEW sibling answer. Seed the branch
+        // metadata optimistically so the `< n/m >` picker appears the instant the
+        // message is sent (reloadActivePath later replaces it with server truth).
+        let asst = assistantMsg
+        if (input.branch) {
+          const oldQ = input.parentId
+            ? c.messages.find((m) => m.role === 'user' && m.parentId === input.parentId)
+            : c.messages.find((m) => m.role === 'user' && !m.parentId)
+          const oldA = oldQ
+            ? c.messages.find((m) => m.role === 'assistant' && m.parentId === oldQ.id)
+            : undefined
+          if (oldA) {
+            const prevSiblings = oldA.siblings && oldA.siblings.length > 0 ? oldA.siblings : [oldA.id]
+            const prevCount = Math.max(oldA.branchCount ?? 0, prevSiblings.length)
+            asst = {
+              ...assistantMsg,
+              branchCount: prevCount + 1,
+              branchIndex: prevCount,
+              siblings: [...prevSiblings, assistantId],
+            }
+          }
+        }
         return {
           ...c,
-          messages: [...base, userMsg, assistantMsg],
+          messages: [...base, userMsg, asst],
           updatedAt: Date.now(),
           // Remember the param_controls selection so regenerate reuses it.
           lastParams: input.params ?? c.lastParams,
@@ -597,6 +619,25 @@ export const useConversations = create<ConversationStore>((set, get) => ({
               quotaExceeded: ev.stop_reason === 'quota_exceeded' ? true : m.quotaExceeded,
             }))
             break
+        }
+      }
+      // The stream ended. If we never received a terminal `done`/`error` (a
+      // clean EOF mid-flight, or the upstream closed without a final event), the
+      // assistant could be stuck `streaming:true` — never leave an empty,
+      // spinning bubble. Finalize it: keep partial content, else mark it failed.
+      {
+        const am = get()
+          .conversations.find((c) => c.id === input.conversationId)
+          ?.messages.find((m) => m.id === serverAssistantId)
+        if (am?.streaming) {
+          const hasOutput =
+            Boolean(am.content?.trim()) || (am.reasoning?.length ?? 0) > 0 || (am.artifacts?.length ?? 0) > 0
+          updateAssistant(set, input.conversationId, serverAssistantId, (m) => ({
+            ...m,
+            streaming: false,
+            error: hasOutput ? m.error : m.error || 'The reply ended unexpectedly. Please try again.',
+          }))
+          if (!hasOutput) errored = true
         }
       }
       // Stream finished cleanly — reconcile to the canonical tree path so the
@@ -1140,7 +1181,43 @@ export function toLocalMessage(m: ApiMessage): Message {
       m.stop_reason === 'content_filter' ||
       m.stop_reason === 'refusal' ||
       m.stop_reason === 'safety',
+    // Never render an empty bubble: surface a persisted error, and treat a
+    // finished-but-empty assistant turn (upstream failed without a usable reply,
+    // no refusal/moderation/quota) as a failure so the retry banner shows.
+    error: errorFromApiMessage(m, content, reasoning.length, artifacts.length, Boolean(research)),
   }
+}
+
+// errorFromApiMessage decides whether a reloaded message should show the red
+// "reply failed — retry" banner: an explicit error status/string, or an
+// assistant turn that finished with no content, reasoning, or artifacts and
+// wasn't a refusal/moderation/quota stop.
+function errorFromApiMessage(
+  m: ApiMessage,
+  content: string,
+  reasoningCount: number,
+  artifactCount: number,
+  hasResearch: boolean,
+): string | undefined {
+  if (m.error && m.error.trim()) return m.error.trim()
+  const refusalLike =
+    m.stop_reason === 'content_moderation' ||
+    m.stop_reason === 'content_filter' ||
+    m.stop_reason === 'refusal' ||
+    m.stop_reason === 'safety' ||
+    m.stop_reason === 'quota_exceeded'
+  const emptyAssistant =
+    m.role === 'assistant' &&
+    m.status !== 'streaming' &&
+    !content.trim() &&
+    reasoningCount === 0 &&
+    artifactCount === 0 &&
+    !hasResearch &&
+    !refusalLike
+  if (m.status === 'error' || emptyAssistant) {
+    return 'The model returned no response. Please try again.'
+  }
+  return undefined
 }
 
 function attachmentToApi(a: Attachment): ApiAttachment {
