@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { motion, useScroll, useTransform } from 'framer-motion'
+import { gsap } from 'gsap'
+import { ScrollTrigger } from 'gsap/ScrollTrigger'
+import { useGSAP } from '@gsap/react'
 import {
   ArrowRight,
   Sparkles,
@@ -26,6 +28,8 @@ import { useTheme } from '@/store/theme'
 import { useTranslation, Trans } from 'react-i18next'
 import { cn } from '@/lib/utils'
 
+gsap.registerPlugin(ScrollTrigger, useGSAP)
+
 const CAPABILITY_KEYS = [
   { icon: BookOpen, key: 'writing' },
   { icon: Telescope, key: 'research' },
@@ -39,24 +43,76 @@ const PRINCIPLE_KEYS = ['noDefaults', 'readingFirst', 'youOwnIt'] as const
 export default function Landing() {
   const navigate = useNavigate()
   const syncSystem = useTheme((s) => s.syncSystem)
-  const { scrollY } = useScroll()
-  const navOpacity = useTransform(scrollY, [0, 100], [0, 1])
-  const [showTop, setShowTop] = useState(false)
   const { t } = useTranslation(['landing', 'common', 'nav'])
   // Pull only the actions to avoid re-rendering Landing on every streaming token.
   const createConversation = useConversations((s) => s.createConversation)
   const sendMessage = useConversations((s) => s.sendMessage)
   const defaultModelId = useModels((s) => s.defaultId)
 
+  const root = useRef<HTMLDivElement>(null)
+  const topBtn = useRef<HTMLButtonElement>(null)
+
   useEffect(() => {
     syncSystem()
   }, [syncSystem])
-  useEffect(() => {
-    const onScroll = () => setShowTop(window.scrollY > 800)
-    window.addEventListener('scroll', onScroll, { passive: true })
-    onScroll()
-    return () => window.removeEventListener('scroll', onScroll)
-  }, [])
+
+  // All page motion lives here (GSAP, scoped to `root`). gsap.matchMedia gates
+  // everything behind prefers-reduced-motion: under "reduce" nothing animates
+  // and every element keeps its natural (visible) state. useGSAP reverts all
+  // tweens + ScrollTriggers on unmount.
+  useGSAP(
+    () => {
+      const btn = topBtn.current
+      if (btn) gsap.set(btn, { autoAlpha: 0 })
+
+      const mm = gsap.matchMedia()
+      mm.add('(prefers-reduced-motion: no-preference)', () => {
+        // Hero: a calm, choreographed reveal. Headline lines rise out of a mask.
+        const tl = gsap.timeline({ defaults: { ease: 'power3.out' } })
+        tl.from('.hero-badge', { y: 14, autoAlpha: 0, duration: 0.5 })
+          .from('.hero-line', { yPercent: 115, duration: 0.9, stagger: 0.12 }, '-=0.15')
+          .from('.hero-sub', { y: 16, autoAlpha: 0, duration: 0.7 }, '-=0.5')
+          .from('.hero-composer', { y: 22, autoAlpha: 0, duration: 0.7 }, '-=0.45')
+          .from('.hero-meta', { y: 10, autoAlpha: 0, duration: 0.6 }, '-=0.5')
+          .from('.hero-preview', { y: 48, autoAlpha: 0, duration: 1.0 }, '-=0.35')
+
+        // Nav backdrop fades in over the first bit of scroll.
+        gsap.fromTo('.nav-bg', { autoAlpha: 0 }, {
+          autoAlpha: 1, ease: 'none',
+          scrollTrigger: { start: 8, end: 96, scrub: true },
+        })
+
+        // Section reveals — single elements rise as they enter the viewport.
+        gsap.utils.toArray<HTMLElement>('[data-reveal]').forEach((el) => {
+          gsap.from(el, {
+            y: 30, autoAlpha: 0, duration: 0.8, ease: 'power3.out',
+            scrollTrigger: { trigger: el, start: 'top 86%', once: true },
+          })
+        })
+        // Grid reveals — children stagger in.
+        gsap.utils.toArray<HTMLElement>('[data-reveal-group]').forEach((group) => {
+          gsap.from(Array.from(group.children), {
+            y: 26, autoAlpha: 0, duration: 0.7, stagger: 0.09, ease: 'power3.out',
+            scrollTrigger: { trigger: group, start: 'top 84%', once: true },
+          })
+        })
+
+        // Depth: the soft background orbs drift at different rates on scroll.
+        gsap.to('.orb-1', { yPercent: 22, ease: 'none', scrollTrigger: { start: 'top top', end: 'max', scrub: true } })
+        gsap.to('.orb-2', { yPercent: -16, ease: 'none', scrollTrigger: { start: 'top top', end: 'max', scrub: true } })
+      })
+
+      // Scroll-to-top visibility (no React state, no window scroll listener).
+      ScrollTrigger.create({
+        start: 760,
+        end: 'max',
+        onToggle: (self) => {
+          if (btn) gsap.to(btn, { autoAlpha: self.isActive ? 1 : 0, duration: 0.25, ease: 'power2.out' })
+        },
+      })
+    },
+    { scope: root },
+  )
 
   async function handleHeroSubmit(text: string) {
     const conv = await createConversation(defaultModelId)
@@ -66,16 +122,15 @@ export default function Landing() {
   }
 
   return (
-    <div className="relative min-h-svh overflow-x-clip bg-[var(--color-bg)] text-[var(--color-fg)]">
+    <div ref={root} className="relative min-h-svh overflow-x-clip bg-[var(--color-bg)] text-[var(--color-fg)]">
       {/* Background accents */}
       <BackgroundOrnament />
 
       {/* Nav */}
       <header className="sticky top-0 z-40 backdrop-blur-[1px]">
-        <motion.div
-          style={{ opacity: navOpacity }}
+        <div
           aria-hidden
-          className="absolute inset-0 -z-10 bg-[var(--color-bg)]/85 border-b border-[var(--color-border-subtle)]"
+          className="nav-bg absolute inset-0 -z-10 bg-[var(--color-bg)]/85 border-b border-[var(--color-border-subtle)]"
         />
         <div className="mx-auto max-w-[76rem] flex items-center justify-between px-5 sm:px-8 h-[64px]">
           <Link to="/" aria-label={t('common:aria.homeLink')}>
@@ -107,56 +162,47 @@ export default function Landing() {
       {/* Hero */}
       <section className="relative pt-20 sm:pt-32 pb-20 sm:pb-28">
         <div className="mx-auto max-w-[68rem] px-5 sm:px-8">
-          <motion.div
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, ease: [0.2, 0.8, 0.2, 1] }}
-            className="text-center"
-          >
-            <Badge variant="sage" leadingIcon={<Sparkles size={11} aria-hidden />} className="mb-7">
-              {t('landing:badgeNew')}
-            </Badge>
+          <div className="text-center">
+            <div className="hero-badge inline-block">
+              <Badge variant="sage" leadingIcon={<Sparkles size={11} aria-hidden />} className="mb-7">
+                {t('landing:badgeNew')}
+              </Badge>
+            </div>
+            {/* Headline lines rise out of an overflow mask (per-line reveal). */}
             <h1 className="font-serif tracking-tight text-balance text-[2.5rem] sm:text-[3.75rem] lg:text-[4.5rem] leading-[1.04] text-[var(--color-fg)]">
-              {t('landing:hero.titleLine1')}
-              <br />
-              <span className="italic text-[var(--color-fg-muted)]">{t('landing:hero.titleLine2')}</span>
+              <span className="block overflow-hidden pb-[0.08em]">
+                <span className="hero-line block">{t('landing:hero.titleLine1')}</span>
+              </span>
+              <span className="block overflow-hidden pb-[0.08em]">
+                <span className="hero-line block italic text-[var(--color-fg-muted)]">{t('landing:hero.titleLine2')}</span>
+              </span>
             </h1>
-            <p className="mx-auto mt-7 max-w-xl text-[var(--color-fg-muted)] text-pretty text-[15px] sm:text-base leading-relaxed">
+            <p className="hero-sub mx-auto mt-7 max-w-xl text-[var(--color-fg-muted)] text-pretty text-[15px] sm:text-base leading-relaxed">
               {t('landing:hero.subtitle')}
             </p>
-          </motion.div>
+          </div>
 
-          <motion.div
-            initial={{ opacity: 0, y: 16 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.7, delay: 0.18, ease: [0.2, 0.8, 0.2, 1] }}
-            className="mx-auto mt-10 max-w-[36rem]"
-          >
+          <div className="hero-composer mx-auto mt-10 max-w-[36rem]">
             <Composer
               modelId={defaultModelId}
               onModelChange={() => { /* hero composer ignores; real switch happens in /chat */ }}
               onSubmit={(text) => void handleHeroSubmit(text)}
               placeholder={t('landing:hero.placeholder')}
             />
-            <div className="mt-3 flex items-center justify-center gap-x-5 gap-y-2 text-[12px] text-[var(--color-fg-subtle)] flex-wrap">
+            <div className="hero-meta mt-3 flex items-center justify-center gap-x-5 gap-y-2 text-[12px] text-[var(--color-fg-subtle)] flex-wrap">
               <span>{t('common:common.free')}</span>
               <span aria-hidden>·</span>
               <span>{t('common:common.noCard')}</span>
               <span aria-hidden>·</span>
               <span>{t('common:common.openAnytime')}</span>
             </div>
-          </motion.div>
+          </div>
         </div>
 
         {/* Floating product preview */}
-        <motion.div
-          initial={{ opacity: 0, y: 24 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.8, delay: 0.32, ease: [0.2, 0.8, 0.2, 1] }}
-          className="mx-auto mt-20 max-w-[60rem] px-5 sm:px-8"
-        >
+        <div className="hero-preview mx-auto mt-20 max-w-[60rem] px-5 sm:px-8 will-change-transform">
           <ProductPreview />
-        </motion.div>
+        </div>
       </section>
 
       {/* Capabilities */}
@@ -167,7 +213,7 @@ export default function Landing() {
             title={t('landing:capabilities.title')}
             body={t('landing:capabilities.body')}
           />
-          <div className="mt-14 grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="mt-14 grid grid-cols-1 md:grid-cols-3 gap-6" data-reveal-group>
             {CAPABILITY_KEYS.map((c) => (
               <div
                 key={c.key}
@@ -191,7 +237,7 @@ export default function Landing() {
       {/* How it feels */}
       <section id="how" className="py-24 sm:py-32 border-t border-[var(--color-divider)]">
         <div className="mx-auto max-w-[76rem] px-5 sm:px-8 grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-20 items-start">
-          <div>
+          <div data-reveal>
             <Badge variant="neutral">{t('landing:how.eyebrow')}</Badge>
             <h2 className="mt-5 font-serif tracking-tight text-3xl sm:text-4xl text-[var(--color-fg)] text-balance">
               {t('landing:how.title')}
@@ -217,7 +263,9 @@ export default function Landing() {
               ))}
             </ul>
           </div>
-          <PullQuote />
+          <div data-reveal>
+            <PullQuote />
+          </div>
         </div>
       </section>
 
@@ -225,7 +273,7 @@ export default function Landing() {
       <section className="py-24 sm:py-32 border-t border-[var(--color-divider)]">
         <div className="mx-auto max-w-[76rem] px-5 sm:px-8">
           <SectionHeader eyebrow={t('landing:useCases.eyebrow')} title={t('landing:useCases.title')} />
-          <div className="mt-12 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+          <div className="mt-12 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5" data-reveal-group>
             {USE_CASE_KEYS.map((key, i) => (
               <div
                 key={key}
@@ -252,7 +300,7 @@ export default function Landing() {
             title={t('landing:models.title')}
             body={t('landing:models.body')}
           />
-          <div className="mt-14 grid grid-cols-1 md:grid-cols-2 gap-5">
+          <div className="mt-14 grid grid-cols-1 md:grid-cols-2 gap-5" data-reveal-group>
             <ModelCard name="Aurelia Prose" tier={t('landing:models.tiers.standard')} body="Fast, conversational. The everyday model." accent="sage" />
             <ModelCard name="Aurelia Reason" tier={t('landing:models.tiers.pro')} body="Deliberate, structured analysis. For research and code." accent="clay" />
             <ModelCard name="Aurelia Canvas" tier={t('landing:models.tiers.pro')} body="Iterative editing of long-form writing and code." accent="sage" />
@@ -264,7 +312,7 @@ export default function Landing() {
       {/* Safety */}
       <section id="safety" className="py-24 sm:py-32 border-t border-[var(--color-divider)]">
         <div className="mx-auto max-w-[76rem] px-5 sm:px-8 grid grid-cols-1 md:grid-cols-2 gap-12 items-start">
-          <div>
+          <div data-reveal>
             <Badge variant="neutral">{t('landing:safety.eyebrow')}</Badge>
             <h2 className="mt-5 font-serif tracking-tight text-3xl sm:text-4xl text-[var(--color-fg)] text-balance">
               {t('landing:safety.title')}
@@ -273,7 +321,7 @@ export default function Landing() {
               {t('landing:safety.body')}
             </p>
           </div>
-          <ul className="space-y-3">
+          <ul className="space-y-3" data-reveal-group>
             <SafetyRow icon={Lock} title={t('landing:safety.rows.noTraining.title')} body={t('landing:safety.rows.noTraining.body')} />
             <SafetyRow icon={Cloud} title={t('landing:safety.rows.export.title')} body={t('landing:safety.rows.export.body')} />
             <SafetyRow icon={Sparkles} title={t('landing:safety.rows.memory.title')} body={t('landing:safety.rows.memory.body')} />
@@ -283,7 +331,7 @@ export default function Landing() {
 
       {/* CTA */}
       <section className="py-28 sm:py-36">
-        <div className="mx-auto max-w-[60rem] px-5 sm:px-8 text-center">
+        <div className="mx-auto max-w-[60rem] px-5 sm:px-8 text-center" data-reveal>
           <h2 className="font-serif tracking-tight text-balance text-3xl sm:text-5xl leading-[1.05] text-[var(--color-fg)]">
             {t('landing:cta.title')}
           </h2>
@@ -336,36 +384,32 @@ export default function Landing() {
             ]}
           />
         </div>
-        <div className="mx-auto max-w-[76rem] px-5 sm:px-8 mt-10 flex items-center justify-between text-xs text-[var(--color-fg-subtle)]">
+        <div className="mx-auto max-w-[76rem] px-5 sm:px-8 mt-10 text-xs text-[var(--color-fg-subtle)]">
           <span>© {new Date().getFullYear()} Aurelia</span>
-          <span className="font-mono">v0.1.0</span>
         </div>
       </footer>
 
-      {/* Scroll-to-top */}
-      <motion.button
+      {/* Scroll-to-top — visibility driven by ScrollTrigger (see useGSAP). */}
+      <button
+        ref={topBtn}
         type="button"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: showTop ? 1 : 0 }}
-        transition={{ duration: 0.2 }}
         onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
         aria-label={t('common:aria.backToTop')}
         className={cn(
           'fixed bottom-6 right-6 z-30 inline-flex items-center justify-center size-10 rounded-full',
           'bg-[var(--color-fg)] text-[var(--color-fg-inverted)] shadow-[var(--shadow-lg)]',
           'hover:opacity-90 interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-          showTop ? 'pointer-events-auto' : 'pointer-events-none',
         )}
       >
         <ArrowUp size={16} aria-hidden />
-      </motion.button>
+      </button>
     </div>
   )
 }
 
 function SectionHeader({ eyebrow, title, body }: { eyebrow: string; title: string; body?: string }) {
   return (
-    <div className="max-w-2xl">
+    <div className="max-w-2xl" data-reveal>
       <Badge variant="neutral">{eyebrow}</Badge>
       <h2 className="mt-5 font-serif tracking-tight text-3xl sm:text-4xl text-[var(--color-fg)] text-balance">
         {title}
@@ -563,13 +607,13 @@ function BackgroundOrnament() {
   return (
     <div aria-hidden className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
       <div
-        className="absolute -top-40 left-1/2 -translate-x-1/2 size-[640px] rounded-full opacity-50 blur-3xl"
+        className="orb-1 absolute -top-40 left-1/2 -translate-x-1/2 size-[640px] rounded-full opacity-50 blur-3xl will-change-transform"
         style={{
           background: 'radial-gradient(closest-side, color-mix(in oklch, var(--color-accent-soft) 80%, transparent), transparent 70%)',
         }}
       />
       <div
-        className="absolute top-[420px] -left-32 size-[420px] rounded-full opacity-50 blur-3xl"
+        className="orb-2 absolute top-[420px] -left-32 size-[420px] rounded-full opacity-50 blur-3xl will-change-transform"
         style={{
           background: 'radial-gradient(closest-side, color-mix(in oklch, var(--color-secondary-soft) 60%, transparent), transparent 70%)',
         }}
