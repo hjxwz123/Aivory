@@ -623,6 +623,33 @@ func GetArtifact(ctx context.Context, db *sql.DB, id, userID string) (*Artifact,
 	return &a, nil
 }
 
+// ListImageArtifactsByConversation returns image artifacts (generated images)
+// produced anywhere in a conversation, oldest first. Used to stage generated
+// images into the sandbox so a follow-up python_execute can embed them
+// (e.g. into a PPTX). Scoped by owner.
+func ListImageArtifactsByConversation(ctx context.Context, db *sql.DB, convID, userID string) ([]Artifact, error) {
+	rows, err := db.QueryContext(ctx,
+		`SELECT a.id, a.message_id, a.filename, a.storage_path, a.mime_type, a.size_bytes, a.created_at
+		 FROM artifacts a
+		 JOIN messages m ON m.id = a.message_id
+		 JOIN conversations c ON c.id = m.conversation_id
+		 WHERE m.conversation_id=? AND c.user_id=? AND a.mime_type LIKE 'image/%'
+		 ORDER BY a.created_at ASC`, convID, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Artifact{}
+	for rows.Next() {
+		var a Artifact
+		if err := rows.Scan(&a.ID, &a.MessageID, &a.Filename, &a.StoragePath, &a.MimeType, &a.SizeBytes, &a.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
 // CreateArtifact inserts a new artifact row (called by tool wrappers when
 // they write a file to ArtifactDir).
 func CreateArtifact(ctx context.Context, db *sql.DB, a Artifact) (*Artifact, error) {

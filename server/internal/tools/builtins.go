@@ -314,7 +314,7 @@ type pythonExecuteTool struct {
 
 func (t *pythonExecuteTool) Name() string { return "python_execute" }
 func (t *pythonExecuteTool) Description() string {
-	return "Run Python in a persistent sandbox for math, data analysis, plotting, spreadsheet/CSV processing, and generating downloadable files (PDF/PPTX/DOCX/XLSX/PNG). The session and its /workspace persist across calls AND across turns in this conversation, so call it several times in a row — inspect the data first (shape/columns/head), then compute, and read again differently if the first attempt doesn't fit. User-uploaded data files (CSV/XLSX/text/PDF) are at /workspace/uploads/ (read spreadsheets with pandas.read_csv / pandas.read_excel; pandas, numpy, openpyxl are installed). Write outputs to /workspace/outputs to return them as downloadable artifacts. Stdout/stderr is returned."
+	return "Run Python in a persistent sandbox for math, data analysis, plotting, spreadsheet/CSV processing, and generating downloadable files (PDF/PPTX/DOCX/XLSX/PNG). The session and its /workspace persist across calls AND across turns in this conversation, so call it several times in a row — inspect the data first (shape/columns/head), then compute, and read again differently if the first attempt doesn't fit. ALL user-uploaded files AND any images you generated earlier are staged in /workspace/uploads/ — ALWAYS run `import os; os.listdir('/workspace/uploads')` first to see the exact filenames (there may be several; names are de-duplicated), then use them by their real paths (read spreadsheets with pandas.read_csv / pandas.read_excel; embed images with python-pptx add_picture / python-docx; pandas, numpy, openpyxl are installed). Write outputs to /workspace/outputs to return them as downloadable artifacts. Stdout/stderr is returned."
 }
 func (t *pythonExecuteTool) InputSchema() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{"code":{"type":"string"}},"required":["code"]}`)
@@ -375,6 +375,29 @@ func (t *pythonExecuteTool) Execute(ctx context.Context, input []byte, tc *llm.T
 		if tc == nil || tc.DB == nil || tc.ConvID == "" {
 			return
 		}
+		// Dedupe staged names so multiple files that share a basename (e.g. four
+		// pasted "image.png") don't overwrite each other at the same path — every
+		// upload must land distinctly so the model can use all of them.
+		seen := map[string]bool{}
+		uniqueName := func(name string) string {
+			base := filepath.Base(name)
+			if base == "" || base == "." || base == "/" {
+				base = "file"
+			}
+			if !seen[base] {
+				seen[base] = true
+				return base
+			}
+			ext := filepath.Ext(base)
+			stem := strings.TrimSuffix(base, ext)
+			for i := 2; ; i++ {
+				cand := fmt.Sprintf("%s-%d%s", stem, i, ext)
+				if !seen[cand] {
+					seen[cand] = true
+					return cand
+				}
+			}
+		}
 		if files, err := store.ListFilesByConversation(ctx, tc.DB, tc.ConvID, tc.UserID); err == nil {
 			for _, f := range files {
 				// Stage data files AND images — images so they can be embedded into
@@ -390,7 +413,21 @@ func (t *pythonExecuteTool) Execute(ctx context.Context, input []byte, tc *llm.T
 				if err != nil {
 					continue
 				}
-				_ = t.sandbox.PutFile(ctx, sid, "/workspace/uploads/"+filepath.Base(f.Filename), data)
+				_ = t.sandbox.PutFile(ctx, sid, "/workspace/uploads/"+uniqueName(f.Filename), data)
+			}
+		}
+		// Stage generated images (image_generate artifacts) so a follow-up turn
+		// can build a deck/doc with them — they live as artifacts, not uploads.
+		if arts, err := store.ListImageArtifactsByConversation(ctx, tc.DB, tc.ConvID, tc.UserID); err == nil {
+			for _, a := range arts {
+				if a.SizeBytes > 20*1024*1024 {
+					continue
+				}
+				data, err := os.ReadFile(a.StoragePath)
+				if err != nil {
+					continue
+				}
+				_ = t.sandbox.PutFile(ctx, sid, "/workspace/uploads/"+uniqueName(a.Filename), data)
 			}
 		}
 		// Stage skill assets too (§4.17) so use_skill can reference scripts/data
