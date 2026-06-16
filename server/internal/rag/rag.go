@@ -1187,19 +1187,43 @@ const contextBudgetTokens = 32_000
 func (s *Service) RouteAndRetrieve(ctx context.Context, userID, convID string, kbIDs []string, userText string, history []string, topK int) ([]Snippet, RouteDecision, error) {
 	decision := RouteDecision{Strategy: "retrieve", Queries: []string{userText}}
 
-	// Step 0: size check — small corpora skip routing entirely.
+	// Step 0: size check + pinned docs. "Pinned" = in-scope child chunks with no
+	// embedding — small conversation docs we intentionally did NOT vectorise (see
+	// runPipeline). They can't be semantically retrieved, so they are ALWAYS
+	// injected in full whenever we don't take the whole-scope full-text path.
 	scope, _ := store.ListChunksInScope(ctx, s.db, kbIDs, convID)
-	if len(scope) > 0 {
-		estTokens := 0
-		for _, c := range scope {
-			if c.ChunkType != "parent" { // parents duplicate child text
-				estTokens += len(c.Content) / 4
-			}
+	pinned := []store.Chunk{}
+	embeddedTokens := 0
+	pinnedTokens := 0
+	for _, c := range scope {
+		if c.ChunkType == "parent" {
+			continue // parents duplicate child text
 		}
-		if estTokens <= fullTextThresholdTokens {
-			decision.Strategy = "full_text"
-			return fullTextSnippets(scope, contextBudgetTokens), decision, nil
+		if len(c.Embedding) == 0 {
+			pinned = append(pinned, c)
+			pinnedTokens += len(c.Content) / 4
+		} else {
+			embeddedTokens += len(c.Content) / 4
 		}
+	}
+	// Whole scope fits (or nothing is embedded) → inject everything in full.
+	if len(scope) > 0 && (embeddedTokens == 0 || pinnedTokens+embeddedTokens <= fullTextThresholdTokens) {
+		decision.Strategy = "full_text"
+		return fullTextSnippets(scope, contextBudgetTokens), decision, nil
+	}
+	// Otherwise we retrieve over the embedded chunks, but ALWAYS prepend the
+	// pinned (unembedded) docs in full so they're never dropped from a large,
+	// mixed-size conversation. Capped at half the budget to leave room for hits.
+	pinnedSnips := fullTextSnippets(pinned, contextBudgetTokens/2)
+	withPinned := func(out []Snippet) []Snippet {
+		if len(pinnedSnips) == 0 {
+			return out
+		}
+		merged := append(append([]Snippet{}, pinnedSnips...), out...)
+		for i := range merged {
+			merged[i].Index = i + 1
+		}
+		return merged
 	}
 
 	// Build a list of (filename, ~first sentence) so the router can resolve
@@ -1208,7 +1232,7 @@ func (s *Service) RouteAndRetrieve(ctx context.Context, userID, convID string, k
 
 	if s.task == nil {
 		out, err := s.Retrieve(ctx, userID, convID, kbIDs, userText, topK)
-		return out, decision, err
+		return withPinned(out), decision, err
 	}
 	prompt := buildRouterPrompt(userText, history, docHints)
 	var d RouteDecision
@@ -1219,7 +1243,9 @@ func (s *Service) RouteAndRetrieve(ctx context.Context, userID, convID string, k
 	}
 	switch decision.Strategy {
 	case "none":
-		return nil, decision, nil
+		// Even when the router sees no need to retrieve, the pinned (small,
+		// always-on) docs are still injected — the user uploaded them on purpose.
+		return withPinned(nil), decision, nil
 	case "full_doc":
 		// Whole-document question. Within budget → inject everything in document
 		// order; over budget → map-reduce summarisation via the task model.
@@ -1230,6 +1256,7 @@ func (s *Service) RouteAndRetrieve(ctx context.Context, userID, convID string, k
 			}
 		}
 		if estTokens <= contextBudgetTokens {
+			// fullTextSnippets(scope) already includes the pinned chunks.
 			return fullTextSnippets(scope, contextBudgetTokens), decision, nil
 		}
 		out, err := s.mapReduceSummarise(ctx, userID, convID, scope, userText)
@@ -1237,7 +1264,7 @@ func (s *Service) RouteAndRetrieve(ctx context.Context, userID, convID string, k
 			// Fall back to wide retrieval if summarisation fails.
 			out, err = s.Retrieve(ctx, userID, convID, kbIDs, userText, topK*2)
 		}
-		return out, decision, err
+		return withPinned(out), decision, err
 	default:
 		// retrieve: run each rewritten query, merge and dedupe.
 		seen := map[string]struct{}{}
@@ -1265,7 +1292,7 @@ func (s *Service) RouteAndRetrieve(ctx context.Context, userID, convID string, k
 				break
 			}
 		}
-		return merged, decision, nil
+		return withPinned(merged), decision, nil
 	}
 }
 
