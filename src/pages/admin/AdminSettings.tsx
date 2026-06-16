@@ -25,6 +25,7 @@ const OWNED_KEYS = [
   'default_model_id',
   'task_model_id',
   'keep_recent_rounds',
+  'compaction_token_trigger',
   'summary_max_tokens',
   'compaction_enabled',
   'memory_enabled',
@@ -152,6 +153,20 @@ export default function AdminSettings() {
                 type="number"
                 value={String(readNumber('keep_recent_rounds', 6))}
                 onChange={(e) => setDraft({ ...draft, keep_recent_rounds: Number(e.target.value) })}
+              />
+            </Field>
+            <Field
+              label={t('admin:settings.fields.tokenTrigger', { defaultValue: 'Compact above (tokens)' })}
+              htmlFor="tokentrigger"
+              hint={t('admin:settings.fields.tokenTriggerHint', {
+                defaultValue: 'Compact older turns once the whole prompt (system + tools + history) exceeds this many tokens. 0 disables the token trigger.',
+              })}
+            >
+              <Input
+                id="tokentrigger"
+                type="number"
+                value={String(readNumber('compaction_token_trigger', 32000))}
+                onChange={(e) => setDraft({ ...draft, compaction_token_trigger: Number(e.target.value) })}
               />
             </Field>
             <Field label={t('admin:settings.fields.sumTokens')} htmlFor="sumtokens">

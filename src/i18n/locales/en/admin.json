@@ -328,6 +328,8 @@
       "taskModel": "Task model (internal LLM calls)",
       "taskModelHint": "Used for titles, query routing, compression summaries, memory triage.",
       "keep": "Keep recent rounds",
+      "tokenTrigger": "Compact above (tokens)",
+      "tokenTriggerHint": "Compact older turns once the whole prompt (system + tools + history) exceeds this many tokens. 0 disables the token trigger.",
       "sumTokens": "Summary token budget",
       "compactionEnabled": "Compaction enabled",
       "memoryEnabled": "Memories enabled",

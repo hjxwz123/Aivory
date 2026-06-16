@@ -328,6 +328,8 @@
       "taskModel": "任务模型(内部 LLM 调用)",
       "taskModelHint": "用于标题、查询路由、压缩摘要、记忆抽取。",
       "keep": "保留最近轮数",
+      "tokenTrigger": "超过多少 token 时压缩",
+      "tokenTriggerHint": "当整个提示（系统提示 + 工具 + 历史）的 token 超过该值时，压缩较早的对话。0 表示关闭 token 触发。",
       "sumTokens": "摘要 token 预算",
       "compactionEnabled": "启用压缩",
       "memoryEnabled": "启用记忆",

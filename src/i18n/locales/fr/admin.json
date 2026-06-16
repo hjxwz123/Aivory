@@ -328,6 +328,8 @@
       "taskModel": "Modèle de tâches (appels LLM internes)",
       "taskModelHint": "Utilisé pour les titres, le routage de requêtes, les résumés de compression, le triage de mémoire.",
       "keep": "Conserver les tours récents",
+      "tokenTrigger": "Compacter au-delà de (tokens)",
+      "tokenTriggerHint": "Compacte les tours plus anciens dès que l'invite entière (système + outils + historique) dépasse ce nombre de tokens. 0 désactive le déclencheur par tokens.",
       "sumTokens": "Budget de tokens pour le résumé",
       "compactionEnabled": "Compactage activé",
       "memoryEnabled": "Mémoires activées",
