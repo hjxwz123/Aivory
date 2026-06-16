@@ -28,7 +28,14 @@ export function InlineThreadPanel() {
 
   const loadOne = useConversations((s) => s.loadOne)
   useEffect(() => {
-    if (open && childId) void loadOne(childId)
+    if (!open || !childId) return
+    // Only fetch when we don't already have the thread locally (i.e. opening an
+    // EXISTING thread from a marker). A freshly-created thread is populated by
+    // its live stream — refetching would race it and orphan the streaming reply
+    // (the stuck "thinking…" bubble).
+    const conv = useConversations.getState().conversations.find((c) => c.id === childId)
+    if (conv && (conv.messages.length > 0 || conv.messages.some((m) => m.streaming))) return
+    void loadOne(childId)
   }, [open, childId, loadOne])
 
   // Leaving the conversation closes the drawer.
