@@ -45,5 +45,7 @@
       "generic": "このコードを引き換えられませんでした。"
     }
   },
-  "buyCta": "購入"
+  "buyCta": "購入",
+  "recommended": "おすすめ",
+  "cycleFee": "現在の周期料金"
 }
