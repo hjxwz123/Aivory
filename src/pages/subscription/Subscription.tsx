@@ -337,7 +337,8 @@ function CreditCards({
   t: (k: string, o?: Record<string, unknown>) => string
 }) {
   const timed = credits.timed
-  const showTimed = timed && (timed.allowance > 0 || timed.period_seconds > 0)
+  // Timed credits only make sense with both an allowance and a refresh period.
+  const showTimed = timed && timed.allowance > 0 && timed.period_seconds > 0
   const pct = timed && timed.allowance > 0 ? Math.max(0, Math.min(100, (timed.remaining / timed.allowance) * 100)) : 0
   const fmtCredits = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1))
   return (

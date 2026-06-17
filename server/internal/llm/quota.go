@@ -89,10 +89,15 @@ func (o *Orchestrator) creditDecision(ctx context.Context, userID, groupID strin
 		// Credits not configured for this group → nothing to charge against.
 		return o.quotaMessage(), false, false
 	}
-	start, ttl := creditWindow(g.CreditPeriodSeconds)
-	timedRemaining := g.CreditAllowance - o.readTimedCreditsUsed(ctx, userID, start, ttl)
-	if timedRemaining < 0 {
-		timedRemaining = 0
+	// Timed credits only apply when an explicit refresh period is set; otherwise
+	// the group is permanent-credits-only.
+	timedRemaining := 0.0
+	if g.CreditPeriodSeconds > 0 && g.CreditAllowance > 0 {
+		start, ttl := creditWindow(g.CreditPeriodSeconds)
+		timedRemaining = g.CreditAllowance - o.readTimedCreditsUsed(ctx, userID, start, ttl)
+		if timedRemaining < 0 {
+			timedRemaining = 0
+		}
 	}
 	perm, _ := store.PermanentCredits(ctx, o.db, userID)
 	if timedRemaining+perm > 0 {
@@ -114,10 +119,17 @@ func (o *Orchestrator) chargeTurnCredits(ctx context.Context, userID string, usd
 		return 0
 	}
 	credits := usdCost * g.CreditsPerUSD
-	start, ttl := creditWindow(g.CreditPeriodSeconds)
-	remaining := g.CreditAllowance - o.readTimedCreditsUsed(ctx, userID, start, ttl)
-	if remaining < 0 {
-		remaining = 0
+	// Timed credits only exist with an explicit refresh period; otherwise charge
+	// entirely against the permanent balance.
+	var remaining float64
+	var start int64
+	var ttl time.Duration
+	if g.CreditPeriodSeconds > 0 && g.CreditAllowance > 0 {
+		start, ttl = creditWindow(g.CreditPeriodSeconds)
+		remaining = g.CreditAllowance - o.readTimedCreditsUsed(ctx, userID, start, ttl)
+		if remaining < 0 {
+			remaining = 0
+		}
 	}
 	fromTimed := credits
 	if fromTimed > remaining {
