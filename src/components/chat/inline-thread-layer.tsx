@@ -120,7 +120,10 @@ export function InlineThreadLayer({ conversationId, scrollRef }: InlineThreadLay
       const sel = window.getSelection()
       const text = sel?.toString().trim() ?? ''
       if (!sel || sel.isCollapsed || !text) {
-        if (!asking) dismiss()
+        // Click outside our popover with no active selection → dismiss, even when
+        // the question box is open (clicks INSIDE already returned above). This is
+        // the "click outside to close" behaviour.
+        dismiss()
         return
       }
       const range = sel.getRangeAt(0)
@@ -156,7 +159,7 @@ export function InlineThreadLayer({ conversationId, scrollRef }: InlineThreadLay
 
     document.addEventListener('mouseup', onMouseUp)
     return () => document.removeEventListener('mouseup', onMouseUp)
-  }, [asking, dismiss, openThread])
+  }, [dismiss, openThread])
 
   // Hide the floating affordance on scroll (its anchor rect goes stale).
   useEffect(() => {

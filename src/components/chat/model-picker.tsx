@@ -68,7 +68,13 @@ export function ModelPicker({ value, onChange, className }: ModelPickerProps) {
         // matter how many models exist or where the trigger sits (e.g. the
         // vertically-centred composer on the welcome screen).
         collisionPadding={12}
-        className="w-[320px] max-h-[var(--radix-popper-available-height)] overflow-[hidden_auto]"
+        className="w-[320px] max-h-[var(--radix-popper-available-height)]"
+        // The shared menu base class sets `overflow:hidden`; an inline longhand
+        // reliably wins over it (inline > class) so the list actually SCROLLS when
+        // it's taller than the available height instead of clipping models off the
+        // bottom. (A className override is fragile here — tailwind-merge / source
+        // order can leave the base `overflow-hidden` in play.)
+        style={{ overflowX: 'hidden', overflowY: 'auto' }}
       >
         <DropdownMenuLabel>{t('modelPicker.section')}</DropdownMenuLabel>
         {shownTags.length > 0 && (
