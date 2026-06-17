@@ -7,6 +7,7 @@
   "allPlans": "Tous les groupes",
   "planCount": "{{count}} forfaits",
   "credits": {
+    "sectionTitle": "Solde de crédits",
     "timedTitle": "Crédits temporaires",
     "permanentTitle": "Crédits permanents",
     "permanentHint": "Les crédits achetés n’expirent jamais et sont utilisés une fois vos crédits temporaires épuisés.",

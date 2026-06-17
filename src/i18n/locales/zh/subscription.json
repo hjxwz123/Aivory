@@ -7,6 +7,7 @@
   "allPlans": "全部用户组",
   "planCount": "{{count}} 个套餐",
   "credits": {
+    "sectionTitle": "积分余额",
     "timedTitle": "限时积分",
     "permanentTitle": "永久积分",
     "permanentHint": "购买的积分永不过期，会在限时积分用完后才扣除。",

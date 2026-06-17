@@ -7,6 +7,7 @@
   "allPlans": "全部使用者組",
   "planCount": "{{count}} 個方案",
   "credits": {
+    "sectionTitle": "積分餘額",
     "timedTitle": "限時積分",
     "permanentTitle": "永久積分",
     "permanentHint": "購買的積分永不過期，會在限時積分用完後才扣除。",

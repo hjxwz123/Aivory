@@ -7,6 +7,7 @@
   "allPlans": "すべてのグループ",
   "planCount": "{{count}} 件のプラン",
   "credits": {
+    "sectionTitle": "クレジット残高",
     "timedTitle": "期間限定クレジット",
     "permanentTitle": "永久クレジット",
     "permanentHint": "購入したクレジットは失効せず、期間限定クレジットを使い切った後に消費されます。",
