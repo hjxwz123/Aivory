@@ -69,11 +69,15 @@ export function PuzzleCaptcha({ data, loading, onChange, onRefresh, invalid }: P
     if (!dragging) return
     setFraction(fractionFromClientX(e.clientX))
   }
-  function onPointerUp() {
+  function onPointerUp(e: React.PointerEvent) {
     if (!dragging) return
     setDragging(false)
     setDropped(true)
-    onChange(fraction)
+    // Commit the value at the release position rather than the `fraction` state,
+    // which can lag the final pointermove by a frame (stale-closure).
+    const f = fractionFromClientX(e.clientX)
+    setFraction(f)
+    onChange(f)
   }
 
   function nudge(delta: number) {
