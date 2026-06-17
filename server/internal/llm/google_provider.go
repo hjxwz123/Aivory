@@ -230,6 +230,24 @@ type geminiCall struct {
 	Args json.RawMessage
 }
 
+// geminiFunctionCallPart rebuilds a model `parts[]` entry for a functionCall so
+// it can be replayed as history. Critically it carries the part-level
+// `thoughtSignature` (a sibling of `functionCall`, NOT a field inside it) that
+// Gemini emits when thinking is enabled. That signature MUST be echoed back on
+// the functionCall part in the next request or the upstream rejects the tool
+// turn with 400 "Function call is missing a thought_signature in functionCall
+// parts." We copy it under whatever key the upstream used (REST camelCase or
+// proto snake_case) to stay robust across gateways.
+func geminiFunctionCallPart(part, fc map[string]any) map[string]any {
+	out := map[string]any{"functionCall": fc}
+	for _, k := range []string{"thoughtSignature", "thought_signature"} {
+		if v, ok := part[k]; ok {
+			out[k] = v
+		}
+	}
+	return out
+}
+
 // readGeminiStream consumes the streamGenerateContent SSE response. Each line
 // of `data:` carries one GenerateContentResponse fragment. We accumulate
 //   - visible text (parts[].text where thought!=true)
@@ -291,7 +309,7 @@ func readGeminiStream(body io.Reader, onEvent func(SseEvent)) (string, string, [
 						args = json.RawMessage("{}")
 					}
 					calls = append(calls, geminiCall{Name: name, Args: args})
-					modelParts = append(modelParts, map[string]any{"functionCall": fc})
+					modelParts = append(modelParts, geminiFunctionCallPart(prm, fc))
 					onEvent(SseEvent{Type: "tool_start", Name: name, ID: name})
 					onEvent(SseEvent{Type: "tool_input", Name: name, ID: name, PartialJson: string(args)})
 				}
@@ -335,7 +353,7 @@ func parseGeminiCandidate(parsed map[string]any) (string, []geminiCall, []map[st
 					args = json.RawMessage("{}")
 				}
 				calls = append(calls, geminiCall{Name: name, Args: args})
-				modelParts = append(modelParts, map[string]any{"functionCall": fc})
+				modelParts = append(modelParts, geminiFunctionCallPart(prm, fc))
 			}
 		}
 	}
