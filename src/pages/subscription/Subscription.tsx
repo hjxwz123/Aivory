@@ -208,7 +208,7 @@ export default function Subscription() {
           {loading ? (
             <CardsSkeleton />
           ) : (
-            <motion.div variants={container} className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <motion.div variants={container} className="mt-6 grid items-start gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {sorted.map((g) => (
                 <TierCard
                   key={g.id}
@@ -448,16 +448,16 @@ function TierCard({
         ) : null}
       </div>
 
-      {group.description ? (
-        <p className="mt-2 text-[13px] leading-relaxed text-[var(--color-fg-muted)]">{group.description}</p>
-      ) : null}
-
-      <div className="mt-5">
+      <div className="mt-3">
         <PriceTag group={group} t={t} />
       </div>
 
+      {group.description ? (
+        <p className="mt-2.5 text-[13px] leading-relaxed text-[var(--color-fg-muted)]">{group.description}</p>
+      ) : null}
+
       {bullets.length > 0 ? (
-        <ul className="mt-5 flex flex-col gap-2.5 border-t border-[var(--color-divider)] pt-5">
+        <ul className="mt-4 flex flex-col gap-2 border-t border-[var(--color-divider)] pt-4">
           {bullets.map((f, i) => (
             <li key={i} className="flex items-start gap-2.5 text-[13px] text-[var(--color-fg)]">
               <Check size={15} aria-hidden className="mt-[2px] shrink-0 text-[var(--color-secondary)]" />
@@ -467,7 +467,7 @@ function TierCard({
         </ul>
       ) : null}
 
-      <div className="mt-7 grow flex items-end">
+      <div className="mt-5">
         {isCurrent ? (
           <Button variant="secondary" disabled className="w-full">
             {t('subscription:youreOnThis')}
@@ -500,7 +500,7 @@ function PriceTag({ group, t, size = 'md' }: { group: ApiUserGroup; t: TFn; size
     )
   }
   return (
-    <div className="flex items-baseline gap-2.5 sm:justify-end">
+    <div className={cn('flex items-baseline gap-2.5', size === 'lg' && 'sm:justify-end')}>
       <span className={cn('font-serif tracking-[-0.02em] leading-none tabular-nums text-[var(--color-fg)]', numCls)}>
         <span className="align-top text-[0.5em] text-[var(--color-fg-muted)]">$</span>
         {group.price_usd}
