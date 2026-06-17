@@ -45,5 +45,7 @@
       "generic": "兑换失败，请稍后再试。"
     }
   },
-  "buyCta": "购买"
+  "buyCta": "购买",
+  "recommended": "推荐",
+  "cycleFee": "当前周期费用"
 }

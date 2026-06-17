@@ -45,5 +45,7 @@
       "generic": "Impossible d’utiliser ce code."
     }
   },
-  "buyCta": "Acheter"
+  "buyCta": "Acheter",
+  "recommended": "Recommandé",
+  "cycleFee": "Coût du cycle actuel"
 }

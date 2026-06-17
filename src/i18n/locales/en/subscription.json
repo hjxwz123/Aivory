@@ -45,5 +45,7 @@
       "generic": "Couldn't redeem this code."
     }
   },
-  "buyCta": "Purchase"
+  "buyCta": "Purchase",
+  "recommended": "Recommend",
+  "cycleFee": "Current cycle fee"
 }

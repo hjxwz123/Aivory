@@ -1,14 +1,14 @@
 /**
  * Subscription — the member-facing view of the user-group tiers (§ user groups).
- * An editorial billing surface: an account panel (current plan + a prominent
- * credit-balance region), every tier as a price card, and a redeem panel that
- * flips the group via a code. Switching is admin-assigned, so most CTAs open a
- * short "how to upgrade" note (unless a global purchase link is configured).
+ * A billing dashboard (current plan + a prominent credit-balance region) over a
+ * pricing grid, plus a redeem panel that flips the group via a code. Switching is
+ * admin-assigned, so most CTAs open a "how to upgrade" note (unless a global
+ * purchase link is configured).
  */
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { motion, useReducedMotion, type Variants } from 'framer-motion'
-import { Check, Sparkles, Ticket, Coins, Wallet, Plus, RefreshCw, ArrowUpRight } from 'lucide-react'
+import { Check, Sparkles, Ticket, Clock, Wallet, Plus, RefreshCw, ArrowUpRight } from 'lucide-react'
 import { groupsApi, redeemApi, authApi, ApiError } from '@/api'
 import type { ApiUserGroup, ApiCredits } from '@/api/types'
 import { useAuth } from '@/store/auth'
@@ -42,7 +42,6 @@ export default function Subscription() {
   const [upgrade, setUpgrade] = useState<ApiUserGroup | null>(null)
   const [redeemCode, setRedeemCode] = useState('')
   const [redeeming, setRedeeming] = useState(false)
-  // Celebratory modal shown after a successful redemption (§ redeem codes).
   const [redeemSuccess, setRedeemSuccess] = useState<{ group: string; date: string } | null>(null)
 
   useEffect(() => {
@@ -52,7 +51,6 @@ export default function Subscription() {
       .then((gs) => active && setGroups(gs))
       .catch((e) => active && toast.error(e instanceof ApiError ? e.message : t('subscription:loadFailed')))
       .finally(() => active && setLoading(false))
-    // Credits ride on top of the tier list — a failure must never block the view.
     authApi
       .credits()
       .then((c) => active && setCredits(c))
@@ -68,15 +66,17 @@ export default function Subscription() {
     [groups],
   )
   const current = sorted.find((g) => g.id === currentId)
-  // Membership window (set by redeem codes). 0 = permanent or default tier.
+  // The flagship CTA: the priciest paid tier the viewer isn't already on. Matches
+  // the "recommend the next tier up" convention without a per-group data flag.
+  const recommendedId = useMemo(() => {
+    const paid = sorted.filter((g) => !g.is_default && g.id !== currentId && (g.price_usd > 0 || g.price_cny > 0))
+    if (paid.length === 0) return null
+    return paid.reduce((a, b) => (b.price_usd > a.price_usd ? b : a)).id
+  }, [sorted, currentId])
+
   const expiresAt = user?.group_expires_at ?? 0
   const expiresLabel = expiresAt > 0 ? t('subscription:expiresOn', { date: formatAbsoluteDate(expiresAt * 1000) }) : null
 
-  /**
-   * Maps the backend's `error` codes to a user-facing toast. The backend uses
-   * sentinel strings (code_invalid / code_used / …) so the frontend can pick the
-   * right translation without parsing free-form messages.
-   */
   function redeemErrorMessage(e: unknown): string {
     if (e instanceof ApiError) {
       switch (e.message) {
@@ -141,7 +141,7 @@ export default function Subscription() {
           animate="show"
           className="mx-auto w-full max-w-[var(--layout-content-max-w)] px-5 sm:px-8 py-10 sm:py-12 pb-28"
         >
-          {/* ── Account panel: current plan + credit balance ───────────────── */}
+          {/* ── Dashboard: current plan + credit balance ───────────────────── */}
           {loading ? (
             <AccountSkeleton />
           ) : showAccount ? (
@@ -150,7 +150,7 @@ export default function Subscription() {
               className="overflow-hidden rounded-[18px] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-sm)]"
             >
               {current ? (
-                <div className="flex flex-col gap-6 p-7 sm:flex-row sm:items-end sm:justify-between sm:p-9">
+                <div className="flex flex-col gap-5 p-7 sm:flex-row sm:items-start sm:justify-between sm:p-9">
                   <div className="min-w-0">
                     <span className="inline-flex items-center gap-2 text-[12.5px] font-medium text-[var(--color-fg-muted)]">
                       <span className="size-1.5 rounded-full bg-[var(--color-secondary)]" aria-hidden />
@@ -177,45 +177,49 @@ export default function Subscription() {
                       </p>
                     ) : null}
                   </div>
-                  <div className="shrink-0 sm:text-right">
-                    <PriceTag group={current} t={t} size="lg" />
-                  </div>
+                  {!current.is_default && (current.price_usd > 0 || current.price_cny > 0) ? (
+                    <div className="shrink-0 sm:text-right">
+                      <PriceTag group={current} t={t} size="lg" />
+                      <span className="mt-1 block text-[11.5px] text-[var(--color-fg-subtle)]">
+                        {t('subscription:cycleFee', { defaultValue: 'Current cycle fee' })}
+                      </span>
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
 
-              {/* Credit balance — its own recessed region, independent of plan. */}
-              {creditsOn && credits ? (
-                <Balance credits={credits} hasPlanHeader={Boolean(current)} t={t} />
-              ) : null}
+              {creditsOn && credits ? <Balance credits={credits} hasPlanHeader={Boolean(current)} t={t} /> : null}
             </motion.section>
           ) : null}
 
           {/* ── All plans ──────────────────────────────────────────────────── */}
-          <motion.div variants={item} className="mt-16 flex items-baseline justify-between gap-4">
-            <h2 className="font-serif text-[1.625rem] tracking-[-0.015em] text-[var(--color-fg)]">
-              {t('subscription:allPlans')}
-            </h2>
+          <motion.div variants={item} className="mt-16 flex items-end justify-between gap-4">
+            <div className="min-w-0">
+              <h2 className="font-serif text-[1.625rem] tracking-[-0.015em] text-[var(--color-fg)]">
+                {t('subscription:allPlans')}
+              </h2>
+              <p className="mt-1.5 max-w-[60ch] text-[14px] leading-relaxed text-[var(--color-fg-muted)]">
+                {t('subscription:subtitle')}
+              </p>
+            </div>
             {sorted.length > 0 ? (
-              <span className="text-[12.5px] tabular-nums text-[var(--color-fg-subtle)]">
+              <span className="hidden shrink-0 text-[12.5px] tabular-nums text-[var(--color-fg-subtle)] sm:inline">
                 {t('subscription:planCount', { count: sorted.length, defaultValue: `${sorted.length} plans` })}
               </span>
             ) : null}
           </motion.div>
-          <motion.p variants={item} className="mt-1.5 max-w-[60ch] text-[14px] leading-relaxed text-[var(--color-fg-muted)]">
-            {t('subscription:subtitle')}
-          </motion.p>
 
           {loading ? (
             <CardsSkeleton />
           ) : (
-            <motion.div variants={container} className="mt-6 grid items-start gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <motion.div variants={container} className="mt-6 grid items-stretch gap-5 sm:grid-cols-2 lg:grid-cols-3">
               {sorted.map((g) => (
                 <TierCard
                   key={g.id}
                   group={g}
                   isCurrent={g.id === currentId}
+                  isRecommended={g.id === recommendedId}
                   variants={item}
-                  hoverY={reduce ? 0 : -4}
                   groupBuyUrl={credits?.group_buy_url}
                   onUpgrade={() => setUpgrade(g)}
                   t={t}
@@ -310,48 +314,43 @@ export default function Subscription() {
   )
 }
 
-/**
- * Balance — the prominent credit-balance region. A recessed panel with the timed
- * pool (large remaining + usage meter + minute-precise refresh) and the permanent
- * pool (balance + top-up), separated by a divider. Renders whenever credits are
- * enabled, independent of whether the current plan resolved.
- */
+/** Credit-balance region: timed meter + permanent balance, separated by a divider. */
 function Balance({ credits, hasPlanHeader, t }: { credits: ApiCredits; hasPlanHeader: boolean; t: TFn }) {
   const timed = credits.timed
   const showTimed = Boolean(timed && timed.allowance > 0 && timed.period_seconds > 0)
   const pct = timed && timed.allowance > 0 ? Math.max(0, Math.min(100, (timed.remaining / timed.allowance) * 100)) : 0
   return (
-    <div className={cn('bg-[var(--color-bg-muted)] p-7 sm:p-9', hasPlanHeader && 'border-t border-[var(--color-divider)]')}>
+    <div
+      className={cn(
+        'bg-[var(--color-bg-muted)] p-7 sm:p-9',
+        hasPlanHeader && 'border-t border-[var(--color-divider)]',
+      )}
+    >
       <span className="inline-flex items-center gap-2 text-[13px] font-medium text-[var(--color-fg-muted)]">
         <span className="size-1.5 rounded-full bg-[var(--color-accent)]" aria-hidden />
         {t('subscription:credits.sectionTitle', { defaultValue: 'Credit balance' })}
       </span>
 
-      <div
-        className={cn(
-          'mt-5 grid gap-7',
-          showTimed ? 'sm:grid-cols-2 sm:gap-10' : 'sm:grid-cols-1',
-        )}
-      >
+      <div className={cn('mt-5 grid gap-8', showTimed ? 'sm:grid-cols-2 sm:gap-12' : 'sm:grid-cols-1')}>
         {/* Timed pool */}
         {showTimed && timed ? (
           <div>
             <div className="flex items-center justify-between gap-2">
-              <span className="inline-flex items-center gap-1.5 text-[13px] font-medium text-[var(--color-fg-muted)]">
-                <Coins size={15} aria-hidden className="text-[var(--color-accent)]" />
+              <span className="inline-flex items-center gap-1.5 text-[13px] font-medium text-[var(--color-accent)]">
+                <Clock size={15} aria-hidden />
                 {t('subscription:credits.timedTitle')}
               </span>
-              <span className="text-[12px] tabular-nums text-[var(--color-fg-subtle)]">{Math.round(pct)}%</span>
+              <span className="text-[12px] font-semibold tabular-nums text-[var(--color-accent)]">{Math.round(pct)}%</span>
             </div>
-            <div className="mt-3 flex items-baseline gap-2">
+            <div className="mt-3 flex items-baseline gap-1.5">
               <span className="font-serif text-[2.75rem] leading-none tabular-nums tracking-[-0.02em] text-[var(--color-fg)]">
                 {fmtCredits(timed.remaining)}
               </span>
-              <span className="text-[14px] tabular-nums text-[var(--color-fg-subtle)]">
+              <span className="text-[16px] tabular-nums text-[var(--color-fg-subtle)]">
                 / {fmtCredits(timed.allowance)}
               </span>
             </div>
-            <div className="mt-4 h-2.5 w-full overflow-hidden rounded-full bg-[var(--color-surface-sunken)]">
+            <div className="mt-3.5 h-1.5 w-full overflow-hidden rounded-full bg-[var(--color-accent-soft)]">
               <div
                 className="h-full rounded-full bg-[var(--color-accent)] transition-[width] duration-700 ease-[var(--ease-out)]"
                 style={{ width: `${pct}%` }}
@@ -367,31 +366,27 @@ function Balance({ credits, hasPlanHeader, t }: { credits: ApiCredits; hasPlanHe
         ) : null}
 
         {/* Permanent pool */}
-        <div className={cn(showTimed && 'sm:border-l sm:border-[var(--color-divider)] sm:pl-10')}>
-          <span className="inline-flex items-center gap-1.5 text-[13px] font-medium text-[var(--color-fg-muted)]">
-            <Wallet size={15} aria-hidden className="text-[var(--color-secondary)]" />
+        <div className={cn('relative', showTimed && 'sm:border-l sm:border-[var(--color-divider)] sm:pl-12')}>
+          <span className="inline-flex items-center gap-1.5 text-[13px] font-medium text-[var(--color-secondary)]">
+            <Wallet size={15} aria-hidden />
             {t('subscription:credits.permanentTitle')}
           </span>
           <div className="mt-3 font-serif text-[2.75rem] leading-none tabular-nums tracking-[-0.02em] text-[var(--color-fg)]">
             {fmtCredits(credits.permanent)}
           </div>
-          <p className="mt-2 max-w-[34ch] text-[12.5px] leading-snug text-[var(--color-fg-subtle)]">
+          <p className="mt-2.5 max-w-[34ch] text-[13px] leading-relaxed text-[var(--color-fg-muted)]">
             {t('subscription:credits.permanentHint')}
           </p>
           {credits.buy_url ? (
-            <Button
-              asChild
-              size="sm"
-              variant="secondary"
-              leadingIcon={<Plus size={14} aria-hidden />}
-              className="mt-4"
-            >
+            <Button asChild size="sm" variant="secondary" leadingIcon={<Plus size={14} aria-hidden />} className="mt-4">
               <a href={safeHref(credits.buy_url)} target="_blank" rel="noreferrer noopener">
                 {t('subscription:credits.topUp')}
               </a>
             </Button>
           ) : (
-            <p className="mt-4 text-[12px] text-[var(--color-fg-subtle)]">{t('subscription:credits.topUpUnavailable')}</p>
+            <span className="mt-4 inline-block rounded-[8px] bg-[var(--color-surface-sunken)] px-3 py-1.5 text-[12px] text-[var(--color-fg-subtle)]">
+              {t('subscription:credits.topUpUnavailable')}
+            </span>
           )}
         </div>
       </div>
@@ -399,75 +394,86 @@ function Balance({ credits, hasPlanHeader, t }: { credits: ApiCredits; hasPlanHe
   )
 }
 
-/** One tier in the plan grid. The current tier reads as selected; others lift on hover. */
+/**
+ * One tier in the pricing grid. Cards are equal height (CTA pinned to the bottom);
+ * the recommended tier is raised with an accent border + ribbon, the current tier
+ * is recessed and its CTA disabled.
+ */
 function TierCard({
   group,
   isCurrent,
+  isRecommended,
   variants,
-  hoverY,
   groupBuyUrl,
   onUpgrade,
   t,
 }: {
   group: ApiUserGroup
   isCurrent: boolean
+  isRecommended: boolean
   variants: Variants
-  hoverY: number
   groupBuyUrl?: string
   onUpgrade: () => void
   t: TFn
 }) {
-  // Reserved functional flags (e.g. 'research') are capabilities, not bullets.
   const bullets = group.features.filter((f) => f !== 'research')
   return (
     <motion.article
       variants={variants}
-      whileHover={isCurrent ? undefined : { y: hoverY }}
-      transition={{ duration: 0.2, ease: EASE }}
       className={cn(
-        'relative flex flex-col rounded-[14px] border bg-[var(--color-surface)] p-6',
-        'transition-[border-color,box-shadow] duration-200',
-        isCurrent
-          ? 'border-[var(--color-accent)] shadow-[var(--shadow-md)]'
-          : 'border-[var(--color-border)] hover:border-[var(--color-border-strong)] hover:shadow-[var(--shadow-md)]',
+        'relative flex flex-col rounded-[16px] p-7 transition-[border-color,box-shadow] duration-200',
+        isRecommended
+          ? 'border-2 border-[var(--color-accent)] bg-[var(--color-surface)] shadow-[var(--shadow-lg)] lg:-translate-y-3'
+          : isCurrent
+            ? 'border border-[var(--color-border)] bg-[var(--color-bg-muted)]'
+            : 'border border-[var(--color-border)] bg-[var(--color-surface)] hover:border-[var(--color-border-strong)] hover:shadow-[var(--shadow-md)]',
       )}
     >
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <h3 className="font-serif text-[1.25rem] tracking-[-0.01em] text-[var(--color-fg)]">{group.name}</h3>
-          {!isCurrent && group.is_default ? (
-            <Badge size="xs" variant="neutral">
-              {t('subscription:free')}
-            </Badge>
-          ) : null}
-        </div>
+      {isRecommended ? (
+        <span className="absolute right-7 top-0 -translate-y-1/2 rounded-full bg-[var(--color-accent)] px-3 py-1 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-[var(--color-accent-fg)] shadow-[var(--shadow-sm)]">
+          {t('subscription:recommended', { defaultValue: 'Recommend' })}
+        </span>
+      ) : null}
+
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="font-serif text-[1.4rem] tracking-[-0.01em] text-[var(--color-fg)]">{group.name}</h3>
         {isCurrent ? (
-          <Badge size="xs" variant="accent">
+          <Badge size="sm" variant="accent">
             {t('subscription:current')}
+          </Badge>
+        ) : group.is_default ? (
+          <Badge size="sm" variant="neutral">
+            {t('subscription:free')}
           </Badge>
         ) : null}
       </div>
+
+      <p className="mt-2 min-h-[2.5rem] text-[13px] leading-relaxed text-[var(--color-fg-muted)]">
+        {group.description || ' '}
+      </p>
 
       <div className="mt-3">
         <PriceTag group={group} t={t} />
       </div>
 
-      {group.description ? (
-        <p className="mt-2.5 text-[13px] leading-relaxed text-[var(--color-fg-muted)]">{group.description}</p>
-      ) : null}
+      <hr className="mt-6 border-[var(--color-divider)]" />
 
       {bullets.length > 0 ? (
-        <ul className="mt-4 flex flex-col gap-2 border-t border-[var(--color-divider)] pt-4">
+        <ul className="mt-6 flex flex-col gap-3">
           {bullets.map((f, i) => (
             <li key={i} className="flex items-start gap-2.5 text-[13px] text-[var(--color-fg)]">
-              <Check size={15} aria-hidden className="mt-[2px] shrink-0 text-[var(--color-secondary)]" />
+              <Check
+                size={16}
+                aria-hidden
+                className={cn('mt-[1px] shrink-0', isCurrent ? 'text-[var(--color-secondary)]' : 'text-[var(--color-accent)]')}
+              />
               <span className="leading-snug">{f}</span>
             </li>
           ))}
         </ul>
       ) : null}
 
-      <div className="mt-5">
+      <div className="mt-8 grow flex items-end">
         {isCurrent ? (
           <Button variant="secondary" disabled className="w-full">
             {t('subscription:youreOnThis')}
@@ -479,7 +485,7 @@ function TierCard({
             </a>
           </Button>
         ) : (
-          <Button variant={group.is_default ? 'ghost' : 'primary'} className="w-full" onClick={onUpgrade}>
+          <Button variant={group.is_default ? 'secondary' : 'primary'} className="w-full" onClick={onUpgrade}>
             {group.is_default ? t('subscription:switchCta') : t('subscription:upgradeCta')}
           </Button>
         )}
@@ -491,7 +497,7 @@ function TierCard({
 /** Price as a typographic moment: serif numerals, small superscript currency. */
 function PriceTag({ group, t, size = 'md' }: { group: ApiUserGroup; t: TFn; size?: 'md' | 'lg' }) {
   const free = group.is_default || (group.price_usd <= 0 && group.price_cny <= 0)
-  const numCls = size === 'lg' ? 'text-[2.5rem]' : 'text-[1.75rem]'
+  const numCls = size === 'lg' ? 'text-[2.5rem]' : 'text-[2rem]'
   if (free) {
     return (
       <span className={cn('font-serif tracking-[-0.02em] leading-none text-[var(--color-fg)]', numCls)}>
@@ -500,13 +506,15 @@ function PriceTag({ group, t, size = 'md' }: { group: ApiUserGroup; t: TFn; size
     )
   }
   return (
-    <div className={cn('flex items-baseline gap-2.5', size === 'lg' && 'sm:justify-end')}>
+    <div className={cn('flex items-baseline gap-2', size === 'lg' && 'sm:justify-end')}>
       <span className={cn('font-serif tracking-[-0.02em] leading-none tabular-nums text-[var(--color-fg)]', numCls)}>
         <span className="align-top text-[0.5em] text-[var(--color-fg-muted)]">$</span>
         {group.price_usd}
       </span>
       {group.price_cny > 0 ? (
-        <span className="text-[13px] tabular-nums text-[var(--color-fg-subtle)]">¥{group.price_cny}</span>
+        <span className="text-[13px] tabular-nums text-[var(--color-fg-subtle)] line-through decoration-[var(--color-border-strong)]">
+          ¥{group.price_cny}
+        </span>
       ) : null}
     </div>
   )
@@ -525,12 +533,12 @@ function AccountSkeleton() {
         <div className="mt-4 h-4 w-80 max-w-full rounded bg-[var(--color-bg-muted)]" />
       </div>
       <div className="border-t border-[var(--color-divider)] bg-[var(--color-bg-muted)] p-7 sm:p-9">
-        <div className="grid gap-10 sm:grid-cols-2">
+        <div className="grid gap-12 sm:grid-cols-2">
           {Array.from({ length: 2 }).map((_, i) => (
             <div key={i}>
               <div className="h-3.5 w-28 rounded bg-[var(--color-surface-sunken)]" />
               <div className="mt-3 h-10 w-32 rounded bg-[var(--color-surface-sunken)]" />
-              <div className="mt-4 h-2.5 w-full rounded-full bg-[var(--color-surface-sunken)]" />
+              <div className="mt-4 h-1.5 w-full rounded-full bg-[var(--color-surface-sunken)]" />
             </div>
           ))}
         </div>
@@ -541,17 +549,17 @@ function AccountSkeleton() {
 
 function CardsSkeleton() {
   return (
-    <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+    <div className="mt-6 grid items-stretch gap-5 sm:grid-cols-2 lg:grid-cols-3">
       {Array.from({ length: 3 }).map((_, i) => (
-        <div key={i} className="animate-pulse rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] p-6">
-          <div className="h-5 w-24 rounded bg-[var(--color-bg-muted)]" />
-          <div className="mt-4 h-8 w-20 rounded bg-[var(--color-bg-muted)]" />
-          <div className="mt-6 flex flex-col gap-2.5 border-t border-[var(--color-divider)] pt-5">
+        <div key={i} className="animate-pulse rounded-[16px] border border-[var(--color-border)] bg-[var(--color-surface)] p-7">
+          <div className="h-6 w-24 rounded bg-[var(--color-bg-muted)]" />
+          <div className="mt-3 h-9 w-24 rounded bg-[var(--color-bg-muted)]" />
+          <div className="mt-6 flex flex-col gap-3 border-t border-[var(--color-divider)] pt-6">
             <div className="h-3.5 w-full rounded bg-[var(--color-bg-muted)]" />
             <div className="h-3.5 w-5/6 rounded bg-[var(--color-bg-muted)]" />
             <div className="h-3.5 w-4/6 rounded bg-[var(--color-bg-muted)]" />
           </div>
-          <div className="mt-7 h-9 w-full rounded-[10px] bg-[var(--color-bg-muted)]" />
+          <div className="mt-8 h-10 w-full rounded-[10px] bg-[var(--color-bg-muted)]" />
         </div>
       ))}
     </div>

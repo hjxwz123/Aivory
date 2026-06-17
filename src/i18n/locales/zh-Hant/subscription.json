@@ -45,5 +45,7 @@
       "generic": "兌換失敗，請稍後再試。"
     }
   },
-  "buyCta": "購買"
+  "buyCta": "購買",
+  "recommended": "推薦",
+  "cycleFee": "當前週期費用"
 }
