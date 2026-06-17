@@ -32,6 +32,7 @@ export default function ChatHome() {
   const { t } = useTranslation('chat')
   const createConversation = useConversations((s) => s.createConversation)
   const sendMessage = useConversations((s) => s.sendMessage)
+  const setModel = useConversations((s) => s.setModel)
   const defaultModelId = useModels((s) => s.defaultId)
   const user = useAuth((s) => s.user)
 
@@ -77,12 +78,19 @@ export default function ChatHome() {
     const conv = pendingConvRef.current ?? (await createConversation(modelId))
     pendingConvRef.current = null
     if (!conv) return
+    // The picker is the source of truth for a new chat. A conversation created
+    // earlier for an attachment may carry a stale model, so persist the picked
+    // model onto it before sending; the first turn always uses `modelId` directly
+    // (never the conversation's possibly-stale model).
+    if (modelId && conv.modelId !== modelId) {
+      void setModel(conv.id, modelId)
+    }
     navigate(`/chat/${conv.id}`)
     // Fire-and-forget the stream; the ChatThread page will react to store updates.
     void sendMessage({
       conversationId: conv.id,
       text,
-      modelId: conv.modelId || modelId,
+      modelId,
       attachments,
       mode: opts.mode,
       params: opts.params,
