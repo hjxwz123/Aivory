@@ -28,7 +28,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { toast } from '@/hooks/use-toast'
-import { cn, formatAbsoluteDate, safeHref } from '@/lib/utils'
+import { cn, formatAbsoluteDate, formatDateTime, safeHref } from '@/lib/utils'
 
 export default function Subscription() {
   const { t } = useTranslation(['subscription', 'common'])
@@ -227,10 +227,10 @@ export default function Subscription() {
                       <Button variant="secondary" disabled className="w-full">
                         {t('subscription:youreOnThis')}
                       </Button>
-                    ) : g.buy_url ? (
-                      // External purchase link configured by the admin → buy off-site.
+                    ) : !g.is_default && credits?.group_buy_url ? (
+                      // Global purchase link (admin-configured) → buy off-site.
                       <Button asChild variant="primary" className="w-full">
-                        <a href={safeHref(g.buy_url)} target="_blank" rel="noreferrer noopener">
+                        <a href={safeHref(credits.group_buy_url)} target="_blank" rel="noreferrer noopener">
                           {t('subscription:buyCta', { defaultValue: 'Purchase' })}
                         </a>
                       </Button>
@@ -360,7 +360,7 @@ function CreditCards({
           {timed!.resets_at > 0 ? (
             <p className="mt-2.5 inline-flex items-center gap-1.5 text-[12px] text-[var(--color-fg-subtle)]">
               <RefreshCw size={12} aria-hidden />
-              {t('subscription:credits.resetsOn', { date: formatAbsoluteDate(timed!.resets_at * 1000) })}
+              {t('subscription:credits.resetsOn', { date: formatDateTime(timed!.resets_at * 1000) })}
             </p>
           ) : null}
         </div>

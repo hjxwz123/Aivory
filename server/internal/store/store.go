@@ -101,8 +101,6 @@ func Migrate(db *sql.DB) error {
 	addPasswordSet := `ALTER TABLE users ADD COLUMN password_set INTEGER NOT NULL DEFAULT 1`
 	// Online status / last-seen (§ admin → users).
 	addLastSeen := `ALTER TABLE users ADD COLUMN last_seen_at INTEGER NOT NULL DEFAULT 0`
-	// Per-group purchase link shown on the subscription page (§ user groups).
-	addGroupBuyURL := `ALTER TABLE user_groups ADD COLUMN buy_url TEXT NOT NULL DEFAULT ''`
 	// Inline-thread linkage (§ text-selection sub-conversations).
 	addInlineSource := `ALTER TABLE conversations ADD COLUMN inline_source_conv TEXT NOT NULL DEFAULT ''`
 	addInlineParent := `ALTER TABLE conversations ADD COLUMN inline_parent_id TEXT NOT NULL DEFAULT ''`
@@ -113,12 +111,11 @@ func Migrate(db *sql.DB) error {
 	// create. 0 = unlimited.
 	addGroupMaxProjects := `ALTER TABLE user_groups ADD COLUMN max_projects INTEGER NOT NULL DEFAULT 0`
 	addGroupMaxKBs := `ALTER TABLE user_groups ADD COLUMN max_kbs INTEGER NOT NULL DEFAULT 0`
-	// Credit system (§ credits): per-group timed allowance + refresh cycle, top-up
-	// link; per-user non-expiring balance; per-row charge. (The USD↔credit rate is
-	// a global setting, not a column.)
+	// Credit system (§ credits): per-group timed allowance + refresh cycle;
+	// per-user non-expiring balance; per-row charge. (The USD↔credit rate and the
+	// purchase links are global settings, not columns.)
 	addGroupCreditAllowance := `ALTER TABLE user_groups ADD COLUMN credit_allowance REAL NOT NULL DEFAULT 0`
 	addGroupCreditPeriod := `ALTER TABLE user_groups ADD COLUMN credit_period_seconds INTEGER NOT NULL DEFAULT 0`
-	addGroupCreditBuyURL := `ALTER TABLE user_groups ADD COLUMN credit_buy_url TEXT NOT NULL DEFAULT ''`
 	addUserPermCredits := `ALTER TABLE users ADD COLUMN credits_permanent REAL NOT NULL DEFAULT 0`
 	addUsageCredits := `ALTER TABLE usage_logs ADD COLUMN credits REAL NOT NULL DEFAULT 0`
 	if usePostgres {
@@ -140,7 +137,6 @@ func Migrate(db *sql.DB) error {
 		addPrevGroup = `ALTER TABLE users ADD COLUMN IF NOT EXISTS previous_group_id TEXT NOT NULL DEFAULT ''`
 		addPasswordSet = `ALTER TABLE users ADD COLUMN IF NOT EXISTS password_set INTEGER NOT NULL DEFAULT 1`
 		addLastSeen = `ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at BIGINT NOT NULL DEFAULT 0`
-		addGroupBuyURL = `ALTER TABLE user_groups ADD COLUMN IF NOT EXISTS buy_url TEXT NOT NULL DEFAULT ''`
 		addInlineSource = `ALTER TABLE conversations ADD COLUMN IF NOT EXISTS inline_source_conv TEXT NOT NULL DEFAULT ''`
 		addInlineParent = `ALTER TABLE conversations ADD COLUMN IF NOT EXISTS inline_parent_id TEXT NOT NULL DEFAULT ''`
 		addInlineQuote = `ALTER TABLE conversations ADD COLUMN IF NOT EXISTS inline_quote TEXT NOT NULL DEFAULT ''`
@@ -149,7 +145,6 @@ func Migrate(db *sql.DB) error {
 		addGroupMaxKBs = `ALTER TABLE user_groups ADD COLUMN IF NOT EXISTS max_kbs INTEGER NOT NULL DEFAULT 0`
 		addGroupCreditAllowance = `ALTER TABLE user_groups ADD COLUMN IF NOT EXISTS credit_allowance REAL NOT NULL DEFAULT 0`
 		addGroupCreditPeriod = `ALTER TABLE user_groups ADD COLUMN IF NOT EXISTS credit_period_seconds INTEGER NOT NULL DEFAULT 0`
-		addGroupCreditBuyURL = `ALTER TABLE user_groups ADD COLUMN IF NOT EXISTS credit_buy_url TEXT NOT NULL DEFAULT ''`
 		addUserPermCredits = `ALTER TABLE users ADD COLUMN IF NOT EXISTS credits_permanent REAL NOT NULL DEFAULT 0`
 		addUsageCredits = `ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS credits REAL NOT NULL DEFAULT 0`
 	}
@@ -165,11 +160,10 @@ func Migrate(db *sql.DB) error {
 		addSessUA, addSessIP, addSessLoc, addSessSeen,
 		addModEnabled, addModMode,
 		addGroupExpires, addPrevGroup, addPasswordSet, addLastSeen,
-		addGroupBuyURL,
 		addInlineSource, addInlineParent, addInlineQuote,
 		addModelTags,
 		addGroupMaxProjects, addGroupMaxKBs,
-		addGroupCreditAllowance, addGroupCreditPeriod, addGroupCreditBuyURL,
+		addGroupCreditAllowance, addGroupCreditPeriod,
 		addUserPermCredits, addUsageCredits,
 	} {
 		_, _ = db.Exec(ddl)
@@ -220,7 +214,11 @@ func Seed(db *sql.DB, cfg config.Config) error {
 		"register_captcha_required": `false`,
 		// Global credit conversion rate (§ credits): 1 USD of model cost = N
 		// credits. Shared by every group; 0 disables credits platform-wide.
-		"credits_per_usd":       `0`,
+		"credits_per_usd": `0`,
+		// Global purchase links (§ credits / user groups): one tier-upgrade link
+		// and one permanent-credit top-up link, shared by every group.
+		"group_buy_url":         `""`,
+		"credit_buy_url":        `""`,
 		"sandbox_base_url":      `""`,
 		"sandbox_api_key":       `""`,
 		"moderation_keywords":   `[]`,

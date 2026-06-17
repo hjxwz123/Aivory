@@ -420,6 +420,10 @@
     "default": "既定",
     "creditsRatioLabel": "1 USD あたりのクレジット（全体）",
     "creditsRatioHint": "全グループ共通：モデル費用 1 USD = 何クレジットか。0 で全体のクレジットを無効化。",
+    "groupBuyUrlLabel": "ティア購入リンク（全体）",
+    "groupBuyUrlHint": "各有料ティアのカードに「購入」ボタンとして表示。空欄の場合は「管理者に連絡」案内を表示。",
+    "creditBuyUrlLabel": "クレジット補充リンク（全体）",
+    "creditBuyUrlHint": "ユーザーが永久クレジットを購入する場所。",
     "quotaMsgLabel": "クォータ超過メッセージ",
     "quotaMsgHint": "メンバーが自分のグループでのモデルの使用上限に達したときに表示されます。",
     "quotaMsgPlaceholder": "このモデルでのプランの上限に達しました。続行するにはプランをアップグレードしてください。",
@@ -443,8 +447,6 @@
       "researchHint": "このグループにディープリサーチ機能の利用を許可します。",
       "featuresHint": "1行に1つ。サブスクリプションページにチェックリストとして表示されます。",
       "featuresPlaceholder": "優先アクセス\nより高い使用上限\n新機能への早期アクセス",
-      "buyUrl": "購入リンク",
-      "buyUrlHint": "任意。サブスクリプションページに「購入 / アップグレード」ボタンとして表示されます。",
       "maxProjects": "最大プロジェクト数",
       "maxKbs": "最大ナレッジベース数",
       "limitHint": "0 = 無制限。",
@@ -456,9 +458,7 @@
       "creditPeriodHint": "期間限定クレジットがリセットされる頻度。",
       "unitHour": "時間",
       "unitDay": "日",
-      "unitWeek": "週",
-      "creditBuyUrl": "補充リンク",
-      "creditBuyUrlHint": "ユーザーが永久クレジットを購入する場所。"
+      "unitWeek": "週"
     },
     "errors": {
       "nameRequired": "名前は必須です"

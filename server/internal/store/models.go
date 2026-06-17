@@ -58,22 +58,17 @@ type UserGroup struct {
 	Features    json.RawMessage `json:"features"`
 	PriceUSD    float64         `json:"price_usd"`
 	PriceCNY    float64         `json:"price_cny"`
-	// BuyURL is an optional external purchase/upgrade link shown on the
-	// subscription page (§ user groups). Empty = no button.
-	BuyURL    string `json:"buy_url"`
-	IsDefault bool   `json:"is_default"`
-	SortOrder int    `json:"sort_order"`
+	IsDefault   bool            `json:"is_default"`
+	SortOrder   int             `json:"sort_order"`
 	// MaxProjects / MaxKBs cap how many projects / knowledge bases a member may
 	// create (§ user groups). 0 = unlimited.
 	MaxProjects int `json:"max_projects"`
 	MaxKBs      int `json:"max_kbs"`
 	// Credit system (§ credits). CreditAllowance is the timed-credit budget granted
-	// each CreditPeriodSeconds cycle (unused voided on refresh). CreditBuyURL is the
-	// top-up link for non-expiring (permanent) credits. The USD→credit rate is a
-	// global setting (credits_per_usd), not a per-group field.
+	// each CreditPeriodSeconds cycle (unused voided on refresh). The USD→credit
+	// rate and both purchase links are global settings, not per-group fields.
 	CreditAllowance     float64 `json:"credit_allowance"`
 	CreditPeriodSeconds int     `json:"credit_period_seconds"`
-	CreditBuyURL        string  `json:"credit_buy_url"`
 	CreatedAt           int64   `json:"created_at"`
 	UpdatedAt           int64   `json:"updated_at"`
 }

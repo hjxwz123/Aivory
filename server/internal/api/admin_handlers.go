@@ -600,9 +600,10 @@ var settingsKeys = []string{
 	// IP may create per day (0 = off). register_captcha_required: gate signup
 	// behind the slider-puzzle captcha.
 	"register_ip_daily_limit", "register_captcha_required",
-	// §credits: global USD→credit conversion rate (1 USD = N credits). Per-group
-	// allowance/period/buy-link stay on the group row; the rate is shared.
-	"credits_per_usd",
+	// §credits: global USD→credit conversion rate (1 USD = N credits) and the two
+	// shared purchase links (tier upgrade + permanent-credit top-up). Per-group
+	// credit fields keep only allowance + refresh period.
+	"credits_per_usd", "group_buy_url", "credit_buy_url",
 	// §B6 partial: JSON array of tool names disabled platform-wide (kill-switch),
 	// e.g. ["python_execute","image_generate"].
 	"disabled_tools",

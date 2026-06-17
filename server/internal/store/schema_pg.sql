@@ -42,14 +42,12 @@ CREATE TABLE IF NOT EXISTS user_groups (
   features    TEXT NOT NULL DEFAULT '[]',
   price_usd   REAL NOT NULL DEFAULT 0,
   price_cny   REAL NOT NULL DEFAULT 0,
-  buy_url     TEXT NOT NULL DEFAULT '',
   is_default  INTEGER NOT NULL DEFAULT 0,
   sort_order  INTEGER NOT NULL DEFAULT 0,
   max_projects INTEGER NOT NULL DEFAULT 0,
   max_kbs      INTEGER NOT NULL DEFAULT 0,
   credit_allowance      REAL NOT NULL DEFAULT 0,
   credit_period_seconds INTEGER NOT NULL DEFAULT 0,
-  credit_buy_url        TEXT NOT NULL DEFAULT '',
   created_at  BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint),
   updated_at  BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
 );

@@ -420,6 +420,10 @@
     "default": "Par défaut",
     "creditsRatioLabel": "Crédits par USD (global)",
     "creditsRatioHint": "Partagé par tous les groupes : 1 USD de coût modèle = ce nombre de crédits. 0 désactive les crédits globalement.",
+    "groupBuyUrlLabel": "Lien d'achat de palier (global)",
+    "groupBuyUrlHint": "Affiché comme bouton « Acheter » sur chaque carte de palier payant. Vide = note « contacter l'admin ».",
+    "creditBuyUrlLabel": "Lien de recharge de crédits (global)",
+    "creditBuyUrlHint": "Où les membres achètent des crédits permanents.",
     "quotaMsgLabel": "Message de dépassement de quota",
     "quotaMsgHint": "Affiché lorsqu'un membre atteint la limite d'utilisation d'un modèle pour son groupe.",
     "quotaMsgPlaceholder": "Vous avez atteint la limite de votre forfait pour ce modèle. Améliorez votre forfait pour continuer.",
@@ -443,8 +447,6 @@
       "researchHint": "Autoriser ce groupe à utiliser le mode Recherche approfondie.",
       "featuresHint": "Une par ligne. Affichées sous forme de liste de contrôle sur la page d'abonnement.",
       "featuresPlaceholder": "Accès prioritaire\nLimites d'utilisation plus élevées\nFonctionnalités en avant-première",
-      "buyUrl": "Lien d'achat",
-      "buyUrlHint": "Facultatif. Affiché comme bouton « Acheter / Améliorer » sur la page d'abonnement.",
       "maxProjects": "Projets max",
       "maxKbs": "Bases de connaissances max",
       "limitHint": "0 = illimité.",
@@ -456,9 +458,7 @@
       "creditPeriodHint": "Fréquence de réinitialisation des crédits temporaires.",
       "unitHour": "heures",
       "unitDay": "jours",
-      "unitWeek": "semaines",
-      "creditBuyUrl": "Lien de recharge",
-      "creditBuyUrlHint": "Où les membres achètent des crédits permanents."
+      "unitWeek": "semaines"
     },
     "errors": {
       "nameRequired": "Le nom est requis"

@@ -60,6 +60,8 @@ export default function AdminUserGroups() {
   // Global over-quota / upgrade prompt + the shared USD→credit rate.
   const [quotaMsg, setQuotaMsg] = useState('')
   const [creditsPerUsd, setCreditsPerUsd] = useState(0)
+  const [groupBuyUrl, setGroupBuyUrl] = useState('')
+  const [creditBuyUrl, setCreditBuyUrl] = useState('')
   const [savingMsg, setSavingMsg] = useState(false)
 
   async function load() {
@@ -69,6 +71,8 @@ export default function AdminUserGroups() {
       setRows(groups)
       setQuotaMsg(typeof settings.quota_exceeded_message === 'string' ? settings.quota_exceeded_message : '')
       setCreditsPerUsd(Number(settings.credits_per_usd) || 0)
+      setGroupBuyUrl(typeof settings.group_buy_url === 'string' ? settings.group_buy_url : '')
+      setCreditBuyUrl(typeof settings.credit_buy_url === 'string' ? settings.credit_buy_url : '')
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
     } finally {
@@ -133,12 +137,10 @@ export default function AdminUserGroups() {
       features,
       price_usd: Number(d.price_usd) || 0,
       price_cny: Number(d.price_cny) || 0,
-      buy_url: (d.buy_url ?? '').trim(),
       max_projects: Math.max(0, Number(d.max_projects) || 0),
       max_kbs: Math.max(0, Number(d.max_kbs) || 0),
       credit_allowance: Math.max(0, Number(d.credit_allowance) || 0),
       credit_period_seconds: periodSeconds,
-      credit_buy_url: (d.credit_buy_url ?? '').trim(),
     }
     try {
       if (editor.row) {
@@ -172,6 +174,8 @@ export default function AdminUserGroups() {
       await adminApi.updateSettings({
         quota_exceeded_message: quotaMsg,
         credits_per_usd: Math.max(0, Number(creditsPerUsd) || 0),
+        group_buy_url: groupBuyUrl.trim(),
+        credit_buy_url: creditBuyUrl.trim(),
       })
       toast.success(t('admin:groups.msgSaved'))
     } catch (e) {
@@ -241,6 +245,30 @@ export default function AdminUserGroups() {
             min={0}
             value={String(creditsPerUsd)}
             onChange={(e) => setCreditsPerUsd(Math.max(0, Number(e.target.value) || 0))}
+          />
+        </Field>
+        <Field
+          label={t('admin:groups.groupBuyUrlLabel')}
+          htmlFor="group-buy-url"
+          hint={t('admin:groups.groupBuyUrlHint')}
+        >
+          <Input
+            id="group-buy-url"
+            value={groupBuyUrl}
+            placeholder="https://…"
+            onChange={(e) => setGroupBuyUrl(e.target.value)}
+          />
+        </Field>
+        <Field
+          label={t('admin:groups.creditBuyUrlLabel')}
+          htmlFor="credit-buy-url"
+          hint={t('admin:groups.creditBuyUrlHint')}
+        >
+          <Input
+            id="credit-buy-url"
+            value={creditBuyUrl}
+            placeholder="https://…"
+            onChange={(e) => setCreditBuyUrl(e.target.value)}
           />
         </Field>
         <Field label={t('admin:groups.quotaMsgLabel')} htmlFor="quota-msg" hint={t('admin:groups.quotaMsgHint')}>
@@ -364,14 +392,6 @@ export default function AdminUserGroups() {
                   </Select>
                 </div>
               </Field>
-              <Field label={t('admin:groups.fields.creditBuyUrl')} htmlFor="g-cbuy" hint={t('admin:groups.fields.creditBuyUrlHint')}>
-                <Input
-                  id="g-cbuy"
-                  value={editor.draft.credit_buy_url ?? ''}
-                  onChange={(e) => setDraft({ credit_buy_url: e.target.value })}
-                  placeholder="https://…"
-                />
-              </Field>
 
               <Field label={t('admin:groups.fields.features')} htmlFor="g-feat" hint={t('admin:groups.fields.featuresHint')}>
                 <Textarea
@@ -395,18 +415,6 @@ export default function AdminUserGroups() {
                   aria-label={t('admin:groups.fields.research', { defaultValue: 'Deep Research' })}
                 />
               </div>
-              <Field
-                label={t('admin:groups.fields.buyUrl', { defaultValue: 'Purchase link' })}
-                htmlFor="g-buy"
-                hint={t('admin:groups.fields.buyUrlHint', { defaultValue: 'Optional. Shown as a “Buy / Upgrade” button on the subscription page.' })}
-              >
-                <Input
-                  id="g-buy"
-                  value={editor.draft.buy_url ?? ''}
-                  onChange={(e) => setDraft({ buy_url: e.target.value })}
-                  placeholder="https://…"
-                />
-              </Field>
             </div>
           </DialogBody>
           <DialogFooter>

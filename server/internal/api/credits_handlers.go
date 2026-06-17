@@ -69,9 +69,24 @@ func meCreditsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 			"period_seconds": period,
 			"resets_at":      resetsAt,
 		},
-		"permanent": u.CreditsPermanent,
-		"buy_url":   g.CreditBuyURL,
+		"permanent":     u.CreditsPermanent,
+		"buy_url":       globalSettingStr(d, "credit_buy_url"),
+		"group_buy_url": globalSettingStr(d, "group_buy_url"),
 	})
+}
+
+// globalSettingStr reads a string-valued global setting (§ credits purchase
+// links). Empty when unset.
+func globalSettingStr(d Deps, key string) string {
+	raw, err := store.GetSetting(d.DB, key)
+	if err != nil || len(raw) == 0 {
+		return ""
+	}
+	var s string
+	if json.Unmarshal(raw, &s) != nil {
+		return ""
+	}
+	return s
 }
 
 func groupOrDefault(id string) string {

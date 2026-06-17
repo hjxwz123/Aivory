@@ -40,14 +40,12 @@ CREATE TABLE IF NOT EXISTS user_groups (
   features    TEXT NOT NULL DEFAULT '[]',
   price_usd   REAL NOT NULL DEFAULT 0,
   price_cny   REAL NOT NULL DEFAULT 0,
-  buy_url     TEXT NOT NULL DEFAULT '',
   is_default  INTEGER NOT NULL DEFAULT 0,
   sort_order  INTEGER NOT NULL DEFAULT 0,
   max_projects INTEGER NOT NULL DEFAULT 0,
   max_kbs      INTEGER NOT NULL DEFAULT 0,
   credit_allowance      REAL NOT NULL DEFAULT 0,    -- timed credits granted each cycle
   credit_period_seconds INTEGER NOT NULL DEFAULT 0, -- refresh cycle length (0 = no timed credits)
-  credit_buy_url        TEXT NOT NULL DEFAULT '',   -- top-up link for permanent credits
   created_at  INTEGER NOT NULL DEFAULT (strftime('%s','now')),
   updated_at  INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 );

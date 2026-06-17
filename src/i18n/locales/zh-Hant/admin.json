@@ -420,6 +420,10 @@
     "default": "預設",
     "creditsRatioLabel": "每美元積分數（全域）",
     "creditsRatioHint": "所有使用者組通用：模型花費 1 美元 = 多少積分。0 表示全域停用積分。",
+    "groupBuyUrlLabel": "使用者組購買連結（全域）",
+    "groupBuyUrlHint": "在每個付費使用者組卡片上顯示為「購買」按鈕。留空則顯示「聯絡管理員」提示。",
+    "creditBuyUrlLabel": "積分補充連結（全域）",
+    "creditBuyUrlHint": "使用者購買永久積分的網址。",
     "quotaMsgLabel": "超額提示",
     "quotaMsgHint": "當使用者達到其使用者組對某模型的用量上限時顯示。",
     "quotaMsgPlaceholder": "您已達到當前套餐對此模型的使用上限，升級套餐即可繼續使用。",
@@ -443,8 +447,6 @@
       "researchHint": "允許該使用者群組使用深度研究功能。",
       "featuresHint": "每行一條，將在訂閱頁面以清單形式展示。",
       "featuresPlaceholder": "優先訪問\n更高用量上限\n搶先體驗新功能",
-      "buyUrl": "購買連結",
-      "buyUrlHint": "可選。將在訂閱頁面顯示為「購買 / 升級」按鈕。",
       "maxProjects": "最大專案數",
       "maxKbs": "最大知識庫數",
       "limitHint": "0 = 不限。",
@@ -456,9 +458,7 @@
       "creditPeriodHint": "限時積分多久重置一次。",
       "unitHour": "小時",
       "unitDay": "天",
-      "unitWeek": "週",
-      "creditBuyUrl": "補充連結",
-      "creditBuyUrlHint": "使用者購買永久積分的網址。"
+      "unitWeek": "週"
     },
     "errors": {
       "nameRequired": "請填寫名稱"

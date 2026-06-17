@@ -420,6 +420,10 @@
     "default": "Default",
     "creditsRatioLabel": "Credits per USD (global)",
     "creditsRatioHint": "Shared by every group: 1 USD of model cost = this many credits. 0 disables credits platform-wide.",
+    "groupBuyUrlLabel": "Tier purchase link (global)",
+    "groupBuyUrlHint": "Shown as a “Buy” button on every paid tier card. Leave blank for the “contact admin” note.",
+    "creditBuyUrlLabel": "Credit top-up link (global)",
+    "creditBuyUrlHint": "Where members buy permanent (non-expiring) credits.",
     "quotaMsgLabel": "Over-quota message",
     "quotaMsgHint": "Shown when a member reaches a model’s usage limit for their group.",
     "quotaMsgPlaceholder": "You’ve reached your plan’s limit for this model. Upgrade your plan to continue.",
@@ -443,8 +447,6 @@
       "researchHint": "Allow this group to use the Deep Research mode.",
       "featuresHint": "One per line. Shown as a checklist on the subscription page.",
       "featuresPlaceholder": "Priority access\nHigher usage limits\nEarly features",
-      "buyUrl": "Purchase link",
-      "buyUrlHint": "Optional. Shown as a “Buy / Upgrade” button on the subscription page.",
       "maxProjects": "Max projects",
       "maxKbs": "Max knowledge bases",
       "limitHint": "0 = unlimited.",
@@ -456,9 +458,7 @@
       "creditPeriodHint": "How often timed credits reset to the allowance.",
       "unitHour": "hours",
       "unitDay": "days",
-      "unitWeek": "weeks",
-      "creditBuyUrl": "Top-up link",
-      "creditBuyUrlHint": "Where members buy permanent (non-expiring) credits."
+      "unitWeek": "weeks"
     },
     "errors": {
       "nameRequired": "Name is required"

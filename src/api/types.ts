@@ -122,18 +122,15 @@ export interface ApiUserGroup {
   features: string[]
   price_usd: number
   price_cny: number
-  /** Optional external purchase/upgrade link shown on the subscription page. */
-  buy_url?: string
   is_default: boolean
   sort_order: number
   /** Max projects / knowledge bases a member may create. 0 = unlimited. */
   max_projects: number
   max_kbs: number
   /** Credit system (§ credits): per-group timed allowance + refresh cycle (unused
-   *  voided) and the top-up link. The USD→credit rate is a global setting. */
+   *  voided). The USD→credit rate and purchase links are global settings. */
   credit_allowance: number
   credit_period_seconds: number
-  credit_buy_url: string
   created_at: number
   updated_at: number
 }
@@ -334,7 +331,10 @@ export interface ApiCredits {
   enabled: boolean
   timed?: { remaining: number; allowance: number; period_seconds: number; resets_at: number }
   permanent: number
+  /** Global permanent-credit top-up link. */
   buy_url?: string
+  /** Global tier-purchase link (shown on every group card). */
+  group_buy_url?: string
 }
 
 /** A file referenced by a conversation (§ conversation files drawer). */
