@@ -219,6 +219,9 @@ func Seed(db *sql.DB, cfg config.Config) error {
 		// (a text math question — no image/OCR).
 		"register_ip_daily_limit":   `0`,
 		"register_captcha_required": `false`,
+		// Global credit conversion rate (§ credits): 1 USD of model cost = N
+		// credits. Shared by every group; 0 disables credits platform-wide.
+		"credits_per_usd": `0`,
 		"sandbox_base_url":          `""`,
 		"sandbox_api_key":           `""`,
 		"moderation_keywords":       `[]`,

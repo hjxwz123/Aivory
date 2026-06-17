@@ -57,8 +57,9 @@ export default function AdminUserGroups() {
   const [loading, setLoading] = useState(true)
   const [editor, setEditor] = useState<{ open: boolean; row?: ApiUserGroup; draft: Draft }>({ open: false, draft: {} })
   const [confirmDelete, setConfirmDelete] = useState<ApiUserGroup | null>(null)
-  // Global over-quota / upgrade prompt.
+  // Global over-quota / upgrade prompt + the shared USD→credit rate.
   const [quotaMsg, setQuotaMsg] = useState('')
+  const [creditsPerUsd, setCreditsPerUsd] = useState(0)
   const [savingMsg, setSavingMsg] = useState(false)
 
   async function load() {
@@ -67,6 +68,7 @@ export default function AdminUserGroups() {
       const [groups, settings] = await Promise.all([adminApi.userGroups(), adminApi.settings()])
       setRows(groups)
       setQuotaMsg(typeof settings.quota_exceeded_message === 'string' ? settings.quota_exceeded_message : '')
+      setCreditsPerUsd(Number(settings.credits_per_usd) || 0)
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
     } finally {
@@ -134,7 +136,6 @@ export default function AdminUserGroups() {
       buy_url: (d.buy_url ?? '').trim(),
       max_projects: Math.max(0, Number(d.max_projects) || 0),
       max_kbs: Math.max(0, Number(d.max_kbs) || 0),
-      credits_per_usd: Math.max(0, Number(d.credits_per_usd) || 0),
       credit_allowance: Math.max(0, Number(d.credit_allowance) || 0),
       credit_period_seconds: periodSeconds,
       credit_buy_url: (d.credit_buy_url ?? '').trim(),
@@ -168,7 +169,10 @@ export default function AdminUserGroups() {
   async function saveMsg() {
     setSavingMsg(true)
     try {
-      await adminApi.updateSettings({ quota_exceeded_message: quotaMsg })
+      await adminApi.updateSettings({
+        quota_exceeded_message: quotaMsg,
+        credits_per_usd: Math.max(0, Number(creditsPerUsd) || 0),
+      })
       toast.success(t('admin:groups.msgSaved'))
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
@@ -224,8 +228,21 @@ export default function AdminUserGroups() {
         )}
       </section>
 
-      {/* Global over-quota / upgrade prompt */}
-      <section className="mt-8 max-w-xl">
+      {/* Global credit settings + over-quota prompt */}
+      <section className="mt-8 max-w-xl flex flex-col gap-5">
+        <Field
+          label={t('admin:groups.creditsRatioLabel')}
+          htmlFor="credits-per-usd"
+          hint={t('admin:groups.creditsRatioHint')}
+        >
+          <Input
+            id="credits-per-usd"
+            type="number"
+            min={0}
+            value={String(creditsPerUsd)}
+            onChange={(e) => setCreditsPerUsd(Math.max(0, Number(e.target.value) || 0))}
+          />
+        </Field>
         <Field label={t('admin:groups.quotaMsgLabel')} htmlFor="quota-msg" hint={t('admin:groups.quotaMsgHint')}>
           <Textarea
             id="quota-msg"
@@ -235,7 +252,7 @@ export default function AdminUserGroups() {
             placeholder={t('admin:groups.quotaMsgPlaceholder')}
           />
         </Field>
-        <div className="mt-3 flex justify-end">
+        <div className="flex justify-end">
           <Button variant="secondary" loading={savingMsg} onClick={() => void saveMsg()}>
             {t('common:actions.save')}
           </Button>
@@ -307,31 +324,21 @@ export default function AdminUserGroups() {
                   />
                 </Field>
               </div>
-              {/* Credit system (§ credits) */}
+              {/* Credit system (§ credits). The USD→credit rate is a global
+                  setting (below the group list); per-group: allowance + period. */}
               <div className="pt-1 border-t border-[var(--color-divider)]">
                 <h2 className="pt-3 font-serif text-lg tracking-tight text-[var(--color-fg)]">{t('admin:groups.fields.creditsSection')}</h2>
                 <p className="mt-0.5 text-xs text-[var(--color-fg-muted)]">{t('admin:groups.fields.creditsLead')}</p>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <Field label={t('admin:groups.fields.creditsPerUsd')} htmlFor="g-cpu" hint={t('admin:groups.fields.creditsPerUsdHint')}>
-                  <Input
-                    id="g-cpu"
-                    type="number"
-                    min={0}
-                    value={String(editor.draft.credits_per_usd ?? 0)}
-                    onChange={(e) => setDraft({ credits_per_usd: Number(e.target.value) })}
-                  />
-                </Field>
-                <Field label={t('admin:groups.fields.creditAllowance')} htmlFor="g-allow" hint={t('admin:groups.fields.creditAllowanceHint')}>
-                  <Input
-                    id="g-allow"
-                    type="number"
-                    min={0}
-                    value={String(editor.draft.credit_allowance ?? 0)}
-                    onChange={(e) => setDraft({ credit_allowance: Number(e.target.value) })}
-                  />
-                </Field>
-              </div>
+              <Field label={t('admin:groups.fields.creditAllowance')} htmlFor="g-allow" hint={t('admin:groups.fields.creditAllowanceHint')}>
+                <Input
+                  id="g-allow"
+                  type="number"
+                  min={0}
+                  value={String(editor.draft.credit_allowance ?? 0)}
+                  onChange={(e) => setDraft({ credit_allowance: Number(e.target.value) })}
+                />
+              </Field>
               <Field label={t('admin:groups.fields.creditPeriod')} hint={t('admin:groups.fields.creditPeriodHint')}>
                 <div className="flex items-stretch gap-2">
                   <Input

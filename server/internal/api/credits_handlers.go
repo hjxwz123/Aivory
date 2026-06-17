@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"math"
 	"net/http"
 	"strconv"
@@ -61,7 +62,7 @@ func meCreditsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		resetsAt = windowStart + int64(period)
 	}
 	writeJSON(w, 200, map[string]any{
-		"enabled": g.CreditsPerUSD > 0,
+		"enabled": globalCreditsPerUSD(d) > 0,
 		"timed": map[string]any{
 			"remaining":      remaining,
 			"allowance":      g.CreditAllowance,
@@ -78,4 +79,18 @@ func groupOrDefault(id string) string {
 		return store.DefaultGroupID
 	}
 	return id
+}
+
+// globalCreditsPerUSD reads the platform-wide USD→credit rate (§ credits). 0 =
+// credits disabled.
+func globalCreditsPerUSD(d Deps) float64 {
+	raw, err := store.GetSetting(d.DB, "credits_per_usd")
+	if err != nil || len(raw) == 0 {
+		return 0
+	}
+	var v float64
+	if json.Unmarshal(raw, &v) != nil {
+		return 0
+	}
+	return v
 }

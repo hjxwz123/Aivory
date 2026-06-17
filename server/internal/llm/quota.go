@@ -81,12 +81,24 @@ func (o *Orchestrator) checkModelQuota(ctx context.Context, userID string, model
 	return o.creditDecision(ctx, userID, groupID)
 }
 
+// creditsPerUSD reads the global USD→credit conversion rate (§ credits). 0 = the
+// credit system is disabled platform-wide.
+func (o *Orchestrator) creditsPerUSD() float64 {
+	if raw, err := store.GetSetting(o.db, "credits_per_usd"); err == nil && len(raw) > 0 {
+		var v float64
+		if json.Unmarshal(raw, &v) == nil {
+			return v
+		}
+	}
+	return 0
+}
+
 // creditDecision checks whether the user can cover a credit-charged turn from
 // their timed + permanent balance. Returns (msg, ok, useCredits).
 func (o *Orchestrator) creditDecision(ctx context.Context, userID, groupID string) (string, bool, bool) {
 	g, err := store.GetUserGroup(ctx, o.db, groupID)
-	if err != nil || g == nil || g.CreditsPerUSD <= 0 {
-		// Credits not configured for this group → nothing to charge against.
+	if err != nil || g == nil || o.creditsPerUSD() <= 0 {
+		// Credits disabled (no global rate) → nothing to charge against.
 		return o.quotaMessage(), false, false
 	}
 	// Timed credits only apply when an explicit refresh period is set; otherwise
@@ -115,10 +127,11 @@ func (o *Orchestrator) chargeTurnCredits(ctx context.Context, userID string, usd
 		return 0
 	}
 	g, err := store.GetUserGroup(ctx, o.db, o.userGroupID(ctx, userID))
-	if err != nil || g == nil || g.CreditsPerUSD <= 0 {
+	ratio := o.creditsPerUSD()
+	if err != nil || g == nil || ratio <= 0 {
 		return 0
 	}
-	credits := usdCost * g.CreditsPerUSD
+	credits := usdCost * ratio
 	// Timed credits only exist with an explicit refresh period; otherwise charge
 	// entirely against the permanent balance.
 	var remaining float64

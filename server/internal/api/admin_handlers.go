@@ -598,8 +598,11 @@ var settingsKeys = []string{
 	"email_verification_required", "daily_token_limit", "max_concurrent_generations",
 	// Anti-abuse registration controls. register_ip_daily_limit: max accounts one
 	// IP may create per day (0 = off). register_captcha_required: gate signup
-	// behind the text arithmetic captcha (no image OCR).
+	// behind the slider-puzzle captcha.
 	"register_ip_daily_limit", "register_captcha_required",
+	// §credits: global USD→credit conversion rate (1 USD = N credits). Per-group
+	// allowance/period/buy-link stay on the group row; the rate is shared.
+	"credits_per_usd",
 	// §B6 partial: JSON array of tool names disabled platform-wide (kill-switch),
 	// e.g. ["python_execute","image_generate"].
 	"disabled_tools",
