@@ -16,14 +16,48 @@ import (
 	"aurelia/server/internal/store"
 )
 
-// signupOpenHandler reports whether new registrations are accepted.
+// signupOpenHandler reports whether new registrations are accepted, and whether
+// the registration form must solve the arithmetic captcha. The client reads both
+// up front so it can render the captcha field only when needed.
 func signupOpenHandler(d Deps, w http.ResponseWriter, _ *http.Request) {
-	raw, err := store.GetSetting(d.DB, "signup_open")
 	open := true
-	if err == nil {
+	if raw, err := store.GetSetting(d.DB, "signup_open"); err == nil {
 		_ = json.Unmarshal(raw, &open)
 	}
-	writeJSON(w, 200, map[string]bool{"open": open})
+	captcha := false
+	if raw, err := store.GetSetting(d.DB, "register_captcha_required"); err == nil {
+		_ = json.Unmarshal(raw, &captcha)
+	}
+	writeJSON(w, 200, map[string]bool{"open": open, "captcha_required": captcha})
+}
+
+// captchaHandler issues a fresh arithmetic captcha: a small "a + b" / "a × b"
+// question (text only — deliberately NOT an image/OCR challenge). The answer is
+// cached under a random id for 10 minutes and consumed on first use by the
+// register handler.
+func captchaHandler(d Deps, w http.ResponseWriter, _ *http.Request) {
+	a := randN(9) + 1
+	b := randN(9) + 1
+	op, ans := "+", a+b
+	if randN(2) == 0 {
+		op, ans = "×", a*b
+	}
+	id := randToken(12)
+	d.Cache.Set("captcha:"+id, fmt.Sprintf("%d", ans), 10*time.Minute)
+	writeJSON(w, 200, map[string]string{"id": id, "question": fmt.Sprintf("%d %s %d", a, op, b)})
+}
+
+// randN returns a crypto-random int in [0, n). Falls back to 0 only if the OS
+// entropy source is unavailable (the captcha stays well-formed, just weaker).
+func randN(n int) int {
+	if n <= 0 {
+		return 0
+	}
+	v, err := rand.Int(rand.Reader, big.NewInt(int64(n)))
+	if err != nil {
+		return 0
+	}
+	return int(v.Int64())
 }
 
 // needsSetupHandler reports whether the deployment still needs its first-run
@@ -88,6 +122,9 @@ type registerReq struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
 	Name     string `json:"name"`
+	// Arithmetic captcha (only checked when register_captcha_required is on).
+	CaptchaID     string `json:"captcha_id"`
+	CaptchaAnswer string `json:"captcha_answer"`
 }
 
 type authResp struct {
@@ -141,17 +178,58 @@ func registerHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Arithmetic captcha gate. The answer is single-use: consume it whether or
+	// not it matched so a guessed id can't be hammered.
+	captchaRequired := false
+	if raw, _ := store.GetSetting(d.DB, "register_captcha_required"); len(raw) > 0 {
+		_ = json.Unmarshal(raw, &captchaRequired)
+	}
+	if captchaRequired {
+		saved, ok := d.Cache.Get("captcha:" + req.CaptchaID)
+		d.Cache.Delete("captcha:" + req.CaptchaID)
+		if !ok || strings.TrimSpace(req.CaptchaAnswer) != saved {
+			writeError(w, 400, errCaptcha)
+			return
+		}
+	}
+
 	if u, _ := store.FindUserByEmail(r.Context(), d.DB, req.Email); u != nil {
 		writeError(w, 409, errors.New("email already registered"))
 		return
 	}
+
+	// Per-IP daily registration cap (anti-abuse). 0 = unlimited. Reserve a slot
+	// by incrementing the day-keyed counter up front; if the account isn't
+	// actually created below, the increment is rolled back so failed attempts
+	// don't burn the quota.
+	ipLimit := 0
+	if raw, _ := store.GetSetting(d.DB, "register_ip_daily_limit"); len(raw) > 0 {
+		_ = json.Unmarshal(raw, &ipLimit)
+	}
+	ip := clientIP(r)
+	regKey := "regquota:" + ip + ":" + time.Now().Format("2006-01-02")
+	if ipLimit > 0 && ip != "" {
+		if n := d.Cache.Incr(regKey, 25*time.Hour); int(n) > ipLimit {
+			d.Cache.Decr(regKey)
+			writeError(w, 429, errRegisterIPLimit)
+			return
+		}
+	}
+	releaseQuota := func() {
+		if ipLimit > 0 && ip != "" {
+			d.Cache.Decr(regKey)
+		}
+	}
+
 	hash, err := store.HashPassword(req.Password)
 	if err != nil {
+		releaseQuota()
 		writeError(w, 500, err)
 		return
 	}
 	user, err := store.CreateUser(r.Context(), d.DB, req.Email, req.Name, hash)
 	if err != nil {
+		releaseQuota()
 		writeError(w, 500, err)
 		return
 	}

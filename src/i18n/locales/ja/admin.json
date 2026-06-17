@@ -335,6 +335,10 @@
       "compactionEnabled": "圧縮を有効化",
       "memoryEnabled": "メモリーを有効化",
       "signupOpen": "新規サインアップを開放",
+      "registerCaptcha": "登録にキャプチャを要求",
+      "registerCaptchaHint": "新規登録時に簡単な計算問題に答える必要があります（テキストのみ・画像認識なし）。",
+      "registerIpDailyLimit": "IP ごとの 1 日の登録上限",
+      "registerIpDailyLimitHint": "同一 IP アドレスが 1 日に作成できるアカウント数の上限。0 = 無制限。",
       "dailyMessageLimit": "1日あたりのメッセージ上限",
       "dailyImageLimit": "1日あたりの画像上限",
       "emailVerificationRequired": "メール認証を必須にする",
@@ -435,7 +439,10 @@
       "featuresHint": "1行に1つ。サブスクリプションページにチェックリストとして表示されます。",
       "featuresPlaceholder": "優先アクセス\nより高い使用上限\n新機能への早期アクセス",
       "buyUrl": "購入リンク",
-      "buyUrlHint": "任意。サブスクリプションページに「購入 / アップグレード」ボタンとして表示されます。"
+      "buyUrlHint": "任意。サブスクリプションページに「購入 / アップグレード」ボタンとして表示されます。",
+      "maxProjects": "最大プロジェクト数",
+      "maxKbs": "最大ナレッジベース数",
+      "limitHint": "0 = 無制限。"
     },
     "errors": {
       "nameRequired": "名前は必須です"

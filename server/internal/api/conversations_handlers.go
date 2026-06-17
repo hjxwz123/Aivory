@@ -494,6 +494,83 @@ func listConversationDocsHandler(d Deps, w http.ResponseWriter, r *http.Request)
 	writeJSON(w, 200, docs)
 }
 
+// convFile is the shape returned by the conversation files drawer (§ conversation
+// files): the authoritative set of files this conversation references, each with
+// a download URL.
+type convFile struct {
+	ID        string `json:"id"`
+	Filename  string `json:"filename"`
+	Kind      string `json:"kind"`
+	MimeType  string `json:"mime_type"`
+	SizeBytes int64  `json:"size_bytes"`
+	CreatedAt int64  `json:"created_at"`
+	URL       string `json:"url"`
+}
+
+// listConversationFilesHandler returns every file currently attached to the
+// conversation (what the model actually sees / stages), for the files drawer.
+func listConversationFilesHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	u := authUser(r)
+	convID := pathParam(r, "id")
+	if _, err := store.GetConversation(r.Context(), d.DB, convID, u.ID); err != nil {
+		writeError(w, 404, errNotFound)
+		return
+	}
+	files, err := store.ListFilesByConversation(r.Context(), d.DB, convID, u.ID)
+	if err != nil {
+		writeError(w, 500, err)
+		return
+	}
+	out := make([]convFile, 0, len(files))
+	for _, f := range files {
+		out = append(out, convFile{
+			ID: f.ID, Filename: f.Filename, Kind: f.Kind, MimeType: f.MimeType,
+			SizeBytes: f.SizeBytes, CreatedAt: f.CreatedAt, URL: "/api/files/" + f.ID,
+		})
+	}
+	writeJSON(w, 200, out)
+}
+
+// deleteConversationFileHandler removes a file from the conversation's referenced
+// set (§ conversation files). It detaches the file (so the sandbox no longer
+// stages it) and deletes the conversation-scoped RAG document(s) of the same
+// name (chunks + vectors), so future turns no longer reference it. The file row
+// survives so a historical message that uploaded it can still be downloaded.
+func deleteConversationFileHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	u := authUser(r)
+	convID := pathParam(r, "id")
+	fileID := pathParam(r, "fileId")
+	if _, err := store.GetConversation(r.Context(), d.DB, convID, u.ID); err != nil {
+		writeError(w, 404, errNotFound)
+		return
+	}
+	f, err := store.GetFile(r.Context(), d.DB, fileID, u.ID)
+	if err != nil || f == nil || f.ConversationID != convID {
+		writeError(w, 404, errNotFound)
+		return
+	}
+	if err := store.DetachFileFromConversation(r.Context(), d.DB, fileID, convID, u.ID); err != nil {
+		writeError(w, 500, err)
+		return
+	}
+	// Drop the conversation-scoped RAG document(s) of the same name so retrieval
+	// stops referencing this file. Best-effort: a vector/chunk hiccup must not
+	// fail the detach the user already performed.
+	if docs, derr := store.ListDocuments(r.Context(), d.DB, "conversation", convID); derr == nil {
+		for _, doc := range docs {
+			if doc.Filename != f.Filename {
+				continue
+			}
+			if d.RAG != nil {
+				_ = d.RAG.OnDocumentDeleted(r.Context(), doc.ID)
+			}
+			_ = store.DeleteChunksByDocument(r.Context(), d.DB, doc.ID)
+			_ = store.DeleteDocument(r.Context(), d.DB, doc.ID)
+		}
+	}
+	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
 // stopHandler signals a generation cancel for the conversation.
 func stopHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)

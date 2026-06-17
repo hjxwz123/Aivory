@@ -335,6 +335,10 @@
       "compactionEnabled": "Compactage activé",
       "memoryEnabled": "Mémoires activées",
       "signupOpen": "Nouvelles inscriptions ouvertes",
+      "registerCaptcha": "Exiger un captcha à l'inscription",
+      "registerCaptchaHint": "Les nouvelles inscriptions doivent résoudre une courte question arithmétique (texte seul — aucune image à lire).",
+      "registerIpDailyLimit": "Inscriptions par jour et par IP",
+      "registerIpDailyLimitHint": "Nombre maximal de comptes qu'une adresse IP peut créer par jour. 0 = illimité.",
       "dailyMessageLimit": "Limite quotidienne de messages",
       "dailyImageLimit": "Limite quotidienne d'images",
       "emailVerificationRequired": "Exiger la vérification de l'e-mail",
@@ -435,7 +439,10 @@
       "featuresHint": "Une par ligne. Affichées sous forme de liste de contrôle sur la page d'abonnement.",
       "featuresPlaceholder": "Accès prioritaire\nLimites d'utilisation plus élevées\nFonctionnalités en avant-première",
       "buyUrl": "Lien d'achat",
-      "buyUrlHint": "Facultatif. Affiché comme bouton « Acheter / Améliorer » sur la page d'abonnement."
+      "buyUrlHint": "Facultatif. Affiché comme bouton « Acheter / Améliorer » sur la page d'abonnement.",
+      "maxProjects": "Projets max",
+      "maxKbs": "Bases de connaissances max",
+      "limitHint": "0 = illimité."
     },
     "errors": {
       "nameRequired": "Le nom est requis"

@@ -67,7 +67,12 @@ export function NewProjectDialog({ open, onOpenChange, onCreated }: NewProjectDi
       accent,
     })
     if (!project) {
-      setError(t('common:somethingWentWrong', { defaultValue: 'Something went wrong' }))
+      const err = useProjects.getState().error
+      setError(
+        err === 'project_limit_reached'
+          ? t('projects:create.limitReached', { defaultValue: 'You’ve reached your plan’s project limit.' })
+          : t('common:somethingWentWrong', { defaultValue: 'Something went wrong' }),
+      )
       return
     }
     onOpenChange(false)

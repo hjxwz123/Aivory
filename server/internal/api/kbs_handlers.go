@@ -38,6 +38,15 @@ func createKBHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errors.New("name required"))
 		return
 	}
+	// Enforce the group's knowledge-base cap (§ user groups). 0 = unlimited.
+	// Only standalone KBs count — project libraries are governed by the project
+	// cap.
+	if _, maxKBs := groupCapFor(d, r, u.ID, u.GroupID); maxKBs > 0 {
+		if n, err := store.CountStandaloneKBsByUser(r.Context(), d.DB, u.ID); err == nil && n >= maxKBs {
+			writeError(w, 403, errKBLimit)
+			return
+		}
+	}
 	if req.EmbeddingModelID == "" {
 		embeds, _ := store.ListModels(r.Context(), d.DB, "embedding", true)
 		if len(embeds) == 0 {

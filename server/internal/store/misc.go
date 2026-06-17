@@ -51,6 +51,24 @@ func ListFilesByConversation(ctx context.Context, db *sql.DB, convID, userID str
 	return out, rows.Err()
 }
 
+// DetachFileFromConversation clears a file's conversation link (ownership
+// checked) so it is no longer staged into the sandbox or counted among the
+// conversation's referenced files (§ conversation files drawer). The file row
+// itself survives, so any historical message that uploaded it can still be
+// downloaded.
+func DetachFileFromConversation(ctx context.Context, db *sql.DB, fileID, convID, userID string) error {
+	res, err := db.ExecContext(ctx,
+		`UPDATE files SET conversation_id=NULL WHERE id=? AND conversation_id=? AND user_id=?`,
+		fileID, convID, userID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // GetFile returns one row with ownership check.
 // GetFile returns a file scoped to userID. An empty userID means "any owner" —
 // reserved for admin triage (an admin viewing another user's conversation).

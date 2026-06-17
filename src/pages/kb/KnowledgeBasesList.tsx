@@ -67,7 +67,12 @@ export default function KnowledgeBasesList() {
       setDraft({ name: '', description: '', embedding_model_id: draft.embedding_model_id })
       await load()
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : t('common:common.error'))
+      const msg = e instanceof ApiError ? e.message : t('common:common.error')
+      toast.error(
+        msg === 'kb_limit_reached'
+          ? t('kb:limitReached', { defaultValue: 'You’ve reached your plan’s knowledge-base limit.' })
+          : msg,
+      )
     }
   }
 

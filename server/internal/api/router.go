@@ -57,6 +57,8 @@ func NewRouter(d Deps) http.Handler {
 		writeJSON(w, 200, map[string]any{"ok": true})
 	})
 	mux.handle("GET", "/api/public/signup-open", wrap(d, signupOpenHandler))
+	// Arithmetic captcha for registration (text math question, no image OCR).
+	mux.handle("GET", "/api/public/captcha", rateLimitedIP(d, "auth", 30, 60*time.Second, wrap(d, captchaHandler)))
 	// First-run setup (§ first-run setup): public probe + create-first-admin.
 	mux.handle("GET", "/api/public/needs-setup", wrap(d, needsSetupHandler))
 	mux.handle("POST", "/api/setup", rateLimitedIP(d, "auth", 10, 60*time.Second, wrap(d, setupHandler)))
@@ -140,6 +142,11 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("POST", "/api/conversations/:id/inline-threads", requireAuth(d, createInlineThreadHandler))
 	mux.handle("GET", "/api/conversations/:id/documents", requireAuth(d, listConversationDocsHandler))
 	mux.handle("POST", "/api/conversations/:id/documents/:docId/promote", requireAuth(d, promoteDocumentHandler))
+	// Conversation files drawer (§ conversation files): the authoritative set of
+	// files the conversation references. Upload reuses POST /api/files; remove
+	// detaches + drops the RAG doc.
+	mux.handle("GET", "/api/conversations/:id/files", requireAuth(d, listConversationFilesHandler))
+	mux.handle("DELETE", "/api/conversations/:id/files/:fileId", requireAuth(d, deleteConversationFileHandler))
 	mux.handle("GET", "/api/conversations/:id/share", requireAuth(d, getShareHandler))
 	mux.handle("POST", "/api/conversations/:id/share", requireAuth(d, createShareHandler))
 	mux.handle("DELETE", "/api/conversations/:id/share", requireAuth(d, deleteShareHandler))

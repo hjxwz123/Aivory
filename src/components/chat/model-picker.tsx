@@ -61,10 +61,14 @@ export function ModelPicker({ value, onChange, className }: ModelPickerProps) {
       <DropdownMenuContent
         side="top"
         align="end"
-        // Cap to the viewport and scroll when there are many models, so a long
-        // registry never overflows off-screen. `overflow-[hidden_auto]` replaces
-        // the menu's base `overflow-hidden` (x clipped, y scrolls).
-        className="w-[320px] max-h-[min(70vh,32rem)] overflow-[hidden_auto]"
+        // collisionPadding keeps the menu ≥12px from every viewport edge and makes
+        // Radix subtract that gap from --radix-popper-available-height — the exact
+        // vertical space left on whichever side the menu opens. Capping max-height
+        // to that var means the list scrolls instead of clipping off-screen, no
+        // matter how many models exist or where the trigger sits (e.g. the
+        // vertically-centred composer on the welcome screen).
+        collisionPadding={12}
+        className="w-[320px] max-h-[var(--radix-popper-available-height)] overflow-[hidden_auto]"
       >
         <DropdownMenuLabel>{t('modelPicker.section')}</DropdownMenuLabel>
         {shownTags.length > 0 && (

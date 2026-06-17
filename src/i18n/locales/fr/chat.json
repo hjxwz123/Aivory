@@ -182,6 +182,20 @@
   "topbar": {
     "shareTooltip": "Partager"
   },
+  "files": {
+    "title": "Fichiers de cette discussion",
+    "tooltip": "Fichiers",
+    "close": "Fermer",
+    "add": "Ajouter des fichiers",
+    "uploading": "Envoi…",
+    "hint": "Fichiers que le modèle peut lire dans cette conversation. En retirer un l’exclut des réponses suivantes — le message qui l’a envoyé reste.",
+    "loading": "Chargement…",
+    "empty": "Aucun fichier. Ajoutez-en un pour que le modèle puisse le lire.",
+    "added": "Fichier ajouté",
+    "addFailed": "Impossible d’ajouter le fichier",
+    "remove": "Retirer {{name}}",
+    "removeFailed": "Impossible de retirer le fichier"
+  },
   "inline": {
     "ask": "Demander",
     "placeholder": "Poser une question à ce sujet…",

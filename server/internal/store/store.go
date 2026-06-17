@@ -109,6 +109,10 @@ func Migrate(db *sql.DB) error {
 	addInlineQuote := `ALTER TABLE conversations ADD COLUMN inline_quote TEXT NOT NULL DEFAULT ''`
 	// Model tags (§ model tags) — JSON id array on models.
 	addModelTags := `ALTER TABLE models ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'`
+	// Per-group resource caps (§ user groups) — max projects / KBs a member may
+	// create. 0 = unlimited.
+	addGroupMaxProjects := `ALTER TABLE user_groups ADD COLUMN max_projects INTEGER NOT NULL DEFAULT 0`
+	addGroupMaxKBs := `ALTER TABLE user_groups ADD COLUMN max_kbs INTEGER NOT NULL DEFAULT 0`
 	if usePostgres {
 		schema = schemaPGSQL
 		addImageRef = `ALTER TABLE chunks ADD COLUMN IF NOT EXISTS image_ref TEXT`
@@ -133,6 +137,8 @@ func Migrate(db *sql.DB) error {
 		addInlineParent = `ALTER TABLE conversations ADD COLUMN IF NOT EXISTS inline_parent_id TEXT NOT NULL DEFAULT ''`
 		addInlineQuote = `ALTER TABLE conversations ADD COLUMN IF NOT EXISTS inline_quote TEXT NOT NULL DEFAULT ''`
 		addModelTags = `ALTER TABLE models ADD COLUMN IF NOT EXISTS tags TEXT NOT NULL DEFAULT '[]'`
+		addGroupMaxProjects = `ALTER TABLE user_groups ADD COLUMN IF NOT EXISTS max_projects INTEGER NOT NULL DEFAULT 0`
+		addGroupMaxKBs = `ALTER TABLE user_groups ADD COLUMN IF NOT EXISTS max_kbs INTEGER NOT NULL DEFAULT 0`
 	}
 	if _, err := db.Exec(schema); err != nil {
 		return fmt.Errorf("apply schema: %w", err)
@@ -149,6 +155,7 @@ func Migrate(db *sql.DB) error {
 		addGroupBuyURL,
 		addInlineSource, addInlineParent, addInlineQuote,
 		addModelTags,
+		addGroupMaxProjects, addGroupMaxKBs,
 	} {
 		_, _ = db.Exec(ddl)
 	}
@@ -190,12 +197,18 @@ func Seed(db *sql.DB, cfg config.Config) error {
 		"daily_image_limit":           fmt.Sprintf("%d", cfg.DailyImages),
 		"signup_open":                 `true`,
 		"email_verification_required": `false`,
-		"sandbox_base_url":            `""`,
-		"sandbox_api_key":             `""`,
-		"moderation_keywords":         `[]`,
-		"moderation_model_id":         `""`,
-		"moderation_categories":       `["politics","pornography","violence or gore","terrorism","illegal activity","hate speech","self-harm"]`,
-		"moderation_message":          `"Your message was blocked by content moderation. Please rephrase and try again."`,
+		// Anti-abuse registration controls. register_ip_daily_limit caps how many
+		// accounts one client IP may create per calendar day (0 = unlimited).
+		// register_captcha_required gates signup behind the arithmetic captcha
+		// (a text math question — no image/OCR).
+		"register_ip_daily_limit":   `0`,
+		"register_captcha_required": `false`,
+		"sandbox_base_url":          `""`,
+		"sandbox_api_key":           `""`,
+		"moderation_keywords":       `[]`,
+		"moderation_model_id":       `""`,
+		"moderation_categories":     `["politics","pornography","violence or gore","terrorism","illegal activity","hate speech","self-harm"]`,
+		"moderation_message":        `"Your message was blocked by content moderation. Please rephrase and try again."`,
 		// § announcement: a single global notice shown to users on load. image_url
 		// non-empty → image announcement (image left, text right). remember_dismiss
 		// false → re-show every visit; updated_at doubles as the dismiss version.

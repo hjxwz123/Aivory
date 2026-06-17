@@ -182,6 +182,20 @@
   "topbar": {
     "shareTooltip": "分享"
   },
+  "files": {
+    "title": "此對話的檔案",
+    "tooltip": "檔案",
+    "close": "關閉",
+    "add": "新增檔案",
+    "uploading": "上傳中…",
+    "hint": "模型在此對話中可讀取的檔案。移除後，後續回覆將不再使用它——上傳它的那則訊息會保留。",
+    "loading": "載入中…",
+    "empty": "尚無檔案。新增後模型即可讀取。",
+    "added": "已新增檔案",
+    "addFailed": "新增檔案失敗",
+    "remove": "移除 {{name}}",
+    "removeFailed": "移除檔案失敗"
+  },
   "inline": {
     "ask": "提問",
     "placeholder": "針對這段內容提問…",

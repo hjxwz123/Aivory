@@ -41,6 +41,7 @@ import { api, ApiError } from '@/api/client'
 import type { ApiAttachment } from '@/api/types'
 import { toast } from '@/hooks/use-toast'
 import { cn, uid, modKey } from '@/lib/utils'
+import { fileIconFor } from '@/lib/file-icon'
 
 interface ComposerProps {
   modelId: string
@@ -432,7 +433,12 @@ export function Composer({
                   <Loader2 size={10} className="animate-spin shrink-0" aria-hidden />
                 ) : a.ingest === 'failed' ? (
                   <AlertTriangle size={10} className="shrink-0" aria-hidden />
-                ) : null}
+                ) : (
+                  (() => {
+                    const Icon = fileIconFor(a.name, a.kind)
+                    return <Icon size={12} className="shrink-0 text-[var(--color-fg-subtle)]" aria-hidden />
+                  })()
+                )}
                 <span className="truncate">{a.name}</span>
                 {a.ingest === 'parsing' || a.ingest === 'embedding' ? (
                   <span className="shrink-0 text-[10px] text-[var(--color-fg-subtle)]">

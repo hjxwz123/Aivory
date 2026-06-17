@@ -596,6 +596,10 @@ var settingsKeys = []string{
 	"compaction_token_trigger",
 	"memory_enabled", "daily_message_limit", "daily_image_limit", "signup_open",
 	"email_verification_required", "daily_token_limit", "max_concurrent_generations",
+	// Anti-abuse registration controls. register_ip_daily_limit: max accounts one
+	// IP may create per day (0 = off). register_captcha_required: gate signup
+	// behind the text arithmetic captcha (no image OCR).
+	"register_ip_daily_limit", "register_captcha_required",
 	// §B6 partial: JSON array of tool names disabled platform-wide (kill-switch),
 	// e.g. ["python_execute","image_generate"].
 	"disabled_tools",

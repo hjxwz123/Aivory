@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { useHtmlPreview } from './html-preview'
+import { useConversationFiles } from './conversation-files'
 
 /**
  * inline-thread — drives the right-side drawer that shows a text-selection
@@ -24,6 +25,7 @@ export const useInlineThreadDrawer = create<InlineThreadDrawerStore>((set) => ({
   openThread({ childId, quote }) {
     // Mutual exclusion: the HTML preview and this drawer share the right edge.
     useHtmlPreview.getState().close()
+    useConversationFiles.getState().close()
     set({ open: true, childId, quote })
   },
   close() {

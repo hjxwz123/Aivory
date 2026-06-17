@@ -42,6 +42,8 @@ CREATE TABLE IF NOT EXISTS user_groups (
   buy_url     TEXT NOT NULL DEFAULT '',
   is_default  INTEGER NOT NULL DEFAULT 0,
   sort_order  INTEGER NOT NULL DEFAULT 0,
+  max_projects INTEGER NOT NULL DEFAULT 0,
+  max_kbs      INTEGER NOT NULL DEFAULT 0,
   created_at  INTEGER NOT NULL DEFAULT (strftime('%s','now')),
   updated_at  INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 );

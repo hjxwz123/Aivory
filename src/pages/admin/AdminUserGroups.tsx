@@ -100,6 +100,8 @@ export default function AdminUserGroups() {
       price_usd: Number(d.price_usd) || 0,
       price_cny: Number(d.price_cny) || 0,
       buy_url: (d.buy_url ?? '').trim(),
+      max_projects: Math.max(0, Number(d.max_projects) || 0),
+      max_kbs: Math.max(0, Number(d.max_kbs) || 0),
     }
     try {
       if (editor.row) {
@@ -238,6 +240,34 @@ export default function AdminUserGroups() {
                     type="number"
                     value={String(editor.draft.price_cny ?? 0)}
                     onChange={(e) => setDraft({ price_cny: Number(e.target.value) })}
+                  />
+                </Field>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <Field
+                  label={t('admin:groups.fields.maxProjects')}
+                  htmlFor="g-maxproj"
+                  hint={t('admin:groups.fields.limitHint')}
+                >
+                  <Input
+                    id="g-maxproj"
+                    type="number"
+                    min={0}
+                    value={String(editor.draft.max_projects ?? 0)}
+                    onChange={(e) => setDraft({ max_projects: Number(e.target.value) })}
+                  />
+                </Field>
+                <Field
+                  label={t('admin:groups.fields.maxKbs')}
+                  htmlFor="g-maxkbs"
+                  hint={t('admin:groups.fields.limitHint')}
+                >
+                  <Input
+                    id="g-maxkbs"
+                    type="number"
+                    min={0}
+                    value={String(editor.draft.max_kbs ?? 0)}
+                    onChange={(e) => setDraft({ max_kbs: Number(e.target.value) })}
                   />
                 </Field>
               </div>

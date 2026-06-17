@@ -28,6 +28,21 @@ type createProjectReq struct {
 	Emoji        string `json:"emoji"`
 }
 
+// groupCapFor returns the user's effective per-group resource caps (§ user
+// groups). 0 = unlimited. Failures fail OPEN (0/unlimited) so a transient DB
+// error never blocks a legitimate create.
+func groupCapFor(d Deps, r *http.Request, userID, groupID string) (maxProjects, maxKBs int) {
+	gid := groupID
+	if gid == "" {
+		gid = store.DefaultGroupID
+	}
+	g, err := store.GetUserGroup(r.Context(), d.DB, gid)
+	if err != nil || g == nil {
+		return 0, 0
+	}
+	return g.MaxProjects, g.MaxKBs
+}
+
 // createProjectHandler creates a project + its dedicated knowledge base.
 func createProjectHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
@@ -40,6 +55,13 @@ func createProjectHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	if req.Name == "" {
 		writeError(w, 400, errors.New("name required"))
 		return
+	}
+	// Enforce the group's project cap (§ user groups). 0 = unlimited.
+	if maxProjects, _ := groupCapFor(d, r, u.ID, u.GroupID); maxProjects > 0 {
+		if n, err := store.CountProjectsByUser(r.Context(), d.DB, u.ID); err == nil && n >= maxProjects {
+			writeError(w, 403, errProjectLimit)
+			return
+		}
 	}
 	// Find embedding model.
 	embeds, err := store.ListModels(r.Context(), d.DB, "embedding", true)

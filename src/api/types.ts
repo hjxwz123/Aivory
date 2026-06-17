@@ -124,6 +124,9 @@ export interface ApiUserGroup {
   buy_url?: string
   is_default: boolean
   sort_order: number
+  /** Max projects / knowledge bases a member may create. 0 = unlimited. */
+  max_projects: number
+  max_kbs: number
   created_at: number
   updated_at: number
 }
@@ -314,6 +317,17 @@ export interface ApiDocument {
   error: string
   chunk_count: number
   created_at: number
+}
+
+/** A file referenced by a conversation (§ conversation files drawer). */
+export interface ApiConversationFile {
+  id: string
+  filename: string
+  kind: string
+  mime_type: string
+  size_bytes: number
+  created_at: number
+  url: string
 }
 
 export interface ApiConversation {

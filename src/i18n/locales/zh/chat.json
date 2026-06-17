@@ -181,6 +181,20 @@
   "topbar": {
     "shareTooltip": "分享"
   },
+  "files": {
+    "title": "本对话的文件",
+    "tooltip": "文件",
+    "close": "关闭",
+    "add": "添加文件",
+    "uploading": "上传中…",
+    "hint": "模型在本对话中可读取的文件。移除后，后续回复将不再使用它——上传它的那条消息会保留。",
+    "loading": "加载中…",
+    "empty": "暂无文件。添加后模型即可读取。",
+    "added": "已添加文件",
+    "addFailed": "添加文件失败",
+    "remove": "移除 {{name}}",
+    "removeFailed": "移除文件失败"
+  },
   "inline": {
     "ask": "提问",
     "placeholder": "针对这段内容提问…",

@@ -30,6 +30,8 @@ const OWNED_KEYS = [
   'compaction_enabled',
   'memory_enabled',
   'signup_open',
+  'register_ip_daily_limit',
+  'register_captcha_required',
   'daily_message_limit',
   'daily_image_limit',
   'email_verification_required',
@@ -194,6 +196,27 @@ export default function AdminSettings() {
             checked={readBool('signup_open', true)}
             onChange={(v) => setDraft({ ...draft, signup_open: v })}
           />
+          <ToggleRow
+            label={t('admin:settings.fields.registerCaptcha')}
+            checked={readBool('register_captcha_required')}
+            onChange={(v) => setDraft({ ...draft, register_captcha_required: v })}
+          />
+          {readBool('register_captcha_required') && (
+            <p className="text-xs text-[var(--color-fg-subtle)] -mt-3 pl-1">{t('admin:settings.fields.registerCaptchaHint')}</p>
+          )}
+          <Field
+            label={t('admin:settings.fields.registerIpDailyLimit')}
+            htmlFor="reg-ip-limit"
+            hint={t('admin:settings.fields.registerIpDailyLimitHint')}
+          >
+            <Input
+              id="reg-ip-limit"
+              type="number"
+              min={0}
+              value={String(readNumber('register_ip_daily_limit', 0))}
+              onChange={(e) => setDraft({ ...draft, register_ip_daily_limit: Math.max(0, Number(e.target.value) || 0) })}
+            />
+          </Field>
 
           <div className="grid grid-cols-2 gap-4">
             <Field label={t('admin:settings.fields.dailyMessageLimit')} htmlFor="dmsg">

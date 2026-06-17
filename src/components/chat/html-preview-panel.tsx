@@ -14,19 +14,43 @@ import { cn } from '@/lib/utils'
  * area, so the conversation stays usable while markup streams in live.
  * Mobile: the same content inside a right-side Sheet.
  *
- * Security: model HTML is hostile input. The iframe grants `allow-scripts`
- * and NOTHING else:
- * - no `allow-same-origin` → opaque origin; no cookies, storage, parent DOM.
- *   (NEVER add it: combined with allow-scripts it voids the sandbox.)
- * - no `allow-forms` → forms can't submit/navigate to an attacker URL with
- *   whatever a user might type into a rendered page; JS-driven interactivity
- *   keeps working.
- * - no `allow-top-navigation` / `allow-popups` / `allow-modals` /
- *   `allow-downloads` → the preview can't redirect, spawn windows, throw
- *   native dialogs, or drop files.
- * - `referrerPolicy="no-referrer"` keeps our URL out of any subresource it
- *   loads.
+ * External resources: the preview is allowed to load external images, CSS,
+ * fonts, media and scripts so a model-built page renders as intended, and to
+ * open external links in a new tab. Security rests on the opaque origin, NOT on
+ * blocking the network:
+ * - no `allow-same-origin` → opaque origin; the frame can never read our
+ *   cookies, storage, or DOM, so external resources it loads can't reach our
+ *   data. (NEVER add allow-same-origin: with allow-scripts it voids the sandbox.)
+ * - `allow-popups allow-popups-to-escape-sandbox` lets a user-clicked link open
+ *   normally in a new tab (the requested "external links work"); popups are
+ *   user-initiated and open as ordinary top-level tabs governed by normal
+ *   browser security.
+ * - injected `<base target="_blank" rel="noopener noreferrer">` routes link
+ *   clicks to a new tab without exposing our window via `opener`.
+ * - injected `upgrade-insecure-requests` CSP upgrades any `http://` subresource
+ *   to https so it isn't blocked as mixed content on an https deployment.
+ * - no `allow-forms` / `allow-modals` / `allow-downloads` → the page can't
+ *   submit forms, throw native dialogs, or drop files.
+ * - `referrerPolicy="no-referrer"` keeps our URL out of any subresource it loads.
  */
+
+// EXTERNAL_HEAD is injected into the previewed document's <head> so external
+// resources render (mixed-content upgrade) and links open in a new tab safely.
+const EXTERNAL_HEAD =
+  '<meta http-equiv="Content-Security-Policy" content="upgrade-insecure-requests">' +
+  '<base target="_blank" rel="noopener noreferrer">'
+
+// withExternalResources injects EXTERNAL_HEAD into the document head. Handles a
+// full document (insert after <head> or <html>) and a bare fragment (prepend —
+// the browser hoists <base>/<meta> into the implicit head).
+function withExternalResources(html: string): string {
+  if (!html) return html
+  const headOpen = /<head[^>]*>/i
+  if (headOpen.test(html)) return html.replace(headOpen, (m) => m + EXTERNAL_HEAD)
+  const htmlOpen = /<html[^>]*>/i
+  if (htmlOpen.test(html)) return html.replace(htmlOpen, (m) => `${m}<head>${EXTERNAL_HEAD}</head>`)
+  return EXTERNAL_HEAD + html
+}
 export function HtmlPreviewPanel() {
   const open = useHtmlPreview((s) => s.open)
   const html = useHtmlPreview((s) => s.html)
@@ -133,9 +157,9 @@ function PreviewBody({ doc, reloadKey, onRefresh, onClose }: PreviewBodyProps) {
         <iframe
           key={reloadKey}
           title={t('code.previewTitle')}
-          sandbox="allow-scripts"
+          sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"
           referrerPolicy="no-referrer"
-          srcDoc={doc}
+          srcDoc={withExternalResources(doc)}
           className="size-full rounded-[12px] border border-[var(--color-border)] bg-[var(--color-preview-canvas)]"
         />
       </div>

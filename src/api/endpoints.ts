@@ -9,6 +9,7 @@ import type {
   ApiAuthResponse,
   ApiChannel,
   ApiConversation,
+  ApiConversationFile,
   ApiDocument,
   ApiKnowledgeBase,
   ApiMemory,
@@ -34,7 +35,9 @@ import type {
 // ----- Auth ----------------------------------------------------------------
 
 export const authApi = {
-  signupOpen: () => api<{ open: boolean }>('/public/signup-open'),
+  signupOpen: () => api<{ open: boolean; captcha_required: boolean }>('/public/signup-open'),
+  /** Fetch a fresh arithmetic captcha (text math question, no image). */
+  captcha: () => api<{ id: string; question: string }>('/public/captcha'),
   /** Whether the deployment still needs its first-run setup (zero users). */
   needsSetup: () => api<{ needs_setup: boolean }>('/public/needs-setup'),
   /** Create the first account (admin) on a fresh deployment, then sign in. */
@@ -53,8 +56,11 @@ export const authApi = {
   setup2fa: () => api<{ secret: string; otpauth_url: string }>('/me/2fa/setup', { method: 'POST' }),
   enable2fa: (code: string) => api<{ ok: true }>('/me/2fa/enable', { method: 'POST', body: { code } }),
   disable2fa: (code: string) => api<{ ok: true }>('/me/2fa/disable', { method: 'POST', body: { code } }),
-  register: (email: string, password: string, name: string) =>
-    api<ApiAuthResponse | { verification_required: boolean; email: string }>('/auth/register', { method: 'POST', body: { email, password, name } }),
+  register: (email: string, password: string, name: string, captcha?: { id: string; answer: string }) =>
+    api<ApiAuthResponse | { verification_required: boolean; email: string }>('/auth/register', {
+      method: 'POST',
+      body: { email, password, name, captcha_id: captcha?.id, captcha_answer: captcha?.answer },
+    }),
   refresh: () => api<ApiAuthResponse>('/auth/refresh', { method: 'POST' }),
   logout: () => api<{ ok: true }>('/auth/logout', { method: 'POST' }),
   updateProfile: (patch: { name?: string; email?: string }) =>
@@ -241,6 +247,14 @@ export const conversationsApi = {
   // to show upload/parse progress and block the first send until 'ready'.
   listDocs: (id: string) =>
     api<ApiDocument[]>(`/conversations/${encodeURIComponent(id)}/documents`),
+  // Conversation files drawer (§ conversation files): the authoritative set of
+  // files the conversation references, and remove (detach + drop RAG).
+  listFiles: (id: string) =>
+    api<ApiConversationFile[]>(`/conversations/${encodeURIComponent(id)}/files`),
+  removeFile: (id: string, fileId: string) =>
+    api<{ ok: true }>(`/conversations/${encodeURIComponent(id)}/files/${encodeURIComponent(fileId)}`, {
+      method: 'DELETE',
+    }),
   // Public read-only sharing (§ sharing).
   getShare: (id: string) =>
     api<{ share: ApiShareInfo | null }>(`/conversations/${encodeURIComponent(id)}/share`),

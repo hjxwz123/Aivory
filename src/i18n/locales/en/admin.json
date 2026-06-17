@@ -335,6 +335,10 @@
       "compactionEnabled": "Compaction enabled",
       "memoryEnabled": "Memories enabled",
       "signupOpen": "New signups open",
+      "registerCaptcha": "Require registration captcha",
+      "registerCaptchaHint": "New sign-ups must solve a short arithmetic question (text only — no image to read).",
+      "registerIpDailyLimit": "Daily registrations per IP",
+      "registerIpDailyLimitHint": "Max accounts one IP address can create per day. 0 = unlimited.",
       "dailyMessageLimit": "Daily message limit",
       "dailyImageLimit": "Daily image limit",
       "emailVerificationRequired": "Require email verification",
@@ -435,7 +439,10 @@
       "featuresHint": "One per line. Shown as a checklist on the subscription page.",
       "featuresPlaceholder": "Priority access\nHigher usage limits\nEarly features",
       "buyUrl": "Purchase link",
-      "buyUrlHint": "Optional. Shown as a “Buy / Upgrade” button on the subscription page."
+      "buyUrlHint": "Optional. Shown as a “Buy / Upgrade” button on the subscription page.",
+      "maxProjects": "Max projects",
+      "maxKbs": "Max knowledge bases",
+      "limitHint": "0 = unlimited."
     },
     "errors": {
       "nameRequired": "Name is required"

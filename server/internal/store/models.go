@@ -10,14 +10,14 @@ import (
 
 // User is the row + profile shape returned to the frontend.
 type User struct {
-	ID        string          `json:"id"`
-	Email     string          `json:"email"`
-	Name      string          `json:"name"`
-	Role      string          `json:"role"`
-	Status    string          `json:"status"`
-	TokenVer  int             `json:"-"`
-	Settings  json.RawMessage `json:"settings"`
-	GroupID   string          `json:"group_id"`
+	ID       string          `json:"id"`
+	Email    string          `json:"email"`
+	Name     string          `json:"name"`
+	Role     string          `json:"role"`
+	Status   string          `json:"status"`
+	TokenVer int             `json:"-"`
+	Settings json.RawMessage `json:"settings"`
+	GroupID  string          `json:"group_id"`
 	// GroupExpiresAt is the unix seconds at which the current group_id
 	// downgrades back to PreviousGroupID (or ug_free if empty). 0 = no expiry
 	// (permanent membership, set by admin or by a redeem code with duration=0).
@@ -30,7 +30,7 @@ type User struct {
 	// HasPassword is false for accounts created via OAuth that have never
 	// chosen a password of their own. The client uses this to force a
 	// set-password step (§ third-party login has no password).
-	HasPassword bool  `json:"has_password"`
+	HasPassword bool `json:"has_password"`
 	// LastSeenAt is the unix seconds of the user's last authenticated activity,
 	// updated (throttled) by the auth middleware. Drives the admin online status.
 	LastSeenAt int64 `json:"last_seen_at"`
@@ -56,11 +56,15 @@ type UserGroup struct {
 	PriceCNY    float64         `json:"price_cny"`
 	// BuyURL is an optional external purchase/upgrade link shown on the
 	// subscription page (§ user groups). Empty = no button.
-	BuyURL      string          `json:"buy_url"`
-	IsDefault   bool            `json:"is_default"`
-	SortOrder   int             `json:"sort_order"`
-	CreatedAt   int64           `json:"created_at"`
-	UpdatedAt   int64           `json:"updated_at"`
+	BuyURL    string `json:"buy_url"`
+	IsDefault bool   `json:"is_default"`
+	SortOrder int    `json:"sort_order"`
+	// MaxProjects / MaxKBs cap how many projects / knowledge bases a member may
+	// create (§ user groups). 0 = unlimited.
+	MaxProjects int   `json:"max_projects"`
+	MaxKBs      int   `json:"max_kbs"`
+	CreatedAt   int64 `json:"created_at"`
+	UpdatedAt   int64 `json:"updated_at"`
 }
 
 // ModelGroupQuota caps a group's usage of one model within a fixed window.
@@ -89,40 +93,40 @@ type Channel struct {
 // Model mirrors design.md §2.3-B. Prices are per 1M tokens (chat/embedding)
 // or per image.
 type Model struct {
-	ID              string          `json:"id"`
-	ChannelID       string          `json:"channel_id"`
-	Kind            string          `json:"kind"`
-	RequestID       string          `json:"request_id"`
-	Label           string          `json:"label"`
-	Description     string          `json:"description"`
-	Icon            string          `json:"icon"`
-	Enabled         bool            `json:"enabled"`
-	SortOrder       int             `json:"sort_order"`
-	ToolMode        string          `json:"tool_mode"`
-	Vision          bool            `json:"vision"`
-	Stream          bool            `json:"stream"`
-	SystemPrompt    string          `json:"system_prompt"`
-	ParamControls   json.RawMessage `json:"param_controls"`
+	ID            string          `json:"id"`
+	ChannelID     string          `json:"channel_id"`
+	Kind          string          `json:"kind"`
+	RequestID     string          `json:"request_id"`
+	Label         string          `json:"label"`
+	Description   string          `json:"description"`
+	Icon          string          `json:"icon"`
+	Enabled       bool            `json:"enabled"`
+	SortOrder     int             `json:"sort_order"`
+	ToolMode      string          `json:"tool_mode"`
+	Vision        bool            `json:"vision"`
+	Stream        bool            `json:"stream"`
+	SystemPrompt  string          `json:"system_prompt"`
+	ParamControls json.RawMessage `json:"param_controls"`
 	// OfficialTools lists OpenAI Responses hosted tools to enable (e.g.
 	// "web_search"). Empty = use the system's self-built tools (§2.3-B). Only
 	// meaningful for an openai channel with api_format=responses.
-	OfficialTools   json.RawMessage `json:"official_tools"`
+	OfficialTools json.RawMessage `json:"official_tools"`
 	// Tags is a JSON array of model_tags ids assigned to this model — used by the
 	// model picker's tag filter (§ model tags). Empty = untagged.
-	Tags            json.RawMessage `json:"tags"`
+	Tags json.RawMessage `json:"tags"`
 	// ModerationEnabled screens each user prompt before generation (§ moderation).
 	// ModerationMode picks the screen: "keyword" (match the admin keyword list)
 	// or "model" (ask the configured moderation model for an ALLOW/BLOCK verdict).
-	ModerationEnabled bool   `json:"moderation_enabled"`
-	ModerationMode    string `json:"moderation_mode"`
-	PriceInput      float64         `json:"price_input"`
-	PriceOutput     float64         `json:"price_output"`
-	PriceCacheRead  float64         `json:"price_cache_read"`
-	PriceCacheWrite float64         `json:"price_cache_write"`
-	PricePerImage   float64         `json:"price_per_image"`
-	Currency        string          `json:"currency"`
-	Dim             int             `json:"dim"`
-	UpdatedAt       int64           `json:"updated_at"`
+	ModerationEnabled bool    `json:"moderation_enabled"`
+	ModerationMode    string  `json:"moderation_mode"`
+	PriceInput        float64 `json:"price_input"`
+	PriceOutput       float64 `json:"price_output"`
+	PriceCacheRead    float64 `json:"price_cache_read"`
+	PriceCacheWrite   float64 `json:"price_cache_write"`
+	PricePerImage     float64 `json:"price_per_image"`
+	Currency          string  `json:"currency"`
+	Dim               int     `json:"dim"`
+	UpdatedAt         int64   `json:"updated_at"`
 }
 
 // OAuthProvider is an admin-configured social/OAuth login method. The
@@ -300,14 +304,14 @@ type UsageLog struct {
 
 // File — uploaded file metadata.
 type File struct {
-	ID             string          `json:"id"`
-	UserID         string          `json:"user_id"`
-	ConversationID string          `json:"conversation_id"`
-	Filename       string          `json:"filename"`
-	MimeType       string          `json:"mime_type"`
-	SizeBytes      int64           `json:"size_bytes"`
-	Kind           string          `json:"kind"`
-	StoragePath    string          `json:"-"`
+	ID             string `json:"id"`
+	UserID         string `json:"user_id"`
+	ConversationID string `json:"conversation_id"`
+	Filename       string `json:"filename"`
+	MimeType       string `json:"mime_type"`
+	SizeBytes      int64  `json:"size_bytes"`
+	Kind           string `json:"kind"`
+	StoragePath    string `json:"-"`
 	// URL is filled by the handler (not the DB) so the frontend can render
 	// thumbnails / download links without keeping the blob URL alive.
 	URL string `json:"url,omitempty"`

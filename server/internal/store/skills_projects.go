@@ -160,6 +160,13 @@ func ListSkillAssets(ctx context.Context, db *sql.DB, skillID string) ([]SkillAs
 }
 
 // ListProjects returns the user's projects.
+// CountProjectsByUser returns how many projects a user owns (§ user-group caps).
+func CountProjectsByUser(ctx context.Context, db *sql.DB, userID string) (int, error) {
+	var n int
+	err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM projects WHERE user_id=?`, userID).Scan(&n)
+	return n, err
+}
+
 func ListProjects(ctx context.Context, db *sql.DB, userID string) ([]Project, error) {
 	rows, err := db.QueryContext(ctx,
 		`SELECT id, user_id, name, description, instructions, accent, emoji, pinned, kb_id, auto_add_uploads, created_at, updated_at

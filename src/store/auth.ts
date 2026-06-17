@@ -19,6 +19,8 @@ interface AuthState {
    *  Drives the suspended notice on the login screen. */
   banned: boolean
   signupOpen: boolean
+  /** True when the admin requires the arithmetic captcha on the register form. */
+  captchaRequired: boolean
   /** True when the deployment has no users yet — the app routes to the first-run
    *  setup screen (create the first admin) instead of login (§ first-run setup). */
   needsSetup: boolean
@@ -30,7 +32,12 @@ interface AuthState {
   hydrate: () => Promise<void>
   login: (email: string, password: string) => Promise<boolean | '2fa'>
   loginTwoFactor: (code: string) => Promise<boolean>
-  register: (email: string, password: string, name: string) => Promise<boolean | 'verify'>
+  register: (
+    email: string,
+    password: string,
+    name: string,
+    captcha?: { id: string; answer: string },
+  ) => Promise<boolean | 'verify'>
   /** First-run: create the initial admin account, then sign in. */
   setup: (name: string, email: string, password: string) => Promise<boolean>
   logout: () => Promise<void>
@@ -49,6 +56,7 @@ export const useAuth = create<AuthState>((set, get) => ({
   error: null,
   banned: false,
   signupOpen: true,
+  captchaRequired: false,
   needsSetup: false,
   pendingVerification: null,
   pendingTwoFactor: null,
@@ -89,7 +97,7 @@ export const useAuth = create<AuthState>((set, get) => ({
     } finally {
       try {
         const r = await authApi.signupOpen()
-        set({ signupOpen: r.open })
+        set({ signupOpen: r.open, captchaRequired: r.captcha_required })
       } catch {
         /* ignore */
       }
@@ -168,10 +176,10 @@ export const useAuth = create<AuthState>((set, get) => ({
     }
   },
 
-  async register(email, password, name) {
+  async register(email, password, name, captcha) {
     set({ status: 'authenticating', error: null })
     try {
-      const resp = await authApi.register(email, password, name)
+      const resp = await authApi.register(email, password, name, captcha)
       if ('verification_required' in resp && resp.verification_required) {
         set({ pendingVerification: resp.email as string, status: 'unauthenticated' })
         return 'verify'

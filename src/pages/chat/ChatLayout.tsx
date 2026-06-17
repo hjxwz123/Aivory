@@ -5,6 +5,7 @@ import { PanelLeftOpen, Menu } from 'lucide-react'
 import { Sidebar } from '@/components/sidebar/sidebar'
 import { HtmlPreviewPanel } from '@/components/chat/html-preview-panel'
 import { InlineThreadPanel } from '@/components/chat/inline-thread-panel'
+import { ConversationFilesPanel } from '@/components/chat/conversation-files-panel'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { useSettings } from '@/store/settings'
 import { useUI } from '@/store/ui'
@@ -100,6 +101,7 @@ export default function ChatLayout() {
         {/* Right-edge drawers — mutually exclusive (see store coordination). */}
         <HtmlPreviewPanel />
         <InlineThreadPanel />
+        <ConversationFilesPanel />
       </main>
     </div>
   )

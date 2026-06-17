@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { MoreHorizontal, Pencil, Share2, Star, Trash2, Archive, ArrowDown, FolderKanban, Copy, Check, Globe, Loader2, Menu } from 'lucide-react'
+import { MoreHorizontal, Pencil, Share2, Star, Trash2, Archive, ArrowDown, FolderKanban, Copy, Check, Globe, Loader2, Menu, Files } from 'lucide-react'
 import { Composer } from '@/components/chat/composer'
 import { MessageList } from '@/components/chat/message-list'
 import { InlineThreadLayer } from '@/components/chat/inline-thread-layer'
@@ -30,6 +30,7 @@ import { useConversations } from '@/store/conversations'
 import { useModels } from '@/store/models'
 import { useProjects } from '@/store/projects'
 import { useUI } from '@/store/ui'
+import { useConversationFiles } from '@/store/conversation-files'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { conversationsApi, ApiError } from '@/api'
 import type { ApiShareInfo } from '@/api/types'
@@ -60,6 +61,9 @@ export default function ChatThread() {
 
   const isDesktop = useMediaQuery('(min-width: 1024px)')
   const openNav = useUI((s) => s.setNavOpen)
+  const openFilesDrawer = useConversationFiles((s) => s.openDrawer)
+  const closeFilesDrawer = useConversationFiles((s) => s.close)
+  const filesDrawerOpen = useConversationFiles((s) => s.open)
   // On mobile this page renders one combined bar (menu + title + controls), so
   // tell the layout to drop its standalone brand bar while we're mounted.
   useEffect(() => {
@@ -287,6 +291,22 @@ export default function ChatThread() {
             className="inline-flex items-center justify-center size-8 rounded-[8px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
           >
             <Share2 size={14} aria-hidden />
+          </button>
+        </Tooltip>
+        <Tooltip content={t('chat:files.tooltip')}>
+          <button
+            type="button"
+            onClick={() => (filesDrawerOpen ? closeFilesDrawer() : openFilesDrawer(conversation.id))}
+            aria-label={t('chat:files.title')}
+            aria-pressed={filesDrawerOpen}
+            className={cn(
+              'inline-flex items-center justify-center size-8 rounded-[8px] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+              filesDrawerOpen
+                ? 'bg-[var(--color-bg-muted)] text-[var(--color-fg)]'
+                : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
+            )}
+          >
+            <Files size={14} aria-hidden />
           </button>
         </Tooltip>
         <DropdownMenu>

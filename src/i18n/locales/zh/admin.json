@@ -335,6 +335,10 @@
       "compactionEnabled": "启用压缩",
       "memoryEnabled": "启用记忆",
       "signupOpen": "开放新注册",
+      "registerCaptcha": "注册需要验证码",
+      "registerCaptchaHint": "新注册必须答对一道简单算术题（纯文字，无需识别图片）。",
+      "registerIpDailyLimit": "单 IP 每日注册上限",
+      "registerIpDailyLimitHint": "同一 IP 地址每天最多可创建的账号数。0 = 不限制。",
       "dailyMessageLimit": "每日消息上限",
       "dailyImageLimit": "每日图片上限",
       "emailVerificationRequired": "要求邮箱验证",
@@ -435,7 +439,10 @@
       "featuresHint": "每行一条，将在订阅页面以清单形式展示。",
       "featuresPlaceholder": "优先访问\n更高用量上限\n抢先体验新功能",
       "buyUrl": "购买链接",
-      "buyUrlHint": "可选。将在订阅页面显示为「购买 / 升级」按钮。"
+      "buyUrlHint": "可选。将在订阅页面显示为「购买 / 升级」按钮。",
+      "maxProjects": "最大项目数",
+      "maxKbs": "最大知识库数",
+      "limitHint": "0 = 不限。"
     },
     "errors": {
       "nameRequired": "请填写名称"

@@ -10,6 +10,16 @@ import (
 )
 
 // ListKBs returns the user's knowledge bases.
+// CountStandaloneKBsByUser counts a user's standalone knowledge bases — those
+// not backing a project (§ user-group caps). Project-library KBs are created
+// implicitly with a project and governed by the project cap instead.
+func CountStandaloneKBsByUser(ctx context.Context, db *sql.DB, userID string) (int, error) {
+	var n int
+	err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM knowledge_bases WHERE user_id=? AND (project_id IS NULL OR project_id='')`, userID).Scan(&n)
+	return n, err
+}
+
 func ListKBs(ctx context.Context, db *sql.DB, userID string) ([]KnowledgeBase, error) {
 	rows, err := db.QueryContext(ctx,
 		`SELECT id, user_id, name, description, embedding_model_id, embedding_dim, COALESCE(project_id, ''), created_at FROM knowledge_bases WHERE user_id=? ORDER BY created_at DESC`, userID)

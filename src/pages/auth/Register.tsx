@@ -1,8 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Trans, useTranslation } from 'react-i18next'
 import { motion } from 'framer-motion'
-import { Mail, Lock, User, ArrowRight, ShieldCheck } from 'lucide-react'
+import { Mail, Lock, User, ArrowRight, ShieldCheck, Calculator, RefreshCw } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Field } from '@/components/ui/label'
@@ -11,6 +11,7 @@ import { Separator } from '@/components/ui/separator'
 import { toast } from '@/hooks/use-toast'
 import { useAuth } from '@/store/auth'
 import { authApi, setAccessToken, ApiError } from '@/api'
+import { cn } from '@/lib/utils'
 import { useOAuthProviders } from '@/hooks/use-oauth-providers'
 import { OAuthButtons } from '@/components/auth/oauth-buttons'
 
@@ -26,6 +27,7 @@ export default function Register() {
   const { t } = useTranslation('auth')
   const register = useAuth((s) => s.register)
   const signupOpen = useAuth((s) => s.signupOpen)
+  const captchaRequired = useAuth((s) => s.captchaRequired)
   const pendingVerification = useAuth((s) => s.pendingVerification)
   const { providers } = useOAuthProviders()
 
@@ -34,7 +36,28 @@ export default function Register() {
   const [pw, setPw] = useState('')
   const [agree, setAgree] = useState(false)
   const [loading, setLoading] = useState(false)
-  const [errors, setErrors] = useState<{ name?: string; email?: string; pw?: string; agree?: string; general?: string }>({})
+  const [errors, setErrors] = useState<{ name?: string; email?: string; pw?: string; agree?: string; captcha?: string; general?: string }>({})
+
+  // Arithmetic captcha (only when the admin requires it). Single-use server-side,
+  // so we fetch a fresh one on mount and after every failed attempt.
+  const [captcha, setCaptcha] = useState<{ id: string; question: string } | null>(null)
+  const [captchaAnswer, setCaptchaAnswer] = useState('')
+  const [captchaLoading, setCaptchaLoading] = useState(false)
+
+  async function loadCaptcha() {
+    setCaptchaLoading(true)
+    try {
+      setCaptcha(await authApi.captcha())
+      setCaptchaAnswer('')
+    } catch {
+      /* leave the previous question in place; the user can retry */
+    } finally {
+      setCaptchaLoading(false)
+    }
+  }
+  useEffect(() => {
+    if (captchaRequired) void loadCaptcha()
+  }, [captchaRequired])
 
   // Verification step state
   const [code, setCode] = useState('')
@@ -51,10 +74,16 @@ export default function Register() {
     if (!pw) next.pw = t('errors.required')
     else if (pw.length < 8) next.pw = t('errors.minPassword')
     if (!agree) next.agree = t('errors.acceptTerms')
+    if (captchaRequired && !captchaAnswer.trim()) next.captcha = t('errors.required')
     setErrors(next)
     if (Object.keys(next).length) return
     setLoading(true)
-    const result = await register(email, pw, name.trim())
+    const result = await register(
+      email,
+      pw,
+      name.trim(),
+      captchaRequired && captcha ? { id: captcha.id, answer: captchaAnswer.trim() } : undefined,
+    )
     setLoading(false)
     if (result === 'verify') {
       // verification_required — the store sets pendingVerification, UI will switch
@@ -62,6 +91,19 @@ export default function Register() {
     }
     if (!result) {
       const err = useAuth.getState().error
+      // Map the backend's stable machine codes to friendly copy, and refresh the
+      // single-use captcha so the user can immediately retry.
+      if (err === 'captcha_failed') {
+        void loadCaptcha()
+        setErrors({ captcha: t('register.captchaWrong') })
+        return
+      }
+      if (err === 'register_ip_limit') {
+        if (captchaRequired) void loadCaptcha()
+        setErrors({ general: t('register.ipLimited') })
+        return
+      }
+      if (captchaRequired) void loadCaptcha()
       setErrors({ general: err ?? t('errors.required') })
       return
     }
@@ -267,6 +309,40 @@ export default function Register() {
             />
           </Field>
         </motion.div>
+        {captchaRequired ? (
+          <motion.div variants={fadeUp}>
+            <Field label={t('register.captchaLabel')} htmlFor="captcha" error={errors.captcha}>
+              <div className="flex items-stretch gap-2">
+                <div className="inline-flex select-none items-center gap-1.5 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3 font-mono text-sm text-[var(--color-fg)]">
+                  <span aria-hidden className={cn('tabular-nums', captchaLoading && 'opacity-40')}>
+                    {captcha?.question ?? '— + —'}
+                  </span>
+                  <span className="text-[var(--color-fg-subtle)]">=</span>
+                </div>
+                <Input
+                  id="captcha"
+                  value={captchaAnswer}
+                  onChange={(e) => setCaptchaAnswer(e.target.value.replace(/[^\d-]/g, '').slice(0, 4))}
+                  placeholder={t('register.captchaPlaceholder')}
+                  leadingIcon={<Calculator size={14} aria-hidden />}
+                  inputMode="numeric"
+                  autoComplete="off"
+                  invalid={!!errors.captcha}
+                  className="flex-1"
+                />
+                <button
+                  type="button"
+                  onClick={() => void loadCaptcha()}
+                  disabled={captchaLoading}
+                  aria-label={t('register.captchaRefresh')}
+                  className="inline-flex size-10 shrink-0 items-center justify-center rounded-[10px] border border-[var(--color-border)] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] disabled:opacity-50"
+                >
+                  <RefreshCw size={15} aria-hidden className={cn(captchaLoading && 'animate-[spin_0.8s_linear_infinite]')} />
+                </button>
+              </div>
+            </Field>
+          </motion.div>
+        ) : null}
         <motion.label variants={fadeUp} className="flex items-start gap-3 mt-1 cursor-pointer select-none">
           <Switch
             checked={agree}

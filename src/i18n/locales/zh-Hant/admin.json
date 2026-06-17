@@ -335,6 +335,10 @@
       "compactionEnabled": "啟用壓縮",
       "memoryEnabled": "啟用記憶",
       "signupOpen": "開放新註冊",
+      "registerCaptcha": "註冊需要驗證碼",
+      "registerCaptchaHint": "新註冊必須答對一道簡單算術題（純文字，無需辨識圖片）。",
+      "registerIpDailyLimit": "單 IP 每日註冊上限",
+      "registerIpDailyLimitHint": "同一 IP 位址每天最多可建立的帳號數。0 = 不限制。",
       "dailyMessageLimit": "每日訊息上限",
       "dailyImageLimit": "每日圖片上限",
       "emailVerificationRequired": "要求郵箱驗證",
@@ -435,7 +439,10 @@
       "featuresHint": "每行一條，將在訂閱頁面以清單形式展示。",
       "featuresPlaceholder": "優先訪問\n更高用量上限\n搶先體驗新功能",
       "buyUrl": "購買連結",
-      "buyUrlHint": "可選。將在訂閱頁面顯示為「購買 / 升級」按鈕。"
+      "buyUrlHint": "可選。將在訂閱頁面顯示為「購買 / 升級」按鈕。",
+      "maxProjects": "最大專案數",
+      "maxKbs": "最大知識庫數",
+      "limitHint": "0 = 不限。"
     },
     "errors": {
       "nameRequired": "請填寫名稱"

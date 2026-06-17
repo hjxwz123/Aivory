@@ -13,13 +13,13 @@ import (
 // DefaultGroupID is the always-present free tier id (seeded in Seed).
 const DefaultGroupID = "ug_free"
 
-const userGroupCols = `id, name, description, features, price_usd, price_cny, COALESCE(buy_url,''), is_default, sort_order, created_at, updated_at`
+const userGroupCols = `id, name, description, features, price_usd, price_cny, COALESCE(buy_url,''), is_default, sort_order, COALESCE(max_projects,0), COALESCE(max_kbs,0), created_at, updated_at`
 
 func scanUserGroup(s scanner) (UserGroup, error) {
 	var g UserGroup
 	var features string
 	var def int
-	if err := s.Scan(&g.ID, &g.Name, &g.Description, &features, &g.PriceUSD, &g.PriceCNY, &g.BuyURL, &def, &g.SortOrder, &g.CreatedAt, &g.UpdatedAt); err != nil {
+	if err := s.Scan(&g.ID, &g.Name, &g.Description, &features, &g.PriceUSD, &g.PriceCNY, &g.BuyURL, &def, &g.SortOrder, &g.MaxProjects, &g.MaxKBs, &g.CreatedAt, &g.UpdatedAt); err != nil {
 		return g, err
 	}
 	g.IsDefault = def == 1
@@ -74,9 +74,9 @@ func CreateUserGroup(ctx context.Context, db *sql.DB, g UserGroup) (*UserGroup, 
 	}
 	now := time.Now().Unix()
 	_, err := db.ExecContext(ctx,
-		`INSERT INTO user_groups(id, name, description, features, price_usd, price_cny, buy_url, is_default, sort_order, created_at, updated_at)
-		 VALUES(?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
-		g.ID, g.Name, g.Description, string(g.Features), g.PriceUSD, g.PriceCNY, g.BuyURL, g.SortOrder, now, now)
+		`INSERT INTO user_groups(id, name, description, features, price_usd, price_cny, buy_url, is_default, sort_order, max_projects, max_kbs, created_at, updated_at)
+		 VALUES(?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
+		g.ID, g.Name, g.Description, string(g.Features), g.PriceUSD, g.PriceCNY, g.BuyURL, g.SortOrder, g.MaxProjects, g.MaxKBs, now, now)
 	if err != nil {
 		return nil, err
 	}
@@ -92,6 +92,8 @@ type UserGroupPatch struct {
 	PriceCNY    *float64         `json:"price_cny"`
 	BuyURL      *string          `json:"buy_url"`
 	SortOrder   *int             `json:"sort_order"`
+	MaxProjects *int             `json:"max_projects"`
+	MaxKBs      *int             `json:"max_kbs"`
 }
 
 func UpdateUserGroup(ctx context.Context, db *sql.DB, id string, p UserGroupPatch) (*UserGroup, error) {
@@ -124,6 +126,14 @@ func UpdateUserGroup(ctx context.Context, db *sql.DB, id string, p UserGroupPatc
 	if p.SortOrder != nil {
 		parts = append(parts, "sort_order=?")
 		args = append(args, *p.SortOrder)
+	}
+	if p.MaxProjects != nil {
+		parts = append(parts, "max_projects=?")
+		args = append(args, *p.MaxProjects)
+	}
+	if p.MaxKBs != nil {
+		parts = append(parts, "max_kbs=?")
+		args = append(args, *p.MaxKBs)
 	}
 	if len(parts) == 0 {
 		return GetUserGroup(ctx, db, id)

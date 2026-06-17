@@ -182,6 +182,20 @@
   "topbar": {
     "shareTooltip": "Share"
   },
+  "files": {
+    "title": "Files in this chat",
+    "tooltip": "Files",
+    "close": "Close",
+    "add": "Add files",
+    "uploading": "Uploading…",
+    "hint": "Files the model can read in this conversation. Removing one stops it being used in future replies — the message that uploaded it stays.",
+    "loading": "Loading…",
+    "empty": "No files yet. Add one to let the model read it.",
+    "added": "File added",
+    "addFailed": "Could not add the file",
+    "remove": "Remove {{name}}",
+    "removeFailed": "Could not remove the file"
+  },
   "inline": {
     "ask": "Ask",
     "placeholder": "Ask about this…",
