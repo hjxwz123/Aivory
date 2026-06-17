@@ -232,10 +232,16 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("DELETE", "/api/admin/redeem-codes/:id", requireAdmin(d, deleteRedeemCodeAdmin))
 	mux.handle("GET", "/api/admin/redeem-codes/:id/redemptions", requireAdmin(d, listRedeemCodeRedemptionsAdmin))
 	mux.handle("DELETE", "/api/admin/redeem-batches/:name", requireAdmin(d, deleteRedeemBatchAdmin))
-	// Icon upload — admin-only mint, any authenticated user can read. The
-	// stored URL lands in models.icon so the picker can render the image.
+	// Icon upload — admin-only mint. The stored URL lands in models.icon so the
+	// picker can render the image.
 	mux.handle("POST", "/api/admin/icons", requireAdmin(d, uploadIconAdmin))
-	mux.handle("GET", "/api/icons/:filename", requireAuth(d, serveIcon))
+	// Model icons render in <img> tags (model picker, chat) for every user, so
+	// they're served publicly: gating them behind requireAuth meant the
+	// cookie-auth <img> request 401'd once the access token expired — and an
+	// <img> can't trigger the client's token refresh — so the icon went blank
+	// "after a while" until a full reload. Filenames are random hex with
+	// validated image content, so there's nothing sensitive to protect.
+	mux.handle("GET", "/api/icons/:filename", wrap(d, serveIcon))
 
 	// CORS wrapper.
 	return corsMiddleware(d.Config.AllowedOrigins, mux)
