@@ -145,6 +145,8 @@
     "preview": "Aperçu",
     "previewTitle": "Aperçu HTML",
     "previewRefresh": "Recharger",
+    "previewFullscreen": "Plein écran",
+    "previewExitFullscreen": "Quitter le plein écran",
     "previewClose": "Fermer l'aperçu",
     "previewSandboxHint": "Rendu dans un bac à sable isolé — les scripts de la page ne peuvent pas accéder à vos données.",
     "mermaidFailed": "Impossible d'afficher ce diagramme — affichage de la source."

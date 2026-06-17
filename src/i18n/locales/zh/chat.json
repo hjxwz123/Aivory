@@ -144,6 +144,8 @@
     "preview": "预览",
     "previewTitle": "HTML 预览",
     "previewRefresh": "重新加载",
+    "previewFullscreen": "全屏",
+    "previewExitFullscreen": "退出全屏",
     "previewClose": "关闭预览",
     "previewSandboxHint": "在隔离沙箱中渲染 — 页面脚本无法访问你的数据。",
     "mermaidFailed": "无法渲染该图表，已显示源代码。"

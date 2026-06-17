@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { AppWindow, RotateCw, X } from 'lucide-react'
+import { Maximize2, Minimize2, RotateCw, X } from 'lucide-react'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { Tooltip } from '@/components/ui/tooltip'
 import { useHtmlPreview } from '@/store/html-preview'
@@ -124,10 +124,38 @@ interface PreviewBodyProps {
 
 function PreviewBody({ doc, reloadKey, onRefresh, onClose }: PreviewBodyProps) {
   const { t } = useTranslation('chat')
+  const rootRef = useRef<HTMLDivElement>(null)
+  const [isFullscreen, setIsFullscreen] = useState(false)
+
+  // Keep local state in sync with the native fullscreen lifecycle (Esc exits).
+  useEffect(() => {
+    const onChange = () => setIsFullscreen(document.fullscreenElement === rootRef.current)
+    document.addEventListener('fullscreenchange', onChange)
+    return () => document.removeEventListener('fullscreenchange', onChange)
+  }, [])
+
+  async function toggleFullscreen() {
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen()
+      else if (rootRef.current) await rootRef.current.requestFullscreen()
+    } catch {
+      /* fullscreen can be denied (permissions / unsupported) — no-op */
+    }
+  }
+
   return (
-    <>
+    <div ref={rootRef} className="flex h-full flex-col bg-[var(--color-bg)]">
       <header className="flex items-center gap-2 h-12 px-3 border-b border-[var(--color-divider)]">
-        <AppWindow size={14} aria-hidden className="text-[var(--color-fg-muted)]" />
+        <Tooltip content={t(isFullscreen ? 'code.previewExitFullscreen' : 'code.previewFullscreen', { defaultValue: isFullscreen ? 'Exit fullscreen' : 'Fullscreen' })}>
+          <button
+            type="button"
+            onClick={() => void toggleFullscreen()}
+            aria-label={t(isFullscreen ? 'code.previewExitFullscreen' : 'code.previewFullscreen', { defaultValue: isFullscreen ? 'Exit fullscreen' : 'Fullscreen' })}
+            className="inline-flex items-center justify-center size-8 rounded-[8px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+          >
+            {isFullscreen ? <Minimize2 size={14} aria-hidden /> : <Maximize2 size={14} aria-hidden />}
+          </button>
+        </Tooltip>
         <span className="flex-1 min-w-0 truncate font-serif tracking-tight text-[15px] text-[var(--color-fg)]">
           {t('code.previewTitle')}
         </span>
@@ -167,6 +195,6 @@ function PreviewBody({ doc, reloadKey, onRefresh, onClose }: PreviewBodyProps) {
       <footer className="px-4 py-2 border-t border-[var(--color-divider)]">
         <p className="text-[11px] text-[var(--color-fg-subtle)]">{t('code.previewSandboxHint')}</p>
       </footer>
-    </>
+    </div>
   )
 }

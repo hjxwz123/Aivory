@@ -145,6 +145,8 @@
     "preview": "預覽",
     "previewTitle": "HTML 預覽",
     "previewRefresh": "重新載入",
+    "previewFullscreen": "全螢幕",
+    "previewExitFullscreen": "退出全螢幕",
     "previewClose": "關閉預覽",
     "previewSandboxHint": "在隔離沙箱中渲染 — 頁面指令碼無法訪問你的資料。",
     "mermaidFailed": "無法渲染該圖表，已顯示原始碼。"
