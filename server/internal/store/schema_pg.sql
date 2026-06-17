@@ -47,7 +47,6 @@ CREATE TABLE IF NOT EXISTS user_groups (
   sort_order  INTEGER NOT NULL DEFAULT 0,
   max_projects INTEGER NOT NULL DEFAULT 0,
   max_kbs      INTEGER NOT NULL DEFAULT 0,
-  credits_per_usd       REAL NOT NULL DEFAULT 0,
   credit_allowance      REAL NOT NULL DEFAULT 0,
   credit_period_seconds INTEGER NOT NULL DEFAULT 0,
   credit_buy_url        TEXT NOT NULL DEFAULT '',

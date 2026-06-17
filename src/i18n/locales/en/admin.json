@@ -450,8 +450,6 @@
       "limitHint": "0 = unlimited.",
       "creditsSection": "Credits",
       "creditsLead": "Per-cycle timed allowance and refresh period for this group. The USD→credit rate is global (set below the group list).",
-      "creditsPerUsd": "Credits per USD",
-      "creditsPerUsdHint": "1 USD of model cost = this many credits. 0 disables credits for the group.",
       "creditAllowance": "Credits per cycle",
       "creditAllowanceHint": "Timed credits granted each refresh; unused are voided.",
       "creditPeriod": "Refresh every",

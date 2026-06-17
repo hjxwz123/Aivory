@@ -113,9 +113,9 @@ func Migrate(db *sql.DB) error {
 	// create. 0 = unlimited.
 	addGroupMaxProjects := `ALTER TABLE user_groups ADD COLUMN max_projects INTEGER NOT NULL DEFAULT 0`
 	addGroupMaxKBs := `ALTER TABLE user_groups ADD COLUMN max_kbs INTEGER NOT NULL DEFAULT 0`
-	// Credit system (§ credits): per-group USD↔credit ratio, timed allowance +
-	// refresh cycle, top-up link; per-user non-expiring balance; per-row charge.
-	addGroupCreditsPerUSD := `ALTER TABLE user_groups ADD COLUMN credits_per_usd REAL NOT NULL DEFAULT 0`
+	// Credit system (§ credits): per-group timed allowance + refresh cycle, top-up
+	// link; per-user non-expiring balance; per-row charge. (The USD↔credit rate is
+	// a global setting, not a column.)
 	addGroupCreditAllowance := `ALTER TABLE user_groups ADD COLUMN credit_allowance REAL NOT NULL DEFAULT 0`
 	addGroupCreditPeriod := `ALTER TABLE user_groups ADD COLUMN credit_period_seconds INTEGER NOT NULL DEFAULT 0`
 	addGroupCreditBuyURL := `ALTER TABLE user_groups ADD COLUMN credit_buy_url TEXT NOT NULL DEFAULT ''`
@@ -147,7 +147,6 @@ func Migrate(db *sql.DB) error {
 		addModelTags = `ALTER TABLE models ADD COLUMN IF NOT EXISTS tags TEXT NOT NULL DEFAULT '[]'`
 		addGroupMaxProjects = `ALTER TABLE user_groups ADD COLUMN IF NOT EXISTS max_projects INTEGER NOT NULL DEFAULT 0`
 		addGroupMaxKBs = `ALTER TABLE user_groups ADD COLUMN IF NOT EXISTS max_kbs INTEGER NOT NULL DEFAULT 0`
-		addGroupCreditsPerUSD = `ALTER TABLE user_groups ADD COLUMN IF NOT EXISTS credits_per_usd REAL NOT NULL DEFAULT 0`
 		addGroupCreditAllowance = `ALTER TABLE user_groups ADD COLUMN IF NOT EXISTS credit_allowance REAL NOT NULL DEFAULT 0`
 		addGroupCreditPeriod = `ALTER TABLE user_groups ADD COLUMN IF NOT EXISTS credit_period_seconds INTEGER NOT NULL DEFAULT 0`
 		addGroupCreditBuyURL = `ALTER TABLE user_groups ADD COLUMN IF NOT EXISTS credit_buy_url TEXT NOT NULL DEFAULT ''`
@@ -170,7 +169,7 @@ func Migrate(db *sql.DB) error {
 		addInlineSource, addInlineParent, addInlineQuote,
 		addModelTags,
 		addGroupMaxProjects, addGroupMaxKBs,
-		addGroupCreditsPerUSD, addGroupCreditAllowance, addGroupCreditPeriod, addGroupCreditBuyURL,
+		addGroupCreditAllowance, addGroupCreditPeriod, addGroupCreditBuyURL,
 		addUserPermCredits, addUsageCredits,
 	} {
 		_, _ = db.Exec(ddl)
@@ -221,13 +220,13 @@ func Seed(db *sql.DB, cfg config.Config) error {
 		"register_captcha_required": `false`,
 		// Global credit conversion rate (§ credits): 1 USD of model cost = N
 		// credits. Shared by every group; 0 disables credits platform-wide.
-		"credits_per_usd": `0`,
-		"sandbox_base_url":          `""`,
-		"sandbox_api_key":           `""`,
-		"moderation_keywords":       `[]`,
-		"moderation_model_id":       `""`,
-		"moderation_categories":     `["politics","pornography","violence or gore","terrorism","illegal activity","hate speech","self-harm"]`,
-		"moderation_message":        `"Your message was blocked by content moderation. Please rephrase and try again."`,
+		"credits_per_usd":       `0`,
+		"sandbox_base_url":      `""`,
+		"sandbox_api_key":       `""`,
+		"moderation_keywords":   `[]`,
+		"moderation_model_id":   `""`,
+		"moderation_categories": `["politics","pornography","violence or gore","terrorism","illegal activity","hate speech","self-harm"]`,
+		"moderation_message":    `"Your message was blocked by content moderation. Please rephrase and try again."`,
 		// § announcement: a single global notice shown to users on load. image_url
 		// non-empty → image announcement (image left, text right). remember_dismiss
 		// false → re-show every visit; updated_at doubles as the dismiss version.

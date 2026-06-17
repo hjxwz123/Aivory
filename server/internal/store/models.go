@@ -67,11 +67,10 @@ type UserGroup struct {
 	// create (§ user groups). 0 = unlimited.
 	MaxProjects int `json:"max_projects"`
 	MaxKBs      int `json:"max_kbs"`
-	// Credit system (§ credits). CreditsPerUSD converts a request's USD cost into
-	// credits (0 = credits disabled). CreditAllowance is the timed-credit budget
-	// granted each CreditPeriodSeconds cycle (unused voided on refresh).
-	// CreditBuyURL is the top-up link for non-expiring (permanent) credits.
-	CreditsPerUSD       float64 `json:"credits_per_usd"`
+	// Credit system (§ credits). CreditAllowance is the timed-credit budget granted
+	// each CreditPeriodSeconds cycle (unused voided on refresh). CreditBuyURL is the
+	// top-up link for non-expiring (permanent) credits. The USD→credit rate is a
+	// global setting (credits_per_usd), not a per-group field.
 	CreditAllowance     float64 `json:"credit_allowance"`
 	CreditPeriodSeconds int     `json:"credit_period_seconds"`
 	CreditBuyURL        string  `json:"credit_buy_url"`

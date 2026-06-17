@@ -450,8 +450,6 @@
       "limitHint": "0 = 無制限。",
       "creditsSection": "クレジット",
       "creditsLead": "このグループのサイクルごとの期間限定付与と更新間隔。「USD→クレジット」レートは全体設定です（グループ一覧の下）。",
-      "creditsPerUsd": "1 USD あたりのクレジット",
-      "creditsPerUsdHint": "モデル費用 1 USD = 何クレジットか。0 でこのグループのクレジットを無効化。",
       "creditAllowance": "サイクルごとのクレジット",
       "creditAllowanceHint": "更新ごとに付与される期間限定クレジット。未使用分は失効します。",
       "creditPeriod": "更新間隔",

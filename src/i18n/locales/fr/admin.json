@@ -450,8 +450,6 @@
       "limitHint": "0 = illimité.",
       "creditsSection": "Crédits",
       "creditsLead": "Allocation temporaire par cycle et période de renouvellement de ce groupe. Le taux USD→crédit est global (sous la liste des groupes).",
-      "creditsPerUsd": "Crédits par USD",
-      "creditsPerUsdHint": "1 USD de coût modèle = ce nombre de crédits. 0 désactive les crédits pour le groupe.",
       "creditAllowance": "Crédits par cycle",
       "creditAllowanceHint": "Crédits temporaires accordés à chaque renouvellement ; le solde inutilisé est perdu.",
       "creditPeriod": "Renouveler tous les",

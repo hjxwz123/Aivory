@@ -129,9 +129,8 @@ export interface ApiUserGroup {
   /** Max projects / knowledge bases a member may create. 0 = unlimited. */
   max_projects: number
   max_kbs: number
-  /** Credit system (§ credits): USD→credit ratio, timed allowance + refresh
-   *  cycle (unused voided), and the top-up link for permanent credits. */
-  credits_per_usd: number
+  /** Credit system (§ credits): per-group timed allowance + refresh cycle (unused
+   *  voided) and the top-up link. The USD→credit rate is a global setting. */
   credit_allowance: number
   credit_period_seconds: number
   credit_buy_url: string

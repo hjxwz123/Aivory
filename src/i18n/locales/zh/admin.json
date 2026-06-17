@@ -450,8 +450,6 @@
       "limitHint": "0 = 不限。",
       "creditsSection": "积分",
       "creditsLead": "该用户组每周期发放的限时额度与刷新周期。「美元→积分」比例为全局设置（在用户组列表下方）。",
-      "creditsPerUsd": "每美元积分数",
-      "creditsPerUsdHint": "模型花费 1 美元 = 多少积分。0 表示该组不启用积分。",
       "creditAllowance": "每周期积分",
       "creditAllowanceHint": "每次刷新发放的限时积分，未用完作废。",
       "creditPeriod": "刷新周期",

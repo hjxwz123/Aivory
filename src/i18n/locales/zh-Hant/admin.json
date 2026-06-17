@@ -450,8 +450,6 @@
       "limitHint": "0 = 不限。",
       "creditsSection": "積分",
       "creditsLead": "該使用者組每週期發放的限時額度與刷新週期。「美元→積分」比例為全域設定（在使用者組列表下方）。",
-      "creditsPerUsd": "每美元積分數",
-      "creditsPerUsdHint": "模型花費 1 美元 = 多少積分。0 表示該組不啟用積分。",
       "creditAllowance": "每週期積分",
       "creditAllowanceHint": "每次刷新發放的限時積分，未用完作廢。",
       "creditPeriod": "刷新週期",
