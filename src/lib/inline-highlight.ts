@@ -24,19 +24,14 @@ function unwrapMarks(container: HTMLElement): void {
   container.normalize()
 }
 
-/** Collect the container's text nodes (skipping anything already inside a mark)
- *  plus a cumulative-offset map so a char index maps back to node + offset. */
+/** Collect the container's non-empty text nodes plus a cumulative-offset map so
+ *  a char index maps back to node + offset. Code (`<code>`/`<pre>`) is included:
+ *  users frequently select a snippet to ask about it, and per-text-node wrapping
+ *  (below) only ever surrounds a sub-range of a single text node, so it can't
+ *  corrupt the surrounding syntax-highlight spans. */
 function collectTextNodes(container: HTMLElement): { node: Text; start: number; end: number }[] {
   const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, {
     acceptNode(n) {
-      // Don't highlight inside code blocks — the quote rarely lands there and
-      // wrapping would corrupt syntax-highlighted spans.
-      let p = n.parentElement
-      while (p && p !== container) {
-        const tag = p.tagName
-        if (tag === 'CODE' || tag === 'PRE') return NodeFilter.FILTER_REJECT
-        p = p.parentElement
-      }
       return n.nodeValue && n.nodeValue.length > 0 ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT
     },
   })

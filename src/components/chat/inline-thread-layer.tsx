@@ -49,6 +49,7 @@ export function InlineThreadLayer({ conversationId, scrollRef }: InlineThreadLay
   const [asking, setAsking] = useState(false)
   const [draft, setDraft] = useState('')
   const popoverRef = useRef<HTMLDivElement>(null)
+  const observerRef = useRef<MutationObserver | null>(null)
 
   // ── Highlight markers ──────────────────────────────────────────────────────
   const rehighlight = useCallback(() => {
@@ -64,27 +65,40 @@ export function InlineThreadLayer({ conversationId, scrollRef }: InlineThreadLay
       list.push({ id: c.id, quote: c.inline!.quote })
       byMsg.set(mid, list)
     }
-    root.querySelectorAll<HTMLElement>('[data-inline-msg][data-inline-role="assistant"]').forEach((el) => {
-      const mid = el.getAttribute('data-inline-msg') || ''
-      highlightThreads(el, byMsg.get(mid) ?? [])
-    })
+    // Pause our own observer while we (un)wrap <mark> elements, otherwise those
+    // mutations re-trigger this pass in a perpetual loop. External DOM changes
+    // still fire it because the observer is live between calls.
+    observerRef.current?.disconnect()
+    try {
+      root.querySelectorAll<HTMLElement>('[data-inline-msg][data-inline-role="assistant"]').forEach((el) => {
+        const mid = el.getAttribute('data-inline-msg') || ''
+        highlightThreads(el, byMsg.get(mid) ?? [])
+      })
+    } finally {
+      observerRef.current?.observe(root, { childList: true, subtree: true, characterData: true })
+    }
   }, [conversationId, scrollRef])
 
   // Re-highlight when threads change, and whenever the message DOM mutates
   // (initial render, lazy-loaded older turns, finished streaming) — debounced.
   useEffect(() => {
-    rehighlight()
     const root = scrollRef.current
     if (!root) return
     let timer: ReturnType<typeof setTimeout> | null = null
     const obs = new MutationObserver(() => {
       if (timer) clearTimeout(timer)
-      timer = setTimeout(rehighlight, 250)
+      timer = setTimeout(rehighlight, 120)
     })
-    obs.observe(root, { childList: true, subtree: true, characterData: true })
+    observerRef.current = obs
+    // Initial pass — markdown may still be painting, so also retry on the next
+    // frame so a freshly-created thread's highlight reliably lands.
+    rehighlight()
+    const raf = requestAnimationFrame(rehighlight)
     return () => {
       if (timer) clearTimeout(timer)
+      cancelAnimationFrame(raf)
       obs.disconnect()
+      observerRef.current = null
     }
   }, [sig, rehighlight, scrollRef])
 

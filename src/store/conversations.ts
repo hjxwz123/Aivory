@@ -187,7 +187,22 @@ export const useConversations = create<ConversationStore>((set, get) => ({
   },
 
   async deleteConversation(id) {
-    set((s) => ({ conversations: s.conversations.filter((c) => c.id !== id) }))
+    set((s) => {
+      // Remove the conversation and every inline sub-conversation transitively
+      // anchored to it, mirroring the backend cascade so markers/drawers for the
+      // doomed sub-threads vanish immediately.
+      const doomed = new Set<string>([id])
+      for (let grew = true; grew; ) {
+        grew = false
+        for (const c of s.conversations) {
+          if (!doomed.has(c.id) && c.inline && doomed.has(c.inline.sourceConvId)) {
+            doomed.add(c.id)
+            grew = true
+          }
+        }
+      }
+      return { conversations: s.conversations.filter((c) => !doomed.has(c.id)) }
+    })
     try {
       await conversationsApi.remove(id)
     } catch (e) {

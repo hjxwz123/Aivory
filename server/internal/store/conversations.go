@@ -269,35 +269,90 @@ func UpdateConversation(ctx context.Context, db *sql.DB, id, userID string, p Co
 	return GetConversation(ctx, db, id, userID)
 }
 
-// DeleteConversation removes a row.
-func DeleteConversation(ctx context.Context, db *sql.DB, id, userID string) error {
+// inlineDescendants returns every inline sub-conversation transitively anchored
+// to rootID (children, grandchildren, …) via inline_source_conv. A sub-thread
+// can itself be a source for deeper threads, so this walks the whole subtree;
+// the visited set also guards against any accidental cycle. rootID is NOT
+// included in the result.
+func inlineDescendants(ctx context.Context, db *sql.DB, rootID string) ([]string, error) {
+	seen := map[string]bool{rootID: true}
+	var out []string
+	frontier := []string{rootID}
+	for len(frontier) > 0 {
+		var next []string
+		for _, pid := range frontier {
+			rows, err := db.QueryContext(ctx, "SELECT id FROM conversations WHERE inline_source_conv=?", pid)
+			if err != nil {
+				return nil, err
+			}
+			for rows.Next() {
+				var id string
+				if err := rows.Scan(&id); err != nil {
+					rows.Close()
+					return nil, err
+				}
+				if !seen[id] {
+					seen[id] = true
+					out = append(out, id)
+					next = append(next, id)
+				}
+			}
+			if err := rows.Err(); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			rows.Close()
+		}
+		frontier = next
+	}
+	return out, nil
+}
+
+// DeleteConversation removes a row and every inline sub-conversation anchored to
+// it (recursively), so deleting a conversation also discards the sub-threads
+// spawned from its text selections (§ text-selection threads). Returns the ids
+// of the additionally-deleted sub-conversations so the caller can clean up their
+// side state (e.g. RAG vectors).
+func DeleteConversation(ctx context.Context, db *sql.DB, id, userID string) ([]string, error) {
 	res, err := db.ExecContext(ctx, "DELETE FROM conversations WHERE id=? AND user_id=?", id, userID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
-		return ErrNotFound
+		return nil, ErrNotFound
 	}
-	// Also remove any inline sub-conversations anchored to this one so they
-	// don't become orphaned, unreachable rows (§ text-selection threads).
-	_, _ = db.ExecContext(ctx, "DELETE FROM conversations WHERE inline_source_conv=? AND user_id=?", id, userID)
-	return nil
+	children, err := inlineDescendants(ctx, db, id)
+	if err != nil {
+		return nil, err
+	}
+	for _, cid := range children {
+		_, _ = db.ExecContext(ctx, "DELETE FROM conversations WHERE id=? AND user_id=?", cid, userID)
+	}
+	return children, nil
 }
 
 // DeleteConversationByID removes a conversation regardless of owner — admin
 // authority only (the route is gated by requireAdmin). Messages/chunks cascade
-// via FK ON DELETE CASCADE.
-func DeleteConversationByID(ctx context.Context, db *sql.DB, id string) error {
+// via FK ON DELETE CASCADE; inline sub-conversations are removed recursively
+// (their id list is returned for side-state cleanup).
+func DeleteConversationByID(ctx context.Context, db *sql.DB, id string) ([]string, error) {
 	res, err := db.ExecContext(ctx, "DELETE FROM conversations WHERE id=?", id)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
-		return ErrNotFound
+		return nil, ErrNotFound
 	}
-	return nil
+	children, err := inlineDescendants(ctx, db, id)
+	if err != nil {
+		return nil, err
+	}
+	for _, cid := range children {
+		_, _ = db.ExecContext(ctx, "DELETE FROM conversations WHERE id=?", cid)
+	}
+	return children, nil
 }
 
 // ListMessages walks the active path (parent_id chain) from the active leaf

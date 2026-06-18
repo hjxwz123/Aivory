@@ -490,13 +490,21 @@ func getConversationAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 // No ownership filter — the requireAdmin gate is the authority.
 func deleteConversationAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	id := pathParam(r, "id")
-	if err := store.DeleteConversationByID(r.Context(), d.DB, id); err != nil {
+	children, err := store.DeleteConversationByID(r.Context(), d.DB, id)
+	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, 404, errNotFound)
 			return
 		}
 		writeError(w, 500, err)
 		return
+	}
+	// Drop RAG vectors for the conversation and every inline sub-conversation
+	// removed alongside it.
+	for _, cid := range append([]string{id}, children...) {
+		if err := d.RAG.OnConversationDeleted(r.Context(), cid); err != nil {
+			d.Logger.Printf("rag: drop vectors for conversation %s: %v", cid, err)
+		}
 	}
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }

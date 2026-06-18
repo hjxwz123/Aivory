@@ -196,14 +196,18 @@ func updateConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 func deleteConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
 	id := pathParam(r, "id")
-	if err := store.DeleteConversation(r.Context(), d.DB, id, u.ID); err != nil {
+	children, err := store.DeleteConversation(r.Context(), d.DB, id, u.ID)
+	if err != nil {
 		writeError(w, 404, errNotFound)
 		return
 	}
 	// Conversation uploads cascade-delete (documents.conversation_id ON DELETE
-	// CASCADE); drop their vectors too.
-	if err := d.RAG.OnConversationDeleted(r.Context(), id); err != nil {
-		d.Logger.Printf("rag: drop vectors for conversation %s: %v", id, err)
+	// CASCADE); drop their vectors too — for the conversation and every inline
+	// sub-conversation that was removed with it.
+	for _, cid := range append([]string{id}, children...) {
+		if err := d.RAG.OnConversationDeleted(r.Context(), cid); err != nil {
+			d.Logger.Printf("rag: drop vectors for conversation %s: %v", cid, err)
+		}
 	}
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
