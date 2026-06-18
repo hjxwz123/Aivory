@@ -527,6 +527,15 @@ export const useConversations = create<ConversationStore>((set, get) => ({
               ...m,
               id: serverAssistantId,
             }))
+            // Re-key the abort controller so abortStream (which uses the server
+            // id from the UI message) can actually cancel the local SSE reader.
+            if (serverAssistantId !== assistantId) {
+              const ctrl = streamControllers.get(assistantId)
+              if (ctrl) {
+                streamControllers.set(serverAssistantId, ctrl)
+                streamControllers.delete(assistantId)
+              }
+            }
             break
           case 'text_delta':
             updateAssistant(set, input.conversationId, serverAssistantId, (m) => ({
@@ -725,6 +734,7 @@ export const useConversations = create<ConversationStore>((set, get) => ({
         error: abort.signal.aborted ? m.error : errorMessage(e),
       }))
     } finally {
+      streamControllers.delete(serverAssistantId)
       streamControllers.delete(assistantId)
     }
   },

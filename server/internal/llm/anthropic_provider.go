@@ -557,7 +557,9 @@ func readAnthropicStream(body io.Reader, onEvent func(SseEvent)) (string, []anth
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return "", nil, "", nil, nil, usage, err
+		// Return whatever was accumulated before the error (e.g. on context cancel)
+		// rather than discarding it — partial text must survive a stop signal.
+		return text.String(), toolCalls, thinking.String(), thinkingBlocks, citations, usage, err
 	}
 	return stopReason, toolCalls, text.String(), thinkingBlocks, citations, usage, nil
 }

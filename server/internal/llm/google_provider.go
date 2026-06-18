@@ -350,7 +350,7 @@ func readGeminiStream(body io.Reader, onEvent func(SseEvent)) (string, string, [
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return "", "", nil, nil, usage, err
+		return text.String(), thinking.String(), calls, modelParts, usage, err
 	}
 	if len(modelParts) == 0 {
 		modelParts = append(modelParts, map[string]any{"text": ""})

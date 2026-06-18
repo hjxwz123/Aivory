@@ -422,7 +422,7 @@ func readOpenAIChatStream(body io.Reader, onEvent func(SseEvent)) (string, strin
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return "", "", nil, "", usage, err
+		return text.String(), reasoning.String(), nil, finish, usage, err
 	}
 	calls := []openAIToolCall{}
 	for _, c := range toolByIdx {
@@ -848,7 +848,7 @@ func readOpenAIResponsesStream(body io.Reader, onEvent func(SseEvent)) (string, 
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return "", "", nil, nil, citations, usage, err
+		return text.String(), reasoning.String(), nil, nil, citations, usage, err
 	}
 	calls := []openAIToolCall{}
 	for _, itemID := range order {
