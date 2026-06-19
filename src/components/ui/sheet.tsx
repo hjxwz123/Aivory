@@ -59,7 +59,7 @@ export const SheetContent = forwardRef<ElementRef<typeof DialogPrimitive.Content
             side === 'right' && 'border-l',
             side === 'top' && 'border-b',
             side === 'bottom' && 'border-t',
-            'shadow-[var(--shadow-xl)] focus:outline-none flex flex-col',
+            'shadow-[var(--shadow-xl)] focus-visible:outline-none flex flex-col',
             className,
           )}
           {...rest}

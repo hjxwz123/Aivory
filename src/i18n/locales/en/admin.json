@@ -113,7 +113,29 @@
       "invalidJSON": "param_controls is not valid JSON"
     },
     "permissionsLead": "Choose which user groups may use this model, and how much each gets per period. Leave every group off to keep the model open to everyone.",
-    "tagsHint": "Assign tags to group this model under the picker’s filter chips."
+    "tagsHint": "Assign tags to group this model under the picker’s filter chips.",
+    "pc": {
+      "toggle": "Toggle",
+      "select": "Select",
+      "removeControl": "Remove",
+      "addControl": "Add Control",
+      "addOption": "Add Option",
+      "showRaw": "Advanced: raw JSON",
+      "hideRaw": "Hide JSON",
+      "key": "Key",
+      "label": "Label",
+      "labelPlaceholder": "Deep thinking",
+      "icon": "Icon",
+      "default": "Default",
+      "onFragment": "On (merged into request body)",
+      "offFragment": "Off",
+      "options": "Options",
+      "optValue": "Value",
+      "optLabel": "Label",
+      "fragment": "Merged into request body",
+      "showIfKey": "Show only when (key) — optional",
+      "showIfValue": "Equals (value)"
+    }
   },
   "skills": {
     "title": "Skills",
@@ -623,6 +645,7 @@
     "clear": "Clear sandbox",
     "cleared": "Sandbox cleared",
     "none": "No sandbox session for this conversation.",
+    "unavailable": "Session expired or sidecar does not support file listing.",
     "empty": "Sandbox workspace is empty.",
     "open": "Open"
   },

@@ -113,7 +113,29 @@
       "invalidJSON": "param_controlsが有効なJSONではありません"
     },
     "permissionsLead": "このモデルを使用できるユーザーグループと、各グループが期間ごとに使用できる量を選択します。すべてのグループをオフのままにすると、モデルは全員に開放されます。",
-    "tagsHint": "このモデルにタグを割り当て、ピッカーの絞り込みチップで分類します。"
+    "tagsHint": "このモデルにタグを割り当て、ピッカーの絞り込みチップで分類します。",
+    "pc": {
+      "toggle": "トグル",
+      "select": "セレクト",
+      "removeControl": "削除",
+      "addControl": "コントロールを追加",
+      "addOption": "オプションを追加",
+      "showRaw": "高度設定: 生の JSON",
+      "hideRaw": "JSON を非表示",
+      "key": "キー名",
+      "label": "表示テキスト",
+      "labelPlaceholder": "ディープシンキング",
+      "icon": "アイコン",
+      "default": "デフォルト値",
+      "onFragment": "オン時（リクエストボディに統合）",
+      "offFragment": "オフ時",
+      "options": "オプション",
+      "optValue": "値",
+      "optLabel": "テキスト",
+      "fragment": "リクエストボディに統合",
+      "showIfKey": "表示条件（キー）· 省略可",
+      "showIfValue": "等しい（値）"
+    }
   },
   "skills": {
     "title": "スキル",
@@ -623,6 +645,7 @@
     "clear": "サンドボックスをクリア",
     "cleared": "サンドボックスをクリアしました",
     "none": "この会話にはサンドボックスセッションがありません。",
+    "unavailable": "セッションが期限切れか、サイドカーがファイル一覧をサポートしていません。",
     "empty": "サンドボックスのワークスペースは空です。",
     "open": "開く"
   },

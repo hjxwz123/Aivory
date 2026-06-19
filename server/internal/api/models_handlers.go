@@ -102,6 +102,7 @@ func modelsResponse(d Deps, r *http.Request, models []store.Model) map[string]an
 		ChannelID     string          `json:"channel_id"`
 		SortOrder     int             `json:"sort_order"`
 		Currency      string          `json:"currency"`
+		Tags          json.RawMessage `json:"tags"`
 		// UsesCredits is true when this model has NO free allotment left for the
 		// caller's group (none configured, or the per-cycle count is used up) —
 		// the picker shows the credit multiplier instead of a lock (§ credits).
@@ -128,11 +129,16 @@ func modelsResponse(d Deps, r *http.Request, models []store.Model) map[string]an
 
 	items := []item{}
 	for _, m := range models {
+		tags := m.Tags
+		if tags == nil {
+			tags = json.RawMessage("[]")
+		}
 		items = append(items, item{
 			ID: m.ID, Label: m.Label, Description: m.Description, Icon: m.Icon,
 			Kind: m.Kind, Vision: m.Vision, Stream: m.Stream, ToolMode: m.ToolMode,
 			ParamControls: m.ParamControls, ChannelID: m.ChannelID, SortOrder: m.SortOrder,
 			Currency:    m.Currency,
+			Tags:        tags,
 			UsesCredits: !isAdmin && modelUsesCredits(r.Context(), d, userID, m, restricted[m.ID], grants),
 			Multiplier:  creditMultiplier(m),
 		})

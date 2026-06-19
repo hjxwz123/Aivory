@@ -161,9 +161,16 @@ func addDirToZip(zw *zip.Writer, root, prefix string) error {
 // confirmation).
 func importBackupAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	// Hard cap on the total upload size to prevent DoS via huge archive (H-6).
+	const maxBackupSize = 2 << 30 // 2 GB
+	r.Body = http.MaxBytesReader(w, r.Body, maxBackupSize)
 	// Large parts stream to temp files automatically. 32 MiB stays in memory.
 	if err := r.ParseMultipartForm(32 << 20); err != nil {
-		writeError(w, http.StatusBadRequest, err)
+		if err.Error() == "http: request body too large" {
+			http.Error(w, "backup file too large (max 2 GB)", http.StatusRequestEntityTooLarge)
+			return
+		}
+		writeError(w, http.StatusBadRequest, errors.New("invalid multipart form"))
 		return
 	}
 	if r.FormValue("confirm") != "REPLACE" {
@@ -197,10 +204,28 @@ func importBackupAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Record the importing admin's identity BEFORE the wipe — this is how we
+	// track which account to protect during privilege reconciliation (§ FIX-6).
+	importingAdmin := authUser(r)
+
 	counts, err := restoreDatabase(ctx, d, zr, man)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("restore failed (no changes committed): %w", err))
 		return
+	}
+
+	// Privilege escalation guard: a malicious backup could introduce extra admin
+	// accounts. After restore, downgrade any admin whose email is not the
+	// importing admin's email — they were not pre-authorized (§ FIX-6).
+	// Best-effort: a failure here is logged but doesn't abort — the DB is already
+	// committed and we'd rather have a partial restriction than a broken restore.
+	if importingAdmin != nil {
+		if _, err := d.DB.ExecContext(ctx,
+			`UPDATE users SET role='user' WHERE role='admin' AND email != ?`,
+			importingAdmin.Email,
+		); err != nil {
+			d.Logger.Printf("backup import: privilege reconciliation failed: %v", err)
+		}
 	}
 
 	filesRestored := 0

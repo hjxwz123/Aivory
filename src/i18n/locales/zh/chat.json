@@ -41,6 +41,7 @@
   "thinking": "思考中",
   "reasoning": {
     "title": "思考过程",
+    "steps_one": "{{count}} 步",
     "steps_other": "{{count}} 步"
   },
   "actions": {
@@ -68,7 +69,8 @@
     "viewImage": "查看图片",
     "removeAttachment": "移除附件",
     "previewFile": "预览文件",
-    "delete": "删除"
+    "delete": "删除",
+    "openInNew": "在新标签页打开"
   },
   "message": {
     "refused": "模型拒绝回答此请求。",
@@ -182,7 +184,17 @@
     "removeFromProject": "移出项目"
   },
   "topbar": {
-    "shareTooltip": "分享"
+    "shareTooltip": "分享",
+    "outlineTooltip": "对话概述"
+  },
+  "outline": {
+    "title": "对话概述",
+    "empty": "暂无消息。",
+    "emptyMessage": "（空）",
+    "branches": "{{count}} 个分支",
+    "zoomIn": "放大",
+    "zoomOut": "缩小",
+    "close": "关闭概述"
   },
   "files": {
     "title": "本对话的文件",
@@ -231,7 +243,8 @@
     "label": "模型：{{name}}",
     "upgrade": "升级套餐解锁",
     "allTags": "全部",
-    "noneForTag": "该标签下暂无模型。"
+    "noneForTag": "该标签下暂无模型。",
+    "creditRate": "每 token 消耗积分"
   },
   "commandMenu": {
     "placeholder": "搜索会话，或执行命令…",
@@ -255,6 +268,9 @@
       "switchLanguage": "切换到 {{language}}"
     },
     "title": "命令菜单"
+  },
+  "aria": {
+    "themeGroup": "主题选择"
   },
   "signedOut": "你已退出登录。",
   "userMenu": {

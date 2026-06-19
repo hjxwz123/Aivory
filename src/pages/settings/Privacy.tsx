@@ -1,8 +1,6 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { SettingsRow, SettingsSection } from './SettingsLayout'
-import { useSettings } from '@/store/settings'
-import { Switch } from '@/components/ui/switch'
 import { Button } from '@/components/ui/button'
 import { Download, Trash2 } from 'lucide-react'
 import {
@@ -14,25 +12,15 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { toast } from '@/hooks/use-toast'
-import { conversationsApi, memoriesApi, authApi } from '@/api'
+import { conversationsApi, memoriesApi } from '@/api'
 import { useConversations } from '@/store/conversations'
 
 export default function Privacy() {
-  const p = useSettings((s) => s.privacy)
-  const set = useSettings((s) => s.setPrivacy)
   const [confirmClear, setConfirmClear] = useState(false)
   const [clearing, setClearing] = useState(false)
   const [exporting, setExporting] = useState(false)
   const { t } = useTranslation(['settings', 'common'])
   const reloadConvs = useConversations((s) => s.load)
-
-  /** Persist privacy toggles to both localStorage (via store) and backend. */
-  function setPrivacyPersisted(patch: Partial<typeof p>) {
-    set(patch)
-    void authApi.updateSettings(patch).catch(() => {
-      /* best-effort — client store is the source of truth */
-    })
-  }
 
   /** Export user data: fetch all conversations + messages + memories and
    *  download as a JSON file. */
@@ -40,7 +28,7 @@ export default function Privacy() {
     if (exporting) return
     setExporting(true)
     try {
-      const [convs, mems] = await Promise.all([
+      const [{ conversations: convs }, mems] = await Promise.all([
         conversationsApi.list(),
         memoriesApi.list(),
       ])
@@ -83,7 +71,7 @@ export default function Privacy() {
     if (clearing) return
     setClearing(true)
     try {
-      const [convs, mems] = await Promise.all([
+      const [{ conversations: convs }, mems] = await Promise.all([
         conversationsApi.list(),
         memoriesApi.list(),
       ])
@@ -110,19 +98,15 @@ export default function Privacy() {
         </p>
       </header>
 
-      <SettingsSection title={t('settings:privacy.controls')}>
-        <SettingsRow
-          label={t('settings:privacy.improve')}
-          description={t('settings:privacy.improveBody')}
-        >
-          <Switch checked={!p.trainingOptOut} onCheckedChange={(v) => setPrivacyPersisted({ trainingOptOut: !v })} />
-        </SettingsRow>
-        <SettingsRow
-          label={t('settings:privacy.keep')}
-          description={t('settings:privacy.keepBody')}
-        >
-          <Switch checked={p.retainHistory} onCheckedChange={(v) => setPrivacyPersisted({ retainHistory: Boolean(v) })} />
-        </SettingsRow>
+      <SettingsSection title={t('settings:privacy.dataStorage', { defaultValue: 'Data storage' })}>
+        <div className="px-5 sm:px-6 py-4">
+          <p className="text-sm text-[var(--color-fg-muted)] leading-relaxed">
+            {t('settings:privacy.dataStorageBody', {
+              defaultValue:
+                'Your conversations are stored securely on our servers. To request data deletion, please contact support.',
+            })}
+          </p>
+        </div>
       </SettingsSection>
 
       <SettingsSection title={t('settings:privacy.exportPurge')}>

@@ -138,6 +138,8 @@ export interface Message {
   quotaExceeded?: boolean
   /** Model that generated this assistant message (§7.2-6 “由 … 生成”). */
   modelId?: string
+  /** Snapshot of the model's display name at message creation time. Used as fallback when the model has been deleted. */
+  modelLabel?: string
   /** When the user is editing a previously sent message. */
   editing?: boolean
   /** Reactions. */

@@ -34,9 +34,14 @@ export default function Models() {
       .getSettings()
       .then((s) => {
         setImageModelId(typeof s.image_model_id === 'string' ? s.image_model_id : '')
-        if (typeof s.custom_instructions === 'string' && s.custom_instructions) {
-          setModels({ customInstructions: s.custom_instructions })
+        const patch: Parameters<typeof setModels>[0] = {}
+        if (typeof s.persona_custom === 'string' && s.persona_custom) {
+          patch.customInstructions = s.persona_custom
         }
+        if (typeof s.response_length === 'string' && s.response_length) {
+          patch.responseLength = s.response_length as typeof models.responseLength
+        }
+        if (Object.keys(patch).length > 0) setModels(patch)
       })
       .catch(() => {})
   }, [list.length, load])
@@ -44,6 +49,19 @@ export default function Models() {
   const onPickImageModel = (id: string) => {
     setImageModelId(id)
     void authApi.updateSettings({ image_model_id: id }).then(() => toast.success(t('common:actions.save')))
+  }
+
+  const onPickResponseLength = (v: typeof models.responseLength) => {
+    setModels({ responseLength: v })
+    void authApi.updateSettings({ response_length: v }).catch(() => {
+      /* best-effort — local state is the source of truth */
+    })
+  }
+
+  const onPickDefaultModel = (id: string) => {
+    setModels({ defaultModelId: id })
+    // TODO: add backend support for persisting the default model preference.
+    // Currently stored in localStorage only via the settings store.
   }
 
   return (
@@ -59,7 +77,7 @@ export default function Models() {
         <SettingsRow label={t('settings:models.default')} description={t('settings:models.defaultBody')}>
           <Select
             value={models.defaultModelId}
-            onValueChange={(id) => setModels({ defaultModelId: id })}
+            onValueChange={onPickDefaultModel}
           >
             <SelectTrigger className="w-64" aria-label={t('settings:models.defaultModel')}>
               <SelectValue />
@@ -76,7 +94,7 @@ export default function Models() {
         <SettingsRow label={t('settings:models.responseLength')} description={t('settings:models.responseLengthBody')}>
           <Select
             value={models.responseLength}
-            onValueChange={(v) => setModels({ responseLength: v as typeof models.responseLength })}
+            onValueChange={(v) => onPickResponseLength(v as typeof models.responseLength)}
           >
             <SelectTrigger className="w-64">
               <SelectValue />
@@ -133,7 +151,7 @@ export default function Models() {
               variant="secondary"
               onClick={() => {
                 void authApi
-                  .updateSettings({ custom_instructions: models.customInstructions })
+                  .updateSettings({ persona_custom: models.customInstructions })
                   .then(() => toast.success(t('settings:models.customSaved')))
                   .catch(() => toast.error(t('common:actions.failed', { defaultValue: 'Failed to save' })))
               }}

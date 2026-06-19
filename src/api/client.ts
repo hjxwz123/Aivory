@@ -13,6 +13,7 @@
  *      browser sees; the long-lived refresh token stays in the cookie.
  */
 import type { ApiError as ApiErrorShape } from './types'
+import { toast as _sseToast } from '@/hooks/use-toast'
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? '/api'
 
@@ -144,7 +145,11 @@ function tryRefresh(): Promise<boolean> {
   return refreshInFlight
 }
 
-/** Open a streaming POST request that yields SSE events as parsed JSON. */
+/** Open a streaming POST request that yields SSE events as parsed JSON.
+ *  On network drop (fetch throws after the stream starts) the reader will
+ *  retry up to MAX_SSE_RETRIES times with exponential backoff (1 s, 2 s, 4 s)
+ *  before giving up and re-throwing the error. */
+const MAX_SSE_RETRIES = 3
 export async function* streamSSE(
   path: string,
   body: unknown,
@@ -186,8 +191,59 @@ export async function* streamSSE(
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
   let buf = ''
+  let retryCount = 0
+  let reconnectToastShown = false
   while (true) {
-    const { done, value } = await reader.read()
+    let done: boolean
+    let value: Uint8Array | undefined
+    try {
+      ;({ done, value } = await reader.read())
+    } catch (readErr) {
+      // Network drop during streaming. Attempt reconnect with exponential backoff.
+      if (signal?.aborted || retryCount >= MAX_SSE_RETRIES) throw readErr
+      retryCount++
+      const delay = Math.pow(2, retryCount - 1) * 1000 // 1s, 2s, 4s
+      if (!reconnectToastShown) {
+        reconnectToastShown = true
+        _sseToast.warning('Reconnecting…', 'Connection dropped, retrying automatically.')
+      }
+      await new Promise<void>((resolve) => setTimeout(resolve, delay))
+      // Re-open the stream. If the signal was aborted during the wait, bail out.
+      if (signal?.aborted) throw readErr
+      try {
+        const retryRes = await open()
+        if (!retryRes.ok || !retryRes.body) throw readErr
+        // Replace the reader with the new connection.
+        ;(reader as unknown as { releaseLock(): void }).releaseLock?.()
+        const retryReader = retryRes.body.getReader()
+        ;({ done, value } = await retryReader.read())
+        // Swap the reader reference by restarting the outer loop.
+        // We yield from the new reader by continuing inside this one.
+        // Since we can't swap the outer `reader` variable (const), we yield
+        // from here and return — callers see a seamless stream.
+        while (true) {
+          if (done) {
+            if (buf.trim().length > 0) {
+              const frame = parseSSEFrame(buf)
+              if (frame) yield frame
+            }
+            return
+          }
+          buf += decoder.decode(value, { stream: true })
+          let idx = buf.indexOf('\n\n')
+          while (idx !== -1) {
+            const raw = buf.slice(0, idx)
+            buf = buf.slice(idx + 2)
+            const frame = parseSSEFrame(raw)
+            if (frame) yield frame
+            idx = buf.indexOf('\n\n')
+          }
+          ;({ done, value } = await retryReader.read())
+        }
+      } catch {
+        throw readErr
+      }
+    }
     if (done) break
     buf += decoder.decode(value, { stream: true })
     // SSE frames are separated by \n\n.

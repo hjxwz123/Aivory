@@ -3,7 +3,7 @@
  * ban / unban (realtime via the cache kill channel). Each row links to the
  * per-user conversation drill-down used for support / abuse triage (§8.1).
  */
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
 import { MessageSquare, Plus, Pencil, Trash2, Search } from 'lucide-react'
@@ -38,6 +38,7 @@ export default function AdminUsers() {
   const { t } = useTranslation(['admin', 'common'])
   const me = useAuth((s) => s.user)
   const [rows, setRows] = useState<ApiUser[]>([])
+  const [total, setTotal] = useState(0)
   const [groups, setGroups] = useState<ApiUserGroup[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -62,42 +63,61 @@ export default function AdminUsers() {
   const [deleteRow, setDeleteRow] = useState<ApiUser | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [query, setQuery] = useState('')
+  const [committedQuery, setCommittedQuery] = useState('')
   const [page, setPage] = useState(1)
-  const PAGE_SIZE = 20
-  const filtered = rows.filter((u) => {
-    const q = query.trim().toLowerCase()
-    if (!q) return true
-    return (u.name ?? '').toLowerCase().includes(q) || (u.email ?? '').toLowerCase().includes(q)
-  })
-  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
-  const pageRows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
-  useEffect(() => {
-    setPage(1)
-  }, [query])
+  const PAGE_SIZE = 50
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE))
+  const pageRows = rows
 
-  async function load() {
+  // Debounce search: commit the query 400ms after the user stops typing.
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  function handleQueryChange(v: string) {
+    setQuery(v)
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => {
+      setCommittedQuery(v)
+      setPage(1)
+    }, 400)
+  }
+
+  const groupsLoadedRef = useRef(false)
+
+  const load = useCallback(async (search: string, p: number) => {
     setLoading(true)
     try {
-      const [users, gs] = await Promise.all([adminApi.users(), adminApi.userGroups()])
-      setRows(users)
-      setGroups(gs)
+      const offset = (p - 1) * PAGE_SIZE
+      if (!groupsLoadedRef.current) {
+        const [resp, gs] = await Promise.all([adminApi.users(search, PAGE_SIZE, offset), adminApi.userGroups()])
+        setRows(resp.users)
+        setTotal(resp.total)
+        setGroups(gs)
+        groupsLoadedRef.current = true
+      } else {
+        const resp = await adminApi.users(search, PAGE_SIZE, offset)
+        setRows(resp.users)
+        setTotal(resp.total)
+      }
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
     } finally {
       setLoading(false)
     }
-  }
-
-  useEffect(() => {
-    void load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  useEffect(() => {
+    void load(committedQuery, page)
+  }, [committedQuery, page, load])
+
+  async function reload() {
+    await load(committedQuery, page)
+  }
 
   async function ban(u: ApiUser) {
     try {
       await adminApi.banUser(u.id)
       toast.success(t('admin:users.banned'))
-      await load()
+      await reload()
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
     }
@@ -106,7 +126,7 @@ export default function AdminUsers() {
     try {
       await adminApi.unbanUser(u.id)
       toast.success(t('admin:users.reinstated'))
-      await load()
+      await reload()
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
     }
@@ -118,7 +138,7 @@ export default function AdminUsers() {
       await adminApi.deleteUser(deleteRow.id)
       toast.success(t('admin:users.deleted'))
       setDeleteRow(null)
-      await load()
+      await reload()
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
     } finally {
@@ -150,7 +170,7 @@ export default function AdminUsers() {
       })
       toast.success(t('admin:users.created'))
       setCreateOpen(false)
-      await load()
+      await reload()
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
     } finally {
@@ -164,7 +184,7 @@ export default function AdminUsers() {
       await adminApi.disableUser2fa(editRow.id)
       setEditRow({ ...editRow, totp_enabled: false })
       toast.success(t('admin:users.twofaReset'))
-      await load()
+      await reload()
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
     }
@@ -203,7 +223,7 @@ export default function AdminUsers() {
         toast.success(t('admin:users.creditsSaved'))
       }
       setEditRow(null)
-      await load()
+      await reload()
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
     } finally {
@@ -226,7 +246,7 @@ export default function AdminUsers() {
       <div className="mt-6">
         <Input
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={(e) => handleQueryChange(e.target.value)}
           leadingIcon={<Search size={14} aria-hidden />}
           placeholder={t('admin:users.searchPlaceholder')}
           className="max-w-sm"
@@ -248,8 +268,8 @@ export default function AdminUsers() {
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <span
-                        aria-hidden
-                        title={online ? t('admin:users.online') : t('admin:users.offline')}
+                        role="img"
+                        aria-label={online ? t('admin:users.online') : t('admin:users.offline')}
                         className={cn(
                           'size-2 shrink-0 rounded-full',
                           online ? 'bg-[var(--color-success)]' : 'bg-[var(--color-fg-faint)]',

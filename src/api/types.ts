@@ -231,7 +231,7 @@ export interface ApiPublicOAuthProvider {
 export interface ApiChannel {
   id: string
   name: string
-  type: 'openai' | 'claude' | 'gemini'
+  type: 'openai' | 'claude' | 'anthropic' | 'google' | 'gemini'
   api_format: 'chat' | 'responses' | ''
   base_url: string
   has_api_key: boolean
@@ -430,6 +430,8 @@ export interface ApiMessage {
   role: 'user' | 'assistant' | 'system'
   provider: string
   model_id: string
+  /** Human-readable model name snapshotted at message creation time. Remains populated even after the model is deleted. */
+  model_label?: string
   blocks: ApiBlock[]
   attachments: ApiAttachment[]
   citations: ApiCitation[]

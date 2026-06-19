@@ -55,7 +55,7 @@ export default function AdminUserConversation() {
           adminApi.conversation(cid),
           adminApi.conversationMessages(cid),
           adminApi.models().catch(() => [] as ApiModel[]),
-          adminApi.users().catch(() => [] as ApiUser[]),
+          adminApi.users('', 200, 0).then((r) => r.users).catch(() => [] as ApiUser[]),
         ])
         if (cancelled) return
         setConv(c)
@@ -271,6 +271,7 @@ function SandboxPanel({ convId }: { convId: string }) {
   const [loaded, setLoaded] = useState(false)
   const [session, setSession] = useState('')
   const [files, setFiles] = useState<{ path: string; size: number }[]>([])
+  const [unavailable, setUnavailable] = useState(false)
   const [clearing, setClearing] = useState(false)
 
   async function refresh() {
@@ -278,7 +279,8 @@ function SandboxPanel({ convId }: { convId: string }) {
     try {
       const res = await adminApi.sandboxFiles(convId)
       setSession(res.session)
-      setFiles(res.files)
+      setFiles(res.files ?? [])
+      setUnavailable(!!(res as { unavailable?: boolean }).unavailable)
       setLoaded(true)
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t('common.failed'))
@@ -293,6 +295,7 @@ function SandboxPanel({ convId }: { convId: string }) {
       await adminApi.clearSandbox(convId)
       setSession('')
       setFiles([])
+      setUnavailable(false)
       toast.success(t('sandbox.cleared', { defaultValue: 'Sandbox cleared' }))
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t('common.failed'))
@@ -353,6 +356,10 @@ function SandboxPanel({ convId }: { convId: string }) {
           ) : !session ? (
             <div className="text-sm text-[var(--color-fg-subtle)]">
               {t('sandbox.none', { defaultValue: 'No sandbox session for this conversation.' })}
+            </div>
+          ) : unavailable ? (
+            <div className="text-sm text-[var(--color-fg-subtle)]">
+              {t('sandbox.unavailable', { defaultValue: 'Session expired or sidecar does not support file listing.' })}
             </div>
           ) : files.length === 0 ? (
             <div className="text-sm text-[var(--color-fg-subtle)]">

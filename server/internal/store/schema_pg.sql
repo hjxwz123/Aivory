@@ -223,6 +223,7 @@ CREATE TABLE IF NOT EXISTS messages (
   role               TEXT NOT NULL,
   provider           TEXT NOT NULL DEFAULT '',
   model_id           TEXT NOT NULL DEFAULT '',
+  model_label        TEXT NOT NULL DEFAULT '',
   blocks             TEXT NOT NULL DEFAULT '[]',
   raw                TEXT,
   stop_reason        TEXT,

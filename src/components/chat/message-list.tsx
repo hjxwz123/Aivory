@@ -143,7 +143,12 @@ export function MessageList({ conversation }: MessageListProps) {
   }
 
   return (
-    <div className="flex flex-col gap-8 px-4 sm:px-6 lg:px-8 py-8 mx-auto w-full max-w-[var(--layout-message-max-w)]">
+    <div
+      className="flex flex-col gap-8 px-4 sm:px-6 lg:px-8 py-8 mx-auto w-full max-w-[var(--layout-message-max-w)]"
+      aria-live="polite"
+      aria-atomic="false"
+      aria-relevant="additions text"
+    >
       {hasMore ? (
         <div ref={sentinelRef} className="flex items-center justify-center py-2 text-[12px] text-[var(--color-fg-subtle)]">
           <Loader2 size={14} className="mr-2 animate-spin" aria-hidden />

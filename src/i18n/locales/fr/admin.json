@@ -113,7 +113,29 @@
       "invalidJSON": "param_controls n'est pas un JSON valide"
     },
     "permissionsLead": "Choisissez quels groupes d'utilisateurs peuvent utiliser ce modèle, et combien chacun reçoit par période. Laissez tous les groupes désactivés pour garder le modèle ouvert à tous.",
-    "tagsHint": "Assignez des étiquettes pour regrouper ce modèle sous les filtres du sélecteur."
+    "tagsHint": "Assignez des étiquettes pour regrouper ce modèle sous les filtres du sélecteur.",
+    "pc": {
+      "toggle": "Bascule",
+      "select": "Liste déroulante",
+      "removeControl": "Supprimer",
+      "addControl": "Ajouter un contrôle",
+      "addOption": "Ajouter une option",
+      "showRaw": "Avancé : JSON brut",
+      "hideRaw": "Masquer le JSON",
+      "key": "Clé",
+      "label": "Libellé",
+      "labelPlaceholder": "Réflexion approfondie",
+      "icon": "Icône",
+      "default": "Valeur par défaut",
+      "onFragment": "Actif (fusionné dans le corps de la requête)",
+      "offFragment": "Inactif",
+      "options": "Options",
+      "optValue": "Valeur",
+      "optLabel": "Libellé",
+      "fragment": "Fusionné dans le corps de la requête",
+      "showIfKey": "Afficher si (clé) · facultatif",
+      "showIfValue": "Égale (valeur)"
+    }
   },
   "skills": {
     "title": "Compétences",
@@ -623,6 +645,7 @@
     "clear": "Vider le bac à sable",
     "cleared": "Bac à sable vidé",
     "none": "Aucune session de bac à sable pour cette conversation.",
+    "unavailable": "Session expirée ou le sidecar ne prend pas en charge la liste des fichiers.",
     "empty": "Espace de travail du bac à sable vide.",
     "open": "Ouvrir"
   },

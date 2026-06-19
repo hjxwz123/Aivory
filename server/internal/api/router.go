@@ -7,7 +7,9 @@ package api
 import (
 	"database/sql"
 	"log"
+	"log/slog"
 	"net/http"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -49,9 +51,9 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("POST", "/api/auth/login/2fa", rateLimitedIP(d, "auth", 10, 60*time.Second, wrap(d, login2faHandler)))
 	mux.handle("POST", "/api/auth/logout", rateLimitedIP(d, "auth", 30, 60*time.Second, wrap(d, logoutHandler)))
 	mux.handle("POST", "/api/auth/refresh", rateLimitedIP(d, "auth", 30, 60*time.Second, wrap(d, refreshHandler)))
-	mux.handle("POST", "/api/auth/verify-email", rateLimitedIP(d, "auth", 20, 60*time.Second, wrap(d, verifyEmailHandler)))
+	mux.handle("POST", "/api/auth/verify-email", rateLimitedIP(d, "verify-email", 10, 5*60*time.Second, wrap(d, verifyEmailHandler)))
 	mux.handle("POST", "/api/auth/send-code", rateLimitedIP(d, "auth", 3, 60*time.Second, wrap(d, sendCodeHandler)))
-	mux.handle("POST", "/api/auth/forgot-password", rateLimitedIP(d, "auth", 3, 60*time.Second, wrap(d, forgotPasswordHandler)))
+	mux.handle("POST", "/api/auth/forgot-password", rateLimitedIP(d, "forgot-password", 5, 15*60*time.Second, wrap(d, forgotPasswordHandler)))
 	mux.handle("POST", "/api/auth/reset-password", rateLimitedIP(d, "auth", 5, 60*time.Second, wrap(d, resetPasswordHandler)))
 	mux.handle("GET", "/api/health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, 200, map[string]any{"ok": true})
@@ -77,8 +79,12 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("GET", "/api/me", requireAuth(d, meHandler))
 	mux.handle("PATCH", "/api/me", requireAuth(d, updateMeHandler))
 	mux.handle("DELETE", "/api/me", requireAuth(d, deleteMeHandler))
-	mux.handle("PATCH", "/api/me/password", requireAuth(d, changePasswordHandler))
-	mux.handle("POST", "/api/me/password/set", requireAuth(d, setPasswordHandler))
+	// Password-change and 2FA endpoints are sensitive: rate-limit to slow
+	// credential-stuffing attacks even when the attacker holds a valid session.
+	// Per-IP window (not per-user) so a compromised token on a shared IP still
+	// gets throttled.
+	mux.handle("PATCH", "/api/me/password", rateLimitedIP(d, "password-change", 5, 60*time.Second, requireAuth(d, changePasswordHandler)))
+	mux.handle("POST", "/api/me/password/set", rateLimitedIP(d, "password-change", 5, 60*time.Second, requireAuth(d, setPasswordHandler)))
 	// User avatar upload — reuses the image-validating icon handler (returns
 	// {url}); the client stores that URL in the user's settings (avatar_url).
 	mux.handle("POST", "/api/me/avatar", requireAuth(d, uploadIconAdmin))
@@ -88,9 +94,9 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("PATCH", "/api/me/settings", requireAuth(d, updateMeSettingsHandler))
 	mux.handle("GET", "/api/me/upload-policy", requireAuth(d, meUploadPolicyHandler))
 	mux.handle("GET", "/api/announcement", requireAuth(d, announcementHandler))
-	mux.handle("POST", "/api/me/2fa/setup", requireAuth(d, twofaSetupHandler))
-	mux.handle("POST", "/api/me/2fa/enable", requireAuth(d, twofaEnableHandler))
-	mux.handle("POST", "/api/me/2fa/disable", requireAuth(d, twofaDisableHandler))
+	mux.handle("POST", "/api/me/2fa/setup", rateLimitedIP(d, "2fa", 10, 5*60*time.Second, requireAuth(d, twofaSetupHandler)))
+	mux.handle("POST", "/api/me/2fa/enable", rateLimitedIP(d, "2fa", 10, 5*60*time.Second, requireAuth(d, twofaEnableHandler)))
+	mux.handle("POST", "/api/me/2fa/disable", rateLimitedIP(d, "2fa", 10, 5*60*time.Second, requireAuth(d, twofaDisableHandler)))
 	mux.handle("GET", "/api/me/memories", requireAuth(d, listMemoriesHandler))
 	mux.handle("POST", "/api/me/memories", requireAuth(d, createMemoryHandler))
 	mux.handle("PATCH", "/api/me/memories/:id", requireAuth(d, updateMemoryHandler))
@@ -243,8 +249,23 @@ func NewRouter(d Deps) http.Handler {
 	// validated image content, so there's nothing sensitive to protect.
 	mux.handle("GET", "/api/icons/:filename", wrap(d, serveIcon))
 
-	// CORS wrapper.
-	return corsMiddleware(d.Config.AllowedOrigins, mux)
+	// CORS wrapper, with panic recovery as the outermost layer so any handler
+	// panic is caught before it tears down the server process (§ FIX-7).
+	return recoverMiddleware(corsMiddleware(d.Config.AllowedOrigins, mux))
+}
+
+// recoverMiddleware catches any handler panic, logs the stack trace, and
+// returns a 500 to the client instead of crashing the process (§ FIX-7).
+func recoverMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				slog.Error("panic recovered", "panic", rec, "stack", string(debug.Stack()))
+				http.Error(w, "internal server error", http.StatusInternalServerError)
+			}
+		}()
+		next.ServeHTTP(w, r)
+	})
 }
 
 // corsMiddleware enables credentials so the frontend's fetch with

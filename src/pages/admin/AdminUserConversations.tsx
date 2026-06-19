@@ -66,7 +66,7 @@ export default function AdminUserConversations() {
         // The users list is small enough that re-fetching it for one row is
         // cheaper than carving out a single-user GET endpoint.
         const [users, convs] = await Promise.all([
-          adminApi.users(),
+          adminApi.users('', 200, 0).then((r) => r.users),
           adminApi.userConversations(id),
         ])
         if (cancelled) return

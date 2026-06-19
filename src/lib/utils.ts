@@ -9,13 +9,6 @@ export function cn(...inputs: ClassValue[]): string {
 }
 
 /**
- * Sleep utility for mock streaming.
- */
-export function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms))
-}
-
-/**
  * Allowlist guard for model/tool-controlled URLs (citations, research sources,
  * artifacts). SSE events feed these into `<a href>` / `<img src>` verbatim, and
  * React 19 does NOT block `javascript:` in href — so we must vet the scheme

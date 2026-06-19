@@ -60,8 +60,12 @@ func (o *Orchestrator) checkModelQuota(ctx context.Context, userID string, model
 	groupID := o.userGroupID(ctx, userID)
 	q, err := store.GetModelQuota(ctx, o.db, model.ID, groupID)
 	if err != nil {
-		// Group has no free grant for this model → pay with credits.
-		return o.creditDecision(ctx, userID, groupID)
+		// The model has quota rows (it's restricted) but this group has no
+		// matching row → the model is not available for this plan (H-14).
+		// Fall through to credits is NOT allowed when the model is explicitly
+		// restricted; credits are only a payment mechanism for groups that are
+		// granted access, not a bypass for groups that are excluded.
+		return o.quotaMessage(), false, false
 	}
 	if q.LimitValue <= 0 {
 		return "", true, false // granted unlimited free

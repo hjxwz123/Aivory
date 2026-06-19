@@ -172,11 +172,16 @@ func DeleteUserGroup(ctx context.Context, db *sql.DB, id string) error {
 	return err
 }
 
-// SetUserGroup assigns a user to a group (admin action).
+// SetUserGroup assigns a user to a group (admin action). Bumps the token
+// version so the group change (and its quota limits) takes effect immediately —
+// the group_id lives in the access-token claims, so outstanding tokens must be
+// invalidated (§ FIX-4, same pattern as SetUserRole / SetUserStatus).
 func SetUserGroup(ctx context.Context, db *sql.DB, userID, groupID string) error {
 	if _, err := GetUserGroup(ctx, db, groupID); err != nil {
 		return err
 	}
-	_, err := db.ExecContext(ctx, `UPDATE users SET group_id=? WHERE id=?`, groupID, userID)
-	return err
+	if _, err := db.ExecContext(ctx, `UPDATE users SET group_id=? WHERE id=?`, groupID, userID); err != nil {
+		return err
+	}
+	return BumpTokenVersion(ctx, db, userID)
 }

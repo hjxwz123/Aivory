@@ -52,7 +52,11 @@ func Load() Config {
 		QdrantURL:        getenv("QDRANT_URL", ""),
 		QdrantAPIKey:     getenv("QDRANT_API_KEY", ""),
 		JWTSecret:        getenv("JWT_SECRET", defaultDevJWTSecret),
-		AccessTTL:        getenvDuration("ACCESS_TTL", 2*time.Hour),
+		// Short-lived access tokens limit the damage window if a token is stolen:
+		// the stolen token expires quickly even without explicit revocation.
+		// 30 minutes is the recommended ceiling; operators may lower it further
+		// via ACCESS_TTL without touching RefreshTTL (7–30 days is fine there).
+		AccessTTL:        getenvDuration("ACCESS_TTL", 30*time.Minute),
 		RefreshTTL:       getenvDuration("REFRESH_TTL", 30*24*time.Hour),
 		AllowedOrigins:   getenvList("ALLOWED_ORIGINS", []string{"http://localhost:5173", "http://127.0.0.1:5173"}),
 		UploadDir:        getenv("UPLOAD_DIR", "./data/uploads"),

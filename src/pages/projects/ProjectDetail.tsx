@@ -56,6 +56,7 @@ export default function ProjectDetail() {
   const { t } = useTranslation(['projects', 'chat', 'common'])
 
   const project = useProjects((s) => s.projects.find((p) => p.id === id))
+  const projectsLoaded = useProjects((s) => s.loaded)
   const loadOne = useProjects((s) => s.loadOne)
   const updateProject = useProjects((s) => s.updateProject)
   const renameProject = useProjects((s) => s.renameProject)
@@ -89,6 +90,7 @@ export default function ProjectDetail() {
 
   const [editingInstructions, setEditingInstructions] = useState(false)
   const [instructionsDraft, setInstructionsDraft] = useState('')
+  const [savingInstructions, setSavingInstructions] = useState(false)
 
   const [renameOpen, setRenameOpen] = useState(false)
   const [renameDraft, setRenameDraft] = useState('')
@@ -103,6 +105,18 @@ export default function ProjectDetail() {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [addFileOpen, setAddFileOpen] = useState(false)
   const [renameFileState, setRenameFileState] = useState<{ id: string; draft: string } | null>(null)
+
+  if (!project && !projectsLoaded) {
+    // Still hydrating — show a spinner rather than a premature 404.
+    return (
+      <div className="flex-1 grid place-items-center">
+        <div className="flex flex-col items-center gap-4 text-[var(--color-fg-muted)]">
+          <Loader2 size={24} className="animate-spin" aria-hidden />
+          <span className="text-sm">{t('common:common.loading')}</span>
+        </div>
+      </div>
+    )
+  }
 
   if (!project) {
     return (
@@ -123,11 +137,18 @@ export default function ProjectDetail() {
     setInstructionsDraft(project.instructions)
     setEditingInstructions(true)
   }
-  function saveInstructions() {
+  async function saveInstructions() {
     if (!project) return
-    updateProject(project.id, { instructions: instructionsDraft })
-    setEditingInstructions(false)
-    toast.success(t('projects:detail.instructionsSaved'))
+    setSavingInstructions(true)
+    try {
+      await updateProject(project.id, { instructions: instructionsDraft })
+      setEditingInstructions(false)
+      toast.success(t('projects:detail.instructionsSaved'))
+    } catch {
+      toast.error(t('projects:detail.instructionsSaveFailed', { defaultValue: 'Failed to save instructions' }))
+    } finally {
+      setSavingInstructions(false)
+    }
   }
 
   function openRename() {
@@ -323,7 +344,7 @@ export default function ProjectDetail() {
                   >
                     {t('common:actions.cancel')}
                   </Button>
-                  <Button size="sm" variant="secondary" leadingIcon={<Save size={13} aria-hidden />} onClick={saveInstructions}>
+                  <Button size="sm" variant="secondary" leadingIcon={<Save size={13} aria-hidden />} onClick={() => void saveInstructions()} loading={savingInstructions} disabled={savingInstructions}>
                     {t('projects:detail.instructionsSave')}
                   </Button>
                 </div>
