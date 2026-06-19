@@ -10,7 +10,8 @@ import (
 	"aurelia/server/internal/store"
 )
 
-// listConversationsHandler returns the user's conversations.
+// listConversationsHandler returns the user's conversations with pagination.
+// Query params: project_id, archived=only, limit (default 200, max 500), offset (default 0).
 func listConversationsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
 	projectID := r.URL.Query().Get("project_id")
@@ -20,12 +21,32 @@ func listConversationsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("archived") == "only" {
 		archivedFilter = "archived"
 	}
-	rows, err := store.ListConversations(r.Context(), d.DB, u.ID, projectID, archivedFilter)
+	limit := 200
+	if ls := r.URL.Query().Get("limit"); ls != "" {
+		if n, err := strconv.Atoi(ls); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	offset := 0
+	if os := r.URL.Query().Get("offset"); os != "" {
+		if n, err := strconv.Atoi(os); err == nil && n >= 0 {
+			offset = n
+		}
+	}
+	rows, err := store.ListConversations(r.Context(), d.DB, u.ID, projectID, archivedFilter, limit, offset)
 	if err != nil {
 		writeError(w, 500, err)
 		return
 	}
-	writeJSON(w, 200, rows)
+	writeJSON(w, 200, map[string]any{
+		"conversations": rows,
+		"limit":         limit,
+		"offset":        offset,
+		"has_more":      len(rows) == limit,
+	})
 }
 
 type createConversationReq struct {
@@ -279,9 +300,12 @@ type enrichedMessage struct {
 }
 
 func enrichWithSiblings(d Deps, r *http.Request, msgs []store.Message) []enrichedMessage {
-	out := []enrichedMessage{}
+	// Resolve all sibling lists in a single batch (one query per unique parent
+	// slot) instead of issuing one query per message (N+1 pattern).
+	siblingMap, _ := store.BatchSiblingsOf(r.Context(), d.DB, msgs)
+	out := make([]enrichedMessage, 0, len(msgs))
 	for _, m := range msgs {
-		ids, _ := store.SiblingsOf(r.Context(), d.DB, m)
+		ids := siblingMap[m.ID]
 		idx := 0
 		for i, id := range ids {
 			if id == m.ID {

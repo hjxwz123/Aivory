@@ -107,8 +107,8 @@ export default function AdminUsage() {
             {t('usage.empty')}
           </div>
         ) : (
-          <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] overflow-hidden">
-            <table className="w-full text-sm tabular-nums">
+          <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] overflow-x-auto">
+            <table className="min-w-[640px] w-full text-sm tabular-nums">
               <thead className="bg-[var(--color-bg-muted)] text-[12px] text-[var(--color-fg-subtle)]">
                 <tr>
                   <th className="text-left py-2.5 px-4 font-medium">{t('usage.table.user')}</th>

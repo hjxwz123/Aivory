@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { MoreHorizontal, Pencil, Share2, Star, Trash2, Archive, ArrowDown, FolderKanban, Copy, Check, Globe, Loader2, Menu, Files } from 'lucide-react'
+import { MoreHorizontal, Pencil, Share2, Star, Trash2, Archive, ArrowDown, FolderKanban, Copy, Check, Globe, Loader2, Menu, Files, GitBranch } from 'lucide-react'
 import { Composer } from '@/components/chat/composer'
 import { MessageList } from '@/components/chat/message-list'
 import { InlineThreadLayer } from '@/components/chat/inline-thread-layer'
@@ -36,6 +36,7 @@ import { conversationsApi, ApiError } from '@/api'
 import type { ApiShareInfo } from '@/api/types'
 import { toast } from '@/hooks/use-toast'
 import { useCopy } from '@/hooks/use-clipboard'
+import { ConversationOutline } from '@/components/chat/conversation-outline'
 import { accentClasses } from '@/lib/project-helpers'
 import { cn, truncate } from '@/lib/utils'
 import type { Attachment } from '@/types/chat'
@@ -45,6 +46,7 @@ export default function ChatThread() {
   const navigate = useNavigate()
   const { t } = useTranslation(['chat', 'common', 'projects'])
   const conversation = useConversations((s) => s.conversations.find((c) => c.id === id))
+  const [loadStatus, setLoadStatus] = useState<'idle' | 'loading' | 'done'>('idle')
   const loadOne = useConversations((s) => s.loadOne)
   const loadInlineThreads = useConversations((s) => s.loadInlineThreads)
   const setModel = useConversations((s) => s.setModel)
@@ -81,11 +83,13 @@ export default function ChatThread() {
 
   const [renaming, setRenaming] = useState(false)
   const [renameDraft, setRenameDraft] = useState('')
+  const [renameError, setRenameError] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
   const [share, setShare] = useState<ApiShareInfo | null>(null)
   const [shareLoading, setShareLoading] = useState(false)
   const [shareBusy, setShareBusy] = useState(false)
+  const [outlineOpen, setOutlineOpen] = useState(false)
   const { copied, copy } = useCopy()
   const shareUrl = share ? `${window.location.origin}/share/${share.id}` : ''
 
@@ -139,13 +143,16 @@ export default function ChatThread() {
   // the id changes.
   useEffect(() => {
     if (!id) return
-    void loadOne(id)
-    void loadInlineThreads(id)
+    setLoadStatus('loading')
+    Promise.all([loadOne(id), loadInlineThreads(id)]).finally(() => {
+      setLoadStatus('done')
+    })
   }, [id, loadOne, loadInlineThreads])
 
   useEffect(() => {
     setAutoFollow(true)
     setShowJump(false)
+    setOutlineOpen(false)
     positionedFor.current = null
   }, [id])
 
@@ -197,6 +204,16 @@ export default function ChatThread() {
   }
 
   if (!conversation) {
+    if (loadStatus !== 'done') {
+      return (
+        <div className="flex-1 grid place-items-center">
+          <div className="flex flex-col items-center gap-4 text-[var(--color-fg-muted)]">
+            <Loader2 size={24} className="animate-spin" aria-hidden />
+            <span className="text-sm">{t('common:common.loading')}</span>
+          </div>
+        </div>
+      )
+    }
     return (
       <div className="flex-1 grid place-items-center">
         <EmptyState
@@ -297,14 +314,20 @@ export default function ChatThread() {
             }
           }}
         />
-        <Tooltip content={t('chat:topbar.shareTooltip')}>
+        <Tooltip content={t('chat:topbar.outlineTooltip', { defaultValue: 'Conversation outline' })}>
           <button
             type="button"
-            onClick={() => setShareOpen(true)}
-            aria-label={t('chat:sidebar.share')}
-            className="inline-flex items-center justify-center size-8 rounded-[8px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+            onClick={() => setOutlineOpen((o) => !o)}
+            aria-label={t('chat:topbar.outlineTooltip', { defaultValue: 'Conversation outline' })}
+            aria-pressed={outlineOpen}
+            className={cn(
+              'inline-flex items-center justify-center size-8 rounded-[8px] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+              outlineOpen
+                ? 'bg-[var(--color-bg-muted)] text-[var(--color-fg)]'
+                : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
+            )}
           >
-            <Share2 size={14} aria-hidden />
+            <GitBranch size={14} aria-hidden />
           </button>
         </Tooltip>
         <Tooltip content={t('chat:files.tooltip')}>
@@ -342,8 +365,11 @@ export default function ChatThread() {
             <DropdownMenuItem onSelect={() => void star(conversation.id)}>
               <Star size={13} aria-hidden /> {conversation.starred ? t('common:actions.unstar') : t('common:actions.star')}
             </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => setShareOpen(true)}>
+              <Share2 size={13} aria-hidden /> {t('chat:sidebar.share')}
+            </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={() => { void archive(conversation.id); toast.success(t('chat:sidebar.archived')); navigate('/chat') }}>
+            <DropdownMenuItem onSelect={async () => { await archive(conversation.id); toast.success(t('chat:sidebar.archived')); navigate('/chat') }}>
               <Archive size={13} aria-hidden /> {t('chat:sidebar.archive')}
             </DropdownMenuItem>
             <DropdownMenuItem destructive onSelect={() => setConfirmDelete(true)}>
@@ -396,7 +422,7 @@ export default function ChatThread() {
         </div>
       </div>
 
-      <Dialog open={renaming} onOpenChange={setRenaming}>
+      <Dialog open={renaming} onOpenChange={(open) => { setRenaming(open); if (!open) setRenameError('') }}>
         <DialogContent size="sm">
           <DialogHeader>
             <DialogTitle>{t('chat:sidebar.renameTitle')}</DialogTitle>
@@ -404,23 +430,37 @@ export default function ChatThread() {
           <DialogBody>
             <Input
               value={renameDraft}
-              onChange={(e) => setRenameDraft(e.target.value)}
+              onChange={(e) => { setRenameDraft(e.target.value); if (e.target.value.trim()) setRenameError('') }}
               autoFocus
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
                   e.preventDefault()
                   e.stopPropagation()
-                  void rename(conversation.id, renameDraft)
+                  const trimmed = renameDraft.trim()
+                  if (!trimmed) { setRenameError(t('chat:thread.renameEmpty', { defaultValue: 'Title cannot be empty' })); return }
+                  void rename(conversation.id, trimmed)
                   setRenaming(false)
+                  setRenameError('')
+                  toast.success(t('chat:thread.renamed'))
                 }
               }}
             />
+            {renameError ? (
+              <p className="mt-1.5 text-[12px] text-[var(--color-danger)]">{renameError}</p>
+            ) : null}
           </DialogBody>
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setRenaming(false)}>
+            <Button variant="ghost" onClick={() => { setRenaming(false); setRenameError('') }}>
               {t('common:actions.cancel')}
             </Button>
-            <Button onClick={() => { void rename(conversation.id, renameDraft); setRenaming(false); toast.success(t('chat:thread.renamed')) }}>
+            <Button onClick={() => {
+              const trimmed = renameDraft.trim()
+              if (!trimmed) { setRenameError(t('chat:thread.renameEmpty', { defaultValue: 'Title cannot be empty' })); return }
+              void rename(conversation.id, trimmed)
+              setRenaming(false)
+              setRenameError('')
+              toast.success(t('chat:thread.renamed'))
+            }}>
               {t('common:actions.save')}
             </Button>
           </DialogFooter>
@@ -443,6 +483,14 @@ export default function ChatThread() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {outlineOpen ? (
+        <ConversationOutline
+          conversation={conversation}
+          scrollContainerRef={scrollRef}
+          onClose={() => setOutlineOpen(false)}
+        />
+      ) : null}
 
       <Dialog open={shareOpen} onOpenChange={setShareOpen}>
         <DialogContent size="sm">

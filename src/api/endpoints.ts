@@ -211,9 +211,14 @@ export const projectsApi = {
 // ----- Conversations + messages -------------------------------------------
 
 export const conversationsApi = {
-  list: (projectId?: string) =>
-    api<ApiConversation[]>(`/conversations${projectId ? `?project_id=${encodeURIComponent(projectId)}` : ''}`),
-  listArchived: () => api<ApiConversation[]>('/conversations?archived=only'),
+  list: (projectId?: string, limit = 200, offset = 0) =>
+    api<{ conversations: ApiConversation[]; limit: number; offset: number; has_more: boolean }>(
+      `/conversations?limit=${limit}&offset=${offset}${projectId ? `&project_id=${encodeURIComponent(projectId)}` : ''}`,
+    ),
+  listArchived: (limit = 200, offset = 0) =>
+    api<{ conversations: ApiConversation[]; limit: number; offset: number; has_more: boolean }>(
+      `/conversations?archived=only&limit=${limit}&offset=${offset}`,
+    ),
   get: (id: string) =>
     api<{ conversation: ApiConversation; messages: ApiMessage[] }>(`/conversations/${encodeURIComponent(id)}`),
   create: (body: { model_id?: string; project_id?: string; title?: string }) =>
@@ -419,7 +424,10 @@ export const adminApi = {
   removeRedeemBatch: (name: string) =>
     api<{ ok: true; removed: number }>(`/admin/redeem-batches/${encodeURIComponent(name)}`, { method: 'DELETE' }),
 
-  users: () => api<ApiUser[]>('/admin/users'),
+  users: (search = '', limit = 50, offset = 0) =>
+    api<{ users: ApiUser[]; total: number; limit: number; offset: number }>(
+      `/admin/users?search=${encodeURIComponent(search)}&limit=${limit}&offset=${offset}`,
+    ),
   createUser: (body: { email: string; name: string; password: string; role: 'user' | 'admin' }) =>
     api<ApiUser>('/admin/users', { method: 'POST', body }),
   setUserPassword: (id: string, new_password: string) =>

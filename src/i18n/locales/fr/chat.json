@@ -69,7 +69,8 @@
     "viewImage": "Afficher l’image",
     "removeAttachment": "Supprimer la pièce jointe",
     "previewFile": "Aperçu du fichier",
-    "delete": "Supprimer"
+    "delete": "Supprimer",
+    "openInNew": "Ouvrir dans un nouvel onglet"
   },
   "message": {
     "refused": "Le modèle a refusé de répondre à cette demande.",
@@ -183,7 +184,17 @@
     "removeFromProject": "Retirer du projet"
   },
   "topbar": {
-    "shareTooltip": "Partager"
+    "shareTooltip": "Partager",
+    "outlineTooltip": "Plan de conversation"
+  },
+  "outline": {
+    "title": "Plan de conversation",
+    "empty": "Aucun message pour l'instant.",
+    "emptyMessage": "(vide)",
+    "branches": "{{count}} branches",
+    "zoomIn": "Agrandir",
+    "zoomOut": "Réduire",
+    "close": "Fermer le plan"
   },
   "files": {
     "title": "Fichiers de cette discussion",
@@ -232,7 +243,8 @@
     "label": "Modèle : {{name}}",
     "upgrade": "Mettre à niveau pour débloquer",
     "allTags": "Tous",
-    "noneForTag": "Aucun modèle avec cette étiquette."
+    "noneForTag": "Aucun modèle avec cette étiquette.",
+    "creditRate": "Crédits par token"
   },
   "commandMenu": {
     "placeholder": "Rechercher des conversations, lancer une commande…",
@@ -256,6 +268,9 @@
       "switchLanguage": "Passer en {{language}}"
     },
     "title": "Menu de commandes"
+  },
+  "aria": {
+    "themeGroup": "Sélection du thème"
   },
   "signedOut": "Vous avez été déconnecté.",
   "userMenu": {

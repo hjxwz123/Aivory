@@ -126,7 +126,7 @@ export const useConversations = create<ConversationStore>((set, get) => ({
     if (get().loading) return
     set({ loading: true, error: null })
     try {
-      const rows = await conversationsApi.list()
+      const { conversations: rows } = await conversationsApi.list()
       const conversations = rows.map(toLocalConversation)
       set({ conversations, loaded: true, loading: false })
     } catch (e) {
@@ -187,6 +187,7 @@ export const useConversations = create<ConversationStore>((set, get) => ({
   },
 
   async deleteConversation(id) {
+    const prevConversations = get().conversations
     set((s) => {
       // Remove the conversation and every inline sub-conversation transitively
       // anchored to it, mirroring the backend cascade so markers/drawers for the
@@ -206,11 +207,13 @@ export const useConversations = create<ConversationStore>((set, get) => ({
     try {
       await conversationsApi.remove(id)
     } catch (e) {
+      set({ conversations: prevConversations })
       toast.error(errorMessage(e, 'Failed to delete conversation'))
     }
   },
 
   async renameConversation(id, title) {
+    const prevConversations = get().conversations
     set((s) => ({
       conversations: s.conversations.map((c) =>
         c.id === id ? { ...c, title: title.trim() || c.title, updatedAt: Date.now() } : c,
@@ -219,6 +222,7 @@ export const useConversations = create<ConversationStore>((set, get) => ({
     try {
       await conversationsApi.update(id, { title })
     } catch (e) {
+      set({ conversations: prevConversations })
       toast.error(errorMessage(e, 'Failed to rename conversation'))
     }
   },
@@ -250,12 +254,14 @@ export const useConversations = create<ConversationStore>((set, get) => ({
   },
 
   async archiveConversation(id) {
+    const prevConversations = get().conversations
     set((s) => ({
       conversations: s.conversations.map((c) => (c.id === id ? { ...c, archived: true } : c)),
     }))
     try {
       await conversationsApi.update(id, { archived: true })
     } catch (e) {
+      set({ conversations: prevConversations })
       toast.error(errorMessage(e, 'Failed to archive conversation'))
     }
   },
@@ -275,7 +281,7 @@ export const useConversations = create<ConversationStore>((set, get) => ({
 
   async loadArchived() {
     try {
-      const rows = await conversationsApi.listArchived()
+      const { conversations: rows } = await conversationsApi.listArchived()
       return rows.map(toLocalConversation)
     } catch {
       return []
@@ -404,12 +410,14 @@ export const useConversations = create<ConversationStore>((set, get) => ({
   },
 
   async setKBs(id, kbIds) {
+    const prevConversations = get().conversations
     set((s) => ({
       conversations: s.conversations.map((c) => (c.id === id ? { ...c, kbIds } : c)),
     }))
     try {
       await conversationsApi.update(id, { kb_ids: kbIds })
     } catch (e) {
+      set({ conversations: prevConversations })
       toast.error(errorMessage(e, 'Failed to update knowledge bases'))
     }
   },
@@ -1229,6 +1237,7 @@ export function toLocalMessage(m: ApiMessage): Message {
     mode: research ? 'deep-research' : undefined,
     artifacts: artifacts.length > 0 ? artifacts : undefined,
     modelId: m.model_id || undefined,
+    modelLabel: m.model_label || undefined,
     createdAt: m.created_at * 1000,
     streaming: m.status === 'streaming',
     cost: m.cost > 0 ? m.cost : undefined,

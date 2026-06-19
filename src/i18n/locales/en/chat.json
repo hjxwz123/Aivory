@@ -69,7 +69,8 @@
     "viewImage": "View image",
     "removeAttachment": "Remove attachment",
     "previewFile": "Preview file",
-    "delete": "Delete"
+    "delete": "Delete",
+    "openInNew": "Open in new tab"
   },
   "message": {
     "refused": "The model declined to answer this request.",
@@ -183,7 +184,17 @@
     "removeFromProject": "Remove from project"
   },
   "topbar": {
-    "shareTooltip": "Share"
+    "shareTooltip": "Share",
+    "outlineTooltip": "Conversation outline"
+  },
+  "outline": {
+    "title": "Conversation outline",
+    "empty": "No messages yet.",
+    "emptyMessage": "(empty)",
+    "branches": "{{count}} branches",
+    "zoomIn": "Zoom in",
+    "zoomOut": "Zoom out",
+    "close": "Close outline"
   },
   "files": {
     "title": "Files in this chat",
@@ -232,7 +243,8 @@
     "label": "Model: {{name}}",
     "upgrade": "Upgrade to unlock",
     "allTags": "All",
-    "noneForTag": "No models with this tag."
+    "noneForTag": "No models with this tag.",
+    "creditRate": "Credits per token"
   },
   "commandMenu": {
     "placeholder": "Search conversations, run a command…",
@@ -256,6 +268,9 @@
       "switchLanguage": "Switch to {{language}}"
     },
     "title": "Command menu"
+  },
+  "aria": {
+    "themeGroup": "Theme selection"
   },
   "signedOut": "You've been signed out.",
   "userMenu": {

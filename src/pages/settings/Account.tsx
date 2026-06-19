@@ -42,6 +42,7 @@ export default function Account() {
   const [deleting, setDeleting] = useState(false)
   const [pwOpen, setPwOpen] = useState(false)
   const [pw, setPw] = useState({ current: '', next: '' })
+  const [isChangingPassword, setIsChangingPassword] = useState(false)
 
   // Two-factor (TOTP) state.
   const twoFactorOn = Boolean(user?.totp_enabled)
@@ -163,6 +164,7 @@ export default function Account() {
       toast.error(t('settings:account.passwordMinLength'))
       return
     }
+    setIsChangingPassword(true)
     try {
       await authApi.changePassword(pw.current, pw.next)
       toast.success(t('settings:account.passwordUpdated'))
@@ -172,6 +174,8 @@ export default function Account() {
       navigate('/login')
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : 'Failed')
+    } finally {
+      setIsChangingPassword(false)
     }
   }
 
@@ -213,7 +217,9 @@ export default function Account() {
           </div>
         </SettingsRow>
         <SettingsRow label={t('settings:account.rows.name')} description={t('settings:account.rows.nameBody')}>
+          <label htmlFor="account-name" className="sr-only">{t('settings:account.rows.name')}</label>
           <Input
+            id="account-name"
             value={name}
             onChange={(e) => setName(e.target.value)}
             leadingIcon={<User size={14} aria-hidden />}
@@ -221,7 +227,9 @@ export default function Account() {
           />
         </SettingsRow>
         <SettingsRow label={t('settings:account.rows.email')} description={t('settings:account.rows.emailLocked')}>
+          <label htmlFor="account-email" className="sr-only">{t('settings:account.rows.email')}</label>
           <Input
+            id="account-email"
             type="email"
             value={email}
             readOnly
@@ -302,8 +310,10 @@ export default function Account() {
             </div>
           </DialogBody>
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setPwOpen(false)}>{t('common:actions.cancel')}</Button>
-            <Button onClick={() => void changePassword()}>{t('common:actions.save')}</Button>
+            <Button variant="ghost" onClick={() => setPwOpen(false)} disabled={isChangingPassword}>{t('common:actions.cancel')}</Button>
+            <Button onClick={() => void changePassword()} disabled={isChangingPassword} loading={isChangingPassword}>
+              {isChangingPassword ? t('common:actions.saving', { defaultValue: 'Saving…' }) : t('common:actions.save')}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -318,6 +328,17 @@ export default function Account() {
           <DialogBody>
             <div className="grid gap-4">
               <div>
+                {setup?.otpauth_url && (
+                  <div className="flex justify-center my-4">
+                    <img
+                      src={`https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(setup.otpauth_url)}&size=200x200&margin=8`}
+                      alt={t('settings:account.twofa.qrAlt', { defaultValue: 'Scan with authenticator app' })}
+                      width={200}
+                      height={200}
+                      className="rounded-[10px] border border-[var(--color-border)]"
+                    />
+                  </div>
+                )}
                 <div className="text-[12px] font-medium text-[var(--color-fg-muted)] mb-1.5">
                   {t('settings:account.twofa.secretLabel')}
                 </div>
@@ -334,7 +355,7 @@ export default function Account() {
                     <Copy size={14} aria-hidden />
                   </Button>
                 </div>
-                <p className="mt-1.5 text-[12px] text-[var(--color-fg-subtle)]">{t('settings:account.twofa.secretHint')}</p>
+                <p className="mt-1.5 text-[12px] text-[var(--color-fg-subtle)]">{t('settings:account.twofa.secretHint', { defaultValue: "Can't scan? Enter this code manually." })}</p>
               </div>
               <Field label={t('settings:account.twofa.codeLabel')} htmlFor="twofa-enable-code">
                 <Input

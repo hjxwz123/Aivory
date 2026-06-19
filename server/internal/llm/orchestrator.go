@@ -1441,7 +1441,7 @@ func clipTitle(s string) string {
 	s = strings.ReplaceAll(s, "\n", " ")
 	s = strings.TrimSpace(s)
 	if s == "" {
-		return "新对话"
+		return ""
 	}
 	rs := []rune(s)
 	if len(rs) > 28 {

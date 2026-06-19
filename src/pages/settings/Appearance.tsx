@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/select'
 import { Sun, Moon, Monitor, Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { authApi } from '@/api'
 
 /**
  * Static preview color per accent preset. Chosen at L≈58 / C≈0.18 so the
@@ -60,6 +61,30 @@ export default function Appearance() {
     void import('@fontsource-variable/inter')
   }, [])
 
+  // On mount: merge server-side appearance preferences into local state.
+  // localStorage takes precedence for immediate response; server fills gaps.
+  useEffect(() => {
+    void authApi.getSettings().then((s) => {
+      if (typeof s.accent_color === 'string' && s.accent_color && !localStorage.getItem('accent')) {
+        setAccent(s.accent_color as AccentPref)
+      }
+      if (typeof s.font_family === 'string' && s.font_family && !localStorage.getItem('font')) {
+        setAppearance({ font: s.font_family as FontPref })
+      }
+    }).catch(() => {})
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  function onChangeAccent(preset: AccentPref) {
+    setAccent(preset)
+    void authApi.updateSettings({ accent_color: preset }).catch(() => {})
+  }
+
+  function onChangeFont(opt: FontPref) {
+    setAppearance({ font: opt })
+    void authApi.updateSettings({ font_family: opt }).catch(() => {})
+  }
+
   return (
     <div className="mx-auto max-w-[60rem]">
       <header className="mb-8">
@@ -82,7 +107,7 @@ export default function Appearance() {
                 key={preset}
                 preset={preset}
                 active={accent === preset}
-                onClick={() => setAccent(preset)}
+                onClick={() => onChangeAccent(preset)}
                 label={t(`appearance.accent.${preset}`)}
                 color={ACCENT_PREVIEW[preset]}
               />
@@ -160,7 +185,7 @@ export default function Appearance() {
                   key={opt}
                   type="button"
                   aria-pressed={active}
-                  onClick={() => setAppearance({ font: opt })}
+                  onClick={() => onChangeFont(opt)}
                   style={{ fontFamily: FONT_PREVIEW[opt] }}
                   className={cn(
                     'flex flex-col items-start gap-0.5 rounded-[10px] border px-3 py-2 text-left interactive min-w-[6.5rem]',

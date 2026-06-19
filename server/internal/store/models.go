@@ -223,6 +223,7 @@ type Message struct {
 	Role             string          `json:"role"`
 	Provider         string          `json:"provider"`
 	ModelID          string          `json:"model_id"`
+	ModelLabel       string          `json:"model_label"`
 	Blocks           json.RawMessage `json:"blocks"`
 	Raw              json.RawMessage `json:"raw,omitempty"`
 	StopReason       string          `json:"stop_reason"`

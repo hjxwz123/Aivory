@@ -113,7 +113,29 @@
       "invalidJSON": "param_controls 不是合法 JSON"
     },
     "permissionsLead": "选择哪些用户组可以使用此模型，以及每个周期的额度。全部关闭则此模型对所有人开放。",
-    "tagsHint": "为该模型分配标签，以便在选择框的筛选条中归类。"
+    "tagsHint": "为该模型分配标签，以便在选择框的筛选条中归类。",
+    "pc": {
+      "toggle": "开关",
+      "select": "下拉",
+      "removeControl": "删除",
+      "addControl": "添加控件",
+      "addOption": "添加选项",
+      "showRaw": "高级:原始 JSON",
+      "hideRaw": "隐藏 JSON",
+      "key": "键名 key",
+      "label": "显示文字",
+      "labelPlaceholder": "深度思考",
+      "icon": "图标",
+      "default": "默认值",
+      "onFragment": "开启时(合并进请求体)",
+      "offFragment": "关闭时",
+      "options": "选项",
+      "optValue": "值",
+      "optLabel": "文字",
+      "fragment": "合并进请求体",
+      "showIfKey": "仅当(键)显示 · 可选",
+      "showIfValue": "等于(值)"
+    }
   },
   "skills": {
     "title": "技能",
@@ -623,6 +645,7 @@
     "clear": "清空沙盒",
     "cleared": "沙盒已清空",
     "none": "该对话还没有沙盒会话。",
+    "unavailable": "会话已过期或 Sidecar 不支持文件列举。",
     "empty": "沙盒工作区为空。",
     "open": "打开"
   },

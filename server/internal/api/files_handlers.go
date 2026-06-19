@@ -303,6 +303,28 @@ func kindOf(mime, name string) string {
 	return "text"
 }
 
+// safeMIMEType derives a server-controlled content type for a filename.
+// It never returns a type from client-supplied data — this prevents stored XSS
+// via uploaded HTML/SVG/JS served with an attacker-controlled Content-Type.
+// Dangerous types (HTML, SVG, XML, JS) are forced to application/octet-stream
+// so the browser downloads them rather than rendering/executing them inline.
+func safeMIMEType(filename string) string {
+	ct := mime.TypeByExtension(filepath.Ext(filename))
+	if ct == "" {
+		return "application/octet-stream"
+	}
+	dangerousTypes := []string{
+		"text/html", "image/svg+xml", "text/xml", "application/xml",
+		"text/javascript", "application/javascript",
+	}
+	for _, dt := range dangerousTypes {
+		if strings.HasPrefix(ct, dt) {
+			return "application/octet-stream"
+		}
+	}
+	return ct
+}
+
 // downloadArtifactHandler streams an artifact to the user with ownership
 // check + correct content type. Artifacts are written into the artifact
 // directory by tools (image_generate, python_execute via sandbox); the route
@@ -341,15 +363,15 @@ func downloadArtifactHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
-	mime := a.MimeType
-	if mime == "" {
-		mime = "application/octet-stream"
-	}
-	w.Header().Set("content-type", mime)
+	// Derive a server-side MIME type — never trust the client-supplied value
+	// stored in DB, which enables stored XSS via HTML/SVG uploads (§ FIX-1).
+	contentType := safeMIMEType(cleanName)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("content-type", contentType)
 	w.Header().Set("content-length", strconv.FormatInt(info.Size(), 10))
 	// Disposition: inline for images, attachment for everything else (per A12).
 	disp := "attachment"
-	if strings.HasPrefix(mime, "image/") {
+	if strings.HasPrefix(contentType, "image/") {
 		disp = "inline"
 	}
 	w.Header().Set("content-disposition", disp+`; filename="`+cleanName+`"`)
@@ -394,18 +416,18 @@ func downloadFileHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
-	mime := f.MimeType
-	if mime == "" {
-		mime = "application/octet-stream"
-	}
-	w.Header().Set("content-type", mime)
+	// Derive a server-side MIME type — never trust the client-supplied value
+	// stored in DB, which enables stored XSS via HTML/SVG uploads (§ FIX-1).
+	contentType := safeMIMEType(cleanName)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("content-type", contentType)
 	w.Header().Set("content-length", strconv.FormatInt(info.Size(), 10))
 	// Cache so a single conversation page's repeated image-tag fetches don't
 	// re-stream the same file on every navigation. The file_id never collides,
 	// so a long TTL is safe; we keep it private since the file is owner-scoped.
 	w.Header().Set("cache-control", "private, max-age=86400")
 	disp := "attachment"
-	if strings.HasPrefix(mime, "image/") {
+	if strings.HasPrefix(contentType, "image/") {
 		disp = "inline"
 	}
 	w.Header().Set("content-disposition", disp+`; filename="`+cleanName+`"`)

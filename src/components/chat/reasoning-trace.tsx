@@ -75,6 +75,8 @@ export function ReasoningTrace({ reasoning, streaming = false, settled = false }
       {/* Minimal, box-free disclosure — just an icon + "thinking" label + caret. */}
       <button
         type="button"
+        aria-expanded={expanded}
+        aria-controls="reasoning-content"
         onClick={() => {
           userToggled.current = true
           setExpanded((v) => !v)
@@ -100,6 +102,7 @@ export function ReasoningTrace({ reasoning, streaming = false, settled = false }
       {/* grid 0fr→1fr animates height without measuring; the global
           prefers-reduced-motion rule neutralises the transition automatically. */}
       <div
+        id="reasoning-content"
         className={cn(
           'grid transition-[grid-template-rows] duration-300 ease-[var(--ease-out)]',
           expanded ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]',

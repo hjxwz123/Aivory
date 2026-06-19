@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -58,10 +59,18 @@ func twofaEnableHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errors.New("start setup first"))
 		return
 	}
+	// Replay-attack guard: reject a code that was already consumed within the
+	// current 30-second window (±1 step tolerance = up to 90s of validity).
+	usedKey := fmt.Sprintf("2fa:used:%s:%s", u.ID, req.Code)
+	if _, already := d.Cache.Get(usedKey); already {
+		writeError(w, 400, errors.New("TOTP code already used"))
+		return
+	}
 	if !auth.VerifyTotp(u.TotpSecret, req.Code) {
 		writeError(w, 400, errors.New("invalid code"))
 		return
 	}
+	d.Cache.Set(usedKey, "1", 90*time.Second)
 	if err := store.SetUserTotp(r.Context(), d.DB, u.ID, u.TotpSecret, true); err != nil {
 		writeError(w, 500, err)
 		return
@@ -81,10 +90,17 @@ func twofaDisableHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errors.New("two-factor is not enabled"))
 		return
 	}
+	// Replay-attack guard.
+	usedKey := fmt.Sprintf("2fa:used:%s:%s", u.ID, req.Code)
+	if _, already := d.Cache.Get(usedKey); already {
+		writeError(w, 400, errors.New("TOTP code already used"))
+		return
+	}
 	if !auth.VerifyTotp(u.TotpSecret, req.Code) {
 		writeError(w, 400, errors.New("invalid code"))
 		return
 	}
+	d.Cache.Set(usedKey, "1", 90*time.Second)
 	if err := store.DisableUserTotp(r.Context(), d.DB, u.ID); err != nil {
 		writeError(w, 500, err)
 		return
@@ -147,6 +163,13 @@ func login2faHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 401, errors.New("invalid login session"))
 		return
 	}
+	// Replay-attack guard: reject a code that was already consumed within the
+	// current window before we call VerifyTotp (which only checks correctness).
+	usedKey := fmt.Sprintf("2fa:used:%s:%s", uid, req.Code)
+	if _, already := d.Cache.Get(usedKey); already {
+		writeError(w, 401, errors.New("TOTP code already used"))
+		return
+	}
 	if !auth.VerifyTotp(user.TotpSecret, req.Code) {
 		// §A5: burn the ticket after 5 wrong codes so a captured ticket can't be
 		// brute-forced for its full TTL — the user must redo the password step.
@@ -162,6 +185,7 @@ func login2faHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 401, errors.New("invalid code"))
 		return
 	}
+	d.Cache.Set(usedKey, "1", 90*time.Second)
 	d.Cache.Delete("2fa:" + ticket)
 	d.Cache.Delete("2fa:fail:" + ticket)
 	clear2faCookie(w)

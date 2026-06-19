@@ -302,7 +302,8 @@ func AdminUsageReport(ctx context.Context, db *sql.DB, days int) ([]UsageRow, er
 		 LEFT JOIN conversations c ON c.id = u.conversation_id
 		 WHERE u.created_at >= ?
 		 GROUP BY u.user_id, usr.email, u.conversation_id, c.title, u.model_id, u.purpose
-		 ORDER BY SUM(u.cost) DESC`, since)
+		 ORDER BY SUM(u.cost) DESC
+		 LIMIT 10000`, since)
 	if err != nil {
 		return nil, err
 	}

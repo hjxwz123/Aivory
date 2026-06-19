@@ -546,20 +546,34 @@ func firstHeader(r *http.Request, names ...string) string {
 	return ""
 }
 
-// externalBaseURL reconstructs the public scheme://host the browser used,
-// honouring the standard reverse-proxy forwarding headers. Used to build OAuth
-// redirect URIs and the post-login redirect target.
+// externalBaseURL reconstructs the public scheme://host the browser used.
+// Forwarding headers (X-Forwarded-Host, X-Forwarded-Proto) are only trusted
+// when the direct peer is a loopback or private-network address — an upstream
+// reverse proxy we control. Public peers must not be allowed to override the
+// host, which would enable open-redirect / SSRF attacks via the OAuth callback.
 func externalBaseURL(r *http.Request) string {
-	scheme := "http"
-	if r.TLS != nil {
-		scheme = "https"
+	remoteHost, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		remoteHost = r.RemoteAddr
 	}
-	if p := r.Header.Get("X-Forwarded-Proto"); p != "" {
-		scheme = strings.TrimSpace(strings.Split(p, ",")[0])
+	if isTrustedPeer(remoteHost) {
+		if fh := r.Header.Get("X-Forwarded-Host"); fh != "" {
+			proto := strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-Proto"), ",")[0])
+			if proto == "" {
+				proto = "https"
+			}
+			host := strings.TrimSpace(strings.Split(fh, ",")[0])
+			return proto + "://" + host
+		}
 	}
+	// Fallback: derive from Host header (safe — set by TLS terminator or listen).
 	host := r.Host
-	if h := r.Header.Get("X-Forwarded-Host"); h != "" {
-		host = strings.TrimSpace(strings.Split(h, ",")[0])
+	if host == "" {
+		host = "localhost"
+	}
+	scheme := "https"
+	if r.TLS == nil {
+		scheme = "http"
 	}
 	return scheme + "://" + host
 }

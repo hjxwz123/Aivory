@@ -128,6 +128,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
     <aside
       data-variant={variant}
       data-collapsed={collapsed ? 'true' : 'false'}
+      aria-label={t('sidebar.navAria', { defaultValue: 'Conversation navigation' })}
       className={cn(
         'flex flex-col h-full bg-[var(--color-bg-muted)] border-r border-[var(--color-divider)]',
         variant === 'desktop' && (collapsed ? 'w-[3.5rem]' : 'w-[17.5rem]'),
@@ -237,7 +238,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
                 type="button"
                 onClick={() => setNewProjectOpen(true)}
                 aria-label={tProjects('nav.newProject')}
-                className="inline-flex items-center justify-center size-5 rounded-[5px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-bg)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                className="inline-flex items-center justify-center size-5 max-sm:size-7 rounded-[5px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-bg)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
               >
                 <Plus size={11} aria-hidden />
               </button>
@@ -399,7 +400,7 @@ function ConversationItem({
               <button
                 type="button"
                 aria-label={t('sidebar.actions')}
-                className="inline-flex items-center justify-center size-6 rounded-[6px] opacity-0 group-hover/conv:opacity-100 data-[state=open]:opacity-100 text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                className="inline-flex items-center justify-center size-6 max-sm:size-8 max-sm:opacity-100 rounded-[6px] opacity-0 group-hover/conv:opacity-100 data-[state=open]:opacity-100 text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
               >
                 <MoreHorizontal size={13} aria-hidden />
               </button>
@@ -409,7 +410,10 @@ function ConversationItem({
                 <Pencil size={13} aria-hidden />
                 {t('sidebar.rename')}
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => star(conversation.id)}>
+              <DropdownMenuItem onClick={() => {
+                void star(conversation.id)
+                toast.success(conversation.starred ? t('common:actions.unstar') : t('common:actions.star'))
+              }}>
                 <Star size={13} aria-hidden />
                 {conversation.starred ? t('common:actions.unstar') : t('common:actions.star')}
               </DropdownMenuItem>
@@ -420,7 +424,10 @@ function ConversationItem({
               <DropdownMenuSeparator />
               <MoveToProjectSub conversationId={conversation.id} currentProjectId={conversation.projectId} />
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => archive(conversation.id)}>
+              <DropdownMenuItem onClick={() => {
+                archive(conversation.id)
+                toast.success(t('sidebar.archived'))
+              }}>
                 <Archive size={13} aria-hidden />
                 {t('sidebar.archive')}
               </DropdownMenuItem>

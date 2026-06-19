@@ -119,7 +119,9 @@ func SetKBEmbeddingDim(ctx context.Context, db *sql.DB, kbID string, dim int) er
 	return err
 }
 
-// DeleteKB removes the KB and cascades to documents/chunks.
+// DeleteKB removes the KB and cascades to documents/chunks. It also removes
+// the deleted KB's ID from the kb_ids JSON array in all conversations so stale
+// references don't cause retrieval errors (§ FIX-5).
 func DeleteKB(ctx context.Context, db *sql.DB, id, userID string) error {
 	res, err := db.ExecContext(ctx, `DELETE FROM knowledge_bases WHERE id=? AND user_id=?`, id, userID)
 	if err != nil {
@@ -128,6 +130,34 @@ func DeleteKB(ctx context.Context, db *sql.DB, id, userID string) error {
 	n, _ := res.RowsAffected()
 	if n == 0 {
 		return ErrNotFound
+	}
+	// Clean up kb_ids references in conversations. kb_ids is stored as a JSON
+	// TEXT array in both SQLite and Postgres. We use json_each to rebuild the
+	// array without the deleted KB's ID (raw query — not in query files because
+	// this dialect-switch logic would be awkward in sqlc templates).
+	if IsPostgres() {
+		// Postgres: use json_agg + json_array_elements_text to filter the array.
+		_, _ = db.ExecContext(ctx, `
+			UPDATE conversations
+			SET kb_ids = COALESCE(
+				(SELECT json_agg(value ORDER BY ordinality)
+				 FROM json_array_elements_text(kb_ids::json) WITH ORDINALITY
+				 WHERE value != $1),
+				'[]'::json
+			)::text
+			WHERE kb_ids LIKE '%' || $1 || '%'
+		`, id)
+	} else {
+		// SQLite: use json_each + json_group_array to rebuild without the deleted ID.
+		_, _ = db.ExecContext(ctx, `
+			UPDATE conversations
+			SET kb_ids = (
+				SELECT COALESCE(json_group_array(value), '[]')
+				FROM json_each(kb_ids)
+				WHERE value != ?
+			)
+			WHERE json_type(kb_ids) = 'array' AND kb_ids LIKE '%' || ? || '%'
+		`, id, id)
 	}
 	return nil
 }

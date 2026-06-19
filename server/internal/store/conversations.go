@@ -40,7 +40,14 @@ func SetConvProviderStateKey(ctx context.Context, db *sql.DB, convID, key, value
 
 // ListConversations returns conversations for a user, optionally filtered by
 // project. archivedFilter "any" returns all; "active" hides archived.
-func ListConversations(ctx context.Context, db *sql.DB, userID, projectID, archivedFilter string) ([]Conversation, error) {
+// limit controls the page size (default 200, max 500); offset is the row offset.
+func ListConversations(ctx context.Context, db *sql.DB, userID, projectID, archivedFilter string, limit, offset int) ([]Conversation, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+	if limit > 500 {
+		limit = 500
+	}
 	q := `SELECT id, user_id, COALESCE(project_id, ''), title, provider, model_id, kb_ids, rag_mode, summary_blocks, COALESCE(active_leaf_id, ''), provider_state, pinned, archived, starred, created_at, updated_at, COALESCE(inline_source_conv, ''), COALESCE(inline_parent_id, ''), COALESCE(inline_quote, '') FROM conversations WHERE user_id=? AND COALESCE(inline_source_conv,'')=''`
 	args := []any{userID}
 	if projectID == "_none_" {
@@ -54,7 +61,8 @@ func ListConversations(ctx context.Context, db *sql.DB, userID, projectID, archi
 	} else if archivedFilter == "archived" {
 		q += " AND archived=1"
 	}
-	q += " ORDER BY pinned DESC, updated_at DESC"
+	q += " ORDER BY pinned DESC, updated_at DESC LIMIT ? OFFSET ?"
+	args = append(args, limit, offset)
 	rows, err := db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
@@ -164,9 +172,6 @@ func CreateConversation(ctx context.Context, db *sql.DB, c Conversation) (*Conve
 	}
 	if c.RAGMode == "" {
 		c.RAGMode = "auto"
-	}
-	if c.Title == "" {
-		c.Title = "新对话"
 	}
 	now := time.Now().Unix()
 	var projectID any
@@ -393,7 +398,7 @@ func ListMessages(ctx context.Context, db *sql.DB, convID, leafID string) ([]Mes
 // branch — used by clients that render the full tree (sibling counts/branch
 // switching). Sorted by created_at ascending.
 func ListAllMessages(ctx context.Context, db *sql.DB, convID string) ([]Message, error) {
-	rows, err := db.QueryContext(ctx, `SELECT id, conversation_id, COALESCE(parent_id,''), role, provider, model_id, blocks, COALESCE(raw,''), COALESCE(stop_reason,''), attachments, citations, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost, currency, credits, status, error, COALESCE(feedback,''), created_at, gen_ms FROM messages WHERE conversation_id=? ORDER BY created_at ASC`, convID)
+	rows, err := db.QueryContext(ctx, `SELECT id, conversation_id, COALESCE(parent_id,''), role, provider, model_id, COALESCE(model_label,''), blocks, COALESCE(raw,''), COALESCE(stop_reason,''), attachments, citations, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost, currency, credits, status, error, COALESCE(feedback,''), created_at, gen_ms FROM messages WHERE conversation_id=? ORDER BY created_at ASC`, convID)
 	if err != nil {
 		return nil, err
 	}
@@ -411,7 +416,7 @@ func ListAllMessages(ctx context.Context, db *sql.DB, convID string) ([]Message,
 
 // GetMessage returns one row.
 func GetMessage(ctx context.Context, db *sql.DB, id string) (*Message, error) {
-	row := db.QueryRowContext(ctx, `SELECT id, conversation_id, COALESCE(parent_id,''), role, provider, model_id, blocks, COALESCE(raw,''), COALESCE(stop_reason,''), attachments, citations, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost, currency, credits, status, error, COALESCE(feedback,''), created_at, gen_ms FROM messages WHERE id=?`, id)
+	row := db.QueryRowContext(ctx, `SELECT id, conversation_id, COALESCE(parent_id,''), role, provider, model_id, COALESCE(model_label,''), blocks, COALESCE(raw,''), COALESCE(stop_reason,''), attachments, citations, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost, currency, credits, status, error, COALESCE(feedback,''), created_at, gen_ms FROM messages WHERE id=?`, id)
 	m, err := scanMessage(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -425,7 +430,7 @@ func GetMessage(ctx context.Context, db *sql.DB, id string) (*Message, error) {
 func scanMessage(s scanner) (Message, error) {
 	var m Message
 	var blocks, raw, atts, cites string
-	if err := s.Scan(&m.ID, &m.ConversationID, &m.ParentID, &m.Role, &m.Provider, &m.ModelID, &blocks, &raw, &m.StopReason, &atts, &cites, &m.InputTokens, &m.OutputTokens, &m.CacheReadTokens, &m.CacheWriteTokens, &m.Cost, &m.Currency, &m.Credits, &m.Status, &m.Error, &m.Feedback, &m.CreatedAt, &m.GenMs); err != nil {
+	if err := s.Scan(&m.ID, &m.ConversationID, &m.ParentID, &m.Role, &m.Provider, &m.ModelID, &m.ModelLabel, &blocks, &raw, &m.StopReason, &atts, &cites, &m.InputTokens, &m.OutputTokens, &m.CacheReadTokens, &m.CacheWriteTokens, &m.Cost, &m.Currency, &m.Credits, &m.Status, &m.Error, &m.Feedback, &m.CreatedAt, &m.GenMs); err != nil {
 		return m, err
 	}
 	m.Blocks = json.RawMessage(orDefault(blocks, "[]"))
@@ -472,11 +477,16 @@ func CreateMessage(ctx context.Context, db *sql.DB, m Message) (*Message, error)
 	} else {
 		raw = nil
 	}
+	// Auto-populate model_label from the models table when the caller hasn't set it.
+	// This ensures historical messages display the correct model name even if the model is later deleted.
+	if m.ModelLabel == "" && m.ModelID != "" {
+		_ = db.QueryRowContext(ctx, `SELECT COALESCE(label,'') FROM models WHERE id=?`, m.ModelID).Scan(&m.ModelLabel)
+	}
 	_, err := db.ExecContext(ctx, `INSERT INTO messages(
-		id, conversation_id, parent_id, role, provider, model_id, blocks, raw, stop_reason, attachments, citations,
+		id, conversation_id, parent_id, role, provider, model_id, model_label, blocks, raw, stop_reason, attachments, citations,
 		input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost, currency, status, error, created_at
-	) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		m.ID, m.ConversationID, parent, m.Role, m.Provider, m.ModelID, string(m.Blocks), raw, m.StopReason,
+	) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		m.ID, m.ConversationID, parent, m.Role, m.Provider, m.ModelID, m.ModelLabel, string(m.Blocks), raw, m.StopReason,
 		string(m.Attachments), string(m.Citations),
 		m.InputTokens, m.OutputTokens, m.CacheReadTokens, m.CacheWriteTokens, m.Cost, m.Currency, m.Status, m.Error, m.CreatedAt)
 	if err != nil {
@@ -564,6 +574,89 @@ func SiblingsOf(ctx context.Context, db *sql.DB, m Message) ([]string, error) {
 		out = append(out, id)
 	}
 	return out, rows.Err()
+}
+
+// siblingKey is the lookup key used by BatchSiblingsOf to group messages that
+// share a parent slot: (conversationID, parentID-or-"", role).
+type siblingKey struct {
+	ConversationID string
+	ParentID       string // empty means root (parent_id IS NULL)
+	Role           string
+}
+
+// SiblingGroup holds the ordered sibling ids for one branch slot.
+type SiblingGroup struct {
+	IDs []string
+}
+
+// BatchSiblingsOf resolves sibling lists for every message in msgs with a single
+// SQL query per conversation instead of one query per message. The returned map
+// is keyed by message id; every message in msgs has an entry.
+func BatchSiblingsOf(ctx context.Context, db *sql.DB, msgs []Message) (map[string][]string, error) {
+	result := make(map[string][]string, len(msgs))
+	if len(msgs) == 0 {
+		return result, nil
+	}
+
+	// Group messages by (conversationID, parentID, role) — sibling scope.
+	type groupEntry struct {
+		msgIDs []string // which input message IDs belong to this group
+		key    siblingKey
+	}
+	byKey := map[siblingKey]*groupEntry{}
+	for _, m := range msgs {
+		k := siblingKey{ConversationID: m.ConversationID, ParentID: m.ParentID, Role: m.Role}
+		if e, ok := byKey[k]; ok {
+			e.msgIDs = append(e.msgIDs, m.ID)
+		} else {
+			byKey[k] = &groupEntry{key: k, msgIDs: []string{m.ID}}
+		}
+	}
+
+	// For each unique scope, fetch ordered sibling ids (one query per scope, but
+	// there are at most as many scopes as distinct (parent, role) pairs — typically
+	// far fewer than the number of messages).
+	siblingsByScope := map[siblingKey][]string{}
+	for k := range byKey {
+		var (
+			rows *sql.Rows
+			err  error
+		)
+		if k.ParentID == "" {
+			rows, err = db.QueryContext(ctx,
+				`SELECT id FROM messages WHERE conversation_id=? AND parent_id IS NULL AND role=? ORDER BY created_at ASC`,
+				k.ConversationID, k.Role)
+		} else {
+			rows, err = db.QueryContext(ctx,
+				`SELECT id FROM messages WHERE conversation_id=? AND parent_id=? AND role=? ORDER BY created_at ASC`,
+				k.ConversationID, k.ParentID, k.Role)
+		}
+		if err != nil {
+			return nil, err
+		}
+		var ids []string
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			ids = append(ids, id)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		rows.Close()
+		siblingsByScope[k] = ids
+	}
+
+	// Attach each input message's sibling list from the pre-fetched scope.
+	for _, m := range msgs {
+		k := siblingKey{ConversationID: m.ConversationID, ParentID: m.ParentID, Role: m.Role}
+		result[m.ID] = siblingsByScope[k]
+	}
+	return result, nil
 }
 
 // LatestAssistantInSubtree finds the youngest assistant descendant reachable

@@ -110,7 +110,7 @@ func getProjectHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	if p.KBID != "" {
 		docs, _ = store.ListDocuments(r.Context(), d.DB, "kb", p.KBID)
 	}
-	convs, _ := store.ListConversations(r.Context(), d.DB, u.ID, p.ID, "active")
+	convs, _ := store.ListConversations(r.Context(), d.DB, u.ID, p.ID, "active", 200, 0)
 	writeJSON(w, 200, map[string]any{
 		"project":       p,
 		"documents":     docs,

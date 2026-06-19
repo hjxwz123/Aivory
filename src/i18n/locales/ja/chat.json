@@ -69,7 +69,8 @@
     "viewImage": "画像を表示",
     "removeAttachment": "添付を削除",
     "previewFile": "ファイルをプレビュー",
-    "delete": "削除"
+    "delete": "削除",
+    "openInNew": "新しいタブで開く"
   },
   "message": {
     "refused": "モデルはこのリクエストへの回答を控えました。",
@@ -183,7 +184,17 @@
     "removeFromProject": "プロジェクトから削除"
   },
   "topbar": {
-    "shareTooltip": "共有"
+    "shareTooltip": "共有",
+    "outlineTooltip": "会話アウトライン"
+  },
+  "outline": {
+    "title": "会話アウトライン",
+    "empty": "メッセージはまだありません。",
+    "emptyMessage": "（空）",
+    "branches": "{{count}} ブランチ",
+    "zoomIn": "拡大",
+    "zoomOut": "縮小",
+    "close": "アウトラインを閉じる"
   },
   "files": {
     "title": "この会話のファイル",
@@ -232,7 +243,8 @@
     "label": "モデル: {{name}}",
     "upgrade": "アップグレードして解除",
     "allTags": "すべて",
-    "noneForTag": "このタグのモデルはありません。"
+    "noneForTag": "このタグのモデルはありません。",
+    "creditRate": "トークンあたりのクレジット"
   },
   "commandMenu": {
     "placeholder": "会話を検索、またはコマンドを実行…",
@@ -256,6 +268,9 @@
       "switchLanguage": "{{language}}に切り替え"
     },
     "title": "コマンドメニュー"
+  },
+  "aria": {
+    "themeGroup": "テーマ選択"
   },
   "signedOut": "ログアウトしました。",
   "userMenu": {

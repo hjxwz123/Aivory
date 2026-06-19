@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 
 	"aurelia/server/internal/store"
@@ -61,6 +62,9 @@ func revokeSessionHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		clearCookie(w, "auth_token")
 		clearCookie(w, "refresh_token")
 	}
+	// Kill any active generation streams for this user so a revoked session
+	// cannot keep a live SSE connection open after sign-out.
+	d.Cache.Publish(fmt.Sprintf("user:%s:kill", user.ID), "session_revoked")
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 

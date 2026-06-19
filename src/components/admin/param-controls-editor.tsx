@@ -139,7 +139,7 @@ export function ParamControlsEditor({ value, onChange }: Props) {
   const setAt = (i: number, patch: Partial<EditorControl>) =>
     commit(controls.map((c, idx) => (idx === i ? { ...c, ...patch } : c)))
 
-  const tt = (k: string, d: string) => t(`models.pc.${k}`, { defaultValue: d })
+  const tt = (k: string) => t(`models.pc.${k}`)
   const inputCls = 'h-8 text-[13px]'
 
   return (
@@ -160,7 +160,7 @@ export function ParamControlsEditor({ value, onChange }: Props) {
                       : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]')
                   }
                 >
-                  {ty === 'toggle' ? tt('toggle', '开关') : tt('select', '下拉')}
+                  {ty === 'toggle' ? tt('toggle') : tt('select')}
                 </button>
               ))}
             </div>
@@ -172,36 +172,36 @@ export function ParamControlsEditor({ value, onChange }: Props) {
               className="text-[var(--color-danger)]"
               onClick={() => commit(controls.filter((_, idx) => idx !== i))}
             >
-              {tt('removeControl', '删除')}
+              {tt('removeControl')}
             </Button>
           </div>
 
           <div className="grid grid-cols-2 gap-2.5">
-            <LabeledInput label={tt('key', '键名 key')} value={c.key} onChange={(v) => setAt(i, { key: v })} placeholder="thinking" cls={inputCls} mono />
-            <LabeledInput label={tt('label', '显示文字')} value={c.label} onChange={(v) => setAt(i, { label: v })} placeholder="深度思考" cls={inputCls} />
-            <LabeledIcon label={tt('icon', '图标')} value={c.icon} onChange={(v) => setAt(i, { icon: v })} />
-            <LabeledInput label={tt('default', '默认值')} value={c.def} onChange={(v) => setAt(i, { def: v })} placeholder={c.type === 'toggle' ? 'true / false' : 'medium'} cls={inputCls} mono />
+            <LabeledInput label={tt('key')} value={c.key} onChange={(v) => setAt(i, { key: v })} placeholder="thinking" cls={inputCls} mono />
+            <LabeledInput label={tt('label')} value={c.label} onChange={(v) => setAt(i, { label: v })} placeholder={t('models.pc.labelPlaceholder')} cls={inputCls} />
+            <LabeledIcon label={tt('icon')} value={c.icon} onChange={(v) => setAt(i, { icon: v })} />
+            <LabeledInput label={tt('default')} value={c.def} onChange={(v) => setAt(i, { def: v })} placeholder={c.type === 'toggle' ? 'true / false' : 'medium'} cls={inputCls} mono />
           </div>
 
           {c.type === 'toggle' ? (
             <div className="grid grid-cols-2 gap-2.5">
-              <LabeledArea label={tt('onFragment', '开启时(合并进请求体)')} value={c.onFragment} onChange={(v) => setAt(i, { onFragment: v })} />
-              <LabeledArea label={tt('offFragment', '关闭时')} value={c.offFragment} onChange={(v) => setAt(i, { offFragment: v })} />
+              <LabeledArea label={tt('onFragment')} value={c.onFragment} onChange={(v) => setAt(i, { onFragment: v })} />
+              <LabeledArea label={tt('offFragment')} value={c.offFragment} onChange={(v) => setAt(i, { offFragment: v })} />
             </div>
           ) : (
             <div className="flex flex-col gap-2">
-              <span className="text-[12px] text-[var(--color-fg-subtle)]">{tt('options', '选项')}</span>
+              <span className="text-[12px] text-[var(--color-fg-subtle)]">{tt('options')}</span>
               {c.options.map((op, j) => (
                 <div key={j} className="rounded-[10px] border border-[var(--color-border-subtle)] bg-[var(--color-bg-muted)] p-2.5 flex flex-col gap-2">
                   <div className="grid grid-cols-[1fr_1fr_1fr_auto] gap-2 items-end">
-                    <LabeledInput label={tt('optValue', '值')} value={op.value} onChange={(v) => setAt(i, { options: c.options.map((x, k) => (k === j ? { ...x, value: v } : x)) })} placeholder="high" cls={inputCls} mono />
-                    <LabeledInput label={tt('optLabel', '文字')} value={op.label} onChange={(v) => setAt(i, { options: c.options.map((x, k) => (k === j ? { ...x, label: v } : x)) })} placeholder="高" cls={inputCls} />
-                    <LabeledIcon label={tt('icon', '图标')} value={op.icon} onChange={(v) => setAt(i, { options: c.options.map((x, k) => (k === j ? { ...x, icon: v } : x)) })} />
+                    <LabeledInput label={tt('optValue')} value={op.value} onChange={(v) => setAt(i, { options: c.options.map((x, k) => (k === j ? { ...x, value: v } : x)) })} placeholder="high" cls={inputCls} mono />
+                    <LabeledInput label={tt('optLabel')} value={op.label} onChange={(v) => setAt(i, { options: c.options.map((x, k) => (k === j ? { ...x, label: v } : x)) })} placeholder={t('models.pc.labelPlaceholder')} cls={inputCls} />
+                    <LabeledIcon label={tt('icon')} value={op.icon} onChange={(v) => setAt(i, { options: c.options.map((x, k) => (k === j ? { ...x, icon: v } : x)) })} />
                     <Button variant="ghost" size="sm" className="text-[var(--color-danger)] h-8" onClick={() => setAt(i, { options: c.options.filter((_, k) => k !== j) })}>
                       <Trash2 size={13} aria-hidden />
                     </Button>
                   </div>
-                  <LabeledArea label={tt('fragment', '合并进请求体')} value={op.fragment} onChange={(v) => setAt(i, { options: c.options.map((x, k) => (k === j ? { ...x, fragment: v } : x)) })} />
+                  <LabeledArea label={tt('fragment')} value={op.fragment} onChange={(v) => setAt(i, { options: c.options.map((x, k) => (k === j ? { ...x, fragment: v } : x)) })} />
                 </div>
               ))}
               <Button
@@ -210,24 +210,24 @@ export function ParamControlsEditor({ value, onChange }: Props) {
                 leadingIcon={<Plus size={13} aria-hidden />}
                 onClick={() => setAt(i, { options: [...c.options, { value: '', label: '', icon: '', fragment: '{\n  \n}' }] })}
               >
-                {tt('addOption', '添加选项')}
+                {tt('addOption')}
               </Button>
             </div>
           )}
 
           <div className="grid grid-cols-2 gap-2.5">
-            <LabeledInput label={tt('showIfKey', '仅当(键)显示 · 可选')} value={c.showIfKey} onChange={(v) => setAt(i, { showIfKey: v })} placeholder="thinking" cls={inputCls} mono />
-            <LabeledInput label={tt('showIfValue', '等于(值)')} value={c.showIfValue} onChange={(v) => setAt(i, { showIfValue: v })} placeholder="true" cls={inputCls} mono />
+            <LabeledInput label={tt('showIfKey')} value={c.showIfKey} onChange={(v) => setAt(i, { showIfKey: v })} placeholder="thinking" cls={inputCls} mono />
+            <LabeledInput label={tt('showIfValue')} value={c.showIfValue} onChange={(v) => setAt(i, { showIfValue: v })} placeholder="true" cls={inputCls} mono />
           </div>
         </div>
       ))}
 
       <div className="flex items-center gap-2">
         <Button variant="secondary" size="sm" leadingIcon={<Plus size={14} aria-hidden />} onClick={() => commit([...controls, blankControl()])}>
-          {tt('addControl', '添加控件')}
+          {tt('addControl')}
         </Button>
         <button type="button" className="ml-auto text-[12px] text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)] interactive" onClick={() => setShowRaw((s) => !s)}>
-          {showRaw ? tt('hideRaw', '隐藏 JSON') : tt('showRaw', '高级:原始 JSON')}
+          {showRaw ? tt('hideRaw') : tt('showRaw')}
         </button>
       </div>
 

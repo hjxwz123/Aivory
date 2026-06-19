@@ -119,6 +119,9 @@ func Migrate(db *sql.DB) error {
 	addUserPermCredits := `ALTER TABLE users ADD COLUMN credits_permanent REAL NOT NULL DEFAULT 0`
 	addUsageCredits := `ALTER TABLE usage_logs ADD COLUMN credits REAL NOT NULL DEFAULT 0`
 	addMsgCredits := `ALTER TABLE messages ADD COLUMN credits REAL NOT NULL DEFAULT 0`
+	// Model label snapshot — preserves the human-readable model name on each
+	// message so it remains visible even after the model is deleted from the catalog.
+	addMsgModelLabel := `ALTER TABLE messages ADD COLUMN model_label TEXT NOT NULL DEFAULT ''`
 	if usePostgres {
 		schema = schemaPGSQL
 		addImageRef = `ALTER TABLE chunks ADD COLUMN IF NOT EXISTS image_ref TEXT`
@@ -149,6 +152,7 @@ func Migrate(db *sql.DB) error {
 		addUserPermCredits = `ALTER TABLE users ADD COLUMN IF NOT EXISTS credits_permanent REAL NOT NULL DEFAULT 0`
 		addUsageCredits = `ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS credits REAL NOT NULL DEFAULT 0`
 		addMsgCredits = `ALTER TABLE messages ADD COLUMN IF NOT EXISTS credits DOUBLE PRECISION NOT NULL DEFAULT 0`
+		addMsgModelLabel = `ALTER TABLE messages ADD COLUMN IF NOT EXISTS model_label TEXT NOT NULL DEFAULT ''`
 	}
 	if _, err := db.Exec(schema); err != nil {
 		return fmt.Errorf("apply schema: %w", err)
@@ -167,6 +171,7 @@ func Migrate(db *sql.DB) error {
 		addGroupMaxProjects, addGroupMaxKBs,
 		addGroupCreditAllowance, addGroupCreditPeriod,
 		addUserPermCredits, addUsageCredits, addMsgCredits,
+		addMsgModelLabel,
 	} {
 		_, _ = db.Exec(ddl)
 	}
@@ -174,6 +179,8 @@ func Migrate(db *sql.DB) error {
 	// above (on an existing DB the CREATE TABLE is a no-op, so the column only
 	// exists once the ALTER has run). Kept out of the schema file for that reason.
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_conv_inline ON conversations(inline_source_conv)`)
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user_id ON refresh_tokens(user_id)`)
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_files_conversation_id ON files(conversation_id)`)
 	// One-time backfill: accounts that exist only because of an OAuth login were
 	// created with a random password they never chose, so mark them as
 	// password-unset to force them through the set-password gate. Guarded by a

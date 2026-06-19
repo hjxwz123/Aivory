@@ -237,8 +237,9 @@ func defaultSystem(kind TaskKind, jsonOutput bool) string {
 	base := "You are an internal helper for the Aurelia product. Be concise."
 	switch kind {
 	case TaskTitle:
-		return base + " 用不超过 10 个字总结这段对话主题（中文≤10字；英文则≤5个词）。" +
-			"Reply with the title only, no quotes, no period."
+		return base + " Write a short title (≤8 words) capturing the topic of the conversation." +
+			" IMPORTANT: write the title in the SAME LANGUAGE as the user's message — do not translate." +
+			" Reply with the title only, no quotes, no period, no explanation."
 	case TaskRouter:
 		return base + " Classify the user's last message into one of: full_doc, retrieve, none. " +
 			"`full_doc`=summarise/explain entire document; `retrieve`=specific question; `none`=unrelated. " +

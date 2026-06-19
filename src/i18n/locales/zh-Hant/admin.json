@@ -113,7 +113,29 @@
       "invalidJSON": "param_controls 不是合法 JSON"
     },
     "permissionsLead": "選擇哪些使用者組可以使用此模型，以及每個週期的額度。全部關閉則此模型對所有人開放。",
-    "tagsHint": "為此模型指派標籤，以便在選擇框的篩選條中分類。"
+    "tagsHint": "為此模型指派標籤，以便在選擇框的篩選條中分類。",
+    "pc": {
+      "toggle": "開關",
+      "select": "下拉",
+      "removeControl": "刪除",
+      "addControl": "新增控件",
+      "addOption": "新增選項",
+      "showRaw": "進階：原始 JSON",
+      "hideRaw": "隱藏 JSON",
+      "key": "鍵名 key",
+      "label": "顯示文字",
+      "labelPlaceholder": "深度思考",
+      "icon": "圖示",
+      "default": "預設值",
+      "onFragment": "開啟時（合併進請求體）",
+      "offFragment": "關閉時",
+      "options": "選項",
+      "optValue": "值",
+      "optLabel": "文字",
+      "fragment": "合併進請求體",
+      "showIfKey": "僅當（鍵）顯示 · 可選",
+      "showIfValue": "等於（值）"
+    }
   },
   "skills": {
     "title": "技能",
@@ -623,6 +645,7 @@
     "clear": "清空沙盒",
     "cleared": "沙盒已清空",
     "none": "此對話尚無沙盒工作階段。",
+    "unavailable": "工作階段已過期或 Sidecar 不支援檔案列舉。",
     "empty": "沙盒工作區為空。",
     "open": "開啟"
   },

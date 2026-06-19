@@ -69,7 +69,8 @@
     "viewImage": "查看圖片",
     "removeAttachment": "移除附件",
     "previewFile": "預覽檔案",
-    "delete": "刪除"
+    "delete": "刪除",
+    "openInNew": "在新分頁開啟"
   },
   "message": {
     "refused": "模型拒絕回答此請求。",
@@ -183,7 +184,17 @@
     "removeFromProject": "移出專案"
   },
   "topbar": {
-    "shareTooltip": "分享"
+    "shareTooltip": "分享",
+    "outlineTooltip": "對話概述"
+  },
+  "outline": {
+    "title": "對話概述",
+    "empty": "尚無訊息。",
+    "emptyMessage": "（空）",
+    "branches": "{{count}} 個分支",
+    "zoomIn": "放大",
+    "zoomOut": "縮小",
+    "close": "關閉概述"
   },
   "files": {
     "title": "此對話的檔案",
@@ -232,7 +243,8 @@
     "label": "模型：{{name}}",
     "upgrade": "升級套餐解鎖",
     "allTags": "全部",
-    "noneForTag": "此標籤下暫無模型。"
+    "noneForTag": "此標籤下暫無模型。",
+    "creditRate": "每 token 消耗點數"
   },
   "commandMenu": {
     "placeholder": "搜尋會話，或執行命令…",
@@ -256,6 +268,9 @@
       "switchLanguage": "切換到 {{language}}"
     },
     "title": "命令選單"
+  },
+  "aria": {
+    "themeGroup": "主題選擇"
   },
   "signedOut": "你已退出登入。",
   "userMenu": {

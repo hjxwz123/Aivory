@@ -63,7 +63,7 @@ export const DialogContent = forwardRef<
           'shadow-[var(--shadow-xl)]',
           'data-[state=open]:animate-[pop-in_220ms_var(--ease-out)]',
           'data-[state=closed]:animate-[fade-out_140ms_var(--ease-in)]',
-          'focus:outline-none',
+          'focus-visible:outline-none',
           className,
         )}
         {...rest}

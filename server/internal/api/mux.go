@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 )
@@ -88,10 +89,21 @@ func writeError(w http.ResponseWriter, status int, err error) {
 	if err == nil {
 		err = errors.New("unknown error")
 	}
-	writeJSON(w, status, map[string]string{"error": err.Error()})
+	msg := err.Error()
+	if status >= 500 {
+		// Log the real error server-side but never expose internal details to
+		// the client — stack traces, SQL, file paths, etc. (§ FIX-3).
+		slog.Error("internal error", "err", err)
+		msg = "internal server error"
+	}
+	writeJSON(w, status, map[string]string{"error": msg})
 }
 
+// decodeJSON decodes a JSON request body into dst.
+// Body reads are capped at 4 MB to prevent memory exhaustion (§ FIX-2).
+// Backup import has its own 2 GB limit in admin_backup_handlers.go.
 func decodeJSON(r *http.Request, dst any) error {
+	r.Body = http.MaxBytesReader(nil, r.Body, 4<<20) // 4 MB
 	defer r.Body.Close()
 	dec := json.NewDecoder(r.Body)
 	if err := dec.Decode(dst); err != nil {

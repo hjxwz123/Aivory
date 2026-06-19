@@ -236,6 +236,7 @@ CREATE TABLE IF NOT EXISTS messages (
   role               TEXT NOT NULL,
   provider           TEXT NOT NULL DEFAULT '',
   model_id           TEXT NOT NULL DEFAULT '',
+  model_label        TEXT NOT NULL DEFAULT '',
   blocks             TEXT NOT NULL DEFAULT '[]',
   raw                TEXT,
   stop_reason        TEXT,
@@ -283,6 +284,7 @@ CREATE TABLE IF NOT EXISTS files (
   created_at      INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 );
 CREATE INDEX IF NOT EXISTS idx_files_user ON files(user_id);
+CREATE INDEX IF NOT EXISTS idx_files_conversation_id ON files(conversation_id);
 
 CREATE TABLE IF NOT EXISTS documents (
   id              TEXT PRIMARY KEY,
@@ -387,6 +389,8 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
   location   TEXT NOT NULL DEFAULT '',
   last_seen  INTEGER NOT NULL DEFAULT 0
 );
+
+CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user_id ON refresh_tokens(user_id);
 
 -- OAuth / social login providers, configured by the admin. Built-in kinds
 -- (google | github | apple) fill their endpoints from code defaults; kind=oidc

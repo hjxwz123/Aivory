@@ -409,6 +409,8 @@
   font-size: var(--text-base);
   line-height: var(--leading-relaxed);
   max-width: var(--layout-prose-max-w);
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 .prose-aurelia > * + * { margin-top: 1em; }
 .prose-aurelia h1 { font-size: var(--text-2xl); margin-top: 1.4em; }

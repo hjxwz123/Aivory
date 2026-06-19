@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
+	"os"
 	"strings"
 	"time"
 )
@@ -325,6 +327,67 @@ func ListUsersPaged(ctx context.Context, db *sql.DB, limit, offset int) ([]User,
 	return out, rows.Err()
 }
 
+const userSelectCols = `id, email, name, role, status, token_ver, settings, group_id, group_expires_at, previous_group_id, totp_secret, totp_enabled, password_set, last_seen_at, COALESCE(credits_permanent,0), created_at`
+
+func scanUsers(rows *sql.Rows) ([]User, error) {
+	defer rows.Close()
+	out := []User{}
+	for rows.Next() {
+		var u User
+		var settings string
+		var totpEnabled int
+		var passwordSet int
+		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.Role, &u.Status, &u.TokenVer, &settings, &u.GroupID, &u.GroupExpiresAt, &u.PreviousGroupID, &u.TotpSecret, &totpEnabled, &passwordSet, &u.LastSeenAt, &u.CreditsPermanent, &u.CreatedAt); err != nil {
+			return nil, err
+		}
+		u.TotpEnabled = totpEnabled != 0
+		u.HasPassword = passwordSet != 0
+		u.Settings = json.RawMessage(settings)
+		out = append(out, u)
+	}
+	return out, rows.Err()
+}
+
+// ListUsersBySearch returns paginated users matching an optional search term
+// (matched against email and name case-insensitively). Limit is capped at 200.
+func ListUsersBySearch(ctx context.Context, db *sql.DB, search string, limit, offset int) ([]User, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	q := `SELECT ` + userSelectCols + ` FROM users`
+	var rows *sql.Rows
+	var err error
+	if search != "" {
+		like := "%" + strings.ToLower(search) + "%"
+		rows, err = db.QueryContext(ctx, q+` WHERE LOWER(email) LIKE ? OR LOWER(name) LIKE ? ORDER BY created_at DESC LIMIT ? OFFSET ?`, like, like, limit, offset)
+	} else {
+		rows, err = db.QueryContext(ctx, q+` ORDER BY created_at DESC LIMIT ? OFFSET ?`, limit, offset)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return scanUsers(rows)
+}
+
+// CountUsersBySearch returns total user count matching an optional search term.
+func CountUsersBySearch(ctx context.Context, db *sql.DB, search string) (int, error) {
+	var n int
+	var err error
+	if search != "" {
+		like := "%" + strings.ToLower(search) + "%"
+		err = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE LOWER(email) LIKE ? OR LOWER(name) LIKE ?`, like, like).Scan(&n)
+	} else {
+		err = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users`).Scan(&n)
+	}
+	return n, err
+}
+
 // SetPermanentCredits overwrites a user's non-expiring credit balance (admin
 // edit on the users page, § credits). Floored at 0.
 func SetPermanentCredits(ctx context.Context, db *sql.DB, userID string, credits float64) error {
@@ -384,22 +447,89 @@ func touch(ctx context.Context, db *sql.DB, table, id string) error {
 var _ = touch
 
 // DeleteUser permanently removes a user and all related data (conversations,
-// messages, memories, refresh tokens, usage logs). Called by the self-service
-// "delete my account" endpoint — the user is already authenticated so the
-// ownership check is implicit.
+// messages, memories, refresh tokens, usage logs, files, documents, artifacts).
+// All DB deletes run inside a single transaction. Disk files are removed
+// best-effort after the transaction commits so a partial disk failure never
+// leaves the database in an inconsistent state.
 func DeleteUser(ctx context.Context, db *sql.DB, userID string) error {
-	// Order matters: messages → conversations → memories → tokens → usage → user.
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("delete user: begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck — intentional best-effort rollback
+
+	// Collect storage paths before deleting rows so we can clean up disk files
+	// after the transaction commits.
+	var diskPaths []string
+
+	// files table: directly user-owned.
+	fileRows, err := tx.QueryContext(ctx, `SELECT storage_path FROM files WHERE user_id=?`, userID)
+	if err != nil {
+		return fmt.Errorf("delete user: query files: %w", err)
+	}
+	for fileRows.Next() {
+		var p string
+		if fileRows.Scan(&p) == nil && p != "" {
+			diskPaths = append(diskPaths, p)
+		}
+	}
+	fileRows.Close()
+
+	// documents table: linked through conversations owned by the user.
+	docRows, err := tx.QueryContext(ctx,
+		`SELECT storage_path FROM documents WHERE conversation_id IN (SELECT id FROM conversations WHERE user_id=?)`,
+		userID)
+	if err != nil {
+		return fmt.Errorf("delete user: query documents: %w", err)
+	}
+	for docRows.Next() {
+		var p string
+		if docRows.Scan(&p) == nil && p != "" {
+			diskPaths = append(diskPaths, p)
+		}
+	}
+	docRows.Close()
+
+	// artifacts table: linked through messages → conversations owned by the user.
+	artRows, err := tx.QueryContext(ctx,
+		`SELECT storage_path FROM artifacts WHERE message_id IN (SELECT id FROM messages WHERE conversation_id IN (SELECT id FROM conversations WHERE user_id=?))`,
+		userID)
+	if err != nil {
+		return fmt.Errorf("delete user: query artifacts: %w", err)
+	}
+	for artRows.Next() {
+		var p string
+		if artRows.Scan(&p) == nil && p != "" {
+			diskPaths = append(diskPaths, p)
+		}
+	}
+	artRows.Close()
+
+	// Delete DB rows. Order matters: child rows before parent rows.
 	stmts := []string{
 		`DELETE FROM messages WHERE conversation_id IN (SELECT id FROM conversations WHERE user_id=?)`,
 		`DELETE FROM conversations WHERE user_id=?`,
 		`DELETE FROM memories WHERE user_id=?`,
 		`DELETE FROM refresh_tokens WHERE user_id=?`,
 		`DELETE FROM usage_logs WHERE user_id=?`,
+		`DELETE FROM files WHERE user_id=?`,
 		`DELETE FROM users WHERE id=?`,
 	}
 	for _, q := range stmts {
-		if _, err := db.ExecContext(ctx, q, userID); err != nil {
+		if _, err := tx.ExecContext(ctx, q, userID); err != nil {
 			return fmt.Errorf("delete user: %w", err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("delete user: commit: %w", err)
+	}
+
+	// Best-effort disk cleanup after a successful commit. Log errors but do not
+	// fail — missing files are harmless (already cleaned up or never written).
+	for _, p := range diskPaths {
+		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+			log.Printf("delete user %s: remove file %q: %v", userID, p, err)
 		}
 	}
 	return nil

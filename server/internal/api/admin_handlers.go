@@ -284,12 +284,27 @@ func deleteSkillAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 // ===== Users =====
 
 func listUsersAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
-	rows, err := store.ListUsers(r.Context(), d.DB)
+	q := r.URL.Query()
+	search := strings.TrimSpace(q.Get("search"))
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	offset, _ := strconv.Atoi(q.Get("offset"))
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	total, err := store.CountUsersBySearch(r.Context(), d.DB, search)
 	if err != nil {
 		writeError(w, 500, err)
 		return
 	}
-	writeJSON(w, 200, rows)
+	rows, err := store.ListUsersBySearch(r.Context(), d.DB, search, limit, offset)
+	if err != nil {
+		writeError(w, 500, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"users": rows, "total": total, "limit": limit, "offset": offset})
 }
 
 func banUserAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
@@ -328,10 +343,23 @@ func deleteUserAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// Collect KB IDs before the SQL delete so we can clean up Qdrant vectors
+	// after the transaction commits. The rows will be gone by then.
+	kbs, _ := store.ListKBs(r.Context(), d.DB, id)
+
 	if err := store.DeleteUser(r.Context(), d.DB, id); err != nil {
 		writeError(w, 500, err)
 		return
 	}
+
+	// Best-effort Qdrant cleanup: delete vector data for every KB the user owned.
+	// Runs after the SQL commit so a Qdrant failure never blocks account deletion.
+	for _, kb := range kbs {
+		if err := d.RAG.OnKBDeleted(r.Context(), kb.ID); err != nil {
+			d.Logger.Printf("admin: delete user %s: drop vectors for kb %s: %v", id, kb.ID, err)
+		}
+	}
+
 	d.Cache.Publish("user:"+id+":kill", "1") // drop any live sessions immediately
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
@@ -465,7 +493,7 @@ func setUserRoleAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 // admin scope already gates this surface in router.go.
 func listUserConversationsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	userID := pathParam(r, "id")
-	rows, err := store.ListConversations(r.Context(), d.DB, userID, "", "")
+	rows, err := store.ListConversations(r.Context(), d.DB, userID, "", "", 500, 0)
 	if err != nil {
 		writeError(w, 500, err)
 		return
@@ -662,6 +690,31 @@ var settingsKeys = []string{
 	"email_domain_whitelist",
 }
 
+// sensitiveKeywords lists substrings that identify secret settings fields.
+// Any settings key whose name contains one of these (case-insensitive) will
+// have its non-empty string value replaced with the mask on GET responses.
+var sensitiveKeywords = []string{"password", "secret", "api_key", "token", "key_secret", "key_id"}
+
+// maskSensitiveSettings replaces non-empty string values for sensitive keys
+// with the display mask so credentials are never returned in plaintext (H-1).
+func maskSensitiveSettings(out map[string]json.RawMessage) map[string]json.RawMessage {
+	const mask = `"••••••"`
+	for k, v := range out {
+		kl := strings.ToLower(k)
+		for _, kw := range sensitiveKeywords {
+			if strings.Contains(kl, kw) {
+				// Only mask non-null, non-empty-string values.
+				var s string
+				if json.Unmarshal(v, &s) == nil && s != "" {
+					out[k] = json.RawMessage(mask)
+				}
+				break
+			}
+		}
+	}
+	return out
+}
+
 func adminSettingsGet(d Deps, w http.ResponseWriter, _ *http.Request) {
 	out := map[string]json.RawMessage{}
 	for _, k := range settingsKeys {
@@ -671,7 +724,7 @@ func adminSettingsGet(d Deps, w http.ResponseWriter, _ *http.Request) {
 			out[k] = json.RawMessage("null")
 		}
 	}
-	writeJSON(w, 200, out)
+	writeJSON(w, 200, maskSensitiveSettings(out))
 }
 
 func adminSettingsSet(d Deps, w http.ResponseWriter, r *http.Request) {
@@ -682,6 +735,11 @@ func adminSettingsSet(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	for _, k := range settingsKeys {
 		if v, ok := body[k]; ok {
+			// Skip writing back the display mask — treat it as "unchanged" (H-1).
+			var s string
+			if json.Unmarshal(v, &s) == nil && s == "••••••" {
+				continue
+			}
 			if err := store.SetSetting(d.DB, k, json.RawMessage(v)); err != nil {
 				writeError(w, 500, err)
 				return

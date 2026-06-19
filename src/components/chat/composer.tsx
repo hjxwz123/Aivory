@@ -212,8 +212,9 @@ export function Composer({
   const canSubmit = value.trim().length > 0 && !streaming && !uploading && !ingesting
 
   async function handleSubmit() {
+    if (submittingRef.current) return
     const text = value.trim()
-    if (!text || streaming || uploading || ingesting || submittingRef.current) return
+    if (!text || streaming || uploading || ingesting) return
     if (text.length > MAX_LEN) {
       toast.warning(
         t('composer.tooLongTitle'),
@@ -221,23 +222,28 @@ export function Composer({
       )
       return
     }
-    // Uploads happen on attach now (so parsing starts immediately and the send is
-    // gated until 'ready'); by here every attachment is already a real backend id.
-    const params = filterVisibleParams(paramControls, paramValues)
-    onSubmit(text, attachments, {
-      mode: mode === 'default' ? undefined : mode,
-      params: Object.keys(params).length > 0 ? params : undefined,
-    })
-    setValue('')
-    // Stop any leftover pollers and revoke blob: URLs — uploadAttachment already
-    // swapped its own. Persistent /api/files/… URLs stay so the bubble can render.
-    pollTimers.current.forEach((tm) => clearTimeout(tm))
-    pollTimers.current.clear()
-    attachments.forEach((a) => {
-      if (a.previewUrl && a.previewUrl.startsWith('blob:')) URL.revokeObjectURL(a.previewUrl)
-    })
-    setAttachments([])
-    setMode('default')
+    submittingRef.current = true
+    try {
+      // Uploads happen on attach now (so parsing starts immediately and the send is
+      // gated until 'ready'); by here every attachment is already a real backend id.
+      const params = filterVisibleParams(paramControls, paramValues)
+      onSubmit(text, attachments, {
+        mode: mode === 'default' ? undefined : mode,
+        params: Object.keys(params).length > 0 ? params : undefined,
+      })
+      setValue('')
+      // Stop any leftover pollers and revoke blob: URLs — uploadAttachment already
+      // swapped its own. Persistent /api/files/… URLs stay so the bubble can render.
+      pollTimers.current.forEach((tm) => clearTimeout(tm))
+      pollTimers.current.clear()
+      attachments.forEach((a) => {
+        if (a.previewUrl && a.previewUrl.startsWith('blob:')) URL.revokeObjectURL(a.previewUrl)
+      })
+      setAttachments([])
+      setMode('default')
+    } finally {
+      submittingRef.current = false
+    }
   }
 
   // Upload one held file into the given conversation scope (rag=1 for doc-like
@@ -498,7 +504,7 @@ export function Composer({
           'placeholder:text-[var(--color-fg-faint)]',
           compact && 'min-h-[40px]',
         )}
-        aria-label={t('assistant')}
+        aria-label={t('composer.inputLabel', { defaultValue: 'Type a message' })}
       />
 
       {/* Toolbar row */}

@@ -147,13 +147,42 @@ func meSettingsHandler(_ Deps, w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, json.RawMessage(u.Settings))
 }
 
+// settingsAllowlist is the exhaustive set of keys a user may write via PATCH
+// /api/me/settings. Any key not in this map is silently stripped so that
+// clients cannot inject arbitrary data into the settings blob (e.g. internal
+// admin flags or future privilege-escalation vectors).
+var settingsAllowlist = map[string]bool{
+	"persona_custom":    true,
+	"persona_nickname":  true,
+	"persona_traits":    true,
+	"response_length":   true,
+	"accent_color":      true,
+	"font_family":       true,
+	"image_model_id":    true,
+	"default_model_id":  true,
+	"memory_enabled":    true,
+	"avatar_url":        true,
+	"language":          true,
+	"theme":             true,
+	"sidebar_collapsed": true,
+	"code_theme":        true,
+}
+
 // updateMeSettingsHandler merges patch keys into settings.
+// Only keys present in settingsAllowlist are accepted; all others are dropped
+// before the merge so users cannot write arbitrary data into their settings blob.
 func updateMeSettingsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
 	patch := map[string]any{}
 	if err := decodeJSON(r, &patch); err != nil {
 		writeError(w, 400, errInvalidInput)
 		return
+	}
+	// Strip keys that are not on the allowlist.
+	for k := range patch {
+		if !settingsAllowlist[k] {
+			delete(patch, k)
+		}
 	}
 	upd, err := store.UpdateUserSettings(r.Context(), d.DB, u.ID, patch)
 	if err != nil {
@@ -178,30 +207,58 @@ func meUsageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 
 // deleteMeHandler permanently deletes the authenticated user's account and all
 // associated data — conversations, messages, memories, tokens, usage logs. The
-// user must confirm by sending their password so accidental calls from JS can't
-// silently wipe an account.
+// user must confirm by sending their password (password accounts) or an exact
+// confirmation string (OAuth-only accounts that have no password).
 func deleteMeHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
 	var req struct {
 		Password string `json:"password"`
+		Confirm  string `json:"confirm"`
 	}
-	if err := decodeJSON(r, &req); err != nil || req.Password == "" {
-		writeError(w, 400, errors.New("password confirmation required"))
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, 400, errors.New("request body required"))
 		return
 	}
-	hash, err := store.PasswordFor(r.Context(), d.DB, u.ID)
-	if err != nil {
-		writeError(w, 500, err)
-		return
+	if !u.HasPassword {
+		// OAuth-only account: no password to check, require explicit confirmation.
+		if req.Confirm != "DELETE MY ACCOUNT" {
+			writeError(w, 400, errors.New("confirm field must be 'DELETE MY ACCOUNT'"))
+			return
+		}
+	} else {
+		// Password account: verify the current password.
+		if req.Password == "" {
+			writeError(w, 400, errors.New("password confirmation required"))
+			return
+		}
+		hash, err := store.PasswordFor(r.Context(), d.DB, u.ID)
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		if !store.CheckPassword(hash, req.Password) {
+			writeError(w, 401, errors.New("incorrect password"))
+			return
+		}
 	}
-	if !store.CheckPassword(hash, req.Password) {
-		writeError(w, 401, errors.New("incorrect password"))
-		return
-	}
+	// Collect KB IDs before the SQL delete so we can clean up Qdrant vectors
+	// after the transaction commits. The rows will be gone by then, so we must
+	// snapshot them here.
+	kbs, _ := store.ListKBs(r.Context(), d.DB, u.ID)
+
 	if err := store.DeleteUser(r.Context(), d.DB, u.ID); err != nil {
 		writeError(w, 500, err)
 		return
 	}
+
+	// Best-effort Qdrant cleanup: delete vector data for every KB the user owned.
+	// Runs after the SQL commit so a Qdrant failure never blocks account deletion.
+	for _, kb := range kbs {
+		if err := d.RAG.OnKBDeleted(r.Context(), kb.ID); err != nil {
+			d.Logger.Printf("delete user %s: drop vectors for kb %s: %v", u.ID, kb.ID, err)
+		}
+	}
+
 	clearCookie(w, "auth_token")
 	clearCookie(w, "refresh_token")
 	writeJSON(w, 200, map[string]bool{"ok": true})

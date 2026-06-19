@@ -161,6 +161,7 @@ export function MessageRow({ message, userName, onRegenerate, onEdit, onSaveEdit
 
   return (
     <div
+      data-message-id={message.id}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       className={cn(
@@ -184,7 +185,7 @@ export function MessageRow({ message, userName, onRegenerate, onEdit, onSaveEdit
               </Avatar>
             )}
             <span className="font-serif text-[15px] tracking-tight text-[var(--color-fg)]">
-              {model?.label ?? t('assistant')}
+              {model?.label ?? message.modelLabel ?? t('assistant')}
             </span>
             {/* Per-reply generation time (§ 用时). Cost stays admin-only. */}
             {!message.streaming && message.genMs ? (
@@ -254,7 +255,7 @@ export function MessageRow({ message, userName, onRegenerate, onEdit, onSaveEdit
             className={cn(
               'rounded-[18px] px-4 py-2.5',
               'bg-[var(--color-user-bubble)] border border-[var(--color-user-bubble-border)]',
-              'text-[var(--color-fg)] text-[0.9375rem] leading-relaxed whitespace-pre-wrap',
+              'text-[var(--color-fg)] text-[0.9375rem] leading-relaxed whitespace-pre-wrap break-words',
               'max-w-full',
             )}
           >
@@ -481,8 +482,10 @@ export function MessageRow({ message, userName, onRegenerate, onEdit, onSaveEdit
 
         {/* Actions — always rendered after streaming completes, so the layout
             never jumps when the user hovers in/out. Visibility is controlled
-            via opacity + pointer-events so nothing below is pushed around. */}
-        {!editing && !message.streaming && message.content ? (
+            via opacity + pointer-events so nothing below is pushed around.
+            Also show the action bar when a message has an error but no content
+            so the user can retry the failed message. */}
+        {!editing && !message.streaming && (message.content || message.error) ? (
           <div
             className={cn(
               'mt-2 inline-flex items-center gap-0.5 transition-opacity duration-[140ms] ease-out',
@@ -494,16 +497,18 @@ export function MessageRow({ message, userName, onRegenerate, onEdit, onSaveEdit
                 {message.branchCount && message.branchCount > 1 && typeof message.branchIndex === 'number' ? (
                   <BranchSwitcher message={message} onSwitch={onBranchSwitch} t={t} />
                 ) : null}
+                {message.content ? (
                 <Tooltip content={copied ? t('actions.copied') : t('actions.copy')}>
                   <button
                     type="button"
                     onClick={() => copy(message.content)}
                     aria-label={t('actions.copy')}
-                    className="inline-flex items-center justify-center size-7 rounded-[7px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                    className="inline-flex items-center justify-center size-7 max-sm:size-9 rounded-[7px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
                   >
                     {copied ? <Check size={13} aria-hidden /> : <Copy size={13} aria-hidden />}
                   </button>
                 </Tooltip>
+                ) : null}
 
                 {!isUser && (
                   <>
@@ -512,7 +517,7 @@ export function MessageRow({ message, userName, onRegenerate, onEdit, onSaveEdit
                         type="button"
                         onClick={() => onRegenerate?.(message.id)}
                         aria-label={t('actions.regenerate')}
-                        className="inline-flex items-center justify-center size-7 rounded-[7px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                        className="inline-flex items-center justify-center size-7 max-sm:size-9 rounded-[7px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
                       >
                         <RefreshCw size={13} aria-hidden />
                       </button>
@@ -524,7 +529,7 @@ export function MessageRow({ message, userName, onRegenerate, onEdit, onSaveEdit
                         aria-label={t('actions.helpful')}
                         aria-pressed={message.liked}
                         className={cn(
-                          'inline-flex items-center justify-center size-7 rounded-[7px] interactive',
+                          'inline-flex items-center justify-center size-7 max-sm:size-9 rounded-[7px] interactive',
                           message.liked
                             ? 'text-[var(--color-success)] bg-[var(--color-success-soft)]'
                             : 'text-[var(--color-fg-subtle)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
@@ -541,7 +546,7 @@ export function MessageRow({ message, userName, onRegenerate, onEdit, onSaveEdit
                         aria-label={t('actions.notHelpful')}
                         aria-pressed={message.disliked}
                         className={cn(
-                          'inline-flex items-center justify-center size-7 rounded-[7px] interactive',
+                          'inline-flex items-center justify-center size-7 max-sm:size-9 rounded-[7px] interactive',
                           message.disliked
                             ? 'text-[var(--color-danger)] bg-[var(--color-danger-soft)]'
                             : 'text-[var(--color-fg-subtle)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
@@ -560,7 +565,7 @@ export function MessageRow({ message, userName, onRegenerate, onEdit, onSaveEdit
                       type="button"
                       onClick={() => setEditing(true)}
                       aria-label={t('actions.edit')}
-                      className="inline-flex items-center justify-center size-7 rounded-[7px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                      className="inline-flex items-center justify-center size-7 max-sm:size-9 rounded-[7px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
                     >
                       <Pencil size={13} aria-hidden />
                     </button>
@@ -573,7 +578,7 @@ export function MessageRow({ message, userName, onRegenerate, onEdit, onSaveEdit
                       type="button"
                       onClick={() => setConfirmDelete(true)}
                       aria-label={t('actions.delete', { defaultValue: 'Delete' })}
-                      className="inline-flex items-center justify-center size-7 rounded-[7px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                      className="inline-flex items-center justify-center size-7 max-sm:size-9 rounded-[7px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
                     >
                       <Trash2 size={13} aria-hidden />
                     </button>
@@ -586,7 +591,7 @@ export function MessageRow({ message, userName, onRegenerate, onEdit, onSaveEdit
                       <button
                         type="button"
                         aria-label={t('actions.more')}
-                        className="inline-flex items-center justify-center size-7 rounded-[7px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                        className="inline-flex items-center justify-center size-7 max-sm:size-9 rounded-[7px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
                       >
                         <MoreHorizontal size={13} aria-hidden />
                       </button>
@@ -716,7 +721,7 @@ function BranchSwitcher({
         onClick={() => go(-1)}
         disabled={siblings.length === 0}
         aria-label={t('actions.prevBranch')}
-        className="inline-flex items-center justify-center size-4 rounded-[4px] hover:bg-[var(--color-surface)] hover:text-[var(--color-fg)] interactive disabled:opacity-40 disabled:cursor-not-allowed"
+        className="inline-flex items-center justify-center size-4 max-sm:p-3 max-sm:-m-3 rounded-[4px] hover:bg-[var(--color-surface)] hover:text-[var(--color-fg)] interactive disabled:opacity-40 disabled:cursor-not-allowed"
       >
         <ChevronLeft size={9} aria-hidden />
       </button>
@@ -728,7 +733,7 @@ function BranchSwitcher({
         onClick={() => go(1)}
         disabled={siblings.length === 0}
         aria-label={t('actions.nextBranch')}
-        className="inline-flex items-center justify-center size-4 rounded-[4px] hover:bg-[var(--color-surface)] hover:text-[var(--color-fg)] interactive disabled:opacity-40 disabled:cursor-not-allowed"
+        className="inline-flex items-center justify-center size-4 max-sm:p-3 max-sm:-m-3 rounded-[4px] hover:bg-[var(--color-surface)] hover:text-[var(--color-fg)] interactive disabled:opacity-40 disabled:cursor-not-allowed"
       >
         <ChevronRight size={9} aria-hidden />
       </button>
