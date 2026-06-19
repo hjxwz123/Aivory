@@ -166,6 +166,7 @@ var settingsAllowlist = map[string]bool{
 	"theme":             true,
 	"sidebar_collapsed": true,
 	"code_theme":        true,
+	"onboarded":         true,
 }
 
 // updateMeSettingsHandler merges patch keys into settings.
