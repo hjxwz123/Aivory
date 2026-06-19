@@ -10,6 +10,11 @@
 </p>
 
 <p align="center">
+  <a href="./README.md"><strong>English</strong></a> ·
+  <a href="./README.zh-CN.md">简体中文</a>
+</p>
+
+<p align="center">
   <a href="https://github.com/hjxwz123/Aurelia/actions/workflows/docker-images.yml"><img alt="Build" src="https://github.com/hjxwz123/Aurelia/actions/workflows/docker-images.yml/badge.svg"></a>
   <a href="https://github.com/hjxwz123/Aurelia/pkgs/container/aurelia-api"><img alt="API image" src="https://img.shields.io/badge/ghcr.io-aurelia--api-blue?logo=docker"></a>
   <a href="https://github.com/hjxwz123/Aurelia/pkgs/container/aurelia-web"><img alt="Web image" src="https://img.shields.io/badge/ghcr.io-aurelia--web-blue?logo=docker"></a>
