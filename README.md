@@ -21,7 +21,7 @@
   <img alt="Go 1.22" src="https://img.shields.io/badge/Go-1.22-00ADD8?logo=go">
   <img alt="React 19" src="https://img.shields.io/badge/React-19-61DAFB?logo=react">
   <img alt="TypeScript 5" src="https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript">
-  <a href="./LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-green"></a>
+  <a href="./LICENSE"><img alt="Apache 2.0" src="https://img.shields.io/badge/license-Apache%202.0-blue"></a>
 </p>
 
 ---
@@ -351,7 +351,7 @@ cd server && go vet ./... && go build ./...
 
 ## License
 
-[MIT](./LICENSE) — commercial use included; keep the copyright notice.
+[Apache 2.0](./LICENSE) — you may use, modify, and distribute this software, including in proprietary/closed-source products, provided you retain the original copyright notice, include a copy of this license, and note any modifications you make.
 
 ---
 
