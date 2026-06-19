@@ -14,7 +14,7 @@
   <img alt="Go" src="https://img.shields.io/badge/Go-1.22-00ADD8?logo=go">
   <img alt="React" src="https://img.shields.io/badge/React-19-61DAFB?logo=react">
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript">
-  <a href="./LICENSE"><img alt="开源协议" src="https://img.shields.io/badge/license-MIT-green"></a>
+  <a href="./LICENSE"><img alt="开源协议" src="https://img.shields.io/badge/license-Apache%202.0-blue"></a>
 </p>
 
 ---
@@ -383,7 +383,7 @@ go build ./...
 
 ## 开源协议
 
-[MIT](./LICENSE)——商用、修改、再发布随意，保留版权声明即可。
+[Apache 2.0](./LICENSE)——允许商用、修改、闭源二次分发，但须保留原始版权声明、附带本协议副本，并在修改的文件中注明变更。
 
 ---
 

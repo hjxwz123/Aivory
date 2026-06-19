@@ -26,3 +26,19 @@ __pycache__/
 
 # VS Code line-counter extension output (generated)
 .VSCodeCounter/
+
+# Internal documentation (kept locally, not published to GitHub)
+CLAUDE.md
+DESIGN.md
+TEST.md
+docs/design-research.md
+docs/frontend-architecture.md
+docs/implementation-report.md
+docs/missing-features-fixed.md
+docs/product-spec.md
+docs/style-guide.md
+docs/ui-spec.md
+docs/功能文档.md
+docs/功能检查报告.md
+docs/功能清单.md
+docs/设计实现核对报告.md
