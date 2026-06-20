@@ -184,7 +184,7 @@ export function MessageRow({ message, userName, onRegenerate, onEdit, onSaveEdit
                 <AvatarFallback>A</AvatarFallback>
               </Avatar>
             )}
-            <span className="font-serif text-[15px] tracking-tight text-[var(--color-fg)]">
+            <span className="font-medium text-[13.5px] text-[var(--color-fg)]">
               {model?.label ?? message.modelLabel ?? t('assistant')}
             </span>
             {/* Per-reply generation time (§ 用时). Cost stays admin-only. */}

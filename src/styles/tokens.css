@@ -22,7 +22,7 @@
   --accent-hue: 290;
 
   /* Backgrounds — porcelain tinted by --accent-hue */
-  --color-bg: oklch(98.4% 0.010 var(--accent-hue));            /* page */
+  --color-bg: oklch(98.4% 0.006 var(--accent-hue));            /* page — lower chroma, more neutral */
   --color-bg-muted: oklch(96.5% 0.016 var(--accent-hue));      /* slightly recessed */
   --color-surface: oklch(99.2% 0.007 var(--accent-hue));       /* cards, popovers */
   --color-surface-raised: oklch(99.6% 0.005 var(--accent-hue));/* dialogs, command */
@@ -225,6 +225,10 @@
   --color-project-teal-bar: oklch(60% 0.110 200);
   --color-project-teal-text: oklch(36% 0.080 200);
 
+  /* Sidebar — visually distinct panel, higher contrast than content area */
+  --color-sidebar-bg: oklch(93.5% 0.022 var(--accent-hue));
+  --color-sidebar-border: oklch(87% 0.022 var(--accent-hue));
+
   /* ---------- LAYOUT --------------------------------------------------- */
   --layout-sidebar-w: 17.5rem;        /* 280 */
   --layout-sidebar-w-collapsed: 3.5rem;
@@ -374,6 +378,10 @@
   --color-project-teal-tint: oklch(26% 0.060 200);
   --color-project-teal-bar: oklch(74% 0.110 200);
   --color-project-teal-text: oklch(84% 0.100 200);
+
+  /* Sidebar — deep dark panel in dark mode (ChatGPT-style contrast) */
+  --color-sidebar-bg: oklch(10.5% 0.018 var(--accent-hue));
+  --color-sidebar-border: oklch(24% 0.026 var(--accent-hue));
 
   --shadow-xs: 0 1px 2px 0 oklch(0% 0 0 / 0.22);
   --shadow-sm: 0 1px 3px 0 oklch(0% 0 0 / 0.32), 0 1px 2px -1px oklch(0% 0 0 / 0.22);

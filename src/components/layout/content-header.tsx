@@ -42,7 +42,7 @@ export function ContentHeader({ title, backTo, backLabel, actions, children, cla
             <span className="h-5 w-px bg-[var(--color-divider)]" aria-hidden />
           </>
         ) : null}
-        <h1 className="font-serif tracking-tight text-[var(--color-fg)] text-[17px]">{title}</h1>
+        <h1 className="font-semibold tracking-tight text-[var(--color-fg)] text-[17px]">{title}</h1>
         <div className="ml-auto flex items-center gap-2">
           {actions ?? <ThemeToggle />}
         </div>

@@ -17,7 +17,7 @@ interface MarkdownProps {
 }
 
 function HeadingTag({ depth, html, className }: { depth: number; html: string; className?: string }) {
-  const base = 'font-serif tracking-tight text-[var(--color-fg)]'
+  const base = 'font-sans font-semibold tracking-tight text-[var(--color-fg)]'
   const inner = <span dangerouslySetInnerHTML={{ __html: html }} />
   switch (depth) {
     case 1:

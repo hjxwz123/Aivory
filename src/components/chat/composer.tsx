@@ -394,7 +394,7 @@ export function Composer({
     <div
       className={cn(
         'group/composer relative w-full',
-        'rounded-[22px] border border-[var(--color-border)] bg-[var(--color-surface)]',
+        'rounded-[16px] border border-[var(--color-border)] bg-[var(--color-surface)]',
         'shadow-[var(--shadow-sm)] transition-[border-color,box-shadow] duration-200',
         'focus-within:border-[var(--color-border-strong)] focus-within:shadow-[var(--shadow-md)]',
       )}

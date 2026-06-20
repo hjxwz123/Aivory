@@ -130,7 +130,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
       data-collapsed={collapsed ? 'true' : 'false'}
       aria-label={t('sidebar.navAria', { defaultValue: 'Conversation navigation' })}
       className={cn(
-        'flex flex-col h-full bg-[var(--color-bg-muted)] border-r border-[var(--color-divider)]',
+        'flex flex-col h-full bg-[var(--color-sidebar-bg)] border-r border-[var(--color-sidebar-border)]',
         variant === 'desktop' && (collapsed ? 'w-[3.5rem]' : 'w-[17.5rem]'),
         variant === 'sheet' && 'w-full',
         'transition-[width] duration-[220ms] ease-[var(--ease-out)]',
@@ -169,14 +169,14 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
             onClick={() => void startNewChat()}
             className={cn(
               'inline-flex items-center gap-2 h-9 rounded-[10px] text-sm font-medium',
-              'bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-fg)]',
+              'bg-[var(--color-bg-muted)] border border-[var(--color-border-strong)] text-[var(--color-fg)]',
               'hover:bg-[var(--color-bg)] hover:border-[var(--color-border-strong)] interactive',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
               collapsed ? 'w-9 justify-center px-0' : 'w-full justify-between px-3',
             )}
           >
             <span className="inline-flex items-center gap-2">
-              <Plus size={15} aria-hidden />
+              <Plus size={15} className="text-[var(--color-accent)]" aria-hidden />
               {!collapsed && <span>{t('sidebar.newChat')}</span>}
             </span>
             {!collapsed && <KeyboardShortcut combo={[modKey(), 'Shift', 'O']} />}
@@ -189,7 +189,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
             onClick={() => setOpen(true)}
             className={cn(
               'inline-flex items-center gap-2 h-9 rounded-[10px] text-sm',
-              'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg)] hover:text-[var(--color-fg)] interactive',
+              'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
               collapsed ? 'w-9 justify-center px-0' : 'w-full justify-between px-3',
             )}
@@ -208,7 +208,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
             onClick={onClose}
             className={cn(
               'inline-flex items-center gap-2 h-9 rounded-[10px] text-sm',
-              'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg)] hover:text-[var(--color-fg)] interactive',
+              'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
               collapsed ? 'w-9 justify-center px-0' : 'w-full justify-between px-3',
             )}

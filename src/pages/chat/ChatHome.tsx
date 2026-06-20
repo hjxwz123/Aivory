@@ -101,9 +101,9 @@ export default function ChatHome() {
     <div className="flex-1 flex flex-col overflow-y-auto">
       <div className="mx-auto w-full max-w-[var(--layout-message-max-w)] px-5 sm:px-8 py-12 flex-1 flex flex-col justify-center">
         <header className="text-center">
-          <h1 className="font-serif tracking-tight text-[2rem] sm:text-[2.5rem] leading-[1.12] text-[var(--color-fg)] text-balance">
+          <h1 className="font-sans font-semibold tracking-tight text-[2rem] sm:text-[2.5rem] leading-[1.12] text-[var(--color-fg)] text-balance">
             {greeting}{' '}
-            <span className="text-[var(--color-fg-muted)] italic">{t('empty.subtitle')}</span>
+            <span className="text-[var(--color-fg-muted)] font-normal">{t('empty.subtitle')}</span>
           </h1>
           <p className="mt-3.5 text-[var(--color-fg-muted)] text-sm sm:text-base text-pretty mx-auto max-w-2xl">
             {t('empty.lead')}

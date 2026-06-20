@@ -48,6 +48,9 @@
 
   --color-ring: var(--color-ring);
 
+  --color-sidebar-bg: var(--color-sidebar-bg);
+  --color-sidebar-border: var(--color-sidebar-border);
+
   --color-user-bubble: var(--color-user-bubble);
   --color-user-bubble-border: var(--color-user-bubble-border);
   --color-code-bg: var(--color-code-bg);

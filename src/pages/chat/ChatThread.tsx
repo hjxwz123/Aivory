@@ -277,7 +277,7 @@ export default function ChatThread() {
           </button>
         ) : null}
         <div className="flex-1 min-w-0 flex flex-col">
-          <h1 className="font-serif tracking-tight text-[var(--color-fg)] text-[15px] sm:text-[17px] truncate">
+          <h1 className="font-medium text-[var(--color-fg)] text-[14px] sm:text-[15px] truncate">
             {truncate(conversation.title, 80)}
           </h1>
           {project ? (
