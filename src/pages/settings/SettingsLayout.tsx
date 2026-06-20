@@ -1,6 +1,6 @@
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { User, Wand2, Palette, Sparkles, ShieldCheck, Keyboard } from 'lucide-react'
+import { User, Wand2, Palette, Sparkles, ShieldCheck, Keyboard, Info } from 'lucide-react'
 import { ContentHeader } from '@/components/layout/content-header'
 import { cn } from '@/lib/utils'
 
@@ -11,6 +11,7 @@ const tabDefs = [
   { to: '/settings/models', key: 'models', icon: Sparkles },
   { to: '/settings/privacy', key: 'privacy', icon: ShieldCheck },
   { to: '/settings/shortcuts', key: 'shortcuts', icon: Keyboard },
+  { to: '/settings/about', key: 'about', icon: Info },
 ] as const
 
 // Renders inside ChatLayout's content panel: the conversation sidebar stays on

@@ -6,7 +6,17 @@
     "appearance": "外観",
     "models": "モデル",
     "privacy": "プライバシー",
-    "shortcuts": "ショートカット"
+    "shortcuts": "ショートカット",
+    "about": "について"
+  },
+  "about": {
+    "title": "について",
+    "description": "ツール呼び出し、Python サンドボックス、ナレッジベース、完全な管理機能を備えたセルフホスト型オープンソースのマルチモデル AI チャットプラットフォームです。",
+    "version": "バージョン",
+    "license": "ライセンス",
+    "builtWith": "技術スタック",
+    "source": "ソースコード",
+    "copyright": "© {{year}} hjxwz123 · Apache 2.0 ライセンス"
   },
   "personalization": {
     "title": "パーソナライズ",
