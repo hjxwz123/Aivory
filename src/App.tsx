@@ -34,6 +34,7 @@ const SettingsModels = lazy(() => import('@/pages/settings/Models'))
 const SettingsPersonalization = lazy(() => import('@/pages/settings/Personalization'))
 const SettingsPrivacy = lazy(() => import('@/pages/settings/Privacy'))
 const SettingsShortcuts = lazy(() => import('@/pages/settings/Shortcuts'))
+const SettingsAbout = lazy(() => import('@/pages/settings/About'))
 const Subscription = lazy(() => import('@/pages/subscription/Subscription'))
 const SharedConversation = lazy(() => import('@/pages/share/SharedConversation'))
 const AdminLayout = lazy(() => import('@/pages/admin/AdminLayout'))
@@ -161,6 +162,7 @@ export default function App() {
                 <Route path="personalization" element={<SettingsPersonalization />} />
                 <Route path="privacy" element={<SettingsPrivacy />} />
                 <Route path="shortcuts" element={<SettingsShortcuts />} />
+                <Route path="about" element={<SettingsAbout />} />
               </Route>
             </Route>
             <Route path="/admin" element={<AdminLayout />}>

@@ -6,7 +6,17 @@
     "appearance": "外观",
     "models": "模型",
     "privacy": "隐私",
-    "shortcuts": "快捷键"
+    "shortcuts": "快捷键",
+    "about": "关于"
+  },
+  "about": {
+    "title": "关于",
+    "description": "一款自托管、开源的多模型 AI 对话平台，支持工具调用、Python 沙盒、知识库及完整的管理后台。",
+    "version": "版本",
+    "license": "许可证",
+    "builtWith": "技术栈",
+    "source": "开源地址",
+    "copyright": "© {{year}} hjxwz123 · 基于 Apache 2.0 协议开源"
   },
   "personalization": {
     "title": "个性化",
