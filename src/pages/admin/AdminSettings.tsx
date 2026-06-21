@@ -98,7 +98,7 @@ export default function AdminSettings() {
   }
 
   return (
-    <div>
+    <div className="mx-auto max-w-[60rem]">
       <header>
         <h1 className="font-serif text-3xl tracking-tight text-[var(--color-fg)]">{t('admin:settings.title')}</h1>
         <p className="mt-2 text-[var(--color-fg-muted)] text-sm max-w-2xl">{t('admin:settings.lead')}</p>
@@ -107,7 +107,7 @@ export default function AdminSettings() {
       {loading ? (
         <div className="mt-8 text-sm text-[var(--color-fg-subtle)]">{t('admin:common.loading')}</div>
       ) : (
-        <section className="mt-8 flex flex-col gap-5 max-w-xl">
+        <section className="mt-8 flex flex-col gap-5">
           <Field label={t('admin:settings.fields.defaultModel')} htmlFor="def-model">
             <Select
               value={readString('default_model_id')}

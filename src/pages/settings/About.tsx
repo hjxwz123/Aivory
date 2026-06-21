@@ -22,7 +22,7 @@ export default function About() {
   const { t } = useTranslation('settings')
 
   return (
-    <div className="max-w-xl">
+    <div className="mx-auto max-w-[60rem]">
       {/* Hero */}
       <div className="mb-10 flex flex-col items-start gap-4">
         <Logo size="lg" />

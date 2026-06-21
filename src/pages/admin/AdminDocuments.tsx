@@ -88,7 +88,7 @@ export default function AdminDocuments() {
   const storageProvider = readString('storage_provider')
 
   return (
-    <div>
+    <div className="mx-auto max-w-[60rem]">
       <header>
         <h1 className="font-serif text-3xl tracking-tight text-[var(--color-fg)]">{t('admin:documents.title')}</h1>
         <p className="mt-2 text-[var(--color-fg-muted)] text-sm max-w-2xl">{t('admin:documents.lead')}</p>
@@ -97,7 +97,7 @@ export default function AdminDocuments() {
       {loading ? (
         <div className="mt-8 text-sm text-[var(--color-fg-subtle)]">{t('admin:common.loading')}</div>
       ) : (
-        <section className="mt-8 flex flex-col gap-5 max-w-xl">
+        <section className="mt-8 flex flex-col gap-5">
           {/* Embedding model ------------------------------------------------- */}
           <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-5">
             <h2 className="font-serif text-lg text-[var(--color-fg)]">{t('admin:documents.embeddingSection')}</h2>

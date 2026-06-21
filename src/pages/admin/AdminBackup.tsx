@@ -95,13 +95,13 @@ export default function AdminBackup() {
   const totalRows = result ? Object.values(result.tables).reduce((a, b) => a + b, 0) : 0
 
   return (
-    <div>
+    <div className="mx-auto max-w-[60rem]">
       <header>
         <h1 className="font-serif text-3xl tracking-tight text-[var(--color-fg)]">{t('admin:backup.title')}</h1>
         <p className="mt-2 max-w-2xl text-sm text-[var(--color-fg-muted)]">{t('admin:backup.lead')}</p>
       </header>
 
-      <section className="mt-8 flex max-w-xl flex-col gap-5">
+      <section className="mt-8 flex flex-col gap-5">
         {/* Export ---------------------------------------------------------- */}
         <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-5">
           <div className="flex items-center gap-2">

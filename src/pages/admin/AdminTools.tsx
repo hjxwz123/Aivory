@@ -71,7 +71,7 @@ export default function AdminTools() {
   const searchProvider = readString('search_provider')
 
   return (
-    <div>
+    <div className="mx-auto max-w-[60rem]">
       <header>
         <h1 className="font-serif text-3xl tracking-tight text-[var(--color-fg)]">{t('admin:tools.title')}</h1>
         <p className="mt-2 text-[var(--color-fg-muted)] text-sm max-w-2xl">{t('admin:tools.lead')}</p>
@@ -80,7 +80,7 @@ export default function AdminTools() {
       {loading ? (
         <div className="mt-8 text-sm text-[var(--color-fg-subtle)]">{t('admin:common.loading')}</div>
       ) : (
-        <section className="mt-8 flex flex-col gap-5 max-w-xl">
+        <section className="mt-8 flex flex-col gap-5">
           {/* Web search ------------------------------------------------------ */}
           <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-5">
             <h2 className="font-serif text-lg text-[var(--color-fg)]">{t('admin:settings.fields.searchSection')}</h2>

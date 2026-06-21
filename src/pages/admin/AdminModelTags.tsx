@@ -70,13 +70,13 @@ export default function AdminModelTags() {
   }
 
   return (
-    <div>
+    <div className="mx-auto max-w-[60rem]">
       <header>
         <h1 className="font-serif text-3xl tracking-tight text-[var(--color-fg)]">{t('admin:modelTags.title')}</h1>
         <p className="mt-2 max-w-2xl text-sm text-[var(--color-fg-muted)]">{t('admin:modelTags.lead')}</p>
       </header>
 
-      <section className="mt-8 max-w-xl">
+      <section className="mt-8">
         <div className="flex gap-2">
           <Input
             value={newName}

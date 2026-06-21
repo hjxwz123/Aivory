@@ -95,7 +95,7 @@ export default function AdminAnnouncement() {
   }
 
   return (
-    <div>
+    <div className="mx-auto max-w-[60rem]">
       <header>
         <h1 className="font-serif text-3xl tracking-tight text-[var(--color-fg)]">{t('admin:announcement.title')}</h1>
         <p className="mt-2 text-[var(--color-fg-muted)] text-sm max-w-2xl">{t('admin:announcement.lead')}</p>
@@ -104,7 +104,7 @@ export default function AdminAnnouncement() {
       {loading ? (
         <div className="mt-8 text-sm text-[var(--color-fg-subtle)]">{t('admin:common.loading')}</div>
       ) : (
-        <section className="mt-8 flex flex-col gap-6 max-w-2xl">
+        <section className="mt-8 flex flex-col gap-6">
           {/* Enabled */}
           <label className="flex items-center justify-between gap-4 rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3.5">
             <span>
