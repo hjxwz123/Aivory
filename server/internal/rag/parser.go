@@ -673,6 +673,32 @@ func isSpreadsheetData(filename, mime string) bool {
 	return strings.Contains(m, "spreadsheet") || strings.Contains(m, "ms-excel")
 }
 
+// isCodeOrConfigText reports whether a file is source code or structured-config
+// text (json/yaml/toml/ini/xml/…). These are poor dense-vector targets: chunking
+// breaks function/structure boundaries and semantic similarity over code/config
+// retrieves badly. In a conversation they're injected whole (when small) and are
+// always reachable via the code sandbox (/workspace/uploads), so the embedding
+// pass is skipped for them. PROSE is deliberately excluded — md/txt/log/rst/html
+// are legitimate RAG targets and still embed.
+func isCodeOrConfigText(filename string) bool {
+	switch docExt(filename, filename) {
+	case
+		// source code
+		"go", "py", "pyw", "js", "jsx", "ts", "tsx", "mjs", "cjs", "vue", "svelte",
+		"c", "h", "cpp", "cxx", "cc", "hpp", "hh", "cs", "java", "kt", "kts", "swift", "rs",
+		"rb", "php", "scala", "r", "jl", "lua", "pl", "pm", "dart",
+		"ex", "exs", "erl", "hrl", "clj", "hs", "ml", "mli", "fs", "f90", "asm", "s",
+		"sh", "bash", "zsh", "ps1", "bat", "sql",
+		"v", "sv", "svh", "vh", "vhd", "vhdl",
+		"proto", "graphql", "gql", "tcl", "groovy", "gradle",
+		"css", "scss", "sass", "less",
+		// structured config / data text
+		"json", "yaml", "yml", "toml", "ini", "cfg", "conf", "env", "properties", "xml":
+		return true
+	}
+	return false
+}
+
 // isProbablyText decides whether to read a file directly as text. Policy:
 // ANYTHING unrecognized is treated as plain text (so an uploaded .v / .ini / any
 // source file is read instead of dropped) — we only bail out for formats that

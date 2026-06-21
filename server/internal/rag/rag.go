@@ -217,8 +217,15 @@ func (s *Service) runPipeline(ctx context.Context, docID string) error {
 	// whole (the §4.11-B router skips retrieval for small scopes), so its vectors
 	// would never be queried — skip embedding entirely: instant ingest, no wasted
 	// embedding calls (this is why a small .c/.txt upload no longer "indexes").
-	// KB docs always embed; they're retrieved across many documents.
-	skipEmbed := d.KBID == "" && d.ConversationID != "" && len(content)/4 <= fullTextThresholdTokens
+	//
+	// Source code & structured config (json/xml/yaml/…) are skipped regardless of
+	// size: chunking breaks their structure and dense-vector similarity retrieves
+	// code/config badly. In a conversation they're injected whole (when small) and
+	// always readable via the sandbox, so embedding adds cost without value. Prose
+	// (md/txt/log) still embeds. KB uploads always embed — a KB is an explicit
+	// cross-document search index, so skipping there would silently break search.
+	skipEmbed := d.KBID == "" && d.ConversationID != "" &&
+		(isCodeOrConfigText(d.Filename) || len(content)/4 <= fullTextThresholdTokens)
 
 	// §4.11-B2 lock: ingest into a KB MUST use the KB's locked embedding model;
 	// global setting changes never re-route an existing KB's vectors. For pure
