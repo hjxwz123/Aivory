@@ -178,13 +178,13 @@ export function MessageRow({ message, userName, onRegenerate, onEdit, onSaveEdit
         {!isUser && (
           <div className="flex items-center gap-2 mb-2">
             {model ? (
-              <ModelIcon icon={model.icon} size={16} />
+              <ModelIcon icon={model.icon} size={20} />
             ) : (
               <Avatar size="sm" tone="sage">
                 <AvatarFallback>A</AvatarFallback>
               </Avatar>
             )}
-            <span className="font-medium text-[13.5px] text-[var(--color-fg)]">
+            <span className="font-medium text-[15px] text-[var(--color-fg)]">
               {model?.label ?? message.modelLabel ?? t('assistant')}
             </span>
             {/* Per-reply generation time (§ 用时). Cost stays admin-only. */}
