@@ -499,23 +499,73 @@
   --color-ring: oklch(74% 0.175 5 / 0.50);
 }
 
-/* --- Mono — monochrome ink/white -----------------------------------------
- * A neutral black-and-white accent: near-black ink in light mode, near-white
- * in dark. Chroma is effectively zero so the whole UI reads as a clean grayscale
- * (ChatGPT/Linear-style). Never pure #000/#fff (§7) — ink sits at L≈26%, white
- * at L≈96%. accent-fg defaults already invert correctly (light text on the dark
- * button, dark text on the light one). */
+/* --- Mono — true black & white -------------------------------------------
+ * A genuine grayscale theme: every surface, text, and border is chroma ZERO
+ * (pure neutral gray) — not just the accent. The other presets only re-tint the
+ * accent and let --accent-hue tint the neutrals; mono must override those
+ * neutrals too, otherwise the hue (270) leaks a violet cast into bg/border (most
+ * visible in dark mode where neutral chroma reaches 0.03+). Accent is near-black
+ * ink in light, near-white in dark. Never pure #000/#fff (§7). */
 :root[data-accent="mono"] {
   --accent-hue: 270;
-  --color-accent: oklch(26% 0.004 270);
-  --color-accent-hover: oklch(20% 0.004 270);
-  --color-accent-soft: oklch(93% 0.003 270);
-  --color-ring: oklch(26% 0.004 270 / 0.55);
+  --color-accent: oklch(26% 0 0);
+  --color-accent-hover: oklch(20% 0 0);
+  --color-accent-soft: oklch(93% 0 0);
+  --color-ring: oklch(40% 0 0 / 0.55);
+
+  /* Neutral surfaces — chroma 0 (keep the base L values) */
+  --color-bg: oklch(98.4% 0 0);
+  --color-bg-muted: oklch(96.5% 0 0);
+  --color-surface: oklch(99.2% 0 0);
+  --color-surface-raised: oklch(99.6% 0 0);
+  --color-surface-sunken: oklch(95% 0 0);
+  --color-overlay: oklch(18% 0 0 / 0.42);
+
+  --color-fg: oklch(22% 0 0);
+  --color-fg-muted: oklch(44% 0 0);
+  --color-fg-subtle: oklch(58% 0 0);
+  --color-fg-faint: oklch(72% 0 0);
+  --color-fg-inverted: oklch(98.4% 0 0);
+
+  --color-border: oklch(89% 0 0);
+  --color-border-strong: oklch(80% 0 0);
+  --color-border-subtle: oklch(93% 0 0);
+  --color-divider: oklch(91% 0 0);
+
+  --color-user-bubble: oklch(95% 0 0);
+  --color-user-bubble-border: oklch(88% 0 0);
+
+  --color-sidebar-bg: oklch(93.5% 0 0);
+  --color-sidebar-border: oklch(87% 0 0);
 }
 .dark[data-accent="mono"] {
-  --color-accent: oklch(96% 0.003 270);
-  --color-accent-hover: oklch(99% 0.002 270);
-  --color-accent-soft: oklch(30% 0.008 270);
-  --color-accent-fg: oklch(18% 0.010 270);
-  --color-ring: oklch(96% 0.003 270 / 0.50);
+  --color-accent: oklch(96% 0 0);
+  --color-accent-hover: oklch(99% 0 0);
+  --color-accent-soft: oklch(30% 0 0);
+  --color-accent-fg: oklch(18% 0 0);
+  --color-ring: oklch(80% 0 0 / 0.50);
+
+  --color-bg: oklch(15% 0 0);
+  --color-bg-muted: oklch(18% 0 0);
+  --color-surface: oklch(20% 0 0);
+  --color-surface-raised: oklch(23% 0 0);
+  --color-surface-sunken: oklch(13% 0 0);
+  --color-overlay: oklch(8% 0 0 / 0.66);
+
+  --color-fg: oklch(95% 0 0);
+  --color-fg-muted: oklch(74% 0 0);
+  --color-fg-subtle: oklch(60% 0 0);
+  --color-fg-faint: oklch(44% 0 0);
+  --color-fg-inverted: oklch(22% 0 0);
+
+  --color-border: oklch(30% 0 0);
+  --color-border-strong: oklch(40% 0 0);
+  --color-border-subtle: oklch(25% 0 0);
+  --color-divider: oklch(28% 0 0);
+
+  --color-user-bubble: oklch(26% 0 0);
+  --color-user-bubble-border: oklch(34% 0 0);
+
+  --color-sidebar-bg: oklch(10.5% 0 0);
+  --color-sidebar-border: oklch(24% 0 0);
 }

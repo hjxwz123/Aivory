@@ -30,7 +30,7 @@ const ACCENT_PREVIEW: Record<AccentPref, string> = {
   moss: 'oklch(54% 0.125 145)',
   indigo: 'oklch(54% 0.180 260)',
   rose: 'oklch(60% 0.180 5)',
-  mono: 'linear-gradient(135deg, oklch(26% 0.004 270) 0 50%, oklch(96% 0.003 270) 50% 100%)',
+  mono: 'linear-gradient(135deg, oklch(26% 0 0) 0 50%, oklch(96% 0 0) 50% 100%)',
 }
 const THEME_OPTS: ThemePref[] = ['light', 'dark', 'system']
 const STYLE_OPTS: ReplyStyle[] = ['concise', 'balanced', 'detailed']

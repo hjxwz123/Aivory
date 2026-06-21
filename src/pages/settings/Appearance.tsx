@@ -33,7 +33,7 @@ const ACCENT_PREVIEW: Record<AccentPref, string> = {
   rose:   'oklch(60% 0.180 5)',
   // Split swatch: ink ↔ near-white, signalling the monochrome theme that
   // flips with light/dark.
-  mono:   'linear-gradient(135deg, oklch(26% 0.004 270) 0 50%, oklch(96% 0.003 270) 50% 100%)',
+  mono:   'linear-gradient(135deg, oklch(26% 0 0) 0 50%, oklch(96% 0 0) 50% 100%)',
 }
 
 // CSS family per typeface preset so each card previews in its own font,
