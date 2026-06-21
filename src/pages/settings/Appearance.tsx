@@ -31,6 +31,9 @@ const ACCENT_PREVIEW: Record<AccentPref, string> = {
   moss:   'oklch(54% 0.125 145)',
   indigo: 'oklch(54% 0.180 260)',
   rose:   'oklch(60% 0.180 5)',
+  // Split swatch: ink ↔ near-white, signalling the monochrome theme that
+  // flips with light/dark.
+  mono:   'linear-gradient(135deg, oklch(26% 0.004 270) 0 50%, oklch(96% 0.003 270) 50% 100%)',
 }
 
 // CSS family per typeface preset so each card previews in its own font,
@@ -270,9 +273,9 @@ function AccentSwatch({
           ? 'shadow-[0_0_0_2px_var(--color-fg),0_0_0_4px_var(--color-bg)]'
           : 'shadow-[inset_0_0_0_1px_oklch(0%_0_0/0.12)] hover:scale-105',
       )}
-      style={{ backgroundColor: color }}
+      style={{ background: color }}
     >
-      {active && <Check size={16} className="text-white drop-shadow" aria-hidden />}
+      {active && <Check size={16} className="text-white drop-shadow-[0_0_2px_oklch(0%_0_0/0.6)]" aria-hidden />}
     </button>
   )
 }

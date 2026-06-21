@@ -26,7 +26,7 @@
           document.documentElement.dataset.theme = resolved
           document.documentElement.classList.toggle('dark', resolved === 'dark')
           var accent = localStorage.getItem('aurelia.accent')
-          var ok = ['violet', 'lagoon', 'ember', 'moss', 'indigo', 'rose']
+          var ok = ['violet', 'lagoon', 'ember', 'moss', 'indigo', 'rose', 'mono']
           document.documentElement.dataset.accent = ok.indexOf(accent) >= 0 ? accent : 'violet'
           // Density + font-size from settings store
           var settings = JSON.parse(localStorage.getItem('aurelia.settings') || '{}')

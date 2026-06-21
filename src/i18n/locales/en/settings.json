@@ -145,7 +145,8 @@
       "ember": "Ember",
       "moss": "Moss",
       "indigo": "Indigo",
-      "rose": "Rose"
+      "rose": "Rose",
+      "mono": "Mono"
     },
     "density": "Density",
     "densityBody": "More breathing room or more on screen.",

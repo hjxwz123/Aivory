@@ -145,7 +145,8 @@
       "ember": "Braise",
       "moss": "Mousse",
       "indigo": "Indigo",
-      "rose": "Rose"
+      "rose": "Rose",
+      "mono": "Mono"
     },
     "density": "Densité",
     "densityBody": "Plus d'espace ou plus de contenu à l'écran.",

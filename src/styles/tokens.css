@@ -498,3 +498,24 @@
   --color-accent-soft: oklch(28% 0.085 5);
   --color-ring: oklch(74% 0.175 5 / 0.50);
 }
+
+/* --- Mono — monochrome ink/white -----------------------------------------
+ * A neutral black-and-white accent: near-black ink in light mode, near-white
+ * in dark. Chroma is effectively zero so the whole UI reads as a clean grayscale
+ * (ChatGPT/Linear-style). Never pure #000/#fff (§7) — ink sits at L≈26%, white
+ * at L≈96%. accent-fg defaults already invert correctly (light text on the dark
+ * button, dark text on the light one). */
+:root[data-accent="mono"] {
+  --accent-hue: 270;
+  --color-accent: oklch(26% 0.004 270);
+  --color-accent-hover: oklch(20% 0.004 270);
+  --color-accent-soft: oklch(93% 0.003 270);
+  --color-ring: oklch(26% 0.004 270 / 0.55);
+}
+.dark[data-accent="mono"] {
+  --color-accent: oklch(96% 0.003 270);
+  --color-accent-hover: oklch(99% 0.002 270);
+  --color-accent-soft: oklch(30% 0.008 270);
+  --color-accent-fg: oklch(18% 0.010 270);
+  --color-ring: oklch(96% 0.003 270 / 0.50);
+}
