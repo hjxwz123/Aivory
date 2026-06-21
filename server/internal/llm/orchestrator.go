@@ -722,6 +722,28 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	}
 	blocksJSON, _ := json.Marshal(result.Blocks)
 	citesJSON, _ := json.Marshal(allCites)
+	// §2.3-C storage: `raw` (the provider-native exchange) only needs to persist
+	// for turns that used TOOLS. Its sole reader is same-vendor replay, where it
+	// preserves what `blocks` drops: tool-call IDs and tool-scoped thinking/
+	// thought signatures (Gemini 400s without thought_signature on functionCall
+	// parts; Anthropic needs the thinking signature INSIDE a tool loop). A pure
+	// text/thinking answer carries none of that — those requirements are all
+	// scoped to tool/function-call parts — and the block→text fallback in
+	// historyTo*() reconstructs such a turn identically. So for tool-free turns we
+	// drop raw, avoiding a second near-duplicate copy of the answer in the DB.
+	// Conservative gate: keep raw if ANY block is not plain text/thinking
+	// (tool_call / artifact / research / image / …), so no tool turn ever loses it.
+	rawToStore := result.Raw
+	turnUsedTools := false
+	for _, b := range result.Blocks {
+		if b.Kind != "text" && b.Kind != "thinking" {
+			turnUsedTools = true
+			break
+		}
+	}
+	if !turnUsedTools {
+		rawToStore = nil
+	}
 	chatCost := computeCost(*model, result.Usage)
 	// §8 cost rule: messages.cost is the FULL spend the user incurred for this
 	// turn — chat + any image_generate calls + any embedding queries inside
@@ -741,7 +763,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	}
 	_ = store.FinishMessage(ctx, o.db, assistantMsg.ID, store.MessageFinishPatch{
 		Blocks:           blocksJSON,
-		Raw:              result.Raw,
+		Raw:              rawToStore,
 		Citations:        citesJSON,
 		StopReason:       result.StopReason,
 		InputTokens:      result.Usage.InputTokens,
