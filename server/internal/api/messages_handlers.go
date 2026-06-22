@@ -54,6 +54,16 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	if req.Mode == "deep-research" && u.Role != "admin" && !userGroupHasFeature(r.Context(), d, u.GroupID, "research") {
 		req.Mode = ""
 	}
+	// §8 hard rule: per-user concurrent generation cap. Reserve the slot FIRST,
+	// before the daily-message counter is incremented — otherwise a request that
+	// is rejected here (slot full) would still burn a daily count for a turn that
+	// never ran. Released when the SSE handler returns.
+	release, ok := reserveConcurrentGen(d, u.ID)
+	if !ok {
+		writeError(w, 429, errors.New("too many concurrent generations — wait for the current one to finish or stop it"))
+		return
+	}
+	defer release()
 	// Admins are exempt from all usage quotas (§ admin) — they can test freely.
 	if u.Role != "admin" {
 		// Limit per day.
@@ -67,14 +77,6 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	// §8 hard rule: per-user concurrent generation cap. Slot reserved here,
-	// released when the SSE handler returns.
-	release, ok := reserveConcurrentGen(d, u.ID)
-	if !ok {
-		writeError(w, 429, errors.New("too many concurrent generations — wait for the current one to finish or stop it"))
-		return
-	}
-	defer release()
 
 	writer := sse.New(w)
 	if writer == nil {
@@ -170,6 +172,14 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	// §8/§C7 daily-message + token + concurrent-gen quotas apply to regenerate
 	// too — otherwise repeated /regenerate bypasses the per-day message cap.
+	// Reserve the concurrent-gen slot FIRST so a slot-full 429 doesn't burn a
+	// daily-message count for a turn that never ran.
+	release, ok := reserveConcurrentGen(d, u.ID)
+	if !ok {
+		writeError(w, 429, errors.New("too many concurrent generations"))
+		return
+	}
+	defer release()
 	if !checkDailyMessageLimit(d, u.ID) {
 		writeError(w, 429, errors.New("daily message limit reached"))
 		return
@@ -178,12 +188,6 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 429, errors.New("daily token quota reached"))
 		return
 	}
-	release, ok := reserveConcurrentGen(d, u.ID)
-	if !ok {
-		writeError(w, 429, errors.New("too many concurrent generations"))
-		return
-	}
-	defer release()
 	if body.AssistantID == "" {
 		body.AssistantID = conv.ActiveLeafID
 	}
@@ -382,7 +386,10 @@ func deleteMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"ok": true, "active_leaf_id": newLeaf, "messages": msgs})
+	// Enrich with sibling/branch metadata + redact admin-only cost, exactly like
+	// getConversationHandler — otherwise the swapped-in path loses its `< n/m >`
+	// branch picker and leaks per-message cost to the user.
+	writeJSON(w, 200, map[string]any{"ok": true, "active_leaf_id": newLeaf, "messages": redactCost(enrichWithSiblings(d, r, msgs))})
 }
 
 // feedbackMessageHandler stores a like/dislike on an assistant message.

@@ -16,6 +16,12 @@ import (
 	"aurelia/server/internal/store"
 )
 
+// dummyPasswordHash is a real (cost-10) bcrypt hash used to run a constant-time
+// verify on the login-with-nonexistent-email path, so timing doesn't reveal
+// whether an account exists. The plaintext is irrelevant — the compare always
+// fails; only its CPU cost matters.
+const dummyPasswordHash = "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy"
+
 // signupOpenHandler reports whether new registrations are accepted, and whether
 // the registration form must solve the slider-puzzle captcha. The client reads
 // both up front so it can render the captcha only when needed.
@@ -381,15 +387,13 @@ func loginHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	user, err := store.FindUserByEmail(r.Context(), d.DB, req.Email)
 	if err != nil {
+		// Run a dummy verify so a nonexistent account takes the same time as a
+		// real one, and return the SAME message — don't let an unauthenticated
+		// caller distinguish "no such account" from "wrong password" (account
+		// enumeration). State-specific messages (unverified/blocked) are only
+		// surfaced AFTER the password is proven correct, below.
+		store.CheckPassword(dummyPasswordHash, req.Password)
 		writeError(w, 401, errors.New("invalid email or password"))
-		return
-	}
-	if user.Status == "pending" {
-		writeError(w, 403, errors.New("email not verified"))
-		return
-	}
-	if user.Status != "active" {
-		writeError(w, 403, errAccountBlocked)
 		return
 	}
 	hash, err := store.PasswordFor(r.Context(), d.DB, user.ID)
@@ -399,6 +403,15 @@ func loginHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	if !store.CheckPassword(hash, req.Password) {
 		writeError(w, 401, errors.New("invalid email or password"))
+		return
+	}
+	// Password is correct — now it's safe to reveal account state to the holder.
+	if user.Status == "pending" {
+		writeError(w, 403, errors.New("email not verified"))
+		return
+	}
+	if user.Status != "active" {
+		writeError(w, 403, errAccountBlocked)
 		return
 	}
 	// 2FA gate (§ 2FA login): with TOTP enabled, the password alone doesn't mint

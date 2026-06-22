@@ -6,12 +6,16 @@ package sse
 import (
 	"encoding/json"
 	"net/http"
+	"sync"
 )
 
 // Writer wraps an http.ResponseWriter and exposes a simple `Send(event)`
-// method. It must be created from inside an HTTP handler — call writer.Send
-// from the goroutine handling the request.
+// method. Send/Ping are safe to call concurrently: the orchestrator emits
+// events from concurrent tool goroutines (runToolsConcurrent) while a separate
+// keep-alive goroutine calls Ping, and the underlying http.ResponseWriter is
+// NOT concurrency-safe — so every write is serialised through `mu`.
 type Writer struct {
+	mu      sync.Mutex
 	w       http.ResponseWriter
 	flusher http.Flusher
 }
@@ -42,6 +46,8 @@ func (s *Writer) Send(payload any, eventName string) error {
 	if err != nil {
 		return err
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if eventName != "" {
 		_, _ = s.w.Write([]byte("event: " + eventName + "\n"))
 	}
@@ -57,6 +63,8 @@ func (s *Writer) Ping() {
 	if s == nil {
 		return
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	_, _ = s.w.Write([]byte(": ping\n\n"))
 	s.flusher.Flush()
 }

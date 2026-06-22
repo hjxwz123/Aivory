@@ -49,6 +49,25 @@ func listConversationsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// searchHandler runs full-text search over the user's own conversation titles
+// and message content (§ homepage search). Query param `q` (min 2 chars).
+// Returns title hits + message hits (each with a snippet + message_id so the
+// client can jump straight to the matching message).
+func searchHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	u := authUser(r)
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	if len([]rune(q)) < 2 {
+		writeJSON(w, 200, map[string]any{"query": q, "titles": []store.SearchHit{}, "messages": []store.SearchHit{}})
+		return
+	}
+	titles, messages, err := store.SearchConversations(r.Context(), d.DB, u.ID, q, 8, 40)
+	if err != nil {
+		writeError(w, 500, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"query": q, "titles": titles, "messages": messages})
+}
+
 type createConversationReq struct {
 	ModelID   string `json:"model_id"`
 	ProjectID string `json:"project_id"`
@@ -175,13 +194,61 @@ func getConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	msgs, _ := store.ListMessages(r.Context(), d.DB, conv.ID, conv.ActiveLeafID)
+	// Optional reverse pagination over the active path: ?limit=N (&before=<id>)
+	// returns the trailing window oldest-first. With NO limit the whole path is
+	// returned and has_more=false — preserving the original (unpaginated) contract.
+	before := r.URL.Query().Get("before")
+	limit := 0
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, perr := strconv.Atoi(l); perr == nil && n > 0 && n <= 200 {
+			limit = n
+		}
+	}
+	window, hasMore, nextBefore := paginatePath(msgs, before, limit)
 	// Enrich with sibling indexes so the active-path load carries branch_count /
 	// branch_index / siblings — without this the frontend never sees the
 	// `< n/m >` branch picker on a fresh load or post-stream reconcile (§4.15).
 	writeJSON(w, 200, map[string]any{
 		"conversation": conv,
-		"messages":     redactCost(enrichWithSiblings(d, r, msgs)),
+		"messages":     redactCost(enrichWithSiblings(d, r, window)),
+		"has_more":     hasMore,
+		"next_before":  nextBefore,
 	})
+}
+
+// paginatePath returns the trailing window of an active path. When before!="" the
+// path is first cut to everything strictly above that message id. When limit>0 the
+// last `limit` messages are returned (oldest-first) with hasMore + the cursor
+// (oldest returned id) for the next older page. limit<=0 returns the whole slice
+// unchanged with hasMore=false — i.e. no pagination.
+func paginatePath(msgs []store.Message, before string, limit int) (window []store.Message, hasMore bool, nextBefore string) {
+	if before != "" {
+		cut := -1
+		for i, m := range msgs {
+			if m.ID == before {
+				cut = i
+				break
+			}
+		}
+		if cut < 0 {
+			// Stale/foreign cursor (message deleted, branch switched, wrong path):
+			// treat as exhausted rather than re-serving the latest window, which
+			// would let the client loop re-requesting the same page.
+			return []store.Message{}, false, ""
+		}
+		msgs = msgs[:cut]
+	}
+	if limit <= 0 {
+		return msgs, false, ""
+	}
+	if len(msgs) > limit {
+		hasMore = true
+		msgs = msgs[len(msgs)-limit:]
+	}
+	if hasMore && len(msgs) > 0 {
+		nextBefore = msgs[0].ID
+	}
+	return msgs, hasMore, nextBefore
 }
 
 // updateConversationHandler edits selected fields (title, project, archive…).
@@ -203,6 +270,15 @@ func updateConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 			p.KBIDs = b
 		} else {
 			p.KBIDs = json.RawMessage("[]")
+		}
+	}
+	// Mirror the create path: a moved conversation must point at a project the
+	// caller owns — don't trust a client-supplied project_id (an empty string
+	// detaches, which is always allowed).
+	if p.ProjectID != nil && *p.ProjectID != "" {
+		if _, err := store.GetProject(r.Context(), d.DB, *p.ProjectID, u.ID); err != nil {
+			writeError(w, 404, errors.New("project not found"))
+			return
 		}
 	}
 	conv, err := store.UpdateConversation(r.Context(), d.DB, id, u.ID, p)
@@ -270,26 +346,12 @@ func listMessagesHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 			limit = n
 		}
 	}
-	if before != "" {
-		cut := len(msgs)
-		for i, m := range msgs {
-			if m.ID == before {
-				cut = i
-				break
-			}
-		}
-		msgs = msgs[:cut]
-	}
-	hasMore := false
-	if len(msgs) > limit {
-		hasMore = true
-		msgs = msgs[len(msgs)-limit:]
-	}
+	window, hasMore, nextBefore := paginatePath(msgs, before, limit)
 	w.Header().Set("X-Has-More", strconv.FormatBool(hasMore))
-	if hasMore && len(msgs) > 0 {
-		w.Header().Set("X-Next-Before", msgs[0].ID)
+	if nextBefore != "" {
+		w.Header().Set("X-Next-Before", nextBefore)
 	}
-	writeJSON(w, 200, redactCost(enrichWithSiblings(d, r, msgs)))
+	writeJSON(w, 200, redactCost(enrichWithSiblings(d, r, window)))
 }
 
 type enrichedMessage struct {
@@ -330,6 +392,11 @@ func redactCost(ems []enrichedMessage) []enrichedMessage {
 	for i := range ems {
 		ems[i].Cost = 0
 		ems[i].Currency = ""
+		// `raw` is the provider-native exchange (tool I/O, retrieved RAG context,
+		// provider plumbing) kept server-side for same-vendor replay — never meant
+		// for end users. Strip it on every user-facing path; admin endpoints that
+		// intentionally skip redaction still expose it.
+		ems[i].Raw = nil
 		ems[i].Attachments = backfillAttachmentURLs(ems[i].Attachments)
 	}
 	return ems
