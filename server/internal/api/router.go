@@ -131,6 +131,7 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("DELETE", "/api/projects/:id/documents/:docId", requireAuth(d, deleteProjectDocHandler))
 	mux.handle("PATCH", "/api/projects/:id/documents/:docId", requireAuth(d, renameProjectDocHandler))
 
+	mux.handle("GET", "/api/search", requireAuth(d, searchHandler))
 	mux.handle("GET", "/api/conversations", requireAuth(d, listConversationsHandler))
 	mux.handle("POST", "/api/conversations", requireAuth(d, createConversationHandler))
 	mux.handle("GET", "/api/conversations/:id", requireAuth(d, getConversationHandler))

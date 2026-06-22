@@ -576,7 +576,16 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	}
 
 	// Artifacts produced by tools during this turn (sandbox files, images).
+	// OnArtifact fires from concurrent tool goroutines (runToolsConcurrent), so
+	// the append — and every later read of producedArtifacts — is guarded by
+	// artMu to avoid a data race / lost artifacts.
+	var artMu sync.Mutex
 	producedArtifacts := []ArtifactRef{}
+	snapshotArtifacts := func() []ArtifactRef {
+		artMu.Lock()
+		defer artMu.Unlock()
+		return append([]ArtifactRef(nil), producedArtifacts...)
+	}
 	runner := &orchToolRunner{
 		orch:    o,
 		onEvent: onEvent,
@@ -586,7 +595,9 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			DB: o.db, RAG: o.rag, ImageModelID: imageModelID,
 			DeepResearch: req.Mode == ModeDeepResearch,
 			OnArtifact: func(a ArtifactRef) {
+				artMu.Lock()
 				producedArtifacts = append(producedArtifacts, a)
+				artMu.Unlock()
 				onEvent(SseEvent{Type: "artifact", ID: a.ID, URL: a.URL, Title: a.Filename, Summary: a.MimeType})
 			},
 		},
@@ -628,7 +639,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			if result != nil {
 				partialBlocks = append(partialBlocks, result.Blocks...)
 			}
-			for _, a := range producedArtifacts {
+			for _, a := range snapshotArtifacts() {
 				partialBlocks = append(partialBlocks, UnifiedBlock{
 					Kind: "artifact", FileRef: a.ID, Title: a.Filename, URL: a.URL,
 					Summary:   a.MimeType, // §4.12 reload: keep mime alongside title
@@ -684,7 +695,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		// so a late provider error doesn't blank the message the user was
 		// watching — they still get the downloadable file.
 		errBlocks := []UnifiedBlock{}
-		for _, a := range producedArtifacts {
+		for _, a := range snapshotArtifacts() {
 			errBlocks = append(errBlocks, UnifiedBlock{
 				Kind: "artifact", FileRef: a.ID, Title: a.Filename, URL: a.URL,
 				Summary: a.MimeType, Artifacts: []ArtifactRef{a},
@@ -707,7 +718,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	}
 
 	// 12. Finalise. Append any artifact blocks so they persist on reload.
-	for _, a := range producedArtifacts {
+	for _, a := range snapshotArtifacts() {
 		result.Blocks = append(result.Blocks, UnifiedBlock{
 			Kind: "artifact", FileRef: a.ID, Title: a.Filename, URL: a.URL,
 			Summary:   a.MimeType, // §4.12 reload fidelity: keep mime
