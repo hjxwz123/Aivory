@@ -42,6 +42,7 @@
     "react-i18next": "^15.7.4",
     "react-router-dom": "^7.1.0",
     "tailwind-merge": "^3.0.0",
+    "use-sync-external-store": "^1.6.0",
     "zustand": "^5.0.2"
   },
   "devDependencies": {
