@@ -14,7 +14,6 @@
     "description": "A self-hosted, open-source multi-model AI chat platform with tool calls, Python sandbox, knowledge bases, and full admin controls.",
     "version": "Version",
     "license": "License",
-    "builtWith": "Built with",
     "source": "Source code",
     "copyright": "© {{year}} hjxwz123 · Licensed under Apache 2.0"
   },

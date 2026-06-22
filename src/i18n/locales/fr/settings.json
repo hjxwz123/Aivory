@@ -14,7 +14,6 @@
     "description": "Une plateforme de chat IA multi-modèles auto-hébergée et open source, avec appels d'outils, sandbox Python, bases de connaissances et panneau d'administration complet.",
     "version": "Version",
     "license": "Licence",
-    "builtWith": "Technologies",
     "source": "Code source",
     "copyright": "© {{year}} hjxwz123 · Sous licence Apache 2.0"
   },

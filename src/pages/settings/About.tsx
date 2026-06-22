@@ -1,8 +1,8 @@
 import { useTranslation } from 'react-i18next'
-import { ExternalLink, Github, FileText, Tag, Globe } from 'lucide-react'
+import { ExternalLink, Github, FileText, Tag } from 'lucide-react'
 import { Logo } from '@/components/brand/logo'
 
-const APP_VERSION = '1.0.0'
+const APP_VERSION = '2.0.0'
 const GITHUB_URL = 'https://github.com/hjxwz123/Aurelia'
 const LICENSE_URL = 'https://github.com/hjxwz123/Aurelia/blob/main/LICENSE'
 
@@ -47,10 +47,6 @@ export default function About() {
             Apache 2.0
             <ExternalLink size={11} aria-hidden />
           </a>
-        </InfoRow>
-
-        <InfoRow icon={Globe} label={t('about.builtWith')}>
-          <span className="text-[var(--color-fg-muted)] text-[13px]">React · Go · SQLite</span>
         </InfoRow>
 
         <InfoRow icon={Github} label={t('about.source')}>
