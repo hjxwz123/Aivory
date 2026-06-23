@@ -72,9 +72,46 @@ func sandboxFileGetAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	if ct == "" {
 		ct = http.DetectContentType(data)
 	}
+	// The workspace bytes are attacker-controlled: per the sandbox threat model the
+	// LLM (driven by an untrusted end-user prompt) can write any file the user
+	// steers it to under /workspace (e.g. a `<script>`-laden report.html or a
+	// scripted .svg). This admin preview must treat them as hostile so a preview
+	// can't run script on the admin origin. Belt-and-braces: (1) nosniff + a strict
+	// CSP/sandbox neutralise any active document the browser does render, and (2)
+	// anything that isn't a known-inert preview type is force-downloaded with an
+	// opaque content-type instead of rendered inline. Mirrors serveIcon's SVG
+	// hardening in admin_uploads.go.
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; img-src 'self' data: blob:; style-src 'unsafe-inline'; sandbox")
+	disposition := "attachment"
+	if isInlinePreviewType(ct) {
+		disposition = "inline"
+	} else {
+		// Never hand the browser an active content-type (text/html, image/svg+xml,
+		// *xml, *javascript, …) for a download it might still try to render.
+		ct = "application/octet-stream"
+	}
 	w.Header().Set("content-type", ct)
-	w.Header().Set("content-disposition", "inline; filename=\""+filepath.Base(path)+"\"")
+	w.Header().Set("content-disposition", disposition+"; filename=\""+filepath.Base(path)+"\"")
 	_, _ = w.Write(data)
+}
+
+// isInlinePreviewType reports whether a content type is safe to render inline in
+// the admin's browser. Only inert image/document types the inspector wants to
+// preview qualify; everything else (html, svg, xml, js, …) is force-downloaded so
+// it can't execute script on the admin origin even if the CSP above were bypassed.
+func isInlinePreviewType(ct string) bool {
+	ct = strings.ToLower(strings.TrimSpace(ct))
+	if i := strings.IndexByte(ct, ';'); i >= 0 {
+		ct = strings.TrimSpace(ct[:i])
+	}
+	switch ct {
+	case "image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp",
+		"image/x-icon", "image/vnd.microsoft.icon", "application/pdf",
+		"text/plain":
+		return true
+	}
+	return false
 }
 
 func sandboxClearAdmin(d Deps, w http.ResponseWriter, r *http.Request) {

@@ -28,6 +28,7 @@ const OWNED_KEYS = [
   'mineru_api_token',
   'storage_provider',
   'storage_prefix',
+  'storage_archive_ttl_days',
   'storage_s3_bucket',
   'storage_s3_region',
   'storage_s3_endpoint',
@@ -203,6 +204,23 @@ export default function AdminDocuments() {
                   onChange={(e) => setDraft({ ...draft, storage_prefix: e.target.value })}
                 />
               </Field>
+
+              {storageProvider !== '' && (
+                <Field
+                  label={t('admin:settings.fields.storageArchiveTtl')}
+                  htmlFor="storage-archive-ttl"
+                  hint={t('admin:settings.fields.storageArchiveTtlHint')}
+                >
+                  <Input
+                    id="storage-archive-ttl"
+                    type="number"
+                    min={0}
+                    placeholder="0"
+                    value={readString('storage_archive_ttl_days')}
+                    onChange={(e) => setDraft({ ...draft, storage_archive_ttl_days: e.target.value })}
+                  />
+                </Field>
+              )}
 
               {storageProvider === 's3' && (
                 <div className="flex flex-col gap-5 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-4">

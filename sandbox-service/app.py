@@ -37,6 +37,7 @@ import mimetypes
 import os
 import re
 import secrets
+import select
 import selectors
 import subprocess
 import sys
@@ -59,8 +60,30 @@ PIDS_LIMIT = os.environ.get("SANDBOX_PIDS_LIMIT", "256")
 API_KEY = os.environ.get("SANDBOX_API_KEY", "")       # required Bearer match (fail-closed; see below)
 # F2: refuse to start with no auth unless the operator explicitly opts out for a
 # trusted localhost-only dev box. Empty/blank key + no opt-out => sys.exit(1).
-ALLOW_NO_AUTH = os.environ.get("SANDBOX_ALLOW_NO_AUTH", "") not in ("", "0", "false")
-EXEC_TIMEOUT_CAP_MS = int(os.environ.get("SANDBOX_EXEC_TIMEOUT_CAP_MS", "120000"))
+# Strict allow-list parse: ONLY canonical truthy tokens disable auth. The prior
+# `not in ("","0","false")` made "False"/"no"/"off"/"FALSE" truthy, so an
+# operator who wrote SANDBOX_ALLOW_NO_AUTH=False (meaning "keep auth") would have
+# disabled it — a fail-OPEN footgun on a host-Docker-driving service.
+ALLOW_NO_AUTH = os.environ.get("SANDBOX_ALLOW_NO_AUTH", "").strip().lower() in ("1", "true", "yes", "on")
+# Hard operator ceiling for a single exec. The per-call timeout (admin-set,
+# forwarded as timeout_ms) is clamped to this. Raised from 120s so the admin's
+# `sandbox_exec_timeout_sec` can reach up to 10min without an env change; lower
+# it to tighten the ceiling.
+EXEC_TIMEOUT_CAP_MS = int(os.environ.get("SANDBOX_EXEC_TIMEOUT_CAP_MS", "600000"))
+# Per-exec default when the caller omits timeout_ms. A missing/zero value must
+# NOT silently inherit the 10-min hard cap (which would let one cell pin an exec
+# slot for the full ceiling); fall back to a sane 120s instead.
+DEFAULT_EXEC_TIMEOUT_MS = int(os.environ.get("SANDBOX_DEFAULT_EXEC_TIMEOUT_MS", "120000"))
+# Wall-clock bound for the workspace archive tar read-loop. Without it a stalled
+# `docker exec tar` blocks the loop forever while the reaper/DELETE hold the
+# session lock, freezing all reaping.
+ARCHIVE_TIMEOUT_S = float(os.environ.get("SANDBOX_ARCHIVE_TIMEOUT_S", "120"))
+# Default timeout (seconds) for any `docker` control call that doesn't pass its
+# own. Bounds the daemon-level calls (inspect/version) that were previously
+# unbounded, so a stalled daemon surfaces a clear error instead of hanging the
+# request until the caller's deadline. Long ops (pull/exec/tar) pass explicit
+# higher timeouts and are unaffected.
+DOCKER_CALL_TIMEOUT_S = float(os.environ.get("SANDBOX_DOCKER_CALL_TIMEOUT_S", "30"))
 IDLE_TTL_SECONDS = int(os.environ.get("SANDBOX_IDLE_TTL_SECONDS", "1800"))  # 30 min
 MAX_SESSIONS = int(os.environ.get("SANDBOX_MAX_SESSIONS", "16"))
 MAX_CONCURRENT_EXECS = int(os.environ.get("SANDBOX_MAX_CONCURRENT_EXECS", "4"))
@@ -94,6 +117,14 @@ MAX_ARTIFACT_BYTES = 20 * 1024 * 1024  # single produced file cap
 MAX_UPLOAD_BYTES = int(os.environ.get("SANDBOX_MAX_UPLOAD_BYTES", str(20 * 1024 * 1024)))
 MAX_FILES_PER_EXEC = int(os.environ.get("SANDBOX_MAX_FILES_PER_EXEC", "20"))
 MAX_TOTAL_ARTIFACT_BYTES = int(os.environ.get("SANDBOX_MAX_TOTAL_ARTIFACT_BYTES", str(50 * 1024 * 1024)))
+# L4: bound the per-exec artifact-collection wall-clock so the sidecar's worst-
+# case /exec latency stays predictable. The Go HTTP client deadlines at
+# ExecTimeout + execClientOverhead (120s); that overhead must comfortably cover
+# this collection budget PLUS the fixed cell-teardown/snapshot control calls. With
+# the default 60s budget the worst case is ~timeout_s + ~80s < client's
+# timeout_s + 120s, so a many-file run can no longer outlast the client mid-base64.
+MAX_COLLECT_SECONDS = float(os.environ.get("SANDBOX_MAX_COLLECT_SECONDS", "60"))
+COLLECT_FILE_TIMEOUT_S = float(os.environ.get("SANDBOX_COLLECT_FILE_TIMEOUT_S", "30"))
 # F5: reject oversized request bodies at the control plane before reading them.
 # Default ~28 MiB comfortably exceeds the 20 MiB upload cap after base64 (+JSON).
 MAX_BODY_BYTES = int(os.environ.get("SANDBOX_MAX_BODY_BYTES", str(28 * 1024 * 1024)))
@@ -147,6 +178,19 @@ class _SessionState:
 
 _session_states: dict[str, _SessionState] = {}
 _state_lock = threading.Lock()
+# L5: serialises the MAX_SESSIONS check-then-`docker run` so the count and the
+# create are atomic. _create_slots admits MAX_CONCURRENT_CREATES creators at once,
+# which would otherwise let several pass the check and all create a container,
+# overshooting the cap. `docker run -d` returns quickly, so this critical section
+# is short.
+_create_count_lock = threading.Lock()
+# L6: session ids currently being torn down (reaper/DELETE). The teardown holds
+# the per-session lock for the whole archive (up to ARCHIVE_TIMEOUT_S) so the tar
+# is consistent; without this flag a concurrent /exec on that session would block
+# on the lock for that whole window before getting its (correct) 404. Marking the
+# session terminating BEFORE teardown lets /exec bail with a fast 404 instead.
+# Guarded by _state_lock.
+_terminating: set[str] = set()
 _exec_slots = threading.BoundedSemaphore(MAX_CONCURRENT_EXECS) if MAX_CONCURRENT_EXECS > 0 else None
 _create_slots = threading.BoundedSemaphore(MAX_CONCURRENT_CREATES) if MAX_CONCURRENT_CREATES > 0 else None
 
@@ -190,6 +234,10 @@ def _valid_session(session_id: str) -> bool:
 
 def _docker(args: list[str], *, input_bytes: Optional[bytes] = None,
             timeout: Optional[float] = None) -> subprocess.CompletedProcess:
+    # Default-bound every control call: a caller that omits `timeout` still can't
+    # hang forever on a stalled daemon. Explicit timeouts (incl. long ones) win.
+    if timeout is None:
+        timeout = DOCKER_CALL_TIMEOUT_S
     return subprocess.run(
         ["docker", *args],
         input=input_bytes,
@@ -199,7 +247,14 @@ def _docker(args: list[str], *, input_bytes: Optional[bytes] = None,
 
 
 def _is_running(session_id: str) -> bool:
-    cp = _docker(["inspect", "-f", "{{.State.Running}}", _container(session_id)])
+    # A stalled daemon must not wedge the whole /exec request here (the step that
+    # used to be unbounded). On timeout, treat the session as unavailable so the
+    # handler returns a clean 404 fast instead of hanging into the client's
+    # deadline; the Go side then provisions a fresh session.
+    try:
+        cp = _docker(["inspect", "-f", "{{.State.Running}}", _container(session_id)], timeout=20)
+    except subprocess.TimeoutExpired:
+        return False
     return cp.returncode == 0 and cp.stdout.strip() == b"true"
 
 
@@ -269,9 +324,23 @@ def _forget(session_id: str) -> None:
     with _state_lock:
         _last_used.pop(session_id, None)
         _session_storage.pop(session_id, None)
+        _terminating.discard(session_id)
         state = _session_states.get(session_id)
         if state is not None and state.refs == 0:
             _session_states.pop(session_id, None)
+
+
+def _set_terminating(session_id: str, on: bool) -> None:
+    with _state_lock:
+        if on:
+            _terminating.add(session_id)
+        else:
+            _terminating.discard(session_id)
+
+
+def _is_terminating(session_id: str) -> bool:
+    with _state_lock:
+        return session_id in _terminating
 
 
 def _remember_storage(session_id: str, storage: Optional[dict]) -> None:
@@ -334,12 +403,16 @@ def _discover_sessions() -> None:
         print(f"[sandbox] recovered {recovered} existing session container(s)")
 
 
-def _run_exec_bounded(name: str, cmd: list[str], *, timeout: float) -> tuple[int, str, str]:
+def _run_exec_bounded(name: str, cmd: list[str], *, timeout: float,
+                      env: Optional[dict[str, str]] = None) -> tuple[int, str, str]:
     stdout = _BoundedOutput()
     stderr = _BoundedOutput()
     start = time.monotonic()
+    eflags: list[str] = []
+    for k, v in (env or {}).items():
+        eflags.extend(["-e", f"{k}={v}"])
     proc = subprocess.Popen(
-        ["docker", "exec", name, *cmd],
+        ["docker", "exec", *eflags, name, *cmd],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
@@ -383,6 +456,34 @@ def _run_exec_bounded(name: str, cmd: list[str], *, timeout: float) -> tuple[int
     if timed_out:
         exit_code = 124
     return exit_code, stdout.text("stdout"), stderr.text("stderr")
+
+
+def _kill_marked_processes(name: str, token: str) -> None:
+    """Kill every process in the session container whose environment carries our
+    per-exec marker (AURELIA_CELL_TOKEN=<token>).
+
+    coreutils `timeout` signals only its single direct child (python), and the
+    host-side proc.kill() only kills the local `docker exec` client — so a
+    background process the cell detached into its own process group/session
+    (subprocess.Popen, os.fork, a double-fork, `setsid`) survives, reparents to
+    PID 1 (`sleep infinity`, which never reaps it), and keeps burning the
+    session's cpu/mem/pids budget until the 30-min idle reaper. The env var is
+    inherited across fork/exec/setsid/double-fork, so matching on it reaps the
+    whole tree regardless of process group. PID 1 carries no marker, so it is
+    never touched. `token` is a uuid4 hex (our own), so it is safe to interpolate.
+    """
+    if not re.fullmatch(r"[0-9a-f]{32}", token or ""):
+        return
+    script = (
+        'for d in /proc/[0-9]*; do '
+        'if tr "\\0" "\\n" < "$d/environ" 2>/dev/null | '
+        f'grep -qxF "AURELIA_CELL_TOKEN={token}"; then '
+        'kill -9 "${d##*/}" 2>/dev/null; fi; done'
+    )
+    try:
+        _docker(["exec", name, "sh", "-c", script], timeout=15)
+    except subprocess.TimeoutExpired:
+        pass
 
 
 # --- Request models ---------------------------------------------------------
@@ -434,6 +535,13 @@ class StorageDeleteBody(BaseModel):
     storage: Optional[dict[str, Any]] = None
 
 
+class StorageGCBody(BaseModel):
+    # Delete archived workspace tarballs older than max_age_seconds. The Go side
+    # forwards the same `storage` block it uses for archive/restore.
+    storage: Optional[dict[str, Any]] = None
+    max_age_seconds: int
+
+
 # --- Endpoints --------------------------------------------------------------
 @app.post("/sessions")
 def create_session(body: Optional[CreateBody] = Body(default=None)):
@@ -441,9 +549,6 @@ def create_session(body: Optional[CreateBody] = Body(default=None)):
     # The Go side forwards a `storage` block here (or {}); a bare POST is fine.
     storage = body.storage if body is not None else None
     with _slot(_create_slots, "session create"):
-        if MAX_SESSIONS > 0 and _count_live_sessions() >= MAX_SESSIONS:
-            raise HTTPException(status_code=429, detail="too many active sessions")
-
         session_id = uuid.uuid4().hex
         name = _container(session_id)
         args = [
@@ -487,19 +592,25 @@ def create_session(body: Optional[CreateBody] = Body(default=None)):
         run_cmd = [IMAGE, "sleep", "infinity"]
         if DISK_SIZE:
             args.extend(["--storage-opt", f"size={DISK_SIZE}"])
-        cp = _docker([*args, *run_cmd], timeout=60)
-        if cp.returncode != 0 and DISK_SIZE and b"storage-opt" in cp.stderr.lower():
-            print(
-                "[sandbox] warning: --storage-opt size is unsupported by the "
-                "docker storage driver (needs overlay2+prjquota); creating the "
-                "session without a writable-layer quota. "
-                f"({cp.stderr.decode(errors='replace')[:160]})"
-            )
-            # Drop the trailing "--storage-opt size=..." pair and retry. Clear
-            # any half-created container holding the name first (best-effort).
-            _docker(["rm", "-f", name], timeout=30)
-            args = args[:-2]
+        # L5: hold _create_count_lock across the count check AND the `docker run`
+        # that makes the container live (counted by `docker ps`), so concurrent
+        # creators can't both pass the check and overshoot MAX_SESSIONS.
+        with _create_count_lock:
+            if MAX_SESSIONS > 0 and _count_live_sessions() >= MAX_SESSIONS:
+                raise HTTPException(status_code=429, detail="too many active sessions")
             cp = _docker([*args, *run_cmd], timeout=60)
+            if cp.returncode != 0 and DISK_SIZE and b"storage-opt" in cp.stderr.lower():
+                print(
+                    "[sandbox] warning: --storage-opt size is unsupported by the "
+                    "docker storage driver (needs overlay2+prjquota); creating the "
+                    "session without a writable-layer quota. "
+                    f"({cp.stderr.decode(errors='replace')[:160]})"
+                )
+                # Drop the trailing "--storage-opt size=..." pair and retry. Clear
+                # any half-created container holding the name first (best-effort).
+                _docker(["rm", "-f", name], timeout=30)
+                args = args[:-2]
+                cp = _docker([*args, *run_cmd], timeout=60)
         if cp.returncode != 0:
             raise HTTPException(status_code=500, detail=f"docker run failed: {cp.stderr.decode(errors='replace')}")
         # Make sure the standard dirs exist (image already creates them, but be safe).
@@ -531,14 +642,21 @@ def exec_code(body: ExecBody):
     if len(code_bytes) > MAX_CODE_BYTES:
         raise HTTPException(status_code=413, detail="code too large")
 
-    timeout_ms = body.timeout_ms or EXEC_TIMEOUT_CAP_MS
+    timeout_ms = body.timeout_ms or DEFAULT_EXEC_TIMEOUT_MS
     timeout_ms = max(1000, min(timeout_ms, EXEC_TIMEOUT_CAP_MS))
     timeout_s = timeout_ms / 1000.0
+
+    # L6: if the session is being torn down (reaper/DELETE holds its lock for the
+    # archive), don't block on the lock for up to ARCHIVE_TIMEOUT_S just to 404 —
+    # bail now. The Go side then provisions a fresh session.
+    if _is_terminating(sid):
+        raise HTTPException(status_code=404, detail="session not found or not running")
 
     with _session_lock(sid), _slot(_exec_slots, "exec"):
         if not _is_running(sid):
             raise HTTPException(status_code=404, detail="session not found or not running")
-        cell_path = f"/tmp/aurelia-cell-{uuid.uuid4().hex}.py"
+        cell_token = uuid.uuid4().hex
+        cell_path = f"/tmp/aurelia-cell-{cell_token}.py"
 
         # Write the cell to a file in the container (stdin avoids arg-length
         # limits and shell-quoting hazards).
@@ -551,14 +669,20 @@ def exec_code(body: ExecBody):
 
         # `timeout` kills runaway code inside the container; the host-side
         # reader keeps stdout/stderr bounded so the sidecar cannot be OOMed by
-        # a print loop.
+        # a print loop. AURELIA_CELL_TOKEN tags every process this cell spawns so
+        # the cleanup sweep below can reap any it detached into its own group.
         try:
             exit_code, stdout, stderr = _run_exec_bounded(
                 name,
                 ["timeout", "--kill-after=2s", _timeout_arg(timeout_s), "python", cell_path],
                 timeout=timeout_s + 15,
+                env={"AURELIA_CELL_TOKEN": cell_token},
             )
         finally:
+            # Reap any background process the cell detached (subprocess / double
+            # fork / setsid) so it doesn't keep consuming the session's
+            # cpu/mem/pids budget after /exec returns, then drop the cell file.
+            _kill_marked_processes(name, cell_token)
             _docker(["exec", name, "rm", "-f", cell_path], timeout=10)
 
         if exit_code == 124:  # `timeout` convention
@@ -637,12 +761,19 @@ def delete_session(session_id: str, body: Optional[DeleteBody] = Body(default=No
     storage = body.storage if body is not None else None
     if not _storage_effective(storage):
         storage = _session_storage_for(session_id)
-    with _session_lock(session_id):
-        # §4.5: archive /workspace before tearing the container down (best-
-        # effort; no-op without effective storage — dev: deleted = gone).
-        _archive_workspace(session_id, storage)
-        _docker(["rm", "-f", _container(session_id)], timeout=30)
-        _forget(session_id)
+    # L6: flag terminating BEFORE taking the lock so a racing /exec 404s fast
+    # instead of waiting out the archive. _forget clears it; the finally is a
+    # belt-and-braces clear if archive/rm raises before _forget runs.
+    _set_terminating(session_id, True)
+    try:
+        with _session_lock(session_id):
+            # §4.5: archive /workspace before tearing the container down (best-
+            # effort; no-op without effective storage — dev: deleted = gone).
+            _archive_workspace(session_id, storage)
+            _docker(["rm", "-f", _container(session_id)], timeout=30)
+            _forget(session_id)
+    finally:
+        _set_terminating(session_id, False)
     return {"ok": True}
 
 
@@ -694,27 +825,29 @@ def list_files(body: ListFilesBody):
     with _session_lock(sid):
         if not _is_running(sid):
             raise HTTPException(status_code=404, detail="session not found or not running")
-        # `find` prints "<size> <path>" per file, NUL-free, capped so a runaway
-        # workspace can't flood the response. Paths are relative to /workspace.
+        # `find` prints "<size>\t<path>" per file, NUL-TERMINATED so a filename
+        # containing a newline can't forge extra rows in the admin inspector. The
+        # byte cap keeps a runaway workspace from flooding the response; the count
+        # is bounded host-side. Paths are relative to /workspace.
         cp = _docker(
             ["exec", name, "sh", "-c",
-             f"find {WORKSPACE} -maxdepth 6 -type f -printf '%s\\t%P\\n' 2>/dev/null | head -n 500"],
+             f"find {WORKSPACE} -maxdepth 6 -type f -printf '%s\\t%P\\0' 2>/dev/null | head -c 1000000"],
             timeout=30,
         )
         _touch(sid)
         files = []
         if cp.returncode == 0:
-            for line in cp.stdout.decode(errors="replace").splitlines():
-                if "\t" not in line:
+            for record in cp.stdout.decode(errors="replace").split("\x00"):
+                if "\t" not in record:
                     continue
-                size_str, rel = line.split("\t", 1)
+                size_str, rel = record.split("\t", 1)
                 try:
                     size = int(size_str)
                 except ValueError:
                     continue
                 files.append({"path": rel, "size": size})
         files.sort(key=lambda f: f["path"])
-        return {"files": files}
+        return {"files": files[:500]}
 
 
 @app.post("/storage/put")
@@ -765,9 +898,70 @@ def storage_delete(body: StorageDeleteBody):
     return {"ok": True, "key": full_key}
 
 
+@app.post("/storage/gc")
+def storage_gc(body: StorageGCBody):
+    """§4.5 object-storage GC: delete objects older than max_age_seconds so the
+    bucket doesn't grow without bound. Two sweeps, both age-bounded:
+      - `<prefix>/workspaces/*.tgz` — one workspace tarball piles up per reaped
+        session and is never otherwise removed.
+      - `<prefix>/mineru/*`        — RAG upload objects whose best-effort delete
+        failed (orphans); legitimate ones live only minutes, so anything older
+        than the (days-scale) TTL is safe to prune.
+    The Go side calls this on a timer with the admin-configured TTL. Safety: only
+    objects UNDER the two known prefixes, only those strictly older than cutoff,
+    and NEVER an object whose timestamp couldn't be read (treated as 'keep')."""
+    if not _storage_effective(body.storage):
+        raise HTTPException(status_code=400, detail="storage backend not configured")
+    max_age = int(body.max_age_seconds or 0)
+    if max_age <= 0:
+        # 0 / negative means "disabled" — never mass-delete on a misconfig.
+        return {"deleted": 0, "scanned": 0, "freed_bytes": 0}
+    cutoff = time.time() - max_age
+    base = _storage_prefix(body.storage).rstrip("/")
+    ws_prefix = _workspace_archive_prefix(body.storage)  # <base>/workspaces/
+    mineru_prefix = base + "/mineru/"
+    # (prefix, require_tgz_suffix)
+    sweeps = [(ws_prefix, True), (mineru_prefix, False)]
+    deleted = scanned = freed = 0
+    try:
+        for prefix, require_tgz in sweeps:
+            for key, last_modified, size in _storage_list(body.storage, prefix):
+                scanned += 1
+                # Defensive: the listing is already prefix-scoped, but re-check
+                # so a surprising key never gets deleted.
+                if not key.startswith(prefix):
+                    continue
+                if require_tgz and not key.endswith(".tgz"):
+                    continue
+                # Unknown/zero timestamp => KEEP. A listing that fails to surface
+                # LastModified must not look "ancient" and get mass-deleted —
+                # fail safe, not fail open.
+                if last_modified <= 0:
+                    continue
+                if last_modified >= cutoff:
+                    continue
+                try:
+                    _storage_delete_object(body.storage, key)
+                    deleted += 1
+                    freed += size
+                except Exception as exc:  # noqa: BLE001 - best-effort per object
+                    print(f"[sandbox] gc: delete {key} failed: {exc}")
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001 - surface SDK errors as 502
+        raise HTTPException(status_code=502, detail=f"storage gc failed: {exc}")
+    if deleted:
+        print(f"[sandbox] gc: deleted {deleted}/{scanned} stale object(s) "
+              f"older than {max_age}s ({freed} bytes freed)")
+    return {"deleted": deleted, "scanned": scanned, "freed_bytes": freed}
+
+
 @app.get("/healthz")
 def healthz():
-    cp = _docker(["version", "-f", "{{.Server.Version}}"])
+    try:
+        cp = _docker(["version", "-f", "{{.Server.Version}}"], timeout=10)
+    except subprocess.TimeoutExpired:
+        return JSONResponse(status_code=503, content={"ok": False, "docker": "", "image": IMAGE})
     ok = cp.returncode == 0
     return JSONResponse(
         status_code=200 if ok else 503,
@@ -798,7 +992,14 @@ def _collect_new_files(name: str, before: dict[str, str]) -> tuple[list[dict], s
     files: list[dict] = []
     total_bytes = 0
     skipped = 0
-    for path in changed:
+    start = time.monotonic()
+    for i, path in enumerate(changed):
+        # L4: stop once the collection budget is spent so a run emitting many
+        # large files can't pin the exec slot (or outlast the Go client deadline)
+        # base64-ing them. Remaining files are counted as skipped.
+        if time.monotonic() - start > MAX_COLLECT_SECONDS:
+            skipped += len(changed) - i
+            break
         size = int(after[path].split("|")[1])
         if size > MAX_ARTIFACT_BYTES:
             skipped += 1
@@ -809,7 +1010,7 @@ def _collect_new_files(name: str, before: dict[str, str]) -> tuple[list[dict], s
         if total_bytes + size > MAX_TOTAL_ARTIFACT_BYTES:
             skipped += 1
             continue  # §4.5: single artifact ≤ 20MB
-        cp = _docker(["exec", name, "base64", "-w0", path], timeout=60)
+        cp = _docker(["exec", name, "base64", "-w0", path], timeout=COLLECT_FILE_TIMEOUT_S)
         if cp.returncode != 0:
             skipped += 1
             continue
@@ -969,6 +1170,17 @@ def _storage_client(storage: dict) -> tuple:
             if access and secret:
                 kwargs["aws_access_key_id"] = access
                 kwargs["aws_secret_access_key"] = secret
+            # Bound every SDK call: archive/restore/GC run while holding the
+            # session lock / a create slot, so a slow or hung bucket would
+            # otherwise freeze the reaper, DELETE, and session creation.
+            try:
+                from botocore.config import Config as _BotoConfig  # type: ignore
+                kwargs["config"] = _BotoConfig(
+                    connect_timeout=10, read_timeout=120,
+                    retries={"max_attempts": 3, "mode": "standard"},
+                )
+            except ImportError:
+                pass
             client: Any = boto3.client("s3", **kwargs)
         else:  # aliyun_oss
             try:
@@ -983,6 +1195,7 @@ def _storage_client(storage: dict) -> tuple:
                 auth,
                 _storage_get(storage, "oss_endpoint"),
                 _storage_get(storage, "oss_bucket"),
+                connect_timeout=30,  # bound the call so a slow bucket can't wedge the session lock
             )
 
         _storage_clients[cache_key] = client
@@ -1018,9 +1231,14 @@ def _storage_presign_get(storage: dict, full_key: str, ttl: int) -> str:
     return client.sign_url("GET", full_key, ttl, slash_safe=True)
 
 
-def _storage_get_object(storage: dict, full_key: str) -> Optional[bytes]:
+def _storage_get_object(storage: dict, full_key: str,
+                        max_bytes: Optional[int] = None) -> Optional[bytes]:
     """Download `full_key`. Returns None when the object is absent (so callers
-    can treat a missing workspace archive as "nothing to restore")."""
+    can treat a missing workspace archive as "nothing to restore"). When
+    `max_bytes` is set, reads at most that many bytes and raises ValueError if
+    the object is larger — so a giant/poisoned archive can't be buffered
+    unbounded into the sidecar."""
+    cap = (max_bytes + 1) if max_bytes is not None else None
     provider, client = _storage_client(storage)
     if provider == "s3":
         try:
@@ -1032,15 +1250,21 @@ def _storage_get_object(storage: dict, full_key: str) -> Optional[bytes]:
                 return None
             raise
         body = resp.get("Body")
-        return body.read() if body is not None else b""
-    # aliyun_oss
-    try:
-        resp = client.get_object(full_key)
-    except Exception as exc:  # noqa: BLE001
-        if _is_not_found(provider, exc):
-            return None
-        raise
-    return resp.read()
+        if body is None:
+            data = b""
+        else:
+            data = body.read(cap) if cap is not None else body.read()
+    else:  # aliyun_oss
+        try:
+            resp = client.get_object(full_key)
+        except Exception as exc:  # noqa: BLE001
+            if _is_not_found(provider, exc):
+                return None
+            raise
+        data = resp.read(cap) if cap is not None else resp.read()
+    if max_bytes is not None and len(data) > max_bytes:
+        raise ValueError(f"object {full_key} exceeds {max_bytes} bytes")
+    return data
 
 
 def _storage_delete_object(storage: dict, full_key: str) -> None:
@@ -1083,7 +1307,46 @@ def _is_not_found(provider: str, exc: Exception) -> bool:
 def _workspace_archive_key(storage: dict, session_id: str) -> str:
     """Object key for a session's workspace tarball:
     <prefix>/workspaces/<session_id>.tgz."""
-    return _storage_prefix(storage).rstrip("/") + f"/workspaces/{session_id}.tgz"
+    return _workspace_archive_prefix(storage) + f"{session_id}.tgz"
+
+
+def _workspace_archive_prefix(storage: dict) -> str:
+    """The object-key prefix every workspace tarball lives under
+    (<prefix>/workspaces/). The GC sweep lists + prunes exactly this prefix, so
+    it MUST stay in lockstep with _workspace_archive_key's layout."""
+    return _storage_prefix(storage).rstrip("/") + "/workspaces/"
+
+
+def _storage_list(storage: dict, prefix: str) -> Iterator[tuple[str, float, int]]:
+    """Yield (key, last_modified_epoch, size_bytes) for every object under
+    `prefix`. Paginates so a large bucket isn't silently truncated to one page."""
+    provider, client = _storage_client(storage)
+    if provider == "s3":
+        bucket = _storage_get(storage, "s3_bucket")
+        token: Optional[str] = None
+        while True:
+            kwargs: dict[str, Any] = {"Bucket": bucket, "Prefix": prefix}
+            if token:
+                kwargs["ContinuationToken"] = token
+            resp = client.list_objects_v2(**kwargs)
+            for obj in resp.get("Contents", []) or []:
+                lm = obj.get("LastModified")
+                epoch = lm.timestamp() if lm is not None else 0.0
+                yield obj["Key"], epoch, int(obj.get("Size", 0) or 0)
+            if resp.get("IsTruncated") and resp.get("NextContinuationToken"):
+                token = resp["NextContinuationToken"]
+                continue
+            break
+    else:  # aliyun_oss
+        import oss2  # type: ignore
+        # ObjectIterator yields SimplifiedObjectInfo: .key, .last_modified
+        # (epoch seconds), .size — and pages internally.
+        for obj in oss2.ObjectIterator(client, prefix=prefix):
+            yield (
+                obj.key,
+                float(getattr(obj, "last_modified", 0) or 0),
+                int(getattr(obj, "size", 0) or 0),
+            )
 
 
 def _archive_workspace(session_id: str, storage: Optional[dict]) -> None:
@@ -1102,8 +1365,20 @@ def _archive_workspace(session_id: str, storage: Optional[dict]) -> None:
         assert proc.stdout is not None
         buf = bytearray()
         too_big = False
+        timed_out = False
+        start = time.monotonic()
+        # Read with a wall-clock deadline: select() makes the read interruptible
+        # so a wedged `docker exec tar` can't block here forever while the reaper
+        # / DELETE hold the session lock.
         while True:
-            chunk = proc.stdout.read(65536)
+            if time.monotonic() - start > ARCHIVE_TIMEOUT_S:
+                timed_out = True
+                proc.kill()
+                break
+            ready, _, _ = select.select([proc.stdout], [], [], 5.0)
+            if not ready:
+                continue
+            chunk = proc.stdout.read1(65536)
             if not chunk:
                 break
             if len(buf) + len(chunk) > MAX_ARCHIVE_BYTES:
@@ -1114,7 +1389,15 @@ def _archive_workspace(session_id: str, storage: Optional[dict]) -> None:
         try:
             stderr = proc.stderr.read() if proc.stderr is not None else b""
         finally:
-            rc = proc.wait(timeout=10)
+            try:
+                rc = proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                rc = -1
+        if timed_out:
+            print(f"[sandbox] warning: archive of {session_id} exceeded "
+                  f"{ARCHIVE_TIMEOUT_S}s; skipping")
+            return
         if too_big:
             print(f"[sandbox] warning: workspace for {session_id} exceeds "
                   f"{MAX_ARCHIVE_BYTES} bytes; skipping archive")
@@ -1142,10 +1425,14 @@ def _restore_workspace(session_id: str, storage: Optional[dict]) -> None:
     name = _container(session_id)
     try:
         full_key = _workspace_archive_key(storage, session_id)
-        data = _storage_get_object(storage, full_key)
+        # Bound the download (an oversized/poisoned archive can't OOM the sidecar)
+        # and extract with --no-same-owner so the archive can't impose ownership.
+        # Path/symlink escape is contained by the read-only rootfs + the bounded
+        # /workspace tmpfs (a decompressed bomb hits ENOSPC, not the host).
+        data = _storage_get_object(storage, full_key, max_bytes=MAX_ARCHIVE_BYTES)
         if data is None:
             return  # nothing archived for this session yet
-        cp = _docker(["exec", "-i", name, "tar", "xzf", "-", "-C", WORKSPACE],
+        cp = _docker(["exec", "-i", name, "tar", "--no-same-owner", "-xzf", "-", "-C", WORKSPACE],
                      input_bytes=data, timeout=120)
         if cp.returncode != 0:
             print(f"[sandbox] warning: restore untar for {session_id} failed: "
@@ -1169,14 +1456,34 @@ def _reaper() -> None:
         for sid in stale:
             try:
                 with _session_lock(sid):
-                    # §4.5: archive /workspace before the TTL kill so the next
-                    # session for this id can restore it. Best-effort, no-op
-                    # when storage is absent (dev: reaped = gone).
-                    _archive_workspace(sid, _session_storage_for(sid))
-                    _docker(["rm", "-f", _container(sid)], timeout=30)
-                    _forget(sid)
+                    # Re-validate staleness now that we hold the session lock. A
+                    # concurrent /exec (or /files*) could have won the lock between
+                    # the snapshot above and here, done real work, and refreshed
+                    # _last_used via _touch. Without this re-check the reaper would
+                    # rm -f a session that was used seconds ago, yanking its
+                    # /workspace out from under an active conversation.
+                    with _state_lock:
+                        last = _last_used.get(sid)
+                    if last is not None and time.time() - last <= IDLE_TTL_SECONDS:
+                        continue
+                    # L6: flag terminating so a /exec that arrives during the
+                    # archive 404s fast instead of blocking on the lock.
+                    _set_terminating(sid, True)
+                    try:
+                        # §4.5: archive /workspace before the TTL kill so the next
+                        # session for this id can restore it. Best-effort, no-op
+                        # when storage is absent (dev: reaped = gone).
+                        _archive_workspace(sid, _session_storage_for(sid))
+                        _docker(["rm", "-f", _container(sid)], timeout=30)
+                        _forget(sid)
+                    finally:
+                        _set_terminating(sid, False)
             except HTTPException:
                 print(f"[sandbox] warning: session {sid} stayed busy during reap")
+            except Exception as exc:  # noqa: BLE001 - one bad session must never kill the reaper
+                # e.g. `docker rm` timing out would otherwise propagate out of the
+                # reaper thread and stop ALL future reaping. Log and move on.
+                print(f"[sandbox] warning: reap of {sid} failed: {exc}")
 
 
 @app.on_event("startup")

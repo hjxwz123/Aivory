@@ -96,8 +96,27 @@ services:
       SANDBOX_MEMORY: ${SANDBOX_MEMORY:-2g}
       SANDBOX_CPUS: ${SANDBOX_CPUS:-1}
       SANDBOX_MAX_SESSIONS: ${SANDBOX_MAX_SESSIONS:-16}
+      # Hard ceiling for one execution. The admin's per-exec timeout
+      # (settings.sandbox_exec_timeout_sec) is clamped to this; lower it to
+      # tighten the cap. 600000ms = 10min.
+      SANDBOX_EXEC_TIMEOUT_CAP_MS: ${SANDBOX_EXEC_TIMEOUT_CAP_MS:-600000}
       SANDBOX_READ_ONLY_ROOTFS: "1"
       SANDBOX_WORKSPACE_SIZE: ${SANDBOX_WORKSPACE_SIZE:-512m}
+    # Liveness: /healthz reports the sidecar can still reach the docker daemon.
+    # No tools beyond python are in the image, so probe via urllib (non-2xx
+    # raises -> unhealthy). start_period covers SANDBOX_PULL_ON_START, which blocks
+    # serving until the runtime image is pulled on a cold boot.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    # Bound the control-plane container itself (not just the session children). It
+    # buffers workspace archives (≤ SANDBOX_MAX_ARCHIVE_BYTES, 200 MiB) and storage
+    # bodies in memory, so keep mem_limit comfortably above those.
+    mem_limit: 1g
+    pids_limit: 512
     volumes:
       # Required: the sidecar spawns sibling session containers via the host daemon.
       - /var/run/docker.sock:/var/run/docker.sock

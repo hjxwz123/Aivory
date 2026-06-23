@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"strconv"
 	"strings"
+	"time"
 
 	"aurelia/server/internal/sandbox"
 	"aurelia/server/internal/store"
@@ -45,7 +47,44 @@ func (s *settingsSandbox) backend() sandbox.Service {
 		key = s.fallbackKey
 	}
 	storage := s.storageConfig()
-	return sandbox.NewWithStorage(base, key, storage)
+	return sandbox.NewWithOptions(sandbox.Options{
+		BaseURL:     base,
+		APIKey:      key,
+		Storage:     storage,
+		ExecTimeout: s.execTimeout(),
+	})
+}
+
+// execTimeout reads settings.sandbox_exec_timeout_sec — the admin-set per-exec
+// wall-clock cap. Accepts a JSON number or the string the admin text input saves
+// ("180"). Clamped to [10s, 600s]; 0 / blank / invalid → 0 so the sandbox uses
+// its built-in default (120s). The sidecar additionally clamps to its own hard
+// ceiling (SANDBOX_EXEC_TIMEOUT_CAP_MS), so this can lower but never exceed it.
+func (s *settingsSandbox) execTimeout() time.Duration {
+	if s.db == nil {
+		return 0
+	}
+	raw, err := store.GetSetting(s.db, "sandbox_exec_timeout_sec")
+	if err != nil {
+		return 0
+	}
+	secs := 0
+	if json.Unmarshal(raw, &secs) != nil {
+		var str string
+		if json.Unmarshal(raw, &str) == nil {
+			secs, _ = strconv.Atoi(strings.TrimSpace(str))
+		}
+	}
+	if secs <= 0 {
+		return 0
+	}
+	if secs < 10 {
+		secs = 10
+	}
+	if secs > 600 {
+		secs = 600
+	}
+	return time.Duration(secs) * time.Second
 }
 
 // storageConfig assembles the admin-driven archive bucket. Returns nil when
@@ -124,4 +163,8 @@ func (s *settingsSandbox) ListFiles(ctx context.Context, sessionID string) ([]sa
 
 func (s *settingsSandbox) Release(ctx context.Context, sessionID string) error {
 	return s.backend().Release(ctx, sessionID)
+}
+
+func (s *settingsSandbox) PruneArchives(ctx context.Context, maxAge time.Duration) (int, error) {
+	return s.backend().PruneArchives(ctx, maxAge)
 }

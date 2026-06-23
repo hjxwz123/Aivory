@@ -1,0 +1,53 @@
+# Aurelia sandbox runtime image — pinned dependencies (design.md §4.5).
+#
+# Why pinned: the previous `pip install <name>` with no version constraints meant
+# every rebuild (and CI fires on any push under sandbox-service/**) resolved
+# whatever was latest on PyPI that day — non-reproducible, and a supply-chain
+# exposure (a compromised/yanked release lands silently). Exact `==` pins make the
+# image deterministic.
+#
+# This is a KNOWN-GOOD baseline constellation (numpy<2 to avoid 2.0 ABI surprises
+# with kaleido/older wheels). Bump deliberately: change a pin, rebuild the image,
+# smoke-test (matplotlib CJK render + a pptx/docx/pdf generation), then commit.
+# If your platform needs different wheels, adjust here — do NOT revert to
+# unpinned installs. For full reproducibility, regenerate with hashes via
+# `pip-compile --generate-hashes`.
+
+# --- core data-science stack ---
+numpy==1.26.4
+pandas==2.2.2
+scipy==1.13.1
+scikit-learn==1.5.1
+statsmodels==0.14.2
+
+# --- plotting / charts ---
+matplotlib==3.9.2
+seaborn==0.13.2
+plotly==5.24.1
+kaleido==0.2.1
+
+# --- imaging / math / graph ---
+pillow==10.4.0
+sympy==1.13.2
+networkx==3.3
+
+# --- spreadsheets / pdf read ---
+openpyxl==3.1.5
+xlsxwriter==3.2.0
+xlrd==2.0.1
+pypdf==4.3.1
+
+# --- document generation ---
+python-pptx==0.6.23
+python-docx==1.1.2
+reportlab==4.2.2
+weasyprint==62.3
+
+# --- text / parsing / templating ---
+tabulate==0.9.0
+requests==2.32.3
+lxml==5.3.0
+beautifulsoup4==4.12.3
+markdown==3.7
+jinja2==3.1.4
+pyyaml==6.0.2

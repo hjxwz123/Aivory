@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -1543,6 +1544,35 @@ var toolTimeouts = map[string]time.Duration{
 
 const toolTimeoutDefault = 100 * time.Second
 
+// sandboxExecCtxTimeout sizes the per-call ctx for python_execute to the
+// admin-configured sandbox exec cap (settings.sandbox_exec_timeout_sec, default
+// 120s, clamped [10,600]) PLUS margin, so the ctx outlasts the sandbox HTTP
+// client timeout (exec + ~120s overhead) and never cancels a valid long run
+// early. Mirrors the clamp in tools.settingsSandbox.execTimeout (kept here
+// rather than imported to avoid an llm→tools import cycle via ToolContext).
+func sandboxExecCtxTimeout(db *sql.DB) time.Duration {
+	secs := 120
+	if db != nil {
+		if raw, err := store.GetSetting(db, "sandbox_exec_timeout_sec"); err == nil {
+			n := 0
+			if json.Unmarshal(raw, &n) != nil {
+				var s string
+				if json.Unmarshal(raw, &s) == nil {
+					n, _ = strconv.Atoi(strings.TrimSpace(s))
+				}
+			}
+			if n > 600 {
+				secs = 600
+			} else if n >= 10 {
+				secs = n
+			} else if n > 0 {
+				secs = 10
+			}
+		}
+	}
+	return time.Duration(secs)*time.Second + 150*time.Second
+}
+
 func (r *orchToolRunner) Run(ctx context.Context, name string, input []byte) (string, []Citation, error) {
 	if err := r.ctx.charge(name); err != nil {
 		return "", nil, err
@@ -1550,6 +1580,13 @@ func (r *orchToolRunner) Run(ctx context.Context, name string, input []byte) (st
 	timeout, ok := toolTimeouts[name]
 	if !ok {
 		timeout = toolTimeoutDefault
+	}
+	if name == "python_execute" {
+		// The sandbox exec cap is admin-configurable (sandbox_exec_timeout_sec,
+		// up to 600s); a static 120s ctx here would silently cancel a longer-but-
+		// valid run before the sidecar/client deadline. Size the ctx to the
+		// configured cap + margin so raising the setting actually takes effect.
+		timeout = sandboxExecCtxTimeout(r.orch.db)
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()

@@ -644,6 +644,9 @@ var settingsKeys = []string{
 	// e.g. ["python_execute","image_generate"].
 	"disabled_tools",
 	"sandbox_base_url", "sandbox_api_key",
+	// §4.5 per-exec wall-clock cap in SECONDS (admin-tunable). Blank/0 = default
+	// 120s. Clamped to [10,600] server-side and to the sidecar's hard ceiling.
+	"sandbox_exec_timeout_sec",
 	// §4.5 storage backend: pick exactly one of s3 / aliyun_oss. When blank,
 	// archive/restore is disabled and the sandbox still works (workspaces
 	// reaped = gone). All credentials live in admin settings, plaintext,
@@ -654,6 +657,9 @@ var settingsKeys = []string{
 	"storage_s3_access_key", "storage_s3_secret_key",
 	"storage_aliyun_bucket", "storage_aliyun_endpoint",
 	"storage_aliyun_access_key_id", "storage_aliyun_access_key_secret",
+	// §4.5 archived-workspace GC: age in DAYS after which a workspace tarball is
+	// deleted from the bucket. "" / "0" = never auto-delete (archives accumulate).
+	"storage_archive_ttl_days",
 	// §4.11-C MinerU document parsing. Cloud API at https://mineru.net by
 	// default; token comes from the user's MinerU console. When blank, the
 	// fallback env vars (MINERU_API_URL/MINERU_API_KEY) are honoured, and if

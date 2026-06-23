@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -234,19 +235,29 @@ func (t *fetchImageTool) Execute(ctx context.Context, input []byte, tc *llm.Tool
 	name := sanitizeImageName(in.Filename, u, ct)
 
 	// Reuse (or provision) the conversation's persistent sandbox session so the
-	// image lands in the SAME /workspace python_execute will read.
+	// image lands in the SAME /workspace python_execute will read. Serialise the
+	// get→create→persist on the SAME per-conversation lock python_execute uses, so
+	// a fetch_image and a python_execute running concurrently in one turn don't
+	// each provision a session and clobber sandbox_id (leaking a container).
+	unlock := lockConvSandbox(tc.ConvID)
 	sessionID, _ := store.GetConvProviderStateKey(ctx, tc.DB, tc.ConvID, "sandbox_id")
 	if sessionID == "" {
 		sid, err := t.sandbox.NewSession(ctx)
 		if err != nil {
+			unlock()
 			if t.logger != nil {
 				t.logger.Printf("fetch_image: sandbox NewSession failed: %v", err)
 			}
 			return "", nil, fmt.Errorf("sandbox session: %w", err)
 		}
 		sessionID = sid
-		_ = store.SetConvProviderStateKey(ctx, tc.DB, tc.ConvID, "sandbox_id", sessionID)
+		if perr := store.SetConvProviderStateKey(ctx, tc.DB, tc.ConvID, "sandbox_id", sessionID); perr != nil {
+			_ = t.sandbox.Release(ctx, sessionID)
+			unlock()
+			return "", nil, fmt.Errorf("persist sandbox session: %w", perr)
+		}
 	}
+	unlock()
 	path := "/workspace/uploads/" + name
 	if err := t.sandbox.PutFile(ctx, sessionID, path, data); err != nil {
 		return "", nil, fmt.Errorf("stage image: %w", err)
@@ -305,6 +316,20 @@ func imageExtForType(ct string) string {
 	}
 }
 
+// convSandboxMu serialises sandbox-session provisioning per conversation so two
+// concurrent python_execute calls in one turn don't each create a session and
+// clobber the conversation's sandbox_id (leaking the orphaned container until
+// the idle reaper). Keyed by conversation id; the per-conv mutex is held only
+// across the cheap get→create→persist, never across exec/staging.
+var convSandboxMu sync.Map // convID -> *sync.Mutex
+
+func lockConvSandbox(convID string) func() {
+	m, _ := convSandboxMu.LoadOrStore(convID, &sync.Mutex{})
+	mu := m.(*sync.Mutex)
+	mu.Lock()
+	return mu.Unlock
+}
+
 // pythonExecuteTool — design.md §4.5. Proxies to the configured sandbox
 // service (the single dependency point). When no sandbox is configured it
 // falls back to a safe-mode arithmetic evaluator so dev stays usable.
@@ -348,14 +373,26 @@ func (t *pythonExecuteTool) Execute(ctx context.Context, input []byte, tc *llm.T
 	}
 
 	// Reuse the conversation's persistent session (§4.5) so /workspace files
-	// carry across calls; provision one on first use.
+	// carry across calls; provision one on first use. The get→create→persist is
+	// serialised per conversation: two concurrent python_execute calls in one
+	// turn (the model can emit several tool calls, run via runToolsConcurrent)
+	// would otherwise each see an empty sandbox_id, each NewSession(), and clobber
+	// the other's id — leaking a container until the 30-min reaper.
 	sessionID := ""
-	if tc != nil && tc.DB != nil && tc.ConvID != "" {
+	hasConv := tc != nil && tc.DB != nil && tc.ConvID != ""
+	var unlockConv func()
+	if hasConv {
+		unlockConv = lockConvSandbox(tc.ConvID)
+	}
+	if hasConv {
 		sessionID, _ = store.GetConvProviderStateKey(ctx, tc.DB, tc.ConvID, "sandbox_id")
 	}
 	if sessionID == "" {
 		sid, err := t.sandbox.NewSession(ctx)
 		if err != nil {
+			if unlockConv != nil {
+				unlockConv()
+			}
 			// Reachability/auth problem talking to the sandbox sidecar — surface
 			// it in the server log so it's diagnosable (the model only sees a
 			// generic tool error otherwise).
@@ -365,9 +402,24 @@ func (t *pythonExecuteTool) Execute(ctx context.Context, input []byte, tc *llm.T
 			return "", nil, fmt.Errorf("sandbox session: %w", err)
 		}
 		sessionID = sid
-		if tc != nil && tc.DB != nil && tc.ConvID != "" {
-			_ = store.SetConvProviderStateKey(ctx, tc.DB, tc.ConvID, "sandbox_id", sessionID)
+		if hasConv {
+			if perr := store.SetConvProviderStateKey(ctx, tc.DB, tc.ConvID, "sandbox_id", sessionID); perr != nil {
+				// We created a container but couldn't durably record its id, so the
+				// next call would provision a SECOND session and leak this one until
+				// the 30-min reaper. Release it now and fail fast.
+				_ = t.sandbox.Release(ctx, sessionID)
+				if unlockConv != nil {
+					unlockConv()
+				}
+				if t.logger != nil {
+					t.logger.Printf("python_execute: persist sandbox_id failed, released session: %v", perr)
+				}
+				return "", nil, fmt.Errorf("persist sandbox session: %w", perr)
+			}
 		}
+	}
+	if unlockConv != nil {
+		unlockConv()
 	}
 
 	// Stage the conversation's uploaded data files into /workspace/uploads so
@@ -445,12 +497,24 @@ func (t *pythonExecuteTool) Execute(ctx context.Context, input []byte, tc *llm.T
 					if err != nil {
 						continue
 					}
+					// Sanitise both path components: a skill name / asset filename
+					// containing "/" or ".." must not steer the dest outside
+					// /workspace/skills/<name>/ (the sidecar confines to /workspace
+					// regardless, but keep the path well-formed — defense in depth).
+					skillDir := filepath.Base(sk.Name)
+					if skillDir == "." || skillDir == "/" || skillDir == "" {
+						skillDir = "skill"
+					}
 					for _, a := range assets {
 						data, err := os.ReadFile(a.StoragePath)
 						if err != nil {
 							continue
 						}
-						_ = t.sandbox.PutFile(ctx, sid, "/workspace/skills/"+sk.Name+"/"+a.Filename, data)
+						assetName := filepath.Base(a.Filename)
+						if assetName == "." || assetName == "/" || assetName == "" {
+							assetName = "asset"
+						}
+						_ = t.sandbox.PutFile(ctx, sid, "/workspace/skills/"+skillDir+"/"+assetName, data)
 					}
 				}
 			}
@@ -464,17 +528,39 @@ func (t *pythonExecuteTool) Execute(ctx context.Context, input []byte, tc *llm.T
 		// while we were idle, Exec returns 404. Provision a fresh session,
 		// re-stage uploads + skills, and retry once before bubbling the error.
 		if isSandboxSessionGone(err) {
-			if tc != nil && tc.DB != nil && tc.ConvID != "" {
-				_ = store.SetConvProviderStateKey(ctx, tc.DB, tc.ConvID, "sandbox_id", "")
+			rebuilt := ""
+			if hasConv {
+				// Re-provision under the per-conversation lock so two python_execute
+				// calls that both hit a reaped session don't each NewSession() and
+				// leak one container. Re-read sandbox_id under the lock first: a peer
+				// may have already rebuilt it — adopt that id instead of creating a
+				// second one.
+				relock := lockConvSandbox(tc.ConvID)
+				cur, _ := store.GetConvProviderStateKey(ctx, tc.DB, tc.ConvID, "sandbox_id")
+				if cur != "" && cur != sessionID {
+					rebuilt = cur
+				} else {
+					sid2, sErr := t.sandbox.NewSession(ctx)
+					if sErr != nil {
+						relock()
+						return "", nil, fmt.Errorf("sandbox session (rebuild): %w", sErr)
+					}
+					if perr := store.SetConvProviderStateKey(ctx, tc.DB, tc.ConvID, "sandbox_id", sid2); perr != nil {
+						_ = t.sandbox.Release(ctx, sid2)
+						relock()
+						return "", nil, fmt.Errorf("persist sandbox session (rebuild): %w", perr)
+					}
+					rebuilt = sid2
+				}
+				relock()
+			} else {
+				sid2, sErr := t.sandbox.NewSession(ctx)
+				if sErr != nil {
+					return "", nil, fmt.Errorf("sandbox session (rebuild): %w", sErr)
+				}
+				rebuilt = sid2
 			}
-			sid2, sErr := t.sandbox.NewSession(ctx)
-			if sErr != nil {
-				return "", nil, fmt.Errorf("sandbox session (rebuild): %w", sErr)
-			}
-			sessionID = sid2
-			if tc != nil && tc.DB != nil && tc.ConvID != "" {
-				_ = store.SetConvProviderStateKey(ctx, tc.DB, tc.ConvID, "sandbox_id", sessionID)
-			}
+			sessionID = rebuilt
 			// §4.5 workspace restore: if a prior run archived /workspace, the
 			// sandbox-service auto-restores on session creation. We re-stage
 			// uploads (always cheap) so the new container has user data.

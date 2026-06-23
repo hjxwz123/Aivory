@@ -23,6 +23,7 @@ const OWNED_KEYS = [
   'search_api_key',
   'sandbox_base_url',
   'sandbox_api_key',
+  'sandbox_exec_timeout_sec',
 ] as const
 
 export default function AdminTools() {
@@ -175,6 +176,21 @@ export default function AdminTools() {
                   autoComplete="off"
                   value={readString('sandbox_api_key')}
                   onChange={(e) => setDraft({ ...draft, sandbox_api_key: e.target.value })}
+                />
+              </Field>
+              <Field
+                label={t('admin:settings.fields.sandboxExecTimeout')}
+                htmlFor="sandbox-exec-timeout"
+                hint={t('admin:settings.fields.sandboxExecTimeoutHint')}
+              >
+                <Input
+                  id="sandbox-exec-timeout"
+                  type="number"
+                  min={10}
+                  max={600}
+                  placeholder="120"
+                  value={readString('sandbox_exec_timeout_sec')}
+                  onChange={(e) => setDraft({ ...draft, sandbox_exec_timeout_sec: e.target.value })}
                 />
               </Field>
             </div>

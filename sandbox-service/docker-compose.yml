@@ -88,6 +88,18 @@ services:
       # F2: MANDATORY. The sidecar exposes host Docker control (RCE) and refuses
       # to start without this. Generate with: openssl rand -hex 24
       SANDBOX_API_KEY: ${SANDBOX_API_KEY:?set SANDBOX_API_KEY (openssl rand -hex 24); the sandbox refuses to start without it}
+    # Liveness probe via urllib (no curl/wget in the image); non-2xx raises ->
+    # unhealthy. start_period covers SANDBOX_PULL_ON_START on a cold boot.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    # Bound the control-plane container itself; mem_limit must exceed the in-memory
+    # archive buffer (SANDBOX_MAX_ARCHIVE_BYTES, default 200 MiB) + storage bodies.
+    mem_limit: 1g
+    pids_limit: 512
     volumes:
       # The sidecar needs the host daemon to spawn sibling session containers.
       # See the SECURITY NOTE above: prefer a docker-socket-proxy over the raw

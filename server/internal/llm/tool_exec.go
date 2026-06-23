@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sync"
 )
 
@@ -42,6 +43,18 @@ func runToolsConcurrent(ctx context.Context, runner ToolRunner, calls []toolCall
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
+			// A panic inside a tool's Execute (e.g. a nil deref while parsing an
+			// adversary-influenced sandbox/tool response) unwinds out of THIS child
+			// goroutine. The request-scoped recoverMiddleware can't catch it — a
+			// recover() only fires for panics in the goroutine that deferred it — so
+			// an unrecovered panic here would crash the whole API process and abort
+			// every other in-flight generation. Contain it and surface it as a tool
+			// error so the turn degrades instead of taking the server down.
+			defer func() {
+				if r := recover(); r != nil {
+					results[i] = toolCallResult{Err: fmt.Errorf("tool %q panicked: %v", c.Name, r)}
+				}
+			}()
 			out, cites, err := runner.Run(ctx, c.Name, c.Input)
 			results[i] = toolCallResult{Output: out, Citations: cites, Err: err}
 		}(i, c)

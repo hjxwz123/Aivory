@@ -104,6 +104,11 @@ type Service interface {
 	// Release tears down a session deliberately (the user closed the
 	// conversation, or compaction archived its workspace). Idempotent.
 	Release(ctx context.Context, sessionID string) error
+	// PruneArchives deletes archived workspace tarballs older than maxAge from
+	// the configured object store, returning how many were removed. A no-op
+	// returning (0, nil) when no storage backend is configured or maxAge<=0 —
+	// archived workspaces otherwise accumulate one-per-session forever (§4.5).
+	PruneArchives(ctx context.Context, maxAge time.Duration) (int, error)
 }
 
 // HTTPSandbox talks to an external runner over the tiny JSON protocol above.
@@ -116,29 +121,67 @@ type HTTPSandbox struct {
 	// in the admin UI applies on the very next /sessions request without
 	// restarting the sidecar.
 	Storage *StorageConfig
-	client  *http.Client
+	// ExecTimeout is the per-exec wall-clock cap forwarded to the sidecar
+	// (timeout_ms). The HTTP client timeout is derived from it (+overhead) so a
+	// long-but-valid run can't trip "context deadline exceeded" before the
+	// sidecar answers. 0 → defaultExecTimeout.
+	ExecTimeout time.Duration
+	client      *http.Client
+}
+
+const (
+	// defaultExecTimeout is the per-exec cap when the admin hasn't set one.
+	defaultExecTimeout = 120 * time.Second
+	// maxSandboxRespBytes caps the decoded sidecar response so a buggy/compromised
+	// sidecar can't OOM the API process. Generous: > the 50MB artifact total.
+	maxSandboxRespBytes = 256 << 20
+	// execClientOverhead is added on top of the exec cap to size the HTTP
+	// client timeout: the sidecar still has to write the cell, snapshot, kill a
+	// runaway, and base64 any output files AFTER the code's own deadline. The
+	// sidecar now BOUNDS artifact collection (SANDBOX_MAX_COLLECT_SECONDS, default
+	// 60s) so its post-deadline work is a known quantity; this 120s comfortably
+	// covers that budget plus the fixed control calls, so the client outlasts the
+	// sidecar's worst-case single-exec time instead of cutting it off mid-collection.
+	execClientOverhead = 120 * time.Second
+)
+
+// Options configures an HTTPSandbox. The settings-wrapped backend
+// (internal/tools/sandbox_settings.go) fills these from admin settings on every
+// call, so URL / key / storage / exec timeout all follow the admin UI live.
+type Options struct {
+	BaseURL     string
+	APIKey      string
+	Storage     *StorageConfig
+	ExecTimeout time.Duration // 0 → defaultExecTimeout
+}
+
+// NewWithOptions builds a sandbox Service, sizing the HTTP client timeout to the
+// exec cap + overhead so the client never deadlines before the sidecar.
+func NewWithOptions(o Options) Service {
+	exec := o.ExecTimeout
+	if exec <= 0 {
+		exec = defaultExecTimeout
+	}
+	return &HTTPSandbox{
+		BaseURL:     strings.TrimRight(o.BaseURL, "/"),
+		APIKey:      o.APIKey,
+		Storage:     o.Storage,
+		ExecTimeout: exec,
+		client:      &http.Client{Timeout: exec + execClientOverhead},
+	}
 }
 
 // New returns a Service. When baseURL is empty the returned service reports
 // Enabled()=false and all calls error, so callers fall back to safe-mode.
 func New(baseURL, apiKey string) Service {
-	return &HTTPSandbox{
-		BaseURL: strings.TrimRight(baseURL, "/"),
-		APIKey:  apiKey,
-		client:  &http.Client{Timeout: 150 * time.Second}, // > 120s exec ceiling
-	}
+	return NewWithOptions(Options{BaseURL: baseURL, APIKey: apiKey})
 }
 
 // NewWithStorage is identical to New but also carries the admin-configured
 // archive/restore bucket. Used by the settings-wrapped backend so storage
 // follows the admin UI live.
 func NewWithStorage(baseURL, apiKey string, storage *StorageConfig) Service {
-	return &HTTPSandbox{
-		BaseURL: strings.TrimRight(baseURL, "/"),
-		APIKey:  apiKey,
-		Storage: storage,
-		client:  &http.Client{Timeout: 150 * time.Second},
-	}
+	return NewWithOptions(Options{BaseURL: baseURL, APIKey: apiKey, Storage: storage})
 }
 
 // Enabled reports whether a backend URL is configured.
@@ -167,13 +210,16 @@ func (s *HTTPSandbox) doMethod(ctx context.Context, method, path string, payload
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
-		b, _ := io.ReadAll(resp.Body)
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10)) // error bodies are small; cap anyway
 		return fmt.Errorf("sandbox %d: %s", resp.StatusCode, string(b))
 	}
 	if out == nil {
 		return nil
 	}
-	return json.NewDecoder(resp.Body).Decode(out)
+	// Cap the decoded body: the largest legit response is an Exec/GetFile with
+	// base64 artifacts (≤50MB total → ~67MB base64), so 256MB is generous while
+	// still preventing a buggy/compromised sidecar from OOMing the API process.
+	return json.NewDecoder(io.LimitReader(resp.Body, maxSandboxRespBytes)).Decode(out)
 }
 
 // NewSession provisions a fresh sandbox session.
@@ -216,8 +262,12 @@ func (s *HTTPSandbox) Exec(ctx context.Context, sessionID, code string) (*Result
 			DataBase64 string `json:"data_base64"`
 		} `json:"files"`
 	}
-	// §4.5 安全基线: 单次执行超时 120s。
-	payload := map[string]any{"session_id": sessionID, "code": code, "timeout_ms": 120000}
+	// §4.5 安全基线: 单次执行超时 = 管理员配置(默认 120s),由 sidecar 再按其硬上限钳制。
+	timeoutMs := int(defaultExecTimeout.Milliseconds())
+	if s.ExecTimeout > 0 {
+		timeoutMs = int(s.ExecTimeout.Milliseconds())
+	}
+	payload := map[string]any{"session_id": sessionID, "code": code, "timeout_ms": timeoutMs}
 	if err := s.do(ctx, "/exec", payload, &res); err != nil {
 		return nil, err
 	}
@@ -279,4 +329,25 @@ func (s *HTTPSandbox) Release(ctx context.Context, sessionID string) error {
 		payload["storage"] = s.Storage
 	}
 	return s.doMethod(ctx, "DELETE", "/sessions/"+sessionID, payload, nil)
+}
+
+// PruneArchives asks the sidecar to delete archived workspaces older than
+// maxAge. No-op when no object store is configured (nothing is ever archived)
+// or maxAge<=0 (the admin disabled the sweep).
+func (s *HTTPSandbox) PruneArchives(ctx context.Context, maxAge time.Duration) (int, error) {
+	if s.Storage == nil || !s.Storage.Effective() {
+		return 0, nil
+	}
+	secs := int(maxAge.Seconds())
+	if secs <= 0 {
+		return 0, nil
+	}
+	payload := map[string]any{"storage": s.Storage, "max_age_seconds": secs}
+	var res struct {
+		Deleted int `json:"deleted"`
+	}
+	if err := s.do(ctx, "/storage/gc", payload, &res); err != nil {
+		return 0, err
+	}
+	return res.Deleted, nil
 }

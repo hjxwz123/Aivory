@@ -37,16 +37,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && fc-cache -f
 
 # --- Python packages -------------------------------------------------------
-# Common data-science + document-generation set (§4.5). Kept to a "batteries
-# included but not 2GB" selection; add heavyweight extras (playwright/chromium,
-# LibreOffice) by uncommenting the blocks at the bottom of this file.
-RUN pip install --upgrade pip && pip install \
-        numpy pandas scipy scikit-learn statsmodels \
-        matplotlib seaborn plotly kaleido \
-        pillow sympy networkx \
-        openpyxl xlsxwriter xlrd pypdf \
-        python-pptx python-docx reportlab weasyprint \
-        tabulate requests lxml beautifulsoup4 markdown jinja2 pyyaml
+# Common data-science + document-generation set (§4.5), VERSION-PINNED for
+# reproducibility + supply-chain safety (see runner-requirements.txt). Kept to a
+# "batteries included but not 2GB" selection; add heavyweight extras
+# (playwright/chromium, LibreOffice) by uncommenting the blocks at the bottom.
+COPY runner-requirements.txt /tmp/runner-requirements.txt
+RUN pip install --upgrade pip \
+    && pip install -r /tmp/runner-requirements.txt \
+    && rm -f /tmp/runner-requirements.txt
 
 # --- Non-root user + workspace --------------------------------------------
 RUN useradd --create-home --uid 1000 sandbox \

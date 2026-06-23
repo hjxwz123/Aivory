@@ -10,11 +10,14 @@ package main
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"errors"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -109,6 +112,40 @@ func main() {
 		logger.Printf("sandbox: disabled (set SANDBOX_BASE_URL; python_execute runs in safe-mode)")
 	}
 
+	// §4.5 archived-workspace GC: the sidecar drops one /workspace tarball into
+	// object storage per reaped session and never removes it, so the bucket grows
+	// without bound. Sweep every 6h and delete archives older than the
+	// admin-configured TTL (settings.storage_archive_ttl_days; 0/blank = off).
+	go func() {
+		time.Sleep(2 * time.Minute) // let boot settle; don't sweep on cold start
+		// One sweep, with its own recover() so a panic (e.g. a nil deref reached via
+		// a malformed settings value or a garbage sidecar response) is contained to
+		// this iteration instead of unwinding out of the goroutine and crashing the
+		// whole API process — and so the GC loop survives to run again.
+		runPrune := func() {
+			defer func() {
+				if r := recover(); r != nil {
+					logger.Printf("archive GC: recovered from panic: %v", r)
+				}
+			}()
+			if days := archiveTTLDays(db); days > 0 {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+				defer cancel()
+				deleted, err := toolRegistry.Sandbox().PruneArchives(ctx, time.Duration(days)*24*time.Hour)
+				switch {
+				case err != nil:
+					logger.Printf("archive GC: prune failed: %v", err)
+				case deleted > 0:
+					logger.Printf("archive GC: removed %d stale workspace archive(s) older than %dd", deleted, days)
+				}
+			}
+		}
+		for {
+			runPrune()
+			time.Sleep(6 * time.Hour)
+		}
+	}()
+
 	// Re-enqueue any document ingest left half-done by a previous shutdown — the
 	// queue is in-memory, so without this a doc can be stuck "indexing…" forever.
 	go ragSvc.RequeueIncomplete(context.Background())
@@ -182,6 +219,28 @@ func redactURL(raw string) string {
 		user = creds[:c]
 	}
 	return scheme + user + ":***@" + host
+}
+
+// archiveTTLDays reads settings.storage_archive_ttl_days — the age after which
+// an archived workspace tarball is GC'd. Accepts a JSON number or the string the
+// admin text input saves ("30"). Returns 0 (disabled) when unset/blank/invalid
+// or negative, so a fat-fingered value can never trigger a mass delete.
+func archiveTTLDays(db *sql.DB) int {
+	raw, err := store.GetSetting(db, "storage_archive_ttl_days")
+	if err != nil {
+		return 0
+	}
+	days := 0
+	if json.Unmarshal(raw, &days) != nil {
+		var s string
+		if json.Unmarshal(raw, &s) == nil {
+			days, _ = strconv.Atoi(strings.TrimSpace(s))
+		}
+	}
+	if days < 0 {
+		return 0
+	}
+	return days
 }
 
 // driverName names the relational backend for a startup log line.
