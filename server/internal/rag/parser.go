@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -69,16 +70,17 @@ func parseDocument(
 	docPath, mime, filename string,
 	mineruURL, mineruToken string,
 	sb *storage.Client,
-) (string, error) {
+	logger *log.Logger,
+) (content string, extracted bool, err error) {
 	if docPath == "" {
-		return "", nil
+		return "", true, nil
 	}
 	if isProbablyText(mime, docPath, filename) {
 		b, err := os.ReadFile(docPath)
 		if err != nil {
-			return "", err
+			return "", false, err
 		}
-		return string(b), nil
+		return string(b), true, nil
 	}
 
 	// Binary formats. Project rule: PDF / DOC(X) / PPT(X) are parsed LOCALLY
@@ -88,13 +90,29 @@ func parseDocument(
 	// still completes. CSV/XLS(X) never reach here — runPipeline short-circuits
 	// spreadsheets to the code sandbox instead of parsing/embedding.
 	ext := docExt(filename, docPath)
+	// MinerU OCR needs BOTH the API creds AND object storage + the sandbox
+	// sidecar (it fetches the file via a presigned bucket URL). Missing any of
+	// these is the usual reason a scanned doc comes back empty — surface it.
 	mineruReady := mineruURL != "" && mineruToken != "" && sb.Enabled()
+	var mineruErr error // last MinerU failure reason, for the diagnostic placeholder + logs
+	logf := func(format string, args ...any) {
+		if logger != nil {
+			logger.Printf(format, args...)
+		}
+	}
 	tryMineru := func() (string, bool) {
 		if !mineruReady {
 			return "", false
 		}
 		md, err := runMinerUMarkdown(ctx, docPath, filename, mime, mineruURL, mineruToken, sb)
-		if err != nil || strings.TrimSpace(md) == "" {
+		if err != nil {
+			mineruErr = err
+			logf("rag: MinerU parse failed for %q: %v", filename, err)
+			return "", false
+		}
+		if strings.TrimSpace(md) == "" {
+			mineruErr = fmt.Errorf("MinerU returned empty content")
+			logf("rag: MinerU returned empty content for %q", filename)
 			return "", false
 		}
 		return md, true
@@ -104,30 +122,33 @@ func parseDocument(
 	case "docx", "pptx":
 		text, hasImages, ok := extractOfficeXML(docPath, ext)
 		if ok && !hasImages {
-			return text, nil // pure-text office doc → local
+			return text, true, nil // pure-text office doc → local
 		}
 		if md, done := tryMineru(); done {
-			return md, nil // image-bearing → MinerU OCR/figure captions
+			return md, true, nil // image-bearing → MinerU OCR/figure captions
 		}
 		if ok && strings.TrimSpace(text) != "" {
-			return text, nil // degraded: MinerU unavailable, keep local text
+			return text, true, nil // degraded: MinerU unavailable, keep local text
 		}
 	case "pdf":
 		text, hasImages, ok := extractPDFText(docPath)
 		scanned := !ok || strings.TrimSpace(text) == ""
 		if ok && !scanned && !hasImages {
-			return text, nil // text-native, no figures → local
+			return text, true, nil // text-native, no figures → local
+		}
+		if scanned {
+			logf("rag: %q is a scanned/text-less PDF — routing to MinerU OCR (configured=%v)", filename, mineruReady)
 		}
 		if md, done := tryMineru(); done {
-			return md, nil // scanned or image-bearing → MinerU
+			return md, true, nil // scanned or image-bearing → MinerU
 		}
 		if ok && !scanned {
-			return text, nil // degraded: MinerU unavailable, keep local text
+			return text, true, nil // degraded: MinerU unavailable, keep local text
 		}
 	default:
 		// Images, legacy .doc/.ppt, .html, etc. — OCR/conversion territory.
 		if md, done := tryMineru(); done {
-			return md, nil
+			return md, true, nil
 		}
 	}
 
@@ -136,7 +157,19 @@ func parseDocument(
 	if info != nil {
 		size = info.Size()
 	}
-	return filepath.Base(docPath) + " — binary document, " + formatBytes(size) + " (configure MinerU + object storage in admin settings to extract content, or analyse spreadsheets in the code sandbox).", nil
+	// Couldn't extract text (e.g. a scan with no text layer). Spell out WHY so it
+	// shows in the doc content + admin page instead of a silent "no text".
+	var reason string
+	switch {
+	case !mineruReady:
+		reason = "It looks scanned/image-only, which needs MinerU OCR — but MinerU isn't fully configured. Set mineru_api_url + mineru_api_token AND object storage (S3/OSS) + the sandbox sidecar in admin settings, then re-upload."
+	case mineruErr != nil:
+		reason = "MinerU OCR was attempted but failed: " + mineruErr.Error() + ". Check the MinerU API token/quota and that object storage is reachable, then re-upload."
+	default:
+		reason = "No extractable text was found."
+	}
+	logf("rag: no text extracted from %q (%s): %s", filename, ext, reason)
+	return filepath.Base(docPath) + " — could not extract text (" + formatBytes(size) + "). " + reason, false, nil
 }
 
 // runMinerUMarkdown runs the cloud OCR pipeline and assembles the markdown body
@@ -319,7 +352,11 @@ func minerUExtractViaCloud(
 	if mime == "" {
 		mime = "application/octet-stream"
 	}
-	put, err := sb.Put(ctx, key, body, mime, 0)
+	// Presigned URL must stay valid for the WHOLE OCR window: MinerU queues the
+	// task and fetches the file some time after submit, and we poll up to 20 min.
+	// A short sidecar default could expire mid-processing → MinerU fetch fails →
+	// silent empty result. Ask for a TTL that comfortably covers it.
+	put, err := sb.Put(ctx, key, body, mime, mineruSourceTTLSeconds)
 	if err != nil {
 		return nil, fmt.Errorf("mineru: upload: %w", err)
 	}
@@ -635,6 +672,12 @@ func zipNameIsSafe(name string) bool {
 // request context keeps individual round-trips honest while the larger
 // poll-loop ceiling is enforced in minerUPollTask.
 var mineruClient = &http.Client{Timeout: 5 * time.Minute}
+
+// mineruSourceTTLSeconds is the presigned-URL lifetime for the document we hand
+// MinerU. It must outlast the full OCR window (poll cap 20 min + MinerU queue
+// time); 1 hour gives generous head-room without leaving objects around long
+// (they're also explicitly deleted right after the parse).
+const mineruSourceTTLSeconds = 60 * 60
 
 func guessImageMime(name string) string {
 	switch strings.ToLower(filepath.Ext(name)) {

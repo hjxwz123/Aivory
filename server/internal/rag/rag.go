@@ -127,8 +127,11 @@ func (s *Service) RequeueIncomplete(ctx context.Context) {
 func (s *Service) Ingest(docID string) {
 	s.queue.Enqueue("rag.ingest", func(ctx context.Context) error {
 		var err error
+		// Cache the parsed content across retries so a transient embed/DB failure
+		// re-runs only the cheap embed step — never the paid MinerU OCR again.
+		cache := &parseCache{}
 		for attempt := 1; attempt <= 3; attempt++ {
-			if err = s.runPipeline(ctx, docID); err == nil {
+			if err = s.runPipeline(ctx, docID, cache); err == nil {
 				return nil
 			}
 			s.logger.Printf("rag: ingest %s attempt %d/3 failed: %v", docID, attempt, err)
@@ -160,7 +163,14 @@ func sanitizeIngestText(s string) string {
 	return strings.ToValidUTF8(s, "")
 }
 
-func (s *Service) runPipeline(ctx context.Context, docID string) error {
+// parseCache memoises a document's parsed content across pipeline retry
+// attempts so a later-stage (embed/DB) failure never re-runs paid MinerU OCR.
+type parseCache struct {
+	ok      bool
+	content string
+}
+
+func (s *Service) runPipeline(ctx context.Context, docID string, cache *parseCache) error {
 	d, err := store.GetDocument(ctx, s.db, docID)
 	if err != nil {
 		return err
@@ -198,15 +208,39 @@ func (s *Service) runPipeline(ctx context.Context, docID string) error {
 
 	// Parse: text docs + text-native PDF/DOC(X)/PPT(X) locally; only scanned or
 	// image-bearing documents go to MinerU OCR (§4.11-C). parseDocument makes the
-	// per-document call from the file's content.
-	content, err := parseDocument(ctx, d.StoragePath, d.MimeType, d.Filename, mineruURL, mineruKey, storageClient)
-	if err != nil {
-		return err
+	// per-document call from the file's content. Reuse the cached parse on a retry
+	// so we never pay for MinerU OCR twice.
+	var content string
+	if cache != nil && cache.ok {
+		content = cache.content
+	} else {
+		raw, extracted, perr := parseDocument(ctx, d.StoragePath, d.MimeType, d.Filename, mineruURL, mineruKey, storageClient, s.logger)
+		if perr != nil {
+			return perr
+		}
+		// Strip NUL / invalid UTF-8 at the source: parsed binary docs (docx/pdf/ppt)
+		// carry bytes Postgres TEXT columns reject (SQLSTATE 22021). This guarantees
+		// every downstream write (chunks, parents) is clean regardless of insert path.
+		content = sanitizeIngestText(raw)
+
+		// A KB upload whose text couldn't be extracted (e.g. a scan with MinerU
+		// unavailable) must NOT be embedded — a junk placeholder vector silently
+		// pollutes search. Fail it loudly with the reason instead, and return nil
+		// so it isn't retried (re-running MinerU/parse would just fail again).
+		if !extracted && d.KBID != "" {
+			reason := strings.TrimSpace(content)
+			if len(reason) > 500 {
+				reason = reason[:500]
+			}
+			return store.UpdateDocumentStatus(ctx, s.db, docID, "failed", reason, 0)
+		}
+		// Only cache real extractions — a placeholder isn't worth reusing, and
+		// caching it would skip a (cheap) re-parse that might succeed next time.
+		if cache != nil && extracted {
+			cache.ok = true
+			cache.content = content
+		}
 	}
-	// Strip NUL / invalid UTF-8 at the source: parsed binary docs (docx/pdf/ppt)
-	// carry bytes Postgres TEXT columns reject (SQLSTATE 22021). This guarantees
-	// every downstream write (chunks, parents) is clean regardless of insert path.
-	content = sanitizeIngestText(content)
 
 	// Chunk hierarchically (§4.11-C-2 small-to-big): parents carry section
 	// context (not embedded), children carry the vectors. The new chunker also
