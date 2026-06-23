@@ -1,14 +1,98 @@
 /**
- * AdminLayout — sidebar-style nav rail along the left for the six admin
- * surfaces. Gates access to admins only. Mobile uses a sheet-based nav.
+ * AdminLayout — flat left rail of merged admin sections. Related pages are
+ * consolidated under one rail entry; a secondary tab bar at the top of the
+ * content area switches between the sibling pages. Every page/route/config is
+ * unchanged — this only groups how they're reached. Gates access to admins only.
  */
 import { useEffect, useState } from 'react'
 import { NavLink, Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { ArrowLeft, BarChart3, Boxes, Cpu, DatabaseBackup, FileText, GaugeCircle, KeyRound, Layers, Megaphone, Menu, Mic, Settings2, ShieldAlert, Sparkles, Ticket, Users, Wrench } from 'lucide-react'
+import { ArrowLeft, BarChart3, Cpu, Menu, Settings2, Sparkles, Users } from 'lucide-react'
 import { useAuth } from '@/store/auth'
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet'
+import { RouteFade } from '@/components/ui/route-fade'
 import { cn } from '@/lib/utils'
+
+interface AdminTab {
+  to: string
+  labelKey: string
+  /** Extra path prefixes that still belong to this tab (drill-down routes). */
+  also?: string[]
+}
+interface AdminSection {
+  key: string
+  icon: typeof Cpu
+  /** Where the rail entry navigates (the section's first tab). */
+  to: string
+  tabs: AdminTab[]
+}
+
+// Merged sections (flat rail). Each groups similar pages; the rail shows one
+// entry per section, and the section's pages appear as tabs in the content area.
+const SECTIONS: AdminSection[] = [
+  {
+    key: 'models',
+    icon: Cpu,
+    to: '/admin/channels',
+    tabs: [
+      { to: '/admin/channels', labelKey: 'admin:channels.title' },
+      { to: '/admin/models', labelKey: 'admin:models.title', also: ['/admin/model-tags'] },
+    ],
+  },
+  {
+    key: 'capabilities',
+    icon: Sparkles,
+    to: '/admin/skills',
+    tabs: [
+      { to: '/admin/skills', labelKey: 'admin:skills.title' },
+      { to: '/admin/tools', labelKey: 'admin:tools.title' },
+      { to: '/admin/documents', labelKey: 'admin:documents.title' },
+      { to: '/admin/audio', labelKey: 'admin:audio.title' },
+    ],
+  },
+  {
+    key: 'users',
+    icon: Users,
+    to: '/admin/users',
+    tabs: [
+      { to: '/admin/users', labelKey: 'admin:users.title' },
+      { to: '/admin/user-groups', labelKey: 'admin:groups.title' },
+      { to: '/admin/redeem-codes', labelKey: 'admin:redeemCodes.title' },
+    ],
+  },
+  {
+    key: 'data',
+    icon: BarChart3,
+    to: '/admin/usage',
+    tabs: [
+      { to: '/admin/usage', labelKey: 'admin:usage.title' },
+      { to: '/admin/analytics', labelKey: 'admin:analytics.title' },
+    ],
+  },
+  {
+    key: 'system',
+    icon: Settings2,
+    to: '/admin/settings',
+    tabs: [
+      { to: '/admin/settings', labelKey: 'admin:settings.title' },
+      { to: '/admin/backup', labelKey: 'admin:backup.title' },
+      { to: '/admin/oauth', labelKey: 'admin:oauth.title' },
+      { to: '/admin/moderation', labelKey: 'admin:moderation.title' },
+      { to: '/admin/announcement', labelKey: 'admin:announcement.title' },
+    ],
+  },
+]
+
+// True when `path` is `to` exactly or a drill-down under it (`to/...`).
+function underPath(path: string, to: string): boolean {
+  return path === to || path.startsWith(to + '/')
+}
+function tabActive(path: string, tab: AdminTab): boolean {
+  return underPath(path, tab.to) || (tab.also ?? []).some((p) => underPath(path, p))
+}
+function sectionActive(path: string, section: AdminSection): boolean {
+  return section.tabs.some((tab) => tabActive(path, tab))
+}
 
 export default function AdminLayout() {
   const navigate = useNavigate()
@@ -35,53 +119,57 @@ export default function AdminLayout() {
     return null
   }
 
-  const items = [
-    { to: '/admin/channels', icon: Boxes, label: t('admin:channels.title') },
-    { to: '/admin/models', icon: Cpu, label: t('admin:models.title') },
-    { to: '/admin/skills', icon: Sparkles, label: t('admin:skills.title') },
-    { to: '/admin/documents', icon: FileText, label: t('admin:documents.title') },
-    { to: '/admin/tools', icon: Wrench, label: t('admin:tools.title') },
-    { to: '/admin/audio', icon: Mic, label: t('admin:audio.title') },
-    { to: '/admin/oauth', icon: KeyRound, label: t('admin:oauth.title') },
-    { to: '/admin/users', icon: Users, label: t('admin:users.title') },
-    { to: '/admin/user-groups', icon: Layers, label: t('admin:groups.title') },
-    { to: '/admin/redeem-codes', icon: Ticket, label: t('admin:redeemCodes.title') },
-    { to: '/admin/usage', icon: GaugeCircle, label: t('admin:usage.title') },
-    { to: '/admin/analytics', icon: BarChart3, label: t('admin:analytics.title') },
-    { to: '/admin/moderation', icon: ShieldAlert, label: t('admin:moderation.title') },
-    { to: '/admin/announcement', icon: Megaphone, label: t('admin:announcement.title') },
-    { to: '/admin/settings', icon: Settings2, label: t('admin:settings.title') },
-    { to: '/admin/backup', icon: DatabaseBackup, label: t('admin:backup.title') },
-  ]
-
-  // §react-router: when end is true, /admin/users only highlights on the
-  // exact path — drill-down routes like /admin/users/:id/conversations would
-  // visually orphan. Match by prefix so nested admin surfaces keep their
-  // parent tab lit.
-  function isItemActive(to: string): boolean {
-    return location.pathname === to || location.pathname.startsWith(to + '/')
-  }
+  const path = location.pathname
+  const currentSection = SECTIONS.find((s) => sectionActive(path, s))
 
   function NavItems() {
     return (
       <>
-        {items.map((it) => (
-          <NavLink
-            key={it.to}
-            to={it.to}
-            end={it.to !== '/admin/users'}
-            className={cn(
-              'flex items-center gap-2.5 h-9 px-3 rounded-[8px] text-[13px] interactive',
-              isItemActive(it.to)
-                ? 'bg-[var(--color-surface)] text-[var(--color-fg)] font-medium'
-                : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
-            )}
-          >
-            <it.icon size={14} aria-hidden />
-            {it.label}
-          </NavLink>
-        ))}
+        {SECTIONS.map((s) => {
+          const active = sectionActive(path, s)
+          return (
+            <NavLink
+              key={s.key}
+              to={s.to}
+              className={cn(
+                'flex items-center gap-2.5 h-9 px-3 rounded-[8px] text-[13px] interactive',
+                active
+                  ? 'bg-[var(--color-surface)] text-[var(--color-fg)] font-medium'
+                  : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
+              )}
+            >
+              <s.icon size={14} aria-hidden />
+              {t('admin:menu.' + s.key)}
+            </NavLink>
+          )
+        })}
       </>
+    )
+  }
+
+  // Secondary tab bar for the active section (only when it has >1 page).
+  function SectionTabs() {
+    if (!currentSection || currentSection.tabs.length < 2) return null
+    return (
+      <div className="mb-6 flex flex-wrap gap-1 border-b border-[var(--color-divider)]">
+        {currentSection.tabs.map((tab) => {
+          const active = tabActive(path, tab)
+          return (
+            <NavLink
+              key={tab.to}
+              to={tab.to}
+              className={cn(
+                '-mb-px inline-flex items-center h-9 px-3.5 text-[13px] border-b-2 interactive',
+                active
+                  ? 'border-[var(--color-accent)] text-[var(--color-fg)] font-medium'
+                  : 'border-transparent text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]',
+              )}
+            >
+              {t(tab.labelKey)}
+            </NavLink>
+          )
+        })}
+      </div>
     )
   }
 
@@ -98,7 +186,7 @@ export default function AdminLayout() {
           {t('admin:backToChat')}
         </button>
         <h2 className="px-5 pt-2 font-serif text-[15px] text-[var(--color-fg)]">{t('admin:title')}</h2>
-        <nav className="mt-4 flex-1 px-3">
+        <nav className="mt-4 flex-1 px-3 flex flex-col gap-0.5">
           <NavItems />
         </nav>
       </aside>
@@ -127,7 +215,7 @@ export default function AdminLayout() {
                   {t('admin:backToChat')}
                 </button>
                 <h2 className="px-5 pt-2 font-serif text-[15px] text-[var(--color-fg)]">{t('admin:title')}</h2>
-                <nav className="mt-4 flex-1 px-3">
+                <nav className="mt-4 flex-1 px-3 flex flex-col gap-0.5">
                   <NavItems />
                 </nav>
               </div>
@@ -137,7 +225,10 @@ export default function AdminLayout() {
         </div>
 
         <div className="mx-auto w-full max-w-[68rem] px-5 sm:px-8 lg:px-12 py-8 sm:py-12">
-          <Outlet />
+          <SectionTabs />
+          <RouteFade dep={path}>
+            <Outlet />
+          </RouteFade>
         </div>
       </main>
     </div>

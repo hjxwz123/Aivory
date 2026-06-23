@@ -697,5 +697,12 @@
     "empty": "尚無標籤，請在上方新增。",
     "emptyHint": "尚無標籤——請到「模型標籤」頁面建立。",
     "manage": "管理標籤"
+  },
+  "menu": {
+    "models": "模型",
+    "capabilities": "能力",
+    "users": "使用者",
+    "data": "資料",
+    "system": "系統"
   }
 }

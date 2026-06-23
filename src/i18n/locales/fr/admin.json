@@ -697,5 +697,12 @@
     "empty": "Aucune étiquette pour l'instant. Ajoutez-en une ci-dessus.",
     "emptyHint": "Aucune étiquette — créez-en sur la page Étiquettes de modèle.",
     "manage": "Gérer les étiquettes"
+  },
+  "menu": {
+    "models": "Modèles",
+    "capabilities": "Capacités",
+    "users": "Utilisateurs",
+    "data": "Analyses",
+    "system": "Système"
   }
 }

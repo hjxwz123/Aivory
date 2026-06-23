@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { Outlet } from 'react-router-dom'
+import { Outlet, useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { PanelLeftOpen, Menu } from 'lucide-react'
 import { Sidebar } from '@/components/sidebar/sidebar'
@@ -14,6 +14,7 @@ import { useTheme } from '@/store/theme'
 import { Tooltip } from '@/components/ui/tooltip'
 import { useHotkeys } from '@/hooks/use-hotkeys'
 import { Logo } from '@/components/brand/logo'
+import { RouteFade } from '@/components/ui/route-fade'
 import { cn } from '@/lib/utils'
 
 export default function ChatLayout() {
@@ -24,6 +25,14 @@ export default function ChatLayout() {
   const drawerOpen = useUI((s) => s.navOpen)
   const setDrawerOpen = useUI((s) => s.setNavOpen)
   const pageOwnsTopBar = useUI((s) => s.pageOwnsTopBar)
+  // Coarse section key for page transitions: collapse param routes (e.g.
+  // /chat/:id, /projects/:id, /settings/*) to their first segment so switching
+  // conversations within a section doesn't re-fade — only section-to-section
+  // navigation (the abrupt jumps) animates.
+  const { pathname } = useLocation()
+  // Home ('/') and the chat thread ('/chat', '/chat/:id') are one section so
+  // creating a conversation (/ → /chat/:id) doesn't flash a transition.
+  const section = pathname === '/' || pathname.startsWith('/chat') ? 'chat' : pathname.split('/')[1] || 'chat'
 
   useEffect(() => syncSystem(), [syncSystem])
 
@@ -88,14 +97,15 @@ export default function ChatLayout() {
           {/* Page content. When the sidebar is collapsed on desktop, reserve
               a 44px gutter on the left so the floating expand toggle never
               sits on top of titles, breadcrumbs, or topbar content. */}
-          <div
+          <RouteFade
+            dep={section}
             className={cn(
               'flex-1 min-h-0 flex flex-col',
               isDesktop && collapsed && 'pl-11',
             )}
           >
             <Outlet />
-          </div>
+          </RouteFade>
         </div>
 
         {/* Right-edge drawers — mutually exclusive (see store coordination). */}

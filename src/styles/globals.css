@@ -289,6 +289,17 @@
   to   { opacity: 1; transform: translateY(0); }
 }
 
+/* Route/page transition (RouteFade) — a gentle fade-up on navigation. No fill
+   mode so no transform lingers after it ends (avoids a stray containing block).
+   The global prefers-reduced-motion rule zeroes it. */
+@keyframes page-enter {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.page-enter {
+  animation: page-enter var(--duration-base) var(--ease-out);
+}
+
 /* Inline split-panel enter (HTML preview drawer on desktop). Width appears
    with the flex re-layout; the content glides in instead of jump-cutting. */
 @keyframes panel-in {

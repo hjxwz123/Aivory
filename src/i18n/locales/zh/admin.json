@@ -697,5 +697,12 @@
     "empty": "还没有标签，请在上方添加。",
     "emptyHint": "还没有标签——请到「模型标签」页面创建。",
     "manage": "管理标签"
+  },
+  "menu": {
+    "models": "模型",
+    "capabilities": "能力",
+    "users": "用户",
+    "data": "数据",
+    "system": "系统"
   }
 }

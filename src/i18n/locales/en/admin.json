@@ -697,5 +697,12 @@
     "empty": "No tags yet. Add one above.",
     "emptyHint": "No tags yet — create them on the Model Tags page.",
     "manage": "Manage tags"
+  },
+  "menu": {
+    "models": "Models",
+    "capabilities": "Capabilities",
+    "users": "Users",
+    "data": "Analytics",
+    "system": "System"
   }
 }
