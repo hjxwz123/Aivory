@@ -29,6 +29,7 @@ import type {
   ApiShareInfo,
   ApiSharedConversation,
   ApiSkill,
+  ApiSkillAsset,
   ApiUsageReportRow,
   ApiUser,
 } from './types'
@@ -385,6 +386,13 @@ export const adminApi = {
   updateSkill: (id: string, body: Partial<ApiSkill>) =>
     api<ApiSkill>(`/admin/skills/${encodeURIComponent(id)}`, { method: 'PATCH', body }),
   removeSkill: (id: string) => api<{ ok: true }>(`/admin/skills/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  // Upload one skill asset (template/script/data). Returns the descriptor to push
+  // into the skill's `assets` array; storage_path is server-controlled (§4.17).
+  uploadSkillAsset: (file: File) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    return api<ApiSkillAsset>('/admin/skills/assets', { method: 'POST', body: fd })
+  },
 
   // OAuth / social login providers. client_secret is write-only — send it on
   // create/update, never expect it back (has_secret flags whether one is set).

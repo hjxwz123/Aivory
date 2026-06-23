@@ -91,27 +91,6 @@ func DeleteSkill(ctx context.Context, db *sql.DB, id string) error {
 	return err
 }
 
-// SkillsForUser returns the ids of all enabled skills available to a user. In
-// the current build skills are a shared global resource (admin-managed), so we
-// simply return enabled skills regardless of userID — the parameter is kept so
-// a future per-user override remains a one-line swap.
-func SkillsForUser(ctx context.Context, db *sql.DB, _ string) ([]string, error) {
-	rows, err := db.QueryContext(ctx, `SELECT id FROM skills WHERE enabled=1`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []string{}
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		out = append(out, id)
-	}
-	return out, rows.Err()
-}
-
 // SkillAsset describes one downloadable file bundled with a skill (§4.17 — the
 // `use_skill` flow stages these into /workspace/skills/<name>/).
 type SkillAsset struct {

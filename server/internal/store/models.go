@@ -120,6 +120,10 @@ type Model struct {
 	// Tags is a JSON array of model_tags ids assigned to this model — used by the
 	// model picker's tag filter (§ model tags). Empty = untagged.
 	Tags json.RawMessage `json:"tags"`
+	// Skills lists the skill ids bound to this model (model_skills join, §4.17).
+	// NOT a column — populated on demand (admin model list) so the editor can show
+	// current bindings. Omitted from JSON when not loaded.
+	Skills []string `json:"skills,omitempty"`
 	// ModerationEnabled screens each user prompt before generation (§ moderation).
 	// ModerationMode picks the screen: "keyword" (match the admin keyword list)
 	// or "model" (ask the configured moderation model for an ALLOW/BLOCK verdict).
@@ -238,10 +242,10 @@ type Message struct {
 	// Credits charged to the user for this turn (0 = free / credits disabled).
 	// Unlike Cost (USD spend, admin-only), credits ARE the user-facing currency,
 	// so this is surfaced to the user and not redacted.
-	Credits          float64         `json:"credits"`
-	Status           string          `json:"status"`
-	Error            string          `json:"error"`
-	Feedback         string          `json:"feedback"` // "" | "like" | "dislike" (§ message feedback)
+	Credits  float64 `json:"credits"`
+	Status   string  `json:"status"`
+	Error    string  `json:"error"`
+	Feedback string  `json:"feedback"` // "" | "like" | "dislike" (§ message feedback)
 	// GenMs is the wall-clock time the assistant turn took to generate (ms).
 	GenMs     int64 `json:"gen_ms"`
 	CreatedAt int64 `json:"created_at"`

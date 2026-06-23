@@ -46,9 +46,14 @@ type ToolRegistry interface {
 
 // ToolContext is the runtime context passed to tools.
 type ToolContext struct {
-	UserID      string
-	ConvID      string
-	MessageID   string
+	UserID    string
+	ConvID    string
+	MessageID string
+	// ModelID is the chat model driving this turn. use_skill + skill-asset staging
+	// scope to the skills bound to THIS model (model_skills, §4.17), so a model can
+	// only load the skills an admin checked for it — the same set the system-prompt
+	// index advertises.
+	ModelID     string
 	KBIDs       []string
 	ProjectID   string
 	ProjectName string
@@ -614,7 +619,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		orch:    o,
 		onEvent: onEvent,
 		ctx: &ToolContext{
-			UserID: conv.UserID, ConvID: conv.ID, MessageID: assistantMsg.ID,
+			UserID: conv.UserID, ConvID: conv.ID, MessageID: assistantMsg.ID, ModelID: model.ID,
 			KBIDs: kbIDs, ProjectID: conv.ProjectID, ProjectName: projectName,
 			DB: o.db, RAG: o.rag, ImageModelID: imageModelID,
 			DeepResearch: req.Mode == ModeDeepResearch,

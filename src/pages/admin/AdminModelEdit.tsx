@@ -16,7 +16,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { ArrowLeft } from 'lucide-react'
 import { adminApi, ApiError } from '@/api'
-import type { ApiChannel, ApiModel, ApiModelTag } from '@/api/types'
+import type { ApiChannel, ApiModel, ApiModelTag, ApiSkill } from '@/api/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Field } from '@/components/ui/label'
@@ -59,6 +59,7 @@ export default function AdminModelEdit() {
   const { id = '' } = useParams<{ id: string }>()
   const [channels, setChannels] = useState<ApiChannel[]>([])
   const [allTags, setAllTags] = useState<ApiModelTag[]>([])
+  const [allSkills, setAllSkills] = useState<ApiSkill[]>([])
   const [draft, setDraft] = useState<Draft | null>(null)
   const [loading, setLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
@@ -69,14 +70,16 @@ export default function AdminModelEdit() {
     async function load() {
       setLoading(true)
       try {
-        const [c, m, tg] = await Promise.all([
+        const [c, m, tg, sk] = await Promise.all([
           adminApi.channels(),
           adminApi.models(),
           adminApi.modelTags().catch(() => [] as ApiModelTag[]),
+          adminApi.skills().catch(() => [] as ApiSkill[]),
         ])
         if (cancelled) return
         setChannels(c)
         setAllTags(tg)
+        setAllSkills(sk)
         const found = m.find((row) => row.id === id)
         if (!found) {
           setNotFound(true)
@@ -109,6 +112,14 @@ export default function AdminModelEdit() {
     })
   }
 
+  function toggleSkill(skillId: string) {
+    setDraft((d) => {
+      if (!d) return d
+      const cur = d.skills ?? []
+      return { ...d, skills: cur.includes(skillId) ? cur.filter((x) => x !== skillId) : [...cur, skillId] }
+    })
+  }
+
   // §2.3-B: the official/system tool switch only applies to an OpenAI channel
   // running the Responses API.
   const channel = channels.find((c) => c.id === draft?.channel_id)
@@ -130,14 +141,21 @@ export default function AdminModelEdit() {
     }
     setSaving(true)
     try {
-      const { param_controls_text: _omit, ...rest } = draft
+      // skills bind through their own endpoint (model_skills, §4.17), so keep
+      // them out of the model PATCH payload.
+      const { param_controls_text: _omit, skills: skillIds, ...rest } = draft
       void _omit
       const payload: Partial<ApiModel> = {
         ...rest,
         param_controls: parsedPC,
       }
       const updated = await adminApi.updateModel(id, payload)
-      setDraft(modelToDraft(updated))
+      if (draft.kind === 'chat') {
+        await adminApi.setModelSkills(id, skillIds ?? [])
+      }
+      // PATCH may not echo back skills — preserve the just-saved selection so the
+      // chips don't flicker empty after save.
+      setDraft({ ...modelToDraft(updated), skills: skillIds ?? [] })
       toast.success(t('admin:models.updated'))
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
@@ -295,6 +313,58 @@ export default function AdminModelEdit() {
               </div>
             )}
           </section>
+
+          {/* Section: Skills (chat only, §4.17) ------------------------------- */}
+          {draft.kind === 'chat' && (
+            <section className="mt-6 rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-5">
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="font-serif text-lg text-[var(--color-fg)]">
+                  {t('admin:models.sections.skills', { defaultValue: 'Skills' })}
+                </h2>
+                <button
+                  type="button"
+                  onClick={() => navigate('/admin/skills')}
+                  className="text-xs text-[var(--color-accent)] hover:underline interactive"
+                >
+                  {t('admin:skills.manage', { defaultValue: 'Manage skills' })}
+                </button>
+              </div>
+              <p className="mt-1 text-xs text-[var(--color-fg-subtle)]">
+                {t('admin:models.skillsHint', {
+                  defaultValue:
+                    'Checked skills are listed in this model’s system prompt; the model loads each one’s full instructions on demand via use_skill.',
+                })}
+              </p>
+              {allSkills.length === 0 ? (
+                <p className="mt-3 text-sm text-[var(--color-fg-muted)]">{t('admin:skills.empty')}</p>
+              ) : (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {allSkills.map((sk) => {
+                    const on = (draft.skills ?? []).includes(sk.id)
+                    return (
+                      <button
+                        key={sk.id}
+                        type="button"
+                        onClick={() => toggleSkill(sk.id)}
+                        aria-pressed={on}
+                        title={sk.description}
+                        className={cn(
+                          'rounded-full px-3 py-1 text-sm interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+                          on
+                            ? 'bg-[var(--color-accent)] text-[var(--color-accent-fg)]'
+                            : 'bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]',
+                          !sk.enabled && 'opacity-60',
+                        )}
+                      >
+                        {sk.name}
+                        {!sk.enabled ? ` · ${t('admin:skills.disabledTag', { defaultValue: 'disabled' })}` : ''}
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </section>
+          )}
 
           {/* Section: Chat behaviour (chat only) ------------------------------ */}
           {draft.kind === 'chat' && (

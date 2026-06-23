@@ -267,6 +267,9 @@ export interface ApiModel {
   official_tools?: string[]
   /** model_tags ids assigned to this model — drives the picker's tag filter (§ model tags). */
   tags?: string[]
+  /** skill ids bound to this model (model_skills) — these get listed in the
+   *  system-prompt skill index; full instructions load on demand via use_skill (§4.17). */
+  skills?: string[]
   /** Screen each user prompt before generation (§ moderation). */
   moderation_enabled?: boolean
   /** Which screen to use when moderation is on: keyword list or a model verdict. */
@@ -286,13 +289,23 @@ export interface ApiModel {
   multiplier?: number
 }
 
+/** One file bundled with a skill (§4.17). use_skill stages these into the
+ *  sandbox at /workspace/skills/<name>/. storage_path is server-controlled
+ *  (returned by the upload endpoint) — the client only echoes it back on save. */
+export interface ApiSkillAsset {
+  filename: string
+  storage_path: string
+  mime_type?: string
+  size_bytes?: number
+}
+
 export interface ApiSkill {
   id: string
   name: string
   description: string
   icon: string
   instructions: string
-  assets: unknown
+  assets: ApiSkillAsset[]
   enabled: boolean
   sort_order: number
   updated_at: number

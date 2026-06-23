@@ -136,6 +136,17 @@ func listModelsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
+	// Populate model_skills bindings (§4.17) so the model editor can show which
+	// skills are currently checked. Admin model lists are small, so the per-row
+	// query is cheap; a SkillsForModel failure just leaves that row's skills empty.
+	for i := range rows {
+		if rows[i].Kind != "chat" {
+			continue
+		}
+		if ids, err := store.SkillsForModel(r.Context(), d.DB, rows[i].ID); err == nil {
+			rows[i].Skills = ids
+		}
+	}
 	writeJSON(w, 200, rows)
 }
 
@@ -249,6 +260,12 @@ func createSkillAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.Enabled = true
+	normAssets, err := validateSkillAssets(d, s.Assets)
+	if err != nil {
+		writeError(w, 400, err)
+		return
+	}
+	s.Assets = normAssets
 	created, err := store.CreateSkill(r.Context(), d.DB, s)
 	if err != nil {
 		writeError(w, 500, err)
@@ -259,11 +276,25 @@ func createSkillAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 
 func updateSkillAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	id := pathParam(r, "id")
-	var s store.Skill
+	// Load the existing row and decode the request body OVER it, so a PARTIAL
+	// payload (e.g. just {"enabled":false}) only changes the fields it sends and
+	// leaves name / instructions / assets intact (mirrors updateModelAdmin).
+	existing, err := store.GetSkill(r.Context(), d.DB, id)
+	if err != nil {
+		writeError(w, 404, errNotFound)
+		return
+	}
+	s := *existing
 	if err := decodeJSON(r, &s); err != nil {
 		writeError(w, 400, errInvalidInput)
 		return
 	}
+	normAssets, err := validateSkillAssets(d, s.Assets)
+	if err != nil {
+		writeError(w, 400, err)
+		return
+	}
+	s.Assets = normAssets
 	upd, err := store.UpdateSkill(r.Context(), d.DB, id, s)
 	if err != nil {
 		writeError(w, 404, errNotFound)

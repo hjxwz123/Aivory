@@ -485,9 +485,10 @@ func (t *pythonExecuteTool) Execute(ctx context.Context, input []byte, tc *llm.T
 			}
 		}
 		// Stage skill assets too (§4.17) so use_skill can reference scripts/data
-		// from /workspace/skills/<name>/.
-		if tc.DB != nil && tc.UserID != "" {
-			if skillIDs, err := store.SkillsForUser(ctx, tc.DB, tc.UserID); err == nil {
+		// from /workspace/skills/<name>/. Scope to the skills bound to THIS model
+		// (model_skills) — the same set use_skill can load and the index advertises.
+		if tc.DB != nil && tc.ModelID != "" {
+			if skillIDs, err := store.SkillsForModel(ctx, tc.DB, tc.ModelID); err == nil {
 				for _, sid2 := range skillIDs {
 					sk, err := store.GetSkill(ctx, tc.DB, sid2)
 					if err != nil || sk == nil || !sk.Enabled {
@@ -1242,15 +1243,32 @@ type skillInput struct {
 	Name string `json:"name"`
 }
 
-func (t *useSkillTool) Execute(ctx context.Context, input []byte, _ *llm.ToolContext) (string, []llm.Citation, error) {
+func (t *useSkillTool) Execute(ctx context.Context, input []byte, tc *llm.ToolContext) (string, []llm.Citation, error) {
 	var in skillInput
 	_ = json.Unmarshal(input, &in)
 	if in.Name == "" {
 		return "", nil, errors.New("name required")
 	}
-	skills, err := store.ListSkills(ctx, t.db, true)
-	if err != nil {
-		return "", nil, err
+	// Only load a skill bound to the current model (model_skills, §4.17) — the same
+	// set advertised in the system-prompt index. Without a model in context, fall
+	// back to all enabled skills so non-orchestrated callers still work.
+	var skills []store.Skill
+	if tc != nil && tc.ModelID != "" {
+		ids, err := store.SkillsForModel(ctx, t.db, tc.ModelID)
+		if err != nil {
+			return "", nil, err
+		}
+		for _, id := range ids {
+			if sk, err := store.GetSkill(ctx, t.db, id); err == nil && sk != nil && sk.Enabled {
+				skills = append(skills, *sk)
+			}
+		}
+	} else {
+		all, err := store.ListSkills(ctx, t.db, true)
+		if err != nil {
+			return "", nil, err
+		}
+		skills = all
 	}
 	for _, s := range skills {
 		if strings.EqualFold(s.Name, in.Name) {

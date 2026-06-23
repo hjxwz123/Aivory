@@ -77,6 +77,12 @@ interface MessageRowProps {
   onFork?: (leafId: string) => void
   /** Delete this whole round (the question + all its answers). Branch-safe. */
   onDelete?: (id: string) => void
+  /**
+   * Read-only render (admin transcript inspection / triage). Renders the message
+   * body identically to the live chat but suppresses the hover action bar and
+   * edit affordances — there are no mutation callbacks to wire in that context.
+   */
+  readOnly?: boolean
 }
 
 // Compact generation time: "3.2s" under a minute, "1m4s" beyond.
@@ -93,7 +99,7 @@ function formatCredits(credits: number): string {
   return credits.toLocaleString(undefined, { maximumFractionDigits: 2 })
 }
 
-function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, onLike, onDislike, onBranchSwitch, onFork, onDelete }: MessageRowProps) {
+function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, onLike, onDislike, onBranchSwitch, onFork, onDelete, readOnly = false }: MessageRowProps) {
   const isUser = message.role === 'user'
   // §7.2-6: assistant 气泡标注生成它的模型名 + 图标。
   const model = useModels((s) => (message.modelId ? s.getById(message.modelId) : undefined))
@@ -485,7 +491,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
             via opacity + pointer-events so nothing below is pushed around.
             Also show the action bar when a message has an error but no content
             so the user can retry the failed message. */}
-        {!editing && !message.streaming && (message.content || message.error) ? (
+        {!readOnly && !editing && !message.streaming && (message.content || message.error) ? (
           <div
             className={cn(
               'mt-2 inline-flex items-center gap-0.5 transition-opacity duration-[140ms] ease-out',

@@ -1,9 +1,9 @@
 /**
  * AdminSkills — manage the skill library.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Plus, Pencil, Trash2 } from 'lucide-react'
+import { Plus, Pencil, Trash2, Upload, X, FileText } from 'lucide-react'
 import { adminApi, ApiError } from '@/api'
 import type { ApiSkill } from '@/api/types'
 import { Button } from '@/components/ui/button'
@@ -25,6 +25,12 @@ import { Badge } from '@/components/ui/badge'
 
 type Draft = Partial<ApiSkill>
 const defaultDraft: Draft = { enabled: true }
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / 1024 / 1024).toFixed(1)} MB`
+}
 
 /**
  * parseSkillMd reads an Anthropic-style SKILL.md: a YAML frontmatter block
@@ -57,6 +63,32 @@ export default function AdminSkills() {
   })
   const [confirmDelete, setConfirmDelete] = useState<ApiSkill | null>(null)
   const [importMd, setImportMd] = useState('')
+  const [uploading, setUploading] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  // Upload one asset (template / script / data); append the returned descriptor
+  // to the draft's assets. Persisted with the skill on save (§4.17).
+  async function onPickAsset(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    setUploading(true)
+    try {
+      const asset = await adminApi.uploadSkillAsset(file)
+      setEditor((ed) => ({ ...ed, draft: { ...ed.draft, assets: [...(ed.draft.assets ?? []), asset] } }))
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : t('admin:common.failed'))
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  function removeAsset(idx: number) {
+    setEditor((ed) => ({
+      ...ed,
+      draft: { ...ed.draft, assets: (ed.draft.assets ?? []).filter((_, i) => i !== idx) },
+    }))
+  }
 
   async function load() {
     setLoading(true)
@@ -223,6 +255,48 @@ export default function AdminSkills() {
                   value={editor.draft.instructions ?? ''}
                   onChange={(e) => setEditor({ ...editor, draft: { ...editor.draft, instructions: e.target.value } })}
                 />
+              </Field>
+              <Field
+                label={t('admin:skills.fields.assets', { defaultValue: 'Assets (templates / scripts)' })}
+                hint={t('admin:skills.fields.assetsHint', {
+                  defaultValue: 'Files staged into the sandbox at /workspace/skills/<name>/ when use_skill loads this skill.',
+                })}
+              >
+                <div className="grid gap-2">
+                  {(editor.draft.assets ?? []).length > 0 ? (
+                    <ul className="flex flex-col divide-y divide-[var(--color-divider)] rounded-[10px] border border-[var(--color-border)]">
+                      {(editor.draft.assets ?? []).map((a, i) => (
+                        <li key={`${a.storage_path}-${i}`} className="flex items-center gap-2 px-3 py-2">
+                          <FileText size={14} aria-hidden className="shrink-0 text-[var(--color-fg-subtle)]" />
+                          <span className="min-w-0 flex-1 truncate text-[13px] text-[var(--color-fg)]">{a.filename}</span>
+                          {typeof a.size_bytes === 'number' ? (
+                            <span className="text-[11px] text-[var(--color-fg-subtle)] tabular-nums">{formatBytes(a.size_bytes)}</span>
+                          ) : null}
+                          <button
+                            type="button"
+                            onClick={() => removeAsset(i)}
+                            aria-label={t('common:actions.remove', { defaultValue: 'Remove' })}
+                            className="inline-flex items-center justify-center size-6 rounded-[6px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                          >
+                            <X size={13} aria-hidden />
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  <div>
+                    <input ref={fileRef} type="file" className="hidden" onChange={onPickAsset} />
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      leadingIcon={<Upload size={14} aria-hidden />}
+                      loading={uploading}
+                      onClick={() => fileRef.current?.click()}
+                    >
+                      {t('admin:skills.fields.assetsUpload', { defaultValue: 'Upload asset' })}
+                    </Button>
+                  </div>
+                </div>
               </Field>
               <label className="flex items-center justify-between rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3 py-2.5">
                 <span className="text-sm">{t('admin:skills.fields.enabled')}</span>
