@@ -469,7 +469,12 @@
       "uploadsSection": "檔案上傳",
       "uploadsLead": "允許上傳的副檔名。留空 = 預設安全集合(PDF/Office/圖片/文字)。",
       "uploadAllowedExt": "允許的副檔名",
-      "uploadAllowedExtHint": "用逗號或空格分隔,不分大小寫。例:pdf, docx, png"
+      "uploadAllowedExtHint": "用逗號或空格分隔,不分大小寫。例:pdf, docx, png",
+      "fallbackModel": "備援模型",
+      "fallbackModelHint": "所選模型逾時無回應時,改用它回答(使用者無感)。",
+      "fallbackNone": "關閉",
+      "fallbackTtft": "首字逾時(秒)",
+      "fallbackTtftHint": "上游這麼多秒無任何輸出就切斷。0 = 關閉。"
     }
   },
   "groups": {

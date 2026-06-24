@@ -469,7 +469,12 @@
       "uploadsSection": "アップロード",
       "uploadsLead": "許可する拡張子。空欄 = 安全な既定(PDF/Office/画像/テキスト)。",
       "uploadAllowedExt": "許可する拡張子",
-      "uploadAllowedExtHint": "カンマ/空白区切り、大小文字不問。例:pdf, docx, png"
+      "uploadAllowedExtHint": "カンマ/空白区切り、大小文字不問。例:pdf, docx, png",
+      "fallbackModel": "フォールバックモデル",
+      "fallbackModelHint": "選択モデルが時間内に返さない場合、これで代わりに回答(ユーザーに無感)。",
+      "fallbackNone": "無効",
+      "fallbackTtft": "初回応答タイムアウト(秒)",
+      "fallbackTtftHint": "この秒数、上流が無出力なら切断。0 = 無効。"
     }
   },
   "groups": {

@@ -469,7 +469,12 @@
       "uploadsSection": "Téléversements",
       "uploadsLead": "Extensions autorisées. Vide = ensemble sûr par défaut.",
       "uploadAllowedExt": "Extensions autorisées",
-      "uploadAllowedExtHint": "Séparés par virgule/espace, insensible à la casse. p. ex. pdf, docx, png"
+      "uploadAllowedExtHint": "Séparés par virgule/espace, insensible à la casse. p. ex. pdf, docx, png",
+      "fallbackModel": "Modèle de secours",
+      "fallbackModelHint": "Si le modèle choisi ne répond pas à temps, répondre avec celui-ci (transparent).",
+      "fallbackNone": "Désactivé",
+      "fallbackTtft": "Délai 1er token (s)",
+      "fallbackTtftHint": "Couper l'amont après ce délai sans sortie. 0 = désactivé."
     }
   },
   "groups": {

@@ -536,8 +536,10 @@ export function Composer({
         aria-label={t('composer.inputLabel', { defaultValue: 'Type a message' })}
       />
 
-      {/* Toolbar row */}
-      <div className="flex flex-wrap items-center gap-1 px-2.5 pb-2.5 pt-1">
+      {/* Toolbar row — single line, no wrap: secondary actions live in a
+          scrollable left zone so a narrow screen never breaks the layout, while
+          the model picker + send stay pinned on the right and always reachable. */}
+      <div className="flex items-center gap-1 px-2 pb-2.5 pt-1 sm:px-2.5">
         <input
           type="file"
           ref={fileRef}
@@ -548,13 +550,15 @@ export function Composer({
             e.currentTarget.value = ''
           }}
         />
+        <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto scrollbar-none">
+          {/* file input lives above; left zone holds the secondary actions */}
 
         <Tooltip content={t('composer.attach')}>
           <button
             type="button"
             onClick={() => fileRef.current?.click()}
             aria-label={t('composer.attach')}
-            className="inline-flex items-center justify-center size-8 rounded-[8px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+            className="inline-flex items-center justify-center size-8 max-sm:size-9 rounded-[8px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
           >
             <Paperclip size={15} aria-hidden />
           </button>
@@ -571,7 +575,7 @@ export function Composer({
               input.accept = ''
             }}
             aria-label={t('composer.addImage')}
-            className="inline-flex items-center justify-center size-8 rounded-[8px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+            className="inline-flex items-center justify-center size-8 max-sm:size-9 rounded-[8px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
           >
             <ImageIcon size={15} aria-hidden />
           </button>
@@ -585,7 +589,7 @@ export function Composer({
             aria-label={t('composer.voice')}
             aria-pressed={recording}
             className={cn(
-              'inline-flex items-center justify-center size-8 rounded-[8px] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+              'inline-flex items-center justify-center size-8 max-sm:size-9 rounded-[8px] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
               recording
                 ? 'bg-[var(--color-danger-soft)] text-[var(--color-danger)]'
                 : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
@@ -610,7 +614,7 @@ export function Composer({
               aria-pressed={mode === 'deep-research'}
               aria-label={t('composer.researchTooltip')}
               className={cn(
-                'inline-flex items-center gap-1.5 h-8 px-2 rounded-[8px] text-[12px] font-medium interactive',
+                'inline-flex items-center gap-1.5 h-8 max-sm:h-9 px-2 rounded-[8px] text-[12px] font-medium interactive',
                 mode === 'deep-research'
                   ? 'bg-[var(--color-secondary-soft)] text-[var(--color-secondary)]'
                   : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
@@ -640,7 +644,7 @@ export function Composer({
                   type="button"
                   aria-label={t('composer.knowledgeBases')}
                   className={cn(
-                    'inline-flex items-center gap-1.5 h-8 px-2 rounded-[8px] text-[12px] font-medium interactive',
+                    'inline-flex items-center gap-1.5 h-8 max-sm:h-9 px-2 rounded-[8px] text-[12px] font-medium interactive',
                     (kbIds?.length ?? 0) > 0
                       ? 'bg-[var(--color-secondary-soft)] text-[var(--color-secondary)]'
                       : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
@@ -693,8 +697,12 @@ export function Composer({
             mode:'canvas' currently produces a normal answer (only deep-research
             is wired). Deep Research above stays available. */}
 
-        <div className="ml-auto flex items-center gap-2">
-          <ModelPicker value={modelId} onChange={onModelChange} />
+        </div>
+
+        {/* Right zone — pinned, never wraps: model picker (compact on phones) +
+            send/stop. */}
+        <div className="flex shrink-0 items-center gap-1.5 pl-1">
+          <ModelPicker value={modelId} onChange={onModelChange} className="max-sm:max-w-[40vw]" />
 
           {streaming ? (
             <Tooltip content={t('composer.stop')}>

@@ -469,7 +469,12 @@
       "uploadsSection": "Uploads",
       "uploadsLead": "Allowed upload extensions. Empty = safe defaults (PDF/Office/images/text).",
       "uploadAllowedExt": "Allowed extensions",
-      "uploadAllowedExtHint": "Comma/space separated, case-insensitive. e.g. pdf, docx, png"
+      "uploadAllowedExtHint": "Comma/space separated, case-insensitive. e.g. pdf, docx, png",
+      "fallbackModel": "Fallback model",
+      "fallbackModelHint": "If the chosen model returns nothing in time, answer with this one instead (transparent to the user).",
+      "fallbackNone": "Disabled",
+      "fallbackTtft": "First-token timeout (s)",
+      "fallbackTtftHint": "Cut the upstream after this many seconds with no output. 0 = off."
     }
   },
   "groups": {

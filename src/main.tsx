@@ -22,3 +22,15 @@ createRoot(root).render(
     </BrowserRouter>
   </StrictMode>,
 )
+
+// Register the service worker so the app is installable to the home screen and
+// opens in standalone (fullscreen) mode. Production only — in dev a SW would
+// interfere with Vite's HMR. The SW itself is a no-cache passthrough (see
+// public/sw.js), so there is no stale-build risk after a deploy.
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {
+      // Installability is a progressive enhancement — ignore failures.
+    })
+  })
+}

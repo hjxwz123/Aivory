@@ -48,7 +48,18 @@ export default function ChatLayout() {
   ])
 
   return (
-    <div className="flex h-svh w-full overflow-hidden bg-[var(--color-bg)] text-[var(--color-fg)]">
+    <div
+      className={cn(
+        'flex h-svh w-full overflow-hidden bg-[var(--color-bg)] text-[var(--color-fg)]',
+        // Inset the whole app shell by the device safe areas so that, when
+        // launched as an installed PWA (fullscreen/standalone), the header,
+        // sidebar and bottom composer never slide under the notch or home
+        // indicator. env() is 0 in a normal browser tab, so this is a no-op
+        // there. box-border keeps total height at 100svh.
+        'pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]',
+        'pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]',
+      )}
+    >
       {isDesktop ? (
         <Sidebar variant="desktop" />
       ) : (

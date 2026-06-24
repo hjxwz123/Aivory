@@ -469,7 +469,12 @@
       "uploadsSection": "文件上传",
       "uploadsLead": "允许上传的扩展名。留空 = 默认安全集合(PDF/Office/图片/文本)。",
       "uploadAllowedExt": "允许的扩展名",
-      "uploadAllowedExtHint": "用逗号或空格分隔,不区分大小写。例:pdf, docx, png"
+      "uploadAllowedExtHint": "用逗号或空格分隔,不区分大小写。例:pdf, docx, png",
+      "fallbackModel": "兜底模型",
+      "fallbackModelHint": "所选模型超时无返回时,改用它回答(用户无感)。",
+      "fallbackNone": "关闭",
+      "fallbackTtft": "首字超时(秒)",
+      "fallbackTtftHint": "上游这么多秒无任何输出就切断。0 = 关闭。"
     }
   },
   "groups": {

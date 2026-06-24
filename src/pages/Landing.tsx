@@ -17,6 +17,7 @@ import {
 } from 'lucide-react'
 import { Logo } from '@/components/brand/logo'
 import { MembershipTiers } from '@/components/landing/membership-tiers'
+import { FlowField } from '@/components/landing/flow-field'
 import { LiveDemo } from '@/components/landing/live-demo'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -246,6 +247,18 @@ export default function Landing() {
       {/* Hero — left-anchored editorial split; the second headline line carries
           a violet ink-wash (dual-layer masked real text, scrubbed by GSAP). */}
       <section className="relative pt-16 sm:pt-24 pb-20 sm:pb-28">
+        {/* Signature generative line-field — a living backdrop behind the hero,
+            edge-faded so it never competes with the headline or the demo. */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 -z-10 overflow-hidden"
+          style={{
+            maskImage: 'radial-gradient(120% 90% at 50% 30%, #000 55%, transparent 100%)',
+            WebkitMaskImage: 'radial-gradient(120% 90% at 50% 30%, #000 55%, transparent 100%)',
+          }}
+        >
+          <FlowField />
+        </div>
         <div className="mx-auto grid max-w-[76rem] items-center gap-12 px-5 sm:px-8 lg:grid-cols-[1.12fr_0.88fr] lg:gap-10">
           <div className="min-w-0 max-w-[40rem]">
             <div className="hero-badge inline-block">

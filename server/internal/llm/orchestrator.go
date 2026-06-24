@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"aurelia/server/internal/cache"
@@ -208,6 +209,131 @@ const ModeDeepResearch = "deep-research"
 type RunResult struct {
 	UserMessage      *store.Message
 	AssistantMessage *store.Message
+}
+
+// streamWithFallback runs provider.Stream behind a time-to-first-token (TTFT)
+// watchdog. If the upstream emits NOTHING within the admin-configured
+// `fallback_ttft_sec`, the connection is cut and the SAME assistant message is
+// re-generated with the admin-configured `fallback_model_id` — transparently,
+// since the user has only seen `message_start` (no text yet). Only triggers
+// before the first event (never mid-stream → no visible restart), and falls back
+// at most once (the fallback runs without a watchdog). Disabled — and zero
+// overhead, a plain provider.Stream — unless both settings are present.
+func (o *Orchestrator) streamWithFallback(
+	ctx context.Context,
+	provReq UnifiedChatRequest,
+	runner ToolRunner,
+	provider Provider,
+	primaryModelID string,
+	onEvent func(SseEvent),
+) (*UnifiedResult, error) {
+	ttft := settingInt(o.db, "fallback_ttft_sec")
+	fbID := settingStr(o.db, "fallback_model_id")
+	if ttft <= 0 || fbID == "" || fbID == primaryModelID {
+		return provider.Stream(ctx, provReq, runner, onEvent)
+	}
+
+	wdCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	firstEvent := make(chan struct{})
+	var firstOnce sync.Once
+	wrapped := func(ev SseEvent) {
+		firstOnce.Do(func() { close(firstEvent) })
+		onEvent(ev)
+	}
+	var stalled atomic.Bool
+	go func() {
+		timer := time.NewTimer(time.Duration(ttft) * time.Second)
+		defer timer.Stop()
+		select {
+		case <-firstEvent: // upstream is alive — disarm
+		case <-wdCtx.Done(): // stream finished / parent cancelled
+		case <-timer.C:
+			stalled.Store(true)
+			cancel() // cut the upstream; provider.Stream returns ctx.Canceled
+		}
+	}()
+
+	result, err := provider.Stream(wdCtx, provReq, runner, wrapped)
+	// Healthy completion, or a real user cancel on the PARENT ctx → return as-is.
+	if !stalled.Load() {
+		return result, err
+	}
+	// Watchdog fired. Only switch when the upstream produced nothing — never
+	// after partial output (would visibly restart the answer).
+	if result != nil && len(result.Blocks) > 0 {
+		return result, err
+	}
+	if parentErr := ctx.Err(); parentErr != nil {
+		return result, err // parent already dead (shutdown) — don't bother
+	}
+	fbReq, fbProvider, ferr := o.buildFallbackRequest(ctx, provReq, fbID)
+	if ferr != nil {
+		o.logger.Printf("llm: fallback model %q unavailable, keeping upstream error: %v", fbID, ferr)
+		return result, err
+	}
+	o.logger.Printf("llm: upstream model %q produced no output in %ds — switching to fallback %q", primaryModelID, ttft, fbID)
+	// Single attempt, no watchdog → no chaining. Streams into the SAME onEvent,
+	// so the frontend just keeps filling the existing (empty) message.
+	return fbProvider.Stream(ctx, fbReq, runner, onEvent)
+}
+
+// buildFallbackRequest clones the in-flight request but swaps in the fallback
+// model + its provider/channel. Messages, tools, system prompt, RAG are reused.
+func (o *Orchestrator) buildFallbackRequest(ctx context.Context, base UnifiedChatRequest, fbID string) (UnifiedChatRequest, Provider, error) {
+	m, err := store.GetModel(ctx, o.db, fbID)
+	if err != nil {
+		return base, nil, err
+	}
+	ch, err := store.GetChannel(ctx, o.db, m.ChannelID)
+	if err != nil {
+		return base, nil, err
+	}
+	prov, err := o.reg.Get(ch.Type)
+	if err != nil {
+		return base, nil, err
+	}
+	req := base // shallow copy; slices (history/tools/…) are read-only during the stream
+	req.Model = ModelInfo{
+		ID: m.ID, RequestID: m.RequestID, Provider: ch.Type, Vision: m.Vision,
+		BaseURL: ch.BaseURL, APIKey: ch.APIKey, APIFormat: ch.APIFormat,
+	}
+	req.Stream = m.Stream
+	req.ParamControls = m.ParamControls
+	req.OfficialTools = nil // hosted-tools config is model-specific; fallback uses self-built tools
+	req.ToolModePrompt = m.ToolMode == "prompt"
+	return req, prov, nil
+}
+
+// settingInt / settingStr read an admin setting (JSON number or quoted string).
+func settingInt(db *sql.DB, key string) int {
+	raw, err := store.GetSetting(db, key)
+	if err != nil || len(raw) == 0 {
+		return 0
+	}
+	var n int
+	if json.Unmarshal(raw, &n) == nil {
+		return n
+	}
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		if v, e := strconv.Atoi(strings.TrimSpace(s)); e == nil {
+			return v
+		}
+	}
+	return 0
+}
+
+func settingStr(db *sql.DB, key string) string {
+	raw, err := store.GetSetting(db, key)
+	if err != nil || len(raw) == 0 {
+		return ""
+	}
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		return strings.TrimSpace(s)
+	}
+	return ""
 }
 
 // Run executes one turn end to end. It blocks while streaming.
@@ -652,7 +778,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		// all finalize/persist/usage/done logic below is path-agnostic.
 		result, err = o.runDeepResearch(ctx, provReq, runner, provider, streamToUser, conv, assistantMsg)
 	} else {
-		result, err = provider.Stream(ctx, provReq, runner, streamToUser)
+		result, err = o.streamWithFallback(ctx, provReq, runner, provider, model.ID, streamToUser)
 	}
 	if err != nil {
 		// §6.2 stop-button semantics: when the user (or the kill switch) cancels

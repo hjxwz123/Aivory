@@ -731,6 +731,11 @@ var settingsKeys = []string{
 	// §user-groups: the prompt shown when a model is locked for a user's group or
 	// their windowed quota is exhausted.
 	"quota_exceeded_message",
+	// § upstream fallback: if the chosen model emits nothing within
+	// fallback_ttft_sec (time-to-first-token), the stream is cut and the same
+	// message is re-generated with fallback_model_id — transparently. Both blank
+	// / 0 = disabled.
+	"fallback_model_id", "fallback_ttft_sec",
 	// § moderation: keyword blocklist (JSON array of strings), the dedicated
 	// moderation model id (for model-mode), the violation categories the model
 	// screens for (model-mode), and the message shown when a prompt is blocked.

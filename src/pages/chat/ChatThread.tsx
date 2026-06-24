@@ -399,7 +399,17 @@ export default function ChatThread() {
         data-scroll-root
         className="flex-1 min-h-0 overflow-y-auto scrollbar-thin"
       >
-        <MessageList conversation={conversation} scrollToMessageId={jumpTo} jumpKey={jumpKey} />
+        {/* First load with nothing yet in the store (slow network / long thread):
+            show a spinner instead of a blank thread. Once any message is present
+            (incl. optimistic/streaming) we hand off to MessageList. */}
+        {conversation.messages.length === 0 && loadStatus === 'loading' ? (
+          <div className="flex h-full items-center justify-center text-[var(--color-fg-subtle)]">
+            <Loader2 size={22} className="animate-spin" aria-hidden />
+            <span className="sr-only">{t('common.loading', { ns: 'common', defaultValue: 'Loading…' })}</span>
+          </div>
+        ) : (
+          <MessageList conversation={conversation} scrollToMessageId={jumpTo} jumpKey={jumpKey} />
+        )}
       </div>
       <InlineThreadLayer conversationId={conversation.id} scrollRef={scrollRef} />
 

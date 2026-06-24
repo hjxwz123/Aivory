@@ -24,6 +24,8 @@ type Settings = Record<string, unknown>
 const OWNED_KEYS = [
   'default_model_id',
   'task_model_id',
+  'fallback_model_id',
+  'fallback_ttft_sec',
   'keep_recent_rounds',
   'compaction_token_trigger',
   'summary_max_tokens',
@@ -147,6 +149,46 @@ export default function AdminSettings() {
               </SelectContent>
             </Select>
           </Field>
+
+          {/* Upstream fallback: if the chosen model returns nothing within N
+              seconds, cut it and answer with this model — transparently. */}
+          <div className="grid grid-cols-2 gap-4">
+            <Field
+              label={t('admin:settings.fields.fallbackModel')}
+              htmlFor="fb-model"
+              hint={t('admin:settings.fields.fallbackModelHint')}
+            >
+              <Select
+                value={readString('fallback_model_id') || 'none'}
+                onValueChange={(v) => setDraft({ ...draft, fallback_model_id: v === 'none' ? '' : v })}
+              >
+                <SelectTrigger id="fb-model">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">{t('admin:settings.fields.fallbackNone')}</SelectItem>
+                  {models.map((m) => (
+                    <SelectItem key={m.id} value={m.id}>
+                      {m.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field
+              label={t('admin:settings.fields.fallbackTtft')}
+              htmlFor="fb-ttft"
+              hint={t('admin:settings.fields.fallbackTtftHint')}
+            >
+              <Input
+                id="fb-ttft"
+                type="number"
+                min={0}
+                value={String(readNumber('fallback_ttft_sec'))}
+                onChange={(e) => setDraft({ ...draft, fallback_ttft_sec: Math.max(0, Number(e.target.value) || 0) })}
+              />
+            </Field>
+          </div>
 
           <div className="grid grid-cols-2 gap-4">
             <Field label={t('admin:settings.fields.keep')} htmlFor="keep">
