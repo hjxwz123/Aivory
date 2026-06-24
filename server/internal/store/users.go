@@ -202,10 +202,21 @@ func GetUserSettingKey(ctx context.Context, db *sql.DB, userID, key string) (jso
 	return nil, nil
 }
 
-// UpdateUserSettings merges patch into users.settings (JSON object) and writes
-// it back atomically.
+// UpdateUserSettings merges patch into users.settings (JSON object). It locks
+// the user row while merging so concurrent PATCH /me/settings calls cannot lose
+// each other's keys by writing a stale whole JSON blob.
 func UpdateUserSettings(ctx context.Context, db *sql.DB, userID string, patch map[string]any) (*User, error) {
-	row := db.QueryRowContext(ctx, `SELECT settings FROM users WHERE id=?`, userID)
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback() //nolint:errcheck — best-effort after commit or early return
+
+	selectSQL := `SELECT settings FROM users WHERE id=?`
+	if usePostgres {
+		selectSQL += ` FOR UPDATE`
+	}
+	row := tx.QueryRowContext(ctx, selectSQL, userID)
 	var raw string
 	if err := row.Scan(&raw); err != nil {
 		return nil, err
@@ -218,10 +229,55 @@ func UpdateUserSettings(ctx context.Context, db *sql.DB, userID string, patch ma
 		current[k] = v
 	}
 	b, _ := json.Marshal(current)
-	if _, err := db.ExecContext(ctx, `UPDATE users SET settings=? WHERE id=?`, string(b), userID); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE users SET settings=? WHERE id=?`, string(b), userID); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	return FindUserByID(ctx, db, userID)
+}
+
+// backfillUserOnboarded marks legacy accounts as already past first-login
+// onboarding. New accounts still start with `{}` and therefore see the wizard.
+func backfillUserOnboarded(db *sql.DB) {
+	const batch = 500
+	last := ""
+	for {
+		rows, err := db.Query(`SELECT id, settings FROM users WHERE id > ? ORDER BY id LIMIT ?`, last, batch)
+		if err != nil {
+			return
+		}
+		type row struct{ id, settings string }
+		buf := make([]row, 0, batch)
+		for rows.Next() {
+			var r row
+			if err := rows.Scan(&r.id, &r.settings); err != nil {
+				continue
+			}
+			buf = append(buf, r)
+		}
+		rows.Close()
+		if len(buf) == 0 {
+			return
+		}
+		for _, r := range buf {
+			current := map[string]any{}
+			if strings.TrimSpace(r.settings) != "" {
+				_ = json.Unmarshal([]byte(r.settings), &current)
+			}
+			if _, exists := current["onboarded"]; !exists {
+				current["onboarded"] = true
+				if b, err := json.Marshal(current); err == nil {
+					_, _ = db.Exec(`UPDATE users SET settings=? WHERE id=?`, string(b), r.id)
+				}
+			}
+			last = r.id
+		}
+		if len(buf) < batch {
+			return
+		}
+	}
 }
 
 // TouchLastSeen records the user's last authenticated activity (online status,

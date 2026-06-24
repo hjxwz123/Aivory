@@ -21,6 +21,10 @@ server/.env
 # Claude Code session state (local tooling, never committed).
 .claude/
 
+# Codex
+.agents/
+.codex/
+
 __pycache__/
 *.pyc
 
@@ -30,6 +34,7 @@ __pycache__/
 # Internal documentation (kept locally, not published to GitHub)
 CLAUDE.md
 DESIGN.md
+AGENTS.md
 TEST.md
 docs/design-research.md
 docs/frontend-architecture.md

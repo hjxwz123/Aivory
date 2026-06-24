@@ -204,6 +204,16 @@ func Migrate(db *sql.DB) error {
 		backfillSearchText(db)
 		_, _ = db.Exec(`INSERT INTO settings(key, value) VALUES('msg_search_text_backfill_v1', '1') ON CONFLICT(key) DO NOTHING`)
 	}
+	// One-time backfill: the welcome wizard is gated by users.settings.onboarded.
+	// Accounts created before that flag existed are established users, so mark
+	// them complete rather than showing first-login preferences on their next
+	// refresh.
+	var onboardBackfill string
+	_ = db.QueryRow(`SELECT value FROM settings WHERE key='user_onboarded_backfill_v1'`).Scan(&onboardBackfill)
+	if onboardBackfill == "" {
+		backfillUserOnboarded(db)
+		_, _ = db.Exec(`INSERT INTO settings(key, value) VALUES('user_onboarded_backfill_v1', '1') ON CONFLICT(key) DO NOTHING`)
+	}
 	return nil
 }
 

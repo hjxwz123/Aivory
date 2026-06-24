@@ -7,6 +7,7 @@ import { useLanguage } from '@/store/language'
 import { useAccent } from '@/store/accent'
 import { useTheme } from '@/store/theme'
 import { useSettings } from '@/store/settings'
+import { toast } from '@/hooks/use-toast'
 import { SUPPORTED_LANGUAGES, type LanguageCode } from '@/i18n'
 import { ACCENT_PRESETS, type AccentPref, type ChatWidthPref, type ThemePref } from '@/types/settings'
 import { Logo } from '@/components/brand/logo'
@@ -102,12 +103,10 @@ export function WelcomeCard() {
   const last = STEPS.length - 1
   const current = STEPS[step]
 
-  function markOnboarded(extra: Record<string, unknown>) {
+  async function markOnboarded(extra: Record<string, unknown>) {
     const patch = { onboarded: true, ...extra }
-    if (user) setUser({ ...user, settings: { ...(user.settings ?? {}), ...patch } })
-    void authApi.updateSettings(patch).catch(() => {
-      /* best-effort — if it fails the card simply reappears next session */
-    })
+    const updated = await authApi.updateSettings(patch)
+    if (user) setUser({ ...user, settings: { ...(user.settings ?? {}), ...updated } })
   }
 
   // Close with the exit animation: flip `open` (Radix plays the zoom-into-app
@@ -117,17 +116,22 @@ export function WelcomeCard() {
     window.setTimeout(() => setMounted(false), 360)
   }
 
-  function handleStart() {
-    if (!open) return
+  async function handleStart() {
+    if (!open || saving) return
     setSaving(true)
-    // Memory is the only choice with a server-side mirror; the rest are
-    // localStorage-backed and already applied live.
-    markOnboarded({ memory_enabled: memory })
-    setSaving(false)
-    // Close the wizard (plays the zoom-out), then hand off to the welcome
-    // dialog once the exit animation finishes.
-    setOpen(false)
-    window.setTimeout(() => setWelcomeOpen(true), 360)
+    try {
+      // Memory is the only choice with a server-side mirror; the rest are
+      // localStorage-backed and already applied live.
+      await markOnboarded({ memory_enabled: memory })
+      // Close the wizard (plays the zoom-out), then hand off to the welcome
+      // dialog once the exit animation finishes.
+      setOpen(false)
+      window.setTimeout(() => setWelcomeOpen(true), 360)
+    } catch (e) {
+      toast.error(t('common:common.error'), e instanceof Error ? e.message : undefined)
+    } finally {
+      setSaving(false)
+    }
   }
 
   // Dismiss the welcome dialog and unmount the whole flow.
@@ -136,8 +140,9 @@ export function WelcomeCard() {
     window.setTimeout(() => setMounted(false), 200)
   }
 
-  function handleSkip() {
-    if (!open) return
+  async function handleSkip() {
+    if (!open || saving) return
+    setSaving(true)
     const init = initial.current
     if (init) {
       if (lang !== init.lang) setLang(init.lang)
@@ -147,8 +152,14 @@ export function WelcomeCard() {
       if (replyStyle !== init.replyStyle) setModels({ responseLength: init.replyStyle })
       if (memory !== init.memory) setPrivacy({ memoriesEnabled: init.memory })
     }
-    markOnboarded({})
-    close()
+    try {
+      await markOnboarded({})
+      close()
+    } catch (e) {
+      toast.error(t('common:common.error'), e instanceof Error ? e.message : undefined)
+    } finally {
+      setSaving(false)
+    }
   }
 
   function renderControl(key: StepKey) {
@@ -236,7 +247,7 @@ export function WelcomeCard() {
 
   return (
     <>
-    <Dialog open={open} onOpenChange={(o) => { if (!o) handleSkip() }}>
+    <Dialog open={open} onOpenChange={(o) => { if (!o) void handleSkip() }}>
       <DialogContent
         size="xl"
         showClose={false}
@@ -326,7 +337,7 @@ export function WelcomeCard() {
 
             {/* Footer nav */}
             <div className="shrink-0 border-t border-[var(--color-divider)] px-6 sm:px-8 py-4 flex items-center justify-between gap-3">
-              <Button variant="ghost" onClick={handleSkip}>
+              <Button variant="ghost" onClick={() => void handleSkip()} loading={saving}>
                 {t('welcome:actions.skip')}
               </Button>
               <div className="flex items-center gap-2">
@@ -338,7 +349,7 @@ export function WelcomeCard() {
                 {step < last ? (
                   <Button onClick={() => setStep((s) => s + 1)}>{t('welcome:actions.next')}</Button>
                 ) : (
-                  <Button onClick={handleStart} loading={saving}>
+                  <Button onClick={() => void handleStart()} loading={saving}>
                     {t('welcome:actions.start')}
                   </Button>
                 )}
