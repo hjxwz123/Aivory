@@ -15,6 +15,7 @@
     "attach": "Attach files",
     "dropHint": "Drop files to attach",
     "addImage": "Add image",
+    "more": "More",
     "voice": "Voice input",
     "voiceStop": "Stop recording",
     "voiceUnsupported": "Voice input isn't supported in this browser.",

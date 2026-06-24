@@ -15,6 +15,7 @@
     "attach": "ファイルを添付",
     "dropHint": "ドロップして添付",
     "addImage": "画像を追加",
+    "more": "その他",
     "voice": "音声入力",
     "voiceStop": "録音を停止",
     "voiceUnsupported": "このブラウザでは音声入力に対応していません。",

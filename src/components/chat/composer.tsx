@@ -25,6 +25,7 @@ import {
   BookOpen,
   Check,
   AlertTriangle,
+  Plus,
 } from 'lucide-react'
 import type { Attachment } from '@/types/chat'
 import { Textarea } from '@/components/ui/textarea'
@@ -35,6 +36,7 @@ import { ModelPicker } from './model-picker'
 import { ParamControls } from './param-controls'
 import { filterVisibleParams } from './param-controls.utils'
 import { useAutosizeTextarea } from '@/hooks/use-autosize-textarea'
+import { useMediaQuery } from '@/hooks/use-media-query'
 import { useModels } from '@/store/models'
 import { useAuth } from '@/store/auth'
 import { api, ApiError } from '@/api/client'
@@ -112,6 +114,11 @@ export function Composer({
   const [kbList, setKBList] = useState<{ id: string; name: string }[]>([])
   // Drag-and-drop file upload over the composer surface.
   const [dragOver, setDragOver] = useState(false)
+  // Narrow screens collapse every secondary action into a single "+" menu
+  // (Gemini/ChatGPT-mobile pattern) so the row never overflows and tap targets
+  // stay large. 639px = Tailwind's `sm` breakpoint minus 1.
+  const isMobile = useMediaQuery('(max-width: 639px)')
+  const [moreOpen, setMoreOpen] = useState(false)
   const loadKBList = async () => {
     try {
       const rows = await kbsApi.list()
@@ -392,6 +399,75 @@ export function Composer({
     })
   }
 
+  // A tool is "armed" while collapsed → the "+" trigger shows an accent dot so
+  // the user knows research / a KB is active without expanding the menu.
+  const hasActiveTool = mode === 'deep-research' || (kbIds?.length ?? 0) > 0
+
+  // KB checklist — shared by the desktop popover and the mobile "+" menu.
+  const kbChecklist =
+    kbList.length === 0 ? (
+      <p className="px-2 py-2 text-sm text-[var(--color-fg-muted)]">{t('composer.noKnowledgeBases')}</p>
+    ) : (
+      kbList.map((kb) => {
+        const checked = kbIds?.includes(kb.id) ?? false
+        return (
+          <button
+            key={kb.id}
+            type="button"
+            onClick={() =>
+              onKBChange?.(checked ? (kbIds ?? []).filter((x) => x !== kb.id) : [...(kbIds ?? []), kb.id])
+            }
+            className="flex w-full items-center gap-2 rounded-[8px] px-2 py-1.5 text-left text-sm text-[var(--color-fg)] hover:bg-[var(--color-bg-muted)]"
+          >
+            <span
+              className={cn(
+                'inline-flex size-4 items-center justify-center rounded border',
+                checked
+                  ? 'border-[var(--color-accent)] bg-[var(--color-accent)] text-white'
+                  : 'border-[var(--color-border-strong)]',
+              )}
+            >
+              {checked ? <Check size={11} aria-hidden /> : null}
+            </span>
+            <span className="truncate">{kb.name}</span>
+          </button>
+        )
+      })
+    )
+
+  // Send / stop button — shared by both layouts. On mobile it's a larger,
+  // thumb-friendly circle pinned to the right edge.
+  const sendBtn = streaming ? (
+    <Tooltip content={t('composer.stop')}>
+      <button
+        type="button"
+        onClick={onStop}
+        aria-label={t('composer.stop')}
+        className="inline-flex items-center justify-center size-9 max-sm:size-10 rounded-[10px] max-sm:rounded-full bg-[var(--color-fg)] text-[var(--color-fg-inverted)] hover:opacity-90 interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+      >
+        <StopCircle size={16} aria-hidden />
+      </button>
+    </Tooltip>
+  ) : (
+    <Tooltip content={t('composer.send', { kbd: modKey() })}>
+      <button
+        type="button"
+        onClick={handleSubmit}
+        disabled={!canSubmit}
+        aria-label={t('actions.send', { ns: 'common' })}
+        className={cn(
+          'inline-flex items-center justify-center size-9 max-sm:size-10 rounded-[10px] max-sm:rounded-full interactive',
+          canSubmit
+            ? 'bg-[var(--color-accent)] text-[var(--color-accent-fg)] hover:bg-[var(--color-accent-hover)] shadow-[var(--shadow-xs)]'
+            : 'bg-[var(--color-bg-muted)] text-[var(--color-fg-faint)] cursor-not-allowed',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+        )}
+      >
+        {uploading ? <Loader2 size={16} className="animate-spin" aria-hidden /> : <ArrowUp size={16} aria-hidden />}
+      </button>
+    </Tooltip>
+  )
+
   return (
     <div
       onDragOver={(e) => {
@@ -536,206 +612,264 @@ export function Composer({
         aria-label={t('composer.inputLabel', { defaultValue: 'Type a message' })}
       />
 
-      {/* Toolbar row — single line, no wrap: secondary actions live in a
-          scrollable left zone so a narrow screen never breaks the layout, while
-          the model picker + send stay pinned on the right and always reachable. */}
-      <div className="flex items-center gap-1 px-2 pb-2.5 pt-1 sm:px-2.5">
-        <input
-          type="file"
-          ref={fileRef}
-          hidden
-          multiple
-          onChange={(e) => {
-            void handleAttach(e.currentTarget.files)
-            e.currentTarget.value = ''
-          }}
-        />
-        <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto scrollbar-none">
-          {/* file input lives above; left zone holds the secondary actions */}
+      {/* Toolbar row. The file input is shared by both layouts. On phones every
+          secondary action collapses into a single "+" menu (Gemini/ChatGPT-mobile
+          pattern); on ≥sm screens they sit inline in a scrollable left zone. */}
+      <input
+        type="file"
+        ref={fileRef}
+        hidden
+        multiple
+        onChange={(e) => {
+          void handleAttach(e.currentTarget.files)
+          e.currentTarget.value = ''
+        }}
+      />
 
-        <Tooltip content={t('composer.attach')}>
-          <button
-            type="button"
-            onClick={() => fileRef.current?.click()}
-            aria-label={t('composer.attach')}
-            className="inline-flex items-center justify-center size-8 max-sm:size-9 rounded-[8px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-          >
-            <Paperclip size={15} aria-hidden />
-          </button>
-        </Tooltip>
-
-        <Tooltip content={t('composer.addImage')}>
-          <button
-            type="button"
-            onClick={() => {
-              const input = fileRef.current
-              if (!input) return
-              input.accept = 'image/*'
-              input.click()
-              input.accept = ''
+      {isMobile ? (
+        /* ── Mobile: [+ menu] [model] … [send] ── */
+        <div className="flex items-center gap-1.5 px-2 pb-2.5 pt-1">
+          <Popover
+            open={moreOpen}
+            onOpenChange={(o) => {
+              setMoreOpen(o)
+              if (o && onKBChange) void loadKBList()
             }}
-            aria-label={t('composer.addImage')}
-            className="inline-flex items-center justify-center size-8 max-sm:size-9 rounded-[8px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
           >
-            <ImageIcon size={15} aria-hidden />
-          </button>
-        </Tooltip>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                aria-label={t('composer.more', { defaultValue: 'More' })}
+                className={cn(
+                  'relative inline-flex shrink-0 items-center justify-center size-10 rounded-full interactive',
+                  'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+                )}
+              >
+                <Plus size={18} aria-hidden />
+                {hasActiveTool ? (
+                  <span
+                    className="absolute right-1 top-1 size-2 rounded-full bg-[var(--color-accent)] ring-2 ring-[var(--color-surface)]"
+                    aria-hidden
+                  />
+                ) : null}
+              </button>
+            </PopoverTrigger>
+            <PopoverContent side="top" align="start" sideOffset={10} className="w-60 p-1.5">
+              <button
+                type="button"
+                onClick={() => {
+                  setMoreOpen(false)
+                  fileRef.current?.click()
+                }}
+                className="flex w-full items-center gap-2.5 rounded-[8px] px-2.5 py-2 text-left text-sm text-[var(--color-fg)] hover:bg-[var(--color-bg-muted)]"
+              >
+                <Paperclip size={16} className="text-[var(--color-fg-muted)]" aria-hidden />
+                {t('composer.attach')}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setMoreOpen(false)
+                  const input = fileRef.current
+                  if (!input) return
+                  input.accept = 'image/*'
+                  input.click()
+                  input.accept = ''
+                }}
+                className="flex w-full items-center gap-2.5 rounded-[8px] px-2.5 py-2 text-left text-sm text-[var(--color-fg)] hover:bg-[var(--color-bg-muted)]"
+              >
+                <ImageIcon size={16} className="text-[var(--color-fg-muted)]" aria-hidden />
+                {t('composer.addImage')}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setMoreOpen(false)
+                  void toggleVoice()
+                }}
+                disabled={transcribing}
+                className={cn(
+                  'flex w-full items-center gap-2.5 rounded-[8px] px-2.5 py-2 text-left text-sm hover:bg-[var(--color-bg-muted)]',
+                  recording ? 'text-[var(--color-danger)]' : 'text-[var(--color-fg)]',
+                  transcribing && 'cursor-not-allowed opacity-60',
+                )}
+              >
+                <Mic size={16} className={cn(!recording && 'text-[var(--color-fg-muted)]')} aria-hidden />
+                {recording ? t('composer.voiceStop') : t('composer.voice')}
+              </button>
 
-        <Tooltip content={recording ? t('composer.voiceStop') : t('composer.voice')}>
-          <button
-            type="button"
-            onClick={() => void toggleVoice()}
-            disabled={transcribing}
-            aria-label={t('composer.voice')}
-            aria-pressed={recording}
-            className={cn(
-              'inline-flex items-center justify-center size-8 max-sm:size-9 rounded-[8px] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-              recording
-                ? 'bg-[var(--color-danger-soft)] text-[var(--color-danger)]'
-                : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
-              transcribing && 'opacity-60 cursor-not-allowed',
-            )}
-          >
-            <Mic
-              size={15}
-              aria-hidden
-              className={cn(recording && 'animate-[streaming-pulse_1600ms_ease-in-out_infinite]')}
-            />
-          </button>
-        </Tooltip>
+              {researchEnabled ? (
+                <>
+                  <div className="my-1 h-px bg-[var(--color-divider)]" aria-hidden />
+                  <button
+                    type="button"
+                    onClick={() => setMode((m) => (m === 'deep-research' ? 'default' : 'deep-research'))}
+                    aria-pressed={mode === 'deep-research'}
+                    className={cn(
+                      'flex w-full items-center gap-2.5 rounded-[8px] px-2.5 py-2 text-left text-sm hover:bg-[var(--color-bg-muted)]',
+                      mode === 'deep-research' ? 'text-[var(--color-secondary)]' : 'text-[var(--color-fg)]',
+                    )}
+                  >
+                    <Telescope
+                      size={16}
+                      className={cn(mode !== 'deep-research' && 'text-[var(--color-fg-muted)]')}
+                      aria-hidden
+                    />
+                    <span className="flex-1">{t('composer.research')}</span>
+                    {mode === 'deep-research' ? <Check size={15} aria-hidden /> : null}
+                  </button>
+                </>
+              ) : null}
 
-        <div className="mx-1 h-5 w-px bg-[var(--color-divider)]" aria-hidden />
+              {onKBChange ? (
+                <>
+                  <div className="my-1 h-px bg-[var(--color-divider)]" aria-hidden />
+                  <p className="px-2.5 pb-1 pt-0.5 text-[11px] font-medium uppercase tracking-wider text-[var(--color-fg-subtle)]">
+                    {t('composer.knowledgeBases')}
+                  </p>
+                  {kbChecklist}
+                </>
+              ) : null}
 
-        {researchEnabled ? (
-          <Tooltip content={t('composer.researchTooltip')}>
-            <button
-              type="button"
-              onClick={() => setMode((m) => (m === 'deep-research' ? 'default' : 'deep-research'))}
-              aria-pressed={mode === 'deep-research'}
-              aria-label={t('composer.researchTooltip')}
-              className={cn(
-                'inline-flex items-center gap-1.5 h-8 max-sm:h-9 px-2 rounded-[8px] text-[12px] font-medium interactive',
-                mode === 'deep-research'
-                  ? 'bg-[var(--color-secondary-soft)] text-[var(--color-secondary)]'
-                  : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-              )}
-            >
-              <Telescope size={14} aria-hidden />
-              <span className="max-sm:hidden">{t('composer.research')}</span>
-            </button>
-          </Tooltip>
-        ) : null}
+              {paramControls ? (
+                <>
+                  <div className="my-1 h-px bg-[var(--color-divider)]" aria-hidden />
+                  <div className="px-1.5 py-1">
+                    <ParamControls controls={paramControls} values={paramValues} onChange={setParamValues} />
+                  </div>
+                </>
+              ) : null}
+            </PopoverContent>
+          </Popover>
 
-        {/* Per-model param_controls — below the input, to the left of the KB
-            selector (§2.3-G). The picked values flow up via onSubmit(). */}
-        {paramControls ? (
-          <div className="flex flex-wrap items-center gap-1.5">
-            <ParamControls controls={paramControls} values={paramValues} onChange={setParamValues} />
-          </div>
-        ) : null}
+          <ModelPicker value={modelId} onChange={onModelChange} className="min-w-0 max-w-[44vw]" />
 
-        {/* §7.2-7 📚 知识库选择器 — 绑定 kb_ids 到当前会话 */}
-        {onKBChange ? (
-          <Popover>
-            <Tooltip content={t('composer.knowledgeBases')}>
-              <PopoverTrigger asChild>
+          <div className="ml-auto">{sendBtn}</div>
+        </div>
+      ) : (
+        /* ── Desktop: inline scrollable left zone + pinned right zone ── */
+        <div className="flex items-center gap-1 px-2.5 pb-2.5 pt-1">
+          <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto scrollbar-none">
+            <Tooltip content={t('composer.attach')}>
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                aria-label={t('composer.attach')}
+                className="inline-flex items-center justify-center size-8 rounded-[8px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+              >
+                <Paperclip size={15} aria-hidden />
+              </button>
+            </Tooltip>
+
+            <Tooltip content={t('composer.addImage')}>
+              <button
+                type="button"
+                onClick={() => {
+                  const input = fileRef.current
+                  if (!input) return
+                  input.accept = 'image/*'
+                  input.click()
+                  input.accept = ''
+                }}
+                aria-label={t('composer.addImage')}
+                className="inline-flex items-center justify-center size-8 rounded-[8px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+              >
+                <ImageIcon size={15} aria-hidden />
+              </button>
+            </Tooltip>
+
+            <Tooltip content={recording ? t('composer.voiceStop') : t('composer.voice')}>
+              <button
+                type="button"
+                onClick={() => void toggleVoice()}
+                disabled={transcribing}
+                aria-label={t('composer.voice')}
+                aria-pressed={recording}
+                className={cn(
+                  'inline-flex items-center justify-center size-8 rounded-[8px] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+                  recording
+                    ? 'bg-[var(--color-danger-soft)] text-[var(--color-danger)]'
+                    : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
+                  transcribing && 'opacity-60 cursor-not-allowed',
+                )}
+              >
+                <Mic
+                  size={15}
+                  aria-hidden
+                  className={cn(recording && 'animate-[streaming-pulse_1600ms_ease-in-out_infinite]')}
+                />
+              </button>
+            </Tooltip>
+
+            <div className="mx-1 h-5 w-px bg-[var(--color-divider)]" aria-hidden />
+
+            {researchEnabled ? (
+              <Tooltip content={t('composer.researchTooltip')}>
                 <button
                   type="button"
-                  aria-label={t('composer.knowledgeBases')}
+                  onClick={() => setMode((m) => (m === 'deep-research' ? 'default' : 'deep-research'))}
+                  aria-pressed={mode === 'deep-research'}
+                  aria-label={t('composer.researchTooltip')}
                   className={cn(
-                    'inline-flex items-center gap-1.5 h-8 max-sm:h-9 px-2 rounded-[8px] text-[12px] font-medium interactive',
-                    (kbIds?.length ?? 0) > 0
+                    'inline-flex items-center gap-1.5 h-8 px-2 rounded-[8px] text-[12px] font-medium interactive',
+                    mode === 'deep-research'
                       ? 'bg-[var(--color-secondary-soft)] text-[var(--color-secondary)]'
                       : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
                     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
                   )}
                 >
-                  <BookOpen size={14} aria-hidden />
-                  {(kbIds?.length ?? 0) > 0 ? <span className="text-[11px]">{kbIds?.length}</span> : null}
+                  <Telescope size={14} aria-hidden />
+                  <span>{t('composer.research')}</span>
                 </button>
-              </PopoverTrigger>
-            </Tooltip>
-            <PopoverContent align="start" className="w-64 p-2" onOpenAutoFocus={() => void loadKBList()}>
-              <p className="px-2 pb-1 pt-0.5 text-[11px] font-medium uppercase tracking-wider text-[var(--color-fg-subtle)]">
-                {t('composer.knowledgeBases')}
-              </p>
-              {kbList.length === 0 ? (
-                <p className="px-2 py-2 text-sm text-[var(--color-fg-muted)]">{t('composer.noKnowledgeBases')}</p>
-              ) : (
-                kbList.map((kb) => {
-                  const checked = kbIds?.includes(kb.id) ?? false
-                  return (
+              </Tooltip>
+            ) : null}
+
+            {/* Per-model param_controls (§2.3-G). Picked values flow up via onSubmit(). */}
+            {paramControls ? (
+              <div className="flex flex-wrap items-center gap-1.5">
+                <ParamControls controls={paramControls} values={paramValues} onChange={setParamValues} />
+              </div>
+            ) : null}
+
+            {/* §7.2-7 📚 知识库选择器 — 绑定 kb_ids 到当前会话 */}
+            {onKBChange ? (
+              <Popover>
+                <Tooltip content={t('composer.knowledgeBases')}>
+                  <PopoverTrigger asChild>
                     <button
-                      key={kb.id}
                       type="button"
-                      onClick={() =>
-                        onKBChange(checked ? (kbIds ?? []).filter((x) => x !== kb.id) : [...(kbIds ?? []), kb.id])
-                      }
-                      className="flex w-full items-center gap-2 rounded-[8px] px-2 py-1.5 text-left text-sm text-[var(--color-fg)] hover:bg-[var(--color-bg-muted)]"
+                      aria-label={t('composer.knowledgeBases')}
+                      className={cn(
+                        'inline-flex items-center gap-1.5 h-8 px-2 rounded-[8px] text-[12px] font-medium interactive',
+                        (kbIds?.length ?? 0) > 0
+                          ? 'bg-[var(--color-secondary-soft)] text-[var(--color-secondary)]'
+                          : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
+                        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+                      )}
                     >
-                      <span
-                        className={cn(
-                          'inline-flex size-4 items-center justify-center rounded border',
-                          checked
-                            ? 'border-[var(--color-accent)] bg-[var(--color-accent)] text-white'
-                            : 'border-[var(--color-border-strong)]',
-                        )}
-                      >
-                        {checked ? <Check size={11} aria-hidden /> : null}
-                      </span>
-                      <span className="truncate">{kb.name}</span>
+                      <BookOpen size={14} aria-hidden />
+                      {(kbIds?.length ?? 0) > 0 ? <span className="text-[11px]">{kbIds?.length}</span> : null}
                     </button>
-                  )
-                })
-              )}
-            </PopoverContent>
-          </Popover>
-        ) : null}
+                  </PopoverTrigger>
+                </Tooltip>
+                <PopoverContent align="start" className="w-64 p-2" onOpenAutoFocus={() => void loadKBList()}>
+                  <p className="px-2 pb-1 pt-0.5 text-[11px] font-medium uppercase tracking-wider text-[var(--color-fg-subtle)]">
+                    {t('composer.knowledgeBases')}
+                  </p>
+                  {kbChecklist}
+                </PopoverContent>
+              </Popover>
+            ) : null}
+          </div>
 
-        {/* Canvas mode is hidden until the backend implements it — arming
-            mode:'canvas' currently produces a normal answer (only deep-research
-            is wired). Deep Research above stays available. */}
-
+          {/* Right zone — pinned, never wraps: model picker + send/stop. */}
+          <div className="flex shrink-0 items-center gap-1.5 pl-1">
+            <ModelPicker value={modelId} onChange={onModelChange} />
+            {sendBtn}
+          </div>
         </div>
-
-        {/* Right zone — pinned, never wraps: model picker (compact on phones) +
-            send/stop. */}
-        <div className="flex shrink-0 items-center gap-1.5 pl-1">
-          <ModelPicker value={modelId} onChange={onModelChange} className="max-sm:max-w-[40vw]" />
-
-          {streaming ? (
-            <Tooltip content={t('composer.stop')}>
-              <button
-                type="button"
-                onClick={onStop}
-                aria-label={t('composer.stop')}
-                className="inline-flex items-center justify-center size-9 rounded-[10px] bg-[var(--color-fg)] text-[var(--color-fg-inverted)] hover:opacity-90 interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-              >
-                <StopCircle size={16} aria-hidden />
-              </button>
-            </Tooltip>
-          ) : (
-            <Tooltip content={t('composer.send', { kbd: modKey() })}>
-              <button
-                type="button"
-                onClick={handleSubmit}
-                disabled={!canSubmit}
-                aria-label={t('actions.send', { ns: 'common' })}
-                className={cn(
-                  'inline-flex items-center justify-center size-9 rounded-[10px] interactive',
-                  canSubmit
-                    ? 'bg-[var(--color-accent)] text-[var(--color-accent-fg)] hover:bg-[var(--color-accent-hover)] shadow-[var(--shadow-xs)]'
-                    : 'bg-[var(--color-bg-muted)] text-[var(--color-fg-faint)] cursor-not-allowed',
-                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-                )}
-              >
-                {uploading ? <Loader2 size={16} className="animate-spin" aria-hidden /> : <ArrowUp size={16} aria-hidden />}
-              </button>
-            </Tooltip>
-          )}
-        </div>
-      </div>
+      )}
     </div>
   )
 }
