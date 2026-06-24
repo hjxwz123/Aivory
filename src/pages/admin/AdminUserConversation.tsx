@@ -167,7 +167,7 @@ function buildBranchPath(all: Message[], activeLeafId: string): Message[] {
     const roots = childrenOf.get('') ?? []
     let cur: Message | undefined = roots[roots.length - 1]
     while (cur) {
-      const kids = childrenOf.get(cur.id) ?? []
+      const kids: Message[] = childrenOf.get(cur.id) ?? []
       if (kids.length === 0) break
       cur = kids[kids.length - 1]
     }
@@ -199,7 +199,7 @@ function deepestLeaf(all: Message[], startId: string): string {
   const childrenOf = childrenIndex(all)
   let cur = startId
   for (;;) {
-    const kids = childrenOf.get(cur) ?? []
+    const kids: Message[] = childrenOf.get(cur) ?? []
     if (kids.length === 0) return cur
     cur = kids[kids.length - 1].id
   }
