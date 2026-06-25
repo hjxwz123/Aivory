@@ -60,12 +60,17 @@ export function StylePicker({ value, onChange, className }: StylePickerProps) {
       <PopoverContent
         side="top"
         align="start"
-        className="w-72 p-2"
+        // collisionPadding keeps the popover ≥12px from every viewport edge and
+        // makes Radix expose the remaining space as --radix-popper-available-height,
+        // so a long style list SCROLLS instead of overflowing off-screen.
+        collisionPadding={12}
+        className="w-[22rem] max-w-[calc(100vw-1.5rem)] max-h-[var(--radix-popper-available-height)] overflow-y-auto p-2"
         onOpenAutoFocus={() => {
           if (!loaded) void load()
         }}
       >
-        <p className="px-1 pb-1.5 text-[11px] font-medium uppercase tracking-wider text-[var(--color-fg-subtle)]">
+        {/* Sticky heading so it stays visible while the grid scrolls. */}
+        <p className="sticky top-0 z-10 -mx-2 -mt-2 mb-1 bg-[var(--color-surface-raised)] px-3 pb-1.5 pt-2 text-[11px] font-medium uppercase tracking-wider text-[var(--color-fg-subtle)]">
           {t('composer.styleHeading', { defaultValue: 'Image style' })}
         </p>
         {styles.length === 0 ? (
@@ -73,7 +78,7 @@ export function StylePicker({ value, onChange, className }: StylePickerProps) {
             {loaded ? t('composer.noStyles', { defaultValue: 'No styles configured.' }) : '…'}
           </p>
         ) : (
-          <div className="grid grid-cols-3 gap-1.5">
+          <div className="grid grid-cols-3 gap-2">
             <Swatch active={!value} label={t('composer.styleNone', { defaultValue: 'None' })} onClick={() => onChange('')} />
             {styles.map((s) => (
               <Swatch

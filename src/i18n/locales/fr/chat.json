@@ -16,7 +16,8 @@
       "Qu'est-ce qui vous intrigue ?"
     ],
     "lead": "Demandez ce que vous voulez. Plans, code, décisions, lectures — Aurelia réfléchira à vos côtés.",
-    "disclaimer": "Aurelia peut faire des erreurs. Vérifiez tout ce qui est important."
+    "disclaimer": "Aurelia peut faire des erreurs. Vérifiez tout ce qui est important.",
+    "drawLead": "Décrivez ce que vous voulez créer — votre galerie est ci-dessous."
   },
   "composer": {
     "placeholder": "Demandez ce que vous voulez — ou collez vos réflexions.",
@@ -357,5 +358,11 @@
   "image": {
     "optimizing": "Affinage du prompt…",
     "generating": "Création de l'image…"
+  },
+  "gallery": {
+    "heading": "Ma galerie",
+    "empty": "Aucune image pour l'instant — créez-en une ci-dessus.",
+    "loadMore": "Charger plus",
+    "loadFailed": "Échec du chargement"
   }
 }

@@ -16,7 +16,8 @@
       "What are you curious about?"
     ],
     "lead": "Ask anything. Outlines, code, decisions, reading — Aurelia will think alongside you.",
-    "disclaimer": "Aurelia can make mistakes. Check anything important."
+    "disclaimer": "Aurelia can make mistakes. Check anything important.",
+    "drawLead": "Describe what you want to create — your gallery is below."
   },
   "composer": {
     "placeholder": "Ask anything — or paste your thinking.",
@@ -357,5 +358,11 @@
   "image": {
     "optimizing": "Refining your prompt…",
     "generating": "Painting your image…"
+  },
+  "gallery": {
+    "heading": "My gallery",
+    "empty": "No images yet — draw something above.",
+    "loadMore": "Load more",
+    "loadFailed": "Failed to load"
   }
 }

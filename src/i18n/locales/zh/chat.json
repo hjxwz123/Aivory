@@ -16,7 +16,8 @@
       "对什么感到好奇？"
     ],
     "lead": "随便问点什么——提纲、代码、决策、阅读，Aurelia 会与你一起思考。",
-    "disclaimer": "Aurelia 也会出错。重要的内容请自行核验。"
+    "disclaimer": "Aurelia 也会出错。重要的内容请自行核验。",
+    "drawLead": "描述你想画的画面——你的作品在下方。"
   },
   "composer": {
     "placeholder": "随便问点什么——或把你的思考粘进来。",
@@ -357,5 +358,11 @@
   "image": {
     "optimizing": "正在优化提示词…",
     "generating": "正在绘制图片…"
+  },
+  "gallery": {
+    "heading": "我的画廊",
+    "empty": "还没有作品,在上方画一张吧。",
+    "loadMore": "加载更多",
+    "loadFailed": "加载失败"
   }
 }

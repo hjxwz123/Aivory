@@ -127,6 +127,8 @@ func NewRouter(d Deps) http.Handler {
 	// §4.20 Image styles — enabled catalog for the composer style picker (hidden
 	// prompt stripped). Image generation itself reuses the chat message endpoint.
 	mux.handle("GET", "/api/image/styles", requireAuth(d, listImageStylesPublic))
+	// §4.20 the signed-in user's own generated-image gallery.
+	mux.handle("GET", "/api/me/images", requireAuth(d, listMyImages))
 	mux.handle("GET", "/api/user-groups", requireAuth(d, listUserGroupsPublic))
 	mux.handle("POST", "/api/audio/transcriptions", requireAuth(d, transcribeAudioHandler))
 
