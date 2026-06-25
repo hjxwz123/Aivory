@@ -90,6 +90,7 @@ export default function AdminUserConversation() {
   const modelName = (mid?: string) => (mid ? getModelById(mid)?.label ?? mid : '')
   const convUser = useMemo(() => users.find((x) => x.id === (conv?.user_id || id)), [users, conv, id])
   const userLabel = convUser?.name || convUser?.email || ''
+  const userMessageMarkdown = convUser?.settings?.user_message_markdown === true
 
   return (
     <div>
@@ -142,6 +143,7 @@ export default function AdminUserConversation() {
                 message={m}
                 userName={userLabel}
                 readOnly
+                userMessageMarkdown={userMessageMarkdown}
                 onBranchSwitch={(leafId) => setActiveLeaf(deepestLeaf(tree, leafId))}
               />
             ))}

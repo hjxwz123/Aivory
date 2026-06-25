@@ -83,6 +83,8 @@ interface MessageRowProps {
    * edit affordances — there are no mutation callbacks to wire in that context.
    */
   readOnly?: boolean
+  /** Render user-authored message text through the markdown renderer. */
+  userMessageMarkdown?: boolean
 }
 
 // Compact generation time: "3.2s" under a minute, "1m4s" beyond.
@@ -99,7 +101,7 @@ function formatCredits(credits: number): string {
   return credits.toLocaleString(undefined, { maximumFractionDigits: 2 })
 }
 
-function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, onLike, onDislike, onBranchSwitch, onFork, onDelete, readOnly = false }: MessageRowProps) {
+function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, onLike, onDislike, onBranchSwitch, onFork, onDelete, readOnly = false, userMessageMarkdown = false }: MessageRowProps) {
   const isUser = message.role === 'user'
   // §7.2-6: assistant 气泡标注生成它的模型名 + 图标。
   const model = useModels((s) => (message.modelId ? s.getById(message.modelId) : undefined))
@@ -261,7 +263,8 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
             className={cn(
               'rounded-[18px] px-4 py-2.5',
               'bg-[var(--color-user-bubble)] border border-[var(--color-user-bubble-border)]',
-              'text-[var(--color-fg)] text-[0.9375rem] leading-relaxed whitespace-pre-wrap break-words',
+              'text-[var(--color-fg)] text-[0.9375rem] leading-relaxed',
+              userMessageMarkdown ? 'min-w-0' : 'whitespace-pre-wrap break-words',
               'max-w-full',
             )}
           >
@@ -308,7 +311,11 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
                     change), so the clean path is blocked. */}
               </div>
             ) : null}
-            {message.content}
+            {userMessageMarkdown ? (
+              <Markdown content={message.content} blockKeyPrefix={`${message.id}-user`} className="prose-user" />
+            ) : (
+              message.content
+            )}
           </div>
         ) : (
           <div className="w-full text-[var(--color-fg)]">
@@ -826,4 +833,3 @@ function KindIcon({ kind }: { kind: Attachment['kind'] }) {
       return <FileText size={12} className={iconClass} aria-hidden />
   }
 }
-

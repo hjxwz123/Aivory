@@ -165,6 +165,10 @@
       "comfortable": "Centré",
       "full": "Pleine largeur"
     },
+    "userMessageMarkdown": {
+      "label": "Markdown dans vos messages",
+      "body": "Affiche vos messages envoyés avec le même rendu Markdown, blocs de code, tableaux et formules que les réponses de l'assistant. Désactivé par défaut."
+    },
     "fontSize": "Taille de police",
     "fontSizeBody": "Affecte le corps des messages et le texte.",
     "language": "Langue",
