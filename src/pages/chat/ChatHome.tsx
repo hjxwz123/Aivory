@@ -3,12 +3,15 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { gsap } from 'gsap'
 import { useGSAP } from '@gsap/react'
+import { ChevronDown } from 'lucide-react'
 import { Composer } from '@/components/chat/composer'
 import { SuggestionCard } from '@/components/chat/suggestion-card'
+import { MyGallery } from '@/components/chat/my-gallery'
 import { SUGGESTIONS } from '@/data/suggestions'
 import { useConversations } from '@/store/conversations'
 import { useAuth } from '@/store/auth'
 import { useModels } from '@/store/models'
+import { cn } from '@/lib/utils'
 import type { Attachment, Conversation } from '@/types/chat'
 
 gsap.registerPlugin(useGSAP)
@@ -44,7 +47,8 @@ export default function ChatHome() {
   // §4.20: the sidebar "Draw" entry links here with ?mode=draw to open the
   // composer pre-set to an image model (drawing mode).
   const [searchParams] = useSearchParams()
-  const drawDefault = searchParams.get('mode') === 'draw' && imageModels[0] ? imageModels[0].id : ''
+  const drawMode = searchParams.get('mode') === 'draw'
+  const drawDefault = drawMode && imageModels[0] ? imageModels[0].id : ''
 
   // The model the user picks in the composer before the conversation exists.
   // Falls back to the draw default (if any), then the async-loaded chat default,
@@ -157,14 +161,23 @@ export default function ChatHome() {
         className="home-glow pointer-events-none absolute left-1/2 top-[14%] -z-0 size-[34rem] max-w-[88vw] -translate-x-1/2 rounded-full bg-[var(--color-accent)] opacity-[0.07] blur-[90px]"
         aria-hidden
       />
-      <div className="relative z-10 mx-auto w-full max-w-[var(--layout-message-max-w)] px-5 sm:px-8 py-12 flex-1 flex flex-col justify-center">
+      <div
+        className={cn(
+          'relative z-10 mx-auto w-full max-w-[var(--layout-message-max-w)] px-5 sm:px-8 py-12 flex flex-col',
+          // Chat home centers vertically; drawing mode top-aligns so the gallery
+          // below the composer is reachable by scrolling.
+          !drawMode && 'flex-1 justify-center',
+        )}
+      >
         <header className="text-center">
           <h1 className="home-rise font-sans font-semibold tracking-tight text-[2rem] sm:text-[2.5rem] leading-[1.12] text-[var(--color-fg)] text-balance">
             {greeting}{' '}
             <span className="text-[var(--color-fg-muted)] font-normal">{subtitle}</span>
           </h1>
           <p className="home-rise mt-3.5 text-[var(--color-fg-muted)] text-sm sm:text-base text-pretty mx-auto max-w-2xl">
-            {t('empty.lead')}
+            {drawMode
+              ? t('empty.drawLead', { defaultValue: 'Describe what you want to create — your gallery is below.' })
+              : t('empty.lead')}
           </p>
         </header>
 
@@ -178,30 +191,42 @@ export default function ChatHome() {
           />
         </div>
 
-        <div className="mt-10 mx-auto w-full max-w-[44rem]">
-          {/* Single row, fixed-width cards, horizontally scrollable (snap). The
-              scrollbar is hidden; cards overflow the 44rem rail and swipe. */}
-          <div className="flex gap-3 overflow-x-auto px-1 -mx-1 pb-2 snap-x snap-mandatory [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            {cards.map((s) => {
-              const title = t(s.titleKey)
-              const prompt = t(s.promptKey)
-              return (
-                <div key={s.id} className="home-card w-[15.5rem] shrink-0 snap-start">
-                  <SuggestionCard
-                    icon={s.icon}
-                    title={title}
-                    prompt={prompt}
-                    onClick={() => void startNew(prompt, [])}
-                    className="h-full"
-                  />
-                </div>
-              )
-            })}
+        {drawMode ? (
+          /* §4.20 drawing mode: no suggestion prompts — a gentle scroll cue, then
+             the gallery "plate section" (which owns its editorial header + reveal).
+             Wider than the composer column so images get a larger field. */
+          <div className="mt-16 w-full sm:mt-20">
+            <div className="home-rise mb-12 flex justify-center text-[var(--color-fg-faint)]">
+              <ChevronDown size={18} strokeWidth={1.5} aria-hidden className="animate-[bob_1.6s_ease-in-out_infinite]" />
+            </div>
+            <MyGallery />
           </div>
-          <p className="mt-6 text-center text-[11px] text-[var(--color-fg-subtle)]">
-            {t('empty.disclaimer')}
-          </p>
-        </div>
+        ) : (
+          <div className="mt-10 mx-auto w-full max-w-[44rem]">
+            {/* Single row, fixed-width cards, horizontally scrollable (snap). The
+                scrollbar is hidden; cards overflow the 44rem rail and swipe. */}
+            <div className="flex gap-3 overflow-x-auto px-1 -mx-1 pb-2 snap-x snap-mandatory [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              {cards.map((s) => {
+                const title = t(s.titleKey)
+                const prompt = t(s.promptKey)
+                return (
+                  <div key={s.id} className="home-card w-[15.5rem] shrink-0 snap-start">
+                    <SuggestionCard
+                      icon={s.icon}
+                      title={title}
+                      prompt={prompt}
+                      onClick={() => void startNew(prompt, [])}
+                      className="h-full"
+                    />
+                  </div>
+                )
+              })}
+            </div>
+            <p className="mt-6 text-center text-[11px] text-[var(--color-fg-subtle)]">
+              {t('empty.disclaimer')}
+            </p>
+          </div>
+        )}
       </div>
     </div>
   )

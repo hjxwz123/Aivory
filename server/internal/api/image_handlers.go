@@ -115,6 +115,25 @@ func deleteImageStyleAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
+// listMyImages returns the signed-in user's own generated-image gallery (§4.20).
+// Each item links back to the conversation that produced it; bytes are served by
+// the existing /api/artifacts/:id (ownership-checked).
+func listMyImages(d Deps, w http.ResponseWriter, r *http.Request) {
+	u := authUser(r)
+	q := r.URL.Query()
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	offset, _ := strconv.Atoi(q.Get("offset"))
+	imgs, err := store.ListUserImageArtifacts(r.Context(), d.DB, u.ID, limit, offset)
+	if err != nil {
+		writeError(w, 500, err)
+		return
+	}
+	for i := range imgs {
+		imgs[i].URL = "/api/artifacts/" + imgs[i].ID
+	}
+	writeJSON(w, 200, imgs)
+}
+
 // listUserImagesAdmin returns a user's generated-image gallery (§8.1 drill-down).
 // Each image links back to the conversation that produced it. Admins view the
 // bytes via /api/artifacts/:id (downloadArtifactHandler bypasses ownership).

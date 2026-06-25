@@ -265,6 +265,13 @@
   100% { transform: translateX(400%); }
 }
 
+/* §4.20 gentle "scroll down" cue between the draw composer and the gallery.
+   prefers-reduced-motion zeroes it (static chevron). */
+@keyframes bob {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(4px); }
+}
+
 /* Jump-to-message flash (content search → scroll to a specific message). A brief
  * accent wash around the target row so the eye lands on it after the scroll. */
 @keyframes msg-jump-flash {

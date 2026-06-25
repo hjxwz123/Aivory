@@ -147,6 +147,9 @@ export const modelsApi = {
 export const imageApi = {
   /** Enabled styles for the composer style picker (hidden prompt stripped). */
   styles: () => api<ApiImageStyle[]>('/image/styles'),
+  /** The signed-in user's own generated-image gallery (§4.20). */
+  myImages: (limit = 60, offset = 0) =>
+    api<ApiAdminImage[]>(`/me/images?limit=${limit}&offset=${offset}`),
 }
 
 export const skillsApi = {
