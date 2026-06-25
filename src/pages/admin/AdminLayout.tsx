@@ -31,6 +31,18 @@ interface AdminSection {
 // entry per section, and the section's pages appear as tabs in the content area.
 const SECTIONS: AdminSection[] = [
   {
+    key: 'system',
+    icon: Settings2,
+    to: '/admin/settings',
+    tabs: [
+      { to: '/admin/settings', labelKey: 'admin:settings.title' },
+      { to: '/admin/backup', labelKey: 'admin:backup.title' },
+      { to: '/admin/oauth', labelKey: 'admin:oauth.title' },
+      { to: '/admin/moderation', labelKey: 'admin:moderation.title' },
+      { to: '/admin/announcement', labelKey: 'admin:announcement.title' },
+    ],
+  },
+  {
     key: 'models',
     icon: Cpu,
     to: '/admin/channels',
@@ -67,18 +79,6 @@ const SECTIONS: AdminSection[] = [
     tabs: [
       { to: '/admin/usage', labelKey: 'admin:usage.title' },
       { to: '/admin/analytics', labelKey: 'admin:analytics.title' },
-    ],
-  },
-  {
-    key: 'system',
-    icon: Settings2,
-    to: '/admin/settings',
-    tabs: [
-      { to: '/admin/settings', labelKey: 'admin:settings.title' },
-      { to: '/admin/backup', labelKey: 'admin:backup.title' },
-      { to: '/admin/oauth', labelKey: 'admin:oauth.title' },
-      { to: '/admin/moderation', labelKey: 'admin:moderation.title' },
-      { to: '/admin/announcement', labelKey: 'admin:announcement.title' },
     ],
   },
 ]

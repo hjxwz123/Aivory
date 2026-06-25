@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect } from 'react'
-import { Route, Routes, useLocation, useNavigate } from 'react-router-dom'
+import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { Toaster } from '@/components/ui/toaster'
 import { CommandMenu } from '@/components/command-menu/command-menu'
@@ -167,7 +167,7 @@ export default function App() {
               </Route>
             </Route>
             <Route path="/admin" element={<AdminLayout />}>
-              <Route index element={<AdminChannels />} />
+              <Route index element={<Navigate to="/admin/settings" replace />} />
               <Route path="channels" element={<AdminChannels />} />
               <Route path="models" element={<AdminModels />} />
               <Route path="models/:id" element={<AdminModelEdit />} />
