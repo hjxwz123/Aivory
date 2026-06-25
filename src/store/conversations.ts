@@ -33,6 +33,13 @@ import type {
 } from '@/types/chat'
 import { uid } from '@/lib/utils'
 import { toast } from '@/hooks/use-toast'
+import i18n from '@/i18n'
+
+// The user's current UI language, sent with each turn so the backend can anchor
+// the reply-language instruction (§ reply language). Falls back to 'en'.
+function currentLocale(): string {
+  return i18n.language || 'en'
+}
 
 // Sidebar conversation page size. Kept at the server default so users with ≤200
 // conversations load everything up front (no behaviour change); heavier users
@@ -644,6 +651,8 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
           attachments: input.attachments?.map(attachmentToApi),
           params: input.params,
           image_style_id: input.imageStyleId,
+          // UI language → backend anchors the reply language to it (§ reply language).
+          locale: currentLocale(),
         },
         abort.signal,
       )) {
@@ -952,7 +961,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
       let lastCitations: Citation[] = []
       for await (const frame of streamSSE(
         `/conversations/${encodeURIComponent(conversationId)}/regenerate`,
-        { assistant_id: assistantId, model_id: modelId, mode, params: conv?.lastParams },
+        { assistant_id: assistantId, model_id: modelId, mode, params: conv?.lastParams, locale: currentLocale() },
         abort.signal,
       )) {
         const ev = frame.data as ApiSseEvent

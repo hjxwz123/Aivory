@@ -401,7 +401,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
                   </div>
                 ) : null}
                 <div data-inline-msg={message.id} data-inline-role={message.role}>
-                  <Markdown content={message.content} live={Boolean(message.streaming)} blockKeyPrefix={message.id} citations={message.citations} />
+                  <Markdown content={message.content} live={Boolean(message.streaming)} blockKeyPrefix={message.id} citations={message.citations} className="prose-full" />
                 </div>
                 {message.streaming ? (
                   <span

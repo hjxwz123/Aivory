@@ -29,6 +29,9 @@ type postMessageReq struct {
 	ParamOverrides map[string]any   `json:"params"`
 	// ImageStyleID selects an admin image style for an image-mode turn (§4.20).
 	ImageStyleID string `json:"image_style_id"`
+	// Locale is the user's current UI language (i18next code, e.g. "en", "zh");
+	// drives the reply-language instruction (§ reply language).
+	Locale string `json:"locale"`
 }
 
 // postMessageHandler is the SSE-streaming endpoint. The orchestrator owns the
@@ -136,6 +139,7 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		Mode:           req.Mode,
 		ParamOverrides: req.ParamOverrides,
 		ImageStyleID:   req.ImageStyleID,
+		Locale:         req.Locale,
 	}, func(ev llm.SseEvent) {
 		_ = writer.Send(ev, ev.Type)
 	})
@@ -163,6 +167,7 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		ModelID        string         `json:"model_id"`
 		Mode           string         `json:"mode"`
 		ParamOverrides map[string]any `json:"params"`
+		Locale         string         `json:"locale"`
 	}
 	if err := decodeJSON(r, &body); err != nil {
 		writeError(w, 400, errInvalidInput)
@@ -273,6 +278,7 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		ReuseExistingUserMessage: true,
 		Mode:           body.Mode,
 		ParamOverrides: body.ParamOverrides,
+		Locale:         body.Locale,
 	}, func(ev llm.SseEvent) {
 		_ = writer.Send(ev, ev.Type)
 	})
