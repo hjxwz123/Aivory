@@ -159,11 +159,18 @@ export function MessageList({ conversation, scrollToMessageId, jumpKey }: Messag
   const handleEdit = useCallback(
     (id: string, newContent: string, attachments?: Attachment[]) => {
       // §4.15 tree semantics: editing a past user message MUST open a NEW BRANCH
-      // under the same parent. Read the current messages from the store so the
-      // closure stays stable across streamed tokens.
-      const msgs = useConversations.getState().conversations.find((c) => c.id === convId)?.messages
-      const edited = msgs?.find((m) => m.id === id)
-      const parentId = edited?.parentId ?? ''
+      // under the SAME parent. The parent is the message immediately BEFORE the
+      // edited one on the rendered active path (its preceding assistant) — derive
+      // it from POSITION rather than `edited.parentId`. A not-yet-reconciled
+      // optimistic message has an empty `parentId`; trusting it would send
+      // parent_id='' and the backend would re-root the edit onto the FIRST message
+      // (the merge bug, §4.15 R3). '' is correct ONLY for a genuine root edit
+      // (idx === 0). Read from the store at click time so the closure stays stable
+      // across streamed tokens.
+      const msgs = useConversations.getState().conversations.find((c) => c.id === convId)?.messages ?? []
+      const idx = msgs.findIndex((m) => m.id === id)
+      const edited = idx >= 0 ? msgs[idx] : undefined
+      const parentId = edited?.parentId ?? (idx > 0 ? msgs[idx - 1].id : '')
       const carryAtts = attachments ?? edited?.attachments
       void sendMessage({
         conversationId: convId,

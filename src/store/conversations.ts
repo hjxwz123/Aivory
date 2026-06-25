@@ -389,10 +389,11 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
   },
 
   async setActiveLeaf(id, leafId) {
-    // Switching branch abandons the current one — stop its stream first so the
-    // old reply actually halts (and can't overwrite the leaf we're switching to).
-    const cur = get().conversations.find((c) => c.id === id)
-    stopConversationStreams(id, cur?.messages ?? [])
+    // §4.15 R4: switching branches must NOT interrupt a sibling that is still
+    // generating. The server-side generation is detached (context.WithoutCancel)
+    // and active_leaf is only written at message creation, so a switch can never
+    // clobber it — we deliberately do NOT publish a conversation-wide stop here.
+    // The off-path stream keeps running and is picked up when its branch reopens.
     try {
       const resp = await conversationsApi.setActiveLeaf(id, leafId)
       const conv = toLocalConversation(resp.conversation)
@@ -535,12 +536,22 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
       stopConversationStreams(input.conversationId, cur?.messages ?? [])
     }
     const abort = new AbortController()
+    const conv0 = get().conversations.find((c) => c.id === input.conversationId)
+    const userId = uid('m')
     const userMsg: Message = {
-      id: uid('m'),
+      id: userId,
       role: 'user',
       content: input.text,
       createdAt: Date.now(),
       attachments: input.attachments,
+      // Give the optimistic turn a real tree position so it is never parentless
+      // before the post-stream reconcile. A normal append hangs off the current
+      // active leaf (the last message on the visible path); an edit-branch uses
+      // the explicit parent. Closes the §4.15 merge bug at the source (an empty
+      // parentId on a later edit would re-root onto the first message).
+      parentId: input.branch
+        ? input.parentId || undefined
+        : conv0?.messages[conv0.messages.length - 1]?.id,
     }
     const assistantId = uid('m')
     const assistantMsg: Message = {
@@ -549,7 +560,8 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
       content: '',
       createdAt: Date.now() + 1,
       streaming: true,
-      modelId: input.modelId || get().conversations.find((c) => c.id === input.conversationId)?.modelId,
+      parentId: userId,
+      modelId: input.modelId || conv0?.modelId,
       mode: input.mode,
     }
     streamControllers.set(assistantId, abort)
@@ -561,31 +573,31 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
       conversations: s.conversations.map((c) => {
         if (c.id !== input.conversationId) return c
         const base = input.branch ? truncateToParent(c.messages, input.parentId) : c.messages
-        // §4.15: an edit-branch creates a NEW sibling answer. Seed the branch
-        // metadata optimistically so the `< n/m >` picker appears the instant the
-        // message is sent (reloadActivePath later replaces it with server truth).
-        let asst = assistantMsg
+        // §4.15 R1: editing a past question opens a NEW sibling QUESTION under the
+        // same parent — so the `< n/m >` picker belongs on the USER bubble (the old
+        // question + the new one), NOT on the answer. Seed it optimistically so the
+        // switcher shows under the user bubble the instant we resend
+        // (reloadActivePath later swaps in server truth). The assistant reply is
+        // the SOLE child of the new question, so it gets NO branch metadata — its
+        // switcher must not appear.
+        let uMsg = userMsg
         if (input.branch) {
-          const oldQ = input.parentId
-            ? c.messages.find((m) => m.role === 'user' && m.parentId === input.parentId)
-            : c.messages.find((m) => m.role === 'user' && !m.parentId)
-          const oldA = oldQ
-            ? c.messages.find((m) => m.role === 'assistant' && m.parentId === oldQ.id)
-            : undefined
-          if (oldA) {
-            const prevSiblings = oldA.siblings && oldA.siblings.length > 0 ? oldA.siblings : [oldA.id]
-            const prevCount = Math.max(oldA.branchCount ?? 0, prevSiblings.length)
-            asst = {
-              ...assistantMsg,
-              branchCount: prevCount + 1,
-              branchIndex: prevCount,
-              siblings: [...prevSiblings, assistantId],
-            }
+          const oldQs = c.messages.filter(
+            (m) => m.role === 'user' && (input.parentId ? m.parentId === input.parentId : !m.parentId),
+          )
+          const prevSiblings = oldQs.flatMap((q) => (q.siblings && q.siblings.length > 0 ? q.siblings : [q.id]))
+          const uniq = Array.from(new Set(prevSiblings))
+          const prevCount = Math.max(uniq.length, 1)
+          uMsg = {
+            ...userMsg,
+            branchCount: prevCount + 1,
+            branchIndex: prevCount,
+            siblings: [...uniq, userMsg.id],
           }
         }
         return {
           ...c,
-          messages: [...base, userMsg, asst],
+          messages: [...base, uMsg, assistantMsg],
           updatedAt: Date.now(),
           // Remember the param_controls selection so regenerate reuses it.
           lastParams: input.params ?? c.lastParams,
@@ -891,6 +903,22 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
     // re-runs the research engine (and shows the panel) instead of downgrading.
     const mode = oldAssistant?.mode
     const placeholderId = uid('m')
+    // §4.15 R2: regenerate forks at the assistant — the new reply is a SIBLING of
+    // the old one under the same user turn. Seed branch metadata on the
+    // placeholder so the `< n/m >` switcher shows under the reply IMMEDIATELY,
+    // before any token arrives (reloadActivePath later swaps in server truth). The
+    // user message is left untouched.
+    const oldReplies = conv?.messages.filter((m) => m.role === 'assistant' && m.parentId === userParentId) ?? []
+    const prevReplySiblings =
+      oldAssistant?.siblings && oldAssistant.siblings.length > 0
+        ? oldAssistant.siblings
+        : oldReplies.length > 0
+          ? oldReplies.map((m) => m.id)
+          : oldAssistant
+            ? [oldAssistant.id]
+            : []
+    const uniqReplies = Array.from(new Set(prevReplySiblings))
+    const prevReplyCount = Math.max(uniqReplies.length, 1)
     // Hoisted so the catch can clear the streaming placeholder by its CURRENT
     // id (re-keyed to the backend id after message_start), mirroring sendMessage
     // (§ stream-error E7).
@@ -904,6 +932,9 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
         streaming: true,
         modelId: modelId ?? conv?.modelId,
         mode,
+        branchCount: prevReplyCount + 1,
+        branchIndex: prevReplyCount,
+        siblings: [...uniqReplies, placeholderId],
       }
       set((s) => ({
         conversations: s.conversations.map((c) => {
@@ -997,7 +1028,13 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
           }
           case 'message_start':
             serverAssistantId = ev.message_id ?? placeholderId
-            updateAssistant(set, conversationId, placeholderId, (m) => ({ ...m, id: serverAssistantId }))
+            updateAssistant(set, conversationId, placeholderId, (m) => ({
+              ...m,
+              id: serverAssistantId,
+              // Re-point the optimistic sibling list (R2) at the server id so the
+              // `< n/m >` picker stays self-consistent until reloadActivePath.
+              siblings: m.siblings?.map((sid) => (sid === placeholderId ? serverAssistantId : sid)),
+            }))
             break
           case 'text_delta':
             updateAssistant(set, conversationId, serverAssistantId, (m) => ({

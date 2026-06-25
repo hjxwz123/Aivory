@@ -483,9 +483,20 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
         )}
 
         {/* Branch picker during streaming — the action bar below is hidden while
-            tokens arrive, but a freshly-sent edit-branch should show its
-            `< n/m >` immediately (§4.15). */}
+            tokens arrive, but a freshly-retried answer should show its
+            `< n/m >` immediately (§4.15 R2). */}
         {!isUser && message.streaming && message.branchCount && message.branchCount > 1 && typeof message.branchIndex === 'number' ? (
+          <div className="mt-2 inline-flex items-center">
+            <BranchSwitcher message={message} onSwitch={onBranchSwitch} t={t} />
+          </div>
+        ) : null}
+
+        {/* Always-visible branch switcher (both roles, once settled). Sits under
+            the USER bubble after an edit-branch (§4.15 R1) and under the AI reply
+            after a retry (R2) — shown the instant the branch exists rather than
+            waiting for a hover, and kept visible in read-only (admin) triage. The
+            hover action bar below no longer carries its own copy. */}
+        {!editing && !message.streaming && message.branchCount && message.branchCount > 1 && typeof message.branchIndex === 'number' ? (
           <div className="mt-2 inline-flex items-center">
             <BranchSwitcher message={message} onSwitch={onBranchSwitch} t={t} />
           </div>
@@ -505,9 +516,6 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
                 : 'opacity-0 pointer-events-none max-sm:opacity-100 max-sm:pointer-events-auto',
             )}
           >
-                {message.branchCount && message.branchCount > 1 && typeof message.branchIndex === 'number' ? (
-                  <BranchSwitcher message={message} onSwitch={onBranchSwitch} t={t} />
-                ) : null}
                 {message.content ? (
                 <Tooltip content={copied ? t('actions.copied') : t('actions.copy')}>
                   <button
@@ -644,13 +652,6 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
                     {t('actions.creditsUsed', { credits: formatCredits(message.credits) })}
                   </span>
                 ) : null}
-          </div>
-        ) : null}
-        {/* Read-only branch picker (admin triage): no mutation actions, but the
-            `< n/m >` switcher stays so reviewers can walk every branch. */}
-        {readOnly && !message.streaming && message.branchCount && message.branchCount > 1 && typeof message.branchIndex === 'number' ? (
-          <div className="mt-2 inline-flex items-center">
-            <BranchSwitcher message={message} onSwitch={onBranchSwitch} t={t} />
           </div>
         ) : null}
         {isUser && (
