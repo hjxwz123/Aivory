@@ -117,6 +117,7 @@ func Migrate(db *sql.DB) error {
 	addGroupCreditAllowance := `ALTER TABLE user_groups ADD COLUMN credit_allowance REAL NOT NULL DEFAULT 0`
 	addGroupCreditPeriod := `ALTER TABLE user_groups ADD COLUMN credit_period_seconds INTEGER NOT NULL DEFAULT 0`
 	addUserPermCredits := `ALTER TABLE users ADD COLUMN credits_permanent REAL NOT NULL DEFAULT 0`
+	addUserSortOrder := `ALTER TABLE users ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0`
 	addUsageCredits := `ALTER TABLE usage_logs ADD COLUMN credits REAL NOT NULL DEFAULT 0`
 	addMsgCredits := `ALTER TABLE messages ADD COLUMN credits REAL NOT NULL DEFAULT 0`
 	// Model label snapshot — preserves the human-readable model name on each
@@ -151,6 +152,7 @@ func Migrate(db *sql.DB) error {
 		addGroupCreditAllowance = `ALTER TABLE user_groups ADD COLUMN IF NOT EXISTS credit_allowance REAL NOT NULL DEFAULT 0`
 		addGroupCreditPeriod = `ALTER TABLE user_groups ADD COLUMN IF NOT EXISTS credit_period_seconds INTEGER NOT NULL DEFAULT 0`
 		addUserPermCredits = `ALTER TABLE users ADD COLUMN IF NOT EXISTS credits_permanent REAL NOT NULL DEFAULT 0`
+		addUserSortOrder = `ALTER TABLE users ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 0`
 		addUsageCredits = `ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS credits REAL NOT NULL DEFAULT 0`
 		addMsgCredits = `ALTER TABLE messages ADD COLUMN IF NOT EXISTS credits DOUBLE PRECISION NOT NULL DEFAULT 0`
 		addMsgModelLabel = `ALTER TABLE messages ADD COLUMN IF NOT EXISTS model_label TEXT NOT NULL DEFAULT ''`
@@ -172,7 +174,7 @@ func Migrate(db *sql.DB) error {
 		addModelTags,
 		addGroupMaxProjects, addGroupMaxKBs,
 		addGroupCreditAllowance, addGroupCreditPeriod,
-		addUserPermCredits, addUsageCredits, addMsgCredits,
+		addUserPermCredits, addUserSortOrder, addUsageCredits, addMsgCredits,
 		addMsgModelLabel, addMsgSearchText,
 	} {
 		_, _ = db.Exec(ddl)
@@ -185,6 +187,7 @@ func Migrate(db *sql.DB) error {
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_files_conversation_id ON files(conversation_id)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_messages_conv_created ON messages(conversation_id, created_at)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_conv_user_updated ON conversations(user_id, archived, pinned DESC, updated_at DESC)`)
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_users_sort_order ON users(sort_order, created_at DESC)`)
 	// One-time backfill: accounts that exist only because of an OAuth login were
 	// created with a random password they never chose, so mark them as
 	// password-unset to force them through the set-password gate. Guarded by a
@@ -203,6 +206,14 @@ func Migrate(db *sql.DB) error {
 	if stBackfill == "" {
 		backfillSearchText(db)
 		_, _ = db.Exec(`INSERT INTO settings(key, value) VALUES('msg_search_text_backfill_v1', '1') ON CONFLICT(key) DO NOTHING`)
+	}
+	// One-time backfill: existing users predate admin-defined ordering, so
+	// preserve the old default order (newest created first) as explicit slots.
+	var userSortBackfill string
+	_ = db.QueryRow(`SELECT value FROM settings WHERE key='user_sort_order_backfill_v1'`).Scan(&userSortBackfill)
+	if userSortBackfill == "" {
+		backfillUserSortOrder(db)
+		_, _ = db.Exec(`INSERT INTO settings(key, value) VALUES('user_sort_order_backfill_v1', '1') ON CONFLICT(key) DO NOTHING`)
 	}
 	// One-time backfill: the welcome wizard is gated by users.settings.onboarded.
 	// Accounts created before that flag existed are established users, so mark

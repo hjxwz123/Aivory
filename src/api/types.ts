@@ -33,6 +33,8 @@ export interface ApiUser {
   last_seen_at?: number
   /** Non-expiring credit balance (§ credits) — admin-editable on the users page. */
   credits_permanent?: number
+  /** Admin-defined order for the users page. */
+  sort_order?: number
   /** Capability flags from the user's group (e.g. "research"). Populated on the
    *  /api/me response so the client can gate features. */
   features?: string[]

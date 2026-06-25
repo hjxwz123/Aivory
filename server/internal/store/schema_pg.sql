@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS users (
   password_set  INTEGER NOT NULL DEFAULT 1,
   last_seen_at  BIGINT NOT NULL DEFAULT 0,
   credits_permanent REAL NOT NULL DEFAULT 0,
+  sort_order    INTEGER NOT NULL DEFAULT 0,
   created_at    BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
 );
 

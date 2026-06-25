@@ -22,9 +22,9 @@ func FindUserByEmail(ctx context.Context, db *sql.DB, email string) (*User, erro
 	var totpEnabled int
 	var passwordSet int
 	err := db.QueryRowContext(ctx,
-		`SELECT id, email, name, role, status, token_ver, settings, group_id, group_expires_at, previous_group_id, totp_secret, totp_enabled, password_set, COALESCE(credits_permanent,0), created_at FROM users WHERE email=?`,
+		`SELECT id, email, name, role, status, token_ver, settings, group_id, group_expires_at, previous_group_id, totp_secret, totp_enabled, password_set, COALESCE(credits_permanent,0), sort_order, created_at FROM users WHERE email=?`,
 		strings.ToLower(strings.TrimSpace(email)),
-	).Scan(&u.ID, &u.Email, &u.Name, &u.Role, &u.Status, &u.TokenVer, &settings, &u.GroupID, &u.GroupExpiresAt, &u.PreviousGroupID, &u.TotpSecret, &totpEnabled, &passwordSet, &u.CreditsPermanent, &u.CreatedAt)
+	).Scan(&u.ID, &u.Email, &u.Name, &u.Role, &u.Status, &u.TokenVer, &settings, &u.GroupID, &u.GroupExpiresAt, &u.PreviousGroupID, &u.TotpSecret, &totpEnabled, &passwordSet, &u.CreditsPermanent, &u.SortOrder, &u.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -47,8 +47,8 @@ func FindUserByID(ctx context.Context, db *sql.DB, id string) (*User, error) {
 	var totpEnabled int
 	var passwordSet int
 	err := db.QueryRowContext(ctx,
-		`SELECT id, email, name, role, status, token_ver, settings, group_id, group_expires_at, previous_group_id, totp_secret, totp_enabled, password_set, COALESCE(credits_permanent,0), created_at FROM users WHERE id=?`, id,
-	).Scan(&u.ID, &u.Email, &u.Name, &u.Role, &u.Status, &u.TokenVer, &settings, &u.GroupID, &u.GroupExpiresAt, &u.PreviousGroupID, &u.TotpSecret, &totpEnabled, &passwordSet, &u.CreditsPermanent, &u.CreatedAt)
+		`SELECT id, email, name, role, status, token_ver, settings, group_id, group_expires_at, previous_group_id, totp_secret, totp_enabled, password_set, COALESCE(credits_permanent,0), sort_order, created_at FROM users WHERE id=?`, id,
+	).Scan(&u.ID, &u.Email, &u.Name, &u.Role, &u.Status, &u.TokenVer, &settings, &u.GroupID, &u.GroupExpiresAt, &u.PreviousGroupID, &u.TotpSecret, &totpEnabled, &passwordSet, &u.CreditsPermanent, &u.SortOrder, &u.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -118,9 +118,11 @@ func CreateUserWithRole(ctx context.Context, db *sql.DB, email, name, pwHash, ro
 			name = email[:idx]
 		}
 	}
+	sortOrder := 0
+	_ = db.QueryRowContext(ctx, `SELECT COALESCE(MAX(sort_order), -1) + 1 FROM users`).Scan(&sortOrder)
 	_, err := db.ExecContext(ctx,
-		`INSERT INTO users(id, email, password_hash, name, role, settings) VALUES(?, ?, ?, ?, ?, '{}')`,
-		id, email, pwHash, name, role)
+		`INSERT INTO users(id, email, password_hash, name, role, settings, sort_order) VALUES(?, ?, ?, ?, ?, '{}', ?)`,
+		id, email, pwHash, name, role, sortOrder)
 	if err != nil {
 		return nil, err
 	}
@@ -280,6 +282,38 @@ func backfillUserOnboarded(db *sql.DB) {
 	}
 }
 
+// backfillUserSortOrder gives legacy accounts stable explicit slots matching
+// the pre-sort admin list order: newest accounts first, then id for ties.
+func backfillUserSortOrder(db *sql.DB) {
+	const batch = 500
+	offset := 0
+	for {
+		rows, err := db.Query(`SELECT id FROM users ORDER BY created_at DESC, id LIMIT ? OFFSET ?`, batch, offset)
+		if err != nil {
+			return
+		}
+		ids := []string{}
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				continue
+			}
+			ids = append(ids, id)
+		}
+		rows.Close()
+		if len(ids) == 0 {
+			return
+		}
+		for i, id := range ids {
+			_, _ = db.Exec(`UPDATE users SET sort_order=? WHERE id=?`, offset+i, id)
+		}
+		if len(ids) < batch {
+			return
+		}
+		offset += len(ids)
+	}
+}
+
 // TouchLastSeen records the user's last authenticated activity (online status,
 // § admin → users). Called from the auth middleware, throttled by a cache key so
 // it's at most one cheap UPDATE per user per minute.
@@ -360,7 +394,7 @@ func ListUsersPaged(ctx context.Context, db *sql.DB, limit, offset int) ([]User,
 		offset = 0
 	}
 	rows, err := db.QueryContext(ctx,
-		`SELECT id, email, name, role, status, token_ver, settings, group_id, group_expires_at, previous_group_id, totp_secret, totp_enabled, password_set, last_seen_at, COALESCE(credits_permanent,0), created_at FROM users ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+		`SELECT id, email, name, role, status, token_ver, settings, group_id, group_expires_at, previous_group_id, totp_secret, totp_enabled, password_set, last_seen_at, COALESCE(credits_permanent,0), sort_order, created_at FROM users ORDER BY sort_order, created_at DESC, id LIMIT ? OFFSET ?`,
 		limit, offset)
 	if err != nil {
 		return nil, err
@@ -372,7 +406,7 @@ func ListUsersPaged(ctx context.Context, db *sql.DB, limit, offset int) ([]User,
 		var settings string
 		var totpEnabled int
 		var passwordSet int
-		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.Role, &u.Status, &u.TokenVer, &settings, &u.GroupID, &u.GroupExpiresAt, &u.PreviousGroupID, &u.TotpSecret, &totpEnabled, &passwordSet, &u.LastSeenAt, &u.CreditsPermanent, &u.CreatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.Role, &u.Status, &u.TokenVer, &settings, &u.GroupID, &u.GroupExpiresAt, &u.PreviousGroupID, &u.TotpSecret, &totpEnabled, &passwordSet, &u.LastSeenAt, &u.CreditsPermanent, &u.SortOrder, &u.CreatedAt); err != nil {
 			return nil, err
 		}
 		u.TotpEnabled = totpEnabled != 0
@@ -383,7 +417,7 @@ func ListUsersPaged(ctx context.Context, db *sql.DB, limit, offset int) ([]User,
 	return out, rows.Err()
 }
 
-const userSelectCols = `id, email, name, role, status, token_ver, settings, group_id, group_expires_at, previous_group_id, totp_secret, totp_enabled, password_set, last_seen_at, COALESCE(credits_permanent,0), created_at`
+const userSelectCols = `id, email, name, role, status, token_ver, settings, group_id, group_expires_at, previous_group_id, totp_secret, totp_enabled, password_set, last_seen_at, COALESCE(credits_permanent,0), sort_order, created_at`
 
 func scanUsers(rows *sql.Rows) ([]User, error) {
 	defer rows.Close()
@@ -393,7 +427,7 @@ func scanUsers(rows *sql.Rows) ([]User, error) {
 		var settings string
 		var totpEnabled int
 		var passwordSet int
-		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.Role, &u.Status, &u.TokenVer, &settings, &u.GroupID, &u.GroupExpiresAt, &u.PreviousGroupID, &u.TotpSecret, &totpEnabled, &passwordSet, &u.LastSeenAt, &u.CreditsPermanent, &u.CreatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.Role, &u.Status, &u.TokenVer, &settings, &u.GroupID, &u.GroupExpiresAt, &u.PreviousGroupID, &u.TotpSecret, &totpEnabled, &passwordSet, &u.LastSeenAt, &u.CreditsPermanent, &u.SortOrder, &u.CreatedAt); err != nil {
 			return nil, err
 		}
 		u.TotpEnabled = totpEnabled != 0
@@ -421,14 +455,62 @@ func ListUsersBySearch(ctx context.Context, db *sql.DB, search string, limit, of
 	var err error
 	if search != "" {
 		like := "%" + strings.ToLower(search) + "%"
-		rows, err = db.QueryContext(ctx, q+` WHERE LOWER(email) LIKE ? OR LOWER(name) LIKE ? ORDER BY created_at DESC LIMIT ? OFFSET ?`, like, like, limit, offset)
+		rows, err = db.QueryContext(ctx, q+` WHERE LOWER(email) LIKE ? OR LOWER(name) LIKE ? ORDER BY sort_order, created_at DESC, id LIMIT ? OFFSET ?`, like, like, limit, offset)
 	} else {
-		rows, err = db.QueryContext(ctx, q+` ORDER BY created_at DESC LIMIT ? OFFSET ?`, limit, offset)
+		rows, err = db.QueryContext(ctx, q+` ORDER BY sort_order, created_at DESC, id LIMIT ? OFFSET ?`, limit, offset)
 	}
 	if err != nil {
 		return nil, err
 	}
 	return scanUsers(rows)
+}
+
+// ReorderUsers persists the visible admin users page order. Because the users
+// surface is paginated, keep the original sort_order slots occupied by this
+// page and only swap which user sits in each slot; users outside the page keep
+// their relative position.
+func ReorderUsers(ctx context.Context, db *sql.DB, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	existingIDs := make([]string, 0, len(ids))
+	slots := make([]int, 0, len(ids))
+	for _, id := range ids {
+		var slot int
+		err := tx.QueryRowContext(ctx, `SELECT sort_order FROM users WHERE id=?`, id).Scan(&slot)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		existingIDs = append(existingIDs, id)
+		slots = append(slots, slot)
+	}
+	if len(slots) == 0 {
+		return tx.Commit()
+	}
+	for i := 1; i < len(slots); i += 1 {
+		key := slots[i]
+		j := i - 1
+		for j >= 0 && slots[j] > key {
+			slots[j+1] = slots[j]
+			j -= 1
+		}
+		slots[j+1] = key
+	}
+	for i, id := range existingIDs {
+		if _, err := tx.ExecContext(ctx, `UPDATE users SET sort_order=? WHERE id=?`, slots[i], id); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // CountUsersBySearch returns total user count matching an optional search term.

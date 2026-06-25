@@ -9,6 +9,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { MessageSquare, Plus, Pencil, Trash2, Search, Info, Ban, ShieldCheck, Library, MoreHorizontal } from 'lucide-react'
 import { adminApi, ApiError } from '@/api'
 import type { ApiUser, ApiUserGroup } from '@/api/types'
+import { AdminSortableList } from '@/components/admin/AdminSortableList'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Tooltip } from '@/components/ui/tooltip'
@@ -123,6 +124,13 @@ export default function AdminUsers() {
 
   async function reload() {
     await load(committedQuery, page)
+  }
+
+  function persistOrder(next: ApiUser[], prev: ApiUser[]) {
+    void adminApi.reorderUsers(next.map((u) => u.id)).catch((e) => {
+      setRows(prev)
+      toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
+    })
   }
 
   async function ban(u: ApiUser) {
@@ -271,14 +279,21 @@ export default function AdminUsers() {
         {loading ? (
           <div className="text-sm text-[var(--color-fg-subtle)]">{t('admin:common.loading')}</div>
         ) : (
-          <ul className="flex flex-col divide-y divide-[var(--color-divider)] rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)]">
-            {pageRows.map((u) => {
+          <AdminSortableList
+            items={pageRows}
+            onItemsChange={setRows}
+            onOrderCommit={persistOrder}
+            dragHandleLabel={t('admin:common.dragHandle')}
+            moveUpLabel={t('admin:common.moveUp')}
+            moveDownLabel={t('admin:common.moveDown')}
+            rowClassName="grid grid-cols-[auto_auto_1fr_auto] gap-3 items-center px-5 py-4"
+            renderItem={(u) => {
               const isMe = me?.id === u.id
               const group = groups.find((g) => g.id === u.group_id)
               const lastSeen = u.last_seen_at ?? 0
               const online = lastSeen > 0 && Date.now() / 1000 - lastSeen < ONLINE_WINDOW_S
               return (
-                <li key={u.id} className="grid grid-cols-[1fr_auto] gap-3 items-center px-5 py-4">
+                <>
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <span
@@ -347,10 +362,10 @@ export default function AdminUsers() {
                       <Trash2 size={15} aria-hidden />
                     </IconAction>
                   </div>
-                </li>
+                </>
               )
-            })}
-          </ul>
+            }}
+          />
         )}
         {!loading ? <Pagination page={page} pageCount={pageCount} onPage={setPage} /> : null}
       </section>

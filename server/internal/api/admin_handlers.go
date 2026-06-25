@@ -353,6 +353,21 @@ func listUsersAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"users": rows, "total": total, "limit": limit, "offset": offset})
 }
 
+func reorderUsersAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		IDs []string `json:"ids"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, 400, errInvalidInput)
+		return
+	}
+	if err := store.ReorderUsers(r.Context(), d.DB, body.IDs); err != nil {
+		writeError(w, 500, err)
+		return
+	}
+	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
 func banUserAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	id := pathParam(r, "id")
 	// §D2: never ban yourself or the last active admin — both lock the platform out.

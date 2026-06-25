@@ -38,6 +38,7 @@ type User struct {
 	// bought via top-up or set by an admin. Debited only after timed credits run
 	// out; never reset by the refresh cycle.
 	CreditsPermanent float64 `json:"credits_permanent"`
+	SortOrder        int     `json:"sort_order"`
 	CreatedAt        int64   `json:"created_at"`
 	// Features is the transient list of capability flags from the user's group
 	// (e.g. "research"). Populated only on the /api/me response so the client can

@@ -372,8 +372,8 @@ func RedeemCodeForUser(ctx context.Context, db *sql.DB, userID, raw string, conf
 	var totpEnabled int
 	var passwordSet int
 	err = tx.QueryRowContext(ctx,
-		`SELECT id, email, name, role, status, token_ver, settings, group_id, group_expires_at, previous_group_id, totp_secret, totp_enabled, password_set, created_at FROM users WHERE id=?`, userID,
-	).Scan(&u.ID, &u.Email, &u.Name, &u.Role, &u.Status, &u.TokenVer, &settings, &u.GroupID, &u.GroupExpiresAt, &u.PreviousGroupID, &u.TotpSecret, &totpEnabled, &passwordSet, &u.CreatedAt)
+		`SELECT id, email, name, role, status, token_ver, settings, group_id, group_expires_at, previous_group_id, totp_secret, totp_enabled, password_set, sort_order, created_at FROM users WHERE id=?`, userID,
+	).Scan(&u.ID, &u.Email, &u.Name, &u.Role, &u.Status, &u.TokenVer, &settings, &u.GroupID, &u.GroupExpiresAt, &u.PreviousGroupID, &u.TotpSecret, &totpEnabled, &passwordSet, &u.SortOrder, &u.CreatedAt)
 	if err != nil {
 		return nil, nil, err
 	}

@@ -60,6 +60,38 @@ export function AdminSortableList<T extends SortableItem>({
     itemsRef.current = items
   }, [items])
 
+  useEffect(() => {
+    if (!drag) return undefined
+
+    function handlePointerMove(e: PointerEvent) {
+      if (e.pointerType === 'mouse' && e.buttons === 0) {
+        finishDrag(e.pointerId)
+        return
+      }
+      updateDragFromPointer(e.pointerId, e.clientX, e.clientY)
+      e.preventDefault()
+    }
+
+    function handlePointerEnd(e: PointerEvent) {
+      finishDrag(e.pointerId)
+    }
+
+    window.addEventListener('pointermove', handlePointerMove, { passive: false })
+    window.addEventListener('pointerup', handlePointerEnd)
+    window.addEventListener('pointercancel', handlePointerEnd)
+    window.addEventListener('mouseup', cancelDrag)
+    window.addEventListener('blur', cancelDrag)
+
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', handlePointerEnd)
+      window.removeEventListener('pointercancel', handlePointerEnd)
+      window.removeEventListener('mouseup', cancelDrag)
+      window.removeEventListener('blur', cancelDrag)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drag?.pointerId])
+
   function setDragState(next: DragState | null) {
     dragRef.current = next
     setDrag(next)
@@ -105,7 +137,11 @@ export function AdminSortableList<T extends SortableItem>({
     const rect = row.getBoundingClientRect()
     e.preventDefault()
     e.stopPropagation()
-    e.currentTarget.setPointerCapture(e.pointerId)
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId)
+    } catch {
+      // The window-level pointer listeners below still complete the drag.
+    }
     dragStartItems.current = itemsRef.current
     setDragState({
       id: item.id,
@@ -122,13 +158,22 @@ export function AdminSortableList<T extends SortableItem>({
   }
 
   function updateDrag(e: React.PointerEvent<HTMLButtonElement>) {
-    const active = dragRef.current
-    if (!active || active.pointerId !== e.pointerId) return
+    if (!dragRef.current || dragRef.current.pointerId !== e.pointerId) return
+    if (e.pointerType === 'mouse' && e.buttons === 0) {
+      finishDrag(e.pointerId)
+      return
+    }
     e.preventDefault()
-    const nextDrag = { ...active, x: e.clientX, y: e.clientY }
+    updateDragFromPointer(e.pointerId, e.clientX, e.clientY)
+  }
+
+  function updateDragFromPointer(pointerId: number, clientX: number, clientY: number) {
+    const active = dragRef.current
+    if (!active || active.pointerId !== pointerId) return
+    const nextDrag = { ...active, x: clientX, y: clientY }
     setDragState(nextDrag)
     const from = itemsRef.current.findIndex((item) => item.id === active.id)
-    const to = indexFromClientY(e.clientY, active.id)
+    const to = indexFromClientY(clientY, active.id)
     moveItem(from, to)
   }
 
@@ -171,10 +216,21 @@ export function AdminSortableList<T extends SortableItem>({
           onPointerMove={updateDrag}
           onPointerUp={(e) => finishDrag(e.pointerId)}
           onPointerCancel={(e) => finishDrag(e.pointerId)}
+          onLostPointerCapture={(e) => {
+            if (e.pointerType !== 'mouse' || e.buttons === 0) {
+              finishDrag(e.pointerId)
+            }
+          }}
         />
         {renderItem(item, index)}
       </>
     )
+  }
+
+  function cancelDrag() {
+    const active = dragRef.current
+    if (!active) return
+    finishDrag(active.pointerId)
   }
 
   const draggedItem = drag ? itemsRef.current.find((item) => item.id === drag.id) : null
@@ -245,6 +301,7 @@ interface OrderControlsProps {
   onPointerMove: (e: React.PointerEvent<HTMLButtonElement>) => void
   onPointerUp: (e: React.PointerEvent<HTMLButtonElement>) => void
   onPointerCancel: (e: React.PointerEvent<HTMLButtonElement>) => void
+  onLostPointerCapture: (e: React.PointerEvent<HTMLButtonElement>) => void
 }
 
 function OrderControls({
@@ -259,6 +316,7 @@ function OrderControls({
   onPointerMove,
   onPointerUp,
   onPointerCancel,
+  onLostPointerCapture,
 }: OrderControlsProps) {
   if (overlay) {
     return (
@@ -286,6 +344,7 @@ function OrderControls({
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerCancel}
+        onLostPointerCapture={onLostPointerCapture}
         aria-label={dragHandleLabel}
         className="inline-flex size-7 touch-none items-center justify-center rounded text-[var(--color-fg-faint)] cursor-grab active:cursor-grabbing hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg-muted)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
       >
