@@ -227,7 +227,14 @@
     "cleared": "全部会话已清除（模拟）。",
     "dataStorage": "数据存储",
     "dataStorageBody": "你的对话安全存储在我们的服务器上。如需删除数据，请联系支持。",
-    "exportDone": "导出已下载"
+    "exportDone": "导出已下载",
+    "import": "导入对话",
+    "importBody": "从其他平台的 JSON 导出文件导入聊天记录。只导入历史记录和标题——图片、文件和用量都会被忽略。",
+    "importDone": "已导入 {{count}} 个对话",
+    "importPartial": "{{count}} 个无法导入。",
+    "importBadJson": "该文件不是有效的 JSON。",
+    "importEmpty": "未在该文件中找到对话。请确认它是受支持的对话导出文件。",
+    "importFailed": "导入失败"
   },
   "shortcuts": {
     "title": "键盘快捷键",

@@ -227,7 +227,14 @@
     "cleared": "Toutes les conversations effacées (simulation).",
     "dataStorage": "Stockage des données",
     "dataStorageBody": "Vos conversations sont stockées en toute sécurité sur nos serveurs. Pour demander leur suppression, contactez le support.",
-    "exportDone": "Export téléchargé"
+    "exportDone": "Export téléchargé",
+    "import": "Importer des conversations",
+    "importBody": "Importez des discussions depuis l'export JSON d'une autre plateforme. Seuls l'historique et les titres sont importés — images, fichiers et usage sont ignorés.",
+    "importDone": "{{count}} conversation(s) importée(s)",
+    "importPartial": "{{count}} n'ont pas pu être importées.",
+    "importBadJson": "Ce fichier n'est pas un JSON valide.",
+    "importEmpty": "Aucune conversation trouvée dans ce fichier. Vérifiez qu'il s'agit d'un export de discussions pris en charge.",
+    "importFailed": "Échec de l'import"
   },
   "shortcuts": {
     "title": "Raccourcis clavier",

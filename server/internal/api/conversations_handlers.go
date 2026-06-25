@@ -120,6 +120,97 @@ func createConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 201, conv)
 }
 
+// Import limits — bound the work a single import request can schedule.
+const (
+	importMaxConversations   = 1000
+	importMaxMessagesPerConv = 10000
+	importMaxContentBytes    = 200 * 1024
+)
+
+type importMessageReq struct {
+	ID       string `json:"id"`
+	ParentID string `json:"parent_id"`
+	Role     string `json:"role"`
+	Content  string `json:"content"`
+}
+
+type importConversationReq struct {
+	Title        string             `json:"title"`
+	ModelID      string             `json:"model_id"`
+	ActiveLeafID string             `json:"active_leaf_id"`
+	Messages     []importMessageReq `json:"messages"`
+}
+
+// importConversationsHandler bulk-creates conversations + message trees from an
+// external export (§ conversation import). It bypasses the orchestrator entirely
+// — no model calls, no quota — and only stores chat history + titles. The client
+// has already stripped images/files/usage/<details> blocks; the server just
+// validates shape, caps sizes, and remaps the tree. Per-conversation failures are
+// skipped (reported in `failed`) rather than aborting the whole import.
+func importConversationsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	u := authUser(r)
+	var req struct {
+		Conversations []importConversationReq `json:"conversations"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, 400, errInvalidInput)
+		return
+	}
+	if len(req.Conversations) == 0 {
+		writeError(w, 400, errors.New("no conversations to import"))
+		return
+	}
+	if len(req.Conversations) > importMaxConversations {
+		writeError(w, 400, errors.New("too many conversations in one import"))
+		return
+	}
+	// Default model so imported conversations can be continued.
+	defaultModel := ""
+	if raw, err := store.GetSetting(d.DB, "default_model_id"); err == nil {
+		_ = json.Unmarshal(raw, &defaultModel)
+	}
+	ids := []string{}
+	failed := 0
+	for _, c := range req.Conversations {
+		if len(c.Messages) == 0 || len(c.Messages) > importMaxMessagesPerConv {
+			failed++
+			continue
+		}
+		modelID := c.ModelID
+		if modelID == "" {
+			modelID = defaultModel
+		}
+		msgs := make([]store.ImportMessageInput, 0, len(c.Messages))
+		for _, m := range c.Messages {
+			content := m.Content
+			if len(content) > importMaxContentBytes {
+				content = strings.ToValidUTF8(content[:importMaxContentBytes], "")
+			}
+			msgs = append(msgs, store.ImportMessageInput{
+				ClientID:       m.ID,
+				ParentClientID: m.ParentID,
+				Role:           m.Role,
+				Content:        content,
+			})
+		}
+		title := strings.TrimSpace(c.Title)
+		if title == "" {
+			title = "Imported chat"
+		}
+		convID, err := store.ImportConversation(r.Context(), d.DB, store.Conversation{
+			UserID:  u.ID,
+			Title:   title,
+			ModelID: modelID,
+		}, msgs, c.ActiveLeafID)
+		if err != nil {
+			failed++
+			continue
+		}
+		ids = append(ids, convID)
+	}
+	writeJSON(w, 201, map[string]any{"imported": len(ids), "failed": failed, "conversation_ids": ids})
+}
+
 type createInlineThreadReq struct {
 	MessageID string `json:"message_id"`
 	Quote     string `json:"quote"`

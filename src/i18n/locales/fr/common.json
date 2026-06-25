@@ -40,7 +40,8 @@
     "saveAndRegenerate": "Enregistrer et régénérer",
     "dismiss": "Ignorer",
     "reset": "Réinitialiser",
-    "gotIt": "Compris"
+    "gotIt": "Compris",
+    "import": "Importer"
   },
   "common": {
     "you": "Vous",

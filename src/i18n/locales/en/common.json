@@ -40,7 +40,8 @@
     "saveAndRegenerate": "Save & regenerate",
     "dismiss": "Dismiss",
     "reset": "Reset",
-    "gotIt": "Got it"
+    "gotIt": "Got it",
+    "import": "Import"
   },
   "common": {
     "you": "You",

@@ -40,7 +40,8 @@
     "saveAndRegenerate": "保存并重新生成",
     "dismiss": "关闭",
     "reset": "重置",
-    "gotIt": "知道了"
+    "gotIt": "知道了",
+    "import": "导入"
   },
   "common": {
     "you": "你",

@@ -518,6 +518,68 @@ func CreateMessage(ctx context.Context, db *sql.DB, m Message) (*Message, error)
 	return GetMessage(ctx, db, m.ID)
 }
 
+// ImportMessageInput is one node of an imported conversation tree (§ conversation
+// import). ClientID / ParentClientID are the SOURCE platform's ids; they are
+// remapped to fresh server ids on insert so parent links survive the migration.
+// Callers MUST order msgs parent-before-child.
+type ImportMessageInput struct {
+	ClientID       string
+	ParentClientID string
+	Role           string // "user" | "assistant"
+	Content        string // plain text (already stripped of images/details/etc.)
+}
+
+// ImportConversation creates a conversation and its message TREE from an external
+// export. Each message's ClientID is remapped to a fresh server id and parent
+// links are rewired through that map; the conversation's active leaf is set to
+// the remapped activeLeafClientID. created_at is assigned sequentially so sibling
+// order (SiblingsOf orders by created_at) matches the input order. Reuses
+// CreateConversation/CreateMessage so blocks/search_text stay consistent with
+// natively-created turns. Returns the new conversation id.
+func ImportConversation(ctx context.Context, db *sql.DB, c Conversation, msgs []ImportMessageInput, activeLeafClientID string) (string, error) {
+	conv, err := CreateConversation(ctx, db, c)
+	if err != nil {
+		return "", err
+	}
+	base := time.Now().Unix()
+	idMap := make(map[string]string, len(msgs))
+	for i, m := range msgs {
+		if m.Role != "user" && m.Role != "assistant" {
+			continue
+		}
+		parent := ""
+		if m.ParentClientID != "" {
+			parent = idMap[m.ParentClientID] // unknown parent → treated as root
+		}
+		// An empty imported reply (an aborted / never-finished turn in the source
+		// export) must not trip the frontend's "no response — retry" banner; mark
+		// it stopped (a deliberate, non-error empty turn) rather than complete.
+		status := "complete"
+		if m.Role == "assistant" && strings.TrimSpace(m.Content) == "" {
+			status = "stopped"
+		}
+		blocks, _ := json.Marshal([]map[string]string{{"kind": "text", "text": m.Content}})
+		created, cerr := CreateMessage(ctx, db, Message{
+			ConversationID: conv.ID,
+			ParentID:       parent,
+			Role:           m.Role,
+			Blocks:         json.RawMessage(blocks),
+			Status:         status,
+			CreatedAt:      base + int64(i),
+		})
+		if cerr != nil {
+			return "", cerr
+		}
+		idMap[m.ClientID] = created.ID
+	}
+	// CreateMessage left active_leaf pointing at the last-inserted message; pin it
+	// to the export's active leaf so the imported path loads as it was left.
+	if leaf := idMap[activeLeafClientID]; leaf != "" {
+		_, _ = UpdateConversation(ctx, db, conv.ID, c.UserID, ConversationPatch{ActiveLeafID: &leaf})
+	}
+	return conv.ID, nil
+}
+
 // UpdateMessage writes finishing state (blocks/raw/citations/usage/status/cost).
 type MessageFinishPatch struct {
 	Blocks           json.RawMessage

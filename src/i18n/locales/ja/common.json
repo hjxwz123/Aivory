@@ -40,7 +40,8 @@
     "saveAndRegenerate": "保存して再生成",
     "dismiss": "閉じる",
     "reset": "リセット",
-    "gotIt": "わかりました"
+    "gotIt": "わかりました",
+    "import": "インポート"
   },
   "common": {
     "you": "あなた",

@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { SettingsRow, SettingsSection } from './SettingsLayout'
 import { Button } from '@/components/ui/button'
-import { Download, Trash2 } from 'lucide-react'
+import { Download, Trash2, Upload } from 'lucide-react'
+import { parseConversationExport } from '@/lib/conversation-import'
 import {
   Dialog,
   DialogContent,
@@ -19,8 +20,50 @@ export default function Privacy() {
   const [confirmClear, setConfirmClear] = useState(false)
   const [clearing, setClearing] = useState(false)
   const [exporting, setExporting] = useState(false)
+  const [importing, setImporting] = useState(false)
+  const importRef = useRef<HTMLInputElement>(null)
   const { t } = useTranslation(['settings', 'common'])
   const reloadConvs = useConversations((s) => s.load)
+
+  /** Import conversations from another platform's JSON export. Only chat history
+   *  + titles are kept — images/files/usage and <details> blocks are stripped
+   *  client-side by the parser. The branch tree migrates to our message tree. */
+  async function performImport(file: File) {
+    if (importing) return
+    setImporting(true)
+    try {
+      const text = await file.text()
+      let json: unknown
+      try {
+        json = JSON.parse(text)
+      } catch {
+        throw new Error(t('settings:privacy.importBadJson', { defaultValue: 'That file is not valid JSON.' }))
+      }
+      const conversations = parseConversationExport(json)
+      if (conversations.length === 0) {
+        throw new Error(
+          t('settings:privacy.importEmpty', {
+            defaultValue: "No conversations were found in this file. Make sure it's a supported chat export.",
+          }),
+        )
+      }
+      const res = await conversationsApi.importConversations({ conversations })
+      await reloadConvs()
+      toast.success(
+        t('settings:privacy.importDone', { defaultValue: 'Imported {{count}} conversation(s)', count: res.imported }),
+        res.failed > 0
+          ? t('settings:privacy.importPartial', { defaultValue: '{{count}} could not be imported.', count: res.failed })
+          : undefined,
+      )
+    } catch (e) {
+      toast.error(
+        t('settings:privacy.importFailed', { defaultValue: 'Import failed' }),
+        e instanceof Error ? e.message : undefined,
+      )
+    } finally {
+      setImporting(false)
+    }
+  }
 
   /** Export user data: fetch all conversations + messages + memories and
    *  download as a JSON file. */
@@ -110,6 +153,33 @@ export default function Privacy() {
       </SettingsSection>
 
       <SettingsSection title={t('settings:privacy.exportPurge')}>
+        <SettingsRow
+          label={t('settings:privacy.import', { defaultValue: 'Import conversations' })}
+          description={t('settings:privacy.importBody', {
+            defaultValue:
+              "Bring chats in from another platform's JSON export. Only history and titles are imported — images, files and usage are ignored.",
+          })}
+        >
+          <input
+            ref={importRef}
+            type="file"
+            accept="application/json,.json"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              e.target.value = '' // allow re-picking the same file
+              if (file) void performImport(file)
+            }}
+          />
+          <Button
+            variant="secondary"
+            leadingIcon={<Upload size={13} aria-hidden />}
+            loading={importing}
+            onClick={() => importRef.current?.click()}
+          >
+            {t('common:actions.import', { defaultValue: 'Import' })}
+          </Button>
+        </SettingsRow>
         <SettingsRow
           label={t('settings:privacy.exportAll')}
           description={t('settings:privacy.exportAllBody')}

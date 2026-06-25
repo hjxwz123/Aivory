@@ -265,6 +265,19 @@ export const conversationsApi = {
   },
   create: (body: { model_id?: string; project_id?: string; title?: string }) =>
     api<ApiConversation>('/conversations', { method: 'POST', body }),
+  // Bulk-import conversation trees from another platform's export. History +
+  // titles only; the server bypasses the orchestrator (no model calls / quota).
+  importConversations: (body: {
+    conversations: {
+      title: string
+      active_leaf_id: string
+      messages: { id: string; parent_id: string; role: string; content: string }[]
+    }[]
+  }) =>
+    api<{ imported: number; failed: number; conversation_ids: string[] }>('/conversations/import', {
+      method: 'POST',
+      body,
+    }),
   update: (id: string, patch: Partial<ApiConversation>) =>
     api<ApiConversation>(`/conversations/${encodeURIComponent(id)}`, { method: 'PATCH', body: patch }),
   remove: (id: string) => api<{ ok: true }>(`/conversations/${encodeURIComponent(id)}`, { method: 'DELETE' }),
