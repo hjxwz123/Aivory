@@ -52,3 +52,53 @@ func TestComposeSystemPromptCarriesReplyLanguage(t *testing.T) {
 		t.Errorf("expected no forced reply-language line without a locale:\n%s", sysNone)
 	}
 }
+
+// TestTitleLanguageDirective locks the title-language mapping (written in the
+// target language) so generated titles follow the user's UI language.
+func TestTitleLanguageDirective(t *testing.T) {
+	cases := map[string]string{
+		"en":      "Write the title in English",
+		"en-GB":   "Write the title in English",
+		"zh":      "请用简体中文写这个标题",
+		"zh-Hant": "請用繁體中文寫這個標題",
+		"ja":      "タイトルは日本語で書いてください",
+		"fr":      "Rédige le titre en français",
+	}
+	for locale, want := range cases {
+		if got := titleLanguageDirective(locale); !strings.Contains(got, want) {
+			t.Errorf("titleLanguageDirective(%q) = %q, want to contain %q", locale, got, want)
+		}
+	}
+	if d := titleLanguageDirective("xx"); d != "" {
+		t.Errorf("unknown locale should yield no directive, got %q", d)
+	}
+}
+
+// TestCleanTitleClamp guards the CJK-aware clamp: dense CJK titles stay short,
+// while a Western title gets more room and is cut on a word boundary (not
+// mid-word) so the now-English titles aren't mangled.
+func TestCleanTitleClamp(t *testing.T) {
+	// A long English title is kept readable and not cut mid-word.
+	long := "How to configure the database connection pool for high concurrency workloads"
+	got := cleanTitle(long)
+	if len([]rune(got)) > 56 {
+		t.Errorf("english title too long: %q (%d runes)", got, len([]rune(got)))
+	}
+	if strings.HasSuffix(got, "concurrenc") || strings.Contains(got, "workloa") && !strings.Contains(got, "workload") {
+		t.Errorf("english title cut mid-word: %q", got)
+	}
+	if !strings.HasPrefix(got, "How to configure the database") {
+		t.Errorf("english title lost its start: %q", got)
+	}
+	// A short title is returned untouched (minus surrounding quotes/period).
+	if cleanTitle("\"Login flow\".") != "Login flow" {
+		t.Errorf("short title trim failed: %q", cleanTitle("\"Login flow\"."))
+	}
+	// CJK uses the tight clamp.
+	if hasCJK("数据库连接") != true {
+		t.Error("hasCJK should detect Chinese")
+	}
+	if hasCJK("Login flow") != false {
+		t.Error("hasCJK should be false for plain English")
+	}
+}

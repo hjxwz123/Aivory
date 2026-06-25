@@ -782,7 +782,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 
 	// 11. Title generation (§6.3) — fire-and-forget the first time.
 	if shouldGenerateTitle(conv) {
-		o.scheduleTitle(conv.ID, conv.UserID, req.UserText)
+		o.scheduleTitle(conv.ID, conv.UserID, req.UserText, req.Locale)
 	}
 
 	provReq := UnifiedChatRequest{
@@ -1276,7 +1276,7 @@ func (o *Orchestrator) runImageTurn(
 	})
 
 	if shouldGenerateTitle(conv) {
-		o.scheduleTitle(conv.ID, conv.UserID, req.UserText)
+		o.scheduleTitle(conv.ID, conv.UserID, req.UserText, req.Locale)
 	}
 
 	finalAssistant, _ := store.GetMessage(persistCtx, o.db, assistantMsg.ID)
@@ -1581,6 +1581,25 @@ func replyLanguageDirective(locale string) string {
 		return "ユーザーが明示的に別の言語を指定しない限り、常に日本語で返信してください。"
 	case "fr", "fr-fr", "fr-ca":
 		return "Réponds toujours en français, sauf si l'utilisateur demande explicitement une autre langue."
+	default:
+		return ""
+	}
+}
+
+// titleLanguageDirective returns a "write the title in this language" instruction
+// WRITTEN IN the user's selected UI language. Empty for unknown/blank locales.
+func titleLanguageDirective(locale string) string {
+	switch strings.ToLower(strings.TrimSpace(locale)) {
+	case "en", "en-us", "en-gb":
+		return "Write the title in English."
+	case "zh", "zh-cn", "zh-hans", "zh-sg":
+		return "请用简体中文写这个标题。"
+	case "zh-hant", "zh-tw", "zh-hk", "zh-mo":
+		return "請用繁體中文寫這個標題。"
+	case "ja", "ja-jp":
+		return "タイトルは日本語で書いてください。"
+	case "fr", "fr-fr", "fr-ca":
+		return "Rédige le titre en français."
 	default:
 		return ""
 	}
@@ -1962,7 +1981,7 @@ func shouldGenerateTitle(c *store.Conversation) bool {
 }
 
 // scheduleTitle fires a TaskLLM call in the background to generate a real title.
-func (o *Orchestrator) scheduleTitle(convID, userID, userText string) {
+func (o *Orchestrator) scheduleTitle(convID, userID, userText, locale string) {
 	if o.queue == nil || o.task == nil {
 		// Fall back to deterministic clip so we always have something.
 		title := clipTitle(userText)
@@ -1972,11 +1991,22 @@ func (o *Orchestrator) scheduleTitle(convID, userID, userText string) {
 	// First, set a deterministic clip so the sidebar updates immediately.
 	first := clipTitle(userText)
 	_, _ = store.UpdateConversation(context.Background(), o.db, convID, userID, store.ConversationPatch{Title: &first})
+	// Force the title language to the user's UI language. The task model is a
+	// separate, often language-biased model that ignores a soft "follow the user"
+	// hint, so we append an authoritative directive WRITTEN IN the target language
+	// (strongest signal); fall back to matching the message when locale is unknown.
+	sys := defaultSystem(TaskTitle, false)
+	if dir := titleLanguageDirective(locale); dir != "" {
+		sys += " " + dir
+	} else {
+		sys += " Write the title in the same language as the user's message."
+	}
 	o.queue.Enqueue("title.generate", func(ctx context.Context) error {
 		text, err := o.task.Run(ctx, TaskTitle, userText, RunOpts{
 			UserID:          userID,
 			ConversationID:  convID,
 			MaxOutputTokens: 60,
+			SystemPrompt:    sys,
 		})
 		if err != nil || strings.TrimSpace(text) == "" {
 			return err
@@ -2009,12 +2039,39 @@ func cleanTitle(s string) string {
 	if i := strings.Index(s, "\n"); i >= 0 {
 		s = s[:i]
 	}
-	// §6.3: 标题应 ≤10 个字；给英文多词标题留一点余量后硬截断。
-	rs := []rune(s)
-	if len(rs) > 24 {
-		rs = rs[:24]
+	// §6.3: keep titles short. CJK is dense (≤24 runes is plenty); a Western title
+	// (≈8 words) needs more room, so clamp higher and back off to a word boundary
+	// rather than cutting mid-word.
+	limit := 24
+	if !hasCJK(s) {
+		limit = 56
 	}
-	return strings.TrimSpace(string(rs))
+	rs := []rune(s)
+	if len(rs) > limit {
+		cut := strings.TrimSpace(string(rs[:limit]))
+		if !hasCJK(s) {
+			if idx := strings.LastIndexByte(cut, ' '); idx > limit/2 {
+				cut = cut[:idx]
+			}
+		}
+		return strings.TrimSpace(cut)
+	}
+	return strings.TrimSpace(s)
+}
+
+// hasCJK reports whether s contains a CJK ideograph, kana, or hangul — used to
+// pick a tighter title clamp for dense CJK vs a roomier one for Western text.
+func hasCJK(s string) bool {
+	for _, r := range s {
+		if (r >= 0x3040 && r <= 0x30ff) || // hiragana + katakana
+			(r >= 0x3400 && r <= 0x4dbf) || // CJK ext A
+			(r >= 0x4e00 && r <= 0x9fff) || // CJK unified
+			(r >= 0xf900 && r <= 0xfaff) || // CJK compatibility
+			(r >= 0xac00 && r <= 0xd7a3) { // hangul syllables
+			return true
+		}
+	}
+	return false
 }
 
 // orchToolRunner adapts the tool registry's Run signature to the provider's
