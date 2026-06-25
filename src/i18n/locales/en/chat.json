@@ -221,7 +221,8 @@
     "branches": "{{count}} branches",
     "zoomIn": "Zoom in",
     "zoomOut": "Zoom out",
-    "close": "Close outline"
+    "close": "Close outline",
+    "fit": "Fit view"
   },
   "files": {
     "title": "Files in this chat",

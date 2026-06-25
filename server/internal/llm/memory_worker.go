@@ -92,6 +92,7 @@ func (w *MemoryWorker) Process(ctx context.Context, convID string) error {
 		"Skip transient/contextual info (current task, opinions about content, etc). " +
 		"Return JSON array (max 5 items) of:\n" +
 		`{"memory_text":"<short sentence>","slot":"<noun key>","value":"<concrete value>","memory_type":"location|preference|identity|schedule|habit|goal|constraint","confidence":0..1,"status":"ACTIVE|QUERY_DEPENDENT","affected_domains":["<slot>"]}` + "\n" +
+		"Use a STABLE, canonical slot key per KIND of fact (e.g. always \"language\" for a language preference) — never invent synonymous keys, and never emit two items that mean the same thing.\n" +
 		"Use status=QUERY_DEPENDENT when the fact's currency depends on context (plans, temporary states); otherwise ACTIVE.\n\n")
 	prompt.WriteString("--- conversation ---\n")
 	turns := 0
@@ -163,6 +164,17 @@ func (w *MemoryWorker) adjudicateAndWrite(ctx context.Context, userID, convID st
 		newStatus = "ACTIVE"
 	}
 	now := time.Now().Unix()
+
+	// Semantic de-dup (§4.16): the extractor frequently re-files the SAME fact
+	// under a new wording/slot (e.g. language / response_language /
+	// language_preference all meaning "reply in Chinese"), which the slot-keyed
+	// logic below can't catch — and slotless facts skip it entirely. Ask the task
+	// model whether this fact is already saved under ANY slot; if so, just refresh
+	// the existing memory and stop, so we never store the same meaning twice.
+	if dupID := w.findSemanticDuplicate(ctx, userID, convID, c); dupID != "" {
+		_, _ = w.db.ExecContext(ctx, `UPDATE memories SET updated_at=? WHERE id=?`, now, dupID)
+		return
+	}
 
 	// Slotless facts have no conflict logic — just append.
 	if c.Slot == "" {
@@ -275,6 +287,73 @@ func (w *MemoryWorker) adjudicate(ctx context.Context, userID, convID string, c 
 		return nil
 	}
 	return verdicts
+}
+
+// findSemanticDuplicate asks the task model whether the candidate is the SAME
+// fact (same meaning) as one already saved — across ALL slots/wordings, not just
+// the exact slot. Returns the matching memory id, or "" when the fact is new or a
+// genuine change to a different value. This is what stops three differently-worded
+// "reply in Chinese" memories from all being stored. The returned id is validated
+// against the set we showed the model, so a hallucinated id can't refresh the
+// wrong row; the dedicated system prompt avoids the keep/stale adjudication framing.
+func (w *MemoryWorker) findSemanticDuplicate(ctx context.Context, userID, convID string, c memoryCandidate) string {
+	if w.task == nil {
+		return ""
+	}
+	rows, err := w.db.QueryContext(ctx,
+		`SELECT id, memory_text FROM memories WHERE user_id=? AND status IN ('ACTIVE','QUERY_DEPENDENT') ORDER BY updated_at DESC LIMIT 40`,
+		userID)
+	if err != nil {
+		return ""
+	}
+	defer rows.Close()
+	type em struct{ id, text string }
+	var mems []em
+	for rows.Next() {
+		var e em
+		if rows.Scan(&e.id, &e.text) == nil {
+			mems = append(mems, e)
+		}
+	}
+	if len(mems) == 0 {
+		return ""
+	}
+	// Cheap exact-text short-circuit (re-extracted identical sentence) — saves the
+	// LLM round-trip for the obvious case.
+	ctext := strings.ToLower(strings.TrimSpace(c.MemoryText))
+	for _, m := range mems {
+		if strings.ToLower(strings.TrimSpace(m.text)) == ctext {
+			return m.id
+		}
+	}
+	var p strings.Builder
+	fmt.Fprintf(&p, "New fact: %s\n\nExisting saved memories:\n", strings.TrimSpace(c.MemoryText))
+	for _, m := range mems {
+		fmt.Fprintf(&p, "- id=%s: %s\n", m.id, m.text)
+	}
+	p.WriteString("\nIf the new fact conveys the SAME information as one of the existing memories " +
+		"(semantically equivalent — same meaning, even if worded differently or filed under a different key), " +
+		"reply with that memory's id. If the new fact is genuinely NEW, or it CHANGES an existing fact to a " +
+		"DIFFERENT value, reply with an empty id. " +
+		`Reply with strict JSON only: {"duplicate_of":"<id or empty>"}.`)
+	var out struct {
+		DuplicateOf string `json:"duplicate_of"`
+	}
+	if err := w.task.RunJSON(ctx, TaskMemoryAdjudicate, p.String(), &out, RunOpts{
+		UserID:          userID,
+		ConversationID:  convID,
+		MaxOutputTokens: 64,
+		SystemPrompt:    "You are a deduplication checker for a user-memory store. Decide whether a new fact already exists in the saved set. Reply with strict JSON only — no prose.",
+	}); err != nil {
+		return ""
+	}
+	id := strings.TrimSpace(out.DuplicateOf)
+	for _, m := range mems {
+		if m.id == id {
+			return id
+		}
+	}
+	return ""
 }
 
 func (w *MemoryWorker) createMemory(ctx context.Context, userID, convID string, msgIDs []string, c memoryCandidate, conf float64, status string, supersedes []string) string {

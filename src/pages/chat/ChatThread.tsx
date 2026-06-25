@@ -446,6 +446,7 @@ export default function ChatThread() {
             conversationId={conversation.id}
             kbIds={conversation.kbIds}
             onKBChange={(ids) => void setKBs(conversation.id, ids)}
+            modelPickerInHeader
           />
         </div>
       </div>

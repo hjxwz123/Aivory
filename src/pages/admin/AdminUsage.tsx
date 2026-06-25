@@ -209,7 +209,7 @@ export default function AdminUsage() {
         </div>
       </section>
 
-      <section className="mt-6 grid grid-cols-2 sm:grid-cols-3 gap-3">
+      <section className="mt-6 grid grid-cols-2 gap-3">
         <Stat label={t('usage.stats.totalCost')} value={`$${totalCost.toFixed(4)}`} />
         <Stat label={t('usage.stats.rows')} value={String(total)} />
       </section>

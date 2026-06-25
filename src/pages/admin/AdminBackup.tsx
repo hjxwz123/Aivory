@@ -95,7 +95,7 @@ export default function AdminBackup() {
   const totalRows = result ? Object.values(result.tables).reduce((a, b) => a + b, 0) : 0
 
   return (
-    <div className="mx-auto max-w-[60rem]">
+    <div className="mx-auto max-w-[76rem]">
       <header>
         <h1 className="font-serif text-3xl tracking-tight text-[var(--color-fg)]">{t('admin:backup.title')}</h1>
         <p className="mt-2 max-w-2xl text-sm text-[var(--color-fg-muted)]">{t('admin:backup.lead')}</p>

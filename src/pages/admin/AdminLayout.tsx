@@ -225,7 +225,7 @@ export default function AdminLayout() {
           <h2 className="font-serif text-[15px] text-[var(--color-fg)]">{t('admin:title')}</h2>
         </div>
 
-        <div className="mx-auto w-full max-w-[68rem] px-5 sm:px-8 lg:px-12 py-8 sm:py-12">
+        <div className="mx-auto w-full max-w-[84rem] px-5 sm:px-8 lg:px-12 py-8 sm:py-12">
           <SectionTabs />
           <RouteFade dep={path}>
             <Outlet />

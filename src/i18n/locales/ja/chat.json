@@ -221,7 +221,8 @@
     "branches": "{{count}} ブランチ",
     "zoomIn": "拡大",
     "zoomOut": "縮小",
-    "close": "アウトラインを閉じる"
+    "close": "アウトラインを閉じる",
+    "fit": "全体表示"
   },
   "files": {
     "title": "この会話のファイル",

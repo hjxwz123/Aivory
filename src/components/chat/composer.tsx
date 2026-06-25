@@ -81,6 +81,10 @@ interface ComposerProps {
   kbIds?: string[]
   /** When provided, the 📚 selector is shown and changes flow up here. */
   onKBChange?: (kbIds: string[]) => void
+  /** True when a model picker already lives in the page header (e.g. ChatThread).
+   *  On phones the composer then drops its own picker to avoid a redundant,
+   *  cramped second selector — the header one is enough (§ mobile composer). */
+  modelPickerInHeader?: boolean
 }
 
 const MAX_LEN = 12_000
@@ -111,6 +115,7 @@ export function Composer({
   ensureConversationId,
   kbIds,
   onKBChange,
+  modelPickerInHeader = false,
 }: ComposerProps) {
   const { t } = useTranslation('chat')
   const [value, setValue] = useState(initialValue)
@@ -615,7 +620,7 @@ export function Composer({
           void handleAttach(dt.files)
         }}
         placeholder={effectivePlaceholder}
-        rows={compact ? 1 : 2}
+        rows={compact || isMobile ? 1 : 2}
         className={cn(
           'border-none bg-transparent focus:bg-transparent focus:ring-0',
           'px-4 pt-3 pb-1 text-[0.9375rem]',
@@ -758,7 +763,12 @@ export function Composer({
 
           {isImageMode ? <StylePicker value={imageStyleId} onChange={setImageStyleId} /> : null}
 
-          <ModelPicker value={modelId} onChange={onModelChange} className="min-w-0 max-w-[40vw]" />
+          {/* On phones the header already carries the model picker (ChatThread),
+              so we drop the composer's to keep the row uncluttered. New-chat
+              (ChatHome) has no header picker, so it keeps this one. */}
+          {!modelPickerInHeader ? (
+            <ModelPicker value={modelId} onChange={onModelChange} className="min-w-0 max-w-[40vw]" />
+          ) : null}
 
           <div className="ml-auto">{sendBtn}</div>
         </div>

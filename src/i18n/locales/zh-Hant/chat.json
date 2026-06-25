@@ -221,7 +221,8 @@
     "branches": "{{count}} 個分支",
     "zoomIn": "放大",
     "zoomOut": "縮小",
-    "close": "關閉概述"
+    "close": "關閉概述",
+    "fit": "適應視圖"
   },
   "files": {
     "title": "此對話的檔案",

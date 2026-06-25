@@ -70,7 +70,7 @@ export default function AdminModelTags() {
   }
 
   return (
-    <div className="mx-auto max-w-[60rem]">
+    <div className="mx-auto max-w-[76rem]">
       <header>
         <h1 className="font-serif text-3xl tracking-tight text-[var(--color-fg)]">{t('admin:modelTags.title')}</h1>
         <p className="mt-2 max-w-2xl text-sm text-[var(--color-fg-muted)]">{t('admin:modelTags.lead')}</p>

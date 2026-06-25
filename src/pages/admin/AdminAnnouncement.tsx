@@ -95,7 +95,7 @@ export default function AdminAnnouncement() {
   }
 
   return (
-    <div className="mx-auto max-w-[60rem]">
+    <div className="mx-auto max-w-[76rem]">
       <header>
         <h1 className="font-serif text-3xl tracking-tight text-[var(--color-fg)]">{t('admin:announcement.title')}</h1>
         <p className="mt-2 text-[var(--color-fg-muted)] text-sm max-w-2xl">{t('admin:announcement.lead')}</p>

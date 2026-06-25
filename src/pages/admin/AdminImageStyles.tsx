@@ -68,7 +68,7 @@ export default function AdminImageStyles() {
   }
 
   return (
-    <div className="mx-auto max-w-[60rem]">
+    <div className="mx-auto max-w-[76rem]">
       <header>
         <h1 className="font-serif text-3xl tracking-tight text-[var(--color-fg)]">
           {t('admin:imageStyles.title', { defaultValue: 'Image styles' })}

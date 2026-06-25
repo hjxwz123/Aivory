@@ -221,7 +221,8 @@
     "branches": "{{count}} branches",
     "zoomIn": "Agrandir",
     "zoomOut": "Réduire",
-    "close": "Fermer le plan"
+    "close": "Fermer le plan",
+    "fit": "Ajuster la vue"
   },
   "files": {
     "title": "Fichiers de cette discussion",
