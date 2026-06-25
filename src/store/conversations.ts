@@ -159,7 +159,12 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
       const { conversations: rows, has_more } = await conversationsApi.list(undefined, CONV_PAGE, 0)
       const conversations = rows.map(toLocalConversation)
       convServerOffset = rows.length
-      set({ conversations, loaded: true, loading: false, hasMore: has_more })
+      set((s) => ({
+        conversations: mergeStreamingSummaries(s.conversations, conversations),
+        loaded: true,
+        loading: false,
+        hasMore: has_more,
+      }))
     } catch (e) {
       set({ error: errorMessage(e, 'Failed to load conversations'), loading: false })
     }
@@ -1475,6 +1480,23 @@ function replaceOrPrepend(list: Conversation[], next: Conversation): Conversatio
   return out
 }
 
+function mergeStreamingSummaries(existing: Conversation[], incoming: Conversation[]): Conversation[] {
+  const byID = new Map(existing.map((c) => [c.id, c]))
+  return incoming.map((next) => {
+    const cur = byID.get(next.id)
+    if (!cur?.messages.some((m) => m.streaming)) return next
+    return {
+      ...next,
+      updatedAt: Math.max(cur.updatedAt, next.updatedAt),
+      title: next.title || cur.title,
+      messages: cur.messages,
+      lastParams: cur.lastParams,
+      hasOlder: cur.hasOlder,
+      olderCursor: cur.olderCursor,
+    }
+  })
+}
+
 function safeDomain(u: string): string {
   try {
     return new URL(u).hostname
@@ -1554,7 +1576,8 @@ export function sameConvListShape(a: Conversation[], b: Conversation[]): boolean
       x.starred !== y.starred ||
       x.archived !== y.archived ||
       x.projectId !== y.projectId ||
-      Boolean(x.inline) !== Boolean(y.inline)
+      Boolean(x.inline) !== Boolean(y.inline) ||
+      x.messages.some((m) => m.streaming) !== y.messages.some((m) => m.streaming)
     ) {
       return false
     }
