@@ -472,6 +472,27 @@
   overflow-wrap: break-word;
   word-break: break-word;
 }
+/* Chat answers fill the message column (so the reply's right edge meets the user
+ * bubble's), instead of the narrower editorial reading measure used elsewhere
+ * (reasoning trace / inline / shared / admin keep the capped measure). The double
+ * class outweighs the base `.prose-aurelia` max-width regardless of source order. */
+.prose-aurelia.prose-full { max-width: none; }
+
+/* DENSITY → cozy actually compacts the chat. The base spacing is fixed (assorted
+ * inline `my-*` margins + a 2rem inter-message gap), so the global density tokens
+ * alone barely move it. Under cozy we tighten the inter-message gap + thread
+ * padding, then zero every block's bottom margin so a single tight top-margin
+ * fully controls the prose rhythm (no margin-collapse surprises from the inline
+ * `my-3`/`my-6` on lists/hr/tables). The `:root[data-density]` prefix outranks the
+ * base rules and the Tailwind utilities regardless of source order. */
+:root[data-density="cozy"] .chat-thread { gap: 1.25rem; padding-top: 1.25rem; padding-bottom: 1.25rem; }
+:root[data-density="cozy"] .prose-aurelia > * { margin-bottom: 0; }
+:root[data-density="cozy"] .prose-aurelia > * + * { margin-top: 0.55em; }
+:root[data-density="cozy"] .prose-aurelia :is(h1, h2) { margin-top: 1em; }
+:root[data-density="cozy"] .prose-aurelia h3 { margin-top: 0.85em; }
+:root[data-density="cozy"] .prose-aurelia hr { margin: 0.9em 0; }
+:root[data-density="cozy"] .prose-aurelia li { margin-top: 0.2em; }
+
 .prose-aurelia > * + * { margin-top: 1em; }
 .prose-aurelia h1 { font-size: var(--text-2xl); margin-top: 1.4em; }
 .prose-aurelia h2 { font-size: var(--text-xl); margin-top: 1.4em; }

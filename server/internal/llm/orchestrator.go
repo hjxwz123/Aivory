@@ -251,6 +251,10 @@ type RunRequest struct {
 	// turn (conversation model kind=image). Its hidden prompt is composed
 	// server-side into the final image prompt; ignored for chat models.
 	ImageStyleID string
+	// Locale is the user's UI language code (e.g. "en", "zh", "zh-Hant", "ja").
+	// It anchors the reply-language instruction so an English question gets an
+	// English answer even from a language-biased model (§ reply language).
+	Locale string
 }
 
 // ModeDeepResearch is the RunRequest.Mode value that triggers the Deep Research
@@ -760,6 +764,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// 10. Compose the six-segment system prompt (§4.8).
 	system := composeSystemPrompt(systemPromptOpts{
 		ModelSystem:         model.SystemPrompt,
+		Locale:              req.Locale,
 		ToolMode:            toolMode,
 		ToolNames:           toolNames,
 		ProjectName:         projectName,
@@ -1457,7 +1462,10 @@ type SkillFull struct {
 }
 
 type systemPromptOpts struct {
-	ModelSystem         string
+	ModelSystem string
+	// Locale is the user's UI language code; anchors the reply-language line so
+	// replies follow the user's message language (defaulting to this on ambiguity).
+	Locale              string
 	ToolMode            string   // native | prompt | none
 	ToolNames           []string // names of the tools actually enabled for this model
 	ProjectName         string
@@ -1558,6 +1566,26 @@ func recentHistoryStrings(msgs []store.Message, n int) []string {
 	return out
 }
 
+// replyLanguageDirective returns a one-line "reply in this language" instruction
+// WRITTEN IN the user's selected UI language (i18next codes: "en", "zh",
+// "zh-Hant", "ja", "fr", …). Empty for unknown/blank locales (no forced language).
+func replyLanguageDirective(locale string) string {
+	switch strings.ToLower(strings.TrimSpace(locale)) {
+	case "en", "en-us", "en-gb":
+		return "Always reply in English, unless the user explicitly asks for another language."
+	case "zh", "zh-cn", "zh-hans", "zh-sg":
+		return "请始终使用简体中文回复，除非用户明确要求改用其他语言。"
+	case "zh-hant", "zh-tw", "zh-hk", "zh-mo":
+		return "請一律使用繁體中文回覆，除非使用者明確要求改用其他語言。"
+	case "ja", "ja-jp":
+		return "ユーザーが明示的に別の言語を指定しない限り、常に日本語で返信してください。"
+	case "fr", "fr-fr", "fr-ca":
+		return "Réponds toujours en français, sauf si l'utilisateur demande explicitement une autre langue."
+	default:
+		return ""
+	}
+}
+
 // composeSystemPrompt implements the §4.8 six-segment composition in stable
 // order. Stable = cache-friendly (§4.9).
 func composeSystemPrompt(o systemPromptOpts) string {
@@ -1566,7 +1594,16 @@ func composeSystemPrompt(o systemPromptOpts) string {
 	if strings.TrimSpace(o.ModelSystem) != "" {
 		b.WriteString(o.ModelSystem)
 	} else {
-		b.WriteString("You are Aurelia, a thoughtful AI assistant. Answer in the user's language, write with calm clarity, and use Markdown formatting (code in fenced blocks, math in $...$). When you use any tool, briefly explain what you did before showing the result.")
+		b.WriteString("You are Aurelia, a thoughtful AI assistant. Write with calm clarity, and use Markdown formatting (code in fenced blocks, math in $...$). When you use any tool, briefly explain what you did before showing the result.")
+	}
+
+	// ①.0 reply language — the user picked a UI language; answer in it. The
+	// directive is written IN that language (the most reliable way to force the
+	// output language) and placed right after the (possibly admin-customized)
+	// model prompt so it stays authoritative even for a language-biased model.
+	if dir := replyLanguageDirective(o.Locale); dir != "" {
+		b.WriteString("\n\n")
+		b.WriteString(dir)
 	}
 
 	// ①.1 ground the model in real time. Without this it falls back to its
