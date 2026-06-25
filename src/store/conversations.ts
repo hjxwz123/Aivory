@@ -206,6 +206,10 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
           // whatever pagination state the local copy already had.
           const merged: Conversation = {
             ...conv,
+            // Preserve the optimistic turn-start bump while a stream is live.
+            // A stale loadOne response can otherwise move the conversation back
+            // into an older sidebar date bucket until post-stream reconciliation.
+            updatedAt: Math.max(existing.updatedAt, conv.updatedAt),
             // Keep the optimistic first-message title if the backend hasn't
             // committed its own (clip/model) title yet — don't flash back to blank.
             title: conv.title || existing.title,
