@@ -165,6 +165,10 @@
       "comfortable": "Centered",
       "full": "Full width"
     },
+    "userMessageMarkdown": {
+      "label": "Markdown in your messages",
+      "body": "Render your sent messages with the same Markdown, code block, table, and math renderer used for assistant replies. Off by default."
+    },
     "fontSize": "Font size",
     "fontSizeBody": "Affects message body and prose.",
     "language": "Language",

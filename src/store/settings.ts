@@ -7,6 +7,7 @@ interface SettingsState {
   privacy: PrivacySettings
   sidebarCollapsed: boolean
   setAppearance: (patch: Partial<AppearanceSettings>) => void
+  syncUserSettings: (settings: Record<string, unknown>) => void
   setModels: (patch: Partial<ModelSettings>) => void
   setPrivacy: (patch: Partial<PrivacySettings>) => void
   setSidebarCollapsed: (v: boolean) => void
@@ -50,6 +51,7 @@ export const useSettings = create<SettingsState>((set) => ({
     fontSize: 'md',
     font: 'default',
     chatWidth: 'comfortable',
+    userMessageMarkdown: false,
     ...(initial.appearance ?? {}),
   },
   models: {
@@ -68,6 +70,36 @@ export const useSettings = create<SettingsState>((set) => ({
   setAppearance(patch) {
     set((s) => {
       const next = { ...s, appearance: { ...s.appearance, ...patch } }
+      persist(next)
+      return next
+    })
+  },
+  syncUserSettings(settings) {
+    set((s) => {
+      const appearancePatch: Partial<AppearanceSettings> = {}
+      const modelsPatch: Partial<ModelSettings> = {}
+      const privacyPatch: Partial<PrivacySettings> = {}
+
+      appearancePatch.userMessageMarkdown = settings.user_message_markdown === true
+      if (typeof settings.response_length === 'string') {
+        const v = settings.response_length
+        if (v === 'concise' || v === 'balanced' || v === 'detailed') {
+          modelsPatch.responseLength = v
+        }
+      }
+      if (typeof settings.persona_custom === 'string' && settings.persona_custom) {
+        modelsPatch.customInstructions = settings.persona_custom
+      }
+      if (typeof settings.memory_enabled === 'boolean') {
+        privacyPatch.memoriesEnabled = settings.memory_enabled
+      }
+
+      const next = {
+        ...s,
+        appearance: { ...s.appearance, ...appearancePatch },
+        models: { ...s.models, ...modelsPatch },
+        privacy: { ...s.privacy, ...privacyPatch },
+      }
       persist(next)
       return next
     })

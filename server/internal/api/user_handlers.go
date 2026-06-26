@@ -152,21 +152,22 @@ func meSettingsHandler(_ Deps, w http.ResponseWriter, r *http.Request) {
 // clients cannot inject arbitrary data into the settings blob (e.g. internal
 // admin flags or future privilege-escalation vectors).
 var settingsAllowlist = map[string]bool{
-	"persona_custom":    true,
-	"persona_nickname":  true,
-	"persona_traits":    true,
-	"response_length":   true,
-	"accent_color":      true,
-	"font_family":       true,
-	"image_model_id":    true,
-	"default_model_id":  true,
-	"memory_enabled":    true,
-	"avatar_url":        true,
-	"language":          true,
-	"theme":             true,
-	"sidebar_collapsed": true,
-	"code_theme":        true,
-	"onboarded":         true,
+	"persona_custom":        true,
+	"persona_nickname":      true,
+	"persona_traits":        true,
+	"response_length":       true,
+	"accent_color":          true,
+	"font_family":           true,
+	"image_model_id":        true,
+	"default_model_id":      true,
+	"memory_enabled":        true,
+	"avatar_url":            true,
+	"language":              true,
+	"theme":                 true,
+	"sidebar_collapsed":     true,
+	"code_theme":            true,
+	"user_message_markdown": true,
+	"onboarded":             true,
 }
 
 // updateMeSettingsHandler merges patch keys into settings.

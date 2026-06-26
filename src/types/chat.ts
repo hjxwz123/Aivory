@@ -110,7 +110,7 @@ export interface Message {
    *  parent instead of appending to the active leaf. */
   parentId?: string
   role: MessageRole
-  /** Rendered content. For user this is plain text; for assistant this is markdown. */
+  /** Original text content. Assistant content is rendered as markdown; user content can opt into the same renderer. */
   content: string
   createdAt: number
   /** True while the model is producing tokens. */
