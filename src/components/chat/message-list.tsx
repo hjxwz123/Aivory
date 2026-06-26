@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { Loader2 } from 'lucide-react'
 import { MessageRow } from './message-row'
 import { useConversations, MSG_PAGE } from '@/store/conversations'
+import { useSettings } from '@/store/settings'
 import { toast } from '@/hooks/use-toast'
 import type { Attachment, Conversation } from '@/types/chat'
 
@@ -36,6 +37,7 @@ export function MessageList({ conversation, scrollToMessageId, jumpKey }: Messag
   const setFeedback = useConversations((s) => s.setFeedback)
   const deleteMessage = useConversations((s) => s.deleteMessage)
   const loadOlderMessages = useConversations((s) => s.loadOlderMessages)
+  const userMessageMarkdown = useSettings((s) => s.appearance.userMessageMarkdown)
 
   // ── Lazy window over the active path ──────────────────────────────────────
   const total = conversation.messages.length
@@ -249,6 +251,7 @@ export function MessageList({ conversation, scrollToMessageId, jumpKey }: Messag
           onBranchSwitch={handleBranchSwitch}
           onFork={handleFork}
           onDelete={handleDelete}
+          userMessageMarkdown={userMessageMarkdown}
         />
       ))}
     </div>

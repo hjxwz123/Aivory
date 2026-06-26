@@ -36,10 +36,10 @@ const SECTIONS: AdminSection[] = [
     to: '/admin/settings',
     tabs: [
       { to: '/admin/settings', labelKey: 'admin:settings.title' },
-      { to: '/admin/backup', labelKey: 'admin:backup.title' },
       { to: '/admin/oauth', labelKey: 'admin:oauth.title' },
       { to: '/admin/moderation', labelKey: 'admin:moderation.title' },
       { to: '/admin/announcement', labelKey: 'admin:announcement.title' },
+      { to: '/admin/backup', labelKey: 'admin:backup.title' },
     ],
   },
   {

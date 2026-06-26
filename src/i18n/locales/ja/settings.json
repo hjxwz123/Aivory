@@ -165,6 +165,10 @@
       "comfortable": "中央寄せ",
       "full": "全幅"
     },
+    "userMessageMarkdown": {
+      "label": "自分のメッセージの Markdown",
+      "body": "送信済みメッセージを、アシスタント返信と同じ Markdown、コードブロック、表、数式レンダラーで表示します。デフォルトはオフです。"
+    },
     "fontSize": "フォントサイズ",
     "fontSizeBody": "メッセージ本文と文章に影響します。",
     "language": "言語",

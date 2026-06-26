@@ -165,6 +165,10 @@
       "comfortable": "置中",
       "full": "全寬"
     },
+    "userMessageMarkdown": {
+      "label": "使用者訊息 Markdown",
+      "body": "將你已傳送的訊息使用與助手回覆相同的 Markdown、程式碼區塊、表格和公式渲染器展示。預設關閉。"
+    },
     "fontSize": "字號",
     "fontSizeBody": "影響訊息正文與長文。",
     "language": "語言",

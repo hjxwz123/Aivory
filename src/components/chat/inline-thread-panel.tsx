@@ -7,6 +7,7 @@ import { Tooltip } from '@/components/ui/tooltip'
 import { Markdown } from '@/components/chat/markdown'
 import { useInlineThreadDrawer } from '@/store/inline-thread'
 import { useConversations } from '@/store/conversations'
+import { useSettings } from '@/store/settings'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { cn } from '@/lib/utils'
 
@@ -77,6 +78,7 @@ function ThreadBody({ quote, childId, onClose }: { quote: string; childId: strin
   const { t } = useTranslation('chat')
   const conv = useConversations((s) => s.conversations.find((c) => c.id === childId))
   const sendMessage = useConversations((s) => s.sendMessage)
+  const userMessageMarkdown = useSettings((s) => s.appearance.userMessageMarkdown)
   const [draft, setDraft] = useState('')
   const listRef = useRef<HTMLDivElement>(null)
 
@@ -134,8 +136,18 @@ function ThreadBody({ quote, childId, onClose }: { quote: string; childId: strin
         ) : (
           messages.map((m) =>
             m.role === 'user' ? (
-              <div key={m.id} className="self-end max-w-[85%] rounded-[12px] bg-[var(--color-bg-muted)] px-3 py-2 text-[13.5px] text-[var(--color-fg)] whitespace-pre-wrap">
-                {m.content}
+              <div
+                key={m.id}
+                className={cn(
+                  'self-end max-w-[85%] rounded-[12px] bg-[var(--color-bg-muted)] px-3 py-2 text-[13.5px] text-[var(--color-fg)]',
+                  userMessageMarkdown ? 'min-w-0' : 'whitespace-pre-wrap',
+                )}
+              >
+                {userMessageMarkdown ? (
+                  <Markdown content={m.content} blockKeyPrefix={`${m.id}-user-inline`} className="prose-user" />
+                ) : (
+                  m.content
+                )}
               </div>
             ) : (
               <div key={m.id} className="self-start w-full text-[13.5px] text-[var(--color-fg)]">

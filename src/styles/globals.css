@@ -579,6 +579,23 @@ mark.inline-thread-mark:hover {
 }
 .prose-aurelia th { font-weight: 600; color: var(--color-fg); background: var(--color-bg-muted); }
 
+.prose-aurelia.prose-user {
+  max-width: 100%;
+  font-size: inherit;
+  line-height: inherit;
+}
+.prose-aurelia.prose-user > *:first-child { margin-top: 0; }
+.prose-aurelia.prose-user > * + * { margin-top: 0.75em; }
+.prose-aurelia.prose-user h1 { font-size: var(--text-lg); margin-top: 0.9em; }
+.prose-aurelia.prose-user h2 { font-size: var(--text-md); margin-top: 0.85em; }
+.prose-aurelia.prose-user h3,
+.prose-aurelia.prose-user h4 { font-size: var(--text-base); margin-top: 0.75em; }
+.prose-aurelia.prose-user p { margin-top: 0.5em; }
+.prose-aurelia.prose-user pre,
+.prose-aurelia.prose-user table {
+  max-width: 100%;
+}
+
 /* §1.1 syntax highlighting — the highlighter writes <span class="hl-…">; the
  * tokens here are defined in tokens.css so light/dark inherit correctly. */
 .hl-comment { color: var(--color-syntax-comment); font-style: italic; }
@@ -587,3 +604,25 @@ mark.inline-thread-mark:hover {
 .hl-number  { color: var(--color-syntax-number); }
 .hl-type    { color: var(--color-syntax-type); }
 .hl-fn      { color: var(--color-syntax-fn); }
+.hl-attr    { color: var(--color-syntax-type); }
+.hl-variable { color: var(--color-syntax-fn); }
+.hl-inserted { color: var(--color-success); }
+.hl-deleted { color: var(--color-danger); }
+
+/* Shiki final-render tokens. The worker uses Shiki's CSS-variable theme so
+   token colors stay bound to Aurelia design tokens instead of bundled themes. */
+.prose-aurelia pre code,
+.group\/code pre code {
+  --shiki-foreground: var(--color-code-fg);
+  --shiki-background: transparent;
+  --shiki-token-comment: var(--color-syntax-comment);
+  --shiki-token-string: var(--color-syntax-string);
+  --shiki-token-keyword: var(--color-syntax-keyword);
+  --shiki-token-function: var(--color-syntax-fn);
+  --shiki-token-constant: var(--color-syntax-number);
+  --shiki-token-string-expression: var(--color-syntax-string);
+  --shiki-token-punctuation: var(--color-code-fg);
+  --shiki-token-link: var(--color-secondary);
+  --shiki-token-deleted: var(--color-danger);
+  --shiki-token-inserted: var(--color-success);
+}

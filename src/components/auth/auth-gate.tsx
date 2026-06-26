@@ -11,6 +11,7 @@ import { useAuth } from '@/store/auth'
 import { useConversations } from '@/store/conversations'
 import { useProjects } from '@/store/projects'
 import { useModels } from '@/store/models'
+import { useSettings } from '@/store/settings'
 
 const PUBLIC_PATHS = ['/welcome', '/login', '/register', '/forgot-password', '/share', '/setup', '/privacy', '/terms']
 
@@ -26,6 +27,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const loadConversations = useConversations((s) => s.load)
   const loadProjects = useProjects((s) => s.load)
   const loadModels = useModels((s) => s.load)
+  const syncUserSettings = useSettings((s) => s.syncUserSettings)
   const location = useLocation()
 
   useEffect(() => {
@@ -35,11 +37,12 @@ export function AuthGate({ children }: { children: ReactNode }) {
   // Once authenticated, hydrate the per-user data caches.
   useEffect(() => {
     if (status === 'authenticated') {
+      if (user?.settings) syncUserSettings(user.settings)
       void loadConversations()
       void loadProjects()
       void loadModels()
     }
-  }, [status, loadConversations, loadProjects, loadModels])
+  }, [status, user?.settings, syncUserSettings, loadConversations, loadProjects, loadModels])
 
   // Loading state — quick shimmer (auth check + initial paint).
   if (status === 'idle' || status === 'authenticating') {

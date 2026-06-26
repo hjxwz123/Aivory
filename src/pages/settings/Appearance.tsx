@@ -5,6 +5,7 @@ import { useSettings } from '@/store/settings'
 import { useTheme } from '@/store/theme'
 import { useAccent } from '@/store/accent'
 import { useLanguage } from '@/store/language'
+import { useAuth } from '@/store/auth'
 import { SUPPORTED_LANGUAGES } from '@/i18n'
 import { type AccentPref, ACCENT_PRESETS, type FontPref, FONT_PRESETS } from '@/types/settings'
 import {
@@ -14,9 +15,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
 import { Sun, Moon, Monitor, Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { authApi } from '@/api'
+import { toast } from '@/hooks/use-toast'
 
 /**
  * Static preview color per accent preset. Chosen at L≈58 / C≈0.18 so the
@@ -55,7 +58,9 @@ export default function Appearance() {
   const setAppearance = useSettings((s) => s.setAppearance)
   const lang = useLanguage((s) => s.lang)
   const setLang = useLanguage((s) => s.setLang)
-  const { t } = useTranslation('settings')
+  const user = useAuth((s) => s.user)
+  const setUser = useAuth((s) => s.setUser)
+  const { t } = useTranslation(['settings', 'common'])
 
   useEffect(() => syncSystem(), [syncSystem])
   // Eager-load Inter so its preview renders in the real face before selection
@@ -74,6 +79,9 @@ export default function Appearance() {
       if (typeof s.font_family === 'string' && s.font_family && !localStorage.getItem('font')) {
         setAppearance({ font: s.font_family as FontPref })
       }
+      if (typeof s.user_message_markdown === 'boolean') {
+        setAppearance({ userMessageMarkdown: s.user_message_markdown })
+      }
     }).catch(() => {})
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -86,6 +94,19 @@ export default function Appearance() {
   function onChangeFont(opt: FontPref) {
     setAppearance({ font: opt })
     void authApi.updateSettings({ font_family: opt }).catch(() => {})
+  }
+
+  function onToggleUserMessageMarkdown(enabled: boolean) {
+    setAppearance({ userMessageMarkdown: enabled })
+    void authApi
+      .updateSettings({ user_message_markdown: enabled })
+      .then((updated) => {
+        if (user) setUser({ ...user, settings: { ...(user.settings ?? {}), ...updated } })
+      })
+      .catch((e) => {
+        setAppearance({ userMessageMarkdown: !enabled })
+        toast.error(t('common:actions.failed', { defaultValue: 'Failed to save' }), e instanceof Error ? e.message : undefined)
+      })
   }
 
   return (
@@ -165,6 +186,13 @@ export default function Appearance() {
               {t('appearance.chatWidth.full')}
             </Segment>
           </div>
+        </SettingsRow>
+        <SettingsRow label={t('appearance.userMessageMarkdown.label')} description={t('appearance.userMessageMarkdown.body')}>
+          <Switch
+            checked={appearance.userMessageMarkdown}
+            onCheckedChange={(v) => onToggleUserMessageMarkdown(Boolean(v))}
+            aria-label={t('appearance.userMessageMarkdown.label')}
+          />
         </SettingsRow>
         <SettingsRow label={t('appearance.fontSize')} description={t('appearance.fontSizeBody')}>
           <div className="inline-flex items-center gap-1 p-0.5 rounded-[10px] bg-[var(--color-bg-muted)] border border-[var(--color-border-subtle)]">

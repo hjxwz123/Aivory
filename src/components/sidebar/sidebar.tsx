@@ -75,6 +75,10 @@ interface SidebarProps {
 
 const groupOrder: DateBucket[] = ['today', 'yesterday', 'last_7', 'last_30', 'older']
 
+function isConversationStreaming(conversation: Conversation): boolean {
+  return conversation.messages.some((message) => message.streaming)
+}
+
 export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
   const navigate = useNavigate()
   const { id: currentId } = useParams<{ id?: string }>()
@@ -110,7 +114,16 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
     // Sort by last-updated so a conversation jumps to the top the moment the
     // user sends/continues a message in it (sendMessage bumps updatedAt). The
     // date buckets below preserve this order within each group.
-    () => allConversations.filter((c) => !c.archived && !c.inline).slice().sort((a, b) => b.updatedAt - a.updatedAt),
+    () =>
+      allConversations
+        .filter((c) => !c.archived && !c.inline)
+        .slice()
+        .sort((a, b) => {
+          const aStreaming = isConversationStreaming(a)
+          const bStreaming = isConversationStreaming(b)
+          if (aStreaming !== bStreaming) return aStreaming ? -1 : 1
+          return b.updatedAt - a.updatedAt
+        }),
     [allConversations],
   )
   const projects = useProjects((s) => s.projects)
@@ -150,7 +163,8 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
     last_30: [],
     older: [],
   }
-  for (const c of others) grouped[bucketFor(c.updatedAt)].push(c)
+  const now = Date.now()
+  for (const c of others) grouped[bucketFor(isConversationStreaming(c) ? now : c.updatedAt)].push(c)
 
   return (
     <aside
