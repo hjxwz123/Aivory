@@ -14,9 +14,21 @@ type Side = 'left' | 'right' | 'bottom' | 'top'
 
 interface SheetContentProps extends ComponentPropsWithoutRef<typeof DialogPrimitive.Content> {
   side?: Side
-  size?: 'sm' | 'md' | 'lg'
+  /** 'nav' (left/right only) = the mobile slide-over width (min(86vw,22rem)). */
+  size?: 'sm' | 'md' | 'lg' | 'nav'
   /** Required for accessibility — Radix will warn otherwise. Pass JSX or a string. */
   label?: string
+}
+
+// Sheets PORTAL to document.body — outside ChatLayout's safe-area inset — so each
+// sheet insets itself, keeping content (drawer footer, bottom-sheet rows) clear of
+// the notch / home indicator. env() returns 0 in a normal tab, so this is a no-op
+// there. (§ mobile redesign)
+const safeClass: Record<Side, string> = {
+  left: 'pt-[var(--safe-top)] pb-[var(--safe-bottom)] pl-[var(--safe-left)]',
+  right: 'pt-[var(--safe-top)] pb-[var(--safe-bottom)] pr-[var(--safe-right)]',
+  top: 'pt-[var(--safe-top)] px-[var(--safe-left)]',
+  bottom: 'pb-[var(--safe-bottom)] px-[var(--safe-left)]',
 }
 
 const sideClass: Record<Side, string> = {
@@ -30,11 +42,18 @@ const sideClass: Record<Side, string> = {
     'left-0 right-0 bottom-0 data-[state=open]:animate-[sheet-in-b_280ms_var(--ease-out)] data-[state=closed]:animate-[sheet-out-b_180ms_var(--ease-in)]',
 }
 
-const sizeForSide = (side: Side, size: 'sm' | 'md' | 'lg' = 'md') => {
+const sizeForSide = (side: Side, size: 'sm' | 'md' | 'lg' | 'nav' = 'md') => {
   if (side === 'left' || side === 'right') {
-    return size === 'sm' ? 'w-[18rem]' : size === 'md' ? 'w-[22rem]' : 'w-[28rem]'
+    return size === 'nav'
+      ? 'w-[var(--layout-drawer-w)]'
+      : size === 'sm'
+        ? 'w-[18rem]'
+        : size === 'md'
+          ? 'w-[22rem]'
+          : 'w-[28rem]'
   }
-  return size === 'sm' ? 'h-[40vh]' : size === 'md' ? 'h-[60vh]' : 'h-[80vh]'
+  // 'nav' is meaningless for top/bottom — fall back to the medium height.
+  return size === 'sm' ? 'h-[40vh]' : size === 'lg' ? 'h-[80vh]' : 'h-[60vh]'
 }
 
 export const SheetContent = forwardRef<ElementRef<typeof DialogPrimitive.Content>, SheetContentProps>(
@@ -55,6 +74,7 @@ export const SheetContent = forwardRef<ElementRef<typeof DialogPrimitive.Content
             'fixed z-[50] bg-[var(--color-surface)] border-[var(--color-border)]',
             sideClass[side],
             sizeForSide(side, size),
+            safeClass[side],
             side === 'left' && 'border-r',
             side === 'right' && 'border-l',
             side === 'top' && 'border-b',

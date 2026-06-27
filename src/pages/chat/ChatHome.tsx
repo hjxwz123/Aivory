@@ -158,30 +158,38 @@ export default function ChatHome() {
     <div ref={root} className="relative flex-1 flex flex-col overflow-y-auto">
       {/* Ambient warmth behind the greeting — faint, blurred, slowly breathing. */}
       <div
-        className="home-glow pointer-events-none absolute left-1/2 top-[14%] -z-0 size-[34rem] max-w-[88vw] -translate-x-1/2 rounded-full bg-[var(--color-accent)] opacity-[0.07] blur-[90px]"
+        className="home-glow pointer-events-none absolute left-1/2 top-[14%] -z-0 size-[20rem] sm:size-[34rem] max-w-[88vw] -translate-x-1/2 rounded-full bg-[var(--color-accent)] opacity-[0.07] blur-[90px]"
         aria-hidden
       />
       <div
         className={cn(
-          'relative z-10 mx-auto w-full max-w-[var(--layout-message-max-w)] px-5 sm:px-8 py-12 flex flex-col',
-          // Chat home centers vertically; drawing mode top-aligns so the gallery
-          // below the composer is reachable by scrolling.
-          !drawMode && 'flex-1 justify-center',
+          'relative z-10 mx-auto w-full max-w-[var(--layout-message-max-w)] px-[var(--layout-gutter-mobile)] sm:px-8 pt-6 pb-8 sm:py-12 flex flex-col',
+          // Phones top-align (composer stays in thumb reach, keyboard-safe);
+          // ≥sm centers the hero vertically. Drawing mode always top-aligns so the
+          // gallery below the composer is reachable by scrolling.
+          !drawMode && 'flex-1 sm:justify-center',
         )}
       >
         <header className="text-center">
-          <h1 className="home-rise font-sans font-semibold tracking-tight text-[2rem] sm:text-[2.5rem] leading-[1.12] text-[var(--color-fg)] text-balance">
+          <h1 className="home-rise font-sans font-semibold tracking-tight text-[1.6rem] sm:text-[2.5rem] leading-[1.14] sm:leading-[1.12] text-[var(--color-fg)] text-balance">
             {greeting}{' '}
             <span className="text-[var(--color-fg-muted)] font-normal">{subtitle}</span>
           </h1>
-          <p className="home-rise mt-3.5 text-[var(--color-fg-muted)] text-sm sm:text-base text-pretty mx-auto max-w-2xl">
+          <p
+            className={cn(
+              'home-rise mt-3.5 text-[var(--color-fg-muted)] text-sm sm:text-base text-pretty mx-auto max-w-2xl',
+              // The lead is a desktop nicety; on a phone it just pushes the input
+              // down, so hide it for chat (drawing mode keeps its instruction).
+              !drawMode && 'max-sm:hidden',
+            )}
+          >
             {drawMode
               ? t('empty.drawLead', { defaultValue: 'Describe what you want to create — your gallery is below.' })
               : t('empty.lead')}
           </p>
         </header>
 
-        <div className="home-rise mt-10 mx-auto w-full max-w-[44rem]">
+        <div className="home-rise mt-7 sm:mt-10 mx-auto w-full max-w-[var(--layout-message-max-w)]">
           <Composer
             modelId={modelId}
             onModelChange={setPickedModelId}
@@ -202,15 +210,16 @@ export default function ChatHome() {
             <MyGallery />
           </div>
         ) : (
-          <div className="mt-10 mx-auto w-full max-w-[44rem]">
+          <div className="mt-8 sm:mt-10 mx-auto w-full max-w-[var(--layout-message-max-w)]">
             {/* Single row, fixed-width cards, horizontally scrollable (snap). The
-                scrollbar is hidden; cards overflow the 44rem rail and swipe. */}
-            <div className="flex gap-3 overflow-x-auto px-1 -mx-1 pb-2 snap-x snap-mandatory [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                scrollbar is hidden; cards overflow the rail and swipe. On phones
+                the rail bleeds to the screen edges so the next card peeks. */}
+            <div className="flex gap-3 overflow-x-auto px-1 -mx-1 max-sm:-mx-[var(--layout-gutter-mobile)] max-sm:px-[var(--layout-gutter-mobile)] max-sm:scroll-px-[var(--layout-gutter-mobile)] pb-2 snap-x snap-mandatory [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               {cards.map((s) => {
                 const title = t(s.titleKey)
                 const prompt = t(s.promptKey)
                 return (
-                  <div key={s.id} className="home-card w-[15.5rem] shrink-0 snap-start">
+                  <div key={s.id} className="home-card w-[13.5rem] sm:w-[15.5rem] shrink-0 snap-start">
                     <SuggestionCard
                       icon={s.icon}
                       title={title}
@@ -222,7 +231,7 @@ export default function ChatHome() {
                 )
               })}
             </div>
-            <p className="mt-6 text-center text-[11px] text-[var(--color-fg-subtle)]">
+            <p className="mt-6 text-center text-xs text-[var(--color-fg-subtle)]">
               {t('empty.disclaimer')}
             </p>
           </div>

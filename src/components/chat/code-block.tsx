@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Copy, Check, Play, Square, AppWindow } from 'lucide-react'
+import { Copy, Check, Play, Square, AppWindow, CodeXml } from 'lucide-react'
+import { Tooltip } from '@/components/ui/tooltip'
 import { useCopy } from '@/hooks/use-clipboard'
 import { useCodeHighlight } from '@/lib/syntax/use-code-highlight'
 import {
@@ -31,6 +32,27 @@ interface CodeBlockProps {
 const PYTHON_LANGS = new Set(['python', 'py', 'python3'])
 const HTML_LANGS = new Set(['html', 'htm', 'xhtml'])
 
+// Friendly, properly-cased display names for the header. Anything not listed
+// falls back to a simple capitalisation ("java" → "Java", "ruby" → "Ruby").
+const LANG_LABELS: Record<string, string> = {
+  js: 'JavaScript', javascript: 'JavaScript', mjs: 'JavaScript', cjs: 'JavaScript',
+  ts: 'TypeScript', typescript: 'TypeScript', jsx: 'JSX', tsx: 'TSX',
+  py: 'Python', python: 'Python', python3: 'Python', rb: 'Ruby', go: 'Go', golang: 'Go',
+  rs: 'Rust', rust: 'Rust', java: 'Java', kt: 'Kotlin', kotlin: 'Kotlin',
+  cs: 'C#', csharp: 'C#', cpp: 'C++', 'c++': 'C++', c: 'C', objc: 'Objective-C',
+  php: 'PHP', sh: 'Shell', bash: 'Bash', zsh: 'Zsh', shell: 'Shell', ps1: 'PowerShell',
+  html: 'HTML', htm: 'HTML', xml: 'XML', css: 'CSS', scss: 'SCSS', sass: 'Sass', less: 'Less',
+  json: 'JSON', jsonc: 'JSON', yaml: 'YAML', yml: 'YAML', toml: 'TOML',
+  sql: 'SQL', md: 'Markdown', markdown: 'Markdown', diff: 'Diff', graphql: 'GraphQL',
+  swift: 'Swift', dart: 'Dart', scala: 'Scala', r: 'R', lua: 'Lua', dockerfile: 'Dockerfile',
+}
+
+function langLabel(lang?: string): string {
+  if (!lang) return 'Plain'
+  const key = lang.toLowerCase()
+  return LANG_LABELS[key] ?? key.charAt(0).toUpperCase() + key.slice(1)
+}
+
 /** Fenced block is HTML when tagged so, or (untagged) when it *reads* like a document. */
 function isHtmlSnippet(code: string, lang?: string): boolean {
   if (lang) return HTML_LANGS.has(lang.toLowerCase())
@@ -47,7 +69,6 @@ export function CodeBlock({ code, lang, className, live = false, previewKey }: C
   const { t } = useTranslation('chat')
   const { copied, copy } = useCopy()
   const theme = useTheme((s) => s.resolved)
-  const [hovered, setHovered] = useState(false)
   const { html } = useCodeHighlight({ code, lang, live, theme })
 
   const fallbackKey = useId()
@@ -97,8 +118,6 @@ export function CodeBlock({ code, lang, className, live = false, previewKey }: C
 
   return (
     <div
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
       className={cn(
         'group/code relative my-3.5 overflow-hidden',
         'rounded-[14px] border border-[var(--color-border)]',
@@ -106,46 +125,37 @@ export function CodeBlock({ code, lang, className, live = false, previewKey }: C
         className,
       )}
     >
-      <div className="flex items-center justify-between gap-2 px-3 h-9 border-b border-[var(--color-border-subtle)] text-[var(--color-fg-subtle)]">
-        <span className="font-mono text-[11px] uppercase tracking-wider">{lang || 'plain'}</span>
-        <div className="flex items-center gap-1">
+      <div className="flex items-center justify-between gap-2 px-4 h-10">
+        <span className="inline-flex items-center gap-1.5 text-[12.5px] font-medium text-[var(--color-fg-muted)]">
+          <CodeXml size={14} strokeWidth={1.5} aria-hidden className="text-[var(--color-fg-subtle)]" />
+          {langLabel(lang)}
+        </span>
+        <div className="flex items-center gap-0.5">
           {isPython && !live ? (
             running ? (
-              <HeaderAction onClick={() => handleRef.current?.cancel()} label={t('code.stop')}>
-                <Square size={11} aria-hidden />
-              </HeaderAction>
+              <IconAction onClick={() => handleRef.current?.cancel()} label={t('code.stop')}>
+                <Square size={13} aria-hidden />
+              </IconAction>
             ) : (
-              <HeaderAction onClick={startRun} label={outcome ? t('code.rerun') : t('code.run')}>
-                <Play size={12} aria-hidden />
-              </HeaderAction>
+              <IconAction onClick={startRun} label={outcome ? t('code.rerun') : t('code.run')}>
+                <Play size={13} aria-hidden />
+              </IconAction>
             )
           ) : null}
           {isHtml ? (
-            <HeaderAction
+            <IconAction
               onClick={() => useHtmlPreview.getState().openPreview(blockKey, code)}
               label={t('code.preview')}
             >
-              <AppWindow size={12} aria-hidden />
-            </HeaderAction>
+              <AppWindow size={13} aria-hidden />
+            </IconAction>
           ) : null}
-          <button
-            type="button"
-            onClick={() => void copy(code)}
-            className={cn(
-              'inline-flex items-center gap-1.5 h-6 px-1.5 rounded-[6px]',
-              'text-[11px] font-medium text-[var(--color-fg-muted)] interactive',
-              'hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-              hovered || copied ? 'opacity-100' : 'opacity-0 sm:opacity-100',
-            )}
-            aria-label={copied ? t('actions.copied') : t('actions.copy')}
-          >
-            {copied ? <Check size={12} aria-hidden /> : <Copy size={12} aria-hidden />}
-            <span>{copied ? t('actions.copied') : t('actions.copy')}</span>
-          </button>
+          <IconAction onClick={() => void copy(code)} label={copied ? t('actions.copied') : t('actions.copy')}>
+            {copied ? <Check size={13} aria-hidden /> : <Copy size={13} aria-hidden />}
+          </IconAction>
         </div>
       </div>
-      <pre className="overflow-x-auto p-4 text-[13px] leading-[1.65]">
+      <pre className="overflow-x-auto px-4 pb-4 pt-1 text-[13px] leading-[1.65]">
         <code className="font-mono whitespace-pre" dangerouslySetInnerHTML={{ __html: html }} />
       </pre>
       {isPython ? (
@@ -164,26 +174,30 @@ export function CodeBlock({ code, lang, className, live = false, previewKey }: C
   )
 }
 
-interface HeaderActionProps {
+interface IconActionProps {
   onClick: () => void
   label: string
   children: ReactNode
 }
 
-function HeaderAction({ onClick, label, children }: HeaderActionProps) {
+// Icon-only header action (Run / Preview / Copy). The label rides in a tooltip
+// + aria-label so the header stays minimal while keeping the action discoverable.
+function IconAction({ onClick, label, children }: IconActionProps) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        'inline-flex items-center gap-1.5 h-6 px-1.5 rounded-[6px]',
-        'text-[11px] font-medium text-[var(--color-fg-muted)] interactive',
-        'hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-      )}
-    >
-      {children}
-      <span>{label}</span>
-    </button>
+    <Tooltip content={label}>
+      <button
+        type="button"
+        onClick={onClick}
+        aria-label={label}
+        className={cn(
+          'inline-flex items-center justify-center size-7 rounded-[7px]',
+          'text-[var(--color-fg-subtle)] interactive',
+          'hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+        )}
+      >
+        {children}
+      </button>
+    </Tooltip>
   )
 }

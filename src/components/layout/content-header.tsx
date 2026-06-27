@@ -1,7 +1,8 @@
-import { type ReactNode } from 'react'
+import { useEffect, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, Menu } from 'lucide-react'
 import { ThemeToggle } from '@/components/ui/theme-toggle'
+import { useUI } from '@/store/ui'
 import { cn } from '@/lib/utils'
 
 interface ContentHeaderProps {
@@ -27,22 +28,39 @@ interface ContentHeaderProps {
  * page to page.
  */
 export function ContentHeader({ title, backTo, backLabel, actions, children, className }: ContentHeaderProps) {
+  // This bar IS the page's mobile top bar — tell the shell to drop its standalone
+  // brand bar so settings/subscription show one bar (this one + a hamburger),
+  // not two stacked rows. (§ mobile redesign — reuses the pageOwnsTopBar flag.)
+  useEffect(() => {
+    useUI.getState().setPageOwnsTopBar(true)
+    return () => useUI.getState().setPageOwnsTopBar(false)
+  }, [])
   return (
     <header className={cn('shrink-0 border-b border-[var(--color-divider)] bg-[var(--color-bg)]', className)}>
-      <div className="mx-auto w-full max-w-[var(--layout-content-max-w)] flex items-center gap-3 px-5 sm:px-8 h-14">
+      <div className="mx-auto w-full max-w-[var(--layout-content-max-w)] flex items-center gap-2 sm:gap-3 px-2 sm:px-8 h-14">
         {backTo ? (
           <>
             <Link
               to={backTo}
-              className="inline-flex items-center gap-1.5 text-sm text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] interactive rounded-[6px]"
+              className="inline-flex items-center justify-center gap-1.5 min-h-[var(--tap-min)] min-w-[var(--tap-min)] sm:min-w-0 px-2 -ml-1 sm:ml-0 sm:px-0 text-sm text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] interactive rounded-[8px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
             >
-              <ArrowLeft size={14} aria-hidden />
+              <ArrowLeft size={16} aria-hidden />
               {backLabel ? <span className="max-sm:hidden">{backLabel}</span> : null}
             </Link>
             <span className="h-5 w-px bg-[var(--color-divider)]" aria-hidden />
           </>
-        ) : null}
-        <h1 className="font-semibold tracking-tight text-[var(--color-fg)] text-[17px]">{title}</h1>
+        ) : (
+          /* No back link → a hamburger opens the nav drawer (phone/tablet only). */
+          <button
+            type="button"
+            aria-label="Open navigation"
+            onClick={() => useUI.getState().toggleNav()}
+            className="lg:hidden inline-flex items-center justify-center size-[var(--tap-min)] -ml-1 rounded-[10px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+          >
+            <Menu size={18} aria-hidden />
+          </button>
+        )}
+        <h1 className="font-semibold tracking-tight text-[var(--color-fg)] text-[17px] truncate">{title}</h1>
         <div className="ml-auto flex items-center gap-2">
           {actions ?? <ThemeToggle />}
         </div>

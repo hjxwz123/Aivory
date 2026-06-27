@@ -222,7 +222,8 @@ export function Composer({
     setParamValues({})
   }, [modelId])
 
-  useAutosizeTextarea(ref, value, compact ? 6 : 12)
+  // Cap textarea growth lower on phones so a long draft can't eat the viewport.
+  useAutosizeTextarea(ref, value, compact || isMobile ? 6 : 12)
 
   useEffect(() => {
     if (autoFocus) ref.current?.focus()
@@ -506,8 +507,10 @@ export function Composer({
       }}
       className={cn(
         'group/composer relative w-full',
-        'rounded-[16px] border border-[var(--color-border)] bg-[var(--color-surface)]',
-        'shadow-[var(--shadow-sm)] transition-[border-color,box-shadow] duration-200',
+        // Calm Gemini-style pill on phones (rounder, no resting shadow); the
+        // editorial card look is kept on ≥sm.
+        'rounded-[16px] max-sm:rounded-[22px] border border-[var(--color-border)] bg-[var(--color-surface)]',
+        'shadow-[var(--shadow-sm)] max-sm:shadow-none transition-[border-color,box-shadow] duration-200',
         'focus-within:border-[var(--color-border-strong)] focus-within:shadow-[var(--shadow-md)]',
         dragOver && 'border-[var(--color-accent)] shadow-[var(--shadow-md)]',
       )}
@@ -623,7 +626,8 @@ export function Composer({
         rows={compact || isMobile ? 1 : 2}
         className={cn(
           'border-none bg-transparent focus:bg-transparent focus:ring-0',
-          'px-4 pt-3 pb-1 text-[0.9375rem]',
+          // ≥16px on phones (--text-input-mobile) so iOS Safari doesn't zoom on focus.
+          'px-4 pt-3 pb-1 text-[0.9375rem] max-sm:text-[length:var(--text-input-mobile)]',
           'placeholder:text-[var(--color-fg-faint)]',
           compact && 'min-h-[40px]',
         )}
@@ -673,7 +677,12 @@ export function Composer({
                 ) : null}
               </button>
             </PopoverTrigger>
-            <PopoverContent side="top" align="start" sideOffset={10} className="w-60 p-1.5">
+            <PopoverContent
+              side="top"
+              align="start"
+              sideOffset={10}
+              className="w-60 max-sm:w-[calc(100vw-2*var(--layout-gutter-mobile))] max-h-[60dvh] overflow-y-auto scrollbar-thin p-1.5"
+            >
               <button
                 type="button"
                 onClick={() => {

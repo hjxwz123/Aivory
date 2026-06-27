@@ -78,10 +78,14 @@ export const layout = {
   sidebarWidth: '17.5rem',
   sidebarWidthCollapsed: '3.5rem',
   topbarHeight: '3.5rem',
+  topbarHeightMobile: '3rem',
   composerMaxWidth: '50rem',
   contentMaxWidth: '76rem',
   proseMaxWidth: '44rem',
   messageMaxWidth: '48rem',
+  drawerWidth: 'min(86vw, 22rem)',
+  gutterMobile: '1rem',
+  tapMin: '2.75rem',
 } as const
 
 export const breakpoint = {
@@ -90,6 +94,19 @@ export const breakpoint = {
   lg: 1024,
   xl: 1280,
   '2xl': 1536,
+} as const
+
+/**
+ * Canonical responsive queries — use these everywhere instead of re-deriving
+ * `(max-width: 639px)` / `(min-width: 1024px)` per surface (§ mobile redesign).
+ *  • phone   — the narrow chrome: full-bleed thread, sticky composer, action sheets
+ *  • mobile  — phone + tablet: the nav slide-over (vs the desktop rail) renders here
+ *  • desktop — the persistent sidebar rail + inline toolbars
+ */
+export const mediaQuery = {
+  phone: '(max-width: 639px)',
+  mobile: '(max-width: 1023px)',
+  desktop: '(min-width: 1024px)',
 } as const
 
 /** Resolve a CSS variable at runtime. Use sparingly — prefer Tailwind utilities. */

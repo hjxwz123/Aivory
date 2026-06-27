@@ -69,8 +69,10 @@
   --color-user-bubble: oklch(95% 0.022 var(--accent-hue));
   --color-user-bubble-border: oklch(88% 0.026 var(--accent-hue));
   --color-assistant-bubble: transparent;
-  --color-code-bg: oklch(95% 0.010 280);
-  --color-code-fg: oklch(28% 0.045 270);
+  /* Code wells track the active accent hue (like every other surface) so the
+     block tints with the theme instead of sitting on a fixed violet. */
+  --color-code-bg: oklch(96% 0.014 var(--accent-hue));
+  --color-code-fg: oklch(30% 0.040 var(--accent-hue));
   /* §1.1 calm-monotone syntax palette — three subtle hues over the code-fg
      baseline so highlighting reads as "this is a string / keyword / comment"
      without breaking the editorial monochrome feel. */
@@ -237,6 +239,33 @@
   --layout-content-max-w: 76rem;
   --layout-prose-max-w: 44rem;
   --layout-message-max-w: 48rem;
+
+  /* ---------- MOBILE LAYOUT (§ mobile redesign) ------------------------ *
+   * Named so every phone surface speaks one vocabulary instead of scattering
+   * env()/44px/px-4. Desktop never reads these except where noted; the phone
+   * @media block below overrides the responsive ones. */
+  /* Device safe areas — the ', 0px' fallback is mandatory so calc()/max() never
+   * break on non-notch browsers (env() is empty there). */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --tap-min: 2.75rem;                 /* 44 — minimum mobile touch target */
+  --layout-topbar-h-mobile: 3rem;     /* 48 — slim mobile app bar */
+  --layout-drawer-w: min(86vw, 22rem);/* nav slide-over: always leaves a scrim */
+  --layout-gutter-mobile: 1rem;       /* 16 — shared mobile content edge */
+  --layout-thread-gap: 2rem;          /* turn rhythm; → 1.5rem on phone below */
+  --layout-thread-bottom-gutter: 6rem;/* clears the sticky composer + safe area */
+  --text-chat-body: var(--text-base); /* chat body; → 16px on phone below */
+}
+
+/* Phone overrides (≤639px = the `phone` query). Touch-comfortable body + a
+ * tighter turn rhythm; base/desktop values above are untouched. */
+@media (max-width: 639px) {
+  :root {
+    --text-chat-body: 1rem;           /* 16 — comfortable + defeats iOS focus-zoom */
+    --layout-thread-gap: 1.5rem;      /* 24 — tighter turns on a small screen */
+  }
 }
 
 /* Chat width preference (§ appearance → layout). "full" widens the editorial
@@ -342,8 +371,8 @@
   --color-user-bubble: oklch(26% 0.045 var(--accent-hue));
   --color-user-bubble-border: oklch(34% 0.050 var(--accent-hue));
   --color-assistant-bubble: transparent;
-  --color-code-bg: oklch(12% 0.020 275);
-  --color-code-fg: oklch(90% 0.020 280);
+  --color-code-bg: oklch(16% 0.024 var(--accent-hue));
+  --color-code-fg: oklch(90% 0.018 var(--accent-hue));
   /* §1.1 dark-mode syntax tones — same hue intent, brighter to read on dark. */
   --color-syntax-comment: oklch(60% 0.030 265);
   --color-syntax-string:  oklch(80% 0.110 25);
@@ -534,6 +563,8 @@
 
   --color-user-bubble: oklch(95% 0 0);
   --color-user-bubble-border: oklch(88% 0 0);
+  --color-code-bg: oklch(96% 0 0);
+  --color-code-fg: oklch(30% 0 0);
 
   --color-sidebar-bg: oklch(93.5% 0 0);
   --color-sidebar-border: oklch(87% 0 0);
@@ -565,6 +596,8 @@
 
   --color-user-bubble: oklch(26% 0 0);
   --color-user-bubble-border: oklch(34% 0 0);
+  --color-code-bg: oklch(16% 0 0);
+  --color-code-fg: oklch(90% 0 0);
 
   --color-sidebar-bg: oklch(10.5% 0 0);
   --color-sidebar-border: oklch(24% 0 0);

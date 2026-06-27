@@ -1,4 +1,4 @@
-import { memo, useState, useRef, useEffect } from 'react'
+import { memo, useState, useRef, useEffect, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Copy,
@@ -44,9 +44,12 @@ import {
 } from '@/components/ui/dialog'
 import { Textarea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
+import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { useCopy } from '@/hooks/use-clipboard'
 import { useModels } from '@/store/models'
 import { useAutosizeTextarea } from '@/hooks/use-autosize-textarea'
+import { useMediaQuery } from '@/hooks/use-media-query'
+import { mediaQuery } from '@/lib/design-tokens'
 import { Markdown } from './markdown'
 import { ReasoningTrace } from './reasoning-trace'
 import { ImageGenerating } from './image-generating'
@@ -110,6 +113,10 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
   const displayUserName = userName ?? t('common.you', { ns: 'common' })
   const [hovered, setHovered] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
+  // Phone: the per-message actions live in a bottom Sheet (a clean thread reveals
+  // them on tap) instead of an always-on row of tiny icons (§ mobile redesign).
+  const isPhone = useMediaQuery(mediaQuery.phone)
+  const [actionSheetOpen, setActionSheetOpen] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(message.content)
@@ -181,7 +188,10 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
       <div
         className={cn(
           'flex flex-col min-w-0',
-          isUser ? 'items-end max-w-[80%] sm:max-w-[68%]' : 'items-start w-full',
+          // A user bubble hugs its content (right-aligned, capped width); but
+          // while editing it expands to the full message column — same width as
+          // an assistant reply — so there's room to rework the question.
+          isUser && !editing ? 'items-end max-w-[88%] sm:max-w-[68%]' : 'items-start w-full',
         )}
       >
         {!isUser && (
@@ -214,40 +224,41 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
 
         {/* Body */}
         {editing && isUser ? (
-          <div className="flex w-full flex-col gap-3">
-            <div className="rounded-[18px] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-4 py-4 shadow-[var(--shadow-sm)] transition-colors focus-within:border-[var(--color-accent)] focus-within:shadow-[var(--shadow-md)]">
-              {/* Editable attachment strip — images preview as thumbnails with
-                  an X hover affordance; non-images render as compact chips. */}
-              {draftAtts.length > 0 ? (
-                <div className="mb-3 flex flex-wrap gap-2">
-                  {draftAtts.map((a) =>
-                    a.kind === 'image' && a.previewUrl ? (
-                      <EditableImageChip key={a.id} att={a} onRemove={() => removeDraftAtt(a.id)} />
-                    ) : (
-                      <EditableFileChip key={a.id} att={a} onRemove={() => removeDraftAtt(a.id)} />
-                    ),
-                  )}
-                </div>
-              ) : null}
-              <Textarea
-                ref={editRef}
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.nativeEvent.isComposing || e.keyCode === 229) return
-                  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-                    e.preventDefault()
-                    commitEdit()
-                  }
-                  if (e.key === 'Escape') {
-                    e.preventDefault()
-                    setEditing(false)
-                  }
-                }}
-                className="min-h-[120px] resize-none border-none bg-transparent p-0 text-[0.9375rem] leading-relaxed focus:ring-0"
-              />
-            </div>
-            <div className="flex items-center justify-end gap-2">
+          // Full-width edit surface (spans the whole message column, like an AI
+          // reply). One calm muted well holds the textarea AND the actions, with
+          // the buttons docked bottom-right inside the box.
+          <div className="w-full rounded-[18px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-4 py-3.5 transition-colors focus-within:border-[var(--color-border-strong)]">
+            {/* Editable attachment strip — images preview as thumbnails with
+                an X hover affordance; non-images render as compact chips. */}
+            {draftAtts.length > 0 ? (
+              <div className="mb-3 flex flex-wrap gap-2">
+                {draftAtts.map((a) =>
+                  a.kind === 'image' && a.previewUrl ? (
+                    <EditableImageChip key={a.id} att={a} onRemove={() => removeDraftAtt(a.id)} />
+                  ) : (
+                    <EditableFileChip key={a.id} att={a} onRemove={() => removeDraftAtt(a.id)} />
+                  ),
+                )}
+              </div>
+            ) : null}
+            <Textarea
+              ref={editRef}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.nativeEvent.isComposing || e.keyCode === 229) return
+                if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                  e.preventDefault()
+                  commitEdit()
+                }
+                if (e.key === 'Escape') {
+                  e.preventDefault()
+                  setEditing(false)
+                }
+              }}
+              className="min-h-[112px] resize-none border-none bg-transparent p-0 text-[length:var(--text-chat-body)] leading-relaxed focus:ring-0"
+            />
+            <div className="mt-2.5 flex items-center justify-end gap-2">
               <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>
                 {t('actions.cancelEdit', { defaultValue: 'Cancel' })}
               </Button>
@@ -264,7 +275,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
             className={cn(
               'rounded-[18px] px-4 py-2.5',
               'bg-[var(--color-user-bubble)] border border-[var(--color-user-bubble-border)]',
-              'text-[var(--color-fg)] text-[0.9375rem] leading-relaxed',
+              'text-[var(--color-fg)] text-[length:var(--text-chat-body)] leading-relaxed',
               userMessageMarkdown ? 'min-w-0' : 'whitespace-pre-wrap break-words',
               'max-w-full',
             )}
@@ -515,6 +526,24 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
             Also show the action bar when a message has an error but no content
             so the user can retry the failed message. */}
         {!readOnly && !editing && !message.streaming && (message.content || message.error || (message.artifacts && message.artifacts.length > 0)) ? (
+          isPhone ? (
+            <div className="mt-1.5 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setActionSheetOpen(true)}
+                aria-label={t('actions.more')}
+                className="inline-flex items-center justify-center size-[var(--tap-min)] -ml-2 rounded-[10px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+              >
+                <MoreHorizontal size={18} aria-hidden />
+              </button>
+              {!isUser && message.credits && message.credits > 0 ? (
+                <span className="inline-flex items-center gap-1 text-[11px] text-[var(--color-secondary)] tabular-nums">
+                  <Coins size={11} aria-hidden />
+                  {t('actions.creditsUsed', { credits: formatCredits(message.credits) })}
+                </span>
+              ) : null}
+            </div>
+          ) : (
           <div
             className={cn(
               'mt-2 inline-flex items-center gap-0.5 transition-opacity duration-[140ms] ease-out',
@@ -660,6 +689,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
                   </span>
                 ) : null}
           </div>
+          )
         ) : null}
         {isUser && (
           <span className="sr-only">
@@ -680,6 +710,71 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
         onOpenChange={(o) => !o && setFilePreview(null)}
         file={filePreview}
       />
+      {/* Phone: per-message actions as a bottom Sheet (§ mobile redesign). */}
+      {isPhone && (
+        <Sheet open={actionSheetOpen} onOpenChange={setActionSheetOpen}>
+          <SheetContent side="bottom" size="sm" label={t('actions.more')} className="h-auto max-h-[85dvh] rounded-t-[20px]">
+            <div className="flex flex-col px-2 py-2">
+              {message.content ? (
+                <MsgActionRow
+                  icon={copied ? <Check size={18} aria-hidden /> : <Copy size={18} aria-hidden />}
+                  label={copied ? t('actions.copied') : t('actions.copy')}
+                  onClick={() => copy(message.content)}
+                />
+              ) : null}
+              {!isUser ? (
+                <>
+                  <MsgActionRow
+                    icon={<RefreshCw size={18} aria-hidden />}
+                    label={t('actions.regenerate')}
+                    onClick={() => { setActionSheetOpen(false); onRegenerate?.(message.id) }}
+                  />
+                  <MsgActionRow
+                    icon={<ThumbsUp size={18} aria-hidden />}
+                    label={t('actions.helpful')}
+                    active={message.liked}
+                    onClick={() => onLike?.(message.id, !message.liked)}
+                  />
+                  <MsgActionRow
+                    icon={<ThumbsDown size={18} aria-hidden />}
+                    label={t('actions.notHelpful')}
+                    active={message.disliked}
+                    onClick={() => onDislike?.(message.id, !message.disliked)}
+                  />
+                </>
+              ) : (
+                <MsgActionRow
+                  icon={<Pencil size={18} aria-hidden />}
+                  label={t('actions.edit')}
+                  onClick={() => { setActionSheetOpen(false); setEditing(true) }}
+                />
+              )}
+              {onFork ? (
+                <MsgActionRow
+                  icon={<GitBranchPlus size={18} aria-hidden />}
+                  label={t('actions.fork', { defaultValue: 'Fork to new conversation' })}
+                  onClick={() => {
+                    setActionSheetOpen(false)
+                    onFork(message.id)
+                    toast.success(t('actions.forked', { defaultValue: 'Forked to a new conversation' }))
+                  }}
+                />
+              ) : null}
+              {onDelete ? (
+                <>
+                  <div className="my-1.5 h-px bg-[var(--color-divider)]" aria-hidden />
+                  <MsgActionRow
+                    icon={<Trash2 size={18} aria-hidden />}
+                    label={t('actions.delete', { defaultValue: 'Delete' })}
+                    destructive
+                    onClick={() => { setActionSheetOpen(false); setConfirmDelete(true) }}
+                  />
+                </>
+              ) : null}
+            </div>
+          </SheetContent>
+        </Sheet>
+      )}
       {/* Delete-round confirmation — removes this question and all of its
           answers (branch-safe: earlier/later turns and other branches stay). */}
       <Dialog open={confirmDelete} onOpenChange={setConfirmDelete}>
@@ -718,6 +813,47 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
 // the rest of the visible window bails out. Default shallow prop comparison is
 // exactly right here (message is a fresh object only when it truly changed).
 export const MessageRow = memo(MessageRowImpl)
+
+/** A 44px icon+label row inside the phone message action Sheet. */
+function MsgActionRow({
+  icon,
+  label,
+  onClick,
+  destructive = false,
+  active = false,
+}: {
+  icon: ReactNode
+  label: string
+  onClick: () => void
+  destructive?: boolean
+  active?: boolean
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'flex w-full items-center gap-3 min-h-[var(--tap-min)] px-3 text-left text-[15px] rounded-[10px] interactive',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+        destructive
+          ? 'text-[var(--color-danger)] hover:bg-[var(--color-danger-soft)]'
+          : active
+            ? 'text-[var(--color-accent)] bg-[var(--color-accent-soft)]'
+            : 'text-[var(--color-fg)] hover:bg-[var(--color-bg-muted)]',
+      )}
+    >
+      <span
+        className={cn(
+          'shrink-0',
+          destructive ? 'text-[var(--color-danger)]' : active ? 'text-[var(--color-accent)]' : 'text-[var(--color-fg-muted)]',
+        )}
+      >
+        {icon}
+      </span>
+      <span className="truncate">{label}</span>
+    </button>
+  )
+}
 
 /**
  * BranchSwitcher — the `<  2/3  >` chip shown when the current message has

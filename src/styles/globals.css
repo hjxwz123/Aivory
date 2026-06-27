@@ -478,6 +478,14 @@
  * class outweighs the base `.prose-aurelia` max-width regardless of source order. */
 .prose-aurelia.prose-full { max-width: none; }
 
+/* Chat turn rhythm lives on a token (§ mobile redesign) so the phone @media block
+ * can tighten it without a per-component utility. The message list drops its
+ * `gap-8` utility in favour of this; cozy (below) still wins by specificity. */
+.chat-thread { gap: var(--layout-thread-gap); }
+/* Mobile chat reads at --text-chat-body (16px on phone, base size on desktop);
+ * scoped to the live thread so admin/shared/desktop transcripts are unaffected. */
+.chat-thread .prose-full { font-size: var(--text-chat-body); }
+
 /* DENSITY → cozy actually compacts the chat. The base spacing is fixed (assorted
  * inline `my-*` margins + a 2rem inter-message gap), so the global density tokens
  * alone barely move it. Under cozy we tighten the inter-message gap + thread

@@ -228,7 +228,7 @@ export function MessageList({ conversation, scrollToMessageId, jumpKey }: Messag
 
   return (
     <div
-      className="chat-thread flex flex-col gap-8 px-4 sm:px-6 lg:px-8 py-8 mx-auto w-full max-w-[var(--layout-message-max-w)]"
+      className="chat-thread flex flex-col px-[var(--layout-gutter-mobile)] sm:px-6 lg:px-8 py-8 mx-auto w-full max-w-[var(--layout-message-max-w)]"
       aria-live="polite"
       aria-atomic="false"
       aria-relevant="additions text"

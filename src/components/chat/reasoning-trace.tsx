@@ -156,13 +156,16 @@ function ToolStep({ toolCall }: { toolCall: ToolCall }) {
   const hasBody = Boolean(output || code)
 
   return (
-    <div className="overflow-hidden rounded-[10px] border border-[var(--color-border-subtle)] bg-[var(--color-surface)]">
+    // Box-free: each tool step is a flat row (no border/surface card), matching
+    // the rest of the trace. A subtle rounded hover affords the expand toggle;
+    // expanded code/output drop into a calm rounded well, no dividing borders.
+    <div>
       <button
         type="button"
         onClick={() => hasBody && setExpanded((v) => !v)}
         className={cn(
-          'flex w-full items-center gap-2 px-2.5 py-1.5 text-left',
-          hasBody ? 'interactive cursor-pointer hover:bg-[var(--color-bg-muted)]/40' : 'cursor-default',
+          'flex w-full items-center gap-2 rounded-[7px] px-1.5 py-1 text-left',
+          hasBody ? 'interactive cursor-pointer hover:bg-[var(--color-bg-muted)]/60' : 'cursor-default',
         )}
       >
         <StatusDot status={status} />
@@ -184,17 +187,17 @@ function ToolStep({ toolCall }: { toolCall: ToolCall }) {
         ) : null}
       </button>
       {expanded && code ? (
-        <pre className="max-h-[300px] overflow-auto border-t border-[var(--color-border-subtle)] bg-[var(--color-code-bg)] px-3 py-2.5 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-[var(--color-code-fg)]">
+        <pre className="mt-1 max-h-[300px] overflow-auto rounded-[10px] bg-[var(--color-code-bg)] px-3 py-2.5 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-[var(--color-code-fg)]">
           {code}
         </pre>
       ) : null}
       {expanded && output ? (
         <div
           className={cn(
-            'border-t border-[var(--color-border-subtle)] px-3 py-2.5 text-[11.5px] leading-relaxed',
+            'mt-1 text-[11.5px] leading-relaxed',
             isPython
-              ? 'max-h-[320px] overflow-auto bg-[var(--color-code-bg)] font-mono whitespace-pre-wrap text-[var(--color-code-fg)]'
-              : 'text-[var(--color-fg-muted)]',
+              ? 'max-h-[320px] overflow-auto rounded-[10px] bg-[var(--color-code-bg)] px-3 py-2.5 font-mono whitespace-pre-wrap text-[var(--color-code-fg)]'
+              : 'px-1.5 text-[var(--color-fg-muted)]',
           )}
         >
           {output}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { MoreHorizontal, Pencil, Share2, Star, Trash2, Archive, ArrowDown, FolderKanban, Copy, Check, Globe, Loader2, Menu, Files, GitBranch } from 'lucide-react'
@@ -26,6 +26,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { useConversations } from '@/store/conversations'
 import { useModels } from '@/store/models'
 import { useProjects } from '@/store/projects'
@@ -97,6 +98,10 @@ export default function ChatThread() {
   const [shareLoading, setShareLoading] = useState(false)
   const [shareBusy, setShareBusy] = useState(false)
   const [outlineOpen, setOutlineOpen] = useState(false)
+  // Mobile: the thread's secondary actions (outline / files / rename / share /
+  // archive / delete) collapse into one trailing overflow that opens this bottom
+  // action Sheet, keeping the header a calm three-zone bar (§ mobile redesign).
+  const [actionsOpen, setActionsOpen] = useState(false)
   const { copied, copy } = useCopy()
   const shareUrl = share ? `${window.location.origin}/share/${share.id}` : ''
 
@@ -280,122 +285,142 @@ export default function ChatThread() {
     setAutoFollow(true)
   }
 
+  // §2.3-D cross-vendor downgrade: only warn when switching provider type.
+  // Same-provider swaps (Sonnet → Opus) keep raw replay + full fidelity.
+  // Shared by the desktop toolbar and the mobile header's model label.
+  function handleModelChange(nextId: string) {
+    if (!conversation) return
+    const all = useModels.getState().models
+    const cur = all.find((m) => m.id === conversation.modelId)
+    const next = all.find((m) => m.id === nextId)
+    const sameProvider = cur && next && cur.channel_id === next.channel_id
+    void setModel(conversation.id, nextId)
+    if (!sameProvider) {
+      toast.success(t('chat:thread.modelSwitched'), t('chat:thread.modelSwitchedBody'))
+    }
+  }
+
   return (
     <div className="flex-1 flex flex-col min-h-0">
-      {/* Topbar */}
-      <header className="flex items-center gap-3 h-[var(--layout-topbar-h)] px-4 sm:px-6 border-b border-[var(--color-divider)] bg-[var(--color-bg)]/85 backdrop-blur-sm">
-        {!isDesktop ? (
+      {/* Topbar — desktop keeps the full inline toolbar; mobile is a calm
+          three-zone bar (menu • title+model • one overflow) like ChatGPT/Gemini. */}
+      {isDesktop ? (
+        <header className="flex items-center gap-3 h-[var(--layout-topbar-h)] px-4 sm:px-6 border-b border-[var(--color-divider)] bg-[var(--color-bg)]/85 backdrop-blur-sm">
+          <div className="flex-1 min-w-0 flex flex-col">
+            <h1 className="font-medium text-[var(--color-fg)] text-[15px] truncate">
+              {truncate(conversation.title || t('untitled'), 80)}
+            </h1>
+            {project ? (
+              <Link
+                to={`/projects/${project.id}`}
+                className={cn(
+                  'mt-0.5 inline-flex items-center gap-1 self-start text-[11px] interactive rounded-[6px] px-1.5 py-0.5 -ml-1.5',
+                  accentClasses(project.accent).chip,
+                  'hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+                )}
+              >
+                <FolderKanban size={10} aria-hidden />
+                {t('projects:badge.in', { name: truncate(project.name, 28) })}
+              </Link>
+            ) : null}
+          </div>
+          <ModelPicker value={conversation.modelId} onChange={handleModelChange} />
+          <Tooltip content={t('chat:topbar.outlineTooltip', { defaultValue: 'Conversation outline' })}>
+            <button
+              type="button"
+              onClick={() => setOutlineOpen((o) => !o)}
+              aria-label={t('chat:topbar.outlineTooltip', { defaultValue: 'Conversation outline' })}
+              aria-pressed={outlineOpen}
+              className={cn(
+                'inline-flex items-center justify-center size-8 rounded-[8px] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+                outlineOpen
+                  ? 'bg-[var(--color-bg-muted)] text-[var(--color-fg)]'
+                  : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
+              )}
+            >
+              <GitBranch size={14} aria-hidden />
+            </button>
+          </Tooltip>
+          <Tooltip content={t('chat:files.tooltip')}>
+            <button
+              type="button"
+              onClick={() => (filesDrawerOpen ? closeFilesDrawer() : openFilesDrawer(conversation.id))}
+              aria-label={t('chat:files.title')}
+              aria-pressed={filesDrawerOpen}
+              className={cn(
+                'inline-flex items-center justify-center size-8 rounded-[8px] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+                filesDrawerOpen
+                  ? 'bg-[var(--color-bg-muted)] text-[var(--color-fg)]'
+                  : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
+              )}
+            >
+              <Files size={14} aria-hidden />
+            </button>
+          </Tooltip>
+          <DropdownMenu>
+            <Tooltip content={t('chat:actions.more')}>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  aria-label={t('chat:sidebar.actions')}
+                  className="inline-flex items-center justify-center size-8 rounded-[8px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                >
+                  <MoreHorizontal size={14} aria-hidden />
+                </button>
+              </DropdownMenuTrigger>
+            </Tooltip>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={() => { setRenameDraft(conversation.title); setRenaming(true) }}>
+                <Pencil size={13} aria-hidden /> {t('chat:sidebar.rename')}
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => void star(conversation.id)}>
+                <Star size={13} aria-hidden /> {conversation.starred ? t('common:actions.unstar') : t('common:actions.star')}
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setShareOpen(true)}>
+                <Share2 size={13} aria-hidden /> {t('chat:sidebar.share')}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={async () => { await archive(conversation.id); toast.success(t('chat:sidebar.archived')); navigate('/chat') }}>
+                <Archive size={13} aria-hidden /> {t('chat:sidebar.archive')}
+              </DropdownMenuItem>
+              <DropdownMenuItem destructive onSelect={() => setConfirmDelete(true)}>
+                <Trash2 size={13} aria-hidden /> {t('chat:sidebar.delete')}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </header>
+      ) : (
+        <header className="grid grid-cols-[var(--tap-min)_1fr_var(--tap-min)] items-center gap-1 h-[var(--layout-topbar-h-mobile)] px-2 border-b border-[var(--color-divider)] bg-[var(--color-bg)]/85 backdrop-blur-sm">
           <button
             type="button"
             aria-label={t('chat:commandMenu.actions.toggleSidebar')}
             onClick={() => openNav(true)}
-            className="-ml-1 inline-flex items-center justify-center size-9 shrink-0 rounded-[8px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+            className="inline-flex items-center justify-center size-[var(--tap-min)] rounded-[10px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
           >
-            <Menu size={16} aria-hidden />
+            <Menu size={18} aria-hidden />
           </button>
-        ) : null}
-        <div className="flex-1 min-w-0 flex flex-col">
-          <h1 className="font-medium text-[var(--color-fg)] text-[14px] sm:text-[15px] truncate">
-            {truncate(conversation.title || t('untitled'), 80)}
-          </h1>
-          {project ? (
-            <Link
-              to={`/projects/${project.id}`}
-              className={cn(
-                'mt-0.5 inline-flex items-center gap-1 self-start text-[11px] interactive rounded-[6px] px-1.5 py-0.5 -ml-1.5',
-                accentClasses(project.accent).chip,
-                'hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-              )}
-            >
-              <FolderKanban size={10} aria-hidden />
-              {t('projects:badge.in', { name: truncate(project.name, 28) })}
-            </Link>
-          ) : null}
-        </div>
-        <ModelPicker
-          value={conversation.modelId}
-          onChange={(id) => {
-            // §2.3-D cross-vendor downgrade: only warn the user when switching
-            // provider type. Same-provider model swaps (Sonnet → Opus) keep
-            // raw replay and full fidelity — they shouldn't trigger the
-            // "tool process compressed" notice.
-            const all = useModels.getState().models
-            const cur = all.find((m) => m.id === conversation.modelId)
-            const next = all.find((m) => m.id === id)
-            // ApiChannel.type is the provider; resolve through channels next
-            // refresh if needed. For now compare by channel_id which is a 1:1
-            // proxy for provider type in our schema.
-            const sameProvider = cur && next && cur.channel_id === next.channel_id
-            void setModel(conversation.id, id)
-            if (!sameProvider) {
-              toast.success(t('chat:thread.modelSwitched'), t('chat:thread.modelSwitchedBody'))
-            }
-          }}
-        />
-        <Tooltip content={t('chat:topbar.outlineTooltip', { defaultValue: 'Conversation outline' })}>
+          <div className="min-w-0 flex flex-col items-center">
+            <h1 className="max-w-full truncate text-[14px] font-medium text-[var(--color-fg)] leading-tight">
+              {truncate(conversation.title || t('untitled'), 60)}
+            </h1>
+            {/* Model name as a tappable under-label (ChatGPT pattern) — opens the
+                model list. The dropdown trigger is restyled small via className. */}
+            <ModelPicker
+              value={conversation.modelId}
+              onChange={handleModelChange}
+              className="h-auto min-w-0 max-w-[62vw] gap-1 px-1.5 py-0.5 text-[11.5px] rounded-[7px]"
+            />
+          </div>
           <button
             type="button"
-            onClick={() => setOutlineOpen((o) => !o)}
-            aria-label={t('chat:topbar.outlineTooltip', { defaultValue: 'Conversation outline' })}
-            aria-pressed={outlineOpen}
-            className={cn(
-              'inline-flex items-center justify-center size-8 rounded-[8px] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-              outlineOpen
-                ? 'bg-[var(--color-bg-muted)] text-[var(--color-fg)]'
-                : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
-            )}
+            aria-label={t('chat:actions.more')}
+            onClick={() => setActionsOpen(true)}
+            className="inline-flex items-center justify-center size-[var(--tap-min)] justify-self-end rounded-[10px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
           >
-            <GitBranch size={14} aria-hidden />
+            <MoreHorizontal size={18} aria-hidden />
           </button>
-        </Tooltip>
-        <Tooltip content={t('chat:files.tooltip')}>
-          <button
-            type="button"
-            onClick={() => (filesDrawerOpen ? closeFilesDrawer() : openFilesDrawer(conversation.id))}
-            aria-label={t('chat:files.title')}
-            aria-pressed={filesDrawerOpen}
-            className={cn(
-              'inline-flex items-center justify-center size-8 rounded-[8px] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-              filesDrawerOpen
-                ? 'bg-[var(--color-bg-muted)] text-[var(--color-fg)]'
-                : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
-            )}
-          >
-            <Files size={14} aria-hidden />
-          </button>
-        </Tooltip>
-        <DropdownMenu>
-          <Tooltip content={t('chat:actions.more')}>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                aria-label={t('chat:sidebar.actions')}
-                className="inline-flex items-center justify-center size-8 rounded-[8px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-              >
-                <MoreHorizontal size={14} aria-hidden />
-              </button>
-            </DropdownMenuTrigger>
-          </Tooltip>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onSelect={() => { setRenameDraft(conversation.title); setRenaming(true) }}>
-              <Pencil size={13} aria-hidden /> {t('chat:sidebar.rename')}
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => void star(conversation.id)}>
-              <Star size={13} aria-hidden /> {conversation.starred ? t('common:actions.unstar') : t('common:actions.star')}
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => setShareOpen(true)}>
-              <Share2 size={13} aria-hidden /> {t('chat:sidebar.share')}
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={async () => { await archive(conversation.id); toast.success(t('chat:sidebar.archived')); navigate('/chat') }}>
-              <Archive size={13} aria-hidden /> {t('chat:sidebar.archive')}
-            </DropdownMenuItem>
-            <DropdownMenuItem destructive onSelect={() => setConfirmDelete(true)}>
-              <Trash2 size={13} aria-hidden /> {t('chat:sidebar.delete')}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </header>
+        </header>
+      )}
 
       {/* Messages */}
       <div
@@ -418,16 +443,17 @@ export default function ChatThread() {
       </div>
       <InlineThreadLayer conversationId={conversation.id} scrollRef={scrollRef} />
 
-      {/* Composer */}
-      <div className="relative">
+      {/* Composer — a hairline separates it from the thread on phones, where it's
+          a bottom-anchored bar rather than a floating card. */}
+      <div className="relative max-sm:border-t max-sm:border-[var(--color-divider)] bg-[var(--color-bg)]">
         {showJump && (
           <button
             type="button"
             onClick={jumpToBottom}
             aria-label={t('chat:thread.jumpToLatest')}
             className={cn(
-              'absolute -top-12 left-1/2 -translate-x-1/2 inline-flex items-center justify-center',
-              'size-9 rounded-full bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-fg-muted)]',
+              'absolute bottom-full left-1/2 mb-2 -translate-x-1/2 inline-flex items-center justify-center',
+              'size-9 max-sm:size-10 rounded-full bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-fg-muted)]',
               'shadow-[var(--shadow-md)] hover:text-[var(--color-fg)] interactive',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
             )}
@@ -435,7 +461,7 @@ export default function ChatThread() {
             <ArrowDown size={14} aria-hidden />
           </button>
         )}
-        <div className="mx-auto w-full max-w-[44rem] px-4 sm:px-6 lg:px-8 pb-5 pt-2">
+        <div className="mx-auto w-full max-w-[var(--layout-message-max-w)] px-3 sm:px-6 lg:px-8 pb-3 sm:pb-5 pt-1.5 sm:pt-2">
           <Composer
             modelId={conversation.modelId}
             onModelChange={(id) => void setModel(conversation.id, id)}
@@ -521,6 +547,59 @@ export default function ChatThread() {
         />
       ) : null}
 
+      {/* Mobile action sheet — outline / files / rename / star / share / archive /
+          delete, collapsed out of the cramped header (§ mobile redesign). */}
+      <Sheet open={actionsOpen} onOpenChange={setActionsOpen}>
+        <SheetContent side="bottom" size="sm" label={t('chat:actions.more')} className="h-auto max-h-[85dvh] rounded-t-[20px]">
+          <div className="flex flex-col px-2 py-2">
+            <ThreadActionRow
+              icon={<GitBranch size={18} aria-hidden />}
+              label={t('chat:topbar.outlineTooltip', { defaultValue: 'Conversation outline' })}
+              onClick={() => { setActionsOpen(false); setOutlineOpen(true) }}
+            />
+            <ThreadActionRow
+              icon={<Files size={18} aria-hidden />}
+              label={t('chat:files.title')}
+              onClick={() => { setActionsOpen(false); openFilesDrawer(conversation.id) }}
+            />
+            <ThreadActionRow
+              icon={<Pencil size={18} aria-hidden />}
+              label={t('chat:sidebar.rename')}
+              onClick={() => { setActionsOpen(false); setRenameDraft(conversation.title); setRenaming(true) }}
+            />
+            <ThreadActionRow
+              icon={<Star size={18} aria-hidden />}
+              label={conversation.starred ? t('common:actions.unstar') : t('common:actions.star')}
+              onClick={() => { setActionsOpen(false); void star(conversation.id) }}
+            />
+            <ThreadActionRow
+              icon={<Share2 size={18} aria-hidden />}
+              label={t('chat:sidebar.share')}
+              onClick={() => { setActionsOpen(false); setShareOpen(true) }}
+            />
+            {project ? (
+              <ThreadActionRow
+                icon={<FolderKanban size={18} aria-hidden />}
+                label={t('projects:badge.in', { name: truncate(project.name, 28) })}
+                onClick={() => { setActionsOpen(false); navigate(`/projects/${project.id}`) }}
+              />
+            ) : null}
+            <div className="my-1.5 h-px bg-[var(--color-divider)]" aria-hidden />
+            <ThreadActionRow
+              icon={<Archive size={18} aria-hidden />}
+              label={t('chat:sidebar.archive')}
+              onClick={async () => { setActionsOpen(false); await archive(conversation.id); toast.success(t('chat:sidebar.archived')); navigate('/chat') }}
+            />
+            <ThreadActionRow
+              icon={<Trash2 size={18} aria-hidden />}
+              label={t('chat:sidebar.delete')}
+              destructive
+              onClick={() => { setActionsOpen(false); setConfirmDelete(true) }}
+            />
+          </div>
+        </SheetContent>
+      </Sheet>
+
       <Dialog open={shareOpen} onOpenChange={setShareOpen}>
         <DialogContent size="sm">
           <DialogHeader>
@@ -588,5 +667,37 @@ export default function ChatThread() {
         </DialogContent>
       </Dialog>
     </div>
+  )
+}
+
+/** A 44px icon+label row inside the mobile thread action Sheet. */
+function ThreadActionRow({
+  icon,
+  label,
+  onClick,
+  destructive = false,
+}: {
+  icon: ReactNode
+  label: string
+  onClick: () => void
+  destructive?: boolean
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'flex w-full items-center gap-3 min-h-[var(--tap-min)] px-3 text-left text-[15px] rounded-[10px] interactive',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+        destructive
+          ? 'text-[var(--color-danger)] hover:bg-[var(--color-danger-soft)]'
+          : 'text-[var(--color-fg)] hover:bg-[var(--color-bg-muted)]',
+      )}
+    >
+      <span className={cn('shrink-0', destructive ? 'text-[var(--color-danger)]' : 'text-[var(--color-fg-muted)]')}>
+        {icon}
+      </span>
+      <span className="truncate">{label}</span>
+    </button>
   )
 }

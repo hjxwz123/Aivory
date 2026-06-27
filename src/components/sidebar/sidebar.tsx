@@ -20,6 +20,7 @@ import {
   Layers,
   Languages,
   Loader2,
+  X,
 } from 'lucide-react'
 import { Logo, LogoMark } from '@/components/brand/logo'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -201,6 +202,18 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
             </button>
           </Tooltip>
         )}
+        {/* Mobile drawer gets an explicit 44px close (the scrim tap alone isn't
+            discoverable on touch). */}
+        {variant === 'sheet' && (
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label={tCommon('actions.close', { defaultValue: 'Close' })}
+            className="inline-flex items-center justify-center size-[var(--tap-min)] rounded-[10px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+          >
+            <X size={18} aria-hidden />
+          </button>
+        )}
       </div>
 
       {/* Actions */}
@@ -210,7 +223,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
             type="button"
             onClick={() => void startNewChat()}
             className={cn(
-              'inline-flex items-center gap-2 h-9 rounded-[10px] text-sm font-medium',
+              'inline-flex items-center gap-2 h-9 max-lg:h-[var(--tap-min)] rounded-[10px] text-sm font-medium',
               'bg-[var(--color-bg-muted)] border border-[var(--color-border-strong)] text-[var(--color-fg)]',
               'hover:bg-[var(--color-bg)] hover:border-[var(--color-border-strong)] interactive',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
@@ -230,7 +243,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
             type="button"
             onClick={() => setOpen(true)}
             className={cn(
-              'inline-flex items-center gap-2 h-9 rounded-[10px] text-sm',
+              'inline-flex items-center gap-2 h-9 max-lg:h-[var(--tap-min)] rounded-[10px] text-sm',
               'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
               collapsed ? 'w-9 justify-center px-0' : 'w-full justify-between px-3',
@@ -249,7 +262,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
             to="/projects"
             onClick={onClose}
             className={cn(
-              'inline-flex items-center gap-2 h-9 rounded-[10px] text-sm',
+              'inline-flex items-center gap-2 h-9 max-lg:h-[var(--tap-min)] rounded-[10px] text-sm',
               'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
               collapsed ? 'w-9 justify-center px-0' : 'w-full justify-between px-3',
@@ -274,7 +287,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
               to="/?mode=draw"
               onClick={onClose}
               className={cn(
-                'inline-flex items-center gap-2 h-9 rounded-[10px] text-sm',
+                'inline-flex items-center gap-2 h-9 max-lg:h-[var(--tap-min)] rounded-[10px] text-sm',
                 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
                 collapsed ? 'w-9 justify-center px-0' : 'w-full justify-start px-3',
@@ -299,7 +312,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
                 type="button"
                 onClick={() => setNewProjectOpen(true)}
                 aria-label={tProjects('nav.newProject')}
-                className="inline-flex items-center justify-center size-5 max-sm:size-7 rounded-[5px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-bg)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                className="inline-flex items-center justify-center size-5 max-lg:size-9 rounded-[5px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-bg)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
               >
                 <Plus size={11} aria-hidden />
               </button>
@@ -451,7 +464,7 @@ function ConversationItem({
         <Link
           to={`/chat/${conversation.id}`}
           onClick={onSelect}
-          className="block px-2.5 py-2 pr-9 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] rounded-[10px]"
+          className="block px-2.5 py-2 pr-9 max-lg:py-2.5 max-lg:pr-12 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] rounded-[10px]"
         >
           <span
             className={cn(
@@ -469,7 +482,7 @@ function ConversationItem({
               <button
                 type="button"
                 aria-label={t('sidebar.actions')}
-                className="inline-flex items-center justify-center size-6 max-sm:size-8 max-sm:opacity-100 rounded-[6px] opacity-0 group-hover/conv:opacity-100 data-[state=open]:opacity-100 text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                className="inline-flex items-center justify-center size-6 max-lg:size-10 max-lg:opacity-100 rounded-[6px] opacity-0 group-hover/conv:opacity-100 data-[state=open]:opacity-100 text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
               >
                 <MoreHorizontal size={13} aria-hidden />
               </button>

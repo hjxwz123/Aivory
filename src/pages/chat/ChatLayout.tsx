@@ -10,6 +10,7 @@ import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { useSettings } from '@/store/settings'
 import { useUI } from '@/store/ui'
 import { useMediaQuery } from '@/hooks/use-media-query'
+import { mediaQuery } from '@/lib/design-tokens'
 import { useTheme } from '@/store/theme'
 import { Tooltip } from '@/components/ui/tooltip'
 import { useHotkeys } from '@/hooks/use-hotkeys'
@@ -18,7 +19,7 @@ import { RouteFade } from '@/components/ui/route-fade'
 import { cn } from '@/lib/utils'
 
 export default function ChatLayout() {
-  const isDesktop = useMediaQuery('(min-width: 1024px)')
+  const isDesktop = useMediaQuery(mediaQuery.desktop)
   const collapsed = useSettings((s) => s.sidebarCollapsed)
   const syncSystem = useTheme((s) => s.syncSystem)
   const { t } = useTranslation('chat')
@@ -56,15 +57,15 @@ export default function ChatLayout() {
         // sidebar and bottom composer never slide under the notch or home
         // indicator. env() is 0 in a normal browser tab, so this is a no-op
         // there. box-border keeps total height at 100svh.
-        'pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]',
-        'pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]',
+        'pt-[var(--safe-top)] pb-[var(--safe-bottom)]',
+        'pl-[var(--safe-left)] pr-[var(--safe-right)]',
       )}
     >
       {isDesktop ? (
         <Sidebar variant="desktop" />
       ) : (
         <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
-          <SheetContent side="left" size="md" label={t('sidebar.search')} className="bg-[var(--color-bg-muted)]">
+          <SheetContent side="left" size="nav" label={t('sidebar.search')} className="bg-[var(--color-bg-muted)]">
             <Sidebar variant="sheet" onClose={() => setDrawerOpen(false)} />
           </SheetContent>
         </Sheet>
@@ -75,17 +76,17 @@ export default function ChatLayout() {
           {/* Mobile top bar — suppressed when the page renders its own combined
               header (e.g. a chat thread) so the two don't stack into two rows. */}
           {!isDesktop && !pageOwnsTopBar && (
-            <div className="flex items-center justify-between h-12 px-3 border-b border-[var(--color-divider)] bg-[var(--color-bg)]/85 backdrop-blur-sm">
+            <div className="flex items-center justify-between h-[var(--layout-topbar-h-mobile)] px-2 border-b border-[var(--color-divider)] bg-[var(--color-bg)]/85 backdrop-blur-sm">
               <button
                 type="button"
                 aria-label={t('commandMenu.actions.toggleSidebar')}
                 onClick={() => setDrawerOpen(true)}
-                className="inline-flex items-center justify-center size-9 rounded-[8px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]"
+                className="inline-flex items-center justify-center size-[var(--tap-min)] rounded-[10px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
               >
-                <Menu size={16} aria-hidden />
+                <Menu size={18} aria-hidden />
               </button>
               <Logo size="sm" />
-              <div className="w-9" />
+              <div className="size-[var(--tap-min)]" />
             </div>
           )}
 

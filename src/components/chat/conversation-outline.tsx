@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { useTranslation } from 'react-i18next'
 import { GitBranch, X, ZoomIn, ZoomOut, GripHorizontal, Maximize2, User } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useMediaQuery } from '@/hooks/use-media-query'
+import { mediaQuery } from '@/lib/design-tokens'
 import { conversationsApi } from '@/api'
 import { useConversations, toLocalMessage } from '@/store/conversations'
 import { useModels } from '@/store/models'
@@ -109,20 +111,38 @@ function layoutTree(roots: TNode[], activeIds: Set<string>): { nodes: LaidNode[]
 
 export function ConversationOutline({ conversation, scrollContainerRef, onClose }: ConversationOutlineProps) {
   const { t } = useTranslation('chat')
+  // Phone: dock as a bottom sheet (full-width, backdrop) instead of a tiny
+  // draggable desktop window (§ mobile redesign).
+  const isPhone = useMediaQuery(mediaQuery.phone)
   const setActiveLeaf = useConversations((s) => s.setActiveLeaf)
   const getModel = useModels((s) => s.getById)
 
-  const [pos, setPos] = useState(() => ({
-    x: Math.max(16, (typeof window !== 'undefined' ? window.innerWidth : 1280) - 452),
-    y: 56,
-  }))
-  const [size, setSize] = useState({ w: 440, h: 480 })
-  const [zoom, setZoom] = useState(0.8)
+  // Open as a roomy panel centered on screen (then the user can drag it aside).
+  const [size, setSize] = useState(() => {
+    const vw = typeof window !== 'undefined' ? window.innerWidth : 1280
+    const vh = typeof window !== 'undefined' ? window.innerHeight : 800
+    return {
+      w: Math.round(Math.min(MAX_W, Math.max(520, vw * 0.52))),
+      h: Math.round(Math.min(MAX_H, Math.max(560, vh * 0.72))),
+    }
+  })
+  const [pos, setPos] = useState(() => {
+    const vw = typeof window !== 'undefined' ? window.innerWidth : 1280
+    const vh = typeof window !== 'undefined' ? window.innerHeight : 800
+    const w = Math.round(Math.min(MAX_W, Math.max(520, vw * 0.52)))
+    const h = Math.round(Math.min(MAX_H, Math.max(560, vh * 0.72)))
+    return { x: Math.max(16, Math.round((vw - w) / 2)), y: Math.max(16, Math.round((vh - h) / 2)) }
+  })
+  // Open enlarged (1:1) — never shrink-to-fit on open, or a big tree collapses
+  // into unreadable lines. The "fit" button is there when the user wants it.
+  const [zoom, setZoom] = useState(1)
 
   const posRef = useRef(pos)
   const sizeRef = useRef(size)
+  const zoomRef = useRef(zoom)
   posRef.current = pos
   sizeRef.current = size
+  zoomRef.current = zoom
 
   const dragRef = useRef<{ mx: number; my: number; px: number; py: number } | null>(null)
   const resizeRef = useRef<{ mx: number; my: number; w: number; h: number } | null>(null)
@@ -157,21 +177,39 @@ export function ConversationOutline({ conversation, scrollContainerRef, onClose 
     [treeMsgs, conversation.messages, activeIds],
   )
 
-  // Fit the whole graph into the panel — on first load and on demand.
+  // Fit the whole graph into the panel — on demand (the "fit" button). Once it
+  // fits, the margin-auto centering keeps the fitted graph centered.
   function fit() {
     const el = bodyRef.current
     const bw = el ? el.clientWidth : sizeRef.current.w - 8
     const bh = el ? el.clientHeight : sizeRef.current.h - 48
-    const z = Math.min((bw - 24) / width, (bh - 24) / height, 1)
+    const z = Math.min((bw - 32) / width, (bh - 32) / height, 1)
     setZoom(Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z)))
   }
+
+  // Scroll the canvas so a node sits in the middle of the viewport. offX/offY
+  // mirror the margin-auto offset when the graph is smaller than the viewport;
+  // the browser clamps the scroll to valid bounds.
+  function centerOnNode(id?: string) {
+    const el = bodyRef.current
+    if (!el) return
+    const z = zoomRef.current
+    const target = (id ? nodes.find((n) => n.msg.id === id) : undefined) ?? nodes[nodes.length - 1]
+    if (!target) return
+    const offX = Math.max(0, (el.clientWidth - width * z) / 2)
+    const offY = Math.max(0, (el.clientHeight - height * z) / 2)
+    el.scrollLeft = offX + target.cx * z - el.clientWidth / 2
+    el.scrollTop = offY + target.cy * z - el.clientHeight / 2
+  }
+
+  // On open: land enlarged and centered on the current leaf — where the
+  // conversation actually is — rather than fit-shrunk in a corner.
   useEffect(() => {
     if (didFit.current || nodes.length === 0) return
     didFit.current = true
-    // Defer so the body has measured its size.
-    requestAnimationFrame(fit)
+    requestAnimationFrame(() => centerOnNode(activeLeafId))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodes.length, width, height])
+  }, [nodes.length])
 
   function scrollToMessage(msgId: string) {
     const container = scrollContainerRef.current
@@ -235,14 +273,34 @@ export function ConversationOutline({ conversation, scrollContainerRef, onClose 
   const canZoomIn = zoom < ZOOM_MAX - 0.001
 
   return (
-    <div
-      style={{ left: pos.x, top: pos.y, width: size.w, height: size.h }}
-      className="fixed z-[200] flex flex-col rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-xl)] select-none overflow-hidden"
-    >
-      {/* Header / drag handle */}
+    <>
+      {isPhone ? (
+        <div
+          className="fixed inset-0 z-[199] bg-[var(--color-overlay)] backdrop-blur-[2px] animate-[fade-in_200ms_var(--ease-out)]"
+          onClick={onClose}
+          aria-hidden
+        />
+      ) : null}
       <div
-        onMouseDown={onDragDown}
-        className="flex items-center gap-2 px-3 py-2 border-b border-[var(--color-divider)] cursor-grab active:cursor-grabbing shrink-0 bg-[var(--color-surface)]"
+        style={
+          isPhone
+            ? { left: 0, bottom: 0, width: '100%', height: '80dvh' }
+            : { left: pos.x, top: pos.y, width: size.w, height: size.h }
+        }
+        className={cn(
+          'fixed z-[200] flex flex-col border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-xl)] select-none overflow-hidden',
+          isPhone
+            ? 'rounded-t-[20px] pb-[var(--safe-bottom)] animate-[sheet-in-b_280ms_var(--ease-out)]'
+            : 'rounded-[12px]',
+        )}
+      >
+      {/* Header — a drag handle on desktop; a static title bar on phone */}
+      <div
+        onMouseDown={isPhone ? undefined : onDragDown}
+        className={cn(
+          'flex items-center gap-2 px-3 py-2 border-b border-[var(--color-divider)] shrink-0 bg-[var(--color-surface)]',
+          isPhone ? '' : 'cursor-grab active:cursor-grabbing',
+        )}
       >
         <GitBranch size={13} aria-hidden className="text-[var(--color-fg-muted)] shrink-0" />
         <span className="flex-1 min-w-0 truncate text-[12.5px] font-medium text-[var(--color-fg)]">
@@ -256,7 +314,7 @@ export function ConversationOutline({ conversation, scrollContainerRef, onClose 
             type="button"
             onClick={fit}
             aria-label={t('outline.fit', { defaultValue: 'Fit view' })}
-            className="inline-flex items-center justify-center size-6 rounded-[5px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+            className="inline-flex items-center justify-center size-6 max-sm:size-9 rounded-[5px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
           >
             <Maximize2 size={11} aria-hidden />
           </button>
@@ -265,7 +323,7 @@ export function ConversationOutline({ conversation, scrollContainerRef, onClose 
             onClick={() => setZoom((z) => parseFloat(Math.max(ZOOM_MIN, z - STEP).toFixed(3)))}
             disabled={!canZoomOut}
             aria-label={t('outline.zoomOut', { defaultValue: 'Zoom out' })}
-            className="inline-flex items-center justify-center size-6 rounded-[5px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] disabled:opacity-35 interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+            className="inline-flex items-center justify-center size-6 max-sm:size-9 rounded-[5px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] disabled:opacity-35 interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
           >
             <ZoomOut size={11} aria-hidden />
           </button>
@@ -274,7 +332,7 @@ export function ConversationOutline({ conversation, scrollContainerRef, onClose 
             onClick={() => setZoom((z) => parseFloat(Math.min(ZOOM_MAX, z + STEP).toFixed(3)))}
             disabled={!canZoomIn}
             aria-label={t('outline.zoomIn', { defaultValue: 'Zoom in' })}
-            className="inline-flex items-center justify-center size-6 rounded-[5px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] disabled:opacity-35 interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+            className="inline-flex items-center justify-center size-6 max-sm:size-9 rounded-[5px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] disabled:opacity-35 interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
           >
             <ZoomIn size={11} aria-hidden />
           </button>
@@ -282,7 +340,7 @@ export function ConversationOutline({ conversation, scrollContainerRef, onClose 
             type="button"
             onClick={onClose}
             aria-label={t('outline.close', { defaultValue: 'Close outline' })}
-            className="inline-flex items-center justify-center size-6 rounded-[5px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+            className="inline-flex items-center justify-center size-6 max-sm:size-9 rounded-[5px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
           >
             <X size={11} aria-hidden />
           </button>
@@ -296,7 +354,11 @@ export function ConversationOutline({ conversation, scrollContainerRef, onClose 
             {t('outline.empty', { defaultValue: 'No messages yet.' })}
           </div>
         ) : (
-          <div style={{ width: width * zoom, height: height * zoom }}>
+          <div
+            className="flex"
+            style={{ width: width * zoom, height: height * zoom, minWidth: '100%', minHeight: '100%' }}
+          >
+            <div style={{ width: width * zoom, height: height * zoom, margin: 'auto' }}>
             <div style={{ width, height, transform: `scale(${zoom})`, transformOrigin: '0 0' }} className="relative">
               {/* Edges */}
               <svg width={width} height={height} className="absolute inset-0 pointer-events-none overflow-visible">
@@ -360,18 +422,22 @@ export function ConversationOutline({ conversation, scrollContainerRef, onClose 
                 )
               })}
             </div>
+            </div>
           </div>
         )}
       </div>
 
-      {/* Resize handle — bottom-right corner */}
-      <div
-        onMouseDown={onResizeDown}
-        aria-hidden
-        className="absolute bottom-0 right-0 size-5 cursor-nwse-resize flex items-center justify-center opacity-40 hover:opacity-80 transition-opacity"
-      >
-        <GripHorizontal size={10} className="rotate-45 text-[var(--color-fg-subtle)]" />
+      {/* Resize handle — desktop only (the phone sheet is fixed height) */}
+      {!isPhone && (
+        <div
+          onMouseDown={onResizeDown}
+          aria-hidden
+          className="absolute bottom-0 right-0 size-5 cursor-nwse-resize flex items-center justify-center opacity-40 hover:opacity-80 transition-opacity"
+        >
+          <GripHorizontal size={10} className="rotate-45 text-[var(--color-fg-subtle)]" />
+        </div>
+      )}
       </div>
-    </div>
+    </>
   )
 }
