@@ -245,6 +245,80 @@ func (o *Orchestrator) logUsage(ctx context.Context, log store.UsageLog) {
 	}
 }
 
+// estimateRequestTokens approximates the INPUT token footprint of the assembled
+// upstream request — system prompt + tool defs + the full history (which already
+// contains the injected RAG/summary/attachments). Heuristic (CJK-aware via
+// estimateTokens), no tokenizer; base64 image/document payloads aren't text-
+// tokenised so they're counted at a flat per-block allowance. Used by the
+// §credits pre-flight gate.
+func estimateRequestTokens(req UnifiedChatRequest) int {
+	t := estimateTokens(req.SystemPrompt)
+	if len(req.Tools) > 0 {
+		if b, err := json.Marshal(req.Tools); err == nil {
+			t += estimateTokens(string(b))
+		}
+	}
+	for _, m := range req.History {
+		if len(m.Raw) > 2 {
+			t += estimateTokens(string(m.Raw))
+			continue
+		}
+		for _, b := range m.Blocks {
+			switch b.Kind {
+			case "image", "document":
+				t += 1024 // base64 isn't text-tokenised; rough flat allowance
+			default:
+				t += estimateTokens(b.Text) + estimateTokens(b.Summary)
+				if len(b.Input) > 0 {
+					t += estimateTokens(string(b.Input))
+				}
+			}
+		}
+	}
+	return t
+}
+
+// availableCredits returns the user's spendable credits right now (timed-window
+// remaining + permanent balance), mirroring creditDecision's read.
+func (o *Orchestrator) availableCredits(ctx context.Context, userID, groupID string) float64 {
+	timed := 0.0
+	if g, err := store.GetUserGroup(ctx, o.db, groupID); err == nil && g != nil && g.CreditAllowance > 0 {
+		start, ttl := creditWindow(g.CreditPeriodSeconds)
+		timed = g.CreditAllowance - o.readTimedCreditsUsed(ctx, userID, start, ttl)
+		if timed < 0 {
+			timed = 0
+		}
+	}
+	perm, _ := store.PermanentCredits(ctx, o.db, userID)
+	return timed + perm
+}
+
+// preflightCredit estimates, BEFORE generating, whether a credit-charged turn is
+// affordable (§credits pre-flight). Estimated cost = computeCost(estimated input
+// tokens of the REAL request + a fixed 2k output reserve) × credits_per_usd;
+// refuse if it exceeds the user's balance. Returns (refusalMessage, ok); ok=true
+// means proceed. No-op when credits are off or the admin disabled the check.
+func (o *Orchestrator) preflightCredit(ctx context.Context, userID string, model *store.Model, req UnifiedChatRequest) (string, bool) {
+	if o.creditsPerUSD() <= 0 {
+		return "", true
+	}
+	enabled := true
+	if raw, err := store.GetSetting(o.db, "credit_preflight_enabled"); err == nil && len(raw) > 0 {
+		_ = json.Unmarshal(raw, &enabled)
+	}
+	if !enabled {
+		return "", true
+	}
+	const outputReserve = 2000 // input + a fixed 2k output reserve (admin choice)
+	estIn := estimateRequestTokens(req)
+	need := computeCost(*model, Usage{InputTokens: estIn, OutputTokens: outputReserve}) * o.creditsPerUSD()
+	have := o.availableCredits(ctx, userID, o.userGroupID(ctx, userID))
+	if need > have {
+		return fmt.Sprintf("This message is estimated to need about %.1f credits (≈%d input tokens) but your balance is %.1f. Reduce the context (fewer referenced files / shorter conversation) or top up, then try again.", need, estIn, have), false
+	}
+	return "", true
+}
+
 // creditWindow computes the fixed-window start + ttl for the credit refresh cycle.
 func creditWindow(periodSeconds int) (int64, time.Duration) {
 	p := int64(periodSeconds)

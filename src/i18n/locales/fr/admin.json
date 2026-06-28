@@ -391,7 +391,20 @@
     "embeddingSection": "Embeddings",
     "embeddingLead": "Modèle d'embedding des KB. Le changer n'affecte que les nouveaux fragments.",
     "embeddingModel": "Modèle d'embedding",
-    "embeddingModelHint": "Choisissez un modèle kind=embedding."
+    "embeddingModelHint": "Choisissez un modèle kind=embedding.",
+    "ragSection": "Récupération et injection",
+    "ragLead": "Contrôle quand un document importé est injecté en entier vs. récupéré par pertinence, et la quantité injectée.",
+    "ragFullTextThreshold": "Seuil d'injection complète (tokens)",
+    "ragFullTextThresholdHint": "Un document dont la taille estimée est ≤ cette valeur est injecté en entier à chaque tour ; au-delà, il est vectorisé et seuls les passages pertinents sont récupérés.",
+    "ragTopK": "Passages récupérés (Top-K)",
+    "ragTopKHint": "Nombre de passages à récupérer pour un document vectorisé (quand le Top-K dynamique est désactivé).",
+    "ragDynamicTopk": "Top-K dynamique (par similarité)",
+    "ragDynamicTopkHint": "Au lieu d'un K fixe, injecte chaque passage dont la similarité dépasse le seuil.",
+    "ragSimThreshold": "Seuil de similarité (0–1)",
+    "ragSimThresholdHint": "Seuil de similarité cosinus. Les passages au-dessus sont injectés.",
+    "preflightSection": "Pré-vérification des crédits",
+    "preflightLead": "Pour les tours facturés en crédits, estime la taille de la requête avant génération et refuse si l'utilisateur ne peut pas payer.",
+    "preflightEnabled": "Estimer et bloquer les requêtes non couvertes"
   },
   "tools": {
     "title": "Outils",

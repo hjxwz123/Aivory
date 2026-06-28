@@ -10,6 +10,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"hash/fnv"
 	"log"
@@ -276,7 +277,7 @@ func (s *Service) runPipeline(ctx context.Context, docID string, cache *parseCac
 	// (md/txt/log) still embeds. KB uploads always embed — a KB is an explicit
 	// cross-document search index, so skipping there would silently break search.
 	skipEmbed := d.KBID == "" && d.ConversationID != "" &&
-		(isCodeOrConfigText(d.Filename) || estimateTokens(content) <= fullTextThresholdTokens)
+		(isCodeOrConfigText(d.Filename) || estimateTokens(content) <= s.ragSettings().FullTextThreshold)
 
 	// §4.11-B2 lock: ingest into a KB MUST use the KB's locked embedding model;
 	// global setting changes never re-route an existing KB's vectors. For pure
@@ -589,27 +590,45 @@ func (s *Service) Retrieve(ctx context.Context, userID, convID string, kbIDs []s
 		return nil, nil
 	}
 
+	cfg := s.ragSettings()
 	ranked := fuseReciprocalRank(cands)
-	if len(ranked) > topK {
-		ranked = ranked[:topK]
+	if cfg.DynamicTopK {
+		// Inject EVERY hit whose cosine similarity clears the cutoff — no fixed K,
+		// no cap (§admin RAG). Keyword-only hits (sim 0) don't qualify here.
+		cut := float32(cfg.SimThreshold)
+		kept := make([]retrievalCandidate, 0, len(ranked))
+		for _, c := range ranked {
+			if c.sim >= cut {
+				kept = append(kept, c)
+			}
+		}
+		ranked = kept
+	} else {
+		k := cfg.TopK
+		if k <= 0 {
+			k = topK
+		}
+		if k > 0 && len(ranked) > k {
+			ranked = ranked[:k]
+		}
 	}
 
 	result := []Snippet{}
 	seenParent := map[string]bool{}
 	for _, c := range ranked {
-		// Small-to-big expansion: pull the PARENT section for surrounding context,
-		// but return a window CENTERED on the matched child so the hit is always
-		// present — even deep in a long section or past the parent's truncation
-		// (§4.11-C-2). One window per parent section (deduped on the top-ranked
-		// child of that section), so distinct sections aren't crowded out.
-		snippet := snippetOf(c.content, retrievedSnippetChars)
+		// Small-to-big: inject the FULL parent section for a retrieved hit (no
+		// per-snippet truncation — §admin RAG "检索到的全量注入"); one section per
+		// parent (deduped on its top-ranked child) so distinct sections aren't
+		// crowded out. Falls back to the child's own text when there's no parent.
+		snippet := c.content
 		if c.parentID != "" {
 			if seenParent[c.parentID] {
 				continue
 			}
 			seenParent[c.parentID] = true
-			parent, _ := store.GetChunkContent(ctx, s.db, c.parentID)
-			snippet = expandHit(parent, c.content, retrievedSnippetChars)
+			if parent, _ := store.GetChunkContent(ctx, s.db, c.parentID); strings.TrimSpace(parent) != "" {
+				snippet = parent
+			}
 		}
 		result = append(result, Snippet{
 			ID:      c.chunkID,
@@ -1495,15 +1514,53 @@ type RouteDecision struct {
 	Queries  []string `json:"queries"`
 }
 
-// FullTextThreshold (§4.11-B): when the bound documents fit in ~32K tokens we
-// skip the router entirely and inject the full text — cheapest and highest
-// fidelity for small docs.
-const fullTextThresholdTokens = 32_000
+// RAG knobs (§4.11-B) are admin-tunable from the Documents settings page and read
+// live from the settings table (no restart). Defaults inject only genuinely small
+// docs in full and send everything larger to RETRIEVAL — a whole medium file
+// injected every turn is what blew the prompt to 70k+.
+const (
+	// defaultRAGFullTextThreshold: a conversation doc whose estimated tokens are
+	// at/below this is injected in FULL (and not vectorised); above it the doc is
+	// vectorised and only relevant chunks are retrieved.
+	defaultRAGFullTextThreshold = 8000
+	defaultRAGTopK              = 8
+	defaultRAGSimThreshold      = 0.5
+)
 
-// ContextBudget caps how much full-document text we inject before degrading to
-// map-reduce summarisation (§4.11-B). Set to match the full-text threshold so
-// the small-document path never silently truncates between threshold and budget.
-const contextBudgetTokens = 32_000
+// ragSettings holds the live RAG configuration.
+type ragSettings struct {
+	FullTextThreshold int     // ≤ this (est. tokens) → inject whole; above → retrieve
+	TopK              int     // chunks retrieved when DynamicTopK is off
+	DynamicTopK       bool    // inject ALL hits with cosine sim ≥ SimThreshold instead of a fixed K
+	SimThreshold      float64 // dynamic-topK cutoff (cosine similarity)
+}
+
+// ragSettings reads the admin-tunable RAG knobs (with safe defaults).
+func (s *Service) ragSettings() ragSettings {
+	c := ragSettings{FullTextThreshold: defaultRAGFullTextThreshold, TopK: defaultRAGTopK, SimThreshold: defaultRAGSimThreshold}
+	if raw, err := store.GetSetting(s.db, "rag_full_text_threshold"); err == nil && len(raw) > 0 {
+		var v int
+		if json.Unmarshal(raw, &v) == nil && v > 0 {
+			c.FullTextThreshold = v
+		}
+	}
+	if raw, err := store.GetSetting(s.db, "rag_top_k"); err == nil && len(raw) > 0 {
+		var v int
+		if json.Unmarshal(raw, &v) == nil && v > 0 {
+			c.TopK = v
+		}
+	}
+	if raw, err := store.GetSetting(s.db, "rag_dynamic_topk"); err == nil && len(raw) > 0 {
+		_ = json.Unmarshal(raw, &c.DynamicTopK)
+	}
+	if raw, err := store.GetSetting(s.db, "rag_similarity_threshold"); err == nil && len(raw) > 0 {
+		var v float64
+		if json.Unmarshal(raw, &v) == nil && v > 0 {
+			c.SimThreshold = v
+		}
+	}
+	return c
+}
 
 // RouteAndRetrieve runs the §4.11-B router pipeline:
 //
@@ -1518,6 +1575,7 @@ const contextBudgetTokens = 32_000
 // user's text as the query (safest).
 func (s *Service) RouteAndRetrieve(ctx context.Context, userID, convID string, kbIDs []string, userText string, history []string, topK int) ([]Snippet, RouteDecision, error) {
 	decision := RouteDecision{Strategy: "retrieve", Queries: []string{userText}}
+	cfg := s.ragSettings()
 
 	// Step 0: size check + pinned docs. "Pinned" = in-scope child chunks with no
 	// embedding — small conversation docs we intentionally did NOT vectorise (see
@@ -1539,14 +1597,15 @@ func (s *Service) RouteAndRetrieve(ctx context.Context, userID, convID string, k
 		}
 	}
 	// Whole scope fits (or nothing is embedded) → inject everything in full.
-	if len(scope) > 0 && (embeddedTokens == 0 || pinnedTokens+embeddedTokens <= fullTextThresholdTokens) {
+	if len(scope) > 0 && (embeddedTokens == 0 || pinnedTokens+embeddedTokens <= cfg.FullTextThreshold) {
 		decision.Strategy = "full_text"
-		return fullTextSnippets(scope, contextBudgetTokens), decision, nil
+		return fullTextSnippets(scope), decision, nil
 	}
-	// Otherwise we retrieve over the embedded chunks, but ALWAYS prepend the
-	// pinned (unembedded) docs in full so they're never dropped from a large,
-	// mixed-size conversation. Capped at half the budget to leave room for hits.
-	pinnedSnips := fullTextSnippets(pinned, contextBudgetTokens/2)
+	// Otherwise retrieve over the embedded chunks, but ALWAYS prepend the pinned
+	// (unembedded) docs in full so they're never dropped from a large, mixed-size
+	// conversation. No injection cap (§admin RAG) — cost is guarded by the
+	// pre-flight credit check, not by truncation.
+	pinnedSnips := fullTextSnippets(pinned)
 	withPinned := func(out []Snippet) []Snippet {
 		if len(pinnedSnips) == 0 {
 			return out
@@ -1563,7 +1622,7 @@ func (s *Service) RouteAndRetrieve(ctx context.Context, userID, convID string, k
 	docHints := s.collectDocHints(ctx, kbIDs, convID)
 
 	if s.task == nil {
-		out, err := s.Retrieve(ctx, userID, convID, kbIDs, userText, topK)
+		out, err := s.Retrieve(ctx, userID, convID, kbIDs, userText, cfg.TopK)
 		return withPinned(out), decision, err
 	}
 	prompt := buildRouterPrompt(userText, history, docHints)
@@ -1579,26 +1638,13 @@ func (s *Service) RouteAndRetrieve(ctx context.Context, userID, convID string, k
 		// always-on) docs are still injected — the user uploaded them on purpose.
 		return withPinned(nil), decision, nil
 	case "full_doc":
-		// Whole-document question. Within budget → inject everything in document
-		// order; over budget → map-reduce summarisation via the task model.
-		estTokens := 0
-		for _, c := range scope {
-			if c.ChunkType != "parent" {
-				estTokens += estimateTokens(c.Content)
-			}
-		}
-		if estTokens <= contextBudgetTokens {
-			// fullTextSnippets(scope) already includes the pinned chunks.
-			return fullTextSnippets(scope, contextBudgetTokens), decision, nil
-		}
-		out, err := s.mapReduceSummarise(ctx, userID, convID, scope, userText)
-		if err != nil || len(out) == 0 {
-			// Fall back to wide retrieval if summarisation fails.
-			out, err = s.Retrieve(ctx, userID, convID, kbIDs, userText, topK*2)
-		}
-		return withPinned(out), decision, err
+		// Whole-document question → inject the entire document in order. No cap
+		// (§admin RAG); the pre-flight credit check governs cost.
+		return fullTextSnippets(scope), decision, nil
 	default:
-		// retrieve: run each rewritten query, merge and dedupe.
+		// retrieve: run each rewritten query, merge + dedupe. With dynamic top-K
+		// the per-query result is already similarity-bounded, so don't cap the
+		// merge; with fixed K, cap the merged set at K.
 		seen := map[string]struct{}{}
 		merged := []Snippet{}
 		queries := decision.Queries
@@ -1606,7 +1652,7 @@ func (s *Service) RouteAndRetrieve(ctx context.Context, userID, convID string, k
 			queries = []string{userText}
 		}
 		for _, q := range queries {
-			subset, err := s.Retrieve(ctx, userID, convID, kbIDs, q, topK)
+			subset, err := s.Retrieve(ctx, userID, convID, kbIDs, q, cfg.TopK)
 			if err != nil {
 				continue
 			}
@@ -1616,13 +1662,13 @@ func (s *Service) RouteAndRetrieve(ctx context.Context, userID, convID string, k
 				}
 				seen[sn.ID] = struct{}{}
 				merged = append(merged, sn)
-				if len(merged) >= topK {
-					break
-				}
 			}
-			if len(merged) >= topK {
+			if !cfg.DynamicTopK && len(merged) >= cfg.TopK {
 				break
 			}
+		}
+		if !cfg.DynamicTopK && len(merged) > cfg.TopK {
+			merged = merged[:cfg.TopK]
 		}
 		return withPinned(merged), decision, nil
 	}
@@ -1630,19 +1676,16 @@ func (s *Service) RouteAndRetrieve(ctx context.Context, userID, convID string, k
 
 // fullTextSnippets returns the scope's child chunks in document order as
 // snippets, capped at budget tokens (≈4 chars/token).
-func fullTextSnippets(scope []store.Chunk, budgetTokens int) []Snippet {
+// fullTextSnippets returns the scope's child chunks in document order, each in
+// FULL — no token budget / truncation (§admin RAG: "删除封顶"). Cost on a credit
+// turn is bounded by the pre-flight estimate, not here.
+func fullTextSnippets(scope []store.Chunk) []Snippet {
 	out := []Snippet{}
-	used := 0
 	idx := 1
 	for _, c := range scope {
 		if c.ChunkType == "parent" {
 			continue
 		}
-		t := estimateTokens(c.Content)
-		if used+t > budgetTokens {
-			break
-		}
-		used += t
 		out = append(out, Snippet{
 			ID:      c.ID,
 			Index:   idx,

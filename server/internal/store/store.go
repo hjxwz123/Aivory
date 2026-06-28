@@ -274,6 +274,17 @@ func Seed(db *sql.DB, cfg config.Config) error {
 		"task_model_id":               `""`,
 		"image_prompt_model_id":       `""`,
 		"verify_model_id":             `""`,
+		// §4.11-B RAG injection knobs (admin → Documents). A conversation doc at/below
+		// rag_full_text_threshold (est. tokens) is injected in full; above it, it's
+		// vectorised and only chunks are retrieved (rag_top_k of them, or — when
+		// rag_dynamic_topk is on — every chunk with cosine sim ≥ rag_similarity_threshold).
+		"rag_full_text_threshold":  `8000`,
+		"rag_top_k":                `8`,
+		"rag_dynamic_topk":         `false`,
+		"rag_similarity_threshold": `0.5`,
+		// §credits pre-flight: on a credit-charged turn, estimate the assembled
+		// prompt's tokens before generating and refuse if the user can't afford it.
+		"credit_preflight_enabled": `true`,
 		"keep_recent_rounds":          `6`,
 		"summary_max_tokens":          `2048`,
 		"compaction_token_trigger":    `32000`,

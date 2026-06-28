@@ -16,6 +16,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Field } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
 import { toast } from '@/hooks/use-toast'
 
 type Settings = Record<string, unknown>
@@ -24,6 +25,11 @@ type Settings = Record<string, unknown>
 // edits on other admin pages aren't clobbered.
 const OWNED_KEYS = [
   'embedding_model_id',
+  'rag_full_text_threshold',
+  'rag_top_k',
+  'rag_dynamic_topk',
+  'rag_similarity_threshold',
+  'credit_preflight_enabled',
   'mineru_api_url',
   'mineru_api_token',
   'storage_provider',
@@ -85,6 +91,14 @@ export default function AdminDocuments() {
     const v = draft[key]
     return typeof v === 'string' ? v : fallback
   }
+  function readNumber(key: string, fallback = 0): number {
+    const v = draft[key]
+    return typeof v === 'number' ? v : fallback
+  }
+  function readBool(key: string, fallback = false): boolean {
+    const v = draft[key]
+    return typeof v === 'boolean' ? v : fallback
+  }
 
   const storageProvider = readString('storage_provider')
 
@@ -128,6 +142,120 @@ export default function AdminDocuments() {
                   </SelectContent>
                 </Select>
               </Field>
+            </div>
+          </div>
+
+          {/* RAG retrieval & injection -------------------------------------- */}
+          <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-5">
+            <h2 className="font-serif text-lg text-[var(--color-fg)]">
+              {t('admin:documents.ragSection', { defaultValue: 'Retrieval & injection' })}
+            </h2>
+            <p className="mt-1 text-xs text-[var(--color-fg-subtle)]">
+              {t('admin:documents.ragLead', {
+                defaultValue:
+                  'Control when an uploaded document is injected whole vs. retrieved by relevance, and how much is injected.',
+              })}
+            </p>
+            <div className="mt-4 flex flex-col gap-5">
+              <Field
+                label={t('admin:documents.ragFullTextThreshold', { defaultValue: 'Full-inject threshold (tokens)' })}
+                htmlFor="rag-threshold"
+                hint={t('admin:documents.ragFullTextThresholdHint', {
+                  defaultValue:
+                    'A document at/below this estimated size is injected in full every turn; above it, the document is vectorized and only relevant chunks are retrieved.',
+                })}
+              >
+                <Input
+                  id="rag-threshold"
+                  type="number"
+                  min={0}
+                  placeholder="8000"
+                  value={String(readNumber('rag_full_text_threshold', 8000))}
+                  onChange={(e) =>
+                    setDraft({ ...draft, rag_full_text_threshold: Math.max(0, Number(e.target.value) || 0) })
+                  }
+                />
+              </Field>
+              <Field
+                label={t('admin:documents.ragTopK', { defaultValue: 'Retrieved chunks (Top-K)' })}
+                htmlFor="rag-topk"
+                hint={t('admin:documents.ragTopKHint', {
+                  defaultValue: 'How many chunks to retrieve for a vectorized document (when dynamic Top-K is off).',
+                })}
+              >
+                <Input
+                  id="rag-topk"
+                  type="number"
+                  min={1}
+                  placeholder="8"
+                  value={String(readNumber('rag_top_k', 8))}
+                  onChange={(e) => setDraft({ ...draft, rag_top_k: Math.max(1, Number(e.target.value) || 1) })}
+                />
+              </Field>
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <div className="text-sm text-[var(--color-fg)]">
+                    {t('admin:documents.ragDynamicTopk', { defaultValue: 'Dynamic Top-K (by similarity)' })}
+                  </div>
+                  <div className="mt-0.5 text-xs text-[var(--color-fg-subtle)]">
+                    {t('admin:documents.ragDynamicTopkHint', {
+                      defaultValue:
+                        'Instead of a fixed K, inject every retrieved chunk whose similarity clears the threshold.',
+                    })}
+                  </div>
+                </div>
+                <Switch
+                  checked={readBool('rag_dynamic_topk', false)}
+                  onChange={(v) => setDraft({ ...draft, rag_dynamic_topk: v })}
+                />
+              </div>
+              {readBool('rag_dynamic_topk', false) && (
+                <Field
+                  label={t('admin:documents.ragSimThreshold', { defaultValue: 'Similarity threshold (0–1)' })}
+                  htmlFor="rag-sim"
+                  hint={t('admin:documents.ragSimThresholdHint', {
+                    defaultValue: 'Cosine-similarity cutoff. Chunks scoring at/above this are injected.',
+                  })}
+                >
+                  <Input
+                    id="rag-sim"
+                    type="number"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    placeholder="0.5"
+                    value={String(readNumber('rag_similarity_threshold', 0.5))}
+                    onChange={(e) =>
+                      setDraft({
+                        ...draft,
+                        rag_similarity_threshold: Math.min(1, Math.max(0, Number(e.target.value) || 0)),
+                      })
+                    }
+                  />
+                </Field>
+              )}
+            </div>
+          </div>
+
+          {/* Credit pre-flight ---------------------------------------------- */}
+          <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-5">
+            <h2 className="font-serif text-lg text-[var(--color-fg)]">
+              {t('admin:documents.preflightSection', { defaultValue: 'Credit pre-flight' })}
+            </h2>
+            <p className="mt-1 text-xs text-[var(--color-fg-subtle)]">
+              {t('admin:documents.preflightLead', {
+                defaultValue:
+                  "For credit-charged turns, estimate the request size before generating and refuse if the user can't afford it.",
+              })}
+            </p>
+            <div className="mt-4 flex items-center justify-between gap-4">
+              <div className="text-sm text-[var(--color-fg)]">
+                {t('admin:documents.preflightEnabled', { defaultValue: 'Estimate & block unaffordable requests' })}
+              </div>
+              <Switch
+                checked={readBool('credit_preflight_enabled', true)}
+                onChange={(v) => setDraft({ ...draft, credit_preflight_enabled: v })}
+              />
             </div>
           </div>
 

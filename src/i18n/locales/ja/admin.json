@@ -391,7 +391,20 @@
     "embeddingSection": "埋め込み",
     "embeddingLead": "KB ベクトルの埋め込みモデル。変更は新規チャンクのみ。",
     "embeddingModel": "埋め込みモデル",
-    "embeddingModelHint": "kind=embedding のモデルから選択。"
+    "embeddingModelHint": "kind=embedding のモデルから選択。",
+    "ragSection": "検索と注入",
+    "ragLead": "アップロード文書を「全文注入」するか「関連性で検索」するか、どれだけ注入するかを制御します。",
+    "ragFullTextThreshold": "全文注入のしきい値(トークン)",
+    "ragFullTextThresholdHint": "推定サイズがこの値以下の文書は毎ターン全文注入。超える場合はベクトル化し、関連チャンクのみ検索します。",
+    "ragTopK": "検索チャンク数(Top-K)",
+    "ragTopKHint": "ベクトル化文書で検索するチャンク数(動的 Top-K がオフのとき)。",
+    "ragDynamicTopk": "動的 Top-K(類似度ベース)",
+    "ragDynamicTopkHint": "固定数ではなく、類似度がしきい値以上のチャンクをすべて注入します。",
+    "ragSimThreshold": "類似度しきい値(0–1)",
+    "ragSimThresholdHint": "コサイン類似度の下限。これ以上のチャンクを注入します。",
+    "preflightSection": "クレジット事前チェック",
+    "preflightLead": "クレジット課金のターンでは、生成前にリクエストサイズを見積もり、残高不足なら拒否します。",
+    "preflightEnabled": "見積もり、支払えないリクエストをブロック"
   },
   "tools": {
     "title": "ツール",

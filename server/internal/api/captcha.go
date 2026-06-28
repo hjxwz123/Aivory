@@ -2,7 +2,10 @@ package api
 
 import (
 	"bytes"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"image"
 	"image/color"
@@ -94,21 +97,46 @@ func captchaVerifyHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"ok": false})
 		return
 	}
-	token := randToken(24)
-	d.Cache.Set("captcha_pass:"+token, "1", 10*time.Minute)
-	writeJSON(w, 200, map[string]any{"ok": true, "token": token})
+	writeJSON(w, 200, map[string]any{"ok": true, "token": mintCaptchaPass(d.Config.JWTSecret)})
 }
 
-// consumeCaptchaPass validates and single-use-consumes a pass token minted by
-// captchaVerifyHandler. The register handler calls it when a captcha is required.
+// captchaPassTTL bounds how long a solved-captcha pass stays valid.
+const captchaPassTTL = 10 * time.Minute
+
+// mintCaptchaPass returns a STATELESS pass proving a captcha was just solved:
+// "<expiryUnix>.<HMAC>". It is signed with the server's JWT secret and carries no
+// server-side state — so, unlike the previous cache-backed token, it survives an
+// API restart and works across multiple API replicas WITHOUT a shared (Redis)
+// cache. With the in-memory cache, the old token lived in ONE process's memory,
+// so a restart between /captcha/verify and /api/auth/register — or a second
+// replica handling the register — lost it and the register 400'd "captcha_failed".
+func mintCaptchaPass(secret string) string {
+	payload := strconv.FormatInt(time.Now().Add(captchaPassTTL).Unix(), 10)
+	return payload + "." + captchaSig(payload, secret)
+}
+
+// consumeCaptchaPass verifies a stateless captcha pass (signature + not expired).
+// The name is kept for callers; statelessness trades strict single-use for
+// restart/multi-instance robustness — acceptable for a registration deterrent,
+// where the per-IP daily cap + rate limits are the real abuse backstop, and the
+// 10-minute TTL bounds replay.
 func consumeCaptchaPass(d Deps, token string) bool {
-	if strings.TrimSpace(token) == "" {
+	payload, sig, ok := strings.Cut(strings.TrimSpace(token), ".")
+	if !ok || payload == "" || sig == "" {
 		return false
 	}
-	key := "captcha_pass:" + token
-	_, ok := d.Cache.Get(key)
-	d.Cache.Delete(key)
-	return ok
+	if subtle.ConstantTimeCompare([]byte(sig), []byte(captchaSig(payload, d.Config.JWTSecret))) != 1 {
+		return false
+	}
+	exp, err := strconv.ParseInt(payload, 10, 64)
+	return err == nil && time.Now().Unix() <= exp
+}
+
+// captchaSig is the HMAC-SHA256 of the pass payload, keyed by the server secret.
+func captchaSig(payload, secret string) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte("captcha-pass:" + payload))
+	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
 // verifyPuzzleCaptcha consumes the cached challenge and checks the submitted drop

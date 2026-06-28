@@ -391,7 +391,20 @@
     "embeddingSection": "嵌入模型",
     "embeddingLead": "知识库向量化模型。换模型只影响新切片。",
     "embeddingModel": "嵌入模型",
-    "embeddingModelHint": "从 kind=embedding 的模型里选。"
+    "embeddingModelHint": "从 kind=embedding 的模型里选。",
+    "ragSection": "检索与注入",
+    "ragLead": "控制上传文档是「整篇注入」还是「按相关性检索」,以及注入多少。",
+    "ragFullTextThreshold": "全文注入阈值(token)",
+    "ragFullTextThresholdHint": "估算大小 ≤ 此值的文档每轮整篇注入;超过则向量化、只检索相关片段。",
+    "ragTopK": "检索片段数(Top-K)",
+    "ragTopKHint": "向量化文档每次检索多少个片段(未开启动态 Top-K 时)。",
+    "ragDynamicTopk": "动态 Top-K(按相似度)",
+    "ragDynamicTopkHint": "不再固定数量,而是把相似度超过下方阈值的片段全部注入。",
+    "ragSimThreshold": "相似度阈值(0–1)",
+    "ragSimThresholdHint": "余弦相似度下限,达到或超过即注入。",
+    "preflightSection": "积分预检",
+    "preflightLead": "对扣积分的对话,在生成前预估请求大小,余额不足则拒绝回复。",
+    "preflightEnabled": "预估并拦截余额不足的请求"
   },
   "tools": {
     "title": "工具",

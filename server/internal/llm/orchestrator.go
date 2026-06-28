@@ -705,21 +705,28 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	//    path (async, like memory.process) and never stalls first token. Only a
 	//    large cold-start backlog (fresh import) is summarised inline to bound the
 	//    first prompt.
-	keep, summaryBlocks, compactAction := PlanCompaction(o.db, conv, history)
+	// The RAG/uploaded-file text injected THIS turn is per-turn overhead that lives
+	// OUTSIDE `history`; render it now so the compaction trigger can count it —
+	// otherwise the first turn after an upload is blind to the file (§4.7). 0 when
+	// nothing was retrieved.
+	ragContext := formatRAGContext(ragSnippets)
+	injectedOverhead := estimateTokens(ragContext)
+
+	keep, summaryBlocks, compactAction := PlanCompaction(o.db, conv, history, injectedOverhead)
 	switch compactAction {
 	case compactInline:
-		if k, b, cerr := MaybeCompact(ctx, o.db, o.task, conv, history); cerr == nil {
+		if k, b, cerr := MaybeCompact(ctx, o.db, o.task, conv, history, injectedOverhead); cerr == nil {
 			keep, summaryBlocks = k, b
 		}
 	case compactAsync:
 		if o.queue != nil && o.task != nil {
-			convID, userID, hist := conv.ID, conv.UserID, history
+			convID, userID, hist, overhead := conv.ID, conv.UserID, history, injectedOverhead
 			o.queue.Enqueue("compaction.advance", func(ctx context.Context) error {
 				fresh, gerr := store.GetConversation(ctx, o.db, convID, userID)
 				if gerr != nil {
 					return gerr
 				}
-				_, _, cerr := MaybeCompact(ctx, o.db, o.task, fresh, hist)
+				_, _, cerr := MaybeCompact(ctx, o.db, o.task, fresh, hist, overhead)
 				return cerr
 			})
 		}
@@ -729,7 +736,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// 9b. Inject the summary + RAG context into the MESSAGE layer (§4.8/§4.9),
 	//     not the system prompt — keeps the system prefix stable + cacheable.
 	uHist = injectSummaryIntoHistory(uHist, ApplySummaryBlocks(summaryBlocks))
-	uHist = injectRAGIntoHistory(uHist, formatRAGContext(ragSnippets))
+	uHist = injectRAGIntoHistory(uHist, ragContext)
 
 	// 9c. Resolve file attachments into provider-ready blocks (§4.6): images and
 	//     PDFs become base64 image/document blocks on their message (vision
@@ -824,6 +831,23 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		ParamOverrides: req.ParamOverrides,
 		ParamControls:  model.ParamControls,
 		Stream:         model.Stream,
+	}
+
+	// §credits pre-flight: for a credit-charged turn, estimate the REAL upstream
+	// request size (system + tools + history incl. injected RAG/file) + a small
+	// output reserve, convert to credits, and refuse BEFORE calling the model if
+	// the user can't afford it. Free-allotment turns are unaffected.
+	if payWithCredits {
+		if pmsg, pok := o.preflightCredit(ctx, conv.UserID, model, provReq); !pok {
+			refusalBlocks, _ := json.Marshal([]UnifiedBlock{{Kind: "text", Text: pmsg}})
+			_ = store.FinishMessage(ctx, o.db, assistantMsg.ID, store.MessageFinishPatch{
+				Blocks: refusalBlocks, Citations: []byte("[]"), StopReason: "insufficient_credits", Status: "complete",
+			})
+			onEvent(SseEvent{Type: "refusal", MessageID: assistantMsg.ID, Message: pmsg})
+			onEvent(SseEvent{Type: "done", MessageID: assistantMsg.ID, StopReason: "insufficient_credits"})
+			assistantMsg.Blocks = refusalBlocks
+			return &RunResult{UserMessage: userMsg, AssistantMessage: assistantMsg}, nil
+		}
 	}
 
 	// Image model the user pre-selected (§4.12-B), read from user settings.

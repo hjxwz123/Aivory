@@ -167,14 +167,26 @@ func estimateHistoryTokens(msgs []store.Message) int {
 // Fallback (first turn, or a freshly-imported history with no recorded usage):
 // the CJK-aware heuristic over the kept history. Returns exact=false so callers
 // know it's only an estimate of the history portion.
-func contextTokens(history []store.Message) (tokens int, exact bool) {
+func contextTokens(history []store.Message, injectedOverhead int) (tokens int, exact bool) {
+	// est = the kept history PLUS this turn's freshly-injected, not-yet-persisted
+	// content (RAG chunks / uploaded-file text). injectedOverhead matters on the
+	// FIRST turn after an upload: no prior assistant row has recorded input_tokens
+	// yet, so the bare history estimate is blind to the file (§4.7 first-turn gap).
+	est := estimateHistoryTokens(history) + injectedOverhead
 	for i := len(history) - 1; i >= 0; i-- {
 		m := history[i]
 		if m.Role == "assistant" && m.InputTokens > 0 {
-			return m.InputTokens + m.CacheReadTokens, true
+			// The provider's real last-turn prompt count (system + tools + RAG +
+			// history). Take the MAX with `est` so a file injected THIS turn that the
+			// previous turn didn't have still counts — otherwise the trigger lags a
+			// turn behind whenever new content is injected.
+			if real := m.InputTokens + m.CacheReadTokens; real >= est {
+				return real, true
+			}
+			return est, true
 		}
 	}
-	return estimateHistoryTokens(history), false
+	return est, false
 }
 
 // compactionSettings reads + clamps the admin-tunable compaction knobs. The admin
@@ -221,7 +233,7 @@ const (
 // so it never stalls first token. Returns the verbatim tail, the path summary
 // blocks to render, and an action telling the caller whether to advance the
 // summary now (inline, only on a large cold-start backlog) or in the background.
-func PlanCompaction(db *sql.DB, conv *store.Conversation, history []store.Message) ([]store.Message, []SummaryBlock, int) {
+func PlanCompaction(db *sql.DB, conv *store.Conversation, history []store.Message, injectedOverhead int) ([]store.Message, []SummaryBlock, int) {
 	enabled := true
 	if raw, err := store.GetSetting(db, "compaction_enabled"); err == nil {
 		_ = json.Unmarshal(raw, &enabled)
@@ -238,7 +250,7 @@ func PlanCompaction(db *sql.DB, conv *store.Conversation, history []store.Messag
 	}
 	keep := history[frontier:]
 	tail := len(history) - frontier
-	ctxTok, _ := contextTokens(history)
+	ctxTok, _ := contextTokens(history, injectedOverhead)
 	overflow := tail > keepRounds*2 || (tokenTrigger > 0 && ctxTok > tokenTrigger)
 	switch {
 	case !overflow:
@@ -289,6 +301,7 @@ func MaybeCompact(
 	task *TaskLLM,
 	conv *store.Conversation,
 	history []store.Message,
+	injectedOverhead int,
 ) ([]store.Message, []SummaryBlock, error) {
 	// Read settings.
 	enabled := true
@@ -311,7 +324,7 @@ func MaybeCompact(
 	// budget is exceeded. Token size prefers the provider's real prompt count
 	// from the last turn (input + cached prefix), falling back to a heuristic.
 	keepMsgs := keepRounds * 2
-	ctxTok, exact := contextTokens(history)
+	ctxTok, exact := contextTokens(history, injectedOverhead)
 	if len(history) <= keepMsgs && ctxTok <= tokenTrigger {
 		return history, filterBlocksForPath(existing, history), nil
 	}
@@ -357,6 +370,14 @@ func MaybeCompact(
 		cut--
 	}
 	if cut == 0 {
+		// The token budget can be exceeded (ctxTok > tokenTrigger) yet leave nothing
+		// to compact: the bloat is per-turn injection (RAG / uploaded file) that
+		// lives OUTSIDE `history`, while the only summarizable rows are the last few
+		// rounds we always keep verbatim. Surface this so "did it compact?" is
+		// diagnosable instead of looking identical to "the trigger never fired".
+		if tokenTrigger > 0 && ctxTok > tokenTrigger && task != nil && task.logger != nil {
+			task.logger.Printf("compaction: token budget exceeded (ctx≈%d > %d) but no old rounds to compact — prompt dominated by per-turn injection (RAG/uploaded file), not conversation history (conv=%s)", ctxTok, tokenTrigger, conv.ID)
+		}
 		return history, filterBlocksForPath(existing, history), nil
 	}
 	older := history[:cut]

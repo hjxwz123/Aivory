@@ -391,7 +391,20 @@
     "embeddingSection": "Embeddings",
     "embeddingLead": "Embedding model for KB vectors. Changing it affects only new chunks.",
     "embeddingModel": "Embedding model",
-    "embeddingModelHint": "Pick a kind=embedding model."
+    "embeddingModelHint": "Pick a kind=embedding model.",
+    "ragSection": "Retrieval & injection",
+    "ragLead": "Control when an uploaded document is injected whole vs. retrieved by relevance, and how much is injected.",
+    "ragFullTextThreshold": "Full-inject threshold (tokens)",
+    "ragFullTextThresholdHint": "A document at/below this estimated size is injected in full every turn; above it, the document is vectorized and only relevant chunks are retrieved.",
+    "ragTopK": "Retrieved chunks (Top-K)",
+    "ragTopKHint": "How many chunks to retrieve for a vectorized document (when dynamic Top-K is off).",
+    "ragDynamicTopk": "Dynamic Top-K (by similarity)",
+    "ragDynamicTopkHint": "Instead of a fixed K, inject every retrieved chunk whose similarity clears the threshold.",
+    "ragSimThreshold": "Similarity threshold (0–1)",
+    "ragSimThresholdHint": "Cosine-similarity cutoff. Chunks scoring at/above this are injected.",
+    "preflightSection": "Credit pre-flight",
+    "preflightLead": "For credit-charged turns, estimate the request size before generating and refuse if the user can't afford it.",
+    "preflightEnabled": "Estimate & block unaffordable requests"
   },
   "tools": {
     "title": "Tools",

@@ -868,6 +868,10 @@ var settingsKeys = []string{
 	// §verify: the secondary auditor model that fact-checks answers in Verify
 	// mode. Blank = Verify mode off platform-wide.
 	"verify_model_id",
+	// §4.11-B RAG injection knobs (admin → Documents).
+	"rag_full_text_threshold", "rag_top_k", "rag_dynamic_topk", "rag_similarity_threshold",
+	// §credits pre-flight token/affordability check.
+	"credit_preflight_enabled",
 }
 
 // sensitiveKeywords lists substrings that identify secret settings fields.

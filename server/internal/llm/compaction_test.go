@@ -42,7 +42,7 @@ func TestMaybeCompactNoDoubleCompaction(t *testing.T) {
 	conv := &store.Conversation{ID: "c1", UserID: "u1", SummaryBlocks: json.RawMessage("[]")}
 
 	// Pass 1: 16 messages → keep last 12, summarise m0..m3 (cut = 16-12 = 4).
-	keep1, blocks1, err := MaybeCompact(context.Background(), db, nil, conv, buildHistory(16))
+	keep1, blocks1, err := MaybeCompact(context.Background(), db, nil, conv, buildHistory(16), 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func TestMaybeCompactNoDoubleCompaction(t *testing.T) {
 	// Pass 2: history grew to 18; feed the prior summary back in.
 	bjson, _ := json.Marshal(blocks1)
 	conv.SummaryBlocks = bjson
-	keep2, blocks2, err := MaybeCompact(context.Background(), db, nil, conv, buildHistory(18))
+	keep2, blocks2, err := MaybeCompact(context.Background(), db, nil, conv, buildHistory(18), 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func TestMaybeCompactNoDoubleCompaction(t *testing.T) {
 	// Pass 3: no growth → nothing new past the anchor → no extra block.
 	bjson2, _ := json.Marshal(blocks2)
 	conv.SummaryBlocks = bjson2
-	_, blocks3, err := MaybeCompact(context.Background(), db, nil, conv, buildHistory(18))
+	_, blocks3, err := MaybeCompact(context.Background(), db, nil, conv, buildHistory(18), 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +113,7 @@ func TestMaybeCompactTokenTriggerDeepens(t *testing.T) {
 
 	keep, blocks, err := MaybeCompact(context.Background(), db, nil,
 		&store.Conversation{ID: "c1", UserID: "u1", SummaryBlocks: json.RawMessage("[]")},
-		buildHistory(16))
+		buildHistory(16), 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +152,7 @@ func TestMaybeCompactCutShrinkNoDuplicate(t *testing.T) {
 	}
 	conv := &store.Conversation{ID: "c1", UserID: "u1", SummaryBlocks: json.RawMessage("[]")}
 
-	_, blocks1, err := MaybeCompact(context.Background(), db, nil, conv, buildHistory(16))
+	_, blocks1, err := MaybeCompact(context.Background(), db, nil, conv, buildHistory(16), 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +167,7 @@ func TestMaybeCompactCutShrinkNoDuplicate(t *testing.T) {
 	if err := store.SetSetting(db, "keep_recent_rounds", 8); err != nil {
 		t.Fatal(err)
 	}
-	_, blocks2, err := MaybeCompact(context.Background(), db, nil, conv, buildHistory(18))
+	_, blocks2, err := MaybeCompact(context.Background(), db, nil, conv, buildHistory(18), 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,12 +211,12 @@ func TestMaybeCompactConcurrentNoDuplicate(t *testing.T) {
 	hist := buildHistory(16) // cut=4 → summarise m0..m3
 
 	convA := &store.Conversation{ID: "c1", UserID: "u1", SummaryBlocks: json.RawMessage("[]")}
-	if _, b1, err := MaybeCompact(context.Background(), db, nil, convA, hist); err != nil || len(b1) != 1 {
+	if _, b1, err := MaybeCompact(context.Background(), db, nil, convA, hist, 0); err != nil || len(b1) != 1 {
 		t.Fatalf("first compaction: blocks=%v err=%v", b1, err)
 	}
 	// convB read the empty snapshot BEFORE convA wrote — the stale concurrent turn.
 	convB := &store.Conversation{ID: "c1", UserID: "u1", SummaryBlocks: json.RawMessage("[]")}
-	_, b2, err := MaybeCompact(context.Background(), db, nil, convB, hist)
+	_, b2, err := MaybeCompact(context.Background(), db, nil, convB, hist, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -263,12 +263,12 @@ func TestMaybeCompactConcurrentDeeperCutNoOverlap(t *testing.T) {
 
 	// Turn A: 16 messages → cut=4 → summarise m0..m3, persisted to the DB.
 	convA := &store.Conversation{ID: "c1", UserID: "u1", SummaryBlocks: json.RawMessage("[]")}
-	if _, b1, err := MaybeCompact(context.Background(), db, nil, convA, buildHistory(16)); err != nil || len(b1) != 1 {
+	if _, b1, err := MaybeCompact(context.Background(), db, nil, convA, buildHistory(16), 0); err != nil || len(b1) != 1 {
 		t.Fatalf("turn A: blocks=%v err=%v", b1, err)
 	}
 	// Turn B read the empty snapshot but sees 18 messages → a DEEPER cut (m0..m5).
 	convB := &store.Conversation{ID: "c1", UserID: "u1", SummaryBlocks: json.RawMessage("[]")}
-	keepB, b2, err := MaybeCompact(context.Background(), db, nil, convB, buildHistory(18))
+	keepB, b2, err := MaybeCompact(context.Background(), db, nil, convB, buildHistory(18), 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -304,17 +304,17 @@ func TestPlanCompactionHotPath(t *testing.T) {
 	conv := &store.Conversation{ID: "c1", UserID: "u1", SummaryBlocks: json.RawMessage("[]")}
 
 	// Short conversation (< keepMsgs=12) → nothing to summarise.
-	keep, blocks, action := PlanCompaction(db, conv, buildHistory(8))
+	keep, blocks, action := PlanCompaction(db, conv, buildHistory(8), 0)
 	if action != compactNone || len(keep) != 8 || len(blocks) != 0 {
 		t.Fatalf("short conv: action=%d keep=%d blocks=%d, want none/8/0", action, len(keep), len(blocks))
 	}
 	// Overflow (> 12, ≤ 36) → advance asynchronously, keep all verbatim this turn.
-	keep2, _, action2 := PlanCompaction(db, conv, buildHistory(20))
+	keep2, _, action2 := PlanCompaction(db, conv, buildHistory(20), 0)
 	if action2 != compactAsync || len(keep2) != 20 {
 		t.Fatalf("overflow conv: action=%d keep=%d, want async/20", action2, len(keep2))
 	}
 	// Large cold-start backlog (> 36) → summarise inline to bound the prompt.
-	if _, _, action3 := PlanCompaction(db, conv, buildHistory(40)); action3 != compactInline {
+	if _, _, action3 := PlanCompaction(db, conv, buildHistory(40), 0); action3 != compactInline {
 		t.Fatalf("large backlog: action=%d, want inline", action3)
 	}
 }
@@ -352,5 +352,49 @@ func TestEstimateTokensNonLatin(t *testing.T) {
 	}
 	if got := estimateTokens(strings.Repeat("\U00020000", 40)); got < 30 {
 		t.Fatalf("40 CJK Ext-B ideographs estimated %d, want ≥30", got)
+	}
+}
+
+// TestContextTokensCountsInjectedOverhead locks in the §4.7 first-turn fix:
+// freshly-injected RAG/uploaded-file content (injectedOverhead) — which is NOT
+// yet in the message history — must count toward the compaction trigger size, so
+// the first turn after an upload isn't blind to the file. It must count both on
+// the heuristic fallback (no prior recorded usage) and as a floor over the real
+// last-turn provider count (a file injected THIS turn the previous turn lacked).
+func TestContextTokensCountsInjectedOverhead(t *testing.T) {
+	// Fallback path: no assistant row has input_tokens yet.
+	hist := []store.Message{
+		{Role: "user", Blocks: json.RawMessage(`[{"kind":"text","text":"hi"}]`)},
+	}
+	base, exact := contextTokens(hist, 0)
+	if exact {
+		t.Fatal("expected fallback (no prior input_tokens) to report exact=false")
+	}
+	if withFile, _ := contextTokens(hist, 5000); withFile != base+5000 {
+		t.Fatalf("injected overhead not counted on fallback: base=%d withFile=%d (want %d)", base, withFile, base+5000)
+	}
+
+	// Exact path: a prior assistant turn recorded only 1000 input tokens, but THIS
+	// turn injects 5000 of new file content → the larger estimate must win so the
+	// trigger doesn't lag a turn behind the upload.
+	hist2 := []store.Message{
+		{Role: "assistant", InputTokens: 1000},
+		{Role: "user", Blocks: json.RawMessage(`[{"kind":"text","text":"hi"}]`)},
+	}
+	got, exact2 := contextTokens(hist2, 5000)
+	if !exact2 {
+		t.Fatal("expected exact=true when a prior assistant input_tokens exists")
+	}
+	if got < 5000 {
+		t.Fatalf("injected overhead ignored on exact path: got=%d, want ≥5000", got)
+	}
+
+	// And when the real last-turn count already dominates, it wins unchanged.
+	hist3 := []store.Message{
+		{Role: "assistant", InputTokens: 80000, CacheReadTokens: 0},
+		{Role: "user", Blocks: json.RawMessage(`[{"kind":"text","text":"hi"}]`)},
+	}
+	if got, _ := contextTokens(hist3, 500); got != 80000 {
+		t.Fatalf("real last-turn count should dominate a small overhead: got=%d, want 80000", got)
 	}
 }
