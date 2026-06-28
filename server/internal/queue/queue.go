@@ -7,6 +7,7 @@ package queue
 import (
 	"context"
 	"log"
+	"runtime/debug"
 	"sync"
 	"time"
 )
@@ -64,10 +65,25 @@ func (q *InProcess) Enqueue(name string, fn Job) {
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 			defer cancel()
-			if err := fn(ctx); err != nil {
-				q.logger.Printf("queue(%s): %v", name, err)
-			}
+			q.runJob(ctx, name, fn)
 		}()
+	}
+}
+
+// runJob executes one job with panic recovery. Background jobs (memory extract,
+// compaction, title, RAG ingest) parse untrusted upstream/model output and can
+// panic (e.g. the PDF reader on a malformed file, see parser.go). A panic here
+// is NOT caught by recoverMiddleware — that only wraps the request goroutine — so
+// without this guard one bad job permanently kills a worker; after 4 the pool is
+// dead and all async work silently stops. Recover, log, and keep the worker alive.
+func (q *InProcess) runJob(ctx context.Context, name string, fn Job) {
+	defer func() {
+		if r := recover(); r != nil {
+			q.logger.Printf("queue(%s) panic recovered: %v\n%s", name, r, debug.Stack())
+		}
+	}()
+	if err := fn(ctx); err != nil {
+		q.logger.Printf("queue(%s): %v", name, err)
 	}
 }
 
@@ -83,9 +99,7 @@ func (q *InProcess) worker() {
 			// large scan can never finish. There are 4 workers, so one long ingest
 			// doesn't starve title/memory jobs.
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
-			if err := j.fn(ctx); err != nil {
-				q.logger.Printf("queue(%s): %v", j.name, err)
-			}
+			q.runJob(ctx, j.name, j.fn)
 			cancel()
 		}
 	}

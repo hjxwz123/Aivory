@@ -153,11 +153,20 @@ func clientIP(r *http.Request) string {
 	// Only trust forwarding headers from private/loopback peers.
 	if isTrustedPeer(remoteHost) {
 		if h := r.Header.Get("X-Forwarded-For"); h != "" {
-			// First IP is the originator; subsequent are proxies.
-			if i := strings.Index(h, ","); i > 0 {
-				return strings.TrimSpace(h[:i])
+			// A reverse proxy APPENDS the real client to any client-supplied XFF, so
+			// the trustworthy originator is the RIGHT-MOST entry that is not itself a
+			// trusted/private proxy hop. Taking the left-most (as before) let a client
+			// send its own `X-Forwarded-For: <spoofed>` and evade every per-IP limit
+			// (login brute-force, registration cap, captcha throttle).
+			parts := strings.Split(h, ",")
+			for i := len(parts) - 1; i >= 0; i-- {
+				ip := strings.TrimSpace(parts[i])
+				if ip != "" && !isTrustedPeer(ip) {
+					return ip
+				}
 			}
-			return strings.TrimSpace(h)
+			// Every hop is trusted/private — use the left-most as the best available.
+			return strings.TrimSpace(parts[0])
 		}
 		if h := r.Header.Get("X-Real-IP"); h != "" {
 			return strings.TrimSpace(h)

@@ -227,9 +227,22 @@ func (o *Orchestrator) chargeTurnCredits(ctx context.Context, userID string, usd
 		o.cache.IncrBy(creditKey(userID, start), costToMicros(fromTimed), ttl)
 	}
 	if fromPermanent := credits - fromTimed; fromPermanent > 0 {
-		_ = store.AddPermanentCredits(ctx, o.db, userID, -fromPermanent)
+		if err := store.SpendPermanentCredits(ctx, o.db, userID, fromPermanent); err != nil && o.logger != nil {
+			o.logger.Printf("credit debit (permanent, user=%s, amount=%.4f) failed: %v", userID, fromPermanent, err)
+		}
 	}
 	return fromTimed, credits
+}
+
+// logUsage writes a usage_logs row and LOGS (rather than silently swallows) a
+// failure. usage_logs.credits is the only durable record of timed-credit
+// consumption — it reseeds the window across restarts (CreditsUsedInWindow) — so
+// a silent write failure would refund the user on the next restart. Make it
+// observable (§ credit accounting).
+func (o *Orchestrator) logUsage(ctx context.Context, log store.UsageLog) {
+	if err := store.LogUsage(ctx, o.db, log); err != nil && o.logger != nil {
+		o.logger.Printf("usage log write failed (msg=%s purpose=%s): %v", log.MessageID, log.Purpose, err)
+	}
 }
 
 // creditWindow computes the fixed-window start + ttl for the credit refresh cycle.

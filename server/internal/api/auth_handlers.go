@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +16,27 @@ import (
 	"aurelia/server/internal/mail"
 	"aurelia/server/internal/store"
 )
+
+// maxCodeAttempts is the number of wrong guesses allowed against a single
+// emailed verify/reset code before it is burned (§ brute-force). With the code
+// burned after 5 misses, the 6-digit space can't be swept across rotating IPs.
+const maxCodeAttempts = 5
+
+// registerCodeFailure counts wrong guesses of a verify/reset code per email and,
+// once maxCodeAttempts is hit, deletes (burns) the code so it can no longer be
+// guessed — the user must request a fresh one. Mirrors the 2FA ticket-burn.
+// purpose is "verify" | "reset". The counter shares the code's 10-minute TTL.
+func registerCodeFailure(d Deps, purpose, email string) {
+	if n := d.Cache.Incr("codefail:"+purpose+":"+email, 10*time.Minute); n >= maxCodeAttempts {
+		d.Cache.Delete(purpose + ":" + email)
+	}
+}
+
+// codeMatches compares an emailed code to user input in constant time, so a
+// wrong guess leaks no timing signal about how many leading digits were right.
+func codeMatches(saved, input string) bool {
+	return subtle.ConstantTimeCompare([]byte(saved), []byte(strings.TrimSpace(input))) == 1
+}
 
 // dummyPasswordHash is a real (cost-10) bcrypt hash used to run a constant-time
 // verify on the login-with-nonexistent-email path, so timing doesn't reveal
@@ -290,11 +312,13 @@ func verifyEmailHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
 
 	saved, ok := d.Cache.Get("verify:" + req.Email)
-	if !ok || saved != strings.TrimSpace(req.Code) {
+	if !ok || !codeMatches(saved, req.Code) {
+		registerCodeFailure(d, "verify", req.Email)
 		writeError(w, 400, errors.New("invalid or expired verification code"))
 		return
 	}
 	d.Cache.Delete("verify:" + req.Email)
+	d.Cache.Delete("codefail:verify:" + req.Email)
 
 	user, err := store.FindUserByEmail(r.Context(), d.DB, req.Email)
 	if err != nil || user.Status != "pending" {
@@ -350,11 +374,13 @@ func resetPasswordHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 
 	saved, ok := d.Cache.Get("reset:" + req.Email)
-	if !ok || saved != strings.TrimSpace(req.Code) {
+	if !ok || !codeMatches(saved, req.Code) {
+		registerCodeFailure(d, "reset", req.Email)
 		writeError(w, 400, errors.New("invalid or expired reset code"))
 		return
 	}
 	d.Cache.Delete("reset:" + req.Email)
+	d.Cache.Delete("codefail:reset:" + req.Email)
 
 	user, err := store.FindUserByEmail(r.Context(), d.DB, req.Email)
 	if err != nil {

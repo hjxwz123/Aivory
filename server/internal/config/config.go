@@ -2,7 +2,10 @@
 package config
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -20,7 +23,10 @@ type Config struct {
 	QdrantURL        string
 	QdrantAPIKey     string
 	JWTSecret        string
-	AccessTTL        time.Duration
+	// JWTSecretEphemeral is true when JWT_SECRET was not provided and a random
+	// secret was minted at boot (dev/local only). Sessions reset on restart.
+	JWTSecretEphemeral bool
+	AccessTTL          time.Duration
 	RefreshTTL       time.Duration
 	AllowedOrigins   []string
 	StaticDir        string
@@ -52,7 +58,7 @@ func Load() Config {
 		RedisURL:     getenv("REDIS_URL", ""),
 		QdrantURL:    getenv("QDRANT_URL", ""),
 		QdrantAPIKey: getenv("QDRANT_API_KEY", ""),
-		JWTSecret:    getenv("JWT_SECRET", defaultDevJWTSecret),
+		JWTSecret:    getenv("JWT_SECRET", ""),
 		// Short-lived access tokens limit the damage window if a token is stolen:
 		// the stolen token expires quickly even without explicit revocation.
 		// 30 minutes is the recommended ceiling; operators may lower it further
@@ -84,7 +90,41 @@ func Load() Config {
 	}
 	_ = os.MkdirAll(cfg.UploadDir, 0o755)
 	_ = os.MkdirAll(cfg.ArtifactDir, 0o755)
+
+	// JWT secret resolution — NEVER sign tokens with the source-committed dev
+	// default (a public signing key = forgeable admin). When JWT_SECRET is unset
+	// (or left at the old dev default) in a NON-deployed environment, mint a random
+	// EPHEMERAL secret so even a misconfigured/exposed dev instance is unforgeable;
+	// sessions reset on restart, which is acceptable for dev. A DEPLOYED environment
+	// (explicit prod env or a Postgres DSN) instead leaves it empty so Validate
+	// fails closed and forces the operator to set a real, stable secret.
+	if cfg.JWTSecret == "" || cfg.JWTSecret == defaultDevJWTSecret {
+		if !looksDeployed(cfg) {
+			cfg.JWTSecret = randomSecret()
+			cfg.JWTSecretEphemeral = true
+			log.Printf("[config] JWT_SECRET not set — using a random ephemeral secret; all sessions reset on restart. Set JWT_SECRET for stable sessions.")
+		}
+	}
 	return cfg
+}
+
+// randomSecret mints a 32-byte hex secret from crypto/rand. On the (practically
+// impossible) failure of the system RNG it returns the dev default — Validate
+// still blocks that in any deployed environment, so dev simply keeps booting.
+func randomSecret() string {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return defaultDevJWTSecret
+	}
+	return hex.EncodeToString(b)
+}
+
+// looksDeployed reports whether this process looks like a real deployment rather
+// than local dev: an explicit non-dev AURELIA_ENV, OR a Postgres DATABASE_URL
+// (real deployments use Postgres; local dev uses SQLite).
+func looksDeployed(cfg Config) bool {
+	dev := cfg.Env == "" || cfg.Env == "development" || cfg.Env == "dev" || cfg.Env == "test" || cfg.Env == "local"
+	return !dev || isPostgresURL(cfg.DatabaseURL)
 }
 
 // Validate refuses to boot with forgeable tokens / a known admin password in
@@ -98,9 +138,7 @@ func Load() Config {
 // silently booted with the public dev JWT secret: real deployments use Postgres,
 // local dev uses SQLite. SQLite + an explicit dev env still boots with defaults.
 func Validate(cfg Config) error {
-	dev := cfg.Env == "" || cfg.Env == "development" || cfg.Env == "dev" || cfg.Env == "test" || cfg.Env == "local"
-	looksDeployed := !dev || isPostgresURL(cfg.DatabaseURL)
-	if !looksDeployed {
+	if !looksDeployed(cfg) {
 		return nil
 	}
 	if cfg.JWTSecret == "" || cfg.JWTSecret == defaultDevJWTSecret {

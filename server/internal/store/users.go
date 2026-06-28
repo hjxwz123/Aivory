@@ -547,11 +547,26 @@ func SetPermanentCredits(ctx context.Context, db *sql.DB, userID string, credits
 }
 
 // AddPermanentCredits atomically adds delta (may be negative) to a user's
-// permanent balance, flooring at 0. Used to debit credits after a paid turn and
-// to top up after a purchase.
+// permanent balance, flooring at 0. Used to top up after a purchase. For debiting
+// a paid turn use SpendPermanentCredits, whose intent (and error) is explicit.
 func AddPermanentCredits(ctx context.Context, db *sql.DB, userID string, delta float64) error {
 	_, err := db.ExecContext(ctx,
 		`UPDATE users SET credits_permanent = MAX(0, credits_permanent + ?) WHERE id=?`, delta, userID)
+	return err
+}
+
+// SpendPermanentCredits atomically debits up to `amount` from a user's permanent
+// balance in a SINGLE conditional statement (never below 0), so concurrent debits
+// serialize at the row and can neither lose updates nor drive the balance
+// negative. The caller checks the returned error so a failed debit is observable
+// rather than silently swallowed (§ credit accounting).
+func SpendPermanentCredits(ctx context.Context, db *sql.DB, userID string, amount float64) error {
+	if amount <= 0 {
+		return nil
+	}
+	_, err := db.ExecContext(ctx,
+		`UPDATE users SET credits_permanent = CASE WHEN credits_permanent > ? THEN credits_permanent - ? ELSE 0 END WHERE id=?`,
+		amount, amount, userID)
 	return err
 }
 

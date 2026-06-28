@@ -53,15 +53,9 @@ CREATE TABLE IF NOT EXISTS user_groups (
   updated_at  BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
 );
 
-CREATE TABLE IF NOT EXISTS model_group_quotas (
-  model_id       TEXT NOT NULL REFERENCES models(id) ON DELETE CASCADE,
-  group_id       TEXT NOT NULL REFERENCES user_groups(id) ON DELETE CASCADE,
-  period_seconds INTEGER NOT NULL DEFAULT 604800,
-  limit_type     TEXT NOT NULL DEFAULT 'count',
-  limit_value    REAL NOT NULL DEFAULT 0,
-  PRIMARY KEY (model_id, group_id)
-);
-CREATE INDEX IF NOT EXISTS idx_mgq_group ON model_group_quotas(group_id);
+-- NOTE: model_group_quotas REFERENCES models(id) — it is created AFTER the models
+-- table below. Postgres rejects a forward FK reference in a single-batch Exec, so
+-- this table MUST stay after `models`; do not move it earlier.
 
 CREATE TABLE IF NOT EXISTS redeem_codes (
   id            TEXT PRIMARY KEY,
@@ -137,6 +131,19 @@ CREATE TABLE IF NOT EXISTS models (
 
 CREATE INDEX IF NOT EXISTS idx_models_channel ON models(channel_id);
 CREATE INDEX IF NOT EXISTS idx_models_kind ON models(kind, enabled);
+
+-- Per-(model, group) free quota. Declared AFTER models because it has a FK to
+-- models(id) and Postgres resolves FK targets eagerly within the schema batch
+-- (a forward reference aborts the whole migration). See the note above redeem_codes.
+CREATE TABLE IF NOT EXISTS model_group_quotas (
+  model_id       TEXT NOT NULL REFERENCES models(id) ON DELETE CASCADE,
+  group_id       TEXT NOT NULL REFERENCES user_groups(id) ON DELETE CASCADE,
+  period_seconds INTEGER NOT NULL DEFAULT 604800,
+  limit_type     TEXT NOT NULL DEFAULT 'count',
+  limit_value    REAL NOT NULL DEFAULT 0,
+  PRIMARY KEY (model_id, group_id)
+);
+CREATE INDEX IF NOT EXISTS idx_mgq_group ON model_group_quotas(group_id);
 
 -- Model tags (§ model tags). Admin-managed labels; each model stores the tag ids
 -- it carries in models.tags (a JSON array), and the picker filters by them.

@@ -196,6 +196,30 @@ func Migrate(db *sql.DB) error {
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_messages_conv_created ON messages(conversation_id, created_at)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_conv_user_updated ON conversations(user_id, archived, pinned DESC, updated_at DESC)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_users_sort_order ON users(sort_order, created_at DESC)`)
+
+	// Column-parity guard. The additive ALTER loop above discards every error by
+	// design (a duplicate-column error on SQLite is expected on re-run), which also
+	// SILENTLY swallows a genuine failure — leaving a column absent while the code's
+	// SELECTs still list it, so the next read fails at runtime with "no such column"
+	// on a live server. Assert here that every additively-migrated column actually
+	// exists; a real failure now aborts startup loudly (mirrors the apply-schema
+	// fatal) instead of surfacing as broken reads later. WHERE 1=0 makes each probe
+	// O(1). If you add an ALTER above, add its column here.
+	columnChecks := map[string][]string{
+		"messages":       {"credits", "model_label", "search_text", "gen_ms", "feedback", "verify"},
+		"users":          {"group_id", "totp_secret", "totp_enabled", "group_expires_at", "previous_group_id", "password_set", "last_seen_at", "credits_permanent", "sort_order"},
+		"usage_logs":     {"credits"},
+		"user_groups":    {"max_projects", "max_kbs", "credit_allowance", "credit_period_seconds"},
+		"models":         {"official_tools", "moderation_enabled", "moderation_mode", "tags", "image_timeout_sec"},
+		"refresh_tokens": {"user_agent", "ip", "location", "last_seen"},
+		"conversations":  {"inline_source_conv", "inline_parent_id", "inline_quote"},
+		"chunks":         {"image_ref"},
+	}
+	for table, cols := range columnChecks {
+		if _, err := db.Exec(fmt.Sprintf(`SELECT %s FROM %s WHERE 1=0`, strings.Join(cols, ", "), table)); err != nil {
+			return fmt.Errorf("schema column check failed for %q (an additive migration may have silently failed): %w", table, err)
+		}
+	}
 	// One-time backfill: accounts that exist only because of an OAuth login were
 	// created with a random password they never chose, so mark them as
 	// password-unset to force them through the set-password gate. Guarded by a

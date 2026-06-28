@@ -125,6 +125,11 @@ func (c *redisCache) Subscribe(topic string) (chan string, func()) {
 	done := make(chan struct{})
 
 	go func() {
+		// The bridge goroutine is the SOLE sender on `out`, so it also owns closing
+		// it. Closing `out` from unsubscribe (a different goroutine) while this one
+		// is mid-send panics with "send on closed channel" and, being detached from
+		// any request, escapes recoverMiddleware and crashes the whole replica.
+		defer close(out)
 		ch := ps.Channel()
 		for {
 			select {
@@ -136,6 +141,8 @@ func (c *redisCache) Subscribe(topic string) (chan string, func()) {
 				}
 				select {
 				case out <- msg.Payload:
+				case <-done: // tearing down — stop sending
+					return
 				default: // drop on backpressure
 				}
 			}
@@ -146,7 +153,8 @@ func (c *redisCache) Subscribe(topic string) (chan string, func()) {
 		once.Do(func() {
 			close(done)
 			_ = ps.Close()
-			close(out)
+			// Do NOT close(out) here — the bridge goroutine closes it on return
+			// (it is the only sender), which avoids the send-on-closed-channel race.
 		})
 	}
 	return out, unsubscribe

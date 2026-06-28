@@ -948,7 +948,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			// and the window-quota increment go together so the cache counter and the
 			// usage_logs COUNT(*) cold-reseed stay in agreement (§B3).
 			if produced {
-				_ = store.LogUsage(ctx, o.db, store.UsageLog{
+				o.logUsage(ctx, store.UsageLog{
 					UserID:           conv.UserID,
 					ConversationID:   conv.ID,
 					MessageID:        assistantMsg.ID,
@@ -1294,7 +1294,7 @@ func (o *Orchestrator) runImageTurn(
 	// survives a cache cold/restart (mirrors the chat path). images_count/cost=0 so
 	// it doesn't perturb the image quota or cost totals.
 	if timedCredits > 0 {
-		_ = store.LogUsage(persistCtx, o.db, store.UsageLog{
+		o.logUsage(persistCtx, store.UsageLog{
 			UserID:         conv.UserID,
 			ConversationID: conv.ID,
 			MessageID:      assistantMsg.ID,

@@ -162,10 +162,13 @@ func formatInt(n int64) string {
 }
 
 func (m *memory) Publish(topic, payload string) {
+	// Hold subsMu for the WHOLE non-blocking send loop. Sends never block (the
+	// select has a default), so this is cheap — and it makes unsubscribe's removal
+	// + close(ch) (also under subsMu) mutually exclusive with the send, so a send
+	// can never hit a channel that unsubscribe just closed (send-on-closed panic).
 	m.subsMu.Lock()
-	subs := append([]chan string{}, m.subs[topic]...)
-	m.subsMu.Unlock()
-	for _, c := range subs {
+	defer m.subsMu.Unlock()
+	for _, c := range m.subs[topic] {
 		select {
 		case c <- payload:
 		default:
@@ -178,16 +181,21 @@ func (m *memory) Subscribe(topic string) (chan string, func()) {
 	m.subsMu.Lock()
 	m.subs[topic] = append(m.subs[topic], ch)
 	m.subsMu.Unlock()
+	var once sync.Once
 	return ch, func() {
-		m.subsMu.Lock()
-		subs := m.subs[topic]
-		for i, c := range subs {
-			if c == ch {
-				m.subs[topic] = append(subs[:i], subs[i+1:]...)
-				break
+		once.Do(func() {
+			m.subsMu.Lock()
+			defer m.subsMu.Unlock()
+			subs := m.subs[topic]
+			for i, c := range subs {
+				if c == ch {
+					m.subs[topic] = append(subs[:i], subs[i+1:]...)
+					break
+				}
 			}
-		}
-		m.subsMu.Unlock()
-		close(ch)
+			// Close under the lock: Publish holds the same lock across its send loop,
+			// so no send can be in flight on ch here.
+			close(ch)
+		})
 	}
 }
