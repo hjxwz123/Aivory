@@ -62,6 +62,36 @@ var defaultUploadExtensions = []string{
 	"sql", "toml", "ini", "env",
 }
 
+// extAliases maps an extension to OTHER spellings of the SAME format, so an admin
+// who allows one spelling automatically accepts the equivalent ones. Most
+// importantly jpg↔jpeg: they are byte-identical JPEG; allowing "jpg" but
+// rejecting "jpeg" (a very common allowlist typo) blocks ordinary photos.
+var extAliases = map[string][]string{
+	"jpg":      {"jpeg", "jpe", "jfif"},
+	"jpeg":     {"jpg", "jpe", "jfif"},
+	"tif":      {"tiff"},
+	"tiff":     {"tif"},
+	"yml":      {"yaml"},
+	"yaml":     {"yml"},
+	"md":       {"markdown"},
+	"markdown": {"md"},
+	"htm":      {"html"},
+	"html":     {"htm"},
+}
+
+// applyExtAliases expands the allowlist in place with equivalent spellings.
+func applyExtAliases(exts map[string]bool) {
+	cur := make([]string, 0, len(exts)) // snapshot keys: don't mutate while ranging
+	for e := range exts {
+		cur = append(cur, e)
+	}
+	for _, e := range cur {
+		for _, a := range extAliases[e] {
+			exts[a] = true
+		}
+	}
+}
+
 // loadUploadPolicy reads the live admin setting. Robust to: nil DB
 // (returns the default policy so tests don't need a DB), invalid JSON
 // (falls back to default), the empty string (uses default — see policy note
@@ -79,6 +109,10 @@ func loadUploadPolicy(d Deps) uploadPolicy {
 			exts[e] = true
 		}
 	}
+	// Accept equivalent spellings (jpg↔jpeg, …) regardless of which the admin
+	// listed — the validateUpload check and the frontend's `<input accept>` both
+	// read this expanded set.
+	applyExtAliases(exts)
 	return uploadPolicy{AllowedExt: exts}
 }
 
