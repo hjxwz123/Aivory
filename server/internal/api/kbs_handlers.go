@@ -38,6 +38,13 @@ func createKBHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errors.New("name required"))
 		return
 	}
+	if existing, err := store.GetKBByName(r.Context(), d.DB, u.ID, req.Name); err == nil && existing != nil {
+		writeError(w, 409, store.ErrKBNameExists)
+		return
+	} else if err != nil && !errors.Is(err, store.ErrNotFound) {
+		writeError(w, 500, err)
+		return
+	}
 	// Enforce the group's knowledge-base cap (§ user groups). 0 = unlimited.
 	// Only standalone KBs count — project libraries are governed by the project
 	// cap.
@@ -68,6 +75,10 @@ func createKBHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		EmbeddingDim:     m.Dim,
 	})
 	if err != nil {
+		if errors.Is(err, store.ErrKBNameExists) {
+			writeError(w, 409, err)
+			return
+		}
 		writeError(w, 500, err)
 		return
 	}

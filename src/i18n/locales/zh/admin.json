@@ -12,7 +12,8 @@
     "dragHandle": "拖动排序",
     "moveUp": "上移",
     "moveDown": "下移",
-    "cancel": "取消"
+    "cancel": "取消",
+    "nameExists": "已存在同名记录。"
   },
   "icon": {
     "upload": "上传",
@@ -173,7 +174,8 @@
     "importDone": "已从 SKILL.md 填充",
     "importFailed": "解析失败,请检查 SKILL.md 格式。",
     "errors": {
-      "missingFields": "请填写名称、描述和指令。"
+      "missingFields": "请填写名称、描述和指令。",
+      "nameExists": "已存在同名技能。"
     },
     "disabledTag": "已禁用",
     "manage": "管理技能"

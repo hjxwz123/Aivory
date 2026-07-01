@@ -1,7 +1,7 @@
 /**
  * KnowledgeBasesList — gallery of the user's knowledge bases.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { Plus, Database } from 'lucide-react'
@@ -33,6 +33,8 @@ export default function KnowledgeBasesList() {
   const [loading, setLoading] = useState(true)
   const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState({ name: '', description: '', embedding_model_id: '' })
+  const [creating, setCreating] = useState(false)
+  const creatingRef = useRef(false)
 
   async function load() {
     setLoading(true)
@@ -56,10 +58,13 @@ export default function KnowledgeBasesList() {
   }, [])
 
   async function create() {
+    if (creatingRef.current) return
     if (!draft.name.trim()) {
       toast.error(t('kb:dialog.nameRequired'))
       return
     }
+    creatingRef.current = true
+    setCreating(true)
     try {
       await kbsApi.create(draft)
       toast.success(t('kb:dialog.created'))
@@ -71,8 +76,13 @@ export default function KnowledgeBasesList() {
       toast.error(
         msg === 'kb_limit_reached'
           ? t('kb:limitReached', { defaultValue: 'You’ve reached your plan’s knowledge-base limit.' })
+          : msg === 'name_exists'
+            ? t('kb:dialog.nameExists', { defaultValue: 'A knowledge base with this name already exists.' })
           : msg,
       )
+    } finally {
+      creatingRef.current = false
+      setCreating(false)
     }
   }
 
@@ -138,7 +148,7 @@ export default function KnowledgeBasesList() {
         </div>
       </div>
 
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog open={open} onOpenChange={(next) => !creatingRef.current && setOpen(next)}>
         <DialogContent size="md">
           <DialogHeader>
             <DialogTitle>{t('kb:dialog.title')}</DialogTitle>
@@ -182,10 +192,10 @@ export default function KnowledgeBasesList() {
             </div>
           </DialogBody>
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setOpen(false)}>
+            <Button variant="ghost" onClick={() => setOpen(false)} disabled={creating}>
               {t('common:actions.cancel')}
             </Button>
-            <Button onClick={() => void create()}>{t('kb:dialog.create')}</Button>
+            <Button onClick={() => void create()} loading={creating}>{t('kb:dialog.create')}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

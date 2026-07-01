@@ -52,14 +52,38 @@ func GetChannel(ctx context.Context, db *sql.DB, id string) (*Channel, error) {
 	return &c, nil
 }
 
+// GetChannelByName returns a channel by case-insensitive, trimmed name.
+func GetChannelByName(ctx context.Context, db *sql.DB, name string) (*Channel, error) {
+	var c Channel
+	var en int
+	err := db.QueryRowContext(ctx,
+		`SELECT id, name, type, api_format, base_url, api_key, enabled, sort_order, updated_at FROM channels WHERE lower(trim(name))=lower(trim(?)) LIMIT 1`,
+		name,
+	).Scan(&c.ID, &c.Name, &c.Type, &c.APIFormat, &c.BaseURL, &c.APIKey, &en, &c.SortOrder, &c.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	c.Enabled = en == 1
+	c.HasAPIKey = c.APIKey != ""
+	return &c, nil
+}
+
 // CreateChannel inserts a row and returns it (with api_key stripped).
 func CreateChannel(ctx context.Context, db *sql.DB, name, typ, apiFormat, baseURL, apiKey string) (*Channel, error) {
 	id := genID("ch")
+	name = strings.TrimSpace(name)
+	baseURL = strings.TrimSpace(baseURL)
 	_, err := db.ExecContext(ctx,
 		`INSERT INTO channels(id, name, type, api_format, base_url, api_key, enabled, sort_order, updated_at)
 		 VALUES(?, ?, ?, ?, ?, ?, 1, 0, ?)`,
 		id, name, typ, apiFormat, baseURL, apiKey, time.Now().Unix())
 	if err != nil {
+		if isUniqueIndexErr(err, "idx_channels_name_unique", "channels.name") {
+			return nil, ErrChannelNameExists
+		}
 		return nil, err
 	}
 	c, err := GetChannel(ctx, db, id)
@@ -105,7 +129,7 @@ func UpdateChannel(ctx context.Context, db *sql.DB, id string, patch ChannelPatc
 	args := []any{}
 	if patch.Name != nil {
 		parts = append(parts, "name=?")
-		args = append(args, *patch.Name)
+		args = append(args, strings.TrimSpace(*patch.Name))
 	}
 	if patch.Type != nil {
 		parts = append(parts, "type=?")
@@ -117,7 +141,7 @@ func UpdateChannel(ctx context.Context, db *sql.DB, id string, patch ChannelPatc
 	}
 	if patch.BaseURL != nil {
 		parts = append(parts, "base_url=?")
-		args = append(args, *patch.BaseURL)
+		args = append(args, strings.TrimSpace(*patch.BaseURL))
 	}
 	if patch.APIKey != nil && *patch.APIKey != "" {
 		parts = append(parts, "api_key=?")
@@ -144,6 +168,9 @@ func UpdateChannel(ctx context.Context, db *sql.DB, id string, patch ChannelPatc
 	if _, err := db.ExecContext(ctx,
 		fmt.Sprintf("UPDATE channels SET %s WHERE id=?", strings.Join(parts, ", ")),
 		args...); err != nil {
+		if isUniqueIndexErr(err, "idx_channels_name_unique", "channels.name") {
+			return nil, ErrChannelNameExists
+		}
 		return nil, err
 	}
 	c, err := GetChannel(ctx, db, id)
@@ -231,6 +258,11 @@ type scanner interface {
 
 // CreateModel inserts a row.
 func CreateModel(ctx context.Context, db *sql.DB, m Model) (*Model, error) {
+	m.RequestID = strings.TrimSpace(m.RequestID)
+	m.Label = strings.TrimSpace(m.Label)
+	m.Description = strings.TrimSpace(m.Description)
+	m.Icon = strings.TrimSpace(m.Icon)
+	m.SystemPrompt = strings.TrimSpace(m.SystemPrompt)
 	if m.ID == "" {
 		m.ID = genID("m")
 	}
@@ -269,13 +301,36 @@ func CreateModel(ctx context.Context, db *sql.DB, m Model) (*Model, error) {
 		m.PriceInput, m.PriceOutput, m.PriceCacheRead, m.PriceCacheWrite, m.PricePerImage, m.Currency,
 		m.Dim, m.ImageTimeoutSec, time.Now().Unix())
 	if err != nil {
+		if isUniqueIndexErr(err, "idx_models_channel_request_unique", "models.channel_id") {
+			return nil, ErrModelRequestExists
+		}
 		return nil, err
 	}
 	return GetModel(ctx, db, m.ID)
 }
 
+func GetModelByChannelRequestID(ctx context.Context, db *sql.DB, channelID, requestID string) (*Model, error) {
+	row := db.QueryRowContext(ctx,
+		`SELECT id, channel_id, kind, request_id, label, description, icon, enabled, sort_order, tool_mode, vision, stream, system_prompt, param_controls, official_tools, tags, moderation_enabled, moderation_mode, price_input, price_output, price_cache_read, price_cache_write, price_per_image, currency, dim, image_timeout_sec, updated_at
+		 FROM models WHERE channel_id=? AND lower(trim(request_id))=lower(trim(?)) LIMIT 1`,
+		channelID, requestID)
+	m, err := scanModel(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &m, nil
+}
+
 // UpdateModel writes selective fields.
 func UpdateModel(ctx context.Context, db *sql.DB, id string, m Model) (*Model, error) {
+	m.RequestID = strings.TrimSpace(m.RequestID)
+	m.Label = strings.TrimSpace(m.Label)
+	m.Description = strings.TrimSpace(m.Description)
+	m.Icon = strings.TrimSpace(m.Icon)
+	m.SystemPrompt = strings.TrimSpace(m.SystemPrompt)
 	if len(m.OfficialTools) == 0 {
 		m.OfficialTools = json.RawMessage("[]")
 	}
@@ -299,6 +354,9 @@ func UpdateModel(ctx context.Context, db *sql.DB, id string, m Model) (*Model, e
 		m.PriceInput, m.PriceOutput, m.PriceCacheRead, m.PriceCacheWrite, m.PricePerImage, m.Currency,
 		m.Dim, m.ImageTimeoutSec, time.Now().Unix(), id)
 	if err != nil {
+		if isUniqueIndexErr(err, "idx_models_channel_request_unique", "models.channel_id") {
+			return nil, ErrModelRequestExists
+		}
 		return nil, err
 	}
 	return GetModel(ctx, db, id)

@@ -1,6 +1,15 @@
 import { create } from 'zustand'
 import type { AppearanceSettings, ChatWidthPref, DensityPref, FontPref, FontSizePref, ModelSettings, PrivacySettings } from '@/types/settings'
 
+const RESPONSE_LENGTHS = ['concise', 'balanced', 'detailed'] as const
+const FONTS: readonly FontPref[] = ['default', 'inter', 'system', 'serif']
+const CHAT_WIDTHS: readonly ChatWidthPref[] = ['comfortable', 'full']
+type ResponseLengthPref = ModelSettings['responseLength']
+
+function isResponseLength(value: string): value is ResponseLengthPref {
+  return (RESPONSE_LENGTHS as readonly string[]).includes(value)
+}
+
 interface SettingsState {
   appearance: AppearanceSettings
   models: ModelSettings
@@ -81,13 +90,22 @@ export const useSettings = create<SettingsState>((set) => ({
       const privacyPatch: Partial<PrivacySettings> = {}
 
       appearancePatch.userMessageMarkdown = settings.user_message_markdown === true
+      if (typeof settings.font_family === 'string' && (FONTS as readonly string[]).includes(settings.font_family)) {
+        appearancePatch.font = settings.font_family as FontPref
+      }
+      if (typeof settings.chat_width === 'string' && (CHAT_WIDTHS as readonly string[]).includes(settings.chat_width)) {
+        appearancePatch.chatWidth = settings.chat_width as ChatWidthPref
+      }
       if (typeof settings.response_length === 'string') {
         const v = settings.response_length
-        if (v === 'concise' || v === 'balanced' || v === 'detailed') {
+        if (isResponseLength(v)) {
           modelsPatch.responseLength = v
         }
       }
-      if (typeof settings.persona_custom === 'string' && settings.persona_custom) {
+      if (typeof settings.default_model_id === 'string') {
+        modelsPatch.defaultModelId = settings.default_model_id
+      }
+      if (typeof settings.persona_custom === 'string') {
         modelsPatch.customInstructions = settings.persona_custom
       }
       if (typeof settings.memory_enabled === 'boolean') {

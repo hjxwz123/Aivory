@@ -1,12 +1,15 @@
-import { useEffect, useMemo, useRef, useState, type RefObject } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { useTranslation } from 'react-i18next'
-import { GitBranch, X, ZoomIn, ZoomOut, GripHorizontal, Maximize2, User } from 'lucide-react'
+import { GitBranch, X, ZoomIn, ZoomOut, GripHorizontal, Maximize2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { mediaQuery } from '@/lib/design-tokens'
 import { conversationsApi } from '@/api'
 import { useConversations, toLocalMessage } from '@/store/conversations'
 import { useModels } from '@/store/models'
+import { useAuth } from '@/store/auth'
+import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar'
+import { initials } from '@/components/ui/avatar.utils'
 import { ModelIcon } from './model-icon'
 import type { Conversation, Message } from '@/types/chat'
 
@@ -25,10 +28,11 @@ const ZOOM_MIN = 0.3
 const ZOOM_MAX = 1.5
 
 // Node-graph geometry (canvas px, before zoom). A turn = two stacked nodes.
-const NODE_W = 184
-const NODE_H = 72
-const COL_W = 212 // horizontal slot per leaf
-const ROW_H = 132 // vertical slot per depth
+const NODE_W = 200
+const NODE_H = 78
+const COL_W = 236 // horizontal slot per leaf
+const ROW_H = 152 // vertical slot per depth
+const GRID = 16 // dotted-canvas dot spacing (px, at 1:1 zoom)
 
 // A node in the FULL message tree (user + assistant), top-down.
 interface TNode {
@@ -116,6 +120,12 @@ export function ConversationOutline({ conversation, scrollContainerRef, onClose 
   const isPhone = useMediaQuery(mediaQuery.phone)
   const setActiveLeaf = useConversations((s) => s.setActiveLeaf)
   const getModel = useModels((s) => s.getById)
+  // The active line's user nodes are labelled with the current account (name +
+  // avatar), matching the chat bubbles rather than a generic "You".
+  const user = useAuth((s) => s.user)
+  const youLabel = t('common.you', { ns: 'common', defaultValue: 'You' })
+  const displayName = user?.name || user?.email?.split('@')[0] || youLabel
+  const avatarUrl = (user?.settings as Record<string, unknown> | undefined)?.avatar_url as string | undefined
 
   // Open as a roomy panel centered on screen (then the user can drag it aside).
   const [size, setSize] = useState(() => {
@@ -148,6 +158,9 @@ export function ConversationOutline({ conversation, scrollContainerRef, onClose 
   const resizeRef = useRef<{ mx: number; my: number; w: number; h: number } | null>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
   const didFit = useRef(false)
+  // Set by a cursor-anchored wheel zoom; consumed after re-render to keep the
+  // point under the pointer stationary (see the wheel + layout effects below).
+  const pendingZoomRef = useRef<{ wx: number; wy: number; vx: number; vy: number } | null>(null)
 
   // Full branch tree (all branches). ?mode=tree gives parent_id edges straight
   // from the server; refetch when the tree SHAPE can change. We key on a signature
@@ -228,6 +241,52 @@ export function ConversationOutline({ conversation, scrollContainerRef, onClose 
     [treeMsgs, conversation.messages, activeIds],
   )
 
+  // Trackpad / mouse wheel. A pinch (trackpad) or ⌘/Ctrl+wheel zooms centered on
+  // the cursor; a plain two-finger swipe falls through to native scroll (pan). A
+  // non-passive native listener is required — React's onWheel is passive, so
+  // preventDefault (needed to stop the browser page-zoom) is ignored there.
+  useEffect(() => {
+    const el = bodyRef.current
+    if (!el) return
+    function onWheel(e: WheelEvent) {
+      if (!(e.ctrlKey || e.metaKey)) return // plain wheel → let the canvas scroll (pan)
+      e.preventDefault()
+      const container = bodyRef.current
+      if (!container) return
+      const z = zoomRef.current
+      const nz = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z * Math.exp(-e.deltaY * 0.0016)))
+      if (Math.abs(nz - z) < 0.0005) return
+      const rect = container.getBoundingClientRect()
+      const vx = e.clientX - rect.left
+      const vy = e.clientY - rect.top
+      // Undo the margin-auto centering offset so we resolve the true world point.
+      const offX = Math.max(0, (container.clientWidth - width * z) / 2)
+      const offY = Math.max(0, (container.clientHeight - height * z) / 2)
+      pendingZoomRef.current = {
+        wx: (container.scrollLeft + vx - offX) / z,
+        wy: (container.scrollTop + vy - offY) / z,
+        vx,
+        vy,
+      }
+      setZoom(parseFloat(nz.toFixed(3)))
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [width, height])
+
+  // After a cursor-anchored zoom re-renders (the canvas resizes), re-scroll so the
+  // point that was under the pointer stays there — the natural pinch-zoom feel.
+  useLayoutEffect(() => {
+    const p = pendingZoomRef.current
+    const el = bodyRef.current
+    if (!p || !el) return
+    pendingZoomRef.current = null
+    const offX = Math.max(0, (el.clientWidth - width * zoom) / 2)
+    const offY = Math.max(0, (el.clientHeight - height * zoom) / 2)
+    el.scrollLeft = p.wx * zoom + offX - p.vx
+    el.scrollTop = p.wy * zoom + offY - p.vy
+  }, [zoom, width, height])
+
   // Fit the whole graph into the panel — on demand (the "fit" button). Once it
   // fits, the margin-auto centering keeps the fitted graph centered.
   function fit() {
@@ -253,14 +312,25 @@ export function ConversationOutline({ conversation, scrollContainerRef, onClose 
     el.scrollTop = offY + target.cy * z - el.clientHeight / 2
   }
 
-  // On open: land enlarged and centered on the current leaf — where the
-  // conversation actually is — rather than fit-shrunk in a corner.
+  // On open: fit the WHOLE tree into view so every branch is visible at once (a
+  // mind-map, not just the active spine) — then center on the current leaf. Fit
+  // floors at ZOOM_MIN, so a huge tree stays navigable via zoom/pan rather than
+  // shrinking to threads.
+  //
+  // Wait for the async branch tree (`treeMsgs`) to land before latching: on mount
+  // it's null, so `nodes` is laid out from the active-path fallback — a single
+  // spine — and fitting to THAT then latching would strand the sibling branches
+  // off-screen (the reported "tree still wrong"). If the fetch never resolves the
+  // fallback spine is all there is, so don't block forever on it.
   useEffect(() => {
-    if (didFit.current || nodes.length === 0) return
+    if (didFit.current || treeMsgs === null || nodes.length === 0) return
     didFit.current = true
-    requestAnimationFrame(() => centerOnNode(activeLeafId))
+    requestAnimationFrame(() => {
+      fit()
+      requestAnimationFrame(() => centerOnNode(activeLeafId))
+    })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodes.length])
+  }, [nodes.length, treeMsgs])
 
   function scrollToMessage(msgId: string) {
     const container = scrollContainerRef.current
@@ -407,7 +477,16 @@ export function ConversationOutline({ conversation, scrollContainerRef, onClose 
         ) : (
           <div
             className="flex"
-            style={{ width: width * zoom, height: height * zoom, minWidth: '100%', minHeight: '100%' }}
+            style={{
+              width: width * zoom,
+              height: height * zoom,
+              minWidth: '100%',
+              minHeight: '100%',
+              // Dotted graph-paper canvas — scales & pans with the content.
+              backgroundImage:
+                'radial-gradient(circle, color-mix(in oklch, var(--color-fg) 9%, transparent) 1px, transparent 1px)',
+              backgroundSize: `${GRID * zoom}px ${GRID * zoom}px`,
+            }}
           >
             <div style={{ width: width * zoom, height: height * zoom, margin: 'auto' }}>
             <div style={{ width, height, transform: `scale(${zoom})`, transformOrigin: '0 0' }} className="relative">
@@ -441,7 +520,7 @@ export function ConversationOutline({ conversation, scrollContainerRef, onClose 
                     aria-current={current ? 'true' : undefined}
                     style={{ left: n.cx - NODE_W / 2, top: n.cy - NODE_H / 2, width: NODE_W, height: NODE_H }}
                     className={cn(
-                      'absolute flex flex-col gap-1 rounded-[10px] border px-2.5 py-2 text-left overflow-hidden transition-colors',
+                      'absolute flex flex-col gap-1.5 rounded-[12px] border px-3 py-2.5 text-left overflow-hidden transition-colors',
                       active
                         ? 'border-[var(--color-border-strong)] bg-[var(--color-surface)]'
                         : 'border-[var(--color-border-subtle)] bg-[var(--color-bg-muted)] opacity-80',
@@ -449,22 +528,21 @@ export function ConversationOutline({ conversation, scrollContainerRef, onClose 
                       'hover:border-[var(--color-fg-subtle)] hover:opacity-100 interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
                     )}
                   >
-                    <span className="flex items-center gap-1.5 shrink-0">
+                    <span className="flex items-center gap-2 shrink-0">
                       {isUser ? (
-                        <span className="inline-flex size-[15px] items-center justify-center rounded-full bg-[var(--color-bg-subtle)] text-[var(--color-fg-muted)]">
-                          <User size={10} aria-hidden />
-                        </span>
+                        <Avatar size="xs">
+                          {avatarUrl ? <AvatarImage src={avatarUrl} alt={displayName} /> : null}
+                          <AvatarFallback>{initials(displayName)}</AvatarFallback>
+                        </Avatar>
                       ) : (
-                        <ModelIcon icon={model?.icon} size={15} />
+                        <ModelIcon icon={model?.icon} size={17} />
                       )}
-                      <span className="truncate text-[11px] font-medium text-[var(--color-fg)]">
-                        {isUser
-                          ? t('common.you', { ns: 'common', defaultValue: 'You' })
-                          : model?.label || n.msg.modelLabel || t('assistant')}
+                      <span className="truncate text-[12px] font-semibold text-[var(--color-fg)]">
+                        {isUser ? displayName : model?.label || n.msg.modelLabel || t('assistant')}
                       </span>
                     </span>
                     <span
-                      className="text-[11px] leading-snug text-[var(--color-fg-muted)]"
+                      className="text-[11.5px] leading-snug text-[var(--color-fg-muted)]"
                       style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
                     >
                       {n.msg.content || t('outline.emptyMessage', { defaultValue: '(empty)' })}

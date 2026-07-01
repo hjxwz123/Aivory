@@ -319,6 +319,68 @@ func TestPlanCompactionHotPath(t *testing.T) {
 	}
 }
 
+// setLastAssistantInput stamps the newest assistant message with a real recorded
+// prompt size so contextTokens reports it as `exact`.
+func setLastAssistantInput(h []store.Message, n int) {
+	for i := len(h) - 1; i >= 0; i-- {
+		if h[i].Role == "assistant" {
+			h[i].InputTokens = n
+			return
+		}
+	}
+}
+
+// TestPlanCompactionInlineOnBigTokenOverflow locks in the token-magnitude inline
+// path: a message-LIGHT history (tail ≤ keepRounds*2*3, so the backlog gate stays
+// quiet) whose last turn recorded a REAL prompt well past 1.25× the trigger is
+// summarised INLINE this turn — otherwise a few huge code/plot turns overflow on
+// tokens but not on message count and make the turn pay one full-price spike
+// before the async pass. Mild and estimate-only overflows still go async.
+func TestPlanCompactionInlineOnBigTokenOverflow(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	// Pin the settings we depend on — GetSetting has a PROCESS-WIDE cache, so a
+	// sibling test's `compaction_token_trigger=0` would otherwise leak in and
+	// disable the token path (SetSetting refreshes the cache for this db).
+	if _, err := db.Exec(`CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT, updated_at INTEGER)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetSetting(db, "keep_recent_rounds", 6); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetSetting(db, "compaction_token_trigger", 32000); err != nil {
+		t.Fatal(err)
+	}
+	conv := &store.Conversation{ID: "c1", UserID: "u1", SummaryBlocks: json.RawMessage("[]")}
+
+	// 14 msgs: tail=14 > keepRounds*2 (12) so it overflows, but ≤ keepRounds*2*3 (36)
+	// so the message-count backlog gate does NOT fire — inline must come from tokens.
+	big := buildHistory(14)
+	setLastAssistantInput(big, 50000) // real prompt 50000 > 1.25×32000 = 40000
+	if _, _, action := PlanCompaction(db, conv, big, 0); action != compactInline {
+		t.Fatalf("real ctx 50000 (>1.25×trigger), 14 msgs: action=%d, want inline", action)
+	}
+
+	// Mild overflow: real prompt over the trigger but under the 1.25× inline bar →
+	// stay async so a task-model round-trip isn't added to first token every turn.
+	mild := buildHistory(14)
+	setLastAssistantInput(mild, 33000) // 32000 < 33000 < 40000
+	if _, _, action := PlanCompaction(db, conv, mild, 0); action != compactAsync {
+		t.Fatalf("real ctx 33000 (<1.25×trigger): action=%d, want async", action)
+	}
+
+	// Estimate-only overflow (no recorded usage → exact=false) must NOT inline: we
+	// never stall first token on a shaky estimate. Small blocks keep the estimate
+	// tiny, so this stays async via the round-budget overflow.
+	est := buildHistory(14) // no InputTokens anywhere → exact=false
+	if _, _, action := PlanCompaction(db, conv, est, 0); action != compactAsync {
+		t.Fatalf("estimate-only, no real count: action=%d, want async", action)
+	}
+}
+
 // TestEstimateMsgTokensConcurrent exercises the memo under concurrent access so
 // `go test -race` proves the size-bound reset no longer races Load/Store (the
 // previous build reassigned a sync.Map under a bare Load — a data race).

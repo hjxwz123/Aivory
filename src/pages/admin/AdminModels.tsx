@@ -8,7 +8,7 @@
  * icon on each row. This avoids a 15-field overflow modal on small screens
  * and matches the editorial-feel "one job per surface" rule.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { Plus, Settings as SettingsIcon, Trash2, Tags as TagsIcon } from 'lucide-react'
@@ -65,6 +65,7 @@ export default function AdminModels() {
     draft: emptyCreate,
   })
   const [submitting, setSubmitting] = useState(false)
+  const submittingRef = useRef(false)
   const [confirmDelete, setConfirmDelete] = useState<ApiModel | null>(null)
 
   async function load() {
@@ -92,11 +93,13 @@ export default function AdminModels() {
   }
 
   async function submitCreate() {
+    if (submittingRef.current) return
     const d = creator.draft
     if (!d.channel_id || !d.label.trim() || !d.request_id.trim()) {
       toast.error(t('admin:models.errors.missingFields'))
       return
     }
+    submittingRef.current = true
     setSubmitting(true)
     try {
       // Sensible defaults so the row is immediately usable; user fine-tunes on
@@ -123,8 +126,13 @@ export default function AdminModels() {
       // (pricing, system prompt, tool mode) is one click away.
       navigate(`/admin/models/${encodeURIComponent(created.id)}`)
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
+      if (e instanceof ApiError && e.status === 409) {
+        toast.error(t('admin:common.nameExists', { defaultValue: 'A record with this name already exists.' }))
+      } else {
+        toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
+      }
     } finally {
+      submittingRef.current = false
       setSubmitting(false)
     }
   }
@@ -246,7 +254,7 @@ export default function AdminModels() {
 
       {/* Quick-create dialog — only the six fields needed to register a row.
           Everything else lives on /admin/models/:id. */}
-      <Dialog open={creator.open} onOpenChange={(o) => setCreator({ ...creator, open: o })}>
+      <Dialog open={creator.open} onOpenChange={(o) => !submittingRef.current && setCreator({ ...creator, open: o })}>
         <DialogContent size="md">
           <DialogHeader>
             <DialogTitle>{t('admin:models.newTitle')}</DialogTitle>

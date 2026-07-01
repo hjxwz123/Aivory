@@ -123,9 +123,14 @@ export function WelcomeCard() {
     if (!open || saving) return
     setSaving(true)
     try {
-      // Memory is the only choice with a server-side mirror; the rest are
-      // localStorage-backed and already applied live.
-      await markOnboarded({ memory_enabled: memoryAvailable ? memory : false })
+      await markOnboarded({
+        language: lang,
+        theme: themePref,
+        accent_color: accent,
+        chat_width: chatWidth,
+        response_length: replyStyle,
+        memory_enabled: memoryAvailable ? memory : false,
+      })
       // Close the wizard (plays the zoom-out), then hand off to the welcome
       // dialog once the exit animation finishes.
       setOpen(false)

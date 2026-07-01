@@ -5,7 +5,7 @@
  * write-only — it's never returned, and an empty field on edit keeps the saved
  * value (mirrors the channel api_key policy).
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Plus, Pencil, Trash2, Copy, Check } from 'lucide-react'
 import { adminApi, ApiError, apiUrl } from '@/api'
@@ -51,6 +51,8 @@ export default function AdminOAuth() {
   })
   const [confirmDelete, setConfirmDelete] = useState<ApiOAuthProvider | null>(null)
   const [copied, setCopied] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const savingRef = useRef(false)
 
   async function load() {
     setLoading(true)
@@ -81,11 +83,14 @@ export default function AdminOAuth() {
   }
 
   async function submit() {
+    if (savingRef.current) return
     const d = editor.draft
     if (!d.name?.trim()) {
       toast.error(t('admin:oauth.errors.nameRequired'))
       return
     }
+    savingRef.current = true
+    setSaving(true)
     try {
       if (editor.row) {
         await adminApi.updateOAuthProvider(editor.row.id, d)
@@ -97,7 +102,14 @@ export default function AdminOAuth() {
       setEditor({ ...editor, open: false })
       await load()
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
+      if (e instanceof ApiError && e.status === 409) {
+        toast.error(t('admin:common.nameExists', { defaultValue: 'A record with this name already exists.' }))
+      } else {
+        toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
+      }
+    } finally {
+      savingRef.current = false
+      setSaving(false)
     }
   }
 
@@ -175,7 +187,7 @@ export default function AdminOAuth() {
         )}
       </section>
 
-      <Dialog open={editor.open} onOpenChange={(o) => setEditor({ ...editor, open: o })}>
+      <Dialog open={editor.open} onOpenChange={(o) => !savingRef.current && setEditor({ ...editor, open: o })}>
         <DialogContent size="md">
           <DialogHeader>
             <DialogTitle>{editor.row ? t('admin:oauth.editorTitle') : t('admin:oauth.newTitle')}</DialogTitle>
@@ -364,10 +376,10 @@ export default function AdminOAuth() {
             </div>
           </DialogBody>
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setEditor({ ...editor, open: false })}>
+            <Button variant="ghost" disabled={saving} onClick={() => setEditor({ ...editor, open: false })}>
               {t('common:actions.cancel')}
             </Button>
-            <Button onClick={() => void submit()}>{t('common:actions.save')}</Button>
+            <Button loading={saving} onClick={() => void submit()}>{t('common:actions.save')}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

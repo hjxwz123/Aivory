@@ -4,7 +4,7 @@
  * server-side (users never see it). The composer's style picker shows the
  * enabled styles' name + thumbnail only.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Plus, Trash2, Palette } from 'lucide-react'
 import { adminApi, ApiError } from '@/api'
@@ -23,6 +23,7 @@ export default function AdminImageStyles() {
   const [loading, setLoading] = useState(true)
   const [newName, setNewName] = useState('')
   const [creating, setCreating] = useState(false)
+  const creatingRef = useRef(false)
 
   async function load() {
     setLoading(true)
@@ -40,16 +41,23 @@ export default function AdminImageStyles() {
   }, [])
 
   async function create() {
+    if (creatingRef.current) return
     const name = newName.trim()
     if (!name) return
+    creatingRef.current = true
     setCreating(true)
     try {
       const st = await adminApi.createImageStyle({ name, enabled: true, sort_order: styles.length })
       setStyles((s) => [...s, st])
       setNewName('')
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
+      if (e instanceof ApiError && e.status === 409) {
+        toast.error(t('admin:common.nameExists', { defaultValue: 'A record with this name already exists.' }))
+      } else {
+        toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
+      }
     } finally {
+      creatingRef.current = false
       setCreating(false)
     }
   }
@@ -84,6 +92,7 @@ export default function AdminImageStyles() {
         <div className="flex gap-2">
           <Input
             value={newName}
+            disabled={creating}
             onChange={(e) => setNewName(e.target.value)}
             placeholder={t('admin:imageStyles.namePlaceholder', { defaultValue: 'Style name (e.g. Watercolor)' })}
             onKeyDown={(e) => {
@@ -146,7 +155,11 @@ function StyleCard({
       onPatch(upd)
       toast.success(t('admin:common.saved', { defaultValue: 'Saved' }))
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
+      if (e instanceof ApiError && e.status === 409) {
+        toast.error(t('admin:common.nameExists', { defaultValue: 'A record with this name already exists.' }))
+      } else {
+        toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
+      }
     } finally {
       setSaving(false)
     }

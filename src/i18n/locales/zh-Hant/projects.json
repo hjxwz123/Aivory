@@ -109,7 +109,8 @@
     "accentLabel": "配色",
     "submit": "建立專案",
     "cancel": "取消",
-    "created": "專案已建立"
+    "created": "專案已建立",
+    "nameExists": "已存在同名專案。"
   },
   "accent": {
     "violet": "紫羅蘭",

@@ -12,6 +12,10 @@ import { useConversations } from '@/store/conversations'
 import { useProjects } from '@/store/projects'
 import { useModels } from '@/store/models'
 import { useSettings } from '@/store/settings'
+import { useAccent } from '@/store/accent'
+import { useLanguage, toSupportedLanguage } from '@/store/language'
+import { useTheme } from '@/store/theme'
+import { ACCENT_PRESETS, type AccentPref, type ThemePref } from '@/types/settings'
 
 const PUBLIC_PATHS = ['/welcome', '/login', '/register', '/forgot-password', '/share', '/setup', '/privacy', '/terms']
 
@@ -37,7 +41,19 @@ export function AuthGate({ children }: { children: ReactNode }) {
   // Once authenticated, hydrate the per-user data caches.
   useEffect(() => {
     if (status === 'authenticated') {
-      if (user?.settings) syncUserSettings(user.settings)
+      if (user?.settings) {
+        syncUserSettings(user.settings)
+        const language = toSupportedLanguage(user.settings.language)
+        if (language) useLanguage.getState().applyLang(language)
+        const theme = user.settings.theme
+        if (theme === 'light' || theme === 'dark' || theme === 'system') {
+          useTheme.getState().applyPref(theme as ThemePref)
+        }
+        const accent = user.settings.accent_color
+        if (typeof accent === 'string' && (ACCENT_PRESETS as readonly string[]).includes(accent)) {
+          useAccent.getState().applyAccent(accent as AccentPref)
+        }
+      }
       void loadConversations()
       void loadProjects()
       void loadModels()

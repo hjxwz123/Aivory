@@ -47,8 +47,19 @@ func createModelTagAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errors.New("name required"))
 		return
 	}
+	if existing, err := store.GetModelTagByName(r.Context(), d.DB, req.Name); err == nil && existing != nil {
+		writeError(w, 409, store.ErrModelTagNameExists)
+		return
+	} else if err != nil && !errors.Is(err, store.ErrNotFound) {
+		writeError(w, 500, err)
+		return
+	}
 	tag, err := store.CreateModelTag(r.Context(), d.DB, req.Name, req.SortOrder)
 	if err != nil {
+		if errors.Is(err, store.ErrModelTagNameExists) {
+			writeError(w, 409, err)
+			return
+		}
 		writeError(w, 500, err)
 		return
 	}
@@ -67,8 +78,19 @@ func updateModelTagAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errors.New("name required"))
 		return
 	}
+	if existing, err := store.GetModelTagByName(r.Context(), d.DB, req.Name); err == nil && existing != nil && existing.ID != id {
+		writeError(w, 409, store.ErrModelTagNameExists)
+		return
+	} else if err != nil && !errors.Is(err, store.ErrNotFound) {
+		writeError(w, 500, err)
+		return
+	}
 	tag, err := store.UpdateModelTag(r.Context(), d.DB, id, req.Name, req.SortOrder)
 	if err != nil {
+		if errors.Is(err, store.ErrModelTagNameExists) {
+			writeError(w, 409, err)
+			return
+		}
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, 404, errNotFound)
 			return

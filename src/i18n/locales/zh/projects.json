@@ -109,7 +109,8 @@
     "accentLabel": "配色",
     "submit": "创建项目",
     "cancel": "取消",
-    "created": "项目已创建"
+    "created": "项目已创建",
+    "nameExists": "已存在同名项目。"
   },
   "accent": {
     "violet": "紫罗兰",

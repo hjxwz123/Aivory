@@ -19,7 +19,8 @@
     "pickModel": "Choisir un modèle",
     "create": "Créer",
     "created": "Base de connaissances créée",
-    "nameRequired": "Nom requis"
+    "nameRequired": "Nom requis",
+    "nameExists": "Une base de connaissances portant ce nom existe déjà."
   },
   "detail": {
     "uploadButton": "Importer un document",

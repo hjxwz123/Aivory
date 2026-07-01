@@ -294,12 +294,24 @@ func createOAuthProviderAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, err)
 		return
 	}
-	if strings.TrimSpace(p.Name) == "" {
+	p.Name = strings.TrimSpace(p.Name)
+	if p.Name == "" {
 		writeError(w, 400, errors.New("name required"))
+		return
+	}
+	if existing, err := store.GetOAuthProviderByName(r.Context(), d.DB, p.Name); err == nil && existing != nil {
+		writeError(w, 409, store.ErrOAuthProviderNameExists)
+		return
+	} else if err != nil && !errors.Is(err, store.ErrNotFound) {
+		writeError(w, 500, err)
 		return
 	}
 	created, err := store.CreateOAuthProvider(r.Context(), d.DB, p)
 	if err != nil {
+		if errors.Is(err, store.ErrOAuthProviderNameExists) {
+			writeError(w, 409, err)
+			return
+		}
 		writeError(w, 500, err)
 		return
 	}
@@ -319,8 +331,27 @@ func updateOAuthProviderAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if patch.Name != nil {
+		name := strings.TrimSpace(*patch.Name)
+		patch.Name = &name
+		if name == "" {
+			writeError(w, 400, errors.New("name required"))
+			return
+		}
+		if existing, err := store.GetOAuthProviderByName(r.Context(), d.DB, name); err == nil && existing != nil && existing.ID != id {
+			writeError(w, 409, store.ErrOAuthProviderNameExists)
+			return
+		} else if err != nil && !errors.Is(err, store.ErrNotFound) {
+			writeError(w, 500, err)
+			return
+		}
+	}
 	upd, err := store.UpdateOAuthProvider(r.Context(), d.DB, id, patch)
 	if err != nil {
+		if errors.Is(err, store.ErrOAuthProviderNameExists) {
+			writeError(w, 409, err)
+			return
+		}
 		writeError(w, 404, errNotFound)
 		return
 	}

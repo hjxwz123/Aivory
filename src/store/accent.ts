@@ -9,6 +9,7 @@
  */
 import { create } from 'zustand'
 import { type AccentPref, ACCENT_PRESETS } from '@/types/settings'
+import { persistUserSettings } from '@/lib/user-settings'
 
 const STORAGE_KEY = 'aurelia.accent'
 const DEFAULT_ACCENT: AccentPref = 'violet'
@@ -26,6 +27,7 @@ function applyAccent(accent: AccentPref) {
 
 interface AccentStore {
   accent: AccentPref
+  applyAccent: (accent: AccentPref) => void
   setAccent: (accent: AccentPref) => void
 }
 
@@ -34,10 +36,16 @@ export const useAccent = create<AccentStore>((set) => {
   if (typeof document !== 'undefined') applyAccent(initial)
   return {
     accent: initial,
+    applyAccent(accent) {
+      localStorage.setItem(STORAGE_KEY, accent)
+      applyAccent(accent)
+      set({ accent })
+    },
     setAccent(accent) {
       localStorage.setItem(STORAGE_KEY, accent)
       applyAccent(accent)
       set({ accent })
+      void persistUserSettings({ accent_color: accent }).catch(() => {})
     },
   }
 })

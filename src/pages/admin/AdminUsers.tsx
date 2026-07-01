@@ -60,6 +60,7 @@ export default function AdminUsers() {
     role: 'user',
   })
   const [creating, setCreating] = useState(false)
+  const creatingRef = useRef(false)
 
   // Edit-user dialog (role + reset password)
   const [editRow, setEditRow] = useState<ApiUser | null>(null)
@@ -172,6 +173,7 @@ export default function AdminUsers() {
   }
 
   async function submitCreate() {
+    if (creatingRef.current) return
     if (!draft.email.trim() || !draft.email.includes('@')) {
       toast.error(t('admin:users.errors.emailRequired'))
       return
@@ -180,6 +182,7 @@ export default function AdminUsers() {
       toast.error(t('admin:users.errors.passwordShort'))
       return
     }
+    creatingRef.current = true
     setCreating(true)
     try {
       await adminApi.createUser({
@@ -194,6 +197,7 @@ export default function AdminUsers() {
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
     } finally {
+      creatingRef.current = false
       setCreating(false)
     }
   }
@@ -371,7 +375,7 @@ export default function AdminUsers() {
       </section>
 
       {/* New user */}
-      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+      <Dialog open={createOpen} onOpenChange={(next) => !creatingRef.current && setCreateOpen(next)}>
         <DialogContent size="sm">
           <DialogHeader>
             <DialogTitle>{t('admin:users.newTitle')}</DialogTitle>
@@ -419,7 +423,7 @@ export default function AdminUsers() {
             </div>
           </DialogBody>
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setCreateOpen(false)}>
+            <Button variant="ghost" onClick={() => setCreateOpen(false)} disabled={creating}>
               {t('common:actions.cancel')}
             </Button>
             <Button loading={creating} onClick={() => void submitCreate()}>

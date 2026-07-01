@@ -158,7 +158,11 @@ export default function AdminModelEdit() {
       setDraft({ ...modelToDraft(updated), skills: skillIds ?? [] })
       toast.success(t('admin:models.updated'))
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
+      if (e instanceof ApiError && e.status === 409) {
+        toast.error(t('admin:common.nameExists', { defaultValue: 'A record with this name already exists.' }))
+      } else {
+        toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
+      }
     } finally {
       setSaving(false)
     }

@@ -19,7 +19,8 @@
     "pickModel": "Pick a model",
     "create": "Create",
     "created": "Knowledge base created",
-    "nameRequired": "Name required"
+    "nameRequired": "Name required",
+    "nameExists": "A knowledge base with this name already exists."
   },
   "detail": {
     "uploadButton": "Upload document",

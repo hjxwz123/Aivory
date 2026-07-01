@@ -56,6 +56,13 @@ func createProjectHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errors.New("name required"))
 		return
 	}
+	if existing, err := store.GetProjectByName(r.Context(), d.DB, u.ID, req.Name); err == nil && existing != nil {
+		writeError(w, 409, store.ErrProjectNameExists)
+		return
+	} else if err != nil && !errors.Is(err, store.ErrNotFound) {
+		writeError(w, 500, err)
+		return
+	}
 	// Enforce the group's project cap (§ user groups). 0 = unlimited.
 	if maxProjects, _ := groupCapFor(d, r, u.ID, u.GroupID); maxProjects > 0 {
 		if n, err := store.CountProjectsByUser(r.Context(), d.DB, u.ID); err == nil && n >= maxProjects {
@@ -72,6 +79,10 @@ func createProjectHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 			Accent: req.Accent, Emoji: req.Emoji,
 		})
 		if err != nil {
+			if errors.Is(err, store.ErrProjectNameExists) {
+				writeError(w, 409, err)
+				return
+			}
 			writeError(w, 500, err)
 			return
 		}
@@ -83,6 +94,10 @@ func createProjectHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		EmbeddingModelID: embeds[0].ID, EmbeddingDim: embeds[0].Dim,
 	})
 	if err != nil {
+		if errors.Is(err, store.ErrKBNameExists) {
+			writeError(w, 409, store.ErrProjectNameExists)
+			return
+		}
 		writeError(w, 500, err)
 		return
 	}
@@ -91,6 +106,13 @@ func createProjectHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		Accent: req.Accent, Emoji: req.Emoji, KBID: kb.ID,
 	})
 	if err != nil {
+		// Keep the two-step create from leaving an unattached project library if
+		// the project insert loses a concurrent unique-name race.
+		_ = store.DeleteKB(r.Context(), d.DB, kb.ID, u.ID)
+		if errors.Is(err, store.ErrProjectNameExists) {
+			writeError(w, 409, err)
+			return
+		}
 		writeError(w, 500, err)
 		return
 	}
@@ -127,8 +149,27 @@ func updateProjectHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errInvalidInput)
 		return
 	}
+	if p.Name != nil {
+		name := strings.TrimSpace(*p.Name)
+		p.Name = &name
+		if name == "" {
+			writeError(w, 400, errors.New("name required"))
+			return
+		}
+		if existing, err := store.GetProjectByName(r.Context(), d.DB, u.ID, name); err == nil && existing != nil && existing.ID != id {
+			writeError(w, 409, store.ErrProjectNameExists)
+			return
+		} else if err != nil && !errors.Is(err, store.ErrNotFound) {
+			writeError(w, 500, err)
+			return
+		}
+	}
 	upd, err := store.UpdateProject(r.Context(), d.DB, id, u.ID, p)
 	if err != nil {
+		if errors.Is(err, store.ErrProjectNameExists) {
+			writeError(w, 409, err)
+			return
+		}
 		writeError(w, 404, errNotFound)
 		return
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"time"
 )
 
@@ -68,16 +69,38 @@ func GetImageStyle(ctx context.Context, db *sql.DB, id string) (*ImageStyle, err
 	return &s, nil
 }
 
+// GetImageStyleByName returns a style by case-insensitive, trimmed name.
+func GetImageStyleByName(ctx context.Context, db *sql.DB, name string) (*ImageStyle, error) {
+	var s ImageStyle
+	var en int
+	err := db.QueryRowContext(ctx,
+		`SELECT id, name, example_image_url, hidden_prompt, enabled, sort_order, created_at, updated_at FROM image_styles WHERE lower(trim(name))=lower(trim(?)) LIMIT 1`, name).
+		Scan(&s.ID, &s.Name, &s.ExampleImageURL, &s.HiddenPrompt, &en, &s.SortOrder, &s.CreatedAt, &s.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	s.Enabled = en == 1
+	return &s, nil
+}
+
 // CreateImageStyle inserts a new style.
 func CreateImageStyle(ctx context.Context, db *sql.DB, s ImageStyle) (*ImageStyle, error) {
 	now := time.Now().Unix()
 	s.ID = genID("imgsty")
 	s.CreatedAt = now
 	s.UpdatedAt = now
+	s.Name = strings.TrimSpace(s.Name)
+	s.ExampleImageURL = strings.TrimSpace(s.ExampleImageURL)
 	if _, err := db.ExecContext(ctx,
 		`INSERT INTO image_styles(id, name, example_image_url, hidden_prompt, enabled, sort_order, created_at, updated_at)
 		 VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
 		s.ID, s.Name, s.ExampleImageURL, s.HiddenPrompt, boolToInt(s.Enabled), s.SortOrder, s.CreatedAt, s.UpdatedAt); err != nil {
+		if isUniqueIndexErr(err, "idx_image_styles_name_unique", "image_styles.name") {
+			return nil, ErrImageStyleNameExists
+		}
 		return nil, err
 	}
 	return &s, nil
@@ -85,9 +108,14 @@ func CreateImageStyle(ctx context.Context, db *sql.DB, s ImageStyle) (*ImageStyl
 
 // UpdateImageStyle overwrites the mutable fields of a style.
 func UpdateImageStyle(ctx context.Context, db *sql.DB, s ImageStyle) (*ImageStyle, error) {
+	s.Name = strings.TrimSpace(s.Name)
+	s.ExampleImageURL = strings.TrimSpace(s.ExampleImageURL)
 	if _, err := db.ExecContext(ctx,
 		`UPDATE image_styles SET name=?, example_image_url=?, hidden_prompt=?, enabled=?, sort_order=?, updated_at=? WHERE id=?`,
 		s.Name, s.ExampleImageURL, s.HiddenPrompt, boolToInt(s.Enabled), s.SortOrder, time.Now().Unix(), s.ID); err != nil {
+		if isUniqueIndexErr(err, "idx_image_styles_name_unique", "image_styles.name") {
+			return nil, ErrImageStyleNameExists
+		}
 		return nil, err
 	}
 	return GetImageStyle(ctx, db, s.ID)

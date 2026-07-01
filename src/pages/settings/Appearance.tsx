@@ -20,6 +20,7 @@ import { Sun, Moon, Monitor, Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { authApi } from '@/api'
 import { toast } from '@/hooks/use-toast'
+import { persistUserSettings } from '@/lib/user-settings'
 
 /**
  * Static preview color per accent preset. Chosen at L≈58 / C≈0.18 so the
@@ -73,10 +74,10 @@ export default function Appearance() {
   // localStorage takes precedence for immediate response; server fills gaps.
   useEffect(() => {
     void authApi.getSettings().then((s) => {
-      if (typeof s.accent_color === 'string' && s.accent_color && !localStorage.getItem('accent')) {
+      if (typeof s.accent_color === 'string' && s.accent_color && !localStorage.getItem('aurelia.accent')) {
         setAccent(s.accent_color as AccentPref)
       }
-      if (typeof s.font_family === 'string' && s.font_family && !localStorage.getItem('font')) {
+      if (typeof s.font_family === 'string' && s.font_family && !localStorage.getItem('aurelia.settings')) {
         setAppearance({ font: s.font_family as FontPref })
       }
       if (typeof s.user_message_markdown === 'boolean') {
@@ -88,12 +89,20 @@ export default function Appearance() {
 
   function onChangeAccent(preset: AccentPref) {
     setAccent(preset)
-    void authApi.updateSettings({ accent_color: preset }).catch(() => {})
   }
 
   function onChangeFont(opt: FontPref) {
     setAppearance({ font: opt })
-    void authApi.updateSettings({ font_family: opt }).catch(() => {})
+    void persistUserSettings({ font_family: opt }).catch(() => {})
+  }
+
+  function onChangeLanguage(v: string) {
+    setLang(v as typeof lang)
+  }
+
+  function onChangeChatWidth(v: typeof appearance.chatWidth) {
+    setAppearance({ chatWidth: v })
+    void persistUserSettings({ chat_width: v }).catch(() => {})
   }
 
   function onToggleUserMessageMarkdown(enabled: boolean) {
@@ -139,7 +148,7 @@ export default function Appearance() {
           </div>
         </SettingsRow>
         <SettingsRow label={t('appearance.language')} description={t('appearance.languageBody')}>
-          <Select value={lang} onValueChange={(v) => setLang(v as typeof lang)}>
+          <Select value={lang} onValueChange={onChangeLanguage}>
             <SelectTrigger className="w-48" aria-label={t('appearance.language')}>
               <SelectValue />
             </SelectTrigger>
@@ -174,14 +183,14 @@ export default function Appearance() {
             <Segment
               current={appearance.chatWidth}
               value="comfortable"
-              onClick={() => setAppearance({ chatWidth: 'comfortable' })}
+              onClick={() => onChangeChatWidth('comfortable')}
             >
               {t('appearance.chatWidth.comfortable')}
             </Segment>
             <Segment
               current={appearance.chatWidth}
               value="full"
-              onClick={() => setAppearance({ chatWidth: 'full' })}
+              onClick={() => onChangeChatWidth('full')}
             >
               {t('appearance.chatWidth.full')}
             </Segment>

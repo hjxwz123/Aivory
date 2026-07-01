@@ -64,7 +64,9 @@ export default function AdminSkills() {
   const [confirmDelete, setConfirmDelete] = useState<ApiSkill | null>(null)
   const [importMd, setImportMd] = useState('')
   const [uploading, setUploading] = useState(false)
+  const [saving, setSaving] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
+  const savingRef = useRef(false)
 
   // Upload one asset (template / script / data); append the returned descriptor
   // to the draft's assets. Persisted with the skill on save (§4.17).
@@ -134,11 +136,14 @@ export default function AdminSkills() {
   }
 
   async function submit() {
+    if (savingRef.current) return
     const d = editor.draft
     if (!d.name || !d.description || !d.instructions) {
       toast.error(t('admin:skills.errors.missingFields'))
       return
     }
+    savingRef.current = true
+    setSaving(true)
     try {
       if (editor.row) {
         await adminApi.updateSkill(editor.row.id, d)
@@ -150,7 +155,14 @@ export default function AdminSkills() {
       setEditor({ ...editor, open: false })
       await load()
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
+      if (e instanceof ApiError && e.status === 409) {
+        toast.error(t('admin:skills.errors.nameExists'))
+      } else {
+        toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
+      }
+    } finally {
+      savingRef.current = false
+      setSaving(false)
     }
   }
 
@@ -207,7 +219,7 @@ export default function AdminSkills() {
         )}
       </section>
 
-      <Dialog open={editor.open} onOpenChange={(o) => setEditor({ ...editor, open: o })}>
+      <Dialog open={editor.open} onOpenChange={(o) => !savingRef.current && setEditor({ ...editor, open: o })}>
         <DialogContent size="md">
           <DialogHeader>
             <DialogTitle>{editor.row ? t('admin:skills.editorTitle') : t('admin:skills.newTitle')}</DialogTitle>
@@ -308,10 +320,10 @@ export default function AdminSkills() {
             </div>
           </DialogBody>
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setEditor({ ...editor, open: false })}>
+            <Button variant="ghost" disabled={saving} onClick={() => setEditor({ ...editor, open: false })}>
               {t('common:actions.cancel')}
             </Button>
-            <Button onClick={() => void submit()}>{t('common:actions.save')}</Button>
+            <Button loading={saving} disabled={uploading} onClick={() => void submit()}>{t('common:actions.save')}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

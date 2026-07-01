@@ -164,6 +164,12 @@ func Migrate(db *sql.DB) error {
 		addImageTimeout = `ALTER TABLE models ADD COLUMN IF NOT EXISTS image_timeout_sec INTEGER NOT NULL DEFAULT 0`
 		addMsgVerify = `ALTER TABLE messages ADD COLUMN IF NOT EXISTS verify TEXT NOT NULL DEFAULT ''`
 	}
+	if err := dedupeSkillNames(db); err != nil {
+		return fmt.Errorf("dedupe skill names: %w", err)
+	}
+	if err := normalizeUniqueTextFields(db); err != nil {
+		return fmt.Errorf("normalize unique text fields: %w", err)
+	}
 	if _, err := db.Exec(schema); err != nil {
 		return fmt.Errorf("apply schema: %w", err)
 	}
@@ -196,6 +202,18 @@ func Migrate(db *sql.DB) error {
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_messages_conv_created ON messages(conversation_id, created_at)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_conv_user_updated ON conversations(user_id, archived, pinned DESC, updated_at DESC)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_users_sort_order ON users(sort_order, created_at DESC)`)
+	for _, ddl := range []string{
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_channels_name_unique ON channels(lower(trim(name)))`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_oauth_providers_name_unique ON oauth_providers(lower(trim(name)))`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_user_groups_name_unique ON user_groups(lower(trim(name)))`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_model_tags_name_unique ON model_tags(lower(trim(name)))`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_image_styles_name_unique ON image_styles(lower(trim(name)))`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_models_channel_request_unique ON models(channel_id, lower(trim(request_id)))`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_user_name_unique ON projects(user_id, lower(trim(name)))`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_kbs_user_name_unique ON knowledge_bases(user_id, lower(trim(name)))`,
+	} {
+		_, _ = db.Exec(ddl)
+	}
 
 	// Column-parity guard. The additive ALTER loop above discards every error by
 	// design (a duplicate-column error on SQLite is expected on re-run), which also
@@ -260,6 +278,234 @@ func Migrate(db *sql.DB) error {
 	return nil
 }
 
+type duplicateSkill struct {
+	id     string
+	keeper string
+}
+
+func dedupeSkillNames(db *sql.DB) error {
+	rows, err := db.Query(`SELECT id, name, lower(trim(name)) FROM skills ORDER BY lower(trim(name)), sort_order, updated_at, id`)
+	if err != nil {
+		if isMissingTableErr(err) {
+			return nil
+		}
+		return err
+	}
+	defer rows.Close()
+
+	keepers := map[string]string{}
+	duplicates := []duplicateSkill{}
+	needsTrim := false
+	for rows.Next() {
+		var id, name, norm string
+		if err := rows.Scan(&id, &name, &norm); err != nil {
+			return err
+		}
+		if name != strings.TrimSpace(name) {
+			needsTrim = true
+		}
+		if keeper := keepers[norm]; keeper != "" {
+			duplicates = append(duplicates, duplicateSkill{id: id, keeper: keeper})
+			continue
+		}
+		keepers[norm] = id
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if !needsTrim && len(duplicates) == 0 {
+		return nil
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	if needsTrim {
+		if _, err := tx.Exec(`UPDATE skills SET name=trim(name)`); err != nil {
+			return err
+		}
+	}
+
+	mergeSQL := `INSERT OR IGNORE INTO model_skills(model_id, skill_id) SELECT model_id, ? FROM model_skills WHERE skill_id=?`
+	if usePostgres {
+		mergeSQL = `INSERT INTO model_skills(model_id, skill_id) SELECT model_id, ? FROM model_skills WHERE skill_id=? ON CONFLICT DO NOTHING`
+	}
+	for _, dup := range duplicates {
+		if _, err := tx.Exec(mergeSQL, dup.keeper, dup.id); err != nil && !isMissingTableErr(err) {
+			return err
+		}
+		if _, err := tx.Exec(`DELETE FROM model_skills WHERE skill_id=?`, dup.id); err != nil && !isMissingTableErr(err) {
+			return err
+		}
+		if _, err := tx.Exec(`DELETE FROM skills WHERE id=?`, dup.id); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+type uniqueTextSpec struct {
+	table     string
+	idCol     string
+	valueCol  string
+	scopeCols []string
+	fallback  string
+}
+
+type uniqueTextRow struct {
+	id     string
+	value  string
+	scopes []string
+}
+
+func normalizeUniqueTextFields(db *sql.DB) error {
+	specs := []uniqueTextSpec{
+		{table: "channels", idCol: "id", valueCol: "name", fallback: "Untitled channel"},
+		{table: "oauth_providers", idCol: "id", valueCol: "name", fallback: "Untitled provider"},
+		{table: "user_groups", idCol: "id", valueCol: "name", fallback: "Untitled group"},
+		{table: "model_tags", idCol: "id", valueCol: "name", fallback: "Untitled tag"},
+		{table: "image_styles", idCol: "id", valueCol: "name", fallback: "Untitled style"},
+		{table: "models", idCol: "id", valueCol: "request_id", scopeCols: []string{"channel_id"}, fallback: "untitled-model"},
+		{table: "projects", idCol: "id", valueCol: "name", scopeCols: []string{"user_id"}, fallback: "Untitled project"},
+		{table: "knowledge_bases", idCol: "id", valueCol: "name", scopeCols: []string{"user_id"}, fallback: "Untitled library"},
+	}
+	for _, spec := range specs {
+		if err := normalizeUniqueTextField(db, spec); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func normalizeUniqueTextField(db *sql.DB, spec uniqueTextSpec) error {
+	selectCols := []string{spec.idCol, spec.valueCol}
+	for _, col := range spec.scopeCols {
+		selectCols = append(selectCols, "COALESCE("+col+", '')")
+	}
+	orderParts := append([]string{}, spec.scopeCols...)
+	orderParts = append(orderParts, "lower(trim("+spec.valueCol+"))", spec.idCol)
+	rows, err := db.Query(fmt.Sprintf(
+		`SELECT %s FROM %s ORDER BY %s`,
+		strings.Join(selectCols, ", "), spec.table, strings.Join(orderParts, ", "),
+	))
+	if err != nil {
+		if isMissingTableErr(err) || isMissingColumnErr(err) {
+			return nil
+		}
+		return err
+	}
+	defer rows.Close()
+
+	records := []uniqueTextRow{}
+	for rows.Next() {
+		var id, value string
+		scopeVals := make([]string, len(spec.scopeCols))
+		dest := make([]any, 0, 2+len(scopeVals))
+		dest = append(dest, &id, &value)
+		for i := range scopeVals {
+			dest = append(dest, &scopeVals[i])
+		}
+		if err := rows.Scan(dest...); err != nil {
+			return err
+		}
+		records = append(records, uniqueTextRow{id: id, value: value, scopes: scopeVals})
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if len(records) == 0 {
+		return nil
+	}
+
+	usedByScope := map[string]map[string]bool{}
+	updates := map[string]string{}
+	for _, row := range records {
+		scopeKey := strings.Join(row.scopes, "\x00")
+		if usedByScope[scopeKey] == nil {
+			usedByScope[scopeKey] = map[string]bool{}
+		}
+		used := usedByScope[scopeKey]
+		next := strings.TrimSpace(row.value)
+		if next == "" || used[normalizeTextForUnique(next)] {
+			base := next
+			if base == "" {
+				base = spec.fallback
+			}
+			next = uniqueTextCandidate(base, row.id, used)
+		}
+		used[normalizeTextForUnique(next)] = true
+		if next != row.value {
+			updates[row.id] = next
+		}
+	}
+	if len(updates) == 0 {
+		return nil
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck
+	updateSQL := fmt.Sprintf(`UPDATE %s SET %s=? WHERE %s=?`, spec.table, spec.valueCol, spec.idCol)
+	for id, next := range updates {
+		if _, err := tx.Exec(updateSQL, next, id); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func uniqueTextCandidate(base, id string, used map[string]bool) string {
+	tail := shortIDForName(id)
+	for i := 0; ; i++ {
+		suffix := tail
+		if i > 0 {
+			suffix = fmt.Sprintf("%s-%d", tail, i+1)
+		}
+		candidate := strings.TrimSpace(fmt.Sprintf("%s (%s)", base, suffix))
+		if !used[normalizeTextForUnique(candidate)] {
+			return candidate
+		}
+	}
+}
+
+func shortIDForName(id string) string {
+	id = strings.TrimSpace(id)
+	if len(id) <= 8 {
+		return id
+	}
+	return id[len(id)-8:]
+}
+
+func normalizeTextForUnique(s string) string {
+	return strings.ToLower(strings.TrimSpace(s))
+}
+
+func isMissingTableErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	low := strings.ToLower(err.Error())
+	return strings.Contains(low, "no such table") ||
+		strings.Contains(low, "does not exist") ||
+		strings.Contains(low, "undefined_table") ||
+		strings.Contains(low, "42p01")
+}
+
+func isMissingColumnErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	low := strings.ToLower(err.Error())
+	return strings.Contains(low, "no such column") ||
+		strings.Contains(low, "undefined_column") ||
+		strings.Contains(low, "42703")
+}
+
 // Seed installs the bootstrap admin user + default global settings. The system
 // ships with NO mock provider — an admin must configure a real channel + model
 // and set the default/task model before chat works.
@@ -270,10 +516,10 @@ func Seed(db *sql.DB, cfg config.Config) error {
 
 	// Default global settings.
 	for k, v := range map[string]string{
-		"default_model_id":            `""`,
-		"task_model_id":               `""`,
-		"image_prompt_model_id":       `""`,
-		"verify_model_id":             `""`,
+		"default_model_id":      `""`,
+		"task_model_id":         `""`,
+		"image_prompt_model_id": `""`,
+		"verify_model_id":       `""`,
 		// §4.11-B RAG injection knobs (admin → Documents). A conversation doc at/below
 		// rag_full_text_threshold (est. tokens) is injected in full; above it, it's
 		// vectorised and only chunks are retrieved (rag_top_k of them, or — when
@@ -284,7 +530,7 @@ func Seed(db *sql.DB, cfg config.Config) error {
 		"rag_similarity_threshold": `0.5`,
 		// §credits pre-flight: on a credit-charged turn, estimate the assembled
 		// prompt's tokens before generating and refuse if the user can't afford it.
-		"credit_preflight_enabled": `true`,
+		"credit_preflight_enabled":    `true`,
 		"keep_recent_rounds":          `6`,
 		"summary_max_tokens":          `2048`,
 		"compaction_token_trigger":    `32000`,

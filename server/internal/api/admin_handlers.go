@@ -36,8 +36,17 @@ func createChannelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errInvalidInput)
 		return
 	}
+	req.Name = strings.TrimSpace(req.Name)
+	req.BaseURL = strings.TrimSpace(req.BaseURL)
 	if req.Name == "" || req.Type == "" {
 		writeError(w, 400, errors.New("name and type required"))
+		return
+	}
+	if existing, err := store.GetChannelByName(r.Context(), d.DB, req.Name); err == nil && existing != nil {
+		writeError(w, 409, store.ErrChannelNameExists)
+		return
+	} else if err != nil && !errors.Is(err, store.ErrNotFound) {
+		writeError(w, 500, err)
 		return
 	}
 	// api_format only applies to OpenAI channels — drop it for other types
@@ -52,6 +61,10 @@ func createChannelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	c, err := store.CreateChannel(r.Context(), d.DB, req.Name, req.Type, req.APIFormat, req.BaseURL, req.APIKey)
 	if err != nil {
+		if errors.Is(err, store.ErrChannelNameExists) {
+			writeError(w, 409, err)
+			return
+		}
 		writeError(w, 500, err)
 		return
 	}
@@ -106,8 +119,27 @@ func updateChannelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, err)
 		return
 	}
+	if p.Name != nil {
+		name := strings.TrimSpace(*p.Name)
+		p.Name = &name
+		if name == "" {
+			writeError(w, 400, errors.New("name required"))
+			return
+		}
+		if existing, err := store.GetChannelByName(r.Context(), d.DB, name); err == nil && existing != nil && existing.ID != id {
+			writeError(w, 409, store.ErrChannelNameExists)
+			return
+		} else if err != nil && !errors.Is(err, store.ErrNotFound) {
+			writeError(w, 500, err)
+			return
+		}
+	}
 	c, err := store.UpdateChannel(r.Context(), d.DB, id, p)
 	if err != nil {
+		if errors.Is(err, store.ErrChannelNameExists) {
+			writeError(w, 409, err)
+			return
+		}
 		writeError(w, 404, errNotFound)
 		return
 	}
@@ -172,13 +204,26 @@ func createModelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errInvalidInput)
 		return
 	}
+	m.RequestID = strings.TrimSpace(m.RequestID)
+	m.Label = strings.TrimSpace(m.Label)
 	if m.ChannelID == "" || m.RequestID == "" || m.Label == "" {
 		writeError(w, 400, errors.New("channel_id, request_id, label required"))
+		return
+	}
+	if existing, err := store.GetModelByChannelRequestID(r.Context(), d.DB, m.ChannelID, m.RequestID); err == nil && existing != nil {
+		writeError(w, 409, store.ErrModelRequestExists)
+		return
+	} else if err != nil && !errors.Is(err, store.ErrNotFound) {
+		writeError(w, 500, err)
 		return
 	}
 	m.Enabled = true
 	created, err := store.CreateModel(r.Context(), d.DB, m)
 	if err != nil {
+		if errors.Is(err, store.ErrModelRequestExists) {
+			writeError(w, 409, err)
+			return
+		}
 		writeError(w, 500, err)
 		return
 	}
@@ -219,8 +264,25 @@ func updateModelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errInvalidInput)
 		return
 	}
+	m.RequestID = strings.TrimSpace(m.RequestID)
+	m.Label = strings.TrimSpace(m.Label)
+	if m.ChannelID == "" || m.RequestID == "" || m.Label == "" {
+		writeError(w, 400, errors.New("channel_id, request_id, label required"))
+		return
+	}
+	if existing, err := store.GetModelByChannelRequestID(r.Context(), d.DB, m.ChannelID, m.RequestID); err == nil && existing != nil && existing.ID != id {
+		writeError(w, 409, store.ErrModelRequestExists)
+		return
+	} else if err != nil && !errors.Is(err, store.ErrNotFound) {
+		writeError(w, 500, err)
+		return
+	}
 	upd, err := store.UpdateModel(r.Context(), d.DB, id, m)
 	if err != nil {
+		if errors.Is(err, store.ErrModelRequestExists) {
+			writeError(w, 409, err)
+			return
+		}
 		writeError(w, 404, errNotFound)
 		return
 	}
@@ -271,8 +333,18 @@ func createSkillAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errInvalidInput)
 		return
 	}
+	s.Name = strings.TrimSpace(s.Name)
+	s.Description = strings.TrimSpace(s.Description)
+	s.Instructions = strings.TrimSpace(s.Instructions)
 	if s.Name == "" || s.Description == "" || s.Instructions == "" {
 		writeError(w, 400, errors.New("name, description, instructions required"))
+		return
+	}
+	if existing, err := store.GetSkillByName(r.Context(), d.DB, s.Name); err == nil && existing != nil {
+		writeError(w, 409, store.ErrSkillNameExists)
+		return
+	} else if err != nil && !errors.Is(err, store.ErrNotFound) {
+		writeError(w, 500, err)
 		return
 	}
 	s.Enabled = true
@@ -284,6 +356,10 @@ func createSkillAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	s.Assets = normAssets
 	created, err := store.CreateSkill(r.Context(), d.DB, s)
 	if err != nil {
+		if errors.Is(err, store.ErrSkillNameExists) {
+			writeError(w, 409, err)
+			return
+		}
 		writeError(w, 500, err)
 		return
 	}
@@ -305,6 +381,20 @@ func updateSkillAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errInvalidInput)
 		return
 	}
+	s.Name = strings.TrimSpace(s.Name)
+	s.Description = strings.TrimSpace(s.Description)
+	s.Instructions = strings.TrimSpace(s.Instructions)
+	if s.Name == "" || s.Description == "" || s.Instructions == "" {
+		writeError(w, 400, errors.New("name, description, instructions required"))
+		return
+	}
+	if existing, err := store.GetSkillByName(r.Context(), d.DB, s.Name); err == nil && existing != nil && existing.ID != id {
+		writeError(w, 409, store.ErrSkillNameExists)
+		return
+	} else if err != nil && !errors.Is(err, store.ErrNotFound) {
+		writeError(w, 500, err)
+		return
+	}
 	normAssets, err := validateSkillAssets(d, s.Assets)
 	if err != nil {
 		writeError(w, 400, err)
@@ -313,7 +403,15 @@ func updateSkillAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	s.Assets = normAssets
 	upd, err := store.UpdateSkill(r.Context(), d.DB, id, s)
 	if err != nil {
-		writeError(w, 404, errNotFound)
+		if errors.Is(err, store.ErrSkillNameExists) {
+			writeError(w, 409, err)
+			return
+		}
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, 404, errNotFound)
+			return
+		}
+		writeError(w, 500, err)
 		return
 	}
 	writeJSON(w, 200, upd)

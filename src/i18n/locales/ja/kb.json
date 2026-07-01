@@ -19,7 +19,8 @@
     "pickModel": "モデルを選択",
     "create": "作成",
     "created": "ナレッジベースを作成しました",
-    "nameRequired": "名前は必須です"
+    "nameRequired": "名前は必須です",
+    "nameExists": "同じ名前のナレッジベースが既に存在します。"
   },
   "detail": {
     "uploadButton": "ドキュメントをアップロード",

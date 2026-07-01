@@ -179,9 +179,9 @@ void i18n
     defaultNS: DEFAULT_NS,
     interpolation: { escapeValue: false }, // React already escapes
     detection: {
-      order: ['localStorage', 'navigator', 'htmlTag'],
+      order: ['localStorage', 'navigator'],
       lookupLocalStorage: 'aurelia.lang',
-      caches: ['localStorage'],
+      caches: [],
     },
     returnNull: false,
   })

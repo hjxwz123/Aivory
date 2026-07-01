@@ -49,6 +49,7 @@ import {
 } from '@/components/ui/dialog'
 import { toast } from '@/hooks/use-toast'
 import { cn, formatRelativeDate, truncate } from '@/lib/utils'
+import { persistUserSettings } from '@/lib/user-settings'
 
 export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>()
@@ -78,6 +79,7 @@ export default function ProjectDetail() {
   const allConversations = useConversations((s) => s.conversations, sameConvListShape)
   const createConversation = useConversations((s) => s.createConversation)
   const defaultModelId = useModels((s) => s.defaultId)
+  const setGlobalDefaultModel = useModels((s) => s.setDefaultId)
 
   const projectChats = useMemo<Conversation[]>(
     () =>
@@ -297,9 +299,11 @@ export default function ProjectDetail() {
             </p>
             <Composer
               modelId={defaultModelId}
-              onModelChange={(modelId) =>
+              onModelChange={(modelId) => {
                 useSettings.getState().setModels({ defaultModelId: modelId })
-              }
+                setGlobalDefaultModel(modelId)
+                void persistUserSettings({ default_model_id: modelId }).catch(() => {})
+              }}
               onSubmit={(text, atts, opts) => void startProjectChat(text, atts, opts)}
             />
           </div>

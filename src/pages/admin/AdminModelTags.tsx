@@ -3,7 +3,7 @@
  * rename, and delete labels here; they're assigned to models on the model-edit
  * page and drive the picker's filter chips.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Plus, Trash2, Tag } from 'lucide-react'
 import { adminApi, ApiError } from '@/api'
@@ -18,6 +18,7 @@ export default function AdminModelTags() {
   const [loading, setLoading] = useState(true)
   const [newName, setNewName] = useState('')
   const [creating, setCreating] = useState(false)
+  const creatingRef = useRef(false)
 
   async function load() {
     setLoading(true)
@@ -35,16 +36,23 @@ export default function AdminModelTags() {
   }, [])
 
   async function create() {
+    if (creatingRef.current) return
     const name = newName.trim()
     if (!name) return
+    creatingRef.current = true
     setCreating(true)
     try {
       const tag = await adminApi.createModelTag(name, tags.length)
       setTags((ts) => [...ts, tag])
       setNewName('')
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
+      if (e instanceof ApiError && e.status === 409) {
+        toast.error(t('admin:common.nameExists', { defaultValue: 'A record with this name already exists.' }))
+      } else {
+        toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
+      }
     } finally {
+      creatingRef.current = false
       setCreating(false)
     }
   }
@@ -56,7 +64,11 @@ export default function AdminModelTags() {
       const upd = await adminApi.updateModelTag(id, { name: n })
       setTags((ts) => ts.map((x) => (x.id === id ? upd : x)))
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
+      if (e instanceof ApiError && e.status === 409) {
+        toast.error(t('admin:common.nameExists', { defaultValue: 'A record with this name already exists.' }))
+      } else {
+        toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
+      }
     }
   }
 
@@ -80,6 +92,7 @@ export default function AdminModelTags() {
         <div className="flex gap-2">
           <Input
             value={newName}
+            disabled={creating}
             onChange={(e) => setNewName(e.target.value)}
             placeholder={t('admin:modelTags.namePlaceholder')}
             onKeyDown={(e) => {

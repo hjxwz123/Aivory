@@ -83,6 +83,78 @@ func TestDeleteRound(t *testing.T) {
 	assertParent(t, db, "U4", "") // re-anchored to root
 }
 
+// TestDeleteBranchKeepsSiblings locks in the §4.15 data-loss fix: deleting ONE
+// regenerated answer (an assistant with sibling answers under the same question)
+// removes only that branch's subtree — the question and the other branches
+// survive — while deleting the LAST remaining answer still falls back to the
+// whole-round delete.
+func TestDeleteBranchKeepsSiblings(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(filepath.Join(t.TempDir(), "db.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer db.Close()
+	if err := Migrate(db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	exec(t, db, `INSERT INTO users(id,email,password_hash,role) VALUES('u1','a@b.c','h','user')`)
+	exec(t, db, `INSERT INTO conversations(id,user_id,title) VALUES('c1','u1','T')`)
+
+	// One question Q with FOUR regenerated answers (4 branches). Branch A2 has a
+	// downstream continuation Q2→A2x.
+	insMsg(t, db, "Q", "", "user", 1000)
+	insMsg(t, db, "A1", "Q", "assistant", 1001)
+	insMsg(t, db, "A2", "Q", "assistant", 1002)
+	insMsg(t, db, "A3", "Q", "assistant", 1003)
+	insMsg(t, db, "A4", "Q", "assistant", 1004)
+	insMsg(t, db, "Q2", "A2", "user", 1005)
+	insMsg(t, db, "A2x", "Q2", "assistant", 1006)
+	exec(t, db, `UPDATE conversations SET active_leaf_id='A2x' WHERE id='c1'`)
+
+	// Delete branch A2 (an answer WITH siblings) → only A2 + its downstream go.
+	leaf, err := DeleteRound(ctx, db, "c1", "u1", "A2")
+	if err != nil {
+		t.Fatalf("DeleteRound A2: %v", err)
+	}
+	assertGone(t, db, "A2")
+	assertGone(t, db, "Q2")
+	assertGone(t, db, "A2x")
+	// Question + the other three branches are untouched.
+	assertParent(t, db, "Q", "")
+	assertParent(t, db, "A1", "Q")
+	assertParent(t, db, "A3", "Q")
+	assertParent(t, db, "A4", "Q")
+	// The active leaf lived inside the deleted branch → re-pointed to a surviving
+	// message under the question.
+	if leaf == "" {
+		t.Fatalf("active leaf should re-point to a surviving branch, got empty")
+	}
+	var x string
+	if err := db.QueryRowContext(ctx, `SELECT id FROM messages WHERE id=?`, leaf).Scan(&x); err != nil {
+		t.Fatalf("re-pointed leaf %q does not exist: %v", leaf, err)
+	}
+
+	// Peel branches down to one: deleting A1 then A3 (each still has siblings)
+	// removes only that branch; A4 remains the sole answer under Q.
+	if _, err := DeleteRound(ctx, db, "c1", "u1", "A1"); err != nil {
+		t.Fatalf("DeleteRound A1: %v", err)
+	}
+	if _, err := DeleteRound(ctx, db, "c1", "u1", "A3"); err != nil {
+		t.Fatalf("DeleteRound A3: %v", err)
+	}
+	assertGone(t, db, "A1")
+	assertGone(t, db, "A3")
+	assertParent(t, db, "A4", "Q") // sole survivor, still attached to the question
+
+	// Deleting the LAST answer falls back to the whole-round delete (question too).
+	if _, err := DeleteRound(ctx, db, "c1", "u1", "A4"); err != nil {
+		t.Fatalf("DeleteRound A4: %v", err)
+	}
+	assertGone(t, db, "A4")
+	assertGone(t, db, "Q")
+}
+
 // --- helpers ---------------------------------------------------------------
 
 func exec(t *testing.T, db *sql.DB, q string, args ...any) {

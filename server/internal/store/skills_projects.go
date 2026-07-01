@@ -9,6 +9,10 @@ import (
 	"time"
 )
 
+// ErrSkillNameExists is returned when a skill create/update would make skill
+// names ambiguous for use_skill(name).
+var ErrSkillNameExists = errors.New("skill name already exists")
+
 // ListSkills returns every skill.
 func ListSkills(ctx context.Context, db *sql.DB, onlyEnabled bool) ([]Skill, error) {
 	q := `SELECT id, name, description, icon, instructions, assets, enabled, sort_order, updated_at FROM skills`
@@ -55,8 +59,31 @@ func GetSkill(ctx context.Context, db *sql.DB, id string) (*Skill, error) {
 	return &s, nil
 }
 
+// GetSkillByName returns a skill by its case-insensitive, trimmed name.
+func GetSkillByName(ctx context.Context, db *sql.DB, name string) (*Skill, error) {
+	var s Skill
+	var en int
+	var assets string
+	err := db.QueryRowContext(ctx,
+		`SELECT id, name, description, icon, instructions, assets, enabled, sort_order, updated_at FROM skills WHERE lower(trim(name))=lower(trim(?)) LIMIT 1`,
+		name,
+	).Scan(&s.ID, &s.Name, &s.Description, &s.Icon, &s.Instructions, &assets, &en, &s.SortOrder, &s.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	s.Enabled = en == 1
+	s.Assets = json.RawMessage(assets)
+	return &s, nil
+}
+
 // CreateSkill inserts a row.
 func CreateSkill(ctx context.Context, db *sql.DB, s Skill) (*Skill, error) {
+	s.Name = strings.TrimSpace(s.Name)
+	s.Description = strings.TrimSpace(s.Description)
+	s.Instructions = strings.TrimSpace(s.Instructions)
 	if s.ID == "" {
 		s.ID = genID("sk")
 	}
@@ -67,6 +94,9 @@ func CreateSkill(ctx context.Context, db *sql.DB, s Skill) (*Skill, error) {
 		VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		s.ID, s.Name, s.Description, s.Icon, s.Instructions, string(s.Assets), boolInt(s.Enabled), s.SortOrder, time.Now().Unix())
 	if err != nil {
+		if isSkillNameUniqueErr(err) {
+			return nil, ErrSkillNameExists
+		}
 		return nil, err
 	}
 	return GetSkill(ctx, db, s.ID)
@@ -74,15 +104,25 @@ func CreateSkill(ctx context.Context, db *sql.DB, s Skill) (*Skill, error) {
 
 // UpdateSkill writes selective fields (using full struct).
 func UpdateSkill(ctx context.Context, db *sql.DB, id string, s Skill) (*Skill, error) {
+	s.Name = strings.TrimSpace(s.Name)
+	s.Description = strings.TrimSpace(s.Description)
+	s.Instructions = strings.TrimSpace(s.Instructions)
 	if len(s.Assets) == 0 {
 		s.Assets = json.RawMessage("[]")
 	}
 	_, err := db.ExecContext(ctx, `UPDATE skills SET name=?, description=?, icon=?, instructions=?, assets=?, enabled=?, sort_order=?, updated_at=? WHERE id=?`,
 		s.Name, s.Description, s.Icon, s.Instructions, string(s.Assets), boolInt(s.Enabled), s.SortOrder, time.Now().Unix(), id)
 	if err != nil {
+		if isSkillNameUniqueErr(err) {
+			return nil, ErrSkillNameExists
+		}
 		return nil, err
 	}
 	return GetSkill(ctx, db, id)
+}
+
+func isSkillNameUniqueErr(err error) bool {
+	return isUniqueIndexErr(err, "idx_skills_name_unique", "skills.name")
 }
 
 // DeleteSkill removes the row.
@@ -180,6 +220,22 @@ func GetProject(ctx context.Context, db *sql.DB, id, userID string) (*Project, e
 	return &p, nil
 }
 
+// GetProjectByName returns a user's project by case-insensitive, trimmed name.
+func GetProjectByName(ctx context.Context, db *sql.DB, userID, name string) (*Project, error) {
+	row := db.QueryRowContext(ctx,
+		`SELECT id, user_id, name, description, instructions, accent, emoji, pinned, kb_id, auto_add_uploads, created_at, updated_at
+		 FROM projects WHERE user_id=? AND lower(trim(name))=lower(trim(?)) LIMIT 1`,
+		userID, name)
+	p, err := scanProject(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &p, nil
+}
+
 func scanProject(s scanner) (Project, error) {
 	var p Project
 	var pinned, autoAdd int
@@ -200,6 +256,9 @@ func CreateProject(ctx context.Context, db *sql.DB, p Project) (*Project, error)
 	if p.ID == "" {
 		p.ID = genID("pr")
 	}
+	p.Name = strings.TrimSpace(p.Name)
+	p.Description = strings.TrimSpace(p.Description)
+	p.Instructions = strings.TrimSpace(p.Instructions)
 	if p.Accent == "" {
 		p.Accent = "violet"
 	}
@@ -216,6 +275,9 @@ func CreateProject(ctx context.Context, db *sql.DB, p Project) (*Project, error)
 		p.ID, p.UserID, p.Name, p.Description, p.Instructions, p.Accent, p.Emoji,
 		boolInt(p.Pinned), kbID, boolInt(p.AutoAddUploads), now, now)
 	if err != nil {
+		if isUniqueIndexErr(err, "idx_projects_user_name_unique", "projects.user_id") {
+			return nil, ErrProjectNameExists
+		}
 		return nil, err
 	}
 	return GetProject(ctx, db, p.ID, p.UserID)
@@ -241,11 +303,11 @@ func UpdateProject(ctx context.Context, db *sql.DB, id, userID string, patch Pro
 	}
 	if patch.Description != nil {
 		parts = append(parts, "description=?")
-		args = append(args, *patch.Description)
+		args = append(args, strings.TrimSpace(*patch.Description))
 	}
 	if patch.Instructions != nil {
 		parts = append(parts, "instructions=?")
-		args = append(args, *patch.Instructions)
+		args = append(args, strings.TrimSpace(*patch.Instructions))
 	}
 	if patch.Accent != nil {
 		parts = append(parts, "accent=?")
@@ -271,6 +333,9 @@ func UpdateProject(ctx context.Context, db *sql.DB, id, userID string, patch Pro
 	args = append(args, id, userID)
 	q := "UPDATE projects SET " + strings.Join(parts, ", ") + " WHERE id=? AND user_id=?"
 	if _, err := db.ExecContext(ctx, q, args...); err != nil {
+		if isUniqueIndexErr(err, "idx_projects_user_name_unique", "projects.user_id") {
+			return nil, ErrProjectNameExists
+		}
 		return nil, err
 	}
 	return GetProject(ctx, db, id, userID)

@@ -14,7 +14,7 @@
  * trail; deleting it removes the row entirely (already-granted memberships
  * keep working until they naturally expire).
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Copy, Plus, Trash2, RotateCcw, Ticket, Check, Download } from 'lucide-react'
 import { adminApi, ApiError } from '@/api'
@@ -72,6 +72,7 @@ export default function AdminRedeemCodes() {
   const [newOpen, setNewOpen] = useState(false)
   const [draft, setDraft] = useState<BatchDraft>(EMPTY_DRAFT)
   const [submitting, setSubmitting] = useState(false)
+  const submittingRef = useRef(false)
   const [confirmDelete, setConfirmDelete] = useState<ApiRedeemCode | null>(null)
   const [generated, setGenerated] = useState<ApiRedeemCode[] | null>(null)
   const [page, setPage] = useState(1)
@@ -114,6 +115,7 @@ export default function AdminRedeemCodes() {
   }
 
   async function submit() {
+    if (submittingRef.current) return
     if (!draft.group_id) {
       toast.error(t('admin:redeemCodes.errors.groupRequired'))
       return
@@ -126,6 +128,7 @@ export default function AdminRedeemCodes() {
       toast.error(t('admin:redeemCodes.errors.durationNegative'))
       return
     }
+    submittingRef.current = true
     setSubmitting(true)
     try {
       const expiresUnix = draft.expires_at ? Math.floor(new Date(draft.expires_at).getTime() / 1000) : 0
@@ -145,6 +148,7 @@ export default function AdminRedeemCodes() {
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
     } finally {
+      submittingRef.current = false
       setSubmitting(false)
     }
   }
@@ -296,7 +300,7 @@ export default function AdminRedeemCodes() {
       </section>
 
       {/* New-batch dialog */}
-      <Dialog open={newOpen} onOpenChange={setNewOpen}>
+      <Dialog open={newOpen} onOpenChange={(next) => !submittingRef.current && setNewOpen(next)}>
         <DialogContent size="md">
           <DialogHeader>
             <DialogTitle>{t('admin:redeemCodes.newTitle')}</DialogTitle>
@@ -389,7 +393,7 @@ export default function AdminRedeemCodes() {
           </DialogBody>
           {!generated && (
             <DialogFooter>
-              <Button variant="ghost" onClick={() => setNewOpen(false)}>
+              <Button variant="ghost" onClick={() => setNewOpen(false)} disabled={submitting}>
                 {t('common:actions.cancel')}
               </Button>
               <Button loading={submitting} onClick={() => void submit()}>
