@@ -304,77 +304,80 @@ func (s *Service) runPipeline(ctx context.Context, docID string, cache *parseCac
 	totalTokens := 0
 	seq := 0
 	points := []vector.Point{}
-	for _, p := range parents {
-		parentID := ""
-		if len(parents) > 1 || len(p.Children) > 1 {
-			parentID, err = store.CreateChunkFull(ctx, s.db, store.ChunkInsert{
-				DocumentID: docID, KBID: d.KBID, ConversationID: d.ConversationID,
-				Seq: seq, ChunkType: "parent", Content: p.Content, EmbeddingModel: emName,
-			})
+
+	// Embed ALL children in ONE call (which now runs its ≤10-text batches
+	// concurrently) instead of a serial em.Embed per parent — the old per-parent
+	// loop paid one serial round-trip per section, the dominant cost for a large
+	// document against a far endpoint.
+	var allVecs [][]float32
+	if !skipEmbed {
+		var allChildren []string
+		for _, p := range parents {
+			allChildren = append(allChildren, p.Children...)
+		}
+		if len(allChildren) > 0 {
+			allVecs, err = em.Embed(ctx, allChildren)
 			if err != nil {
 				return err
 			}
-			seq++
-		}
-		var vecs [][]float32
-		if !skipEmbed {
-			vecs, err = em.Embed(ctx, p.Children)
-			if err != nil {
-				return err
-			}
-		}
-		// Reconcile the collection dimension with what the model ACTUALLY
-		// returned. The configured dim is only a hint — some endpoints ignore
-		// it and emit their native width (e.g. configured 1536 but the model
-		// returns 1024). Writing wrong-dim vectors makes Qdrant reject the whole
-		// upsert ("Vector dimension error"). Trust the vectors over the config so
-		// ingest just works regardless of misconfiguration.
-		if len(vecs) > 0 && len(vecs[0]) > 0 && len(vecs[0]) != dim {
-			actual := len(vecs[0])
-			// Not an error: the model's native width differs from the configured
-			// one (e.g. DashScope text-embedding-v3 only emits 1024, can't do
-			// 1536). We already asked for the configured width via `dimensions`;
-			// the model ignored/capped it, so we adapt the collection to the real
-			// width and move on. To get 1536 you need a model that supports it.
-			s.logger.Printf("rag: embedding model emits %d-dim vectors (config requested %d, unsupported) — adapting to %d (doc %s)", actual, dim, actual, docID)
-			dim = actual
-			if d.KBID != "" {
-				if err := store.SetKBEmbeddingDim(ctx, s.db, d.KBID, actual); err != nil {
-					s.logger.Printf("rag: persist corrected embedding_dim for kb %s: %v", d.KBID, err)
+			// Reconcile the collection dimension with what the model ACTUALLY
+			// returned (some endpoints ignore the configured width and emit their
+			// native one; wrong-dim vectors make Qdrant reject the whole upsert).
+			if len(allVecs) > 0 && len(allVecs[0]) > 0 && len(allVecs[0]) != dim {
+				actual := len(allVecs[0])
+				s.logger.Printf("rag: embedding model emits %d-dim vectors (config requested %d, unsupported) — adapting to %d (doc %s)", actual, dim, actual, docID)
+				dim = actual
+				if d.KBID != "" {
+					if err := store.SetKBEmbeddingDim(ctx, s.db, d.KBID, actual); err != nil {
+						s.logger.Printf("rag: persist corrected embedding_dim for kb %s: %v", d.KBID, err)
+					}
 				}
 			}
 		}
-		for i, child := range p.Children {
+	}
+
+	// Build every chunk row (parents + children) with pre-generated ids so a child
+	// can reference its parent, then write them all in ONE transaction — one commit
+	// instead of one INSERT (and, on SQLite, one fsync) per chunk, which was the
+	// dominant cost when indexing a big file.
+	inserts := []store.ChunkInsert{}
+	vi := 0 // index into the flattened allVecs, in child order
+	for _, p := range parents {
+		parentID := ""
+		if len(parents) > 1 || len(p.Children) > 1 {
+			parentID = store.NewChunkID()
+			inserts = append(inserts, store.ChunkInsert{
+				ID: parentID, DocumentID: docID, KBID: d.KBID, ConversationID: d.ConversationID,
+				Seq: seq, ChunkType: "parent", Content: p.Content, EmbeddingModel: emName,
+			})
+			seq++
+		}
+		for _, child := range p.Children {
 			// Classify image_caption strictly: a child chunk must be EXACTLY one
-			// `![…](mineru://…)` marker (optionally preceded by the page-number
-			// HTML comment we emit in parser.go). Anything mixed with prose stays
-			// `chunkType=text` so we don't collapse the prose under an image_ref,
-			// and so a child that happens to embed two image markers isn't tagged
-			// against just the first one's filename.
+			// `![…](mineru://…)` marker (optionally preceded by the page-number HTML
+			// comment). Mixed-with-prose stays chunkType=text.
 			chunkType := "text"
 			imageRef := ""
 			if ref, ok := soleMineruImageMarker(child); ok {
 				chunkType = "image_caption"
 				imageRef = ref
 			}
-			// Keep the vector in Postgres too: it's the brute-force fallback when
-			// Qdrant is disabled, and cheap insurance otherwise.
 			var emb []byte
-			if !skipEmbed {
-				emb = packFloats(vecs[i])
+			var vec []float32
+			if !skipEmbed && vi < len(allVecs) {
+				vec = allVecs[vi]
+				emb = packFloats(vec) // keep the vector in Postgres too (brute-force fallback)
 			}
-			chunkID, err := store.CreateChunkFull(ctx, s.db, store.ChunkInsert{
-				DocumentID: docID, KBID: d.KBID, ConversationID: d.ConversationID,
+			childID := store.NewChunkID()
+			inserts = append(inserts, store.ChunkInsert{
+				ID: childID, DocumentID: docID, KBID: d.KBID, ConversationID: d.ConversationID,
 				Seq: seq, ParentID: parentID, ChunkType: chunkType, Content: child,
-				ImageRef:  imageRef,
-				Embedding: emb, EmbeddingModel: emName,
+				ImageRef: imageRef, Embedding: emb, EmbeddingModel: emName,
 			})
-			if err != nil {
-				s.logger.Printf("rag: insert chunk: %v", err)
-			} else if !skipEmbed && s.vec.Enabled() {
+			if vec != nil && s.vec.Enabled() {
 				points = append(points, vector.Point{
-					ChunkID: chunkID,
-					Vector:  vecs[i],
+					ChunkID: childID,
+					Vector:  vec,
 					Payload: vector.Payload{
 						DocumentID: docID, KBID: d.KBID, ConversationID: d.ConversationID,
 						ParentID: parentID, ChunkType: chunkType, Seq: seq,
@@ -382,10 +385,15 @@ func (s *Service) runPipeline(ctx context.Context, docID string, cache *parseCac
 					},
 				})
 			}
+			vi++
 			seq++
 			written++
 			totalTokens += estimateTokens(child)
 		}
+	}
+	// One transactional batch write for the whole document.
+	if err := store.CreateChunksBatch(ctx, s.db, inserts); err != nil {
+		return err
 	}
 	if s.vec.Enabled() && len(points) > 0 {
 		if err := s.vec.Upsert(ctx, dim, points); err != nil {
