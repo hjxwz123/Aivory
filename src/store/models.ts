@@ -9,6 +9,7 @@
 import { create } from 'zustand'
 import { modelsApi, ApiError } from '@/api'
 import type { ApiModel, ApiModelTag } from '@/api/types'
+import { useSettings } from '@/store/settings'
 
 interface ModelStore {
   models: ApiModel[]
@@ -25,6 +26,7 @@ interface ModelStore {
   error: string | null
 
   load: () => Promise<void>
+  setDefaultId: (id: string) => void
   getById: (id: string) => ApiModel | undefined
 }
 
@@ -49,11 +51,19 @@ export const useModels = create<ModelStore>((set, get) => ({
         modelsApi.tags().catch(() => []),
         modelsApi.listImage().catch(() => ({ models: [], default_id: '' })),
       ])
+      const userDefaultId = useSettings.getState().models.defaultModelId
+      const firstEnabled = resp.models.find((m) => m.enabled)
+      const globalDefault = resp.default_id
+        ? resp.models.find((m) => m.id === resp.default_id && m.enabled)
+        : undefined
+      const userDefault = userDefaultId
+        ? resp.models.find((m) => m.id === userDefaultId && m.enabled)
+        : undefined
       set({
         models: resp.models,
         imageModels: img.models,
         tags,
-        defaultId: resp.default_id || resp.models[0]?.id || '',
+        defaultId: userDefault?.id || globalDefault?.id || firstEnabled?.id || resp.models[0]?.id || '',
         verifyAvailable: Boolean(resp.verify_available),
         loaded: true,
         loading: false,
@@ -62,6 +72,13 @@ export const useModels = create<ModelStore>((set, get) => ({
       const msg = e instanceof ApiError ? e.message : 'Failed to load models'
       set({ error: msg, loading: false })
     }
+  },
+
+  setDefaultId(id) {
+    set((s) => {
+      const exists = s.models.some((m) => m.id === id && m.enabled)
+      return { defaultId: exists ? id : s.defaultId }
+    })
   },
 
   getById(id) {

@@ -166,6 +166,7 @@ var settingsAllowlist = map[string]bool{
 	"avatar_url":            true,
 	"language":              true,
 	"theme":                 true,
+	"chat_width":            true,
 	"sidebar_collapsed":     true,
 	"code_theme":            true,
 	"user_message_markdown": true,
