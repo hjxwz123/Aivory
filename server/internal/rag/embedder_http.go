@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"aurelia/server/internal/store"
@@ -86,23 +87,66 @@ type httpEmbedder struct {
 // safe universal default.
 const embedBatchMax = 10
 
-// Embed returns one vector per input text, batching upstream calls.
+// embedConcurrency caps how many upstream embedding batches run at once. The old
+// code did them strictly sequentially, so a 500-chunk doc paid 50 serial
+// round-trips (a minute+ against a far endpoint like DashScope). Running a few in
+// parallel cuts that ~Nx while staying gentle enough not to trip provider rate
+// limits (postEmbeddings already retries any 429 with backoff).
+const embedConcurrency = 5
+
+// Embed returns one vector per input text, splitting into ≤embedBatchMax upstream
+// requests and running them CONCURRENTLY (bounded, order-preserving).
 func (e *httpEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
-	if len(texts) > embedBatchMax {
-		out := make([][]float32, 0, len(texts))
-		for start := 0; start < len(texts); start += embedBatchMax {
-			end := start + embedBatchMax
-			if end > len(texts) {
-				end = len(texts)
-			}
-			part, err := e.Embed(ctx, texts[start:end])
-			if err != nil {
-				return nil, err
-			}
-			out = append(out, part...)
-		}
-		return out, nil
+	if len(texts) <= embedBatchMax {
+		return e.embedOne(ctx, texts)
 	}
+	out := make([][]float32, len(texts))
+	sem := make(chan struct{}, embedConcurrency)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var firstErr error
+	cctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	for start := 0; start < len(texts); start += embedBatchMax {
+		end := start + embedBatchMax
+		if end > len(texts) {
+			end = len(texts)
+		}
+		mu.Lock()
+		stop := firstErr != nil
+		mu.Unlock()
+		if stop {
+			break
+		}
+		sem <- struct{}{}
+		wg.Add(1)
+		go func(start, end int) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			part, err := e.embedOne(cctx, texts[start:end])
+			if err != nil {
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = err
+					cancel() // stop the other in-flight batches
+				}
+				mu.Unlock()
+				return
+			}
+			for i, v := range part {
+				out[start+i] = v
+			}
+		}(start, end)
+	}
+	wg.Wait()
+	if firstErr != nil {
+		return nil, firstErr
+	}
+	return out, nil
+}
+
+// embedOne POSTs a single batch (≤embedBatchMax texts) and returns its vectors.
+func (e *httpEmbedder) embedOne(ctx context.Context, texts []string) ([][]float32, error) {
 	base := strings.TrimRight(e.baseURL, "/")
 	if base == "" {
 		base = "https://api.openai.com"

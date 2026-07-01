@@ -174,6 +174,21 @@ func ConversationHasReadyDocs(ctx context.Context, db *sql.DB, convID string) bo
 	return n == 1
 }
 
+// ConversationDocReady reports whether a conversation-scoped document with this
+// filename has finished RAG ingestion (status=ready). Used to skip re-sending a
+// PDF as a slow native `document` block when its text is already retrievable via
+// RAG (§4.6 / §perf — native PDF processing is minutes for a large file).
+func ConversationDocReady(ctx context.Context, db *sql.DB, convID, filename string) bool {
+	if convID == "" || filename == "" {
+		return false
+	}
+	var n int
+	err := db.QueryRowContext(ctx,
+		`SELECT 1 FROM documents WHERE conversation_id=? AND filename=? AND status='ready' LIMIT 1`,
+		convID, filename).Scan(&n)
+	return err == nil && n == 1
+}
+
 // ConversationHasPendingDocs reports whether a conversation has a document still
 // being ingested (pending/parsing/embedding). Used to briefly wait for a
 // just-uploaded chat file to finish indexing before answering, so the very first
@@ -338,6 +353,9 @@ func CreateChunk(ctx context.Context, db *sql.DB, docID, kbID, convID string, se
 // (§4.11-C-2: parent rows carry section context, children carry vectors) and
 // image-caption chunks referencing the original image.
 type ChunkInsert struct {
+	// ID, when set, is used verbatim (so a batched insert can pre-resolve
+	// parent→child references); empty means "generate one".
+	ID             string
 	DocumentID     string
 	KBID           string
 	ConversationID string
@@ -385,6 +403,59 @@ func CreateChunkFull(ctx context.Context, db *sql.DB, c ChunkInsert) (string, er
 		`INSERT INTO chunks(id, document_id, kb_id, conversation_id, seq, parent_id, chunk_type, content, image_ref, meta, embedding, embedding_model) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', ?, ?)`,
 		id, c.DocumentID, kb, conv, c.Seq, parent, c.ChunkType, c.Content, imgRef, c.Embedding, c.EmbeddingModel)
 	return id, err
+}
+
+// NewChunkID returns a fresh chunk id, so callers can pre-resolve parent→child
+// references before a batched insert.
+func NewChunkID() string { return genID("ch") }
+
+// CreateChunksBatch inserts many chunks in ONE transaction — a single commit
+// instead of one autonomous INSERT (and, on SQLite, one fsync) per chunk, which
+// is the dominant cost when indexing a large document. Each chunk's ID must be
+// pre-set (NewChunkID) and parents must precede the children that reference them.
+// Rolls back on the first error.
+func CreateChunksBatch(ctx context.Context, db *sql.DB, chunks []ChunkInsert) error {
+	if len(chunks) == 0 {
+		return nil
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	stmt, err := tx.PrepareContext(ctx,
+		`INSERT INTO chunks(id, document_id, kb_id, conversation_id, seq, parent_id, chunk_type, content, image_ref, meta, embedding, embedding_model) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', ?, ?)`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	for _, c := range chunks {
+		id := c.ID
+		if id == "" {
+			id = genID("ch")
+		}
+		var kb, conv, parent, imgRef any
+		if c.KBID != "" {
+			kb = c.KBID
+		}
+		if c.ConversationID != "" {
+			conv = c.ConversationID
+		}
+		if c.ParentID != "" {
+			parent = c.ParentID
+		}
+		if c.ImageRef != "" {
+			imgRef = c.ImageRef
+		}
+		ct := c.ChunkType
+		if ct == "" {
+			ct = "text"
+		}
+		if _, err := stmt.ExecContext(ctx, id, c.DocumentID, kb, conv, c.Seq, parent, ct, sanitizeChunkText(c.Content), imgRef, c.Embedding, c.EmbeddingModel); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // GetChunkContent returns one chunk's content — used for small-to-big parent

@@ -237,6 +237,11 @@
     "close": "Close outline",
     "fit": "Fit view"
   },
+  "minimap": {
+    "label": "Conversation map",
+    "jumpTo": "Jump to this question",
+    "untitled": "Question {{index}}"
+  },
   "files": {
     "title": "Files in this chat",
     "tooltip": "Files",

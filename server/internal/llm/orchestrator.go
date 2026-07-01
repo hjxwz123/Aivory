@@ -744,7 +744,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	//     via the sandbox upload path instead.
 	//     §4.6 vision gating: non-vision models receive a textual stub for
 	//     image attachments instead of silently dropping them.
-	o.resolveAttachments(ctx, conv.UserID, uHist, model, onEvent)
+	o.resolveAttachments(ctx, conv.UserID, conv.ID, uHist, model, onEvent)
 
 	// 9d. Conversation-scoped data files staged into the sandbox
 	//     (/workspace/uploads). Listing them in the system prompt lets the model
@@ -1451,7 +1451,7 @@ func (o *Orchestrator) waitForPendingDocs(ctx context.Context, convID string) {
 // user sees "this model can't read images, pick a vision-capable one". PDFs
 // are still attached because non-vision models can typically read PDF text
 // (Anthropic accepts document blocks even on cheaper non-vision tiers).
-func (o *Orchestrator) resolveAttachments(ctx context.Context, userID string, hist []UnifiedMessage, model *store.Model, onEvent func(SseEvent)) {
+func (o *Orchestrator) resolveAttachments(ctx context.Context, userID, convID string, hist []UnifiedMessage, model *store.Model, onEvent func(SseEvent)) {
 	visionCapable := model == nil || model.Vision
 	notedNonVision := false
 	for i := range hist {
@@ -1474,6 +1474,14 @@ func (o *Orchestrator) resolveAttachments(ctx context.Context, userID string, hi
 			}
 			f, err := store.GetFile(ctx, o.db, a.ID, userID)
 			if err != nil || f.SizeBytes > maxInlineAttachment {
+				continue
+			}
+			// A RAG-ingested PDF already has its text injected via retrieval. Sending
+			// it AGAIN as a native `document` block makes the model server-side
+			// OCR/parse every page (minutes for a large PDF) for no added text — so
+			// skip the native block once ingestion is ready (§4.6 / §perf). Non-ingested
+			// PDFs (RAG off / ingest failed) still go inline so the model can read them.
+			if a.Kind == "pdf" && store.ConversationDocReady(ctx, o.db, convID, f.Filename) {
 				continue
 			}
 			data, err := os.ReadFile(f.StoragePath)
