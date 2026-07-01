@@ -31,7 +31,12 @@ async function _dk(jwt: string): Promise<CryptoKey> {
 
 async function _sign(jwt: string, ts: number, nonce: string, path: string): Promise<string> {
   const key = await _dk(jwt)
-  const msg = new TextEncoder().encode(`${ts}\x00${nonce}\x00${path}`)
+  // The server verifies over r.URL.Path — the path WITHOUT the query string
+  // (middleware.go). Strip any `?query` here or a request like `?mode=tree` signs
+  // a different message than the server checks and gets a 403 "invalid request
+  // signature" (this silently broke the conversation-tree / paginated fetches).
+  const signPath = path.split('?')[0]
+  const msg = new TextEncoder().encode(`${ts}\x00${nonce}\x00${signPath}`)
   const sig = await crypto.subtle.sign('HMAC', key, msg)
   return btoa(String.fromCharCode(...new Uint8Array(sig)))
 }
