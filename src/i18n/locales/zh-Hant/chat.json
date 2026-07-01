@@ -237,6 +237,11 @@
     "close": "關閉概述",
     "fit": "適應視圖"
   },
+  "minimap": {
+    "label": "對話地圖",
+    "jumpTo": "跳轉到該提問",
+    "untitled": "第 {{index}} 個提問"
+  },
   "files": {
     "title": "此對話的檔案",
     "tooltip": "檔案",

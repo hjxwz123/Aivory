@@ -38,6 +38,7 @@ import type { ApiShareInfo } from '@/api/types'
 import { toast } from '@/hooks/use-toast'
 import { useCopy } from '@/hooks/use-clipboard'
 import { ConversationOutline } from '@/components/chat/conversation-outline'
+import { ConversationMinimap } from '@/components/chat/conversation-minimap'
 import { accentClasses } from '@/lib/project-helpers'
 import { cn, truncate } from '@/lib/utils'
 import type { Attachment } from '@/types/chat'
@@ -424,24 +425,28 @@ export default function ChatThread() {
         </header>
       )}
 
-      {/* Messages */}
-      <div
-        ref={scrollRef}
-        onScroll={handleScroll}
-        data-scroll-root
-        className="flex-1 min-h-0 overflow-y-auto scrollbar-thin"
-      >
-        {/* First load with nothing yet in the store (slow network / long thread):
-            show a spinner instead of a blank thread. Once any message is present
-            (incl. optimistic/streaming) we hand off to MessageList. */}
-        {conversation.messages.length === 0 && loadStatus === 'loading' ? (
-          <div className="flex h-full items-center justify-center text-[var(--color-fg-subtle)]">
-            <Loader2 size={22} className="animate-spin" aria-hidden />
-            <span className="sr-only">{t('common.loading', { ns: 'common', defaultValue: 'Loading…' })}</span>
-          </div>
-        ) : (
-          <MessageList conversation={conversation} scrollToMessageId={jumpTo} jumpKey={jumpKey} />
-        )}
+      {/* Messages — wrapped in a relative box so the conversation minimap rail
+          (§ minimap) can anchor to the right edge of the thread viewport. */}
+      <div className="relative flex flex-1 min-h-0 flex-col">
+        <div
+          ref={scrollRef}
+          onScroll={handleScroll}
+          data-scroll-root
+          className="flex-1 min-h-0 overflow-y-auto scrollbar-thin"
+        >
+          {/* First load with nothing yet in the store (slow network / long thread):
+              show a spinner instead of a blank thread. Once any message is present
+              (incl. optimistic/streaming) we hand off to MessageList. */}
+          {conversation.messages.length === 0 && loadStatus === 'loading' ? (
+            <div className="flex h-full items-center justify-center text-[var(--color-fg-subtle)]">
+              <Loader2 size={22} className="animate-spin" aria-hidden />
+              <span className="sr-only">{t('common.loading', { ns: 'common', defaultValue: 'Loading…' })}</span>
+            </div>
+          ) : (
+            <MessageList conversation={conversation} scrollToMessageId={jumpTo} jumpKey={jumpKey} />
+          )}
+        </div>
+        <ConversationMinimap conversation={conversation} scrollContainerRef={scrollRef} />
       </div>
       <InlineThreadLayer conversationId={conversation.id} scrollRef={scrollRef} />
 

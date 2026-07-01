@@ -237,6 +237,11 @@
     "close": "Fermer le plan",
     "fit": "Ajuster la vue"
   },
+  "minimap": {
+    "label": "Carte de conversation",
+    "jumpTo": "Aller à cette question",
+    "untitled": "Question {{index}}"
+  },
   "files": {
     "title": "Fichiers de cette discussion",
     "tooltip": "Fichiers",

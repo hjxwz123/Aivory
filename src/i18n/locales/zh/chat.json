@@ -237,6 +237,11 @@
     "close": "关闭概述",
     "fit": "适应视图"
   },
+  "minimap": {
+    "label": "对话地图",
+    "jumpTo": "跳转到该提问",
+    "untitled": "第 {{index}} 个提问"
+  },
   "files": {
     "title": "本对话的文件",
     "tooltip": "文件",

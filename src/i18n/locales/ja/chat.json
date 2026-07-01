@@ -237,6 +237,11 @@
     "close": "アウトラインを閉じる",
     "fit": "全体表示"
   },
+  "minimap": {
+    "label": "会話マップ",
+    "jumpTo": "この質問に移動",
+    "untitled": "質問 {{index}}"
+  },
   "files": {
     "title": "この会話のファイル",
     "tooltip": "ファイル",
