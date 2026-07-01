@@ -82,6 +82,21 @@ func GetKB(ctx context.Context, db *sql.DB, id, userID string) (*KnowledgeBase, 
 	return &kb, nil
 }
 
+// GetKBByName returns a user's KB by case-insensitive, trimmed name.
+func GetKBByName(ctx context.Context, db *sql.DB, userID, name string) (*KnowledgeBase, error) {
+	row := db.QueryRowContext(ctx,
+		`SELECT id, user_id, name, description, embedding_model_id, embedding_dim, COALESCE(project_id, ''), created_at FROM knowledge_bases WHERE user_id=? AND lower(trim(name))=lower(trim(?)) LIMIT 1`,
+		userID, name)
+	kb, err := scanKB(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &kb, nil
+}
+
 func scanKB(s scanner) (KnowledgeBase, error) {
 	var kb KnowledgeBase
 	if err := s.Scan(&kb.ID, &kb.UserID, &kb.Name, &kb.Description, &kb.EmbeddingModelID, &kb.EmbeddingDim, &kb.ProjectID, &kb.CreatedAt); err != nil {
@@ -95,6 +110,8 @@ func CreateKB(ctx context.Context, db *sql.DB, kb KnowledgeBase) (*KnowledgeBase
 	if kb.ID == "" {
 		kb.ID = genID("kb")
 	}
+	kb.Name = strings.TrimSpace(kb.Name)
+	kb.Description = strings.TrimSpace(kb.Description)
 	var pid any
 	if kb.ProjectID == "" {
 		pid = nil
@@ -105,6 +122,9 @@ func CreateKB(ctx context.Context, db *sql.DB, kb KnowledgeBase) (*KnowledgeBase
 		`INSERT INTO knowledge_bases(id, user_id, name, description, embedding_model_id, embedding_dim, project_id, created_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
 		kb.ID, kb.UserID, kb.Name, kb.Description, kb.EmbeddingModelID, kb.EmbeddingDim, pid, time.Now().Unix())
 	if err != nil {
+		if isUniqueIndexErr(err, "idx_kbs_user_name_unique", "knowledge_bases.user_id") {
+			return nil, ErrKBNameExists
+		}
 		return nil, err
 	}
 	return GetKB(ctx, db, kb.ID, kb.UserID)

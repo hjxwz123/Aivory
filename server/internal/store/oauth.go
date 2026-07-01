@@ -80,16 +80,41 @@ func GetOAuthProvider(ctx context.Context, db *sql.DB, id string) (*OAuthProvide
 	return &p, nil
 }
 
+// GetOAuthProviderByName returns a provider by case-insensitive, trimmed name.
+func GetOAuthProviderByName(ctx context.Context, db *sql.DB, name string) (*OAuthProvider, error) {
+	row := db.QueryRowContext(ctx, `SELECT `+oauthCols+` FROM oauth_providers WHERE lower(trim(name))=lower(trim(?)) LIMIT 1`, name)
+	p, err := scanOAuthProvider(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &p, nil
+}
+
 // CreateOAuthProvider inserts a row and returns it (secret stripped).
 func CreateOAuthProvider(ctx context.Context, db *sql.DB, p OAuthProvider) (*OAuthProvider, error) {
 	if p.ID == "" {
 		p.ID = genID("oa")
 	}
+	p.Name = strings.TrimSpace(p.Name)
+	p.Icon = strings.TrimSpace(p.Icon)
+	p.ClientID = strings.TrimSpace(p.ClientID)
+	p.AuthURL = strings.TrimSpace(p.AuthURL)
+	p.TokenURL = strings.TrimSpace(p.TokenURL)
+	p.UserInfoURL = strings.TrimSpace(p.UserInfoURL)
+	p.Scopes = strings.TrimSpace(p.Scopes)
+	p.TeamID = strings.TrimSpace(p.TeamID)
+	p.KeyID = strings.TrimSpace(p.KeyID)
 	if _, err := db.ExecContext(ctx, `INSERT INTO oauth_providers(`+oauthCols+`)
 		VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		p.ID, p.Kind, p.Name, p.Icon, p.ClientID, p.ClientSecret,
 		p.AuthURL, p.TokenURL, p.UserInfoURL, p.Scopes, p.TeamID, p.KeyID,
 		boolInt(p.Enabled), p.SortOrder, time.Now().Unix()); err != nil {
+		if isUniqueIndexErr(err, "idx_oauth_providers_name_unique", "oauth_providers.name") {
+			return nil, ErrOAuthProviderNameExists
+		}
 		return nil, err
 	}
 	out, err := GetOAuthProvider(ctx, db, p.ID)
@@ -126,34 +151,34 @@ func UpdateOAuthProvider(ctx context.Context, db *sql.DB, id string, patch OAuth
 		set("kind", *patch.Kind)
 	}
 	if patch.Name != nil {
-		set("name", *patch.Name)
+		set("name", strings.TrimSpace(*patch.Name))
 	}
 	if patch.Icon != nil {
-		set("icon", *patch.Icon)
+		set("icon", strings.TrimSpace(*patch.Icon))
 	}
 	if patch.ClientID != nil {
-		set("client_id", *patch.ClientID)
+		set("client_id", strings.TrimSpace(*patch.ClientID))
 	}
 	if patch.ClientSecret != nil && *patch.ClientSecret != "" {
 		set("client_secret", *patch.ClientSecret)
 	}
 	if patch.AuthURL != nil {
-		set("auth_url", *patch.AuthURL)
+		set("auth_url", strings.TrimSpace(*patch.AuthURL))
 	}
 	if patch.TokenURL != nil {
-		set("token_url", *patch.TokenURL)
+		set("token_url", strings.TrimSpace(*patch.TokenURL))
 	}
 	if patch.UserInfoURL != nil {
-		set("userinfo_url", *patch.UserInfoURL)
+		set("userinfo_url", strings.TrimSpace(*patch.UserInfoURL))
 	}
 	if patch.Scopes != nil {
-		set("scopes", *patch.Scopes)
+		set("scopes", strings.TrimSpace(*patch.Scopes))
 	}
 	if patch.TeamID != nil {
-		set("team_id", *patch.TeamID)
+		set("team_id", strings.TrimSpace(*patch.TeamID))
 	}
 	if patch.KeyID != nil {
-		set("key_id", *patch.KeyID)
+		set("key_id", strings.TrimSpace(*patch.KeyID))
 	}
 	if patch.Enabled != nil {
 		set("enabled", boolInt(*patch.Enabled))
@@ -170,6 +195,9 @@ func UpdateOAuthProvider(ctx context.Context, db *sql.DB, id string, patch OAuth
 	if _, err := db.ExecContext(ctx,
 		fmt.Sprintf("UPDATE oauth_providers SET %s WHERE id=?", strings.Join(parts, ", ")),
 		args...); err != nil {
+		if isUniqueIndexErr(err, "idx_oauth_providers_name_unique", "oauth_providers.name") {
+			return nil, ErrOAuthProviderNameExists
+		}
 		return nil, err
 	}
 	out, err := GetOAuthProvider(ctx, db, id)

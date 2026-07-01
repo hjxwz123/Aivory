@@ -801,43 +801,86 @@ func DeleteRound(ctx context.Context, db *sql.DB, convID, userID, msgID string) 
 		return "", ErrNotFound
 	}
 
-	// Resolve the round's user message U (and its parent P). Clicking an answer
-	// walks up to its question; clicking the question uses it directly.
-	uID, uParent := m.ID, m.ParentID
-	uCreatedAt := m.CreatedAt
-	roundIsUser := m.Role == "user"
-	if !roundIsUser && m.ParentID != "" {
-		if pu, perr := GetMessage(ctx, db, m.ParentID); perr == nil && pu.Role == "user" {
-			uID, uParent, roundIsUser = pu.ID, pu.ParentID, true
-			uCreatedAt = pu.CreatedAt
-		}
-	}
-
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return "", err
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	deletable := []string{uID}
-	if roundIsUser {
-		// Children of U are the answer variants. Re-parent each variant's
-		// continuation onto P, then delete the variants (and U below).
-		answers, err := childIDsTx(ctx, tx, convID, uID)
-		if err != nil {
-			return "", err
+	var (
+		deletable     []string
+		leafBase      string // subtree root the active leaf is re-derived from
+		pruneAnchorTs int64  // earliest created_at among the deleted messages
+	)
+
+	// Resolve the parent WITHIN the tx — a GetMessage on `db` here would grab a
+	// second pool connection and deadlock against this tx's SQLite write lock
+	// (single-writer). One read serves both the branch check and the round walk-up.
+	var pParent, pRole string
+	var pCreated int64
+	pFound := false
+	if m.ParentID != "" {
+		switch perr := tx.QueryRowContext(ctx, `SELECT COALESCE(parent_id,''), role, created_at FROM messages WHERE id=? AND conversation_id=?`, m.ParentID, convID).Scan(&pParent, &pRole, &pCreated); {
+		case perr == nil:
+			pFound = true
+		case errors.Is(perr, sql.ErrNoRows):
+			// parent already gone — treat as a root
+		default:
+			return "", perr
 		}
-		for _, aid := range answers {
-			if err := reparentChildrenTx(ctx, tx, convID, aid, uParent); err != nil {
+	}
+
+	// A regenerated answer that has SIBLING answers (the `< n/m >` branch picker
+	// under the same question) is deleted as ONE branch: remove only this answer
+	// and everything downstream on it, never the shared question or the other
+	// branches (§4.15 data-loss fix — deleting one branch must not wipe the round).
+	branch := false
+	if m.Role != "user" && pFound && pRole == "user" {
+		sibs, serr := childIDsTx(ctx, tx, convID, m.ParentID)
+		if serr != nil {
+			return "", serr
+		}
+		if len(sibs) > 1 {
+			branch = true
+			leafBase = m.ParentID // re-point onto a surviving sibling / the question
+			pruneAnchorTs = m.CreatedAt
+			if deletable, err = subtreeIDsTx(ctx, tx, convID, m.ID); err != nil {
 				return "", err
 			}
-			deletable = append(deletable, aid)
 		}
-	} else {
-		// Degenerate (a parentless non-user node): re-parent its own children up
-		// and delete just it.
-		if err := reparentChildrenTx(ctx, tx, convID, uID, uParent); err != nil {
-			return "", err
+	}
+
+	if !branch {
+		// Whole-round delete. Resolve the round's user message U (and its parent P):
+		// clicking an answer walks up to its question; clicking the question uses it
+		// directly. Remove U + all its answer variants, re-parenting each variant's
+		// continuation onto P so the surviving thread stays connected.
+		uID, uParent := m.ID, m.ParentID
+		uCreatedAt := m.CreatedAt
+		roundIsUser := m.Role == "user"
+		if !roundIsUser && pFound && pRole == "user" {
+			uID, uParent, roundIsUser = m.ParentID, pParent, true
+			uCreatedAt = pCreated
+		}
+		leafBase = uParent
+		pruneAnchorTs = uCreatedAt
+		deletable = []string{uID}
+		if roundIsUser {
+			answers, aerr := childIDsTx(ctx, tx, convID, uID)
+			if aerr != nil {
+				return "", aerr
+			}
+			for _, aid := range answers {
+				if err := reparentChildrenTx(ctx, tx, convID, aid, uParent); err != nil {
+					return "", err
+				}
+				deletable = append(deletable, aid)
+			}
+		} else {
+			// Degenerate (a parentless non-user node): re-parent its own children up.
+			if err := reparentChildrenTx(ctx, tx, convID, uID, uParent); err != nil {
+				return "", err
+			}
 		}
 	}
 	for _, id := range deletable {
@@ -856,7 +899,7 @@ func DeleteRound(ctx context.Context, db *sql.DB, convID, userID, msgID string) 
 	for _, id := range deletable {
 		deletedSet[id] = true
 	}
-	if err := pruneSummaryBlocksForDeleteTx(ctx, tx, convID, deletedSet, uCreatedAt); err != nil {
+	if err := pruneSummaryBlocksForDeleteTx(ctx, tx, convID, deletedSet, pruneAnchorTs); err != nil {
 		return "", err
 	}
 
@@ -865,7 +908,7 @@ func DeleteRound(ctx context.Context, db *sql.DB, convID, userID, msgID string) 
 	_ = tx.QueryRowContext(ctx, `SELECT COALESCE(active_leaf_id,'') FROM conversations WHERE id=?`, convID).Scan(&curLeaf)
 	newLeaf := curLeaf
 	if curLeaf == "" || !messageExistsTx(ctx, tx, convID, curLeaf) {
-		newLeaf, err = deepestLeafFromTx(ctx, tx, convID, uParent)
+		newLeaf, err = deepestLeafFromTx(ctx, tx, convID, leafBase)
 		if err != nil {
 			return "", err
 		}
@@ -877,6 +920,23 @@ func DeleteRound(ctx context.Context, db *sql.DB, convID, userID, msgID string) 
 		return "", err
 	}
 	return newLeaf, nil
+}
+
+// subtreeIDsTx returns rootID and every descendant id (BFS over parent_id) within
+// the tx — the full branch removed when deleting a single answer variant.
+func subtreeIDsTx(ctx context.Context, tx *sql.Tx, convID, rootID string) ([]string, error) {
+	out := []string{rootID}
+	for queue := []string{rootID}; len(queue) > 0; {
+		id := queue[0]
+		queue = queue[1:]
+		kids, err := childIDsTx(ctx, tx, convID, id)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, kids...)
+		queue = append(queue, kids...)
+	}
+	return out, nil
 }
 
 // msgCreatedAtTx returns a surviving message's created_at within the tx.

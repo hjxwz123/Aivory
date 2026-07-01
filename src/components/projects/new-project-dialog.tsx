@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import type { ProjectAccent } from '@/types/project'
@@ -42,6 +42,8 @@ export function NewProjectDialog({ open, onOpenChange, onCreated }: NewProjectDi
   const [instructions, setInstructions] = useState('')
   const [accent, setAccent] = useState<ProjectAccent>(DEFAULT_ACCENT)
   const [error, setError] = useState<string | null>(null)
+  const [creating, setCreating] = useState(false)
+  const creatingRef = useRef(false)
 
   // Reset every time the dialog re-opens so a stale draft never reappears.
   useEffect(() => {
@@ -55,34 +57,44 @@ export function NewProjectDialog({ open, onOpenChange, onCreated }: NewProjectDi
   }, [open])
 
   async function submit() {
+    if (creatingRef.current) return
     const trimmed = name.trim()
     if (!trimmed) {
       setError(t('projects:create.nameLabel'))
       return
     }
-    const project = await create({
-      name: trimmed,
-      description: description.trim() || undefined,
-      instructions: instructions.trim(),
-      accent,
-    })
-    if (!project) {
-      const err = useProjects.getState().error
-      setError(
-        err === 'project_limit_reached'
-          ? t('projects:create.limitReached', { defaultValue: 'You’ve reached your plan’s project limit.' })
-          : t('common:somethingWentWrong', { defaultValue: 'Something went wrong' }),
-      )
-      return
+    creatingRef.current = true
+    setCreating(true)
+    try {
+      const project = await create({
+        name: trimmed,
+        description: description.trim() || undefined,
+        instructions: instructions.trim(),
+        accent,
+      })
+      if (!project) {
+        const err = useProjects.getState().error
+        setError(
+          err === 'project_limit_reached'
+            ? t('projects:create.limitReached', { defaultValue: 'You’ve reached your plan’s project limit.' })
+            : err === 'name_exists'
+              ? t('projects:create.nameExists', { defaultValue: 'A project with this name already exists.' })
+              : t('common:somethingWentWrong', { defaultValue: 'Something went wrong' }),
+        )
+        return
+      }
+      onOpenChange(false)
+      toast.success(t('projects:create.created'))
+      if (onCreated) onCreated(project.id)
+      else navigate(`/projects/${project.id}`)
+    } finally {
+      creatingRef.current = false
+      setCreating(false)
     }
-    onOpenChange(false)
-    toast.success(t('projects:create.created'))
-    if (onCreated) onCreated(project.id)
-    else navigate(`/projects/${project.id}`)
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={(next) => !creatingRef.current && onOpenChange(next)}>
       <DialogContent size="lg">
         <DialogHeader>
           <DialogTitle>{t('projects:create.title')}</DialogTitle>
@@ -162,10 +174,10 @@ export function NewProjectDialog({ open, onOpenChange, onCreated }: NewProjectDi
           </Field>
         </DialogBody>
         <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>
+          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={creating}>
             {t('projects:create.cancel')}
           </Button>
-          <Button onClick={() => void submit()}>{t('projects:create.submit')}</Button>
+          <Button onClick={() => void submit()} loading={creating}>{t('projects:create.submit')}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

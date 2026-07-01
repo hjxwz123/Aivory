@@ -31,12 +31,24 @@ func createUserGroupAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errInvalidInput)
 		return
 	}
-	if strings.TrimSpace(g.Name) == "" {
+	g.Name = strings.TrimSpace(g.Name)
+	if g.Name == "" {
 		writeError(w, 400, errors.New("name required"))
+		return
+	}
+	if existing, err := store.GetUserGroupByName(r.Context(), d.DB, g.Name); err == nil && existing != nil {
+		writeError(w, 409, store.ErrUserGroupNameExists)
+		return
+	} else if err != nil && !errors.Is(err, store.ErrNotFound) {
+		writeError(w, 500, err)
 		return
 	}
 	created, err := store.CreateUserGroup(r.Context(), d.DB, g)
 	if err != nil {
+		if errors.Is(err, store.ErrUserGroupNameExists) {
+			writeError(w, 409, err)
+			return
+		}
 		writeError(w, 500, err)
 		return
 	}
@@ -65,8 +77,27 @@ func updateUserGroupAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errInvalidInput)
 		return
 	}
+	if p.Name != nil {
+		name := strings.TrimSpace(*p.Name)
+		p.Name = &name
+		if name == "" {
+			writeError(w, 400, errors.New("name required"))
+			return
+		}
+		if existing, err := store.GetUserGroupByName(r.Context(), d.DB, name); err == nil && existing != nil && existing.ID != id {
+			writeError(w, 409, store.ErrUserGroupNameExists)
+			return
+		} else if err != nil && !errors.Is(err, store.ErrNotFound) {
+			writeError(w, 500, err)
+			return
+		}
+	}
 	upd, err := store.UpdateUserGroup(r.Context(), d.DB, id, p)
 	if err != nil {
+		if errors.Is(err, store.ErrUserGroupNameExists) {
+			writeError(w, 409, err)
+			return
+		}
 		writeError(w, 404, errNotFound)
 		return
 	}

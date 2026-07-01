@@ -19,7 +19,8 @@
     "pickModel": "選擇一個模型",
     "create": "建立",
     "created": "知識庫已建立",
-    "nameRequired": "請填寫名稱"
+    "nameRequired": "請填寫名稱",
+    "nameExists": "已存在同名知識庫。"
   },
   "detail": {
     "uploadButton": "上傳文件",

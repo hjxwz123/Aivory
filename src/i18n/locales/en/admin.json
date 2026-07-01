@@ -12,7 +12,8 @@
     "dragHandle": "Drag to reorder",
     "moveUp": "Move up",
     "moveDown": "Move down",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "nameExists": "A record with this name already exists."
   },
   "icon": {
     "upload": "Upload",
@@ -173,7 +174,8 @@
     "importDone": "Filled from SKILL.md",
     "importFailed": "Couldn't parse — check the SKILL.md format.",
     "errors": {
-      "missingFields": "Name, description and instructions are required."
+      "missingFields": "Name, description and instructions are required.",
+      "nameExists": "A skill with this name already exists."
     },
     "disabledTag": "disabled",
     "manage": "Manage skills"

@@ -64,11 +64,25 @@ func GetUserGroup(ctx context.Context, db *sql.DB, id string) (*UserGroup, error
 	return &g, nil
 }
 
+// GetUserGroupByName returns a group by case-insensitive, trimmed name.
+func GetUserGroupByName(ctx context.Context, db *sql.DB, name string) (*UserGroup, error) {
+	g, err := scanUserGroup(db.QueryRowContext(ctx, `SELECT `+userGroupCols+` FROM user_groups WHERE lower(trim(name))=lower(trim(?)) LIMIT 1`, name))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &g, nil
+}
+
 // CreateUserGroup inserts a non-default group.
 func CreateUserGroup(ctx context.Context, db *sql.DB, g UserGroup) (*UserGroup, error) {
 	if g.ID == "" {
 		g.ID = genID("ug")
 	}
+	g.Name = strings.TrimSpace(g.Name)
+	g.Description = strings.TrimSpace(g.Description)
 	if len(g.Features) == 0 {
 		g.Features = json.RawMessage("[]")
 	}
@@ -78,6 +92,9 @@ func CreateUserGroup(ctx context.Context, db *sql.DB, g UserGroup) (*UserGroup, 
 		 VALUES(?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)`,
 		g.ID, g.Name, g.Description, string(g.Features), g.PriceUSD, g.PriceCNY, g.SortOrder, g.MaxProjects, g.MaxKBs, g.CreditAllowance, g.CreditPeriodSeconds, now, now)
 	if err != nil {
+		if isUniqueIndexErr(err, "idx_user_groups_name_unique", "user_groups.name") {
+			return nil, ErrUserGroupNameExists
+		}
 		return nil, err
 	}
 	return GetUserGroup(ctx, db, g.ID)
@@ -120,11 +137,11 @@ func UpdateUserGroup(ctx context.Context, db *sql.DB, id string, p UserGroupPatc
 	args := []any{}
 	if p.Name != nil {
 		parts = append(parts, "name=?")
-		args = append(args, *p.Name)
+		args = append(args, strings.TrimSpace(*p.Name))
 	}
 	if p.Description != nil {
 		parts = append(parts, "description=?")
-		args = append(args, *p.Description)
+		args = append(args, strings.TrimSpace(*p.Description))
 	}
 	if p.Features != nil {
 		parts = append(parts, "features=?")
@@ -164,6 +181,9 @@ func UpdateUserGroup(ctx context.Context, db *sql.DB, id string, p UserGroupPatc
 	parts = append(parts, "updated_at=?")
 	args = append(args, time.Now().Unix(), id)
 	if _, err := db.ExecContext(ctx, fmt.Sprintf("UPDATE user_groups SET %s WHERE id=?", strings.Join(parts, ", ")), args...); err != nil {
+		if isUniqueIndexErr(err, "idx_user_groups_name_unique", "user_groups.name") {
+			return nil, ErrUserGroupNameExists
+		}
 		return nil, err
 	}
 	return GetUserGroup(ctx, db, id)

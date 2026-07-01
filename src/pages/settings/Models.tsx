@@ -16,12 +16,21 @@ import {
 } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
 import { toast } from '@/hooks/use-toast'
+import { persistUserSettings } from '@/lib/user-settings'
+import type { ModelSettings } from '@/types/settings'
+
+const RESPONSE_LENGTHS: readonly ModelSettings['responseLength'][] = ['concise', 'balanced', 'detailed']
+
+function isResponseLength(value: unknown): value is ModelSettings['responseLength'] {
+  return typeof value === 'string' && (RESPONSE_LENGTHS as readonly string[]).includes(value)
+}
 
 export default function Models() {
   const models = useSettings((s) => s.models)
   const setModels = useSettings((s) => s.setModels)
   const list = useModels((s) => s.models)
   const load = useModels((s) => s.load)
+  const setGlobalDefaultModel = useModels((s) => s.setDefaultId)
   const { t } = useTranslation(['settings', 'common'])
 
   // Image-generation model pre-selection (§4.12-B). Persists to user settings.
@@ -38,13 +47,17 @@ export default function Models() {
         if (typeof s.persona_custom === 'string' && s.persona_custom) {
           patch.customInstructions = s.persona_custom
         }
-        if (typeof s.response_length === 'string' && s.response_length) {
-          patch.responseLength = s.response_length as typeof models.responseLength
+        if (isResponseLength(s.response_length)) {
+          patch.responseLength = s.response_length
+        }
+        if (typeof s.default_model_id === 'string') {
+          patch.defaultModelId = s.default_model_id
+          setGlobalDefaultModel(s.default_model_id)
         }
         if (Object.keys(patch).length > 0) setModels(patch)
       })
       .catch(() => {})
-  }, [list.length, load])
+  }, [list.length, load, setGlobalDefaultModel, setModels])
 
   const onPickImageModel = (id: string) => {
     setImageModelId(id)
@@ -59,9 +72,16 @@ export default function Models() {
   }
 
   const onPickDefaultModel = (id: string) => {
+    const prev = models.defaultModelId
     setModels({ defaultModelId: id })
-    // TODO: add backend support for persisting the default model preference.
-    // Currently stored in localStorage only via the settings store.
+    setGlobalDefaultModel(id)
+    void persistUserSettings({ default_model_id: id })
+      .then(() => toast.success(t('common:actions.save')))
+      .catch((e) => {
+        setModels({ defaultModelId: prev })
+        setGlobalDefaultModel(prev)
+        toast.error(t('common:actions.failed', { defaultValue: 'Failed to save' }), e instanceof Error ? e.message : undefined)
+      })
   }
 
   return (

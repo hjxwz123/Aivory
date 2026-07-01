@@ -12,7 +12,8 @@
     "dragHandle": "ドラッグして並べ替え",
     "moveUp": "上に移動",
     "moveDown": "下に移動",
-    "cancel": "キャンセル"
+    "cancel": "キャンセル",
+    "nameExists": "同じ名前のレコードが既に存在します。"
   },
   "icon": {
     "upload": "アップロード",
@@ -173,7 +174,8 @@
     "importDone": "SKILL.mdから入力しました",
     "importFailed": "解析失敗—SKILL.md の形式を確認。",
     "errors": {
-      "missingFields": "名前、説明、手順は必須です。"
+      "missingFields": "名前、説明、手順は必須です。",
+      "nameExists": "同じ名前のスキルが既に存在します。"
     },
     "disabledTag": "無効",
     "manage": "スキルを管理"

@@ -76,7 +76,7 @@
       "sessionsBody": "You're signed in here. We'd list other devices."
     },
     "danger": "Danger zone",
-    "dangerBody": "Permanent actions. We won't ask twice.",
+    "dangerBody": "Permanent actions.",
     "dangerRows": {
       "delete": "Delete account",
       "deleteBody": "Removes your conversations, memories, and account. Irreversible.",

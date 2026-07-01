@@ -76,7 +76,7 @@
       "sessionsBody": "你目前在此裝置登入。"
     },
     "danger": "危險操作",
-    "dangerBody": "永久性的操作，不會再次確認。",
+    "dangerBody": "永久性的操作。",
     "dangerRows": {
       "delete": "刪除賬號",
       "deleteBody": "會同時刪除你的會話、記憶與賬號，不可恢復。",

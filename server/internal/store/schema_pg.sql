@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS user_groups (
   created_at  BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint),
   updated_at  BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_groups_name_unique ON user_groups(lower(trim(name)));
 
 -- NOTE: model_group_quotas REFERENCES models(id) — it is created AFTER the models
 -- table below. Postgres rejects a forward FK reference in a single-batch Exec, so
@@ -98,6 +99,7 @@ CREATE TABLE IF NOT EXISTS channels (
   sort_order  INTEGER NOT NULL DEFAULT 0,
   updated_at  BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_channels_name_unique ON channels(lower(trim(name)));
 
 CREATE TABLE IF NOT EXISTS models (
   id                TEXT PRIMARY KEY,
@@ -131,6 +133,7 @@ CREATE TABLE IF NOT EXISTS models (
 
 CREATE INDEX IF NOT EXISTS idx_models_channel ON models(channel_id);
 CREATE INDEX IF NOT EXISTS idx_models_kind ON models(kind, enabled);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_models_channel_request_unique ON models(channel_id, lower(trim(request_id)));
 
 -- Per-(model, group) free quota. Declared AFTER models because it has a FK to
 -- models(id) and Postgres resolves FK targets eagerly within the schema batch
@@ -153,6 +156,7 @@ CREATE TABLE IF NOT EXISTS model_tags (
   sort_order INTEGER NOT NULL DEFAULT 0,
   created_at BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_model_tags_name_unique ON model_tags(lower(trim(name)));
 
 CREATE TABLE IF NOT EXISTS skills (
   id           TEXT PRIMARY KEY,
@@ -165,6 +169,7 @@ CREATE TABLE IF NOT EXISTS skills (
   sort_order   INTEGER NOT NULL DEFAULT 0,
   updated_at   BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_skills_name_unique ON skills(lower(trim(name)));
 
 CREATE TABLE IF NOT EXISTS model_skills (
   model_id TEXT NOT NULL REFERENCES models(id) ON DELETE CASCADE,
@@ -184,6 +189,7 @@ CREATE TABLE IF NOT EXISTS knowledge_bases (
 );
 
 CREATE INDEX IF NOT EXISTS idx_kbs_user ON knowledge_bases(user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_kbs_user_name_unique ON knowledge_bases(user_id, lower(trim(name)));
 
 CREATE TABLE IF NOT EXISTS projects (
   id               TEXT PRIMARY KEY,
@@ -200,6 +206,7 @@ CREATE TABLE IF NOT EXISTS projects (
   updated_at       BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
 );
 CREATE INDEX IF NOT EXISTS idx_projects_user ON projects(user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_user_name_unique ON projects(user_id, lower(trim(name)));
 
 CREATE TABLE IF NOT EXISTS conversations (
   id              TEXT PRIMARY KEY,
@@ -403,6 +410,7 @@ CREATE TABLE IF NOT EXISTS oauth_providers (
   sort_order    INTEGER NOT NULL DEFAULT 0,
   updated_at    BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_oauth_providers_name_unique ON oauth_providers(lower(trim(name)));
 
 CREATE TABLE IF NOT EXISTS oauth_identities (
   provider_id TEXT NOT NULL,
@@ -426,3 +434,4 @@ CREATE TABLE IF NOT EXISTS image_styles (
   updated_at        BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
 );
 CREATE INDEX IF NOT EXISTS idx_image_styles_sort ON image_styles(sort_order);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_image_styles_name_unique ON image_styles(lower(trim(name)));

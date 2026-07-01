@@ -4,7 +4,7 @@
  * design.md §2.3-B. The api_key column is never re-displayed; admins can leave
  * the field blank when editing to keep the existing secret.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Plus, Pencil, Trash2 } from 'lucide-react'
 import { adminApi, ApiError } from '@/api'
@@ -39,6 +39,8 @@ export default function AdminChannels() {
     { open: false, draft: { type: 'openai', api_format: 'chat', enabled: true } },
   )
   const [confirmDelete, setConfirmDelete] = useState<ApiChannel | null>(null)
+  const [saving, setSaving] = useState(false)
+  const savingRef = useRef(false)
 
   async function load() {
     setLoading(true)
@@ -65,11 +67,14 @@ export default function AdminChannels() {
   }
 
   async function submit() {
+    if (savingRef.current) return
     const d = editor.draft
     if (!d.name) {
       toast.error(t('admin:channels.errors.nameRequired'))
       return
     }
+    savingRef.current = true
+    setSaving(true)
     try {
       if (editor.row) {
         await adminApi.updateChannel(editor.row.id, d)
@@ -81,7 +86,14 @@ export default function AdminChannels() {
       setEditor({ ...editor, open: false })
       await load()
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
+      if (e instanceof ApiError && e.status === 409) {
+        toast.error(t('admin:common.nameExists', { defaultValue: 'A record with this name already exists.' }))
+      } else {
+        toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
+      }
+    } finally {
+      savingRef.current = false
+      setSaving(false)
     }
   }
 
@@ -159,7 +171,7 @@ export default function AdminChannels() {
         )}
       </section>
 
-      <Dialog open={editor.open} onOpenChange={(o) => setEditor({ ...editor, open: o })}>
+      <Dialog open={editor.open} onOpenChange={(o) => !savingRef.current && setEditor({ ...editor, open: o })}>
         <DialogContent size="md">
           <DialogHeader>
             <DialogTitle>{editor.row ? t('admin:channels.editorTitle') : t('admin:channels.newTitle')}</DialogTitle>
@@ -254,10 +266,10 @@ export default function AdminChannels() {
             </div>
           </DialogBody>
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setEditor({ ...editor, open: false })}>
+            <Button variant="ghost" disabled={saving} onClick={() => setEditor({ ...editor, open: false })}>
               {t('common:actions.cancel')}
             </Button>
-            <Button onClick={() => void submit()}>{t('common:actions.save')}</Button>
+            <Button loading={saving} onClick={() => void submit()}>{t('common:actions.save')}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

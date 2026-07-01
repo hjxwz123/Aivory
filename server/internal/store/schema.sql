@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS user_groups (
   created_at  INTEGER NOT NULL DEFAULT (strftime('%s','now')),
   updated_at  INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_groups_name_unique ON user_groups(lower(trim(name)));
 
 -- Per-model, per-group access + usage cap. A model with NO rows here is open to
 -- everyone (unlimited). Once a model has any row, only listed groups may use it;
@@ -115,6 +116,7 @@ CREATE TABLE IF NOT EXISTS channels (
   sort_order  INTEGER NOT NULL DEFAULT 0,
   updated_at  INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_channels_name_unique ON channels(lower(trim(name)));
 
 CREATE TABLE IF NOT EXISTS models (
   id                TEXT PRIMARY KEY,
@@ -148,6 +150,7 @@ CREATE TABLE IF NOT EXISTS models (
 
 CREATE INDEX IF NOT EXISTS idx_models_channel ON models(channel_id);
 CREATE INDEX IF NOT EXISTS idx_models_kind ON models(kind, enabled);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_models_channel_request_unique ON models(channel_id, lower(trim(request_id)));
 
 -- Model tags (§ model tags). Admin-managed labels; each model stores the tag ids
 -- it carries in models.tags (a JSON array), and the picker filters by them.
@@ -157,6 +160,7 @@ CREATE TABLE IF NOT EXISTS model_tags (
   sort_order INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_model_tags_name_unique ON model_tags(lower(trim(name)));
 
 CREATE TABLE IF NOT EXISTS skills (
   id           TEXT PRIMARY KEY,
@@ -169,6 +173,7 @@ CREATE TABLE IF NOT EXISTS skills (
   sort_order   INTEGER NOT NULL DEFAULT 0,
   updated_at   INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_skills_name_unique ON skills(lower(trim(name)));
 
 CREATE TABLE IF NOT EXISTS model_skills (
   model_id TEXT NOT NULL REFERENCES models(id) ON DELETE CASCADE,
@@ -188,6 +193,7 @@ CREATE TABLE IF NOT EXISTS knowledge_bases (
 );
 
 CREATE INDEX IF NOT EXISTS idx_kbs_user ON knowledge_bases(user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_kbs_user_name_unique ON knowledge_bases(user_id, lower(trim(name)));
 
 CREATE TABLE IF NOT EXISTS projects (
   id               TEXT PRIMARY KEY,
@@ -204,6 +210,7 @@ CREATE TABLE IF NOT EXISTS projects (
   updated_at       INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 );
 CREATE INDEX IF NOT EXISTS idx_projects_user ON projects(user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_user_name_unique ON projects(user_id, lower(trim(name)));
 
 CREATE TABLE IF NOT EXISTS conversations (
   id              TEXT PRIMARY KEY,
@@ -426,6 +433,7 @@ CREATE TABLE IF NOT EXISTS oauth_providers (
   sort_order    INTEGER NOT NULL DEFAULT 0,
   updated_at    INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_oauth_providers_name_unique ON oauth_providers(lower(trim(name)));
 
 -- Links a provider identity (provider row + stable subject) to a local user.
 -- Keyed on (provider_id, subject) so the link survives email changes — re-login
@@ -453,3 +461,4 @@ CREATE TABLE IF NOT EXISTS image_styles (
   updated_at        INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 );
 CREATE INDEX IF NOT EXISTS idx_image_styles_sort ON image_styles(sort_order);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_image_styles_name_unique ON image_styles(lower(trim(name)));

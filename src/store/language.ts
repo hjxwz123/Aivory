@@ -1,25 +1,47 @@
 import { create } from 'zustand'
 import i18n, { SUPPORTED_LANGUAGES, type LanguageCode } from '@/i18n'
+import { persistUserSettings } from '@/lib/user-settings'
 
 const STORAGE_KEY = 'aurelia.lang'
 
+function normalizeLanguage(code: unknown): LanguageCode | null {
+  if (typeof code !== 'string' || !code) return null
+  const codes = SUPPORTED_LANGUAGES.map((l) => l.code) as readonly string[]
+  if (codes.includes(code)) return code as LanguageCode
+  const lower = code.toLowerCase().replace('_', '-')
+  if (lower === 'zh-tw' || lower === 'zh-hk' || lower === 'zh-mo' || lower === 'zh-hant') return 'zh-Hant'
+  if (lower === 'zh-cn' || lower === 'zh-sg' || lower === 'zh-hans') return 'zh'
+  const base = lower.split('-')[0]
+  const found = codes.find((c) => c.toLowerCase().split('-')[0] === base)
+  return (found as LanguageCode) ?? null
+}
+
 function detect(): LanguageCode {
   if (typeof window === 'undefined') return 'en'
-  const codes = SUPPORTED_LANGUAGES.map((l) => l.code) as readonly string[]
-  const stored = localStorage.getItem(STORAGE_KEY)
-  if (stored && codes.includes(stored)) return stored as LanguageCode
-  // i18next-browser-languagedetector already wrote to localStorage; read what it
-  // chose. Prefer an exact code (e.g. 'zh-Hant'), else fall back to the base
-  // language (e.g. 'fr-CA' → 'fr', generic 'zh' → 'zh').
-  const detected = i18n.language || 'en'
-  if (codes.includes(detected)) return detected as LanguageCode
-  const base = detected.toLowerCase().split('-')[0]
-  const found = codes.find((c) => c.toLowerCase().split('-')[0] === base)
-  return (found as LanguageCode) ?? 'en'
+  const stored = normalizeLanguage(localStorage.getItem(STORAGE_KEY))
+  if (stored) return stored
+  const detected = normalizeLanguage(i18n.language)
+  if (detected) return detected
+  for (const code of navigator.languages ?? []) {
+    const normalized = normalizeLanguage(code)
+    if (normalized) return normalized
+  }
+  return normalizeLanguage(navigator.language) ?? 'en'
+}
+
+function applyLanguage(code: LanguageCode) {
+  try {
+    localStorage.setItem(STORAGE_KEY, code)
+  } catch {
+    /* noop */
+  }
+  void i18n.changeLanguage(code)
+  if (typeof document !== 'undefined') document.documentElement.lang = code
 }
 
 interface LanguageStore {
   lang: LanguageCode
+  applyLang: (code: LanguageCode) => void
   setLang: (code: LanguageCode) => void
   cycle: () => void
 }
@@ -34,29 +56,27 @@ export const useLanguage = create<LanguageStore>((set) => {
 
   return {
     lang: initial,
-    setLang(code) {
-      try {
-        localStorage.setItem(STORAGE_KEY, code)
-      } catch {
-        /* noop */
-      }
-      void i18n.changeLanguage(code)
-      if (typeof document !== 'undefined') document.documentElement.lang = code
+    applyLang(code) {
+      applyLanguage(code)
       set({ lang: code })
+    },
+    setLang(code) {
+      applyLanguage(code)
+      set({ lang: code })
+      void persistUserSettings({ language: code }).catch(() => {})
     },
     cycle() {
       const codes = SUPPORTED_LANGUAGES.map((l) => l.code)
       set((s) => {
         const next = codes[(codes.indexOf(s.lang) + 1) % codes.length]
-        try {
-          localStorage.setItem(STORAGE_KEY, next)
-        } catch {
-          /* noop */
-        }
-        void i18n.changeLanguage(next)
-        if (typeof document !== 'undefined') document.documentElement.lang = next
+        applyLanguage(next)
+        void persistUserSettings({ language: next }).catch(() => {})
         return { lang: next }
       })
     },
   }
 })
+
+export function toSupportedLanguage(code: unknown): LanguageCode | null {
+  return normalizeLanguage(code)
+}

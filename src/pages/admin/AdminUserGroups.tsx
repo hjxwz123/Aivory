@@ -4,7 +4,7 @@
  * Per-model usage caps live on the model editor; this page also holds the global
  * "quota exceeded / upgrade" prompt shown when a user hits a model's limit.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Plus, Pencil, Trash2 } from 'lucide-react'
 import { adminApi, ApiError } from '@/api'
@@ -64,6 +64,8 @@ export default function AdminUserGroups() {
   const [groupBuyUrl, setGroupBuyUrl] = useState('')
   const [creditBuyUrl, setCreditBuyUrl] = useState('')
   const [savingMsg, setSavingMsg] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const savingRef = useRef(false)
 
   async function load() {
     setLoading(true)
@@ -119,6 +121,7 @@ export default function AdminUserGroups() {
   }
 
   async function submit() {
+    if (savingRef.current) return
     const d = editor.draft
     if (!d.name?.trim()) {
       toast.error(t('admin:groups.errors.nameRequired'))
@@ -143,6 +146,8 @@ export default function AdminUserGroups() {
       credit_allowance: Math.max(0, Number(d.credit_allowance) || 0),
       credit_period_seconds: periodSeconds,
     }
+    savingRef.current = true
+    setSaving(true)
     try {
       if (editor.row) {
         await adminApi.updateUserGroup(editor.row.id, body)
@@ -154,7 +159,14 @@ export default function AdminUserGroups() {
       setEditor({ ...editor, open: false })
       await load()
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
+      if (e instanceof ApiError && e.status === 409) {
+        toast.error(t('admin:common.nameExists', { defaultValue: 'A record with this name already exists.' }))
+      } else {
+        toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
+      }
+    } finally {
+      savingRef.current = false
+      setSaving(false)
     }
   }
 
@@ -302,7 +314,7 @@ export default function AdminUserGroups() {
         </div>
       </section>
 
-      <Dialog open={editor.open} onOpenChange={(o) => setEditor({ ...editor, open: o })}>
+      <Dialog open={editor.open} onOpenChange={(o) => !savingRef.current && setEditor({ ...editor, open: o })}>
         <DialogContent size="md">
           <DialogHeader>
             <DialogTitle>{editor.row ? t('admin:groups.editorTitle') : t('admin:groups.newTitle')}</DialogTitle>
@@ -433,10 +445,10 @@ export default function AdminUserGroups() {
             </div>
           </DialogBody>
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setEditor({ ...editor, open: false })}>
+            <Button variant="ghost" disabled={saving} onClick={() => setEditor({ ...editor, open: false })}>
               {t('common:actions.cancel')}
             </Button>
-            <Button onClick={() => void submit()}>{t('common:actions.save')}</Button>
+            <Button loading={saving} onClick={() => void submit()}>{t('common:actions.save')}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

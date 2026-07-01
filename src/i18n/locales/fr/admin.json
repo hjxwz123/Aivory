@@ -12,7 +12,8 @@
     "dragHandle": "Faire glisser pour réordonner",
     "moveUp": "Monter",
     "moveDown": "Descendre",
-    "cancel": "Annuler"
+    "cancel": "Annuler",
+    "nameExists": "Un enregistrement portant ce nom existe déjà."
   },
   "icon": {
     "upload": "Téléverser",
@@ -173,7 +174,8 @@
     "importDone": "Rempli depuis SKILL.md",
     "importFailed": "Échec d'analyse — vérifiez le format SKILL.md.",
     "errors": {
-      "missingFields": "Le nom, la description et les instructions sont requis."
+      "missingFields": "Le nom, la description et les instructions sont requis.",
+      "nameExists": "Une compétence portant ce nom existe déjà."
     },
     "disabledTag": "désactivée",
     "manage": "Gérer les compétences"

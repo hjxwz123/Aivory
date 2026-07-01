@@ -109,7 +109,8 @@
     "accentLabel": "Accent",
     "submit": "Create project",
     "cancel": "Cancel",
-    "created": "Project created"
+    "created": "Project created",
+    "nameExists": "A project with this name already exists."
   },
   "accent": {
     "violet": "Violet",

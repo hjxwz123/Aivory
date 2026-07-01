@@ -76,7 +76,7 @@
       "sessionsBody": "你目前在此设备登录。"
     },
     "danger": "危险操作",
-    "dangerBody": "永久性的操作，不会再次确认。",
+    "dangerBody": "永久性的操作。",
     "dangerRows": {
       "delete": "删除账号",
       "deleteBody": "会同时删除你的会话、记忆与账号，不可恢复。",

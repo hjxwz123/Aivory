@@ -58,6 +58,13 @@ func createImageStyleAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errors.New("name required"))
 		return
 	}
+	if existing, err := store.GetImageStyleByName(r.Context(), d.DB, req.Name); err == nil && existing != nil {
+		writeError(w, 409, store.ErrImageStyleNameExists)
+		return
+	} else if err != nil && !errors.Is(err, store.ErrNotFound) {
+		writeError(w, 500, err)
+		return
+	}
 	st, err := store.CreateImageStyle(r.Context(), d.DB, store.ImageStyle{
 		Name:            req.Name,
 		ExampleImageURL: strings.TrimSpace(req.ExampleImageURL),
@@ -66,6 +73,10 @@ func createImageStyleAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		SortOrder:       req.SortOrder,
 	})
 	if err != nil {
+		if errors.Is(err, store.ErrImageStyleNameExists) {
+			writeError(w, 409, err)
+			return
+		}
 		writeError(w, 500, err)
 		return
 	}
@@ -93,6 +104,13 @@ func updateImageStyleAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errors.New("name required"))
 		return
 	}
+	if existing, err := store.GetImageStyleByName(r.Context(), d.DB, req.Name); err == nil && existing != nil && existing.ID != id {
+		writeError(w, 409, store.ErrImageStyleNameExists)
+		return
+	} else if err != nil && !errors.Is(err, store.ErrNotFound) {
+		writeError(w, 500, err)
+		return
+	}
 	cur.Name = req.Name
 	cur.ExampleImageURL = strings.TrimSpace(req.ExampleImageURL)
 	cur.HiddenPrompt = req.HiddenPrompt
@@ -100,6 +118,10 @@ func updateImageStyleAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	cur.SortOrder = req.SortOrder
 	st, err := store.UpdateImageStyle(r.Context(), d.DB, *cur)
 	if err != nil {
+		if errors.Is(err, store.ErrImageStyleNameExists) {
+			writeError(w, 409, err)
+			return
+		}
 		writeError(w, 500, err)
 		return
 	}

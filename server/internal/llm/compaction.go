@@ -232,7 +232,8 @@ const (
 // done by MaybeCompact, which the orchestrator runs ASYNCHRONOUSLY after the turn
 // so it never stalls first token. Returns the verbatim tail, the path summary
 // blocks to render, and an action telling the caller whether to advance the
-// summary now (inline, only on a large cold-start backlog) or in the background.
+// summary now (inline, on a large cold-start backlog OR a real context well past
+// the trigger) or in the background.
 func PlanCompaction(db *sql.DB, conv *store.Conversation, history []store.Message, injectedOverhead int) ([]store.Message, []SummaryBlock, int) {
 	enabled := true
 	if raw, err := store.GetSetting(db, "compaction_enabled"); err == nil {
@@ -250,14 +251,25 @@ func PlanCompaction(db *sql.DB, conv *store.Conversation, history []store.Messag
 	}
 	keep := history[frontier:]
 	tail := len(history) - frontier
-	ctxTok, _ := contextTokens(history, injectedOverhead)
+	ctxTok, exact := contextTokens(history, injectedOverhead)
 	overflow := tail > keepRounds*2 || (tokenTrigger > 0 && ctxTok > tokenTrigger)
+	// A token-heavy but message-LIGHT overflow (a few huge code/plot turns) is not
+	// caught by the message-count backlog gate below, so it would always defer to
+	// the async pass and make THIS turn pay the full un-summarised prompt — the
+	// "compaction ran (14770→268) but the very next turn was still 52k" report.
+	// When the REAL context blows well past the trigger (>1.25×), summarise inline
+	// so the SAME turn is bounded. Gated on `exact` (a real provider count) so we
+	// never add a task-model round-trip to first token on a shaky estimate; once a
+	// turn is trimmed its ctxTok drops back under the bar and later turns go async
+	// again, so this fires only on the actual spikes.
+	bigTokenOverflow := exact && tokenTrigger > 0 && ctxTok > tokenTrigger*5/4
 	switch {
 	case !overflow:
 		return keep, pathExisting, compactNone
-	case tail > keepRounds*2*3:
-		// Large un-summarised backlog (e.g. a freshly-imported long conversation):
-		// summarise inline this turn so the prompt stays bounded.
+	case tail > keepRounds*2*3 || bigTokenOverflow:
+		// Large un-summarised backlog (a freshly-imported long conversation) OR a
+		// real context well past the trigger: summarise inline this turn so the
+		// prompt stays bounded instead of paying one full-price spike first.
 		return keep, pathExisting, compactInline
 	default:
 		return keep, pathExisting, compactAsync

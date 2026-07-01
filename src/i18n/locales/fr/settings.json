@@ -76,7 +76,7 @@
       "sessionsBody": "Vous êtes connecté ici. Nous listerions les autres appareils."
     },
     "danger": "Zone sensible",
-    "dangerBody": "Actions permanentes. Nous ne demanderons pas deux fois.",
+    "dangerBody": "Actions permanentes.",
     "dangerRows": {
       "delete": "Supprimer le compte",
       "deleteBody": "Supprime vos conversations, vos mémoires et votre compte. Irréversible.",
