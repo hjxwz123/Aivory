@@ -166,16 +166,53 @@ export function ConversationOutline({ conversation, scrollContainerRef, onClose 
     [conversation.messages],
   )
   const [treeMsgs, setTreeMsgs] = useState<Message[] | null>(null)
+  // Bumped to force a tree refetch when the fetched tree looks INCOMPLETE (see
+  // the self-heal effect below) — e.g. a fetch that raced ahead of a
+  // just-persisted retry sibling, or one that failed/returned partial data.
+  const [refetchNonce, setRefetchNonce] = useState(0)
+  const retriesRef = useRef(0)
+  // A structural change (new/switched branch) earns a fresh self-heal budget.
+  useEffect(() => {
+    retriesRef.current = 0
+  }, [convId, treeSig])
   useEffect(() => {
     let alive = true
     conversationsApi
       .messages(convId, 'tree')
       .then((rows) => alive && setTreeMsgs(rows.map(toLocalMessage)))
-      .catch(() => alive && setTreeMsgs(null))
+      // Keep the last good tree on a failed/partial fetch — nulling it would
+      // collapse the view to the single active-path branch (§ branch tree).
+      .catch(() => {})
     return () => {
       alive = false
     }
-  }, [convId, treeSig])
+  }, [convId, treeSig, refetchNonce])
+
+  // The active path always ends at the current leaf, and its `< n/m >` switcher
+  // knows the TRUE sibling count (DB-backed branch_count) even when a fresh retry
+  // sibling hasn't landed in the tree fetch yet. If any settled active-path node
+  // declares more same-parent siblings than the fetched tree holds, the tree is
+  // stale/incomplete — refetch (a few times, backing off) so the sibling branches
+  // actually render instead of a lone spine (the reported bug). Keyed on treeMsgs
+  // (a fresh array each fetch) so a still-incomplete refetch schedules the next
+  // retry rather than stalling on an unchanged boolean.
+  useEffect(() => {
+    if (retriesRef.current >= 4) return
+    const present = new Map<string, number>()
+    for (const m of treeMsgs ?? []) {
+      const key = `${m.parentId ?? ''}|${m.role}`
+      present.set(key, (present.get(key) ?? 0) + 1)
+    }
+    const incomplete = conversation.messages.some((m) => {
+      if (m.streaming || !m.branchCount || m.branchCount <= 1) return false
+      const key = `${m.parentId ?? ''}|${m.role}`
+      return (present.get(key) ?? 0) < m.branchCount
+    })
+    if (!incomplete) return
+    retriesRef.current += 1
+    const timer = setTimeout(() => setRefetchNonce((n) => n + 1), 200 * retriesRef.current)
+    return () => clearTimeout(timer)
+  }, [treeMsgs, conversation.messages])
 
   const activeIds = useMemo(() => new Set(conversation.messages.map((m) => m.id)), [conversation.messages])
   const activeLeafId = useMemo(() => {
@@ -183,6 +220,9 @@ export function ConversationOutline({ conversation, scrollContainerRef, onClose 
     return path.length ? path[path.length - 1].id : undefined
   }, [conversation.messages])
 
+  // The fetched tree carries the full parent_id edges (all branches); fall back
+  // to the active path only until the first fetch resolves. The self-heal above
+  // keeps `treeMsgs` complete once it exists, so this no longer strands siblings.
   const { nodes, edges, width, height } = useMemo(
     () => layoutTree(buildMessageTree(treeMsgs ?? conversation.messages), activeIds),
     [treeMsgs, conversation.messages, activeIds],
