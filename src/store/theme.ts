@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { ThemePref } from '@/types/settings'
+import { persistUserSettings } from '@/lib/user-settings'
 
 const STORAGE_KEY = 'aurelia.theme'
 
@@ -26,6 +27,7 @@ function applyTheme(resolved: 'light' | 'dark') {
 interface ThemeStore {
   pref: ThemePref
   resolved: 'light' | 'dark'
+  applyPref: (pref: ThemePref) => void
   setPref: (pref: ThemePref) => void
   /** Subscribe to system theme changes when pref === 'system'. */
   syncSystem: () => () => void
@@ -39,11 +41,15 @@ export const useTheme = create<ThemeStore>((set, get) => {
   return {
     pref: initialPref,
     resolved: initialResolved,
-    setPref(pref) {
+    applyPref(pref) {
       localStorage.setItem(STORAGE_KEY, pref)
       const resolved = resolveTheme(pref)
       applyTheme(resolved)
       set({ pref, resolved })
+    },
+    setPref(pref) {
+      get().applyPref(pref)
+      void persistUserSettings({ theme: pref }).catch(() => {})
     },
     syncSystem() {
       if (typeof window === 'undefined') return () => {}
