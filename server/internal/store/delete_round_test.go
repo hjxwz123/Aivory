@@ -155,6 +155,50 @@ func TestDeleteBranchKeepsSiblings(t *testing.T) {
 	assertGone(t, db, "Q")
 }
 
+// TestDeleteRoundWorkspaceMember locks in the §workspaces fix: a non-creator
+// member may delete their OWN round in a shared conversation. Before the fix,
+// DeleteRound hard-required caller==conversation.user_id, so a member who
+// passed deleteMessageHandler's per-round author check still got ErrNotFound
+// here — a regression the handler's own check couldn't catch on its own.
+func TestDeleteRoundWorkspaceMember(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(filepath.Join(t.TempDir(), "drw.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer db.Close()
+	if err := Migrate(db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	exec(t, db, `INSERT INTO users(id,email,password_hash,role) VALUES('owner','o@b.c','h','user')`)
+	exec(t, db, `INSERT INTO users(id,email,password_hash,role) VALUES('member','m@b.c','h','user')`)
+	exec(t, db, `INSERT INTO users(id,email,password_hash,role) VALUES('outsider','x@b.c','h','user')`)
+	exec(t, db, `INSERT INTO workspaces(id,name,owner_id,invite_token) VALUES('ws1','WS','owner','tok1')`)
+	exec(t, db, `INSERT INTO workspace_members(workspace_id,user_id,role) VALUES('ws1','owner','owner')`)
+	exec(t, db, `INSERT INTO workspace_members(workspace_id,user_id,role) VALUES('ws1','member','member')`)
+	exec(t, db, `INSERT INTO conversations(id,user_id,title,workspace_id) VALUES('c1','owner','T','ws1')`)
+
+	// member sends U1, gets an assistant reply A1.
+	insMsg(t, db, "U1", "", "user", 1000)
+	insMsg(t, db, "A1", "U1", "assistant", 1001)
+	exec(t, db, `UPDATE conversations SET active_leaf_id='A1' WHERE id='c1'`)
+
+	// A workspace member (not the conversation creator) deletes their own round.
+	if _, err := DeleteRound(ctx, db, "c1", "member", "U1"); err != nil {
+		t.Fatalf("member deleting own round: want ok, got %v", err)
+	}
+	assertGone(t, db, "U1")
+	assertGone(t, db, "A1")
+
+	// A user with no workspace membership at all is still rejected.
+	insMsg(t, db, "U2", "", "user", 2000)
+	exec(t, db, `UPDATE conversations SET active_leaf_id='U2' WHERE id='c1'`)
+	if _, err := DeleteRound(ctx, db, "c1", "outsider", "U2"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("non-member: want ErrNotFound, got %v", err)
+	}
+	assertParent(t, db, "U2", "") // untouched
+}
+
 // --- helpers ---------------------------------------------------------------
 
 func exec(t *testing.T, db *sql.DB, q string, args ...any) {

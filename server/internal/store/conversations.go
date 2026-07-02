@@ -848,15 +848,26 @@ func LatestAssistantInSubtree(ctx context.Context, db *sql.DB, convID, msgID str
 //
 // Returns the conversation's (possibly new) active leaf id.
 func DeleteRound(ctx context.Context, db *sql.DB, convID, userID, msgID string) (string, error) {
-	var owner string
-	if err := db.QueryRowContext(ctx, `SELECT user_id FROM conversations WHERE id=?`, convID).Scan(&owner); err != nil {
+	var owner, workspaceID string
+	if err := db.QueryRowContext(ctx, `SELECT user_id, COALESCE(workspace_id,'') FROM conversations WHERE id=?`, convID).Scan(&owner, &workspaceID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", ErrNotFound
 		}
 		return "", err
 	}
+	// §workspaces: the creator may always delete. A non-creator member may only
+	// reach this point for a round the caller (deleteMessageHandler) already
+	// verified belongs to THEM — this check just admits workspace participants;
+	// it does not re-derive per-round authorship.
 	if owner != userID {
-		return "", ErrNotFound
+		if workspaceID == "" {
+			return "", ErrNotFound
+		}
+		if role, err := IsWorkspaceMember(ctx, db, workspaceID, userID); err != nil {
+			return "", err
+		} else if role == "" {
+			return "", ErrNotFound
+		}
 	}
 	m, err := GetMessage(ctx, db, msgID)
 	if err != nil {

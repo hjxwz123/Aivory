@@ -194,6 +194,43 @@ _terminating: set[str] = set()
 _exec_slots = threading.BoundedSemaphore(MAX_CONCURRENT_EXECS) if MAX_CONCURRENT_EXECS > 0 else None
 _create_slots = threading.BoundedSemaphore(MAX_CONCURRENT_CREATES) if MAX_CONCURRENT_CREATES > 0 else None
 
+# Set once IMAGE is confirmed present locally, so a fresh pull is attempted at
+# most once per process lifetime (never re-checked afterwards — this only
+# guards the COLD-CACHE case, not `:latest` freshness; PULL_ON_START / an
+# operator-run `docker pull` handle keeping it current).
+_image_ready = threading.Event()
+_image_pull_lock = threading.Lock()
+
+
+def _ensure_image_present() -> None:
+    """`docker run` at session-create is budgeted 60s on the assumption it never
+    pulls (see L5 above — that lock's comment literally says "docker run -d
+    returns quickly"). On a cold host (fresh deploy, pruned cache, evicted
+    layers) an IMPLICIT pull inside that call routinely exceeds 60s for a
+    Python-runtime image, so every session create fails with a generic 500
+    until the image happens to land. Pull it here, OUTSIDE _create_count_lock,
+    with the same generous budget PULL_ON_START uses, so a cold cache surfaces
+    one clear 503 instead of repeated `docker run` timeouts.
+    """
+    if _image_ready.is_set():
+        return
+    with _image_pull_lock:
+        if _image_ready.is_set():
+            return
+        cp = _docker(["image", "inspect", IMAGE], timeout=10)
+        if cp.returncode == 0:
+            _image_ready.set()
+            return
+        print(f"[sandbox] {IMAGE} not cached locally — pulling before session create")
+        cp = _docker(["pull", IMAGE], timeout=600)
+        if cp.returncode != 0:
+            raise HTTPException(
+                status_code=503,
+                detail=f"sandbox image not available yet: {cp.stderr.decode(errors='replace')[:200]}",
+            )
+        _image_ready.set()
+
+
 app = FastAPI(title="Aurelia Sandbox Sidecar", version="1.0")
 
 
@@ -623,6 +660,7 @@ def create_session(body: Optional[CreateBody] = Body(default=None)):
     # The Go side forwards a `storage` block here (or {}); a bare POST is fine.
     storage = body.storage if body is not None else None
     with _slot(_create_slots, "session create"):
+        _ensure_image_present()
         session_id = uuid.uuid4().hex
         name = _container(session_id)
         args = [
@@ -1044,7 +1082,17 @@ def healthz():
     ok = cp.returncode == 0
     return JSONResponse(
         status_code=200 if ok else 503,
-        content={"ok": ok, "docker": cp.stdout.decode(errors="replace").strip(), "image": IMAGE},
+        content={
+            "ok": ok,
+            "docker": cp.stdout.decode(errors="replace").strip(),
+            "image": IMAGE,
+            # False here (with docker otherwise healthy) means the runtime image
+            # isn't cached yet — the NEXT /sessions call will pull it inline
+            # (_ensure_image_present) rather than failing outright, but it's
+            # useful to see this from monitoring instead of only from a slow
+            # first session create.
+            "image_ready": _image_ready.is_set(),
+        },
     )
 
 
