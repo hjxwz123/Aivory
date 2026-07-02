@@ -44,7 +44,16 @@ export function CitationChip({ citation, className }: CitationChipProps) {
           {citation.index}
         </button>
       </PopoverTrigger>
-      <PopoverContent side="top" align="start" className="w-[320px]">
+      {/* Long RAG snippets (full parent sections) can exceed the viewport, and
+          locally-extracted PDF text can be one giant unbroken "word" — so the
+          panel is height-capped to Radix's collision-aware available height
+          (scrolls inside) and everything wraps with overflow-wrap:anywhere. */}
+      <PopoverContent
+        side="top"
+        align="start"
+        collisionPadding={12}
+        className="w-[min(320px,calc(100vw-24px))] max-h-[min(var(--radix-popover-content-available-height),480px)] overflow-y-auto scrollbar-thin"
+      >
         <div className="px-2.5 pt-1.5 pb-2">
           {isDoc ? (
             <>
@@ -52,30 +61,30 @@ export function CitationChip({ citation, className }: CitationChipProps) {
                 <FileText size={11} aria-hidden />
                 {t('sources.fromDocuments')}
               </p>
-              <p className="mt-1 block text-sm font-medium text-[var(--color-fg)] leading-snug">
+              <p className="mt-1 block text-sm font-medium text-[var(--color-fg)] leading-snug [overflow-wrap:anywhere]">
                 {citation.title}
               </p>
               {citation.snippet ? (
-                <p className="mt-2 text-xs text-[var(--color-fg-muted)] leading-relaxed">
+                <p className="mt-2 text-xs text-[var(--color-fg-muted)] leading-relaxed [overflow-wrap:anywhere]">
                   {citation.snippet}
                 </p>
               ) : null}
             </>
           ) : (
             <>
-              <p className="text-[11px] uppercase tracking-wider text-[var(--color-fg-subtle)]">
+              <p className="text-[11px] uppercase tracking-wider text-[var(--color-fg-subtle)] [overflow-wrap:anywhere]">
                 {citation.domain}
               </p>
               <a
                 href={safeHref(citation.url)}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="mt-1 block text-sm font-medium text-[var(--color-fg)] hover:text-[var(--color-accent)] leading-snug"
+                className="mt-1 block text-sm font-medium text-[var(--color-fg)] hover:text-[var(--color-accent)] leading-snug [overflow-wrap:anywhere]"
               >
                 {citation.title}
               </a>
               {citation.snippet ? (
-                <p className="mt-2 text-xs text-[var(--color-fg-muted)] leading-relaxed">
+                <p className="mt-2 text-xs text-[var(--color-fg-muted)] leading-relaxed [overflow-wrap:anywhere]">
                   {citation.snippet}
                 </p>
               ) : null}
@@ -140,10 +149,10 @@ export function CitationList({ citations }: CitationListProps) {
                 // (filename + "from your documents") instead of a dead link.
                 <li key={c.id} className="flex items-start gap-2.5 text-xs">
                   <CitationChip citation={c} />
-                  <span className="leading-relaxed text-[var(--color-fg-muted)]">
-                    <span className="inline-flex items-center gap-1 font-medium text-[var(--color-fg)]">
-                      <FileText size={11} aria-hidden className="text-[var(--color-fg-subtle)]" />
-                      {c.title}
+                  <span className="min-w-0 flex-1 leading-relaxed text-[var(--color-fg-muted)] [overflow-wrap:anywhere]">
+                    <span className="inline-flex max-w-full items-center gap-1 font-medium text-[var(--color-fg)]">
+                      <FileText size={11} aria-hidden className="shrink-0 text-[var(--color-fg-subtle)]" />
+                      <span className="[overflow-wrap:anywhere]">{c.title}</span>
                     </span>
                     <span className="ml-1.5 text-[var(--color-fg-subtle)]">{t('sources.fromDocuments')}</span>
                   </span>
@@ -155,7 +164,7 @@ export function CitationList({ citations }: CitationListProps) {
                     href={safeHref(c.url)}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-[var(--color-fg-muted)] hover:text-[var(--color-accent)] leading-relaxed"
+                    className="min-w-0 flex-1 text-[var(--color-fg-muted)] hover:text-[var(--color-accent)] leading-relaxed [overflow-wrap:anywhere]"
                   >
                     <span className="font-medium text-[var(--color-fg)]">{c.title}</span>
                     <span className="ml-1.5">{c.domain}</span>

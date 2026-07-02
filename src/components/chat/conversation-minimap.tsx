@@ -115,7 +115,13 @@ export function ConversationMinimap({ conversation, scrollContainerRef }: Conver
       aria-label={t('minimap.label', { defaultValue: 'Conversation map' })}
       className={cn(
         'group/rail absolute right-1.5 top-1/2 z-20 -translate-y-1/2',
-        'flex max-h-[62vh] flex-col items-end gap-1 overflow-y-auto py-1 scrollbar-none',
+        'flex max-h-[62vh] flex-col items-end gap-0.5 overflow-y-auto scrollbar-none',
+        // One shared panel for the whole rail on hover/keyboard-focus — the rows
+        // themselves stay chromeless (a border per row read as visual noise).
+        'rounded-xl border border-transparent px-1 py-1',
+        'transition-colors duration-fast ease-out',
+        'hover:border-[var(--color-border)] hover:bg-[var(--color-surface)] hover:shadow-[var(--shadow-md)]',
+        'focus-within:border-[var(--color-border)] focus-within:bg-[var(--color-surface)] focus-within:shadow-[var(--shadow-md)]',
       )}
     >
       {userTurns.map((m, i) => {
@@ -132,10 +138,12 @@ export function ConversationMinimap({ conversation, scrollContainerRef }: Conver
             aria-current={active ? 'true' : undefined}
             aria-label={`${t('minimap.jumpTo', { defaultValue: 'Jump to this question' })}: ${text}`}
             className={cn(
-              'flex items-center justify-end rounded-md border border-transparent px-1 py-0.5 outline-none',
+              'flex items-center justify-end rounded-md px-1 py-0.5 outline-none',
               'transition-colors duration-fast ease-out',
-              'group-hover/rail:border-[var(--color-border)] group-hover/rail:bg-[var(--color-surface)] group-hover/rail:shadow-[var(--shadow-md)]',
-              'focus-visible:border-[var(--color-border)] focus-visible:bg-[var(--color-surface)] focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+              // Row affordance without chrome: the shared rail panel carries the
+              // border; the hovered row only tints.
+              'hover:bg-[var(--color-bg-muted)]',
+              'focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
             )}
           >
             {/* Question preview — clipped to zero width until the rail is hovered

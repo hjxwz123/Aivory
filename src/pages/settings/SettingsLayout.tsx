@@ -57,7 +57,13 @@ export default function SettingsLayout() {
       <div className="flex-1 min-h-0 overflow-y-auto">
         <main className="mx-auto w-full max-w-[var(--layout-content-max-w)] px-[var(--layout-gutter-mobile)] sm:px-8 py-8 sm:py-10">
           <RouteFade dep={pathname}>
-            <Suspense fallback={<PanelFallback />}>
+            {/* key=pathname: router navigations run inside startTransition, and an
+                ALREADY-MOUNTED Suspense boundary doesn't show its fallback during
+                a transition — React freezes the old tab (nav highlight included)
+                until the next lazy chunk resolves. A key change mounts a NEW
+                boundary, which commits the fallback immediately: the tab switches
+                on click, with a spinner while the page loads (§ instant nav). */}
+            <Suspense key={pathname} fallback={<PanelFallback />}>
               <Outlet />
             </Suspense>
           </RouteFade>
