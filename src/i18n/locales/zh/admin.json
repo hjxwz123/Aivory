@@ -385,7 +385,8 @@
       "title": "删除这些用量记录？",
       "body": "将永久删除当前筛选条件下的 {{count}} 条记录。此操作不可撤销。",
       "action": "删除"
-    }
+    },
+    "workspaceTag": "空间"
   },
   "documents": {
     "title": "文档",
@@ -573,7 +574,12 @@
       "creditPeriodHint": "限时积分多久重置一次。",
       "unitHour": "小时",
       "unitDay": "天",
-      "unitWeek": "周"
+      "unitWeek": "周",
+      "maxWorkspaces": "最多工作空间数",
+      "workspaces": "工作空间",
+      "workspacesHint": "允许该用户组创建工作空间（数量上限见上；0 = 不限）。",
+      "isPublic": "在订阅页展示",
+      "isPublicHint": "关闭后该用户组不再出现在订阅页（已在该组的用户不受影响）。"
     },
     "errors": {
       "nameRequired": "请填写名称"
@@ -801,5 +807,30 @@
     "hiddenPrompt": "风格提示词（对用户隐藏）",
     "hiddenPromptPlaceholder": "如：柔和水彩、纸张纹理、低饱和配色",
     "nameRequired": "名称必填。"
+  },
+  "workspaces": {
+    "title": "工作空间",
+    "subtitle": "所有协作空间及其创建者、成员数。",
+    "loadFailed": "加载工作空间失败。",
+    "deleted": "工作空间已删除。",
+    "deleteFailed": "删除工作空间失败。",
+    "emptyTitle": "暂无工作空间",
+    "emptyBody": "用户可在侧栏头像菜单中创建工作空间。",
+    "colName": "名称",
+    "colOwner": "创建者",
+    "colMembers": "成员",
+    "colCreated": "创建时间",
+    "view": "查看",
+    "back": "全部工作空间",
+    "detailMeta": "创建者 {{owner}} · {{count}} 名成员",
+    "members": "成员",
+    "conversations": "对话",
+    "projects": "项目",
+    "kbs": "知识库",
+    "delete": "删除工作空间",
+    "deleteTitle": "删除该工作空间？",
+    "deleteBody": "其中的所有对话、项目和知识库将被删除，全部成员失去访问权限。此操作不可撤销。",
+    "roleOwner": "创建者",
+    "roleMember": "成员"
   }
 }

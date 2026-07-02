@@ -1,3 +1,4 @@
+import { activeWorkspaceId } from '@/store/workspaces'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
@@ -91,7 +92,7 @@ export function CommandMenu() {
     setSearching(true)
     const tmo = setTimeout(() => {
       void searchApi
-        .query(q)
+        .query(q, activeWorkspaceId())
         .then((res) => {
           // Ignore out-of-order responses (a newer keystroke already fired).
           if (mine !== seq.current) return

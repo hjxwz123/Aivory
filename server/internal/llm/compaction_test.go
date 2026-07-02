@@ -42,7 +42,7 @@ func TestMaybeCompactNoDoubleCompaction(t *testing.T) {
 	conv := &store.Conversation{ID: "c1", UserID: "u1", SummaryBlocks: json.RawMessage("[]")}
 
 	// Pass 1: 16 messages → keep last 12, summarise m0..m3 (cut = 16-12 = 4).
-	keep1, blocks1, err := MaybeCompact(context.Background(), db, nil, conv, buildHistory(16), 0)
+	keep1, blocks1, err := MaybeCompact(context.Background(), db, nil, conv, buildHistory(16), 0, "u1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func TestMaybeCompactNoDoubleCompaction(t *testing.T) {
 	// Pass 2: history grew to 18; feed the prior summary back in.
 	bjson, _ := json.Marshal(blocks1)
 	conv.SummaryBlocks = bjson
-	keep2, blocks2, err := MaybeCompact(context.Background(), db, nil, conv, buildHistory(18), 0)
+	keep2, blocks2, err := MaybeCompact(context.Background(), db, nil, conv, buildHistory(18), 0, "u1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func TestMaybeCompactNoDoubleCompaction(t *testing.T) {
 	// Pass 3: no growth → nothing new past the anchor → no extra block.
 	bjson2, _ := json.Marshal(blocks2)
 	conv.SummaryBlocks = bjson2
-	_, blocks3, err := MaybeCompact(context.Background(), db, nil, conv, buildHistory(18), 0)
+	_, blocks3, err := MaybeCompact(context.Background(), db, nil, conv, buildHistory(18), 0, "u1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +113,7 @@ func TestMaybeCompactTokenTriggerDeepens(t *testing.T) {
 
 	keep, blocks, err := MaybeCompact(context.Background(), db, nil,
 		&store.Conversation{ID: "c1", UserID: "u1", SummaryBlocks: json.RawMessage("[]")},
-		buildHistory(16), 0)
+		buildHistory(16), 0, "u1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +152,7 @@ func TestMaybeCompactCutShrinkNoDuplicate(t *testing.T) {
 	}
 	conv := &store.Conversation{ID: "c1", UserID: "u1", SummaryBlocks: json.RawMessage("[]")}
 
-	_, blocks1, err := MaybeCompact(context.Background(), db, nil, conv, buildHistory(16), 0)
+	_, blocks1, err := MaybeCompact(context.Background(), db, nil, conv, buildHistory(16), 0, "u1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +167,7 @@ func TestMaybeCompactCutShrinkNoDuplicate(t *testing.T) {
 	if err := store.SetSetting(db, "keep_recent_rounds", 8); err != nil {
 		t.Fatal(err)
 	}
-	_, blocks2, err := MaybeCompact(context.Background(), db, nil, conv, buildHistory(18), 0)
+	_, blocks2, err := MaybeCompact(context.Background(), db, nil, conv, buildHistory(18), 0, "u1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,12 +211,12 @@ func TestMaybeCompactConcurrentNoDuplicate(t *testing.T) {
 	hist := buildHistory(16) // cut=4 → summarise m0..m3
 
 	convA := &store.Conversation{ID: "c1", UserID: "u1", SummaryBlocks: json.RawMessage("[]")}
-	if _, b1, err := MaybeCompact(context.Background(), db, nil, convA, hist, 0); err != nil || len(b1) != 1 {
+	if _, b1, err := MaybeCompact(context.Background(), db, nil, convA, hist, 0, "u1"); err != nil || len(b1) != 1 {
 		t.Fatalf("first compaction: blocks=%v err=%v", b1, err)
 	}
 	// convB read the empty snapshot BEFORE convA wrote — the stale concurrent turn.
 	convB := &store.Conversation{ID: "c1", UserID: "u1", SummaryBlocks: json.RawMessage("[]")}
-	_, b2, err := MaybeCompact(context.Background(), db, nil, convB, hist, 0)
+	_, b2, err := MaybeCompact(context.Background(), db, nil, convB, hist, 0, "u1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -263,12 +263,12 @@ func TestMaybeCompactConcurrentDeeperCutNoOverlap(t *testing.T) {
 
 	// Turn A: 16 messages → cut=4 → summarise m0..m3, persisted to the DB.
 	convA := &store.Conversation{ID: "c1", UserID: "u1", SummaryBlocks: json.RawMessage("[]")}
-	if _, b1, err := MaybeCompact(context.Background(), db, nil, convA, buildHistory(16), 0); err != nil || len(b1) != 1 {
+	if _, b1, err := MaybeCompact(context.Background(), db, nil, convA, buildHistory(16), 0, "u1"); err != nil || len(b1) != 1 {
 		t.Fatalf("turn A: blocks=%v err=%v", b1, err)
 	}
 	// Turn B read the empty snapshot but sees 18 messages → a DEEPER cut (m0..m5).
 	convB := &store.Conversation{ID: "c1", UserID: "u1", SummaryBlocks: json.RawMessage("[]")}
-	keepB, b2, err := MaybeCompact(context.Background(), db, nil, convB, buildHistory(18), 0)
+	keepB, b2, err := MaybeCompact(context.Background(), db, nil, convB, buildHistory(18), 0, "u1")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -71,6 +71,7 @@ const SECTIONS: AdminSection[] = [
     tabs: [
       { to: '/admin/users', labelKey: 'admin:users.title' },
       { to: '/admin/user-groups', labelKey: 'admin:groups.title' },
+      { to: '/admin/workspaces', labelKey: 'admin:workspaces.title' },
       { to: '/admin/redeem-codes', labelKey: 'admin:redeemCodes.title' },
     ],
   },
@@ -229,11 +230,17 @@ export default function AdminLayout() {
         <div className="mx-auto w-full max-w-[84rem] px-5 sm:px-8 lg:px-12 py-8 sm:py-12">
           <SectionTabs />
           {/* Content-scoped Suspense: switching tabs/sections keeps the sidebar +
-              tabs on screen (clicked item highlights instantly) and only this
-              panel shows a loader while the lazy page chunk loads — instead of the
-              whole admin shell blanking to the app-level full-screen spinner. */}
+              tabs on screen and only this panel shows a loader while the lazy page
+              chunk loads — instead of the whole admin shell blanking to the
+              app-level full-screen spinner.
+              key=path: router navigations run inside startTransition, and an
+              ALREADY-MOUNTED boundary doesn't show its fallback during a
+              transition — React freezes the old page (rail/tab highlight included)
+              until the next chunk resolves, which reads as click lag. A key change
+              mounts a NEW boundary, which commits the fallback immediately: the
+              section/tab switches on click, spinner while it loads (§ instant nav). */}
           <RouteFade dep={path}>
-            <Suspense fallback={<PanelFallback />}>
+            <Suspense key={path} fallback={<PanelFallback />}>
               <Outlet />
             </Suspense>
           </RouteFade>

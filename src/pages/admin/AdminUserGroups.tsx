@@ -32,6 +32,7 @@ type PeriodUnit = 'hour' | 'day' | 'week'
 type Draft = Partial<ApiUserGroup> & {
   featuresText?: string
   researchEnabled?: boolean
+  workspacesEnabled?: boolean
   creditPeriodValue?: number
   creditPeriodUnit?: PeriodUnit
 }
@@ -51,6 +52,8 @@ function splitPeriod(seconds: number): { value: number; unit: PeriodUnit } {
 // Research mode. Managed via a dedicated toggle and hidden from the free-text
 // features editor + the subscription page's marketing list.
 const RESEARCH_FEATURE = 'research'
+// Reserved functional flag: whether the group may CREATE workspaces (§workspaces).
+const WORKSPACES_FEATURE = 'workspaces'
 
 export default function AdminUserGroups() {
   const { t } = useTranslation(['admin', 'common'])
@@ -95,6 +98,9 @@ export default function AdminUserGroups() {
         price_usd: 0,
         price_cny: 0,
         researchEnabled: false,
+        workspacesEnabled: false,
+        is_public: true,
+        max_workspaces: 0,
         creditPeriodValue: 0,
         creditPeriodUnit: 'day',
       },
@@ -109,8 +115,9 @@ export default function AdminUserGroups() {
       draft: {
         ...row,
         // Hide the reserved functional flag from the marketing free-text editor.
-        featuresText: feats.filter((f) => f !== RESEARCH_FEATURE).join('\n'),
+        featuresText: feats.filter((f) => f !== RESEARCH_FEATURE && f !== WORKSPACES_FEATURE).join('\n'),
         researchEnabled: feats.includes(RESEARCH_FEATURE),
+        workspacesEnabled: feats.includes(WORKSPACES_FEATURE),
         creditPeriodValue: period.value,
         creditPeriodUnit: period.unit,
       },
@@ -131,9 +138,13 @@ export default function AdminUserGroups() {
       .split('\n')
       .map((s) => s.trim())
       .filter(Boolean)
-      .filter((f) => f !== RESEARCH_FEATURE)
-    // Append the reserved functional flag when the research toggle is on.
-    const features = d.researchEnabled ? [...marketing, RESEARCH_FEATURE] : marketing
+      .filter((f) => f !== RESEARCH_FEATURE && f !== WORKSPACES_FEATURE)
+    // Append the reserved functional flags for the enabled toggles.
+    const features = [
+      ...marketing,
+      ...(d.researchEnabled ? [RESEARCH_FEATURE] : []),
+      ...(d.workspacesEnabled ? [WORKSPACES_FEATURE] : []),
+    ]
     const periodSeconds = Math.max(0, Number(d.creditPeriodValue) || 0) * UNIT_SECONDS[d.creditPeriodUnit ?? 'day']
     const body: Partial<ApiUserGroup> = {
       name: d.name,
@@ -143,6 +154,8 @@ export default function AdminUserGroups() {
       price_cny: Number(d.price_cny) || 0,
       max_projects: Math.max(0, Number(d.max_projects) || 0),
       max_kbs: Math.max(0, Number(d.max_kbs) || 0),
+      max_workspaces: Math.max(0, Number(d.max_workspaces) || 0),
+      is_public: d.is_public !== false,
       credit_allowance: Math.max(0, Number(d.credit_allowance) || 0),
       credit_period_seconds: periodSeconds,
     }
@@ -378,6 +391,19 @@ export default function AdminUserGroups() {
                     onChange={(e) => setDraft({ max_kbs: Number(e.target.value) })}
                   />
                 </Field>
+                <Field
+                  label={t('admin:groups.fields.maxWorkspaces', { defaultValue: 'Max workspaces' })}
+                  htmlFor="g-maxws"
+                  hint={t('admin:groups.fields.limitHint')}
+                >
+                  <Input
+                    id="g-maxws"
+                    type="number"
+                    min={0}
+                    value={String(editor.draft.max_workspaces ?? 0)}
+                    onChange={(e) => setDraft({ max_workspaces: Number(e.target.value) })}
+                  />
+                </Field>
               </div>
               {/* Credit system (§ credits). The USD→credit rate is a global
                   setting (below the group list); per-group: allowance + period. */}
@@ -440,6 +466,32 @@ export default function AdminUserGroups() {
                   checked={Boolean(editor.draft.researchEnabled)}
                   onCheckedChange={(v) => setDraft({ researchEnabled: v })}
                   aria-label={t('admin:groups.fields.research', { defaultValue: 'Deep Research' })}
+                />
+              </div>
+              <div className="flex items-center justify-between gap-3 rounded-[10px] border border-[var(--color-border)] px-3 py-2.5">
+                <div className="min-w-0">
+                  <p className="text-sm text-[var(--color-fg)]">{t('admin:groups.fields.workspaces', { defaultValue: 'Workspaces' })}</p>
+                  <p className="text-[12px] text-[var(--color-fg-subtle)]">
+                    {t('admin:groups.fields.workspacesHint', { defaultValue: 'Allow this group to create workspaces (max above; 0 = unlimited).' })}
+                  </p>
+                </div>
+                <Switch
+                  checked={Boolean(editor.draft.workspacesEnabled)}
+                  onCheckedChange={(v) => setDraft({ workspacesEnabled: v })}
+                  aria-label={t('admin:groups.fields.workspaces', { defaultValue: 'Workspaces' })}
+                />
+              </div>
+              <div className="flex items-center justify-between gap-3 rounded-[10px] border border-[var(--color-border)] px-3 py-2.5">
+                <div className="min-w-0">
+                  <p className="text-sm text-[var(--color-fg)]">{t('admin:groups.fields.isPublic', { defaultValue: 'Show on subscription page' })}</p>
+                  <p className="text-[12px] text-[var(--color-fg-subtle)]">
+                    {t('admin:groups.fields.isPublicHint', { defaultValue: 'When off, this tier is hidden from the public subscription page (members keep their plan).' })}
+                  </p>
+                </div>
+                <Switch
+                  checked={editor.draft.is_public !== false}
+                  onCheckedChange={(v) => setDraft({ is_public: v })}
+                  aria-label={t('admin:groups.fields.isPublic', { defaultValue: 'Show on subscription page' })}
                 />
               </div>
             </div>

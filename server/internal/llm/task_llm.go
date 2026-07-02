@@ -79,6 +79,8 @@ type RunOpts struct {
 	UserID         string
 	ConversationID string
 	MessageID      string
+	// WorkspaceID attributes side-task spend to a workspace (§workspaces).
+	WorkspaceID string
 	// MaxOutputTokens is a soft cap surfaced into the upstream request as
 	// max_tokens.
 	MaxOutputTokens int
@@ -179,7 +181,8 @@ func (t *TaskLLM) Run(ctx context.Context, kind TaskKind, prompt string, opts Ru
 	if result != nil {
 		cost := computeCost(*model, result.Usage)
 		_ = store.LogUsage(ctx, t.db, store.UsageLog{
-			UserID:           opts.UserID,
+			WorkspaceID:      opts.WorkspaceID,
+		UserID:           opts.UserID,
 			ConversationID:   opts.ConversationID,
 			MessageID:        opts.MessageID,
 			ModelID:          model.ID,

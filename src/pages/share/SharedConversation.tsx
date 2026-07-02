@@ -8,18 +8,43 @@ import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { sharedApi, ApiError } from '@/api'
-import type { ApiBlock, ApiSharedConversation } from '@/api/types'
+import type { ApiAttachment, ApiBlock, ApiSharedConversation } from '@/api/types'
 import { Logo } from '@/components/brand/logo'
 import { Markdown } from '@/components/chat/markdown'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
-import { Ghost } from 'lucide-react'
+import { FileText, Ghost } from 'lucide-react'
 
 function messageText(blocks: ApiBlock[]): string {
   return blocks
     .filter((b) => b.kind === 'text' && b.text)
     .map((b) => b.text as string)
     .join('\n\n')
+}
+
+// The snapshot's asset URLs point at the OWNER-authenticated routes
+// (/api/files/:id, /api/artifacts/:id) which 401 for anonymous viewers. Rewrite
+// them to the share-scoped public routes — the backend authorises by checking
+// the id against this share's frozen snapshot (§ sharing).
+function shareAssetUrl(token: string, url: string): string {
+  const tok = encodeURIComponent(token)
+  const file = url.match(/^\/api\/files\/([^/?#]+)$/)
+  if (file) return `/api/public/shared/${tok}/files/${file[1]}`
+  const art = url.match(/^\/api\/artifacts\/([^/?#]+)$/)
+  if (art) return `/api/public/shared/${tok}/artifacts/${art[1]}`
+  return url
+}
+
+function isImageAttachment(a: ApiAttachment): boolean {
+  return a.kind === 'image' || (a.mime_type ?? '').startsWith('image/')
+}
+
+// Generated files ride in `artifact` blocks; `summary` carries the mime type
+// (same field toLocalMessage reads). Fall back to the filename extension for
+// older blocks that predate the mime backfill.
+function isImageArtifact(b: ApiBlock): boolean {
+  if ((b.summary ?? '').startsWith('image/')) return true
+  return /\.(png|jpe?g|gif|webp|avif)$/i.test(b.title ?? b.url ?? '')
 }
 
 export default function SharedConversation() {
@@ -86,20 +111,82 @@ export default function SharedConversation() {
             <div className="mt-10 flex flex-col gap-8">
               {data.messages.map((m, i) => {
                 const text = messageText(m.blocks)
-                if (!text) return null
+                const atts = m.attachments ?? []
+                const artifacts = m.blocks.filter((b) => b.kind === 'artifact' && b.url)
+                // A message can be attachment-only (an uploaded image) or a pure
+                // generated-image reply — those must still render (§ sharing).
+                if (!text && atts.length === 0 && artifacts.length === 0) return null
                 return (
                   <article key={i} className="flex flex-col gap-1.5">
                     <div className="text-[12px] font-medium uppercase tracking-[0.06em] text-[var(--color-fg-subtle)]">
                       {m.role === 'user' ? t('chat:share.roleUser') : t('chat:share.roleAssistant')}
                     </div>
+                    {atts.length > 0 ? (
+                      <div className="flex flex-wrap gap-2">
+                        {atts.map((a) =>
+                          isImageAttachment(a) ? (
+                            <img
+                              key={a.id}
+                              src={shareAssetUrl(token, a.url)}
+                              alt={a.filename}
+                              loading="lazy"
+                              className="max-h-64 max-w-full rounded-[12px] border border-[var(--color-border)] object-contain"
+                            />
+                          ) : (
+                            <a
+                              key={a.id}
+                              href={shareAssetUrl(token, a.url)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1.5 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1.5 text-[12.5px] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] [overflow-wrap:anywhere]"
+                            >
+                              <FileText size={13} aria-hidden className="shrink-0 text-[var(--color-fg-subtle)]" />
+                              {a.filename}
+                            </a>
+                          ),
+                        )}
+                      </div>
+                    ) : null}
                     {m.role === 'user' ? (
-                      <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3 text-[15px] leading-relaxed whitespace-pre-wrap">
-                        {text}
-                      </div>
+                      text ? (
+                        <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3 text-[15px] leading-relaxed whitespace-pre-wrap">
+                          {text}
+                        </div>
+                      ) : null
                     ) : (
-                      <div className="text-[15px] leading-relaxed">
-                        <Markdown content={text} blockKeyPrefix={`share-${i}`} />
-                      </div>
+                      <>
+                        {text ? (
+                          <div className="text-[15px] leading-relaxed">
+                            <Markdown content={text} blockKeyPrefix={`share-${i}`} />
+                          </div>
+                        ) : null}
+                        {artifacts.length > 0 ? (
+                          <div className="flex flex-wrap gap-2">
+                            {artifacts.map((b, j) =>
+                              isImageArtifact(b) ? (
+                                <img
+                                  key={`${i}-art-${j}`}
+                                  src={shareAssetUrl(token, b.url ?? '')}
+                                  alt={b.title || 'image'}
+                                  loading="lazy"
+                                  className="max-h-96 max-w-full rounded-[12px] border border-[var(--color-border)] object-contain"
+                                />
+                              ) : (
+                                <a
+                                  key={`${i}-art-${j}`}
+                                  href={shareAssetUrl(token, b.url ?? '')}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1.5 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1.5 text-[12.5px] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] [overflow-wrap:anywhere]"
+                                >
+                                  <FileText size={13} aria-hidden className="shrink-0 text-[var(--color-fg-subtle)]" />
+                                  {b.title || b.url}
+                                </a>
+                              ),
+                            )}
+                          </div>
+                        ) : null}
+                      </>
                     )}
                   </article>
                 )

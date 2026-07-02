@@ -119,7 +119,7 @@ func (o *Orchestrator) runDeepResearch(
 		emit:     emit,
 		convID:   conv.ID,
 		msgID:    assistantMsg.ID,
-		userID:   conv.UserID,
+		userID:   runner.ctx.UserID, // §workspaces: the SENDER pays for plan/verify
 		question: lastUserText(provReq.History),
 		seen:     map[string]int{},
 		sourceID: map[string]string{},

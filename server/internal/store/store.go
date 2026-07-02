@@ -128,6 +128,18 @@ func Migrate(db *sql.DB) error {
 	addImageTimeout := `ALTER TABLE models ADD COLUMN image_timeout_sec INTEGER NOT NULL DEFAULT 0`
 	// §verify: per-message auditor (Verify mode) result JSON ('' = never audited).
 	addMsgVerify := `ALTER TABLE messages ADD COLUMN verify TEXT NOT NULL DEFAULT ''`
+	// Workspaces (§workspaces): '' = personal. Conversations/projects/KBs inside
+	// a workspace are shared across members; messages record their AUTHOR so
+	// shared conversations attribute each user turn; usage rows carry the
+	// workspace for the usage pages; per-group cap on owned workspaces.
+	addConvWorkspace := `ALTER TABLE conversations ADD COLUMN workspace_id TEXT NOT NULL DEFAULT ''`
+	addProjWorkspace := `ALTER TABLE projects ADD COLUMN workspace_id TEXT NOT NULL DEFAULT ''`
+	addKBWorkspace := `ALTER TABLE knowledge_bases ADD COLUMN workspace_id TEXT NOT NULL DEFAULT ''`
+	addMsgAuthor := `ALTER TABLE messages ADD COLUMN author_id TEXT NOT NULL DEFAULT ''`
+	addUsageWorkspace := `ALTER TABLE usage_logs ADD COLUMN workspace_id TEXT NOT NULL DEFAULT ''`
+	addGroupMaxWorkspaces := `ALTER TABLE user_groups ADD COLUMN max_workspaces INTEGER NOT NULL DEFAULT 0`
+	// Whether the tier is listed on the public subscription page (§ user groups).
+	addGroupIsPublic := `ALTER TABLE user_groups ADD COLUMN is_public INTEGER NOT NULL DEFAULT 1`
 	if usePostgres {
 		schema = schemaPGSQL
 		addImageRef = `ALTER TABLE chunks ADD COLUMN IF NOT EXISTS image_ref TEXT`
@@ -163,6 +175,13 @@ func Migrate(db *sql.DB) error {
 		addMsgSearchText = `ALTER TABLE messages ADD COLUMN IF NOT EXISTS search_text TEXT NOT NULL DEFAULT ''`
 		addImageTimeout = `ALTER TABLE models ADD COLUMN IF NOT EXISTS image_timeout_sec INTEGER NOT NULL DEFAULT 0`
 		addMsgVerify = `ALTER TABLE messages ADD COLUMN IF NOT EXISTS verify TEXT NOT NULL DEFAULT ''`
+		addConvWorkspace = `ALTER TABLE conversations ADD COLUMN IF NOT EXISTS workspace_id TEXT NOT NULL DEFAULT ''`
+		addProjWorkspace = `ALTER TABLE projects ADD COLUMN IF NOT EXISTS workspace_id TEXT NOT NULL DEFAULT ''`
+		addKBWorkspace = `ALTER TABLE knowledge_bases ADD COLUMN IF NOT EXISTS workspace_id TEXT NOT NULL DEFAULT ''`
+		addMsgAuthor = `ALTER TABLE messages ADD COLUMN IF NOT EXISTS author_id TEXT NOT NULL DEFAULT ''`
+		addUsageWorkspace = `ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS workspace_id TEXT NOT NULL DEFAULT ''`
+		addGroupMaxWorkspaces = `ALTER TABLE user_groups ADD COLUMN IF NOT EXISTS max_workspaces INTEGER NOT NULL DEFAULT 0`
+		addGroupIsPublic = `ALTER TABLE user_groups ADD COLUMN IF NOT EXISTS is_public INTEGER NOT NULL DEFAULT 1`
 	}
 	if err := dedupeSkillNames(db); err != nil {
 		return fmt.Errorf("dedupe skill names: %w", err)
@@ -190,6 +209,7 @@ func Migrate(db *sql.DB) error {
 		addMsgModelLabel, addMsgSearchText,
 		addImageTimeout,
 		addMsgVerify,
+		addConvWorkspace, addProjWorkspace, addKBWorkspace, addMsgAuthor, addUsageWorkspace, addGroupMaxWorkspaces, addGroupIsPublic,
 	} {
 		_, _ = db.Exec(ddl)
 	}
@@ -202,6 +222,10 @@ func Migrate(db *sql.DB) error {
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_messages_conv_created ON messages(conversation_id, created_at)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_conv_user_updated ON conversations(user_id, archived, pinned DESC, updated_at DESC)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_users_sort_order ON users(sort_order, created_at DESC)`)
+	// Workspace-scoped listings (§workspaces) — mirror the personal composites.
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_conv_workspace_updated ON conversations(workspace_id, archived, pinned DESC, updated_at DESC)`)
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_projects_workspace ON projects(workspace_id)`)
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_kbs_workspace ON knowledge_bases(workspace_id)`)
 	for _, ddl := range []string{
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_channels_name_unique ON channels(lower(trim(name)))`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_oauth_providers_name_unique ON oauth_providers(lower(trim(name)))`,
@@ -209,8 +233,13 @@ func Migrate(db *sql.DB) error {
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_model_tags_name_unique ON model_tags(lower(trim(name)))`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_image_styles_name_unique ON image_styles(lower(trim(name)))`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_models_channel_request_unique ON models(channel_id, lower(trim(request_id)))`,
-		`CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_user_name_unique ON projects(user_id, lower(trim(name)))`,
-		`CREATE UNIQUE INDEX IF NOT EXISTS idx_kbs_user_name_unique ON knowledge_bases(user_id, lower(trim(name)))`,
+		// §workspaces: names are unique per (user, space) — the same user may reuse
+		// a name across their personal space and different workspaces. The old
+		// two-column indexes are dropped and recreated with the workspace column.
+		`DROP INDEX IF EXISTS idx_projects_user_name_unique`,
+		`DROP INDEX IF EXISTS idx_kbs_user_name_unique`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_user_name_unique ON projects(user_id, COALESCE(workspace_id,''), lower(trim(name)))`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_kbs_user_name_unique ON knowledge_bases(user_id, COALESCE(workspace_id,''), lower(trim(name)))`,
 	} {
 		_, _ = db.Exec(ddl)
 	}
@@ -224,14 +253,16 @@ func Migrate(db *sql.DB) error {
 	// fatal) instead of surfacing as broken reads later. WHERE 1=0 makes each probe
 	// O(1). If you add an ALTER above, add its column here.
 	columnChecks := map[string][]string{
-		"messages":       {"credits", "model_label", "search_text", "gen_ms", "feedback", "verify"},
-		"users":          {"group_id", "totp_secret", "totp_enabled", "group_expires_at", "previous_group_id", "password_set", "last_seen_at", "credits_permanent", "sort_order"},
-		"usage_logs":     {"credits"},
-		"user_groups":    {"max_projects", "max_kbs", "credit_allowance", "credit_period_seconds"},
-		"models":         {"official_tools", "moderation_enabled", "moderation_mode", "tags", "image_timeout_sec"},
-		"refresh_tokens": {"user_agent", "ip", "location", "last_seen"},
-		"conversations":  {"inline_source_conv", "inline_parent_id", "inline_quote"},
-		"chunks":         {"image_ref"},
+		"messages":        {"credits", "model_label", "search_text", "gen_ms", "feedback", "verify", "author_id"},
+		"users":           {"group_id", "totp_secret", "totp_enabled", "group_expires_at", "previous_group_id", "password_set", "last_seen_at", "credits_permanent", "sort_order"},
+		"usage_logs":      {"credits", "workspace_id"},
+		"user_groups":     {"max_projects", "max_kbs", "credit_allowance", "credit_period_seconds", "max_workspaces", "is_public"},
+		"models":          {"official_tools", "moderation_enabled", "moderation_mode", "tags", "image_timeout_sec"},
+		"refresh_tokens":  {"user_agent", "ip", "location", "last_seen"},
+		"conversations":   {"inline_source_conv", "inline_parent_id", "inline_quote", "workspace_id"},
+		"projects":        {"workspace_id"},
+		"knowledge_bases": {"workspace_id"},
+		"chunks":          {"image_ref"},
 	}
 	for table, cols := range columnChecks {
 		if _, err := db.Exec(fmt.Sprintf(`SELECT %s FROM %s WHERE 1=0`, strings.Join(cols, ", "), table)); err != nil {
