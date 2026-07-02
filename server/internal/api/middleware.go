@@ -377,8 +377,13 @@ func requireReqSig(h handler) handler {
 		base := hmac.New(sha256.New, []byte(raw))
 		base.Write([]byte(strconv.FormatInt(epoch, 10)))
 		derivedKey := base.Sum(nil)
-		// Step 2: sign ts\x00nonce\x00path with derived key.
-		path := r.URL.Path
+		// Step 2: sign ts\x00nonce\x00path with derived key. The client signs the
+		// LOGICAL path — its fetch prepends API_BASE ("/api") only after signing,
+		// and never includes the query string — so canonicalise r.URL.Path the
+		// same way: trim the mount prefix (a no-op when a reverse proxy already
+		// stripped it). Hashing the raw r.URL.Path was why this route answered
+		// 403 "invalid request signature" ever since it shipped.
+		path := strings.TrimPrefix(r.URL.Path, "/api")
 		msg := ts + "\x00" + nonce + "\x00" + path
 		mac := hmac.New(sha256.New, derivedKey)
 		mac.Write([]byte(msg))
