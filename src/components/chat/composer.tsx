@@ -11,6 +11,7 @@
  *   3. Stop / send button states.
  *   4. IME-aware Enter handling for CJK input.
  */
+import { activeWorkspaceId } from '@/store/workspaces'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
@@ -137,7 +138,7 @@ export function Composer({
   const [moreOpen, setMoreOpen] = useState(false)
   const loadKBList = async () => {
     try {
-      const rows = await kbsApi.list()
+      const rows = await kbsApi.list(activeWorkspaceId())
       setKBList(rows.map((kb) => ({ id: kb.id, name: kb.name })))
     } catch {
       /* ignore */

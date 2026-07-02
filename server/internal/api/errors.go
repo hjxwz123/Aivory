@@ -23,4 +23,10 @@ var (
 	// maps to a localized "you've reached your plan's limit" notice.
 	errProjectLimit = errors.New("project_limit_reached")
 	errKBLimit      = errors.New("kb_limit_reached")
+
+	// Workspaces (§workspaces). Stable machine codes: creation gated off for the
+	// group / owned-workspace cap reached. Deliberately NOT "account_suspended" —
+	// the client force-logs-out on that one.
+	errWorkspaceDisabled = errors.New("workspace_disabled")
+	errWorkspaceLimit    = errors.New("workspace_limit_reached")
 )

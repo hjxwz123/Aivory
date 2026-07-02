@@ -385,7 +385,8 @@
       "title": "これらの利用記録を削除しますか？",
       "body": "現在のフィルターに一致する {{count}} 件を完全に削除します。元に戻せません。",
       "action": "削除"
-    }
+    },
+    "workspaceTag": "WS"
   },
   "documents": {
     "title": "ドキュメント",
@@ -573,7 +574,12 @@
       "creditPeriodHint": "期間限定クレジットがリセットされる頻度。",
       "unitHour": "時間",
       "unitDay": "日",
-      "unitWeek": "週"
+      "unitWeek": "週",
+      "maxWorkspaces": "最大ワークスペース数",
+      "workspaces": "ワークスペース",
+      "workspacesHint": "このグループにワークスペース作成を許可（上限は上記、0 = 無制限）。",
+      "isPublic": "サブスクページに表示",
+      "isPublicHint": "オフにすると公開サブスクリプションページに表示されません（既存メンバーには影響しません）。"
     },
     "errors": {
       "nameRequired": "名前は必須です"
@@ -801,5 +807,30 @@
     "hiddenPrompt": "スタイルプロンプト（ユーザー非表示）",
     "hiddenPromptPlaceholder": "例：柔らかな水彩、紙の質感、落ち着いた配色",
     "nameRequired": "名前は必須です。"
+  },
+  "workspaces": {
+    "title": "ワークスペース",
+    "subtitle": "すべての共有スペースとオーナー・メンバー数。",
+    "loadFailed": "ワークスペースを読み込めませんでした。",
+    "deleted": "ワークスペースを削除しました。",
+    "deleteFailed": "ワークスペースを削除できませんでした。",
+    "emptyTitle": "ワークスペースはまだありません",
+    "emptyBody": "ユーザーはサイドバーのアバターメニューから作成できます。",
+    "colName": "名前",
+    "colOwner": "オーナー",
+    "colMembers": "メンバー",
+    "colCreated": "作成日",
+    "view": "表示",
+    "back": "すべてのワークスペース",
+    "detailMeta": "オーナー {{owner}} · {{count}} 名",
+    "members": "メンバー",
+    "conversations": "会話",
+    "projects": "プロジェクト",
+    "kbs": "ナレッジベース",
+    "delete": "ワークスペースを削除",
+    "deleteTitle": "このワークスペースを削除しますか？",
+    "deleteBody": "内部のすべての会話・プロジェクト・ナレッジベースが削除され、全メンバーがアクセスを失います。元に戻せません。",
+    "roleOwner": "オーナー",
+    "roleMember": "メンバー"
   }
 }

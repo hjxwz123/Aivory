@@ -35,6 +35,8 @@ import type {
 } from '@/types/chat'
 import { uid } from '@/lib/utils'
 import { toast } from '@/hooks/use-toast'
+import { activeWorkspaceId } from '@/store/workspaces'
+import { useAuth } from '@/store/auth'
 import i18n from '@/i18n'
 
 // The user's current UI language, sent with each turn so the backend can anchor
@@ -54,6 +56,8 @@ const CONV_PAGE = 200
 // make loadMore skip a real server row. Only ever advances by the number of rows
 // the paged list endpoint actually returned.
 let convServerOffset = 0
+// Monotonic token identifying which space the in-flight list requests belong to.
+let convLoadEpoch = 0
 
 // Messages per page when opening a conversation. A bit above the render window
 // (INITIAL_WINDOW=24) so the first screen is full with a little buffer; older
@@ -166,10 +170,16 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
   error: null,
 
   async load() {
-    if (get().loading) return
+    // §workspaces: every load belongs to the space it was ISSUED for. A switch
+    // mid-flight bumps the epoch, so (a) a fresh load is never silently dropped
+    // because a stale one is still in flight, and (b) a stale response can never
+    // overwrite the new space's list.
+    const ws = activeWorkspaceId()
+    const epoch = ++convLoadEpoch
     set({ loading: true, error: null })
     try {
-      const { conversations: rows, has_more } = await conversationsApi.list(undefined, CONV_PAGE, 0)
+      const { conversations: rows, has_more } = await conversationsApi.list(undefined, CONV_PAGE, 0, ws)
+      if (epoch !== convLoadEpoch) return // superseded by a workspace switch
       const conversations = rows.map(toLocalConversation)
       convServerOffset = rows.length
       set((s) => ({
@@ -179,6 +189,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
         hasMore: has_more,
       }))
     } catch (e) {
+      if (epoch !== convLoadEpoch) return
       set({ error: errorMessage(e, 'Failed to load conversations'), loading: false })
     }
   },
@@ -186,12 +197,20 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
   async loadMore() {
     const { loading, loadingMore, hasMore } = get()
     if (loading || loadingMore || !hasMore) return
+    const ws = activeWorkspaceId()
+    const epoch = convLoadEpoch
     set({ loadingMore: true })
     try {
       // Page from the tracked server cursor (NOT the cache size), so out-of-order
       // prepends can't skip a real row. Advance the cursor by the rows the server
       // returned; the `seen` filter only de-dupes what we add to the cache.
-      const { conversations: rows, has_more } = await conversationsApi.list(undefined, CONV_PAGE, convServerOffset)
+      const { conversations: rows, has_more } = await conversationsApi.list(undefined, CONV_PAGE, convServerOffset, ws)
+      if (epoch !== convLoadEpoch) {
+        // A workspace switch landed while this page was in flight — its rows
+        // belong to the OLD space; appending them would corrupt the new list.
+        set({ loadingMore: false })
+        return
+      }
       convServerOffset += rows.length
       set((s) => {
         const seen = new Set(s.conversations.map((c) => c.id))
@@ -274,7 +293,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
 
   async createConversation(modelId, projectId) {
     try {
-      const created = await conversationsApi.create({ model_id: modelId, project_id: projectId })
+      const created = await conversationsApi.create({ model_id: modelId, project_id: projectId, workspace_id: activeWorkspaceId() })
       const conv = toLocalConversation(created)
       set((s) => ({ conversations: [conv, ...s.conversations] }))
       return conv
@@ -564,6 +583,10 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
       content: input.text,
       createdAt: Date.now(),
       attachments: input.attachments,
+      // §workspaces: attribute the optimistic turn to the sender so the shared
+      // bubble renders own-right with the right name before the reconcile.
+      authorId: useAuth.getState().user?.id,
+      authorName: useAuth.getState().user?.name,
       // Give the optimistic turn a real tree position so it is never parentless
       // before the post-stream reconcile. A normal append hangs off the current
       // active leaf (the last message on the visible path); an edit-branch uses
@@ -1257,6 +1280,10 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
 function toLocalConversation(c: ApiConversation): Conversation {
   return {
     id: c.id,
+    workspaceId: c.workspace_id || undefined,
+    creatorName: c.creator_name || undefined,
+    creatorAvatar: c.creator_avatar || undefined,
+    creatorId: c.user_id || undefined,
     title: c.title,
     createdAt: c.created_at * 1000,
     updatedAt: c.updated_at * 1000,
@@ -1482,6 +1509,9 @@ export function toLocalMessage(m: ApiMessage): Message {
   return {
     id: m.id,
     parentId: m.parent_id || undefined,
+    authorId: m.author_id || undefined,
+    authorName: m.author_name || undefined,
+    authorAvatar: m.author_avatar || undefined,
     role: m.role,
     content,
     reasoning: reasoning.length > 0 ? reasoning : undefined,

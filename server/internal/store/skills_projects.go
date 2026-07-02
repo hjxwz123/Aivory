@@ -187,9 +187,11 @@ func CountProjectsByUser(ctx context.Context, db *sql.DB, userID string) (int, e
 }
 
 func ListProjects(ctx context.Context, db *sql.DB, userID string) ([]Project, error) {
+	// Personal listing only — workspace projects are isolated (§workspaces) and
+	// listed via ListWorkspaceProjects.
 	rows, err := db.QueryContext(ctx,
-		`SELECT id, user_id, name, description, instructions, accent, emoji, pinned, kb_id, auto_add_uploads, created_at, updated_at
-		 FROM projects WHERE user_id=? ORDER BY pinned DESC, updated_at DESC`, userID)
+		`SELECT id, user_id, name, description, instructions, accent, emoji, pinned, kb_id, auto_add_uploads, created_at, updated_at, COALESCE(workspace_id,'')
+		 FROM projects WHERE user_id=? AND COALESCE(workspace_id,'')='' ORDER BY pinned DESC, updated_at DESC`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -205,11 +207,33 @@ func ListProjects(ctx context.Context, db *sql.DB, userID string) ([]Project, er
 	return out, rows.Err()
 }
 
-// GetProject reads one row and checks ownership.
+// ListWorkspaceProjects lists a workspace's shared projects (§workspaces).
+// Membership is the handler's job.
+func ListWorkspaceProjects(ctx context.Context, db *sql.DB, workspaceID string) ([]Project, error) {
+	rows, err := db.QueryContext(ctx,
+		`SELECT id, user_id, name, description, instructions, accent, emoji, pinned, kb_id, auto_add_uploads, created_at, updated_at, COALESCE(workspace_id,'')
+		 FROM projects WHERE workspace_id=? ORDER BY pinned DESC, updated_at DESC`, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Project{}
+	for rows.Next() {
+		p, err := scanProject(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// GetProject reads one row and checks ownership: the owner, or — for a
+// workspace project — any member of that workspace (§workspaces).
 func GetProject(ctx context.Context, db *sql.DB, id, userID string) (*Project, error) {
 	row := db.QueryRowContext(ctx,
-		`SELECT id, user_id, name, description, instructions, accent, emoji, pinned, kb_id, auto_add_uploads, created_at, updated_at
-		 FROM projects WHERE id=? AND user_id=?`, id, userID)
+		`SELECT id, user_id, name, description, instructions, accent, emoji, pinned, kb_id, auto_add_uploads, created_at, updated_at, COALESCE(workspace_id,'')
+		 FROM projects WHERE id=? AND (user_id=? OR (COALESCE(workspace_id,'')<>'' AND workspace_id IN (SELECT workspace_id FROM workspace_members WHERE user_id=?)))`, id, userID, userID)
 	p, err := scanProject(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -223,7 +247,7 @@ func GetProject(ctx context.Context, db *sql.DB, id, userID string) (*Project, e
 // GetProjectByName returns a user's project by case-insensitive, trimmed name.
 func GetProjectByName(ctx context.Context, db *sql.DB, userID, name string) (*Project, error) {
 	row := db.QueryRowContext(ctx,
-		`SELECT id, user_id, name, description, instructions, accent, emoji, pinned, kb_id, auto_add_uploads, created_at, updated_at
+		`SELECT id, user_id, name, description, instructions, accent, emoji, pinned, kb_id, auto_add_uploads, created_at, updated_at, COALESCE(workspace_id,'')
 		 FROM projects WHERE user_id=? AND lower(trim(name))=lower(trim(?)) LIMIT 1`,
 		userID, name)
 	p, err := scanProject(row)
@@ -240,7 +264,7 @@ func scanProject(s scanner) (Project, error) {
 	var p Project
 	var pinned, autoAdd int
 	var kbID sql.NullString
-	if err := s.Scan(&p.ID, &p.UserID, &p.Name, &p.Description, &p.Instructions, &p.Accent, &p.Emoji, &pinned, &kbID, &autoAdd, &p.CreatedAt, &p.UpdatedAt); err != nil {
+	if err := s.Scan(&p.ID, &p.UserID, &p.Name, &p.Description, &p.Instructions, &p.Accent, &p.Emoji, &pinned, &kbID, &autoAdd, &p.CreatedAt, &p.UpdatedAt, &p.WorkspaceID); err != nil {
 		return p, err
 	}
 	p.Pinned = pinned == 1
@@ -270,10 +294,10 @@ func CreateProject(ctx context.Context, db *sql.DB, p Project) (*Project, error)
 		kbID = p.KBID
 	}
 	_, err := db.ExecContext(ctx, `INSERT INTO projects(
-		id, user_id, name, description, instructions, accent, emoji, pinned, kb_id, auto_add_uploads, created_at, updated_at
-	) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, user_id, name, description, instructions, accent, emoji, pinned, kb_id, auto_add_uploads, created_at, updated_at, workspace_id
+	) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		p.ID, p.UserID, p.Name, p.Description, p.Instructions, p.Accent, p.Emoji,
-		boolInt(p.Pinned), kbID, boolInt(p.AutoAddUploads), now, now)
+		boolInt(p.Pinned), kbID, boolInt(p.AutoAddUploads), now, now, p.WorkspaceID)
 	if err != nil {
 		if isUniqueIndexErr(err, "idx_projects_user_name_unique", "projects.user_id") {
 			return nil, ErrProjectNameExists
@@ -330,8 +354,10 @@ func UpdateProject(ctx context.Context, db *sql.DB, id, userID string, patch Pro
 	}
 	parts = append(parts, "updated_at=?")
 	args = append(args, time.Now().Unix())
-	args = append(args, id, userID)
-	q := "UPDATE projects SET " + strings.Join(parts, ", ") + " WHERE id=? AND user_id=?"
+	args = append(args, id, userID, userID)
+	// Owner or workspace member (§workspaces — members edit shared projects).
+	q := "UPDATE projects SET " + strings.Join(parts, ", ") +
+		" WHERE id=? AND (user_id=? OR (COALESCE(workspace_id,'')<>'' AND workspace_id IN (SELECT workspace_id FROM workspace_members WHERE user_id=?)))"
 	if _, err := db.ExecContext(ctx, q, args...); err != nil {
 		if isUniqueIndexErr(err, "idx_projects_user_name_unique", "projects.user_id") {
 			return nil, ErrProjectNameExists
@@ -342,8 +368,9 @@ func UpdateProject(ctx context.Context, db *sql.DB, id, userID string, patch Pro
 }
 
 // DeleteProject removes a row and unsets conversations.project_id via FK.
+// Owner or workspace member (§workspaces).
 func DeleteProject(ctx context.Context, db *sql.DB, id, userID string) error {
-	res, err := db.ExecContext(ctx, "DELETE FROM projects WHERE id=? AND user_id=?", id, userID)
+	res, err := db.ExecContext(ctx, "DELETE FROM projects WHERE id=? AND (user_id=? OR (COALESCE(workspace_id,'')<>'' AND workspace_id IN (SELECT workspace_id FROM workspace_members WHERE user_id=?)))", id, userID, userID)
 	if err != nil {
 		return err
 	}

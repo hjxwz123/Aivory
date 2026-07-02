@@ -8,6 +8,7 @@
  */
 import { create } from 'zustand'
 import { ApiError, projectsApi } from '@/api'
+import { activeWorkspaceId } from '@/store/workspaces'
 import type { ApiDocument, ApiProject } from '@/api/types'
 import type { Project, ProjectAccent, ProjectFile, ProjectFileKind } from '@/types/project'
 import { toast } from '@/hooks/use-toast'
@@ -48,7 +49,7 @@ export const useProjects = create<ProjectStore>((set, get) => ({
     if (get().loading) return
     set({ loading: true, error: null })
     try {
-      const rows = await projectsApi.list()
+      const rows = await projectsApi.list(activeWorkspaceId())
       const projects = await Promise.all(rows.map(async (p) => toLocalProject(p, [])))
       set({ projects, loaded: true, loading: false })
     } catch (e) {
@@ -72,6 +73,7 @@ export const useProjects = create<ProjectStore>((set, get) => ({
   async createProject(init = {}) {
     try {
       const created = await projectsApi.create({
+        workspace_id: activeWorkspaceId(),
         name: init.name?.trim() ?? '',
         description: init.description ?? '',
         instructions: init.instructions ?? '',

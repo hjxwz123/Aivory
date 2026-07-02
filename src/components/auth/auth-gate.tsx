@@ -13,6 +13,7 @@ import { useProjects } from '@/store/projects'
 import { useModels } from '@/store/models'
 import { useSettings } from '@/store/settings'
 import { useAccent } from '@/store/accent'
+import { useWorkspaces } from '@/store/workspaces'
 import { useLanguage, toSupportedLanguage } from '@/store/language'
 import { useTheme } from '@/store/theme'
 import { ACCENT_PRESETS, type AccentPref, type ThemePref } from '@/types/settings'
@@ -54,8 +55,15 @@ export function AuthGate({ children }: { children: ReactNode }) {
           useAccent.getState().applyAccent(accent as AccentPref)
         }
       }
-      void loadConversations()
-      void loadProjects()
+      // §workspaces: resolve the persisted active workspace BEFORE the scoped
+      // caches load, so a reload lands back inside the same space.
+      void useWorkspaces
+        .getState()
+        .load()
+        .then(() => {
+          void loadConversations()
+          void loadProjects()
+        })
       void loadModels()
     }
   }, [status, user?.settings, syncUserSettings, loadConversations, loadProjects, loadModels])

@@ -2,6 +2,7 @@
  * KnowledgeBaseDetail — list documents, add one (paste content or upload a
  * file), remove. Status shown live via polling while any doc is non-ready.
  */
+import { activeWorkspaceId } from '@/store/workspaces'
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
@@ -50,7 +51,7 @@ export default function KnowledgeBaseDetail() {
     if (!id) return
     if (!silent) setLoading(true)
     try {
-      const [list, d] = await Promise.all([kbsApi.list(), kbsApi.listDocs(id)])
+      const [list, d] = await Promise.all([kbsApi.list(activeWorkspaceId()), kbsApi.listDocs(id)])
       setKB(list.find((k) => k.id === id) ?? null)
       setDocs(d)
     } catch (e) {

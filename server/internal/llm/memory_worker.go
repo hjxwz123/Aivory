@@ -71,10 +71,17 @@ func (w *MemoryWorker) Process(ctx context.Context, convID string) error {
 		return errors.New("memory worker not initialised")
 	}
 	// Read the conversation + the last 30 messages on the active path.
-	row := w.db.QueryRowContext(ctx, `SELECT user_id FROM conversations WHERE id=?`, convID)
-	var userID string
-	if err := row.Scan(&userID); err != nil {
+	row := w.db.QueryRowContext(ctx, `SELECT user_id, COALESCE(workspace_id,'') FROM conversations WHERE id=?`, convID)
+	var userID, workspaceID string
+	if err := row.Scan(&userID, &workspaceID); err != nil {
 		return err
+	}
+	// §workspaces defence-in-depth: NEVER extract memories from shared
+	// conversations — other members' words must not become the creator's
+	// "user facts", and the creator must not be billed for members' turns.
+	// (The orchestrator already gates the enqueue; this survives future callers.)
+	if workspaceID != "" {
+		return nil
 	}
 	// Memory must be enabled both globally AND for this user (Personalization
 	// toggle) — otherwise extract nothing.

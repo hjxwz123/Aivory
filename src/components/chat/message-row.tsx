@@ -24,7 +24,7 @@ import {
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import type { Message, Attachment } from '@/types/chat'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { ModelIcon } from '@/components/chat/model-icon'
 import { Tooltip } from '@/components/ui/tooltip'
 import {
@@ -46,6 +46,8 @@ import { Textarea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { useCopy } from '@/hooks/use-clipboard'
+import { useAuth } from '@/store/auth'
+import { initials } from '@/components/ui/avatar.utils'
 import { useModels } from '@/store/models'
 import { useAutosizeTextarea } from '@/hooks/use-autosize-textarea'
 import { useMediaQuery } from '@/hooks/use-media-query'
@@ -108,10 +110,18 @@ function formatCredits(credits: number): string {
 
 function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, onLike, onDislike, onBranchSwitch, onFork, onDelete, readOnly = false, userMessageMarkdown = false }: MessageRowProps) {
   const isUser = message.role === 'user'
+  // §workspaces: in a shared conversation "own" = authored by ME — other
+  // members' questions render LEFT like the assistant, with the author's
+  // name + avatar. Personal conversations (no author) keep role semantics.
+  const meId = useAuth((s) => s.user?.id)
+  // readOnly (admin transcript viewer): there is no "me" perspective — keep the
+  // classic role-based layout so mixed legacy/authored turns don't zigzag.
+  const isOwn = isUser && (readOnly ? true : message.authorId ? message.authorId === meId : true)
+  const isForeignUser = isUser && !isOwn
   // §7.2-6: assistant 气泡标注生成它的模型名 + 图标。
   const model = useModels((s) => (message.modelId ? s.getById(message.modelId) : undefined))
   const { t } = useTranslation('chat')
-  const displayUserName = userName ?? t('common.you', { ns: 'common' })
+  const displayUserName = message.authorName ?? userName ?? t('common.you', { ns: 'common' })
   const [hovered, setHovered] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   // Phone: the per-message actions live in a bottom Sheet (a clean thread reveals
@@ -183,7 +193,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
       onMouseLeave={() => setHovered(false)}
       className={cn(
         'group/msg w-full flex animate-[message-in_220ms_var(--ease-out)_both]',
-        isUser ? 'justify-end' : 'justify-start',
+        isOwn ? 'justify-end' : 'justify-start',
       )}
     >
       <div
@@ -192,9 +202,22 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
           // A user bubble hugs its content (right-aligned, capped width); but
           // while editing it expands to the full message column — same width as
           // an assistant reply — so there's room to rework the question.
-          isUser && !editing ? 'items-end max-w-[88%] sm:max-w-[68%]' : 'items-start w-full',
+          isOwn && !editing
+            ? 'items-end max-w-[88%] sm:max-w-[68%]'
+            : isForeignUser
+              ? 'items-start max-w-[88%] sm:max-w-[68%]'
+              : 'items-start w-full',
         )}
       >
+        {isForeignUser && (
+          <div className="flex items-center gap-2 mb-1.5">
+            <Avatar size="sm" tone="ink">
+              {message.authorAvatar ? <AvatarImage src={message.authorAvatar} alt={displayUserName} /> : null}
+              <AvatarFallback>{initials(displayUserName)}</AvatarFallback>
+            </Avatar>
+            <span className="text-[13px] font-medium text-[var(--color-fg-muted)]">{displayUserName}</span>
+          </div>
+        )}
         {!isUser && (
           <div className="flex items-center gap-2 mb-2">
             {model ? (
@@ -617,7 +640,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
                   </>
                 )}
 
-                {isUser && (
+                {isOwn && (
                   <Tooltip content={t('actions.edit')}>
                     <button
                       type="button"
@@ -745,13 +768,13 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
                     onClick={() => onDislike?.(message.id, !message.disliked)}
                   />
                 </>
-              ) : (
+              ) : isOwn ? (
                 <MsgActionRow
                   icon={<Pencil size={18} aria-hidden />}
                   label={t('actions.edit')}
                   onClick={() => { setActionSheetOpen(false); setEditing(true) }}
                 />
-              )}
+              ) : null}
               {onFork ? (
                 <MsgActionRow
                   icon={<GitBranchPlus size={18} aria-hidden />}

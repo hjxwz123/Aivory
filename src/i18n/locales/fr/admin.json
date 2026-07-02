@@ -385,7 +385,8 @@
       "title": "Supprimer ces enregistrements ?",
       "body": "Cela supprime définitivement les {{count}} enregistrement(s) correspondant au filtre. Action irréversible.",
       "action": "Supprimer"
-    }
+    },
+    "workspaceTag": "WS"
   },
   "documents": {
     "title": "Documents",
@@ -573,7 +574,12 @@
       "creditPeriodHint": "Fréquence de réinitialisation des crédits temporaires.",
       "unitHour": "heures",
       "unitDay": "jours",
-      "unitWeek": "semaines"
+      "unitWeek": "semaines",
+      "maxWorkspaces": "Espaces max",
+      "workspaces": "Espaces de travail",
+      "workspacesHint": "Autoriser ce groupe à créer des espaces (max ci-dessus ; 0 = illimité).",
+      "isPublic": "Afficher sur la page d'abonnement",
+      "isPublicHint": "Désactivé, ce palier n'apparaît plus sur la page d'abonnement publique (les membres gardent leur offre)."
     },
     "errors": {
       "nameRequired": "Le nom est requis"
@@ -801,5 +807,30 @@
     "hiddenPrompt": "Prompt de style (masqué aux utilisateurs)",
     "hiddenPromptPlaceholder": "ex. aquarelle douce, papier texturé, palette sobre",
     "nameRequired": "Le nom est requis."
+  },
+  "workspaces": {
+    "title": "Espaces de travail",
+    "subtitle": "Tous les espaces collaboratifs, leur propriétaire et le nombre de membres.",
+    "loadFailed": "Impossible de charger les espaces.",
+    "deleted": "Espace supprimé.",
+    "deleteFailed": "Impossible de supprimer l'espace.",
+    "emptyTitle": "Aucun espace pour l'instant",
+    "emptyBody": "Les utilisateurs créent des espaces depuis le menu avatar de la barre latérale.",
+    "colName": "Nom",
+    "colOwner": "Propriétaire",
+    "colMembers": "Membres",
+    "colCreated": "Créé",
+    "view": "Voir",
+    "back": "Tous les espaces",
+    "detailMeta": "Propriétaire {{owner}} · {{count}} membres",
+    "members": "Membres",
+    "conversations": "Conversations",
+    "projects": "Projets",
+    "kbs": "Bases de connaissances",
+    "delete": "Supprimer l'espace",
+    "deleteTitle": "Supprimer cet espace ?",
+    "deleteBody": "Toutes les conversations, projets et bases de connaissances internes seront supprimés et tous les membres perdront l'accès. Irréversible.",
+    "roleOwner": "Propriétaire",
+    "roleMember": "Membre"
   }
 }

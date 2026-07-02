@@ -462,3 +462,24 @@ CREATE TABLE IF NOT EXISTS image_styles (
 );
 CREATE INDEX IF NOT EXISTS idx_image_styles_sort ON image_styles(sort_order);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_image_styles_name_unique ON image_styles(lower(trim(name)));
+
+-- 工作空间(§workspaces):完全独立的协作空间。个人数据 workspace_id=''(空串);
+-- 空间内的 conversations/projects/knowledge_bases 记 workspace_id,所有成员共享可见。
+-- invite_token 是 192-bit 能力令牌(仅通过邀请链接加入);轮换即作废旧链接。
+CREATE TABLE IF NOT EXISTS workspaces (
+  id           TEXT PRIMARY KEY,
+  name         TEXT NOT NULL,
+  owner_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  invite_token TEXT NOT NULL UNIQUE,
+  created_at   INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+);
+CREATE INDEX IF NOT EXISTS idx_workspaces_owner ON workspaces(owner_id);
+
+CREATE TABLE IF NOT EXISTS workspace_members (
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  role         TEXT NOT NULL DEFAULT 'member',
+  joined_at    INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+  PRIMARY KEY (workspace_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_ws_members_user ON workspace_members(user_id);

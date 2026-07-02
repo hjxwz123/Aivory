@@ -925,6 +925,7 @@ func (t *imageGenerateTool) Execute(ctx context.Context, input []byte, tc *llm.T
 	if tc != nil && tc.DB != nil {
 		_ = store.LogUsage(persistCtx, t.db, store.UsageLog{
 			UserID:         tc.UserID,
+			WorkspaceID:    tc.WorkspaceID,
 			ConversationID: tc.ConvID,
 			MessageID:      tc.MessageID,
 			ModelID:        model.ID,

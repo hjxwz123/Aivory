@@ -366,6 +366,12 @@ func editMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, errNotFound)
 		return
 	}
+	// §workspaces: in shared conversations only the AUTHOR may edit their own
+	// question (legacy rows with no author fall back to the conversation gate).
+	if msg.AuthorID != "" && msg.AuthorID != u.ID {
+		writeError(w, 404, errNotFound)
+		return
+	}
 	blocks, _ := json.Marshal([]llm.UnifiedBlock{{Kind: "text", Text: body.Text}})
 	if err := store.UpdateMessageContent(r.Context(), d.DB, msgID, blocks); err != nil {
 		writeError(w, 500, err)
@@ -383,9 +389,30 @@ func deleteMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
 	convID := pathParam(r, "id")
 	msgID := pathParam(r, "msgId")
-	if _, err := store.GetConversation(r.Context(), d.DB, convID, u.ID); err != nil {
+	conv, err := store.GetConversation(r.Context(), d.DB, convID, u.ID)
+	if err != nil {
 		writeError(w, 404, errNotFound)
 		return
+	}
+	// §workspaces: deleting a round in a shared conversation is limited to the
+	// round's author or the conversation creator. Resolve the round's USER turn
+	// (clicking an answer implies its question) and check its author.
+	if conv.WorkspaceID != "" && conv.UserID != u.ID {
+		if m, merr := store.GetMessage(r.Context(), d.DB, msgID); merr == nil && m.ConversationID == convID {
+			author := m.AuthorID
+			if m.Role != "user" && m.ParentID != "" {
+				if pu, perr := store.GetMessage(r.Context(), d.DB, m.ParentID); perr == nil && pu.Role == "user" {
+					author = pu.AuthorID
+				}
+			}
+			if author == "" || author != u.ID {
+				writeError(w, 404, errNotFound)
+				return
+			}
+		} else {
+			writeError(w, 404, errNotFound)
+			return
+		}
 	}
 	newLeaf, err := store.DeleteRound(r.Context(), d.DB, convID, u.ID, msgID)
 	if err != nil {

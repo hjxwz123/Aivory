@@ -380,6 +380,13 @@ func downloadArtifactHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, errNotFound)
 		return
 	}
+	serveStoredArtifact(d, w, a)
+}
+
+// serveStoredArtifact streams an artifact row's bytes with the standard safety
+// headers. ACCESS CONTROL IS THE CALLER'S JOB — owner/admin auth on the private
+// route, share-snapshot membership on the public share route (§ sharing).
+func serveStoredArtifact(d Deps, w http.ResponseWriter, a *store.Artifact) {
 	// Resolve a safe absolute path inside ArtifactDir.
 	cleanName := filepath.Base(a.Filename)
 	full := filepath.Clean(a.StoragePath)
@@ -443,6 +450,13 @@ func downloadFileHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, errNotFound)
 		return
 	}
+	serveStoredFile(d, w, f)
+}
+
+// serveStoredFile streams an uploaded file row's bytes with the standard safety
+// headers. ACCESS CONTROL IS THE CALLER'S JOB — owner/admin auth on the private
+// route, share-snapshot membership on the public share route (§ sharing).
+func serveStoredFile(d Deps, w http.ResponseWriter, f *store.File) {
 	// Resolve a safe absolute path inside UploadDir.
 	cleanName := filepath.Base(f.Filename)
 	full := filepath.Clean(f.StoragePath)

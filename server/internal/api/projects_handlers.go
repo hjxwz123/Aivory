@@ -12,7 +12,19 @@ import (
 // listProjectsHandler returns the user's projects.
 func listProjectsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
-	rows, err := store.ListProjects(r.Context(), d.DB, u.ID)
+	// Workspace scope (§workspaces): a member lists the space's shared projects;
+	// otherwise the personal ones.
+	var rows []store.Project
+	var err error
+	if wsID := strings.TrimSpace(r.URL.Query().Get("workspace_id")); wsID != "" {
+		if role, merr := store.IsWorkspaceMember(r.Context(), d.DB, wsID, u.ID); merr != nil || role == "" {
+			writeError(w, 404, errNotFound)
+			return
+		}
+		rows, err = store.ListWorkspaceProjects(r.Context(), d.DB, wsID)
+	} else {
+		rows, err = store.ListProjects(r.Context(), d.DB, u.ID)
+	}
 	if err != nil {
 		writeError(w, 500, err)
 		return
@@ -26,6 +38,9 @@ type createProjectReq struct {
 	Instructions string `json:"instructions"`
 	Accent       string `json:"accent"`
 	Emoji        string `json:"emoji"`
+	// '' = personal; set = create INSIDE that workspace (§workspaces, membership
+	// validated server-side). Both members and the owner may create.
+	WorkspaceID string `json:"workspace_id"`
 }
 
 // groupCapFor returns the user's effective per-group resource caps (§ user
@@ -56,6 +71,13 @@ func createProjectHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errors.New("name required"))
 		return
 	}
+	req.WorkspaceID = strings.TrimSpace(req.WorkspaceID)
+	if req.WorkspaceID != "" {
+		if role, merr := store.IsWorkspaceMember(r.Context(), d.DB, req.WorkspaceID, u.ID); merr != nil || role == "" {
+			writeError(w, 404, errNotFound)
+			return
+		}
+	}
 	if existing, err := store.GetProjectByName(r.Context(), d.DB, u.ID, req.Name); err == nil && existing != nil {
 		writeError(w, 409, store.ErrProjectNameExists)
 		return
@@ -76,7 +98,7 @@ func createProjectHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		// Allow project without KB if no embedding model.
 		p, err := store.CreateProject(r.Context(), d.DB, store.Project{
 			UserID: u.ID, Name: req.Name, Description: req.Description, Instructions: req.Instructions,
-			Accent: req.Accent, Emoji: req.Emoji,
+			Accent: req.Accent, Emoji: req.Emoji, WorkspaceID: req.WorkspaceID,
 		})
 		if err != nil {
 			if errors.Is(err, store.ErrProjectNameExists) {
@@ -92,6 +114,7 @@ func createProjectHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	kb, err := store.CreateKB(r.Context(), d.DB, store.KnowledgeBase{
 		UserID: u.ID, Name: req.Name + " — project library",
 		EmbeddingModelID: embeds[0].ID, EmbeddingDim: embeds[0].Dim,
+		WorkspaceID: req.WorkspaceID,
 	})
 	if err != nil {
 		if errors.Is(err, store.ErrKBNameExists) {
@@ -103,7 +126,7 @@ func createProjectHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	p, err := store.CreateProject(r.Context(), d.DB, store.Project{
 		UserID: u.ID, Name: req.Name, Description: req.Description, Instructions: req.Instructions,
-		Accent: req.Accent, Emoji: req.Emoji, KBID: kb.ID,
+		Accent: req.Accent, Emoji: req.Emoji, KBID: kb.ID, WorkspaceID: req.WorkspaceID,
 	})
 	if err != nil {
 		// Keep the two-step create from leaving an unattached project library if

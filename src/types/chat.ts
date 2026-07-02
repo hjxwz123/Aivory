@@ -192,6 +192,10 @@ export interface Message {
   branchIndex?: number
   /** Total branches for this position. */
   branchCount?: number
+  /** §workspaces: author of a user turn in a shared conversation. */
+  authorId?: string
+  authorName?: string
+  authorAvatar?: string
   /** Sibling message ids at this branch position (parents share). */
   siblings?: string[]
 }
@@ -218,6 +222,14 @@ export interface Conversation {
   /** Reverse-pagination state for the active path: true while older messages
    *  remain on the server (loaded latest-first; older fetched on scroll-up). */
   hasOlder?: boolean
+  /** §workspaces: set when the conversation lives in a workspace. */
+  workspaceId?: string
+  /** §workspaces: creator display identity for shared-history rows. */
+  creatorName?: string
+  creatorAvatar?: string
+  /** Creator user id (conversations.user_id) — drives "only the creator may
+   *  delete" affordances client-side (server enforces regardless). */
+  creatorId?: string
   /** Cursor (oldest loaded message id) for the next older page. */
   olderCursor?: string
   messages: Message[]

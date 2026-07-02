@@ -48,7 +48,9 @@ func ListConversations(ctx context.Context, db *sql.DB, userID, projectID, archi
 	if limit > 500 {
 		limit = 500
 	}
-	q := `SELECT id, user_id, COALESCE(project_id, ''), title, provider, model_id, kb_ids, rag_mode, summary_blocks, COALESCE(active_leaf_id, ''), provider_state, pinned, archived, starred, created_at, updated_at, COALESCE(inline_source_conv, ''), COALESCE(inline_parent_id, ''), COALESCE(inline_quote, '') FROM conversations WHERE user_id=? AND COALESCE(inline_source_conv,'')=''`
+	// Personal listing ONLY: workspace conversations are fully isolated from the
+	// personal space (§workspaces) and are listed via ListWorkspaceConversations.
+	q := `SELECT id, user_id, COALESCE(project_id, ''), title, provider, model_id, kb_ids, rag_mode, summary_blocks, COALESCE(active_leaf_id, ''), provider_state, pinned, archived, starred, created_at, updated_at, COALESCE(inline_source_conv, ''), COALESCE(inline_parent_id, ''), COALESCE(inline_quote, ''), COALESCE(workspace_id, '') FROM conversations WHERE user_id=? AND COALESCE(inline_source_conv,'')='' AND COALESCE(workspace_id,'')=''`
 	args := []any{userID}
 	if projectID == "_none_" {
 		q += " AND project_id IS NULL"
@@ -79,12 +81,65 @@ func ListConversations(ctx context.Context, db *sql.DB, userID, projectID, archi
 	return out, rows.Err()
 }
 
+// ListWorkspaceConversations lists EVERY member's conversations in a workspace
+// (§workspaces — shared history), newest first, enriched with each creator's
+// display name + avatar so the sidebar can attribute rows. Membership is the
+// CALLER's job (the handler validates before calling).
+func ListWorkspaceConversations(ctx context.Context, db *sql.DB, workspaceID, projectID, archivedFilter string, limit, offset int) ([]Conversation, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	q := `SELECT c.id, c.user_id, COALESCE(c.project_id, ''), c.title, c.provider, c.model_id, c.kb_ids, c.rag_mode, c.summary_blocks, COALESCE(c.active_leaf_id, ''), c.provider_state, c.pinned, c.archived, c.starred, c.created_at, c.updated_at, COALESCE(c.inline_source_conv, ''), COALESCE(c.inline_parent_id, ''), COALESCE(c.inline_quote, ''), COALESCE(c.workspace_id, ''), COALESCE(u.name,''), COALESCE(u.settings,'')
+	 FROM conversations c LEFT JOIN users u ON u.id = c.user_id
+	 WHERE c.workspace_id=? AND COALESCE(c.inline_source_conv,'')=''`
+	args := []any{workspaceID}
+	if projectID == "_none_" {
+		q += " AND c.project_id IS NULL"
+	} else if projectID != "" {
+		q += " AND c.project_id=?"
+		args = append(args, projectID)
+	}
+	if archivedFilter == "active" {
+		q += " AND c.archived=0"
+	} else if archivedFilter == "archived" {
+		q += " AND c.archived=1"
+	}
+	q += " ORDER BY c.pinned DESC, c.updated_at DESC LIMIT ? OFFSET ?"
+	args = append(args, limit, offset)
+	rows, err := db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Conversation{}
+	for rows.Next() {
+		var c Conversation
+		var pinned, archived, starred int
+		var kbIDs, sumBlocks, provState, settings string
+		if err := rows.Scan(&c.ID, &c.UserID, &c.ProjectID, &c.Title, &c.Provider, &c.ModelID, &kbIDs, &c.RAGMode, &sumBlocks, &c.ActiveLeafID, &provState, &pinned, &archived, &starred, &c.CreatedAt, &c.UpdatedAt, &c.InlineSourceConv, &c.InlineParentID, &c.InlineQuote, &c.WorkspaceID, &c.CreatorName, &settings); err != nil {
+			return nil, err
+		}
+		c.Pinned = pinned == 1
+		c.Archived = archived == 1
+		c.Starred = starred == 1
+		c.KBIDs = json.RawMessage(orDefault(kbIDs, "[]"))
+		c.SummaryBlocks = json.RawMessage(orDefault(sumBlocks, "[]"))
+		c.ProviderState = json.RawMessage(orDefault(provState, "{}"))
+		c.CreatorAvatar = avatarFromSettings(settings)
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
 // ListInlineThreads returns the sub-conversations anchored to messages of the
 // given source conversation, owned by userID, oldest first. Used to render the
 // inline-thread markers on a conversation's messages (§ text-selection threads).
 func ListInlineThreads(ctx context.Context, db *sql.DB, sourceConvID, userID string) ([]Conversation, error) {
 	rows, err := db.QueryContext(ctx,
-		`SELECT id, user_id, COALESCE(project_id, ''), title, provider, model_id, kb_ids, rag_mode, summary_blocks, COALESCE(active_leaf_id, ''), provider_state, pinned, archived, starred, created_at, updated_at, COALESCE(inline_source_conv, ''), COALESCE(inline_parent_id, ''), COALESCE(inline_quote, '')
+		`SELECT id, user_id, COALESCE(project_id, ''), title, provider, model_id, kb_ids, rag_mode, summary_blocks, COALESCE(active_leaf_id, ''), provider_state, pinned, archived, starred, created_at, updated_at, COALESCE(inline_source_conv, ''), COALESCE(inline_parent_id, ''), COALESCE(inline_quote, ''), COALESCE(workspace_id, '')
 		 FROM conversations WHERE inline_source_conv=? AND user_id=? ORDER BY created_at ASC`, sourceConvID, userID)
 	if err != nil {
 		return nil, err
@@ -101,11 +156,17 @@ func ListInlineThreads(ctx context.Context, db *sql.DB, sourceConvID, userID str
 	return out, rows.Err()
 }
 
-// GetConversation returns one row checked against userID.
+// GetConversation returns one row checked against userID. Access = the OWNER,
+// or — for a workspace conversation — ANY member of that workspace
+// (§workspaces: shared visibility). This is THE access primitive: every
+// per-user handler gates through it, so the membership clause here is what
+// makes the whole conversation surface (read/reply/branch/regenerate/files)
+// workspace-aware at once. Deletion stays creator-only via DeleteConversation's
+// own user_id scope.
 func GetConversation(ctx context.Context, db *sql.DB, id, userID string) (*Conversation, error) {
 	row := db.QueryRowContext(ctx,
-		`SELECT id, user_id, COALESCE(project_id, ''), title, provider, model_id, kb_ids, rag_mode, summary_blocks, COALESCE(active_leaf_id, ''), provider_state, pinned, archived, starred, created_at, updated_at, COALESCE(inline_source_conv, ''), COALESCE(inline_parent_id, ''), COALESCE(inline_quote, '')
-		 FROM conversations WHERE id=? AND user_id=?`, id, userID)
+		`SELECT id, user_id, COALESCE(project_id, ''), title, provider, model_id, kb_ids, rag_mode, summary_blocks, COALESCE(active_leaf_id, ''), provider_state, pinned, archived, starred, created_at, updated_at, COALESCE(inline_source_conv, ''), COALESCE(inline_parent_id, ''), COALESCE(inline_quote, ''), COALESCE(workspace_id, '')
+		 FROM conversations WHERE id=? AND (user_id=? OR (COALESCE(workspace_id,'')<>'' AND workspace_id IN (SELECT workspace_id FROM workspace_members WHERE user_id=?)))`, id, userID, userID)
 	c, err := scanConversation(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -121,7 +182,7 @@ func GetConversation(ctx context.Context, db *sql.DB, id, userID string) (*Conve
 // per-user surfaces must go through GetConversation.
 func GetConversationByID(ctx context.Context, db *sql.DB, id string) (*Conversation, error) {
 	row := db.QueryRowContext(ctx,
-		`SELECT id, user_id, COALESCE(project_id, ''), title, provider, model_id, kb_ids, rag_mode, summary_blocks, COALESCE(active_leaf_id, ''), provider_state, pinned, archived, starred, created_at, updated_at, COALESCE(inline_source_conv, ''), COALESCE(inline_parent_id, ''), COALESCE(inline_quote, '')
+		`SELECT id, user_id, COALESCE(project_id, ''), title, provider, model_id, kb_ids, rag_mode, summary_blocks, COALESCE(active_leaf_id, ''), provider_state, pinned, archived, starred, created_at, updated_at, COALESCE(inline_source_conv, ''), COALESCE(inline_parent_id, ''), COALESCE(inline_quote, ''), COALESCE(workspace_id, '')
 		 FROM conversations WHERE id=?`, id)
 	c, err := scanConversation(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -137,7 +198,7 @@ func scanConversation(s scanner) (Conversation, error) {
 	var c Conversation
 	var pinned, archived, starred int
 	var kbIDs, sumBlocks, provState string
-	if err := s.Scan(&c.ID, &c.UserID, &c.ProjectID, &c.Title, &c.Provider, &c.ModelID, &kbIDs, &c.RAGMode, &sumBlocks, &c.ActiveLeafID, &provState, &pinned, &archived, &starred, &c.CreatedAt, &c.UpdatedAt, &c.InlineSourceConv, &c.InlineParentID, &c.InlineQuote); err != nil {
+	if err := s.Scan(&c.ID, &c.UserID, &c.ProjectID, &c.Title, &c.Provider, &c.ModelID, &kbIDs, &c.RAGMode, &sumBlocks, &c.ActiveLeafID, &provState, &pinned, &archived, &starred, &c.CreatedAt, &c.UpdatedAt, &c.InlineSourceConv, &c.InlineParentID, &c.InlineQuote, &c.WorkspaceID); err != nil {
 		return c, err
 	}
 	c.Pinned = pinned == 1
@@ -181,12 +242,12 @@ func CreateConversation(ctx context.Context, db *sql.DB, c Conversation) (*Conve
 		projectID = c.ProjectID
 	}
 	_, err := db.ExecContext(ctx, `INSERT INTO conversations(
-		id, user_id, project_id, title, provider, model_id, kb_ids, rag_mode, summary_blocks, active_leaf_id, provider_state, pinned, archived, starred, created_at, updated_at, inline_source_conv, inline_parent_id, inline_quote
-	) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, user_id, project_id, title, provider, model_id, kb_ids, rag_mode, summary_blocks, active_leaf_id, provider_state, pinned, archived, starred, created_at, updated_at, inline_source_conv, inline_parent_id, inline_quote, workspace_id
+	) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		c.ID, c.UserID, projectID, c.Title, c.Provider, c.ModelID,
 		string(c.KBIDs), c.RAGMode, string(c.SummaryBlocks), string(c.ProviderState),
 		boolInt(c.Pinned), boolInt(c.Archived), boolInt(c.Starred), now, now,
-		c.InlineSourceConv, c.InlineParentID, c.InlineQuote)
+		c.InlineSourceConv, c.InlineParentID, c.InlineQuote, c.WorkspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -266,8 +327,12 @@ func UpdateConversation(ctx context.Context, db *sql.DB, id, userID string, p Co
 	}
 	parts = append(parts, "updated_at=?")
 	args = append(args, time.Now().Unix())
-	args = append(args, id, userID)
-	q := "UPDATE conversations SET " + strings.Join(parts, ", ") + " WHERE id=? AND user_id=?"
+	args = append(args, id, userID, userID)
+	// Same access predicate as GetConversation: the owner, or any member of the
+	// conversation's workspace (§workspaces — members switch branches, rename,
+	// attach KBs collaboratively). Deletion is NOT here; it stays creator-only.
+	q := "UPDATE conversations SET " + strings.Join(parts, ", ") +
+		" WHERE id=? AND (user_id=? OR (COALESCE(workspace_id,'')<>'' AND workspace_id IN (SELECT workspace_id FROM workspace_members WHERE user_id=?)))"
 	if _, err := db.ExecContext(ctx, q, args...); err != nil {
 		return nil, err
 	}
@@ -417,7 +482,7 @@ func ListMessages(ctx context.Context, db *sql.DB, convID, leafID string) ([]Mes
 // branch — used by clients that render the full tree (sibling counts/branch
 // switching). Sorted by created_at ascending.
 func ListAllMessages(ctx context.Context, db *sql.DB, convID string) ([]Message, error) {
-	rows, err := db.QueryContext(ctx, `SELECT id, conversation_id, COALESCE(parent_id,''), role, provider, model_id, COALESCE(model_label,''), blocks, COALESCE(raw,''), COALESCE(stop_reason,''), attachments, citations, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost, currency, credits, status, error, COALESCE(feedback,''), created_at, gen_ms, COALESCE(verify,'') FROM messages WHERE conversation_id=? ORDER BY created_at ASC`, convID)
+	rows, err := db.QueryContext(ctx, `SELECT id, conversation_id, COALESCE(parent_id,''), role, provider, model_id, COALESCE(model_label,''), blocks, COALESCE(raw,''), COALESCE(stop_reason,''), attachments, citations, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost, currency, credits, status, error, COALESCE(feedback,''), created_at, gen_ms, COALESCE(verify,''), COALESCE(author_id,'') FROM messages WHERE conversation_id=? ORDER BY created_at ASC`, convID)
 	if err != nil {
 		return nil, err
 	}
@@ -435,7 +500,7 @@ func ListAllMessages(ctx context.Context, db *sql.DB, convID string) ([]Message,
 
 // GetMessage returns one row.
 func GetMessage(ctx context.Context, db *sql.DB, id string) (*Message, error) {
-	row := db.QueryRowContext(ctx, `SELECT id, conversation_id, COALESCE(parent_id,''), role, provider, model_id, COALESCE(model_label,''), blocks, COALESCE(raw,''), COALESCE(stop_reason,''), attachments, citations, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost, currency, credits, status, error, COALESCE(feedback,''), created_at, gen_ms, COALESCE(verify,'') FROM messages WHERE id=?`, id)
+	row := db.QueryRowContext(ctx, `SELECT id, conversation_id, COALESCE(parent_id,''), role, provider, model_id, COALESCE(model_label,''), blocks, COALESCE(raw,''), COALESCE(stop_reason,''), attachments, citations, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost, currency, credits, status, error, COALESCE(feedback,''), created_at, gen_ms, COALESCE(verify,''), COALESCE(author_id,'') FROM messages WHERE id=?`, id)
 	m, err := scanMessage(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -449,7 +514,7 @@ func GetMessage(ctx context.Context, db *sql.DB, id string) (*Message, error) {
 func scanMessage(s scanner) (Message, error) {
 	var m Message
 	var blocks, raw, atts, cites, verify string
-	if err := s.Scan(&m.ID, &m.ConversationID, &m.ParentID, &m.Role, &m.Provider, &m.ModelID, &m.ModelLabel, &blocks, &raw, &m.StopReason, &atts, &cites, &m.InputTokens, &m.OutputTokens, &m.CacheReadTokens, &m.CacheWriteTokens, &m.Cost, &m.Currency, &m.Credits, &m.Status, &m.Error, &m.Feedback, &m.CreatedAt, &m.GenMs, &verify); err != nil {
+	if err := s.Scan(&m.ID, &m.ConversationID, &m.ParentID, &m.Role, &m.Provider, &m.ModelID, &m.ModelLabel, &blocks, &raw, &m.StopReason, &atts, &cites, &m.InputTokens, &m.OutputTokens, &m.CacheReadTokens, &m.CacheWriteTokens, &m.Cost, &m.Currency, &m.Credits, &m.Status, &m.Error, &m.Feedback, &m.CreatedAt, &m.GenMs, &verify, &m.AuthorID); err != nil {
 		return m, err
 	}
 	m.Blocks = json.RawMessage(orDefault(blocks, "[]"))
@@ -507,11 +572,11 @@ func CreateMessage(ctx context.Context, db *sql.DB, m Message) (*Message, error)
 	}
 	_, err := db.ExecContext(ctx, `INSERT INTO messages(
 		id, conversation_id, parent_id, role, provider, model_id, model_label, blocks, raw, stop_reason, attachments, citations,
-		input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost, currency, status, error, search_text, created_at
-	) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost, currency, status, error, search_text, author_id, created_at
+	) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		m.ID, m.ConversationID, parent, m.Role, m.Provider, m.ModelID, m.ModelLabel, string(m.Blocks), raw, m.StopReason,
 		string(m.Attachments), string(m.Citations),
-		m.InputTokens, m.OutputTokens, m.CacheReadTokens, m.CacheWriteTokens, m.Cost, m.Currency, m.Status, m.Error, searchTextFromBlocks(m.Blocks), m.CreatedAt)
+		m.InputTokens, m.OutputTokens, m.CacheReadTokens, m.CacheWriteTokens, m.Cost, m.Currency, m.Status, m.Error, searchTextFromBlocks(m.Blocks), m.AuthorID, m.CreatedAt)
 	if err != nil {
 		return nil, err
 	}

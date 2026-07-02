@@ -21,8 +21,10 @@ func CountStandaloneKBsByUser(ctx context.Context, db *sql.DB, userID string) (i
 }
 
 func ListKBs(ctx context.Context, db *sql.DB, userID string) ([]KnowledgeBase, error) {
+	// Personal listing only — workspace KBs are isolated (§workspaces) and listed
+	// via ListWorkspaceKBs.
 	rows, err := db.QueryContext(ctx,
-		`SELECT id, user_id, name, description, embedding_model_id, embedding_dim, COALESCE(project_id, ''), created_at FROM knowledge_bases WHERE user_id=? ORDER BY created_at DESC`, userID)
+		`SELECT id, user_id, name, description, embedding_model_id, embedding_dim, COALESCE(project_id, ''), created_at, COALESCE(workspace_id,'') FROM knowledge_bases WHERE user_id=? AND COALESCE(workspace_id,'')='' ORDER BY created_at DESC`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -38,10 +40,32 @@ func ListKBs(ctx context.Context, db *sql.DB, userID string) ([]KnowledgeBase, e
 	return out, rows.Err()
 }
 
-// OwnedKBIDs filters ids down to the ones actually owned by userID (§C1 — the
-// retrieval scope must never include another user's KB). On a DB error it fails
-// closed (returns none) rather than risk leaking another user's chunks.
-func OwnedKBIDs(ctx context.Context, db *sql.DB, userID string, ids []string) []string {
+// ListWorkspaceKBs lists a workspace's shared KBs (§workspaces). Membership is
+// the handler's job.
+func ListWorkspaceKBs(ctx context.Context, db *sql.DB, workspaceID string) ([]KnowledgeBase, error) {
+	rows, err := db.QueryContext(ctx,
+		`SELECT id, user_id, name, description, embedding_model_id, embedding_dim, COALESCE(project_id, ''), created_at, COALESCE(workspace_id,'') FROM knowledge_bases WHERE workspace_id=? ORDER BY created_at DESC`, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []KnowledgeBase{}
+	for rows.Next() {
+		kb, err := scanKB(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, kb)
+	}
+	return out, rows.Err()
+}
+
+// OwnedKBIDs filters ids down to the ones the user may retrieve from (§C1 — the
+// retrieval scope must never include another user's KB). workspaceID steers the
+// scope (§workspaces): '' admits only the user's PERSONAL KBs; set, it admits
+// only THAT workspace's shared KBs — personal KBs are unusable inside a
+// workspace and vice versa. On a DB error it fails closed (returns none).
+func OwnedKBIDs(ctx context.Context, db *sql.DB, userID, workspaceID string, ids []string) []string {
 	if len(ids) == 0 {
 		return ids
 	}
@@ -51,9 +75,15 @@ func OwnedKBIDs(ctx context.Context, db *sql.DB, userID string, ids []string) []
 		ph[i] = "?"
 		args = append(args, id)
 	}
-	args = append(args, userID)
+	scope := `user_id=? AND COALESCE(workspace_id,'')=''`
+	if workspaceID != "" {
+		scope = `workspace_id=?`
+		args = append(args, workspaceID)
+	} else {
+		args = append(args, userID)
+	}
 	rows, err := db.QueryContext(ctx,
-		`SELECT id FROM knowledge_bases WHERE id IN (`+strings.Join(ph, ",")+`) AND user_id=?`, args...)
+		`SELECT id FROM knowledge_bases WHERE id IN (`+strings.Join(ph, ",")+`) AND `+scope, args...)
 	if err != nil {
 		return nil
 	}
@@ -68,10 +98,11 @@ func OwnedKBIDs(ctx context.Context, db *sql.DB, userID string, ids []string) []
 	return owned
 }
 
-// GetKB reads one row with ownership check.
+// GetKB reads one row with ownership check: the owner, or — for a workspace
+// KB — any member of that workspace (§workspaces: members view/edit shared KBs).
 func GetKB(ctx context.Context, db *sql.DB, id, userID string) (*KnowledgeBase, error) {
 	row := db.QueryRowContext(ctx,
-		`SELECT id, user_id, name, description, embedding_model_id, embedding_dim, COALESCE(project_id, ''), created_at FROM knowledge_bases WHERE id=? AND user_id=?`, id, userID)
+		`SELECT id, user_id, name, description, embedding_model_id, embedding_dim, COALESCE(project_id, ''), created_at, COALESCE(workspace_id,'') FROM knowledge_bases WHERE id=? AND (user_id=? OR (COALESCE(workspace_id,'')<>'' AND workspace_id IN (SELECT workspace_id FROM workspace_members WHERE user_id=?)))`, id, userID, userID)
 	kb, err := scanKB(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -85,7 +116,7 @@ func GetKB(ctx context.Context, db *sql.DB, id, userID string) (*KnowledgeBase, 
 // GetKBByName returns a user's KB by case-insensitive, trimmed name.
 func GetKBByName(ctx context.Context, db *sql.DB, userID, name string) (*KnowledgeBase, error) {
 	row := db.QueryRowContext(ctx,
-		`SELECT id, user_id, name, description, embedding_model_id, embedding_dim, COALESCE(project_id, ''), created_at FROM knowledge_bases WHERE user_id=? AND lower(trim(name))=lower(trim(?)) LIMIT 1`,
+		`SELECT id, user_id, name, description, embedding_model_id, embedding_dim, COALESCE(project_id, ''), created_at, COALESCE(workspace_id,'') FROM knowledge_bases WHERE user_id=? AND lower(trim(name))=lower(trim(?)) LIMIT 1`,
 		userID, name)
 	kb, err := scanKB(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -99,7 +130,7 @@ func GetKBByName(ctx context.Context, db *sql.DB, userID, name string) (*Knowled
 
 func scanKB(s scanner) (KnowledgeBase, error) {
 	var kb KnowledgeBase
-	if err := s.Scan(&kb.ID, &kb.UserID, &kb.Name, &kb.Description, &kb.EmbeddingModelID, &kb.EmbeddingDim, &kb.ProjectID, &kb.CreatedAt); err != nil {
+	if err := s.Scan(&kb.ID, &kb.UserID, &kb.Name, &kb.Description, &kb.EmbeddingModelID, &kb.EmbeddingDim, &kb.ProjectID, &kb.CreatedAt, &kb.WorkspaceID); err != nil {
 		return kb, err
 	}
 	return kb, nil
@@ -119,8 +150,8 @@ func CreateKB(ctx context.Context, db *sql.DB, kb KnowledgeBase) (*KnowledgeBase
 		pid = kb.ProjectID
 	}
 	_, err := db.ExecContext(ctx,
-		`INSERT INTO knowledge_bases(id, user_id, name, description, embedding_model_id, embedding_dim, project_id, created_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
-		kb.ID, kb.UserID, kb.Name, kb.Description, kb.EmbeddingModelID, kb.EmbeddingDim, pid, time.Now().Unix())
+		`INSERT INTO knowledge_bases(id, user_id, name, description, embedding_model_id, embedding_dim, project_id, created_at, workspace_id) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		kb.ID, kb.UserID, kb.Name, kb.Description, kb.EmbeddingModelID, kb.EmbeddingDim, pid, time.Now().Unix(), kb.WorkspaceID)
 	if err != nil {
 		if isUniqueIndexErr(err, "idx_kbs_user_name_unique", "knowledge_bases.user_id") {
 			return nil, ErrKBNameExists
@@ -143,7 +174,9 @@ func SetKBEmbeddingDim(ctx context.Context, db *sql.DB, kbID string, dim int) er
 // the deleted KB's ID from the kb_ids JSON array in all conversations so stale
 // references don't cause retrieval errors (§ FIX-5).
 func DeleteKB(ctx context.Context, db *sql.DB, id, userID string) error {
-	res, err := db.ExecContext(ctx, `DELETE FROM knowledge_bases WHERE id=? AND user_id=?`, id, userID)
+	// Owner, or any member of the KB's workspace (§workspaces — members manage
+	// shared KBs collaboratively).
+	res, err := db.ExecContext(ctx, `DELETE FROM knowledge_bases WHERE id=? AND (user_id=? OR (COALESCE(workspace_id,'')<>'' AND workspace_id IN (SELECT workspace_id FROM workspace_members WHERE user_id=?)))`, id, userID, userID)
 	if err != nil {
 		return err
 	}

@@ -110,6 +110,9 @@ export interface ApiSharedMessage {
   role: 'user' | 'assistant'
   blocks: ApiBlock[]
   citations: ApiCitation[]
+  /** Uploaded attachments (id/filename/kind/url). Absent on snapshots created
+   *  before shares carried assets — re-share to include uploads. */
+  attachments?: ApiAttachment[]
   created_at: number
 }
 
@@ -118,6 +121,28 @@ export interface ApiSharedConversation {
   title: string
   messages: ApiSharedMessage[]
   created_at: number
+}
+
+/** Workspace (§workspaces) — fully-isolated collaborative space. */
+export interface ApiWorkspace {
+  id: string
+  name: string
+  owner_id: string
+  /** Present only for the owner. */
+  invite_token?: string
+  created_at: number
+  role?: 'owner' | 'member'
+  member_count?: number
+  owner_name?: string
+}
+
+export interface ApiWorkspaceMember {
+  user_id: string
+  role: 'owner' | 'member'
+  joined_at: number
+  name: string
+  email: string
+  avatar_url: string
 }
 
 /** Membership tier (§ user groups). */
@@ -139,6 +164,9 @@ export interface ApiUserGroup {
   credit_period_seconds: number
   created_at: number
   updated_at: number
+  max_workspaces?: number
+  /** Listed on the public subscription page. */
+  is_public?: boolean
 }
 
 /** Per-model, per-group usage cap. */
@@ -336,6 +364,8 @@ export interface ApiProject {
   auto_add_uploads: boolean
   created_at: number
   updated_at: number
+  /** §workspaces */
+  workspace_id?: string
 }
 
 export interface ApiKnowledgeBase {
@@ -406,6 +436,10 @@ export interface ApiConversation {
   inline_source_conv?: string
   inline_parent_id?: string
   inline_quote?: string
+  /** §workspaces */
+  workspace_id?: string
+  creator_name?: string
+  creator_avatar?: string
 }
 
 export type ApiBlockKind =
@@ -483,6 +517,10 @@ export interface ApiMessage {
   branch_index?: number
   branch_count?: number
   siblings?: string[]
+  /** §workspaces — author of a user turn in a shared conversation. */
+  author_id?: string
+  author_name?: string
+  author_avatar?: string
 }
 
 export interface ApiMemory {
@@ -521,6 +559,9 @@ export interface ApiUsageRecord {
   cost: number
   currency: string
   created_at: number
+  /** §workspaces */
+  workspace_id?: string
+  workspace_name?: string
 }
 
 /** SSE event shapes — matches §6.2. */

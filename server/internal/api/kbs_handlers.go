@@ -12,7 +12,19 @@ import (
 // listKBsHandler returns the user's knowledge bases.
 func listKBsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
-	rows, err := store.ListKBs(r.Context(), d.DB, u.ID)
+	// Workspace scope (§workspaces): a member lists the space's shared KBs;
+	// otherwise the personal ones. Inside a workspace, personal KBs are unusable.
+	var rows []store.KnowledgeBase
+	var err error
+	if wsID := strings.TrimSpace(r.URL.Query().Get("workspace_id")); wsID != "" {
+		if role, merr := store.IsWorkspaceMember(r.Context(), d.DB, wsID, u.ID); merr != nil || role == "" {
+			writeError(w, 404, errNotFound)
+			return
+		}
+		rows, err = store.ListWorkspaceKBs(r.Context(), d.DB, wsID)
+	} else {
+		rows, err = store.ListKBs(r.Context(), d.DB, u.ID)
+	}
 	if err != nil {
 		writeError(w, 500, err)
 		return
@@ -24,6 +36,8 @@ type createKBReq struct {
 	Name             string `json:"name"`
 	Description      string `json:"description"`
 	EmbeddingModelID string `json:"embedding_model_id"`
+	// '' = personal; set = shared workspace KB (§workspaces).
+	WorkspaceID string `json:"workspace_id"`
 }
 
 // createKBHandler creates a new KB pinned to one embedding model.
@@ -37,6 +51,13 @@ func createKBHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	if req.Name = strings.TrimSpace(req.Name); req.Name == "" {
 		writeError(w, 400, errors.New("name required"))
 		return
+	}
+	req.WorkspaceID = strings.TrimSpace(req.WorkspaceID)
+	if req.WorkspaceID != "" {
+		if role, merr := store.IsWorkspaceMember(r.Context(), d.DB, req.WorkspaceID, u.ID); merr != nil || role == "" {
+			writeError(w, 404, errNotFound)
+			return
+		}
 	}
 	if existing, err := store.GetKBByName(r.Context(), d.DB, u.ID, req.Name); err == nil && existing != nil {
 		writeError(w, 409, store.ErrKBNameExists)
@@ -73,6 +94,7 @@ func createKBHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		Description:      req.Description,
 		EmbeddingModelID: m.ID,
 		EmbeddingDim:     m.Dim,
+		WorkspaceID:      req.WorkspaceID,
 	})
 	if err != nil {
 		if errors.Is(err, store.ErrKBNameExists) {

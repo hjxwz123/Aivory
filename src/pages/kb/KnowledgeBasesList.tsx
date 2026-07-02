@@ -1,6 +1,7 @@
 /**
  * KnowledgeBasesList — gallery of the user's knowledge bases.
  */
+import { activeWorkspaceId } from '@/store/workspaces'
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
@@ -39,7 +40,7 @@ export default function KnowledgeBasesList() {
   async function load() {
     setLoading(true)
     try {
-      const [kb, em] = await Promise.all([kbsApi.list(), modelsApi.listEmbedding()])
+      const [kb, em] = await Promise.all([kbsApi.list(activeWorkspaceId()), modelsApi.listEmbedding()])
       setRows(kb)
       setModels(em.models)
       if (em.models.length > 0 && !draft.embedding_model_id) {
@@ -66,7 +67,7 @@ export default function KnowledgeBasesList() {
     creatingRef.current = true
     setCreating(true)
     try {
-      await kbsApi.create(draft)
+      await kbsApi.create({ ...draft, workspace_id: activeWorkspaceId() })
       toast.success(t('kb:dialog.created'))
       setOpen(false)
       setDraft({ name: '', description: '', embedding_model_id: draft.embedding_model_id })

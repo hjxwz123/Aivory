@@ -385,7 +385,8 @@
       "title": "刪除這些用量記錄？",
       "body": "將永久刪除目前篩選條件下的 {{count}} 筆記錄。此操作無法復原。",
       "action": "刪除"
-    }
+    },
+    "workspaceTag": "空間"
   },
   "documents": {
     "title": "文件",
@@ -573,7 +574,12 @@
       "creditPeriodHint": "限時積分多久重置一次。",
       "unitHour": "小時",
       "unitDay": "天",
-      "unitWeek": "週"
+      "unitWeek": "週",
+      "maxWorkspaces": "最多工作空間數",
+      "workspaces": "工作空間",
+      "workspacesHint": "允許該用戶組建立工作空間（數量上限見上；0 = 不限）。",
+      "isPublic": "在訂閱頁展示",
+      "isPublicHint": "關閉後該用戶組不再出現在訂閱頁（已在該組的用戶不受影響）。"
     },
     "errors": {
       "nameRequired": "請填寫名稱"
@@ -801,5 +807,30 @@
     "hiddenPrompt": "風格提示詞（對使用者隱藏）",
     "hiddenPromptPlaceholder": "如：柔和水彩、紙張紋理、低飽和配色",
     "nameRequired": "名稱必填。"
+  },
+  "workspaces": {
+    "title": "工作空間",
+    "subtitle": "所有協作空間及其建立者、成員數。",
+    "loadFailed": "載入工作空間失敗。",
+    "deleted": "工作空間已刪除。",
+    "deleteFailed": "刪除工作空間失敗。",
+    "emptyTitle": "尚無工作空間",
+    "emptyBody": "使用者可在側欄頭像選單中建立工作空間。",
+    "colName": "名稱",
+    "colOwner": "建立者",
+    "colMembers": "成員",
+    "colCreated": "建立時間",
+    "view": "檢視",
+    "back": "全部工作空間",
+    "detailMeta": "建立者 {{owner}} · {{count}} 名成員",
+    "members": "成員",
+    "conversations": "對話",
+    "projects": "專案",
+    "kbs": "知識庫",
+    "delete": "刪除工作空間",
+    "deleteTitle": "刪除該工作空間？",
+    "deleteBody": "其中的所有對話、專案和知識庫將被刪除，全部成員失去存取權限。此操作無法復原。",
+    "roleOwner": "建立者",
+    "roleMember": "成員"
   }
 }
