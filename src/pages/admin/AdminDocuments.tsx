@@ -206,7 +206,7 @@ export default function AdminDocuments() {
                 </div>
                 <Switch
                   checked={readBool('rag_dynamic_topk', false)}
-                  onChange={(v) => setDraft({ ...draft, rag_dynamic_topk: v })}
+                  onCheckedChange={(v) => setDraft({ ...draft, rag_dynamic_topk: v })}
                 />
               </div>
               {readBool('rag_dynamic_topk', false) && (
@@ -254,7 +254,7 @@ export default function AdminDocuments() {
               </div>
               <Switch
                 checked={readBool('credit_preflight_enabled', true)}
-                onChange={(v) => setDraft({ ...draft, credit_preflight_enabled: v })}
+                onCheckedChange={(v) => setDraft({ ...draft, credit_preflight_enabled: v })}
               />
             </div>
           </div>
