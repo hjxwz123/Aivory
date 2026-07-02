@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { Loader2 } from 'lucide-react'
 import { MessageRow } from './message-row'
+import { useAuth } from '@/store/auth'
 import { useConversations, MSG_PAGE } from '@/store/conversations'
 import { useSettings } from '@/store/settings'
 import { toast } from '@/hooks/use-toast'
@@ -25,6 +26,7 @@ const INITIAL_WINDOW = 24
 const BATCH = 24
 
 export function MessageList({ conversation, scrollToMessageId, jumpKey }: MessageListProps) {
+  const meId = useAuth((s) => s.user?.id)
   const navigate = useNavigate()
   const { t } = useTranslation('chat')
   // Pull stable selectors only — keeps this component out of the per-token
@@ -250,7 +252,15 @@ export function MessageList({ conversation, scrollToMessageId, jumpKey }: Messag
           onDislike={handleDislike}
           onBranchSwitch={handleBranchSwitch}
           onFork={handleFork}
-          onDelete={handleDelete}
+          onDelete={
+            // §workspaces: hide the delete-round affordance on turns the member
+            // cannot delete (server enforces author-or-creator regardless). In a
+            // shared conversation: the creator moderates everything; others only
+            // their own user turns (assistant rows have no author -> hidden).
+            !conversation.workspaceId || conversation.creatorId === meId || (m.role === 'user' && m.authorId === meId)
+              ? handleDelete
+              : undefined
+          }
           userMessageMarkdown={userMessageMarkdown}
         />
       ))}

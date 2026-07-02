@@ -17,6 +17,7 @@ import { initials } from '@/components/ui/avatar.utils'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -134,7 +135,7 @@ export function CreateWorkspaceDialog({ open, onOpenChange }: { open: boolean; o
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-sm">
+      <DialogContent size="sm">
         <DialogHeader>
           <DialogTitle>{t('workspace.create', { defaultValue: 'Create workspace' })}</DialogTitle>
           <DialogDescription>
@@ -143,13 +144,15 @@ export function CreateWorkspaceDialog({ open, onOpenChange }: { open: boolean; o
             })}
           </DialogDescription>
         </DialogHeader>
-        <Input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && void submit()}
-          placeholder={t('workspace.namePlaceholder', { defaultValue: 'Workspace name' })}
-          autoFocus
-        />
+        <DialogBody>
+          <Input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && void submit()}
+            placeholder={t('workspace.namePlaceholder', { defaultValue: 'Workspace name' })}
+            autoFocus
+          />
+        </DialogBody>
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
             {t('common.cancel', { ns: 'common', defaultValue: 'Cancel' })}
@@ -166,7 +169,6 @@ export function CreateWorkspaceDialog({ open, onOpenChange }: { open: boolean; o
 /** Members + invite management for the ACTIVE workspace. */
 export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const { t } = useTranslation('chat')
-  const me = useAuth((s) => s.user)
   const activeId = useWorkspaces((s) => s.activeId)
   const ws = useWorkspaces((s) => (s.activeId ? s.workspaces.find((w) => w.id === s.activeId) : undefined))
   const removeWs = useWorkspaces((s) => s.remove)
@@ -209,7 +211,7 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent size="md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Briefcase size={15} aria-hidden />
@@ -220,6 +222,7 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
           </DialogDescription>
         </DialogHeader>
 
+        <DialogBody className="space-y-4">
         {/* Invite link — owner only */}
         {isOwner && inviteURL ? (
           <div className="rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-2.5">
@@ -272,6 +275,7 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
             </li>
           ))}
         </ul>
+        </DialogBody>
 
         <DialogFooter className="justify-between">
           {isOwner ? (
@@ -299,7 +303,6 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
             {t('common.close', { ns: 'common', defaultValue: 'Close' })}
           </Button>
         </DialogFooter>
-        {me?.id === ws.owner_id ? null : null}
       </DialogContent>
     </Dialog>
   )

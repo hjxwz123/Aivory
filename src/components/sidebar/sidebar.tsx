@@ -513,26 +513,31 @@ function ConversationItem({
           onClick={onSelect}
           className="block px-2.5 py-2 pr-9 max-lg:py-2.5 max-lg:pr-12 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] rounded-[10px]"
         >
-          <span
-            className={cn(
-              'block truncate text-[13.5px] max-lg:text-[15px] leading-snug',
-              active ? 'text-[var(--color-fg)] font-medium' : 'text-[var(--color-fg-muted)]',
-            )}
-          >
-            {conversation.starred ? '☆ ' : ''}
-            {truncate(conversation.title || t('untitled'), 50)}
-          </span>
-          {conversation.workspaceId && conversation.creatorName ? (
-            <span className="mt-0.5 flex items-center gap-1.5 text-[11px] text-[var(--color-fg-subtle)]">
-              <Avatar size="xs">
-                {conversation.creatorAvatar ? (
-                  <AvatarImage src={conversation.creatorAvatar} alt={conversation.creatorName} />
-                ) : null}
-                <AvatarFallback>{initials(conversation.creatorName)}</AvatarFallback>
-              </Avatar>
-              <span className="truncate">{conversation.creatorName}</span>
+          <span className="flex items-center gap-2">
+            <span
+              className={cn(
+                'min-w-0 flex-1 truncate text-[13.5px] max-lg:text-[15px] leading-snug',
+                active ? 'text-[var(--color-fg)] font-medium' : 'text-[var(--color-fg-muted)]',
+              )}
+            >
+              {conversation.starred ? '☆ ' : ''}
+              {conversation.title || t('untitled')}
             </span>
-          ) : null}
+            {conversation.workspaceId && conversation.creatorName ? (
+              <span
+                className="flex max-w-[45%] shrink-0 items-center gap-1 text-[11px] text-[var(--color-fg-subtle)]"
+                title={conversation.creatorName}
+              >
+                <Avatar size="xs">
+                  {conversation.creatorAvatar ? (
+                    <AvatarImage src={conversation.creatorAvatar} alt={conversation.creatorName} />
+                  ) : null}
+                  <AvatarFallback>{initials(conversation.creatorName)}</AvatarFallback>
+                </Avatar>
+                <span className="truncate">{conversation.creatorName}</span>
+              </span>
+            ) : null}
+          </span>
         </Link>
         <div className="absolute right-1.5 top-1/2 -translate-y-1/2">
           <DropdownMenu>

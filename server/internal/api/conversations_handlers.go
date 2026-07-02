@@ -350,7 +350,7 @@ func getConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	// `< n/m >` branch picker on a fresh load or post-stream reconcile (§4.15).
 	writeJSON(w, 200, map[string]any{
 		"conversation": conv,
-		"messages":     redactCost(enrichWithSiblings(d, r, window)),
+		"messages":     redactCost(enrichWithAuthors(d, r, enrichWithSiblings(d, r, window))),
 		"has_more":     hasMore,
 		"next_before":  nextBefore,
 	})
@@ -658,7 +658,7 @@ func setActiveLeafHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	stripServerConvFields(conv)
 	writeJSON(w, 200, map[string]any{
 		"conversation": conv,
-		"messages":     redactCost(enrichWithSiblings(d, r, msgs)),
+		"messages":     redactCost(enrichWithAuthors(d, r, enrichWithSiblings(d, r, msgs))),
 	})
 }
 

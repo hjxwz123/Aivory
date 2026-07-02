@@ -7,7 +7,7 @@
 import { Suspense, useEffect, useState } from 'react'
 import { NavLink, Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { ArrowLeft, BarChart3, Cpu, Menu, Settings2, Sparkles, Users } from 'lucide-react'
+import { ArrowLeft, BarChart3, Briefcase, Cpu, Menu, Settings2, Sparkles, Users } from 'lucide-react'
 import { useAuth } from '@/store/auth'
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet'
 import { RouteFade } from '@/components/ui/route-fade'
@@ -71,9 +71,14 @@ const SECTIONS: AdminSection[] = [
     tabs: [
       { to: '/admin/users', labelKey: 'admin:users.title' },
       { to: '/admin/user-groups', labelKey: 'admin:groups.title' },
-      { to: '/admin/workspaces', labelKey: 'admin:workspaces.title' },
       { to: '/admin/redeem-codes', labelKey: 'admin:redeemCodes.title' },
     ],
+  },
+  {
+    key: 'workspaces',
+    icon: Briefcase,
+    to: '/admin/workspaces',
+    tabs: [{ to: '/admin/workspaces', labelKey: 'admin:workspaces.title' }],
   },
   {
     key: 'data',

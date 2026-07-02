@@ -791,7 +791,8 @@
     "capabilities": "Capabilities",
     "users": "Users",
     "data": "Analytics",
-    "system": "System"
+    "system": "System",
+    "workspaces": "Workspaces"
   },
   "imageStyles": {
     "title": "Image styles",

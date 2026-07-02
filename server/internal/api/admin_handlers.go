@@ -746,7 +746,7 @@ func listConversationMessagesAdmin(d Deps, w http.ResponseWriter, r *http.Reques
 			writeError(w, 500, err)
 			return
 		}
-		writeJSON(w, 200, enrichWithSiblings(d, r, msgs))
+		writeJSON(w, 200, enrichWithAuthors(d, r, enrichWithSiblings(d, r, msgs)))
 		return
 	}
 	msgs, err := store.ListMessages(r.Context(), d.DB, id, conv.ActiveLeafID)
@@ -754,7 +754,7 @@ func listConversationMessagesAdmin(d Deps, w http.ResponseWriter, r *http.Reques
 		writeError(w, 500, err)
 		return
 	}
-	writeJSON(w, 200, enrichWithSiblings(d, r, msgs))
+	writeJSON(w, 200, enrichWithAuthors(d, r, enrichWithSiblings(d, r, msgs)))
 }
 
 // ===== Usage report =====

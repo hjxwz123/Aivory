@@ -431,7 +431,7 @@ func deleteMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	// Enrich with sibling/branch metadata + redact admin-only cost, exactly like
 	// getConversationHandler — otherwise the swapped-in path loses its `< n/m >`
 	// branch picker and leaks per-message cost to the user.
-	writeJSON(w, 200, map[string]any{"ok": true, "active_leaf_id": newLeaf, "messages": redactCost(enrichWithSiblings(d, r, msgs))})
+	writeJSON(w, 200, map[string]any{"ok": true, "active_leaf_id": newLeaf, "messages": redactCost(enrichWithAuthors(d, r, enrichWithSiblings(d, r, msgs)))})
 }
 
 // feedbackMessageHandler stores a like/dislike on an assistant message.

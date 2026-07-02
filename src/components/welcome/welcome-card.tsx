@@ -374,7 +374,7 @@ export function WelcomeCard() {
         <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-28 opacity-[0.18] blur-2xl"
           style={{ background: 'radial-gradient(60% 80% at 50% 0%, var(--color-accent), transparent 70%)' }}
         />
-        <div className="relative flex flex-col items-center gap-4 pt-3 pb-1">
+        <div className="relative flex flex-col items-center gap-4 px-6 pt-8 pb-6 sm:px-8">
           <Logo size="lg" />
           <div>
             <DialogTitle className="font-serif text-2xl tracking-tight text-[var(--color-fg)]">

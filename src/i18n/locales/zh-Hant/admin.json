@@ -791,7 +791,8 @@
     "capabilities": "能力",
     "users": "使用者",
     "data": "資料",
-    "system": "系統"
+    "system": "系統",
+    "workspaces": "工作空間"
   },
   "imageStyles": {
     "title": "圖片風格",

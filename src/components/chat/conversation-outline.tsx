@@ -530,15 +530,22 @@ export function ConversationOutline({ conversation, scrollContainerRef, onClose 
                   >
                     <span className="flex items-center gap-2 shrink-0">
                       {isUser ? (
+                        // §workspaces: a shared conversation's question nodes carry
+                        // their AUTHOR — show that identity, not the viewer's.
                         <Avatar size="xs">
-                          {avatarUrl ? <AvatarImage src={avatarUrl} alt={displayName} /> : null}
-                          <AvatarFallback>{initials(displayName)}</AvatarFallback>
+                          {(n.msg.authorAvatar ?? avatarUrl) ? (
+                            <AvatarImage
+                              src={n.msg.authorAvatar || avatarUrl || ''}
+                              alt={n.msg.authorName || displayName}
+                            />
+                          ) : null}
+                          <AvatarFallback>{initials(n.msg.authorName || displayName)}</AvatarFallback>
                         </Avatar>
                       ) : (
                         <ModelIcon icon={model?.icon} size={17} />
                       )}
                       <span className="truncate text-[12px] font-semibold text-[var(--color-fg)]">
-                        {isUser ? displayName : model?.label || n.msg.modelLabel || t('assistant')}
+                        {isUser ? n.msg.authorName || displayName : model?.label || n.msg.modelLabel || t('assistant')}
                       </span>
                     </span>
                     <span

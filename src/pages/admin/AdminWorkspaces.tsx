@@ -4,6 +4,7 @@
  * and delete a workspace with all its content.
  */
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { Briefcase, ChevronLeft, Trash2, Users } from 'lucide-react'
 import { workspacesApi } from '@/api'
@@ -196,8 +197,18 @@ function WorkspaceDetail({
           ))}
         </Panel>
         <Panel title={`${t('workspaces.conversations', { defaultValue: 'Conversations' })} · ${conversations.length}`}>
-          {conversations.slice(0, 50).map((c) => (
-            <Row key={c.id} main={c.title || '—'} sub={c.creator_name || ''} />
+          {conversations.slice(0, 100).map((c) => (
+            <li key={c.id}>
+              <Link
+                to={`/admin/users/${encodeURIComponent(c.user_id)}/conversations/${encodeURIComponent(c.id)}`}
+                className="block rounded-[8px] px-2 py-1.5 hover:bg-[var(--color-bg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+              >
+                <div className="truncate text-[13px] text-[var(--color-fg)] hover:text-[var(--color-accent)]">{c.title || '—'}</div>
+                {c.creator_name ? (
+                  <div className="truncate text-[11px] text-[var(--color-fg-subtle)]">{c.creator_name}</div>
+                ) : null}
+              </Link>
+            </li>
           ))}
         </Panel>
         <Panel title={`${t('workspaces.projects', { defaultValue: 'Projects' })} · ${projects.length}`}>

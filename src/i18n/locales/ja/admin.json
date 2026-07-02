@@ -791,7 +791,8 @@
     "capabilities": "機能",
     "users": "ユーザー",
     "data": "分析",
-    "system": "システム"
+    "system": "システム",
+    "workspaces": "ワークスペース"
   },
   "imageStyles": {
     "title": "画像スタイル",
