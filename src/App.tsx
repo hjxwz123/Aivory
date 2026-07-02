@@ -37,6 +37,7 @@ const SettingsShortcuts = lazy(() => import('@/pages/settings/Shortcuts'))
 const SettingsAbout = lazy(() => import('@/pages/settings/About'))
 const Subscription = lazy(() => import('@/pages/subscription/Subscription'))
 const SharedConversation = lazy(() => import('@/pages/share/SharedConversation'))
+const JoinWorkspace = lazy(() => import('@/pages/workspace/JoinWorkspace'))
 const AdminLayout = lazy(() => import('@/pages/admin/AdminLayout'))
 const AdminChannels = lazy(() => import('@/pages/admin/AdminChannels'))
 const AdminModels = lazy(() => import('@/pages/admin/AdminModels'))
@@ -46,6 +47,7 @@ const AdminSkills = lazy(() => import('@/pages/admin/AdminSkills'))
 const AdminImageStyles = lazy(() => import('@/pages/admin/AdminImageStyles'))
 const AdminUsers = lazy(() => import('@/pages/admin/AdminUsers'))
 const AdminUserGroups = lazy(() => import('@/pages/admin/AdminUserGroups'))
+const AdminWorkspaces = lazy(() => import('@/pages/admin/AdminWorkspaces'))
 const AdminUserConversations = lazy(() => import('@/pages/admin/AdminUserConversations'))
 const AdminUserConversation = lazy(() => import('@/pages/admin/AdminUserConversation'))
 const AdminUserLibrary = lazy(() => import('@/pages/admin/AdminUserLibrary'))
@@ -125,6 +127,7 @@ export default function App() {
           <Routes>
             <Route path="/welcome" element={<Landing />} />
             <Route path="/share/:token" element={<SharedConversation />} />
+            <Route path="/workspace/join/:token" element={<JoinWorkspace />} />
             <Route path="/" element={<ChatLayout />}>
               <Route index element={<ChatHome />} />
               <Route path="chat/:id" element={<ChatThread />} />
@@ -177,6 +180,7 @@ export default function App() {
               <Route path="image-styles" element={<AdminImageStyles />} />
               <Route path="users" element={<AdminUsers />} />
               <Route path="user-groups" element={<AdminUserGroups />} />
+              <Route path="workspaces" element={<AdminWorkspaces />} />
               <Route path="redeem-codes" element={<AdminRedeemCodes />} />
               <Route path="users/:id/conversations" element={<AdminUserConversations />} />
               <Route path="users/:id/library" element={<AdminUserLibrary />} />

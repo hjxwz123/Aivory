@@ -21,8 +21,16 @@ import {
   Languages,
   Loader2,
   X,
+  ArrowLeftRight,
+  Briefcase,
 } from 'lucide-react'
 import { Logo, LogoMark } from '@/components/brand/logo'
+import { useWorkspaces } from '@/store/workspaces'
+import {
+  CreateWorkspaceDialog,
+  WorkspaceMembersDialog,
+  WorkspaceMenuItems,
+} from '@/components/sidebar/workspace-menu'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { initials } from '@/components/ui/avatar.utils'
 import { Tooltip } from '@/components/ui/tooltip'
@@ -81,6 +89,7 @@ function isConversationStreaming(conversation: Conversation): boolean {
 }
 
 export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
+  const activeWorkspace = useWorkspaces((s) => (s.activeId ? s.workspaces.find((w) => w.id === s.activeId) : undefined))
   const navigate = useNavigate()
   const { id: currentId } = useParams<{ id?: string }>()
   const { t } = useTranslation('chat')
@@ -90,7 +99,15 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
   // Gate re-renders on the conversation SUMMARY (title/flags/order), not message
   // content — so a streaming turn's per-token message updates don't re-run the
   // filter/sort/bucket pipeline below or reconcile every row (§ perf).
-  const allConversations = useConversations((s) => s.conversations, sameConvListShape)
+  const allConversationsRaw = useConversations((s) => s.conversations, sameConvListShape)
+  const activeWsId = useWorkspaces((s) => s.activeId)
+  // §workspaces isolation: the cache can transiently hold rows from another
+  // space (loadOne of a cross-space deep link, a stale in-flight list) — the
+  // sidebar only ever RENDERS the current space's rows.
+  const allConversations = useMemo(
+    () => allConversationsRaw.filter((c) => (c.workspaceId ?? '') === (activeWsId ?? '')),
+    [allConversationsRaw, activeWsId],
+  )
   const hasMore = useConversations((s) => s.hasMore)
   const loadingMore = useConversations((s) => s.loadingMore)
   const loadMore = useConversations((s) => s.loadMore)
@@ -179,12 +196,25 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
         'transition-[width] duration-[220ms] ease-[var(--ease-out)]',
       )}
     >
-      {/* Header */}
+      {/* Header — inside a workspace the brand slot shows the WORKSPACE NAME
+          (§workspaces spec: sidebar 上方原先显示 aurelia 的地方显示工作空间名称). */}
       <div className="flex items-center justify-between px-3 h-[56px] shrink-0">
         {!collapsed ? (
+          activeWorkspace ? (
+            <Link
+              to="/"
+              className="inline-flex min-w-0 items-center gap-2"
+              aria-label={activeWorkspace.name}
+              title={activeWorkspace.name}
+            >
+              <Briefcase size={16} aria-hidden className="shrink-0 text-[var(--color-fg-muted)]" />
+              <span className="truncate font-serif text-[15px] text-[var(--color-fg)]">{activeWorkspace.name}</span>
+            </Link>
+          ) : (
           <Link to="/" className="inline-flex items-center" aria-label={tCommon('aria.homeLink')}>
             <Logo size="sm" />
           </Link>
+          )
         ) : (
           <Link to="/" className="mx-auto" aria-label={tCommon('aria.homeLink')}>
             <LogoMark size={22} />
@@ -385,7 +415,23 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
 
       {/* Footer */}
       <div className={cn('mt-auto border-t border-[var(--color-divider)] p-2', collapsed && 'flex items-center justify-center')}>
-        <UserMenu collapsed={collapsed} />
+        <div className={cn('flex items-center gap-1', collapsed && 'flex-col')}>
+          <div className="min-w-0 flex-1">
+            <UserMenu collapsed={collapsed} />
+          </div>
+          {activeWorkspace || activeWsId ? (
+            <Tooltip content={t('workspace.backToPersonal', { defaultValue: 'Switch to personal space' })}>
+              <button
+                type="button"
+                onClick={() => void useWorkspaces.getState().switchTo(null)}
+                aria-label={t('workspace.backToPersonal', { defaultValue: 'Switch to personal space' })}
+                className="inline-flex size-8 shrink-0 items-center justify-center rounded-[8px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+              >
+                <ArrowLeftRight size={14} aria-hidden />
+              </button>
+            </Tooltip>
+          ) : null}
+        </div>
       </div>
 
       <NewProjectDialog open={newProjectOpen} onOpenChange={setNewProjectOpen} />
@@ -431,6 +477,7 @@ function ConversationItem({
   onSelect?: () => void
   t: TFunction<'chat'>
 }) {
+  const meId = useAuth((s) => s.user?.id)
   const rename = useConversations((s) => s.renameConversation)
   const remove = useConversations((s) => s.deleteConversation)
   const star = useConversations((s) => s.toggleStar)
@@ -475,6 +522,17 @@ function ConversationItem({
             {conversation.starred ? '☆ ' : ''}
             {truncate(conversation.title || t('untitled'), 50)}
           </span>
+          {conversation.workspaceId && conversation.creatorName ? (
+            <span className="mt-0.5 flex items-center gap-1.5 text-[11px] text-[var(--color-fg-subtle)]">
+              <Avatar size="xs">
+                {conversation.creatorAvatar ? (
+                  <AvatarImage src={conversation.creatorAvatar} alt={conversation.creatorName} />
+                ) : null}
+                <AvatarFallback>{initials(conversation.creatorName)}</AvatarFallback>
+              </Avatar>
+              <span className="truncate">{conversation.creatorName}</span>
+            </span>
+          ) : null}
         </Link>
         <div className="absolute right-1.5 top-1/2 -translate-y-1/2">
           <DropdownMenu>
@@ -513,10 +571,12 @@ function ConversationItem({
                 <Archive size={13} aria-hidden />
                 {t('sidebar.archive')}
               </DropdownMenuItem>
-              <DropdownMenuItem destructive onClick={() => setConfirm(true)}>
-                <Trash2 size={13} aria-hidden />
-                {t('sidebar.delete')}
-              </DropdownMenuItem>
+              {!conversation.workspaceId || conversation.creatorId === meId ? (
+                <DropdownMenuItem destructive onClick={() => setConfirm(true)}>
+                  <Trash2 size={13} aria-hidden />
+                  {t('sidebar.delete')}
+                </DropdownMenuItem>
+              ) : null}
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
@@ -591,6 +651,8 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
   const lang = useLanguage((s) => s.lang)
   const setLang = useLanguage((s) => s.setLang)
   const [archivedOpen, setArchivedOpen] = useState(false)
+  const [wsMembersOpen, setWsMembersOpen] = useState(false)
+  const [wsCreateOpen, setWsCreateOpen] = useState(false)
   return (
     <>
     <DropdownMenu>
@@ -650,6 +712,7 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
             {t('chat:userMenu.admin', { defaultValue: 'Admin' })}
           </DropdownMenuItem>
         )}
+        <WorkspaceMenuItems onManage={() => setWsMembersOpen(true)} onCreate={() => setWsCreateOpen(true)} />
         <DropdownMenuSeparator />
         <DropdownMenuSub>
           <DropdownMenuSubTrigger>
@@ -680,6 +743,8 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
+    <WorkspaceMembersDialog open={wsMembersOpen} onOpenChange={setWsMembersOpen} />
+    <CreateWorkspaceDialog open={wsCreateOpen} onOpenChange={setWsCreateOpen} />
     <ArchivedDialog open={archivedOpen} onOpenChange={setArchivedOpen} />
     </>
   )

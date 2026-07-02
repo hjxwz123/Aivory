@@ -59,6 +59,8 @@ type ToolContext struct {
 	UserID    string
 	ConvID    string
 	MessageID string
+	// WorkspaceID attributes tool spend to a workspace (§workspaces). '' = personal.
+	WorkspaceID string
 	// ModelID is the chat model driving this turn. use_skill + skill-asset staging
 	// scope to the skills bound to THIS model (model_skills, §4.17), so a model can
 	// only load the skills an admin checked for it — the same set the system-prompt
@@ -471,6 +473,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			ConversationID: conv.ID, ParentID: parentID, Role: "user",
 			Provider: channel.Type, ModelID: model.ID,
 			Blocks: userBlocks, Attachments: atts,
+			AuthorID: req.UserID, // §workspaces: shared conversations attribute each question
 		})
 		if err != nil {
 			return nil, fmt.Errorf("save user message: %w", err)
@@ -493,7 +496,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// Persist new conversation defaults.
 	tmpModelID := model.ID
 	tmpProvider := channel.Type
-	_, _ = store.UpdateConversation(ctx, o.db, conv.ID, conv.UserID, store.ConversationPatch{
+	_, _ = store.UpdateConversation(ctx, o.db, conv.ID, req.UserID, store.ConversationPatch{
 		ModelID: &tmpModelID, Provider: &tmpProvider,
 	})
 
@@ -507,9 +510,9 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	var msg string
 	var ok, payWithCredits bool
 	if model.Kind == "image" {
-		msg, ok, payWithCredits = o.checkImageQuota(ctx, conv.UserID, model, 1)
+		msg, ok, payWithCredits = o.checkImageQuota(ctx, req.UserID, model, 1)
 	} else {
-		msg, ok, payWithCredits = o.checkModelQuota(ctx, conv.UserID, model)
+		msg, ok, payWithCredits = o.checkModelQuota(ctx, req.UserID, model)
 	}
 	if !ok {
 		refusalBlocks, _ := json.Marshal([]UnifiedBlock{{Kind: "text", Text: msg}})
@@ -525,7 +528,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// 2c. Content moderation (§ moderation): screen the new user prompt alone
 	//     (no history) before any provider call. On block, persist a refusal and
 	//     stop — generation never runs.
-	if blocked, msg := o.moderatePrompt(ctx, model, req.UserText, conv.UserID, conv.ID, assistantMsg.ID); blocked {
+	if blocked, msg := o.moderatePrompt(ctx, model, req.UserText, req.UserID, conv.ID, assistantMsg.ID); blocked {
 		refusalBlocks, _ := json.Marshal([]UnifiedBlock{{Kind: "text", Text: msg}})
 		_ = store.FinishMessage(ctx, o.db, assistantMsg.ID, store.MessageFinishPatch{
 			Blocks: refusalBlocks, Citations: []byte("[]"), StopReason: "content_moderation", Status: "complete",
@@ -552,7 +555,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	projectFiles := []ProjectFileSummary{}
 	kbIDs := []string{}
 	if conv.ProjectID != "" {
-		if p, err := store.GetProject(ctx, o.db, conv.ProjectID, conv.UserID); err == nil {
+		if p, err := store.GetProject(ctx, o.db, conv.ProjectID, req.UserID); err == nil {
 			projectName = p.Name
 			projectInstructions = p.Instructions
 			if p.KBID != "" {
@@ -575,7 +578,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// by kb_id — so drop any KB the user doesn't own BEFORE it reaches inline RAG
 	// or the search_knowledge_base tool (ToolContext.KBIDs below).
 	if len(kbIDs) > 0 {
-		kbIDs = store.OwnedKBIDs(ctx, o.db, conv.UserID, kbIDs)
+		kbIDs = store.OwnedKBIDs(ctx, o.db, req.UserID, conv.WorkspaceID, kbIDs)
 	}
 
 	// 4. Load full path history (the RAG router + compaction both need it).
@@ -648,10 +651,10 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		// the context budget while improving recall on specific-reference questions.
 		var ragErr error
 		if ragMode == "inject" {
-			snippets, ragErr = o.rag.Retrieve(ctx, conv.UserID, conv.ID, kbIDs, req.UserText, 8)
+			snippets, ragErr = o.rag.Retrieve(ctx, req.UserID, conv.ID, kbIDs, req.UserText, 8)
 			decision = rag.RouteDecision{Strategy: "retrieve"}
 		} else {
-			snippets, decision, ragErr = o.rag.RouteAndRetrieve(ctx, conv.UserID, conv.ID, kbIDs, req.UserText, recent, 8)
+			snippets, decision, ragErr = o.rag.RouteAndRetrieve(ctx, req.UserID, conv.ID, kbIDs, req.UserText, recent, 8)
 		}
 		// Never SILENTLY swallow a retrieval failure (e.g. mixed embedding
 		// models/dims, embedder down). We still answer without RAG context — the
@@ -677,14 +680,19 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	//    only when the user (and global setting) keep memory enabled. With memory
 	//    off, no conversation gets memory injected.
 	activeMemories := []store.Memory{}
-	if store.MemoryEnabledForUser(ctx, o.db, conv.UserID) {
-		activeMemories, _ = store.ListMemoriesActive(ctx, o.db, conv.UserID)
+	// §workspaces privacy: personal memories/persona never leak into SHARED
+	// conversations — replies there are visible to every member.
+	if conv.WorkspaceID == "" && store.MemoryEnabledForUser(ctx, o.db, req.UserID) {
+		activeMemories, _ = store.ListMemoriesActive(ctx, o.db, req.UserID)
 	}
 
 	// 7b. Personalization (§ user persona): tone traits + custom instructions +
 	//     nickname, read from per-user settings and injected into the system
 	//     prompt so the assistant adopts the user's preferred style.
-	persona := readUserPersona(ctx, o.db, conv.UserID)
+	var persona UserPersona
+	if conv.WorkspaceID == "" {
+		persona = readUserPersona(ctx, o.db, req.UserID)
+	}
 
 	// 8. Skills for this model (§4.17). Native models get the slim index plus
 	//    the use_skill tool (progressive disclosure); prompt/none models can't
@@ -715,18 +723,18 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	keep, summaryBlocks, compactAction := PlanCompaction(o.db, conv, history, injectedOverhead)
 	switch compactAction {
 	case compactInline:
-		if k, b, cerr := MaybeCompact(ctx, o.db, o.task, conv, history, injectedOverhead); cerr == nil {
+		if k, b, cerr := MaybeCompact(ctx, o.db, o.task, conv, history, injectedOverhead, req.UserID); cerr == nil {
 			keep, summaryBlocks = k, b
 		}
 	case compactAsync:
 		if o.queue != nil && o.task != nil {
-			convID, userID, hist, overhead := conv.ID, conv.UserID, history, injectedOverhead
+			convID, userID, hist, overhead := conv.ID, req.UserID, history, injectedOverhead
 			o.queue.Enqueue("compaction.advance", func(ctx context.Context) error {
 				fresh, gerr := store.GetConversation(ctx, o.db, convID, userID)
 				if gerr != nil {
 					return gerr
 				}
-				_, _, cerr := MaybeCompact(ctx, o.db, o.task, fresh, hist, overhead)
+				_, _, cerr := MaybeCompact(ctx, o.db, o.task, fresh, hist, overhead, userID)
 				return cerr
 			})
 		}
@@ -744,7 +752,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	//     via the sandbox upload path instead.
 	//     §4.6 vision gating: non-vision models receive a textual stub for
 	//     image attachments instead of silently dropping them.
-	o.resolveAttachments(ctx, conv.UserID, conv.ID, uHist, model, onEvent)
+	o.resolveAttachments(ctx, req.UserID, conv.ID, uHist, model, onEvent)
 
 	// 9d. Conversation-scoped data files staged into the sandbox
 	//     (/workspace/uploads). Listing them in the system prompt lets the model
@@ -752,7 +760,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	//     conversation's sandbox session and is re-staged on every tool call.
 	//     Mirrors the staging filter in tools.pythonExecuteTool.
 	sandboxFiles := []ProjectFileSummary{}
-	if convFiles, ferr := store.ListFilesByConversation(ctx, o.db, conv.ID, conv.UserID); ferr == nil {
+	if convFiles, ferr := store.ListFilesByConversation(ctx, o.db, conv.ID, req.UserID); ferr == nil {
 		for _, f := range convFiles {
 			switch f.Kind {
 			case "sheet", "text", "code", "pdf", "image":
@@ -805,11 +813,11 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 
 	// 11. Title generation (§6.3) — fire-and-forget the first time.
 	if shouldGenerateTitle(conv) {
-		o.scheduleTitle(conv.ID, conv.UserID, req.UserText, req.Locale)
+		o.scheduleTitle(conv.ID, req.UserID, req.UserText, req.Locale)
 	}
 
 	provReq := UnifiedChatRequest{
-		UserID:         conv.UserID,
+		UserID:         req.UserID,
 		ConversationID: conv.ID,
 		MessageID:      assistantMsg.ID,
 		ProjectName:    projectName,
@@ -839,7 +847,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// output reserve, convert to credits, and refuse BEFORE calling the model if
 	// the user can't afford it. Free-allotment turns are unaffected.
 	if payWithCredits {
-		if pmsg, pok := o.preflightCredit(ctx, conv.UserID, model, provReq); !pok {
+		if pmsg, pok := o.preflightCredit(ctx, req.UserID, model, provReq); !pok {
 			refusalBlocks, _ := json.Marshal([]UnifiedBlock{{Kind: "text", Text: pmsg}})
 			_ = store.FinishMessage(ctx, o.db, assistantMsg.ID, store.MessageFinishPatch{
 				Blocks: refusalBlocks, Citations: []byte("[]"), StopReason: "insufficient_credits", Status: "complete",
@@ -853,7 +861,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 
 	// Image model the user pre-selected (§4.12-B), read from user settings.
 	imageModelID := ""
-	if raw, err := store.GetUserSettingKey(ctx, o.db, conv.UserID, "image_model_id"); err == nil && len(raw) > 0 {
+	if raw, err := store.GetUserSettingKey(ctx, o.db, req.UserID, "image_model_id"); err == nil && len(raw) > 0 {
 		_ = json.Unmarshal(raw, &imageModelID)
 	}
 
@@ -872,7 +880,8 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		orch:    o,
 		onEvent: onEvent,
 		ctx: &ToolContext{
-			UserID: conv.UserID, ConvID: conv.ID, MessageID: assistantMsg.ID, ModelID: model.ID,
+			UserID: req.UserID,
+			WorkspaceID: conv.WorkspaceID, ConvID: conv.ID, MessageID: assistantMsg.ID, ModelID: model.ID,
 			KBIDs: kbIDs, ProjectID: conv.ProjectID, ProjectName: projectName,
 			DB: o.db, RAG: o.rag, ImageModelID: imageModelID,
 			// §4.20: meter chat-driven image_generate against the same credit flow.
@@ -951,7 +960,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			produced := usage.InputTokens > 0 || usage.OutputTokens > 0
 			var timedCredits, stopCredits float64
 			if payWithCredits && produced {
-				timedCredits, stopCredits = o.chargeTurnCredits(ctx, conv.UserID, stopChatCost)
+				timedCredits, stopCredits = o.chargeTurnCredits(ctx, req.UserID, stopChatCost)
 			}
 			// Image credits (a tool that drew before the stop) are already debited by
 			// ImageBilling; fold them into the per-turn total the user sees.
@@ -974,7 +983,8 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			// usage_logs COUNT(*) cold-reseed stay in agreement (§B3).
 			if produced {
 				o.logUsage(ctx, store.UsageLog{
-					UserID:           conv.UserID,
+					UserID:           req.UserID,
+		WorkspaceID:      conv.WorkspaceID,
 					ConversationID:   conv.ID,
 					MessageID:        assistantMsg.ID,
 					ModelID:          model.ID,
@@ -987,7 +997,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 					Currency:         model.Currency,
 					Credits:          timedCredits,
 				})
-				o.recordQuotaUsage(ctx, conv.UserID, model, stopChatCost)
+				o.recordQuotaUsage(ctx, req.UserID, model, stopChatCost)
 			}
 			onEvent(SseEvent{Type: "done", MessageID: assistantMsg.ID, StopReason: "stopped", Usage: &usage, Credits: turnCredits})
 			finalAssistant, _ := store.GetMessage(ctx, o.db, assistantMsg.ID)
@@ -1066,7 +1076,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// tallyTurnSideCosts — so its usage row (purpose='verify', pinned to this
 	// message) folds into the turn cost + credit charge below. Fail-open.
 	if req.Verify {
-		o.runVerify(ctx, conv, assistantMsg.ID, req.UserText, result, onEvent)
+		o.runVerify(ctx, conv, req.UserID, assistantMsg.ID, req.UserText, result, onEvent)
 	}
 	// §8 cost rule: messages.cost is the FULL spend the user incurred for this
 	// turn — chat + any image_generate calls + any embedding queries inside
@@ -1088,7 +1098,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// is recorded in usage_logs.credits below so the window survives restarts.
 	var timedCredits, chatCredits float64
 	if payWithCredits {
-		timedCredits, chatCredits = o.chargeTurnCredits(ctx, conv.UserID, chatCreditBase)
+		timedCredits, chatCredits = o.chargeTurnCredits(ctx, req.UserID, chatCreditBase)
 	}
 	// Total credits the user sees for this turn = chat credits + image credits the
 	// tool charged (ImageBilling), so a chat turn that drew an image shows both.
@@ -1108,7 +1118,8 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		GenMs:            time.Since(turnStart).Milliseconds(),
 	})
 	_ = store.LogUsage(ctx, o.db, store.UsageLog{
-		UserID:           conv.UserID,
+		UserID:           req.UserID,
+		WorkspaceID:      conv.WorkspaceID,
 		ConversationID:   conv.ID,
 		MessageID:        assistantMsg.ID,
 		ModelID:          model.ID,
@@ -1122,7 +1133,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		Credits:          timedCredits,
 	})
 	// Update the fixed-window quota counter for this user+model (§ user groups).
-	o.recordQuotaUsage(ctx, conv.UserID, model, chatCost)
+	o.recordQuotaUsage(ctx, req.UserID, model, chatCost)
 
 	// Non-streaming models: now that generation is complete, emit the full
 	// answer as a single text delta.
@@ -1153,7 +1164,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	})
 
 	// 13. Async memory extraction (§4.16) — runs after the user has the reply.
-	if o.memory != nil && o.queue != nil {
+	if o.memory != nil && o.queue != nil && conv.WorkspaceID == "" {
 		convID := conv.ID
 		o.queue.Enqueue("memory.process", func(ctx context.Context) error {
 			return o.memory.Process(ctx, convID)
@@ -1195,7 +1206,7 @@ func (o *Orchestrator) runImageTurn(
 			_ = store.SetConvProviderStateKey(ctx, o.db, conv.ID, "image_style", styleID)
 		}
 	}
-	finalPrompt := o.optimizeImagePrompt(ctx, conv.UserID, conv.ID, assistantMsg.ID, req.UserText, styleHidden)
+	finalPrompt := o.optimizeImagePrompt(ctx, req.UserID, conv.ID, assistantMsg.ID, req.UserText, styleHidden)
 
 	// Reference images: the user's image attachments become input images (edit /
 	// image-to-image). loadInputImages resolves file ids too (§4.20).
@@ -1219,7 +1230,8 @@ func (o *Orchestrator) runImageTurn(
 	var mu sync.Mutex
 	artifacts := []ArtifactRef{}
 	tc := &ToolContext{
-		UserID:       conv.UserID,
+		UserID:       req.UserID,
+		WorkspaceID: conv.WorkspaceID,
 		ConvID:       conv.ID,
 		MessageID:    assistantMsg.ID,
 		ModelID:      model.ID,
@@ -1313,14 +1325,15 @@ func (o *Orchestrator) runImageTurn(
 	turnTotal := tallyTurnSideCosts(persistCtx, o.db, conv.ID, assistantMsg.ID)
 	var timedCredits, turnCredits float64
 	if payWithCredits && turnTotal > 0 {
-		timedCredits, turnCredits = o.chargeTurnCredits(persistCtx, conv.UserID, turnTotal)
+		timedCredits, turnCredits = o.chargeTurnCredits(persistCtx, req.UserID, turnTotal)
 	}
 	// Record the timed-credit portion in usage_logs.credits so the timed window
 	// survives a cache cold/restart (mirrors the chat path). images_count/cost=0 so
 	// it doesn't perturb the image quota or cost totals.
 	if timedCredits > 0 {
 		o.logUsage(persistCtx, store.UsageLog{
-			UserID:         conv.UserID,
+			UserID:         req.UserID,
+			WorkspaceID:    conv.WorkspaceID,
 			ConversationID: conv.ID,
 			MessageID:      assistantMsg.ID,
 			ModelID:        model.ID,
@@ -1341,7 +1354,7 @@ func (o *Orchestrator) runImageTurn(
 	})
 
 	if shouldGenerateTitle(conv) {
-		o.scheduleTitle(conv.ID, conv.UserID, req.UserText, req.Locale)
+		o.scheduleTitle(conv.ID, req.UserID, req.UserText, req.Locale)
 	}
 
 	finalAssistant, _ := store.GetMessage(persistCtx, o.db, assistantMsg.ID)

@@ -45,7 +45,7 @@ func TestSearchConversations(t *testing.T) {
 	}
 
 	// Content match: "quokka" is in messages but not in c1's title.
-	titles, msgs, err := SearchConversations(ctx, db, "u1", "quokka", 8, 40)
+	titles, msgs, err := SearchConversations(ctx, db, "u1", "", "quokka", 8, 40)
 	if err != nil {
 		t.Fatalf("search: %v", err)
 	}
@@ -65,7 +65,7 @@ func TestSearchConversations(t *testing.T) {
 	}
 
 	// Title match path.
-	titles2, _, err := SearchConversations(ctx, db, "u1", "compiler", 8, 40)
+	titles2, _, err := SearchConversations(ctx, db, "u1", "", "compiler", 8, 40)
 	if err != nil {
 		t.Fatalf("search title: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestSearchConversations(t *testing.T) {
 	}
 
 	// Cross-user isolation: u1 must not see u2's "quokka" title conversation.
-	if _, msgsX, _ := SearchConversations(ctx, db, "u1", "secret", 8, 40); len(msgsX) != 0 {
+	if _, msgsX, _ := SearchConversations(ctx, db, "u1", "", "secret", 8, 40); len(msgsX) != 0 {
 		t.Fatalf("u1 saw u2 content: %+v", msgsX)
 	}
 
@@ -84,24 +84,24 @@ func TestSearchConversations(t *testing.T) {
 	if _, err := CreateMessage(ctx, db, Message{ID: "m3", ConversationID: "c1", Role: "assistant", Blocks: json.RawMessage(`[{"kind":"thinking","text":"internal numbat reasoning"}]`)}); err != nil {
 		t.Fatalf("create m3: %v", err)
 	}
-	if _, hidden, _ := SearchConversations(ctx, db, "u1", "numbat", 8, 40); len(hidden) != 0 {
+	if _, hidden, _ := SearchConversations(ctx, db, "u1", "", "numbat", 8, 40); len(hidden) != 0 {
 		t.Fatalf("a thinking-only word leaked into results: %+v", hidden)
 	}
 	// The same word in a real text block IS found.
 	if _, err := CreateMessage(ctx, db, Message{ID: "m4", ConversationID: "c1", Role: "user", Blocks: blocks("what is a numbat")}); err != nil {
 		t.Fatalf("create m4: %v", err)
 	}
-	if _, shown, _ := SearchConversations(ctx, db, "u1", "numbat", 8, 40); len(shown) != 1 {
+	if _, shown, _ := SearchConversations(ctx, db, "u1", "", "numbat", 8, 40); len(shown) != 1 {
 		t.Fatalf("expected 1 visible-text hit, got %d", len(shown))
 	}
 
 	// Backfill: a legacy row whose search_text was never set becomes searchable.
 	exec(t, db, `INSERT INTO messages(id,conversation_id,role,blocks,search_text) VALUES('m5','c1','user','[{"kind":"text","text":"legacy wombat fact"}]','')`)
-	if _, pre, _ := SearchConversations(ctx, db, "u1", "wombat", 8, 40); len(pre) != 0 {
+	if _, pre, _ := SearchConversations(ctx, db, "u1", "", "wombat", 8, 40); len(pre) != 0 {
 		t.Fatalf("expected no hit before backfill, got %d", len(pre))
 	}
 	backfillSearchText(db)
-	if _, post, _ := SearchConversations(ctx, db, "u1", "wombat", 8, 40); len(post) != 1 {
+	if _, post, _ := SearchConversations(ctx, db, "u1", "", "wombat", 8, 40); len(post) != 1 {
 		t.Fatalf("expected 1 hit after backfill, got %d", len(post))
 	}
 }

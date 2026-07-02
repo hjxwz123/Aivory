@@ -385,7 +385,8 @@
       "title": "Delete these usage records?",
       "body": "This permanently deletes the {{count}} record(s) matching the current filter. This cannot be undone.",
       "action": "Delete"
-    }
+    },
+    "workspaceTag": "WS"
   },
   "documents": {
     "title": "Documents",
@@ -573,7 +574,12 @@
       "creditPeriodHint": "How often timed credits reset to the allowance.",
       "unitHour": "hours",
       "unitDay": "days",
-      "unitWeek": "weeks"
+      "unitWeek": "weeks",
+      "maxWorkspaces": "Max workspaces",
+      "workspaces": "Workspaces",
+      "workspacesHint": "Allow this group to create workspaces (max above; 0 = unlimited).",
+      "isPublic": "Show on subscription page",
+      "isPublicHint": "When off, this tier is hidden from the public subscription page (members keep their plan)."
     },
     "errors": {
       "nameRequired": "Name is required"
@@ -801,5 +807,30 @@
     "hiddenPrompt": "Style prompt (hidden from users)",
     "hiddenPromptPlaceholder": "e.g. soft watercolor, textured paper, muted palette",
     "nameRequired": "Name is required."
+  },
+  "workspaces": {
+    "title": "Workspaces",
+    "subtitle": "Every collaborative space, its owner and member count.",
+    "loadFailed": "Could not load workspaces.",
+    "deleted": "Workspace deleted.",
+    "deleteFailed": "Could not delete the workspace.",
+    "emptyTitle": "No workspaces yet",
+    "emptyBody": "Users create workspaces from the sidebar avatar menu.",
+    "colName": "Name",
+    "colOwner": "Owner",
+    "colMembers": "Members",
+    "colCreated": "Created",
+    "view": "View",
+    "back": "All workspaces",
+    "detailMeta": "Owner {{owner}} · {{count}} members",
+    "members": "Members",
+    "conversations": "Conversations",
+    "projects": "Projects",
+    "kbs": "Knowledge bases",
+    "delete": "Delete workspace",
+    "deleteTitle": "Delete this workspace?",
+    "deleteBody": "Every conversation, project and knowledge base inside is removed and all members lose access. This cannot be undone.",
+    "roleOwner": "Owner",
+    "roleMember": "Member"
   }
 }

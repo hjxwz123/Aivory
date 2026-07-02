@@ -224,8 +224,9 @@ func (s *Service) runPipeline(ctx context.Context, docID string, cache *parseCac
 		return store.UpdateDocumentStatus(ctx, s.db, docID, "ready", "", 0)
 	}
 
-	// Parse: text docs + text-native PDF/DOC(X)/PPT(X) locally; only scanned or
-	// image-bearing documents go to MinerU OCR (§4.11-C). parseDocument makes the
+	// Parse: text docs + any PDF/DOC(X)/PPT(X) with a usable text layer locally
+	// (instant); only scanned/text-less documents go to MinerU OCR — the cloud
+	// pipeline takes minutes (§4.11-C latency-first). parseDocument makes the
 	// per-document call from the file's content. Reuse the cached parse on a retry
 	// so we never pay for MinerU OCR twice.
 	var content string
@@ -417,12 +418,16 @@ func (s *Service) logEmbeddingUsage(ctx context.Context, kbID, convID, embedder 
 	if tokens == 0 || strings.HasPrefix(embedder, "aurelia-local") {
 		return // local hash embedder is free — don't pollute the report
 	}
-	userID := ""
+	// §workspaces: shared-KB / shared-conversation indexing is billed to the
+	// KB/conversation CREATOR (shared-infrastructure cost — documents carry no
+	// uploader column), but the row is attributed to the workspace so the usage
+	// pages report it under the right space.
+	userID, wsID := "", ""
 	if kbID != "" {
-		_ = s.db.QueryRowContext(ctx, `SELECT user_id FROM knowledge_bases WHERE id=?`, kbID).Scan(&userID)
+		_ = s.db.QueryRowContext(ctx, `SELECT user_id, COALESCE(workspace_id,'') FROM knowledge_bases WHERE id=?`, kbID).Scan(&userID, &wsID)
 	}
 	if userID == "" && convID != "" {
-		_ = s.db.QueryRowContext(ctx, `SELECT user_id FROM conversations WHERE id=?`, convID).Scan(&userID)
+		_ = s.db.QueryRowContext(ctx, `SELECT user_id, COALESCE(workspace_id,'') FROM conversations WHERE id=?`, convID).Scan(&userID, &wsID)
 	}
 	if userID == "" {
 		return
@@ -430,6 +435,7 @@ func (s *Service) logEmbeddingUsage(ctx context.Context, kbID, convID, embedder 
 	modelID := strings.TrimPrefix(embedder, "emb:")
 	_ = store.LogUsage(ctx, s.db, store.UsageLog{
 		UserID:         userID,
+		WorkspaceID:    wsID,
 		ConversationID: convID,
 		ModelID:        modelID,
 		Purpose:        "embedding",
@@ -742,8 +748,12 @@ func (s *Service) searchScope(ctx context.Context, userID, convID string, em Emb
 	// Query embedding is billable (§8.3) — but only when we actually called the API
 	// (no call on a query-vector cache hit, or for the local embedder).
 	if !cached && !strings.HasPrefix(emName, "aurelia-local") && userID != "" {
+		var wsID string
+		if convID != "" {
+			_ = s.db.QueryRowContext(ctx, `SELECT COALESCE(workspace_id,'') FROM conversations WHERE id=?`, convID).Scan(&wsID)
+		}
 		_ = store.LogUsage(ctx, s.db, store.UsageLog{
-			UserID: userID, ConversationID: convID,
+			UserID: userID, WorkspaceID: wsID, ConversationID: convID,
 			ModelID: strings.TrimPrefix(emName, "emb:"),
 			Purpose: "embedding", InputTokens: estimateTokens(query),
 		})
@@ -1635,10 +1645,19 @@ func (s *Service) RouteAndRetrieve(ctx context.Context, userID, convID string, k
 	}
 	prompt := buildRouterPrompt(userText, history, docHints)
 	var d RouteDecision
-	if err := s.task.RunJSON(ctx, "task.router", prompt, &d, RouterOpts{UserID: userID, ConversationID: convID}); err == nil {
+	// The router is a small-model JSON call on the FIRST-TOKEN hot path — bound
+	// it. A slow or hung task-model channel must degrade to plain retrieval with
+	// the original query (the same fallback as s.task == nil), not stall the
+	// user's reply for minutes.
+	rctx, cancelRouter := context.WithTimeout(ctx, 12*time.Second)
+	err := s.task.RunJSON(rctx, "task.router", prompt, &d, RouterOpts{UserID: userID, ConversationID: convID})
+	cancelRouter()
+	if err == nil {
 		if d.Strategy != "" {
 			decision = d
 		}
+	} else if s.logger != nil {
+		s.logger.Printf("rag: router call failed (falling back to retrieve): %v", err)
 	}
 	switch decision.Strategy {
 	case "none":

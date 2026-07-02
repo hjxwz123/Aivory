@@ -45,7 +45,7 @@ type verifyReport struct {
 // runVerify runs auditor model B over A's finished answer. It MUST be called
 // after `result` is finalized but BEFORE tallyTurnSideCosts, so its usage row
 // (purpose=verify, pinned to msgID) folds into the turn cost + credit charge.
-func (o *Orchestrator) runVerify(ctx context.Context, conv *store.Conversation, msgID, userText string, result *UnifiedResult, onEvent func(SseEvent)) {
+func (o *Orchestrator) runVerify(ctx context.Context, conv *store.Conversation, senderID, msgID, userText string, result *UnifiedResult, onEvent func(SseEvent)) {
 	if o == nil || o.task == nil || result == nil || conv == nil {
 		return
 	}
@@ -86,7 +86,8 @@ func (o *Orchestrator) runVerify(ctx context.Context, conv *store.Conversation, 
 	if err := o.task.RunJSON(vctx, TaskVerify, prompt, &rep, RunOpts{
 		ModelID:         modelID,
 		SystemPrompt:    verifySystemPrompt,
-		UserID:          conv.UserID,
+		UserID:          senderID, // §workspaces: the SENDER pays for the audit
+		WorkspaceID:     conv.WorkspaceID,
 		ConversationID:  conv.ID,
 		MessageID:       msgID, // pins the usage row to this turn for tallyTurnSideCosts
 		MaxOutputTokens: 800,

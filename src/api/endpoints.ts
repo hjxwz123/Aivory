@@ -5,6 +5,8 @@
  */
 import { api, apiUrl, getAccessToken, ApiError } from './client'
 import type {
+  ApiWorkspace,
+  ApiWorkspaceMember,
   ApiAnalytics,
   ApiAuthResponse,
   ApiChannel,
@@ -202,7 +204,8 @@ export const audioApi = {
 // ----- Projects ------------------------------------------------------------
 
 export const projectsApi = {
-  list: () => api<ApiProject[]>('/projects'),
+  list: (workspaceId?: string) =>
+    api<ApiProject[]>(`/projects${workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : ''}`),
   get: (id: string) =>
     api<{ project: ApiProject; documents: ApiDocument[]; conversations: ApiConversation[] }>(
       `/projects/${encodeURIComponent(id)}`,
@@ -243,20 +246,53 @@ export interface SearchHit {
   updated_at: number
 }
 
+// ----- Workspaces (§workspaces) ---------------------------------------------
+
+export const workspacesApi = {
+  list: () => api<{ workspaces: ApiWorkspace[] }>('/workspaces'),
+  create: (name: string) => api<ApiWorkspace>('/workspaces', { method: 'POST', body: { name } }),
+  remove: (id: string) => api<{ ok: true }>(`/workspaces/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  members: (id: string) => api<{ members: ApiWorkspaceMember[] }>(`/workspaces/${encodeURIComponent(id)}/members`),
+  kick: (id: string, userId: string) =>
+    api<{ ok: true }>(`/workspaces/${encodeURIComponent(id)}/members/${encodeURIComponent(userId)}`, { method: 'DELETE' }),
+  leave: (id: string) => api<{ ok: true }>(`/workspaces/${encodeURIComponent(id)}/leave`, { method: 'POST' }),
+  rotateInvite: (id: string) =>
+    api<{ invite_token: string }>(`/workspaces/${encodeURIComponent(id)}/invite/rotate`, { method: 'POST' }),
+  inviteInfo: (token: string) =>
+    api<{ id: string; name: string; owner_name: string; member_count: number }>(
+      `/workspaces/join/${encodeURIComponent(token)}`,
+    ),
+  join: (token: string) =>
+    api<{ id: string; name: string }>(`/workspaces/join/${encodeURIComponent(token)}`, { method: 'POST' }),
+  adminList: (limit = 200, offset = 0) =>
+    api<{ workspaces: ApiWorkspace[] }>(`/admin/workspaces?limit=${limit}&offset=${offset}`),
+  adminDetail: (id: string) =>
+    api<{
+      workspace: ApiWorkspace
+      members: ApiWorkspaceMember[]
+      conversations: ApiConversation[]
+      projects: ApiProject[]
+      kbs: ApiKnowledgeBase[]
+    }>(`/admin/workspaces/${encodeURIComponent(id)}`),
+  adminRemove: (id: string) =>
+    api<{ ok: true }>(`/admin/workspaces/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+}
+
 export const searchApi = {
-  /** Full-text search over the user's conversation titles + message content. */
-  query: (q: string) =>
+  /** Full-text search over conversation titles + message content — scoped to the
+   *  active workspace when one is set (§workspaces). */
+  query: (q: string, workspaceId?: string) =>
     api<{ query: string; titles: SearchHit[]; messages: SearchHit[] }>(
-      `/search?q=${encodeURIComponent(q)}`,
+      `/search?q=${encodeURIComponent(q)}${workspaceId ? `&workspace_id=${encodeURIComponent(workspaceId)}` : ''}`,
     ),
 }
 
 // ----- Conversations + messages -------------------------------------------
 
 export const conversationsApi = {
-  list: (projectId?: string, limit = 200, offset = 0) =>
+  list: (projectId?: string, limit = 200, offset = 0, workspaceId?: string) =>
     api<{ conversations: ApiConversation[]; limit: number; offset: number; has_more: boolean }>(
-      `/conversations?limit=${limit}&offset=${offset}${projectId ? `&project_id=${encodeURIComponent(projectId)}` : ''}`,
+      `/conversations?limit=${limit}&offset=${offset}${projectId ? `&project_id=${encodeURIComponent(projectId)}` : ''}${workspaceId ? `&workspace_id=${encodeURIComponent(workspaceId)}` : ''}`,
     ),
   listArchived: (limit = 200, offset = 0) =>
     api<{ conversations: ApiConversation[]; limit: number; offset: number; has_more: boolean }>(
@@ -271,7 +307,7 @@ export const conversationsApi = {
       `/conversations/${encodeURIComponent(id)}${q ? `?${q}` : ''}`,
     )
   },
-  create: (body: { model_id?: string; project_id?: string; title?: string }) =>
+  create: (body: { model_id?: string; project_id?: string; title?: string; workspace_id?: string }) =>
     api<ApiConversation>('/conversations', { method: 'POST', body }),
   // Bulk-import conversation trees from another platform's export. History +
   // titles only; the server bypasses the orchestrator (no model calls / quota).
@@ -358,8 +394,9 @@ export const sharedApi = {
 // ----- Knowledge bases ----------------------------------------------------
 
 export const kbsApi = {
-  list: () => api<ApiKnowledgeBase[]>('/kbs'),
-  create: (body: { name: string; description?: string; embedding_model_id?: string }) =>
+  list: (workspaceId?: string) =>
+    api<ApiKnowledgeBase[]>(`/kbs${workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : ''}`),
+  create: (body: { name: string; description?: string; embedding_model_id?: string; workspace_id?: string }) =>
     api<ApiKnowledgeBase>('/kbs', { method: 'POST', body }),
   remove: (id: string) => api<{ ok: true }>(`/kbs/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   listDocs: (id: string) => api<ApiDocument[]>(`/kbs/${encodeURIComponent(id)}/documents`),

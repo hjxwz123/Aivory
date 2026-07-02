@@ -36,7 +36,20 @@ func listConversationsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 			offset = n
 		}
 	}
-	rows, err := store.ListConversations(r.Context(), d.DB, u.ID, projectID, archivedFilter, limit, offset)
+	// Workspace scope (§workspaces): list THAT workspace's shared conversations
+	// (all members', with creator identity for the sidebar) instead of the
+	// caller's personal ones — members only.
+	var rows []store.Conversation
+	var err error
+	if wsID := strings.TrimSpace(r.URL.Query().Get("workspace_id")); wsID != "" {
+		if role, merr := store.IsWorkspaceMember(r.Context(), d.DB, wsID, u.ID); merr != nil || role == "" {
+			writeError(w, 404, errNotFound)
+			return
+		}
+		rows, err = store.ListWorkspaceConversations(r.Context(), d.DB, wsID, projectID, archivedFilter, limit, offset)
+	} else {
+		rows, err = store.ListConversations(r.Context(), d.DB, u.ID, projectID, archivedFilter, limit, offset)
+	}
 	if err != nil {
 		writeError(w, 500, err)
 		return
@@ -71,7 +84,17 @@ func searchHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"query": q, "titles": []store.SearchHit{}, "messages": []store.SearchHit{}})
 		return
 	}
-	titles, messages, err := store.SearchConversations(r.Context(), d.DB, u.ID, q, 8, 40)
+	// Workspace scope (§workspaces): search that workspace's shared conversations
+	// instead of the personal space — but ONLY for its members (a forged
+	// workspace_id must not read someone else's space).
+	wsID := strings.TrimSpace(r.URL.Query().Get("workspace_id"))
+	if wsID != "" {
+		if role, err := store.IsWorkspaceMember(r.Context(), d.DB, wsID, u.ID); err != nil || role == "" {
+			writeError(w, 404, errNotFound)
+			return
+		}
+	}
+	titles, messages, err := store.SearchConversations(r.Context(), d.DB, u.ID, wsID, q, 8, 40)
 	if err != nil {
 		writeError(w, 500, err)
 		return
@@ -83,6 +106,9 @@ type createConversationReq struct {
 	ModelID   string `json:"model_id"`
 	ProjectID string `json:"project_id"`
 	Title     string `json:"title"`
+	// '' = personal; set = create INSIDE that workspace (§workspaces, membership
+	// validated server-side).
+	WorkspaceID string `json:"workspace_id"`
 }
 
 // createConversationHandler creates a fresh conversation.
@@ -99,19 +125,30 @@ func createConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 			_ = json.Unmarshal(raw, &req.ModelID)
 		}
 	}
+	// Workspace binding (§workspaces): only members may create inside a space.
+	req.WorkspaceID = strings.TrimSpace(req.WorkspaceID)
+	if req.WorkspaceID != "" {
+		if role, merr := store.IsWorkspaceMember(r.Context(), d.DB, req.WorkspaceID, u.ID); merr != nil || role == "" {
+			writeError(w, 404, errNotFound)
+			return
+		}
+	}
 	// Validate the project belongs to this user before attaching (don't trust
-	// the client-supplied project_id).
+	// the client-supplied project_id). GetProject is member-aware, and the
+	// project must live in the SAME space as the conversation.
 	if req.ProjectID != "" {
-		if _, err := store.GetProject(r.Context(), d.DB, req.ProjectID, u.ID); err != nil {
+		p, err := store.GetProject(r.Context(), d.DB, req.ProjectID, u.ID)
+		if err != nil || p.WorkspaceID != req.WorkspaceID {
 			writeError(w, 404, errors.New("project not found"))
 			return
 		}
 	}
 	conv, err := store.CreateConversation(r.Context(), d.DB, store.Conversation{
-		UserID:    u.ID,
-		ProjectID: req.ProjectID,
-		Title:     strings.TrimSpace(req.Title),
-		ModelID:   req.ModelID,
+		UserID:      u.ID,
+		ProjectID:   req.ProjectID,
+		Title:       strings.TrimSpace(req.Title),
+		ModelID:     req.ModelID,
+		WorkspaceID: req.WorkspaceID,
 	})
 	if err != nil {
 		writeError(w, 500, err)
@@ -365,10 +402,17 @@ func updateConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	// §C1: never let a user attach a KB they don't own — filter kb_ids to the
 	// owned subset at write time (the orchestrator re-filters at read time too).
+	// The scope follows the CONVERSATION's space (§workspaces): a workspace
+	// conversation may only attach that workspace's shared KBs, and a personal
+	// one only personal KBs.
 	if len(p.KBIDs) > 0 {
 		var ids []string
 		if json.Unmarshal(p.KBIDs, &ids) == nil {
-			owned := store.OwnedKBIDs(r.Context(), d.DB, u.ID, ids)
+			ws := ""
+			if conv, err := store.GetConversation(r.Context(), d.DB, id, u.ID); err == nil {
+				ws = conv.WorkspaceID
+			}
+			owned := store.OwnedKBIDs(r.Context(), d.DB, u.ID, ws, ids)
 			b, _ := json.Marshal(owned)
 			p.KBIDs = b
 		} else {
@@ -379,7 +423,16 @@ func updateConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	// caller owns — don't trust a client-supplied project_id (an empty string
 	// detaches, which is always allowed).
 	if p.ProjectID != nil && *p.ProjectID != "" {
-		if _, err := store.GetProject(r.Context(), d.DB, *p.ProjectID, u.ID); err != nil {
+		proj, err := store.GetProject(r.Context(), d.DB, *p.ProjectID, u.ID)
+		if err != nil {
+			writeError(w, 404, errors.New("project not found"))
+			return
+		}
+		// §workspaces: a conversation may only attach to a project in the SAME
+		// space — mirror the create path (a member-accessible workspace project
+		// must not bind to a personal conversation or vice versa).
+		cur, err := store.GetConversation(r.Context(), d.DB, id, u.ID)
+		if err != nil || proj.WorkspaceID != cur.WorkspaceID {
 			writeError(w, 404, errors.New("project not found"))
 			return
 		}
@@ -430,7 +483,7 @@ func listMessagesHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		}
 		// Enrich each message with sibling indexes so the frontend can render
 		// branch pickers without a second roundtrip.
-		writeJSON(w, 200, redactCost(enrichWithSiblings(d, r, msgs)))
+		writeJSON(w, 200, redactCost(enrichWithAuthors(d, r, enrichWithSiblings(d, r, msgs))))
 		return
 	}
 	conv, _ := store.GetConversation(r.Context(), d.DB, id, u.ID)
@@ -455,7 +508,7 @@ func listMessagesHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	if nextBefore != "" {
 		w.Header().Set("X-Next-Before", nextBefore)
 	}
-	writeJSON(w, 200, redactCost(enrichWithSiblings(d, r, window)))
+	writeJSON(w, 200, redactCost(enrichWithAuthors(d, r, enrichWithSiblings(d, r, window))))
 }
 
 type enrichedMessage struct {
@@ -463,6 +516,40 @@ type enrichedMessage struct {
 	BranchIndex int      `json:"branch_index"`
 	BranchCount int      `json:"branch_count"`
 	Siblings    []string `json:"siblings"`
+	// Author display identity (§workspaces — shared conversations attribute each
+	// user turn). Empty outside workspaces / on legacy rows.
+	AuthorName   string `json:"author_name,omitempty"`
+	AuthorAvatar string `json:"author_avatar,omitempty"`
+}
+
+// enrichWithAuthors resolves author_id → display name + avatar in ONE batched
+// users query. Only meaningful for workspace conversations; personal ones have
+// a single implied author and skip the lookup.
+func enrichWithAuthors(d Deps, r *http.Request, ems []enrichedMessage) []enrichedMessage {
+	idSet := map[string]struct{}{}
+	for i := range ems {
+		if ems[i].AuthorID != "" {
+			idSet[ems[i].AuthorID] = struct{}{}
+		}
+	}
+	if len(idSet) == 0 {
+		return ems
+	}
+	ids := make([]string, 0, len(idSet))
+	for id := range idSet {
+		ids = append(ids, id)
+	}
+	identities, err := store.UserIdentities(r.Context(), d.DB, ids)
+	if err != nil {
+		return ems
+	}
+	for i := range ems {
+		if ident, ok := identities[ems[i].AuthorID]; ok {
+			ems[i].AuthorName = ident.Name
+			ems[i].AuthorAvatar = ident.AvatarURL
+		}
+	}
+	return ems
 }
 
 func enrichWithSiblings(d Deps, r *http.Request, msgs []store.Message) []enrichedMessage {

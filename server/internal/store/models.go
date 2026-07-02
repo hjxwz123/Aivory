@@ -70,6 +70,13 @@ type UserGroup struct {
 	// create (§ user groups). 0 = unlimited.
 	MaxProjects int `json:"max_projects"`
 	MaxKBs      int `json:"max_kbs"`
+	// IsPublic controls whether the tier is listed on the public subscription
+	// page (admins always see every group). Default true.
+	IsPublic bool `json:"is_public"`
+	// MaxWorkspaces caps how many workspaces a member may OWN (§workspaces).
+	// 0 = unlimited; whether the group may create workspaces AT ALL is the
+	// 'workspaces' feature flag inside Features (mirrors the research flag).
+	MaxWorkspaces int `json:"max_workspaces"`
 	// Credit system (§ credits). CreditAllowance is the timed-credit budget granted
 	// each CreditPeriodSeconds cycle (unused voided on refresh). The USD→credit
 	// rate and both purchase links are global settings, not per-group fields.
@@ -198,6 +205,8 @@ type Project struct {
 	AutoAddUploads bool   `json:"auto_add_uploads"`
 	CreatedAt      int64  `json:"created_at"`
 	UpdatedAt      int64  `json:"updated_at"`
+	// '' = personal; set = shared with the workspace's members (§workspaces).
+	WorkspaceID string `json:"workspace_id"`
 }
 
 // Conversation — §5 conversations row. kb_ids/summary_blocks/provider_state
@@ -226,6 +235,13 @@ type Conversation struct {
 	InlineSourceConv string `json:"inline_source_conv"`
 	InlineParentID   string `json:"inline_parent_id"`
 	InlineQuote      string `json:"inline_quote"`
+	// Workspace linkage (§workspaces). '' = personal conversation; set = shared
+	// with every member of that workspace (user_id stays the CREATOR).
+	WorkspaceID string `json:"workspace_id"`
+	// Enriched for workspace listings (not columns): creator display identity so
+	// the sidebar can label who started each shared conversation.
+	CreatorName   string `json:"creator_name,omitempty"`
+	CreatorAvatar string `json:"creator_avatar,omitempty"`
 }
 
 // Message — flat record over §5 messages. blocks/raw/attachments/citations are
@@ -263,6 +279,10 @@ type Message struct {
 	// Omitted from the wire when the turn was never audited.
 	Verify    json.RawMessage `json:"verify,omitempty"`
 	CreatedAt int64           `json:"created_at"`
+	// AuthorID records WHO wrote a user turn (§workspaces — shared conversations
+	// attribute each question). '' on legacy rows and assistant turns: the
+	// conversation creator is the implied author.
+	AuthorID string `json:"author_id,omitempty"`
 }
 
 // KnowledgeBase — §5 knowledge_bases row.
@@ -275,6 +295,8 @@ type KnowledgeBase struct {
 	EmbeddingDim     int    `json:"embedding_dim"`
 	ProjectID        string `json:"project_id"`
 	CreatedAt        int64  `json:"created_at"`
+	// '' = personal; set = shared with the workspace's members (§workspaces).
+	WorkspaceID string `json:"workspace_id"`
 }
 
 // Document — §5 documents row. status: pending|parsing|embedding|ready|failed.
@@ -332,6 +354,9 @@ type UsageLog struct {
 	// per-group free count) or credits disabled.
 	Credits   float64 `json:"credits"`
 	CreatedAt int64   `json:"created_at"`
+	// WorkspaceID attributes spend to a workspace conversation (§workspaces).
+	// '' = personal. The PAYER stays user_id (members burn their OWN quota).
+	WorkspaceID string `json:"workspace_id,omitempty"`
 }
 
 // File — uploaded file metadata.

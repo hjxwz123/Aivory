@@ -18,11 +18,24 @@ func listUserGroupsPublic(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
-	writeJSON(w, 200, rows)
+	// Public/subscription page lists only tiers the admin marked visible
+	// (is_public). Admins keep the full list via listUserGroupsAdmin.
+	visible := make([]store.UserGroup, 0, len(rows))
+	for _, g := range rows {
+		if g.IsPublic {
+			visible = append(visible, g)
+		}
+	}
+	writeJSON(w, 200, visible)
 }
 
 func listUserGroupsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
-	listUserGroupsPublic(d, w, r)
+	rows, err := store.ListUserGroups(r.Context(), d.DB)
+	if err != nil {
+		writeError(w, 500, err)
+		return
+	}
+	writeJSON(w, 200, rows)
 }
 
 func createUserGroupAdmin(d Deps, w http.ResponseWriter, r *http.Request) {

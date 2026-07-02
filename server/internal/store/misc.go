@@ -33,7 +33,9 @@ func CreateFile(ctx context.Context, db *sql.DB, f File) (*File, error) {
 func ListFilesByConversation(ctx context.Context, db *sql.DB, convID, userID string) ([]File, error) {
 	rows, err := db.QueryContext(ctx,
 		`SELECT id, user_id, conversation_id, filename, mime_type, size_bytes, storage_path, kind, created_at
-		 FROM files WHERE conversation_id=? AND user_id=? ORDER BY created_at ASC`, convID, userID)
+		 FROM files WHERE conversation_id=? AND (user_id=? OR conversation_id IN (
+		   SELECT c.id FROM conversations c JOIN workspace_members m ON m.workspace_id=c.workspace_id WHERE m.user_id=?
+		 )) ORDER BY created_at ASC`, convID, userID, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -78,8 +80,12 @@ func GetFile(ctx context.Context, db *sql.DB, id, userID string) (*File, error) 
 	q := `SELECT id, user_id, conversation_id, filename, mime_type, size_bytes, storage_path, kind, created_at FROM files WHERE id=?`
 	args := []any{id}
 	if userID != "" {
-		q += ` AND user_id=?`
-		args = append(args, userID)
+		// Uploader, or any workspace member of the conversation the file lives in
+		// (§workspaces — members view each other's attachments).
+		q += ` AND (user_id=? OR conversation_id IN (
+		  SELECT c.id FROM conversations c JOIN workspace_members m ON m.workspace_id=c.workspace_id WHERE m.user_id=?
+		))`
+		args = append(args, userID, userID)
 	}
 	err := db.QueryRowContext(ctx, q, args...).
 		Scan(&f.ID, &f.UserID, &conv, &f.Filename, &f.MimeType, &f.SizeBytes, &f.StoragePath, &f.Kind, &f.CreatedAt)
@@ -236,10 +242,10 @@ func ListMemoriesActive(ctx context.Context, db *sql.DB, userID string) ([]Memor
 // LogUsage writes a single usage row. Best-effort — callers ignore errors.
 func LogUsage(ctx context.Context, db *sql.DB, u UsageLog) error {
 	_, err := db.ExecContext(ctx,
-		`INSERT INTO usage_logs(user_id, conversation_id, message_id, model_id, purpose, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, images_count, cost, currency, credits, created_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO usage_logs(user_id, conversation_id, message_id, model_id, purpose, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, images_count, cost, currency, credits, workspace_id, created_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		u.UserID, nullable(u.ConversationID), nullable(u.MessageID), u.ModelID, u.Purpose,
 		u.InputTokens, u.OutputTokens, u.CacheReadTokens, u.CacheWriteTokens, u.ImagesCount,
-		u.Cost, u.Currency, u.Credits, time.Now().Unix())
+		u.Cost, u.Currency, u.Credits, u.WorkspaceID, time.Now().Unix())
 	return err
 }
 
@@ -292,6 +298,9 @@ type AdminUsageRecord struct {
 	Cost                float64 `json:"cost"`
 	Currency            string  `json:"currency"`
 	CreatedAt           int64   `json:"created_at"`
+	// §workspaces: which workspace the spend belongs to ('' = personal).
+	WorkspaceID   string `json:"workspace_id,omitempty"`
+	WorkspaceName string `json:"workspace_name,omitempty"`
 }
 
 // UsageFilter scopes the admin usage list / delete. Zero fields = no constraint.
@@ -343,10 +352,12 @@ func AdminUsageRecords(ctx context.Context, db *sql.DB, f UsageFilter, limit, of
 	// Postgres (a bare boolean expression scans differently between them).
 	q := `SELECT u.id, u.user_id, COALESCE(usr.email,''), COALESCE(u.conversation_id,''), COALESCE(c.title,''),
 	             CASE WHEN u.conversation_id IS NOT NULL AND u.conversation_id <> '' AND c.id IS NULL THEN 1 ELSE 0 END,
-	             u.model_id, u.purpose, u.input_tokens, u.output_tokens, u.cost, u.currency, u.created_at
+	             u.model_id, u.purpose, u.input_tokens, u.output_tokens, u.cost, u.currency, u.created_at,
+	             COALESCE(u.workspace_id,''), COALESCE(w.name,'')
 	      FROM usage_logs u
 	      LEFT JOIN users usr ON usr.id = u.user_id
-	      LEFT JOIN conversations c ON c.id = u.conversation_id` + where +
+	      LEFT JOIN conversations c ON c.id = u.conversation_id
+	      LEFT JOIN workspaces w ON w.id = u.workspace_id` + where +
 		` ORDER BY u.created_at DESC, u.id DESC LIMIT ? OFFSET ?`
 	args = append(args, limit, offset)
 	rows, err := db.QueryContext(ctx, q, args...)
@@ -359,7 +370,8 @@ func AdminUsageRecords(ctx context.Context, db *sql.DB, f UsageFilter, limit, of
 		var r AdminUsageRecord
 		var gone int
 		if err := rows.Scan(&r.ID, &r.UserID, &r.UserEmail, &r.ConversationID, &r.ConversationTitle, &gone,
-			&r.ModelID, &r.Purpose, &r.InputTokens, &r.OutputTokens, &r.Cost, &r.Currency, &r.CreatedAt); err != nil {
+			&r.ModelID, &r.Purpose, &r.InputTokens, &r.OutputTokens, &r.Cost, &r.Currency, &r.CreatedAt,
+			&r.WorkspaceID, &r.WorkspaceName); err != nil {
 			return nil, err
 		}
 		r.ConversationDeleted = gone == 1
@@ -750,8 +762,9 @@ func GetArtifact(ctx context.Context, db *sql.DB, id, userID string) (*Artifact,
 		 WHERE a.id=?`
 	args := []any{id}
 	if userID != "" {
-		q += ` AND c.user_id=?`
-		args = append(args, userID)
+		// Owner, or any member of the conversation's workspace (§workspaces).
+		q += ` AND (c.user_id=? OR (COALESCE(c.workspace_id,'')<>'' AND c.workspace_id IN (SELECT workspace_id FROM workspace_members WHERE user_id=?)))`
+		args = append(args, userID, userID)
 	}
 	err := db.QueryRowContext(ctx, q, args...).Scan(
 		&a.ID, &a.MessageID, &a.Filename, &a.StoragePath, &a.MimeType, &a.SizeBytes, &a.CreatedAt)

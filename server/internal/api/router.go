@@ -76,6 +76,13 @@ func NewRouter(d Deps) http.Handler {
 	// Public read-only conversation share (token in the path; no auth). Rate
 	// limited (§D1) so the token space can't be swept even though it's now 192-bit.
 	mux.handle("GET", "/api/public/shared/:token", rateLimitedIP(d, "share", 60, 60*time.Second, wrap(d, publicSharedHandler)))
+	// Share-scoped assets: uploaded attachments + generated artifacts referenced
+	// by the snapshot (the private /api/files|artifacts routes need the owner's
+	// session, which share viewers don't have). Membership in the snapshot is the
+	// access check; a separate, roomier rate bucket since one page load can pull
+	// many images.
+	mux.handle("GET", "/api/public/shared/:token/files/:id", rateLimitedIP(d, "share_asset", 240, 60*time.Second, wrap(d, publicSharedFileHandler)))
+	mux.handle("GET", "/api/public/shared/:token/artifacts/:id", rateLimitedIP(d, "share_asset", 240, 60*time.Second, wrap(d, publicSharedArtifactHandler)))
 
 	// OAuth / social login. /start is a top-level browser navigation; /callback
 	// is hit by the provider redirect (GET) or Apple's form_post (POST).
@@ -133,6 +140,19 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("GET", "/api/me/images", requireAuth(d, listMyImages))
 	mux.handle("GET", "/api/user-groups", requireAuth(d, listUserGroupsPublic))
 	mux.handle("POST", "/api/audio/transcriptions", requireAuth(d, transcribeAudioHandler))
+
+	// Workspaces (§workspaces) — collaborative spaces. Join is invite-link-only;
+	// the token resolver + join are rate-limited per IP (uniform 404 on unknown
+	// tokens) so the 192-bit token space can't be swept.
+	mux.handle("GET", "/api/workspaces", requireAuth(d, listWorkspacesHandler))
+	mux.handle("POST", "/api/workspaces", requireAuth(d, createWorkspaceHandler))
+	mux.handle("DELETE", "/api/workspaces/:id", requireAuth(d, deleteWorkspaceHandler))
+	mux.handle("GET", "/api/workspaces/:id/members", requireAuth(d, workspaceMembersHandler))
+	mux.handle("DELETE", "/api/workspaces/:id/members/:uid", requireAuth(d, kickWorkspaceMemberHandler))
+	mux.handle("POST", "/api/workspaces/:id/leave", requireAuth(d, leaveWorkspaceHandler))
+	mux.handle("POST", "/api/workspaces/:id/invite/rotate", requireAuth(d, rotateWorkspaceInviteHandler))
+	mux.handle("GET", "/api/workspaces/join/:token", rateLimitedIP(d, "ws_join", 30, 60*time.Second, requireAuth(d, workspaceInviteInfoHandler)))
+	mux.handle("POST", "/api/workspaces/join/:token", rateLimitedIP(d, "ws_join", 30, 60*time.Second, requireAuth(d, joinWorkspaceHandler)))
 
 	mux.handle("GET", "/api/projects", requireAuth(d, listProjectsHandler))
 	mux.handle("POST", "/api/projects", requireAuth(d, createProjectHandler))
@@ -247,6 +267,10 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("GET", "/api/admin/conversations/:id/sandbox/file", requireAdmin(d, sandboxFileGetAdmin))
 	mux.handle("DELETE", "/api/admin/conversations/:id/sandbox", requireAdmin(d, sandboxClearAdmin))
 	mux.handle("GET", "/api/admin/conversations/:id/messages", requireAdmin(d, listConversationMessagesAdmin))
+	// Workspaces admin triage (§workspaces 管理端).
+	mux.handle("GET", "/api/admin/workspaces", requireAdmin(d, adminListWorkspacesHandler))
+	mux.handle("GET", "/api/admin/workspaces/:id", requireAdmin(d, adminWorkspaceDetailHandler))
+	mux.handle("DELETE", "/api/admin/workspaces/:id", requireAdmin(d, adminDeleteWorkspaceHandler))
 	mux.handle("DELETE", "/api/admin/conversations/:id", requireAdmin(d, deleteConversationAdmin))
 	mux.handle("GET", "/api/admin/usage", requireAdmin(d, usageReportAdmin))
 	mux.handle("DELETE", "/api/admin/usage", requireAdmin(d, usageDeleteFilteredAdmin))

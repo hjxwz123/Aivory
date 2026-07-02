@@ -314,6 +314,7 @@ func MaybeCompact(
 	conv *store.Conversation,
 	history []store.Message,
 	injectedOverhead int,
+	payerID string, // §workspaces: the SENDER whose turn triggered the roll-up pays
 ) ([]store.Message, []SummaryBlock, error) {
 	// Read settings.
 	enabled := true
@@ -486,7 +487,8 @@ func MaybeCompact(
 	var text string
 	if task != nil {
 		text, _ = task.Run(ctx, TaskCompact, prompt.String(), RunOpts{
-			UserID:          conv.UserID,
+			UserID:          payerID, // §workspaces: the sender pays
+			WorkspaceID:     conv.WorkspaceID,
 			ConversationID:  conv.ID,
 			MaxOutputTokens: 512,
 		})
@@ -549,7 +551,7 @@ func MaybeCompact(
 		// Column changed under us — retry against the fresh value.
 	}
 	if appended {
-		if merged, ok := mergeAndPersist(ctx, db, task, conv, history, summaryMaxTokens); ok {
+		if merged, ok := mergeAndPersist(ctx, db, task, conv, payerID, history, summaryMaxTokens); ok {
 			finalBlocks = merged
 		}
 	}
@@ -590,7 +592,7 @@ func maxCoveredIdx(blocks []SummaryBlock, history []store.Message) int {
 // the current blocks, merges if needed, and CAS-writes. On contention (the column
 // moved) it returns ok=false WITHOUT retrying the merge — a later compaction turn
 // folds instead, so a hot conversation never pays multiple merge calls per turn.
-func mergeAndPersist(ctx context.Context, db *sql.DB, task *TaskLLM, conv *store.Conversation, history []store.Message, budget int) ([]SummaryBlock, bool) {
+func mergeAndPersist(ctx context.Context, db *sql.DB, task *TaskLLM, conv *store.Conversation, payerID string, history []store.Message, budget int) ([]SummaryBlock, bool) {
 	var curRaw string
 	if err := db.QueryRowContext(ctx, "SELECT COALESCE(summary_blocks,'[]') FROM conversations WHERE id=?", conv.ID).Scan(&curRaw); err != nil {
 		return nil, false
@@ -599,7 +601,7 @@ func mergeAndPersist(ctx context.Context, db *sql.DB, task *TaskLLM, conv *store
 	if summaryTokens(filterBlocksForPath(cur, history)) <= budget {
 		return cur, true // nothing to fold
 	}
-	merged := mergeIfOver(ctx, task, conv, cur, history, budget)
+	merged := mergeIfOver(ctx, task, conv, payerID, cur, history, budget)
 	encoded, _ := json.Marshal(merged)
 	res, err := db.ExecContext(ctx,
 		"UPDATE conversations SET summary_blocks=? WHERE id=? AND COALESCE(summary_blocks,'[]')=?",
@@ -618,13 +620,13 @@ func mergeAndPersist(ctx context.Context, db *sql.DB, task *TaskLLM, conv *store
 // It folds REPEATEDLY (capped) until the path fits, so a long thread's summary
 // prefix can't grow without bound — a single fold of the oldest half may not
 // bring the total under budget if recent coarse blocks dominate.
-func mergeIfOver(ctx context.Context, task *TaskLLM, conv *store.Conversation, blocks []SummaryBlock, history []store.Message, budget int) []SummaryBlock {
+func mergeIfOver(ctx context.Context, task *TaskLLM, conv *store.Conversation, payerID string, blocks []SummaryBlock, history []store.Message, budget int) []SummaryBlock {
 	for iter := 0; iter < 3; iter++ {
 		pathBlocks := filterBlocksForPath(blocks, history)
 		if summaryTokens(pathBlocks) <= budget || len(pathBlocks) < 2 {
 			return blocks
 		}
-		merged := mergeOldestBlocks(ctx, task, conv, pathBlocks, budget)
+		merged := mergeOldestBlocks(ctx, task, conv, payerID, pathBlocks, budget)
 		pathSet := map[string]bool{}
 		for _, b := range pathBlocks {
 			pathSet[b.AnchorMessageID+"|"+b.FromMessageID] = true
@@ -657,7 +659,7 @@ func summaryTokens(blocks []SummaryBlock) int {
 // mergeOldestBlocks folds the oldest half of the path's summary blocks into one
 // coarser (level+1) block so the total stays under budget. Never re-summarises
 // from summaries-of-summaries beyond one extra level to preserve fidelity.
-func mergeOldestBlocks(ctx context.Context, task *TaskLLM, conv *store.Conversation, blocks []SummaryBlock, budget int) []SummaryBlock {
+func mergeOldestBlocks(ctx context.Context, task *TaskLLM, conv *store.Conversation, payerID string, blocks []SummaryBlock, budget int) []SummaryBlock {
 	if len(blocks) < 2 {
 		return blocks
 	}
@@ -683,7 +685,8 @@ func mergeOldestBlocks(ctx context.Context, task *TaskLLM, conv *store.Conversat
 	text := ""
 	if task != nil {
 		text, _ = task.Run(ctx, TaskCompact, prompt.String(), RunOpts{
-			UserID:          conv.UserID,
+			UserID:          payerID, // §workspaces: the sender pays
+			WorkspaceID:     conv.WorkspaceID,
 			ConversationID:  conv.ID,
 			MaxOutputTokens: budget / 2,
 		})

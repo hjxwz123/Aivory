@@ -258,6 +258,14 @@ export default function AdminUsage() {
                       ) : (
                         <span className="text-[var(--color-fg-faint)]">—</span>
                       )}
+                      {r.workspace_name || r.workspace_id ? (
+                        <span
+                          className="mt-0.5 inline-block max-w-full truncate rounded-full border border-[var(--color-border)] px-1.5 text-[10px] text-[var(--color-fg-subtle)]"
+                          title={r.workspace_name || r.workspace_id}
+                        >
+                          {t('usage.workspaceTag', { defaultValue: 'WS' })} · {r.workspace_name || r.workspace_id}
+                        </span>
+                      ) : null}
                     </td>
                     <td className="py-2 px-4 text-[12px]">{modelLabel(r.model_id)}</td>
                     <td className="py-2 px-4 text-[var(--color-fg-muted)]">{purposeLabel(r.purpose)}</td>

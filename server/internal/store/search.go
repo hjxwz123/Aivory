@@ -94,19 +94,29 @@ func likeEscape(s string) string {
 // scan only ever touches one user's rows. Content search matches the small
 // messages.search_text column (visible text only) rather than the full blocks
 // JSON, so the scan corpus excludes thinking/tool/image data.
-func SearchConversations(ctx context.Context, db *sql.DB, userID, query string, titleLimit, msgLimit int) (titles []SearchHit, messages []SearchHit, err error) {
+//
+// workspaceID switches the scope (§workspaces): '' searches the caller's
+// PERSONAL space only; set, it searches that workspace's shared conversations
+// (all members' rows — the HANDLER must have validated membership).
+func SearchConversations(ctx context.Context, db *sql.DB, userID, workspaceID, query string, titleLimit, msgLimit int) (titles []SearchHit, messages []SearchHit, err error) {
 	q := strings.ToLower(strings.TrimSpace(query))
 	if q == "" {
 		return []SearchHit{}, []SearchHit{}, nil
 	}
 	like := "%" + likeEscape(q) + "%"
+	scope := `user_id=? AND COALESCE(workspace_id,'')=''`
+	scopeArg := userID
+	if workspaceID != "" {
+		scope = `workspace_id=?`
+		scopeArg = workspaceID
+	}
 
 	// Title hits.
 	titles = []SearchHit{}
 	tRows, err := db.QueryContext(ctx,
 		`SELECT id, title, updated_at FROM conversations
-		 WHERE user_id=? AND archived=0 AND inline_source_conv='' AND LOWER(title) LIKE ? ESCAPE '\'
-		 ORDER BY updated_at DESC LIMIT ?`, userID, like, titleLimit)
+		 WHERE `+scope+` AND archived=0 AND inline_source_conv='' AND LOWER(title) LIKE ? ESCAPE '\'
+		 ORDER BY updated_at DESC LIMIT ?`, scopeArg, like, titleLimit)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -125,11 +135,15 @@ func SearchConversations(ctx context.Context, db *sql.DB, userID, query string, 
 
 	// Content hits — scan the small search_text column.
 	messages = []SearchHit{}
+	mScope := `c.user_id=? AND COALESCE(c.workspace_id,'')=''`
+	if workspaceID != "" {
+		mScope = `c.workspace_id=?`
+	}
 	mRows, err := db.QueryContext(ctx,
 		`SELECT m.conversation_id, c.title, m.id, m.role, m.search_text, m.created_at, c.updated_at
 		 FROM messages m JOIN conversations c ON m.conversation_id=c.id
-		 WHERE c.user_id=? AND c.archived=0 AND c.inline_source_conv='' AND m.search_text<>'' AND LOWER(m.search_text) LIKE ? ESCAPE '\'
-		 ORDER BY c.updated_at DESC, m.created_at DESC LIMIT ?`, userID, like, msgLimit)
+		 WHERE `+mScope+` AND c.archived=0 AND c.inline_source_conv='' AND m.search_text<>'' AND LOWER(m.search_text) LIKE ? ESCAPE '\'
+		 ORDER BY c.updated_at DESC, m.created_at DESC LIMIT ?`, scopeArg, like, msgLimit)
 	if err != nil {
 		return nil, nil, err
 	}
