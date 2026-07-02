@@ -9,6 +9,7 @@ import { ConversationFilesPanel } from '@/components/chat/conversation-files-pan
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { useSettings } from '@/store/settings'
 import { useUI } from '@/store/ui'
+import { useWorkspaces } from '@/store/workspaces'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { mediaQuery } from '@/lib/design-tokens'
 import { useTheme } from '@/store/theme'
@@ -28,6 +29,7 @@ export default function ChatLayout() {
   const drawerOpen = useUI((s) => s.navOpen)
   const setDrawerOpen = useUI((s) => s.setNavOpen)
   const pageOwnsTopBar = useUI((s) => s.pageOwnsTopBar)
+  const activeWsId = useWorkspaces((s) => s.activeId)
   // Coarse section key for page transitions: collapse param routes (e.g.
   // /chat/:id, /projects/:id, /settings/*) to their first segment so switching
   // conversations within a section doesn't re-fade — only section-to-section
@@ -36,6 +38,7 @@ export default function ChatLayout() {
   // Home ('/') and the chat thread ('/chat', '/chat/:id') are one section so
   // creating a conversation (/ → /chat/:id) doesn't flash a transition.
   const section = pathname === '/' || pathname.startsWith('/chat') ? 'chat' : pathname.split('/')[1] || 'chat'
+  const isHome = pathname === '/'
 
   useEffect(() => syncSystem(), [syncSystem])
 
@@ -59,7 +62,11 @@ export default function ChatLayout() {
         // sidebar and bottom composer never slide under the notch or home
         // indicator. env() is 0 in a normal browser tab, so this is a no-op
         // there. box-border keeps total height at 100svh.
-        'pt-[var(--safe-top)] pb-[var(--safe-bottom)]',
+        // The home screen has no bottom-docked control (the composer sits
+        // inline, vertically centered) — reserving the home-indicator gap
+        // there just wastes space, so it's skipped for that route only.
+        'pt-[var(--safe-top)]',
+        !isHome && 'pb-[var(--safe-bottom)]',
         'pl-[var(--safe-left)] pr-[var(--safe-right)]',
       )}
     >
@@ -116,7 +123,7 @@ export default function ChatLayout() {
               a 44px gutter on the left so the floating expand toggle never
               sits on top of titles, breadcrumbs, or topbar content. */}
           <RouteFade
-            dep={section}
+            dep={`${section}:${activeWsId ?? 'personal'}`}
             className={cn(
               'flex-1 min-h-0 flex flex-col',
               isDesktop && collapsed && 'pl-11',

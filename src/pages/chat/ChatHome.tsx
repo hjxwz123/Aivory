@@ -1,9 +1,9 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { gsap } from 'gsap'
 import { useGSAP } from '@gsap/react'
-import { ChevronDown } from 'lucide-react'
+import { ChevronDown, Menu } from 'lucide-react'
 import { Composer } from '@/components/chat/composer'
 import { SuggestionCard } from '@/components/chat/suggestion-card'
 import { MyGallery } from '@/components/chat/my-gallery'
@@ -11,6 +11,7 @@ import { SUGGESTIONS } from '@/data/suggestions'
 import { useConversations } from '@/store/conversations'
 import { useAuth } from '@/store/auth'
 import { useModels } from '@/store/models'
+import { useUI } from '@/store/ui'
 import { cn } from '@/lib/utils'
 import type { Attachment, Conversation } from '@/types/chat'
 
@@ -43,6 +44,14 @@ export default function ChatHome() {
   const defaultModelId = useModels((s) => s.defaultId)
   const imageModels = useModels((s) => s.imageModels)
   const user = useAuth((s) => s.user)
+
+  // The home screen has no title to show, so on mobile it drops the layout's
+  // standalone brand bar entirely (§ mobile home redesign) — a light floating
+  // button below replaces it for opening the sidebar drawer.
+  useEffect(() => {
+    useUI.getState().setPageOwnsTopBar(true)
+    return () => useUI.getState().setPageOwnsTopBar(false)
+  }, [])
 
   // §4.20: the sidebar "Draw" entry links here with ?mode=draw to open the
   // composer pre-set to an image model (drawing mode).
@@ -161,6 +170,16 @@ export default function ChatHome() {
 
   return (
     <div ref={root} className="relative flex-1 flex flex-col overflow-y-auto">
+      {/* Mobile: no title bar on the home screen — this light floating button is
+          the only way to reach the sidebar drawer here (§ mobile home redesign). */}
+      <button
+        type="button"
+        aria-label={t('commandMenu.actions.toggleSidebar')}
+        onClick={() => useUI.getState().setNavOpen(true)}
+        className="lg:hidden absolute left-3 top-3 z-20 inline-flex items-center justify-center size-[var(--tap-min)] rounded-[10px] bg-[var(--color-bg)]/85 backdrop-blur-sm text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+      >
+        <Menu size={18} aria-hidden />
+      </button>
       {/* Ambient warmth behind the greeting — faint, blurred, slowly breathing. */}
       <div
         className="home-glow pointer-events-none absolute left-1/2 top-[14%] -z-0 size-[20rem] sm:size-[34rem] max-w-[88vw] -translate-x-1/2 rounded-full bg-[var(--color-accent)] opacity-[0.07] blur-[90px]"

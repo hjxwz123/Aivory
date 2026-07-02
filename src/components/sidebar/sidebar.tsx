@@ -101,6 +101,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
   // filter/sort/bucket pipeline below or reconcile every row (§ perf).
   const allConversationsRaw = useConversations((s) => s.conversations, sameConvListShape)
   const activeWsId = useWorkspaces((s) => s.activeId)
+  const switching = useWorkspaces((s) => s.switching)
   // §workspaces isolation: the cache can transiently hold rows from another
   // space (loadOne of a cross-space deep link, a stale in-flight list) — the
   // sidebar only ever RENDERS the current space's rows.
@@ -197,13 +198,16 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
       )}
     >
       {/* Header — inside a workspace the brand slot shows the WORKSPACE NAME
-          (§workspaces spec: sidebar 上方原先显示 aurelia 的地方显示工作空间名称). */}
+          (§workspaces spec: sidebar 上方原先显示 aurelia 的地方显示工作空间名称).
+          Keyed on the active space so switching replays a fade-in (§ workspace
+          switch animation) instead of the name jump-cutting. */}
       <div className="flex items-center justify-between px-3 h-[56px] shrink-0">
         {!collapsed ? (
           activeWorkspace ? (
             <Link
+              key={activeWorkspace.id}
               to="/"
-              className="inline-flex min-w-0 items-center gap-2"
+              className="page-enter inline-flex min-w-0 items-center gap-2"
               aria-label={activeWorkspace.name}
               title={activeWorkspace.name}
             >
@@ -211,7 +215,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
               <span className="truncate font-serif text-[15px] text-[var(--color-fg)]">{activeWorkspace.name}</span>
             </Link>
           ) : (
-          <Link to="/" className="inline-flex items-center" aria-label={tCommon('aria.homeLink')}>
+          <Link key="personal" to="/" className="page-enter inline-flex items-center" aria-label={tCommon('aria.homeLink')}>
             <Logo size="sm" />
           </Link>
           )
@@ -385,30 +389,45 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
         </div>
       )}
 
-      {/* Conversation list */}
+      {/* Conversation list — while a workspace switch is reloading data, the list
+          fades out and a spinner takes its place instead of flashing the old
+          (or momentarily empty) space's rows (§ workspace switch animation). */}
       {!collapsed && (
-        <div ref={listScrollRef} className="mt-2 flex-1 min-h-0 overflow-y-auto scrollbar-thin">
-          {starred.length > 0 && (
-            <Group label={t('sidebar.starred')} items={starred} currentId={currentId} onSelect={onClose} t={t} />
-          )}
-          {groupOrder.map(
-            (g) =>
-              grouped[g].length > 0 && (
-                <Group key={g} label={t(`buckets.${g}`)} items={grouped[g]} currentId={currentId} onSelect={onClose} t={t} />
-              ),
-          )}
-          {hasMore && (
-            <div
-              ref={loadMoreRef}
-              className="flex items-center justify-center py-3 text-[11px] text-[var(--color-fg-subtle)]"
-            >
-              {loadingMore ? <Loader2 size={13} className="animate-spin" aria-hidden /> : null}
+        <div className="relative mt-2 flex-1 min-h-0">
+          <div
+            ref={listScrollRef}
+            className={cn(
+              'h-full overflow-y-auto scrollbar-thin transition-opacity duration-200',
+              switching && 'opacity-0 pointer-events-none',
+            )}
+          >
+            {starred.length > 0 && (
+              <Group label={t('sidebar.starred')} items={starred} currentId={currentId} onSelect={onClose} t={t} />
+            )}
+            {groupOrder.map(
+              (g) =>
+                grouped[g].length > 0 && (
+                  <Group key={g} label={t(`buckets.${g}`)} items={grouped[g]} currentId={currentId} onSelect={onClose} t={t} />
+                ),
+            )}
+            {hasMore && (
+              <div
+                ref={loadMoreRef}
+                className="flex items-center justify-center py-3 text-[11px] text-[var(--color-fg-subtle)]"
+              >
+                {loadingMore ? <Loader2 size={13} className="animate-spin" aria-hidden /> : null}
+              </div>
+            )}
+            {conversations.length === 0 && (
+              <p className="px-4 py-6 text-xs text-[var(--color-fg-subtle)] text-center">
+                {t('sidebar.empty')}
+              </p>
+            )}
+          </div>
+          {switching && (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <Loader2 size={16} className="animate-spin text-[var(--color-fg-subtle)]" aria-hidden />
             </div>
-          )}
-          {conversations.length === 0 && (
-            <p className="px-4 py-6 text-xs text-[var(--color-fg-subtle)] text-center">
-              {t('sidebar.empty')}
-            </p>
           )}
         </div>
       )}

@@ -27,6 +27,9 @@ interface WorkspacesState {
   /** Active workspace id; null = personal space. */
   activeId: string | null
   loaded: boolean
+  /** True while switchTo() is reloading the space-scoped stores — drives the
+   *  switch transition/loading state in the sidebar and content area. */
+  switching: boolean
   load: () => Promise<void>
   /** Switch space and reload the space-scoped stores. null = personal. */
   switchTo: (id: string | null) => Promise<void>
@@ -50,6 +53,7 @@ export const useWorkspaces = create<WorkspacesState>((set, get) => ({
   workspaces: [],
   activeId: readStoredActive(),
   loaded: false,
+  switching: false,
 
   async load() {
     try {
@@ -72,14 +76,20 @@ export const useWorkspaces = create<WorkspacesState>((set, get) => ({
 
   async switchTo(id) {
     if (id === get().activeId) return
-    set({ activeId: id })
+    // activeId flips synchronously (instant switch, no delay) — `switching`
+    // drives the loading transition while the space-scoped data catches up.
+    set({ activeId: id, switching: true })
     try {
       if (id) localStorage.setItem(ACTIVE_KEY, id)
       else localStorage.removeItem(ACTIVE_KEY)
     } catch {
       /* ignore */
     }
-    await reloadSpaceData()
+    try {
+      await reloadSpaceData()
+    } finally {
+      set({ switching: false })
+    }
   },
 
   async create(name) {
