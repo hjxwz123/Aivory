@@ -91,8 +91,10 @@ const embedBatchMax = 10
 // code did them strictly sequentially, so a 500-chunk doc paid 50 serial
 // round-trips (a minute+ against a far endpoint like DashScope). Running a few in
 // parallel cuts that ~Nx while staying gentle enough not to trip provider rate
-// limits (postEmbeddings already retries any 429 with backoff).
-const embedConcurrency = 5
+// limits (postEmbeddings already retries any 429 with backoff). 8 is still well
+// inside DashScope/OpenAI per-key limits even with the 4 ingest workers running
+// documents in parallel (worst case 32 in-flight requests).
+const embedConcurrency = 8
 
 // Embed returns one vector per input text, splitting into ≤embedBatchMax upstream
 // requests and running them CONCURRENTLY (bounded, order-preserving).

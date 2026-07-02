@@ -83,12 +83,14 @@ func parseDocument(
 		return string(b), true, nil
 	}
 
-	// Binary formats. Project rule: PDF / DOC(X) / PPT(X) are parsed LOCALLY
-	// when they're text-native; only image-bearing or scanned documents are sent
-	// to MinerU (paid OCR). Everything else (images, legacy .doc/.ppt, html)
-	// goes to MinerU when configured, otherwise a one-line placeholder so ingest
-	// still completes. CSV/XLS(X) never reach here — runPipeline short-circuits
-	// spreadsheets to the code sandbox instead of parsing/embedding.
+	// Binary formats. Project rule (§4.11-C latency-first): PDF / DOC(X) / PPT(X)
+	// with a usable text layer are parsed LOCALLY — instantly — even when they
+	// embed figures; ONLY scanned / effectively text-less documents are sent to
+	// MinerU (paid cloud OCR, minutes of queue+poll during which the composer
+	// stays gated on "indexing"). Everything else (images, legacy .doc/.ppt,
+	// html) goes to MinerU when configured, otherwise a one-line placeholder so
+	// ingest still completes. CSV/XLS(X) never reach here — runPipeline
+	// short-circuits spreadsheets to the code sandbox instead of parsing/embedding.
 	ext := docExt(filename, docPath)
 	// MinerU OCR needs BOTH the API creds AND object storage + the sandbox
 	// sidecar (it fetches the file via a presigned bucket URL). Missing any of
@@ -120,27 +122,37 @@ func parseDocument(
 
 	switch ext {
 	case "docx", "pptx":
-		text, hasImages, ok := extractOfficeXML(docPath, ext)
-		if ok && !hasImages {
-			return text, true, nil // pure-text office doc → local
+		text, _, ok := extractOfficeXML(docPath, ext)
+		// Office files are born-digital: when XML text extraction works, use it
+		// immediately. Embedded images no longer force the whole doc through cloud
+		// OCR — that pipeline (upload → queue → per-page OCR → poll) takes minutes
+		// while the composer stays gated on "indexing" (§4.11-C latency-first).
+		// Only an effectively text-less file (e.g. a pptx of pure screenshots)
+		// still goes to MinerU for OCR.
+		if ok && strings.TrimSpace(text) != "" {
+			return text, true, nil
 		}
 		if md, done := tryMineru(); done {
-			return md, true, nil // image-bearing → MinerU OCR/figure captions
-		}
-		if ok && strings.TrimSpace(text) != "" {
-			return text, true, nil // degraded: MinerU unavailable, keep local text
+			return md, true, nil // text-less office doc → MinerU OCR
 		}
 	case "pdf":
-		text, hasImages, ok := extractPDFText(docPath)
+		text, pages, hasImages, ok := extractPDFText(docPath)
 		scanned := !ok || strings.TrimSpace(text) == ""
-		if ok && !scanned && !hasImages {
-			return text, true, nil // text-native, no figures → local
+		// Thin text + images smells like a scan with a stray text layer (a cover
+		// page, headers) — the content lives in the page images, so OCR is still
+		// the right call. A dense text layer is the real document: use it NOW,
+		// figures or not, instead of paying minutes of cloud OCR for captions.
+		thin := hasImages && pages > 0 && len(text) < 200*pages
+		if ok && !scanned && !thin {
+			return text, true, nil // usable text layer → local, instant
 		}
 		if scanned {
 			logf("rag: %q is a scanned/text-less PDF — routing to MinerU OCR (configured=%v)", filename, mineruReady)
+		} else if thin {
+			logf("rag: %q has a thin text layer (%d chars over %d pages, images present) — routing to MinerU OCR (configured=%v)", filename, len(text), pages, mineruReady)
 		}
 		if md, done := tryMineru(); done {
-			return md, true, nil // scanned or image-bearing → MinerU
+			return md, true, nil // scanned / thin-text → MinerU
 		}
 		if ok && !scanned {
 			return text, true, nil // degraded: MinerU unavailable, keep local text
@@ -206,7 +218,9 @@ func docExt(filename, docPath string) string {
 
 // extractOfficeXML pulls plain text out of a DOCX/PPTX (both are ZIP+XML) using
 // the standard library only, and reports whether the archive embeds any images
-// (a media/ entry) — image-bearing docs are routed to MinerU for figure OCR.
+// (a media/ entry). Since §4.11-C latency-first the image flag no longer routes
+// text-bearing docs to OCR — parseDocument keeps local text whenever it's
+// non-empty — but callers may still use it as a signal.
 func extractOfficeXML(docPath, ext string) (text string, hasImages bool, ok bool) {
 	zr, err := zip.OpenReader(docPath)
 	if err != nil {
@@ -283,22 +297,22 @@ func stripOfficeXML(raw string) string {
 // whether the PDF embeds image XObjects. ok=false (or empty text) means the PDF
 // has no extractable text — i.e. a scan — and should go to MinerU. The reader
 // panics on some malformed PDFs, so the whole call is recover-guarded.
-func extractPDFText(docPath string) (text string, hasImages bool, ok bool) {
+func extractPDFText(docPath string) (text string, pages int, hasImages bool, ok bool) {
 	defer func() {
 		if r := recover(); r != nil {
-			text, hasImages, ok = "", false, false
+			text, pages, hasImages, ok = "", 0, false, false
 		}
 	}()
 	f, reader, err := pdf.Open(docPath)
 	if err != nil {
-		return "", false, false
+		return "", 0, false, false
 	}
 	defer f.Close()
 	var buf bytes.Buffer
 	if tr, terr := reader.GetPlainText(); terr == nil {
 		_, _ = io.Copy(&buf, tr)
 	}
-	return strings.TrimSpace(buf.String()), pdfHasImages(docPath), true
+	return strings.TrimSpace(buf.String()), reader.NumPage(), pdfHasImages(docPath), true
 }
 
 // pdfHasImages is a cheap heuristic: image XObjects declare `/Subtype /Image`
