@@ -22,11 +22,7 @@ function detect(): LanguageCode {
   if (stored) return stored
   const detected = normalizeLanguage(i18n.language)
   if (detected) return detected
-  for (const code of navigator.languages ?? []) {
-    const normalized = normalizeLanguage(code)
-    if (normalized) return normalized
-  }
-  return normalizeLanguage(navigator.language) ?? 'en'
+  return detectBrowserLanguage() ?? 'en'
 }
 
 function applyLanguage(code: LanguageCode) {
@@ -79,4 +75,13 @@ export const useLanguage = create<LanguageStore>((set) => {
 
 export function toSupportedLanguage(code: unknown): LanguageCode | null {
   return normalizeLanguage(code)
+}
+
+export function detectBrowserLanguage(): LanguageCode | null {
+  if (typeof navigator === 'undefined') return null
+  for (const code of navigator.languages ?? []) {
+    const normalized = normalizeLanguage(code)
+    if (normalized) return normalized
+  }
+  return normalizeLanguage(navigator.language)
 }

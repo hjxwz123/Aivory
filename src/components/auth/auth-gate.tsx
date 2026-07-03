@@ -14,8 +14,9 @@ import { useModels } from '@/store/models'
 import { useSettings } from '@/store/settings'
 import { useAccent } from '@/store/accent'
 import { useWorkspaces } from '@/store/workspaces'
-import { useLanguage, toSupportedLanguage } from '@/store/language'
+import { useLanguage, detectBrowserLanguage, toSupportedLanguage } from '@/store/language'
 import { useTheme } from '@/store/theme'
+import { persistUserSettings } from '@/lib/user-settings'
 import { ACCENT_PRESETS, type AccentPref, type ThemePref } from '@/types/settings'
 
 const PUBLIC_PATHS = ['/welcome', '/login', '/register', '/forgot-password', '/share', '/setup', '/privacy', '/terms']
@@ -45,7 +46,15 @@ export function AuthGate({ children }: { children: ReactNode }) {
       if (user?.settings) {
         syncUserSettings(user.settings)
         const language = toSupportedLanguage(user.settings.language)
-        if (language) useLanguage.getState().applyLang(language)
+        if (language) {
+          useLanguage.getState().applyLang(language)
+        } else {
+          const detected = detectBrowserLanguage()
+          if (detected) {
+            useLanguage.getState().applyLang(detected)
+            void persistUserSettings({ language: detected }).catch(() => {})
+          }
+        }
         const theme = user.settings.theme
         if (theme === 'light' || theme === 'dark' || theme === 'system') {
           useTheme.getState().applyPref(theme as ThemePref)
