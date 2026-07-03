@@ -12,6 +12,7 @@ import { useConversations } from '@/store/conversations'
 import { useAuth } from '@/store/auth'
 import { useModels } from '@/store/models'
 import { useUI } from '@/store/ui'
+import { useComposerPrefs } from '@/store/composer-prefs'
 import { cn } from '@/lib/utils'
 import type { Attachment, Conversation } from '@/types/chat'
 
@@ -44,6 +45,7 @@ export default function ChatHome() {
   const defaultModelId = useModels((s) => s.defaultId)
   const imageModels = useModels((s) => s.imageModels)
   const user = useAuth((s) => s.user)
+  const clearComposerDraft = useComposerPrefs((s) => s.clearDraft)
 
   // The home screen has no title to show, so on mobile it drops the layout's
   // standalone brand bar entirely (§ mobile home redesign) — a light floating
@@ -57,6 +59,7 @@ export default function ChatHome() {
   // composer pre-set to an image model (drawing mode).
   const [searchParams] = useSearchParams()
   const drawMode = searchParams.get('mode') === 'draw'
+  const draftScope = drawMode ? 'new-draw' : 'new-chat'
   const drawDefault = drawMode && imageModels[0] ? imageModels[0].id : ''
 
   // The model the user picks in the composer before the conversation exists.
@@ -154,6 +157,7 @@ export default function ChatHome() {
     if (modelId && conv.modelId !== modelId) {
       void setModel(conv.id, modelId)
     }
+    clearComposerDraft(draftScope)
     navigate(`/chat/${conv.id}`)
     // Fire-and-forget the stream; the ChatThread page will react to store updates.
     void sendMessage({
@@ -218,6 +222,7 @@ export default function ChatHome() {
                 modelId={modelId}
                 onModelChange={setPickedModelId}
                 onSubmit={(text, atts, opts) => void startNew(text, atts, opts)}
+                draftScope={draftScope}
                 ensureConversationId={ensureConversation}
                 autoFocus
               />

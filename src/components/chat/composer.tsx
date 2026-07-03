@@ -72,6 +72,8 @@ interface ComposerProps {
   compact?: boolean
   /** Autofocus on mount. */
   autoFocus?: boolean
+  /** Optional local draft cache scope. Used by the new-chat composer only. */
+  draftScope?: string
   /** Conversation id (so uploads carry the right scope). */
   conversationId?: string
   /**
@@ -117,6 +119,7 @@ export function Composer({
   placeholder,
   compact = false,
   autoFocus = false,
+  draftScope,
   conversationId,
   ensureConversationId,
   kbIds,
@@ -124,9 +127,6 @@ export function Composer({
   modelPickerInHeader = false,
 }: ComposerProps) {
   const { t } = useTranslation('chat')
-  const [value, setValue] = useState(initialValue)
-  const [attachments, setAttachments] = useState<PendingAttachment[]>([])
-  const [kbList, setKBList] = useState<{ id: string; name: string }[]>([])
   const mode = useComposerPrefs((s) => s.mode)
   const setMode = useComposerPrefs((s) => s.setMode)
   // §verify: when on, the answer is fact-checked by a second model this turn.
@@ -134,7 +134,14 @@ export function Composer({
   const setVerify = useComposerPrefs((s) => s.setVerify)
   const cachedParamValues = useComposerPrefs((s) => (modelId ? s.paramValuesByModel[modelId] : undefined))
   const setCachedParamValues = useComposerPrefs((s) => s.setParamValues)
+  const cachedDraft = useComposerPrefs((s) => (draftScope ? s.draftsByScope[draftScope] : undefined))
+  const setCachedDraft = useComposerPrefs((s) => s.setDraft)
   const paramValues = cachedParamValues ?? EMPTY_PARAM_VALUES
+  const [value, setValue] = useState(() => (draftScope ? cachedDraft ?? initialValue : initialValue))
+  const valueRef = useRef(value)
+  const draftScopeRef = useRef(draftScope)
+  const [attachments, setAttachments] = useState<PendingAttachment[]>([])
+  const [kbList, setKBList] = useState<{ id: string; name: string }[]>([])
   // Drag-and-drop file upload over the composer surface.
   const [dragOver, setDragOver] = useState(false)
   // Narrow screens collapse every secondary action into a single "+" menu
@@ -169,6 +176,24 @@ export function Composer({
   const [transcribing, setTranscribing] = useState(false)
   const recorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
+  const updateValue = useCallback(
+    (next: string) => {
+      valueRef.current = next
+      setValue(next)
+      if (draftScope) setCachedDraft(draftScope, next)
+    },
+    [draftScope, setCachedDraft],
+  )
+
+  useEffect(() => {
+    valueRef.current = value
+  }, [value])
+
+  useEffect(() => {
+    if (draftScopeRef.current === draftScope) return
+    draftScopeRef.current = draftScope
+    updateValue(draftScope ? cachedDraft ?? initialValue : initialValue)
+  }, [cachedDraft, draftScope, initialValue, updateValue])
 
   async function toggleVoice() {
     if (transcribing) return
@@ -202,7 +227,8 @@ export function Composer({
         .transcribe(blob, 'audio.webm')
         .then(({ text }) => {
           if (text) {
-            setValue((v) => (v.trim() ? v.trimEnd() + ' ' : '') + text)
+            const current = valueRef.current
+            updateValue((current.trim() ? current.trimEnd() + ' ' : '') + text)
             requestAnimationFrame(() => ref.current?.focus())
           }
         })
@@ -277,7 +303,7 @@ export function Composer({
         imageStyleId: isImageMode && imageStyleId ? imageStyleId : undefined,
         verify: effectiveVerify ? true : undefined,
       })
-      setValue('')
+      updateValue('')
       // Stop any leftover pollers and revoke blob: URLs — uploadAttachment already
       // swapped its own. Persistent /api/files/… URLs stay so the bubble can render.
       pollTimers.current.forEach((tm) => clearTimeout(tm))
@@ -612,7 +638,7 @@ export function Composer({
       <Textarea
         ref={ref}
         value={value}
-        onChange={(e) => setValue(e.target.value)}
+        onChange={(e) => updateValue(e.target.value)}
         onKeyDown={(e) => {
           // Don't intercept while user is mid-IME composition (CJK).
           if (e.nativeEvent.isComposing || e.keyCode === 229) return

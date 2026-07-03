@@ -9,20 +9,25 @@ interface PersistedComposerPrefs {
   mode: ComposerMode
   verify: boolean
   paramValuesByModel: Record<string, ComposerParamValues>
+  draftsByScope: Record<string, string>
 }
 
 interface ComposerPrefsStore extends PersistedComposerPrefs {
   setMode: (mode: ComposerMode) => void
   setVerify: (verify: boolean) => void
   setParamValues: (modelId: string, values: Record<string, unknown>) => void
+  setDraft: (scope: string, value: string) => void
+  clearDraft: (scope: string) => void
 }
 
 const STORAGE_KEY = 'aurelia.composer-prefs.v1'
+const MAX_DRAFT_LEN = 12_000
 
 const DEFAULT_PREFS: PersistedComposerPrefs = {
   mode: 'default',
   verify: false,
   paramValuesByModel: {},
+  draftsByScope: {},
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -60,6 +65,16 @@ function sanitizeParamValuesByModel(raw: unknown): Record<string, ComposerParamV
   return out
 }
 
+function sanitizeDraftsByScope(raw: unknown): Record<string, string> {
+  if (!isRecord(raw)) return {}
+  const out: Record<string, string> = {}
+  for (const [scope, value] of Object.entries(raw)) {
+    if (!scope || typeof value !== 'string' || value.length === 0) continue
+    out[scope] = value.slice(0, MAX_DRAFT_LEN)
+  }
+  return out
+}
+
 function loadPrefs(): PersistedComposerPrefs {
   if (typeof window === 'undefined') return DEFAULT_PREFS
   try {
@@ -71,6 +86,7 @@ function loadPrefs(): PersistedComposerPrefs {
       mode: isMode(parsed.mode) ? parsed.mode : DEFAULT_PREFS.mode,
       verify: parsed.verify === true,
       paramValuesByModel: sanitizeParamValuesByModel(parsed.paramValuesByModel),
+      draftsByScope: sanitizeDraftsByScope(parsed.draftsByScope),
     }
   } catch {
     return DEFAULT_PREFS
@@ -96,6 +112,7 @@ export const useComposerPrefs = create<ComposerPrefsStore>((set) => {
           mode,
           verify: state.verify,
           paramValuesByModel: state.paramValuesByModel,
+          draftsByScope: state.draftsByScope,
         }
         persistPrefs(next)
         return { mode }
@@ -107,6 +124,7 @@ export const useComposerPrefs = create<ComposerPrefsStore>((set) => {
           mode: state.mode,
           verify,
           paramValuesByModel: state.paramValuesByModel,
+          draftsByScope: state.draftsByScope,
         }
         persistPrefs(next)
         return { verify }
@@ -127,9 +145,47 @@ export const useComposerPrefs = create<ComposerPrefsStore>((set) => {
           mode: state.mode,
           verify: state.verify,
           paramValuesByModel,
+          draftsByScope: state.draftsByScope,
         }
         persistPrefs(next)
         return { paramValuesByModel }
+      })
+    },
+    setDraft(scope, value) {
+      const key = scope.trim()
+      if (!key) return
+      set((state) => {
+        const draftsByScope = { ...state.draftsByScope }
+        if (value.length > 0) {
+          draftsByScope[key] = value.slice(0, MAX_DRAFT_LEN)
+        } else {
+          delete draftsByScope[key]
+        }
+        const next: PersistedComposerPrefs = {
+          mode: state.mode,
+          verify: state.verify,
+          paramValuesByModel: state.paramValuesByModel,
+          draftsByScope,
+        }
+        persistPrefs(next)
+        return { draftsByScope }
+      })
+    },
+    clearDraft(scope) {
+      const key = scope.trim()
+      if (!key) return
+      set((state) => {
+        if (state.draftsByScope[key] === undefined) return {}
+        const draftsByScope = { ...state.draftsByScope }
+        delete draftsByScope[key]
+        const next: PersistedComposerPrefs = {
+          mode: state.mode,
+          verify: state.verify,
+          paramValuesByModel: state.paramValuesByModel,
+          draftsByScope,
+        }
+        persistPrefs(next)
+        return { draftsByScope }
       })
     },
   }
