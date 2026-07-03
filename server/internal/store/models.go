@@ -112,20 +112,24 @@ type Channel struct {
 // Model mirrors design.md §2.3-B. Prices are per 1M tokens (chat/embedding)
 // or per image.
 type Model struct {
-	ID            string          `json:"id"`
-	ChannelID     string          `json:"channel_id"`
-	Kind          string          `json:"kind"`
-	RequestID     string          `json:"request_id"`
-	Label         string          `json:"label"`
-	Description   string          `json:"description"`
-	Icon          string          `json:"icon"`
-	Enabled       bool            `json:"enabled"`
-	SortOrder     int             `json:"sort_order"`
-	ToolMode      string          `json:"tool_mode"`
-	Vision        bool            `json:"vision"`
-	Stream        bool            `json:"stream"`
-	SystemPrompt  string          `json:"system_prompt"`
-	ParamControls json.RawMessage `json:"param_controls"`
+	ID              string `json:"id"`
+	ChannelID       string `json:"channel_id"`
+	Kind            string `json:"kind"`
+	RequestID       string `json:"request_id"`
+	Label           string `json:"label"`
+	Description     string `json:"description"`
+	Icon            string `json:"icon"`
+	Enabled         bool   `json:"enabled"`
+	SortOrder       int    `json:"sort_order"`
+	ToolMode        string `json:"tool_mode"`
+	Vision          bool   `json:"vision"`
+	Stream          bool   `json:"stream"`
+	ResearchEnabled bool   `json:"research_enabled"`
+	// ResearchEnabledSet is an internal create-path marker: JSON booleans cannot
+	// distinguish omitted from explicit false once decoded into Model.
+	ResearchEnabledSet bool            `json:"-"`
+	SystemPrompt       string          `json:"system_prompt"`
+	ParamControls      json.RawMessage `json:"param_controls"`
 	// OfficialTools lists OpenAI Responses hosted tools to enable (e.g.
 	// "web_search"). Empty = use the system's self-built tools (§2.3-B). Only
 	// meaningful for an openai channel with api_format=responses.

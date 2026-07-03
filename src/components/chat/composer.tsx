@@ -248,11 +248,13 @@ export function Composer({
   // picker and hides chat-only controls (research / knowledge bases).
   const isImageMode = currentModel?.kind === 'image'
   const [imageStyleId, setImageStyleId] = useState('')
-  // Deep Research is a per-group capability — only show the button when the
-  // user's group is entitled (admins always are).
-  const researchEnabled = useAuth(
+  // Deep Research is both a per-group capability and a per-model exposure flag.
+  // Admins bypass the group feature but still respect the current model's flag.
+  const groupResearchEnabled = useAuth(
     (s) => s.user?.role === 'admin' || Boolean(s.user?.features?.includes('research')),
   )
+  const modelResearchEnabled = currentModel?.research_enabled ?? true
+  const researchEnabled = groupResearchEnabled && modelResearchEnabled
   // §verify: only offer the toggle when an admin has configured an auditor model.
   const verifyAvailable = useModels((s) => s.verifyAvailable)
   const paramControls = currentModel?.param_controls

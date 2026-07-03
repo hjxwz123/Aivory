@@ -88,6 +88,7 @@
       "officialToolsHint": "OpenAI runs its built-in tools instead of the system ones.",
       "vision": "Vision",
       "stream": "Stream",
+      "researchEnabled": "Deep Research",
       "systemPrompt": "System prompt",
       "paramControls": "param_controls (JSON)",
       "dim": "Dimension",

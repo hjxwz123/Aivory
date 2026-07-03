@@ -88,6 +88,7 @@
       "officialToolsHint": "OpenAI exécute ses outils intégrés au lieu des outils système.",
       "vision": "Vision",
       "stream": "Flux",
+      "researchEnabled": "Recherche approfondie",
       "systemPrompt": "Invite système",
       "paramControls": "param_controls (JSON)",
       "dim": "Dimension",

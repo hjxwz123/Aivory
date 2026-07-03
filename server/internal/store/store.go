@@ -94,6 +94,8 @@ func Migrate(db *sql.DB) error {
 	// Per-model content moderation (§ moderation).
 	addModEnabled := `ALTER TABLE models ADD COLUMN moderation_enabled INTEGER NOT NULL DEFAULT 0`
 	addModMode := `ALTER TABLE models ADD COLUMN moderation_mode TEXT NOT NULL DEFAULT 'keyword'`
+	// Per-model Deep Research exposure (§2.3-B).
+	addResearchEnabled := `ALTER TABLE models ADD COLUMN research_enabled INTEGER NOT NULL DEFAULT 1`
 	// Redeem-code-driven group membership window (§ redeem codes).
 	addGroupExpires := `ALTER TABLE users ADD COLUMN group_expires_at INTEGER NOT NULL DEFAULT 0`
 	addPrevGroup := `ALTER TABLE users ADD COLUMN previous_group_id TEXT NOT NULL DEFAULT ''`
@@ -155,6 +157,7 @@ func Migrate(db *sql.DB) error {
 		addSessSeen = `ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS last_seen BIGINT NOT NULL DEFAULT 0`
 		addModEnabled = `ALTER TABLE models ADD COLUMN IF NOT EXISTS moderation_enabled INTEGER NOT NULL DEFAULT 0`
 		addModMode = `ALTER TABLE models ADD COLUMN IF NOT EXISTS moderation_mode TEXT NOT NULL DEFAULT 'keyword'`
+		addResearchEnabled = `ALTER TABLE models ADD COLUMN IF NOT EXISTS research_enabled INTEGER NOT NULL DEFAULT 1`
 		addGroupExpires = `ALTER TABLE users ADD COLUMN IF NOT EXISTS group_expires_at BIGINT NOT NULL DEFAULT 0`
 		addPrevGroup = `ALTER TABLE users ADD COLUMN IF NOT EXISTS previous_group_id TEXT NOT NULL DEFAULT ''`
 		addPasswordSet = `ALTER TABLE users ADD COLUMN IF NOT EXISTS password_set INTEGER NOT NULL DEFAULT 1`
@@ -200,6 +203,7 @@ func Migrate(db *sql.DB) error {
 		addImageRef, addOfficialTools, addGroupID, addTotpSecret, addTotpEnabled, addFeedback, addGenMs,
 		addSessUA, addSessIP, addSessLoc, addSessSeen,
 		addModEnabled, addModMode,
+		addResearchEnabled,
 		addGroupExpires, addPrevGroup, addPasswordSet, addLastSeen,
 		addInlineSource, addInlineParent, addInlineQuote,
 		addModelTags,
@@ -257,7 +261,7 @@ func Migrate(db *sql.DB) error {
 		"users":           {"group_id", "totp_secret", "totp_enabled", "group_expires_at", "previous_group_id", "password_set", "last_seen_at", "credits_permanent", "sort_order"},
 		"usage_logs":      {"credits", "workspace_id"},
 		"user_groups":     {"max_projects", "max_kbs", "credit_allowance", "credit_period_seconds", "max_workspaces", "is_public"},
-		"models":          {"official_tools", "moderation_enabled", "moderation_mode", "tags", "image_timeout_sec"},
+		"models":          {"official_tools", "moderation_enabled", "moderation_mode", "tags", "image_timeout_sec", "research_enabled"},
 		"refresh_tokens":  {"user_agent", "ip", "location", "last_seen"},
 		"conversations":   {"inline_source_conv", "inline_parent_id", "inline_quote", "workspace_id"},
 		"projects":        {"workspace_id"},

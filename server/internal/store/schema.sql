@@ -131,6 +131,7 @@ CREATE TABLE IF NOT EXISTS models (
   tool_mode         TEXT NOT NULL DEFAULT 'native', -- native | prompt | none
   vision            INTEGER NOT NULL DEFAULT 1,
   stream            INTEGER NOT NULL DEFAULT 1,
+  research_enabled  INTEGER NOT NULL DEFAULT 1, -- expose Deep Research for this chat model
   system_prompt     TEXT NOT NULL DEFAULT '',
   param_controls    TEXT NOT NULL DEFAULT '[]',
   official_tools    TEXT NOT NULL DEFAULT '[]', -- OpenAI Responses hosted tools; [] = use system tools (§2.3-B)

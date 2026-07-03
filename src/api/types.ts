@@ -295,6 +295,8 @@ export interface ApiModel {
   tool_mode: 'native' | 'prompt' | 'none'
   vision: boolean
   stream: boolean
+  /** Whether this chat model exposes Deep Research in the composer. Absent from older backends ⇒ enabled. */
+  research_enabled?: boolean
   system_prompt: string
   param_controls: unknown
   /** OpenAI Responses hosted tools to enable; empty/absent = use system tools (§2.3-B). */

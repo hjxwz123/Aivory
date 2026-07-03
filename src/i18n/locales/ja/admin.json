@@ -88,6 +88,7 @@
       "officialToolsHint": "OpenAI の組み込みツールを使用(自前ツールは不使用)。",
       "vision": "ビジョン",
       "stream": "ストリーム",
+      "researchEnabled": "ディープリサーチ",
       "systemPrompt": "システムプロンプト",
       "paramControls": "param_controls（JSON）",
       "dim": "次元",

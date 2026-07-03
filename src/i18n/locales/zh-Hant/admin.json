@@ -88,6 +88,7 @@
       "officialToolsHint": "由 OpenAI 執行內建工具,不用系統自建工具。",
       "vision": "視覺",
       "stream": "流式",
+      "researchEnabled": "深度研究",
       "systemPrompt": "系統提示詞",
       "paramControls": "param_controls (JSON)",
       "dim": "向量維度",

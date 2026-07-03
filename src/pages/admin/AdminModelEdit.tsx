@@ -392,7 +392,7 @@ export default function AdminModelEdit() {
                     </SelectContent>
                   </Select>
                 </Field>
-                <div className="grid grid-cols-2 gap-3 items-end">
+                <div className="grid grid-cols-1 gap-3 items-end sm:grid-cols-3 col-span-2">
                   <label className="flex items-center justify-between rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3 py-2.5">
                     <span className="text-sm">{t('admin:models.fields.vision')}</span>
                     <Switch
@@ -405,6 +405,13 @@ export default function AdminModelEdit() {
                     <Switch
                       checked={draft.stream ?? true}
                       onCheckedChange={(v) => patch({ stream: v })}
+                    />
+                  </label>
+                  <label className="flex items-center justify-between gap-3 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3 py-2.5">
+                    <span className="text-sm">{t('admin:models.fields.researchEnabled')}</span>
+                    <Switch
+                      checked={draft.research_enabled ?? true}
+                      onCheckedChange={(v) => patch({ research_enabled: v })}
                     />
                   </label>
                 </div>

@@ -180,7 +180,7 @@ Native reasoning support for Claude (extended thinking) and Gemini (chain-of-tho
 | Section | What you manage |
 |---------|-----------------|
 | Channels | Provider URL + API key per channel. Multiple channels of the same provider type are allowed. |
-| Models | Enable / disable, display name, context window, per-model knobs, image fallback chain, in/out pricing. |
+| Models | Enable / disable, display name, context window, per-model knobs, Deep Research exposure, image fallback chain, in/out pricing. |
 | Model Tags | Admin-defined labels ("Fast", "Vision", "Coding") shown as filter chips in the model picker. |
 | User Groups | Named tiers with feature flags — extra tools, higher context, custom branding, group quotas. |
 | Users | Role assignment, real-time ban (JWT token-version bump), conversation drill-down (read-only). |
