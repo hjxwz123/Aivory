@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, type MouseEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, type ReactNode } from 'react'
 
 import { cn } from '@/lib/utils'
 
@@ -8,6 +8,14 @@ import { cn } from '@/lib/utils'
  * they travel. Drawn on a pointer-events-none canvas overlay, so everything
  * underneath keeps full interactivity; the wrapper is a plain `relative` block
  * that sizes to its content and adds no stacking side effects.
+ *
+ * The burst is driven by a document-level `click` listener, NOT an `onClick`
+ * on the wrapper div. That matters on iOS Safari: a click handler on a large
+ * <div> that wraps form fields makes the div a "clickable" tap target, which
+ * can steal the first tap from a nested <input> — the input never focuses and
+ * the soft keyboard never opens. A passive document listener touches no
+ * element's clickability, so nested inputs focus (and raise the keyboard)
+ * exactly as if the wrapper weren't there.
  *
  * `sparkColor` defaults to the clay accent token and is resolved from CSS
  * variables at burst time, so theme switches apply on the very next click.
@@ -145,11 +153,17 @@ export function ClickSpark({
     [],
   )
 
-  const handleClick = (e: MouseEvent<HTMLDivElement>) => {
+  // The burst logic lives in a ref so the once-registered document listener
+  // always sees fresh props without re-subscribing (mirrors the rAF pattern).
+  const burstRef = useRef<(clientX: number, clientY: number) => void>(() => {})
+  burstRef.current = (clientX: number, clientY: number) => {
     // Reduced motion: the burst is pure ornament, so clicks draw nothing.
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
     const canvas = canvasRef.current
     if (!canvas) return
+    const rect = canvas.getBoundingClientRect()
+    // Ignore clicks outside this wrapper (e.g. a portalled dialog above it).
+    if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) return
 
     // Canvas strokeStyle can't take var(); route the prop through the canvas's
     // own `color` so getComputedStyle resolves vars / color-mix to concrete
@@ -157,9 +171,8 @@ export function ClickSpark({
     canvas.style.color = sparkColor
     strokeRef.current = getComputedStyle(canvas).color
 
-    const rect = canvas.getBoundingClientRect()
-    const x = e.clientX - rect.left
-    const y = e.clientY - rect.top
+    const x = clientX - rect.left
+    const y = clientY - rect.top
     const now = performance.now()
     for (let i = 0; i < sparkCount; i++) {
       sparksRef.current.push({ x, y, angle: (2 * Math.PI * i) / sparkCount, startTime: now })
@@ -167,8 +180,17 @@ export function ClickSpark({
     if (rafRef.current === null) rafRef.current = requestAnimationFrame(tick)
   }
 
+  // Document-level (not wrapper-onClick) so the wrapper never becomes a
+  // clickable tap target — see the component doc: nested <input> keyboards on
+  // iOS Safari depend on this.
+  useEffect(() => {
+    const onDocClick = (e: globalThis.MouseEvent) => burstRef.current(e.clientX, e.clientY)
+    document.addEventListener('click', onDocClick)
+    return () => document.removeEventListener('click', onDocClick)
+  }, [])
+
   return (
-    <div className={cn('relative', className)} onClick={handleClick}>
+    <div className={cn('relative', className)}>
       {children}
       {/* After children in DOM order so bursts paint above positioned page content. */}
       <canvas ref={canvasRef} className="absolute inset-0 pointer-events-none" aria-hidden />
