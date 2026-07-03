@@ -233,7 +233,7 @@
     "dataStorageBody": "Your conversations are stored securely on our servers. To request data deletion, please contact support.",
     "exportDone": "Export downloaded",
     "import": "Import conversations",
-    "importBody": "Bring chats in from another platform's JSON export. ",
+    "importBody": "Import chats from another platform's export or this page's own export file.",
     "importDone": "Imported {{count}} conversation(s)",
     "importPartial": "{{count}} could not be imported.",
     "importBadJson": "That file is not valid JSON.",

@@ -1,18 +1,25 @@
 /**
- * Conversation-import parser — converts another platform's JSON chat export into
- * our import payload.
+ * Conversation-import parser — converts a JSON chat export into our import
+ * payload. Two source formats are auto-detected:
  *
- * The source format is a JSON array of chat wrappers; each carries a
- * `chat.history` tree: `{ messages: { <id>: { id, parentId, childrenIds, role,
- * content } }, currentId }`. That maps cleanly onto our own message tree
- * (parent_id + active_leaf_id; multiple null-parent roots = edit-branches of the
- * first question, which our sibling model supports).
+ * 1. Another platform's export: a JSON array of chat wrappers; each carries a
+ *    `chat.history` tree: `{ messages: { <id>: { id, parentId, childrenIds,
+ *    role, content } }, currentId }` (messages as a MAP). That maps cleanly
+ *    onto our own message tree (parent_id + active_leaf_id; multiple
+ *    null-parent roots = edit-branches of the first question, which our
+ *    sibling model supports).
  *
- * Per the import spec we keep ONLY chat history + titles. Everything else is
- * dropped: uploaded files, usage, and — inside assistant content — the
- * `<details>…</details>` status/thinking blocks, the source platform's internal
- * `[openai_responses:…]` reasoning markers, and embedded (base64/data-URI or
- * markdown) images.
+ * 2. Aurelia's own "Export all data" file (settings → privacy):
+ *    `{ conversations: [ { title, model_id, active_leaf_id, messages: [ { id,
+ *    parent_id, role, blocks: [...] } ] } ], memories, exported_at }`
+ *    (messages as an ARRAY of block-carrying objects). Only the text blocks
+ *    are kept; memories are not importable through this endpoint.
+ *
+ * Per the import spec we keep ONLY chat history + titles (+ model for our own
+ * format). Everything else is dropped: uploaded files, usage, and — inside
+ * assistant content — the `<details>…</details>` status/thinking blocks, the
+ * source platform's internal `[openai_responses:…]` reasoning markers, and
+ * embedded (base64/data-URI or markdown) images.
  */
 
 export interface ImportMessage {
@@ -30,6 +37,8 @@ export interface ImportConversationInput {
   active_leaf_id: string
   /** Messages ordered parent-before-child (DFS from roots). */
   messages: ImportMessage[]
+  /** Model to reopen the conversation with (Aurelia self-export only). */
+  model_id?: string
 }
 
 interface SourceMessage {
@@ -120,11 +129,107 @@ function parseOne(item: unknown): ImportConversationInput | null {
   return { title, active_leaf_id: active, messages }
 }
 
+// ── Aurelia self-export (settings → privacy → Export all data) ──────────────
+
+interface AureliaBlock {
+  kind?: string
+  text?: string
+}
+
+interface AureliaMessage {
+  id?: string
+  parent_id?: string
+  role?: string
+  blocks?: AureliaBlock[]
+}
+
+/** True when the object looks like one conversation from our own export:
+ *  `messages` is an ARRAY whose entries carry a `blocks` array — unambiguous
+ *  against the other-platform format, where messages live in a MAP under
+ *  `chat.history`. */
+function isAureliaConversation(obj: Record<string, unknown>): boolean {
+  const msgs = obj.messages
+  if (!Array.isArray(msgs)) return false
+  if (msgs.length === 0) return false
+  const first = asRecord(msgs[0])
+  return !!first && Array.isArray(first.blocks) && typeof first.role === 'string'
+}
+
+/** Flatten a message's blocks to plain text — text blocks only; thinking /
+ *  tool / citation / image blocks are dropped (history + titles only), then
+ *  the shared cleanup strips any embedded markdown images. */
+function aureliaBlocksToText(blocks: AureliaBlock[]): string {
+  const parts: string[] = []
+  for (const b of blocks) {
+    if (b && b.kind === 'text' && typeof b.text === 'string' && b.text.trim() !== '') {
+      parts.push(b.text)
+    }
+  }
+  return cleanImportedContent(parts.join('\n\n'))
+}
+
+function parseAureliaConversation(obj: Record<string, unknown>): ImportConversationInput | null {
+  const raw = (obj.messages as unknown[]).map(asRecord)
+  const messages: ImportMessage[] = []
+  const ids = new Set<string>()
+  for (const m of raw) {
+    if (!m) continue
+    const msg = m as AureliaMessage
+    if (typeof msg.id !== 'string' || msg.id === '') continue
+    const role = msg.role === 'user' ? 'user' : msg.role === 'assistant' ? 'assistant' : null
+    if (!role) continue // system rows etc. are not part of the visible history
+    messages.push({
+      id: msg.id,
+      parent_id: typeof msg.parent_id === 'string' ? msg.parent_id : '',
+      role,
+      content: aureliaBlocksToText(Array.isArray(msg.blocks) ? msg.blocks : []),
+    })
+    ids.add(msg.id)
+  }
+  if (messages.length === 0) return null
+  const title = String((obj.title as string | undefined) ?? '').trim() || 'Imported chat'
+  let active = typeof obj.active_leaf_id === 'string' ? obj.active_leaf_id : ''
+  if (!active || !ids.has(active)) active = messages[messages.length - 1].id
+  const modelID = typeof obj.model_id === 'string' ? obj.model_id : ''
+  const out: ImportConversationInput = { title, active_leaf_id: active, messages }
+  if (modelID) out.model_id = modelID
+  return out
+}
+
+/** Parse our own export file. Accepts the full export root
+ *  (`{ conversations: [...] }`), a bare array of its conversations, or a single
+ *  conversation object. Returns [] when the shape isn't ours. */
+function parseAureliaExport(json: unknown): ImportConversationInput[] {
+  const root = asRecord(json)
+  let candidates: unknown[]
+  if (root && Array.isArray(root.conversations)) {
+    candidates = root.conversations
+  } else if (Array.isArray(json)) {
+    candidates = json
+  } else if (root) {
+    candidates = [root]
+  } else {
+    return []
+  }
+  const out: ImportConversationInput[] = []
+  for (const item of candidates) {
+    const obj = asRecord(item)
+    if (!obj || !isAureliaConversation(obj)) continue
+    const parsed = parseAureliaConversation(obj)
+    if (parsed) out.push(parsed)
+  }
+  return out
+}
+
 /**
- * Parse a chat export (array of chat wrappers, or a single one) into our import
- * payload. Returns [] when nothing parseable is found (unsupported file).
+ * Parse a chat export into our import payload, auto-detecting the source:
+ * Aurelia's own "Export all data" file first (messages as block-carrying
+ * arrays), then the other-platform wrapper format (messages as a map under
+ * chat.history). Returns [] when nothing parseable is found (unsupported file).
  */
 export function parseConversationExport(json: unknown): ImportConversationInput[] {
+  const own = parseAureliaExport(json)
+  if (own.length > 0) return own
   const arr = Array.isArray(json) ? json : [json]
   const out: ImportConversationInput[] = []
   for (const item of arr) {

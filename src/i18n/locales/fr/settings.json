@@ -233,7 +233,7 @@
     "dataStorageBody": "Vos conversations sont stockées en toute sécurité sur nos serveurs. Pour demander leur suppression, contactez le support.",
     "exportDone": "Export téléchargé",
     "import": "Importer des conversations",
-    "importBody": "Importez des discussions depuis l'export JSON d'une autre plateforme. ",
+    "importBody": "Importez l'export d'une autre plateforme ou le fichier exporté depuis cette page.",
     "importDone": "{{count}} conversation(s) importée(s)",
     "importPartial": "{{count}} n'ont pas pu être importées.",
     "importBadJson": "Ce fichier n'est pas un JSON valide.",

@@ -309,13 +309,15 @@ export const conversationsApi = {
   },
   create: (body: { model_id?: string; project_id?: string; title?: string; workspace_id?: string }) =>
     api<ApiConversation>('/conversations', { method: 'POST', body }),
-  // Bulk-import conversation trees from another platform's export. History +
-  // titles only; the server bypasses the orchestrator (no model calls / quota).
+  // Bulk-import conversation trees from another platform's export OR our own
+  // privacy-page "Export all data" file. History + titles (+ model for our own
+  // format) only; the server bypasses the orchestrator (no model calls / quota).
   importConversations: (body: {
     conversations: {
       title: string
       active_leaf_id: string
       messages: { id: string; parent_id: string; role: string; content: string }[]
+      model_id?: string
     }[]
   }) =>
     api<{ imported: number; failed: number; conversation_ids: string[] }>('/conversations/import', {

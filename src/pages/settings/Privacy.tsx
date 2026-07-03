@@ -25,9 +25,11 @@ export default function Privacy() {
   const { t } = useTranslation(['settings', 'common'])
   const reloadConvs = useConversations((s) => s.load)
 
-  /** Import conversations from another platform's JSON export. Only chat history
-   *  + titles are kept — images/files/usage and <details> blocks are stripped
-   *  client-side by the parser. The branch tree migrates to our message tree. */
+  /** Import conversations from a JSON export — another platform's, or this
+   *  page's own "Export all data" file (parseConversationExport auto-detects
+   *  which). Only chat history + titles are kept — images/files/usage and
+   *  <details> blocks are stripped client-side by the parser. The branch tree
+   *  migrates to our message tree. */
   async function performImport(file: File) {
     if (importing) return
     setImporting(true)
@@ -157,7 +159,7 @@ export default function Privacy() {
           label={t('settings:privacy.import', { defaultValue: 'Import conversations' })}
           description={t('settings:privacy.importBody', {
             defaultValue:
-              "Bring chats in from another platform's JSON export. Only history and titles are imported — images, files and usage are ignored.",
+              "Import chats from another platform's export or this page's own export file.",
           })}
         >
           <input
