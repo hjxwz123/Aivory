@@ -233,7 +233,7 @@
     "dataStorageBody": "你的對話安全儲存在我們的伺服器上。如需刪除資料，請聯絡支援。",
     "exportDone": "匯出已下載",
     "import": "匯入對話",
-    "importBody": "從其他平台的 JSON 匯出檔匯入聊天記錄。",
+    "importBody": "支援其他平台匯出檔或本頁匯出的檔案。",
     "importDone": "已匯入 {{count}} 個對話",
     "importPartial": "{{count}} 個無法匯入。",
     "importBadJson": "該檔案不是有效的 JSON。",
