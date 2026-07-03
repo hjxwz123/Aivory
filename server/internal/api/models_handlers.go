@@ -102,19 +102,20 @@ func listSkillsPublicHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 // frontend's model picker can default to it.
 func modelsResponse(d Deps, r *http.Request, models []store.Model) map[string]any {
 	type item struct {
-		ID            string          `json:"id"`
-		Label         string          `json:"label"`
-		Description   string          `json:"description"`
-		Icon          string          `json:"icon"`
-		Kind          string          `json:"kind"`
-		Vision        bool            `json:"vision"`
-		Stream        bool            `json:"stream"`
-		ToolMode      string          `json:"tool_mode"`
-		ParamControls json.RawMessage `json:"param_controls"`
-		ChannelID     string          `json:"channel_id"`
-		SortOrder     int             `json:"sort_order"`
-		Currency      string          `json:"currency"`
-		Tags          json.RawMessage `json:"tags"`
+		ID              string          `json:"id"`
+		Label           string          `json:"label"`
+		Description     string          `json:"description"`
+		Icon            string          `json:"icon"`
+		Kind            string          `json:"kind"`
+		Vision          bool            `json:"vision"`
+		Stream          bool            `json:"stream"`
+		ResearchEnabled bool            `json:"research_enabled"`
+		ToolMode        string          `json:"tool_mode"`
+		ParamControls   json.RawMessage `json:"param_controls"`
+		ChannelID       string          `json:"channel_id"`
+		SortOrder       int             `json:"sort_order"`
+		Currency        string          `json:"currency"`
+		Tags            json.RawMessage `json:"tags"`
 		// UsesCredits is true when this model has NO free allotment left for the
 		// caller's group (none configured, or the per-cycle count is used up) —
 		// the picker shows the credit multiplier instead of a lock (§ credits).
@@ -163,7 +164,7 @@ func modelsResponse(d Deps, r *http.Request, models []store.Model) map[string]an
 		}
 		items = append(items, item{
 			ID: m.ID, Label: m.Label, Description: m.Description, Icon: m.Icon,
-			Kind: m.Kind, Vision: m.Vision, Stream: m.Stream, ToolMode: m.ToolMode,
+			Kind: m.Kind, Vision: m.Vision, Stream: m.Stream, ResearchEnabled: m.ResearchEnabled, ToolMode: m.ToolMode,
 			ParamControls: m.ParamControls, ChannelID: m.ChannelID, SortOrder: m.SortOrder,
 			Currency:        m.Currency,
 			Tags:            tags,

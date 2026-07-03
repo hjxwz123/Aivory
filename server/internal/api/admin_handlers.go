@@ -177,6 +177,11 @@ func deleteChannelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 
 // ===== Models =====
 
+type createModelReq struct {
+	store.Model
+	ResearchEnabled *bool `json:"research_enabled"`
+}
+
 func listModelsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	kind := r.URL.Query().Get("kind")
 	rows, err := store.ListModels(r.Context(), d.DB, kind, false)
@@ -199,10 +204,15 @@ func listModelsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 }
 
 func createModelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
-	var m store.Model
-	if err := decodeJSON(r, &m); err != nil {
+	var req createModelReq
+	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, 400, errInvalidInput)
 		return
+	}
+	m := req.Model
+	if req.ResearchEnabled != nil {
+		m.ResearchEnabled = *req.ResearchEnabled
+		m.ResearchEnabledSet = true
 	}
 	m.RequestID = strings.TrimSpace(m.RequestID)
 	m.Label = strings.TrimSpace(m.Label)

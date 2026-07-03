@@ -20,11 +20,11 @@ import (
 const maxGenDuration = 10 * time.Minute
 
 type postMessageReq struct {
-	Text           string           `json:"text"`
-	ModelID        string           `json:"model_id"`
-	ParentID       string           `json:"parent_id"`
-	Branch         bool             `json:"branch"`
-	Mode           string           `json:"mode"`
+	Text     string `json:"text"`
+	ModelID  string `json:"model_id"`
+	ParentID string `json:"parent_id"`
+	Branch   bool   `json:"branch"`
+	Mode     string `json:"mode"`
 	// Verify enables Verify mode (§verify) — a secondary auditor model checks the
 	// answer. No-op unless an admin configured `verify_model_id`.
 	Verify         bool             `json:"verify"`
@@ -183,6 +183,11 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, errNotFound)
 		return
 	}
+	// Keep regenerate aligned with the normal send path: users without the
+	// Deep Research group feature cannot force it by calling /regenerate.
+	if body.Mode == "deep-research" && u.Role != "admin" && !userGroupHasFeature(r.Context(), d, u.GroupID, "research") {
+		body.Mode = ""
+	}
 	// §8/§C7 daily-message + token + concurrent-gen quotas apply to regenerate
 	// too — otherwise repeated /regenerate bypasses the per-day message cap.
 	// Reserve the concurrent-gen slot FIRST so a slot-full 429 doesn't burn a
@@ -275,16 +280,16 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 	_, err = d.Orchestrator.Run(ctx, llm.RunRequest{
-		UserID:         u.ID,
-		ConversationID: id,
-		ModelID:        body.ModelID,
-		UserText:       text,
-		ParentID:       user.ID, // assistant sibling under SAME user — §4.15
+		UserID:                   u.ID,
+		ConversationID:           id,
+		ModelID:                  body.ModelID,
+		UserText:                 text,
+		ParentID:                 user.ID, // assistant sibling under SAME user — §4.15
 		ReuseExistingUserMessage: true,
-		Mode:           body.Mode,
-		Verify:         body.Verify,
-		ParamOverrides: body.ParamOverrides,
-		Locale:         body.Locale,
+		Mode:                     body.Mode,
+		Verify:                   body.Verify,
+		ParamOverrides:           body.ParamOverrides,
+		Locale:                   body.Locale,
 	}, func(ev llm.SseEvent) {
 		_ = writer.Send(ev, ev.Type)
 	})

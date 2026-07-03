@@ -23,6 +23,7 @@ import { Switch } from '@/components/ui/switch'
 import { Tooltip } from '@/components/ui/tooltip'
 import { IconUploader } from '@/components/admin/icon-uploader'
 import { AdminSortableList } from '@/components/admin/AdminSortableList'
+import { ModelIcon } from '@/components/chat/model-icon'
 import {
   Dialog,
   DialogBody,
@@ -116,6 +117,7 @@ export default function AdminModels() {
         tool_mode: 'native',
         vision: true,
         stream: true,
+        research_enabled: true,
         param_controls: [],
         currency: 'USD',
       })
@@ -205,11 +207,14 @@ export default function AdminModels() {
             dragHandleLabel={t('admin:common.dragHandle')}
             moveUpLabel={t('admin:common.moveUp')}
             moveDownLabel={t('admin:common.moveDown')}
-            rowClassName="grid grid-cols-[auto_auto_1fr_auto_auto_auto] gap-2 items-center px-5 py-4"
+            rowClassName="grid grid-cols-[auto_auto_auto_minmax(0,1fr)_auto_auto_auto] gap-2 items-center px-5 py-4"
             renderItem={(m) => {
               const ch = channels.find((c) => c.id === m.channel_id)
               return (
                 <>
+                  <div className="grid size-9 shrink-0 place-items-center rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-muted)]">
+                    <ModelIcon icon={m.icon} size={22} />
+                  </div>
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-medium text-[var(--color-fg)] truncate">{m.label}</span>

@@ -425,6 +425,13 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	if !model.Enabled {
 		return nil, errors.New("model is disabled")
 	}
+	// Deep Research is model-scoped as well as group-scoped. The API handler
+	// already strips the mode for users without the group feature; this guard
+	// covers the resolved model (including defaults/regenerate) so a client can't
+	// force deep research for a model where admins disabled exposure.
+	if req.Mode == ModeDeepResearch && !model.ResearchEnabled {
+		req.Mode = ""
+	}
 	channel, err := store.GetChannel(ctx, o.db, model.ChannelID)
 	if err != nil {
 		return nil, err
@@ -880,7 +887,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		orch:    o,
 		onEvent: onEvent,
 		ctx: &ToolContext{
-			UserID: req.UserID,
+			UserID:      req.UserID,
 			WorkspaceID: conv.WorkspaceID, ConvID: conv.ID, MessageID: assistantMsg.ID, ModelID: model.ID,
 			KBIDs: kbIDs, ProjectID: conv.ProjectID, ProjectName: projectName,
 			DB: o.db, RAG: o.rag, ImageModelID: imageModelID,
@@ -984,7 +991,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			if produced {
 				o.logUsage(ctx, store.UsageLog{
 					UserID:           req.UserID,
-		WorkspaceID:      conv.WorkspaceID,
+					WorkspaceID:      conv.WorkspaceID,
 					ConversationID:   conv.ID,
 					MessageID:        assistantMsg.ID,
 					ModelID:          model.ID,
@@ -1231,7 +1238,7 @@ func (o *Orchestrator) runImageTurn(
 	artifacts := []ArtifactRef{}
 	tc := &ToolContext{
 		UserID:       req.UserID,
-		WorkspaceID: conv.WorkspaceID,
+		WorkspaceID:  conv.WorkspaceID,
 		ConvID:       conv.ID,
 		MessageID:    assistantMsg.ID,
 		ModelID:      model.ID,
