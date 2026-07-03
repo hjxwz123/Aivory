@@ -12,7 +12,7 @@
  *   4. IME-aware Enter handling for CJK input.
  */
 import { activeWorkspaceId } from '@/store/workspaces'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   ArrowUp,
@@ -42,6 +42,7 @@ import { useAutosizeTextarea } from '@/hooks/use-autosize-textarea'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { useModels } from '@/store/models'
 import { useAuth } from '@/store/auth'
+import { useComposerPrefs } from '@/store/composer-prefs'
 import { api, ApiError } from '@/api/client'
 import type { ApiAttachment } from '@/api/types'
 import { toast } from '@/hooks/use-toast'
@@ -92,6 +93,7 @@ interface ComposerProps {
 }
 
 const MAX_LEN = 12_000
+const EMPTY_PARAM_VALUES: Record<string, unknown> = {}
 
 interface PendingAttachment extends Attachment {
   /** true while POST /api/files is in flight. */
@@ -124,11 +126,15 @@ export function Composer({
   const { t } = useTranslation('chat')
   const [value, setValue] = useState(initialValue)
   const [attachments, setAttachments] = useState<PendingAttachment[]>([])
-  const [mode, setMode] = useState<'default' | 'deep-research' | 'canvas'>('default')
-  // §verify: when on, the answer is fact-checked by a second model this turn.
-  const [verify, setVerify] = useState(false)
-  const [paramValues, setParamValues] = useState<Record<string, unknown>>({})
   const [kbList, setKBList] = useState<{ id: string; name: string }[]>([])
+  const mode = useComposerPrefs((s) => s.mode)
+  const setMode = useComposerPrefs((s) => s.setMode)
+  // §verify: when on, the answer is fact-checked by a second model this turn.
+  const verify = useComposerPrefs((s) => s.verify)
+  const setVerify = useComposerPrefs((s) => s.setVerify)
+  const cachedParamValues = useComposerPrefs((s) => (modelId ? s.paramValuesByModel[modelId] : undefined))
+  const setCachedParamValues = useComposerPrefs((s) => s.setParamValues)
+  const paramValues = cachedParamValues ?? EMPTY_PARAM_VALUES
   // Drag-and-drop file upload over the composer surface.
   const [dragOver, setDragOver] = useState(false)
   // Narrow screens collapse every secondary action into a single "+" menu
@@ -224,11 +230,14 @@ export function Composer({
   // §verify: only offer the toggle when an admin has configured an auditor model.
   const verifyAvailable = useModels((s) => s.verifyAvailable)
   const paramControls = currentModel?.param_controls
-
-  // Reset param values whenever the model changes (different schemas).
-  useEffect(() => {
-    setParamValues({})
-  }, [modelId])
+  const effectiveMode = !isImageMode && researchEnabled ? mode : 'default'
+  const effectiveVerify = verify && verifyAvailable && !isImageMode
+  const handleParamValuesChange = useCallback(
+    (next: Record<string, unknown>) => {
+      setCachedParamValues(modelId, next)
+    },
+    [modelId, setCachedParamValues],
+  )
 
   // Cap textarea growth lower on phones so a long draft can't eat the viewport.
   useAutosizeTextarea(ref, value, compact || isMobile ? 6 : 12)
@@ -263,10 +272,10 @@ export function Composer({
       // gated until 'ready'); by here every attachment is already a real backend id.
       const params = filterVisibleParams(paramControls, paramValues)
       onSubmit(text, attachments, {
-        mode: mode === 'default' ? undefined : mode,
+        mode: effectiveMode === 'default' ? undefined : effectiveMode,
         params: Object.keys(params).length > 0 ? params : undefined,
         imageStyleId: isImageMode && imageStyleId ? imageStyleId : undefined,
-        verify: verify && verifyAvailable && !isImageMode ? true : undefined,
+        verify: effectiveVerify ? true : undefined,
       })
       setValue('')
       // Stop any leftover pollers and revoke blob: URLs — uploadAttachment already
@@ -277,7 +286,6 @@ export function Composer({
         if (a.previewUrl && a.previewUrl.startsWith('blob:')) URL.revokeObjectURL(a.previewUrl)
       })
       setAttachments([])
-      setMode('default')
     } finally {
       submittingRef.current = false
     }
@@ -429,7 +437,7 @@ export function Composer({
 
   // A tool is "armed" while collapsed → the "+" trigger shows an accent dot so
   // the user knows research / a KB is active without expanding the menu.
-  const hasActiveTool = mode === 'deep-research' || (kbIds?.length ?? 0) > 0
+  const hasActiveTool = effectiveMode === 'deep-research' || (kbIds?.length ?? 0) > 0
 
   // KB checklist — shared by the desktop popover and the mobile "+" menu.
   const kbChecklist =
@@ -740,20 +748,20 @@ export function Composer({
                   <div className="my-1 h-px bg-[var(--color-divider)]" aria-hidden />
                   <button
                     type="button"
-                    onClick={() => setMode((m) => (m === 'deep-research' ? 'default' : 'deep-research'))}
-                    aria-pressed={mode === 'deep-research'}
+                    onClick={() => setMode(effectiveMode === 'deep-research' ? 'default' : 'deep-research')}
+                    aria-pressed={effectiveMode === 'deep-research'}
                     className={cn(
                       'flex w-full items-center gap-2.5 rounded-[8px] px-2.5 py-2 text-left text-sm hover:bg-[var(--color-bg-muted)]',
-                      mode === 'deep-research' ? 'text-[var(--color-secondary)]' : 'text-[var(--color-fg)]',
+                      effectiveMode === 'deep-research' ? 'text-[var(--color-secondary)]' : 'text-[var(--color-fg)]',
                     )}
                   >
                     <Telescope
                       size={16}
-                      className={cn(mode !== 'deep-research' && 'text-[var(--color-fg-muted)]')}
+                      className={cn(effectiveMode !== 'deep-research' && 'text-[var(--color-fg-muted)]')}
                       aria-hidden
                     />
                     <span className="flex-1">{t('composer.research')}</span>
-                    {mode === 'deep-research' ? <Check size={15} aria-hidden /> : null}
+                    {effectiveMode === 'deep-research' ? <Check size={15} aria-hidden /> : null}
                   </button>
                 </>
               ) : null}
@@ -761,17 +769,17 @@ export function Composer({
               {verifyAvailable && !isImageMode ? (
                 <button
                   type="button"
-                  onClick={() => setVerify((v) => !v)}
-                  aria-pressed={verify}
+                  onClick={() => setVerify(!verify)}
+                  aria-pressed={effectiveVerify}
                   className={cn(
                     'flex w-full items-center gap-2.5 rounded-[8px] px-2.5 py-2 text-left text-sm hover:bg-[var(--color-bg-muted)]',
                     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-                    verify ? 'text-[var(--color-secondary)]' : 'text-[var(--color-fg)]',
+                    effectiveVerify ? 'text-[var(--color-secondary)]' : 'text-[var(--color-fg)]',
                   )}
                 >
-                  <ShieldCheck size={16} className={cn(!verify && 'text-[var(--color-fg-muted)]')} aria-hidden />
+                  <ShieldCheck size={16} className={cn(!effectiveVerify && 'text-[var(--color-fg-muted)]')} aria-hidden />
                   <span className="flex-1">{t('composer.verify', { defaultValue: 'Verify' })}</span>
-                  {verify ? <Check size={15} aria-hidden /> : null}
+                  {effectiveVerify ? <Check size={15} aria-hidden /> : null}
                 </button>
               ) : null}
 
@@ -789,7 +797,12 @@ export function Composer({
                 <>
                   <div className="my-1 h-px bg-[var(--color-divider)]" aria-hidden />
                   <div className="px-1.5 py-1">
-                    <ParamControls controls={paramControls} values={paramValues} onChange={setParamValues} />
+                    <ParamControls
+                      key={modelId || 'default-model'}
+                      controls={paramControls}
+                      values={paramValues}
+                      onChange={handleParamValuesChange}
+                    />
                   </div>
                 </>
               ) : null}
@@ -870,12 +883,12 @@ export function Composer({
               <Tooltip content={t('composer.researchTooltip')}>
                 <button
                   type="button"
-                  onClick={() => setMode((m) => (m === 'deep-research' ? 'default' : 'deep-research'))}
-                  aria-pressed={mode === 'deep-research'}
+                  onClick={() => setMode(effectiveMode === 'deep-research' ? 'default' : 'deep-research')}
+                  aria-pressed={effectiveMode === 'deep-research'}
                   aria-label={t('composer.researchTooltip')}
                   className={cn(
                     'inline-flex items-center gap-1.5 h-8 px-2 rounded-[8px] text-[12px] font-medium interactive',
-                    mode === 'deep-research'
+                    effectiveMode === 'deep-research'
                       ? 'bg-[var(--color-secondary-soft)] text-[var(--color-secondary)]'
                       : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
                     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
@@ -891,12 +904,12 @@ export function Composer({
               <Tooltip content={t('composer.verifyTooltip', { defaultValue: 'Have a second model fact-check the answer' })}>
                 <button
                   type="button"
-                  onClick={() => setVerify((v) => !v)}
-                  aria-pressed={verify}
+                  onClick={() => setVerify(!verify)}
+                  aria-pressed={effectiveVerify}
                   aria-label={t('composer.verifyTooltip', { defaultValue: 'Have a second model fact-check the answer' })}
                   className={cn(
                     'inline-flex items-center gap-1.5 h-8 px-2 rounded-[8px] text-[12px] font-medium interactive',
-                    verify
+                    effectiveVerify
                       ? 'bg-[var(--color-secondary-soft)] text-[var(--color-secondary)]'
                       : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
                     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
@@ -911,7 +924,12 @@ export function Composer({
             {/* Per-model param_controls (§2.3-G). Picked values flow up via onSubmit(). */}
             {paramControls ? (
               <div className="flex flex-wrap items-center gap-1.5">
-                <ParamControls controls={paramControls} values={paramValues} onChange={setParamValues} />
+                <ParamControls
+                  key={modelId || 'default-model'}
+                  controls={paramControls}
+                  values={paramValues}
+                  onChange={handleParamValuesChange}
+                />
               </div>
             ) : null}
 
