@@ -156,7 +156,7 @@ function PreviewBody({ doc, reloadKey, onRefresh, onClose }: PreviewBodyProps) {
             {isFullscreen ? <Minimize2 size={14} aria-hidden /> : <Maximize2 size={14} aria-hidden />}
           </button>
         </Tooltip>
-        <span className="flex-1 min-w-0 truncate font-serif tracking-tight text-[15px] text-[var(--color-fg)]">
+        <span className="flex-1 min-w-0 truncate tracking-tight text-[15px] text-[var(--color-fg)]">
           {t('code.previewTitle')}
         </span>
         <Tooltip content={t('code.previewRefresh')}>

@@ -102,7 +102,7 @@ function ThreadBody({ quote, childId, onClose }: { quote: string; childId: strin
     <>
       <header className="flex items-center gap-2 h-12 px-3 border-b border-[var(--color-divider)] shrink-0">
         <MessagesSquare size={14} aria-hidden className="text-[var(--color-secondary)]" />
-        <span className="flex-1 min-w-0 truncate font-serif tracking-tight text-[15px] text-[var(--color-fg)]">
+        <span className="flex-1 min-w-0 truncate tracking-tight text-[15px] text-[var(--color-fg)]">
           {t('inline.title', { defaultValue: 'Sub-conversation' })}
         </span>
         <Tooltip content={t('code.previewClose', { defaultValue: 'Close' })}>

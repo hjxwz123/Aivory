@@ -91,7 +91,7 @@ function FilesBody({ onClose }: { onClose: () => void }) {
     <>
       <header className="flex items-center gap-2 h-12 px-3 border-b border-[var(--color-divider)] shrink-0">
         <FolderOpen size={14} aria-hidden className="text-[var(--color-fg-muted)]" />
-        <span className="flex-1 min-w-0 truncate font-serif tracking-tight text-[15px] text-[var(--color-fg)]">
+        <span className="flex-1 min-w-0 truncate tracking-tight text-[15px] text-[var(--color-fg)]">
           {t('files.title')}
         </span>
         <Tooltip content={t('files.close')}>

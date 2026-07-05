@@ -207,8 +207,14 @@
     border: 2px solid transparent;
   }
 
+  /* Headings default to the BODY typeface so app chrome (chat title, sidebar
+     date labels, panel/settings/dialog titles — all bare <h*> tags) follows the
+     Appearance → Font setting, which only ever overrides --font-sans. The
+     editorial Fraunces serif is now OPT-IN via `.font-serif` (brand pages,
+     wordmark) or the .prose-aurelia rule below (AI reply content), so picking a
+     sans font actually makes the UI sans. */
   h1, h2, h3, h4, h5, h6 {
-    font-family: var(--font-serif);
+    font-family: var(--font-sans);
     font-weight: 400;
     letter-spacing: var(--tracking-tight);
     color: var(--color-fg);
@@ -528,6 +534,10 @@
 :root[data-density="cozy"] .prose-aurelia li { margin-top: 0.2em; }
 
 .prose-aurelia > * + * { margin-top: 1em; }
+/* Message content headings follow the base heading rule (= --font-sans), so
+   they honour the Appearance → Font setting like the rest of the UI: sans by
+   default, and Fraunces only when the user picks the "serif" font (which maps
+   --font-sans to Fraunces). No explicit family override here. */
 .prose-aurelia h1 { font-size: var(--text-2xl); margin-top: 1.4em; }
 .prose-aurelia h2 { font-size: var(--text-xl); margin-top: 1.4em; }
 .prose-aurelia h3 { font-size: var(--text-lg); margin-top: 1.2em; }

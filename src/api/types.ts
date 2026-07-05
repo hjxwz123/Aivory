@@ -262,6 +262,19 @@ export interface ApiPublicOAuthProvider {
   icon: string
 }
 
+/** One third-party identity bound to the current user (§ identity linking). */
+export interface ApiOAuthIdentity {
+  provider_id: string
+  subject: string
+  email: string
+  created_at: number
+  provider_name: string
+  provider_kind: OAuthKind
+  provider_icon: string
+  /** false when the admin disabled the provider — bound but not usable to log in. */
+  provider_enabled: boolean
+}
+
 export interface ApiChannel {
   id: string
   name: string

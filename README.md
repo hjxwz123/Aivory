@@ -381,4 +381,4 @@ cd server && go vet ./... && go build ./...
 
 ## Acknowledgements
 
-[Anthropic](https://www.anthropic.com) · [OpenAI](https://openai.com) · [Google](https://ai.google.dev) · [MinerU](https://mineru.net) · [Qdrant](https://qdrant.tech) · [SearXNG](https://github.com/searxng/searxng) · [Radix UI](https://www.radix-ui.com)
+[MinerU](https://mineru.net) · [Qdrant](https://qdrant.tech) · [SearXNG](https://github.com/searxng/searxng) · [Radix UI](https://www.radix-ui.com)

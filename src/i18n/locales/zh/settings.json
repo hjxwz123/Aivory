@@ -130,6 +130,23 @@
       "empty": "暂无活跃会话",
       "unknownDevice": "未知设备",
       "localNetwork": "本地网络"
+    },
+    "identities": {
+      "title": "身份源",
+      "subtitle": "可用于登录的第三方账户。可绑定更多，或移除不再使用的。",
+      "link": "绑定",
+      "unlink": "移除",
+      "notLinked": "未绑定",
+      "noEmail": "无邮箱",
+      "boundOn": "绑定于 {{date}}",
+      "disabled": "已停用",
+      "empty": "暂无可用的身份源。",
+      "linked": "已绑定 {{provider}}",
+      "unlinked": "已移除该身份源",
+      "conflict": "该账户已绑定到另一个用户。",
+      "linkFailed": "绑定失败",
+      "unlinkFailed": "移除失败",
+      "lastMethod": "这是你唯一的登录方式，请先设置密码。"
     }
   },
   "appearance": {

@@ -174,7 +174,7 @@ function Band({ label, children }: { label?: string; children: React.ReactNode }
   return (
     <section className="mt-10 first:mt-6">
       {label ? (
-        <h2 className="font-serif text-[13.5px] text-[var(--color-fg-subtle)] tracking-tight mb-1 px-4 sm:px-6 -mx-4 sm:-mx-6">
+        <h2 className="text-[13.5px] text-[var(--color-fg-subtle)] tracking-tight mb-1 px-4 sm:px-6 -mx-4 sm:-mx-6">
           {label}
         </h2>
       ) : null}

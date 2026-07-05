@@ -242,6 +242,95 @@ func LinkOAuthIdentity(ctx context.Context, db *sql.DB, providerID, subject, use
 	return err
 }
 
+// ListOAuthIdentitiesForUser returns every third-party identity bound to the
+// user, joined with its provider row for display (§ identity linking). INNER
+// JOIN drops orphaned rows whose provider was deleted — those can no longer log
+// in or be meaningfully shown, so they're invisible (and harmless).
+func ListOAuthIdentitiesForUser(ctx context.Context, db *sql.DB, userID string) ([]OAuthIdentity, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT i.provider_id, i.subject, i.email, i.created_at, p.name, p.kind, p.icon, p.enabled
+		FROM oauth_identities i
+		JOIN oauth_providers p ON p.id = i.provider_id
+		WHERE i.user_id = ?
+		ORDER BY p.sort_order, p.name, i.created_at`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []OAuthIdentity{}
+	for rows.Next() {
+		var it OAuthIdentity
+		var en int
+		if err := rows.Scan(&it.ProviderID, &it.Subject, &it.Email, &it.CreatedAt,
+			&it.ProviderName, &it.ProviderKind, &it.ProviderIcon, &en); err != nil {
+			return nil, err
+		}
+		it.ProviderEnabled = en == 1
+		out = append(out, it)
+	}
+	return out, rows.Err()
+}
+
+// CountOAuthIdentitiesForUser counts the user's bound identities — used by the
+// unbind lockout guard (an account with no password must keep at least one).
+func CountOAuthIdentitiesForUser(ctx context.Context, db *sql.DB, userID string) (int, error) {
+	var n int
+	err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM oauth_identities WHERE user_id=?`, userID).Scan(&n)
+	return n, err
+}
+
+// BindOAuthIdentity links (providerID, subject) to userID, conflict-checked
+// (§ identity linking). Unlike LinkOAuthIdentity — the LOGIN path, which
+// reassigns on conflict — binding must REFUSE if the identity already belongs to
+// a different account: both "someone logs in with Google A, another account
+// tries to bind A" and "account 1 bound Google B, account 2 tries B" reduce to
+// this single (provider, subject) primary-key collision.
+//
+// Insert-if-absent (ON CONFLICT DO NOTHING) then inspect the owner, so the
+// check and the write are one atomic statement — no TOCTOU between a concurrent
+// bind of the same identity. Re-binding the caller's own identity is a no-op
+// success (refreshes the email).
+func BindOAuthIdentity(ctx context.Context, db *sql.DB, providerID, subject, userID, email string) error {
+	res, err := db.ExecContext(ctx,
+		`INSERT INTO oauth_identities(provider_id, subject, user_id, email)
+		 VALUES(?, ?, ?, ?)
+		 ON CONFLICT(provider_id, subject) DO NOTHING`,
+		providerID, subject, userID, strings.ToLower(email))
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 1 {
+		return nil // freshly bound
+	}
+	// The row already existed — resolve who owns it.
+	owner, err := FindOAuthIdentityUser(ctx, db, providerID, subject)
+	if err != nil {
+		return err
+	}
+	if owner != userID {
+		return ErrOAuthIdentityConflict
+	}
+	// Already ours — idempotent; refresh the stored email.
+	_, _ = db.ExecContext(ctx,
+		`UPDATE oauth_identities SET email=? WHERE provider_id=? AND subject=?`,
+		strings.ToLower(email), providerID, subject)
+	return nil
+}
+
+// UnbindOAuthIdentity removes (providerID, subject) IF it belongs to userID.
+// Scoped by user_id so a caller can never delete another account's link. Returns
+// true when a row was actually removed (false → nothing matched → 404).
+func UnbindOAuthIdentity(ctx context.Context, db *sql.DB, providerID, subject, userID string) (bool, error) {
+	res, err := db.ExecContext(ctx,
+		`DELETE FROM oauth_identities WHERE provider_id=? AND subject=? AND user_id=?`,
+		providerID, subject, userID)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
 // CreateOAuthUser provisions a local account for a first-time social login. The
 // password is a random throwaway hash — the user signs in via the provider, or
 // later sets a real password through the forgot-password flow.

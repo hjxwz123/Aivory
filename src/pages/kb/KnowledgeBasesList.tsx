@@ -125,7 +125,7 @@ export default function KnowledgeBasesList() {
                     className="grid grid-cols-[1fr_180px] items-baseline gap-x-6 px-4 sm:px-6 -mx-4 sm:-mx-6 py-7 rounded-[12px] interactive hover:bg-[var(--color-bg-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
                   >
                     <div className="min-w-0">
-                      <h3 className="font-serif text-[22px] leading-[1.15] tracking-tight text-[var(--color-fg)] truncate">
+                      <h3 className="text-[22px] leading-[1.15] tracking-tight text-[var(--color-fg)] truncate">
                         {kb.name}
                       </h3>
                       {kb.description ? (

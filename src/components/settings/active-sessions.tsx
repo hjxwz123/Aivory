@@ -100,7 +100,7 @@ export function ActiveSessions() {
     <section className="mb-12">
       <div className="mb-5 flex items-end justify-between gap-4">
         <div>
-          <h2 className="font-serif tracking-tight text-xl text-[var(--color-fg)]">
+          <h2 className="tracking-tight text-xl text-[var(--color-fg)]">
             {t('settings:account.sessions.title')}
           </h2>
           <p className="mt-1.5 text-sm text-[var(--color-fg-muted)]">{t('settings:account.sessions.subtitle')}</p>

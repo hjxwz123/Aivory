@@ -182,6 +182,24 @@ type OAuthProvider struct {
 	UpdatedAt    int64  `json:"updated_at"`
 }
 
+// OAuthIdentity is one third-party identity bound to a local user (an
+// oauth_identities row joined with its provider row), returned to the account
+// page's "identity sources" section (§ identity linking). ClientSecret and the
+// provider subject are safe to expose here — the subject is the provider's own
+// public account id, not a credential.
+type OAuthIdentity struct {
+	ProviderID   string `json:"provider_id"`
+	Subject      string `json:"subject"`
+	Email        string `json:"email"`
+	CreatedAt    int64  `json:"created_at"`
+	ProviderName string `json:"provider_name"`
+	ProviderKind string `json:"provider_kind"`
+	ProviderIcon string `json:"provider_icon"`
+	// ProviderEnabled is false when the admin has since disabled the provider:
+	// the binding still shows (so it can be removed) but can't be used to log in.
+	ProviderEnabled bool `json:"provider_enabled"`
+}
+
 // Skill is the §4.17 record. Assets carry references to template files.
 type Skill struct {
 	ID           string          `json:"id"`

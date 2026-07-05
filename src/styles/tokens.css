@@ -566,7 +566,7 @@
   --color-code-bg: oklch(96% 0 0);
   --color-code-fg: oklch(30% 0 0);
 
-  --color-sidebar-bg: oklch(93.5% 0 0);
+  --color-sidebar-bg: oklch(98.5% 0 0);
   --color-sidebar-border: oklch(87% 0 0);
 }
 .dark[data-accent="mono"] {

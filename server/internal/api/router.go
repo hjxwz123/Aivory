@@ -108,6 +108,12 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("GET", "/api/me/settings", requireAuth(d, meSettingsHandler))
 	mux.handle("PATCH", "/api/me/settings", requireAuth(d, updateMeSettingsHandler))
 	mux.handle("GET", "/api/me/upload-policy", requireAuth(d, meUploadPolicyHandler))
+	// §identity linking — bind/list/unbind third-party accounts on the current
+	// user. Link-start is authenticated (it stashes the caller in the OAuth
+	// state); the callback reuses the shared public /api/auth/oauth/:id/callback.
+	mux.handle("GET", "/api/me/identities", requireAuth(d, listIdentitiesHandler))
+	mux.handle("DELETE", "/api/me/identities", requireAuth(d, unlinkIdentityHandler))
+	mux.handle("POST", "/api/me/identities/:id/link", rateLimitedIP(d, "auth", 20, 60*time.Second, requireAuth(d, oauthLinkStartHandler)))
 	mux.handle("GET", "/api/announcement", requireAuth(d, announcementHandler))
 	mux.handle("POST", "/api/me/2fa/setup", rateLimitedIP(d, "2fa", 10, 5*60*time.Second, requireAuth(d, twofaSetupHandler)))
 	mux.handle("POST", "/api/me/2fa/enable", rateLimitedIP(d, "2fa", 10, 5*60*time.Second, requireAuth(d, twofaEnableHandler)))

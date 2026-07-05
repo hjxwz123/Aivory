@@ -308,7 +308,7 @@ export default function ChatThread() {
       {/* Topbar — desktop keeps the full inline toolbar; mobile is a calm
           three-zone bar (menu • title+model • one overflow) like ChatGPT/Gemini. */}
       {isDesktop ? (
-        <header className="flex items-center gap-3 h-[var(--layout-topbar-h)] px-4 sm:px-6 border-b border-[var(--color-divider)] bg-[var(--color-bg)]/85 backdrop-blur-sm">
+        <header className="flex items-center gap-3 h-[var(--layout-topbar-h)] px-4 sm:px-6 bg-[var(--color-bg)]/85 backdrop-blur-sm">
           <div className="flex-1 min-w-0 flex flex-col">
             <h1 className="font-medium text-[var(--color-fg)] text-[15px] truncate">
               {truncate(conversation.title || t('untitled'), 80)}
@@ -393,7 +393,7 @@ export default function ChatThread() {
           </DropdownMenu>
         </header>
       ) : (
-        <header className="grid grid-cols-[var(--tap-min)_1fr_var(--tap-min)] items-center gap-1 h-[var(--layout-topbar-h-mobile)] px-2 border-b border-[var(--color-divider)] bg-[var(--color-bg)]/85 backdrop-blur-sm">
+        <header className="grid grid-cols-[var(--tap-min)_1fr_var(--tap-min)] items-center gap-1 h-[var(--layout-topbar-h-mobile)] px-2 bg-[var(--color-bg)]/85 backdrop-blur-sm">
           <button
             type="button"
             aria-label={t('chat:commandMenu.actions.toggleSidebar')}

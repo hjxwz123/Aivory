@@ -30,6 +30,7 @@ import {
 } from '@/components/ui/command'
 import { NewProjectDialog } from '@/components/projects/new-project-dialog'
 import { useCommandMenu } from '@/hooks/use-command-menu'
+import { useOpenSettings } from '@/hooks/use-open-settings'
 import { searchApi, type SearchHit } from '@/api'
 import { useConversations, sameConvListShape } from '@/store/conversations'
 import { useProjects } from '@/store/projects'
@@ -44,6 +45,7 @@ export function CommandMenu() {
   const open = useCommandMenu((s) => s.open)
   const setOpen = useCommandMenu((s) => s.setOpen)
   const navigate = useNavigate()
+  const openSettings = useOpenSettings()
   const { t } = useTranslation(['chat', 'projects'])
   // Summary-only subscription (see sidebar): don't re-render per streamed token.
   const allConversations = useConversations((s) => s.conversations, sameConvListShape)
@@ -186,7 +188,7 @@ export function CommandMenu() {
                   <MessageSquare size={14} aria-hidden />
                   {t('chat:commandMenu.actions.goToChat')}
                 </CommandItem>
-                <CommandItem onSelect={() => run(() => navigate('/settings/account'))}>
+                <CommandItem onSelect={() => run(() => openSettings('account'))}>
                   <Settings size={14} aria-hidden />
                   {t('chat:commandMenu.actions.openSettings')}
                   <CommandShortcut>{modKey()} ,</CommandShortcut>
@@ -332,7 +334,7 @@ export function CommandMenu() {
 
               <CommandSeparator />
               <CommandGroup heading={t('chat:commandMenu.groups.help')}>
-                <CommandItem onSelect={() => run(() => navigate('/settings/shortcuts'))}>
+                <CommandItem onSelect={() => run(() => openSettings('shortcuts'))}>
                   <HelpCircle size={14} aria-hidden />
                   {t('chat:commandMenu.actions.shortcuts')}
                   <CommandShortcut>{modKey()} /</CommandShortcut>

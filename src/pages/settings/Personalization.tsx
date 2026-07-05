@@ -99,7 +99,7 @@ export default function Personalization() {
   return (
     <div className="mx-auto max-w-[60rem]">
       <header className="mb-8">
-        <h1 className="font-serif tracking-tight text-3xl text-[var(--color-fg)]">
+        <h1 className="tracking-tight text-3xl text-[var(--color-fg)]">
           {t('settings:personalization.title')}
         </h1>
         <p className="mt-2.5 text-sm text-[var(--color-fg-muted)]">{t('settings:personalization.subtitle')}</p>
@@ -108,7 +108,7 @@ export default function Personalization() {
       {/* Response style */}
       <section className="mb-12">
         <div className="mb-5">
-          <h2 className="font-serif tracking-tight text-xl text-[var(--color-fg)]">
+          <h2 className="tracking-tight text-xl text-[var(--color-fg)]">
             {t('settings:personalization.styleTitle')}
           </h2>
           <p className="mt-1.5 text-sm text-[var(--color-fg-muted)]">{t('settings:personalization.styleSubtitle')}</p>
@@ -175,7 +175,7 @@ export default function Personalization() {
       {memoryAvailable && (
         <section className="mb-12">
           <div className="mb-5">
-            <h2 className="font-serif tracking-tight text-xl text-[var(--color-fg)]">
+            <h2 className="tracking-tight text-xl text-[var(--color-fg)]">
               {t('settings:personalization.memoryTitle')}
             </h2>
             <p className="mt-1.5 text-sm text-[var(--color-fg-muted)]">{t('settings:personalization.memorySubtitle')}</p>

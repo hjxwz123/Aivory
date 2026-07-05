@@ -130,6 +130,23 @@
       "empty": "Aucune session active",
       "unknownDevice": "Appareil inconnu",
       "localNetwork": "Réseau local"
+    },
+    "identities": {
+      "title": "Sources d'identité",
+      "subtitle": "Comptes tiers utilisables pour vous connecter. Ajoutez-en ou retirez ceux que vous n'utilisez plus.",
+      "link": "Lier",
+      "unlink": "Retirer",
+      "notLinked": "Non lié",
+      "noEmail": "Pas d'e-mail",
+      "boundOn": "lié le {{date}}",
+      "disabled": "Désactivé",
+      "empty": "Aucune source d'identité disponible.",
+      "linked": "{{provider}} lié",
+      "unlinked": "Identité retirée",
+      "conflict": "Ce compte est déjà lié à un autre utilisateur.",
+      "linkFailed": "Impossible de lier ce compte",
+      "unlinkFailed": "Impossible de retirer cette identité",
+      "lastMethod": "C'est votre seule méthode de connexion — définissez d'abord un mot de passe."
     }
   },
   "appearance": {

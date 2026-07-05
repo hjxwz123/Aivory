@@ -112,6 +112,11 @@ func oauthCallbackHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	var st struct {
 		ProviderID string `json:"provider_id"`
 		Verifier   string `json:"verifier"`
+		// LinkUserID marks a §identity-linking BIND flow (set by the authenticated
+		// link-start). When present the callback links to this user instead of
+		// logging in — it is trusted because it was stashed server-side from an
+		// authenticated session, never read from the callback request.
+		LinkUserID string `json:"link_user_id"`
 	}
 	_ = json.Unmarshal([]byte(raw), &st)
 	if st.ProviderID != id {
@@ -149,6 +154,24 @@ func oauthCallbackHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// §identity linking BIND flow: link this provider identity to the already-
+	// authenticated user (conflict-checked) instead of logging in. No session is
+	// minted, no account provisioned, 2FA is not re-challenged. Redirect back to
+	// the account page with a status the SPA turns into a toast.
+	if st.LinkUserID != "" {
+		acct := base + "/settings/account"
+		switch err := store.BindOAuthIdentity(ctx, d.DB, p.ID, info.Subject, st.LinkUserID, info.Email); {
+		case err == nil:
+			http.Redirect(w, r, acct+"?linked="+url.QueryEscape(p.Name), http.StatusFound)
+		case errors.Is(err, store.ErrOAuthIdentityConflict):
+			http.Redirect(w, r, acct+"?link_error=conflict", http.StatusFound)
+		default:
+			d.Logger.Printf("[oauth] %s identity link failed: %v", p.Kind, err)
+			http.Redirect(w, r, acct+"?link_error=failed", http.StatusFound)
+		}
+		return
+	}
+
 	user, err := resolveOAuthUser(ctx, d, p, info)
 	if err != nil {
 		d.Logger.Printf("[oauth] %s account resolve failed: %v", p.Kind, err)
@@ -184,6 +207,89 @@ func oauthCallbackHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, base+"/", http.StatusFound)
+}
+
+// ===== Identity linking (authenticated: §account → identity sources) =====
+
+// oauthLinkStartHandler begins a BIND flow for the logged-in user. It mirrors
+// oauthStartHandler but (a) stashes the caller's user id in the state so the
+// shared callback links instead of logging in, and (b) returns the authorize
+// URL as JSON for the SPA to navigate to. The SPA calls this with its bearer
+// token (a plain browser navigation to a /start URL wouldn't carry it), then
+// does a full-page redirect to the returned URL.
+func oauthLinkStartHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	u := authUser(r)
+	id := pathParam(r, "id")
+	p, err := store.GetOAuthProvider(r.Context(), d.DB, id)
+	if err != nil || !p.Enabled {
+		writeError(w, 404, errNotFound)
+		return
+	}
+	cfg := oauth.Resolve(toOAuthConfig(p))
+	if cfg.ClientID == "" || cfg.AuthURL == "" {
+		writeError(w, 400, errors.New("provider is not fully configured"))
+		return
+	}
+	state := randToken(24)
+	verifier := ""
+	challenge := ""
+	if oauth.UsesPKCE(p.Kind) {
+		verifier = randToken(32)
+		challenge = oauth.PKCEChallenge(verifier)
+	}
+	stash, _ := json.Marshal(map[string]string{
+		"provider_id": id, "verifier": verifier, "link_user_id": u.ID,
+	})
+	d.Cache.Set("oauth:state:"+state, string(stash), 10*time.Minute)
+	redirectURI := externalBaseURL(r) + "/api/auth/oauth/" + id + "/callback"
+	writeJSON(w, 200, map[string]string{"authorize_url": cfg.AuthCodeURL(redirectURI, state, challenge)})
+}
+
+// listIdentitiesHandler returns the current user's bound identities.
+func listIdentitiesHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	u := authUser(r)
+	rows, err := store.ListOAuthIdentitiesForUser(r.Context(), d.DB, u.ID)
+	if err != nil {
+		writeError(w, 500, err)
+		return
+	}
+	writeJSON(w, 200, rows)
+}
+
+// unlinkIdentityHandler removes one bound identity (provider_id + subject in the
+// query). Guards against locking out an account that has no password of its own
+// and only this one identity.
+func unlinkIdentityHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	u := authUser(r)
+	providerID := strings.TrimSpace(r.URL.Query().Get("provider_id"))
+	subject := strings.TrimSpace(r.URL.Query().Get("subject"))
+	if providerID == "" || subject == "" {
+		writeError(w, 400, errInvalidInput)
+		return
+	}
+	// Lockout guard: an account with no password must keep at least one sign-in
+	// method — refuse to remove the last identity (set a password first).
+	if !u.HasPassword {
+		n, err := store.CountOAuthIdentitiesForUser(r.Context(), d.DB, u.ID)
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		if n <= 1 {
+			writeError(w, 400, store.ErrOAuthLastLoginMethod)
+			return
+		}
+	}
+	ok, err := store.UnbindOAuthIdentity(r.Context(), d.DB, providerID, subject, u.ID)
+	if err != nil {
+		writeError(w, 500, err)
+		return
+	}
+	if !ok {
+		writeError(w, 404, errNotFound)
+		return
+	}
+	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
 // resolveOAuthUser maps a provider identity to a local account:

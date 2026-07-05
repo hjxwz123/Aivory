@@ -130,6 +130,23 @@
       "empty": "アクティブなセッションはありません",
       "unknownDevice": "不明なデバイス",
       "localNetwork": "ローカルネットワーク"
+    },
+    "identities": {
+      "title": "認証元",
+      "subtitle": "ログインに使える外部アカウント。追加したり、使わないものを削除できます。",
+      "link": "連携",
+      "unlink": "解除",
+      "notLinked": "未連携",
+      "noEmail": "メールなし",
+      "boundOn": "{{date}} に連携",
+      "disabled": "無効",
+      "empty": "利用可能な認証元がありません。",
+      "linked": "{{provider}} を連携しました",
+      "unlinked": "認証元を解除しました",
+      "conflict": "そのアカウントは別のユーザーに既に連携されています。",
+      "linkFailed": "アカウントを連携できませんでした",
+      "unlinkFailed": "認証元を解除できませんでした",
+      "lastMethod": "これは唯一のログイン方法です。先にパスワードを設定してください。"
     }
   },
   "appearance": {

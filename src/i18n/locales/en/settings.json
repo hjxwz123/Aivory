@@ -130,6 +130,23 @@
       "empty": "No active sessions",
       "unknownDevice": "Unknown device",
       "localNetwork": "Local network"
+    },
+    "identities": {
+      "title": "Identity sources",
+      "subtitle": "Third-party accounts you can use to sign in. Bind more, or remove ones you no longer use.",
+      "link": "Bind",
+      "unlink": "Remove",
+      "notLinked": "Not linked",
+      "noEmail": "No email",
+      "boundOn": "bound {{date}}",
+      "disabled": "Disabled",
+      "empty": "No identity providers are available.",
+      "linked": "Linked {{provider}}",
+      "unlinked": "Identity removed",
+      "conflict": "That account is already linked to another user.",
+      "linkFailed": "Couldn't link that account",
+      "unlinkFailed": "Couldn't remove that identity",
+      "lastMethod": "This is your only sign-in method — set a password first."
     }
   },
   "appearance": {

@@ -89,7 +89,7 @@ export default function ChatLayout() {
           {/* Mobile top bar — suppressed when the page renders its own combined
               header (e.g. a chat thread) so the two don't stack into two rows. */}
           {!isDesktop && !pageOwnsTopBar && (
-            <div className="flex items-center justify-between h-[var(--layout-topbar-h-mobile)] px-2 border-b border-[var(--color-divider)] bg-[var(--color-bg)]/85 backdrop-blur-sm">
+            <div className="flex items-center justify-between h-[var(--layout-topbar-h-mobile)] px-2 bg-[var(--color-bg)]/85 backdrop-blur-sm">
               <button
                 type="button"
                 aria-label={t('commandMenu.actions.toggleSidebar')}

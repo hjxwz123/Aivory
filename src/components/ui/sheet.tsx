@@ -115,7 +115,7 @@ export const SheetTitle = forwardRef<
   return (
     <DialogPrimitive.Title
       ref={ref}
-      className={cn('font-serif text-xl tracking-tight text-[var(--color-fg)]', className)}
+      className={cn('text-xl tracking-tight text-[var(--color-fg)]', className)}
       {...rest}
     />
   )

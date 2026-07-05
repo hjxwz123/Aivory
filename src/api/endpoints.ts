@@ -30,6 +30,7 @@ import type {
   ApiSession,
   ApiUserGroup,
   ApiPublicOAuthProvider,
+  ApiOAuthIdentity,
   ApiShareInfo,
   ApiSharedConversation,
   ApiSkill,
@@ -140,6 +141,23 @@ export const authApi = {
   // Enabled social-login providers for the login screen (no secrets). Empty
   // array → the UI hides the OAuth section entirely.
   oauthProviders: () => api<ApiPublicOAuthProvider[]>('/public/oauth-providers'),
+
+  // ----- Identity linking (§ account → identity sources) -----
+  /** Third-party accounts bound to the current user. */
+  identities: () => api<ApiOAuthIdentity[]>('/me/identities'),
+  /**
+   * Begin a bind flow: returns the provider authorize URL for the SPA to
+   * navigate to. The caller's identity is stashed server-side in the OAuth
+   * state, so the shared callback links instead of logging in.
+   */
+  linkIdentityStart: (providerId: string) =>
+    api<{ authorize_url: string }>(`/me/identities/${encodeURIComponent(providerId)}/link`, { method: 'POST' }),
+  /** Remove a bound identity by its (provider, subject) key. */
+  unlinkIdentity: (providerId: string, subject: string) =>
+    api<{ ok: true }>(
+      `/me/identities?provider_id=${encodeURIComponent(providerId)}&subject=${encodeURIComponent(subject)}`,
+      { method: 'DELETE' },
+    ),
 }
 
 // ----- Models / skills -----------------------------------------------------

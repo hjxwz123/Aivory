@@ -47,7 +47,7 @@ export function ProjectRow({ project, chatCount }: ProjectRowProps) {
       {/* Title block */}
       <div className="min-w-0">
         <div className="flex items-baseline gap-2 flex-wrap">
-          <h3 className="font-serif text-[22px] sm:text-[26px] leading-[1.15] tracking-tight text-[var(--color-fg)] truncate-2">
+          <h3 className="text-[22px] sm:text-[26px] leading-[1.15] tracking-tight text-[var(--color-fg)] truncate-2">
             {project.name}
           </h3>
           {project.pinned ? (

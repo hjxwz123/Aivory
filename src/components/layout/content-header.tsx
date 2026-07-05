@@ -36,7 +36,7 @@ export function ContentHeader({ title, backTo, backLabel, actions, children, cla
     return () => useUI.getState().setPageOwnsTopBar(false)
   }, [])
   return (
-    <header className={cn('shrink-0 border-b border-[var(--color-divider)] bg-[var(--color-bg)]', className)}>
+    <header className={cn('shrink-0 bg-[var(--color-bg)]', className)}>
       <div className="mx-auto w-full max-w-[var(--layout-content-max-w)] flex items-center gap-2 sm:gap-3 px-2 sm:px-8 h-14">
         {backTo ? (
           <>

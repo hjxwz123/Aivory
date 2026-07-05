@@ -116,7 +116,7 @@ export const DialogTitle = forwardRef<
   return (
     <DialogPrimitive.Title
       ref={ref}
-      className={cn('font-serif text-2xl tracking-tight text-[var(--color-fg)]', className)}
+      className={cn('text-2xl tracking-tight text-[var(--color-fg)]', className)}
       {...rest}
     />
   )

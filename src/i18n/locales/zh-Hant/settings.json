@@ -130,6 +130,23 @@
       "empty": "暫無活躍會話",
       "unknownDevice": "未知裝置",
       "localNetwork": "本地網路"
+    },
+    "identities": {
+      "title": "身分來源",
+      "subtitle": "可用於登入的第三方帳戶。可綁定更多，或移除不再使用的。",
+      "link": "綁定",
+      "unlink": "移除",
+      "notLinked": "未綁定",
+      "noEmail": "無電子郵件",
+      "boundOn": "綁定於 {{date}}",
+      "disabled": "已停用",
+      "empty": "暫無可用的身分來源。",
+      "linked": "已綁定 {{provider}}",
+      "unlinked": "已移除該身分來源",
+      "conflict": "該帳戶已綁定到另一個使用者。",
+      "linkFailed": "綁定失敗",
+      "unlinkFailed": "移除失敗",
+      "lastMethod": "這是你唯一的登入方式，請先設定密碼。"
     }
   },
   "appearance": {

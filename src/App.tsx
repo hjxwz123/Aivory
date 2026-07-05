@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect } from 'react'
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
+import { useOpenSettings, type SettingsBackgroundState } from '@/hooks/use-open-settings'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { Toaster } from '@/components/ui/toaster'
 import { CommandMenu } from '@/components/command-menu/command-menu'
@@ -70,11 +71,12 @@ function GlobalShortcuts() {
   const toggleSidebar = useSettings((s) => s.toggleSidebar)
   const createConversation = useConversations((s) => s.createConversation)
   const navigate = useNavigate()
+  const openSettings = useOpenSettings()
 
   useHotkeys([
     { combo: 'mod+k', whenInputFocused: true, handler: () => toggle() },
     { combo: 'mod+b', whenInputFocused: false, handler: () => toggleSidebar() },
-    { combo: 'mod+,', whenInputFocused: false, handler: () => navigate('/settings/account') },
+    { combo: 'mod+,', whenInputFocused: false, handler: () => openSettings('account') },
     {
       combo: 'mod+shift+o',
       whenInputFocused: false,
@@ -88,7 +90,7 @@ function GlobalShortcuts() {
     {
       combo: 'mod+/',
       whenInputFocused: false,
-      handler: () => navigate('/settings/shortcuts'),
+      handler: () => openSettings('shortcuts'),
     },
     {
       combo: 'escape',
@@ -118,13 +120,21 @@ function ScrollToTop() {
 }
 
 export default function App() {
+  const location = useLocation()
+  // §settings modal: when opened over a page, `backgroundLocation` holds that
+  // page. The main <Routes> then render IT (so it stays live behind the modal),
+  // and a second <Routes> renders the settings modal on top — its backdrop-blur
+  // blurs the page behind. Absent (deep link / OAuth ?linked / fresh load) the
+  // modal renders over the app shell instead.
+  const backgroundLocation = (location.state as SettingsBackgroundState | null)?.backgroundLocation
+
   return (
     <TooltipProvider delayDuration={280} skipDelayDuration={120}>
       <ScrollToTop />
       <AuthGate>
         <GlobalShortcuts />
         <Suspense fallback={<RouteFallback />}>
-          <Routes>
+          <Routes location={backgroundLocation ?? location}>
             <Route path="/welcome" element={<Landing />} />
             <Route path="/share/:token" element={<SharedConversation />} />
             <Route path="/workspace/join/:token" element={<JoinWorkspace />} />
@@ -198,6 +208,23 @@ export default function App() {
             </Route>
             <Route path="*" element={<NotFound />} />
           </Routes>
+          {/* Overlay: settings modal rendered ON TOP of the live background page
+              (only when opened over one). SettingsLayout is a portaled dialog, so
+              it floats above whatever the main <Routes> rendered above. */}
+          {backgroundLocation && (
+            <Routes>
+              <Route path="/settings" element={<SettingsLayout />}>
+                <Route index element={<SettingsAccount />} />
+                <Route path="account" element={<SettingsAccount />} />
+                <Route path="appearance" element={<SettingsAppearance />} />
+                <Route path="models" element={<SettingsModels />} />
+                <Route path="personalization" element={<SettingsPersonalization />} />
+                <Route path="privacy" element={<SettingsPrivacy />} />
+                <Route path="shortcuts" element={<SettingsShortcuts />} />
+                <Route path="about" element={<SettingsAbout />} />
+              </Route>
+            </Routes>
+          )}
         </Suspense>
         <CommandMenu />
         <SetPasswordGate />

@@ -69,6 +69,7 @@ import { useAuth } from '@/store/auth'
 import { useLanguage } from '@/store/language'
 import { SUPPORTED_LANGUAGES } from '@/i18n'
 import { useCommandMenu } from '@/hooks/use-command-menu'
+import { useOpenSettings } from '@/hooks/use-open-settings'
 import { useCopy } from '@/hooks/use-clipboard'
 import { conversationsApi, ApiError } from '@/api'
 import { accentClasses } from '@/lib/project-helpers'
@@ -192,7 +193,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
       data-collapsed={collapsed ? 'true' : 'false'}
       aria-label={t('sidebar.navAria', { defaultValue: 'Conversation navigation' })}
       className={cn(
-        'flex flex-col h-full bg-[var(--color-sidebar-bg)] border-r border-[var(--color-sidebar-border)]',
+        'flex flex-col h-full bg-[var(--color-sidebar-bg)]',
         variant === 'desktop' && (collapsed ? 'w-[3.5rem]' : 'w-[17.5rem]'),
         variant === 'sheet' && 'w-full',
         'transition-[width] duration-[220ms] ease-[var(--ease-out)]',
@@ -213,7 +214,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
                 title={activeWorkspace.name}
               >
                 <Briefcase size={16} aria-hidden className="shrink-0 text-[var(--color-secondary)]" />
-                <span className="truncate font-serif text-[15px] text-[var(--color-fg)]">{activeWorkspace.name}</span>
+                <span className="truncate text-[15px] text-[var(--color-fg)]">{activeWorkspace.name}</span>
               </Link>
               {/* Prominent escape hatch back to the personal space, right next to
                   the workspace name (§workspaces: 标题旁显著切换按钮). Sage =
@@ -451,7 +452,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
           flat picker (personal + every workspace) shown whenever the user has
           any workspace, so it works both in the personal space (pick one to
           enter) and inside a workspace (§workspaces 头像旁切换按钮). */}
-      <div className={cn('mt-auto border-t border-[var(--color-divider)] p-2', collapsed && 'flex items-center justify-center')}>
+      <div className={cn('mt-auto p-2', collapsed && 'flex items-center justify-center')}>
         <div className={cn('flex items-center gap-1', collapsed && 'flex-col')}>
           <div className="min-w-0 flex-1">
             <UserMenu collapsed={collapsed} />
@@ -673,6 +674,7 @@ function ConversationItem({
 
 function UserMenu({ collapsed }: { collapsed: boolean }) {
   const navigate = useNavigate()
+  const openSettings = useOpenSettings()
   const { t } = useTranslation(['chat', 'common', 'settings'])
   const user = useAuth((s) => s.user)
   const logout = useAuth((s) => s.logout)
@@ -717,11 +719,11 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" side="top" className="min-w-[220px]">
-        <DropdownMenuItem onClick={() => navigate('/settings/account')}>
+        <DropdownMenuItem onClick={() => openSettings('account')}>
           <Settings size={13} aria-hidden />
           {t('settings:user.settings')}
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => navigate('/settings/personalization')}>
+        <DropdownMenuItem onClick={() => openSettings('personalization')}>
           <Wand2 size={13} aria-hidden />
           {t('chat:userMenu.personalization', { defaultValue: 'Personalization' })}
         </DropdownMenuItem>

@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { Mail, User, Lock, AlertTriangle, ShieldCheck, Copy, Upload } from 'lucide-react'
 import { SettingsRow, SettingsSection } from './SettingsLayout'
 import { ActiveSessions } from '@/components/settings/active-sessions'
+import { IdentitySources } from '@/components/settings/identity-sources'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -182,7 +183,7 @@ export default function Account() {
   return (
     <div className="mx-auto max-w-[60rem]">
       <header className="mb-8">
-        <h1 className="font-serif tracking-tight text-3xl text-[var(--color-fg)]">{t('settings:account.title')}</h1>
+        <h1 className="tracking-tight text-3xl text-[var(--color-fg)]">{t('settings:account.title')}</h1>
         <p className="mt-2.5 text-sm text-[var(--color-fg-muted)]">{t('settings:account.subtitle')}</p>
       </header>
 
@@ -269,6 +270,8 @@ export default function Account() {
           )}
         </SettingsRow>
       </SettingsSection>
+
+      <IdentitySources />
 
       <ActiveSessions />
 

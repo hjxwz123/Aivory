@@ -121,7 +121,7 @@ export default function Appearance() {
   return (
     <div className="mx-auto max-w-[60rem]">
       <header className="mb-8">
-        <h1 className="font-serif tracking-tight text-3xl text-[var(--color-fg)]">{t('appearance.title')}</h1>
+        <h1 className="tracking-tight text-3xl text-[var(--color-fg)]">{t('appearance.title')}</h1>
         <p className="mt-2.5 text-sm text-[var(--color-fg-muted)]">{t('appearance.subtitle')}</p>
       </header>
 
