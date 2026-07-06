@@ -41,7 +41,7 @@ export function CardFooter({ className, ...rest }: HTMLAttributes<HTMLDivElement
 
 export function CardTitle({ className, ...rest }: HTMLAttributes<HTMLHeadingElement>) {
   return (
-    <h3 className={cn('font-serif text-xl text-[var(--color-fg)] tracking-tight', className)} {...rest} />
+    <h3 className={cn('text-xl text-[var(--color-fg)] tracking-tight', className)} {...rest} />
   )
 }
 

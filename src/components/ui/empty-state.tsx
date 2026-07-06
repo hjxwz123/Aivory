@@ -23,7 +23,9 @@ export function EmptyState({ icon, title, description, action, className }: Empt
           {icon}
         </div>
       ) : null}
-      <h3 className="font-serif text-2xl tracking-tight text-[var(--color-fg)]">{title}</h3>
+      {/* No font-serif: in-app headings follow the Appearance → Font setting
+          (globals.css base rule); serif stays opt-in for brand pages only. */}
+      <h3 className="text-2xl tracking-tight text-[var(--color-fg)]">{title}</h3>
       {description ? (
         <p className="mt-2.5 text-sm text-[var(--color-fg-muted)] leading-relaxed text-pretty">
           {description}
