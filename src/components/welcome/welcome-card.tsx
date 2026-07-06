@@ -23,9 +23,11 @@ import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
 
-type ReplyStyle = 'concise' | 'balanced' | 'detailed'
-type StepKey = 'language' | 'theme' | 'accent' | 'layout' | 'style' | 'memory'
-const STEPS: StepKey[] = ['language', 'theme', 'accent', 'layout', 'style', 'memory']
+// No chat-preference step on purpose: a new account keeps NO reply-style
+// preference (neutral default) unless the user actively picks one later in
+// Settings — the wizard covers appearance/language/memory only.
+type StepKey = 'language' | 'theme' | 'accent' | 'layout' | 'memory'
+const STEPS: StepKey[] = ['language', 'theme', 'accent', 'layout', 'memory']
 const CHAT_WIDTH_OPTS: ChatWidthPref[] = ['comfortable', 'full']
 
 // Static hue per accent preset, mirrored from the Appearance picker so the
@@ -40,14 +42,13 @@ const ACCENT_PREVIEW: Record<AccentPref, string> = {
   mono: 'linear-gradient(135deg, oklch(26% 0 0) 0 50%, oklch(96% 0 0) 50% 100%)',
 }
 const THEME_OPTS: ThemePref[] = ['light', 'dark', 'system']
-const STYLE_OPTS: ReplyStyle[] = ['concise', 'balanced', 'detailed']
 
 /**
  * First-login welcome — a small wizard (one choice per page). Shows once per
  * account (gated on a server-side `onboarded` flag in user settings). The left
  * panel is an editorial intro with a slow accent-tinted aurora that re-tints
  * live as the user picks an accent; the right steps through language → theme →
- * accent → reply style → memory. Choices apply live for instant preview; "Skip"
+ * accent → layout → memory. Choices apply live for instant preview; "Skip"
  * restores whatever was set before so it's truly non-committal, while the final
  * "Get started" persists. Either path marks the account onboarded.
  */
@@ -65,8 +66,6 @@ export function WelcomeCard() {
   const setAccent = useAccent((s) => s.setAccent)
   const themePref = useTheme((s) => s.pref)
   const setPref = useTheme((s) => s.setPref)
-  const replyStyle = useSettings((s) => s.models.responseLength)
-  const setModels = useSettings((s) => s.setModels)
   const memory = useSettings((s) => s.privacy.memoriesEnabled)
   const setPrivacy = useSettings((s) => s.setPrivacy)
   const chatWidth = useSettings((s) => s.appearance.chatWidth)
@@ -90,7 +89,6 @@ export function WelcomeCard() {
     accent: AccentPref
     theme: ThemePref
     chatWidth: ChatWidthPref
-    replyStyle: ReplyStyle
     memory: boolean
   } | null>(null)
 
@@ -99,7 +97,7 @@ export function WelcomeCard() {
   // through its exit animation even after `open` flips false.
   useEffect(() => {
     if (eligible && !mounted && initial.current === null) {
-      initial.current = { lang, accent, theme: themePref, chatWidth, replyStyle, memory }
+      initial.current = { lang, accent, theme: themePref, chatWidth, memory }
       setMounted(true)
       setOpen(true)
     }
@@ -129,12 +127,13 @@ export function WelcomeCard() {
     if (!open || saving) return
     setSaving(true)
     try {
+      // Deliberately NOT writing response_length: new accounts stay at the
+      // neutral default until the user picks a preference in Settings.
       await markOnboarded({
         language: lang,
         theme: themePref,
         accent_color: accent,
         chat_width: chatWidth,
-        response_length: replyStyle,
         memory_enabled: memoryAvailable ? memory : false,
       })
       // Close the wizard (plays the zoom-out), then hand off to the welcome
@@ -163,7 +162,6 @@ export function WelcomeCard() {
       if (accent !== init.accent) setAccent(init.accent)
       if (themePref !== init.theme) setPref(init.theme)
       if (chatWidth !== init.chatWidth) setAppearance({ chatWidth: init.chatWidth })
-      if (replyStyle !== init.replyStyle) setModels({ responseLength: init.replyStyle })
       if (memory !== init.memory) setPrivacy({ memoriesEnabled: init.memory })
     }
     try {
@@ -235,16 +233,6 @@ export function WelcomeCard() {
             {CHAT_WIDTH_OPTS.map((opt) => (
               <Seg key={opt} active={chatWidth === opt} onClick={() => setAppearance({ chatWidth: opt })}>
                 {t(`settings:appearance.chatWidth.${opt}`)}
-              </Seg>
-            ))}
-          </div>
-        )
-      case 'style':
-        return (
-          <div className="flex items-center gap-2">
-            {STYLE_OPTS.map((opt) => (
-              <Seg key={opt} active={replyStyle === opt} onClick={() => setModels({ responseLength: opt })}>
-                {t(`welcome:chatStyle.${opt}`)}
               </Seg>
             ))}
           </div>
@@ -367,7 +355,7 @@ export function WelcomeCard() {
                   step title drifts into focus with it (BlurText replays per key). */}
               <div key={step} className="mt-7 animate-[welcome-step_300ms_var(--ease-out)]">
                 <h3 className="font-serif text-2xl tracking-tight text-[var(--color-fg)]">
-                  <BlurText text={t(`welcome:fields.${current === 'style' ? 'chatStyle' : current}`)} delay={90} />
+                  <BlurText text={t(`welcome:fields.${current}`)} delay={90} />
                 </h3>
                 <p className="mt-1.5 text-sm text-[var(--color-fg-muted)] leading-relaxed">
                   {t(`welcome:stepHints.${current}`)}
