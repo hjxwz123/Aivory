@@ -29,6 +29,9 @@ export interface ApiUser {
   /** False for OAuth accounts that have never chosen their own password — the
    *  client forces a set-password step before letting them into the app. */
   has_password?: boolean
+  /** Unix seconds of the last password change (change/reset/first set).
+   *  0 or absent = never changed since the account was created. */
+  password_changed_at?: number
   /** Unix seconds of last authenticated activity. Drives admin online status. */
   last_seen_at?: number
   /** Non-expiring credit balance (§ credits) — admin-editable on the users page. */

@@ -31,6 +31,11 @@ type User struct {
 	// chosen a password of their own. The client uses this to force a
 	// set-password step (§ third-party login has no password).
 	HasPassword bool `json:"has_password"`
+	// PasswordChangedAt is the unix seconds of the user's last password change
+	// (change / reset / first OAuth set-password). 0 = never changed since the
+	// account was created — the account page shows a neutral message instead of
+	// a fabricated time.
+	PasswordChangedAt int64 `json:"password_changed_at"`
 	// LastSeenAt is the unix seconds of the user's last authenticated activity,
 	// updated (throttled) by the auth middleware. Drives the admin online status.
 	LastSeenAt int64 `json:"last_seen_at"`

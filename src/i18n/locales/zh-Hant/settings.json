@@ -69,7 +69,8 @@
     "security": "安全",
     "securityRows": {
       "password": "密碼",
-      "passwordBody": "上次修改於 3 個月前。",
+      "passwordChangedOn": "上次修改於 {{date}}。",
+      "passwordNeverChanged": "帳號建立後從未修改過。",
       "twoFactor": "兩步驗證",
       "twoFactorBody": "使用身份驗證 App 增加一層保障。",
       "sessions": "登入裝置",

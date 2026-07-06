@@ -432,7 +432,10 @@ export default function ChatThread() {
           ref={scrollRef}
           onScroll={handleScroll}
           data-scroll-root
-          className="flex-1 min-h-0 overflow-y-auto scrollbar-thin"
+          // overflow-x-hidden: wide message content (code / tables / math)
+          // scrolls inside its own block — the thread itself must never grow a
+          // horizontal scrollbar.
+          className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden scrollbar-thin"
         >
           {/* First load with nothing yet in the store (slow network / long thread):
               show a spinner instead of a blank thread. Once any message is present

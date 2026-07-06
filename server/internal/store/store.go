@@ -101,6 +101,8 @@ func Migrate(db *sql.DB) error {
 	addPrevGroup := `ALTER TABLE users ADD COLUMN previous_group_id TEXT NOT NULL DEFAULT ''`
 	// Forced set-password for OAuth accounts (§ third-party login has no password).
 	addPasswordSet := `ALTER TABLE users ADD COLUMN password_set INTEGER NOT NULL DEFAULT 1`
+	// Last password change (§ account security row). 0 = never changed since signup.
+	addPasswordChangedAt := `ALTER TABLE users ADD COLUMN password_changed_at INTEGER NOT NULL DEFAULT 0`
 	// Online status / last-seen (§ admin → users).
 	addLastSeen := `ALTER TABLE users ADD COLUMN last_seen_at INTEGER NOT NULL DEFAULT 0`
 	// Inline-thread linkage (§ text-selection sub-conversations).
@@ -161,6 +163,7 @@ func Migrate(db *sql.DB) error {
 		addGroupExpires = `ALTER TABLE users ADD COLUMN IF NOT EXISTS group_expires_at BIGINT NOT NULL DEFAULT 0`
 		addPrevGroup = `ALTER TABLE users ADD COLUMN IF NOT EXISTS previous_group_id TEXT NOT NULL DEFAULT ''`
 		addPasswordSet = `ALTER TABLE users ADD COLUMN IF NOT EXISTS password_set INTEGER NOT NULL DEFAULT 1`
+		addPasswordChangedAt = `ALTER TABLE users ADD COLUMN IF NOT EXISTS password_changed_at BIGINT NOT NULL DEFAULT 0`
 		addLastSeen = `ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at BIGINT NOT NULL DEFAULT 0`
 		addInlineSource = `ALTER TABLE conversations ADD COLUMN IF NOT EXISTS inline_source_conv TEXT NOT NULL DEFAULT ''`
 		addInlineParent = `ALTER TABLE conversations ADD COLUMN IF NOT EXISTS inline_parent_id TEXT NOT NULL DEFAULT ''`
@@ -204,7 +207,7 @@ func Migrate(db *sql.DB) error {
 		addSessUA, addSessIP, addSessLoc, addSessSeen,
 		addModEnabled, addModMode,
 		addResearchEnabled,
-		addGroupExpires, addPrevGroup, addPasswordSet, addLastSeen,
+		addGroupExpires, addPrevGroup, addPasswordSet, addPasswordChangedAt, addLastSeen,
 		addInlineSource, addInlineParent, addInlineQuote,
 		addModelTags,
 		addGroupMaxProjects, addGroupMaxKBs,
@@ -258,7 +261,7 @@ func Migrate(db *sql.DB) error {
 	// O(1). If you add an ALTER above, add its column here.
 	columnChecks := map[string][]string{
 		"messages":        {"credits", "model_label", "search_text", "gen_ms", "feedback", "verify", "author_id"},
-		"users":           {"group_id", "totp_secret", "totp_enabled", "group_expires_at", "previous_group_id", "password_set", "last_seen_at", "credits_permanent", "sort_order"},
+		"users":           {"group_id", "totp_secret", "totp_enabled", "group_expires_at", "previous_group_id", "password_set", "password_changed_at", "last_seen_at", "credits_permanent", "sort_order"},
 		"usage_logs":      {"credits", "workspace_id"},
 		"user_groups":     {"max_projects", "max_kbs", "credit_allowance", "credit_period_seconds", "max_workspaces", "is_public"},
 		"models":          {"official_tools", "moderation_enabled", "moderation_mode", "tags", "image_timeout_sec", "research_enabled"},

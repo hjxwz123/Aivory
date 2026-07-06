@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Trans, useTranslation } from 'react-i18next'
 import { motion } from 'framer-motion'
-import { Mail, Lock, User, ArrowRight, ShieldCheck } from 'lucide-react'
+import { Mail, Lock, User, ArrowRight, ShieldCheck, Eye, EyeOff } from 'lucide-react'
 import { BlurText } from '@/components/landing/fx/blur-text'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -35,6 +35,7 @@ export default function Register() {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [pw, setPw] = useState('')
+  const [showPw, setShowPw] = useState(false)
   const [agree, setAgree] = useState(false)
   const [loading, setLoading] = useState(false)
   const [errors, setErrors] = useState<{ name?: string; email?: string; pw?: string; agree?: string; captcha?: string; general?: string }>({})
@@ -294,12 +295,22 @@ export default function Register() {
           <Field label={t('fields.password')} htmlFor="pw" hint={t('fields.passwordHint')} error={errors.pw}>
             <Input
               id="pw"
-              type="password"
+              type={showPw ? 'text' : 'password'}
               value={pw}
               onChange={(e) => setPw(e.target.value)}
               leadingIcon={<Lock size={14} aria-hidden />}
               autoComplete="new-password"
               invalid={!!errors.pw}
+              trailingSlot={
+                <button
+                  type="button"
+                  onClick={() => setShowPw((s) => !s)}
+                  aria-label={showPw ? t('fields.hidePassword') : t('fields.showPassword')}
+                  className="inline-flex items-center justify-center size-7 rounded-[6px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]"
+                >
+                  {showPw ? <EyeOff size={13} aria-hidden /> : <Eye size={13} aria-hidden />}
+                </button>
+              }
             />
           </Field>
         </motion.div>

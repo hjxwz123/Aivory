@@ -128,7 +128,7 @@ function ThreadBody({ quote, childId, onClose }: { quote: string; childId: strin
       ) : null}
 
       {/* Messages */}
-      <div ref={listRef} className="flex-1 min-h-0 overflow-y-auto scrollbar-thin px-4 py-4 flex flex-col gap-4">
+      <div ref={listRef} className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden scrollbar-thin px-4 py-4 flex flex-col gap-4">
         {messages.length === 0 ? (
           <p className="text-[13px] text-[var(--color-fg-subtle)]">
             {t('inline.empty', { defaultValue: 'Ask anything about the highlighted passage.' })}

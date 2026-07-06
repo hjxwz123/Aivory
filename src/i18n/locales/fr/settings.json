@@ -69,7 +69,8 @@
     "security": "Sécurité",
     "securityRows": {
       "password": "Mot de passe",
-      "passwordBody": "Modifié pour la dernière fois il y a 3 mois.",
+      "passwordChangedOn": "Dernière modification le {{date}}.",
+      "passwordNeverChanged": "Jamais modifié depuis la création du compte.",
       "twoFactor": "Authentification à deux facteurs",
       "twoFactorBody": "Utilisez une application d'authentification pour une couche supplémentaire.",
       "sessions": "Sessions actives",

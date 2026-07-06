@@ -11,6 +11,8 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { initials } from '@/components/ui/avatar.utils'
 import { useAuth } from '@/store/auth'
 import { authApi, ApiError } from '@/api'
+import { resizeImageForUpload } from '@/lib/resize-image'
+import { formatAbsoluteDate } from '@/lib/utils'
 import { toast } from '@/hooks/use-toast'
 import { useCopy } from '@/hooks/use-clipboard'
 import {
@@ -139,7 +141,10 @@ export default function Account() {
     if (!file) return
     setAvatarBusy(true)
     try {
-      const res = await authApi.uploadAvatar(file)
+      // Avatars render at ≤96px; downscale + re-encode client-side so a large
+      // photo fits the server's 256 KiB cap instead of being rejected.
+      const prepared = await resizeImageForUpload(file, 512)
+      const res = await authApi.uploadAvatar(prepared)
       await setAvatar(res.url)
       toast.success(t('settings:account.avatar.updated'))
     } catch (e) {
@@ -250,7 +255,16 @@ export default function Account() {
       </SettingsSection>
 
       <SettingsSection title={t('settings:account.security')}>
-        <SettingsRow label={t('settings:account.securityRows.password')} description={t('settings:account.securityRows.passwordBody')}>
+        <SettingsRow
+          label={t('settings:account.securityRows.password')}
+          description={
+            user?.password_changed_at
+              ? t('settings:account.securityRows.passwordChangedOn', {
+                  date: formatAbsoluteDate(user.password_changed_at * 1000),
+                })
+              : t('settings:account.securityRows.passwordNeverChanged')
+          }
+        >
           <Button variant="secondary" onClick={() => setPwOpen(true)}>
             <Lock size={13} aria-hidden /> {t('common:actions.changePassword')}
           </Button>

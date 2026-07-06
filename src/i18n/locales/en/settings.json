@@ -69,7 +69,8 @@
     "security": "Security",
     "securityRows": {
       "password": "Password",
-      "passwordBody": "Last changed 3 months ago.",
+      "passwordChangedOn": "Last changed on {{date}}.",
+      "passwordNeverChanged": "Never changed since this account was created.",
       "twoFactor": "Two-factor auth",
       "twoFactorBody": "Use an authenticator app for an extra layer.",
       "sessions": "Active sessions",

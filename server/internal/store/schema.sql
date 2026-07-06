@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS users (
   totp_secret   TEXT NOT NULL DEFAULT '',         -- base32 TOTP secret (empty = no 2FA configured)
   totp_enabled  INTEGER NOT NULL DEFAULT 0,       -- 1 = login requires a 2FA code
   password_set  INTEGER NOT NULL DEFAULT 1,        -- 0 = OAuth account that never chose its own password
+  password_changed_at INTEGER NOT NULL DEFAULT 0,  -- unix seconds of last password change (0 = never since signup)
   last_seen_at  INTEGER NOT NULL DEFAULT 0,        -- unix seconds of last authenticated activity (online status)
   credits_permanent REAL NOT NULL DEFAULT 0,       -- non-expiring credits (purchased / admin-set)
   sort_order    INTEGER NOT NULL DEFAULT 0,        -- admin-defined display order

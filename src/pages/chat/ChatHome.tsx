@@ -173,7 +173,7 @@ export default function ChatHome() {
   }
 
   return (
-    <div ref={root} className="relative flex-1 flex flex-col overflow-y-auto">
+    <div ref={root} className="relative flex-1 flex flex-col overflow-y-auto overflow-x-hidden">
       {/* Mobile: no title bar on the home screen — this light floating button is
           the only way to reach the sidebar drawer here (§ mobile home redesign). */}
       <button

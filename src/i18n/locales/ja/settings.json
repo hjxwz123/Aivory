@@ -69,7 +69,8 @@
     "security": "セキュリティ",
     "securityRows": {
       "password": "パスワード",
-      "passwordBody": "最終変更は 3 か月前です。",
+      "passwordChangedOn": "最終変更日：{{date}}。",
+      "passwordNeverChanged": "アカウント作成後、変更されていません。",
       "twoFactor": "二要素認証",
       "twoFactorBody": "認証アプリを使って保護を強化します。",
       "sessions": "アクティブなセッション",

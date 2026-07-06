@@ -69,7 +69,8 @@
     "security": "安全",
     "securityRows": {
       "password": "密码",
-      "passwordBody": "上次修改于 3 个月前。",
+      "passwordChangedOn": "上次修改于 {{date}}。",
+      "passwordNeverChanged": "账号创建后从未修改过。",
       "twoFactor": "两步验证",
       "twoFactorBody": "使用身份验证 App 增加一层保障。",
       "sessions": "登录设备",

@@ -22,9 +22,9 @@ func FindUserByEmail(ctx context.Context, db *sql.DB, email string) (*User, erro
 	var totpEnabled int
 	var passwordSet int
 	err := db.QueryRowContext(ctx,
-		`SELECT id, email, name, role, status, token_ver, settings, group_id, group_expires_at, previous_group_id, totp_secret, totp_enabled, password_set, COALESCE(credits_permanent,0), sort_order, created_at FROM users WHERE email=?`,
+		`SELECT id, email, name, role, status, token_ver, settings, group_id, group_expires_at, previous_group_id, totp_secret, totp_enabled, password_set, password_changed_at, COALESCE(credits_permanent,0), sort_order, created_at FROM users WHERE email=?`,
 		strings.ToLower(strings.TrimSpace(email)),
-	).Scan(&u.ID, &u.Email, &u.Name, &u.Role, &u.Status, &u.TokenVer, &settings, &u.GroupID, &u.GroupExpiresAt, &u.PreviousGroupID, &u.TotpSecret, &totpEnabled, &passwordSet, &u.CreditsPermanent, &u.SortOrder, &u.CreatedAt)
+	).Scan(&u.ID, &u.Email, &u.Name, &u.Role, &u.Status, &u.TokenVer, &settings, &u.GroupID, &u.GroupExpiresAt, &u.PreviousGroupID, &u.TotpSecret, &totpEnabled, &passwordSet, &u.PasswordChangedAt, &u.CreditsPermanent, &u.SortOrder, &u.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -47,8 +47,8 @@ func FindUserByID(ctx context.Context, db *sql.DB, id string) (*User, error) {
 	var totpEnabled int
 	var passwordSet int
 	err := db.QueryRowContext(ctx,
-		`SELECT id, email, name, role, status, token_ver, settings, group_id, group_expires_at, previous_group_id, totp_secret, totp_enabled, password_set, COALESCE(credits_permanent,0), sort_order, created_at FROM users WHERE id=?`, id,
-	).Scan(&u.ID, &u.Email, &u.Name, &u.Role, &u.Status, &u.TokenVer, &settings, &u.GroupID, &u.GroupExpiresAt, &u.PreviousGroupID, &u.TotpSecret, &totpEnabled, &passwordSet, &u.CreditsPermanent, &u.SortOrder, &u.CreatedAt)
+		`SELECT id, email, name, role, status, token_ver, settings, group_id, group_expires_at, previous_group_id, totp_secret, totp_enabled, password_set, password_changed_at, COALESCE(credits_permanent,0), sort_order, created_at FROM users WHERE id=?`, id,
+	).Scan(&u.ID, &u.Email, &u.Name, &u.Role, &u.Status, &u.TokenVer, &settings, &u.GroupID, &u.GroupExpiresAt, &u.PreviousGroupID, &u.TotpSecret, &totpEnabled, &passwordSet, &u.PasswordChangedAt, &u.CreditsPermanent, &u.SortOrder, &u.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -348,7 +348,7 @@ func UpdateUserProfile(ctx context.Context, db *sql.DB, userID string, name, ema
 // stolen refresh token survives a password reset and can re-mint a session,
 // defeating the reset.
 func UpdateUserPassword(ctx context.Context, db *sql.DB, userID, newHash string) error {
-	if _, err := db.ExecContext(ctx, `UPDATE users SET password_hash=?, password_set=1 WHERE id=?`, newHash, userID); err != nil {
+	if _, err := db.ExecContext(ctx, `UPDATE users SET password_hash=?, password_set=1, password_changed_at=? WHERE id=?`, newHash, time.Now().Unix(), userID); err != nil {
 		return err
 	}
 	if _, err := db.ExecContext(ctx, `UPDATE refresh_tokens SET revoked=1 WHERE user_id=?`, userID); err != nil {
@@ -363,7 +363,7 @@ func UpdateUserPassword(ctx context.Context, db *sql.DB, userID, newHash string)
 // stay logged in and continue straight into the app. It is the caller's job to
 // verify the account currently has no password (password_set=0).
 func SetInitialPassword(ctx context.Context, db *sql.DB, userID, newHash string) error {
-	_, err := db.ExecContext(ctx, `UPDATE users SET password_hash=?, password_set=1 WHERE id=?`, newHash, userID)
+	_, err := db.ExecContext(ctx, `UPDATE users SET password_hash=?, password_set=1, password_changed_at=? WHERE id=?`, newHash, time.Now().Unix(), userID)
 	return err
 }
 
@@ -404,7 +404,7 @@ func ListUsersPaged(ctx context.Context, db *sql.DB, limit, offset int) ([]User,
 		offset = 0
 	}
 	rows, err := db.QueryContext(ctx,
-		`SELECT id, email, name, role, status, token_ver, settings, group_id, group_expires_at, previous_group_id, totp_secret, totp_enabled, password_set, last_seen_at, COALESCE(credits_permanent,0), sort_order, created_at FROM users ORDER BY sort_order, created_at DESC, id LIMIT ? OFFSET ?`,
+		`SELECT id, email, name, role, status, token_ver, settings, group_id, group_expires_at, previous_group_id, totp_secret, totp_enabled, password_set, password_changed_at, last_seen_at, COALESCE(credits_permanent,0), sort_order, created_at FROM users ORDER BY sort_order, created_at DESC, id LIMIT ? OFFSET ?`,
 		limit, offset)
 	if err != nil {
 		return nil, err
@@ -416,7 +416,7 @@ func ListUsersPaged(ctx context.Context, db *sql.DB, limit, offset int) ([]User,
 		var settings string
 		var totpEnabled int
 		var passwordSet int
-		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.Role, &u.Status, &u.TokenVer, &settings, &u.GroupID, &u.GroupExpiresAt, &u.PreviousGroupID, &u.TotpSecret, &totpEnabled, &passwordSet, &u.LastSeenAt, &u.CreditsPermanent, &u.SortOrder, &u.CreatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.Role, &u.Status, &u.TokenVer, &settings, &u.GroupID, &u.GroupExpiresAt, &u.PreviousGroupID, &u.TotpSecret, &totpEnabled, &passwordSet, &u.PasswordChangedAt, &u.LastSeenAt, &u.CreditsPermanent, &u.SortOrder, &u.CreatedAt); err != nil {
 			return nil, err
 		}
 		u.TotpEnabled = totpEnabled != 0
@@ -427,7 +427,7 @@ func ListUsersPaged(ctx context.Context, db *sql.DB, limit, offset int) ([]User,
 	return out, rows.Err()
 }
 
-const userSelectCols = `id, email, name, role, status, token_ver, settings, group_id, group_expires_at, previous_group_id, totp_secret, totp_enabled, password_set, last_seen_at, COALESCE(credits_permanent,0), sort_order, created_at`
+const userSelectCols = `id, email, name, role, status, token_ver, settings, group_id, group_expires_at, previous_group_id, totp_secret, totp_enabled, password_set, password_changed_at, last_seen_at, COALESCE(credits_permanent,0), sort_order, created_at`
 
 func scanUsers(rows *sql.Rows) ([]User, error) {
 	defer rows.Close()
@@ -437,7 +437,7 @@ func scanUsers(rows *sql.Rows) ([]User, error) {
 		var settings string
 		var totpEnabled int
 		var passwordSet int
-		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.Role, &u.Status, &u.TokenVer, &settings, &u.GroupID, &u.GroupExpiresAt, &u.PreviousGroupID, &u.TotpSecret, &totpEnabled, &passwordSet, &u.LastSeenAt, &u.CreditsPermanent, &u.SortOrder, &u.CreatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.Role, &u.Status, &u.TokenVer, &settings, &u.GroupID, &u.GroupExpiresAt, &u.PreviousGroupID, &u.TotpSecret, &totpEnabled, &passwordSet, &u.PasswordChangedAt, &u.LastSeenAt, &u.CreditsPermanent, &u.SortOrder, &u.CreatedAt); err != nil {
 			return nil, err
 		}
 		u.TotpEnabled = totpEnabled != 0
