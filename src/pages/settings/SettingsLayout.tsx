@@ -125,18 +125,20 @@ export default function SettingsLayout() {
           </div>
 
           {/* ===== Right pane ===== */}
+          {/* The close button sits OUTSIDE the scrolling pane (anchored to the
+              dialog frame) so it stays pinned top-right while the pane scrolls. */}
+          <DialogPrimitive.Close
+            aria-label={t('common:aria.close', { defaultValue: 'Close' })}
+            className={cn(
+              'max-sm:hidden absolute right-3 top-3 z-10 inline-flex items-center justify-center size-8 rounded-[8px]',
+              'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-bg-muted)]',
+              'transition-colors duration-150',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+            )}
+          >
+            <X size={16} aria-hidden />
+          </DialogPrimitive.Close>
           <div className="relative min-h-0 min-w-0 flex-1 overflow-y-auto">
-            <DialogPrimitive.Close
-              aria-label={t('common:aria.close', { defaultValue: 'Close' })}
-              className={cn(
-                'max-sm:hidden absolute right-3 top-3 z-10 inline-flex items-center justify-center size-8 rounded-[8px]',
-                'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-bg-muted)]',
-                'transition-colors duration-150',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-              )}
-            >
-              <X size={16} aria-hidden />
-            </DialogPrimitive.Close>
             <div className="px-5 sm:px-8 py-6 sm:py-8">
               <RouteFade dep={pathname}>
                 {/* key=pathname: a router navigation runs inside startTransition,
