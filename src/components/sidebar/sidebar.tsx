@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import {
   Search,
   Plus,
@@ -94,6 +94,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
   const activeWorkspace = useWorkspaces((s) => (s.activeId ? s.workspaces.find((w) => w.id === s.activeId) : undefined))
   const navigate = useNavigate()
   const { id: currentId } = useParams<{ id?: string }>()
+  const location = useLocation()
   const { t } = useTranslation('chat')
   const { t: tCommon } = useTranslation('common')
   const { t: tProjects } = useTranslation('projects')
@@ -150,6 +151,14 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
   const projects = useProjects((s) => s.projects)
   // §4.20: show the Draw entry only when an image model is configured.
   const hasImageModels = useModels((s) => s.imageModels.length > 0)
+  // Draw links to '/?mode=draw' — same pathname as New chat, so its active
+  // state must read the query string (NavLink's isActive ignores search).
+  // Gated on hasImageModels: when the Draw row isn't rendered, New chat keeps
+  // its usual look instead of leaving no entry highlighted.
+  const drawActive =
+    hasImageModels &&
+    location.pathname === '/' &&
+    new URLSearchParams(location.search).get('mode') === 'draw'
   const recentProjects = useMemo(
     () =>
       projects
@@ -274,8 +283,12 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
             onClick={() => void startNewChat()}
             className={cn(
               'inline-flex items-center gap-2 h-9 max-lg:h-[var(--tap-min)] rounded-[10px] text-sm font-medium',
-              'bg-[var(--color-bg-muted)] border border-[var(--color-border-strong)] text-[var(--color-fg)]',
-              'hover:bg-[var(--color-bg)] hover:border-[var(--color-border-strong)] interactive',
+              // While Draw is the active destination the highlight belongs to
+              // it — drop the CTA fill so two rows never read as selected.
+              drawActive
+                ? 'border border-transparent text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]'
+                : 'bg-[var(--color-bg-muted)] border border-[var(--color-border-strong)] text-[var(--color-fg)] hover:bg-[var(--color-bg)] hover:border-[var(--color-border-strong)]',
+              'interactive',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
               collapsed ? 'w-9 justify-center px-0' : 'w-full justify-between px-3',
             )}
@@ -336,9 +349,13 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
             <Link
               to="/?mode=draw"
               onClick={onClose}
+              aria-current={drawActive ? 'page' : undefined}
               className={cn(
                 'inline-flex items-center gap-2 h-9 max-lg:h-[var(--tap-min)] rounded-[10px] text-sm',
-                'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive',
+                drawActive
+                  ? 'bg-[var(--color-bg-muted)] text-[var(--color-fg)] font-medium'
+                  : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
+                'interactive',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
                 collapsed ? 'w-9 justify-center px-0' : 'w-full justify-start px-3',
               )}

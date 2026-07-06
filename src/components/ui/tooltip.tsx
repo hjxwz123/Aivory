@@ -14,30 +14,36 @@ interface TooltipProps {
 }
 
 export function Tooltip({ content, children, side = 'top', align = 'center', delayDuration = 280, shortcut }: TooltipProps) {
+  // No content → no popup. Callers pass '' to disable (e.g. the sidebar rows
+  // only tooltip while collapsed); without the guard an empty pill + arrow
+  // pops up after the hover delay. The Root stays mounted either way so the
+  // trigger children never remount (and lose focus) when content toggles.
   return (
     <TooltipPrimitive.Root delayDuration={delayDuration}>
       <TooltipPrimitive.Trigger asChild>{children}</TooltipPrimitive.Trigger>
-      <TooltipPrimitive.Portal>
-        <TooltipPrimitive.Content
-          side={side}
-          align={align}
-          sideOffset={6}
-          className={cn(
-            'z-[90] inline-flex items-center gap-1.5',
-            'px-2.5 py-1.5 rounded-[8px]',
-            'bg-[var(--color-fg)] text-[var(--color-fg-inverted)]',
-            'text-xs font-medium',
-            'shadow-[var(--shadow-md)]',
-            'data-[state=delayed-open]:animate-[slide-down_140ms_var(--ease-out)]',
-          )}
-        >
-          {content}
-          {shortcut ? (
-            <span className="ml-1 text-[10px] tracking-wide opacity-60 font-mono">{shortcut}</span>
-          ) : null}
-          <TooltipPrimitive.Arrow className="fill-[var(--color-fg)]" width={8} height={4} />
-        </TooltipPrimitive.Content>
-      </TooltipPrimitive.Portal>
+      {content ? (
+        <TooltipPrimitive.Portal>
+          <TooltipPrimitive.Content
+            side={side}
+            align={align}
+            sideOffset={6}
+            className={cn(
+              'z-[90] inline-flex items-center gap-1.5',
+              'px-2.5 py-1.5 rounded-[8px]',
+              'bg-[var(--color-fg)] text-[var(--color-fg-inverted)]',
+              'text-xs font-medium',
+              'shadow-[var(--shadow-md)]',
+              'data-[state=delayed-open]:animate-[slide-down_140ms_var(--ease-out)]',
+            )}
+          >
+            {content}
+            {shortcut ? (
+              <span className="ml-1 text-[10px] tracking-wide opacity-60 font-mono">{shortcut}</span>
+            ) : null}
+            <TooltipPrimitive.Arrow className="fill-[var(--color-fg)]" width={8} height={4} />
+          </TooltipPrimitive.Content>
+        </TooltipPrimitive.Portal>
+      ) : null}
     </TooltipPrimitive.Root>
   )
 }
