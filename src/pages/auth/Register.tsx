@@ -107,17 +107,24 @@ export default function Register() {
     void finishRegister(token)
   }
 
-  async function submitCode(e: React.FormEvent) {
+  function submitCode(e: React.FormEvent) {
     e.preventDefault()
+    void verifyCode(code)
+  }
+
+  // Takes the code as an argument (not from state) so the auto-submit in
+  // onChange can pass the freshly typed value — state hasn't committed yet.
+  async function verifyCode(value: string) {
+    if (verifyLoading) return
     const verifyEmail = pendingVerification ?? email
-    if (!code.trim()) {
+    if (!value.trim()) {
       setVerifyError(t('errors.required'))
       return
     }
     setVerifyLoading(true)
     setVerifyError(undefined)
     try {
-      const resp = await authApi.verifyEmail(verifyEmail, code.trim())
+      const resp = await authApi.verifyEmail(verifyEmail, value.trim())
       setAccessToken(resp.access_token)
       useAuth.getState().setUser(resp.user)
       useAuth.getState().clearPendingVerification()
@@ -182,7 +189,15 @@ export default function Register() {
               <Input
                 id="code"
                 value={code}
-                onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                onChange={(e) => {
+                  const next = e.target.value.replace(/\D/g, '').slice(0, 6)
+                  setCode(next)
+                  // Auto-submit on the 6th digit (typed or pasted). Skip
+                  // transient IME composition values; button/Enter still work.
+                  if (next.length === 6 && !(e.nativeEvent as InputEvent).isComposing && !verifyLoading) {
+                    void verifyCode(next)
+                  }
+                }}
                 placeholder={t('register.codePlaceholder')}
                 leadingIcon={<ShieldCheck size={14} aria-hidden />}
                 autoComplete="one-time-code"
