@@ -130,7 +130,7 @@ export default function SettingsLayout() {
           <DialogPrimitive.Close
             aria-label={t('common:aria.close', { defaultValue: 'Close' })}
             className={cn(
-              'max-sm:hidden absolute right-3 top-3 z-10 inline-flex items-center justify-center size-8 rounded-[8px]',
+              'max-sm:hidden absolute right-3 top-3 z-20 inline-flex items-center justify-center size-8 rounded-[8px]',
               'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-bg-muted)]',
               'transition-colors duration-150',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
@@ -138,8 +138,20 @@ export default function SettingsLayout() {
           >
             <X size={16} aria-hidden />
           </DialogPrimitive.Close>
-          <div className="relative min-h-0 min-w-0 flex-1 overflow-y-auto">
-            <div className="px-5 sm:px-8 py-6 sm:py-8">
+          {/* scroll-padding clears the pinned page header, so focus/anchor
+              auto-scrolls land visible instead of underneath it. */}
+          <div className="relative min-h-0 min-w-0 flex-1 overflow-y-auto scrollbar-hover [scroll-padding-top:5.5rem]">
+            <div
+              className={cn(
+                'px-5 sm:px-8 py-6 sm:py-8',
+                // Pin each settings page's <header> (title + lead) while the
+                // body scrolls under it. Pages without a header (About) are
+                // untouched.
+                '[&_header]:sticky [&_header]:top-0 [&_header]:z-10',
+                '[&_header]:bg-[var(--color-surface)] [&_header]:pb-4',
+                '[&_header]:border-b [&_header]:border-[var(--color-divider)]',
+              )}
+            >
               <RouteFade dep={pathname}>
                 {/* key=pathname: a router navigation runs inside startTransition,
                     and an already-mounted Suspense boundary won't show its

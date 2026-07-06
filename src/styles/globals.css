@@ -427,6 +427,29 @@
 
   .scrollbar-thin::-webkit-scrollbar { width: 6px; height: 6px; }
 
+  /* Auto-hide scrollbar — invisible until the container is hovered, with a
+     stable gutter so content never shifts when it appears. `scrollbar-color`
+     covers Firefox + Chromium ≥121; the ::-webkit-scrollbar rules cover
+     Safari and older Chromium. */
+  .scrollbar-hover {
+    scrollbar-gutter: stable;
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+  }
+  .scrollbar-hover:hover {
+    scrollbar-color: color-mix(in oklch, var(--color-fg-faint) 30%, transparent) transparent;
+  }
+  .scrollbar-hover::-webkit-scrollbar-thumb {
+    background: transparent;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  .scrollbar-hover:hover::-webkit-scrollbar-thumb {
+    background: color-mix(in oklch, var(--color-fg-faint) 30%, transparent);
+    background-clip: padding-box;
+    border: 2px solid transparent;
+  }
+
   .mask-fade-bottom {
     mask-image: linear-gradient(to bottom, black 70%, transparent 100%);
     -webkit-mask-image: linear-gradient(to bottom, black 70%, transparent 100%);
