@@ -85,6 +85,9 @@ interface ConversationStore {
   loadOlderMessages: (id: string) => Promise<void>
 
   createConversation: (modelId?: string, projectId?: string) => Promise<Conversation>
+  /** Insert a conversation created OUTSIDE the store (the home page's
+   *  attachment-scoped draft, kept off the sidebar until first send). */
+  adoptConversation: (row: ApiConversation) => Conversation
   deleteConversation: (id: string) => Promise<void>
   renameConversation: (id: string, title: string) => Promise<void>
   togglePin: (id: string) => Promise<void>
@@ -312,6 +315,12 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
       set((s) => ({ conversations: [conv, ...s.conversations], error: errorMessage(e) }))
       return conv
     }
+  },
+
+  adoptConversation(row) {
+    const conv = toLocalConversation(row)
+    set((s) => ({ conversations: replaceOrPrepend(s.conversations, conv) }))
+    return conv
   },
 
   async deleteConversation(id) {

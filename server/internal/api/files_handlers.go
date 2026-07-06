@@ -20,6 +20,16 @@ import (
 // errFileTooLarge is returned when an upload exceeds MaxUploadBytes (§C3).
 var errFileTooLarge = errors.New("file exceeds the maximum upload size")
 
+// isForeignKeyErr matches the SQLite and PostgreSQL FK-violation messages —
+// used to translate a conversation deleted mid-upload into a clean 404.
+func isForeignKeyErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	low := strings.ToLower(err.Error())
+	return strings.Contains(low, "foreign key constraint") || strings.Contains(low, "23503")
+}
+
 // uploadDestPath returns the per-user destination for a fresh upload. We
 // keep one subdirectory per user under UPLOAD_DIR (`uploads/<userID>/…`)
 // so the joined path component never has the cross-user collision shape
@@ -151,6 +161,25 @@ func uploadFileHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	if v := r.URL.Query().Get("conversation_id"); v != "" {
 		conv = v
 	}
+	// Validate the scope BEFORE writing anything. A dangling conversation id
+	// used to surface as an opaque 500 (FK violation in store.CreateFile) —
+	// and the route never checked ownership, so any authenticated user could
+	// attach files (and rag=1 documents) into another user's conversation
+	// retrieval scope. GetConversation is workspace-member-aware, so shared-
+	// space uploads keep working.
+	var scopeConv *store.Conversation
+	if conv != "" {
+		c, err := store.GetConversation(r.Context(), d.DB, conv, u.ID)
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, 404, errors.New("conversation not found"))
+			return
+		}
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		scopeConv = c
+	}
 	// §C3 hard cap: reject the whole request body past the limit (+overhead) so a
 	// huge upload can't exhaust memory/disk before the per-file copy check.
 	r.Body = http.MaxBytesReader(w, r.Body, d.Config.MaxUploadBytes+1<<20)
@@ -198,15 +227,26 @@ func uploadFileHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		Kind: kindOf(header.Header.Get("Content-Type"), safe), StoragePath: path,
 	})
 	if err != nil {
+		// The row never landed — don't leave the copied bytes orphaned on disk.
+		_ = os.Remove(path)
+		// TOCTOU with the scope check above: the conversation can be deleted
+		// while the body was still streaming (the home page's abandoned-draft
+		// cleanup does exactly this) — surface that as the same 404 rather
+		// than an opaque FK 500.
+		if isForeignKeyErr(err) {
+			writeError(w, 404, errors.New("conversation not found"))
+			return
+		}
 		writeError(w, 500, err)
 		return
 	}
 
 	// §4.14 auto_add_uploads: when the file lands in a project conversation and
 	// the project opted in, also register it as a project-KB document + ingest.
-	// Best-effort — never fails the upload.
-	if conv != "" && isDocKind(f.Kind) {
-		if c, err := store.GetConversation(r.Context(), d.DB, conv, u.ID); err == nil && c.ProjectID != "" {
+	// Best-effort — never fails the upload. Reuses the conversation fetched by
+	// the scope check above.
+	if scopeConv != nil && isDocKind(f.Kind) {
+		if c := scopeConv; c.ProjectID != "" {
 			if p, err := store.GetProject(r.Context(), d.DB, c.ProjectID, u.ID); err == nil && p.AutoAddUploads && p.KBID != "" {
 				if doc, derr := store.CreateDocument(r.Context(), d.DB, store.Document{
 					KBID: p.KBID, Filename: f.Filename, MimeType: f.MimeType,

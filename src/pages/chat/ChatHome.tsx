@@ -13,8 +13,11 @@ import { useAuth } from '@/store/auth'
 import { useModels } from '@/store/models'
 import { useUI } from '@/store/ui'
 import { useComposerPrefs } from '@/store/composer-prefs'
+import { activeWorkspaceId } from '@/store/workspaces'
+import { apiUrl, conversationsApi, getAccessToken } from '@/api'
 import { cn } from '@/lib/utils'
-import type { Attachment, Conversation } from '@/types/chat'
+import type { Attachment } from '@/types/chat'
+import type { ApiConversation } from '@/api/types'
 
 gsap.registerPlugin(useGSAP)
 
@@ -71,20 +74,81 @@ export default function ChatHome() {
   // When the user attaches a file BEFORE sending, we must create the
   // conversation up front so the upload is scoped + RAG-ingested (§4.11.2).
   // Stash it here so the eventual send reuses the SAME conversation instead of
-  // spawning a second empty one.
-  const pendingConvRef = useRef<Conversation | null>(null)
+  // spawning a second empty one. Created OUTSIDE the store on purpose: the
+  // draft stays off the sidebar (no "Untitled" row from merely attaching) and
+  // only enters the cache on send (adoptConversation). If the draft is
+  // abandoned instead, the cleanup below deletes it server-side.
+  const pendingConvRef = useRef<ApiConversation | null>(null)
+  const pendingConsumedRef = useRef(false)
+  // True once this mount's cleanup ran — a create that resolves AFTER the user
+  // left the page must delete itself instead of stashing into a dead ref.
+  const disposedRef = useRef(false)
+  const adoptConversation = useConversations((s) => s.adoptConversation)
 
   // Lazily create (once) the conversation the first attachment will be scoped
   // to. Idempotent: repeat attaches in the same draft reuse the same id. Does
   // NOT navigate — that happens on send, so attaching a file doesn't yank the
-  // user off the home screen mid-compose.
+  // user off the home screen mid-compose. Returning undefined on failure lets
+  // the composer fall back to a scope-less (non-RAG) upload instead of
+  // uploading against a fabricated id the server would reject.
   async function ensureConversation(): Promise<string | undefined> {
     if (pendingConvRef.current) return pendingConvRef.current.id
-    const conv = await createConversation(modelId)
-    if (!conv) return undefined
-    pendingConvRef.current = conv
-    return conv.id
+    try {
+      const created = await conversationsApi.create({
+        model_id: modelId || undefined,
+        workspace_id: activeWorkspaceId(),
+      })
+      // The user may have navigated away (or sent via a suggestion card, which
+      // bypasses the composer) while the create was in flight — the cleanup
+      // already ran against an empty ref, so this draft must delete itself.
+      if (disposedRef.current) {
+        void conversationsApi.remove(created.id).catch(() => {})
+        return undefined
+      }
+      pendingConvRef.current = created
+      pendingConsumedRef.current = false
+      return created.id
+    } catch {
+      return undefined
+    }
   }
+
+  // Abandoned draft cleanup — navigating away from home (unmount) or closing
+  // the tab (pagehide, keepalive) deletes a draft conversation that never got
+  // its first message, so attach-then-leave doesn't leak "Untitled" rows.
+  useEffect(() => {
+    // Reset on (re)mount — StrictMode's dev double-mount reuses the refs, so a
+    // stale true here would make every future draft delete itself.
+    disposedRef.current = false
+    const cleanup = (keepalive: boolean) => {
+      const draft = pendingConvRef.current
+      if (!draft || pendingConsumedRef.current) return
+      pendingConvRef.current = null
+      if (keepalive) {
+        const token = getAccessToken()
+        void fetch(apiUrl(`/conversations/${encodeURIComponent(draft.id)}`), {
+          method: 'DELETE',
+          keepalive: true,
+          credentials: 'include',
+          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        }).catch(() => {})
+      } else {
+        void conversationsApi.remove(draft.id).catch(() => {})
+      }
+    }
+    const onPageHide = (e: PageTransitionEvent) => {
+      // bfcache round-trip: the page may be RESTORED with its attachment state
+      // intact — deleting the draft would orphan it. Accept the rare leak.
+      if (e.persisted) return
+      cleanup(true)
+    }
+    window.addEventListener('pagehide', onPageHide)
+    return () => {
+      window.removeEventListener('pagehide', onPageHide)
+      disposedRef.current = true
+      cleanup(false)
+    }
+  }, [])
 
   const firstName = (user?.name || user?.email?.split('@')[0] || 'friend').split(' ')[0]
   // Greeting depends on the active language; recompute whenever t changes.
@@ -146,9 +210,12 @@ export default function ChatHome() {
     } = {},
   ) {
     // Reuse the conversation created up front for an attachment (so its uploads
-    // stay scoped/ingested); otherwise create a fresh one now.
-    const conv = pendingConvRef.current ?? (await createConversation(modelId))
+    // stay scoped/ingested) — adopting it into the store now (it was kept off
+    // the sidebar while drafting); otherwise create a fresh one via the store.
+    const pending = pendingConvRef.current
+    if (pending) pendingConsumedRef.current = true
     pendingConvRef.current = null
+    const conv = pending ? adoptConversation(pending) : await createConversation(modelId)
     if (!conv) return
     // The picker is the source of truth for a new chat. A conversation created
     // earlier for an attachment may carry a stale model, so persist the picked
