@@ -610,6 +610,18 @@ mark.inline-thread-mark:hover {
   color: var(--color-fg-muted);
   font-style: italic;
 }
+/* Wide unbreakable content must scroll inside its own box instead of widening
+   the thread. The top-level CodeBlock/table/math wrappers already do this via
+   utilities; these rules catch the same elements when marked emits them NESTED
+   (a code block inside a list item, display math inside a quote, …). */
+.prose-aurelia pre {
+  overflow-x: auto;
+  max-width: 100%;
+}
+.prose-aurelia .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
 .prose-aurelia hr { border: none; border-top: 1px solid var(--color-divider); margin: 2em 0; }
 .prose-aurelia table {
   width: 100%;
