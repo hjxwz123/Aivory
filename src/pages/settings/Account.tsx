@@ -11,6 +11,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { initials } from '@/components/ui/avatar.utils'
 import { useAuth } from '@/store/auth'
 import { authApi, ApiError } from '@/api'
+import { resizeImageForUpload } from '@/lib/resize-image'
 import { toast } from '@/hooks/use-toast'
 import { useCopy } from '@/hooks/use-clipboard'
 import {
@@ -139,7 +140,10 @@ export default function Account() {
     if (!file) return
     setAvatarBusy(true)
     try {
-      const res = await authApi.uploadAvatar(file)
+      // Avatars render at ≤96px; downscale + re-encode client-side so a large
+      // photo fits the server's 256 KiB cap instead of being rejected.
+      const prepared = await resizeImageForUpload(file, 512)
+      const res = await authApi.uploadAvatar(prepared)
       await setAvatar(res.url)
       toast.success(t('settings:account.avatar.updated'))
     } catch (e) {
