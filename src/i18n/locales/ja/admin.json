@@ -477,7 +477,7 @@
       "storageSection": "オブジェクトストレージ",
       "storageLead": "回収時のワークスペース保存先。1 つ選択;空欄で無効。",
       "storageProvider": "プロバイダー",
-      "storageProviderHint": "S3互換（AWS、MinIOなど）またはAliyun OSS。",
+      "storageProviderHint": "ローカルディスク（既定）、S3互換（AWS、MinIOなど）、またはAliyun OSS。",
       "storageProviderPlaceholder": "プロバイダーを選択",
       "storageNone": "無効",
       "storageS3": "Amazon S3（または互換）",
@@ -528,7 +528,11 @@
       "imagePromptModel": "画像プロンプトモデル",
       "imagePromptModelHint": "描画前にプロンプトを調整するテキストモデル。なし＝スキップ。",
       "verifyModel": "検証（監査）モデル",
-      "verifyModelHint": "検証モードで回答をチェックする2つ目のモデル。なし＝検証オフ。"
+      "verifyModelHint": "検証モードで回答をチェックする2つ目のモデル。なし＝検証オフ。",
+      "storageLocal": "ローカルディスク（サーバーのボリューム）",
+      "storageLocalNote": "ゼロ設定の永続化：回収されたワークスペースはサンドボックスサーバーのマウント済みディレクトリ（SANDBOX_LOCAL_STORAGE_DIR）にアーカイブされ、外部オブジェクトストレージは不要です。単一ノードのみ。マルチレプリカ構成では S3/OSS を使用してください。MinerU の文書解析には引き続きオブジェクトストレージが必要です。",
+      "sandboxIdleTtl": "アイドル回収（秒）",
+      "sandboxIdleTtlHint": "この秒数アイドルが続いたらサンドボックスを回収します（回収前にワークスペースをアーカイブ）。空欄 = 1800（30 分）。範囲 60–86400。"
     }
   },
   "groups": {

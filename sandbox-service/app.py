@@ -85,6 +85,11 @@ ARCHIVE_TIMEOUT_S = float(os.environ.get("SANDBOX_ARCHIVE_TIMEOUT_S", "120"))
 # higher timeouts and are unaffected.
 DOCKER_CALL_TIMEOUT_S = float(os.environ.get("SANDBOX_DOCKER_CALL_TIMEOUT_S", "30"))
 IDLE_TTL_SECONDS = int(os.environ.get("SANDBOX_IDLE_TTL_SECONDS", "1800"))  # 30 min
+# Hard operator ceiling for the admin-tunable idle-recycle TTL. The per-session
+# value Go forwards on create (idle_ttl_sec, from the admin `sandbox_idle_ttl_sec`
+# setting) is clamped to this — mirroring EXEC_TIMEOUT_CAP_MS, an admin can
+# shorten the recycle window but never push it past the operator's ceiling.
+IDLE_TTL_CAP_SECONDS = int(os.environ.get("SANDBOX_IDLE_TTL_CAP_SECONDS", "86400"))  # 24h
 MAX_SESSIONS = int(os.environ.get("SANDBOX_MAX_SESSIONS", "16"))
 MAX_CONCURRENT_EXECS = int(os.environ.get("SANDBOX_MAX_CONCURRENT_EXECS", "4"))
 MAX_CONCURRENT_CREATES = int(os.environ.get("SANDBOX_MAX_CONCURRENT_CREATES", "2"))
@@ -150,6 +155,14 @@ MAX_ARCHIVE_BYTES = int(os.environ.get("SANDBOX_MAX_ARCHIVE_BYTES", str(200 * 10
 MAX_STORAGE_BODY_BYTES = int(
     os.environ.get("SANDBOX_MAX_STORAGE_BODY_BYTES", str(300 * 1024 * 1024))
 )
+# §4.5 local (on-disk) archive backend — the zero-dependency alternative to
+# S3/OSS. When set, workspace tarballs are written under this directory; mount it
+# as a volume for durability across sidecar restarts. Empty => the `local`
+# provider is inert (archive/restore/GC no-op), so a mis-mounted dir degrades to
+# "reaped = gone" rather than erroring. The path is an OPERATOR env, never an
+# admin/forwarded value: the sidecar runs as root driving docker.sock, so letting
+# a remote caller pick the write path would be a host-write vector.
+LOCAL_STORAGE_DIR = os.environ.get("SANDBOX_LOCAL_STORAGE_DIR", "").strip()
 
 CONTAINER_PREFIX = "aurelia-sbx-"
 LABEL = "aurelia.sandbox=1"
@@ -168,6 +181,13 @@ _last_used: dict[str, float] = {}
 # later TTL kill) — acceptable; storage is a best-effort convenience. Guarded by
 # `_state_lock`.
 _session_storage: dict[str, dict] = {}
+
+# session_id -> per-session idle TTL in seconds, forwarded by Go on create (from
+# the admin `sandbox_idle_ttl_sec` setting, already clamped). The reaper reads it
+# with a fallback to the global IDLE_TTL_SECONDS, so an admin change takes effect
+# for new sessions without a sidecar restart. Same in-memory, best-effort,
+# lost-on-restart model as _session_storage above. Guarded by `_state_lock`.
+_session_ttl: dict[str, int] = {}
 
 
 @dataclass
@@ -361,6 +381,7 @@ def _forget(session_id: str) -> None:
     with _state_lock:
         _last_used.pop(session_id, None)
         _session_storage.pop(session_id, None)
+        _session_ttl.pop(session_id, None)
         _terminating.discard(session_id)
         state = _session_states.get(session_id)
         if state is not None and state.refs == 0:
@@ -392,6 +413,15 @@ def _remember_storage(session_id: str, storage: Optional[dict]) -> None:
 def _session_storage_for(session_id: str) -> Optional[dict]:
     with _state_lock:
         return _session_storage.get(session_id)
+
+
+def _remember_ttl(session_id: str, ttl: Optional[int]) -> None:
+    """Record (or clear) the session's admin-forwarded idle TTL (seconds)."""
+    with _state_lock:
+        if ttl and ttl > 0:
+            _session_ttl[session_id] = ttl
+        else:
+            _session_ttl.pop(session_id, None)
 
 
 def _count_live_sessions() -> int:
@@ -627,6 +657,9 @@ class ListFilesBody(BaseModel):
 # keeps the sidecar agnostic to which fields a given provider needs.
 class CreateBody(BaseModel):
     storage: Optional[dict[str, Any]] = None
+    # Admin-tunable idle-recycle TTL (seconds) forwarded by Go. Clamped sidecar
+    # side to [1, IDLE_TTL_CAP_SECONDS]. None/0 => fall back to IDLE_TTL_SECONDS.
+    idle_ttl_sec: Optional[int] = None
 
 
 class DeleteBody(BaseModel):
@@ -742,6 +775,10 @@ def create_session(body: Optional[CreateBody] = Body(default=None)):
         if _storage_effective(storage):
             _restore_workspace(session_id, storage)
             _remember_storage(session_id, storage)
+        # §4.5 admin-tunable recycle window: remember the (clamped) idle TTL Go
+        # forwarded so the reaper honours it for this session. 0/absent => global.
+        if body is not None and body.idle_ttl_sec:
+            _remember_ttl(session_id, max(1, min(int(body.idle_ttl_sec), IDLE_TTL_CAP_SECONDS)))
         _touch(session_id)
         return {"session_id": session_id}
 
@@ -1218,6 +1255,11 @@ def _storage_effective(storage: Optional[dict]) -> bool:
             and _storage_get(storage, "oss_access_key_id")
             and _storage_get(storage, "oss_access_key_secret")
         )
+    if provider == "local":
+        # Effective only when the operator actually mounted a dir. A missing mount
+        # then degrades to "no archive" (fail-safe) instead of writing into the
+        # sidecar's ephemeral rootfs.
+        return bool(LOCAL_STORAGE_DIR) and os.path.isdir(LOCAL_STORAGE_DIR)
     return False
 
 
@@ -1233,6 +1275,19 @@ def _storage_full_key(storage: Optional[dict], key: str) -> str:
     """Join the admin prefix and the caller key: <prefix>/<key>."""
     _validate_object_key(key)
     return _storage_prefix(storage).rstrip("/") + "/" + key
+
+
+def _local_path(full_key: str) -> str:
+    """Resolve an object key to an absolute path confined under LOCAL_STORAGE_DIR.
+    Reuses the object-key guard, then asserts containment via realpath so a
+    crafted key or a symlink can't escape the archive dir (defence in depth for
+    keys that arrive from a directory listing, not just from _storage_full_key)."""
+    _validate_object_key(full_key)
+    base = os.path.realpath(LOCAL_STORAGE_DIR)
+    p = os.path.realpath(os.path.join(base, full_key))
+    if p != base and not p.startswith(base + os.sep):
+        raise HTTPException(status_code=400, detail="key escapes local storage dir")
+    return p
 
 
 def _storage_ttl(expires_in: Optional[int]) -> int:
@@ -1272,6 +1327,8 @@ def _storage_client(storage: dict) -> tuple:
         cache_key = _s3_creds_key(storage)
     elif provider == "aliyun_oss":
         cache_key = _oss_creds_key(storage)
+    elif provider == "local":
+        cache_key = ("local", LOCAL_STORAGE_DIR)
     else:
         raise HTTPException(status_code=400, detail=f"unsupported storage provider: {provider or '(none)'}")
 
@@ -1302,14 +1359,24 @@ def _storage_client(storage: dict) -> tuple:
             # otherwise freeze the reaper, DELETE, and session creation.
             try:
                 from botocore.config import Config as _BotoConfig  # type: ignore
-                kwargs["config"] = _BotoConfig(
+                cfg_kwargs: dict[str, Any] = dict(
                     connect_timeout=10, read_timeout=120,
                     retries={"max_attempts": 3, "mode": "standard"},
                 )
+                if endpoint:
+                    # A custom endpoint means a non-AWS, S3-compatible store
+                    # (MinIO, Ceph RGW, SeaweedFS, …). Those serve PATH-style
+                    # addressing (host/bucket), not virtual-hosted (bucket.host),
+                    # and expect SigV4 — force both so MinIO works once the admin
+                    # just fills in the endpoint. Harmless for real AWS since it
+                    # only applies when a custom endpoint is present.
+                    cfg_kwargs["s3"] = {"addressing_style": "path"}
+                    cfg_kwargs["signature_version"] = "s3v4"
+                kwargs["config"] = _BotoConfig(**cfg_kwargs)
             except ImportError:
                 pass
             client: Any = boto3.client("s3", **kwargs)
-        else:  # aliyun_oss
+        elif provider == "aliyun_oss":
             try:
                 import oss2  # type: ignore
             except ImportError as exc:  # pragma: no cover - dep is pinned
@@ -1324,6 +1391,12 @@ def _storage_client(storage: dict) -> tuple:
                 _storage_get(storage, "oss_bucket"),
                 connect_timeout=30,  # bound the call so a slow bucket can't wedge the session lock
             )
+        else:  # local
+            # The "client" is just the base dir; filesystem ops resolve keys
+            # against it via _local_path. No SDK, no connection pool.
+            if not LOCAL_STORAGE_DIR:
+                raise HTTPException(status_code=400, detail="local storage dir not configured")
+            client = LOCAL_STORAGE_DIR
 
         _storage_clients[cache_key] = client
         return provider, client
@@ -1341,8 +1414,15 @@ def _storage_put_object(storage: dict, full_key: str, data: bytes,
             Body=data,
             ContentType=ctype,
         )
-    else:  # aliyun_oss
+    elif provider == "aliyun_oss":
         client.put_object(full_key, data, headers={"Content-Type": ctype})
+    else:  # local — ctype is not persisted (see presign gap in DESIGN §4.5).
+        path = _local_path(full_key)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = f"{path}.tmp-{os.getpid()}-{threading.get_ident()}"
+        with open(tmp, "wb") as f:
+            f.write(data)
+        os.replace(tmp, path)  # atomic within the same filesystem
 
 
 def _storage_presign_get(storage: dict, full_key: str, ttl: int) -> str:
@@ -1354,8 +1434,14 @@ def _storage_presign_get(storage: dict, full_key: str, ttl: int) -> str:
             Params={"Bucket": _storage_get(storage, "s3_bucket"), "Key": full_key},
             ExpiresIn=ttl,
         )
-    # oss2: slash_safe keeps the "/" in the key path un-escaped.
-    return client.sign_url("GET", full_key, ttl, slash_safe=True)
+    if provider == "aliyun_oss":
+        # oss2: slash_safe keeps the "/" in the key path un-escaped.
+        return client.sign_url("GET", full_key, ttl, slash_safe=True)
+    # local has no externally-fetchable URL. Workspace archive/restore never
+    # needs one (the sidecar moves bytes directly), but the RAG/MinerU flow does
+    # — so fail loudly here rather than hand back a dead URL. local => object
+    # storage is required for MinerU document parsing (see DESIGN §4.5).
+    raise HTTPException(status_code=400, detail="presigned URLs are unsupported for local storage")
 
 
 def _storage_get_object(storage: dict, full_key: str,
@@ -1381,7 +1467,7 @@ def _storage_get_object(storage: dict, full_key: str,
             data = b""
         else:
             data = body.read(cap) if cap is not None else body.read()
-    else:  # aliyun_oss
+    elif provider == "aliyun_oss":
         try:
             resp = client.get_object(full_key)
         except Exception as exc:  # noqa: BLE001
@@ -1389,6 +1475,12 @@ def _storage_get_object(storage: dict, full_key: str,
                 return None
             raise
         data = resp.read(cap) if cap is not None else resp.read()
+    else:  # local
+        try:
+            with open(_local_path(full_key), "rb") as f:
+                data = f.read(cap) if cap is not None else f.read()
+        except FileNotFoundError:
+            return None
     if max_bytes is not None and len(data) > max_bytes:
         raise ValueError(f"object {full_key} exceeds {max_bytes} bytes")
     return data
@@ -1402,8 +1494,10 @@ def _storage_delete_object(storage: dict, full_key: str) -> None:
             client.delete_object(
                 Bucket=_storage_get(storage, "s3_bucket"), Key=full_key
             )
-        else:  # aliyun_oss
+        elif provider == "aliyun_oss":
             client.delete_object(full_key)
+        else:  # local
+            os.remove(_local_path(full_key))
     except Exception as exc:  # noqa: BLE001
         if _is_not_found(provider, exc):
             return
@@ -1411,9 +1505,11 @@ def _storage_delete_object(storage: dict, full_key: str) -> None:
 
 
 def _is_not_found(provider: str, exc: Exception) -> bool:
-    """Best-effort 'object does not exist' classifier across both SDKs, so a
+    """Best-effort 'object does not exist' classifier across all backends, so a
     delete of an absent key is idempotent and a missing archive restores as a
     no-op."""
+    if isinstance(exc, FileNotFoundError):  # local backend
+        return True
     if type(exc).__name__ in ("NoSuchKey", "NoSuchBucket", "NotFound"):
         return True
     if provider == "s3":
@@ -1464,7 +1560,7 @@ def _storage_list(storage: dict, prefix: str) -> Iterator[tuple[str, float, int]
                 token = resp["NextContinuationToken"]
                 continue
             break
-    else:  # aliyun_oss
+    elif provider == "aliyun_oss":
         import oss2  # type: ignore
         # ObjectIterator yields SimplifiedObjectInfo: .key, .last_modified
         # (epoch seconds), .size — and pages internally.
@@ -1474,6 +1570,23 @@ def _storage_list(storage: dict, prefix: str) -> Iterator[tuple[str, float, int]
                 float(getattr(obj, "last_modified", 0) or 0),
                 int(getattr(obj, "size", 0) or 0),
             )
+    else:  # local
+        base = os.path.realpath(LOCAL_STORAGE_DIR)
+        root = _local_path(prefix) if prefix else base
+        if not os.path.isdir(root):
+            return
+        for dirpath, _dirs, files in os.walk(root):
+            for fn in files:
+                fp = os.path.join(dirpath, fn)
+                # Yield the key RELATIVE to base with "/" separators, so the GC
+                # sweep's startswith(prefix)/`.tgz` checks and _storage_delete_object
+                # behave identically to the object-store backends.
+                key = os.path.relpath(fp, base).replace(os.sep, "/")
+                try:
+                    st = os.stat(fp)
+                except FileNotFoundError:
+                    continue
+                yield key, st.st_mtime, int(st.st_size)
 
 
 def _archive_workspace(session_id: str, storage: Optional[dict]) -> None:
@@ -1579,7 +1692,11 @@ def _reaper() -> None:
         time.sleep(300)
         now = time.time()
         with _state_lock:
-            stale = [sid for sid, t in _last_used.items() if now - t > IDLE_TTL_SECONDS]
+            # Per-session TTL (admin-forwarded) wins over the global default. Read
+            # inline while holding _state_lock — it is NOT reentrant, so don't call
+            # a helper that re-acquires it.
+            stale = [sid for sid, t in _last_used.items()
+                     if now - t > (_session_ttl.get(sid) or IDLE_TTL_SECONDS)]
         for sid in stale:
             try:
                 with _session_lock(sid):
@@ -1591,7 +1708,8 @@ def _reaper() -> None:
                     # /workspace out from under an active conversation.
                     with _state_lock:
                         last = _last_used.get(sid)
-                    if last is not None and time.time() - last <= IDLE_TTL_SECONDS:
+                        ttl = _session_ttl.get(sid) or IDLE_TTL_SECONDS
+                    if last is not None and time.time() - last <= ttl:
                         continue
                     # L6: flag terminating so a /exec that arrives during the
                     # archive 404s fast instead of blocking on the lock.
@@ -1622,6 +1740,14 @@ def _start_reaper() -> None:
         if cp.returncode != 0:
             print(f"[sandbox] warning: failed to pull {IMAGE}: "
                   f"{cp.stderr.decode(errors='replace')[:200]}")
+    if LOCAL_STORAGE_DIR:
+        # §4.5 local archive backend: ensure the mount point exists so
+        # _storage_effective("local") turns on. Best-effort — a failure just
+        # leaves local archiving off (fail-safe).
+        try:
+            os.makedirs(LOCAL_STORAGE_DIR, exist_ok=True)
+        except OSError as exc:
+            print(f"[sandbox] warning: cannot create local storage dir {LOCAL_STORAGE_DIR}: {exc}")
     _discover_sessions()
     threading.Thread(target=_reaper, daemon=True).start()
 

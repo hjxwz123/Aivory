@@ -44,9 +44,11 @@ type Result struct {
 
 // StorageConfig is the per-call override the Go side forwards on /sessions
 // and /sessions/:delete so the sandbox sidecar can archive/restore /workspace
-// to whichever bucket the admin configured live (no sidecar restart). Empty
+// to whichever backend the admin configured live (no sidecar restart). Empty
 // Provider means "no archive" — workspaces reaped = gone, which matches the
-// original sidecar default. Provider is one of "s3" | "aliyun_oss" | "".
+// original sidecar default. Provider is one of "s3" | "aliyun_oss" | "local" | "".
+// For "local" the sidecar writes tarballs to its SANDBOX_LOCAL_STORAGE_DIR
+// (an operator-mounted volume), so no bucket/creds fields are needed here.
 type StorageConfig struct {
 	Provider string `json:"provider,omitempty"`
 	Prefix   string `json:"prefix,omitempty"`
@@ -75,6 +77,11 @@ func (c *StorageConfig) Effective() bool {
 	case "aliyun_oss":
 		return c.OSSBucket != "" && c.OSSEndpoint != "" &&
 			c.OSSAccessKeyID != "" && c.OSSAccessKeySecret != ""
+	case "local":
+		// The archive dir lives sidecar-side (SANDBOX_LOCAL_STORAGE_DIR); Go
+		// can't see it, so it always forwards and lets the sidecar gate on
+		// whether the dir is actually mounted (a missing mount → no-op).
+		return true
 	}
 	return false
 }
@@ -126,7 +133,11 @@ type HTTPSandbox struct {
 	// long-but-valid run can't trip "context deadline exceeded" before the
 	// sidecar answers. 0 → defaultExecTimeout.
 	ExecTimeout time.Duration
-	client      *http.Client
+	// IdleTTL is the admin-tunable idle-recycle window forwarded on /sessions
+	// (idle_ttl_sec). 0 → the sidecar's own default (SANDBOX_IDLE_TTL_SECONDS).
+	// Bound at session-create; already-live sessions keep their create-time TTL.
+	IdleTTL time.Duration
+	client  *http.Client
 }
 
 const (
@@ -153,6 +164,7 @@ type Options struct {
 	APIKey      string
 	Storage     *StorageConfig
 	ExecTimeout time.Duration // 0 → defaultExecTimeout
+	IdleTTL     time.Duration // 0 → sidecar default (SANDBOX_IDLE_TTL_SECONDS)
 }
 
 // NewWithOptions builds a sandbox Service, sizing the HTTP client timeout to the
@@ -167,6 +179,7 @@ func NewWithOptions(o Options) Service {
 		APIKey:      o.APIKey,
 		Storage:     o.Storage,
 		ExecTimeout: exec,
+		IdleTTL:     o.IdleTTL,
 		client:      &http.Client{Timeout: exec + execClientOverhead},
 	}
 }
@@ -230,6 +243,9 @@ func (s *HTTPSandbox) NewSession(ctx context.Context) (string, error) {
 	payload := map[string]any{}
 	if s.Storage != nil && s.Storage.Effective() {
 		payload["storage"] = s.Storage
+	}
+	if s.IdleTTL > 0 {
+		payload["idle_ttl_sec"] = int(s.IdleTTL.Seconds())
 	}
 	if err := s.do(ctx, "/sessions", payload, &res); err != nil {
 		return "", err

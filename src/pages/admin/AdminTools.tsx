@@ -24,6 +24,7 @@ const OWNED_KEYS = [
   'sandbox_base_url',
   'sandbox_api_key',
   'sandbox_exec_timeout_sec',
+  'sandbox_idle_ttl_sec',
 ] as const
 
 export default function AdminTools() {
@@ -191,6 +192,21 @@ export default function AdminTools() {
                   placeholder="120"
                   value={readString('sandbox_exec_timeout_sec')}
                   onChange={(e) => setDraft({ ...draft, sandbox_exec_timeout_sec: e.target.value })}
+                />
+              </Field>
+              <Field
+                label={t('admin:settings.fields.sandboxIdleTtl')}
+                htmlFor="sandbox-idle-ttl"
+                hint={t('admin:settings.fields.sandboxIdleTtlHint')}
+              >
+                <Input
+                  id="sandbox-idle-ttl"
+                  type="number"
+                  min={60}
+                  max={86400}
+                  placeholder="1800"
+                  value={readString('sandbox_idle_ttl_sec')}
+                  onChange={(e) => setDraft({ ...draft, sandbox_idle_ttl_sec: e.target.value })}
                 />
               </Field>
             </div>

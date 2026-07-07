@@ -101,8 +101,17 @@ services:
       # (settings.sandbox_exec_timeout_sec) is clamped to this; lower it to
       # tighten the cap. 600000ms = 10min.
       SANDBOX_EXEC_TIMEOUT_CAP_MS: ${SANDBOX_EXEC_TIMEOUT_CAP_MS:-600000}
+      # Hard ceiling for the admin's idle-recycle window
+      # (settings.sandbox_idle_ttl_sec is clamped to this). 86400s = 24h.
+      SANDBOX_IDLE_TTL_CAP_SECONDS: ${SANDBOX_IDLE_TTL_CAP_SECONDS:-86400}
       SANDBOX_READ_ONLY_ROOTFS: "1"
       SANDBOX_WORKSPACE_SIZE: ${SANDBOX_WORKSPACE_SIZE:-512m}
+      # §4.5 zero-config workspace persistence: the admin `storage_provider`
+      # defaults to "local", so reaped /workspace tarballs are archived to the
+      # named volume below and survive the idle reaper + sidecar restarts — no
+      # S3/OSS/MinIO required. Multi-replica deployments must switch to S3/OSS
+      # (a plain volume isn't shared across replicas).
+      SANDBOX_LOCAL_STORAGE_DIR: /var/lib/aurelia/sandbox-archives
     # Liveness: /healthz reports the sidecar can still reach the docker daemon.
     # No tools beyond python are in the image, so probe via urllib (non-2xx
     # raises -> unhealthy). start_period covers SANDBOX_PULL_ON_START, which blocks
@@ -121,6 +130,8 @@ services:
     volumes:
       # Required: the sidecar spawns sibling session containers via the host daemon.
       - /var/run/docker.sock:/var/run/docker.sock
+      # §4.5 durable local archive store (SANDBOX_LOCAL_STORAGE_DIR above).
+      - sandbox-archives:/var/lib/aurelia/sandbox-archives
     networks: [internal]
 
   # Single application container: the Go process serves BOTH the built SPA and
@@ -201,6 +212,7 @@ volumes:
   pgdata:
   redisdata:
   qdrantdata:
+  sandbox-archives:  # §4.5 durable local sandbox workspace archives
 
 networks:
   internal:

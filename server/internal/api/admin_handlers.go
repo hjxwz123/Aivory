@@ -916,11 +916,15 @@ var settingsKeys = []string{
 	// §4.5 per-exec wall-clock cap in SECONDS (admin-tunable). Blank/0 = default
 	// 120s. Clamped to [10,600] server-side and to the sidecar's hard ceiling.
 	"sandbox_exec_timeout_sec",
-	// §4.5 storage backend: pick exactly one of s3 / aliyun_oss. When blank,
-	// archive/restore is disabled and the sandbox still works (workspaces
-	// reaped = gone). All credentials live in admin settings, plaintext,
-	// consistent with the channel api_key policy.
-	"storage_provider", // "" | "s3" | "aliyun_oss"
+	// §4.5 idle-recycle window in SECONDS (admin-tunable). How long a sandbox may
+	// sit unused before it's archived + torn down. Blank/0 = sidecar default
+	// (1800s). Clamped to [60,86400] server-side and to the sidecar's ceiling.
+	"sandbox_idle_ttl_sec",
+	// §4.5 storage backend: pick one of s3 / aliyun_oss / local. "local" archives
+	// to a sidecar-mounted volume (zero external deps). When blank, archive/restore
+	// is disabled and the sandbox still works (workspaces reaped = gone). All
+	// credentials live in admin settings, plaintext, per the channel api_key policy.
+	"storage_provider", // "" | "s3" | "aliyun_oss" | "local"
 	"storage_prefix",   // shared key-prefix for archived workspaces
 	"storage_s3_bucket", "storage_s3_region", "storage_s3_endpoint",
 	"storage_s3_access_key", "storage_s3_secret_key",
@@ -985,7 +989,7 @@ var settingsKeys = []string{
 // sensitiveKeywords lists substrings that identify secret settings fields.
 // Any settings key whose name contains one of these (case-insensitive) will
 // have its non-empty string value replaced with the mask on GET responses.
-var sensitiveKeywords = []string{"password", "secret", "api_key", "token", "key_secret", "key_id"}
+var sensitiveKeywords = []string{"password", "secret", "api_key", "token", "key_secret", "key_id", "access_key"}
 
 // maskSensitiveSettings replaces non-empty string values for sensitive keys
 // with the display mask so credentials are never returned in plaintext (H-1).

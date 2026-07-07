@@ -52,7 +52,41 @@ func (s *settingsSandbox) backend() sandbox.Service {
 		APIKey:      key,
 		Storage:     storage,
 		ExecTimeout: s.execTimeout(),
+		IdleTTL:     s.idleTTL(),
 	})
+}
+
+// idleTTL reads settings.sandbox_idle_ttl_sec — the admin-set idle-recycle
+// window (how long a sandbox may sit unused before the reaper archives + tears
+// it down). Accepts a JSON number or the string the admin text input saves.
+// Clamped to [60s, 86400s]; 0 / blank / invalid → 0 so the sidecar uses its
+// built-in default (SANDBOX_IDLE_TTL_SECONDS, 30min). The sidecar additionally
+// clamps to its own hard ceiling, so this can lower but never exceed it.
+func (s *settingsSandbox) idleTTL() time.Duration {
+	if s.db == nil {
+		return 0
+	}
+	raw, err := store.GetSetting(s.db, "sandbox_idle_ttl_sec")
+	if err != nil {
+		return 0
+	}
+	secs := 0
+	if json.Unmarshal(raw, &secs) != nil {
+		var str string
+		if json.Unmarshal(raw, &str) == nil {
+			secs, _ = strconv.Atoi(strings.TrimSpace(str))
+		}
+	}
+	if secs <= 0 {
+		return 0
+	}
+	if secs < 60 {
+		secs = 60
+	}
+	if secs > 86400 {
+		secs = 86400
+	}
+	return time.Duration(secs) * time.Second
 }
 
 // execTimeout reads settings.sandbox_exec_timeout_sec — the admin-set per-exec
@@ -92,7 +126,7 @@ func (s *settingsSandbox) execTimeout() time.Duration {
 // off and "reaped = gone" applies.
 func (s *settingsSandbox) storageConfig() *sandbox.StorageConfig {
 	provider := s.settingString("storage_provider", "")
-	if provider != "s3" && provider != "aliyun_oss" {
+	if provider != "s3" && provider != "aliyun_oss" && provider != "local" {
 		return nil
 	}
 	cfg := &sandbox.StorageConfig{
@@ -111,6 +145,8 @@ func (s *settingsSandbox) storageConfig() *sandbox.StorageConfig {
 		cfg.OSSEndpoint = s.settingString("storage_aliyun_endpoint", "")
 		cfg.OSSAccessKeyID = s.settingString("storage_aliyun_access_key_id", "")
 		cfg.OSSAccessKeySecret = s.settingString("storage_aliyun_access_key_secret", "")
+		// "local" carries no bucket/creds — the archive dir is a sidecar-side env
+		// (SANDBOX_LOCAL_STORAGE_DIR), so nothing more to read here.
 	}
 	if !cfg.Effective() {
 		return nil

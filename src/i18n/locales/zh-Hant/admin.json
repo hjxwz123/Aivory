@@ -477,7 +477,7 @@
       "storageSection": "物件儲存",
       "storageLead": "沙箱回收時 /workspace 歸檔到何處。二選一;留空則不歸檔。",
       "storageProvider": "儲存型別",
-      "storageProviderHint": "S3 相容(AWS、MinIO 等)或阿里雲 OSS。",
+      "storageProviderHint": "本機磁碟（預設）、S3 相容（AWS、MinIO 等）或阿里雲 OSS。",
       "storageProviderPlaceholder": "選擇儲存型別",
       "storageNone": "禁用",
       "storageS3": "Amazon S3(或相容)",
@@ -528,7 +528,11 @@
       "imagePromptModel": "圖片提示詞模型",
       "imagePromptModelHint": "繪圖前用於潤色提示詞的文字模型。選「無」則略過。",
       "verifyModel": "審校（審計）模型",
-      "verifyModelHint": "在審校模式下核查答案的第二個模型。選「無」則關閉審校。"
+      "verifyModelHint": "在審校模式下核查答案的第二個模型。選「無」則關閉審校。",
+      "storageLocal": "本機磁碟（伺服器卷）",
+      "storageLocalNote": "零設定持久化：被回收的工作區會歸檔到沙箱伺服器掛載的目錄（SANDBOX_LOCAL_STORAGE_DIR），無需外部物件儲存。僅適用於單節點；多副本部署請用 S3/OSS。MinerU 文件解析仍需物件儲存。",
+      "sandboxIdleTtl": "閒置回收（秒）",
+      "sandboxIdleTtlHint": "沙箱閒置這麼多秒後回收（回收前先歸檔其工作區）。留空 = 1800（30 分鐘）。範圍 60–86400。"
     }
   },
   "groups": {

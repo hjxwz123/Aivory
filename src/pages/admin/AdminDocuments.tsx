@@ -314,6 +314,7 @@ export default function AdminDocuments() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">{t('admin:settings.fields.storageNone')}</SelectItem>
+                    <SelectItem value="local">{t('admin:settings.fields.storageLocal')}</SelectItem>
                     <SelectItem value="s3">{t('admin:settings.fields.storageS3')}</SelectItem>
                     <SelectItem value="aliyun_oss">{t('admin:settings.fields.storageAliyun')}</SelectItem>
                   </SelectContent>
@@ -348,6 +349,12 @@ export default function AdminDocuments() {
                     onChange={(e) => setDraft({ ...draft, storage_archive_ttl_days: e.target.value })}
                   />
                 </Field>
+              )}
+
+              {storageProvider === 'local' && (
+                <p className="rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-4 text-xs leading-relaxed text-[var(--color-fg-muted)]">
+                  {t('admin:settings.fields.storageLocalNote')}
+                </p>
               )}
 
               {storageProvider === 's3' && (

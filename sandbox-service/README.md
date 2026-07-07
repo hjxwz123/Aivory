@@ -212,7 +212,8 @@ You should get `stdout: "rows 3\n"`, `exit_code: 0`, and one file `p.png`
 | `SANDBOX_MAX_BODY_BYTES` | `29360128` | reject requests whose `Content-Length` exceeds this (HTTP 413) before reading the body. ~28 MiB. |
 | `SANDBOX_MAX_CODE_BYTES` | `1048576` | max bytes for the `/exec` `code` field (HTTP 413/422 over). 1 MiB. |
 | `SANDBOX_EXEC_TIMEOUT_CAP_MS` | `120000` | hard ceiling per exec (§4.5) |
-| `SANDBOX_IDLE_TTL_SECONDS` | `1800` | idle sessions reaped after 30 min |
+| `SANDBOX_IDLE_TTL_SECONDS` | `1800` | idle sessions reaped after 30 min (fallback when Go forwards no per-session `idle_ttl_sec`) |
+| `SANDBOX_IDLE_TTL_CAP_SECONDS` | `86400` | hard ceiling for the admin-forwarded idle TTL (`idle_ttl_sec` clamped to this). 24h. |
 | `SANDBOX_MAX_SESSIONS` | `16` | max active sandbox containers |
 | `SANDBOX_MAX_CONCURRENT_EXECS` | `4` | max concurrent `/exec` calls across sessions |
 | `SANDBOX_MAX_CONCURRENT_CREATES` | `2` | max concurrent Docker container creates |
@@ -230,6 +231,9 @@ You should get `stdout: "rows 3\n"`, `exit_code: 0`, and one file `p.png`
 | `SANDBOX_STORAGE_MAX_TTL` | `86400` | hard cap on the presigned-GET ttl (24h) |
 | `SANDBOX_MAX_ARCHIVE_BYTES` | `209715200` | max `/workspace` tar size archived on reap/delete; larger workspaces skip archive (logged). 200 MiB. |
 | `SANDBOX_MAX_STORAGE_BODY_BYTES` | `314572800` | body-size ceiling for `/storage/put` (RAG document uploads dwarf the F5 cap that guards `/exec`/`/files`). 300 MiB. |
+| `SANDBOX_LOCAL_STORAGE_DIR` | _(empty)_ | directory for the `local` archive backend (§4.5-F). When set (mount it as a volume), the `local` storage provider archives `/workspace` tarballs here — zero-config persistence, no S3/OSS/MinIO needed. Empty = `local` is inert (reaped = gone). **Single-node only** (a plain volume isn't shared across replicas); MinerU document parsing still needs an object store (no presigned URL for local files). Operator env, never admin/forwarded — the sidecar is root+docker.sock, so a caller-chosen path would be a host-write vector. |
+
+> **Storage providers.** The forwarded `storage.provider` is one of `local` (default), `s3`, `aliyun_oss`, or empty. **MinIO / any S3-compatible store**: pick `s3` and set `storage.s3_endpoint` — a custom endpoint auto-selects path-style addressing + SigV4, so it works with no extra flags.
 
 ## Security posture (dev-grade)
 
@@ -273,7 +277,7 @@ and the Go side stay identical (that's the whole point of the thin adapter).
 
 | Method | Path | Body | Returns |
 |---|---|---|---|
-| POST | `/sessions` | `{storage?}` | `{session_id}` |
+| POST | `/sessions` | `{storage?, idle_ttl_sec?}` | `{session_id}` |
 | POST | `/exec` | `{session_id, code, timeout_ms?}` | `{stdout, stderr, exit_code, files[]}` |
 | POST | `/files` | `{session_id, path, data_base64}` | `{ok}` |
 | POST | `/files/get` | `{session_id, path}` | `{data_base64}` |

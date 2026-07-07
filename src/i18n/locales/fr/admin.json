@@ -477,7 +477,7 @@
       "storageSection": "Stockage d'objets",
       "storageLead": "Où archiver les espaces recyclés. Au choix ; vide = désactivé.",
       "storageProvider": "Fournisseur",
-      "storageProviderHint": "Compatible S3 (AWS, MinIO, etc.) ou Aliyun OSS.",
+      "storageProviderHint": "Disque local (par défaut), compatible S3 (AWS, MinIO, etc.) ou Aliyun OSS.",
       "storageProviderPlaceholder": "Choisir un fournisseur",
       "storageNone": "Désactivé",
       "storageS3": "Amazon S3 (ou compatible)",
@@ -528,7 +528,11 @@
       "imagePromptModel": "Modèle de prompt d'image",
       "imagePromptModelHint": "Modèle texte qui affine les prompts avant le dessin. Aucun = ignorer.",
       "verifyModel": "Modèle vérificateur",
-      "verifyModelHint": "Second modèle qui vérifie les réponses en mode Vérifier. Aucun = désactivé."
+      "verifyModelHint": "Second modèle qui vérifie les réponses en mode Vérifier. Aucun = désactivé.",
+      "storageLocal": "Disque local (volume serveur)",
+      "storageLocalNote": "Persistance sans configuration : les espaces de travail recyclés sont archivés dans le répertoire monté du serveur sandbox (SANDBOX_LOCAL_STORAGE_DIR), sans stockage objet externe. Nœud unique uniquement ; utilisez S3/OSS pour les déploiements multi-répliques. L'analyse de documents MinerU nécessite toujours un stockage objet.",
+      "sandboxIdleTtl": "Recyclage inactif (secondes)",
+      "sandboxIdleTtlHint": "Recycle un sandbox après ce nombre de secondes d'inactivité (son espace de travail est archivé d'abord). Vide = 1800 (30 min). Plage 60–86400."
     }
   },
   "groups": {

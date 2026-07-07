@@ -135,7 +135,8 @@ curl -s -XPOST "$SANDBOX_URL/exec" \
 | `SANDBOX_MAX_BODY_BYTES` | `29360128` | 在读取 body 前拒绝超过该 `Content-Length` 的请求（HTTP 413），约 28 MiB。 |
 | `SANDBOX_MAX_CODE_BYTES` | `1048576` | `/exec` 的 `code` 字段最大字节数，超过返回 HTTP 413/422。1 MiB。 |
 | `SANDBOX_EXEC_TIMEOUT_CAP_MS` | `120000` | 单次执行硬上限（§4.5） |
-| `SANDBOX_IDLE_TTL_SECONDS` | `1800` | 空闲 session 30 分钟后回收 |
+| `SANDBOX_IDLE_TTL_SECONDS` | `1800` | 空闲 session 默认 30 分钟后回收（Go 未按会话下发 `idle_ttl_sec` 时的兜底值） |
+| `SANDBOX_IDLE_TTL_CAP_SECONDS` | `86400` | 管理员下发的回收窗口（`idle_ttl_sec`）硬上限，24h |
 | `SANDBOX_MAX_SESSIONS` | `16` | 最大活跃沙箱容器数 |
 | `SANDBOX_MAX_CONCURRENT_EXECS` | `4` | 所有 session 合计最大并发 `/exec` 数 |
 | `SANDBOX_MAX_CONCURRENT_CREATES` | `2` | 最大并发 Docker 容器创建数 |
@@ -153,6 +154,9 @@ curl -s -XPOST "$SANDBOX_URL/exec" \
 | `SANDBOX_STORAGE_MAX_TTL` | `86400` | 预签名 GET URL 的硬上限，24 小时 |
 | `SANDBOX_MAX_ARCHIVE_BYTES` | `209715200` | reap/delete 时 `/workspace` tar 归档最大大小；超过则跳过归档并记录日志。200 MiB。 |
 | `SANDBOX_MAX_STORAGE_BODY_BYTES` | `314572800` | `/storage/put` body 大小上限（RAG 文档上传远大于保护 `/exec`/`/files` 的 F5 上限）。300 MiB。 |
+| `SANDBOX_LOCAL_STORAGE_DIR` | _空_ | `local` 归档后端目录（§4.5-F）。设置并挂载为卷后，`local` provider 把 `/workspace` tarball 归档到这里——0 配置持久化，无需 S3/OSS/MinIO。留空则 `local` 不生效（reaped = gone）。**仅单节点**（普通卷不跨副本共享）；MinerU 文档解析仍需对象存储（本机文件无预签名 URL）。仅 operator env，绝不由管理员/请求下发——sidecar 以 root + docker.sock 运行，让调用方选路径即主机写入面。 |
+
+> **存储 provider**：下发的 `storage.provider` 为 `local`（默认）/ `s3` / `aliyun_oss` / 空。**MinIO / 任意 S3 兼容**：选 `s3` 并填 `storage.s3_endpoint`——自定义 endpoint 会自动切 path-style + SigV4，无需额外开关。
 
 ## 安全姿态（开发级）
 
@@ -172,7 +176,7 @@ sidecar 启动时还会发现已有的 `aurelia.sandbox=1` 容器，因此 sidec
 
 | 方法 | 路径 | Body | 返回 |
 |---|---|---|---|
-| POST | `/sessions` | `{storage?}` | `{session_id}` |
+| POST | `/sessions` | `{storage?, idle_ttl_sec?}` | `{session_id}` |
 | POST | `/exec` | `{session_id, code, timeout_ms?}` | `{stdout, stderr, exit_code, files[]}` |
 | POST | `/files` | `{session_id, path, data_base64}` | `{ok}` |
 | POST | `/files/get` | `{session_id, path}` | `{data_base64}` |

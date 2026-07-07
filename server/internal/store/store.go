@@ -589,10 +589,17 @@ func Seed(db *sql.DB, cfg config.Config) error {
 		"credits_per_usd": `0`,
 		// Global purchase links (§ credits / user groups): one tier-upgrade link
 		// and one permanent-credit top-up link, shared by every group.
-		"group_buy_url":         `""`,
-		"credit_buy_url":        `""`,
-		"sandbox_base_url":      `""`,
-		"sandbox_api_key":       `""`,
+		"group_buy_url":    `""`,
+		"credit_buy_url":   `""`,
+		"sandbox_base_url": `""`,
+		"sandbox_api_key":  `""`,
+		// §4.5 default sandbox archiving to the zero-dependency local backend so a
+		// fresh deployment persists /workspace across the idle reaper with no
+		// external object store. Fail-safe: when the sidecar has no
+		// SANDBOX_LOCAL_STORAGE_DIR mounted, `local` is inert (reaped = gone),
+		// identical to the pre-existing behaviour. Insert-if-absent, so an admin
+		// who later picks s3/aliyun_oss is never overwritten.
+		"storage_provider":      `"local"`,
 		"moderation_keywords":   `[]`,
 		"moderation_model_id":   `""`,
 		"moderation_categories": `["politics","pornography","violence or gore","terrorism","illegal activity","hate speech","self-harm"]`,

@@ -82,6 +82,13 @@ services:
       SANDBOX_READ_ONLY_ROOTFS: "1"
       SANDBOX_WORKSPACE_SIZE: 512m
       # SANDBOX_DISK_SIZE: 1g
+      # §4.5 zero-config workspace persistence: with the admin `storage_provider`
+      # left at its "local" default, reaped /workspace tarballs are archived here
+      # (backed by the named volume below) so they survive the idle reaper AND a
+      # sidecar restart — no S3/OSS/MinIO needed. Unset this (or drop the volume)
+      # to fall back to ephemeral "reaped = gone". Multi-replica deployments must
+      # use S3/OSS instead (a plain volume isn't shared across replicas).
+      SANDBOX_LOCAL_STORAGE_DIR: /var/lib/aurelia/sandbox-archives
       # F1: optional pinned seccomp profile for session containers (path must be
       # readable INSIDE this sidecar container — mount it and point here).
       # SANDBOX_SECCOMP_PROFILE: /seccomp/aurelia-sandbox.json
@@ -105,3 +112,9 @@ services:
       # See the SECURITY NOTE above: prefer a docker-socket-proxy over the raw
       # socket, restricted to container create/start/exec/kill + image pull.
       - /var/run/docker.sock:/var/run/docker.sock
+      # §4.5 durable local archive store (SANDBOX_LOCAL_STORAGE_DIR above). Keep
+      # it OUT of any session container's reach — it holds cross-session tarballs.
+      - sandbox-archives:/var/lib/aurelia/sandbox-archives
+
+volumes:
+  sandbox-archives:
