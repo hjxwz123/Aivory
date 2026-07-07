@@ -22,19 +22,30 @@
   --accent-hue: 290;
 
   /* Backgrounds — porcelain tinted by --accent-hue */
-  --color-bg: oklch(98.4% 0.006 var(--accent-hue));            /* page — lower chroma, more neutral */
-  --color-bg-muted: oklch(96.5% 0.016 var(--accent-hue));      /* slightly recessed */
-  --color-surface: oklch(99.2% 0.007 var(--accent-hue));       /* cards, popovers */
-  --color-surface-raised: oklch(99.6% 0.005 var(--accent-hue));/* dialogs, command */
-  --color-surface-sunken: oklch(95% 0.018 var(--accent-hue));  /* code wells, inputs */
-  --color-overlay: oklch(18% 0.03 var(--accent-hue) / 0.42);   /* dim layer */
+  --color-bg: oklch(98.4% 0.006 var(--accent-hue));
+  /* page — lower chroma, more neutral */
+  --color-bg-muted: oklch(96.5% 0.016 var(--accent-hue));
+  /* slightly recessed */
+  --color-surface: oklch(99.2% 0.007 var(--accent-hue));
+  /* cards, popovers */
+  --color-surface-raised: oklch(99.6% 0.005 var(--accent-hue));
+  /* dialogs, command */
+  --color-surface-sunken: oklch(95% 0.018 var(--accent-hue));
+  /* code wells, inputs */
+  --color-overlay: oklch(18% 0.03 var(--accent-hue) / 0.42);
+  /* dim layer */
 
   /* Foreground — ink tinted by --accent-hue */
-  --color-fg: oklch(22% 0.040 var(--accent-hue));              /* primary text */
-  --color-fg-muted: oklch(44% 0.030 var(--accent-hue));        /* secondary text */
-  --color-fg-subtle: oklch(58% 0.025 var(--accent-hue));       /* hint text */
-  --color-fg-faint: oklch(72% 0.020 var(--accent-hue));        /* placeholder */
-  --color-fg-inverted: oklch(98.4% 0.010 var(--accent-hue));   /* on dark surfaces */
+  --color-fg: oklch(22% 0.040 var(--accent-hue));
+  /* primary text */
+  --color-fg-muted: oklch(44% 0.030 var(--accent-hue));
+  /* secondary text */
+  --color-fg-subtle: oklch(58% 0.025 var(--accent-hue));
+  /* hint text */
+  --color-fg-faint: oklch(72% 0.020 var(--accent-hue));
+  /* placeholder */
+  --color-fg-inverted: oklch(98.4% 0.010 var(--accent-hue));
+  /* on dark surfaces */
 
   /* Borders & dividers — tinted by --accent-hue */
   --color-border: oklch(89% 0.018 var(--accent-hue));
@@ -43,7 +54,8 @@
   --color-divider: oklch(91% 0.016 var(--accent-hue));
 
   /* Accents — electric violet, owned and unmistakable */
-  --color-accent: oklch(58% 0.225 290);          /* #6A4DE6-ish */
+  --color-accent: oklch(58% 0.225 290);
+  /* #6A4DE6-ish */
   --color-accent-hover: oklch(52% 0.235 290);
   --color-accent-soft: oklch(94% 0.045 290);
   --color-accent-fg: oklch(99% 0.004 280);
@@ -77,11 +89,11 @@
      baseline so highlighting reads as "this is a string / keyword / comment"
      without breaking the editorial monochrome feel. */
   --color-syntax-comment: oklch(58% 0.030 265);
-  --color-syntax-string:  oklch(48% 0.090 25);
+  --color-syntax-string: oklch(48% 0.090 25);
   --color-syntax-keyword: oklch(40% 0.110 305);
-  --color-syntax-number:  oklch(45% 0.110 95);
-  --color-syntax-type:    oklch(40% 0.090 200);
-  --color-syntax-fn:      oklch(40% 0.095 245);
+  --color-syntax-number: oklch(45% 0.110 95);
+  --color-syntax-type: oklch(40% 0.090 200);
+  --color-syntax-fn: oklch(40% 0.095 245);
   --color-kbd-bg: oklch(97% 0.008 280);
   --color-kbd-border: oklch(84% 0.014 270);
   /* Canvas behind rendered HTML previews / matplotlib figures. Stays paper-
@@ -99,17 +111,28 @@
   --font-mono: 'Geist Mono Variable', 'Geist Mono', 'JetBrains Mono', ui-monospace, 'SF Mono', Consolas, monospace;
 
   /* Type scale — modular, generous */
-  --text-xs: 0.75rem;       /* 12 */
-  --text-sm: 0.8125rem;     /* 13 */
-  --text-base: 0.9375rem;   /* 15 — body */
-  --text-md: 1rem;          /* 16 */
-  --text-lg: 1.125rem;      /* 18 */
-  --text-xl: 1.375rem;      /* 22 */
-  --text-2xl: 1.75rem;      /* 28 */
-  --text-3xl: 2.125rem;     /* 34 */
-  --text-4xl: 2.75rem;      /* 44 */
-  --text-5xl: 3.5rem;       /* 56 */
-  --text-6xl: 4.5rem;       /* 72 */
+  --text-xs: 0.75rem;
+  /* 12 */
+  --text-sm: 0.8125rem;
+  /* 13 */
+  --text-base: 0.9375rem;
+  /* 15 — body */
+  --text-md: 1rem;
+  /* 16 */
+  --text-lg: 1.125rem;
+  /* 18 */
+  --text-xl: 1.375rem;
+  /* 22 */
+  --text-2xl: 1.75rem;
+  /* 28 */
+  --text-3xl: 2.125rem;
+  /* 34 */
+  --text-4xl: 2.75rem;
+  /* 44 */
+  --text-5xl: 3.5rem;
+  /* 56 */
+  --text-6xl: 4.5rem;
+  /* 72 */
 
   --leading-tight: 1.1;
   --leading-snug: 1.25;
@@ -232,7 +255,8 @@
   --color-sidebar-border: oklch(87% 0.022 var(--accent-hue));
 
   /* ---------- LAYOUT --------------------------------------------------- */
-  --layout-sidebar-w: 17.5rem;        /* 280 */
+  --layout-sidebar-w: 17.5rem;
+  /* 280 */
   --layout-sidebar-w-collapsed: 3.5rem;
   --layout-topbar-h: 3.5rem;
   --layout-composer-max-w: 50rem;
@@ -250,21 +274,30 @@
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-left: env(safe-area-inset-left, 0px);
   --safe-right: env(safe-area-inset-right, 0px);
-  --tap-min: 2.75rem;                 /* 44 — minimum mobile touch target */
-  --layout-topbar-h-mobile: 3rem;     /* 48 — slim mobile app bar */
-  --layout-drawer-w: min(86vw, 22rem);/* nav slide-over: always leaves a scrim */
-  --layout-gutter-mobile: 1rem;       /* 16 — shared mobile content edge */
-  --layout-thread-gap: 2rem;          /* turn rhythm; → 1.5rem on phone below */
-  --layout-thread-bottom-gutter: 6rem;/* clears the sticky composer + safe area */
-  --text-chat-body: var(--text-base); /* chat body; → 16px on phone below */
+  --tap-min: 2.75rem;
+  /* 44 — minimum mobile touch target */
+  --layout-topbar-h-mobile: 3rem;
+  /* 48 — slim mobile app bar */
+  --layout-drawer-w: min(86vw, 22rem);
+  /* nav slide-over: always leaves a scrim */
+  --layout-gutter-mobile: 1rem;
+  /* 16 — shared mobile content edge */
+  --layout-thread-gap: 2rem;
+  /* turn rhythm; → 1.5rem on phone below */
+  --layout-thread-bottom-gutter: 6rem;
+  /* clears the sticky composer + safe area */
+  --text-chat-body: var(--text-base);
+  /* chat body; → 16px on phone below */
 }
 
 /* Phone overrides (≤639px = the `phone` query). Touch-comfortable body + a
  * tighter turn rhythm; base/desktop values above are untouched. */
 @media (max-width: 639px) {
   :root {
-    --text-chat-body: 1rem;           /* 16 — comfortable + defeats iOS focus-zoom */
-    --layout-thread-gap: 1.5rem;      /* 24 — tighter turns on a small screen */
+    --text-chat-body: 1rem;
+    /* 16 — comfortable + defeats iOS focus-zoom */
+    --layout-thread-gap: 1.5rem;
+    /* 24 — tighter turns on a small screen */
   }
 }
 
@@ -288,7 +321,8 @@
  * Default "comfortable" uses the base tokens above. "cozy" overrides below.
  * ============================================================================ */
 :root[data-density="cozy"] {
-  --text-base: 0.875rem;          /* 14 — tighter body text */
+  --text-base: 0.875rem;
+  /* 14 — tighter body text */
   --leading-normal: 1.45;
   --leading-relaxed: 1.55;
   --space-3: 0.5rem;
@@ -305,18 +339,29 @@
  * FONT-SIZE SCALE — sm / md (default) / lg.
  * ============================================================================ */
 :root[data-fontsize="sm"] {
-  --text-xs: 0.6875rem;           /* 11 */
-  --text-sm: 0.75rem;             /* 12 */
-  --text-base: 0.8125rem;         /* 13 */
-  --text-md: 0.875rem;            /* 14 */
-  --text-lg: 1rem;                /* 16 */
+  --text-xs: 0.6875rem;
+  /* 11 */
+  --text-sm: 0.75rem;
+  /* 12 */
+  --text-base: 0.8125rem;
+  /* 13 */
+  --text-md: 0.875rem;
+  /* 14 */
+  --text-lg: 1rem;
+  /* 16 */
 }
+
 :root[data-fontsize="lg"] {
-  --text-xs: 0.8125rem;           /* 13 */
-  --text-sm: 0.875rem;            /* 14 */
-  --text-base: 1rem;              /* 16 */
-  --text-md: 1.0625rem;           /* 17 */
-  --text-lg: 1.25rem;             /* 20 */
+  --text-xs: 0.8125rem;
+  /* 13 */
+  --text-sm: 0.875rem;
+  /* 14 */
+  --text-base: 1rem;
+  /* 16 */
+  --text-md: 1.0625rem;
+  /* 17 */
+  --text-lg: 1.25rem;
+  /* 20 */
 }
 
 /* ============================================================================
@@ -326,9 +371,11 @@
 :root[data-font="inter"] {
   --font-sans: 'Inter Variable', 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
+
 :root[data-font="system"] {
   --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
 }
+
 :root[data-font="serif"] {
   --font-sans: 'Fraunces Variable', 'Fraunces', 'Iowan Old Style', Charter, ui-serif, Georgia, serif;
 }
@@ -338,7 +385,8 @@
  * Deep midnight indigo, porcelain ink, brighter violet.
  * ============================================================================ */
 .dark {
-  --color-bg: oklch(15% 0.025 var(--accent-hue));              /* deep tinted midnight */
+  --color-bg: oklch(15% 0.025 var(--accent-hue));
+  /* deep tinted midnight */
   --color-bg-muted: oklch(18% 0.025 var(--accent-hue));
   --color-surface: oklch(20% 0.030 var(--accent-hue));
   --color-surface-raised: oklch(23% 0.032 var(--accent-hue));
@@ -382,11 +430,11 @@
   --color-code-fg: oklch(90% 0.018 var(--accent-hue));
   /* §1.1 dark-mode syntax tones — same hue intent, brighter to read on dark. */
   --color-syntax-comment: oklch(60% 0.030 265);
-  --color-syntax-string:  oklch(80% 0.110 25);
+  --color-syntax-string: oklch(80% 0.110 25);
   --color-syntax-keyword: oklch(76% 0.140 305);
-  --color-syntax-number:  oklch(82% 0.140 95);
-  --color-syntax-type:    oklch(78% 0.110 200);
-  --color-syntax-fn:      oklch(78% 0.120 245);
+  --color-syntax-number: oklch(82% 0.140 95);
+  --color-syntax-type: oklch(78% 0.110 200);
+  --color-syntax-fn: oklch(78% 0.120 245);
   --color-kbd-bg: oklch(23% 0.030 275);
   --color-kbd-border: oklch(36% 0.035 275);
 
@@ -453,6 +501,7 @@
   --color-accent-soft: oklch(94% 0.045 290);
   --color-ring: oklch(58% 0.225 290 / 0.55);
 }
+
 .dark[data-accent="violet"] {
   --color-accent: oklch(72% 0.215 290);
   --color-accent-hover: oklch(78% 0.215 290);
@@ -468,6 +517,7 @@
   --color-accent-soft: oklch(94% 0.035 200);
   --color-ring: oklch(58% 0.130 200 / 0.55);
 }
+
 .dark[data-accent="lagoon"] {
   --color-accent: oklch(74% 0.130 200);
   --color-accent-hover: oklch(80% 0.130 200);
@@ -483,6 +533,7 @@
   --color-accent-soft: oklch(95% 0.040 40);
   --color-ring: oklch(62% 0.170 40 / 0.55);
 }
+
 .dark[data-accent="ember"] {
   --color-accent: oklch(74% 0.165 40);
   --color-accent-hover: oklch(80% 0.165 40);
@@ -498,6 +549,7 @@
   --color-accent-soft: oklch(94% 0.040 145);
   --color-ring: oklch(54% 0.125 145 / 0.55);
 }
+
 .dark[data-accent="moss"] {
   --color-accent: oklch(72% 0.130 145);
   --color-accent-hover: oklch(78% 0.130 145);
@@ -513,6 +565,7 @@
   --color-accent-soft: oklch(94% 0.045 260);
   --color-ring: oklch(54% 0.180 260 / 0.55);
 }
+
 .dark[data-accent="indigo"] {
   --color-accent: oklch(72% 0.165 260);
   --color-accent-hover: oklch(78% 0.165 260);
@@ -528,6 +581,7 @@
   --color-accent-soft: oklch(94% 0.045 5);
   --color-ring: oklch(60% 0.180 5 / 0.55);
 }
+
 .dark[data-accent="rose"] {
   --color-accent: oklch(74% 0.175 5);
   --color-accent-hover: oklch(80% 0.175 5);
@@ -576,6 +630,7 @@
   --color-sidebar-bg: oklch(98.5% 0 0);
   --color-sidebar-border: oklch(87% 0 0);
 }
+
 .dark[data-accent="mono"] {
   --color-accent: oklch(96% 0 0);
   --color-accent-hover: oklch(99% 0 0);

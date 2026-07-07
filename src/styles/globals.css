@@ -137,6 +137,7 @@
  * Global resets & base
  * ============================================================================ */
 @layer base {
+
   *,
   *::before,
   *::after {
@@ -192,15 +193,18 @@
     width: 10px;
     height: 10px;
   }
+
   *::-webkit-scrollbar-track {
     background: transparent;
   }
+
   *::-webkit-scrollbar-thumb {
     background: color-mix(in oklch, var(--color-fg-faint) 30%, transparent);
     border-radius: var(--radius-full);
     border: 2px solid transparent;
     background-clip: padding-box;
   }
+
   *::-webkit-scrollbar-thumb:hover {
     background: color-mix(in oklch, var(--color-fg-faint) 55%, transparent);
     background-clip: padding-box;
@@ -213,14 +217,22 @@
      editorial Fraunces serif is now OPT-IN via `.font-serif` (brand pages,
      wordmark) or the .prose-aurelia rule below (AI reply content), so picking a
      sans font actually makes the UI sans. */
-  h1, h2, h3, h4, h5, h6 {
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
     font-family: var(--font-sans);
     font-weight: 400;
     letter-spacing: var(--tracking-tight);
     color: var(--color-fg);
   }
 
-  code, kbd, pre, samp {
+  code,
+  kbd,
+  pre,
+  samp {
     font-family: var(--font-mono);
     font-size: 0.92em;
   }
@@ -230,64 +242,152 @@
  * Keyframes
  * ============================================================================ */
 @keyframes fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
 }
+
 @keyframes fade-out {
-  from { opacity: 1; }
-  to { opacity: 0; }
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+  }
 }
+
 @keyframes slide-up {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
+
 @keyframes slide-down {
-  from { opacity: 0; transform: translateY(-6px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
+
 @keyframes pop-in {
-  from { opacity: 0; transform: scale(0.96); }
-  to { opacity: 1; transform: scale(1); }
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
+
 @keyframes shimmer {
-  0% { background-position: -1000px 0; }
-  100% { background-position: 1000px 0; }
+  0% {
+    background-position: -1000px 0;
+  }
+
+  100% {
+    background-position: 1000px 0;
+  }
 }
+
 @keyframes typing {
-  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
-  30% { transform: translateY(-4px); opacity: 1; }
+
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.4;
+  }
+
+  30% {
+    transform: translateY(-4px);
+    opacity: 1;
+  }
 }
+
 @keyframes streaming-pulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.5; transform: scale(0.85); }
+
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 0.5;
+    transform: scale(0.85);
+  }
 }
+
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* Indeterminate progress bar (used by KB document processing status). */
 @keyframes indeterminate {
-  0%   { transform: translateX(-100%); }
-  100% { transform: translateX(400%); }
+  0% {
+    transform: translateX(-100%);
+  }
+
+  100% {
+    transform: translateX(400%);
+  }
 }
 
 /* §4.20 gentle "scroll down" cue between the draw composer and the gallery.
    prefers-reduced-motion zeroes it (static chevron). */
 @keyframes bob {
-  0%, 100% { transform: translateY(0); }
-  50%      { transform: translateY(4px); }
+
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+
+  50% {
+    transform: translateY(4px);
+  }
 }
 
 /* Jump-to-message flash (content search → scroll to a specific message). A brief
  * accent wash around the target row so the eye lands on it after the scroll. */
 @keyframes msg-jump-flash {
-  0%, 100% { background-color: transparent; box-shadow: 0 0 0 0 transparent; }
-  12%      { background-color: var(--color-accent-soft); box-shadow: 0 0 0 6px var(--color-accent-soft); }
+
+  0%,
+  100% {
+    background-color: transparent;
+    box-shadow: 0 0 0 0 transparent;
+  }
+
+  12% {
+    background-color: var(--color-accent-soft);
+    box-shadow: 0 0 0 6px var(--color-accent-soft);
+  }
 }
+
 .msg-jump-highlight {
   border-radius: var(--radius-lg);
   animation: msg-jump-flash 2.2s var(--ease-out);
 }
+
 @media (prefers-reduced-motion: reduce) {
   .msg-jump-highlight {
     animation: none;
@@ -298,43 +398,111 @@
 
 /* Soft enter for new list items / messages. Respects prefers-reduced-motion. */
 @keyframes message-in {
-  from { opacity: 0; transform: translateY(4px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* Landing capability scenes (§ welcome fx) — token-drawn living illustrations.
    All zeroed by the global prefers-reduced-motion rule (static compositions). */
 @keyframes fx-write {
-  0%        { transform: scaleX(0); }
-  12%, 82%  { transform: scaleX(1); }
-  92%, 100% { transform: scaleX(0); }
+  0% {
+    transform: scaleX(0);
+  }
+
+  12%,
+  82% {
+    transform: scaleX(1);
+  }
+
+  92%,
+  100% {
+    transform: scaleX(0);
+  }
 }
+
 @keyframes fx-caret {
-  0%, 100% { opacity: 1; }
-  50%      { opacity: 0; }
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0;
+  }
 }
+
 @keyframes fx-bob {
-  0%, 100% { transform: translateY(0); }
-  50%      { transform: translateY(-5px); }
+
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+
+  50% {
+    transform: translateY(-5px);
+  }
 }
+
 @keyframes fx-pulse {
-  0%, 100% { transform: scale(1); opacity: 1; }
-  50%      { transform: scale(1.25); opacity: 0.75; }
+
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+
+  50% {
+    transform: scale(1.25);
+    opacity: 0.75;
+  }
 }
+
 @keyframes fx-scan {
-  0%, 12%   { transform: translateY(0); opacity: 0; }
-  18%       { opacity: 1; }
-  82%       { opacity: 1; }
-  88%, 100% { transform: translateY(400%); opacity: 0; }
+
+  0%,
+  12% {
+    transform: translateY(0);
+    opacity: 0;
+  }
+
+  18% {
+    opacity: 1;
+  }
+
+  82% {
+    opacity: 1;
+  }
+
+  88%,
+  100% {
+    transform: translateY(400%);
+    opacity: 0;
+  }
 }
 
 /* Route/page transition (RouteFade) — a gentle fade-up on navigation. No fill
    mode so no transform lingers after it ends (avoids a stray containing block).
    The global prefers-reduced-motion rule zeroes it. */
 @keyframes page-enter {
-  from { opacity: 0; transform: translateY(6px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
+
 .page-enter {
   animation: page-enter var(--duration-base) var(--ease-out);
 }
@@ -343,12 +511,16 @@
    copies of the row; translating it -50% lands exactly on the seam, so the loop
    is seamless. Pauses on hover. prefers-reduced-motion zeroes it (static row). */
 @keyframes marquee {
-  to { transform: translateX(-50%); }
+  to {
+    transform: translateX(-50%);
+  }
 }
+
 .marquee-track {
   animation: marquee 36s linear infinite;
   will-change: transform;
 }
+
 .marquee-group:hover .marquee-track {
   animation-play-state: paused;
 }
@@ -363,50 +535,161 @@
 /* Inline split-panel enter (HTML preview drawer on desktop). Width appears
    with the flex re-layout; the content glides in instead of jump-cutting. */
 @keyframes panel-in {
-  from { opacity: 0; transform: translateX(16px); }
-  to   { opacity: 1; transform: translateX(0); }
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
 /* Sheet slide animations */
-@keyframes sheet-in-l { from { transform: translateX(-100%); } to { transform: translateX(0); } }
-@keyframes sheet-out-l { from { transform: translateX(0); } to { transform: translateX(-100%); } }
-@keyframes sheet-in-r { from { transform: translateX(100%); } to { transform: translateX(0); } }
-@keyframes sheet-out-r { from { transform: translateX(0); } to { transform: translateX(100%); } }
-@keyframes sheet-in-t { from { transform: translateY(-100%); } to { transform: translateY(0); } }
-@keyframes sheet-out-t { from { transform: translateY(0); } to { transform: translateY(-100%); } }
-@keyframes sheet-in-b { from { transform: translateY(100%); } to { transform: translateY(0); } }
-@keyframes sheet-out-b { from { transform: translateY(0); } to { transform: translateY(100%); } }
+@keyframes sheet-in-l {
+  from {
+    transform: translateX(-100%);
+  }
+
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes sheet-out-l {
+  from {
+    transform: translateX(0);
+  }
+
+  to {
+    transform: translateX(-100%);
+  }
+}
+
+@keyframes sheet-in-r {
+  from {
+    transform: translateX(100%);
+  }
+
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes sheet-out-r {
+  from {
+    transform: translateX(0);
+  }
+
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes sheet-in-t {
+  from {
+    transform: translateY(-100%);
+  }
+
+  to {
+    transform: translateY(0);
+  }
+}
+
+@keyframes sheet-out-t {
+  from {
+    transform: translateY(0);
+  }
+
+  to {
+    transform: translateY(-100%);
+  }
+}
+
+@keyframes sheet-in-b {
+  from {
+    transform: translateY(100%);
+  }
+
+  to {
+    transform: translateY(0);
+  }
+}
+
+@keyframes sheet-out-b {
+  from {
+    transform: translateY(0);
+  }
+
+  to {
+    transform: translateY(100%);
+  }
+}
 
 /* Welcome wizard: a slow accent-tinted aurora on the intro panel, and a soft
    per-step content enter. Both are disabled by the prefers-reduced-motion rule
    below (which forces all animations to ~0ms). */
 @keyframes welcome-aurora {
-  0%   { transform: translate3d(-3%, -2%, 0) scale(1.05); opacity: 0.85; }
-  50%  { transform: translate3d(3%, 2%, 0) scale(1.18); opacity: 1; }
-  100% { transform: translate3d(-3%, -2%, 0) scale(1.05); opacity: 0.85; }
+  0% {
+    transform: translate3d(-3%, -2%, 0) scale(1.05);
+    opacity: 0.85;
+  }
+
+  50% {
+    transform: translate3d(3%, 2%, 0) scale(1.18);
+    opacity: 1;
+  }
+
+  100% {
+    transform: translate3d(-3%, -2%, 0) scale(1.05);
+    opacity: 0.85;
+  }
 }
+
 @keyframes welcome-step {
-  from { opacity: 0; transform: translateY(8px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
+
 /* Welcome wizard exit — on finish/skip the card zooms slightly toward the
    viewer and fades, so it reads as "stepping through into the app" while the
    backdrop clears to reveal the page. */
 @keyframes welcome-exit {
-  from { opacity: 1; transform: scale(1); }
-  to   { opacity: 0; transform: scale(1.06); }
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  to {
+    opacity: 0;
+    transform: scale(1.06);
+  }
 }
 
 /* ============================================================================
  * Utilities
  * ============================================================================ */
 @layer utilities {
-  .text-balance { text-wrap: balance; }
-  .text-pretty { text-wrap: pretty; }
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  .text-pretty {
+    text-wrap: pretty;
+  }
 
   .grain {
     position: relative;
   }
+
   .grain::after {
     content: '';
     position: absolute;
@@ -421,11 +704,15 @@
     scrollbar-width: none;
     -ms-overflow-style: none;
   }
+
   .scrollbar-none::-webkit-scrollbar {
     display: none;
   }
 
-  .scrollbar-thin::-webkit-scrollbar { width: 6px; height: 6px; }
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
 
   /* Auto-hide scrollbar — invisible until the container is hovered, with a
      stable gutter so content never shifts when it appears. `scrollbar-color`
@@ -454,6 +741,7 @@
     mask-image: linear-gradient(to bottom, black 70%, transparent 100%);
     -webkit-mask-image: linear-gradient(to bottom, black 70%, transparent 100%);
   }
+
   .mask-fade-top {
     mask-image: linear-gradient(to top, black 70%, transparent 100%);
     -webkit-mask-image: linear-gradient(to top, black 70%, transparent 100%);
@@ -490,7 +778,8 @@
      layer underneath stays the AA-readable carrier — this is a mask over real
      selectable text, never background-clip:text. */
   .ink-overlay {
-    --ink: 0; /* 0 = hidden (muted base shows), 1 = ink fully wicked in; GSAP scrubs it */
+    --ink: 0;
+    /* 0 = hidden (muted base shows), 1 = ink fully wicked in; GSAP scrubs it */
     -webkit-mask-image: linear-gradient(105deg, #000 0%, #000 38%, transparent 62%);
     mask-image: linear-gradient(105deg, #000 0%, #000 38%, transparent 62%);
     -webkit-mask-size: 320% 100%;
@@ -506,6 +795,7 @@
  * Reduced motion
  * ============================================================================ */
 @media (prefers-reduced-motion: reduce) {
+
   *,
   *::before,
   *::after {
@@ -527,19 +817,27 @@
   overflow-wrap: break-word;
   word-break: break-word;
 }
+
 /* Chat answers fill the message column (so the reply's right edge meets the user
  * bubble's), instead of the narrower editorial reading measure used elsewhere
  * (reasoning trace / inline / shared / admin keep the capped measure). The double
  * class outweighs the base `.prose-aurelia` max-width regardless of source order. */
-.prose-aurelia.prose-full { max-width: none; }
+.prose-aurelia.prose-full {
+  max-width: none;
+}
 
 /* Chat turn rhythm lives on a token (§ mobile redesign) so the phone @media block
  * can tighten it without a per-component utility. The message list drops its
  * `gap-8` utility in favour of this; cozy (below) still wins by specificity. */
-.chat-thread { gap: var(--layout-thread-gap); }
+.chat-thread {
+  gap: var(--layout-thread-gap);
+}
+
 /* Mobile chat reads at --text-chat-body (16px on phone, base size on desktop);
  * scoped to the live thread so admin/shared/desktop transcripts are unaffected. */
-.chat-thread .prose-full { font-size: var(--text-chat-body); }
+.chat-thread .prose-full {
+  font-size: var(--text-chat-body);
+}
 
 /* DENSITY → cozy actually compacts the chat. The base spacing is fixed (assorted
  * inline `my-*` margins + a 2rem inter-message gap), so the global density tokens
@@ -548,28 +846,86 @@
  * fully controls the prose rhythm (no margin-collapse surprises from the inline
  * `my-3`/`my-6` on lists/hr/tables). The `:root[data-density]` prefix outranks the
  * base rules and the Tailwind utilities regardless of source order. */
-:root[data-density="cozy"] .chat-thread { gap: 1.25rem; padding-top: 1.25rem; padding-bottom: 1.25rem; }
-:root[data-density="cozy"] .prose-aurelia > * { margin-bottom: 0; }
-:root[data-density="cozy"] .prose-aurelia > * + * { margin-top: 0.55em; }
-:root[data-density="cozy"] .prose-aurelia :is(h1, h2) { margin-top: 1em; }
-:root[data-density="cozy"] .prose-aurelia h3 { margin-top: 0.85em; }
-:root[data-density="cozy"] .prose-aurelia hr { margin: 0.9em 0; }
-:root[data-density="cozy"] .prose-aurelia li { margin-top: 0.2em; }
+:root[data-density="cozy"] .chat-thread {
+  gap: 1.25rem;
+  padding-top: 1.25rem;
+  padding-bottom: 1.25rem;
+}
 
-.prose-aurelia > * + * { margin-top: 1em; }
+:root[data-density="cozy"] .prose-aurelia>* {
+  margin-bottom: 0;
+}
+
+:root[data-density="cozy"] .prose-aurelia>*+* {
+  margin-top: 0.55em;
+}
+
+:root[data-density="cozy"] .prose-aurelia :is(h1, h2) {
+  margin-top: 1em;
+}
+
+:root[data-density="cozy"] .prose-aurelia h3 {
+  margin-top: 0.85em;
+}
+
+:root[data-density="cozy"] .prose-aurelia hr {
+  margin: 0.9em 0;
+}
+
+:root[data-density="cozy"] .prose-aurelia li {
+  margin-top: 0.2em;
+}
+
+.prose-aurelia>*+* {
+  margin-top: 1em;
+}
+
 /* Message content headings follow the base heading rule (= --font-sans), so
    they honour the Appearance → Font setting like the rest of the UI: sans by
    default, and Fraunces only when the user picks the "serif" font (which maps
    --font-sans to Fraunces). No explicit family override here. */
-.prose-aurelia h1 { font-size: var(--text-2xl); margin-top: 1.4em; }
-.prose-aurelia h2 { font-size: var(--text-xl); margin-top: 1.4em; }
-.prose-aurelia h3 { font-size: var(--text-lg); margin-top: 1.2em; }
-.prose-aurelia h4 { font-size: var(--text-md); font-family: var(--font-sans); font-weight: 600; }
-.prose-aurelia p { margin-top: 0.75em; }
-.prose-aurelia ul, .prose-aurelia ol { padding-left: 1.5em; }
-.prose-aurelia ul { list-style: disc; }
-.prose-aurelia ol { list-style: decimal; }
-.prose-aurelia li { margin-top: 0.35em; }
+.prose-aurelia h1 {
+  font-size: var(--text-2xl);
+  margin-top: 1.4em;
+}
+
+.prose-aurelia h2 {
+  font-size: var(--text-xl);
+  margin-top: 1.4em;
+}
+
+.prose-aurelia h3 {
+  font-size: var(--text-lg);
+  margin-top: 1.2em;
+}
+
+.prose-aurelia h4 {
+  font-size: var(--text-md);
+  font-family: var(--font-sans);
+  font-weight: 600;
+}
+
+.prose-aurelia p {
+  margin-top: 0.75em;
+}
+
+.prose-aurelia ul,
+.prose-aurelia ol {
+  padding-left: 1.5em;
+}
+
+.prose-aurelia ul {
+  list-style: disc;
+}
+
+.prose-aurelia ol {
+  list-style: decimal;
+}
+
+.prose-aurelia li {
+  margin-top: 0.35em;
+}
+
 .prose-aurelia a {
   color: var(--color-accent);
   text-decoration: underline;
@@ -578,9 +934,19 @@
   text-decoration-color: color-mix(in oklch, var(--color-accent) 50%, transparent);
   transition: text-decoration-color var(--duration-fast);
 }
-.prose-aurelia a:hover { text-decoration-color: var(--color-accent); }
-.prose-aurelia strong { font-weight: 600; color: var(--color-fg); }
-.prose-aurelia em { font-style: italic; }
+
+.prose-aurelia a:hover {
+  text-decoration-color: var(--color-accent);
+}
+
+.prose-aurelia strong {
+  font-weight: 600;
+  color: var(--color-fg);
+}
+
+.prose-aurelia em {
+  font-style: italic;
+}
 
 /* Inline citation markers (§ citations). A small sage superscript [n] placed
    right after the cited text; web sources link out, KB docs show a tooltip. */
@@ -591,16 +957,30 @@
   margin-left: 1px;
   vertical-align: super;
 }
-.prose-aurelia .cite-marker::before { content: "["; }
-.prose-aurelia .cite-marker::after { content: "]"; }
+
+.prose-aurelia .cite-marker::before {
+  content: "[";
+}
+
+.prose-aurelia .cite-marker::after {
+  content: "]";
+}
+
 .prose-aurelia .cite-marker a,
 .prose-aurelia .cite-marker.cite-doc {
   color: var(--color-secondary);
   text-decoration: none;
   cursor: pointer;
 }
-.prose-aurelia .cite-marker.cite-doc { cursor: help; }
-.prose-aurelia .cite-marker a:hover { color: var(--color-accent); text-decoration: underline; }
+
+.prose-aurelia .cite-marker.cite-doc {
+  cursor: help;
+}
+
+.prose-aurelia .cite-marker a:hover {
+  color: var(--color-accent);
+  text-decoration: underline;
+}
 
 /* Text-selection sub-conversation markers (§ inline threads). A sage tint +
    dotted underline marks a passage that has its own side conversation; click to
@@ -616,9 +996,11 @@ mark.inline-thread-mark {
   text-underline-offset: 3px;
   transition: background-color var(--duration-fast);
 }
+
 mark.inline-thread-mark:hover {
   background-color: color-mix(in oklch, var(--color-secondary) 26%, transparent);
 }
+
 .prose-aurelia code:not(pre code) {
   background: var(--color-code-bg);
   color: var(--color-code-fg);
@@ -627,6 +1009,7 @@ mark.inline-thread-mark:hover {
   font-size: 0.86em;
   border: 1px solid var(--color-border-subtle);
 }
+
 .prose-aurelia blockquote {
   border-left: 2px solid var(--color-border-strong);
   padding-left: 1em;
@@ -651,25 +1034,54 @@ mark.inline-thread-mark:hover {
   border-collapse: collapse;
   font-size: var(--text-sm);
 }
-.prose-aurelia th, .prose-aurelia td {
+
+.prose-aurelia th,
+.prose-aurelia td {
   text-align: left;
   padding: 0.5em 0.75em;
   border-bottom: 1px solid var(--color-divider);
 }
-.prose-aurelia th { font-weight: 600; color: var(--color-fg); background: var(--color-bg-muted); }
+
+.prose-aurelia th {
+  font-weight: 600;
+  color: var(--color-fg);
+  background: var(--color-bg-muted);
+}
 
 .prose-aurelia.prose-user {
   max-width: 100%;
   font-size: inherit;
   line-height: inherit;
 }
-.prose-aurelia.prose-user > *:first-child { margin-top: 0; }
-.prose-aurelia.prose-user > * + * { margin-top: 0.75em; }
-.prose-aurelia.prose-user h1 { font-size: var(--text-lg); margin-top: 0.9em; }
-.prose-aurelia.prose-user h2 { font-size: var(--text-md); margin-top: 0.85em; }
+
+.prose-aurelia.prose-user>*:first-child {
+  margin-top: 0;
+}
+
+.prose-aurelia.prose-user>*+* {
+  margin-top: 0.75em;
+}
+
+.prose-aurelia.prose-user h1 {
+  font-size: var(--text-lg);
+  margin-top: 0.9em;
+}
+
+.prose-aurelia.prose-user h2 {
+  font-size: var(--text-md);
+  margin-top: 0.85em;
+}
+
 .prose-aurelia.prose-user h3,
-.prose-aurelia.prose-user h4 { font-size: var(--text-base); margin-top: 0.75em; }
-.prose-aurelia.prose-user p { margin-top: 0.5em; }
+.prose-aurelia.prose-user h4 {
+  font-size: var(--text-base);
+  margin-top: 0.75em;
+}
+
+.prose-aurelia.prose-user p {
+  margin-top: 0.5em;
+}
+
 .prose-aurelia.prose-user pre,
 .prose-aurelia.prose-user table {
   max-width: 100%;
@@ -677,16 +1089,47 @@ mark.inline-thread-mark:hover {
 
 /* §1.1 syntax highlighting — the highlighter writes <span class="hl-…">; the
  * tokens here are defined in tokens.css so light/dark inherit correctly. */
-.hl-comment { color: var(--color-syntax-comment); font-style: italic; }
-.hl-string  { color: var(--color-syntax-string); }
-.hl-keyword { color: var(--color-syntax-keyword); font-weight: 600; }
-.hl-number  { color: var(--color-syntax-number); }
-.hl-type    { color: var(--color-syntax-type); }
-.hl-fn      { color: var(--color-syntax-fn); }
-.hl-attr    { color: var(--color-syntax-type); }
-.hl-variable { color: var(--color-syntax-fn); }
-.hl-inserted { color: var(--color-success); }
-.hl-deleted { color: var(--color-danger); }
+.hl-comment {
+  color: var(--color-syntax-comment);
+  font-style: italic;
+}
+
+.hl-string {
+  color: var(--color-syntax-string);
+}
+
+.hl-keyword {
+  color: var(--color-syntax-keyword);
+  font-weight: 600;
+}
+
+.hl-number {
+  color: var(--color-syntax-number);
+}
+
+.hl-type {
+  color: var(--color-syntax-type);
+}
+
+.hl-fn {
+  color: var(--color-syntax-fn);
+}
+
+.hl-attr {
+  color: var(--color-syntax-type);
+}
+
+.hl-variable {
+  color: var(--color-syntax-fn);
+}
+
+.hl-inserted {
+  color: var(--color-success);
+}
+
+.hl-deleted {
+  color: var(--color-danger);
+}
 
 /* Shiki final-render tokens. The worker uses Shiki's CSS-variable theme so
    token colors stay bound to Aurelia design tokens instead of bundled themes. */
