@@ -777,6 +777,25 @@
       "lead": "将用上传的归档永久覆盖本部署的所有记录。",
       "instruction": "输入 {{word}} 以确认。",
       "action": "替换全部"
+    },
+    "config": {
+      "export": {
+        "title": "导出配置",
+        "lead": "将本机的所有站点设置导出为 JSON 文件。敏感密钥会被隐去。",
+        "action": "导出配置 JSON",
+        "done": "配置已导出。"
+      },
+      "import": {
+        "title": "导入配置",
+        "lead": "应用上方导出的配置 JSON，将合并进当前配置——被隐去的密钥保持不变。",
+        "action": "导入配置 JSON…",
+        "invalid": "该文件不是有效的 Aurelia 配置导出文件。",
+        "done": "已应用配置（{{count}} 项设置）。",
+        "confirmTitle": "应用此配置？",
+        "confirmLead": "将用该文件中的值覆盖当前站点设置。",
+        "confirmDetail": "{{file}} —— 将应用 {{count}} 项设置。被隐去的密钥保持不变。",
+        "confirmAction": "应用配置"
+      }
     }
   },
   "modelTags": {

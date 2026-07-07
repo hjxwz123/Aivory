@@ -777,6 +777,25 @@
       "lead": "Permanently overwrites all records with the uploaded archive.",
       "instruction": "Type {{word}} to confirm.",
       "action": "Replace everything"
+    },
+    "config": {
+      "export": {
+        "title": "Export configuration",
+        "lead": "Download all site settings as a JSON file. Secrets are redacted.",
+        "action": "Export config JSON",
+        "done": "Configuration exported."
+      },
+      "import": {
+        "title": "Import configuration",
+        "lead": "Apply settings from a config JSON exported above. Merges into the current config — redacted secrets are left unchanged.",
+        "action": "Import config JSON…",
+        "invalid": "That file isn't a valid Aurelia configuration export.",
+        "done": "Configuration applied ({{count}} settings).",
+        "confirmTitle": "Apply this configuration?",
+        "confirmLead": "Overwrites the current site settings with the values from this file.",
+        "confirmDetail": "{{file}} — {{count}} settings will be applied. Redacted secrets stay unchanged.",
+        "confirmAction": "Apply configuration"
+      }
     }
   },
   "modelTags": {

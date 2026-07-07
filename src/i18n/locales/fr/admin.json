@@ -777,6 +777,25 @@
       "lead": "Écrase définitivement tous les enregistrements par l'archive.",
       "instruction": "Saisissez {{word}} pour confirmer.",
       "action": "Tout remplacer"
+    },
+    "config": {
+      "export": {
+        "title": "Exporter la configuration",
+        "lead": "Téléchargez tous les paramètres du site dans un fichier JSON. Les secrets sont masqués.",
+        "action": "Exporter la config JSON",
+        "done": "Configuration exportée."
+      },
+      "import": {
+        "title": "Importer la configuration",
+        "lead": "Appliquez les paramètres d'un JSON de config exporté ci-dessus. Fusionné dans la configuration actuelle — les secrets masqués restent inchangés.",
+        "action": "Importer la config JSON…",
+        "invalid": "Ce fichier n'est pas un export de configuration Aurelia valide.",
+        "done": "Configuration appliquée ({{count}} paramètres).",
+        "confirmTitle": "Appliquer cette configuration ?",
+        "confirmLead": "Écrase les paramètres actuels du site avec les valeurs de ce fichier.",
+        "confirmDetail": "{{file}} — {{count}} paramètres seront appliqués. Les secrets masqués restent inchangés.",
+        "confirmAction": "Appliquer la configuration"
+      }
     }
   },
   "modelTags": {

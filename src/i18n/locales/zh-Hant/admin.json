@@ -777,6 +777,25 @@
       "lead": "將用上傳的歸檔永久覆寫本部署的所有記錄。",
       "instruction": "輸入 {{word}} 以確認。",
       "action": "取代全部"
+    },
+    "config": {
+      "export": {
+        "title": "匯出設定",
+        "lead": "將本機的所有站台設定匯出為 JSON 檔案。敏感密鑰會被隱藏。",
+        "action": "匯出設定 JSON",
+        "done": "設定已匯出。"
+      },
+      "import": {
+        "title": "匯入設定",
+        "lead": "套用上方匯出的設定 JSON，會合併進目前的設定——被隱藏的密鑰維持不變。",
+        "action": "匯入設定 JSON…",
+        "invalid": "該檔案不是有效的 Aurelia 設定匯出檔。",
+        "done": "已套用設定（{{count}} 項）。",
+        "confirmTitle": "套用此設定？",
+        "confirmLead": "將以該檔案中的值覆寫目前的站台設定。",
+        "confirmDetail": "{{file}} —— 將套用 {{count}} 項設定。被隱藏的密鑰維持不變。",
+        "confirmAction": "套用設定"
+      }
     }
   },
   "modelTags": {
