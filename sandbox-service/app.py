@@ -1065,7 +1065,11 @@ def storage_gc(body: StorageGCBody):
     objects UNDER the two known prefixes, only those strictly older than cutoff,
     and NEVER an object whose timestamp couldn't be read (treated as 'keep')."""
     if not _storage_effective(body.storage):
-        raise HTTPException(status_code=400, detail="storage backend not configured")
+        # Nothing to prune. Go's Effective() returns true for "local" without
+        # seeing the sidecar's dir, so an admin who sets an archive TTL but never
+        # mounts SANDBOX_LOCAL_STORAGE_DIR would otherwise get a hard 400 logged
+        # every GC cycle — treat "not configured" as an empty sweep instead.
+        return {"deleted": 0, "scanned": 0, "freed_bytes": 0}
     max_age = int(body.max_age_seconds or 0)
     if max_age <= 0:
         # 0 / negative means "disabled" — never mass-delete on a misconfig.

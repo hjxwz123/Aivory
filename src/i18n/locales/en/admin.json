@@ -477,7 +477,7 @@
       "storageSection": "Object storage",
       "storageLead": "Where recycled sandbox workspaces are archived. Pick one; empty disables archiving.",
       "storageProvider": "Provider",
-      "storageProviderHint": "Local disk (default), S3-compatible (AWS, MinIO, etc.), or Aliyun OSS.",
+      "storageProviderHint": "Local disk, S3-compatible (AWS, MinIO, etc.), or Aliyun OSS.",
       "storageProviderPlaceholder": "Pick a provider",
       "storageNone": "Disabled",
       "storageS3": "Amazon S3 (or compatible)",
@@ -530,7 +530,7 @@
       "verifyModel": "Verify (auditor) model",
       "verifyModelHint": "Second model that fact-checks answers in Verify mode. None = Verify off.",
       "storageLocal": "Local disk (server volume)",
-      "storageLocalNote": "Zero-config persistence: recycled workspaces are archived to the sandbox server's mounted directory (SANDBOX_LOCAL_STORAGE_DIR) — no external object store needed. Single-node only; use S3/OSS for multi-replica deployments. MinerU document parsing still requires an object store.",
+      "storageLocalNote": "Archives recycled workspaces to the sandbox server's mounted directory (SANDBOX_LOCAL_STORAGE_DIR) — no external object store needed. Single-node only; MinerU document parsing still needs an object store.",
       "sandboxIdleTtl": "Idle recycle (seconds)",
       "sandboxIdleTtlHint": "Recycle a sandbox after this many idle seconds (its workspace is archived first). Empty = 1800 (30 min). Range 60–86400."
     }
