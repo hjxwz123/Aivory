@@ -14,7 +14,6 @@ import {
   FolderKanban,
   ChevronRight,
   BookText,
-  Wand2,
   ImagePlus,
   ShieldCheck,
   Layers,
@@ -676,7 +675,10 @@ function ConversationItem({
               onClick={() => {
                 remove(conversation.id)
                 setConfirm(false)
-                navigate('/chat')
+                // Only leave for the blank chat when we just deleted the
+                // conversation the user is actively viewing; deleting any other
+                // row should remove it in place without hijacking the route.
+                if (active) navigate('/chat')
                 toast.success(t('sidebar.deleted'))
               }}
             >
@@ -739,10 +741,6 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
         <DropdownMenuItem onClick={() => openSettings('account')}>
           <Settings size={13} aria-hidden />
           {t('settings:user.settings')}
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => openSettings('personalization')}>
-          <Wand2 size={13} aria-hidden />
-          {t('chat:userMenu.personalization', { defaultValue: 'Personalization' })}
         </DropdownMenuItem>
         <DropdownMenuItem onClick={() => navigate('/kb')}>
           <BookText size={13} aria-hidden />
