@@ -140,14 +140,18 @@ export default function SettingsLayout() {
           </DialogPrimitive.Close>
           {/* scroll-padding clears the pinned page header, so focus/anchor
               auto-scrolls land visible instead of underneath it. */}
-          <div className="relative min-h-0 min-w-0 flex-1 overflow-y-auto scrollbar-hover [scroll-padding-top:5.5rem]">
+          <div className="relative min-h-0 min-w-0 flex-1 overflow-y-auto scrollbar-hover [scroll-padding-top:7.5rem]">
             <div
               className={cn(
-                'px-5 sm:px-8 py-6 sm:py-8',
+                // No top padding here — the pinned header carries it instead.
+                // With wrapper padding above it, the header would first travel
+                // that distance before sticking; owning the padding makes it
+                // pinned from the very first scrolled pixel.
+                'px-5 sm:px-8 pb-6 sm:pb-8',
                 // Pin each settings page's <header> (title + lead) while the
-                // body scrolls under it. Pages without a header (About) are
-                // untouched.
+                // body scrolls under it. About has no header and pads itself.
                 '[&_header]:sticky [&_header]:top-0 [&_header]:z-10',
+                '[&_header]:pt-6 sm:[&_header]:pt-8',
                 '[&_header]:bg-[var(--color-surface)] [&_header]:pb-4',
                 '[&_header]:border-b [&_header]:border-[var(--color-divider)]',
               )}

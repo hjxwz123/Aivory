@@ -22,7 +22,9 @@ export default function About() {
   const { t } = useTranslation('settings')
 
   return (
-    <div className="mx-auto max-w-[60rem]">
+    // pt matches the wrapper padding the settings pane moved into pinned page
+    // headers — About has no header, so it pads itself.
+    <div className="mx-auto max-w-[60rem] pt-6 sm:pt-8">
       {/* Hero */}
       <div className="mb-10 flex flex-col items-start gap-4">
         <Logo size="lg" />
