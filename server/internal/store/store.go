@@ -589,14 +589,27 @@ func Seed(db *sql.DB, cfg config.Config) error {
 		"credits_per_usd": `0`,
 		// Global purchase links (§ credits / user groups): one tier-upgrade link
 		// and one permanent-credit top-up link, shared by every group.
-		"group_buy_url":         `""`,
-		"credit_buy_url":        `""`,
-		"sandbox_base_url":      `""`,
-		"sandbox_api_key":       `""`,
-		"moderation_keywords":   `[]`,
-		"moderation_model_id":   `""`,
-		"moderation_categories": `["politics","pornography","violence or gore","terrorism","illegal activity","hate speech","self-harm"]`,
-		"moderation_message":    `"Your message was blocked by content moderation. Please rephrase and try again."`,
+		"group_buy_url":    `""`,
+		"credit_buy_url":   `""`,
+		"sandbox_base_url": `""`,
+		"sandbox_api_key":  `""`,
+		// §4.5-F default sandbox archiving to the zero-dependency local backend so
+		// a fresh deployment persists /workspace across the idle reaper with no
+		// external object store. This is only meaningful because archives are keyed
+		// by the conversation id (§4.5-C G2 fix), so restore survives session
+		// recycle. Fail-safe: without SANDBOX_LOCAL_STORAGE_DIR mounted, `local` is
+		// inert (reaped = gone). GC below bounds growth. Insert-if-absent, so an
+		// admin who later picks s3/aliyun_oss (or "" to disable) is never overwritten.
+		"storage_provider": `"local"`,
+		// §4.5-A prune archived workspaces untouched for this many days so the
+		// default-on local store can't grow without bound. An active conversation
+		// re-archives (mtime bumps) each recycle, so only truly-abandoned ones age
+		// out. 0 / "" = keep forever.
+		"storage_archive_ttl_days": `30`,
+		"moderation_keywords":      `[]`,
+		"moderation_model_id":      `""`,
+		"moderation_categories":    `["politics","pornography","violence or gore","terrorism","illegal activity","hate speech","self-harm"]`,
+		"moderation_message":       `"Your message was blocked by content moderation. Please rephrase and try again."`,
 		// § announcement: a single global notice shown to users on load. image_url
 		// non-empty → image announcement (image left, text right). remember_dismiss
 		// false → re-show every visit; updated_at doubles as the dismiss version.

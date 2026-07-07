@@ -119,7 +119,10 @@ func sandboxClearAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	sb := d.Tools.Sandbox()
 	sid, _ := store.GetConvProviderStateKey(r.Context(), d.DB, convID, "sandbox_id")
 	if sid != "" && sb != nil {
-		_ = sb.Release(r.Context(), sid)
+		// Discard (not archive): a real purge. Pass convID so the sidecar also
+		// deletes the stable-key archive — otherwise §4.5-C G2 restore would
+		// resurrect every "cleared" file on the next code run.
+		_ = sb.ReleaseDiscard(r.Context(), sid, convID)
 		// Forget the session so the next python_execute provisions a fresh one.
 		_ = store.SetConvProviderStateKey(r.Context(), d.DB, convID, "sandbox_id", "")
 	}

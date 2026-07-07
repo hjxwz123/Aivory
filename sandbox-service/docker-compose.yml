@@ -82,11 +82,13 @@ services:
       SANDBOX_READ_ONLY_ROOTFS: "1"
       SANDBOX_WORKSPACE_SIZE: 512m
       # SANDBOX_DISK_SIZE: 1g
-      # §4.5 local archive backend: pick the `local` storage provider in admin
-      # settings and reaped /workspace tarballs are archived here (backed by the
-      # named volume below) — no S3/OSS/MinIO needed. Leave the provider unset for
-      # ephemeral "reaped = gone". Single-node only (a plain volume isn't shared
-      # across replicas); multi-replica deployments must use S3/OSS.
+      # §4.5-F zero-config workspace persistence: the admin `storage_provider`
+      # defaults to "local", so reaped /workspace tarballs are archived here (the
+      # named volume below) and RESTORED when the conversation runs code again —
+      # archives are keyed by conversation id, so they survive session recycle
+      # (§4.5-C G2). No S3/OSS/MinIO needed. Unset the provider (or drop the
+      # volume) for ephemeral "reaped = gone". Single-node only (a plain volume
+      # isn't shared across replicas); multi-replica deployments must use S3/OSS.
       SANDBOX_LOCAL_STORAGE_DIR: /var/lib/aurelia/sandbox-archives
       # F1: optional pinned seccomp profile for session containers (path must be
       # readable INSIDE this sidecar container — mount it and point here).

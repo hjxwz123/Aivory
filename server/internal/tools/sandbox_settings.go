@@ -177,8 +177,8 @@ func (s *settingsSandbox) settingString(key, fallback string) string {
 
 func (s *settingsSandbox) Enabled() bool { return s.backend().Enabled() }
 
-func (s *settingsSandbox) NewSession(ctx context.Context) (string, error) {
-	return s.backend().NewSession(ctx)
+func (s *settingsSandbox) NewSession(ctx context.Context, archiveKey string) (string, error) {
+	return s.backend().NewSession(ctx, archiveKey)
 }
 
 func (s *settingsSandbox) Exec(ctx context.Context, sessionID, code string) (*sandbox.Result, error) {
@@ -199,6 +199,10 @@ func (s *settingsSandbox) ListFiles(ctx context.Context, sessionID string) ([]sa
 
 func (s *settingsSandbox) Release(ctx context.Context, sessionID string) error {
 	return s.backend().Release(ctx, sessionID)
+}
+
+func (s *settingsSandbox) ReleaseDiscard(ctx context.Context, sessionID, archiveKey string) error {
+	return s.backend().ReleaseDiscard(ctx, sessionID, archiveKey)
 }
 
 func (s *settingsSandbox) PruneArchives(ctx context.Context, maxAge time.Duration) (int, error) {

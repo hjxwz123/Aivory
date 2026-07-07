@@ -106,10 +106,12 @@ services:
       SANDBOX_IDLE_TTL_CAP_SECONDS: ${SANDBOX_IDLE_TTL_CAP_SECONDS:-86400}
       SANDBOX_READ_ONLY_ROOTFS: "1"
       SANDBOX_WORKSPACE_SIZE: ${SANDBOX_WORKSPACE_SIZE:-512m}
-      # §4.5 local archive backend: pick the `local` storage provider in admin
-      # settings and reaped /workspace tarballs are archived to the named volume
-      # below — no S3/OSS/MinIO required. Single-node only (a plain volume isn't
-      # shared across replicas); multi-replica deployments must use S3/OSS.
+      # §4.5-F zero-config workspace persistence: the admin `storage_provider`
+      # defaults to "local", so reaped /workspace tarballs are archived to the
+      # named volume below and RESTORED when the conversation runs code again
+      # (archives are keyed by conversation id, so they survive session recycle,
+      # §4.5-C G2). No S3/OSS/MinIO required. Single-node only (a plain volume
+      # isn't shared across replicas); multi-replica deployments must use S3/OSS.
       SANDBOX_LOCAL_STORAGE_DIR: /var/lib/aurelia/sandbox-archives
     # Liveness: /healthz reports the sidecar can still reach the docker daemon.
     # No tools beyond python are in the image, so probe via urllib (non-2xx

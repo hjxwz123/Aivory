@@ -242,7 +242,7 @@ func (t *fetchImageTool) Execute(ctx context.Context, input []byte, tc *llm.Tool
 	unlock := lockConvSandbox(tc.ConvID)
 	sessionID, _ := store.GetConvProviderStateKey(ctx, tc.DB, tc.ConvID, "sandbox_id")
 	if sessionID == "" {
-		sid, err := t.sandbox.NewSession(ctx)
+		sid, err := t.sandbox.NewSession(ctx, tc.ConvID)
 		if err != nil {
 			unlock()
 			if t.logger != nil {
@@ -388,7 +388,7 @@ func (t *pythonExecuteTool) Execute(ctx context.Context, input []byte, tc *llm.T
 		sessionID, _ = store.GetConvProviderStateKey(ctx, tc.DB, tc.ConvID, "sandbox_id")
 	}
 	if sessionID == "" {
-		sid, err := t.sandbox.NewSession(ctx)
+		sid, err := t.sandbox.NewSession(ctx, tc.ConvID)
 		if err != nil {
 			if unlockConv != nil {
 				unlockConv()
@@ -541,7 +541,7 @@ func (t *pythonExecuteTool) Execute(ctx context.Context, input []byte, tc *llm.T
 				if cur != "" && cur != sessionID {
 					rebuilt = cur
 				} else {
-					sid2, sErr := t.sandbox.NewSession(ctx)
+					sid2, sErr := t.sandbox.NewSession(ctx, tc.ConvID)
 					if sErr != nil {
 						relock()
 						return "", nil, fmt.Errorf("sandbox session (rebuild): %w", sErr)
@@ -555,7 +555,7 @@ func (t *pythonExecuteTool) Execute(ctx context.Context, input []byte, tc *llm.T
 				}
 				relock()
 			} else {
-				sid2, sErr := t.sandbox.NewSession(ctx)
+				sid2, sErr := t.sandbox.NewSession(ctx, tc.ConvID)
 				if sErr != nil {
 					return "", nil, fmt.Errorf("sandbox session (rebuild): %w", sErr)
 				}

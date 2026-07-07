@@ -176,11 +176,11 @@ sidecar 启动时还会发现已有的 `aurelia.sandbox=1` 容器，因此 sidec
 
 | 方法 | 路径 | Body | 返回 |
 |---|---|---|---|
-| POST | `/sessions` | `{storage?, idle_ttl_sec?}` | `{session_id}` |
+| POST | `/sessions` | `{storage?, idle_ttl_sec?, archive_key?}` | `{session_id}` |
 | POST | `/exec` | `{session_id, code, timeout_ms?}` | `{stdout, stderr, exit_code, files[]}` |
 | POST | `/files` | `{session_id, path, data_base64}` | `{ok}` |
 | POST | `/files/get` | `{session_id, path}` | `{data_base64}` |
-| DELETE | `/sessions/{id}` | `{storage?}` | `{ok}` |
+| DELETE | `/sessions/{id}` | `{storage?, discard?, archive_key?}` | `{ok}` |
 | POST | `/storage/put` | `{key, data_base64, content_type, expires_in?, storage}` | `{provider, key, url, expires_in}` |
 | POST | `/storage/delete` | `{key, storage}` | `{ok, key}` |
 | GET | `/healthz` | - | `{ok, docker, image}` |
@@ -189,6 +189,6 @@ sidecar 启动时还会发现已有的 `aurelia.sandbox=1` 容器，因此 sidec
 
 `/storage/*` 是针对管理员配置对象存储桶的操作。Go 后端会在 `storage` 块中转发配置：`provider` 为 `s3` 或 `aliyun_oss`，并带上 `prefix` 与对应 provider 凭据。`boto3` / `oss2` 只有在实际使用对应后端时才会 lazy import。`/storage/put` 上传 base64 字节并返回预签名 GET URL（ttl 为 `expires_in` 或 1 小时，上限 24 小时）；`/storage/delete` 是幂等的，并拒绝删除配置 `prefix` 外的对象。
 
-当 `/sessions` 和 `DELETE /sessions/{id}` 请求携带 `storage` 块时，sidecar 会在 TTL 回收或显式销毁前，把 `/workspace` 归档到 `<prefix>/workspaces/<session_id>.tgz`，并在下一次用同一 id 创建 session 时恢复（设计 §4.5）。这些操作都是 best-effort：没有有效 `storage` 块时就是 no-op（回收即丢失），归档/恢复失败也不会让请求失败。
+当 `/sessions` 和 `DELETE /sessions/{id}` 请求携带 `storage` 块时，sidecar 会在 TTL 回收或显式销毁前把 `/workspace` 归档，并在下次创建 session 时恢复（设计 §4.5）。归档对象键用 `/sessions` 下发的 **`archive_key`（会话 id）**作为文件名 `<prefix>/workspaces/<archive_key>.tgz`——因为每次创建都是新的 session id，用稳定的 `archive_key` 才能**跨回收恢复**工作区（§4.5-C G2）；未下发 `archive_key` 时回退用 session id。`provider` 为 `local`（默认）/ `s3` / `aliyun_oss`。这些操作都是 best-effort：无有效 `storage` 块即 no-op（回收即丢失），归档/恢复失败也不会让请求失败。
 
 `files[]` 产物是本次执行期间代码写入 `/workspace/outputs/` 的文件，格式为 `{name, mime_type, data_base64}`。用户上传文件应通过 `/files` 写入 `/workspace/uploads/`，这也是 `python_execute` 工具描述中告诉模型使用的路径。

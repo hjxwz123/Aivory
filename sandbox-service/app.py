@@ -189,6 +189,14 @@ _session_storage: dict[str, dict] = {}
 # lost-on-restart model as _session_storage above. Guarded by `_state_lock`.
 _session_ttl: dict[str, int] = {}
 
+# session_id -> stable archive key (the Go side forwards the conversation id).
+# Workspace tarballs are keyed by THIS, not the ephemeral session id, so a
+# workspace survives session recycle (§4.5-C G2 fix): every create mints a fresh
+# session uuid, but the reaper archives — and the next create restores — under
+# the same stable key. Falls back to the session id when unset. Guarded by
+# `_state_lock`; same best-effort, lost-on-restart model as above.
+_session_archive_key: dict[str, str] = {}
+
 
 @dataclass
 class _SessionState:
@@ -382,6 +390,7 @@ def _forget(session_id: str) -> None:
         _last_used.pop(session_id, None)
         _session_storage.pop(session_id, None)
         _session_ttl.pop(session_id, None)
+        _session_archive_key.pop(session_id, None)
         _terminating.discard(session_id)
         state = _session_states.get(session_id)
         if state is not None and state.refs == 0:
@@ -422,6 +431,31 @@ def _remember_ttl(session_id: str, ttl: Optional[int]) -> None:
             _session_ttl[session_id] = ttl
         else:
             _session_ttl.pop(session_id, None)
+
+
+def _sanitize_archive_key(key: Optional[str]) -> Optional[str]:
+    """Accept a Go-forwarded archive key (a conversation id) only when it is safe
+    to use as an object-key / filename stem; else None so we fall back to keying
+    the archive by the session id. Bounds length + charset so it can't inject a
+    prefix/traversal into the storage key."""
+    if key and re.fullmatch(r"[A-Za-z0-9_-]{1,128}", key):
+        return key
+    return None
+
+
+def _remember_archive_key(session_id: str, key: Optional[str]) -> None:
+    with _state_lock:
+        if key:
+            _session_archive_key[session_id] = key
+        else:
+            _session_archive_key.pop(session_id, None)
+
+
+def _archive_stem(session_id: str) -> str:
+    """Object-key stem for this session's workspace tarball: the stable archive
+    key when the Go side forwarded one (survives recycle), else the session id."""
+    with _state_lock:
+        return _session_archive_key.get(session_id) or session_id
 
 
 def _count_live_sessions() -> int:
@@ -660,10 +694,18 @@ class CreateBody(BaseModel):
     # Admin-tunable idle-recycle TTL (seconds) forwarded by Go. Clamped sidecar
     # side to [1, IDLE_TTL_CAP_SECONDS]. None/0 => fall back to IDLE_TTL_SECONDS.
     idle_ttl_sec: Optional[int] = None
+    # Stable archive key (the conversation id) so the workspace tarball survives
+    # session recycle (§4.5-C G2). None => archive is keyed by the session id.
+    archive_key: Optional[str] = None
 
 
 class DeleteBody(BaseModel):
     storage: Optional[dict[str, Any]] = None
+    # Admin "clear sandbox": tear down WITHOUT archiving, and delete any existing
+    # archive under archive_key, so stable-key restore (§4.5-C G2) can't undo the
+    # purge. Default False keeps the normal archive-on-release behaviour.
+    discard: Optional[bool] = False
+    archive_key: Optional[str] = None
 
 
 class StoragePutBody(BaseModel):
@@ -772,6 +814,11 @@ def create_session(body: Optional[CreateBody] = Body(default=None)):
         # workspace for this session id from the bucket (best-effort; missing
         # archive or no storage → no-op). Remember the storage block so the
         # reaper / DELETE can archive it back later.
+        # §4.5-C G2: remember the stable archive key (conv id) BEFORE restore, so
+        # the workspace is restored from <archive_key>.tgz (survives recycle) and
+        # not from this fresh session id's (non-existent) archive.
+        if body is not None:
+            _remember_archive_key(session_id, _sanitize_archive_key(body.archive_key))
         if _storage_effective(storage):
             _restore_workspace(session_id, storage)
             _remember_storage(session_id, storage)
@@ -918,12 +965,19 @@ def delete_session(session_id: str, body: Optional[DeleteBody] = Body(default=No
     # L6: flag terminating BEFORE taking the lock so a racing /exec 404s fast
     # instead of waiting out the archive. _forget clears it; the finally is a
     # belt-and-braces clear if archive/rm raises before _forget runs.
+    discard = bool(body.discard) if body is not None else False
+    archive_key = body.archive_key if body is not None else None
     _set_terminating(session_id, True)
     try:
         with _session_lock(session_id):
-            # §4.5: archive /workspace before tearing the container down (best-
-            # effort; no-op without effective storage — dev: deleted = gone).
-            _archive_workspace(session_id, storage)
+            if discard:
+                # §4.5-F admin "clear": DON'T archive, and delete the existing
+                # archive so a later create can't restore the "cleared" workspace.
+                _purge_archive(session_id, storage, archive_key)
+            else:
+                # §4.5: archive /workspace before tearing the container down (best-
+                # effort; no-op without effective storage — dev: deleted = gone).
+                _archive_workspace(session_id, storage)
             _docker(["rm", "-f", _container(session_id)], timeout=30)
             _forget(session_id)
     finally:
@@ -1531,10 +1585,11 @@ def _is_not_found(provider: str, exc: Exception) -> bool:
 
 
 # --- Workspace archive / restore (§4.5) -------------------------------------
-def _workspace_archive_key(storage: dict, session_id: str) -> str:
-    """Object key for a session's workspace tarball:
-    <prefix>/workspaces/<session_id>.tgz."""
-    return _workspace_archive_prefix(storage) + f"{session_id}.tgz"
+def _workspace_archive_key(storage: dict, stem: str) -> str:
+    """Object key for a workspace tarball: <prefix>/workspaces/<stem>.tgz. `stem`
+    is the stable archive key (conversation id) when the Go side forwarded one,
+    else the session id — see _archive_stem."""
+    return _workspace_archive_prefix(storage) + f"{stem}.tgz"
 
 
 def _workspace_archive_prefix(storage: dict) -> str:
@@ -1650,7 +1705,7 @@ def _archive_workspace(session_id: str, storage: Optional[dict]) -> None:
             print(f"[sandbox] warning: tar of workspace {session_id} failed "
                   f"(rc={rc}): {stderr.decode(errors='replace')[:200]}")
             return
-        full_key = _workspace_archive_key(storage, session_id)
+        full_key = _workspace_archive_key(storage, _archive_stem(session_id))
         _storage_put_object(storage, full_key, bytes(buf), "application/gzip")
         print(f"[sandbox] archived workspace {session_id} -> {full_key} "
               f"({len(buf)} bytes)")
@@ -1658,6 +1713,23 @@ def _archive_workspace(session_id: str, storage: Optional[dict]) -> None:
         print(f"[sandbox] warning: archive of {session_id} failed: {exc.detail}")
     except Exception as exc:  # noqa: BLE001 - archive is best-effort
         print(f"[sandbox] warning: archive of {session_id} failed: {exc}")
+
+
+def _purge_archive(session_id: str, storage: Optional[dict], archive_key: Optional[str]) -> None:
+    """Best-effort: delete this session's workspace tarball so an admin "clear"
+    is a real purge that stable-key restore (§4.5-C G2) can't undo. Prefers the
+    forwarded archive_key (works even if the session was already reaped and its
+    remembered key is gone); falls back to the session's stem. Never raises."""
+    if not _storage_effective(storage):
+        return
+    stem = _sanitize_archive_key(archive_key) or _archive_stem(session_id)
+    try:
+        _storage_delete_object(storage, _workspace_archive_key(storage, stem))
+        print(f"[sandbox] purged workspace archive (key={stem})")
+    except HTTPException as exc:
+        print(f"[sandbox] warning: purge archive for {session_id} failed: {exc.detail}")
+    except Exception as exc:  # noqa: BLE001 - purge is best-effort
+        print(f"[sandbox] warning: purge archive for {session_id} failed: {exc}")
 
 
 def _restore_workspace(session_id: str, storage: Optional[dict]) -> None:
@@ -1668,7 +1740,7 @@ def _restore_workspace(session_id: str, storage: Optional[dict]) -> None:
         return
     name = _container(session_id)
     try:
-        full_key = _workspace_archive_key(storage, session_id)
+        full_key = _workspace_archive_key(storage, _archive_stem(session_id))
         # Bound the download (an oversized/poisoned archive can't OOM the sidecar)
         # and extract with --no-same-owner so the archive can't impose ownership.
         # Path/symlink escape is contained by the read-only rootfs + the bounded

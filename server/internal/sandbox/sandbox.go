@@ -91,10 +91,13 @@ type Service interface {
 	// Enabled reports whether a real backend is configured. When false the
 	// tool falls back to its safe-mode evaluator so dev stays usable.
 	Enabled() bool
-	// NewSession provisions a fresh sandbox with a persistent /workspace and
-	// returns its id. The id is stored on the conversation (provider_state)
-	// so subsequent calls reuse the same filesystem (§4.5).
-	NewSession(ctx context.Context) (string, error)
+	// NewSession provisions a fresh sandbox session and returns its id (stored on
+	// the conversation's provider_state). archiveKey is a STABLE key (the
+	// conversation id) under which /workspace is archived and restored, so the
+	// filesystem survives session recycle even though each session gets a fresh
+	// id (§4.5-C G2). Pass "" to key the archive by the session id (no
+	// cross-recycle persistence).
+	NewSession(ctx context.Context, archiveKey string) (string, error)
 	// Exec runs code in the given session and returns stdout/stderr + any
 	// files written to /workspace/outputs.
 	Exec(ctx context.Context, sessionID, code string) (*Result, error)
@@ -110,7 +113,14 @@ type Service interface {
 	ListFiles(ctx context.Context, sessionID string) ([]SandboxFile, error)
 	// Release tears down a session deliberately (the user closed the
 	// conversation, or compaction archived its workspace). Idempotent.
+	// It ARCHIVES /workspace first, so a later session for the same conversation
+	// restores it (§4.5-C G2).
 	Release(ctx context.Context, sessionID string) error
+	// ReleaseDiscard tears down a session WITHOUT archiving, and also deletes the
+	// existing archive under archiveKey (the conversation id) — a real purge for
+	// the admin "clear sandbox" control, which stable-key restore would otherwise
+	// silently undo. Idempotent. archiveKey "" only skips the archive.
+	ReleaseDiscard(ctx context.Context, sessionID, archiveKey string) error
 	// PruneArchives deletes archived workspace tarballs older than maxAge from
 	// the configured object store, returning how many were removed. A no-op
 	// returning (0, nil) when no storage backend is configured or maxAge<=0 —
@@ -236,7 +246,7 @@ func (s *HTTPSandbox) doMethod(ctx context.Context, method, path string, payload
 }
 
 // NewSession provisions a fresh sandbox session.
-func (s *HTTPSandbox) NewSession(ctx context.Context) (string, error) {
+func (s *HTTPSandbox) NewSession(ctx context.Context, archiveKey string) (string, error) {
 	var res struct {
 		SessionID string `json:"session_id"`
 	}
@@ -246,6 +256,9 @@ func (s *HTTPSandbox) NewSession(ctx context.Context) (string, error) {
 	}
 	if s.IdleTTL > 0 {
 		payload["idle_ttl_sec"] = int(s.IdleTTL.Seconds())
+	}
+	if archiveKey != "" {
+		payload["archive_key"] = archiveKey
 	}
 	if err := s.do(ctx, "/sessions", payload, &res); err != nil {
 		return "", err
@@ -343,6 +356,23 @@ func (s *HTTPSandbox) Release(ctx context.Context, sessionID string) error {
 	payload := map[string]any{}
 	if s.Storage != nil && s.Storage.Effective() {
 		payload["storage"] = s.Storage
+	}
+	return s.doMethod(ctx, "DELETE", "/sessions/"+sessionID, payload, nil)
+}
+
+// ReleaseDiscard deletes a session without archiving /workspace, and deletes any
+// existing archive keyed by archiveKey so a stable-key restore (§4.5-C G2)
+// can't resurrect the "cleared" workspace. Idempotent.
+func (s *HTTPSandbox) ReleaseDiscard(ctx context.Context, sessionID, archiveKey string) error {
+	if sessionID == "" {
+		return nil
+	}
+	payload := map[string]any{"discard": true}
+	if s.Storage != nil && s.Storage.Effective() {
+		payload["storage"] = s.Storage
+	}
+	if archiveKey != "" {
+		payload["archive_key"] = archiveKey
 	}
 	return s.doMethod(ctx, "DELETE", "/sessions/"+sessionID, payload, nil)
 }
