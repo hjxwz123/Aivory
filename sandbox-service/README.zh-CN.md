@@ -156,7 +156,7 @@ curl -s -XPOST "$SANDBOX_URL/exec" \
 | `SANDBOX_MAX_STORAGE_BODY_BYTES` | `314572800` | `/storage/put` body 大小上限（RAG 文档上传远大于保护 `/exec`/`/files` 的 F5 上限）。300 MiB。 |
 | `SANDBOX_LOCAL_STORAGE_DIR` | _空_ | `local` 归档后端目录（§4.5-F）。设置并挂载为卷后，`local` provider 把 `/workspace` tarball 归档到这里——0 配置持久化，无需 S3/OSS/MinIO。留空则 `local` 不生效（reaped = gone）。**仅单节点**（普通卷不跨副本共享）；MinerU 文档解析仍需对象存储（本机文件无预签名 URL）。仅 operator env，绝不由管理员/请求下发——sidecar 以 root + docker.sock 运行，让调用方选路径即主机写入面。 |
 
-> **存储 provider**：下发的 `storage.provider` 为 `local`（默认）/ `s3` / `aliyun_oss` / 空。**MinIO / 任意 S3 兼容**：选 `s3` 并填 `storage.s3_endpoint`——自定义 endpoint 会自动切 path-style + SigV4，无需额外开关。
+> **存储 provider**：下发的 `storage.provider` 为 `local` / `s3` / `aliyun_oss` / 空。**MinIO / 任意 S3 兼容**：选 `s3` 并填 `storage.s3_endpoint`——自定义 endpoint 会自动切 path-style + SigV4，无需额外开关。
 
 ## 安全姿态（开发级）
 

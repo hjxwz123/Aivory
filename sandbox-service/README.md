@@ -233,7 +233,7 @@ You should get `stdout: "rows 3\n"`, `exit_code: 0`, and one file `p.png`
 | `SANDBOX_MAX_STORAGE_BODY_BYTES` | `314572800` | body-size ceiling for `/storage/put` (RAG document uploads dwarf the F5 cap that guards `/exec`/`/files`). 300 MiB. |
 | `SANDBOX_LOCAL_STORAGE_DIR` | _(empty)_ | directory for the `local` archive backend (§4.5-F). When set (mount it as a volume), the `local` storage provider archives `/workspace` tarballs here — zero-config persistence, no S3/OSS/MinIO needed. Empty = `local` is inert (reaped = gone). **Single-node only** (a plain volume isn't shared across replicas); MinerU document parsing still needs an object store (no presigned URL for local files). Operator env, never admin/forwarded — the sidecar is root+docker.sock, so a caller-chosen path would be a host-write vector. |
 
-> **Storage providers.** The forwarded `storage.provider` is one of `local` (default), `s3`, `aliyun_oss`, or empty. **MinIO / any S3-compatible store**: pick `s3` and set `storage.s3_endpoint` — a custom endpoint auto-selects path-style addressing + SigV4, so it works with no extra flags.
+> **Storage providers.** The forwarded `storage.provider` is one of `local`, `s3`, `aliyun_oss`, or empty. **MinIO / any S3-compatible store**: pick `s3` and set `storage.s3_endpoint` — a custom endpoint auto-selects path-style addressing + SigV4, so it works with no extra flags.
 
 ## Security posture (dev-grade)
 
