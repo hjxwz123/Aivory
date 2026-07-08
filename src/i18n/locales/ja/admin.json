@@ -13,6 +13,7 @@
     "moveUp": "上に移動",
     "moveDown": "下に移動",
     "cancel": "キャンセル",
+    "close": "閉じる",
     "nameExists": "同じ名前のレコードが既に存在します。"
   },
   "icon": {
@@ -77,6 +78,9 @@
     },
     "fields": {
       "channel": "チャネル",
+      "fallbackChannel": "フォールバックチャネル",
+      "fallbackChannelHint": "プライマリチャネルのリクエストが失敗したとき、ユーザーにエラーが表示される前に自動で再試行します。プライマリと同じタイプ・フォーマットが必須で、URL とキーのみが異なります。省略可。",
+      "fallbackNone": "なし",
       "kind": "種類",
       "label": "表示ラベル",
       "requestId": "request_id（APIに送信）",
@@ -345,6 +349,7 @@
     "table": {
       "user": "ユーザー",
       "model": "モデル",
+      "channel": "チャネル",
       "purpose": "目的",
       "in": "入力",
       "out": "出力",
@@ -381,14 +386,23 @@
       "user": "ユーザー",
       "userPlaceholder": "メールまたは ID",
       "model": "モデル",
-      "allModels": "すべてのモデル"
+      "allModels": "すべてのモデル",
+      "status": "ステータス"
     },
     "deleteConfirm": {
       "title": "これらの利用記録を削除しますか？",
       "body": "現在のフィルターに一致する {{count}} 件を完全に削除します。元に戻せません。",
       "action": "削除"
     },
-    "workspaceTag": "WS"
+    "workspaceTag": "WS",
+    "status": {
+      "all": "すべて",
+      "errorsOnly": "エラーのみ"
+    },
+    "fallbackTag": "フォールバック",
+    "fallbackTitle": "モデルのフォールバックチャネルで応答",
+    "errorDetail": { "title": "アップストリームエラー", "view": "エラー詳細を表示", "none": "このリクエストにはエラー詳細が記録されていません。" },
+    "statusError": "エラー"
   },
   "documents": {
     "title": "ドキュメント",
@@ -406,10 +420,7 @@
     "ragDynamicTopk": "動的 Top-K(類似度ベース)",
     "ragDynamicTopkHint": "固定数ではなく、類似度がしきい値以上のチャンクをすべて注入します。",
     "ragSimThreshold": "類似度しきい値(0–1)",
-    "ragSimThresholdHint": "コサイン類似度の下限。これ以上のチャンクを注入します。",
-    "preflightSection": "クレジット事前チェック",
-    "preflightLead": "クレジット課金のターンでは、生成前にリクエストサイズを見積もり、残高不足なら拒否します。",
-    "preflightEnabled": "見積もり、支払えないリクエストをブロック"
+    "ragSimThresholdHint": "コサイン類似度の下限。これ以上のチャンクを注入します。"
   },
   "tools": {
     "title": "ツール",
@@ -449,6 +460,8 @@
       "registerIpDailyLimitHint": "同一 IP アドレスが 1 日に作成できるアカウント数の上限。0 = 無制限。",
       "dailyMessageLimit": "1日あたりのメッセージ上限",
       "dailyImageLimit": "1日あたりの画像上限",
+      "preflightLead": "クレジット課金のターンでは、生成前にリクエストサイズを見積もり、残高不足なら拒否します。",
+      "preflightEnabled": "見積もり、支払えないリクエストをブロック",
       "emailVerificationRequired": "メール認証を必須にする",
       "emailVerificationHint": "新規登録では、サインイン前に6桁のコードでメールアドレスを認証する必要があります。",
       "domainWhitelist": "許可するメールドメイン",

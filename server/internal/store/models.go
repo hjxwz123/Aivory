@@ -117,19 +117,24 @@ type Channel struct {
 // Model mirrors design.md §2.3-B. Prices are per 1M tokens (chat/embedding)
 // or per image.
 type Model struct {
-	ID              string `json:"id"`
-	ChannelID       string `json:"channel_id"`
-	Kind            string `json:"kind"`
-	RequestID       string `json:"request_id"`
-	Label           string `json:"label"`
-	Description     string `json:"description"`
-	Icon            string `json:"icon"`
-	Enabled         bool   `json:"enabled"`
-	SortOrder       int    `json:"sort_order"`
-	ToolMode        string `json:"tool_mode"`
-	Vision          bool   `json:"vision"`
-	Stream          bool   `json:"stream"`
-	ResearchEnabled bool   `json:"research_enabled"`
+	ID          string `json:"id"`
+	ChannelID   string `json:"channel_id"`
+	Kind        string `json:"kind"`
+	RequestID   string `json:"request_id"`
+	Label       string `json:"label"`
+	Description string `json:"description"`
+	Icon        string `json:"icon"`
+	// FallbackChannelID is the backup channel retried when a request on the
+	// primary channel fails (§fallback channel). '' = no fallback. The fallback
+	// channel is expected to match the primary's type/format — only the endpoint
+	// URL and API key differ.
+	FallbackChannelID string `json:"fallback_channel_id"`
+	Enabled           bool   `json:"enabled"`
+	SortOrder         int    `json:"sort_order"`
+	ToolMode          string `json:"tool_mode"`
+	Vision            bool   `json:"vision"`
+	Stream            bool   `json:"stream"`
+	ResearchEnabled   bool   `json:"research_enabled"`
 	// ResearchEnabledSet is an internal create-path marker: JSON booleans cannot
 	// distinguish omitted from explicit false once decoded into Model.
 	ResearchEnabledSet bool            `json:"-"`
@@ -384,6 +389,16 @@ type UsageLog struct {
 	// WorkspaceID attributes spend to a workspace conversation (§workspaces).
 	// '' = personal. The PAYER stays user_id (members burn their OWN quota).
 	WorkspaceID string `json:"workspace_id,omitempty"`
+	// ChannelID records which channel actually served the request (§fallback
+	// channel). Fallback is true when the model's backup channel was used because
+	// the primary failed. Status is "ok" | "error"; error requests are logged too
+	// so the admin usage page can count failures.
+	ChannelID string `json:"channel_id,omitempty"`
+	Fallback  bool   `json:"fallback,omitempty"`
+	Status    string `json:"status,omitempty"`
+	// Error is the upstream failure detail for status='error' rows (admin-only;
+	// may embed provider response bodies, so it is never returned to end users).
+	Error string `json:"-"`
 }
 
 // File — uploaded file metadata.

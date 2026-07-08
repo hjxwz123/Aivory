@@ -13,6 +13,7 @@
     "moveUp": "Move up",
     "moveDown": "Move down",
     "cancel": "Cancel",
+    "close": "Close",
     "nameExists": "A record with this name already exists."
   },
   "icon": {
@@ -77,6 +78,9 @@
     },
     "fields": {
       "channel": "Channel",
+      "fallbackChannel": "Fallback channel",
+      "fallbackChannelHint": "Retried automatically when a request on the primary channel fails, before the user sees an error. Must match the primary type & format — only the URL and key differ. Optional.",
+      "fallbackNone": "None",
       "kind": "Kind",
       "label": "Display label",
       "requestId": "request_id (sent to API)",
@@ -345,6 +349,7 @@
     "table": {
       "user": "User",
       "model": "Model",
+      "channel": "Channel",
       "purpose": "Purpose",
       "in": "In",
       "out": "Out",
@@ -381,14 +386,23 @@
       "user": "User",
       "userPlaceholder": "Email or ID",
       "model": "Model",
-      "allModels": "All models"
+      "allModels": "All models",
+      "status": "Status"
     },
     "deleteConfirm": {
       "title": "Delete these usage records?",
       "body": "This permanently deletes the {{count}} record(s) matching the current filter. This cannot be undone.",
       "action": "Delete"
     },
-    "workspaceTag": "WS"
+    "workspaceTag": "WS",
+    "fallbackTag": "Fallback",
+    "fallbackTitle": "Served by the model’s fallback channel",
+    "errorDetail": { "title": "Upstream error", "view": "View error detail", "none": "No error detail was recorded for this request." },
+    "statusError": "Error",
+    "status": {
+      "all": "All",
+      "errorsOnly": "Errors only"
+    }
   },
   "documents": {
     "title": "Documents",
@@ -406,10 +420,7 @@
     "ragDynamicTopk": "Dynamic Top-K (by similarity)",
     "ragDynamicTopkHint": "Instead of a fixed K, inject every retrieved chunk whose similarity clears the threshold.",
     "ragSimThreshold": "Similarity threshold (0–1)",
-    "ragSimThresholdHint": "Cosine-similarity cutoff. Chunks scoring at/above this are injected.",
-    "preflightSection": "Credit pre-flight",
-    "preflightLead": "For credit-charged turns, estimate the request size before generating and refuse if the user can't afford it.",
-    "preflightEnabled": "Estimate & block unaffordable requests"
+    "ragSimThresholdHint": "Cosine-similarity cutoff. Chunks scoring at/above this are injected."
   },
   "tools": {
     "title": "Tools",
@@ -449,6 +460,8 @@
       "registerIpDailyLimitHint": "Max accounts one IP address can create per day. 0 = unlimited.",
       "dailyMessageLimit": "Daily message limit",
       "dailyImageLimit": "Daily image limit",
+      "preflightLead": "For credit-charged turns, estimate the request size before generating and refuse if the user can't afford it.",
+      "preflightEnabled": "Estimate & block unaffordable requests",
       "emailVerificationRequired": "Require email verification",
       "emailVerificationHint": "New registrations must verify their email with a 6-digit code before signing in.",
       "domainWhitelist": "Allowed email domains",

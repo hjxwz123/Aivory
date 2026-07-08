@@ -13,6 +13,7 @@
     "moveUp": "上移",
     "moveDown": "下移",
     "cancel": "取消",
+    "close": "關閉",
     "nameExists": "已存在同名記錄。"
   },
   "icon": {
@@ -77,6 +78,9 @@
     },
     "fields": {
       "channel": "渠道",
+      "fallbackChannel": "備援渠道",
+      "fallbackChannelHint": "主渠道請求失敗時自動重試,在使用者看到錯誤前切換。型別與格式須與主渠道一致——僅 URL 與金鑰不同。可選。",
+      "fallbackNone": "無",
       "kind": "型別",
       "label": "顯示名",
       "requestId": "request_id (實際請求 ID)",
@@ -345,6 +349,7 @@
     "table": {
       "user": "使用者",
       "model": "模型",
+      "channel": "渠道",
       "purpose": "用途",
       "in": "輸入",
       "out": "輸出",
@@ -381,14 +386,23 @@
       "user": "使用者",
       "userPlaceholder": "電子郵件或 ID",
       "model": "模型",
-      "allModels": "全部模型"
+      "allModels": "全部模型",
+      "status": "狀態"
     },
     "deleteConfirm": {
       "title": "刪除這些用量記錄？",
       "body": "將永久刪除目前篩選條件下的 {{count}} 筆記錄。此操作無法復原。",
       "action": "刪除"
     },
-    "workspaceTag": "空間"
+    "workspaceTag": "空間",
+    "fallbackTag": "備援",
+    "fallbackTitle": "由該模型的備援渠道處理",
+    "errorDetail": { "title": "上游報錯", "view": "檢視報錯詳情", "none": "此請求未記錄報錯詳情。" },
+    "statusError": "錯誤",
+    "status": {
+      "all": "全部",
+      "errorsOnly": "僅錯誤"
+    }
   },
   "documents": {
     "title": "文件",
@@ -406,10 +420,7 @@
     "ragDynamicTopk": "動態 Top-K(按相似度)",
     "ragDynamicTopkHint": "不再固定數量,而是把相似度超過下方閾值的片段全部注入。",
     "ragSimThreshold": "相似度閾值(0–1)",
-    "ragSimThresholdHint": "餘弦相似度下限,達到或超過即注入。",
-    "preflightSection": "積分預檢",
-    "preflightLead": "對扣積分的對話,在生成前預估請求大小,餘額不足則拒絕回覆。",
-    "preflightEnabled": "預估並攔截餘額不足的請求"
+    "ragSimThresholdHint": "餘弦相似度下限,達到或超過即注入。"
   },
   "tools": {
     "title": "工具",
@@ -449,6 +460,8 @@
       "registerIpDailyLimitHint": "同一 IP 位址每天最多可建立的帳號數。0 = 不限制。",
       "dailyMessageLimit": "每日訊息上限",
       "dailyImageLimit": "每日圖片上限",
+      "preflightLead": "對扣積分的對話,在生成前預估請求大小,餘額不足則拒絕回覆。",
+      "preflightEnabled": "預估並攔截餘額不足的請求",
       "emailVerificationRequired": "要求郵箱驗證",
       "emailVerificationHint": "開啟後新註冊使用者需要輸入 6 位郵箱驗證碼才能登入。",
       "domainWhitelist": "允許註冊的郵箱域名",

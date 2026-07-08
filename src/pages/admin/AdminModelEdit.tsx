@@ -126,6 +126,16 @@ export default function AdminModelEdit() {
   const isOpenAIResponses = channel?.type === 'openai' && channel?.api_format === 'responses'
   const officialTools = draft?.official_tools ?? []
 
+  // §fallback channel: the backup must match the primary's type + api_format (the
+  // retry reuses the primary provider's wire format — only URL/key differ). Show
+  // compatible channels only, but always keep the current selection visible.
+  const fallbackOptions = channels.filter(
+    (c) =>
+      c.id !== draft?.channel_id &&
+      ((c.type === channel?.type && (c.api_format ?? '') === (channel?.api_format ?? '')) ||
+        c.id === draft?.fallback_channel_id),
+  )
+
   async function save() {
     if (!draft) return
     if (!draft.channel_id || !draft.label?.trim() || !draft.request_id?.trim()) {
@@ -199,12 +209,47 @@ export default function AdminModelEdit() {
             <h2 className="font-serif text-lg text-[var(--color-fg)]">{t('admin:models.sections.basic')}</h2>
             <div className="mt-4 grid grid-cols-2 gap-4">
               <Field label={t('admin:models.fields.channel')} htmlFor="m-ch">
-                <Select value={draft.channel_id ?? ''} onValueChange={(v) => patch({ channel_id: v })}>
+                <Select
+                  value={draft.channel_id ?? ''}
+                  onValueChange={(v) =>
+                    // Clear the fallback if the new primary IS the current fallback —
+                    // otherwise fallback_channel_id == channel_id (a no-op the backend
+                    // ignores) and the fallback Select would render blank.
+                    patch(v === draft.fallback_channel_id ? { channel_id: v, fallback_channel_id: '' } : { channel_id: v })
+                  }
+                >
                   <SelectTrigger id="m-ch">
                     <SelectValue placeholder={t('admin:settings.fields.pickModel')} />
                   </SelectTrigger>
                   <SelectContent>
                     {channels.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.name} ({c.type})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field
+                label={t('admin:models.fields.fallbackChannel', { defaultValue: 'Fallback channel' })}
+                htmlFor="m-fb-ch"
+                hint={t('admin:models.fields.fallbackChannelHint', {
+                  defaultValue:
+                    'Retried automatically when a request on the primary channel fails, before the user sees an error. Must match the primary type & format — only the URL and key differ. Optional.',
+                })}
+              >
+                <Select
+                  value={draft.fallback_channel_id && draft.fallback_channel_id !== draft.channel_id ? draft.fallback_channel_id : 'none'}
+                  onValueChange={(v) => patch({ fallback_channel_id: v === 'none' ? '' : v })}
+                >
+                  <SelectTrigger id="m-fb-ch">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">
+                      {t('admin:models.fields.fallbackNone', { defaultValue: 'None' })}
+                    </SelectItem>
+                    {fallbackOptions.map((c) => (
                       <SelectItem key={c.id} value={c.id}>
                         {c.name} ({c.type})
                       </SelectItem>

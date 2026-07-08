@@ -622,11 +622,12 @@ export const adminApi = {
     api<{ ok: true }>(`/admin/conversations/${encodeURIComponent(id)}/sandbox`, { method: 'DELETE' }),
 
   // Per-record usage list (one row per API call), filtered + paginated.
-  usage: (params: { days?: number; user?: string; model?: string; page?: number; pageSize?: number } = {}) => {
+  usage: (params: { days?: number; user?: string; model?: string; status?: string; page?: number; pageSize?: number } = {}) => {
     const qs = new URLSearchParams()
     if (params.days) qs.set('days', String(params.days))
     if (params.user) qs.set('user', params.user)
     if (params.model) qs.set('model', params.model)
+    if (params.status) qs.set('status', params.status)
     if (params.page) qs.set('page', String(params.page))
     if (params.pageSize) qs.set('page_size', String(params.pageSize))
     return api<{ records: ApiUsageRecord[]; total: number; total_cost: number; page: number; page_size: number }>(
@@ -634,11 +635,12 @@ export const adminApi = {
     )
   },
   deleteUsageRecord: (id: number) => api<{ ok: true }>(`/admin/usage/${id}`, { method: 'DELETE' }),
-  deleteUsageFiltered: (params: { days?: number; user?: string; model?: string }) => {
+  deleteUsageFiltered: (params: { days?: number; user?: string; model?: string; status?: string }) => {
     const qs = new URLSearchParams()
     if (params.days) qs.set('days', String(params.days))
     if (params.user) qs.set('user', params.user)
     if (params.model) qs.set('model', params.model)
+    if (params.status) qs.set('status', params.status)
     return api<{ deleted: number }>(`/admin/usage${qs.toString() ? `?${qs}` : ''}`, { method: 'DELETE' })
   },
   analytics: (days = 30) => api<ApiAnalytics>(`/admin/analytics?days=${days}`),

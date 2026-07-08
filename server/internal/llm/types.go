@@ -7,7 +7,10 @@
 // specific shapes.
 package llm
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"sync/atomic"
+)
 
 // UnifiedBlock is the canonical message-block shape stored in DB (§2.3-C).
 type UnifiedBlock struct {
@@ -86,6 +89,11 @@ type UnifiedChatRequest struct {
 	// MaxOutputTokens overrides the provider's default max_tokens cap.
 	// Used by TaskLLM for short internal calls.
 	MaxOutputTokens int
+	// FallbackUsed, when non-nil, is set by the provider (via doProviderRequest)
+	// the first time it serves ANY request in this turn — including a tool-loop
+	// round — through Model.Fallback. The orchestrator reads it after Stream to
+	// flag the turn's usage row as fallback (§fallback channel). nil = untracked.
+	FallbackUsed *atomic.Bool
 }
 
 // ModelInfo is the slim subset of store.Model the provider needs.
@@ -97,6 +105,18 @@ type ModelInfo struct {
 	BaseURL   string
 	APIKey    string
 	APIFormat string
+	// Fallback, when non-nil, is the backup endpoint retried when a primary
+	// request fails in a way a different channel could fix (transport error /
+	// 401 / 403 / 408 / 429 / 5xx). Same channel type + format as the primary —
+	// only the URL and key differ (§fallback channel). nil = no fallback.
+	Fallback *ChannelCreds
+}
+
+// ChannelCreds is the alternate endpoint used for the fallback retry. Only the
+// base URL + API key differ from the primary channel.
+type ChannelCreds struct {
+	BaseURL string
+	APIKey  string
 }
 
 // UnifiedMessage is the chronological message used as conversation history.
@@ -135,15 +155,15 @@ type SseEvent struct {
 	// tool_input.partialJson).
 	PartialJson string          `json:"partial_json,omitempty"`
 	Input       json.RawMessage `json:"input,omitempty"`
-	Summary    string          `json:"summary,omitempty"`
-	URL        string          `json:"url,omitempty"`
-	Title      string          `json:"title,omitempty"`
-	Citation   *Citation       `json:"citation,omitempty"`
-	StopReason string          `json:"stop_reason,omitempty"`
-	Usage      *Usage          `json:"usage,omitempty"`
-	Message    string          `json:"message,omitempty"`
-	ToolID     string          `json:"tool_id,omitempty"`
-	Status     string          `json:"status,omitempty"`
+	Summary     string          `json:"summary,omitempty"`
+	URL         string          `json:"url,omitempty"`
+	Title       string          `json:"title,omitempty"`
+	Citation    *Citation       `json:"citation,omitempty"`
+	StopReason  string          `json:"stop_reason,omitempty"`
+	Usage       *Usage          `json:"usage,omitempty"`
+	Message     string          `json:"message,omitempty"`
+	ToolID      string          `json:"tool_id,omitempty"`
+	Status      string          `json:"status,omitempty"`
 	// Credits charged for this turn (emitted on the `done` event so the UI can
 	// show "credits used"). 0 = free / credits disabled.
 	Credits float64 `json:"credits,omitempty"`

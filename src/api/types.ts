@@ -306,6 +306,8 @@ export interface ApiModel {
   label: string
   description: string
   icon: string
+  /** Backup channel retried when a request on the primary channel fails; '' = none (§fallback channel). */
+  fallback_channel_id?: string
   enabled: boolean
   sort_order: number
   tool_mode: 'native' | 'prompt' | 'none'
@@ -580,6 +582,14 @@ export interface ApiUsageRecord {
   /** §workspaces */
   workspace_id?: string
   workspace_name?: string
+  /** §fallback channel: which channel served the request, whether it was the
+   *  model's fallback, and ok|error (error requests are logged too). */
+  channel_id?: string
+  channel_name?: string
+  fallback?: boolean
+  status?: string
+  /** Upstream failure detail for status='error' rows (admin-only; may embed provider bodies). */
+  error?: string
 }
 
 /** SSE event shapes — matches §6.2. */

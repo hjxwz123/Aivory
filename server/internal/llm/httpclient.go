@@ -1,10 +1,24 @@
 package llm
 
 import (
+	"context"
+	"errors"
 	"net"
 	"net/http"
+	"strings"
+	"sync/atomic"
 	"time"
 )
+
+// providerBaseURL trims a channel base URL and substitutes the vendor default
+// when it is empty. Used inside the doProviderRequest build closures so the
+// fallback endpoint gets the SAME defaulting the primary does.
+func providerBaseURL(baseURL, vendorDefault string) string {
+	if b := strings.TrimRight(baseURL, "/"); b != "" {
+		return b
+	}
+	return vendorDefault
+}
 
 // providerHTTPClient is the shared client for all upstream model-provider calls
 // (§B2). It deliberately has NO overall Timeout — generation responses stream
@@ -26,4 +40,80 @@ var providerHTTPClient = &http.Client{
 		IdleConnTimeout:       90 * time.Second,
 		MaxIdleConns:          50,
 	},
+}
+
+// doProviderRequest issues one upstream call against the model's PRIMARY channel.
+// If that fails in a way a different endpoint could fix (transport error, or an
+// HTTP status of 401/403/408/409/429/5xx) AND the model has a fallback channel,
+// it rebuilds the request against the fallback creds and retries ONCE, flagging
+// req.FallbackUsed so the whole turn is marked fallback (§fallback channel).
+//
+// build MUST create a fresh *http.Request each call — a request body Reader is
+// consumed once and can't be rewound for the retry. A caller cancellation
+// (ctx.Canceled / DeadlineExceeded — the stop button or the TTFT watchdog) is
+// NOT a failure we retry: that would defeat the cancel and, for the watchdog,
+// double-generate. On fallback, the primary response body is drained/closed
+// before the retry so the connection is released.
+//
+// The retry covers only request ESTABLISHMENT (dial/TLS/headers/status). A
+// stream that breaks mid-body after a 200 is not retried — replaying after
+// partially-streamed tokens/tool-calls is unsafe (see the client note above).
+func doProviderRequest(
+	ctx context.Context,
+	m ModelInfo,
+	fallbackUsed *atomic.Bool,
+	build func(baseURL, apiKey string) (*http.Request, error),
+) (*http.Response, error) {
+	primaryReq, err := build(m.BaseURL, m.APIKey)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := providerHTTPClient.Do(primaryReq)
+	if m.Fallback == nil || !retryableUpstreamFailure(resp, err) {
+		return resp, err
+	}
+	// Build the retry BEFORE releasing the primary response: if the fallback
+	// request can't be constructed (e.g. an unparseable fallback base URL), we
+	// return the primary response UNTOUCHED so the caller can still read its error
+	// body — closing it first would surface an empty upstream message.
+	fbReq, berr := build(m.Fallback.BaseURL, m.Fallback.APIKey)
+	if berr != nil {
+		return resp, err // keep the original (unclosed) failure; couldn't build the retry
+	}
+	// Release the primary connection now that we're committed to the retry.
+	if resp != nil && resp.Body != nil {
+		_ = resp.Body.Close()
+	}
+	resp2, err2 := providerHTTPClient.Do(fbReq)
+	// The fallback endpoint served the (final) response — mark the turn fallback
+	// whether or not it ultimately succeeded, so an error row is still attributed
+	// to the fallback channel.
+	if fallbackUsed != nil {
+		fallbackUsed.Store(true)
+	}
+	return resp2, err2
+}
+
+// retryableUpstreamFailure reports whether a primary provider call failed in a
+// way that a DIFFERENT endpoint/key (the fallback channel) might fix. A caller
+// cancellation or deadline is intentional and never retried.
+func retryableUpstreamFailure(resp *http.Response, err error) bool {
+	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return false
+		}
+		return true // dial / TLS / connection-reset / header-timeout
+	}
+	if resp == nil {
+		return true
+	}
+	switch s := resp.StatusCode; {
+	case s == http.StatusUnauthorized, s == http.StatusForbidden, // 401 / 403 — bad or throttled key
+		s == http.StatusRequestTimeout, s == http.StatusConflict, // 408 / 409
+		s == http.StatusTooManyRequests: // 429 — overloaded
+		return true
+	case s >= 500: // upstream 5xx
+		return true
+	}
+	return false
 }

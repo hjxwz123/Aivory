@@ -29,7 +29,6 @@ const OWNED_KEYS = [
   'rag_top_k',
   'rag_dynamic_topk',
   'rag_similarity_threshold',
-  'credit_preflight_enabled',
   'mineru_api_url',
   'mineru_api_token',
   'storage_provider',
@@ -234,28 +233,6 @@ export default function AdminDocuments() {
                   />
                 </Field>
               )}
-            </div>
-          </div>
-
-          {/* Credit pre-flight ---------------------------------------------- */}
-          <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-5">
-            <h2 className="font-serif text-lg text-[var(--color-fg)]">
-              {t('admin:documents.preflightSection', { defaultValue: 'Credit pre-flight' })}
-            </h2>
-            <p className="mt-1 text-xs text-[var(--color-fg-subtle)]">
-              {t('admin:documents.preflightLead', {
-                defaultValue:
-                  "For credit-charged turns, estimate the request size before generating and refuse if the user can't afford it.",
-              })}
-            </p>
-            <div className="mt-4 flex items-center justify-between gap-4">
-              <div className="text-sm text-[var(--color-fg)]">
-                {t('admin:documents.preflightEnabled', { defaultValue: 'Estimate & block unaffordable requests' })}
-              </div>
-              <Switch
-                checked={readBool('credit_preflight_enabled', true)}
-                onCheckedChange={(v) => setDraft({ ...draft, credit_preflight_enabled: v })}
-              />
             </div>
           </div>
 

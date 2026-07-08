@@ -367,6 +367,50 @@ func (o *Orchestrator) buildFallbackRequest(ctx context.Context, base UnifiedCha
 	return req, prov, nil
 }
 
+// resolveFallbackChannel returns the creds + id of a model's backup channel
+// (§fallback channel), or (nil, "") when there is none or it's unusable. It is
+// honoured only when the configured channel is DISTINCT from the primary, is
+// enabled, carries an API key, and matches the primary's type + api_format — the
+// retry reuses the primary provider's code path, so a different vendor/format
+// would be sent the wrong wire shape. An unusable configured fallback is logged
+// and ignored; the turn still runs on the primary channel.
+func (o *Orchestrator) resolveFallbackChannel(ctx context.Context, model *store.Model, primary *store.Channel) (*ChannelCreds, string) {
+	fid := strings.TrimSpace(model.FallbackChannelID)
+	if fid == "" || fid == model.ChannelID {
+		return nil, ""
+	}
+	fc, err := store.GetChannel(ctx, o.db, fid)
+	if err != nil {
+		if o.logger != nil {
+			o.logger.Printf("llm: model %q fallback channel %q not found — ignoring", model.ID, fid)
+		}
+		return nil, ""
+	}
+	if !fc.Enabled || fc.Type != primary.Type || fc.APIFormat != primary.APIFormat || fc.APIKey == "" {
+		if o.logger != nil {
+			o.logger.Printf("llm: model %q fallback channel %q unusable (enabled=%v type=%q/%q format=%q/%q hasKey=%v) — ignoring",
+				model.ID, fid, fc.Enabled, fc.Type, primary.Type, fc.APIFormat, primary.APIFormat, fc.APIKey != "")
+		}
+		return nil, ""
+	}
+	return &ChannelCreds{BaseURL: fc.BaseURL, APIKey: fc.APIKey}, fc.ID
+}
+
+// truncErr caps a raw provider error for storage on the admin usage row — an
+// upstream failure can carry a large response body. Trims on a rune boundary so
+// the stored string stays valid UTF-8.
+func truncErr(s string) string {
+	const max = 2000
+	if len(s) <= max {
+		return s
+	}
+	r := []rune(s)
+	if len(r) > max {
+		r = r[:max]
+	}
+	return string(r) + "…"
+}
+
 // settingInt / settingStr read an admin setting (JSON number or quoted string).
 func settingInt(db *sql.DB, key string) int {
 	raw, err := store.GetSetting(db, key)
@@ -833,6 +877,18 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		o.scheduleTitle(conv.ID, req.UserID, req.UserText, req.Locale)
 	}
 
+	// §fallback channel: resolve the model's backup channel (if any) so a failed
+	// request on the primary channel is retried on it — transparently, before the
+	// user sees an error. It must be an enabled channel of the SAME type + format
+	// as the primary (only the URL + key differ); anything else is ignored with a
+	// warning. fallbackFlag is shared into the provider and flipped the first time
+	// ANY request this turn (incl. a tool-loop round) is served by the fallback.
+	fallbackCreds, fallbackChannelID := o.resolveFallbackChannel(ctx, model, channel)
+	var fallbackFlag *atomic.Bool
+	if fallbackCreds != nil {
+		fallbackFlag = new(atomic.Bool)
+	}
+
 	provReq := UnifiedChatRequest{
 		UserID:         req.UserID,
 		ConversationID: conv.ID,
@@ -848,6 +904,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			BaseURL:   channel.BaseURL,
 			APIKey:    channel.APIKey,
 			APIFormat: channel.APIFormat,
+			Fallback:  fallbackCreds,
 		},
 		Tools:          toolDefs,
 		OfficialTools:  officialTools,
@@ -857,6 +914,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		ParamOverrides: req.ParamOverrides,
 		ParamControls:  model.ParamControls,
 		Stream:         model.Stream,
+		FallbackUsed:   fallbackFlag,
 	}
 
 	// §credits pre-flight: for a credit-charged turn, estimate the REAL upstream
@@ -934,6 +992,20 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		result, err = o.runDeepResearch(ctx, provReq, runner, provider, streamToUser, conv, assistantMsg)
 	} else {
 		result, err = o.streamWithFallback(ctx, provReq, runner, provider, model.ID, streamToUser)
+	}
+	// §fallback channel: which channel actually served this turn, for the usage
+	// row. If any request was retried on the fallback, the whole turn is marked
+	// fallback and attributed to the fallback channel id. Channel attribution
+	// deliberately follows MODEL attribution: the separate TTFT model-fallback
+	// (streamWithFallback) already books the whole turn against the PRIMARY model
+	// and its pricing even when a different model serves it, so we keep channel_id
+	// within the primary model's own channels (primary or its fallback) rather than
+	// naming the TTFT-fallback model's channel — pairing model X with model Y's
+	// channel would be more misleading than this rare, analytics-only edge.
+	usedFallback := fallbackFlag != nil && fallbackFlag.Load()
+	servedChannelID := model.ChannelID
+	if usedFallback {
+		servedChannelID = fallbackChannelID
 	}
 	if err != nil {
 		// §6.2 stop-button semantics: when the user (or the kill switch) cancels
@@ -1013,6 +1085,8 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 					Cost:             stopChatCost,
 					Currency:         model.Currency,
 					Credits:          timedCredits,
+					ChannelID:        servedChannelID,
+					Fallback:         usedFallback,
 				})
 				o.recordQuotaUsage(ctx, req.UserID, model, stopChatCost)
 			}
@@ -1041,6 +1115,26 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		_ = store.FinishMessage(ctx, o.db, assistantMsg.ID, store.MessageFinishPatch{
 			Blocks: errBlocksJSON, Citations: []byte("[]"),
 			Status: "error", Error: safeErr,
+		})
+		// §usage errors: record the failed request so admin/usage counts it and
+		// shows which channel served it (and whether the fallback was used). No
+		// output was produced, so it carries zero tokens/cost/credits and is
+		// excluded from quota reseeds (store.UsageInWindow skips status='error').
+		o.logUsage(ctx, store.UsageLog{
+			UserID:         req.UserID,
+			WorkspaceID:    conv.WorkspaceID,
+			ConversationID: conv.ID,
+			MessageID:      assistantMsg.ID,
+			ModelID:        model.ID,
+			Purpose:        "chat",
+			Currency:       model.Currency,
+			ChannelID:      servedChannelID,
+			Fallback:       usedFallback,
+			Status:         "error",
+			// Store the raw upstream failure (status + response body) so an admin can
+			// diagnose it on /admin/usage. It's the same detail we log server-side and
+			// deliberately withhold from the user (§B5); it's admin-only on the wire.
+			Error: truncErr(err.Error()),
 		})
 		onEvent(SseEvent{Type: "error", Message: safeErr})
 		return nil, err
@@ -1148,6 +1242,8 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		Cost:             chatCost,
 		Currency:         model.Currency,
 		Credits:          timedCredits,
+		ChannelID:        servedChannelID,
+		Fallback:         usedFallback,
 	})
 	// Update the fixed-window quota counter for this user+model (§ user groups).
 	o.recordQuotaUsage(ctx, req.UserID, model, chatCost)

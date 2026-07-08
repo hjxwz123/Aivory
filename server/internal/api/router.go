@@ -89,6 +89,9 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("GET", "/api/auth/oauth/:id/start", rateLimitedIP(d, "auth", 20, 60*time.Second, wrap(d, oauthStartHandler)))
 	mux.handle("GET", "/api/auth/oauth/:id/callback", rateLimitedIP(d, "auth", 20, 60*time.Second, wrap(d, oauthCallbackHandler)))
 	mux.handle("POST", "/api/auth/oauth/:id/callback", rateLimitedIP(d, "auth", 20, 60*time.Second, wrap(d, oauthCallbackHandler)))
+	// §cross-domain hand-off: redeems the one-time token minted by the canonical
+	// callback and sets the session cookies on THIS (origin) domain.
+	mux.handle("GET", "/api/auth/oauth/handoff", rateLimitedIP(d, "auth", 20, 60*time.Second, wrap(d, oauthHandoffHandler)))
 
 	// Authenticated endpoints.
 	mux.handle("GET", "/api/me", requireAuth(d, meHandler))

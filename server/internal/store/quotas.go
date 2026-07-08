@@ -79,7 +79,7 @@ func GetModelQuota(ctx context.Context, db *sql.DB, modelID, groupID string) (*M
 func ImageUsageInWindow(ctx context.Context, db *sql.DB, userID, modelID string, sinceUnix int64) (cost float64, images int, err error) {
 	err = db.QueryRowContext(ctx,
 		`SELECT COALESCE(SUM(cost),0), COALESCE(SUM(images_count),0) FROM usage_logs
-		 WHERE user_id=? AND model_id=? AND purpose='image' AND created_at>=?`,
+		 WHERE user_id=? AND model_id=? AND purpose='image' AND COALESCE(status,'ok')<>'error' AND created_at>=?`,
 		userID, modelID, sinceUnix).Scan(&cost, &images)
 	return cost, images, err
 }
@@ -132,11 +132,13 @@ func QuotasForGroup(ctx context.Context, db *sql.DB, groupID string) (map[string
 }
 
 // UsageInWindow sums chat cost + call count for one user+model since a unix time
-// — the authoritative fallback when the cache counter is cold.
+// — the authoritative fallback when the cache counter is cold. Error rows
+// (status='error', logged so admin/usage can count failures) are excluded: a
+// failed request produced nothing and must not burn a count-based quota.
 func UsageInWindow(ctx context.Context, db *sql.DB, userID, modelID string, sinceUnix int64) (cost float64, count int, err error) {
 	err = db.QueryRowContext(ctx,
 		`SELECT COALESCE(SUM(cost),0), COUNT(*) FROM usage_logs
-		 WHERE user_id=? AND model_id=? AND purpose='chat' AND created_at>=?`,
+		 WHERE user_id=? AND model_id=? AND purpose='chat' AND COALESCE(status,'ok')<>'error' AND created_at>=?`,
 		userID, modelID, sinceUnix).Scan(&cost, &count)
 	return cost, count, err
 }

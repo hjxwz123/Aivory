@@ -47,6 +47,122 @@ func oauthProvidersPublicHandler(d Deps, w http.ResponseWriter, r *http.Request)
 	writeJSON(w, 200, out)
 }
 
+// ===== Multi-domain OAuth (§ cross-domain hand-off) =====
+//
+// The site answers on several domains but a provider typically registers a
+// single redirect_uri, so every flow must send the provider the ONE callback it
+// trusts (the canonical host, domain A) regardless of which domain the user
+// started on. The flow therefore always lands on A; when the user began on a
+// different — allowlisted — origin we mint a one-time hand-off token and bounce
+// the browser back there, where the session cookies get set on the right host.
+
+// oauthCallbackBase returns the canonical scheme://host whose callback path is
+// registered with the providers. OAUTH_CALLBACK_BASE_URL wins when set; else we
+// fall back to the request host (single-domain deployments — unchanged).
+func oauthCallbackBase(d Deps, r *http.Request) string {
+	if b := strings.TrimRight(strings.TrimSpace(d.Config.OAuthCallbackBaseURL), "/"); b != "" {
+		return b
+	}
+	return externalBaseURL(r)
+}
+
+// allowedReturnOrigin reports whether origin (scheme://host) is an exact match
+// for one of the configured return targets. This is the open-redirect guard for
+// the hand-off: a value that fails here is NEVER used as a redirect destination.
+func allowedReturnOrigin(d Deps, origin string) bool {
+	origin = strings.TrimRight(strings.TrimSpace(origin), "/")
+	if origin == "" {
+		return false
+	}
+	for _, o := range d.Config.OAuthReturnOrigins {
+		if strings.EqualFold(strings.TrimRight(strings.TrimSpace(o), "/"), origin) {
+			return true
+		}
+	}
+	return false
+}
+
+// startOrigin decides where a flow that begins on this request should return to.
+// It is the request host when that differs from the canonical callback host AND
+// is allowlisted; otherwise "" (a same-canonical-host flow, no hand-off). Derived
+// from the (trusted-peer-gated) Host — never a client-supplied query param.
+func startOrigin(d Deps, r *http.Request, callbackBase string) string {
+	reqBase := strings.TrimRight(externalBaseURL(r), "/")
+	if reqBase == strings.TrimRight(callbackBase, "/") {
+		return ""
+	}
+	if !allowedReturnOrigin(d, reqBase) {
+		return ""
+	}
+	return reqBase
+}
+
+// completeOAuthLogin runs the shared login tail — account-status gate, TOTP
+// hand-off, session minting — on whatever host `base` names, so the session (and
+// 2FA) cookies always land on the domain the browser is actually on. Used by the
+// callback for same-host logins and by the hand-off endpoint for cross-domain.
+func completeOAuthLogin(d Deps, w http.ResponseWriter, r *http.Request, user *store.User, base string) {
+	fail := func(reason string) {
+		http.Redirect(w, r, base+"/login?oauth_error="+url.QueryEscape(reason), http.StatusFound)
+	}
+	if user.Status != "active" {
+		fail("account_disabled")
+		return
+	}
+	// 2FA gate (§ 2FA login): honour the user's TOTP setting on social logins too
+	// — hand off to the login page's code step via a short-lived ticket instead of
+	// minting a session here.
+	if user.TotpEnabled {
+		ticket := issueTwofaTicket(d, user.ID)
+		if ticket == "" {
+			fail("session_error")
+			return
+		}
+		// §A10: hand the ticket to the SPA via a short-lived HttpOnly cookie (Path
+		// /api/auth, so it rides only the /auth/login/2fa request) rather than the
+		// URL — keeps the bearer secret out of history, Referer and access logs.
+		http.SetCookie(w, &http.Cookie{
+			Name: "aurelia_2fa", Value: ticket, Path: "/api/auth",
+			HttpOnly: true, Secure: secureCookie(r), SameSite: http.SameSiteLaxMode, MaxAge: 300,
+		})
+		http.Redirect(w, r, base+"/login?twofa=1", http.StatusFound)
+		return
+	}
+	if _, _, err := issueSessionCookies(d, w, r, user, 0); err != nil {
+		fail("session_error")
+		return
+	}
+	http.Redirect(w, r, base+"/", http.StatusFound)
+}
+
+// oauthHandoffHandler completes a cross-domain login on the ORIGIN host. It
+// redeems the one-time token the canonical callback minted (single-use, 60s TTL,
+// held in the process-shared cache), loads the resolved user, then runs the
+// shared login tail so the session cookies are set on THIS domain.
+func oauthHandoffHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	base := externalBaseURL(r)
+	fail := func(reason string) {
+		http.Redirect(w, r, base+"/login?oauth_error="+url.QueryEscape(reason), http.StatusFound)
+	}
+	tok := strings.TrimSpace(r.URL.Query().Get("token"))
+	if tok == "" {
+		fail("invalid_handoff")
+		return
+	}
+	uid, ok := d.Cache.Get("oauth:handoff:" + tok)
+	if !ok {
+		fail("invalid_or_expired_handoff")
+		return
+	}
+	d.Cache.Delete("oauth:handoff:" + tok) // one-time use — a redeemed token can't be replayed
+	user, err := store.FindUserByID(r.Context(), d.DB, uid)
+	if err != nil || user == nil {
+		fail("account_error")
+		return
+	}
+	completeOAuthLogin(d, w, r, user, base)
+}
+
 // ===== OAuth flow =====
 
 // oauthStartHandler kicks off the Authorization Code flow: it generates state
@@ -73,10 +189,15 @@ func oauthStartHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		challenge = oauth.PKCEChallenge(verifier)
 	}
 
-	stash, _ := json.Marshal(map[string]string{"provider_id": id, "verifier": verifier})
+	// §cross-domain: pin the callback to the canonical host the provider trusts and
+	// remember the (allowlisted) origin the user began on so we can bounce back.
+	callbackBase := oauthCallbackBase(d, r)
+	origin := startOrigin(d, r, callbackBase)
+
+	stash, _ := json.Marshal(map[string]string{"provider_id": id, "verifier": verifier, "origin": origin})
 	d.Cache.Set("oauth:state:"+state, string(stash), 10*time.Minute)
 
-	redirectURI := externalBaseURL(r) + "/api/auth/oauth/" + id + "/callback"
+	redirectURI := callbackBase + "/api/auth/oauth/" + id + "/callback"
 	http.Redirect(w, r, cfg.AuthCodeURL(redirectURI, state, challenge), http.StatusFound)
 }
 
@@ -86,9 +207,14 @@ func oauthStartHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 // r.ParseForm merges query + body, so FormValue works for both.
 func oauthCallbackHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	_ = r.ParseForm()
-	base := externalBaseURL(r)
+	// The provider redirected here using the canonical registered callback, so
+	// redirect_uri for the exchange must be rebuilt from the SAME canonical host,
+	// not the request host. returnBase (where the browser is finally sent) is
+	// overwritten below once we read the origin out of the server-side state.
+	callbackBase := oauthCallbackBase(d, r)
+	returnBase := callbackBase
 	fail := func(reason string) {
-		http.Redirect(w, r, base+"/login?oauth_error="+url.QueryEscape(reason), http.StatusFound)
+		http.Redirect(w, r, returnBase+"/login?oauth_error="+url.QueryEscape(reason), http.StatusFound)
 	}
 
 	id := pathParam(r, "id")
@@ -117,11 +243,21 @@ func oauthCallbackHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		// logging in — it is trusted because it was stashed server-side from an
 		// authenticated session, never read from the callback request.
 		LinkUserID string `json:"link_user_id"`
+		// Origin is the allowlisted host the flow began on (§cross-domain). Like the
+		// other fields it comes from the trusted server-side stash, never the
+		// callback URL, so the provider/user cannot tamper with it.
+		Origin string `json:"origin"`
 	}
 	_ = json.Unmarshal([]byte(raw), &st)
 	if st.ProviderID != id {
 		fail("state_mismatch")
 		return
+	}
+	// Send the browser back to the origin domain from here on. Re-validate against
+	// the allowlist (defence in depth — config may have changed mid-flight); a
+	// value that no longer passes falls back to the canonical host.
+	if st.Origin != "" && allowedReturnOrigin(d, st.Origin) {
+		returnBase = strings.TrimRight(st.Origin, "/")
 	}
 
 	p, err := store.GetOAuthProvider(r.Context(), d.DB, id)
@@ -130,7 +266,7 @@ func oauthCallbackHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cfg := oauth.Resolve(toOAuthConfig(p))
-	redirectURI := base + "/api/auth/oauth/" + id + "/callback"
+	redirectURI := callbackBase + "/api/auth/oauth/" + id + "/callback"
 
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
@@ -159,7 +295,9 @@ func oauthCallbackHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	// minted, no account provisioned, 2FA is not re-challenged. Redirect back to
 	// the account page with a status the SPA turns into a toast.
 	if st.LinkUserID != "" {
-		acct := base + "/settings/account"
+		// The linking user's session lives on the origin domain; binding sets no
+		// cookies, so a plain redirect back to returnBase is enough (no hand-off).
+		acct := returnBase + "/settings/account"
 		switch err := store.BindOAuthIdentity(ctx, d.DB, p.ID, info.Subject, st.LinkUserID, info.Email); {
 		case err == nil:
 			http.Redirect(w, r, acct+"?linked="+url.QueryEscape(p.Name), http.StatusFound)
@@ -178,35 +316,19 @@ func oauthCallbackHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		fail("account_error")
 		return
 	}
-	if user.Status != "active" {
-		fail("account_disabled")
+
+	// §cross-domain hand-off: the flow always completes here on the canonical host,
+	// but session cookies must be set on the domain the user is actually browsing.
+	// When that origin differs, mint a one-time token (single-use, 60s, in the
+	// process-shared cache) and bounce back — the origin's /handoff endpoint sets
+	// the cookies there. The status/2FA/session tail runs on the FINAL host.
+	if returnBase != callbackBase {
+		tok := randToken(24)
+		d.Cache.Set("oauth:handoff:"+tok, user.ID, 60*time.Second)
+		http.Redirect(w, r, returnBase+"/api/auth/oauth/handoff?token="+url.QueryEscape(tok), http.StatusFound)
 		return
 	}
-	// 2FA gate (§ 2FA login): honour the user's TOTP setting on social logins too
-	// — hand off to the login page's code step via a short-lived ticket instead
-	// of minting a session here.
-	if user.TotpEnabled {
-		ticket := issueTwofaTicket(d, user.ID)
-		if ticket == "" {
-			fail("session_error")
-			return
-		}
-		// §A10: hand the ticket to the SPA via a short-lived HttpOnly cookie
-		// (Path /api/auth, so it rides only the /auth/login/2fa request) rather
-		// than the URL query string — keeps the bearer secret out of browser
-		// history, Referer headers and access logs. The SPA only sees ?twofa=1.
-		http.SetCookie(w, &http.Cookie{
-			Name: "aurelia_2fa", Value: ticket, Path: "/api/auth",
-			HttpOnly: true, Secure: secureCookie(r), SameSite: http.SameSiteLaxMode, MaxAge: 300,
-		})
-		http.Redirect(w, r, base+"/login?twofa=1", http.StatusFound)
-		return
-	}
-	if _, _, err := issueSessionCookies(d, w, r, user, 0); err != nil {
-		fail("session_error")
-		return
-	}
-	http.Redirect(w, r, base+"/", http.StatusFound)
+	completeOAuthLogin(d, w, r, user, callbackBase)
 }
 
 // ===== Identity linking (authenticated: §account → identity sources) =====
@@ -237,11 +359,13 @@ func oauthLinkStartHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		verifier = randToken(32)
 		challenge = oauth.PKCEChallenge(verifier)
 	}
+	callbackBase := oauthCallbackBase(d, r)
+	origin := startOrigin(d, r, callbackBase)
 	stash, _ := json.Marshal(map[string]string{
-		"provider_id": id, "verifier": verifier, "link_user_id": u.ID,
+		"provider_id": id, "verifier": verifier, "link_user_id": u.ID, "origin": origin,
 	})
 	d.Cache.Set("oauth:state:"+state, string(stash), 10*time.Minute)
-	redirectURI := externalBaseURL(r) + "/api/auth/oauth/" + id + "/callback"
+	redirectURI := callbackBase + "/api/auth/oauth/" + id + "/callback"
 	writeJSON(w, 200, map[string]string{"authorize_url": cfg.AuthCodeURL(redirectURI, state, challenge)})
 }
 

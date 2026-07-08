@@ -48,17 +48,12 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 	if req.Model.APIKey == "" {
 		return nil, errors.New("this channel has no API key configured")
 	}
-	base := strings.TrimRight(req.Model.BaseURL, "/")
-	if base == "" {
-		base = "https://api.anthropic.com"
-	}
-
 	// §4.13 prompt-mode: the model has no native function calling, so drive the
 	// text-protocol loop instead of the native tool_use loop.
 	if req.ToolModePrompt {
 		_, blocks, usage, cites, err := RunPromptToolLoop(
 			ctx, req.SystemPrompt, req.History, req.Tools,
-			p.promptRunOnce(base, req), tools, onEvent,
+			p.promptRunOnce(req), tools, onEvent,
 		)
 		if err != nil {
 			return nil, err
@@ -120,16 +115,17 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 			delete(body, "top_k")
 		}
 		buf, _ := json.Marshal(body)
-		httpReq, err := http.NewRequestWithContext(ctx, "POST", base+"/v1/messages", bytes.NewReader(buf))
-		if err != nil {
-			return nil, err
-		}
-		httpReq.Header.Set("content-type", "application/json")
-		httpReq.Header.Set("anthropic-version", "2023-06-01")
-		httpReq.Header.Set("x-api-key", req.Model.APIKey)
-		httpReq.Header.Set("accept", "text/event-stream")
-
-		resp, err := providerHTTPClient.Do(httpReq)
+		resp, err := doProviderRequest(ctx, req.Model, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
+			hr, e := http.NewRequestWithContext(ctx, "POST", providerBaseURL(baseURL, "https://api.anthropic.com")+"/v1/messages", bytes.NewReader(buf))
+			if e != nil {
+				return nil, e
+			}
+			hr.Header.Set("content-type", "application/json")
+			hr.Header.Set("anthropic-version", "2023-06-01")
+			hr.Header.Set("x-api-key", apiKey)
+			hr.Header.Set("accept", "text/event-stream")
+			return hr, nil
+		})
 		if err != nil {
 			// Context cancel (stop button): return partial result + err so the
 			// orchestrator persists what we got so far (§6.2 partial-content rule).
@@ -243,7 +239,7 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 // (no native tools, stop sequence on </tool_call>) and returns the raw text.
 // Text deltas are swallowed here because RunPromptToolLoop emits the visible
 // (markup-stripped) portion itself.
-func (p *AnthropicProvider) promptRunOnce(base string, req UnifiedChatRequest) PromptToolRunner {
+func (p *AnthropicProvider) promptRunOnce(req UnifiedChatRequest) PromptToolRunner {
 	return func(ctx context.Context, history []UnifiedMessage, system string) (string, Usage, error) {
 		maxTok := 4096
 		if req.MaxOutputTokens > 0 {
@@ -261,15 +257,17 @@ func (p *AnthropicProvider) promptRunOnce(base string, req UnifiedChatRequest) P
 		}
 		body = MergeParamControls(body, req.ParamControls, req.ParamOverrides)
 		buf, _ := json.Marshal(body)
-		httpReq, err := http.NewRequestWithContext(ctx, "POST", base+"/v1/messages", bytes.NewReader(buf))
-		if err != nil {
-			return "", Usage{}, err
-		}
-		httpReq.Header.Set("content-type", "application/json")
-		httpReq.Header.Set("anthropic-version", "2023-06-01")
-		httpReq.Header.Set("x-api-key", req.Model.APIKey)
-		httpReq.Header.Set("accept", "text/event-stream")
-		resp, err := providerHTTPClient.Do(httpReq)
+		resp, err := doProviderRequest(ctx, req.Model, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
+			hr, e := http.NewRequestWithContext(ctx, "POST", providerBaseURL(baseURL, "https://api.anthropic.com")+"/v1/messages", bytes.NewReader(buf))
+			if e != nil {
+				return nil, e
+			}
+			hr.Header.Set("content-type", "application/json")
+			hr.Header.Set("anthropic-version", "2023-06-01")
+			hr.Header.Set("x-api-key", apiKey)
+			hr.Header.Set("accept", "text/event-stream")
+			return hr, nil
+		})
 		if err != nil {
 			return "", Usage{}, err
 		}

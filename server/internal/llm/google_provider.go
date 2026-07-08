@@ -31,16 +31,11 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 	if req.Model.APIKey == "" {
 		return nil, errors.New("this channel has no API key configured")
 	}
-	base := strings.TrimRight(req.Model.BaseURL, "/")
-	if base == "" {
-		base = "https://generativelanguage.googleapis.com"
-	}
-
 	// §4.13 prompt-mode: drive the text protocol loop.
 	if req.ToolModePrompt {
 		_, blocks, usage, cites, err := RunPromptToolLoop(
 			ctx, req.SystemPrompt, req.History, req.Tools,
-			p.promptRunOnce(base, req), tools, onEvent,
+			p.promptRunOnce(req), tools, onEvent,
 		)
 		if err != nil {
 			return nil, err
@@ -106,12 +101,17 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 		// chunks; we use alt=sse to get one event per line.
 		// §B5: API key travels in the x-goog-api-key header, NOT the query string
 		// (URLs leak into proxy/access logs, Referer, and error wrappers).
-		streamURL := fmt.Sprintf("%s/v1beta/models/%s:streamGenerateContent?alt=sse", base, req.Model.RequestID)
-		httpReq, _ := http.NewRequestWithContext(ctx, "POST", streamURL, bytes.NewReader(raw))
-		httpReq.Header.Set("content-type", "application/json")
-		httpReq.Header.Set("accept", "text/event-stream")
-		httpReq.Header.Set("x-goog-api-key", req.Model.APIKey)
-		resp, err := providerHTTPClient.Do(httpReq)
+		resp, err := doProviderRequest(ctx, req.Model, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
+			streamURL := fmt.Sprintf("%s/v1beta/models/%s:streamGenerateContent?alt=sse", providerBaseURL(baseURL, "https://generativelanguage.googleapis.com"), req.Model.RequestID)
+			hr, e := http.NewRequestWithContext(ctx, "POST", streamURL, bytes.NewReader(raw))
+			if e != nil {
+				return nil, e
+			}
+			hr.Header.Set("content-type", "application/json")
+			hr.Header.Set("accept", "text/event-stream")
+			hr.Header.Set("x-goog-api-key", apiKey)
+			return hr, nil
+		})
 		if err != nil {
 			return nil, err
 		}
@@ -479,7 +479,7 @@ func parseGeminiCandidate(parsed map[string]any) (string, []geminiCall, []map[st
 
 // promptRunOnce returns a PromptToolRunner performing ONE generateContent call
 // (stop sequence on </tool_call>) for §4.13 prompt-mode.
-func (p *GoogleProvider) promptRunOnce(base string, req UnifiedChatRequest) PromptToolRunner {
+func (p *GoogleProvider) promptRunOnce(req UnifiedChatRequest) PromptToolRunner {
 	return func(ctx context.Context, history []UnifiedMessage, system string) (string, Usage, error) {
 		contents := []map[string]any{}
 		for _, m := range history {
@@ -506,11 +506,16 @@ func (p *GoogleProvider) promptRunOnce(base string, req UnifiedChatRequest) Prom
 		}
 		body = MergeParamControls(body, req.ParamControls, req.ParamOverrides)
 		raw, _ := json.Marshal(body)
-		url := fmt.Sprintf("%s/v1beta/models/%s:generateContent", base, req.Model.RequestID)
-		httpReq, _ := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(raw))
-		httpReq.Header.Set("content-type", "application/json")
-		httpReq.Header.Set("x-goog-api-key", req.Model.APIKey) // §B5: key in header, not URL
-		resp, err := providerHTTPClient.Do(httpReq)
+		resp, err := doProviderRequest(ctx, req.Model, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
+			url := fmt.Sprintf("%s/v1beta/models/%s:generateContent", providerBaseURL(baseURL, "https://generativelanguage.googleapis.com"), req.Model.RequestID)
+			hr, e := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(raw))
+			if e != nil {
+				return nil, e
+			}
+			hr.Header.Set("content-type", "application/json")
+			hr.Header.Set("x-goog-api-key", apiKey) // §B5: key in header, not URL
+			return hr, nil
+		})
 		if err != nil {
 			return "", Usage{}, err
 		}

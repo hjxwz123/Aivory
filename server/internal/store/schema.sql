@@ -127,6 +127,7 @@ CREATE TABLE IF NOT EXISTS models (
   label             TEXT NOT NULL,
   description       TEXT NOT NULL DEFAULT '',
   icon              TEXT NOT NULL DEFAULT '',
+  fallback_channel_id TEXT NOT NULL DEFAULT '',      -- retried when a primary request fails ('' = none, §fallback channel)
   enabled           INTEGER NOT NULL DEFAULT 1,
   sort_order        INTEGER NOT NULL DEFAULT 0,
   tool_mode         TEXT NOT NULL DEFAULT 'native', -- native | prompt | none
@@ -378,6 +379,10 @@ CREATE TABLE IF NOT EXISTS usage_logs (
   cost               REAL NOT NULL DEFAULT 0,
   currency           TEXT NOT NULL DEFAULT 'USD',
   credits            REAL NOT NULL DEFAULT 0,   -- credits charged for this row (0 = free / unconverted)
+  channel_id         TEXT NOT NULL DEFAULT '',   -- channel that served the request (§fallback channel)
+  fallback           INTEGER NOT NULL DEFAULT 0, -- 1 = served via the model's fallback channel
+  status             TEXT NOT NULL DEFAULT 'ok', -- ok | error (error requests are logged too, §usage errors)
+  error              TEXT NOT NULL DEFAULT '',   -- upstream failure detail for status='error' rows (admin-only)
   created_at         INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 );
 CREATE INDEX IF NOT EXISTS idx_usage_user_time ON usage_logs(user_id, created_at);

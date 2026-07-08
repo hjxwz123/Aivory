@@ -13,6 +13,7 @@
     "moveUp": "上移",
     "moveDown": "下移",
     "cancel": "取消",
+    "close": "关闭",
     "nameExists": "已存在同名记录。"
   },
   "icon": {
@@ -77,6 +78,9 @@
     },
     "fields": {
       "channel": "渠道",
+      "fallbackChannel": "兜底渠道",
+      "fallbackChannelHint": "主渠道请求失败时自动重试,在用户看到错误之前。类型与格式必须与主渠道一致——仅 URL 与密钥不同。选填。",
+      "fallbackNone": "无",
       "kind": "类型",
       "label": "显示名",
       "requestId": "request_id (实际请求 ID)",
@@ -345,6 +349,7 @@
     "table": {
       "user": "用户",
       "model": "模型",
+      "channel": "渠道",
       "purpose": "用途",
       "in": "输入",
       "out": "输出",
@@ -381,14 +386,23 @@
       "user": "用户",
       "userPlaceholder": "邮箱或 ID",
       "model": "模型",
-      "allModels": "全部模型"
+      "allModels": "全部模型",
+      "status": "状态"
     },
     "deleteConfirm": {
       "title": "删除这些用量记录？",
       "body": "将永久删除当前筛选条件下的 {{count}} 条记录。此操作不可撤销。",
       "action": "删除"
     },
-    "workspaceTag": "空间"
+    "workspaceTag": "空间",
+    "fallbackTag": "兜底",
+    "fallbackTitle": "由该模型的兜底渠道提供",
+    "errorDetail": { "title": "上游报错", "view": "查看报错详情", "none": "该请求未记录报错详情。" },
+    "statusError": "错误",
+    "status": {
+      "all": "全部",
+      "errorsOnly": "仅错误"
+    }
   },
   "documents": {
     "title": "文档",
@@ -406,10 +420,7 @@
     "ragDynamicTopk": "动态 Top-K(按相似度)",
     "ragDynamicTopkHint": "不再固定数量,而是把相似度超过下方阈值的片段全部注入。",
     "ragSimThreshold": "相似度阈值(0–1)",
-    "ragSimThresholdHint": "余弦相似度下限,达到或超过即注入。",
-    "preflightSection": "积分预检",
-    "preflightLead": "对扣积分的对话,在生成前预估请求大小,余额不足则拒绝回复。",
-    "preflightEnabled": "预估并拦截余额不足的请求"
+    "ragSimThresholdHint": "余弦相似度下限,达到或超过即注入。"
   },
   "tools": {
     "title": "工具",
@@ -449,6 +460,8 @@
       "registerIpDailyLimitHint": "同一 IP 地址每天最多可创建的账号数。0 = 不限制。",
       "dailyMessageLimit": "每日消息上限",
       "dailyImageLimit": "每日图片上限",
+      "preflightLead": "对扣积分的对话,在生成前预估请求大小,余额不足则拒绝回复。",
+      "preflightEnabled": "预估并拦截余额不足的请求",
       "emailVerificationRequired": "要求邮箱验证",
       "emailVerificationHint": "开启后新注册用户需要输入 6 位邮箱验证码才能登录。",
       "domainWhitelist": "允许注册的邮箱域名",

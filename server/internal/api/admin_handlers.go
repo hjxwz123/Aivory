@@ -792,6 +792,9 @@ func parseUsageQuery(r *http.Request) (store.UsageFilter, int, int) {
 	}
 	f.UserQ = strings.TrimSpace(q.Get("user"))
 	f.ModelID = strings.TrimSpace(q.Get("model"))
+	if strings.EqualFold(strings.TrimSpace(q.Get("status")), "error") {
+		f.Status = "error"
+	}
 	page, _ := strconv.Atoi(q.Get("page"))
 	if page < 1 {
 		page = 1

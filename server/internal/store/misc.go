@@ -241,11 +241,15 @@ func ListMemoriesActive(ctx context.Context, db *sql.DB, userID string) ([]Memor
 
 // LogUsage writes a single usage row. Best-effort — callers ignore errors.
 func LogUsage(ctx context.Context, db *sql.DB, u UsageLog) error {
+	status := u.Status
+	if status == "" {
+		status = "ok"
+	}
 	_, err := db.ExecContext(ctx,
-		`INSERT INTO usage_logs(user_id, conversation_id, message_id, model_id, purpose, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, images_count, cost, currency, credits, workspace_id, created_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO usage_logs(user_id, conversation_id, message_id, model_id, purpose, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, images_count, cost, currency, credits, workspace_id, channel_id, fallback, status, error, created_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		u.UserID, nullable(u.ConversationID), nullable(u.MessageID), u.ModelID, u.Purpose,
 		u.InputTokens, u.OutputTokens, u.CacheReadTokens, u.CacheWriteTokens, u.ImagesCount,
-		u.Cost, u.Currency, u.Credits, u.WorkspaceID, time.Now().Unix())
+		u.Cost, u.Currency, u.Credits, u.WorkspaceID, u.ChannelID, boolInt(u.Fallback), status, u.Error, time.Now().Unix())
 	return err
 }
 
@@ -270,12 +274,14 @@ func nullable(s string) any {
 }
 
 // SumUsageByUser returns total cost and message count over the past N days.
+// Error rows (§usage errors) are excluded — a failed request is not a delivered
+// message and must not inflate the user-facing /me/usage count.
 func SumUsageByUser(ctx context.Context, db *sql.DB, userID string, days int) (float64, int, error) {
 	since := time.Now().Add(-time.Duration(days) * 24 * time.Hour).Unix()
 	var cost float64
 	var count int
 	err := db.QueryRowContext(ctx,
-		`SELECT COALESCE(SUM(cost),0), COUNT(*) FROM usage_logs WHERE user_id=? AND created_at>=?`, userID, since,
+		`SELECT COALESCE(SUM(cost),0), COUNT(*) FROM usage_logs WHERE user_id=? AND created_at>=? AND COALESCE(status,'ok')<>'error'`, userID, since,
 	).Scan(&cost, &count)
 	return cost, count, err
 }
@@ -301,6 +307,15 @@ type AdminUsageRecord struct {
 	// §workspaces: which workspace the spend belongs to ('' = personal).
 	WorkspaceID   string `json:"workspace_id,omitempty"`
 	WorkspaceName string `json:"workspace_name,omitempty"`
+	// §fallback channel: which channel served the request, whether it was the
+	// model's fallback, and ok|error (error rows are logged so failures show here).
+	ChannelID   string `json:"channel_id"`
+	ChannelName string `json:"channel_name"`
+	Fallback    bool   `json:"fallback"`
+	Status      string `json:"status"`
+	// Error is the upstream failure detail for status='error' rows. Surfaced only
+	// on this admin endpoint (requireAdmin), never to end users.
+	Error string `json:"error,omitempty"`
 }
 
 // UsageFilter scopes the admin usage list / delete. Zero fields = no constraint.
@@ -309,6 +324,7 @@ type UsageFilter struct {
 	Until   int64  // created_at <= Until (0 = no upper bound)
 	UserQ   string // matches user_id exactly OR email substring (case-insensitive)
 	ModelID string // exact model_id
+	Status  string // "error" = only failed requests; "" = all (§usage errors)
 }
 
 // where builds the shared WHERE clause + args. The user predicate needs the
@@ -332,6 +348,9 @@ func (f UsageFilter) where() (string, []any) {
 		conds = append(conds, "u.model_id = ?")
 		args = append(args, f.ModelID)
 	}
+	if f.Status == "error" {
+		conds = append(conds, "COALESCE(u.status,'ok') = 'error'")
+	}
 	if len(conds) == 0 {
 		return "", nil
 	}
@@ -353,11 +372,13 @@ func AdminUsageRecords(ctx context.Context, db *sql.DB, f UsageFilter, limit, of
 	q := `SELECT u.id, u.user_id, COALESCE(usr.email,''), COALESCE(u.conversation_id,''), COALESCE(c.title,''),
 	             CASE WHEN u.conversation_id IS NOT NULL AND u.conversation_id <> '' AND c.id IS NULL THEN 1 ELSE 0 END,
 	             u.model_id, u.purpose, u.input_tokens, u.output_tokens, u.cost, u.currency, u.created_at,
-	             COALESCE(u.workspace_id,''), COALESCE(w.name,'')
+	             COALESCE(u.workspace_id,''), COALESCE(w.name,''),
+	             COALESCE(u.channel_id,''), COALESCE(ch.name,''), COALESCE(u.fallback,0), COALESCE(u.status,'ok'), COALESCE(u.error,'')
 	      FROM usage_logs u
 	      LEFT JOIN users usr ON usr.id = u.user_id
 	      LEFT JOIN conversations c ON c.id = u.conversation_id
-	      LEFT JOIN workspaces w ON w.id = u.workspace_id` + where +
+	      LEFT JOIN workspaces w ON w.id = u.workspace_id
+	      LEFT JOIN channels ch ON ch.id = u.channel_id` + where +
 		` ORDER BY u.created_at DESC, u.id DESC LIMIT ? OFFSET ?`
 	args = append(args, limit, offset)
 	rows, err := db.QueryContext(ctx, q, args...)
@@ -368,13 +389,14 @@ func AdminUsageRecords(ctx context.Context, db *sql.DB, f UsageFilter, limit, of
 	out := []AdminUsageRecord{}
 	for rows.Next() {
 		var r AdminUsageRecord
-		var gone int
+		var gone, fb int
 		if err := rows.Scan(&r.ID, &r.UserID, &r.UserEmail, &r.ConversationID, &r.ConversationTitle, &gone,
 			&r.ModelID, &r.Purpose, &r.InputTokens, &r.OutputTokens, &r.Cost, &r.Currency, &r.CreatedAt,
-			&r.WorkspaceID, &r.WorkspaceName); err != nil {
+			&r.WorkspaceID, &r.WorkspaceName, &r.ChannelID, &r.ChannelName, &fb, &r.Status, &r.Error); err != nil {
 			return nil, err
 		}
 		r.ConversationDeleted = gone == 1
+		r.Fallback = fb == 1
 		out = append(out, r)
 	}
 	return out, rows.Err()
@@ -462,9 +484,11 @@ func AdminUsageTrend(ctx context.Context, db *sql.DB, days int) ([]UsageBucket, 
 		bucket = 3600 // hourly
 	}
 	rows, err := db.QueryContext(ctx,
+		// §usage errors: analytics counts SUCCESSFUL calls only, so Calls stays
+		// consistent with the token/cost sums (error rows carry zero of those).
 		`SELECT (created_at / ?) * ? AS b,
 		        SUM(input_tokens), SUM(output_tokens), COUNT(*), SUM(cost)
-		 FROM usage_logs WHERE created_at >= ?
+		 FROM usage_logs WHERE created_at >= ? AND COALESCE(status,'ok') <> 'error'
 		 GROUP BY b ORDER BY b ASC`, bucket, bucket, since)
 	if err != nil {
 		return nil, err
@@ -508,9 +532,11 @@ func AdminUsageTotals(ctx context.Context, db *sql.DB, days int) (UsageTotals, e
 	since := time.Now().Add(-time.Duration(days) * 24 * time.Hour).Unix()
 	var t UsageTotals
 	err := db.QueryRowContext(ctx,
+		// §usage errors: exclude failed requests so Calls / active-Users stay
+		// consistent with the token/cost sums (error rows contribute zero tokens/cost).
 		`SELECT COUNT(*), COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
 		        COALESCE(SUM(cost),0), COUNT(DISTINCT user_id)
-		 FROM usage_logs WHERE created_at >= ?`, since).
+		 FROM usage_logs WHERE created_at >= ? AND COALESCE(status,'ok') <> 'error'`, since).
 		Scan(&t.Calls, &t.InputTokens, &t.OutputTokens, &t.Cost, &t.Users)
 	return t, err
 }
@@ -547,8 +573,9 @@ func AdminUsageBreakdown(ctx context.Context, db *sql.DB, days int, groupCol str
 		groupBy = "u.user_id, usr.email"
 	}
 	q := fmt.Sprintf(
+		// §usage errors: successful calls only, keeping Calls consistent with cost.
 		`SELECT u.%s, %s, SUM(u.input_tokens), SUM(u.output_tokens), COUNT(*), SUM(u.cost)
-		 FROM usage_logs u %s WHERE u.created_at >= ?
+		 FROM usage_logs u %s WHERE u.created_at >= ? AND COALESCE(u.status,'ok') <> 'error'
 		 GROUP BY %s ORDER BY SUM(u.cost) DESC, COUNT(*) DESC LIMIT ?`,
 		groupCol, labelExpr, join, groupBy)
 	rows, err := db.QueryContext(ctx, q, since, limit)
@@ -599,8 +626,9 @@ func AdminUsageSeries(ctx context.Context, db *sql.DB, days int, groupCol string
 		args = append(args, k)
 	}
 	q := fmt.Sprintf(
+		// §usage errors: successful calls only, keeping Calls consistent with cost.
 		`SELECT (created_at / ?) * ? AS b, %s, SUM(input_tokens), SUM(output_tokens), COUNT(*), SUM(cost)
-		 FROM usage_logs WHERE created_at >= ? AND %s IN (%s)
+		 FROM usage_logs WHERE created_at >= ? AND COALESCE(status,'ok') <> 'error' AND %s IN (%s)
 		 GROUP BY b, %s ORDER BY b ASC`,
 		groupCol, groupCol, placeholders, groupCol)
 	rows, err := db.QueryContext(ctx, q, args...)

@@ -190,7 +190,7 @@ func DeleteChannel(ctx context.Context, db *sql.DB, id string) error {
 // ListModels returns every model with optional kind filter (empty = all).
 // onlyEnabled restricts to enabled rows.
 func ListModels(ctx context.Context, db *sql.DB, kind string, onlyEnabled bool) ([]Model, error) {
-	q := `SELECT id, channel_id, kind, request_id, label, description, icon, enabled, sort_order, tool_mode, vision, stream, research_enabled, system_prompt, param_controls, official_tools, tags, moderation_enabled, moderation_mode, price_input, price_output, price_cache_read, price_cache_write, price_per_image, currency, dim, image_timeout_sec, updated_at FROM models WHERE 1=1`
+	q := `SELECT id, channel_id, kind, request_id, label, description, icon, fallback_channel_id, enabled, sort_order, tool_mode, vision, stream, research_enabled, system_prompt, param_controls, official_tools, tags, moderation_enabled, moderation_mode, price_input, price_output, price_cache_read, price_cache_write, price_per_image, currency, dim, image_timeout_sec, updated_at FROM models WHERE 1=1`
 	args := []any{}
 	if kind != "" {
 		q += " AND kind=?"
@@ -219,7 +219,7 @@ func ListModels(ctx context.Context, db *sql.DB, kind string, onlyEnabled bool) 
 // GetModel returns one row.
 func GetModel(ctx context.Context, db *sql.DB, id string) (*Model, error) {
 	row := db.QueryRowContext(ctx,
-		`SELECT id, channel_id, kind, request_id, label, description, icon, enabled, sort_order, tool_mode, vision, stream, research_enabled, system_prompt, param_controls, official_tools, tags, moderation_enabled, moderation_mode, price_input, price_output, price_cache_read, price_cache_write, price_per_image, currency, dim, image_timeout_sec, updated_at FROM models WHERE id=?`, id)
+		`SELECT id, channel_id, kind, request_id, label, description, icon, fallback_channel_id, enabled, sort_order, tool_mode, vision, stream, research_enabled, system_prompt, param_controls, official_tools, tags, moderation_enabled, moderation_mode, price_input, price_output, price_cache_read, price_cache_write, price_per_image, currency, dim, image_timeout_sec, updated_at FROM models WHERE id=?`, id)
 	m, err := scanModel(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -234,7 +234,7 @@ func scanModel(s scanner) (Model, error) {
 	var m Model
 	var en, vi, st, researchEn, modEn int
 	var paramControls, officialTools, tags string
-	if err := s.Scan(&m.ID, &m.ChannelID, &m.Kind, &m.RequestID, &m.Label, &m.Description, &m.Icon, &en, &m.SortOrder,
+	if err := s.Scan(&m.ID, &m.ChannelID, &m.Kind, &m.RequestID, &m.Label, &m.Description, &m.Icon, &m.FallbackChannelID, &en, &m.SortOrder,
 		&m.ToolMode, &vi, &st, &researchEn, &m.SystemPrompt, &paramControls, &officialTools, &tags, &modEn, &m.ModerationMode,
 		&m.PriceInput, &m.PriceOutput, &m.PriceCacheRead, &m.PriceCacheWrite, &m.PricePerImage, &m.Currency, &m.Dim, &m.ImageTimeoutSec, &m.UpdatedAt); err != nil {
 		return m, err
@@ -263,6 +263,7 @@ func CreateModel(ctx context.Context, db *sql.DB, m Model) (*Model, error) {
 	m.Label = strings.TrimSpace(m.Label)
 	m.Description = strings.TrimSpace(m.Description)
 	m.Icon = strings.TrimSpace(m.Icon)
+	m.FallbackChannelID = strings.TrimSpace(m.FallbackChannelID)
 	m.SystemPrompt = strings.TrimSpace(m.SystemPrompt)
 	if m.ID == "" {
 		m.ID = genID("m")
@@ -295,12 +296,12 @@ func CreateModel(ctx context.Context, db *sql.DB, m Model) (*Model, error) {
 		m.ImageTimeoutSec = 0 // 0 = no cap; never store a negative
 	}
 	_, err := db.ExecContext(ctx, `INSERT INTO models(
-		id, channel_id, kind, request_id, label, description, icon, enabled, sort_order,
+		id, channel_id, kind, request_id, label, description, icon, fallback_channel_id, enabled, sort_order,
 		tool_mode, vision, stream, research_enabled, system_prompt, param_controls, official_tools, tags, moderation_enabled, moderation_mode,
 		price_input, price_output, price_cache_read, price_cache_write, price_per_image, currency,
 		dim, image_timeout_sec, updated_at
-	) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		m.ID, m.ChannelID, m.Kind, m.RequestID, m.Label, m.Description, m.Icon, boolInt(m.Enabled), m.SortOrder,
+	) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		m.ID, m.ChannelID, m.Kind, m.RequestID, m.Label, m.Description, m.Icon, m.FallbackChannelID, boolInt(m.Enabled), m.SortOrder,
 		m.ToolMode, boolInt(m.Vision), boolInt(m.Stream), boolInt(m.ResearchEnabled), m.SystemPrompt, string(m.ParamControls), string(m.OfficialTools), string(m.Tags), boolInt(m.ModerationEnabled), m.ModerationMode,
 		m.PriceInput, m.PriceOutput, m.PriceCacheRead, m.PriceCacheWrite, m.PricePerImage, m.Currency,
 		m.Dim, m.ImageTimeoutSec, time.Now().Unix())
@@ -315,7 +316,7 @@ func CreateModel(ctx context.Context, db *sql.DB, m Model) (*Model, error) {
 
 func GetModelByChannelRequestID(ctx context.Context, db *sql.DB, channelID, requestID string) (*Model, error) {
 	row := db.QueryRowContext(ctx,
-		`SELECT id, channel_id, kind, request_id, label, description, icon, enabled, sort_order, tool_mode, vision, stream, research_enabled, system_prompt, param_controls, official_tools, tags, moderation_enabled, moderation_mode, price_input, price_output, price_cache_read, price_cache_write, price_per_image, currency, dim, image_timeout_sec, updated_at
+		`SELECT id, channel_id, kind, request_id, label, description, icon, fallback_channel_id, enabled, sort_order, tool_mode, vision, stream, research_enabled, system_prompt, param_controls, official_tools, tags, moderation_enabled, moderation_mode, price_input, price_output, price_cache_read, price_cache_write, price_per_image, currency, dim, image_timeout_sec, updated_at
 		 FROM models WHERE channel_id=? AND lower(trim(request_id))=lower(trim(?)) LIMIT 1`,
 		channelID, requestID)
 	m, err := scanModel(row)
@@ -334,6 +335,7 @@ func UpdateModel(ctx context.Context, db *sql.DB, id string, m Model) (*Model, e
 	m.Label = strings.TrimSpace(m.Label)
 	m.Description = strings.TrimSpace(m.Description)
 	m.Icon = strings.TrimSpace(m.Icon)
+	m.FallbackChannelID = strings.TrimSpace(m.FallbackChannelID)
 	m.SystemPrompt = strings.TrimSpace(m.SystemPrompt)
 	if len(m.OfficialTools) == 0 {
 		m.OfficialTools = json.RawMessage("[]")
@@ -348,12 +350,12 @@ func UpdateModel(ctx context.Context, db *sql.DB, id string, m Model) (*Model, e
 		m.ImageTimeoutSec = 0 // 0 = no cap; never store a negative
 	}
 	_, err := db.ExecContext(ctx, `UPDATE models SET
-		channel_id=?, label=?, description=?, icon=?, request_id=?, kind=?, enabled=?, sort_order=?,
+		channel_id=?, label=?, description=?, icon=?, fallback_channel_id=?, request_id=?, kind=?, enabled=?, sort_order=?,
 		tool_mode=?, vision=?, stream=?, research_enabled=?, system_prompt=?, param_controls=?, official_tools=?, tags=?, moderation_enabled=?, moderation_mode=?,
 		price_input=?, price_output=?, price_cache_read=?, price_cache_write=?, price_per_image=?, currency=?,
 		dim=?, image_timeout_sec=?, updated_at=?
 		WHERE id=?`,
-		m.ChannelID, m.Label, m.Description, m.Icon, m.RequestID, m.Kind, boolInt(m.Enabled), m.SortOrder,
+		m.ChannelID, m.Label, m.Description, m.Icon, m.FallbackChannelID, m.RequestID, m.Kind, boolInt(m.Enabled), m.SortOrder,
 		m.ToolMode, boolInt(m.Vision), boolInt(m.Stream), boolInt(m.ResearchEnabled), m.SystemPrompt, string(m.ParamControls), string(m.OfficialTools), string(m.Tags), boolInt(m.ModerationEnabled), m.ModerationMode,
 		m.PriceInput, m.PriceOutput, m.PriceCacheRead, m.PriceCacheWrite, m.PricePerImage, m.Currency,
 		m.Dim, m.ImageTimeoutSec, time.Now().Unix(), id)

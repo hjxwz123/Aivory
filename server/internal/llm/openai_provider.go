@@ -39,16 +39,11 @@ func (p *OpenAIProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 }
 
 func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest, tools ToolRunner, onEvent func(SseEvent)) (*UnifiedResult, error) {
-	base := strings.TrimRight(req.Model.BaseURL, "/")
-	if base == "" {
-		base = "https://api.openai.com"
-	}
-
 	// §4.13 prompt-mode: no native function calling — drive the text protocol.
 	if req.ToolModePrompt {
 		_, blocks, usage, cites, err := RunPromptToolLoop(
 			ctx, req.SystemPrompt, req.History, req.Tools,
-			p.promptRunOnce(base, req), tools, onEvent,
+			p.promptRunOnce(req), tools, onEvent,
 		)
 		if err != nil {
 			return nil, err
@@ -137,11 +132,16 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest,
 		}
 		body = MergeParamControls(body, req.ParamControls, req.ParamOverrides)
 		raw, _ := json.Marshal(body)
-		httpReq, _ := http.NewRequestWithContext(ctx, "POST", base+"/v1/chat/completions", bytes.NewReader(raw))
-		httpReq.Header.Set("authorization", "Bearer "+req.Model.APIKey)
-		httpReq.Header.Set("content-type", "application/json")
-		httpReq.Header.Set("accept", "text/event-stream")
-		resp, err := providerHTTPClient.Do(httpReq)
+		resp, err := doProviderRequest(ctx, req.Model, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
+			hr, e := http.NewRequestWithContext(ctx, "POST", providerBaseURL(baseURL, "https://api.openai.com")+"/v1/chat/completions", bytes.NewReader(raw))
+			if e != nil {
+				return nil, e
+			}
+			hr.Header.Set("authorization", "Bearer "+apiKey)
+			hr.Header.Set("content-type", "application/json")
+			hr.Header.Set("accept", "text/event-stream")
+			return hr, nil
+		})
 		if err != nil {
 			return nil, err
 		}
@@ -245,7 +245,7 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest,
 
 // promptRunOnce returns a PromptToolRunner performing ONE Chat Completions
 // call (no native tools, stop on </tool_call>) for §4.13 prompt-mode.
-func (p *OpenAIProvider) promptRunOnce(base string, req UnifiedChatRequest) PromptToolRunner {
+func (p *OpenAIProvider) promptRunOnce(req UnifiedChatRequest) PromptToolRunner {
 	return func(ctx context.Context, history []UnifiedMessage, system string) (string, Usage, error) {
 		messages := []map[string]any{}
 		if system != "" {
@@ -275,11 +275,16 @@ func (p *OpenAIProvider) promptRunOnce(base string, req UnifiedChatRequest) Prom
 		}
 		body = MergeParamControls(body, req.ParamControls, req.ParamOverrides)
 		raw, _ := json.Marshal(body)
-		httpReq, _ := http.NewRequestWithContext(ctx, "POST", base+"/v1/chat/completions", bytes.NewReader(raw))
-		httpReq.Header.Set("authorization", "Bearer "+req.Model.APIKey)
-		httpReq.Header.Set("content-type", "application/json")
-		httpReq.Header.Set("accept", "text/event-stream")
-		resp, err := providerHTTPClient.Do(httpReq)
+		resp, err := doProviderRequest(ctx, req.Model, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
+			hr, e := http.NewRequestWithContext(ctx, "POST", providerBaseURL(baseURL, "https://api.openai.com")+"/v1/chat/completions", bytes.NewReader(raw))
+			if e != nil {
+				return nil, e
+			}
+			hr.Header.Set("authorization", "Bearer "+apiKey)
+			hr.Header.Set("content-type", "application/json")
+			hr.Header.Set("accept", "text/event-stream")
+			return hr, nil
+		})
 		if err != nil {
 			return "", Usage{}, err
 		}
@@ -455,10 +460,6 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 	if req.ToolModePrompt {
 		return p.streamChat(ctx, req, tools, onEvent)
 	}
-	base := strings.TrimRight(req.Model.BaseURL, "/")
-	if base == "" {
-		base = "https://api.openai.com"
-	}
 
 	// Build the input list from history.
 	input := []map[string]any{}
@@ -557,11 +558,16 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 		}
 		body = MergeParamControls(body, req.ParamControls, req.ParamOverrides)
 		raw, _ := json.Marshal(body)
-		httpReq, _ := http.NewRequestWithContext(ctx, "POST", base+"/v1/responses", bytes.NewReader(raw))
-		httpReq.Header.Set("authorization", "Bearer "+req.Model.APIKey)
-		httpReq.Header.Set("content-type", "application/json")
-		httpReq.Header.Set("accept", "text/event-stream")
-		resp, err := providerHTTPClient.Do(httpReq)
+		resp, err := doProviderRequest(ctx, req.Model, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
+			hr, e := http.NewRequestWithContext(ctx, "POST", providerBaseURL(baseURL, "https://api.openai.com")+"/v1/responses", bytes.NewReader(raw))
+			if e != nil {
+				return nil, e
+			}
+			hr.Header.Set("authorization", "Bearer "+apiKey)
+			hr.Header.Set("content-type", "application/json")
+			hr.Header.Set("accept", "text/event-stream")
+			return hr, nil
+		})
 		if err != nil {
 			return nil, err
 		}

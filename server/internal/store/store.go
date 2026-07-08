@@ -144,6 +144,14 @@ func Migrate(db *sql.DB) error {
 	addGroupMaxWorkspaces := `ALTER TABLE user_groups ADD COLUMN max_workspaces INTEGER NOT NULL DEFAULT 0`
 	// Whether the tier is listed on the public subscription page (§ user groups).
 	addGroupIsPublic := `ALTER TABLE user_groups ADD COLUMN is_public INTEGER NOT NULL DEFAULT 1`
+	// §fallback channel: per-model backup channel retried on primary request
+	// failure ('' = none); usage rows record which channel served the request,
+	// whether the fallback was used, and error requests are logged too.
+	addModelFallbackChannel := `ALTER TABLE models ADD COLUMN fallback_channel_id TEXT NOT NULL DEFAULT ''`
+	addUsageChannel := `ALTER TABLE usage_logs ADD COLUMN channel_id TEXT NOT NULL DEFAULT ''`
+	addUsageFallback := `ALTER TABLE usage_logs ADD COLUMN fallback INTEGER NOT NULL DEFAULT 0`
+	addUsageStatus := `ALTER TABLE usage_logs ADD COLUMN status TEXT NOT NULL DEFAULT 'ok'`
+	addUsageError := `ALTER TABLE usage_logs ADD COLUMN error TEXT NOT NULL DEFAULT ''`
 	if usePostgres {
 		schema = schemaPGSQL
 		addImageRef = `ALTER TABLE chunks ADD COLUMN IF NOT EXISTS image_ref TEXT`
@@ -188,6 +196,11 @@ func Migrate(db *sql.DB) error {
 		addUsageWorkspace = `ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS workspace_id TEXT NOT NULL DEFAULT ''`
 		addGroupMaxWorkspaces = `ALTER TABLE user_groups ADD COLUMN IF NOT EXISTS max_workspaces INTEGER NOT NULL DEFAULT 0`
 		addGroupIsPublic = `ALTER TABLE user_groups ADD COLUMN IF NOT EXISTS is_public INTEGER NOT NULL DEFAULT 1`
+		addModelFallbackChannel = `ALTER TABLE models ADD COLUMN IF NOT EXISTS fallback_channel_id TEXT NOT NULL DEFAULT ''`
+		addUsageChannel = `ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS channel_id TEXT NOT NULL DEFAULT ''`
+		addUsageFallback = `ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS fallback INTEGER NOT NULL DEFAULT 0`
+		addUsageStatus = `ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'ok'`
+		addUsageError = `ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS error TEXT NOT NULL DEFAULT ''`
 	}
 	if err := dedupeSkillNames(db); err != nil {
 		return fmt.Errorf("dedupe skill names: %w", err)
@@ -217,6 +230,7 @@ func Migrate(db *sql.DB) error {
 		addImageTimeout,
 		addMsgVerify,
 		addConvWorkspace, addProjWorkspace, addKBWorkspace, addMsgAuthor, addUsageWorkspace, addGroupMaxWorkspaces, addGroupIsPublic,
+		addModelFallbackChannel, addUsageChannel, addUsageFallback, addUsageStatus, addUsageError,
 	} {
 		_, _ = db.Exec(ddl)
 	}
@@ -262,9 +276,9 @@ func Migrate(db *sql.DB) error {
 	columnChecks := map[string][]string{
 		"messages":        {"credits", "model_label", "search_text", "gen_ms", "feedback", "verify", "author_id"},
 		"users":           {"group_id", "totp_secret", "totp_enabled", "group_expires_at", "previous_group_id", "password_set", "password_changed_at", "last_seen_at", "credits_permanent", "sort_order"},
-		"usage_logs":      {"credits", "workspace_id"},
+		"usage_logs":      {"credits", "workspace_id", "channel_id", "fallback", "status", "error"},
 		"user_groups":     {"max_projects", "max_kbs", "credit_allowance", "credit_period_seconds", "max_workspaces", "is_public"},
-		"models":          {"official_tools", "moderation_enabled", "moderation_mode", "tags", "image_timeout_sec", "research_enabled"},
+		"models":          {"official_tools", "moderation_enabled", "moderation_mode", "tags", "image_timeout_sec", "research_enabled", "fallback_channel_id"},
 		"refresh_tokens":  {"user_agent", "ip", "location", "last_seen"},
 		"conversations":   {"inline_source_conv", "inline_parent_id", "inline_quote", "workspace_id"},
 		"projects":        {"workspace_id"},

@@ -13,6 +13,7 @@
     "moveUp": "Monter",
     "moveDown": "Descendre",
     "cancel": "Annuler",
+    "close": "Fermer",
     "nameExists": "Un enregistrement portant ce nom existe déjà."
   },
   "icon": {
@@ -77,6 +78,9 @@
     },
     "fields": {
       "channel": "Canal",
+      "fallbackChannel": "Canal de secours",
+      "fallbackChannelHint": "Réessayé automatiquement lorsqu'une requête sur le canal principal échoue, avant que l'utilisateur ne voie une erreur. Doit correspondre au type et au format du principal — seuls l'URL et la clé diffèrent. Facultatif.",
+      "fallbackNone": "Aucun",
       "kind": "Type",
       "label": "Libellé d'affichage",
       "requestId": "request_id (envoyé à l'API)",
@@ -345,6 +349,7 @@
     "table": {
       "user": "Utilisateur",
       "model": "Modèle",
+      "channel": "Canal",
       "purpose": "Objet",
       "in": "Entrée",
       "out": "Sortie",
@@ -381,14 +386,23 @@
       "user": "Utilisateur",
       "userPlaceholder": "E-mail ou ID",
       "model": "Modèle",
-      "allModels": "Tous les modèles"
+      "allModels": "Tous les modèles",
+      "status": "Statut"
     },
     "deleteConfirm": {
       "title": "Supprimer ces enregistrements ?",
       "body": "Cela supprime définitivement les {{count}} enregistrement(s) correspondant au filtre. Action irréversible.",
       "action": "Supprimer"
     },
-    "workspaceTag": "WS"
+    "workspaceTag": "WS",
+    "fallbackTag": "Secours",
+    "fallbackTitle": "Servi par le canal de secours du modèle",
+    "errorDetail": { "title": "Erreur amont", "view": "Voir le détail de l'erreur", "none": "Aucun détail d'erreur n'a été enregistré pour cette requête." },
+    "statusError": "Erreur",
+    "status": {
+      "all": "Tous",
+      "errorsOnly": "Erreurs uniquement"
+    }
   },
   "documents": {
     "title": "Documents",
@@ -406,10 +420,7 @@
     "ragDynamicTopk": "Top-K dynamique (par similarité)",
     "ragDynamicTopkHint": "Au lieu d'un K fixe, injecte chaque passage dont la similarité dépasse le seuil.",
     "ragSimThreshold": "Seuil de similarité (0–1)",
-    "ragSimThresholdHint": "Seuil de similarité cosinus. Les passages au-dessus sont injectés.",
-    "preflightSection": "Pré-vérification des crédits",
-    "preflightLead": "Pour les tours facturés en crédits, estime la taille de la requête avant génération et refuse si l'utilisateur ne peut pas payer.",
-    "preflightEnabled": "Estimer et bloquer les requêtes non couvertes"
+    "ragSimThresholdHint": "Seuil de similarité cosinus. Les passages au-dessus sont injectés."
   },
   "tools": {
     "title": "Outils",
@@ -449,6 +460,8 @@
       "registerIpDailyLimitHint": "Nombre maximal de comptes qu'une adresse IP peut créer par jour. 0 = illimité.",
       "dailyMessageLimit": "Limite quotidienne de messages",
       "dailyImageLimit": "Limite quotidienne d'images",
+      "preflightLead": "Pour les tours facturés en crédits, estime la taille de la requête avant génération et refuse si l'utilisateur ne peut pas payer.",
+      "preflightEnabled": "Estimer et bloquer les requêtes non couvertes",
       "emailVerificationRequired": "Exiger la vérification de l'e-mail",
       "emailVerificationHint": "Les nouvelles inscriptions doivent vérifier leur e-mail avec un code à 6 chiffres avant de se connecter.",
       "domainWhitelist": "Domaines d'e-mail autorisés",

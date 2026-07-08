@@ -1,0 +1,145 @@
+package llm
+
+import (
+	"context"
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
+	"testing"
+)
+
+// TestRetryableUpstreamFailure pins the fallback trigger: transport errors and
+// the "a different endpoint/key might fix it" statuses retry; a 2xx/4xx-client
+// error and a caller cancellation do NOT (§fallback channel).
+func TestRetryableUpstreamFailure(t *testing.T) {
+	resp := func(code int) *http.Response { return &http.Response{StatusCode: code} }
+	cases := []struct {
+		name string
+		resp *http.Response
+		err  error
+		want bool
+	}{
+		{"transport error", nil, errors.New("dial tcp: connection refused"), true},
+		{"user cancel", nil, context.Canceled, false},
+		{"deadline", nil, context.DeadlineExceeded, false},
+		{"200 ok", resp(200), nil, false},
+		{"400 bad request", resp(400), nil, false}, // our request is malformed — fallback won't fix it
+		{"401 unauthorized", resp(401), nil, true}, // bad key on primary → other key may work
+		{"403 forbidden", resp(403), nil, true},
+		{"429 rate limited", resp(429), nil, true},
+		{"500 server error", resp(500), nil, true},
+		{"503 unavailable", resp(503), nil, true},
+		{"nil resp nil err", nil, nil, true}, // defensive: treat as failure
+	}
+	for _, c := range cases {
+		if got := retryableUpstreamFailure(c.resp, c.err); got != c.want {
+			t.Errorf("%s: retryableUpstreamFailure = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+func TestProviderBaseURL(t *testing.T) {
+	if got := providerBaseURL("", "https://api.openai.com"); got != "https://api.openai.com" {
+		t.Errorf("empty base = %q, want vendor default", got)
+	}
+	if got := providerBaseURL("https://proxy.example.com/", "https://api.openai.com"); got != "https://proxy.example.com" {
+		t.Errorf("trailing slash not trimmed: %q", got)
+	}
+}
+
+// TestDoProviderRequestFallback drives the retry end-to-end against two test
+// servers: a failing primary and a healthy fallback.
+func TestDoProviderRequestFallback(t *testing.T) {
+	ctx := context.Background()
+	build := func(reqBody string) func(baseURL, apiKey string) (*http.Request, error) {
+		return func(baseURL, apiKey string) (*http.Request, error) {
+			r, e := http.NewRequestWithContext(ctx, "POST", providerBaseURL(baseURL, "https://x")+"/v1/chat", nil)
+			if e != nil {
+				return nil, e
+			}
+			r.Header.Set("authorization", "Bearer "+apiKey)
+			return r, nil
+		}
+	}
+
+	// Primary always 500s; fallback returns the key it saw so we can prove the
+	// retry used the FALLBACK creds, not the primary's.
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(500)
+	}))
+	defer primary.Close()
+	fallback := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+		_, _ = io.WriteString(w, r.Header.Get("authorization"))
+	}))
+	defer fallback.Close()
+
+	// With a fallback configured, the 500 triggers the retry.
+	flag := new(atomic.Bool)
+	m := ModelInfo{BaseURL: primary.URL, APIKey: "primary-key",
+		Fallback: &ChannelCreds{BaseURL: fallback.URL, APIKey: "fallback-key"}}
+	resp, err := doProviderRequest(ctx, m, flag, build("x"))
+	if err != nil {
+		t.Fatalf("doProviderRequest err: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("status = %d, want 200 (fallback should have served)", resp.StatusCode)
+	}
+	if string(body) != "Bearer fallback-key" {
+		t.Errorf("fallback used the wrong key: %q", string(body))
+	}
+	if !flag.Load() {
+		t.Error("FallbackUsed flag not set after fallback served the request")
+	}
+
+	// No fallback configured → the 500 is returned as-is, flag stays false.
+	flag2 := new(atomic.Bool)
+	m2 := ModelInfo{BaseURL: primary.URL, APIKey: "primary-key"}
+	resp2, err2 := doProviderRequest(ctx, m2, flag2, build("x"))
+	if err2 != nil {
+		t.Fatalf("no-fallback err: %v", err2)
+	}
+	resp2.Body.Close()
+	if resp2.StatusCode != 500 {
+		t.Errorf("without fallback, status = %d, want 500 passthrough", resp2.StatusCode)
+	}
+	if flag2.Load() {
+		t.Error("FallbackUsed must stay false when no fallback is configured")
+	}
+}
+
+// TestDoProviderRequestPrimarySuccess: a healthy primary is used directly, the
+// fallback is never touched, and the flag stays false.
+func TestDoProviderRequestPrimarySuccess(t *testing.T) {
+	ctx := context.Background()
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+		_, _ = io.WriteString(w, "primary")
+	}))
+	defer primary.Close()
+	fallbackHit := false
+	fallback := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fallbackHit = true
+		w.WriteHeader(200)
+	}))
+	defer fallback.Close()
+
+	flag := new(atomic.Bool)
+	m := ModelInfo{BaseURL: primary.URL, APIKey: "k",
+		Fallback: &ChannelCreds{BaseURL: fallback.URL, APIKey: "k2"}}
+	resp, err := doProviderRequest(ctx, m, flag, func(baseURL, apiKey string) (*http.Request, error) {
+		return http.NewRequestWithContext(ctx, "POST", baseURL+"/x", nil)
+	})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if string(body) != "primary" || flag.Load() || fallbackHit {
+		t.Errorf("primary success should not touch fallback: body=%q flag=%v hit=%v", body, flag.Load(), fallbackHit)
+	}
+}

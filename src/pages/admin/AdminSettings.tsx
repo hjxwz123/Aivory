@@ -38,6 +38,7 @@ const OWNED_KEYS = [
   'register_captcha_required',
   'daily_message_limit',
   'daily_image_limit',
+  'credit_preflight_enabled',
   'email_verification_required',
   'email_domain_whitelist',
   'smtp_host',
@@ -335,6 +336,18 @@ export default function AdminSettings() {
                 onChange={(e) => setDraft({ ...draft, daily_image_limit: Number(e.target.value) })}
               />
             </Field>
+          </div>
+
+          {/* Credit pre-flight — a billing/quota policy, lives with the daily limits */}
+          <div>
+            <ToggleRow
+              label={t('admin:settings.fields.preflightEnabled')}
+              checked={readBool('credit_preflight_enabled', true)}
+              onChange={(v) => setDraft({ ...draft, credit_preflight_enabled: v })}
+            />
+            <p className="text-xs text-[var(--color-fg-subtle)] mt-2 pl-1">
+              {t('admin:settings.fields.preflightLead')}
+            </p>
           </div>
 
           {/* Email verification + domain whitelist */}

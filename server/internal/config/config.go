@@ -16,36 +16,47 @@ const defaultDevJWTSecret = "dev-secret-change-me-aurelia-2026"
 
 // Config holds the resolved environment for one server process.
 type Config struct {
-	Listen           string
-	Env              string
-	DatabaseURL      string
-	RedisURL         string
-	QdrantURL        string
-	QdrantAPIKey     string
-	JWTSecret        string
+	Listen       string
+	Env          string
+	DatabaseURL  string
+	RedisURL     string
+	QdrantURL    string
+	QdrantAPIKey string
+	JWTSecret    string
 	// JWTSecretEphemeral is true when JWT_SECRET was not provided and a random
 	// secret was minted at boot (dev/local only). Sessions reset on restart.
 	JWTSecretEphemeral bool
 	AccessTTL          time.Duration
-	RefreshTTL       time.Duration
-	AllowedOrigins   []string
-	StaticDir        string
-	UploadDir        string
-	ArtifactDir      string
-	MaxUploadBytes   int64
-	DailyMessages    int
-	DailyImages      int
-	SearchProvider   string
-	SearchAPIKey     string
-	SearchBaseURL    string
-	EmbeddingBaseURL string
-	EmbeddingAPIKey  string
-	EmbeddingModel   string
-	EmbeddingDim     int
-	SandboxBaseURL   string
-	SandboxAPIKey    string
-	MinerUAPIURL     string
-	MinerUAPIKey     string
+	RefreshTTL         time.Duration
+	AllowedOrigins     []string
+	StaticDir          string
+	UploadDir          string
+	ArtifactDir        string
+	MaxUploadBytes     int64
+	DailyMessages      int
+	DailyImages        int
+	SearchProvider     string
+	SearchAPIKey       string
+	SearchBaseURL      string
+	EmbeddingBaseURL   string
+	EmbeddingAPIKey    string
+	EmbeddingModel     string
+	EmbeddingDim       int
+	SandboxBaseURL     string
+	SandboxAPIKey      string
+	MinerUAPIURL       string
+	MinerUAPIKey       string
+	// OAuthCallbackBaseURL pins the ONE scheme://host whose OAuth callback path is
+	// registered with the providers (domain A). When the site answers on several
+	// domains but the provider only accepts a single redirect_uri, set this so every
+	// flow — no matter which domain it starts on — hands the provider the callback
+	// it trusts. Empty = derive from the request host (single-domain deployments).
+	OAuthCallbackBaseURL string
+	// OAuthReturnOrigins is the allowlist of scheme://host values a login may be
+	// bounced back to after completing on the canonical host (the site's bound
+	// domains: A, B, C…). It is the open-redirect guard for the cross-domain
+	// hand-off — only an exact match here may be a redirect target.
+	OAuthReturnOrigins []string
 }
 
 // Load reads environment variables, applying production-safe defaults so the
@@ -70,23 +81,25 @@ func Load() Config {
 		// also serves the frontend from the SAME origin (single-container deploy),
 		// so there is no cross-origin and any domain the server is reached on just
 		// works. Empty = API-only (dev with the Vite proxy, or a separate web tier).
-		StaticDir:        getenv("STATIC_DIR", ""),
-		UploadDir:        getenv("UPLOAD_DIR", "./data/uploads"),
-		ArtifactDir:      getenv("ARTIFACT_DIR", "./data/artifacts"),
-		MaxUploadBytes:   getenvInt64("MAX_UPLOAD_BYTES", 50*1024*1024),
-		DailyMessages:    getenvInt("DAILY_MESSAGE_LIMIT", 200),
-		DailyImages:      getenvInt("IMAGE_DAILY_LIMIT", 30),
-		SearchProvider:   getenv("SEARCH_PROVIDER", ""),
-		SearchAPIKey:     getenv("SEARCH_API_KEY", ""),
-		SearchBaseURL:    getenv("SEARCH_BASE_URL", ""),
-		EmbeddingBaseURL: getenv("EMBEDDING_BASE_URL", ""),
-		EmbeddingAPIKey:  getenv("EMBEDDING_API_KEY", ""),
-		EmbeddingModel:   getenv("EMBEDDING_MODEL", "text-embedding-3-small"),
-		EmbeddingDim:     getenvInt("EMBEDDING_DIM", 1536),
-		SandboxBaseURL:   getenv("SANDBOX_BASE_URL", ""),
-		SandboxAPIKey:    getenv("SANDBOX_API_KEY", ""),
-		MinerUAPIURL:     getenv("MINERU_API_URL", ""),
-		MinerUAPIKey:     getenv("MINERU_API_KEY", ""),
+		StaticDir:            getenv("STATIC_DIR", ""),
+		UploadDir:            getenv("UPLOAD_DIR", "./data/uploads"),
+		ArtifactDir:          getenv("ARTIFACT_DIR", "./data/artifacts"),
+		MaxUploadBytes:       getenvInt64("MAX_UPLOAD_BYTES", 50*1024*1024),
+		DailyMessages:        getenvInt("DAILY_MESSAGE_LIMIT", 200),
+		DailyImages:          getenvInt("IMAGE_DAILY_LIMIT", 30),
+		SearchProvider:       getenv("SEARCH_PROVIDER", ""),
+		SearchAPIKey:         getenv("SEARCH_API_KEY", ""),
+		SearchBaseURL:        getenv("SEARCH_BASE_URL", ""),
+		EmbeddingBaseURL:     getenv("EMBEDDING_BASE_URL", ""),
+		EmbeddingAPIKey:      getenv("EMBEDDING_API_KEY", ""),
+		EmbeddingModel:       getenv("EMBEDDING_MODEL", "text-embedding-3-small"),
+		EmbeddingDim:         getenvInt("EMBEDDING_DIM", 1536),
+		SandboxBaseURL:       getenv("SANDBOX_BASE_URL", ""),
+		SandboxAPIKey:        getenv("SANDBOX_API_KEY", ""),
+		MinerUAPIURL:         getenv("MINERU_API_URL", ""),
+		MinerUAPIKey:         getenv("MINERU_API_KEY", ""),
+		OAuthCallbackBaseURL: strings.TrimRight(getenv("OAUTH_CALLBACK_BASE_URL", ""), "/"),
+		OAuthReturnOrigins:   getenvList("OAUTH_RETURN_ORIGINS", nil),
 	}
 	_ = os.MkdirAll(cfg.UploadDir, 0o755)
 	_ = os.MkdirAll(cfg.ArtifactDir, 0o755)

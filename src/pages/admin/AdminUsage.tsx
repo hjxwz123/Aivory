@@ -36,6 +36,7 @@ export default function AdminUsage() {
   const [userQ, setUserQ] = useState('')
   const [userQDebounced, setUserQDebounced] = useState('')
   const [modelId, setModelId] = useState(ALL_MODELS)
+  const [status, setStatus] = useState('all')
 
   const [records, setRecords] = useState<ApiUsageRecord[]>([])
   const [total, setTotal] = useState(0)
@@ -46,6 +47,8 @@ export default function AdminUsage() {
   const [page, setPage] = useState(1)
   const [confirmBulk, setConfirmBulk] = useState(false)
   const [busy, setBusy] = useState(false)
+  // The failed-request record whose upstream error detail is being viewed (§usage errors).
+  const [errorDetail, setErrorDetail] = useState<ApiUsageRecord | null>(null)
 
   // Debounce the free-text user filter so we don't refetch on every keystroke.
   useEffect(() => {
@@ -59,8 +62,9 @@ export default function AdminUsage() {
       days: Number(days),
       user: userQDebounced || undefined,
       model: modelId === ALL_MODELS ? undefined : modelId,
+      status: status === 'all' ? undefined : status,
     }),
-    [days, userQDebounced, modelId],
+    [days, userQDebounced, modelId, status],
   )
 
   const load = useCallback(async () => {
@@ -99,7 +103,7 @@ export default function AdminUsage() {
   // Any filter change resets to the first page.
   useEffect(() => {
     setPage(1)
-  }, [days, userQDebounced, modelId])
+  }, [days, userQDebounced, modelId, status])
 
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE))
   const timeFmt = useMemo(
@@ -207,6 +211,18 @@ export default function AdminUsage() {
             </SelectContent>
           </Select>
         </div>
+        <div className="w-44">
+          <label className="block text-[12px] text-[var(--color-fg-subtle)] mb-1">{t('usage.filters.status', { defaultValue: 'Status' })}</label>
+          <Select value={status} onValueChange={setStatus}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">{t('usage.status.all', { defaultValue: 'All' })}</SelectItem>
+              <SelectItem value="error">{t('usage.status.errorsOnly', { defaultValue: 'Errors only' })}</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
       </section>
 
       <section className="mt-6 grid grid-cols-2 gap-3">
@@ -223,13 +239,14 @@ export default function AdminUsage() {
           </div>
         ) : (
           <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] overflow-x-auto">
-            <table className="min-w-[720px] w-full text-sm tabular-nums">
+            <table className="min-w-[820px] w-full text-sm tabular-nums">
               <thead className="bg-[var(--color-bg-muted)] text-[12px] text-[var(--color-fg-subtle)]">
                 <tr>
                   <th className="text-left py-2.5 px-4 font-medium">{t('usage.table.time', { defaultValue: 'Time' })}</th>
                   <th className="text-left py-2.5 px-4 font-medium">{t('usage.table.user')}</th>
                   <th className="text-left py-2.5 px-4 font-medium">{t('usage.table.conversation', { defaultValue: 'Conversation' })}</th>
                   <th className="text-left py-2.5 px-4 font-medium">{t('usage.table.model')}</th>
+                  <th className="text-left py-2.5 px-4 font-medium">{t('usage.table.channel', { defaultValue: 'Channel' })}</th>
                   <th className="text-left py-2.5 px-4 font-medium">{t('usage.table.purpose')}</th>
                   <th className="text-right py-2.5 px-4 font-medium">{t('usage.table.in')}</th>
                   <th className="text-right py-2.5 px-4 font-medium">{t('usage.table.out')}</th>
@@ -268,7 +285,40 @@ export default function AdminUsage() {
                       ) : null}
                     </td>
                     <td className="py-2 px-4 text-[12px]">{modelLabel(r.model_id)}</td>
-                    <td className="py-2 px-4 text-[var(--color-fg-muted)]">{purposeLabel(r.purpose)}</td>
+                    <td className="py-2 px-4 text-[12px]">
+                      {r.channel_name || r.channel_id ? (
+                        <span className="inline-flex items-center gap-1">
+                          <span className="truncate max-w-[8rem] text-[var(--color-fg-muted)]" title={r.channel_name || r.channel_id}>
+                            {r.channel_name || r.channel_id}
+                          </span>
+                          {r.fallback ? (
+                            <span
+                              className="rounded-full border border-[var(--color-warning)] px-1.5 text-[10px] text-[var(--color-warning)]"
+                              title={t('usage.fallbackTitle', { defaultValue: 'Served by the model’s fallback channel' })}
+                            >
+                              {t('usage.fallbackTag', { defaultValue: 'Fallback' })}
+                            </span>
+                          ) : null}
+                        </span>
+                      ) : (
+                        <span className="text-[var(--color-fg-faint)]">—</span>
+                      )}
+                    </td>
+                    <td className="py-2 px-4 text-[var(--color-fg-muted)]">
+                      <span className="inline-flex items-center gap-1.5">
+                        {purposeLabel(r.purpose)}
+                        {r.status === 'error' ? (
+                          <button
+                            type="button"
+                            onClick={() => setErrorDetail(r)}
+                            title={t('usage.errorDetail.view', { defaultValue: 'View error detail' })}
+                            className="rounded-full bg-[var(--color-danger-soft)] px-1.5 text-[10px] text-[var(--color-danger)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                          >
+                            {t('usage.statusError', { defaultValue: 'Error' })}
+                          </button>
+                        ) : null}
+                      </span>
+                    </td>
                     <td className="py-2 px-4 text-right">{r.input_tokens}</td>
                     <td className="py-2 px-4 text-right">{r.output_tokens}</td>
                     <td className="py-2 px-4 text-right">${r.cost.toFixed(4)}</td>
@@ -291,6 +341,28 @@ export default function AdminUsage() {
         )}
         {!loading && total > PAGE_SIZE ? <Pagination page={page} pageCount={pageCount} onPage={setPage} /> : null}
       </section>
+
+      <Dialog open={!!errorDetail} onOpenChange={(o) => !o && setErrorDetail(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('usage.errorDetail.title', { defaultValue: 'Upstream error' })}</DialogTitle>
+            <DialogDescription>
+              {errorDetail
+                ? `${modelLabel(errorDetail.model_id)} · ${errorDetail.channel_name || errorDetail.channel_id || '—'}`
+                : ''}
+            </DialogDescription>
+          </DialogHeader>
+          <pre className="max-h-[50vh] overflow-auto rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-3 text-[12px] leading-relaxed text-[var(--color-fg-muted)] whitespace-pre-wrap break-words">
+            {errorDetail?.error ||
+              t('usage.errorDetail.none', { defaultValue: 'No error detail was recorded for this request.' })}
+          </pre>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setErrorDetail(null)}>
+              {t('common.close', { defaultValue: 'Close' })}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={confirmBulk} onOpenChange={setConfirmBulk}>
         <DialogContent size="sm">
