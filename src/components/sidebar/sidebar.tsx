@@ -158,6 +158,10 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
     hasImageModels &&
     location.pathname === '/' &&
     new URLSearchParams(location.search).get('mode') === 'draw'
+  // "New chat" is the current page ONLY on the plain new-chat home ('/', not
+  // draw mode). Elsewhere (/chat/:id, /projects, /kb, …) it's just an action,
+  // not the selected entry — so it must not keep a permanent "selected" fill.
+  const newChatActive = location.pathname === '/' && !drawActive
   const recentProjects = useMemo(
     () =>
       projects
@@ -280,13 +284,14 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
           <button
             type="button"
             onClick={() => void startNewChat()}
+            aria-current={newChatActive ? 'page' : undefined}
             className={cn(
               'inline-flex items-center gap-2 h-9 max-lg:h-[var(--tap-min)] rounded-[10px] text-sm font-medium',
-              // While Draw is the active destination the highlight belongs to
-              // it — drop the CTA fill so two rows never read as selected.
-              drawActive
-                ? 'border border-transparent text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]'
-                : 'bg-[var(--color-bg-muted)] border border-[var(--color-border-strong)] text-[var(--color-fg)] hover:bg-[var(--color-bg)] hover:border-[var(--color-border-strong)]',
+              // Filled "selected" look ONLY on the new-chat home; a plain nav row
+              // everywhere else so it never reads as selected on /chat, /projects…
+              newChatActive
+                ? 'bg-[var(--color-bg-muted)] border border-[var(--color-border-strong)] text-[var(--color-fg)] hover:bg-[var(--color-bg)] hover:border-[var(--color-border-strong)]'
+                : 'border border-transparent text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
               'interactive',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
               collapsed ? 'w-9 justify-center px-0' : 'w-full justify-between px-3',

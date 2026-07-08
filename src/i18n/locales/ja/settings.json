@@ -183,7 +183,8 @@
       "narrow": "狭い",
       "comfortable": "中央寄せ",
       "wide": "広い",
-      "full": "全幅"
+      "full": "全幅",
+      "max": "特大幅"
     },
     "userMessageMarkdown": {
       "label": "自分のメッセージの Markdown",

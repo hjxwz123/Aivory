@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log"
+	"os"
 	"strings"
 	"time"
 )
@@ -174,6 +176,20 @@ func SetKBEmbeddingDim(ctx context.Context, db *sql.DB, kbID string, dim int) er
 // the deleted KB's ID from the kb_ids JSON array in all conversations so stale
 // references don't cause retrieval errors (§ FIX-5).
 func DeleteKB(ctx context.Context, db *sql.DB, id, userID string) error {
+	// Collect the KB's document files BEFORE the delete so we can remove them
+	// from disk afterwards — the DB rows cascade away (documents → chunks via
+	// FK ON DELETE CASCADE), but the stored files on disk would otherwise be
+	// orphaned. Best-effort; a query error just skips disk cleanup.
+	var diskPaths []string
+	if rows, qerr := db.QueryContext(ctx, `SELECT storage_path FROM documents WHERE kb_id=? AND storage_path<>''`, id); qerr == nil {
+		for rows.Next() {
+			var p string
+			if rows.Scan(&p) == nil && p != "" {
+				diskPaths = append(diskPaths, p)
+			}
+		}
+		rows.Close()
+	}
 	// Owner, or any member of the KB's workspace (§workspaces — members manage
 	// shared KBs collaboratively).
 	res, err := db.ExecContext(ctx, `DELETE FROM knowledge_bases WHERE id=? AND (user_id=? OR (COALESCE(workspace_id,'')<>'' AND workspace_id IN (SELECT workspace_id FROM workspace_members WHERE user_id=?)))`, id, userID, userID)
@@ -183,6 +199,13 @@ func DeleteKB(ctx context.Context, db *sql.DB, id, userID string) error {
 	n, _ := res.RowsAffected()
 	if n == 0 {
 		return ErrNotFound
+	}
+	// The KB row (and, via cascade, its documents + chunks) is gone — now remove
+	// the document files from disk. Best-effort: a missing file is harmless.
+	for _, p := range diskPaths {
+		if rmErr := os.Remove(p); rmErr != nil && !os.IsNotExist(rmErr) {
+			log.Printf("delete kb %s: remove file %q: %v", id, p, rmErr)
+		}
 	}
 	// Clean up kb_ids references in conversations. kb_ids is stored as a JSON
 	// TEXT array in both SQLite and Postgres. We use json_each to rebuild the

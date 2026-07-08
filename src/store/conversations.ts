@@ -132,7 +132,19 @@ interface ConversationStore {
     imageStyleId?: string
     /** §verify: enable Verify mode for this turn (a second model audits the answer). */
     verify?: boolean
+    /** Home "instant send": the conversation is an OPTIMISTIC local placeholder
+     *  (temp id) — create the real one server-side FIRST, re-key the cache to
+     *  its id, then stream. Lets the home page navigate to the thread the moment
+     *  the user hits send instead of waiting on the create round-trip. */
+    createFirst?: boolean
+    /** Fires with the real conversation id once `createFirst` has created it, so
+     *  the caller can swap the temp id in the URL (navigate replace). */
+    onConversationId?: (realId: string) => void
   }) => Promise<void>
+  /** Insert an OPTIMISTIC (client-only, temp id) conversation so the home page
+   *  can navigate to its thread instantly; the real one is created on send via
+   *  sendMessage({ createFirst }). Returns the temp id. */
+  beginOptimisticConversation: (text: string, modelId?: string) => string
   regenerate: (conversationId: string, assistantId: string, modelId?: string) => Promise<void>
   /** Edit a user message's text IN PLACE — overwrite, no new branch, no
    *  regeneration (§4.15 "save" vs "save & resend"). */
@@ -321,6 +333,26 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
     const conv = toLocalConversation(row)
     set((s) => ({ conversations: replaceOrPrepend(s.conversations, conv) }))
     return conv
+  },
+
+  beginOptimisticConversation(text, modelId) {
+    const id = uid('c')
+    const now = Date.now()
+    const conv: Conversation = {
+      id,
+      // Seed the first-message title so the sidebar/header read right instantly;
+      // the backend's clip/title model overwrites it after the turn settles.
+      title: text.replace(/\s+/g, ' ').trim().slice(0, 60) || 'New conversation',
+      createdAt: now,
+      updatedAt: now,
+      modelId: modelId ?? '',
+      // Tag the active space so the sidebar (which filters by workspace) shows
+      // the new chat immediately; the create + re-key confirms it server-side.
+      workspaceId: activeWorkspaceId() || undefined,
+      messages: [],
+    }
+    set((s) => ({ conversations: [conv, ...s.conversations] }))
+    return id
   },
 
   async deleteConversation(id) {
@@ -669,6 +701,50 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
         }
       }),
     }))
+    // Home "instant send": the seed above ran against an OPTIMISTIC conversation
+    // (temp id) so the thread could render immediately. Now create the REAL
+    // conversation server-side, re-key the cache to its id, and point the rest of
+    // this function (SSE URL + every updateAssistant/reload below) at it by
+    // mutating input.conversationId. Done BEFORE the stream starts so the id is
+    // stable for the whole SSE loop — no mid-stream re-key.
+    if (input.createFirst) {
+      let created
+      try {
+        created = await conversationsApi.create({
+          model_id: input.modelId || undefined,
+          workspace_id: activeWorkspaceId(),
+        })
+      } catch {
+        // Create failed — settle the optimistic turn as an error (the SSE would
+        // 404 against the temp id anyway) and stop. The user keeps their message
+        // with a retry affordance.
+        updateAssistant(set, input.conversationId, assistantId, (m) => ({
+          ...m,
+          streaming: false,
+          error: 'Could not start the conversation. Please try again.',
+        }))
+        streamControllers.delete(assistantId)
+        return
+      }
+      const tempId = input.conversationId
+      const realId = created.id
+      // Re-key the cache entry to the real id AND fold in the server row's
+      // metadata (workspace_id, project_id, model, …) — keeping the optimistic
+      // messages + first-message title — so the sidebar filter (workspace) and
+      // header read right immediately, without waiting on the remount's loadOne.
+      const meta = toLocalConversation(created)
+      set((s) => ({
+        conversations: s.conversations.map((c) =>
+          c.id === tempId
+            ? { ...meta, messages: c.messages, title: c.title || meta.title, updatedAt: Math.max(c.updatedAt, meta.updatedAt) }
+            : c,
+        ),
+      }))
+      input.conversationId = realId
+      // Swap the temp id in the URL for the real one (navigate replace), so a
+      // refresh/share resolves and the thread keeps rendering (it re-keyed too).
+      input.onConversationId?.(realId)
+    }
     // Hoisted out of the try so the catch below targets the message by its
     // CURRENT id: after `message_start` the message is re-keyed to the backend
     // id, and a mid-stream network drop must patch THAT id (else streaming:true

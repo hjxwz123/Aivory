@@ -188,7 +188,7 @@ export default function ChatThread() {
   // the view part-way up — which, with the lazy window, reads as the oldest message.
   const pinToBottom = useCallback(() => {
     const el = scrollRef.current
-    if (!el) return () => {}
+    if (!el) return () => { }
     const pin = () => {
       el.scrollTop = el.scrollHeight
     }

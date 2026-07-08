@@ -5,7 +5,7 @@ import { activeWorkspaceId, useWorkspaces } from '@/store/workspaces'
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { Plus, Database } from 'lucide-react'
+import { Plus, Database, MoreHorizontal, Trash2 } from 'lucide-react'
 import { ApiError, kbsApi, modelsApi } from '@/api'
 import type { ApiKnowledgeBase, ApiModel } from '@/api/types'
 import { Button } from '@/components/ui/button'
@@ -15,6 +15,12 @@ import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { EmptyState } from '@/components/ui/empty-state'
 import { ContentHeader } from '@/components/layout/content-header'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import {
   Dialog,
   DialogBody,
@@ -40,6 +46,10 @@ export default function KnowledgeBasesList() {
   const [draft, setDraft] = useState({ name: '', description: '', embedding_model_id: '' })
   const [creating, setCreating] = useState(false)
   const creatingRef = useRef(false)
+  // Delete-KB confirmation (removes the KB + its documents/vectors, and
+  // auto-unbinds it from any conversation that referenced it — server-side).
+  const [toDelete, setToDelete] = useState<ApiKnowledgeBase | null>(null)
+  const [deleting, setDeleting] = useState(false)
   // Stale-response guard for the space-switch reloads: a slow earlier space's
   // response must never overwrite the current space's rows (same epoch pattern
   // as the conversations/projects stores).
@@ -69,6 +79,21 @@ export default function KnowledgeBasesList() {
     void load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeWsId, wsSwitching])
+
+  async function doDelete() {
+    if (!toDelete) return
+    setDeleting(true)
+    try {
+      await kbsApi.remove(toDelete.id)
+      toast.success(t('kb:deleted', { defaultValue: 'Knowledge base deleted' }))
+      setToDelete(null)
+      await load()
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : t('common:common.error'))
+    } finally {
+      setDeleting(false)
+    }
+  }
 
   async function create() {
     if (creatingRef.current) return
@@ -131,12 +156,12 @@ export default function KnowledgeBasesList() {
           ) : (
             <ul className="flex flex-col divide-y divide-[var(--color-divider)]">
               {rows.map((kb) => (
-                <li key={kb.id}>
+                <li key={kb.id} className="group/kb relative">
                   <Link
                     to={`/kb/${kb.id}`}
                     className="grid grid-cols-[1fr_180px] items-baseline gap-x-6 px-4 sm:px-6 -mx-4 sm:-mx-6 py-7 rounded-[12px] interactive hover:bg-[var(--color-bg-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
                   >
-                    <div className="min-w-0">
+                    <div className="min-w-0 pr-10">
                       <h3 className="text-[22px] leading-[1.15] tracking-tight text-[var(--color-fg)] truncate">
                         {kb.name}
                       </h3>
@@ -153,6 +178,26 @@ export default function KnowledgeBasesList() {
                       </time>
                     </div>
                   </Link>
+                  {/* Row actions — kept OUTSIDE the Link so a menu click never
+                      navigates into the KB. Revealed on hover / focus. */}
+                  <div className="absolute right-1 top-4">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <button
+                          type="button"
+                          aria-label={t('common:actions.more', { defaultValue: 'More' })}
+                          className="inline-flex items-center justify-center size-8 rounded-[8px] text-[var(--color-fg-subtle)] opacity-0 group-hover/kb:opacity-100 focus-visible:opacity-100 hover:bg-[var(--color-bg)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                        >
+                          <MoreHorizontal size={16} aria-hidden />
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem destructive onSelect={() => setToDelete(kb)}>
+                          <Trash2 size={13} aria-hidden /> {t('common:actions.delete')}
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
                 </li>
               ))}
             </ul>
@@ -209,6 +254,29 @@ export default function KnowledgeBasesList() {
               {t('common:actions.cancel')}
             </Button>
             <Button onClick={() => void create()} loading={creating}>{t('kb:dialog.create')}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={toDelete !== null} onOpenChange={(o) => { if (!o) setToDelete(null) }}>
+        <DialogContent size="sm">
+          <DialogHeader>
+            <DialogTitle>{t('kb:deleteTitle', { defaultValue: 'Delete knowledge base?' })}</DialogTitle>
+            <DialogDescription>
+              {t('kb:deleteBody', {
+                name: toDelete?.name ?? '',
+                defaultValue:
+                  'This permanently deletes “{{name}}”, all its documents and their embeddings. Conversations that reference it will be unlinked. This cannot be undone.',
+              })}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setToDelete(null)} disabled={deleting}>
+              {t('common:actions.cancel')}
+            </Button>
+            <Button variant="destructive" loading={deleting} onClick={() => void doDelete()}>
+              {t('common:actions.delete')}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

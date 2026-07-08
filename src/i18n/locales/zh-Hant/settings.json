@@ -183,7 +183,8 @@
       "narrow": "窄",
       "comfortable": "置中",
       "wide": "寬",
-      "full": "全寬"
+      "full": "全寬",
+      "max": "超寬"
     },
     "userMessageMarkdown": {
       "label": "使用者訊息 Markdown",
