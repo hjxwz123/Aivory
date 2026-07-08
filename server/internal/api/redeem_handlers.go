@@ -17,12 +17,12 @@ import (
 //
 // Error mapping (so the frontend can show specific messages):
 //
-//   400  empty                — `errInvalidInput`
-//   404  invalid              — `code_invalid`
-//   410  expired              — `code_expired`
-//   409  used                 — `code_used`
-//   409  already redeemed     — `code_already_owned`
-//   403  disabled             — `code_disabled`
+//	400  empty                — `errInvalidInput`
+//	404  invalid              — `code_invalid`
+//	410  expired              — `code_expired`
+//	409  used                 — `code_used`
+//	409  already redeemed     — `code_already_owned`
+//	403  disabled             — `code_disabled`
 func redeemCodeHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
 	var body struct {
@@ -79,6 +79,7 @@ func redeemCodeHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	invalidateAuthUser(d, u.ID)
 
 	// Resolve the group's display name so the success toast can say
 	// "You're now on VIP" without a second request.

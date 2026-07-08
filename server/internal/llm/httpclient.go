@@ -68,6 +68,7 @@ func doProviderRequest(
 	if err != nil {
 		return nil, err
 	}
+	armProviderTTFTWatchdog(ctx)
 	resp, err := providerHTTPClient.Do(primaryReq)
 	if m.Fallback == nil || !retryableUpstreamFailure(resp, err) {
 		return resp, err
@@ -84,6 +85,7 @@ func doProviderRequest(
 	if resp != nil && resp.Body != nil {
 		_ = resp.Body.Close()
 	}
+	armProviderTTFTWatchdog(ctx)
 	resp2, err2 := providerHTTPClient.Do(fbReq)
 	// The fallback endpoint served the (final) response — mark the turn fallback
 	// whether or not it ultimately succeeded, so an error row is still attributed

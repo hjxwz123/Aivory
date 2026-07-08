@@ -511,7 +511,7 @@
       "ossAccessKeyId": "AccessKey ID",
       "ossAccessKeySecret": "AccessKey Secret",
       "mineruSection": "Analyse de documents (MinerU)",
-      "mineruLead": "Les fichiers non textuels (PDF/Office/images) sont analysés par MinerU via votre bucket.",
+      "mineruLead": "Les fichiers non textuels (PDF/Office/images) sont analysés par MinerU via votre bucket ; définissez aussi sandbox_base_url dans Outils pour que le backend téléverse via le sidecar sandbox et crée des URL présignées.",
       "mineruBaseUrl": "URL de base MinerU",
       "mineruBaseUrlHint": "Par défaut : https://mineru.net. Ou votre passerelle.",
       "mineruToken": "Jeton d'API",

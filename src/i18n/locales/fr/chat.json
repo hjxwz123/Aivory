@@ -94,6 +94,9 @@
     "ragFullText": "Document(s) intégral/intégraux injecté(s)",
     "ragFullDoc": "Contexte du document entier",
     "ragNone": "Récupération ignorée",
+    "ragIndexing": "Indexation du document",
+    "ragIndexingDone": "Document indexé",
+    "ragWarning": "Avertissement de récupération",
     "ragDefault": "Sources récupérées",
     "moderation": {
       "title": "Contenu bloqué",

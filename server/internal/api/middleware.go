@@ -59,7 +59,7 @@ func requireAuth(d Deps, h handler) http.HandlerFunc {
 			writeError(w, http.StatusUnauthorized, errAuthRequired)
 			return
 		}
-		user, err := store.FindUserByID(r.Context(), d.DB, claims.UID)
+		user, err := cachedAuthUser(r.Context(), d, claims.UID)
 		if err != nil {
 			writeError(w, http.StatusUnauthorized, errAuthRequired)
 			return

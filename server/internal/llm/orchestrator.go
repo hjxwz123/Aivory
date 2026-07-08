@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"aurelia/server/internal/cache"
+	"aurelia/server/internal/msgcache"
 	"aurelia/server/internal/queue"
 	"aurelia/server/internal/rag"
 	"aurelia/server/internal/store"
@@ -274,7 +275,10 @@ type RunResult struct {
 }
 
 // streamWithFallback runs provider.Stream behind a time-to-first-token (TTFT)
-// watchdog. If the upstream emits NOTHING within the admin-configured
+// watchdog. The timer is armed by doProviderRequest immediately before the
+// provider HTTP call, so it measures provider API request -> first streamed
+// event and excludes RAG retrieval, context assembly, credit preflight and local
+// payload construction. If the upstream emits NOTHING within the admin-configured
 // `fallback_ttft_sec`, the connection is cut and the SAME assistant message is
 // re-generated with the admin-configured `fallback_model_id` — transparently,
 // since the user has only seen `message_start` (no text yet). Only triggers
@@ -304,17 +308,9 @@ func (o *Orchestrator) streamWithFallback(
 		onEvent(ev)
 	}
 	var stalled atomic.Bool
-	go func() {
-		timer := time.NewTimer(time.Duration(ttft) * time.Second)
-		defer timer.Stop()
-		select {
-		case <-firstEvent: // upstream is alive — disarm
-		case <-wdCtx.Done(): // stream finished / parent cancelled
-		case <-timer.C:
-			stalled.Store(true)
-			cancel() // cut the upstream; provider.Stream returns ctx.Canceled
-		}
-	}()
+	watchdog := newProviderTTFTWatchdog(time.Duration(ttft)*time.Second, cancel, firstEvent, &stalled)
+	defer watchdog.stop()
+	wdCtx = contextWithProviderTTFTWatchdog(wdCtx, watchdog)
 
 	result, err := provider.Stream(wdCtx, provReq, runner, wrapped)
 	// Healthy completion, or a real user cancel on the PARENT ctx → return as-is.
@@ -409,6 +405,48 @@ func truncErr(s string) string {
 		r = r[:max]
 	}
 	return string(r) + "…"
+}
+
+func providerRequestMediaStats(req UnifiedChatRequest) string {
+	var images, docs int
+	var imageBytes, docBytes int
+	for _, m := range req.History {
+		for _, b := range m.Blocks {
+			size := approxBase64Bytes(b.Data)
+			switch b.Kind {
+			case "image":
+				if b.Data != "" {
+					images++
+					imageBytes += size
+				}
+			case "document":
+				if b.Data != "" {
+					docs++
+					docBytes += size
+				}
+			}
+		}
+	}
+	return fmt.Sprintf("images=%d(%s) documents=%d(%s)", images, formatMediaBytes(imageBytes), docs, formatMediaBytes(docBytes))
+}
+
+func approxBase64Bytes(s string) int {
+	if s == "" {
+		return 0
+	}
+	return len(s) * 3 / 4
+}
+
+func formatMediaBytes(n int) string {
+	const kb = 1024
+	const mb = 1024 * kb
+	if n >= mb {
+		return fmt.Sprintf("%.1f MiB", float64(n)/float64(mb))
+	}
+	if n >= kb {
+		return fmt.Sprintf("%.1f KiB", float64(n)/float64(kb))
+	}
+	return fmt.Sprintf("%d B", n)
 }
 
 // settingInt / settingStr read an admin setting (JSON number or quoted string).
@@ -542,7 +580,15 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	if err != nil {
 		return nil, err
 	}
+	msgcache.Bump(o.cache, conv.ID)
 	onEvent(SseEvent{Type: "message_start", MessageID: assistantMsg.ID})
+	finishMessage := func(ctx context.Context, p store.MessageFinishPatch) error {
+		err := store.FinishMessage(ctx, o.db, assistantMsg.ID, p)
+		if err == nil {
+			msgcache.Bump(o.cache, conv.ID)
+		}
+		return err
+	}
 
 	// Persist new conversation defaults.
 	tmpModelID := model.ID
@@ -567,7 +613,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	}
 	if !ok {
 		refusalBlocks, _ := json.Marshal([]UnifiedBlock{{Kind: "text", Text: msg}})
-		_ = store.FinishMessage(ctx, o.db, assistantMsg.ID, store.MessageFinishPatch{
+		_ = finishMessage(ctx, store.MessageFinishPatch{
 			Blocks: refusalBlocks, Citations: []byte("[]"), StopReason: "quota_exceeded", Status: "complete",
 		})
 		onEvent(SseEvent{Type: "refusal", MessageID: assistantMsg.ID, Message: msg})
@@ -581,7 +627,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	//     stop — generation never runs.
 	if blocked, msg := o.moderatePrompt(ctx, model, req.UserText, req.UserID, conv.ID, assistantMsg.ID); blocked {
 		refusalBlocks, _ := json.Marshal([]UnifiedBlock{{Kind: "text", Text: msg}})
-		_ = store.FinishMessage(ctx, o.db, assistantMsg.ID, store.MessageFinishPatch{
+		_ = finishMessage(ctx, store.MessageFinishPatch{
 			Blocks: refusalBlocks, Citations: []byte("[]"), StopReason: "content_moderation", Status: "complete",
 		})
 		onEvent(SseEvent{Type: "refusal", MessageID: assistantMsg.ID, Message: msg})
@@ -633,7 +679,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	}
 
 	// 4. Load full path history (the RAG router + compaction both need it).
-	history, err := store.ListMessages(ctx, o.db, conv.ID, userMsg.ID)
+	history, err := msgcache.ListMessages(ctx, o.cache, o.db, conv.ID, userMsg.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -686,7 +732,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// the request — on timeout we just proceed (the answer model is told the file
 	// is still indexing via the no-context path).
 	if o.rag != nil {
-		o.waitForPendingDocs(ctx, conv.ID)
+		o.waitForPendingDocs(ctx, conv.ID, onEvent)
 	}
 	// §4.11-B: run inline RAG when a KB is bound OR the conversation itself has an
 	// ingested upload (chat-attached files are conversation-scoped, not in a KB —
@@ -791,7 +837,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 				// that up would record an empty summary and hide the real answer
 				// behind the frontier forever), and rounds may have been deleted.
 				// Same leaf as the snapshot, so it is the same path, fresh state.
-				histNow, herr := store.ListMessages(ctx, o.db, convID, leafID)
+				histNow, herr := msgcache.ListMessages(ctx, o.cache, o.db, convID, leafID)
 				if herr != nil {
 					return herr
 				}
@@ -807,10 +853,12 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	uHist = injectSummaryIntoHistory(uHist, ApplySummaryBlocks(summaryBlocks))
 	uHist = injectRAGIntoHistory(uHist, ragContext)
 
-	// 9c. Resolve file attachments into provider-ready blocks (§4.6): images and
-	//     PDFs become base64 image/document blocks on their message (vision
-	//     models see them inline); sheets/CSVs are surfaced to python_execute
-	//     via the sandbox upload path instead.
+	// 9c. Resolve file attachments into provider-ready blocks (§4.6): images
+	//     become base64 image blocks on their message (vision models see them
+	//     inline). Documents (PDF/DOCX/PPTX/…) never become native provider file
+	//     blocks; they are parsed by RAG (local text extraction or MinerU OCR),
+	//     chunked/retrieved, and injected as text. Sheets/CSVs are surfaced to
+	//     python_execute via the sandbox upload path instead.
 	//     §4.6 vision gating: non-vision models receive a textual stub for
 	//     image attachments instead of silently dropping them.
 	o.resolveAttachments(ctx, req.UserID, conv.ID, uHist, model, onEvent)
@@ -924,7 +972,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	if payWithCredits {
 		if pmsg, pok := o.preflightCredit(ctx, req.UserID, model, provReq); !pok {
 			refusalBlocks, _ := json.Marshal([]UnifiedBlock{{Kind: "text", Text: pmsg}})
-			_ = store.FinishMessage(ctx, o.db, assistantMsg.ID, store.MessageFinishPatch{
+			_ = finishMessage(ctx, store.MessageFinishPatch{
 				Blocks: refusalBlocks, Citations: []byte("[]"), StopReason: "insufficient_credits", Status: "complete",
 			})
 			onEvent(SseEvent{Type: "refusal", MessageID: assistantMsg.ID, Message: pmsg})
@@ -1054,7 +1102,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			// Image credits (a tool that drew before the stop) are already debited by
 			// ImageBilling; fold them into the per-turn total the user sees.
 			turnCredits := stopCredits + runner.ctx.ImageCreditsTotal()
-			_ = store.FinishMessage(ctx, o.db, assistantMsg.ID, store.MessageFinishPatch{
+			_ = finishMessage(ctx, store.MessageFinishPatch{
 				Blocks:           partialJSON,
 				Citations:        citesJSON,
 				StopReason:       "stopped",
@@ -1109,10 +1157,11 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		// echoed prompt fragments). Log it server-side; show the user a generic
 		// message and persist only that.
 		if o.logger != nil {
-			o.logger.Printf("orchestrator: generation error (conv=%s msg=%s): %v", conv.ID, assistantMsg.ID, err)
+			o.logger.Printf("orchestrator: generation error (conv=%s msg=%s model=%s provider=%s format=%s media=%s): %v",
+				conv.ID, assistantMsg.ID, model.ID, channel.Type, channel.APIFormat, providerRequestMediaStats(provReq), err)
 		}
 		const safeErr = "The model provider returned an error. Please try again in a moment."
-		_ = store.FinishMessage(ctx, o.db, assistantMsg.ID, store.MessageFinishPatch{
+		_ = finishMessage(ctx, store.MessageFinishPatch{
 			Blocks: errBlocksJSON, Citations: []byte("[]"),
 			Status: "error", Error: safeErr,
 		})
@@ -1214,7 +1263,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// Total credits the user sees for this turn = chat credits + image credits the
 	// tool charged (ImageBilling), so a chat turn that drew an image shows both.
 	turnCredits := chatCredits + runner.ctx.ImageCreditsTotal()
-	_ = store.FinishMessage(ctx, o.db, assistantMsg.ID, store.MessageFinishPatch{
+	_ = finishMessage(ctx, store.MessageFinishPatch{
 		Blocks:           blocksJSON,
 		Raw:              rawToStore,
 		Citations:        citesJSON,
@@ -1368,6 +1417,13 @@ func (o *Orchestrator) runImageTurn(
 	// strand the assistant message in Status="streaming" (the ImageGenerating tile
 	// spins forever). Mirror the chat path's context.WithoutCancel guard.
 	persistCtx := context.WithoutCancel(ctx)
+	finishMessage := func(p store.MessageFinishPatch) error {
+		err := store.FinishMessage(persistCtx, o.db, assistantMsg.ID, p)
+		if err == nil {
+			msgcache.Bump(o.cache, conv.ID)
+		}
+		return err
+	}
 
 	// Snapshot produced artifacts (non-empty even on a mid-stream stop).
 	mu.Lock()
@@ -1387,7 +1443,7 @@ func (o *Orchestrator) runImageTurn(
 			// Policy / quota / moderation refusal — show the real message, not a
 			// generic "try again" (mirrors the chat refusal path).
 			rb, _ := json.Marshal([]UnifiedBlock{{Kind: "text", Text: refusal.Message}})
-			_ = store.FinishMessage(persistCtx, o.db, assistantMsg.ID, store.MessageFinishPatch{
+			_ = finishMessage(store.MessageFinishPatch{
 				Blocks: rb, Citations: []byte("[]"), StopReason: "refusal", Status: "complete",
 				GenMs: time.Since(turnStart).Milliseconds(),
 			})
@@ -1400,7 +1456,7 @@ func (o *Orchestrator) runImageTurn(
 			// Finalize cleanly (no error banner). A per-model image timeout cancels
 			// only the CHILD ctx (ctx.Err()==nil) and falls through to the error case.
 			empty, _ := json.Marshal([]UnifiedBlock{})
-			_ = store.FinishMessage(persistCtx, o.db, assistantMsg.ID, store.MessageFinishPatch{
+			_ = finishMessage(store.MessageFinishPatch{
 				Blocks: empty, Citations: []byte("[]"), StopReason: "stopped", Status: "complete",
 				GenMs: time.Since(turnStart).Milliseconds(),
 			})
@@ -1417,7 +1473,7 @@ func (o *Orchestrator) runImageTurn(
 				safeErr = "Image generation timed out. Please try again."
 			}
 			errBlocks, _ := json.Marshal([]UnifiedBlock{{Kind: "text", Text: safeErr}})
-			_ = store.FinishMessage(persistCtx, o.db, assistantMsg.ID, store.MessageFinishPatch{
+			_ = finishMessage(store.MessageFinishPatch{
 				Blocks: errBlocks, Citations: []byte("[]"), Status: "error", Error: safeErr,
 			})
 			onEvent(SseEvent{Type: "error", Message: safeErr})
@@ -1459,7 +1515,7 @@ func (o *Orchestrator) runImageTurn(
 	if err != nil {
 		stopReason = "stopped" // image produced, then the stream was cut
 	}
-	_ = store.FinishMessage(persistCtx, o.db, assistantMsg.ID, store.MessageFinishPatch{
+	_ = finishMessage(store.MessageFinishPatch{
 		Blocks: blocksJSON, Citations: []byte("[]"),
 		StopReason: stopReason, Status: "complete",
 		Cost: turnTotal, Credits: turnCredits,
@@ -1591,9 +1647,16 @@ const pendingDocWait = 25 * time.Second
 // adds zero latency to ordinary chats — only the first turn right after an
 // upload pays the (usually small) wait. This is what lets the FIRST message
 // after attaching a file actually use it instead of "I can't see the file".
-func (o *Orchestrator) waitForPendingDocs(ctx context.Context, convID string) {
+func (o *Orchestrator) waitForPendingDocs(ctx context.Context, convID string, onEvent func(SseEvent)) {
 	if !store.ConversationHasPendingDocs(ctx, o.db, convID) {
 		return
+	}
+	start := time.Now()
+	if o.logger != nil {
+		o.logger.Printf("rag: waiting up to %s for pending documents before provider request (conv=%s)", pendingDocWait, convID)
+	}
+	if onEvent != nil {
+		onEvent(SseEvent{Type: "rag", Status: "indexing"})
 	}
 	deadline := time.Now().Add(pendingDocWait)
 	ticker := time.NewTicker(500 * time.Millisecond)
@@ -1601,30 +1664,49 @@ func (o *Orchestrator) waitForPendingDocs(ctx context.Context, convID string) {
 	for {
 		select {
 		case <-ctx.Done():
+			if o.logger != nil {
+				o.logger.Printf("rag: pending-document wait cancelled after %s (conv=%s): %v", time.Since(start).Round(time.Millisecond), convID, ctx.Err())
+			}
 			return
 		case <-ticker.C:
 			if !store.ConversationHasPendingDocs(ctx, o.db, convID) {
+				if o.logger != nil {
+					o.logger.Printf("rag: pending documents ready after %s (conv=%s)", time.Since(start).Round(time.Millisecond), convID)
+				}
+				if onEvent != nil {
+					onEvent(SseEvent{Type: "rag", Status: "indexing_done", Summary: fmt.Sprintf("waited %.1fs", time.Since(start).Seconds())})
+				}
 				return
 			}
 			if time.Now().After(deadline) {
+				if o.logger != nil {
+					o.logger.Printf("rag: pending documents still not ready after %s; continuing without them for this turn (conv=%s)", time.Since(start).Round(time.Millisecond), convID)
+				}
+				if onEvent != nil {
+					onEvent(SseEvent{Type: "rag", Status: "warning", Summary: fmt.Sprintf("still indexing after %.0fs; continuing without pending documents", pendingDocWait.Seconds())})
+				}
 				return
 			}
 		}
 	}
 }
 
-// resolveAttachments loads image/PDF attachments from disk and appends them as
-// base64 blocks to their messages so vision-capable providers can see them
-// (§4.6). Errors are silent — a missing file never blocks the turn.
+// resolveAttachments loads image attachments from disk and appends them as
+// base64 image blocks to their messages so vision-capable providers can see
+// them (§4.6). Errors are silent — a missing file never blocks the turn.
 //
 // §4.6 vision gating: if the resolved model is not vision-capable, image
 // attachments are SKIPPED with a visible note appended to the user turn so the
-// user sees "this model can't read images, pick a vision-capable one". PDFs
-// are still attached because non-vision models can typically read PDF text
-// (Anthropic accepts document blocks even on cheaper non-vision tiers).
+// user sees "this model can't read images, pick a vision-capable one".
+//
+// Documents are deliberately NOT attached as native provider file/document
+// blocks. Every LLM API request uses the RAG text path for PDFs/DOCX/PPTX/etc.:
+// upload -> parse/OCR -> chunks -> retrieval/full-text injection. This keeps
+// provider wire formats simple and avoids gateway-specific file-block failures.
 func (o *Orchestrator) resolveAttachments(ctx context.Context, userID, convID string, hist []UnifiedMessage, model *store.Model, onEvent func(SseEvent)) {
 	visionCapable := model == nil || model.Vision
 	notedNonVision := false
+	notedPDFRAGOnly := false
 	for i := range hist {
 		for _, a := range hist[i].Attachments {
 			if a.Kind != "image" && a.Kind != "pdf" {
@@ -1647,26 +1729,23 @@ func (o *Orchestrator) resolveAttachments(ctx context.Context, userID, convID st
 			if err != nil || f.SizeBytes > maxInlineAttachment {
 				continue
 			}
-			// A RAG-ingested PDF already has its text injected via retrieval. Sending
-			// it AGAIN as a native `document` block makes the model server-side
-			// OCR/parse every page (minutes for a large PDF) for no added text — so
-			// skip the native block once ingestion is ready (§4.6 / §perf). Non-ingested
-			// PDFs (RAG off / ingest failed) still go inline so the model can read them.
-			if a.Kind == "pdf" && store.ConversationDocReady(ctx, o.db, convID, f.Filename) {
+			if a.Kind == "pdf" {
+				if !store.ConversationDocReady(ctx, o.db, convID, f.Filename) && !notedPDFRAGOnly && onEvent != nil {
+					onEvent(SseEvent{Type: "rag", Status: "warning", Summary: "PDF attachment is still indexing; documents are read through RAG text, not native file blocks"})
+					notedPDFRAGOnly = true
+				}
+				hist[i].Blocks = append(hist[i].Blocks, UnifiedBlock{
+					Kind: "text",
+					Text: fmt.Sprintf("[PDF attachment %q is read through the indexed RAG text path; do not expect a native PDF/file block in the provider request.]", f.Filename),
+				})
 				continue
 			}
 			data, err := os.ReadFile(f.StoragePath)
 			if err != nil {
 				continue
 			}
-			kind := "image"
-			mime := f.MimeType
-			if a.Kind == "pdf" {
-				kind = "document"
-				mime = "application/pdf"
-			}
 			hist[i].Blocks = append(hist[i].Blocks, UnifiedBlock{
-				Kind: kind, Data: base64.StdEncoding.EncodeToString(data), MimeType: mime, Title: f.Filename,
+				Kind: "image", Data: base64.StdEncoding.EncodeToString(data), MimeType: f.MimeType, Title: f.Filename,
 			})
 		}
 	}

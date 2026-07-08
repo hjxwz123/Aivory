@@ -511,7 +511,7 @@
       "ossAccessKeyId": "AccessKey ID",
       "ossAccessKeySecret": "AccessKey Secret",
       "mineruSection": "文档解析(MinerU)",
-      "mineruLead": "非纯文本上传(PDF/Office/图片)经对象存储交给 MinerU 解析。",
+      "mineruLead": "非纯文本上传(PDF/Office/图片)经对象存储交给 MinerU 解析；还需要在工具设置里配置 sandbox_base_url，让后端通过沙箱 sidecar 上传并生成预签名 URL。",
       "mineruBaseUrl": "MinerU 接口地址",
       "mineruBaseUrlHint": "云端默认 https://mineru.net;也可指向自建网关。",
       "mineruToken": "API Token",

@@ -13,7 +13,7 @@
  * Inside the store we map ApiMessage / ApiConversation into these shapes.
  */
 import { createWithEqualityFn } from 'zustand/traditional'
-import { ApiError, conversationsApi, streamSSE } from '@/api'
+import { ApiError, conversationsApi, streamSSE, streamSSEGet } from '@/api'
 import type {
   ApiAttachment,
   ApiConversation,
@@ -146,6 +146,7 @@ interface ConversationStore {
    *  sendMessage({ createFirst }). Returns the temp id. */
   beginOptimisticConversation: (text: string, modelId?: string) => string
   regenerate: (conversationId: string, assistantId: string, modelId?: string) => Promise<void>
+  resumeStreamingMessages: (conversationId: string, opts?: { replaceExisting?: boolean }) => void
   /** Edit a user message's text IN PLACE — overwrite, no new branch, no
    *  regeneration (§4.15 "save" vs "save & resend"). */
   editMessageInPlace: (conversationId: string, messageId: string, text: string) => Promise<void>
@@ -160,6 +161,7 @@ interface ConversationStore {
 }
 
 const streamControllers = new Map<string, AbortController>()
+const streamHandoffs = new Set<string>()
 
 // Stop every in-progress generation in a conversation: tell the backend to
 // halt (so partial output is persisted) and abort the local SSE readers. Used
@@ -239,6 +241,11 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
 
   async loadOne(id, opts) {
     try {
+      const hadStreaming = Boolean(
+        get()
+          .conversations.find((c) => c.id === id)
+          ?.messages.some((m) => m.streaming),
+      )
       // Paginate by default (latest MSG_PAGE messages); load the whole path when
       // a caller needs every message present up front (e.g. jump-to-message).
       const resp = await conversationsApi.get(id, opts?.full ? undefined : { limit: MSG_PAGE })
@@ -274,6 +281,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
         }
         return { conversations: replaceOrPrepend(s.conversations, conv) }
       })
+      if (!hadStreaming) get().resumeStreamingMessages(id)
       return conv
     } catch {
       return undefined
@@ -479,6 +487,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
       const conv = toLocalConversation(resp.conversation)
       conv.messages = resp.messages.map(toLocalMessage)
       set((s) => ({ conversations: replaceOrPrepend(s.conversations, conv) }))
+      get().resumeStreamingMessages(id, { replaceExisting: true })
     } catch (e) {
       toast.error(errorMessage(e, 'Failed to switch branch'))
     }
@@ -606,15 +615,39 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
     }
   },
 
-  async sendMessage(input) {
-    // §4.15: editing a past turn into a NEW branch while the old branch is still
-    // generating must stop the old stream first — otherwise two streams race and
-    // the old one's late completion clobbers the new branch's active leaf (the
-    // new branch appeared next to the first sibling instead of the current one).
-    if (input.branch) {
-      const cur = get().conversations.find((c) => c.id === input.conversationId)
-      stopConversationStreams(input.conversationId, cur?.messages ?? [])
+  resumeStreamingMessages(conversationId, opts) {
+    const conv = get().conversations.find((c) => c.id === conversationId)
+    if (!conv) return
+    for (const msg of conv.messages) {
+      if (msg.role !== 'assistant' || !msg.streaming) continue
+      const existing = streamControllers.get(msg.id) ?? streamControllers.get(msg.id + '-regen')
+      const hasLocalOutput =
+        Boolean(msg.content?.trim()) ||
+        (msg.reasoning?.length ?? 0) > 0 ||
+        (msg.artifacts?.length ?? 0) > 0 ||
+        (msg.citations?.length ?? 0) > 0
+      if (existing) {
+        if (!opts?.replaceExisting && hasLocalOutput) continue
+        streamHandoffs.add(msg.id)
+        streamHandoffs.add(msg.id + '-regen')
+        existing.abort()
+        streamControllers.delete(msg.id)
+        streamControllers.delete(msg.id + '-regen')
+      }
+      const abort = new AbortController()
+      streamControllers.set(msg.id, abort)
+      void consumeReplayStream(set, get, conversationId, msg.id, abort).finally(() => {
+        if (streamControllers.get(msg.id) === abort) {
+          streamControllers.delete(msg.id)
+        }
+      })
     }
+  },
+
+  async sendMessage(input) {
+    // §4.15: an edit-resend creates a sibling branch. Do not stop the existing
+    // branch's stream; stream frames are keyed by assistant message id and can be
+    // replayed when that branch is reopened.
     const abort = new AbortController()
     const conv0 = get().conversations.find((c) => c.id === input.conversationId)
     const userId = uid('m')
@@ -1014,6 +1047,11 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
       // reconcile would replace them with the server's empty row).
       if (!errored) await get().reloadActivePath(input.conversationId)
     } catch (e) {
+      if (abort.signal.aborted && (streamHandoffs.delete(serverAssistantId) || streamHandoffs.delete(serverAssistantId + '-regen'))) return
+      if (!abort.signal.aborted && serverAssistantId !== assistantId) {
+        window.setTimeout(() => get().resumeStreamingMessages(input.conversationId, { replaceExisting: true }), 0)
+        return
+      }
       // Target the CURRENT server id so the patch lands even after the
       // message_start re-key; always clear streaming so the spinner stops. A
       // user-initiated stop aborts the local reader before the terminal `done`
@@ -1032,8 +1070,8 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
         error: abort.signal.aborted ? m.error : errorMessage(e),
       }))
     } finally {
-      streamControllers.delete(serverAssistantId)
-      streamControllers.delete(assistantId)
+      if (streamControllers.get(serverAssistantId) === abort) streamControllers.delete(serverAssistantId)
+      if (streamControllers.get(assistantId) === abort) streamControllers.delete(assistantId)
     }
   },
 
@@ -1188,6 +1226,13 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
               // `< n/m >` picker stays self-consistent until reloadActivePath.
               siblings: m.siblings?.map((sid) => (sid === placeholderId ? serverAssistantId : sid)),
             }))
+            if (serverAssistantId !== placeholderId) {
+              const ctrl = streamControllers.get(assistantId + '-regen')
+              if (ctrl) {
+                streamControllers.set(serverAssistantId, ctrl)
+                streamControllers.delete(assistantId + '-regen')
+              }
+            }
             break
           case 'text_delta':
             updateAssistant(set, conversationId, serverAssistantId, (m) => ({
@@ -1266,6 +1311,11 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
       // siblings with a `< n/m >` picker instead of two stacked bubbles (§4.15).
       await get().reloadActivePath(conversationId)
     } catch (e) {
+      if (abort.signal.aborted && (streamHandoffs.delete(serverAssistantId) || streamHandoffs.delete(assistantId + '-regen'))) return
+      if (!abort.signal.aborted && serverAssistantId !== placeholderId) {
+        window.setTimeout(() => get().resumeStreamingMessages(conversationId, { replaceExisting: true }), 0)
+        return
+      }
       // A user-initiated stop aborts the reader before the terminal frame — keep
       // the partial reply and reconcile to the server's persisted stopped turn,
       // without the interrupted note or error toast.
@@ -1286,7 +1336,8 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
         await get().reloadActivePath(conversationId)
       }
     } finally {
-      streamControllers.delete(assistantId + '-regen')
+      if (streamControllers.get(assistantId + '-regen') === abort) streamControllers.delete(assistantId + '-regen')
+      if (streamControllers.get(serverAssistantId) === abort) streamControllers.delete(serverAssistantId)
     }
   },
 
@@ -1359,6 +1410,207 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
     return get().conversations.find((c) => c.id === id)
   },
 }))
+
+type StreamApplyState = {
+  lastCitations: Citation[]
+  toolCallsById: Map<string, ToolCall>
+  toolInputBuffers: Map<string, string>
+}
+
+async function consumeReplayStream(
+  set: (fn: (s: ConversationStore) => Partial<ConversationStore>) => void,
+  get: () => ConversationStore,
+  conversationId: string,
+  assistantId: string,
+  abort: AbortController,
+): Promise<void> {
+  const state: StreamApplyState = {
+    lastCitations: [],
+    toolCallsById: new Map(),
+    toolInputBuffers: new Map(),
+  }
+  try {
+    for await (const frame of streamSSEGet(
+      `/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(assistantId)}/stream`,
+      abort.signal,
+    )) {
+      const ev = frame.data as ApiSseEvent
+      applyReplayEvent(set, conversationId, assistantId, ev, state)
+      if (ev.type === 'done') {
+        await get().reloadActivePath(conversationId)
+        return
+      }
+      if (ev.type === 'error') return
+    }
+    await get().reloadActivePath(conversationId)
+  } catch (e) {
+    if (abort.signal.aborted) return
+    updateAssistant(set, conversationId, assistantId, (m) => ({
+      ...m,
+      streaming: false,
+      imageStatus: undefined,
+      verify: m.verify?.status === 'running' ? undefined : m.verify,
+      error: errorMessage(e, 'Stream replay failed'),
+    }))
+  }
+}
+
+function applyReplayEvent(
+  set: (fn: (s: ConversationStore) => Partial<ConversationStore>) => void,
+  conversationId: string,
+  assistantId: string,
+  ev: ApiSseEvent,
+  state: StreamApplyState,
+): void {
+  switch (ev.type) {
+    case 'message_start':
+      updateAssistant(set, conversationId, assistantId, (m) => ({
+        ...m,
+        id: ev.message_id || assistantId,
+        streaming: true,
+        content: '',
+        reasoning: [],
+        citations: [],
+        artifacts: [],
+        research: undefined,
+        ragInjection: undefined,
+        error: undefined,
+      }))
+      break
+    case 'text_delta':
+      updateAssistant(set, conversationId, assistantId, (m) => ({ ...m, content: m.content + (ev.text ?? '') }))
+      break
+    case 'thinking_delta':
+      updateAssistant(set, conversationId, assistantId, (m) => ({
+        ...m,
+        reasoning: appendThinkingDelta(m.reasoning ?? [], ev.text ?? ''),
+      }))
+      break
+    case 'image_status':
+      updateAssistant(set, conversationId, assistantId, (m) => ({
+        ...m,
+        imageStatus: ev.status === 'optimizing' ? 'optimizing' : 'generating',
+      }))
+      break
+    case 'artifact':
+      updateAssistant(set, conversationId, assistantId, (m) => ({
+        ...m,
+        imageStatus: undefined,
+        artifacts: [
+          ...(m.artifacts ?? []),
+          { id: ev.id ?? uid('art'), filename: ev.title ?? 'file', url: ev.url ?? '', mimeType: ev.summary ?? '' },
+        ],
+      }))
+      break
+    case 'refusal':
+      updateAssistant(set, conversationId, assistantId, (m) => ({
+        ...m,
+        imageStatus: undefined,
+        refused: true,
+        content: m.content || (ev.message ?? 'The model declined to answer.'),
+      }))
+      break
+    case 'rag':
+      updateAssistant(set, conversationId, assistantId, (m) => ({
+        ...m,
+        ragInjection: {
+          strategy: (ev.status as string | undefined) ?? '',
+          summary: ev.summary ?? '',
+          at: Date.now(),
+        },
+      }))
+      break
+    case 'research_plan':
+    case 'research_task':
+    case 'research_source':
+      updateAssistant(set, conversationId, assistantId, (m) => ({ ...m, research: applyResearchEvent(m.research, ev) }))
+      break
+    case 'verify_started':
+    case 'verify_finding':
+    case 'verify_done':
+      updateAssistant(set, conversationId, assistantId, (m) => ({ ...m, verify: applyVerifyEvent(m.verify, ev) }))
+      break
+    case 'tool_start': {
+      const tid = ev.id ?? uid('tc')
+      if (state.toolCallsById.has(tid)) break
+      const tc: ToolCall = {
+        id: tid,
+        name: ev.name,
+        label: prettyToolLabel(ev.name),
+        status: 'running',
+        startedAt: Date.now(),
+        input: (ev.input as Record<string, unknown>) ?? undefined,
+      }
+      state.toolCallsById.set(tid, tc)
+      updateAssistant(set, conversationId, assistantId, (m) => {
+        const flushed = flushNarration(m)
+        return { ...m, content: flushed.content, reasoning: appendToolStart(flushed.reasoning, tc) }
+      })
+      break
+    }
+    case 'tool_input': {
+      if (!ev.id) break
+      let nextInput: Record<string, unknown> | undefined
+      if (ev.partial_json) {
+        const buf = (state.toolInputBuffers.get(ev.id) ?? '') + ev.partial_json
+        state.toolInputBuffers.set(ev.id, buf)
+        try {
+          nextInput = JSON.parse(buf) as Record<string, unknown>
+        } catch {
+          /* incomplete JSON */
+        }
+      } else if (ev.input) {
+        nextInput = ev.input as Record<string, unknown>
+      }
+      if (!nextInput) break
+      updateAssistant(set, conversationId, assistantId, (m) => ({
+        ...m,
+        reasoning: patchReasoningTool(m.reasoning ?? [], ev.id!, { input: nextInput }),
+      }))
+      break
+    }
+    case 'tool_result':
+      if (!ev.id) break
+      updateAssistant(set, conversationId, assistantId, (m) => ({
+        ...m,
+        reasoning: patchReasoningTool(m.reasoning ?? [], ev.id!, {
+          output: ev.summary,
+          status: ev.status === 'error' ? 'error' : 'complete',
+          endedAt: Date.now(),
+        }),
+      }))
+      break
+    case 'citation': {
+      const c = ev.citation
+      state.lastCitations = [
+        ...state.lastCitations,
+        { id: c.id, index: c.index, title: c.title, url: c.url, domain: safeDomain(c.url), snippet: c.snippet, source: c.source },
+      ]
+      updateAssistant(set, conversationId, assistantId, (m) => ({ ...m, citations: state.lastCitations }))
+      break
+    }
+    case 'done':
+      updateAssistant(set, conversationId, assistantId, (m) => ({
+        ...m,
+        streaming: false,
+        imageStatus: undefined,
+        verify: m.verify?.status === 'running' ? undefined : m.verify,
+        credits: ev.credits && ev.credits > 0 ? ev.credits : m.credits,
+        moderation: ev.stop_reason === 'content_moderation' ? true : m.moderation,
+        quotaExceeded: ev.stop_reason === 'quota_exceeded' ? true : m.quotaExceeded,
+      }))
+      break
+    case 'error':
+      updateAssistant(set, conversationId, assistantId, (m) => ({
+        ...m,
+        streaming: false,
+        imageStatus: undefined,
+        verify: m.verify?.status === 'running' ? undefined : m.verify,
+        error: ev.message || 'error',
+      }))
+      break
+  }
+}
 
 // -------- conversion helpers ----------------------------------------------
 

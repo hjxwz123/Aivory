@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"aurelia/server/internal/msgcache"
 	"aurelia/server/internal/store"
 )
 
@@ -332,7 +333,7 @@ func getConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, errNotFound)
 		return
 	}
-	msgs, _ := store.ListMessages(r.Context(), d.DB, conv.ID, conv.ActiveLeafID)
+	msgs, _ := msgcache.ListMessages(r.Context(), d.Cache, d.DB, conv.ID, conv.ActiveLeafID)
 	// Optional reverse pagination over the active path: ?limit=N (&before=<id>)
 	// returns the trailing window oldest-first. With NO limit the whole path is
 	// returned and has_more=false — preserving the original (unpaginated) contract.
@@ -442,6 +443,7 @@ func updateConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, errNotFound)
 		return
 	}
+	msgcache.Bump(d.Cache, id)
 	stripServerConvFields(conv)
 	writeJSON(w, 200, conv)
 }
@@ -459,6 +461,7 @@ func deleteConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	// CASCADE); drop their vectors too — for the conversation and every inline
 	// sub-conversation that was removed with it.
 	for _, cid := range append([]string{id}, children...) {
+		msgcache.Bump(d.Cache, cid)
 		if err := d.RAG.OnConversationDeleted(r.Context(), cid); err != nil {
 			d.Logger.Printf("rag: drop vectors for conversation %s: %v", cid, err)
 		}
@@ -487,7 +490,7 @@ func listMessagesHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	conv, _ := store.GetConversation(r.Context(), d.DB, id, u.ID)
-	msgs, err := store.ListMessages(r.Context(), d.DB, id, conv.ActiveLeafID)
+	msgs, err := msgcache.ListMessages(r.Context(), d.Cache, d.DB, id, conv.ActiveLeafID)
 	if err != nil {
 		writeError(w, 500, err)
 		return
@@ -654,7 +657,8 @@ func setActiveLeafHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, errNotFound)
 		return
 	}
-	msgs, _ := store.ListMessages(r.Context(), d.DB, id, conv.ActiveLeafID)
+	msgcache.Bump(d.Cache, id)
+	msgs, _ := msgcache.ListMessages(r.Context(), d.Cache, d.DB, id, conv.ActiveLeafID)
 	stripServerConvFields(conv)
 	writeJSON(w, 200, map[string]any{
 		"conversation": conv,
@@ -685,7 +689,7 @@ func forkConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errors.New("leaf_id required"))
 		return
 	}
-	path, err := store.ListMessages(r.Context(), d.DB, conv.ID, body.LeafID)
+	path, err := msgcache.ListMessages(r.Context(), d.Cache, d.DB, conv.ID, body.LeafID)
 	if err != nil {
 		writeError(w, 500, err)
 		return

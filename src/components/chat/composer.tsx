@@ -109,6 +109,37 @@ interface PendingAttachment extends Attachment {
   ingest?: 'parsing' | 'embedding' | 'ready' | 'failed'
 }
 
+function attachmentKindLabel(a: Pick<Attachment, 'kind' | 'name'>): string {
+  const ext = a.name.includes('.') ? a.name.split('.').pop()?.toUpperCase() : ''
+  if (ext) return ext
+  switch (a.kind) {
+    case 'pdf':
+      return 'PDF'
+    case 'doc':
+      return 'DOC'
+    case 'sheet':
+      return 'SHEET'
+    case 'code':
+      return 'CODE'
+    case 'image':
+      return 'IMAGE'
+    default:
+      return 'FILE'
+  }
+}
+
+function attachmentTileClass(a: Pick<Attachment, 'kind' | 'name'>): string {
+  const ext = a.name.includes('.') ? a.name.split('.').pop()?.toLowerCase() : ''
+  if (a.kind === 'pdf' || ext === 'pdf') return 'bg-[var(--color-danger)] text-[var(--color-fg-inverted)]'
+  if (a.kind === 'sheet' || ['xls', 'xlsx', 'csv', 'tsv'].includes(ext ?? '')) {
+    return 'bg-[var(--color-success)] text-[var(--color-fg-inverted)]'
+  }
+  if (a.kind === 'doc' || ['doc', 'docx', 'ppt', 'pptx'].includes(ext ?? '')) {
+    return 'bg-[var(--color-info)] text-[var(--color-fg-inverted)]'
+  }
+  return 'bg-[var(--color-accent)] text-[var(--color-accent-fg)]'
+}
+
 export function Composer({
   modelId,
   onModelChange,
@@ -573,66 +604,96 @@ export function Composer({
       {/* Attachments preview. The armed-mode (research) state is shown by the
           toolbar button below, so we don't repeat a chip above the input. */}
       {attachments.length > 0 && (
-        <div className="flex flex-wrap items-center gap-1.5 px-3.5 pt-3 pb-1">
-          {attachments.map((a) =>
-            a.kind === 'image' && a.previewUrl ? (
-              <span key={a.id} className="group/att relative inline-block">
-                <img
-                  src={a.previewUrl}
-                  alt={a.name}
-                  className="size-16 rounded-[10px] border border-[var(--color-border-subtle)] object-cover"
-                />
-                {a.uploading ? (
-                  <span className="absolute inset-0 grid place-items-center rounded-[10px] bg-[var(--color-overlay)]">
-                    <Loader2 size={14} className="animate-spin text-[var(--color-fg-inverted)]" aria-hidden />
-                  </span>
-                ) : null}
-                <button
-                  type="button"
-                  aria-label={`Remove ${a.name}`}
-                  onClick={() => removeAttachment(a.id)}
-                  className="absolute -right-1.5 -top-1.5 inline-flex size-5 items-center justify-center rounded-full bg-[var(--color-fg)] text-[var(--color-fg-inverted)] shadow-[var(--shadow-sm)] opacity-0 interactive group-hover/att:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-                >
-                  <X size={11} aria-hidden />
-                </button>
-              </span>
-            ) : (
+        <div className="flex items-stretch gap-2 overflow-x-auto px-3.5 pb-1 pt-3 scrollbar-none">
+          {attachments.map((a) => {
+            const busy = a.uploading || a.ingest === 'parsing' || a.ingest === 'embedding'
+            const failed = a.ingest === 'failed'
+            const status =
+              a.ingest === 'embedding'
+                ? t('composer.indexing')
+                : a.ingest === 'parsing'
+                  ? t('composer.parsing')
+                  : attachmentKindLabel(a)
+
+            if (a.kind === 'image' && a.previewUrl) {
+              return (
+                <span key={a.id} className="group/att relative inline-block shrink-0">
+                  <img
+                    src={a.previewUrl}
+                    alt={a.name}
+                    className="size-[4.5rem] rounded-[12px] border border-[var(--color-border-subtle)] bg-[var(--color-bg-muted)] object-cover"
+                  />
+                  {busy ? (
+                    <span className="absolute inset-0 grid place-items-center rounded-[12px] bg-[var(--color-overlay)]">
+                      <Loader2 size={14} className="animate-spin text-[var(--color-fg-inverted)]" aria-hidden />
+                    </span>
+                  ) : null}
+                  <button
+                    type="button"
+                    aria-label={`Remove ${a.name}`}
+                    onClick={() => removeAttachment(a.id)}
+                    className="absolute -right-1.5 -top-1.5 inline-flex size-6 items-center justify-center rounded-full bg-[var(--color-fg)] text-[var(--color-fg-inverted)] shadow-[var(--shadow-sm)] interactive hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                  >
+                    <X size={15} aria-hidden />
+                  </button>
+                </span>
+              )
+            }
+
+            const Icon = fileIconFor(a.name, a.kind)
+            return (
               <span
                 key={a.id}
                 className={cn(
-                  'inline-flex items-center gap-1.5 rounded-[8px] bg-[var(--color-bg-muted)] border px-2 py-1 text-[11px] max-w-[240px]',
-                  a.ingest === 'failed'
-                    ? 'border-[var(--color-danger)]/40 text-[var(--color-danger)]'
-                    : 'border-[var(--color-border-subtle)] text-[var(--color-fg-muted)]',
+                  'group/att relative flex h-[4.5rem] min-w-0 max-w-[min(31rem,calc(100vw-7rem))] flex-[1_1_18rem] items-center gap-3 rounded-[14px] border bg-[var(--color-surface-raised)] py-2.5 pl-3 pr-10 shadow-[var(--shadow-xs)]',
+                  failed ? 'border-[var(--color-danger)]/50' : 'border-[var(--color-border)]',
                 )}
               >
-                {a.uploading || a.ingest === 'parsing' || a.ingest === 'embedding' ? (
-                  <Loader2 size={10} className="animate-spin shrink-0" aria-hidden />
-                ) : a.ingest === 'failed' ? (
-                  <AlertTriangle size={10} className="shrink-0" aria-hidden />
-                ) : (
-                  (() => {
-                    const Icon = fileIconFor(a.name, a.kind)
-                    return <Icon size={12} className="shrink-0 text-[var(--color-fg-subtle)]" aria-hidden />
-                  })()
-                )}
-                <span className="truncate">{a.name}</span>
-                {a.ingest === 'parsing' || a.ingest === 'embedding' ? (
-                  <span className="shrink-0 text-[10px] text-[var(--color-fg-subtle)]">
-                    {a.ingest === 'embedding' ? t('composer.indexing') : t('composer.parsing')}
+                <span
+                  className={cn(
+                    'grid size-12 shrink-0 place-items-center rounded-[12px]',
+                    failed
+                      ? 'bg-[var(--color-danger-soft)] text-[var(--color-danger)]'
+                      : attachmentTileClass(a),
+                  )}
+                  aria-hidden
+                >
+                  {busy ? (
+                    <Loader2 size={22} className="animate-spin" />
+                  ) : failed ? (
+                    <AlertTriangle size={22} />
+                  ) : (
+                    <Icon size={24} strokeWidth={2} />
+                  )}
+                </span>
+                <span className="grid min-w-0 flex-1 gap-0.5 text-left">
+                  <span className="truncate text-[0.9375rem] font-semibold leading-snug text-[var(--color-fg)]">
+                    {a.name}
                   </span>
-                ) : null}
+                  <span
+                    className={cn(
+                      'truncate text-sm leading-tight',
+                      failed
+                        ? 'text-[var(--color-danger)]'
+                        : busy
+                          ? 'text-[var(--color-fg-muted)]'
+                          : 'text-[var(--color-fg-subtle)]',
+                    )}
+                  >
+                    {failed ? t('composer.ingestFailed', { defaultValue: "Couldn't read this file" }) : status}
+                  </span>
+                </span>
                 <button
                   type="button"
                   aria-label={`Remove ${a.name}`}
                   onClick={() => removeAttachment(a.id)}
-                  className="inline-flex items-center justify-center rounded-full hover:text-[var(--color-fg)]"
+                  className="absolute right-2 top-2 inline-flex size-6 items-center justify-center rounded-full bg-[var(--color-fg)] text-[var(--color-fg-inverted)] shadow-[var(--shadow-xs)] interactive hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
                 >
-                  <X size={10} aria-hidden />
+                  <X size={15} aria-hidden />
                 </button>
               </span>
-            ),
-          )}
+            )
+          })}
         </div>
       )}
 

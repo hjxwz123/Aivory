@@ -94,6 +94,9 @@
     "ragFullText": "已注入完整文件",
     "ragFullDoc": "全文件上下文",
     "ragNone": "跳過檢索",
+    "ragIndexing": "文件解析中",
+    "ragIndexingDone": "文件已入庫",
+    "ragWarning": "文件檢索提示",
     "ragDefault": "已檢索來源",
     "moderation": {
       "title": "內容被攔截",

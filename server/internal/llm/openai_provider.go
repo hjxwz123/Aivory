@@ -68,24 +68,15 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest,
 			}
 		}
 		text := renderBlocksAsText(m.Blocks)
-		// Image attachments → multimodal content array (data URI form).
+		// Image attachments → multimodal content array (data URI form). Document
+		// attachments are intentionally excluded: PDFs/DOCX/PPTX/etc. always enter
+		// the model through the RAG text path, never native provider file blocks.
 		imgParts := []map[string]any{}
 		for _, b := range m.Blocks {
 			if b.Kind == "image" && b.Data != "" {
 				imgParts = append(imgParts, map[string]any{
 					"type":      "image_url",
 					"image_url": map[string]any{"url": "data:" + b.MimeType + ";base64," + b.Data},
-				})
-			}
-			// PDF / document blocks: send as a file part so document-capable
-			// chat-completions models (e.g. gpt-5-turbo) receive the file.
-			if b.Kind == "document" && b.Data != "" {
-				imgParts = append(imgParts, map[string]any{
-					"type": "file",
-					"file": map[string]any{
-						"filename":  b.Title,
-						"file_data": "data:" + b.MimeType + ";base64," + b.Data,
-					},
 				})
 			}
 		}
@@ -479,20 +470,14 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 			ctype = "output_text"
 		}
 		parts := []map[string]any{{"type": ctype, "text": strings.TrimRight(text.String(), "\n")}}
-		// Multimodal: pass image + PDF document blocks through so vision /
-		// document-capable Responses models receive them.
+		// Multimodal: pass image blocks through. Document attachments are
+		// intentionally excluded: PDFs/DOCX/PPTX/etc. always enter the model
+		// through the RAG text path, never native provider file blocks.
 		for _, b := range m.Blocks {
 			if b.Kind == "image" && b.Data != "" {
 				parts = append(parts, map[string]any{
 					"type":      "input_image",
 					"image_url": "data:" + b.MimeType + ";base64," + b.Data,
-				})
-			}
-			if b.Kind == "document" && b.Data != "" {
-				parts = append(parts, map[string]any{
-					"type":      "input_file",
-					"filename":  b.Title,
-					"file_data": "data:" + b.MimeType + ";base64," + b.Data,
 				})
 			}
 		}

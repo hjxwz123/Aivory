@@ -494,6 +494,7 @@ func banUserAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
+	invalidateAuthUser(d, id)
 	d.Cache.Publish("user:"+id+":kill", "1")
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
@@ -521,6 +522,7 @@ func deleteUserAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
+	invalidateAuthUser(d, id)
 
 	// Best-effort Qdrant cleanup: delete vector data for every KB the user owned.
 	// Runs after the SQL commit so a Qdrant failure never blocks account deletion.
@@ -540,6 +542,7 @@ func unbanUserAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
+	invalidateAuthUser(d, id)
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
@@ -616,6 +619,7 @@ func setUserPasswordAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
+	invalidateAuthUser(d, id)
 	d.Cache.Publish("user:"+id+":kill", "1")
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
@@ -655,6 +659,7 @@ func setUserRoleAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
+	invalidateAuthUser(d, id)
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 

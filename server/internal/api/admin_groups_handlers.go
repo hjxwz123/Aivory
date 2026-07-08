@@ -142,6 +142,7 @@ func setUserGroupAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, err)
 		return
 	}
+	invalidateAuthUser(d, id)
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
@@ -167,6 +168,7 @@ func setUserCreditsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
+	invalidateAuthUser(d, id)
 	writeJSON(w, 200, map[string]any{"ok": true, "credits_permanent": req.CreditsPermanent})
 }
 

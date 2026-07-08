@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // TestRetryableUpstreamFailure pins the fallback trigger: transport errors and
@@ -141,5 +142,37 @@ func TestDoProviderRequestPrimarySuccess(t *testing.T) {
 	resp.Body.Close()
 	if string(body) != "primary" || flag.Load() || fallbackHit {
 		t.Errorf("primary success should not touch fallback: body=%q flag=%v hit=%v", body, flag.Load(), fallbackHit)
+	}
+}
+
+func TestProviderTTFTWatchdogStartsAtHTTPRequest(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	firstEvent := make(chan struct{})
+	stalled := atomic.Bool{}
+	watchdog := newProviderTTFTWatchdog(25*time.Millisecond, cancel, firstEvent, &stalled)
+	defer watchdog.stop()
+	ctx = contextWithProviderTTFTWatchdog(ctx, watchdog)
+
+	// Local provider work before the upstream HTTP request must not count toward
+	// fallback_ttft_sec.
+	time.Sleep(40 * time.Millisecond)
+	if stalled.Load() || ctx.Err() != nil {
+		t.Fatalf("watchdog fired before provider HTTP request: stalled=%v err=%v", stalled.Load(), ctx.Err())
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(100 * time.Millisecond)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	_, err := doProviderRequest(ctx, ModelInfo{BaseURL: srv.URL, APIKey: "k"}, nil, func(baseURL, apiKey string) (*http.Request, error) {
+		return http.NewRequestWithContext(ctx, "POST", baseURL+"/slow", nil)
+	})
+	if err == nil {
+		t.Fatal("doProviderRequest unexpectedly completed; watchdog should cancel the slow upstream request")
+	}
+	if !stalled.Load() {
+		t.Fatal("watchdog did not mark the upstream request as stalled")
 	}
 }

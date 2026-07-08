@@ -39,6 +39,12 @@ func New(w http.ResponseWriter) *Writer {
 // Send marshals payload as JSON and writes one SSE event. The optional event
 // name appears as the "event:" line.
 func (s *Writer) Send(payload any, eventName string) error {
+	return s.SendID(payload, eventName, "")
+}
+
+// SendID is Send plus the SSE "id:" line used by reconnect/replay clients to
+// resume after the last event they processed.
+func (s *Writer) SendID(payload any, eventName, id string) error {
 	if s == nil {
 		return nil
 	}
@@ -48,6 +54,9 @@ func (s *Writer) Send(payload any, eventName string) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if id != "" {
+		_, _ = s.w.Write([]byte("id: " + id + "\n"))
+	}
 	if eventName != "" {
 		_, _ = s.w.Write([]byte("event: " + eventName + "\n"))
 	}

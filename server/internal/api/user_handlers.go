@@ -63,6 +63,7 @@ func updateMeHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, err)
 		return
 	}
+	invalidateAuthUser(d, u.ID)
 	writeJSON(w, 200, upd)
 }
 
@@ -101,6 +102,7 @@ func changePasswordHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
+	invalidateAuthUser(d, u.ID)
 	clearCookie(w, "auth_token")
 	clearCookie(w, "refresh_token")
 	writeJSON(w, 200, map[string]bool{"ok": true})
@@ -140,6 +142,7 @@ func setPasswordHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
+	invalidateAuthUser(d, u.ID)
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
@@ -194,6 +197,7 @@ func updateMeSettingsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
+	invalidateAuthUser(d, u.ID)
 	writeJSON(w, 200, json.RawMessage(upd.Settings))
 }
 
@@ -255,6 +259,7 @@ func deleteMeHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
+	invalidateAuthUser(d, u.ID)
 
 	// Best-effort Qdrant cleanup: delete vector data for every KB the user owned.
 	// Runs after the SQL commit so a Qdrant failure never blocks account deletion.

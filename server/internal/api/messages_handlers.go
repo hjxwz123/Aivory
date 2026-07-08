@@ -8,7 +8,9 @@ import (
 	"strings"
 	"time"
 
+	"aurelia/server/internal/genstream"
 	"aurelia/server/internal/llm"
+	"aurelia/server/internal/msgcache"
 	"aurelia/server/internal/sse"
 	"aurelia/server/internal/store"
 )
@@ -131,6 +133,27 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
+	streamMessageID := ""
+	terminalSent := false
+	sendEvent := func(ev llm.SseEvent) {
+		if ev.Type == "message_start" && ev.MessageID != "" {
+			streamMessageID = ev.MessageID
+		}
+		if streamMessageID != "" && ev.MessageID == "" {
+			ev.MessageID = streamMessageID
+		}
+		if genstream.Terminal(ev) {
+			terminalSent = true
+		}
+		if streamMessageID != "" {
+			if eventID, ok := genstream.Append(d.Cache, streamMessageID, ev); ok {
+				_ = writer.SendID(ev, ev.Type, eventID)
+				return
+			}
+		}
+		_ = writer.Send(ev, ev.Type)
+	}
+
 	_, err := d.Orchestrator.Run(ctx, llm.RunRequest{
 		UserID:         u.ID,
 		ConversationID: id,
@@ -144,11 +167,9 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		ParamOverrides: req.ParamOverrides,
 		ImageStyleID:   req.ImageStyleID,
 		Locale:         req.Locale,
-	}, func(ev llm.SseEvent) {
-		_ = writer.Send(ev, ev.Type)
-	})
-	if err != nil {
-		_ = writer.Send(map[string]string{"type": "error", "message": err.Error()}, "error")
+	}, sendEvent)
+	if err != nil && !terminalSent {
+		sendEvent(llm.SseEvent{Type: "error", Message: err.Error(), MessageID: streamMessageID})
 	}
 }
 
@@ -279,6 +300,27 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}()
+	streamMessageID := ""
+	terminalSent := false
+	sendEvent := func(ev llm.SseEvent) {
+		if ev.Type == "message_start" && ev.MessageID != "" {
+			streamMessageID = ev.MessageID
+		}
+		if streamMessageID != "" && ev.MessageID == "" {
+			ev.MessageID = streamMessageID
+		}
+		if genstream.Terminal(ev) {
+			terminalSent = true
+		}
+		if streamMessageID != "" {
+			if eventID, ok := genstream.Append(d.Cache, streamMessageID, ev); ok {
+				_ = writer.SendID(ev, ev.Type, eventID)
+				return
+			}
+		}
+		_ = writer.Send(ev, ev.Type)
+	}
+
 	_, err = d.Orchestrator.Run(ctx, llm.RunRequest{
 		UserID:                   u.ID,
 		ConversationID:           id,
@@ -290,11 +332,95 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		Verify:                   body.Verify,
 		ParamOverrides:           body.ParamOverrides,
 		Locale:                   body.Locale,
-	}, func(ev llm.SseEvent) {
-		_ = writer.Send(ev, ev.Type)
-	})
-	if err != nil {
-		_ = writer.Send(map[string]string{"type": "error", "message": err.Error()}, "error")
+	}, sendEvent)
+	if err != nil && !terminalSent {
+		sendEvent(llm.SseEvent{Type: "error", Message: err.Error(), MessageID: streamMessageID})
+	}
+}
+
+// streamMessageHandler replays and follows the generation stream for one
+// assistant message. It is keyed by assistant message id (not conversation id),
+// so two concurrent branches in the same conversation cannot interleave frames.
+func streamMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	u := authUser(r)
+	convID := pathParam(r, "id")
+	msgID := pathParam(r, "msgId")
+	if _, err := store.GetConversation(r.Context(), d.DB, convID, u.ID); err != nil {
+		writeError(w, 404, errNotFound)
+		return
+	}
+	msg, err := store.GetMessage(r.Context(), d.DB, msgID)
+	if err != nil || msg.ConversationID != convID || msg.Role != "assistant" {
+		writeError(w, 404, errNotFound)
+		return
+	}
+	writer := sse.New(w)
+	if writer == nil {
+		writeError(w, 500, errors.New("streaming not supported"))
+		return
+	}
+
+	lastID := r.Header.Get("Last-Event-ID")
+	if lastID == "" {
+		lastID = r.URL.Query().Get("last_id")
+	}
+	terminal := false
+	flush := func() bool {
+		events, ok := genstream.Read(d.Cache, msgID, lastID, 200)
+		if !ok {
+			_ = writer.Send(llm.SseEvent{Type: "error", MessageID: msgID, Message: "stream replay unavailable"}, "error")
+			return true
+		}
+		for _, ev := range events {
+			lastID = ev.ID
+			if genstream.Terminal(ev.Value) {
+				terminal = true
+			}
+			_ = writer.SendID(ev.Value, ev.Value.Type, ev.ID)
+		}
+		return terminal
+	}
+	if flush() {
+		return
+	}
+	if msg.Status != "streaming" {
+		if !terminal {
+			_ = writer.Send(llm.SseEvent{Type: "done", MessageID: msgID, StopReason: msg.StopReason, Credits: msg.Credits}, "done")
+		}
+		return
+	}
+
+	ch, unsub := d.Cache.Subscribe(genstream.Topic(msgID))
+	defer unsub()
+	if flush() {
+		return
+	}
+	ping := time.NewTicker(15 * time.Second)
+	defer ping.Stop()
+	statusCheck := time.NewTicker(5 * time.Second)
+	defer statusCheck.Stop()
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-ch:
+			if flush() {
+				return
+			}
+		case <-ping.C:
+			writer.Ping()
+		case <-statusCheck.C:
+			if flush() {
+				return
+			}
+			fresh, ferr := store.GetMessage(r.Context(), d.DB, msgID)
+			if ferr == nil && fresh.Status != "streaming" {
+				if !terminal {
+					_ = writer.Send(llm.SseEvent{Type: "done", MessageID: msgID, StopReason: fresh.StopReason, Credits: fresh.Credits}, "done")
+				}
+				return
+			}
+		}
 	}
 }
 
@@ -382,6 +508,7 @@ func editMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
+	msgcache.Bump(d.Cache, convID)
 	updated, _ := store.GetMessage(r.Context(), d.DB, msgID)
 	writeJSON(w, 200, updated)
 }
@@ -428,7 +555,8 @@ func deleteMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
-	msgs, err := store.ListMessages(r.Context(), d.DB, convID, newLeaf)
+	msgcache.Bump(d.Cache, convID)
+	msgs, err := msgcache.ListMessages(r.Context(), d.Cache, d.DB, convID, newLeaf)
 	if err != nil {
 		writeError(w, 500, err)
 		return

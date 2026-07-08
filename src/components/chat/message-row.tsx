@@ -395,13 +395,19 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
                 <BookText size={13} strokeWidth={1.5} aria-hidden className="shrink-0 text-[var(--color-secondary)]" />
                 <span className="truncate">
                   <span className="text-[var(--color-fg-muted)]">
-                    {message.ragInjection.strategy === 'full_text'
-                      ? t('message.ragFullText')
-                      : message.ragInjection.strategy === 'full_doc'
-                        ? t('message.ragFullDoc')
-                        : message.ragInjection.strategy === 'none'
-                          ? t('message.ragNone')
-                          : t('message.ragDefault')}
+                    {message.ragInjection.strategy === 'indexing'
+                      ? t('message.ragIndexing')
+                      : message.ragInjection.strategy === 'indexing_done'
+                        ? t('message.ragIndexingDone')
+                        : message.ragInjection.strategy === 'warning'
+                          ? t('message.ragWarning')
+                          : message.ragInjection.strategy === 'full_text'
+                            ? t('message.ragFullText')
+                            : message.ragInjection.strategy === 'full_doc'
+                              ? t('message.ragFullDoc')
+                              : message.ragInjection.strategy === 'none'
+                                ? t('message.ragNone')
+                                : t('message.ragDefault')}
                   </span>
                   {message.ragInjection.summary ? (
                     <span className="text-[var(--color-fg-faint)]"> · {message.ragInjection.summary}</span>

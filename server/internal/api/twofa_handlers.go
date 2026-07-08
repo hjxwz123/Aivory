@@ -36,6 +36,7 @@ func twofaSetupHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
+	invalidateAuthUser(d, u.ID)
 	writeJSON(w, 200, map[string]string{
 		"secret":      secret,
 		"otpauth_url": auth.TotpURI(secret, twofaIssuer, u.Email),
@@ -75,6 +76,7 @@ func twofaEnableHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
+	invalidateAuthUser(d, u.ID)
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
@@ -105,6 +107,7 @@ func twofaDisableHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
+	invalidateAuthUser(d, u.ID)
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
@@ -116,6 +119,7 @@ func adminDisableTwofaHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
+	invalidateAuthUser(d, id)
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
