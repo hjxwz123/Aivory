@@ -342,6 +342,49 @@
   }
 }
 
+/* AI "thinking" label — a soft highlight sweeps across the word while the model
+   works. Neutral fg gradient so it reads in both themes; the global
+   prefers-reduced-motion rule freezes it to a plain filled gradient (still
+   legible, never invisible). */
+@keyframes text-shimmer {
+  to {
+    background-position: 200% center;
+  }
+}
+
+.thinking-shimmer {
+  background: linear-gradient(90deg,
+      var(--color-fg-subtle) 0%,
+      var(--color-fg) 50%,
+      var(--color-fg-subtle) 100%);
+  background-size: 200% auto;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  animation: text-shimmer 2s linear infinite;
+}
+
+/* Brand "thinking" mark — the Aurelia logo breathes + glows inside a slow scan
+   ring while the reply is still forming (before the first token). The ring
+   highlight and the glow use the sage AI-status color (§2.4); the global
+   reduced-motion rule holds the logo static. */
+@keyframes core-breathe {
+
+  0%,
+  100% {
+    transform: scale(0.94);
+    opacity: 0.72;
+    filter: drop-shadow(0 0 2px color-mix(in oklch, var(--color-secondary) 15%, transparent));
+  }
+
+  50% {
+    transform: scale(1.06);
+    opacity: 1;
+    filter: drop-shadow(0 0 9px color-mix(in oklch, var(--color-secondary) 45%, transparent));
+  }
+}
+
 /* Indeterminate progress bar (used by KB document processing status). */
 @keyframes indeterminate {
   0% {

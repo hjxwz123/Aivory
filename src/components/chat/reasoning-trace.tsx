@@ -92,7 +92,7 @@ export function ReasoningTrace({ reasoning, streaming = false, settled = false }
             active && 'animate-[streaming-pulse_1600ms_ease-in-out_infinite]',
           )}
         />
-        <span className="min-w-0 truncate text-[12.5px]">{headline}</span>
+        <span className={cn('min-w-0 truncate text-[12.5px]', active && 'thinking-shimmer font-medium')}>{headline}</span>
         <ChevronRight
           size={12}
           aria-hidden

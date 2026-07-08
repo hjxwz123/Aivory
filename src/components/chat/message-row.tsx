@@ -25,6 +25,7 @@ import {
 import { Link } from 'react-router-dom'
 import type { Message, Attachment } from '@/types/chat'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { LogoMark } from '@/components/brand/logo'
 import { ModelIcon } from '@/components/chat/model-icon'
 import { Tooltip } from '@/components/ui/tooltip'
 import {
@@ -62,6 +63,21 @@ import { ImageLightbox } from './image-lightbox'
 import { FilePreview } from './file-preview'
 import { toast } from '@/hooks/use-toast'
 import { cn, safeHref } from '@/lib/utils'
+
+/**
+ * ThinkingLogo — the "still forming a reply" indicator shown before the first
+ * token: the Aurelia mark breathing + glowing inside a slow scan ring. The ring
+ * highlight and glow use the sage AI-status colour (§2.4); the global
+ * prefers-reduced-motion rule holds it static.
+ */
+function ThinkingLogo() {
+  return (
+    <div className="relative grid size-11 place-items-center" aria-hidden>
+      <span className="absolute inset-0 rounded-full border border-[var(--color-border)] [border-top-color:var(--color-secondary)] animate-[spin_1200ms_cubic-bezier(0.6,0.1,0.4,0.9)_infinite]" />
+      <LogoMark size={24} className="animate-[core-breathe_2400ms_ease-in-out_infinite]" />
+    </div>
+  )
+}
 
 interface MessageRowProps {
   message: Message
@@ -238,9 +254,8 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
               </span>
             ) : null}
             {message.streaming ? (
-              <span className="ml-1 inline-flex items-center gap-1 text-[11px] text-[var(--color-fg-subtle)]">
-                <span className="inline-block size-1.5 rounded-full bg-[var(--color-secondary)] animate-[streaming-pulse_1600ms_ease-in-out_infinite]" />
-                {t('thinking')}
+              <span className="thinking-shimmer ml-1 text-[11px] font-medium tracking-[0.04em]">
+                {t('thinking')}…
               </span>
             ) : null}
           </div>
@@ -399,12 +414,10 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
                 chat thinking/tool-call trace) while no image artifact exists yet. */}
             {message.imageStatus && (!message.artifacts || message.artifacts.length === 0) ? (
               <ImageGenerating phase={message.imageStatus} />
-            ) : /* Streaming placeholder while empty */
+            ) : /* Streaming placeholder while empty — the brand thinking mark */
             message.streaming && !message.content && (!message.reasoning || message.reasoning.length === 0) ? (
-              <div className="flex items-center gap-1.5 py-1">
-                <span className="size-1.5 rounded-full bg-[var(--color-fg-faint)] animate-[typing_1400ms_ease-in-out_infinite] [animation-delay:0ms]" />
-                <span className="size-1.5 rounded-full bg-[var(--color-fg-faint)] animate-[typing_1400ms_ease-in-out_infinite] [animation-delay:160ms]" />
-                <span className="size-1.5 rounded-full bg-[var(--color-fg-faint)] animate-[typing_1400ms_ease-in-out_infinite] [animation-delay:320ms]" />
+              <div className="py-1">
+                <ThinkingLogo />
               </div>
             ) : message.quotaExceeded ? (
               <div className="my-1 overflow-hidden rounded-xl border border-[var(--color-secondary)]/40 bg-[var(--color-secondary-soft)]/50 px-4 py-3.5">
