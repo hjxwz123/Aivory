@@ -51,5 +51,9 @@
     "tabUpload": "Upload file",
     "contentLabel": "Content",
     "clickToChoose": "Click to choose files"
-  }
+  },
+  "deleted": "Knowledge base deleted",
+  "deleteAction": "Delete knowledge base",
+  "deleteTitle": "Delete knowledge base?",
+  "deleteBody": "This permanently deletes “{{name}}”, all its documents and their embeddings. Conversations that reference it will be unlinked. This cannot be undone."
 }

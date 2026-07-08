@@ -24,7 +24,7 @@ import { persistUserSettings } from '@/lib/user-settings'
 
 // Slider stops, narrow → full. Order defines the slider's left-to-right axis;
 // widths live in tokens.css ([data-chat-width=…] → --layout-message-max-w).
-const CHAT_WIDTH_STOPS: readonly ChatWidthPref[] = ['narrow', 'comfortable', 'wide', 'full']
+const CHAT_WIDTH_STOPS: readonly ChatWidthPref[] = ['narrow', 'comfortable', 'wide', 'full', 'max']
 
 /**
  * Static preview color per accent preset. Chosen at L≈58 / C≈0.18 so the

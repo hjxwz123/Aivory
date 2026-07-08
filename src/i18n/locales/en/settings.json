@@ -183,7 +183,8 @@
       "narrow": "Narrow",
       "comfortable": "Centered",
       "wide": "Wide",
-      "full": "Full width"
+      "full": "Full width",
+      "max": "Extra wide"
     },
     "userMessageMarkdown": {
       "label": "Markdown in your messages",

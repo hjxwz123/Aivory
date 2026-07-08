@@ -42,7 +42,7 @@ function greetingKey(): 'morning' | 'afternoon' | 'evening' | 'stillUp' {
 export default function ChatHome() {
   const navigate = useNavigate()
   const { t } = useTranslation('chat')
-  const createConversation = useConversations((s) => s.createConversation)
+  const beginOptimisticConversation = useConversations((s) => s.beginOptimisticConversation)
   const sendMessage = useConversations((s) => s.sendMessage)
   const setModel = useConversations((s) => s.setModel)
   const defaultModelId = useModels((s) => s.defaultId)
@@ -81,6 +81,9 @@ export default function ChatHome() {
   const pendingConvRef = useRef<ApiConversation | null>(null)
   const pendingCreateRef = useRef<Promise<string | undefined> | null>(null)
   const pendingConsumedRef = useRef(false)
+  // Guards startNew against a double fire (rapid re-click, two suggestion cards)
+  // spawning duplicate conversations + sends.
+  const startedRef = useRef(false)
   // True once this mount's cleanup ran — a create that resolves AFTER the user
   // left the page must delete itself instead of stashing into a dead ref.
   const disposedRef = useRef(false)
@@ -217,28 +220,47 @@ export default function ChatHome() {
       verify?: boolean
     } = {},
   ) {
-    // Reuse the conversation created up front for an attachment (so its uploads
-    // stay scoped/ingested) — adopting it into the store now (it was kept off
-    // the sidebar while drafting); otherwise create a fresh one via the store.
-    // consumed is set unconditionally: an ensureConversation still in flight
-    // (send raced the attach) must delete its row on resolve, not stash it.
-    const pending = pendingConvRef.current
+    if (startedRef.current) return
+    startedRef.current = true
+    // Mark any attachment draft as consumed so its cleanup won't delete it.
     pendingConsumedRef.current = true
-    pendingConvRef.current = null
-    const conv = pending ? adoptConversation(pending) : await createConversation(modelId)
-    if (!conv) return
-    // The picker is the source of truth for a new chat. A conversation created
-    // earlier for an attachment may carry a stale model, so persist the picked
-    // model onto it before sending; the first turn always uses `modelId` directly
-    // (never the conversation's possibly-stale model).
-    if (modelId && conv.modelId !== modelId) {
-      void setModel(conv.id, modelId)
+
+    // Attachment flow: the conversation was already created server-side on
+    // attach (so uploads were scoped/ingested). Adopt it into the store, then
+    // send. This path already navigates instantly (no create round-trip here).
+    const pending = pendingConvRef.current
+    if (pending) {
+      pendingConvRef.current = null
+      const conv = adoptConversation(pending)
+      // The picker is the source of truth: a conversation created earlier for an
+      // attachment may carry a stale model, so persist the picked one first.
+      if (modelId && conv.modelId !== modelId) void setModel(conv.id, modelId)
+      clearComposerDraft(draftScope)
+      navigate(`/chat/${conv.id}`)
+      void sendMessage({
+        conversationId: conv.id,
+        text,
+        modelId,
+        attachments,
+        mode: opts.mode,
+        params: opts.params,
+        imageStyleId: opts.imageStyleId,
+        verify: opts.verify,
+      })
+      return
     }
+
+    // No attachment: navigate to the thread INSTANTLY on an optimistic (temp-id)
+    // conversation, and let sendMessage create the real one server-side, re-key
+    // the cache, and swap the id in the URL. So the user lands on the thread the
+    // moment they hit send — never staring at the home screen during the create
+    // round-trip (and never re-clicking because "nothing happened").
+    const tempId = beginOptimisticConversation(text, modelId)
     clearComposerDraft(draftScope)
-    navigate(`/chat/${conv.id}`)
-    // Fire-and-forget the stream; the ChatThread page will react to store updates.
+    navigate(`/chat/${tempId}`)
     void sendMessage({
-      conversationId: conv.id,
+      conversationId: tempId,
+      createFirst: true,
       text,
       modelId,
       attachments,
@@ -246,6 +268,15 @@ export default function ChatHome() {
       params: opts.params,
       imageStyleId: opts.imageStyleId,
       verify: opts.verify,
+      // Swap temp→real id in the URL only if the user is STILL on the optimistic
+      // thread. If they navigated elsewhere during the create round-trip, leave
+      // them be — the stream still lands in the (re-keyed) real conversation,
+      // reachable from the sidebar; yanking them would be worse than a stale URL.
+      onConversationId: (realId) => {
+        if (window.location.pathname === `/chat/${tempId}`) {
+          navigate(`/chat/${realId}`, { replace: true })
+        }
+      },
     })
   }
 

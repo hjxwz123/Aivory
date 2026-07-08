@@ -6,13 +6,19 @@ import { activeWorkspaceId } from '@/store/workspaces'
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { Plus, Trash2, Upload, FileText, Loader2, AlertTriangle } from 'lucide-react'
+import { Plus, Trash2, Upload, FileText, Loader2, AlertTriangle, MoreHorizontal } from 'lucide-react'
 import { ApiError, kbsApi } from '@/api'
 import type { ApiDocument, ApiKnowledgeBase } from '@/api/types'
 import { api } from '@/api/client'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Badge } from '@/components/ui/badge'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import {
   Dialog,
   DialogBody,
@@ -42,6 +48,22 @@ export default function KnowledgeBaseDetail() {
   const [uploading, setUploading] = useState(false)
   const [tab, setTab] = useState<'paste' | 'upload'>('paste')
   const fileInput = useRef<HTMLInputElement>(null)
+  // Delete the whole KB (documents + vectors; unbinds it from conversations).
+  const [confirmDeleteKB, setConfirmDeleteKB] = useState(false)
+  const [deletingKB, setDeletingKB] = useState(false)
+
+  async function deleteKB() {
+    if (!id) return
+    setDeletingKB(true)
+    try {
+      await kbsApi.remove(id)
+      toast.success(t('kb:deleted', { defaultValue: 'Knowledge base deleted' }))
+      navigate('/kb')
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : t('common:common.error'))
+      setDeletingKB(false)
+    }
+  }
 
   // load(silent) refreshes the KB + its docs. Only the FIRST load toggles the
   // page-level skeleton; the background status poll passes silent=true so the
@@ -145,13 +167,31 @@ export default function KnowledgeBaseDetail() {
         backTo="/kb"
         backLabel={t('kb:title')}
         actions={
-          <Button
-            size="sm"
-            leadingIcon={<Plus size={15} aria-hidden />}
-            onClick={() => setOpen(true)}
-          >
-            {t('kb:detail.uploadButton')}
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              leadingIcon={<Plus size={15} aria-hidden />}
+              onClick={() => setOpen(true)}
+            >
+              {t('kb:detail.uploadButton')}
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  aria-label={t('common:actions.more', { defaultValue: 'More' })}
+                  className="inline-flex items-center justify-center size-8 rounded-[8px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                >
+                  <MoreHorizontal size={16} aria-hidden />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem destructive onSelect={() => setConfirmDeleteKB(true)}>
+                  <Trash2 size={13} aria-hidden /> {t('kb:deleteAction', { defaultValue: 'Delete knowledge base' })}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         }
       />
       <div className="flex-1 min-h-0 overflow-y-auto">
@@ -280,6 +320,29 @@ export default function KnowledgeBaseDetail() {
             {tab === 'paste' ? (
               <Button onClick={() => void addPasted()}>{t('common:actions.save')}</Button>
             ) : null}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={confirmDeleteKB} onOpenChange={(o) => { if (!o && !deletingKB) setConfirmDeleteKB(false) }}>
+        <DialogContent size="sm">
+          <DialogHeader>
+            <DialogTitle>{t('kb:deleteTitle', { defaultValue: 'Delete knowledge base?' })}</DialogTitle>
+            <DialogDescription>
+              {t('kb:deleteBody', {
+                name: kb?.name ?? '',
+                defaultValue:
+                  'This permanently deletes “{{name}}”, all its documents and their embeddings. Conversations that reference it will be unlinked. This cannot be undone.',
+              })}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setConfirmDeleteKB(false)} disabled={deletingKB}>
+              {t('common:actions.cancel')}
+            </Button>
+            <Button variant="destructive" loading={deletingKB} onClick={() => void deleteKB()}>
+              {t('common:actions.delete')}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

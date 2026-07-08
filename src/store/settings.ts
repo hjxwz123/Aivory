@@ -3,7 +3,7 @@ import type { AppearanceSettings, ChatWidthPref, DensityPref, FontPref, FontSize
 
 const RESPONSE_LENGTHS = ['concise', 'balanced', 'detailed'] as const
 const FONTS: readonly FontPref[] = ['default', 'inter', 'system', 'serif']
-const CHAT_WIDTHS: readonly ChatWidthPref[] = ['narrow', 'comfortable', 'wide', 'full']
+const CHAT_WIDTHS: readonly ChatWidthPref[] = ['narrow', 'comfortable', 'wide', 'full', 'max']
 type ResponseLengthPref = ModelSettings['responseLength']
 
 function isResponseLength(value: string): value is ResponseLengthPref {
@@ -59,7 +59,7 @@ export const useSettings = create<SettingsState>((set) => ({
     density: 'comfortable',
     fontSize: 'md',
     font: 'default',
-    chatWidth: 'comfortable',
+    chatWidth: 'full',
     userMessageMarkdown: false,
     ...(initial.appearance ?? {}),
   },
