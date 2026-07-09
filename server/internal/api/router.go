@@ -193,6 +193,7 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("GET", "/api/conversations/:id/inline-threads", requireAuth(d, listInlineThreadsHandler))
 	mux.handle("POST", "/api/conversations/:id/inline-threads", requireAuth(d, createInlineThreadHandler))
 	mux.handle("GET", "/api/conversations/:id/documents", requireAuth(d, listConversationDocsHandler))
+	mux.handle("POST", "/api/conversations/:id/documents/:docId/retry", requireAuth(d, retryConversationDocumentHandler))
 	mux.handle("POST", "/api/conversations/:id/documents/:docId/promote", requireAuth(d, promoteDocumentHandler))
 	// Conversation files drawer (§ conversation files): the authoritative set of
 	// files the conversation references. Upload reuses POST /api/files; remove

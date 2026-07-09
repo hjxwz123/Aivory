@@ -513,7 +513,7 @@
       "ossAccessKeyId": "AccessKey ID",
       "ossAccessKeySecret": "AccessKey Secret",
       "mineruSection": "Document parsing (MinerU)",
-      "mineruLead": "Non-text uploads (PDF/Office/images) are parsed by MinerU via your storage bucket; also set sandbox_base_url in Tools so the backend can upload through the sandbox sidecar and create presigned URLs.",
+      "mineruLead": "Non-text uploads (PDF/Office/images) are parsed by MinerU via your storage bucket; the backend uploads directly to S3/OSS and creates presigned URLs, so sandbox_base_url is not required for MinerU.",
       "mineruBaseUrl": "MinerU base URL",
       "mineruBaseUrlHint": "Cloud default: https://mineru.net. Or point at your gateway.",
       "mineruToken": "API token",

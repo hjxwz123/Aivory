@@ -33,11 +33,14 @@ func TestStorageBlockFromSettingsRejectsLocalForMinerU(t *testing.T) {
 }
 
 func TestMinerUConfigIssues(t *testing.T) {
-	issues := minerUConfigIssues("", "", "", nil, []string{"storage_provider is empty"})
+	issues := minerUConfigIssues("", "", nil, []string{"storage_provider is empty"})
 	joined := strings.Join(issues, "; ")
-	for _, want := range []string{"mineru_api_url", "mineru_api_token", "sandbox_base_url", "storage_provider"} {
+	for _, want := range []string{"mineru_api_url", "mineru_api_token", "storage_provider"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("issues %q missing %q", joined, want)
 		}
+	}
+	if strings.Contains(joined, "sandbox_base_url") {
+		t.Fatalf("MinerU direct upload should not require sandbox_base_url, got %q", joined)
 	}
 }

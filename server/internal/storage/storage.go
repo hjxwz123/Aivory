@@ -2,19 +2,13 @@
 // /storage/put and /storage/delete endpoints (design.md §4.5 + §4.11-C).
 //
 // Why a separate package: the sandbox sidecar is the only process that links
-// boto3 / oss2. The Go server has no AWS or Aliyun SDK in its dep graph; it
-// just POSTs JSON to the sidecar and treats the bucket as opaque. This keeps
-// the Go binary slim and the cloud-SDK choice swappable behind a stable HTTP
-// contract.
+// boto3 / oss2 for sandbox workspace archive/restore. The Go server normally
+// POSTs JSON to the sidecar and treats the bucket as opaque. MinerU source
+// uploads are the exception: see s3_direct.go for the narrow Go-side direct
+// upload path that avoids an extra large-file hop before OCR.
 //
-// The RAG ingest pipeline uses Put to stash a document, hands the returned
-// presigned URL to MinerU's /api/v4/extract/task, then Deletes after the zip
-// download completes (best-effort cleanup; a missed delete is OK because the
-// presigned URL expires).
-//
-// Storage credentials are forwarded on every call, same shape and live-reload
-// semantics as the sandbox's existing flow. Empty Provider → caller should
-// treat upload as unavailable.
+// The legacy sidecar path uses Put/Delete. MinerU source uploads use the
+// narrow PutFileDirect/DeleteDirect helpers in s3_direct.go.
 package storage
 
 import (
@@ -53,14 +47,14 @@ func New(baseURL, apiKey string, storage *sandbox.StorageConfig) *Client {
 	}
 }
 
-// Enabled reports whether the client has both a sidecar URL and an effective
-// storage config. Callers SHOULD check this — the RAG pipeline falls back to
-// the no-MinerU placeholder when storage isn't wired.
+// Enabled reports whether the sidecar upload/delete path has both a sidecar URL
+// and an effective storage config. Direct MinerU upload readiness is checked
+// separately via DirectUploadSupported.
 func (c *Client) Enabled() bool {
 	return c != nil && c.BaseURL != "" && c.Storage != nil && c.Storage.Effective()
 }
 
-// PutResult is what /storage/put returns.
+// PutResult is what /storage/put and direct MinerU uploads return.
 type PutResult struct {
 	Provider  string `json:"provider"`
 	Key       string `json:"key"`
