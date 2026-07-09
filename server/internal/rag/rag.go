@@ -215,6 +215,9 @@ func (s *Service) runIngestWithRetries(ctx context.Context, docID string) error 
 		if s.logger != nil {
 			s.logger.Printf("rag: ingest %s attempt %d/3 failed: %v", docID, attempt, err)
 		}
+		if isNonRetryableIngestError(err) {
+			break
+		}
 		// Back off between whole-pipeline retries so a transient upstream outage
 		// (e.g. embeddings TLS timeout) gets a chance to recover instead of being
 		// hammered three times in a row.
@@ -228,7 +231,40 @@ func (s *Service) runIngestWithRetries(ctx context.Context, docID string) error 
 			}
 		}
 	}
-	_ = store.UpdateDocumentStatus(ctx, s.db, docID, "failed", err.Error(), 0)
+	if s.vec.Enabled() {
+		if derr := s.vec.DeleteByDocument(ctx, docID); derr != nil && s.logger != nil {
+			s.logger.Printf("rag: cleanup vectors after failed ingest %s: %v", docID, derr)
+		}
+	}
+	if derr := store.DeleteChunksByDocument(ctx, s.db, docID); derr != nil && s.logger != nil {
+		s.logger.Printf("rag: cleanup chunks after failed ingest %s: %v", docID, derr)
+	}
+	_ = store.UpdateDocumentStatus(ctx, s.db, docID, "failed", unwrapNonRetryableIngestError(err).Error(), 0)
+	return err
+}
+
+type nonRetryableIngestError struct{ err error }
+
+func (e nonRetryableIngestError) Error() string { return e.err.Error() }
+func (e nonRetryableIngestError) Unwrap() error { return e.err }
+
+func noRetryIngest(err error) error {
+	if err == nil {
+		return nil
+	}
+	return nonRetryableIngestError{err: err}
+}
+
+func isNonRetryableIngestError(err error) bool {
+	var target nonRetryableIngestError
+	return errors.As(err, &target)
+}
+
+func unwrapNonRetryableIngestError(err error) error {
+	var target nonRetryableIngestError
+	if errors.As(err, &target) {
+		return target.err
+	}
 	return err
 }
 
@@ -250,9 +286,13 @@ type parseCache struct {
 }
 
 func (s *Service) runPipeline(ctx context.Context, docID string, cache *parseCache) error {
+	pipelineStart := time.Now()
 	d, err := store.GetDocument(ctx, s.db, docID)
 	if err != nil {
 		return err
+	}
+	if s.logger != nil {
+		s.logger.Printf("rag: ingest start doc=%s file=%q kb=%s conv=%s", docID, d.Filename, d.KBID, d.ConversationID)
 	}
 	// Idempotent re-ingest: drop any chunks AND vectors from a previous, partial,
 	// or retried run BEFORE doing anything else. Doing it FIRST (not after parse /
@@ -298,6 +338,9 @@ func (s *Service) runPipeline(ctx context.Context, docID string, cache *parseCac
 	// stages them to /workspace/uploads). Mark ready with zero chunks so the
 	// ingest pipeline completes cleanly instead of vectorising rows of numbers.
 	if isSpreadsheetData(d.Filename, d.MimeType) {
+		if s.logger != nil {
+			s.logger.Printf("rag: ingest ready doc=%s file=%q spreadsheet skipped in %s", docID, d.Filename, time.Since(pipelineStart).Round(time.Millisecond))
+		}
 		return store.UpdateDocumentStatus(ctx, s.db, docID, "ready", "", 0)
 	}
 
@@ -310,6 +353,7 @@ func (s *Service) runPipeline(ctx context.Context, docID string, cache *parseCac
 	if cache != nil && cache.ok {
 		content = cache.content
 	} else {
+		stageStart := time.Now()
 		raw, extracted, perr := parseDocument(ctx, d.StoragePath, d.MimeType, d.Filename, mineruURL, mineruKey, storageClient, mineruIssues, s.logger)
 		if perr != nil {
 			return perr
@@ -336,24 +380,28 @@ func (s *Service) runPipeline(ctx context.Context, docID string, cache *parseCac
 			cache.ok = true
 			cache.content = content
 		}
+		if s.logger != nil {
+			s.logger.Printf("rag: parse done doc=%s file=%q chars=%d extracted=%v took=%s", docID, d.Filename, len(content), extracted, time.Since(stageStart).Round(time.Millisecond))
+		}
 	}
 
 	// Chunk hierarchically (§4.11-C-2 small-to-big): parents carry section
 	// context (not embedded), children carry the vectors. The new chunker also
 	// returns image_caption rows for MinerU-extracted images (§4.11-C-1).
+	stageStart := time.Now()
 	parents := chunkHierarchical(content)
+	if s.logger != nil {
+		childCount := 0
+		for _, p := range parents {
+			childCount += len(p.Children)
+		}
+		s.logger.Printf("rag: chunk done doc=%s file=%q parents=%d children=%d took=%s", docID, d.Filename, len(parents), childCount, time.Since(stageStart).Round(time.Millisecond))
+	}
 
-	// A conversation-scoped doc that fits the full-text window is ALWAYS injected
-	// whole (the §4.11-B router skips retrieval for small scopes), so its vectors
-	// would never be queried — skip embedding entirely: instant ingest, no wasted
-	// embedding calls (this is why a small .c/.txt upload no longer "indexes").
-	//
-	// Source code & structured config (json/xml/yaml/…) are skipped regardless of
-	// size: chunking breaks their structure and dense-vector similarity retrieves
-	// code/config badly. In a conversation they're injected whole (when small) and
-	// always readable via the sandbox, so embedding adds cost without value. Prose
-	// (md/txt/log) still embeds. KB uploads always embed — a KB is an explicit
-	// cross-document search index, so skipping there would silently break search.
+	// A conversation-scoped doc that fits the full-text window is injected whole,
+	// and source/config text is also better provided as exact context instead of
+	// dense-vector chunks. KB uploads always embed because a KB is an explicit
+	// cross-document search index.
 	skipEmbed := d.KBID == "" && d.ConversationID != "" &&
 		(isCodeOrConfigText(d.Filename) || estimateTokens(content) <= s.ragSettings().FullTextThreshold)
 
@@ -394,9 +442,17 @@ func (s *Service) runPipeline(ctx context.Context, docID string, cache *parseCac
 			allChildren = append(allChildren, p.Children...)
 		}
 		if len(allChildren) > 0 {
+			stageStart = time.Now()
+			if s.logger != nil {
+				s.logger.Printf("rag: embedding start doc=%s file=%q chunks=%d model=%s dim=%d", docID, d.Filename, len(allChildren), emName, dim)
+			}
 			allVecs, err = em.Embed(ctx, allChildren)
 			if err != nil {
-				return err
+				s.logEmbeddingError(ctx, d.KBID, d.ConversationID, emName, totalEstimatedTokens(allChildren), err, em, allChildren)
+				return noRetryIngest(fmt.Errorf("embedding failed: %w", err))
+			}
+			if s.logger != nil {
+				s.logger.Printf("rag: embedding done doc=%s file=%q vectors=%d model=%s took=%s", docID, d.Filename, len(allVecs), emName, time.Since(stageStart).Round(time.Millisecond))
 			}
 			// Reconcile the collection dimension with what the model ACTUALLY
 			// returned (some endpoints ignore the configured width and emit their
@@ -468,24 +524,96 @@ func (s *Service) runPipeline(ctx context.Context, docID string, cache *parseCac
 		}
 	}
 	// One transactional batch write for the whole document.
+	stageStart = time.Now()
 	if err := store.CreateChunksBatch(ctx, s.db, inserts); err != nil {
 		return err
 	}
+	if s.logger != nil {
+		s.logger.Printf("rag: chunks stored doc=%s file=%q rows=%d children=%d took=%s", docID, d.Filename, len(inserts), written, time.Since(stageStart).Round(time.Millisecond))
+	}
 	if s.vec.Enabled() && len(points) > 0 {
+		stageStart = time.Now()
 		if err := s.vec.Upsert(ctx, dim, points); err != nil {
-			// Don't fail the whole ingest on a vector-store problem (e.g. Qdrant
-			// down / mis-keyed). We no longer keep a relational vector copy; if
-			// Qdrant is unavailable at retrieval time, the retriever injects the
-			// full in-scope text from chunks.content.
-			s.logger.Printf("rag: vector upsert for %s failed (%v) — no DB vector copy kept; retrieval will use full-text fallback when Qdrant is unavailable", docID, err)
+			return fmt.Errorf("qdrant upsert failed: %w", err)
+		}
+		if s.logger != nil {
+			s.logger.Printf("rag: qdrant upsert done doc=%s file=%q points=%d dim=%d took=%s", docID, d.Filename, len(points), dim, time.Since(stageStart).Round(time.Millisecond))
 		}
 	}
 	// Record embedding spend (§8.3, purpose=embedding) — best-effort. Skipped
-	// when we didn't embed (small conversation doc), so the report stays honest.
+	// when we intentionally inject the conversation document in full.
 	if !skipEmbed {
 		s.logEmbeddingUsage(ctx, d.KBID, d.ConversationID, emName, totalTokens)
 	}
-	return store.UpdateDocumentStatus(ctx, s.db, docID, "ready", "", written)
+	if err := store.UpdateDocumentStatus(ctx, s.db, docID, "ready", "", written); err != nil {
+		return err
+	}
+	if s.logger != nil {
+		s.logger.Printf("rag: ingest ready doc=%s file=%q chunks=%d total=%s", docID, d.Filename, written, time.Since(pipelineStart).Round(time.Millisecond))
+	}
+	return nil
+}
+
+func totalEstimatedTokens(texts []string) int {
+	total := 0
+	for _, text := range texts {
+		total += estimateTokens(text)
+	}
+	return total
+}
+
+func (s *Service) logEmbeddingError(ctx context.Context, kbID, convID, embedder string, tokens int, err error, em Embedder, texts []string) {
+	if strings.HasPrefix(embedder, "aurelia-local") {
+		return
+	}
+	userID, wsID := "", ""
+	if kbID != "" {
+		_ = s.db.QueryRowContext(ctx, `SELECT user_id, COALESCE(workspace_id,'') FROM knowledge_bases WHERE id=?`, kbID).Scan(&userID, &wsID)
+	}
+	if userID == "" && convID != "" {
+		_ = s.db.QueryRowContext(ctx, `SELECT user_id, COALESCE(workspace_id,'') FROM conversations WHERE id=?`, convID).Scan(&userID, &wsID)
+	}
+	modelID := strings.TrimPrefix(embedder, "emb:")
+	channelID := ""
+	if modelID != "" && modelID != "env" {
+		if m, merr := store.GetModel(ctx, s.db, modelID); merr == nil {
+			channelID = m.ChannelID
+		}
+	}
+	method, url, headers, body := "POST", "", "", ""
+	var reqErr *embeddingRequestError
+	if errors.As(err, &reqErr) {
+		method = reqErr.method
+		url = reqErr.url
+		headers = reqErr.headers
+		body = reqErr.body
+	}
+	if h, ok := em.(*httpEmbedder); ok {
+		if url == "" {
+			url = h.endpoint()
+		}
+		if headers == "" {
+			headers = "{\n  \"Authorization\": \"[redacted]\",\n  \"Content-Type\": [\"application/json\"]\n}"
+		}
+		if body == "" {
+			body = h.diagnosticsBody(texts)
+		}
+	}
+	_ = store.LogUsage(ctx, s.db, store.UsageLog{
+		UserID:         userID,
+		WorkspaceID:    wsID,
+		ConversationID: convID,
+		ModelID:        modelID,
+		Purpose:        "embedding",
+		InputTokens:    tokens,
+		ChannelID:      channelID,
+		Status:         "error",
+		Error:          truncateAtN(err.Error(), 4096),
+		RequestMethod:  method,
+		RequestURL:     url,
+		RequestHeaders: headers,
+		RequestBody:    body,
+	})
 }
 
 // logEmbeddingUsage writes one usage_logs row for an embedding batch. The
@@ -1579,6 +1707,15 @@ func mergeAtomsIntoChildren(atoms []atom, target int) []string {
 		if len(a.text) > target {
 			sentences := splitSentences(a.text)
 			for _, s := range sentences {
+				if len(s) > target {
+					if cur.Len() > 0 {
+						flush()
+					}
+					for _, part := range splitLongTextByChars(s, target) {
+						out = append(out, part)
+					}
+					continue
+				}
 				if cur.Len()+len(s) > target && cur.Len() > 0 {
 					flush()
 				}
@@ -1595,6 +1732,23 @@ func mergeAtomsIntoChildren(atoms []atom, target int) []string {
 		cur.WriteString(a.text)
 	}
 	flush()
+	return out
+}
+
+func splitLongTextByChars(s string, target int) []string {
+	if target <= 0 || len(s) <= target {
+		return []string{s}
+	}
+	out := []string{}
+	rest := strings.TrimSpace(s)
+	for len(rest) > target {
+		cut := clampRune(rest, target)
+		out = append(out, strings.TrimSpace(rest[:cut]))
+		rest = strings.TrimSpace(rest[cut:])
+	}
+	if rest != "" {
+		out = append(out, rest)
+	}
 	return out
 }
 
@@ -1618,7 +1772,7 @@ func withOverlap(children []string, overlap int) []string {
 		}
 		tail := prev
 		if len(tail) > overlap {
-			tail = tail[len(tail)-overlap:]
+			tail = tail[clampRune(tail, len(tail)-overlap):]
 			// Pull back to a word boundary.
 			if i := strings.IndexAny(tail, " \n。.；;！!？?"); i > 0 && i < len(tail)-1 {
 				tail = tail[i+1:]
@@ -1804,7 +1958,22 @@ func (s *Service) RouteAndRetrieve(ctx context.Context, userID, convID string, k
 		if len(pinnedSnips) == 0 {
 			return out
 		}
-		merged := append(append([]Snippet{}, pinnedSnips...), out...)
+		merged := make([]Snippet, 0, len(pinnedSnips)+len(out))
+		seen := map[string]bool{}
+		for _, sn := range pinnedSnips {
+			if seen[sn.ID] {
+				continue
+			}
+			seen[sn.ID] = true
+			merged = append(merged, sn)
+		}
+		for _, sn := range out {
+			if seen[sn.ID] {
+				continue
+			}
+			seen[sn.ID] = true
+			merged = append(merged, sn)
+		}
 		for i := range merged {
 			merged[i].Index = i + 1
 		}

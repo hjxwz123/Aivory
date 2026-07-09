@@ -23,7 +23,7 @@ import (
 // The transport timeouts bound a hung dial/handshake so a stuck connection
 // fails fast (and gets retried) instead of blocking the whole ingest.
 var embedHTTPClient = &http.Client{
-	Timeout: 120 * time.Second, // overall safety net; the request context still applies
+	Timeout: 60 * time.Second, // overall safety net; the request context still applies
 	Transport: &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
 		DialContext: (&net.Dialer{
@@ -46,6 +46,16 @@ type embeddingResponse struct {
 	} `json:"data"`
 }
 
+// dashscopeEmbeddingResponse is the native DashScope text embedding reply shape
+// from /api/v1/services/embeddings/text-embedding/text-embedding.
+type dashscopeEmbeddingResponse struct {
+	Output struct {
+		Embeddings []struct {
+			Embedding []float32 `json:"embedding"`
+		} `json:"embeddings"`
+	} `json:"output"`
+}
+
 // embedHTTPError carries the upstream status so the caller can distinguish a
 // hard rejection (e.g. 400 on an unsupported `dimensions` value) from transient
 // failures and react — like retrying without the dimensions hint.
@@ -58,10 +68,27 @@ func (e *embedHTTPError) Error() string {
 	return fmt.Sprintf("embeddings %d: %s", e.status, e.body)
 }
 
-// buildBody marshals the request. dimensions is included only when withDim is
-// set and a positive dim is configured (OpenAI-compatible `dimensions` param).
-func (e *httpEmbedder) buildBody(texts []string, withDim bool) []byte {
-	m := map[string]any{"model": e.model, "input": texts}
+type embeddingRequestError struct {
+	err     error
+	method  string
+	url     string
+	headers string
+	body    string
+}
+
+func (e *embeddingRequestError) Error() string { return e.err.Error() }
+func (e *embeddingRequestError) Unwrap() error { return e.err }
+
+// buildOpenAIBody marshals an OpenAI-compatible embedding request. dimensions is
+// included only when withDim is set and a positive dim is configured.
+func (e *httpEmbedder) buildOpenAIBody(texts []string, withDim bool) []byte {
+	input := any(texts)
+	if len(texts) == 1 {
+		// DashScope's examples use a single string for one input; arrays work too,
+		// but the string form reduces one common compatibility edge.
+		input = texts[0]
+	}
+	m := map[string]any{"model": e.model, "input": input, "encoding_format": "float"}
 	if withDim && e.dim > 0 {
 		m["dimensions"] = e.dim
 	}
@@ -69,9 +96,24 @@ func (e *httpEmbedder) buildBody(texts []string, withDim bool) []byte {
 	return b
 }
 
-// httpEmbedder calls an OpenAI-format `/v1/embeddings` endpoint (§4.11-D). Any
-// OpenAI-compatible gateway works — the admin configures base_url + key + model
-// via a channel/model of kind=embedding, or via the EMBEDDING_* env vars.
+// buildDashScopeBody marshals a native DashScope text embedding request. Native
+// API uses `input.texts` + `parameters.dimension`, not OpenAI's top-level
+// `input` + `dimensions`.
+func (e *httpEmbedder) buildDashScopeBody(texts []string, withDim bool) []byte {
+	m := map[string]any{
+		"model": e.model,
+		"input": map[string]any{"texts": texts},
+	}
+	if withDim && e.dim > 0 {
+		m["parameters"] = map[string]any{"dimension": e.dim}
+	}
+	b, _ := json.Marshal(m)
+	return b
+}
+
+// httpEmbedder calls either an OpenAI-compatible `/embeddings` endpoint or the
+// native DashScope text embedding endpoint. Admins configure base_url + key +
+// model via a channel/model of kind=embedding, or via EMBEDDING_* env vars.
 type httpEmbedder struct {
 	baseURL string
 	apiKey  string
@@ -79,31 +121,38 @@ type httpEmbedder struct {
 	dim     int
 }
 
-// embedBatchMax caps texts per upstream request. Kept conservative because some
-// OpenAI-compatible providers cap the input array hard — notably Alibaba
-// DashScope (Qwen) text-embedding-v3, whose compatible-mode endpoint rejects
-// batches over 10 with a 400. OpenAI/others tolerate small batches fine (just
-// more requests, cheap now that the HTTP client pools connections), so 10 is the
-// safe universal default.
-const embedBatchMax = 10
+const (
+	// embedBatchMax caps texts per upstream request. text-embedding-v4's official
+	// limit is 10, so keep the generic cap at that limit.
+	embedBatchMax = 10
+	// textEmbeddingV4MaxTokens is the documented per-text limit for DashScope
+	// text-embedding-v4. The chunker targets far smaller inputs; this is a final
+	// guard that reports a clear local error instead of waiting on a provider
+	// timeout when OCR returns one enormous atom.
+	textEmbeddingV4MaxTokens = 8192
+)
 
 // embedConcurrency caps how many upstream embedding batches run at once. The old
 // code did them strictly sequentially, so a 500-chunk doc paid 50 serial
-// round-trips (a minute+ against a far endpoint like DashScope). Running a few in
-// parallel cuts that ~Nx while staying gentle enough not to trip provider rate
-// limits (postEmbeddings already retries any 429 with backoff). 8 is still well
-// inside DashScope/OpenAI per-key limits even with the 4 ingest workers running
-// documents in parallel (worst case 32 in-flight requests).
-const embedConcurrency = 8
+// round-trips. Keep this moderate: too much parallelism makes some compatible
+// gateways stall "awaiting headers", which is worse than taking a few more waves.
+const embedConcurrency = 4
 
 // Embed returns one vector per input text, splitting into ≤embedBatchMax upstream
 // requests and running them CONCURRENTLY (bounded, order-preserving).
 func (e *httpEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+	texts = e.normalizeInputs(texts)
+	if len(texts) == 0 {
+		return nil, nil
+	}
+	if err := e.validateInputs(texts); err != nil {
+		return nil, err
+	}
 	if len(texts) <= embedBatchMax {
 		return e.embedOne(ctx, texts)
 	}
 	out := make([][]float32, len(texts))
-	sem := make(chan struct{}, embedConcurrency)
+	sem := make(chan struct{}, e.concurrency())
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	var firstErr error
@@ -149,32 +198,30 @@ func (e *httpEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, 
 
 // embedOne POSTs a single batch (≤embedBatchMax texts) and returns its vectors.
 func (e *httpEmbedder) embedOne(ctx context.Context, texts []string) ([][]float32, error) {
-	base := strings.TrimRight(e.baseURL, "/")
-	if base == "" {
-		base = "https://api.openai.com"
-	}
-	// Build the endpoint. Most configs give the API root (…/compatible-mode or
-	// api.openai.com) so we append /v1/embeddings; tolerate a base that already
-	// ends in /v1 so we don't produce …/v1/v1/embeddings.
-	endpoint := base + "/v1/embeddings"
-	if strings.HasSuffix(base, "/v1") {
-		endpoint = base + "/embeddings"
-	}
+	endpoint := e.endpoint()
 	// Ask for the configured width via the `dimensions` param so providers that
 	// support it (OpenAI text-embedding-3, DashScope text-embedding-v3/v4) return
 	// exactly what the admin set instead of their default. If the provider rejects
 	// it (older model / unsupported value — e.g. asking v3 for 1536), retry
 	// WITHOUT the hint and let the caller reconcile to whatever native width comes
 	// back, so ingestion still succeeds.
-	parsed, err := e.postEmbeddings(ctx, endpoint, e.buildBody(texts, e.dim > 0))
+	body := e.buildBody(texts, e.dim > 0)
+	parsed, err := e.postEmbeddings(ctx, endpoint, body)
 	if err != nil && e.dim > 0 {
 		var he *embedHTTPError
 		if errors.As(err, &he) && he.status == http.StatusBadRequest {
-			parsed, err = e.postEmbeddings(ctx, endpoint, e.buildBody(texts, false))
+			body = e.buildBody(texts, false)
+			parsed, err = e.postEmbeddings(ctx, endpoint, body)
 		}
 	}
 	if err != nil {
-		return nil, err
+		return nil, &embeddingRequestError{
+			err:     err,
+			method:  http.MethodPost,
+			url:     endpoint,
+			headers: "{\n  \"Authorization\": \"[redacted]\",\n  \"Content-Type\": [\"application/json\"]\n}",
+			body:    truncateAtN(string(body), 128*1024),
+		}
 	}
 	if len(parsed.Data) != len(texts) {
 		// A short/over-long reply means we'd misalign vectors with their chunks
@@ -192,14 +239,124 @@ func (e *httpEmbedder) embedOne(ctx context.Context, texts []string) ([][]float3
 	return out, nil
 }
 
+func (e *httpEmbedder) endpoint() string {
+	base := strings.TrimRight(e.baseURL, "/")
+	if base == "" {
+		base = "https://api.openai.com"
+	}
+	if strings.Contains(base, "dashscope.aliyuncs.com/compatible-mode") {
+		// DashScope compatible embedding models are served from the Bailian
+		// workspace region endpoint,
+		// e.g. https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1.
+		// The legacy global dashscope host can accept the TCP connection but never
+		// return headers for newer embedding models, which looks like a random
+		// timeout.
+		return base + "/__invalid_dashscope_embedding_base_url__"
+	}
+	if strings.HasSuffix(base, "/embeddings") || strings.Contains(base, "/services/embeddings/") {
+		return base
+	}
+	if strings.HasSuffix(base, "/api/v1") || strings.Contains(base, ".maas.aliyuncs.com/api/v1") {
+		return base + "/services/embeddings/text-embedding/text-embedding"
+	}
+	if strings.HasSuffix(base, "/v1") {
+		return base + "/embeddings"
+	}
+	return base + "/v1/embeddings"
+}
+
+func (e *httpEmbedder) buildBody(texts []string, withDim bool) []byte {
+	if e.nativeDashScope() {
+		return e.buildDashScopeBody(texts, withDim)
+	}
+	return e.buildOpenAIBody(texts, withDim)
+}
+
+func (e *httpEmbedder) nativeDashScope() bool {
+	base := strings.TrimRight(e.baseURL, "/")
+	return strings.Contains(base, "/services/embeddings/text-embedding/") ||
+		strings.HasSuffix(base, "/api/v1") ||
+		strings.Contains(base, ".maas.aliyuncs.com/api/v1")
+}
+
+func (e *httpEmbedder) concurrency() int {
+	if strings.Contains(strings.ToLower(e.baseURL), "aliyuncs.com") {
+		// DashScope v4 is much more reliable with one in-flight batch per worker;
+		// parallel batches against the same workspace commonly stall awaiting
+		// headers under large OCR ingests.
+		return 1
+	}
+	return embedConcurrency
+}
+
+func (e *httpEmbedder) normalizeInputs(texts []string) []string {
+	out := make([]string, 0, len(texts))
+	for _, text := range texts {
+		text = strings.TrimSpace(text)
+		if text == "" {
+			continue
+		}
+		out = append(out, text)
+	}
+	return out
+}
+
+func (e *httpEmbedder) maxTokensPerInput() int {
+	if strings.EqualFold(strings.TrimSpace(e.model), "text-embedding-v4") {
+		return textEmbeddingV4MaxTokens
+	}
+	return 0
+}
+
+func (e *httpEmbedder) validateInputs(texts []string) error {
+	limit := e.maxTokensPerInput()
+	if limit <= 0 {
+		return nil
+	}
+	for i, text := range texts {
+		if n := estimateTokens(text); n > limit {
+			return fmt.Errorf("embedding input %d is about %d tokens, exceeding %s limit %d; reduce chunk size or fix OCR paragraph splitting", i, n, e.model, limit)
+		}
+	}
+	return nil
+}
+
+func (e *httpEmbedder) diagnosticsBody(texts []string) string {
+	previews := make([]string, 0, 2)
+	totalChars := 0
+	for i, text := range texts {
+		totalChars += len(text)
+		if i < 2 {
+			previews = append(previews, truncateAtN(text, 1200))
+		}
+	}
+	body := map[string]any{
+		"model":         e.model,
+		"input_count":   len(texts),
+		"input_chars":   totalChars,
+		"input_preview": previews,
+	}
+	if e.nativeDashScope() {
+		body["parameters"] = map[string]any{"dimension": e.dim}
+	} else {
+		body["dimensions"] = e.dim
+		body["encoding_format"] = "float"
+	}
+	b, _ := json.MarshalIndent(body, "", "  ")
+	return truncateAtN(string(b), 16*1024)
+}
+
 // postEmbeddings POSTs one batch, retrying transient failures (TLS handshake
 // timeout, dropped connection, 429/5xx) with backoff. The request body is a
 // []byte so it can be replayed on each attempt. Hard 4xx (bad key, bad model,
 // unsupported dimension) are returned immediately — retrying won't help.
 func (e *httpEmbedder) postEmbeddings(ctx context.Context, url string, body []byte) (embeddingResponse, error) {
-	const maxAttempts = 3
+	const maxAttempts = 2
 	var parsed embeddingResponse
 	var lastErr error
+	if strings.Contains(url, "__invalid_dashscope_embedding_base_url__") {
+		return parsed, fmt.Errorf("invalid DashScope embedding base_url: use a Bailian workspace regional URL such as https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1 or https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/api/v1, not https://dashscope.aliyuncs.com/compatible-mode/v1")
+	}
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		if attempt > 1 {
 			// Linear backoff: 2s, 4s. Honor cancellation while waiting.
@@ -237,7 +394,7 @@ func (e *httpEmbedder) postEmbeddings(ctx context.Context, url string, body []by
 			resp.Body.Close()
 			return parsed, &embedHTTPError{status: resp.StatusCode, body: strings.TrimSpace(string(b))}
 		}
-		err = json.NewDecoder(resp.Body).Decode(&parsed)
+		err = e.decodeResponse(resp.Body, &parsed)
 		resp.Body.Close()
 		if err != nil {
 			lastErr = fmt.Errorf("decode embeddings response: %w", err)
@@ -251,8 +408,29 @@ func (e *httpEmbedder) postEmbeddings(ctx context.Context, url string, body []by
 	return parsed, fmt.Errorf("embeddings request failed after %d attempts: %w", maxAttempts, lastErr)
 }
 
+func (e *httpEmbedder) decodeResponse(r io.Reader, parsed *embeddingResponse) error {
+	if !e.nativeDashScope() {
+		return json.NewDecoder(r).Decode(parsed)
+	}
+	var ds dashscopeEmbeddingResponse
+	if err := json.NewDecoder(r).Decode(&ds); err != nil {
+		return err
+	}
+	parsed.Data = make([]struct {
+		Embedding []float32 `json:"embedding"`
+	}, len(ds.Output.Embeddings))
+	for i, item := range ds.Output.Embeddings {
+		parsed.Data[i].Embedding = item.Embedding
+	}
+	return nil
+}
+
 // localEmbedDim is the fixed width of the bundled hash-bag embedder.
 const localEmbedDim = 256
+
+func defaultEmbeddingDim() int {
+	return 1536
+}
 
 // resolveEmbedder picks the embedding backend in priority order:
 //  1. admin-configured embedding model (settings.embedding_model_id → model+channel)
@@ -277,7 +455,7 @@ func (s *Service) resolveEmbedder(ctx context.Context) (Embedder, string, int) {
 			if ch, err := store.GetChannel(ctx, s.db, m.ChannelID); err == nil && ch.APIKey != "" {
 				dim := m.Dim
 				if dim <= 0 {
-					dim = 1536
+					dim = defaultEmbeddingDim()
 				}
 				return &httpEmbedder{baseURL: ch.BaseURL, apiKey: ch.APIKey, model: m.RequestID, dim: dim}, "emb:" + m.ID, dim
 			}
@@ -286,7 +464,7 @@ func (s *Service) resolveEmbedder(ctx context.Context) (Embedder, string, int) {
 	if s.embAPIKey != "" {
 		dim := s.embDim
 		if dim <= 0 {
-			dim = 1536
+			dim = defaultEmbeddingDim()
 		}
 		return &httpEmbedder{baseURL: s.embBaseURL, apiKey: s.embAPIKey, model: s.embModel, dim: dim}, "emb:env", dim
 	}
@@ -334,7 +512,7 @@ func (s *Service) resolveEmbedderForKB(ctx context.Context, kbID string) (Embedd
 		useDim = m.Dim
 	}
 	if useDim <= 0 {
-		useDim = 1536
+		useDim = defaultEmbeddingDim()
 	}
 	return &httpEmbedder{baseURL: ch.BaseURL, apiKey: ch.APIKey, model: m.RequestID, dim: useDim}, "emb:" + m.ID, useDim, nil
 }

@@ -202,6 +202,7 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("GET", "/api/conversations/:id/share", requireAuth(d, getShareHandler))
 	mux.handle("POST", "/api/conversations/:id/share", requireAuth(d, createShareHandler))
 	mux.handle("DELETE", "/api/conversations/:id/share", requireAuth(d, deleteShareHandler))
+	mux.handle("POST", "/api/shared/:token/clone", requireAuth(d, cloneSharedConversationHandler))
 
 	mux.handle("POST", "/api/files", requireAuth(d, uploadFileHandler))
 	mux.handle("GET", "/api/files/:id", requireAuth(d, downloadFileHandler))

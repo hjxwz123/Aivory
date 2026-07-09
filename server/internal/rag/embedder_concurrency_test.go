@@ -56,3 +56,108 @@ func TestEmbedConcurrencyPreservesOrder(t *testing.T) {
 		t.Fatalf("small batch wrong: v=%v err=%v", v, err)
 	}
 }
+
+func TestHTTPEmbedderDashScopeNativeRequestShape(t *testing.T) {
+	var got map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/services/embeddings/text-embedding/text-embedding" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"output": map[string]any{
+				"embeddings": []map[string]any{
+					{"embedding": []float32{1, 2, 3}},
+				},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	e := &httpEmbedder{baseURL: srv.URL + "/api/v1", apiKey: "sk", model: "text-embedding-v4", dim: 1024}
+	vecs, err := e.Embed(context.Background(), []string{"hello"})
+	if err != nil {
+		t.Fatalf("Embed: %v", err)
+	}
+	if len(vecs) != 1 || len(vecs[0]) != 3 {
+		t.Fatalf("vectors = %+v", vecs)
+	}
+	if got["model"] != "text-embedding-v4" {
+		t.Fatalf("model = %v", got["model"])
+	}
+	input, ok := got["input"].(map[string]any)
+	if !ok {
+		t.Fatalf("input shape = %#v", got["input"])
+	}
+	texts, ok := input["texts"].([]any)
+	if !ok || len(texts) != 1 || texts[0] != "hello" {
+		t.Fatalf("texts = %#v", input["texts"])
+	}
+	params, ok := got["parameters"].(map[string]any)
+	if !ok || int(params["dimension"].(float64)) != 1024 {
+		t.Fatalf("parameters = %#v", got["parameters"])
+	}
+}
+
+func TestHTTPEmbedderOpenAICompatibleRequestShape(t *testing.T) {
+	var got map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/compatible-mode/v1/embeddings" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{
+				{"embedding": []float32{1, 2}},
+				{"embedding": []float32{3, 4}},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	e := &httpEmbedder{baseURL: srv.URL + "/compatible-mode/v1", apiKey: "sk", model: "text-embedding-v4", dim: 1024}
+	vecs, err := e.Embed(context.Background(), []string{"a", "b"})
+	if err != nil {
+		t.Fatalf("Embed: %v", err)
+	}
+	if len(vecs) != 2 {
+		t.Fatalf("vectors = %+v", vecs)
+	}
+	if got["model"] != "text-embedding-v4" || int(got["dimensions"].(float64)) != 1024 || got["encoding_format"] != "float" {
+		t.Fatalf("request body = %#v", got)
+	}
+	input, ok := got["input"].([]any)
+	if !ok || len(input) != 2 || input[0] != "a" || input[1] != "b" {
+		t.Fatalf("input = %#v", got["input"])
+	}
+}
+
+func TestHTTPEmbedderRejectsLegacyDashScopeCompatibleURL(t *testing.T) {
+	e := &httpEmbedder{baseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1", apiKey: "sk", model: "text-embedding-v4", dim: 1024}
+	_, err := e.Embed(context.Background(), []string{"hello"})
+	if err == nil || !strings.Contains(err.Error(), "invalid DashScope embedding base_url") {
+		t.Fatalf("err = %v, want workspace URL guidance", err)
+	}
+}
+
+func TestHTTPEmbedderRejectsOversizeV4InputBeforeHTTP(t *testing.T) {
+	called := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusTeapot)
+	}))
+	defer srv.Close()
+
+	e := &httpEmbedder{baseURL: srv.URL, apiKey: "sk", model: "text-embedding-v4", dim: 1024}
+	_, err := e.Embed(context.Background(), []string{strings.Repeat("测", textEmbeddingV4MaxTokens+1)})
+	if err == nil || !strings.Contains(err.Error(), "exceeding text-embedding-v4 limit") {
+		t.Fatalf("err = %v, want local oversize error", err)
+	}
+	if called {
+		t.Fatal("provider should not be called for an oversized v4 input")
+	}
+}

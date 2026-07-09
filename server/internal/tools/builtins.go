@@ -457,7 +457,7 @@ func (t *pythonExecuteTool) Execute(ctx context.Context, input []byte, tc *llm.T
 				// Stage data files AND images — images so they can be embedded into
 				// generated decks/docs (python-pptx/-docx read them from /workspace
 				// /uploads). Other binary kinds (audio/video/archives) stay out.
-				if f.Kind != "sheet" && f.Kind != "text" && f.Kind != "code" && f.Kind != "pdf" && f.Kind != "image" {
+				if f.Kind != "sheet" && f.Kind != "text" && f.Kind != "code" && f.Kind != "image" {
 					continue
 				}
 				if f.SizeBytes > 20*1024*1024 {

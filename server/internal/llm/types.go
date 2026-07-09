@@ -34,11 +34,12 @@ type UnifiedBlock struct {
 
 // Attachment is a user-side file reference attached to a message.
 type Attachment struct {
-	ID       string `json:"id"`
-	Filename string `json:"filename"`
-	MimeType string `json:"mime_type"`
-	Kind     string `json:"kind"`
-	URL      string `json:"url"`
+	ID         string `json:"id"`
+	DocumentID string `json:"document_id,omitempty"`
+	Filename   string `json:"filename"`
+	MimeType   string `json:"mime_type"`
+	Kind       string `json:"kind"`
+	URL        string `json:"url"`
 }
 
 // Citation is the cross-source citation type used by web_search and RAG.

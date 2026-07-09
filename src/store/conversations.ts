@@ -1897,6 +1897,7 @@ export function toLocalMessage(m: ApiMessage): Message {
             size: 0,
             kind: (a.kind as Attachment['kind']) || 'other',
             previewUrl: a.url,
+            documentId: a.document_id,
           }))
         : undefined,
     branchIndex: m.branch_index,
@@ -1961,6 +1962,7 @@ function attachmentToApi(a: Attachment): ApiAttachment {
     mime_type: '',
     kind: a.kind,
     url: a.previewUrl ?? '',
+    document_id: a.documentId,
   }
 }
 

@@ -409,6 +409,8 @@ export const conversationsApi = {
 
 export const sharedApi = {
   get: (token: string) => api<ApiSharedConversation>(`/public/shared/${encodeURIComponent(token)}`),
+  clone: (token: string) =>
+    api<ApiConversation>(`/shared/${encodeURIComponent(token)}/clone`, { method: 'POST' }),
 }
 
 // ----- Knowledge bases ----------------------------------------------------

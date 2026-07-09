@@ -275,14 +275,79 @@ func ConversationDocReady(ctx context.Context, db *sql.DB, convID, filename stri
 }
 
 // ConversationHasPendingDocs reports whether a conversation has a document still
-// being ingested (pending/parsing/embedding). Used to briefly wait for a
-// just-uploaded chat file to finish indexing before answering, so the very first
-// turn after an upload can actually use the file (§4.11-B chat uploads).
+// being ingested (pending/parsing/embedding). Used by admin/maintenance views and
+// old safety checks; normal sends validate the attached document ids directly.
 func ConversationHasPendingDocs(ctx context.Context, db *sql.DB, convID string) bool {
 	var n int
 	_ = db.QueryRowContext(ctx,
 		`SELECT 1 FROM documents WHERE conversation_id=? AND status IN ('pending','parsing','embedding') LIMIT 1`, convID).Scan(&n)
 	return n == 1
+}
+
+// ConversationDocumentStatuses returns the status for conversation-scoped
+// documents by id. The message handler uses it as a server-side guard so a stale
+// or hand-written client cannot start generation before the attached document's
+// RAG ingest is actually ready.
+func ConversationDocumentStatuses(ctx context.Context, db *sql.DB, convID string, docIDs []string) (map[string]string, error) {
+	docIDs = cleanIDs(docIDs)
+	out := make(map[string]string, len(docIDs))
+	if convID == "" || len(docIDs) == 0 {
+		return out, nil
+	}
+	args := make([]any, 0, len(docIDs)+1)
+	args = append(args, convID)
+	for _, id := range docIDs {
+		args = append(args, id)
+	}
+	rows, err := db.QueryContext(ctx,
+		`SELECT id, status FROM documents WHERE conversation_id=? AND id IN (`+idPlaceholders(len(docIDs))+`)`,
+		args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, status string
+		if err := rows.Scan(&id, &status); err != nil {
+			return nil, err
+		}
+		out[id] = status
+	}
+	return out, rows.Err()
+}
+
+// ConversationDocumentStatusesForFiles returns the conversation-scoped document
+// statuses that were created from the given file ids. It lets the message handler
+// protect older clients that know only the file id, not the newer document_id.
+func ConversationDocumentStatusesForFiles(ctx context.Context, db *sql.DB, convID string, fileIDs []string) (map[string][]string, error) {
+	fileIDs = cleanIDs(fileIDs)
+	out := make(map[string][]string, len(fileIDs))
+	if convID == "" || len(fileIDs) == 0 {
+		return out, nil
+	}
+	args := make([]any, 0, len(fileIDs)+1)
+	args = append(args, convID)
+	for _, id := range fileIDs {
+		args = append(args, id)
+	}
+	rows, err := db.QueryContext(ctx, `
+SELECT f.id, d.status
+FROM files f
+JOIN documents d ON d.storage_path=f.storage_path AND d.conversation_id=f.conversation_id
+WHERE f.conversation_id=? AND f.id IN (`+idPlaceholders(len(fileIDs))+`)
+ORDER BY f.id, d.created_at ASC`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var fileID, status string
+		if err := rows.Scan(&fileID, &status); err != nil {
+			return nil, err
+		}
+		out[fileID] = append(out[fileID], status)
+	}
+	return out, rows.Err()
 }
 
 // ListIncompleteDocuments returns documents stuck in a non-terminal state —
@@ -627,7 +692,7 @@ func ListChunksInScope(ctx context.Context, db *sql.DB, kbIDs []string, convID s
 	// index (idx_chunks_kb / idx_chunks_conv) — an `OR` across the two columns
 	// would force a full scan.
 	const cols = `c.id, c.document_id, COALESCE(c.kb_id,''), COALESCE(c.conversation_id,''), c.seq, COALESCE(c.parent_id,''), c.chunk_type, c.content, COALESCE(c.image_ref,''), c.meta, c.embedding_model, d.filename`
-	const from = ` FROM chunks c JOIN documents d ON d.id = c.document_id WHERE `
+	const from = ` FROM chunks c JOIN documents d ON d.id = c.document_id WHERE d.status='ready' AND `
 	legs := []string{}
 	args := []any{}
 	if len(kbIDs) > 0 {

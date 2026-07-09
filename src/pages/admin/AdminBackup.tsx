@@ -16,7 +16,17 @@ import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'reac
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { CheckCircle2, Download, Upload, TriangleAlert, FileArchive, FileJson, Braces, Clock3, XCircle, Database, Wrench } from 'lucide-react'
-import { adminApi, ApiError, type BackupArchiveFile, type BackupExportJob, type BackupImportResult, type VectorMaintenanceJob } from '@/api'
+import {
+  adminApi,
+  ApiError,
+  type BackupArchiveFile,
+  type BackupExportJob,
+  type BackupExportState,
+  type BackupImportResult,
+  type VectorAuditReport,
+  type VectorMaintenanceJob,
+  type VectorMaintenanceState,
+} from '@/api'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { Input } from '@/components/ui/input'
@@ -51,6 +61,49 @@ function formatBytes(n: number): string {
 function formatDate(unixSec: number): string {
   if (!unixSec) return '—'
   return new Date(unixSec * 1000).toLocaleString()
+}
+
+function safeArray<T>(value: T[] | null | undefined): T[] {
+  return Array.isArray(value) ? value : []
+}
+
+function tableRowCount(tables: Record<string, number> | null | undefined): number {
+  if (!tables || typeof tables !== 'object' || Array.isArray(tables)) return 0
+  return Object.values(tables).reduce((sum, value) => sum + (Number.isFinite(value) ? value : 0), 0)
+}
+
+function normalizeBackupState(state: BackupExportState | null | undefined): BackupExportState {
+  return {
+    running: state?.running ?? null,
+    archives: safeArray(state?.archives),
+    jobs: safeArray(state?.jobs),
+  }
+}
+
+function normalizeVectorReport(report: VectorAuditReport | null | undefined): VectorAuditReport | undefined {
+  if (!report) return undefined
+  return {
+    ...report,
+    models: safeArray(report.models),
+    issues: safeArray(report.issues),
+  }
+}
+
+function normalizeVectorJob(job: VectorMaintenanceJob | null | undefined): VectorMaintenanceJob | null {
+  if (!job) return null
+  return {
+    ...job,
+    report: normalizeVectorReport(job.report),
+  }
+}
+
+function normalizeVectorState(state: VectorMaintenanceState | null | undefined): VectorMaintenanceState {
+  return {
+    running: normalizeVectorJob(state?.running),
+    jobs: safeArray(state?.jobs)
+      .map(normalizeVectorJob)
+      .filter((job): job is VectorMaintenanceJob => Boolean(job)),
+  }
 }
 
 export default function AdminBackup() {
@@ -90,14 +143,14 @@ export default function AdminBackup() {
   const [importingConfig, setImportingConfig] = useState(false)
 
   const refreshExportState = useCallback(async () => {
-    const state = await adminApi.backupExportState()
+    const state = normalizeBackupState(await adminApi.backupExportState())
     setRunningExport(state.running)
     setArchives(state.archives)
     setRecentJobs(state.jobs)
   }, [])
 
   const refreshVectorState = useCallback(async () => {
-    const state = await adminApi.vectorMaintenanceState()
+    const state = normalizeVectorState(await adminApi.vectorMaintenanceState())
     setRunningVector(state.running)
     setVectorJobs(state.jobs)
   }, [])
@@ -108,13 +161,15 @@ export default function AdminBackup() {
       .then(([backupRes, vectorRes]) => {
         if (!alive) return
         if (backupRes.status === 'fulfilled') {
-          setRunningExport(backupRes.value.running)
-          setArchives(backupRes.value.archives)
-          setRecentJobs(backupRes.value.jobs)
+          const state = normalizeBackupState(backupRes.value)
+          setRunningExport(state.running)
+          setArchives(state.archives)
+          setRecentJobs(state.jobs)
         }
         if (vectorRes.status === 'fulfilled') {
-          setRunningVector(vectorRes.value.running)
-          setVectorJobs(vectorRes.value.jobs)
+          const state = normalizeVectorState(vectorRes.value)
+          setRunningVector(state.running)
+          setVectorJobs(state.jobs)
         }
       })
       .catch(() => {
@@ -155,7 +210,7 @@ export default function AdminBackup() {
     if (runningExport || runningVector) return
     setExporting(true)
     try {
-      const state = await adminApi.backupExportStart(includeFiles)
+      const state = normalizeBackupState(await adminApi.backupExportStart(includeFiles))
       setRunningExport(state.running)
       setArchives(state.archives)
       setRecentJobs(state.jobs)
@@ -248,7 +303,7 @@ export default function AdminBackup() {
     setImportingConfig(true)
     try {
       const res = await adminApi.configImport(pendingConfig)
-      const count = Object.values(res.tables).reduce((a, b) => a + b, 0)
+      const count = tableRowCount(res.tables)
       setCfgConfirmOpen(false)
       setPendingConfig(null)
       toast.success(t('admin:backup.config.import.done', { count }))
@@ -263,7 +318,7 @@ export default function AdminBackup() {
     if (runningVector || runningExport) return
     setStartingVectorJob('check')
     try {
-      const state = await adminApi.vectorCheckStart()
+      const state = normalizeVectorState(await adminApi.vectorCheckStart())
       setRunningVector(state.running)
       setVectorJobs(state.jobs)
       toast.success(t('admin:backup.vectors.checkStarted'))
@@ -278,7 +333,7 @@ export default function AdminBackup() {
     if (runningVector || runningExport) return
     setStartingVectorJob('rebuild')
     try {
-      const state = await adminApi.vectorRebuildMissingStart()
+      const state = normalizeVectorState(await adminApi.vectorRebuildMissingStart())
       setRunningVector(state.running)
       setVectorJobs(state.jobs)
       toast.success(t('admin:backup.vectors.rebuildStarted'))
@@ -289,11 +344,11 @@ export default function AdminBackup() {
     }
   }
 
-  const totalRows = result ? Object.values(result.tables).reduce((a, b) => a + b, 0) : 0
+  const totalRows = result ? tableRowCount(result.tables) : 0
   const exportBusy = exporting || Boolean(runningExport)
   const failedExport = recentJobs[0]?.status === 'failed' ? recentJobs[0] : null
   const latestVectorJob = vectorJobs[0] ?? null
-  const vectorReport = runningVector?.report ?? latestVectorJob?.report
+  const vectorReport = normalizeVectorReport(runningVector?.report ?? latestVectorJob?.report)
   const vectorMissing = vectorReport ? vectorReport.missing + vectorReport.empty : 0
   const vectorBusy = Boolean(runningVector)
   const fullBackupBusy = exportBusy || vectorBusy

@@ -723,17 +723,9 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	if ragMode == "" {
 		ragMode = "auto"
 	}
-	// Chat uploads ingest asynchronously (parse → embed → status='ready'). If the
-	// user sends a message the instant they attach a file, ingestion hasn't
-	// finished, so the doc isn't retrievable yet and the model would answer "I
-	// can't see the file" on the FIRST turn (it only worked from the 2nd turn on).
-	// Briefly wait for in-flight ingestion of THIS conversation's docs so the very
-	// first turn can use the upload. Bounded so a slow/failing embed never hangs
-	// the request — on timeout we just proceed (the answer model is told the file
-	// is still indexing via the no-context path).
-	if o.rag != nil {
-		o.waitForPendingDocs(ctx, conv.ID, onEvent)
-	}
+	// Chat uploads are rejected by the HTTP handler until their document_id is
+	// status='ready'. Do not wait-and-skip here: skipping pending docs is exactly
+	// what made the model fall back to python-side PDF parsing.
 	// §4.11-B: run inline RAG when a KB is bound OR the conversation itself has an
 	// ingested upload (chat-attached files are conversation-scoped, not in a KB —
 	// without this they'd only be retrievable if the model voluntarily called the
@@ -872,7 +864,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	if convFiles, ferr := store.ListFilesByConversation(ctx, o.db, conv.ID, req.UserID); ferr == nil {
 		for _, f := range convFiles {
 			switch f.Kind {
-			case "sheet", "text", "code", "pdf", "image":
+			case "sheet", "text", "code", "image":
 				sandboxFiles = append(sandboxFiles, ProjectFileSummary{Name: f.Filename, Kind: f.Kind})
 			}
 		}
@@ -1642,62 +1634,6 @@ func assistantRendersEmpty(m store.Message) bool {
 // ~13 MB base64), protecting the upstream request size.
 const maxInlineAttachment = 10 * 1024 * 1024
 
-// pendingDocWait bounds how long a turn waits for a just-uploaded chat file to
-// finish async ingestion before answering. Long enough for a normal embed pass
-// (a few batches over the network), short enough that a slow/failing embed
-// can't hang the request — on timeout the turn proceeds without the doc.
-const pendingDocWait = 25 * time.Second
-
-// waitForPendingDocs blocks until this conversation has no documents still being
-// ingested (pending/parsing/embedding), or pendingDocWait elapses, or the
-// request is cancelled. It returns immediately when nothing is in flight, so it
-// adds zero latency to ordinary chats — only the first turn right after an
-// upload pays the (usually small) wait. This is what lets the FIRST message
-// after attaching a file actually use it instead of "I can't see the file".
-func (o *Orchestrator) waitForPendingDocs(ctx context.Context, convID string, onEvent func(SseEvent)) {
-	if !store.ConversationHasPendingDocs(ctx, o.db, convID) {
-		return
-	}
-	start := time.Now()
-	if o.logger != nil {
-		o.logger.Printf("rag: waiting up to %s for pending documents before provider request (conv=%s)", pendingDocWait, convID)
-	}
-	if onEvent != nil {
-		onEvent(SseEvent{Type: "rag", Status: "indexing"})
-	}
-	deadline := time.Now().Add(pendingDocWait)
-	ticker := time.NewTicker(500 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			if o.logger != nil {
-				o.logger.Printf("rag: pending-document wait cancelled after %s (conv=%s): %v", time.Since(start).Round(time.Millisecond), convID, ctx.Err())
-			}
-			return
-		case <-ticker.C:
-			if !store.ConversationHasPendingDocs(ctx, o.db, convID) {
-				if o.logger != nil {
-					o.logger.Printf("rag: pending documents ready after %s (conv=%s)", time.Since(start).Round(time.Millisecond), convID)
-				}
-				if onEvent != nil {
-					onEvent(SseEvent{Type: "rag", Status: "indexing_done", Summary: fmt.Sprintf("waited %.1fs", time.Since(start).Seconds())})
-				}
-				return
-			}
-			if time.Now().After(deadline) {
-				if o.logger != nil {
-					o.logger.Printf("rag: pending documents still not ready after %s; continuing without them for this turn (conv=%s)", time.Since(start).Round(time.Millisecond), convID)
-				}
-				if onEvent != nil {
-					onEvent(SseEvent{Type: "rag", Status: "warning", Summary: fmt.Sprintf("still indexing after %.0fs; continuing without pending documents", pendingDocWait.Seconds())})
-				}
-				return
-			}
-		}
-	}
-}
-
 // resolveAttachments loads image attachments from disk and appends them as
 // base64 image blocks to their messages so vision-capable providers can see
 // them (§4.6). Errors are silent — a missing file never blocks the turn.
@@ -1808,7 +1744,7 @@ type systemPromptOpts struct {
 	Memories            []store.Memory
 	ProjectFiles        []ProjectFileSummary
 	// SandboxFiles are conversation-uploaded data files staged at
-	// /workspace/uploads (CSV/XLSX/text/code/PDF). Listed only when
+	// /workspace/uploads (CSV/XLSX/text/code/images). Listed only when
 	// python_execute is enabled.
 	SandboxFiles []ProjectFileSummary
 	// Persona is the user's personalization (tone traits + custom instructions

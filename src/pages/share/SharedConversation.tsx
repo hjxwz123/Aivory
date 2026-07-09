@@ -5,7 +5,7 @@
  * with the link. The owner can revoke the share at any time, which 404s this.
  */
 import { useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { sharedApi, ApiError } from '@/api'
 import type { ApiAttachment, ApiBlock, ApiSharedConversation } from '@/api/types'
@@ -13,7 +13,10 @@ import { Logo } from '@/components/brand/logo'
 import { Markdown } from '@/components/chat/markdown'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
-import { FileText, Ghost } from 'lucide-react'
+import { toast } from '@/hooks/use-toast'
+import { useAuth } from '@/store/auth'
+import { useConversations } from '@/store/conversations'
+import { Copy, FileText, Ghost, Loader2 } from 'lucide-react'
 
 function messageText(blocks: ApiBlock[]): string {
   return blocks
@@ -49,9 +52,15 @@ function isImageArtifact(b: ApiBlock): boolean {
 
 export default function SharedConversation() {
   const { token = '' } = useParams<{ token: string }>()
+  const navigate = useNavigate()
   const { t } = useTranslation(['subscription', 'chat', 'common'])
+  const authStatus = useAuth((s) => s.status)
+  const user = useAuth((s) => s.user)
+  const adoptConversation = useConversations((s) => s.adoptConversation)
   const [data, setData] = useState<ApiSharedConversation | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'missing'>('loading')
+  const [cloning, setCloning] = useState(false)
+  const isAuthenticated = authStatus === 'authenticated' && Boolean(user)
 
   useEffect(() => {
     let active = true
@@ -71,20 +80,56 @@ export default function SharedConversation() {
     }
   }, [token])
 
+  async function cloneToMyChats() {
+    if (!token || cloning) return
+    setCloning(true)
+    try {
+      const conv = await sharedApi.clone(token)
+      adoptConversation(conv)
+      toast.success(t('chat:share.cloneDone'))
+      navigate(`/chat/${conv.id}`)
+    } catch (e) {
+      toast.error(t('chat:share.failed'), e instanceof ApiError ? e.message : undefined)
+    } finally {
+      setCloning(false)
+    }
+  }
+
   return (
     <div className="min-h-svh w-full bg-[var(--color-bg)] text-[var(--color-fg)]">
       <header className="sticky top-0 z-10 border-b border-[var(--color-divider)] bg-[var(--color-bg)]/85 backdrop-blur">
-        <div className="mx-auto flex max-w-[48rem] items-center justify-between px-5 sm:px-8 h-14">
-          <Link to="/welcome" aria-label="Aurelia" className="inline-flex items-center">
+        <div className="mx-auto flex h-14 max-w-[72rem] items-center justify-between gap-3 px-5 sm:px-8">
+          <Link to={isAuthenticated ? '/' : '/welcome'} aria-label="Aurelia" className="inline-flex items-center">
             <Logo />
           </Link>
-          <Button asChild variant="secondary" size="sm">
-            <Link to="/welcome">{t('chat:share.tryCta')}</Link>
-          </Button>
+          <div className="flex min-w-0 items-center gap-2">
+            {isAuthenticated ? (
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={cloneToMyChats}
+                disabled={cloning || status !== 'ready' || !data}
+                className="shrink-0"
+              >
+                {cloning ? (
+                  <Loader2 size={14} aria-hidden className="animate-spin" />
+                ) : (
+                  <Copy size={14} aria-hidden />
+                )}
+                <span className="hidden sm:inline">{t('chat:share.cloneCta')}</span>
+                <span className="sm:hidden">{t('chat:share.cloneShortCta')}</span>
+              </Button>
+            ) : (
+              <Button asChild variant="secondary" size="sm">
+                <Link to="/welcome">{t('chat:share.tryCta')}</Link>
+              </Button>
+            )}
+          </div>
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-[48rem] px-5 sm:px-8 pt-10 pb-24">
+      <main className="mx-auto w-full max-w-[72rem] px-5 pt-10 pb-24 sm:px-8">
         {status === 'loading' ? (
           <div className="text-sm text-[var(--color-fg-subtle)]">{t('common:common.loading')}</div>
         ) : status === 'missing' || !data ? (
