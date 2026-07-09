@@ -8,8 +8,21 @@
  */
 import { create } from 'zustand'
 import { authApi, ApiError, setAccessToken } from '@/api'
-import { setBannedHandler, setRefreshHandler } from '@/api/client'
+import { setAuthLostHandler, setBannedHandler, setRefreshHandler } from '@/api/client'
 import type { ApiUser } from '@/api/types'
+
+// Auth requests can overlap: AuthGate hydrates even on /login, while the user can
+// submit the login form before that stale hydrate finishes. Only the latest auth
+// operation may write user/status, otherwise a late 401 from the old hydrate can
+// sign out a freshly logged-in user.
+let authOpSeq = 0
+function beginAuthOp(): number {
+  authOpSeq += 1
+  return authOpSeq
+}
+function isLatestAuthOp(seq: number): boolean {
+  return seq === authOpSeq
+}
 
 interface AuthState {
   user: ApiUser | null
@@ -78,12 +91,14 @@ export const useAuth = create<AuthState>((set, get) => ({
   },
 
   async hydrate() {
+    const seq = beginAuthOp()
     set({ status: 'authenticating' })
     try {
       // Try refresh first — it lets the user back in even after the access
       // token expired.
       try {
         const resp = await authApi.refresh()
+        if (!isLatestAuthOp(seq)) return
         setAccessToken(resp.access_token)
         set({ user: resp.user, status: 'authenticated', error: null })
         return
@@ -91,20 +106,22 @@ export const useAuth = create<AuthState>((set, get) => ({
         /* fall through to /me */
       }
       const user = await authApi.me()
+      if (!isLatestAuthOp(seq)) return
       set({ user, status: 'authenticated', error: null })
     } catch {
+      if (!isLatestAuthOp(seq)) return
       set({ user: null, status: 'unauthenticated' })
     } finally {
       try {
         const r = await authApi.signupOpen()
-        set({ signupOpen: r.open, captchaRequired: r.captcha_required })
+        if (isLatestAuthOp(seq)) set({ signupOpen: r.open, captchaRequired: r.captcha_required })
       } catch {
         /* ignore */
       }
       // First-run probe: a fresh deployment (zero users) routes to /setup.
       try {
         const s = await authApi.needsSetup()
-        set({ needsSetup: s.needs_setup })
+        if (isLatestAuthOp(seq)) set({ needsSetup: s.needs_setup })
       } catch {
         /* ignore */
       }
@@ -112,22 +129,27 @@ export const useAuth = create<AuthState>((set, get) => ({
   },
 
   async setup(name, email, password) {
+    const seq = beginAuthOp()
     set({ status: 'authenticating', error: null })
     try {
       const resp = await authApi.setup(name, email, password)
+      if (!isLatestAuthOp(seq)) return false
       setAccessToken(resp.access_token)
       set({ user: resp.user, status: 'authenticated', needsSetup: false, error: null })
       return true
     } catch (e) {
+      if (!isLatestAuthOp(seq)) return false
       set({ error: e instanceof ApiError ? e.message : 'Setup failed', status: 'unauthenticated' })
       return false
     }
   },
 
   async login(email, password) {
+    const seq = beginAuthOp()
     set({ status: 'authenticating', error: null })
     try {
       const resp = await authApi.login(email, password)
+      if (!isLatestAuthOp(seq)) return false
       // 2FA-enabled accounts get a ticket instead of a session — hold it and
       // let the UI collect the code (§ 2FA login).
       if ('totp_required' in resp) {
@@ -138,6 +160,7 @@ export const useAuth = create<AuthState>((set, get) => ({
       set({ user: resp.user, status: 'authenticated', pendingTwoFactor: null, banned: false })
       return true
     } catch (e) {
+      if (!isLatestAuthOp(seq)) return false
       const msg = e instanceof ApiError ? e.message : 'Login failed'
       // A banned account trying to log in → show the suspended notice, not the
       // raw code.
@@ -158,13 +181,16 @@ export const useAuth = create<AuthState>((set, get) => ({
   async loginTwoFactor(code) {
     const pending = get().pendingTwoFactor
     if (!pending) return false
+    const seq = beginAuthOp()
     set({ status: 'authenticating', error: null })
     try {
       const resp = await authApi.loginTwoFactor(pending.ticket, code)
+      if (!isLatestAuthOp(seq)) return false
       setAccessToken(resp.access_token)
       set({ user: resp.user, status: 'authenticated', pendingTwoFactor: null })
       return true
     } catch (e) {
+      if (!isLatestAuthOp(seq)) return false
       const msg = e instanceof ApiError ? e.message : 'Verification failed'
       // An expired ticket means the password step must be redone.
       if (e instanceof ApiError && e.status === 401 && msg.toLowerCase().includes('expired')) {
@@ -177,9 +203,11 @@ export const useAuth = create<AuthState>((set, get) => ({
   },
 
   async register(email, password, name, captchaToken) {
+    const seq = beginAuthOp()
     set({ status: 'authenticating', error: null })
     try {
       const resp = await authApi.register(email, password, name, captchaToken)
+      if (!isLatestAuthOp(seq)) return false
       if ('verification_required' in resp && resp.verification_required) {
         set({ pendingVerification: resp.email as string, status: 'unauthenticated' })
         return 'verify'
@@ -189,6 +217,7 @@ export const useAuth = create<AuthState>((set, get) => ({
       set({ user: auth.user, status: 'authenticated' })
       return true
     } catch (e) {
+      if (!isLatestAuthOp(seq)) return false
       const msg = e instanceof ApiError ? e.message : 'Registration failed'
       set({ error: msg, status: 'unauthenticated' })
       return false
@@ -196,6 +225,7 @@ export const useAuth = create<AuthState>((set, get) => ({
   },
 
   async logout() {
+    beginAuthOp()
     try {
       await authApi.logout()
     } catch {
@@ -215,8 +245,15 @@ export const useAuth = create<AuthState>((set, get) => ({
 // 403 with `account_suspended`. The api client calls this once — sign the user
 // out and flip `banned` so the login screen shows the suspended notice.
 setBannedHandler(() => {
+  beginAuthOp()
   setAccessToken(null)
   useAuth.setState({ user: null, status: 'unauthenticated', banned: true, pendingTwoFactor: null })
+})
+
+setAuthLostHandler(() => {
+  beginAuthOp()
+  setAccessToken(null)
+  useAuth.setState({ user: null, status: 'unauthenticated', pendingTwoFactor: null })
 })
 
 // Refresh-on-401: the access token is short-lived (2h); rather than letting an
@@ -224,12 +261,18 @@ setBannedHandler(() => {
 // cookie and let the api client retry. Returns false (→ the original 401 stands,
 // surfacing as logged-out) when the refresh token is gone/expired/revoked.
 setRefreshHandler(async () => {
+  const seq = beginAuthOp()
   try {
     const resp = await authApi.refresh()
+    if (!isLatestAuthOp(seq)) return true
     setAccessToken(resp.access_token)
-    useAuth.setState({ user: resp.user, status: 'authenticated' })
+    const current = useAuth.getState()
+    if (current.status !== 'authenticated' || current.user?.id !== resp.user.id) {
+      useAuth.setState({ user: resp.user, status: 'authenticated' })
+    }
     return true
   } catch {
+    if (!isLatestAuthOp(seq)) return false
     setAccessToken(null)
     useAuth.setState({ user: null, status: 'unauthenticated' })
     return false

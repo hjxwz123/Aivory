@@ -52,6 +52,10 @@ let memoryToken: string | null = null
 /** Set or clear the in-memory access token. */
 export function setAccessToken(token: string | null): void {
   memoryToken = token
+  if (token) {
+    authLostFired = false
+    bannedFired = false
+  }
 }
 
 /** Read the current access token (mostly for tests). */
@@ -139,6 +143,9 @@ async function apiRequest<T>(path: string, opts: ApiOptions, retried: boolean): 
   if (!res.ok) {
     const errBody = parsed as ApiErrorShape | undefined
     const message = errBody?.error ?? `Request failed with status ${res.status}`
+    if (res.status === 401 && retried && !isAuthPath(path) && isAuthExpiredMessage(message)) {
+      notifyAuthLost()
+    }
     // A banned account (any in-flight request after an admin ban) → notify the
     // app once so it can sign the user out with a clear "suspended" message,
     // instead of a silent logout or a generic error.
@@ -160,6 +167,20 @@ function notifyBanned(): void {
   if (bannedFired) return // a ban floods every in-flight request; act once
   bannedFired = true
   bannedHandler?.()
+}
+
+let authLostHandler: (() => void) | null = null
+let authLostFired = false
+export function setAuthLostHandler(cb: () => void): void {
+  authLostHandler = cb
+}
+function notifyAuthLost(): void {
+  if (authLostFired) return
+  authLostFired = true
+  authLostHandler?.()
+}
+function isAuthExpiredMessage(message: string): boolean {
+  return message === 'auth required' || message === 'session expired, please log in again'
 }
 
 // Refresh-on-401 hook. The auth store registers a handler that mints a fresh

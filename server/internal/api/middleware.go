@@ -130,12 +130,12 @@ func csrfOK(allowed []string, r *http.Request) bool {
 }
 
 func readAccessToken(r *http.Request) string {
-	if c, err := r.Cookie("auth_token"); err == nil {
-		return c.Value
-	}
 	a := r.Header.Get("Authorization")
 	if strings.HasPrefix(a, "Bearer ") {
 		return strings.TrimPrefix(a, "Bearer ")
+	}
+	if c, err := r.Cookie("auth_token"); err == nil {
+		return c.Value
 	}
 	return ""
 }

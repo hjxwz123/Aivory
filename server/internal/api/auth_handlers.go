@@ -536,6 +536,7 @@ func issueSessionCookies(d Deps, w http.ResponseWriter, r *http.Request, user *s
 	})
 
 	secure := secureCookie(r)
+	clearCookie(w, "auth_token")
 	setCookie(w, "auth_token", access, exp, false, secure)
 	setCookie(w, "refresh_token", refresh, refreshExp, true, secure)
 	return access, exp, nil
@@ -636,7 +637,13 @@ func setCookie(w http.ResponseWriter, name, value string, expires time.Time, res
 
 func clearCookie(w http.ResponseWriter, name string) {
 	http.SetCookie(w, &http.Cookie{Name: name, Value: "", HttpOnly: true, Path: "/", SameSite: http.SameSiteLaxMode, MaxAge: -1})
-	if name == "refresh_token" {
+	switch name {
+	case "auth_token":
+		// Older builds used narrower paths during auth experiments; clear every
+		// variant so a stale /api cookie cannot shadow the fresh "/" cookie.
+		http.SetCookie(w, &http.Cookie{Name: name, Value: "", HttpOnly: true, Path: "/api", SameSite: http.SameSiteLaxMode, MaxAge: -1})
+		http.SetCookie(w, &http.Cookie{Name: name, Value: "", HttpOnly: true, Path: "/api/auth", SameSite: http.SameSiteLaxMode, MaxAge: -1})
+	case "refresh_token":
 		http.SetCookie(w, &http.Cookie{Name: name, Value: "", HttpOnly: true, Path: "/api/auth", SameSite: http.SameSiteLaxMode, MaxAge: -1})
 	}
 }

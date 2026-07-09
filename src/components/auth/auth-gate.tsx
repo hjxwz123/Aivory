@@ -5,7 +5,7 @@
  * an authenticated user — unauthenticated visitors get redirected to /login
  * with the original location preserved in the `from` state.
  */
-import { useEffect, type ReactNode } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
 import { Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '@/store/auth'
 import { useConversations } from '@/store/conversations'
@@ -35,47 +35,56 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const loadModels = useModels((s) => s.load)
   const syncUserSettings = useSettings((s) => s.syncUserSettings)
   const location = useLocation()
+  const hydratedDataForUser = useRef<string | null>(null)
 
   useEffect(() => {
     void hydrate()
   }, [hydrate])
 
-  // Once authenticated, hydrate the per-user data caches.
+  // Keep local UI preferences in sync with the authenticated profile.
   useEffect(() => {
-    if (status === 'authenticated') {
-      if (user?.settings) {
-        syncUserSettings(user.settings)
-        const language = toSupportedLanguage(user.settings.language)
-        if (language) {
-          useLanguage.getState().applyLang(language)
-        } else {
-          const detected = detectBrowserLanguage()
-          if (detected) {
-            useLanguage.getState().applyLang(detected)
-            void persistUserSettings({ language: detected }).catch(() => {})
-          }
-        }
-        const theme = user.settings.theme
-        if (theme === 'light' || theme === 'dark' || theme === 'system') {
-          useTheme.getState().applyPref(theme as ThemePref)
-        }
-        const accent = user.settings.accent_color
-        if (typeof accent === 'string' && (ACCENT_PRESETS as readonly string[]).includes(accent)) {
-          useAccent.getState().applyAccent(accent as AccentPref)
-        }
+    if (status !== 'authenticated' || !user?.settings) return
+    syncUserSettings(user.settings)
+    const language = toSupportedLanguage(user.settings.language)
+    if (language) {
+      useLanguage.getState().applyLang(language)
+    } else {
+      const detected = detectBrowserLanguage()
+      if (detected) {
+        useLanguage.getState().applyLang(detected)
+        void persistUserSettings({ language: detected }).catch(() => {})
       }
-      // §workspaces: resolve the persisted active workspace BEFORE the scoped
-      // caches load, so a reload lands back inside the same space.
-      void useWorkspaces
-        .getState()
-        .load()
-        .then(() => {
-          void loadConversations()
-          void loadProjects()
-        })
-      void loadModels()
     }
-  }, [status, user?.settings, syncUserSettings, loadConversations, loadProjects, loadModels])
+    const theme = user.settings.theme
+    if (theme === 'light' || theme === 'dark' || theme === 'system') {
+      useTheme.getState().applyPref(theme as ThemePref)
+    }
+    const accent = user.settings.accent_color
+    if (typeof accent === 'string' && (ACCENT_PRESETS as readonly string[]).includes(accent)) {
+      useAccent.getState().applyAccent(accent as AccentPref)
+    }
+  }, [status, user?.settings, syncUserSettings])
+
+  // Once authenticated, hydrate the per-user data caches. This is keyed by user
+  // id so a refresh that returns an equivalent user object cannot fan out into
+  // repeated conversations/projects/models requests.
+  useEffect(() => {
+    const userId = user?.id ?? null
+    if (status !== 'authenticated' || !userId) {
+      hydratedDataForUser.current = null
+      return
+    }
+    if (hydratedDataForUser.current === userId) return
+    hydratedDataForUser.current = userId
+    void useWorkspaces
+      .getState()
+      .load()
+      .then(() => {
+        void loadConversations()
+        void loadProjects()
+      })
+    void loadModels()
+  }, [status, user?.id, loadConversations, loadProjects, loadModels])
 
   // Loading state — quick shimmer (auth check + initial paint).
   if (status === 'idle' || status === 'authenticating') {
