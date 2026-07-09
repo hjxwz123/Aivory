@@ -1148,6 +1148,9 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		// so a late provider error doesn't blank the message the user was
 		// watching — they still get the downloadable file.
 		errBlocks := []UnifiedBlock{}
+		if result != nil {
+			errBlocks = append(errBlocks, result.Blocks...)
+		}
 		for _, a := range snapshotArtifacts() {
 			errBlocks = append(errBlocks, UnifiedBlock{
 				Kind: "artifact", FileRef: a.ID, Title: a.Filename, URL: a.URL,
@@ -1231,10 +1234,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			break
 		}
 	}
-	// The OpenAI Responses-format path rebuilds assistant turns from blocks and
-	// never replays raw (streamResponses has no raw-replay branch), so storing it
-	// is dead weight there.
-	if !turnUsedTools || (channel.Type == "openai" && channel.APIFormat == "responses") {
+	if !turnUsedTools {
 		rawToStore = nil
 	}
 	chatCost := computeCost(*model, result.Usage)

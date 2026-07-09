@@ -187,22 +187,34 @@ func teardownWorkspace(d Deps, r *http.Request, ws *store.Workspace) error {
 		return err
 	}
 	for _, cid := range convIDs {
+		ids, _ := store.ConversationTreeIDs(r.Context(), d.DB, cid)
+		storagePaths, _ := store.StoragePathsForConversations(r.Context(), d.DB, ids)
 		if _, err := store.DeleteConversationByID(r.Context(), d.DB, cid); err != nil {
 			d.Logger.Printf("workspace %s teardown: conversation %s: %v", ws.ID, cid, err)
-		} else if err := d.RAG.OnConversationDeleted(r.Context(), cid); err != nil {
-			d.Logger.Printf("rag: drop vectors for conversation %s: %v", cid, err)
+			continue
 		}
+		if len(ids) == 0 {
+			ids = []string{cid}
+		}
+		for _, id := range ids {
+			cleanupRAGConversation(r.Context(), d, id, "workspace "+ws.ID+" conversation "+cid)
+		}
+		cleanupStoragePaths(r.Context(), d, storagePaths, "workspace "+ws.ID+" conversation "+cid)
 	}
 	for _, kid := range kbIDs {
 		// The owner is a member, so the member-aware DeleteKB admits them; it also
 		// sweeps kb_ids references. Vector cleanup mirrors deleteKBHandler.
+		docs, _ := store.ListDocuments(r.Context(), d.DB, "kb", kid)
+		storagePaths := make([]string, 0, len(docs))
+		for _, doc := range docs {
+			storagePaths = append(storagePaths, doc.StoragePath)
+		}
 		if err := store.DeleteKB(r.Context(), d.DB, kid, ws.OwnerID); err != nil {
 			d.Logger.Printf("workspace %s teardown: kb %s: %v", ws.ID, kid, err)
 			continue
 		}
-		if err := d.RAG.OnKBDeleted(r.Context(), kid); err != nil {
-			d.Logger.Printf("rag: drop vectors for kb %s: %v", kid, err)
-		}
+		cleanupRAGKB(r.Context(), d, kid, "workspace "+ws.ID+" kb "+kid)
+		cleanupStoragePaths(r.Context(), d, storagePaths, "workspace "+ws.ID+" kb "+kid)
 	}
 	for _, pid := range projectIDs {
 		if err := store.DeleteProject(r.Context(), d.DB, pid, ws.OwnerID); err != nil {

@@ -225,13 +225,13 @@ Five containers come up:
 | `sandbox` | `ghcr.io/hjxwz123/aurelia-sandbox-sidecar:latest` | Bundled code-execution sandbox (internal-only) |
 | `app` | `ghcr.io/hjxwz123/aurelia-app:latest` | One container: Go HTTP + SSE server **and** the built SPA, same origin |
 
-Postgres / Redis / Qdrant use named volumes (`pgdata`, `redisdata`, `qdrantdata`). Uploads and artifacts are bind-mounted from `DATA_DIR` (default `./data`) — files land directly on the host, no container access needed.
+Postgres / Redis / Qdrant use named volumes (`pgdata`, `redisdata`, `qdrantdata`). Uploads and artifacts are bind-mounted from `DATA_DIR` (default `./data`) — files land directly on the host, no container access needed. The admin backup page can also generate an async full migration ZIP that includes DB rows, files, and Qdrant vectors; completed archives live under `BACKUP_DIR` (default `DATA_DIR/backups`).
 
 ---
 
 ## Local development
 
-The Go API ships with an embedded SQLite driver and a brute-force cosine embedder, so everything runs without external services for development.
+The Go API ships with an embedded SQLite driver and a full-context RAG fallback, so everything runs without external services for development. Docker Compose still starts Qdrant by default for production-like vector retrieval.
 
 ```bash
 # Backend
@@ -299,7 +299,7 @@ The env file only holds boot-time essentials:
 | **Postgres** | `POSTGRES_USER/PASSWORD/DB` | Database credentials |
 | **Redis** | `REDIS_PASSWORD` | Cache auth |
 | **Auth** | `JWT_SECRET` | Required; ≥ 32 chars |
-| **Data** | `DATA_DIR` | Host directory for uploads + artifacts (default `./data`) |
+| **Data** | `DATA_DIR`, `BACKUP_DIR`, `MAX_BACKUP_BYTES` | Host directory for uploads/artifacts, async admin backup archives, and import size cap |
 | **Sandbox** | `SANDBOX_BASE_URL`, `SANDBOX_API_KEY` | Python sandbox sidecar (optional) |
 | **Boot fallbacks** | `SEARCH_*`, `EMBEDDING_*`, `MINERU_*` | Used when the matching admin setting is absent |
 
@@ -311,7 +311,7 @@ The env file only holds boot-time essentials:
 - **Backend**: Go 1.22, standard `net/http`, hand-rolled typed queries
 - **Storage**: PostgreSQL 16 (production) / SQLite (embedded dev fallback)
 - **Cache & coordination**: Redis 7
-- **Vector search**: Qdrant 1.12 (brute-force PostgreSQL cosine fallback for dev)
+- **Vector search**: Qdrant 1.12 (full-context fallback when no vector backend is configured)
 - **Document parsing**: MinerU cloud API (PDF / DOCX / PPTX / images via OCR)
 - **Internationalization**: 5 locales — English, Simplified Chinese, Traditional Chinese, Japanese, French
 

@@ -49,6 +49,20 @@ func (q *Qdrant) Enabled() bool { return true }
 
 func collectionName(dim int) string { return fmt.Sprintf("%s%d", collectionPrefix, dim) }
 
+func scopeShould(scope Scope) []map[string]any {
+	should := []map[string]any{}
+	for _, kb := range scope.KBIDs {
+		if kb == "" {
+			continue
+		}
+		should = append(should, map[string]any{"key": "kb_id", "match": map[string]any{"value": kb}})
+	}
+	if scope.ConversationID != "" {
+		should = append(should, map[string]any{"key": "conversation_id", "match": map[string]any{"value": scope.ConversationID}})
+	}
+	return should
+}
+
 // do performs one JSON request. Any 2xx is success; the decoded body (if out is
 // non-nil) is unmarshalled. A non-2xx returns an error carrying the body.
 func (q *Qdrant) do(ctx context.Context, method, path string, body, out any) error {
@@ -175,16 +189,7 @@ func (q *Qdrant) Search(ctx context.Context, dim int, vector []float32, scope Sc
 	if err := q.ensureCollection(ctx, dim); err != nil {
 		return nil, err
 	}
-	should := []map[string]any{}
-	for _, kb := range scope.KBIDs {
-		if kb == "" {
-			continue
-		}
-		should = append(should, map[string]any{"key": "kb_id", "match": map[string]any{"value": kb}})
-	}
-	if scope.ConversationID != "" {
-		should = append(should, map[string]any{"key": "conversation_id", "match": map[string]any{"value": scope.ConversationID}})
-	}
+	should := scopeShould(scope)
 	if len(should) == 0 {
 		return nil, nil
 	}
@@ -226,16 +231,7 @@ func (q *Qdrant) SearchKeyword(ctx context.Context, dim int, query string, scope
 	if err := q.ensureCollection(ctx, dim); err != nil {
 		return nil, err
 	}
-	should := []map[string]any{}
-	for _, kb := range scope.KBIDs {
-		if kb == "" {
-			continue
-		}
-		should = append(should, map[string]any{"key": "kb_id", "match": map[string]any{"value": kb}})
-	}
-	if scope.ConversationID != "" {
-		should = append(should, map[string]any{"key": "conversation_id", "match": map[string]any{"value": scope.ConversationID}})
-	}
+	should := scopeShould(scope)
 	if len(should) == 0 {
 		return nil, nil
 	}
@@ -271,6 +267,127 @@ func (q *Qdrant) SearchKeyword(ctx context.Context, dim int, query string, scope
 		hits = append(hits, Hit{Score: float32(len(out.Result.Points) - i), Payload: p.Payload})
 	}
 	return hits, nil
+}
+
+// ExistingChunkIDs scrolls Qdrant payloads for the given dimension + scope and
+// returns the chunk ids currently present in the vector index. It deliberately
+// fetches only chunk_id (no vectors/content) because the relational DB remains
+// the source of truth for rendering and full-context fallback.
+func (q *Qdrant) ExistingChunkIDs(ctx context.Context, dim int, scope Scope) (map[string]bool, error) {
+	ids := map[string]bool{}
+	if err := q.ensureCollection(ctx, dim); err != nil {
+		return nil, err
+	}
+	should := scopeShould(scope)
+	if len(should) == 0 {
+		return ids, nil
+	}
+	var offset json.RawMessage
+	for {
+		body := map[string]any{
+			"filter":       map[string]any{"should": should},
+			"limit":        256,
+			"with_payload": true,
+			"with_vector":  false,
+		}
+		if len(offset) > 0 && string(offset) != "null" {
+			body["offset"] = offset
+		}
+		var out struct {
+			Result struct {
+				Points []struct {
+					Payload Payload `json:"payload"`
+				} `json:"points"`
+				Next json.RawMessage `json:"next_page_offset"`
+			} `json:"result"`
+		}
+		if err := q.do(ctx, http.MethodPost, "/collections/"+collectionName(dim)+"/points/scroll", body, &out); err != nil {
+			return nil, err
+		}
+		for _, p := range out.Result.Points {
+			if p.Payload.ChunkID != "" {
+				ids[p.Payload.ChunkID] = true
+			}
+		}
+		if len(out.Result.Next) == 0 || string(out.Result.Next) == "null" {
+			break
+		}
+		offset = out.Result.Next
+	}
+	return ids, nil
+}
+
+// VectorChunkStatuses scrolls every point in a dimension/scope and reports
+// whether its vector payload is non-empty. It is intentionally separate from
+// ExistingChunkIDs so normal retrieval can keep using the lighter payload-only
+// consistency check, while admin maintenance can verify vector integrity.
+func (q *Qdrant) VectorChunkStatuses(ctx context.Context, dim int, scope Scope) (map[string]ChunkVectorStatus, error) {
+	status := map[string]ChunkVectorStatus{}
+	if err := q.ensureCollection(ctx, dim); err != nil {
+		return nil, err
+	}
+	should := scopeShould(scope)
+	var offset json.RawMessage
+	for {
+		body := map[string]any{
+			"limit":        256,
+			"with_payload": true,
+			"with_vector":  true,
+		}
+		if len(should) > 0 {
+			body["filter"] = map[string]any{"should": should}
+		}
+		if len(offset) > 0 && string(offset) != "null" {
+			body["offset"] = offset
+		}
+		var out struct {
+			Result struct {
+				Points []struct {
+					Payload Payload         `json:"payload"`
+					Vector  json.RawMessage `json:"vector"`
+				} `json:"points"`
+				Next json.RawMessage `json:"next_page_offset"`
+			} `json:"result"`
+		}
+		if err := q.do(ctx, http.MethodPost, "/collections/"+collectionName(dim)+"/points/scroll", body, &out); err != nil {
+			return nil, err
+		}
+		for _, p := range out.Result.Points {
+			if p.Payload.ChunkID == "" {
+				continue
+			}
+			status[p.Payload.ChunkID] = ChunkVectorStatus{
+				Exists:    true,
+				HasVector: hasNonEmptyVectorJSON(p.Vector),
+			}
+		}
+		if len(out.Result.Next) == 0 || string(out.Result.Next) == "null" {
+			break
+		}
+		offset = out.Result.Next
+	}
+	return status, nil
+}
+
+func hasNonEmptyVectorJSON(raw json.RawMessage) bool {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		return false
+	}
+	var arr []json.RawMessage
+	if json.Unmarshal(raw, &arr) == nil {
+		return len(arr) > 0
+	}
+	var named map[string]json.RawMessage
+	if json.Unmarshal(raw, &named) == nil {
+		for _, v := range named {
+			if hasNonEmptyVectorJSON(v) {
+				return true
+			}
+		}
+		return false
+	}
+	return true
 }
 
 // listCollections returns the names of Aurelia's per-dimension collections.

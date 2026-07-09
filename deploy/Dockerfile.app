@@ -59,6 +59,7 @@ COPY --from=web /web/dist /app/web
 RUN mkdir -p /app/data/uploads /app/data/artifacts
 ENV UPLOAD_DIR=/app/data/uploads \
     ARTIFACT_DIR=/app/data/artifacts \
+    BACKUP_DIR=/app/data/backups \
     STATIC_DIR=/app/web
 EXPOSE 8787
 HEALTHCHECK --interval=15s --timeout=3s --start-period=20s --retries=5 \

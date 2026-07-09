@@ -250,10 +250,13 @@ func deleteMeHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	// Collect KB IDs before the SQL delete so we can clean up Qdrant vectors
-	// after the transaction commits. The rows will be gone by then, so we must
-	// snapshot them here.
-	kbs, _ := store.ListKBs(r.Context(), d.DB, u.ID)
+	// Snapshot side state before the SQL delete so Qdrant vectors and physical
+	// storage can be cleaned after the transaction commits.
+	plan, err := store.BuildUserCleanupPlan(r.Context(), d.DB, u.ID)
+	if err != nil {
+		writeError(w, 500, err)
+		return
+	}
 
 	if err := store.DeleteUser(r.Context(), d.DB, u.ID); err != nil {
 		writeError(w, 500, err)
@@ -261,13 +264,19 @@ func deleteMeHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	invalidateAuthUser(d, u.ID)
 
-	// Best-effort Qdrant cleanup: delete vector data for every KB the user owned.
-	// Runs after the SQL commit so a Qdrant failure never blocks account deletion.
-	for _, kb := range kbs {
-		if err := d.RAG.OnKBDeleted(r.Context(), kb.ID); err != nil {
-			d.Logger.Printf("delete user %s: drop vectors for kb %s: %v", u.ID, kb.ID, err)
-		}
+	// Best-effort Qdrant/storage cleanup. Runs after the SQL commit so a sidecar
+	// or Qdrant failure never blocks account deletion.
+	label := "delete user " + u.ID
+	for _, docID := range plan.DocumentIDs {
+		cleanupRAGDocument(r.Context(), d, docID, label)
 	}
+	for _, convID := range plan.ConversationIDs {
+		cleanupRAGConversation(r.Context(), d, convID, label)
+	}
+	for _, kbID := range plan.KBIDs {
+		cleanupRAGKB(r.Context(), d, kbID, label)
+	}
+	cleanupStoragePaths(r.Context(), d, plan.StoragePaths, label)
 
 	clearCookie(w, "auth_token")
 	clearCookie(w, "refresh_token")

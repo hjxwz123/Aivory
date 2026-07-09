@@ -681,12 +681,72 @@ export const adminApi = {
     }
     return res.blob()
   },
+  backupExportStart: (includeFiles: boolean) =>
+    api<BackupExportState>('/admin/backup/export-jobs', {
+      method: 'POST',
+      body: { include_files: includeFiles },
+    }),
+  backupExportState: () => api<BackupExportState>('/admin/backup/export-jobs'),
+  backupArchiveDownload: async (name: string): Promise<Blob> => {
+    const token = getAccessToken()
+    const res = await fetch(apiUrl(`/admin/backup/archives/${encodeURIComponent(name)}`), {
+      credentials: 'include',
+      headers: token ? { authorization: `Bearer ${token}` } : {},
+    })
+    if (!res.ok) {
+      let msg = `download failed (${res.status})`
+      try {
+        const j = (await res.json()) as { error?: string }
+        if (j?.error) msg = j.error
+      } catch {
+        /* non-JSON error body */
+      }
+      throw new ApiError(res.status, msg, null)
+    }
+    return res.blob()
+  },
   backupImport: (file: File) => {
     const fd = new FormData()
     fd.append('confirm', 'REPLACE')
     fd.append('file', file)
     return api<BackupImportResult>('/admin/backup/import', { method: 'POST', body: fd })
   },
+
+  // Configuration backup / migration. This is lighter than the full backup:
+  // it exports admin configuration tables (settings, channels, models, skills,
+  // OAuth providers, groups, image styles) plus admin assets, and imports by
+  // upsert, leaving users, conversations, user uploads, KBs, sessions,
+  // workspaces, and logs untouched.
+  configExport: async (): Promise<Blob> => {
+    const token = getAccessToken()
+    const res = await fetch(apiUrl('/admin/config/export'), {
+      credentials: 'include',
+      headers: token ? { authorization: `Bearer ${token}` } : {},
+    })
+    if (!res.ok) {
+      let msg = `export failed (${res.status})`
+      try {
+        const j = (await res.json()) as { error?: string }
+        if (j?.error) msg = j.error
+      } catch {
+        /* non-JSON error body */
+      }
+      throw new ApiError(res.status, msg, null)
+    }
+    return res.blob()
+  },
+  configImport: (file: File) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    return api<ConfigImportResult>('/admin/config/import', { method: 'POST', body: fd })
+  },
+
+  // Vector index maintenance. Checks DB chunks against Qdrant and can rebuild
+  // missing/empty vectors asynchronously.
+  vectorMaintenanceState: () => api<VectorMaintenanceState>('/admin/vectors/jobs'),
+  vectorCheckStart: () => api<VectorMaintenanceState>('/admin/vectors/check', { method: 'POST' }),
+  vectorRebuildMissingStart: () =>
+    api<VectorMaintenanceState>('/admin/vectors/rebuild-missing', { method: 'POST' }),
 }
 
 /** Result of a successful database import (§ admin → data migration). */
@@ -696,6 +756,95 @@ export interface BackupImportResult {
   tables: Record<string, number>
   files_restored: number
   includes_files: boolean
+  qdrant_restored?: number
+  qdrant_error?: string
   /** The admin's session was invalidated by the restore — re-login required. */
   relogin_required: boolean
+}
+
+/** Async Docker/full backup export state. */
+export interface BackupExportJob {
+  id: string
+  status: 'running' | 'completed' | 'failed'
+  progress: string
+  filename?: string
+  error?: string
+  started_at: number
+  completed_at?: number
+  size_bytes?: number
+  include_files: boolean
+  include_qdrant: boolean
+  qdrant_points?: number
+}
+
+export interface BackupArchiveFile {
+  name: string
+  size_bytes: number
+  created_at: number
+}
+
+export interface BackupExportState {
+  running: BackupExportJob | null
+  jobs: BackupExportJob[]
+  archives: BackupArchiveFile[]
+}
+
+export interface VectorIssue {
+  chunk_id: string
+  document_id: string
+  kb_id?: string
+  conversation_id?: string
+  filename: string
+  embedding_model: string
+  dim?: number
+  reason: string
+}
+
+export interface VectorAuditModel {
+  embedding_model: string
+  dim: number
+  total: number
+  present: number
+  missing: number
+  empty: number
+  skipped: number
+}
+
+export interface VectorAuditReport {
+  total: number
+  present: number
+  missing: number
+  empty: number
+  skipped: number
+  models: VectorAuditModel[]
+  issues: VectorIssue[]
+}
+
+export interface VectorMaintenanceJob {
+  id: string
+  type: 'check' | 'rebuild'
+  status: 'running' | 'completed' | 'failed'
+  progress: string
+  error?: string
+  started_at: number
+  completed_at?: number
+  report?: VectorAuditReport
+  rebuilt?: number
+  failed?: number
+}
+
+export interface VectorMaintenanceState {
+  running: VectorMaintenanceJob | null
+  jobs: VectorMaintenanceJob[]
+}
+
+/** Result of a successful configuration import (§ admin → configuration migration). */
+export interface ConfigImportResult {
+  ok: true
+  /** Row count merged per config table. */
+  tables: Record<string, number>
+  /** Admin-managed icon / skill-asset files restored from the archive. */
+  assets_restored: number
+  merge_mode: 'upsert' | 'settings'
+  relogin_required: false
 }

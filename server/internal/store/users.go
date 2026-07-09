@@ -653,6 +653,38 @@ func DeleteUser(ctx context.Context, db *sql.DB, userID string) error {
 	}
 	docRows.Close()
 
+	// documents table: linked through KBs owned by the user.
+	kbDocRows, err := tx.QueryContext(ctx,
+		`SELECT storage_path FROM documents WHERE kb_id IN (SELECT id FROM knowledge_bases WHERE user_id=?)`,
+		userID)
+	if err != nil {
+		return fmt.Errorf("delete user: query kb documents: %w", err)
+	}
+	for kbDocRows.Next() {
+		var p string
+		if kbDocRows.Scan(&p) == nil && p != "" {
+			diskPaths = append(diskPaths, p)
+		}
+	}
+	kbDocRows.Close()
+
+	// documents table: conversation/KB docs created from this user's uploaded
+	// file bytes. This catches shared conversations whose owner is another user:
+	// deleting the uploader must still remove their file-derived RAG document.
+	fileDocRows, err := tx.QueryContext(ctx,
+		`SELECT DISTINCT d.storage_path FROM documents d JOIN files f ON f.storage_path=d.storage_path WHERE f.user_id=? AND d.storage_path<>''`,
+		userID)
+	if err != nil {
+		return fmt.Errorf("delete user: query file documents: %w", err)
+	}
+	for fileDocRows.Next() {
+		var p string
+		if fileDocRows.Scan(&p) == nil && p != "" {
+			diskPaths = append(diskPaths, p)
+		}
+	}
+	fileDocRows.Close()
+
 	// artifacts table: linked through messages → conversations owned by the user.
 	artRows, err := tx.QueryContext(ctx,
 		`SELECT storage_path FROM artifacts WHERE message_id IN (SELECT id FROM messages WHERE conversation_id IN (SELECT id FROM conversations WHERE user_id=?))`,
@@ -670,6 +702,7 @@ func DeleteUser(ctx context.Context, db *sql.DB, userID string) error {
 
 	// Delete DB rows. Order matters: child rows before parent rows.
 	stmts := []string{
+		`DELETE FROM documents WHERE storage_path IN (SELECT storage_path FROM files WHERE user_id=? AND storage_path<>'')`,
 		`DELETE FROM messages WHERE conversation_id IN (SELECT id FROM conversations WHERE user_id=?)`,
 		`DELETE FROM conversations WHERE user_id=?`,
 		`DELETE FROM memories WHERE user_id=?`,
@@ -691,9 +724,89 @@ func DeleteUser(ctx context.Context, db *sql.DB, userID string) error {
 	// Best-effort disk cleanup after a successful commit. Log errors but do not
 	// fail — missing files are harmless (already cleaned up or never written).
 	for _, p := range diskPaths {
-		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+		ref, rerr := StoragePathReferenced(context.Background(), db, p)
+		if rerr != nil {
+			log.Printf("delete user %s: check storage refs for %q: %v", userID, p, rerr)
+			continue
+		}
+		if ref {
+			continue
+		}
+		if err := removeLocalStoragePath(p); err != nil && !os.IsNotExist(err) {
 			log.Printf("delete user %s: remove file %q: %v", userID, p, err)
 		}
 	}
 	return nil
+}
+
+// UserCleanupPlan is the side-state snapshot callers need before DeleteUser
+// removes rows: vector scopes plus physical storage refs. It intentionally uses
+// raw ids/paths so API handlers can perform best-effort Qdrant and S3/OSS cleanup
+// after the SQL delete commits.
+type UserCleanupPlan struct {
+	ConversationIDs []string
+	KBIDs           []string
+	DocumentIDs     []string
+	StoragePaths    []string
+}
+
+func BuildUserCleanupPlan(ctx context.Context, db *sql.DB, userID string) (UserCleanupPlan, error) {
+	var plan UserCleanupPlan
+	collectIDs := func(q string) ([]string, error) {
+		rows, err := db.QueryContext(ctx, q, userID)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		var out []string
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return nil, err
+			}
+			out = append(out, id)
+		}
+		return out, rows.Err()
+	}
+	var err error
+	if plan.ConversationIDs, err = collectIDs(`SELECT id FROM conversations WHERE user_id=?`); err != nil {
+		return plan, err
+	}
+	if plan.KBIDs, err = collectIDs(`SELECT id FROM knowledge_bases WHERE user_id=?`); err != nil {
+		return plan, err
+	}
+	if plan.DocumentIDs, err = collectIDs(`SELECT DISTINCT d.id FROM documents d JOIN files f ON f.storage_path=d.storage_path WHERE f.user_id=? AND d.storage_path<>''`); err != nil {
+		return plan, err
+	}
+	paths := map[string]struct{}{}
+	addPaths := func(q string) error {
+		rows, err := db.QueryContext(ctx, q, userID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var p string
+			if err := rows.Scan(&p); err != nil {
+				return err
+			}
+			if strings.TrimSpace(p) != "" {
+				paths[p] = struct{}{}
+			}
+		}
+		return rows.Err()
+	}
+	for _, q := range []string{
+		`SELECT storage_path FROM files WHERE user_id=? AND storage_path<>''`,
+		`SELECT storage_path FROM documents WHERE conversation_id IN (SELECT id FROM conversations WHERE user_id=?) AND storage_path<>''`,
+		`SELECT storage_path FROM documents WHERE kb_id IN (SELECT id FROM knowledge_bases WHERE user_id=?) AND storage_path<>''`,
+		`SELECT DISTINCT d.storage_path FROM documents d JOIN files f ON f.storage_path=d.storage_path WHERE f.user_id=? AND d.storage_path<>''`,
+		`SELECT a.storage_path FROM artifacts a JOIN messages m ON m.id=a.message_id WHERE m.conversation_id IN (SELECT id FROM conversations WHERE user_id=?) AND a.storage_path<>''`,
+	} {
+		if err := addPaths(q); err != nil {
+			return plan, err
+		}
+	}
+	plan.StoragePaths = keys(paths)
+	return plan, nil
 }

@@ -243,6 +243,9 @@ func Migrate(db *sql.DB) error {
 	} {
 		_, _ = db.Exec(ddl)
 	}
+	if err := dropLegacyChunkEmbeddingColumn(db); err != nil {
+		return fmt.Errorf("drop legacy chunks.embedding column: %w", err)
+	}
 	// Indexes that depend on additively-added columns must run AFTER the ALTERs
 	// above (on an existing DB the CREATE TABLE is a no-op, so the column only
 	// exists once the ALTER has run). Kept out of the schema file for that reason.
@@ -337,6 +340,70 @@ func Migrate(db *sql.DB) error {
 		_, _ = db.Exec(`INSERT INTO settings(key, value) VALUES('user_onboarded_backfill_v1', '1') ON CONFLICT(key) DO NOTHING`)
 	}
 	return nil
+}
+
+func dropLegacyChunkEmbeddingColumn(db *sql.DB) error {
+	exists, err := columnExists(db, "chunks", "embedding")
+	if err != nil || !exists {
+		return err
+	}
+	if usePostgres {
+		_, err := db.Exec(`ALTER TABLE chunks DROP COLUMN IF EXISTS embedding`)
+		return err
+	}
+	if _, err := db.Exec(`ALTER TABLE chunks DROP COLUMN embedding`); err == nil || isMissingColumnErr(err) {
+		return nil
+	}
+	return rebuildSQLiteChunksWithoutEmbedding(db)
+}
+
+func columnExists(db *sql.DB, table, column string) (bool, error) {
+	if _, err := db.Exec(fmt.Sprintf(`SELECT %s FROM %s WHERE 1=0`, column, table)); err != nil {
+		if isMissingColumnErr(err) || isMissingTableErr(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+func rebuildSQLiteChunksWithoutEmbedding(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.Exec(`ALTER TABLE chunks RENAME TO chunks__legacy_embedding`); err != nil {
+		return err
+	}
+	for _, ddl := range []string{
+		`DROP INDEX IF EXISTS idx_chunks_doc`,
+		`DROP INDEX IF EXISTS idx_chunks_kb`,
+		`DROP INDEX IF EXISTS idx_chunks_conv`,
+		`CREATE TABLE chunks (
+			id              TEXT PRIMARY KEY,
+			document_id     TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+			kb_id           TEXT,
+			conversation_id TEXT,
+			seq             INTEGER NOT NULL,
+			parent_id       TEXT,
+			chunk_type      TEXT NOT NULL DEFAULT 'text',
+			content         TEXT NOT NULL,
+			image_ref       TEXT,
+			meta            TEXT NOT NULL DEFAULT '{}',
+			embedding_model TEXT NOT NULL DEFAULT ''
+		)`,
+		`INSERT INTO chunks(id, document_id, kb_id, conversation_id, seq, parent_id, chunk_type, content, image_ref, meta, embedding_model)
+		 SELECT id, document_id, kb_id, conversation_id, seq, parent_id, COALESCE(NULLIF(chunk_type,''), 'text'), content, image_ref, COALESCE(meta, '{}'), COALESCE(embedding_model, '')
+		 FROM chunks__legacy_embedding`,
+		`DROP TABLE chunks__legacy_embedding`,
+	} {
+		if _, err := tx.Exec(ddl); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 type duplicateSkill struct {

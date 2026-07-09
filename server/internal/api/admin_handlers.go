@@ -1,6 +1,8 @@
 package api
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -287,6 +289,14 @@ func updateModelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
+	if err := ensureLockedEmbeddingModelCanUpdate(d, *existing, m); err != nil {
+		if errors.Is(err, errEmbeddingModelLocked) {
+			writeError(w, http.StatusConflict, errEmbeddingModelLocked)
+			return
+		}
+		writeError(w, 500, err)
+		return
+	}
 	upd, err := store.UpdateModel(r.Context(), d.DB, id, m)
 	if err != nil {
 		if errors.Is(err, store.ErrModelRequestExists) {
@@ -301,6 +311,14 @@ func updateModelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 
 func deleteModelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	id := pathParam(r, "id")
+	if err := ensureLockedEmbeddingModelCanDelete(d, id); err != nil {
+		if errors.Is(err, errEmbeddingModelLocked) {
+			writeError(w, http.StatusConflict, errEmbeddingModelLocked)
+			return
+		}
+		writeError(w, 500, err)
+		return
+	}
 	if err := store.DeleteModel(r.Context(), d.DB, id); err != nil {
 		writeError(w, 500, err)
 		return
@@ -514,9 +532,13 @@ func deleteUserAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	// Collect KB IDs before the SQL delete so we can clean up Qdrant vectors
-	// after the transaction commits. The rows will be gone by then.
-	kbs, _ := store.ListKBs(r.Context(), d.DB, id)
+	// Snapshot side state before the SQL delete so Qdrant vectors and physical
+	// storage can be cleaned after the transaction commits.
+	plan, err := store.BuildUserCleanupPlan(r.Context(), d.DB, id)
+	if err != nil {
+		writeError(w, 500, err)
+		return
+	}
 
 	if err := store.DeleteUser(r.Context(), d.DB, id); err != nil {
 		writeError(w, 500, err)
@@ -524,13 +546,19 @@ func deleteUserAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	invalidateAuthUser(d, id)
 
-	// Best-effort Qdrant cleanup: delete vector data for every KB the user owned.
-	// Runs after the SQL commit so a Qdrant failure never blocks account deletion.
-	for _, kb := range kbs {
-		if err := d.RAG.OnKBDeleted(r.Context(), kb.ID); err != nil {
-			d.Logger.Printf("admin: delete user %s: drop vectors for kb %s: %v", id, kb.ID, err)
-		}
+	// Best-effort Qdrant/storage cleanup. Runs after the SQL commit so a sidecar
+	// or Qdrant failure never blocks account deletion.
+	label := "admin delete user " + id
+	for _, docID := range plan.DocumentIDs {
+		cleanupRAGDocument(r.Context(), d, docID, label)
 	}
+	for _, convID := range plan.ConversationIDs {
+		cleanupRAGConversation(r.Context(), d, convID, label)
+	}
+	for _, kbID := range plan.KBIDs {
+		cleanupRAGKB(r.Context(), d, kbID, label)
+	}
+	cleanupStoragePaths(r.Context(), d, plan.StoragePaths, label)
 
 	d.Cache.Publish("user:"+id+":kill", "1") // drop any live sessions immediately
 	writeJSON(w, 200, map[string]bool{"ok": true})
@@ -725,6 +753,8 @@ func getConversationAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 // No ownership filter — the requireAdmin gate is the authority.
 func deleteConversationAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	id := pathParam(r, "id")
+	ids, _ := store.ConversationTreeIDs(r.Context(), d.DB, id)
+	storagePaths, _ := store.StoragePathsForConversations(r.Context(), d.DB, ids)
 	children, err := store.DeleteConversationByID(r.Context(), d.DB, id)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
@@ -734,13 +764,15 @@ func deleteConversationAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
+	if len(ids) == 0 {
+		ids = append([]string{id}, children...)
+	}
 	// Drop RAG vectors for the conversation and every inline sub-conversation
 	// removed alongside it.
-	for _, cid := range append([]string{id}, children...) {
-		if err := d.RAG.OnConversationDeleted(r.Context(), cid); err != nil {
-			d.Logger.Printf("rag: drop vectors for conversation %s: %v", cid, err)
-		}
+	for _, cid := range ids {
+		cleanupRAGConversation(r.Context(), d, cid, "admin delete conversation "+id)
 	}
+	cleanupStoragePaths(r.Context(), d, storagePaths, "admin delete conversation "+id)
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
@@ -1037,8 +1069,29 @@ func adminSettingsSet(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errInvalidInput)
 		return
 	}
+	if _, err := applyAdminSettingsPatch(d, body, true); err != nil {
+		if errors.Is(err, errInvalidInput) {
+			writeError(w, 400, errInvalidInput)
+			return
+		}
+		if errors.Is(err, errEmbeddingModelLocked) {
+			writeError(w, http.StatusConflict, errEmbeddingModelLocked)
+			return
+		}
+		writeError(w, 500, err)
+		return
+	}
+	broadcastConfigInvalidate(d) // §2.4: clear the settings cache on every instance
+	adminSettingsGet(d, w, r)
+}
+
+func applyAdminSettingsPatch(d Deps, body map[string]json.RawMessage, skipNull bool) (int64, error) {
+	var n int64
 	for _, k := range settingsKeys {
 		if v, ok := body[k]; ok {
+			if skipNull && strings.TrimSpace(string(v)) == "null" {
+				continue
+			}
 			// Skip writing back the display mask — treat it as "unchanged" (H-1).
 			var s string
 			if json.Unmarshal(v, &s) == nil && s == "••••••" {
@@ -1051,18 +1104,172 @@ func adminSettingsSet(d Deps, w http.ResponseWriter, r *http.Request) {
 			case "keep_recent_rounds", "summary_max_tokens", "compaction_token_trigger":
 				var n int
 				if json.Unmarshal(v, &n) != nil || n < 0 {
-					writeError(w, 400, errInvalidInput)
-					return
+					return 0, errInvalidInput
+				}
+			case "embedding_model_id":
+				if err := ensureEmbeddingModelSettingCanChange(d, v); err != nil {
+					return 0, err
 				}
 			}
 			if err := store.SetSetting(d.DB, k, json.RawMessage(v)); err != nil {
-				writeError(w, 500, err)
-				return
+				return n, err
 			}
+			n++
 		}
 	}
-	broadcastConfigInvalidate(d) // §2.4: clear the settings cache on every instance
-	adminSettingsGet(d, w, r)
+	return n, nil
+}
+
+func ensureEmbeddingModelSettingCanChange(d Deps, next json.RawMessage) error {
+	var nextID string
+	if err := json.Unmarshal(next, &nextID); err != nil {
+		return errInvalidInput
+	}
+	curID, err := lockedEmbeddingModelID(d)
+	if err != nil {
+		return err
+	}
+	if curID == "" {
+		return nil
+	}
+	if curID != strings.TrimSpace(nextID) {
+		return errEmbeddingModelLocked
+	}
+	return nil
+}
+
+func lockedEmbeddingModelID(d Deps) (string, error) {
+	var curValue string
+	err := d.DB.QueryRow(`SELECT value FROM settings WHERE key=?`, "embedding_model_id").Scan(&curValue)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", nil
+		}
+		return "", err
+	}
+	var curID string
+	if json.Unmarshal([]byte(curValue), &curID) != nil {
+		return "", nil
+	}
+	return strings.TrimSpace(curID), nil
+}
+
+func ensureLockedEmbeddingModelCanUpdate(d Deps, before, after store.Model) error {
+	lockedID, err := lockedEmbeddingModelID(d)
+	if err != nil || lockedID == "" || before.ID != lockedID {
+		return err
+	}
+	if before.Kind != after.Kind ||
+		before.ChannelID != after.ChannelID ||
+		before.RequestID != after.RequestID ||
+		before.Dim != after.Dim ||
+		!after.Enabled {
+		return errEmbeddingModelLocked
+	}
+	return nil
+}
+
+func ensureLockedEmbeddingModelCanDelete(d Deps, id string) error {
+	lockedID, err := lockedEmbeddingModelID(d)
+	if err != nil || lockedID == "" {
+		return err
+	}
+	if lockedID == id {
+		return errEmbeddingModelLocked
+	}
+	return nil
+}
+
+func lockedEmbeddingModelFieldChanged(existing store.Model, row map[string]json.RawMessage) (bool, error) {
+	if v, ok, err := backupStringField(row, "kind"); err != nil {
+		return false, err
+	} else if ok && v != existing.Kind {
+		return true, nil
+	}
+	if v, ok, err := backupStringField(row, "channel_id"); err != nil {
+		return false, err
+	} else if ok && v != existing.ChannelID {
+		return true, nil
+	}
+	if v, ok, err := backupStringField(row, "request_id"); err != nil {
+		return false, err
+	} else if ok && v != existing.RequestID {
+		return true, nil
+	}
+	if v, ok, err := backupIntField(row, "dim"); err != nil {
+		return false, err
+	} else if ok && v != existing.Dim {
+		return true, nil
+	}
+	if v, ok, err := backupBoolField(row, "enabled"); err != nil {
+		return false, err
+	} else if ok && !v {
+		return true, nil
+	}
+	return false, nil
+}
+
+func backupStringField(row map[string]json.RawMessage, key string) (string, bool, error) {
+	raw, ok := row[key]
+	if !ok {
+		return "", false, nil
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return "", true, err
+	}
+	return strings.TrimSpace(s), true, nil
+}
+
+func backupIntField(row map[string]json.RawMessage, key string) (int, bool, error) {
+	raw, ok := row[key]
+	if !ok {
+		return 0, false, nil
+	}
+	var n int
+	if err := json.Unmarshal(raw, &n); err != nil {
+		return 0, true, err
+	}
+	return n, true, nil
+}
+
+func backupBoolField(row map[string]json.RawMessage, key string) (bool, bool, error) {
+	raw, ok := row[key]
+	if !ok {
+		return false, false, nil
+	}
+	var b bool
+	if err := json.Unmarshal(raw, &b); err == nil {
+		return b, true, nil
+	}
+	var n int
+	if err := json.Unmarshal(raw, &n); err != nil {
+		return false, true, err
+	}
+	return n != 0, true, nil
+}
+
+func ensureLockedEmbeddingModelArchiveRowCanChange(d Deps, row map[string]json.RawMessage) error {
+	lockedID, err := lockedEmbeddingModelID(d)
+	if err != nil || lockedID == "" {
+		return err
+	}
+	rowID, ok, err := backupStringField(row, "id")
+	if err != nil || !ok || rowID != lockedID {
+		return err
+	}
+	existing, err := store.GetModel(context.Background(), d.DB, lockedID)
+	if err != nil {
+		return nil
+	}
+	changed, err := lockedEmbeddingModelFieldChanged(*existing, row)
+	if err != nil {
+		return err
+	}
+	if changed {
+		return errEmbeddingModelLocked
+	}
+	return nil
 }
 
 // broadcastConfigInvalidate tells every instance (including this one, via the

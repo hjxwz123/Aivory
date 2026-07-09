@@ -5,7 +5,6 @@
 --   * strftime('%s','now')        -> (extract(epoch from now())::bigint)
 --   * INTEGER timestamps/bytes    -> BIGINT (avoid 2038 + large token sums)
 --   * AUTOINCREMENT               -> BIGSERIAL
---   * BLOB                        -> BYTEA
 --   * REAL                        -> DOUBLE PRECISION
 -- Boolean-ish flag columns stay INTEGER 0/1 on purpose: the store layer reads
 -- them through `int` locals (`x == 1`) and writes them via boolInt()/literals,
@@ -321,7 +320,6 @@ CREATE TABLE IF NOT EXISTS chunks (
   content         TEXT NOT NULL,
   image_ref       TEXT,
   meta            TEXT NOT NULL DEFAULT '{}',
-  embedding       BYTEA,
   embedding_model TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_chunks_doc ON chunks(document_id);

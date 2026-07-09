@@ -94,13 +94,13 @@ func main() {
 	// ingest time, but the env defaults make a fresh install Just Work when
 	// the operator has only set SANDBOX_BASE_URL.
 	ragSvc.SetSandboxFallback(cfg.SandboxBaseURL, cfg.SandboxAPIKey)
-	// Vector backend: Qdrant in production, Disabled (Postgres brute-force
-	// fallback) when QDRANT_URL is unset — search still works without the install.
+	// Vector backend: Qdrant in production; when QDRANT_URL is unset the RAG
+	// layer injects full in-scope document text instead of vector retrieval.
 	if cfg.QdrantURL != "" {
 		ragSvc.SetVectorStore(vector.NewQdrant(cfg.QdrantURL, cfg.QdrantAPIKey))
 		logger.Printf("vector: qdrant (%s)", redactURL(cfg.QdrantURL))
 	} else {
-		logger.Printf("vector: disabled (brute-force over %s)", driverName(cfg.DatabaseURL))
+		logger.Printf("vector: disabled (full-context fallback over %s)", driverName(cfg.DatabaseURL))
 	}
 	if cfg.RedisURL != "" {
 		if err := ragSvc.UseAsynq(cfg.RedisURL); err != nil {
@@ -183,7 +183,7 @@ func main() {
 		Handler:           router,
 		ReadHeaderTimeout: 15 * time.Second,
 		// SSE streams need long write deadlines; 30 minutes matches design.md §11.5.
-		WriteTimeout: 30 * time.Minute,
+		WriteTimeout: 90 * time.Minute,
 		IdleTimeout:  120 * time.Second,
 	}
 

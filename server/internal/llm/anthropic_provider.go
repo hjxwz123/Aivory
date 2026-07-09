@@ -29,26 +29,10 @@ type AnthropicProvider struct {
 // ID returns "anthropic".
 func (p *AnthropicProvider) ID() string { return "anthropic" }
 
-// anthropicModelRejectsSampling reports models whose API rejects non-default
-// sampling params such as temperature/top_p/top_k. These models use adaptive
-// thinking by default or expose the newer adaptive thinking controls.
+// anthropicModelRejectsSampling reports Claude models whose API rejects
+// non-default sampling params such as temperature/top_p/top_k.
 func anthropicModelRejectsSampling(requestID string) bool {
-	id := strings.ToLower(requestID)
-	for _, p := range []string{
-		"claude-fable-5",
-		"claude-mythos-5",
-		"claude-mythos-preview",
-		"claude-sonnet-5",
-		"claude-opus-4-8",
-		"claude-opus-4.8",
-		"claude-opus-4-7",
-		"claude-opus-4.7",
-	} {
-		if strings.Contains(id, p) {
-			return true
-		}
-	}
-	return false
+	return strings.Contains(strings.ToLower(strings.TrimSpace(requestID)), "claude")
 }
 
 func applyAnthropicThinkingSettings(body map[string]any, requestID string, maxTok *int) {

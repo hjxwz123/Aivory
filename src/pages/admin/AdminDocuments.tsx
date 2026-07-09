@@ -50,6 +50,7 @@ export default function AdminDocuments() {
   const { t } = useTranslation(['admin', 'common'])
   const [embeddingModels, setEmbeddingModels] = useState<ApiModel[]>([])
   const [draft, setDraft] = useState<Settings>({})
+  const [lockedEmbeddingModelID, setLockedEmbeddingModelID] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
 
@@ -58,6 +59,7 @@ export default function AdminDocuments() {
     try {
       const [s, em] = await Promise.all([adminApi.settings(), adminApi.models('embedding')])
       setDraft(s)
+      setLockedEmbeddingModelID(typeof s.embedding_model_id === 'string' ? s.embedding_model_id : '')
       setEmbeddingModels(em)
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
@@ -78,9 +80,17 @@ export default function AdminDocuments() {
         if (k in draft) patch[k] = draft[k]
       }
       await adminApi.updateSettings(patch)
+      const nextEmbedding = draft.embedding_model_id
+      if (typeof nextEmbedding === 'string' && nextEmbedding) {
+        setLockedEmbeddingModelID(nextEmbedding)
+      }
       toast.success(t('admin:settings.saved'))
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
+      toast.error(e instanceof ApiError && e.message === 'embedding_model_locked'
+        ? t('admin:documents.embeddingModelLockedError')
+        : e instanceof ApiError
+          ? e.message
+          : t('admin:common.failed'))
     } finally {
       setSaving(false)
     }
@@ -100,6 +110,7 @@ export default function AdminDocuments() {
   }
 
   const storageProvider = readString('storage_provider')
+  const embeddingModelLocked = lockedEmbeddingModelID !== ''
 
   return (
     <div className="mx-auto max-w-[76rem]">
@@ -120,10 +131,13 @@ export default function AdminDocuments() {
               <Field
                 label={t('admin:documents.embeddingModel')}
                 htmlFor="embed-model"
-                hint={t('admin:documents.embeddingModelHint')}
+                hint={embeddingModelLocked
+                  ? t('admin:documents.embeddingModelLockedHint')
+                  : t('admin:documents.embeddingModelHint')}
               >
                 <Select
                   value={readString('embedding_model_id') || 'none'}
+                  disabled={embeddingModelLocked}
                   onValueChange={(v) =>
                     setDraft({ ...draft, embedding_model_id: v === 'none' ? '' : v })
                   }

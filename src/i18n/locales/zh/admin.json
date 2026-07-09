@@ -408,9 +408,11 @@
     "title": "文档",
     "lead": "把上传转成可检索上下文的相关配置。",
     "embeddingSection": "嵌入模型",
-    "embeddingLead": "知识库向量化模型。换模型只影响新切片。",
+    "embeddingLead": "知识库与文档向量化模型。首次配置后会锁定，避免旧向量失配。",
     "embeddingModel": "嵌入模型",
     "embeddingModelHint": "从 kind=embedding 的模型里选。",
+    "embeddingModelLockedHint": "向量模型已锁定。为避免旧切块与 Qdrant 向量失配，配置后不能更改。",
+    "embeddingModelLockedError": "向量模型已锁定，不能更改。",
     "ragSection": "检索与注入",
     "ragLead": "控制上传文档是「整篇注入」还是「按相关性检索」,以及注入多少。",
     "ragFullTextThreshold": "全文注入阈值(token)",
@@ -772,11 +774,27 @@
     "lead": "导出/导入整库归档,可跨服务器与 SQLite/PostgreSQL 迁移。",
     "export": {
       "title": "导出备份",
-      "lead": "导出所有数据表为可移植归档。",
+      "lead": "异步生成全量迁移归档：数据库、可选文件和 Qdrant 向量会一起打包。",
       "includeFiles": "包含上传文件与生成产物",
       "includeFilesHint": "一并打包 uploads 与 artifacts(归档更大)。",
       "action": "导出备份",
-      "done": "备份已导出。"
+      "runningAction": "正在生成备份",
+      "started": "备份生成已开始。",
+      "done": "备份已导出。",
+      "running": "正在生成全量迁移归档",
+      "runningHint": "当前步骤：{{progress}}。生成期间不能再次发起导出。",
+      "failed": "上次导出失败：{{error}}",
+      "archivesTitle": "已生成的归档",
+      "loading": "正在加载归档列表…",
+      "noArchives": "还没有可下载的备份归档。",
+      "download": "下载",
+      "progress": {
+        "preparing": "准备中",
+        "reading_database": "读取数据库",
+        "writing_archive": "写入归档",
+        "completed": "已完成",
+        "failed": "失败"
+      }
     },
     "import": {
       "title": "导入与还原",
@@ -787,6 +805,8 @@
       "done": "导入完成。",
       "successTitle": "还原完成",
       "successSummary": "已还原全部数据表共 {{rows}} 行，以及 {{files}} 个文件。",
+      "successQdrant": "已还原 Qdrant 向量 {{points}} 条。",
+      "qdrantWarning": "Qdrant 向量还原警告：{{error}}",
       "reloginNote": "你的会话已结束，正在退出登录。请使用导入数据中的账号重新登录。"
     },
     "confirm": {
@@ -795,22 +815,53 @@
       "instruction": "输入 {{word}} 以确认。",
       "action": "替换全部"
     },
+    "vectors": {
+      "title": "向量检查",
+      "lead": "检查数据库中的文档切块是否都在 Qdrant 中有非空向量；发现缺失后可异步重建缺少部分。",
+      "loading": "正在加载向量维护状态…",
+      "empty": "还没有检查结果。",
+      "checkAction": "检查向量",
+      "rebuildAction": "重建缺失向量",
+      "checkStarted": "向量检查已开始。",
+      "rebuildStarted": "缺失向量重建已开始。",
+      "checking": "正在检查向量库",
+      "rebuilding": "正在重建缺失向量",
+      "runningHint": "当前步骤：{{progress}}。已重建 {{rebuilt}}，失败 {{failed}}。",
+      "failed": "向量维护失败：{{error}}",
+      "rebuildSummary": "本次已重建 {{rebuilt}} 个向量，失败 {{failed}} 个。",
+      "modelSummary": "总计 {{total}} / 正常 {{present}} / 缺失 {{missing}} / 空向量 {{empty}} / 跳过 {{skipped}}",
+      "issueSamples": "问题样例",
+      "stats": {
+        "total": "应有",
+        "present": "正常",
+        "missing": "缺失",
+        "empty": "空向量",
+        "skipped": "跳过"
+      },
+      "progress": {
+        "preparing": "准备中",
+        "checking": "检查中",
+        "rebuilding": "重建中",
+        "completed": "已完成",
+        "failed": "失败"
+      }
+    },
     "config": {
       "export": {
         "title": "导出配置",
-        "lead": "将本机的所有站点设置导出为 JSON 文件。敏感密钥会被隐去。",
-        "action": "导出配置 JSON",
+        "lead": "导出站点设置、渠道、模型、技能、OAuth、图片风格、用户组、模型额度、图标和技能资产为配置 ZIP。包含密钥明文，请妥善保管。",
+        "action": "导出配置 ZIP",
         "done": "配置已导出。"
       },
       "import": {
         "title": "导入配置",
-        "lead": "应用上方导出的配置 JSON，将合并进当前配置——被隐去的密钥保持不变。",
-        "action": "导入配置 JSON…",
+        "lead": "导入配置 ZIP（也兼容旧 JSON），按 ID 合并/覆盖配置；不会导入用户、对话、文件或日志。",
+        "action": "导入配置归档…",
         "invalid": "该文件不是有效的 Aurelia 配置导出文件。",
-        "done": "已应用配置（{{count}} 项设置）。",
+        "done": "已导入配置（{{count}} 行）。",
         "confirmTitle": "应用此配置？",
-        "confirmLead": "将用该文件中的值覆盖当前站点设置。",
-        "confirmDetail": "{{file}} —— 将应用 {{count}} 项设置。被隐去的密钥保持不变。",
+        "confirmLead": "同 ID 的配置会被覆盖，其他本地配置会保留。",
+        "confirmDetail": "{{file}} —— 将导入配置表、图标和技能资产。用户、对话、文件和日志不会改变。配置包包含的密钥会写入当前部署。",
         "confirmAction": "应用配置"
       }
     }

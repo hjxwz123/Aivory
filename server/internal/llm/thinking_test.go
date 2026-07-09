@@ -10,27 +10,28 @@ import (
 	"testing"
 )
 
-func TestAnthropicSamplingRestrictionHeuristics(t *testing.T) {
-	anthropicYes := []string{
-		"claude-fable-5-20260401",
-		"claude-mythos-5-20260401",
-		"claude-mythos-preview-20260401",
-		"claude-sonnet-5-20260401",
-		"claude-opus-4-8-20260401",
-		"claude-opus-4.7-20260301",
-	}
-	anthropicNo := []string{
+func TestAnthropicSamplingRestrictionMatchesClaudeModels(t *testing.T) {
+	claudeIDs := []string{
+		"claude-3-5-sonnet-20241022",
 		"claude-3-7-sonnet-20250219",
 		"claude-sonnet-4-20250514",
 		"claude-opus-4-1",
-		"claude-3-5-sonnet-20241022",
+		"claude-sonnet-5-20260401",
+		"anthropic/claude-sonnet-5-20260401",
+		"bedrock/us.anthropic.claude-3-5-sonnet-20241022-v2:0",
 	}
-	for _, id := range anthropicYes {
+	nonClaudeIDs := []string{
+		"",
+		"gpt-4o",
+		"gemini-2.5-pro",
+		"llama-3.3-70b",
+	}
+	for _, id := range claudeIDs {
 		if !anthropicModelRejectsSampling(id) {
 			t.Errorf("anthropicModelRejectsSampling(%q) = false, want true", id)
 		}
 	}
-	for _, id := range anthropicNo {
+	for _, id := range nonClaudeIDs {
 		if anthropicModelRejectsSampling(id) {
 			t.Errorf("anthropicModelRejectsSampling(%q) = true, want false", id)
 		}
@@ -132,7 +133,7 @@ func TestAnthropicAdaptiveThinkingRemovesConflictingParams(t *testing.T) {
 
 	p := &AnthropicProvider{}
 	req := UnifiedChatRequest{
-		Model:           ModelInfo{RequestID: "claude-opus-4-8-20260401", BaseURL: srv.URL, APIKey: "k"},
+		Model:           ModelInfo{RequestID: "claude-3-5-sonnet-20241022", BaseURL: srv.URL, APIKey: "k"},
 		History:         []UnifiedMessage{{Role: "user", Blocks: []UnifiedBlock{{Kind: "text", Text: "hello"}}}},
 		MaxOutputTokens: 1024,
 		ParamOverrides:  map[string]any{"thinking": true},

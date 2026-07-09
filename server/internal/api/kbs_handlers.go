@@ -111,14 +111,18 @@ func createKBHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 func deleteKBHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
 	id := pathParam(r, "id")
+	docs, _ := store.ListDocuments(r.Context(), d.DB, "kb", id)
+	storagePaths := make([]string, 0, len(docs))
+	for _, doc := range docs {
+		storagePaths = append(storagePaths, doc.StoragePath)
+	}
 	if err := store.DeleteKB(r.Context(), d.DB, id, u.ID); err != nil {
 		writeError(w, 404, errNotFound)
 		return
 	}
 	// Keep the vector backend in sync with the cascaded chunk deletes.
-	if err := d.RAG.OnKBDeleted(r.Context(), id); err != nil {
-		d.Logger.Printf("rag: drop vectors for kb %s: %v", id, err)
-	}
+	cleanupRAGKB(r.Context(), d, id, "delete kb "+id)
+	cleanupStoragePaths(r.Context(), d, storagePaths, "delete kb "+id)
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
@@ -175,8 +179,7 @@ func deleteKBDocHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = store.DeleteDocument(r.Context(), d.DB, docID)
-	if err := d.RAG.OnDocumentDeleted(r.Context(), docID); err != nil {
-		d.Logger.Printf("rag: drop vectors for doc %s: %v", docID, err)
-	}
+	cleanupRAGDocument(r.Context(), d, docID, "delete kb document "+docID)
+	cleanupStoragePaths(r.Context(), d, []string{doc.StoragePath}, "delete kb document "+docID)
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }

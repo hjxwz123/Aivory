@@ -402,13 +402,44 @@ func inlineDescendants(ctx context.Context, db *sql.DB, rootID string) ([]string
 	return out, nil
 }
 
+// ConversationTreeIDs returns rootID plus every inline sub-conversation anchored
+// to it. Callers use this before deletion to collect side-state rows that SQL
+// cascades would otherwise hide (files/artifacts/storage refs).
+func ConversationTreeIDs(ctx context.Context, db *sql.DB, rootID string) ([]string, error) {
+	children, err := inlineDescendants(ctx, db, rootID)
+	if err != nil {
+		return nil, err
+	}
+	return append([]string{rootID}, children...), nil
+}
+
 // DeleteConversation removes a row and every inline sub-conversation anchored to
 // it (recursively), so deleting a conversation also discards the sub-threads
 // spawned from its text selections (§ text-selection threads). Returns the ids
 // of the additionally-deleted sub-conversations so the caller can clean up their
 // side state (e.g. RAG vectors).
 func DeleteConversation(ctx context.Context, db *sql.DB, id, userID string) ([]string, error) {
-	res, err := db.ExecContext(ctx, "DELETE FROM conversations WHERE id=? AND user_id=?", id, userID)
+	children, err := inlineDescendants(ctx, db, id)
+	if err != nil {
+		return nil, err
+	}
+	ids := append([]string{id}, children...)
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback() //nolint:errcheck
+	var exists int
+	if err := tx.QueryRowContext(ctx, `SELECT 1 FROM conversations WHERE id=? AND user_id=?`, id, userID).Scan(&exists); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM files WHERE conversation_id IN (`+idPlaceholders(len(ids))+`)`, anySlice(ids)...); err != nil {
+		return nil, err
+	}
+	res, err := tx.ExecContext(ctx, "DELETE FROM conversations WHERE id=? AND user_id=?", id, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -416,12 +447,11 @@ func DeleteConversation(ctx context.Context, db *sql.DB, id, userID string) ([]s
 	if n == 0 {
 		return nil, ErrNotFound
 	}
-	children, err := inlineDescendants(ctx, db, id)
-	if err != nil {
-		return nil, err
-	}
 	for _, cid := range children {
-		_, _ = db.ExecContext(ctx, "DELETE FROM conversations WHERE id=? AND user_id=?", cid, userID)
+		_, _ = tx.ExecContext(ctx, "DELETE FROM conversations WHERE id=? AND user_id=?", cid, userID)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
 	}
 	return children, nil
 }
@@ -431,7 +461,27 @@ func DeleteConversation(ctx context.Context, db *sql.DB, id, userID string) ([]s
 // via FK ON DELETE CASCADE; inline sub-conversations are removed recursively
 // (their id list is returned for side-state cleanup).
 func DeleteConversationByID(ctx context.Context, db *sql.DB, id string) ([]string, error) {
-	res, err := db.ExecContext(ctx, "DELETE FROM conversations WHERE id=?", id)
+	children, err := inlineDescendants(ctx, db, id)
+	if err != nil {
+		return nil, err
+	}
+	ids := append([]string{id}, children...)
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback() //nolint:errcheck
+	var exists int
+	if err := tx.QueryRowContext(ctx, `SELECT 1 FROM conversations WHERE id=?`, id).Scan(&exists); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM files WHERE conversation_id IN (`+idPlaceholders(len(ids))+`)`, anySlice(ids)...); err != nil {
+		return nil, err
+	}
+	res, err := tx.ExecContext(ctx, "DELETE FROM conversations WHERE id=?", id)
 	if err != nil {
 		return nil, err
 	}
@@ -439,12 +489,11 @@ func DeleteConversationByID(ctx context.Context, db *sql.DB, id string) ([]strin
 	if n == 0 {
 		return nil, ErrNotFound
 	}
-	children, err := inlineDescendants(ctx, db, id)
-	if err != nil {
-		return nil, err
-	}
 	for _, cid := range children {
-		_, _ = db.ExecContext(ctx, "DELETE FROM conversations WHERE id=?", cid)
+		_, _ = tx.ExecContext(ctx, "DELETE FROM conversations WHERE id=?", cid)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
 	}
 	return children, nil
 }

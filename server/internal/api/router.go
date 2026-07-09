@@ -295,7 +295,20 @@ func NewRouter(d Deps) http.Handler {
 	// Database backup / migration (§ admin → data migration). Export streams a
 	// logical, engine-neutral archive; import replaces ALL data from one.
 	mux.handle("GET", "/api/admin/backup/export", requireAdmin(d, exportBackupAdmin))
+	mux.handle("POST", "/api/admin/backup/export-jobs", requireAdmin(d, startBackupExportAdmin))
+	mux.handle("GET", "/api/admin/backup/export-jobs", requireAdmin(d, listBackupExportsAdmin))
+	mux.handle("GET", "/api/admin/backup/archives/:name", requireAdmin(d, downloadBackupArchiveAdmin))
 	mux.handle("POST", "/api/admin/backup/import", requireAdmin(d, importBackupAdmin))
+	// Configuration migration. Exports/imports admin configuration tables and
+	// admin assets (icons / skill-assets), deliberately leaving users,
+	// conversations, user uploads, KBs, sessions, workspaces, and logs untouched.
+	mux.handle("GET", "/api/admin/config/export", requireAdmin(d, exportConfigAdmin))
+	mux.handle("POST", "/api/admin/config/import", requireAdmin(d, importConfigAdmin))
+	// Vector index maintenance: checks DB chunks against Qdrant and can rebuild
+	// missing/empty vector points asynchronously.
+	mux.handle("GET", "/api/admin/vectors/jobs", requireAdmin(d, listVectorMaintenanceAdmin))
+	mux.handle("POST", "/api/admin/vectors/check", requireAdmin(d, startVectorCheckAdmin))
+	mux.handle("POST", "/api/admin/vectors/rebuild-missing", requireAdmin(d, startVectorRebuildAdmin))
 	// Redeem codes (§ redeem codes). Admin lists/creates/patches/deletes;
 	// individual codes can be revoked (enabled=false) without losing audit.
 	mux.handle("GET", "/api/admin/redeem-codes", requireAdmin(d, listRedeemCodesAdmin))

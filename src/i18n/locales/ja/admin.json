@@ -408,9 +408,11 @@
     "title": "ドキュメント",
     "lead": "アップロードを検索可能な文脈にする設定。",
     "embeddingSection": "埋め込み",
-    "embeddingLead": "KB ベクトルの埋め込みモデル。変更は新規チャンクのみ。",
+    "embeddingLead": "KB と文書ベクトルの埋め込みモデル。初回設定後は不整合を避けるためロックされます。",
     "embeddingModel": "埋め込みモデル",
     "embeddingModelHint": "kind=embedding のモデルから選択。",
+    "embeddingModelLockedHint": "埋め込みモデルはロックされています。既存チャンクと Qdrant ベクトルの不整合を避けるため、設定後は変更できません。",
+    "embeddingModelLockedError": "埋め込みモデルはロックされており、変更できません。",
     "ragSection": "検索と注入",
     "ragLead": "アップロード文書を「全文注入」するか「関連性で検索」するか、どれだけ注入するかを制御します。",
     "ragFullTextThreshold": "全文注入のしきい値(トークン)",
@@ -772,11 +774,27 @@
     "lead": "DB アーカイブの書出/取込—サーバ間や SQLite/PostgreSQL 移行に。",
     "export": {
       "title": "バックアップをエクスポート",
-      "lead": "全テーブルを可搬アーカイブに書出。",
+      "lead": "完全移行アーカイブを非同期生成します。データベース、任意のファイル、Qdrant ベクトルをまとめて同梱します。",
       "includeFiles": "アップロードファイルと生成物を含める",
       "includeFilesHint": "uploads と artifacts も同梱(アーカイブ増大)。",
       "action": "バックアップをエクスポート",
-      "done": "バックアップをエクスポートしました。"
+      "runningAction": "バックアップを生成中",
+      "started": "バックアップ生成を開始しました。",
+      "done": "バックアップをエクスポートしました。",
+      "running": "完全移行アーカイブを生成中",
+      "runningHint": "現在のステップ：{{progress}}。完了まで別のエクスポートは開始できません。",
+      "failed": "前回のエクスポートに失敗しました：{{error}}",
+      "archivesTitle": "生成済みアーカイブ",
+      "loading": "アーカイブ一覧を読み込み中…",
+      "noArchives": "ダウンロード可能なバックアップアーカイブはまだありません。",
+      "download": "ダウンロード",
+      "progress": {
+        "preparing": "準備中",
+        "reading_database": "データベースを読み込み中",
+        "writing_archive": "アーカイブを書き込み中",
+        "completed": "完了",
+        "failed": "失敗"
+      }
     },
     "import": {
       "title": "インポートと復元",
@@ -787,6 +805,8 @@
       "done": "インポートが完了しました。",
       "successTitle": "復元が完了しました",
       "successSummary": "全テーブルで {{rows}} 行、{{files}} 個のファイルを復元しました。",
+      "successQdrant": "Qdrant ベクトル {{points}} 件を復元しました。",
+      "qdrantWarning": "Qdrant 復元の警告：{{error}}",
       "reloginNote": "セッションが終了しました。サインアウトします。インポートしたデータ内のアカウントで再度サインインしてください。"
     },
     "confirm": {
@@ -795,22 +815,53 @@
       "instruction": "確認のため {{word}} と入力してください。",
       "action": "すべて置き換える"
     },
+    "vectors": {
+      "title": "ベクトルチェック",
+      "lead": "DB の各埋め込み済みチャンクに、空でない Qdrant ベクトルがあるか確認し、欠落/空のベクトルだけを非同期で再構築します。",
+      "loading": "ベクトルメンテナンス状態を読み込み中…",
+      "empty": "まだチェック結果はありません。",
+      "checkAction": "ベクトルをチェック",
+      "rebuildAction": "欠落ベクトルを再構築",
+      "checkStarted": "ベクトルチェックを開始しました。",
+      "rebuildStarted": "欠落ベクトルの再構築を開始しました。",
+      "checking": "ベクトルインデックスを確認中",
+      "rebuilding": "欠落ベクトルを再構築中",
+      "runningHint": "現在のステップ: {{progress}}。再構築 {{rebuilt}}、失敗 {{failed}}。",
+      "failed": "ベクトルメンテナンスに失敗しました: {{error}}",
+      "rebuildSummary": "{{rebuilt}} 件のベクトルを再構築、{{failed}} 件失敗。",
+      "modelSummary": "合計 {{total}} / 正常 {{present}} / 欠落 {{missing}} / 空 {{empty}} / スキップ {{skipped}}",
+      "issueSamples": "問題サンプル",
+      "stats": {
+        "total": "対象",
+        "present": "正常",
+        "missing": "欠落",
+        "empty": "空",
+        "skipped": "スキップ"
+      },
+      "progress": {
+        "preparing": "準備中",
+        "checking": "確認中",
+        "rebuilding": "再構築中",
+        "completed": "完了",
+        "failed": "失敗"
+      }
+    },
     "config": {
       "export": {
         "title": "設定をエクスポート",
-        "lead": "このインスタンスのすべてのサイト設定を JSON ファイルとして書き出します。機密情報は伏せられます。",
-        "action": "設定 JSON をエクスポート",
+        "lead": "サイト設定、チャンネル、モデル、スキル、OAuth、画像スタイル、ユーザーグループ、モデル上限、アイコン、スキル資産を設定 ZIP として書き出します。シークレットは平文で含まれます。",
+        "action": "設定 ZIP をエクスポート",
         "done": "設定をエクスポートしました。"
       },
       "import": {
         "title": "設定をインポート",
-        "lead": "上でエクスポートした設定 JSON を適用します。現在の設定にマージされ、伏せられた機密情報は変更されません。",
-        "action": "設定 JSON をインポート…",
+        "lead": "設定 ZIP をインポートします（旧 JSON も利用可）。ID ごとにマージ/上書きし、ユーザー、会話、ファイル、ログは取り込みません。",
+        "action": "設定アーカイブをインポート…",
         "invalid": "このファイルは有効な Aurelia 設定エクスポートではありません。",
-        "done": "設定を適用しました（{{count}} 項目）。",
+        "done": "設定をインポートしました（{{count}} 行）。",
         "confirmTitle": "この設定を適用しますか？",
-        "confirmLead": "このファイルの値で現在のサイト設定を上書きします。",
-        "confirmDetail": "{{file}} — {{count}} 項目の設定を適用します。伏せられた機密情報は変更されません。",
+        "confirmLead": "同じ ID の設定行は上書きされ、その他のローカル設定行は保持されます。",
+        "confirmDetail": "{{file}} — 設定テーブル、アイコン、スキル資産をインポートします。ユーザー、会話、ファイル、ログは変更されません。アーカイブ内のシークレットはこのデプロイに書き込まれます。",
         "confirmAction": "設定を適用"
       }
     }

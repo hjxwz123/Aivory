@@ -26,16 +26,17 @@ inspecting an environment URL at boot:
 - `DATABASE_URL=postgres://…` → Postgres (via the `pgcompat` driver); anything
   else (e.g. a `*.db` path) → embedded SQLite.
 - `REDIS_URL` set → Redis; unset → in-process memory cache.
-- `QDRANT_URL` set → Qdrant; unset → vector search disabled, RAG falls back to
-  brute-force cosine over the embeddings mirrored in the relational store.
+- `QDRANT_URL` set → Qdrant; unset → vector search disabled, RAG injects the
+  full in-scope document text as a fallback.
 
 So **nothing needs to be installed locally** to run the app — leave those URLs
-unset and it runs on SQLite + memory + brute-force. This compose file sets all
-three, giving the production topology.
+unset and it runs on SQLite + memory + full-context RAG fallback. This compose
+file sets all three, and Docker deployments use Qdrant by default.
 
-Embeddings are dual-written: every chunk vector goes to both Postgres (insurance
-/ fallback) and Qdrant (search). Deleting a document/KB/conversation removes its
-points from Qdrant too.
+Chunk vectors are stored only in Qdrant. The relational database stores chunk
+text and retrieval metadata, which lets the retriever validate Qdrant hits and
+fall back to full-context injection if Qdrant is unavailable or empty. Deleting
+a document/KB/conversation removes its points from Qdrant too.
 
 ## First deploy (prebuilt images)
 
@@ -90,6 +91,12 @@ forwards the `Host` header (every reverse proxy does by default). No
 
 ## Backups
 
-Persisted in named volumes: `pgdata`, `redisdata`, `qdrantdata`, `apidata`
-(uploads + artifacts). Back these up together so vectors, rows and files stay
-consistent.
+Persisted in named volumes: `pgdata`, `redisdata`, `qdrantdata`. Uploads and
+artifacts are bind-mounted from `DATA_DIR` (default `./data`). Back these up
+together so vectors, rows and files stay consistent.
+
+The admin **Backup & Migration** page also creates async full migration archives
+for Docker deployments. Those ZIPs include the logical database dump, optional
+uploads/artifacts, and Qdrant vectors, and are stored under `BACKUP_DIR`
+(default `/app/data/backups`, visible on the host as `DATA_DIR/backups`).
+Backup import accepts up to `MAX_BACKUP_BYTES` bytes (default 20 GiB).

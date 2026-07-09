@@ -408,9 +408,11 @@
     "title": "Documents",
     "lead": "Réglages qui rendent les fichiers cherchables.",
     "embeddingSection": "Embeddings",
-    "embeddingLead": "Modèle d'embedding des KB. Le changer n'affecte que les nouveaux fragments.",
+    "embeddingLead": "Modèle d'embedding des KB et documents. Il est verrouillé après la première configuration pour éviter les vecteurs incohérents.",
     "embeddingModel": "Modèle d'embedding",
     "embeddingModelHint": "Choisissez un modèle kind=embedding.",
+    "embeddingModelLockedHint": "Le modèle d'embedding est verrouillé. Pour éviter de désaligner les fragments existants et les vecteurs Qdrant, il ne peut plus être changé après configuration.",
+    "embeddingModelLockedError": "Le modèle d'embedding est verrouillé et ne peut pas être changé.",
     "ragSection": "Récupération et injection",
     "ragLead": "Contrôle quand un document importé est injecté en entier vs. récupéré par pertinence, et la quantité injectée.",
     "ragFullTextThreshold": "Seuil d'injection complète (tokens)",
@@ -772,11 +774,27 @@
     "lead": "Exporter/importer une archive DB — migration serveurs et SQLite/PostgreSQL.",
     "export": {
       "title": "Exporter une sauvegarde",
-      "lead": "Exporte toutes les tables en archive portable.",
+      "lead": "Génère en arrière-plan une archive complète de migration : base de données, fichiers optionnels et vecteurs Qdrant.",
       "includeFiles": "Inclure les fichiers téléversés et les artefacts générés",
       "includeFilesHint": "Inclut aussi uploads + artifacts (archive plus grande).",
       "action": "Exporter une sauvegarde",
-      "done": "Sauvegarde exportée."
+      "runningAction": "Sauvegarde en cours",
+      "started": "Génération de la sauvegarde lancée.",
+      "done": "Sauvegarde exportée.",
+      "running": "Génération de l’archive complète de migration",
+      "runningHint": "Étape actuelle : {{progress}}. Aucun autre export ne peut démarrer avant la fin.",
+      "failed": "Dernier export échoué : {{error}}",
+      "archivesTitle": "Archives générées",
+      "loading": "Chargement de la liste des archives…",
+      "noArchives": "Aucune archive de sauvegarde téléchargeable pour l’instant.",
+      "download": "Télécharger",
+      "progress": {
+        "preparing": "Préparation",
+        "reading_database": "Lecture de la base",
+        "writing_archive": "Écriture de l’archive",
+        "completed": "Terminé",
+        "failed": "Échec"
+      }
     },
     "import": {
       "title": "Importer et restaurer",
@@ -787,6 +805,8 @@
       "done": "Importation terminée.",
       "successTitle": "Restauration terminée",
       "successSummary": "{{rows}} lignes restaurées sur l'ensemble des tables et {{files}} fichiers.",
+      "successQdrant": "{{points}} vecteurs Qdrant restaurés.",
+      "qdrantWarning": "Avertissement de restauration Qdrant : {{error}}",
       "reloginNote": "Votre session a pris fin — déconnexion en cours. Reconnectez-vous avec un compte des données importées."
     },
     "confirm": {
@@ -795,22 +815,53 @@
       "instruction": "Saisissez {{word}} pour confirmer.",
       "action": "Tout remplacer"
     },
+    "vectors": {
+      "title": "Vérification des vecteurs",
+      "lead": "Vérifie que chaque fragment DB vectorisé possède un vecteur Qdrant non vide, puis reconstruit les vecteurs manquants/vides de façon asynchrone.",
+      "loading": "Chargement de l'état des vecteurs…",
+      "empty": "Aucun résultat de vérification.",
+      "checkAction": "Vérifier les vecteurs",
+      "rebuildAction": "Reconstruire les vecteurs manquants",
+      "checkStarted": "Vérification des vecteurs lancée.",
+      "rebuildStarted": "Reconstruction des vecteurs manquants lancée.",
+      "checking": "Vérification de l'index vectoriel",
+      "rebuilding": "Reconstruction des vecteurs manquants",
+      "runningHint": "Étape actuelle : {{progress}}. Reconstruits {{rebuilt}}, échecs {{failed}}.",
+      "failed": "Maintenance des vecteurs échouée : {{error}}",
+      "rebuildSummary": "{{rebuilt}} vecteurs reconstruits ; {{failed}} échecs.",
+      "modelSummary": "total {{total}} / présents {{present}} / manquants {{missing}} / vides {{empty}} / ignorés {{skipped}}",
+      "issueSamples": "Exemples de problèmes",
+      "stats": {
+        "total": "Attendus",
+        "present": "Présents",
+        "missing": "Manquants",
+        "empty": "Vides",
+        "skipped": "Ignorés"
+      },
+      "progress": {
+        "preparing": "Préparation",
+        "checking": "Vérification",
+        "rebuilding": "Reconstruction",
+        "completed": "Terminé",
+        "failed": "Échec"
+      }
+    },
     "config": {
       "export": {
         "title": "Exporter la configuration",
-        "lead": "Téléchargez tous les paramètres du site dans un fichier JSON. Les secrets sont masqués.",
-        "action": "Exporter la config JSON",
+        "lead": "Téléchargez les paramètres, canaux, modèles, compétences, OAuth, styles d'image, groupes, quotas de modèles, icônes et assets de compétence dans une archive ZIP. Les secrets sont inclus en clair.",
+        "action": "Exporter la config ZIP",
         "done": "Configuration exportée."
       },
       "import": {
         "title": "Importer la configuration",
-        "lead": "Appliquez les paramètres d'un JSON de config exporté ci-dessus. Fusionné dans la configuration actuelle — les secrets masqués restent inchangés.",
-        "action": "Importer la config JSON…",
+        "lead": "Importez une archive ZIP de configuration (anciens JSON acceptés). Les lignes sont fusionnées par ID ; utilisateurs, conversations, fichiers et journaux ne sont pas importés.",
+        "action": "Importer l'archive de config…",
         "invalid": "Ce fichier n'est pas un export de configuration Aurelia valide.",
-        "done": "Configuration appliquée ({{count}} paramètres).",
+        "done": "Configuration importée ({{count}} lignes).",
         "confirmTitle": "Appliquer cette configuration ?",
-        "confirmLead": "Écrase les paramètres actuels du site avec les valeurs de ce fichier.",
-        "confirmDetail": "{{file}} — {{count}} paramètres seront appliqués. Les secrets masqués restent inchangés.",
+        "confirmLead": "Les lignes ayant le même ID seront écrasées ; les autres lignes locales sont conservées.",
+        "confirmDetail": "{{file}} — les tables de configuration, icônes et assets de compétence seront importés. Utilisateurs, conversations, fichiers et journaux ne changeront pas. Les secrets de l'archive seront écrits dans ce déploiement.",
         "confirmAction": "Appliquer la configuration"
       }
     }

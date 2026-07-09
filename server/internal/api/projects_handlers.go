@@ -262,9 +262,8 @@ func deleteProjectDocHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = store.DeleteDocument(r.Context(), d.DB, docID)
-	if err := d.RAG.OnDocumentDeleted(r.Context(), docID); err != nil {
-		d.Logger.Printf("rag: drop vectors for doc %s: %v", docID, err)
-	}
+	cleanupRAGDocument(r.Context(), d, docID, "delete project document "+docID)
+	cleanupStoragePaths(r.Context(), d, []string{doc.StoragePath}, "delete project document "+docID)
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 

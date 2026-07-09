@@ -1,7 +1,7 @@
 // Package vector is the pluggable similarity-search backend for RAG. In
-// production it is backed by Qdrant (one collection per embedding dimension);
-// when no QDRANT_URL is configured a Disabled store is used and the rag layer
-// falls back to brute-force cosine over the embeddings kept in Postgres.
+// production it is backed by Qdrant (one collection per embedding dimension).
+// When no QDRANT_URL is configured a Disabled store is used and the rag layer
+// injects full in-scope document text instead of doing vector retrieval.
 //
 // The store is intentionally thin: it knows nothing about chunking, routing or
 // fusion — it upserts vectors with a small payload, runs a filtered nearest-
@@ -38,6 +38,14 @@ type Hit struct {
 	Payload Payload
 }
 
+// ChunkVectorStatus reports whether a chunk id exists in the vector backend and
+// whether the stored point carries a non-empty vector. Admin maintenance uses
+// this to detect partial/empty Qdrant restores without trusting search top-K.
+type ChunkVectorStatus struct {
+	Exists    bool
+	HasVector bool
+}
+
 // Scope restricts a search to a conversation's visible chunks: any chunk whose
 // kb_id is in KBIDs, OR whose conversation_id equals ConversationID.
 type Scope struct {
@@ -48,7 +56,7 @@ type Scope struct {
 // Store is the backend surface. dim selects the per-dimension collection.
 type Store interface {
 	// Enabled reports whether a real vector backend is wired. When false the
-	// rag layer uses its Postgres brute-force path instead.
+	// rag layer uses full-context injection instead.
 	Enabled() bool
 	// Upsert writes (or overwrites) the points for the given dimension.
 	Upsert(ctx context.Context, dim int, points []Point) error
@@ -58,6 +66,13 @@ type Store interface {
 	// query is full-text scored against the chunks' content payload field —
 	// this is the independent keyword leg of the §4.11-E hybrid retrieval.
 	SearchKeyword(ctx context.Context, dim int, query string, scope Scope, topK int) ([]Hit, error)
+	// ExistingChunkIDs returns the chunk ids present in the vector backend for
+	// this dimension + scope. Retrieval uses it as a consistency guard because
+	// chunks.content is the source of truth while Qdrant is only the search index.
+	ExistingChunkIDs(ctx context.Context, dim int, scope Scope) (map[string]bool, error)
+	// VectorChunkStatuses returns vector presence for every point in a dimension
+	// and optional scope. Empty scope means all Aurelia points in the collection.
+	VectorChunkStatuses(ctx context.Context, dim int, scope Scope) (map[string]ChunkVectorStatus, error)
 	// DeleteByDocument removes every point belonging to a document.
 	DeleteByDocument(ctx context.Context, documentID string) error
 	// DeleteByKB removes every point belonging to a knowledge base.
@@ -79,6 +94,12 @@ func (Disabled) Search(context.Context, int, []float32, Scope, int) ([]Hit, erro
 }
 func (Disabled) SearchKeyword(context.Context, int, string, Scope, int) ([]Hit, error) {
 	return nil, nil
+}
+func (Disabled) ExistingChunkIDs(context.Context, int, Scope) (map[string]bool, error) {
+	return map[string]bool{}, nil
+}
+func (Disabled) VectorChunkStatuses(context.Context, int, Scope) (map[string]ChunkVectorStatus, error) {
+	return map[string]ChunkVectorStatus{}, nil
 }
 func (Disabled) DeleteByDocument(context.Context, string) error     { return nil }
 func (Disabled) DeleteByKB(context.Context, string) error           { return nil }

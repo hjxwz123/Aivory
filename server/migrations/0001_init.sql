@@ -198,7 +198,6 @@ CREATE TABLE IF NOT EXISTS chunks (
   chunk_type      TEXT NOT NULL DEFAULT 'text',
   content         TEXT NOT NULL,
   meta            TEXT NOT NULL DEFAULT '{}',
-  embedding       BLOB,                                -- float32 packed; nullable
   embedding_model TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_chunks_doc ON chunks(document_id);

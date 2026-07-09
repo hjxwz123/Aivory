@@ -408,9 +408,11 @@
     "title": "Documents",
     "lead": "Settings that turn uploads into searchable context.",
     "embeddingSection": "Embeddings",
-    "embeddingLead": "Embedding model for KB vectors. Changing it affects only new chunks.",
+    "embeddingLead": "Embedding model for KB and document vectors. It locks after first configuration to avoid stale vector mismatch.",
     "embeddingModel": "Embedding model",
     "embeddingModelHint": "Pick a kind=embedding model.",
+    "embeddingModelLockedHint": "The embedding model is locked. To avoid mismatching existing chunks and Qdrant vectors, it cannot be changed after configuration.",
+    "embeddingModelLockedError": "The embedding model is locked and cannot be changed.",
     "ragSection": "Retrieval & injection",
     "ragLead": "Control when an uploaded document is injected whole vs. retrieved by relevance, and how much is injected.",
     "ragFullTextThreshold": "Full-inject threshold (tokens)",
@@ -772,11 +774,27 @@
     "lead": "Export/import a portable DB archive — migrate across servers and SQLite/PostgreSQL.",
     "export": {
       "title": "Export backup",
-      "lead": "Export all tables as a portable archive.",
+      "lead": "Generate a full migration archive asynchronously: database, optional files, and Qdrant vectors are bundled together.",
       "includeFiles": "Include uploaded files & generated artifacts",
       "includeFilesHint": "Also bundle uploads + artifacts (larger archive).",
       "action": "Export backup",
-      "done": "Backup exported."
+      "runningAction": "Generating backup",
+      "started": "Backup generation started.",
+      "done": "Backup exported.",
+      "running": "Generating full migration archive",
+      "runningHint": "Current step: {{progress}}. Another export cannot start until this one finishes.",
+      "failed": "Last export failed: {{error}}",
+      "archivesTitle": "Generated archives",
+      "loading": "Loading archive list…",
+      "noArchives": "No downloadable backup archives yet.",
+      "download": "Download",
+      "progress": {
+        "preparing": "Preparing",
+        "reading_database": "Reading database",
+        "writing_archive": "Writing archive",
+        "completed": "Completed",
+        "failed": "Failed"
+      }
     },
     "import": {
       "title": "Import & restore",
@@ -787,6 +805,8 @@
       "done": "Import complete.",
       "successTitle": "Restore complete",
       "successSummary": "Restored {{rows}} rows across all tables and {{files}} files.",
+      "successQdrant": "Restored {{points}} Qdrant vectors.",
+      "qdrantWarning": "Qdrant restore warning: {{error}}",
       "reloginNote": "Your session has ended — signing you out. Sign in again with an account from the imported data."
     },
     "confirm": {
@@ -795,22 +815,53 @@
       "instruction": "Type {{word}} to confirm.",
       "action": "Replace everything"
     },
+    "vectors": {
+      "title": "Vector check",
+      "lead": "Check that every embedded DB chunk has a non-empty Qdrant vector, then rebuild only the missing/empty vectors asynchronously.",
+      "loading": "Loading vector maintenance state…",
+      "empty": "No check result yet.",
+      "checkAction": "Check vectors",
+      "rebuildAction": "Rebuild missing vectors",
+      "checkStarted": "Vector check started.",
+      "rebuildStarted": "Missing vector rebuild started.",
+      "checking": "Checking vector index",
+      "rebuilding": "Rebuilding missing vectors",
+      "runningHint": "Current step: {{progress}}. Rebuilt {{rebuilt}}, failed {{failed}}.",
+      "failed": "Vector maintenance failed: {{error}}",
+      "rebuildSummary": "Rebuilt {{rebuilt}} vectors; {{failed}} failed.",
+      "modelSummary": "total {{total}} / present {{present}} / missing {{missing}} / empty {{empty}} / skipped {{skipped}}",
+      "issueSamples": "Issue samples",
+      "stats": {
+        "total": "Expected",
+        "present": "Present",
+        "missing": "Missing",
+        "empty": "Empty",
+        "skipped": "Skipped"
+      },
+      "progress": {
+        "preparing": "Preparing",
+        "checking": "Checking",
+        "rebuilding": "Rebuilding",
+        "completed": "Completed",
+        "failed": "Failed"
+      }
+    },
     "config": {
       "export": {
         "title": "Export configuration",
-        "lead": "Download all site settings as a JSON file. Secrets are redacted.",
-        "action": "Export config JSON",
+        "lead": "Download site settings, channels, models, skills, OAuth, image styles, groups, model quotas, icons, and skill assets as a config ZIP. Secrets are included in plaintext.",
+        "action": "Export config ZIP",
         "done": "Configuration exported."
       },
       "import": {
         "title": "Import configuration",
-        "lead": "Apply settings from a config JSON exported above. Merges into the current config — redacted secrets are left unchanged.",
-        "action": "Import config JSON…",
+        "lead": "Import a config ZIP (old JSON files are still accepted). Rows are merged by ID; users, conversations, files, and logs are not imported.",
+        "action": "Import config archive…",
         "invalid": "That file isn't a valid Aurelia configuration export.",
-        "done": "Configuration applied ({{count}} settings).",
+        "done": "Configuration imported ({{count}} rows).",
         "confirmTitle": "Apply this configuration?",
-        "confirmLead": "Overwrites the current site settings with the values from this file.",
-        "confirmDetail": "{{file}} — {{count}} settings will be applied. Redacted secrets stay unchanged.",
+        "confirmLead": "Rows with the same ID will be overwritten; other local configuration rows are kept.",
+        "confirmDetail": "{{file}} — configuration tables, icons, and skill assets will be imported. Users, conversations, files, and logs will not change. Secrets included in the archive will be written to this deployment.",
         "confirmAction": "Apply configuration"
       }
     }

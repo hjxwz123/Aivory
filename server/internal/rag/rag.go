@@ -9,7 +9,6 @@ package rag
 import (
 	"context"
 	"database/sql"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -88,8 +87,9 @@ type RouterOpts struct {
 	ConversationID string
 }
 
-// New builds the service. The vector backend defaults to Disabled (brute-force
-// over Postgres); call SetVectorStore to wire Qdrant.
+// New builds the service. The vector backend defaults to Disabled; call
+// SetVectorStore to wire Qdrant. When no vector backend is available, retrieval
+// injects the full in-scope document text instead of keeping a DB vector copy.
 func New(db *sql.DB, q queue.Queue, logger *log.Logger) *Service {
 	return &Service{db: db, queue: q, logger: logger, vec: vector.NewDisabled()}
 }
@@ -440,17 +440,15 @@ func (s *Service) runPipeline(ctx context.Context, docID string, cache *parseCac
 				chunkType = "image_caption"
 				imageRef = ref
 			}
-			var emb []byte
 			var vec []float32
 			if !skipEmbed && vi < len(allVecs) {
 				vec = allVecs[vi]
-				emb = packFloats(vec) // keep the vector in Postgres too (brute-force fallback)
 			}
 			childID := store.NewChunkID()
 			inserts = append(inserts, store.ChunkInsert{
 				ID: childID, DocumentID: docID, KBID: d.KBID, ConversationID: d.ConversationID,
 				Seq: seq, ParentID: parentID, ChunkType: chunkType, Content: child,
-				ImageRef: imageRef, Embedding: emb, EmbeddingModel: emName,
+				ImageRef: imageRef, EmbeddingModel: emName,
 			})
 			if vec != nil && s.vec.Enabled() {
 				points = append(points, vector.Point{
@@ -476,9 +474,10 @@ func (s *Service) runPipeline(ctx context.Context, docID string, cache *parseCac
 	if s.vec.Enabled() && len(points) > 0 {
 		if err := s.vec.Upsert(ctx, dim, points); err != nil {
 			// Don't fail the whole ingest on a vector-store problem (e.g. Qdrant
-			// down / mis-keyed): the same vectors are written to Postgres, so
-			// retrieval degrades to brute-force. Log loudly and mark the doc ready.
-			s.logger.Printf("rag: vector upsert for %s failed (%v) — falling back to Postgres brute-force", docID, err)
+			// down / mis-keyed). We no longer keep a relational vector copy; if
+			// Qdrant is unavailable at retrieval time, the retriever injects the
+			// full in-scope text from chunks.content.
+			s.logger.Printf("rag: vector upsert for %s failed (%v) — no DB vector copy kept; retrieval will use full-text fallback when Qdrant is unavailable", docID, err)
 		}
 	}
 	// Record embedding spend (§8.3, purpose=embedding) — best-effort. Skipped
@@ -563,6 +562,8 @@ var (
 	queryEmbedStore = map[string]queryEmbedEntry{}
 )
 
+var errVectorBackendUnavailable = errors.New("rag: vector backend unavailable")
+
 func (s *Service) embedQueryCached(ctx context.Context, em Embedder, emName, query string) (vec []float32, cached bool, err error) {
 	h := fnv.New64a()
 	_, _ = h.Write([]byte(emName))
@@ -604,6 +605,16 @@ func (s *Service) Retrieve(ctx context.Context, userID, convID string, kbIDs []s
 	if topK <= 0 {
 		topK = 5
 	}
+	fullContext := func() ([]Snippet, error) {
+		scope, err := store.ListChunksInScope(ctx, s.db, kbIDs, convID)
+		if err != nil {
+			return nil, err
+		}
+		return fullTextSnippets(scope), nil
+	}
+	if !s.vec.Enabled() {
+		return fullContext()
+	}
 
 	// Resolve the embedding model(s) covering the scope and search each model's
 	// chunks with ITS OWN query vector. KB docs use the KB's locked model; a
@@ -634,35 +645,62 @@ func (s *Service) Retrieve(ctx context.Context, userID, convID string, kbIDs []s
 		if convID != "" && (gName != kbName || gDim != kbDim) {
 			// Two model groups: KBs under the KB model, conversation docs under the
 			// global model — each with its own query embedding + per-dim collection.
-			kbCands, err := s.searchScope(ctx, userID, convID, kbEm, kbName, kbDim, vector.Scope{KBIDs: kbIDs}, query, terms)
+			kbScope := vector.Scope{KBIDs: kbIDs}
+			kbCands, err := s.searchScope(ctx, userID, convID, kbEm, kbName, kbDim, kbScope, query, terms)
 			if err != nil {
+				if errors.Is(err, errVectorBackendUnavailable) {
+					return fullContext()
+				}
 				return nil, err
 			}
+			if len(kbCands) == 0 && s.vectorScopeHasEmbeddedChunks(ctx, kbScope) {
+				return fullContext()
+			}
 			cands = kbCands
-			if convCands, cerr := s.searchScope(ctx, userID, convID, gEm, gName, gDim, vector.Scope{ConversationID: convID}, query, terms); cerr == nil {
+			convScope := vector.Scope{ConversationID: convID}
+			if convCands, cerr := s.searchScope(ctx, userID, convID, gEm, gName, gDim, convScope, query, terms); cerr == nil {
+				if len(convCands) == 0 && s.vectorScopeHasEmbeddedChunks(ctx, convScope) {
+					return fullContext()
+				}
 				cands = appendUniqueCandidates(cands, convCands)
+			} else if errors.Is(cerr, errVectorBackendUnavailable) {
+				return fullContext()
 			} else {
 				s.logger.Printf("rag: conversation-scope retrieval failed for %s: %v", convID, cerr)
 			}
 		} else {
 			// One model across KBs (+ the conversation when its model matches): a
 			// single combined-scope search — exactly the prior behaviour.
-			cands, err = s.searchScope(ctx, userID, convID, kbEm, kbName, kbDim, vector.Scope{KBIDs: kbIDs, ConversationID: convID}, query, terms)
+			scope := vector.Scope{KBIDs: kbIDs, ConversationID: convID}
+			cands, err = s.searchScope(ctx, userID, convID, kbEm, kbName, kbDim, scope, query, terms)
 			if err != nil {
+				if errors.Is(err, errVectorBackendUnavailable) {
+					return fullContext()
+				}
 				return nil, err
+			}
+			if len(cands) == 0 && s.vectorScopeHasEmbeddedChunks(ctx, scope) {
+				return fullContext()
 			}
 		}
 	} else {
 		gEm, gName, gDim := s.resolveEmbedder(ctx)
 		var err error
-		cands, err = s.searchScope(ctx, userID, convID, gEm, gName, gDim, vector.Scope{ConversationID: convID}, query, terms)
+		scope := vector.Scope{ConversationID: convID}
+		cands, err = s.searchScope(ctx, userID, convID, gEm, gName, gDim, scope, query, terms)
 		if err != nil {
+			if errors.Is(err, errVectorBackendUnavailable) {
+				return fullContext()
+			}
 			return nil, err
+		}
+		if len(cands) == 0 && s.vectorScopeHasEmbeddedChunks(ctx, scope) {
+			return fullContext()
 		}
 	}
 	// Surface in-scope chunks that were intentionally left UNEMBEDDED (small
 	// conversation docs, code/config — runPipeline's skipEmbed). They live in
-	// neither Qdrant nor the dense brute-force set, so without this the
+	// neither Qdrant nor the dense search set, so without this the
 	// search_knowledge_base tool and inject-mode retrieval couldn't find a
 	// freshly-uploaded small/code file at all — only auto-mode's pinned injection
 	// covered them. Conversation-scoped only (KB docs always embed). (§4.11 skip-embed)
@@ -707,10 +745,12 @@ func (s *Service) Retrieve(ctx context.Context, userID, convID string, kbIDs []s
 	result := []Snippet{}
 	seenParent := map[string]bool{}
 	for _, c := range ranked {
-		// Small-to-big: inject the FULL parent section for a retrieved hit (no
-		// per-snippet truncation — §admin RAG "检索到的全量注入"); one section per
-		// parent (deduped on its top-ranked child) so distinct sections aren't
-		// crowded out. Falls back to the child's own text when there's no parent.
+		// Small-to-big: inject a parent-window that is guaranteed to include the
+		// matched child. Parent chunks are capped at ingest time, so blindly using
+		// the parent head can hide a hit that lives deep in a long section; if the
+		// child is outside the stored parent window, expandHit falls back to the
+		// child itself. One snippet per parent keeps distinct sections from being
+		// crowded out.
 		snippet := c.content
 		if c.parentID != "" {
 			if seenParent[c.parentID] {
@@ -718,7 +758,7 @@ func (s *Service) Retrieve(ctx context.Context, userID, convID string, kbIDs []s
 			}
 			seenParent[c.parentID] = true
 			if parent, _ := store.GetChunkContent(ctx, s.db, c.parentID); strings.TrimSpace(parent) != "" {
-				snippet = parent
+				snippet = expandHit(parent, c.content, retrievedSnippetChars)
 			}
 		}
 		result = append(result, Snippet{
@@ -733,46 +773,14 @@ func (s *Service) Retrieve(ctx context.Context, userID, convID string, kbIDs []s
 	return result, nil
 }
 
-// bruteForceCandidates scores every in-scope chunk by cosine over the vectors
-// kept in the relational store (the dual-write insurance copy). Used when Qdrant
-// is disabled OR unavailable, so retrieval keeps working without it.
-func (s *Service) bruteForceCandidates(ctx context.Context, kbIDs []string, convID string, qVec []float32, terms []string) ([]retrievalCandidate, error) {
-	rows, err := store.ListChunksInScope(ctx, s.db, kbIDs, convID)
-	if err != nil {
-		return nil, err
-	}
-	cands := make([]retrievalCandidate, 0, len(rows))
-	for _, r := range rows {
-		// Parent rows carry section context but no vector — they're returned via
-		// expansion, never scored directly (§4.11-C-2).
-		if r.ChunkType == "parent" || len(r.Embedding) == 0 {
-			continue
-		}
-		v := unpackFloats(r.Embedding)
-		sim := float32(0)
-		if len(v) > 0 {
-			sim = cosine(qVec, v)
-		}
-		cands = append(cands, retrievalCandidate{
-			chunkID:    r.ID,
-			documentID: r.DocumentID,
-			parentID:   r.ParentID,
-			filename:   r.Filename,
-			content:    r.Content,
-			sim:        sim,
-			bm:         keywordScore(terms, r.Content),
-		})
-	}
-	return cands, nil
-}
-
 // keywordOnlyUnembedded returns in-scope CHILD chunks that were intentionally not
 // embedded (runPipeline's skipEmbed: small conversation docs, code/config),
 // scored by keyword overlap only. Such chunks have no vector in Qdrant and are
-// skipped by the dense brute-force leg, so this is the ONLY way the
-// search_knowledge_base tool / inject-mode retrieval can reach them. Only chunks
-// that actually match the query (bm > 0) are surfaced — a query-driven search
-// shouldn't dump every unembedded chunk into context.
+// skipped by the dense/keyword Qdrant legs, so this is the ONLY query-driven way
+// the search_knowledge_base tool / inject-mode retrieval can reach them when
+// Qdrant itself is available. Only chunks that actually match the query (bm > 0)
+// are surfaced — a query-driven search shouldn't dump every unembedded chunk
+// into context.
 func (s *Service) keywordOnlyUnembedded(ctx context.Context, kbIDs []string, convID string, terms []string) []retrievalCandidate {
 	if len(terms) == 0 {
 		return nil
@@ -785,7 +793,7 @@ func (s *Service) keywordOnlyUnembedded(ctx context.Context, kbIDs []string, con
 	for _, r := range rows {
 		// Parents carry no own text vector; embedded children are already covered
 		// by the dense/keyword legs above.
-		if r.ChunkType == "parent" || len(r.Embedding) != 0 {
+		if r.ChunkType == "parent" || strings.TrimSpace(r.EmbeddingModel) != "" {
 			continue
 		}
 		bm := keywordScore(terms, r.Content)
@@ -805,6 +813,22 @@ func (s *Service) keywordOnlyUnembedded(ctx context.Context, kbIDs []string, con
 	return out
 }
 
+func (s *Service) vectorScopeHasEmbeddedChunks(ctx context.Context, scope vector.Scope) bool {
+	rows, err := store.ListChunksInScope(ctx, s.db, scope.KBIDs, scope.ConversationID)
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Printf("rag: check embedded chunks failed: %v", err)
+		}
+		return false
+	}
+	for _, r := range rows {
+		if r.ChunkType != "parent" && strings.TrimSpace(r.EmbeddingModel) != "" {
+			return true
+		}
+	}
+	return false
+}
+
 // searchScope runs the dense + keyword retrieval legs for ONE embedding model over
 // the given vector scope, returning fusion-input candidates. Factored out of
 // Retrieve so a query whose scope spans sources embedded by DIFFERENT models (a
@@ -813,6 +837,9 @@ func (s *Service) keywordOnlyUnembedded(ctx context.Context, kbIDs []string, con
 // another's, nor missing a doc whose vectors sit in a different per-dim
 // collection. (§4.11 model split)
 func (s *Service) searchScope(ctx context.Context, userID, convID string, em Embedder, emName string, dim int, scope vector.Scope, query string, terms []string) ([]retrievalCandidate, error) {
+	if !s.vec.Enabled() {
+		return nil, errVectorBackendUnavailable
+	}
 	qVec, cached, err := s.embedQueryCached(ctx, em, emName, query)
 	if err != nil {
 		return nil, err
@@ -835,44 +862,63 @@ func (s *Service) searchScope(ctx context.Context, userID, convID string, em Emb
 			Purpose: "embedding", InputTokens: estimateTokens(query),
 		})
 	}
-	if !s.vec.Enabled() {
-		// Dev / no-Qdrant: brute-force cosine over the relational vector copy.
-		return s.bruteForceCandidates(ctx, scope.KBIDs, scope.ConversationID, qVec, terms)
-	}
 	// §4.11-E independent legs: 30 dense ∥ 30 keyword, fused later; the same scope
 	// so a chunk that hits in only one leg survives.
+	live, err := s.liveChildChunks(ctx, scope)
+	if err != nil {
+		return nil, err
+	}
+	if len(live) == 0 {
+		return nil, nil
+	}
+	if err := s.ensureVectorIndexComplete(ctx, scope, emName, dim, live); err != nil {
+		return nil, err
+	}
 	hits, err := s.vec.Search(ctx, dim, qVec, scope, 30)
 	if err != nil {
-		s.logger.Printf("rag: qdrant search failed (%v) — falling back to Postgres brute-force", err)
-		return s.bruteForceCandidates(ctx, scope.KBIDs, scope.ConversationID, qVec, terms)
+		if s.logger != nil {
+			s.logger.Printf("rag: qdrant search failed (%v) — injecting full in-scope text", err)
+		}
+		return nil, fmt.Errorf("%w: %v", errVectorBackendUnavailable, err)
 	}
-	kwHits, _ := s.vec.SearchKeyword(ctx, dim, query, scope, 30)
+	kwHits, kwErr := s.vec.SearchKeyword(ctx, dim, query, scope, 30)
+	if kwErr != nil && s.logger != nil {
+		s.logger.Printf("rag: qdrant keyword search failed (%v) — continuing with dense hits", kwErr)
+	}
 	merged := map[string]retrievalCandidate{}
 	for _, h := range hits {
-		merged[h.Payload.ChunkID] = retrievalCandidate{
-			chunkID:    h.Payload.ChunkID,
-			documentID: h.Payload.DocumentID,
-			parentID:   h.Payload.ParentID,
-			filename:   h.Payload.Filename,
-			content:    h.Payload.Content,
+		row, ok := live[h.Payload.ChunkID]
+		if !ok || strings.TrimSpace(row.EmbeddingModel) != emName {
+			continue
+		}
+		merged[row.ID] = retrievalCandidate{
+			chunkID:    row.ID,
+			documentID: row.DocumentID,
+			parentID:   row.ParentID,
+			filename:   row.Filename,
+			content:    row.Content,
 			sim:        h.Score,
-			bm:         keywordScore(terms, h.Payload.Content),
+			bm:         keywordScore(terms, row.Content),
 		}
 	}
 	for _, h := range kwHits {
-		if cur, ok := merged[h.Payload.ChunkID]; ok {
-			cur.bm += keywordScore(terms, h.Payload.Content)
-			merged[h.Payload.ChunkID] = cur
+		row, ok := live[h.Payload.ChunkID]
+		if !ok || strings.TrimSpace(row.EmbeddingModel) != emName {
 			continue
 		}
-		merged[h.Payload.ChunkID] = retrievalCandidate{
-			chunkID:    h.Payload.ChunkID,
-			documentID: h.Payload.DocumentID,
-			parentID:   h.Payload.ParentID,
-			filename:   h.Payload.Filename,
-			content:    h.Payload.Content,
+		if cur, ok := merged[row.ID]; ok {
+			cur.bm += keywordScore(terms, row.Content)
+			merged[row.ID] = cur
+			continue
+		}
+		merged[row.ID] = retrievalCandidate{
+			chunkID:    row.ID,
+			documentID: row.DocumentID,
+			parentID:   row.ParentID,
+			filename:   row.Filename,
+			content:    row.Content,
 			sim:        0,
-			bm:         keywordScore(terms, h.Payload.Content),
+			bm:         keywordScore(terms, row.Content),
 		}
 	}
 	out := make([]retrievalCandidate, 0, len(merged))
@@ -880,6 +926,84 @@ func (s *Service) searchScope(ctx context.Context, userID, convID string, em Emb
 		out = append(out, c)
 	}
 	return out, nil
+}
+
+func (s *Service) ensureVectorIndexComplete(ctx context.Context, scope vector.Scope, emName string, dim int, live map[string]store.Chunk) error {
+	expected := []string{}
+	otherModels := map[string]int{}
+	for _, r := range live {
+		model := strings.TrimSpace(r.EmbeddingModel)
+		if model == "" {
+			continue
+		}
+		if model != emName {
+			otherModels[model]++
+			continue
+		}
+		expected = append(expected, r.ID)
+	}
+	if len(otherModels) > 0 {
+		names := make([]string, 0, len(otherModels))
+		for name := range otherModels {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		if s.logger != nil {
+			s.logger.Printf("rag: scope contains chunks embedded by %v while querying with %s — injecting full in-scope text", names, emName)
+		}
+		return fmt.Errorf("%w: mixed embedding models in scope", errVectorBackendUnavailable)
+	}
+	if len(expected) == 0 {
+		return nil
+	}
+	status, err := s.vec.VectorChunkStatuses(ctx, dim, scope)
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Printf("rag: qdrant consistency check failed (%v) — injecting full in-scope text", err)
+		}
+		return fmt.Errorf("%w: %v", errVectorBackendUnavailable, err)
+	}
+	missing := []string{}
+	empty := []string{}
+	for _, id := range expected {
+		st, ok := status[id]
+		if !ok || !st.Exists {
+			missing = append(missing, id)
+			continue
+		}
+		if !st.HasVector {
+			empty = append(empty, id)
+		}
+	}
+	if len(missing) > 0 || len(empty) > 0 {
+		sort.Strings(missing)
+		sort.Strings(empty)
+		sample := append([]string{}, missing...)
+		sample = append(sample, empty...)
+		if len(sample) > 5 {
+			sample = sample[:5]
+		}
+		if s.logger != nil {
+			s.logger.Printf("rag: qdrant index incomplete for dim=%d scope={kb:%v conv:%s}; missing %d/%d chunks, empty vectors %d/%d (sample %v) — injecting full in-scope text", dim, scope.KBIDs, scope.ConversationID, len(missing), len(expected), len(empty), len(expected), sample)
+		}
+		return fmt.Errorf("%w: vector index missing %d chunks and has %d empty vectors", errVectorBackendUnavailable, len(missing), len(empty))
+	}
+	return nil
+}
+
+func (s *Service) liveChildChunks(ctx context.Context, scope vector.Scope) (map[string]store.Chunk, error) {
+	rows, err := store.ListChunksInScope(ctx, s.db, scope.KBIDs, scope.ConversationID)
+	if err != nil {
+		return nil, err
+	}
+	live := make(map[string]store.Chunk, len(rows))
+	for _, r := range rows {
+		if r.ChunkType == "parent" || strings.TrimSpace(r.EmbeddingModel) == "" {
+			continue
+		}
+		live[r.ID] = r
+	}
+	return live, nil
 }
 
 // appendUniqueCandidates appends candidates from src not already in dst (by chunk
@@ -902,8 +1026,8 @@ func appendUniqueCandidates(dst, src []retrievalCandidate) []retrievalCandidate 
 }
 
 // retrievalCandidate is one scored chunk feeding the reciprocal-rank fusion in
-// Retrieve. Both retrieval paths (Qdrant search and Postgres brute force)
-// produce these so the fusion + small-to-big expansion runs identically.
+// Retrieve. Qdrant dense and keyword legs both produce these so the fusion +
+// small-to-big expansion runs identically.
 type retrievalCandidate struct {
 	chunkID    string
 	documentID string
@@ -1227,35 +1351,6 @@ func featureVector(s string, dim int) []float32 {
 		}
 	}
 	return v
-}
-
-func cosine(a, b []float32) float32 {
-	if len(a) != len(b) {
-		return 0
-	}
-	var dot float32
-	for i := range a {
-		dot += a[i] * b[i]
-	}
-	return dot
-}
-
-func packFloats(v []float32) []byte {
-	out := make([]byte, 4*len(v))
-	for i, x := range v {
-		binary.LittleEndian.PutUint32(out[i*4:], math.Float32bits(x))
-	}
-	return out
-}
-func unpackFloats(b []byte) []float32 {
-	if len(b)%4 != 0 || len(b) == 0 {
-		return nil
-	}
-	out := make([]float32, len(b)/4)
-	for i := range out {
-		out[i] = math.Float32frombits(binary.LittleEndian.Uint32(b[i*4:]))
-	}
-	return out
 }
 
 // parentChunk groups one large section with its embedded child chunks
@@ -1677,6 +1772,10 @@ func (s *Service) RouteAndRetrieve(ctx context.Context, userID, convID string, k
 	// runPipeline). They can't be semantically retrieved, so they are ALWAYS
 	// injected in full whenever we don't take the whole-scope full-text path.
 	scope, _ := store.ListChunksInScope(ctx, s.db, kbIDs, convID)
+	if len(scope) > 0 && !s.vec.Enabled() {
+		decision.Strategy = "full_text"
+		return fullTextSnippets(scope), decision, nil
+	}
 	pinned := []store.Chunk{}
 	embeddedTokens := 0
 	pinnedTokens := 0
@@ -1684,7 +1783,7 @@ func (s *Service) RouteAndRetrieve(ctx context.Context, userID, convID string, k
 		if c.ChunkType == "parent" {
 			continue // parents duplicate child text
 		}
-		if len(c.Embedding) == 0 {
+		if strings.TrimSpace(c.EmbeddingModel) == "" {
 			pinned = append(pinned, c)
 			pinnedTokens += estimateTokens(c.Content)
 		} else {
@@ -1778,8 +1877,6 @@ func (s *Service) RouteAndRetrieve(ctx context.Context, userID, convID string, k
 	}
 }
 
-// fullTextSnippets returns the scope's child chunks in document order as
-// snippets, capped at budget tokens (≈4 chars/token).
 // fullTextSnippets returns the scope's child chunks in document order, each in
 // FULL — no token budget / truncation (§admin RAG: "删除封顶"). Cost on a credit
 // turn is bounded by the pre-flight estimate, not here.

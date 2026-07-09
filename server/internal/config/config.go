@@ -32,7 +32,9 @@ type Config struct {
 	StaticDir          string
 	UploadDir          string
 	ArtifactDir        string
+	BackupDir          string
 	MaxUploadBytes     int64
+	MaxBackupBytes     int64
 	DailyMessages      int
 	DailyImages        int
 	SearchProvider     string
@@ -84,7 +86,9 @@ func Load() Config {
 		StaticDir:            getenv("STATIC_DIR", ""),
 		UploadDir:            getenv("UPLOAD_DIR", "./data/uploads"),
 		ArtifactDir:          getenv("ARTIFACT_DIR", "./data/artifacts"),
+		BackupDir:            getenv("BACKUP_DIR", "./data/backups"),
 		MaxUploadBytes:       getenvInt64("MAX_UPLOAD_BYTES", 50*1024*1024),
+		MaxBackupBytes:       getenvInt64("MAX_BACKUP_BYTES", 20*1024*1024*1024),
 		DailyMessages:        getenvInt("DAILY_MESSAGE_LIMIT", 200),
 		DailyImages:          getenvInt("IMAGE_DAILY_LIMIT", 30),
 		SearchProvider:       getenv("SEARCH_PROVIDER", ""),
@@ -103,6 +107,7 @@ func Load() Config {
 	}
 	_ = os.MkdirAll(cfg.UploadDir, 0o755)
 	_ = os.MkdirAll(cfg.ArtifactDir, 0o755)
+	_ = os.MkdirAll(cfg.BackupDir, 0o755)
 
 	// JWT secret resolution — NEVER sign tokens with the source-committed dev
 	// default (a public signing key = forgeable admin). When JWT_SECRET is unset

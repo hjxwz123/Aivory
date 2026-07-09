@@ -29,4 +29,8 @@ var (
 	// the client force-logs-out on that one.
 	errWorkspaceDisabled = errors.New("workspace_disabled")
 	errWorkspaceLimit    = errors.New("workspace_limit_reached")
+
+	// RAG embedding model lock. Once set, changing the global embedding model
+	// would strand existing Qdrant collections/chunks under the old model.
+	errEmbeddingModelLocked = errors.New("embedding_model_locked")
 )

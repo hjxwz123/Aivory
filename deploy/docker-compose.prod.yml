@@ -18,10 +18,10 @@
 # when present, falls back to build otherwise — so the same file serves both
 # flows without duplicating the topology.
 #
-# The API auto-detects its backends from the URLs below: postgres:// →
-# Postgres, REDIS_URL set → Redis, QDRANT_URL set → Qdrant. Unset any of them
-# and that subsystem falls back (SQLite / in-memory / brute-force vectors) —
-# which is how local dev runs with nothing installed.
+# The production stack wires all backends by default: postgres:// → Postgres,
+# REDIS_URL → Redis, QDRANT_URL → Qdrant. Qdrant is part of the default Docker
+# deployment; only unset QDRANT_URL for local/dev or an explicit full-context
+# RAG fallback deployment.
 
 name: aurelia
 
@@ -171,11 +171,13 @@ services:
       # --- Backends (auto-detected by URL scheme) ---
       DATABASE_URL: "postgres://${POSTGRES_USER:-aurelia}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-aurelia}?sslmode=disable"
       REDIS_URL: "redis://:${REDIS_PASSWORD}@redis:6379/0"
-      QDRANT_URL: "http://qdrant:6333"
+      QDRANT_URL: "${QDRANT_URL:-http://qdrant:6333}"
       # Must match qdrant's QDRANT__SERVICE__API_KEY above (same default).
       QDRANT_API_KEY: ${QDRANT_API_KEY:-aurelia-internal-qdrant}
       # --- Auth / app ---
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      BACKUP_DIR: ${BACKUP_DIR:-/app/data/backups}
+      MAX_BACKUP_BYTES: ${MAX_BACKUP_BYTES:-21474836480}
       # No CORS config needed: the SPA is served same-origin by this process, so
       # any domain works. (ALLOWED_ORIGINS only matters if you split the frontend
       # onto a DIFFERENT origin than the API — not this single-container setup.)
@@ -218,4 +220,3 @@ volumes:
 networks:
   internal:
     driver: bridge
-

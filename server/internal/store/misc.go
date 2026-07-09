@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -53,14 +55,11 @@ func ListFilesByConversation(ctx context.Context, db *sql.DB, convID, userID str
 	return out, rows.Err()
 }
 
-// DetachFileFromConversation clears a file's conversation link (ownership
-// checked) so it is no longer staged into the sandbox or counted among the
-// conversation's referenced files (§ conversation files drawer). The file row
-// itself survives, so any historical message that uploaded it can still be
-// downloaded.
-func DetachFileFromConversation(ctx context.Context, db *sql.DB, fileID, convID, userID string) error {
+// DeleteConversationFile removes a file row from a conversation (ownership
+// checked). The caller is responsible for cleaning storage after the DB commit.
+func DeleteConversationFile(ctx context.Context, db *sql.DB, fileID, convID, userID string) error {
 	res, err := db.ExecContext(ctx,
-		`UPDATE files SET conversation_id=NULL WHERE id=? AND conversation_id=? AND user_id=?`,
+		`DELETE FROM files WHERE id=? AND conversation_id=? AND user_id=?`,
 		fileID, convID, userID)
 	if err != nil {
 		return err
@@ -69,6 +68,184 @@ func DetachFileFromConversation(ctx context.Context, db *sql.DB, fileID, convID,
 		return ErrNotFound
 	}
 	return nil
+}
+
+// DeleteConversationFileAndDocuments atomically removes the file row and every
+// document row backed by the same stored object. This keeps the DB side
+// all-or-nothing; vector/storage cleanup happens after commit in the API layer.
+func DeleteConversationFileAndDocuments(ctx context.Context, db *sql.DB, fileID, convID, userID string, docIDs []string) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck
+	res, err := tx.ExecContext(ctx,
+		`DELETE FROM files WHERE id=? AND conversation_id=? AND user_id=?`,
+		fileID, convID, userID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	docIDs = cleanIDs(docIDs)
+	if len(docIDs) > 0 {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM documents WHERE id IN (`+idPlaceholders(len(docIDs))+`)`, anySlice(docIDs)...); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// DocumentsByStoragePath returns every document row that points at path. A file
+// upload can create several document views over the same bytes (conversation RAG
+// plus auto-added project KB), so file deletion must clean all of them together
+// before the physical object is removed.
+func DocumentsByStoragePath(ctx context.Context, db *sql.DB, path string) ([]Document, error) {
+	rows, err := db.QueryContext(ctx,
+		`SELECT id, COALESCE(kb_id,''), COALESCE(conversation_id,''), filename, mime_type, size_bytes, status, error, chunk_count, storage_path, created_at
+		 FROM documents WHERE storage_path=?`, path)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Document{}
+	for rows.Next() {
+		var d Document
+		if err := rows.Scan(&d.ID, &d.KBID, &d.ConversationID, &d.Filename, &d.MimeType, &d.SizeBytes, &d.Status, &d.Error, &d.ChunkCount, &d.StoragePath, &d.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// StoragePathsForConversations returns every persisted object path referenced by
+// conversations before they are deleted: uploaded files, RAG source documents,
+// and generated artifacts. The returned paths are de-duplicated.
+func StoragePathsForConversations(ctx context.Context, db *sql.DB, convIDs []string) ([]string, error) {
+	return storagePathsForConversationIDs(ctx, db, convIDs)
+}
+
+// StoragePathReferenced reports whether any live DB row still references path.
+// Physical deletion uses this after row deletion so a shared path is not removed
+// while another file/document/artifact still needs it.
+func StoragePathReferenced(ctx context.Context, db *sql.DB, path string) (bool, error) {
+	if strings.TrimSpace(path) == "" {
+		return false, nil
+	}
+	var n int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM files WHERE storage_path=?`, path).Scan(&n); err != nil {
+		return false, err
+	}
+	if n > 0 {
+		return true, nil
+	}
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM documents WHERE storage_path=?`, path).Scan(&n); err != nil {
+		return false, err
+	}
+	if n > 0 {
+		return true, nil
+	}
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM artifacts WHERE storage_path=?`, path).Scan(&n); err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
+func storagePathsForConversationIDs(ctx context.Context, db *sql.DB, convIDs []string) ([]string, error) {
+	ids := cleanIDs(convIDs)
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	ph := idPlaceholders(len(ids))
+	out := map[string]struct{}{}
+	collect := func(q string, args ...any) error {
+		rows, err := db.QueryContext(ctx, q, args...)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var p string
+			if err := rows.Scan(&p); err != nil {
+				return err
+			}
+			if strings.TrimSpace(p) != "" {
+				out[p] = struct{}{}
+			}
+		}
+		return rows.Err()
+	}
+	args := anySlice(ids)
+	if err := collect(`SELECT storage_path FROM files WHERE conversation_id IN (`+ph+`) AND storage_path<>''`, args...); err != nil {
+		return nil, err
+	}
+	if err := collect(`SELECT storage_path FROM documents WHERE conversation_id IN (`+ph+`) AND storage_path<>''`, args...); err != nil {
+		return nil, err
+	}
+	if err := collect(`SELECT a.storage_path FROM artifacts a JOIN messages m ON m.id=a.message_id WHERE m.conversation_id IN (`+ph+`) AND a.storage_path<>''`, args...); err != nil {
+		return nil, err
+	}
+	return keys(out), nil
+}
+
+func idPlaceholders(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	return strings.TrimRight(strings.Repeat("?,", n), ",")
+}
+
+func anySlice(ids []string) []any {
+	out := make([]any, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, id)
+	}
+	return out
+}
+
+func cleanIDs(ids []string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
+}
+
+func keys(m map[string]struct{}) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}
+
+func removeLocalStoragePath(path string) error {
+	if !looksLocalStoragePath(path) {
+		return nil
+	}
+	return os.Remove(path)
+}
+
+func looksLocalStoragePath(p string) bool {
+	p = strings.TrimSpace(p)
+	if p == "" || strings.Contains(p, "://") {
+		return false
+	}
+	if strings.HasPrefix(p, "s3:") || strings.HasPrefix(p, "oss:") || strings.HasPrefix(p, "aliyun_oss:") || strings.HasPrefix(p, "storage:") {
+		return false
+	}
+	return filepath.IsAbs(p) || strings.HasPrefix(p, ".") || strings.Contains(p, string(filepath.Separator))
 }
 
 // GetFile returns one row with ownership check.

@@ -452,20 +452,25 @@ func updateConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 func deleteConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
 	id := pathParam(r, "id")
+	ids, _ := store.ConversationTreeIDs(r.Context(), d.DB, id)
+	storagePaths, _ := store.StoragePathsForConversations(r.Context(), d.DB, ids)
 	children, err := store.DeleteConversation(r.Context(), d.DB, id, u.ID)
 	if err != nil {
 		writeError(w, 404, errNotFound)
 		return
 	}
-	// Conversation uploads cascade-delete (documents.conversation_id ON DELETE
-	// CASCADE); drop their vectors too — for the conversation and every inline
-	// sub-conversation that was removed with it.
-	for _, cid := range append([]string{id}, children...) {
-		msgcache.Bump(d.Cache, cid)
-		if err := d.RAG.OnConversationDeleted(r.Context(), cid); err != nil {
-			d.Logger.Printf("rag: drop vectors for conversation %s: %v", cid, err)
-		}
+	if len(ids) == 0 {
+		ids = append([]string{id}, children...)
 	}
+	// Conversation uploads cascade-delete (documents.conversation_id ON DELETE
+	// CASCADE); files are physically deleted by DeleteConversation. Drop vectors
+	// and storage objects for the conversation and every inline sub-conversation
+	// that was removed with it.
+	for _, cid := range ids {
+		msgcache.Bump(d.Cache, cid)
+		cleanupRAGConversation(r.Context(), d, cid, "delete conversation "+id)
+	}
+	cleanupStoragePaths(r.Context(), d, storagePaths, "delete conversation "+id)
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
@@ -822,11 +827,10 @@ func listConversationFilesHandler(d Deps, w http.ResponseWriter, r *http.Request
 	writeJSON(w, 200, out)
 }
 
-// deleteConversationFileHandler removes a file from the conversation's referenced
-// set (§ conversation files). It detaches the file (so the sandbox no longer
-// stages it) and deletes the conversation-scoped RAG document(s) of the same
-// name (chunks + vectors), so future turns no longer reference it. The file row
-// survives so a historical message that uploaded it can still be downloaded.
+// deleteConversationFileHandler permanently removes a file from the
+// conversation's referenced set (§ conversation files), its file row, every RAG
+// document backed by the same stored bytes, the corresponding Qdrant vectors,
+// and finally the physical storage object when no DB row still references it.
 func deleteConversationFileHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
 	convID := pathParam(r, "id")
@@ -840,25 +844,25 @@ func deleteConversationFileHandler(d Deps, w http.ResponseWriter, r *http.Reques
 		writeError(w, 404, errNotFound)
 		return
 	}
-	if err := store.DetachFileFromConversation(r.Context(), d.DB, fileID, convID, u.ID); err != nil {
+	storagePaths := []string{f.StoragePath}
+	docs, err := store.DocumentsByStoragePath(r.Context(), d.DB, f.StoragePath)
+	if err != nil {
 		writeError(w, 500, err)
 		return
 	}
-	// Drop the conversation-scoped RAG document(s) of the same name so retrieval
-	// stops referencing this file. Best-effort: a vector/chunk hiccup must not
-	// fail the detach the user already performed.
-	if docs, derr := store.ListDocuments(r.Context(), d.DB, "conversation", convID); derr == nil {
-		for _, doc := range docs {
-			if doc.Filename != f.Filename {
-				continue
-			}
-			if d.RAG != nil {
-				_ = d.RAG.OnDocumentDeleted(r.Context(), doc.ID)
-			}
-			_ = store.DeleteChunksByDocument(r.Context(), d.DB, doc.ID)
-			_ = store.DeleteDocument(r.Context(), d.DB, doc.ID)
-		}
+	docIDs := make([]string, 0, len(docs))
+	for _, doc := range docs {
+		docIDs = append(docIDs, doc.ID)
+		storagePaths = append(storagePaths, doc.StoragePath)
 	}
+	if err := store.DeleteConversationFileAndDocuments(r.Context(), d.DB, fileID, convID, u.ID, docIDs); err != nil {
+		writeError(w, 500, err)
+		return
+	}
+	for _, docID := range docIDs {
+		cleanupRAGDocument(r.Context(), d, docID, "delete conversation file "+fileID)
+	}
+	cleanupStoragePaths(r.Context(), d, storagePaths, "delete conversation file "+fileID)
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 

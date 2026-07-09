@@ -64,7 +64,7 @@ func ListWorkspaceKBs(ctx context.Context, db *sql.DB, workspaceID string) ([]Kn
 
 // OwnedKBIDs filters ids down to the ones the user may retrieve from (§C1 — the
 // retrieval scope must never include another user's KB). workspaceID steers the
-// scope (§workspaces): '' admits only the user's PERSONAL KBs; set, it admits
+// scope (§workspaces): ” admits only the user's PERSONAL KBs; set, it admits
 // only THAT workspace's shared KBs — personal KBs are unusable inside a
 // workspace and vice versa. On a DB error it fails closed (returns none).
 func OwnedKBIDs(ctx context.Context, db *sql.DB, userID, workspaceID string, ids []string) []string {
@@ -166,7 +166,7 @@ func CreateKB(ctx context.Context, db *sql.DB, kb KnowledgeBase) (*KnowledgeBase
 // SetKBEmbeddingDim corrects the stored vector width for a KB. Called during
 // ingest when the embedding model's actual output dimension differs from what
 // was configured, so retrieval resolves the same (real) dim and hits the right
-// Qdrant collection instead of falling back to brute-force forever.
+// Qdrant collection.
 func SetKBEmbeddingDim(ctx context.Context, db *sql.DB, kbID string, dim int) error {
 	_, err := db.ExecContext(ctx, `UPDATE knowledge_bases SET embedding_dim=? WHERE id=?`, dim, kbID)
 	return err
@@ -201,9 +201,18 @@ func DeleteKB(ctx context.Context, db *sql.DB, id, userID string) error {
 		return ErrNotFound
 	}
 	// The KB row (and, via cascade, its documents + chunks) is gone — now remove
-	// the document files from disk. Best-effort: a missing file is harmless.
+	// local document files only when no remaining DB row still references the same
+	// storage path. S3/OSS cleanup is orchestrated by the API layer.
 	for _, p := range diskPaths {
-		if rmErr := os.Remove(p); rmErr != nil && !os.IsNotExist(rmErr) {
+		ref, rerr := StoragePathReferenced(context.Background(), db, p)
+		if rerr != nil {
+			log.Printf("delete kb %s: check storage refs for %q: %v", id, p, rerr)
+			continue
+		}
+		if ref {
+			continue
+		}
+		if rmErr := removeLocalStoragePath(p); rmErr != nil && !os.IsNotExist(rmErr) {
 			log.Printf("delete kb %s: remove file %q: %v", id, p, rmErr)
 		}
 	}
@@ -416,11 +425,11 @@ func PromoteDocumentToKB(ctx context.Context, db *sql.DB, docID, kbID string) er
 }
 
 // CreateChunk inserts a single text chunk (back-compat convenience wrapper).
-func CreateChunk(ctx context.Context, db *sql.DB, docID, kbID, convID string, seq int, content string, embedding []byte, embeddingModel string) error {
+func CreateChunk(ctx context.Context, db *sql.DB, docID, kbID, convID string, seq int, content string, embeddingModel string) error {
 	_, err := CreateChunkFull(ctx, db, ChunkInsert{
 		DocumentID: docID, KBID: kbID, ConversationID: convID,
 		Seq: seq, ChunkType: "text", Content: content,
-		Embedding: embedding, EmbeddingModel: embeddingModel,
+		EmbeddingModel: embeddingModel,
 	})
 	return err
 }
@@ -440,7 +449,6 @@ type ChunkInsert struct {
 	ChunkType      string // text | parent | table | image_caption
 	Content        string
 	ImageRef       string
-	Embedding      []byte
 	EmbeddingModel string
 }
 
@@ -476,8 +484,8 @@ func CreateChunkFull(ctx context.Context, db *sql.DB, c ChunkInsert) (string, er
 		c.ChunkType = "text"
 	}
 	_, err := db.ExecContext(ctx,
-		`INSERT INTO chunks(id, document_id, kb_id, conversation_id, seq, parent_id, chunk_type, content, image_ref, meta, embedding, embedding_model) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', ?, ?)`,
-		id, c.DocumentID, kb, conv, c.Seq, parent, c.ChunkType, c.Content, imgRef, c.Embedding, c.EmbeddingModel)
+		`INSERT INTO chunks(id, document_id, kb_id, conversation_id, seq, parent_id, chunk_type, content, image_ref, meta, embedding_model) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', ?)`,
+		id, c.DocumentID, kb, conv, c.Seq, parent, c.ChunkType, c.Content, imgRef, c.EmbeddingModel)
 	return id, err
 }
 
@@ -500,7 +508,7 @@ func CreateChunksBatch(ctx context.Context, db *sql.DB, chunks []ChunkInsert) er
 	}
 	defer func() { _ = tx.Rollback() }()
 	stmt, err := tx.PrepareContext(ctx,
-		`INSERT INTO chunks(id, document_id, kb_id, conversation_id, seq, parent_id, chunk_type, content, image_ref, meta, embedding, embedding_model) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', ?, ?)`)
+		`INSERT INTO chunks(id, document_id, kb_id, conversation_id, seq, parent_id, chunk_type, content, image_ref, meta, embedding_model) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', ?)`)
 	if err != nil {
 		return err
 	}
@@ -527,7 +535,7 @@ func CreateChunksBatch(ctx context.Context, db *sql.DB, chunks []ChunkInsert) er
 		if ct == "" {
 			ct = "text"
 		}
-		if _, err := stmt.ExecContext(ctx, id, c.DocumentID, kb, conv, c.Seq, parent, ct, sanitizeChunkText(c.Content), imgRef, c.Embedding, c.EmbeddingModel); err != nil {
+		if _, err := stmt.ExecContext(ctx, id, c.DocumentID, kb, conv, c.Seq, parent, ct, sanitizeChunkText(c.Content), imgRef, c.EmbeddingModel); err != nil {
 			return err
 		}
 	}
@@ -554,9 +562,60 @@ type Chunk struct {
 	Content        string
 	ImageRef       string
 	Meta           json.RawMessage
-	Embedding      []byte
 	EmbeddingModel string
 	Filename       string // joined from documents
+}
+
+// EmbeddedChunk is the admin-maintenance view of a child chunk that should have
+// a vector point in Qdrant. KB chunks carry the KB's locked embedding_dim; plain
+// conversation chunks leave it 0 and the RAG service resolves it from the model.
+type EmbeddedChunk struct {
+	ID             string
+	DocumentID     string
+	KBID           string
+	ConversationID string
+	Seq            int
+	ParentID       string
+	ChunkType      string
+	Content        string
+	EmbeddingModel string
+	Filename       string
+	EmbeddingDim   int
+}
+
+func ListEmbeddedChildChunks(ctx context.Context, db *sql.DB) ([]EmbeddedChunk, error) {
+	rows, err := db.QueryContext(ctx, `
+SELECT
+  c.id,
+  c.document_id,
+  COALESCE(c.kb_id,''),
+  COALESCE(c.conversation_id,''),
+  c.seq,
+  COALESCE(c.parent_id,''),
+  c.chunk_type,
+  c.content,
+  c.embedding_model,
+  d.filename,
+  COALESCE(k.embedding_dim,0)
+FROM chunks c
+JOIN documents d ON d.id = c.document_id
+LEFT JOIN knowledge_bases k ON k.id = c.kb_id
+WHERE c.chunk_type <> 'parent'
+  AND COALESCE(c.embedding_model,'') <> ''
+ORDER BY c.embedding_model, COALESCE(k.embedding_dim,0), c.document_id, c.seq`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []EmbeddedChunk{}
+	for rows.Next() {
+		var ch EmbeddedChunk
+		if err := rows.Scan(&ch.ID, &ch.DocumentID, &ch.KBID, &ch.ConversationID, &ch.Seq, &ch.ParentID, &ch.ChunkType, &ch.Content, &ch.EmbeddingModel, &ch.Filename, &ch.EmbeddingDim); err != nil {
+			return nil, err
+		}
+		out = append(out, ch)
+	}
+	return out, rows.Err()
 }
 
 // ListChunksInScope returns chunks whose kb_id ∈ kbIDs OR conversation_id =
@@ -567,7 +626,7 @@ func ListChunksInScope(ctx context.Context, db *sql.DB, kbIDs []string, convID s
 	// other), so the legs are disjoint (no duplicates) and each can use its own
 	// index (idx_chunks_kb / idx_chunks_conv) — an `OR` across the two columns
 	// would force a full scan.
-	const cols = `c.id, c.document_id, COALESCE(c.kb_id,''), COALESCE(c.conversation_id,''), c.seq, COALESCE(c.parent_id,''), c.chunk_type, c.content, COALESCE(c.image_ref,''), c.meta, c.embedding, c.embedding_model, d.filename`
+	const cols = `c.id, c.document_id, COALESCE(c.kb_id,''), COALESCE(c.conversation_id,''), c.seq, COALESCE(c.parent_id,''), c.chunk_type, c.content, COALESCE(c.image_ref,''), c.meta, c.embedding_model, d.filename`
 	const from = ` FROM chunks c JOIN documents d ON d.id = c.document_id WHERE `
 	legs := []string{}
 	args := []any{}
@@ -601,7 +660,7 @@ func ListChunksInScope(ctx context.Context, db *sql.DB, kbIDs []string, convID s
 	for rows.Next() {
 		var ch Chunk
 		var meta string
-		if err := rows.Scan(&ch.ID, &ch.DocumentID, &ch.KBID, &ch.ConversationID, &ch.Seq, &ch.ParentID, &ch.ChunkType, &ch.Content, &ch.ImageRef, &meta, &ch.Embedding, &ch.EmbeddingModel, &ch.Filename); err != nil {
+		if err := rows.Scan(&ch.ID, &ch.DocumentID, &ch.KBID, &ch.ConversationID, &ch.Seq, &ch.ParentID, &ch.ChunkType, &ch.Content, &ch.ImageRef, &meta, &ch.EmbeddingModel, &ch.Filename); err != nil {
 			return nil, err
 		}
 		ch.Meta = json.RawMessage(meta)

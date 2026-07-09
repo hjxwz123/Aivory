@@ -10,6 +10,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"sort"
 	"strings"
 )
 
@@ -144,17 +145,25 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest,
 		text, reasoning, calls, finish, u, err := readOpenAIChatStream(resp.Body, onEvent)
 		resp.Body.Close()
 		if err != nil {
+			partialBlocks := append([]UnifiedBlock{}, allBlocks...)
+			if reasoning != "" {
+				partialBlocks = append(partialBlocks, UnifiedBlock{Kind: "thinking", Text: reasoning})
+			}
+			if text != "" {
+				partialBlocks = append(partialBlocks, UnifiedBlock{Kind: "text", Text: text})
+			}
+			partialUsage := usage
+			partialUsage.InputTokens += u.InputTokens
+			partialUsage.OutputTokens += u.OutputTokens
 			// Stop button / kill: preserve what streamed so far (§6.2) instead of
 			// blanking the message.
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				if reasoning != "" {
-					allBlocks = append(allBlocks, UnifiedBlock{Kind: "thinking", Text: reasoning})
-				}
-				if text != "" {
-					allBlocks = append(allBlocks, UnifiedBlock{Kind: "text", Text: text})
-				}
 				raw, _ := json.Marshal(messages[historyLen:])
-				return &UnifiedResult{Blocks: allBlocks, Raw: raw, StopReason: "stopped", Usage: usage, Citations: allCitations}, err
+				return &UnifiedResult{Blocks: partialBlocks, Raw: raw, StopReason: "stopped", Usage: partialUsage, Citations: allCitations}, err
+			}
+			if len(partialBlocks) > 0 || partialUsage.InputTokens > 0 || partialUsage.OutputTokens > 0 {
+				raw, _ := json.Marshal(messages[historyLen:])
+				return &UnifiedResult{Blocks: partialBlocks, Raw: raw, StopReason: "error", Usage: partialUsage, Citations: allCitations}, err
 			}
 			return nil, err
 		}
@@ -338,6 +347,54 @@ func hostedToolName(itemType string) string {
 	return strings.TrimSuffix(itemType, "_call")
 }
 
+func appendResponsesInclude(body map[string]any, values ...string) {
+	if body == nil {
+		return
+	}
+	seen := map[string]bool{}
+	include := []string{}
+	switch cur := body["include"].(type) {
+	case []string:
+		for _, s := range cur {
+			if s != "" && !seen[s] {
+				seen[s] = true
+				include = append(include, s)
+			}
+		}
+	case []any:
+		for _, v := range cur {
+			if s, _ := v.(string); s != "" && !seen[s] {
+				seen[s] = true
+				include = append(include, s)
+			}
+		}
+	}
+	for _, s := range values {
+		if s != "" && !seen[s] {
+			seen[s] = true
+			include = append(include, s)
+		}
+	}
+	if len(include) > 0 {
+		body["include"] = include
+	}
+}
+
+func responseOutputHasFunctionCalls(items []map[string]any) bool {
+	for _, item := range items {
+		if t, _ := item["type"].(string); t == "function_call" {
+			return true
+		}
+	}
+	return false
+}
+
+type openAIResponseCallBuf struct {
+	ID, Name string
+	Args     strings.Builder
+	Started  bool
+}
+
 func readOpenAIChatStream(body io.Reader, onEvent func(SseEvent)) (string, string, []openAIToolCall, string, Usage, error) {
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
@@ -347,6 +404,7 @@ func readOpenAIChatStream(body io.Reader, onEvent func(SseEvent)) (string, strin
 	finish := "end_turn"
 	// Tool calls are accumulated by index — OpenAI streams partial args.
 	toolByIdx := map[int]*openAIToolCall{}
+	toolStarted := map[int]bool{}
 	for scanner.Scan() {
 		line := scanner.Text()
 		if !strings.HasPrefix(line, "data:") {
@@ -393,9 +451,10 @@ func readOpenAIChatStream(body io.Reader, onEvent func(SseEvent)) (string, strin
 					}
 					if fn, _ := tc["function"].(map[string]any); fn != nil {
 						if n, _ := fn["name"].(string); n != "" {
-							if !isExisting {
+							if !toolStarted[idx] {
 								// First slice that names the tool — emit tool_start.
 								onEvent(SseEvent{Type: "tool_start", Name: n, ID: cur.ID})
+								toolStarted[idx] = true
 							}
 							cur.Name = n
 						}
@@ -417,15 +476,21 @@ func readOpenAIChatStream(body io.Reader, onEvent func(SseEvent)) (string, strin
 			usage.OutputTokens = intOf(u["completion_tokens"])
 		}
 	}
-	if err := scanner.Err(); err != nil {
-		return text.String(), reasoning.String(), nil, finish, usage, err
-	}
 	calls := []openAIToolCall{}
-	for _, c := range toolByIdx {
+	indexes := make([]int, 0, len(toolByIdx))
+	for idx := range toolByIdx {
+		indexes = append(indexes, idx)
+	}
+	sort.Ints(indexes)
+	for _, idx := range indexes {
+		c := toolByIdx[idx]
 		if len(c.Input) == 0 {
 			c.Input = []byte("{}")
 		}
 		calls = append(calls, *c)
+	}
+	if err := scanner.Err(); err != nil {
+		return text.String(), reasoning.String(), calls, finish, usage, err
 	}
 	return text.String(), reasoning.String(), calls, finish, usage, nil
 }
@@ -457,6 +522,18 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 	for _, m := range req.History {
 		if m.Role != "user" && m.Role != "assistant" {
 			continue
+		}
+		// Same-vendor raw replay (§2.3-C) for Responses-format tool turns. Raw
+		// from Chat Completions has role/tool_calls; Responses raw has typed
+		// output/input items (`message`, `reasoning`, `function_call`,
+		// `function_call_output`). Accept only the latter so switching an OpenAI
+		// model between chat/responses formats cannot poison the request body.
+		if m.Role == "assistant" && len(m.Raw) > 2 {
+			var items []map[string]any
+			if err := json.Unmarshal(m.Raw, &items); err == nil && len(items) > 0 && items[0]["type"] != nil {
+				input = append(input, items...)
+				continue
+			}
 		}
 		text := strings.Builder{}
 		for _, b := range m.Blocks {
@@ -536,12 +613,20 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 		if len(respTools) > 0 {
 			body["tools"] = respTools
 		}
-		// Ask the API to return the sources the hosted web_search consulted, so
-		// we can surface them as citations (only valid when web_search is on).
-		if wantWebSearch {
-			body["include"] = []string{"web_search_call.action.sources"}
-		}
 		body = MergeParamControls(body, req.ParamControls, req.ParamOverrides)
+		// Ask the API to return the sources the hosted web_search consulted, so
+		// we can surface them as citations. For stateless Responses tool loops
+		// (`store:false`), also carry encrypted reasoning items forward; otherwise
+		// reasoning models can lose their hidden chain between a function_call and
+		// the matching function_call_output.
+		includes := []string{}
+		if wantWebSearch {
+			includes = append(includes, "web_search_call.action.sources")
+		}
+		if len(respTools) > 0 {
+			includes = append(includes, "reasoning.encrypted_content")
+		}
+		appendResponsesInclude(body, includes...)
 		raw, _ := json.Marshal(body)
 		resp, err := doProviderRequest(ctx, req.Model, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
 			hr, e := http.NewRequestWithContext(ctx, "POST", providerBaseURL(baseURL, "https://api.openai.com")+"/v1/responses", bytes.NewReader(raw))
@@ -562,22 +647,34 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 			return nil, fmt.Errorf("openai responses %d: %s", resp.StatusCode, string(b))
 		}
 
-		text, reasoning, calls, hosted, citations, u, err := readOpenAIResponsesStream(resp.Body, onEvent)
+		text, reasoning, calls, hosted, citations, u, outputItems, err := readOpenAIResponsesStream(resp.Body, onEvent)
 		resp.Body.Close()
 		if err != nil {
+			partialBlocks := append([]UnifiedBlock{}, allBlocks...)
+			if reasoning != "" {
+				partialBlocks = append(partialBlocks, UnifiedBlock{Kind: "thinking", Text: reasoning})
+			}
+			for _, h := range hosted {
+				partialBlocks = append(partialBlocks, UnifiedBlock{Kind: "tool_call", ToolName: h.Name, ToolID: h.ID, Summary: h.Summary})
+			}
+			if text != "" {
+				partialBlocks = append(partialBlocks, UnifiedBlock{Kind: "text", Text: text})
+			}
+			partialCitations := append(append([]Citation{}, allCitations...), citations...)
+			partialUsage := usage
+			partialUsage.InputTokens += u.InputTokens
+			partialUsage.OutputTokens += u.OutputTokens
+			if len(outputItems) > 0 {
+				input = append(input, outputItems...)
+			}
 			// Stop button / kill: preserve the partial (§6.2).
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				allCitations = append(allCitations, citations...)
-				if reasoning != "" {
-					allBlocks = append(allBlocks, UnifiedBlock{Kind: "thinking", Text: reasoning})
-				}
-				for _, h := range hosted {
-					allBlocks = append(allBlocks, UnifiedBlock{Kind: "tool_call", ToolName: h.Name, ToolID: h.ID, Summary: h.Summary})
-				}
-				if text != "" {
-					allBlocks = append(allBlocks, UnifiedBlock{Kind: "text", Text: text})
-				}
-				return &UnifiedResult{Blocks: allBlocks, StopReason: "stopped", Usage: usage, Citations: allCitations}, err
+				raw, _ := json.Marshal(input[historyLen:])
+				return &UnifiedResult{Blocks: partialBlocks, Raw: raw, StopReason: "stopped", Usage: partialUsage, Citations: partialCitations}, err
+			}
+			if len(partialBlocks) > 0 || len(partialCitations) > len(allCitations) || partialUsage.InputTokens > 0 || partialUsage.OutputTokens > 0 {
+				raw, _ := json.Marshal(input[historyLen:])
+				return &UnifiedResult{Blocks: partialBlocks, Raw: raw, StopReason: "error", Usage: partialUsage, Citations: partialCitations}, err
 			}
 			return nil, err
 		}
@@ -599,6 +696,12 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 		if text != "" {
 			allText.WriteString(text)
 			allBlocks = append(allBlocks, UnifiedBlock{Kind: "text", Text: text})
+		}
+		if len(outputItems) > 0 {
+			input = append(input, outputItems...)
+		} else if text != "" {
+			// Compatibility fallback for OpenAI-compatible gateways that stream
+			// deltas but omit response.completed.output.
 			input = append(input, map[string]any{
 				"role":    "assistant",
 				"content": []map[string]any{{"type": "output_text", "text": text}},
@@ -617,17 +720,21 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 		}
 
 		// Insert the function_call items the model emitted (echo them back
-		// alongside their outputs — required by the Responses protocol).
-		for _, c := range calls {
-			input = append(input, map[string]any{
-				"type":    "function_call",
-				"call_id": c.ID,
-				"name":    c.Name,
-				// Responses requires `arguments` to be a JSON STRING. Passing
-				// json.RawMessage serialises it as an OBJECT and the API rejects
-				// it with "expected a string, got an object" on input[N].arguments.
-				"arguments": string(c.Input),
-			})
+		// alongside their outputs — required by the Responses protocol). Official
+		// OpenAI responses include those items in response.output; keep this manual
+		// path only for compatible gateways that omit the completed output list.
+		if len(outputItems) == 0 || !responseOutputHasFunctionCalls(outputItems) {
+			for _, c := range calls {
+				input = append(input, map[string]any{
+					"type":    "function_call",
+					"call_id": c.ID,
+					"name":    c.Name,
+					// Responses requires `arguments` to be a JSON STRING. Passing
+					// json.RawMessage serialises it as an OBJECT and the API rejects
+					// it with "expected a string, got an object" on input[N].arguments.
+					"arguments": string(c.Input),
+				})
+			}
 		}
 
 		// Execute tools concurrently, then feed function_call_output items.
@@ -677,8 +784,9 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 //   - response.completed — final response with usage + finalized items
 //
 // The function returns the joined visible text, the parsed function-call list,
-// and the input/output token counts.
-func readOpenAIResponsesStream(body io.Reader, onEvent func(SseEvent)) (string, string, []openAIToolCall, []hostedToolCall, []Citation, Usage, error) {
+// usage, and the finalized response.output items needed to continue stateless
+// Responses tool loops.
+func readOpenAIResponsesStream(body io.Reader, onEvent func(SseEvent)) (string, string, []openAIToolCall, []hostedToolCall, []Citation, Usage, []map[string]any, error) {
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 	text := strings.Builder{}
@@ -706,15 +814,13 @@ func readOpenAIResponsesStream(body io.Reader, onEvent func(SseEvent)) (string, 
 		citations = append(citations, c)
 		onEvent(SseEvent{Type: "citation", Citation: &c})
 	}
-	type callBuf struct {
-		ID, Name string
-		Args     strings.Builder
-		Started  bool
-	}
-	callsByItem := map[string]*callBuf{} // item_id → buffer
+	callsByItem := map[string]*openAIResponseCallBuf{} // item_id → buffer
 	order := []string{}
 	hostedByItem := map[string]*hostedToolCall{} // item_id → hosted tool round
 	hostedOrder := []string{}
+	outputByItem := map[string]map[string]any{} // item_id → finalized output item
+	outputOrder := []string{}
+	completedOutput := []map[string]any{}
 	for scanner.Scan() {
 		line := scanner.Text()
 		if !strings.HasPrefix(line, "data:") {
@@ -759,9 +865,10 @@ func readOpenAIResponsesStream(body io.Reader, onEvent func(SseEvent)) (string, 
 				itemID, _ := it["id"].(string)
 				callID, _ := it["call_id"].(string)
 				name, _ := it["name"].(string)
-				cb := &callBuf{ID: callID, Name: name, Started: true}
+				cb := &openAIResponseCallBuf{ID: callID, Name: name, Started: true}
 				callsByItem[itemID] = cb
 				order = append(order, itemID)
+				outputOrder = append(outputOrder, itemID)
 				onEvent(SseEvent{Type: "tool_start", Name: name, ID: callID})
 			} else if strings.HasSuffix(t, "_call") {
 				// §2.3-B OpenAI-hosted tool round (web_search_call, …). OpenAI
@@ -770,7 +877,10 @@ func readOpenAIResponsesStream(body io.Reader, onEvent func(SseEvent)) (string, 
 				name := hostedToolName(t)
 				hostedByItem[itemID] = &hostedToolCall{ID: itemID, Name: name}
 				hostedOrder = append(hostedOrder, itemID)
+				outputOrder = append(outputOrder, itemID)
 				onEvent(SseEvent{Type: "tool_start", Name: name, ID: itemID})
+			} else if itemID, _ := it["id"].(string); itemID != "" {
+				outputOrder = append(outputOrder, itemID)
 			}
 		case "response.output_item.done":
 			it, _ := ev["item"].(map[string]any)
@@ -778,6 +888,27 @@ func readOpenAIResponsesStream(body io.Reader, onEvent func(SseEvent)) (string, 
 				continue
 			}
 			itemID, _ := it["id"].(string)
+			if itemID != "" {
+				outputByItem[itemID] = it
+				outputOrder = append(outputOrder, itemID)
+			}
+			if t, _ := it["type"].(string); t == "function_call" {
+				cb := callsByItem[itemID]
+				if cb == nil {
+					cb = &openAIResponseCallBuf{}
+					callsByItem[itemID] = cb
+					order = append(order, itemID)
+				}
+				if callID, _ := it["call_id"].(string); callID != "" {
+					cb.ID = callID
+				}
+				if name, _ := it["name"].(string); name != "" {
+					cb.Name = name
+				}
+				if args, _ := it["arguments"].(string); args != "" && cb.Args.Len() == 0 {
+					cb.Args.WriteString(args)
+				}
+			}
 			if h := hostedByItem[itemID]; h != nil {
 				status := "complete"
 				if s, _ := it["status"].(string); s != "" && s != "completed" {
@@ -826,21 +957,44 @@ func readOpenAIResponsesStream(body io.Reader, onEvent func(SseEvent)) (string, 
 					usage.InputTokens = intOf(u["input_tokens"])
 					usage.OutputTokens = intOf(u["output_tokens"])
 				}
+				if out, ok := r["output"].([]any); ok {
+					completedOutput = completedOutput[:0]
+					for _, raw := range out {
+						if item, _ := raw.(map[string]any); item != nil {
+							completedOutput = append(completedOutput, item)
+						}
+					}
+				}
 			}
 		case "response.failed":
 			r, _ := ev["response"].(map[string]any)
 			if r != nil {
 				if errObj, ok := r["error"].(map[string]any); ok {
 					msg, _ := errObj["message"].(string)
-					return text.String(), reasoning.String(), nil, nil, citations, usage, fmt.Errorf("openai responses error: %s", msg)
+					calls, hosted, outputItems := finalizeOpenAIResponsesStream(callsByItem, order, hostedByItem, hostedOrder, outputByItem, outputOrder, completedOutput)
+					return text.String(), reasoning.String(), calls, hosted, citations, usage, outputItems, fmt.Errorf("openai responses error: %s", msg)
 				}
 			}
-			return text.String(), reasoning.String(), nil, nil, citations, usage, fmt.Errorf("openai responses failed")
+			calls, hosted, outputItems := finalizeOpenAIResponsesStream(callsByItem, order, hostedByItem, hostedOrder, outputByItem, outputOrder, completedOutput)
+			return text.String(), reasoning.String(), calls, hosted, citations, usage, outputItems, fmt.Errorf("openai responses failed")
 		}
 	}
+	calls, hosted, outputItems := finalizeOpenAIResponsesStream(callsByItem, order, hostedByItem, hostedOrder, outputByItem, outputOrder, completedOutput)
 	if err := scanner.Err(); err != nil {
-		return text.String(), reasoning.String(), nil, nil, citations, usage, err
+		return text.String(), reasoning.String(), calls, hosted, citations, usage, outputItems, err
 	}
+	return text.String(), reasoning.String(), calls, hosted, citations, usage, outputItems, nil
+}
+
+func finalizeOpenAIResponsesStream(
+	callsByItem map[string]*openAIResponseCallBuf,
+	order []string,
+	hostedByItem map[string]*hostedToolCall,
+	hostedOrder []string,
+	outputByItem map[string]map[string]any,
+	outputOrder []string,
+	completedOutput []map[string]any,
+) ([]openAIToolCall, []hostedToolCall, []map[string]any) {
 	calls := []openAIToolCall{}
 	for _, itemID := range order {
 		cb := callsByItem[itemID]
@@ -859,7 +1013,20 @@ func readOpenAIResponsesStream(body io.Reader, onEvent func(SseEvent)) (string, 
 			hosted = append(hosted, *h)
 		}
 	}
-	return text.String(), reasoning.String(), calls, hosted, citations, usage, nil
+	outputItems := completedOutput
+	if len(outputItems) == 0 {
+		seen := map[string]bool{}
+		for _, itemID := range outputOrder {
+			if itemID == "" || seen[itemID] {
+				continue
+			}
+			seen[itemID] = true
+			if item := outputByItem[itemID]; item != nil {
+				outputItems = append(outputItems, item)
+			}
+		}
+	}
+	return calls, hosted, outputItems
 }
 
 // parseResponsesOutput is retained for callers that need a non-streaming JSON

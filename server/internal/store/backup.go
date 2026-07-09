@@ -32,12 +32,31 @@ const BackupVersion = 1
 // (messages.parent_id) is satisfied by exporting messages in creation order —
 // a reply is always created after the message it answers.
 var backupTableOrder = []string{
-	"settings", "users", "user_groups", "channels", "skills", "oauth_providers",
+	"settings", "users", "workspaces", "workspace_members", "user_groups", "channels", "skills", "oauth_providers",
 	"models", "model_group_quotas", "model_tags", "image_styles",
 	"redeem_codes", "redeem_redemptions",
 	"model_skills", "knowledge_bases", "projects", "conversations", "messages",
 	"conversation_shares", "files", "documents", "chunks", "memories",
 	"usage_logs", "artifacts", "refresh_tokens", "oauth_identities",
+}
+
+// configTableOrder is the non-user, non-conversation admin configuration slice.
+// Config imports UPSERT these tables instead of wiping the DB, so existing
+// users, conversations, KBs, files, sessions, usage logs, and workspaces remain
+// intact. The order still follows FK dependencies: groups/channels/skills before
+// models, models before model join tables, groups before redeem codes.
+var configTableOrder = []string{
+	"settings",
+	"user_groups",
+	"channels",
+	"skills",
+	"oauth_providers",
+	"model_tags",
+	"image_styles",
+	"models",
+	"model_group_quotas",
+	"model_skills",
+	"redeem_codes",
 }
 
 var backupTableSet = func() map[string]bool {
@@ -52,6 +71,14 @@ var backupTableSet = func() map[string]bool {
 func BackupTableOrder() []string {
 	out := make([]string, len(backupTableOrder))
 	copy(out, backupTableOrder)
+	return out
+}
+
+// ConfigTableOrder returns the admin-configuration tables exported by the
+// config archive. These are intentionally a subset of BackupTableOrder.
+func ConfigTableOrder() []string {
+	out := make([]string, len(configTableOrder))
+	copy(out, configTableOrder)
 	return out
 }
 
@@ -72,10 +99,10 @@ type RowExecer interface {
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 }
 
-// binCell is the JSON wrapper for a binary column value (e.g. chunks.embedding,
-// BLOB on SQLite / BYTEA on Postgres). Text columns are emitted as plain JSON
-// strings; only true binary is base64-wrapped, so the importer can tell them
-// apart from text that merely scanned as []byte.
+// binCell is the JSON wrapper for binary column values (BLOB on SQLite / BYTEA
+// on Postgres). Text columns are emitted as plain JSON strings; only true binary
+// is base64-wrapped, so the importer can tell them apart from text that merely
+// scanned as []byte.
 type binCell struct {
 	B64 string `json:"__b64__"`
 }
@@ -130,6 +157,9 @@ func ExportTable(ctx context.Context, q RowQuerier, table string, w io.Writer) (
 		}
 		obj := make(map[string]any, len(cols))
 		for i, c := range cols {
+			if skipLogicalBackupColumn(table, c) {
+				continue
+			}
 			switch v := vals[i].(type) {
 			case nil:
 				obj[c] = nil
@@ -206,6 +236,9 @@ func RestoreTable(ctx context.Context, ex RowExecer, table string, r io.Reader) 
 		cols := make([]string, 0, len(liveCols))
 		args := make([]any, 0, len(liveCols))
 		for _, c := range liveCols { // stable, schema-defined order
+			if skipLogicalBackupColumn(table, c) {
+				continue
+			}
 			rm, ok := raw[c]
 			if !ok {
 				continue
@@ -227,6 +260,122 @@ func RestoreTable(ctx context.Context, ex RowExecer, table string, r io.Reader) 
 		n++
 	}
 	return n, nil
+}
+
+var tablePrimaryKeys = map[string][]string{
+	"settings":            {"key"},
+	"users":               {"id"},
+	"workspaces":          {"id"},
+	"workspace_members":   {"workspace_id", "user_id"},
+	"user_groups":         {"id"},
+	"channels":            {"id"},
+	"skills":              {"id"},
+	"oauth_providers":     {"id"},
+	"models":              {"id"},
+	"model_group_quotas":  {"model_id", "group_id"},
+	"model_tags":          {"id"},
+	"image_styles":        {"id"},
+	"redeem_codes":        {"id"},
+	"redeem_redemptions":  {"id"},
+	"model_skills":        {"model_id", "skill_id"},
+	"knowledge_bases":     {"id"},
+	"projects":            {"id"},
+	"conversations":       {"id"},
+	"messages":            {"id"},
+	"conversation_shares": {"id"},
+	"files":               {"id"},
+	"documents":           {"id"},
+	"chunks":              {"id"},
+	"memories":            {"id"},
+	"usage_logs":          {"id"},
+	"artifacts":           {"id"},
+	"refresh_tokens":      {"jti"},
+	"oauth_identities":    {"provider_id", "subject"},
+}
+
+// UpsertTable merges rows from a JSONL table dump by primary key. Config import
+// uses this instead of RestoreTable so it can bring channels/models/settings
+// across without wiping existing users, conversations, sessions, files, or logs.
+func UpsertTable(ctx context.Context, ex RowExecer, table string, r io.Reader) (int64, error) {
+	if !backupTableSet[table] {
+		return 0, fmt.Errorf("backup: unknown table %q", table)
+	}
+	pk := tablePrimaryKeys[table]
+	if len(pk) == 0 {
+		return 0, fmt.Errorf("backup: primary key for table %q is unknown", table)
+	}
+	liveCols, isBin, err := tableColumns(ctx, ex, table)
+	if err != nil {
+		return 0, err
+	}
+	pkSet := make(map[string]bool, len(pk))
+	for _, c := range pk {
+		pkSet[c] = true
+	}
+
+	dec := json.NewDecoder(r)
+	dec.UseNumber()
+	var n int64
+	for {
+		var raw map[string]json.RawMessage
+		if err := dec.Decode(&raw); err == io.EOF {
+			break
+		} else if err != nil {
+			return n, fmt.Errorf("decode %s row: %w", table, err)
+		}
+		cols := make([]string, 0, len(liveCols))
+		args := make([]any, 0, len(liveCols))
+		colSet := make(map[string]bool, len(liveCols))
+		for _, c := range liveCols { // stable, schema-defined order
+			if skipLogicalBackupColumn(table, c) {
+				continue
+			}
+			rm, ok := raw[c]
+			if !ok {
+				continue
+			}
+			val, err := decodeBackupValue(rm, isBin[c])
+			if err != nil {
+				return n, fmt.Errorf("decode %s.%s: %w", table, c, err)
+			}
+			cols = append(cols, c)
+			args = append(args, val)
+			colSet[c] = true
+		}
+		if len(cols) == 0 {
+			continue
+		}
+		for _, c := range pk {
+			if !colSet[c] {
+				return n, fmt.Errorf("upsert %s: row missing primary key column %s", table, c)
+			}
+		}
+		q := "INSERT INTO " + table + " (" + strings.Join(cols, ", ") + ") VALUES (" + placeholders(len(cols)) + ") " + upsertClause(pk, cols, pkSet)
+		if _, err := ex.ExecContext(ctx, q, args...); err != nil { //nolint:gosec // table+cols are schema-derived
+			return n, fmt.Errorf("upsert into %s: %w", table, err)
+		}
+		n++
+	}
+	return n, nil
+}
+
+func upsertClause(pk, cols []string, pkSet map[string]bool) string {
+	updates := make([]string, 0, len(cols))
+	for _, c := range cols {
+		if pkSet[c] {
+			continue
+		}
+		updates = append(updates, c+"=excluded."+c)
+	}
+	target := strings.Join(pk, ", ")
+	if len(updates) == 0 {
+		return "ON CONFLICT (" + target + ") DO NOTHING"
+	}
+	return "ON CONFLICT (" + target + ") DO UPDATE SET " + strings.Join(updates, ", ")
+}
+
+func skipLogicalBackupColumn(table, column string) bool {
+	return table == "chunks" && column == "embedding"
 }
 
 // decodeBackupValue turns one JSON cell back into a driver-ready Go value.

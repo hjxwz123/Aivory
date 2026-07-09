@@ -1,8 +1,7 @@
 -- Aurelia schema. SQLite-compatible; ports cleanly to Postgres (replace
 -- AUTOINCREMENT with BIGSERIAL, JSON with JSONB, and add tsvector for
--- chunks). Mirrors design.md §5 — same table names and semantics, with
--- vectors and full-text dropped into the same row instead of split across
--- Qdrant + PG because we run on a single SQLite file in this build.
+-- chunks). Mirrors design.md §5 — same table names and semantics. RAG vectors
+-- live only in Qdrant; chunks stores text and retrieval metadata, not embeddings.
 
 PRAGMA foreign_keys = ON;
 
@@ -335,7 +334,6 @@ CREATE TABLE IF NOT EXISTS chunks (
   content         TEXT NOT NULL,
   image_ref       TEXT,                                -- original image ref for image_caption chunks
   meta            TEXT NOT NULL DEFAULT '{}',
-  embedding       BLOB,                                -- float32 packed; nullable (parents aren't embedded)
   embedding_model TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_chunks_doc ON chunks(document_id);

@@ -23,8 +23,11 @@ func providerBaseURL(baseURL, vendorDefault string) string {
 // providerHTTPClient is the shared client for all upstream model-provider calls
 // (§B2). It deliberately has NO overall Timeout — generation responses stream
 // for a long time and the request *context* bounds the total. Instead it bounds
-// the parts that would otherwise hang forever on a dead upstream: TCP dial, TLS
-// handshake, and time-to-first-response-header.
+// the parts that would otherwise hang forever before the request reaches the
+// provider: TCP dial and TLS handshake. Do NOT set ResponseHeaderTimeout here:
+// reasoning/tool-heavy streaming calls can legitimately take more than two
+// minutes before the first SSE frame. The request context plus the provider
+// TTFT watchdog/admin generation cap are the right owners of that decision.
 //
 // Retries are intentionally NOT applied to streaming generation: replaying after
 // partial output (already-streamed tokens / tool calls) is unsafe. A transient
@@ -35,7 +38,6 @@ var providerHTTPClient = &http.Client{
 		Proxy:                 http.ProxyFromEnvironment,
 		DialContext:           (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
 		TLSHandshakeTimeout:   10 * time.Second,
-		ResponseHeaderTimeout: 120 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
 		IdleConnTimeout:       90 * time.Second,
 		MaxIdleConns:          50,

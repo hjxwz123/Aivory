@@ -18,8 +18,10 @@ import (
 // maxGenDuration caps a detached generation. Generation is deliberately NOT
 // tied to the HTTP request anymore (so closing the page doesn't lose the reply),
 // so this is the backstop that prevents a stuck turn from running forever and
-// holding a concurrency slot.
-const maxGenDuration = 10 * time.Minute
+// holding a concurrency slot. Reasoning/tool-heavy turns can run well past ten
+// minutes, so keep this wide and let per-tool/admin TTFT limits handle the
+// narrower failure modes.
+const maxGenDuration = 90 * time.Minute
 
 type postMessageReq struct {
 	Text     string `json:"text"`
