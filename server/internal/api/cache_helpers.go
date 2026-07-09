@@ -26,10 +26,29 @@ func cachedAuthUser(ctx context.Context, d Deps, userID string) (*store.User, er
 	if err != nil {
 		return nil, err
 	}
-	if b, err := json.Marshal(u); err == nil {
-		d.Cache.Set(key, string(b), authUserTTL(*u))
-	}
+	cacheAuthUser(d, u)
 	return u, nil
+}
+
+func refreshCachedAuthUser(ctx context.Context, d Deps, userID string) (*store.User, error) {
+	if d.Cache != nil {
+		d.Cache.Delete(authUserCacheKey(d, userID))
+	}
+	u, err := store.FindUserByID(ctx, d.DB, userID)
+	if err != nil {
+		return nil, err
+	}
+	cacheAuthUser(d, u)
+	return u, nil
+}
+
+func cacheAuthUser(d Deps, u *store.User) {
+	if d.Cache == nil || u == nil {
+		return
+	}
+	if b, err := json.Marshal(u); err == nil {
+		d.Cache.Set(authUserCacheKey(d, u.ID), string(b), authUserTTL(*u))
+	}
 }
 
 func authUserTTL(u store.User) time.Duration {

@@ -11,7 +11,7 @@ import { Switch } from '@/components/ui/switch'
 import { Separator } from '@/components/ui/separator'
 import { toast } from '@/hooks/use-toast'
 import { useAuth } from '@/store/auth'
-import { authApi, setAccessToken, ApiError } from '@/api'
+import { authApi, resetAuthFailureState, setAccessToken, ApiError } from '@/api'
 import { useOAuthProviders } from '@/hooks/use-oauth-providers'
 import { OAuthButtons } from '@/components/auth/oauth-buttons'
 import { PuzzleCaptchaDialog } from '@/components/auth/puzzle-captcha-dialog'
@@ -125,6 +125,7 @@ export default function Register() {
     setVerifyError(undefined)
     try {
       const resp = await authApi.verifyEmail(verifyEmail, value.trim())
+      resetAuthFailureState()
       setAccessToken(resp.access_token)
       useAuth.getState().setUser(resp.user)
       useAuth.getState().clearPendingVerification()

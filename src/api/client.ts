@@ -52,15 +52,18 @@ let memoryToken: string | null = null
 /** Set or clear the in-memory access token. */
 export function setAccessToken(token: string | null): void {
   memoryToken = token
-  if (token) {
-    authLostFired = false
-    bannedFired = false
-  }
 }
 
 /** Read the current access token (mostly for tests). */
 export function getAccessToken(): string | null {
   return memoryToken
+}
+
+/** Reset one-shot auth failure guards after a deliberate new session starts. */
+export function resetAuthFailureState(): void {
+  authLostFired = false
+  suppressRefreshAfterAuthLost = false
+  bannedFired = false
 }
 
 /**
@@ -177,6 +180,7 @@ export function setAuthLostHandler(cb: () => void): void {
 function notifyAuthLost(): void {
   if (authLostFired) return
   authLostFired = true
+  suppressRefreshAfterAuthLost = true
   authLostHandler?.()
 }
 function isAuthExpiredMessage(message: string): boolean {
@@ -188,10 +192,15 @@ function isAuthExpiredMessage(message: string): boolean {
 // once (token just expired) — they all await one refresh.
 let refreshHandler: (() => Promise<boolean>) | null = null
 let refreshInFlight: Promise<boolean> | null = null
+let suppressRefreshAfterAuthLost = false
+export function isAuthRefreshSuppressed(): boolean {
+  return suppressRefreshAfterAuthLost
+}
 export function setRefreshHandler(cb: () => Promise<boolean>): void {
   refreshHandler = cb
 }
 function tryRefresh(): Promise<boolean> {
+  if (suppressRefreshAfterAuthLost) return Promise.resolve(false)
   if (!refreshHandler) return Promise.resolve(false)
   if (!refreshInFlight) {
     refreshInFlight = refreshHandler()

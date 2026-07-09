@@ -64,6 +64,18 @@ func requireAuth(d Deps, h handler) http.HandlerFunc {
 			writeError(w, http.StatusUnauthorized, errAuthRequired)
 			return
 		}
+		if user.Status != "active" || user.TokenVer != claims.TV {
+			// The auth user is cached because every protected request needs status
+			// and token_ver. A stale cache entry must not turn a freshly refreshed
+			// token into a fake "session expired", so verify once against the DB
+			// before rejecting.
+			fresh, err := refreshCachedAuthUser(r.Context(), d, claims.UID)
+			if err != nil {
+				writeError(w, http.StatusUnauthorized, errAuthRequired)
+				return
+			}
+			user = fresh
+		}
 		if user.Status != "active" {
 			writeError(w, http.StatusForbidden, errAccountBlocked)
 			return

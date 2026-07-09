@@ -7,8 +7,8 @@
  * On refresh, the cookie-backed /api/auth/refresh restores both.
  */
 import { create } from 'zustand'
-import { authApi, ApiError, setAccessToken } from '@/api'
-import { setAuthLostHandler, setBannedHandler, setRefreshHandler } from '@/api/client'
+import { authApi, ApiError, resetAuthFailureState, setAccessToken } from '@/api'
+import { isAuthRefreshSuppressed, setAuthLostHandler, setBannedHandler, setRefreshHandler } from '@/api/client'
 import type { ApiUser } from '@/api/types'
 
 // Auth requests can overlap: AuthGate hydrates even on /login, while the user can
@@ -99,6 +99,7 @@ export const useAuth = create<AuthState>((set, get) => ({
       try {
         const resp = await authApi.refresh()
         if (!isLatestAuthOp(seq)) return
+        resetAuthFailureState()
         setAccessToken(resp.access_token)
         set({ user: resp.user, status: 'authenticated', error: null })
         return
@@ -107,6 +108,7 @@ export const useAuth = create<AuthState>((set, get) => ({
       }
       const user = await authApi.me()
       if (!isLatestAuthOp(seq)) return
+      resetAuthFailureState()
       set({ user, status: 'authenticated', error: null })
     } catch {
       if (!isLatestAuthOp(seq)) return
@@ -134,6 +136,7 @@ export const useAuth = create<AuthState>((set, get) => ({
     try {
       const resp = await authApi.setup(name, email, password)
       if (!isLatestAuthOp(seq)) return false
+      resetAuthFailureState()
       setAccessToken(resp.access_token)
       set({ user: resp.user, status: 'authenticated', needsSetup: false, error: null })
       return true
@@ -156,6 +159,7 @@ export const useAuth = create<AuthState>((set, get) => ({
         set({ status: 'unauthenticated', pendingTwoFactor: { ticket: resp.ticket } })
         return '2fa'
       }
+      resetAuthFailureState()
       setAccessToken(resp.access_token)
       set({ user: resp.user, status: 'authenticated', pendingTwoFactor: null, banned: false })
       return true
@@ -186,6 +190,7 @@ export const useAuth = create<AuthState>((set, get) => ({
     try {
       const resp = await authApi.loginTwoFactor(pending.ticket, code)
       if (!isLatestAuthOp(seq)) return false
+      resetAuthFailureState()
       setAccessToken(resp.access_token)
       set({ user: resp.user, status: 'authenticated', pendingTwoFactor: null })
       return true
@@ -213,6 +218,7 @@ export const useAuth = create<AuthState>((set, get) => ({
         return 'verify'
       }
       const auth = resp as { user: ApiUser; access_token: string }
+      resetAuthFailureState()
       setAccessToken(auth.access_token)
       set({ user: auth.user, status: 'authenticated' })
       return true
@@ -264,6 +270,7 @@ setRefreshHandler(async () => {
   const seq = beginAuthOp()
   try {
     const resp = await authApi.refresh()
+    if (isAuthRefreshSuppressed()) return false
     if (!isLatestAuthOp(seq)) return true
     setAccessToken(resp.access_token)
     const current = useAuth.getState()

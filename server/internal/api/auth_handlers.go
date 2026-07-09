@@ -501,6 +501,10 @@ func refreshHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 }
 
 func finaliseSession(d Deps, w http.ResponseWriter, r *http.Request, user *store.User, inheritCreatedAt int64) {
+	// A login/refresh is the moment that matters most for token_ver correctness:
+	// clear any stale hot auth entry before the browser starts its first burst of
+	// authenticated data requests with the newly minted access token.
+	invalidateAuthUser(d, user.ID)
 	access, exp, err := issueSessionCookies(d, w, r, user, inheritCreatedAt)
 	if err != nil {
 		writeError(w, 500, err)
