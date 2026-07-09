@@ -4,7 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"net/http"
+	"net/url"
+	"strings"
+	"time"
 
+	"aurelia/server/internal/msgcache"
 	"aurelia/server/internal/store"
 )
 
@@ -114,6 +118,129 @@ func publicSharedHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		"messages":   share.Snapshot,
 		"created_at": share.CreatedAt,
 	})
+}
+
+// cloneSharedConversationHandler lets a signed-in viewer copy a public share
+// snapshot into their own personal conversations. It deliberately clones the
+// frozen, cost-stripped snapshot rather than the owner's live conversation, so
+// no private later messages or admin-only fields cross account boundaries.
+func cloneSharedConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	u := authUser(r)
+	token := pathParam(r, "token")
+	share, err := store.GetShareByToken(r.Context(), d.DB, token)
+	if err != nil {
+		writeError(w, 404, errNotFound)
+		return
+	}
+	var snap []publicShareMessage
+	if err := json.Unmarshal(share.Snapshot, &snap); err != nil {
+		writeError(w, 500, err)
+		return
+	}
+	modelID := ""
+	if raw, err := store.GetSetting(d.DB, "default_model_id"); err == nil {
+		_ = json.Unmarshal(raw, &modelID)
+	}
+	title := strings.TrimSpace(share.Title)
+	if title == "" {
+		title = "Shared conversation"
+	}
+	conv, err := store.CreateConversation(r.Context(), d.DB, store.Conversation{
+		UserID:  u.ID,
+		Title:   title,
+		ModelID: modelID,
+	})
+	if err != nil {
+		writeError(w, 500, err)
+		return
+	}
+	parentID := ""
+	base := time.Now().Unix()
+	for i, m := range snap {
+		if m.Role != "user" && m.Role != "assistant" {
+			continue
+		}
+		blocks := rewriteShareAssetURLsInRaw(token, m.Blocks)
+		atts := rewriteShareAssetURLsInRaw(token, m.Attachments)
+		cites := normalizeJSONList(m.Citations)
+		created, err := store.CreateMessage(r.Context(), d.DB, store.Message{
+			ConversationID: conv.ID,
+			ParentID:       parentID,
+			Role:           m.Role,
+			ModelID:        modelID,
+			Blocks:         blocks,
+			Attachments:    atts,
+			Citations:      cites,
+			Status:         "complete",
+			AuthorID:       userMessageAuthor(m.Role, u.ID),
+			CreatedAt:      base + int64(i),
+		})
+		if err != nil {
+			_, _ = store.DeleteConversation(r.Context(), d.DB, conv.ID, u.ID)
+			writeError(w, 500, err)
+			return
+		}
+		parentID = created.ID
+	}
+	msgcache.Bump(d.Cache, conv.ID)
+	stripServerConvFields(conv)
+	writeJSON(w, 201, conv)
+}
+
+func userMessageAuthor(role, userID string) string {
+	if role == "user" {
+		return userID
+	}
+	return ""
+}
+
+func normalizeJSONList(raw json.RawMessage) json.RawMessage {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return json.RawMessage("[]")
+	}
+	return raw
+}
+
+func rewriteShareAssetURLsInRaw(token string, raw json.RawMessage) json.RawMessage {
+	raw = normalizeJSONList(raw)
+	var items []map[string]any
+	if err := json.Unmarshal(raw, &items); err != nil || items == nil {
+		return raw
+	}
+	for _, item := range items {
+		if rawURL, ok := item["url"].(string); ok {
+			item["url"] = publicShareAssetURL(token, rawURL)
+		}
+	}
+	b, err := json.Marshal(items)
+	if err != nil {
+		return raw
+	}
+	return json.RawMessage(b)
+}
+
+func publicShareAssetURL(token, rawURL string) string {
+	fileID := privateAssetID(rawURL, "/api/files/")
+	if fileID != "" {
+		return "/api/public/shared/" + url.PathEscape(token) + "/files/" + url.PathEscape(fileID)
+	}
+	artifactID := privateAssetID(rawURL, "/api/artifacts/")
+	if artifactID != "" {
+		return "/api/public/shared/" + url.PathEscape(token) + "/artifacts/" + url.PathEscape(artifactID)
+	}
+	return rawURL
+}
+
+func privateAssetID(rawURL, prefix string) string {
+	if !strings.HasPrefix(rawURL, prefix) {
+		return ""
+	}
+	id := strings.TrimPrefix(rawURL, prefix)
+	if cut := strings.IndexAny(id, "?#/"); cut >= 0 {
+		id = id[:cut]
+	}
+	return id
 }
 
 // shareSnapshotHasID reports whether a share's frozen snapshot references the

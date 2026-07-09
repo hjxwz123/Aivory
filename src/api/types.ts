@@ -491,6 +491,7 @@ export interface ApiAttachment {
   mime_type: string
   kind: string
   url: string
+  document_id?: string
 }
 
 export interface ApiCitation {

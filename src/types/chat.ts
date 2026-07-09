@@ -114,6 +114,8 @@ export interface Attachment {
   size: number
   /** Optional preview URL (data URL for mock) */
   previewUrl?: string
+  /** Server-side RAG document id for doc-like uploads. */
+  documentId?: string
 }
 
 /** A file a tool produced (sandbox output, generated image), §4.5/§4.12. */

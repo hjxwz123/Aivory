@@ -2,8 +2,10 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -58,6 +60,10 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.TrimSpace(req.Text) == "" {
 		writeError(w, 400, errors.New("text required"))
+		return
+	}
+	if err := ensureAttachedDocumentsReady(r.Context(), d.DB, id, req.Attachments); err != nil {
+		writeError(w, 409, err)
 		return
 	}
 	// Deep Research is a per-group capability (§ user groups). If the user's
@@ -173,6 +179,63 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	if err != nil && !terminalSent {
 		sendEvent(llm.SseEvent{Type: "error", Message: err.Error(), MessageID: streamMessageID})
 	}
+}
+
+func ensureAttachedDocumentsReady(ctx context.Context, db *sql.DB, convID string, atts []llm.Attachment) error {
+	docIDs := []string{}
+	fileIDs := []string{}
+	seen := map[string]bool{}
+	seenFiles := map[string]bool{}
+	for _, a := range atts {
+		id := strings.TrimSpace(a.DocumentID)
+		if id != "" {
+			if seen[id] {
+				continue
+			}
+			seen[id] = true
+			docIDs = append(docIDs, id)
+			continue
+		}
+		fileID := strings.TrimSpace(a.ID)
+		if fileID == "" || seenFiles[fileID] || !isDocKind(a.Kind) {
+			continue
+		}
+		seenFiles[fileID] = true
+		fileIDs = append(fileIDs, fileID)
+	}
+	if len(docIDs) > 0 {
+		statuses, err := store.ConversationDocumentStatuses(ctx, db, convID, docIDs)
+		if err != nil {
+			return err
+		}
+		for _, id := range docIDs {
+			status, ok := statuses[id]
+			if !ok {
+				return errors.New("attached document not found")
+			}
+			if status != "ready" {
+				return fmt.Errorf("attached document is still indexing (%s)", status)
+			}
+		}
+	}
+	if len(fileIDs) > 0 {
+		statuses, err := store.ConversationDocumentStatusesForFiles(ctx, db, convID, fileIDs)
+		if err != nil {
+			return err
+		}
+		for _, id := range fileIDs {
+			fileStatuses := statuses[id]
+			if len(fileStatuses) == 0 {
+				return errors.New("attached document not found")
+			}
+			for _, status := range fileStatuses {
+				if status != "ready" {
+					return fmt.Errorf("attached document is still indexing (%s)", status)
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // regenerateHandler creates a sibling assistant message under the SAME user

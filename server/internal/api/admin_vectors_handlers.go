@@ -160,8 +160,8 @@ func cloneVectorJob(job *vectorMaintenanceJob) *vectorMaintenanceJob {
 	cp := *job
 	if job.Report != nil {
 		report := *job.Report
-		report.Models = append([]rag.VectorAuditModel(nil), job.Report.Models...)
-		report.Issues = append([]rag.VectorIssue(nil), job.Report.Issues...)
+		report.Models = append([]rag.VectorAuditModel{}, job.Report.Models...)
+		report.Issues = append([]rag.VectorIssue{}, job.Report.Issues...)
 		cp.Report = &report
 	}
 	return &cp

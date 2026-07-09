@@ -100,9 +100,8 @@ const EMPTY_PARAM_VALUES: Record<string, unknown> = {}
 interface PendingAttachment extends Attachment {
   /** true while POST /api/files is in flight. */
   uploading?: boolean
-  /** Server document id for a doc-like upload that is being RAG-ingested, so we
-   *  can poll its status. Absent for images / scope-less uploads. */
-  documentId?: string
+  /** Conversation scope used for the uploaded file; needed for explicit removal. */
+  uploadScopeId?: string
   /** Ingest progress of the conversation-scoped document. While 'parsing' or
    *  'embedding' the send button is blocked so the FIRST question always lands
    *  after the file is searchable (§ chat uploads). */
@@ -194,6 +193,9 @@ export function Composer({
   // Active ingest-status pollers, keyed by attachment id, so they can be
   // cancelled on remove / submit / unmount.
   const pollTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
+  // Local ids explicitly removed while an upload is still in flight. If the
+  // request completes after removal, immediately delete the backend file/doc.
+  const removedAttachmentIds = useRef<Set<string>>(new Set())
   useEffect(() => {
     const timers = pollTimers.current
     return () => {
@@ -306,18 +308,18 @@ export function Composer({
   }, [autoFocus])
 
   const uploading = useMemo(() => attachments.some((a) => a.uploading), [attachments])
-  // A doc that is still parsing/embedding isn't searchable yet — block the send
-  // so the FIRST question lands after the file is ready (§ chat uploads).
-  const ingesting = useMemo(
-    () => attachments.some((a) => a.ingest === 'parsing' || a.ingest === 'embedding'),
+  // A document attachment must be fully RAG-ready before it can be sent. Failed
+  // docs block too; removing the chip is the explicit "send without it" action.
+  const documentNotReady = useMemo(
+    () => attachments.some((a) => a.documentId && a.ingest !== 'ready'),
     [attachments],
   )
-  const canSubmit = value.trim().length > 0 && !streaming && !uploading && !ingesting
+  const canSubmit = value.trim().length > 0 && !streaming && !uploading && !documentNotReady
 
   async function handleSubmit() {
     if (submittingRef.current) return
     const text = value.trim()
-    if (!text || streaming || uploading || ingesting) return
+    if (!text || streaming || uploading || documentNotReady) return
     if (text.length > MAX_LEN) {
       toast.warning(
         t('composer.tooLongTitle'),
@@ -368,6 +370,9 @@ export function Composer({
       // model can use it (the backend reads unknown types as plain text and
       // routes spreadsheets to the sandbox). Images don't need RAG.
       const isDocLike = local.kind !== 'image'
+      if (isDocLike && !scopeId) {
+        throw new Error(t('composer.documentScopeRequired', { defaultValue: 'Create a conversation before uploading documents.' }))
+      }
       const ragFlag = (kbIds && kbIds.length > 0) || isDocLike
       const url = `/files${scopeId ? `?conversation_id=${encodeURIComponent(scopeId)}${ragFlag ? '&rag=1' : ''}` : ''}`
       const res = await api<ApiAttachment & { id: string; url?: string; document_id?: string }>(url, { method: 'POST', body: form })
@@ -382,11 +387,19 @@ export function Composer({
         ...local,
         id: res.id,
         uploading: false,
+        uploadScopeId: scopeId,
         previewUrl: persistentUrl,
         documentId: res.document_id,
         // A conversation doc was created → it's being parsed/embedded; track it
         // so the send stays blocked until it's searchable.
         ingest: res.document_id ? 'parsing' : undefined,
+      }
+      if (removedAttachmentIds.current.has(local.id)) {
+        removedAttachmentIds.current.delete(local.id)
+        if (scopeId) {
+          void conversationsApi.removeFile(scopeId, res.id).catch(() => {})
+        }
+        return null
       }
       setAttachments((s) => s.map((a) => (a.id === local.id ? updated : a)))
       if (res.document_id && scopeId) {
@@ -400,15 +413,12 @@ export function Composer({
     }
   }
 
-  // INGEST_POLL_MS: status poll cadence. INGEST_MAX_MS: cap on how long the send
-  // stays blocked — long enough for a normal parse+embed, but bounded so a slow
-  // MinerU OCR job can't lock the composer; past it we unblock and let the
-  // backend's own brief wait + RAG catch the doc up.
+  // INGEST_POLL_MS: status poll cadence. Do not fake-ready after a timer: the
+  // send button must stay blocked until parsing, embedding and vector upsert
+  // really finished, otherwise the model falls back to tool-side PDF parsing.
   const INGEST_POLL_MS = 1200
-  const INGEST_MAX_MS = 90_000
 
   function startIngestPoll(scopeId: string, docId: string, attId: string) {
-    const started = Date.now()
     const tick = async () => {
       pollTimers.current.delete(attId)
       let done = false
@@ -432,11 +442,6 @@ export function Composer({
         /* transient network error — keep polling */
       }
       if (done) return
-      if (Date.now() - started > INGEST_MAX_MS) {
-        // Stop blocking; mark ready so the user can send (backend waits too).
-        setAttachments((s) => s.map((a) => (a.id === attId && (a.ingest === 'parsing' || a.ingest === 'embedding') ? { ...a, ingest: 'ready' } : a)))
-        return
-      }
       pollTimers.current.set(attId, setTimeout(() => void tick(), INGEST_POLL_MS))
     }
     pollTimers.current.set(attId, setTimeout(() => void tick(), INGEST_POLL_MS))
@@ -487,11 +492,20 @@ export function Composer({
       clearTimeout(tm)
       pollTimers.current.delete(id)
     }
+    const target = attachments.find((a) => a.id === id)
+    if (target?.uploading) {
+      removedAttachmentIds.current.add(id)
+    }
     setAttachments((s) => {
-      const target = s.find((a) => a.id === id)
       if (target?.previewUrl && target.previewUrl.startsWith('blob:')) URL.revokeObjectURL(target.previewUrl)
       return s.filter((a) => a.id !== id)
     })
+    if (target?.uploadScopeId && !target.uploading) {
+      void conversationsApi.removeFile(target.uploadScopeId, target.id).catch(() => {
+        // Removal is best-effort from the composer. The conversation-files drawer
+        // still exposes retryable deletion for already-sent attachments.
+      })
+    }
   }
 
   // A tool is "armed" while collapsed → the "+" trigger shows an accent dot so

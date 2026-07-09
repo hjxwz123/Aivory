@@ -3,6 +3,7 @@ package rag
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 // Content before the first heading (preamble: frontmatter / abstract / intro)
@@ -47,5 +48,24 @@ func TestEstimateTokensCJK(t *testing.T) {
 	// Mixed: 2 CJK runes (案例) + "98 case" (7 ASCII bytes / 4 = 1) = 3.
 	if got := estimateTokens("案例98 case"); got != 3 {
 		t.Fatalf("mixed estimate = %d, want 3", got)
+	}
+}
+
+func TestChunkerSplitsLongUnpunctuatedParagraph(t *testing.T) {
+	long := strings.Repeat("测", childTargetChars*3)
+	parents := chunkHierarchical(long)
+	if len(parents) != 1 {
+		t.Fatalf("parents = %d, want 1", len(parents))
+	}
+	if len(parents[0].Children) < 3 {
+		t.Fatalf("children = %d, want split long paragraph", len(parents[0].Children))
+	}
+	for i, child := range parents[0].Children {
+		if !utf8.ValidString(child) {
+			t.Fatalf("child %d is not valid UTF-8", i)
+		}
+		if len(child) > childTargetChars+chunkOverlapChars+8 {
+			t.Fatalf("child %d too large: %d", i, len(child))
+		}
 	}
 }

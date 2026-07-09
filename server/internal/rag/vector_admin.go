@@ -203,7 +203,10 @@ func (s *Service) RebuildMissingVectors(ctx context.Context, progress func(Vecto
 }
 
 func (s *Service) collectVectorIssues(ctx context.Context) (VectorAuditReport, []vectorIssueChunk, error) {
-	report := VectorAuditReport{}
+	report := VectorAuditReport{
+		Models: []VectorAuditModel{},
+		Issues: []VectorIssue{},
+	}
 	if !s.VectorStoreEnabled() {
 		return report, nil, errVectorBackendUnavailable
 	}

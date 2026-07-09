@@ -256,7 +256,7 @@ func runBackupExportJob(d Deps, job *backupExportJob) {
 func listBackupArchiveFiles(dir string) []backupArchiveFile {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil
+		return []backupArchiveFile{}
 	}
 	out := []backupArchiveFile{}
 	for _, entry := range entries {
