@@ -51,9 +51,9 @@ type Service struct {
 	embDim     int
 	mineruURL  string
 	mineruKey  string
-	// Sandbox sidecar URL/key — needed to talk to /storage/put + /storage/delete
-	// for MinerU uploads. Fallback values from env; runtime reads `sandbox_*`
-	// settings each ingest.
+	// Sandbox sidecar URL/key — kept for legacy storage-client wiring and env
+	// fallback compatibility. MinerU source uploads now use direct Go-side S3/OSS
+	// upload and do not require sandbox_base_url.
 	sandboxURL string
 	sandboxKey string
 }
@@ -68,9 +68,9 @@ func (s *Service) SetExternalConfig(embBaseURL, embAPIKey, embModel string, embD
 }
 
 // SetSandboxFallback stashes the sandbox sidecar URL/key the env supplied at
-// boot. Runtime reads the `sandbox_base_url` / `sandbox_api_key` settings
-// first; these are the dev fallback so `MINERU` works in a freshly seeded
-// install with no admin clicks.
+// boot. Runtime reads the `sandbox_base_url` / `sandbox_api_key` settings first
+// for legacy storage-client compatibility; MinerU direct S3/OSS upload does not
+// require these values.
 func (s *Service) SetSandboxFallback(url, key string) {
 	s.sandboxURL, s.sandboxKey = url, key
 }
@@ -168,16 +168,29 @@ func (s *Service) RequeueIncomplete(ctx context.Context) {
 // `failed` with the last error (§4.11-C-3). The pipeline is idempotent —
 // repeat calls re-write existing chunks.
 func (s *Service) Ingest(docID string) {
+	s.enqueueIngest(docID, true)
+}
+
+// IngestNow requeues a document without the Redis uniqueness guard. Use this
+// for explicit user/admin retry actions: a previous failed task may still have
+// a uniqueness lock, but a clicked Retry must actually run.
+func (s *Service) IngestNow(docID string) {
+	s.enqueueIngest(docID, false)
+}
+
+func (s *Service) enqueueIngest(docID string, unique bool) {
 	if s.asynqClient != nil {
 		payload, _ := json.Marshal(map[string]string{"doc_id": docID})
 		task := asynq.NewTask(ragIngestTaskType, payload)
-		if _, err := s.asynqClient.Enqueue(
-			task,
+		opts := []asynq.Option{
 			asynq.Queue("rag"),
-			asynq.Timeout(30*time.Minute),
+			asynq.Timeout(30 * time.Minute),
 			asynq.MaxRetry(0),
-			asynq.Unique(30*time.Minute),
-		); err == nil {
+		}
+		if unique {
+			opts = append(opts, asynq.Unique(30*time.Minute))
+		}
+		if _, err := s.asynqClient.Enqueue(task, opts...); err == nil {
 			return
 		} else if errors.Is(err, asynq.ErrDuplicateTask) {
 			return
@@ -311,13 +324,11 @@ func (s *Service) runPipeline(ctx context.Context, docID string, cache *parseCac
 	}
 	_ = store.UpdateDocumentStatus(ctx, s.db, docID, "parsing", "", 0)
 
-	// Resolve MinerU + sandbox + storage from admin settings (live), falling
-	// back to env values supplied at boot. The MinerU URL/token come from
-	// the settings keys `mineru_api_url` / `mineru_api_token`; the sandbox
-	// sidecar (which hosts /storage/put for the upload-then-fetch flow)
-	// comes from `sandbox_base_url` / `sandbox_api_key`; the bucket comes
-	// from the `storage_*` block. Any of these can be blank — the parser
-	// degrades gracefully (binary docs become a one-line placeholder).
+	// Resolve MinerU + storage from admin settings (live), falling back to env
+	// values supplied at boot. MinerU source uploads prefer direct Go-side
+	// S3/OSS upload; sandbox_base_url remains only as a legacy sidecar fallback.
+	// Any of these can be blank — the parser degrades gracefully (binary docs
+	// become a one-line placeholder).
 	mineruURL := readSettingString(s.db, "mineru_api_url", s.mineruURL)
 	mineruKey := readSettingString(s.db, "mineru_api_token", s.mineruKey)
 	// Blank admin setting → fall back to the env/boot default (bundled sandbox).
@@ -331,7 +342,7 @@ func (s *Service) runPipeline(ctx context.Context, docID string, cache *parseCac
 	}
 	storageCfg, storageIssues := storageBlockFromSettings(s.db)
 	storageClient := storage.New(sbURL, sbKey, storageCfg)
-	mineruIssues := minerUConfigIssues(mineruURL, mineruKey, sbURL, storageCfg, storageIssues)
+	mineruIssues := minerUConfigIssues(mineruURL, mineruKey, storageCfg, storageIssues)
 
 	// Spreadsheets are data, not prose: never parse or embed them. They stay as
 	// conversation files and are analysed in the code sandbox (python_execute
@@ -363,14 +374,22 @@ func (s *Service) runPipeline(ctx context.Context, docID string, cache *parseCac
 		// every downstream write (chunks, parents) is clean regardless of insert path.
 		content = sanitizeIngestText(raw)
 
-		// A KB upload whose text couldn't be extracted (e.g. a scan with MinerU
-		// unavailable) must NOT be embedded — a junk placeholder vector silently
-		// pollutes search. Fail it loudly with the reason instead, and return nil
-		// so it isn't retried (re-running MinerU/parse would just fail again).
-		if !extracted && d.KBID != "" {
+		// A document whose text couldn't be extracted (e.g. a scan with MinerU
+		// unavailable/failing) must NOT be embedded or marked ready — a junk
+		// placeholder chunk silently pollutes search and incorrectly unblocks
+		// sending. Fail it loudly with the reason instead, and return nil so it
+		// isn't retried (re-running MinerU/parse would just fail again until the
+		// operator fixes storage/MinerU and re-uploads or rebuilds).
+		if !extracted {
 			reason := strings.TrimSpace(content)
 			if len(reason) > 500 {
 				reason = reason[:500]
+			}
+			if reason == "" {
+				reason = "could not extract text"
+			}
+			if s.logger != nil {
+				s.logger.Printf("rag: ingest failed doc=%s file=%q extracted=false reason=%s", docID, d.Filename, reason)
 			}
 			return store.UpdateDocumentStatus(ctx, s.db, docID, "failed", reason, 0)
 		}

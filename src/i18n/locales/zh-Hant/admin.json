@@ -513,7 +513,7 @@
       "ossAccessKeyId": "AccessKey ID",
       "ossAccessKeySecret": "AccessKey Secret",
       "mineruSection": "文件解析(MinerU)",
-      "mineruLead": "非純文字上傳(PDF/Office/圖片)經物件儲存交給 MinerU 解析；還需要在工具設定裡配置 sandbox_base_url，讓後端透過沙箱 sidecar 上傳並生成預簽名 URL。",
+      "mineruLead": "非純文字上傳(PDF/Office/圖片)經物件儲存交給 MinerU 解析；後端會直接上傳到 S3/OSS 並生成預簽名 URL，MinerU 不再需要 sandbox_base_url。",
       "mineruBaseUrl": "MinerU 介面地址",
       "mineruBaseUrlHint": "雲端預設 https://mineru.net;也可指向自建閘道。",
       "mineruToken": "API Token",

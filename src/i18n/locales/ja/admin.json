@@ -513,7 +513,7 @@
       "ossAccessKeyId": "AccessKey ID",
       "ossAccessKeySecret": "AccessKey Secret",
       "mineruSection": "ドキュメント解析（MinerU）",
-      "mineruLead": "非テキストのアップロード(PDF/Office/画像)はストレージ経由で MinerU が解析します。Tools で sandbox_base_url も設定し、バックエンドが sandbox sidecar 経由でアップロードして署名付き URL を作れるようにしてください。",
+      "mineruLead": "非テキストのアップロード(PDF/Office/画像)はストレージ経由で MinerU が解析します。バックエンドが S3/OSS に直接アップロードして署名付き URL を作成するため、MinerU に sandbox_base_url は不要です。",
       "mineruBaseUrl": "MinerUベースURL",
       "mineruBaseUrlHint": "クラウド既定 https://mineru.net。自前ゲートウェイも可。",
       "mineruToken": "APIトークン",

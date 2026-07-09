@@ -790,6 +790,39 @@ func listConversationDocsHandler(d Deps, w http.ResponseWriter, r *http.Request)
 	writeJSON(w, 200, docs)
 }
 
+// retryConversationDocumentHandler requeues a failed conversation-scoped
+// document after the user fixes the underlying issue (for example OSS/MinerU
+// credentials) and clicks Retry in the composer.
+func retryConversationDocumentHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	u := authUser(r)
+	convID := pathParam(r, "id")
+	docID := pathParam(r, "docId")
+	conv, err := store.GetConversation(r.Context(), d.DB, convID, u.ID)
+	if err != nil {
+		writeError(w, 404, errNotFound)
+		return
+	}
+	doc, err := store.GetDocument(r.Context(), d.DB, docID)
+	if err != nil || doc.ConversationID != conv.ID {
+		writeError(w, 404, errNotFound)
+		return
+	}
+	if doc.Status != "failed" {
+		writeError(w, 409, errors.New("document is not failed"))
+		return
+	}
+	if d.RAG == nil {
+		writeError(w, 503, errors.New("rag service is unavailable"))
+		return
+	}
+	if err := store.UpdateDocumentStatus(r.Context(), d.DB, docID, "pending", "", 0); err != nil {
+		writeError(w, 500, err)
+		return
+	}
+	d.RAG.IngestNow(docID)
+	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
 // convFile is the shape returned by the conversation files drawer (§ conversation
 // files): the authoritative set of files this conversation references, each with
 // a download URL.

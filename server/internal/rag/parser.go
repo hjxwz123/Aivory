@@ -94,13 +94,18 @@ func parseDocument(
 	// ingest still completes. CSV/XLS(X) never reach here — runPipeline
 	// short-circuits spreadsheets to the code sandbox instead of parsing/embedding.
 	ext := docExt(filename, docPath)
-	// MinerU OCR needs BOTH the API creds AND object storage + the sandbox
-	// sidecar (it fetches the file via a presigned bucket URL). Missing any of
-	// these is the usual reason a scanned doc comes back empty — surface it.
-	mineruReady := len(mineruConfigIssues) == 0 && mineruURL != "" && mineruToken != "" && sb.Enabled()
+	// MinerU OCR needs API creds and an object store URL it can fetch. Source
+	// files are uploaded directly by the Go backend to S3/OSS; the sandbox
+	// sidecar is intentionally not in this path, so large scanned PDFs don't
+	// fail on the old Go→sidecar→OSS hop.
+	storageReady := false
+	if sb != nil {
+		storageReady = storage.DirectUploadSupported(sb.Storage)
+	}
+	mineruReady := len(mineruConfigIssues) == 0 && mineruURL != "" && mineruToken != "" && storageReady
 	mineruIssueSummary := strings.Join(mineruConfigIssues, "; ")
 	if mineruIssueSummary == "" && !mineruReady {
-		mineruIssueSummary = "storage upload client is disabled"
+		mineruIssueSummary = "object storage upload client is disabled"
 	}
 	var mineruErr error // last MinerU failure reason, for the diagnostic placeholder + logs
 	logf := func(format string, args ...any) {
@@ -180,7 +185,7 @@ func parseDocument(
 	var reason string
 	switch {
 	case !mineruReady:
-		reason = "It looks scanned/image-only, which needs MinerU OCR — but MinerU isn't fully configured. Missing: " + mineruIssueSummary + ". Configure mineru_api_url + mineru_api_token, sandbox_base_url, and S3/OSS object storage (local storage cannot be used by MinerU), then re-upload."
+		reason = "It looks scanned/image-only, which needs MinerU OCR — but MinerU isn't fully configured. Missing: " + mineruIssueSummary + ". Configure mineru_api_url + mineru_api_token and S3/OSS object storage (local storage cannot be used by MinerU), then re-upload."
 	case mineruErr != nil:
 		reason = "MinerU OCR was attempted but failed: " + mineruErr.Error() + ". Check the MinerU API token/quota and that object storage is reachable, then re-upload."
 	default:
@@ -336,8 +341,9 @@ func pdfHasImages(docPath string) bool {
 // minerUExtractViaCloud runs the four-step pipeline against the MinerU cloud
 // API (https://mineru.net):
 //
-//  1. Upload the document bytes to the admin-configured bucket (S3 or OSS)
-//     via the sidecar's /storage/put → returns a 1-hour presigned GET URL.
+//  1. Upload the document to the admin-configured bucket (S3 or OSS) from the
+//     Go backend → returns a 1-hour presigned GET URL. The sandbox sidecar is
+//     not used for this MinerU source-upload path.
 //  2. POST /api/v4/extract/task {url, model_version: pipeline, is_ocr: true}.
 //  3. Poll GET /api/v4/extract/task/{task_id} until state == "done" or
 //     "failed". Pipeline model returns within minutes for typical PDFs;
@@ -353,17 +359,20 @@ func minerUExtractViaCloud(
 	baseURL, token string,
 	sb *storage.Client,
 ) (*MinerUResult, error) {
-	body, err := os.ReadFile(docPath)
+	if sb == nil {
+		return nil, fmt.Errorf("mineru: storage client is nil")
+	}
+	info, err := os.Stat(docPath)
 	if err != nil {
 		return nil, err
 	}
-	if len(body) == 0 {
+	if info.Size() == 0 {
 		return nil, fmt.Errorf("mineru: empty document")
 	}
 
 	// Upload — key is mineru/<short-id>/<safe-name> so the bucket layout is
-	// inspectable and the prefix is owned by the parser. The sidecar adds the
-	// admin-configured storage_prefix in front.
+	// inspectable and the prefix is owned by the parser. The storage client adds
+	// the admin-configured storage_prefix in front.
 	safe := filepath.Base(filename)
 	if safe == "" {
 		safe = filepath.Base(docPath)
@@ -374,9 +383,12 @@ func minerUExtractViaCloud(
 	}
 	// Presigned URL must stay valid for the WHOLE OCR window: MinerU queues the
 	// task and fetches the file some time after submit, and we poll up to 20 min.
-	// A short sidecar default could expire mid-processing → MinerU fetch fails →
-	// silent empty result. Ask for a TTL that comfortably covers it.
-	put, err := sb.Put(ctx, key, body, mime, mineruSourceTTLSeconds)
+	// A short default could expire mid-processing → MinerU fetch fails → silent
+	// empty result. Ask for a TTL that comfortably covers it.
+	if !storage.DirectUploadSupported(sb.Storage) {
+		return nil, fmt.Errorf("mineru: direct S3/OSS upload is not configured")
+	}
+	put, err := sb.PutFileDirect(ctx, key, docPath, mime, mineruSourceTTLSeconds)
 	if err != nil {
 		return nil, fmt.Errorf("mineru: upload: %w", err)
 	}
@@ -385,7 +397,7 @@ func minerUExtractViaCloud(
 		// Use a fresh context so client-cancel doesn't skip cleanup.
 		dctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		_ = sb.Delete(dctx, put.Key)
+		_ = sb.DeleteDirect(dctx, put.Key)
 	}()
 
 	// Submit the task. MinerU requires the file URL to be reachable from
@@ -897,7 +909,7 @@ func storageBlockFromSettings(db *sql.DB) (*sandbox.StorageConfig, []string) {
 	return cfg, nil
 }
 
-func minerUConfigIssues(mineruURL, mineruToken, sandboxURL string, storageCfg *sandbox.StorageConfig, storageIssues []string) []string {
+func minerUConfigIssues(mineruURL, mineruToken string, storageCfg *sandbox.StorageConfig, storageIssues []string) []string {
 	issues := []string{}
 	if strings.TrimSpace(mineruURL) == "" {
 		issues = append(issues, "mineru_api_url is empty")
@@ -905,12 +917,9 @@ func minerUConfigIssues(mineruURL, mineruToken, sandboxURL string, storageCfg *s
 	if strings.TrimSpace(mineruToken) == "" {
 		issues = append(issues, "mineru_api_token is empty")
 	}
-	if strings.TrimSpace(sandboxURL) == "" {
-		issues = append(issues, "sandbox_base_url is empty")
-	}
 	if len(storageIssues) > 0 {
 		issues = append(issues, storageIssues...)
-	} else if storageCfg == nil || !storageCfg.Effective() {
+	} else if storageCfg == nil || !storageCfg.Effective() || !storage.DirectUploadSupported(storageCfg) {
 		issues = append(issues, "S3/OSS object storage is not configured")
 	}
 	return issues

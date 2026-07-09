@@ -384,6 +384,10 @@ export const conversationsApi = {
     api<{ ok: true }>(`/conversations/${encodeURIComponent(id)}/documents/${encodeURIComponent(docId)}/promote`, {
       method: 'POST',
     }),
+  retryDoc: (id: string, docId: string) =>
+    api<{ ok: true }>(`/conversations/${encodeURIComponent(id)}/documents/${encodeURIComponent(docId)}/retry`, {
+      method: 'POST',
+    }),
   // Conversation-scoped documents + their ingest status — polled by the composer
   // to show upload/parse progress and block the first send until 'ready'.
   listDocs: (id: string) =>

@@ -171,6 +171,7 @@ export function Composer({
   const valueRef = useRef(value)
   const draftScopeRef = useRef(draftScope)
   const [attachments, setAttachments] = useState<PendingAttachment[]>([])
+  const attachmentsRef = useRef<PendingAttachment[]>([])
   const [kbList, setKBList] = useState<{ id: string; name: string }[]>([])
   // Drag-and-drop file upload over the composer surface.
   const [dragOver, setDragOver] = useState(false)
@@ -203,6 +204,9 @@ export function Composer({
       timers.clear()
     }
   }, [])
+  useEffect(() => {
+    attachmentsRef.current = attachments
+  }, [attachments])
   // Voice input (§ whisper). Record via MediaRecorder, then transcribe through
   // the admin-configured /audio/transcriptions endpoint and insert the text.
   const [recording, setRecording] = useState(false)
@@ -447,6 +451,28 @@ export function Composer({
     pollTimers.current.set(attId, setTimeout(() => void tick(), INGEST_POLL_MS))
   }
 
+  async function retryAttachmentIngest(a: PendingAttachment) {
+    if (!a.uploadScopeId || !a.documentId) return
+    const tm = pollTimers.current.get(a.id)
+    if (tm) {
+      clearTimeout(tm)
+      pollTimers.current.delete(a.id)
+    }
+    setAttachments((s) => s.map((x) => (x.id === a.id ? { ...x, ingest: 'parsing' } : x)))
+    try {
+      await conversationsApi.retryDoc(a.uploadScopeId, a.documentId)
+      if (!attachmentsRef.current.some((x) => x.id === a.id)) return
+      startIngestPoll(a.uploadScopeId, a.documentId, a.id)
+    } catch (e) {
+      if (!attachmentsRef.current.some((x) => x.id === a.id)) return
+      setAttachments((s) => s.map((x) => (x.id === a.id ? { ...x, ingest: 'failed' } : x)))
+      toast.error(
+        t('composer.ingestRetryFailed', { defaultValue: 'Retry failed' }),
+        e instanceof Error ? e.message : undefined,
+      )
+    }
+  }
+
   async function handleAttach(files: FileList | null) {
     if (!files || !files.length) return
     const list = Array.from(files)
@@ -618,7 +644,7 @@ export function Composer({
       {/* Attachments preview. The armed-mode (research) state is shown by the
           toolbar button below, so we don't repeat a chip above the input. */}
       {attachments.length > 0 && (
-        <div className="flex items-stretch gap-2 overflow-x-auto px-3.5 pb-1 pt-3 scrollbar-none">
+        <div className="flex items-stretch gap-1.5 overflow-x-auto px-3 pb-1 pt-2.5 scrollbar-none">
           {attachments.map((a) => {
             const busy = a.uploading || a.ingest === 'parsing' || a.ingest === 'embedding'
             const failed = a.ingest === 'failed'
@@ -635,20 +661,20 @@ export function Composer({
                   <img
                     src={a.previewUrl}
                     alt={a.name}
-                    className="size-[4.5rem] rounded-[12px] border border-[var(--color-border-subtle)] bg-[var(--color-bg-muted)] object-cover"
+                    className="size-14 rounded-[10px] border border-[var(--color-border-subtle)] bg-[var(--color-bg-muted)] object-cover"
                   />
                   {busy ? (
-                    <span className="absolute inset-0 grid place-items-center rounded-[12px] bg-[var(--color-overlay)]">
-                      <Loader2 size={14} className="animate-spin text-[var(--color-fg-inverted)]" aria-hidden />
+                    <span className="absolute inset-0 grid place-items-center rounded-[10px] bg-[var(--color-overlay)]">
+                      <Loader2 size={13} className="animate-spin text-[var(--color-fg-inverted)]" aria-hidden />
                     </span>
                   ) : null}
                   <button
                     type="button"
                     aria-label={`Remove ${a.name}`}
                     onClick={() => removeAttachment(a.id)}
-                    className="absolute -right-1.5 -top-1.5 inline-flex size-6 items-center justify-center rounded-full bg-[var(--color-fg)] text-[var(--color-fg-inverted)] shadow-[var(--shadow-sm)] interactive hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                    className="absolute -right-1.5 -top-1.5 inline-flex size-5 items-center justify-center rounded-full bg-[var(--color-fg)] text-[var(--color-fg-inverted)] shadow-[var(--shadow-sm)] interactive hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
                   >
-                    <X size={15} aria-hidden />
+                    <X size={13} aria-hidden />
                   </button>
                 </span>
               )
@@ -659,13 +685,13 @@ export function Composer({
               <span
                 key={a.id}
                 className={cn(
-                  'group/att relative flex h-[4.5rem] min-w-0 max-w-[min(31rem,calc(100vw-7rem))] flex-[1_1_18rem] items-center gap-3 rounded-[14px] border bg-[var(--color-surface-raised)] py-2.5 pl-3 pr-10 shadow-[var(--shadow-xs)]',
+                  'group/att relative flex h-14 min-w-0 max-w-[min(28rem,calc(100vw-6rem))] flex-[1_1_15rem] items-center gap-2.5 rounded-[10px] border bg-[var(--color-surface-raised)] py-2 pl-2.5 pr-8 shadow-[var(--shadow-xs)]',
                   failed ? 'border-[var(--color-danger)]/50' : 'border-[var(--color-border)]',
                 )}
               >
                 <span
                   className={cn(
-                    'grid size-12 shrink-0 place-items-center rounded-[12px]',
+                    'grid size-9 shrink-0 place-items-center rounded-[9px]',
                     failed
                       ? 'bg-[var(--color-danger-soft)] text-[var(--color-danger)]'
                       : attachmentTileClass(a),
@@ -673,20 +699,21 @@ export function Composer({
                   aria-hidden
                 >
                   {busy ? (
-                    <Loader2 size={22} className="animate-spin" />
+                    <Loader2 size={17} className="animate-spin" />
                   ) : failed ? (
-                    <AlertTriangle size={22} />
+                    <AlertTriangle size={17} />
                   ) : (
-                    <Icon size={24} strokeWidth={2} />
+                    <Icon size={18} strokeWidth={2} />
                   )}
                 </span>
                 <span className="grid min-w-0 flex-1 gap-0.5 text-left">
-                  <span className="truncate text-[0.9375rem] font-semibold leading-snug text-[var(--color-fg)]">
+                  <span className="truncate text-[0.8125rem] font-semibold leading-tight text-[var(--color-fg)]">
                     {a.name}
                   </span>
                   <span
                     className={cn(
-                      'truncate text-sm leading-tight',
+                      'min-w-0 text-[0.75rem] leading-tight',
+                      !failed && 'truncate',
                       failed
                         ? 'text-[var(--color-danger)]'
                         : busy
@@ -694,16 +721,34 @@ export function Composer({
                           : 'text-[var(--color-fg-subtle)]',
                     )}
                   >
-                    {failed ? t('composer.ingestFailed', { defaultValue: "Couldn't read this file" }) : status}
+                    {failed ? (
+                      <span className="flex min-w-0 items-center gap-1">
+                        <span className="truncate">
+                          {t('composer.ingestFailedAction', { defaultValue: 'Parsing failed. Remove it or' })}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            void retryAttachmentIngest(a)
+                          }}
+                          className="shrink-0 font-semibold underline underline-offset-2 hover:text-[var(--color-danger)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                        >
+                          {t('composer.retry', { defaultValue: 'Retry' })}
+                        </button>
+                      </span>
+                    ) : (
+                      status
+                    )}
                   </span>
                 </span>
                 <button
                   type="button"
                   aria-label={`Remove ${a.name}`}
                   onClick={() => removeAttachment(a.id)}
-                  className="absolute right-2 top-2 inline-flex size-6 items-center justify-center rounded-full bg-[var(--color-fg)] text-[var(--color-fg-inverted)] shadow-[var(--shadow-xs)] interactive hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                  className="absolute right-1.5 top-1.5 inline-flex size-5 items-center justify-center rounded-full bg-[var(--color-fg)] text-[var(--color-fg-inverted)] shadow-[var(--shadow-xs)] interactive hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
                 >
-                  <X size={15} aria-hidden />
+                  <X size={13} aria-hidden />
                 </button>
               </span>
             )
