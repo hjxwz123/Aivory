@@ -33,14 +33,8 @@ func TestGoogleProviderWireFormatCamelCase(t *testing.T) {
 	req := UnifiedChatRequest{
 		SystemPrompt: "sys",
 		Model:        ModelInfo{RequestID: "gemini-2.5-flash", BaseURL: srv.URL, APIKey: "k"},
-		History: []UnifiedMessage{
-			{Role: "user", Blocks: []UnifiedBlock{
-				{Kind: "image", Data: "aGk=", MimeType: "image/png"},
-				{Kind: "document", Data: "aGk=", MimeType: "application/pdf"},
-				{Kind: "text", Text: "hi"},
-			}},
-		},
-		Tools: []ToolDef{{Name: "web_search", Description: "d", InputSchema: json.RawMessage(`{"type":"object"}`)}},
+		History:      multimodalHistoryWithDocument(),
+		Tools:        []ToolDef{{Name: "web_search", Description: "d", InputSchema: json.RawMessage(`{"type":"object"}`)}},
 	}
 	if _, err := p.Stream(context.Background(), req, nil, func(SseEvent) {}); err != nil {
 		t.Fatal(err)
@@ -57,6 +51,10 @@ func TestGoogleProviderWireFormatCamelCase(t *testing.T) {
 			t.Errorf("request body carries snake_case key %s — relays drop it (→ empty tools[0], tool_type proto error)", banned)
 		}
 	}
+	if !strings.Contains(body, `"aW1n"`) {
+		t.Fatalf("image inlineData should still be sent\nbody: %s", body)
+	}
+	assertNoNativeDocumentPayload(t, captured)
 
 	// tools[0] must never reach the wire as an empty object.
 	var parsed struct {

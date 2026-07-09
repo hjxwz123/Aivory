@@ -152,6 +152,10 @@ func Migrate(db *sql.DB) error {
 	addUsageFallback := `ALTER TABLE usage_logs ADD COLUMN fallback INTEGER NOT NULL DEFAULT 0`
 	addUsageStatus := `ALTER TABLE usage_logs ADD COLUMN status TEXT NOT NULL DEFAULT 'ok'`
 	addUsageError := `ALTER TABLE usage_logs ADD COLUMN error TEXT NOT NULL DEFAULT ''`
+	addUsageRequestMethod := `ALTER TABLE usage_logs ADD COLUMN request_method TEXT NOT NULL DEFAULT ''`
+	addUsageRequestURL := `ALTER TABLE usage_logs ADD COLUMN request_url TEXT NOT NULL DEFAULT ''`
+	addUsageRequestHeaders := `ALTER TABLE usage_logs ADD COLUMN request_headers TEXT NOT NULL DEFAULT ''`
+	addUsageRequestBody := `ALTER TABLE usage_logs ADD COLUMN request_body TEXT NOT NULL DEFAULT ''`
 	if usePostgres {
 		schema = schemaPGSQL
 		addImageRef = `ALTER TABLE chunks ADD COLUMN IF NOT EXISTS image_ref TEXT`
@@ -201,6 +205,10 @@ func Migrate(db *sql.DB) error {
 		addUsageFallback = `ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS fallback INTEGER NOT NULL DEFAULT 0`
 		addUsageStatus = `ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'ok'`
 		addUsageError = `ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS error TEXT NOT NULL DEFAULT ''`
+		addUsageRequestMethod = `ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS request_method TEXT NOT NULL DEFAULT ''`
+		addUsageRequestURL = `ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS request_url TEXT NOT NULL DEFAULT ''`
+		addUsageRequestHeaders = `ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS request_headers TEXT NOT NULL DEFAULT ''`
+		addUsageRequestBody = `ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS request_body TEXT NOT NULL DEFAULT ''`
 	}
 	if err := dedupeSkillNames(db); err != nil {
 		return fmt.Errorf("dedupe skill names: %w", err)
@@ -231,6 +239,7 @@ func Migrate(db *sql.DB) error {
 		addMsgVerify,
 		addConvWorkspace, addProjWorkspace, addKBWorkspace, addMsgAuthor, addUsageWorkspace, addGroupMaxWorkspaces, addGroupIsPublic,
 		addModelFallbackChannel, addUsageChannel, addUsageFallback, addUsageStatus, addUsageError,
+		addUsageRequestMethod, addUsageRequestURL, addUsageRequestHeaders, addUsageRequestBody,
 	} {
 		_, _ = db.Exec(ddl)
 	}
@@ -276,7 +285,7 @@ func Migrate(db *sql.DB) error {
 	columnChecks := map[string][]string{
 		"messages":        {"credits", "model_label", "search_text", "gen_ms", "feedback", "verify", "author_id"},
 		"users":           {"group_id", "totp_secret", "totp_enabled", "group_expires_at", "previous_group_id", "password_set", "password_changed_at", "last_seen_at", "credits_permanent", "sort_order"},
-		"usage_logs":      {"credits", "workspace_id", "channel_id", "fallback", "status", "error"},
+		"usage_logs":      {"credits", "workspace_id", "channel_id", "fallback", "status", "error", "request_method", "request_url", "request_headers", "request_body"},
 		"user_groups":     {"max_projects", "max_kbs", "credit_allowance", "credit_period_seconds", "max_workspaces", "is_public"},
 		"models":          {"official_tools", "moderation_enabled", "moderation_mode", "tags", "image_timeout_sec", "research_enabled", "fallback_channel_id"},
 		"refresh_tokens":  {"user_agent", "ip", "location", "last_seen"},

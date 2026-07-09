@@ -11,6 +11,7 @@ import (
 	"database/sql"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"log"
@@ -27,15 +28,21 @@ import (
 	"aurelia/server/internal/storage"
 	"aurelia/server/internal/store"
 	"aurelia/server/internal/vector"
+
+	"github.com/hibiken/asynq"
 )
+
+const ragIngestTaskType = "rag.ingest"
 
 // Service is the public façade.
 type Service struct {
-	db     *sql.DB
-	queue  queue.Queue
-	logger *log.Logger
-	task   TaskRouter
-	vec    vector.Store
+	db          *sql.DB
+	queue       queue.Queue
+	logger      *log.Logger
+	task        TaskRouter
+	vec         vector.Store
+	asynqClient *asynq.Client
+	asynqServer *asynq.Server
 	// External integration config (§4.11-C/D): embedding HTTP backend + MinerU.
 	// All values are env-fallbacks — runtime resolution prefers the admin
 	// settings table so the live admin UI controls them without a restart.
@@ -95,6 +102,39 @@ func (s *Service) SetVectorStore(v vector.Store) {
 	}
 }
 
+// UseAsynq wires Redis/asynq for document ingestion. The rest of the background
+// system still uses the closure-based in-process queue; RAG ingest is the part
+// that can be expressed as a durable task payload (doc_id) and benefits most
+// from surviving restarts and smoothing parsing/embedding bursts.
+func (s *Service) UseAsynq(redisURL string) error {
+	opt, err := asynq.ParseRedisURI(redisURL)
+	if err != nil {
+		return err
+	}
+	s.asynqClient = asynq.NewClient(opt)
+	s.asynqServer = asynq.NewServer(opt, asynq.Config{
+		Concurrency: 2,
+		Queues:      map[string]int{"rag": 1},
+	})
+	mux := asynq.NewServeMux()
+	mux.HandleFunc(ragIngestTaskType, s.handleAsynqIngest)
+	go func() {
+		if err := s.asynqServer.Run(mux); err != nil && s.logger != nil {
+			s.logger.Printf("rag: asynq server stopped: %v", err)
+		}
+	}()
+	return nil
+}
+
+func (s *Service) CloseAsynq() {
+	if s.asynqServer != nil {
+		s.asynqServer.Shutdown()
+	}
+	if s.asynqClient != nil {
+		_ = s.asynqClient.Close()
+	}
+}
+
 // SetTaskLLM is called by main() after the task helper exists. We accept any
 // implementation of TaskRouter to avoid an import cycle.
 func (s *Service) SetTaskLLM(t TaskRouter) { s.task = t }
@@ -128,32 +168,68 @@ func (s *Service) RequeueIncomplete(ctx context.Context) {
 // `failed` with the last error (§4.11-C-3). The pipeline is idempotent —
 // repeat calls re-write existing chunks.
 func (s *Service) Ingest(docID string) {
+	if s.asynqClient != nil {
+		payload, _ := json.Marshal(map[string]string{"doc_id": docID})
+		task := asynq.NewTask(ragIngestTaskType, payload)
+		if _, err := s.asynqClient.Enqueue(
+			task,
+			asynq.Queue("rag"),
+			asynq.Timeout(30*time.Minute),
+			asynq.MaxRetry(0),
+			asynq.Unique(30*time.Minute),
+		); err == nil {
+			return
+		} else if errors.Is(err, asynq.ErrDuplicateTask) {
+			return
+		} else if s.logger != nil {
+			s.logger.Printf("rag: asynq enqueue failed for %s, falling back to in-process queue: %v", docID, err)
+		}
+	}
 	s.queue.Enqueue("rag.ingest", func(ctx context.Context) error {
-		var err error
-		// Cache the parsed content across retries so a transient embed/DB failure
-		// re-runs only the cheap embed step — never the paid MinerU OCR again.
-		cache := &parseCache{}
-		for attempt := 1; attempt <= 3; attempt++ {
-			if err = s.runPipeline(ctx, docID, cache); err == nil {
-				return nil
-			}
+		return s.runIngestWithRetries(ctx, docID)
+	})
+}
+
+func (s *Service) handleAsynqIngest(ctx context.Context, t *asynq.Task) error {
+	var payload struct {
+		DocID string `json:"doc_id"`
+	}
+	if err := json.Unmarshal(t.Payload(), &payload); err != nil {
+		return err
+	}
+	if payload.DocID == "" {
+		return fmt.Errorf("rag: missing doc_id")
+	}
+	return s.runIngestWithRetries(ctx, payload.DocID)
+}
+
+func (s *Service) runIngestWithRetries(ctx context.Context, docID string) error {
+	var err error
+	// Cache the parsed content across retries so a transient embed/DB failure
+	// re-runs only the cheap embed step — never the paid MinerU OCR again.
+	cache := &parseCache{}
+	for attempt := 1; attempt <= 3; attempt++ {
+		if err = s.runPipeline(ctx, docID, cache); err == nil {
+			return nil
+		}
+		if s.logger != nil {
 			s.logger.Printf("rag: ingest %s attempt %d/3 failed: %v", docID, attempt, err)
-			// Back off between whole-pipeline retries so a transient upstream
-			// outage (e.g. embeddings TLS timeout) gets a chance to recover
-			// instead of being hammered three times in a row.
-			if attempt < 3 {
-				timer := time.NewTimer(time.Duration(attempt) * 3 * time.Second)
-				select {
-				case <-ctx.Done():
-					timer.Stop()
-					return ctx.Err()
-				case <-timer.C:
-				}
+		}
+		// Back off between whole-pipeline retries so a transient upstream outage
+		// (e.g. embeddings TLS timeout) gets a chance to recover instead of being
+		// hammered three times in a row.
+		if attempt < 3 {
+			timer := time.NewTimer(time.Duration(attempt) * 3 * time.Second)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return ctx.Err()
+			case <-timer.C:
 			}
 		}
-		_ = store.UpdateDocumentStatus(ctx, s.db, docID, "failed", err.Error(), 0)
-		return err
-	})
+	}
+	_ = store.UpdateDocumentStatus(ctx, s.db, docID, "failed", err.Error(), 0)
+	return err
 }
 
 // sanitizeIngestText removes NUL bytes and invalid UTF-8 from parsed document
@@ -213,8 +289,9 @@ func (s *Service) runPipeline(ctx context.Context, docID string, cache *parseCac
 	if strings.TrimSpace(sbKey) == "" {
 		sbKey = s.sandboxKey
 	}
-	storageCfg := storageBlockFromSettings(s.db)
+	storageCfg, storageIssues := storageBlockFromSettings(s.db)
 	storageClient := storage.New(sbURL, sbKey, storageCfg)
+	mineruIssues := minerUConfigIssues(mineruURL, mineruKey, sbURL, storageCfg, storageIssues)
 
 	// Spreadsheets are data, not prose: never parse or embed them. They stay as
 	// conversation files and are analysed in the code sandbox (python_execute
@@ -233,7 +310,7 @@ func (s *Service) runPipeline(ctx context.Context, docID string, cache *parseCac
 	if cache != nil && cache.ok {
 		content = cache.content
 	} else {
-		raw, extracted, perr := parseDocument(ctx, d.StoragePath, d.MimeType, d.Filename, mineruURL, mineruKey, storageClient, s.logger)
+		raw, extracted, perr := parseDocument(ctx, d.StoragePath, d.MimeType, d.Filename, mineruURL, mineruKey, storageClient, mineruIssues, s.logger)
 		if perr != nil {
 			return perr
 		}

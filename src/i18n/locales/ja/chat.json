@@ -94,6 +94,9 @@
     "ragFullText": "ドキュメント全文を挿入しました",
     "ragFullDoc": "ドキュメント全体のコンテキスト",
     "ragNone": "検索をスキップしました",
+    "ragIndexing": "ドキュメントを解析中",
+    "ragIndexingDone": "ドキュメントの準備完了",
+    "ragWarning": "ドキュメント検索の通知",
     "ragDefault": "取得したソース",
     "moderation": {
       "title": "コンテンツがブロックされました",

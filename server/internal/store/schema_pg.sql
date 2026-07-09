@@ -369,6 +369,10 @@ CREATE TABLE IF NOT EXISTS usage_logs (
   fallback           INTEGER NOT NULL DEFAULT 0, -- 1 = served via the model's fallback channel
   status             TEXT NOT NULL DEFAULT 'ok', -- ok | error (error requests are logged too, §usage errors)
   error              TEXT NOT NULL DEFAULT '',   -- upstream failure detail for status='error' rows (admin-only)
+  request_method     TEXT NOT NULL DEFAULT '',   -- sanitized upstream request diagnostics for status='error'
+  request_url        TEXT NOT NULL DEFAULT '',
+  request_headers    TEXT NOT NULL DEFAULT '',
+  request_body       TEXT NOT NULL DEFAULT '',
   created_at         BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
 );
 CREATE INDEX IF NOT EXISTS idx_usage_user_time ON usage_logs(user_id, created_at);

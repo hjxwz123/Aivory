@@ -23,8 +23,9 @@ type UnifiedBlock struct {
 	URL      string          `json:"url,omitempty"`
 	Title    string          `json:"title,omitempty"`
 	FileRef  string          `json:"file_ref,omitempty"`
-	// Data carries base64 payloads for image/document blocks built from user
-	// attachments (§4.6); MimeType qualifies it.
+	// Data carries base64 payloads for image blocks built from user
+	// attachments (§4.6); MimeType qualifies it. Document attachments are
+	// parsed/OCRed by RAG and injected as text, not sent as provider file blocks.
 	Data     string `json:"data,omitempty"`
 	MimeType string `json:"mime_type,omitempty"`
 	// Artifacts lists files this block references (§2.3-C ArtifactRef).

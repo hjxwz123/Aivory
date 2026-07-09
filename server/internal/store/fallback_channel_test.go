@@ -75,7 +75,11 @@ func TestUsageChannelFallbackStatus(t *testing.T) {
 	}
 	mustLog(UsageLog{UserID: "u1", ModelID: "m1", Purpose: "chat", Cost: 0.1, Currency: "USD", ChannelID: primary.ID})
 	mustLog(UsageLog{UserID: "u1", ModelID: "m1", Purpose: "chat", Cost: 0.2, Currency: "USD", ChannelID: backup.ID, Fallback: true})
-	mustLog(UsageLog{UserID: "u1", ModelID: "m1", Purpose: "chat", Currency: "USD", ChannelID: backup.ID, Fallback: true, Status: "error", Error: "openai 500: rate limited"})
+	mustLog(UsageLog{
+		UserID: "u1", ModelID: "m1", Purpose: "chat", Currency: "USD", ChannelID: backup.ID, Fallback: true,
+		Status: "error", Error: "openai 500: rate limited", RequestMethod: "POST", RequestURL: "https://api.example/v1/chat",
+		RequestHeaders: `{"Authorization":"[redacted]"}`, RequestBody: `{"model":"gpt-x"}`,
+	})
 
 	rows, err := AdminUsageRecords(ctx, db, UsageFilter{}, 50, 0)
 	if err != nil || len(rows) != 3 {
@@ -100,6 +104,10 @@ func TestUsageChannelFallbackStatus(t *testing.T) {
 	// The upstream failure detail is surfaced to the admin list (§usage errors).
 	if errRow.Error != "openai 500: rate limited" {
 		t.Fatalf("error detail not surfaced: %q", errRow.Error)
+	}
+	if errRow.RequestMethod != "POST" || errRow.RequestURL != "https://api.example/v1/chat" ||
+		errRow.RequestHeaders == "" || errRow.RequestBody == "" {
+		t.Fatalf("request diagnostics not surfaced: %+v", errRow)
 	}
 
 	// status=error filter returns only the failed row.

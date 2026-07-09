@@ -102,6 +102,15 @@ func main() {
 	} else {
 		logger.Printf("vector: disabled (brute-force over %s)", driverName(cfg.DatabaseURL))
 	}
+	if cfg.RedisURL != "" {
+		if err := ragSvc.UseAsynq(cfg.RedisURL); err != nil {
+			logger.Fatalf("rag asynq: %v", err)
+		}
+		defer ragSvc.CloseAsynq()
+		logger.Printf("rag queue: asynq/redis")
+	} else {
+		logger.Printf("rag queue: in-process (dev)")
+	}
 	toolRegistry := tools.NewRegistry(db, ragSvc, cfg, logger)
 	// Surface the sandbox wiring at boot — the #1 reason python_execute silently
 	// falls back to "safe-mode" (and the model says it can't run code / host

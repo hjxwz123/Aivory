@@ -183,15 +183,14 @@ function tryRefresh(): Promise<boolean> {
 }
 
 /** Open a streaming POST request that yields SSE events as parsed JSON.
- *  On network drop (fetch throws after the stream starts) the reader will
- *  retry up to MAX_SSE_RETRIES times with exponential backoff (1 s, 2 s, 4 s)
- *  before giving up and re-throwing the error. */
+ *  Creation streams are not retried: re-sending the POST would start a second
+ *  generation. Message-specific GET replay streams handle reconnect/resume. */
 const MAX_SSE_RETRIES = 3
 export async function* streamSSE(
   path: string,
   body: unknown,
   signal?: AbortSignal,
-): AsyncGenerator<{ event: string; data: unknown }> {
+): AsyncGenerator<{ event: string; data: unknown; id?: string }> {
   const sseTs = Math.floor(Date.now() / 1000)
   const sseNonce = _nonce()
   const sseSig = memoryToken ? await _sign(memoryToken, sseTs, sseNonce, path) : ''
@@ -232,59 +231,8 @@ export async function* streamSSE(
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
   let buf = ''
-  let retryCount = 0
-  let reconnectToastShown = false
   while (true) {
-    let done: boolean
-    let value: Uint8Array | undefined
-    try {
-      ;({ done, value } = await reader.read())
-    } catch (readErr) {
-      // Network drop during streaming. Attempt reconnect with exponential backoff.
-      if (signal?.aborted || retryCount >= MAX_SSE_RETRIES) throw readErr
-      retryCount++
-      const delay = Math.pow(2, retryCount - 1) * 1000 // 1s, 2s, 4s
-      if (!reconnectToastShown) {
-        reconnectToastShown = true
-        _sseToast.warning('Reconnecting…', 'Connection dropped, retrying automatically.')
-      }
-      await new Promise<void>((resolve) => setTimeout(resolve, delay))
-      // Re-open the stream. If the signal was aborted during the wait, bail out.
-      if (signal?.aborted) throw readErr
-      try {
-        const retryRes = await open()
-        if (!retryRes.ok || !retryRes.body) throw readErr
-        // Replace the reader with the new connection.
-        ;(reader as unknown as { releaseLock(): void }).releaseLock?.()
-        const retryReader = retryRes.body.getReader()
-        ;({ done, value } = await retryReader.read())
-        // Swap the reader reference by restarting the outer loop.
-        // We yield from the new reader by continuing inside this one.
-        // Since we can't swap the outer `reader` variable (const), we yield
-        // from here and return — callers see a seamless stream.
-        while (true) {
-          if (done) {
-            if (buf.trim().length > 0) {
-              const frame = parseSSEFrame(buf)
-              if (frame) yield frame
-            }
-            return
-          }
-          buf += decoder.decode(value, { stream: true })
-          let idx = buf.indexOf('\n\n')
-          while (idx !== -1) {
-            const raw = buf.slice(0, idx)
-            buf = buf.slice(idx + 2)
-            const frame = parseSSEFrame(raw)
-            if (frame) yield frame
-            idx = buf.indexOf('\n\n')
-          }
-          ;({ done, value } = await retryReader.read())
-        }
-      } catch {
-        throw readErr
-      }
-    }
+    const { done, value } = await reader.read()
     if (done) break
     buf += decoder.decode(value, { stream: true })
     // SSE frames are separated by \n\n.
@@ -304,19 +252,108 @@ export async function* streamSSE(
   }
 }
 
-function parseSSEFrame(raw: string): { event: string; data: unknown } | null {
+export async function* streamSSEGet(
+  path: string,
+  signal?: AbortSignal,
+  lastEventId?: string,
+): AsyncGenerator<{ event: string; data: unknown; id?: string }> {
+  let currentLastId = lastEventId ?? ''
+  let retryCount = 0
+  let reconnectToastShown = false
+  const open = () =>
+    fetch(API_BASE + path, {
+      method: 'GET',
+      credentials: 'include',
+      headers: {
+        accept: 'text/event-stream',
+        ...(memoryToken ? { authorization: `Bearer ${memoryToken}` } : {}),
+        ...(currentLastId ? { 'Last-Event-ID': currentLastId } : {}),
+      },
+      signal,
+    })
+
+  while (true) {
+    let res = await open()
+    if (res.status === 401 && !isAuthPath(path) && (await tryRefresh())) {
+      res = await open()
+    }
+    if (!res.ok || !res.body) {
+      let text = ''
+      try {
+        text = await res.text()
+      } catch {
+        /* ignore */
+      }
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(text)
+      } catch {
+        parsed = text
+      }
+      const e = parsed as ApiErrorShape | undefined
+      throw new ApiError(res.status, e?.error ?? `stream failed (${res.status})`, parsed)
+    }
+    try {
+      for await (const frame of readSSEBody(res.body)) {
+        if (frame.id) currentLastId = frame.id
+        retryCount = 0
+        yield frame
+        const typ = typeof frame.data === 'object' && frame.data ? (frame.data as { type?: string }).type : undefined
+        if (typ === 'done' || typ === 'error') return
+      }
+      return
+    } catch (readErr) {
+      if (signal?.aborted || retryCount >= MAX_SSE_RETRIES) throw readErr
+      retryCount++
+      const delay = Math.pow(2, retryCount - 1) * 1000
+      if (!reconnectToastShown) {
+        reconnectToastShown = true
+        _sseToast.warning('Reconnecting…', 'Connection dropped, retrying automatically.')
+      }
+      await new Promise<void>((resolve) => setTimeout(resolve, delay))
+      if (signal?.aborted) throw readErr
+    }
+  }
+}
+
+async function* readSSEBody(body: ReadableStream<Uint8Array>): AsyncGenerator<{ event: string; data: unknown; id?: string }> {
+  const reader = body.getReader()
+  const decoder = new TextDecoder()
+  let buf = ''
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buf += decoder.decode(value, { stream: true })
+    let idx = buf.indexOf('\n\n')
+    while (idx !== -1) {
+      const raw = buf.slice(0, idx)
+      buf = buf.slice(idx + 2)
+      const frame = parseSSEFrame(raw)
+      if (frame) yield frame
+      idx = buf.indexOf('\n\n')
+    }
+  }
+  if (buf.trim().length > 0) {
+    const frame = parseSSEFrame(buf)
+    if (frame) yield frame
+  }
+}
+
+function parseSSEFrame(raw: string): { event: string; data: unknown; id?: string } | null {
   let event = 'message'
+  let id: string | undefined
   const dataLines: string[] = []
   for (const line of raw.split('\n')) {
     if (line.startsWith(':')) continue
+    if (line.startsWith('id:')) id = line.slice(3).trim()
     if (line.startsWith('event:')) event = line.slice(6).trim()
     else if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart())
   }
   if (dataLines.length === 0) return null
   const text = dataLines.join('\n')
   try {
-    return { event, data: JSON.parse(text) }
+    return { event, data: JSON.parse(text), id }
   } catch {
-    return { event, data: text }
+    return { event, data: text, id }
   }
 }

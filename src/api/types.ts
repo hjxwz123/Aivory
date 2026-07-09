@@ -590,6 +590,11 @@ export interface ApiUsageRecord {
   status?: string
   /** Upstream failure detail for status='error' rows (admin-only; may embed provider bodies). */
   error?: string
+  /** Sanitized upstream request diagnostics for failed rows. */
+  request_method?: string
+  request_url?: string
+  request_headers?: string
+  request_body?: string
 }
 
 /** SSE event shapes — matches §6.2. */

@@ -16,6 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import {
+  DialogBody,
   Dialog,
   DialogContent,
   DialogDescription,
@@ -343,7 +344,7 @@ export default function AdminUsage() {
       </section>
 
       <Dialog open={!!errorDetail} onOpenChange={(o) => !o && setErrorDetail(null)}>
-        <DialogContent>
+        <DialogContent size="full">
           <DialogHeader>
             <DialogTitle>{t('usage.errorDetail.title', { defaultValue: 'Upstream error' })}</DialogTitle>
             <DialogDescription>
@@ -352,10 +353,26 @@ export default function AdminUsage() {
                 : ''}
             </DialogDescription>
           </DialogHeader>
-          <pre className="max-h-[50vh] overflow-auto rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-3 text-[12px] leading-relaxed text-[var(--color-fg-muted)] whitespace-pre-wrap break-words">
-            {errorDetail?.error ||
-              t('usage.errorDetail.none', { defaultValue: 'No error detail was recorded for this request.' })}
-          </pre>
+          <DialogBody className="space-y-4">
+            {errorDetail?.request_method || errorDetail?.request_url ? (
+              <div className="rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3 py-2 text-[12px] text-[var(--color-fg-muted)]">
+                <span className="font-medium text-[var(--color-fg)]">{errorDetail.request_method || 'REQUEST'}</span>
+                {errorDetail.request_url ? <span className="ml-2 break-all">{errorDetail.request_url}</span> : null}
+              </div>
+            ) : null}
+            <ErrorDetailBlock
+              title={t('usage.errorDetail.error', { defaultValue: 'Error' })}
+              content={errorDetail?.error || t('usage.errorDetail.none', { defaultValue: 'No error detail was recorded for this request.' })}
+            />
+            <ErrorDetailBlock
+              title={t('usage.errorDetail.headers', { defaultValue: 'Request headers' })}
+              content={errorDetail?.request_headers || t('usage.errorDetail.noHeaders', { defaultValue: 'No request headers were recorded.' })}
+            />
+            <ErrorDetailBlock
+              title={t('usage.errorDetail.body', { defaultValue: 'Request body' })}
+              content={errorDetail?.request_body || t('usage.errorDetail.noBody', { defaultValue: 'No request body was recorded.' })}
+            />
+          </DialogBody>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setErrorDetail(null)}>
               {t('common.close', { defaultValue: 'Close' })}
@@ -386,6 +403,17 @@ export default function AdminUsage() {
         </DialogContent>
       </Dialog>
     </div>
+  )
+}
+
+function ErrorDetailBlock({ title, content }: { title: string; content: string }) {
+  return (
+    <section>
+      <h3 className="mb-1.5 text-[12px] font-medium text-[var(--color-fg-subtle)]">{title}</h3>
+      <pre className="max-h-[34vh] overflow-auto rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-3 text-[12px] leading-relaxed text-[var(--color-fg-muted)] whitespace-pre-wrap break-words">
+        {content}
+      </pre>
+    </section>
   )
 }
 

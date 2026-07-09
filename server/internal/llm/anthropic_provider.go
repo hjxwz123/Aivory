@@ -372,20 +372,15 @@ func historyToAnthropic(h []UnifiedMessage) []map[string]any {
 			}
 		}
 		content := []map[string]any{}
-		// File attachments resolved by the orchestrator (§4.6).
+		// Image attachments resolved by the orchestrator (§4.6). Document
+		// attachments are intentionally excluded: PDFs/DOCX/PPTX/etc. always enter
+		// the model through the RAG text path, never native provider file blocks.
 		for _, b := range m.Blocks {
 			switch b.Kind {
 			case "image":
 				if b.Data != "" {
 					content = append(content, map[string]any{
 						"type":   "image",
-						"source": map[string]any{"type": "base64", "media_type": b.MimeType, "data": b.Data},
-					})
-				}
-			case "document":
-				if b.Data != "" {
-					content = append(content, map[string]any{
-						"type":   "document",
 						"source": map[string]any{"type": "base64", "media_type": b.MimeType, "data": b.Data},
 					})
 				}

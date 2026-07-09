@@ -234,13 +234,6 @@ func historyToGemini(h []UnifiedMessage) []map[string]any {
 					"inlineData": map[string]any{"mimeType": b.MimeType, "data": b.Data},
 				})
 			}
-			// PDF document blocks: Gemini accepts them as inlineData with
-			// mimeType=application/pdf (§4.10-G doc capability).
-			if b.Kind == "document" && b.Data != "" {
-				parts = append(parts, map[string]any{
-					"inlineData": map[string]any{"mimeType": b.MimeType, "data": b.Data},
-				})
-			}
 		}
 		if text := renderBlocksAsText(m.Blocks); text != "" {
 			parts = append(parts, map[string]any{"text": text})

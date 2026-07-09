@@ -235,6 +235,7 @@ func importBackupAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 
 	// The settings cache (and the admin's own session) now reflect wiped data.
 	store.InvalidateConfig()
+	bumpAuthCacheEpoch(d)
 	d.Logger.Printf("backup import: restored %d tables, %d files (source dialect=%s)", len(counts), filesRestored, man.Dialect)
 
 	writeJSON(w, http.StatusOK, map[string]any{

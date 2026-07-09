@@ -246,10 +246,11 @@ func LogUsage(ctx context.Context, db *sql.DB, u UsageLog) error {
 		status = "ok"
 	}
 	_, err := db.ExecContext(ctx,
-		`INSERT INTO usage_logs(user_id, conversation_id, message_id, model_id, purpose, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, images_count, cost, currency, credits, workspace_id, channel_id, fallback, status, error, created_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO usage_logs(user_id, conversation_id, message_id, model_id, purpose, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, images_count, cost, currency, credits, workspace_id, channel_id, fallback, status, error, request_method, request_url, request_headers, request_body, created_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		u.UserID, nullable(u.ConversationID), nullable(u.MessageID), u.ModelID, u.Purpose,
 		u.InputTokens, u.OutputTokens, u.CacheReadTokens, u.CacheWriteTokens, u.ImagesCount,
-		u.Cost, u.Currency, u.Credits, u.WorkspaceID, u.ChannelID, boolInt(u.Fallback), status, u.Error, time.Now().Unix())
+		u.Cost, u.Currency, u.Credits, u.WorkspaceID, u.ChannelID, boolInt(u.Fallback), status, u.Error,
+		u.RequestMethod, u.RequestURL, u.RequestHeaders, u.RequestBody, time.Now().Unix())
 	return err
 }
 
@@ -316,6 +317,12 @@ type AdminUsageRecord struct {
 	// Error is the upstream failure detail for status='error' rows. Surfaced only
 	// on this admin endpoint (requireAdmin), never to end users.
 	Error string `json:"error,omitempty"`
+	// Request* are sanitized upstream request diagnostics for status='error' rows.
+	// Headers have secrets masked; bodies are capped/redacted before storage.
+	RequestMethod  string `json:"request_method,omitempty"`
+	RequestURL     string `json:"request_url,omitempty"`
+	RequestHeaders string `json:"request_headers,omitempty"`
+	RequestBody    string `json:"request_body,omitempty"`
 }
 
 // UsageFilter scopes the admin usage list / delete. Zero fields = no constraint.
@@ -373,7 +380,8 @@ func AdminUsageRecords(ctx context.Context, db *sql.DB, f UsageFilter, limit, of
 	             CASE WHEN u.conversation_id IS NOT NULL AND u.conversation_id <> '' AND c.id IS NULL THEN 1 ELSE 0 END,
 	             u.model_id, u.purpose, u.input_tokens, u.output_tokens, u.cost, u.currency, u.created_at,
 	             COALESCE(u.workspace_id,''), COALESCE(w.name,''),
-	             COALESCE(u.channel_id,''), COALESCE(ch.name,''), COALESCE(u.fallback,0), COALESCE(u.status,'ok'), COALESCE(u.error,'')
+		             COALESCE(u.channel_id,''), COALESCE(ch.name,''), COALESCE(u.fallback,0), COALESCE(u.status,'ok'), COALESCE(u.error,''),
+		             COALESCE(u.request_method,''), COALESCE(u.request_url,''), COALESCE(u.request_headers,''), COALESCE(u.request_body,'')
 	      FROM usage_logs u
 	      LEFT JOIN users usr ON usr.id = u.user_id
 	      LEFT JOIN conversations c ON c.id = u.conversation_id
@@ -392,7 +400,8 @@ func AdminUsageRecords(ctx context.Context, db *sql.DB, f UsageFilter, limit, of
 		var gone, fb int
 		if err := rows.Scan(&r.ID, &r.UserID, &r.UserEmail, &r.ConversationID, &r.ConversationTitle, &gone,
 			&r.ModelID, &r.Purpose, &r.InputTokens, &r.OutputTokens, &r.Cost, &r.Currency, &r.CreatedAt,
-			&r.WorkspaceID, &r.WorkspaceName, &r.ChannelID, &r.ChannelName, &fb, &r.Status, &r.Error); err != nil {
+			&r.WorkspaceID, &r.WorkspaceName, &r.ChannelID, &r.ChannelName, &fb, &r.Status, &r.Error,
+			&r.RequestMethod, &r.RequestURL, &r.RequestHeaders, &r.RequestBody); err != nil {
 			return nil, err
 		}
 		r.ConversationDeleted = gone == 1

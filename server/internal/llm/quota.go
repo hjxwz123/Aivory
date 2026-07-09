@@ -248,9 +248,9 @@ func (o *Orchestrator) logUsage(ctx context.Context, log store.UsageLog) {
 // estimateRequestTokens approximates the INPUT token footprint of the assembled
 // upstream request — system prompt + tool defs + the full history (which already
 // contains the injected RAG/summary/attachments). Heuristic (CJK-aware via
-// estimateTokens), no tokenizer; base64 image/document payloads aren't text-
-// tokenised so they're counted at a flat per-block allowance. Used by the
-// §credits pre-flight gate.
+// estimateTokens), no tokenizer; base64 image payloads aren't text-tokenised so
+// they're counted at a flat per-block allowance. Documents use the RAG text path.
+// Used by the §credits pre-flight gate.
 func estimateRequestTokens(req UnifiedChatRequest) int {
 	t := estimateTokens(req.SystemPrompt)
 	if len(req.Tools) > 0 {

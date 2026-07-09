@@ -159,3 +159,46 @@ func (c *redisCache) Subscribe(topic string) (chan string, func()) {
 	}
 	return out, unsubscribe
 }
+
+func (c *redisCache) StreamAppend(key, value string, ttl time.Duration) (string, bool) {
+	ctx, cancel := context.WithTimeout(c.ctx, 3*time.Second)
+	defer cancel()
+	id, err := c.rdb.XAdd(ctx, &redis.XAddArgs{
+		Stream: key,
+		Values: map[string]any{"data": value},
+		MaxLen: 50000,
+		Approx: true,
+	}).Result()
+	if err != nil {
+		return "", false
+	}
+	if ttl > 0 {
+		_ = c.rdb.Expire(ctx, key, ttl).Err()
+	}
+	return id, true
+}
+
+func (c *redisCache) StreamRead(key, afterID string, limit int) ([]StreamEvent, bool) {
+	if limit <= 0 {
+		limit = 100
+	}
+	ctx, cancel := context.WithTimeout(c.ctx, 3*time.Second)
+	defer cancel()
+	start := "-"
+	if afterID != "" {
+		start = "(" + afterID
+	}
+	rows, err := c.rdb.XRangeN(ctx, key, start, "+", int64(limit)).Result()
+	if err != nil {
+		return nil, false
+	}
+	out := make([]StreamEvent, 0, len(rows))
+	for _, row := range rows {
+		v, _ := row.Values["data"].(string)
+		if v == "" {
+			continue
+		}
+		out = append(out, StreamEvent{ID: row.ID, Value: v})
+	}
+	return out, true
+}

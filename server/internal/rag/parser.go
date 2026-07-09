@@ -15,6 +15,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -70,6 +71,7 @@ func parseDocument(
 	docPath, mime, filename string,
 	mineruURL, mineruToken string,
 	sb *storage.Client,
+	mineruConfigIssues []string,
 	logger *log.Logger,
 ) (content string, extracted bool, err error) {
 	if docPath == "" {
@@ -95,7 +97,11 @@ func parseDocument(
 	// MinerU OCR needs BOTH the API creds AND object storage + the sandbox
 	// sidecar (it fetches the file via a presigned bucket URL). Missing any of
 	// these is the usual reason a scanned doc comes back empty — surface it.
-	mineruReady := mineruURL != "" && mineruToken != "" && sb.Enabled()
+	mineruReady := len(mineruConfigIssues) == 0 && mineruURL != "" && mineruToken != "" && sb.Enabled()
+	mineruIssueSummary := strings.Join(mineruConfigIssues, "; ")
+	if mineruIssueSummary == "" && !mineruReady {
+		mineruIssueSummary = "storage upload client is disabled"
+	}
 	var mineruErr error // last MinerU failure reason, for the diagnostic placeholder + logs
 	logf := func(format string, args ...any) {
 		if logger != nil {
@@ -147,9 +153,9 @@ func parseDocument(
 			return text, true, nil // usable text layer → local, instant
 		}
 		if scanned {
-			logf("rag: %q is a scanned/text-less PDF — routing to MinerU OCR (configured=%v)", filename, mineruReady)
+			logf("rag: %q is a scanned/text-less PDF — routing to MinerU OCR (configured=%v missing=%q)", filename, mineruReady, mineruIssueSummary)
 		} else if thin {
-			logf("rag: %q has a thin text layer (%d chars over %d pages, images present) — routing to MinerU OCR (configured=%v)", filename, len(text), pages, mineruReady)
+			logf("rag: %q has a thin text layer (%d chars over %d pages, images present) — routing to MinerU OCR (configured=%v missing=%q)", filename, len(text), pages, mineruReady, mineruIssueSummary)
 		}
 		if md, done := tryMineru(); done {
 			return md, true, nil // scanned / thin-text → MinerU
@@ -174,7 +180,7 @@ func parseDocument(
 	var reason string
 	switch {
 	case !mineruReady:
-		reason = "It looks scanned/image-only, which needs MinerU OCR — but MinerU isn't fully configured. Set mineru_api_url + mineru_api_token AND object storage (S3/OSS) + the sandbox sidecar in admin settings, then re-upload."
+		reason = "It looks scanned/image-only, which needs MinerU OCR — but MinerU isn't fully configured. Missing: " + mineruIssueSummary + ". Configure mineru_api_url + mineru_api_token, sandbox_base_url, and S3/OSS object storage (local storage cannot be used by MinerU), then re-upload."
 	case mineruErr != nil:
 		reason = "MinerU OCR was attempted but failed: " + mineruErr.Error() + ". Check the MinerU API token/quota and that object storage is reachable, then re-upload."
 	default:
@@ -830,20 +836,30 @@ func formatFloat(f float64) string {
 }
 
 // storageBlockFromSettings reads the admin-configured S3 / OSS block from the
-// settings table. Returns nil when no provider is set or required fields are
-// missing — caller treats that as "no upload bucket; MinerU disabled".
-func storageBlockFromSettings(db *sql.DB) *sandbox.StorageConfig {
+// settings table. Returns nil + human-readable issues when no provider is set
+// or required fields are missing — caller treats that as "no upload bucket;
+// MinerU disabled". The sandbox's "local" provider is intentionally rejected:
+// it can archive workspaces, but it cannot give MinerU cloud a presigned fetch
+// URL.
+func storageBlockFromSettings(db *sql.DB) (*sandbox.StorageConfig, []string) {
 	if db == nil {
-		return nil
+		return nil, []string{"settings database is unavailable"}
 	}
 	provider := readSettingString(db, "storage_provider", "")
 	if provider != "s3" && provider != "aliyun_oss" {
-		return nil
+		if provider == "" {
+			return nil, []string{"storage_provider is empty (choose s3 or aliyun_oss for MinerU)"}
+		}
+		if provider == "local" {
+			return nil, []string{`storage_provider is "local"; MinerU needs s3 or aliyun_oss because local storage has no presigned fetch URL`}
+		}
+		return nil, []string{"storage_provider " + strconv.Quote(provider) + " is unsupported for MinerU"}
 	}
 	cfg := &sandbox.StorageConfig{
 		Provider: provider,
 		Prefix:   readSettingString(db, "storage_prefix", "workspaces/"),
 	}
+	issues := []string{}
 	switch provider {
 	case "s3":
 		cfg.S3Bucket = readSettingString(db, "storage_s3_bucket", "")
@@ -851,16 +867,53 @@ func storageBlockFromSettings(db *sql.DB) *sandbox.StorageConfig {
 		cfg.S3Endpoint = readSettingString(db, "storage_s3_endpoint", "")
 		cfg.S3AccessKey = readSettingString(db, "storage_s3_access_key", "")
 		cfg.S3SecretKey = readSettingString(db, "storage_s3_secret_key", "")
+		if cfg.S3Bucket == "" {
+			issues = append(issues, "storage_s3_bucket is empty")
+		}
 	case "aliyun_oss":
 		cfg.OSSBucket = readSettingString(db, "storage_aliyun_bucket", "")
 		cfg.OSSEndpoint = readSettingString(db, "storage_aliyun_endpoint", "")
 		cfg.OSSAccessKeyID = readSettingString(db, "storage_aliyun_access_key_id", "")
 		cfg.OSSAccessKeySecret = readSettingString(db, "storage_aliyun_access_key_secret", "")
+		if cfg.OSSBucket == "" {
+			issues = append(issues, "storage_aliyun_bucket is empty")
+		}
+		if cfg.OSSEndpoint == "" {
+			issues = append(issues, "storage_aliyun_endpoint is empty")
+		}
+		if cfg.OSSAccessKeyID == "" {
+			issues = append(issues, "storage_aliyun_access_key_id is empty")
+		}
+		if cfg.OSSAccessKeySecret == "" {
+			issues = append(issues, "storage_aliyun_access_key_secret is empty")
+		}
 	}
-	if !cfg.Effective() {
-		return nil
+	if len(issues) > 0 || !cfg.Effective() {
+		if len(issues) == 0 {
+			issues = append(issues, "object storage config is incomplete")
+		}
+		return nil, issues
 	}
-	return cfg
+	return cfg, nil
+}
+
+func minerUConfigIssues(mineruURL, mineruToken, sandboxURL string, storageCfg *sandbox.StorageConfig, storageIssues []string) []string {
+	issues := []string{}
+	if strings.TrimSpace(mineruURL) == "" {
+		issues = append(issues, "mineru_api_url is empty")
+	}
+	if strings.TrimSpace(mineruToken) == "" {
+		issues = append(issues, "mineru_api_token is empty")
+	}
+	if strings.TrimSpace(sandboxURL) == "" {
+		issues = append(issues, "sandbox_base_url is empty")
+	}
+	if len(storageIssues) > 0 {
+		issues = append(issues, storageIssues...)
+	} else if storageCfg == nil || !storageCfg.Effective() {
+		issues = append(issues, "S3/OSS object storage is not configured")
+	}
+	return issues
 }
 
 // readSettingString reads one setting key as a JSON string. When the row is

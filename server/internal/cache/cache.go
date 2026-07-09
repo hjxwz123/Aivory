@@ -22,6 +22,8 @@ type Cache interface {
 	Decr(key string) int64
 	Publish(topic string, payload string)
 	Subscribe(topic string) (chan string, func())
+	StreamAppend(key, value string, ttl time.Duration) (string, bool)
+	StreamRead(key, afterID string, limit int) ([]StreamEvent, bool)
 }
 
 type memoryEntry struct {
@@ -29,20 +31,36 @@ type memoryEntry struct {
 	exp   int64 // unix nanos; 0 = no expiry
 }
 
+// StreamEvent is one durable-enough event in an append-only cache stream. Redis
+// backs this with XADD/XRANGE; the in-memory implementation mirrors the same
+// contract for local development and tests.
+type StreamEvent struct {
+	ID    string
+	Value string
+}
+
 // memory is a goroutine-safe, in-process implementation. Tuned to be simple,
 // not fast — we expect single-digit ops/sec from the dev profile.
 type memory struct {
-	mu     sync.RWMutex
-	store  map[string]memoryEntry
-	subsMu sync.Mutex
-	subs   map[string][]chan string
+	mu        sync.RWMutex
+	store     map[string]memoryEntry
+	subsMu    sync.Mutex
+	subs      map[string][]chan string
+	streams   map[string]memoryStream
+	streamSeq int64
+}
+
+type memoryStream struct {
+	events []StreamEvent
+	exp    int64 // unix nanos; 0 = no expiry
 }
 
 // NewMemory constructs a fresh in-memory cache.
 func NewMemory() Cache {
 	return &memory{
-		store: map[string]memoryEntry{},
-		subs:  map[string][]chan string{},
+		store:   map[string]memoryEntry{},
+		subs:    map[string][]chan string{},
+		streams: map[string]memoryStream{},
 	}
 }
 
@@ -198,4 +216,65 @@ func (m *memory) Subscribe(topic string) (chan string, func()) {
 			close(ch)
 		})
 	}
+}
+
+func (m *memory) StreamAppend(key, value string, ttl time.Duration) (string, bool) {
+	exp := int64(0)
+	if ttl > 0 {
+		exp = time.Now().Add(ttl).UnixNano()
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.streamSeq++
+	id := formatInt(time.Now().UnixMilli()) + "-" + formatInt(m.streamSeq)
+	s := m.streams[key]
+	if s.exp > 0 && time.Now().UnixNano() > s.exp {
+		s = memoryStream{}
+	}
+	s.events = append(s.events, StreamEvent{ID: id, Value: value})
+	// Keep a generous cap for dev. Production Redis uses MAXLEN too; either way,
+	// generation streams are for short-lived reconnect/replay, not archival.
+	if len(s.events) > 50000 {
+		s.events = append([]StreamEvent(nil), s.events[len(s.events)-50000:]...)
+	}
+	s.exp = exp
+	m.streams[key] = s
+	return id, true
+}
+
+func (m *memory) StreamRead(key, afterID string, limit int) ([]StreamEvent, bool) {
+	if limit <= 0 {
+		limit = 100
+	}
+	m.mu.RLock()
+	s, ok := m.streams[key]
+	m.mu.RUnlock()
+	if !ok {
+		return nil, true
+	}
+	if s.exp > 0 && time.Now().UnixNano() > s.exp {
+		m.mu.Lock()
+		delete(m.streams, key)
+		m.mu.Unlock()
+		return nil, true
+	}
+	start := 0
+	if afterID != "" {
+		start = len(s.events)
+		for i, ev := range s.events {
+			if ev.ID == afterID {
+				start = i + 1
+				break
+			}
+		}
+	}
+	if start >= len(s.events) {
+		return []StreamEvent{}, true
+	}
+	end := start + limit
+	if end > len(s.events) {
+		end = len(s.events)
+	}
+	out := append([]StreamEvent(nil), s.events[start:end]...)
+	return out, true
 }

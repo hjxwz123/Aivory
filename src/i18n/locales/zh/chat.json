@@ -94,6 +94,9 @@
     "ragFullText": "已注入完整文档",
     "ragFullDoc": "全文档上下文",
     "ragNone": "跳过检索",
+    "ragIndexing": "文档解析中",
+    "ragIndexingDone": "文档已入库",
+    "ragWarning": "文档检索提示",
     "ragDefault": "已检索来源",
     "moderation": {
       "title": "内容被拦截",

@@ -398,7 +398,11 @@ type UsageLog struct {
 	Status    string `json:"status,omitempty"`
 	// Error is the upstream failure detail for status='error' rows (admin-only;
 	// may embed provider response bodies, so it is never returned to end users).
-	Error string `json:"-"`
+	Error          string `json:"-"`
+	RequestMethod  string `json:"-"`
+	RequestURL     string `json:"-"`
+	RequestHeaders string `json:"-"`
+	RequestBody    string `json:"-"`
 }
 
 // File — uploaded file metadata.

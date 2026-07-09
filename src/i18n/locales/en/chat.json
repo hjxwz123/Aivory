@@ -94,6 +94,9 @@
     "ragFullText": "Injected full document(s)",
     "ragFullDoc": "Whole-document context",
     "ragNone": "Skipped retrieval",
+    "ragIndexing": "Indexing document",
+    "ragIndexingDone": "Document indexed",
+    "ragWarning": "Document retrieval notice",
     "ragDefault": "Retrieved sources",
     "moderation": {
       "title": "Content blocked",
