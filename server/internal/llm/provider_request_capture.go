@@ -153,7 +153,7 @@ func sanitizeProviderRequestBody(body []byte) string {
 }
 
 func sanitizeProviderJSONValue(key string, v any) any {
-	if key != "" && isSensitiveName(key) {
+	if key != "" && !isProviderJSONTokenCountName(key) && isSensitiveName(key) {
 		return "[redacted]"
 	}
 	switch x := v.(type) {
@@ -172,6 +172,16 @@ func sanitizeProviderJSONValue(key string, v any) any {
 		return sanitizeProviderString(x)
 	default:
 		return v
+	}
+}
+
+func isProviderJSONTokenCountName(name string) bool {
+	n := strings.ToLower(strings.TrimSpace(name))
+	switch n {
+	case "max_tokens", "max_completion_tokens", "budget_tokens":
+		return true
+	default:
+		return false
 	}
 }
 

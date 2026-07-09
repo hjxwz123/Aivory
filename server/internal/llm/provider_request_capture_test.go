@@ -43,6 +43,31 @@ func TestProviderRequestRecorderSanitizesHeadersBodyAndURL(t *testing.T) {
 	}
 }
 
+func TestProviderRequestRecorderDoesNotRedactTokenCounts(t *testing.T) {
+	rec := newProviderRequestRecorder()
+	ctx := contextWithProviderRequestRecorder(context.Background(), rec)
+	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.example/v1/messages", bytes.NewReader([]byte(`{
+		"max_tokens": 4096,
+		"max_completion_tokens": 8192,
+		"thinking": {"type": "enabled", "budget_tokens": 2048},
+		"access_token": "secret"
+	}`)))
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+
+	recordProviderRequest(ctx, req)
+	got := rec.snapshot().Body
+	for _, want := range []string{`"max_tokens": 4096`, `"max_completion_tokens": 8192`, `"budget_tokens": 2048`} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("token count %s was not preserved: %s", want, got)
+		}
+	}
+	if strings.Contains(got, "secret") || !strings.Contains(got, `"access_token": "[redacted]"`) {
+		t.Fatalf("access_token was not redacted: %s", got)
+	}
+}
+
 func TestProviderRequestRecorderRedactsLargeJSONBeforeTruncating(t *testing.T) {
 	rec := newProviderRequestRecorder()
 	ctx := contextWithProviderRequestRecorder(context.Background(), rec)

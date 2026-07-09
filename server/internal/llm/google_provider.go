@@ -81,21 +81,6 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 			body["tools"] = toolsDecl
 		}
 		body = MergeParamControls(body, req.ParamControls, req.ParamOverrides)
-		// Request thought summaries by default on thinking-capable models so the
-		// chain-of-thought streams (official format:
-		// generationConfig.thinkingConfig.includeThoughts). param_controls can
-		// override the budget or disable it. Older models reject thinkingConfig, so
-		// it's gated to the families that support it.
-		if geminiSupportsThinking(req.Model.RequestID) {
-			gc, ok := body["generationConfig"].(map[string]any)
-			if !ok {
-				gc = map[string]any{}
-				body["generationConfig"] = gc
-			}
-			if _, has := gc["thinkingConfig"]; !has {
-				gc["thinkingConfig"] = map[string]any{"includeThoughts": true}
-			}
-		}
 		raw, _ := json.Marshal(body)
 		// §4.10-G stream: streamGenerateContent returns SSE-style JSON-array
 		// chunks; we use alt=sse to get one event per line.
@@ -250,20 +235,6 @@ func historyToGemini(h []UnifiedMessage) []map[string]any {
 type geminiCall struct {
 	Name string
 	Args json.RawMessage
-}
-
-// geminiSupportsThinking reports whether the model's request id is a
-// thinking-capable Gemini (2.5 series and newer). Older models reject
-// generationConfig.thinkingConfig, so we only default thought summaries on for
-// the families that accept it.
-func geminiSupportsThinking(requestID string) bool {
-	id := strings.ToLower(requestID)
-	for _, p := range []string{"2.5", "2-5", "gemini-3", "gemini-4"} {
-		if strings.Contains(id, p) {
-			return true
-		}
-	}
-	return false
 }
 
 // geminiSkipSigSentinel is Google's documented placeholder thoughtSignature for

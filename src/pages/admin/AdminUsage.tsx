@@ -240,7 +240,7 @@ export default function AdminUsage() {
           </div>
         ) : (
           <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] overflow-x-auto">
-            <table className="min-w-[820px] w-full text-sm tabular-nums">
+            <table className="min-w-[1120px] w-full text-sm tabular-nums">
               <thead className="bg-[var(--color-bg-muted)] text-[12px] text-[var(--color-fg-subtle)]">
                 <tr>
                   <th className="text-left py-2.5 px-4 font-medium">{t('usage.table.time', { defaultValue: 'Time' })}</th>
@@ -305,15 +305,15 @@ export default function AdminUsage() {
                         <span className="text-[var(--color-fg-faint)]">—</span>
                       )}
                     </td>
-                    <td className="py-2 px-4 text-[var(--color-fg-muted)]">
-                      <span className="inline-flex items-center gap-1.5">
+                    <td className="py-2 px-4 text-[var(--color-fg-muted)] whitespace-nowrap">
+                      <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
                         {purposeLabel(r.purpose)}
                         {r.status === 'error' ? (
                           <button
                             type="button"
                             onClick={() => setErrorDetail(r)}
                             title={t('usage.errorDetail.view', { defaultValue: 'View error detail' })}
-                            className="rounded-full bg-[var(--color-danger-soft)] px-1.5 text-[10px] text-[var(--color-danger)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                            className="inline-flex h-5 shrink-0 items-center justify-center whitespace-nowrap rounded-full bg-[var(--color-danger-soft)] px-2 text-[10px] leading-none text-[var(--color-danger)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
                           >
                             {t('usage.statusError', { defaultValue: 'Error' })}
                           </button>
