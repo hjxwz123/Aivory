@@ -66,3 +66,45 @@ func TestListMessagesActivePath(t *testing.T) {
 		t.Fatalf("a1 path = %v, want [root a1]", g)
 	}
 }
+
+func TestCreateUserMessageCommitsDraftAttachments(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(filepath.Join(t.TempDir(), "commit-draft.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer db.Close()
+	if err := Migrate(db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	exec(t, db, `INSERT INTO users(id,email,password_hash,role) VALUES('u1','a@b.c','h','user')`)
+	if _, err := CreateConversation(ctx, db, Conversation{ID: "c1", UserID: "u1", Title: "t"}); err != nil {
+		t.Fatalf("conv: %v", err)
+	}
+	if _, err := CreateFile(ctx, db, File{
+		ID: "f1", UserID: "u1", ConversationID: "c1", Filename: "draft.pdf",
+		MimeType: "application/pdf", Kind: "pdf", StoragePath: "/tmp/draft.pdf", Draft: true,
+	}); err != nil {
+		t.Fatalf("file: %v", err)
+	}
+	attachments := json.RawMessage(`[{"id":"f1","filename":"draft.pdf","kind":"pdf"}]`)
+	if _, err := CreateMessage(ctx, db, Message{
+		ID: "m1", ConversationID: "c1", Role: "user", Blocks: json.RawMessage(`[]`), Attachments: attachments,
+	}); err != nil {
+		t.Fatalf("message: %v", err)
+	}
+	file, err := GetFile(ctx, db, "f1", "u1")
+	if err != nil {
+		t.Fatalf("get file: %v", err)
+	}
+	if file.Draft {
+		t.Fatal("file remained draft after its user message was committed")
+	}
+	drafts, err := ListDraftFilesForConversation(ctx, db, "c1")
+	if err != nil {
+		t.Fatalf("list drafts: %v", err)
+	}
+	if len(drafts) != 0 {
+		t.Fatalf("drafts = %+v, want none", drafts)
+	}
+}

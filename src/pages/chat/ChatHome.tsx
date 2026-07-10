@@ -13,9 +13,15 @@ import { useAuth } from '@/store/auth'
 import { useModels } from '@/store/models'
 import { useUI } from '@/store/ui'
 import { useComposerPrefs } from '@/store/composer-prefs'
-import { activeWorkspaceId } from '@/store/workspaces'
-import { apiUrl, conversationsApi, getAccessToken } from '@/api'
+import { useWorkspaces } from '@/store/workspaces'
+import { conversationsApi } from '@/api'
 import { cn } from '@/lib/utils'
+import {
+  clearPendingConversation,
+  pendingConversationKey,
+  readPendingConversation,
+  writePendingConversation,
+} from '@/lib/pending-conversation'
 import type { Attachment } from '@/types/chat'
 import type { ApiConversation } from '@/api/types'
 
@@ -48,6 +54,7 @@ export default function ChatHome() {
   const defaultModelId = useModels((s) => s.defaultId)
   const imageModels = useModels((s) => s.imageModels)
   const user = useAuth((s) => s.user)
+  const workspaceId = useWorkspaces((s) => s.activeId ?? undefined)
   const clearComposerDraft = useComposerPrefs((s) => s.clearDraft)
 
   // The home screen has no title to show, so on mobile it drops the layout's
@@ -64,6 +71,10 @@ export default function ChatHome() {
   const drawMode = searchParams.get('mode') === 'draw'
   const draftScope = drawMode ? 'new-draw' : 'new-chat'
   const drawDefault = drawMode && imageModels[0] ? imageModels[0].id : ''
+  const pendingStorageKey = useMemo(
+    () => pendingConversationKey(user?.id, draftScope, workspaceId),
+    [draftScope, user?.id, workspaceId],
+  )
 
   // The model the user picks in the composer before the conversation exists.
   // Falls back to the draw default (if any), then the async-loaded chat default,
@@ -76,18 +87,68 @@ export default function ChatHome() {
   // Stash it here so the eventual send reuses the SAME conversation instead of
   // spawning a second empty one. Created OUTSIDE the store on purpose: the
   // draft stays off the sidebar (no "Untitled" row from merely attaching) and
-  // only enters the cache on send (adoptConversation). If the draft is
-  // abandoned instead, the cleanup below deletes it server-side.
+  // only enters the cache on send (adoptConversation). Its id is persisted so
+  // a refresh can reclaim the draft without exposing it in the sidebar.
   const pendingConvRef = useRef<ApiConversation | null>(null)
   const pendingCreateRef = useRef<Promise<string | undefined> | null>(null)
   const pendingConsumedRef = useRef(false)
+  const mountedRef = useRef(true)
+  // Read synchronously on the first render so Composer starts in its restoring
+  // state and cannot submit an attachment-less turn before recovery finishes.
+  const [pendingConversationId, setPendingConversationId] = useState<string | undefined>(() =>
+    readPendingConversation(pendingStorageKey),
+  )
+  const pendingStorageKeyRef = useRef(pendingStorageKey)
+  pendingStorageKeyRef.current = pendingStorageKey
   // Guards startNew against a double fire (rapid re-click, two suggestion cards)
   // spawning duplicate conversations + sends.
   const startedRef = useRef(false)
-  // True once this mount's cleanup ran — a create that resolves AFTER the user
-  // left the page must delete itself instead of stashing into a dead ref.
-  const disposedRef = useRef(false)
   const adoptConversation = useConversations((s) => s.adoptConversation)
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
+
+  // Reclaim an attachment-created conversation after a refresh. Keep the id in
+  // durable browser storage instead of deleting it from pagehide: unload-time
+  // DELETE requests are inherently racy and used to discard minutes of parsing.
+  useEffect(() => {
+    pendingConvRef.current = null
+    pendingCreateRef.current = null
+    pendingConsumedRef.current = false
+    const savedID = readPendingConversation(pendingStorageKey)
+    setPendingConversationId(savedID)
+    if (!savedID) return
+    let cancelled = false
+    const recovery = (async () => {
+      try {
+        const loaded = await conversationsApi.get(savedID, { limit: 1 })
+        if (loaded.messages.length > 0) {
+          clearPendingConversation(pendingStorageKey)
+          if (!cancelled) setPendingConversationId(undefined)
+          return undefined
+        }
+        if (cancelled) return savedID
+        pendingConvRef.current = loaded.conversation
+        setPendingConversationId(savedID)
+        return savedID
+      } catch {
+        clearPendingConversation(pendingStorageKey)
+        if (!cancelled) setPendingConversationId(undefined)
+        return undefined
+      }
+    })()
+    pendingCreateRef.current = recovery
+    void recovery.finally(() => {
+      if (pendingCreateRef.current === recovery) pendingCreateRef.current = null
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [pendingStorageKey])
 
   // Lazily create (once) the conversation the first attachment will be scoped
   // to. Idempotent: repeat attaches in the same draft reuse the same id — the
@@ -99,67 +160,36 @@ export default function ChatHome() {
   function ensureConversation(): Promise<string | undefined> {
     if (pendingConvRef.current) return Promise.resolve(pendingConvRef.current.id)
     if (!pendingCreateRef.current) {
-      pendingCreateRef.current = (async () => {
+      const storageKey = pendingStorageKey
+      const creation = (async () => {
         try {
           const created = await conversationsApi.create({
             model_id: modelId || undefined,
-            workspace_id: activeWorkspaceId(),
+            workspace_id: workspaceId,
           })
-          // The user may have navigated away, or sent meanwhile (a suggestion
-          // card bypasses the composer's upload gate), while the create was in
-          // flight — this draft must delete itself instead of leaking.
-          if (disposedRef.current || pendingConsumedRef.current) {
+          // A suggestion card can bypass the composer's upload gate while this
+          // create is in flight. A mode/workspace switch also invalidates this
+          // scope before any upload starts.
+          if (pendingConsumedRef.current || pendingStorageKeyRef.current !== storageKey) {
             void conversationsApi.remove(created.id).catch(() => {})
             return undefined
           }
+          writePendingConversation(storageKey, created.id)
+          if (!mountedRef.current) return created.id
           pendingConvRef.current = created
+          setPendingConversationId(created.id)
           return created.id
         } catch {
           return undefined
-        } finally {
-          pendingCreateRef.current = null
         }
       })()
+      pendingCreateRef.current = creation
+      void creation.finally(() => {
+        if (pendingCreateRef.current === creation) pendingCreateRef.current = null
+      })
     }
     return pendingCreateRef.current
   }
-
-  // Abandoned draft cleanup — navigating away from home (unmount) or closing
-  // the tab (pagehide, keepalive) deletes a draft conversation that never got
-  // its first message, so attach-then-leave doesn't leak "Untitled" rows.
-  useEffect(() => {
-    // Reset on (re)mount — StrictMode's dev double-mount reuses the refs, so a
-    // stale true here would make every future draft delete itself.
-    disposedRef.current = false
-    const cleanup = (keepalive: boolean) => {
-      const draft = pendingConvRef.current
-      if (!draft || pendingConsumedRef.current) return
-      pendingConvRef.current = null
-      if (keepalive) {
-        const token = getAccessToken()
-        void fetch(apiUrl(`/conversations/${encodeURIComponent(draft.id)}`), {
-          method: 'DELETE',
-          keepalive: true,
-          credentials: 'include',
-          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-        }).catch(() => {})
-      } else {
-        void conversationsApi.remove(draft.id).catch(() => {})
-      }
-    }
-    const onPageHide = (e: PageTransitionEvent) => {
-      // bfcache round-trip: the page may be RESTORED with its attachment state
-      // intact — deleting the draft would orphan it. Accept the rare leak.
-      if (e.persisted) return
-      cleanup(true)
-    }
-    window.addEventListener('pagehide', onPageHide)
-    return () => {
-      window.removeEventListener('pagehide', onPageHide)
-      disposedRef.current = true
-      cleanup(false)
-    }
-  }, [])
 
   const firstName = (user?.name || user?.email?.split('@')[0] || 'friend').split(' ')[0]
   // Greeting depends on the active language; recompute whenever t changes.
@@ -222,7 +252,11 @@ export default function ChatHome() {
   ) {
     if (startedRef.current) return
     startedRef.current = true
-    // Mark any attachment draft as consumed so its cleanup won't delete it.
+    if (!pendingConvRef.current && pendingCreateRef.current) {
+      await pendingCreateRef.current
+    }
+    // Mark any attachment draft as consumed so an overlapping lazy create does
+    // not install a second conversation.
     pendingConsumedRef.current = true
 
     // Attachment flow: the conversation was already created server-side on
@@ -231,6 +265,8 @@ export default function ChatHome() {
     const pending = pendingConvRef.current
     if (pending) {
       pendingConvRef.current = null
+      setPendingConversationId(undefined)
+      clearPendingConversation(pendingStorageKey)
       const conv = adoptConversation(pending)
       // The picker is the source of truth: a conversation created earlier for an
       // attachment may carry a stale model, so persist the picked one first.
@@ -331,6 +367,7 @@ export default function ChatHome() {
                 onModelChange={setPickedModelId}
                 onSubmit={(text, atts, opts) => void startNew(text, atts, opts)}
                 draftScope={draftScope}
+                conversationId={pendingConversationId}
                 ensureConversationId={ensureConversation}
                 autoFocus
               />

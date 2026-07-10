@@ -19,8 +19,9 @@ import type { ProjectAccent } from '@/types/project'
 import { useProjects } from '@/store/projects'
 import { useConversations, sameConvListShape } from '@/store/conversations'
 import { useModels } from '@/store/models'
+import { useAuth } from '@/store/auth'
 import { useSettings } from '@/store/settings'
-import { activeWorkspaceId } from '@/store/workspaces'
+import { useWorkspaces } from '@/store/workspaces'
 import { accentClasses, fileKindIcon, formatFileSize, PROJECT_ACCENT_OPTIONS } from '@/lib/project-helpers'
 import { Composer } from '@/components/chat/composer'
 import { ContentHeader } from '@/components/layout/content-header'
@@ -51,6 +52,12 @@ import {
 import { toast } from '@/hooks/use-toast'
 import { cn, formatRelativeDate, truncate } from '@/lib/utils'
 import { persistUserSettings } from '@/lib/user-settings'
+import {
+  clearPendingConversation,
+  pendingConversationKey,
+  readPendingConversation,
+  writePendingConversation,
+} from '@/lib/pending-conversation'
 import { conversationsApi } from '@/api/endpoints'
 import type { ApiConversation } from '@/api/types'
 
@@ -83,6 +90,8 @@ export default function ProjectDetail() {
   const createConversation = useConversations((s) => s.createConversation)
   const adoptConversation = useConversations((s) => s.adoptConversation)
   const defaultModelId = useModels((s) => s.defaultId)
+  const userId = useAuth((s) => s.user?.id)
+  const workspaceId = useWorkspaces((s) => s.activeId ?? undefined)
   const setGlobalDefaultModel = useModels((s) => s.setDefaultId)
   const [projectComposerModelId, setProjectComposerModelId] = useState('')
   const effectiveProjectModelId = projectComposerModelId || defaultModelId
@@ -120,51 +129,92 @@ export default function ProjectDetail() {
   const pendingConsumedRef = useRef(false)
   const activeProjectIdRef = useRef<string | undefined>(project?.id)
   activeProjectIdRef.current = project?.id
+  const pendingStorageKey = useMemo(
+    () => pendingConversationKey(userId, `project:${project?.id || id || 'unknown'}`, workspaceId),
+    [id, project?.id, userId, workspaceId],
+  )
+  const [pendingConversationId, setPendingConversationId] = useState<string | undefined>(() =>
+    readPendingConversation(pendingStorageKey),
+  )
+  const pendingStorageKeyRef = useRef(pendingStorageKey)
+  pendingStorageKeyRef.current = pendingStorageKey
 
   useEffect(() => {
-    const draft = pendingConvRef.current
-    if (draft && !pendingConsumedRef.current) {
-      void conversationsApi.remove(draft.id).catch(() => {})
-    }
     pendingConvRef.current = null
     pendingCreateRef.current = null
     pendingConsumedRef.current = false
+    setPendingConversationId(readPendingConversation(pendingStorageKey))
     setProjectComposerModelId('')
-  }, [project?.id])
+  }, [pendingStorageKey])
 
+  // Project composers use the same durable draft handoff as the chat home.
+  // Refreshing keeps the hidden conversation and lets Composer restore its files.
   useEffect(() => {
+    if (!project?.id) return
+    const savedID = readPendingConversation(pendingStorageKey)
+    setPendingConversationId(savedID)
+    if (!savedID) return
+    let cancelled = false
+    const recovery = (async () => {
+      try {
+        const loaded = await conversationsApi.get(savedID, { limit: 1 })
+        if (loaded.messages.length > 0 || loaded.conversation.project_id !== project.id) {
+          clearPendingConversation(pendingStorageKey)
+          if (!cancelled) setPendingConversationId(undefined)
+          return undefined
+        }
+        if (cancelled) return savedID
+        pendingConvRef.current = loaded.conversation
+        setPendingConversationId(savedID)
+        return savedID
+      } catch {
+        clearPendingConversation(pendingStorageKey)
+        if (!cancelled) setPendingConversationId(undefined)
+        return undefined
+      }
+    })()
+    pendingCreateRef.current = recovery
+    void recovery.finally(() => {
+      if (pendingCreateRef.current === recovery) pendingCreateRef.current = null
+    })
     return () => {
-      const draft = pendingConvRef.current
-      if (!draft || pendingConsumedRef.current) return
-      pendingConvRef.current = null
-      void conversationsApi.remove(draft.id).catch(() => {})
+      cancelled = true
     }
-  }, [])
+  }, [pendingStorageKey, project?.id])
 
   function ensureProjectConversation(): Promise<string | undefined> {
     if (!project) return Promise.resolve(undefined)
     if (pendingConvRef.current) return Promise.resolve(pendingConvRef.current.id)
     if (!pendingCreateRef.current) {
       const projectId = project.id
-      pendingCreateRef.current = (async () => {
+      const storageKey = pendingStorageKey
+      const creation = (async () => {
         try {
           const created = await conversationsApi.create({
             model_id: effectiveProjectModelId || undefined,
             project_id: projectId,
-            workspace_id: activeWorkspaceId(),
+            workspace_id: workspaceId,
           })
-          if (pendingConsumedRef.current || activeProjectIdRef.current !== projectId) {
+          if (
+            pendingConsumedRef.current ||
+            activeProjectIdRef.current !== projectId ||
+            pendingStorageKeyRef.current !== storageKey
+          ) {
             void conversationsApi.remove(created.id).catch(() => {})
             return undefined
           }
+          writePendingConversation(storageKey, created.id)
           pendingConvRef.current = created
+          setPendingConversationId(created.id)
           return created.id
         } catch {
           return undefined
-        } finally {
-          pendingCreateRef.current = null
         }
       })()
+      pendingCreateRef.current = creation
+      void creation.finally(() => {
+        if (pendingCreateRef.current === creation) pendingCreateRef.current = null
+      })
     }
     return pendingCreateRef.current
   }
@@ -271,9 +321,14 @@ export default function ProjectDetail() {
     opts: { mode?: 'default' | 'deep-research' | 'canvas'; params?: Record<string, unknown> } = {},
   ) {
     if (!project) return
+    if (!pendingConvRef.current && pendingCreateRef.current) {
+      await pendingCreateRef.current
+    }
     pendingConsumedRef.current = true
     const pending = pendingConvRef.current
     pendingConvRef.current = null
+    setPendingConversationId(undefined)
+    clearPendingConversation(pendingStorageKey)
     const conv = pending ? adoptConversation(pending) : await createConversation(effectiveProjectModelId, project.id)
     if (!conv) {
       pendingConsumedRef.current = false
@@ -374,7 +429,7 @@ export default function ProjectDetail() {
                 void persistUserSettings({ default_model_id: modelId }).catch(() => {})
               }}
               onSubmit={(text, atts, opts) => void startProjectChat(text, atts, opts)}
-              conversationId={pendingConvRef.current?.id}
+              conversationId={pendingConversationId}
               ensureConversationId={ensureProjectConversation}
             />
           </div>

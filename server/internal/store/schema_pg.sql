@@ -289,6 +289,7 @@ CREATE TABLE IF NOT EXISTS files (
   size_bytes      BIGINT NOT NULL DEFAULT 0,
   storage_path    TEXT NOT NULL,
   kind            TEXT NOT NULL DEFAULT 'other',
+  draft           INTEGER NOT NULL DEFAULT 0,
   created_at      BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
 );
 CREATE INDEX IF NOT EXISTS idx_files_user ON files(user_id);
@@ -304,6 +305,7 @@ CREATE TABLE IF NOT EXISTS documents (
   error           TEXT NOT NULL DEFAULT '',
   chunk_count     INTEGER NOT NULL DEFAULT 0,
   storage_path    TEXT NOT NULL DEFAULT '',
+  ingest_updated_at BIGINT NOT NULL DEFAULT 0,
   created_at      BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
 );
 CREATE INDEX IF NOT EXISTS idx_docs_kb ON documents(kb_id);

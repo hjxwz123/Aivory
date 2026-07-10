@@ -46,6 +46,7 @@
     "uploadFailed": "上传失败",
     "imageTooLarge": "图片不能超过 {{mb}} MB",
     "fileTooLarge": "文件不能超过 {{mb}} MB",
+    "restoreAttachmentsFailed": "无法恢复待发送附件",
     "documentScopeRequired": "请先创建对话再上传文档。",
     "parsing": "解析中…",
     "indexing": "索引中…",

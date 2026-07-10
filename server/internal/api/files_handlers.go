@@ -293,14 +293,14 @@ func uploadFileHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		UserID: u.ID, ConversationID: conv, Filename: safe,
 		MimeType: header.Header.Get("Content-Type"), SizeBytes: n,
 		Kind: kind, StoragePath: path,
+		Draft: conv != "" && (r.URL.Query().Get("draft") == "1" || r.URL.Query().Get("draft") == "true"),
 	})
 	if err != nil {
 		// The row never landed — don't leave the copied bytes orphaned on disk.
 		_ = os.Remove(path)
-		// TOCTOU with the scope check above: the conversation can be deleted
-		// while the body was still streaming (the home page's abandoned-draft
-		// cleanup does exactly this) — surface that as the same 404 rather
-		// than an opaque FK 500.
+		// TOCTOU with the scope check above: an explicit conversation deletion
+		// can race a body that is still streaming. Surface that as the same 404
+		// rather than an opaque FK 500.
 		if isForeignKeyErr(err) {
 			writeError(w, 404, errors.New("conversation not found"))
 			return

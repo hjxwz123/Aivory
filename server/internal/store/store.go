@@ -156,6 +156,12 @@ func Migrate(db *sql.DB) error {
 	addUsageRequestURL := `ALTER TABLE usage_logs ADD COLUMN request_url TEXT NOT NULL DEFAULT ''`
 	addUsageRequestHeaders := `ALTER TABLE usage_logs ADD COLUMN request_headers TEXT NOT NULL DEFAULT ''`
 	addUsageRequestBody := `ALTER TABLE usage_logs ADD COLUMN request_body TEXT NOT NULL DEFAULT ''`
+	// Composer uploads remain drafts until the user message carrying them is
+	// persisted. This lets the client restore only unsent attachments on refresh.
+	addFileDraft := `ALTER TABLE files ADD COLUMN draft INTEGER NOT NULL DEFAULT 0`
+	// Persisted ingest heartbeat lets the RAG watchdog distinguish a live long-
+	// running parse from a task abandoned by timeout, crash, or lease expiry.
+	addDocumentIngestUpdatedAt := `ALTER TABLE documents ADD COLUMN ingest_updated_at INTEGER NOT NULL DEFAULT 0`
 	if usePostgres {
 		schema = schemaPGSQL
 		addImageRef = `ALTER TABLE chunks ADD COLUMN IF NOT EXISTS image_ref TEXT`
@@ -209,6 +215,8 @@ func Migrate(db *sql.DB) error {
 		addUsageRequestURL = `ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS request_url TEXT NOT NULL DEFAULT ''`
 		addUsageRequestHeaders = `ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS request_headers TEXT NOT NULL DEFAULT ''`
 		addUsageRequestBody = `ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS request_body TEXT NOT NULL DEFAULT ''`
+		addFileDraft = `ALTER TABLE files ADD COLUMN IF NOT EXISTS draft INTEGER NOT NULL DEFAULT 0`
+		addDocumentIngestUpdatedAt = `ALTER TABLE documents ADD COLUMN IF NOT EXISTS ingest_updated_at BIGINT NOT NULL DEFAULT 0`
 	}
 	if err := dedupeSkillNames(db); err != nil {
 		return fmt.Errorf("dedupe skill names: %w", err)
@@ -240,6 +248,7 @@ func Migrate(db *sql.DB) error {
 		addConvWorkspace, addProjWorkspace, addKBWorkspace, addMsgAuthor, addUsageWorkspace, addGroupMaxWorkspaces, addGroupIsPublic,
 		addModelFallbackChannel, addUsageChannel, addUsageFallback, addUsageStatus, addUsageError,
 		addUsageRequestMethod, addUsageRequestURL, addUsageRequestHeaders, addUsageRequestBody,
+		addFileDraft, addDocumentIngestUpdatedAt,
 	} {
 		_, _ = db.Exec(ddl)
 	}
@@ -252,6 +261,7 @@ func Migrate(db *sql.DB) error {
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_conv_inline ON conversations(inline_source_conv)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user_id ON refresh_tokens(user_id)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_files_conversation_id ON files(conversation_id)`)
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_docs_ingest_state ON documents(status, ingest_updated_at)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_messages_conv_created ON messages(conversation_id, created_at)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_conv_user_updated ON conversations(user_id, archived, pinned DESC, updated_at DESC)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_users_sort_order ON users(sort_order, created_at DESC)`)
@@ -296,6 +306,8 @@ func Migrate(db *sql.DB) error {
 		"projects":        {"workspace_id"},
 		"knowledge_bases": {"workspace_id"},
 		"chunks":          {"image_ref"},
+		"files":           {"draft"},
+		"documents":       {"ingest_updated_at"},
 	}
 	for table, cols := range columnChecks {
 		if _, err := db.Exec(fmt.Sprintf(`SELECT %s FROM %s WHERE 1=0`, strings.Join(cols, ", "), table)); err != nil {

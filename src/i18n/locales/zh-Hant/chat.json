@@ -46,6 +46,7 @@
     "uploadFailed": "上傳失敗",
     "imageTooLarge": "圖片不能超過 {{mb}} MB",
     "fileTooLarge": "檔案不能超過 {{mb}} MB",
+    "restoreAttachmentsFailed": "無法恢復待傳送附件",
     "documentScopeRequired": "請先建立對話再上傳文件。",
     "parsing": "解析中…",
     "indexing": "索引中…",

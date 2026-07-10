@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestEmbedConcurrencyPreservesOrder verifies that Embed, which now runs its
@@ -54,6 +55,67 @@ func TestEmbedConcurrencyPreservesOrder(t *testing.T) {
 	// Single batch (≤10) still works.
 	if v, err := e.Embed(context.Background(), []string{"t7", "t3"}); err != nil || len(v) != 2 || int(v[0][0]) != 7 || int(v[1][0]) != 3 {
 		t.Fatalf("small batch wrong: v=%v err=%v", v, err)
+	}
+}
+
+func TestHTTPEmbedderDashScopeUsesBoundedConcurrency(t *testing.T) {
+	e := &httpEmbedder{
+		baseURL: "https://workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+		model:   "text-embedding-v4",
+	}
+	if got := e.concurrency(); got != dashScopeEmbedConcurrency {
+		t.Fatalf("DashScope concurrency = %d, want %d", got, dashScopeEmbedConcurrency)
+	}
+	if dashScopeEmbedConcurrency <= 1 {
+		t.Fatalf("DashScope concurrency must be greater than one, got %d", dashScopeEmbedConcurrency)
+	}
+}
+
+func TestDashScopeProviderSlotsBoundAggregateConcurrency(t *testing.T) {
+	e := &httpEmbedder{baseURL: "https://workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"}
+	releases := make([]func(), 0, dashScopeGlobalEmbedConcurrency)
+	defer func() {
+		for _, release := range releases {
+			release()
+		}
+	}()
+	for i := 0; i < dashScopeGlobalEmbedConcurrency; i++ {
+		release, err := e.acquireProviderSlot(context.Background())
+		if err != nil {
+			t.Fatalf("acquire slot %d: %v", i, err)
+		}
+		releases = append(releases, release)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if _, err := e.acquireProviderSlot(ctx); err == nil {
+		t.Fatal("acquired a slot above the global DashScope cap")
+	}
+
+	releases[0]()
+	releases = releases[1:]
+	release, err := e.acquireProviderSlot(context.Background())
+	if err != nil {
+		t.Fatalf("acquire after release: %v", err)
+	}
+	release()
+}
+
+func TestEmbeddingRetryDelayHonorsRetryAfterWithJitter(t *testing.T) {
+	delay := embeddingRetryDelay(1, "5")
+	if delay < 5*time.Second || delay >= 6*time.Second {
+		t.Fatalf("retry delay = %s, want [5s, 6s)", delay)
+	}
+}
+
+func TestEmbeddingResponseHeaderTimeoutFailsFast(t *testing.T) {
+	transport, ok := embedHTTPClient.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("embedding transport type = %T", embedHTTPClient.Transport)
+	}
+	if transport.ResponseHeaderTimeout != 30*time.Second {
+		t.Fatalf("response header timeout = %s, want 30s", transport.ResponseHeaderTimeout)
 	}
 }
 

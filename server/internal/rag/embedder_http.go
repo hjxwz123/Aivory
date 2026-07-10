@@ -7,8 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -23,7 +25,7 @@ import (
 // The transport timeouts bound a hung dial/handshake so a stuck connection
 // fails fast (and gets retried) instead of blocking the whole ingest.
 var embedHTTPClient = &http.Client{
-	Timeout: 60 * time.Second, // overall safety net; the request context still applies
+	Timeout: 3 * time.Minute, // overall cap includes reading the vector response body
 	Transport: &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
 		DialContext: (&net.Dialer{
@@ -35,6 +37,7 @@ var embedHTTPClient = &http.Client{
 		MaxIdleConnsPerHost:   10,
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   20 * time.Second,
+		ResponseHeaderTimeout: 30 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
 	},
 }
@@ -130,13 +133,20 @@ const (
 	// guard that reports a clear local error instead of waiting on a provider
 	// timeout when OCR returns one enormous atom.
 	textEmbeddingV4MaxTokens = 8192
+	// DashScope remains concurrent, but two batches per document avoids a single
+	// OCR-heavy ingest monopolising the workspace. A process-wide cap also bounds
+	// the aggregate when several RAG workers reach embedding at once.
+	dashScopeEmbedConcurrency       = 2
+	dashScopeGlobalEmbedConcurrency = 2
 )
 
 // embedConcurrency caps how many upstream embedding batches run at once. The old
 // code did them strictly sequentially, so a 500-chunk doc paid 50 serial
-// round-trips. Keep this moderate: too much parallelism makes some compatible
-// gateways stall "awaiting headers", which is worse than taking a few more waves.
+// round-trips. Keep this moderate because the RAG queue can process multiple
+// documents at once and each document gets its own concurrency allowance.
 const embedConcurrency = 4
+
+var dashScopeEmbeddingSlots = make(chan struct{}, dashScopeGlobalEmbedConcurrency)
 
 // Embed returns one vector per input text, splitting into ≤embedBatchMax upstream
 // requests and running them CONCURRENTLY (bounded, order-preserving).
@@ -158,6 +168,7 @@ func (e *httpEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, 
 	var firstErr error
 	cctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+batchLoop:
 	for start := 0; start < len(texts); start += embedBatchMax {
 		end := start + embedBatchMax
 		if end > len(texts) {
@@ -169,7 +180,11 @@ func (e *httpEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, 
 		if stop {
 			break
 		}
-		sem <- struct{}{}
+		select {
+		case sem <- struct{}{}:
+		case <-cctx.Done():
+			break batchLoop
+		}
 		wg.Add(1)
 		go func(start, end int) {
 			defer wg.Done()
@@ -279,14 +294,28 @@ func (e *httpEmbedder) nativeDashScope() bool {
 		strings.Contains(base, ".maas.aliyuncs.com/api/v1")
 }
 
+func (e *httpEmbedder) isDashScope() bool {
+	base := strings.ToLower(strings.TrimSpace(e.baseURL))
+	return strings.Contains(base, "aliyuncs.com") || strings.Contains(base, "dashscope")
+}
+
 func (e *httpEmbedder) concurrency() int {
-	if strings.Contains(strings.ToLower(e.baseURL), "aliyuncs.com") {
-		// DashScope v4 is much more reliable with one in-flight batch per worker;
-		// parallel batches against the same workspace commonly stall awaiting
-		// headers under large OCR ingests.
-		return 1
+	if e.isDashScope() {
+		return dashScopeEmbedConcurrency
 	}
 	return embedConcurrency
+}
+
+func (e *httpEmbedder) acquireProviderSlot(ctx context.Context) (func(), error) {
+	if !e.isDashScope() {
+		return func() {}, nil
+	}
+	select {
+	case dashScopeEmbeddingSlots <- struct{}{}:
+		return func() { <-dashScopeEmbeddingSlots }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 func (e *httpEmbedder) normalizeInputs(texts []string) []string {
@@ -354,13 +383,15 @@ func (e *httpEmbedder) postEmbeddings(ctx context.Context, url string, body []by
 	const maxAttempts = 2
 	var parsed embeddingResponse
 	var lastErr error
+	var retryAfter string
 	if strings.Contains(url, "__invalid_dashscope_embedding_base_url__") {
 		return parsed, fmt.Errorf("invalid DashScope embedding base_url: use a Bailian workspace regional URL such as https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1 or https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/api/v1, not https://dashscope.aliyuncs.com/compatible-mode/v1")
 	}
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		if attempt > 1 {
-			// Linear backoff: 2s, 4s. Honor cancellation while waiting.
-			timer := time.NewTimer(time.Duration(attempt-1) * 2 * time.Second)
+			// Exponential backoff plus jitter prevents every concurrent batch from
+			// timing out and retrying against the workspace in the same millisecond.
+			timer := time.NewTimer(embeddingRetryDelay(attempt-1, retryAfter))
 			select {
 			case <-ctx.Done():
 				timer.Stop()
@@ -374,8 +405,13 @@ func (e *httpEmbedder) postEmbeddings(ctx context.Context, url string, body []by
 		}
 		req.Header.Set("authorization", "Bearer "+e.apiKey)
 		req.Header.Set("content-type", "application/json")
+		release, err := e.acquireProviderSlot(ctx)
+		if err != nil {
+			return parsed, err
+		}
 		resp, err := embedHTTPClient.Do(req)
 		if err != nil {
+			release()
 			// Don't retry if the caller cancelled / timed out the context.
 			if ctx.Err() != nil {
 				return parsed, ctx.Err()
@@ -384,18 +420,23 @@ func (e *httpEmbedder) postEmbeddings(ctx context.Context, url string, body []by
 			continue
 		}
 		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
+			retryAfter = resp.Header.Get("Retry-After")
 			b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 			resp.Body.Close()
+			release()
 			lastErr = fmt.Errorf("embeddings %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
 			continue // rate-limited / server-side → retry
 		}
 		if resp.StatusCode >= 400 {
 			b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 			resp.Body.Close()
+			release()
 			return parsed, &embedHTTPError{status: resp.StatusCode, body: strings.TrimSpace(string(b))}
 		}
+		parsed = embeddingResponse{}
 		err = e.decodeResponse(resp.Body, &parsed)
 		resp.Body.Close()
+		release()
 		if err != nil {
 			lastErr = fmt.Errorf("decode embeddings response: %w", err)
 			continue // truncated body / transient → retry
@@ -406,6 +447,21 @@ func (e *httpEmbedder) postEmbeddings(ctx context.Context, url string, body []by
 		lastErr = errors.New("unknown error")
 	}
 	return parsed, fmt.Errorf("embeddings request failed after %d attempts: %w", maxAttempts, lastErr)
+}
+
+func embeddingRetryDelay(failedAttempt int, retryAfter string) time.Duration {
+	base := time.Duration(1<<min(failedAttempt, 4)) * time.Second
+	if seconds, err := strconv.Atoi(strings.TrimSpace(retryAfter)); err == nil && seconds > 0 {
+		base = time.Duration(seconds) * time.Second
+	} else if when, err := http.ParseTime(strings.TrimSpace(retryAfter)); err == nil {
+		if wait := time.Until(when); wait > 0 {
+			base = wait
+		}
+	}
+	if base > 30*time.Second {
+		base = 30 * time.Second
+	}
+	return base + time.Duration(rand.IntN(1000))*time.Millisecond
 }
 
 func (e *httpEmbedder) decodeResponse(r io.Reader, parsed *embeddingResponse) error {

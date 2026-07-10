@@ -786,7 +786,11 @@ func listConversationDocsHandler(d Deps, w http.ResponseWriter, r *http.Request)
 		writeError(w, 404, errNotFound)
 		return
 	}
-	docs, _ := store.ListDocuments(r.Context(), d.DB, "conversation", convID)
+	docs, err := store.ListDocuments(r.Context(), d.DB, "conversation", convID)
+	if err != nil {
+		writeError(w, 500, err)
+		return
+	}
 	writeJSON(w, 200, docs)
 }
 
@@ -827,13 +831,17 @@ func retryConversationDocumentHandler(d Deps, w http.ResponseWriter, r *http.Req
 // files): the authoritative set of files this conversation references, each with
 // a download URL.
 type convFile struct {
-	ID        string `json:"id"`
-	Filename  string `json:"filename"`
-	Kind      string `json:"kind"`
-	MimeType  string `json:"mime_type"`
-	SizeBytes int64  `json:"size_bytes"`
-	CreatedAt int64  `json:"created_at"`
-	URL       string `json:"url"`
+	ID             string `json:"id"`
+	Filename       string `json:"filename"`
+	Kind           string `json:"kind"`
+	MimeType       string `json:"mime_type"`
+	SizeBytes      int64  `json:"size_bytes"`
+	CreatedAt      int64  `json:"created_at"`
+	URL            string `json:"url"`
+	Draft          bool   `json:"draft"`
+	DocumentID     string `json:"document_id,omitempty"`
+	DocumentStatus string `json:"document_status,omitempty"`
+	DocumentError  string `json:"document_error,omitempty"`
 }
 
 // listConversationFilesHandler returns every file currently attached to the
@@ -850,12 +858,33 @@ func listConversationFilesHandler(d Deps, w http.ResponseWriter, r *http.Request
 		writeError(w, 500, err)
 		return
 	}
+	draftOnly := r.URL.Query().Get("draft") == "1" || r.URL.Query().Get("draft") == "true"
+	docs, err := store.ListDocuments(r.Context(), d.DB, "conversation", convID)
+	if err != nil {
+		writeError(w, 500, err)
+		return
+	}
+	docByPath := make(map[string]store.Document, len(docs))
+	for _, doc := range docs {
+		if _, exists := docByPath[doc.StoragePath]; !exists {
+			docByPath[doc.StoragePath] = doc
+		}
+	}
 	out := make([]convFile, 0, len(files))
 	for _, f := range files {
-		out = append(out, convFile{
+		if draftOnly && !f.Draft {
+			continue
+		}
+		row := convFile{
 			ID: f.ID, Filename: f.Filename, Kind: f.Kind, MimeType: f.MimeType,
-			SizeBytes: f.SizeBytes, CreatedAt: f.CreatedAt, URL: "/api/files/" + f.ID,
-		})
+			SizeBytes: f.SizeBytes, CreatedAt: f.CreatedAt, URL: "/api/files/" + f.ID, Draft: f.Draft,
+		}
+		if doc, ok := docByPath[f.StoragePath]; ok {
+			row.DocumentID = doc.ID
+			row.DocumentStatus = doc.Status
+			row.DocumentError = doc.Error
+		}
+		out = append(out, row)
 	}
 	writeJSON(w, 200, out)
 }

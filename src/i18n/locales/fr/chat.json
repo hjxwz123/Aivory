@@ -46,6 +46,7 @@
     "uploadFailed": "Échec du téléversement",
     "imageTooLarge": "Les images doivent faire moins de {{mb}} Mo",
     "fileTooLarge": "Les fichiers doivent faire moins de {{mb}} Mo",
+    "restoreAttachmentsFailed": "Impossible de restaurer les pièces jointes en attente",
     "documentScopeRequired": "Créez une conversation avant de téléverser des documents.",
     "parsing": "Analyse…",
     "indexing": "Indexation…",
