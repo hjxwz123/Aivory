@@ -485,14 +485,15 @@ func unwrapNonRetryableIngestError(err error) error {
 	return err
 }
 
-// sanitizeIngestText removes NUL bytes and invalid UTF-8 from parsed document
-// text. Postgres TEXT columns reject these (SQLSTATE 22021 "invalid byte
-// sequence for encoding UTF8: 0x00"), which otherwise fails the whole ingest.
+// sanitizeIngestText removes invalid DB text and MinerU-only image markdown
+// from parsed document text. Postgres TEXT columns reject NUL/invalid UTF-8
+// (SQLSTATE 22021), while `![...](mineru://...)` markers are opaque filenames
+// that pollute chunks, embeddings, and keyword search.
 func sanitizeIngestText(s string) string {
 	if strings.IndexByte(s, 0) >= 0 {
 		s = strings.ReplaceAll(s, "\x00", "")
 	}
-	return strings.ToValidUTF8(s, "")
+	return stripMinerUMarkdownImages(strings.ToValidUTF8(s, ""))
 }
 
 // parseCache memoises a document's parsed content across pipeline retry
@@ -614,8 +615,7 @@ func (s *Service) runPipeline(ctx context.Context, docID string, cache *parseCac
 	}
 
 	// Chunk hierarchically (§4.11-C-2 small-to-big): parents carry section
-	// context (not embedded), children carry the vectors. The new chunker also
-	// returns image_caption rows for MinerU-extracted images (§4.11-C-1).
+	// context (not embedded), children carry the vectors.
 	stageStart := time.Now()
 	parents := chunkHierarchical(content)
 	if s.logger != nil {
