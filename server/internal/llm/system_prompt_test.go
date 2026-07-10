@@ -28,3 +28,57 @@ func TestComposeSystemPromptIdentity(t *testing.T) {
 		t.Errorf("empty label should fall back generically; got %q", s3)
 	}
 }
+
+// TestComposeSystemPromptDocGenSkill locks in §4.5.1 progressive disclosure:
+// a model that can call use_skill gets a one-line skills-index entry instead
+// of the multi-KB recipes; a model that can't still gets them inline.
+func TestComposeSystemPromptDocGenSkill(t *testing.T) {
+	// use_skill available → recipes NOT inlined, built-in index entry present.
+	s := composeSystemPrompt(systemPromptOpts{
+		ToolMode:           "native",
+		ToolNames:          []string{"python_execute", "use_skill"},
+		SkillToolAvailable: true,
+	})
+	if strings.Contains(s, "## Document-generation recipes") {
+		t.Error("recipes must not be inlined when use_skill can load them on demand")
+	}
+	if !strings.Contains(s, "- "+DocGenSkillName+": ") {
+		t.Errorf("skills index should advertise the built-in %s skill; got %q", DocGenSkillName, s)
+	}
+
+	// No use_skill (prompt mode) → recipes inlined, no index entry.
+	s2 := composeSystemPrompt(systemPromptOpts{
+		ToolMode:  "prompt",
+		ToolNames: []string{"python_execute"},
+	})
+	if !strings.Contains(s2, "## Document-generation recipes") {
+		t.Error("recipes must stay inline when the model cannot call use_skill")
+	}
+	if strings.Contains(s2, "## Skills available") {
+		t.Error("no skills index without use_skill")
+	}
+
+	// No python_execute → neither inline recipes nor the index entry.
+	s3 := composeSystemPrompt(systemPromptOpts{
+		ToolMode:           "native",
+		ToolNames:          []string{"web_search", "use_skill"},
+		SkillToolAvailable: true,
+	})
+	if strings.Contains(s3, DocGenSkillName) || strings.Contains(s3, "## Document-generation recipes") {
+		t.Error("document-generation must not appear without python_execute")
+	}
+
+	// Admin skill with the same name shadows the built-in — exactly one entry.
+	s4 := composeSystemPrompt(systemPromptOpts{
+		ToolMode:           "native",
+		ToolNames:          []string{"python_execute", "use_skill"},
+		SkillToolAvailable: true,
+		Skills:             []SkillIndex{{Name: "Document-Generation", When: "admin override"}},
+	})
+	if n := strings.Count(strings.ToLower(s4), "document-generation"); n != 1 {
+		t.Errorf("admin skill must shadow the built-in exactly once, got %d occurrences in %q", n, s4)
+	}
+	if !strings.Contains(s4, "admin override") {
+		t.Error("admin-defined description should win over the built-in")
+	}
+}

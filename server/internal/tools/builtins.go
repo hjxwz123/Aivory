@@ -1470,6 +1470,13 @@ func (t *useSkillTool) Execute(ctx context.Context, input []byte, tc *llm.ToolCo
 			return "Skill: " + s.Name + "\n\n" + s.Instructions, nil, nil
 		}
 	}
+	// Built-in document-generation skill (§4.5.1): served from code, not the
+	// skills table, so it can't be deleted in the admin panel. Checked AFTER
+	// the DB skills so an admin skill with the same name shadows it, matching
+	// the system-prompt index in composeSystemPrompt.
+	if strings.EqualFold(in.Name, llm.DocGenSkillName) {
+		return "Skill: " + llm.DocGenSkillName + "\n\n" + llm.DocGenRecipes, nil, nil
+	}
 	return "Skill not found: " + in.Name, nil, nil
 }
 
