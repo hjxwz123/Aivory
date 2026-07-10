@@ -97,6 +97,25 @@ interface ComposerProps {
 const MAX_LEN = 12_000
 const EMPTY_PARAM_VALUES: Record<string, unknown> = {}
 
+// §4.6-A upload size caps. The /api/files handler is authoritative; we read the
+// admin-configured per-kind caps from the upload policy once (module-level
+// cache, shared across composer instances) so we can reject an oversize file up
+// front instead of wasting an upload round-trip. Falls back to the seeded
+// defaults if the fetch fails, so a transient error never blocks attaching.
+const DEFAULT_UPLOAD_LIMITS = { max_image_bytes: 5 * 1024 * 1024, max_file_bytes: 50 * 1024 * 1024 }
+let uploadLimitsCache: Promise<{ max_image_bytes: number; max_file_bytes: number }> | null = null
+function getUploadLimits() {
+  if (!uploadLimitsCache) {
+    uploadLimitsCache = api<{ max_image_bytes?: number; max_file_bytes?: number }>('/me/upload-policy')
+      .then((p) => ({
+        max_image_bytes: p.max_image_bytes ?? DEFAULT_UPLOAD_LIMITS.max_image_bytes,
+        max_file_bytes: p.max_file_bytes ?? DEFAULT_UPLOAD_LIMITS.max_file_bytes,
+      }))
+      .catch(() => DEFAULT_UPLOAD_LIMITS)
+  }
+  return uploadLimitsCache
+}
+
 interface PendingAttachment extends Attachment {
   /** true while POST /api/files is in flight. */
   uploading?: boolean
@@ -475,7 +494,34 @@ export function Composer({
 
   async function handleAttach(files: FileList | null) {
     if (!files || !files.length) return
-    const list = Array.from(files)
+    const all = Array.from(files)
+    // §4.6 reject oversize files BEFORE uploading — images and other files have
+    // separate admin-set caps. Rejected images would otherwise upload fine but be
+    // silently dropped at chat time (base64 inline cap); documents would fail the
+    // server cap after a wasted upload.
+    const limits = await getUploadLimits()
+    const overImage = all.filter((f) => f.type.startsWith('image/') && f.size > limits.max_image_bytes)
+    const overFile = all.filter((f) => !f.type.startsWith('image/') && f.size > limits.max_file_bytes)
+    if (overImage.length) {
+      toast.error(
+        t('composer.imageTooLarge', {
+          defaultValue: 'Images must be under {{mb}} MB',
+          mb: Math.floor(limits.max_image_bytes / (1024 * 1024)),
+        }),
+        overImage.map((f) => f.name).join(', '),
+      )
+    }
+    if (overFile.length) {
+      toast.error(
+        t('composer.fileTooLarge', {
+          defaultValue: 'Files must be under {{mb}} MB',
+          mb: Math.floor(limits.max_file_bytes / (1024 * 1024)),
+        }),
+        overFile.map((f) => f.name).join(', '),
+      )
+    }
+    const list = all.filter((f) => !overImage.includes(f) && !overFile.includes(f))
+    if (!list.length) return
     const additions: PendingAttachment[] = list.map((f) => ({
       id: uid('att'),
       name: f.name,

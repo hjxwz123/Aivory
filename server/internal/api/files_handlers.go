@@ -20,6 +20,63 @@ import (
 // errFileTooLarge is returned when an upload exceeds MaxUploadBytes (§C3).
 var errFileTooLarge = errors.New("file exceeds the maximum upload size")
 
+// uploadLimitBytes returns the byte ceiling for a file of the given kind, read
+// from admin settings (max_image_upload_mb / max_file_upload_mb, in MB) and
+// clamped to the MAX_UPLOAD_BYTES env ceiling (the absolute hard cap). A blank
+// or non-positive setting falls back to the default: 5 MB for images, the env
+// ceiling for everything else. Admins can thus only tighten a per-kind cap.
+func uploadLimitBytes(d Deps, kind string) int64 {
+	hard := d.Config.MaxUploadBytes
+	key := "max_file_upload_mb"
+	def := hard
+	if kind == "image" {
+		key = "max_image_upload_mb"
+		if def = 5 << 20; def > hard {
+			def = hard
+		}
+	}
+	mb := settingPositiveInt(d, key)
+	if mb <= 0 {
+		return def
+	}
+	lim := int64(mb) << 20
+	if lim > hard {
+		lim = hard
+	}
+	return lim
+}
+
+// settingPositiveInt reads an admin setting the number input persists as a JSON
+// number (or, defensively, a numeric string) and returns it, or 0 when the key
+// is absent, blank, or invalid.
+func settingPositiveInt(d Deps, key string) int {
+	raw, err := store.GetSetting(d.DB, key)
+	if err != nil {
+		return 0
+	}
+	var n int
+	if json.Unmarshal(raw, &n) == nil && n != 0 {
+		return n
+	}
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		n, _ = strconv.Atoi(strings.TrimSpace(s))
+		return n
+	}
+	return 0
+}
+
+// uploadTooLargeError phrases a per-kind cap breach with the actual limit so the
+// client can show "images must be under N MB" even when it skipped its own
+// pre-check.
+func uploadTooLargeError(kind string, limit int64) error {
+	mb := limit / (1 << 20)
+	if kind == "image" {
+		return fmt.Errorf("image exceeds the maximum size of %d MB", mb)
+	}
+	return fmt.Errorf("file exceeds the maximum size of %d MB", mb)
+}
+
 // isForeignKeyErr matches the SQLite and PostgreSQL FK-violation messages —
 // used to translate a conversation deleted mid-upload into a clean 404.
 func isForeignKeyErr(err error) bool {
@@ -199,6 +256,17 @@ func uploadFileHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, verr)
 		return
 	}
+	// §4.6 per-kind size cap (admin-tunable). Images inline to vision models as
+	// base64, so they carry a tighter cap than documents; enforce it HERE so an
+	// oversize file is rejected at upload instead of being silently dropped at
+	// chat time. header.Size is the declared part size — a cheap reject before we
+	// write our own copy; the post-copy check on n stays authoritative.
+	kind := kindOf(header.Header.Get("Content-Type"), safe)
+	limit := uploadLimitBytes(d, kind)
+	if header.Size > limit {
+		writeError(w, 413, uploadTooLargeError(kind, limit))
+		return
+	}
 	path, err := uploadDestPath(d, u.ID, "f", safe)
 	if err != nil {
 		writeError(w, 500, err)
@@ -210,21 +278,21 @@ func uploadFileHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer out.Close()
-	n, err := io.Copy(out, io.LimitReader(file, d.Config.MaxUploadBytes+1))
+	n, err := io.Copy(out, io.LimitReader(file, limit+1))
 	if err != nil {
 		writeError(w, 500, err)
 		return
 	}
-	if n > d.Config.MaxUploadBytes {
+	if n > limit {
 		_ = out.Close()
 		_ = os.Remove(path)
-		writeError(w, 413, errFileTooLarge)
+		writeError(w, 413, uploadTooLargeError(kind, limit))
 		return
 	}
 	f, err := store.CreateFile(r.Context(), d.DB, store.File{
 		UserID: u.ID, ConversationID: conv, Filename: safe,
 		MimeType: header.Header.Get("Content-Type"), SizeBytes: n,
-		Kind: kindOf(header.Header.Get("Content-Type"), safe), StoragePath: path,
+		Kind: kind, StoragePath: path,
 	})
 	if err != nil {
 		// The row never landed — don't leave the copied bytes orphaned on disk.

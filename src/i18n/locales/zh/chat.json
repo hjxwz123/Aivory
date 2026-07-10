@@ -44,6 +44,8 @@
     "attachedMultiple": "已附加 {{count}} 个文件",
     "attachedHint": "本版本中附件仅用于视觉展示。",
     "uploadFailed": "上传失败",
+    "imageTooLarge": "图片不能超过 {{mb}} MB",
+    "fileTooLarge": "文件不能超过 {{mb}} MB",
     "documentScopeRequired": "请先创建对话再上传文档。",
     "parsing": "解析中…",
     "indexing": "索引中…",

@@ -1630,10 +1630,6 @@ func assistantRendersEmpty(m store.Message) bool {
 	return strings.TrimSpace(renderBlocksAsText(blocks)) == ""
 }
 
-// maxInlineAttachment caps how large a file we inline as base64 (≈10 MB raw →
-// ~13 MB base64), protecting the upstream request size.
-const maxInlineAttachment = 10 * 1024 * 1024
-
 // resolveAttachments loads image attachments from disk and appends them as
 // base64 image blocks to their messages so vision-capable providers can see
 // them (§4.6). Errors are silent — a missing file never blocks the turn.
@@ -1669,9 +1665,12 @@ func (o *Orchestrator) resolveAttachments(ctx context.Context, userID, convID st
 				continue
 			}
 			f, err := store.GetFile(ctx, o.db, a.ID, userID)
-			if err != nil || f.SizeBytes > maxInlineAttachment {
+			if err != nil {
 				continue
 			}
+			// No independent size cap here: an image only reaches storage after the
+			// upload handler enforced the admin-configured per-kind cap (§4.6-A), so
+			// whatever is on disk is already within the allowed size. Inline it.
 			if a.Kind == "pdf" {
 				if !store.ConversationDocReady(ctx, o.db, convID, f.Filename) && !notedPDFRAGOnly && onEvent != nil {
 					onEvent(SseEvent{Type: "rag", Status: "warning", Summary: "PDF attachment is still indexing; documents are read through RAG text, not native file blocks"})

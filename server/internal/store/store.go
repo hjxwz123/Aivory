@@ -696,7 +696,11 @@ func Seed(db *sql.DB, cfg config.Config) error {
 		// re-archives (mtime bumps) each recycle, so only truly-abandoned ones age
 		// out. 0 / "" = keep forever.
 		"storage_archive_ttl_days": `30`,
-		"moderation_keywords":      `[]`,
+		// §4.6 default image upload cap: 5 MB. Non-image files have no seeded cap
+		// (blank → the MAX_UPLOAD_BYTES env ceiling). Admins tune both in
+		// /admin/documents; the env ceiling remains the absolute maximum.
+		"max_image_upload_mb":   `5`,
+		"moderation_keywords":   `[]`,
 		"moderation_model_id":      `""`,
 		"moderation_categories":    `["politics","pornography","violence or gore","terrorism","illegal activity","hate speech","self-harm"]`,
 		"moderation_message":       `"Your message was blocked by content moderation. Please rephrase and try again."`,

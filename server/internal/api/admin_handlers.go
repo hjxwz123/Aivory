@@ -1007,6 +1007,11 @@ var settingsKeys = []string{
 	// "use the safe default allowlist" (see api.defaultUploadExtensions).
 	// Enforced on /api/files and /api/kbs/:id/documents BEFORE bytes touch disk.
 	"upload_allowed_extensions",
+	// §4.6 upload size caps — per-kind byte ceilings expressed in MB, enforced on
+	// /api/files BEFORE bytes land. 0 / blank → default (images: 5 MB; other files:
+	// the MAX_UPLOAD_BYTES env ceiling). Both are additionally clamped to that env
+	// ceiling server-side, so admins can only tighten, never exceed it.
+	"max_image_upload_mb", "max_file_upload_mb",
 	// SMTP mail — live-reloaded on each send (see internal/mail).
 	"smtp_host", "smtp_port", "smtp_user", "smtp_password",
 	"smtp_from", "smtp_tls",
@@ -1102,6 +1107,13 @@ func applyAdminSettingsPatch(d Deps, body map[string]json.RawMessage, skipNull b
 			// summary length makes the tiered merge churn the cache every turn.
 			switch k {
 			case "keep_recent_rounds", "summary_max_tokens", "compaction_token_trigger":
+				var n int
+				if json.Unmarshal(v, &n) != nil || n < 0 {
+					return 0, errInvalidInput
+				}
+			case "max_image_upload_mb", "max_file_upload_mb":
+				// Per-kind upload caps in MB. Non-negative integer; 0 = "use default".
+				// The byte ceiling (env MaxUploadBytes) is applied at read time.
 				var n int
 				if json.Unmarshal(v, &n) != nil || n < 0 {
 					return 0, errInvalidInput

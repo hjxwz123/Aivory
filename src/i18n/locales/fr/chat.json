@@ -44,6 +44,8 @@
     "attachedMultiple": "{{count}} fichiers joints",
     "attachedHint": "Les pièces jointes sont uniquement visuelles dans cette version.",
     "uploadFailed": "Échec du téléversement",
+    "imageTooLarge": "Les images doivent faire moins de {{mb}} Mo",
+    "fileTooLarge": "Les fichiers doivent faire moins de {{mb}} Mo",
     "documentScopeRequired": "Créez une conversation avant de téléverser des documents.",
     "parsing": "Analyse…",
     "indexing": "Indexation…",

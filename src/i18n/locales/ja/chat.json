@@ -44,6 +44,8 @@
     "attachedMultiple": "{{count}} 件のファイルを添付しました",
     "attachedHint": "このビルドでは添付ファイルは表示のみです。",
     "uploadFailed": "アップロードに失敗しました",
+    "imageTooLarge": "画像は {{mb}} MB 未満にしてください",
+    "fileTooLarge": "ファイルは {{mb}} MB 未満にしてください",
     "documentScopeRequired": "ドキュメントをアップロードする前に会話を作成してください。",
     "parsing": "解析中…",
     "indexing": "インデックス作成中…",

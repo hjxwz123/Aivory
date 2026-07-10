@@ -44,6 +44,8 @@
     "attachedMultiple": "Attached {{count}} files",
     "attachedHint": "Attachments are visual-only in this build.",
     "uploadFailed": "Upload failed",
+    "imageTooLarge": "Images must be under {{mb}} MB",
+    "fileTooLarge": "Files must be under {{mb}} MB",
     "documentScopeRequired": "Create a conversation before uploading documents.",
     "parsing": "Parsing…",
     "indexing": "Indexing…",
