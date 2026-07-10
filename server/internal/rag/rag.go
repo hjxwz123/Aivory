@@ -31,17 +31,33 @@ import (
 	"github.com/hibiken/asynq"
 )
 
-const ragIngestTaskType = "rag.ingest"
+const (
+	ragIngestTaskType          = "rag.ingest"
+	ragFastQueueName           = "rag-fast"
+	ragSlowQueueName           = "rag"
+	ragFastQueueConcurrency    = 4
+	ragSlowQueueConcurrency    = 4
+	ingestPipelineTimeout      = 70 * time.Minute
+	ingestTaskTimeout          = 75 * time.Minute
+	ingestUniqueTTL            = 80 * time.Minute
+	ingestHeartbeatInterval    = 30 * time.Second
+	ingestStaleAfter           = 4 * time.Minute
+	ingestPendingStaleAfter    = ingestUniqueTTL
+	ingestRecoveryInterval     = time.Minute
+	ingestFinalizeTimeout      = 30 * time.Second
+	ingestAsynqLeaseMaxRetries = 1
+	ingestAsynqRetryDelay      = 2 * time.Minute
+)
 
 // Service is the public façade.
 type Service struct {
-	db          *sql.DB
-	queue       queue.Queue
-	logger      *log.Logger
-	task        TaskRouter
-	vec         vector.Store
-	asynqClient *asynq.Client
-	asynqServer *asynq.Server
+	db           *sql.DB
+	queue        queue.Queue
+	logger       *log.Logger
+	task         TaskRouter
+	vec          vector.Store
+	asynqClient  *asynq.Client
+	asynqServers []*asynq.Server
 	// External integration config (§4.11-C/D): embedding HTTP backend + MinerU.
 	// All values are env-fallbacks — runtime resolution prefers the admin
 	// settings table so the live admin UI controls them without a restart.
@@ -112,23 +128,46 @@ func (s *Service) UseAsynq(redisURL string) error {
 		return err
 	}
 	s.asynqClient = asynq.NewClient(opt)
-	s.asynqServer = asynq.NewServer(opt, asynq.Config{
-		Concurrency: 2,
-		Queues:      map[string]int{"rag": 1},
-	})
-	mux := asynq.NewServeMux()
-	mux.HandleFunc(ragIngestTaskType, s.handleAsynqIngest)
-	go func() {
-		if err := s.asynqServer.Run(mux); err != nil && s.logger != nil {
-			s.logger.Printf("rag: asynq server stopped: %v", err)
+	serverConfig := func(queueName string, concurrency int) asynq.Config {
+		return asynq.Config{
+			Concurrency: concurrency,
+			Queues:      map[string]int{queueName: 1},
+			RetryDelayFunc: func(_ int, _ error, _ *asynq.Task) time.Duration {
+				// A timeout can win the processor select just before the handler finishes
+				// its detached cleanup. Keep the replacement task from overlapping it.
+				return ingestAsynqRetryDelay
+			},
+			ErrorHandler: asynq.ErrorHandlerFunc(func(ctx context.Context, task *asynq.Task, taskErr error) {
+				s.handleAsynqIngestError(ctx, task, taskErr)
+			}),
 		}
-	}()
+	}
+	for _, lane := range []struct {
+		name        string
+		concurrency int
+	}{
+		{name: ragFastQueueName, concurrency: ragFastQueueConcurrency},
+		{name: ragSlowQueueName, concurrency: ragSlowQueueConcurrency},
+	} {
+		srv := asynq.NewServer(opt, serverConfig(lane.name, lane.concurrency))
+		s.asynqServers = append(s.asynqServers, srv)
+		mux := asynq.NewServeMux()
+		mux.HandleFunc(ragIngestTaskType, s.handleAsynqIngest)
+		go func(queueName string, server *asynq.Server, handler *asynq.ServeMux) {
+			if err := server.Run(handler); err != nil && s.logger != nil {
+				s.logger.Printf("rag: asynq server for queue %s stopped: %v", queueName, err)
+			}
+		}(lane.name, srv, mux)
+	}
+	if s.logger != nil {
+		s.logger.Printf("rag: asynq lanes started fast=%d slow=%d", ragFastQueueConcurrency, ragSlowQueueConcurrency)
+	}
 	return nil
 }
 
 func (s *Service) CloseAsynq() {
-	if s.asynqServer != nil {
-		s.asynqServer.Shutdown()
+	for _, server := range s.asynqServers {
+		server.Shutdown()
 	}
 	if s.asynqClient != nil {
 		_ = s.asynqClient.Close()
@@ -147,8 +186,6 @@ type Embedder interface {
 	Embed(ctx context.Context, texts []string) ([][]float32, error)
 }
 
-// Ingest enqueues the parse/chunk/embed pipeline for a freshly created
-// document. Failures retry up to 3 times before the document is marked
 // RequeueIncomplete re-enqueues documents left in a non-terminal state
 // (pending/parsing/embedding) by a crash or restart — the in-memory queue
 // doesn't survive a restart, so without this a doc would poll "indexing…"
@@ -156,12 +193,66 @@ type Embedder interface {
 func (s *Service) RequeueIncomplete(ctx context.Context) {
 	docs, err := store.ListIncompleteDocuments(ctx, s.db)
 	if err != nil {
-		s.logger.Printf("rag: requeue scan failed: %v", err)
+		if s.logger != nil {
+			s.logger.Printf("rag: requeue scan failed: %v", err)
+		}
 		return
 	}
 	for _, d := range docs {
-		s.logger.Printf("rag: requeueing stuck document %s (was %s)", d.ID, d.Status)
+		if err := store.TouchDocumentIngest(ctx, s.db, d.ID); err != nil {
+			if s.logger != nil {
+				s.logger.Printf("rag: refresh recovery heartbeat for %s: %v", d.ID, err)
+			}
+			continue
+		}
+		if s.logger != nil {
+			s.logger.Printf("rag: requeueing incomplete document %s (was %s)", d.ID, d.Status)
+		}
 		s.Ingest(d.ID)
+	}
+}
+
+// RunIngestRecovery performs the boot recovery and then continuously reclaims
+// non-terminal documents whose worker heartbeat stopped. The DB claim is atomic,
+// so multiple API replicas can run this loop without enqueueing the same stale
+// document in the same recovery window.
+func (s *Service) RunIngestRecovery(ctx context.Context) {
+	s.RequeueIncomplete(ctx)
+	ticker := time.NewTicker(ingestRecoveryInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.RequeueStaleIngests(ctx)
+		}
+	}
+}
+
+// RequeueStaleIngests claims and requeues tasks abandoned by a process crash,
+// an exhausted asynq lease, a panic, or a worker that could not finalize state.
+func (s *Service) RequeueStaleIngests(ctx context.Context) {
+	now := time.Now()
+	docs, err := store.ClaimStaleIncompleteDocuments(
+		ctx,
+		s.db,
+		now.Add(-ingestPendingStaleAfter).Unix(),
+		now.Add(-ingestStaleAfter).Unix(),
+	)
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Printf("rag: stale ingest scan failed: %v", err)
+		}
+		return
+	}
+	for _, d := range docs {
+		if s.logger != nil {
+			s.logger.Printf("rag: reclaiming stale document %s (last status %s)", d.ID, d.Status)
+		}
+		// The stale DB claim is the uniqueness guard here. Bypass an old Redis
+		// Unique lock that may have survived the worker which owned it.
+		s.IngestNow(d.ID)
 	}
 }
 
@@ -180,17 +271,23 @@ func (s *Service) IngestNow(docID string) {
 
 func (s *Service) enqueueIngest(docID string, unique bool) {
 	if s.asynqClient != nil {
+		queueName := s.ingestQueueName(docID)
 		payload, _ := json.Marshal(map[string]string{"doc_id": docID})
 		task := asynq.NewTask(ragIngestTaskType, payload)
 		opts := []asynq.Option{
-			asynq.Queue("rag"),
-			asynq.Timeout(30 * time.Minute),
-			asynq.MaxRetry(0),
+			asynq.Queue(queueName),
+			asynq.Timeout(ingestTaskTimeout),
+			// Handler-level failures already get three bounded attempts and are
+			// archived with SkipRetry. These retries are for lease/process loss.
+			asynq.MaxRetry(ingestAsynqLeaseMaxRetries),
 		}
 		if unique {
-			opts = append(opts, asynq.Unique(30*time.Minute))
+			opts = append(opts, asynq.Unique(ingestUniqueTTL))
 		}
 		if _, err := s.asynqClient.Enqueue(task, opts...); err == nil {
+			if s.logger != nil {
+				s.logger.Printf("rag: enqueued doc=%s queue=%s", docID, queueName)
+			}
 			return
 		} else if errors.Is(err, asynq.ErrDuplicateTask) {
 			return
@@ -198,9 +295,33 @@ func (s *Service) enqueueIngest(docID string, unique bool) {
 			s.logger.Printf("rag: asynq enqueue failed for %s, falling back to in-process queue: %v", docID, err)
 		}
 	}
-	s.queue.Enqueue("rag.ingest", func(ctx context.Context) error {
+	s.queue.Enqueue("rag.ingest", func(context.Context) error {
+		// The generic in-process queue has a shorter default deadline. RAG owns
+		// its longer stage-aware budget so MinerU plus embedding can finish.
+		ctx, cancel := context.WithTimeout(context.Background(), ingestPipelineTimeout)
+		defer cancel()
 		return s.runIngestWithRetries(ctx, docID)
 	})
+}
+
+func (s *Service) ingestQueueName(docID string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	d, err := store.GetDocument(ctx, s.db, docID)
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Printf("rag: classify queue for %s: %v", docID, err)
+		}
+		return ragSlowQueueName
+	}
+	return ingestQueueNameForDocument(d)
+}
+
+func ingestQueueNameForDocument(d *store.Document) string {
+	if d != nil && (isSpreadsheetData(d.Filename, d.MimeType) || isProbablyText(d.MimeType, d.StoragePath, d.Filename)) {
+		return ragFastQueueName
+	}
+	return ragSlowQueueName
 }
 
 func (s *Service) handleAsynqIngest(ctx context.Context, t *asynq.Task) error {
@@ -213,10 +334,43 @@ func (s *Service) handleAsynqIngest(ctx context.Context, t *asynq.Task) error {
 	if payload.DocID == "" {
 		return fmt.Errorf("rag: missing doc_id")
 	}
-	return s.runIngestWithRetries(ctx, payload.DocID)
+	pipelineCtx, cancel := context.WithTimeout(ctx, ingestPipelineTimeout)
+	defer cancel()
+	if err := s.runIngestWithRetries(pipelineCtx, payload.DocID); err != nil {
+		// Business/upstream failures were already retried and finalized by the
+		// handler. Preserve asynq retries for lease loss instead of multiplying
+		// the three-attempt pipeline by another retry layer.
+		return fmt.Errorf("%w: %v", asynq.SkipRetry, err)
+	}
+	return nil
+}
+
+func (s *Service) handleAsynqIngestError(ctx context.Context, task *asynq.Task, taskErr error) {
+	if task == nil || task.Type() != ragIngestTaskType {
+		return
+	}
+	retried, retryOK := asynq.GetRetryCount(ctx)
+	maxRetry, maxOK := asynq.GetMaxRetry(ctx)
+	// SkipRetry means runIngestWithRetries already finalized the original error;
+	// writing the asynq wrapper would replace the useful user-facing cause.
+	if errors.Is(taskErr, asynq.SkipRetry) {
+		return
+	}
+	if !retryOK || !maxOK || retried < maxRetry {
+		return
+	}
+	var payload struct {
+		DocID string `json:"doc_id"`
+	}
+	if json.Unmarshal(task.Payload(), &payload) != nil || payload.DocID == "" {
+		return
+	}
+	s.finalizeIngestFailure(payload.DocID, taskErr)
 }
 
 func (s *Service) runIngestWithRetries(ctx context.Context, docID string) error {
+	stopHeartbeat := s.startIngestHeartbeat(ctx, docID)
+	defer stopHeartbeat()
 	var err error
 	// Cache the parsed content across retries so a transient embed/DB failure
 	// re-runs only the cheap embed step — never the paid MinerU OCR again.
@@ -239,21 +393,71 @@ func (s *Service) runIngestWithRetries(ctx context.Context, docID string) error 
 			select {
 			case <-ctx.Done():
 				timer.Stop()
-				return ctx.Err()
+				err = ctx.Err()
+				attempt = 3
 			case <-timer.C:
 			}
 		}
 	}
-	if s.vec.Enabled() {
-		if derr := s.vec.DeleteByDocument(ctx, docID); derr != nil && s.logger != nil {
-			s.logger.Printf("rag: cleanup vectors after failed ingest %s: %v", docID, derr)
+	s.finalizeIngestFailure(docID, err)
+	return err
+}
+
+func (s *Service) startIngestHeartbeat(ctx context.Context, docID string) func() {
+	heartbeatCtx, cancel := context.WithCancel(ctx)
+	touch := func() {
+		writeCtx, writeCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer writeCancel()
+		if err := store.TouchDocumentIngest(writeCtx, s.db, docID); err != nil && s.logger != nil {
+			s.logger.Printf("rag: heartbeat document %s: %v", docID, err)
 		}
 	}
-	if derr := store.DeleteChunksByDocument(ctx, s.db, docID); derr != nil && s.logger != nil {
+	touch()
+	go func() {
+		ticker := time.NewTicker(ingestHeartbeatInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-heartbeatCtx.Done():
+				return
+			case <-ticker.C:
+				touch()
+			}
+		}
+	}()
+	return cancel
+}
+
+// finalizeIngestFailure never reuses the task context: on timeout/cancellation
+// that context is already unusable, which was the original reason rows remained
+// forever in parsing/embedding. Cleanup and the terminal status get a fresh,
+// tightly-bounded context.
+func (s *Service) finalizeIngestFailure(docID string, ingestErr error) {
+	if ingestErr == nil {
+		ingestErr = errors.New("ingest failed")
+	}
+	chunkCtx, chunkCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	if derr := store.DeleteChunksByDocument(chunkCtx, s.db, docID); derr != nil && s.logger != nil {
 		s.logger.Printf("rag: cleanup chunks after failed ingest %s: %v", docID, derr)
 	}
-	_ = store.UpdateDocumentStatus(ctx, s.db, docID, "failed", unwrapNonRetryableIngestError(err).Error(), 0)
-	return err
+	chunkCancel()
+
+	if s.vec.Enabled() {
+		vectorCtx, vectorCancel := context.WithTimeout(context.Background(), ingestFinalizeTimeout)
+		if derr := s.vec.DeleteByDocument(vectorCtx, docID); derr != nil && s.logger != nil {
+			s.logger.Printf("rag: cleanup vectors after failed ingest %s: %v", docID, derr)
+		}
+		vectorCancel()
+	}
+
+	// Always allocate a separate status context after cleanup. Even if Qdrant
+	// consumed its entire deadline, the terminal DB transition still gets a full
+	// chance to complete and unlock the frontend Retry action.
+	statusCtx, statusCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	if err := store.UpdateDocumentStatus(statusCtx, s.db, docID, "failed", unwrapNonRetryableIngestError(ingestErr).Error(), 0); err != nil && s.logger != nil {
+		s.logger.Printf("rag: finalize failed ingest %s: %v", docID, err)
+	}
+	statusCancel()
 }
 
 type nonRetryableIngestError struct{ err error }
@@ -312,15 +516,20 @@ func (s *Service) runPipeline(ctx context.Context, docID string, cache *parseCac
 	// embedder-resolve) means a failure later in THIS run — parse error, MinerU
 	// outage, KB embedder-resolve error — can't leave stale rows behind; and
 	// repeats (RequeueIncomplete, the 3× retry loop, a manual re-Ingest) never
-	// duplicate. Unconditional: skip-embed docs write chunk rows too, and every
-	// insert below mints a new id. (§4.11-C-3)
+	// duplicate. Unconditional: a previous cleanup may have removed DB chunks but
+	// failed to reach Qdrant, so absence of chunk rows is not proof that no stale
+	// vectors exist. (§4.11-C-3)
+	cleanupStart := time.Now()
 	if err := store.DeleteChunksByDocument(ctx, s.db, docID); err != nil {
 		return err
 	}
 	if s.vec.Enabled() {
-		if derr := s.vec.DeleteByDocument(ctx, docID); derr != nil {
+		if derr := s.vec.DeleteByDocument(ctx, docID); derr != nil && s.logger != nil {
 			s.logger.Printf("rag: clear old vectors for %s: %v", docID, derr)
 		}
+	}
+	if s.logger != nil {
+		s.logger.Printf("rag: pre-ingest cleanup done doc=%s took=%s", docID, time.Since(cleanupStart).Round(time.Millisecond))
 	}
 	_ = store.UpdateDocumentStatus(ctx, s.db, docID, "parsing", "", 0)
 

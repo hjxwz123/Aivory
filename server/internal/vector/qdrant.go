@@ -317,16 +317,34 @@ func (q *Qdrant) ExistingChunkIDs(ctx context.Context, dim int, scope Scope) (ma
 	return ids, nil
 }
 
-// VectorChunkStatuses scrolls every point in a dimension/scope and reports
-// whether its vector payload is non-empty. It is intentionally separate from
-// ExistingChunkIDs so normal retrieval can keep using the lighter payload-only
-// consistency check, while admin maintenance can verify vector integrity.
+// VectorChunkStatuses scrolls points in a required scope and reports whether
+// each vector payload is non-empty. Empty scope is deliberately fail-closed so
+// a future caller cannot accidentally turn a tenant-scoped check into a global
+// collection scan.
 func (q *Qdrant) VectorChunkStatuses(ctx context.Context, dim int, scope Scope) (map[string]ChunkVectorStatus, error) {
 	status := map[string]ChunkVectorStatus{}
+	should := scopeShould(scope)
+	if len(should) == 0 {
+		return status, nil
+	}
 	if err := q.ensureCollection(ctx, dim); err != nil {
 		return nil, err
 	}
-	should := scopeShould(scope)
+	return q.vectorChunkStatuses(ctx, dim, should)
+}
+
+// AllVectorChunkStatuses is the explicit global variant used by admin vector
+// audit/rebuild. Keeping it separate makes an unfiltered scan visible at every
+// call site instead of overloading Scope{} with privileged semantics.
+func (q *Qdrant) AllVectorChunkStatuses(ctx context.Context, dim int) (map[string]ChunkVectorStatus, error) {
+	if err := q.ensureCollection(ctx, dim); err != nil {
+		return nil, err
+	}
+	return q.vectorChunkStatuses(ctx, dim, nil)
+}
+
+func (q *Qdrant) vectorChunkStatuses(ctx context.Context, dim int, should []map[string]any) (map[string]ChunkVectorStatus, error) {
+	status := map[string]ChunkVectorStatus{}
 	var offset json.RawMessage
 	for {
 		body := map[string]any{
@@ -429,12 +447,39 @@ func (q *Qdrant) deleteByField(ctx context.Context, field, value string) error {
 			},
 		},
 	}
-	var firstErr error
-	for _, name := range names {
-		if err := q.do(ctx, http.MethodPost, "/collections/"+name+"/points/delete?wait=true", body, nil); err != nil && firstErr == nil {
+	const deleteConcurrency = 4
+	var (
+		wg       sync.WaitGroup
+		mu       sync.Mutex
+		firstErr error
+	)
+	sem := make(chan struct{}, deleteConcurrency)
+	setFirstErr := func(err error) {
+		mu.Lock()
+		if firstErr == nil {
 			firstErr = err
 		}
+		mu.Unlock()
 	}
+
+collectionLoop:
+	for _, name := range names {
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+			setFirstErr(ctx.Err())
+			break collectionLoop
+		}
+		wg.Add(1)
+		go func(collection string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			if err := q.do(ctx, http.MethodPost, "/collections/"+collection+"/points/delete?wait=true", body, nil); err != nil {
+				setFirstErr(err)
+			}
+		}(name)
+	}
+	wg.Wait()
 	return firstErr
 }
 

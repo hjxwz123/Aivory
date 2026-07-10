@@ -185,8 +185,12 @@ func ensureAttachedDocumentsReady(ctx context.Context, db *sql.DB, convID string
 	docIDs := []string{}
 	fileIDs := []string{}
 	seen := map[string]bool{}
-	seenFiles := map[string]bool{}
+	attachedFiles := map[string]bool{}
+	queuedFiles := map[string]bool{}
 	for _, a := range atts {
+		if fileID := strings.TrimSpace(a.ID); fileID != "" {
+			attachedFiles[fileID] = true
+		}
 		id := strings.TrimSpace(a.DocumentID)
 		if id != "" {
 			if seen[id] {
@@ -197,11 +201,24 @@ func ensureAttachedDocumentsReady(ctx context.Context, db *sql.DB, convID string
 			continue
 		}
 		fileID := strings.TrimSpace(a.ID)
-		if fileID == "" || seenFiles[fileID] || !isDocKind(a.Kind) {
+		if fileID == "" || queuedFiles[fileID] || !isDocKind(a.Kind) {
 			continue
 		}
-		seenFiles[fileID] = true
+		queuedFiles[fileID] = true
 		fileIDs = append(fileIDs, fileID)
+	}
+	// Never trust the refreshed client to remember local attachment state. Every
+	// server-side composer draft must be present in this turn; otherwise the user
+	// could refresh while parsing, send with attachments=[], and receive an answer
+	// that silently ignored the file.
+	drafts, err := store.ListDraftFilesForConversation(ctx, db, convID)
+	if err != nil {
+		return err
+	}
+	for _, draft := range drafts {
+		if !attachedFiles[draft.ID] {
+			return errors.New("conversation has unsent attachments; reload and try again")
+		}
 	}
 	if len(docIDs) > 0 {
 		statuses, err := store.ConversationDocumentStatuses(ctx, db, convID, docIDs)

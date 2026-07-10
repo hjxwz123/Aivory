@@ -241,7 +241,7 @@ func (s *Service) collectVectorIssues(ctx context.Context) (VectorAuditReport, [
 	}
 	sort.Ints(dims)
 	for _, dim := range dims {
-		status, err := s.vec.VectorChunkStatuses(ctx, dim, vector.Scope{})
+		status, err := s.vec.AllVectorChunkStatuses(ctx, dim)
 		if err != nil {
 			return report, issues, err
 		}

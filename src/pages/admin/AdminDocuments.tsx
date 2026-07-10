@@ -44,6 +44,8 @@ const OWNED_KEYS = [
   'storage_aliyun_access_key_id',
   'storage_aliyun_access_key_secret',
   'upload_allowed_extensions',
+  'max_image_upload_mb',
+  'max_file_upload_mb',
 ] as const
 
 export default function AdminDocuments() {
@@ -452,7 +454,7 @@ export default function AdminDocuments() {
           <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-5">
             <h2 className="font-serif text-lg text-[var(--color-fg)]">{t('admin:settings.fields.uploadsSection')}</h2>
             <p className="mt-1 text-xs text-[var(--color-fg-subtle)]">{t('admin:settings.fields.uploadsLead')}</p>
-            <div className="mt-4">
+            <div className="mt-4 flex flex-col gap-5">
               <Field
                 label={t('admin:settings.fields.uploadAllowedExt')}
                 htmlFor="upload-ext"
@@ -464,6 +466,44 @@ export default function AdminDocuments() {
                   value={readString('upload_allowed_extensions')}
                   onChange={(e) =>
                     setDraft({ ...draft, upload_allowed_extensions: e.target.value })
+                  }
+                />
+              </Field>
+              <Field
+                label={t('admin:settings.fields.maxImageUploadMb', { defaultValue: 'Max image size (MB)' })}
+                htmlFor="max-image-mb"
+                hint={t('admin:settings.fields.maxImageUploadMbHint', {
+                  defaultValue:
+                    'Images larger than this are rejected at upload. 0 = default (5 MB). Cannot exceed the server upload ceiling.',
+                })}
+              >
+                <Input
+                  id="max-image-mb"
+                  type="number"
+                  min={0}
+                  placeholder="5"
+                  value={String(readNumber('max_image_upload_mb', 5))}
+                  onChange={(e) =>
+                    setDraft({ ...draft, max_image_upload_mb: Math.max(0, Number(e.target.value) || 0) })
+                  }
+                />
+              </Field>
+              <Field
+                label={t('admin:settings.fields.maxFileUploadMb', { defaultValue: 'Max file size (MB, non-image)' })}
+                htmlFor="max-file-mb"
+                hint={t('admin:settings.fields.maxFileUploadMbHint', {
+                  defaultValue:
+                    'Non-image files (PDF, DOCX, CSV, …) larger than this are rejected. 0 = default (server upload ceiling).',
+                })}
+              >
+                <Input
+                  id="max-file-mb"
+                  type="number"
+                  min={0}
+                  placeholder="0"
+                  value={String(readNumber('max_file_upload_mb', 0))}
+                  onChange={(e) =>
+                    setDraft({ ...draft, max_file_upload_mb: Math.max(0, Number(e.target.value) || 0) })
                   }
                 />
               </Field>

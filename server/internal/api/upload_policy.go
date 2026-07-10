@@ -258,5 +258,9 @@ func meUploadPolicyHandler(d Deps, w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, 200, map[string]any{
 		"allowed_extensions": p.AllowedExtensionsSlice(),
 		"max_upload_bytes":   d.Config.MaxUploadBytes,
+		// §4.6-A per-kind caps (admin-tunable). The composer rejects an oversize
+		// file up front using these instead of the single env ceiling.
+		"max_image_bytes": uploadLimitBytes(d, "image"),
+		"max_file_bytes":  uploadLimitBytes(d, "text"),
 	})
 }

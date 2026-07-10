@@ -414,7 +414,10 @@ type File struct {
 	MimeType       string `json:"mime_type"`
 	SizeBytes      int64  `json:"size_bytes"`
 	Kind           string `json:"kind"`
-	StoragePath    string `json:"-"`
+	// Draft is true for a composer upload that has not yet been committed to a
+	// user message. Conversation-file drawer uploads are immediately committed.
+	Draft       bool   `json:"draft"`
+	StoragePath string `json:"-"`
 	// URL is filled by the handler (not the DB) so the frontend can render
 	// thumbnails / download links without keeping the blob URL alive.
 	URL string `json:"url,omitempty"`

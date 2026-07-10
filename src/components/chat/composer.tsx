@@ -44,7 +44,7 @@ import { useModels } from '@/store/models'
 import { useAuth } from '@/store/auth'
 import { useComposerPrefs } from '@/store/composer-prefs'
 import { api, ApiError } from '@/api/client'
-import type { ApiAttachment } from '@/api/types'
+import type { ApiAttachment, ApiConversationFile, ApiDocument } from '@/api/types'
 import { toast } from '@/hooks/use-toast'
 import { cn, uid, modKey } from '@/lib/utils'
 import { fileIconFor } from '@/lib/file-icon'
@@ -97,6 +97,25 @@ interface ComposerProps {
 const MAX_LEN = 12_000
 const EMPTY_PARAM_VALUES: Record<string, unknown> = {}
 
+// §4.6-A upload size caps. The /api/files handler is authoritative; we read the
+// admin-configured per-kind caps from the upload policy once (module-level
+// cache, shared across composer instances) so we can reject an oversize file up
+// front instead of wasting an upload round-trip. Falls back to the seeded
+// defaults if the fetch fails, so a transient error never blocks attaching.
+const DEFAULT_UPLOAD_LIMITS = { max_image_bytes: 5 * 1024 * 1024, max_file_bytes: 50 * 1024 * 1024 }
+let uploadLimitsCache: Promise<{ max_image_bytes: number; max_file_bytes: number }> | null = null
+function getUploadLimits() {
+  if (!uploadLimitsCache) {
+    uploadLimitsCache = api<{ max_image_bytes?: number; max_file_bytes?: number }>('/me/upload-policy')
+      .then((p) => ({
+        max_image_bytes: p.max_image_bytes ?? DEFAULT_UPLOAD_LIMITS.max_image_bytes,
+        max_file_bytes: p.max_file_bytes ?? DEFAULT_UPLOAD_LIMITS.max_file_bytes,
+      }))
+      .catch(() => DEFAULT_UPLOAD_LIMITS)
+  }
+  return uploadLimitsCache
+}
+
 interface PendingAttachment extends Attachment {
   /** true while POST /api/files is in flight. */
   uploading?: boolean
@@ -139,6 +158,46 @@ function attachmentTileClass(a: Pick<Attachment, 'kind' | 'name'>): string {
   return 'bg-[var(--color-accent)] text-[var(--color-accent-fg)]'
 }
 
+function restoredAttachmentKind(kind: string): Attachment['kind'] {
+  switch (kind) {
+    case 'image':
+    case 'pdf':
+    case 'doc':
+    case 'sheet':
+    case 'code':
+      return kind
+    default:
+      return 'other'
+  }
+}
+
+function restoredIngestStatus(status?: ApiDocument['status']): PendingAttachment['ingest'] {
+  switch (status) {
+    case 'ready':
+    case 'failed':
+    case 'embedding':
+      return status
+    case 'pending':
+    case 'parsing':
+      return 'parsing'
+    default:
+      return undefined
+  }
+}
+
+function restoreConversationFile(file: ApiConversationFile, scopeId: string): PendingAttachment {
+  return {
+    id: file.id,
+    name: file.filename,
+    kind: restoredAttachmentKind(file.kind),
+    size: file.size_bytes,
+    previewUrl: file.url,
+    uploadScopeId: scopeId,
+    documentId: file.document_id,
+    ingest: restoredIngestStatus(file.document_status),
+  }
+}
+
 export function Composer({
   modelId,
   onModelChange,
@@ -172,6 +231,8 @@ export function Composer({
   const draftScopeRef = useRef(draftScope)
   const [attachments, setAttachments] = useState<PendingAttachment[]>([])
   const attachmentsRef = useRef<PendingAttachment[]>([])
+  const attachmentScopeRef = useRef(conversationId)
+  const [restoringAttachments, setRestoringAttachments] = useState(Boolean(conversationId))
   const [kbList, setKBList] = useState<{ id: string; name: string }[]>([])
   // Drag-and-drop file upload over the composer surface.
   const [dragOver, setDragOver] = useState(false)
@@ -318,12 +379,12 @@ export function Composer({
     () => attachments.some((a) => a.documentId && a.ingest !== 'ready'),
     [attachments],
   )
-  const canSubmit = value.trim().length > 0 && !streaming && !uploading && !documentNotReady
+  const canSubmit = value.trim().length > 0 && !streaming && !uploading && !restoringAttachments && !documentNotReady
 
   async function handleSubmit() {
     if (submittingRef.current) return
     const text = value.trim()
-    if (!text || streaming || uploading || documentNotReady) return
+    if (!text || streaming || uploading || restoringAttachments || documentNotReady) return
     if (text.length > MAX_LEN) {
       toast.warning(
         t('composer.tooLongTitle'),
@@ -378,7 +439,7 @@ export function Composer({
         throw new Error(t('composer.documentScopeRequired', { defaultValue: 'Create a conversation before uploading documents.' }))
       }
       const ragFlag = (kbIds && kbIds.length > 0) || isDocLike
-      const url = `/files${scopeId ? `?conversation_id=${encodeURIComponent(scopeId)}${ragFlag ? '&rag=1' : ''}` : ''}`
+      const url = `/files${scopeId ? `?conversation_id=${encodeURIComponent(scopeId)}&draft=1${ragFlag ? '&rag=1' : ''}` : ''}`
       const res = await api<ApiAttachment & { id: string; url?: string; document_id?: string }>(url, { method: 'POST', body: form })
       // Persistent URL replaces the blob URL. Fall back to /api/files/<id>
       // when the response omits `url` (older backends).
@@ -400,12 +461,20 @@ export function Composer({
       }
       if (removedAttachmentIds.current.has(local.id)) {
         removedAttachmentIds.current.delete(local.id)
+        setAttachments((items) => items.filter((item) => item.id !== local.id && item.id !== res.id))
         if (scopeId) {
           void conversationsApi.removeFile(scopeId, res.id).catch(() => {})
         }
         return null
       }
-      setAttachments((s) => s.map((a) => (a.id === local.id ? updated : a)))
+      // The conversation id becomes visible before this request finishes. A
+      // simultaneous draft-restore query may therefore have already inserted
+      // the server row; replace the local chip and collapse that duplicate.
+      setAttachments((items) =>
+        items
+          .filter((item) => item.id !== res.id)
+          .map((item) => (item.id === local.id ? updated : item)),
+      )
       if (res.document_id && scopeId) {
         startIngestPoll(scopeId, res.document_id, res.id)
       }
@@ -422,7 +491,9 @@ export function Composer({
   // really finished, otherwise the model falls back to tool-side PDF parsing.
   const INGEST_POLL_MS = 1200
 
-  function startIngestPoll(scopeId: string, docId: string, attId: string) {
+  const startIngestPoll = useCallback((scopeId: string, docId: string, attId: string) => {
+    const previous = pollTimers.current.get(attId)
+    if (previous) clearTimeout(previous)
     const tick = async () => {
       pollTimers.current.delete(attId)
       let done = false
@@ -449,7 +520,62 @@ export function Composer({
       pollTimers.current.set(attId, setTimeout(() => void tick(), INGEST_POLL_MS))
     }
     pollTimers.current.set(attId, setTimeout(() => void tick(), INGEST_POLL_MS))
-  }
+  }, [t])
+
+  // The backend is authoritative for unsent attachments. Rehydrate composer
+  // drafts after refresh and resume status polling; committed historical files
+  // are excluded by the endpoint and remain available in the files drawer only.
+  useEffect(() => {
+    const previousScope = attachmentScopeRef.current
+    attachmentScopeRef.current = conversationId
+    if (previousScope && previousScope !== conversationId) {
+      pollTimers.current.forEach((tm) => clearTimeout(tm))
+      pollTimers.current.clear()
+      setAttachments([])
+    }
+    if (!conversationId) {
+      setRestoringAttachments(false)
+      return
+    }
+
+    let cancelled = false
+    setRestoringAttachments(true)
+    void conversationsApi
+      .listDraftFiles(conversationId)
+      .then((files) => {
+        if (cancelled) return
+        const restored = files.map((file) => restoreConversationFile(file, conversationId))
+        setAttachments((current) => {
+          const present = new Set(current.map((item) => item.id))
+          return [...current, ...restored.filter((item) => !present.has(item.id))]
+        })
+        for (const file of files) {
+          if (
+            file.document_id &&
+            file.document_status !== 'ready' &&
+            file.document_status !== 'failed'
+          ) {
+            const existing = pollTimers.current.get(file.id)
+            if (existing) clearTimeout(existing)
+            startIngestPoll(conversationId, file.document_id, file.id)
+          }
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          toast.error(
+            t('composer.restoreAttachmentsFailed', { defaultValue: 'Could not restore pending attachments' }),
+            error instanceof Error ? error.message : undefined,
+          )
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setRestoringAttachments(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [conversationId, startIngestPoll, t])
 
   async function retryAttachmentIngest(a: PendingAttachment) {
     if (!a.uploadScopeId || !a.documentId) return
@@ -475,7 +601,34 @@ export function Composer({
 
   async function handleAttach(files: FileList | null) {
     if (!files || !files.length) return
-    const list = Array.from(files)
+    const all = Array.from(files)
+    // §4.6 reject oversize files BEFORE uploading — images and other files have
+    // separate admin-set caps. Rejected images would otherwise upload fine but be
+    // silently dropped at chat time (base64 inline cap); documents would fail the
+    // server cap after a wasted upload.
+    const limits = await getUploadLimits()
+    const overImage = all.filter((f) => f.type.startsWith('image/') && f.size > limits.max_image_bytes)
+    const overFile = all.filter((f) => !f.type.startsWith('image/') && f.size > limits.max_file_bytes)
+    if (overImage.length) {
+      toast.error(
+        t('composer.imageTooLarge', {
+          defaultValue: 'Images must be under {{mb}} MB',
+          mb: Math.floor(limits.max_image_bytes / (1024 * 1024)),
+        }),
+        overImage.map((f) => f.name).join(', '),
+      )
+    }
+    if (overFile.length) {
+      toast.error(
+        t('composer.fileTooLarge', {
+          defaultValue: 'Files must be under {{mb}} MB',
+          mb: Math.floor(limits.max_file_bytes / (1024 * 1024)),
+        }),
+        overFile.map((f) => f.name).join(', '),
+      )
+    }
+    const list = all.filter((f) => !overImage.includes(f) && !overFile.includes(f))
+    if (!list.length) return
     const additions: PendingAttachment[] = list.map((f) => ({
       id: uid('att'),
       name: f.name,

@@ -643,7 +643,12 @@ func CreateMessage(ctx context.Context, db *sql.DB, m Message) (*Message, error)
 	if m.ModelLabel == "" && m.ModelID != "" {
 		_ = db.QueryRowContext(ctx, `SELECT COALESCE(label,'') FROM models WHERE id=?`, m.ModelID).Scan(&m.ModelLabel)
 	}
-	_, err := db.ExecContext(ctx, `INSERT INTO messages(
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback() //nolint:errcheck
+	_, err = tx.ExecContext(ctx, `INSERT INTO messages(
 		id, conversation_id, parent_id, role, provider, model_id, model_label, blocks, raw, stop_reason, attachments, citations,
 		input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost, currency, status, error, search_text, author_id, created_at
 	) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -653,11 +658,45 @@ func CreateMessage(ctx context.Context, db *sql.DB, m Message) (*Message, error)
 	if err != nil {
 		return nil, err
 	}
+	// A composer upload is a durable draft until the user message that carries it
+	// is persisted. Commit those file rows in the SAME transaction as the message,
+	// so a refresh can never observe a saved question whose attachments still look
+	// unsent (or an unsaved question whose files were prematurely committed).
+	if m.Role == "user" {
+		ids := attachmentFileIDs(m.Attachments)
+		if len(ids) > 0 {
+			args := []any{m.ConversationID}
+			args = append(args, anySlice(ids)...)
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE files SET draft=0 WHERE conversation_id=? AND id IN (`+idPlaceholders(len(ids))+`)`, args...); err != nil {
+				return nil, err
+			}
+		}
+	}
 	// Always advance the conversation's active leaf to point at this message so
 	// the latest reply is what loads on refresh — branches are still navigable
 	// via the explicit PATCH active-leaf endpoint.
-	_, _ = db.ExecContext(ctx, `UPDATE conversations SET active_leaf_id=?, updated_at=? WHERE id=?`, m.ID, time.Now().Unix(), m.ConversationID)
+	if _, err := tx.ExecContext(ctx, `UPDATE conversations SET active_leaf_id=?, updated_at=? WHERE id=?`, m.ID, time.Now().Unix(), m.ConversationID); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
 	return GetMessage(ctx, db, m.ID)
+}
+
+func attachmentFileIDs(raw json.RawMessage) []string {
+	var atts []struct {
+		ID string `json:"id"`
+	}
+	if json.Unmarshal(raw, &atts) != nil {
+		return nil
+	}
+	ids := make([]string, 0, len(atts))
+	for _, att := range atts {
+		ids = append(ids, att.ID)
+	}
+	return cleanIDs(ids)
 }
 
 // ImportMessageInput is one node of an imported conversation tree (§ conversation
