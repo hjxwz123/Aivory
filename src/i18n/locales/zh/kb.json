@@ -50,7 +50,9 @@
     "tabPaste": "粘贴文本",
     "tabUpload": "上传文件",
     "contentLabel": "内容",
-    "clickToChoose": "点击选择文件"
+    "clickToChoose": "点击选择文件",
+    "uploadProgress": "上传中 {{percent}}%",
+    "uploadProcessing": "解析/索引中…"
   },
   "deleted": "知识库已删除",
   "deleteAction": "删除知识库",

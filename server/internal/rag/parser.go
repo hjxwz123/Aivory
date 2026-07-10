@@ -29,11 +29,9 @@ import (
 )
 
 // MinerUResult is the structured output we get back from MinerU. Markdown is
-// the body of `full.md` from the zip with image refs rewritten to the
-// `mineru://filename` markers the existing chunker recognises (§4.11-C image
-// embed). Images is the per-image metadata pulled from the same zip — caption,
-// page number, filename — so the citation UI can link back to the source
-// image when an image_caption chunk is retrieved.
+// the body of `full.md` from the zip; image refs may be normalised temporarily
+// to `mineru://filename` markers so the ingest cleanup can remove them before
+// chunking, embedding, or storing text.
 type MinerUResult struct {
 	Markdown string
 	Images   []MinerUImage
@@ -41,9 +39,7 @@ type MinerUResult struct {
 
 // MinerUImage is one image extracted from a non-text document. Caption may be
 // blank — the orchestrator can route blank captions through a VLM later if
-// needed. Filename is the basename inside the zip (e.g. `foo.png`), used as
-// the `image_ref` on the resulting image_caption chunk and matched against
-// the inline `mineru://filename` markers in the markdown.
+// needed. Filename is the basename inside the zip (e.g. `foo.png`).
 type MinerUImage struct {
 	PageNo   int
 	Caption  string
@@ -231,26 +227,15 @@ func parseDocument(
 	return filepath.Base(docPath) + " — could not extract text (" + formatBytes(size) + "). " + reason, false, nil
 }
 
-// runMinerUMarkdown runs the cloud OCR pipeline and assembles the markdown body
-// plus any per-image markers the zip layout didn't already embed.
+// runMinerUMarkdown runs the cloud OCR pipeline and returns the markdown body
+// with MinerU image markdown stripped. Raw image markers are useful only for
+// display; storing or embedding them pollutes retrieval with opaque filenames.
 func runMinerUMarkdown(ctx context.Context, docPath, filename, mime, baseURL, token string, sb *storage.Client) (string, error) {
 	res, err := minerUExtractViaCloud(ctx, docPath, filename, mime, baseURL, token, sb)
 	if err != nil {
 		return "", err
 	}
-	b := strings.Builder{}
-	b.WriteString(res.Markdown)
-	for _, im := range res.Images {
-		if strings.Contains(b.String(), "mineru://"+im.Filename) {
-			continue
-		}
-		caption := strings.TrimSpace(im.Caption)
-		if caption == "" {
-			caption = im.Filename
-		}
-		fmt.Fprintf(&b, "\n\n<!-- mineru-image page=%d -->\n![%s](mineru://%s)\n", im.PageNo, caption, im.Filename)
-	}
-	return b.String(), nil
+	return stripMinerUMarkdownImages(res.Markdown), nil
 }
 
 // docExt returns the lower-case extension (no dot) from the original filename,
@@ -816,9 +801,9 @@ func minerUPollTask(ctx context.Context, baseURL, token, taskID string, interval
 //   - `images/` — image files (png/jpg/etc.).
 //   - `*_content_list.json`, `*_layout.json`, `*_model.json` — metadata, ignored.
 //
-// We rewrite `![alt](images/foo.png)` → `![alt](mineru://foo.png)` so the
-// existing chunker's `mineruImageMarker` regex picks them up as image_caption
-// chunks.
+// We rewrite `![alt](images/foo.png)` → `![alt](mineru://foo.png)` as a
+// canonical intermediate form; runMinerUMarkdown strips those markers before
+// the text reaches chunking, embedding, or database storage.
 // mineruZipClient downloads the MinerU result zip. Because the zip URL comes
 // from the API *response* (not admin config), it goes through an SSRF-safe
 // client that blocks private/internal IPs at dial time (§C6).
@@ -913,10 +898,8 @@ func minerUDownloadAndUnpack(ctx context.Context, zipURL string) (*MinerUResult,
 
 	out := &MinerUResult{Markdown: markdown}
 	// We don't reorder images — the markdown already has them in document
-	// order. We attach the list so the ingest pipeline can persist
-	// image_caption rows with the right `image_ref` even when the markdown
-	// rewriter missed a path (defensive — appended at the bottom by
-	// parseDocument).
+	// order. We attach the list for future image-aware indexing, but the current
+	// text ingest path strips opaque image markdown before storage/embedding.
 	seen := map[string]bool{}
 	for _, im := range images {
 		if seen[im.basename] {
@@ -934,6 +917,28 @@ func minerUDownloadAndUnpack(ctx context.Context, zipURL string) (*MinerUResult,
 // mineruImagesPathRe matches `![alt](images/foo.png)` and `![alt](./images/foo.png)`.
 // Capture (1) = alt text, (2) = full path so we can take the basename.
 var mineruImagesPathRe = regexp.MustCompile(`!\[([^\]]*)\]\(((?:\./)?images/[^)\s]+)\)`)
+
+var (
+	// A MinerU-only image block can be either just the markdown image marker, or
+	// the marker preceded by the optional metadata comment older parser versions
+	// appended. Remove the whole line/block so it cannot become a standalone
+	// child chunk.
+	mineruImageOnlyBlockRe = regexp.MustCompile(`(?m)^[ \t]*(?:<!--\s*mineru-image\b[^>]*-->\s*\r?\n[ \t]*)?!\[[^\]\n]*\]\(\s*mineru://[^)\n]*\)[ \t]*(?:\r?\n)?`)
+	mineruMarkdownImageRe  = regexp.MustCompile(`!\[[^\]\n]*\]\(\s*mineru://[^)\n]*\)`)
+	mineruImageCommentRe   = regexp.MustCompile(`(?m)^[ \t]*<!--\s*mineru-image\b[^>]*-->[ \t]*(?:\r?\n)?`)
+	excessiveBlankLinesRe  = regexp.MustCompile(`\n{3,}`)
+)
+
+func stripMinerUMarkdownImages(s string) string {
+	if !strings.Contains(s, "mineru://") && !strings.Contains(s, "mineru-image") {
+		return s
+	}
+	s = mineruImageOnlyBlockRe.ReplaceAllString(s, "\n")
+	s = mineruMarkdownImageRe.ReplaceAllString(s, " ")
+	s = mineruImageCommentRe.ReplaceAllString(s, "")
+	s = excessiveBlankLinesRe.ReplaceAllString(s, "\n\n")
+	return s
+}
 
 // zipNameIsSafe returns true when the zip entry's name has no traversal
 // segments, no empty/absolute prefix, and no Windows-y backslashes. We don't

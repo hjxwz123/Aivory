@@ -10,6 +10,7 @@ import { create } from 'zustand'
 import { ApiError, projectsApi } from '@/api'
 import { activeWorkspaceId } from '@/store/workspaces'
 import type { ApiDocument, ApiProject } from '@/api/types'
+import type { UploadProgress } from '@/api/client'
 import type { Project, ProjectAccent, ProjectFile, ProjectFileKind } from '@/types/project'
 import { toast } from '@/hooks/use-toast'
 
@@ -30,7 +31,11 @@ interface ProjectStore {
 
   addFile: (id: string, file: Omit<ProjectFile, 'id' | 'addedAt'> & { content?: string }) => Promise<ProjectFile | null>
   /** Upload a real file (multipart) into the project library. */
-  uploadFile: (id: string, file: File) => Promise<ProjectFile | null>
+  uploadFile: (
+    id: string,
+    file: File,
+    opts?: { onProgress?: (progress: UploadProgress) => void },
+  ) => Promise<ProjectFile | null>
   removeFile: (id: string, fileId: string) => Promise<void>
   renameFile: (id: string, fileId: string, name: string) => Promise<void>
 
@@ -179,9 +184,9 @@ export const useProjects = create<ProjectStore>((set, get) => ({
     }
   },
 
-  async uploadFile(id, file) {
+  async uploadFile(id, file, opts = {}) {
     try {
-      const doc = await projectsApi.uploadDoc(id, file)
+      const doc = await projectsApi.uploadDoc(id, file, opts)
       const f = toLocalFile(doc)
       set((s) => ({
         projects: s.projects.map((p) =>

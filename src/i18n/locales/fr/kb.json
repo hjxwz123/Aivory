@@ -50,7 +50,9 @@
     "tabPaste": "Coller du texte",
     "tabUpload": "Importer un fichier",
     "contentLabel": "Contenu",
-    "clickToChoose": "Cliquez pour choisir des fichiers"
+    "clickToChoose": "Cliquez pour choisir des fichiers",
+    "uploadProgress": "Envoi {{percent}} %",
+    "uploadProcessing": "Analyse / indexation…"
   },
   "deleted": "Base de connaissances supprimée",
   "deleteAction": "Supprimer la base de connaissances",

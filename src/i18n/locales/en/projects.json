@@ -44,6 +44,8 @@
     "filesAddDescription": "Upload a PDF, Markdown or text file. Aurelia indexes it so the assistant can retrieve it during chats in this project.",
     "filesClickToChoose": "Click to choose files",
     "filesUploading": "Uploading…",
+    "filesUploadingPercent": "Uploading {{percent}}%",
+    "filesProcessing": "Parsing / indexing…",
     "filesEmpty": "No files yet.",
     "filesEmptyBody": "Drop in working notes, a style guide, a glossary, anything you want the assistant to keep in view.",
     "fileSize": "{{size}}",

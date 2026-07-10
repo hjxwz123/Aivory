@@ -44,6 +44,8 @@
     "filesAddDescription": "Téléversez un fichier PDF, Markdown ou texte. Aurelia l'indexe pour que l'assistant puisse le récupérer pendant les discussions de ce projet.",
     "filesClickToChoose": "Cliquez pour choisir des fichiers",
     "filesUploading": "Téléversement…",
+    "filesUploadingPercent": "Téléversement {{percent}} %",
+    "filesProcessing": "Analyse / indexation…",
     "filesEmpty": "Aucun fichier pour l'instant.",
     "filesEmptyBody": "Déposez des notes de travail, un guide de style, un glossaire, tout ce que vous voulez garder à la vue de l'assistant.",
     "fileSize": "{{size}}",

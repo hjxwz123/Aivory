@@ -50,7 +50,9 @@
     "tabPaste": "テキストを貼り付け",
     "tabUpload": "ファイルをアップロード",
     "contentLabel": "内容",
-    "clickToChoose": "クリックしてファイルを選択"
+    "clickToChoose": "クリックしてファイルを選択",
+    "uploadProgress": "アップロード中 {{percent}}%",
+    "uploadProcessing": "解析/インデックス中…"
   },
   "deleted": "ナレッジベースを削除しました",
   "deleteAction": "ナレッジベースを削除",

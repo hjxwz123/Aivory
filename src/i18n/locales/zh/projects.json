@@ -44,6 +44,8 @@
     "filesAddDescription": "上传 PDF / Markdown / 纯文本文件。Aurelia 会建立索引，让助手在项目对话中检索它。",
     "filesClickToChoose": "点击选择文件",
     "filesUploading": "上传中……",
+    "filesUploadingPercent": "上传中 {{percent}}%",
+    "filesProcessing": "解析/索引中…",
     "filesEmpty": "尚无文件。",
     "filesEmptyBody": "上传工作笔记、风格指南、术语表，任何你希望助手随时在手边的资料。",
     "fileSize": "{{size}}",
