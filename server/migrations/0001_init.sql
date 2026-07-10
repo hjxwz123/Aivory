@@ -168,6 +168,7 @@ CREATE TABLE IF NOT EXISTS files (
   storage_path    TEXT NOT NULL,
   provider_refs   TEXT NOT NULL DEFAULT '{}',
   kind            TEXT NOT NULL DEFAULT 'other',
+  draft           INTEGER NOT NULL DEFAULT 0,
   created_at      INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 );
 CREATE INDEX IF NOT EXISTS idx_files_user ON files(user_id);
@@ -183,10 +184,12 @@ CREATE TABLE IF NOT EXISTS documents (
   error           TEXT NOT NULL DEFAULT '',
   chunk_count     INTEGER NOT NULL DEFAULT 0,
   storage_path    TEXT NOT NULL DEFAULT '',
+  ingest_updated_at INTEGER NOT NULL DEFAULT 0,
   created_at      INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 );
 CREATE INDEX IF NOT EXISTS idx_docs_kb ON documents(kb_id);
 CREATE INDEX IF NOT EXISTS idx_docs_conv ON documents(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_docs_ingest_state ON documents(status, ingest_updated_at);
 
 CREATE TABLE IF NOT EXISTS chunks (
   id              TEXT PRIMARY KEY,

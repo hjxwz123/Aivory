@@ -39,14 +39,18 @@ type job struct {
 	fn   Job
 }
 
-// NewInProcess starts the worker pool (4 workers).
+const inProcessWorkers = 8
+
+// NewInProcess starts the worker pool. Production RAG work uses dedicated
+// Redis lanes; the larger development pool prevents one parsing burst from
+// starving lightweight title and memory jobs.
 func NewInProcess(logger *log.Logger) *InProcess {
 	q := &InProcess{
 		jobs:   make(chan job, 256),
 		closed: make(chan struct{}),
 		logger: logger,
 	}
-	for i := 0; i < 4; i++ {
+	for i := 0; i < inProcessWorkers; i++ {
 		q.wg.Add(1)
 		go q.worker()
 	}
@@ -96,7 +100,7 @@ func (q *InProcess) worker() {
 		case j := <-q.jobs:
 			// 30 min ceiling: document ingest can run a MinerU OCR job that polls
 			// up to 20 min (parser.go), so the job context must outlast it or a
-			// large scan can never finish. There are 4 workers, so one long ingest
+			// large scan can never finish. Multiple workers ensure one long ingest
 			// doesn't starve title/memory jobs.
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 			q.runJob(ctx, j.name, j.fn)

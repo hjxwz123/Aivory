@@ -109,13 +109,21 @@ func (v *adminVectorStore) ExistingChunkIDs(context.Context, int, vector.Scope) 
 }
 
 func (v *adminVectorStore) VectorChunkStatuses(context.Context, int, vector.Scope) (map[string]vector.ChunkVectorStatus, error) {
+	return v.allVectorChunkStatuses(), nil
+}
+
+func (v *adminVectorStore) AllVectorChunkStatuses(context.Context, int) (map[string]vector.ChunkVectorStatus, error) {
+	return v.allVectorChunkStatuses(), nil
+}
+
+func (v *adminVectorStore) allVectorChunkStatuses() map[string]vector.ChunkVectorStatus {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	out := map[string]vector.ChunkVectorStatus{}
 	for id, status := range v.statuses {
 		out[id] = status
 	}
-	return out, nil
+	return out
 }
 
 func (*adminVectorStore) DeleteByDocument(context.Context, string) error {

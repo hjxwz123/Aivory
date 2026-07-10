@@ -396,18 +396,24 @@ func (v testVectorStore) ExistingChunkIDs(context.Context, int, vector.Scope) (m
 	return out, nil
 }
 func (v testVectorStore) VectorChunkStatuses(context.Context, int, vector.Scope) (map[string]vector.ChunkVectorStatus, error) {
+	return v.allVectorChunkStatuses(), nil
+}
+func (v testVectorStore) AllVectorChunkStatuses(context.Context, int) (map[string]vector.ChunkVectorStatus, error) {
+	return v.allVectorChunkStatuses(), nil
+}
+func (v testVectorStore) allVectorChunkStatuses() map[string]vector.ChunkVectorStatus {
 	if v.statuses != nil {
 		out := map[string]vector.ChunkVectorStatus{}
 		for id, status := range v.statuses {
 			out[id] = status
 		}
-		return out, nil
+		return out
 	}
 	out := map[string]vector.ChunkVectorStatus{}
 	for id, ok := range v.existingIDs {
 		out[id] = vector.ChunkVectorStatus{Exists: ok, HasVector: ok}
 	}
-	return out, nil
+	return out
 }
 func (testVectorStore) DeleteByDocument(context.Context, string) error {
 	return nil

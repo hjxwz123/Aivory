@@ -432,6 +432,10 @@ export interface ApiConversationFile {
   size_bytes: number
   created_at: number
   url: string
+  draft: boolean
+  document_id?: string
+  document_status?: ApiDocument['status']
+  document_error?: string
 }
 
 export interface ApiConversation {

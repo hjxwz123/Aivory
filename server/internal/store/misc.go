@@ -22,8 +22,8 @@ func CreateFile(ctx context.Context, db *sql.DB, f File) (*File, error) {
 		conv = f.ConversationID
 	}
 	_, err := db.ExecContext(ctx,
-		`INSERT INTO files(id, user_id, conversation_id, filename, mime_type, size_bytes, storage_path, kind, created_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		f.ID, f.UserID, conv, f.Filename, f.MimeType, f.SizeBytes, f.StoragePath, f.Kind, time.Now().Unix())
+		`INSERT INTO files(id, user_id, conversation_id, filename, mime_type, size_bytes, storage_path, kind, draft, created_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		f.ID, f.UserID, conv, f.Filename, f.MimeType, f.SizeBytes, f.StoragePath, f.Kind, boolInt(f.Draft), time.Now().Unix())
 	if err != nil {
 		return nil, err
 	}
@@ -34,7 +34,7 @@ func CreateFile(ctx context.Context, db *sql.DB, f File) (*File, error) {
 // first) — used to stage data files into the sandbox /workspace/uploads (§4.5).
 func ListFilesByConversation(ctx context.Context, db *sql.DB, convID, userID string) ([]File, error) {
 	rows, err := db.QueryContext(ctx,
-		`SELECT id, user_id, conversation_id, filename, mime_type, size_bytes, storage_path, kind, created_at
+		`SELECT id, user_id, conversation_id, filename, mime_type, size_bytes, storage_path, kind, draft, created_at
 		 FROM files WHERE conversation_id=? AND (user_id=? OR conversation_id IN (
 		   SELECT c.id FROM conversations c JOIN workspace_members m ON m.workspace_id=c.workspace_id WHERE m.user_id=?
 		 )) ORDER BY created_at ASC`, convID, userID, userID)
@@ -46,10 +46,38 @@ func ListFilesByConversation(ctx context.Context, db *sql.DB, convID, userID str
 	for rows.Next() {
 		var f File
 		var conv sql.NullString
-		if err := rows.Scan(&f.ID, &f.UserID, &conv, &f.Filename, &f.MimeType, &f.SizeBytes, &f.StoragePath, &f.Kind, &f.CreatedAt); err != nil {
+		var draft int
+		if err := rows.Scan(&f.ID, &f.UserID, &conv, &f.Filename, &f.MimeType, &f.SizeBytes, &f.StoragePath, &f.Kind, &draft, &f.CreatedAt); err != nil {
 			return nil, err
 		}
 		f.ConversationID = conv.String
+		f.Draft = draft != 0
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
+// ListDraftFilesForConversation returns composer uploads that have not yet been
+// committed to a user message. The conversation ownership check belongs to the
+// caller; this is also used by the message preflight after that check has run.
+func ListDraftFilesForConversation(ctx context.Context, db *sql.DB, convID string) ([]File, error) {
+	rows, err := db.QueryContext(ctx,
+		`SELECT id, user_id, conversation_id, filename, mime_type, size_bytes, storage_path, kind, draft, created_at
+		 FROM files WHERE conversation_id=? AND draft=1 ORDER BY created_at ASC`, convID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []File{}
+	for rows.Next() {
+		var f File
+		var conv sql.NullString
+		var draft int
+		if err := rows.Scan(&f.ID, &f.UserID, &conv, &f.Filename, &f.MimeType, &f.SizeBytes, &f.StoragePath, &f.Kind, &draft, &f.CreatedAt); err != nil {
+			return nil, err
+		}
+		f.ConversationID = conv.String
+		f.Draft = draft != 0
 		out = append(out, f)
 	}
 	return out, rows.Err()
@@ -254,7 +282,7 @@ func looksLocalStoragePath(p string) bool {
 func GetFile(ctx context.Context, db *sql.DB, id, userID string) (*File, error) {
 	var f File
 	var conv sql.NullString
-	q := `SELECT id, user_id, conversation_id, filename, mime_type, size_bytes, storage_path, kind, created_at FROM files WHERE id=?`
+	q := `SELECT id, user_id, conversation_id, filename, mime_type, size_bytes, storage_path, kind, draft, created_at FROM files WHERE id=?`
 	args := []any{id}
 	if userID != "" {
 		// Uploader, or any workspace member of the conversation the file lives in
@@ -264,8 +292,9 @@ func GetFile(ctx context.Context, db *sql.DB, id, userID string) (*File, error) 
 		))`
 		args = append(args, userID, userID)
 	}
+	var draft int
 	err := db.QueryRowContext(ctx, q, args...).
-		Scan(&f.ID, &f.UserID, &conv, &f.Filename, &f.MimeType, &f.SizeBytes, &f.StoragePath, &f.Kind, &f.CreatedAt)
+		Scan(&f.ID, &f.UserID, &conv, &f.Filename, &f.MimeType, &f.SizeBytes, &f.StoragePath, &f.Kind, &draft, &f.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -273,6 +302,7 @@ func GetFile(ctx context.Context, db *sql.DB, id, userID string) (*File, error) 
 		return nil, err
 	}
 	f.ConversationID = conv.String
+	f.Draft = draft != 0
 	return &f, nil
 }
 

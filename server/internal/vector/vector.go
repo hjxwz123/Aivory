@@ -70,9 +70,13 @@ type Store interface {
 	// this dimension + scope. Retrieval uses it as a consistency guard because
 	// chunks.content is the source of truth while Qdrant is only the search index.
 	ExistingChunkIDs(ctx context.Context, dim int, scope Scope) (map[string]bool, error)
-	// VectorChunkStatuses returns vector presence for every point in a dimension
-	// and optional scope. Empty scope means all Aurelia points in the collection.
+	// VectorChunkStatuses returns vector presence within a required scope. An
+	// empty scope returns no rows, matching the other scoped query methods.
 	VectorChunkStatuses(ctx context.Context, dim int, scope Scope) (map[string]ChunkVectorStatus, error)
+	// AllVectorChunkStatuses returns vector presence for every Aurelia point in a
+	// dimension. This deliberately explicit operation is reserved for global
+	// administrative maintenance.
+	AllVectorChunkStatuses(ctx context.Context, dim int) (map[string]ChunkVectorStatus, error)
 	// DeleteByDocument removes every point belonging to a document.
 	DeleteByDocument(ctx context.Context, documentID string) error
 	// DeleteByKB removes every point belonging to a knowledge base.
@@ -99,6 +103,9 @@ func (Disabled) ExistingChunkIDs(context.Context, int, Scope) (map[string]bool, 
 	return map[string]bool{}, nil
 }
 func (Disabled) VectorChunkStatuses(context.Context, int, Scope) (map[string]ChunkVectorStatus, error) {
+	return map[string]ChunkVectorStatus{}, nil
+}
+func (Disabled) AllVectorChunkStatuses(context.Context, int) (map[string]ChunkVectorStatus, error) {
 	return map[string]ChunkVectorStatus{}, nil
 }
 func (Disabled) DeleteByDocument(context.Context, string) error     { return nil }

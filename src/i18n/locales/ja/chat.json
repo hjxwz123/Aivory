@@ -46,6 +46,7 @@
     "uploadFailed": "アップロードに失敗しました",
     "imageTooLarge": "画像は {{mb}} MB 未満にしてください",
     "fileTooLarge": "ファイルは {{mb}} MB 未満にしてください",
+    "restoreAttachmentsFailed": "未送信の添付ファイルを復元できませんでした",
     "documentScopeRequired": "ドキュメントをアップロードする前に会話を作成してください。",
     "parsing": "解析中…",
     "indexing": "インデックス作成中…",

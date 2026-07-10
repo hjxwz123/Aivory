@@ -155,9 +155,11 @@ func main() {
 		}
 	}()
 
-	// Re-enqueue any document ingest left half-done by a previous shutdown — the
-	// queue is in-memory, so without this a doc can be stuck "indexing…" forever.
-	go ragSvc.RequeueIncomplete(context.Background())
+	// Recover half-done ingest work at boot and continuously reclaim rows whose
+	// persisted worker heartbeat stopped after a crash, timeout, or lost lease.
+	ingestRecoveryCtx, stopIngestRecovery := context.WithCancel(context.Background())
+	defer stopIngestRecovery()
+	go ragSvc.RunIngestRecovery(ingestRecoveryCtx)
 
 	taskLLM := llm.NewTaskLLM(db, providers, logger)
 	memoryWorker := llm.NewMemoryWorker(db, taskLLM, logger)

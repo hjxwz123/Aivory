@@ -371,6 +371,63 @@ func ListIncompleteDocuments(ctx context.Context, db *sql.DB) ([]Document, error
 	return out, rows.Err()
 }
 
+// TouchDocumentIngest refreshes the persisted heartbeat only while a document
+// is in a non-terminal state. A late heartbeat can therefore never make a ready
+// or failed document look active again.
+func TouchDocumentIngest(ctx context.Context, db *sql.DB, id string) error {
+	_, err := db.ExecContext(ctx,
+		`UPDATE documents SET ingest_updated_at=? WHERE id=? AND status IN ('pending','parsing','embedding')`,
+		time.Now().Unix(), id)
+	return err
+}
+
+// ClaimStaleIncompleteDocuments atomically claims abandoned ingest rows for a
+// watchdog pass. Pending rows get a longer queue-wait allowance than active
+// parsing/embedding rows. Multiple API replicas may list the same stale ids,
+// but only one can advance each heartbeat and enqueue it.
+func ClaimStaleIncompleteDocuments(ctx context.Context, db *sql.DB, pendingCutoff, activeCutoff int64) ([]Document, error) {
+	rows, err := db.QueryContext(ctx,
+		`SELECT id, status FROM documents
+		 WHERE (status='pending' AND ingest_updated_at<=?)
+		    OR (status IN ('parsing','embedding') AND ingest_updated_at<=?)
+		 ORDER BY ingest_updated_at ASC, created_at ASC`, pendingCutoff, activeCutoff)
+	if err != nil {
+		return nil, err
+	}
+	candidates := []Document{}
+	for rows.Next() {
+		var d Document
+		if err := rows.Scan(&d.ID, &d.Status); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		candidates = append(candidates, d)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+
+	now := time.Now().Unix()
+	claimed := make([]Document, 0, len(candidates))
+	for _, d := range candidates {
+		cutoff := activeCutoff
+		if d.Status == "pending" {
+			cutoff = pendingCutoff
+		}
+		res, err := db.ExecContext(ctx,
+			`UPDATE documents SET status='pending', error='', ingest_updated_at=?
+			 WHERE id=? AND status=? AND ingest_updated_at<=?`,
+			now, d.ID, d.Status, cutoff)
+		if err != nil {
+			return nil, err
+		}
+		if n, _ := res.RowsAffected(); n == 1 {
+			claimed = append(claimed, d)
+		}
+	}
+	return claimed, nil
+}
+
 func ListDocuments(ctx context.Context, db *sql.DB, scope, parentID string) ([]Document, error) {
 	var (
 		rows *sql.Rows
@@ -435,9 +492,10 @@ func CreateDocument(ctx context.Context, db *sql.DB, d Document) (*Document, err
 	if kbID == nil && convID == nil {
 		return nil, errors.New("document must belong to a kb or a conversation")
 	}
+	now := time.Now().Unix()
 	_, err := db.ExecContext(ctx,
-		`INSERT INTO documents(id, kb_id, conversation_id, filename, mime_type, size_bytes, status, storage_path, created_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		d.ID, kbID, convID, d.Filename, d.MimeType, d.SizeBytes, d.Status, d.StoragePath, time.Now().Unix())
+		`INSERT INTO documents(id, kb_id, conversation_id, filename, mime_type, size_bytes, status, storage_path, ingest_updated_at, created_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		d.ID, kbID, convID, d.Filename, d.MimeType, d.SizeBytes, d.Status, d.StoragePath, now, now)
 	if err != nil {
 		return nil, err
 	}
@@ -447,7 +505,8 @@ func CreateDocument(ctx context.Context, db *sql.DB, d Document) (*Document, err
 // UpdateDocumentStatus moves the document along the pipeline state machine.
 func UpdateDocumentStatus(ctx context.Context, db *sql.DB, id, status, errMsg string, chunkCount int) error {
 	_, err := db.ExecContext(ctx,
-		`UPDATE documents SET status=?, error=?, chunk_count=? WHERE id=?`, status, errMsg, chunkCount, id)
+		`UPDATE documents SET status=?, error=?, chunk_count=?, ingest_updated_at=? WHERE id=?`,
+		status, errMsg, chunkCount, time.Now().Unix(), id)
 	return err
 }
 

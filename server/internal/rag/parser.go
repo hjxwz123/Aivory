@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"regexp"
@@ -48,6 +49,26 @@ type MinerUImage struct {
 	Caption  string
 	Filename string
 	MimeType string
+}
+
+const (
+	pdfInspectionChildModeEnv = "AURELIA_INTERNAL_PDF_INSPECTION_CHILD"
+	pdfInspectionChildPathEnv = "AURELIA_INTERNAL_PDF_INSPECTION_PATH"
+)
+
+var pdfInspectionTimeout = 8 * time.Second
+
+// The PDF reader does not accept a context and can spend minutes interpreting a
+// pathological content stream. Run probes in a copy of this executable so the
+// parent can enforce a real deadline by killing the process. The same init hook
+// also works when the parent is a Go test binary.
+func init() {
+	if os.Getenv(pdfInspectionChildModeEnv) != "1" {
+		return
+	}
+	inspection, ok := inspectPDFTextLayer(os.Getenv(pdfInspectionChildPathEnv))
+	_ = json.NewEncoder(os.Stdout).Encode(pdfInspectionProbeResultFrom(inspection, ok))
+	os.Exit(0)
 }
 
 // parseDocument extracts text from a document (§4.11-C). The decision rule:
@@ -147,26 +168,41 @@ func parseDocument(
 			return md, true, nil // text-less office doc → MinerU OCR
 		}
 	case "pdf":
-		text, pages, hasImages, ok := extractPDFText(docPath)
-		scanned := !ok || strings.TrimSpace(text) == ""
-		// Thin text + images smells like a scan with a stray text layer (a cover
-		// page, headers) — the content lives in the page images, so OCR is still
-		// the right call. A dense text layer is the real document: use it NOW,
-		// figures or not, instead of paying minutes of cloud OCR for captions.
-		thin := hasImages && pages > 0 && len(text) < 200*pages
+		inspectionStart := time.Now()
+		inspection, ok := inspectPDFTextLayerBounded(ctx, docPath)
+		inspectionTook := time.Since(inspectionStart).Round(time.Millisecond)
+		scanned := !ok || inspection.scanned
+		thin := ok && inspection.thin
+		logf("rag: PDF inspection file=%q method=%s pages=%d sampled=%d sample_chars=%d images=%v scanned=%v thin=%v took=%s",
+			filename, inspection.method, inspection.pages, inspection.sampledPages, inspection.sampleChars, inspection.hasImages, scanned, thin, inspectionTook)
+
+		// Only born-digital PDFs pay for full text extraction. Scans used to call
+		// Reader.GetPlainText across every page merely to discover there was no
+		// text, which made a large scan spend minutes locally before MinerU even
+		// received it.
 		if ok && !scanned && !thin {
-			return text, true, nil // usable text layer → local, instant
+			text, _, extractedOK := extractFullPDFText(docPath)
+			if extractedOK && strings.TrimSpace(text) != "" {
+				return text, true, nil
+			}
+			scanned = true
+			logf("rag: %q passed the fast PDF text-layer check but full extraction failed — routing to MinerU OCR", filename)
 		}
 		if scanned {
-			logf("rag: %q is a scanned/text-less PDF — routing to MinerU OCR (configured=%v missing=%q)", filename, mineruReady, mineruIssueSummary)
+			logf("rag: %q is a scanned/text-less PDF — routing to MinerU OCR after %s inspection (%d/%d sampled pages) in %s (configured=%v missing=%q)", filename, inspection.method, inspection.sampledPages, inspection.pages, inspectionTook, mineruReady, mineruIssueSummary)
 		} else if thin {
-			logf("rag: %q has a thin text layer (%d chars over %d pages, images present) — routing to MinerU OCR (configured=%v missing=%q)", filename, len(text), pages, mineruReady, mineruIssueSummary)
+			logf("rag: %q has a thin sampled text layer (%d chars over %d sampled pages, images present) — routing to MinerU OCR (configured=%v missing=%q)", filename, inspection.sampleChars, inspection.sampledPages, mineruReady, mineruIssueSummary)
 		}
 		if md, done := tryMineru(); done {
 			return md, true, nil // scanned / thin-text → MinerU
 		}
-		if ok && !scanned {
-			return text, true, nil // degraded: MinerU unavailable, keep local text
+		if ok && thin {
+			// MinerU unavailable or failed: preserve the old degraded behavior by
+			// extracting the complete thin text layer instead of returning only the
+			// sampled pages.
+			if text, _, extractedOK := extractFullPDFText(docPath); extractedOK && strings.TrimSpace(text) != "" {
+				return text, true, nil
+			}
 		}
 	default:
 		// Images, legacy .doc/.ppt, .html, etc. — OCR/conversion territory.
@@ -304,38 +340,262 @@ func stripOfficeXML(raw string) string {
 	return strings.TrimSpace(s)
 }
 
-// extractPDFText extracts the text layer with a pure-Go reader and reports
-// whether the PDF embeds image XObjects. ok=false (or empty text) means the PDF
-// has no extractable text — i.e. a scan — and should go to MinerU. The reader
-// panics on some malformed PDFs, so the whole call is recover-guarded.
-func extractPDFText(docPath string) (text string, pages int, hasImages bool, ok bool) {
+const (
+	pdfInspectionSampleLimit = 3
+	pdfThinCharsPerPage      = 200
+)
+
+type pdfTextInspection struct {
+	pages        int
+	sampledPages int
+	sampleChars  int
+	hasImages    bool
+	scanned      bool
+	thin         bool
+	method       string
+}
+
+type pdfInspectionProbeResult struct {
+	Pages        int    `json:"pages"`
+	SampledPages int    `json:"sampled_pages"`
+	SampleChars  int    `json:"sample_chars"`
+	HasImages    bool   `json:"has_images"`
+	Scanned      bool   `json:"scanned"`
+	Thin         bool   `json:"thin"`
+	Method       string `json:"method"`
+	OK           bool   `json:"ok"`
+}
+
+func pdfInspectionProbeResultFrom(inspection pdfTextInspection, ok bool) pdfInspectionProbeResult {
+	return pdfInspectionProbeResult{
+		Pages: inspection.pages, SampledPages: inspection.sampledPages,
+		SampleChars: inspection.sampleChars, HasImages: inspection.hasImages,
+		Scanned: inspection.scanned, Thin: inspection.thin, Method: inspection.method, OK: ok,
+	}
+}
+
+func (r pdfInspectionProbeResult) inspection() pdfTextInspection {
+	return pdfTextInspection{
+		pages: r.Pages, sampledPages: r.SampledPages, sampleChars: r.SampleChars,
+		hasImages: r.HasImages, scanned: r.Scanned, thin: r.Thin, method: r.Method,
+	}
+}
+
+var pdfInspectionCommand = func(ctx context.Context, docPath string) (*exec.Cmd, error) {
+	executable, err := os.Executable()
+	if err != nil {
+		return nil, err
+	}
+	cmd := exec.CommandContext(ctx, executable)
+	cmd.Env = append(os.Environ(),
+		pdfInspectionChildModeEnv+"=1",
+		pdfInspectionChildPathEnv+"="+docPath,
+	)
+	cmd.WaitDelay = 500 * time.Millisecond
+	return cmd, nil
+}
+
+func inspectPDFTextLayerBounded(ctx context.Context, docPath string) (pdfTextInspection, bool) {
+	probeCtx, cancel := context.WithTimeout(ctx, pdfInspectionTimeout)
+	defer cancel()
+	cmd, err := pdfInspectionCommand(probeCtx, docPath)
+	if err != nil {
+		return pdfTextInspection{scanned: true, method: "probe-error"}, false
+	}
+	out, err := cmd.Output()
+	if probeCtx.Err() != nil {
+		return pdfTextInspection{scanned: true, method: "timeout"}, true
+	}
+	if err != nil {
+		return pdfTextInspection{scanned: true, method: "probe-error"}, false
+	}
+	var result pdfInspectionProbeResult
+	if err := json.Unmarshal(out, &result); err != nil {
+		return pdfTextInspection{scanned: true, method: "probe-error"}, false
+	}
+	return result.inspection(), result.OK
+}
+
+type pdfRawSignals struct {
+	imageCount      int
+	fontCount       int
+	hasObjectStream bool
+}
+
+func inspectPDFRawSignals(raw []byte) pdfRawSignals {
+	count := func(markers ...string) int {
+		total := 0
+		for _, marker := range markers {
+			total += bytes.Count(raw, []byte(marker))
+		}
+		return total
+	}
+	return pdfRawSignals{
+		imageCount: count("/Subtype/Image", "/Subtype /Image"),
+		fontCount: count(
+			"/BaseFont", "/Type/Font", "/Type /Font", "/FontDescriptor", "/DescendantFonts",
+		),
+		hasObjectStream: count("/Type/ObjStm", "/Type /ObjStm") > 0,
+	}
+}
+
+func (s pdfRawSignals) strongScan(pages int) bool {
+	if pages <= 0 || s.imageCount == 0 || s.fontCount != 0 || s.hasObjectStream {
+		return false
+	}
+	// Require roughly one image definition for at least 80% of pages. Counts are
+	// deliberately a one-way confidence signal: shared or compressed images fall
+	// through to structural inspection rather than being misclassified.
+	return s.imageCount*5 >= pages*4
+}
+
+// inspectPDFTextLayer samples the first, middle and last page instead of
+// extracting the entire document. Empty sampled pages identify normal scans in
+// bounded work; evenly spaced samples avoid treating a scanned cover as proof
+// that an otherwise born-digital document needs OCR.
+func inspectPDFTextLayer(docPath string) (inspection pdfTextInspection, ok bool) {
 	defer func() {
 		if r := recover(); r != nil {
-			text, pages, hasImages, ok = "", 0, false, false
+			inspection, ok = pdfTextInspection{scanned: true, method: "probe-panic"}, false
 		}
 	}()
 	f, reader, err := pdf.Open(docPath)
 	if err != nil {
-		return "", 0, false, false
+		return pdfTextInspection{scanned: true, method: "open-error"}, false
 	}
 	defer f.Close()
-	var buf bytes.Buffer
-	if tr, terr := reader.GetPlainText(); terr == nil {
-		_, _ = io.Copy(&buf, tr)
+	inspection.pages = reader.NumPage()
+	raw, _ := os.ReadFile(docPath)
+	rawSignals := inspectPDFRawSignals(raw)
+	if rawSignals.strongScan(inspection.pages) {
+		inspection.hasImages = true
+		inspection.scanned = true
+		inspection.method = "raw"
+		return inspection, true
 	}
-	return strings.TrimSpace(buf.String()), reader.NumPage(), pdfHasImages(docPath), true
+	pageNumbers := pdfInspectionPages(inspection.pages, pdfInspectionSampleLimit)
+	imageResourcePages := 0
+	fontResourcePages := 0
+	for _, pageNumber := range pageNumbers {
+		resources := reader.Page(pageNumber).Resources()
+		if pdfResourcesHaveImages(resources, 2) {
+			imageResourcePages++
+		}
+		if pdfResourcesHaveFonts(resources, 2) {
+			fontResourcePages++
+		}
+	}
+	inspection.sampledPages = len(pageNumbers)
+	if inspection.sampledPages > 0 && imageResourcePages == inspection.sampledPages && fontResourcePages == 0 {
+		inspection.hasImages = true
+		inspection.scanned = true
+		inspection.method = "resources"
+		return inspection, true
+	}
+
+	for _, pageNumber := range pageNumbers {
+		text, err := reader.Page(pageNumber).GetPlainText(nil)
+		if err != nil {
+			inspection.scanned = true
+			inspection.method = "text-error"
+			return inspection, false
+		}
+		inspection.sampleChars += len(strings.TrimSpace(text))
+	}
+	inspection.scanned = inspection.sampleChars == 0
+	inspection.method = "text-sample"
+	if !inspection.scanned {
+		inspection.hasImages = rawSignals.imageCount > 0 || imageResourcePages > 0
+		inspection.thin = inspection.hasImages && inspection.sampleChars < pdfThinCharsPerPage*inspection.sampledPages
+	}
+	return inspection, inspection.pages > 0 && inspection.sampledPages > 0
 }
 
-// pdfHasImages is a cheap heuristic: image XObjects declare `/Subtype /Image`
-// in their (usually uncompressed) object dictionary, so a raw-bytes scan finds
-// them without a full structural parse. Misses are safe — a scanned PDF has no
-// text layer and is caught by the empty-text check instead.
-func pdfHasImages(docPath string) bool {
-	b, err := os.ReadFile(docPath)
-	if err != nil {
+func pdfResourcesHaveImages(resources pdf.Value, depth int) bool {
+	if depth < 0 {
 		return false
 	}
-	return bytes.Contains(b, []byte("/Subtype/Image")) || bytes.Contains(b, []byte("/Subtype /Image"))
+	xobjects := resources.Key("XObject")
+	for _, name := range xobjects.Keys() {
+		object := xobjects.Key(name)
+		switch object.Key("Subtype").Name() {
+		case "Image":
+			return true
+		case "Form":
+			if pdfResourcesHaveImages(object.Key("Resources"), depth-1) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func pdfResourcesHaveFonts(resources pdf.Value, depth int) bool {
+	if depth < 0 {
+		return false
+	}
+	if len(resources.Key("Font").Keys()) > 0 {
+		return true
+	}
+	xobjects := resources.Key("XObject")
+	for _, name := range xobjects.Keys() {
+		object := xobjects.Key(name)
+		if object.Key("Subtype").Name() == "Form" && pdfResourcesHaveFonts(object.Key("Resources"), depth-1) {
+			return true
+		}
+	}
+	return false
+}
+
+func pdfInspectionPages(total, limit int) []int {
+	if total <= 0 || limit <= 0 {
+		return nil
+	}
+	if total <= limit {
+		pages := make([]int, total)
+		for i := range pages {
+			pages[i] = i + 1
+		}
+		return pages
+	}
+	if limit == 1 {
+		return []int{1}
+	}
+	pages := make([]int, 0, limit)
+	seen := make(map[int]bool, limit)
+	for i := 0; i < limit; i++ {
+		page := 1 + i*(total-1)/(limit-1)
+		if !seen[page] {
+			seen[page] = true
+			pages = append(pages, page)
+		}
+	}
+	return pages
+}
+
+// extractFullPDFText is reserved for PDFs whose sampled pages demonstrate a
+// usable text layer. The reader panics on some malformed PDFs, so the full call
+// remains recover-guarded.
+func extractFullPDFText(docPath string) (text string, pages int, ok bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			text, pages, ok = "", 0, false
+		}
+	}()
+	f, reader, err := pdf.Open(docPath)
+	if err != nil {
+		return "", 0, false
+	}
+	defer f.Close()
+	tr, err := reader.GetPlainText()
+	if err != nil {
+		return "", reader.NumPage(), false
+	}
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, tr); err != nil {
+		return "", reader.NumPage(), false
+	}
+	return strings.TrimSpace(buf.String()), reader.NumPage(), true
 }
 
 // minerUExtractViaCloud runs the four-step pipeline against the MinerU cloud

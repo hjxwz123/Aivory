@@ -396,6 +396,8 @@ export const conversationsApi = {
   // files the conversation references, and remove (detach + drop RAG).
   listFiles: (id: string) =>
     api<ApiConversationFile[]>(`/conversations/${encodeURIComponent(id)}/files`),
+  listDraftFiles: (id: string) =>
+    api<ApiConversationFile[]>(`/conversations/${encodeURIComponent(id)}/files?draft=1`),
   removeFile: (id: string, fileId: string) =>
     api<{ ok: true }>(`/conversations/${encodeURIComponent(id)}/files/${encodeURIComponent(fileId)}`, {
       method: 'DELETE',

@@ -58,3 +58,22 @@ func TestEnsureAttachedDocumentsReadyFallsBackToFileID(t *testing.T) {
 		t.Fatalf("missing file-backed document error = %v, want not found", err)
 	}
 }
+
+func TestEnsureAttachedDocumentsReadyRejectsOmittedServerDraft(t *testing.T) {
+	ctx := context.Background()
+	db := openMigrated(t, filepath.Join(t.TempDir(), "draft-preflight.db"))
+	defer db.Close()
+
+	mustExec(t, db, `INSERT INTO users(id,email,password_hash,role) VALUES('u1','a@b.c','h','user')`)
+	mustExec(t, db, `INSERT INTO conversations(id,user_id,title) VALUES('c1','u1','T')`)
+	mustExec(t, db, `INSERT INTO files(id,user_id,conversation_id,filename,mime_type,size_bytes,kind,storage_path,draft) VALUES('f_draft','u1','c1','ready.pdf','application/pdf',10,'pdf','/tmp/ready.pdf',1)`)
+	mustExec(t, db, `INSERT INTO documents(id,conversation_id,filename,mime_type,size_bytes,status,storage_path) VALUES('d_ready','c1','ready.pdf','application/pdf',10,'ready','/tmp/ready.pdf')`)
+
+	err := ensureAttachedDocumentsReady(ctx, db, "c1", nil)
+	if err == nil || !strings.Contains(err.Error(), "unsent attachments") {
+		t.Fatalf("omitted draft error = %v, want unsent attachments", err)
+	}
+	if err := ensureAttachedDocumentsReady(ctx, db, "c1", []llm.Attachment{{ID: "f_draft", Kind: "pdf"}}); err != nil {
+		t.Fatalf("included ready draft rejected: %v", err)
+	}
+}
