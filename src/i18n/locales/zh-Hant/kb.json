@@ -50,7 +50,9 @@
     "tabPaste": "貼上文字",
     "tabUpload": "上傳檔案",
     "contentLabel": "內容",
-    "clickToChoose": "點選選擇檔案"
+    "clickToChoose": "點選選擇檔案",
+    "uploadProgress": "上傳中 {{percent}}%",
+    "uploadProcessing": "解析/索引中…"
   },
   "deleted": "知識庫已刪除",
   "deleteAction": "刪除知識庫",

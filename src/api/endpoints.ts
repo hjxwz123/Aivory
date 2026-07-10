@@ -3,7 +3,7 @@
  * backend returns, with a small typed helper signature. Group by feature so
  * the call sites stay readable.
  */
-import { api, apiUrl, getAccessToken, ApiError } from './client'
+import { api, apiUrl, getAccessToken, ApiError, apiUpload, type UploadProgress } from './client'
 import type {
   ApiWorkspace,
   ApiWorkspaceMember,
@@ -236,10 +236,10 @@ export const projectsApi = {
   addDoc: (id: string, body: { filename: string; content: string; mime_type?: string }) =>
     api<ApiDocument>(`/projects/${encodeURIComponent(id)}/documents`, { method: 'POST', body }),
   /** Upload a real file (multipart) into the project's knowledge library. */
-  uploadDoc: (id: string, file: File) => {
+  uploadDoc: (id: string, file: File, opts: { onProgress?: (progress: UploadProgress) => void } = {}) => {
     const fd = new FormData()
     fd.append('file', file)
-    return api<ApiDocument>(`/projects/${encodeURIComponent(id)}/documents`, { method: 'POST', body: fd })
+    return apiUpload<ApiDocument>(`/projects/${encodeURIComponent(id)}/documents`, fd, opts)
   },
   removeDoc: (id: string, docId: string) =>
     api<{ ok: true }>(`/projects/${encodeURIComponent(id)}/documents/${encodeURIComponent(docId)}`, {

@@ -95,9 +95,29 @@ interface ApiOptions {
   headers?: Record<string, string>
 }
 
+export interface UploadProgress {
+  loaded: number
+  total?: number
+  percent?: number
+}
+
+interface UploadOptions {
+  method?: 'POST' | 'PATCH' | 'PUT'
+  signal?: AbortSignal
+  headers?: Record<string, string>
+  onProgress?: (progress: UploadProgress) => void
+}
+
 /** Core fetch wrapper. */
 export async function api<T = unknown>(path: string, opts: ApiOptions = {}): Promise<T> {
   return apiRequest<T>(path, opts, false)
+}
+
+/** Multipart upload wrapper with browser upload progress. `fetch()` still does
+ * not expose upload progress events, so file uploads use XHR while keeping the
+ * same credentials, bearer token and request-signature behavior as api(). */
+export async function apiUpload<T = unknown>(path: string, body: FormData, opts: UploadOptions = {}): Promise<T> {
+  return apiUploadRequest<T>(path, body, opts, false)
 }
 
 // isAuthPath: the auth endpoints (login / refresh / register / logout) must NEVER
@@ -156,6 +176,106 @@ async function apiRequest<T>(path: string, opts: ApiOptions, retried: boolean): 
     throw new ApiError(res.status, message, parsed)
   }
   return parsed as T
+}
+
+async function apiUploadRequest<T>(
+  path: string,
+  body: FormData,
+  opts: UploadOptions,
+  retried: boolean,
+): Promise<T> {
+  const res = await xhrUpload(path, body, opts)
+  if (res.status === 401 && !retried && !isAuthPath(path)) {
+    if (await tryRefresh()) return apiUploadRequest<T>(path, body, opts, true)
+  }
+  if (!res.ok) {
+    const errBody = res.parsed as ApiErrorShape | undefined
+    const message = errBody?.error ?? `Request failed with status ${res.status}`
+    if (res.status === 401 && retried && !isAuthPath(path) && isAuthExpiredMessage(message)) {
+      notifyAuthLost()
+    }
+    if (message === 'account_suspended') notifyBanned()
+    throw new ApiError(res.status, message, res.parsed)
+  }
+  return res.parsed as T
+}
+
+async function xhrUpload(
+  path: string,
+  body: FormData,
+  opts: UploadOptions,
+): Promise<{ status: number; ok: boolean; parsed: unknown }> {
+  const headers: Record<string, string> = {
+    accept: 'application/json',
+    ...(memoryToken ? { authorization: `Bearer ${memoryToken}` } : {}),
+    ...opts.headers,
+  }
+  if (memoryToken) {
+    const ts = Math.floor(Date.now() / 1000)
+    const nonce = _nonce()
+    headers['x-req-ts'] = String(ts)
+    headers['x-req-nonce'] = nonce
+    headers['x-req-token'] = await _sign(memoryToken, ts, nonce, path)
+  }
+
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    let settled = false
+    const cleanup = () => {
+      if (opts.signal) opts.signal.removeEventListener('abort', abort)
+    }
+    const finishReject = (error: unknown) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      reject(error)
+    }
+    const abort = () => {
+      xhr.abort()
+      finishReject(new DOMException('Upload aborted', 'AbortError'))
+    }
+    if (opts.signal?.aborted) {
+      abort()
+      return
+    }
+    if (opts.signal) opts.signal.addEventListener('abort', abort, { once: true })
+
+    xhr.open(opts.method ?? 'POST', API_BASE + path)
+    xhr.withCredentials = true
+    for (const [key, value] of Object.entries(headers)) {
+      xhr.setRequestHeader(key, value)
+    }
+    xhr.upload.onprogress = (event) => {
+      if (!opts.onProgress) return
+      if (event.lengthComputable && event.total > 0) {
+        opts.onProgress({
+          loaded: event.loaded,
+          total: event.total,
+          percent: Math.max(0, Math.min(100, Math.round((event.loaded / event.total) * 100))),
+        })
+      } else {
+        opts.onProgress({ loaded: event.loaded })
+      }
+    }
+    xhr.onerror = () => finishReject(new TypeError('Network request failed'))
+    xhr.ontimeout = () => finishReject(new TypeError('Upload timed out'))
+    xhr.onload = () => {
+      if (settled) return
+      settled = true
+      cleanup()
+      let parsed: unknown = undefined
+      const text = xhr.responseText
+      if (text.length > 0) {
+        try {
+          parsed = JSON.parse(text)
+        } catch {
+          parsed = text
+        }
+      }
+      resolve({ status: xhr.status, ok: xhr.status >= 200 && xhr.status < 300, parsed })
+    }
+    xhr.send(body)
+  })
 }
 
 // Banned-account hook. The auth store registers a handler that clears the

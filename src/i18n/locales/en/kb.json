@@ -50,7 +50,9 @@
     "tabPaste": "Paste text",
     "tabUpload": "Upload file",
     "contentLabel": "Content",
-    "clickToChoose": "Click to choose files"
+    "clickToChoose": "Click to choose files",
+    "uploadProgress": "Uploading {{percent}}%",
+    "uploadProcessing": "Parsing / indexing…"
   },
   "deleted": "Knowledge base deleted",
   "deleteAction": "Delete knowledge base",

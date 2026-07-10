@@ -3,10 +3,12 @@ package rag
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -119,6 +121,69 @@ func TestEmbeddingResponseHeaderTimeoutFailsFast(t *testing.T) {
 	}
 }
 
+func TestDashScopeEmbeddingHTTPClientDisablesHTTP2(t *testing.T) {
+	dash := &httpEmbedder{baseURL: "https://workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"}
+	if got := dash.httpClient(); got != dashScopeEmbedHTTPClient {
+		t.Fatalf("DashScope client = %p, want %p", got, dashScopeEmbedHTTPClient)
+	}
+	transport, ok := dashScopeEmbedHTTPClient.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("DashScope embedding transport type = %T", dashScopeEmbedHTTPClient.Transport)
+	}
+	if transport.ForceAttemptHTTP2 {
+		t.Fatal("DashScope embedding transport should not force HTTP/2")
+	}
+	if transport.TLSNextProto == nil {
+		t.Fatal("DashScope embedding transport should explicitly disable HTTP/2 via TLSNextProto")
+	}
+
+	other := &httpEmbedder{baseURL: "https://api.openai.com/v1"}
+	if got := other.httpClient(); got != embedHTTPClient {
+		t.Fatalf("non-DashScope client = %p, want %p", got, embedHTTPClient)
+	}
+	otherTransport, ok := embedHTTPClient.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("embedding transport type = %T", embedHTTPClient.Transport)
+	}
+	if !otherTransport.ForceAttemptHTTP2 {
+		t.Fatal("non-DashScope embedding transport should keep HTTP/2 enabled")
+	}
+}
+
+func TestDashScopeEmbedderUsesBoundedAttemptTimeout(t *testing.T) {
+	e := &httpEmbedder{baseURL: "https://workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"}
+	if got := e.requestTimeout(); got != dashScopeEmbedAttemptTimeout {
+		t.Fatalf("DashScope request timeout = %s, want %s", got, dashScopeEmbedAttemptTimeout)
+	}
+	other := &httpEmbedder{baseURL: "https://api.openai.com/v1"}
+	if got := other.requestTimeout(); got != 0 {
+		t.Fatalf("non-DashScope request timeout = %s, want 0", got)
+	}
+}
+
+func TestDashScopeRequestTimeoutDoesNotRetrySameHungRequest(t *testing.T) {
+	oldTimeout := dashScopeEmbedAttemptTimeout
+	dashScopeEmbedAttemptTimeout = 20 * time.Millisecond
+	defer func() { dashScopeEmbedAttemptTimeout = oldTimeout }()
+
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		time.Sleep(200 * time.Millisecond)
+		_, _ = w.Write([]byte(`{"data":[]}`))
+	}))
+	defer srv.Close()
+
+	e := &httpEmbedder{baseURL: "https://workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1", apiKey: "sk", model: "text-embedding-v4", dim: 1024}
+	_, err := e.postEmbeddings(context.Background(), srv.URL, []byte(`{"model":"text-embedding-v4","input":"hello"}`))
+	if err == nil || !strings.Contains(err.Error(), "did not return a response within") {
+		t.Fatalf("err = %v, want bounded timeout", err)
+	}
+	if got := atomic.LoadInt32(&hits); got != 1 {
+		t.Fatalf("request hits = %d, want no retry after a hung provider request", got)
+	}
+}
+
 func TestHTTPEmbedderDashScopeNativeRequestShape(t *testing.T) {
 	var got map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -195,6 +260,34 @@ func TestHTTPEmbedderOpenAICompatibleRequestShape(t *testing.T) {
 	input, ok := got["input"].([]any)
 	if !ok || len(input) != 2 || input[0] != "a" || input[1] != "b" {
 		t.Fatalf("input = %#v", got["input"])
+	}
+}
+
+func TestEmbeddingRequestErrorIncludesBatchDiagnostics(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "temporary upstream outage", http.StatusBadGateway)
+	}))
+	defer srv.Close()
+
+	e := &httpEmbedder{baseURL: srv.URL, apiKey: "sk", model: "text-embedding-v4", dim: 1024}
+	_, err := e.Embed(context.Background(), []string{"alpha", "案例98"})
+	if err == nil {
+		t.Fatal("Embed unexpectedly succeeded")
+	}
+	msg := err.Error()
+	for _, want := range []string{"batch inputs=2", "chars=", "approx_tokens="} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error %q missing %q", msg, want)
+		}
+	}
+	var reqErr *embeddingRequestError
+	if !errors.As(err, &reqErr) {
+		t.Fatalf("error type = %T, want embeddingRequestError", err)
+	}
+	for _, want := range []string{"\"input_count\": 2", "\"input_chars\""} {
+		if !strings.Contains(reqErr.body, want) {
+			t.Fatalf("diagnostic body %q missing %q", reqErr.body, want)
+		}
 	}
 }
 

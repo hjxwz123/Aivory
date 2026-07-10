@@ -1,9 +1,10 @@
 import { useEffect, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { FolderOpen, Plus, Trash2, X, Loader2 } from 'lucide-react'
+import { FolderOpen, Plus, Trash2, X } from 'lucide-react'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { Tooltip } from '@/components/ui/tooltip'
+import { ProgressRing } from '@/components/ui/progress-ring'
 import { useConversationFiles } from '@/store/conversation-files'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { fileIconFor } from '@/lib/file-icon'
@@ -62,9 +63,16 @@ function FilesBody({ onClose }: { onClose: () => void }) {
   const files = useConversationFiles((s) => s.files)
   const loading = useConversationFiles((s) => s.loading)
   const uploading = useConversationFiles((s) => s.uploading)
+  const uploadJob = useConversationFiles((s) => s.uploadJob)
   const upload = useConversationFiles((s) => s.upload)
   const remove = useConversationFiles((s) => s.remove)
   const inputRef = useRef<HTMLInputElement>(null)
+  const uploadPercent = Math.max(0, Math.min(100, Math.round(uploadJob?.progress ?? 0)))
+  const uploadLabel = uploadJob
+    ? uploadJob.phase === 'processing'
+      ? t('files.processing')
+      : t('files.uploadingPercent', { percent: uploadPercent })
+    : t('files.uploading')
 
   async function onPick(e: React.ChangeEvent<HTMLInputElement>) {
     const list = e.target.files
@@ -119,9 +127,16 @@ function FilesBody({ onClose }: { onClose: () => void }) {
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
           )}
         >
-          {uploading ? <Loader2 size={14} className="animate-spin" aria-hidden /> : <Plus size={14} aria-hidden />}
-          {uploading ? t('files.uploading') : t('files.add')}
+          {uploading ? (
+            <ProgressRing value={uploadPercent} size={22} strokeWidth={2.5} showValue label={uploadLabel} />
+          ) : (
+            <Plus size={14} aria-hidden />
+          )}
+          <span className="min-w-0 truncate">{uploading ? uploadLabel : t('files.add')}</span>
         </button>
+        {uploading && uploadJob ? (
+          <p className="mt-1 truncate px-1 text-[11px] text-[var(--color-fg-subtle)]">{uploadJob.name}</p>
+        ) : null}
       </div>
 
       <p className="px-4 pt-2.5 pb-1 text-[11px] leading-snug text-[var(--color-fg-subtle)] shrink-0">

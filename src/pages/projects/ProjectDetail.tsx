@@ -27,6 +27,7 @@ import { Composer } from '@/components/chat/composer'
 import { ContentHeader } from '@/components/layout/content-header'
 import { MoveToProjectSub } from '@/components/projects/move-to-project-menu'
 import { Button } from '@/components/ui/button'
+import { ProgressRing } from '@/components/ui/progress-ring'
 import { Textarea } from '@/components/ui/textarea'
 import { Input } from '@/components/ui/input'
 import { Field } from '@/components/ui/label'
@@ -60,6 +61,12 @@ import {
 } from '@/lib/pending-conversation'
 import { conversationsApi } from '@/api/endpoints'
 import type { ApiConversation } from '@/api/types'
+
+type ProjectUploadHandlers = {
+  onFileStart: (file: File) => void
+  onProgress: (file: File, percent: number) => void
+  onProcessing: (file: File) => void
+}
 
 export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>()
@@ -808,15 +815,24 @@ export default function ProjectDetail() {
         open={addFileOpen}
         onOpenChange={setAddFileOpen}
         projectName={project.name}
-        onUpload={async (files) => {
+        onUpload={async (files, upload) => {
           let ok = 0
           for (const file of files) {
-            const res = await uploadFile(project.id, file)
-            if (res) ok += 1
+            upload.onFileStart(file)
+            const res = await uploadFile(project.id, file, {
+              onProgress: (progress) => {
+                if (typeof progress.percent !== 'number') return
+                upload.onProgress(file, progress.percent)
+              },
+            })
+            if (res) {
+              ok += 1
+              upload.onProcessing(file)
+            }
           }
           // Re-pull the document list so freshly-uploaded docs (and their
           // server-assigned size / status) replace the optimistic entries.
-          void loadOne(project.id)
+          await loadOne(project.id)
           if (ok > 0) toast.success(t('projects:detail.filesAdded', { count: ok }))
           if (ok < files.length) toast.error(t('projects:detail.filesAddFailed'))
         }}
@@ -914,22 +930,37 @@ function AddFileDialog({
   open: boolean
   onOpenChange: (open: boolean) => void
   projectName: string
-  onUpload: (files: File[]) => Promise<void>
+  onUpload: (files: File[], handlers: ProjectUploadHandlers) => Promise<void>
 }) {
   const { t } = useTranslation(['projects', 'common'])
   const fileInput = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
+  const [uploadJob, setUploadJob] = useState<{ name: string; progress: number; phase: 'uploading' | 'processing' } | null>(null)
 
   async function handleFiles(list: FileList | null) {
     if (!list || list.length === 0) return
+    const selected = Array.from(list)
     setUploading(true)
+    setUploadJob({ name: selected[0].name, progress: 0, phase: 'uploading' })
     try {
-      await onUpload(Array.from(list))
+      await onUpload(selected, {
+        onFileStart: (file) => setUploadJob({ name: file.name, progress: 0, phase: 'uploading' }),
+        onProgress: (file, percent) => setUploadJob({ name: file.name, progress: percent, phase: 'uploading' }),
+        onProcessing: (file) => setUploadJob({ name: file.name, progress: 100, phase: 'processing' }),
+      })
       onOpenChange(false)
     } finally {
       setUploading(false)
+      setUploadJob(null)
     }
   }
+
+  const uploadPercent = Math.max(0, Math.min(100, Math.round(uploadJob?.progress ?? 0)))
+  const uploadLabel = uploadJob
+    ? uploadJob.phase === 'processing'
+      ? t('projects:detail.filesProcessing')
+      : t('projects:detail.filesUploadingPercent', { percent: uploadPercent })
+    : t('projects:detail.filesUploading')
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -960,13 +991,23 @@ function AddFileDialog({
               }}
             />
             {uploading ? (
-              <Loader2 size={24} className="mx-auto animate-spin text-[var(--color-fg-subtle)]" aria-hidden />
+              <ProgressRing
+                value={uploadPercent}
+                size={44}
+                strokeWidth={4}
+                showValue
+                label={uploadLabel}
+                className="mx-auto text-[var(--color-accent)]"
+              />
             ) : (
               <Upload size={24} className="mx-auto text-[var(--color-fg-subtle)]" aria-hidden />
             )}
             <p className="mt-3 text-[var(--color-fg-muted)] text-sm">
-              {uploading ? t('projects:detail.filesUploading') : t('projects:detail.filesClickToChoose')}
+              {uploading ? uploadLabel : t('projects:detail.filesClickToChoose')}
             </p>
+            {uploading && uploadJob ? (
+              <p className="mt-1 truncate text-xs text-[var(--color-fg-subtle)]">{uploadJob.name}</p>
+            ) : null}
           </button>
         </DialogBody>
         <DialogFooter>

@@ -43,11 +43,12 @@ import { useMediaQuery } from '@/hooks/use-media-query'
 import { useModels } from '@/store/models'
 import { useAuth } from '@/store/auth'
 import { useComposerPrefs } from '@/store/composer-prefs'
-import { api, ApiError } from '@/api/client'
+import { api, apiUpload, ApiError } from '@/api/client'
 import type { ApiAttachment, ApiConversationFile, ApiDocument } from '@/api/types'
 import { toast } from '@/hooks/use-toast'
 import { cn, uid, modKey } from '@/lib/utils'
 import { fileIconFor } from '@/lib/file-icon'
+import { ProgressRing } from '@/components/ui/progress-ring'
 
 interface ComposerProps {
   modelId: string
@@ -119,6 +120,8 @@ function getUploadLimits() {
 interface PendingAttachment extends Attachment {
   /** true while POST /api/files is in flight. */
   uploading?: boolean
+  /** Browser-reported upload progress, 0-100, while uploading is true. */
+  uploadProgress?: number
   /** Conversation scope used for the uploaded file; needed for explicit removal. */
   uploadScopeId?: string
   /** Ingest progress of the conversation-scoped document. While 'parsing' or
@@ -440,7 +443,14 @@ export function Composer({
       }
       const ragFlag = (kbIds && kbIds.length > 0) || isDocLike
       const url = `/files${scopeId ? `?conversation_id=${encodeURIComponent(scopeId)}&draft=1${ragFlag ? '&rag=1' : ''}` : ''}`
-      const res = await api<ApiAttachment & { id: string; url?: string; document_id?: string }>(url, { method: 'POST', body: form })
+      const res = await apiUpload<ApiAttachment & { id: string; url?: string; document_id?: string }>(url, form, {
+        onProgress: (progress) => {
+          if (typeof progress.percent !== 'number') return
+          setAttachments((items) =>
+            items.map((item) => (item.id === local.id ? { ...item, uploadProgress: progress.percent } : item)),
+          )
+        },
+      })
       // Persistent URL replaces the blob URL. Fall back to /api/files/<id>
       // when the response omits `url` (older backends).
       const persistentUrl = res.url || `/api/files/${encodeURIComponent(res.id)}`
@@ -452,6 +462,7 @@ export function Composer({
         ...local,
         id: res.id,
         uploading: false,
+        uploadProgress: 100,
         uploadScopeId: scopeId,
         previewUrl: persistentUrl,
         documentId: res.document_id,
@@ -645,6 +656,7 @@ export function Composer({
       // Local thumbnail so images preview instantly; revoked on remove/submit.
       previewUrl: f.type.startsWith('image/') ? URL.createObjectURL(f) : undefined,
       uploading: true,
+      uploadProgress: 0,
     }))
     setAttachments((s) => [...s, ...additions])
     toast.success(
@@ -801,8 +813,11 @@ export function Composer({
           {attachments.map((a) => {
             const busy = a.uploading || a.ingest === 'parsing' || a.ingest === 'embedding'
             const failed = a.ingest === 'failed'
+            const uploadPercent = Math.max(0, Math.min(100, Math.round(a.uploadProgress ?? 0)))
             const status =
-              a.ingest === 'embedding'
+              a.uploading
+                ? t('composer.uploadingPercent', { defaultValue: 'Uploading {{percent}}%', percent: uploadPercent })
+                : a.ingest === 'embedding'
                 ? t('composer.indexing')
                 : a.ingest === 'parsing'
                   ? t('composer.parsing')
@@ -818,7 +833,18 @@ export function Composer({
                   />
                   {busy ? (
                     <span className="absolute inset-0 grid place-items-center rounded-[10px] bg-[var(--color-overlay)]">
-                      <Loader2 size={13} className="animate-spin text-[var(--color-fg-inverted)]" aria-hidden />
+                      {a.uploading ? (
+                        <ProgressRing
+                          value={uploadPercent}
+                          size={34}
+                          strokeWidth={3}
+                          showValue
+                          label={status}
+                          className="text-[var(--color-fg-inverted)]"
+                        />
+                      ) : (
+                        <Loader2 size={13} className="animate-spin text-[var(--color-fg-inverted)]" aria-hidden />
+                      )}
                     </span>
                   ) : null}
                   <button
@@ -852,7 +878,11 @@ export function Composer({
                   aria-hidden
                 >
                   {busy ? (
-                    <Loader2 size={17} className="animate-spin" />
+                    a.uploading ? (
+                      <ProgressRing value={uploadPercent} size={30} strokeWidth={3} showValue label={status} />
+                    ) : (
+                      <Loader2 size={17} className="animate-spin" />
+                    )
                   ) : failed ? (
                     <AlertTriangle size={17} />
                   ) : (
