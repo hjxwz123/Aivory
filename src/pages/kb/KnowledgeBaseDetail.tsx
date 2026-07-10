@@ -6,13 +6,14 @@ import { activeWorkspaceId } from '@/store/workspaces'
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { Plus, Trash2, Upload, FileText, Loader2, AlertTriangle, MoreHorizontal } from 'lucide-react'
+import { Plus, Trash2, Upload, FileText, AlertTriangle, MoreHorizontal } from 'lucide-react'
 import { ApiError, kbsApi } from '@/api'
 import type { ApiDocument, ApiKnowledgeBase } from '@/api/types'
-import { api } from '@/api/client'
+import { apiUpload } from '@/api/client'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Badge } from '@/components/ui/badge'
+import { ProgressRing } from '@/components/ui/progress-ring'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -46,6 +47,7 @@ export default function KnowledgeBaseDetail() {
   const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState({ filename: '', content: '' })
   const [uploading, setUploading] = useState(false)
+  const [uploadJob, setUploadJob] = useState<{ name: string; progress: number; phase: 'uploading' | 'processing' } | null>(null)
   const [tab, setTab] = useState<'paste' | 'upload'>('paste')
   const fileInput = useRef<HTMLInputElement>(null)
   // Delete the whole KB (documents + vectors; unbinds it from conversations).
@@ -120,12 +122,21 @@ export default function KnowledgeBaseDetail() {
 
   async function uploadFiles(files: FileList | null) {
     if (!files || !id) return
+    const selected = Array.from(files)
+    if (!selected.length) return
     setUploading(true)
     try {
-      for (const file of Array.from(files)) {
+      for (const file of selected) {
+        setUploadJob({ name: file.name, progress: 0, phase: 'uploading' })
         const form = new FormData()
         form.append('file', file)
-        await api(`/kbs/${encodeURIComponent(id)}/documents`, { method: 'POST', body: form })
+        await apiUpload<ApiDocument>(`/kbs/${encodeURIComponent(id)}/documents`, form, {
+          onProgress: (progress) => {
+            if (typeof progress.percent !== 'number') return
+            setUploadJob({ name: file.name, progress: progress.percent, phase: 'uploading' })
+          },
+        })
+        setUploadJob({ name: file.name, progress: 100, phase: 'processing' })
       }
       toast.success(t('kb:detail.uploaded'))
       setOpen(false)
@@ -134,6 +145,7 @@ export default function KnowledgeBaseDetail() {
       toast.error(e instanceof ApiError ? e.message : t('kb:detail.uploadFailed'))
     } finally {
       setUploading(false)
+      setUploadJob(null)
     }
   }
 
@@ -292,8 +304,11 @@ export default function KnowledgeBaseDetail() {
                   className={cn(
                     'rounded-[14px] border border-dashed border-[var(--color-border-strong)] bg-[var(--color-bg-muted)] p-10 text-center interactive',
                     'hover:border-[var(--color-accent)] cursor-pointer',
+                    uploading && 'cursor-not-allowed opacity-70',
                   )}
-                  onClick={() => fileInput.current?.click()}
+                  onClick={() => {
+                    if (!uploading) fileInput.current?.click()
+                  }}
                 >
                   <input
                     ref={fileInput}
@@ -305,10 +320,38 @@ export default function KnowledgeBaseDetail() {
                       e.currentTarget.value = ''
                     }}
                   />
-                  <Upload size={24} className="mx-auto text-[var(--color-fg-subtle)]" aria-hidden />
+                  {uploading ? (
+                    <ProgressRing
+                      value={uploadJob?.progress ?? 0}
+                      size={44}
+                      strokeWidth={4}
+                      showValue
+                      label={
+                        uploadJob?.phase === 'processing'
+                          ? t('kb:detail.uploadProcessing', { defaultValue: 'Parsing / indexing…' })
+                          : t('kb:detail.uploadProgress', {
+                              defaultValue: 'Uploading {{percent}}%',
+                              percent: uploadJob?.progress ?? 0,
+                            })
+                      }
+                      className="mx-auto text-[var(--color-accent)]"
+                    />
+                  ) : (
+                    <Upload size={24} className="mx-auto text-[var(--color-fg-subtle)]" aria-hidden />
+                  )}
                   <p className="mt-3 text-[var(--color-fg-muted)] text-sm">
-                    {uploading ? <Loader2 className="inline-block animate-spin" size={14} aria-hidden /> : t('kb:detail.clickToChoose')}
+                    {uploading && uploadJob
+                      ? uploadJob.phase === 'processing'
+                        ? t('kb:detail.uploadProcessing', { defaultValue: 'Parsing / indexing…' })
+                        : t('kb:detail.uploadProgress', {
+                            defaultValue: 'Uploading {{percent}}%',
+                            percent: Math.round(uploadJob.progress),
+                          })
+                      : t('kb:detail.clickToChoose')}
                   </p>
+                  {uploading && uploadJob ? (
+                    <p className="mt-1 truncate text-xs text-[var(--color-fg-subtle)]">{uploadJob.name}</p>
+                  ) : null}
                 </div>
               </TabsContent>
             </Tabs>

@@ -3,6 +3,7 @@ package rag
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,28 +19,41 @@ import (
 	"aurelia/server/internal/store"
 )
 
-// embedHTTPClient is shared across every httpEmbedder so TLS connections to the
-// embeddings endpoint are pooled and reused between documents. Re-handshaking a
-// slow / far-away endpoint (e.g. dashscope.aliyuncs.com) on every batch is
+// Embedding HTTP clients are shared so TLS connections are pooled and reused
+// between documents. Re-handshaking a slow / far-away endpoint on every batch is
 // exactly what produces "TLS handshake timeout"; keep-alive avoids most of it.
 // The transport timeouts bound a hung dial/handshake so a stuck connection
 // fails fast (and gets retried) instead of blocking the whole ingest.
-var embedHTTPClient = &http.Client{
-	Timeout: 3 * time.Minute, // overall cap includes reading the vector response body
-	Transport: &http.Transport{
+var (
+	embedHTTPClient          = newEmbeddingHTTPClient(true)
+	dashScopeEmbedHTTPClient = newEmbeddingHTTPClient(false)
+)
+
+func newEmbeddingHTTPClient(allowHTTP2 bool) *http.Client {
+	tr := &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
 		DialContext: (&net.Dialer{
 			Timeout:   15 * time.Second,
 			KeepAlive: 30 * time.Second,
 		}).DialContext,
-		ForceAttemptHTTP2:     true,
+		ForceAttemptHTTP2:     allowHTTP2,
 		MaxIdleConns:          50,
 		MaxIdleConnsPerHost:   10,
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   20 * time.Second,
 		ResponseHeaderTimeout: 30 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
-	},
+	}
+	if !allowHTTP2 {
+		// DashScope compatible embedding occasionally stalls on h2 streams behind
+		// the provider gateway. HTTP/1.1 keeps each request easier to isolate while
+		// retaining keep-alive pooling for the low embedding concurrency we use.
+		tr.TLSNextProto = map[string]func(string, *tls.Conn) http.RoundTripper{}
+	}
+	return &http.Client{
+		Timeout:   3 * time.Minute, // overall cap includes reading the vector response body
+		Transport: tr,
+	}
 }
 
 // embeddingResponse is the OpenAI-format /v1/embeddings reply shape.
@@ -140,6 +154,13 @@ const (
 	dashScopeGlobalEmbedConcurrency = 2
 )
 
+// DashScope compatible-mode can occasionally accept the request and then sit
+// behind provider-side queueing without returning headers. Bound each attempt
+// below the shared client's broad 3-minute safety cap so indexing fails with a
+// retryable, visible error instead of looking stuck for many minutes. Variable
+// for tests.
+var dashScopeEmbedAttemptTimeout = 60 * time.Second
+
 // embedConcurrency caps how many upstream embedding batches run at once. The old
 // code did them strictly sequentially, so a 500-chunk doc paid 50 serial
 // round-trips. Keep this moderate because the RAG queue can process multiple
@@ -230,12 +251,13 @@ func (e *httpEmbedder) embedOne(ctx context.Context, texts []string) ([][]float3
 		}
 	}
 	if err != nil {
+		err = fmt.Errorf("%w (batch inputs=%d chars=%d approx_tokens=%d)", err, len(texts), totalTextChars(texts), totalEstimatedTokens(texts))
 		return nil, &embeddingRequestError{
 			err:     err,
 			method:  http.MethodPost,
 			url:     endpoint,
 			headers: "{\n  \"Authorization\": \"[redacted]\",\n  \"Content-Type\": [\"application/json\"]\n}",
-			body:    truncateAtN(string(body), 128*1024),
+			body:    e.diagnosticsBody(texts),
 		}
 	}
 	if len(parsed.Data) != len(texts) {
@@ -304,6 +326,20 @@ func (e *httpEmbedder) concurrency() int {
 		return dashScopeEmbedConcurrency
 	}
 	return embedConcurrency
+}
+
+func (e *httpEmbedder) requestTimeout() time.Duration {
+	if e.isDashScope() {
+		return dashScopeEmbedAttemptTimeout
+	}
+	return 0
+}
+
+func (e *httpEmbedder) httpClient() *http.Client {
+	if e.isDashScope() {
+		return dashScopeEmbedHTTPClient
+	}
+	return embedHTTPClient
 }
 
 func (e *httpEmbedder) acquireProviderSlot(ctx context.Context) (func(), error) {
@@ -384,6 +420,7 @@ func (e *httpEmbedder) postEmbeddings(ctx context.Context, url string, body []by
 	var parsed embeddingResponse
 	var lastErr error
 	var retryAfter string
+	client := e.httpClient()
 	if strings.Contains(url, "__invalid_dashscope_embedding_base_url__") {
 		return parsed, fmt.Errorf("invalid DashScope embedding base_url: use a Bailian workspace regional URL such as https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1 or https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/api/v1, not https://dashscope.aliyuncs.com/compatible-mode/v1")
 	}
@@ -399,22 +436,34 @@ func (e *httpEmbedder) postEmbeddings(ctx context.Context, url string, body []by
 			case <-timer.C:
 			}
 		}
-		req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
+		reqCtx := ctx
+		cancelReq := func() {}
+		if timeout := e.requestTimeout(); timeout > 0 {
+			reqCtx, cancelReq = context.WithTimeout(ctx, timeout)
+		}
+		req, err := http.NewRequestWithContext(reqCtx, "POST", url, bytes.NewReader(body))
 		if err != nil {
+			cancelReq()
 			return parsed, err
 		}
 		req.Header.Set("authorization", "Bearer "+e.apiKey)
 		req.Header.Set("content-type", "application/json")
 		release, err := e.acquireProviderSlot(ctx)
 		if err != nil {
+			cancelReq()
 			return parsed, err
 		}
-		resp, err := embedHTTPClient.Do(req)
+		resp, err := client.Do(req)
 		if err != nil {
 			release()
+			cancelReq()
 			// Don't retry if the caller cancelled / timed out the context.
 			if ctx.Err() != nil {
 				return parsed, ctx.Err()
+			}
+			if reqCtx.Err() != nil {
+				lastErr = fmt.Errorf("embedding provider did not return a response within %s: %w", e.requestTimeout().Round(time.Second), err)
+				break
 			}
 			lastErr = err // network / TLS / dial error → transient, retry
 			continue
@@ -424,6 +473,7 @@ func (e *httpEmbedder) postEmbeddings(ctx context.Context, url string, body []by
 			b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 			resp.Body.Close()
 			release()
+			cancelReq()
 			lastErr = fmt.Errorf("embeddings %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
 			continue // rate-limited / server-side → retry
 		}
@@ -431,12 +481,14 @@ func (e *httpEmbedder) postEmbeddings(ctx context.Context, url string, body []by
 			b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 			resp.Body.Close()
 			release()
+			cancelReq()
 			return parsed, &embedHTTPError{status: resp.StatusCode, body: strings.TrimSpace(string(b))}
 		}
 		parsed = embeddingResponse{}
 		err = e.decodeResponse(resp.Body, &parsed)
 		resp.Body.Close()
 		release()
+		cancelReq()
 		if err != nil {
 			lastErr = fmt.Errorf("decode embeddings response: %w", err)
 			continue // truncated body / transient → retry
@@ -447,6 +499,14 @@ func (e *httpEmbedder) postEmbeddings(ctx context.Context, url string, body []by
 		lastErr = errors.New("unknown error")
 	}
 	return parsed, fmt.Errorf("embeddings request failed after %d attempts: %w", maxAttempts, lastErr)
+}
+
+func totalTextChars(texts []string) int {
+	total := 0
+	for _, text := range texts {
+		total += len(text)
+	}
+	return total
 }
 
 func embeddingRetryDelay(failedAttempt int, retryAfter string) time.Duration {

@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { conversationsApi } from '@/api/endpoints'
-import { api } from '@/api/client'
+import { apiUpload } from '@/api/client'
 import type { ApiConversationFile } from '@/api/types'
 import { useHtmlPreview } from './html-preview'
 import { useInlineThreadDrawer } from './inline-thread'
@@ -18,6 +18,7 @@ interface ConversationFilesStore {
   files: ApiConversationFile[]
   loading: boolean
   uploading: boolean
+  uploadJob: { name: string; progress: number; phase: 'uploading' | 'processing' } | null
   openDrawer: (conversationId: string) => void
   close: () => void
   load: (conversationId: string) => Promise<void>
@@ -31,6 +32,7 @@ export const useConversationFiles = create<ConversationFilesStore>((set, get) =>
   files: [],
   loading: false,
   uploading: false,
+  uploadJob: null,
 
   openDrawer(conversationId) {
     // Mutual exclusion: the three right-edge drawers share the same column.
@@ -65,17 +67,24 @@ export const useConversationFiles = create<ConversationFilesStore>((set, get) =>
     set({ uploading: true })
     try {
       for (const file of list) {
+        set({ uploadJob: { name: file.name, progress: 0, phase: 'uploading' } })
         const form = new FormData()
         form.append('file', file)
         // Mirror the composer: anything that isn't an image is ingested as a
         // conversation-scoped RAG document so the model can read it.
         const isImage = file.type.startsWith('image/')
         const qs = `conversation_id=${encodeURIComponent(convId)}${isImage ? '' : '&rag=1'}`
-        await api(`/files?${qs}`, { method: 'POST', body: form })
+        await apiUpload(`/files?${qs}`, form, {
+          onProgress: (progress) => {
+            if (typeof progress.percent !== 'number') return
+            set({ uploadJob: { name: file.name, progress: progress.percent, phase: 'uploading' } })
+          },
+        })
+        set({ uploadJob: { name: file.name, progress: 100, phase: 'processing' } })
       }
       await get().load(convId)
     } finally {
-      set({ uploading: false })
+      set({ uploading: false, uploadJob: null })
     }
   },
 

@@ -44,6 +44,8 @@
     "filesAddDescription": "PDF、Markdown、テキストファイルをアップロードします。Aurelia がインデックスし、このプロジェクトのチャット中にアシスタントが取得できるようにします。",
     "filesClickToChoose": "クリックしてファイルを選択",
     "filesUploading": "アップロード中…",
+    "filesUploadingPercent": "アップロード中 {{percent}}%",
+    "filesProcessing": "解析/インデックス中…",
     "filesEmpty": "ファイルはまだありません。",
     "filesEmptyBody": "作業メモ、スタイルガイド、用語集など、アシスタントに常に把握しておいてほしいものを入れてください。",
     "fileSize": "{{size}}",
