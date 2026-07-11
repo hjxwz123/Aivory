@@ -72,6 +72,8 @@
   "actions": {
     "copy": "コピー",
     "copied": "コピーしました",
+    "exportDocx": "Word としてエクスポート",
+    "exportDocxFailed": "エクスポートに失敗しました",
     "creditsUsed": "{{credits}} クレジット使用",
     "regenerate": "再生成",
     "helpful": "役に立った",
