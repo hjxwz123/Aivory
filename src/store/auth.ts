@@ -20,6 +20,15 @@ function beginAuthOp(): number {
   authOpSeq += 1
   return authOpSeq
 }
+// Observe the current op WITHOUT starting a new one. The background
+// refresh-on-401 handler uses this: it must notice when a real auth transition
+// (login/register/logout) supersedes it, but must not itself invalidate an
+// in-flight hydrate — bumping the seq from here made hydrate's finally drop the
+// first-run probe result, leaving `setupProbed` false forever on a logged-out
+// load, and the AuthGate then hung on its shimmer right after register/login.
+function currentAuthOp(): number {
+  return authOpSeq
+}
 function isLatestAuthOp(seq: number): boolean {
   return seq === authOpSeq
 }
@@ -80,7 +89,14 @@ export const useAuth = create<AuthState>((set, get) => ({
   pendingTwoFactor: null,
 
   setUser(user) {
-    set({ user, status: user ? 'authenticated' : 'unauthenticated' })
+    // An authenticated user proves the deployment is past first-run setup, so
+    // also resolve the probe — flows that sign in via setUser (email
+    // verification, OAuth callback) must never leave the gate waiting on it.
+    if (user) {
+      set({ user, status: 'authenticated', needsSetup: false, setupProbed: true })
+    } else {
+      set({ user: null, status: 'unauthenticated' })
+    }
   },
   setSignupOpen(open) {
     set({ signupOpen: open })
@@ -106,7 +122,10 @@ export const useAuth = create<AuthState>((set, get) => ({
         if (!isLatestAuthOp(seq)) return
         resetAuthFailureState()
         setAccessToken(resp.access_token)
-        set({ user: resp.user, status: 'authenticated', error: null })
+        // Authenticated ⇒ the deployment has users; resolve the setup probe
+        // immediately so the gate can route without waiting on the sibling
+        // /public/needs-setup call.
+        set({ user: resp.user, status: 'authenticated', needsSetup: false, setupProbed: true, error: null })
         return
       } catch {
         /* fall through to /me */
@@ -114,7 +133,7 @@ export const useAuth = create<AuthState>((set, get) => ({
       const user = await authApi.me()
       if (!isLatestAuthOp(seq)) return
       resetAuthFailureState()
-      set({ user, status: 'authenticated', error: null })
+      set({ user, status: 'authenticated', needsSetup: false, setupProbed: true, error: null })
     } catch {
       if (!isLatestAuthOp(seq)) return
       set({ user: null, status: 'unauthenticated' })
@@ -144,7 +163,7 @@ export const useAuth = create<AuthState>((set, get) => ({
       if (!isLatestAuthOp(seq)) return false
       resetAuthFailureState()
       setAccessToken(resp.access_token)
-      set({ user: resp.user, status: 'authenticated', needsSetup: false, error: null })
+      set({ user: resp.user, status: 'authenticated', needsSetup: false, setupProbed: true, error: null })
       return true
     } catch (e) {
       if (!isLatestAuthOp(seq)) return false
@@ -167,7 +186,7 @@ export const useAuth = create<AuthState>((set, get) => ({
       }
       resetAuthFailureState()
       setAccessToken(resp.access_token)
-      set({ user: resp.user, status: 'authenticated', pendingTwoFactor: null, banned: false })
+      set({ user: resp.user, status: 'authenticated', needsSetup: false, setupProbed: true, pendingTwoFactor: null, banned: false })
       return true
     } catch (e) {
       if (!isLatestAuthOp(seq)) return false
@@ -198,7 +217,7 @@ export const useAuth = create<AuthState>((set, get) => ({
       if (!isLatestAuthOp(seq)) return false
       resetAuthFailureState()
       setAccessToken(resp.access_token)
-      set({ user: resp.user, status: 'authenticated', pendingTwoFactor: null })
+      set({ user: resp.user, status: 'authenticated', needsSetup: false, setupProbed: true, pendingTwoFactor: null })
       return true
     } catch (e) {
       if (!isLatestAuthOp(seq)) return false
@@ -226,7 +245,7 @@ export const useAuth = create<AuthState>((set, get) => ({
       const auth = resp as { user: ApiUser; access_token: string }
       resetAuthFailureState()
       setAccessToken(auth.access_token)
-      set({ user: auth.user, status: 'authenticated' })
+      set({ user: auth.user, status: 'authenticated', needsSetup: false, setupProbed: true })
       return true
     } catch (e) {
       if (!isLatestAuthOp(seq)) return false
@@ -273,7 +292,7 @@ setAuthLostHandler(() => {
 // cookie and let the api client retry. Returns false (→ the original 401 stands,
 // surfacing as logged-out) when the refresh token is gone/expired/revoked.
 setRefreshHandler(async () => {
-  const seq = beginAuthOp()
+  const seq = currentAuthOp()
   try {
     const resp = await authApi.refresh()
     if (isAuthRefreshSuppressed()) return false
@@ -281,7 +300,7 @@ setRefreshHandler(async () => {
     setAccessToken(resp.access_token)
     const current = useAuth.getState()
     if (current.status !== 'authenticated' || current.user?.id !== resp.user.id) {
-      useAuth.setState({ user: resp.user, status: 'authenticated' })
+      useAuth.setState({ user: resp.user, status: 'authenticated', needsSetup: false, setupProbed: true })
     }
     return true
   } catch {
