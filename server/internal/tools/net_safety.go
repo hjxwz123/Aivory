@@ -1,22 +1,20 @@
 package tools
 
 import (
+	"aurelia/server/internal/netsafe"
 	"net"
 	"net/http"
 	"time"
-
-	"aurelia/server/internal/envcfg"
-	"aurelia/server/internal/netsafe"
 )
 
-// Env-overridable tool HTTP client tunables (envcfg). Defaults preserve prior
-// hardcoded behaviour; overrides are read once at process start.
+// Low-level HTTP-client network tunables for tool fetches — dial / TLS / idle /
+// overall timeouts. Hardcoded (not operator-facing knobs).
 var (
-	ssrfSafeClientTimeout               = envcfg.Dur("AURELIA_TOOLS_SSRFSAFECLIENT_OVERALL_TIMEOUT_WEB_FETCH", 25*time.Second)
-	toolHTTPClientDialTimeout           = envcfg.Dur("AURELIA_TOOLS_TOOLHTTPCLIENT_DIAL_TIMEOUT", 10*time.Second)
-	toolHTTPClientTLSHandshakeTimeout   = envcfg.Dur("AURELIA_TOOLS_TOOLHTTPCLIENT_TLS_HANDSHAKE_TIMEOUT", 10*time.Second)
-	toolHTTPClientResponseHeaderTimeout = envcfg.Dur("AURELIA_TOOLS_TOOLHTTPCLIENT_RESPONSE_HEADER_TIMEOUT", 600*time.Second)
-	toolHTTPClientIdleConnTimeout       = envcfg.Dur("AURELIA_TOOLS_TOOLHTTPCLIENT_IDLE_CONN_TIMEOUT", 90*time.Second)
+	ssrfSafeClientTimeout               = 25 * time.Second
+	toolHTTPClientDialTimeout           = 10 * time.Second
+	toolHTTPClientTLSHandshakeTimeout   = 10 * time.Second
+	toolHTTPClientResponseHeaderTimeout = 600 * time.Second
+	toolHTTPClientIdleConnTimeout       = 90 * time.Second
 )
 
 // isPublicIP rejects loopback/private/link-local/unspecified/multicast plus the

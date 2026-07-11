@@ -5,13 +5,12 @@ import (
 	"time"
 
 	"aurelia/server/internal/cache"
-	"aurelia/server/internal/envcfg"
+
 	"aurelia/server/internal/llm"
 )
 
-// TTL is env-overridable (see docs/config-reference.md); it falls back to the
-// original 2h default when AURELIA_GENSTREAM_TTL is unset.
-var TTL = envcfg.Dur("AURELIA_GENSTREAM_TTL", 2*time.Hour)
+// TTL is how long a per-message SSE event stream (gen:<id>) is retained (2h).
+var TTL = 2 * time.Hour
 
 type Event struct {
 	ID    string

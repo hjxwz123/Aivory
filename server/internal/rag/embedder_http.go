@@ -31,21 +31,21 @@ var (
 )
 
 var (
-	netDialerTimeout                   = envcfg.Dur("AURELIA_RAG_NET_DIALER_TIMEOUT", 15*time.Second)
-	netDialerKeepAlive                 = envcfg.Dur("AURELIA_RAG_NET_DIALER_KEEP_ALIVE", 30*time.Second)
-	httpTransportMaxIdleConns          = envcfg.Int("AURELIA_RAG_HTTP_TRANSPORT_MAX_IDLE_CONNS", 50)
-	httpTransportMaxIdleConnsPerHost   = envcfg.Int("AURELIA_RAG_HTTP_TRANSPORT_MAX_IDLE_CONNS_PER_HOST", 10)
-	httpTransportIdleConnTimeout       = envcfg.Dur("AURELIA_RAG_HTTP_TRANSPORT_IDLE_CONN_TIMEOUT", 90*time.Second)
-	httpTransportTLSHandshakeTimeout   = envcfg.Dur("AURELIA_RAG_HTTP_TRANSPORT_TLSHANDSHAKE_TIMEOUT", 20*time.Second)
-	httpTransportResponseHeaderTimeout = envcfg.Dur("AURELIA_RAG_HTTP_TRANSPORT_RESPONSE_HEADER_TIMEOUT", 30*time.Second)
-	httpTransportExpectContinueTimeout = envcfg.Dur("AURELIA_RAG_HTTP_TRANSPORT_EXPECT_CONTINUE_TIMEOUT", 1*time.Second)
-	httpClientTimeout                  = envcfg.Dur("AURELIA_RAG_HTTP_CLIENT_TIMEOUT", 3*time.Minute)
+	netDialerTimeout                   = 15 * time.Second
+	netDialerKeepAlive                 = 30 * time.Second
+	httpTransportMaxIdleConns          = 50
+	httpTransportMaxIdleConnsPerHost   = 10
+	httpTransportIdleConnTimeout       = 90 * time.Second
+	httpTransportTLSHandshakeTimeout   = 20 * time.Second
+	httpTransportResponseHeaderTimeout = 30 * time.Second
+	httpTransportExpectContinueTimeout = 1 * time.Second
+	httpClientTimeout                  = 3 * time.Minute
 
-	diagPreviewCharCap = envcfg.Int("AURELIA_RAG_TRUNCATE_AT_N", 1200)
-	diagBodyCap        = envcfg.Int("AURELIA_RAG_TRUNCATE_AT_N_2", 16*1024)
+	diagPreviewCharCap = 1200
+	diagBodyCap        = 16 * 1024
 
-	embedErrBodyReadCap    = envcfg.Int64("AURELIA_RAG_IO_LIMIT_READER", 4096)
-	embedErrBodyReadCap4xx = envcfg.Int64("AURELIA_RAG_IO_LIMIT_READER_2", 4096)
+	embedErrBodyReadCap    int64 = 4096
+	embedErrBodyReadCap4xx int64 = 4096
 
 	embeddingRetryDelayBase = envcfg.Dur("AURELIA_RAG_EMBEDDING_RETRY_DELAY", time.Second)
 	embeddingRetryDelayCap  = envcfg.Dur("AURELIA_RAG_EMBEDDING_RETRY_DELAY_2", 30*time.Second)

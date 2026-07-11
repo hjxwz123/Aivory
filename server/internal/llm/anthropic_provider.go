@@ -22,9 +22,14 @@ var _ = context.Canceled
 // hardcoded behavior).
 var (
 	anthropicThinkingHeadroomTokens      = envcfg.Int("AURELIA_LLM_APPLY_ANTHROPIC_THINKING_SETTINGS", 2048)
-	toolResultSummaryTruncationAnthropic = envcfg.Int("AURELIA_LLM_TOOL_RESULT_SUMMARY_TRUNCATION_ANTHROPIC", 240)
-	anthropicScannerBufInit              = envcfg.Int("AURELIA_LLM_READ_ANTHROPIC_STREAM_INIT", 64*1024)
-	anthropicScannerBufMax               = envcfg.Int("AURELIA_LLM_READ_ANTHROPIC_STREAM_MAX", 1024*1024)
+	toolResultSummaryTruncationAnthropic = 240
+)
+
+// SSE scanner buffer sizing — low-level transport plumbing, not a tunable in
+// practice, so hardcoded rather than env-overridable (unlike the knobs above).
+const (
+	anthropicScannerBufInit = 64 * 1024
+	anthropicScannerBufMax  = 1024 * 1024
 )
 
 // AnthropicProvider calls the Messages API (`POST /v1/messages`, SSE). The
@@ -161,7 +166,7 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 	totalUsage := Usage{}
 
 	for i := 0; i < maxIter; i++ {
-		maxTok := envcfg.Int("AURELIA_LLM_MAX_TOK", 4096)
+		maxTok := envcfg.Int("AURELIA_LLM_MAX_TOK", 64000)
 		if req.MaxOutputTokens > 0 {
 			maxTok = req.MaxOutputTokens
 		}
@@ -314,7 +319,7 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 // (markup-stripped) portion itself.
 func (p *AnthropicProvider) promptRunOnce(req UnifiedChatRequest) PromptToolRunner {
 	return func(ctx context.Context, history []UnifiedMessage, system string) (string, Usage, error) {
-		maxTok := envcfg.Int("AURELIA_LLM_MAX_TOK_2", 4096)
+		maxTok := envcfg.Int("AURELIA_LLM_MAX_TOK_2", 64000)
 		if req.MaxOutputTokens > 0 {
 			maxTok = req.MaxOutputTokens
 		}

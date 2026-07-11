@@ -40,11 +40,7 @@ var (
 	archiveGcBootSettleDelay  = envcfg.Dur("AURELIA_CMD_ARCHIVE_GC_BOOT_SETTLE_DELAY", 2*time.Minute)
 	runPruneCtxTimeout        = envcfg.Dur("AURELIA_CMD_RUN_PRUNE", 5*time.Minute)
 	archiveGcSweepInterval    = envcfg.Dur("AURELIA_CMD_ARCHIVE_GC_SWEEP_INTERVAL", 6*time.Hour)
-	readHeaderTimeout         = envcfg.Dur("AURELIA_CMD_HTTP_SERVER", 15*time.Second)
-	writeTimeout              = envcfg.Dur("AURELIA_CMD_HTTP_SERVER_2", 90*time.Minute)
-	idleTimeout               = envcfg.Dur("AURELIA_CMD_HTTP_SERVER_3", 120*time.Second)
-	gracefulShutdownTimeout   = envcfg.Dur("AURELIA_CMD_GRACEFUL_SHUTDOWN_TIMEOUT", 10*time.Second)
-	taskRouterMaxOutputTokens = envcfg.Int("AURELIA_CMD_TASK_ROUTER_ADAPTER_RUN_JSON", 256)
+	taskRouterMaxOutputTokens = 256
 )
 
 func main() {
@@ -195,10 +191,10 @@ func main() {
 	srv := &http.Server{
 		Addr:              cfg.Listen,
 		Handler:           router,
-		ReadHeaderTimeout: readHeaderTimeout,
+		ReadHeaderTimeout: 15 * time.Second,
 		// SSE streams need long write deadlines; 30 minutes matches design.md §11.5.
-		WriteTimeout: writeTimeout,
-		IdleTimeout:  idleTimeout,
+		WriteTimeout: 90 * time.Minute,
+		IdleTimeout:  120 * time.Second,
 	}
 
 	go func() {
@@ -214,7 +210,7 @@ func main() {
 	<-sig
 	logger.Println("shutting down...")
 
-	ctx, cancel := context.WithTimeout(context.Background(), gracefulShutdownTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {
 		logger.Printf("shutdown: %v", err)

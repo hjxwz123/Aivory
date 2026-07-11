@@ -72,12 +72,17 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 	totalUsage := Usage{}
 
 	for i := 0; i < maxIter; i++ {
+		// Gemini defaults maxOutputTokens to 8192 when the field is omitted,
+		// silently truncating well below what current models actually support
+		// (up to 64K+) — always send it explicitly (mirrors the Anthropic fix).
+		maxTok := envcfg.Int("AURELIA_LLM_GEMINI_MAX_TOK", 64000)
+		if req.MaxOutputTokens > 0 {
+			maxTok = req.MaxOutputTokens
+		}
 		body := map[string]any{
 			"systemInstruction": map[string]any{"parts": []map[string]any{{"text": req.SystemPrompt}}},
 			"contents":          contents,
-		}
-		if req.MaxOutputTokens > 0 {
-			body["generationConfig"] = map[string]any{"maxOutputTokens": req.MaxOutputTokens}
+			"generationConfig":  map[string]any{"maxOutputTokens": maxTok},
 		}
 		if toolsDecl != nil {
 			body["tools"] = toolsDecl
@@ -164,10 +169,10 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 			// §6.2 tool_result MUST include the upstream tool_use id so the UI
 			// can pair the result with the in-flight tool_call card. For Gemini
 			// the id is the function name (multiple calls to the same fn rare).
-			onEvent(SseEvent{Type: "tool_result", Name: c.Name, ID: c.Name, Summary: truncate(out, envcfg.Int("AURELIA_LLM_TOOL_RESULT_SUMMARY_TRUNCATION_GEMINI", 240)), Status: status})
+			onEvent(SseEvent{Type: "tool_result", Name: c.Name, ID: c.Name, Summary: truncate(out, 240), Status: status})
 			allBlocks = append(allBlocks, UnifiedBlock{
 				Kind: "tool_call", ToolName: c.Name, ToolID: c.Name,
-				Input: c.Args, Summary: truncate(out, envcfg.Int("AURELIA_LLM_TOOL_RESULT_SUMMARY_TRUNCATION_GEMINI", 240)),
+				Input: c.Args, Summary: truncate(out, 240),
 			})
 			respParts = append(respParts, map[string]any{
 				"functionResponse": map[string]any{
@@ -324,7 +329,7 @@ func geminiRawCallsAllSigned(turns []map[string]any) bool {
 // Returns: (visible text, thinking text, function calls, raw model parts, usage).
 func readGeminiStream(body io.Reader, onEvent func(SseEvent)) (string, string, []geminiCall, []map[string]any, Usage, error) {
 	scanner := bufio.NewScanner(body)
-	scanner.Buffer(make([]byte, envcfg.Int("AURELIA_LLM_READ_GEMINI_STREAM_INIT", 64*1024)), envcfg.Int("AURELIA_LLM_READ_GEMINI_STREAM_MAX", 1024*1024))
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 	text := strings.Builder{}
 	thinking := strings.Builder{}
 	calls := []geminiCall{}
@@ -462,9 +467,13 @@ func (p *GoogleProvider) promptRunOnce(req UnifiedChatRequest) PromptToolRunner 
 			contents = append(contents, map[string]any{"role": role, "parts": parts})
 		}
 		gc := map[string]any{"stopSequences": []string{PromptToolStopSequence()}}
+		// Gemini defaults maxOutputTokens to 8192 when omitted — always send it
+		// explicitly (mirrors the Anthropic fix and the main Stream() path above).
+		maxTok := envcfg.Int("AURELIA_LLM_GEMINI_MAX_TOK_2", 64000)
 		if req.MaxOutputTokens > 0 {
-			gc["maxOutputTokens"] = req.MaxOutputTokens
+			maxTok = req.MaxOutputTokens
 		}
+		gc["maxOutputTokens"] = maxTok
 		body := map[string]any{
 			"systemInstruction": map[string]any{"parts": []map[string]any{{"text": system}}},
 			"contents":          contents,

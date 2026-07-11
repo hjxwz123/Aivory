@@ -25,8 +25,8 @@ func TestAdminUsageRecords(t *testing.T) {
 		t.Fatalf("conv: %v", err)
 	}
 	ins := `INSERT INTO usage_logs(user_id,conversation_id,model_id,purpose,input_tokens,output_tokens,cost,currency,created_at) VALUES(?,?,?,?,?,?,?,?,?)`
-	exec(t, db, ins, "u1", "c1", "m1", "chat", 10, 20, 0.1, "USD", 1000)      // existing conv
-	exec(t, db, ins, "u1", "cGONE", "m1", "task.title", 5, 5, 0.2, "USD", 2000) // conv was deleted
+	exec(t, db, ins, "u1", "c1", "m1", "chat", 10, 20, 0.1, "USD", 1000)                                                              // existing conv
+	exec(t, db, ins, "u1", "cGONE", "m1", "task.title", 5, 5, 0.2, "USD", 2000)                                                       // conv was deleted
 	exec(t, db, `INSERT INTO usage_logs(user_id,model_id,purpose,cost,currency,created_at) VALUES('u2','m2','image',0.3,'USD',3000)`) // no conv
 
 	all, err := AdminUsageRecords(ctx, db, UsageFilter{}, 50, 0)

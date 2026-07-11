@@ -10,20 +10,17 @@ import (
 	"os"
 	"strings"
 	"time"
-
-	"aurelia/server/internal/envcfg"
 )
 
 // ErrNotFound is returned when a queried row is missing.
 var ErrNotFound = errors.New("not found")
 
-// Env-overridable pagination defaults/caps (see docs/config-reference.md); each
-// falls back to the original hardcoded value when its AURELIA_* var is unset.
+// Pagination defaults/caps.
 var (
-	listUsersPagedDefault    = envcfg.Int("AURELIA_STORE_LIMIT_DEFAULT", 200)
-	listUsersPagedMax        = envcfg.Int("AURELIA_STORE_LIMIT_MAX", 500)
-	listUsersBySearchDefault = envcfg.Int("AURELIA_STORE_LIMIT_2_DEFAULT", 50)
-	listUsersBySearchMax     = envcfg.Int("AURELIA_STORE_LIMIT_2_MAX", 200)
+	listUsersPagedDefault    = 200
+	listUsersPagedMax        = 500
+	listUsersBySearchDefault = 50
+	listUsersBySearchMax     = 200
 )
 
 // FindUserByEmail returns nil + ErrNotFound when the user does not exist.
@@ -264,7 +261,7 @@ func UpdateUserSettings(ctx context.Context, db *sql.DB, userID string, patch ma
 // backfillUserOnboarded marks legacy accounts as already past first-login
 // onboarding. New accounts still start with `{}` and therefore see the wizard.
 func backfillUserOnboarded(db *sql.DB) {
-	batch := envcfg.Int("AURELIA_STORE_BATCH_2", 500)
+	batch := 500
 	last := ""
 	for {
 		rows, err := db.Query(`SELECT id, settings FROM users WHERE id > ? ORDER BY id LIMIT ?`, last, batch)

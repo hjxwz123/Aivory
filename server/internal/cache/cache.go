@@ -5,16 +5,14 @@ package cache
 import (
 	"sync"
 	"time"
-
-	"aurelia/server/internal/envcfg"
 )
 
 // In-memory cache tuning knobs — overridable via env (see
 // docs/config-reference.md); defaults preserve the previous hardcoded values.
 var (
-	memoryPubSubSubscriberChannelBuffer = envcfg.Int("AURELIA_CACHE_MEMORY_PUB_SUB_SUBSCRIBER_CHANNEL_BUFFER", 16)
-	memoryStreamEventRetentionCap       = envcfg.Int("AURELIA_CACHE_MEMORY_STREAM_EVENT_RETENTION_CAP", 50000)
-	memoryStreamReadPageLimit           = envcfg.Int("AURELIA_CACHE_MEMORY_STREAMREAD_PAGE_LIMIT", 100)
+	memoryPubSubSubscriberChannelBuffer = 16
+	memoryStreamEventRetentionCap       = 50000
+	memoryStreamReadPageLimit           = 100
 )
 
 // Cache is the minimal surface we use across the codebase: KV with TTL and a

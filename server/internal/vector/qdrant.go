@@ -28,7 +28,7 @@ var pointNamespace = uuid.MustParse("8f4d2c1a-1f2e-4b6a-9c3d-7a0b1c2d3e4f")
 // Env-overridable Qdrant tunables (envcfg). Defaults preserve prior hardcoded
 // behaviour; overrides are read once at process start.
 var (
-	qdrantHTTPClientTimeout                 = envcfg.Dur("AURELIA_VECTOR_QDRANT_HTTP_CLIENT_TIMEOUT", 20*time.Second)
+	qdrantHTTPClientTimeout                 = 20 * time.Second
 	qdrantScrollPageSizeExistingChunkIDs    = envcfg.Int("AURELIA_VECTOR_QDRANT_SCROLL_PAGE_SIZE_EXISTINGCHUNKIDS", 256)
 	qdrantScrollPageSizeVectorChunkStatuses = envcfg.Int("AURELIA_VECTOR_QDRANT_SCROLL_PAGE_SIZE_VECTORCHUNKSTATUSES", 256)
 )

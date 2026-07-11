@@ -4,11 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-
-	"aurelia/server/internal/envcfg"
 )
 
-var defaultQuotaPeriodSeconds = envcfg.Int("AURELIA_STORE_PS", 604800)
+var defaultQuotaPeriodSeconds = 604800
 
 // ListModelQuotas returns every per-group quota row for a model.
 func ListModelQuotas(ctx context.Context, db *sql.DB, modelID string) ([]ModelGroupQuota, error) {

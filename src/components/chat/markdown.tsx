@@ -3,7 +3,7 @@ import { tokenizeMarkdown, inlineMarkdownToHtml, blockMarkdownToHtml, type CiteR
 import { CodeBlock } from './code-block'
 import { MermaidDiagram } from './mermaid-diagram'
 import { cn, safeHref } from '@/lib/utils'
-import { envNum } from '@/lib/env-config'
+
 import type { Citation } from '@/types/chat'
 
 interface MarkdownProps {
@@ -50,7 +50,7 @@ function HeadingTag({ depth, html, className }: { depth: number; html: string; c
  *
  * Final value (when the stream ends) is always flushed verbatim.
  */
-function useThrottledContent(content: string, intervalMs = envNum('VITE_AURELIA_INTERVAL_MS', 50)): string {
+function useThrottledContent(content: string, intervalMs = 50): string {
   const deferred = useDeferredValue(content)
   const [snap, setSnap] = useState(deferred)
   useEffect(() => {

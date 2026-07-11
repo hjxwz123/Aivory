@@ -54,9 +54,9 @@ func (s *settingsSearcher) Search(ctx context.Context, query string, topK int) (
 		return "Search not yet configured. Reply based on training knowledge or ask the admin to configure search in the admin panel.",
 			[]llm.Citation{{
 				ID: "w1", Index: 1, Title: "Aurelia local-only mode",
-				URL: "https://example.com/aurelia-local-mode",
+				URL:     "https://example.com/aurelia-local-mode",
 				Snippet: "No search backend configured. Set provider + base URL / api key in admin settings to enable real web_search results.",
-				Source: "web",
+				Source:  "web",
 			}}, nil
 	}
 	return b.Search(ctx, query, topK)

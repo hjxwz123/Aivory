@@ -1,13 +1,11 @@
 package llm
 
 import (
+	"aurelia/server/internal/store"
 	"context"
 	"encoding/json"
 	"strings"
 	"unicode"
-
-	"aurelia/server/internal/envcfg"
-	"aurelia/server/internal/store"
 )
 
 // moderationModelSystemPrompt instructs the dedicated moderation model to return
@@ -21,8 +19,7 @@ const moderationModelSystemPrompt = "You are a strict content-safety classifier 
 const defaultModerationMessage = "Your message was blocked by content moderation. Please rephrase and try again."
 
 // moderationVerdictMaxOutputTokens caps the one-word ALLOW/BLOCK verdict output.
-// Default preserves prior hardcoded behaviour; read once at process start.
-var moderationVerdictMaxOutputTokens = envcfg.Int("AURELIA_LLM_MAX_OUTPUT_TOKENS_6", 8)
+var moderationVerdictMaxOutputTokens = 8
 
 // moderatePrompt screens a single user prompt (no history) before generation.
 // Returns (blocked, message). It honours the model's per-model toggle + mode:

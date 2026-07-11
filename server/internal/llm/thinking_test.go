@@ -61,8 +61,8 @@ func TestAnthropicDoesNotInjectThinkingByDefault(t *testing.T) {
 	if _, has := captured["thinking"]; has {
 		t.Fatalf("thinking was injected without param_controls: %#v", captured["thinking"])
 	}
-	if got := captured["max_tokens"]; got != float64(4096) {
-		t.Fatalf("max_tokens = %#v, want default 4096", got)
+	if got := captured["max_tokens"]; got != float64(64000) {
+		t.Fatalf("max_tokens = %#v, want default 64000", got)
 	}
 }
 

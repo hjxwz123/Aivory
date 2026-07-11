@@ -26,9 +26,9 @@ func TestValidateSVG(t *testing.T) {
 	}
 
 	notSVG := map[string]string{
-		"empty":    ``,
-		"plain":    `hello world`,
-		"html":     `<html><body>x</body></html>`,
+		"empty": ``,
+		"plain": `hello world`,
+		"html":  `<html><body>x</body></html>`,
 	}
 	for name, s := range notSVG {
 		if err := validateSVG([]byte(s)); !errors.Is(err, errIconBadBytes) {

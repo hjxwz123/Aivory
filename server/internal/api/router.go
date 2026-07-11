@@ -108,7 +108,7 @@ var (
 	rlWorkspaceJoinMax    = envcfg.Int("AURELIA_API_RATE_LIMIT_WORKSPACE_JOIN_MAX", 30)
 	rlWorkspaceJoinWindow = envcfg.Dur("AURELIA_API_RATE_LIMIT_WORKSPACE_JOIN_WINDOW", 60*time.Second)
 
-	corsPreflightMaxAge = envcfg.Dur("AURELIA_API_CORS_PREFLIGHT_CACHE_AGE", 600*time.Second)
+	corsPreflightMaxAge = 600 * time.Second
 )
 
 // NewRouter returns the fully-wired http.Handler.

@@ -14,7 +14,7 @@
  */
 import type { ApiError as ApiErrorShape } from './types'
 import { toast as _sseToast } from '@/hooks/use-toast'
-import { envNum } from '@/lib/env-config'
+
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? '/api'
 
@@ -336,10 +336,10 @@ function tryRefresh(): Promise<boolean> {
 /** Open a streaming POST request that yields SSE events as parsed JSON.
  *  Creation streams are not retried: re-sending the POST would start a second
  *  generation. Message-specific GET replay streams handle reconnect/resume. */
-const MAX_SSE_RETRIES = envNum('VITE_AURELIA_MAX_SSE_RETRIES', 3)
+const MAX_SSE_RETRIES = 3
 // Exponential SSE reconnect backoff: delay = SSE_RECONNECT_BACKOFF_BASE_MS * factor^(retryCount - 1).
-const SSE_RECONNECT_BACKOFF_BASE_MS = envNum('VITE_AURELIA_DELAY_BASE', 1000)
-const SSE_RECONNECT_BACKOFF_FACTOR = envNum('VITE_AURELIA_DELAY_FACTOR', 2)
+const SSE_RECONNECT_BACKOFF_BASE_MS = 1000
+const SSE_RECONNECT_BACKOFF_FACTOR = 2
 export async function* streamSSE(
   path: string,
   body: unknown,

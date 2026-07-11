@@ -122,15 +122,15 @@ MAX_ARTIFACT_BYTES = int(os.environ.get("SANDBOX_MAX_ARTIFACT_BYTES", str(20 * 1
 
 # Exec reader loop (_run_exec_bounded): selector poll cadence, per-read chunk
 # size, and the post-loop process-wait grace period.
-EXEC_READER_POLL_S = float(os.environ.get("SANDBOX_EXEC_READER_LOOP_POLL_S", "0.2"))
-EXEC_READER_CHUNK_BYTES = int(os.environ.get("SANDBOX_EXEC_READER_LOOP_CHUNK_BYTES", "8192"))
-EXEC_READER_WAIT_GRACE_S = float(os.environ.get("SANDBOX_EXEC_READER_LOOP_WAIT_GRACE_S", "2"))
+EXEC_READER_POLL_S = 0.2
+EXEC_READER_CHUNK_BYTES = 8192
+EXEC_READER_WAIT_GRACE_S = 2.0
 
 # Archive tar-stream reader loop: selector poll cadence, per-read chunk size,
 # and the post-loop process-wait grace period.
-ARCHIVE_READ_POLL_S = float(os.environ.get("SANDBOX_ARCHIVE_TAR_READ_POLL_S", "5.0"))
-ARCHIVE_READ_CHUNK_BYTES = int(os.environ.get("SANDBOX_ARCHIVE_TAR_READ_CHUNK_BYTES", "65536"))
-ARCHIVE_READ_WAIT_GRACE_S = float(os.environ.get("SANDBOX_ARCHIVE_TAR_READ_WAIT_GRACE_S", "10"))
+ARCHIVE_READ_POLL_S = 5.0
+ARCHIVE_READ_CHUNK_BYTES = 65536
+ARCHIVE_READ_WAIT_GRACE_S = 10.0
 
 # Object-storage SDK timeouts/retries — bound every SDK call so a slow/hung
 # bucket can't freeze the reaper, DELETE, or session creation.

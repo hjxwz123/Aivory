@@ -25,7 +25,7 @@ var audioHTTPClient = &http.Client{Timeout: envcfg.Dur("AURELIA_API_AUDIO_TRANSC
 var (
 	audioTranscriptionUserRateLimit            = envcfg.Int("AURELIA_API_AUDIO_TRANSCRIPTION_USER_RATE_LIMIT", 20)
 	transcriptionUpstreamResponseReadCap       = envcfg.Int64("AURELIA_API_TRANSCRIPTION_UPSTREAM_RESPONSE_READ_CAP", 1<<20)
-	transcriptionUpstreamErrorTruncationLength = envcfg.Int("AURELIA_API_TRANSCRIPTION_UPSTREAM_ERROR_TRUNCATION_LENGTH", 240)
+	transcriptionUpstreamErrorTruncationLength = 240
 )
 
 // transcribeAudioHandler accepts an audio blob (multipart field "file") and

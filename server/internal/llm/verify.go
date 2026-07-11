@@ -91,7 +91,7 @@ func (o *Orchestrator) runVerify(ctx context.Context, conv *store.Conversation, 
 		WorkspaceID:     conv.WorkspaceID,
 		ConversationID:  conv.ID,
 		MessageID:       msgID, // pins the usage row to this turn for tallyTurnSideCosts
-		MaxOutputTokens: envcfg.Int("AURELIA_LLM_MAX_OUTPUT_TOKENS_7", 800),
+		MaxOutputTokens: 800,
 	}); err != nil {
 		if o.logger != nil {
 			o.logger.Printf("verify model %q error (fail-open): %v", modelID, err)

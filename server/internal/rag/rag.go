@@ -62,9 +62,9 @@ var (
 	heartbeatWriteTimeout       = envcfg.Dur("AURELIA_RAG_START_INGEST_HEARTBEAT", 5*time.Second)
 	finalizeChunkCleanupTimeout = envcfg.Dur("AURELIA_RAG_FINALIZE_CHUNK_CLEANUP_TIMEOUT", 10*time.Second)
 	finalizeStatusTimeout       = envcfg.Dur("AURELIA_RAG_FINALIZE_STATUS_TIMEOUT", 10*time.Second)
-	extractionFailureReasonCap  = envcfg.Int("AURELIA_RAG_EXTRACTION_FAILURE_REASON_CAP", 500)
-	embeddingErrorTruncate      = envcfg.Int("AURELIA_RAG_EMBEDDING_ERROR_TRUNCATE", 4096)
-	retrieveDefaultTopK         = envcfg.Int("AURELIA_RAG_RETRIEVE", 5)
+	extractionFailureReasonCap  = 500
+	embeddingErrorTruncate      = 4096
+	retrieveDefaultTopK         = 5
 	denseSearchLegLimit         = envcfg.Int("AURELIA_RAG_DENSE_SEARCH_LEG_LIMIT", 30)
 	keywordSearchLegLimit       = envcfg.Int("AURELIA_RAG_KEYWORD_SEARCH_LEG_LIMIT", 30)
 	snippetDefaultMax           = envcfg.Int("AURELIA_RAG_SNIPPET_OF", 240)
@@ -930,8 +930,8 @@ type Snippet struct {
 // re-calling the embedding API. Keyed by embedder name + query so different
 // models/dims never collide. Process-local, short TTL, bounded size.
 var (
-	queryEmbedTTL = envcfg.Dur("AURELIA_RAG_QUERY_EMBED_TTL", 10*time.Minute)
-	queryEmbedMax = envcfg.Int("AURELIA_RAG_QUERY_EMBED_MAX", 4096)
+	queryEmbedTTL = 10 * time.Minute
+	queryEmbedMax = 4096
 )
 
 type queryEmbedEntry struct {

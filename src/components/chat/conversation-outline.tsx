@@ -4,7 +4,7 @@ import { GitBranch, X, ZoomIn, ZoomOut, GripHorizontal, Maximize2 } from 'lucide
 import { cn } from '@/lib/utils'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { mediaQuery } from '@/lib/design-tokens'
-import { envNum } from '@/lib/env-config'
+
 import { conversationsApi } from '@/api'
 import { useConversations, toLocalMessage } from '@/store/conversations'
 import { useModels } from '@/store/models'
@@ -29,7 +29,7 @@ const ZOOM_MIN = 0.3
 const ZOOM_MAX = 1.5
 
 // Tree self-heal refetch backoff (ms), scaled by retry count.
-const treeRefetchBackoffMs = envNum('VITE_AURELIA_CONVERSATION_OUTLINE_TREE_REFETCH_BACKOFF', 200)
+const treeRefetchBackoffMs = 200
 
 // Node-graph geometry (canvas px, before zoom). A turn = two stacked nodes.
 const NODE_W = 200

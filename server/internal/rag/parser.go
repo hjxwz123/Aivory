@@ -692,7 +692,7 @@ func minerUExtractViaCloud(
 }
 
 // mineruSubmitErrorBodyTruncation caps the MinerU submit error body kept in logs.
-var mineruSubmitErrorBodyTruncation = envcfg.Int("AURELIA_RAG_MINERU_SUBMIT_ERROR_BODY_TRUNCATION", 256)
+var mineruSubmitErrorBodyTruncation = 256
 
 // minerUSubmitTask creates one extract task. We hard-code:
 //   - model_version: "pipeline" (project requirement; PDF/DOC/PPT/IMG work
@@ -754,7 +754,7 @@ func minerUSubmitTask(ctx context.Context, baseURL, token, fileURL string) (stri
 }
 
 // mineruPollErrorBodyTruncation caps the MinerU poll error body kept in logs.
-var mineruPollErrorBodyTruncation = envcfg.Int("AURELIA_RAG_MINERU_POLL_ERROR_BODY_TRUNCATION", 256)
+var mineruPollErrorBodyTruncation = 256
 
 // minerUPollTask polls /api/v4/extract/task/{task_id} until state ∈
 // {done, failed} or the deadline expires. Returns the full_zip_url on done.

@@ -51,19 +51,19 @@ var (
 	drSearchTopK      = envcfg.Int("AURELIA_LLM_DR_SEARCH_TOP_K", 8)              // results requested per search
 	drWallClock       = envcfg.Dur("AURELIA_LLM_DR_WALL_CLOCK", 5*time.Minute)    // backstop for the whole engine
 	drCallTimeout     = envcfg.Dur("AURELIA_LLM_DR_CALL_TIMEOUT", 30*time.Second) // per search/fetch call
-	drMaxBodyChars    = envcfg.Int("AURELIA_LLM_DR_MAX_BODY_CHARS", 4000)         // per-source excerpt fed to the writer
+	drMaxBodyChars    = 4000                                                      // per-source excerpt fed to the writer
 )
 
 // Overridable inline tuning constants for the deep-research engine (env-backed;
 // defaults preserve original behaviour).
 var (
-	maxOutputTokens8                     = envcfg.Int("AURELIA_LLM_MAX_OUTPUT_TOKENS_8", 1024)
-	maxOutputTokens9                     = envcfg.Int("AURELIA_LLM_MAX_OUTPUT_TOKENS_9", 512)
-	maxOutputTokens10                    = envcfg.Int("AURELIA_LLM_MAX_OUTPUT_TOKENS_10", 2048)
-	deepResearchVerifyEvidenceExcerptCap = envcfg.Int("AURELIA_LLM_DEEP_RESEARCH_VERIFY_EVIDENCE_EXCERPT_CAP", 200)
+	maxOutputTokens8                     = 1024
+	maxOutputTokens9                     = 512
+	maxOutputTokens10                    = 2048
+	deepResearchVerifyEvidenceExcerptCap = 200
 	deepResearchValidateTimeout          = envcfg.Dur("AURELIA_LLM_DEEP_RESEARCH_VALIDATE_TIMEOUT", 75*time.Second)
-	deepResearchValidateSourceExcerptCap = envcfg.Int("AURELIA_LLM_DEEP_RESEARCH_VALIDATE_SOURCE_EXCERPT_CAP", 2000)
-	deepResearchToolResultSummaryCap     = envcfg.Int("AURELIA_LLM_DEEP_RESEARCH_TOOL_RESULT_SUMMARY_CAP", 240)
+	deepResearchValidateSourceExcerptCap = 2000
+	deepResearchToolResultSummaryCap     = 240
 	scoreGradeA                          = envcfg.F64("AURELIA_LLM_SCORE_A", 9)
 	scoreGradeB                          = envcfg.F64("AURELIA_LLM_SCORE_B", 6)
 	scoreGradeC                          = envcfg.F64("AURELIA_LLM_SCORE_C", 3)

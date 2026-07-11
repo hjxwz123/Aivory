@@ -27,7 +27,7 @@ func microsToCost(m int64) float64 { return float64(m) / 1e6 }
 func quotaWindow(periodSeconds int) (start int64, ttl time.Duration) {
 	p := int64(periodSeconds)
 	if p <= 0 {
-		p = envcfg.Int64("AURELIA_LLM_P", 604800) // 7 days
+		p = 604800 // 7 days
 	}
 	now := time.Now().Unix()
 	return (now / p) * p, time.Duration(p) * time.Second
@@ -324,7 +324,7 @@ func (o *Orchestrator) preflightCredit(ctx context.Context, userID string, model
 func creditWindow(periodSeconds int) (int64, time.Duration) {
 	p := int64(periodSeconds)
 	if p <= 0 {
-		p = envcfg.Int64("AURELIA_LLM_P_2", 604800)
+		p = 604800
 	}
 	now := time.Now().Unix()
 	return (now / p) * p, time.Duration(p) * time.Second

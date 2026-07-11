@@ -24,7 +24,7 @@ const (
 
 var (
 	qdrantArchiveRequestTimeout      = envcfg.Dur("AURELIA_API_QDRANT_ARCHIVE_REQUEST_TIMEOUT", 5*time.Minute)
-	qdrantErrorBodyReadCap           = envcfg.Int64("AURELIA_API_QDRANT_ERROR_BODY_READ_CAP", 1<<20)
+	qdrantErrorBodyReadCap           = int64(1 << 20)
 	qdrantExportScrollPageSize       = envcfg.Int("AURELIA_API_QDRANT_EXPORT_SCROLL_PAGE_SIZE", 256)
 	qdrantImportUpsertFlushBatchSize = envcfg.Int("AURELIA_API_QDRANT_IMPORT_UPSERT_FLUSH_BATCH_SIZE", 128)
 )

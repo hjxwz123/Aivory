@@ -276,7 +276,7 @@ export default function AdminSettings() {
               <Input
                 id="sumtokens"
                 type="number"
-                value={String(readNumber('summary_max_tokens', 2048))}
+                value={String(readNumber('summary_max_tokens', 8192))}
                 onChange={(e) => setDraft({ ...draft, summary_max_tokens: Number(e.target.value) })}
               />
             </Field>

@@ -24,9 +24,8 @@ import (
 	"aurelia/server/internal/envcfg"
 )
 
-// iconServingCacheAge is the GET-icon Cache-Control max-age; defaults to 86400s
-// (24h) when AURELIA_API_ICON_SERVING_CACHE_AGE is unset.
-var iconServingCacheAge = envcfg.Dur("AURELIA_API_ICON_SERVING_CACHE_AGE", 86400*time.Second)
+// iconServingCacheAge is the GET-icon Cache-Control max-age (86400s = 24h).
+var iconServingCacheAge = 86400 * time.Second
 
 // Icon upload — admin-only POST that stores a small image and returns a URL
 // the model record can reference.

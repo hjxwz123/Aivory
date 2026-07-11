@@ -28,12 +28,12 @@ import (
 // docs/config-reference.md).
 var (
 	inlineQuoteSourceInjectionCap    = envcfg.Int("AURELIA_LLM_INLINE_QUOTE_SOURCE_INJECTION_CAP", 8000)
-	imageModeForcedGenerationSize    = envcfg.Str("AURELIA_LLM_IMAGE_MODE_FORCED_GENERATION_SIZE_COUNT_SIZE", "1024x1024")
-	imageModeForcedGenerationCount   = envcfg.Int("AURELIA_LLM_IMAGE_MODE_FORCED_GENERATION_SIZE_COUNT_COUNT", 1)
-	imagePromptOptimizerOutputTokens = envcfg.Int("AURELIA_LLM_IMAGE_PROMPT_OPTIMIZER_OUTPUT_TOKENS", 400)
-	ragRouterRecentHistoryCount      = envcfg.Int("AURELIA_LLM_RECENT_HISTORY_STRINGS", 6)
-	ragRouterRecentHistoryTruncate   = envcfg.Int("AURELIA_LLM_RECENT_HISTORY_STRINGS_2", 200)
-	titleGenerationOutputTokens      = envcfg.Int("AURELIA_LLM_TITLE_GENERATION_OUTPUT_TOKENS", 60)
+	imageModeForcedGenerationSize    = "1024x1024"
+	imageModeForcedGenerationCount   = 1
+	imagePromptOptimizerOutputTokens = 400
+	ragRouterRecentHistoryCount      = 6
+	ragRouterRecentHistoryTruncate   = 200
+	titleGenerationOutputTokens      = 60
 	sandboxExecTimeoutClampRangeMax  = envcfg.Int("AURELIA_LLM_SANDBOX_EXEC_TIMEOUT_CLAMP_RANGE_MAX", 600)
 	sandboxExecTimeoutClampRangeMin  = envcfg.Int("AURELIA_LLM_SANDBOX_EXEC_TIMEOUT_CLAMP_RANGE_MIN", 10)
 	sandboxExecCtxSafetyMargin       = envcfg.Dur("AURELIA_LLM_SANDBOX_EXEC_CTX_SAFETY_MARGIN", 150*time.Second)
@@ -413,7 +413,7 @@ func (o *Orchestrator) resolveFallbackChannel(ctx context.Context, model *store.
 // upstream failure can carry a large response body. Trims on a rune boundary so
 // the stored string stays valid UTF-8.
 func truncErr(s string) string {
-	max := envcfg.Int("AURELIA_LLM_TRUNC_ERR", 2000)
+	max := 2000
 	if len(s) <= max {
 		return s
 	}

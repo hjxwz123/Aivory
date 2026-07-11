@@ -43,7 +43,7 @@ var (
 	inN                                    = envcfg.Int("AURELIA_TOOLS_IN_N", 4)
 	inSize                                 = envcfg.Str("AURELIA_TOOLS_IN_SIZE", "1024x1024")
 	dailyImageLimitResetWindow             = envcfg.Dur("AURELIA_TOOLS_DAILY_IMAGE_LIMIT_RESET_WINDOW", 24*time.Hour)
-	imageQuotaDefaultPeriod                = envcfg.Int64("AURELIA_TOOLS_P", 604800)
+	imageQuotaDefaultPeriod                = int64(604800)
 	imageImageInputImageCap                = envcfg.Int("AURELIA_TOOLS_IMAGE_IMAGE_INPUT_IMAGE_CAP", 3)
 	fetchRemoteImageDownloadCap            = envcfg.Int64("AURELIA_TOOLS_FETCHREMOTEIMAGE_DOWNLOAD_CAP", 32<<20)
 	inTopK2                                = envcfg.Int("AURELIA_TOOLS_IN_TOP_K_2", 5)

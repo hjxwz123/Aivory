@@ -17,13 +17,11 @@ import (
 	"fmt"
 	"strings"
 	"time"
-
-	"aurelia/server/internal/envcfg"
 )
 
 // redeemCodeUniquenessRetries bounds the per-code collision-retry loop in
 // BulkGenerateRedeemCodes; overridable via env, defaults to the original 5.
-var redeemCodeUniquenessRetries = envcfg.Int("AURELIA_STORE_REDEEM_CODE_UNIQUENESS_RETRIES", 5)
+var redeemCodeUniquenessRetries = 5
 
 // RedeemCode is a single row in redeem_codes.
 type RedeemCode struct {

@@ -61,17 +61,17 @@ type UserInfo struct {
 	AvatarURL     string
 }
 
-var httpClientTimeout = envcfg.Dur("AURELIA_OAUTH_HTTP_CLIENT", 15*time.Second)
+var httpClientTimeout = 15 * time.Second
 var httpClient = &http.Client{Timeout: httpClientTimeout}
 
 // oauthProviderResponseBodyCap bounds a provider token/userinfo response read.
-var oauthProviderResponseBodyCap = envcfg.Int64("AURELIA_OAUTH_OAUTH_PROVIDER_RESPONSE_BODY_CAP", 1<<20)
+var oauthProviderResponseBodyCap = int64(1 << 20)
 
 // appleClientSecretJwtExpiry is the lifetime of the generated Apple client-secret JWT.
 var appleClientSecretJwtExpiry = envcfg.Dur("AURELIA_OAUTH_APPLE_CLIENT_SECRET_JWT_EXPIRY", 30*time.Minute)
 
 // snippetMaxLen caps an error-body snippet included in error messages.
-var snippetMaxLen = envcfg.Int("AURELIA_OAUTH_SNIPPET", 200)
+var snippetMaxLen = 200
 
 // Resolve fills built-in endpoints/scopes for known kinds without overwriting
 // any explicit override already present on the Config.
