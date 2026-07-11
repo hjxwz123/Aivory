@@ -10,8 +10,8 @@ import { cn } from '@/lib/utils'
  * position; the gradient fill itself stays visible.
  */
 
-const STYLE_ID = 'aurelia-gradient-text-style'
-const PAN_CLASS = 'aurelia-gradient-pan'
+const STYLE_ID = 'aivory-gradient-text-style'
+const PAN_CLASS = 'aivory-gradient-pan'
 
 // One shared stylesheet for all instances: the yoyo keyframes plus the
 // reduced-motion kill switch (!important so it beats the inline animation,
@@ -22,7 +22,7 @@ function useGradientTextStyles() {
     const style = document.createElement('style')
     style.id = STYLE_ID
     style.textContent = `
-@keyframes aurelia-gradient-pan {
+@keyframes aivory-gradient-pan {
   0%, 100% { background-position: 0% 50%; }
   50% { background-position: 100% 50%; }
 }
@@ -60,7 +60,7 @@ export function GradientText({
     backgroundImage: `linear-gradient(to right, ${colors.join(', ')})`,
     backgroundSize: '300% 100%',
     backgroundPosition: '0% 50%',
-    animation: `aurelia-gradient-pan ${animationSpeed * 2}s linear infinite`,
+    animation: `aivory-gradient-pan ${animationSpeed * 2}s linear infinite`,
   }
 
   return (

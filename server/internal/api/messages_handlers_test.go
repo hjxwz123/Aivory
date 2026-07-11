@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"aurelia/server/internal/llm"
+	"aivory/server/internal/llm"
 )
 
 func TestEnsureAttachedDocumentsReadyRequiresReadyStatus(t *testing.T) {

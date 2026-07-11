@@ -22,7 +22,7 @@ deploy/.env
 
 # Backend local state (SQLite db, uploads, artifacts, dev binary)
 server/data
-server/aurelia
+server/aivory
 server/.env
 
 # Sandbox sidecar local dev state (it ships from its own repo/compose)

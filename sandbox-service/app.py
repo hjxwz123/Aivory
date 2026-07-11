@@ -1,5 +1,5 @@
 """
-Aurelia local Python sandbox — sidecar service (design.md §4.5).
+Aivory local Python sandbox — sidecar service (design.md §4.5).
 
 Speaks the tiny 3-endpoint HTTP protocol that `server/internal/sandbox/
 sandbox.go` already expects, so the Go backend needs zero changes — just point
@@ -11,7 +11,7 @@ SANDBOX_BASE_URL at this service:
     POST /files     {session_id, path, data_base64}  -> {"ok": true}
 
 Each session is one long-lived, locked-down Docker container running the
-`aurelia-sandbox` image (see Dockerfile.runner). /workspace persists across
+`aivory-sandbox` image (see Dockerfile.runner). /workspace persists across
 exec calls within a session — pip-installed packages, generated files and
 intermediate data survive, matching ChatGPT Code Interpreter behaviour.
 
@@ -52,7 +52,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 # --- Config (env-overridable) ----------------------------------------------
-IMAGE = os.environ.get("SANDBOX_IMAGE", "aurelia-sandbox:latest")
+IMAGE = os.environ.get("SANDBOX_IMAGE", "aivory-sandbox:latest")
 NETWORK = os.environ.get("SANDBOX_NETWORK", "none")  # set "bridge" to allow pip at runtime
 MEMORY = os.environ.get("SANDBOX_MEMORY", "2g")       # §4.5 doc rendering can be heavy
 CPUS = os.environ.get("SANDBOX_CPUS", "1")
@@ -122,15 +122,15 @@ MAX_ARTIFACT_BYTES = int(os.environ.get("SANDBOX_MAX_ARTIFACT_BYTES", str(20 * 1
 
 # Exec reader loop (_run_exec_bounded): selector poll cadence, per-read chunk
 # size, and the post-loop process-wait grace period.
-EXEC_READER_POLL_S = float(os.environ.get("SANDBOX_EXEC_READER_LOOP_POLL_S", "0.2"))
-EXEC_READER_CHUNK_BYTES = int(os.environ.get("SANDBOX_EXEC_READER_LOOP_CHUNK_BYTES", "8192"))
-EXEC_READER_WAIT_GRACE_S = float(os.environ.get("SANDBOX_EXEC_READER_LOOP_WAIT_GRACE_S", "2"))
+EXEC_READER_POLL_S = 0.2
+EXEC_READER_CHUNK_BYTES = 8192
+EXEC_READER_WAIT_GRACE_S = 2.0
 
 # Archive tar-stream reader loop: selector poll cadence, per-read chunk size,
 # and the post-loop process-wait grace period.
-ARCHIVE_READ_POLL_S = float(os.environ.get("SANDBOX_ARCHIVE_TAR_READ_POLL_S", "5.0"))
-ARCHIVE_READ_CHUNK_BYTES = int(os.environ.get("SANDBOX_ARCHIVE_TAR_READ_CHUNK_BYTES", "65536"))
-ARCHIVE_READ_WAIT_GRACE_S = float(os.environ.get("SANDBOX_ARCHIVE_TAR_READ_WAIT_GRACE_S", "10"))
+ARCHIVE_READ_POLL_S = 5.0
+ARCHIVE_READ_CHUNK_BYTES = 65536
+ARCHIVE_READ_WAIT_GRACE_S = 10.0
 
 # Object-storage SDK timeouts/retries — bound every SDK call so a slow/hung
 # bucket can't freeze the reaper, DELETE, or session creation.
@@ -183,8 +183,8 @@ MAX_STORAGE_BODY_BYTES = int(
 # a remote caller pick the write path would be a host-write vector.
 LOCAL_STORAGE_DIR = os.environ.get("SANDBOX_LOCAL_STORAGE_DIR", "").strip()
 
-CONTAINER_PREFIX = "aurelia-sbx-"
-LABEL = "aurelia.sandbox=1"
+CONTAINER_PREFIX = "aivory-sbx-"
+LABEL = "aivory.sandbox=1"
 WORKSPACE = "/workspace"
 OUTPUTS_DIR = f"{WORKSPACE}/outputs"
 UPLOADS_DIR = f"{WORKSPACE}/uploads"
@@ -278,7 +278,7 @@ def _ensure_image_present() -> None:
         _image_ready.set()
 
 
-app = FastAPI(title="Aurelia Sandbox Sidecar", version="1.0")
+app = FastAPI(title="Aivory Sandbox Sidecar", version="1.0")
 
 
 # --- F2: fail closed on missing auth ---------------------------------------
@@ -580,7 +580,7 @@ def _run_exec_bounded(name: str, cmd: list[str], *, timeout: float,
 
 def _kill_marked_processes(name: str, token: str) -> None:
     """Kill every process in the session container whose environment carries our
-    per-exec marker (AURELIA_CELL_TOKEN=<token>).
+    per-exec marker (AIVORY_CELL_TOKEN=<token>).
 
     coreutils `timeout` signals only its single direct child (python), and the
     host-side proc.kill() only kills the local `docker exec` client — so a
@@ -597,7 +597,7 @@ def _kill_marked_processes(name: str, token: str) -> None:
     script = (
         'for d in /proc/[0-9]*; do '
         'if tr "\\0" "\\n" < "$d/environ" 2>/dev/null | '
-        f'grep -qxF "AURELIA_CELL_TOKEN={token}"; then '
+        f'grep -qxF "AIVORY_CELL_TOKEN={token}"; then '
         'kill -9 "${d##*/}" 2>/dev/null; fi; done'
     )
     try:
@@ -761,8 +761,8 @@ def create_session(body: Optional[CreateBody] = Body(default=None)):
             "run", "-d",
             "--name", name,
             "--label", LABEL,
-            "--label", f"aurelia.session_id={session_id}",
-            "--label", f"aurelia.created_at={int(time.time())}",
+            "--label", f"aivory.session_id={session_id}",
+            "--label", f"aivory.created_at={int(time.time())}",
             "--network", NETWORK,
             "--memory", MEMORY,
             "--memory-swap", MEMORY,
@@ -876,7 +876,7 @@ def exec_code(body: ExecBody):
         if not _is_running(sid):
             raise HTTPException(status_code=404, detail="session not found or not running")
         cell_token = uuid.uuid4().hex
-        cell_path = f"/tmp/aurelia-cell-{cell_token}.py"
+        cell_path = f"/tmp/aivory-cell-{cell_token}.py"
 
         # Write the cell to a file in the container (stdin avoids arg-length
         # limits and shell-quoting hazards).
@@ -889,14 +889,14 @@ def exec_code(body: ExecBody):
 
         # `timeout` kills runaway code inside the container; the host-side
         # reader keeps stdout/stderr bounded so the sidecar cannot be OOMed by
-        # a print loop. AURELIA_CELL_TOKEN tags every process this cell spawns so
+        # a print loop. AIVORY_CELL_TOKEN tags every process this cell spawns so
         # the cleanup sweep below can reap any it detached into its own group.
         try:
             exit_code, stdout, stderr = _run_exec_bounded(
                 name,
                 ["timeout", "--kill-after=2s", _timeout_arg(timeout_s), "python", cell_path],
                 timeout=timeout_s + 15,
-                env={"AURELIA_CELL_TOKEN": cell_token},
+                env={"AIVORY_CELL_TOKEN": cell_token},
             )
         finally:
             # Reap any background process the cell detached (subprocess / double

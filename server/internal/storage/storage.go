@@ -22,13 +22,13 @@ import (
 	"strings"
 	"time"
 
-	"aurelia/server/internal/envcfg"
-	"aurelia/server/internal/sandbox"
+	"aivory/server/internal/envcfg"
+	"aivory/server/internal/sandbox"
 )
 
 // sidecarStorageClientHTTPTimeout bounds the sidecar object-storage round-trip.
 // MinerU PDF uploads can hit 200 MB, so the default leaves head-room.
-var sidecarStorageClientHTTPTimeout = envcfg.Dur("AURELIA_STORAGE_SIDECAR_STORAGE_CLIENT_HTTP_TIMEOUT", 5*time.Minute)
+var sidecarStorageClientHTTPTimeout = envcfg.Dur("AIVORY_STORAGE_SIDECAR_STORAGE_CLIENT_HTTP_TIMEOUT", 5*time.Minute)
 
 // Client is the sidecar-backed object-storage client. BaseURL points at the
 // same sandbox sidecar; APIKey gates it. Storage carries the admin-configured

@@ -1,4 +1,4 @@
--- Aurelia schema — PostgreSQL dialect (production).
+-- Aivory schema — PostgreSQL dialect (production).
 --
 -- Mirrors schema.sql (SQLite) table-for-table and column-for-column so the Go
 -- store layer runs unchanged. Differences from the SQLite file:

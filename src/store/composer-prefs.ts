@@ -20,7 +20,7 @@ interface ComposerPrefsStore extends PersistedComposerPrefs {
   clearDraft: (scope: string) => void
 }
 
-const STORAGE_KEY = 'aurelia.composer-prefs.v1'
+const STORAGE_KEY = 'aivory.composer-prefs.v1'
 const MAX_DRAFT_LEN = 12_000
 
 const DEFAULT_PREFS: PersistedComposerPrefs = {

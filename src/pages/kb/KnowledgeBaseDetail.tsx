@@ -38,7 +38,7 @@ import { toast } from '@/hooks/use-toast'
 import { formatRelativeDate, cn } from '@/lib/utils'
 import { envNum } from '@/lib/env-config'
 
-const kbDocStatusPollInterval = envNum('VITE_AURELIA_KB_DOC_STATUS_POLL_INTERVAL', 2200)
+const kbDocStatusPollInterval = envNum('VITE_AIVORY_KB_DOC_STATUS_POLL_INTERVAL', 2200)
 
 export default function KnowledgeBaseDetail() {
   const { t } = useTranslation(['kb', 'common'])

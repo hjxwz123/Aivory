@@ -1,5 +1,5 @@
 {
-  "appName": "Aurelia",
+  "appName": "Aivory",
   "tagline": "一位剋制而細膩的 AI 夥伴",
   "actions": {
     "send": "傳送",
@@ -21,7 +21,7 @@
     "back": "返回",
     "continue": "繼續",
     "tryAgain": "再試一次",
-    "openAurelia": "進入 Aurelia",
+    "openAivory": "進入 Aivory",
     "signIn": "登入",
     "signOut": "退出登入",
     "signUp": "建立賬號",
@@ -76,7 +76,7 @@
     "themeValue": "主題：{{label}}",
     "languageValue": "語言：{{label}}",
     "selected": "已選中",
-    "homeLink": "Aurelia 首頁",
+    "homeLink": "Aivory 首頁",
     "backToTop": "返回頂部",
     "boundary": "好像有點不對勁。"
   },

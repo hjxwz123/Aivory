@@ -58,7 +58,7 @@ const USE_CASE_KEYS = [
   { key: 'thinkers', icon: Lightbulb },
 ] as const
 
-// The mainstream models Aurelia convenes (§ models showcase). Names + makers are
+// The mainstream models Aivory convenes (§ models showcase). Names + makers are
 // proper nouns (untranslated); logos are vendored brand marks in /public/brand,
 // painted in token ink via CSS mask. Claude leads (slightly larger) for hierarchy.
 interface ModelSpec {
@@ -264,7 +264,7 @@ export default function Landing() {
               </Link>
               <Link to="/chat">
                 <Button size="sm" trailingIcon={<ArrowRight size={14} aria-hidden />}>
-                  {t('common:actions.openAurelia')}
+                  {t('common:actions.openAivory')}
                 </Button>
               </Link>
             </div>
@@ -424,7 +424,7 @@ export default function Landing() {
         </section>
 
         {/* Model band — two counter-drifting serif rails of the frontier models
-          Aurelia convenes; their speed answers the user's scroll velocity, so
+          Aivory convenes; their speed answers the user's scroll velocity, so
           the page physically reacts to being read (§ welcome fx). Edge-faded,
           static under reduced-motion. */}
         <div
@@ -738,7 +738,7 @@ export default function Landing() {
             <FooterCol
               title={t('nav:product')}
               links={[
-                [t('common:actions.openAurelia'), '/chat'],
+                [t('common:actions.openAivory'), '/chat'],
                 [t('common:actions.settings'), '/settings/account'],
               ]}
             />
@@ -758,7 +758,7 @@ export default function Landing() {
             />
           </div>
           <div className="mx-auto max-w-[76rem] px-5 sm:px-8 mt-10 text-xs text-[var(--color-fg-subtle)]">
-            <span>© {new Date().getFullYear()} Aurelia</span>
+            <span>© {new Date().getFullYear()} Aivory</span>
           </div>
         </footer>
 

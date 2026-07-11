@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"aurelia/server/internal/cache"
-	"aurelia/server/internal/config"
+	"aivory/server/internal/cache"
+	"aivory/server/internal/config"
 )
 
 // TestCaptchaVerifyThenConsume reproduces the backend captcha path the register

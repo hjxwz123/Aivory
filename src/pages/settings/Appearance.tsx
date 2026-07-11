@@ -78,10 +78,10 @@ export default function Appearance() {
   // localStorage takes precedence for immediate response; server fills gaps.
   useEffect(() => {
     void authApi.getSettings().then((s) => {
-      if (typeof s.accent_color === 'string' && s.accent_color && !localStorage.getItem('aurelia.accent')) {
+      if (typeof s.accent_color === 'string' && s.accent_color && !localStorage.getItem('aivory.accent')) {
         setAccent(s.accent_color as AccentPref)
       }
-      if (typeof s.font_family === 'string' && s.font_family && !localStorage.getItem('aurelia.settings')) {
+      if (typeof s.font_family === 'string' && s.font_family && !localStorage.getItem('aivory.settings')) {
         setAppearance({ font: s.font_family as FontPref })
       }
       if (typeof s.user_message_markdown === 'boolean') {

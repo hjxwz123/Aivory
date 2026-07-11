@@ -9,11 +9,11 @@ import (
 	"net/http"
 	"strings"
 
-	"aurelia/server/internal/envcfg"
+	"aivory/server/internal/envcfg"
 )
 
 // jsonRequestBodySizeCap caps JSON request bodies (§FIX-2); env-overridable.
-var jsonRequestBodySizeCap = envcfg.Int64("AURELIA_API_JSON_REQUEST_BODY_SIZE_CAP", 4<<20)
+var jsonRequestBodySizeCap = envcfg.Int64("AIVORY_API_JSON_REQUEST_BODY_SIZE_CAP", 4<<20)
 
 // mux is a tiny path-param router. Routes use the `:name` syntax which is
 // captured into the request context.

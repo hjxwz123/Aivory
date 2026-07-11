@@ -13,18 +13,23 @@ import (
 	"sort"
 	"strings"
 
-	"aurelia/server/internal/envcfg"
+	"aivory/server/internal/envcfg"
 )
 
 // Env-overridable defaults (§ config-reference). Each falls back to the
-// original hardcoded value when its AURELIA_* variable is unset.
+// original hardcoded value when its AIVORY_* variable is unset.
 var (
-	toolResultSummaryTruncationOpenAI = envcfg.Int("AURELIA_LLM_TOOL_RESULT_SUMMARY_TRUNCATION_OPENAI", 240)
-	officialWebSearchContextSize      = envcfg.Str("AURELIA_LLM_OFFICIAL_TOOL_SPEC", "medium")
-	readOpenAIChatStreamBufInit       = envcfg.Int("AURELIA_LLM_READ_OPEN_AICHAT_STREAM_INIT", 64*1024)
-	readOpenAIChatStreamBufMax        = envcfg.Int("AURELIA_LLM_READ_OPEN_AICHAT_STREAM_MAX", 1024*1024)
-	readOpenAIResponsesStreamBufInit  = envcfg.Int("AURELIA_LLM_READ_OPEN_AIRESPONSES_STREAM_INIT", 64*1024)
-	readOpenAIResponsesStreamBufMax   = envcfg.Int("AURELIA_LLM_READ_OPEN_AIRESPONSES_STREAM_MAX", 1024*1024)
+	toolResultSummaryTruncationOpenAI = 240
+	officialWebSearchContextSize      = envcfg.Str("AIVORY_LLM_OFFICIAL_TOOL_SPEC", "medium")
+)
+
+// SSE scanner buffer sizing — low-level transport plumbing, not a tunable in
+// practice, so hardcoded rather than env-overridable (unlike the knobs above).
+const (
+	readOpenAIChatStreamBufInit      = 64 * 1024
+	readOpenAIChatStreamBufMax       = 1024 * 1024
+	readOpenAIResponsesStreamBufInit = 64 * 1024
+	readOpenAIResponsesStreamBufMax  = 1024 * 1024
 )
 
 // OpenAIProvider supports both the Chat Completions ("chat") and Responses
@@ -102,7 +107,7 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest,
 		}
 	}
 
-	maxIter := envcfg.Int("AURELIA_LLM_MAX_ITER_2", 20)
+	maxIter := envcfg.Int("AIVORY_LLM_MAX_ITER_2", 20)
 	historyLen := len(messages)
 	allText := strings.Builder{}
 	allBlocks := []UnifiedBlock{}
@@ -602,7 +607,7 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 		}
 	}
 
-	maxIter := envcfg.Int("AURELIA_LLM_MAX_ITER_3", 20)
+	maxIter := envcfg.Int("AIVORY_LLM_MAX_ITER_3", 20)
 	historyLen := len(input)
 	allText := strings.Builder{}
 	allBlocks := []UnifiedBlock{}

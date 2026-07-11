@@ -1,21 +1,18 @@
 package api
 
 import (
+	"aivory/server/internal/store"
 	"context"
 	"encoding/json"
 	"math"
 	"net/http"
 	"strconv"
 	"time"
-
-	"aurelia/server/internal/envcfg"
-	"aurelia/server/internal/store"
 )
 
-// creditWindowPeriodFallbackSeconds is the default timed-window length (in
-// seconds) used when no explicit period is supplied. Overridable via envcfg
-// (operators write a duration string, e.g. "168h"); default preserves 604800s.
-var creditWindowPeriodFallbackSeconds = int64(envcfg.Dur("AURELIA_API_P", 604800*time.Second) / time.Second)
+// creditWindowPeriodFallbackSeconds is the default timed-window length in
+// seconds (604800 = 7 days) used when no explicit period is supplied.
+var creditWindowPeriodFallbackSeconds int64 = 604800
 
 // Credit balance (§ credits). The timed pool refreshes every cycle (unused
 // voided); the permanent pool is bought / admin-set and never expires. The

@@ -15,7 +15,7 @@ dist-ssr
 
 # Backend
 server/data/
-server/aurelia
+server/aivory
 server/.env
 
 # Claude Code session state (local tooling, never committed).

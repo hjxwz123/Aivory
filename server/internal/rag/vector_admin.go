@@ -6,9 +6,9 @@ import (
 	"sort"
 	"strings"
 
-	"aurelia/server/internal/envcfg"
-	"aurelia/server/internal/store"
-	"aurelia/server/internal/vector"
+	"aivory/server/internal/envcfg"
+	"aivory/server/internal/store"
+	"aivory/server/internal/vector"
 )
 
 const vectorIssueSampleLimit = 100
@@ -133,7 +133,7 @@ func (s *Service) RebuildMissingVectors(ctx context.Context, progress func(Vecto
 			emit()
 			continue
 		}
-		batchSize := envcfg.Int("AURELIA_RAG_BATCH_SIZE", 64)
+		batchSize := envcfg.Int("AIVORY_RAG_BATCH_SIZE", 64)
 		for start := 0; start < len(rows); start += batchSize {
 			end := start + batchSize
 			if end > len(rows) {
@@ -344,7 +344,7 @@ func (s *Service) resolveEmbedderForVectorChunk(ctx context.Context, ch store.Em
 	switch {
 	case name == "":
 		return nil, "", 0, fmt.Errorf("empty embedding model")
-	case name == "aurelia-local-embed":
+	case name == "aivory-local-embed":
 		return NewLocalEmbedder(localEmbedDim), name, localEmbedDim, nil
 	case name == "emb:env":
 		if s.embAPIKey == "" {

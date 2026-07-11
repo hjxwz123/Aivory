@@ -180,7 +180,7 @@ void i18n
     interpolation: { escapeValue: false }, // React already escapes
     detection: {
       order: ['localStorage', 'navigator'],
-      lookupLocalStorage: 'aurelia.lang',
+      lookupLocalStorage: 'aivory.lang',
       caches: [],
     },
     returnNull: false,

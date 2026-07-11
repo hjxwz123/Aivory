@@ -1,5 +1,5 @@
 /**
- * Aurelia Design Tokens — TypeScript surface for runtime access.
+ * Aivory Design Tokens — TypeScript surface for runtime access.
  * Mirrors src/styles/tokens.css. Use this when you need a token value
  * inside JS (e.g. Framer Motion animations, canvas, dynamic styles).
  *

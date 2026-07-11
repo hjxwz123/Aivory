@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"aurelia/server/internal/store"
+	"aivory/server/internal/store"
 )
 
 // currentSessionJTI returns the jti of the refresh token presented with the

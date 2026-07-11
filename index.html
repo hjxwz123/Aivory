@@ -9,7 +9,7 @@
     <meta name="color-scheme" content="light dark" />
     <meta name="theme-color" content="#F6F5FA" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#13111A" media="(prefers-color-scheme: dark)" />
-    <meta name="description" content="Aurelia — a thoughtful AI companion for writing, reasoning, and exploration." />
+    <meta name="description" content="Aivory — a thoughtful AI companion for writing, reasoning, and exploration." />
 
     <!-- PWA: installable to the home screen, opens fullscreen (standalone). -->
     <link rel="manifest" href="/manifest.json" />
@@ -17,10 +17,10 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-    <meta name="apple-mobile-web-app-title" content="Aurelia" />
-    <meta name="application-name" content="Aurelia" />
+    <meta name="apple-mobile-web-app-title" content="Aivory" />
+    <meta name="application-name" content="Aivory" />
 
-    <title>Aurelia — A thoughtful AI companion</title>
+    <title>Aivory — A thoughtful AI companion</title>
     <!-- Fonts are self-hosted via @fontsource (bundled in the app) so they load
          without the Google Fonts CDN, which is unreachable in mainland China. -->
     <script>
@@ -31,17 +31,17 @@
       // zustand store re-applies.
       ;(function () {
         try {
-          var stored = localStorage.getItem('aurelia.theme')
+          var stored = localStorage.getItem('aivory.theme')
           var systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches
           var theme = stored || 'system'
           var resolved = theme === 'system' ? (systemDark ? 'dark' : 'light') : theme
           document.documentElement.dataset.theme = resolved
           document.documentElement.classList.toggle('dark', resolved === 'dark')
-          var accent = localStorage.getItem('aurelia.accent')
+          var accent = localStorage.getItem('aivory.accent')
           var ok = ['violet', 'lagoon', 'ember', 'moss', 'indigo', 'rose', 'mono']
           document.documentElement.dataset.accent = ok.indexOf(accent) >= 0 ? accent : 'violet'
           // Density + font-size from settings store
-          var settings = JSON.parse(localStorage.getItem('aurelia.settings') || '{}')
+          var settings = JSON.parse(localStorage.getItem('aivory.settings') || '{}')
           var ap = settings.appearance || {}
           var density = ap.density === 'cozy' ? 'cozy' : 'comfortable'
           var fs = ap.fontSize === 'sm' ? 'sm' : ap.fontSize === 'lg' ? 'lg' : 'md'
@@ -57,7 +57,7 @@
     <div id="root" class="h-full"></div>
     <noscript>
       <div style="font-family: ui-serif, Georgia, serif; padding: 4rem 2rem; max-width: 32rem; margin: 0 auto; text-align: center; color: #1B1830;">
-        <h1 style="font-size: 1.75rem; font-weight: 400; margin: 0 0 1rem;">Aurelia needs JavaScript.</h1>
+        <h1 style="font-size: 1.75rem; font-weight: 400; margin: 0 0 1rem;">Aivory needs JavaScript.</h1>
         <p style="color: #5F5677; line-height: 1.6;">Please enable JavaScript in your browser to continue.</p>
       </div>
     </noscript>

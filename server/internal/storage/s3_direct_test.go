@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"aurelia/server/internal/sandbox"
+	"aivory/server/internal/sandbox"
 )
 
 func TestPutFileDirectUsesS3CompatibleEndpointWithoutSidecar(t *testing.T) {

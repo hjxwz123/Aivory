@@ -10,21 +10,19 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-
-	"aurelia/server/internal/envcfg"
 )
 
 var (
-	mConfidence                     = envcfg.F64("AURELIA_STORE_M_CONFIDENCE", 0.8)
-	listMemoriesActive              = envcfg.Int("AURELIA_STORE_LIST_MEMORIES_ACTIVE", 20)
-	adminUsageRecordsLimit          = envcfg.Int("AURELIA_STORE_ADMIN_USAGE_RECORDS_LIMIT", 500)
-	adminUsageRecordsLimit2         = envcfg.Int("AURELIA_STORE_ADMIN_USAGE_RECORDS_LIMIT_2", 50)
-	usageTrendWindow                = envcfg.Int("AURELIA_STORE_USAGE_TREND_WINDOW", 7)
-	usageTrendHourlyBucketThreshold = envcfg.Int("AURELIA_STORE_USAGE_TREND_HOURLY_BUCKET_THRESHOLD", 2)
-	usageTotalsWindow               = envcfg.Int("AURELIA_STORE_USAGE_TOTALS_WINDOW", 7)
-	usageBreakdownTopN              = envcfg.Int("AURELIA_STORE_USAGE_BREAKDOWN_TOP_N", 8)
-	usageBreakdownWindow            = envcfg.Int("AURELIA_STORE_USAGE_BREAKDOWN_WINDOW", 7)
-	usageSeriesWindow               = envcfg.Int("AURELIA_STORE_USAGE_SERIES_WINDOW", 7)
+	mConfidence                     = 0.8
+	listMemoriesActive              = 20
+	adminUsageRecordsLimit          = 500
+	adminUsageRecordsLimit2         = 50
+	usageTrendWindow                = 7
+	usageTrendHourlyBucketThreshold = 2
+	usageTotalsWindow               = 7
+	usageBreakdownTopN              = 8
+	usageBreakdownWindow            = 7
+	usageSeriesWindow               = 7
 )
 
 // CreateFile inserts a file metadata row.

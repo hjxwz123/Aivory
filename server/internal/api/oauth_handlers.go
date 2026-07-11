@@ -13,18 +13,18 @@ import (
 	"strings"
 	"time"
 
-	"aurelia/server/internal/envcfg"
-	"aurelia/server/internal/oauth"
-	"aurelia/server/internal/store"
+	"aivory/server/internal/envcfg"
+	"aivory/server/internal/oauth"
+	"aivory/server/internal/store"
 )
 
 // OAuth timing knobs — overridable via env (see docs/config-reference.md); the
 // defaults preserve the previous hardcoded behaviour.
 var (
-	oauth2FAHandoffCookieTTL        = envcfg.Dur("AURELIA_API_OAUTH_2FA_HANDOFF_COOKIE_TTL", 300*time.Second)
-	oauthStateCacheTTL              = envcfg.Dur("AURELIA_API_OAUTH_STATE_CACHE_TTL", 10*time.Minute)
-	oauthTokenExchangeCtxTimeout    = envcfg.Dur("AURELIA_API_OAUTH_TOKEN_EXCHANGE_CONTEXT_TIMEOUT", 20*time.Second)
-	oauthCrossDomainHandoffTokenTTL = envcfg.Dur("AURELIA_API_OAUTH_CROSS_DOMAIN_HANDOFF_TOKEN_TTL", 60*time.Second)
+	oauth2FAHandoffCookieTTL        = envcfg.Dur("AIVORY_API_OAUTH_2FA_HANDOFF_COOKIE_TTL", 300*time.Second)
+	oauthStateCacheTTL              = envcfg.Dur("AIVORY_API_OAUTH_STATE_CACHE_TTL", 10*time.Minute)
+	oauthTokenExchangeCtxTimeout    = envcfg.Dur("AIVORY_API_OAUTH_TOKEN_EXCHANGE_CONTEXT_TIMEOUT", 20*time.Second)
+	oauthCrossDomainHandoffTokenTTL = envcfg.Dur("AIVORY_API_OAUTH_CROSS_DOMAIN_HANDOFF_TOKEN_TTL", 60*time.Second)
 )
 
 // ===== Public: provider list for the login page =====
@@ -132,7 +132,7 @@ func completeOAuthLogin(d Deps, w http.ResponseWriter, r *http.Request, user *st
 		// /api/auth, so it rides only the /auth/login/2fa request) rather than the
 		// URL — keeps the bearer secret out of history, Referer and access logs.
 		http.SetCookie(w, &http.Cookie{
-			Name: "aurelia_2fa", Value: ticket, Path: "/api/auth",
+			Name: "aivory_2fa", Value: ticket, Path: "/api/auth",
 			HttpOnly: true, Secure: secureCookie(r), SameSite: http.SameSiteLaxMode, MaxAge: int(oauth2FAHandoffCookieTTL.Seconds()),
 		})
 		http.Redirect(w, r, base+"/login?twofa=1", http.StatusFound)

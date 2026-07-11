@@ -15,8 +15,8 @@
       "Where would you like to begin?",
       "What are you curious about?"
     ],
-    "lead": "Ask anything. Outlines, code, decisions, reading — Aurelia will think alongside you.",
-    "disclaimer": "Aurelia can make mistakes. Check anything important.",
+    "lead": "Ask anything. Outlines, code, decisions, reading — Aivory will think alongside you.",
+    "disclaimer": "Aivory can make mistakes. Check anything important.",
     "drawLead": "Describe what you want to create — your gallery is below."
   },
   "composer": {
@@ -62,7 +62,7 @@
     "styleNone": "None",
     "noStyles": "No styles configured."
   },
-  "assistant": "Aurelia",
+  "assistant": "Aivory",
   "thinking": "Thinking",
   "reasoning": {
     "title": "Reasoning",
@@ -159,7 +159,7 @@
     "failed": "Something went wrong",
     "linkCopied": "Share link copied",
     "publicHint": "Public — no sign-in needed to view.",
-    "tryCta": "Try Aurelia",
+    "tryCta": "Try Aivory",
     "cloneCta": "Clone to my chats",
     "cloneShortCta": "Clone",
     "cloneDone": "Cloned to your chats",
@@ -169,7 +169,7 @@
     "untitled": "Untitled conversation",
     "roleUser": "User",
     "roleAssistant": "Assistant",
-    "footer": "Shared from Aurelia — a thoughtful AI workspace."
+    "footer": "Shared from Aivory — a thoughtful AI workspace."
   },
   "code": {
     "run": "Run",

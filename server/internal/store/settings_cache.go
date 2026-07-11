@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"sync"
 	"time"
-
-	"aurelia/server/internal/envcfg"
 )
 
 // §2.4 settings cache. GetSetting is read on nearly every request (sandbox /
@@ -14,7 +12,7 @@ import (
 // touched key immediately on this instance; cross-instance invalidation is
 // driven by the "cfg:invalidate" Pub/Sub subscriber wired in main() so an admin
 // change on one node propagates to the others.
-var settingsCacheTTL = envcfg.Dur("AURELIA_STORE_SETTINGS_CACHE_TTL", 15*time.Second)
+var settingsCacheTTL = 15 * time.Second
 
 type settingEntry struct {
 	val     json.RawMessage

@@ -12,9 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"aurelia/server/internal/config"
-	"aurelia/server/internal/envcfg"
-	"aurelia/server/internal/store/pgcompat"
+	"aivory/server/internal/config"
+	"aivory/server/internal/store/pgcompat"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -29,13 +28,12 @@ var schemaPGSQL string
 // matching schema. Set once at startup; the server opens a single database.
 var usePostgres bool
 
-// Postgres connection-pool tunables (env-overridable; defaults preserve prior
-// hardcoded behavior).
+// Postgres connection-pool tunables.
 var (
-	setMaxOpenConns    = envcfg.Int("AURELIA_STORE_SET_MAX_OPEN_CONNS", 20)
-	setMaxIdleConns    = envcfg.Int("AURELIA_STORE_SET_MAX_IDLE_CONNS", 10)
-	setConnMaxIdleTime = envcfg.Dur("AURELIA_STORE_SET_CONN_MAX_IDLE_TIME", 5*time.Minute)
-	setConnMaxLifetime = envcfg.Dur("AURELIA_STORE_SET_CONN_MAX_LIFETIME", time.Hour)
+	setMaxOpenConns    = 20
+	setMaxIdleConns    = 10
+	setConnMaxIdleTime = 5 * time.Minute
+	setConnMaxLifetime = time.Hour
 )
 
 // isPostgresDSN reports whether the data source addresses PostgreSQL. Accepts
@@ -682,7 +680,7 @@ func Seed(db *sql.DB, cfg config.Config) error {
 		// prompt's tokens before generating and refuse if the user can't afford it.
 		"credit_preflight_enabled":    `true`,
 		"keep_recent_rounds":          `6`,
-		"summary_max_tokens":          `2048`,
+		"summary_max_tokens":          `8192`,
 		"compaction_token_trigger":    `32000`,
 		"compaction_enabled":          `true`,
 		"memory_enabled":              `true`,

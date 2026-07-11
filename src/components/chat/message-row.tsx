@@ -66,7 +66,7 @@ import { cn, safeHref } from '@/lib/utils'
 
 /**
  * ThinkingLogo — the "still forming a reply" indicator shown before the first
- * token: the Aurelia mark breathing + glowing inside a slow scan ring. The ring
+ * token: the Aivory mark breathing + glowing inside a slow scan ring. The ring
  * highlight and glow use the sage AI-status colour (§2.4); the global
  * prefers-reduced-motion rule holds it static.
  */

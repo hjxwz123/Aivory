@@ -10,12 +10,12 @@ import (
 	"net/http"
 	"strconv"
 
-	"aurelia/server/internal/envcfg"
-	"aurelia/server/internal/store"
+	"aivory/server/internal/envcfg"
+	"aivory/server/internal/store"
 )
 
 // bulkRedeemCodeGenerationQuantity caps how many codes one bulk request may mint.
-var bulkRedeemCodeGenerationQuantity = envcfg.Int("AURELIA_API_BULK_REDEEM_CODE_GENERATION_QUANTITY", 1000)
+var bulkRedeemCodeGenerationQuantity = envcfg.Int("AIVORY_API_BULK_REDEEM_CODE_GENERATION_QUANTITY", 1000)
 
 // listRedeemCodesAdmin returns redeem codes newest-first.
 // Query params: batch=<name>, status=unused|redeemed|disabled|expired,

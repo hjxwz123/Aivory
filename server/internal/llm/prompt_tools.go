@@ -27,15 +27,15 @@ import (
 	"fmt"
 	"strings"
 
-	"aurelia/server/internal/envcfg"
+	"aivory/server/internal/envcfg"
 )
 
 const promptStopToken = "</tool_call>"
 
 var (
-	promptMaxIter                     = envcfg.Int("AURELIA_LLM_PROMPT_MAX_ITER", 10)
-	promptMaxRetry                    = envcfg.Int("AURELIA_LLM_PROMPT_MAX_RETRY", 2)
-	promptModeToolResultSummaryLength = envcfg.Int("AURELIA_LLM_PROMPT_MODE_TOOL_RESULT_SUMMARY_LENGTH", 240)
+	promptMaxIter                     = envcfg.Int("AIVORY_LLM_PROMPT_MAX_ITER", 10)
+	promptMaxRetry                    = envcfg.Int("AIVORY_LLM_PROMPT_MAX_RETRY", 2)
+	promptModeToolResultSummaryLength = 240
 )
 
 // PromptToolPreamble builds the text block appended to the system prompt

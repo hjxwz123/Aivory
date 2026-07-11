@@ -9,7 +9,7 @@ import (
 	"net/url"
 	"strings"
 
-	"aurelia/server/internal/llm"
+	"aivory/server/internal/llm"
 )
 
 // Searcher is the pluggable web-search backend abstraction (§4.4). Swap Serper
@@ -152,7 +152,7 @@ func (s *searxngSearcher) Search(ctx context.Context, query string, topK int) (s
 	// SearXNG's default bot limiter blocks user agents that match bot/crawler
 	// patterns and requests without an Accept-Language — identify plainly but
 	// without tripping either check.
-	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; Aurelia/1.0)")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; Aivory/1.0)")
 	req.Header.Set("Accept-Language", "en")
 	resp, err := toolHTTPClient.Do(req)
 	if err != nil {

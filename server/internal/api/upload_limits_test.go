@@ -4,8 +4,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"aurelia/server/internal/config"
-	"aurelia/server/internal/store"
+	"aivory/server/internal/config"
+	"aivory/server/internal/store"
 )
 
 // TestUploadLimitBytes locks in §4.6 per-kind upload caps: images default to

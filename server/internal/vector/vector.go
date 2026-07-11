@@ -73,7 +73,7 @@ type Store interface {
 	// VectorChunkStatuses returns vector presence within a required scope. An
 	// empty scope returns no rows, matching the other scoped query methods.
 	VectorChunkStatuses(ctx context.Context, dim int, scope Scope) (map[string]ChunkVectorStatus, error)
-	// AllVectorChunkStatuses returns vector presence for every Aurelia point in a
+	// AllVectorChunkStatuses returns vector presence for every Aivory point in a
 	// dimension. This deliberately explicit operation is reserved for global
 	// administrative maintenance.
 	AllVectorChunkStatuses(ctx context.Context, dim int) (map[string]ChunkVectorStatus, error)

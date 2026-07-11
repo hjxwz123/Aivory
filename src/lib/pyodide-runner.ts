@@ -36,11 +36,11 @@ import { envNum } from '@/lib/env-config'
 const PYODIDE_VERSION = '0.28.3'
 const PYODIDE_BASE = `https://cdn.jsdelivr.net/pyodide/v${PYODIDE_VERSION}/full/`
 /** Hard wall-clock cap per run — mirrors the §4.5 sandbox exec ceiling. */
-const RUN_TIMEOUT_MS = envNum('VITE_AURELIA_RUN_TIMEOUT_MS', 120_000)
+const RUN_TIMEOUT_MS = envNum('VITE_AIVORY_RUN_TIMEOUT_MS', 120_000)
 /** Stop runaway `print` loops before they flood postMessage / the DOM. */
-const MAX_STREAM_CHARS = envNum('VITE_AURELIA_MAX_STREAM_CHARS', 200_000)
+const MAX_STREAM_CHARS = envNum('VITE_AIVORY_MAX_STREAM_CHARS', 200_000)
 /** Cap the repr() of the final expression (think 1M-row DataFrames). */
-const MAX_RESULT_CHARS = envNum('VITE_AURELIA_MAX_RESULT_CHARS', 20_000)
+const MAX_RESULT_CHARS = envNum('VITE_AIVORY_MAX_RESULT_CHARS', 20_000)
 
 export type PythonRunPhase = 'queued' | 'boot' | 'packages' | 'running'
 
@@ -106,20 +106,20 @@ importScripts('${PYODIDE_BASE}pyodide.js');
       if (new URL(raw).origin === CDN_ORIGIN) return realFetch(input, init);
     } catch (e) { /* relative or malformed URL: fall through to rejection */ }
     return Promise.reject(new TypeError(
-      'Aurelia sandbox: network access is disabled - only the Pyodide CDN is reachable.'));
+      'Aivory sandbox: network access is disabled - only the Pyodide CDN is reachable.'));
   };
   // pyodide.js pulls pyodide.asm.js through importScripts in classic workers.
   self.importScripts = function () {
     for (var i = 0; i < arguments.length; i++) {
       if (String(arguments[i]).indexOf(CDN_PREFIX) !== 0) {
-        throw new Error('Aurelia sandbox: importScripts is restricted to the Pyodide CDN.');
+        throw new Error('Aivory sandbox: importScripts is restricted to the Pyodide CDN.');
       }
     }
     return realImportScripts.apply(null, arguments);
   };
 
   var blocked = function (name) {
-    return function () { throw new Error('Aurelia sandbox: ' + name + ' is disabled.'); };
+    return function () { throw new Error('Aivory sandbox: ' + name + ' is disabled.'); };
   };
   var remove = function (name) {
     try { Object.defineProperty(self, name, { value: undefined, configurable: false }); }
@@ -150,7 +150,7 @@ function boot() {
 // never bleeds into the next run. Defined in the engine's root namespace —
 // user snippets run in their own dict and never see it.
 var FIG_HARVEST = [
-  "def _aurelia_collect_figs():",
+  "def _aivory_collect_figs():",
   "    import sys",
   "    if 'matplotlib' not in sys.modules:",
   "        return '[]'",
@@ -167,7 +167,7 @@ var FIG_HARVEST = [
   "        out.append(base64.b64encode(buf.getvalue()).decode('ascii'))",
   "    plt.close('all')",
   "    return json.dumps(out)",
-  "_aurelia_collect_figs()"
+  "_aivory_collect_figs()"
 ].join('\\n');
 
 function harvestFigures(py) {
@@ -204,7 +204,7 @@ self.onmessage = function (event) {
       post({ type: 'phase', phase: 'running' });
       var namespace = py.globals.get('dict')();
       try {
-        var value = await py.runPythonAsync(code, { globals: namespace, filename: '<aurelia-cell>' });
+        var value = await py.runPythonAsync(code, { globals: namespace, filename: '<aivory-cell>' });
         var resultRepr;
         if (value !== undefined) {
           var reprFn = py.runPython('repr');

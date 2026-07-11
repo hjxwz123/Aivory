@@ -27,21 +27,21 @@ import (
 	"strings"
 	"time"
 
-	"aurelia/server/internal/envcfg"
-	"aurelia/server/internal/store"
+	"aivory/server/internal/envcfg"
+	"aivory/server/internal/store"
 )
 
 // Tunable knobs — envcfg overrides; defaults preserve original behaviour.
 var (
-	memoryWorkerRecentMessageFetchLimit = envcfg.Int("AURELIA_LLM_MEMORY_WORKER_RECENT_MESSAGE_FETCH_LIMIT", 30)
-	memoryCandidatesExtractionCap       = envcfg.Int("AURELIA_LLM_MEMORY_CANDIDATES_EXTRACTION_CAP", 5)
-	memoryExtractorUserTurnCap          = envcfg.Int("AURELIA_LLM_MEMORY_EXTRACTOR_USER_TURN_CAP", 20)
-	maxOutputTokens                     = envcfg.Int("AURELIA_LLM_MAX_OUTPUT_TOKENS", 1024)
-	defaultMemoryConfidence             = envcfg.F64("AURELIA_LLM_CONF", 0.7)
-	existingSameSlotMemoriesFetchLimit  = envcfg.Int("AURELIA_LLM_EXISTING_SAME_SLOT_MEMORIES_FETCH_LIMIT", 10)
-	maxOutputTokens2                    = envcfg.Int("AURELIA_LLM_MAX_OUTPUT_TOKENS_2", 256)
-	semanticDedupCandidateMemoriesLimit = envcfg.Int("AURELIA_LLM_SEMANTIC_DEDUP_CANDIDATE_MEMORIES_LIMIT", 40)
-	maxOutputTokens3                    = envcfg.Int("AURELIA_LLM_MAX_OUTPUT_TOKENS_3", 64)
+	memoryWorkerRecentMessageFetchLimit = 30
+	memoryCandidatesExtractionCap       = 5
+	memoryExtractorUserTurnCap          = 20
+	maxOutputTokens                     = 1024
+	defaultMemoryConfidence             = envcfg.F64("AIVORY_LLM_CONF", 0.7)
+	existingSameSlotMemoriesFetchLimit  = 10
+	maxOutputTokens2                    = 256
+	semanticDedupCandidateMemoriesLimit = 40
+	maxOutputTokens3                    = 64
 )
 
 // MemoryWorker runs the §4.16 capture pipeline asynchronously.

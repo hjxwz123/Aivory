@@ -1,7 +1,7 @@
 /**
  * Workspaces store (§workspaces) — the user's collaborative spaces plus which
  * one is ACTIVE. Personal space = activeId null. The active choice persists in
- * localStorage (`aurelia.workspace`) so a reload / next visit reopens the same
+ * localStorage (`aivory.workspace`) so a reload / next visit reopens the same
  * space; it is validated against the fetched list (a kicked member falls back
  * to personal silently).
  *
@@ -12,7 +12,7 @@ import { create } from 'zustand'
 import { workspacesApi } from '@/api'
 import type { ApiWorkspace } from '@/api/types'
 
-const ACTIVE_KEY = 'aurelia.workspace'
+const ACTIVE_KEY = 'aivory.workspace'
 
 // Monotonic switch sequence: overlapping switchTo() calls must not let an
 // EARLIER switch's finally clear `switching` while a newer switch's loads are

@@ -13,13 +13,13 @@
   },
   "ready": {
     "title": "一切就绪",
-    "body": "Aurelia 已按你的喜好调好。准备好了就开始你的第一次对话吧。",
+    "body": "Aivory 已按你的喜好调好。准备好了就开始你的第一次对话吧。",
     "cta": "开始探索"
   },
   "intro": {
-    "eyebrow": "欢迎来到 Aurelia",
+    "eyebrow": "欢迎来到 Aivory",
     "title": "更安静的思考空间。",
-    "subtitle": "花几秒钟把 Aurelia 调成你喜欢的样子，这些之后都能在设置里修改。",
+    "subtitle": "花几秒钟把 Aivory 调成你喜欢的样子，这些之后都能在设置里修改。",
     "points": {
       "write": "与你一同思考的写作",
       "research": "基于真实来源的检索",
@@ -38,7 +38,7 @@
     "chatStyle": "回复风格",
     "chatStyleBody": "默认回答的详细程度。",
     "memory": "记忆",
-    "memoryBody": "让 Aurelia 跨对话记住有用的信息。"
+    "memoryBody": "让 Aivory 跨对话记住有用的信息。"
   },
   "theme": {
     "light": "浅色",
@@ -62,6 +62,6 @@
     "accent": "选择应用的强调色。",
     "layout": "聊天内容居中，或占满整个宽度。",
     "style": "默认回复的详细程度。",
-    "memory": "让 Aurelia 跨对话记住有用的信息。"
+    "memory": "让 Aivory 跨对话记住有用的信息。"
   }
 }

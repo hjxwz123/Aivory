@@ -25,7 +25,7 @@
   "detail": {
     "uploadButton": "Upload document",
     "noDocs": "No documents yet",
-    "noDocsBody": "Upload a PDF, Markdown or text file and Aurelia indexes it for retrieval.",
+    "noDocsBody": "Upload a PDF, Markdown or text file and Aivory indexes it for retrieval.",
     "rename": "Rename library",
     "delete": "Delete library",
     "deleteConfirm": "Delete this library and all its documents?",

@@ -21,12 +21,11 @@ import (
 	"strings"
 	"time"
 
-	"aurelia/server/internal/envcfg"
+	"aivory/server/internal/envcfg"
 )
 
-// iconServingCacheAge is the GET-icon Cache-Control max-age; defaults to 86400s
-// (24h) when AURELIA_API_ICON_SERVING_CACHE_AGE is unset.
-var iconServingCacheAge = envcfg.Dur("AURELIA_API_ICON_SERVING_CACHE_AGE", 86400*time.Second)
+// iconServingCacheAge is the GET-icon Cache-Control max-age (86400s = 24h).
+var iconServingCacheAge = 86400 * time.Second
 
 // Icon upload — admin-only POST that stores a small image and returns a URL
 // the model record can reference.
@@ -57,7 +56,7 @@ var iconServingCacheAge = envcfg.Dur("AURELIA_API_ICON_SERVING_CACHE_AGE", 86400
 // maxIconBytes — small on purpose. Icons render at ~16-32 px in the model
 // picker; anything over 256 KiB is either a photo (wrong tool) or an attempt
 // to waste disk.
-var maxIconBytes = envcfg.Int64("AURELIA_API_ADMIN_ICON_UPLOAD_SIZE", 256*1024)
+var maxIconBytes = envcfg.Int64("AIVORY_API_ADMIN_ICON_UPLOAD_SIZE", 256*1024)
 
 // allowedIconExt — extension → expected DetectContentType prefix. The
 // DetectContentType return value can also include charset on text/* but for

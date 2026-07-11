@@ -7,9 +7,9 @@ import (
 	"strconv"
 	"strings"
 
-	"aurelia/server/internal/envcfg"
-	"aurelia/server/internal/msgcache"
-	"aurelia/server/internal/store"
+	"aivory/server/internal/envcfg"
+	"aivory/server/internal/msgcache"
+	"aivory/server/internal/store"
 )
 
 // listConversationsHandler returns the user's conversations with pagination.
@@ -23,13 +23,13 @@ func listConversationsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("archived") == "only" {
 		archivedFilter = "archived"
 	}
-	limit := envcfg.Int("AURELIA_API_LIMIT_2", 200)
+	limit := envcfg.Int("AIVORY_API_LIMIT_2", 200)
 	if ls := r.URL.Query().Get("limit"); ls != "" {
 		if n, err := strconv.Atoi(ls); err == nil && n > 0 {
 			limit = n
 		}
 	}
-	if maxLimit := envcfg.Int("AURELIA_API_LIMIT_3", 500); limit > maxLimit {
+	if maxLimit := envcfg.Int("AIVORY_API_LIMIT_3", 500); limit > maxLimit {
 		limit = maxLimit
 	}
 	offset := 0
@@ -96,7 +96,7 @@ func searchHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	titles, messages, err := store.SearchConversations(r.Context(), d.DB, u.ID, wsID, q, 8, envcfg.Int("AURELIA_API_SEARCH_MESSAGE_HIT_LIMIT", 40))
+	titles, messages, err := store.SearchConversations(r.Context(), d.DB, u.ID, wsID, q, 8, envcfg.Int("AIVORY_API_SEARCH_MESSAGE_HIT_LIMIT", 40))
 	if err != nil {
 		writeError(w, 500, err)
 		return
@@ -161,9 +161,9 @@ func createConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 
 // Import limits — bound the work a single import request can schedule.
 var (
-	importMaxConversations   = envcfg.Int("AURELIA_API_IMPORT_MAX_CONVERSATIONS", 1000)
-	importMaxMessagesPerConv = envcfg.Int("AURELIA_API_IMPORT_MAX_MESSAGES_PER_CONV", 10000)
-	importMaxContentBytes    = envcfg.Int("AURELIA_API_IMPORT_MAX_CONTENT_BYTES", 200*1024)
+	importMaxConversations   = envcfg.Int("AIVORY_API_IMPORT_MAX_CONVERSATIONS", 1000)
+	importMaxMessagesPerConv = envcfg.Int("AIVORY_API_IMPORT_MAX_MESSAGES_PER_CONV", 10000)
+	importMaxContentBytes    = envcfg.Int("AIVORY_API_IMPORT_MAX_CONTENT_BYTES", 200*1024)
 )
 
 type importMessageReq struct {
@@ -279,7 +279,7 @@ func createInlineThreadHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Cap the quote so a runaway selection can't bloat the system prompt.
-	quoteCap := envcfg.Int("AURELIA_API_INLINE_THREAD_QUOTE_CAP", 4000)
+	quoteCap := envcfg.Int("AIVORY_API_INLINE_THREAD_QUOTE_CAP", 4000)
 	if rs := []rune(quote); len(rs) > quoteCap {
 		quote = string(rs[:quoteCap])
 	}
@@ -342,7 +342,7 @@ func getConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	before := r.URL.Query().Get("before")
 	limit := 0
 	if l := r.URL.Query().Get("limit"); l != "" {
-		if n, perr := strconv.Atoi(l); perr == nil && n > 0 && n <= envcfg.Int("AURELIA_API_GETCONVERSATION_ACTIVE_PATH_LIMIT", 200) {
+		if n, perr := strconv.Atoi(l); perr == nil && n > 0 && n <= envcfg.Int("AIVORY_API_GETCONVERSATION_ACTIVE_PATH_LIMIT", 200) {
 			limit = n
 		}
 	}
@@ -507,9 +507,9 @@ func listMessagesHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	// returns the trailing window oldest-first. Cursor metadata travels in
 	// headers so the response stays a plain array (backward compatible).
 	before := r.URL.Query().Get("before")
-	limit := envcfg.Int("AURELIA_API_LIMIT_4", 30)
+	limit := envcfg.Int("AIVORY_API_LIMIT_4", 30)
 	if l := r.URL.Query().Get("limit"); l != "" {
-		if n, perr := strconv.Atoi(l); perr == nil && n > 0 && n <= envcfg.Int("AURELIA_API_LISTMESSAGES_PAGE_LIMIT", 200) {
+		if n, perr := strconv.Atoi(l); perr == nil && n > 0 && n <= envcfg.Int("AIVORY_API_LISTMESSAGES_PAGE_LIMIT", 200) {
 			limit = n
 		}
 	}

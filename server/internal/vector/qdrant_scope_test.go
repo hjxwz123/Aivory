@@ -34,7 +34,7 @@ func TestAllVectorChunkStatusesExplicitlyRunsUnfilteredScan(t *testing.T) {
 	const dim = 1536
 	var gotBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/collections/aurelia_c1536/points/scroll" {
+		if r.URL.Path != "/collections/aivory_c1536/points/scroll" {
 			t.Errorf("path = %q", r.URL.Path)
 		}
 		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
@@ -90,7 +90,7 @@ func TestDeleteByDocumentSweepsCollectionsWithBoundedConcurrency(t *testing.T) {
 	var active, maximum, deletes atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/collections" {
-			_, _ = w.Write([]byte(`{"result":{"collections":[{"name":"aurelia_c256"},{"name":"aurelia_c512"},{"name":"aurelia_c768"},{"name":"aurelia_c1024"},{"name":"aurelia_c1536"},{"name":"aurelia_c3072"}]}}`))
+			_, _ = w.Write([]byte(`{"result":{"collections":[{"name":"aivory_c256"},{"name":"aivory_c512"},{"name":"aivory_c768"},{"name":"aivory_c1024"},{"name":"aivory_c1536"},{"name":"aivory_c3072"}]}}`))
 			return
 		}
 		deletes.Add(1)

@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import type { ThemePref } from '@/types/settings'
 import { persistUserSettings } from '@/lib/user-settings'
 
-const STORAGE_KEY = 'aurelia.theme'
+const STORAGE_KEY = 'aivory.theme'
 
 function getStored(): ThemePref {
   if (typeof window === 'undefined') return 'system'

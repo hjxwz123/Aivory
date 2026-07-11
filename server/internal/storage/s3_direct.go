@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"aurelia/server/internal/envcfg"
-	"aurelia/server/internal/sandbox"
+	"aivory/server/internal/envcfg"
+	"aivory/server/internal/sandbox"
 
 	aliyunoss "github.com/aliyun/aliyun-oss-go-sdk/oss"
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -25,12 +25,12 @@ const defaultStoragePrefix = "workspaces/"
 // Direct-upload / OSS tunables (env-overridable; defaults preserve prior
 // hardcoded behavior).
 var (
-	s3DirectUploadMinClientTimeout   = envcfg.Dur("AURELIA_STORAGE_S3_DIRECT_UPLOAD_MIN_CLIENT_TIMEOUT", 20*time.Minute)
-	directS3OSSUploadHTTPClientTTL   = envcfg.Dur("AURELIA_STORAGE_DIRECT_S3_OSS_UPLOAD_HTTP_CLIENT", 20*time.Minute)
-	aliyunOSSConnectTimeoutSec       = envcfg.Int64("AURELIA_STORAGE_ALIYUN_OSS_CLIENT_CONNECT_READ_TIMEOUTS_CONNECT", 30)
-	aliyunOSSReadWriteTimeoutSec     = envcfg.Int64("AURELIA_STORAGE_ALIYUN_OSS_CLIENT_CONNECT_READ_TIMEOUTS_RW", 300)
-	presignURLTTLSeconds             = int(envcfg.Dur("AURELIA_STORAGE_PRESIGN_URL_TTL", 3600*time.Second) / time.Second)
-	presignURLTTLClampCeilingSeconds = int(envcfg.Dur("AURELIA_STORAGE_PRESIGN_URL_TTL_CLAMP_CEILING", 86400*time.Second) / time.Second)
+	s3DirectUploadMinClientTimeout   = envcfg.Dur("AIVORY_STORAGE_S3_DIRECT_UPLOAD_MIN_CLIENT_TIMEOUT", 20*time.Minute)
+	directS3OSSUploadHTTPClientTTL   = envcfg.Dur("AIVORY_STORAGE_DIRECT_S3_OSS_UPLOAD_HTTP_CLIENT", 20*time.Minute)
+	aliyunOSSConnectTimeoutSec       = envcfg.Int64("AIVORY_STORAGE_ALIYUN_OSS_CLIENT_CONNECT_READ_TIMEOUTS_CONNECT", 30)
+	aliyunOSSReadWriteTimeoutSec     = envcfg.Int64("AIVORY_STORAGE_ALIYUN_OSS_CLIENT_CONNECT_READ_TIMEOUTS_RW", 300)
+	presignURLTTLSeconds             = int(envcfg.Dur("AIVORY_STORAGE_PRESIGN_URL_TTL", 3600*time.Second) / time.Second)
+	presignURLTTLClampCeilingSeconds = int(envcfg.Dur("AIVORY_STORAGE_PRESIGN_URL_TTL_CLAMP_CEILING", 86400*time.Second) / time.Second)
 )
 
 type directS3Config struct {

@@ -9,7 +9,7 @@ import { toast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
 import { envNum } from '@/lib/env-config'
 
-const PAGE = envNum('VITE_AURELIA_PAGE', 30)
+const PAGE = envNum('VITE_AIVORY_PAGE', 30)
 // Varied aspect ratios so each tile's loading skeleton reserves a real masonry
 // shape (the API doesn't return image dimensions).
 const SKELETON_ASPECTS = ['4/5', '1/1', '3/4', '4/5', '1/1', '4/5', '3/4', '1/1', '4/5', '3/4']

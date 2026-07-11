@@ -1,11 +1,11 @@
-# Aurelia sandbox — sidecar image (the FastAPI control service).
+# Aivory sandbox — sidecar image (the FastAPI control service).
 #
 # This is the small service that the Go backend calls (SANDBOX_BASE_URL). It
 # does NOT run user code itself — it drives the Docker daemon to spawn one
-# locked-down `aurelia-sandbox` container per session. So it needs the docker
+# locked-down `aivory-sandbox` container per session. So it needs the docker
 # CLI plus access to a Docker socket at runtime (mount /var/run/docker.sock).
 #
-#   docker build -f Dockerfile.sidecar -t aurelia-sandbox-sidecar:latest .
+#   docker build -f Dockerfile.sidecar -t aivory-sandbox-sidecar:latest .
 #
 # Built for linux/amd64 (typical server). For arm64 servers, change
 # DOCKER_CLI_ARCH to aarch64 and build with --platform linux/arm64.
@@ -30,7 +30,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app.py .
 
 # Default points at the GHCR runtime image; override at deploy time.
-ENV SANDBOX_IMAGE=aurelia-sandbox:latest \
+ENV SANDBOX_IMAGE=aivory-sandbox:latest \
     SANDBOX_NETWORK=none
 
 EXPOSE 8000

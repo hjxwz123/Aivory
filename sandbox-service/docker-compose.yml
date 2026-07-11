@@ -1,4 +1,4 @@
-# Server deployment for the Aurelia sandbox.
+# Server deployment for the Aivory sandbox.
 #
 # Pull-and-run on the server (no build needed — images come from ghcr.io):
 #   export OWNER=hjxwz123
@@ -10,7 +10,7 @@
 #   SANDBOX_API_KEY=<same value as above>
 #
 # The sidecar drives the host Docker daemon (mounted socket) to spawn one
-# locked-down `aurelia-sandbox` container per session. SANDBOX_PULL_ON_START
+# locked-down `aivory-sandbox` container per session. SANDBOX_PULL_ON_START
 # makes it fetch the runtime image on boot so the first /sessions call works.
 #
 # ─────────────────────────────────────────────────────────────────────────────
@@ -55,14 +55,14 @@
 
 services:
   sandbox:
-    image: ghcr.io/${OWNER:-hjxwz123}/aurelia-sandbox-sidecar:latest
+    image: ghcr.io/${OWNER:-hjxwz123}/aivory-sandbox-sidecar:latest
     restart: unless-stopped
     ports:
       # Host port is an uncommon high port to avoid clashes with other
       # services; the in-container port stays 8000.
       - "48217:8000"
     environment:
-      SANDBOX_IMAGE: ghcr.io/${OWNER:-hjxwz123}/aurelia-sandbox:latest
+      SANDBOX_IMAGE: ghcr.io/${OWNER:-hjxwz123}/aivory-sandbox:latest
       SANDBOX_PULL_ON_START: "1"
       SANDBOX_NETWORK: none        # set "bridge" only if code needs runtime internet
       SANDBOX_MEMORY: 2g
@@ -89,10 +89,10 @@ services:
       # (§4.5-C G2). No S3/OSS/MinIO needed. Unset the provider (or drop the
       # volume) for ephemeral "reaped = gone". Single-node only (a plain volume
       # isn't shared across replicas); multi-replica deployments must use S3/OSS.
-      SANDBOX_LOCAL_STORAGE_DIR: /var/lib/aurelia/sandbox-archives
+      SANDBOX_LOCAL_STORAGE_DIR: /var/lib/aivory/sandbox-archives
       # F1: optional pinned seccomp profile for session containers (path must be
       # readable INSIDE this sidecar container — mount it and point here).
-      # SANDBOX_SECCOMP_PROFILE: /seccomp/aurelia-sandbox.json
+      # SANDBOX_SECCOMP_PROFILE: /seccomp/aivory-sandbox.json
       # F2: MANDATORY. The sidecar exposes host Docker control (RCE) and refuses
       # to start without this. Generate with: openssl rand -hex 24
       SANDBOX_API_KEY: ${SANDBOX_API_KEY:?set SANDBOX_API_KEY (openssl rand -hex 24); the sandbox refuses to start without it}
@@ -115,7 +115,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       # §4.5 durable local archive store (SANDBOX_LOCAL_STORAGE_DIR above). Keep
       # it OUT of any session container's reach — it holds cross-session tarballs.
-      - sandbox-archives:/var/lib/aurelia/sandbox-archives
+      - sandbox-archives:/var/lib/aivory/sandbox-archives
 
 volumes:
   sandbox-archives:

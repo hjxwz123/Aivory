@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import i18n, { SUPPORTED_LANGUAGES, type LanguageCode } from '@/i18n'
 import { persistUserSettings } from '@/lib/user-settings'
 
-const STORAGE_KEY = 'aurelia.lang'
+const STORAGE_KEY = 'aivory.lang'
 
 function normalizeLanguage(code: unknown): LanguageCode | null {
   if (typeof code !== 'string' || !code) return null

@@ -1,4 +1,4 @@
-// Aurelia API server — entrypoint.
+// Aivory API server — entrypoint.
 //
 // Runs the HTTP API described in design.md §6. Wires the SQLite-backed store,
 // Provider registry, tools registry, async queue, and the SSE-aware chat
@@ -22,34 +22,30 @@ import (
 	"syscall"
 	"time"
 
-	"aurelia/server/internal/api"
-	"aurelia/server/internal/auth"
-	"aurelia/server/internal/cache"
-	"aurelia/server/internal/config"
-	"aurelia/server/internal/envcfg"
-	"aurelia/server/internal/llm"
-	"aurelia/server/internal/mail"
-	"aurelia/server/internal/queue"
-	"aurelia/server/internal/rag"
-	"aurelia/server/internal/store"
-	"aurelia/server/internal/tools"
-	"aurelia/server/internal/vector"
+	"aivory/server/internal/api"
+	"aivory/server/internal/auth"
+	"aivory/server/internal/cache"
+	"aivory/server/internal/config"
+	"aivory/server/internal/envcfg"
+	"aivory/server/internal/llm"
+	"aivory/server/internal/mail"
+	"aivory/server/internal/queue"
+	"aivory/server/internal/rag"
+	"aivory/server/internal/store"
+	"aivory/server/internal/tools"
+	"aivory/server/internal/vector"
 )
 
 var (
-	archiveGcBootSettleDelay  = envcfg.Dur("AURELIA_CMD_ARCHIVE_GC_BOOT_SETTLE_DELAY", 2*time.Minute)
-	runPruneCtxTimeout        = envcfg.Dur("AURELIA_CMD_RUN_PRUNE", 5*time.Minute)
-	archiveGcSweepInterval    = envcfg.Dur("AURELIA_CMD_ARCHIVE_GC_SWEEP_INTERVAL", 6*time.Hour)
-	readHeaderTimeout         = envcfg.Dur("AURELIA_CMD_HTTP_SERVER", 15*time.Second)
-	writeTimeout              = envcfg.Dur("AURELIA_CMD_HTTP_SERVER_2", 90*time.Minute)
-	idleTimeout               = envcfg.Dur("AURELIA_CMD_HTTP_SERVER_3", 120*time.Second)
-	gracefulShutdownTimeout   = envcfg.Dur("AURELIA_CMD_GRACEFUL_SHUTDOWN_TIMEOUT", 10*time.Second)
-	taskRouterMaxOutputTokens = envcfg.Int("AURELIA_CMD_TASK_ROUTER_ADAPTER_RUN_JSON", 256)
+	archiveGcBootSettleDelay  = envcfg.Dur("AIVORY_CMD_ARCHIVE_GC_BOOT_SETTLE_DELAY", 2*time.Minute)
+	runPruneCtxTimeout        = envcfg.Dur("AIVORY_CMD_RUN_PRUNE", 5*time.Minute)
+	archiveGcSweepInterval    = envcfg.Dur("AIVORY_CMD_ARCHIVE_GC_SWEEP_INTERVAL", 6*time.Hour)
+	taskRouterMaxOutputTokens = 256
 )
 
 func main() {
 	cfg := config.Load()
-	logger := log.New(os.Stdout, "aurelia ", log.LstdFlags|log.Lmicroseconds)
+	logger := log.New(os.Stdout, "aivory ", log.LstdFlags|log.Lmicroseconds)
 
 	// §8.1 production guard — refuse to boot with the dev JWT_SECRET in prod.
 	if err := config.Validate(cfg); err != nil {
@@ -195,10 +191,10 @@ func main() {
 	srv := &http.Server{
 		Addr:              cfg.Listen,
 		Handler:           router,
-		ReadHeaderTimeout: readHeaderTimeout,
+		ReadHeaderTimeout: 15 * time.Second,
 		// SSE streams need long write deadlines; 30 minutes matches design.md §11.5.
-		WriteTimeout: writeTimeout,
-		IdleTimeout:  idleTimeout,
+		WriteTimeout: 90 * time.Minute,
+		IdleTimeout:  120 * time.Second,
 	}
 
 	go func() {
@@ -214,7 +210,7 @@ func main() {
 	<-sig
 	logger.Println("shutting down...")
 
-	ctx, cancel := context.WithTimeout(context.Background(), gracefulShutdownTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {
 		logger.Printf("shutdown: %v", err)

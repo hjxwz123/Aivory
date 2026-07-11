@@ -1,4 +1,4 @@
-# Aurelia — production deployment
+# Aivory — production deployment
 
 <p align="center">
   <a href="./README.md"><strong>English</strong></a> ·
@@ -12,8 +12,8 @@ This folder deploys the full stack with Docker Compose:
 | `postgres` | `postgres:16-alpine`       | Relational store (users, conversations, KBs, usage). |
 | `redis`    | `redis:7-alpine`           | Cache, rate-limit counters, cross-process stop-stream pub/sub. |
 | `qdrant`   | `qdrant/qdrant:v1.12.4`    | Vector search for RAG.                  |
-| `sandbox`  | `ghcr.io/hjxwz123/aurelia-sandbox-sidecar` | Bundled code-execution sandbox (internal-only). |
-| `app`      | `ghcr.io/hjxwz123/aurelia-app` *(or local build via `Dockerfile.app`)* | One container serving BOTH the built SPA and the `/api` backend on the same origin. |
+| `sandbox`  | `ghcr.io/hjxwz123/aivory-sandbox-sidecar` | Bundled code-execution sandbox (internal-only). |
+| `app`      | `ghcr.io/hjxwz123/aivory-app` *(or local build via `Dockerfile.app`)* | One container serving BOTH the built SPA and the `/api` backend on the same origin. |
 
 See the [root README](../README.md) for the full project overview; this file is
 just the deployment cheat-sheet.
@@ -75,7 +75,7 @@ prebuilt image when present and falls back to a local build otherwise.
 
 ## Embedding dimension
 
-Qdrant uses one collection per embedding width (`aurelia_c<dim>`). If you
+Qdrant uses one collection per embedding width (`aivory_c<dim>`). If you
 configure a real embedding model, set `EMBEDDING_DIM` (and/or the model's `dim`
 in the admin UI) to match — otherwise the local 256-dim embedder is used and
 its collection won't match a 1536-dim model's vectors.

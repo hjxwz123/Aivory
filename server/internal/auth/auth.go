@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"aurelia/server/internal/cache"
+	"aivory/server/internal/cache"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"

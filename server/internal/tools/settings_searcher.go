@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"strings"
 
-	"aurelia/server/internal/llm"
-	"aurelia/server/internal/store"
+	"aivory/server/internal/llm"
+	"aivory/server/internal/store"
 )
 
 // settingsSearcher is a thin Searcher that re-resolves provider + base URL +
@@ -53,10 +53,10 @@ func (s *settingsSearcher) Search(ctx context.Context, query string, topK int) (
 		// the resolver ran out of values.
 		return "Search not yet configured. Reply based on training knowledge or ask the admin to configure search in the admin panel.",
 			[]llm.Citation{{
-				ID: "w1", Index: 1, Title: "Aurelia local-only mode",
-				URL: "https://example.com/aurelia-local-mode",
+				ID: "w1", Index: 1, Title: "Aivory local-only mode",
+				URL:     "https://example.com/aivory-local-mode",
 				Snippet: "No search backend configured. Set provider + base URL / api key in admin settings to enable real web_search results.",
-				Source: "web",
+				Source:  "web",
 			}}, nil
 	}
 	return b.Search(ctx, query, topK)

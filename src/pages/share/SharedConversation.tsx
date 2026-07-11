@@ -99,7 +99,7 @@ export default function SharedConversation() {
     <div className="min-h-svh w-full bg-[var(--color-bg)] text-[var(--color-fg)]">
       <header className="sticky top-0 z-10 border-b border-[var(--color-divider)] bg-[var(--color-bg)]/85 backdrop-blur">
         <div className="mx-auto flex h-14 max-w-[72rem] items-center justify-between gap-3 px-5 sm:px-8">
-          <Link to={isAuthenticated ? '/' : '/welcome'} aria-label="Aurelia" className="inline-flex items-center">
+          <Link to={isAuthenticated ? '/' : '/welcome'} aria-label="Aivory" className="inline-flex items-center">
             <Logo />
           </Link>
           <div className="flex min-w-0 items-center gap-2">

@@ -1,4 +1,4 @@
--- Aurelia schema. SQLite-compatible; ports cleanly to Postgres (replace
+-- Aivory schema. SQLite-compatible; ports cleanly to Postgres (replace
 -- AUTOINCREMENT with BIGSERIAL, JSON with JSONB, and add tsvector for
 -- chunks). Mirrors design.md §5 — same table names and semantics. RAG vectors
 -- live only in Qdrant; chunks stores text and retrieval metadata, not embeddings.

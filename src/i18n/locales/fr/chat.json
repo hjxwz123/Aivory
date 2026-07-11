@@ -15,8 +15,8 @@
       "Par où commençons-nous ?",
       "Qu'est-ce qui vous intrigue ?"
     ],
-    "lead": "Demandez ce que vous voulez. Plans, code, décisions, lectures — Aurelia réfléchira à vos côtés.",
-    "disclaimer": "Aurelia peut faire des erreurs. Vérifiez tout ce qui est important.",
+    "lead": "Demandez ce que vous voulez. Plans, code, décisions, lectures — Aivory réfléchira à vos côtés.",
+    "disclaimer": "Aivory peut faire des erreurs. Vérifiez tout ce qui est important.",
     "drawLead": "Décrivez ce que vous voulez créer — votre galerie est ci-dessous."
   },
   "composer": {
@@ -62,7 +62,7 @@
     "styleNone": "Aucun",
     "noStyles": "Aucun style configuré."
   },
-  "assistant": "Aurelia",
+  "assistant": "Aivory",
   "thinking": "Réflexion",
   "reasoning": {
     "title": "Raisonnement",
@@ -159,7 +159,7 @@
     "failed": "Une erreur s'est produite",
     "linkCopied": "Lien de partage copié",
     "publicHint": "Public — aucune connexion requise pour consulter.",
-    "tryCta": "Essayer Aurelia",
+    "tryCta": "Essayer Aivory",
     "cloneCta": "Cloner dans mes conversations",
     "cloneShortCta": "Cloner",
     "cloneDone": "Conversation clonée",
@@ -169,7 +169,7 @@
     "untitled": "Conversation sans titre",
     "roleUser": "Utilisateur",
     "roleAssistant": "Assistant",
-    "footer": "Partagé depuis Aurelia — un espace de travail IA réfléchi."
+    "footer": "Partagé depuis Aivory — un espace de travail IA réfléchi."
   },
   "code": {
     "run": "Exécuter",

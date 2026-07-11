@@ -15,6 +15,7 @@
 package llm
 
 import (
+	"aivory/server/internal/store"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -22,18 +23,15 @@ import (
 	"fmt"
 	"log"
 	"strings"
-
-	"aurelia/server/internal/envcfg"
-	"aurelia/server/internal/store"
 )
 
 var (
-	taskDefaultMaxOutputTokens    = envcfg.Int("AURELIA_LLM_MAX_TOK_3", 512)
-	titleGenerationWordCap        = envcfg.Int("AURELIA_LLM_TITLE_GENERATION_WORD_CAP", 8)
-	routerRetrievalQueryCap       = envcfg.Int("AURELIA_LLM_ROUTER_RETRIEVAL_QUERY_CAP", 3)
-	researchValidateConfirmedCap  = envcfg.Int("AURELIA_LLM_RESEARCH_CROSS_VALIDATE_FINDING_CAPS_CONFIRMED", 8)
-	researchValidateDisputedCap   = envcfg.Int("AURELIA_LLM_RESEARCH_CROSS_VALIDATE_FINDING_CAPS_DISPUTED", 4)
-	researchValidateUnverifiedCap = envcfg.Int("AURELIA_LLM_RESEARCH_CROSS_VALIDATE_FINDING_CAPS_UNVERIFIED", 6)
+	taskDefaultMaxOutputTokens    = 512
+	titleGenerationWordCap        = 8
+	routerRetrievalQueryCap       = 3
+	researchValidateConfirmedCap  = 8
+	researchValidateDisputedCap   = 4
+	researchValidateUnverifiedCap = 6
 )
 
 // TaskKind enumerates the internal task purposes. Used both for routing
@@ -265,8 +263,13 @@ func defaultSystem(kind TaskKind, jsonOutput bool) string {
 			fmt.Sprintf("Also propose up to %d short retrieval queries when strategy=retrieve. ", routerRetrievalQueryCap) +
 			`Reply with strict JSON: {"strategy":"retrieve","queries":["..."]}.`
 	case TaskCompact:
-		return base + " Compress the prior conversation rounds into a SHORT summary block " +
-			"≤300 tokens. Keep user preferences, decisions, tool outcomes, and pending tasks. " +
+		// Length is governed by RunOpts.MaxOutputTokens (the caller's actual
+		// generation cap — admin summary_max_tokens for a fresh summary, or the
+		// hardcoded merge budget when folding old blocks), not a fixed word count
+		// here — a hardcoded number in this prompt would silently override
+		// whatever MaxOutputTokens the caller asked for.
+		return base + " Compress the prior conversation rounds into a SHORT summary block. " +
+			"Keep user preferences, decisions, tool outcomes, and pending tasks. " +
 			"Drop pleasantries. Reply with just the summary text — no preamble."
 	case TaskMemoryExtract:
 		return base + " Extract durable, user-specific facts from the conversation. " +

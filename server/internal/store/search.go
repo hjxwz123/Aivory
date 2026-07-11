@@ -5,13 +5,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"strings"
-
-	"aurelia/server/internal/envcfg"
 )
 
 // searchSnippetRadius is the ~rune padding on each side of a content-search
-// snippet window; defaults to 64 when AURELIA_STORE_SEARCH_SNIPPET_RADIUS is unset.
-var searchSnippetRadius = envcfg.Int("AURELIA_STORE_SEARCH_SNIPPET_RADIUS", 64)
+// snippet window.
+var searchSnippetRadius = 64
 
 // searchTextFromBlocks projects a message's blocks JSON down to the plain words
 // the user typed or the assistant replied — i.e. only `text` blocks. Thinking,
@@ -44,7 +42,7 @@ func searchTextFromBlocks(blocks json.RawMessage) string {
 // migration; best-effort (errors ignored — a missed row just isn't searchable
 // until next written).
 func backfillSearchText(db *sql.DB) {
-	batch := envcfg.Int("AURELIA_STORE_BATCH", 500)
+	batch := 500
 	last := ""
 	for {
 		rows, err := db.Query(`SELECT id, blocks FROM messages WHERE id > ? ORDER BY id LIMIT ?`, last, batch)

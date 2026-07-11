@@ -861,7 +861,7 @@
         "title": "导入配置",
         "lead": "导入配置 ZIP（也兼容旧 JSON），按 ID 合并/覆盖配置；不会导入用户、对话、文件或日志。",
         "action": "导入配置归档…",
-        "invalid": "该文件不是有效的 Aurelia 配置导出文件。",
+        "invalid": "该文件不是有效的 Aivory 配置导出文件。",
         "done": "已导入配置（{{count}} 行）。",
         "confirmTitle": "应用此配置？",
         "confirmLead": "同 ID 的配置会被覆盖，其他本地配置会保留。",

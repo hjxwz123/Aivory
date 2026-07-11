@@ -26,7 +26,7 @@ function formatStamp(unixSec: number): string {
   }
 }
 
-const IMAGES_PAGE = envNum('VITE_AURELIA_IMAGES_PAGE', 60)
+const IMAGES_PAGE = envNum('VITE_AIVORY_IMAGES_PAGE', 60)
 
 function formatBytes(n: number): string {
   if (!n) return ''

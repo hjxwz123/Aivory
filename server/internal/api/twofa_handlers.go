@@ -9,20 +9,20 @@ import (
 	"strings"
 	"time"
 
-	"aurelia/server/internal/auth"
-	"aurelia/server/internal/envcfg"
-	"aurelia/server/internal/store"
+	"aivory/server/internal/auth"
+	"aivory/server/internal/envcfg"
+	"aivory/server/internal/store"
 )
 
 // Two-factor (TOTP) login (§ 2FA). Setup hands the user a secret; enable proves
 // possession with a code; once enabled, password login returns a short-lived
 // ticket instead of a session, and the code must be supplied to finish.
 
-const twofaIssuer = "Aurelia"
+const twofaIssuer = "Aivory"
 
 var (
-	twofaLoginTicketBurnThreshold = envcfg.Int64("AURELIA_API_2FA_LOGIN_TICKET_BURN_THRESHOLD", 5)
-	issueTwofaTicketTTL           = envcfg.Dur("AURELIA_API_ISSUE_TWOFA_TICKET", 5*time.Minute)
+	twofaLoginTicketBurnThreshold = envcfg.Int64("AIVORY_API_2FA_LOGIN_TICKET_BURN_THRESHOLD", 5)
+	issueTwofaTicketTTL           = envcfg.Dur("AIVORY_API_ISSUE_TWOFA_TICKET", 5*time.Minute)
 )
 
 // twofaSetupHandler generates a fresh (not yet enabled) secret and returns the
@@ -146,7 +146,7 @@ func login2faHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	// flow, from the short-lived HttpOnly cookie set by the callback (§A10).
 	ticket := req.Ticket
 	if ticket == "" {
-		if c, cerr := r.Cookie("aurelia_2fa"); cerr == nil {
+		if c, cerr := r.Cookie("aivory_2fa"); cerr == nil {
 			ticket = c.Value
 		}
 	}
@@ -208,7 +208,7 @@ func clear2faCookie(w http.ResponseWriter) {
 	// Deletion only (MaxAge -1) — leave Secure off so the removal also takes
 	// effect over plain HTTP (a Secure Set-Cookie is ignored on http://).
 	http.SetCookie(w, &http.Cookie{
-		Name: "aurelia_2fa", Value: "", Path: "/api/auth",
+		Name: "aivory_2fa", Value: "", Path: "/api/auth",
 		HttpOnly: true, Secure: false, SameSite: http.SameSiteLaxMode, MaxAge: -1,
 	})
 }

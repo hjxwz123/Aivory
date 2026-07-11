@@ -10,12 +10,12 @@ import (
 	"strings"
 	"time"
 
-	"aurelia/server/internal/envcfg"
-	"aurelia/server/internal/genstream"
-	"aurelia/server/internal/llm"
-	"aurelia/server/internal/msgcache"
-	"aurelia/server/internal/sse"
-	"aurelia/server/internal/store"
+	"aivory/server/internal/envcfg"
+	"aivory/server/internal/genstream"
+	"aivory/server/internal/llm"
+	"aivory/server/internal/msgcache"
+	"aivory/server/internal/sse"
+	"aivory/server/internal/store"
 )
 
 // maxGenDuration caps a detached generation. Generation is deliberately NOT
@@ -24,16 +24,16 @@ import (
 // holding a concurrency slot. Reasoning/tool-heavy turns can run well past ten
 // minutes, so keep this wide and let per-tool/admin TTFT limits handle the
 // narrower failure modes.
-var maxGenDuration = envcfg.Dur("AURELIA_API_MAX_GEN_DURATION", 90*time.Minute)
+var maxGenDuration = envcfg.Dur("AIVORY_API_MAX_GEN_DURATION", 90*time.Minute)
 
 // SSE heartbeat and stream-replay tunables (env-overridable; defaults preserve
 // prior hardcoded behavior).
 var (
-	ssePingHeartbeatPost        = envcfg.Dur("AURELIA_API_SSE_PING_HEARTBEAT_POST", 15*time.Second)
-	ssePingHeartbeatRegenerate  = envcfg.Dur("AURELIA_API_SSE_PING_HEARTBEAT_REGENERATE", 15*time.Second)
-	ssePingHeartbeatStream      = envcfg.Dur("AURELIA_API_SSE_PING_HEARTBEAT_STREAM", 15*time.Second)
-	streamStatusRecheckInterval = envcfg.Dur("AURELIA_API_STREAM_STATUS_RECHECK_INTERVAL", 5*time.Second)
-	streamReplayBatchSize       = envcfg.Int("AURELIA_API_STREAM_REPLAY_BATCH_SIZE", 200)
+	ssePingHeartbeatPost        = envcfg.Dur("AIVORY_API_SSE_PING_HEARTBEAT_POST", 15*time.Second)
+	ssePingHeartbeatRegenerate  = envcfg.Dur("AIVORY_API_SSE_PING_HEARTBEAT_REGENERATE", 15*time.Second)
+	ssePingHeartbeatStream      = envcfg.Dur("AIVORY_API_SSE_PING_HEARTBEAT_STREAM", 15*time.Second)
+	streamStatusRecheckInterval = envcfg.Dur("AIVORY_API_STREAM_STATUS_RECHECK_INTERVAL", 5*time.Second)
+	streamReplayBatchSize       = envcfg.Int("AIVORY_API_STREAM_REPLAY_BATCH_SIZE", 200)
 )
 
 type postMessageReq struct {

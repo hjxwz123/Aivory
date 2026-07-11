@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"aurelia/server/internal/envcfg"
+	"aivory/server/internal/envcfg"
 )
 
 // Slider-puzzle captcha (§ registration anti-abuse). The server renders a
@@ -38,10 +38,10 @@ const (
 // capTol is the accepted error between the submitted fraction and the true
 // gap fraction (~9px on a 228px track). Forgiving on purpose — the per-IP
 // daily cap is the real abuse backstop; this just deters trivial scripts.
-var capTol = envcfg.F64("AURELIA_API_CAP_TOL", 0.04)
+var capTol = envcfg.F64("AIVORY_API_CAP_TOL", 0.04)
 
 // captchaChallengeCacheTTL bounds how long an unsolved challenge stays valid.
-var captchaChallengeCacheTTL = envcfg.Dur("AURELIA_API_CAPTCHA_CHALLENGE_CACHE_TTL", 5*time.Minute)
+var captchaChallengeCacheTTL = envcfg.Dur("AIVORY_API_CAPTCHA_CHALLENGE_CACHE_TTL", 5*time.Minute)
 
 // captchaHandler issues a fresh slider-puzzle challenge.
 func captchaHandler(d Deps, w http.ResponseWriter, _ *http.Request) {
@@ -107,7 +107,7 @@ func captchaVerifyHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 }
 
 // captchaPassTTL bounds how long a solved-captcha pass stays valid.
-var captchaPassTTL = envcfg.Dur("AURELIA_API_CAPTCHA_PASS_TTL", 10*time.Minute)
+var captchaPassTTL = envcfg.Dur("AIVORY_API_CAPTCHA_PASS_TTL", 10*time.Minute)
 
 // mintCaptchaPass returns a STATELESS pass proving a captcha was just solved:
 // "<expiryUnix>.<HMAC>". It is signed with the server's JWT secret and carries no

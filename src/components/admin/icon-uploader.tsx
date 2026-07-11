@@ -31,7 +31,7 @@ import { ModelIcon } from '@/components/chat/model-icon'
 import { envNum } from '@/lib/env-config'
 
 const ACCEPT = 'image/png,image/jpeg,image/svg+xml,.svg'
-const MAX_BYTES = envNum('VITE_AURELIA_MAX_BYTES', 256 * 1024) // mirrors backend admin_uploads.go maxIconBytes
+const MAX_BYTES = envNum('VITE_AIVORY_MAX_BYTES', 256 * 1024) // mirrors backend admin_uploads.go maxIconBytes
 
 interface IconUploaderProps {
   id?: string

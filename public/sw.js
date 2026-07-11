@@ -1,5 +1,5 @@
 /*
- * Aurelia service worker.
+ * Aivory service worker.
  *
  * 1) Installability: Chrome/Android only offer "Install app" when a SW with a
  *    fetch handler exists. Navigations pass straight through to the network — no
@@ -15,7 +15,7 @@
  *    image/* GETs are cached; the store is capped (FIFO) so it can't grow
  *    unbounded.
  */
-const IMG_CACHE = 'aurelia-img-v1'
+const IMG_CACHE = 'aivory-img-v1'
 const IMG_CACHE_MAX = 400
 
 self.addEventListener('install', () => {
@@ -28,7 +28,7 @@ self.addEventListener('activate', (event) => {
       // Drop any older image-cache versions on activate.
       const names = await caches.keys()
       await Promise.all(
-        names.filter((n) => n.startsWith('aurelia-img-') && n !== IMG_CACHE).map((n) => caches.delete(n)),
+        names.filter((n) => n.startsWith('aivory-img-') && n !== IMG_CACHE).map((n) => caches.delete(n)),
       )
       await self.clients.claim()
     })(),

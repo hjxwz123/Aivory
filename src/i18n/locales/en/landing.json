@@ -1,19 +1,19 @@
 {
-  "badgeNew": "New · Aurelia Reason is here",
+  "badgeNew": "New · Aivory Reason is here",
   "hero": {
     "titleLine1": "A thoughtful AI companion",
     "titleLine2": "for the way you actually think.",
-    "subtitle": "Aurelia is a calm place to write, reason, and read. Built around your conversation, not the model behind it.",
+    "subtitle": "Aivory is a calm place to write, reason, and read. Built around your conversation, not the model behind it.",
     "placeholder": "Try: outline an essay on attention as a moral skill"
   },
   "capabilities": {
     "eyebrow": "Capabilities",
     "title": "The product is the writing.",
-    "body": "Three things Aurelia does better than its alternatives. Everything else is calm chrome around them.",
+    "body": "Three things Aivory does better than its alternatives. Everything else is calm chrome around them.",
     "items": {
       "writing": {
         "title": "Writing that thinks with you",
-        "body": "Outlines, edits, and long-form drafts in a single thread. Aurelia reads what you wrote before, and respects it."
+        "body": "Outlines, edits, and long-form drafts in a single thread. Aivory reads what you wrote before, and respects it."
       },
       "research": {
         "title": "Research with sources",
@@ -87,7 +87,7 @@
   "safety": {
     "eyebrow": "Safety & privacy",
     "title": "Your conversations are yours.",
-    "body": "Aurelia does not train on your conversations by default. Memory is editable and exportable. Workspaces can be enterprise-isolated with custom retention rules.",
+    "body": "Aivory does not train on your conversations by default. Memory is editable and exportable. Workspaces can be enterprise-isolated with custom retention rules.",
     "rows": {
       "noTraining": {
         "title": "No training on your chats",
@@ -99,7 +99,7 @@
       },
       "memory": {
         "title": "Editable memory",
-        "body": "Every fact Aurelia learns is a row you can edit or delete."
+        "body": "Every fact Aivory learns is a row you can edit or delete."
       }
     }
   },

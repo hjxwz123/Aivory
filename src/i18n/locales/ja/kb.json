@@ -25,7 +25,7 @@
   "detail": {
     "uploadButton": "ドキュメントをアップロード",
     "noDocs": "ドキュメントがまだありません",
-    "noDocsBody": "PDF、Markdown、またはテキストファイルをアップロードすると、Aurelia が検索用にインデックスします。",
+    "noDocsBody": "PDF、Markdown、またはテキストファイルをアップロードすると、Aivory が検索用にインデックスします。",
     "rename": "ライブラリの名前を変更",
     "delete": "ライブラリを削除",
     "deleteConfirm": "このライブラリとすべてのドキュメントを削除しますか？",

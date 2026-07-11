@@ -1,11 +1,11 @@
 {
   "title": "Mémoire",
-  "lead": "Aurelia retient des faits durables à votre sujet d'une conversation à l'autre. Tout ce qui figure ici peut nourrir ses futures réponses.",
+  "lead": "Aivory retient des faits durables à votre sujet d'une conversation à l'autre. Tout ce qui figure ici peut nourrir ses futures réponses.",
   "empty": "Aucune mémoire pour l'instant.",
-  "emptyBody": "Après quelques conversations, Aurelia fera ressortir les éléments qui méritent d'être retenus. Vous pouvez aussi les enregistrer manuellement.",
+  "emptyBody": "Après quelques conversations, Aivory fera ressortir les éléments qui méritent d'être retenus. Vous pouvez aussi les enregistrer manuellement.",
   "new": "Ajouter une mémoire",
   "addDialogTitle": "Nouvelle mémoire",
-  "addDialogBody": "Un fait court et durable à votre sujet. Aurelia le considérera comme une vérité établie.",
+  "addDialogBody": "Un fait court et durable à votre sujet. Aivory le considérera comme une vérité établie.",
   "fields": {
     "text": "Mémoire",
     "slot": "Champ (facultatif)",

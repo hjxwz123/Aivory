@@ -7,17 +7,14 @@ import (
 	"errors"
 	"strings"
 	"time"
-
-	"aurelia/server/internal/envcfg"
 )
 
-// Env-overridable pagination limits for conversation listings. Each defaults to
-// the previous hardcoded value when its AURELIA_* variable is unset.
+// Pagination limits for conversation listings.
 var (
-	listConversationsLimit           = envcfg.Int("AURELIA_STORE_LISTCONVERSATIONS_LIMIT", 200)
-	listConversationsLimit2          = envcfg.Int("AURELIA_STORE_LISTCONVERSATIONS_LIMIT_2", 500)
-	listWorkspaceConversationsLimit  = envcfg.Int("AURELIA_STORE_LISTWORKSPACECONVERSATIONS_LIMIT", 200)
-	listWorkspaceConversationsLimit2 = envcfg.Int("AURELIA_STORE_LISTWORKSPACECONVERSATIONS_LIMIT_2", 500)
+	listConversationsLimit           = 200
+	listConversationsLimit2          = 500
+	listWorkspaceConversationsLimit  = 200
+	listWorkspaceConversationsLimit2 = 500
 )
 
 // GetConvProviderStateKey reads one key from a conversation's provider_state

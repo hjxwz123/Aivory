@@ -96,7 +96,7 @@ interface ComposerProps {
   modelPickerInHeader?: boolean
 }
 
-const MAX_LEN = envNum('VITE_AURELIA_MAX_LEN', 12_000)
+const MAX_LEN = envNum('VITE_AIVORY_MAX_LEN', 12_000)
 const EMPTY_PARAM_VALUES: Record<string, unknown> = {}
 
 // §4.6-A upload size caps. The /api/files handler is authoritative; we read the
@@ -110,7 +110,7 @@ let uploadLimitsCache: Promise<{ max_image_bytes: number; max_file_bytes: number
 // INGEST_POLL_MS: status poll cadence. Do not fake-ready after a timer: the
 // send button must stay blocked until parsing, embedding and vector upsert
 // really finished, otherwise the model falls back to tool-side PDF parsing.
-const INGEST_POLL_MS = envNum('VITE_AURELIA_INGEST_POLL_MS', 1200)
+const INGEST_POLL_MS = envNum('VITE_AIVORY_INGEST_POLL_MS', 1200)
 function getUploadLimits() {
   if (!uploadLimitsCache) {
     uploadLimitsCache = api<{ max_image_bytes?: number; max_file_bytes?: number }>('/me/upload-policy')

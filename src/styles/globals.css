@@ -215,7 +215,7 @@
      date labels, panel/settings/dialog titles — all bare <h*> tags) follows the
      Appearance → Font setting, which only ever overrides --font-sans. The
      editorial Fraunces serif is now OPT-IN via `.font-serif` (brand pages,
-     wordmark) or the .prose-aurelia rule below (AI reply content), so picking a
+     wordmark) or the .prose-aivory rule below (AI reply content), so picking a
      sans font actually makes the UI sans. */
   h1,
   h2,
@@ -365,7 +365,7 @@
   animation: text-shimmer 2s linear infinite;
 }
 
-/* Brand "thinking" mark — the Aurelia logo breathes + glows inside a slow scan
+/* Brand "thinking" mark — the Aivory logo breathes + glows inside a slow scan
    ring while the reply is still forming (before the first token). The ring
    highlight and the glow use the sage AI-status color (§2.4); the global
    reduced-motion rule holds the logo static. */
@@ -852,7 +852,7 @@
 /* ============================================================================
  * Prose — for assistant markdown output
  * ============================================================================ */
-.prose-aurelia {
+.prose-aivory {
   color: var(--color-fg);
   font-size: var(--text-base);
   line-height: var(--leading-relaxed);
@@ -864,8 +864,8 @@
 /* Chat answers fill the message column (so the reply's right edge meets the user
  * bubble's), instead of the narrower editorial reading measure used elsewhere
  * (reasoning trace / inline / shared / admin keep the capped measure). The double
- * class outweighs the base `.prose-aurelia` max-width regardless of source order. */
-.prose-aurelia.prose-full {
+ * class outweighs the base `.prose-aivory` max-width regardless of source order. */
+.prose-aivory.prose-full {
   max-width: none;
 }
 
@@ -895,31 +895,31 @@
   padding-bottom: 1.25rem;
 }
 
-:root[data-density="cozy"] .prose-aurelia>* {
+:root[data-density="cozy"] .prose-aivory>* {
   margin-bottom: 0;
 }
 
-:root[data-density="cozy"] .prose-aurelia>*+* {
+:root[data-density="cozy"] .prose-aivory>*+* {
   margin-top: 0.55em;
 }
 
-:root[data-density="cozy"] .prose-aurelia :is(h1, h2) {
+:root[data-density="cozy"] .prose-aivory :is(h1, h2) {
   margin-top: 1em;
 }
 
-:root[data-density="cozy"] .prose-aurelia h3 {
+:root[data-density="cozy"] .prose-aivory h3 {
   margin-top: 0.85em;
 }
 
-:root[data-density="cozy"] .prose-aurelia hr {
+:root[data-density="cozy"] .prose-aivory hr {
   margin: 0.9em 0;
 }
 
-:root[data-density="cozy"] .prose-aurelia li {
+:root[data-density="cozy"] .prose-aivory li {
   margin-top: 0.2em;
 }
 
-.prose-aurelia>*+* {
+.prose-aivory>*+* {
   margin-top: 1em;
 }
 
@@ -927,49 +927,49 @@
    they honour the Appearance → Font setting like the rest of the UI: sans by
    default, and Fraunces only when the user picks the "serif" font (which maps
    --font-sans to Fraunces). No explicit family override here. */
-.prose-aurelia h1 {
+.prose-aivory h1 {
   font-size: var(--text-2xl);
   margin-top: 1.4em;
 }
 
-.prose-aurelia h2 {
+.prose-aivory h2 {
   font-size: var(--text-xl);
   margin-top: 1.4em;
 }
 
-.prose-aurelia h3 {
+.prose-aivory h3 {
   font-size: var(--text-lg);
   margin-top: 1.2em;
 }
 
-.prose-aurelia h4 {
+.prose-aivory h4 {
   font-size: var(--text-md);
   font-family: var(--font-sans);
   font-weight: 600;
 }
 
-.prose-aurelia p {
+.prose-aivory p {
   margin-top: 0.75em;
 }
 
-.prose-aurelia ul,
-.prose-aurelia ol {
+.prose-aivory ul,
+.prose-aivory ol {
   padding-left: 1.5em;
 }
 
-.prose-aurelia ul {
+.prose-aivory ul {
   list-style: disc;
 }
 
-.prose-aurelia ol {
+.prose-aivory ol {
   list-style: decimal;
 }
 
-.prose-aurelia li {
+.prose-aivory li {
   margin-top: 0.35em;
 }
 
-.prose-aurelia a {
+.prose-aivory a {
   color: var(--color-accent);
   text-decoration: underline;
   text-underline-offset: 3px;
@@ -978,22 +978,22 @@
   transition: text-decoration-color var(--duration-fast);
 }
 
-.prose-aurelia a:hover {
+.prose-aivory a:hover {
   text-decoration-color: var(--color-accent);
 }
 
-.prose-aurelia strong {
+.prose-aivory strong {
   font-weight: 600;
   color: var(--color-fg);
 }
 
-.prose-aurelia em {
+.prose-aivory em {
   font-style: italic;
 }
 
 /* Inline citation markers (§ citations). A small sage superscript [n] placed
    right after the cited text; web sources link out, KB docs show a tooltip. */
-.prose-aurelia .cite-marker {
+.prose-aivory .cite-marker {
   font-size: 0.68em;
   line-height: 0;
   font-weight: 600;
@@ -1001,26 +1001,26 @@
   vertical-align: super;
 }
 
-.prose-aurelia .cite-marker::before {
+.prose-aivory .cite-marker::before {
   content: "[";
 }
 
-.prose-aurelia .cite-marker::after {
+.prose-aivory .cite-marker::after {
   content: "]";
 }
 
-.prose-aurelia .cite-marker a,
-.prose-aurelia .cite-marker.cite-doc {
+.prose-aivory .cite-marker a,
+.prose-aivory .cite-marker.cite-doc {
   color: var(--color-secondary);
   text-decoration: none;
   cursor: pointer;
 }
 
-.prose-aurelia .cite-marker.cite-doc {
+.prose-aivory .cite-marker.cite-doc {
   cursor: help;
 }
 
-.prose-aurelia .cite-marker a:hover {
+.prose-aivory .cite-marker a:hover {
   color: var(--color-accent);
   text-decoration: underline;
 }
@@ -1044,7 +1044,7 @@ mark.inline-thread-mark:hover {
   background-color: color-mix(in oklch, var(--color-secondary) 26%, transparent);
 }
 
-.prose-aurelia code:not(pre code) {
+.prose-aivory code:not(pre code) {
   background: var(--color-code-bg);
   color: var(--color-code-fg);
   padding: 0.12em 0.4em;
@@ -1053,7 +1053,7 @@ mark.inline-thread-mark:hover {
   border: 1px solid var(--color-border-subtle);
 }
 
-.prose-aurelia blockquote {
+.prose-aivory blockquote {
   border-left: 2px solid var(--color-border-strong);
   padding-left: 1em;
   color: var(--color-fg-muted);
@@ -1063,70 +1063,70 @@ mark.inline-thread-mark:hover {
    the thread. The top-level CodeBlock/table/math wrappers already do this via
    utilities; these rules catch the same elements when marked emits them NESTED
    (a code block inside a list item, display math inside a quote, …). */
-.prose-aurelia pre {
+.prose-aivory pre {
   overflow-x: auto;
   max-width: 100%;
 }
-.prose-aurelia .katex-display {
+.prose-aivory .katex-display {
   overflow-x: auto;
   overflow-y: hidden;
 }
-.prose-aurelia hr { border: none; border-top: 1px solid var(--color-divider); margin: 2em 0; }
-.prose-aurelia table {
+.prose-aivory hr { border: none; border-top: 1px solid var(--color-divider); margin: 2em 0; }
+.prose-aivory table {
   width: 100%;
   border-collapse: collapse;
   font-size: var(--text-sm);
 }
 
-.prose-aurelia th,
-.prose-aurelia td {
+.prose-aivory th,
+.prose-aivory td {
   text-align: left;
   padding: 0.5em 0.75em;
   border-bottom: 1px solid var(--color-divider);
 }
 
-.prose-aurelia th {
+.prose-aivory th {
   font-weight: 600;
   color: var(--color-fg);
   background: var(--color-bg-muted);
 }
 
-.prose-aurelia.prose-user {
+.prose-aivory.prose-user {
   max-width: 100%;
   font-size: inherit;
   line-height: inherit;
 }
 
-.prose-aurelia.prose-user>*:first-child {
+.prose-aivory.prose-user>*:first-child {
   margin-top: 0;
 }
 
-.prose-aurelia.prose-user>*+* {
+.prose-aivory.prose-user>*+* {
   margin-top: 0.75em;
 }
 
-.prose-aurelia.prose-user h1 {
+.prose-aivory.prose-user h1 {
   font-size: var(--text-lg);
   margin-top: 0.9em;
 }
 
-.prose-aurelia.prose-user h2 {
+.prose-aivory.prose-user h2 {
   font-size: var(--text-md);
   margin-top: 0.85em;
 }
 
-.prose-aurelia.prose-user h3,
-.prose-aurelia.prose-user h4 {
+.prose-aivory.prose-user h3,
+.prose-aivory.prose-user h4 {
   font-size: var(--text-base);
   margin-top: 0.75em;
 }
 
-.prose-aurelia.prose-user p {
+.prose-aivory.prose-user p {
   margin-top: 0.5em;
 }
 
-.prose-aurelia.prose-user pre,
-.prose-aurelia.prose-user table {
+.prose-aivory.prose-user pre,
+.prose-aivory.prose-user table {
   max-width: 100%;
 }
 
@@ -1175,8 +1175,8 @@ mark.inline-thread-mark:hover {
 }
 
 /* Shiki final-render tokens. The worker uses Shiki's CSS-variable theme so
-   token colors stay bound to Aurelia design tokens instead of bundled themes. */
-.prose-aurelia pre code,
+   token colors stay bound to Aivory design tokens instead of bundled themes. */
+.prose-aivory pre code,
 .group\/code pre code {
   --shiki-foreground: var(--color-code-fg);
   --shiki-background: transparent;

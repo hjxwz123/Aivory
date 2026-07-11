@@ -10,16 +10,14 @@ import (
 	"net/http"
 	"syscall"
 	"time"
-
-	"aurelia/server/internal/envcfg"
 )
 
 var (
-	ssrfClientDialTimeout = envcfg.Dur("AURELIA_NETSAFE_NETSAFE_SSRF_CLIENT_DIAL_TIMEOUT", 10*time.Second)
-	maxIdleConns          = envcfg.Int("AURELIA_NETSAFE_MAX_IDLE_CONNS", 10)
-	idleConnTimeout       = envcfg.Dur("AURELIA_NETSAFE_IDLE_CONN_TIMEOUT", 30*time.Second)
-	tlsHandshakeTimeout   = envcfg.Dur("AURELIA_NETSAFE_TLSHANDSHAKE_TIMEOUT", 10*time.Second)
-	maxRedirects          = envcfg.Int("AURELIA_NETSAFE_NETSAFE_REDIRECTS", 5)
+	ssrfClientDialTimeout = 10 * time.Second
+	maxIdleConns          = 10
+	idleConnTimeout       = 30 * time.Second
+	tlsHandshakeTimeout   = 10 * time.Second
+	maxRedirects          = 5
 )
 
 // extraDeny lists ranges that Go's IP predicates don't classify as private but

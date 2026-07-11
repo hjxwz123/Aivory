@@ -16,7 +16,7 @@ import { useAuth } from '@/store/auth'
 import { sanitizeHtml } from '@/lib/markdown'
 import { cn } from '@/lib/utils'
 
-const BAR_DISMISS_KEY = 'aurelia.announcement.bar.dismissed'
+const BAR_DISMISS_KEY = 'aivory.announcement.bar.dismissed'
 
 export function AnnouncementBar() {
   const { t } = useTranslation('common')

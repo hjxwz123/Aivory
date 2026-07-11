@@ -9,7 +9,7 @@
  *    null-parent roots = edit-branches of the first question, which our
  *    sibling model supports).
  *
- * 2. Aurelia's own "Export all data" file (settings → privacy):
+ * 2. Aivory's own "Export all data" file (settings → privacy):
  *    `{ conversations: [ { title, model_id, active_leaf_id, messages: [ { id,
  *    parent_id, role, blocks: [...] } ] } ], memories, exported_at }`
  *    (messages as an ARRAY of block-carrying objects). Only the text blocks
@@ -37,7 +37,7 @@ export interface ImportConversationInput {
   active_leaf_id: string
   /** Messages ordered parent-before-child (DFS from roots). */
   messages: ImportMessage[]
-  /** Model to reopen the conversation with (Aurelia self-export only). */
+  /** Model to reopen the conversation with (Aivory self-export only). */
   model_id?: string
 }
 
@@ -129,25 +129,25 @@ function parseOne(item: unknown): ImportConversationInput | null {
   return { title, active_leaf_id: active, messages }
 }
 
-// ── Aurelia self-export (settings → privacy → Export all data) ──────────────
+// ── Aivory self-export (settings → privacy → Export all data) ──────────────
 
-interface AureliaBlock {
+interface AivoryBlock {
   kind?: string
   text?: string
 }
 
-interface AureliaMessage {
+interface AivoryMessage {
   id?: string
   parent_id?: string
   role?: string
-  blocks?: AureliaBlock[]
+  blocks?: AivoryBlock[]
 }
 
 /** True when the object looks like one conversation from our own export:
  *  `messages` is an ARRAY whose entries carry a `blocks` array — unambiguous
  *  against the other-platform format, where messages live in a MAP under
  *  `chat.history`. */
-function isAureliaConversation(obj: Record<string, unknown>): boolean {
+function isAivoryConversation(obj: Record<string, unknown>): boolean {
   const msgs = obj.messages
   if (!Array.isArray(msgs)) return false
   if (msgs.length === 0) return false
@@ -158,7 +158,7 @@ function isAureliaConversation(obj: Record<string, unknown>): boolean {
 /** Flatten a message's blocks to plain text — text blocks only; thinking /
  *  tool / citation / image blocks are dropped (history + titles only), then
  *  the shared cleanup strips any embedded markdown images. */
-function aureliaBlocksToText(blocks: AureliaBlock[]): string {
+function aivoryBlocksToText(blocks: AivoryBlock[]): string {
   const parts: string[] = []
   for (const b of blocks) {
     if (b && b.kind === 'text' && typeof b.text === 'string' && b.text.trim() !== '') {
@@ -168,13 +168,13 @@ function aureliaBlocksToText(blocks: AureliaBlock[]): string {
   return cleanImportedContent(parts.join('\n\n'))
 }
 
-function parseAureliaConversation(obj: Record<string, unknown>): ImportConversationInput | null {
+function parseAivoryConversation(obj: Record<string, unknown>): ImportConversationInput | null {
   const raw = (obj.messages as unknown[]).map(asRecord)
   const messages: ImportMessage[] = []
   const ids = new Set<string>()
   for (const m of raw) {
     if (!m) continue
-    const msg = m as AureliaMessage
+    const msg = m as AivoryMessage
     if (typeof msg.id !== 'string' || msg.id === '') continue
     const role = msg.role === 'user' ? 'user' : msg.role === 'assistant' ? 'assistant' : null
     if (!role) continue // system rows etc. are not part of the visible history
@@ -182,7 +182,7 @@ function parseAureliaConversation(obj: Record<string, unknown>): ImportConversat
       id: msg.id,
       parent_id: typeof msg.parent_id === 'string' ? msg.parent_id : '',
       role,
-      content: aureliaBlocksToText(Array.isArray(msg.blocks) ? msg.blocks : []),
+      content: aivoryBlocksToText(Array.isArray(msg.blocks) ? msg.blocks : []),
     })
     ids.add(msg.id)
   }
@@ -199,7 +199,7 @@ function parseAureliaConversation(obj: Record<string, unknown>): ImportConversat
 /** Parse our own export file. Accepts the full export root
  *  (`{ conversations: [...] }`), a bare array of its conversations, or a single
  *  conversation object. Returns [] when the shape isn't ours. */
-function parseAureliaExport(json: unknown): ImportConversationInput[] {
+function parseAivoryExport(json: unknown): ImportConversationInput[] {
   const root = asRecord(json)
   let candidates: unknown[]
   if (root && Array.isArray(root.conversations)) {
@@ -214,8 +214,8 @@ function parseAureliaExport(json: unknown): ImportConversationInput[] {
   const out: ImportConversationInput[] = []
   for (const item of candidates) {
     const obj = asRecord(item)
-    if (!obj || !isAureliaConversation(obj)) continue
-    const parsed = parseAureliaConversation(obj)
+    if (!obj || !isAivoryConversation(obj)) continue
+    const parsed = parseAivoryConversation(obj)
     if (parsed) out.push(parsed)
   }
   return out
@@ -223,12 +223,12 @@ function parseAureliaExport(json: unknown): ImportConversationInput[] {
 
 /**
  * Parse a chat export into our import payload, auto-detecting the source:
- * Aurelia's own "Export all data" file first (messages as block-carrying
+ * Aivory's own "Export all data" file first (messages as block-carrying
  * arrays), then the other-platform wrapper format (messages as a map under
  * chat.history). Returns [] when nothing parseable is found (unsupported file).
  */
 export function parseConversationExport(json: unknown): ImportConversationInput[] {
-  const own = parseAureliaExport(json)
+  const own = parseAivoryExport(json)
   if (own.length > 0) return own
   const arr = Array.isArray(json) ? json : [json]
   const out: ImportConversationInput[] = []

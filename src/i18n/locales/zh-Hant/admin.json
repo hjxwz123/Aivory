@@ -861,7 +861,7 @@
         "title": "匯入設定",
         "lead": "匯入設定 ZIP（也相容舊 JSON），依 ID 合併/覆寫設定；不會匯入使用者、對話、檔案或日誌。",
         "action": "匯入設定歸檔…",
-        "invalid": "該檔案不是有效的 Aurelia 設定匯出檔。",
+        "invalid": "該檔案不是有效的 Aivory 設定匯出檔。",
         "done": "已匯入設定（{{count}} 列）。",
         "confirmTitle": "套用此設定？",
         "confirmLead": "相同 ID 的設定會被覆寫，其他本機設定列會保留。",

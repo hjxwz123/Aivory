@@ -13,17 +13,17 @@ import (
 	"strings"
 	"time"
 
-	"aurelia/server/internal/envcfg"
-	"aurelia/server/internal/store"
+	"aivory/server/internal/envcfg"
+	"aivory/server/internal/store"
 )
 
 // Env-overridable defaults (§ config-reference); each falls back to the
-// original hardcoded value when its AURELIA_* variable is unset.
+// original hardcoded value when its AIVORY_* variable is unset.
 var (
-	onlinePresenceTouchThrottle        = envcfg.Dur("AURELIA_API_ONLINE_PRESENCE_TOUCH_THROTTLE", time.Minute)
-	concurrentGenSlotSafetyTTL         = envcfg.Dur("AURELIA_API_CONCURRENT_GEN_SLOT_SAFETY_TTL", 30*time.Minute)
-	requestSignatureReplayWindowFuture = envcfg.Int64("AURELIA_API_REQUEST_SIGNATURE_REPLAY_WINDOW_FUTURE", 300)
-	requestSignatureReplayWindowPast   = envcfg.Int64("AURELIA_API_REQUEST_SIGNATURE_REPLAY_WINDOW_PAST", 60)
+	onlinePresenceTouchThrottle        = envcfg.Dur("AIVORY_API_ONLINE_PRESENCE_TOUCH_THROTTLE", time.Minute)
+	concurrentGenSlotSafetyTTL         = envcfg.Dur("AIVORY_API_CONCURRENT_GEN_SLOT_SAFETY_TTL", 30*time.Minute)
+	requestSignatureReplayWindowFuture = envcfg.Int64("AIVORY_API_REQUEST_SIGNATURE_REPLAY_WINDOW_FUTURE", 300)
+	requestSignatureReplayWindowPast   = envcfg.Int64("AIVORY_API_REQUEST_SIGNATURE_REPLAY_WINDOW_PAST", 60)
 )
 
 type handler func(d Deps, w http.ResponseWriter, r *http.Request)

@@ -14,18 +14,18 @@ import (
 	"strings"
 	"time"
 
-	"aurelia/server/internal/envcfg"
-	"aurelia/server/internal/store"
+	"aivory/server/internal/envcfg"
+	"aivory/server/internal/store"
 )
 
 // errFileTooLarge is returned when an upload exceeds MaxUploadBytes (§C3).
 var errFileTooLarge = errors.New("file exceeds the maximum upload size")
 
 var (
-	uploadRateLimitMax    = envcfg.Int("AURELIA_API_UPLOAD_RATE_LIMIT_MAX", 20)
-	uploadRateLimitWindow = envcfg.Dur("AURELIA_API_UPLOAD_RATE_LIMIT_WINDOW", time.Minute)
-	artifactCacheTTL      = envcfg.Dur("AURELIA_API_ARTIFACT_CACHE_TTL", 31536000*time.Second)
-	uploadedFileCacheTTL  = envcfg.Dur("AURELIA_API_UPLOADED_FILE_CACHE_TTL", 86400*time.Second)
+	uploadRateLimitMax    = envcfg.Int("AIVORY_API_UPLOAD_RATE_LIMIT_MAX", 20)
+	uploadRateLimitWindow = envcfg.Dur("AIVORY_API_UPLOAD_RATE_LIMIT_WINDOW", time.Minute)
+	artifactCacheTTL      = 31536000 * time.Second
+	uploadedFileCacheTTL  = 86400 * time.Second
 )
 
 // uploadLimitBytes returns the byte ceiling for a file of the given kind, read

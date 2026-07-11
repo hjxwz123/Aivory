@@ -6,14 +6,14 @@ import (
 	"encoding/json"
 	"time"
 
-	"aurelia/server/internal/cache"
-	"aurelia/server/internal/envcfg"
-	"aurelia/server/internal/store"
+	"aivory/server/internal/cache"
+
+	"aivory/server/internal/store"
 )
 
 var (
-	pathTTL       = envcfg.Dur("AURELIA_MSGCACHE_PATH_TTL", 45*time.Second)
-	versionKeyTTL = envcfg.Dur("AURELIA_MSGCACHE_MESSAGE_CACHE_VERSION_KEY_TTL", 10*time.Minute)
+	pathTTL       = 45 * time.Second
+	versionKeyTTL = 10 * time.Minute
 )
 
 // Bump invalidates cached conversation message paths by moving the version used

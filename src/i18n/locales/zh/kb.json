@@ -25,7 +25,7 @@
   "detail": {
     "uploadButton": "上传文档",
     "noDocs": "尚无文档",
-    "noDocsBody": "上传 PDF / Markdown / 纯文本文件,Aurelia 会异步建索引以供检索。",
+    "noDocsBody": "上传 PDF / Markdown / 纯文本文件,Aivory 会异步建索引以供检索。",
     "rename": "重命名",
     "delete": "删除知识库",
     "deleteConfirm": "删除这个知识库及其所有文档?",

@@ -6,14 +6,14 @@ import (
 	"strings"
 	"time"
 
-	"aurelia/server/internal/envcfg"
-	"aurelia/server/internal/store"
+	"aivory/server/internal/envcfg"
+	"aivory/server/internal/store"
 )
 
 // Project handler tunables (env-overridable; defaults preserve prior behavior).
 var (
-	projectDetailConversationsPageSize = envcfg.Int("AURELIA_API_PROJECT_DETAIL_CONVERSATIONS_PAGE_SIZE", 200)
-	projectDocUploadRateLimit          = envcfg.Int("AURELIA_API_RATE_LIMIT_USER_2", 20)
+	projectDetailConversationsPageSize = envcfg.Int("AIVORY_API_PROJECT_DETAIL_CONVERSATIONS_PAGE_SIZE", 200)
+	projectDocUploadRateLimit          = envcfg.Int("AIVORY_API_RATE_LIMIT_USER_2", 20)
 )
 
 // listProjectsHandler returns the user's projects.

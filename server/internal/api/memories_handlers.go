@@ -4,13 +4,13 @@ import (
 	"errors"
 	"net/http"
 
-	"aurelia/server/internal/envcfg"
-	"aurelia/server/internal/store"
+	"aivory/server/internal/envcfg"
+	"aivory/server/internal/store"
 )
 
 // defaultMemoryConfidence is the confidence stored for a user-created memory;
 // overridable via env, defaults to the original 0.95.
-var defaultMemoryConfidence = envcfg.F64("AURELIA_API_CONFIDENCE", 0.95)
+var defaultMemoryConfidence = envcfg.F64("AIVORY_API_CONFIDENCE", 0.95)
 
 // listMemoriesHandler returns the user's memories.
 func listMemoriesHandler(d Deps, w http.ResponseWriter, r *http.Request) {

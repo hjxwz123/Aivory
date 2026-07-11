@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"aurelia/server/internal/config"
+	"aivory/server/internal/config"
 )
 
 func TestCreateModelReqTracksExplicitResearchEnabled(t *testing.T) {
@@ -99,7 +99,7 @@ func TestConfigImportCannotOverwriteLockedEmbeddingModelRow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := json.NewEncoder(mw).Encode(configManifest{Format: "aurelia-config", Version: configArchiveVersion, Tables: []string{"models"}, MergeMode: "upsert"}); err != nil {
+	if err := json.NewEncoder(mw).Encode(configManifest{Format: "aivory-config", Version: configArchiveVersion, Tables: []string{"models"}, MergeMode: "upsert"}); err != nil {
 		t.Fatal(err)
 	}
 	models, err := zw.Create("db/models.jsonl")

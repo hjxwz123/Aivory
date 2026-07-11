@@ -1,5 +1,5 @@
 {
-  "appName": "Aurelia",
+  "appName": "Aivory",
   "tagline": "思慮深い AI のパートナー",
   "actions": {
     "send": "送信",
@@ -21,7 +21,7 @@
     "back": "戻る",
     "continue": "続ける",
     "tryAgain": "もう一度試す",
-    "openAurelia": "Aurelia を開く",
+    "openAivory": "Aivory を開く",
     "signIn": "ログイン",
     "signOut": "ログアウト",
     "signUp": "アカウントを作成",
@@ -76,7 +76,7 @@
     "themeValue": "テーマ: {{label}}",
     "languageValue": "言語: {{label}}",
     "selected": "選択済み",
-    "homeLink": "Aurelia ホーム",
+    "homeLink": "Aivory ホーム",
     "backToTop": "トップに戻る",
     "boundary": "問題が発生しました。"
   },

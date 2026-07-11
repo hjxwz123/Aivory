@@ -5,7 +5,7 @@ name: Build & push app image
 # images have their own workflow (sandbox-image.yml).
 #
 # Image produced:
-#   ghcr.io/<owner>/aurelia-app:latest   ← Go API serving the built SPA (one container)
+#   ghcr.io/<owner>/aivory-app:latest   ← Go API serving the built SPA (one container)
 #
 # Tagging strategy (handled by docker/metadata-action):
 #   - push to main          → :latest        + :sha-<short>
@@ -46,7 +46,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: aurelia-app
+          - name: aivory-app
             dockerfile: deploy/Dockerfile.app
             context: .
     steps:
@@ -89,7 +89,7 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
           labels: |
             org.opencontainers.image.title=${{ matrix.name }}
-            org.opencontainers.image.description=Aurelia — multi-model AI chat platform
+            org.opencontainers.image.description=Aivory — multi-model AI chat platform
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.licenses=MIT
 

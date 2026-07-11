@@ -9,13 +9,13 @@ import { cn } from '@/lib/utils'
 
 gsap.registerPlugin(useGSAP)
 
-// The Aurelia mark — the hollow triangular vessel from components/brand/logo.
+// The Aivory mark — the hollow triangular vessel from components/brand/logo.
 const MARK_PATH =
   'M16 4.5c-1.05 0-2.02.6-2.47 1.55L4.34 24.6c-.74 1.55.4 3.4 2.13 3.4h19.06c1.74 0 2.87-1.85 2.13-3.4L18.47 6.05A2.72 2.72 0 0 0 16 4.5Zm0 4.3 9.8 20.6H6.2L16 8.8Z'
 
 /**
  * AuthHero — the interactive brand scene on the auth pages' left panel. Built
- * around the Aurelia triangular mark: the outline draws itself, a light runs
+ * around the Aivory triangular mark: the outline draws itself, a light runs
  * along it, the apex glows, particles converge to the apex ("attention focusing
  * to a point"), and the whole scene parallaxes toward the pointer.
  *
@@ -181,7 +181,7 @@ export function AuthHero() {
 /** The large animated mark: soft fill, self-drawing outline, a running light, glowing apex. */
 function AnimatedMark() {
   return (
-    <svg width={172} height={172} viewBox="0 0 32 32" role="img" aria-label="Aurelia" className="overflow-visible">
+    <svg width={172} height={172} viewBox="0 0 32 32" role="img" aria-label="Aivory" className="overflow-visible">
       <defs>
         <linearGradient id="hero-stroke" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
           <stop offset="0" stopColor="var(--color-accent)" />

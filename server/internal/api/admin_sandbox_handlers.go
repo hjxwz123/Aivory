@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"aurelia/server/internal/store"
+	"aivory/server/internal/store"
 )
 
 // Admin sandbox inspector (§ admin tools): list / preview / clear the files in a

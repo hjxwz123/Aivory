@@ -1,7 +1,7 @@
-# Aurelia
+# Aivory
 
 <p align="center">
-  <img src="docs/screenshots/hero.png" alt="Aurelia — multi-model AI chat platform" width="100%">
+  <img src="docs/screenshots/hero.png" alt="Aivory — multi-model AI chat platform" width="100%">
 </p>
 
 <p align="center">
@@ -15,8 +15,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/hjxwz123/Aurelia/actions/workflows/docker-images.yml"><img alt="Build" src="https://github.com/hjxwz123/Aurelia/actions/workflows/docker-images.yml/badge.svg"></a>
-  <a href="https://github.com/hjxwz123/Aurelia/pkgs/container/aurelia-app"><img alt="App image" src="https://img.shields.io/badge/ghcr.io-aurelia--app-blue?logo=docker"></a>
+  <a href="https://github.com/hjxwz123/Aivory/actions/workflows/docker-images.yml"><img alt="Build" src="https://github.com/hjxwz123/Aivory/actions/workflows/docker-images.yml/badge.svg"></a>
+  <a href="https://github.com/hjxwz123/Aivory/pkgs/container/aivory-app"><img alt="App image" src="https://img.shields.io/badge/ghcr.io-aivory--app-blue?logo=docker"></a>
   <img alt="Go 1.22" src="https://img.shields.io/badge/Go-1.22-00ADD8?logo=go">
   <img alt="React 19" src="https://img.shields.io/badge/React-19-61DAFB?logo=react">
   <img alt="TypeScript 5" src="https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript">
@@ -25,9 +25,9 @@
 
 ---
 
-## Why Aurelia
+## Why Aivory
 
-Most self-hosted AI frontends are thin proxies — one model, one message, one response. Aurelia is built as a production platform: the same depth you expect from Claude.ai or ChatGPT, with the control of running it yourself.
+Most self-hosted AI frontends are thin proxies — one model, one message, one response. Aivory is built as a production platform: the same depth you expect from Claude.ai or ChatGPT, with the control of running it yourself.
 
 ## Feature highlights
 
@@ -53,7 +53,7 @@ Most self-hosted AI frontends are thin proxies — one model, one message, one r
 
 ## Tool calls & Python sandbox
 
-This is where Aurelia diverges most from the rest. The orchestrator runs **up to 48 tool calls across 12 provider cycles in a single turn**. Tools chain freely — the output of one call becomes the input for the next, with no manual handoff required.
+This is where Aivory diverges most from the rest. The orchestrator runs **up to 48 tool calls across 12 provider cycles in a single turn**. Tools chain freely — the output of one call becomes the input for the next, with no manual handoff required.
 
 ### Multi-step pipeline in one turn
 
@@ -201,8 +201,8 @@ Requires Docker 24+ with the Compose plugin.
 
 ```bash
 # 1. Clone
-git clone https://github.com/hjxwz123/Aurelia.git
-cd Aurelia/deploy
+git clone https://github.com/hjxwz123/Aivory.git
+cd Aivory/deploy
 
 # 2. Fill in secrets
 cp .env.example .env
@@ -222,8 +222,8 @@ Five containers come up:
 | `postgres` | `postgres:16-alpine` | Users, conversations, KBs, settings, usage |
 | `redis` | `redis:7-alpine` | Cache, rate limits, kill-signal pub/sub |
 | `qdrant` | `qdrant/qdrant:v1.12.4` | Vector search for RAG |
-| `sandbox` | `ghcr.io/hjxwz123/aurelia-sandbox-sidecar:latest` | Bundled code-execution sandbox (internal-only) |
-| `app` | `ghcr.io/hjxwz123/aurelia-app:latest` | One container: Go HTTP + SSE server **and** the built SPA, same origin |
+| `sandbox` | `ghcr.io/hjxwz123/aivory-sandbox-sidecar:latest` | Bundled code-execution sandbox (internal-only) |
+| `app` | `ghcr.io/hjxwz123/aivory-app:latest` | One container: Go HTTP + SSE server **and** the built SPA, same origin |
 
 Postgres / Redis / Qdrant use named volumes (`pgdata`, `redisdata`, `qdrantdata`). Uploads and artifacts are bind-mounted from `DATA_DIR` (default `./data`) — files land directly on the host, no container access needed. The admin backup page can also generate an async full migration ZIP that includes DB rows, files, and Qdrant vectors; completed archives live under `BACKUP_DIR` (default `DATA_DIR/backups`).
 
@@ -288,7 +288,7 @@ graph TB
 
 ## Configuration
 
-Most of Aurelia is configured from the admin UI at runtime — provider keys, MinerU token, S3 credentials, SearXNG URL, upload allowlist, disabled tools, compaction settings. All apply on the next request, no restart needed.
+Most of Aivory is configured from the admin UI at runtime — provider keys, MinerU token, S3 credentials, SearXNG URL, upload allowlist, disabled tools, compaction settings. All apply on the next request, no restart needed.
 
 The env file only holds boot-time essentials:
 
@@ -307,9 +307,9 @@ The env file only holds boot-time essentials:
 
 Beyond the boot-time keys above, every internal timeout, concurrency limit, retry/backoff, batch size, cache TTL, and similar tuning knob is also overridable via environment variable — see **[`docs/config-reference.md`](docs/config-reference.md)** (Chinese: [`docs/config-reference.zh-CN.md`](docs/config-reference.zh-CN.md)) for the full list with defaults and locations.
 
-These are intentionally **not** listed in `.env.example` — leave it alone unless you actually need one. Every variable defaults to the current hardcoded value, so Aurelia's behavior is unchanged if you set none of them. If you need one, copy it from the reference doc into your own `.env`:
+These are intentionally **not** listed in `.env.example` — leave it alone unless you actually need one. Every variable defaults to the current hardcoded value, so Aivory's behavior is unchanged if you set none of them. If you need one, copy it from the reference doc into your own `.env`:
 
-- Backend (Go) vars take effect on the next `aurelia-api` restart.
+- Backend (Go) vars take effect on the next `aivory-api` restart.
 - `VITE_*` frontend vars are inlined at **build time** — set them before `npm run build` / the frontend Docker build, not at container runtime.
 - `SANDBOX_*` vars belong to the `sandbox-service` process and take effect on its restart.
 
@@ -360,7 +360,7 @@ These are intentionally **not** listed in `.env.example` — leave it alone unle
 
 | Workflow | Trigger | Output |
 |----------|---------|--------|
-| `docker-images.yml` | push to `main`, `v*.*.*` tags, manual dispatch | `ghcr.io/<owner>/aurelia-app` — multi-arch (amd64 + arm64) |
+| `docker-images.yml` | push to `main`, `v*.*.*` tags, manual dispatch | `ghcr.io/<owner>/aivory-app` — multi-arch (amd64 + arm64) |
 
 - `main` → `:latest` + `:sha-<short>`
 - `v1.2.3` → `:1.2.3` + `:1.2` + `:1` + `:latest`
