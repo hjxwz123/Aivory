@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"aurelia/server/internal/envcfg"
 )
 
 // providerBaseURL trims a channel base URL and substitutes the vendor default
@@ -36,11 +38,11 @@ func providerBaseURL(baseURL, vendorDefault string) string {
 var providerHTTPClient = &http.Client{
 	Transport: &http.Transport{
 		Proxy:                 http.ProxyFromEnvironment,
-		DialContext:           (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
-		TLSHandshakeTimeout:   10 * time.Second,
-		ExpectContinueTimeout: 1 * time.Second,
-		IdleConnTimeout:       90 * time.Second,
-		MaxIdleConns:          50,
+		DialContext:           (&net.Dialer{Timeout: envcfg.Dur("AURELIA_LLM_PROVIDER_HTTP_CLIENT_TCP_DIAL_TIMEOUT", 10*time.Second), KeepAlive: 30 * time.Second}).DialContext,
+		TLSHandshakeTimeout:   envcfg.Dur("AURELIA_LLM_TRANSPORT_TLSHANDSHAKE_TIMEOUT", 10*time.Second),
+		ExpectContinueTimeout: envcfg.Dur("AURELIA_LLM_TRANSPORT_EXPECT_CONTINUE_TIMEOUT", 1*time.Second),
+		IdleConnTimeout:       envcfg.Dur("AURELIA_LLM_TRANSPORT_IDLE_CONN_TIMEOUT", 90*time.Second),
+		MaxIdleConns:          envcfg.Int("AURELIA_LLM_TRANSPORT_MAX_IDLE_CONNS", 50),
 	},
 }
 

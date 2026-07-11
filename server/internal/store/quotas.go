@@ -4,7 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+
+	"aurelia/server/internal/envcfg"
 )
+
+var defaultQuotaPeriodSeconds = envcfg.Int("AURELIA_STORE_PS", 604800)
 
 // ListModelQuotas returns every per-group quota row for a model.
 func ListModelQuotas(ctx context.Context, db *sql.DB, modelID string) ([]ModelGroupQuota, error) {
@@ -45,7 +49,7 @@ func SetModelQuotas(ctx context.Context, db *sql.DB, modelID string, quotas []Mo
 		}
 		ps := q.PeriodSeconds
 		if ps <= 0 {
-			ps = 604800
+			ps = defaultQuotaPeriodSeconds
 		}
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO model_group_quotas(model_id, group_id, period_seconds, limit_type, limit_value) VALUES(?, ?, ?, ?, ?)`,

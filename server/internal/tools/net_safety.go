@@ -5,7 +5,18 @@ import (
 	"net/http"
 	"time"
 
+	"aurelia/server/internal/envcfg"
 	"aurelia/server/internal/netsafe"
+)
+
+// Env-overridable tool HTTP client tunables (envcfg). Defaults preserve prior
+// hardcoded behaviour; overrides are read once at process start.
+var (
+	ssrfSafeClientTimeout               = envcfg.Dur("AURELIA_TOOLS_SSRFSAFECLIENT_OVERALL_TIMEOUT_WEB_FETCH", 25*time.Second)
+	toolHTTPClientDialTimeout           = envcfg.Dur("AURELIA_TOOLS_TOOLHTTPCLIENT_DIAL_TIMEOUT", 10*time.Second)
+	toolHTTPClientTLSHandshakeTimeout   = envcfg.Dur("AURELIA_TOOLS_TOOLHTTPCLIENT_TLS_HANDSHAKE_TIMEOUT", 10*time.Second)
+	toolHTTPClientResponseHeaderTimeout = envcfg.Dur("AURELIA_TOOLS_TOOLHTTPCLIENT_RESPONSE_HEADER_TIMEOUT", 600*time.Second)
+	toolHTTPClientIdleConnTimeout       = envcfg.Dur("AURELIA_TOOLS_TOOLHTTPCLIENT_IDLE_CONN_TIMEOUT", 90*time.Second)
 )
 
 // isPublicIP rejects loopback/private/link-local/unspecified/multicast plus the
@@ -16,7 +27,7 @@ func isPublicIP(ip net.IP) bool { return netsafe.IsPublicIP(ip) }
 // ssrfSafeClient returns an http.Client that only connects to ports 80/443 and
 // validates the resolved IP at dial time (defeats DNS-rebinding + redirects).
 // Use for MODEL-controlled URLs (web_fetch).
-func ssrfSafeClient() *http.Client { return netsafe.SafeClient(25 * time.Second) }
+func ssrfSafeClient() *http.Client { return netsafe.SafeClient(ssrfSafeClientTimeout) }
 
 // toolHTTPClient is for ADMIN-configured tool endpoints (web search backends,
 // image-generation gateways). Like the LLM provider client (§B2/§F3) it bounds
@@ -27,9 +38,9 @@ func ssrfSafeClient() *http.Client { return netsafe.SafeClient(25 * time.Second)
 var toolHTTPClient = &http.Client{
 	Transport: &http.Transport{
 		Proxy:                 http.ProxyFromEnvironment,
-		DialContext:           (&net.Dialer{Timeout: 10 * time.Second}).DialContext,
-		TLSHandshakeTimeout:   10 * time.Second,
-		ResponseHeaderTimeout: 600 * time.Second, // image gen can be slow; per-tool ctx is the real bound
-		IdleConnTimeout:       90 * time.Second,
+		DialContext:           (&net.Dialer{Timeout: toolHTTPClientDialTimeout}).DialContext,
+		TLSHandshakeTimeout:   toolHTTPClientTLSHandshakeTimeout,
+		ResponseHeaderTimeout: toolHTTPClientResponseHeaderTimeout, // image gen can be slow; per-tool ctx is the real bound
+		IdleConnTimeout:       toolHTTPClientIdleConnTimeout,
 	},
 }

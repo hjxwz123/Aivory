@@ -13,10 +13,19 @@ import (
 	"sync"
 	"time"
 
+	"aurelia/server/internal/envcfg"
+
 	"github.com/google/uuid"
 )
 
 const backupArchivePrefix = "aurelia-docker-backup-"
+
+// Env-overridable backup-export knobs. Defaults match the historical hardcoded
+// values (see docs/config-reference.md).
+var (
+	backupExportJobHistoryRetention = envcfg.Int("AURELIA_API_BACKUP_EXPORT_JOB_HISTORY_RETENTION", 20)
+	backupExportJobRuntime          = envcfg.Dur("AURELIA_API_BACKUP_EXPORT_JOB_RUNTIME", 12*time.Hour)
+)
 
 type backupExportJob struct {
 	ID            string `json:"id"`
@@ -134,7 +143,7 @@ func (m *backupExportManager) start(includeFiles, includeQdrant bool) (*backupEx
 	m.jobs[id] = job
 	m.order = append([]string{id}, m.order...)
 	m.runningID = id
-	for len(m.order) > 20 {
+	for len(m.order) > backupExportJobHistoryRetention {
 		old := m.order[len(m.order)-1]
 		m.order = m.order[:len(m.order)-1]
 		delete(m.jobs, old)
@@ -197,7 +206,7 @@ func cloneBackupJob(job *backupExportJob) *backupExportJob {
 }
 
 func runBackupExportJob(d Deps, job *backupExportJob) {
-	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Hour)
+	ctx, cancel := context.WithTimeout(context.Background(), backupExportJobRuntime)
 	defer cancel()
 
 	if err := os.MkdirAll(d.Config.BackupDir, 0o755); err != nil {

@@ -10,7 +10,21 @@ import (
 	"strings"
 	"time"
 
+	"aurelia/server/internal/envcfg"
 	"aurelia/server/internal/store"
+)
+
+// Env-overridable defaults (§ config-reference). Each falls back to the
+// original hardcoded value when its AURELIA_* variable is unset.
+var (
+	adminUserListPageSizeCap          = envcfg.Int("AURELIA_API_ADMIN_USER_LIST_PAGE_SIZE_CAP", 50)
+	adminCreatedUserMinPasswordLength = envcfg.Int("AURELIA_API_ADMIN_CREATED_USER_MIN_PASSWORD_LENGTH", 8)
+	adminPasswordResetMinLength       = envcfg.Int("AURELIA_API_ADMIN_PASSWORD_RESET_MIN_LENGTH", 8)
+	adminUserConversationsListingCap  = envcfg.Int("AURELIA_API_ADMIN_USER_CONVERSATIONS_LISTING_CAP", 500)
+	usageReportPageSizeCap            = envcfg.Int("AURELIA_API_USAGE_REPORT_PAGE_SIZE_CAP", 50)
+	analyticsWindow                   = envcfg.Int("AURELIA_API_ANALYTICS_WINDOW", 30)
+	analyticsWindow2                  = envcfg.Int("AURELIA_API_ANALYTICS_WINDOW_2", 365)
+	analyticsBreakdownTopN            = envcfg.Int("AURELIA_API_ANALYTICS_BREAKDOWN_TOP_N", 8)
 )
 
 // ===== Channels =====
@@ -462,7 +476,7 @@ func listUsersAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(q.Get("limit"))
 	offset, _ := strconv.Atoi(q.Get("offset"))
 	if limit <= 0 {
-		limit = 50
+		limit = adminUserListPageSizeCap
 	}
 	if limit > 200 {
 		limit = 200
@@ -594,7 +608,7 @@ func createUserAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errors.New("valid email required"))
 		return
 	}
-	if len(req.Password) < 8 {
+	if len(req.Password) < adminCreatedUserMinPasswordLength {
 		writeError(w, 400, errors.New("password must be at least 8 characters"))
 		return
 	}
@@ -630,7 +644,7 @@ func setUserPasswordAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errInvalidInput)
 		return
 	}
-	if len(req.NewPassword) < 8 {
+	if len(req.NewPassword) < adminPasswordResetMinLength {
 		writeError(w, 400, errors.New("password must be at least 8 characters"))
 		return
 	}
@@ -696,7 +710,7 @@ func setUserRoleAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 // admin scope already gates this surface in router.go.
 func listUserConversationsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	userID := pathParam(r, "id")
-	rows, err := store.ListConversations(r.Context(), d.DB, userID, "", "", 500, 0)
+	rows, err := store.ListConversations(r.Context(), d.DB, userID, "", "", adminUserConversationsListingCap, 0)
 	if err != nil {
 		writeError(w, 500, err)
 		return
@@ -838,7 +852,7 @@ func parseUsageQuery(r *http.Request) (store.UsageFilter, int, int) {
 	}
 	pageSize, _ := strconv.Atoi(q.Get("page_size"))
 	if pageSize <= 0 || pageSize > 200 {
-		pageSize = 50
+		pageSize = usageReportPageSizeCap
 	}
 	return f, page, pageSize
 }
@@ -896,9 +910,9 @@ func usageDeleteFilteredAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 // per-model and per-user breakdowns and their time series (top keys only, so the
 // payload stays bounded).
 func analyticsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
-	days := 30
+	days := analyticsWindow
 	if s := r.URL.Query().Get("days"); s != "" {
-		if n, err := strconv.Atoi(s); err == nil && n > 0 && n <= 365 {
+		if n, err := strconv.Atoi(s); err == nil && n > 0 && n <= analyticsWindow2 {
 			days = n
 		}
 	}
@@ -909,8 +923,8 @@ func analyticsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	trend, _ := store.AdminUsageTrend(ctx, d.DB, days)
-	byModel, _ := store.AdminUsageBreakdown(ctx, d.DB, days, "model_id", 8)
-	byUser, _ := store.AdminUsageBreakdown(ctx, d.DB, days, "user_id", 8)
+	byModel, _ := store.AdminUsageBreakdown(ctx, d.DB, days, "model_id", analyticsBreakdownTopN)
+	byUser, _ := store.AdminUsageBreakdown(ctx, d.DB, days, "user_id", analyticsBreakdownTopN)
 	modelSeries, _ := store.AdminUsageSeries(ctx, d.DB, days, "model_id", breakdownKeys(byModel))
 	userSeries, _ := store.AdminUsageSeries(ctx, d.DB, days, "user_id", breakdownKeys(byUser))
 	writeJSON(w, 200, map[string]any{

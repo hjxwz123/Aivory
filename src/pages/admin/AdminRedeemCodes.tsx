@@ -39,6 +39,7 @@ import {
 import { toast } from '@/hooks/use-toast'
 import { useCopy } from '@/hooks/use-clipboard'
 import { formatRelativeDate } from '@/lib/utils'
+import { envNum } from '@/lib/env-config'
 
 type StatusFilter = 'all' | 'unused' | 'redeemed' | 'disabled' | 'expired'
 
@@ -76,7 +77,7 @@ export default function AdminRedeemCodes() {
   const [confirmDelete, setConfirmDelete] = useState<ApiRedeemCode | null>(null)
   const [generated, setGenerated] = useState<ApiRedeemCode[] | null>(null)
   const [page, setPage] = useState(1)
-  const PAGE_SIZE = 20
+  const PAGE_SIZE = envNum('VITE_AURELIA_PAGE_SIZE_2', 20)
   const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE))
   const pageRows = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
   useEffect(() => {

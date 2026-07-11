@@ -10,11 +10,15 @@ import (
 	"strings"
 	"sync"
 	"unicode/utf8"
+
+	"aurelia/server/internal/envcfg"
 )
 
-const (
-	providerRequestBodyMaxBytes  = 128 * 1024
-	providerRequestValueMaxBytes = 8 * 1024
+// These caps are consumed as int (clampString's max param and len() comparisons),
+// so they are wired via envcfg.Int; defaults preserve prior hardcoded behaviour.
+var (
+	providerRequestBodyMaxBytes  = envcfg.Int("AURELIA_LLM_PROVIDER_REQUEST_BODY_MAX_BYTES", 128*1024)
+	providerRequestValueMaxBytes = envcfg.Int("AURELIA_LLM_PROVIDER_REQUEST_VALUE_MAX_BYTES", 8*1024)
 )
 
 type providerRequestSnapshot struct {

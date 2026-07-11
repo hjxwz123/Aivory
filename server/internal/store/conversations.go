@@ -7,6 +7,17 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	"aurelia/server/internal/envcfg"
+)
+
+// Env-overridable pagination limits for conversation listings. Each defaults to
+// the previous hardcoded value when its AURELIA_* variable is unset.
+var (
+	listConversationsLimit           = envcfg.Int("AURELIA_STORE_LISTCONVERSATIONS_LIMIT", 200)
+	listConversationsLimit2          = envcfg.Int("AURELIA_STORE_LISTCONVERSATIONS_LIMIT_2", 500)
+	listWorkspaceConversationsLimit  = envcfg.Int("AURELIA_STORE_LISTWORKSPACECONVERSATIONS_LIMIT", 200)
+	listWorkspaceConversationsLimit2 = envcfg.Int("AURELIA_STORE_LISTWORKSPACECONVERSATIONS_LIMIT_2", 500)
 )
 
 // GetConvProviderStateKey reads one key from a conversation's provider_state
@@ -43,10 +54,10 @@ func SetConvProviderStateKey(ctx context.Context, db *sql.DB, convID, key, value
 // limit controls the page size (default 200, max 500); offset is the row offset.
 func ListConversations(ctx context.Context, db *sql.DB, userID, projectID, archivedFilter string, limit, offset int) ([]Conversation, error) {
 	if limit <= 0 {
-		limit = 200
+		limit = listConversationsLimit
 	}
-	if limit > 500 {
-		limit = 500
+	if limit > listConversationsLimit2 {
+		limit = listConversationsLimit2
 	}
 	// Personal listing ONLY: workspace conversations are fully isolated from the
 	// personal space (§workspaces) and are listed via ListWorkspaceConversations.
@@ -87,10 +98,10 @@ func ListConversations(ctx context.Context, db *sql.DB, userID, projectID, archi
 // CALLER's job (the handler validates before calling).
 func ListWorkspaceConversations(ctx context.Context, db *sql.DB, workspaceID, projectID, archivedFilter string, limit, offset int) ([]Conversation, error) {
 	if limit <= 0 {
-		limit = 200
+		limit = listWorkspaceConversationsLimit
 	}
-	if limit > 500 {
-		limit = 500
+	if limit > listWorkspaceConversationsLimit2 {
+		limit = listWorkspaceConversationsLimit2
 	}
 	q := `SELECT c.id, c.user_id, COALESCE(c.project_id, ''), c.title, c.provider, c.model_id, c.kb_ids, c.rag_mode, c.summary_blocks, COALESCE(c.active_leaf_id, ''), c.provider_state, c.pinned, c.archived, c.starred, c.created_at, c.updated_at, COALESCE(c.inline_source_conv, ''), COALESCE(c.inline_parent_id, ''), COALESCE(c.inline_quote, ''), COALESCE(c.workspace_id, ''), COALESCE(u.name,''), COALESCE(u.settings,'')
 	 FROM conversations c LEFT JOIN users u ON u.id = c.user_id

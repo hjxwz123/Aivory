@@ -8,8 +8,14 @@ import (
 	"strconv"
 	"time"
 
+	"aurelia/server/internal/envcfg"
 	"aurelia/server/internal/store"
 )
+
+// creditWindowPeriodFallbackSeconds is the default timed-window length (in
+// seconds) used when no explicit period is supplied. Overridable via envcfg
+// (operators write a duration string, e.g. "168h"); default preserves 604800s.
+var creditWindowPeriodFallbackSeconds = int64(envcfg.Dur("AURELIA_API_P", 604800*time.Second) / time.Second)
 
 // Credit balance (§ credits). The timed pool refreshes every cycle (unused
 // voided); the permanent pool is bought / admin-set and never expires. The
@@ -24,7 +30,7 @@ func creditMicros(c float64) int64 { return int64(math.Round(c * 1e6)) }
 func creditWindowUsed(ctx context.Context, d Deps, userID string, periodSeconds int) (used float64, windowStart int64) {
 	p := int64(periodSeconds)
 	if p <= 0 {
-		p = 604800
+		p = creditWindowPeriodFallbackSeconds
 	}
 	windowStart = (time.Now().Unix() / p) * p
 	key := "credit:v1:" + userID + ":" + strconv.FormatInt(windowStart, 10)

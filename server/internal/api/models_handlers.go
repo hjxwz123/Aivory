@@ -8,7 +8,18 @@ import (
 	"strings"
 	"time"
 
+	"aurelia/server/internal/envcfg"
 	"aurelia/server/internal/store"
+)
+
+// Env-overridable defaults (§ config-reference). creditMultiplierDivisor keeps
+// the original 5.0 divisor as a float so the price arithmetic still compiles;
+// modelFreeAllotmentQuotaWindowFallback stays an int64 second-count (not a
+// time.Duration) to match the PeriodSeconds math it feeds. Each falls back to
+// the original hardcoded value when its AURELIA_* variable is unset.
+var (
+	creditMultiplierDivisor               = envcfg.F64("AURELIA_API_CREDIT_MULTIPLIER", 5.0)
+	modelFreeAllotmentQuotaWindowFallback = envcfg.Int64("AURELIA_API_P_2", 604800)
 )
 
 // imageCreditCost is the per-image cost in CREDITS for an image model:
@@ -25,7 +36,7 @@ func imageCreditCost(m store.Model, ratePerUSD float64) float64 {
 // creditMultiplier is the relative credit rate shown in the picker: the model's
 // (input + output price) / 5 (so a $5 combined price = ×1.0), one decimal.
 func creditMultiplier(m store.Model) float64 {
-	v := (m.PriceInput + m.PriceOutput) / 5.0
+	v := (m.PriceInput + m.PriceOutput) / creditMultiplierDivisor
 	return math.Round(v*10) / 10
 }
 
@@ -46,7 +57,7 @@ func modelUsesCredits(ctx context.Context, d Deps, userID string, m store.Model,
 	}
 	p := int64(q.PeriodSeconds)
 	if p <= 0 {
-		p = 604800
+		p = modelFreeAllotmentQuotaWindowFallback
 	}
 	start := (time.Now().Unix() / p) * p
 	cost, count, _ := store.UsageInWindow(ctx, d.DB, userID, m.ID, start)

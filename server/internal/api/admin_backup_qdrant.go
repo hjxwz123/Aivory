@@ -11,14 +11,22 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"aurelia/server/internal/envcfg"
 )
 
 const (
-	qdrantArchiveVersion        = 1
-	qdrantCollectionPrefix      = "aurelia_c"
-	qdrantZipManifest           = "qdrant/manifest.json"
-	qdrantZipCollectionDir      = "qdrant/collections/"
-	qdrantArchiveRequestTimeout = 5 * time.Minute
+	qdrantArchiveVersion   = 1
+	qdrantCollectionPrefix = "aurelia_c"
+	qdrantZipManifest      = "qdrant/manifest.json"
+	qdrantZipCollectionDir = "qdrant/collections/"
+)
+
+var (
+	qdrantArchiveRequestTimeout      = envcfg.Dur("AURELIA_API_QDRANT_ARCHIVE_REQUEST_TIMEOUT", 5*time.Minute)
+	qdrantErrorBodyReadCap           = envcfg.Int64("AURELIA_API_QDRANT_ERROR_BODY_READ_CAP", 1<<20)
+	qdrantExportScrollPageSize       = envcfg.Int("AURELIA_API_QDRANT_EXPORT_SCROLL_PAGE_SIZE", 256)
+	qdrantImportUpsertFlushBatchSize = envcfg.Int("AURELIA_API_QDRANT_IMPORT_UPSERT_FLUSH_BATCH_SIZE", 128)
 )
 
 type qdrantArchiveManifest struct {
@@ -84,7 +92,7 @@ func (c *qdrantArchiveClient) do(ctx context.Context, method, path string, body,
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		data, _ := io.ReadAll(io.LimitReader(resp.Body, qdrantErrorBodyReadCap))
 		return fmt.Errorf("qdrant %s %s: %d %s", method, path, resp.StatusCode, strings.TrimSpace(string(data)))
 	}
 	data, err := io.ReadAll(resp.Body)
@@ -174,7 +182,7 @@ func (c *qdrantArchiveClient) exportCollection(ctx context.Context, name string,
 	var offset json.RawMessage
 	for {
 		body := map[string]any{
-			"limit":        256,
+			"limit":        qdrantExportScrollPageSize,
 			"with_payload": true,
 			"with_vector":  true,
 		}
@@ -312,7 +320,7 @@ func (c *qdrantArchiveClient) importCollection(ctx context.Context, name string,
 	}
 	defer rc.Close()
 	dec := json.NewDecoder(rc)
-	batch := make([]qdrantDumpPoint, 0, 128)
+	batch := make([]qdrantDumpPoint, 0, qdrantImportUpsertFlushBatchSize)
 	var total int64
 	flush := func() error {
 		if len(batch) == 0 {
@@ -342,7 +350,7 @@ func (c *qdrantArchiveClient) importCollection(ctx context.Context, name string,
 			p.Payload = json.RawMessage(`{}`)
 		}
 		batch = append(batch, p)
-		if len(batch) >= 128 {
+		if len(batch) >= qdrantImportUpsertFlushBatchSize {
 			if err := flush(); err != nil {
 				return total, err
 			}

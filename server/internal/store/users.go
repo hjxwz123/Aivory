@@ -10,10 +10,21 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"aurelia/server/internal/envcfg"
 )
 
 // ErrNotFound is returned when a queried row is missing.
 var ErrNotFound = errors.New("not found")
+
+// Env-overridable pagination defaults/caps (see docs/config-reference.md); each
+// falls back to the original hardcoded value when its AURELIA_* var is unset.
+var (
+	listUsersPagedDefault    = envcfg.Int("AURELIA_STORE_LIMIT_DEFAULT", 200)
+	listUsersPagedMax        = envcfg.Int("AURELIA_STORE_LIMIT_MAX", 500)
+	listUsersBySearchDefault = envcfg.Int("AURELIA_STORE_LIMIT_2_DEFAULT", 50)
+	listUsersBySearchMax     = envcfg.Int("AURELIA_STORE_LIMIT_2_MAX", 200)
+)
 
 // FindUserByEmail returns nil + ErrNotFound when the user does not exist.
 func FindUserByEmail(ctx context.Context, db *sql.DB, email string) (*User, error) {
@@ -253,7 +264,7 @@ func UpdateUserSettings(ctx context.Context, db *sql.DB, userID string, patch ma
 // backfillUserOnboarded marks legacy accounts as already past first-login
 // onboarding. New accounts still start with `{}` and therefore see the wizard.
 func backfillUserOnboarded(db *sql.DB) {
-	const batch = 500
+	batch := envcfg.Int("AURELIA_STORE_BATCH_2", 500)
 	last := ""
 	for {
 		rows, err := db.Query(`SELECT id, settings FROM users WHERE id > ? ORDER BY id LIMIT ?`, last, batch)
@@ -388,17 +399,17 @@ func DisableUserTotp(ctx context.Context, db *sql.DB, userID string) error {
 
 // ListUsers returns every user (admin only). Paged in memory.
 func ListUsers(ctx context.Context, db *sql.DB) ([]User, error) {
-	return ListUsersPaged(ctx, db, 200, 0)
+	return ListUsersPaged(ctx, db, listUsersPagedDefault, 0)
 }
 
 // ListUsersPaged returns users with pagination support. Limit defaults to 200
 // and is capped at 500 to prevent unbounded queries at scale.
 func ListUsersPaged(ctx context.Context, db *sql.DB, limit, offset int) ([]User, error) {
 	if limit <= 0 {
-		limit = 200
+		limit = listUsersPagedDefault
 	}
-	if limit > 500 {
-		limit = 500
+	if limit > listUsersPagedMax {
+		limit = listUsersPagedMax
 	}
 	if offset < 0 {
 		offset = 0
@@ -452,10 +463,10 @@ func scanUsers(rows *sql.Rows) ([]User, error) {
 // (matched against email and name case-insensitively). Limit is capped at 200.
 func ListUsersBySearch(ctx context.Context, db *sql.DB, search string, limit, offset int) ([]User, error) {
 	if limit <= 0 {
-		limit = 50
+		limit = listUsersBySearchDefault
 	}
-	if limit > 200 {
-		limit = 200
+	if limit > listUsersBySearchMax {
+		limit = listUsersBySearchMax
 	}
 	if offset < 0 {
 		offset = 0

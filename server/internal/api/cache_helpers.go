@@ -5,10 +5,14 @@ import (
 	"encoding/json"
 	"time"
 
+	"aurelia/server/internal/envcfg"
 	"aurelia/server/internal/store"
 )
 
-const authUserCacheTTL = 5 * time.Minute
+var (
+	authUserCacheTTL             = envcfg.Dur("AURELIA_API_AUTH_USER_CACHE_TTL", 5*time.Minute)
+	authUserCacheTTLGroupExpired = envcfg.Dur("AURELIA_API_AUTH_USER_CACHE_TTL_GROUP_ALREADY", time.Second)
+)
 
 func cachedAuthUser(ctx context.Context, d Deps, userID string) (*store.User, error) {
 	if d.Cache == nil {
@@ -56,7 +60,7 @@ func authUserTTL(u store.User) time.Duration {
 	if u.GroupExpiresAt > 0 {
 		until := time.Until(time.Unix(u.GroupExpiresAt, 0))
 		if until <= 0 {
-			return time.Second
+			return authUserCacheTTLGroupExpired
 		}
 		if until < ttl {
 			ttl = until

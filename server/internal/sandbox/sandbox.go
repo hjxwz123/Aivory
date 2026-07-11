@@ -25,6 +25,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"aurelia/server/internal/envcfg"
 )
 
 // File is an artifact produced by a run (a file under /workspace/outputs).
@@ -153,18 +155,23 @@ type HTTPSandbox struct {
 const (
 	// defaultExecTimeout is the per-exec cap when the admin hasn't set one.
 	defaultExecTimeout = 120 * time.Second
-	// maxSandboxRespBytes caps the decoded sidecar response so a buggy/compromised
-	// sidecar can't OOM the API process. Generous: > the 50MB artifact total.
-	maxSandboxRespBytes = 256 << 20
-	// execClientOverhead is added on top of the exec cap to size the HTTP
-	// client timeout: the sidecar still has to write the cell, snapshot, kill a
-	// runaway, and base64 any output files AFTER the code's own deadline. The
-	// sidecar now BOUNDS artifact collection (SANDBOX_MAX_COLLECT_SECONDS, default
-	// 60s) so its post-deadline work is a known quantity; this 120s comfortably
-	// covers that budget plus the fixed control calls, so the client outlasts the
-	// sidecar's worst-case single-exec time instead of cutting it off mid-collection.
-	execClientOverhead = 120 * time.Second
 )
+
+// maxSandboxRespBytes caps the decoded sidecar response so a buggy/compromised
+// sidecar can't OOM the API process. Generous: > the 50MB artifact total.
+var maxSandboxRespBytes = envcfg.Int64("AURELIA_SANDBOX_MAX_SANDBOX_RESP_BYTES", 256<<20)
+
+// execClientOverhead is added on top of the exec cap to size the HTTP
+// client timeout: the sidecar still has to write the cell, snapshot, kill a
+// runaway, and base64 any output files AFTER the code's own deadline. The
+// sidecar now BOUNDS artifact collection (SANDBOX_MAX_COLLECT_SECONDS, default
+// 60s) so its post-deadline work is a known quantity; this 120s comfortably
+// covers that budget plus the fixed control calls, so the client outlasts the
+// sidecar's worst-case single-exec time instead of cutting it off mid-collection.
+var execClientOverhead = envcfg.Dur("AURELIA_SANDBOX_EXEC_CLIENT_OVERHEAD", 120*time.Second)
+
+// sandboxErrorBodyReadCap bounds how much of a 4xx/5xx sidecar error body we read.
+var sandboxErrorBodyReadCap = envcfg.Int64("AURELIA_SANDBOX_SANDBOX_ERROR_BODY_READ_CAP", 64<<10)
 
 // Options configures an HTTPSandbox. The settings-wrapped backend
 // (internal/tools/sandbox_settings.go) fills these from admin settings on every
@@ -233,7 +240,7 @@ func (s *HTTPSandbox) doMethod(ctx context.Context, method, path string, payload
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
-		b, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10)) // error bodies are small; cap anyway
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, sandboxErrorBodyReadCap)) // error bodies are small; cap anyway
 		return fmt.Errorf("sandbox %d: %s", resp.StatusCode, string(b))
 	}
 	if out == nil {

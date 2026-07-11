@@ -12,6 +12,19 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+
+	"aurelia/server/internal/envcfg"
+)
+
+// Env-overridable defaults (§ config-reference). Each falls back to the
+// original hardcoded value when its AURELIA_* variable is unset.
+var (
+	toolResultSummaryTruncationOpenAI = envcfg.Int("AURELIA_LLM_TOOL_RESULT_SUMMARY_TRUNCATION_OPENAI", 240)
+	officialWebSearchContextSize      = envcfg.Str("AURELIA_LLM_OFFICIAL_TOOL_SPEC", "medium")
+	readOpenAIChatStreamBufInit       = envcfg.Int("AURELIA_LLM_READ_OPEN_AICHAT_STREAM_INIT", 64*1024)
+	readOpenAIChatStreamBufMax        = envcfg.Int("AURELIA_LLM_READ_OPEN_AICHAT_STREAM_MAX", 1024*1024)
+	readOpenAIResponsesStreamBufInit  = envcfg.Int("AURELIA_LLM_READ_OPEN_AIRESPONSES_STREAM_INIT", 64*1024)
+	readOpenAIResponsesStreamBufMax   = envcfg.Int("AURELIA_LLM_READ_OPEN_AIRESPONSES_STREAM_MAX", 1024*1024)
 )
 
 // OpenAIProvider supports both the Chat Completions ("chat") and Responses
@@ -89,7 +102,7 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest,
 		}
 	}
 
-	const maxIter = 20
+	maxIter := envcfg.Int("AURELIA_LLM_MAX_ITER_2", 20)
 	historyLen := len(messages)
 	allText := strings.Builder{}
 	allBlocks := []UnifiedBlock{}
@@ -221,10 +234,10 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest,
 				out = "Error: " + r.Err.Error()
 			}
 			allCitations = append(allCitations, r.Citations...)
-			onEvent(SseEvent{Type: "tool_result", Name: tc.Name, ID: tc.ID, Summary: truncate(out, 240), Status: status})
+			onEvent(SseEvent{Type: "tool_result", Name: tc.Name, ID: tc.ID, Summary: truncate(out, toolResultSummaryTruncationOpenAI), Status: status})
 			allBlocks = append(allBlocks, UnifiedBlock{
 				Kind: "tool_call", ToolName: tc.Name, ToolID: tc.ID,
-				Input: tc.Input, Summary: truncate(out, 240),
+				Input: tc.Input, Summary: truncate(out, toolResultSummaryTruncationOpenAI),
 			})
 			messages = append(messages, map[string]any{
 				"role":         "tool",
@@ -321,7 +334,7 @@ func officialToolSpec(name string) map[string]any {
 		// older OpenAI-compatible endpoints don't 400 on unknown fields. Pair
 		// this with include=["web_search_call.action.sources"] (set on the body)
 		// so the cited sources come back.
-		return map[string]any{"type": "web_search", "search_context_size": "medium"}
+		return map[string]any{"type": "web_search", "search_context_size": officialWebSearchContextSize}
 	case "code_interpreter":
 		return map[string]any{"type": "code_interpreter", "container": map[string]any{"type": "auto"}}
 	case "image_generation":
@@ -397,7 +410,7 @@ type openAIResponseCallBuf struct {
 
 func readOpenAIChatStream(body io.Reader, onEvent func(SseEvent)) (string, string, []openAIToolCall, string, Usage, error) {
 	scanner := bufio.NewScanner(body)
-	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	scanner.Buffer(make([]byte, readOpenAIChatStreamBufInit), readOpenAIChatStreamBufMax)
 	text := strings.Builder{}
 	reasoning := strings.Builder{}
 	usage := Usage{}
@@ -589,7 +602,7 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 		}
 	}
 
-	const maxIter = 20
+	maxIter := envcfg.Int("AURELIA_LLM_MAX_ITER_3", 20)
 	historyLen := len(input)
 	allText := strings.Builder{}
 	allBlocks := []UnifiedBlock{}
@@ -752,10 +765,10 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 				out = "Error: " + r.Err.Error()
 			}
 			allCitations = append(allCitations, r.Citations...)
-			onEvent(SseEvent{Type: "tool_result", Name: c.Name, ID: c.ID, Summary: truncate(out, 240), Status: status})
+			onEvent(SseEvent{Type: "tool_result", Name: c.Name, ID: c.ID, Summary: truncate(out, toolResultSummaryTruncationOpenAI), Status: status})
 			allBlocks = append(allBlocks, UnifiedBlock{
 				Kind: "tool_call", ToolName: c.Name, ToolID: c.ID,
-				Input: c.Input, Summary: truncate(out, 240),
+				Input: c.Input, Summary: truncate(out, toolResultSummaryTruncationOpenAI),
 			})
 			input = append(input, map[string]any{
 				"type":    "function_call_output",
@@ -788,7 +801,7 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 // Responses tool loops.
 func readOpenAIResponsesStream(body io.Reader, onEvent func(SseEvent)) (string, string, []openAIToolCall, []hostedToolCall, []Citation, Usage, []map[string]any, error) {
 	scanner := bufio.NewScanner(body)
-	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	scanner.Buffer(make([]byte, readOpenAIResponsesStreamBufInit), readOpenAIResponsesStreamBufMax)
 	text := strings.Builder{}
 	reasoning := strings.Builder{}
 	usage := Usage{}

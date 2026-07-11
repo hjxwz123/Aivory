@@ -11,6 +11,8 @@ import (
 	"log"
 	"net/http"
 	"strings"
+
+	"aurelia/server/internal/envcfg"
 )
 
 // GoogleProvider speaks the generateContent / streamGenerateContent endpoints
@@ -63,7 +65,7 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 		toolsDecl = []map[string]any{{"functionDeclarations": decls}}
 	}
 
-	const maxIter = 20
+	maxIter := envcfg.Int("AURELIA_LLM_MAX_ITER_4", 20)
 	historyLen := len(contents)
 	allText := strings.Builder{}
 	allBlocks := []UnifiedBlock{}
@@ -162,10 +164,10 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 			// §6.2 tool_result MUST include the upstream tool_use id so the UI
 			// can pair the result with the in-flight tool_call card. For Gemini
 			// the id is the function name (multiple calls to the same fn rare).
-			onEvent(SseEvent{Type: "tool_result", Name: c.Name, ID: c.Name, Summary: truncate(out, 240), Status: status})
+			onEvent(SseEvent{Type: "tool_result", Name: c.Name, ID: c.Name, Summary: truncate(out, envcfg.Int("AURELIA_LLM_TOOL_RESULT_SUMMARY_TRUNCATION_GEMINI", 240)), Status: status})
 			allBlocks = append(allBlocks, UnifiedBlock{
 				Kind: "tool_call", ToolName: c.Name, ToolID: c.Name,
-				Input: c.Args, Summary: truncate(out, 240),
+				Input: c.Args, Summary: truncate(out, envcfg.Int("AURELIA_LLM_TOOL_RESULT_SUMMARY_TRUNCATION_GEMINI", 240)),
 			})
 			respParts = append(respParts, map[string]any{
 				"functionResponse": map[string]any{
@@ -322,7 +324,7 @@ func geminiRawCallsAllSigned(turns []map[string]any) bool {
 // Returns: (visible text, thinking text, function calls, raw model parts, usage).
 func readGeminiStream(body io.Reader, onEvent func(SseEvent)) (string, string, []geminiCall, []map[string]any, Usage, error) {
 	scanner := bufio.NewScanner(body)
-	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	scanner.Buffer(make([]byte, envcfg.Int("AURELIA_LLM_READ_GEMINI_STREAM_INIT", 64*1024)), envcfg.Int("AURELIA_LLM_READ_GEMINI_STREAM_MAX", 1024*1024))
 	text := strings.Builder{}
 	thinking := strings.Builder{}
 	calls := []geminiCall{}

@@ -26,6 +26,7 @@ import (
 	"aurelia/server/internal/auth"
 	"aurelia/server/internal/cache"
 	"aurelia/server/internal/config"
+	"aurelia/server/internal/envcfg"
 	"aurelia/server/internal/llm"
 	"aurelia/server/internal/mail"
 	"aurelia/server/internal/queue"
@@ -33,6 +34,17 @@ import (
 	"aurelia/server/internal/store"
 	"aurelia/server/internal/tools"
 	"aurelia/server/internal/vector"
+)
+
+var (
+	archiveGcBootSettleDelay  = envcfg.Dur("AURELIA_CMD_ARCHIVE_GC_BOOT_SETTLE_DELAY", 2*time.Minute)
+	runPruneCtxTimeout        = envcfg.Dur("AURELIA_CMD_RUN_PRUNE", 5*time.Minute)
+	archiveGcSweepInterval    = envcfg.Dur("AURELIA_CMD_ARCHIVE_GC_SWEEP_INTERVAL", 6*time.Hour)
+	readHeaderTimeout         = envcfg.Dur("AURELIA_CMD_HTTP_SERVER", 15*time.Second)
+	writeTimeout              = envcfg.Dur("AURELIA_CMD_HTTP_SERVER_2", 90*time.Minute)
+	idleTimeout               = envcfg.Dur("AURELIA_CMD_HTTP_SERVER_3", 120*time.Second)
+	gracefulShutdownTimeout   = envcfg.Dur("AURELIA_CMD_GRACEFUL_SHUTDOWN_TIMEOUT", 10*time.Second)
+	taskRouterMaxOutputTokens = envcfg.Int("AURELIA_CMD_TASK_ROUTER_ADAPTER_RUN_JSON", 256)
 )
 
 func main() {
@@ -126,7 +138,7 @@ func main() {
 	// without bound. Sweep every 6h and delete archives older than the
 	// admin-configured TTL (settings.storage_archive_ttl_days; 0/blank = off).
 	go func() {
-		time.Sleep(2 * time.Minute) // let boot settle; don't sweep on cold start
+		time.Sleep(archiveGcBootSettleDelay) // let boot settle; don't sweep on cold start
 		// One sweep, with its own recover() so a panic (e.g. a nil deref reached via
 		// a malformed settings value or a garbage sidecar response) is contained to
 		// this iteration instead of unwinding out of the goroutine and crashing the
@@ -138,7 +150,7 @@ func main() {
 				}
 			}()
 			if days := archiveTTLDays(db); days > 0 {
-				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+				ctx, cancel := context.WithTimeout(context.Background(), runPruneCtxTimeout)
 				defer cancel()
 				deleted, err := toolRegistry.Sandbox().PruneArchives(ctx, time.Duration(days)*24*time.Hour)
 				switch {
@@ -151,7 +163,7 @@ func main() {
 		}
 		for {
 			runPrune()
-			time.Sleep(6 * time.Hour)
+			time.Sleep(archiveGcSweepInterval)
 		}
 	}()
 
@@ -183,10 +195,10 @@ func main() {
 	srv := &http.Server{
 		Addr:              cfg.Listen,
 		Handler:           router,
-		ReadHeaderTimeout: 15 * time.Second,
+		ReadHeaderTimeout: readHeaderTimeout,
 		// SSE streams need long write deadlines; 30 minutes matches design.md §11.5.
-		WriteTimeout: 90 * time.Minute,
-		IdleTimeout:  120 * time.Second,
+		WriteTimeout: writeTimeout,
+		IdleTimeout:  idleTimeout,
 	}
 
 	go func() {
@@ -202,7 +214,7 @@ func main() {
 	<-sig
 	logger.Println("shutting down...")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), gracefulShutdownTimeout)
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {
 		logger.Printf("shutdown: %v", err)
@@ -275,6 +287,6 @@ func (a taskRouterAdapter) RunJSON(ctx context.Context, kind, prompt string, out
 		UserID:          opts.UserID,
 		ConversationID:  opts.ConversationID,
 		JSONOutput:      true,
-		MaxOutputTokens: 256,
+		MaxOutputTokens: taskRouterMaxOutputTokens,
 	})
 }

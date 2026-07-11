@@ -16,7 +16,14 @@ import (
 	"strings"
 	"time"
 
+	"aurelia/server/internal/envcfg"
 	"aurelia/server/internal/store"
+)
+
+// Tunable knobs — envcfg overrides; defaults preserve original behaviour.
+var (
+	configImportMultipartMemoryBuffer = envcfg.Int64("AURELIA_API_CONFIG_IMPORT_MULTIPART_MEMORY_BUFFER", 16<<20)
+	backupImportMultipartMemoryBuffer = envcfg.Int64("AURELIA_API_BACKUP_IMPORT_MULTIPART_MEMORY_BUFFER", 32<<20)
 )
 
 // Database backup / migration (§ admin → data migration).
@@ -363,11 +370,11 @@ func addDirToZip(zw *zip.Writer, root, prefix string) error {
 // absent from the archive are kept, which avoids breaking user data references.
 func importConfigAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	const maxConfigSize = 512 << 20 // 512 MiB; config archives are normally tiny.
+	maxConfigSize := envcfg.Int64("AURELIA_API_MAX_CONFIG_SIZE", 512<<20) // 512 MiB; config archives are normally tiny.
 	r.Body = http.MaxBytesReader(w, r.Body, maxConfigSize)
-	if err := r.ParseMultipartForm(16 << 20); err != nil {
+	if err := r.ParseMultipartForm(configImportMultipartMemoryBuffer); err != nil {
 		if err.Error() == "http: request body too large" {
-			http.Error(w, "config file too large (max 512 MB)", http.StatusRequestEntityTooLarge)
+			http.Error(w, fmt.Sprintf("config file too large (max %d MB)", maxConfigSize>>20), http.StatusRequestEntityTooLarge)
 			return
 		}
 		writeError(w, http.StatusBadRequest, errors.New("invalid multipart form"))
@@ -482,7 +489,7 @@ func importBackupAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxBackupSize)
 	// Large parts stream to temp files automatically. 32 MiB stays in memory.
-	if err := r.ParseMultipartForm(32 << 20); err != nil {
+	if err := r.ParseMultipartForm(backupImportMultipartMemoryBuffer); err != nil {
 		if err.Error() == "http: request body too large" {
 			http.Error(w, fmt.Sprintf("backup file too large (max %s)", humanBackupBytes(maxBackupSize)), http.StatusRequestEntityTooLarge)
 			return

@@ -5,7 +5,15 @@ import (
 	"strconv"
 	"strings"
 
+	"aurelia/server/internal/envcfg"
 	"aurelia/server/internal/store"
+)
+
+// Admin workspace listing page-size knobs — overridable via env (see
+// docs/config-reference.md); defaults preserve the previous hardcoded values.
+var (
+	adminWorkspaceListLimit                   = envcfg.Int("AURELIA_API_LIMIT", 200)
+	adminWorkspaceDetailConversationsPageSize = envcfg.Int("AURELIA_API_ADMIN_WORKSPACE_DETAIL_CONVERSATIONS_PAGE_SIZE", 500)
 )
 
 // Workspaces (§workspaces) — fully-isolated collaborative spaces. Creation is
@@ -228,7 +236,7 @@ func teardownWorkspace(d Deps, r *http.Request, ws *store.Workspace) error {
 
 // adminListWorkspacesHandler lists every workspace with owner + member count.
 func adminListWorkspacesHandler(d Deps, w http.ResponseWriter, r *http.Request) {
-	limit, offset := 200, 0
+	limit, offset := adminWorkspaceListLimit, 0
 	if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 {
 		limit = n
 	}
@@ -254,7 +262,7 @@ func adminWorkspaceDetailHandler(d Deps, w http.ResponseWriter, r *http.Request)
 	}
 	ws.InviteToken = "" // never leak the join capability to the admin UI
 	members, _ := store.ListWorkspaceMembers(r.Context(), d.DB, id)
-	convs, _ := store.ListWorkspaceConversations(r.Context(), d.DB, id, "", "any", 500, 0)
+	convs, _ := store.ListWorkspaceConversations(r.Context(), d.DB, id, "", "any", adminWorkspaceDetailConversationsPageSize, 0)
 	projects, _ := store.ListWorkspaceProjects(r.Context(), d.DB, id)
 	kbs, _ := store.ListWorkspaceKBs(r.Context(), d.DB, id)
 	for i := range convs {

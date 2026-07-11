@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"aurelia/server/internal/envcfg"
 	"aurelia/server/internal/sandbox"
 
 	aliyunoss "github.com/aliyun/aliyun-oss-go-sdk/oss"
@@ -20,6 +21,17 @@ import (
 )
 
 const defaultStoragePrefix = "workspaces/"
+
+// Direct-upload / OSS tunables (env-overridable; defaults preserve prior
+// hardcoded behavior).
+var (
+	s3DirectUploadMinClientTimeout   = envcfg.Dur("AURELIA_STORAGE_S3_DIRECT_UPLOAD_MIN_CLIENT_TIMEOUT", 20*time.Minute)
+	directS3OSSUploadHTTPClientTTL   = envcfg.Dur("AURELIA_STORAGE_DIRECT_S3_OSS_UPLOAD_HTTP_CLIENT", 20*time.Minute)
+	aliyunOSSConnectTimeoutSec       = envcfg.Int64("AURELIA_STORAGE_ALIYUN_OSS_CLIENT_CONNECT_READ_TIMEOUTS_CONNECT", 30)
+	aliyunOSSReadWriteTimeoutSec     = envcfg.Int64("AURELIA_STORAGE_ALIYUN_OSS_CLIENT_CONNECT_READ_TIMEOUTS_RW", 300)
+	presignURLTTLSeconds             = int(envcfg.Dur("AURELIA_STORAGE_PRESIGN_URL_TTL", 3600*time.Second) / time.Second)
+	presignURLTTLClampCeilingSeconds = int(envcfg.Dur("AURELIA_STORAGE_PRESIGN_URL_TTL_CLAMP_CEILING", 86400*time.Second) / time.Second)
+)
 
 type directS3Config struct {
 	provider     string
@@ -136,8 +148,8 @@ func (c *Client) deleteDirectS3(ctx context.Context, key string) error {
 
 func (c *Client) newDirectS3Client(ctx context.Context, cfg directS3Config) (*s3.Client, error) {
 	httpClient := c.client
-	if httpClient == nil || httpClient.Timeout < 20*time.Minute {
-		httpClient = &http.Client{Timeout: 20 * time.Minute}
+	if httpClient == nil || httpClient.Timeout < s3DirectUploadMinClientTimeout {
+		httpClient = &http.Client{Timeout: directS3OSSUploadHTTPClientTTL}
 	}
 	opts := []func(*config.LoadOptions) error{
 		config.WithRegion(cfg.region),
@@ -277,7 +289,7 @@ func (c *Client) aliyunOSSBucket() (*aliyunoss.Bucket, error) {
 	if endpoint == "" || bucketName == "" || accessKeyID == "" || accessKeySecret == "" {
 		return nil, fmt.Errorf("storage: incomplete aliyun_oss config")
 	}
-	client, err := aliyunoss.New(endpoint, accessKeyID, accessKeySecret, aliyunoss.Timeout(30, 300))
+	client, err := aliyunoss.New(endpoint, accessKeyID, accessKeySecret, aliyunoss.Timeout(aliyunOSSConnectTimeoutSec, aliyunOSSReadWriteTimeoutSec))
 	if err != nil {
 		return nil, fmt.Errorf("direct aliyun_oss client: %w", err)
 	}
@@ -318,10 +330,10 @@ func storagePrefix(sc *sandbox.StorageConfig) string {
 
 func storageTTL(seconds int) int {
 	if seconds <= 0 {
-		return 3600
+		return presignURLTTLSeconds
 	}
-	if seconds > 86400 {
-		return 86400
+	if seconds > presignURLTTLClampCeilingSeconds {
+		return presignURLTTLClampCeilingSeconds
 	}
 	return seconds
 }

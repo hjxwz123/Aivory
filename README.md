@@ -303,6 +303,16 @@ The env file only holds boot-time essentials:
 | **Sandbox** | `SANDBOX_BASE_URL`, `SANDBOX_API_KEY` | Python sandbox sidecar (optional) |
 | **Boot fallbacks** | `SEARCH_*`, `EMBEDDING_*`, `MINERU_*` | Used when the matching admin setting is absent |
 
+### Advanced tuning (optional)
+
+Beyond the boot-time keys above, every internal timeout, concurrency limit, retry/backoff, batch size, cache TTL, and similar tuning knob is also overridable via environment variable — see **[`docs/config-reference.md`](docs/config-reference.md)** (Chinese: [`docs/config-reference.zh-CN.md`](docs/config-reference.zh-CN.md)) for the full list with defaults and locations.
+
+These are intentionally **not** listed in `.env.example` — leave it alone unless you actually need one. Every variable defaults to the current hardcoded value, so Aurelia's behavior is unchanged if you set none of them. If you need one, copy it from the reference doc into your own `.env`:
+
+- Backend (Go) vars take effect on the next `aurelia-api` restart.
+- `VITE_*` frontend vars are inlined at **build time** — set them before `npm run build` / the frontend Docker build, not at container runtime.
+- `SANDBOX_*` vars belong to the `sandbox-service` process and take effect on its restart.
+
 ---
 
 ## Tech stack

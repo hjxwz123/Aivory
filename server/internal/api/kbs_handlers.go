@@ -6,8 +6,11 @@ import (
 	"strings"
 	"time"
 
+	"aurelia/server/internal/envcfg"
 	"aurelia/server/internal/store"
 )
+
+var kbDocUploadRateLimit = envcfg.Int("AURELIA_API_RATE_LIMIT_USER", 20)
 
 // listKBsHandler returns the user's knowledge bases.
 func listKBsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
@@ -129,7 +132,7 @@ func deleteKBHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 // uploadKBDocHandler accepts a document into the KB and enqueues parsing.
 func uploadKBDocHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
-	if !rateLimitUser(d, u.ID, "upload", 20, time.Minute) { // §C4
+	if !rateLimitUser(d, u.ID, "upload", kbDocUploadRateLimit, time.Minute) { // §C4
 		writeError(w, 429, errUploadRateLimited)
 		return
 	}

@@ -17,8 +17,16 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
+	"time"
+
+	"aurelia/server/internal/envcfg"
 )
+
+// iconServingCacheAge is the GET-icon Cache-Control max-age; defaults to 86400s
+// (24h) when AURELIA_API_ICON_SERVING_CACHE_AGE is unset.
+var iconServingCacheAge = envcfg.Dur("AURELIA_API_ICON_SERVING_CACHE_AGE", 86400*time.Second)
 
 // Icon upload — admin-only POST that stores a small image and returns a URL
 // the model record can reference.
@@ -49,7 +57,7 @@ import (
 // maxIconBytes — small on purpose. Icons render at ~16-32 px in the model
 // picker; anything over 256 KiB is either a photo (wrong tool) or an attempt
 // to waste disk.
-const maxIconBytes = 256 * 1024
+var maxIconBytes = envcfg.Int64("AURELIA_API_ADMIN_ICON_UPLOAD_SIZE", 256*1024)
 
 // allowedIconExt — extension → expected DetectContentType prefix. The
 // DetectContentType return value can also include charset on text/* but for
@@ -249,7 +257,7 @@ func serveIcon(d Deps, w http.ResponseWriter, r *http.Request) {
 		// script/active content with a strict CSP + sandbox.
 		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox")
 	}
-	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.Header().Set("Cache-Control", "public, max-age="+strconv.Itoa(int(iconServingCacheAge.Seconds())))
 	// X-Content-Type-Options: belt-and-braces, prevent any sniff override
 	// downstream.
 	w.Header().Set("X-Content-Type-Options", "nosniff")

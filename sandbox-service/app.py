@@ -117,8 +117,27 @@ DISK_SIZE = os.environ.get("SANDBOX_DISK_SIZE", "")
 # only added to `docker run` when set (path readable inside the sidecar).
 SECCOMP_PROFILE = os.environ.get("SANDBOX_SECCOMP_PROFILE", "")
 
-MAX_OUTPUT_BYTES = 32 * 1024          # stdout/stderr truncation
-MAX_ARTIFACT_BYTES = 20 * 1024 * 1024  # single produced file cap
+MAX_OUTPUT_BYTES = int(os.environ.get("SANDBOX_MAX_OUTPUT_BYTES", str(32 * 1024)))          # stdout/stderr truncation
+MAX_ARTIFACT_BYTES = int(os.environ.get("SANDBOX_MAX_ARTIFACT_BYTES", str(20 * 1024 * 1024)))  # single produced file cap
+
+# Exec reader loop (_run_exec_bounded): selector poll cadence, per-read chunk
+# size, and the post-loop process-wait grace period.
+EXEC_READER_POLL_S = float(os.environ.get("SANDBOX_EXEC_READER_LOOP_POLL_S", "0.2"))
+EXEC_READER_CHUNK_BYTES = int(os.environ.get("SANDBOX_EXEC_READER_LOOP_CHUNK_BYTES", "8192"))
+EXEC_READER_WAIT_GRACE_S = float(os.environ.get("SANDBOX_EXEC_READER_LOOP_WAIT_GRACE_S", "2"))
+
+# Archive tar-stream reader loop: selector poll cadence, per-read chunk size,
+# and the post-loop process-wait grace period.
+ARCHIVE_READ_POLL_S = float(os.environ.get("SANDBOX_ARCHIVE_TAR_READ_POLL_S", "5.0"))
+ARCHIVE_READ_CHUNK_BYTES = int(os.environ.get("SANDBOX_ARCHIVE_TAR_READ_CHUNK_BYTES", "65536"))
+ARCHIVE_READ_WAIT_GRACE_S = float(os.environ.get("SANDBOX_ARCHIVE_TAR_READ_WAIT_GRACE_S", "10"))
+
+# Object-storage SDK timeouts/retries — bound every SDK call so a slow/hung
+# bucket can't freeze the reaper, DELETE, or session creation.
+S3_MAX_ATTEMPTS = int(os.environ.get("SANDBOX_S3_MAX_ATTEMPTS", "3"))
+S3_CONNECT_TIMEOUT_S = float(os.environ.get("SANDBOX_S3_CONNECT_TIMEOUT_S", "10"))
+S3_READ_TIMEOUT_S = float(os.environ.get("SANDBOX_S3_READ_TIMEOUT_S", "120"))
+OSS_CONNECT_TIMEOUT_S = float(os.environ.get("SANDBOX_OSS_CONNECT_TIMEOUT_S", "30"))
 MAX_UPLOAD_BYTES = int(os.environ.get("SANDBOX_MAX_UPLOAD_BYTES", str(20 * 1024 * 1024)))
 MAX_FILES_PER_EXEC = int(os.environ.get("SANDBOX_MAX_FILES_PER_EXEC", "20"))
 MAX_TOTAL_ARTIFACT_BYTES = int(os.environ.get("SANDBOX_MAX_TOTAL_ARTIFACT_BYTES", str(50 * 1024 * 1024)))
@@ -531,14 +550,14 @@ def _run_exec_bounded(name: str, cmd: list[str], *, timeout: float,
                 timed_out = True
                 proc.kill()
                 break
-            for key, _ in sel.select(timeout=0.2):
-                chunk = key.fileobj.read1(8192)
+            for key, _ in sel.select(timeout=EXEC_READER_POLL_S):
+                chunk = key.fileobj.read1(EXEC_READER_CHUNK_BYTES)
                 if chunk:
                     key.data.append(chunk)
                 else:
                     sel.unregister(key.fileobj)
                     key.fileobj.close()
-        exit_code = proc.wait(timeout=2)
+        exit_code = proc.wait(timeout=EXEC_READER_WAIT_GRACE_S)
     except subprocess.TimeoutExpired:
         timed_out = True
         proc.kill()
@@ -1418,8 +1437,8 @@ def _storage_client(storage: dict) -> tuple:
             try:
                 from botocore.config import Config as _BotoConfig  # type: ignore
                 cfg_kwargs: dict[str, Any] = dict(
-                    connect_timeout=10, read_timeout=120,
-                    retries={"max_attempts": 3, "mode": "standard"},
+                    connect_timeout=S3_CONNECT_TIMEOUT_S, read_timeout=S3_READ_TIMEOUT_S,
+                    retries={"max_attempts": S3_MAX_ATTEMPTS, "mode": "standard"},
                 )
                 if endpoint:
                     # A custom endpoint means a non-AWS, S3-compatible store
@@ -1447,7 +1466,7 @@ def _storage_client(storage: dict) -> tuple:
                 auth,
                 _storage_get(storage, "oss_endpoint"),
                 _storage_get(storage, "oss_bucket"),
-                connect_timeout=30,  # bound the call so a slow bucket can't wedge the session lock
+                connect_timeout=OSS_CONNECT_TIMEOUT_S,  # bound the call so a slow bucket can't wedge the session lock
             )
         else:  # local
             # The "client" is just the base dir; filesystem ops resolve keys
@@ -1674,10 +1693,10 @@ def _archive_workspace(session_id: str, storage: Optional[dict]) -> None:
                 timed_out = True
                 proc.kill()
                 break
-            ready, _, _ = select.select([proc.stdout], [], [], 5.0)
+            ready, _, _ = select.select([proc.stdout], [], [], ARCHIVE_READ_POLL_S)
             if not ready:
                 continue
-            chunk = proc.stdout.read1(65536)
+            chunk = proc.stdout.read1(ARCHIVE_READ_CHUNK_BYTES)
             if not chunk:
                 break
             if len(buf) + len(chunk) > MAX_ARCHIVE_BYTES:
@@ -1689,7 +1708,7 @@ def _archive_workspace(session_id: str, storage: Optional[dict]) -> None:
             stderr = proc.stderr.read() if proc.stderr is not None else b""
         finally:
             try:
-                rc = proc.wait(timeout=10)
+                rc = proc.wait(timeout=ARCHIVE_READ_WAIT_GRACE_S)
             except subprocess.TimeoutExpired:
                 proc.kill()
                 rc = -1
@@ -1763,9 +1782,12 @@ def _restore_workspace(session_id: str, storage: Optional[dict]) -> None:
 
 
 # --- Idle reaper ------------------------------------------------------------
+IDLE_REAPER_SWEEP_SECONDS = float(os.environ.get("SANDBOX_IDLE_REAPER_SWEEP_INTERVAL", "300"))
+
+
 def _reaper() -> None:
     while True:
-        time.sleep(300)
+        time.sleep(IDLE_REAPER_SWEEP_SECONDS)
         now = time.time()
         with _state_lock:
             # Per-session TTL (admin-forwarded) wins over the global default. Read

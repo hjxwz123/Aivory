@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"aurelia/server/internal/envcfg"
+
 	"github.com/google/uuid"
 )
 
@@ -22,6 +24,14 @@ const collectionPrefix = "aurelia_c"
 // (Qdrant only accepts unsigned-int or UUID ids). Re-ingesting a chunk maps to
 // the same point, so upserts are idempotent.
 var pointNamespace = uuid.MustParse("8f4d2c1a-1f2e-4b6a-9c3d-7a0b1c2d3e4f")
+
+// Env-overridable Qdrant tunables (envcfg). Defaults preserve prior hardcoded
+// behaviour; overrides are read once at process start.
+var (
+	qdrantHTTPClientTimeout                 = envcfg.Dur("AURELIA_VECTOR_QDRANT_HTTP_CLIENT_TIMEOUT", 20*time.Second)
+	qdrantScrollPageSizeExistingChunkIDs    = envcfg.Int("AURELIA_VECTOR_QDRANT_SCROLL_PAGE_SIZE_EXISTINGCHUNKIDS", 256)
+	qdrantScrollPageSizeVectorChunkStatuses = envcfg.Int("AURELIA_VECTOR_QDRANT_SCROLL_PAGE_SIZE_VECTORCHUNKSTATUSES", 256)
+)
 
 // Qdrant is an HTTP client for a Qdrant server. Safe for concurrent use.
 type Qdrant struct {
@@ -39,7 +49,7 @@ func NewQdrant(baseURL, apiKey string) *Qdrant {
 	return &Qdrant{
 		baseURL: strings.TrimRight(baseURL, "/"),
 		apiKey:  apiKey,
-		http:    &http.Client{Timeout: 20 * time.Second},
+		http:    &http.Client{Timeout: qdrantHTTPClientTimeout},
 		ensured: map[int]bool{},
 	}
 }
@@ -286,7 +296,7 @@ func (q *Qdrant) ExistingChunkIDs(ctx context.Context, dim int, scope Scope) (ma
 	for {
 		body := map[string]any{
 			"filter":       map[string]any{"should": should},
-			"limit":        256,
+			"limit":        qdrantScrollPageSizeExistingChunkIDs,
 			"with_payload": true,
 			"with_vector":  false,
 		}
@@ -348,7 +358,7 @@ func (q *Qdrant) vectorChunkStatuses(ctx context.Context, dim int, should []map[
 	var offset json.RawMessage
 	for {
 		body := map[string]any{
-			"limit":        256,
+			"limit":        qdrantScrollPageSizeVectorChunkStatuses,
 			"with_payload": true,
 			"with_vector":  true,
 		}
@@ -447,7 +457,7 @@ func (q *Qdrant) deleteByField(ctx context.Context, field, value string) error {
 			},
 		},
 	}
-	const deleteConcurrency = 4
+	deleteConcurrency := envcfg.Int("AURELIA_VECTOR_DELETE_CONCURRENCY", 4)
 	var (
 		wg       sync.WaitGroup
 		mu       sync.Mutex

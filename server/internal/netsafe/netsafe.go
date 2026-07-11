@@ -10,6 +10,16 @@ import (
 	"net/http"
 	"syscall"
 	"time"
+
+	"aurelia/server/internal/envcfg"
+)
+
+var (
+	ssrfClientDialTimeout = envcfg.Dur("AURELIA_NETSAFE_NETSAFE_SSRF_CLIENT_DIAL_TIMEOUT", 10*time.Second)
+	maxIdleConns          = envcfg.Int("AURELIA_NETSAFE_MAX_IDLE_CONNS", 10)
+	idleConnTimeout       = envcfg.Dur("AURELIA_NETSAFE_IDLE_CONN_TIMEOUT", 30*time.Second)
+	tlsHandshakeTimeout   = envcfg.Dur("AURELIA_NETSAFE_TLSHANDSHAKE_TIMEOUT", 10*time.Second)
+	maxRedirects          = envcfg.Int("AURELIA_NETSAFE_NETSAFE_REDIRECTS", 5)
 )
 
 // extraDeny lists ranges that Go's IP predicates don't classify as private but
@@ -58,7 +68,7 @@ func IsPublicIP(ip net.IP) bool {
 
 func makeClient(clientTimeout time.Duration, restrictPort bool) *http.Client {
 	dialer := &net.Dialer{
-		Timeout: 10 * time.Second,
+		Timeout: ssrfClientDialTimeout,
 		Control: func(_, address string, _ syscall.RawConn) error {
 			host, port, err := net.SplitHostPort(address)
 			if err != nil {
@@ -77,12 +87,12 @@ func makeClient(clientTimeout time.Duration, restrictPort bool) *http.Client {
 		Timeout: clientTimeout,
 		Transport: &http.Transport{
 			DialContext:         dialer.DialContext,
-			MaxIdleConns:        10,
-			IdleConnTimeout:     30 * time.Second,
-			TLSHandshakeTimeout: 10 * time.Second,
+			MaxIdleConns:        maxIdleConns,
+			IdleConnTimeout:     idleConnTimeout,
+			TLSHandshakeTimeout: tlsHandshakeTimeout,
 		},
 		CheckRedirect: func(_ *http.Request, via []*http.Request) error {
-			if len(via) >= 5 {
+			if len(via) >= maxRedirects {
 				return errors.New("too many redirects")
 			}
 			return nil // each hop's IP+port is re-validated by Dialer.Control
@@ -97,4 +107,6 @@ func SafeClient(clientTimeout time.Duration) *http.Client { return makeClient(cl
 // PrivateBlockClient blocks private/internal IPs (DNS-rebind-safe) but allows
 // any port — for semi-trusted server-to-server downloads (e.g. a MinerU-returned
 // object-storage URL) that may use a non-standard port.
-func PrivateBlockClient(clientTimeout time.Duration) *http.Client { return makeClient(clientTimeout, false) }
+func PrivateBlockClient(clientTimeout time.Duration) *http.Client {
+	return makeClient(clientTimeout, false)
+}

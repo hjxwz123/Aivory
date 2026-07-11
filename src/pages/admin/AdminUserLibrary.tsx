@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button'
 import { useModels } from '@/store/models'
 import { toast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
+import { envNum } from '@/lib/env-config'
 
 function formatStamp(unixSec: number): string {
   if (!unixSec) return ''
@@ -25,7 +26,7 @@ function formatStamp(unixSec: number): string {
   }
 }
 
-const IMAGES_PAGE = 60
+const IMAGES_PAGE = envNum('VITE_AURELIA_IMAGES_PAGE', 60)
 
 function formatBytes(n: number): string {
   if (!n) return ''

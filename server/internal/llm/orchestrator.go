@@ -16,10 +16,27 @@ import (
 	"time"
 
 	"aurelia/server/internal/cache"
+	"aurelia/server/internal/envcfg"
 	"aurelia/server/internal/msgcache"
 	"aurelia/server/internal/queue"
 	"aurelia/server/internal/rag"
 	"aurelia/server/internal/store"
+)
+
+// Env-overridable tuning knobs for inline literals used below. Each defaults to
+// the previous hardcoded value when its AURELIA_* variable is unset (see
+// docs/config-reference.md).
+var (
+	inlineQuoteSourceInjectionCap    = envcfg.Int("AURELIA_LLM_INLINE_QUOTE_SOURCE_INJECTION_CAP", 8000)
+	imageModeForcedGenerationSize    = envcfg.Str("AURELIA_LLM_IMAGE_MODE_FORCED_GENERATION_SIZE_COUNT_SIZE", "1024x1024")
+	imageModeForcedGenerationCount   = envcfg.Int("AURELIA_LLM_IMAGE_MODE_FORCED_GENERATION_SIZE_COUNT_COUNT", 1)
+	imagePromptOptimizerOutputTokens = envcfg.Int("AURELIA_LLM_IMAGE_PROMPT_OPTIMIZER_OUTPUT_TOKENS", 400)
+	ragRouterRecentHistoryCount      = envcfg.Int("AURELIA_LLM_RECENT_HISTORY_STRINGS", 6)
+	ragRouterRecentHistoryTruncate   = envcfg.Int("AURELIA_LLM_RECENT_HISTORY_STRINGS_2", 200)
+	titleGenerationOutputTokens      = envcfg.Int("AURELIA_LLM_TITLE_GENERATION_OUTPUT_TOKENS", 60)
+	sandboxExecTimeoutClampRangeMax  = envcfg.Int("AURELIA_LLM_SANDBOX_EXEC_TIMEOUT_CLAMP_RANGE_MAX", 600)
+	sandboxExecTimeoutClampRangeMin  = envcfg.Int("AURELIA_LLM_SANDBOX_EXEC_TIMEOUT_CLAMP_RANGE_MIN", 10)
+	sandboxExecCtxSafetyMargin       = envcfg.Dur("AURELIA_LLM_SANDBOX_EXEC_CTX_SAFETY_MARGIN", 150*time.Second)
 )
 
 // Orchestrator coordinates the per-message flow described in §3.1: load
@@ -127,30 +144,30 @@ type ImageBiller interface {
 // perTurnToolLimits caps how many times a single tool may run per message
 // (§4.4 — prevents a model from exhausting search/fetch budget). 0 = unlimited.
 var perTurnToolLimits = map[string]int{
-	"web_search":     16,
-	"web_fetch":      12,
-	"fetch_image":    16, // images for a deck/doc — bounded so a turn can't mass-download
-	"image_generate": 8,
-	"python_execute": 16, // §F10: cap sandbox executions/turn (each up to 120s) to bound abuse/DoS
+	"web_search":     envcfg.Int("AURELIA_LLM_PER_TURN_TOOL_LIMITS_WEB_SEARCH", 16),
+	"web_fetch":      envcfg.Int("AURELIA_LLM_PER_TURN_TOOL_LIMITS_WEB_FETCH", 12),
+	"fetch_image":    envcfg.Int("AURELIA_LLM_PER_TURN_TOOL_LIMITS_FETCH_IMAGE", 16), // images for a deck/doc — bounded so a turn can't mass-download
+	"image_generate": envcfg.Int("AURELIA_LLM_PER_TURN_TOOL_LIMITS_IMAGE_GENERATE", 8),
+	"python_execute": envcfg.Int("AURELIA_LLM_PER_TURN_TOOL_LIMITS_PYTHON_EXECUTE", 16), // §F10: cap sandbox executions/turn (each up to 120s) to bound abuse/DoS
 }
 
 // deepResearchToolLimits are the much higher per-turn caps used while the Deep
 // Research engine runs — it deliberately fans out many searches + source reads.
 var deepResearchToolLimits = map[string]int{
-	"web_search":     40,
-	"web_fetch":      25,
-	"fetch_image":    12,
-	"image_generate": 4,
-	"python_execute": 8,
+	"web_search":     envcfg.Int("AURELIA_LLM_DEEP_RESEARCH_TOOL_LIMITS_WEB_SEARCH", 40),
+	"web_fetch":      envcfg.Int("AURELIA_LLM_DEEP_RESEARCH_TOOL_LIMITS_WEB_FETCH", 25),
+	"fetch_image":    envcfg.Int("AURELIA_LLM_DEEP_RESEARCH_TOOL_LIMITS_FETCH_IMAGE", 12),
+	"image_generate": envcfg.Int("AURELIA_LLM_DEEP_RESEARCH_TOOL_LIMITS_IMAGE_GENERATE", 4),
+	"python_execute": envcfg.Int("AURELIA_LLM_DEEP_RESEARCH_TOOL_LIMITS_PYTHON_EXECUTE", 8),
 }
 
 // per-turn GLOBAL tool-call ceiling (§B4): bounds a single message's total
 // tool-driven cost across ALL tools, on top of the per-tool caps — the native
 // provider loop (maxIter=12) otherwise lets the model request unbounded tools
 // per round. Deep Research deliberately fans out far more.
-const (
-	maxToolCallsPerTurn     = 48
-	maxToolCallsPerTurnDeep = 150
+var (
+	maxToolCallsPerTurn     = envcfg.Int("AURELIA_LLM_MAX_TOOL_CALLS_PER_TURN", 48)
+	maxToolCallsPerTurnDeep = envcfg.Int("AURELIA_LLM_MAX_TOOL_CALLS_PER_TURN_DEEP", 150)
 )
 
 // filterDisabledTools drops any tool named in the global `disabled_tools`
@@ -396,7 +413,7 @@ func (o *Orchestrator) resolveFallbackChannel(ctx context.Context, model *store.
 // upstream failure can carry a large response body. Trims on a rune boundary so
 // the stored string stays valid UTF-8.
 func truncErr(s string) string {
-	const max = 2000
+	max := envcfg.Int("AURELIA_LLM_TRUNC_ERR", 2000)
 	if len(s) <= max {
 		return s
 	}
@@ -732,7 +749,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// search tool, so a non-tool model or an unprompted one would never see them).
 	ragScoped := len(kbIDs) > 0 || (o.rag != nil && store.ConversationHasReadyDocs(ctx, o.db, conv.ID))
 	if o.rag != nil && ragScoped && ragMode != "tool" && req.Mode != ModeDeepResearch {
-		recent := recentHistoryStrings(history, 6)
+		recent := recentHistoryStrings(history, ragRouterRecentHistoryCount)
 		var snippets []rag.Snippet
 		var decision rag.RouteDecision
 		// topK=8 (was 5): a large uploaded doc's relevant section can sit outside a
@@ -886,8 +903,8 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 				}
 			}
 			inlineSource = sb.String()
-			if r := []rune(inlineSource); len(r) > 8000 {
-				inlineSource = string(r[:8000]) + "…"
+			if r := []rune(inlineSource); len(r) > inlineQuoteSourceInjectionCap {
+				inlineSource = string(r[:inlineQuoteSourceInjectionCap]) + "…"
 			}
 		}
 	}
@@ -1384,8 +1401,8 @@ func (o *Orchestrator) runImageTurn(
 	// so resolveImageModel uses exactly it.
 	toolInput, _ := json.Marshal(map[string]any{
 		"prompt":       finalPrompt,
-		"n":            1,
-		"size":         "1024x1024",
+		"n":            imageModeForcedGenerationCount,
+		"size":         imageModeForcedGenerationSize,
 		"input_images": inputImageIDs,
 	})
 	var mu sync.Mutex
@@ -1551,7 +1568,7 @@ func (o *Orchestrator) optimizeImagePrompt(ctx context.Context, userID, convID, 
 	out, err := o.task.Run(ctx, TaskKind("task.image_prompt"), ask, RunOpts{
 		SystemPrompt: sys, ModelID: modelID,
 		UserID: userID, ConversationID: convID, MessageID: msgID,
-		MaxOutputTokens: 400,
+		MaxOutputTokens: imagePromptOptimizerOutputTokens,
 	})
 	if err != nil || strings.TrimSpace(out) == "" {
 		return join
@@ -1826,8 +1843,8 @@ func recentHistoryStrings(msgs []store.Message, n int) []string {
 		if t == "" {
 			continue
 		}
-		if len([]rune(t)) > 200 {
-			t = string([]rune(t)[:200])
+		if len([]rune(t)) > ragRouterRecentHistoryTruncate {
+			t = string([]rune(t)[:ragRouterRecentHistoryTruncate])
 		}
 		out = append(out, m.Role+": "+t)
 	}
@@ -2225,7 +2242,7 @@ func (o *Orchestrator) scheduleTitle(convID, userID, userText, locale string) {
 		text, err := o.task.Run(ctx, TaskTitle, userText, RunOpts{
 			UserID:          userID,
 			ConversationID:  convID,
-			MaxOutputTokens: 60,
+			MaxOutputTokens: titleGenerationOutputTokens,
 			SystemPrompt:    sys,
 		})
 		if err != nil || strings.TrimSpace(text) == "" {
@@ -2306,13 +2323,13 @@ type orchToolRunner struct {
 // toolTimeouts bounds a single tool invocation per tool type (§4.3: search
 // 10s / sandbox 120s / image 60s) so one slow tool can't stall the turn.
 var toolTimeouts = map[string]time.Duration{
-	"web_search":     10 * time.Second,
-	"web_fetch":      15 * time.Second,
+	"web_search":     envcfg.Dur("AURELIA_LLM_TOOL_TIMEOUTS", 10*time.Second),
+	"web_fetch":      envcfg.Dur("AURELIA_LLM_TOOL_TIMEOUTS_2", 15*time.Second),
 	"python_execute": 120 * time.Second,
-	"image_generate": 600 * time.Second, // slow third-party image gateways need a wide window
+	"image_generate": envcfg.Dur("AURELIA_LLM_TOOL_TIMEOUTS_3", 600*time.Second), // slow third-party image gateways need a wide window
 }
 
-const toolTimeoutDefault = 100 * time.Second
+var toolTimeoutDefault = envcfg.Dur("AURELIA_LLM_TOOL_TIMEOUT_DEFAULT", 100*time.Second)
 
 // sandboxExecCtxTimeout sizes the per-call ctx for python_execute to the
 // admin-configured sandbox exec cap (settings.sandbox_exec_timeout_sec, default
@@ -2331,16 +2348,16 @@ func sandboxExecCtxTimeout(db *sql.DB) time.Duration {
 					n, _ = strconv.Atoi(strings.TrimSpace(s))
 				}
 			}
-			if n > 600 {
-				secs = 600
-			} else if n >= 10 {
+			if n > sandboxExecTimeoutClampRangeMax {
+				secs = sandboxExecTimeoutClampRangeMax
+			} else if n >= sandboxExecTimeoutClampRangeMin {
 				secs = n
 			} else if n > 0 {
-				secs = 10
+				secs = sandboxExecTimeoutClampRangeMin
 			}
 		}
 	}
-	return time.Duration(secs)*time.Second + 150*time.Second
+	return time.Duration(secs)*time.Second + sandboxExecCtxSafetyMargin
 }
 
 func (r *orchToolRunner) Run(ctx context.Context, name string, input []byte) (string, []Citation, error) {

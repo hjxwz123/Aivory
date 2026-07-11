@@ -6,7 +6,14 @@ import (
 	"strings"
 	"time"
 
+	"aurelia/server/internal/envcfg"
 	"aurelia/server/internal/store"
+)
+
+// Project handler tunables (env-overridable; defaults preserve prior behavior).
+var (
+	projectDetailConversationsPageSize = envcfg.Int("AURELIA_API_PROJECT_DETAIL_CONVERSATIONS_PAGE_SIZE", 200)
+	projectDocUploadRateLimit          = envcfg.Int("AURELIA_API_RATE_LIMIT_USER_2", 20)
 )
 
 // listProjectsHandler returns the user's projects.
@@ -155,7 +162,7 @@ func getProjectHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	if p.KBID != "" {
 		docs, _ = store.ListDocuments(r.Context(), d.DB, "kb", p.KBID)
 	}
-	convs, _ := store.ListConversations(r.Context(), d.DB, u.ID, p.ID, "active", 200, 0)
+	convs, _ := store.ListConversations(r.Context(), d.DB, u.ID, p.ID, "active", projectDetailConversationsPageSize, 0)
 	writeJSON(w, 200, map[string]any{
 		"project":       p,
 		"documents":     docs,
@@ -226,7 +233,7 @@ func listProjectDocsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 // uploadProjectDocHandler ingests a new document into the project KB.
 func uploadProjectDocHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
-	if !rateLimitUser(d, u.ID, "upload", 20, time.Minute) { // §C4
+	if !rateLimitUser(d, u.ID, "upload", projectDocUploadRateLimit, time.Minute) { // §C4
 		writeError(w, 429, errUploadRateLimited)
 		return
 	}

@@ -6,8 +6,13 @@
  * the result fits the byte budget. Small images that already fit are returned
  * untouched (so a crisp small PNG keeps its transparency/format).
  */
-const DEFAULT_MAX_DIM = 1280
-const DEFAULT_MAX_BYTES = 240 * 1024 // headroom under the server's 256 KiB cap
+import { envNum } from '@/lib/env-config'
+
+const DEFAULT_MAX_DIM = envNum('VITE_AURELIA_DEFAULT_MAX_DIM', 1280)
+const DEFAULT_MAX_BYTES = envNum('VITE_AURELIA_DEFAULT_MAX_BYTES', 240 * 1024) // headroom under the server's 256 KiB cap
+const QUALITY_START = envNum('VITE_AURELIA_QUALITY_START', 0.9)
+const QUALITY_FLOOR = envNum('VITE_AURELIA_QUALITY_FLOOR', 0.4)
+const QUALITY_STEP = envNum('VITE_AURELIA_QUALITY_STEP', 0.12)
 
 function canvasToBlob(canvas: HTMLCanvasElement, quality: number): Promise<Blob | null> {
   return new Promise((resolve) => canvas.toBlob((b) => resolve(b), 'image/jpeg', quality))
@@ -44,10 +49,10 @@ export async function resizeImageForUpload(
     ctx.fillRect(0, 0, w, h)
     ctx.drawImage(bitmap, 0, 0, w, h)
 
-    let quality = 0.9
+    let quality = QUALITY_START
     let blob = await canvasToBlob(canvas, quality)
-    while (blob && blob.size > maxBytes && quality > 0.4) {
-      quality = Math.round((quality - 0.12) * 100) / 100
+    while (blob && blob.size > maxBytes && quality > QUALITY_FLOOR) {
+      quality = Math.round((quality - QUALITY_STEP) * 100) / 100
       blob = await canvasToBlob(canvas, quality)
     }
     if (!blob) return file

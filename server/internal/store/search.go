@@ -5,7 +5,13 @@ import (
 	"database/sql"
 	"encoding/json"
 	"strings"
+
+	"aurelia/server/internal/envcfg"
 )
+
+// searchSnippetRadius is the ~rune padding on each side of a content-search
+// snippet window; defaults to 64 when AURELIA_STORE_SEARCH_SNIPPET_RADIUS is unset.
+var searchSnippetRadius = envcfg.Int("AURELIA_STORE_SEARCH_SNIPPET_RADIUS", 64)
 
 // searchTextFromBlocks projects a message's blocks JSON down to the plain words
 // the user typed or the assistant replied — i.e. only `text` blocks. Thinking,
@@ -38,7 +44,7 @@ func searchTextFromBlocks(blocks json.RawMessage) string {
 // migration; best-effort (errors ignored — a missed row just isn't searchable
 // until next written).
 func backfillSearchText(db *sql.DB) {
-	const batch = 500
+	batch := envcfg.Int("AURELIA_STORE_BATCH", 500)
 	last := ""
 	for {
 		rows, err := db.Query(`SELECT id, blocks FROM messages WHERE id > ? ORDER BY id LIMIT ?`, last, batch)
@@ -95,7 +101,7 @@ func likeEscape(s string) string {
 // messages.search_text column (visible text only) rather than the full blocks
 // JSON, so the scan corpus excludes thinking/tool/image data.
 //
-// workspaceID switches the scope (§workspaces): '' searches the caller's
+// workspaceID switches the scope (§workspaces): ” searches the caller's
 // PERSONAL space only; set, it searches that workspace's shared conversations
 // (all members' rows — the HANDLER must have validated membership).
 func SearchConversations(ctx context.Context, db *sql.DB, userID, workspaceID, query string, titleLimit, msgLimit int) (titles []SearchHit, messages []SearchHit, err error) {
@@ -154,7 +160,7 @@ func SearchConversations(ctx context.Context, db *sql.DB, userID, workspaceID, q
 		if err := mRows.Scan(&h.ConversationID, &h.Title, &h.MessageID, &h.Role, &text, &h.CreatedAt, &h.UpdatedAt); err != nil {
 			return nil, nil, err
 		}
-		h.Snippet = buildSnippet(text, q, 64)
+		h.Snippet = buildSnippet(text, q, searchSnippetRadius)
 		messages = append(messages, h)
 	}
 	if err := mRows.Err(); err != nil {

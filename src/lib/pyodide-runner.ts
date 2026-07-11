@@ -31,14 +31,16 @@
  * worker at all, so what remains is pure compute + CDN package downloads.
  */
 
+import { envNum } from '@/lib/env-config'
+
 const PYODIDE_VERSION = '0.28.3'
 const PYODIDE_BASE = `https://cdn.jsdelivr.net/pyodide/v${PYODIDE_VERSION}/full/`
 /** Hard wall-clock cap per run — mirrors the §4.5 sandbox exec ceiling. */
-const RUN_TIMEOUT_MS = 120_000
+const RUN_TIMEOUT_MS = envNum('VITE_AURELIA_RUN_TIMEOUT_MS', 120_000)
 /** Stop runaway `print` loops before they flood postMessage / the DOM. */
-const MAX_STREAM_CHARS = 200_000
+const MAX_STREAM_CHARS = envNum('VITE_AURELIA_MAX_STREAM_CHARS', 200_000)
 /** Cap the repr() of the final expression (think 1M-row DataFrames). */
-const MAX_RESULT_CHARS = 20_000
+const MAX_RESULT_CHARS = envNum('VITE_AURELIA_MAX_RESULT_CHARS', 20_000)
 
 export type PythonRunPhase = 'queued' | 'boot' | 'packages' | 'running'
 

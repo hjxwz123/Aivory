@@ -11,13 +11,22 @@ import (
 	"strings"
 	"time"
 
+	"aurelia/server/internal/envcfg"
 	"aurelia/server/internal/store"
 )
 
 // maxAudioBytes caps an upload at the Whisper API's 25 MiB limit.
 const maxAudioBytes = 25 * 1024 * 1024
 
-var audioHTTPClient = &http.Client{Timeout: 120 * time.Second}
+var audioHTTPClient = &http.Client{Timeout: envcfg.Dur("AURELIA_API_AUDIO_TRANSCRIPTION_UPSTREAM_HTTP_TIMEOUT", 120*time.Second)}
+
+// Env-overridable defaults (§ config-reference); each falls back to the
+// original hardcoded value when its AURELIA_* variable is unset.
+var (
+	audioTranscriptionUserRateLimit            = envcfg.Int("AURELIA_API_AUDIO_TRANSCRIPTION_USER_RATE_LIMIT", 20)
+	transcriptionUpstreamResponseReadCap       = envcfg.Int64("AURELIA_API_TRANSCRIPTION_UPSTREAM_RESPONSE_READ_CAP", 1<<20)
+	transcriptionUpstreamErrorTruncationLength = envcfg.Int("AURELIA_API_TRANSCRIPTION_UPSTREAM_ERROR_TRUNCATION_LENGTH", 240)
+)
 
 // transcribeAudioHandler accepts an audio blob (multipart field "file") and
 // forwards it to an OpenAI-compatible /v1/audio/transcriptions endpoint using
@@ -37,7 +46,7 @@ func transcribeAudioHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	// §D6: per-user rate limit — each call buffers up to 25 MiB and burns the
 	// admin's transcription spend.
-	if u := authUser(r); u != nil && !rateLimitUser(d, u.ID, "audio", 20, time.Minute) {
+	if u := authUser(r); u != nil && !rateLimitUser(d, u.ID, "audio", audioTranscriptionUserRateLimit, time.Minute) {
 		writeError(w, 429, errors.New("transcription rate limit exceeded — try again shortly"))
 		return
 	}
@@ -92,7 +101,7 @@ func transcribeAudioHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer resp.Body.Close()
-	respBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	respBytes, _ := io.ReadAll(io.LimitReader(resp.Body, transcriptionUpstreamResponseReadCap))
 	if resp.StatusCode >= 400 {
 		writeError(w, 502, fmt.Errorf("transcription upstream %d: %s", resp.StatusCode, truncateAudioErr(respBytes)))
 		return
@@ -125,8 +134,8 @@ func settingString(d Deps, key, def string) string {
 
 func truncateAudioErr(b []byte) string {
 	s := strings.TrimSpace(string(b))
-	if len(s) > 240 {
-		return s[:240]
+	if len(s) > transcriptionUpstreamErrorTruncationLength {
+		return s[:transcriptionUpstreamErrorTruncationLength]
 	}
 	return s
 }

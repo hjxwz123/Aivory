@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"aurelia/server/internal/envcfg"
 	"aurelia/server/internal/store"
 )
 
@@ -42,7 +43,27 @@ const (
 // see the cut clamp in MaybeCompact). It sits above the API layer's 10-minute
 // generation cap (api.maxGenDuration); a streaming row older than this is a
 // crash leftover that will never receive content.
-const inflightGrace = 15 * time.Minute
+var inflightGrace = envcfg.Dur("AURELIA_LLM_INFLIGHT_GRACE", 15*time.Minute)
+
+// Env-overridable compaction tunables (envcfg). Defaults preserve prior
+// hardcoded behaviour; overrides are read once at process start.
+// Note: AURELIA_LLM_MESSAGE_TOKEN_MEMO_CACHE_BOUND is a count (map length),
+// wired via envcfg.Int so it can be compared against len(); the summary
+// max-tokens site honours both AURELIA_LLM_COMPACTION_SUMMARY_GENERATION_TOKENS
+// and AURELIA_LLM_MAX_OUTPUT_TOKENS_4 (the former wins when both are set).
+var (
+	msgStructuralOverhead          = envcfg.Int("AURELIA_LLM_T", 4)
+	messageTokenMemoCacheBound     = envcfg.Int("AURELIA_LLM_MESSAGE_TOKEN_MEMO_CACHE_BOUND", 100000)
+	summaryTokensClampFloor        = envcfg.Int("AURELIA_LLM_SUMMARY_TOKENS_CLAMP_FLOOR", 256)
+	bigTokenOverflowNum            = envcfg.Int("AURELIA_LLM_BIG_TOKEN_OVERFLOW_NUM", 5)
+	bigTokenOverflowDen            = envcfg.Int("AURELIA_LLM_BIG_TOKEN_OVERFLOW_DEN", 4)
+	inlineCompactionBacklogFactor  = envcfg.Int("AURELIA_LLM_INLINE_COMPACTION_BACKLOG_FACTOR", 3)
+	compactionSummaryMaxTokens     = envcfg.Int("AURELIA_LLM_COMPACTION_SUMMARY_GENERATION_TOKENS", envcfg.Int("AURELIA_LLM_MAX_OUTPUT_TOKENS_4", 512))
+	deterministicSummaryClipBudget = envcfg.Int("AURELIA_LLM_DETERMINISTIC_SUMMARY_CLIP_BUDGET", 300)
+	summaryBlockCASAttempts        = envcfg.Int("AURELIA_LLM_ATTEMPT", 4)
+	summaryMergeFoldIterCap        = envcfg.Int("AURELIA_LLM_ITER", 3)
+	summaryMergeMaxOutputDivisor   = envcfg.Int("AURELIA_LLM_MAX_OUTPUT_TOKENS_5", 2)
+)
 
 // msgTokenMemo caches the per-message token estimate. Keyed by id + blocks/raw
 // lengths so an edit (blocks change) or finish (raw set) yields a fresh key. The
@@ -71,7 +92,7 @@ func estimateMsgTokens(m store.Message) int {
 	if ok {
 		return v
 	}
-	t := 4 // per-message structural overhead (role markers, framing)
+	t := msgStructuralOverhead // per-message structural overhead (role markers, framing)
 	if len(m.Raw) > 2 {
 		// Replayed verbatim — estimate its real footprint (tool I/O included).
 		t += estimateTokens(string(m.Raw))
@@ -86,7 +107,7 @@ func estimateMsgTokens(m store.Message) int {
 		}
 	}
 	msgTokenMemoMu.Lock()
-	if len(msgTokenMemo) > 100000 { // crude bound — reset in place rather than leak
+	if len(msgTokenMemo) > messageTokenMemoCacheBound { // crude bound — reset in place rather than leak
 		msgTokenMemo = make(map[string]int)
 	}
 	msgTokenMemo[key] = t
@@ -286,7 +307,7 @@ func compactionSettings(db *sql.DB) (keepRounds, tokenTrigger, summaryMaxTokens 
 	if raw, err := store.GetSetting(db, "summary_max_tokens"); err == nil {
 		_ = json.Unmarshal(raw, &summaryMaxTokens)
 	}
-	if summaryMaxTokens < 256 { // floor so the tiered-merge budget stays sane
+	if summaryMaxTokens < summaryTokensClampFloor { // floor so the tiered-merge budget stays sane
 		summaryMaxTokens = defaultSummaryMaxTokens
 	}
 	return
@@ -337,11 +358,11 @@ func PlanCompaction(db *sql.DB, conv *store.Conversation, history []store.Messag
 	// never add a task-model round-trip to first token on a shaky estimate; once a
 	// turn is trimmed its ctxTok drops back under the bar and later turns go async
 	// again, so this fires only on the actual spikes.
-	bigTokenOverflow := exact && tokenTrigger > 0 && ctxTok > tokenTrigger*5/4
+	bigTokenOverflow := exact && tokenTrigger > 0 && ctxTok > tokenTrigger*bigTokenOverflowNum/bigTokenOverflowDen
 	switch {
 	case !overflow:
 		return keep, pathExisting, compactNone
-	case tail > keepRounds*2*3 || bigTokenOverflow:
+	case tail > keepRounds*2*inlineCompactionBacklogFactor || bigTokenOverflow:
 		// Large un-summarised backlog (a freshly-imported long conversation) OR a
 		// real context well past the trigger: summarise inline this turn so the
 		// prompt stays bounded instead of paying one full-price spike first.
@@ -661,12 +682,12 @@ func MaybeCompact(
 			UserID:          payerID, // §workspaces: the sender pays
 			WorkspaceID:     conv.WorkspaceID,
 			ConversationID:  conv.ID,
-			MaxOutputTokens: 512,
+			MaxOutputTokens: compactionSummaryMaxTokens,
 		})
 	}
 	if strings.TrimSpace(text) == "" {
 		// Fall back to a deterministic clip so the system never blocks.
-		text = clipOlder(newer, 300)
+		text = clipOlder(newer, deterministicSummaryClipBudget)
 	}
 	block := SummaryBlock{
 		Level:           1,
@@ -687,7 +708,7 @@ func MaybeCompact(
 	keepFrom := cut
 	finalBlocks := append(append([]SummaryBlock{}, existing...), block)
 	appended := false
-	for attempt := 0; attempt < 4; attempt++ {
+	for attempt := 0; attempt < summaryBlockCASAttempts; attempt++ {
 		var curRaw string
 		if err := db.QueryRowContext(ctx, "SELECT COALESCE(summary_blocks,'[]') FROM conversations WHERE id=?", conv.ID).Scan(&curRaw); err != nil {
 			break // compaction never blocks the turn
@@ -764,7 +785,7 @@ func readSummaryRaw(ctx context.Context, db *sql.DB, convID string) (string, err
 // failure (or a schema-less test fixture) must not block compaction — the guard
 // is a best-effort race-narrower, not a correctness gate for the write itself.
 func messagesStillCurrent(ctx context.Context, db *sql.DB, convID string, msgs []store.Message) bool {
-	const chunkSize = 400
+	chunkSize := envcfg.Int("AURELIA_LLM_CHUNK_SIZE", 400)
 	for start := 0; start < len(msgs); start += chunkSize {
 		end := start + chunkSize
 		if end > len(msgs) {
@@ -845,7 +866,7 @@ func mergeAndPersist(ctx context.Context, db *sql.DB, task *TaskLLM, conv *store
 // prefix can't grow without bound — a single fold of the oldest half may not
 // bring the total under budget if recent coarse blocks dominate.
 func mergeIfOver(ctx context.Context, task *TaskLLM, conv *store.Conversation, payerID string, blocks []SummaryBlock, history []store.Message, budget int) []SummaryBlock {
-	for iter := 0; iter < 3; iter++ {
+	for iter := 0; iter < summaryMergeFoldIterCap; iter++ {
 		pathBlocks := filterBlocksForPath(blocks, history)
 		if summaryTokens(pathBlocks) <= budget || len(pathBlocks) < 2 {
 			return blocks
@@ -918,7 +939,7 @@ func mergeOldestBlocks(ctx context.Context, task *TaskLLM, conv *store.Conversat
 			UserID:          payerID, // §workspaces: the sender pays
 			WorkspaceID:     conv.WorkspaceID,
 			ConversationID:  conv.ID,
-			MaxOutputTokens: budget / 2,
+			MaxOutputTokens: budget / summaryMergeMaxOutputDivisor,
 		})
 	}
 	if strings.TrimSpace(text) == "" {
@@ -932,7 +953,7 @@ func mergeOldestBlocks(ctx context.Context, task *TaskLLM, conv *store.Conversat
 		for _, b := range oldest {
 			parts = append(parts, b.Text)
 		}
-		text = clipToTokens(strings.Join(parts, " "), budget/2)
+		text = clipToTokens(strings.Join(parts, " "), budget/summaryMergeMaxOutputDivisor)
 	}
 	coarse := SummaryBlock{
 		Level:           maxLevel + 1,

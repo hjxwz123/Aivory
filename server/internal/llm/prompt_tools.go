@@ -26,12 +26,16 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"aurelia/server/internal/envcfg"
 )
 
-const (
-	promptMaxIter   = 10
-	promptMaxRetry  = 2
-	promptStopToken = "</tool_call>"
+const promptStopToken = "</tool_call>"
+
+var (
+	promptMaxIter                     = envcfg.Int("AURELIA_LLM_PROMPT_MAX_ITER", 10)
+	promptMaxRetry                    = envcfg.Int("AURELIA_LLM_PROMPT_MAX_RETRY", 2)
+	promptModeToolResultSummaryLength = envcfg.Int("AURELIA_LLM_PROMPT_MODE_TOOL_RESULT_SUMMARY_LENGTH", 240)
 )
 
 // PromptToolPreamble builds the text block appended to the system prompt
@@ -232,14 +236,14 @@ func RunPromptToolLoop(
 			summaryStatus = "error"
 		}
 		citations = append(citations, cites...)
-		onEvent(SseEvent{Type: "tool_result", ID: toolID, Name: call.Name, Summary: truncate(output, 240), Status: summaryStatus})
+		onEvent(SseEvent{Type: "tool_result", ID: toolID, Name: call.Name, Summary: truncate(output, promptModeToolResultSummaryLength), Status: summaryStatus})
 
 		blocks = append(blocks, UnifiedBlock{
 			Kind:     "tool_call",
 			ToolName: call.Name,
 			ToolID:   toolID,
 			Input:    call.Arguments,
-			Summary:  truncate(output, 240),
+			Summary:  truncate(output, promptModeToolResultSummaryLength),
 		})
 
 		// Append assistant + tool_result rounds to history.

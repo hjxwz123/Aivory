@@ -11,10 +11,21 @@ import (
 	"log"
 	"net/http"
 	"strings"
+
+	"aurelia/server/internal/envcfg"
 )
 
 // Force-use context to avoid "imported and not used" if ever the only ref is removed.
 var _ = context.Canceled
+
+// Anthropic provider tunables (env-overridable; defaults preserve prior
+// hardcoded behavior).
+var (
+	anthropicThinkingHeadroomTokens      = envcfg.Int("AURELIA_LLM_APPLY_ANTHROPIC_THINKING_SETTINGS", 2048)
+	toolResultSummaryTruncationAnthropic = envcfg.Int("AURELIA_LLM_TOOL_RESULT_SUMMARY_TRUNCATION_ANTHROPIC", 240)
+	anthropicScannerBufInit              = envcfg.Int("AURELIA_LLM_READ_ANTHROPIC_STREAM_INIT", 64*1024)
+	anthropicScannerBufMax               = envcfg.Int("AURELIA_LLM_READ_ANTHROPIC_STREAM_MAX", 1024*1024)
+)
 
 // AnthropicProvider calls the Messages API (`POST /v1/messages`, SSE). The
 // channel must carry a real api_key; an empty key is a configuration error.
@@ -62,8 +73,8 @@ func applyAnthropicThinkingSettings(body map[string]any, requestID string, maxTo
 	}
 	// max_tokens must exceed budget_tokens because extended thinking spends
 	// from the same Anthropic output budget.
-	if *maxTok < budget+2048 {
-		*maxTok = budget + 2048
+	if *maxTok < budget+anthropicThinkingHeadroomTokens {
+		*maxTok = budget + anthropicThinkingHeadroomTokens
 		body["max_tokens"] = *maxTok
 	}
 }
@@ -141,7 +152,7 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 		return &UnifiedResult{Blocks: blocks, StopReason: "end_turn", Usage: usage, Citations: cites}, nil
 	}
 
-	const maxIter = 20
+	maxIter := envcfg.Int("AURELIA_LLM_MAX_ITER", 20)
 	messages := historyToAnthropic(req.History)
 	historyLen := len(messages) // turns beyond this are this run's raw exchange (§2.3-C)
 	allText := strings.Builder{}
@@ -150,7 +161,7 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 	totalUsage := Usage{}
 
 	for i := 0; i < maxIter; i++ {
-		maxTok := 4096
+		maxTok := envcfg.Int("AURELIA_LLM_MAX_TOK", 4096)
 		if req.MaxOutputTokens > 0 {
 			maxTok = req.MaxOutputTokens
 		}
@@ -275,12 +286,12 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 				out = "Error: " + r.Err.Error()
 			}
 			allCitations = append(allCitations, r.Citations...)
-			onEvent(SseEvent{Type: "tool_result", Name: tc.Name, ID: tc.ID, Summary: truncate(out, 240), Status: status})
+			onEvent(SseEvent{Type: "tool_result", Name: tc.Name, ID: tc.ID, Summary: truncate(out, toolResultSummaryTruncationAnthropic), Status: status})
 			// Persist the tool round as a block so history reconstruction and the
 			// frontend reload keep the full content array (§4.3).
 			allBlocks = append(allBlocks, UnifiedBlock{
 				Kind: "tool_call", ToolName: tc.Name, ToolID: tc.ID,
-				Input: tc.Input, Summary: truncate(out, 240),
+				Input: tc.Input, Summary: truncate(out, toolResultSummaryTruncationAnthropic),
 			})
 			resultBlocks = append(resultBlocks, map[string]any{
 				"type":        "tool_result",
@@ -303,7 +314,7 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 // (markup-stripped) portion itself.
 func (p *AnthropicProvider) promptRunOnce(req UnifiedChatRequest) PromptToolRunner {
 	return func(ctx context.Context, history []UnifiedMessage, system string) (string, Usage, error) {
-		maxTok := 4096
+		maxTok := envcfg.Int("AURELIA_LLM_MAX_TOK_2", 4096)
 		if req.MaxOutputTokens > 0 {
 			maxTok = req.MaxOutputTokens
 		}
@@ -493,7 +504,7 @@ type anthropicThinkingBlock struct {
 // turn.
 func readAnthropicStream(body io.Reader, onEvent func(SseEvent)) (string, []anthropicToolCall, string, []anthropicThinkingBlock, []Citation, Usage, error) {
 	scanner := bufio.NewScanner(body)
-	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	scanner.Buffer(make([]byte, anthropicScannerBufInit), anthropicScannerBufMax)
 	stopReason := "end_turn"
 	text := strings.Builder{}
 	thinking := strings.Builder{}

@@ -41,10 +41,17 @@ import {
 } from '@/components/ui/dialog'
 import { toast } from '@/hooks/use-toast'
 import { useAuth } from '@/store/auth'
+import { envNum } from '@/lib/env-config'
 
 // The literal an admin must type to authorise a destructive restore. Kept as a
 // fixed token (not localized) so muscle memory can't fire it blind.
 const CONFIRM_WORD = 'REPLACE'
+
+const ADMIN_BACKUP_EXPORT_JOB_POLL_INTERVAL_MS = envNum('VITE_AURELIA_ADMIN_BACKUP_EXPORT_JOB_POLL_INTERVAL', 2500)
+const ADMIN_VECTOR_MAINTENANCE_JOB_POLL_INTERVAL_MS = envNum(
+  'VITE_AURELIA_ADMIN_VECTOR_MAINTENANCE_JOB_POLL_INTERVAL',
+  2500,
+)
 
 function formatBytes(n: number): string {
   if (!Number.isFinite(n) || n <= 0) return '0 B'
@@ -192,7 +199,7 @@ export default function AdminBackup() {
       void refreshExportState().catch(() => {
         /* keep polling; transient admin requests can fail during deploys */
       })
-    }, 2500)
+    }, ADMIN_BACKUP_EXPORT_JOB_POLL_INTERVAL_MS)
     return () => window.clearInterval(timer)
   }, [refreshExportState, runningExportID])
 
@@ -202,7 +209,7 @@ export default function AdminBackup() {
       void refreshVectorState().catch(() => {
         /* keep polling; the job continues server-side */
       })
-    }, 2500)
+    }, ADMIN_VECTOR_MAINTENANCE_JOB_POLL_INTERVAL_MS)
     return () => window.clearInterval(timer)
   }, [refreshVectorState, runningVectorID])
 

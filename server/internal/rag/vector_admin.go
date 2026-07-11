@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"aurelia/server/internal/envcfg"
 	"aurelia/server/internal/store"
 	"aurelia/server/internal/vector"
 )
@@ -132,7 +133,7 @@ func (s *Service) RebuildMissingVectors(ctx context.Context, progress func(Vecto
 			emit()
 			continue
 		}
-		const batchSize = 64
+		batchSize := envcfg.Int("AURELIA_RAG_BATCH_SIZE", 64)
 		for start := 0; start < len(rows); start += batchSize {
 			end := start + batchSize
 			if end > len(rows) {

@@ -10,8 +10,12 @@ import (
 	"net/http"
 	"strconv"
 
+	"aurelia/server/internal/envcfg"
 	"aurelia/server/internal/store"
 )
+
+// bulkRedeemCodeGenerationQuantity caps how many codes one bulk request may mint.
+var bulkRedeemCodeGenerationQuantity = envcfg.Int("AURELIA_API_BULK_REDEEM_CODE_GENERATION_QUANTITY", 1000)
 
 // listRedeemCodesAdmin returns redeem codes newest-first.
 // Query params: batch=<name>, status=unused|redeemed|disabled|expired,
@@ -35,7 +39,8 @@ func listRedeemCodesAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 
 // createRedeemCodeAdmin creates either a single code or a batch.
 // Body: { group_id, duration_days, max_uses, expires_at, note, batch_name,
-//         quantity?: int (when >1 a batch is generated) }
+//
+//	quantity?: int (when >1 a batch is generated) }
 func createRedeemCodeAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
 	var body struct {
@@ -45,8 +50,8 @@ func createRedeemCodeAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		ExpiresAt    int64  `json:"expires_at"`
 		Note         string `json:"note"`
 		BatchName    string `json:"batch_name"`
-		Code         string `json:"code"`      // optional — supply your own
-		Quantity     int    `json:"quantity"`  // when >1 → bulk
+		Code         string `json:"code"`     // optional — supply your own
+		Quantity     int    `json:"quantity"` // when >1 → bulk
 	}
 	if err := decodeJSON(r, &body); err != nil {
 		writeError(w, 400, errInvalidInput)
@@ -64,7 +69,7 @@ func createRedeemCodeAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errors.New("max_uses must be 0 or greater"))
 		return
 	}
-	if body.Quantity < 0 || body.Quantity > 1000 {
+	if body.Quantity < 0 || body.Quantity > bulkRedeemCodeGenerationQuantity {
 		writeError(w, 400, errors.New("quantity must be between 1 and 1000"))
 		return
 	}

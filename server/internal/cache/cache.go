@@ -5,6 +5,16 @@ package cache
 import (
 	"sync"
 	"time"
+
+	"aurelia/server/internal/envcfg"
+)
+
+// In-memory cache tuning knobs — overridable via env (see
+// docs/config-reference.md); defaults preserve the previous hardcoded values.
+var (
+	memoryPubSubSubscriberChannelBuffer = envcfg.Int("AURELIA_CACHE_MEMORY_PUB_SUB_SUBSCRIBER_CHANNEL_BUFFER", 16)
+	memoryStreamEventRetentionCap       = envcfg.Int("AURELIA_CACHE_MEMORY_STREAM_EVENT_RETENTION_CAP", 50000)
+	memoryStreamReadPageLimit           = envcfg.Int("AURELIA_CACHE_MEMORY_STREAMREAD_PAGE_LIMIT", 100)
 )
 
 // Cache is the minimal surface we use across the codebase: KV with TTL and a
@@ -195,7 +205,7 @@ func (m *memory) Publish(topic, payload string) {
 }
 
 func (m *memory) Subscribe(topic string) (chan string, func()) {
-	ch := make(chan string, 16)
+	ch := make(chan string, memoryPubSubSubscriberChannelBuffer)
 	m.subsMu.Lock()
 	m.subs[topic] = append(m.subs[topic], ch)
 	m.subsMu.Unlock()
@@ -234,8 +244,8 @@ func (m *memory) StreamAppend(key, value string, ttl time.Duration) (string, boo
 	s.events = append(s.events, StreamEvent{ID: id, Value: value})
 	// Keep a generous cap for dev. Production Redis uses MAXLEN too; either way,
 	// generation streams are for short-lived reconnect/replay, not archival.
-	if len(s.events) > 50000 {
-		s.events = append([]StreamEvent(nil), s.events[len(s.events)-50000:]...)
+	if len(s.events) > memoryStreamEventRetentionCap {
+		s.events = append([]StreamEvent(nil), s.events[len(s.events)-memoryStreamEventRetentionCap:]...)
 	}
 	s.exp = exp
 	m.streams[key] = s
@@ -244,7 +254,7 @@ func (m *memory) StreamAppend(key, value string, ttl time.Duration) (string, boo
 
 func (m *memory) StreamRead(key, afterID string, limit int) ([]StreamEvent, bool) {
 	if limit <= 0 {
-		limit = 100
+		limit = memoryStreamReadPageLimit
 	}
 	m.mu.RLock()
 	s, ok := m.streams[key]

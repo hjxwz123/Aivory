@@ -14,11 +14,19 @@ import (
 	"strings"
 	"time"
 
+	"aurelia/server/internal/envcfg"
 	"aurelia/server/internal/store"
 )
 
 // errFileTooLarge is returned when an upload exceeds MaxUploadBytes (§C3).
 var errFileTooLarge = errors.New("file exceeds the maximum upload size")
+
+var (
+	uploadRateLimitMax    = envcfg.Int("AURELIA_API_UPLOAD_RATE_LIMIT_MAX", 20)
+	uploadRateLimitWindow = envcfg.Dur("AURELIA_API_UPLOAD_RATE_LIMIT_WINDOW", time.Minute)
+	artifactCacheTTL      = envcfg.Dur("AURELIA_API_ARTIFACT_CACHE_TTL", 31536000*time.Second)
+	uploadedFileCacheTTL  = envcfg.Dur("AURELIA_API_UPLOADED_FILE_CACHE_TTL", 86400*time.Second)
+)
 
 // uploadLimitBytes returns the byte ceiling for a file of the given kind, read
 // from admin settings (max_image_upload_mb / max_file_upload_mb, in MB) and
@@ -210,7 +218,7 @@ func receiveDocument(d Deps, r *http.Request, kbID, convID string) (*store.Docum
 // bytes to the filesystem (§4.6).
 func uploadFileHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
-	if !rateLimitUser(d, u.ID, "upload", 20, time.Minute) { // §C4
+	if !rateLimitUser(d, u.ID, "upload", uploadRateLimitMax, uploadRateLimitWindow) { // §C4
 		writeError(w, 429, errUploadRateLimited)
 		return
 	}
@@ -527,7 +535,7 @@ func serveStoredArtifact(d Deps, w http.ResponseWriter, a *store.Artifact) {
 	// and chat re-render the same generated images constantly; without this every
 	// <img> re-streams from the server (slow first paint, wasted bandwidth).
 	// Private because artifacts are owner-scoped. (§ image caching)
-	w.Header().Set("cache-control", "private, max-age=31536000, immutable")
+	w.Header().Set("cache-control", fmt.Sprintf("private, max-age=%d, immutable", int(artifactCacheTTL.Seconds())))
 	// Disposition: inline for browser-previewable, XSS-safe types (images, PDF,
 	// plain text); attachment for everything else. RFC 6266 encoding keeps
 	// non-ASCII names intact.
@@ -593,7 +601,7 @@ func serveStoredFile(d Deps, w http.ResponseWriter, f *store.File) {
 	// Cache so a single conversation page's repeated image-tag fetches don't
 	// re-stream the same file on every navigation. The file_id never collides,
 	// so a long TTL is safe; we keep it private since the file is owner-scoped.
-	w.Header().Set("cache-control", "private, max-age=86400")
+	w.Header().Set("cache-control", fmt.Sprintf("private, max-age=%d", int(uploadedFileCacheTTL.Seconds())))
 	disp := "attachment"
 	if previewableInline(contentType) {
 		disp = "inline"

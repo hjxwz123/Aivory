@@ -19,7 +19,13 @@ import (
 	"strings"
 	"time"
 
+	"aurelia/server/internal/envcfg"
 	"aurelia/server/internal/store"
+)
+
+var (
+	smtpDialTimeout  = envcfg.Dur("AURELIA_MAIL_SMTP_DIAL_TIMEOUT", 10*time.Second)
+	smtpSendDeadline = envcfg.Dur("AURELIA_MAIL_DEADLINE", 25*time.Second)
 )
 
 // Sender is the surface the auth handlers use. Implementations must be safe
@@ -141,8 +147,8 @@ func (s *SMTPSender) send(cfg smtpConfig, to, subject, htmlBody string) error {
 	// STARTTLS, 465 expects implicit TLS) hangs forever — which froze the
 	// register request on an infinite spinner. A 10s dial + a 25s overall
 	// deadline make a misconfigured server fail fast instead.
-	dialer := &net.Dialer{Timeout: 10 * time.Second}
-	deadline := time.Now().Add(25 * time.Second)
+	dialer := &net.Dialer{Timeout: smtpDialTimeout}
+	deadline := time.Now().Add(smtpSendDeadline)
 
 	var c *smtp.Client
 	if cfg.TLS || cfg.Port == "465" {
