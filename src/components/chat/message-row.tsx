@@ -13,6 +13,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Download,
+  FileDown,
   GitBranchPlus,
   AlertTriangle,
   X,
@@ -160,6 +161,24 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
   const [filePreview, setFilePreview] = useState<{ name: string; url?: string; kind: Attachment['kind'] } | null>(null)
   const editRef = useRef<HTMLTextAreaElement>(null)
   const { copied, copy } = useCopy()
+  const [exportingDocx, setExportingDocx] = useState(false)
+
+  // Export THIS reply as .docx: markdown -> formatted Word, LaTeX -> native
+  // equations (lib/docx-export.ts). Lazy import keeps docx/katex-omml out of
+  // the main bundle; failures surface as a toast, never an exception.
+  const exportDocx = async () => {
+    if (exportingDocx || !message.content) return
+    setExportingDocx(true)
+    try {
+      const { exportMarkdownAsDocx } = await import('@/lib/docx-export')
+      const stamp = new Date().toISOString().slice(0, 16).replace(/[T:]/g, '-')
+      await exportMarkdownAsDocx(message.content, `aivory-reply-${stamp}`)
+    } catch {
+      toast.error(t('actions.exportDocxFailed', { defaultValue: 'Export failed' }))
+    } finally {
+      setExportingDocx(false)
+    }
+  }
 
   useAutosizeTextarea(editRef, draft, 14)
 
@@ -612,6 +631,20 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
 
                 {!isUser && (
                   <>
+                    {message.content ? (
+                      <Tooltip content={t('actions.exportDocx', { defaultValue: 'Export as Word' })}>
+                        <button
+                          type="button"
+                          onClick={exportDocx}
+                          disabled={exportingDocx}
+                          aria-label={t('actions.exportDocx', { defaultValue: 'Export as Word' })}
+                          aria-busy={exportingDocx}
+                          className="inline-flex items-center justify-center size-7 max-sm:size-9 rounded-[7px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] disabled:opacity-50 disabled:pointer-events-none"
+                        >
+                          <FileDown size={13} aria-hidden />
+                        </button>
+                      </Tooltip>
+                    ) : null}
                     <Tooltip content={t('actions.regenerate')}>
                       <button
                         type="button"
@@ -769,6 +802,13 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
               ) : null}
               {!isUser ? (
                 <>
+                  {message.content ? (
+                    <MsgActionRow
+                      icon={<FileDown size={18} aria-hidden />}
+                      label={t('actions.exportDocx', { defaultValue: 'Export as Word' })}
+                      onClick={() => { setActionSheetOpen(false); void exportDocx() }}
+                    />
+                  ) : null}
                   <MsgActionRow
                     icon={<RefreshCw size={18} aria-hidden />}
                     label={t('actions.regenerate')}
