@@ -18,8 +18,8 @@ import {
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { cn } from '@/lib/utils'
 
-const STYLE_ID = 'aurelia-star-border-style'
-const LAYER_CLASS = 'aurelia-star-border-layer'
+const STYLE_ID = 'aivory-star-border-style'
+const LAYER_CLASS = 'aivory-star-border-layer'
 
 // Band geometry (intrinsic to the effect): each band is 3× the wrapper's width
 // and half its height, sunk almost fully past the clip so only a sliver of the
@@ -40,11 +40,11 @@ function useStarBorderStyles() {
     const style = document.createElement('style')
     style.id = STYLE_ID
     style.textContent = `
-@keyframes aurelia-star-border-bottom {
+@keyframes aivory-star-border-bottom {
   0% { transform: translate(0%, 0%); opacity: 1; }
   100% { transform: translate(-100%, 0%); opacity: 0; }
 }
-@keyframes aurelia-star-border-top {
+@keyframes aivory-star-border-top {
   0% { transform: translate(0%, 0%); opacity: 1; }
   100% { transform: translate(100%, 0%); opacity: 0; }
 }
@@ -106,12 +106,12 @@ export function StarBorder<T extends ElementType = 'div'>({
           <div
             aria-hidden
             className={cn(LAYER_CLASS, 'absolute z-0 rounded-full opacity-70')}
-            style={{ ...band, bottom: BOTTOM_SINK, right: BAND_START, animationName: 'aurelia-star-border-bottom' }}
+            style={{ ...band, bottom: BOTTOM_SINK, right: BAND_START, animationName: 'aivory-star-border-bottom' }}
           />
           <div
             aria-hidden
             className={cn(LAYER_CLASS, 'absolute z-0 rounded-full opacity-70')}
-            style={{ ...band, top: TOP_SINK, left: BAND_START, animationName: 'aurelia-star-border-top' }}
+            style={{ ...band, top: TOP_SINK, left: BAND_START, animationName: 'aivory-star-border-top' }}
           />
         </>
       )}

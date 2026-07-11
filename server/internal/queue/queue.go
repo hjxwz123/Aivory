@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"aurelia/server/internal/envcfg"
+	"aivory/server/internal/envcfg"
 )
 
 // Job is a function that the queue runs in the background.
@@ -42,12 +42,12 @@ type job struct {
 }
 
 // Env-overridable defaults (see docs/config-reference.md); each falls back to
-// the original hardcoded value when its AURELIA_* variable is unset.
+// the original hardcoded value when its AIVORY_* variable is unset.
 var (
-	inProcessWorkers            = envcfg.Int("AURELIA_QUEUE_IN_PROCESS_WORKERS", 8)
-	processJobBuffer            = envcfg.Int("AURELIA_QUEUE_PROCESS_JOB_BUFFER", 256)
-	queueBackpressureJobTimeout = envcfg.Dur("AURELIA_QUEUE_QUEUE_BACKPRESSURE_JOB_TIMEOUT", 30*time.Minute)
-	queueWorkerJobTimeout       = envcfg.Dur("AURELIA_QUEUE_QUEUE_WORKER_JOB_TIMEOUT", 30*time.Minute)
+	inProcessWorkers            = envcfg.Int("AIVORY_QUEUE_IN_PROCESS_WORKERS", 8)
+	processJobBuffer            = envcfg.Int("AIVORY_QUEUE_PROCESS_JOB_BUFFER", 256)
+	queueBackpressureJobTimeout = envcfg.Dur("AIVORY_QUEUE_QUEUE_BACKPRESSURE_JOB_TIMEOUT", 30*time.Minute)
+	queueWorkerJobTimeout       = envcfg.Dur("AIVORY_QUEUE_QUEUE_WORKER_JOB_TIMEOUT", 30*time.Minute)
 )
 
 // NewInProcess starts the worker pool. Production RAG work uses dedicated

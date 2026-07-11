@@ -13,13 +13,13 @@
   },
   "ready": {
     "title": "準備完了",
-    "body": "Aurelia をあなた好みに設定しました。準備ができたら最初の会話を始めましょう。",
+    "body": "Aivory をあなた好みに設定しました。準備ができたら最初の会話を始めましょう。",
     "cta": "始める"
   },
   "intro": {
-    "eyebrow": "Aurelia へようこそ",
+    "eyebrow": "Aivory へようこそ",
     "title": "もっと静かに考える場所。",
-    "subtitle": "数秒だけ、Aurelia をあなた仕様にしましょう。後から設定でいつでも変更できます。",
+    "subtitle": "数秒だけ、Aivory をあなた仕様にしましょう。後から設定でいつでも変更できます。",
     "points": {
       "write": "ともに考えながら書く",
       "research": "本物のソースに基づくリサーチ",
@@ -38,7 +38,7 @@
     "chatStyle": "返信スタイル",
     "chatStyleBody": "デフォルトの回答はどのくらい詳しくしますか？",
     "memory": "メモリー",
-    "memoryBody": "Aurelia がチャットを通じて役立つ詳細を記憶できるようにします。"
+    "memoryBody": "Aivory がチャットを通じて役立つ詳細を記憶できるようにします。"
   },
   "theme": {
     "light": "ライト",

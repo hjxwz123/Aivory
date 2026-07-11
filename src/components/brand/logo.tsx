@@ -6,7 +6,7 @@ interface LogoMarkProps {
 }
 
 /**
- * Aurelia mark — abstract triangular vessel suggesting attention focusing
+ * Aivory mark — abstract triangular vessel suggesting attention focusing
  * to a point. Rendered as SVG, single accent fill, scales to any size.
  */
 export function LogoMark({ size = 24, className }: LogoMarkProps) {
@@ -16,18 +16,18 @@ export function LogoMark({ size = 24, className }: LogoMarkProps) {
       height={size}
       viewBox="0 0 32 32"
       role="img"
-      aria-label="Aurelia"
+      aria-label="Aivory"
       className={cn('inline-block', className)}
     >
       <defs>
-        <linearGradient id="aurelia-mark" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+        <linearGradient id="aivory-mark" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
           <stop offset="0" stopColor="var(--color-accent)" />
           <stop offset="1" stopColor="var(--color-secondary)" />
         </linearGradient>
       </defs>
       <path
         d="M16 4.5c-1.05 0-2.02.6-2.47 1.55L4.34 24.6c-.74 1.55.4 3.4 2.13 3.4h19.06c1.74 0 2.87-1.85 2.13-3.4L18.47 6.05A2.72 2.72 0 0 0 16 4.5Zm0 4.3 9.8 20.6H6.2L16 8.8Z"
-        fill="url(#aurelia-mark)"
+        fill="url(#aivory-mark)"
       />
       <circle cx="16" cy="22.2" r="1.4" fill="var(--color-accent)" />
     </svg>
@@ -51,7 +51,7 @@ export function Logo({ size = 'md', className }: LogoProps) {
       )}
     >
       <LogoMark size={size === 'sm' ? 18 : size === 'md' ? 22 : 30} />
-      <span className="leading-none">Aurelia</span>
+      <span className="leading-none">Aivory</span>
     </span>
   )
 }

@@ -1,6 +1,6 @@
 import { createHighlighterCore, type HighlighterCore, type LanguageRegistration } from 'shiki/core'
 import { createJavaScriptRegexEngine } from 'shiki/engine/javascript'
-import { aureliaShikiTheme, SHIKI_THEME } from './shiki-theme'
+import { aivoryShikiTheme, SHIKI_THEME } from './shiki-theme'
 
 interface ShikiWorkerRequest {
   id: string
@@ -38,7 +38,7 @@ function languagePath(lang: string): string {
 
 async function getHighlighter(): Promise<HighlighterCore> {
   highlighterPromise ??= createHighlighterCore({
-    themes: [aureliaShikiTheme],
+    themes: [aivoryShikiTheme],
     langs: [],
     engine: createJavaScriptRegexEngine(),
     warnings: false,

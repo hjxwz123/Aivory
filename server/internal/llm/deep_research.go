@@ -39,19 +39,19 @@ import (
 	"sync"
 	"time"
 
-	"aurelia/server/internal/envcfg"
-	"aurelia/server/internal/store"
+	"aivory/server/internal/envcfg"
+	"aivory/server/internal/store"
 )
 
 var (
-	drMaxRounds       = envcfg.Int("AURELIA_LLM_DR_MAX_ROUNDS", 4)                // hard cap on search→verify rounds
-	drQueriesPerRound = envcfg.Int("AURELIA_LLM_DR_QUERIES_PER_ROUND", 6)         // max searches dispatched per round
-	drFetchPerRound   = envcfg.Int("AURELIA_LLM_DR_FETCH_PER_ROUND", 5)           // max sources read per round
-	drMinDeepReads    = envcfg.Int("AURELIA_LLM_DR_MIN_DEEP_READS", 5)            // skill Phase 3: deep-read at least this many sources
-	drSearchTopK      = envcfg.Int("AURELIA_LLM_DR_SEARCH_TOP_K", 8)              // results requested per search
-	drWallClock       = envcfg.Dur("AURELIA_LLM_DR_WALL_CLOCK", 5*time.Minute)    // backstop for the whole engine
-	drCallTimeout     = envcfg.Dur("AURELIA_LLM_DR_CALL_TIMEOUT", 30*time.Second) // per search/fetch call
-	drMaxBodyChars    = 4000                                                      // per-source excerpt fed to the writer
+	drMaxRounds       = envcfg.Int("AIVORY_LLM_DR_MAX_ROUNDS", 4)                // hard cap on search→verify rounds
+	drQueriesPerRound = envcfg.Int("AIVORY_LLM_DR_QUERIES_PER_ROUND", 6)         // max searches dispatched per round
+	drFetchPerRound   = envcfg.Int("AIVORY_LLM_DR_FETCH_PER_ROUND", 5)           // max sources read per round
+	drMinDeepReads    = envcfg.Int("AIVORY_LLM_DR_MIN_DEEP_READS", 5)            // skill Phase 3: deep-read at least this many sources
+	drSearchTopK      = envcfg.Int("AIVORY_LLM_DR_SEARCH_TOP_K", 8)              // results requested per search
+	drWallClock       = envcfg.Dur("AIVORY_LLM_DR_WALL_CLOCK", 5*time.Minute)    // backstop for the whole engine
+	drCallTimeout     = envcfg.Dur("AIVORY_LLM_DR_CALL_TIMEOUT", 30*time.Second) // per search/fetch call
+	drMaxBodyChars    = 4000                                                    // per-source excerpt fed to the writer
 )
 
 // Overridable inline tuning constants for the deep-research engine (env-backed;
@@ -61,14 +61,14 @@ var (
 	maxOutputTokens9                     = 512
 	maxOutputTokens10                    = 2048
 	deepResearchVerifyEvidenceExcerptCap = 200
-	deepResearchValidateTimeout          = envcfg.Dur("AURELIA_LLM_DEEP_RESEARCH_VALIDATE_TIMEOUT", 75*time.Second)
+	deepResearchValidateTimeout          = envcfg.Dur("AIVORY_LLM_DEEP_RESEARCH_VALIDATE_TIMEOUT", 75*time.Second)
 	deepResearchValidateSourceExcerptCap = 2000
 	deepResearchToolResultSummaryCap     = 240
-	scoreGradeA                          = envcfg.F64("AURELIA_LLM_SCORE_A", 9)
-	scoreGradeB                          = envcfg.F64("AURELIA_LLM_SCORE_B", 6)
-	scoreGradeC                          = envcfg.F64("AURELIA_LLM_SCORE_C", 3)
-	scoreKeywordMatch                    = envcfg.F64("AURELIA_LLM_SCORE_KW", 1)
-	scoreFreshDomain                     = envcfg.F64("AURELIA_LLM_SCORE_FRESH_DOMAIN", 2)
+	scoreGradeA                          = envcfg.F64("AIVORY_LLM_SCORE_A", 9)
+	scoreGradeB                          = envcfg.F64("AIVORY_LLM_SCORE_B", 6)
+	scoreGradeC                          = envcfg.F64("AIVORY_LLM_SCORE_C", 3)
+	scoreKeywordMatch                    = envcfg.F64("AIVORY_LLM_SCORE_KW", 1)
+	scoreFreshDomain                     = envcfg.F64("AIVORY_LLM_SCORE_FRESH_DOMAIN", 2)
 )
 
 // drState is the panel state streamed live and persisted for reload. Field tags

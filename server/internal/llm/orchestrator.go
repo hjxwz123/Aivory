@@ -15,28 +15,28 @@ import (
 	"sync/atomic"
 	"time"
 
-	"aurelia/server/internal/cache"
-	"aurelia/server/internal/envcfg"
-	"aurelia/server/internal/msgcache"
-	"aurelia/server/internal/queue"
-	"aurelia/server/internal/rag"
-	"aurelia/server/internal/store"
+	"aivory/server/internal/cache"
+	"aivory/server/internal/envcfg"
+	"aivory/server/internal/msgcache"
+	"aivory/server/internal/queue"
+	"aivory/server/internal/rag"
+	"aivory/server/internal/store"
 )
 
 // Env-overridable tuning knobs for inline literals used below. Each defaults to
-// the previous hardcoded value when its AURELIA_* variable is unset (see
+// the previous hardcoded value when its AIVORY_* variable is unset (see
 // docs/config-reference.md).
 var (
-	inlineQuoteSourceInjectionCap    = envcfg.Int("AURELIA_LLM_INLINE_QUOTE_SOURCE_INJECTION_CAP", 8000)
+	inlineQuoteSourceInjectionCap    = envcfg.Int("AIVORY_LLM_INLINE_QUOTE_SOURCE_INJECTION_CAP", 8000)
 	imageModeForcedGenerationSize    = "1024x1024"
 	imageModeForcedGenerationCount   = 1
 	imagePromptOptimizerOutputTokens = 400
 	ragRouterRecentHistoryCount      = 6
 	ragRouterRecentHistoryTruncate   = 200
 	titleGenerationOutputTokens      = 60
-	sandboxExecTimeoutClampRangeMax  = envcfg.Int("AURELIA_LLM_SANDBOX_EXEC_TIMEOUT_CLAMP_RANGE_MAX", 600)
-	sandboxExecTimeoutClampRangeMin  = envcfg.Int("AURELIA_LLM_SANDBOX_EXEC_TIMEOUT_CLAMP_RANGE_MIN", 10)
-	sandboxExecCtxSafetyMargin       = envcfg.Dur("AURELIA_LLM_SANDBOX_EXEC_CTX_SAFETY_MARGIN", 150*time.Second)
+	sandboxExecTimeoutClampRangeMax  = envcfg.Int("AIVORY_LLM_SANDBOX_EXEC_TIMEOUT_CLAMP_RANGE_MAX", 600)
+	sandboxExecTimeoutClampRangeMin  = envcfg.Int("AIVORY_LLM_SANDBOX_EXEC_TIMEOUT_CLAMP_RANGE_MIN", 10)
+	sandboxExecCtxSafetyMargin       = envcfg.Dur("AIVORY_LLM_SANDBOX_EXEC_CTX_SAFETY_MARGIN", 150*time.Second)
 )
 
 // Orchestrator coordinates the per-message flow described in §3.1: load
@@ -144,21 +144,21 @@ type ImageBiller interface {
 // perTurnToolLimits caps how many times a single tool may run per message
 // (§4.4 — prevents a model from exhausting search/fetch budget). 0 = unlimited.
 var perTurnToolLimits = map[string]int{
-	"web_search":     envcfg.Int("AURELIA_LLM_PER_TURN_TOOL_LIMITS_WEB_SEARCH", 16),
-	"web_fetch":      envcfg.Int("AURELIA_LLM_PER_TURN_TOOL_LIMITS_WEB_FETCH", 12),
-	"fetch_image":    envcfg.Int("AURELIA_LLM_PER_TURN_TOOL_LIMITS_FETCH_IMAGE", 16), // images for a deck/doc — bounded so a turn can't mass-download
-	"image_generate": envcfg.Int("AURELIA_LLM_PER_TURN_TOOL_LIMITS_IMAGE_GENERATE", 8),
-	"python_execute": envcfg.Int("AURELIA_LLM_PER_TURN_TOOL_LIMITS_PYTHON_EXECUTE", 16), // §F10: cap sandbox executions/turn (each up to 120s) to bound abuse/DoS
+	"web_search":     envcfg.Int("AIVORY_LLM_PER_TURN_TOOL_LIMITS_WEB_SEARCH", 16),
+	"web_fetch":      envcfg.Int("AIVORY_LLM_PER_TURN_TOOL_LIMITS_WEB_FETCH", 12),
+	"fetch_image":    envcfg.Int("AIVORY_LLM_PER_TURN_TOOL_LIMITS_FETCH_IMAGE", 16), // images for a deck/doc — bounded so a turn can't mass-download
+	"image_generate": envcfg.Int("AIVORY_LLM_PER_TURN_TOOL_LIMITS_IMAGE_GENERATE", 8),
+	"python_execute": envcfg.Int("AIVORY_LLM_PER_TURN_TOOL_LIMITS_PYTHON_EXECUTE", 16), // §F10: cap sandbox executions/turn (each up to 120s) to bound abuse/DoS
 }
 
 // deepResearchToolLimits are the much higher per-turn caps used while the Deep
 // Research engine runs — it deliberately fans out many searches + source reads.
 var deepResearchToolLimits = map[string]int{
-	"web_search":     envcfg.Int("AURELIA_LLM_DEEP_RESEARCH_TOOL_LIMITS_WEB_SEARCH", 40),
-	"web_fetch":      envcfg.Int("AURELIA_LLM_DEEP_RESEARCH_TOOL_LIMITS_WEB_FETCH", 25),
-	"fetch_image":    envcfg.Int("AURELIA_LLM_DEEP_RESEARCH_TOOL_LIMITS_FETCH_IMAGE", 12),
-	"image_generate": envcfg.Int("AURELIA_LLM_DEEP_RESEARCH_TOOL_LIMITS_IMAGE_GENERATE", 4),
-	"python_execute": envcfg.Int("AURELIA_LLM_DEEP_RESEARCH_TOOL_LIMITS_PYTHON_EXECUTE", 8),
+	"web_search":     envcfg.Int("AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_WEB_SEARCH", 40),
+	"web_fetch":      envcfg.Int("AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_WEB_FETCH", 25),
+	"fetch_image":    envcfg.Int("AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_FETCH_IMAGE", 12),
+	"image_generate": envcfg.Int("AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_IMAGE_GENERATE", 4),
+	"python_execute": envcfg.Int("AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_PYTHON_EXECUTE", 8),
 }
 
 // per-turn GLOBAL tool-call ceiling (§B4): bounds a single message's total
@@ -166,8 +166,8 @@ var deepResearchToolLimits = map[string]int{
 // provider loop (maxIter=12) otherwise lets the model request unbounded tools
 // per round. Deep Research deliberately fans out far more.
 var (
-	maxToolCallsPerTurn     = envcfg.Int("AURELIA_LLM_MAX_TOOL_CALLS_PER_TURN", 48)
-	maxToolCallsPerTurnDeep = envcfg.Int("AURELIA_LLM_MAX_TOOL_CALLS_PER_TURN_DEEP", 150)
+	maxToolCallsPerTurn     = envcfg.Int("AIVORY_LLM_MAX_TOOL_CALLS_PER_TURN", 48)
+	maxToolCallsPerTurnDeep = envcfg.Int("AIVORY_LLM_MAX_TOOL_CALLS_PER_TURN_DEEP", 150)
 )
 
 // filterDisabledTools drops any tool named in the global `disabled_tools`
@@ -2323,13 +2323,13 @@ type orchToolRunner struct {
 // toolTimeouts bounds a single tool invocation per tool type (§4.3: search
 // 10s / sandbox 120s / image 60s) so one slow tool can't stall the turn.
 var toolTimeouts = map[string]time.Duration{
-	"web_search":     envcfg.Dur("AURELIA_LLM_TOOL_TIMEOUTS", 10*time.Second),
-	"web_fetch":      envcfg.Dur("AURELIA_LLM_TOOL_TIMEOUTS_2", 15*time.Second),
+	"web_search":     envcfg.Dur("AIVORY_LLM_TOOL_TIMEOUTS", 10*time.Second),
+	"web_fetch":      envcfg.Dur("AIVORY_LLM_TOOL_TIMEOUTS_2", 15*time.Second),
 	"python_execute": 120 * time.Second,
-	"image_generate": envcfg.Dur("AURELIA_LLM_TOOL_TIMEOUTS_3", 600*time.Second), // slow third-party image gateways need a wide window
+	"image_generate": envcfg.Dur("AIVORY_LLM_TOOL_TIMEOUTS_3", 600*time.Second), // slow third-party image gateways need a wide window
 }
 
-var toolTimeoutDefault = envcfg.Dur("AURELIA_LLM_TOOL_TIMEOUT_DEFAULT", 100*time.Second)
+var toolTimeoutDefault = envcfg.Dur("AIVORY_LLM_TOOL_TIMEOUT_DEFAULT", 100*time.Second)
 
 // sandboxExecCtxTimeout sizes the per-call ctx for python_execute to the
 // admin-configured sandbox exec cap (settings.sandbox_exec_timeout_sec, default

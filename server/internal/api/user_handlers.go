@@ -5,8 +5,8 @@ import (
 	"errors"
 	"net/http"
 
-	"aurelia/server/internal/envcfg"
-	"aurelia/server/internal/store"
+	"aivory/server/internal/envcfg"
+	"aivory/server/internal/store"
 )
 
 // meHandler returns the authenticated user profile.
@@ -206,7 +206,7 @@ func updateMeSettingsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 // deliberately NOT returned to users — only admins can view spend (/admin/usage).
 func meUsageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
-	days := envcfg.Int("AURELIA_API_SELF_USAGE_LOOKBACK_WINDOW", 30)
+	days := envcfg.Int("AIVORY_API_SELF_USAGE_LOOKBACK_WINDOW", 30)
 	_, count, err := store.SumUsageByUser(r.Context(), d.DB, u.ID, days)
 	if err != nil {
 		writeError(w, 500, err)

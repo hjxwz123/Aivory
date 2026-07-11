@@ -12,7 +12,7 @@ func TestComposeSystemPromptIdentity(t *testing.T) {
 	if !strings.Contains(s, "You are GPT 5.5") {
 		t.Errorf("identity should be the model label; prompt = %q", s)
 	}
-	if strings.Contains(s, "Aurelia") {
+	if strings.Contains(s, "Aivory") {
 		t.Error("system prompt must not contain the hardcoded product name")
 	}
 
@@ -24,7 +24,7 @@ func TestComposeSystemPromptIdentity(t *testing.T) {
 
 	// No label → generic fallback, still no product name.
 	s3 := composeSystemPrompt(systemPromptOpts{})
-	if !strings.Contains(s3, "an AI assistant") || strings.Contains(s3, "Aurelia") {
+	if !strings.Contains(s3, "an AI assistant") || strings.Contains(s3, "Aivory") {
 		t.Errorf("empty label should fall back generically; got %q", s3)
 	}
 }

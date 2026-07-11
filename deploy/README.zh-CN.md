@@ -1,4 +1,4 @@
-# Aurelia — 生产部署
+# Aivory — 生产部署
 
 <p align="center">
   <a href="./README.md">English</a> ·
@@ -12,8 +12,8 @@
 | `postgres` | `postgres:16-alpine` | 关系型存储：用户、对话、知识库、用量等。 |
 | `redis` | `redis:7-alpine` | 缓存、限流计数器、跨进程停止流式输出 pub/sub。 |
 | `qdrant` | `qdrant/qdrant:v1.12.4` | RAG 向量检索。 |
-| `sandbox` | `ghcr.io/hjxwz123/aurelia-sandbox-sidecar` | 内置代码执行沙箱，仅供内网访问。 |
-| `app` | `ghcr.io/hjxwz123/aurelia-app`（也可通过 `Dockerfile.app` 本地构建） | 同一个容器同时提供构建后的 SPA 和 `/api` 后端，二者同源。 |
+| `sandbox` | `ghcr.io/hjxwz123/aivory-sandbox-sidecar` | 内置代码执行沙箱，仅供内网访问。 |
+| `app` | `ghcr.io/hjxwz123/aivory-app`（也可通过 `Dockerfile.app` 本地构建） | 同一个容器同时提供构建后的 SPA 和 `/api` 后端，二者同源。 |
 
 完整项目介绍见[根目录 README](../README.zh-CN.md)。本文档只作为部署速查。
 
@@ -59,7 +59,7 @@ compose 文件同时声明了 `image:` 和 `build:`：存在预构建镜像时 C
 
 ## Embedding 维度
 
-Qdrant 按 embedding 宽度使用独立 collection（`aurelia_c<dim>`）。如果配置真实 embedding 模型，请确保 `EMBEDDING_DIM`（以及管理后台中该模型的 `dim`）与模型输出维度一致。否则会使用本地 256 维 embedder，它的 collection 与 1536 维模型向量不兼容。
+Qdrant 按 embedding 宽度使用独立 collection（`aivory_c<dim>`）。如果配置真实 embedding 模型，请确保 `EMBEDDING_DIM`（以及管理后台中该模型的 `dim`）与模型输出维度一致。否则会使用本地 256 维 embedder，它的 collection 与 1536 维模型向量不兼容。
 
 ## TLS 与域名
 

@@ -212,7 +212,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
       )}
     >
       {/* Header — inside a workspace the brand slot shows the WORKSPACE NAME
-          (§workspaces spec: sidebar 上方原先显示 aurelia 的地方显示工作空间名称).
+          (§workspaces spec: sidebar 上方原先显示 aivory 的地方显示工作空间名称).
           Keyed on the active space so switching replays a fade-in (§ workspace
           switch animation) instead of the name jump-cutting. */}
       <div className="flex items-center justify-between px-3 h-[56px] shrink-0">
@@ -702,7 +702,7 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
   const { t } = useTranslation(['chat', 'common', 'settings'])
   const user = useAuth((s) => s.user)
   const logout = useAuth((s) => s.logout)
-  const displayName = user?.name || user?.email?.split('@')[0] || 'Aurelia'
+  const displayName = user?.name || user?.email?.split('@')[0] || 'Aivory'
   const avatarUrl = (user?.settings as Record<string, unknown> | undefined)?.avatar_url as string | undefined
   const isAdmin = user?.role === 'admin'
   const lang = useLanguage((s) => s.lang)

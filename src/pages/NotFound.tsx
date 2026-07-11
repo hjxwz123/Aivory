@@ -32,7 +32,7 @@ export default function NotFound() {
           <div className="mt-9 flex items-center justify-center gap-2">
             <Link to="/chat">
               <Button trailingIcon={<ArrowRight size={14} aria-hidden />}>
-                {t('common:actions.openAurelia')}
+                {t('common:actions.openAivory')}
               </Button>
             </Link>
             <Link to="/">

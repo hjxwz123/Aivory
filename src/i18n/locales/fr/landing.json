@@ -1,19 +1,19 @@
 {
-  "badgeNew": "Nouveau · Aurelia Reason est arrivé",
+  "badgeNew": "Nouveau · Aivory Reason est arrivé",
   "hero": {
     "titleLine1": "Un compagnon IA réfléchi",
     "titleLine2": "à la mesure de votre façon de penser.",
-    "subtitle": "Aurelia est un espace serein pour écrire, raisonner et lire. Conçu autour de votre conversation, et non du modèle qui la sous-tend.",
+    "subtitle": "Aivory est un espace serein pour écrire, raisonner et lire. Conçu autour de votre conversation, et non du modèle qui la sous-tend.",
     "placeholder": "Essayez : esquisser un essai sur l'attention comme vertu morale"
   },
   "capabilities": {
     "eyebrow": "Fonctionnalités",
     "title": "Le produit, c'est l'écriture.",
-    "body": "Trois choses qu'Aurelia fait mieux que ses alternatives. Tout le reste n'est qu'une discrète mise en valeur autour d'elles.",
+    "body": "Trois choses qu'Aivory fait mieux que ses alternatives. Tout le reste n'est qu'une discrète mise en valeur autour d'elles.",
     "items": {
       "writing": {
         "title": "Une écriture qui pense avec vous",
-        "body": "Plans, retouches et brouillons longs dans un seul fil. Aurelia relit ce que vous avez écrit, et le respecte."
+        "body": "Plans, retouches et brouillons longs dans un seul fil. Aivory relit ce que vous avez écrit, et le respecte."
       },
       "research": {
         "title": "Des recherches sourcées",
@@ -87,7 +87,7 @@
   "safety": {
     "eyebrow": "Sécurité et confidentialité",
     "title": "Vos conversations vous appartiennent.",
-    "body": "Aurelia n'entraîne pas ses modèles sur vos conversations par défaut. La mémoire est modifiable et exportable. Les espaces de travail peuvent être isolés pour l'entreprise, avec des règles de conservation personnalisées.",
+    "body": "Aivory n'entraîne pas ses modèles sur vos conversations par défaut. La mémoire est modifiable et exportable. Les espaces de travail peuvent être isolés pour l'entreprise, avec des règles de conservation personnalisées.",
     "rows": {
       "noTraining": {
         "title": "Aucun entraînement sur vos discussions",
@@ -99,7 +99,7 @@
       },
       "memory": {
         "title": "Une mémoire modifiable",
-        "body": "Chaque fait qu'Aurelia apprend est une ligne que vous pouvez modifier ou supprimer."
+        "body": "Chaque fait qu'Aivory apprend est une ligne que vous pouvez modifier ou supprimer."
       }
     }
   },

@@ -20,11 +20,11 @@ import (
 	"strings"
 	"time"
 
-	"aurelia/server/internal/envcfg"
-	"aurelia/server/internal/netsafe"
-	"aurelia/server/internal/sandbox"
-	"aurelia/server/internal/storage"
-	"aurelia/server/internal/store"
+	"aivory/server/internal/envcfg"
+	"aivory/server/internal/netsafe"
+	"aivory/server/internal/sandbox"
+	"aivory/server/internal/storage"
+	"aivory/server/internal/store"
 
 	"github.com/ledongthuc/pdf"
 )
@@ -49,11 +49,11 @@ type MinerUImage struct {
 }
 
 const (
-	pdfInspectionChildModeEnv = "AURELIA_INTERNAL_PDF_INSPECTION_CHILD"
-	pdfInspectionChildPathEnv = "AURELIA_INTERNAL_PDF_INSPECTION_PATH"
+	pdfInspectionChildModeEnv = "AIVORY_INTERNAL_PDF_INSPECTION_CHILD"
+	pdfInspectionChildPathEnv = "AIVORY_INTERNAL_PDF_INSPECTION_PATH"
 )
 
-var pdfInspectionTimeout = envcfg.Dur("AURELIA_RAG_PDF_INSPECTION_TIMEOUT", 8*time.Second)
+var pdfInspectionTimeout = envcfg.Dur("AIVORY_RAG_PDF_INSPECTION_TIMEOUT", 8*time.Second)
 
 // The PDF reader does not accept a context and can spend minutes interpreting a
 // pathological content stream. Run probes in a copy of this executable so the
@@ -250,7 +250,7 @@ func docExt(filename, docPath string) string {
 }
 
 // officeXMLZipEntryReadCap bounds a single DOCX/PPTX zip-entry read.
-var officeXMLZipEntryReadCap = envcfg.Int64("AURELIA_RAG_OFFICE_XML_ZIP_ENTRY_READ_CAP", 16*1024*1024)
+var officeXMLZipEntryReadCap = envcfg.Int64("AIVORY_RAG_OFFICE_XML_ZIP_ENTRY_READ_CAP", 16*1024*1024)
 
 // extractOfficeXML pulls plain text out of a DOCX/PPTX (both are ZIP+XML) using
 // the standard library only, and reports whether the archive embeds any images
@@ -330,8 +330,8 @@ func stripOfficeXML(raw string) string {
 }
 
 var (
-	pdfInspectionSampleLimit = envcfg.Int("AURELIA_RAG_PDF_INSPECTION_SAMPLE_LIMIT", 3)
-	pdfThinCharsPerPage      = envcfg.Int("AURELIA_RAG_PDF_THIN_CHARS_PER_PAGE", 200)
+	pdfInspectionSampleLimit = envcfg.Int("AIVORY_RAG_PDF_INSPECTION_SAMPLE_LIMIT", 3)
+	pdfThinCharsPerPage      = envcfg.Int("AIVORY_RAG_PDF_THIN_CHARS_PER_PAGE", 200)
 )
 
 type pdfTextInspection struct {
@@ -372,7 +372,7 @@ func (r pdfInspectionProbeResult) inspection() pdfTextInspection {
 
 // cmdWaitDelay is the grace period before the PDF-inspection child process is
 // force-killed after its context deadline fires.
-var cmdWaitDelay = envcfg.Dur("AURELIA_RAG_CMD_WAIT_DELAY", 500*time.Millisecond)
+var cmdWaitDelay = envcfg.Dur("AIVORY_RAG_CMD_WAIT_DELAY", 500*time.Millisecond)
 
 var pdfInspectionCommand = func(ctx context.Context, docPath string) (*exec.Cmd, error) {
 	executable, err := os.Executable()
@@ -435,8 +435,8 @@ func inspectPDFRawSignals(raw []byte) pdfRawSignals {
 // strongScan image-to-page ratio: default imageCount*5 >= pages*4 (≈ one image
 // per 80% of pages). Both multipliers are independently overridable.
 var (
-	pdfStrongScanImageFactor = envcfg.Int("AURELIA_RAG_PDF_RAW_SIGNALS_STRONG_SCAN_IMAGE", 5)
-	pdfStrongScanPageFactor  = envcfg.Int("AURELIA_RAG_PDF_RAW_SIGNALS_STRONG_SCAN_PAGE", 4)
+	pdfStrongScanImageFactor = envcfg.Int("AIVORY_RAG_PDF_RAW_SIGNALS_STRONG_SCAN_IMAGE", 5)
+	pdfStrongScanPageFactor  = envcfg.Int("AIVORY_RAG_PDF_RAW_SIGNALS_STRONG_SCAN_PAGE", 4)
 )
 
 func (s pdfRawSignals) strongScan(pages int) bool {
@@ -600,10 +600,10 @@ func extractFullPDFText(docPath string) (text string, pages int, ok bool) {
 
 // mineruSourceObjectCleanupTimeout bounds the best-effort delete of the source
 // object we uploaded for MinerU, run on a fresh context after the parse.
-var mineruSourceObjectCleanupTimeout = envcfg.Dur("AURELIA_RAG_MINERU_SOURCE_OBJECT_CLEANUP_TIMEOUT", 30*time.Second)
+var mineruSourceObjectCleanupTimeout = envcfg.Dur("AIVORY_RAG_MINERU_SOURCE_OBJECT_CLEANUP_TIMEOUT", 30*time.Second)
 
 // mineruPollDeadline caps the total MinerU extract poll loop.
-var mineruPollDeadline = envcfg.Dur("AURELIA_RAG_MINERU_POLL_DEADLINE", 20*time.Minute)
+var mineruPollDeadline = envcfg.Dur("AIVORY_RAG_MINERU_POLL_DEADLINE", 20*time.Minute)
 
 // minerUExtractViaCloud runs the four-step pipeline against the MinerU cloud
 // API (https://mineru.net):
@@ -835,10 +835,10 @@ func minerUPollTask(ctx context.Context, baseURL, token, taskID string, interval
 // mineruZipClient downloads the MinerU result zip. Because the zip URL comes
 // from the API *response* (not admin config), it goes through an SSRF-safe
 // client that blocks private/internal IPs at dial time (§C6).
-var mineruZipClient = netsafe.PrivateBlockClient(envcfg.Dur("AURELIA_RAG_MINERUZIPCLIENT_TIMEOUT", 5*time.Minute))
+var mineruZipClient = netsafe.PrivateBlockClient(envcfg.Dur("AIVORY_RAG_MINERUZIPCLIENT_TIMEOUT", 5*time.Minute))
 
 // fullMdReadCapInsideZip bounds the in-zip full.md read.
-var fullMdReadCapInsideZip = envcfg.Int64("AURELIA_RAG_FULL_MD_READ_CAP_INSIDE_ZIP", 32*1024*1024)
+var fullMdReadCapInsideZip = envcfg.Int64("AIVORY_RAG_FULL_MD_READ_CAP_INSIDE_ZIP", 32*1024*1024)
 
 func minerUDownloadAndUnpack(ctx context.Context, zipURL string) (*MinerUResult, error) {
 	// §C6: only fetch http(s) zip URLs; reject file://, gopher://, etc.
@@ -859,7 +859,7 @@ func minerUDownloadAndUnpack(ctx context.Context, zipURL string) (*MinerUResult,
 	}
 	// Cap the download at 500 MiB — zips for normal documents are <100 MiB;
 	// anything bigger is a runaway and we'd rather error than OOM the server.
-	maxZip := envcfg.Int64("AURELIA_RAG_MAX_ZIP", 500*1024*1024)
+	maxZip := envcfg.Int64("AIVORY_RAG_MAX_ZIP", 500*1024*1024)
 	zipBytes, err := io.ReadAll(io.LimitReader(resp.Body, maxZip+1))
 	if err != nil {
 		return nil, err
@@ -999,13 +999,13 @@ func zipNameIsSafe(name string) bool {
 // download legs of the cloud API. 60s connect + a per-call deadline via the
 // request context keeps individual round-trips honest while the larger
 // poll-loop ceiling is enforced in minerUPollTask.
-var mineruClient = &http.Client{Timeout: envcfg.Dur("AURELIA_RAG_MINERUCLIENT_TIMEOUT", 5*time.Minute)}
+var mineruClient = &http.Client{Timeout: envcfg.Dur("AIVORY_RAG_MINERUCLIENT_TIMEOUT", 5*time.Minute)}
 
 // mineruSourceTTLSeconds is the presigned-URL lifetime for the document we hand
 // MinerU. It must outlast the full OCR window (poll cap 20 min + MinerU queue
 // time); 1 hour gives generous head-room without leaving objects around long
 // (they're also explicitly deleted right after the parse).
-var mineruSourceTTLSeconds = envcfg.Int("AURELIA_RAG_MINERU_SOURCE_TTLSECONDS", 60*60)
+var mineruSourceTTLSeconds = envcfg.Int("AIVORY_RAG_MINERU_SOURCE_TTLSECONDS", 60*60)
 
 func guessImageMime(name string) string {
 	switch strings.ToLower(filepath.Ext(name)) {

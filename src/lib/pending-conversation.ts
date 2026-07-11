@@ -1,4 +1,4 @@
-const PREFIX = 'aurelia:pending-conversation:v1'
+const PREFIX = 'aivory:pending-conversation:v1'
 
 export function pendingConversationKey(userId: string | undefined, scope: string, workspaceId?: string): string {
   return [PREFIX, userId || 'anonymous', workspaceId || 'personal', scope].join(':')

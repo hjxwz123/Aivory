@@ -10,21 +10,21 @@ import (
 	"strings"
 	"time"
 
-	"aurelia/server/internal/envcfg"
-	"aurelia/server/internal/store"
+	"aivory/server/internal/envcfg"
+	"aivory/server/internal/store"
 )
 
 // Env-overridable defaults (§ config-reference). Each falls back to the
-// original hardcoded value when its AURELIA_* variable is unset.
+// original hardcoded value when its AIVORY_* variable is unset.
 var (
-	adminUserListPageSizeCap          = envcfg.Int("AURELIA_API_ADMIN_USER_LIST_PAGE_SIZE_CAP", 50)
-	adminCreatedUserMinPasswordLength = envcfg.Int("AURELIA_API_ADMIN_CREATED_USER_MIN_PASSWORD_LENGTH", 8)
-	adminPasswordResetMinLength       = envcfg.Int("AURELIA_API_ADMIN_PASSWORD_RESET_MIN_LENGTH", 8)
-	adminUserConversationsListingCap  = envcfg.Int("AURELIA_API_ADMIN_USER_CONVERSATIONS_LISTING_CAP", 500)
-	usageReportPageSizeCap            = envcfg.Int("AURELIA_API_USAGE_REPORT_PAGE_SIZE_CAP", 50)
-	analyticsWindow                   = envcfg.Int("AURELIA_API_ANALYTICS_WINDOW", 30)
-	analyticsWindow2                  = envcfg.Int("AURELIA_API_ANALYTICS_WINDOW_2", 365)
-	analyticsBreakdownTopN            = envcfg.Int("AURELIA_API_ANALYTICS_BREAKDOWN_TOP_N", 8)
+	adminUserListPageSizeCap          = envcfg.Int("AIVORY_API_ADMIN_USER_LIST_PAGE_SIZE_CAP", 50)
+	adminCreatedUserMinPasswordLength = envcfg.Int("AIVORY_API_ADMIN_CREATED_USER_MIN_PASSWORD_LENGTH", 8)
+	adminPasswordResetMinLength       = envcfg.Int("AIVORY_API_ADMIN_PASSWORD_RESET_MIN_LENGTH", 8)
+	adminUserConversationsListingCap  = envcfg.Int("AIVORY_API_ADMIN_USER_CONVERSATIONS_LISTING_CAP", 500)
+	usageReportPageSizeCap            = envcfg.Int("AIVORY_API_USAGE_REPORT_PAGE_SIZE_CAP", 50)
+	analyticsWindow                   = envcfg.Int("AIVORY_API_ANALYTICS_WINDOW", 30)
+	analyticsWindow2                  = envcfg.Int("AIVORY_API_ANALYTICS_WINDOW_2", 365)
+	analyticsBreakdownTopN            = envcfg.Int("AIVORY_API_ANALYTICS_BREAKDOWN_TOP_N", 8)
 )
 
 // ===== Channels =====

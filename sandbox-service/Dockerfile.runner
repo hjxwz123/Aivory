@@ -1,11 +1,11 @@
-# Aurelia Python sandbox — runtime image (design.md §4.5).
+# Aivory Python sandbox — runtime image (design.md §4.5).
 #
 # This is the image each session container runs. It is a pure-Python runtime
 # (no Node.js) carrying the data-science stack + document-generation deps from
 # §4.5, plus CJK / emoji fonts so matplotlib charts and generated PDF/PPT/DOCX
 # render Chinese without tofu boxes.
 #
-#   docker build -f Dockerfile.runner -t aurelia-sandbox:latest .
+#   docker build -f Dockerfile.runner -t aivory-sandbox:latest .
 #
 # The container itself does nothing but `sleep infinity`; the sidecar
 # (app.py) runs code inside it via `docker exec`.

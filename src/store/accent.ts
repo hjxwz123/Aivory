@@ -11,7 +11,7 @@ import { create } from 'zustand'
 import { type AccentPref, ACCENT_PRESETS } from '@/types/settings'
 import { persistUserSettings } from '@/lib/user-settings'
 
-const STORAGE_KEY = 'aurelia.accent'
+const STORAGE_KEY = 'aivory.accent'
 const DEFAULT_ACCENT: AccentPref = 'violet'
 
 function getStored(): AccentPref {

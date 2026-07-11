@@ -11,20 +11,20 @@ import (
 	"strings"
 	"time"
 
-	"aurelia/server/internal/envcfg"
-	"aurelia/server/internal/store"
+	"aivory/server/internal/envcfg"
+	"aivory/server/internal/store"
 )
 
 // maxAudioBytes caps an upload at the Whisper API's 25 MiB limit.
 const maxAudioBytes = 25 * 1024 * 1024
 
-var audioHTTPClient = &http.Client{Timeout: envcfg.Dur("AURELIA_API_AUDIO_TRANSCRIPTION_UPSTREAM_HTTP_TIMEOUT", 120*time.Second)}
+var audioHTTPClient = &http.Client{Timeout: envcfg.Dur("AIVORY_API_AUDIO_TRANSCRIPTION_UPSTREAM_HTTP_TIMEOUT", 120*time.Second)}
 
 // Env-overridable defaults (§ config-reference); each falls back to the
-// original hardcoded value when its AURELIA_* variable is unset.
+// original hardcoded value when its AIVORY_* variable is unset.
 var (
-	audioTranscriptionUserRateLimit            = envcfg.Int("AURELIA_API_AUDIO_TRANSCRIPTION_USER_RATE_LIMIT", 20)
-	transcriptionUpstreamResponseReadCap       = envcfg.Int64("AURELIA_API_TRANSCRIPTION_UPSTREAM_RESPONSE_READ_CAP", 1<<20)
+	audioTranscriptionUserRateLimit            = envcfg.Int("AIVORY_API_AUDIO_TRANSCRIPTION_USER_RATE_LIMIT", 20)
+	transcriptionUpstreamResponseReadCap       = envcfg.Int64("AIVORY_API_TRANSCRIPTION_UPSTREAM_RESPONSE_READ_CAP", 1<<20)
 	transcriptionUpstreamErrorTruncationLength = 240
 )
 

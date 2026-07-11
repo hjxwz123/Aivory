@@ -25,7 +25,7 @@
   "detail": {
     "uploadButton": "上傳文件",
     "noDocs": "尚無文件",
-    "noDocsBody": "上傳 PDF / Markdown / 純文字檔案,Aurelia 會非同步建索引以供檢索。",
+    "noDocsBody": "上傳 PDF / Markdown / 純文字檔案,Aivory 會非同步建索引以供檢索。",
     "rename": "重新命名",
     "delete": "刪除知識庫",
     "deleteConfirm": "刪除這個知識庫及其所有文件?",

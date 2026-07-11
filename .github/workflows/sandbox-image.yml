@@ -2,15 +2,15 @@ name: Build & push sandbox images
 
 # Builds the two sandbox images in the cloud (no local Docker needed) and
 # pushes them to GitHub Container Registry (ghcr.io):
-#   - aurelia-sandbox          (Python runtime each session container runs)
-#   - aurelia-sandbox-sidecar  (FastAPI control service the Go backend calls)
+#   - aivory-sandbox          (Python runtime each session container runs)
+#   - aivory-sandbox-sidecar  (FastAPI control service the Go backend calls)
 #
 # These are bundled into the main stack (deploy/docker-compose.prod.yml ships a
 # `sandbox` service that pulls them), so they must be published for a turnkey
 # deploy. Trigger: any push touching sandbox-service/, or manually via the
 # Actions tab. Images land at:
-#   ghcr.io/<account>/aurelia-sandbox:latest
-#   ghcr.io/<account>/aurelia-sandbox-sidecar:latest
+#   ghcr.io/<account>/aivory-sandbox:latest
+#   ghcr.io/<account>/aivory-sandbox-sidecar:latest
 
 on:
   push:
@@ -35,9 +35,9 @@ jobs:
     strategy:
       matrix:
         include:
-          - name: aurelia-sandbox
+          - name: aivory-sandbox
             dockerfile: sandbox-service/Dockerfile.runner
-          - name: aurelia-sandbox-sidecar
+          - name: aivory-sandbox-sidecar
             dockerfile: sandbox-service/Dockerfile.sidecar
     steps:
       - uses: actions/checkout@v4

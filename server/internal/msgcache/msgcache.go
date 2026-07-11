@@ -6,9 +6,9 @@ import (
 	"encoding/json"
 	"time"
 
-	"aurelia/server/internal/cache"
+	"aivory/server/internal/cache"
 
-	"aurelia/server/internal/store"
+	"aivory/server/internal/store"
 )
 
 var (

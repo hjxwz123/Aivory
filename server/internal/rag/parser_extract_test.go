@@ -231,7 +231,7 @@ func TestBoundedPDFInspectionKillsHungProbe(t *testing.T) {
 	pdfInspectionTimeout = 30 * time.Millisecond
 	pdfInspectionCommand = func(ctx context.Context, _ string) (*exec.Cmd, error) {
 		cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=TestPDFInspectionSleepHelper")
-		cmd.Env = append(os.Environ(), "AURELIA_PDF_INSPECTION_TEST_SLEEP=1")
+		cmd.Env = append(os.Environ(), "AIVORY_PDF_INSPECTION_TEST_SLEEP=1")
 		return cmd, nil
 	}
 
@@ -246,7 +246,7 @@ func TestBoundedPDFInspectionKillsHungProbe(t *testing.T) {
 }
 
 func TestPDFInspectionSleepHelper(t *testing.T) {
-	if os.Getenv("AURELIA_PDF_INSPECTION_TEST_SLEEP") != "1" {
+	if os.Getenv("AIVORY_PDF_INSPECTION_TEST_SLEEP") != "1" {
 		return
 	}
 	time.Sleep(10 * time.Second)

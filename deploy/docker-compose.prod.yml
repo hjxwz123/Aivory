@@ -1,4 +1,4 @@
-# Aurelia — production stack: Postgres + Redis + Qdrant + bundled sandbox + a
+# Aivory — production stack: Postgres + Redis + Qdrant + bundled sandbox + a
 # single `app` container that serves both the SPA and the /api backend.
 #
 # Two ways to bring this up:
@@ -23,20 +23,20 @@
 # deployment; only unset QDRANT_URL for local/dev or an explicit full-context
 # RAG fallback deployment.
 
-name: aurelia
+name: aivory
 
 services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-aurelia}
+      POSTGRES_USER: ${POSTGRES_USER:-aivory}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
-      POSTGRES_DB: ${POSTGRES_DB:-aurelia}
+      POSTGRES_DB: ${POSTGRES_DB:-aivory}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aurelia} -d ${POSTGRES_DB:-aurelia}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aivory} -d ${POSTGRES_DB:-aivory}"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -67,7 +67,7 @@ services:
       # (QDRANT_API_KEY below). Both default to one shared internal value so it
       # works with zero config — Qdrant has no published port (private network
       # only). Override QDRANT_API_KEY in .env for a real secret.
-      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:-aurelia-internal-qdrant}
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:-aivory-internal-qdrant}
     volumes:
       - qdrantdata:/qdrant/storage
     networks: [internal]
@@ -82,16 +82,16 @@ services:
   # SECURITY: the mounted docker.sock is root-equivalent on the host; keeping
   # the service internal-only (no ports) is what contains that blast radius.
   sandbox:
-    image: ghcr.io/${IMAGE_OWNER:-hjxwz123}/aurelia-sandbox-sidecar:${IMAGE_TAG:-latest}
+    image: ghcr.io/${IMAGE_OWNER:-hjxwz123}/aivory-sandbox-sidecar:${IMAGE_TAG:-latest}
     build:
       context: ../sandbox-service
       dockerfile: Dockerfile.sidecar
     restart: unless-stopped
     environment:
       # Shared internal default — must match the api's SANDBOX_API_KEY above.
-      SANDBOX_API_KEY: ${SANDBOX_API_KEY:-aurelia-bundled-sandbox}
+      SANDBOX_API_KEY: ${SANDBOX_API_KEY:-aivory-bundled-sandbox}
       # Per-session runtime image, pulled from ghcr on boot so the first call works.
-      SANDBOX_IMAGE: ghcr.io/${IMAGE_OWNER:-hjxwz123}/aurelia-sandbox:${IMAGE_TAG:-latest}
+      SANDBOX_IMAGE: ghcr.io/${IMAGE_OWNER:-hjxwz123}/aivory-sandbox:${IMAGE_TAG:-latest}
       SANDBOX_PULL_ON_START: "1"
       SANDBOX_NETWORK: ${SANDBOX_NETWORK:-none}   # "bridge" only if sandboxed code needs internet
       SANDBOX_MEMORY: ${SANDBOX_MEMORY:-2g}
@@ -112,7 +112,7 @@ services:
       # (archives are keyed by conversation id, so they survive session recycle,
       # §4.5-C G2). No S3/OSS/MinIO required. Single-node only (a plain volume
       # isn't shared across replicas); multi-replica deployments must use S3/OSS.
-      SANDBOX_LOCAL_STORAGE_DIR: /var/lib/aurelia/sandbox-archives
+      SANDBOX_LOCAL_STORAGE_DIR: /var/lib/aivory/sandbox-archives
     # Liveness: /healthz reports the sidecar can still reach the docker daemon.
     # No tools beyond python are in the image, so probe via urllib (non-2xx
     # raises -> unhealthy). start_period covers SANDBOX_PULL_ON_START, which blocks
@@ -132,7 +132,7 @@ services:
       # Required: the sidecar spawns sibling session containers via the host daemon.
       - /var/run/docker.sock:/var/run/docker.sock
       # §4.5 durable local archive store (SANDBOX_LOCAL_STORAGE_DIR above).
-      - sandbox-archives:/var/lib/aurelia/sandbox-archives
+      - sandbox-archives:/var/lib/aivory/sandbox-archives
     networks: [internal]
 
   # Single application container: the Go process serves BOTH the built SPA and
@@ -144,7 +144,7 @@ services:
   app:
     # Prebuilt image from the docker-images.yml workflow. Override IMAGE_OWNER
     # in .env if you forked into a different account.
-    image: ghcr.io/${IMAGE_OWNER:-hjxwz123}/aurelia-app:${IMAGE_TAG:-latest}
+    image: ghcr.io/${IMAGE_OWNER:-hjxwz123}/aivory-app:${IMAGE_TAG:-latest}
     build:
       context: ..
       dockerfile: deploy/Dockerfile.app
@@ -166,14 +166,14 @@ services:
     ports:
       - "80:8787"
     environment:
-      AURELIA_LISTEN: ":8787"
-      AURELIA_ENV: production
+      AIVORY_LISTEN: ":8787"
+      AIVORY_ENV: production
       # --- Backends (auto-detected by URL scheme) ---
-      DATABASE_URL: "postgres://${POSTGRES_USER:-aurelia}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-aurelia}?sslmode=disable"
+      DATABASE_URL: "postgres://${POSTGRES_USER:-aivory}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-aivory}?sslmode=disable"
       REDIS_URL: "redis://:${REDIS_PASSWORD}@redis:6379/0"
       QDRANT_URL: "${QDRANT_URL:-http://qdrant:6333}"
       # Must match qdrant's QDRANT__SERVICE__API_KEY above (same default).
-      QDRANT_API_KEY: ${QDRANT_API_KEY:-aurelia-internal-qdrant}
+      QDRANT_API_KEY: ${QDRANT_API_KEY:-aivory-internal-qdrant}
       # --- Auth / app ---
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
       BACKUP_DIR: ${BACKUP_DIR:-/app/data/backups}
@@ -201,7 +201,7 @@ services:
       # The key is a shared internal default — nothing to configure. (Leave the
       # admin sandbox_base_url / sandbox_api_key fields BLANK so these win.)
       SANDBOX_BASE_URL: "http://sandbox:8000"
-      SANDBOX_API_KEY: ${SANDBOX_API_KEY:-aurelia-bundled-sandbox}
+      SANDBOX_API_KEY: ${SANDBOX_API_KEY:-aivory-bundled-sandbox}
     volumes:
       # Uploads + artifacts (and the SQLite file, if ever used) are filesystem-
       # backed regardless of DB backend. Bind-mounted to a HOST directory so the

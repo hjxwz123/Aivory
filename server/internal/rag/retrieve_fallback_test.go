@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"aurelia/server/internal/store"
-	"aurelia/server/internal/vector"
+	"aivory/server/internal/store"
+	"aivory/server/internal/vector"
 )
 
 func TestRetrieveWithoutVectorStoreInjectsFullContext(t *testing.T) {
@@ -316,9 +316,9 @@ func seedEmbeddedConversationDoc(t *testing.T, ctx context.Context) *sql.DB {
 		`INSERT INTO users(id,email,password_hash,name,role) VALUES('u1','a@b.c','h','A','user')`,
 		`INSERT INTO conversations(id,user_id,title) VALUES('c1','u1','T')`,
 		`INSERT INTO documents(id,conversation_id,filename,mime_type,size_bytes,status) VALUES('d1','c1','f.txt','text/plain',10,'ready')`,
-		`INSERT INTO chunks(id,document_id,conversation_id,seq,chunk_type,content,embedding_model) VALUES('p1','d1','c1',0,'parent','parent text','aurelia-local-embed')`,
-		`INSERT INTO chunks(id,document_id,conversation_id,seq,chunk_type,content,embedding_model) VALUES('ch1','d1','c1',1,'text','first full chunk','aurelia-local-embed')`,
-		`INSERT INTO chunks(id,document_id,conversation_id,seq,chunk_type,content,embedding_model) VALUES('ch2','d1','c1',2,'text','second full chunk','aurelia-local-embed')`,
+		`INSERT INTO chunks(id,document_id,conversation_id,seq,chunk_type,content,embedding_model) VALUES('p1','d1','c1',0,'parent','parent text','aivory-local-embed')`,
+		`INSERT INTO chunks(id,document_id,conversation_id,seq,chunk_type,content,embedding_model) VALUES('ch1','d1','c1',1,'text','first full chunk','aivory-local-embed')`,
+		`INSERT INTO chunks(id,document_id,conversation_id,seq,chunk_type,content,embedding_model) VALUES('ch2','d1','c1',2,'text','second full chunk','aivory-local-embed')`,
 	} {
 		if _, err := db.ExecContext(ctx, q); err != nil {
 			_ = db.Close()

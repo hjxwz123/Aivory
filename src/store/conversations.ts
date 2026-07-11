@@ -49,7 +49,7 @@ function currentLocale(): string {
 // Sidebar conversation page size. Kept at the server default so users with ≤200
 // conversations load everything up front (no behaviour change); heavier users
 // page in older conversations on scroll via loadMore().
-const CONV_PAGE = envNum('VITE_AURELIA_CONV_PAGE', 200)
+const CONV_PAGE = envNum('VITE_AIVORY_CONV_PAGE', 200)
 
 // Server-side pagination cursor for the sidebar list. Tracked separately from the
 // cache size so that conversations PREPENDED out-of-order (loadOne of an old chat
@@ -63,7 +63,7 @@ let convLoadEpoch = 0
 // Messages per page when opening a conversation. A bit above the render window
 // (INITIAL_WINDOW=24) so the first screen is full with a little buffer; older
 // pages are fetched on scroll-up via loadOlderMessages().
-export const MSG_PAGE = envNum('VITE_AURELIA_MSG_PAGE', 40)
+export const MSG_PAGE = envNum('VITE_AIVORY_MSG_PAGE', 40)
 
 interface ConversationStore {
   conversations: Conversation[]

@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils'
 /**
  * LiveDemo — the "product is the hero" centrepiece: an auto-playing, looping
  * mock conversation that streams its replies, switches models mid-thread, and
- * surfaces a citation — the actual feel of Aurelia, on the landing page.
+ * surfaces a citation — the actual feel of Aivory, on the landing page.
  *
  * Pure presentation (no real API). Driven by a small cancellable phase machine;
  * under prefers-reduced-motion it renders the finished transcript with no motion.
@@ -142,7 +142,7 @@ export function LiveDemo() {
           <span className="size-2.5 rounded-full bg-[var(--color-fg-faint)]" />
           <span className="size-2.5 rounded-full bg-[var(--color-fg-faint)]" />
           <span className="size-2.5 rounded-full bg-[var(--color-fg-faint)]" />
-          <span className="mx-auto font-mono text-[11px] text-[var(--color-fg-subtle)]">aurelia.app</span>
+          <span className="mx-auto font-mono text-[11px] text-[var(--color-fg-subtle)]">aivory.app</span>
         </div>
 
         {/* Transcript */}
@@ -201,7 +201,7 @@ function Message({
         {step.model ? (
           <BrandMark slug={step.model.slug} className="size-4 text-[var(--color-fg-muted)]" />
         ) : null}
-        <span className="font-medium text-[13px] text-[var(--color-fg)]">{step.model?.name ?? 'Aurelia'}</span>
+        <span className="font-medium text-[13px] text-[var(--color-fg)]">{step.model?.name ?? 'Aivory'}</span>
         {thinking ? (
           <span className="inline-flex items-center gap-1 text-[11px] text-[var(--color-fg-subtle)]">
             <span className="size-1.5 rounded-full bg-[var(--color-secondary)] animate-[streaming-pulse_1600ms_ease-in-out_infinite]" />

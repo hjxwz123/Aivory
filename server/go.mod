@@ -1,4 +1,4 @@
-module aurelia/server
+module aivory/server
 
 go 1.24.1
 

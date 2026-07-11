@@ -1,4 +1,4 @@
-# Aurelia 本地 Python 沙箱（sidecar）
+# Aivory 本地 Python 沙箱（sidecar）
 
 <p align="center">
   <a href="./README.md">English</a> ·
@@ -12,7 +12,7 @@
 ```
 ┌────────────┐   POST /sessions /exec /files   ┌──────────────┐   docker exec   ┌──────────────────┐
 │ Go 后端    │ ──────────────────────────────► │ app.py (本服务)│ ─────────────► │ session 容器      │
-└────────────┘   SANDBOX_BASE_URL              └──────────────┘                 │  aurelia-sandbox  │
+└────────────┘   SANDBOX_BASE_URL              └──────────────┘                 │  aivory-sandbox  │
                                                                                  └──────────────────┘
 ```
 
@@ -30,15 +30,15 @@
 本项目已经把可直接使用的镜像发布到 GitHub Container Registry。使用者不需要构建镜像，不需要创建自己的 GitHub 仓库，也不需要登录 GHCR。镜像是公开的：
 
 ```
-ghcr.io/hjxwz123/aurelia-sandbox:latest          # Python 运行时镜像
-ghcr.io/hjxwz123/aurelia-sandbox-sidecar:latest  # 控制服务镜像
+ghcr.io/hjxwz123/aivory-sandbox:latest          # Python 运行时镜像
+ghcr.io/hjxwz123/aivory-sandbox-sidecar:latest  # 控制服务镜像
 ```
 
 **1. 在服务器上克隆公开仓库**
 
 ```bash
-git clone https://github.com/hjxwz123/aurelia-sandbox.git
-cd aurelia-sandbox
+git clone https://github.com/hjxwz123/aivory-sandbox.git
+cd aivory-sandbox
 ```
 
 **2. 拉取公开镜像**
@@ -46,9 +46,9 @@ cd aurelia-sandbox
 ```bash
 export OWNER=hjxwz123
 
-docker pull ghcr.io/$OWNER/aurelia-sandbox:latest
-docker pull ghcr.io/$OWNER/aurelia-sandbox-sidecar:latest
-docker images "ghcr.io/$OWNER/aurelia-sandbox*"
+docker pull ghcr.io/$OWNER/aivory-sandbox:latest
+docker pull ghcr.io/$OWNER/aivory-sandbox-sidecar:latest
+docker images "ghcr.io/$OWNER/aivory-sandbox*"
 ```
 
 **3. 生成并显示 API key**
@@ -83,10 +83,10 @@ SANDBOX_API_KEY=<上一步打印出来的同一个值>
 普通用户应使用上面的公开镜像。本节只适合维护者，或需要修改运行时镜像的开发者。你需要一个可用的 Docker 引擎（Docker Desktop 或 Colima）以及 Python 3.10+。
 
 ```bash
-cd aurelia-sandbox
+cd aivory-sandbox
 
 # 1. 构建运行时镜像（一次性，约 5-8 分钟，会下载 wheel 和字体）
-docker build -f Dockerfile.runner -t aurelia-sandbox:latest .
+docker build -f Dockerfile.runner -t aivory-sandbox:latest .
 
 # 2. 安装 sidecar 依赖，并在 :8000 启动
 python3 -m venv .venv && source .venv/bin/activate
@@ -125,7 +125,7 @@ curl -s -XPOST "$SANDBOX_URL/exec" \
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
-| `SANDBOX_IMAGE` | `aurelia-sandbox:latest` | 运行时镜像 tag |
+| `SANDBOX_IMAGE` | `aivory-sandbox:latest` | 运行时镜像 tag |
 | `SANDBOX_NETWORK` | `none` | 设置为 `bridge` 可允许运行时 `pip install` |
 | `SANDBOX_MEMORY` | `2g` | 单容器内存上限 |
 | `SANDBOX_CPUS` | `1` | 单容器 CPU 上限 |
@@ -168,7 +168,7 @@ curl -s -XPOST "$SANDBOX_URL/exec" \
 
 **docker.sock 在宿主机上等价于 root。** 架构需要它，但生产环境应在裸 socket 前放一个 [docker-socket-proxy](https://github.com/Tecnativa/docker-socket-proxy)，并限制为 container create/start/exec/kill + image pull（见 `docker-compose.yml` 中的安全说明）。不要把服务端口暴露到公网。
 
-sidecar 启动时还会发现已有的 `aurelia.sandbox=1` 容器，因此 sidecar 重启后仍能继续追踪存活 session，并在之后回收过期容器。
+sidecar 启动时还会发现已有的 `aivory.sandbox=1` 容器，因此 sidecar 重启后仍能继续追踪存活 session，并在之后回收过期容器。
 
 这是容器级隔离，适合单机开发环境。它**不是** gVisor/microVM 级别。生产环境可以把 `app.py` 中的 `docker run`/`docker exec` 调用替换成 gVisor、Firecracker 或 E2B 后端；HTTP 合约和 Go 侧代码保持不变，这正是 thin adapter 的意义。
 

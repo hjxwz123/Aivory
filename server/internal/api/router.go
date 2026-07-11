@@ -17,15 +17,15 @@ import (
 	"strings"
 	"time"
 
-	"aurelia/server/internal/auth"
-	"aurelia/server/internal/cache"
-	"aurelia/server/internal/config"
-	"aurelia/server/internal/envcfg"
-	"aurelia/server/internal/llm"
-	"aurelia/server/internal/mail"
-	"aurelia/server/internal/queue"
-	"aurelia/server/internal/rag"
-	"aurelia/server/internal/tools"
+	"aivory/server/internal/auth"
+	"aivory/server/internal/cache"
+	"aivory/server/internal/config"
+	"aivory/server/internal/envcfg"
+	"aivory/server/internal/llm"
+	"aivory/server/internal/mail"
+	"aivory/server/internal/queue"
+	"aivory/server/internal/rag"
+	"aivory/server/internal/tools"
 )
 
 // Deps is the dependency bundle passed to NewRouter.
@@ -45,68 +45,68 @@ type Deps struct {
 
 // Env-overridable per-IP rate-limit budgets ("<N> per <window>") and the CORS
 // preflight cache age. Defaults match the historical hardcoded values; each is
-// tunable via the paired AURELIA_API_RATE_LIMIT_*_MAX / *_WINDOW variables (see
+// tunable via the paired AIVORY_API_RATE_LIMIT_*_MAX / *_WINDOW variables (see
 // docs/config-reference.md) without changing behaviour when unset.
 var (
-	rlRegisterMax    = envcfg.Int("AURELIA_API_RATE_LIMIT_REGISTER_MAX", 5)
-	rlRegisterWindow = envcfg.Dur("AURELIA_API_RATE_LIMIT_REGISTER_WINDOW", 60*time.Second)
+	rlRegisterMax    = envcfg.Int("AIVORY_API_RATE_LIMIT_REGISTER_MAX", 5)
+	rlRegisterWindow = envcfg.Dur("AIVORY_API_RATE_LIMIT_REGISTER_WINDOW", 60*time.Second)
 
-	rlLoginMax    = envcfg.Int("AURELIA_API_RATE_LIMIT_LOGIN_MAX", 10)
-	rlLoginWindow = envcfg.Dur("AURELIA_API_RATE_LIMIT_LOGIN_WINDOW", 60*time.Second)
+	rlLoginMax    = envcfg.Int("AIVORY_API_RATE_LIMIT_LOGIN_MAX", 10)
+	rlLoginWindow = envcfg.Dur("AIVORY_API_RATE_LIMIT_LOGIN_WINDOW", 60*time.Second)
 
-	rlLogin2faMax    = envcfg.Int("AURELIA_API_RATE_LIMIT_LOGIN_2FA_MAX", 10)
-	rlLogin2faWindow = envcfg.Dur("AURELIA_API_RATE_LIMIT_LOGIN_2FA_WINDOW", 60*time.Second)
+	rlLogin2faMax    = envcfg.Int("AIVORY_API_RATE_LIMIT_LOGIN_2FA_MAX", 10)
+	rlLogin2faWindow = envcfg.Dur("AIVORY_API_RATE_LIMIT_LOGIN_2FA_WINDOW", 60*time.Second)
 
-	rlLogoutMax    = envcfg.Int("AURELIA_API_RATE_LIMIT_LOGOUT_MAX", 30)
-	rlLogoutWindow = envcfg.Dur("AURELIA_API_RATE_LIMIT_LOGOUT_WINDOW", 60*time.Second)
+	rlLogoutMax    = envcfg.Int("AIVORY_API_RATE_LIMIT_LOGOUT_MAX", 30)
+	rlLogoutWindow = envcfg.Dur("AIVORY_API_RATE_LIMIT_LOGOUT_WINDOW", 60*time.Second)
 
-	rlRefreshMax    = envcfg.Int("AURELIA_API_RATE_LIMIT_REFRESH_MAX", 30)
-	rlRefreshWindow = envcfg.Dur("AURELIA_API_RATE_LIMIT_REFRESH_WINDOW", 60*time.Second)
+	rlRefreshMax    = envcfg.Int("AIVORY_API_RATE_LIMIT_REFRESH_MAX", 30)
+	rlRefreshWindow = envcfg.Dur("AIVORY_API_RATE_LIMIT_REFRESH_WINDOW", 60*time.Second)
 
-	rlVerifyEmailMax    = envcfg.Int("AURELIA_API_RATE_LIMIT_VERIFY_EMAIL_MAX", 10)
-	rlVerifyEmailWindow = envcfg.Dur("AURELIA_API_RATE_LIMIT_VERIFY_EMAIL_WINDOW", 5*60*time.Second)
+	rlVerifyEmailMax    = envcfg.Int("AIVORY_API_RATE_LIMIT_VERIFY_EMAIL_MAX", 10)
+	rlVerifyEmailWindow = envcfg.Dur("AIVORY_API_RATE_LIMIT_VERIFY_EMAIL_WINDOW", 5*60*time.Second)
 
-	rlSendCodeMax    = envcfg.Int("AURELIA_API_RATE_LIMIT_SEND_CODE_MAX", 3)
-	rlSendCodeWindow = envcfg.Dur("AURELIA_API_RATE_LIMIT_SEND_CODE_WINDOW", 60*time.Second)
+	rlSendCodeMax    = envcfg.Int("AIVORY_API_RATE_LIMIT_SEND_CODE_MAX", 3)
+	rlSendCodeWindow = envcfg.Dur("AIVORY_API_RATE_LIMIT_SEND_CODE_WINDOW", 60*time.Second)
 
-	rlForgotPasswordMax    = envcfg.Int("AURELIA_API_RATE_LIMIT_FORGOT_PASSWORD_MAX", 5)
-	rlForgotPasswordWindow = envcfg.Dur("AURELIA_API_RATE_LIMIT_FORGOT_PASSWORD_WINDOW", 15*60*time.Second)
+	rlForgotPasswordMax    = envcfg.Int("AIVORY_API_RATE_LIMIT_FORGOT_PASSWORD_MAX", 5)
+	rlForgotPasswordWindow = envcfg.Dur("AIVORY_API_RATE_LIMIT_FORGOT_PASSWORD_WINDOW", 15*60*time.Second)
 
-	rlResetPasswordMax    = envcfg.Int("AURELIA_API_RATE_LIMIT_RESET_PASSWORD_MAX", 5)
-	rlResetPasswordWindow = envcfg.Dur("AURELIA_API_RATE_LIMIT_RESET_PASSWORD_WINDOW", 60*time.Second)
+	rlResetPasswordMax    = envcfg.Int("AIVORY_API_RATE_LIMIT_RESET_PASSWORD_MAX", 5)
+	rlResetPasswordWindow = envcfg.Dur("AIVORY_API_RATE_LIMIT_RESET_PASSWORD_WINDOW", 60*time.Second)
 
-	rlCaptchaIssueMax    = envcfg.Int("AURELIA_API_RATE_LIMIT_CAPTCHA_ISSUE_MAX", 30)
-	rlCaptchaIssueWindow = envcfg.Dur("AURELIA_API_RATE_LIMIT_CAPTCHA_ISSUE_WINDOW", 60*time.Second)
+	rlCaptchaIssueMax    = envcfg.Int("AIVORY_API_RATE_LIMIT_CAPTCHA_ISSUE_MAX", 30)
+	rlCaptchaIssueWindow = envcfg.Dur("AIVORY_API_RATE_LIMIT_CAPTCHA_ISSUE_WINDOW", 60*time.Second)
 
-	rlCaptchaVerifyMax    = envcfg.Int("AURELIA_API_RATE_LIMIT_CAPTCHA_VERIFY_MAX", 60)
-	rlCaptchaVerifyWindow = envcfg.Dur("AURELIA_API_RATE_LIMIT_CAPTCHA_VERIFY_WINDOW", 60*time.Second)
+	rlCaptchaVerifyMax    = envcfg.Int("AIVORY_API_RATE_LIMIT_CAPTCHA_VERIFY_MAX", 60)
+	rlCaptchaVerifyWindow = envcfg.Dur("AIVORY_API_RATE_LIMIT_CAPTCHA_VERIFY_WINDOW", 60*time.Second)
 
-	rlFirstRunSetupMax    = envcfg.Int("AURELIA_API_RATE_LIMIT_FIRST_RUN_SETUP_MAX", 10)
-	rlFirstRunSetupWindow = envcfg.Dur("AURELIA_API_RATE_LIMIT_FIRST_RUN_SETUP_WINDOW", 60*time.Second)
+	rlFirstRunSetupMax    = envcfg.Int("AIVORY_API_RATE_LIMIT_FIRST_RUN_SETUP_MAX", 10)
+	rlFirstRunSetupWindow = envcfg.Dur("AIVORY_API_RATE_LIMIT_FIRST_RUN_SETUP_WINDOW", 60*time.Second)
 
-	rlPublicSharedConversationMax    = envcfg.Int("AURELIA_API_RATE_LIMIT_PUBLIC_SHARED_CONVERSATION_MAX", 60)
-	rlPublicSharedConversationWindow = envcfg.Dur("AURELIA_API_RATE_LIMIT_PUBLIC_SHARED_CONVERSATION_WINDOW", 60*time.Second)
+	rlPublicSharedConversationMax    = envcfg.Int("AIVORY_API_RATE_LIMIT_PUBLIC_SHARED_CONVERSATION_MAX", 60)
+	rlPublicSharedConversationWindow = envcfg.Dur("AIVORY_API_RATE_LIMIT_PUBLIC_SHARED_CONVERSATION_WINDOW", 60*time.Second)
 
-	rlSharedAssetsMax    = envcfg.Int("AURELIA_API_RATE_LIMIT_SHARED_ASSETS_FILES_ARTIFACTS_MAX", 240)
-	rlSharedAssetsWindow = envcfg.Dur("AURELIA_API_RATE_LIMIT_SHARED_ASSETS_FILES_ARTIFACTS_WINDOW", 60*time.Second)
+	rlSharedAssetsMax    = envcfg.Int("AIVORY_API_RATE_LIMIT_SHARED_ASSETS_FILES_ARTIFACTS_MAX", 240)
+	rlSharedAssetsWindow = envcfg.Dur("AIVORY_API_RATE_LIMIT_SHARED_ASSETS_FILES_ARTIFACTS_WINDOW", 60*time.Second)
 
-	rlOauthMax    = envcfg.Int("AURELIA_API_RATE_LIMIT_OAUTH_START_CALLBACK_HANDOFF_MAX", 20)
-	rlOauthWindow = envcfg.Dur("AURELIA_API_RATE_LIMIT_OAUTH_START_CALLBACK_HANDOFF_WINDOW", 60*time.Second)
+	rlOauthMax    = envcfg.Int("AIVORY_API_RATE_LIMIT_OAUTH_START_CALLBACK_HANDOFF_MAX", 20)
+	rlOauthWindow = envcfg.Dur("AIVORY_API_RATE_LIMIT_OAUTH_START_CALLBACK_HANDOFF_WINDOW", 60*time.Second)
 
-	rlPasswordChangeMax    = envcfg.Int("AURELIA_API_RATE_LIMIT_PASSWORD_CHANGE_SET_MAX", 5)
-	rlPasswordChangeWindow = envcfg.Dur("AURELIA_API_RATE_LIMIT_PASSWORD_CHANGE_SET_WINDOW", 60*time.Second)
+	rlPasswordChangeMax    = envcfg.Int("AIVORY_API_RATE_LIMIT_PASSWORD_CHANGE_SET_MAX", 5)
+	rlPasswordChangeWindow = envcfg.Dur("AIVORY_API_RATE_LIMIT_PASSWORD_CHANGE_SET_WINDOW", 60*time.Second)
 
-	rlIdentityLinkStartMax    = envcfg.Int("AURELIA_API_RATE_LIMIT_IDENTITY_LINK_START_MAX", 20)
-	rlIdentityLinkStartWindow = envcfg.Dur("AURELIA_API_RATE_LIMIT_IDENTITY_LINK_START_WINDOW", 60*time.Second)
+	rlIdentityLinkStartMax    = envcfg.Int("AIVORY_API_RATE_LIMIT_IDENTITY_LINK_START_MAX", 20)
+	rlIdentityLinkStartWindow = envcfg.Dur("AIVORY_API_RATE_LIMIT_IDENTITY_LINK_START_WINDOW", 60*time.Second)
 
-	rl2faSetupMax    = envcfg.Int("AURELIA_API_RATE_LIMIT_2FA_SETUP_ENABLE_DISABLE_MAX", 10)
-	rl2faSetupWindow = envcfg.Dur("AURELIA_API_RATE_LIMIT_2FA_SETUP_ENABLE_DISABLE_WINDOW", 5*60*time.Second)
+	rl2faSetupMax    = envcfg.Int("AIVORY_API_RATE_LIMIT_2FA_SETUP_ENABLE_DISABLE_MAX", 10)
+	rl2faSetupWindow = envcfg.Dur("AIVORY_API_RATE_LIMIT_2FA_SETUP_ENABLE_DISABLE_WINDOW", 5*60*time.Second)
 
-	rlRedeemCodeMax    = envcfg.Int("AURELIA_API_RATE_LIMIT_REDEEM_CODE_MAX", 10)
-	rlRedeemCodeWindow = envcfg.Dur("AURELIA_API_RATE_LIMIT_REDEEM_CODE_WINDOW", 60*time.Second)
+	rlRedeemCodeMax    = envcfg.Int("AIVORY_API_RATE_LIMIT_REDEEM_CODE_MAX", 10)
+	rlRedeemCodeWindow = envcfg.Dur("AIVORY_API_RATE_LIMIT_REDEEM_CODE_WINDOW", 60*time.Second)
 
-	rlWorkspaceJoinMax    = envcfg.Int("AURELIA_API_RATE_LIMIT_WORKSPACE_JOIN_MAX", 30)
-	rlWorkspaceJoinWindow = envcfg.Dur("AURELIA_API_RATE_LIMIT_WORKSPACE_JOIN_WINDOW", 60*time.Second)
+	rlWorkspaceJoinMax    = envcfg.Int("AIVORY_API_RATE_LIMIT_WORKSPACE_JOIN_MAX", 30)
+	rlWorkspaceJoinWindow = envcfg.Dur("AIVORY_API_RATE_LIMIT_WORKSPACE_JOIN_WINDOW", 60*time.Second)
 
 	corsPreflightMaxAge = 600 * time.Second
 )

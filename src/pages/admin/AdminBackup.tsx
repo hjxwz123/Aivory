@@ -47,9 +47,9 @@ import { envNum } from '@/lib/env-config'
 // fixed token (not localized) so muscle memory can't fire it blind.
 const CONFIRM_WORD = 'REPLACE'
 
-const ADMIN_BACKUP_EXPORT_JOB_POLL_INTERVAL_MS = envNum('VITE_AURELIA_ADMIN_BACKUP_EXPORT_JOB_POLL_INTERVAL', 2500)
+const ADMIN_BACKUP_EXPORT_JOB_POLL_INTERVAL_MS = envNum('VITE_AIVORY_ADMIN_BACKUP_EXPORT_JOB_POLL_INTERVAL', 2500)
 const ADMIN_VECTOR_MAINTENANCE_JOB_POLL_INTERVAL_MS = envNum(
-  'VITE_AURELIA_ADMIN_VECTOR_MAINTENANCE_JOB_POLL_INTERVAL',
+  'VITE_AIVORY_ADMIN_VECTOR_MAINTENANCE_JOB_POLL_INTERVAL',
   2500,
 )
 
@@ -283,7 +283,7 @@ export default function AdminBackup() {
       const a = document.createElement('a')
       a.href = url
       const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
-      a.download = `aurelia-config-${stamp}.zip`
+      a.download = `aivory-config-${stamp}.zip`
       document.body.appendChild(a)
       a.click()
       a.remove()

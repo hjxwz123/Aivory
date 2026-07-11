@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"aurelia/server/internal/store"
+	"aivory/server/internal/store"
 )
 
 func TestRunPipelineFailsConversationDocWhenTextExtractionFails(t *testing.T) {

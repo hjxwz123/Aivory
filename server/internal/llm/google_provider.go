@@ -12,7 +12,7 @@ import (
 	"net/http"
 	"strings"
 
-	"aurelia/server/internal/envcfg"
+	"aivory/server/internal/envcfg"
 )
 
 // GoogleProvider speaks the generateContent / streamGenerateContent endpoints
@@ -65,7 +65,7 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 		toolsDecl = []map[string]any{{"functionDeclarations": decls}}
 	}
 
-	maxIter := envcfg.Int("AURELIA_LLM_MAX_ITER_4", 20)
+	maxIter := envcfg.Int("AIVORY_LLM_MAX_ITER_4", 20)
 	historyLen := len(contents)
 	allText := strings.Builder{}
 	allBlocks := []UnifiedBlock{}
@@ -75,7 +75,7 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 		// Gemini defaults maxOutputTokens to 8192 when the field is omitted,
 		// silently truncating well below what current models actually support
 		// (up to 64K+) — always send it explicitly (mirrors the Anthropic fix).
-		maxTok := envcfg.Int("AURELIA_LLM_GEMINI_MAX_TOK", 64000)
+		maxTok := envcfg.Int("AIVORY_LLM_GEMINI_MAX_TOK", 64000)
 		if req.MaxOutputTokens > 0 {
 			maxTok = req.MaxOutputTokens
 		}
@@ -469,7 +469,7 @@ func (p *GoogleProvider) promptRunOnce(req UnifiedChatRequest) PromptToolRunner 
 		gc := map[string]any{"stopSequences": []string{PromptToolStopSequence()}}
 		// Gemini defaults maxOutputTokens to 8192 when omitted — always send it
 		// explicitly (mirrors the Anthropic fix and the main Stream() path above).
-		maxTok := envcfg.Int("AURELIA_LLM_GEMINI_MAX_TOK_2", 64000)
+		maxTok := envcfg.Int("AIVORY_LLM_GEMINI_MAX_TOK_2", 64000)
 		if req.MaxOutputTokens > 0 {
 			maxTok = req.MaxOutputTokens
 		}

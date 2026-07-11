@@ -1,4 +1,4 @@
-# Aurelia sandbox runtime image — pinned dependencies (design.md §4.5).
+# Aivory sandbox runtime image — pinned dependencies (design.md §4.5).
 #
 # Why pinned: the previous `pip install <name>` with no version constraints meant
 # every rebuild (and CI fires on any push under sandbox-service/**) resolved

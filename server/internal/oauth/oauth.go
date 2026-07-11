@@ -29,7 +29,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
-	"aurelia/server/internal/envcfg"
+	"aivory/server/internal/envcfg"
 )
 
 // Config is the resolved settings for one provider. Build it from a stored
@@ -68,7 +68,7 @@ var httpClient = &http.Client{Timeout: httpClientTimeout}
 var oauthProviderResponseBodyCap = int64(1 << 20)
 
 // appleClientSecretJwtExpiry is the lifetime of the generated Apple client-secret JWT.
-var appleClientSecretJwtExpiry = envcfg.Dur("AURELIA_OAUTH_APPLE_CLIENT_SECRET_JWT_EXPIRY", 30*time.Minute)
+var appleClientSecretJwtExpiry = envcfg.Dur("AIVORY_OAUTH_APPLE_CLIENT_SECRET_JWT_EXPIRY", 30*time.Minute)
 
 // snippetMaxLen caps an error-body snippet included in error messages.
 var snippetMaxLen = 200
@@ -294,7 +294,7 @@ func (c Config) githubUser(ctx context.Context, accessToken string) (UserInfo, e
 		}
 		req.Header.Set("Authorization", "Bearer "+accessToken)
 		req.Header.Set("Accept", "application/vnd.github+json")
-		req.Header.Set("User-Agent", "Aurelia")
+		req.Header.Set("User-Agent", "Aivory")
 		resp, err := httpClient.Do(req)
 		if err != nil {
 			return err

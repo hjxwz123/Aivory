@@ -25,8 +25,8 @@ import (
 	"sync"
 	"time"
 
-	"aurelia/server/internal/envcfg"
-	"aurelia/server/internal/store"
+	"aivory/server/internal/envcfg"
+	"aivory/server/internal/store"
 )
 
 // Compaction defaults — kept in sync with the seeded settings (store.Seed) so an
@@ -52,28 +52,28 @@ const (
 // see the cut clamp in MaybeCompact). It sits above the API layer's 10-minute
 // generation cap (api.maxGenDuration); a streaming row older than this is a
 // crash leftover that will never receive content.
-var inflightGrace = envcfg.Dur("AURELIA_LLM_INFLIGHT_GRACE", 15*time.Minute)
+var inflightGrace = envcfg.Dur("AIVORY_LLM_INFLIGHT_GRACE", 15*time.Minute)
 
 // Env-overridable compaction tunables (envcfg). Defaults preserve prior
 // hardcoded behaviour; overrides are read once at process start.
-// Note: AURELIA_LLM_MESSAGE_TOKEN_MEMO_CACHE_BOUND is a count (map length),
+// Note: AIVORY_LLM_MESSAGE_TOKEN_MEMO_CACHE_BOUND is a count (map length),
 // wired via envcfg.Int so it can be compared against len().
 var (
-	msgStructuralOverhead          = envcfg.Int("AURELIA_LLM_T", 4)
-	messageTokenMemoCacheBound     = envcfg.Int("AURELIA_LLM_MESSAGE_TOKEN_MEMO_CACHE_BOUND", 100000)
-	summaryTokensClampFloor        = envcfg.Int("AURELIA_LLM_SUMMARY_TOKENS_CLAMP_FLOOR", 256)
-	bigTokenOverflowNum            = envcfg.Int("AURELIA_LLM_BIG_TOKEN_OVERFLOW_NUM", 5)
-	bigTokenOverflowDen            = envcfg.Int("AURELIA_LLM_BIG_TOKEN_OVERFLOW_DEN", 4)
-	inlineCompactionBacklogFactor  = envcfg.Int("AURELIA_LLM_INLINE_COMPACTION_BACKLOG_FACTOR", 3)
-	deterministicSummaryClipBudget = envcfg.Int("AURELIA_LLM_DETERMINISTIC_SUMMARY_CLIP_BUDGET", 300)
-	summaryBlockCASAttempts        = envcfg.Int("AURELIA_LLM_ATTEMPT", 4)
-	summaryMergeFoldIterCap        = envcfg.Int("AURELIA_LLM_ITER", 3)
-	summaryMergeMaxOutputDivisor   = envcfg.Int("AURELIA_LLM_MAX_OUTPUT_TOKENS_5", 2)
+	msgStructuralOverhead          = envcfg.Int("AIVORY_LLM_T", 4)
+	messageTokenMemoCacheBound     = envcfg.Int("AIVORY_LLM_MESSAGE_TOKEN_MEMO_CACHE_BOUND", 100000)
+	summaryTokensClampFloor        = envcfg.Int("AIVORY_LLM_SUMMARY_TOKENS_CLAMP_FLOOR", 256)
+	bigTokenOverflowNum            = envcfg.Int("AIVORY_LLM_BIG_TOKEN_OVERFLOW_NUM", 5)
+	bigTokenOverflowDen            = envcfg.Int("AIVORY_LLM_BIG_TOKEN_OVERFLOW_DEN", 4)
+	inlineCompactionBacklogFactor  = envcfg.Int("AIVORY_LLM_INLINE_COMPACTION_BACKLOG_FACTOR", 3)
+	deterministicSummaryClipBudget = envcfg.Int("AIVORY_LLM_DETERMINISTIC_SUMMARY_CLIP_BUDGET", 300)
+	summaryBlockCASAttempts        = envcfg.Int("AIVORY_LLM_ATTEMPT", 4)
+	summaryMergeFoldIterCap        = envcfg.Int("AIVORY_LLM_ITER", 3)
+	summaryMergeMaxOutputDivisor   = envcfg.Int("AIVORY_LLM_MAX_OUTPUT_TOKENS_5", 2)
 	// summaryMergeBudget is the total-accumulated-summary-tokens threshold that
 	// triggers folding old summary blocks together (mergeAndPersist) — NOT
 	// admin-configurable (see the const block above for why); the admin-facing
 	// summary_max_tokens setting controls per-summary GENERATION size instead.
-	summaryMergeBudget = envcfg.Int("AURELIA_LLM_SUMMARY_MERGE_BUDGET", defaultSummaryMergeBudget)
+	summaryMergeBudget = envcfg.Int("AIVORY_LLM_SUMMARY_MERGE_BUDGET", defaultSummaryMergeBudget)
 )
 
 // msgTokenMemo caches the per-message token estimate. Keyed by id + blocks/raw
@@ -807,7 +807,7 @@ func readSummaryRaw(ctx context.Context, db *sql.DB, convID string) (string, err
 // failure (or a schema-less test fixture) must not block compaction — the guard
 // is a best-effort race-narrower, not a correctness gate for the write itself.
 func messagesStillCurrent(ctx context.Context, db *sql.DB, convID string, msgs []store.Message) bool {
-	chunkSize := envcfg.Int("AURELIA_LLM_CHUNK_SIZE", 400)
+	chunkSize := envcfg.Int("AIVORY_LLM_CHUNK_SIZE", 400)
 	for start := 0; start < len(msgs); start += chunkSize {
 		end := start + chunkSize
 		if end > len(msgs) {

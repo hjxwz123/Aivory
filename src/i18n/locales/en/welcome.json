@@ -13,13 +13,13 @@
   },
   "ready": {
     "title": "You're all set",
-    "body": "Aurelia is tuned to your taste. Start your first conversation whenever you're ready.",
+    "body": "Aivory is tuned to your taste. Start your first conversation whenever you're ready.",
     "cta": "Start exploring"
   },
   "intro": {
-    "eyebrow": "Welcome to Aurelia",
+    "eyebrow": "Welcome to Aivory",
     "title": "A calmer place to think.",
-    "subtitle": "Take a few seconds to make Aurelia yours. You can change any of this later in Settings.",
+    "subtitle": "Take a few seconds to make Aivory yours. You can change any of this later in Settings.",
     "points": {
       "write": "Writing that thinks with you",
       "research": "Research grounded in real sources",
@@ -38,7 +38,7 @@
     "chatStyle": "Reply style",
     "chatStyleBody": "How detailed should answers be by default?",
     "memory": "Memory",
-    "memoryBody": "Let Aurelia remember useful details across your chats."
+    "memoryBody": "Let Aivory remember useful details across your chats."
   },
   "theme": {
     "light": "Light",
@@ -62,6 +62,6 @@
     "accent": "Pick an accent color for the app.",
     "layout": "Center the chat or use the full width.",
     "style": "How detailed should replies be by default?",
-    "memory": "Let Aurelia remember useful details across your chats."
+    "memory": "Let Aivory remember useful details across your chats."
   }
 }

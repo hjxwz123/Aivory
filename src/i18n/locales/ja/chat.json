@@ -15,8 +15,8 @@
       "どこから始めましょうか？",
       "何が気になっていますか？"
     ],
-    "lead": "何でも聞いてください。アウトライン、コード、意思決定、読書まで — Aurelia があなたと一緒に考えます。",
-    "disclaimer": "Aurelia は誤ることがあります。重要な内容は必ず確認してください。",
+    "lead": "何でも聞いてください。アウトライン、コード、意思決定、読書まで — Aivory があなたと一緒に考えます。",
+    "disclaimer": "Aivory は誤ることがあります。重要な内容は必ず確認してください。",
     "drawLead": "作りたい画像を説明してください — ギャラリーは下にあります。"
   },
   "composer": {
@@ -62,7 +62,7 @@
     "styleNone": "なし",
     "noStyles": "スタイルがありません。"
   },
-  "assistant": "Aurelia",
+  "assistant": "Aivory",
   "thinking": "思考中",
   "reasoning": {
     "title": "推論",
@@ -159,7 +159,7 @@
     "failed": "問題が発生しました",
     "linkCopied": "共有リンクをコピーしました",
     "publicHint": "公開 — 閲覧にログインは不要です。",
-    "tryCta": "Aurelia を試す",
+    "tryCta": "Aivory を試す",
     "cloneCta": "自分のチャットに複製",
     "cloneShortCta": "複製",
     "cloneDone": "自分のチャットに複製しました",
@@ -169,7 +169,7 @@
     "untitled": "無題の会話",
     "roleUser": "ユーザー",
     "roleAssistant": "アシスタント",
-    "footer": "Aurelia から共有 — 思慮深い AI ワークスペース。"
+    "footer": "Aivory から共有 — 思慮深い AI ワークスペース。"
   },
   "code": {
     "run": "実行",

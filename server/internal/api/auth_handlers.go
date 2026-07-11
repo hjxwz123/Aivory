@@ -13,22 +13,22 @@ import (
 	"strings"
 	"time"
 
-	"aurelia/server/internal/envcfg"
-	"aurelia/server/internal/mail"
-	"aurelia/server/internal/store"
+	"aivory/server/internal/envcfg"
+	"aivory/server/internal/mail"
+	"aivory/server/internal/store"
 )
 
 // maxCodeAttempts is the number of wrong guesses allowed against a single
 // emailed verify/reset code before it is burned (§ brute-force). With the code
 // burned after 5 misses, the 6-digit space can't be swept across rotating IPs.
-var maxCodeAttempts = envcfg.Int("AURELIA_API_MAX_CODE_ATTEMPTS", 5)
+var maxCodeAttempts = envcfg.Int("AIVORY_API_MAX_CODE_ATTEMPTS", 5)
 
 // Tunable knobs — envcfg overrides; defaults preserve original behaviour.
 var (
-	codeFailureCounterTTL    = envcfg.Dur("AURELIA_API_CODE_FAILURE_COUNTER_TTL", 10*time.Minute)
-	minimumPasswordLength    = envcfg.Int("AURELIA_API_MINIMUM_PASSWORD_LENGTH", 8)
-	emailVerificationCodeTTL = envcfg.Dur("AURELIA_API_EMAIL_VERIFICATION_CODE_TTL", 10*time.Minute)
-	passwordResetCodeTTL     = envcfg.Dur("AURELIA_API_PASSWORD_RESET_CODE_TTL", 10*time.Minute)
+	codeFailureCounterTTL    = envcfg.Dur("AIVORY_API_CODE_FAILURE_COUNTER_TTL", 10*time.Minute)
+	minimumPasswordLength    = envcfg.Int("AIVORY_API_MINIMUM_PASSWORD_LENGTH", 8)
+	emailVerificationCodeTTL = envcfg.Dur("AIVORY_API_EMAIL_VERIFICATION_CODE_TTL", 10*time.Minute)
+	passwordResetCodeTTL     = envcfg.Dur("AIVORY_API_PASSWORD_RESET_CODE_TTL", 10*time.Minute)
 )
 
 // registerCodeFailure counts wrong guesses of a verify/reset code per email and,

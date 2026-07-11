@@ -2,7 +2,7 @@
 // from admin settings (live-reloaded on each send — no restart required).
 //
 // The HTML template is inline to keep the deployment to a single binary;
-// it uses the Aurelia brand palette via CSS variables that we compile to
+// it uses the Aivory brand palette via CSS variables that we compile to
 // literal values at render time so the HTML works in any email client.
 package mail
 
@@ -19,7 +19,7 @@ import (
 	"strings"
 	"time"
 
-	"aurelia/server/internal/store"
+	"aivory/server/internal/store"
 )
 
 // Sender is the surface the auth handlers use. Implementations must be safe
@@ -238,7 +238,7 @@ var emailTmpl = template.Must(template.New("email").Parse(`<!DOCTYPE html>
   <!-- Footer -->
   <tr><td style="padding:20px 36px;text-align:center;">
     <p style="margin:0;font-size:11px;color:#8C87A0;">
-      &copy; {{.Year}} Aurelia &middot; You received this because someone used your email to sign up or reset a password.
+      &copy; {{.Year}} Aivory &middot; You received this because someone used your email to sign up or reset a password.
     </p>
   </td></tr>
 </table>

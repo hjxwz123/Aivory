@@ -2,9 +2,9 @@ import { useTranslation } from 'react-i18next'
 import { ExternalLink, Github, FileText, Tag } from 'lucide-react'
 import { Logo } from '@/components/brand/logo'
 
-const APP_VERSION = '2.1.1'
-const GITHUB_URL = 'https://github.com/hjxwz123/Aurelia'
-const LICENSE_URL = 'https://github.com/hjxwz123/Aurelia/blob/main/LICENSE'
+const APP_VERSION = '2.2.0'
+const GITHUB_URL = 'https://github.com/hjxwz123/Aivory'
+const LICENSE_URL = 'https://github.com/hjxwz123/Aivory/blob/main/LICENSE'
 
 function InfoRow({ icon: Icon, label, children }: { icon: React.ElementType; label: string; children: React.ReactNode }) {
   return (
@@ -58,7 +58,7 @@ export default function About() {
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1 text-[var(--color-accent)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] rounded-[4px]"
           >
-            hjxwz123/Aurelia
+            hjxwz123/Aivory
             <ExternalLink size={11} aria-hidden />
           </a>
         </InfoRow>

@@ -12,7 +12,7 @@ import (
 	"net/http"
 	"strings"
 
-	"aurelia/server/internal/envcfg"
+	"aivory/server/internal/envcfg"
 )
 
 // Force-use context to avoid "imported and not used" if ever the only ref is removed.
@@ -21,7 +21,7 @@ var _ = context.Canceled
 // Anthropic provider tunables (env-overridable; defaults preserve prior
 // hardcoded behavior).
 var (
-	anthropicThinkingHeadroomTokens      = envcfg.Int("AURELIA_LLM_APPLY_ANTHROPIC_THINKING_SETTINGS", 2048)
+	anthropicThinkingHeadroomTokens      = envcfg.Int("AIVORY_LLM_APPLY_ANTHROPIC_THINKING_SETTINGS", 2048)
 	toolResultSummaryTruncationAnthropic = 240
 )
 
@@ -157,7 +157,7 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 		return &UnifiedResult{Blocks: blocks, StopReason: "end_turn", Usage: usage, Citations: cites}, nil
 	}
 
-	maxIter := envcfg.Int("AURELIA_LLM_MAX_ITER", 20)
+	maxIter := envcfg.Int("AIVORY_LLM_MAX_ITER", 20)
 	messages := historyToAnthropic(req.History)
 	historyLen := len(messages) // turns beyond this are this run's raw exchange (§2.3-C)
 	allText := strings.Builder{}
@@ -166,7 +166,7 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 	totalUsage := Usage{}
 
 	for i := 0; i < maxIter; i++ {
-		maxTok := envcfg.Int("AURELIA_LLM_MAX_TOK", 64000)
+		maxTok := envcfg.Int("AIVORY_LLM_MAX_TOK", 64000)
 		if req.MaxOutputTokens > 0 {
 			maxTok = req.MaxOutputTokens
 		}
@@ -319,7 +319,7 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 // (markup-stripped) portion itself.
 func (p *AnthropicProvider) promptRunOnce(req UnifiedChatRequest) PromptToolRunner {
 	return func(ctx context.Context, history []UnifiedMessage, system string) (string, Usage, error) {
-		maxTok := envcfg.Int("AURELIA_LLM_MAX_TOK_2", 64000)
+		maxTok := envcfg.Int("AIVORY_LLM_MAX_TOK_2", 64000)
 		if req.MaxOutputTokens > 0 {
 			maxTok = req.MaxOutputTokens
 		}

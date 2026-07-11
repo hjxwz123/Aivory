@@ -23,11 +23,11 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"aurelia/server/internal/envcfg"
-	"aurelia/server/internal/queue"
-	"aurelia/server/internal/storage"
-	"aurelia/server/internal/store"
-	"aurelia/server/internal/vector"
+	"aivory/server/internal/envcfg"
+	"aivory/server/internal/queue"
+	"aivory/server/internal/storage"
+	"aivory/server/internal/store"
+	"aivory/server/internal/vector"
 
 	"github.com/hibiken/asynq"
 )
@@ -39,40 +39,40 @@ const (
 )
 
 var (
-	ragFastQueueConcurrency    = envcfg.Int("AURELIA_RAG_RAG_FAST_QUEUE_CONCURRENCY", 4)
-	ragSlowQueueConcurrency    = envcfg.Int("AURELIA_RAG_RAG_SLOW_QUEUE_CONCURRENCY", 4)
-	ingestPipelineTimeout      = envcfg.Dur("AURELIA_RAG_INGEST_PIPELINE_TIMEOUT", 70*time.Minute)
-	ingestTaskTimeout          = envcfg.Dur("AURELIA_RAG_INGEST_TASK_TIMEOUT", 75*time.Minute)
-	ingestUniqueTTL            = envcfg.Dur("AURELIA_RAG_INGEST_UNIQUE_TTL", 80*time.Minute)
-	ingestHeartbeatInterval    = envcfg.Dur("AURELIA_RAG_INGEST_HEARTBEAT_INTERVAL", 30*time.Second)
-	ingestStaleAfter           = envcfg.Dur("AURELIA_RAG_INGEST_STALE_AFTER", 4*time.Minute)
-	ingestPendingStaleAfter    = envcfg.Dur("AURELIA_RAG_INGEST_PENDING_STALE_AFTER", ingestUniqueTTL)
-	ingestRecoveryInterval     = envcfg.Dur("AURELIA_RAG_INGEST_RECOVERY_INTERVAL", time.Minute)
-	ingestFinalizeTimeout      = envcfg.Dur("AURELIA_RAG_INGEST_FINALIZE_TIMEOUT", 30*time.Second)
-	ingestAsynqLeaseMaxRetries = envcfg.Int("AURELIA_RAG_INGEST_ASYNQ_LEASE_MAX_RETRIES", 1)
-	ingestAsynqRetryDelay      = envcfg.Dur("AURELIA_RAG_INGEST_ASYNQ_RETRY_DELAY", 2*time.Minute)
+	ragFastQueueConcurrency    = envcfg.Int("AIVORY_RAG_RAG_FAST_QUEUE_CONCURRENCY", 4)
+	ragSlowQueueConcurrency    = envcfg.Int("AIVORY_RAG_RAG_SLOW_QUEUE_CONCURRENCY", 4)
+	ingestPipelineTimeout      = envcfg.Dur("AIVORY_RAG_INGEST_PIPELINE_TIMEOUT", 70*time.Minute)
+	ingestTaskTimeout          = envcfg.Dur("AIVORY_RAG_INGEST_TASK_TIMEOUT", 75*time.Minute)
+	ingestUniqueTTL            = envcfg.Dur("AIVORY_RAG_INGEST_UNIQUE_TTL", 80*time.Minute)
+	ingestHeartbeatInterval    = envcfg.Dur("AIVORY_RAG_INGEST_HEARTBEAT_INTERVAL", 30*time.Second)
+	ingestStaleAfter           = envcfg.Dur("AIVORY_RAG_INGEST_STALE_AFTER", 4*time.Minute)
+	ingestPendingStaleAfter    = envcfg.Dur("AIVORY_RAG_INGEST_PENDING_STALE_AFTER", ingestUniqueTTL)
+	ingestRecoveryInterval     = envcfg.Dur("AIVORY_RAG_INGEST_RECOVERY_INTERVAL", time.Minute)
+	ingestFinalizeTimeout      = envcfg.Dur("AIVORY_RAG_INGEST_FINALIZE_TIMEOUT", 30*time.Second)
+	ingestAsynqLeaseMaxRetries = envcfg.Int("AIVORY_RAG_INGEST_ASYNQ_LEASE_MAX_RETRIES", 1)
+	ingestAsynqRetryDelay      = envcfg.Dur("AIVORY_RAG_INGEST_ASYNQ_RETRY_DELAY", 2*time.Minute)
 )
 
 // Env-overridable defaults for inline literals elsewhere in this file. Each
 // falls back to the original hardcoded value when the variable is unset.
 var (
-	ingestQueueClassifyTimeout  = envcfg.Dur("AURELIA_RAG_INGEST_QUEUE_NAME", 2*time.Second)
-	runIngestMaxAttempts        = envcfg.Int("AURELIA_RAG_RUN_INGEST_WITH_RETRIES", 3)
-	runIngestRetryBackoff       = envcfg.Dur("AURELIA_RAG_RUN_INGEST_WITH_RETRIES_2", 3*time.Second)
-	heartbeatWriteTimeout       = envcfg.Dur("AURELIA_RAG_START_INGEST_HEARTBEAT", 5*time.Second)
-	finalizeChunkCleanupTimeout = envcfg.Dur("AURELIA_RAG_FINALIZE_CHUNK_CLEANUP_TIMEOUT", 10*time.Second)
-	finalizeStatusTimeout       = envcfg.Dur("AURELIA_RAG_FINALIZE_STATUS_TIMEOUT", 10*time.Second)
+	ingestQueueClassifyTimeout  = envcfg.Dur("AIVORY_RAG_INGEST_QUEUE_NAME", 2*time.Second)
+	runIngestMaxAttempts        = envcfg.Int("AIVORY_RAG_RUN_INGEST_WITH_RETRIES", 3)
+	runIngestRetryBackoff       = envcfg.Dur("AIVORY_RAG_RUN_INGEST_WITH_RETRIES_2", 3*time.Second)
+	heartbeatWriteTimeout       = envcfg.Dur("AIVORY_RAG_START_INGEST_HEARTBEAT", 5*time.Second)
+	finalizeChunkCleanupTimeout = envcfg.Dur("AIVORY_RAG_FINALIZE_CHUNK_CLEANUP_TIMEOUT", 10*time.Second)
+	finalizeStatusTimeout       = envcfg.Dur("AIVORY_RAG_FINALIZE_STATUS_TIMEOUT", 10*time.Second)
 	extractionFailureReasonCap  = 500
 	embeddingErrorTruncate      = 4096
 	retrieveDefaultTopK         = 5
-	denseSearchLegLimit         = envcfg.Int("AURELIA_RAG_DENSE_SEARCH_LEG_LIMIT", 30)
-	keywordSearchLegLimit       = envcfg.Int("AURELIA_RAG_KEYWORD_SEARCH_LEG_LIMIT", 30)
-	snippetDefaultMax           = envcfg.Int("AURELIA_RAG_SNIPPET_OF", 240)
-	imageAtomSizeThreshold      = envcfg.Int("AURELIA_RAG_SPLIT_PARAGRAPHS_AND_TABLES", 800)
-	routerCallTimeout           = envcfg.Dur("AURELIA_RAG_ROUTER_CALL_TIMEOUT", 12*time.Second)
-	mapReduceSummaryChars       = envcfg.Int("AURELIA_RAG_MAP_REDUCE_SUMMARISE", 200)
-	docHintFirstContentCap      = envcfg.Int("AURELIA_RAG_COLLECT_DOC_HINTS", 120)
-	docHintsMaxCount            = envcfg.Int("AURELIA_RAG_COLLECT_DOC_HINTS_2", 12)
+	denseSearchLegLimit         = envcfg.Int("AIVORY_RAG_DENSE_SEARCH_LEG_LIMIT", 30)
+	keywordSearchLegLimit       = envcfg.Int("AIVORY_RAG_KEYWORD_SEARCH_LEG_LIMIT", 30)
+	snippetDefaultMax           = envcfg.Int("AIVORY_RAG_SNIPPET_OF", 240)
+	imageAtomSizeThreshold      = envcfg.Int("AIVORY_RAG_SPLIT_PARAGRAPHS_AND_TABLES", 800)
+	routerCallTimeout           = envcfg.Dur("AIVORY_RAG_ROUTER_CALL_TIMEOUT", 12*time.Second)
+	mapReduceSummaryChars       = envcfg.Int("AIVORY_RAG_MAP_REDUCE_SUMMARISE", 200)
+	docHintFirstContentCap      = envcfg.Int("AIVORY_RAG_COLLECT_DOC_HINTS", 120)
+	docHintsMaxCount            = envcfg.Int("AIVORY_RAG_COLLECT_DOC_HINTS_2", 12)
 )
 
 // Service is the public façade.
@@ -817,7 +817,7 @@ func totalEstimatedTokens(texts []string) int {
 }
 
 func (s *Service) logEmbeddingError(ctx context.Context, kbID, convID, embedder string, tokens int, err error, em Embedder, texts []string) {
-	if strings.HasPrefix(embedder, "aurelia-local") {
+	if strings.HasPrefix(embedder, "aivory-local") {
 		return
 	}
 	userID, wsID := "", ""
@@ -873,7 +873,7 @@ func (s *Service) logEmbeddingError(ctx context.Context, kbID, convID, embedder 
 // logEmbeddingUsage writes one usage_logs row for an embedding batch. The
 // owning user is resolved through the KB or conversation.
 func (s *Service) logEmbeddingUsage(ctx context.Context, kbID, convID, embedder string, tokens int) {
-	if tokens == 0 || strings.HasPrefix(embedder, "aurelia-local") {
+	if tokens == 0 || strings.HasPrefix(embedder, "aivory-local") {
 		return // local hash embedder is free — don't pollute the report
 	}
 	// §workspaces: shared-KB / shared-conversation indexing is billed to the
@@ -1233,7 +1233,7 @@ func (s *Service) searchScope(ctx context.Context, userID, convID string, em Emb
 	}
 	// Query embedding is billable (§8.3) — but only when we actually called the API
 	// (no call on a query-vector cache hit, or for the local embedder).
-	if !cached && !strings.HasPrefix(emName, "aurelia-local") && userID != "" {
+	if !cached && !strings.HasPrefix(emName, "aivory-local") && userID != "" {
 		var wsID string
 		if convID != "" {
 			_ = s.db.QueryRowContext(ctx, `SELECT COALESCE(workspace_id,'') FROM conversations WHERE id=?`, convID).Scan(&wsID)
@@ -1424,7 +1424,7 @@ type retrievalCandidate struct {
 // vector-similarity ranking and the keyword ranking (§4.11-E). It returns a new
 // slice sorted best-first; the input is left untouched.
 func fuseReciprocalRank(cands []retrievalCandidate) []retrievalCandidate {
-	k := envcfg.Int("AURELIA_RAG_FUSE_RECIPROCAL_RANK", 60)
+	k := envcfg.Int("AIVORY_RAG_FUSE_RECIPROCAL_RANK", 60)
 	n := len(cands)
 	idx := make([]int, n)
 	for i := range idx {
@@ -1517,7 +1517,7 @@ func clampRune(s string, i int) int {
 // child chunk (childTargetChars) plus a little surrounding section context, so a
 // hit deep in a long section is shown in full rather than truncated to the
 // section head. (§4.11 retrieval fidelity)
-var retrievedSnippetChars = envcfg.Int("AURELIA_RAG_RETRIEVED_SNIPPET_CHARS", 2000)
+var retrievedSnippetChars = envcfg.Int("AIVORY_RAG_RETRIEVED_SNIPPET_CHARS", 2000)
 
 // expandHit returns a snippet that is GUARANTEED to contain the matched child
 // chunk, with surrounding section context when available. The old small-to-big
@@ -1754,11 +1754,11 @@ type parentChunk struct {
 // at ~4 chars/token the safe range is ~1600-3200 chars. Defaulting at 2000
 // gives the embedder enough context per vector without diluting precision.
 var (
-	childTargetChars  = envcfg.Int("AURELIA_RAG_CHILD_TARGET_CHARS", 2000)
-	parentTargetChars = envcfg.Int("AURELIA_RAG_PARENT_TARGET_CHARS", 4800)
+	childTargetChars  = envcfg.Int("AIVORY_RAG_CHILD_TARGET_CHARS", 2000)
+	parentTargetChars = envcfg.Int("AIVORY_RAG_PARENT_TARGET_CHARS", 4800)
 	// Overlap between consecutive children (~12%) keeps boundary information
 	// retrievable from either side (§4.11-C-1 "10-15% overlap").
-	chunkOverlapChars = envcfg.Int("AURELIA_RAG_CHUNK_OVERLAP_CHARS", 250)
+	chunkOverlapChars = envcfg.Int("AIVORY_RAG_CHUNK_OVERLAP_CHARS", 250)
 )
 
 // chunkHierarchical splits content into parent sections, each subdivided into
@@ -2331,8 +2331,8 @@ func (s *Service) mapReduceSummarise(ctx context.Context, userID, convID string,
 	if s.task == nil {
 		return nil, nil
 	}
-	groupTokens := envcfg.Int("AURELIA_RAG_MAPREDUCE_GROUPTOKENS", 6000)
-	maxGroups := envcfg.Int("AURELIA_RAG_MAPREDUCE_MAXGROUPS", 8)
+	groupTokens := envcfg.Int("AIVORY_RAG_MAPREDUCE_GROUPTOKENS", 6000)
+	maxGroups := envcfg.Int("AIVORY_RAG_MAPREDUCE_MAXGROUPS", 8)
 	groups := [][]store.Chunk{}
 	cur := []store.Chunk{}
 	used := 0

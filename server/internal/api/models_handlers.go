@@ -8,17 +8,17 @@ import (
 	"strings"
 	"time"
 
-	"aurelia/server/internal/envcfg"
-	"aurelia/server/internal/store"
+	"aivory/server/internal/envcfg"
+	"aivory/server/internal/store"
 )
 
 // creditMultiplierDivisor is env-overridable (§ config-reference) and keeps the
 // original 5.0 divisor as a float so the price arithmetic still compiles; it
-// falls back to that default when AURELIA_API_CREDIT_MULTIPLIER is unset.
+// falls back to that default when AIVORY_API_CREDIT_MULTIPLIER is unset.
 // modelFreeAllotmentQuotaWindowFallback is a hardcoded int64 second-count (not a
 // time.Duration) to match the PeriodSeconds math it feeds.
 var (
-	creditMultiplierDivisor               = envcfg.F64("AURELIA_API_CREDIT_MULTIPLIER", 5.0)
+	creditMultiplierDivisor               = envcfg.F64("AIVORY_API_CREDIT_MULTIPLIER", 5.0)
 	modelFreeAllotmentQuotaWindowFallback = int64(604800)
 )
 

@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"aurelia/server/internal/envcfg"
-	"aurelia/server/internal/store"
+	"aivory/server/internal/envcfg"
+	"aivory/server/internal/store"
 )
 
 // TaskVerify is the usage_logs `purpose` for the auditor call. It is a bare
@@ -74,7 +74,7 @@ func (o *Orchestrator) runVerify(ctx context.Context, conv *store.Conversation, 
 
 	// Bound the auditor so a slow (possibly cross-provider) call can't stall the
 	// turn near the generation budget.
-	vctx, cancel := context.WithTimeout(ctx, envcfg.Dur("AURELIA_LLM_VCTX", 45*time.Second))
+	vctx, cancel := context.WithTimeout(ctx, envcfg.Dur("AIVORY_LLM_VCTX", 45*time.Second))
 	defer cancel()
 
 	// Untrusted-content boundary tags: both question (user) and answer (model)

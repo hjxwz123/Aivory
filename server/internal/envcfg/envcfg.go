@@ -1,4 +1,4 @@
-// Package envcfg reads optional AURELIA_* environment overrides for values that
+// Package envcfg reads optional AIVORY_* environment overrides for values that
 // would otherwise be compiled-in defaults (timeouts, concurrency, batch sizes,
 // cache TTLs, size caps, internal model params, …).
 //

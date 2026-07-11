@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"aurelia/server/internal/store"
+	"aivory/server/internal/store"
 )
 
 // ===== User groups (membership tiers) =====

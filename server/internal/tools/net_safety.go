@@ -1,7 +1,7 @@
 package tools
 
 import (
-	"aurelia/server/internal/netsafe"
+	"aivory/server/internal/netsafe"
 	"net"
 	"net/http"
 	"time"

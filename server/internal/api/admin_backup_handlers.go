@@ -16,14 +16,14 @@ import (
 	"strings"
 	"time"
 
-	"aurelia/server/internal/envcfg"
-	"aurelia/server/internal/store"
+	"aivory/server/internal/envcfg"
+	"aivory/server/internal/store"
 )
 
 // Tunable knobs — envcfg overrides; defaults preserve original behaviour.
 var (
-	configImportMultipartMemoryBuffer = envcfg.Int64("AURELIA_API_CONFIG_IMPORT_MULTIPART_MEMORY_BUFFER", 16<<20)
-	backupImportMultipartMemoryBuffer = envcfg.Int64("AURELIA_API_BACKUP_IMPORT_MULTIPART_MEMORY_BUFFER", 32<<20)
+	configImportMultipartMemoryBuffer = envcfg.Int64("AIVORY_API_CONFIG_IMPORT_MULTIPART_MEMORY_BUFFER", 16<<20)
+	backupImportMultipartMemoryBuffer = envcfg.Int64("AIVORY_API_BACKUP_IMPORT_MULTIPART_MEMORY_BUFFER", 32<<20)
 )
 
 // Database backup / migration (§ admin → data migration).
@@ -38,7 +38,7 @@ var (
 
 // backupManifest is the archive's self-description (manifest.json).
 type backupManifest struct {
-	Format            string           `json:"format"` // always "aurelia-backup"
+	Format            string           `json:"format"` // always "aivory-backup"
 	Version           int              `json:"version"`
 	CreatedAt         int64            `json:"created_at"`
 	App               string           `json:"app"`
@@ -56,7 +56,7 @@ type backupManifest struct {
 // no users, conversations, messages, user uploads, KBs, sessions, workspaces, or
 // usage logs; import is an UPSERT merge into config tables plus admin assets.
 type configManifest struct {
-	Format          string           `json:"format"` // always "aurelia-config"
+	Format          string           `json:"format"` // always "aivory-config"
 	Version         int              `json:"version"`
 	CreatedAt       int64            `json:"created_at"`
 	App             string           `json:"app"`
@@ -104,9 +104,9 @@ func exportBackupAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 
 	ts := time.Now().Unix()
 	w.Header().Set("content-type", "application/zip")
-	name := "aurelia-backup"
+	name := "aivory-backup"
 	if includeQdrant {
-		name = "aurelia-docker-backup"
+		name = "aivory-docker-backup"
 	}
 	w.Header().Set("content-disposition", fmt.Sprintf(`attachment; filename="%s-%d.zip"`, name, ts))
 	w.Header().Set("x-content-type-options", "nosniff")
@@ -167,10 +167,10 @@ func writeBackupArchive(ctx context.Context, d Deps, tx *sql.Tx, w io.Writer, op
 
 	// Manifest last (random-access zip — order doesn't matter to the reader).
 	man := backupManifest{
-		Format:            "aurelia-backup",
+		Format:            "aivory-backup",
 		Version:           store.BackupVersion,
 		CreatedAt:         time.Now().Unix(),
-		App:               "aurelia",
+		App:               "aivory",
 		Dialect:           dialect,
 		Tables:            store.BackupTableOrder(),
 		Counts:            counts,
@@ -222,7 +222,7 @@ func exportConfigAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	ts := time.Now().Unix()
 	w.Header().Set("content-type", "application/zip")
-	w.Header().Set("content-disposition", fmt.Sprintf(`attachment; filename="aurelia-config-%d.zip"`, ts))
+	w.Header().Set("content-disposition", fmt.Sprintf(`attachment; filename="aivory-config-%d.zip"`, ts))
 	w.Header().Set("x-content-type-options", "nosniff")
 
 	zw := zip.NewWriter(w)
@@ -256,10 +256,10 @@ func exportConfigAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 
 	man := configManifest{
-		Format:          "aurelia-config",
+		Format:          "aivory-config",
 		Version:         configArchiveVersion,
 		CreatedAt:       ts,
-		App:             "aurelia",
+		App:             "aivory",
 		Dialect:         dialect,
 		Tables:          store.ConfigTableOrder(),
 		Counts:          counts,
@@ -370,7 +370,7 @@ func addDirToZip(zw *zip.Writer, root, prefix string) error {
 // absent from the archive are kept, which avoids breaking user data references.
 func importConfigAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	maxConfigSize := envcfg.Int64("AURELIA_API_MAX_CONFIG_SIZE", 512<<20) // 512 MiB; config archives are normally tiny.
+	maxConfigSize := envcfg.Int64("AIVORY_API_MAX_CONFIG_SIZE", 512<<20) // 512 MiB; config archives are normally tiny.
 	r.Body = http.MaxBytesReader(w, r.Body, maxConfigSize)
 	if err := r.ParseMultipartForm(configImportMultipartMemoryBuffer); err != nil {
 		if err.Error() == "http: request body too large" {
@@ -393,8 +393,8 @@ func importConfigAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err)
 			return
 		}
-		if man.Format != "aurelia-config" {
-			writeError(w, http.StatusBadRequest, errors.New("unrecognized config archive (missing aurelia-config manifest)"))
+		if man.Format != "aivory-config" {
+			writeError(w, http.StatusBadRequest, errors.New("unrecognized config archive (missing aivory-config manifest)"))
 			return
 		}
 		if man.Version > configArchiveVersion {
@@ -431,7 +431,7 @@ func importConfigAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Backward compatibility: accept the old frontend-only JSON shape
-	// {"format":"aurelia-config","settings":{...}} and apply settings only.
+	// {"format":"aivory-config","settings":{...}} and apply settings only.
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		writeError(w, http.StatusBadRequest, errors.New("invalid config file"))
 		return
@@ -519,8 +519,8 @@ func importBackupAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if man.Format != "aurelia-backup" {
-		writeError(w, http.StatusBadRequest, errors.New("unrecognized archive (missing aurelia-backup manifest)"))
+	if man.Format != "aivory-backup" {
+		writeError(w, http.StatusBadRequest, errors.New("unrecognized archive (missing aivory-backup manifest)"))
 		return
 	}
 	if man.Version > store.BackupVersion {
@@ -937,10 +937,10 @@ func importLegacySettingsConfig(d Deps, data []byte) (int64, error) {
 		Settings map[string]json.RawMessage `json:"settings"`
 	}
 	if err := json.Unmarshal(data, &payload); err != nil {
-		return 0, errors.New("not a valid Aurelia configuration export")
+		return 0, errors.New("not a valid Aivory configuration export")
 	}
-	if payload.Format != "aurelia-config" || payload.Settings == nil {
-		return 0, errors.New("not a valid Aurelia configuration export")
+	if payload.Format != "aivory-config" || payload.Settings == nil {
+		return 0, errors.New("not a valid Aivory configuration export")
 	}
 	return applyAdminSettingsPatch(d, payload.Settings, true)
 }

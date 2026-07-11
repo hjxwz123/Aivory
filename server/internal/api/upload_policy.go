@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"aurelia/server/internal/store"
+	"aivory/server/internal/store"
 )
 
 // uploadPolicy is the live, admin-configured upload safety policy (design.md
@@ -38,7 +38,7 @@ type uploadPolicy struct {
 }
 
 // defaultUploadExtensions is the safe-by-default allowlist used when the admin
-// has not configured one. Covers the formats Aurelia's other subsystems
+// has not configured one. Covers the formats Aivory's other subsystems
 // actually understand:
 //   - documents the RAG pipeline ingests (MinerU + local text)
 //   - images displayed in the composer attachments rail
@@ -93,7 +93,7 @@ func applyExtAliases(exts map[string]bool) {
 }
 
 // alwaysAllowedImageExtensions is the family of common raster image formats
-// Aurelia natively displays in the composer attachments rail and feeds to
+// Aivory natively displays in the composer attachments rail and feeds to
 // vision models. They are ALWAYS accepted regardless of the admin allowlist:
 // the allowlist is meant to gate document/code/data uploads, while ordinary
 // photos must just work. All are served with attachment disposition and carry

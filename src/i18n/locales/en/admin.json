@@ -861,7 +861,7 @@
         "title": "Import configuration",
         "lead": "Import a config ZIP (old JSON files are still accepted). Rows are merged by ID; users, conversations, files, and logs are not imported.",
         "action": "Import config archive…",
-        "invalid": "That file isn't a valid Aurelia configuration export.",
+        "invalid": "That file isn't a valid Aivory configuration export.",
         "done": "Configuration imported ({{count}} rows).",
         "confirmTitle": "Apply this configuration?",
         "confirmLead": "Rows with the same ID will be overwritten; other local configuration rows are kept.",

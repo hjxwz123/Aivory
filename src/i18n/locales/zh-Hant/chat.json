@@ -15,8 +15,8 @@
       "想從哪裡開始？",
       "對什麼感到好奇？"
     ],
-    "lead": "隨便問點什麼——提綱、程式碼、決策、閱讀，Aurelia 會與你一起思考。",
-    "disclaimer": "Aurelia 也會出錯。重要的內容請自行核驗。",
+    "lead": "隨便問點什麼——提綱、程式碼、決策、閱讀，Aivory 會與你一起思考。",
+    "disclaimer": "Aivory 也會出錯。重要的內容請自行核驗。",
     "drawLead": "描述你想畫的畫面——你的作品在下方。"
   },
   "composer": {
@@ -62,7 +62,7 @@
     "styleNone": "無",
     "noStyles": "尚無風格。"
   },
-  "assistant": "Aurelia",
+  "assistant": "Aivory",
   "thinking": "思考中",
   "reasoning": {
     "title": "思考過程",
@@ -159,7 +159,7 @@
     "failed": "出錯了",
     "linkCopied": "分享連結已複製",
     "publicHint": "公開 — 無需登入即可檢視。",
-    "tryCta": "體驗 Aurelia",
+    "tryCta": "體驗 Aivory",
     "cloneCta": "複製到我的對話",
     "cloneShortCta": "複製",
     "cloneDone": "已複製到我的對話",
@@ -169,7 +169,7 @@
     "untitled": "未命名對話",
     "roleUser": "使用者",
     "roleAssistant": "助手",
-    "footer": "由 Aurelia 分享 —— 一個用心的 AI 工作空間。"
+    "footer": "由 Aivory 分享 —— 一個用心的 AI 工作空間。"
   },
   "code": {
     "run": "執行",

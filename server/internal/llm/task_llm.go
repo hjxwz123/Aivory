@@ -15,7 +15,7 @@
 package llm
 
 import (
-	"aurelia/server/internal/store"
+	"aivory/server/internal/store"
 	"context"
 	"database/sql"
 	"encoding/json"

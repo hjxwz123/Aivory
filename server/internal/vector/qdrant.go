@@ -11,14 +11,14 @@ import (
 	"sync"
 	"time"
 
-	"aurelia/server/internal/envcfg"
+	"aivory/server/internal/envcfg"
 
 	"github.com/google/uuid"
 )
 
-// collectionPrefix namespaces Aurelia's collections so DeleteBy* can enumerate
+// collectionPrefix namespaces Aivory's collections so DeleteBy* can enumerate
 // them and so a shared Qdrant instance won't collide with other tenants.
-const collectionPrefix = "aurelia_c"
+const collectionPrefix = "aivory_c"
 
 // pointNamespace turns string chunk ids into deterministic UUIDv5 point ids
 // (Qdrant only accepts unsigned-int or UUID ids). Re-ingesting a chunk maps to
@@ -29,8 +29,8 @@ var pointNamespace = uuid.MustParse("8f4d2c1a-1f2e-4b6a-9c3d-7a0b1c2d3e4f")
 // behaviour; overrides are read once at process start.
 var (
 	qdrantHTTPClientTimeout                 = 20 * time.Second
-	qdrantScrollPageSizeExistingChunkIDs    = envcfg.Int("AURELIA_VECTOR_QDRANT_SCROLL_PAGE_SIZE_EXISTINGCHUNKIDS", 256)
-	qdrantScrollPageSizeVectorChunkStatuses = envcfg.Int("AURELIA_VECTOR_QDRANT_SCROLL_PAGE_SIZE_VECTORCHUNKSTATUSES", 256)
+	qdrantScrollPageSizeExistingChunkIDs    = envcfg.Int("AIVORY_VECTOR_QDRANT_SCROLL_PAGE_SIZE_EXISTINGCHUNKIDS", 256)
+	qdrantScrollPageSizeVectorChunkStatuses = envcfg.Int("AIVORY_VECTOR_QDRANT_SCROLL_PAGE_SIZE_VECTORCHUNKSTATUSES", 256)
 )
 
 // Qdrant is an HTTP client for a Qdrant server. Safe for concurrent use.
@@ -418,7 +418,7 @@ func hasNonEmptyVectorJSON(raw json.RawMessage) bool {
 	return true
 }
 
-// listCollections returns the names of Aurelia's per-dimension collections.
+// listCollections returns the names of Aivory's per-dimension collections.
 func (q *Qdrant) listCollections(ctx context.Context) ([]string, error) {
 	var out struct {
 		Result struct {
@@ -457,7 +457,7 @@ func (q *Qdrant) deleteByField(ctx context.Context, field, value string) error {
 			},
 		},
 	}
-	deleteConcurrency := envcfg.Int("AURELIA_VECTOR_DELETE_CONCURRENCY", 4)
+	deleteConcurrency := envcfg.Int("AIVORY_VECTOR_DELETE_CONCURRENCY", 4)
 	var (
 		wg       sync.WaitGroup
 		mu       sync.Mutex

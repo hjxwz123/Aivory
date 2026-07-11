@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-const defaultDevJWTSecret = "dev-secret-change-me-aurelia-2026"
+const defaultDevJWTSecret = "dev-secret-change-me-aivory-2026"
 
 // Config holds the resolved environment for one server process.
 type Config struct {
@@ -65,9 +65,9 @@ type Config struct {
 // server starts in development with zero configuration.
 func Load() Config {
 	cfg := Config{
-		Listen:       getenv("AURELIA_LISTEN", ":8787"),
-		Env:          getenv("AURELIA_ENV", "development"),
-		DatabaseURL:  getenv("DATABASE_URL", "./data/aurelia.db?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)"),
+		Listen:       getenv("AIVORY_LISTEN", ":8787"),
+		Env:          getenv("AIVORY_ENV", "development"),
+		DatabaseURL:  getenv("DATABASE_URL", "./data/aivory.db?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)"),
 		RedisURL:     getenv("REDIS_URL", ""),
 		QdrantURL:    getenv("QDRANT_URL", ""),
 		QdrantAPIKey: getenv("QDRANT_API_KEY", ""),
@@ -138,7 +138,7 @@ func randomSecret() string {
 }
 
 // looksDeployed reports whether this process looks like a real deployment rather
-// than local dev: an explicit non-dev AURELIA_ENV, OR a Postgres DATABASE_URL
+// than local dev: an explicit non-dev AIVORY_ENV, OR a Postgres DATABASE_URL
 // (real deployments use Postgres; local dev uses SQLite).
 func looksDeployed(cfg Config) bool {
 	dev := cfg.Env == "" || cfg.Env == "development" || cfg.Env == "dev" || cfg.Env == "test" || cfg.Env == "local"
@@ -150,9 +150,9 @@ func looksDeployed(cfg Config) bool {
 // right after Load(); it returns an error so the process aborts with a clear
 // message.
 //
-// "Looks deployed" = an explicit non-dev AURELIA_ENV (production/prod/staging/…)
+// "Looks deployed" = an explicit non-dev AIVORY_ENV (production/prod/staging/…)
 // OR a Postgres DATABASE_URL. The Postgres signal closes the original hole where
-// an operator forgot to set AURELIA_ENV=production (default is "development") and
+// an operator forgot to set AIVORY_ENV=production (default is "development") and
 // silently booted with the public dev JWT secret: real deployments use Postgres,
 // local dev uses SQLite. SQLite + an explicit dev env still boots with defaults.
 func Validate(cfg Config) error {
@@ -160,7 +160,7 @@ func Validate(cfg Config) error {
 		return nil
 	}
 	if cfg.JWTSecret == "" || cfg.JWTSecret == defaultDevJWTSecret {
-		return fmt.Errorf("refusing to start: JWT_SECRET is unset or at the built-in dev default in a non-development deployment (AURELIA_ENV=%q, Postgres=%v) — set a long random JWT_SECRET", cfg.Env, isPostgresURL(cfg.DatabaseURL))
+		return fmt.Errorf("refusing to start: JWT_SECRET is unset or at the built-in dev default in a non-development deployment (AIVORY_ENV=%q, Postgres=%v) — set a long random JWT_SECRET", cfg.Env, isPostgresURL(cfg.DatabaseURL))
 	}
 	if len(cfg.JWTSecret) < 32 {
 		return fmt.Errorf("refusing to start: JWT_SECRET is too short (%d chars; need ≥32)", len(cfg.JWTSecret))

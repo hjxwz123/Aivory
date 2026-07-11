@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"aurelia/server/internal/config"
-	"aurelia/server/internal/store/pgcompat"
+	"aivory/server/internal/config"
+	"aivory/server/internal/store/pgcompat"
 
 	_ "github.com/mattn/go-sqlite3"
 )

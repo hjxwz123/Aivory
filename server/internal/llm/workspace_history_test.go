@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"aurelia/server/internal/store"
+	"aivory/server/internal/store"
 )
 
 func textBlocks(text string) json.RawMessage {

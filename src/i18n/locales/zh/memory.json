@@ -1,11 +1,11 @@
 {
   "title": "记忆",
-  "lead": "Aurelia 会跨对话记住你的长期事实,这里的内容会在未来回答中被参考。",
+  "lead": "Aivory 会跨对话记住你的长期事实,这里的内容会在未来回答中被参考。",
   "empty": "暂无记忆",
-  "emptyBody": "对话几次之后,Aurelia 会自动捕获值得记住的内容,你也可以手动添加。",
+  "emptyBody": "对话几次之后,Aivory 会自动捕获值得记住的内容,你也可以手动添加。",
   "new": "添加记忆",
   "addDialogTitle": "新增记忆",
-  "addDialogBody": "关于你的一句简短、长期有效的事实。Aurelia 会以此为依据。",
+  "addDialogBody": "关于你的一句简短、长期有效的事实。Aivory 会以此为依据。",
   "fields": {
     "text": "记忆内容",
     "slot": "属性键(可选)",

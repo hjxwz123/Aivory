@@ -17,8 +17,8 @@ import (
 	"sync"
 	"testing"
 
-	"aurelia/server/internal/config"
-	"aurelia/server/internal/store"
+	"aivory/server/internal/config"
+	"aivory/server/internal/store"
 )
 
 // TestBackupExportImportEndToEnd drives the real export + import handlers across
@@ -157,7 +157,7 @@ func TestBackupImportRequiresConfirm(t *testing.T) {
 
 func TestBackupExportImportRoundTripsQdrant(t *testing.T) {
 	qdrant := newFakeQdrant(t)
-	qdrant.setPoints("aurelia_c2", []qdrantDumpPoint{{
+	qdrant.setPoints("aivory_c2", []qdrantDumpPoint{{
 		ID:      json.RawMessage(`"point-1"`),
 		Vector:  json.RawMessage(`[0.25,0.75]`),
 		Payload: json.RawMessage(`{"chunk_id":"ch1","document_id":"d1","content":"hello vector"}`),
@@ -194,7 +194,7 @@ func TestBackupExportImportRoundTripsQdrant(t *testing.T) {
 	if !man.IncludesQdrant || man.QdrantPoints != 1 {
 		t.Fatalf("manifest qdrant = includes:%v points:%d, want true/1", man.IncludesQdrant, man.QdrantPoints)
 	}
-	if findZipFile(zr, qdrantZipManifest) == nil || findZipFile(zr, "qdrant/collections/aurelia_c2.jsonl") == nil {
+	if findZipFile(zr, qdrantZipManifest) == nil || findZipFile(zr, "qdrant/collections/aivory_c2.jsonl") == nil {
 		t.Fatalf("archive missing qdrant entries")
 	}
 
@@ -226,7 +226,7 @@ func TestBackupExportImportRoundTripsQdrant(t *testing.T) {
 	if !res.OK || res.QdrantRestored != 1 || res.QdrantError != "" {
 		t.Fatalf("unexpected qdrant import response: %+v", res)
 	}
-	got := qdrant.pointsFor("aurelia_c2")
+	got := qdrant.pointsFor("aivory_c2")
 	if len(got) != 1 {
 		t.Fatalf("restored qdrant points = %d, want 1", len(got))
 	}
@@ -422,7 +422,7 @@ func TestConfigImportCannotChangeLockedEmbeddingModel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := json.NewEncoder(mw).Encode(configManifest{Format: "aurelia-config", Version: configArchiveVersion, Tables: []string{"settings"}, MergeMode: "upsert"}); err != nil {
+	if err := json.NewEncoder(mw).Encode(configManifest{Format: "aivory-config", Version: configArchiveVersion, Tables: []string{"settings"}, MergeMode: "upsert"}); err != nil {
 		t.Fatal(err)
 	}
 	sw, err := zw.Create("db/settings.jsonl")

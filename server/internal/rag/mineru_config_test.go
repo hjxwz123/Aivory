@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"aurelia/server/internal/store"
+	"aivory/server/internal/store"
 )
 
 func TestStorageBlockFromSettingsRejectsLocalForMinerU(t *testing.T) {

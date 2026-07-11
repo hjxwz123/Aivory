@@ -16,8 +16,8 @@ import (
 	"sync"
 	"time"
 
-	"aurelia/server/internal/envcfg"
-	"aurelia/server/internal/store"
+	"aivory/server/internal/envcfg"
+	"aivory/server/internal/store"
 )
 
 // Embedding HTTP clients are shared so TLS connections are pooled and reused
@@ -47,9 +47,9 @@ var (
 	embedErrBodyReadCap    int64 = 4096
 	embedErrBodyReadCap4xx int64 = 4096
 
-	embeddingRetryDelayBase = envcfg.Dur("AURELIA_RAG_EMBEDDING_RETRY_DELAY", time.Second)
-	embeddingRetryDelayCap  = envcfg.Dur("AURELIA_RAG_EMBEDDING_RETRY_DELAY_2", 30*time.Second)
-	embeddingRetryJitter    = envcfg.Dur("AURELIA_RAG_EMBEDDING_RETRY_DELAY_3", 1000*time.Millisecond)
+	embeddingRetryDelayBase = envcfg.Dur("AIVORY_RAG_EMBEDDING_RETRY_DELAY", time.Second)
+	embeddingRetryDelayCap  = envcfg.Dur("AIVORY_RAG_EMBEDDING_RETRY_DELAY_2", 30*time.Second)
+	embeddingRetryJitter    = envcfg.Dur("AIVORY_RAG_EMBEDDING_RETRY_DELAY_3", 1000*time.Millisecond)
 )
 
 func newEmbeddingHTTPClient(allowHTTP2 bool) *http.Client {
@@ -176,8 +176,8 @@ const (
 // OCR-heavy ingest monopolising the workspace. A process-wide cap also bounds
 // the aggregate when several RAG workers reach embedding at once.
 var (
-	dashScopeEmbedConcurrency       = envcfg.Int("AURELIA_RAG_DASH_SCOPE_EMBED_CONCURRENCY", 2)
-	dashScopeGlobalEmbedConcurrency = envcfg.Int("AURELIA_RAG_DASH_SCOPE_GLOBAL_EMBED_CONCURRENCY", 2)
+	dashScopeEmbedConcurrency       = envcfg.Int("AIVORY_RAG_DASH_SCOPE_EMBED_CONCURRENCY", 2)
+	dashScopeGlobalEmbedConcurrency = envcfg.Int("AIVORY_RAG_DASH_SCOPE_GLOBAL_EMBED_CONCURRENCY", 2)
 )
 
 // DashScope compatible-mode can occasionally accept the request and then sit
@@ -185,13 +185,13 @@ var (
 // below the shared client's broad 3-minute safety cap so indexing fails with a
 // retryable, visible error instead of looking stuck for many minutes. Variable
 // for tests.
-var dashScopeEmbedAttemptTimeout = envcfg.Dur("AURELIA_RAG_DASH_SCOPE_EMBED_ATTEMPT_TIMEOUT", 60*time.Second)
+var dashScopeEmbedAttemptTimeout = envcfg.Dur("AIVORY_RAG_DASH_SCOPE_EMBED_ATTEMPT_TIMEOUT", 60*time.Second)
 
 // embedConcurrency caps how many upstream embedding batches run at once. The old
 // code did them strictly sequentially, so a 500-chunk doc paid 50 serial
 // round-trips. Keep this moderate because the RAG queue can process multiple
 // documents at once and each document gets its own concurrency allowance.
-var embedConcurrency = envcfg.Int("AURELIA_RAG_EMBED_CONCURRENCY", 4)
+var embedConcurrency = envcfg.Int("AIVORY_RAG_EMBED_CONCURRENCY", 4)
 
 var dashScopeEmbeddingSlots = make(chan struct{}, dashScopeGlobalEmbedConcurrency)
 
@@ -442,7 +442,7 @@ func (e *httpEmbedder) diagnosticsBody(texts []string) string {
 // []byte so it can be replayed on each attempt. Hard 4xx (bad key, bad model,
 // unsupported dimension) are returned immediately — retrying won't help.
 func (e *httpEmbedder) postEmbeddings(ctx context.Context, url string, body []byte) (embeddingResponse, error) {
-	maxAttempts := envcfg.Int("AURELIA_RAG_MAX_ATTEMPTS", 2)
+	maxAttempts := envcfg.Int("AIVORY_RAG_MAX_ATTEMPTS", 2)
 	var parsed embeddingResponse
 	var lastErr error
 	var retryAfter string
@@ -610,7 +610,7 @@ func (s *Service) resolveEmbedder(ctx context.Context) (Embedder, string, int) {
 		}
 		return &httpEmbedder{baseURL: s.embBaseURL, apiKey: s.embAPIKey, model: s.embModel, dim: dim}, "emb:env", dim
 	}
-	return NewLocalEmbedder(localEmbedDim), "aurelia-local-embed", localEmbedDim
+	return NewLocalEmbedder(localEmbedDim), "aivory-local-embed", localEmbedDim
 }
 
 // resolveEmbedderForKB picks the embedding backend for a specific knowledge

@@ -7,16 +7,16 @@ import (
 	"sync"
 	"time"
 
-	"aurelia/server/internal/envcfg"
-	"aurelia/server/internal/rag"
+	"aivory/server/internal/envcfg"
+	"aivory/server/internal/rag"
 
 	"github.com/google/uuid"
 )
 
 // Tunable knobs — envcfg overrides; defaults preserve original behaviour.
 var (
-	vectorMaintenanceJobHistoryRetention = envcfg.Int("AURELIA_API_VECTOR_MAINTENANCE_JOB_HISTORY_RETENTION", 20)
-	vectorMaintenanceJobRuntime          = envcfg.Dur("AURELIA_API_VECTOR_MAINTENANCE_JOB_RUNTIME", 12*time.Hour)
+	vectorMaintenanceJobHistoryRetention = envcfg.Int("AIVORY_API_VECTOR_MAINTENANCE_JOB_HISTORY_RETENTION", 20)
+	vectorMaintenanceJobRuntime          = envcfg.Dur("AIVORY_API_VECTOR_MAINTENANCE_JOB_RUNTIME", 12*time.Hour)
 )
 
 type vectorMaintenanceJob struct {

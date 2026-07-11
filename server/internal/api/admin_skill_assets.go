@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"aurelia/server/internal/envcfg"
+	"aivory/server/internal/envcfg"
 )
 
 // Skill assets (§4.17) are templates / scripts / data files an admin bundles
@@ -21,7 +21,7 @@ import (
 
 // maxSkillAssetBytes caps one asset. Templates / scripts / small data, not media
 // libraries.
-var maxSkillAssetBytes = envcfg.Int64("AURELIA_API_MAX_SKILL_ASSET_BYTES", 20*1024*1024) // 20 MiB
+var maxSkillAssetBytes = envcfg.Int64("AIVORY_API_MAX_SKILL_ASSET_BYTES", 20*1024*1024) // 20 MiB
 
 // skillAssetsSubdir is the flat directory under UploadDir where skill assets
 // live. createSkillAdmin / updateSkillAdmin only accept assets whose

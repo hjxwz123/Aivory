@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"time"
 
-	"aurelia/server/internal/envcfg"
-	"aurelia/server/internal/store"
+	"aivory/server/internal/envcfg"
+	"aivory/server/internal/store"
 )
 
 // Window cost is accumulated in integer micro-units so it can use the cache's
@@ -267,7 +267,7 @@ func estimateRequestTokens(req UnifiedChatRequest) int {
 		for _, b := range m.Blocks {
 			switch b.Kind {
 			case "image", "document":
-				t += envcfg.Int("AURELIA_LLM_IMAGE_DOCUMENT_FLAT_TOKEN_ALLOWANCE", 1024) // base64 isn't text-tokenised; rough flat allowance
+				t += envcfg.Int("AIVORY_LLM_IMAGE_DOCUMENT_FLAT_TOKEN_ALLOWANCE", 1024) // base64 isn't text-tokenised; rough flat allowance
 			default:
 				t += estimateTokens(b.Text) + estimateTokens(b.Summary)
 				if len(b.Input) > 0 {
@@ -310,7 +310,7 @@ func (o *Orchestrator) preflightCredit(ctx context.Context, userID string, model
 	if !enabled {
 		return "", true
 	}
-	outputReserve := envcfg.Int("AURELIA_LLM_OUTPUT_RESERVE", 2000) // input + a fixed 2k output reserve (admin choice)
+	outputReserve := envcfg.Int("AIVORY_LLM_OUTPUT_RESERVE", 2000) // input + a fixed 2k output reserve (admin choice)
 	estIn := estimateRequestTokens(req)
 	need := computeCost(*model, Usage{InputTokens: estIn, OutputTokens: outputReserve}) * o.creditsPerUSD()
 	have := o.availableCredits(ctx, userID, o.userGroupID(ctx, userID))

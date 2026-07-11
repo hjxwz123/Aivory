@@ -1,4 +1,4 @@
-# Aurelia local Python sandbox (sidecar)
+# Aivory local Python sandbox (sidecar)
 
 <p align="center">
   <a href="./README.md"><strong>English</strong></a> ·
@@ -17,7 +17,7 @@ correctly because the image ships Noto CJK fonts.
 ```
 ┌────────────┐   POST /sessions /exec /files   ┌──────────────┐   docker exec   ┌──────────────────┐
 │ Go backend │ ──────────────────────────────► │ app.py (this)│ ──────────────► │ session container │
-└────────────┘   SANDBOX_BASE_URL              └──────────────┘                 │  aurelia-sandbox  │
+└────────────┘   SANDBOX_BASE_URL              └──────────────┘                 │  aivory-sandbox  │
                                                                                  └──────────────────┘
 ```
 
@@ -42,15 +42,15 @@ do **not** need to build images, create their own GitHub repo, or log in to
 GHCR. The images are public:
 
 ```
-ghcr.io/hjxwz123/aurelia-sandbox:latest          # Python runtime
-ghcr.io/hjxwz123/aurelia-sandbox-sidecar:latest  # control service
+ghcr.io/hjxwz123/aivory-sandbox:latest          # Python runtime
+ghcr.io/hjxwz123/aivory-sandbox-sidecar:latest  # control service
 ```
 
 **1. Clone the public repo on your server**
 
 ```bash
-git clone https://github.com/hjxwz123/aurelia-sandbox.git
-cd aurelia-sandbox
+git clone https://github.com/hjxwz123/aivory-sandbox.git
+cd aivory-sandbox
 ```
 
 **2. Pull the public images**
@@ -58,9 +58,9 @@ cd aurelia-sandbox
 ```bash
 export OWNER=hjxwz123
 
-docker pull ghcr.io/$OWNER/aurelia-sandbox:latest
-docker pull ghcr.io/$OWNER/aurelia-sandbox-sidecar:latest
-docker images "ghcr.io/$OWNER/aurelia-sandbox*"
+docker pull ghcr.io/$OWNER/aivory-sandbox:latest
+docker pull ghcr.io/$OWNER/aivory-sandbox-sidecar:latest
+docker images "ghcr.io/$OWNER/aivory-sandbox*"
 ```
 
 **3. Generate and display the API key**
@@ -101,15 +101,15 @@ Docker images.
 是公开的：
 
 ```
-ghcr.io/hjxwz123/aurelia-sandbox:latest          # Python 运行时镜像
-ghcr.io/hjxwz123/aurelia-sandbox-sidecar:latest  # 控制服务镜像
+ghcr.io/hjxwz123/aivory-sandbox:latest          # Python 运行时镜像
+ghcr.io/hjxwz123/aivory-sandbox-sidecar:latest  # 控制服务镜像
 ```
 
 **1. 在服务器上克隆公开仓库**
 
 ```bash
-git clone https://github.com/hjxwz123/aurelia-sandbox.git
-cd aurelia-sandbox
+git clone https://github.com/hjxwz123/aivory-sandbox.git
+cd aivory-sandbox
 ```
 
 **2. 拉取公开镜像**
@@ -117,9 +117,9 @@ cd aurelia-sandbox
 ```bash
 export OWNER=hjxwz123
 
-docker pull ghcr.io/$OWNER/aurelia-sandbox:latest
-docker pull ghcr.io/$OWNER/aurelia-sandbox-sidecar:latest
-docker images "ghcr.io/$OWNER/aurelia-sandbox*"
+docker pull ghcr.io/$OWNER/aivory-sandbox:latest
+docker pull ghcr.io/$OWNER/aivory-sandbox-sidecar:latest
+docker images "ghcr.io/$OWNER/aivory-sandbox*"
 ```
 
 **3. 生成并显示密钥**
@@ -158,10 +158,10 @@ maintainers or developers who want to change the runtime image. It requires a
 running Docker engine (Docker Desktop or Colima) and Python 3.10+.
 
 ```bash
-cd aurelia-sandbox
+cd aivory-sandbox
 
 # 1. Build the runtime image (one-time, ~5–8 min, downloads the wheels + fonts)
-docker build -f Dockerfile.runner -t aurelia-sandbox:latest .
+docker build -f Dockerfile.runner -t aivory-sandbox:latest .
 
 # 2. Install the sidecar deps and run it on :8000
 python3 -m venv .venv && source .venv/bin/activate
@@ -202,7 +202,7 @@ You should get `stdout: "rows 3\n"`, `exit_code: 0`, and one file `p.png`
 
 | Var | Default | Notes |
 |---|---|---|
-| `SANDBOX_IMAGE` | `aurelia-sandbox:latest` | runtime image tag |
+| `SANDBOX_IMAGE` | `aivory-sandbox:latest` | runtime image tag |
 | `SANDBOX_NETWORK` | `none` | set `bridge` to allow `pip install` at runtime |
 | `SANDBOX_MEMORY` | `2g` | per-container memory cap |
 | `SANDBOX_CPUS` | `1` | per-container CPU cap |
@@ -265,7 +265,7 @@ in front of the raw socket restricted to container create/start/exec/kill +
 image pull (see the security note in `docker-compose.yml`), and never expose the
 service port to the public internet.
 
-On startup the sidecar also discovers existing `aurelia.sandbox=1` containers,
+On startup the sidecar also discovers existing `aivory.sandbox=1` containers,
 so a sidecar restart can keep tracking live sessions and reap stale ones later.
 
 This is container-level isolation, fine for a single-host dev box. It is **not**

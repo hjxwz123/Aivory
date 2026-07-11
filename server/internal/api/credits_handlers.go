@@ -1,7 +1,7 @@
 package api
 
 import (
-	"aurelia/server/internal/store"
+	"aivory/server/internal/store"
 	"context"
 	"encoding/json"
 	"math"

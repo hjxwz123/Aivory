@@ -27,8 +27,8 @@ import (
 	"strings"
 	"time"
 
-	"aurelia/server/internal/envcfg"
-	"aurelia/server/internal/store"
+	"aivory/server/internal/envcfg"
+	"aivory/server/internal/store"
 )
 
 // Tunable knobs — envcfg overrides; defaults preserve original behaviour.
@@ -37,7 +37,7 @@ var (
 	memoryCandidatesExtractionCap       = 5
 	memoryExtractorUserTurnCap          = 20
 	maxOutputTokens                     = 1024
-	defaultMemoryConfidence             = envcfg.F64("AURELIA_LLM_CONF", 0.7)
+	defaultMemoryConfidence             = envcfg.F64("AIVORY_LLM_CONF", 0.7)
 	existingSameSlotMemoriesFetchLimit  = 10
 	maxOutputTokens2                    = 256
 	semanticDedupCandidateMemoriesLimit = 40

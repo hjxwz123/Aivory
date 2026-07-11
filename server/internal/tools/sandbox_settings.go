@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"aurelia/server/internal/sandbox"
-	"aurelia/server/internal/store"
+	"aivory/server/internal/sandbox"
+	"aivory/server/internal/store"
 )
 
 // settingsSandbox resolves the sandbox backend (base URL + API key) from admin

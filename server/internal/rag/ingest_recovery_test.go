@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"aurelia/server/internal/queue"
-	"aurelia/server/internal/store"
+	"aivory/server/internal/queue"
+	"aivory/server/internal/store"
 )
 
 func TestCanceledIngestFinalizesDocumentWithFreshContext(t *testing.T) {

@@ -23,31 +23,31 @@ import (
 	"time"
 	"unicode"
 
-	"aurelia/server/internal/config"
-	"aurelia/server/internal/envcfg"
-	"aurelia/server/internal/llm"
-	"aurelia/server/internal/rag"
-	"aurelia/server/internal/sandbox"
-	"aurelia/server/internal/store"
+	"aivory/server/internal/config"
+	"aivory/server/internal/envcfg"
+	"aivory/server/internal/llm"
+	"aivory/server/internal/rag"
+	"aivory/server/internal/sandbox"
+	"aivory/server/internal/store"
 )
 
 // Env-overridable defaults (see docs/config-reference.md). Each falls back to
-// the original hardcoded value when its AURELIA_* variable is unset.
+// the original hardcoded value when its AIVORY_* variable is unset.
 var (
-	inTopK                                 = envcfg.Int("AURELIA_TOOLS_IN_TOP_K", 5)
-	webFetchResponseBodyReadCap            = envcfg.Int64("AURELIA_TOOLS_WEB_FETCH_RESPONSE_BODY_READ_CAP", 256*1024)
-	webFetchExtractedTextCharCap           = envcfg.Int("AURELIA_TOOLS_WEB_FETCH_EXTRACTED_TEXT_CHAR_CAP", 32000)
-	pythonExecuteUploadStagingFileSize     = envcfg.Int64("AURELIA_TOOLS_PYTHON_EXECUTE_UPLOAD_STAGING_FILE_SIZE", 20*1024*1024)
-	pythonExecuteImageArtifactStagingSize  = envcfg.Int64("AURELIA_TOOLS_PYTHON_EXECUTE_IMAGE_ARTIFACT_STAGING_SIZE", 20*1024*1024)
-	pythonExecuteStdoutStderrTruncationCap = envcfg.Int("AURELIA_TOOLS_PYTHON_EXECUTE_STDOUT_STDERR_TRUNCATION_CAP", 32*1024)
-	inN                                    = envcfg.Int("AURELIA_TOOLS_IN_N", 4)
-	inSize                                 = envcfg.Str("AURELIA_TOOLS_IN_SIZE", "1024x1024")
-	dailyImageLimitResetWindow             = envcfg.Dur("AURELIA_TOOLS_DAILY_IMAGE_LIMIT_RESET_WINDOW", 24*time.Hour)
+	inTopK                                 = envcfg.Int("AIVORY_TOOLS_IN_TOP_K", 5)
+	webFetchResponseBodyReadCap            = envcfg.Int64("AIVORY_TOOLS_WEB_FETCH_RESPONSE_BODY_READ_CAP", 256*1024)
+	webFetchExtractedTextCharCap           = envcfg.Int("AIVORY_TOOLS_WEB_FETCH_EXTRACTED_TEXT_CHAR_CAP", 32000)
+	pythonExecuteUploadStagingFileSize     = envcfg.Int64("AIVORY_TOOLS_PYTHON_EXECUTE_UPLOAD_STAGING_FILE_SIZE", 20*1024*1024)
+	pythonExecuteImageArtifactStagingSize  = envcfg.Int64("AIVORY_TOOLS_PYTHON_EXECUTE_IMAGE_ARTIFACT_STAGING_SIZE", 20*1024*1024)
+	pythonExecuteStdoutStderrTruncationCap = envcfg.Int("AIVORY_TOOLS_PYTHON_EXECUTE_STDOUT_STDERR_TRUNCATION_CAP", 32*1024)
+	inN                                    = envcfg.Int("AIVORY_TOOLS_IN_N", 4)
+	inSize                                 = envcfg.Str("AIVORY_TOOLS_IN_SIZE", "1024x1024")
+	dailyImageLimitResetWindow             = envcfg.Dur("AIVORY_TOOLS_DAILY_IMAGE_LIMIT_RESET_WINDOW", 24*time.Hour)
 	imageQuotaDefaultPeriod                = int64(604800)
-	imageImageInputImageCap                = envcfg.Int("AURELIA_TOOLS_IMAGE_IMAGE_INPUT_IMAGE_CAP", 3)
-	fetchRemoteImageDownloadCap            = envcfg.Int64("AURELIA_TOOLS_FETCHREMOTEIMAGE_DOWNLOAD_CAP", 32<<20)
-	inTopK2                                = envcfg.Int("AURELIA_TOOLS_IN_TOP_K_2", 5)
-	saveMemoryConfidence                   = envcfg.F64("AURELIA_TOOLS_CONFIDENCE", 0.95)
+	imageImageInputImageCap                = envcfg.Int("AIVORY_TOOLS_IMAGE_IMAGE_INPUT_IMAGE_CAP", 3)
+	fetchRemoteImageDownloadCap            = envcfg.Int64("AIVORY_TOOLS_FETCHREMOTEIMAGE_DOWNLOAD_CAP", 32<<20)
+	inTopK2                                = envcfg.Int("AIVORY_TOOLS_IN_TOP_K_2", 5)
+	saveMemoryConfidence                   = envcfg.F64("AIVORY_TOOLS_CONFIDENCE", 0.95)
 )
 
 // webSearchTool implements §4.4 via a pluggable Searcher. When no backend is
@@ -82,7 +82,7 @@ func (t *webSearchTool) Execute(ctx context.Context, input []byte, _ *llm.ToolCo
 	if t.searcher == nil {
 		// Fallback "result" so the model can still respond gracefully.
 		fake := []llm.Citation{
-			{ID: "w1", Index: 1, Title: "Aurelia local-only mode", URL: "https://example.com/aurelia-local-mode", Snippet: "No SEARCH_API_KEY configured. Configure one to enable real web_search results.", Source: "web"},
+			{ID: "w1", Index: 1, Title: "Aivory local-only mode", URL: "https://example.com/aivory-local-mode", Snippet: "No SEARCH_API_KEY configured. Configure one to enable real web_search results.", Source: "web"},
 		}
 		return "Search not yet configured. Reply based on training knowledge or ask the user to configure SEARCH_API_KEY.", fake, nil
 	}
@@ -117,7 +117,7 @@ func (t *webFetchTool) Execute(ctx context.Context, input []byte, _ *llm.ToolCon
 		return "", nil, errors.New("blocked non-web port")
 	}
 	req, _ := http.NewRequestWithContext(ctx, "GET", in.URL, nil)
-	req.Header.Set("user-agent", "AureliaBot/1.0")
+	req.Header.Set("user-agent", "AivoryBot/1.0")
 	resp, err := ssrfSafeClient().Do(req)
 	if err != nil {
 		return "", nil, err
@@ -228,7 +228,7 @@ func (t *fetchImageTool) Execute(ctx context.Context, input []byte, tc *llm.Tool
 	}
 
 	req, _ := http.NewRequestWithContext(ctx, "GET", u.String(), nil)
-	req.Header.Set("user-agent", "AureliaBot/1.0")
+	req.Header.Set("user-agent", "AivoryBot/1.0")
 	resp, err := ssrfSafeClient().Do(req)
 	if err != nil {
 		return "", nil, err
@@ -237,7 +237,7 @@ func (t *fetchImageTool) Execute(ctx context.Context, input []byte, tc *llm.Tool
 	if resp.StatusCode != 200 {
 		return "", nil, fmt.Errorf("image fetch failed: HTTP %d", resp.StatusCode)
 	}
-	maxImg := envcfg.Int64("AURELIA_TOOLS_MAX_IMG", 15*1024*1024)
+	maxImg := envcfg.Int64("AIVORY_TOOLS_MAX_IMG", 15*1024*1024)
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, maxImg+1))
 	if len(data) == 0 {
 		return "", nil, errors.New("empty image response")

@@ -63,7 +63,7 @@ export default function JoinWorkspace() {
     <div className="min-h-svh w-full bg-[var(--color-bg)] text-[var(--color-fg)]">
       <header className="border-b border-[var(--color-divider)]">
         <div className="mx-auto flex h-14 max-w-[40rem] items-center px-5">
-          <Link to="/" aria-label="Aurelia" className="inline-flex items-center">
+          <Link to="/" aria-label="Aivory" className="inline-flex items-center">
             <Logo />
           </Link>
         </div>

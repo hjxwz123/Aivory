@@ -13,10 +13,10 @@ import (
 	"sort"
 	"sync"
 
-	"aurelia/server/internal/config"
-	"aurelia/server/internal/llm"
-	"aurelia/server/internal/rag"
-	"aurelia/server/internal/sandbox"
+	"aivory/server/internal/config"
+	"aivory/server/internal/llm"
+	"aivory/server/internal/rag"
+	"aivory/server/internal/sandbox"
 )
 
 // Tool is the contract every self-built tool implements.

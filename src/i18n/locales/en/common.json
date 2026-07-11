@@ -1,5 +1,5 @@
 {
-  "appName": "Aurelia",
+  "appName": "Aivory",
   "tagline": "A thoughtful AI companion",
   "actions": {
     "send": "Send",
@@ -21,7 +21,7 @@
     "back": "Back",
     "continue": "Continue",
     "tryAgain": "Try again",
-    "openAurelia": "Open Aurelia",
+    "openAivory": "Open Aivory",
     "signIn": "Sign in",
     "signOut": "Sign out",
     "signUp": "Create account",
@@ -76,7 +76,7 @@
     "themeValue": "Theme: {{label}}",
     "languageValue": "Language: {{label}}",
     "selected": "Selected",
-    "homeLink": "Aurelia home",
+    "homeLink": "Aivory home",
     "backToTop": "Back to top",
     "boundary": "Something went sideways."
   },

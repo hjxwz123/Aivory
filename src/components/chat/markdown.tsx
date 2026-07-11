@@ -89,7 +89,7 @@ export const Markdown = memo(function Markdown({ content, className, live = fals
   const blockAnim = live ? 'animate-[fade-in_500ms_var(--ease-out)_backwards]' : undefined
 
   return (
-    <div className={cn('prose-aurelia', className)}>
+    <div className={cn('prose-aivory', className)}>
       {blocks.map((b, i) => {
         switch (b.type) {
           case 'heading':

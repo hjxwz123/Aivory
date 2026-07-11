@@ -30,7 +30,7 @@ import { envNum } from '@/lib/env-config'
 
 const RANGE_IDS = ['1', '7', '30', '90'] as const
 const ALL_MODELS = 'all'
-const PAGE_SIZE = envNum('VITE_AURELIA_PAGE_SIZE', 50)
+const PAGE_SIZE = envNum('VITE_AIVORY_PAGE_SIZE', 50)
 
 export default function AdminUsage() {
   const { t, i18n } = useTranslation('admin')

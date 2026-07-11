@@ -23,7 +23,7 @@ interface SettingsState {
   toggleSidebar: () => void
 }
 
-const KEY = 'aurelia.settings'
+const KEY = 'aivory.settings'
 
 function load(): Partial<SettingsState> {
   try {

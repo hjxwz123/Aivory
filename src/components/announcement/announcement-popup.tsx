@@ -26,7 +26,7 @@ interface AnnouncementData {
   updated_at: number
 }
 
-const DISMISS_KEY = 'aurelia.announcement.dismissed'
+const DISMISS_KEY = 'aivory.announcement.dismissed'
 
 export function AnnouncementPopup() {
   const { t } = useTranslation('common')

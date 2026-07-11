@@ -25,7 +25,7 @@
   "detail": {
     "uploadButton": "Importer un document",
     "noDocs": "Aucun document pour l'instant",
-    "noDocsBody": "Importez un fichier PDF, Markdown ou texte, et Aurelia l'indexe pour la recherche.",
+    "noDocsBody": "Importez un fichier PDF, Markdown ou texte, et Aivory l'indexe pour la recherche.",
     "rename": "Renommer la bibliothèque",
     "delete": "Supprimer la bibliothèque",
     "deleteConfirm": "Supprimer cette bibliothèque et tous ses documents ?",
