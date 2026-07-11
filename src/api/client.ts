@@ -14,6 +14,7 @@
  */
 import type { ApiError as ApiErrorShape } from './types'
 import { toast as _sseToast } from '@/hooks/use-toast'
+import { hmacSha256 } from '@/lib/hmac-sha256'
 
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? '/api'
@@ -22,6 +23,12 @@ const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? '/api'
 // JWT + a slow-rotating epoch (changes every hour), then signs ts:nonce:path
 // with it. Every request produces a unique token; the path is bound into the
 // signature so a token captured from one endpoint is invalid on another.
+//
+// `crypto.subtle` only exists in secure contexts (https / localhost). A
+// deployment reached over plain http on a LAN IP or domain has no SubtleCrypto
+// and would throw "Cannot read properties of undefined (reading 'importKey')"
+// on every authed request — fall back to the pure-JS HMAC (byte-identical
+// output) so those deployments keep working.
 async function _dk(jwt: string): Promise<CryptoKey> {
   const raw = new TextEncoder().encode(jwt)
   const base = await crypto.subtle.importKey('raw', raw, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
@@ -31,13 +38,21 @@ async function _dk(jwt: string): Promise<CryptoKey> {
 }
 
 async function _sign(jwt: string, ts: number, nonce: string, path: string): Promise<string> {
-  const key = await _dk(jwt)
   // The server verifies over r.URL.Path — the path WITHOUT the query string
   // (middleware.go). Strip any `?query` here or a request like `?mode=tree` signs
   // a different message than the server checks and gets a 403 "invalid request
   // signature" (this silently broke the conversation-tree / paginated fetches).
   const signPath = path.split('?')[0]
-  const msg = new TextEncoder().encode(`${ts}\x00${nonce}\x00${signPath}`)
+  const msgStr = `${ts}\x00${nonce}\x00${signPath}`
+  if (typeof crypto.subtle === 'undefined') {
+    const encoder = new TextEncoder()
+    const epoch = Math.floor(Date.now() / 1000 / 3600)
+    const derived = hmacSha256(encoder.encode(jwt), encoder.encode(String(epoch)))
+    const sig = hmacSha256(derived, encoder.encode(msgStr))
+    return btoa(String.fromCharCode(...sig))
+  }
+  const key = await _dk(jwt)
+  const msg = new TextEncoder().encode(msgStr)
   const sig = await crypto.subtle.sign('HMAC', key, msg)
   return btoa(String.fromCharCode(...new Uint8Array(sig)))
 }
