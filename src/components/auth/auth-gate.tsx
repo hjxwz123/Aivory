@@ -30,6 +30,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const hydrate = useAuth((s) => s.hydrate)
   const user = useAuth((s) => s.user)
   const needsSetup = useAuth((s) => s.needsSetup)
+  const setupProbed = useAuth((s) => s.setupProbed)
   const loadConversations = useConversations((s) => s.load)
   const loadProjects = useProjects((s) => s.load)
   const loadModels = useModels((s) => s.load)
@@ -86,14 +87,23 @@ export function AuthGate({ children }: { children: ReactNode }) {
     void loadModels()
   }, [status, user?.id, loadConversations, loadProjects, loadModels])
 
-  // Loading state — quick shimmer (auth check + initial paint).
+  // Loading shimmer (auth check + initial paint) — reused while the first-run
+  // probe is still pending so we never route on a not-yet-known needsSetup.
+  const shimmer = (
+    <div className="min-h-svh w-full flex items-center justify-center text-[var(--color-fg-subtle)] text-sm">
+      <span className="inline-block size-4 rounded-full border-2 border-[var(--color-fg-faint)] border-r-transparent animate-[spin_900ms_linear_infinite]" />
+    </div>
+  )
   if (status === 'idle' || status === 'authenticating') {
     if (isPublic(location.pathname)) return <>{children}</>
-    return (
-      <div className="min-h-svh w-full flex items-center justify-center text-[var(--color-fg-subtle)] text-sm">
-        <span className="inline-block size-4 rounded-full border-2 border-[var(--color-fg-faint)] border-r-transparent animate-[spin_900ms_linear_infinite]" />
-      </div>
-    )
+    return shimmer
+  }
+  // First-run probe not resolved yet — deciding setup-vs-login on the default
+  // (needsSetup=false) is exactly what flickered a fresh deploy /setup → /login.
+  // Public pages render immediately; protected paths wait for the probe.
+  if (!setupProbed) {
+    if (isPublic(location.pathname)) return <>{children}</>
+    return shimmer
   }
 
   // First-run: a deployment with no users routes everything to the setup screen
