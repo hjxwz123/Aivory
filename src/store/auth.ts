@@ -37,6 +37,10 @@ interface AuthState {
   /** True when the deployment has no users yet — the app routes to the first-run
    *  setup screen (create the first admin) instead of login (§ first-run setup). */
   needsSetup: boolean
+  /** False until the first-run probe (/public/needs-setup) has resolved at least
+   *  once. The gate waits for this before choosing setup-vs-login, so a fresh
+   *  deploy doesn't flicker /setup → /login on the default (false) value. */
+  setupProbed: boolean
   /** Set when registration returns verification_required — drives the code UI. */
   pendingVerification: string | null
   /** Set when password login returns totp_required — drives the 2FA code UI. */
@@ -71,6 +75,7 @@ export const useAuth = create<AuthState>((set, get) => ({
   signupOpen: true,
   captchaRequired: false,
   needsSetup: false,
+  setupProbed: false,
   pendingVerification: null,
   pendingTwoFactor: null,
 
@@ -114,18 +119,19 @@ export const useAuth = create<AuthState>((set, get) => ({
       if (!isLatestAuthOp(seq)) return
       set({ user: null, status: 'unauthenticated' })
     } finally {
-      try {
-        const r = await authApi.signupOpen()
-        if (isLatestAuthOp(seq)) set({ signupOpen: r.open, captchaRequired: r.captcha_required })
-      } catch {
-        /* ignore */
-      }
-      // First-run probe: a fresh deployment (zero users) routes to /setup.
-      try {
-        const s = await authApi.needsSetup()
-        if (isLatestAuthOp(seq)) set({ needsSetup: s.needs_setup })
-      } catch {
-        /* ignore */
+      // First-run probe: a fresh deployment (zero users) routes to /setup. Probe
+      // it in PARALLEL with signup-open so a slow/failed sibling call can't delay
+      // the routing decision, and mark it resolved either way so the AuthGate
+      // stops waiting (otherwise the gate is stuck on the default needsSetup).
+      const [signup, setup] = await Promise.allSettled([authApi.signupOpen(), authApi.needsSetup()])
+      if (isLatestAuthOp(seq)) {
+        if (signup.status === 'fulfilled') {
+          set({ signupOpen: signup.value.open, captchaRequired: signup.value.captcha_required })
+        }
+        if (setup.status === 'fulfilled') {
+          set({ needsSetup: setup.value.needs_setup })
+        }
+        set({ setupProbed: true })
       }
     }
   },
