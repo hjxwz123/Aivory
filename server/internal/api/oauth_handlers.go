@@ -13,8 +13,18 @@ import (
 	"strings"
 	"time"
 
+	"aurelia/server/internal/envcfg"
 	"aurelia/server/internal/oauth"
 	"aurelia/server/internal/store"
+)
+
+// OAuth timing knobs — overridable via env (see docs/config-reference.md); the
+// defaults preserve the previous hardcoded behaviour.
+var (
+	oauth2FAHandoffCookieTTL        = envcfg.Dur("AURELIA_API_OAUTH_2FA_HANDOFF_COOKIE_TTL", 300*time.Second)
+	oauthStateCacheTTL              = envcfg.Dur("AURELIA_API_OAUTH_STATE_CACHE_TTL", 10*time.Minute)
+	oauthTokenExchangeCtxTimeout    = envcfg.Dur("AURELIA_API_OAUTH_TOKEN_EXCHANGE_CONTEXT_TIMEOUT", 20*time.Second)
+	oauthCrossDomainHandoffTokenTTL = envcfg.Dur("AURELIA_API_OAUTH_CROSS_DOMAIN_HANDOFF_TOKEN_TTL", 60*time.Second)
 )
 
 // ===== Public: provider list for the login page =====
@@ -123,7 +133,7 @@ func completeOAuthLogin(d Deps, w http.ResponseWriter, r *http.Request, user *st
 		// URL — keeps the bearer secret out of history, Referer and access logs.
 		http.SetCookie(w, &http.Cookie{
 			Name: "aurelia_2fa", Value: ticket, Path: "/api/auth",
-			HttpOnly: true, Secure: secureCookie(r), SameSite: http.SameSiteLaxMode, MaxAge: 300,
+			HttpOnly: true, Secure: secureCookie(r), SameSite: http.SameSiteLaxMode, MaxAge: int(oauth2FAHandoffCookieTTL.Seconds()),
 		})
 		http.Redirect(w, r, base+"/login?twofa=1", http.StatusFound)
 		return
@@ -195,7 +205,7 @@ func oauthStartHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	origin := startOrigin(d, r, callbackBase)
 
 	stash, _ := json.Marshal(map[string]string{"provider_id": id, "verifier": verifier, "origin": origin})
-	d.Cache.Set("oauth:state:"+state, string(stash), 10*time.Minute)
+	d.Cache.Set("oauth:state:"+state, string(stash), oauthStateCacheTTL)
 
 	redirectURI := callbackBase + "/api/auth/oauth/" + id + "/callback"
 	http.Redirect(w, r, cfg.AuthCodeURL(redirectURI, state, challenge), http.StatusFound)
@@ -268,7 +278,7 @@ func oauthCallbackHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	cfg := oauth.Resolve(toOAuthConfig(p))
 	redirectURI := callbackBase + "/api/auth/oauth/" + id + "/callback"
 
-	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), oauthTokenExchangeCtxTimeout)
 	defer cancel()
 
 	tokens, err := cfg.Exchange(ctx, redirectURI, code, st.Verifier)
@@ -324,7 +334,7 @@ func oauthCallbackHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	// the cookies there. The status/2FA/session tail runs on the FINAL host.
 	if returnBase != callbackBase {
 		tok := randToken(24)
-		d.Cache.Set("oauth:handoff:"+tok, user.ID, 60*time.Second)
+		d.Cache.Set("oauth:handoff:"+tok, user.ID, oauthCrossDomainHandoffTokenTTL)
 		http.Redirect(w, r, returnBase+"/api/auth/oauth/handoff?token="+url.QueryEscape(tok), http.StatusFound)
 		return
 	}
@@ -364,7 +374,7 @@ func oauthLinkStartHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	stash, _ := json.Marshal(map[string]string{
 		"provider_id": id, "verifier": verifier, "link_user_id": u.ID, "origin": origin,
 	})
-	d.Cache.Set("oauth:state:"+state, string(stash), 10*time.Minute)
+	d.Cache.Set("oauth:state:"+state, string(stash), oauthStateCacheTTL)
 	redirectURI := callbackBase + "/api/auth/oauth/" + id + "/callback"
 	writeJSON(w, 200, map[string]string{"authorize_url": cfg.AuthCodeURL(redirectURI, state, challenge)})
 }

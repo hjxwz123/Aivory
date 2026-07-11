@@ -8,7 +8,12 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+
+	"aurelia/server/internal/envcfg"
 )
+
+// jsonRequestBodySizeCap caps JSON request bodies (§FIX-2); env-overridable.
+var jsonRequestBodySizeCap = envcfg.Int64("AURELIA_API_JSON_REQUEST_BODY_SIZE_CAP", 4<<20)
 
 // mux is a tiny path-param router. Routes use the `:name` syntax which is
 // captured into the request context.
@@ -103,7 +108,7 @@ func writeError(w http.ResponseWriter, status int, err error) {
 // Body reads are capped at 4 MB to prevent memory exhaustion (§ FIX-2).
 // Backup import has its own 2 GB limit in admin_backup_handlers.go.
 func decodeJSON(r *http.Request, dst any) error {
-	r.Body = http.MaxBytesReader(nil, r.Body, 4<<20) // 4 MB
+	r.Body = http.MaxBytesReader(nil, r.Body, jsonRequestBodySizeCap) // 4 MB
 	defer r.Body.Close()
 	dec := json.NewDecoder(r.Body)
 	if err := dec.Decode(dst); err != nil {

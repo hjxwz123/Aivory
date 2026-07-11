@@ -7,9 +7,16 @@ import (
 	"sync"
 	"time"
 
+	"aurelia/server/internal/envcfg"
 	"aurelia/server/internal/rag"
 
 	"github.com/google/uuid"
+)
+
+// Tunable knobs — envcfg overrides; defaults preserve original behaviour.
+var (
+	vectorMaintenanceJobHistoryRetention = envcfg.Int("AURELIA_API_VECTOR_MAINTENANCE_JOB_HISTORY_RETENTION", 20)
+	vectorMaintenanceJobRuntime          = envcfg.Dur("AURELIA_API_VECTOR_MAINTENANCE_JOB_RUNTIME", 12*time.Hour)
 )
 
 type vectorMaintenanceJob struct {
@@ -96,7 +103,7 @@ func (m *vectorMaintenanceManager) start(typ string) (*vectorMaintenanceJob, boo
 	m.jobs[id] = job
 	m.order = append([]string{id}, m.order...)
 	m.runningID = id
-	for len(m.order) > 20 {
+	for len(m.order) > vectorMaintenanceJobHistoryRetention {
 		old := m.order[len(m.order)-1]
 		m.order = m.order[:len(m.order)-1]
 		delete(m.jobs, old)
@@ -168,7 +175,7 @@ func cloneVectorJob(job *vectorMaintenanceJob) *vectorMaintenanceJob {
 }
 
 func runVectorMaintenanceJob(d Deps, id, typ string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Hour)
+	ctx, cancel := context.WithTimeout(context.Background(), vectorMaintenanceJobRuntime)
 	defer cancel()
 
 	switch typ {

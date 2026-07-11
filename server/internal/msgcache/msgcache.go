@@ -7,10 +7,14 @@ import (
 	"time"
 
 	"aurelia/server/internal/cache"
+	"aurelia/server/internal/envcfg"
 	"aurelia/server/internal/store"
 )
 
-const pathTTL = 45 * time.Second
+var (
+	pathTTL       = envcfg.Dur("AURELIA_MSGCACHE_PATH_TTL", 45*time.Second)
+	versionKeyTTL = envcfg.Dur("AURELIA_MSGCACHE_MESSAGE_CACHE_VERSION_KEY_TTL", 10*time.Minute)
+)
 
 // Bump invalidates cached conversation message paths by moving the version used
 // in cache keys. It is deliberately prefix-free so Redis does not need SCAN/DEL
@@ -19,7 +23,7 @@ func Bump(c cache.Cache, convID string) {
 	if c == nil || convID == "" {
 		return
 	}
-	c.Incr(versionKey(convID), 10*time.Minute)
+	c.Incr(versionKey(convID), versionKeyTTL)
 }
 
 // ListMessages returns store.ListMessages with a short Redis/in-memory cache.

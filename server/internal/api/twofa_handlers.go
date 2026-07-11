@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"aurelia/server/internal/auth"
+	"aurelia/server/internal/envcfg"
 	"aurelia/server/internal/store"
 )
 
@@ -18,6 +19,11 @@ import (
 // ticket instead of a session, and the code must be supplied to finish.
 
 const twofaIssuer = "Aurelia"
+
+var (
+	twofaLoginTicketBurnThreshold = envcfg.Int64("AURELIA_API_2FA_LOGIN_TICKET_BURN_THRESHOLD", 5)
+	issueTwofaTicketTTL           = envcfg.Dur("AURELIA_API_ISSUE_TWOFA_TICKET", 5*time.Minute)
+)
 
 // twofaSetupHandler generates a fresh (not yet enabled) secret and returns the
 // provisioning URI for the user's authenticator app.
@@ -179,7 +185,7 @@ func login2faHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		// brute-forced for its full TTL — the user must redo the password step.
 		// Until then KEEP the cookie so the user can retry (mirrors the
 		// body-ticket password flow).
-		burned := d.Cache.Incr("2fa:fail:"+ticket, 5*time.Minute) >= 5
+		burned := d.Cache.Incr("2fa:fail:"+ticket, 5*time.Minute) >= twofaLoginTicketBurnThreshold
 		if burned {
 			d.Cache.Delete("2fa:" + ticket)
 			d.Cache.Delete("2fa:fail:" + ticket)
@@ -215,6 +221,6 @@ func issueTwofaTicket(d Deps, userID string) string {
 		return ""
 	}
 	ticket := hex.EncodeToString(buf)
-	d.Cache.Set("2fa:"+ticket, userID, 5*time.Minute)
+	d.Cache.Set("2fa:"+ticket, userID, issueTwofaTicketTTL)
 	return ticket
 }

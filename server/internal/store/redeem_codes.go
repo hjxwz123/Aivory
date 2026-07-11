@@ -17,7 +17,13 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"aurelia/server/internal/envcfg"
 )
+
+// redeemCodeUniquenessRetries bounds the per-code collision-retry loop in
+// BulkGenerateRedeemCodes; overridable via env, defaults to the original 5.
+var redeemCodeUniquenessRetries = envcfg.Int("AURELIA_STORE_REDEEM_CODE_UNIQUENESS_RETRIES", 5)
 
 // RedeemCode is a single row in redeem_codes.
 type RedeemCode struct {
@@ -123,7 +129,7 @@ func BulkGenerateRedeemCodes(ctx context.Context, db *sql.DB, template RedeemCod
 	out := make([]RedeemCode, 0, count)
 	for i := 0; i < count; i++ {
 		var created *RedeemCode
-		for attempt := 0; attempt < 5; attempt++ {
+		for attempt := 0; attempt < redeemCodeUniquenessRetries; attempt++ {
 			tpl := template
 			tpl.ID = ""
 			tpl.Code = ""

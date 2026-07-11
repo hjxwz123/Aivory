@@ -38,6 +38,7 @@ import type {
   ApiUsageRecord,
   ApiUser,
 } from './types'
+import { envNum, envStr } from '@/lib/env-config'
 
 // ----- Auth ----------------------------------------------------------------
 
@@ -176,8 +177,10 @@ export const imageApi = {
   /** Enabled styles for the composer style picker (hidden prompt stripped). */
   styles: () => api<ApiImageStyle[]>('/image/styles'),
   /** The signed-in user's own generated-image gallery (§4.20). */
-  myImages: (limit = 60, offset = 0) =>
-    api<ApiAdminImage[]>(`/me/images?limit=${limit}&offset=${offset}`),
+  myImages: (
+    limit = envNum('VITE_AURELIA_IMAGE_API_MY_IMAGES_LIMIT', 60),
+    offset = envNum('VITE_AURELIA_IMAGE_API_MY_IMAGES_OFFSET', 0),
+  ) => api<ApiAdminImage[]>(`/me/images?limit=${limit}&offset=${offset}`),
 }
 
 export const skillsApi = {
@@ -282,8 +285,10 @@ export const workspacesApi = {
     ),
   join: (token: string) =>
     api<{ id: string; name: string }>(`/workspaces/join/${encodeURIComponent(token)}`, { method: 'POST' }),
-  adminList: (limit = 200, offset = 0) =>
-    api<{ workspaces: ApiWorkspace[] }>(`/admin/workspaces?limit=${limit}&offset=${offset}`),
+  adminList: (
+    limit = envNum('VITE_AURELIA_WORKSPACES_API_ADMIN_LIST_LIMIT', 200),
+    offset = envNum('VITE_AURELIA_WORKSPACES_API_ADMIN_LIST_OFFSET', 0),
+  ) => api<{ workspaces: ApiWorkspace[] }>(`/admin/workspaces?limit=${limit}&offset=${offset}`),
   adminDetail: (id: string) =>
     api<{
       workspace: ApiWorkspace
@@ -308,11 +313,19 @@ export const searchApi = {
 // ----- Conversations + messages -------------------------------------------
 
 export const conversationsApi = {
-  list: (projectId?: string, limit = 200, offset = 0, workspaceId?: string) =>
+  list: (
+    projectId?: string,
+    limit = envNum('VITE_AURELIA_CONVERSATIONS_API_LIST_LIMIT', 200),
+    offset = envNum('VITE_AURELIA_CONVERSATIONS_API_LIST_OFFSET', 0),
+    workspaceId?: string,
+  ) =>
     api<{ conversations: ApiConversation[]; limit: number; offset: number; has_more: boolean }>(
       `/conversations?limit=${limit}&offset=${offset}${projectId ? `&project_id=${encodeURIComponent(projectId)}` : ''}${workspaceId ? `&workspace_id=${encodeURIComponent(workspaceId)}` : ''}`,
     ),
-  listArchived: (limit = 200, offset = 0) =>
+  listArchived: (
+    limit = envNum('VITE_AURELIA_CONVERSATIONS_API_LIST_ARCHIVED_LIMIT', 200),
+    offset = envNum('VITE_AURELIA_CONVERSATIONS_API_LIST_ARCHIVED_OFFSET', 0),
+  ) =>
     api<{ conversations: ApiConversation[]; limit: number; offset: number; has_more: boolean }>(
       `/conversations?archived=only&limit=${limit}&offset=${offset}`,
     ),
@@ -576,7 +589,11 @@ export const adminApi = {
   removeRedeemBatch: (name: string) =>
     api<{ ok: true; removed: number }>(`/admin/redeem-batches/${encodeURIComponent(name)}`, { method: 'DELETE' }),
 
-  users: (search = '', limit = 50, offset = 0) =>
+  users: (
+    search = envStr('VITE_AURELIA_ADMIN_API_USERS_SEARCH', ''),
+    limit = envNum('VITE_AURELIA_ADMIN_API_USERS_LIMIT', 50),
+    offset = envNum('VITE_AURELIA_ADMIN_API_USERS_OFFSET', 0),
+  ) =>
     api<{ users: ApiUser[]; total: number; limit: number; offset: number }>(
       `/admin/users?search=${encodeURIComponent(search)}&limit=${limit}&offset=${offset}`,
     ),
@@ -604,8 +621,11 @@ export const adminApi = {
   userProjects: (id: string) =>
     api<ApiProject[]>(`/admin/users/${encodeURIComponent(id)}/projects`),
   // §4.20 a user's generated-image gallery (admin drill-down).
-  userImages: (id: string, limit = 60, offset = 0) =>
-    api<ApiAdminImage[]>(`/admin/users/${encodeURIComponent(id)}/images?limit=${limit}&offset=${offset}`),
+  userImages: (
+    id: string,
+    limit = envNum('VITE_AURELIA_ADMIN_API_USER_IMAGES_LIMIT', 60),
+    offset = envNum('VITE_AURELIA_ADMIN_API_USER_IMAGES_OFFSET', 0),
+  ) => api<ApiAdminImage[]>(`/admin/users/${encodeURIComponent(id)}/images?limit=${limit}&offset=${offset}`),
   userKbs: (id: string) =>
     api<ApiKnowledgeBase[]>(`/admin/users/${encodeURIComponent(id)}/kbs`),
   kbDocuments: (kbId: string) =>
@@ -651,7 +671,8 @@ export const adminApi = {
     if (params.status) qs.set('status', params.status)
     return api<{ deleted: number }>(`/admin/usage${qs.toString() ? `?${qs}` : ''}`, { method: 'DELETE' })
   },
-  analytics: (days = 30) => api<ApiAnalytics>(`/admin/analytics?days=${days}`),
+  analytics: (days = envNum('VITE_AURELIA_ADMIN_API_ANALYTICS', 30)) =>
+    api<ApiAnalytics>(`/admin/analytics?days=${days}`),
 
   settings: () => api<Record<string, unknown>>('/admin/settings'),
   updateSettings: (patch: Record<string, unknown>) =>

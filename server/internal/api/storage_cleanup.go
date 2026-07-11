@@ -8,10 +8,13 @@ import (
 	"strings"
 	"time"
 
+	"aurelia/server/internal/envcfg"
 	"aurelia/server/internal/sandbox"
 	"aurelia/server/internal/storage"
 	"aurelia/server/internal/store"
 )
+
+var objectStorageDeleteTimeout = envcfg.Dur("AURELIA_API_OBJECT_STORAGE_DELETE_TIMEOUT_CLEANUP", 30*time.Second)
 
 func cleanupStoragePaths(ctx context.Context, d Deps, paths []string, label string) {
 	if len(paths) == 0 {
@@ -42,7 +45,7 @@ func cleanupStoragePaths(ctx context.Context, d Deps, paths []string, label stri
 			}
 		}
 		if key, ok := objectStorageKey(p, obj); ok {
-			dctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			dctx, cancel := context.WithTimeout(context.Background(), objectStorageDeleteTimeout)
 			if err := obj.Delete(dctx, key); err != nil {
 				logStorageCleanup(d, "%s: delete object storage %q: %v", label, key, err)
 			}

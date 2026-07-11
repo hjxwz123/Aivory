@@ -13,7 +13,17 @@ import (
 	"strings"
 	"time"
 
+	"aurelia/server/internal/envcfg"
 	"aurelia/server/internal/store"
+)
+
+// Env-overridable defaults (§ config-reference); each falls back to the
+// original hardcoded value when its AURELIA_* variable is unset.
+var (
+	onlinePresenceTouchThrottle        = envcfg.Dur("AURELIA_API_ONLINE_PRESENCE_TOUCH_THROTTLE", time.Minute)
+	concurrentGenSlotSafetyTTL         = envcfg.Dur("AURELIA_API_CONCURRENT_GEN_SLOT_SAFETY_TTL", 30*time.Minute)
+	requestSignatureReplayWindowFuture = envcfg.Int64("AURELIA_API_REQUEST_SIGNATURE_REPLAY_WINDOW_FUTURE", 300)
+	requestSignatureReplayWindowPast   = envcfg.Int64("AURELIA_API_REQUEST_SIGNATURE_REPLAY_WINDOW_PAST", 60)
 )
 
 type handler func(d Deps, w http.ResponseWriter, r *http.Request)
@@ -89,7 +99,7 @@ func requireAuth(d Deps, h handler) http.HandlerFunc {
 		// request path. user.LastSeenAt reflects the value before this touch.
 		if d.Cache != nil {
 			if _, fresh := d.Cache.Get("seen:" + user.ID); !fresh {
-				d.Cache.Set("seen:"+user.ID, "1", time.Minute)
+				d.Cache.Set("seen:"+user.ID, "1", onlinePresenceTouchThrottle)
 				uid := user.ID
 				go store.TouchLastSeen(context.Background(), d.DB, uid, time.Now().Unix())
 			}
@@ -271,7 +281,7 @@ func reserveConcurrentGen(d Deps, userID string) (release func(), ok bool) {
 	}
 	key := "gen:active:" + userID
 	// Incr first; if we're over the cap, decrement immediately and refuse.
-	n := d.Cache.Incr(key, 30*time.Minute) // safety TTL so dead slots clear themselves
+	n := d.Cache.Incr(key, concurrentGenSlotSafetyTTL) // safety TTL so dead slots clear themselves
 	if int(n) > cap {
 		// Over budget — atomically undo the increment.
 		d.Cache.Decr(key)
@@ -380,7 +390,7 @@ func requireReqSig(h handler) handler {
 			return
 		}
 		diff := time.Now().Unix() - tsInt
-		if diff > 300 || diff < -60 {
+		if diff > requestSignatureReplayWindowFuture || diff < -requestSignatureReplayWindowPast {
 			writeError(w, http.StatusForbidden, errors.New("request signature expired"))
 			return
 		}

@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"aurelia/server/internal/envcfg"
 	"aurelia/server/internal/netsafe"
 	"aurelia/server/internal/sandbox"
 	"aurelia/server/internal/storage"
@@ -52,7 +53,7 @@ const (
 	pdfInspectionChildPathEnv = "AURELIA_INTERNAL_PDF_INSPECTION_PATH"
 )
 
-var pdfInspectionTimeout = 8 * time.Second
+var pdfInspectionTimeout = envcfg.Dur("AURELIA_RAG_PDF_INSPECTION_TIMEOUT", 8*time.Second)
 
 // The PDF reader does not accept a context and can spend minutes interpreting a
 // pathological content stream. Run probes in a copy of this executable so the
@@ -248,6 +249,9 @@ func docExt(filename, docPath string) string {
 	return ext
 }
 
+// officeXMLZipEntryReadCap bounds a single DOCX/PPTX zip-entry read.
+var officeXMLZipEntryReadCap = envcfg.Int64("AURELIA_RAG_OFFICE_XML_ZIP_ENTRY_READ_CAP", 16*1024*1024)
+
 // extractOfficeXML pulls plain text out of a DOCX/PPTX (both are ZIP+XML) using
 // the standard library only, and reports whether the archive embeds any images
 // (a media/ entry). Since §4.11-C latency-first the image flag no longer routes
@@ -282,7 +286,7 @@ func extractOfficeXML(docPath, ext string) (text string, hasImages bool, ok bool
 		if !want {
 			continue
 		}
-		raw, rerr := readZipEntry(f, 16*1024*1024)
+		raw, rerr := readZipEntry(f, officeXMLZipEntryReadCap)
 		if rerr != nil {
 			continue
 		}
@@ -325,9 +329,9 @@ func stripOfficeXML(raw string) string {
 	return strings.TrimSpace(s)
 }
 
-const (
-	pdfInspectionSampleLimit = 3
-	pdfThinCharsPerPage      = 200
+var (
+	pdfInspectionSampleLimit = envcfg.Int("AURELIA_RAG_PDF_INSPECTION_SAMPLE_LIMIT", 3)
+	pdfThinCharsPerPage      = envcfg.Int("AURELIA_RAG_PDF_THIN_CHARS_PER_PAGE", 200)
 )
 
 type pdfTextInspection struct {
@@ -366,6 +370,10 @@ func (r pdfInspectionProbeResult) inspection() pdfTextInspection {
 	}
 }
 
+// cmdWaitDelay is the grace period before the PDF-inspection child process is
+// force-killed after its context deadline fires.
+var cmdWaitDelay = envcfg.Dur("AURELIA_RAG_CMD_WAIT_DELAY", 500*time.Millisecond)
+
 var pdfInspectionCommand = func(ctx context.Context, docPath string) (*exec.Cmd, error) {
 	executable, err := os.Executable()
 	if err != nil {
@@ -376,7 +384,7 @@ var pdfInspectionCommand = func(ctx context.Context, docPath string) (*exec.Cmd,
 		pdfInspectionChildModeEnv+"=1",
 		pdfInspectionChildPathEnv+"="+docPath,
 	)
-	cmd.WaitDelay = 500 * time.Millisecond
+	cmd.WaitDelay = cmdWaitDelay
 	return cmd, nil
 }
 
@@ -424,6 +432,13 @@ func inspectPDFRawSignals(raw []byte) pdfRawSignals {
 	}
 }
 
+// strongScan image-to-page ratio: default imageCount*5 >= pages*4 (≈ one image
+// per 80% of pages). Both multipliers are independently overridable.
+var (
+	pdfStrongScanImageFactor = envcfg.Int("AURELIA_RAG_PDF_RAW_SIGNALS_STRONG_SCAN_IMAGE", 5)
+	pdfStrongScanPageFactor  = envcfg.Int("AURELIA_RAG_PDF_RAW_SIGNALS_STRONG_SCAN_PAGE", 4)
+)
+
 func (s pdfRawSignals) strongScan(pages int) bool {
 	if pages <= 0 || s.imageCount == 0 || s.fontCount != 0 || s.hasObjectStream {
 		return false
@@ -431,7 +446,7 @@ func (s pdfRawSignals) strongScan(pages int) bool {
 	// Require roughly one image definition for at least 80% of pages. Counts are
 	// deliberately a one-way confidence signal: shared or compressed images fall
 	// through to structural inspection rather than being misclassified.
-	return s.imageCount*5 >= pages*4
+	return s.imageCount*pdfStrongScanImageFactor >= pages*pdfStrongScanPageFactor
 }
 
 // inspectPDFTextLayer samples the first, middle and last page instead of
@@ -583,6 +598,13 @@ func extractFullPDFText(docPath string) (text string, pages int, ok bool) {
 	return strings.TrimSpace(buf.String()), reader.NumPage(), true
 }
 
+// mineruSourceObjectCleanupTimeout bounds the best-effort delete of the source
+// object we uploaded for MinerU, run on a fresh context after the parse.
+var mineruSourceObjectCleanupTimeout = envcfg.Dur("AURELIA_RAG_MINERU_SOURCE_OBJECT_CLEANUP_TIMEOUT", 30*time.Second)
+
+// mineruPollDeadline caps the total MinerU extract poll loop.
+var mineruPollDeadline = envcfg.Dur("AURELIA_RAG_MINERU_POLL_DEADLINE", 20*time.Minute)
+
 // minerUExtractViaCloud runs the four-step pipeline against the MinerU cloud
 // API (https://mineru.net):
 //
@@ -640,7 +662,7 @@ func minerUExtractViaCloud(
 	// Always clean up — even on a poll failure the source object should die.
 	defer func() {
 		// Use a fresh context so client-cancel doesn't skip cleanup.
-		dctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		dctx, cancel := context.WithTimeout(context.Background(), mineruSourceObjectCleanupTimeout)
 		defer cancel()
 		_ = sb.DeleteDirect(dctx, put.Key)
 	}()
@@ -656,7 +678,7 @@ func minerUExtractViaCloud(
 	// Poll until done or failed. 5s interval keeps a tight feedback loop; cap
 	// at 20 minutes — anything longer than that is an operational failure
 	// rather than slow processing.
-	zipURL, perr := minerUPollTask(ctx, baseURL, token, taskID, 5*time.Second, 20*time.Minute)
+	zipURL, perr := minerUPollTask(ctx, baseURL, token, taskID, 5*time.Second, mineruPollDeadline)
 	if perr != nil {
 		return nil, fmt.Errorf("mineru: poll: %w", perr)
 	}
@@ -668,6 +690,9 @@ func minerUExtractViaCloud(
 	}
 	return res, nil
 }
+
+// mineruSubmitErrorBodyTruncation caps the MinerU submit error body kept in logs.
+var mineruSubmitErrorBodyTruncation = envcfg.Int("AURELIA_RAG_MINERU_SUBMIT_ERROR_BODY_TRUNCATION", 256)
 
 // minerUSubmitTask creates one extract task. We hard-code:
 //   - model_version: "pipeline" (project requirement; PDF/DOC/PPT/IMG work
@@ -702,7 +727,7 @@ func minerUSubmitTask(ctx context.Context, baseURL, token, fileURL string) (stri
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
 		b, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("status %d: %s", resp.StatusCode, truncateAtN(string(b), 256))
+		return "", fmt.Errorf("status %d: %s", resp.StatusCode, truncateAtN(string(b), mineruSubmitErrorBodyTruncation))
 	}
 	var parsed struct {
 		Code    int             `json:"code"`
@@ -728,6 +753,9 @@ func minerUSubmitTask(ctx context.Context, baseURL, token, fileURL string) (stri
 	return d.TaskID, nil
 }
 
+// mineruPollErrorBodyTruncation caps the MinerU poll error body kept in logs.
+var mineruPollErrorBodyTruncation = envcfg.Int("AURELIA_RAG_MINERU_POLL_ERROR_BODY_TRUNCATION", 256)
+
 // minerUPollTask polls /api/v4/extract/task/{task_id} until state ∈
 // {done, failed} or the deadline expires. Returns the full_zip_url on done.
 func minerUPollTask(ctx context.Context, baseURL, token, taskID string, interval, max time.Duration) (string, error) {
@@ -747,7 +775,7 @@ func minerUPollTask(ctx context.Context, baseURL, token, taskID string, interval
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if resp.StatusCode >= 400 {
-			return "", fmt.Errorf("status %d: %s", resp.StatusCode, truncateAtN(string(bodyBytes), 256))
+			return "", fmt.Errorf("status %d: %s", resp.StatusCode, truncateAtN(string(bodyBytes), mineruPollErrorBodyTruncation))
 		}
 		var parsed struct {
 			Code int `json:"code"`
@@ -807,7 +835,10 @@ func minerUPollTask(ctx context.Context, baseURL, token, taskID string, interval
 // mineruZipClient downloads the MinerU result zip. Because the zip URL comes
 // from the API *response* (not admin config), it goes through an SSRF-safe
 // client that blocks private/internal IPs at dial time (§C6).
-var mineruZipClient = netsafe.PrivateBlockClient(5 * time.Minute)
+var mineruZipClient = netsafe.PrivateBlockClient(envcfg.Dur("AURELIA_RAG_MINERUZIPCLIENT_TIMEOUT", 5*time.Minute))
+
+// fullMdReadCapInsideZip bounds the in-zip full.md read.
+var fullMdReadCapInsideZip = envcfg.Int64("AURELIA_RAG_FULL_MD_READ_CAP_INSIDE_ZIP", 32*1024*1024)
 
 func minerUDownloadAndUnpack(ctx context.Context, zipURL string) (*MinerUResult, error) {
 	// §C6: only fetch http(s) zip URLs; reject file://, gopher://, etc.
@@ -828,7 +859,7 @@ func minerUDownloadAndUnpack(ctx context.Context, zipURL string) (*MinerUResult,
 	}
 	// Cap the download at 500 MiB — zips for normal documents are <100 MiB;
 	// anything bigger is a runaway and we'd rather error than OOM the server.
-	const maxZip = 500 * 1024 * 1024
+	maxZip := envcfg.Int64("AURELIA_RAG_MAX_ZIP", 500*1024*1024)
 	zipBytes, err := io.ReadAll(io.LimitReader(resp.Body, maxZip+1))
 	if err != nil {
 		return nil, err
@@ -869,7 +900,7 @@ func minerUDownloadAndUnpack(ctx context.Context, zipURL string) (*MinerUResult,
 			if err != nil {
 				continue
 			}
-			b, err := io.ReadAll(io.LimitReader(rc, 32*1024*1024))
+			b, err := io.ReadAll(io.LimitReader(rc, fullMdReadCapInsideZip))
 			rc.Close()
 			if err == nil {
 				markdown = string(b)
@@ -968,13 +999,13 @@ func zipNameIsSafe(name string) bool {
 // download legs of the cloud API. 60s connect + a per-call deadline via the
 // request context keeps individual round-trips honest while the larger
 // poll-loop ceiling is enforced in minerUPollTask.
-var mineruClient = &http.Client{Timeout: 5 * time.Minute}
+var mineruClient = &http.Client{Timeout: envcfg.Dur("AURELIA_RAG_MINERUCLIENT_TIMEOUT", 5*time.Minute)}
 
 // mineruSourceTTLSeconds is the presigned-URL lifetime for the document we hand
 // MinerU. It must outlast the full OCR window (poll cap 20 min + MinerU queue
 // time); 1 hour gives generous head-room without leaving objects around long
 // (they're also explicitly deleted right after the parse).
-const mineruSourceTTLSeconds = 60 * 60
+var mineruSourceTTLSeconds = envcfg.Int("AURELIA_RAG_MINERU_SOURCE_TTLSECONDS", 60*60)
 
 func guessImageMime(name string) string {
 	switch strings.ToLower(filepath.Ext(name)) {

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+
+	"aurelia/server/internal/envcfg"
 )
 
 // toolCallSpec is a provider-agnostic tool invocation.
@@ -23,7 +25,7 @@ type toolCallResult struct {
 
 // maxConcurrentTools caps how many tools run at once within a single turn so a
 // model can't fan out unbounded work (§4.3).
-const maxConcurrentTools = 4
+var maxConcurrentTools = envcfg.Int("AURELIA_LLM_MAX_CONCURRENT_TOOLS", 4)
 
 // runToolsConcurrent executes all tool calls in a turn concurrently (§4.2/§4.3)
 // while preserving result order. tool_start events are emitted up-front from

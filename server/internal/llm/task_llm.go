@@ -23,7 +23,17 @@ import (
 	"log"
 	"strings"
 
+	"aurelia/server/internal/envcfg"
 	"aurelia/server/internal/store"
+)
+
+var (
+	taskDefaultMaxOutputTokens    = envcfg.Int("AURELIA_LLM_MAX_TOK_3", 512)
+	titleGenerationWordCap        = envcfg.Int("AURELIA_LLM_TITLE_GENERATION_WORD_CAP", 8)
+	routerRetrievalQueryCap       = envcfg.Int("AURELIA_LLM_ROUTER_RETRIEVAL_QUERY_CAP", 3)
+	researchValidateConfirmedCap  = envcfg.Int("AURELIA_LLM_RESEARCH_CROSS_VALIDATE_FINDING_CAPS_CONFIRMED", 8)
+	researchValidateDisputedCap   = envcfg.Int("AURELIA_LLM_RESEARCH_CROSS_VALIDATE_FINDING_CAPS_DISPUTED", 4)
+	researchValidateUnverifiedCap = envcfg.Int("AURELIA_LLM_RESEARCH_CROSS_VALIDATE_FINDING_CAPS_UNVERIFIED", 6)
 )
 
 // TaskKind enumerates the internal task purposes. Used both for routing
@@ -132,7 +142,7 @@ func (t *TaskLLM) Run(ctx context.Context, kind TaskKind, prompt string, opts Ru
 	}
 	maxTok := opts.MaxOutputTokens
 	if maxTok <= 0 {
-		maxTok = 512
+		maxTok = taskDefaultMaxOutputTokens
 	}
 	req := UnifiedChatRequest{
 		UserID:         opts.UserID,
@@ -247,12 +257,12 @@ func defaultSystem(kind TaskKind, jsonOutput bool) string {
 		// Reply language is appended authoritatively by scheduleTitle (it forces
 		// the user's UI language, since a language-biased task model ignores a soft
 		// "same language" hint here).
-		return base + " Write a short title (≤8 words) capturing the topic of the conversation." +
+		return base + fmt.Sprintf(" Write a short title (≤%d words) capturing the topic of the conversation.", titleGenerationWordCap) +
 			" Reply with the title only, no quotes, no period, no explanation."
 	case TaskRouter:
 		return base + " Classify the user's last message into one of: full_doc, retrieve, none. " +
 			"`full_doc`=summarise/explain entire document; `retrieve`=specific question; `none`=unrelated. " +
-			"Also propose up to 3 short retrieval queries when strategy=retrieve. " +
+			fmt.Sprintf("Also propose up to %d short retrieval queries when strategy=retrieve. ", routerRetrievalQueryCap) +
 			`Reply with strict JSON: {"strategy":"retrieve","queries":["..."]}.`
 	case TaskCompact:
 		return base + " Compress the prior conversation rounds into a SHORT summary block " +
@@ -306,8 +316,9 @@ func defaultSystem(kind TaskKind, jsonOutput bool) string {
 			" same fact is supported by 2+ DIFFERENT sources (list all supporting source" +
 			" numbers); disputed = sources genuinely conflict (record each position with its" +
 			" sources — do NOT merge them); unverified = an important claim that appears in" +
-			" only one source. Prefer precision over volume: at most 8 confirmed, 4 disputed" +
-			" topics, 6 unverified. Write claims in the user's language, tersely. Reply with" +
+			fmt.Sprintf(" only one source. Prefer precision over volume: at most %d confirmed, %d disputed"+
+				" topics, %d unverified.", researchValidateConfirmedCap, researchValidateDisputedCap, researchValidateUnverifiedCap) +
+			" Write claims in the user's language, tersely. Reply with" +
 			" strict JSON only: " +
 			`{"confirmed":[{"claim":"...","sources":[1,3]}],` +
 			`"disputed":[{"topic":"...","positions":[{"claim":"...","sources":[2]},{"claim":"...","sources":[4]}]}],` +

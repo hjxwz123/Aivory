@@ -22,8 +22,13 @@ import (
 	"strings"
 	"time"
 
+	"aurelia/server/internal/envcfg"
 	"aurelia/server/internal/sandbox"
 )
+
+// sidecarStorageClientHTTPTimeout bounds the sidecar object-storage round-trip.
+// MinerU PDF uploads can hit 200 MB, so the default leaves head-room.
+var sidecarStorageClientHTTPTimeout = envcfg.Dur("AURELIA_STORAGE_SIDECAR_STORAGE_CLIENT_HTTP_TIMEOUT", 5*time.Minute)
 
 // Client is the sidecar-backed object-storage client. BaseURL points at the
 // same sandbox sidecar; APIKey gates it. Storage carries the admin-configured
@@ -43,7 +48,7 @@ func New(baseURL, apiKey string, storage *sandbox.StorageConfig) *Client {
 		APIKey:  apiKey,
 		Storage: storage,
 		// MinerU PDF uploads can hit 200 MB; give the round-trip enough head-room.
-		client: &http.Client{Timeout: 5 * time.Minute},
+		client: &http.Client{Timeout: sidecarStorageClientHTTPTimeout},
 	}
 }
 

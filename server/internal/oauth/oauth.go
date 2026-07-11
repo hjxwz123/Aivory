@@ -28,6 +28,8 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+
+	"aurelia/server/internal/envcfg"
 )
 
 // Config is the resolved settings for one provider. Build it from a stored
@@ -59,7 +61,17 @@ type UserInfo struct {
 	AvatarURL     string
 }
 
-var httpClient = &http.Client{Timeout: 15 * time.Second}
+var httpClientTimeout = envcfg.Dur("AURELIA_OAUTH_HTTP_CLIENT", 15*time.Second)
+var httpClient = &http.Client{Timeout: httpClientTimeout}
+
+// oauthProviderResponseBodyCap bounds a provider token/userinfo response read.
+var oauthProviderResponseBodyCap = envcfg.Int64("AURELIA_OAUTH_OAUTH_PROVIDER_RESPONSE_BODY_CAP", 1<<20)
+
+// appleClientSecretJwtExpiry is the lifetime of the generated Apple client-secret JWT.
+var appleClientSecretJwtExpiry = envcfg.Dur("AURELIA_OAUTH_APPLE_CLIENT_SECRET_JWT_EXPIRY", 30*time.Minute)
+
+// snippetMaxLen caps an error-body snippet included in error messages.
+var snippetMaxLen = envcfg.Int("AURELIA_OAUTH_SNIPPET", 200)
 
 // Resolve fills built-in endpoints/scopes for known kinds without overwriting
 // any explicit override already present on the Config.
@@ -184,7 +196,7 @@ func (c Config) postToken(ctx context.Context, form url.Values, authHeader strin
 		return Tokens{}, 0, err
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, oauthProviderResponseBodyCap))
 	if resp.StatusCode >= 400 {
 		return Tokens{}, resp.StatusCode, fmt.Errorf("token endpoint %d: %s", resp.StatusCode, snippet(body))
 	}
@@ -250,7 +262,7 @@ func (c Config) oidcUserInfo(ctx context.Context, accessToken string) (UserInfo,
 		return UserInfo{}, err
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, oauthProviderResponseBodyCap))
 	if resp.StatusCode >= 400 {
 		return UserInfo{}, fmt.Errorf("userinfo %d: %s", resp.StatusCode, snippet(body))
 	}
@@ -288,7 +300,7 @@ func (c Config) githubUser(ctx context.Context, accessToken string) (UserInfo, e
 			return err
 		}
 		defer resp.Body.Close()
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, oauthProviderResponseBodyCap))
 		if resp.StatusCode >= 400 {
 			return fmt.Errorf("github %d: %s", resp.StatusCode, snippet(body))
 		}
@@ -353,7 +365,7 @@ func appleClientSecret(c Config) (string, error) {
 	claims := jwt.MapClaims{
 		"iss": c.TeamID,
 		"iat": now.Unix(),
-		"exp": now.Add(30 * time.Minute).Unix(),
+		"exp": now.Add(appleClientSecretJwtExpiry).Unix(),
 		"aud": "https://appleid.apple.com",
 		"sub": c.ClientID,
 	}
@@ -435,8 +447,8 @@ func truthy(v any) bool {
 
 func snippet(b []byte) string {
 	s := strings.TrimSpace(string(b))
-	if len(s) > 200 {
-		return s[:200]
+	if len(s) > snippetMaxLen {
+		return s[:snippetMaxLen]
 	}
 	return s
 }

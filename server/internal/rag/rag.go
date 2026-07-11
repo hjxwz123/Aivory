@@ -23,6 +23,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"aurelia/server/internal/envcfg"
 	"aurelia/server/internal/queue"
 	"aurelia/server/internal/storage"
 	"aurelia/server/internal/store"
@@ -32,21 +33,46 @@ import (
 )
 
 const (
-	ragIngestTaskType          = "rag.ingest"
-	ragFastQueueName           = "rag-fast"
-	ragSlowQueueName           = "rag"
-	ragFastQueueConcurrency    = 4
-	ragSlowQueueConcurrency    = 4
-	ingestPipelineTimeout      = 70 * time.Minute
-	ingestTaskTimeout          = 75 * time.Minute
-	ingestUniqueTTL            = 80 * time.Minute
-	ingestHeartbeatInterval    = 30 * time.Second
-	ingestStaleAfter           = 4 * time.Minute
-	ingestPendingStaleAfter    = ingestUniqueTTL
-	ingestRecoveryInterval     = time.Minute
-	ingestFinalizeTimeout      = 30 * time.Second
-	ingestAsynqLeaseMaxRetries = 1
-	ingestAsynqRetryDelay      = 2 * time.Minute
+	ragIngestTaskType = "rag.ingest"
+	ragFastQueueName  = "rag-fast"
+	ragSlowQueueName  = "rag"
+)
+
+var (
+	ragFastQueueConcurrency    = envcfg.Int("AURELIA_RAG_RAG_FAST_QUEUE_CONCURRENCY", 4)
+	ragSlowQueueConcurrency    = envcfg.Int("AURELIA_RAG_RAG_SLOW_QUEUE_CONCURRENCY", 4)
+	ingestPipelineTimeout      = envcfg.Dur("AURELIA_RAG_INGEST_PIPELINE_TIMEOUT", 70*time.Minute)
+	ingestTaskTimeout          = envcfg.Dur("AURELIA_RAG_INGEST_TASK_TIMEOUT", 75*time.Minute)
+	ingestUniqueTTL            = envcfg.Dur("AURELIA_RAG_INGEST_UNIQUE_TTL", 80*time.Minute)
+	ingestHeartbeatInterval    = envcfg.Dur("AURELIA_RAG_INGEST_HEARTBEAT_INTERVAL", 30*time.Second)
+	ingestStaleAfter           = envcfg.Dur("AURELIA_RAG_INGEST_STALE_AFTER", 4*time.Minute)
+	ingestPendingStaleAfter    = envcfg.Dur("AURELIA_RAG_INGEST_PENDING_STALE_AFTER", ingestUniqueTTL)
+	ingestRecoveryInterval     = envcfg.Dur("AURELIA_RAG_INGEST_RECOVERY_INTERVAL", time.Minute)
+	ingestFinalizeTimeout      = envcfg.Dur("AURELIA_RAG_INGEST_FINALIZE_TIMEOUT", 30*time.Second)
+	ingestAsynqLeaseMaxRetries = envcfg.Int("AURELIA_RAG_INGEST_ASYNQ_LEASE_MAX_RETRIES", 1)
+	ingestAsynqRetryDelay      = envcfg.Dur("AURELIA_RAG_INGEST_ASYNQ_RETRY_DELAY", 2*time.Minute)
+)
+
+// Env-overridable defaults for inline literals elsewhere in this file. Each
+// falls back to the original hardcoded value when the variable is unset.
+var (
+	ingestQueueClassifyTimeout  = envcfg.Dur("AURELIA_RAG_INGEST_QUEUE_NAME", 2*time.Second)
+	runIngestMaxAttempts        = envcfg.Int("AURELIA_RAG_RUN_INGEST_WITH_RETRIES", 3)
+	runIngestRetryBackoff       = envcfg.Dur("AURELIA_RAG_RUN_INGEST_WITH_RETRIES_2", 3*time.Second)
+	heartbeatWriteTimeout       = envcfg.Dur("AURELIA_RAG_START_INGEST_HEARTBEAT", 5*time.Second)
+	finalizeChunkCleanupTimeout = envcfg.Dur("AURELIA_RAG_FINALIZE_CHUNK_CLEANUP_TIMEOUT", 10*time.Second)
+	finalizeStatusTimeout       = envcfg.Dur("AURELIA_RAG_FINALIZE_STATUS_TIMEOUT", 10*time.Second)
+	extractionFailureReasonCap  = envcfg.Int("AURELIA_RAG_EXTRACTION_FAILURE_REASON_CAP", 500)
+	embeddingErrorTruncate      = envcfg.Int("AURELIA_RAG_EMBEDDING_ERROR_TRUNCATE", 4096)
+	retrieveDefaultTopK         = envcfg.Int("AURELIA_RAG_RETRIEVE", 5)
+	denseSearchLegLimit         = envcfg.Int("AURELIA_RAG_DENSE_SEARCH_LEG_LIMIT", 30)
+	keywordSearchLegLimit       = envcfg.Int("AURELIA_RAG_KEYWORD_SEARCH_LEG_LIMIT", 30)
+	snippetDefaultMax           = envcfg.Int("AURELIA_RAG_SNIPPET_OF", 240)
+	imageAtomSizeThreshold      = envcfg.Int("AURELIA_RAG_SPLIT_PARAGRAPHS_AND_TABLES", 800)
+	routerCallTimeout           = envcfg.Dur("AURELIA_RAG_ROUTER_CALL_TIMEOUT", 12*time.Second)
+	mapReduceSummaryChars       = envcfg.Int("AURELIA_RAG_MAP_REDUCE_SUMMARISE", 200)
+	docHintFirstContentCap      = envcfg.Int("AURELIA_RAG_COLLECT_DOC_HINTS", 120)
+	docHintsMaxCount            = envcfg.Int("AURELIA_RAG_COLLECT_DOC_HINTS_2", 12)
 )
 
 // Service is the public façade.
@@ -305,7 +331,7 @@ func (s *Service) enqueueIngest(docID string, unique bool) {
 }
 
 func (s *Service) ingestQueueName(docID string) string {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), ingestQueueClassifyTimeout)
 	defer cancel()
 	d, err := store.GetDocument(ctx, s.db, docID)
 	if err != nil {
@@ -375,12 +401,12 @@ func (s *Service) runIngestWithRetries(ctx context.Context, docID string) error 
 	// Cache the parsed content across retries so a transient embed/DB failure
 	// re-runs only the cheap embed step — never the paid MinerU OCR again.
 	cache := &parseCache{}
-	for attempt := 1; attempt <= 3; attempt++ {
+	for attempt := 1; attempt <= runIngestMaxAttempts; attempt++ {
 		if err = s.runPipeline(ctx, docID, cache); err == nil {
 			return nil
 		}
 		if s.logger != nil {
-			s.logger.Printf("rag: ingest %s attempt %d/3 failed: %v", docID, attempt, err)
+			s.logger.Printf("rag: ingest %s attempt %d/%d failed: %v", docID, attempt, runIngestMaxAttempts, err)
 		}
 		if isNonRetryableIngestError(err) {
 			break
@@ -388,13 +414,13 @@ func (s *Service) runIngestWithRetries(ctx context.Context, docID string) error 
 		// Back off between whole-pipeline retries so a transient upstream outage
 		// (e.g. embeddings TLS timeout) gets a chance to recover instead of being
 		// hammered three times in a row.
-		if attempt < 3 {
-			timer := time.NewTimer(time.Duration(attempt) * 3 * time.Second)
+		if attempt < runIngestMaxAttempts {
+			timer := time.NewTimer(time.Duration(attempt) * runIngestRetryBackoff)
 			select {
 			case <-ctx.Done():
 				timer.Stop()
 				err = ctx.Err()
-				attempt = 3
+				attempt = runIngestMaxAttempts
 			case <-timer.C:
 			}
 		}
@@ -406,7 +432,7 @@ func (s *Service) runIngestWithRetries(ctx context.Context, docID string) error 
 func (s *Service) startIngestHeartbeat(ctx context.Context, docID string) func() {
 	heartbeatCtx, cancel := context.WithCancel(ctx)
 	touch := func() {
-		writeCtx, writeCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		writeCtx, writeCancel := context.WithTimeout(context.Background(), heartbeatWriteTimeout)
 		defer writeCancel()
 		if err := store.TouchDocumentIngest(writeCtx, s.db, docID); err != nil && s.logger != nil {
 			s.logger.Printf("rag: heartbeat document %s: %v", docID, err)
@@ -436,7 +462,7 @@ func (s *Service) finalizeIngestFailure(docID string, ingestErr error) {
 	if ingestErr == nil {
 		ingestErr = errors.New("ingest failed")
 	}
-	chunkCtx, chunkCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	chunkCtx, chunkCancel := context.WithTimeout(context.Background(), finalizeChunkCleanupTimeout)
 	if derr := store.DeleteChunksByDocument(chunkCtx, s.db, docID); derr != nil && s.logger != nil {
 		s.logger.Printf("rag: cleanup chunks after failed ingest %s: %v", docID, derr)
 	}
@@ -453,7 +479,7 @@ func (s *Service) finalizeIngestFailure(docID string, ingestErr error) {
 	// Always allocate a separate status context after cleanup. Even if Qdrant
 	// consumed its entire deadline, the terminal DB transition still gets a full
 	// chance to complete and unlock the frontend Retry action.
-	statusCtx, statusCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	statusCtx, statusCancel := context.WithTimeout(context.Background(), finalizeStatusTimeout)
 	if err := store.UpdateDocumentStatus(statusCtx, s.db, docID, "failed", unwrapNonRetryableIngestError(ingestErr).Error(), 0); err != nil && s.logger != nil {
 		s.logger.Printf("rag: finalize failed ingest %s: %v", docID, err)
 	}
@@ -592,8 +618,8 @@ func (s *Service) runPipeline(ctx context.Context, docID string, cache *parseCac
 		// operator fixes storage/MinerU and re-uploads or rebuilds).
 		if !extracted {
 			reason := strings.TrimSpace(content)
-			if len(reason) > 500 {
-				reason = reason[:500]
+			if len(reason) > extractionFailureReasonCap {
+				reason = reason[:extractionFailureReasonCap]
 			}
 			if reason == "" {
 				reason = "could not extract text"
@@ -836,7 +862,7 @@ func (s *Service) logEmbeddingError(ctx context.Context, kbID, convID, embedder 
 		InputTokens:    tokens,
 		ChannelID:      channelID,
 		Status:         "error",
-		Error:          truncateAtN(err.Error(), 4096),
+		Error:          truncateAtN(err.Error(), embeddingErrorTruncate),
 		RequestMethod:  method,
 		RequestURL:     url,
 		RequestHeaders: headers,
@@ -903,9 +929,9 @@ type Snippet struct {
 // the same question across users on a shared KB) reuse the embedding instead of
 // re-calling the embedding API. Keyed by embedder name + query so different
 // models/dims never collide. Process-local, short TTL, bounded size.
-const (
-	queryEmbedTTL = 10 * time.Minute
-	queryEmbedMax = 4096
+var (
+	queryEmbedTTL = envcfg.Dur("AURELIA_RAG_QUERY_EMBED_TTL", 10*time.Minute)
+	queryEmbedMax = envcfg.Int("AURELIA_RAG_QUERY_EMBED_MAX", 4096)
 )
 
 type queryEmbedEntry struct {
@@ -959,7 +985,7 @@ func (s *Service) Retrieve(ctx context.Context, userID, convID string, kbIDs []s
 	}
 	terms := tokenize(strings.ToLower(query))
 	if topK <= 0 {
-		topK = 5
+		topK = retrieveDefaultTopK
 	}
 	fullContext := func() ([]Snippet, error) {
 		scope, err := store.ListChunksInScope(ctx, s.db, kbIDs, convID)
@@ -1230,14 +1256,14 @@ func (s *Service) searchScope(ctx context.Context, userID, convID string, em Emb
 	if err := s.ensureVectorIndexComplete(ctx, scope, emName, dim, live); err != nil {
 		return nil, err
 	}
-	hits, err := s.vec.Search(ctx, dim, qVec, scope, 30)
+	hits, err := s.vec.Search(ctx, dim, qVec, scope, denseSearchLegLimit)
 	if err != nil {
 		if s.logger != nil {
 			s.logger.Printf("rag: qdrant search failed (%v) — injecting full in-scope text", err)
 		}
 		return nil, fmt.Errorf("%w: %v", errVectorBackendUnavailable, err)
 	}
-	kwHits, kwErr := s.vec.SearchKeyword(ctx, dim, query, scope, 30)
+	kwHits, kwErr := s.vec.SearchKeyword(ctx, dim, query, scope, keywordSearchLegLimit)
 	if kwErr != nil && s.logger != nil {
 		s.logger.Printf("rag: qdrant keyword search failed (%v) — continuing with dense hits", kwErr)
 	}
@@ -1398,7 +1424,7 @@ type retrievalCandidate struct {
 // vector-similarity ranking and the keyword ranking (§4.11-E). It returns a new
 // slice sorted best-first; the input is left untouched.
 func fuseReciprocalRank(cands []retrievalCandidate) []retrievalCandidate {
-	const k = 60
+	k := envcfg.Int("AURELIA_RAG_FUSE_RECIPROCAL_RANK", 60)
 	n := len(cands)
 	idx := make([]int, n)
 	for i := range idx {
@@ -1462,7 +1488,7 @@ func snippetOf(s string, max int) string {
 	s = strings.ReplaceAll(s, "\n", " ")
 	s = strings.TrimSpace(s)
 	if max <= 0 {
-		max = 240
+		max = snippetDefaultMax
 	}
 	if len(s) > max {
 		// Rune-safe cut — a byte slice mid-rune produces invalid UTF-8 (mojibake /
@@ -1491,7 +1517,7 @@ func clampRune(s string, i int) int {
 // child chunk (childTargetChars) plus a little surrounding section context, so a
 // hit deep in a long section is shown in full rather than truncated to the
 // section head. (§4.11 retrieval fidelity)
-const retrievedSnippetChars = 2000
+var retrievedSnippetChars = envcfg.Int("AURELIA_RAG_RETRIEVED_SNIPPET_CHARS", 2000)
 
 // expandHit returns a snippet that is GUARANTEED to contain the matched child
 // chunk, with surrounding section context when available. The old small-to-big
@@ -1727,12 +1753,12 @@ type parentChunk struct {
 // Target child chunk size in characters. The design specifies 400-800 tokens;
 // at ~4 chars/token the safe range is ~1600-3200 chars. Defaulting at 2000
 // gives the embedder enough context per vector without diluting precision.
-const (
-	childTargetChars  = 2000
-	parentTargetChars = 4800
+var (
+	childTargetChars  = envcfg.Int("AURELIA_RAG_CHILD_TARGET_CHARS", 2000)
+	parentTargetChars = envcfg.Int("AURELIA_RAG_PARENT_TARGET_CHARS", 4800)
 	// Overlap between consecutive children (~12%) keeps boundary information
 	// retrievable from either side (§4.11-C-1 "10-15% overlap").
-	chunkOverlapChars = 250
+	chunkOverlapChars = envcfg.Int("AURELIA_RAG_CHUNK_OVERLAP_CHARS", 250)
 )
 
 // chunkHierarchical splits content into parent sections, each subdivided into
@@ -1898,7 +1924,7 @@ func splitParagraphsAndTables(s string) []atom {
 			continue
 		}
 		// math/image blocks are kept whole too.
-		if mathRe.MatchString(p) || (imageRe.MatchString(p) && len(p) < 800) {
+		if mathRe.MatchString(p) || (imageRe.MatchString(p) && len(p) < imageAtomSizeThreshold) {
 			out = append(out, atom{text: p, atomic: true})
 			continue
 		}
@@ -2222,7 +2248,7 @@ func (s *Service) RouteAndRetrieve(ctx context.Context, userID, convID string, k
 	// it. A slow or hung task-model channel must degrade to plain retrieval with
 	// the original query (the same fallback as s.task == nil), not stall the
 	// user's reply for minutes.
-	rctx, cancelRouter := context.WithTimeout(ctx, 12*time.Second)
+	rctx, cancelRouter := context.WithTimeout(ctx, routerCallTimeout)
 	err := s.task.RunJSON(rctx, "task.router", prompt, &d, RouterOpts{UserID: userID, ConversationID: convID})
 	cancelRouter()
 	if err == nil {
@@ -2305,8 +2331,8 @@ func (s *Service) mapReduceSummarise(ctx context.Context, userID, convID string,
 	if s.task == nil {
 		return nil, nil
 	}
-	const groupTokens = 6000
-	const maxGroups = 8
+	groupTokens := envcfg.Int("AURELIA_RAG_MAPREDUCE_GROUPTOKENS", 6000)
+	maxGroups := envcfg.Int("AURELIA_RAG_MAPREDUCE_MAXGROUPS", 8)
 	groups := [][]store.Chunk{}
 	cur := []store.Chunk{}
 	used := 0
@@ -2332,7 +2358,7 @@ func (s *Service) mapReduceSummarise(ctx context.Context, userID, convID string,
 	out := []Snippet{}
 	for gi, g := range groups {
 		var b strings.Builder
-		fmt.Fprintf(&b, "针对问题「%s」，提炼下面文档片段中相关的事实与数据，≤200字。无关内容忽略。\n\n", userText)
+		fmt.Fprintf(&b, "针对问题「%s」，提炼下面文档片段中相关的事实与数据，≤%d字。无关内容忽略。\n\n", userText, mapReduceSummaryChars)
 		for _, c := range g {
 			b.WriteString(c.Content)
 			b.WriteString("\n\n")
@@ -2405,12 +2431,12 @@ func (s *Service) collectDocHints(ctx context.Context, kbIDs []string, convID st
 		}
 		seen[c.DocumentID] = true
 		first := c.Content
-		if len(first) > 120 {
-			first = first[:120]
+		if len(first) > docHintFirstContentCap {
+			first = first[:docHintFirstContentCap]
 		}
 		first = strings.ReplaceAll(first, "\n", " ")
 		hints = append(hints, c.Filename+" — "+strings.TrimSpace(first))
-		if len(hints) >= 12 {
+		if len(hints) >= docHintsMaxCount {
 			break
 		}
 	}

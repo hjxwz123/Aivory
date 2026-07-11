@@ -16,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"aurelia/server/internal/envcfg"
 )
 
 // Slider-puzzle captcha (§ registration anti-abuse). The server renders a
@@ -31,11 +33,15 @@ const (
 	capW     = 280 // background width  (natural px)
 	capH     = 160 // background height (natural px)
 	capPiece = 52  // puzzle piece bounding box (square)
-	// capTol is the accepted error between the submitted fraction and the true
-	// gap fraction (~9px on a 228px track). Forgiving on purpose — the per-IP
-	// daily cap is the real abuse backstop; this just deters trivial scripts.
-	capTol = 0.04
 )
+
+// capTol is the accepted error between the submitted fraction and the true
+// gap fraction (~9px on a 228px track). Forgiving on purpose — the per-IP
+// daily cap is the real abuse backstop; this just deters trivial scripts.
+var capTol = envcfg.F64("AURELIA_API_CAP_TOL", 0.04)
+
+// captchaChallengeCacheTTL bounds how long an unsolved challenge stays valid.
+var captchaChallengeCacheTTL = envcfg.Dur("AURELIA_API_CAPTCHA_CHALLENGE_CACHE_TTL", 5*time.Minute)
 
 // captchaHandler issues a fresh slider-puzzle challenge.
 func captchaHandler(d Deps, w http.ResponseWriter, _ *http.Request) {
@@ -66,7 +72,7 @@ func captchaHandler(d Deps, w http.ResponseWriter, _ *http.Request) {
 	id := randToken(12)
 	track := float64(capW - capPiece)
 	gapFraction := float64(gapX) / track
-	d.Cache.Set("captcha:"+id, strconv.FormatFloat(gapFraction, 'f', 6, 64), 5*time.Minute)
+	d.Cache.Set("captcha:"+id, strconv.FormatFloat(gapFraction, 'f', 6, 64), captchaChallengeCacheTTL)
 
 	writeJSON(w, 200, map[string]any{
 		"id":         id,
@@ -101,7 +107,7 @@ func captchaVerifyHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 }
 
 // captchaPassTTL bounds how long a solved-captcha pass stays valid.
-const captchaPassTTL = 10 * time.Minute
+var captchaPassTTL = envcfg.Dur("AURELIA_API_CAPTCHA_PASS_TTL", 10*time.Minute)
 
 // mintCaptchaPass returns a STATELESS pass proving a captcha was just solved:
 // "<expiryUnix>.<HMAC>". It is signed with the server's JWT secret and carries no

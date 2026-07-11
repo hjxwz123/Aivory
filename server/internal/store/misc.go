@@ -10,6 +10,21 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"aurelia/server/internal/envcfg"
+)
+
+var (
+	mConfidence                     = envcfg.F64("AURELIA_STORE_M_CONFIDENCE", 0.8)
+	listMemoriesActive              = envcfg.Int("AURELIA_STORE_LIST_MEMORIES_ACTIVE", 20)
+	adminUsageRecordsLimit          = envcfg.Int("AURELIA_STORE_ADMIN_USAGE_RECORDS_LIMIT", 500)
+	adminUsageRecordsLimit2         = envcfg.Int("AURELIA_STORE_ADMIN_USAGE_RECORDS_LIMIT_2", 50)
+	usageTrendWindow                = envcfg.Int("AURELIA_STORE_USAGE_TREND_WINDOW", 7)
+	usageTrendHourlyBucketThreshold = envcfg.Int("AURELIA_STORE_USAGE_TREND_HOURLY_BUCKET_THRESHOLD", 2)
+	usageTotalsWindow               = envcfg.Int("AURELIA_STORE_USAGE_TOTALS_WINDOW", 7)
+	usageBreakdownTopN              = envcfg.Int("AURELIA_STORE_USAGE_BREAKDOWN_TOP_N", 8)
+	usageBreakdownWindow            = envcfg.Int("AURELIA_STORE_USAGE_BREAKDOWN_WINDOW", 7)
+	usageSeriesWindow               = envcfg.Int("AURELIA_STORE_USAGE_SERIES_WINDOW", 7)
 )
 
 // CreateFile inserts a file metadata row.
@@ -353,7 +368,7 @@ func CreateMemory(ctx context.Context, db *sql.DB, m Memory) (*Memory, error) {
 		m.Status = "ACTIVE"
 	}
 	if m.Confidence == 0 {
-		m.Confidence = 0.8
+		m.Confidence = mConfidence
 	}
 	srcIDs, _ := json.Marshal(m.SourceMessageIDs)
 	supers, _ := json.Marshal(m.Supersedes)
@@ -429,8 +444,8 @@ func DeleteMemory(ctx context.Context, db *sql.DB, id, userID string) error {
 // the system prompt — ACTIVE plus QUERY_DEPENDENT per design.md §4.16.
 func ListMemoriesActive(ctx context.Context, db *sql.DB, userID string) ([]Memory, error) {
 	rows, err := db.QueryContext(ctx,
-		`SELECT id, user_id, memory_text, memory_type, slot, value, status, confidence, source_message_ids, supersedes, superseded_by, affected_domains, reason, COALESCE(valid_from, 0), COALESCE(valid_until, 0), created_at, updated_at FROM memories WHERE user_id=? AND status IN ('ACTIVE','QUERY_DEPENDENT') ORDER BY updated_at DESC LIMIT 20`,
-		userID)
+		`SELECT id, user_id, memory_text, memory_type, slot, value, status, confidence, source_message_ids, supersedes, superseded_by, affected_domains, reason, COALESCE(valid_from, 0), COALESCE(valid_until, 0), created_at, updated_at FROM memories WHERE user_id=? AND status IN ('ACTIVE','QUERY_DEPENDENT') ORDER BY updated_at DESC LIMIT ?`,
+		userID, listMemoriesActive)
 	if err != nil {
 		return nil, err
 	}
@@ -574,8 +589,8 @@ func (f UsageFilter) where() (string, []any) {
 // AdminUsageRecords lists individual usage_logs rows (one per API call), newest
 // first, scoped by filter and paginated.
 func AdminUsageRecords(ctx context.Context, db *sql.DB, f UsageFilter, limit, offset int) ([]AdminUsageRecord, error) {
-	if limit <= 0 || limit > 500 {
-		limit = 50
+	if limit <= 0 || limit > adminUsageRecordsLimit {
+		limit = adminUsageRecordsLimit2
 	}
 	if offset < 0 {
 		offset = 0
@@ -692,11 +707,11 @@ type UsageBucket struct {
 // no date_trunc, so we floor to the bucket width with integer math.
 func AdminUsageTrend(ctx context.Context, db *sql.DB, days int) ([]UsageBucket, error) {
 	if days <= 0 {
-		days = 7
+		days = usageTrendWindow
 	}
 	since := time.Now().Add(-time.Duration(days) * 24 * time.Hour).Unix()
 	bucket := int64(86400) // daily
-	if days <= 2 {
+	if days <= usageTrendHourlyBucketThreshold {
 		bucket = 3600 // hourly
 	}
 	rows, err := db.QueryContext(ctx,
@@ -724,7 +739,7 @@ func AdminUsageTrend(ctx context.Context, db *sql.DB, days int) ([]UsageBucket, 
 // UsageBucketWidth mirrors AdminUsageTrend's choice so trend + per-series points
 // share one time axis (hourly for ≤2-day windows, otherwise daily).
 func UsageBucketWidth(days int) int64 {
-	if days <= 2 {
+	if days <= usageTrendHourlyBucketThreshold {
 		return 3600
 	}
 	return 86400
@@ -743,7 +758,7 @@ type UsageTotals struct {
 // AdminUsageTotals returns the period totals plus the distinct active-user count.
 func AdminUsageTotals(ctx context.Context, db *sql.DB, days int) (UsageTotals, error) {
 	if days <= 0 {
-		days = 7
+		days = usageTotalsWindow
 	}
 	since := time.Now().Add(-time.Duration(days) * 24 * time.Hour).Unix()
 	var t UsageTotals
@@ -776,10 +791,10 @@ func AdminUsageBreakdown(ctx context.Context, db *sql.DB, days int, groupCol str
 		return nil, fmt.Errorf("AdminUsageBreakdown: invalid group column %q", groupCol)
 	}
 	if limit <= 0 {
-		limit = 8
+		limit = usageBreakdownTopN
 	}
 	if days <= 0 {
-		days = 7
+		days = usageBreakdownWindow
 	}
 	since := time.Now().Add(-time.Duration(days) * 24 * time.Hour).Unix()
 	labelExpr, join, groupBy := "''", "", "u."+groupCol
@@ -832,7 +847,7 @@ func AdminUsageSeries(ctx context.Context, db *sql.DB, days int, groupCol string
 		return []UsageSeriesPoint{}, nil
 	}
 	if days <= 0 {
-		days = 7
+		days = usageSeriesWindow
 	}
 	bucket := UsageBucketWidth(days)
 	since := time.Now().Add(-time.Duration(days) * 24 * time.Hour).Unix()

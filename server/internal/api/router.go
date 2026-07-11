@@ -13,12 +13,14 @@ import (
 	"path"
 	"path/filepath"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"time"
 
 	"aurelia/server/internal/auth"
 	"aurelia/server/internal/cache"
 	"aurelia/server/internal/config"
+	"aurelia/server/internal/envcfg"
 	"aurelia/server/internal/llm"
 	"aurelia/server/internal/mail"
 	"aurelia/server/internal/queue"
@@ -41,6 +43,74 @@ type Deps struct {
 	Logger       *log.Logger
 }
 
+// Env-overridable per-IP rate-limit budgets ("<N> per <window>") and the CORS
+// preflight cache age. Defaults match the historical hardcoded values; each is
+// tunable via the paired AURELIA_API_RATE_LIMIT_*_MAX / *_WINDOW variables (see
+// docs/config-reference.md) without changing behaviour when unset.
+var (
+	rlRegisterMax    = envcfg.Int("AURELIA_API_RATE_LIMIT_REGISTER_MAX", 5)
+	rlRegisterWindow = envcfg.Dur("AURELIA_API_RATE_LIMIT_REGISTER_WINDOW", 60*time.Second)
+
+	rlLoginMax    = envcfg.Int("AURELIA_API_RATE_LIMIT_LOGIN_MAX", 10)
+	rlLoginWindow = envcfg.Dur("AURELIA_API_RATE_LIMIT_LOGIN_WINDOW", 60*time.Second)
+
+	rlLogin2faMax    = envcfg.Int("AURELIA_API_RATE_LIMIT_LOGIN_2FA_MAX", 10)
+	rlLogin2faWindow = envcfg.Dur("AURELIA_API_RATE_LIMIT_LOGIN_2FA_WINDOW", 60*time.Second)
+
+	rlLogoutMax    = envcfg.Int("AURELIA_API_RATE_LIMIT_LOGOUT_MAX", 30)
+	rlLogoutWindow = envcfg.Dur("AURELIA_API_RATE_LIMIT_LOGOUT_WINDOW", 60*time.Second)
+
+	rlRefreshMax    = envcfg.Int("AURELIA_API_RATE_LIMIT_REFRESH_MAX", 30)
+	rlRefreshWindow = envcfg.Dur("AURELIA_API_RATE_LIMIT_REFRESH_WINDOW", 60*time.Second)
+
+	rlVerifyEmailMax    = envcfg.Int("AURELIA_API_RATE_LIMIT_VERIFY_EMAIL_MAX", 10)
+	rlVerifyEmailWindow = envcfg.Dur("AURELIA_API_RATE_LIMIT_VERIFY_EMAIL_WINDOW", 5*60*time.Second)
+
+	rlSendCodeMax    = envcfg.Int("AURELIA_API_RATE_LIMIT_SEND_CODE_MAX", 3)
+	rlSendCodeWindow = envcfg.Dur("AURELIA_API_RATE_LIMIT_SEND_CODE_WINDOW", 60*time.Second)
+
+	rlForgotPasswordMax    = envcfg.Int("AURELIA_API_RATE_LIMIT_FORGOT_PASSWORD_MAX", 5)
+	rlForgotPasswordWindow = envcfg.Dur("AURELIA_API_RATE_LIMIT_FORGOT_PASSWORD_WINDOW", 15*60*time.Second)
+
+	rlResetPasswordMax    = envcfg.Int("AURELIA_API_RATE_LIMIT_RESET_PASSWORD_MAX", 5)
+	rlResetPasswordWindow = envcfg.Dur("AURELIA_API_RATE_LIMIT_RESET_PASSWORD_WINDOW", 60*time.Second)
+
+	rlCaptchaIssueMax    = envcfg.Int("AURELIA_API_RATE_LIMIT_CAPTCHA_ISSUE_MAX", 30)
+	rlCaptchaIssueWindow = envcfg.Dur("AURELIA_API_RATE_LIMIT_CAPTCHA_ISSUE_WINDOW", 60*time.Second)
+
+	rlCaptchaVerifyMax    = envcfg.Int("AURELIA_API_RATE_LIMIT_CAPTCHA_VERIFY_MAX", 60)
+	rlCaptchaVerifyWindow = envcfg.Dur("AURELIA_API_RATE_LIMIT_CAPTCHA_VERIFY_WINDOW", 60*time.Second)
+
+	rlFirstRunSetupMax    = envcfg.Int("AURELIA_API_RATE_LIMIT_FIRST_RUN_SETUP_MAX", 10)
+	rlFirstRunSetupWindow = envcfg.Dur("AURELIA_API_RATE_LIMIT_FIRST_RUN_SETUP_WINDOW", 60*time.Second)
+
+	rlPublicSharedConversationMax    = envcfg.Int("AURELIA_API_RATE_LIMIT_PUBLIC_SHARED_CONVERSATION_MAX", 60)
+	rlPublicSharedConversationWindow = envcfg.Dur("AURELIA_API_RATE_LIMIT_PUBLIC_SHARED_CONVERSATION_WINDOW", 60*time.Second)
+
+	rlSharedAssetsMax    = envcfg.Int("AURELIA_API_RATE_LIMIT_SHARED_ASSETS_FILES_ARTIFACTS_MAX", 240)
+	rlSharedAssetsWindow = envcfg.Dur("AURELIA_API_RATE_LIMIT_SHARED_ASSETS_FILES_ARTIFACTS_WINDOW", 60*time.Second)
+
+	rlOauthMax    = envcfg.Int("AURELIA_API_RATE_LIMIT_OAUTH_START_CALLBACK_HANDOFF_MAX", 20)
+	rlOauthWindow = envcfg.Dur("AURELIA_API_RATE_LIMIT_OAUTH_START_CALLBACK_HANDOFF_WINDOW", 60*time.Second)
+
+	rlPasswordChangeMax    = envcfg.Int("AURELIA_API_RATE_LIMIT_PASSWORD_CHANGE_SET_MAX", 5)
+	rlPasswordChangeWindow = envcfg.Dur("AURELIA_API_RATE_LIMIT_PASSWORD_CHANGE_SET_WINDOW", 60*time.Second)
+
+	rlIdentityLinkStartMax    = envcfg.Int("AURELIA_API_RATE_LIMIT_IDENTITY_LINK_START_MAX", 20)
+	rlIdentityLinkStartWindow = envcfg.Dur("AURELIA_API_RATE_LIMIT_IDENTITY_LINK_START_WINDOW", 60*time.Second)
+
+	rl2faSetupMax    = envcfg.Int("AURELIA_API_RATE_LIMIT_2FA_SETUP_ENABLE_DISABLE_MAX", 10)
+	rl2faSetupWindow = envcfg.Dur("AURELIA_API_RATE_LIMIT_2FA_SETUP_ENABLE_DISABLE_WINDOW", 5*60*time.Second)
+
+	rlRedeemCodeMax    = envcfg.Int("AURELIA_API_RATE_LIMIT_REDEEM_CODE_MAX", 10)
+	rlRedeemCodeWindow = envcfg.Dur("AURELIA_API_RATE_LIMIT_REDEEM_CODE_WINDOW", 60*time.Second)
+
+	rlWorkspaceJoinMax    = envcfg.Int("AURELIA_API_RATE_LIMIT_WORKSPACE_JOIN_MAX", 30)
+	rlWorkspaceJoinWindow = envcfg.Dur("AURELIA_API_RATE_LIMIT_WORKSPACE_JOIN_WINDOW", 60*time.Second)
+
+	corsPreflightMaxAge = envcfg.Dur("AURELIA_API_CORS_PREFLIGHT_CACHE_AGE", 600*time.Second)
+)
+
 // NewRouter returns the fully-wired http.Handler.
 func NewRouter(d Deps) http.Handler {
 	mux := newMux()
@@ -49,49 +119,49 @@ func NewRouter(d Deps) http.Handler {
 	// §8 brute-force defence: tight IP-scoped rate limit on auth surfaces.
 	// 10 requests per IP per 60s — enough for retries on typos, not enough
 	// to enumerate passwords / spam refresh.
-	mux.handle("POST", "/api/auth/register", rateLimitedIP(d, "auth", 5, 60*time.Second, wrap(d, registerHandler)))
-	mux.handle("POST", "/api/auth/login", rateLimitedIP(d, "auth", 10, 60*time.Second, wrap(d, loginHandler)))
-	mux.handle("POST", "/api/auth/login/2fa", rateLimitedIP(d, "auth", 10, 60*time.Second, wrap(d, login2faHandler)))
-	mux.handle("POST", "/api/auth/logout", rateLimitedIP(d, "auth", 30, 60*time.Second, wrap(d, logoutHandler)))
-	mux.handle("POST", "/api/auth/refresh", rateLimitedIP(d, "auth", 30, 60*time.Second, wrap(d, refreshHandler)))
-	mux.handle("POST", "/api/auth/verify-email", rateLimitedIP(d, "verify-email", 10, 5*60*time.Second, wrap(d, verifyEmailHandler)))
-	mux.handle("POST", "/api/auth/send-code", rateLimitedIP(d, "auth", 3, 60*time.Second, wrap(d, sendCodeHandler)))
-	mux.handle("POST", "/api/auth/forgot-password", rateLimitedIP(d, "forgot-password", 5, 15*60*time.Second, wrap(d, forgotPasswordHandler)))
-	mux.handle("POST", "/api/auth/reset-password", rateLimitedIP(d, "auth", 5, 60*time.Second, wrap(d, resetPasswordHandler)))
+	mux.handle("POST", "/api/auth/register", rateLimitedIP(d, "auth", rlRegisterMax, rlRegisterWindow, wrap(d, registerHandler)))
+	mux.handle("POST", "/api/auth/login", rateLimitedIP(d, "auth", rlLoginMax, rlLoginWindow, wrap(d, loginHandler)))
+	mux.handle("POST", "/api/auth/login/2fa", rateLimitedIP(d, "auth", rlLogin2faMax, rlLogin2faWindow, wrap(d, login2faHandler)))
+	mux.handle("POST", "/api/auth/logout", rateLimitedIP(d, "auth", rlLogoutMax, rlLogoutWindow, wrap(d, logoutHandler)))
+	mux.handle("POST", "/api/auth/refresh", rateLimitedIP(d, "auth", rlRefreshMax, rlRefreshWindow, wrap(d, refreshHandler)))
+	mux.handle("POST", "/api/auth/verify-email", rateLimitedIP(d, "verify-email", rlVerifyEmailMax, rlVerifyEmailWindow, wrap(d, verifyEmailHandler)))
+	mux.handle("POST", "/api/auth/send-code", rateLimitedIP(d, "auth", rlSendCodeMax, rlSendCodeWindow, wrap(d, sendCodeHandler)))
+	mux.handle("POST", "/api/auth/forgot-password", rateLimitedIP(d, "forgot-password", rlForgotPasswordMax, rlForgotPasswordWindow, wrap(d, forgotPasswordHandler)))
+	mux.handle("POST", "/api/auth/reset-password", rateLimitedIP(d, "auth", rlResetPasswordMax, rlResetPasswordWindow, wrap(d, resetPasswordHandler)))
 	mux.handle("GET", "/api/health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, 200, map[string]any{"ok": true})
 	})
 	mux.handle("GET", "/api/public/signup-open", wrap(d, signupOpenHandler))
 	// Slider-puzzle captcha for registration. GET issues a challenge; POST /verify
 	// checks a solution and returns a single-use pass token (immediate feedback).
-	mux.handle("GET", "/api/public/captcha", rateLimitedIP(d, "auth", 30, 60*time.Second, wrap(d, captchaHandler)))
-	mux.handle("POST", "/api/public/captcha/verify", rateLimitedIP(d, "auth", 60, 60*time.Second, wrap(d, captchaVerifyHandler)))
+	mux.handle("GET", "/api/public/captcha", rateLimitedIP(d, "auth", rlCaptchaIssueMax, rlCaptchaIssueWindow, wrap(d, captchaHandler)))
+	mux.handle("POST", "/api/public/captcha/verify", rateLimitedIP(d, "auth", rlCaptchaVerifyMax, rlCaptchaVerifyWindow, wrap(d, captchaVerifyHandler)))
 	// First-run setup (§ first-run setup): public probe + create-first-admin.
 	mux.handle("GET", "/api/public/needs-setup", wrap(d, needsSetupHandler))
-	mux.handle("POST", "/api/setup", rateLimitedIP(d, "auth", 10, 60*time.Second, wrap(d, setupHandler)))
+	mux.handle("POST", "/api/setup", rateLimitedIP(d, "auth", rlFirstRunSetupMax, rlFirstRunSetupWindow, wrap(d, setupHandler)))
 	mux.handle("GET", "/api/public/oauth-providers", wrap(d, oauthProvidersPublicHandler))
 	// Membership tiers for the public landing page (§ user groups) — read-only,
 	// marketing info (names / prices / features / allowances), no secrets.
 	mux.handle("GET", "/api/public/user-groups", wrap(d, listUserGroupsPublic))
 	// Public read-only conversation share (token in the path; no auth). Rate
 	// limited (§D1) so the token space can't be swept even though it's now 192-bit.
-	mux.handle("GET", "/api/public/shared/:token", rateLimitedIP(d, "share", 60, 60*time.Second, wrap(d, publicSharedHandler)))
+	mux.handle("GET", "/api/public/shared/:token", rateLimitedIP(d, "share", rlPublicSharedConversationMax, rlPublicSharedConversationWindow, wrap(d, publicSharedHandler)))
 	// Share-scoped assets: uploaded attachments + generated artifacts referenced
 	// by the snapshot (the private /api/files|artifacts routes need the owner's
 	// session, which share viewers don't have). Membership in the snapshot is the
 	// access check; a separate, roomier rate bucket since one page load can pull
 	// many images.
-	mux.handle("GET", "/api/public/shared/:token/files/:id", rateLimitedIP(d, "share_asset", 240, 60*time.Second, wrap(d, publicSharedFileHandler)))
-	mux.handle("GET", "/api/public/shared/:token/artifacts/:id", rateLimitedIP(d, "share_asset", 240, 60*time.Second, wrap(d, publicSharedArtifactHandler)))
+	mux.handle("GET", "/api/public/shared/:token/files/:id", rateLimitedIP(d, "share_asset", rlSharedAssetsMax, rlSharedAssetsWindow, wrap(d, publicSharedFileHandler)))
+	mux.handle("GET", "/api/public/shared/:token/artifacts/:id", rateLimitedIP(d, "share_asset", rlSharedAssetsMax, rlSharedAssetsWindow, wrap(d, publicSharedArtifactHandler)))
 
 	// OAuth / social login. /start is a top-level browser navigation; /callback
 	// is hit by the provider redirect (GET) or Apple's form_post (POST).
-	mux.handle("GET", "/api/auth/oauth/:id/start", rateLimitedIP(d, "auth", 20, 60*time.Second, wrap(d, oauthStartHandler)))
-	mux.handle("GET", "/api/auth/oauth/:id/callback", rateLimitedIP(d, "auth", 20, 60*time.Second, wrap(d, oauthCallbackHandler)))
-	mux.handle("POST", "/api/auth/oauth/:id/callback", rateLimitedIP(d, "auth", 20, 60*time.Second, wrap(d, oauthCallbackHandler)))
+	mux.handle("GET", "/api/auth/oauth/:id/start", rateLimitedIP(d, "auth", rlOauthMax, rlOauthWindow, wrap(d, oauthStartHandler)))
+	mux.handle("GET", "/api/auth/oauth/:id/callback", rateLimitedIP(d, "auth", rlOauthMax, rlOauthWindow, wrap(d, oauthCallbackHandler)))
+	mux.handle("POST", "/api/auth/oauth/:id/callback", rateLimitedIP(d, "auth", rlOauthMax, rlOauthWindow, wrap(d, oauthCallbackHandler)))
 	// §cross-domain hand-off: redeems the one-time token minted by the canonical
 	// callback and sets the session cookies on THIS (origin) domain.
-	mux.handle("GET", "/api/auth/oauth/handoff", rateLimitedIP(d, "auth", 20, 60*time.Second, wrap(d, oauthHandoffHandler)))
+	mux.handle("GET", "/api/auth/oauth/handoff", rateLimitedIP(d, "auth", rlOauthMax, rlOauthWindow, wrap(d, oauthHandoffHandler)))
 
 	// Authenticated endpoints.
 	mux.handle("GET", "/api/me", requireAuth(d, meHandler))
@@ -101,8 +171,8 @@ func NewRouter(d Deps) http.Handler {
 	// credential-stuffing attacks even when the attacker holds a valid session.
 	// Per-IP window (not per-user) so a compromised token on a shared IP still
 	// gets throttled.
-	mux.handle("PATCH", "/api/me/password", rateLimitedIP(d, "password-change", 5, 60*time.Second, requireAuth(d, changePasswordHandler)))
-	mux.handle("POST", "/api/me/password/set", rateLimitedIP(d, "password-change", 5, 60*time.Second, requireAuth(d, setPasswordHandler)))
+	mux.handle("PATCH", "/api/me/password", rateLimitedIP(d, "password-change", rlPasswordChangeMax, rlPasswordChangeWindow, requireAuth(d, changePasswordHandler)))
+	mux.handle("POST", "/api/me/password/set", rateLimitedIP(d, "password-change", rlPasswordChangeMax, rlPasswordChangeWindow, requireAuth(d, setPasswordHandler)))
 	// User avatar upload — reuses the image-validating icon handler (returns
 	// {url}); the client stores that URL in the user's settings (avatar_url).
 	mux.handle("POST", "/api/me/avatar", requireAuth(d, uploadIconAdmin))
@@ -116,11 +186,11 @@ func NewRouter(d Deps) http.Handler {
 	// state); the callback reuses the shared public /api/auth/oauth/:id/callback.
 	mux.handle("GET", "/api/me/identities", requireAuth(d, listIdentitiesHandler))
 	mux.handle("DELETE", "/api/me/identities", requireAuth(d, unlinkIdentityHandler))
-	mux.handle("POST", "/api/me/identities/:id/link", rateLimitedIP(d, "auth", 20, 60*time.Second, requireAuth(d, oauthLinkStartHandler)))
+	mux.handle("POST", "/api/me/identities/:id/link", rateLimitedIP(d, "auth", rlIdentityLinkStartMax, rlIdentityLinkStartWindow, requireAuth(d, oauthLinkStartHandler)))
 	mux.handle("GET", "/api/announcement", requireAuth(d, announcementHandler))
-	mux.handle("POST", "/api/me/2fa/setup", rateLimitedIP(d, "2fa", 10, 5*60*time.Second, requireAuth(d, twofaSetupHandler)))
-	mux.handle("POST", "/api/me/2fa/enable", rateLimitedIP(d, "2fa", 10, 5*60*time.Second, requireAuth(d, twofaEnableHandler)))
-	mux.handle("POST", "/api/me/2fa/disable", rateLimitedIP(d, "2fa", 10, 5*60*time.Second, requireAuth(d, twofaDisableHandler)))
+	mux.handle("POST", "/api/me/2fa/setup", rateLimitedIP(d, "2fa", rl2faSetupMax, rl2faSetupWindow, requireAuth(d, twofaSetupHandler)))
+	mux.handle("POST", "/api/me/2fa/enable", rateLimitedIP(d, "2fa", rl2faSetupMax, rl2faSetupWindow, requireAuth(d, twofaEnableHandler)))
+	mux.handle("POST", "/api/me/2fa/disable", rateLimitedIP(d, "2fa", rl2faSetupMax, rl2faSetupWindow, requireAuth(d, twofaDisableHandler)))
 	mux.handle("GET", "/api/me/memories", requireAuth(d, listMemoriesHandler))
 	mux.handle("POST", "/api/me/memories", requireAuth(d, createMemoryHandler))
 	mux.handle("PATCH", "/api/me/memories/:id", requireAuth(d, updateMemoryHandler))
@@ -128,7 +198,7 @@ func NewRouter(d Deps) http.Handler {
 	// Redeem a code → grants the user a configured user-group for a configured
 	// duration (§ redeem codes). Tight rate limit so a stolen code can't be
 	// brute-force-typed by an attacker who knows the alphabet.
-	mux.handle("POST", "/api/me/redeem", rateLimitedIP(d, "redeem", 10, 60*time.Second, requireAuth(d, redeemCodeHandler)))
+	mux.handle("POST", "/api/me/redeem", rateLimitedIP(d, "redeem", rlRedeemCodeMax, rlRedeemCodeWindow, requireAuth(d, redeemCodeHandler)))
 
 	// Active sessions (§ account → active sessions). Registered under /api/auth
 	// so the refresh-token cookie (scoped to /api/auth) is sent — that's how we
@@ -160,8 +230,8 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("DELETE", "/api/workspaces/:id/members/:uid", requireAuth(d, kickWorkspaceMemberHandler))
 	mux.handle("POST", "/api/workspaces/:id/leave", requireAuth(d, leaveWorkspaceHandler))
 	mux.handle("POST", "/api/workspaces/:id/invite/rotate", requireAuth(d, rotateWorkspaceInviteHandler))
-	mux.handle("GET", "/api/workspaces/join/:token", rateLimitedIP(d, "ws_join", 30, 60*time.Second, requireAuth(d, workspaceInviteInfoHandler)))
-	mux.handle("POST", "/api/workspaces/join/:token", rateLimitedIP(d, "ws_join", 30, 60*time.Second, requireAuth(d, joinWorkspaceHandler)))
+	mux.handle("GET", "/api/workspaces/join/:token", rateLimitedIP(d, "ws_join", rlWorkspaceJoinMax, rlWorkspaceJoinWindow, requireAuth(d, workspaceInviteInfoHandler)))
+	mux.handle("POST", "/api/workspaces/join/:token", rateLimitedIP(d, "ws_join", rlWorkspaceJoinMax, rlWorkspaceJoinWindow, requireAuth(d, joinWorkspaceHandler)))
 
 	mux.handle("GET", "/api/projects", requireAuth(d, listProjectsHandler))
 	mux.handle("POST", "/api/projects", requireAuth(d, createProjectHandler))
@@ -406,7 +476,7 @@ func corsMiddleware(allowed []string, next http.Handler) http.Handler {
 			// (i.e. serving the app on a domain other than the API's origin).
 			w.Header().Set("Access-Control-Allow-Headers", "content-type, authorization, x-req-ts, x-req-nonce, x-req-token")
 			w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PATCH,PUT,DELETE,OPTIONS")
-			w.Header().Set("Access-Control-Max-Age", "600")
+			w.Header().Set("Access-Control-Max-Age", strconv.Itoa(int(corsPreflightMaxAge.Seconds())))
 		}
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusNoContent)

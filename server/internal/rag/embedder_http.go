@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"aurelia/server/internal/envcfg"
 	"aurelia/server/internal/store"
 )
 
@@ -29,20 +30,42 @@ var (
 	dashScopeEmbedHTTPClient = newEmbeddingHTTPClient(false)
 )
 
+var (
+	netDialerTimeout                   = envcfg.Dur("AURELIA_RAG_NET_DIALER_TIMEOUT", 15*time.Second)
+	netDialerKeepAlive                 = envcfg.Dur("AURELIA_RAG_NET_DIALER_KEEP_ALIVE", 30*time.Second)
+	httpTransportMaxIdleConns          = envcfg.Int("AURELIA_RAG_HTTP_TRANSPORT_MAX_IDLE_CONNS", 50)
+	httpTransportMaxIdleConnsPerHost   = envcfg.Int("AURELIA_RAG_HTTP_TRANSPORT_MAX_IDLE_CONNS_PER_HOST", 10)
+	httpTransportIdleConnTimeout       = envcfg.Dur("AURELIA_RAG_HTTP_TRANSPORT_IDLE_CONN_TIMEOUT", 90*time.Second)
+	httpTransportTLSHandshakeTimeout   = envcfg.Dur("AURELIA_RAG_HTTP_TRANSPORT_TLSHANDSHAKE_TIMEOUT", 20*time.Second)
+	httpTransportResponseHeaderTimeout = envcfg.Dur("AURELIA_RAG_HTTP_TRANSPORT_RESPONSE_HEADER_TIMEOUT", 30*time.Second)
+	httpTransportExpectContinueTimeout = envcfg.Dur("AURELIA_RAG_HTTP_TRANSPORT_EXPECT_CONTINUE_TIMEOUT", 1*time.Second)
+	httpClientTimeout                  = envcfg.Dur("AURELIA_RAG_HTTP_CLIENT_TIMEOUT", 3*time.Minute)
+
+	diagPreviewCharCap = envcfg.Int("AURELIA_RAG_TRUNCATE_AT_N", 1200)
+	diagBodyCap        = envcfg.Int("AURELIA_RAG_TRUNCATE_AT_N_2", 16*1024)
+
+	embedErrBodyReadCap    = envcfg.Int64("AURELIA_RAG_IO_LIMIT_READER", 4096)
+	embedErrBodyReadCap4xx = envcfg.Int64("AURELIA_RAG_IO_LIMIT_READER_2", 4096)
+
+	embeddingRetryDelayBase = envcfg.Dur("AURELIA_RAG_EMBEDDING_RETRY_DELAY", time.Second)
+	embeddingRetryDelayCap  = envcfg.Dur("AURELIA_RAG_EMBEDDING_RETRY_DELAY_2", 30*time.Second)
+	embeddingRetryJitter    = envcfg.Dur("AURELIA_RAG_EMBEDDING_RETRY_DELAY_3", 1000*time.Millisecond)
+)
+
 func newEmbeddingHTTPClient(allowHTTP2 bool) *http.Client {
 	tr := &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
 		DialContext: (&net.Dialer{
-			Timeout:   15 * time.Second,
-			KeepAlive: 30 * time.Second,
+			Timeout:   netDialerTimeout,
+			KeepAlive: netDialerKeepAlive,
 		}).DialContext,
 		ForceAttemptHTTP2:     allowHTTP2,
-		MaxIdleConns:          50,
-		MaxIdleConnsPerHost:   10,
-		IdleConnTimeout:       90 * time.Second,
-		TLSHandshakeTimeout:   20 * time.Second,
-		ResponseHeaderTimeout: 30 * time.Second,
-		ExpectContinueTimeout: 1 * time.Second,
+		MaxIdleConns:          httpTransportMaxIdleConns,
+		MaxIdleConnsPerHost:   httpTransportMaxIdleConnsPerHost,
+		IdleConnTimeout:       httpTransportIdleConnTimeout,
+		TLSHandshakeTimeout:   httpTransportTLSHandshakeTimeout,
+		ResponseHeaderTimeout: httpTransportResponseHeaderTimeout,
+		ExpectContinueTimeout: httpTransportExpectContinueTimeout,
 	}
 	if !allowHTTP2 {
 		// DashScope compatible embedding occasionally stalls on h2 streams behind
@@ -51,7 +74,7 @@ func newEmbeddingHTTPClient(allowHTTP2 bool) *http.Client {
 		tr.TLSNextProto = map[string]func(string, *tls.Conn) http.RoundTripper{}
 	}
 	return &http.Client{
-		Timeout:   3 * time.Minute, // overall cap includes reading the vector response body
+		Timeout:   httpClientTimeout, // overall cap includes reading the vector response body
 		Transport: tr,
 	}
 }
@@ -147,11 +170,14 @@ const (
 	// guard that reports a clear local error instead of waiting on a provider
 	// timeout when OCR returns one enormous atom.
 	textEmbeddingV4MaxTokens = 8192
-	// DashScope remains concurrent, but two batches per document avoids a single
-	// OCR-heavy ingest monopolising the workspace. A process-wide cap also bounds
-	// the aggregate when several RAG workers reach embedding at once.
-	dashScopeEmbedConcurrency       = 2
-	dashScopeGlobalEmbedConcurrency = 2
+)
+
+// DashScope remains concurrent, but two batches per document avoids a single
+// OCR-heavy ingest monopolising the workspace. A process-wide cap also bounds
+// the aggregate when several RAG workers reach embedding at once.
+var (
+	dashScopeEmbedConcurrency       = envcfg.Int("AURELIA_RAG_DASH_SCOPE_EMBED_CONCURRENCY", 2)
+	dashScopeGlobalEmbedConcurrency = envcfg.Int("AURELIA_RAG_DASH_SCOPE_GLOBAL_EMBED_CONCURRENCY", 2)
 )
 
 // DashScope compatible-mode can occasionally accept the request and then sit
@@ -159,13 +185,13 @@ const (
 // below the shared client's broad 3-minute safety cap so indexing fails with a
 // retryable, visible error instead of looking stuck for many minutes. Variable
 // for tests.
-var dashScopeEmbedAttemptTimeout = 60 * time.Second
+var dashScopeEmbedAttemptTimeout = envcfg.Dur("AURELIA_RAG_DASH_SCOPE_EMBED_ATTEMPT_TIMEOUT", 60*time.Second)
 
 // embedConcurrency caps how many upstream embedding batches run at once. The old
 // code did them strictly sequentially, so a 500-chunk doc paid 50 serial
 // round-trips. Keep this moderate because the RAG queue can process multiple
 // documents at once and each document gets its own concurrency allowance.
-const embedConcurrency = 4
+var embedConcurrency = envcfg.Int("AURELIA_RAG_EMBED_CONCURRENCY", 4)
 
 var dashScopeEmbeddingSlots = make(chan struct{}, dashScopeGlobalEmbedConcurrency)
 
@@ -392,7 +418,7 @@ func (e *httpEmbedder) diagnosticsBody(texts []string) string {
 	for i, text := range texts {
 		totalChars += len(text)
 		if i < 2 {
-			previews = append(previews, truncateAtN(text, 1200))
+			previews = append(previews, truncateAtN(text, diagPreviewCharCap))
 		}
 	}
 	body := map[string]any{
@@ -408,7 +434,7 @@ func (e *httpEmbedder) diagnosticsBody(texts []string) string {
 		body["encoding_format"] = "float"
 	}
 	b, _ := json.MarshalIndent(body, "", "  ")
-	return truncateAtN(string(b), 16*1024)
+	return truncateAtN(string(b), diagBodyCap)
 }
 
 // postEmbeddings POSTs one batch, retrying transient failures (TLS handshake
@@ -416,7 +442,7 @@ func (e *httpEmbedder) diagnosticsBody(texts []string) string {
 // []byte so it can be replayed on each attempt. Hard 4xx (bad key, bad model,
 // unsupported dimension) are returned immediately — retrying won't help.
 func (e *httpEmbedder) postEmbeddings(ctx context.Context, url string, body []byte) (embeddingResponse, error) {
-	const maxAttempts = 2
+	maxAttempts := envcfg.Int("AURELIA_RAG_MAX_ATTEMPTS", 2)
 	var parsed embeddingResponse
 	var lastErr error
 	var retryAfter string
@@ -470,7 +496,7 @@ func (e *httpEmbedder) postEmbeddings(ctx context.Context, url string, body []by
 		}
 		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
 			retryAfter = resp.Header.Get("Retry-After")
-			b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+			b, _ := io.ReadAll(io.LimitReader(resp.Body, embedErrBodyReadCap))
 			resp.Body.Close()
 			release()
 			cancelReq()
@@ -478,7 +504,7 @@ func (e *httpEmbedder) postEmbeddings(ctx context.Context, url string, body []by
 			continue // rate-limited / server-side → retry
 		}
 		if resp.StatusCode >= 400 {
-			b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+			b, _ := io.ReadAll(io.LimitReader(resp.Body, embedErrBodyReadCap4xx))
 			resp.Body.Close()
 			release()
 			cancelReq()
@@ -510,7 +536,7 @@ func totalTextChars(texts []string) int {
 }
 
 func embeddingRetryDelay(failedAttempt int, retryAfter string) time.Duration {
-	base := time.Duration(1<<min(failedAttempt, 4)) * time.Second
+	base := time.Duration(1<<min(failedAttempt, 4)) * embeddingRetryDelayBase
 	if seconds, err := strconv.Atoi(strings.TrimSpace(retryAfter)); err == nil && seconds > 0 {
 		base = time.Duration(seconds) * time.Second
 	} else if when, err := http.ParseTime(strings.TrimSpace(retryAfter)); err == nil {
@@ -518,10 +544,10 @@ func embeddingRetryDelay(failedAttempt int, retryAfter string) time.Duration {
 			base = wait
 		}
 	}
-	if base > 30*time.Second {
-		base = 30 * time.Second
+	if base > embeddingRetryDelayCap {
+		base = embeddingRetryDelayCap
 	}
-	return base + time.Duration(rand.IntN(1000))*time.Millisecond
+	return base + time.Duration(rand.IntN(int(max(1, embeddingRetryJitter/time.Millisecond))))*time.Millisecond
 }
 
 func (e *httpEmbedder) decodeResponse(r io.Reader, parsed *embeddingResponse) error {

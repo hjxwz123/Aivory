@@ -11,8 +11,13 @@ import (
 	"sync"
 	"time"
 
+	"aurelia/server/internal/envcfg"
+
 	"github.com/redis/go-redis/v9"
 )
+
+// redisOpTimeout bounds every per-operation Redis command (env-overridable).
+var redisOpTimeout = envcfg.Dur("AURELIA_CACHE_REDIS_OPERATION_COMMAND_TIMEOUT", 3*time.Second)
 
 type redisCache struct {
 	rdb *redis.Client
@@ -27,7 +32,7 @@ func NewRedis(url string) (Cache, error) {
 		return nil, err
 	}
 	rdb := redis.NewClient(opt)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), envcfg.Dur("AURELIA_CACHE_REDIS_STARTUP_PING_TIMEOUT", 5*time.Second))
 	defer cancel()
 	if err := rdb.Ping(ctx).Err(); err != nil {
 		_ = rdb.Close()
@@ -37,7 +42,7 @@ func NewRedis(url string) (Cache, error) {
 }
 
 func (c *redisCache) Get(key string) (string, bool) {
-	ctx, cancel := context.WithTimeout(c.ctx, 3*time.Second)
+	ctx, cancel := context.WithTimeout(c.ctx, redisOpTimeout)
 	defer cancel()
 	v, err := c.rdb.Get(ctx, key).Result()
 	if err != nil {
@@ -47,13 +52,13 @@ func (c *redisCache) Get(key string) (string, bool) {
 }
 
 func (c *redisCache) Set(key, value string, ttl time.Duration) {
-	ctx, cancel := context.WithTimeout(c.ctx, 3*time.Second)
+	ctx, cancel := context.WithTimeout(c.ctx, redisOpTimeout)
 	defer cancel()
 	_ = c.rdb.Set(ctx, key, value, ttl).Err()
 }
 
 func (c *redisCache) Delete(key string) {
-	ctx, cancel := context.WithTimeout(c.ctx, 3*time.Second)
+	ctx, cancel := context.WithTimeout(c.ctx, redisOpTimeout)
 	defer cancel()
 	_ = c.rdb.Del(ctx, key).Err()
 }
@@ -62,7 +67,7 @@ func (c *redisCache) Delete(key string) {
 // created (result == 1), giving a fixed-window counter — matching the in-memory
 // implementation's semantics (the window does not slide on each hit).
 func (c *redisCache) Incr(key string, ttl time.Duration) int64 {
-	ctx, cancel := context.WithTimeout(c.ctx, 3*time.Second)
+	ctx, cancel := context.WithTimeout(c.ctx, redisOpTimeout)
 	defer cancel()
 	n, err := c.rdb.Incr(ctx, key).Result()
 	if err != nil {
@@ -77,7 +82,7 @@ func (c *redisCache) Incr(key string, ttl time.Duration) int64 {
 // IncrBy atomically adds delta to key (setting the TTL on creation), flooring
 // at 0. Used for windowed cost quotas in integer micro-units.
 func (c *redisCache) IncrBy(key string, delta int64, ttl time.Duration) int64 {
-	ctx, cancel := context.WithTimeout(c.ctx, 3*time.Second)
+	ctx, cancel := context.WithTimeout(c.ctx, redisOpTimeout)
 	defer cancel()
 	n, err := c.rdb.IncrBy(ctx, key, delta).Result()
 	if err != nil {
@@ -95,7 +100,7 @@ func (c *redisCache) IncrBy(key string, delta int64, ttl time.Duration) int64 {
 
 // Decr atomically decrements key, flooring at 0.
 func (c *redisCache) Decr(key string) int64 {
-	ctx, cancel := context.WithTimeout(c.ctx, 3*time.Second)
+	ctx, cancel := context.WithTimeout(c.ctx, redisOpTimeout)
 	defer cancel()
 	n, err := c.rdb.Decr(ctx, key).Result()
 	if err != nil {
@@ -110,7 +115,7 @@ func (c *redisCache) Decr(key string) int64 {
 }
 
 func (c *redisCache) Publish(topic, payload string) {
-	ctx, cancel := context.WithTimeout(c.ctx, 3*time.Second)
+	ctx, cancel := context.WithTimeout(c.ctx, redisOpTimeout)
 	defer cancel()
 	_ = c.rdb.Publish(ctx, topic, payload).Err()
 }
@@ -120,7 +125,7 @@ func (c *redisCache) Publish(topic, payload string) {
 // small buffer; slow consumers drop messages rather than block the bridge.
 func (c *redisCache) Subscribe(topic string) (chan string, func()) {
 	ps := c.rdb.Subscribe(c.ctx, topic)
-	out := make(chan string, 16)
+	out := make(chan string, envcfg.Int("AURELIA_CACHE_REDIS_PUB_SUB_SUBSCRIBER_CHANNEL_BUFFER", 16))
 	var once sync.Once
 	done := make(chan struct{})
 
@@ -161,12 +166,12 @@ func (c *redisCache) Subscribe(topic string) (chan string, func()) {
 }
 
 func (c *redisCache) StreamAppend(key, value string, ttl time.Duration) (string, bool) {
-	ctx, cancel := context.WithTimeout(c.ctx, 3*time.Second)
+	ctx, cancel := context.WithTimeout(c.ctx, redisOpTimeout)
 	defer cancel()
 	id, err := c.rdb.XAdd(ctx, &redis.XAddArgs{
 		Stream: key,
 		Values: map[string]any{"data": value},
-		MaxLen: 50000,
+		MaxLen: envcfg.Int64("AURELIA_CACHE_REDIS_GENERATION_STREAM_MAXLEN_CAP", 50000),
 		Approx: true,
 	}).Result()
 	if err != nil {
@@ -180,9 +185,9 @@ func (c *redisCache) StreamAppend(key, value string, ttl time.Duration) (string,
 
 func (c *redisCache) StreamRead(key, afterID string, limit int) ([]StreamEvent, bool) {
 	if limit <= 0 {
-		limit = 100
+		limit = envcfg.Int("AURELIA_CACHE_REDIS_STREAMREAD_PAGE_LIMIT", 100)
 	}
-	ctx, cancel := context.WithTimeout(c.ctx, 3*time.Second)
+	ctx, cancel := context.WithTimeout(c.ctx, redisOpTimeout)
 	defer cancel()
 	start := "-"
 	if afterID != "" {

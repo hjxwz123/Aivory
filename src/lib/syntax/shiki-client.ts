@@ -1,3 +1,4 @@
+import { envNum } from '@/lib/env-config'
 import { fallbackHighlight } from './fallback-highlight'
 import { normalizeLanguage } from './shiki-languages'
 
@@ -38,9 +39,9 @@ interface ShikiWorkerFailure {
 
 type ShikiWorkerResponse = ShikiWorkerSuccess | ShikiWorkerFailure
 
-const MAX_SHIKI_CODE_LENGTH = 200_000
-const FINAL_RENDER_TIMEOUT_MS = 15_000
-const CACHE_LIMIT = 160
+const MAX_SHIKI_CODE_LENGTH = envNum('VITE_AURELIA_MAX_SHIKI_CODE_LENGTH', 200_000)
+const FINAL_RENDER_TIMEOUT_MS = envNum('VITE_AURELIA_FINAL_RENDER_TIMEOUT_MS', 15_000)
+const CACHE_LIMIT = envNum('VITE_AURELIA_CACHE_LIMIT', 160)
 
 let worker: Worker | null = null
 let seq = 0

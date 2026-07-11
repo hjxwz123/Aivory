@@ -39,18 +39,36 @@ import (
 	"sync"
 	"time"
 
+	"aurelia/server/internal/envcfg"
 	"aurelia/server/internal/store"
 )
 
-const (
-	drMaxRounds       = 4                // hard cap on search→verify rounds
-	drQueriesPerRound = 6                // max searches dispatched per round
-	drFetchPerRound   = 5                // max sources read per round
-	drMinDeepReads    = 5                // skill Phase 3: deep-read at least this many sources
-	drSearchTopK      = 8                // results requested per search
-	drWallClock       = 5 * time.Minute  // backstop for the whole engine
-	drCallTimeout     = 30 * time.Second // per search/fetch call
-	drMaxBodyChars    = 4000             // per-source excerpt fed to the writer
+var (
+	drMaxRounds       = envcfg.Int("AURELIA_LLM_DR_MAX_ROUNDS", 4)                // hard cap on search→verify rounds
+	drQueriesPerRound = envcfg.Int("AURELIA_LLM_DR_QUERIES_PER_ROUND", 6)         // max searches dispatched per round
+	drFetchPerRound   = envcfg.Int("AURELIA_LLM_DR_FETCH_PER_ROUND", 5)           // max sources read per round
+	drMinDeepReads    = envcfg.Int("AURELIA_LLM_DR_MIN_DEEP_READS", 5)            // skill Phase 3: deep-read at least this many sources
+	drSearchTopK      = envcfg.Int("AURELIA_LLM_DR_SEARCH_TOP_K", 8)              // results requested per search
+	drWallClock       = envcfg.Dur("AURELIA_LLM_DR_WALL_CLOCK", 5*time.Minute)    // backstop for the whole engine
+	drCallTimeout     = envcfg.Dur("AURELIA_LLM_DR_CALL_TIMEOUT", 30*time.Second) // per search/fetch call
+	drMaxBodyChars    = envcfg.Int("AURELIA_LLM_DR_MAX_BODY_CHARS", 4000)         // per-source excerpt fed to the writer
+)
+
+// Overridable inline tuning constants for the deep-research engine (env-backed;
+// defaults preserve original behaviour).
+var (
+	maxOutputTokens8                     = envcfg.Int("AURELIA_LLM_MAX_OUTPUT_TOKENS_8", 1024)
+	maxOutputTokens9                     = envcfg.Int("AURELIA_LLM_MAX_OUTPUT_TOKENS_9", 512)
+	maxOutputTokens10                    = envcfg.Int("AURELIA_LLM_MAX_OUTPUT_TOKENS_10", 2048)
+	deepResearchVerifyEvidenceExcerptCap = envcfg.Int("AURELIA_LLM_DEEP_RESEARCH_VERIFY_EVIDENCE_EXCERPT_CAP", 200)
+	deepResearchValidateTimeout          = envcfg.Dur("AURELIA_LLM_DEEP_RESEARCH_VALIDATE_TIMEOUT", 75*time.Second)
+	deepResearchValidateSourceExcerptCap = envcfg.Int("AURELIA_LLM_DEEP_RESEARCH_VALIDATE_SOURCE_EXCERPT_CAP", 2000)
+	deepResearchToolResultSummaryCap     = envcfg.Int("AURELIA_LLM_DEEP_RESEARCH_TOOL_RESULT_SUMMARY_CAP", 240)
+	scoreGradeA                          = envcfg.F64("AURELIA_LLM_SCORE_A", 9)
+	scoreGradeB                          = envcfg.F64("AURELIA_LLM_SCORE_B", 6)
+	scoreGradeC                          = envcfg.F64("AURELIA_LLM_SCORE_C", 3)
+	scoreKeywordMatch                    = envcfg.F64("AURELIA_LLM_SCORE_KW", 1)
+	scoreFreshDomain                     = envcfg.F64("AURELIA_LLM_SCORE_FRESH_DOMAIN", 2)
 )
 
 // drState is the panel state streamed live and persisted for reload. Field tags
@@ -244,7 +262,7 @@ func (rs *researcher) plan(ctx context.Context) researchPlan {
 		input := fmt.Sprintf("Today's date: %s\n\nResearch question:\n%s", time.Now().Format("2006-01-02"), rs.question)
 		err := rs.o.task.RunJSON(ctx, TaskResearchPlan, input, &plan, RunOpts{
 			UserID: rs.userID, ConversationID: rs.convID, MessageID: rs.msgID,
-			MaxOutputTokens: 1024,
+			MaxOutputTokens: maxOutputTokens8,
 		})
 		if err != nil {
 			rs.logger("plan failed, falling back to single-question: %v", err)
@@ -515,14 +533,14 @@ func (rs *researcher) verify(ctx context.Context, plan researchPlan) gapVerdict 
 	for _, e := range rs.evidence {
 		excerpt := e.Snippet
 		if excerpt == "" {
-			excerpt = truncate(e.Body, 200)
+			excerpt = truncate(e.Body, deepResearchVerifyEvidenceExcerptCap)
 		}
-		fmt.Fprintf(&b, "- [%d] (%s, %s) %s — %s\n", e.Index, e.Grade, domainOf(e.URL), e.Title, truncate(excerpt, 200))
+		fmt.Fprintf(&b, "- [%d] (%s, %s) %s — %s\n", e.Index, e.Grade, domainOf(e.URL), e.Title, truncate(excerpt, deepResearchVerifyEvidenceExcerptCap))
 	}
 	b.WriteString("</tool-output>\n")
 	var gap gapVerdict
 	if err := rs.o.task.RunJSON(ctx, TaskResearchVerify, b.String(), &gap, RunOpts{
-		UserID: rs.userID, ConversationID: rs.convID, MessageID: rs.msgID, MaxOutputTokens: 512,
+		UserID: rs.userID, ConversationID: rs.convID, MessageID: rs.msgID, MaxOutputTokens: maxOutputTokens9,
 	}); err != nil {
 		rs.logger("verify failed, treating as sufficient: %v", err)
 		return gapVerdict{Sufficient: true}
@@ -544,7 +562,7 @@ func (rs *researcher) validate(ctx context.Context) {
 	}
 	// Bounded like the tool calls — a slow task model must not eat the whole
 	// 5-minute wall clock that the writer still needs.
-	ctx, cancel := context.WithTimeout(ctx, 75*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, deepResearchValidateTimeout)
 	defer cancel()
 	var b strings.Builder
 	fmt.Fprintf(&b, "Research question: %s\n", rs.question)
@@ -560,12 +578,12 @@ func (rs *researcher) validate(ctx context.Context) {
 		if strings.TrimSpace(excerpt) == "" {
 			excerpt = e.Snippet
 		}
-		fmt.Fprintf(&b, "[%d] (%s, %s) %s\n%s\n\n", e.Index, e.Grade, domainOf(e.URL), e.titleOrURL(), truncate(excerpt, 2000))
+		fmt.Fprintf(&b, "[%d] (%s, %s) %s\n%s\n\n", e.Index, e.Grade, domainOf(e.URL), e.titleOrURL(), truncate(excerpt, deepResearchValidateSourceExcerptCap))
 	}
 	b.WriteString("</tool-output>\n")
 	var f drFindings
 	if err := rs.o.task.RunJSON(ctx, TaskResearchValidate, b.String(), &f, RunOpts{
-		UserID: rs.userID, ConversationID: rs.convID, MessageID: rs.msgID, MaxOutputTokens: 2048,
+		UserID: rs.userID, ConversationID: rs.convID, MessageID: rs.msgID, MaxOutputTokens: maxOutputTokens10,
 	}); err != nil {
 		rs.logger("cross-validate failed, writer will cite sources directly: %v", err)
 		return
@@ -759,7 +777,7 @@ func (rs *researcher) execToolsConcurrent(ctx context.Context, specs []toolCallS
 	for i, c := range specs {
 		r := results[i]
 		status := "complete"
-		summary := truncate(r.Output, 240)
+		summary := truncate(r.Output, deepResearchToolResultSummaryCap)
 		if r.Err != nil {
 			status = "error"
 			summary = "Error: " + r.Err.Error()
@@ -852,19 +870,19 @@ func (rs *researcher) rankAndPick(candidates []drCandidate, round int) []drCandi
 		// Credibility dominates: an A-grade source outranks any keyword match.
 		switch credibilityOf(c.url) {
 		case "A":
-			score += 9
+			score += scoreGradeA
 		case "B":
-			score += 6
+			score += scoreGradeB
 		case "C":
-			score += 3
+			score += scoreGradeC
 		}
 		for _, t := range terms {
 			if len(t) > 3 && strings.Contains(hay, t) {
-				score += 1
+				score += scoreKeywordMatch
 			}
 		}
 		if !seenDomain[domainOf(c.url)] {
-			score += 2 // reward a fresh domain
+			score += scoreFreshDomain // reward a fresh domain
 		}
 		ranked = append(ranked, scored{c: c, score: score})
 	}

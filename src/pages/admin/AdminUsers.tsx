@@ -35,10 +35,11 @@ import {
 import { toast } from '@/hooks/use-toast'
 import { useAuth } from '@/store/auth'
 import { formatDateTime, cn } from '@/lib/utils'
+import { envNum } from '@/lib/env-config'
 
 // A user counts as online if they made an authenticated request in the last 5
 // minutes (the middleware refreshes last_seen_at at most once/min).
-const ONLINE_WINDOW_S = 300
+const ONLINE_WINDOW_S = envNum('VITE_AURELIA_ONLINE_WINDOW_S', 300)
 
 type Role = 'user' | 'admin'
 
@@ -79,7 +80,7 @@ export default function AdminUsers() {
   const [query, setQuery] = useState('')
   const [committedQuery, setCommittedQuery] = useState('')
   const [page, setPage] = useState(1)
-  const PAGE_SIZE = 50
+  const PAGE_SIZE = envNum('VITE_AURELIA_PAGE_SIZE_3', 50)
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE))
   const pageRows = rows
 

@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"aurelia/server/internal/envcfg"
 	"aurelia/server/internal/store"
 )
 
@@ -26,7 +27,7 @@ func microsToCost(m int64) float64 { return float64(m) / 1e6 }
 func quotaWindow(periodSeconds int) (start int64, ttl time.Duration) {
 	p := int64(periodSeconds)
 	if p <= 0 {
-		p = 604800 // 7 days
+		p = envcfg.Int64("AURELIA_LLM_P", 604800) // 7 days
 	}
 	now := time.Now().Unix()
 	return (now / p) * p, time.Duration(p) * time.Second
@@ -266,7 +267,7 @@ func estimateRequestTokens(req UnifiedChatRequest) int {
 		for _, b := range m.Blocks {
 			switch b.Kind {
 			case "image", "document":
-				t += 1024 // base64 isn't text-tokenised; rough flat allowance
+				t += envcfg.Int("AURELIA_LLM_IMAGE_DOCUMENT_FLAT_TOKEN_ALLOWANCE", 1024) // base64 isn't text-tokenised; rough flat allowance
 			default:
 				t += estimateTokens(b.Text) + estimateTokens(b.Summary)
 				if len(b.Input) > 0 {
@@ -309,7 +310,7 @@ func (o *Orchestrator) preflightCredit(ctx context.Context, userID string, model
 	if !enabled {
 		return "", true
 	}
-	const outputReserve = 2000 // input + a fixed 2k output reserve (admin choice)
+	outputReserve := envcfg.Int("AURELIA_LLM_OUTPUT_RESERVE", 2000) // input + a fixed 2k output reserve (admin choice)
 	estIn := estimateRequestTokens(req)
 	need := computeCost(*model, Usage{InputTokens: estIn, OutputTokens: outputReserve}) * o.creditsPerUSD()
 	have := o.availableCredits(ctx, userID, o.userGroupID(ctx, userID))
@@ -323,7 +324,7 @@ func (o *Orchestrator) preflightCredit(ctx context.Context, userID string, model
 func creditWindow(periodSeconds int) (int64, time.Duration) {
 	p := int64(periodSeconds)
 	if p <= 0 {
-		p = 604800
+		p = envcfg.Int64("AURELIA_LLM_P_2", 604800)
 	}
 	now := time.Now().Unix()
 	return (now / p) * p, time.Duration(p) * time.Second

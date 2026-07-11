@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"aurelia/server/internal/envcfg"
 	"aurelia/server/internal/mail"
 	"aurelia/server/internal/store"
 )
@@ -20,14 +21,22 @@ import (
 // maxCodeAttempts is the number of wrong guesses allowed against a single
 // emailed verify/reset code before it is burned (§ brute-force). With the code
 // burned after 5 misses, the 6-digit space can't be swept across rotating IPs.
-const maxCodeAttempts = 5
+var maxCodeAttempts = envcfg.Int("AURELIA_API_MAX_CODE_ATTEMPTS", 5)
+
+// Tunable knobs — envcfg overrides; defaults preserve original behaviour.
+var (
+	codeFailureCounterTTL    = envcfg.Dur("AURELIA_API_CODE_FAILURE_COUNTER_TTL", 10*time.Minute)
+	minimumPasswordLength    = envcfg.Int("AURELIA_API_MINIMUM_PASSWORD_LENGTH", 8)
+	emailVerificationCodeTTL = envcfg.Dur("AURELIA_API_EMAIL_VERIFICATION_CODE_TTL", 10*time.Minute)
+	passwordResetCodeTTL     = envcfg.Dur("AURELIA_API_PASSWORD_RESET_CODE_TTL", 10*time.Minute)
+)
 
 // registerCodeFailure counts wrong guesses of a verify/reset code per email and,
 // once maxCodeAttempts is hit, deletes (burns) the code so it can no longer be
 // guessed — the user must request a fresh one. Mirrors the 2FA ticket-burn.
 // purpose is "verify" | "reset". The counter shares the code's 10-minute TTL.
 func registerCodeFailure(d Deps, purpose, email string) {
-	if n := d.Cache.Incr("codefail:"+purpose+":"+email, 10*time.Minute); n >= maxCodeAttempts {
+	if n := d.Cache.Incr("codefail:"+purpose+":"+email, codeFailureCounterTTL); n >= int64(maxCodeAttempts) {
 		d.Cache.Delete(purpose + ":" + email)
 	}
 }
@@ -102,7 +111,7 @@ func setupHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errors.New("name required"))
 		return
 	}
-	if len(req.Password) < 8 {
+	if len(req.Password) < minimumPasswordLength {
 		writeError(w, 400, errors.New("password must be at least 8 characters"))
 		return
 	}
@@ -148,7 +157,7 @@ func registerHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errors.New("valid email required"))
 		return
 	}
-	if len(req.Password) < 8 {
+	if len(req.Password) < minimumPasswordLength {
 		writeError(w, 400, errors.New("password must be at least 8 characters"))
 		return
 	}
@@ -241,7 +250,7 @@ func registerHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	if verifyRequired {
 		code := genCode6()
-		d.Cache.Set("verify:"+req.Email, code, 10*time.Minute)
+		d.Cache.Set("verify:"+req.Email, code, emailVerificationCodeTTL)
 		_ = store.SetUserStatus(r.Context(), d.DB, user.ID, "pending")
 		// Send off the request path: even with timeouts a slow SMTP server would
 		// otherwise make "Create account" spin for seconds. The code is already
@@ -285,13 +294,13 @@ func sendCodeHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 
 	code := genCode6()
 	if req.Purpose == "reset" {
-		d.Cache.Set("reset:"+req.Email, code, 10*time.Minute)
+		d.Cache.Set("reset:"+req.Email, code, passwordResetCodeTTL)
 	} else {
 		if user.Status != "pending" {
 			writeJSON(w, 200, map[string]bool{"ok": true})
 			return
 		}
-		d.Cache.Set("verify:"+req.Email, code, 10*time.Minute)
+		d.Cache.Set("verify:"+req.Email, code, emailVerificationCodeTTL)
 	}
 	if err := d.Mailer.SendCode(req.Email, code, req.Purpose); err != nil {
 		d.Logger.Printf("[mail] failed to send %s code to %s: %v", req.Purpose, req.Email, err)
@@ -347,7 +356,7 @@ func forgotPasswordHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 
 	if user, err := store.FindUserByEmail(r.Context(), d.DB, req.Email); err == nil && user != nil {
 		code := genCode6()
-		d.Cache.Set("reset:"+req.Email, code, 10*time.Minute)
+		d.Cache.Set("reset:"+req.Email, code, passwordResetCodeTTL)
 		if err := d.Mailer.SendCode(req.Email, code, "reset"); err != nil {
 			d.Logger.Printf("[mail] failed to send reset code to %s: %v", req.Email, err)
 		}
@@ -368,7 +377,7 @@ func resetPasswordHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
-	if len(req.NewPassword) < 8 {
+	if len(req.NewPassword) < minimumPasswordLength {
 		writeError(w, 400, errors.New("password must be at least 8 characters"))
 		return
 	}

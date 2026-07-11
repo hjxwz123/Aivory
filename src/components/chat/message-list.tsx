@@ -7,6 +7,7 @@ import { useAuth } from '@/store/auth'
 import { useConversations, MSG_PAGE } from '@/store/conversations'
 import { useSettings } from '@/store/settings'
 import { toast } from '@/hooks/use-toast'
+import { envNum } from '@/lib/env-config'
 import type { Attachment, Conversation } from '@/types/chat'
 
 interface MessageListProps {
@@ -22,8 +23,8 @@ interface MessageListProps {
 // Long transcripts render lazily: only the latest INITIAL_WINDOW turns mount;
 // scrolling toward the top reveals BATCH more at a time. Keeps first paint fast
 // on conversations with hundreds of messages (§ perf).
-const INITIAL_WINDOW = 24
-const BATCH = 24
+const INITIAL_WINDOW = envNum('VITE_AURELIA_INITIAL_WINDOW', 24)
+const BATCH = envNum('VITE_AURELIA_BATCH', 24)
 
 export function MessageList({ conversation, scrollToMessageId, jumpKey }: MessageListProps) {
   const meId = useAuth((s) => s.user?.id)

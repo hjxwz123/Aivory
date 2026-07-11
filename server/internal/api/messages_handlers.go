@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"aurelia/server/internal/envcfg"
 	"aurelia/server/internal/genstream"
 	"aurelia/server/internal/llm"
 	"aurelia/server/internal/msgcache"
@@ -23,7 +24,17 @@ import (
 // holding a concurrency slot. Reasoning/tool-heavy turns can run well past ten
 // minutes, so keep this wide and let per-tool/admin TTFT limits handle the
 // narrower failure modes.
-const maxGenDuration = 90 * time.Minute
+var maxGenDuration = envcfg.Dur("AURELIA_API_MAX_GEN_DURATION", 90*time.Minute)
+
+// SSE heartbeat and stream-replay tunables (env-overridable; defaults preserve
+// prior hardcoded behavior).
+var (
+	ssePingHeartbeatPost        = envcfg.Dur("AURELIA_API_SSE_PING_HEARTBEAT_POST", 15*time.Second)
+	ssePingHeartbeatRegenerate  = envcfg.Dur("AURELIA_API_SSE_PING_HEARTBEAT_REGENERATE", 15*time.Second)
+	ssePingHeartbeatStream      = envcfg.Dur("AURELIA_API_SSE_PING_HEARTBEAT_STREAM", 15*time.Second)
+	streamStatusRecheckInterval = envcfg.Dur("AURELIA_API_STREAM_STATUS_RECHECK_INTERVAL", 5*time.Second)
+	streamReplayBatchSize       = envcfg.Int("AURELIA_API_STREAM_REPLAY_BATCH_SIZE", 200)
+)
 
 type postMessageReq struct {
 	Text     string `json:"text"`
@@ -129,7 +140,7 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	pingCtx, pingCancel := context.WithCancel(ctx)
 	defer pingCancel()
 	go func() {
-		t := time.NewTicker(15 * time.Second)
+		t := time.NewTicker(ssePingHeartbeatPost)
 		defer t.Stop()
 		for {
 			select {
@@ -371,7 +382,7 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	pingCtx, pingCancel := context.WithCancel(ctx)
 	defer pingCancel()
 	go func() {
-		t := time.NewTicker(15 * time.Second)
+		t := time.NewTicker(ssePingHeartbeatRegenerate)
 		defer t.Stop()
 		for {
 			select {
@@ -448,7 +459,7 @@ func streamMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	terminal := false
 	flush := func() bool {
-		events, ok := genstream.Read(d.Cache, msgID, lastID, 200)
+		events, ok := genstream.Read(d.Cache, msgID, lastID, streamReplayBatchSize)
 		if !ok {
 			_ = writer.Send(llm.SseEvent{Type: "error", MessageID: msgID, Message: "stream replay unavailable"}, "error")
 			return true
@@ -477,9 +488,9 @@ func streamMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	if flush() {
 		return
 	}
-	ping := time.NewTicker(15 * time.Second)
+	ping := time.NewTicker(ssePingHeartbeatStream)
 	defer ping.Stop()
-	statusCheck := time.NewTicker(5 * time.Second)
+	statusCheck := time.NewTicker(streamStatusRecheckInterval)
 	defer statusCheck.Stop()
 	for {
 		select {

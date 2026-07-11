@@ -36,6 +36,9 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { ContentHeader } from '@/components/layout/content-header'
 import { toast } from '@/hooks/use-toast'
 import { formatRelativeDate, cn } from '@/lib/utils'
+import { envNum } from '@/lib/env-config'
+
+const kbDocStatusPollInterval = envNum('VITE_AURELIA_KB_DOC_STATUS_POLL_INTERVAL', 2200)
 
 export default function KnowledgeBaseDetail() {
   const { t } = useTranslation(['kb', 'common'])
@@ -99,7 +102,7 @@ export default function KnowledgeBaseDetail() {
       (d) => d.status === 'pending' || d.status === 'parsing' || d.status === 'embedding',
     )
     if (!pending) return
-    const handle = setInterval(() => void load(true), 2200)
+    const handle = setInterval(() => void load(true), kbDocStatusPollInterval)
     return () => clearInterval(handle)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docs, id])

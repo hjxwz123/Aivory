@@ -49,6 +49,7 @@ import { toast } from '@/hooks/use-toast'
 import { cn, uid, modKey } from '@/lib/utils'
 import { fileIconFor } from '@/lib/file-icon'
 import { ProgressRing } from '@/components/ui/progress-ring'
+import { envNum } from '@/lib/env-config'
 
 interface ComposerProps {
   modelId: string
@@ -95,7 +96,7 @@ interface ComposerProps {
   modelPickerInHeader?: boolean
 }
 
-const MAX_LEN = 12_000
+const MAX_LEN = envNum('VITE_AURELIA_MAX_LEN', 12_000)
 const EMPTY_PARAM_VALUES: Record<string, unknown> = {}
 
 // §4.6-A upload size caps. The /api/files handler is authoritative; we read the
@@ -105,6 +106,11 @@ const EMPTY_PARAM_VALUES: Record<string, unknown> = {}
 // defaults if the fetch fails, so a transient error never blocks attaching.
 const DEFAULT_UPLOAD_LIMITS = { max_image_bytes: 5 * 1024 * 1024, max_file_bytes: 50 * 1024 * 1024 }
 let uploadLimitsCache: Promise<{ max_image_bytes: number; max_file_bytes: number }> | null = null
+
+// INGEST_POLL_MS: status poll cadence. Do not fake-ready after a timer: the
+// send button must stay blocked until parsing, embedding and vector upsert
+// really finished, otherwise the model falls back to tool-side PDF parsing.
+const INGEST_POLL_MS = envNum('VITE_AURELIA_INGEST_POLL_MS', 1200)
 function getUploadLimits() {
   if (!uploadLimitsCache) {
     uploadLimitsCache = api<{ max_image_bytes?: number; max_file_bytes?: number }>('/me/upload-policy')
@@ -496,11 +502,6 @@ export function Composer({
       return null
     }
   }
-
-  // INGEST_POLL_MS: status poll cadence. Do not fake-ready after a timer: the
-  // send button must stay blocked until parsing, embedding and vector upsert
-  // really finished, otherwise the model falls back to tool-side PDF parsing.
-  const INGEST_POLL_MS = 1200
 
   const startIngestPoll = useCallback((scopeId: string, docId: string, attId: string) => {
     const previous = pollTimers.current.get(attId)

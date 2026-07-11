@@ -6,6 +6,7 @@ import (
 	"strings"
 	"unicode"
 
+	"aurelia/server/internal/envcfg"
 	"aurelia/server/internal/store"
 )
 
@@ -18,6 +19,10 @@ const moderationModelSystemPrompt = "You are a strict content-safety classifier 
 	"Reply with EXACTLY one word: ALLOW or BLOCK. Output nothing else."
 
 const defaultModerationMessage = "Your message was blocked by content moderation. Please rephrase and try again."
+
+// moderationVerdictMaxOutputTokens caps the one-word ALLOW/BLOCK verdict output.
+// Default preserves prior hardcoded behaviour; read once at process start.
+var moderationVerdictMaxOutputTokens = envcfg.Int("AURELIA_LLM_MAX_OUTPUT_TOKENS_6", 8)
 
 // moderatePrompt screens a single user prompt (no history) before generation.
 // Returns (blocked, message). It honours the model's per-model toggle + mode:
@@ -80,7 +85,7 @@ func (o *Orchestrator) moderateByModel(ctx context.Context, userText, userID, co
 		UserID:          userID,
 		ConversationID:  convID,
 		MessageID:       msgID,
-		MaxOutputTokens: 8,
+		MaxOutputTokens: moderationVerdictMaxOutputTokens,
 	})
 	if err != nil {
 		if o.logger != nil {

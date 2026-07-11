@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"aurelia/server/internal/config"
+	"aurelia/server/internal/envcfg"
 	"aurelia/server/internal/store/pgcompat"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -27,6 +28,15 @@ var schemaPGSQL string
 // usePostgres records which dialect Open selected, so Migrate applies the
 // matching schema. Set once at startup; the server opens a single database.
 var usePostgres bool
+
+// Postgres connection-pool tunables (env-overridable; defaults preserve prior
+// hardcoded behavior).
+var (
+	setMaxOpenConns    = envcfg.Int("AURELIA_STORE_SET_MAX_OPEN_CONNS", 20)
+	setMaxIdleConns    = envcfg.Int("AURELIA_STORE_SET_MAX_IDLE_CONNS", 10)
+	setConnMaxIdleTime = envcfg.Dur("AURELIA_STORE_SET_CONN_MAX_IDLE_TIME", 5*time.Minute)
+	setConnMaxLifetime = envcfg.Dur("AURELIA_STORE_SET_CONN_MAX_LIFETIME", time.Hour)
+)
 
 // isPostgresDSN reports whether the data source addresses PostgreSQL. Accepts
 // the libpq URL forms plus bare key=value strings.
@@ -49,10 +59,10 @@ func Open(dataSource string) (*sql.DB, error) {
 		}
 		// A real connection pool — Postgres handles concurrency, unlike the
 		// single-writer SQLite file.
-		db.SetMaxOpenConns(20)
-		db.SetMaxIdleConns(10)
-		db.SetConnMaxIdleTime(5 * time.Minute)
-		db.SetConnMaxLifetime(time.Hour)
+		db.SetMaxOpenConns(setMaxOpenConns)
+		db.SetMaxIdleConns(setMaxIdleConns)
+		db.SetConnMaxIdleTime(setConnMaxIdleTime)
+		db.SetConnMaxLifetime(setConnMaxLifetime)
 		if err := db.Ping(); err != nil {
 			_ = db.Close()
 			return nil, fmt.Errorf("db.Ping: %w", err)
@@ -713,9 +723,9 @@ func Seed(db *sql.DB, cfg config.Config) error {
 		// /admin/documents; the env ceiling remains the absolute maximum.
 		"max_image_upload_mb":   `5`,
 		"moderation_keywords":   `[]`,
-		"moderation_model_id":      `""`,
-		"moderation_categories":    `["politics","pornography","violence or gore","terrorism","illegal activity","hate speech","self-harm"]`,
-		"moderation_message":       `"Your message was blocked by content moderation. Please rephrase and try again."`,
+		"moderation_model_id":   `""`,
+		"moderation_categories": `["politics","pornography","violence or gore","terrorism","illegal activity","hate speech","self-harm"]`,
+		"moderation_message":    `"Your message was blocked by content moderation. Please rephrase and try again."`,
 		// § announcement: a single global notice shown to users on load. image_url
 		// non-empty → image announcement (image left, text right). remember_dismiss
 		// false → re-show every visit; updated_at doubles as the dismiss version.

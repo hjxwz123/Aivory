@@ -27,7 +27,21 @@ import (
 	"strings"
 	"time"
 
+	"aurelia/server/internal/envcfg"
 	"aurelia/server/internal/store"
+)
+
+// Tunable knobs — envcfg overrides; defaults preserve original behaviour.
+var (
+	memoryWorkerRecentMessageFetchLimit = envcfg.Int("AURELIA_LLM_MEMORY_WORKER_RECENT_MESSAGE_FETCH_LIMIT", 30)
+	memoryCandidatesExtractionCap       = envcfg.Int("AURELIA_LLM_MEMORY_CANDIDATES_EXTRACTION_CAP", 5)
+	memoryExtractorUserTurnCap          = envcfg.Int("AURELIA_LLM_MEMORY_EXTRACTOR_USER_TURN_CAP", 20)
+	maxOutputTokens                     = envcfg.Int("AURELIA_LLM_MAX_OUTPUT_TOKENS", 1024)
+	defaultMemoryConfidence             = envcfg.F64("AURELIA_LLM_CONF", 0.7)
+	existingSameSlotMemoriesFetchLimit  = envcfg.Int("AURELIA_LLM_EXISTING_SAME_SLOT_MEMORIES_FETCH_LIMIT", 10)
+	maxOutputTokens2                    = envcfg.Int("AURELIA_LLM_MAX_OUTPUT_TOKENS_2", 256)
+	semanticDedupCandidateMemoriesLimit = envcfg.Int("AURELIA_LLM_SEMANTIC_DEDUP_CANDIDATE_MEMORIES_LIMIT", 40)
+	maxOutputTokens3                    = envcfg.Int("AURELIA_LLM_MAX_OUTPUT_TOKENS_3", 64)
 )
 
 // MemoryWorker runs the §4.16 capture pipeline asynchronously.
@@ -44,11 +58,11 @@ func NewMemoryWorker(db *sql.DB, task *TaskLLM, logger *log.Logger) *MemoryWorke
 
 // candidate is the shape we ask the task model to produce.
 type memoryCandidate struct {
-	MemoryText string   `json:"memory_text"`
-	Slot       string   `json:"slot"`
-	Value      string   `json:"value"`
-	Type       string   `json:"memory_type"`
-	Confidence float64  `json:"confidence"`
+	MemoryText string  `json:"memory_text"`
+	Slot       string  `json:"slot"`
+	Value      string  `json:"value"`
+	Type       string  `json:"memory_type"`
+	Confidence float64 `json:"confidence"`
 	// Status hint from the extractor: ACTIVE (a stable current fact) or
 	// QUERY_DEPENDENT (currency depends on the question) per the STALE model.
 	Status string `json:"status"`
@@ -89,7 +103,7 @@ func (w *MemoryWorker) Process(ctx context.Context, convID string) error {
 		return nil
 	}
 
-	rows, err := w.db.QueryContext(ctx, `SELECT id, role, blocks FROM messages WHERE conversation_id=? ORDER BY created_at DESC LIMIT 30`, convID)
+	rows, err := w.db.QueryContext(ctx, `SELECT id, role, blocks FROM messages WHERE conversation_id=? ORDER BY created_at DESC LIMIT ?`, convID, memoryWorkerRecentMessageFetchLimit)
 	if err != nil {
 		return err
 	}
@@ -97,7 +111,7 @@ func (w *MemoryWorker) Process(ctx context.Context, convID string) error {
 	var prompt strings.Builder
 	prompt.WriteString("Extract durable facts about the user from this conversation. " +
 		"Skip transient/contextual info (current task, opinions about content, etc). " +
-		"Return JSON array (max 5 items) of:\n" +
+		fmt.Sprintf("Return JSON array (max %d items) of:\n", memoryCandidatesExtractionCap) +
 		`{"memory_text":"<short sentence>","slot":"<noun key>","value":"<concrete value>","memory_type":"location|preference|identity|schedule|habit|goal|constraint","confidence":0..1,"status":"ACTIVE|QUERY_DEPENDENT","affected_domains":["<slot>"]}` + "\n" +
 		"Use a STABLE, canonical slot key per KIND of fact (e.g. always \"language\" for a language preference) — never invent synonymous keys, and never emit two items that mean the same thing.\n" +
 		"Use status=QUERY_DEPENDENT when the fact's currency depends on context (plans, temporary states); otherwise ACTIVE.\n\n")
@@ -126,7 +140,7 @@ func (w *MemoryWorker) Process(ctx context.Context, convID string) error {
 			fmt.Fprintf(&prompt, "[%s] %s\n", role, strings.TrimSpace(b.Text))
 		}
 		turns++
-		if turns >= 20 {
+		if turns >= memoryExtractorUserTurnCap {
 			break
 		}
 	}
@@ -138,7 +152,7 @@ func (w *MemoryWorker) Process(ctx context.Context, convID string) error {
 	if err := w.task.RunJSON(ctx, TaskMemoryExtract, prompt.String(), &candidates, RunOpts{
 		UserID:          userID,
 		ConversationID:  convID,
-		MaxOutputTokens: 1024,
+		MaxOutputTokens: maxOutputTokens,
 	}); err != nil {
 		// Fall back to nothing — memory is opportunistic.
 		return nil
@@ -164,7 +178,7 @@ func (w *MemoryWorker) adjudicateAndWrite(ctx context.Context, userID, convID st
 	}
 	conf := c.Confidence
 	if conf <= 0 || conf > 1 {
-		conf = 0.7
+		conf = defaultMemoryConfidence
 	}
 	newStatus := strings.ToUpper(strings.TrimSpace(c.Status))
 	if newStatus != "QUERY_DEPENDENT" {
@@ -253,8 +267,8 @@ func (w *MemoryWorker) adjudicateAndWrite(ctx context.Context, userID, convID st
 
 func (w *MemoryWorker) existingForSlot(ctx context.Context, userID, slot string) []existingMem {
 	rows, err := w.db.QueryContext(ctx,
-		`SELECT id, value, status FROM memories WHERE user_id=? AND slot=? AND status IN ('ACTIVE','UNKNOWN_CURRENT','QUERY_DEPENDENT') ORDER BY updated_at DESC LIMIT 10`,
-		userID, slot)
+		`SELECT id, value, status FROM memories WHERE user_id=? AND slot=? AND status IN ('ACTIVE','UNKNOWN_CURRENT','QUERY_DEPENDENT') ORDER BY updated_at DESC LIMIT ?`,
+		userID, slot, existingSameSlotMemoriesFetchLimit)
 	if err != nil {
 		return nil
 	}
@@ -289,7 +303,7 @@ func (w *MemoryWorker) adjudicate(ctx context.Context, userID, convID string, c 
 		"Be conservative: when in doubt, use unknown_current — never `stale`.")
 	var verdicts map[string]string
 	if err := w.task.RunJSON(ctx, TaskMemoryAdjudicate, p.String(), &verdicts, RunOpts{
-		UserID: userID, ConversationID: convID, MaxOutputTokens: 256,
+		UserID: userID, ConversationID: convID, MaxOutputTokens: maxOutputTokens2,
 	}); err != nil {
 		return nil
 	}
@@ -308,8 +322,8 @@ func (w *MemoryWorker) findSemanticDuplicate(ctx context.Context, userID, convID
 		return ""
 	}
 	rows, err := w.db.QueryContext(ctx,
-		`SELECT id, memory_text FROM memories WHERE user_id=? AND status IN ('ACTIVE','QUERY_DEPENDENT') ORDER BY updated_at DESC LIMIT 40`,
-		userID)
+		`SELECT id, memory_text FROM memories WHERE user_id=? AND status IN ('ACTIVE','QUERY_DEPENDENT') ORDER BY updated_at DESC LIMIT ?`,
+		userID, semanticDedupCandidateMemoriesLimit)
 	if err != nil {
 		return ""
 	}
@@ -349,7 +363,7 @@ func (w *MemoryWorker) findSemanticDuplicate(ctx context.Context, userID, convID
 	if err := w.task.RunJSON(ctx, TaskMemoryAdjudicate, p.String(), &out, RunOpts{
 		UserID:          userID,
 		ConversationID:  convID,
-		MaxOutputTokens: 64,
+		MaxOutputTokens: maxOutputTokens3,
 		SystemPrompt:    "You are a deduplication checker for a user-memory store. Decide whether a new fact already exists in the saved set. Reply with strict JSON only — no prose.",
 	}); err != nil {
 		return ""

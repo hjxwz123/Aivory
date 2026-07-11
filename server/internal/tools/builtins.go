@@ -24,10 +24,30 @@ import (
 	"unicode"
 
 	"aurelia/server/internal/config"
+	"aurelia/server/internal/envcfg"
 	"aurelia/server/internal/llm"
 	"aurelia/server/internal/rag"
 	"aurelia/server/internal/sandbox"
 	"aurelia/server/internal/store"
+)
+
+// Env-overridable defaults (see docs/config-reference.md). Each falls back to
+// the original hardcoded value when its AURELIA_* variable is unset.
+var (
+	inTopK                                 = envcfg.Int("AURELIA_TOOLS_IN_TOP_K", 5)
+	webFetchResponseBodyReadCap            = envcfg.Int64("AURELIA_TOOLS_WEB_FETCH_RESPONSE_BODY_READ_CAP", 256*1024)
+	webFetchExtractedTextCharCap           = envcfg.Int("AURELIA_TOOLS_WEB_FETCH_EXTRACTED_TEXT_CHAR_CAP", 32000)
+	pythonExecuteUploadStagingFileSize     = envcfg.Int64("AURELIA_TOOLS_PYTHON_EXECUTE_UPLOAD_STAGING_FILE_SIZE", 20*1024*1024)
+	pythonExecuteImageArtifactStagingSize  = envcfg.Int64("AURELIA_TOOLS_PYTHON_EXECUTE_IMAGE_ARTIFACT_STAGING_SIZE", 20*1024*1024)
+	pythonExecuteStdoutStderrTruncationCap = envcfg.Int("AURELIA_TOOLS_PYTHON_EXECUTE_STDOUT_STDERR_TRUNCATION_CAP", 32*1024)
+	inN                                    = envcfg.Int("AURELIA_TOOLS_IN_N", 4)
+	inSize                                 = envcfg.Str("AURELIA_TOOLS_IN_SIZE", "1024x1024")
+	dailyImageLimitResetWindow             = envcfg.Dur("AURELIA_TOOLS_DAILY_IMAGE_LIMIT_RESET_WINDOW", 24*time.Hour)
+	imageQuotaDefaultPeriod                = envcfg.Int64("AURELIA_TOOLS_P", 604800)
+	imageImageInputImageCap                = envcfg.Int("AURELIA_TOOLS_IMAGE_IMAGE_INPUT_IMAGE_CAP", 3)
+	fetchRemoteImageDownloadCap            = envcfg.Int64("AURELIA_TOOLS_FETCHREMOTEIMAGE_DOWNLOAD_CAP", 32<<20)
+	inTopK2                                = envcfg.Int("AURELIA_TOOLS_IN_TOP_K_2", 5)
+	saveMemoryConfidence                   = envcfg.F64("AURELIA_TOOLS_CONFIDENCE", 0.95)
 )
 
 // webSearchTool implements §4.4 via a pluggable Searcher. When no backend is
@@ -57,7 +77,7 @@ func (t *webSearchTool) Execute(ctx context.Context, input []byte, _ *llm.ToolCo
 		return "", nil, errors.New("query required")
 	}
 	if in.TopK <= 0 {
-		in.TopK = 5
+		in.TopK = inTopK
 	}
 	if t.searcher == nil {
 		// Fallback "result" so the model can still respond gracefully.
@@ -104,12 +124,12 @@ func (t *webFetchTool) Execute(ctx context.Context, input []byte, _ *llm.ToolCon
 	}
 	defer resp.Body.Close()
 	// Truncate after 256 KB — keeps tokens bounded.
-	limited := io.LimitReader(resp.Body, 256*1024)
+	limited := io.LimitReader(resp.Body, webFetchResponseBodyReadCap)
 	body, _ := io.ReadAll(limited)
 	text := stripHTML(string(body))
 	// Roughly cap at ~8K tokens (≈32K chars) per §4.4.
-	if len(text) > 32000 {
-		text = text[:32000] + "\n…[truncated]"
+	if len(text) > webFetchExtractedTextCharCap {
+		text = text[:webFetchExtractedTextCharCap] + "\n…[truncated]"
 	}
 	return text, nil, nil
 }
@@ -217,12 +237,12 @@ func (t *fetchImageTool) Execute(ctx context.Context, input []byte, tc *llm.Tool
 	if resp.StatusCode != 200 {
 		return "", nil, fmt.Errorf("image fetch failed: HTTP %d", resp.StatusCode)
 	}
-	const maxImg = 15 * 1024 * 1024
+	maxImg := envcfg.Int64("AURELIA_TOOLS_MAX_IMG", 15*1024*1024)
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, maxImg+1))
 	if len(data) == 0 {
 		return "", nil, errors.New("empty image response")
 	}
-	if len(data) > maxImg {
+	if int64(len(data)) > maxImg {
 		return "", nil, errors.New("image too large (>15MB)")
 	}
 	ct := resp.Header.Get("content-type")
@@ -460,7 +480,7 @@ func (t *pythonExecuteTool) Execute(ctx context.Context, input []byte, tc *llm.T
 				if f.Kind != "sheet" && f.Kind != "text" && f.Kind != "code" && f.Kind != "image" {
 					continue
 				}
-				if f.SizeBytes > 20*1024*1024 {
+				if f.SizeBytes > pythonExecuteUploadStagingFileSize {
 					continue
 				}
 				data, err := os.ReadFile(f.StoragePath)
@@ -474,7 +494,7 @@ func (t *pythonExecuteTool) Execute(ctx context.Context, input []byte, tc *llm.T
 		// can build a deck/doc with them — they live as artifacts, not uploads.
 		if arts, err := store.ListImageArtifactsByConversation(ctx, tc.DB, tc.ConvID, tc.UserID); err == nil {
 			for _, a := range arts {
-				if a.SizeBytes > 20*1024*1024 {
+				if a.SizeBytes > pythonExecuteImageArtifactStagingSize {
 					continue
 				}
 				data, err := os.ReadFile(a.StoragePath)
@@ -582,10 +602,10 @@ func (t *pythonExecuteTool) Execute(ctx context.Context, input []byte, tc *llm.T
 	// the model context and blow up single-turn cost (§4.5).
 	out := strings.Builder{}
 	if res.Stdout != "" {
-		out.WriteString("stdout:\n" + truncateOutput(res.Stdout, 32*1024) + "\n")
+		out.WriteString("stdout:\n" + truncateOutput(res.Stdout, pythonExecuteStdoutStderrTruncationCap) + "\n")
 	}
 	if res.Stderr != "" {
-		out.WriteString("stderr:\n" + truncateOutput(res.Stderr, 32*1024) + "\n")
+		out.WriteString("stderr:\n" + truncateOutput(res.Stderr, pythonExecuteStdoutStderrTruncationCap) + "\n")
 	}
 	if len(res.Files) > 0 {
 		out.WriteString("\nProduced files:\n")
@@ -796,11 +816,11 @@ func (t *imageGenerateTool) Execute(ctx context.Context, input []byte, tc *llm.T
 	if in.N <= 0 {
 		in.N = 1
 	}
-	if in.N > 4 {
-		in.N = 4
+	if in.N > inN {
+		in.N = inN
 	}
 	if in.Size == "" {
-		in.Size = "1024x1024"
+		in.Size = inSize
 	}
 
 	// §4.12-E 内容安全: 生成前 prompt 过审（关键词来自管理员配置，非硬编码）。
@@ -1017,7 +1037,7 @@ func (t *imageGenerateTool) checkDailyImageLimit(ctx context.Context, userID str
 	if limit <= 0 {
 		return nil
 	}
-	dayStart := time.Now().Truncate(24 * time.Hour).Unix()
+	dayStart := time.Now().Truncate(dailyImageLimitResetWindow).Unix()
 	var used int
 	_ = t.db.QueryRowContext(ctx,
 		`SELECT COALESCE(SUM(images_count),0) FROM usage_logs WHERE user_id=? AND purpose='image' AND created_at>=?`,
@@ -1033,7 +1053,7 @@ func (t *imageGenerateTool) checkDailyImageLimit(ctx context.Context, userID str
 func imageQuotaWindow(periodSeconds int) int64 {
 	p := int64(periodSeconds)
 	if p <= 0 {
-		p = 604800
+		p = imageQuotaDefaultPeriod
 	}
 	now := time.Now().Unix()
 	return (now / p) * p
@@ -1131,7 +1151,7 @@ func (t *imageGenerateTool) loadInputImages(ctx context.Context, tc *llm.ToolCon
 			continue
 		}
 		out = append(out, imageBytes{data: data, mime: mime})
-		if len(out) >= 3 {
+		if len(out) >= imageImageInputImageCap {
 			break
 		}
 	}
@@ -1323,7 +1343,7 @@ func fetchRemoteImage(ctx context.Context, rawURL string) ([]byte, string) {
 	if resp.StatusCode >= 400 {
 		return nil, ""
 	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20)) // 32MB cap
+	data, err := io.ReadAll(io.LimitReader(resp.Body, fetchRemoteImageDownloadCap)) // 32MB cap
 	if err != nil || len(data) == 0 {
 		return nil, ""
 	}
@@ -1403,7 +1423,7 @@ func (t *searchKnowledgeBaseTool) Execute(ctx context.Context, input []byte, tc 
 	var in kbInput
 	_ = json.Unmarshal(input, &in)
 	if in.TopK <= 0 {
-		in.TopK = 5
+		in.TopK = inTopK2
 	}
 	snippets, err := tc.RAG.Retrieve(ctx, tc.UserID, tc.ConvID, tc.KBIDs, in.Query, in.TopK)
 	if err != nil {
@@ -1511,7 +1531,7 @@ func (t *saveMemoryTool) Execute(ctx context.Context, input []byte, tc *llm.Tool
 		Slot:       in.Slot,
 		Value:      in.Value,
 		Status:     "ACTIVE",
-		Confidence: 0.95,
+		Confidence: saveMemoryConfidence,
 	})
 	if err != nil {
 		return "", nil, err
