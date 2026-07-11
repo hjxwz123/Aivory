@@ -72,6 +72,8 @@
   "actions": {
     "copy": "複製",
     "copied": "已複製",
+    "exportDocx": "匯出為 Word",
+    "exportDocxFailed": "匯出失敗",
     "creditsUsed": "消耗 {{credits}} 點數",
     "regenerate": "重新生成",
     "helpful": "有幫助",

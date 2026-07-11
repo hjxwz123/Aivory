@@ -72,6 +72,8 @@
   "actions": {
     "copy": "Copy",
     "copied": "Copied",
+    "exportDocx": "Export as Word",
+    "exportDocxFailed": "Export failed",
     "creditsUsed": "{{credits}} credits used",
     "regenerate": "Regenerate",
     "helpful": "Helpful",
