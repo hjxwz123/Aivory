@@ -1,0 +1,40 @@
+{
+  "title": "Files",
+  "searchPlaceholder": "Search filenames",
+  "total": "{{count}} file(s)",
+  "view": "View",
+  "deleted": "File deleted",
+  "previewFailed": "Preview failed",
+  "noInlinePreview": "No inline preview for this file type.",
+  "confirmTitle": "Delete this file?",
+  "confirmBody": "\"{{name}}\" will be removed everywhere — the file itself, its database records, and its search index. This cannot be undone.",
+  "origin": {
+    "all": "All sources",
+    "conversation": "Conversation",
+    "kb": "Knowledge base"
+  },
+  "sort": {
+    "newest": "Newest first",
+    "oldest": "Oldest first",
+    "largest": "Largest first",
+    "smallest": "Smallest first"
+  },
+  "table": {
+    "filename": "Filename",
+    "type": "Type",
+    "origin": "Source",
+    "size": "Size",
+    "uploaded": "Uploaded",
+    "actions": "Actions"
+  },
+  "storage": {
+    "title": "Storage",
+    "usedOf": "{{used}} of {{quota}} used",
+    "usedUnlimited": "{{used}} used · no limit",
+    "note": "Documents and other files count toward your storage; images don't."
+  },
+  "empty": {
+    "title": "No files yet",
+    "body": "Files you upload in conversations or knowledge bases will appear here."
+  }
+}

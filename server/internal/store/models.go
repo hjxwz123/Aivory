@@ -78,6 +78,9 @@ type UserGroup struct {
 	// IsPublic controls whether the tier is listed on the public subscription
 	// page (admins always see every group). Default true.
 	IsPublic bool `json:"is_public"`
+	// MaxStorageMB caps the total size of a member's non-image uploads
+	// (files + KB documents), in MB. 0 = unlimited (§ user files page).
+	MaxStorageMB int `json:"max_storage_mb"`
 	// MaxWorkspaces caps how many workspaces a member may OWN (§workspaces).
 	// 0 = unlimited; whether the group may create workspaces AT ALL is the
 	// 'workspaces' feature flag inside Features (mirrors the research flag).

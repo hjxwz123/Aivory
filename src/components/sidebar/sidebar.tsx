@@ -22,6 +22,7 @@ import {
   X,
   ArrowLeftRight,
   Briefcase,
+  FolderOpen,
 } from 'lucide-react'
 import { Logo, LogoMark } from '@/components/brand/logo'
 import { useWorkspaces } from '@/store/workspaces'
@@ -369,6 +370,23 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
             </Link>
           </Tooltip>
         )}
+
+        {/* § user files page — every upload (chat + KB) with the storage meter. */}
+        <Tooltip content={collapsed ? tNav('files', { defaultValue: 'Files' }) : ''} side="right">
+          <Link
+            to="/files"
+            onClick={onClose}
+            className={cn(
+              'inline-flex items-center gap-2 h-9 max-lg:h-[var(--tap-min)] rounded-[10px] text-sm',
+              'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+              collapsed ? 'w-9 justify-center px-0' : 'w-full justify-start px-3',
+            )}
+          >
+            <FolderOpen size={15} aria-hidden />
+            {!collapsed && <span>{tNav('files', { defaultValue: 'Files' })}</span>}
+          </Link>
+        </Tooltip>
       </div>
 
       {/* Projects (expanded only) */}

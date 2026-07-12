@@ -87,6 +87,7 @@ const SECTIONS: AdminSection[] = [
     tabs: [
       { to: '/admin/usage', labelKey: 'admin:usage.title' },
       { to: '/admin/analytics', labelKey: 'admin:analytics.title' },
+      { to: '/admin/files', labelKey: 'admin:files.title' },
     ],
   },
 ]

@@ -60,7 +60,8 @@
     "style": "Style",
     "styleHeading": "Image style",
     "styleNone": "None",
-    "noStyles": "No styles configured."
+    "noStyles": "No styles configured.",
+    "storageQuotaFull": "Storage is full — free up space in Files and try again."
   },
   "assistant": "Aivory",
   "thinking": "Thinking",
@@ -435,5 +436,6 @@
     "roleOwner": "Owner",
     "roleMember": "Member",
     "switchSpace": "Switch space"
-  }
+  },
+  "attachmentDeleted": "File deleted"
 }

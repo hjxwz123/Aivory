@@ -1,0 +1,40 @@
+{
+  "title": "文件",
+  "searchPlaceholder": "搜索文件名",
+  "total": "共 {{count}} 个文件",
+  "view": "查看",
+  "deleted": "文件已删除",
+  "previewFailed": "预览失败",
+  "noInlinePreview": "该文件类型不支持在线预览。",
+  "confirmTitle": "删除该文件?",
+  "confirmBody": "「{{name}}」将被彻底删除——文件本体、数据库记录与检索索引都会移除,不可恢复。",
+  "origin": {
+    "all": "全部来源",
+    "conversation": "对话",
+    "kb": "知识库"
+  },
+  "sort": {
+    "newest": "最新在前",
+    "oldest": "最早在前",
+    "largest": "最大在前",
+    "smallest": "最小在前"
+  },
+  "table": {
+    "filename": "文件名",
+    "type": "类型",
+    "origin": "来源",
+    "size": "大小",
+    "uploaded": "上传时间",
+    "actions": "操作"
+  },
+  "storage": {
+    "title": "存储空间",
+    "usedOf": "已用 {{used}} / 共 {{quota}}",
+    "usedUnlimited": "已用 {{used}} · 无限制",
+    "note": "文档等文件计入存储空间;图片不计入。"
+  },
+  "empty": {
+    "title": "还没有文件",
+    "body": "你在对话或知识库中上传的文件会显示在这里。"
+  }
+}

@@ -330,7 +330,13 @@
     "noDocuments": "ドキュメントなし。",
     "imagesHeading": "画像ギャラリー",
     "noImages": "生成された画像はありません。",
-    "loadMore": "もっと読み込む"
+    "loadMore": "もっと読み込む",
+    "deleteStarted": "削除を開始しました — バックグラウンドでクリーンアップ中",
+    "status": {
+      "banned": "凍結済み",
+      "disabled": "無効",
+      "deleting": "削除中…"
+    }
   },
   "usage": {
     "title": "使用状況",
@@ -401,7 +407,11 @@
     },
     "fallbackTag": "フォールバック",
     "fallbackTitle": "モデルのフォールバックチャネルで応答",
-    "errorDetail": { "title": "アップストリームエラー", "view": "エラー詳細を表示", "none": "このリクエストにはエラー詳細が記録されていません。" },
+    "errorDetail": {
+      "title": "アップストリームエラー",
+      "view": "エラー詳細を表示",
+      "none": "このリクエストにはエラー詳細が記録されていません。"
+    },
     "statusError": "エラー"
   },
   "documents": {
@@ -608,7 +618,9 @@
     },
     "errors": {
       "nameRequired": "名前は必須です"
-    }
+    },
+    "maxStorage": "ストレージ(MB)",
+    "maxStorageHint": "0 = 無制限。画像以外のファイルのみ計上。"
   },
   "quota": {
     "saved": "権限を保存しました",
@@ -926,5 +938,50 @@
     "deleteBody": "内部のすべての会話・プロジェクト・ナレッジベースが削除され、全メンバーがアクセスを失います。元に戻せません。",
     "roleOwner": "オーナー",
     "roleMember": "メンバー"
+  },
+  "files": {
+    "title": "ファイル",
+    "lead": "会話とナレッジベースにアップロードされた全ファイル。削除するとデータベース記録・ベクトル・ディスク上のファイルがすべて除去されます。",
+    "deleteSelected": "選択を削除({{count}})",
+    "total": "{{count}} 件のファイル",
+    "empty": "条件に一致するファイルはありません。",
+    "view": "表示",
+    "download": "ダウンロード",
+    "deleted": "{{count}} 件のファイルを削除しました",
+    "previewFailed": "プレビューに失敗しました",
+    "noInlinePreview": "このファイル形式はインラインプレビューに対応していません。",
+    "unknownType": "不明な形式",
+    "selectAll": "このページを全選択",
+    "selectOne": "{{name}} を選択",
+    "confirmTitle": "{{count}} 件のファイルを削除しますか?",
+    "confirmBody": "ディスク上のファイル、データベース記録、検索ベクトルが完全に削除されます。元に戻せません。",
+    "confirmMore": "…ほか {{count}} 件",
+    "filters": {
+      "search": "ファイル名",
+      "searchPlaceholder": "ファイル名を検索",
+      "user": "ユーザー",
+      "allUsers": "すべてのユーザー",
+      "origin": "ソース",
+      "sort": "並び替え"
+    },
+    "origin": {
+      "all": "すべてのソース",
+      "conversation": "会話",
+      "kb": "ナレッジベース"
+    },
+    "sort": {
+      "newest": "新しい順",
+      "oldest": "古い順",
+      "largest": "大きい順",
+      "smallest": "小さい順"
+    },
+    "table": {
+      "filename": "ファイル名",
+      "user": "ユーザー",
+      "origin": "ソース",
+      "size": "サイズ",
+      "uploaded": "アップロード日時",
+      "actions": "操作"
+    }
   }
 }

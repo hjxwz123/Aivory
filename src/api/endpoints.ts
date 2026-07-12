@@ -5,6 +5,7 @@
  */
 import { api, apiUrl, getAccessToken, ApiError, apiUpload, type UploadProgress } from './client'
 import type {
+  ApiAdminFile,
   ApiWorkspace,
   ApiWorkspaceMember,
   ApiAnalytics,
@@ -61,6 +62,31 @@ export const authApi = {
   setup: (name: string, email: string, password: string) =>
     api<ApiAuthResponse>('/setup', { method: 'POST', body: { name, email, password } }),
   me: () => api<ApiUser>('/me'),
+  /** § user files page: storage meter + unified upload inventory. */
+  myStorage: () => api<{ used_bytes: number; quota_bytes: number }>('/me/storage'),
+  myFiles: (params: { search?: string; origin?: string; sort?: string; order?: string; limit?: number; offset?: number } = {}) => {
+    const qs = new URLSearchParams()
+    if (params.search) qs.set('search', params.search)
+    if (params.origin && params.origin !== 'all') qs.set('origin', params.origin)
+    if (params.sort) qs.set('sort', params.sort)
+    if (params.order) qs.set('order', params.order)
+    if (params.limit) qs.set('limit', String(params.limit))
+    if (params.offset) qs.set('offset', String(params.offset))
+    return api<{ files: ApiAdminFile[]; total: number; limit: number; offset: number }>(
+      `/me/files${qs.toString() ? `?${qs}` : ''}`,
+    )
+  },
+  deleteMyFiles: (items: Array<{ source: 'file' | 'document'; id: string }>) =>
+    api<{ deleted: number }>('/me/files/delete', { method: 'POST', body: { items } }),
+  myFileContentBlob: async (source: 'file' | 'document', id: string): Promise<Blob> => {
+    const token = getAccessToken()
+    const res = await fetch(apiUrl(`/me/files/content?source=${source}&id=${encodeURIComponent(id)}`), {
+      credentials: 'include',
+      headers: token ? { authorization: `Bearer ${token}` } : {},
+    })
+    if (!res.ok) throw new ApiError(res.status, `preview failed (${res.status})`, null)
+    return res.blob()
+  },
   /** Credit balance (timed pool + permanent pool) for the subscription page. */
   credits: () => api<ApiCredits>('/me/credits'),
   login: (email: string, password: string) =>
@@ -608,7 +634,13 @@ export const adminApi = {
   banUser: (id: string) => api<{ ok: true }>(`/admin/users/${encodeURIComponent(id)}/ban`, { method: 'POST' }),
   unbanUser: (id: string) => api<{ ok: true }>(`/admin/users/${encodeURIComponent(id)}/unban`, { method: 'POST' }),
   /** Permanently delete a user and all their data (§ admin → users). */
-  deleteUser: (id: string) => api<{ ok: true }>(`/admin/users/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  deleteUser: (id: string) =>
+    api<{ ok: true; status?: string }>(`/admin/users/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  /** Background deletion jobs (§async user delete) — poll while a purge runs. */
+  userDeletions: () =>
+    api<{ jobs: Array<{ user_id: string; email: string; status: string; progress: string; error?: string }> }>(
+      '/admin/users/deletions',
+    ),
   /** Reset (turn off) a user's 2FA — recovery for a lost authenticator (§ 2FA). */
   disableUser2fa: (id: string) =>
     api<{ ok: true }>(`/admin/users/${encodeURIComponent(id)}/2fa/disable`, { method: 'POST' }),
@@ -670,6 +702,32 @@ export const adminApi = {
     if (params.model) qs.set('model', params.model)
     if (params.status) qs.set('status', params.status)
     return api<{ deleted: number }>(`/admin/usage${qs.toString() ? `?${qs}` : ''}`, { method: 'DELETE' })
+  },
+  files: (params: { search?: string; userId?: string; origin?: string; sort?: string; order?: string; limit?: number; offset?: number } = {}) => {
+    const qs = new URLSearchParams()
+    if (params.search) qs.set('search', params.search)
+    if (params.userId) qs.set('user_id', params.userId)
+    if (params.origin && params.origin !== 'all') qs.set('origin', params.origin)
+    if (params.sort) qs.set('sort', params.sort)
+    if (params.order) qs.set('order', params.order)
+    if (params.limit) qs.set('limit', String(params.limit))
+    if (params.offset) qs.set('offset', String(params.offset))
+    return api<{ files: ApiAdminFile[]; total: number; limit: number; offset: number }>(
+      `/admin/files${qs.toString() ? `?${qs}` : ''}`,
+    )
+  },
+  deleteFiles: (items: Array<{ source: 'file' | 'document'; id: string }>) =>
+    api<{ deleted: number }>('/admin/files/delete', { method: 'POST', body: { items } }),
+  // Raw bytes for the preview dialog. Same bearer-fetch pattern as
+  // backupArchiveDownload: <img>/<iframe> tags can't carry the auth header.
+  fileContentBlob: async (source: 'file' | 'document', id: string): Promise<Blob> => {
+    const token = getAccessToken()
+    const res = await fetch(apiUrl(`/admin/files/content?source=${source}&id=${encodeURIComponent(id)}`), {
+      credentials: 'include',
+      headers: token ? { authorization: `Bearer ${token}` } : {},
+    })
+    if (!res.ok) throw new ApiError(res.status, `preview failed (${res.status})`, null)
+    return res.blob()
   },
   analytics: (days = envNum('VITE_AIVORY_ADMIN_API_ANALYTICS', 30)) =>
     api<ApiAnalytics>(`/admin/analytics?days=${days}`),

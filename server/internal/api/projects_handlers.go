@@ -246,7 +246,11 @@ func uploadProjectDocHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, d.Config.MaxUploadBytes+1<<20) // §C3
 	doc, err := receiveDocument(d, r, p.KBID, "")
 	if err != nil {
-		writeError(w, 400, err)
+		status := 400
+		if errors.Is(err, errStorageQuotaExceeded) {
+			status = http.StatusInsufficientStorage
+		}
+		writeError(w, status, err)
 		return
 	}
 	d.RAG.Ingest(doc.ID)

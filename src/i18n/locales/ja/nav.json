@@ -12,5 +12,6 @@
   "projects": "プロジェクト",
   "newProject": "新しいプロジェクト",
   "allProjects": "すべてのプロジェクト",
-  "draw": "画像生成"
+  "draw": "画像生成",
+  "files": "ファイル"
 }
