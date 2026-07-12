@@ -35,6 +35,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { ContentHeader } from '@/components/layout/content-header'
 import { toast } from '@/hooks/use-toast'
+import { toastStorageQuotaFull } from '@/lib/quota-toast'
 import { formatRelativeDate, cn } from '@/lib/utils'
 import { envNum } from '@/lib/env-config'
 
@@ -119,7 +120,11 @@ export default function KnowledgeBaseDetail() {
       setDraft({ filename: '', content: '' })
       await load()
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : t('kb:detail.uploadFailed'))
+      if (e instanceof ApiError && e.status === 507) {
+        toastStorageQuotaFull(navigate)
+      } else {
+        toast.error(e instanceof ApiError ? e.message : t('kb:detail.uploadFailed'))
+      }
     }
   }
 
@@ -145,7 +150,11 @@ export default function KnowledgeBaseDetail() {
       setOpen(false)
       await load()
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : t('kb:detail.uploadFailed'))
+      if (e instanceof ApiError && e.status === 507) {
+        toastStorageQuotaFull(navigate)
+      } else {
+        toast.error(e instanceof ApiError ? e.message : t('kb:detail.uploadFailed'))
+      }
     } finally {
       setUploading(false)
       setUploadJob(null)
