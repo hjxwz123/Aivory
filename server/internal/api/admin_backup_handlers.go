@@ -659,6 +659,16 @@ func restoreInto(ctx context.Context, ex store.RowExecer, zr *zip.Reader, man ba
 		return nil, err
 	}
 	counts := make(map[string]int64)
+	// messages.parent_id is a self-referencing FK. Old archives (and any
+	// same-second creation ties) don't guarantee parents sort before children,
+	// so on Postgres the constraint is detached for the load and re-attached
+	// after — all inside the restore transaction, so failure rolls back both
+	// the rows and the DDL. (SQLite runs the whole restore with FKs off.)
+	if store.IsPostgres() {
+		if _, err := ex.ExecContext(ctx, `ALTER TABLE messages DROP CONSTRAINT IF EXISTS messages_parent_id_fkey`); err != nil {
+			return nil, fmt.Errorf("detach messages parent fk: %w", err)
+		}
+	}
 	for _, t := range store.BackupTableOrder() {
 		entry := findZipFile(zr, "db/"+t+".jsonl")
 		if entry == nil {
@@ -674,6 +684,18 @@ func restoreInto(ctx context.Context, ex store.RowExecer, zr *zip.Reader, man ba
 			return nil, err
 		}
 		counts[t] = n
+	}
+	if store.IsPostgres() {
+		// Ancient data may carry genuinely dangling parent ids (pre-FK eras).
+		// Promote those replies to roots instead of failing the whole import.
+		if _, err := ex.ExecContext(ctx,
+			`UPDATE messages SET parent_id=NULL WHERE parent_id IS NOT NULL AND parent_id NOT IN (SELECT id FROM messages)`); err != nil {
+			return nil, fmt.Errorf("clear dangling message parents: %w", err)
+		}
+		if _, err := ex.ExecContext(ctx,
+			`ALTER TABLE messages ADD CONSTRAINT messages_parent_id_fkey FOREIGN KEY (parent_id) REFERENCES messages(id) ON DELETE CASCADE`); err != nil {
+			return nil, fmt.Errorf("re-attach messages parent fk: %w", err)
+		}
 	}
 	if err := rewriteStoragePaths(ctx, ex, man, d); err != nil {
 		return nil, err
