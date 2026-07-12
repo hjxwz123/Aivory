@@ -611,3 +611,25 @@ func multipartArchive(t *testing.T, archive []byte) (*bytes.Buffer, string) {
 	}
 	return &body, mw.FormDataContentType()
 }
+
+// The product was renamed Aurelia -> Auven -> Aivory; archives from those
+// builds must keep importing (§ backup compatibility).
+func TestAcceptedArchiveFormatLegacyAliases(t *testing.T) {
+	for _, tc := range []struct {
+		got, want string
+		ok        bool
+	}{
+		{"aivory-backup", "aivory-backup", true},
+		{"aurelia-backup", "aivory-backup", true},
+		{"auven-backup", "aivory-backup", true},
+		{"aurelia-config", "aivory-config", true},
+		{"auven-config", "aivory-config", true},
+		{"aurelia-config", "aivory-backup", false},
+		{"other-backup", "aivory-backup", false},
+		{"", "aivory-backup", false},
+	} {
+		if got := acceptedArchiveFormat(tc.got, tc.want); got != tc.ok {
+			t.Errorf("acceptedArchiveFormat(%q, %q) = %v, want %v", tc.got, tc.want, got, tc.ok)
+		}
+	}
+}

@@ -330,7 +330,13 @@
     "noDocuments": "Aucun document.",
     "imagesHeading": "Galerie d'images",
     "noImages": "Aucune image générée.",
-    "loadMore": "Charger plus"
+    "loadMore": "Charger plus",
+    "deleteStarted": "Suppression lancée — nettoyage en arrière-plan",
+    "status": {
+      "banned": "banni",
+      "disabled": "désactivé",
+      "deleting": "suppression…"
+    }
   },
   "usage": {
     "title": "Utilisation",
@@ -397,7 +403,11 @@
     "workspaceTag": "WS",
     "fallbackTag": "Secours",
     "fallbackTitle": "Servi par le canal de secours du modèle",
-    "errorDetail": { "title": "Erreur amont", "view": "Voir le détail de l'erreur", "none": "Aucun détail d'erreur n'a été enregistré pour cette requête." },
+    "errorDetail": {
+      "title": "Erreur amont",
+      "view": "Voir le détail de l'erreur",
+      "none": "Aucun détail d'erreur n'a été enregistré pour cette requête."
+    },
     "statusError": "Erreur",
     "status": {
       "all": "Tous",
@@ -608,7 +618,9 @@
     },
     "errors": {
       "nameRequired": "Le nom est requis"
-    }
+    },
+    "maxStorage": "Stockage (Mo)",
+    "maxStorageHint": "0 = illimité. Fichiers non-image uniquement."
   },
   "quota": {
     "saved": "Permissions enregistrées",
@@ -926,5 +938,50 @@
     "deleteBody": "Toutes les conversations, projets et bases de connaissances internes seront supprimés et tous les membres perdront l'accès. Irréversible.",
     "roleOwner": "Propriétaire",
     "roleMember": "Membre"
+  },
+  "files": {
+    "title": "Fichiers",
+    "lead": "Tous les fichiers téléversés dans les conversations et les bases de connaissances. La suppression retire les enregistrements, les vecteurs et le fichier sur disque.",
+    "deleteSelected": "Supprimer la sélection ({{count}})",
+    "total": "{{count}} fichier(s)",
+    "empty": "Aucun fichier ne correspond aux filtres.",
+    "view": "Voir",
+    "download": "Télécharger",
+    "deleted": "{{count}} fichier(s) supprimé(s)",
+    "previewFailed": "Échec de l'aperçu",
+    "noInlinePreview": "Pas d'aperçu intégré pour ce type de fichier.",
+    "unknownType": "type inconnu",
+    "selectAll": "Tout sélectionner sur cette page",
+    "selectOne": "Sélectionner {{name}}",
+    "confirmTitle": "Supprimer {{count}} fichier(s) ?",
+    "confirmBody": "Le fichier sur disque, ses enregistrements et ses vecteurs de recherche seront définitivement supprimés. Irréversible.",
+    "confirmMore": "…et {{count}} de plus",
+    "filters": {
+      "search": "Nom de fichier",
+      "searchPlaceholder": "Rechercher un nom",
+      "user": "Utilisateur",
+      "allUsers": "Tous les utilisateurs",
+      "origin": "Source",
+      "sort": "Trier par"
+    },
+    "origin": {
+      "all": "Toutes les sources",
+      "conversation": "Conversation",
+      "kb": "Base de connaissances"
+    },
+    "sort": {
+      "newest": "Plus récents d'abord",
+      "oldest": "Plus anciens d'abord",
+      "largest": "Plus gros d'abord",
+      "smallest": "Plus petits d'abord"
+    },
+    "table": {
+      "filename": "Nom",
+      "user": "Utilisateur",
+      "origin": "Source",
+      "size": "Taille",
+      "uploaded": "Téléversé",
+      "actions": "Actions"
+    }
   }
 }

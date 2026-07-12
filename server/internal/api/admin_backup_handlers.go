@@ -36,6 +36,19 @@ var (
 // The whole point is portability: the archive migrates a deployment between
 // machines AND between SQLite and Postgres, through the admin UI alone.
 
+// legacyBackupFormat reports whether a manifest format string is an accepted
+// alias for the given current format. The product was renamed twice
+// (Aurelia -> Auven -> Aivory); archives exported by those builds carry the
+// old prefix but are byte-compatible — same tables, same layout, same version
+// counter. Rejecting them would strand every pre-rename backup.
+func acceptedArchiveFormat(got, want string) bool {
+	if got == want {
+		return true
+	}
+	suffix := strings.TrimPrefix(want, "aivory")
+	return got == "aurelia"+suffix || got == "auven"+suffix
+}
+
 // backupManifest is the archive's self-description (manifest.json).
 type backupManifest struct {
 	Format            string           `json:"format"` // always "aivory-backup"
@@ -393,7 +406,7 @@ func importConfigAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err)
 			return
 		}
-		if man.Format != "aivory-config" {
+		if !acceptedArchiveFormat(man.Format, "aivory-config") {
 			writeError(w, http.StatusBadRequest, errors.New("unrecognized config archive (missing aivory-config manifest)"))
 			return
 		}
@@ -519,7 +532,7 @@ func importBackupAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if man.Format != "aivory-backup" {
+	if !acceptedArchiveFormat(man.Format, "aivory-backup") {
 		writeError(w, http.StatusBadRequest, errors.New("unrecognized archive (missing aivory-backup manifest)"))
 		return
 	}
@@ -939,7 +952,7 @@ func importLegacySettingsConfig(d Deps, data []byte) (int64, error) {
 	if err := json.Unmarshal(data, &payload); err != nil {
 		return 0, errors.New("not a valid Aivory configuration export")
 	}
-	if payload.Format != "aivory-config" || payload.Settings == nil {
+	if !acceptedArchiveFormat(payload.Format, "aivory-config") || payload.Settings == nil {
 		return 0, errors.New("not a valid Aivory configuration export")
 	}
 	return applyAdminSettingsPatch(d, payload.Settings, true)

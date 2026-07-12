@@ -150,6 +150,7 @@ func Migrate(db *sql.DB) error {
 	addMsgAuthor := `ALTER TABLE messages ADD COLUMN author_id TEXT NOT NULL DEFAULT ''`
 	addUsageWorkspace := `ALTER TABLE usage_logs ADD COLUMN workspace_id TEXT NOT NULL DEFAULT ''`
 	addGroupMaxWorkspaces := `ALTER TABLE user_groups ADD COLUMN max_workspaces INTEGER NOT NULL DEFAULT 0`
+	addGroupMaxStorage := `ALTER TABLE user_groups ADD COLUMN max_storage_mb INTEGER NOT NULL DEFAULT 0`
 	// Whether the tier is listed on the public subscription page (§ user groups).
 	addGroupIsPublic := `ALTER TABLE user_groups ADD COLUMN is_public INTEGER NOT NULL DEFAULT 1`
 	// §fallback channel: per-model backup channel retried on primary request
@@ -213,6 +214,7 @@ func Migrate(db *sql.DB) error {
 		addMsgAuthor = `ALTER TABLE messages ADD COLUMN IF NOT EXISTS author_id TEXT NOT NULL DEFAULT ''`
 		addUsageWorkspace = `ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS workspace_id TEXT NOT NULL DEFAULT ''`
 		addGroupMaxWorkspaces = `ALTER TABLE user_groups ADD COLUMN IF NOT EXISTS max_workspaces INTEGER NOT NULL DEFAULT 0`
+		addGroupMaxStorage = `ALTER TABLE user_groups ADD COLUMN IF NOT EXISTS max_storage_mb INTEGER NOT NULL DEFAULT 0`
 		addGroupIsPublic = `ALTER TABLE user_groups ADD COLUMN IF NOT EXISTS is_public INTEGER NOT NULL DEFAULT 1`
 		addModelFallbackChannel = `ALTER TABLE models ADD COLUMN IF NOT EXISTS fallback_channel_id TEXT NOT NULL DEFAULT ''`
 		addUsageChannel = `ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS channel_id TEXT NOT NULL DEFAULT ''`
@@ -253,7 +255,7 @@ func Migrate(db *sql.DB) error {
 		addMsgModelLabel, addMsgSearchText,
 		addImageTimeout,
 		addMsgVerify,
-		addConvWorkspace, addProjWorkspace, addKBWorkspace, addMsgAuthor, addUsageWorkspace, addGroupMaxWorkspaces, addGroupIsPublic,
+		addConvWorkspace, addProjWorkspace, addKBWorkspace, addMsgAuthor, addUsageWorkspace, addGroupMaxWorkspaces, addGroupMaxStorage, addGroupIsPublic,
 		addModelFallbackChannel, addUsageChannel, addUsageFallback, addUsageStatus, addUsageError,
 		addUsageRequestMethod, addUsageRequestURL, addUsageRequestHeaders, addUsageRequestBody,
 		addFileDraft, addDocumentIngestUpdatedAt,
@@ -307,7 +309,7 @@ func Migrate(db *sql.DB) error {
 		"messages":        {"credits", "model_label", "search_text", "gen_ms", "feedback", "verify", "author_id"},
 		"users":           {"group_id", "totp_secret", "totp_enabled", "group_expires_at", "previous_group_id", "password_set", "password_changed_at", "last_seen_at", "credits_permanent", "sort_order"},
 		"usage_logs":      {"credits", "workspace_id", "channel_id", "fallback", "status", "error", "request_method", "request_url", "request_headers", "request_body"},
-		"user_groups":     {"max_projects", "max_kbs", "credit_allowance", "credit_period_seconds", "max_workspaces", "is_public"},
+		"user_groups":     {"max_projects", "max_kbs", "credit_allowance", "credit_period_seconds", "max_workspaces", "is_public", "max_storage_mb"},
 		"models":          {"official_tools", "moderation_enabled", "moderation_mode", "tags", "image_timeout_sec", "research_enabled", "fallback_channel_id"},
 		"refresh_tokens":  {"user_agent", "ip", "location", "last_seen"},
 		"conversations":   {"inline_source_conv", "inline_parent_id", "inline_quote", "workspace_id"},

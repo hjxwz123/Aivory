@@ -60,7 +60,8 @@
     "style": "Style",
     "styleHeading": "Style d'image",
     "styleNone": "Aucun",
-    "noStyles": "Aucun style configuré."
+    "noStyles": "Aucun style configuré.",
+    "storageQuotaFull": "Stockage plein — libérez de l'espace dans Fichiers puis réessayez."
   },
   "assistant": "Aivory",
   "thinking": "Réflexion",
@@ -435,5 +436,6 @@
     "roleOwner": "Propriétaire",
     "roleMember": "Membre",
     "switchSpace": "Changer d'espace"
-  }
+  },
+  "attachmentDeleted": "Fichier supprimé"
 }

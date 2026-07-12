@@ -47,6 +47,8 @@ CREATE TABLE IF NOT EXISTS user_groups (
   sort_order  INTEGER NOT NULL DEFAULT 0,
   max_projects INTEGER NOT NULL DEFAULT 0,
   max_kbs      INTEGER NOT NULL DEFAULT 0,
+  -- Storage quota for non-image uploads, MB (0 = unlimited, § user files page).
+  max_storage_mb INTEGER NOT NULL DEFAULT 0,
   credit_allowance      REAL NOT NULL DEFAULT 0,
   credit_period_seconds INTEGER NOT NULL DEFAULT 0,
   created_at  BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint),
@@ -422,6 +424,16 @@ CREATE TABLE IF NOT EXISTS oauth_providers (
   updated_at    BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_oauth_providers_name_unique ON oauth_providers(lower(trim(name)));
+
+-- Storage paths awaiting physical deletion (§8.1-A async user delete). Rows
+-- are written BEFORE any destructive SQL delete and removed one by one as the
+-- bytes are actually unlinked, so a crash mid-purge never orphans disk or
+-- object-storage bytes: startup sweeps whatever is left.
+CREATE TABLE IF NOT EXISTS pending_storage_cleanup (
+  path       TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL,
+  created_at BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
+);
 
 CREATE TABLE IF NOT EXISTS oauth_identities (
   provider_id TEXT NOT NULL,

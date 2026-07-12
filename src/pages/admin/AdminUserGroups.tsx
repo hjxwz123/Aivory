@@ -101,6 +101,7 @@ export default function AdminUserGroups() {
         workspacesEnabled: false,
         is_public: true,
         max_workspaces: 0,
+        max_storage_mb: 0,
         creditPeriodValue: 0,
         creditPeriodUnit: 'day',
       },
@@ -155,6 +156,7 @@ export default function AdminUserGroups() {
       max_projects: Math.max(0, Number(d.max_projects) || 0),
       max_kbs: Math.max(0, Number(d.max_kbs) || 0),
       max_workspaces: Math.max(0, Number(d.max_workspaces) || 0),
+      max_storage_mb: Math.max(0, Number(d.max_storage_mb) || 0),
       is_public: d.is_public !== false,
       credit_allowance: Math.max(0, Number(d.credit_allowance) || 0),
       credit_period_seconds: periodSeconds,
@@ -402,6 +404,19 @@ export default function AdminUserGroups() {
                     min={0}
                     value={String(editor.draft.max_workspaces ?? 0)}
                     onChange={(e) => setDraft({ max_workspaces: Number(e.target.value) })}
+                  />
+                </Field>
+                <Field
+                  label={t('admin:groups.maxStorage', { defaultValue: 'Storage (MB)' })}
+                  htmlFor="g-maxstorage"
+                  hint={t('admin:groups.maxStorageHint', { defaultValue: '0 = unlimited. Non-image uploads only.' })}
+                >
+                  <Input
+                    id="g-maxstorage"
+                    type="number"
+                    min={0}
+                    value={String(editor.draft.max_storage_mb ?? 0)}
+                    onChange={(e) => setDraft({ max_storage_mb: Number(e.target.value) })}
                   />
                 </Field>
               </div>

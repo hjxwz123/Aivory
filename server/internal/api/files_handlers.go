@@ -152,6 +152,10 @@ func receiveDocument(d Deps, r *http.Request, kbID, convID string) (*store.Docum
 		if verr != nil {
 			return nil, verr
 		}
+		// § user files page: documents always count against the storage quota.
+		if err := checkStorageQuota(r, d, u.ID, int64(len(body.Content))); err != nil {
+			return nil, err
+		}
 		path, err := uploadDestPath(d, u.ID, "d", safe)
 		if err != nil {
 			return nil, err
@@ -179,6 +183,10 @@ func receiveDocument(d Deps, r *http.Request, kbID, convID string) (*store.Docum
 	safe, _, verr := policy.validateUpload(header.Filename)
 	if verr != nil {
 		return nil, verr
+	}
+	// § user files page: documents always count against the storage quota.
+	if err := checkStorageQuota(r, d, u.ID, header.Size); err != nil {
+		return nil, err
 	}
 	path, err := uploadDestPath(d, u.ID, "d", safe)
 	if err != nil {
@@ -274,6 +282,13 @@ func uploadFileHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	if header.Size > limit {
 		writeError(w, 413, uploadTooLargeError(kind, limit))
 		return
+	}
+	// § user files page: group storage quota — non-image uploads only.
+	if kind != "image" {
+		if err := checkStorageQuota(r, d, u.ID, header.Size); err != nil {
+			writeError(w, http.StatusInsufficientStorage, err)
+			return
+		}
 	}
 	path, err := uploadDestPath(d, u.ID, "f", safe)
 	if err != nil {

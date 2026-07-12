@@ -14,7 +14,7 @@ export interface ApiUser {
   email: string
   name: string
   role: 'user' | 'admin'
-  status: 'active' | 'banned' | 'disabled'
+  status: 'active' | 'banned' | 'disabled' | 'deleting'
   settings: Record<string, unknown>
   group_id?: string
   /** Display name of the membership group (tier label shown in the sidebar).
@@ -168,6 +168,8 @@ export interface ApiUserGroup {
   created_at: number
   updated_at: number
   max_workspaces?: number
+  /** Storage cap for non-image uploads, MB. 0 = unlimited (§ user files page). */
+  max_storage_mb?: number
   /** Listed on the public subscription page. */
   is_public?: boolean
 }
@@ -566,6 +568,25 @@ export interface ApiMemory {
   valid_until: number
   created_at: number
   updated_at: number
+}
+
+// One row of the admin file inventory (§ admin files): the union of the files
+// table (conversation attachments) and documents (KB docs). A conversation
+// document sharing its storage path with a files row is folded into that row.
+export interface ApiAdminFile {
+  id: string
+  source: 'file' | 'document'
+  origin: 'conversation' | 'kb'
+  user_id: string
+  user_email: string
+  user_name: string
+  filename: string
+  mime_type: string
+  size_bytes: number
+  created_at: number
+  conversation_id: string
+  kb_id: string
+  kb_name: string
 }
 
 // A single usage_logs row (one API call) for the admin usage list.

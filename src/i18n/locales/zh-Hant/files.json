@@ -1,0 +1,40 @@
+{
+  "title": "檔案",
+  "searchPlaceholder": "搜尋檔名",
+  "total": "共 {{count}} 個檔案",
+  "view": "檢視",
+  "deleted": "檔案已刪除",
+  "previewFailed": "預覽失敗",
+  "noInlinePreview": "該檔案類型不支援線上預覽。",
+  "confirmTitle": "刪除該檔案?",
+  "confirmBody": "「{{name}}」將被徹底刪除——檔案本體、資料庫記錄與檢索索引都會移除,無法復原。",
+  "origin": {
+    "all": "全部來源",
+    "conversation": "對話",
+    "kb": "知識庫"
+  },
+  "sort": {
+    "newest": "最新在前",
+    "oldest": "最早在前",
+    "largest": "最大在前",
+    "smallest": "最小在前"
+  },
+  "table": {
+    "filename": "檔名",
+    "type": "類型",
+    "origin": "來源",
+    "size": "大小",
+    "uploaded": "上傳時間",
+    "actions": "操作"
+  },
+  "storage": {
+    "title": "儲存空間",
+    "usedOf": "已用 {{used}} / 共 {{quota}}",
+    "usedUnlimited": "已用 {{used}} · 無限制",
+    "note": "文件等檔案計入儲存空間;圖片不計入。"
+  },
+  "empty": {
+    "title": "還沒有檔案",
+    "body": "你在對話或知識庫中上傳的檔案會顯示在這裡。"
+  }
+}

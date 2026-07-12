@@ -330,7 +330,13 @@
     "noDocuments": "No documents.",
     "imagesHeading": "Image gallery",
     "noImages": "No generated images.",
-    "loadMore": "Load more"
+    "loadMore": "Load more",
+    "deleteStarted": "Deletion started — cleaning up in the background",
+    "status": {
+      "banned": "banned",
+      "disabled": "disabled",
+      "deleting": "deleting…"
+    }
   },
   "usage": {
     "title": "Usage",
@@ -397,7 +403,11 @@
     "workspaceTag": "WS",
     "fallbackTag": "Fallback",
     "fallbackTitle": "Served by the model’s fallback channel",
-    "errorDetail": { "title": "Upstream error", "view": "View error detail", "none": "No error detail was recorded for this request." },
+    "errorDetail": {
+      "title": "Upstream error",
+      "view": "View error detail",
+      "none": "No error detail was recorded for this request."
+    },
     "statusError": "Error",
     "status": {
       "all": "All",
@@ -608,7 +618,9 @@
     },
     "errors": {
       "nameRequired": "Name is required"
-    }
+    },
+    "maxStorage": "Storage (MB)",
+    "maxStorageHint": "0 = unlimited. Non-image uploads only."
   },
   "quota": {
     "saved": "Permissions saved",
@@ -926,5 +938,50 @@
     "deleteBody": "Every conversation, project and knowledge base inside is removed and all members lose access. This cannot be undone.",
     "roleOwner": "Owner",
     "roleMember": "Member"
+  },
+  "files": {
+    "title": "Files",
+    "lead": "Every upload across conversations and knowledge bases. Deleting removes the database rows, vectors, and the file on disk.",
+    "deleteSelected": "Delete selected ({{count}})",
+    "total": "{{count}} file(s)",
+    "empty": "No files match the current filters.",
+    "view": "View",
+    "download": "Download",
+    "deleted": "Deleted {{count}} file(s)",
+    "previewFailed": "Preview failed",
+    "noInlinePreview": "No inline preview for this file type.",
+    "unknownType": "unknown type",
+    "selectAll": "Select all on this page",
+    "selectOne": "Select {{name}}",
+    "confirmTitle": "Delete {{count}} file(s)?",
+    "confirmBody": "This permanently removes the file from disk, its database records, and its search vectors. It cannot be undone.",
+    "confirmMore": "…and {{count}} more",
+    "filters": {
+      "search": "Filename",
+      "searchPlaceholder": "Search filenames",
+      "user": "User",
+      "allUsers": "All users",
+      "origin": "Source",
+      "sort": "Sort by"
+    },
+    "origin": {
+      "all": "All sources",
+      "conversation": "Conversation",
+      "kb": "Knowledge base"
+    },
+    "sort": {
+      "newest": "Newest first",
+      "oldest": "Oldest first",
+      "largest": "Largest first",
+      "smallest": "Smallest first"
+    },
+    "table": {
+      "filename": "Filename",
+      "user": "User",
+      "origin": "Source",
+      "size": "Size",
+      "uploaded": "Uploaded",
+      "actions": "Actions"
+    }
   }
 }

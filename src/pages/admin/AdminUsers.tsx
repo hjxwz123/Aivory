@@ -97,8 +97,8 @@ export default function AdminUsers() {
 
   const groupsLoadedRef = useRef(false)
 
-  const load = useCallback(async (search: string, p: number) => {
-    setLoading(true)
+  const load = useCallback(async (search: string, p: number, opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setLoading(true)
     try {
       const offset = (p - 1) * PAGE_SIZE
       if (!groupsLoadedRef.current) {
@@ -123,6 +123,28 @@ export default function AdminUsers() {
   useEffect(() => {
     void load(committedQuery, page)
   }, [committedQuery, page, load])
+
+  // While any account is being purged in the background, refresh periodically
+  // (silently — no loading flash) so the row disappears once the job completes,
+  // and surface each job's progress text on the badge.
+  const [deletionProgress, setDeletionProgress] = useState<Record<string, string>>({})
+  const hasDeleting = rows.some((u) => u.status === 'deleting')
+  useEffect(() => {
+    if (!hasDeleting) return
+    const tick = async () => {
+      await load(committedQuery, page, { silent: true })
+      try {
+        const resp = await adminApi.userDeletions()
+        setDeletionProgress(
+          Object.fromEntries(resp.jobs.map((j) => [j.user_id, j.status === 'failed' ? `failed: ${j.error ?? ''}` : j.progress])),
+        )
+      } catch {
+        /* polling is best-effort */
+      }
+    }
+    const id = window.setInterval(() => void tick(), 4000)
+    return () => window.clearInterval(id)
+  }, [hasDeleting, committedQuery, page, load])
 
   async function reload() {
     await load(committedQuery, page)
@@ -158,7 +180,7 @@ export default function AdminUsers() {
     setDeleting(true)
     try {
       await adminApi.deleteUser(deleteRow.id)
-      toast.success(t('admin:users.deleted'))
+      toast.success(t('admin:users.deleteStarted', { defaultValue: 'Deletion started — cleaning up in the background' }))
       setDeleteRow(null)
       await reload()
     } catch (e) {
@@ -312,7 +334,15 @@ export default function AdminUsers() {
                       <span className="font-medium text-[var(--color-fg)]">{u.name || u.email}</span>
                       <Badge size="xs">{t(`admin:users.role${u.role === 'admin' ? 'Admin' : 'User'}`)}</Badge>
                       {group && !group.is_default ? <Badge size="xs" variant="neutral">{group.name}</Badge> : null}
-                      {u.status !== 'active' ? <Badge size="xs" variant="neutral">{u.status}</Badge> : null}
+                      {u.status !== 'active' ? (
+                        <Badge
+                          size="xs"
+                          variant={u.status === 'deleting' ? 'warning' : 'neutral'}
+                          title={u.status === 'deleting' ? deletionProgress[u.id] : undefined}
+                        >
+                          {t(`admin:users.status.${u.status}`, { defaultValue: u.status })}
+                        </Badge>
+                      ) : null}
                       {isMe ? <Badge size="xs" variant="neutral">{t('admin:users.you')}</Badge> : null}
                     </div>
                     <div className="mt-0.5 flex items-center gap-2 text-[12px] text-[var(--color-fg-subtle)]">
@@ -359,7 +389,7 @@ export default function AdminUsers() {
                         <Ban size={15} aria-hidden />
                       </IconAction>
                     ) : (
-                      <IconAction label={t('admin:users.unban')} onClick={() => void unban(u)}>
+                      <IconAction label={t('admin:users.unban')} onClick={() => void unban(u)} disabled={u.status === 'deleting'}>
                         <ShieldCheck size={15} aria-hidden />
                       </IconAction>
                     )}

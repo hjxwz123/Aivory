@@ -21,8 +21,7 @@ import {
   FileSpreadsheet,
   Sparkles,
   BookText,
-  Coins,
-} from 'lucide-react'
+  Coins, ImageOff } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import type { Message, Attachment } from '@/types/chat'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -153,6 +152,9 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
   // original until the user clicks "Save & resend" (which opens a new branch
   // with this exact attachment list).
   const [draftAtts, setDraftAtts] = useState<Attachment[]>(message.attachments ?? [])
+  // Attachment ids whose thumbnail 404'd — the file was deleted from the Files
+  // page or the admin console; show a labelled placeholder, not a broken img.
+  const [brokenAtts, setBrokenAtts] = useState<Set<string>>(new Set())
   // Lightbox: which image is being previewed (null = closed). Driven from the
   // attachment id so the Dialog re-mounts cleanly on each preview.
   const [lightbox, setLightbox] = useState<{ src: string; alt?: string } | null>(null)
@@ -341,7 +343,17 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
             {message.attachments && message.attachments.length > 0 ? (
               <div className="mb-2 flex flex-wrap gap-2">
                 {message.attachments.map((a) =>
-                  a.kind === 'image' && a.previewUrl ? (
+                  a.kind === 'image' && brokenAtts.has(a.id) ? (
+                    <span
+                      key={a.id}
+                      className="inline-flex items-center gap-1.5 rounded-[8px] border border-dashed border-[var(--color-border)] bg-[var(--color-bg-muted)] px-2 py-1 text-[11.5px] text-[var(--color-fg-subtle)] max-w-[18rem]"
+                      title={a.name}
+                    >
+                      <ImageOff size={13} aria-hidden />
+                      <span className="truncate">{a.name}</span>
+                      <span className="shrink-0">· {t('attachmentDeleted', { defaultValue: 'File deleted' })}</span>
+                    </span>
+                  ) : a.kind === 'image' && a.previewUrl ? (
                     <button
                       key={a.id}
                       type="button"
@@ -354,6 +366,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
                         alt={a.name}
                         className="max-h-56 max-w-[18rem] sm:max-w-[22rem] w-auto h-auto object-cover"
                         draggable={false}
+                        onError={() => setBrokenAtts((prev) => new Set(prev).add(a.id))}
                       />
                     </button>
                   ) : (
