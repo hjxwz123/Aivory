@@ -194,7 +194,11 @@ func main() {
 		ReadHeaderTimeout: 15 * time.Second,
 		// SSE streams need long write deadlines; 30 minutes matches design.md §11.5.
 		WriteTimeout: 90 * time.Minute,
-		IdleTimeout:  120 * time.Second,
+		// MUST exceed any upstream proxy's origin keep-alive reuse window, or
+		// the proxy fires requests down connections we already closed and users
+		// see intermittent "site can't be reached" pages that fix on refresh.
+		// Cloudflare reuses origin connections for ~15 minutes — 20min clears it.
+		IdleTimeout: envcfg.Dur("AIVORY_HTTP_IDLE_TIMEOUT", 20*time.Minute),
 	}
 
 	go func() {
