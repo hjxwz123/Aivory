@@ -43,7 +43,9 @@ import { useMediaQuery } from '@/hooks/use-media-query'
 import { useModels } from '@/store/models'
 import { useAuth } from '@/store/auth'
 import { useComposerPrefs } from '@/store/composer-prefs'
+import { useNavigate } from 'react-router-dom'
 import { api, apiUpload, ApiError } from '@/api/client'
+import { toastStorageQuotaFull } from '@/lib/quota-toast'
 import type { ApiAttachment, ApiConversationFile, ApiDocument } from '@/api/types'
 import { toast } from '@/hooks/use-toast'
 import { cn, uid, modKey } from '@/lib/utils'
@@ -225,6 +227,7 @@ export function Composer({
   modelPickerInHeader = false,
 }: ComposerProps) {
   const { t } = useTranslation('chat')
+  const navigate = useNavigate()
   const mode = useComposerPrefs((s) => s.mode)
   const setMode = useComposerPrefs((s) => s.setMode)
   // §verify: when on, the answer is fact-checked by a second model this turn.
@@ -499,8 +502,8 @@ export function Composer({
     } catch (e) {
       setAttachments((s) => s.filter((a) => a.id !== local.id))
       if (e instanceof ApiError && e.status === 507) {
-        // § user files page: group storage quota exhausted.
-        toast.error(t('composer.storageQuotaFull', { defaultValue: 'Storage is full — free up space in Files and try again.' }))
+        // § user files page: group storage quota exhausted — link to /files.
+        toastStorageQuotaFull(navigate)
       } else {
         toast.error(t('composer.uploadFailed', { defaultValue: 'Upload failed' }), e instanceof Error ? e.message : undefined)
       }

@@ -61,7 +61,8 @@
     "styleHeading": "Style d'image",
     "styleNone": "Aucun",
     "noStyles": "Aucun style configuré.",
-    "storageQuotaFull": "Stockage plein — libérez de l'espace dans Fichiers puis réessayez."
+    "storageQuotaFull": "Stockage plein — libérez de l'espace dans Fichiers puis réessayez.",
+    "storageQuotaAction": "Libérer de l'espace"
   },
   "assistant": "Aivory",
   "thinking": "Réflexion",
