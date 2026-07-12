@@ -18,6 +18,7 @@ import { Input } from '@/components/ui/input'
 import { Field } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from '@/hooks/use-toast'
+import { PanelFallback } from '@/components/ui/panel-fallback'
 
 // Radix Select forbids an empty-string item value, so use a sentinel for "none".
 const NONE = '__none'
@@ -92,7 +93,7 @@ export default function AdminModeration() {
       </header>
 
       {loading ? (
-        <div className="mt-8 text-sm text-[var(--color-fg-subtle)]">{t('admin:common.loading')}</div>
+        <PanelFallback />
       ) : (
         <section className="mt-8 flex flex-col gap-6">
           {/* Keyword list */}

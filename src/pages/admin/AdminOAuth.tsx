@@ -29,6 +29,7 @@ import { toast } from '@/hooks/use-toast'
 import { Badge } from '@/components/ui/badge'
 import { IconUploader } from '@/components/admin/icon-uploader'
 import { OAuthBrandGlyph } from '@/components/auth/oauth-glyph'
+import { PanelFallback } from '@/components/ui/panel-fallback'
 
 type Editable = Partial<ApiOAuthProvider> & { client_secret?: string }
 
@@ -153,7 +154,7 @@ export default function AdminOAuth() {
 
       <section className="mt-8">
         {loading ? (
-          <div className="text-sm text-[var(--color-fg-subtle)]">{t('admin:common.loading')}</div>
+          <PanelFallback />
         ) : rows.length === 0 ? (
           <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-10 text-center text-sm text-[var(--color-fg-muted)]">
             {t('admin:oauth.empty')}

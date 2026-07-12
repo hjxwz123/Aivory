@@ -36,6 +36,7 @@ import { toast } from '@/hooks/use-toast'
 import { useAuth } from '@/store/auth'
 import { formatDateTime, cn } from '@/lib/utils'
 import { envNum } from '@/lib/env-config'
+import { PanelFallback } from '@/components/ui/panel-fallback'
 
 // A user counts as online if they made an authenticated request in the last 5
 // minutes (the middleware refreshes last_seen_at at most once/min).
@@ -304,7 +305,7 @@ export default function AdminUsers() {
 
       <section className="mt-5">
         {loading ? (
-          <div className="text-sm text-[var(--color-fg-subtle)]">{t('admin:common.loading')}</div>
+          <PanelFallback />
         ) : (
           <AdminSortableList
             items={pageRows}

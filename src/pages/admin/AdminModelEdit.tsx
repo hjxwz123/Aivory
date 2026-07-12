@@ -28,6 +28,7 @@ import { ParamControlsEditor } from '@/components/admin/param-controls-editor'
 import { ModelQuotaEditor } from '@/components/admin/model-quota-editor'
 import { toast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
+import { PanelFallback } from '@/components/ui/panel-fallback'
 
 const KINDS = ['chat', 'image', 'embedding'] as const
 const TOOL_MODES = ['native', 'prompt', 'none'] as const
@@ -190,7 +191,7 @@ export default function AdminModelEdit() {
       </button>
 
       {loading ? (
-        <div className="text-sm text-[var(--color-fg-subtle)]">{t('admin:common.loading')}</div>
+        <PanelFallback />
       ) : notFound || !draft ? (
         <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-10 text-center text-sm text-[var(--color-fg-muted)]">
           {t('admin:models.notFound')}

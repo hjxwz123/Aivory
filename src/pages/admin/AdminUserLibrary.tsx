@@ -16,6 +16,7 @@ import { useModels } from '@/store/models'
 import { toast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
 import { envNum } from '@/lib/env-config'
+import { PanelFallback } from '@/components/ui/panel-fallback'
 
 function formatStamp(unixSec: number): string {
   if (!unixSec) return ''
@@ -143,7 +144,7 @@ export default function AdminUserLibrary() {
       </header>
 
       {loading ? (
-        <div className="mt-8 text-sm text-[var(--color-fg-subtle)]">{t('common.loading')}</div>
+        <PanelFallback />
       ) : (
         <>
           {/* Projects */}
@@ -232,7 +233,7 @@ export default function AdminUserLibrary() {
                       {open ? (
                         <div className="border-t border-[var(--color-divider)] bg-[var(--color-bg-muted)]/40 px-5 py-3">
                           {kbLoading === k.id ? (
-                            <div className="text-[12px] text-[var(--color-fg-subtle)]">{t('common.loading')}</div>
+                            <PanelFallback />
                           ) : docs && docs.length > 0 ? (
                             <ul className="flex flex-col gap-1.5">
                               {docs.map((doc) => (

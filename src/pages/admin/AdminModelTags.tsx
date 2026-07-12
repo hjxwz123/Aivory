@@ -12,6 +12,7 @@ import type { ApiModelTag } from '@/api/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { toast } from '@/hooks/use-toast'
+import { PanelFallback } from '@/components/ui/panel-fallback'
 
 export default function AdminModelTags() {
   const { t } = useTranslation(['admin', 'common'])
@@ -122,7 +123,7 @@ export default function AdminModelTags() {
         </div>
 
         {loading ? (
-          <div className="mt-6 text-sm text-[var(--color-fg-subtle)]">{t('admin:common.loading')}</div>
+          <PanelFallback />
         ) : tags.length === 0 ? (
           <div className="mt-6 rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-8 text-center text-sm text-[var(--color-fg-muted)]">
             {t('admin:modelTags.empty')}

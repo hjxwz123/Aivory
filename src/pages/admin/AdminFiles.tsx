@@ -26,6 +26,7 @@ import { Pagination } from '@/components/ui/pagination'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from '@/hooks/use-toast'
 import { envNum } from '@/lib/env-config'
+import { PanelFallback } from '@/components/ui/panel-fallback'
 
 const PAGE_SIZE = envNum('VITE_AIVORY_PAGE_SIZE', 50)
 const ALL = 'all'
@@ -294,7 +295,7 @@ export default function AdminFiles() {
 
       <section className="mt-6">
         {loading ? (
-          <div className="text-sm text-[var(--color-fg-subtle)]">{t('common.loading')}</div>
+          <PanelFallback />
         ) : rows.length === 0 ? (
           <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-10 text-center text-sm text-[var(--color-fg-muted)]">
             {t('files.empty', { defaultValue: 'No files match the current filters.' })}
@@ -433,7 +434,7 @@ export default function AdminFiles() {
           </DialogHeader>
           <DialogBody>
             {preview?.loading ? (
-              <div className="py-10 text-center text-sm text-[var(--color-fg-subtle)]">{t('common.loading')}</div>
+              <PanelFallback />
             ) : preview?.error ? (
               <div className="py-10 text-center text-sm text-[var(--color-danger)]">{preview.error}</div>
             ) : preview?.kind === 'image' && preview.url ? (

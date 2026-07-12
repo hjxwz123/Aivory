@@ -23,6 +23,7 @@ import { MessageRow } from '@/components/chat/message-row'
 import { useModels } from '@/store/models'
 import { toLocalMessage } from '@/store/conversations'
 import { cn } from '@/lib/utils'
+import { PanelFallback } from '@/components/ui/panel-fallback'
 
 function formatStamp(unixMs: number): string {
   if (!unixMs) return ''
@@ -128,7 +129,7 @@ export default function AdminUserConversation() {
 
       <section className="mt-8">
         {loading ? (
-          <div className="text-sm text-[var(--color-fg-subtle)]">{t('common.loading')}</div>
+          <PanelFallback />
         ) : messages.length === 0 ? (
           <div className="text-sm text-[var(--color-fg-subtle)] rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-10 text-center">
             {t('users.noMessages')}
@@ -318,7 +319,7 @@ function SandboxPanel({ convId }: { convId: string }) {
           </div>
 
           {loading ? (
-            <div className="text-sm text-[var(--color-fg-subtle)]">{t('common.loading')}</div>
+            <PanelFallback />
           ) : !session ? (
             <div className="text-sm text-[var(--color-fg-subtle)]">
               {t('sandbox.none', { defaultValue: 'No sandbox session for this conversation.' })}

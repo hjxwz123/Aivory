@@ -163,6 +163,11 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
   // draw mode). Elsewhere (/chat/:id, /projects, /kb, …) it's just an action,
   // not the selected entry — so it must not keep a permanent "selected" fill.
   const newChatActive = location.pathname === '/' && !drawActive
+  // Projects and Files are their own routes — highlight the rail entry when the
+  // current path is under them (parity with the Draw entry, which was the only
+  // secondary nav row that reflected its selected state).
+  const projectsActive = location.pathname === '/projects' || location.pathname.startsWith('/projects/')
+  const filesActive = location.pathname === '/files'
   const recentProjects = useMemo(
     () =>
       projects
@@ -329,9 +334,12 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
           <Link
             to="/projects"
             onClick={onClose}
+            aria-current={projectsActive ? 'page' : undefined}
             className={cn(
-              'inline-flex items-center gap-2 h-9 max-lg:h-[var(--tap-min)] rounded-[10px] text-sm',
-              'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive',
+              'inline-flex items-center gap-2 h-9 max-lg:h-[var(--tap-min)] rounded-[10px] text-sm interactive',
+              projectsActive
+                ? 'bg-[var(--color-bg-muted)] text-[var(--color-fg)] font-medium'
+                : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
               collapsed ? 'w-9 justify-center px-0' : 'w-full justify-between px-3',
             )}
@@ -371,22 +379,29 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
           </Tooltip>
         )}
 
-        {/* § user files page — every upload (chat + KB) with the storage meter. */}
-        <Tooltip content={collapsed ? tNav('files', { defaultValue: 'Files' }) : ''} side="right">
-          <Link
-            to="/files"
-            onClick={onClose}
-            className={cn(
-              'inline-flex items-center gap-2 h-9 max-lg:h-[var(--tap-min)] rounded-[10px] text-sm',
-              'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-              collapsed ? 'w-9 justify-center px-0' : 'w-full justify-start px-3',
-            )}
-          >
-            <FolderOpen size={15} aria-hidden />
-            {!collapsed && <span>{tNav('files', { defaultValue: 'Files' })}</span>}
-          </Link>
-        </Tooltip>
+        {/* § user files page — every upload (chat + KB) with the storage meter.
+            The page is scoped to the user's PERSONAL uploads (GET /me/files),
+            so it's hidden inside a workspace where files are shared, not owned. */}
+        {!activeWorkspace && (
+          <Tooltip content={collapsed ? tNav('files', { defaultValue: 'Files' }) : ''} side="right">
+            <Link
+              to="/files"
+              onClick={onClose}
+              aria-current={filesActive ? 'page' : undefined}
+              className={cn(
+                'inline-flex items-center gap-2 h-9 max-lg:h-[var(--tap-min)] rounded-[10px] text-sm interactive',
+                filesActive
+                  ? 'bg-[var(--color-bg-muted)] text-[var(--color-fg)] font-medium'
+                  : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+                collapsed ? 'w-9 justify-center px-0' : 'w-full justify-start px-3',
+              )}
+            >
+              <FolderOpen size={15} aria-hidden />
+              {!collapsed && <span>{tNav('files', { defaultValue: 'Files' })}</span>}
+            </Link>
+          </Tooltip>
+        )}
       </div>
 
       {/* Projects (expanded only) */}

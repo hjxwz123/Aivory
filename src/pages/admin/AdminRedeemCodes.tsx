@@ -40,6 +40,7 @@ import { toast } from '@/hooks/use-toast'
 import { useCopy } from '@/hooks/use-clipboard'
 import { formatRelativeDate } from '@/lib/utils'
 import { envNum } from '@/lib/env-config'
+import { PanelFallback } from '@/components/ui/panel-fallback'
 
 type StatusFilter = 'all' | 'unused' | 'redeemed' | 'disabled' | 'expired'
 
@@ -276,7 +277,7 @@ export default function AdminRedeemCodes() {
 
       <section className="mt-6">
         {loading ? (
-          <div className="text-sm text-[var(--color-fg-subtle)]">{t('admin:common.loading')}</div>
+          <PanelFallback />
         ) : rows.length === 0 ? (
           <div className="grid place-items-center px-6 py-16 rounded-[14px] border border-dashed border-[var(--color-border)] bg-[var(--color-bg-muted)]/30">
             <Ticket size={28} className="text-[var(--color-fg-faint)]" aria-hidden />

@@ -182,8 +182,12 @@ export default function AdminLayout() {
     )
   }
 
+  // h-full (not h-svh) on the shell root: #root resolves to a concrete viewport
+  // height via the html/body height:100% chain, so matching it exactly avoids
+  // 100svh overshooting that height and the document gaining a scrollbar
+  // alongside <main>'s — the "two scrollbars" bug.
   return (
-    <div className="flex h-svh w-full overflow-hidden bg-[var(--color-bg)] text-[var(--color-fg)]">
+    <div className="flex h-full w-full overflow-hidden bg-[var(--color-bg)] text-[var(--color-fg)]">
       {/* Desktop sidebar */}
       <aside className="hidden md:flex w-[15rem] flex-col border-r border-[var(--color-divider)] bg-[var(--color-bg-muted)]/40">
         <button

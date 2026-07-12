@@ -16,6 +16,7 @@ import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
 import { IconUploader } from '@/components/admin/icon-uploader'
 import { toast } from '@/hooks/use-toast'
+import { PanelFallback } from '@/components/ui/panel-fallback'
 
 export default function AdminImageStyles() {
   const { t } = useTranslation(['admin', 'common'])
@@ -108,7 +109,7 @@ export default function AdminImageStyles() {
         </div>
 
         {loading ? (
-          <div className="mt-6 text-sm text-[var(--color-fg-subtle)]">{t('admin:common.loading')}</div>
+          <PanelFallback />
         ) : styles.length === 0 ? (
           <div className="mt-6 rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-8 text-center text-sm text-[var(--color-fg-muted)]">
             {t('admin:imageStyles.empty', { defaultValue: 'No styles yet. Add one above.' })}

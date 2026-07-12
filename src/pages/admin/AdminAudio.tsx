@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Field } from '@/components/ui/label'
 import { toast } from '@/hooks/use-toast'
+import { PanelFallback } from '@/components/ui/panel-fallback'
 
 const KEYS = ['audio_transcribe_base_url', 'audio_transcribe_api_key', 'audio_transcribe_model'] as const
 
@@ -55,7 +56,7 @@ export default function AdminAudio() {
 
       <section className="mt-8 flex flex-col gap-5">
         {loading ? (
-          <div className="text-sm text-[var(--color-fg-subtle)]">{t('admin:common.loading')}</div>
+          <PanelFallback />
         ) : (
           <>
             <Field

@@ -20,6 +20,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { EmptyState } from '@/components/ui/empty-state'
+import { PanelFallback } from '@/components/ui/panel-fallback'
 
 function fmtDate(unix: number): string {
   return new Date(unix * 1000).toLocaleDateString()
@@ -72,7 +73,7 @@ export default function AdminWorkspaces() {
         {t('workspaces.subtitle', { defaultValue: 'Every collaborative space, its owner and member count.' })}
       </p>
       {loading ? (
-        <p className="mt-8 text-sm text-[var(--color-fg-subtle)]">{t('common.loading', { ns: 'common', defaultValue: 'Loading…' })}</p>
+        <PanelFallback />
       ) : rows.length === 0 ? (
         <div className="mt-10">
           <EmptyState
@@ -155,7 +156,7 @@ function WorkspaceDetail({
   }, [id, t])
 
   if (!data) {
-    return <p className="text-sm text-[var(--color-fg-subtle)]">{t('common.loading', { ns: 'common', defaultValue: 'Loading…' })}</p>
+    return <PanelFallback />
   }
   const { workspace, members, conversations, projects, kbs } = data
 

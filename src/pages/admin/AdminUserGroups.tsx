@@ -27,6 +27,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { toast } from '@/hooks/use-toast'
+import { PanelFallback } from '@/components/ui/panel-fallback'
 
 type PeriodUnit = 'hour' | 'day' | 'week'
 type Draft = Partial<ApiUserGroup> & {
@@ -234,7 +235,7 @@ export default function AdminUserGroups() {
 
       <section className="mt-8">
         {loading ? (
-          <div className="text-sm text-[var(--color-fg-subtle)]">{t('admin:common.loading')}</div>
+          <PanelFallback />
         ) : (
           <AdminSortableList
             items={rows}

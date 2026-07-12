@@ -27,6 +27,7 @@ import {
 import { Pagination } from '@/components/ui/pagination'
 import { toast } from '@/hooks/use-toast'
 import { envNum } from '@/lib/env-config'
+import { PanelFallback } from '@/components/ui/panel-fallback'
 
 const RANGE_IDS = ['1', '7', '30', '90'] as const
 const ALL_MODELS = 'all'
@@ -234,7 +235,7 @@ export default function AdminUsage() {
 
       <section className="mt-8">
         {loading ? (
-          <div className="text-sm text-[var(--color-fg-subtle)]">{t('common.loading')}</div>
+          <PanelFallback />
         ) : records.length === 0 ? (
           <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-10 text-center text-sm text-[var(--color-fg-muted)]">
             {t('usage.empty')}

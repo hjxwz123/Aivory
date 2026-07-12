@@ -26,6 +26,7 @@ import {
 } from '@/components/ui/dialog'
 import { toast } from '@/hooks/use-toast'
 import { Badge } from '@/components/ui/badge'
+import { PanelFallback } from '@/components/ui/panel-fallback'
 
 type Editable = Partial<ApiChannel> & { api_key?: string }
 
@@ -129,7 +130,7 @@ export default function AdminChannels() {
 
       <section className="mt-8">
         {loading ? (
-          <div className="text-sm text-[var(--color-fg-subtle)]">{t('admin:common.loading')}</div>
+          <PanelFallback />
         ) : rows.length === 0 ? (
           <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-10 text-center">
             <p className="text-[var(--color-fg-muted)] text-sm">{t('admin:channels.empty')}</p>

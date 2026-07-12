@@ -18,6 +18,7 @@ import { Field } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { toast } from '@/hooks/use-toast'
+import { PanelFallback } from '@/components/ui/panel-fallback'
 
 type Settings = Record<string, unknown>
 
@@ -122,7 +123,7 @@ export default function AdminDocuments() {
       </header>
 
       {loading ? (
-        <div className="mt-8 text-sm text-[var(--color-fg-subtle)]">{t('admin:common.loading')}</div>
+        <PanelFallback />
       ) : (
         <section className="mt-8 flex flex-col gap-5">
           {/* Embedding model ------------------------------------------------- */}

@@ -15,6 +15,7 @@ import { useLanguage } from '@/store/language'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
+import { PanelFallback } from '@/components/ui/panel-fallback'
 
 const RANGE_IDS = ['1', '7', '30', '90'] as const
 type Metric = 'calls' | 'tokens' | 'cost'
@@ -146,7 +147,7 @@ export default function AdminAnalytics() {
       </div>
 
       {loading ? (
-        <div className="mt-8 text-sm text-[var(--color-fg-subtle)]">{t('common.loading')}</div>
+        <PanelFallback />
       ) : !data || data.trend.length === 0 ? (
         <div className="mt-8 rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-10 text-center text-sm text-[var(--color-fg-muted)]">
           {t('analytics.empty')}

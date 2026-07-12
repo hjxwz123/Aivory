@@ -24,6 +24,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { toast } from '@/hooks/use-toast'
+import { PanelFallback } from '@/components/ui/panel-fallback'
 
 function formatStamp(unixSec: number): string {
   if (!unixSec) return ''
@@ -111,7 +112,7 @@ export default function AdminUserConversations() {
 
       <section className="mt-8">
         {loading ? (
-          <div className="text-sm text-[var(--color-fg-subtle)]">{t('common.loading')}</div>
+          <PanelFallback />
         ) : rows.length === 0 ? (
           <div className="text-sm text-[var(--color-fg-subtle)] rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-10 text-center">
             {t('users.noConversations')}
