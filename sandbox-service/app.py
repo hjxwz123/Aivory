@@ -1832,12 +1832,23 @@ def _reaper() -> None:
 @app.on_event("startup")
 def _start_reaper() -> None:
     if PULL_ON_START:
-        # Pull the runtime image up front (host daemon; not affected by the
-        # per-session --network none). Don't crash the service if it fails.
-        cp = _docker(["pull", IMAGE], timeout=600)
-        if cp.returncode != 0:
-            print(f"[sandbox] warning: failed to pull {IMAGE}: "
-                  f"{cp.stderr.decode(errors='replace')[:200]}")
+        # Warm the runtime image in the BACKGROUND (host daemon; not affected
+        # by the per-session --network none). This is an optimization, never a
+        # startup gate: a slow registry/proxy used to raise TimeoutExpired out
+        # of this hook and crash-loop the whole sidecar. Cold-cache sessions
+        # still pull lazily on first use if this hasn't finished.
+        def _warm_pull() -> None:
+            try:
+                cp = _docker(["pull", IMAGE], timeout=3600)
+                if cp.returncode != 0:
+                    print(f"[sandbox] warning: startup pull of {IMAGE} failed: "
+                          f"{cp.stderr.decode(errors='replace')[:200]}")
+                else:
+                    print(f"[sandbox] runtime image {IMAGE} ready")
+            except Exception as exc:  # noqa: BLE001 - warm-up must never kill startup
+                print(f"[sandbox] warning: startup pull of {IMAGE} failed: {exc}")
+
+        threading.Thread(target=_warm_pull, daemon=True).start()
     if LOCAL_STORAGE_DIR:
         # §4.5 local archive backend: ensure the mount point exists so
         # _storage_effective("local") turns on. Best-effort — a failure just
