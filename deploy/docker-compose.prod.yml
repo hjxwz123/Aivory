@@ -82,7 +82,7 @@ services:
   # SECURITY: the mounted docker.sock is root-equivalent on the host; keeping
   # the service internal-only (no ports) is what contains that blast radius.
   sandbox:
-    image: ghcr.io/${IMAGE_OWNER:-hjxwz123}/aivory-sandbox-sidecar:${IMAGE_TAG:-latest}
+    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-hjxwz123}/aivory-sandbox-sidecar:${IMAGE_TAG:-latest}
     build:
       context: ../sandbox-service
       dockerfile: Dockerfile.sidecar
@@ -91,7 +91,7 @@ services:
       # Shared internal default — must match the api's SANDBOX_API_KEY above.
       SANDBOX_API_KEY: ${SANDBOX_API_KEY:-aivory-bundled-sandbox}
       # Per-session runtime image, pulled from ghcr on boot so the first call works.
-      SANDBOX_IMAGE: ghcr.io/${IMAGE_OWNER:-hjxwz123}/aivory-sandbox:${IMAGE_TAG:-latest}
+      SANDBOX_IMAGE: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-hjxwz123}/aivory-sandbox:${IMAGE_TAG:-latest}
       SANDBOX_PULL_ON_START: "1"
       SANDBOX_NETWORK: ${SANDBOX_NETWORK:-none}   # "bridge" only if sandboxed code needs internet
       SANDBOX_MEMORY: ${SANDBOX_MEMORY:-2g}
@@ -144,7 +144,7 @@ services:
   app:
     # Prebuilt image from the docker-images.yml workflow. Override IMAGE_OWNER
     # in .env if you forked into a different account.
-    image: ghcr.io/${IMAGE_OWNER:-hjxwz123}/aivory-app:${IMAGE_TAG:-latest}
+    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-hjxwz123}/aivory-app:${IMAGE_TAG:-latest}
     build:
       context: ..
       dockerfile: deploy/Dockerfile.app
@@ -165,6 +165,12 @@ services:
     # 80 is taken (e.g. "8080:8787"); no env var needed.
     ports:
       - "80:8787"
+    # Advanced tuning: any AIVORY_* variable from docs (configuration/env-advanced)
+    # can simply be added to the same .env file used above — env_file injects the
+    # whole file into the container. Explicit `environment:` entries below still
+    # take precedence, so the wired-up backends can't be broken by a stray line.
+    env_file:
+      - .env
     environment:
       AIVORY_LISTEN: ":8787"
       AIVORY_ENV: production
