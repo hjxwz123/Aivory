@@ -62,7 +62,8 @@
     "styleNone": "なし",
     "noStyles": "スタイルがありません。",
     "storageQuotaFull": "ストレージが満杯のためアップロードできません。「ファイル」ページで空きを作ってから再試行してください。",
-    "storageQuotaAction": "空き容量を作る"
+    "storageQuotaAction": "空き容量を作る",
+    "processing": "処理中…"
   },
   "assistant": "Aivory",
   "thinking": "思考中",

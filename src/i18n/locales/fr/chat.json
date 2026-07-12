@@ -62,7 +62,8 @@
     "styleNone": "Aucun",
     "noStyles": "Aucun style configuré.",
     "storageQuotaFull": "Stockage plein — libérez de l'espace dans Fichiers puis réessayez.",
-    "storageQuotaAction": "Libérer de l'espace"
+    "storageQuotaAction": "Libérer de l'espace",
+    "processing": "Traitement…"
   },
   "assistant": "Aivory",
   "thinking": "Réflexion",

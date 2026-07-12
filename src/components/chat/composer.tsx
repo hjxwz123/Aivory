@@ -823,8 +823,15 @@ export function Composer({
             const busy = a.uploading || a.ingest === 'parsing' || a.ingest === 'embedding'
             const failed = a.ingest === 'failed'
             const uploadPercent = Math.max(0, Math.min(100, Math.round(a.uploadProgress ?? 0)))
+            // Browser progress hits 100% when the bytes are handed to the socket,
+            // but the request isn't done until the server has received + written
+            // the file (and any reverse proxy has finished buffering it). Show a
+            // neutral "processing" state so a parked 100% doesn't read as frozen.
+            const serverProcessing = a.uploading && uploadPercent >= 100
             const status =
-              a.uploading
+              serverProcessing
+                ? t('composer.processing', { defaultValue: 'Processing…' })
+                : a.uploading
                 ? t('composer.uploadingPercent', { defaultValue: 'Uploading {{percent}}%', percent: uploadPercent })
                 : a.ingest === 'embedding'
                 ? t('composer.indexing')
@@ -842,7 +849,7 @@ export function Composer({
                   />
                   {busy ? (
                     <span className="absolute inset-0 grid place-items-center rounded-[10px] bg-[var(--color-overlay)]">
-                      {a.uploading ? (
+                      {a.uploading && !serverProcessing ? (
                         <ProgressRing
                           value={uploadPercent}
                           size={34}
@@ -887,7 +894,7 @@ export function Composer({
                   aria-hidden
                 >
                   {busy ? (
-                    a.uploading ? (
+                    a.uploading && !serverProcessing ? (
                       <ProgressRing value={uploadPercent} size={30} strokeWidth={3} showValue label={status} />
                     ) : (
                       <Loader2 size={17} className="animate-spin" />
