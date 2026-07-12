@@ -165,6 +165,12 @@ services:
     # 80 is taken (e.g. "8080:8787"); no env var needed.
     ports:
       - "80:8787"
+    # Advanced tuning: any AIVORY_* variable from docs (configuration/env-advanced)
+    # can simply be added to the same .env file used above — env_file injects the
+    # whole file into the container. Explicit `environment:` entries below still
+    # take precedence, so the wired-up backends can't be broken by a stray line.
+    env_file:
+      - .env
     environment:
       AIVORY_LISTEN: ":8787"
       AIVORY_ENV: production
