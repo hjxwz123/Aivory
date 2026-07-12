@@ -270,6 +270,12 @@ export function Composer({
   // Local ids explicitly removed while an upload is still in flight. If the
   // request completes after removal, immediately delete the backend file/doc.
   const removedAttachmentIds = useRef<Set<string>>(new Set())
+  // Attachments already committed to a sent message. A draft-file restore fetch
+  // fired at conversation-creation time (e.g. pasting an image on the home
+  // screen lazily creates the scope) can resolve AFTER the send cleared the
+  // composer, re-adding the just-sent file. These ids are filtered out of any
+  // late restore so a sent attachment never bounces back into the input.
+  const committedAttachmentIds = useRef<Set<string>>(new Set())
   useEffect(() => {
     const timers = pollTimers.current
     return () => {
@@ -421,6 +427,7 @@ export function Composer({
       pollTimers.current.forEach((tm) => clearTimeout(tm))
       pollTimers.current.clear()
       attachments.forEach((a) => {
+        committedAttachmentIds.current.add(a.id)
         if (a.previewUrl && a.previewUrl.startsWith('blob:')) URL.revokeObjectURL(a.previewUrl)
       })
       setAttachments([])
@@ -551,6 +558,7 @@ export function Composer({
     if (previousScope && previousScope !== conversationId) {
       pollTimers.current.forEach((tm) => clearTimeout(tm))
       pollTimers.current.clear()
+      committedAttachmentIds.current.clear()
       setAttachments([])
     }
     if (!conversationId) {
@@ -567,7 +575,12 @@ export function Composer({
         const restored = files.map((file) => restoreConversationFile(file, conversationId))
         setAttachments((current) => {
           const present = new Set(current.map((item) => item.id))
-          return [...current, ...restored.filter((item) => !present.has(item.id))]
+          return [
+            ...current,
+            // Skip anything already present OR already sent — a stale restore
+            // fetch must never resurrect a just-committed attachment.
+            ...restored.filter((item) => !present.has(item.id) && !committedAttachmentIds.current.has(item.id)),
+          ]
         })
         for (const file of files) {
           if (
