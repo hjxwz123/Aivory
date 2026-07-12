@@ -61,7 +61,8 @@
     "styleHeading": "Image style",
     "styleNone": "None",
     "noStyles": "No styles configured.",
-    "storageQuotaFull": "Storage is full — free up space in Files and try again."
+    "storageQuotaFull": "Storage is full — free up space in Files and try again.",
+    "storageQuotaAction": "Clean up space"
   },
   "assistant": "Aivory",
   "thinking": "Thinking",

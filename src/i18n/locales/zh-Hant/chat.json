@@ -61,7 +61,8 @@
     "styleHeading": "圖片風格",
     "styleNone": "無",
     "noStyles": "尚無風格。",
-    "storageQuotaFull": "儲存空間已滿,無法上傳。請先到「檔案」頁清理後再試。"
+    "storageQuotaFull": "儲存空間已滿,無法上傳。請先到「檔案」頁清理後再試。",
+    "storageQuotaAction": "去清理空間"
   },
   "assistant": "Aivory",
   "thinking": "思考中",
