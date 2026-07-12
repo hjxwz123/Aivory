@@ -330,7 +330,13 @@
     "noDocuments": "暂无文档。",
     "imagesHeading": "图库",
     "noImages": "暂无生成的图片。",
-    "loadMore": "加载更多"
+    "loadMore": "加载更多",
+    "deleteStarted": "删除已开始,正在后台清理数据",
+    "status": {
+      "banned": "已封禁",
+      "disabled": "已停用",
+      "deleting": "删除中…"
+    }
   },
   "usage": {
     "title": "用量",
@@ -397,7 +403,11 @@
     "workspaceTag": "空间",
     "fallbackTag": "兜底",
     "fallbackTitle": "由该模型的兜底渠道提供",
-    "errorDetail": { "title": "上游报错", "view": "查看报错详情", "none": "该请求未记录报错详情。" },
+    "errorDetail": {
+      "title": "上游报错",
+      "view": "查看报错详情",
+      "none": "该请求未记录报错详情。"
+    },
     "statusError": "错误",
     "status": {
       "all": "全部",
@@ -608,7 +618,9 @@
     },
     "errors": {
       "nameRequired": "请填写名称"
-    }
+    },
+    "maxStorage": "存储空间(MB)",
+    "maxStorageHint": "0 表示不限制;仅统计非图片文件。"
   },
   "quota": {
     "saved": "权限已保存",
@@ -926,5 +938,50 @@
     "deleteBody": "其中的所有对话、项目和知识库将被删除，全部成员失去访问权限。此操作不可撤销。",
     "roleOwner": "创建者",
     "roleMember": "成员"
+  },
+  "files": {
+    "title": "文件",
+    "lead": "所有用户在对话与知识库中上传的文件。删除会同时清除数据库记录、向量索引与磁盘上的文件。",
+    "deleteSelected": "删除所选({{count}})",
+    "total": "共 {{count}} 个文件",
+    "empty": "没有符合筛选条件的文件。",
+    "view": "查看",
+    "download": "下载",
+    "deleted": "已删除 {{count}} 个文件",
+    "previewFailed": "预览失败",
+    "noInlinePreview": "该文件类型不支持在线预览。",
+    "unknownType": "未知类型",
+    "selectAll": "全选本页",
+    "selectOne": "选择 {{name}}",
+    "confirmTitle": "删除 {{count}} 个文件?",
+    "confirmBody": "将永久删除磁盘文件、数据库记录与检索向量,不可恢复。",
+    "confirmMore": "…以及另外 {{count}} 个",
+    "filters": {
+      "search": "文件名",
+      "searchPlaceholder": "搜索文件名",
+      "user": "用户",
+      "allUsers": "全部用户",
+      "origin": "来源",
+      "sort": "排序"
+    },
+    "origin": {
+      "all": "全部来源",
+      "conversation": "对话",
+      "kb": "知识库"
+    },
+    "sort": {
+      "newest": "最新在前",
+      "oldest": "最早在前",
+      "largest": "最大在前",
+      "smallest": "最小在前"
+    },
+    "table": {
+      "filename": "文件名",
+      "user": "用户",
+      "origin": "来源",
+      "size": "大小",
+      "uploaded": "上传时间",
+      "actions": "操作"
+    }
   }
 }

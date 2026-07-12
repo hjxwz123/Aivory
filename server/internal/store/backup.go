@@ -38,6 +38,7 @@ var backupTableOrder = []string{
 	"model_skills", "knowledge_bases", "projects", "conversations", "messages",
 	"conversation_shares", "files", "documents", "chunks", "memories",
 	"usage_logs", "artifacts", "refresh_tokens", "oauth_identities",
+	"pending_storage_cleanup",
 }
 
 // configTableOrder is the non-user, non-conversation admin configuration slice.
@@ -291,6 +292,7 @@ var tablePrimaryKeys = map[string][]string{
 	"artifacts":           {"id"},
 	"refresh_tokens":      {"jti"},
 	"oauth_identities":    {"provider_id", "subject"},
+	"pending_storage_cleanup": {"path"},
 }
 
 // UpsertTable merges rows from a JSONL table dump by primary key. Config import

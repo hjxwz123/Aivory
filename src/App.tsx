@@ -59,6 +59,8 @@ const AdminBackup = lazy(() => import('@/pages/admin/AdminBackup'))
 const AdminModeration = lazy(() => import('@/pages/admin/AdminModeration'))
 const AdminAnnouncement = lazy(() => import('@/pages/admin/AdminAnnouncement'))
 const AdminDocuments = lazy(() => import('@/pages/admin/AdminDocuments'))
+const AdminFiles = lazy(() => import('@/pages/admin/AdminFiles'))
+const UserFiles = lazy(() => import('@/pages/files/UserFiles'))
 const AdminTools = lazy(() => import('@/pages/admin/AdminTools'))
 const AdminAudio = lazy(() => import('@/pages/admin/AdminAudio'))
 const AdminOAuth = lazy(() => import('@/pages/admin/AdminOAuth'))
@@ -150,6 +152,9 @@ export default function App() {
               <Route index element={<ProjectsList />} />
               <Route path=":id" element={<ProjectDetail />} />
             </Route>
+            <Route path="/files" element={<ChatLayout />}>
+              <Route index element={<UserFiles />} />
+            </Route>
             <Route path="/kb" element={<ChatLayout />}>
               <Route index element={<KnowledgeBasesList />} />
               <Route path=":id" element={<KnowledgeBaseDetail />} />
@@ -198,6 +203,7 @@ export default function App() {
               <Route path="usage" element={<AdminUsage />} />
               <Route path="analytics" element={<AdminAnalytics />} />
               <Route path="documents" element={<AdminDocuments />} />
+              <Route path="files" element={<AdminFiles />} />
               <Route path="tools" element={<AdminTools />} />
               <Route path="audio" element={<AdminAudio />} />
               <Route path="oauth" element={<AdminOAuth />} />

@@ -13,6 +13,7 @@ import enErrors from './locales/en/errors.json'
 import enProjects from './locales/en/projects.json'
 import enAdmin from './locales/en/admin.json'
 import enKb from './locales/en/kb.json'
+import enFiles from './locales/en/files.json'
 import enMemory from './locales/en/memory.json'
 import enSubscription from './locales/en/subscription.json'
 import enWelcome from './locales/en/welcome.json'
@@ -28,6 +29,7 @@ import zhErrors from './locales/zh/errors.json'
 import zhProjects from './locales/zh/projects.json'
 import zhAdmin from './locales/zh/admin.json'
 import zhKb from './locales/zh/kb.json'
+import zhFiles from './locales/zh/files.json'
 import zhMemory from './locales/zh/memory.json'
 import zhSubscription from './locales/zh/subscription.json'
 import zhWelcome from './locales/zh/welcome.json'
@@ -43,6 +45,7 @@ import zhHantErrors from './locales/zh-Hant/errors.json'
 import zhHantProjects from './locales/zh-Hant/projects.json'
 import zhHantAdmin from './locales/zh-Hant/admin.json'
 import zhHantKb from './locales/zh-Hant/kb.json'
+import zhHantFiles from './locales/zh-Hant/files.json'
 import zhHantMemory from './locales/zh-Hant/memory.json'
 import zhHantSubscription from './locales/zh-Hant/subscription.json'
 import zhHantWelcome from './locales/zh-Hant/welcome.json'
@@ -58,6 +61,7 @@ import jaErrors from './locales/ja/errors.json'
 import jaProjects from './locales/ja/projects.json'
 import jaAdmin from './locales/ja/admin.json'
 import jaKb from './locales/ja/kb.json'
+import jaFiles from './locales/ja/files.json'
 import jaMemory from './locales/ja/memory.json'
 import jaSubscription from './locales/ja/subscription.json'
 import jaWelcome from './locales/ja/welcome.json'
@@ -73,6 +77,7 @@ import frErrors from './locales/fr/errors.json'
 import frProjects from './locales/fr/projects.json'
 import frAdmin from './locales/fr/admin.json'
 import frKb from './locales/fr/kb.json'
+import frFiles from './locales/fr/files.json'
 import frMemory from './locales/fr/memory.json'
 import frSubscription from './locales/fr/subscription.json'
 import frWelcome from './locales/fr/welcome.json'
@@ -102,6 +107,7 @@ const resources = {
     projects: enProjects,
     admin: enAdmin,
     kb: enKb,
+      files: enFiles,
     memory: enMemory,
     subscription: enSubscription,
     welcome: enWelcome,
@@ -117,6 +123,7 @@ const resources = {
     projects: zhProjects,
     admin: zhAdmin,
     kb: zhKb,
+      files: zhFiles,
     memory: zhMemory,
     subscription: zhSubscription,
     welcome: zhWelcome,
@@ -132,6 +139,7 @@ const resources = {
     projects: zhHantProjects,
     admin: zhHantAdmin,
     kb: zhHantKb,
+      files: zhHantFiles,
     memory: zhHantMemory,
     subscription: zhHantSubscription,
     welcome: zhHantWelcome,
@@ -147,6 +155,7 @@ const resources = {
     projects: jaProjects,
     admin: jaAdmin,
     kb: jaKb,
+      files: jaFiles,
     memory: jaMemory,
     subscription: jaSubscription,
     welcome: jaWelcome,
@@ -162,6 +171,7 @@ const resources = {
     projects: frProjects,
     admin: frAdmin,
     kb: frKb,
+      files: frFiles,
     memory: frMemory,
     subscription: frSubscription,
     welcome: frWelcome,

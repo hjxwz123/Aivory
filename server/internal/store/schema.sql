@@ -45,6 +45,8 @@ CREATE TABLE IF NOT EXISTS user_groups (
   sort_order  INTEGER NOT NULL DEFAULT 0,
   max_projects INTEGER NOT NULL DEFAULT 0,
   max_kbs      INTEGER NOT NULL DEFAULT 0,
+  -- Storage quota for non-image uploads, MB (0 = unlimited, § user files page).
+  max_storage_mb INTEGER NOT NULL DEFAULT 0,
   credit_allowance      REAL NOT NULL DEFAULT 0,    -- timed credits granted each cycle
   credit_period_seconds INTEGER NOT NULL DEFAULT 0, -- refresh cycle length (0 = no timed credits)
   created_at  INTEGER NOT NULL DEFAULT (strftime('%s','now')),
@@ -449,6 +451,16 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_oauth_providers_name_unique ON oauth_provi
 -- Links a provider identity (provider row + stable subject) to a local user.
 -- Keyed on (provider_id, subject) so the link survives email changes — re-login
 -- matches on the provider's immutable subject, never on the email.
+-- Storage paths awaiting physical deletion (§8.1-A async user delete). Rows
+-- are written BEFORE any destructive SQL delete and removed one by one as the
+-- bytes are actually unlinked, so a crash mid-purge never orphans disk or
+-- object-storage bytes: startup sweeps whatever is left.
+CREATE TABLE IF NOT EXISTS pending_storage_cleanup (
+  path       TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL,
+  created_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+);
+
 CREATE TABLE IF NOT EXISTS oauth_identities (
   provider_id TEXT NOT NULL,
   subject     TEXT NOT NULL,

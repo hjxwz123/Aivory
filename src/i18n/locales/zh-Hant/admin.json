@@ -330,7 +330,13 @@
     "noDocuments": "尚無文件。",
     "imagesHeading": "圖庫",
     "noImages": "尚無生成的圖片。",
-    "loadMore": "載入更多"
+    "loadMore": "載入更多",
+    "deleteStarted": "刪除已開始,正在背景清理資料",
+    "status": {
+      "banned": "已封禁",
+      "disabled": "已停用",
+      "deleting": "刪除中…"
+    }
   },
   "usage": {
     "title": "用量",
@@ -397,7 +403,11 @@
     "workspaceTag": "空間",
     "fallbackTag": "備援",
     "fallbackTitle": "由該模型的備援渠道處理",
-    "errorDetail": { "title": "上游報錯", "view": "檢視報錯詳情", "none": "此請求未記錄報錯詳情。" },
+    "errorDetail": {
+      "title": "上游報錯",
+      "view": "檢視報錯詳情",
+      "none": "此請求未記錄報錯詳情。"
+    },
     "statusError": "錯誤",
     "status": {
       "all": "全部",
@@ -608,7 +618,9 @@
     },
     "errors": {
       "nameRequired": "請填寫名稱"
-    }
+    },
+    "maxStorage": "儲存空間(MB)",
+    "maxStorageHint": "0 表示不限制;僅統計非圖片檔案。"
   },
   "quota": {
     "saved": "許可權已儲存",
@@ -926,5 +938,50 @@
     "deleteBody": "其中的所有對話、專案和知識庫將被刪除，全部成員失去存取權限。此操作無法復原。",
     "roleOwner": "建立者",
     "roleMember": "成員"
+  },
+  "files": {
+    "title": "檔案",
+    "lead": "所有使用者在對話與知識庫中上傳的檔案。刪除會同時清除資料庫記錄、向量索引與磁碟上的檔案。",
+    "deleteSelected": "刪除所選({{count}})",
+    "total": "共 {{count}} 個檔案",
+    "empty": "沒有符合篩選條件的檔案。",
+    "view": "檢視",
+    "download": "下載",
+    "deleted": "已刪除 {{count}} 個檔案",
+    "previewFailed": "預覽失敗",
+    "noInlinePreview": "該檔案類型不支援線上預覽。",
+    "unknownType": "未知類型",
+    "selectAll": "全選本頁",
+    "selectOne": "選擇 {{name}}",
+    "confirmTitle": "刪除 {{count}} 個檔案?",
+    "confirmBody": "將永久刪除磁碟檔案、資料庫記錄與檢索向量,無法復原。",
+    "confirmMore": "…以及另外 {{count}} 個",
+    "filters": {
+      "search": "檔名",
+      "searchPlaceholder": "搜尋檔名",
+      "user": "使用者",
+      "allUsers": "全部使用者",
+      "origin": "來源",
+      "sort": "排序"
+    },
+    "origin": {
+      "all": "全部來源",
+      "conversation": "對話",
+      "kb": "知識庫"
+    },
+    "sort": {
+      "newest": "最新在前",
+      "oldest": "最早在前",
+      "largest": "最大在前",
+      "smallest": "最小在前"
+    },
+    "table": {
+      "filename": "檔名",
+      "user": "使用者",
+      "origin": "來源",
+      "size": "大小",
+      "uploaded": "上傳時間",
+      "actions": "操作"
+    }
   }
 }

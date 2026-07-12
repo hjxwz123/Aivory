@@ -31,27 +31,39 @@ func cleanupStoragePaths(ctx context.Context, d Deps, paths []string, label stri
 			continue
 		}
 		seen[p] = struct{}{}
-		ref, err := store.StoragePathReferenced(ctx, d.DB, p)
-		if err != nil {
-			logStorageCleanup(d, "%s: check storage refs for %q: %v", label, p, err)
-			continue
-		}
-		if ref {
-			continue
-		}
-		if looksLocalStoragePath(p) {
-			if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
-				logStorageCleanup(d, "%s: remove local storage %q: %v", label, p, err)
-			}
-		}
-		if key, ok := objectStorageKey(p, obj); ok {
-			dctx, cancel := context.WithTimeout(context.Background(), objectStorageDeleteTimeout)
-			if err := obj.Delete(dctx, key); err != nil {
-				logStorageCleanup(d, "%s: delete object storage %q: %v", label, key, err)
-			}
-			cancel()
+		if _, err := cleanupOneStoragePath(ctx, d, obj, p); err != nil {
+			logStorageCleanup(d, "%s: cleanup %q: %v", label, p, err)
 		}
 	}
+}
+
+// cleanupOneStoragePath removes one path from local disk and object storage,
+// honouring the reference-count guard. referenced=true means DB rows still
+// point at the path so the bytes were intentionally left alone — the deletion
+// job may forget such a path (it belongs to someone else) while the startup
+// sweep must keep it (its owner's job is still running). err != nil means the
+// removal itself failed and durable cleanup state must be retained.
+func cleanupOneStoragePath(ctx context.Context, d Deps, obj *storage.Client, p string) (referenced bool, err error) {
+	ref, err := store.StoragePathReferenced(ctx, d.DB, p)
+	if err != nil {
+		return false, err
+	}
+	if ref {
+		return true, nil
+	}
+	if looksLocalStoragePath(p) {
+		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+			return false, err
+		}
+	}
+	if key, ok := objectStorageKey(p, obj); ok {
+		dctx, cancel := context.WithTimeout(context.Background(), objectStorageDeleteTimeout)
+		defer cancel()
+		if err := obj.Delete(dctx, key); err != nil {
+			return false, err
+		}
+	}
+	return false, nil
 }
 
 func cleanupRAGDocument(ctx context.Context, d Deps, docID, label string) {

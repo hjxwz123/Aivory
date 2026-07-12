@@ -251,35 +251,13 @@ func deleteMeHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	// Snapshot side state before the SQL delete so Qdrant vectors and physical
-	// storage can be cleaned after the transaction commits.
-	plan, err := store.BuildUserCleanupPlan(r.Context(), d.DB, u.ID)
-	if err != nil {
+	// Heavy cleanup (bulk SQL, vectors, disk) runs in a background job; this
+	// request only locks the account out and returns. §async user delete.
+	if _, err := startUserDeletion(d, u.ID, u.Email); err != nil {
 		writeError(w, 500, err)
 		return
 	}
-
-	if err := store.DeleteUser(r.Context(), d.DB, u.ID); err != nil {
-		writeError(w, 500, err)
-		return
-	}
-	invalidateAuthUser(d, u.ID)
-
-	// Best-effort Qdrant/storage cleanup. Runs after the SQL commit so a sidecar
-	// or Qdrant failure never blocks account deletion.
-	label := "delete user " + u.ID
-	for _, docID := range plan.DocumentIDs {
-		cleanupRAGDocument(r.Context(), d, docID, label)
-	}
-	for _, convID := range plan.ConversationIDs {
-		cleanupRAGConversation(r.Context(), d, convID, label)
-	}
-	for _, kbID := range plan.KBIDs {
-		cleanupRAGKB(r.Context(), d, kbID, label)
-	}
-	cleanupStoragePaths(r.Context(), d, plan.StoragePaths, label)
-
 	clearCookie(w, "auth_token")
 	clearCookie(w, "refresh_token")
-	writeJSON(w, 200, map[string]bool{"ok": true})
+	writeJSON(w, 202, map[string]any{"ok": true, "status": "deleting"})
 }

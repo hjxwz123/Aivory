@@ -60,7 +60,8 @@
     "style": "スタイル",
     "styleHeading": "画像スタイル",
     "styleNone": "なし",
-    "noStyles": "スタイルがありません。"
+    "noStyles": "スタイルがありません。",
+    "storageQuotaFull": "ストレージが満杯のためアップロードできません。「ファイル」ページで空きを作ってから再試行してください。"
   },
   "assistant": "Aivory",
   "thinking": "思考中",
@@ -435,5 +436,6 @@
     "roleOwner": "オーナー",
     "roleMember": "メンバー",
     "switchSpace": "スペースを切り替え"
-  }
+  },
+  "attachmentDeleted": "ファイルは削除されました"
 }

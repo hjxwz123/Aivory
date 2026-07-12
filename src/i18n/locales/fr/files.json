@@ -1,0 +1,40 @@
+{
+  "title": "Fichiers",
+  "searchPlaceholder": "Rechercher un nom de fichier",
+  "total": "{{count}} fichier(s)",
+  "view": "Voir",
+  "deleted": "Fichier supprimé",
+  "previewFailed": "Échec de l'aperçu",
+  "noInlinePreview": "Pas d'aperçu intégré pour ce type de fichier.",
+  "confirmTitle": "Supprimer ce fichier ?",
+  "confirmBody": "« {{name}} » sera supprimé partout — le fichier lui-même, ses enregistrements et son index de recherche. Irréversible.",
+  "origin": {
+    "all": "Toutes les sources",
+    "conversation": "Conversation",
+    "kb": "Base de connaissances"
+  },
+  "sort": {
+    "newest": "Plus récents d'abord",
+    "oldest": "Plus anciens d'abord",
+    "largest": "Plus gros d'abord",
+    "smallest": "Plus petits d'abord"
+  },
+  "table": {
+    "filename": "Nom",
+    "type": "Type",
+    "origin": "Source",
+    "size": "Taille",
+    "uploaded": "Téléversé",
+    "actions": "Actions"
+  },
+  "storage": {
+    "title": "Stockage",
+    "usedOf": "{{used}} sur {{quota}} utilisés",
+    "usedUnlimited": "{{used}} utilisés · sans limite",
+    "note": "Les documents et autres fichiers comptent dans votre stockage ; pas les images."
+  },
+  "empty": {
+    "title": "Aucun fichier",
+    "body": "Les fichiers téléversés dans vos conversations ou bases de connaissances apparaîtront ici."
+  }
+}

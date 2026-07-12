@@ -60,7 +60,8 @@
     "style": "風格",
     "styleHeading": "圖片風格",
     "styleNone": "無",
-    "noStyles": "尚無風格。"
+    "noStyles": "尚無風格。",
+    "storageQuotaFull": "儲存空間已滿,無法上傳。請先到「檔案」頁清理後再試。"
   },
   "assistant": "Aivory",
   "thinking": "思考中",
@@ -435,5 +436,6 @@
     "roleOwner": "建立者",
     "roleMember": "成員",
     "switchSpace": "切換空間"
-  }
+  },
+  "attachmentDeleted": "檔案已刪除"
 }

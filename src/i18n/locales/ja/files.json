@@ -1,0 +1,40 @@
+{
+  "title": "ファイル",
+  "searchPlaceholder": "ファイル名を検索",
+  "total": "{{count}} 件のファイル",
+  "view": "表示",
+  "deleted": "ファイルを削除しました",
+  "previewFailed": "プレビューに失敗しました",
+  "noInlinePreview": "このファイル形式はインラインプレビューに対応していません。",
+  "confirmTitle": "このファイルを削除しますか?",
+  "confirmBody": "「{{name}}」は完全に削除されます——ファイル本体、データベース記録、検索インデックスがすべて除去されます。元に戻せません。",
+  "origin": {
+    "all": "すべてのソース",
+    "conversation": "会話",
+    "kb": "ナレッジベース"
+  },
+  "sort": {
+    "newest": "新しい順",
+    "oldest": "古い順",
+    "largest": "大きい順",
+    "smallest": "小さい順"
+  },
+  "table": {
+    "filename": "ファイル名",
+    "type": "形式",
+    "origin": "ソース",
+    "size": "サイズ",
+    "uploaded": "アップロード日時",
+    "actions": "操作"
+  },
+  "storage": {
+    "title": "ストレージ",
+    "usedOf": "{{quota}} 中 {{used}} 使用",
+    "usedUnlimited": "{{used}} 使用 · 制限なし",
+    "note": "ドキュメントなどのファイルはストレージに計上されます。画像は計上されません。"
+  },
+  "empty": {
+    "title": "ファイルはまだありません",
+    "body": "会話やナレッジベースでアップロードしたファイルがここに表示されます。"
+  }
+}

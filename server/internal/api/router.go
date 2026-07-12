@@ -113,6 +113,10 @@ var (
 
 // NewRouter returns the fully-wired http.Handler.
 func NewRouter(d Deps) http.Handler {
+	// Resume account deletions stranded in status='deleting' by a previous
+	// process (§async user delete). Async: never delays startup.
+	go resumeUserDeletions(d)
+
 	mux := newMux()
 
 	// Public endpoints.
@@ -277,6 +281,11 @@ func NewRouter(d Deps) http.Handler {
 
 	mux.handle("POST", "/api/files", requireAuth(d, uploadFileHandler))
 	mux.handle("GET", "/api/files/:id", requireAuth(d, downloadFileHandler))
+	// User files page (§ user files page): inventory, meter, delete, preview.
+	mux.handle("GET", "/api/me/files", requireAuth(d, listMyFilesHandler))
+	mux.handle("POST", "/api/me/files/delete", requireAuth(d, deleteMyFilesHandler))
+	mux.handle("GET", "/api/me/files/content", requireAuth(d, myFileContentHandler))
+	mux.handle("GET", "/api/me/storage", requireAuth(d, myStorageHandler))
 	mux.handle("GET", "/api/artifacts/:id", requireAuth(d, downloadArtifactHandler))
 
 	mux.handle("GET", "/api/kbs", requireAuth(d, listKBsHandler))
@@ -358,6 +367,10 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("DELETE", "/api/admin/usage", requireAdmin(d, usageDeleteFilteredAdmin))
 	mux.handle("DELETE", "/api/admin/usage/:id", requireAdmin(d, usageDeleteOneAdmin))
 	mux.handle("GET", "/api/admin/analytics", requireAdmin(d, analyticsAdmin))
+	mux.handle("GET", "/api/admin/users/deletions", requireAdmin(d, listUserDeletionsAdmin))
+	mux.handle("GET", "/api/admin/files", requireAdmin(d, listFilesAdmin))
+	mux.handle("POST", "/api/admin/files/delete", requireAdmin(d, deleteFilesAdmin))
+	mux.handle("GET", "/api/admin/files/content", requireAdmin(d, adminFileContentHandler))
 	mux.handle("GET", "/api/admin/oauth-providers", requireAdmin(d, listOAuthProvidersAdmin))
 	mux.handle("POST", "/api/admin/oauth-providers", requireAdmin(d, createOAuthProviderAdmin))
 	mux.handle("PATCH", "/api/admin/oauth-providers/:id", requireAdmin(d, updateOAuthProviderAdmin))

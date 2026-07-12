@@ -498,7 +498,12 @@ export function Composer({
       return updated
     } catch (e) {
       setAttachments((s) => s.filter((a) => a.id !== local.id))
-      toast.error(t('composer.uploadFailed', { defaultValue: 'Upload failed' }), e instanceof Error ? e.message : undefined)
+      if (e instanceof ApiError && e.status === 507) {
+        // § user files page: group storage quota exhausted.
+        toast.error(t('composer.storageQuotaFull', { defaultValue: 'Storage is full — free up space in Files and try again.' }))
+      } else {
+        toast.error(t('composer.uploadFailed', { defaultValue: 'Upload failed' }), e instanceof Error ? e.message : undefined)
+      }
       return null
     }
   }
