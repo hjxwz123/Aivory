@@ -38,6 +38,8 @@ import { envNum } from '@/lib/env-config'
 import { toast } from '@/hooks/use-toast'
 import { activeWorkspaceId } from '@/store/workspaces'
 import { useAuth } from '@/store/auth'
+import { useComposerPrefs } from '@/store/composer-prefs'
+import { useModels } from '@/store/models'
 import i18n from '@/i18n'
 
 // The user's current UI language, sent with each turn so the backend can anchor
@@ -1091,8 +1093,14 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
     // Carry the original turn's mode so regenerating a deep-research reply
     // re-runs the research engine (and shows the panel) instead of downgrading.
     const mode = oldAssistant?.mode
-    // §verify: re-audit on regenerate iff the original turn was audited.
-    const verify = oldAssistant?.verify ? true : undefined
+    // §verify: regenerate honours the CURRENT Verify toggle — exactly like a
+    // fresh send — rather than the original turn's setting. Otherwise turning
+    // Verify OFF and then retrying an errored turn still re-audits, so the
+    // badge "sticks" even though the user disabled it. (Common case is
+    // unchanged: if the toggle was on for the original send and untouched, it
+    // is still on, so the re-audit happens as before.)
+    const verify =
+      useComposerPrefs.getState().verify && useModels.getState().verifyAvailable ? true : undefined
     const placeholderId = uid('m')
     // §4.15 R2: regenerate forks at the assistant — the new reply is a SIBLING of
     // the old one under the same user turn. Seed branch metadata on the
