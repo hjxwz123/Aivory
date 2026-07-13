@@ -452,7 +452,7 @@ export default function AdminUserGroups() {
                     aria-label={t('admin:groups.fields.creditPeriod')}
                     value={String(editor.draft.creditPeriodValue ?? 0)}
                     onChange={(e) => setDraft({ creditPeriodValue: Number(e.target.value) })}
-                    className="flex-1"
+                    wrapperClassName="flex-1 min-w-0"
                   />
                   <Select
                     value={editor.draft.creditPeriodUnit ?? 'day'}

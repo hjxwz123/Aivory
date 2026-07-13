@@ -641,7 +641,8 @@ export default function ChatThread() {
                     readOnly
                     value={shareUrl}
                     onFocus={(e) => e.currentTarget.select()}
-                    className="flex-1 min-w-0 font-mono text-[12px]"
+                    wrapperClassName="flex-1 min-w-0"
+                    className="font-mono text-[12px]"
                   />
                   <Button
                     variant="secondary"

@@ -47,7 +47,8 @@ function stripRawHtml(md: string): string {
  */
 const allowedTags = new Set([
   'a', 'b', 'em', 'i', 'strong', 'u', 's', 'del', 'code', 'pre', 'kbd', 'mark',
-  'p', 'br', 'hr', 'span', 'div',
+  'small', 'sub', 'sup',
+  'p', 'br', 'hr', 'span', 'div', 'img', 'figure', 'figcaption',
   'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
   'ul', 'ol', 'li',
   'blockquote',
@@ -58,6 +59,7 @@ const allowedTags = new Set([
 ])
 const allowedAttrs: Record<string, Set<string>> = {
   a: new Set(['href', 'title']),
+  img: new Set(['src', 'alt', 'title', 'width', 'height']),
   span: new Set(['class', 'aria-hidden']),
   div: new Set(['class']),
   code: new Set(['class']),
@@ -87,6 +89,50 @@ function isSafeUrl(url: string): boolean {
   return true
 }
 
+// Visual / layout CSS properties admins may set via inline `style` in an
+// announcement (the only sanitizeHtml consumer, all admin-authored). Behavioral
+// or escape-prone properties are intentionally excluded: `position` (fixed
+// overlays / clickjacking), `content`, `cursor`, `pointer-events`, `z-index`,
+// `transform`, and any `-webkit-*`/`-moz-*` vendor prop.
+const allowedStyleProps = new Set([
+  'color', 'background', 'background-color',
+  'font', 'font-size', 'font-weight', 'font-style', 'font-family', 'line-height',
+  'letter-spacing', 'text-align', 'text-decoration', 'text-transform', 'text-shadow', 'text-indent',
+  'white-space', 'word-break', 'overflow-wrap',
+  'margin', 'margin-top', 'margin-right', 'margin-bottom', 'margin-left',
+  'padding', 'padding-top', 'padding-right', 'padding-bottom', 'padding-left',
+  'border', 'border-top', 'border-right', 'border-bottom', 'border-left',
+  'border-color', 'border-width', 'border-style', 'border-radius',
+  'width', 'max-width', 'min-width', 'height', 'max-height', 'min-height',
+  'display', 'flex', 'flex-direction', 'flex-wrap', 'align-items', 'justify-content',
+  'gap', 'row-gap', 'column-gap',
+  'opacity', 'box-shadow', 'list-style', 'vertical-align',
+])
+
+// A declaration is dropped whole when its value carries a dangerous token:
+// url() (external tracker / legacy url(javascript:)), expression()/behavior (old
+// IE code exec), @import (external CSS), CSS comments (obfuscation), or angle
+// brackets. Images go through <img>, never a CSS background.
+function styleValueSafe(v: string): boolean {
+  return !/url\(|expression\(|javascript:|@import|behavior\s*:|[<>]|\/\*/i.test(v)
+}
+
+// sanitizeStyle keeps only allow-listed, safe-valued declarations so admins get
+// real CSS control (colors, fonts, spacing, borders, flex layout) without an
+// XSS / tracking surface. Returns "" when nothing survives (caller drops the attr).
+function sanitizeStyle(value: string): string {
+  const out: string[] = []
+  for (const decl of value.split(';')) {
+    const i = decl.indexOf(':')
+    if (i < 0) continue
+    const prop = decl.slice(0, i).trim().toLowerCase()
+    const val = decl.slice(i + 1).trim()
+    if (!prop || !val || !allowedStyleProps.has(prop) || !styleValueSafe(val)) continue
+    out.push(`${prop}: ${val}`)
+  }
+  return out.join('; ')
+}
+
 /**
  * sanitizeHtml runs in the browser. It re-parses the marked-emitted HTML in
  * a detached <template> (never connected to the live DOM), walks the tree,
@@ -113,8 +159,16 @@ export function sanitizeHtml(html: string): string {
       const allow = allowedAttrs[tag] ?? new Set<string>()
       for (const a of [...el.attributes]) {
         const name = a.name.toLowerCase()
-        if (name.startsWith('on') || name === 'style' || name === 'srcdoc' || name === 'formaction') {
+        if (name.startsWith('on') || name === 'srcdoc' || name === 'formaction') {
           el.removeAttribute(a.name)
+          continue
+        }
+        // Inline style is allowed on every allowed tag but sanitized to
+        // visual/layout CSS (admin announcements author real CSS this way).
+        if (name === 'style') {
+          const safe = sanitizeStyle(a.value)
+          if (safe) el.setAttribute('style', safe)
+          else el.removeAttribute(a.name)
           continue
         }
         if (!allow.has(name)) {

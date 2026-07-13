@@ -157,6 +157,7 @@ export default function AdminAnnouncement() {
             <div className="flex items-center gap-2">
               <Input
                 id="ann-img"
+                wrapperClassName="flex-1 min-w-0"
                 value={imageUrl}
                 onChange={(e) => setImageUrl(e.target.value)}
                 placeholder={t('admin:announcement.imagePlaceholder')}
