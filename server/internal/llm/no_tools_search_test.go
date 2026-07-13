@@ -187,6 +187,51 @@ func TestEmptyToolsCarriesNoToolFieldsOnWire(t *testing.T) {
 	})
 }
 
+// §4.13-B history compat: a turn that declares NO native tools (disable-tools,
+// tool_mode none/prompt) must not replay the stored native tool exchange —
+// providers 400 on tool_use/tool_result blocks without a tools param. The tool
+// rounds instead degrade to their text trace via the block path.
+func TestStoreToUnifiedStripsRawWithoutNativeTools(t *testing.T) {
+	raw := json.RawMessage(`[{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"web_search","input":{"query":"q"}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"result"}]},{"role":"assistant","content":[{"type":"text","text":"answer"}]}]`)
+	msgs := []store.Message{
+		{Role: "user", Blocks: json.RawMessage(`[{"kind":"text","text":"question"}]`), Status: "complete"},
+		{Role: "assistant", Provider: "anthropic", Raw: raw, Status: "complete",
+			Blocks: json.RawMessage(`[{"kind":"tool_call","tool_name":"web_search","summary":"searched the web"},{"kind":"text","text":"answer"}]`)},
+	}
+
+	// Native tools declared → raw replays verbatim (unchanged behavior).
+	with := storeToUnified(msgs, "anthropic", true)
+	if len(with) != 2 || len(with[1].Raw) == 0 {
+		t.Fatalf("native-tool turn must keep raw replay: %+v", with)
+	}
+	if body, _ := json.Marshal(historyToAnthropic(with)); !strings.Contains(string(body), `"tool_use"`) {
+		t.Fatalf("raw replay should splice tool_use into the wire history: %s", body)
+	}
+
+	// No native tools → raw stripped, wire history has NO tool blocks, and the
+	// tool round survives as readable text.
+	without := storeToUnified(msgs, "anthropic", false)
+	if len(without) != 2 {
+		t.Fatalf("stripped history lost a turn: %+v", without)
+	}
+	if len(without[1].Raw) != 0 {
+		t.Fatalf("raw must be stripped on a no-native-tools turn: %s", without[1].Raw)
+	}
+	body, _ := json.Marshal(historyToAnthropic(without))
+	for _, banned := range []string{`"tool_use"`, `"tool_result"`} {
+		if strings.Contains(string(body), banned) {
+			t.Fatalf("no-native-tools history leaked %s: %s", banned, body)
+		}
+	}
+	if !strings.Contains(string(body), "web_search") || !strings.Contains(string(body), "answer") {
+		t.Fatalf("tool round must degrade to a text trace: %s", body)
+	}
+	// The caller's slice must not be mutated by the strip.
+	if len(msgs[1].Raw) == 0 {
+		t.Fatal("storeToUnified must not mutate the caller's messages")
+	}
+}
+
 func TestForcedWebSearchUnconfiguredInjectsNothing(t *testing.T) {
 	reg := &fakeSearchRegistry{out: "Search not yet configured. Reply based on training knowledge."}
 	o := &Orchestrator{tools: reg}

@@ -521,26 +521,108 @@ func settingBool(db *sql.DB, key string, def bool) bool {
 	return def
 }
 
-// requestSnapshotFor returns the captured provider-request fields to persist on
-// a usage row, honoring the admin request-logging settings (§B5-request-logging):
-//   - Error rows ALWAYS carry the snapshot (unchanged floor behavior).
-//   - Success rows carry it only when `log_full_requests` is on AND
-//     `log_errors_only` is off — i.e. the admin explicitly opted into logging
-//     every request's full body, not just failures.
-//
-// The snapshot is the same sanitized capture the error path stores (headers
-// masked, body clamped to AIVORY_LLM_PROVIDER_REQUEST_BODY_MAX_BYTES).
-func (o *Orchestrator) requestSnapshotFor(rec *providerRequestRecorder, isError bool) (method, url, header, body string) {
-	if rec == nil {
-		return "", "", "", ""
-	}
-	if !isError {
-		if !settingBool(o.db, "log_full_requests", false) || settingBool(o.db, "log_errors_only", true) {
-			return "", "", "", ""
+// successRequestLoggingEnabled reports whether SUCCESS usage rows should carry
+// the sanitized provider-request snapshot (§B5-request-logging): only when the
+// admin turned `log_full_requests` on AND `log_errors_only` off. Error rows
+// always carry their snapshot regardless (unchanged floor behavior).
+func (o *Orchestrator) successRequestLoggingEnabled() bool {
+	return settingBool(o.db, "log_full_requests", false) && !settingBool(o.db, "log_errors_only", true)
+}
+
+// requestUsageRow is one per-upstream-request slice of a finished turn's usage
+// (§B5-per-request usage rows).
+type requestUsageRow struct {
+	Usage   Usage
+	Cost    float64
+	Credits float64
+	Method  string
+	URL     string
+	Header  string
+	Body    string
+}
+
+// perRequestUsageRows splits one finished turn into per-upstream-request usage
+// rows: every provider round the recorder captured (native tool loop iteration,
+// prompt-protocol round, deep-research call) becomes its own row carrying that
+// round's tokens and its own request snapshot. Billing invariants hold exactly:
+// row token sums equal the turn totals (any un-attached residual — list
+// overflow, TTFT model fallback — folds into the LAST row), row costs sum to
+// totalCost, and row credits sum to totalCredits (distributed by cost share so
+// the §12.2 timed-credit window reseed stays exact). When fewer than two rounds
+// carried usage, the turn stays a single row exactly as before. includeReq
+// gates the request-snapshot fields per the §B5 admin settings.
+func perRequestUsageRows(snaps []providerRequestSnapshot, model *store.Model, total Usage, totalCost, totalCredits float64, includeReq bool) []requestUsageRow {
+	withUsage := make([]providerRequestSnapshot, 0, len(snaps))
+	for _, s := range snaps {
+		if s.HasUsage {
+			withUsage = append(withUsage, s)
 		}
 	}
-	s := rec.snapshot()
-	return s.Method, s.URL, s.Header, s.Body
+	var last providerRequestSnapshot
+	if n := len(snaps); n > 0 {
+		last = snaps[n-1]
+	}
+	if len(withUsage) < 2 {
+		row := requestUsageRow{Usage: total, Cost: totalCost, Credits: totalCredits}
+		if includeReq {
+			row.Method, row.URL, row.Header, row.Body = last.Method, last.URL, last.Header, last.Body
+		}
+		return []requestUsageRow{row}
+	}
+	rows := make([]requestUsageRow, len(withUsage))
+	summed := Usage{}
+	for i, s := range withUsage {
+		rows[i] = requestUsageRow{Usage: s.Usage}
+		if includeReq {
+			rows[i].Method, rows[i].URL, rows[i].Header, rows[i].Body = s.Method, s.URL, s.Header, s.Body
+		}
+		summed.InputTokens += s.Usage.InputTokens
+		summed.OutputTokens += s.Usage.OutputTokens
+		summed.CacheReadTokens += s.Usage.CacheReadTokens
+		summed.CacheWriteTokens += s.Usage.CacheWriteTokens
+	}
+	// Residual reconciliation: whatever the attaches missed lands on the last
+	// row so Σrows == turn totals exactly (never negative per field).
+	lastRow := &rows[len(rows)-1]
+	lastRow.Usage.InputTokens = maxInt(lastRow.Usage.InputTokens+(total.InputTokens-summed.InputTokens), 0)
+	lastRow.Usage.OutputTokens = maxInt(lastRow.Usage.OutputTokens+(total.OutputTokens-summed.OutputTokens), 0)
+	lastRow.Usage.CacheReadTokens = maxInt(lastRow.Usage.CacheReadTokens+(total.CacheReadTokens-summed.CacheReadTokens), 0)
+	lastRow.Usage.CacheWriteTokens = maxInt(lastRow.Usage.CacheWriteTokens+(total.CacheWriteTokens-summed.CacheWriteTokens), 0)
+	// Costs: per-row from the model's pricing; the last row takes the exact
+	// remainder so float drift can't change what the turn billed.
+	costSum := 0.0
+	for i := range rows[:len(rows)-1] {
+		rows[i].Cost = computeCost(*model, rows[i].Usage)
+		costSum += rows[i].Cost
+	}
+	lastRow.Cost = totalCost - costSum
+	if lastRow.Cost < 0 {
+		lastRow.Cost = 0
+	}
+	// Credits: proportional to cost share, exact remainder on the last row —
+	// SUM(credits) is the durable timed-credit window record (§ credit
+	// accounting) and must not drift.
+	if totalCredits > 0 {
+		creditSum := 0.0
+		if totalCost > 0 {
+			for i := range rows[:len(rows)-1] {
+				rows[i].Credits = totalCredits * (rows[i].Cost / totalCost)
+				creditSum += rows[i].Credits
+			}
+		}
+		lastRow.Credits = totalCredits - creditSum
+		if lastRow.Credits < 0 {
+			lastRow.Credits = 0
+		}
+	}
+	return rows
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 // Run executes one turn end to end. It blocks while streaming.
@@ -932,7 +1014,12 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			})
 		}
 	}
-	uHist := storeToUnified(keep, channel.Type)
+	// §4.13-B / §2.3-C: only a request that actually declares native tools may
+	// splice the stored native tool exchange (raw) back into the history — a
+	// none/prompt/disable-tools turn would 400 upstream on tool blocks without
+	// a tools param.
+	nativeToolReplay := useOfficial || (toolMode == "native" && len(toolDefs) > 0)
+	uHist := storeToUnified(keep, channel.Type, nativeToolReplay)
 
 	// 9b. Inject the summary + RAG context into the MESSAGE layer (§4.8/§4.9),
 	//     not the system prompt — keeps the system prefix stable + cacheable.
@@ -1132,6 +1219,10 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	}
 
 	reqRecorder := newProviderRequestRecorder()
+	// §B5-per-request rows: keep sanitized header/body on EVERY captured request
+	// only when the admin opted into full success-request logging; `last` always
+	// keeps the full snapshot for the error row either way.
+	reqRecorder.captureAll = o.successRequestLoggingEnabled()
 	providerCtx := contextWithProviderRequestRecorder(ctx, reqRecorder)
 	var result *UnifiedResult
 	if req.Mode == ModeDeepResearch {
@@ -1220,28 +1311,31 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			// and the window-quota increment go together so the cache counter and the
 			// usage_logs COUNT(*) cold-reseed stay in agreement (§B3).
 			if produced {
-				reqMethod, reqURL, reqHeader, reqBody := o.requestSnapshotFor(reqRecorder, false)
-				o.logUsage(ctx, store.UsageLog{
-					UserID:           req.UserID,
-					WorkspaceID:      conv.WorkspaceID,
-					ConversationID:   conv.ID,
-					MessageID:        assistantMsg.ID,
-					ModelID:          model.ID,
-					Purpose:          "chat",
-					InputTokens:      usage.InputTokens,
-					OutputTokens:     usage.OutputTokens,
-					CacheReadTokens:  usage.CacheReadTokens,
-					CacheWriteTokens: usage.CacheWriteTokens,
-					Cost:             stopChatCost,
-					Currency:         model.Currency,
-					Credits:          timedCredits,
-					ChannelID:        servedChannelID,
-					Fallback:         usedFallback,
-					RequestMethod:    reqMethod,
-					RequestURL:       reqURL,
-					RequestHeaders:   reqHeader,
-					RequestBody:      reqBody,
-				})
+				// §B5-per-request rows: same split as the success path — tool
+				// rounds completed before the stop each keep their own row.
+				for _, rr := range perRequestUsageRows(reqRecorder.snapshots(), model, usage, stopChatCost, timedCredits, o.successRequestLoggingEnabled()) {
+					o.logUsage(ctx, store.UsageLog{
+						UserID:           req.UserID,
+						WorkspaceID:      conv.WorkspaceID,
+						ConversationID:   conv.ID,
+						MessageID:        assistantMsg.ID,
+						ModelID:          model.ID,
+						Purpose:          "chat",
+						InputTokens:      rr.Usage.InputTokens,
+						OutputTokens:     rr.Usage.OutputTokens,
+						CacheReadTokens:  rr.Usage.CacheReadTokens,
+						CacheWriteTokens: rr.Usage.CacheWriteTokens,
+						Cost:             rr.Cost,
+						Currency:         model.Currency,
+						Credits:          rr.Credits,
+						ChannelID:        servedChannelID,
+						Fallback:         usedFallback,
+						RequestMethod:    rr.Method,
+						RequestURL:       rr.URL,
+						RequestHeaders:   rr.Header,
+						RequestBody:      rr.Body,
+					})
+				}
 				o.recordQuotaUsage(ctx, req.UserID, model, stopChatCost, payWithCredits)
 			}
 			onEvent(SseEvent{Type: "done", MessageID: assistantMsg.ID, StopReason: "stopped", Usage: &usage, Credits: turnCredits})
@@ -1388,28 +1482,34 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		Status:           "complete",
 		GenMs:            time.Since(turnStart).Milliseconds(),
 	})
-	successMethod, successURL, successHeader, successBody := o.requestSnapshotFor(reqRecorder, false)
-	_ = store.LogUsage(ctx, o.db, store.UsageLog{
-		UserID:           req.UserID,
-		WorkspaceID:      conv.WorkspaceID,
-		ConversationID:   conv.ID,
-		MessageID:        assistantMsg.ID,
-		ModelID:          model.ID,
-		Purpose:          "chat",
-		InputTokens:      result.Usage.InputTokens,
-		OutputTokens:     result.Usage.OutputTokens,
-		CacheReadTokens:  result.Usage.CacheReadTokens,
-		CacheWriteTokens: result.Usage.CacheWriteTokens,
-		Cost:             chatCost,
-		Currency:         model.Currency,
-		Credits:          timedCredits,
-		ChannelID:        servedChannelID,
-		Fallback:         usedFallback,
-		RequestMethod:    successMethod,
-		RequestURL:       successURL,
-		RequestHeaders:   successHeader,
-		RequestBody:      successBody,
-	})
+	// §B5-per-request usage rows: a turn that hit the upstream N times (tool
+	// loop rounds, prompt-protocol rounds, research calls) books N rows — each
+	// with its own tokens/cost and (when full request logging is on) its own
+	// request snapshot. Row sums equal the old single-row totals exactly, and
+	// they share message_id, so per-turn groupings and quota reseeds hold.
+	for _, rr := range perRequestUsageRows(reqRecorder.snapshots(), model, result.Usage, chatCost, timedCredits, o.successRequestLoggingEnabled()) {
+		o.logUsage(ctx, store.UsageLog{
+			UserID:           req.UserID,
+			WorkspaceID:      conv.WorkspaceID,
+			ConversationID:   conv.ID,
+			MessageID:        assistantMsg.ID,
+			ModelID:          model.ID,
+			Purpose:          "chat",
+			InputTokens:      rr.Usage.InputTokens,
+			OutputTokens:     rr.Usage.OutputTokens,
+			CacheReadTokens:  rr.Usage.CacheReadTokens,
+			CacheWriteTokens: rr.Usage.CacheWriteTokens,
+			Cost:             rr.Cost,
+			Currency:         model.Currency,
+			Credits:          rr.Credits,
+			ChannelID:        servedChannelID,
+			Fallback:         usedFallback,
+			RequestMethod:    rr.Method,
+			RequestURL:       rr.URL,
+			RequestHeaders:   rr.Header,
+			RequestBody:      rr.Body,
+		})
+	}
 	// Update the fixed-window FREE quota counter for this user+model (§ user
 	// groups). Credit-paid turns are skipped inside — they must not burn the
 	// remaining free allowance.
@@ -1685,7 +1785,24 @@ func (o *Orchestrator) optimizeImagePrompt(ctx context.Context, userID, convID, 
 // fidelity). When it came from a DIFFERENT vendor, the tool process is
 // downgraded — block renderers compress each tool round into a one-line
 // summary and thinking blocks are dropped (handled by renderBlocksAsText).
-func storeToUnified(msgs []store.Message, currentProvider string) []UnifiedMessage {
+func storeToUnified(msgs []store.Message, currentProvider string, nativeToolReplay bool) []UnifiedMessage {
+	// §4.13-B / §2.3-C: raw replay re-sends the provider-native exchange
+	// verbatim — including tool_use / tool_result / functionCall blocks. A
+	// request that declares NO native tools (per-turn disable-tools, tool_mode
+	// none or prompt, every tool disabled for the model) must not splice those
+	// in: providers reject tool blocks when the request has no tools param.
+	// Blank Raw up front — on a defensive copy, the caller's slice is shared —
+	// so both the empty-turn dropper below and the replay gate see the
+	// block-derived view; prior tool rounds degrade to their text trace via
+	// renderBlocksAsText ("[已执行 …]").
+	if !nativeToolReplay {
+		cp := make([]store.Message, len(msgs))
+		copy(cp, msgs)
+		for i := range cp {
+			cp[i].Raw = nil
+		}
+		msgs = cp
+	}
 	// §workspaces concurrent turns: a shared conversation is one linear thread, so
 	// when B asks while A's answer is still generating, B's question chains directly
 	// under A's assistant PLACEHOLDER (status="streaming", empty blocks — streamed

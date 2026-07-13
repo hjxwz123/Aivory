@@ -24,7 +24,7 @@ func TestStoreToUnifiedDropsInflightPair(t *testing.T) {
 		{Role: "assistant", Blocks: json.RawMessage("[]"), Status: "streaming"},
 		{Role: "user", Blocks: textBlocks("B's question"), Status: "complete"},
 	}
-	out := storeToUnified(msgs, "anthropic")
+	out := storeToUnified(msgs, "anthropic", true)
 
 	wantRoles := []string{"user", "assistant", "user"}
 	if len(out) != len(wantRoles) {
@@ -54,7 +54,7 @@ func TestStoreToUnifiedDropsEmptyCompletedPair(t *testing.T) {
 		{Role: "user", Blocks: textBlocks("orphaned"), Status: "complete"},
 		{Role: "assistant", Blocks: json.RawMessage("[]"), Status: "complete"},
 	}
-	out := storeToUnified(msgs, "anthropic")
+	out := storeToUnified(msgs, "anthropic", true)
 	if len(out) != 2 {
 		t.Fatalf("want 2 messages, got %d", len(out))
 	}
@@ -70,7 +70,7 @@ func TestStoreToUnifiedKeepsCompleteHistory(t *testing.T) {
 		{Role: "assistant", Blocks: textBlocks("A1"), Status: "complete"},
 		{Role: "user", Blocks: textBlocks("Q2"), Status: "complete"},
 	}
-	if out := storeToUnified(msgs, "anthropic"); len(out) != 3 {
+	if out := storeToUnified(msgs, "anthropic", true); len(out) != 3 {
 		t.Fatalf("want 3 messages, got %d", len(out))
 	}
 }
@@ -84,7 +84,7 @@ func TestStoreToUnifiedKeepsImageOnlyAssistant(t *testing.T) {
 		{Role: "assistant", Blocks: img, Status: "complete"},
 		{Role: "user", Blocks: textBlocks("now a dog"), Status: "complete"},
 	}
-	if out := storeToUnified(msgs, "anthropic"); len(out) != 3 {
+	if out := storeToUnified(msgs, "anthropic", true); len(out) != 3 {
 		t.Fatalf("image-only assistant was dropped; want 3, got %d", len(out))
 	}
 }

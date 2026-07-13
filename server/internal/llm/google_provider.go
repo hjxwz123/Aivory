@@ -115,6 +115,8 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 
 		text, thinkingText, calls, modelParts, u, err := readGeminiStream(resp.Body, onEvent)
 		resp.Body.Close()
+		// §B5-per-request usage rows: pin this iteration's usage to its request.
+		attachProviderRequestUsage(ctx, u)
 		if err != nil {
 			// Stop button / kill: preserve the partial (§6.2).
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {

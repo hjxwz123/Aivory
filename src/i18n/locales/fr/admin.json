@@ -417,6 +417,11 @@
     "status": {
       "all": "Tous",
       "errorsOnly": "Erreurs uniquement"
+    },
+    "requestDetail": {
+      "title": "Détail de la requête",
+      "view": "Voir le détail de la requête",
+      "tag": "Requête"
     }
   },
   "documents": {

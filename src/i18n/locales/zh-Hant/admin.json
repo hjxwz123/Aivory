@@ -417,6 +417,11 @@
     "status": {
       "all": "全部",
       "errorsOnly": "僅錯誤"
+    },
+    "requestDetail": {
+      "title": "請求詳情",
+      "view": "檢視請求詳情",
+      "tag": "請求"
     }
   },
   "documents": {

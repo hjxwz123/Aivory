@@ -417,6 +417,11 @@
     "status": {
       "all": "全部",
       "errorsOnly": "仅错误"
+    },
+    "requestDetail": {
+      "title": "请求详情",
+      "view": "查看请求详情",
+      "tag": "请求"
     }
   },
   "documents": {

@@ -162,6 +162,8 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest,
 		}
 		text, reasoning, calls, finish, u, err := readOpenAIChatStream(resp.Body, onEvent)
 		resp.Body.Close()
+		// §B5-per-request usage rows: pin this iteration's usage to its request.
+		attachProviderRequestUsage(ctx, u)
 		if err != nil {
 			partialBlocks := append([]UnifiedBlock{}, allBlocks...)
 			if reasoning != "" {
@@ -667,6 +669,8 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 
 		text, reasoning, calls, hosted, citations, u, outputItems, err := readOpenAIResponsesStream(resp.Body, onEvent)
 		resp.Body.Close()
+		// §B5-per-request usage rows: pin this iteration's usage to its request.
+		attachProviderRequestUsage(ctx, u)
 		if err != nil {
 			partialBlocks := append([]UnifiedBlock{}, allBlocks...)
 			if reasoning != "" {

@@ -223,6 +223,9 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 		}
 		stopReason, toolCalls, text, thinkingBlocks, citations, usage, err := readAnthropicStream(resp.Body, onEvent)
 		resp.Body.Close()
+		// §B5-per-request usage rows: pin this iteration's usage to the request
+		// that produced it (also on cancel — the partial stream was still billed).
+		attachProviderRequestUsage(ctx, usage)
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				allText.WriteString(text)

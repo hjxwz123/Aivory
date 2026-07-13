@@ -359,6 +359,18 @@ export default function AdminUsage() {
                           >
                             {t('usage.statusError', { defaultValue: 'Error' })}
                           </button>
+                        ) : r.request_method || r.request_url || r.request_body ? (
+                          /* §B5-request-logging: with full-request logging on,
+                             SUCCESS rows also carry the sanitized snapshot —
+                             give them the same viewer behind a neutral chip. */
+                          <button
+                            type="button"
+                            onClick={() => setErrorDetail(r)}
+                            title={t('usage.requestDetail.view', { defaultValue: 'View request detail' })}
+                            className="inline-flex h-5 shrink-0 items-center justify-center whitespace-nowrap rounded-full bg-[var(--color-bg-muted)] px-2 text-[10px] leading-none text-[var(--color-fg-muted)] interactive hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                          >
+                            {t('usage.requestDetail.tag', { defaultValue: 'Request' })}
+                          </button>
                         ) : null}
                       </span>
                     </td>
@@ -388,7 +400,11 @@ export default function AdminUsage() {
       <Dialog open={!!errorDetail} onOpenChange={(o) => !o && setErrorDetail(null)}>
         <DialogContent size="full">
           <DialogHeader>
-            <DialogTitle>{t('usage.errorDetail.title', { defaultValue: 'Upstream error' })}</DialogTitle>
+            <DialogTitle>
+              {errorDetail?.status === 'error'
+                ? t('usage.errorDetail.title', { defaultValue: 'Upstream error' })
+                : t('usage.requestDetail.title', { defaultValue: 'Request detail' })}
+            </DialogTitle>
             <DialogDescription>
               {errorDetail
                 ? `${modelLabel(errorDetail.model_id)} · ${errorDetail.channel_name || errorDetail.channel_id || '—'}`
@@ -402,10 +418,12 @@ export default function AdminUsage() {
                 {errorDetail.request_url ? <span className="ml-2 break-all">{errorDetail.request_url}</span> : null}
               </div>
             ) : null}
-            <ErrorDetailBlock
-              title={t('usage.errorDetail.error', { defaultValue: 'Error' })}
-              content={errorDetail?.error || t('usage.errorDetail.none', { defaultValue: 'No error detail was recorded for this request.' })}
-            />
+            {errorDetail?.status === 'error' ? (
+              <ErrorDetailBlock
+                title={t('usage.errorDetail.error', { defaultValue: 'Error' })}
+                content={errorDetail?.error || t('usage.errorDetail.none', { defaultValue: 'No error detail was recorded for this request.' })}
+              />
+            ) : null}
             <ErrorDetailBlock
               title={t('usage.errorDetail.headers', { defaultValue: 'Request headers' })}
               content={errorDetail?.request_headers || t('usage.errorDetail.noHeaders', { defaultValue: 'No request headers were recorded.' })}

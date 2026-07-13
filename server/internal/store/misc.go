@@ -496,13 +496,17 @@ func nullable(s string) any {
 
 // SumUsageByUser returns total cost and message count over the past N days.
 // Error rows (§usage errors) are excluded — a failed request is not a delivered
-// message and must not inflate the user-facing /me/usage count.
+// message and must not inflate the user-facing /me/usage count. Rows sharing a
+// message_id (per-request chat rows §B5, verify/image side rows) count as ONE
+// message; rows without a message_id keep per-row identity.
 func SumUsageByUser(ctx context.Context, db *sql.DB, userID string, days int) (float64, int, error) {
 	since := time.Now().Add(-time.Duration(days) * 24 * time.Hour).Unix()
 	var cost float64
 	var count int
 	err := db.QueryRowContext(ctx,
-		`SELECT COALESCE(SUM(cost),0), COUNT(*) FROM usage_logs WHERE user_id=? AND created_at>=? AND COALESCE(status,'ok')<>'error'`, userID, since,
+		`SELECT COALESCE(SUM(cost),0),
+		        COUNT(DISTINCT COALESCE(NULLIF(message_id,''), 'row:' || CAST(id AS TEXT)))
+		 FROM usage_logs WHERE user_id=? AND created_at>=? AND COALESCE(status,'ok')<>'error'`, userID, since,
 	).Scan(&cost, &count)
 	return cost, count, err
 }

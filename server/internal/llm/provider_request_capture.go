@@ -21,18 +21,34 @@ var (
 	providerRequestValueMaxBytes = envcfg.Int("AIVORY_LLM_PROVIDER_REQUEST_VALUE_MAX_BYTES", 8*1024)
 )
 
+// maxProviderRequestSnapshots bounds the per-turn snapshot list (§B5-per-request
+// usage rows). A native tool loop is capped at ~20 iterations and deep research
+// at a few dozen provider calls; overflow requests still stream fine — they just
+// lose their own usage row and their tokens fold into the last row's residual.
+const maxProviderRequestSnapshots = 64
+
 type providerRequestSnapshot struct {
 	Method  string
 	URL     string
 	Header  string
 	Body    string
 	Attempt int
+	// Usage of the stream this request produced, attached by the provider once
+	// the response has been read (§B5-per-request usage rows). HasUsage marks
+	// requests that completed a stream — only those become usage rows.
+	Usage    Usage
+	HasUsage bool
 }
 
 type providerRequestRecorder struct {
 	mu      sync.Mutex
 	last    providerRequestSnapshot
+	all     []providerRequestSnapshot
 	attempt int
+	// captureAll keeps the sanitized header/body on EVERY list entry (admin
+	// enabled full success-request logging). Off, list entries keep only
+	// method/URL/usage — `last` always keeps the full snapshot for the error row.
+	captureAll bool
 }
 
 type providerRequestRecorderKey struct{}
@@ -56,6 +72,19 @@ func recordProviderRequest(ctx context.Context, req *http.Request) {
 	rec.record(req)
 }
 
+// attachProviderRequestUsage pins one stream's parsed usage onto the most
+// recent recorded request (§B5-per-request usage rows). Providers call it right
+// after reading each iteration's response stream; requests that never complete
+// a stream (transport error, HTTP 4xx/5xx) stay usage-less and don't become
+// success rows.
+func attachProviderRequestUsage(ctx context.Context, u Usage) {
+	rec, _ := ctx.Value(providerRequestRecorderKey{}).(*providerRequestRecorder)
+	if rec == nil {
+		return
+	}
+	rec.attachUsage(u)
+}
+
 func (r *providerRequestRecorder) snapshot() providerRequestSnapshot {
 	if r == nil {
 		return providerRequestSnapshot{}
@@ -63,6 +92,18 @@ func (r *providerRequestRecorder) snapshot() providerRequestSnapshot {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.last
+}
+
+// snapshots returns a copy of the per-request list in request order.
+func (r *providerRequestRecorder) snapshots() []providerRequestSnapshot {
+	if r == nil {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]providerRequestSnapshot, len(r.all))
+	copy(out, r.all)
+	return out
 }
 
 func (r *providerRequestRecorder) record(req *http.Request) {
@@ -79,6 +120,28 @@ func (r *providerRequestRecorder) record(req *http.Request) {
 		Header:  sanitizeProviderRequestHeaders(req.Header),
 		Body:    sanitizeProviderRequestBody(body),
 		Attempt: r.attempt,
+	}
+	if len(r.all) < maxProviderRequestSnapshots {
+		entry := r.last
+		if !r.captureAll {
+			entry.Header, entry.Body = "", ""
+		}
+		r.all = append(r.all, entry)
+	}
+}
+
+func (r *providerRequestRecorder) attachUsage(u Usage) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	// Attach only when the list's tail IS the latest request — after list
+	// overflow the tail is an older request and must not absorb foreign usage
+	// (the orchestrator's residual reconciliation keeps totals exact instead).
+	if n := len(r.all); n > 0 && r.all[n-1].Attempt == r.attempt {
+		r.all[n-1].Usage = u
+		r.all[n-1].HasUsage = true
 	}
 }
 

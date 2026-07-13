@@ -169,6 +169,9 @@ func RunPromptToolLoop(
 		if err != nil {
 			return "", blocks, usage, citations, err
 		}
+		// §B5-per-request usage rows: one attach per prompt-protocol round —
+		// covers every provider's prompt mode from this single loop.
+		attachProviderRequestUsage(ctx, u)
 		usage.InputTokens += u.InputTokens
 		usage.OutputTokens += u.OutputTokens
 		usage.CacheReadTokens += u.CacheReadTokens

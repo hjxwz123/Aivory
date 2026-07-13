@@ -141,8 +141,14 @@ func QuotasForGroup(ctx context.Context, db *sql.DB, groupID string) (map[string
 // FREE allotment, and a turn the user already paid for must not also burn
 // their remaining free allowance (§ free-allowance overshoot).
 func UsageInWindow(ctx context.Context, db *sql.DB, userID, modelID string, sinceUnix int64) (cost float64, count int, err error) {
+	// §B5-per-request usage rows: one TURN can book several chat rows (one per
+	// upstream request), so count-type quotas must count DISTINCT turns
+	// (message_id), not raw rows. Legacy rows without a message_id keep a
+	// per-row identity so their historical count is unchanged.
 	err = db.QueryRowContext(ctx,
-		`SELECT COALESCE(SUM(cost),0), COUNT(*) FROM usage_logs
+		`SELECT COALESCE(SUM(cost),0),
+		        COUNT(DISTINCT COALESCE(NULLIF(message_id,''), 'row:' || CAST(id AS TEXT)))
+		 FROM usage_logs
 		 WHERE user_id=? AND model_id=? AND purpose='chat' AND COALESCE(status,'ok')<>'error' AND COALESCE(credits,0)<=0 AND created_at>=?`,
 		userID, modelID, sinceUnix).Scan(&cost, &count)
 	return cost, count, err

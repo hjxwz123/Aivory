@@ -417,7 +417,12 @@
       "view": "エラー詳細を表示",
       "none": "このリクエストにはエラー詳細が記録されていません。"
     },
-    "statusError": "エラー"
+    "statusError": "エラー",
+    "requestDetail": {
+      "title": "リクエスト詳細",
+      "view": "リクエスト詳細を表示",
+      "tag": "リクエスト"
+    }
   },
   "documents": {
     "title": "ドキュメント",
