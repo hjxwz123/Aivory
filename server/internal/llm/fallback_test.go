@@ -12,8 +12,10 @@ import (
 )
 
 // TestRetryableUpstreamFailure pins the fallback trigger: transport errors and
-// the "a different endpoint/key might fix it" statuses retry; a 2xx/4xx-client
-// error and a caller cancellation do NOT (§fallback channel).
+// ANY non-2xx status retry on the backup channel; only a 2xx and a caller
+// cancellation do NOT (§fallback channel). 4xx is deliberately retryable:
+// relay channels answer 400/402/404 for channel-side conditions (quota, model
+// not enabled, region) that a backup relay serves fine.
 func TestRetryableUpstreamFailure(t *testing.T) {
 	resp := func(code int) *http.Response { return &http.Response{StatusCode: code} }
 	cases := []struct {
@@ -26,9 +28,11 @@ func TestRetryableUpstreamFailure(t *testing.T) {
 		{"user cancel", nil, context.Canceled, false},
 		{"deadline", nil, context.DeadlineExceeded, false},
 		{"200 ok", resp(200), nil, false},
-		{"400 bad request", resp(400), nil, false}, // our request is malformed — fallback won't fix it
+		{"400 bad request (relay quota/model errors)", resp(400), nil, true},
 		{"401 unauthorized", resp(401), nil, true}, // bad key on primary → other key may work
+		{"402 payment required (relay balance)", resp(402), nil, true},
 		{"403 forbidden", resp(403), nil, true},
+		{"404 model not found on relay", resp(404), nil, true},
 		{"429 rate limited", resp(429), nil, true},
 		{"500 server error", resp(500), nil, true},
 		{"503 unavailable", resp(503), nil, true},

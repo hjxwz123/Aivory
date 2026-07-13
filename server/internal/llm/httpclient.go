@@ -45,10 +45,10 @@ var providerHTTPClient = &http.Client{
 }
 
 // doProviderRequest issues one upstream call against the model's PRIMARY channel.
-// If that fails in a way a different endpoint could fix (transport error, or an
-// HTTP status of 401/403/408/409/429/5xx) AND the model has a fallback channel,
-// it rebuilds the request against the fallback creds and retries ONCE, flagging
-// req.FallbackUsed so the whole turn is marked fallback (§fallback channel).
+// If that fails (transport error, or ANY non-2xx HTTP status — see
+// retryableUpstreamFailure for why 4xx is included) AND the model has a fallback
+// channel, it rebuilds the request against the fallback creds and retries ONCE,
+// flagging req.FallbackUsed so the whole turn is marked fallback (§fallback channel).
 //
 // build MUST create a fresh *http.Request each call — a request body Reader is
 // consumed once and can't be rewound for the retry. A caller cancellation
@@ -101,8 +101,18 @@ func doProviderRequest(
 }
 
 // retryableUpstreamFailure reports whether a primary provider call failed in a
-// way that a DIFFERENT endpoint/key (the fallback channel) might fix. A caller
-// cancellation or deadline is intentional and never retried.
+// way the fallback channel should absorb. A caller cancellation or deadline is
+// intentional and never retried; everything else — transport errors and ANY
+// non-2xx status — retries once on the backup.
+//
+// 4xx used to be excluded on the theory "our payload is malformed, a different
+// endpoint fails identically". In practice relay/proxy channels answer 400/402/
+// 404 for CHANNEL-side conditions (quota exhausted, model not enabled on this
+// relay, region blocks), which a backup relay serves fine — a user who
+// configured a fallback expects exactly that. The cost of a wasted retry on a
+// genuinely malformed payload is one extra failed call; the cost of NOT
+// retrying a relay-side 400 is a user-visible error with a healthy backup
+// sitting idle.
 func retryableUpstreamFailure(resp *http.Response, err error) bool {
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -113,13 +123,5 @@ func retryableUpstreamFailure(resp *http.Response, err error) bool {
 	if resp == nil {
 		return true
 	}
-	switch s := resp.StatusCode; {
-	case s == http.StatusUnauthorized, s == http.StatusForbidden, // 401 / 403 — bad or throttled key
-		s == http.StatusRequestTimeout, s == http.StatusConflict, // 408 / 409
-		s == http.StatusTooManyRequests: // 429 — overloaded
-		return true
-	case s >= 500: // upstream 5xx
-		return true
-	}
-	return false
+	return resp.StatusCode >= 400
 }
