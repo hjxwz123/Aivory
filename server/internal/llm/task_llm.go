@@ -172,6 +172,27 @@ func (t *TaskLLM) Run(ctx context.Context, kind TaskKind, prompt string, opts Ru
 		}
 	})
 	if err != nil {
+		// Task-model failures were previously invisible: no usage row, no log —
+		// callers like compaction silently fall back (deterministic clip) and the
+		// only symptom is degraded quality. Log + record a status=error usage row
+		// (0 tokens, purpose = the task kind) so the admin usage page surfaces it
+		// (filterable via the purpose dropdown / errors-only).
+		if t.logger != nil {
+			t.logger.Printf("task: %s call failed (model=%s user=%s conv=%s): %v", kind, model.ID, opts.UserID, opts.ConversationID, err)
+		}
+		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			_ = store.LogUsage(ctx, t.db, store.UsageLog{
+				WorkspaceID:    opts.WorkspaceID,
+				UserID:         opts.UserID,
+				ConversationID: opts.ConversationID,
+				MessageID:      opts.MessageID,
+				ModelID:        model.ID,
+				Purpose:        string(kind),
+				Currency:       model.Currency,
+				Status:         "error",
+				Error:          truncErr(err.Error()),
+			})
+		}
 		return "", err
 	}
 	// Some providers emit deltas, others not; pick the longer.

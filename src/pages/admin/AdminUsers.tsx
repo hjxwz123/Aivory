@@ -21,6 +21,8 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Pagination } from '@/components/ui/pagination'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { initials } from '@/components/ui/avatar.utils'
 import { Field } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import {
@@ -88,7 +90,7 @@ export default function AdminUsers() {
   const [query, setQuery] = useState('')
   const [committedQuery, setCommittedQuery] = useState('')
   const [page, setPage] = useState(1)
-  const PAGE_SIZE = envNum('VITE_AIVORY_PAGE_SIZE_3', 50)
+  const PAGE_SIZE = envNum('VITE_AIVORY_PAGE_SIZE_3', 20)
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE))
   const pageRows = rows
 
@@ -341,9 +343,15 @@ export default function AdminUsers() {
               const group = groups.find((g) => g.id === u.group_id)
               const lastSeen = u.last_seen_at ?? 0
               const online = lastSeen > 0 && Date.now() / 1000 - lastSeen < ONLINE_WINDOW_S
+              const avatarUrl = (u.settings as Record<string, unknown> | undefined)?.avatar_url as string | undefined
               return (
                 <>
-                  <div className="min-w-0">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <Avatar size="md" className="shrink-0">
+                      {avatarUrl ? <AvatarImage src={avatarUrl} alt={u.name || u.email} /> : null}
+                      <AvatarFallback>{initials(u.name || u.email)}</AvatarFallback>
+                    </Avatar>
+                    <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <span
                         role="img"
@@ -377,6 +385,7 @@ export default function AdminUsers() {
                             ? t('admin:users.lastSeen', { when: formatDateTime(lastSeen * 1000) })
                             : t('admin:users.neverSeen')}
                       </span>
+                    </div>
                     </div>
                   </div>
                   <div className="flex items-center gap-0.5">
