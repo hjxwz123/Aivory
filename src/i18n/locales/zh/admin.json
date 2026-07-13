@@ -568,7 +568,11 @@
       "storageLocal": "本机磁盘（服务器卷）",
       "storageLocalNote": "零配置持久化：被回收的工作区归档到沙盒服务器挂载的目录（SANDBOX_LOCAL_STORAGE_DIR），下次该对话再执行代码时自动恢复，无需外部对象存储。仅适用于单节点；MinerU 文档解析仍需对象存储。",
       "sandboxIdleTtl": "闲置回收（秒）",
-      "sandboxIdleTtlHint": "沙盒闲置这么多秒后回收（回收前先归档其工作区）。留空 = 1800（30 分钟）。范围 60–86400。"
+      "sandboxIdleTtlHint": "沙盒闲置这么多秒后回收（回收前先归档其工作区）。留空 = 1800（30 分钟）。范围 60–86400。",
+      "logFullRequests": "记录完整请求体",
+      "logFullRequestsLead": "在每条用量记录上保存完整（已脱敏）的上游请求体，便于调试。失败请求无论此项是否开启都始终记录。",
+      "logErrorsOnly": "仅记录失败请求",
+      "logErrorsOnlyHint": "开启：维持只记录失败请求。关闭：记录全部请求的完整请求体——数据库更大，且更多敏感提示词落盘。"
     }
   },
   "groups": {

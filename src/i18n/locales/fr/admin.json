@@ -568,7 +568,11 @@
       "storageLocal": "Disque local (volume serveur)",
       "storageLocalNote": "Persistance sans configuration : les espaces de travail recyclés sont archivés dans le répertoire monté du serveur sandbox (SANDBOX_LOCAL_STORAGE_DIR) et restaurés lorsque la conversation réexécute du code — sans stockage objet externe. Nœud unique uniquement ; l'analyse de documents MinerU nécessite un stockage objet.",
       "sandboxIdleTtl": "Recyclage inactif (secondes)",
-      "sandboxIdleTtlHint": "Recycle un sandbox après ce nombre de secondes d'inactivité (son espace de travail est archivé d'abord). Vide = 1800 (30 min). Plage 60–86400."
+      "sandboxIdleTtlHint": "Recycle un sandbox après ce nombre de secondes d'inactivité (son espace de travail est archivé d'abord). Vide = 1800 (30 min). Plage 60–86400.",
+      "logFullRequests": "Journaliser le corps complet des requêtes",
+      "logFullRequestsLead": "Enregistre le corps complet (assaini) de la requête en amont sur chaque enregistrement d'usage pour le débogage. Les requêtes en échec sont toujours enregistrées, indépendamment de ce réglage.",
+      "logErrorsOnly": "Uniquement les requêtes en échec",
+      "logErrorsOnlyHint": "Activé : ne conserver que les requêtes en échec. Désactivé : enregistrer le corps complet de chaque requête — base de données plus volumineuse et davantage de données de prompt sensibles stockées."
     }
   },
   "groups": {
