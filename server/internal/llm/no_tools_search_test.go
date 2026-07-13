@@ -3,6 +3,9 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -95,6 +98,93 @@ func TestForcedWebSearchInjectsResults(t *testing.T) {
 	if !start || !result || !cite {
 		t.Fatalf("missing progress events: start=%v result=%v cite=%v", start, result, cite)
 	}
+}
+
+// §4.13-B wire contract: a no-tools turn reaches the orchestrator as an
+// empty-Tools UnifiedChatRequest (NoTools forces toolMode=none, so toolDefs is
+// never populated) — and with empty Tools, NONE of the four provider wire
+// formats may emit a tool-calling field in the upstream request body.
+func TestEmptyToolsCarriesNoToolFieldsOnWire(t *testing.T) {
+	toolFields := []string{`"tools"`, `"tool_choice"`, `"functions"`, `"function_call"`, `"toolConfig"`, `"tool_config"`}
+	assertNoToolFields := func(t *testing.T, body []byte) {
+		t.Helper()
+		for _, f := range toolFields {
+			if strings.Contains(string(body), f) {
+				t.Fatalf("no-tools request leaked %s onto the wire\nbody: %s", f, string(body))
+			}
+		}
+	}
+	capture := func(stream string) (*httptest.Server, *[]byte) {
+		var captured []byte
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			captured, _ = io.ReadAll(r.Body)
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte(stream))
+		}))
+		return srv, &captured
+	}
+	history := []UnifiedMessage{{Role: "user", Blocks: []UnifiedBlock{{Kind: "text", Text: "hello"}}}}
+	openAIChatStream := `data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}` + "\n\n"
+	openAIRespStream := `data: {"type":"response.output_text.delta","delta":"ok"}` + "\n\n"
+
+	t.Run("anthropic", func(t *testing.T) {
+		srv, captured := capture(anthropicTextStream("ok"))
+		defer srv.Close()
+		p := &AnthropicProvider{}
+		req := UnifiedChatRequest{Model: ModelInfo{RequestID: "claude-test", BaseURL: srv.URL, APIKey: "k"}, History: history}
+		if _, err := p.Stream(context.Background(), req, nil, func(SseEvent) {}); err != nil {
+			t.Fatal(err)
+		}
+		assertNoToolFields(t, *captured)
+	})
+	t.Run("openai-chat", func(t *testing.T) {
+		srv, captured := capture(openAIChatStream)
+		defer srv.Close()
+		p := &OpenAIProvider{}
+		req := UnifiedChatRequest{Model: ModelInfo{RequestID: "gpt-test", BaseURL: srv.URL, APIKey: "k"}, History: history}
+		if _, err := p.Stream(context.Background(), req, nil, func(SseEvent) {}); err != nil {
+			t.Fatal(err)
+		}
+		assertNoToolFields(t, *captured)
+	})
+	t.Run("openai-responses", func(t *testing.T) {
+		srv, captured := capture(openAIRespStream)
+		defer srv.Close()
+		p := &OpenAIProvider{}
+		req := UnifiedChatRequest{Model: ModelInfo{RequestID: "gpt-test", BaseURL: srv.URL, APIKey: "k", APIFormat: "responses"}, History: history}
+		if _, err := p.Stream(context.Background(), req, nil, func(SseEvent) {}); err != nil {
+			t.Fatal(err)
+		}
+		assertNoToolFields(t, *captured)
+	})
+	t.Run("google", func(t *testing.T) {
+		srv, captured := capture(geminiTextStream("ok"))
+		defer srv.Close()
+		p := &GoogleProvider{}
+		req := UnifiedChatRequest{Model: ModelInfo{RequestID: "gemini-2.5-flash", BaseURL: srv.URL, APIKey: "k"}, History: history}
+		if _, err := p.Stream(context.Background(), req, nil, func(SseEvent) {}); err != nil {
+			t.Fatal(err)
+		}
+		assertNoToolFields(t, *captured)
+	})
+	// Positive control: WITH a tool the field appears — proving the assertions
+	// above would catch a leak rather than passing vacuously.
+	t.Run("anthropic-with-tools-control", func(t *testing.T) {
+		srv, captured := capture(anthropicTextStream("ok"))
+		defer srv.Close()
+		p := &AnthropicProvider{}
+		req := UnifiedChatRequest{
+			Model:   ModelInfo{RequestID: "claude-test", BaseURL: srv.URL, APIKey: "k"},
+			History: history,
+			Tools:   []ToolDef{{Name: "web_search", Description: "d", InputSchema: json.RawMessage(`{"type":"object"}`)}},
+		}
+		if _, err := p.Stream(context.Background(), req, nil, func(SseEvent) {}); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(*captured), `"tools"`) {
+			t.Fatalf("control failed: tools field missing when tools ARE configured\nbody: %s", string(*captured))
+		}
+	})
 }
 
 func TestForcedWebSearchUnconfiguredInjectsNothing(t *testing.T) {
