@@ -48,3 +48,6 @@ docs/功能文档.md
 docs/功能检查报告.md
 docs/功能清单.md
 docs/设计实现核对报告.md
+
+# Docs site (kept locally; only the built output is published, to gh-pages)
+docs-site/
