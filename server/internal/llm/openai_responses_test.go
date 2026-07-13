@@ -90,6 +90,56 @@ func TestResponsesStreamReturnsCompletedOutputForToolContinuation(t *testing.T) 
 	}
 }
 
+// A response.failed AFTER response.completed is a relay-side protocol
+// violation (completed is terminal): some gateways append a bogus failed
+// event while closing the connection. It must be ignored — the answer and
+// usage are already in hand; flipping the turn to error showed the user
+// "provider returned an error" on a fully delivered, billed reply.
+func TestResponsesStreamIgnoresTrailingFailedAfterCompleted(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"type":"response.output_text.delta","delta":"The answer."}`,
+		`data: {"type":"response.completed","response":{"usage":{"input_tokens":2584,"output_tokens":412},"output":[{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"output_text","text":"The answer."}]}]}}`,
+		`data: {"type":"response.failed","response":{"error":{"message":"Upstream request failed"}}}`,
+		`data: [DONE]`,
+		``,
+	}, "\n\n")
+
+	text, _, _, _, _, usage, outputItems, err := readOpenAIResponsesStream(strings.NewReader(stream), func(SseEvent) {})
+	if err != nil {
+		t.Fatalf("trailing failed after completed must be ignored, got error: %v", err)
+	}
+	if text != "The answer." {
+		t.Fatalf("text = %q, want the delivered answer", text)
+	}
+	if usage.InputTokens != 2584 || usage.OutputTokens != 412 {
+		t.Fatalf("usage = %+v, want 2584/412", usage)
+	}
+	if len(outputItems) != 1 {
+		t.Fatalf("completed output must be preserved, got %+v", outputItems)
+	}
+}
+
+// A genuine response.failed (no completed before it) still errors, and the
+// streamed partial text is returned alongside so callers can preserve it.
+func TestResponsesStreamRealFailedStillErrors(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"type":"response.output_text.delta","delta":"partial"}`,
+		`data: {"type":"response.failed","response":{"error":{"message":"Upstream request failed"}}}`,
+		``,
+	}, "\n\n")
+
+	text, _, _, _, _, _, _, err := readOpenAIResponsesStream(strings.NewReader(stream), func(SseEvent) {})
+	if err == nil {
+		t.Fatal("real failed (no completed) must return an error")
+	}
+	if !strings.Contains(err.Error(), "Upstream request failed") {
+		t.Fatalf("error should carry the upstream message, got: %v", err)
+	}
+	if text != "partial" {
+		t.Fatalf("partial text should be returned for preservation, got %q", text)
+	}
+}
+
 func TestAppendResponsesIncludeKeepsRequiredValues(t *testing.T) {
 	body := map[string]any{"include": []any{"existing"}}
 	appendResponsesInclude(body, "web_search_call.action.sources", "reasoning.encrypted_content", "existing")

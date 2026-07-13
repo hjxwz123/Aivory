@@ -839,6 +839,12 @@ func readOpenAIResponsesStream(body io.Reader, onEvent func(SseEvent)) (string, 
 	outputByItem := map[string]map[string]any{} // item_id → finalized output item
 	outputOrder := []string{}
 	completedOutput := []map[string]any{}
+	// Set once response.completed arrives. Per the Responses protocol, completed
+	// is a TERMINAL state — yet some relay gateways append a bogus
+	// response.failed afterwards (their own upstream-accounting hiccup while
+	// closing the connection). Without this guard that trailing event flipped a
+	// fully-delivered, usage-carrying turn into a user-visible error.
+	completed := false
 	for scanner.Scan() {
 		line := scanner.Text()
 		if !strings.HasPrefix(line, "data:") {
@@ -969,6 +975,7 @@ func readOpenAIResponsesStream(body io.Reader, onEvent func(SseEvent)) (string, 
 				cb.Args.WriteString(a)
 			}
 		case "response.completed":
+			completed = true
 			r, _ := ev["response"].(map[string]any)
 			if r != nil {
 				if u, ok := r["usage"].(map[string]any); ok {
@@ -985,6 +992,13 @@ func readOpenAIResponsesStream(body io.Reader, onEvent func(SseEvent)) (string, 
 				}
 			}
 		case "response.failed":
+			// A failed AFTER completed is a protocol violation (completed is
+			// terminal) — a relay-side artifact, not a real failure: the answer
+			// and its usage are already in hand. Ignore it instead of flipping
+			// the delivered turn into an error.
+			if completed {
+				continue
+			}
 			r, _ := ev["response"].(map[string]any)
 			if r != nil {
 				if errObj, ok := r["error"].(map[string]any); ok {
