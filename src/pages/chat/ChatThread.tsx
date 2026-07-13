@@ -393,7 +393,7 @@ export default function ChatThread() {
                 <Share2 size={13} aria-hidden /> {t('chat:sidebar.share')}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onSelect={async () => { await archive(conversation.id); toast.success(t('chat:sidebar.archived')); navigate('/chat') }}>
+              <DropdownMenuItem onSelect={async () => { toast.info(t('chat:sidebar.archiving', { defaultValue: 'Archiving…' })); await archive(conversation.id); toast.success(t('chat:sidebar.archived')); navigate('/chat') }}>
                 <Archive size={13} aria-hidden /> {t('chat:sidebar.archive')}
               </DropdownMenuItem>
               <DropdownMenuItem destructive onSelect={() => setConfirmDelete(true)}>

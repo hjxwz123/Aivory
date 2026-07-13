@@ -3,7 +3,7 @@
  * count, created), drill into one (members / conversations / projects / KBs),
  * and delete a workspace with all its content.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { Briefcase, ChevronLeft, Trash2, Users } from 'lucide-react'
@@ -32,6 +32,8 @@ export default function AdminWorkspaces() {
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
+  const deletingRef = useRef(false)
+  const [deleting, setDeleting] = useState(false)
 
   async function load() {
     setLoading(true)
@@ -50,6 +52,9 @@ export default function AdminWorkspaces() {
   }, [])
 
   async function remove(id: string) {
+    if (deletingRef.current) return
+    deletingRef.current = true
+    setDeleting(true)
     try {
       await workspacesApi.adminRemove(id)
       setRows((r) => r.filter((w) => w.id !== id))
@@ -57,11 +62,14 @@ export default function AdminWorkspaces() {
       toast.success(t('workspaces.deleted', { defaultValue: 'Workspace deleted.' }))
     } catch {
       toast.error(t('workspaces.deleteFailed', { defaultValue: 'Could not delete the workspace.' }))
+    } finally {
+      deletingRef.current = false
+      setDeleting(false)
     }
   }
 
   if (selected) {
-    return <WorkspaceDetail id={selected} onBack={() => setSelected(null)} onDelete={(id) => setConfirmDelete(id)} confirm={confirmDelete} onConfirmChange={setConfirmDelete} doDelete={remove} />
+    return <WorkspaceDetail id={selected} onBack={() => setSelected(null)} onDelete={(id) => setConfirmDelete(id)} confirm={confirmDelete} onConfirmChange={setConfirmDelete} doDelete={remove} deleting={deleting} />
   }
 
   return (
@@ -131,6 +139,7 @@ function WorkspaceDetail({
   confirm,
   onConfirmChange,
   doDelete,
+  deleting,
 }: {
   id: string
   onBack: () => void
@@ -138,6 +147,7 @@ function WorkspaceDetail({
   confirm: string | null
   onConfirmChange: (v: string | null) => void
   doDelete: (id: string) => Promise<void>
+  deleting: boolean
 }) {
   const { t } = useTranslation('admin')
   const [data, setData] = useState<{
@@ -235,10 +245,10 @@ function WorkspaceDetail({
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="ghost" onClick={() => onConfirmChange(null)}>
+            <Button variant="ghost" disabled={deleting} onClick={() => onConfirmChange(null)}>
               {t('common.cancel', { ns: 'common', defaultValue: 'Cancel' })}
             </Button>
-            <Button variant="destructive" onClick={() => void doDelete(id)}>
+            <Button variant="destructive" loading={deleting} onClick={() => void doDelete(id)}>
               {t('workspaces.delete', { defaultValue: 'Delete workspace' })}
             </Button>
           </DialogFooter>

@@ -91,6 +91,7 @@
     "editAutoAddHint": "Files you upload inside this project's chats are also added to the project library.",
     "editSave": "Save changes",
     "edited": "Project updated",
+    "deleteFailed": "Failed to delete project",
     "deleteTitle": "Delete this project?",
     "deleteBody": "The project, its instructions, and its files will be removed. Chats started inside it will move back to your regular history.",
     "deleted": "Project deleted",

@@ -22,6 +22,9 @@ export default function AdminModelTags() {
   const [newName, setNewName] = useState('')
   const [creating, setCreating] = useState(false)
   const creatingRef = useRef(false)
+  // Per-row guard: a rename/delete in flight blocks re-entrancy and drives the
+  // row's disabled/loading feedback (mirrors `creating` for the create field).
+  const [busyId, setBusyId] = useState<string | null>(null)
 
   async function load() {
     setLoading(true)
@@ -61,26 +64,35 @@ export default function AdminModelTags() {
   }
 
   async function rename(id: string, name: string) {
+    if (busyId) return
     const n = name.trim()
     if (!n) return
+    setBusyId(id)
     try {
       const upd = await adminApi.updateModelTag(id, { name: n })
       setTags((ts) => ts.map((x) => (x.id === id ? upd : x)))
+      toast.success(t('admin:common.saved'))
     } catch (e) {
       if (e instanceof ApiError && e.status === 409) {
         toast.error(t('admin:common.nameExists', { defaultValue: 'A record with this name already exists.' }))
       } else {
         toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
       }
+    } finally {
+      setBusyId(null)
     }
   }
 
   async function remove(id: string) {
+    if (busyId) return
+    setBusyId(id)
     try {
       await adminApi.removeModelTag(id)
       setTags((ts) => ts.filter((x) => x.id !== id))
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
+    } finally {
+      setBusyId(null)
     }
   }
 
@@ -135,19 +147,22 @@ export default function AdminModelTags() {
                 <Tag size={14} className="shrink-0 text-[var(--color-fg-subtle)]" aria-hidden />
                 <Input
                   defaultValue={tag.name}
+                  disabled={busyId === tag.id}
                   onBlur={(e) => {
                     if (e.target.value.trim() && e.target.value !== tag.name) void rename(tag.id, e.target.value)
                   }}
                   className="h-8 flex-1"
                 />
-                <button
-                  type="button"
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  loading={busyId === tag.id}
+                  disabled={busyId === tag.id}
                   onClick={() => void remove(tag.id)}
                   aria-label={t('common:actions.delete', { defaultValue: 'Delete' })}
-                  className="inline-flex size-8 items-center justify-center rounded-[8px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)] interactive"
-                >
-                  <Trash2 size={14} aria-hidden />
-                </button>
+                  leadingIcon={<Trash2 size={14} aria-hidden />}
+                  className="size-8 rounded-[8px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)]"
+                />
               </li>
             ))}
           </ul>

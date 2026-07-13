@@ -73,11 +73,18 @@ export default function AdminUsers() {
   const [editPassword, setEditPassword] = useState('')
   const [editCredits, setEditCredits] = useState(0)
   const [saving, setSaving] = useState(false)
+  // Reset-2FA button inside the edit dialog — the dialog stays open after
+  // success, so guard against re-clicks that would fire duplicate calls/toasts.
+  const [resetting2fa, setResetting2fa] = useState(false)
+  const resetting2faRef = useRef(false)
   // Read-only user info dialog.
   const [infoRow, setInfoRow] = useState<ApiUser | null>(null)
   // Delete-user confirmation.
   const [deleteRow, setDeleteRow] = useState<ApiUser | null>(null)
   const [deleting, setDeleting] = useState(false)
+  // Per-row ban/unban in-flight guard (a given row is either ban or unban, so a
+  // single shared id suffices) — blocks double-submits and drives the spinner.
+  const [busyId, setBusyId] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [committedQuery, setCommittedQuery] = useState('')
   const [page, setPage] = useState(1)
@@ -159,21 +166,29 @@ export default function AdminUsers() {
   }
 
   async function ban(u: ApiUser) {
+    if (busyId) return
+    setBusyId(u.id)
     try {
       await adminApi.banUser(u.id)
       toast.success(t('admin:users.banned'))
       await reload()
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
+    } finally {
+      setBusyId(null)
     }
   }
   async function unban(u: ApiUser) {
+    if (busyId) return
+    setBusyId(u.id)
     try {
       await adminApi.unbanUser(u.id)
       toast.success(t('admin:users.reinstated'))
       await reload()
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
+    } finally {
+      setBusyId(null)
     }
   }
   async function remove() {
@@ -228,6 +243,9 @@ export default function AdminUsers() {
 
   async function resetTwoFa() {
     if (!editRow) return
+    if (resetting2faRef.current) return
+    resetting2faRef.current = true
+    setResetting2fa(true)
     try {
       await adminApi.disableUser2fa(editRow.id)
       setEditRow({ ...editRow, totp_enabled: false })
@@ -235,6 +253,9 @@ export default function AdminUsers() {
       await reload()
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
+    } finally {
+      resetting2faRef.current = false
+      setResetting2fa(false)
     }
   }
 
@@ -386,11 +407,21 @@ export default function AdminUsers() {
                       </DropdownMenuContent>
                     </DropdownMenu>
                     {u.status === 'active' ? (
-                      <IconAction label={t('admin:users.ban')} onClick={() => void ban(u)} disabled={isMe}>
+                      <IconAction
+                        label={t('admin:users.ban')}
+                        onClick={() => void ban(u)}
+                        disabled={isMe || busyId === u.id}
+                        loading={busyId === u.id}
+                      >
                         <Ban size={15} aria-hidden />
                       </IconAction>
                     ) : (
-                      <IconAction label={t('admin:users.unban')} onClick={() => void unban(u)} disabled={u.status === 'deleting'}>
+                      <IconAction
+                        label={t('admin:users.unban')}
+                        onClick={() => void unban(u)}
+                        disabled={u.status === 'deleting' || busyId === u.id}
+                        loading={busyId === u.id}
+                      >
                         <ShieldCheck size={15} aria-hidden />
                       </IconAction>
                     )}
@@ -520,7 +551,7 @@ export default function AdminUsers() {
               </Field>
               {editRow?.totp_enabled ? (
                 <Field label={t('admin:users.fields.twofa')} hint={t('admin:users.twofaHint')}>
-                  <Button variant="secondary" onClick={() => void resetTwoFa()}>
+                  <Button variant="secondary" loading={resetting2fa} onClick={() => void resetTwoFa()}>
                     {t('admin:users.twofaReset')}
                   </Button>
                 </Field>
@@ -653,6 +684,7 @@ function IconAction({
   href,
   disabled,
   danger,
+  loading,
   children,
 }: {
   label: string
@@ -660,6 +692,7 @@ function IconAction({
   href?: string
   disabled?: boolean
   danger?: boolean
+  loading?: boolean
   children: ReactNode
 }) {
   const cls = cn(
@@ -668,6 +701,12 @@ function IconAction({
       ? 'text-[var(--color-fg-subtle)] hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)]'
       : 'text-[var(--color-fg-subtle)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
   )
+  const spinner = (
+    <span
+      className="inline-block size-3.5 rounded-full border-2 border-current border-r-transparent animate-[spin_700ms_linear_infinite]"
+      aria-hidden
+    />
+  )
   return (
     <Tooltip content={label}>
       {href ? (
@@ -675,8 +714,15 @@ function IconAction({
           {children}
         </Link>
       ) : (
-        <button type="button" aria-label={label} onClick={onClick} disabled={disabled} className={cls}>
-          {children}
+        <button
+          type="button"
+          aria-label={label}
+          aria-busy={loading || undefined}
+          onClick={onClick}
+          disabled={disabled || loading}
+          className={cls}
+        >
+          {loading ? spinner : children}
         </button>
       )}
     </Tooltip>

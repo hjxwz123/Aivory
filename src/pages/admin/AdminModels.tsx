@@ -69,6 +69,8 @@ export default function AdminModels() {
   const [submitting, setSubmitting] = useState(false)
   const submittingRef = useRef(false)
   const [confirmDelete, setConfirmDelete] = useState<ApiModel | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  const deletingRef = useRef(false)
 
   async function load() {
     setLoading(true)
@@ -141,6 +143,9 @@ export default function AdminModels() {
   }
 
   async function remove(row: ApiModel) {
+    if (deletingRef.current) return
+    deletingRef.current = true
+    setDeleting(true)
     try {
       await adminApi.removeModel(row.id)
       toast.success(t('admin:models.removed'))
@@ -148,6 +153,9 @@ export default function AdminModels() {
       await load()
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
+    } finally {
+      deletingRef.current = false
+      setDeleting(false)
     }
   }
 
@@ -361,10 +369,10 @@ export default function AdminModels() {
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setConfirmDelete(null)}>
+            <Button variant="ghost" onClick={() => setConfirmDelete(null)} disabled={deleting}>
               {t('common:actions.cancel')}
             </Button>
-            <Button variant="destructive" onClick={() => confirmDelete && void remove(confirmDelete)}>
+            <Button variant="destructive" onClick={() => confirmDelete && void remove(confirmDelete)} loading={deleting}>
               {t('common:actions.delete')}
             </Button>
           </DialogFooter>

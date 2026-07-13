@@ -129,6 +129,8 @@ export default function ProjectDetail() {
     autoAddUploads: boolean
   }>({ name: '', description: '', accent: 'violet', emoji: '', autoAddUploads: false })
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const deletingRef = useRef(false)
+  const [deleting, setDeleting] = useState(false)
   const [addFileOpen, setAddFileOpen] = useState(false)
   const [renameFileState, setRenameFileState] = useState<{ id: string; draft: string } | null>(null)
   const pendingConvRef = useRef<ApiConversation | null>(null)
@@ -312,14 +314,24 @@ export default function ProjectDetail() {
 
   async function submitDelete() {
     if (!project) return
-    const setProj = useConversations.getState().setProject
-    for (const c of allConversations) {
-      if (c.projectId === project.id) await setProj(c.id, undefined)
+    if (deletingRef.current) return
+    deletingRef.current = true
+    setDeleting(true)
+    try {
+      const setProj = useConversations.getState().setProject
+      for (const c of allConversations) {
+        if (c.projectId === project.id) await setProj(c.id, undefined)
+      }
+      await deleteProject(project.id)
+      setConfirmDelete(false)
+      toast.success(t('projects:detail.deleted'))
+      navigate('/projects')
+    } catch {
+      toast.error(t('projects:detail.deleteFailed', { defaultValue: 'Failed to delete project' }))
+    } finally {
+      deletingRef.current = false
+      setDeleting(false)
     }
-    await deleteProject(project.id)
-    setConfirmDelete(false)
-    toast.success(t('projects:detail.deleted'))
-    navigate('/projects')
   }
 
   async function startProjectChat(
@@ -800,10 +812,10 @@ export default function ProjectDetail() {
             <DialogDescription>{t('projects:detail.deleteBody')}</DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setConfirmDelete(false)}>
+            <Button variant="ghost" onClick={() => setConfirmDelete(false)} disabled={deleting}>
               {t('common:actions.cancel')}
             </Button>
-            <Button variant="destructive" onClick={submitDelete}>
+            <Button variant="destructive" onClick={submitDelete} loading={deleting}>
               {t('common:actions.delete')}
             </Button>
           </DialogFooter>

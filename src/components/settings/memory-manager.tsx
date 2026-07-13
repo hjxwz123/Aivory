@@ -3,7 +3,7 @@
  * Compact embed used inside the Personalization settings page (replaces the
  * standalone /memory route). Reuses the `memory` i18n namespace.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Plus, Trash2, Pencil } from 'lucide-react'
 import { ApiError, memoriesApi } from '@/api'
@@ -49,6 +49,10 @@ export function MemoryManager() {
     draft: { status: 'ACTIVE' },
   })
   const [confirmDelete, setConfirmDelete] = useState<ApiMemory | null>(null)
+  const [saving, setSaving] = useState(false)
+  const savingRef = useRef(false)
+  const [deleting, setDeleting] = useState(false)
+  const deletingRef = useRef(false)
 
   async function load() {
     setLoading(true)
@@ -78,6 +82,9 @@ export function MemoryManager() {
       toast.error(t('memory:fields.text'))
       return
     }
+    if (savingRef.current) return
+    savingRef.current = true
+    setSaving(true)
     try {
       if (editor.row) {
         await memoriesApi.update(editor.row.id, { memory_text: d.memory_text, status: d.status, reason: d.reason })
@@ -90,10 +97,16 @@ export function MemoryManager() {
       await load()
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t('common:common.error'))
+    } finally {
+      savingRef.current = false
+      setSaving(false)
     }
   }
 
   async function remove(row: ApiMemory) {
+    if (deletingRef.current) return
+    deletingRef.current = true
+    setDeleting(true)
     try {
       await memoriesApi.remove(row.id)
       toast.success(t('memory:deleted'))
@@ -101,6 +114,9 @@ export function MemoryManager() {
       await load()
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t('common:common.error'))
+    } finally {
+      deletingRef.current = false
+      setDeleting(false)
     }
   }
 
@@ -198,10 +214,10 @@ export function MemoryManager() {
             </div>
           </DialogBody>
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setEditor({ ...editor, open: false })}>
+            <Button variant="ghost" disabled={saving} onClick={() => setEditor({ ...editor, open: false })}>
               {t('common:actions.cancel')}
             </Button>
-            <Button onClick={() => void submit()}>{t('common:actions.save')}</Button>
+            <Button loading={saving} onClick={() => void submit()}>{t('common:actions.save')}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -212,10 +228,10 @@ export function MemoryManager() {
             <DialogTitle>{t('memory:deleteConfirm')}</DialogTitle>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setConfirmDelete(null)}>
+            <Button variant="ghost" disabled={deleting} onClick={() => setConfirmDelete(null)}>
               {t('common:actions.cancel')}
             </Button>
-            <Button variant="destructive" onClick={() => confirmDelete && void remove(confirmDelete)}>
+            <Button variant="destructive" loading={deleting} onClick={() => confirmDelete && void remove(confirmDelete)}>
               {t('memory:actions.delete')}
             </Button>
           </DialogFooter>

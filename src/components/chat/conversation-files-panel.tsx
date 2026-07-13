@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { FolderOpen, Plus, Trash2, X } from 'lucide-react'
@@ -67,6 +67,10 @@ function FilesBody({ onClose }: { onClose: () => void }) {
   const upload = useConversationFiles((s) => s.upload)
   const remove = useConversationFiles((s) => s.remove)
   const inputRef = useRef<HTMLInputElement>(null)
+  // Belt-and-suspenders against a microtask-window double-click: the store
+  // removes the row optimistically (synchronously) so it unmounts almost
+  // immediately, but this also disables the trash button in the meantime.
+  const [removingId, setRemovingId] = useState<string | null>(null)
   const uploadPercent = Math.max(0, Math.min(100, Math.round(uploadJob?.progress ?? 0)))
   const uploadLabel = uploadJob
     ? uploadJob.phase === 'processing'
@@ -88,10 +92,14 @@ function FilesBody({ onClose }: { onClose: () => void }) {
   }
 
   async function onRemove(id: string) {
+    if (removingId) return
+    setRemovingId(id)
     try {
       await remove(id)
     } catch {
       toast.error(t('files.removeFailed'))
+    } finally {
+      setRemovingId(null)
     }
   }
 
@@ -174,6 +182,7 @@ function FilesBody({ onClose }: { onClose: () => void }) {
                   <button
                     type="button"
                     onClick={() => void onRemove(f.id)}
+                    disabled={removingId === f.id}
                     aria-label={t('files.remove', { name: f.filename })}
                     className="inline-flex size-7 shrink-0 items-center justify-center rounded-[8px] text-[var(--color-fg-subtle)] opacity-0 interactive hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)] group-hover/file:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
                   >

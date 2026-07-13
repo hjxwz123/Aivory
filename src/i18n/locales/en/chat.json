@@ -159,6 +159,7 @@
     "body": "Create a public link to a read-only snapshot of this conversation. Later messages stay private.",
     "bodyShared": "Anyone with this link can view a read-only snapshot of this conversation.",
     "createCta": "Create share link",
+    "creatingLink": "Creating share link…",
     "revokeCta": "Unshare",
     "revoked": "Share link revoked",
     "failed": "Something went wrong",
@@ -227,6 +228,7 @@
     "renamed": "Conversation renamed",
     "share": "Share",
     "archive": "Archive",
+    "archiving": "Archiving…",
     "archived": "Conversation archived",
     "archivedTitle": "Archived chats",
     "archivedBody": "Unarchive to bring a chat back to your list.",
@@ -346,6 +348,7 @@
   "aria": {
     "themeGroup": "Theme selection"
   },
+  "signingOut": "Signing out…",
   "signedOut": "You've been signed out.",
   "userMenu": {
     "personalization": "Personalization",

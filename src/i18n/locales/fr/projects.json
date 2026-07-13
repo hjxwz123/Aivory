@@ -91,6 +91,7 @@
     "editAutoAddHint": "Les fichiers que vous téléversez dans les discussions de ce projet sont également ajoutés à la bibliothèque du projet.",
     "editSave": "Enregistrer les modifications",
     "edited": "Projet mis à jour",
+    "deleteFailed": "Échec de la suppression du projet",
     "deleteTitle": "Supprimer ce projet ?",
     "deleteBody": "Le projet, ses instructions et ses fichiers seront supprimés. Les discussions démarrées à l'intérieur reviendront dans votre historique habituel.",
     "deleted": "Projet supprimé",

@@ -159,6 +159,7 @@
     "body": "Créez un lien public vers un instantané en lecture seule de cette conversation. Les messages ultérieurs restent privés.",
     "bodyShared": "Toute personne disposant de ce lien peut consulter un instantané en lecture seule de cette conversation.",
     "createCta": "Créer un lien de partage",
+    "creatingLink": "Création du lien de partage…",
     "revokeCta": "Ne plus partager",
     "revoked": "Lien de partage révoqué",
     "failed": "Une erreur s'est produite",
@@ -227,6 +228,7 @@
     "renamed": "Conversation renommée",
     "share": "Partager",
     "archive": "Archiver",
+    "archiving": "Archivage…",
     "archived": "Conversation archivée",
     "archivedTitle": "Discussions archivées",
     "archivedBody": "Désarchivez pour ramener une discussion dans votre liste.",
@@ -346,6 +348,7 @@
   "aria": {
     "themeGroup": "Sélection du thème"
   },
+  "signingOut": "Déconnexion…",
   "signedOut": "Vous avez été déconnecté.",
   "userMenu": {
     "personalization": "Personnalisation",

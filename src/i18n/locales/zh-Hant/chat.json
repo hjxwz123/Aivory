@@ -159,6 +159,7 @@
     "body": "建立一個公開連結，分享此對話的只讀快照。之後的新訊息不會出現在分享中。",
     "bodyShared": "任何擁有此連結的人都可以檢視此對話的只讀快照。",
     "createCta": "建立分享連結",
+    "creatingLink": "正在建立分享連結…",
     "revokeCta": "取消分享",
     "revoked": "已取消分享",
     "failed": "出錯了",
@@ -227,6 +228,7 @@
     "renamed": "會話已重新命名",
     "share": "分享",
     "archive": "歸檔",
+    "archiving": "正在歸檔…",
     "archived": "會話已歸檔",
     "archivedTitle": "已歸檔對話",
     "archivedBody": "取消歸檔可讓對話重新回到列表。",
@@ -346,6 +348,7 @@
   "aria": {
     "themeGroup": "主題選擇"
   },
+  "signingOut": "正在退出登入…",
   "signedOut": "你已退出登入。",
   "userMenu": {
     "personalization": "個性化",

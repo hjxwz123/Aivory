@@ -70,6 +70,8 @@ export default function AdminUserGroups() {
   const [savingMsg, setSavingMsg] = useState(false)
   const [saving, setSaving] = useState(false)
   const savingRef = useRef(false)
+  const [deleting, setDeleting] = useState(false)
+  const deletingRef = useRef(false)
 
   async function load() {
     setLoading(true)
@@ -187,6 +189,9 @@ export default function AdminUserGroups() {
   }
 
   async function remove(row: ApiUserGroup) {
+    if (deletingRef.current) return
+    deletingRef.current = true
+    setDeleting(true)
     try {
       await adminApi.removeUserGroup(row.id)
       toast.success(t('admin:groups.removed'))
@@ -194,6 +199,9 @@ export default function AdminUserGroups() {
       await load()
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
+    } finally {
+      deletingRef.current = false
+      setDeleting(false)
     }
   }
 
@@ -530,10 +538,10 @@ export default function AdminUserGroups() {
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setConfirmDelete(null)}>
+            <Button variant="ghost" disabled={deleting} onClick={() => setConfirmDelete(null)}>
               {t('common:actions.cancel')}
             </Button>
-            <Button variant="destructive" onClick={() => confirmDelete && void remove(confirmDelete)}>
+            <Button variant="destructive" loading={deleting} onClick={() => confirmDelete && void remove(confirmDelete)}>
               {t('common:actions.delete')}
             </Button>
           </DialogFooter>

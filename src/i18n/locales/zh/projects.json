@@ -91,6 +91,7 @@
     "editAutoAddHint": "你在该项目对话中上传的文件，也会被加入项目知识库。",
     "editSave": "保存修改",
     "edited": "项目已更新",
+    "deleteFailed": "删除项目失败",
     "deleteTitle": "确认删除该项目？",
     "deleteBody": "项目本身、其指令与文件都会被移除。项目内已开启的对话会回到普通历史记录中。",
     "deleted": "项目已删除",

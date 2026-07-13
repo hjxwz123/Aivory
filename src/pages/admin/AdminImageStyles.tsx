@@ -25,6 +25,7 @@ export default function AdminImageStyles() {
   const [newName, setNewName] = useState('')
   const [creating, setCreating] = useState(false)
   const creatingRef = useRef(false)
+  const [busyId, setBusyId] = useState<string | null>(null)
 
   async function load() {
     setLoading(true)
@@ -64,11 +65,15 @@ export default function AdminImageStyles() {
   }
 
   async function remove(id: string) {
+    if (busyId) return
+    setBusyId(id)
     try {
       await adminApi.removeImageStyle(id)
       setStyles((s) => s.filter((x) => x.id !== id))
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
+    } finally {
+      setBusyId(null)
     }
   }
 
@@ -117,7 +122,13 @@ export default function AdminImageStyles() {
         ) : (
           <ul className="mt-6 flex flex-col gap-3">
             {styles.map((st) => (
-              <StyleCard key={st.id} style={st} onPatch={(p) => patchLocal(st.id, p)} onRemove={() => void remove(st.id)} />
+              <StyleCard
+                key={st.id}
+                style={st}
+                removing={busyId === st.id}
+                onPatch={(p) => patchLocal(st.id, p)}
+                onRemove={() => void remove(st.id)}
+              />
             ))}
           </ul>
         )}
@@ -128,10 +139,12 @@ export default function AdminImageStyles() {
 
 function StyleCard({
   style,
+  removing,
   onPatch,
   onRemove,
 }: {
   style: ApiImageStyle
+  removing: boolean
   onPatch: (patch: Partial<ApiImageStyle>) => void
   onRemove: () => void
 }) {
@@ -247,10 +260,19 @@ function StyleCard({
             <button
               type="button"
               onClick={onRemove}
+              disabled={removing}
+              aria-busy={removing || undefined}
               aria-label={t('common:actions.delete', { defaultValue: 'Delete' })}
-              className="inline-flex size-9 items-center justify-center rounded-[8px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)] interactive"
+              className="inline-flex size-9 items-center justify-center rounded-[8px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)] interactive disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none"
             >
-              <Trash2 size={15} aria-hidden />
+              {removing ? (
+                <span
+                  className="inline-block size-3.5 rounded-full border-2 border-current border-r-transparent animate-[spin_700ms_linear_infinite]"
+                  aria-hidden
+                />
+              ) : (
+                <Trash2 size={15} aria-hidden />
+              )}
             </button>
             <Button onClick={() => void save()} loading={saving} size="sm">
               {t('common:actions.save', { defaultValue: 'Save' })}

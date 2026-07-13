@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Lock } from 'lucide-react'
 import { SettingsRow, SettingsSection } from './SettingsLayout'
@@ -36,6 +36,10 @@ export default function Models() {
   // Image-generation model pre-selection (§4.12-B). Persists to user settings.
   const [imageModels, setImageModels] = useState<ApiModel[]>([])
   const [imageModelId, setImageModelId] = useState('')
+
+  // Custom-instructions save: in-flight guard so the request can't be double-fired.
+  const savingRef = useRef(false)
+  const [savingInstructions, setSavingInstructions] = useState(false)
   useEffect(() => {
     if (list.length === 0) void load()
     void modelsApi.listImage().then((r) => setImageModels(r.models ?? [])).catch(() => {})
@@ -82,6 +86,21 @@ export default function Models() {
         setGlobalDefaultModel(prev)
         toast.error(t('common:actions.failed', { defaultValue: 'Failed to save' }), e instanceof Error ? e.message : undefined)
       })
+  }
+
+  const onSaveInstructions = async () => {
+    if (savingRef.current) return
+    savingRef.current = true
+    setSavingInstructions(true)
+    try {
+      await authApi.updateSettings({ persona_custom: models.customInstructions })
+      toast.success(t('settings:models.customSaved'))
+    } catch {
+      toast.error(t('common:actions.failed', { defaultValue: 'Failed to save' }))
+    } finally {
+      savingRef.current = false
+      setSavingInstructions(false)
+    }
   }
 
   return (
@@ -169,12 +188,8 @@ export default function Models() {
             </p>
             <Button
               variant="secondary"
-              onClick={() => {
-                void authApi
-                  .updateSettings({ persona_custom: models.customInstructions })
-                  .then(() => toast.success(t('settings:models.customSaved')))
-                  .catch(() => toast.error(t('common:actions.failed', { defaultValue: 'Failed to save' })))
-              }}
+              loading={savingInstructions}
+              onClick={() => void onSaveInstructions()}
             >
               {t('common:actions.save')}
             </Button>

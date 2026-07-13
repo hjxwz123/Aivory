@@ -66,8 +66,10 @@ export default function AdminSkills() {
   const [importMd, setImportMd] = useState('')
   const [uploading, setUploading] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const savingRef = useRef(false)
+  const deletingRef = useRef(false)
 
   // Upload one asset (template / script / data); append the returned descriptor
   // to the draft's assets. Persisted with the skill on save (§4.17).
@@ -168,6 +170,9 @@ export default function AdminSkills() {
   }
 
   async function remove(row: ApiSkill) {
+    if (deletingRef.current) return
+    deletingRef.current = true
+    setDeleting(true)
     try {
       await adminApi.removeSkill(row.id)
       toast.success(t('admin:skills.removed'))
@@ -175,6 +180,9 @@ export default function AdminSkills() {
       await load()
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
+    } finally {
+      deletingRef.current = false
+      setDeleting(false)
     }
   }
 
@@ -338,10 +346,10 @@ export default function AdminSkills() {
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setConfirmDelete(null)}>
+            <Button variant="ghost" disabled={deleting} onClick={() => setConfirmDelete(null)}>
               {t('common:actions.cancel')}
             </Button>
-            <Button variant="destructive" onClick={() => confirmDelete && void remove(confirmDelete)}>
+            <Button variant="destructive" loading={deleting} onClick={() => confirmDelete && void remove(confirmDelete)}>
               {t('common:actions.delete')}
             </Button>
           </DialogFooter>

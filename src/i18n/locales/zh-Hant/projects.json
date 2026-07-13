@@ -91,6 +91,7 @@
     "editAutoAddHint": "你在該專案對話中上傳的檔案，也會被加入專案知識庫。",
     "editSave": "儲存修改",
     "edited": "專案已更新",
+    "deleteFailed": "刪除專案失敗",
     "deleteTitle": "確認刪除該專案？",
     "deleteBody": "專案本身、其指令與檔案都會被移除。專案內已開啟的對話會回到普通曆史記錄中。",
     "deleted": "專案已刪除",

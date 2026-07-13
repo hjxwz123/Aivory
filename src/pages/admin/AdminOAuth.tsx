@@ -54,6 +54,8 @@ export default function AdminOAuth() {
   const [copied, setCopied] = useState(false)
   const [saving, setSaving] = useState(false)
   const savingRef = useRef(false)
+  const [deleting, setDeleting] = useState(false)
+  const deletingRef = useRef(false)
 
   async function load() {
     setLoading(true)
@@ -115,6 +117,9 @@ export default function AdminOAuth() {
   }
 
   async function remove(row: ApiOAuthProvider) {
+    if (deletingRef.current) return
+    deletingRef.current = true
+    setDeleting(true)
     try {
       await adminApi.removeOAuthProvider(row.id)
       toast.success(t('admin:oauth.removed'))
@@ -122,6 +127,9 @@ export default function AdminOAuth() {
       await load()
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
+    } finally {
+      deletingRef.current = false
+      setDeleting(false)
     }
   }
 
@@ -394,10 +402,10 @@ export default function AdminOAuth() {
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setConfirmDelete(null)}>
+            <Button variant="ghost" disabled={deleting} onClick={() => setConfirmDelete(null)}>
               {t('common:actions.cancel')}
             </Button>
-            <Button variant="destructive" onClick={() => confirmDelete && void remove(confirmDelete)}>
+            <Button variant="destructive" loading={deleting} onClick={() => confirmDelete && void remove(confirmDelete)}>
               {t('common:actions.delete')}
             </Button>
           </DialogFooter>

@@ -57,6 +57,10 @@ export default function KnowledgeBaseDetail() {
   // Delete the whole KB (documents + vectors; unbinds it from conversations).
   const [confirmDeleteKB, setConfirmDeleteKB] = useState(false)
   const [deletingKB, setDeletingKB] = useState(false)
+  // Per-row delete guard + single-flight guard for the paste-tab Save.
+  const [busyDocId, setBusyDocId] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+  const savingRef = useRef(false)
 
   async function deleteKB() {
     if (!id) return
@@ -113,6 +117,9 @@ export default function KnowledgeBaseDetail() {
       toast.error(t('kb:dialog.nameRequired'))
       return
     }
+    if (savingRef.current) return
+    savingRef.current = true
+    setSaving(true)
     try {
       await kbsApi.addDoc(id, { filename: draft.filename, content: draft.content })
       toast.success(t('kb:detail.uploaded'))
@@ -125,6 +132,9 @@ export default function KnowledgeBaseDetail() {
       } else {
         toast.error(e instanceof ApiError ? e.message : t('kb:detail.uploadFailed'))
       }
+    } finally {
+      savingRef.current = false
+      setSaving(false)
     }
   }
 
@@ -162,13 +172,16 @@ export default function KnowledgeBaseDetail() {
   }
 
   async function remove(d: ApiDocument) {
-    if (!id) return
+    if (!id || busyDocId) return
+    setBusyDocId(d.id)
     try {
       await kbsApi.removeDoc(id, d.id)
       toast.success(t('kb:detail.removed'))
       await load()
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t('common:common.error'))
+    } finally {
+      setBusyDocId(null)
     }
   }
 
@@ -263,6 +276,8 @@ export default function KnowledgeBaseDetail() {
                     variant="ghost"
                     size="sm"
                     leadingIcon={<Trash2 size={13} aria-hidden />}
+                    loading={busyDocId === d.id}
+                    disabled={busyDocId === d.id}
                     onClick={() => void remove(d)}
                   >
                     {t('common:actions.delete')}
@@ -369,11 +384,11 @@ export default function KnowledgeBaseDetail() {
             </Tabs>
           </DialogBody>
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setOpen(false)}>
+            <Button variant="ghost" onClick={() => setOpen(false)} disabled={saving}>
               {t('common:actions.cancel')}
             </Button>
             {tab === 'paste' ? (
-              <Button onClick={() => void addPasted()}>{t('common:actions.save')}</Button>
+              <Button loading={saving} onClick={() => void addPasted()}>{t('common:actions.save')}</Button>
             ) : null}
           </DialogFooter>
         </DialogContent>

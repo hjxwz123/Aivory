@@ -572,6 +572,9 @@ function ConversationItem({
   // Create (or refresh) a public share and copy its link in one tap (§ sharing).
   // Managing / revoking the share lives in the conversation's Share dialog.
   async function shareConversation() {
+    // Immediate feedback so a slow backend doesn't leave the click feeling dead;
+    // the success toast below replaces this once the link is copied.
+    toast.info(t('share.creatingLink', { defaultValue: 'Creating share link…' }))
     try {
       const s = await conversationsApi.createShare(conversation.id)
       await copy(`${window.location.origin}/share/${s.id}`)
@@ -819,6 +822,9 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
         <DropdownMenuItem
           onClick={() =>
             void (async () => {
+              // Immediate feedback while the backend sign-out is in flight;
+              // the success toast + redirect below follow once it resolves.
+              toast.info(t('chat:signingOut', { defaultValue: 'Signing out…' }))
               await logout()
               toast.success(t('chat:signedOut'))
               navigate('/login')

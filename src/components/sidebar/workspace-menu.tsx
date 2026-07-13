@@ -3,7 +3,7 @@
  * workspaces plus the members/invite management dialog. Users with no
  * workspaces AND no create-capability see nothing (per spec: 左下角不显示).
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ArrowLeftRight, Briefcase, Check, Copy, Home, LogOut, Plus, Trash2, UserX, Users } from 'lucide-react'
 import { workspacesApi } from '@/api'
@@ -229,6 +229,12 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
   const [inviteToken, setInviteToken] = useState(ws?.invite_token ?? '')
   const { copied, copy } = useCopy()
   const isOwner = ws?.role === 'owner'
+  // In-flight guards so slow-backend mutations can't be double-fired.
+  const [busyUid, setBusyUid] = useState<string | null>(null)
+  const [rotating, setRotating] = useState(false)
+  const rotatingRef = useRef(false)
+  const [actioning, setActioning] = useState(false)
+  const actioningRef = useRef(false)
 
   useEffect(() => {
     if (!open || !activeId) return
@@ -243,21 +249,46 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
   const inviteURL = inviteToken ? `${window.location.origin}/workspace/join/${inviteToken}` : ''
 
   async function kick(uid: string) {
+    if (busyUid) return
+    setBusyUid(uid)
     try {
       await workspacesApi.kick(activeId!, uid)
       setMembers((m) => m.filter((x) => x.user_id !== uid))
     } catch {
       toast.error(t('workspace.kickFailed', { defaultValue: 'Could not remove the member.' }))
+    } finally {
+      setBusyUid(null)
     }
   }
 
   async function rotate() {
+    if (rotatingRef.current) return
+    rotatingRef.current = true
+    setRotating(true)
     try {
       const { invite_token } = await workspacesApi.rotateInvite(activeId!)
       setInviteToken(invite_token)
       toast.success(t('workspace.inviteRotated', { defaultValue: 'New invite link generated — the old one is dead.' }))
     } catch {
       toast.error(t('workspace.inviteRotateFailed', { defaultValue: 'Could not rotate the invite link.' }))
+    } finally {
+      rotatingRef.current = false
+      setRotating(false)
+    }
+  }
+
+  // Delete (owner) / Leave (non-owner) share one in-flight flag — only one is
+  // ever rendered — so the destructive footer button can't be double-fired.
+  async function runFooterAction(fn: (id: string) => Promise<void>) {
+    if (actioningRef.current) return
+    actioningRef.current = true
+    setActioning(true)
+    try {
+      await fn(activeId!)
+      onOpenChange(false)
+    } finally {
+      actioningRef.current = false
+      setActioning(false)
     }
   }
 
@@ -291,7 +322,8 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
             <button
               type="button"
               onClick={() => void rotate()}
-              className="mt-1.5 text-[11px] text-[var(--color-fg-subtle)] underline-offset-2 hover:underline interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] rounded-[4px]"
+              disabled={rotating}
+              className="mt-1.5 text-[11px] text-[var(--color-fg-subtle)] underline-offset-2 hover:underline interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] rounded-[4px] disabled:opacity-50 disabled:pointer-events-none"
             >
               {t('workspace.rotateInvite', { defaultValue: 'Reset link (invalidates the old one)' })}
             </button>
@@ -318,8 +350,9 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
                 <button
                   type="button"
                   onClick={() => void kick(m.user_id)}
+                  disabled={busyUid === m.user_id}
                   aria-label={t('workspace.kick', { defaultValue: 'Remove member' })}
-                  className="inline-flex size-7 items-center justify-center rounded-[7px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                  className="inline-flex size-7 items-center justify-center rounded-[7px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] disabled:opacity-50 disabled:pointer-events-none"
                 >
                   <UserX size={13} aria-hidden />
                 </button>
@@ -333,9 +366,8 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
           {isOwner ? (
             <Button
               variant="destructive"
-              onClick={() => {
-                void removeWs(activeId).then(() => onOpenChange(false))
-              }}
+              loading={actioning}
+              onClick={() => void runFooterAction(removeWs)}
             >
               <Trash2 size={13} aria-hidden />
               {t('workspace.delete', { defaultValue: 'Delete workspace' })}
@@ -343,15 +375,14 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
           ) : (
             <Button
               variant="destructive"
-              onClick={() => {
-                void leaveWs(activeId).then(() => onOpenChange(false))
-              }}
+              loading={actioning}
+              onClick={() => void runFooterAction(leaveWs)}
             >
               <LogOut size={13} aria-hidden />
               {t('workspace.leave', { defaultValue: 'Leave workspace' })}
             </Button>
           )}
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>
+          <Button variant="ghost" disabled={actioning} onClick={() => onOpenChange(false)}>
             {t('common.close', { ns: 'common', defaultValue: 'Close' })}
           </Button>
         </DialogFooter>

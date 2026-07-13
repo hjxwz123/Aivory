@@ -76,6 +76,9 @@ export default function AdminRedeemCodes() {
   const [submitting, setSubmitting] = useState(false)
   const submittingRef = useRef(false)
   const [confirmDelete, setConfirmDelete] = useState<ApiRedeemCode | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  const deletingRef = useRef(false)
+  const [togglingId, setTogglingId] = useState<string | null>(null)
   const [generated, setGenerated] = useState<ApiRedeemCode[] | null>(null)
   const [page, setPage] = useState(1)
   const PAGE_SIZE = envNum('VITE_AIVORY_PAGE_SIZE_2', 20)
@@ -156,16 +159,23 @@ export default function AdminRedeemCodes() {
   }
 
   async function toggleEnabled(row: ApiRedeemCode) {
+    if (togglingId) return
+    setTogglingId(row.id)
     try {
       await adminApi.updateRedeemCode(row.id, { enabled: !row.enabled })
       toast.success(row.enabled ? t('admin:redeemCodes.disabled') : t('admin:redeemCodes.enabled'))
       await load()
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
+    } finally {
+      setTogglingId(null)
     }
   }
 
   async function remove(row: ApiRedeemCode) {
+    if (deletingRef.current) return
+    deletingRef.current = true
+    setDeleting(true)
     try {
       await adminApi.removeRedeemCode(row.id)
       toast.success(t('admin:redeemCodes.removed'))
@@ -173,6 +183,9 @@ export default function AdminRedeemCodes() {
       await load()
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
+    } finally {
+      deletingRef.current = false
+      setDeleting(false)
     }
   }
 
@@ -291,6 +304,7 @@ export default function AdminRedeemCodes() {
                   key={rc.id}
                   row={rc}
                   group={groupByID.get(rc.group_id)}
+                  toggling={togglingId === rc.id}
                   onToggleEnabled={() => void toggleEnabled(rc)}
                   onDelete={() => setConfirmDelete(rc)}
                 />
@@ -416,10 +430,10 @@ export default function AdminRedeemCodes() {
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setConfirmDelete(null)}>
+            <Button variant="ghost" onClick={() => setConfirmDelete(null)} disabled={deleting}>
               {t('common:actions.cancel')}
             </Button>
-            <Button variant="destructive" onClick={() => confirmDelete && void remove(confirmDelete)}>
+            <Button variant="destructive" loading={deleting} onClick={() => confirmDelete && void remove(confirmDelete)}>
               {t('common:actions.delete')}
             </Button>
           </DialogFooter>
@@ -434,11 +448,13 @@ export default function AdminRedeemCodes() {
 function CodeRow({
   row,
   group,
+  toggling,
   onToggleEnabled,
   onDelete,
 }: {
   row: ApiRedeemCode
   group?: ApiUserGroup
+  toggling: boolean
   onToggleEnabled: () => void
   onDelete: () => void
 }) {
@@ -512,6 +528,8 @@ function CodeRow({
           variant="ghost"
           size="sm"
           leadingIcon={<RotateCcw size={13} aria-hidden />}
+          loading={toggling}
+          disabled={toggling}
           onClick={onToggleEnabled}
         >
           {row.enabled ? t('admin:redeemCodes.disable') : t('admin:redeemCodes.enable')}
