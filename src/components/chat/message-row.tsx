@@ -749,12 +749,10 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
                       {t('actions.copyMessage')}
                     </DropdownMenuItem>
                     {onFork ? (
-                      <DropdownMenuItem
-                        onClick={() => {
-                          onFork(message.id)
-                          toast.success(t('actions.forked', { defaultValue: 'Forked to a new conversation' }))
-                        }}
-                      >
+                      // Feedback (forking… → forked/failed) is owned by handleFork
+                      // in message-list — a success toast here would fire before
+                      // the request even starts (§2.7).
+                      <DropdownMenuItem onClick={() => onFork(message.id)}>
                         <GitBranchPlus size={13} aria-hidden />
                         {t('actions.fork', { defaultValue: 'Fork to new conversation' })}
                       </DropdownMenuItem>
@@ -852,9 +850,9 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
                   icon={<GitBranchPlus size={18} aria-hidden />}
                   label={t('actions.fork', { defaultValue: 'Fork to new conversation' })}
                   onClick={() => {
+                    // handleFork owns the forking…/forked/failed toasts (§2.7).
                     setActionSheetOpen(false)
                     onFork(message.id)
-                    toast.success(t('actions.forked', { defaultValue: 'Forked to a new conversation' }))
                   }}
                 />
               ) : null}

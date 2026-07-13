@@ -623,10 +623,15 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	//     (tc.SkipImageQuota) so the orchestrator's credit decision governs.
 	var msg string
 	var ok, payWithCredits bool
+	// Remaining free allowance (USD) when admitted under a finite cost-type
+	// allotment; -1 otherwise. Re-checked against the assembled request below
+	// (§ free-allowance overshoot). Image turns already pre-project their cost
+	// (checkImageQuota counts n × price before deciding), so they don't need it.
+	freeRemainingUSD := -1.0
 	if model.Kind == "image" {
 		msg, ok, payWithCredits = o.checkImageQuota(ctx, req.UserID, model, 1)
 	} else {
-		msg, ok, payWithCredits = o.checkModelQuota(ctx, req.UserID, model)
+		msg, ok, payWithCredits, freeRemainingUSD = o.checkModelQuota(ctx, req.UserID, model)
 	}
 	if !ok {
 		refusalBlocks, _ := json.Marshal([]UnifiedBlock{{Kind: "text", Text: msg}})
@@ -974,6 +979,19 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		FallbackUsed:   fallbackFlag,
 	}
 
+	// § free-allowance overshoot: the free/credits decision above ran BEFORE the
+	// prompt existed, on accumulated usage alone — a $2 request would ride on $1
+	// of remaining allowance. Now that the real request is assembled, re-check:
+	// if the estimate clearly exceeds what's left (grace factor, default 120%),
+	// charge the WHOLE turn in credits instead; the unspent free remainder stays
+	// for later, smaller turns (paid turns don't burn the free window — see
+	// recordQuotaUsage / store.UsageInWindow). Only when credits are enabled:
+	// non-credit deployments keep the old overshootable behavior over blocking.
+	if !payWithCredits && freeRemainingUSD >= 0 && o.creditsPerUSD() > 0 &&
+		freeQuotaOvershoot(estimateTurnUSD(*model, provReq), freeRemainingUSD) {
+		payWithCredits = true
+	}
+
 	// §credits pre-flight: for a credit-charged turn, estimate the REAL upstream
 	// request size (system + tools + history incl. injected RAG/file) + a small
 	// output reserve, convert to credits, and refuse BEFORE calling the model if
@@ -1147,7 +1165,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 					ChannelID:        servedChannelID,
 					Fallback:         usedFallback,
 				})
-				o.recordQuotaUsage(ctx, req.UserID, model, stopChatCost)
+				o.recordQuotaUsage(ctx, req.UserID, model, stopChatCost, payWithCredits)
 			}
 			onEvent(SseEvent{Type: "done", MessageID: assistantMsg.ID, StopReason: "stopped", Usage: &usage, Credits: turnCredits})
 			finalAssistant, _ := store.GetMessage(ctx, o.db, assistantMsg.ID)
@@ -1310,8 +1328,10 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		ChannelID:        servedChannelID,
 		Fallback:         usedFallback,
 	})
-	// Update the fixed-window quota counter for this user+model (§ user groups).
-	o.recordQuotaUsage(ctx, req.UserID, model, chatCost)
+	// Update the fixed-window FREE quota counter for this user+model (§ user
+	// groups). Credit-paid turns are skipped inside — they must not burn the
+	// remaining free allowance.
+	o.recordQuotaUsage(ctx, req.UserID, model, chatCost, payWithCredits)
 
 	// Non-streaming models: now that generation is complete, emit the full
 	// answer as a single text delta.

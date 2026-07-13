@@ -42,10 +42,17 @@ func quotaWindow(periodSeconds int) (start int64, ttl time.Duration) {
 //
 // There is no "locked" outcome anymore — a model the group has no free uses for
 // simply falls back to credits (§ remove user-side lock).
-func (o *Orchestrator) checkModelQuota(ctx context.Context, userID string, model *store.Model) (string, bool, bool) {
+//
+// The fourth return is the REMAINING free allowance in USD when the turn was
+// admitted under a finite cost-type allotment, or -1 when no such ceiling
+// applies (admin, unlimited, count-type, already paying credits). The
+// orchestrator re-checks it against the assembled request's estimated cost
+// (§ free-allowance overshoot): the gate here runs before the prompt exists,
+// so on its own a $2 request would ride on $1 of remaining allowance.
+func (o *Orchestrator) checkModelQuota(ctx context.Context, userID string, model *store.Model) (string, bool, bool, float64) {
 	// Admins are exempt from all usage quotas (§ admin).
 	if u, err := store.FindUserByID(ctx, o.db, userID); err == nil && u.Role == "admin" {
-		return "", true, false
+		return "", true, false, -1
 	}
 	has, err := store.ModelHasAnyQuota(ctx, o.db, model.ID)
 	if err != nil {
@@ -53,10 +60,10 @@ func (o *Orchestrator) checkModelQuota(ctx context.Context, userID string, model
 		if o.logger != nil {
 			o.logger.Printf("quota: ModelHasAnyQuota(%s) failed, allowing (fail-open): %v", model.ID, err)
 		}
-		return "", true, false
+		return "", true, false, -1
 	}
 	if !has {
-		return "", true, false // no quota rows → open to everyone, free + unlimited
+		return "", true, false, -1 // no quota rows → open to everyone, free + unlimited
 	}
 	groupID := o.userGroupID(ctx, userID)
 	q, err := store.GetModelQuota(ctx, o.db, model.ID, groupID)
@@ -68,24 +75,28 @@ func (o *Orchestrator) checkModelQuota(ctx context.Context, userID string, model
 		// they actually send. creditDecision still blocks when credits are disabled
 		// (credits_per_usd=0) or the user can't cover the cost, so non-credit
 		// deployments stay hard-locked exactly as before.
-		return o.creditDecision(ctx, userID, groupID)
+		msg, ok, useCredits := o.creditDecision(ctx, userID, groupID)
+		return msg, ok, useCredits, -1
 	}
 	if q.LimitValue <= 0 {
-		return "", true, false // granted unlimited free
+		return "", true, false, -1 // granted unlimited free
 	}
 	start, ttl := quotaWindow(q.PeriodSeconds)
 	cost, count := o.readQuota(ctx, userID, model.ID, q, start, ttl)
 	withinFree := true
+	remaining := -1.0
 	if q.LimitType == "count" {
 		withinFree = count < int(q.LimitValue+0.5)
 	} else {
 		withinFree = cost < q.LimitValue
+		remaining = q.LimitValue - cost // > 0 whenever withinFree holds
 	}
 	if withinFree {
-		return "", true, false // free use within the group's per-cycle allotment
+		return "", true, false, remaining // free use within the group's per-cycle allotment
 	}
 	// Free allotment exhausted → pay with credits.
-	return o.creditDecision(ctx, userID, groupID)
+	msg, ok, useCredits := o.creditDecision(ctx, userID, groupID)
+	return msg, ok, useCredits, -1
 }
 
 // checkImageQuota is the image-model analogue of checkModelQuota (§4.20). It
@@ -351,9 +362,34 @@ func (o *Orchestrator) readTimedCreditsUsed(ctx context.Context, userID string, 
 	return used
 }
 
-// recordQuotaUsage updates the window counter after a successful turn.
-func (o *Orchestrator) recordQuotaUsage(ctx context.Context, userID string, model *store.Model, turnCost float64) {
-	if o.cache == nil {
+// freeQuotaOvershootGracePct: a turn admitted under the free allotment flips to
+// credits only when its estimated cost exceeds the REMAINING allowance by this
+// percentage (default 120 = 20% grace). The estimate (bytes/4 + CJK) is
+// approximate; the grace keeps borderline turns free instead of prematurely
+// charging credits, while still stopping a $2 request from riding on $0.01.
+var freeQuotaOvershootGracePct = envcfg.Int("AIVORY_LLM_FREE_QUOTA_OVERSHOOT_GRACE_PCT", 120)
+
+// estimateTurnUSD estimates a turn's upstream USD cost before sending: the
+// assembled request's estimated input tokens plus the same fixed output
+// reserve the credit pre-flight uses.
+func estimateTurnUSD(model store.Model, req UnifiedChatRequest) float64 {
+	outputReserve := envcfg.Int("AIVORY_LLM_OUTPUT_RESERVE", 2000)
+	return computeCost(model, Usage{InputTokens: estimateRequestTokens(req), OutputTokens: outputReserve})
+}
+
+// freeQuotaOvershoot reports whether an estimated turn cost blows past the
+// remaining free allowance (§ free-allowance overshoot). remaining < 0 means
+// no finite cost-type allowance applies, so there is nothing to overshoot.
+func freeQuotaOvershoot(estUSD, remainingUSD float64) bool {
+	return remainingUSD >= 0 && estUSD*100 > remainingUSD*float64(freeQuotaOvershootGracePct)
+}
+
+// recordQuotaUsage updates the free-window counter after a successful turn.
+// Credit-paid turns are skipped — the window measures the FREE allotment, and
+// store.UsageInWindow (the cold-cache seed) excludes credits>0 rows the same
+// way, so a paid turn never burns the user's remaining free allowance.
+func (o *Orchestrator) recordQuotaUsage(ctx context.Context, userID string, model *store.Model, turnCost float64, paidWithCredits bool) {
+	if o.cache == nil || paidWithCredits {
 		return
 	}
 	has, err := store.ModelHasAnyQuota(ctx, o.db, model.ID)

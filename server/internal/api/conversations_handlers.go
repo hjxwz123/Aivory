@@ -717,14 +717,18 @@ func forkConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
-	parent := ""
+	// Copy the whole chain in ONE transaction (store.CreateMessagePath). The old
+	// per-message CreateMessage loop paid a commit+fsync per copied message —
+	// forking a long conversation took seconds, users assumed it failed and
+	// clicked again, forking twice.
+	copies := make([]store.Message, 0, len(path))
 	for _, m := range path {
-		copied, err := store.CreateMessage(r.Context(), d.DB, store.Message{
+		copies = append(copies, store.Message{
 			ConversationID: newConv.ID,
-			ParentID:       parent,
 			Role:           m.Role,
 			Provider:       m.Provider,
 			ModelID:        m.ModelID,
+			ModelLabel:     m.ModelLabel, // pass the source label through; the batch insert does no per-row lookup
 			Blocks:         m.Blocks,
 			Raw:            m.Raw,
 			StopReason:     m.StopReason,
@@ -736,11 +740,12 @@ func forkConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 			Currency:       m.Currency,
 			Status:         "complete",
 		})
-		if err != nil {
+	}
+	if len(copies) > 0 {
+		if _, err := store.CreateMessagePath(r.Context(), d.DB, copies); err != nil {
 			writeError(w, 500, err)
 			return
 		}
-		parent = copied.ID
 	}
 	writeJSON(w, 201, newConv)
 }

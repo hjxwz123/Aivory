@@ -205,13 +205,31 @@ export function MessageList({ conversation, scrollToMessageId, jumpKey }: Messag
     [convId, setActiveLeaf],
   )
 
+  // §2.7 double-submit guard: forking a long conversation copies every message
+  // server-side and can take a while. Without the ref a user who sees nothing
+  // happen reopens the menu and clicks again — each click forks another copy.
+  // Feedback is owned here (not at the menu items): instant "forking…" info on
+  // click, success/error only when the request actually resolves.
+  const forkingRef = useRef(false)
   const handleFork = useCallback(
     (leafId: string) => {
-      void fork(convId, leafId).then((created) => {
-        if (created) navigate(`/chat/${created.id}`)
-      })
+      if (forkingRef.current) return
+      forkingRef.current = true
+      toast.info(t('actions.forking', { defaultValue: 'Forking to a new conversation…' }))
+      void fork(convId, leafId)
+        .then((created) => {
+          if (created) {
+            toast.success(t('actions.forked', { defaultValue: 'Forked to a new conversation' }))
+            navigate(`/chat/${created.id}`)
+          } else {
+            toast.error(t('actions.forkFailed', { defaultValue: 'Could not fork the conversation' }))
+          }
+        })
+        .finally(() => {
+          forkingRef.current = false
+        })
     },
-    [convId, fork, navigate],
+    [convId, fork, navigate, t],
   )
 
   const handleLike = useCallback(

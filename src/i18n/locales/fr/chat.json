@@ -97,12 +97,14 @@
     "prevBranch": "Branche précédente",
     "nextBranch": "Branche suivante",
     "fork": "Dupliquer dans une nouvelle conversation",
+    "forking": "Duplication vers une nouvelle conversation…",
     "forked": "Dupliqué dans une nouvelle conversation",
     "viewImage": "Afficher l’image",
     "removeAttachment": "Supprimer la pièce jointe",
     "previewFile": "Aperçu du fichier",
     "delete": "Supprimer",
-    "openInNew": "Ouvrir dans un nouvel onglet"
+    "openInNew": "Ouvrir dans un nouvel onglet",
+    "forkFailed": "Impossible de dupliquer la conversation"
   },
   "message": {
     "refused": "Le modèle a refusé de répondre à cette demande.",

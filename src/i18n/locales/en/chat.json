@@ -97,12 +97,14 @@
     "prevBranch": "Previous branch",
     "nextBranch": "Next branch",
     "fork": "Fork to new conversation",
+    "forking": "Forking to a new conversation…",
     "forked": "Forked to a new conversation",
     "viewImage": "View image",
     "removeAttachment": "Remove attachment",
     "previewFile": "Preview file",
     "delete": "Delete",
-    "openInNew": "Open in new tab"
+    "openInNew": "Open in new tab",
+    "forkFailed": "Could not fork the conversation"
   },
   "message": {
     "refused": "The model declined to answer this request.",

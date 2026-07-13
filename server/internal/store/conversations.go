@@ -693,6 +693,86 @@ func CreateMessage(ctx context.Context, db *sql.DB, m Message) (*Message, error)
 	return GetMessage(ctx, db, m.ID)
 }
 
+// CreateMessagePath inserts a LINEAR chain of messages in ONE transaction and
+// points the conversation's active leaf at the last one. Built for fork (§7.x):
+// the old per-message CreateMessage loop paid one transaction + fsync per
+// copied message, which made forking a long conversation take seconds to tens
+// of seconds on SQLite. Parent links are chained automatically (msgs[0] keeps
+// its given ParentID, each subsequent message parents on the previous one);
+// ids are generated up front. Defaults mirror CreateMessage, except the
+// model_label lookup: callers pass the source row's label through verbatim.
+// Returns the leaf (last) message id.
+func CreateMessagePath(ctx context.Context, db *sql.DB, msgs []Message) (string, error) {
+	if len(msgs) == 0 {
+		return "", errors.New("empty message path")
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback() //nolint:errcheck
+	stmt, err := tx.PrepareContext(ctx, `INSERT INTO messages(
+		id, conversation_id, parent_id, role, provider, model_id, model_label, blocks, raw, stop_reason, attachments, citations,
+		input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost, currency, status, error, search_text, author_id, created_at
+	) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		return "", err
+	}
+	defer stmt.Close() //nolint:errcheck
+	now := time.Now().Unix()
+	parent := msgs[0].ParentID
+	last := ""
+	for _, m := range msgs {
+		m.ID = genID("msg")
+		if len(m.Blocks) == 0 {
+			m.Blocks = json.RawMessage("[]")
+		}
+		if len(m.Attachments) == 0 {
+			m.Attachments = json.RawMessage("[]")
+		}
+		if len(m.Citations) == 0 {
+			m.Citations = json.RawMessage("[]")
+		}
+		if m.Currency == "" {
+			m.Currency = "USD"
+		}
+		if m.Status == "" {
+			m.Status = "complete"
+		}
+		if m.CreatedAt == 0 {
+			m.CreatedAt = now
+		}
+		var parentArg any
+		if parent == "" {
+			parentArg = nil
+		} else {
+			parentArg = parent
+		}
+		var raw any
+		if len(m.Raw) > 0 {
+			raw = string(m.Raw)
+		} else {
+			raw = nil
+		}
+		if _, err := stmt.ExecContext(ctx,
+			m.ID, m.ConversationID, parentArg, m.Role, m.Provider, m.ModelID, m.ModelLabel, string(m.Blocks), raw, m.StopReason,
+			string(m.Attachments), string(m.Citations),
+			m.InputTokens, m.OutputTokens, m.CacheReadTokens, m.CacheWriteTokens, m.Cost, m.Currency, m.Status, m.Error,
+			searchTextFromBlocks(m.Blocks), m.AuthorID, m.CreatedAt); err != nil {
+			return "", err
+		}
+		parent = m.ID
+		last = m.ID
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE conversations SET active_leaf_id=?, updated_at=? WHERE id=?`, last, now, msgs[0].ConversationID); err != nil {
+		return "", err
+	}
+	if err := tx.Commit(); err != nil {
+		return "", err
+	}
+	return last, nil
+}
+
 func attachmentFileIDs(raw json.RawMessage) []string {
 	var atts []struct {
 		ID string `json:"id"`

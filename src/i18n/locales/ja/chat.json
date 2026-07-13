@@ -97,12 +97,14 @@
     "prevBranch": "前のブランチ",
     "nextBranch": "次のブランチ",
     "fork": "新しい会話に分岐",
+    "forking": "新しい会話へ分岐しています…",
     "forked": "新しい会話に分岐しました",
     "viewImage": "画像を表示",
     "removeAttachment": "添付を削除",
     "previewFile": "ファイルをプレビュー",
     "delete": "削除",
-    "openInNew": "新しいタブで開く"
+    "openInNew": "新しいタブで開く",
+    "forkFailed": "分岐に失敗しました。もう一度お試しください"
   },
   "message": {
     "refused": "モデルはこのリクエストへの回答を控えました。",
