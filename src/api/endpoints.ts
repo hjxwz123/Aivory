@@ -682,12 +682,13 @@ export const adminApi = {
     api<{ ok: true }>(`/admin/conversations/${encodeURIComponent(id)}/sandbox`, { method: 'DELETE' }),
 
   // Per-record usage list (one row per API call), filtered + paginated.
-  usage: (params: { days?: number; user?: string; model?: string; status?: string; page?: number; pageSize?: number } = {}) => {
+  usage: (params: { days?: number; user?: string; model?: string; status?: string; purpose?: string; page?: number; pageSize?: number } = {}) => {
     const qs = new URLSearchParams()
     if (params.days) qs.set('days', String(params.days))
     if (params.user) qs.set('user', params.user)
     if (params.model) qs.set('model', params.model)
     if (params.status) qs.set('status', params.status)
+    if (params.purpose) qs.set('purpose', params.purpose)
     if (params.page) qs.set('page', String(params.page))
     if (params.pageSize) qs.set('page_size', String(params.pageSize))
     return api<{ records: ApiUsageRecord[]; total: number; total_cost: number; page: number; page_size: number }>(
@@ -695,18 +696,20 @@ export const adminApi = {
     )
   },
   deleteUsageRecord: (id: number) => api<{ ok: true }>(`/admin/usage/${id}`, { method: 'DELETE' }),
-  deleteUsageFiltered: (params: { days?: number; user?: string; model?: string; status?: string }) => {
+  deleteUsageFiltered: (params: { days?: number; user?: string; model?: string; status?: string; purpose?: string }) => {
     const qs = new URLSearchParams()
     if (params.days) qs.set('days', String(params.days))
     if (params.user) qs.set('user', params.user)
     if (params.model) qs.set('model', params.model)
     if (params.status) qs.set('status', params.status)
+    if (params.purpose) qs.set('purpose', params.purpose)
     return api<{ deleted: number }>(`/admin/usage${qs.toString() ? `?${qs}` : ''}`, { method: 'DELETE' })
   },
-  files: (params: { search?: string; userId?: string; origin?: string; sort?: string; order?: string; limit?: number; offset?: number } = {}) => {
+  files: (params: { search?: string; userId?: string; user?: string; origin?: string; sort?: string; order?: string; limit?: number; offset?: number } = {}) => {
     const qs = new URLSearchParams()
     if (params.search) qs.set('search', params.search)
     if (params.userId) qs.set('user_id', params.userId)
+    if (params.user) qs.set('user', params.user)
     if (params.origin && params.origin !== 'all') qs.set('origin', params.origin)
     if (params.sort) qs.set('sort', params.sort)
     if (params.order) qs.set('order', params.order)

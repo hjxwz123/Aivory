@@ -70,7 +70,10 @@ export default function AdminFiles() {
   const { t, i18n } = useTranslation('admin')
   const [search, setSearch] = useState('')
   const [searchDebounced, setSearchDebounced] = useState('')
-  const [userId, setUserId] = useState(ALL)
+  // Free-text owner filter (user_id exact or email/name substring) — same UX
+  // as the usage page. A dropdown of every user doesn't scale.
+  const [userQ, setUserQ] = useState('')
+  const [userQDebounced, setUserQDebounced] = useState('')
   const [origin, setOrigin] = useState(ALL)
   const [sort, setSort] = useState('created_at')
   const [order, setOrder] = useState<'desc' | 'asc'>('desc')
@@ -79,7 +82,6 @@ export default function AdminFiles() {
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [page, setPage] = useState(1)
-  const [users, setUsers] = useState<{ id: string; email: string }[]>([])
 
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [confirmDelete, setConfirmDelete] = useState<ApiAdminFile[] | null>(null)
@@ -92,21 +94,17 @@ export default function AdminFiles() {
     return () => clearTimeout(id)
   }, [search])
 
-  // Owner filter options: first page of users is plenty for an admin dropdown;
-  // the free-text search covers anything beyond it.
   useEffect(() => {
-    adminApi
-      .users('', 200, 0)
-      .then((resp) => setUsers(resp.users.map((u) => ({ id: u.id, email: u.email }))))
-      .catch(() => {})
-  }, [])
+    const id = setTimeout(() => setUserQDebounced(userQ.trim()), 400)
+    return () => clearTimeout(id)
+  }, [userQ])
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
       const resp = await adminApi.files({
         search: searchDebounced,
-        userId: userId === ALL ? '' : userId,
+        user: userQDebounced,
         origin,
         sort,
         order,
@@ -121,7 +119,7 @@ export default function AdminFiles() {
     } finally {
       setLoading(false)
     }
-  }, [searchDebounced, userId, origin, sort, order, page, t])
+  }, [searchDebounced, userQDebounced, origin, sort, order, page, t])
 
   useEffect(() => {
     void load()
@@ -130,7 +128,7 @@ export default function AdminFiles() {
   // Reset to page 1 whenever a filter changes.
   useEffect(() => {
     setPage(1)
-  }, [searchDebounced, userId, origin, sort, order])
+  }, [searchDebounced, userQDebounced, origin, sort, order])
 
   const timeFmt = useMemo(
     () => new Intl.DateTimeFormat(i18n.language, { dateStyle: 'medium', timeStyle: 'short' }),
@@ -240,19 +238,11 @@ export default function AdminFiles() {
         </div>
         <div className="w-56">
           <label className="block text-[12px] text-[var(--color-fg-subtle)] mb-1">{t('files.filters.user', { defaultValue: 'User' })}</label>
-          <Select value={userId} onValueChange={setUserId}>
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL}>{t('files.filters.allUsers', { defaultValue: 'All users' })}</SelectItem>
-              {users.map((u) => (
-                <SelectItem key={u.id} value={u.id}>
-                  {u.email}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <Input
+            value={userQ}
+            onChange={(e) => setUserQ(e.target.value)}
+            placeholder={t('files.filters.userSearchPlaceholder', { defaultValue: 'Email / name / user id' })}
+          />
         </div>
         <div className="w-44">
           <label className="block text-[12px] text-[var(--color-fg-subtle)] mb-1">{t('files.filters.origin', { defaultValue: 'Source' })}</label>

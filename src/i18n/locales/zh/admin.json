@@ -395,7 +395,10 @@
       "userPlaceholder": "邮箱或 ID",
       "model": "模型",
       "allModels": "全部模型",
-      "status": "状态"
+      "status": "状态",
+      "purpose": "用途",
+      "allPurposes": "全部用途",
+      "taskAll": "任务模型（全部）"
     },
     "deleteConfirm": {
       "title": "删除这些用量记录？",
@@ -966,7 +969,8 @@
       "user": "用户",
       "allUsers": "全部用户",
       "origin": "来源",
-      "sort": "排序"
+      "sort": "排序",
+      "userSearchPlaceholder": "邮箱 / 姓名 / 用户 ID"
     },
     "origin": {
       "all": "全部来源",

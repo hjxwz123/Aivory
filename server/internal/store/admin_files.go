@@ -31,6 +31,10 @@ type AdminFile struct {
 type AdminFileFilter struct {
 	Search string // case-insensitive filename substring
 	UserID string // exact owner match
+	// UserQ matches the owner by user_id exactly OR email/name substring
+	// (case-insensitive) — same semantics as the usage page's user filter, so
+	// the admin can type instead of scrolling a dropdown of every user.
+	UserQ  string
 	Origin string // "" (all) | "conversation" | "kb"
 	Sort   string // "created_at" (default) | "size_bytes" | "filename"
 	Order  string // "desc" (default) | "asc"
@@ -68,6 +72,11 @@ func adminFilesWhere(f AdminFileFilter) (string, []any) {
 	if f.UserID != "" {
 		conds = append(conds, "t.user_id = ?")
 		args = append(args, f.UserID)
+	}
+	if q := strings.TrimSpace(f.UserQ); q != "" {
+		like := "%" + strings.ToLower(q) + "%"
+		conds = append(conds, "(t.user_id = ? OR LOWER(t.user_email) LIKE ? OR LOWER(t.user_name) LIKE ?)")
+		args = append(args, q, like, like)
 	}
 	if f.Origin == "conversation" || f.Origin == "kb" {
 		conds = append(conds, "t.origin = ?")

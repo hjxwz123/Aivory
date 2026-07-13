@@ -395,7 +395,10 @@
       "userPlaceholder": "Email or ID",
       "model": "Model",
       "allModels": "All models",
-      "status": "Status"
+      "status": "Status",
+      "purpose": "Purpose",
+      "allPurposes": "All purposes",
+      "taskAll": "Task models (all)"
     },
     "deleteConfirm": {
       "title": "Delete these usage records?",
@@ -966,7 +969,8 @@
       "user": "User",
       "allUsers": "All users",
       "origin": "Source",
-      "sort": "Sort by"
+      "sort": "Sort by",
+      "userSearchPlaceholder": "Email / name / user id"
     },
     "origin": {
       "all": "All sources",

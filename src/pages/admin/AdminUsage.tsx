@@ -32,6 +32,23 @@ import { PanelFallback } from '@/components/ui/panel-fallback'
 const RANGE_IDS = ['1', '7', '30', '90'] as const
 const ALL_MODELS = 'all'
 const PAGE_SIZE = envNum('VITE_AIVORY_PAGE_SIZE', 50)
+// Known task-model sub-purposes for the purpose filter dropdown. Labels come
+// from the existing usage.purposes.* i18n keys (dots → underscores); an
+// unknown/new purpose still displays raw in rows and matches via the "task"
+// umbrella option even before it's added here.
+const TASK_PURPOSES = [
+  'task.title',
+  'task.router',
+  'task.compact',
+  'task.memory_extract',
+  'task.memory_adjudicate',
+  'task.downgrade',
+  'task.image_prompt',
+  'task.research_plan',
+  'task.research_verify',
+  'task.research_validate',
+  'task.moderation',
+] as const
 
 export default function AdminUsage() {
   const { t, i18n } = useTranslation('admin')
@@ -40,6 +57,7 @@ export default function AdminUsage() {
   const [userQDebounced, setUserQDebounced] = useState('')
   const [modelId, setModelId] = useState(ALL_MODELS)
   const [status, setStatus] = useState('all')
+  const [purpose, setPurpose] = useState('all')
 
   const [records, setRecords] = useState<ApiUsageRecord[]>([])
   const [total, setTotal] = useState(0)
@@ -66,8 +84,9 @@ export default function AdminUsage() {
       user: userQDebounced || undefined,
       model: modelId === ALL_MODELS ? undefined : modelId,
       status: status === 'all' ? undefined : status,
+      purpose: purpose === 'all' ? undefined : purpose,
     }),
-    [days, userQDebounced, modelId, status],
+    [days, userQDebounced, modelId, status, purpose],
   )
 
   const load = useCallback(async () => {
@@ -106,7 +125,7 @@ export default function AdminUsage() {
   // Any filter change resets to the first page.
   useEffect(() => {
     setPage(1)
-  }, [days, userQDebounced, modelId, status])
+  }, [days, userQDebounced, modelId, status, purpose])
 
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE))
   const timeFmt = useMemo(
@@ -223,6 +242,27 @@ export default function AdminUsage() {
             <SelectContent>
               <SelectItem value="all">{t('usage.status.all', { defaultValue: 'All' })}</SelectItem>
               <SelectItem value="error">{t('usage.status.errorsOnly', { defaultValue: 'Errors only' })}</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="w-48">
+          <label className="block text-[12px] text-[var(--color-fg-subtle)] mb-1">{t('usage.filters.purpose', { defaultValue: 'Purpose' })}</label>
+          <Select value={purpose} onValueChange={setPurpose}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">{t('usage.filters.allPurposes', { defaultValue: 'All purposes' })}</SelectItem>
+              <SelectItem value="chat">{purposeLabel('chat')}</SelectItem>
+              <SelectItem value="image">{purposeLabel('image')}</SelectItem>
+              <SelectItem value="embedding">{purposeLabel('embedding')}</SelectItem>
+              {/* "task" is the backend umbrella matching every task.* sub-purpose */}
+              <SelectItem value="task">{t('usage.filters.taskAll', { defaultValue: 'Task models (all)' })}</SelectItem>
+              {TASK_PURPOSES.map((p) => (
+                <SelectItem key={p} value={p}>
+                  {purposeLabel(p)}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>

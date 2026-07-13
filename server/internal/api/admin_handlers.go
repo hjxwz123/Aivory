@@ -841,6 +841,10 @@ func parseUsageQuery(r *http.Request) (store.UsageFilter, int, int) {
 	if strings.EqualFold(strings.TrimSpace(q.Get("status")), "error") {
 		f.Status = "error"
 	}
+	// "all" / "" = no purpose constraint; "task" is the umbrella for task.*.
+	if p := strings.TrimSpace(q.Get("purpose")); p != "" && !strings.EqualFold(p, "all") {
+		f.Purpose = p
+	}
 	page, _ := strconv.Atoi(q.Get("page"))
 	if page < 1 {
 		page = 1

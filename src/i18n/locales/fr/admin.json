@@ -395,7 +395,10 @@
       "userPlaceholder": "E-mail ou ID",
       "model": "Modèle",
       "allModels": "Tous les modèles",
-      "status": "Statut"
+      "status": "Statut",
+      "purpose": "Usage",
+      "allPurposes": "Tous les usages",
+      "taskAll": "Modèles de tâche (tous)"
     },
     "deleteConfirm": {
       "title": "Supprimer ces enregistrements ?",
@@ -966,7 +969,8 @@
       "user": "Utilisateur",
       "allUsers": "Tous les utilisateurs",
       "origin": "Source",
-      "sort": "Trier par"
+      "sort": "Trier par",
+      "userSearchPlaceholder": "E-mail / nom / ID utilisateur"
     },
     "origin": {
       "all": "Toutes les sources",

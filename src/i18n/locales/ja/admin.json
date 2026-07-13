@@ -395,7 +395,10 @@
       "userPlaceholder": "メールまたは ID",
       "model": "モデル",
       "allModels": "すべてのモデル",
-      "status": "ステータス"
+      "status": "ステータス",
+      "purpose": "用途",
+      "allPurposes": "すべての用途",
+      "taskAll": "タスクモデル（すべて）"
     },
     "deleteConfirm": {
       "title": "これらの利用記録を削除しますか？",
@@ -966,7 +969,8 @@
       "user": "ユーザー",
       "allUsers": "すべてのユーザー",
       "origin": "ソース",
-      "sort": "並び替え"
+      "sort": "並び替え",
+      "userSearchPlaceholder": "メール / 名前 / ユーザーID"
     },
     "origin": {
       "all": "すべてのソース",

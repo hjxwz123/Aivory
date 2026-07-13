@@ -552,6 +552,10 @@ type UsageFilter struct {
 	UserQ   string // matches user_id exactly OR email substring (case-insensitive)
 	ModelID string // exact model_id
 	Status  string // "error" = only failed requests; "" = all (§usage errors)
+	// Purpose filters by usage purpose: exact ("chat" / "image" / "embedding" /
+	// "task.title" / …), or the umbrella value "task" which matches every
+	// task-model sub-purpose ("task" itself + "task.*"). "" = all.
+	Purpose string
 }
 
 // where builds the shared WHERE clause + args. The user predicate needs the
@@ -577,6 +581,14 @@ func (f UsageFilter) where() (string, []any) {
 	}
 	if f.Status == "error" {
 		conds = append(conds, "COALESCE(u.status,'ok') = 'error'")
+	}
+	if p := strings.TrimSpace(f.Purpose); p != "" {
+		if p == "task" {
+			conds = append(conds, "(u.purpose = 'task' OR u.purpose LIKE 'task.%')")
+		} else {
+			conds = append(conds, "u.purpose = ?")
+			args = append(args, p)
+		}
 	}
 	if len(conds) == 0 {
 		return "", nil

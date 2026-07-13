@@ -395,7 +395,10 @@
       "userPlaceholder": "電子郵件或 ID",
       "model": "模型",
       "allModels": "全部模型",
-      "status": "狀態"
+      "status": "狀態",
+      "purpose": "用途",
+      "allPurposes": "全部用途",
+      "taskAll": "任務模型（全部）"
     },
     "deleteConfirm": {
       "title": "刪除這些用量記錄？",
@@ -966,7 +969,8 @@
       "user": "使用者",
       "allUsers": "全部使用者",
       "origin": "來源",
-      "sort": "排序"
+      "sort": "排序",
+      "userSearchPlaceholder": "信箱 / 姓名 / 用戶 ID"
     },
     "origin": {
       "all": "全部來源",
