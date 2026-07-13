@@ -1045,6 +1045,10 @@ var settingsKeys = []string{
 	"rag_code_full_text_max_lines",
 	// §credits pre-flight token/affordability check.
 	"credit_preflight_enabled",
+	// §B5 request logging: log_full_requests turns on persisting the full
+	// (sanitized) provider request body on usage rows; log_errors_only (default
+	// true) restricts that to failed requests. Off = errors-only (the floor).
+	"log_full_requests", "log_errors_only",
 }
 
 // sensitiveKeywords lists substrings that identify secret settings fields.

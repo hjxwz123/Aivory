@@ -497,6 +497,40 @@ func settingStr(db *sql.DB, key string) string {
 	return ""
 }
 
+func settingBool(db *sql.DB, key string, def bool) bool {
+	raw, err := store.GetSetting(db, key)
+	if err != nil || len(raw) == 0 {
+		return def
+	}
+	var b bool
+	if json.Unmarshal(raw, &b) == nil {
+		return b
+	}
+	return def
+}
+
+// requestSnapshotFor returns the captured provider-request fields to persist on
+// a usage row, honoring the admin request-logging settings (§B5-request-logging):
+//   - Error rows ALWAYS carry the snapshot (unchanged floor behavior).
+//   - Success rows carry it only when `log_full_requests` is on AND
+//     `log_errors_only` is off — i.e. the admin explicitly opted into logging
+//     every request's full body, not just failures.
+//
+// The snapshot is the same sanitized capture the error path stores (headers
+// masked, body clamped to AIVORY_LLM_PROVIDER_REQUEST_BODY_MAX_BYTES).
+func (o *Orchestrator) requestSnapshotFor(rec *providerRequestRecorder, isError bool) (method, url, header, body string) {
+	if rec == nil {
+		return "", "", "", ""
+	}
+	if !isError {
+		if !settingBool(o.db, "log_full_requests", false) || settingBool(o.db, "log_errors_only", true) {
+			return "", "", "", ""
+		}
+	}
+	s := rec.snapshot()
+	return s.Method, s.URL, s.Header, s.Body
+}
+
 // Run executes one turn end to end. It blocks while streaming.
 // onEvent is invoked on every SSE event so the HTTP handler can flush.
 func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(SseEvent)) (*RunResult, error) {
@@ -1148,6 +1182,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			// and the window-quota increment go together so the cache counter and the
 			// usage_logs COUNT(*) cold-reseed stay in agreement (§B3).
 			if produced {
+				reqMethod, reqURL, reqHeader, reqBody := o.requestSnapshotFor(reqRecorder, false)
 				o.logUsage(ctx, store.UsageLog{
 					UserID:           req.UserID,
 					WorkspaceID:      conv.WorkspaceID,
@@ -1164,6 +1199,10 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 					Credits:          timedCredits,
 					ChannelID:        servedChannelID,
 					Fallback:         usedFallback,
+					RequestMethod:    reqMethod,
+					RequestURL:       reqURL,
+					RequestHeaders:   reqHeader,
+					RequestBody:      reqBody,
 				})
 				o.recordQuotaUsage(ctx, req.UserID, model, stopChatCost, payWithCredits)
 			}
@@ -1311,6 +1350,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		Status:           "complete",
 		GenMs:            time.Since(turnStart).Milliseconds(),
 	})
+	successMethod, successURL, successHeader, successBody := o.requestSnapshotFor(reqRecorder, false)
 	_ = store.LogUsage(ctx, o.db, store.UsageLog{
 		UserID:           req.UserID,
 		WorkspaceID:      conv.WorkspaceID,
@@ -1327,6 +1367,10 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		Credits:          timedCredits,
 		ChannelID:        servedChannelID,
 		Fallback:         usedFallback,
+		RequestMethod:    successMethod,
+		RequestURL:       successURL,
+		RequestHeaders:   successHeader,
+		RequestBody:      successBody,
 	})
 	// Update the fixed-window FREE quota counter for this user+model (§ user
 	// groups). Credit-paid turns are skipped inside — they must not burn the

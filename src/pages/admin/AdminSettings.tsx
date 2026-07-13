@@ -34,6 +34,8 @@ const OWNED_KEYS = [
   'summary_max_tokens',
   'compaction_enabled',
   'memory_enabled',
+  'log_full_requests',
+  'log_errors_only',
   'signup_open',
   'register_ip_daily_limit',
   'register_captcha_required',
@@ -349,6 +351,37 @@ export default function AdminSettings() {
             <p className="text-xs text-[var(--color-fg-subtle)] mt-2 pl-1">
               {t('admin:settings.fields.preflightLead')}
             </p>
+          </div>
+
+          {/* §B5 request logging — off = only failed requests store the full body
+              (the floor). Master on reveals the errors-only child switch. */}
+          <div>
+            <ToggleRow
+              label={t('admin:settings.fields.logFullRequests', { defaultValue: 'Log full request bodies' })}
+              checked={readBool('log_full_requests', false)}
+              onChange={(v) => setDraft({ ...draft, log_full_requests: v })}
+            />
+            <p className="text-xs text-[var(--color-fg-subtle)] mt-2 pl-1">
+              {t('admin:settings.fields.logFullRequestsLead', {
+                defaultValue:
+                  'Store the complete (sanitized) upstream request body on every usage record for debugging. Failed requests are always stored regardless of this setting.',
+              })}
+            </p>
+            {readBool('log_full_requests', false) && (
+              <div className="mt-3 pl-4 border-l-2 border-[var(--color-border)]">
+                <ToggleRow
+                  label={t('admin:settings.fields.logErrorsOnly', { defaultValue: 'Only failed requests' })}
+                  checked={readBool('log_errors_only', true)}
+                  onChange={(v) => setDraft({ ...draft, log_errors_only: v })}
+                />
+                <p className="text-xs text-[var(--color-fg-subtle)] mt-2 pl-1">
+                  {t('admin:settings.fields.logErrorsOnlyHint', {
+                    defaultValue:
+                      'On: keep storing only failed requests. Off: store the full body of every request — larger database and more sensitive prompt data at rest.',
+                  })}
+                </p>
+              </div>
+            )}
           </div>
 
           {/* Email verification + domain whitelist */}

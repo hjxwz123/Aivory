@@ -568,7 +568,11 @@
       "storageLocal": "Local disk (server volume)",
       "storageLocalNote": "Zero-config persistence: recycled workspaces are archived to the sandbox server's mounted directory (SANDBOX_LOCAL_STORAGE_DIR) and restored when the conversation runs code again — no external object store needed. Single-node only; MinerU document parsing still needs an object store.",
       "sandboxIdleTtl": "Idle recycle (seconds)",
-      "sandboxIdleTtlHint": "Recycle a sandbox after this many idle seconds (its workspace is archived first). Empty = 1800 (30 min). Range 60–86400."
+      "sandboxIdleTtlHint": "Recycle a sandbox after this many idle seconds (its workspace is archived first). Empty = 1800 (30 min). Range 60–86400.",
+      "logFullRequests": "Log full request bodies",
+      "logFullRequestsLead": "Store the complete (sanitized) upstream request body on every usage record for debugging. Failed requests are always stored regardless of this setting.",
+      "logErrorsOnly": "Only failed requests",
+      "logErrorsOnlyHint": "On: keep storing only failed requests. Off: store the full body of every request — larger database and more sensitive prompt data at rest."
     }
   },
   "groups": {

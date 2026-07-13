@@ -568,7 +568,11 @@
       "storageLocal": "本機磁碟（伺服器卷）",
       "storageLocalNote": "零設定持久化：被回收的工作區歸檔到沙箱伺服器掛載的目錄（SANDBOX_LOCAL_STORAGE_DIR），下次該對話再執行程式碼時自動還原，無需外部物件儲存。僅適用於單節點；MinerU 文件解析仍需物件儲存。",
       "sandboxIdleTtl": "閒置回收（秒）",
-      "sandboxIdleTtlHint": "沙箱閒置這麼多秒後回收（回收前先歸檔其工作區）。留空 = 1800（30 分鐘）。範圍 60–86400。"
+      "sandboxIdleTtlHint": "沙箱閒置這麼多秒後回收（回收前先歸檔其工作區）。留空 = 1800（30 分鐘）。範圍 60–86400。",
+      "logFullRequests": "記錄完整請求體",
+      "logFullRequestsLead": "在每條用量記錄上保存完整（已脫敏）的上游請求體，便於除錯。失敗請求無論此項是否開啟都始終記錄。",
+      "logErrorsOnly": "僅記錄失敗請求",
+      "logErrorsOnlyHint": "開啟：維持只記錄失敗請求。關閉：記錄全部請求的完整請求體——資料庫更大，且更多敏感提示詞落盤。"
     }
   },
   "groups": {
