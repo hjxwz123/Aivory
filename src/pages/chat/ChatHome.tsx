@@ -92,6 +92,10 @@ export default function ChatHome() {
   const pendingConvRef = useRef<ApiConversation | null>(null)
   const pendingCreateRef = useRef<Promise<string | undefined> | null>(null)
   const pendingConsumedRef = useRef(false)
+  // Set when the composer drains its last attachment while the lazy create is
+  // still in flight — the create then discards its own conversation on landing
+  // instead of installing a draft nobody references ("Untitled ghost").
+  const draftAbandonedRef = useRef(false)
   const mountedRef = useRef(true)
   // Read synchronously on the first render so Composer starts in its restoring
   // state and cannot submit an attachment-less turn before recovery finishes.
@@ -158,6 +162,8 @@ export default function ChatHome() {
   // the composer fall back to a scope-less (non-RAG) upload instead of
   // uploading against a fabricated id the server would reject.
   function ensureConversation(): Promise<string | undefined> {
+    // A fresh attach revives an abandoned draft scope (see discardDraftConversation).
+    draftAbandonedRef.current = false
     if (pendingConvRef.current) return Promise.resolve(pendingConvRef.current.id)
     if (!pendingCreateRef.current) {
       const storageKey = pendingStorageKey
@@ -169,8 +175,9 @@ export default function ChatHome() {
           })
           // A suggestion card can bypass the composer's upload gate while this
           // create is in flight. A mode/workspace switch also invalidates this
-          // scope before any upload starts.
-          if (pendingConsumedRef.current || pendingStorageKeyRef.current !== storageKey) {
+          // scope before any upload starts. So does removing every attachment
+          // before the create lands (draft abandoned).
+          if (pendingConsumedRef.current || draftAbandonedRef.current || pendingStorageKeyRef.current !== storageKey) {
             void conversationsApi.remove(created.id).catch(() => {})
             return undefined
           }
@@ -189,6 +196,21 @@ export default function ChatHome() {
       })
     }
     return pendingCreateRef.current
+  }
+
+  // The composer removed its LAST attachment: the draft conversation existed
+  // purely to scope those uploads, so delete it — otherwise it lingers
+  // server-side forever and surfaces as an "Untitled" row on the next sidebar
+  // load. A create still in flight is flagged instead (it self-discards on
+  // landing); a subsequent attach simply creates a fresh scope.
+  function discardDraftConversation() {
+    if (pendingConsumedRef.current) return
+    draftAbandonedRef.current = true
+    const pending = pendingConvRef.current
+    pendingConvRef.current = null
+    clearPendingConversation(pendingStorageKey)
+    setPendingConversationId(undefined)
+    if (pending) void conversationsApi.remove(pending.id).catch(() => {})
   }
 
   const firstName = (user?.name || user?.email?.split('@')[0] || 'friend').split(' ')[0]
@@ -375,6 +397,7 @@ export default function ChatHome() {
                 draftScope={draftScope}
                 conversationId={pendingConversationId}
                 ensureConversationId={ensureConversation}
+                onAttachmentsDrained={discardDraftConversation}
                 autoFocus
               />
             </div>

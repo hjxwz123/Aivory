@@ -94,6 +94,13 @@ interface ComposerProps {
    * unreachable). Should be idempotent — return the same id on repeat calls.
    */
   ensureConversationId?: () => Promise<string | undefined>
+  /**
+   * Fired when the LAST attachment leaves the composer (user removed it, or a
+   * failed upload auto-removed it). Home / project pages use it to discard the
+   * draft conversation that existed only to scope those uploads — otherwise it
+   * lingers server-side and surfaces as an "Untitled" row in the sidebar.
+   */
+  onAttachmentsDrained?: () => void
   /** Knowledge bases bound to the conversation (§7.2-7 📚 selector). */
   kbIds?: string[]
   /** When provided, the 📚 selector is shown and changes flow up here. */
@@ -293,6 +300,7 @@ export function Composer({
   draftScope,
   conversationId,
   ensureConversationId,
+  onAttachmentsDrained,
   kbIds,
   onKBChange,
   modelPickerInHeader = false,
@@ -358,6 +366,30 @@ export function Composer({
   // composer, re-adding the just-sent file. These ids are filtered out of any
   // late restore so a sent attachment never bounces back into the input.
   const committedAttachmentIds = useRef<Set<string>>(new Set())
+  // Latest onAttachmentsDrained, readable from async upload callbacks without
+  // capturing a stale closure.
+  const onAttachmentsDrainedRef = useRef(onAttachmentsDrained)
+  onAttachmentsDrainedRef.current = onAttachmentsDrained
+  // The horizontal attachment rail (chips). A plain mouse wheel only scrolls
+  // vertically, so translate dominant vertical wheel deltas into horizontal
+  // scroll when the rail overflows — trackpads already pan natively. Native
+  // listener because React root-delegates wheel as passive (preventDefault
+  // would be ignored via onWheel).
+  const chipsRailRef = useRef<HTMLDivElement | null>(null)
+  const hasAttachments = attachments.length > 0
+  useEffect(() => {
+    const el = chipsRailRef.current
+    if (!el) return
+    const onWheel = (e: WheelEvent) => {
+      if (el.scrollWidth <= el.clientWidth) return
+      if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return
+      // deltaMode 1 = lines (Firefox wheel) — normalise to pixels.
+      el.scrollLeft += e.deltaMode === 1 ? e.deltaY * 24 : e.deltaY
+      e.preventDefault()
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [hasAttachments])
   useEffect(() => {
     const timers = pollTimers.current
     return () => {
@@ -612,7 +644,22 @@ export function Composer({
       }
       return updated
     } catch (e) {
-      setAttachments((s) => s.filter((a) => a.id !== local.id))
+      setAttachments((s) => {
+        const next = s.filter((a) => a.id !== local.id)
+        // Failure auto-removed the last chip → same draft-conversation cleanup
+        // as a manual removal. Microtask: never call parent handlers from
+        // inside a state updater.
+        if (next.length === 0 && s.length > 0) {
+          queueMicrotask(() => onAttachmentsDrainedRef.current?.())
+        }
+        return next
+      })
+      // The user already removed this chip mid-upload — the failure (often the
+      // now-discarded scope) is expected noise, not something to alarm about.
+      if (removedAttachmentIds.current.has(local.id)) {
+        removedAttachmentIds.current.delete(local.id)
+        return null
+      }
       if (e instanceof ApiError && e.status === 507) {
         // § user files page: group storage quota exhausted — link to /files.
         toastStorageQuotaFull(navigate)
@@ -854,6 +901,11 @@ export function Composer({
         // still exposes retryable deletion for already-sent attachments.
       })
     }
+    // Removed the last chip → let the page discard a draft conversation that
+    // existed only to scope these uploads (the "Untitled ghost" fix).
+    if (!attachments.some((a) => a.id !== id)) {
+      onAttachmentsDrainedRef.current?.()
+    }
   }
 
   // §4.13-B turn-feature list (composer "+" menu). Only chat models expose them.
@@ -1029,10 +1081,15 @@ export function Composer({
       )}
 
       {/* Attachments preview. The armed-mode (research) state is shown by the
-          toolbar button below, so we don't repeat a chip above the input. */}
+          toolbar button below, so we don't repeat a chip above the input.
+          ≤4 chips share the row (they may shrink); >4 stop shrinking — the rail
+          scrolls horizontally (wheel deltas translated via chipsRailRef) and
+          chip width is sized to ~4.5 per row so a half chip peeks at the edge
+          as the scroll affordance. */}
       {attachments.length > 0 && (
-        <div className="flex items-stretch gap-1.5 overflow-x-auto px-3 pb-1 pt-2.5 scrollbar-none">
+        <div ref={chipsRailRef} className="flex items-stretch gap-1.5 overflow-x-auto px-3 pb-1 pt-2.5 scrollbar-none">
           {attachments.map((a) => {
+            const manyAttachments = attachments.length > 4
             const busy = a.uploading || a.ingest === 'parsing' || a.ingest === 'embedding'
             const failed = a.ingest === 'failed'
             const uploadPercent = Math.max(0, Math.min(100, Math.round(a.uploadProgress ?? 0)))
@@ -1093,7 +1150,13 @@ export function Composer({
               <span
                 key={a.id}
                 className={cn(
-                  'group/att relative flex h-14 min-w-0 max-w-[min(28rem,calc(100vw-6rem))] flex-[1_1_15rem] items-center gap-2.5 rounded-[10px] border bg-[var(--color-surface-raised)] py-2 pl-2.5 pr-8 shadow-[var(--shadow-xs)]',
+                  'group/att relative flex h-14 items-center gap-2.5 rounded-[10px] border bg-[var(--color-surface-raised)] py-2 pl-2.5 pr-8 shadow-[var(--shadow-xs)]',
+                  manyAttachments
+                    ? // >4 chips: stop shrinking. Fixed width targets ~4.5 chips per
+                      // row (half chip visible = "there's more" affordance), floored
+                      // so names stay readable on narrow rails.
+                      'w-[clamp(10rem,calc((100%_-_1.5rem)/4.5),15rem)] flex-none'
+                    : 'min-w-0 max-w-[min(28rem,calc(100vw-6rem))] flex-[1_1_15rem]',
                   failed ? 'border-[var(--color-danger)]/50' : 'border-[var(--color-border)]',
                 )}
               >

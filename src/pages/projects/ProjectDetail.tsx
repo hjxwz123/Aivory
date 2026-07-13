@@ -136,6 +136,10 @@ export default function ProjectDetail() {
   const pendingConvRef = useRef<ApiConversation | null>(null)
   const pendingCreateRef = useRef<Promise<string | undefined> | null>(null)
   const pendingConsumedRef = useRef(false)
+  // Set when the composer drains its last attachment while the lazy create is
+  // still in flight — the create then discards its own conversation on landing
+  // ("Untitled ghost" fix, same as ChatHome).
+  const draftAbandonedRef = useRef(false)
   const activeProjectIdRef = useRef<string | undefined>(project?.id)
   activeProjectIdRef.current = project?.id
   const pendingStorageKey = useMemo(
@@ -193,6 +197,8 @@ export default function ProjectDetail() {
 
   function ensureProjectConversation(): Promise<string | undefined> {
     if (!project) return Promise.resolve(undefined)
+    // A fresh attach revives an abandoned draft scope (see discardDraftConversation).
+    draftAbandonedRef.current = false
     if (pendingConvRef.current) return Promise.resolve(pendingConvRef.current.id)
     if (!pendingCreateRef.current) {
       const projectId = project.id
@@ -206,6 +212,7 @@ export default function ProjectDetail() {
           })
           if (
             pendingConsumedRef.current ||
+            draftAbandonedRef.current ||
             activeProjectIdRef.current !== projectId ||
             pendingStorageKeyRef.current !== storageKey
           ) {
@@ -226,6 +233,18 @@ export default function ProjectDetail() {
       })
     }
     return pendingCreateRef.current
+  }
+
+  // Same "Untitled ghost" cleanup as ChatHome: the last attachment left the
+  // composer, so the upload-scoped draft conversation has no reason to exist.
+  function discardDraftConversation() {
+    if (pendingConsumedRef.current) return
+    draftAbandonedRef.current = true
+    const pending = pendingConvRef.current
+    pendingConvRef.current = null
+    clearPendingConversation(pendingStorageKey)
+    setPendingConversationId(undefined)
+    if (pending) void conversationsApi.remove(pending.id).catch(() => {})
   }
 
   if (!project && !projectsLoaded) {
@@ -459,6 +478,7 @@ export default function ProjectDetail() {
               onSubmit={(text, atts, opts) => void startProjectChat(text, atts, opts)}
               conversationId={pendingConversationId}
               ensureConversationId={ensureProjectConversation}
+              onAttachmentsDrained={discardDraftConversation}
             />
           </div>
         </section>
