@@ -19,7 +19,10 @@ export const SelectTrigger = forwardRef<
         'bg-[var(--color-surface-sunken)] border border-[var(--color-border)]',
         'text-sm text-[var(--color-fg)]',
         'transition-[border-color,box-shadow] duration-150',
-        'focus:outline-none focus:border-[var(--color-border-strong)] focus:ring-[3px] focus:ring-[var(--color-ring)]',
+        // focus-VISIBLE only: a mouse click leaves the trigger focused, and a
+        // 3px glow ring on plain :focus looked like a permanent "selected"
+        // outline. Keyboard users still get the ring (§2.6 a11y).
+        'focus:outline-none focus-visible:border-[var(--color-border-strong)] focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
         'data-[placeholder]:text-[var(--color-fg-faint)]',
         'data-[disabled]:opacity-50 data-[disabled]:cursor-not-allowed',
         'w-full',
@@ -49,6 +52,11 @@ export const SelectContent = forwardRef<
         sideOffset={6}
         className={cn(
           'z-[70] min-w-[var(--radix-select-trigger-width)] overflow-hidden',
+          // Radix locks page scroll while the listbox is open, so a long model
+          // list MUST scroll inside the dropdown — otherwise items below the
+          // fold are unreachable and the page feels frozen. Cap to the space
+          // Radix measured (popper) and let the viewport scroll.
+          'max-h-[min(22rem,var(--radix-select-content-available-height))]',
           'rounded-[12px] bg-[var(--color-surface-raised)] border border-[var(--color-border)]',
           'shadow-[var(--shadow-popover)] p-1',
           'data-[state=open]:animate-[slide-down_180ms_var(--ease-out)]',
@@ -57,7 +65,9 @@ export const SelectContent = forwardRef<
         )}
         {...rest}
       >
-        <SelectPrimitive.Viewport className="p-1">{children}</SelectPrimitive.Viewport>
+        <SelectPrimitive.Viewport className="p-1 max-h-[min(22rem,var(--radix-select-content-available-height))] overflow-y-auto scrollbar-thin">
+          {children}
+        </SelectPrimitive.Viewport>
       </SelectPrimitive.Content>
     </SelectPrimitive.Portal>
   )
