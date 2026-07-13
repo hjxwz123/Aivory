@@ -1034,8 +1034,11 @@ var settingsKeys = []string{
 	// §verify: the secondary auditor model that fact-checks answers in Verify
 	// mode. Blank = Verify mode off platform-wide.
 	"verify_model_id",
-	// §4.11-B RAG injection knobs (admin → Documents).
+	// §4.11-B RAG injection knobs (admin → Documents). §4.11-B3 adds the line cap
+	// for code/config/txt/unknown-format docs (≤ N lines → full inject; above →
+	// embed + retrieve).
 	"rag_full_text_threshold", "rag_top_k", "rag_dynamic_topk", "rag_similarity_threshold",
+	"rag_code_full_text_max_lines",
 	// §credits pre-flight token/affordability check.
 	"credit_preflight_enabled",
 }

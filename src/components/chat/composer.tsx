@@ -264,6 +264,8 @@ export function Composer({
   const ref = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const submittingRef = useRef(false)
+  // §2.7 re-entry guard for the long-draft → .txt conversion in handleSubmit.
+  const convertingRef = useRef(false)
   // Active ingest-status pollers, keyed by attachment id, so they can be
   // cancelled on remove / submit / unmount.
   const pollTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
@@ -404,10 +406,28 @@ export function Composer({
     const text = value.trim()
     if (!text || streaming || uploading || restoringAttachments || documentNotReady) return
     if (text.length > MAX_LEN) {
-      toast.warning(
-        t('composer.tooLongTitle'),
-        t('composer.tooLongBody', { max: MAX_LEN.toLocaleString() }),
-      )
+      // Overflow fallback (multi-paste / dictation can pass the paste hook):
+      // move the whole draft into a .txt attachment; the user adds a short
+      // prompt and sends. The draft is only cleared once the upload actually
+      // succeeded (quota/allowlist failures must not eat the text), and a ref
+      // guard stops a second Enter from converting the same draft twice (§2.7).
+      if (canAttachLongText) {
+        if (convertingRef.current) return
+        convertingRef.current = true
+        const original = value
+        void attachTextAsFile(text)
+          .then((ok) => {
+            if (ok && valueRef.current === original) updateValue('')
+          })
+          .finally(() => {
+            convertingRef.current = false
+          })
+      } else {
+        toast.warning(
+          t('composer.tooLongTitle'),
+          t('composer.tooLongBody', { max: MAX_LEN.toLocaleString() }),
+        )
+      }
       return
     }
     submittingRef.current = true
@@ -632,8 +652,10 @@ export function Composer({
     }
   }
 
-  async function handleAttach(files: FileList | null) {
-    if (!files || !files.length) return
+  // Returns how many files actually uploaded, so callers that transform user
+  // input into an attachment (attachTextAsFile) can tell success from failure.
+  async function handleAttach(files: FileList | null): Promise<number> {
+    if (!files || !files.length) return 0
     const all = Array.from(files)
     // §4.6 reject oversize files BEFORE uploading — images and other files have
     // separate admin-set caps. Rejected images would otherwise upload fine but be
@@ -661,7 +683,7 @@ export function Composer({
       )
     }
     const list = all.filter((f) => !overImage.includes(f) && !overFile.includes(f))
-    if (!list.length) return
+    if (!list.length) return 0
     const additions: PendingAttachment[] = list.map((f) => ({
       id: uid('att'),
       name: f.name,
@@ -696,7 +718,35 @@ export function Composer({
         scopeId = undefined
       }
     }
-    await Promise.all(list.map((file, idx) => uploadAttachment(file, additions[idx], scopeId)))
+    const done = await Promise.all(list.map((file, idx) => uploadAttachment(file, additions[idx], scopeId)))
+    return done.filter(Boolean).length
+  }
+
+  // Codex-style long-text overflow (§4.11-B3): text past MAX_LEN becomes a .txt
+  // attachment instead of being blocked. The backend line-gates it — small
+  // files are injected in full, huge ones are embedded and retrieved — so the
+  // model still sees the content either way. Document uploads need a
+  // conversation scope, so this is only offered where one exists or can be
+  // lazily created (all current composer mounts qualify).
+  const canAttachLongText = Boolean(conversationId || ensureConversationId)
+  async function attachTextAsFile(text: string): Promise<boolean> {
+    const d = new Date()
+    const pad = (n: number, w = 2) => String(n).padStart(w, '0')
+    // Millisecond suffix so two conversions in the same second don't share a name.
+    const name = `pasted-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}${pad(d.getMilliseconds(), 3)}.txt`
+    // Phrased as in-progress, not success — the upload can still fail (quota,
+    // allowlist), in which case the error toast + draft restore tell the truth.
+    toast.info(
+      t('composer.longTextAttachedTitle', { defaultValue: 'Attaching long text as a file' }),
+      t('composer.longTextAttachedBody', {
+        defaultValue: 'Text over {{max}} characters is being uploaded as {{name}}.',
+        max: MAX_LEN.toLocaleString(),
+        name,
+      }),
+    )
+    const dt = new DataTransfer()
+    dt.items.add(new File([text], name, { type: 'text/plain' }))
+    return (await handleAttach(dt.files)) > 0
   }
 
   function removeAttachment(id: string) {
@@ -993,11 +1043,31 @@ export function Composer({
             .filter((it) => it.kind === 'file' && it.type.startsWith('image/'))
             .map((it) => it.getAsFile())
             .filter((f): f is File => f !== null)
-          if (imgs.length === 0) return
-          e.preventDefault()
-          const dt = new DataTransfer()
-          imgs.forEach((f) => dt.items.add(f))
-          void handleAttach(dt.files)
+          if (imgs.length > 0) {
+            e.preventDefault()
+            const dt = new DataTransfer()
+            imgs.forEach((f) => dt.items.add(f))
+            void handleAttach(dt.files)
+            return
+          }
+          // Codex-style long paste: inserting would push the draft past
+          // MAX_LEN, so attach the pasted text as a .txt file instead of
+          // flooding the textarea (and later hitting the length wall). The
+          // resulting length accounts for the selection the paste replaces.
+          const pasted = e.clipboardData?.getData('text/plain') ?? ''
+          const el = e.currentTarget
+          const replaced = (el.selectionEnd ?? 0) - (el.selectionStart ?? 0)
+          if (canAttachLongText && pasted && el.value.length - replaced + pasted.length > MAX_LEN) {
+            e.preventDefault()
+            void attachTextAsFile(pasted).then((ok) => {
+              // Upload failed (quota / allowlist) — put the text back into the
+              // draft so nothing is lost; the error toast explains what happened.
+              if (!ok) {
+                const cur = valueRef.current
+                updateValue(cur ? cur + '\n' + pasted : pasted)
+              }
+            })
+          }
         }}
         placeholder={effectivePlaceholder}
         rows={compact || isMobile ? 1 : 2}

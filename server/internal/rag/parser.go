@@ -1044,30 +1044,40 @@ func isSpreadsheetData(filename, mime string) bool {
 	return strings.Contains(m, "spreadsheet") || strings.Contains(m, "ms-excel")
 }
 
-// isCodeOrConfigText reports whether a file is source code or structured-config
-// text (json/yaml/toml/ini/xml/…). These are poor dense-vector targets: chunking
-// breaks function/structure boundaries and semantic similarity over code/config
-// retrieves badly. In a conversation they're injected whole (when small) and are
-// always reachable via the code sandbox (/workspace/uploads), so the embedding
-// pass is skipped for them. PROSE is deliberately excluded — md/txt/log/rst/html
-// are legitimate RAG targets and still embed.
-func isCodeOrConfigText(filename string) bool {
-	switch docExt(filename, filename) {
-	case
-		// source code
-		"go", "py", "pyw", "js", "jsx", "ts", "tsx", "mjs", "cjs", "vue", "svelte",
-		"c", "h", "cpp", "cxx", "cc", "hpp", "hh", "cs", "java", "kt", "kts", "swift", "rs",
-		"rb", "php", "scala", "r", "jl", "lua", "pl", "pm", "dart",
-		"ex", "exs", "erl", "hrl", "clj", "hs", "ml", "mli", "fs", "f90", "asm", "s",
-		"sh", "bash", "zsh", "ps1", "bat", "sql",
-		"v", "sv", "svh", "vh", "vhd", "vhdl",
-		"proto", "graphql", "gql", "tcl", "groovy", "gradle",
-		"css", "scss", "sass", "less",
-		// structured config / data text
-		"json", "yaml", "yml", "toml", "ini", "cfg", "conf", "env", "properties", "xml":
-		return true
-	}
-	return false
+// tokenGatedProseExts lists the formats whose extracted content reads as
+// natural-language prose — legitimate dense-vector targets that keep the
+// token-based full-text threshold (§4.11-B). Everything OUTSIDE this set that
+// reaches the text path — source code, structured config, plain .txt, and any
+// unknown / niche extension (.drawio, .foobar, …) — is line-gated instead
+// (§4.11-B3): injected whole when at/below the admin-configured line cap,
+// chunked + embedded above it. Code/config are poor dense-vector targets
+// (chunking breaks function/structure boundaries), but past a certain size
+// full injection blows the prompt, so the line cap restores a ceiling.
+var tokenGatedProseExts = map[string]bool{
+	// prose text read locally. rtf is in the default upload allowlist and its
+	// markup reads as few very long lines, so leaving it to the line gate would
+	// pin whole documents that used to embed; the lightweight prose-markup
+	// cousins (tex/adoc/org) and subtitle formats (srt/vtt) are the same shape.
+	"md": true, "markdown": true, "rst": true, "log": true, "html": true, "htm": true,
+	"rtf": true, "tex": true, "adoc": true, "asciidoc": true, "org": true, "srt": true, "vtt": true,
+	// binary-parsed document formats (content arrives as extracted/OCR'd prose)
+	"pdf": true, "docx": true, "doc": true, "pptx": true, "ppt": true,
+	// spreadsheets never reach the gate (sandbox path) — listed defensively
+	"xlsx": true, "xls": true, "xlsm": true, "csv": true, "tsv": true,
+	// images (KB-only; content is MinerU OCR prose) — listed defensively
+	"png": true, "jpg": true, "jpeg": true, "jpe": true, "jfif": true, "gif": true,
+	"webp": true, "bmp": true, "tif": true, "tiff": true, "heic": true, "heif": true,
+	"avif": true, "ico": true,
+}
+
+// isLineGatedText reports whether a conversation-scoped document uses the
+// line-count full-text gate instead of the token threshold. Covers source
+// code, structured config (json/yaml/toml/ini/xml/…), plain .txt (admin
+// decision: exact text beats lossy chunk retrieval for pasted blobs), and
+// every unknown / undeclared extension — those parse as plain text anyway,
+// so they follow the same exact-context rule.
+func isLineGatedText(filename string) bool {
+	return !tokenGatedProseExts[docExt(filename, filename)]
 }
 
 // isProbablyText decides whether to read a file directly as text. Policy:

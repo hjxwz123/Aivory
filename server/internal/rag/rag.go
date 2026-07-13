@@ -652,12 +652,25 @@ func (s *Service) runPipeline(ctx context.Context, docID string, cache *parseCac
 		s.logger.Printf("rag: chunk done doc=%s file=%q parents=%d children=%d took=%s", docID, d.Filename, len(parents), childCount, time.Since(stageStart).Round(time.Millisecond))
 	}
 
-	// A conversation-scoped doc that fits the full-text window is injected whole,
-	// and source/config text is also better provided as exact context instead of
-	// dense-vector chunks. KB uploads always embed because a KB is an explicit
-	// cross-document search index.
-	skipEmbed := d.KBID == "" && d.ConversationID != "" &&
-		(isCodeOrConfigText(d.Filename) || estimateTokens(content) <= s.ragSettings().FullTextThreshold)
+	// A conversation-scoped doc that fits its full-text window is injected whole.
+	// KB uploads always embed because a KB is an explicit cross-document search
+	// index. Two gates (§4.11-B3): code/config/txt/unknown formats are line-gated
+	// (exact context beats dense-vector chunks for them, but past the admin line
+	// cap they embed like everything else — full injection of a 50k-line file
+	// would blow the prompt); prose documents keep the token threshold.
+	skipEmbed := false
+	if d.KBID == "" && d.ConversationID != "" {
+		gates := s.ragSettings()
+		if isLineGatedText(d.Filename) {
+			// Both legs must fit: the line cap AND its token-equivalent ceiling
+			// (cap × ~20 tokens/line) — otherwise a minified/single-line dump
+			// counts as "1 line" and pins megabytes into every prompt.
+			skipEmbed = countLines(content) <= gates.CodeFullTextMaxLines &&
+				estimateTokens(content) <= gates.CodeFullTextMaxLines*ragCodeTokensPerLine
+		} else {
+			skipEmbed = estimateTokens(content) <= gates.FullTextThreshold
+		}
+	}
 
 	// §4.11-B2 lock: ingest into a KB MUST use the KB's locked embedding model;
 	// global setting changes never re-route an existing KB's vectors. For pure
@@ -1647,6 +1660,16 @@ func estimateTokens(s string) int {
 	return cjk + other/4
 }
 
+// countLines counts the newline-delimited lines of a document for the §4.11-B3
+// line gate. A trailing newline doesn't add an empty line; empty content is 0.
+func countLines(s string) int {
+	s = strings.TrimRight(s, "\n")
+	if s == "" {
+		return 0
+	}
+	return strings.Count(s, "\n") + 1
+}
+
 // cjkGrams segments a mixed CJK run: maximal CJK spans become overlapping bigrams
 // (a lone CJK char → itself), and ASCII/Latin/digit spans are kept whole (so an
 // id like "98" inside "案例98" survives as its own matchable token).
@@ -2123,23 +2146,46 @@ const (
 	defaultRAGFullTextThreshold = 8000
 	defaultRAGTopK              = 8
 	defaultRAGSimThreshold      = 0.5
+	// defaultRAGCodeFullTextMaxLines (§4.11-B3): line cap for the code/config/txt/
+	// unknown-format gate. At/below → full injection (pinned, no vectors); above →
+	// normal chunk + embed + retrieval. ~2000 code lines ≈ 20-30k tokens, a
+	// deliberate ceiling so one pasted dump can't monopolise the prompt.
+	defaultRAGCodeFullTextMaxLines = 2000
+	// ragCodeTokensPerLine turns the admin's line cap into a token-equivalent
+	// ceiling (cap × this). A newline count alone is gameable: a minified bundle,
+	// JSONL dump or 5 MB single-line file is "1 line" yet would monopolise the
+	// prompt if pinned whole. 20 tokens is a generous code line, so the ceiling
+	// scales with the same knob the admin already reasons about.
+	ragCodeTokensPerLine = 20
 )
 
 // ragSettings holds the live RAG configuration.
 type ragSettings struct {
-	FullTextThreshold int     // ≤ this (est. tokens) → inject whole; above → retrieve
-	TopK              int     // chunks retrieved when DynamicTopK is off
-	DynamicTopK       bool    // inject ALL hits with cosine sim ≥ SimThreshold instead of a fixed K
-	SimThreshold      float64 // dynamic-topK cutoff (cosine similarity)
+	FullTextThreshold    int     // prose docs: ≤ this (est. tokens) → inject whole; above → retrieve
+	CodeFullTextMaxLines int     // code/config/txt/unknown: ≤ this (lines) → inject whole; above → embed (§4.11-B3)
+	TopK                 int     // chunks retrieved when DynamicTopK is off
+	DynamicTopK          bool    // inject ALL hits with cosine sim ≥ SimThreshold instead of a fixed K
+	SimThreshold         float64 // dynamic-topK cutoff (cosine similarity)
 }
 
 // ragSettings reads the admin-tunable RAG knobs (with safe defaults).
 func (s *Service) ragSettings() ragSettings {
-	c := ragSettings{FullTextThreshold: defaultRAGFullTextThreshold, TopK: defaultRAGTopK, SimThreshold: defaultRAGSimThreshold}
+	c := ragSettings{
+		FullTextThreshold:    defaultRAGFullTextThreshold,
+		CodeFullTextMaxLines: defaultRAGCodeFullTextMaxLines,
+		TopK:                 defaultRAGTopK,
+		SimThreshold:         defaultRAGSimThreshold,
+	}
 	if raw, err := store.GetSetting(s.db, "rag_full_text_threshold"); err == nil && len(raw) > 0 {
 		var v int
 		if json.Unmarshal(raw, &v) == nil && v > 0 {
 			c.FullTextThreshold = v
+		}
+	}
+	if raw, err := store.GetSetting(s.db, "rag_code_full_text_max_lines"); err == nil && len(raw) > 0 {
+		var v int
+		if json.Unmarshal(raw, &v) == nil && v > 0 {
+			c.CodeFullTextMaxLines = v
 		}
 	}
 	if raw, err := store.GetSetting(s.db, "rag_top_k"); err == nil && len(raw) > 0 {

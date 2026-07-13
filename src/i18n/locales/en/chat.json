@@ -40,6 +40,8 @@
     "stop": "Stop generating",
     "tooLongTitle": "Message too long",
     "tooLongBody": "Keep messages under {{max}} characters.",
+    "longTextAttachedTitle": "Attaching long text as a file",
+    "longTextAttachedBody": "Text over {{max}} characters is being uploaded as {{name}}.",
     "attachedSingle": "Attached {{count}} file",
     "attachedMultiple": "Attached {{count}} files",
     "attachedHint": "Attachments are visual-only in this build.",

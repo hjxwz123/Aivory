@@ -40,6 +40,8 @@
     "stop": "生成を停止",
     "tooLongTitle": "メッセージが長すぎます",
     "tooLongBody": "メッセージは {{max}} 文字以内にしてください。",
+    "longTextAttachedTitle": "長いテキストをファイルとして添付しています",
+    "longTextAttachedBody": "{{max}} 文字を超えるテキストを {{name}} としてアップロードしています。",
     "attachedSingle": "{{count}} 件のファイルを添付しました",
     "attachedMultiple": "{{count}} 件のファイルを添付しました",
     "attachedHint": "このビルドでは添付ファイルは表示のみです。",

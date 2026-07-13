@@ -27,6 +27,7 @@ type Settings = Record<string, unknown>
 const OWNED_KEYS = [
   'embedding_model_id',
   'rag_full_text_threshold',
+  'rag_code_full_text_max_lines',
   'rag_top_k',
   'rag_dynamic_topk',
   'rag_similarity_threshold',
@@ -178,7 +179,7 @@ export default function AdminDocuments() {
                 htmlFor="rag-threshold"
                 hint={t('admin:documents.ragFullTextThresholdHint', {
                   defaultValue:
-                    'A document at/below this estimated size is injected in full every turn; above it, the document is vectorized and only relevant chunks are retrieved.',
+                    'A prose document (PDF / Office / Markdown / logs) at/below this estimated size is injected in full every turn; above it, the document is vectorized and only relevant chunks are retrieved.',
                 })}
               >
                 <Input
@@ -189,6 +190,27 @@ export default function AdminDocuments() {
                   value={String(readNumber('rag_full_text_threshold', 8000))}
                   onChange={(e) =>
                     setDraft({ ...draft, rag_full_text_threshold: Math.max(0, Number(e.target.value) || 0) })
+                  }
+                />
+              </Field>
+              <Field
+                label={t('admin:documents.ragCodeMaxLines', { defaultValue: 'Code / text full-inject cap (lines)' })}
+                htmlFor="rag-code-lines"
+                hint={t('admin:documents.ragCodeMaxLinesHint', {
+                  defaultValue:
+                    'Source code, config, .txt and unrecognized text formats at/below this many lines are injected in full (very long single-line files are size-scaled and may still be retrieved); above it they are vectorized and retrieved like other documents.',
+                })}
+              >
+                <Input
+                  id="rag-code-lines"
+                  type="number"
+                  min={1}
+                  placeholder="2000"
+                  value={String(readNumber('rag_code_full_text_max_lines', 2000))}
+                  onChange={(e) =>
+                    // ≥1: the backend treats 0/blank as "use the default (2000)",
+                    // so persisting a literal 0 would show 0 while acting as 2000.
+                    setDraft({ ...draft, rag_code_full_text_max_lines: Math.max(1, Number(e.target.value) || 1) })
                   }
                 />
               </Field>
