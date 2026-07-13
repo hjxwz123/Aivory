@@ -1,0 +1,228 @@
+# Aivory — production stack: Postgres + Redis + Qdrant + bundled sandbox + a
+# single `app` container that serves both the SPA and the /api backend.
+#
+# Two ways to bring this up:
+#
+#   1) Pull prebuilt images from ghcr.io (recommended for deploys):
+#        cd deploy
+#        cp .env.example .env          # then edit secrets
+#        docker compose -f docker-compose.prod.yml pull
+#        docker compose -f docker-compose.prod.yml up -d
+#
+#   2) Build locally from source (recommended for development / CI smoke tests):
+#        cd deploy
+#        cp .env.example .env
+#        docker compose -f docker-compose.prod.yml up -d --build
+#
+# The app service declares BOTH `image:` and `build:`. Compose picks the image
+# when present, falls back to build otherwise — so the same file serves both
+# flows without duplicating the topology.
+#
+# The production stack wires all backends by default: postgres:// → Postgres,
+# REDIS_URL → Redis, QDRANT_URL → Qdrant. Qdrant is part of the default Docker
+# deployment; only unset QDRANT_URL for local/dev or an explicit full-context
+# RAG fallback deployment.
+
+name: aivory
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-aivory}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-aivory}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aivory} -d ${POSTGRES_DB:-aivory}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [internal]
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # Password-protected + append-only persistence for the kill-signal pub/sub
+    # and rate-limit counters.
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    networks: [internal]
+
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    restart: unless-stopped
+    environment:
+      # Qdrant requires this key on every request; the api sends the SAME value
+      # (QDRANT_API_KEY below). Both default to one shared internal value so it
+      # works with zero config — Qdrant has no published port (private network
+      # only). Override QDRANT_API_KEY in .env for a real secret.
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:-aivory-internal-qdrant}
+    volumes:
+      - qdrantdata:/qdrant/storage
+    networks: [internal]
+
+  # Sandbox — bundled with the stack so a single `docker compose up` carries it;
+  # no separate project, no key to configure. It is deliberately NOT published
+  # to any host port: only the `api` service reaches it over the private
+  # `internal` network, so it is never exposed to the internet.
+  #
+  # It drives the host Docker daemon (mounted socket) to spawn one locked-down
+  # per-session container, and pulls its runtime image from ghcr on boot.
+  # SECURITY: the mounted docker.sock is root-equivalent on the host; keeping
+  # the service internal-only (no ports) is what contains that blast radius.
+  sandbox:
+    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-hjxwz123}/aivory-sandbox-sidecar:${IMAGE_TAG:-latest}
+    build:
+      context: ../sandbox-service
+      dockerfile: Dockerfile.sidecar
+    restart: unless-stopped
+    environment:
+      # Shared internal default — must match the api's SANDBOX_API_KEY above.
+      SANDBOX_API_KEY: ${SANDBOX_API_KEY:-aivory-bundled-sandbox}
+      # Per-session runtime image, pulled from ghcr on boot so the first call works.
+      SANDBOX_IMAGE: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-hjxwz123}/aivory-sandbox:${IMAGE_TAG:-latest}
+      SANDBOX_PULL_ON_START: "1"
+      SANDBOX_NETWORK: ${SANDBOX_NETWORK:-none}   # "bridge" only if sandboxed code needs internet
+      SANDBOX_MEMORY: ${SANDBOX_MEMORY:-2g}
+      SANDBOX_CPUS: ${SANDBOX_CPUS:-1}
+      SANDBOX_MAX_SESSIONS: ${SANDBOX_MAX_SESSIONS:-16}
+      # Hard ceiling for one execution. The admin's per-exec timeout
+      # (settings.sandbox_exec_timeout_sec) is clamped to this; lower it to
+      # tighten the cap. 600000ms = 10min.
+      SANDBOX_EXEC_TIMEOUT_CAP_MS: ${SANDBOX_EXEC_TIMEOUT_CAP_MS:-600000}
+      # Hard ceiling for the admin's idle-recycle window
+      # (settings.sandbox_idle_ttl_sec is clamped to this). 86400s = 24h.
+      SANDBOX_IDLE_TTL_CAP_SECONDS: ${SANDBOX_IDLE_TTL_CAP_SECONDS:-86400}
+      SANDBOX_READ_ONLY_ROOTFS: "1"
+      SANDBOX_WORKSPACE_SIZE: ${SANDBOX_WORKSPACE_SIZE:-512m}
+      # §4.5-F zero-config workspace persistence: the admin `storage_provider`
+      # defaults to "local", so reaped /workspace tarballs are archived to the
+      # named volume below and RESTORED when the conversation runs code again
+      # (archives are keyed by conversation id, so they survive session recycle,
+      # §4.5-C G2). No S3/OSS/MinIO required. Single-node only (a plain volume
+      # isn't shared across replicas); multi-replica deployments must use S3/OSS.
+      SANDBOX_LOCAL_STORAGE_DIR: /var/lib/aivory/sandbox-archives
+    # Liveness: /healthz reports the sidecar can still reach the docker daemon.
+    # No tools beyond python are in the image, so probe via urllib (non-2xx
+    # raises -> unhealthy). start_period covers SANDBOX_PULL_ON_START, which blocks
+    # serving until the runtime image is pulled on a cold boot.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    # Bound the control-plane container itself (not just the session children). It
+    # buffers workspace archives (≤ SANDBOX_MAX_ARCHIVE_BYTES, 200 MiB) and storage
+    # bodies in memory, so keep mem_limit comfortably above those.
+    mem_limit: 1g
+    pids_limit: 512
+    volumes:
+      # Required: the sidecar spawns sibling session containers via the host daemon.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # §4.5 durable local archive store (SANDBOX_LOCAL_STORAGE_DIR above).
+      - sandbox-archives:/var/lib/aivory/sandbox-archives
+    networks: [internal]
+
+  # Single application container: the Go process serves BOTH the built SPA and
+  # the /api backend from one origin (STATIC_DIR is baked into the image). No
+  # separate nginx/web tier — so there's no cross-origin, and whatever domain the
+  # container is reached on just works (no PUBLIC_ORIGIN / ALLOWED_ORIGINS / port
+  # plumbing). Put a TLS terminator (Caddy / cloud LB) in front for HTTPS; it
+  # only needs to forward the Host header (any reverse proxy does by default).
+  app:
+    # Prebuilt image from the docker-images.yml workflow. Override IMAGE_OWNER
+    # in .env if you forked into a different account.
+    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-hjxwz123}/aivory-app:${IMAGE_TAG:-latest}
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.app
+    restart: unless-stopped
+    # NOTE: app does NOT depend_on the sandbox. The sandbox is a soft, per-request
+    # HTTP dependency (only code execution needs it) — making it a startup
+    # dependency would block the whole app whenever the sandbox image is
+    # unavailable or the container is unhealthy.
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    # Host:container port. The container listens on 8787 and serves both the SPA
+    # and /api there. Maps to host port 80 by default — change the left number if
+    # 80 is taken (e.g. "8080:8787"); no env var needed.
+    ports:
+      - "80:8787"
+    # Advanced tuning: any AIVORY_* variable from docs (configuration/env-advanced)
+    # can simply be added to the same .env file used above — env_file injects the
+    # whole file into the container. Explicit `environment:` entries below still
+    # take precedence, so the wired-up backends can't be broken by a stray line.
+    env_file:
+      - .env
+    environment:
+      AIVORY_LISTEN: ":8787"
+      AIVORY_ENV: production
+      # --- Backends (auto-detected by URL scheme) ---
+      DATABASE_URL: "postgres://${POSTGRES_USER:-aivory}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-aivory}?sslmode=disable"
+      REDIS_URL: "redis://:${REDIS_PASSWORD}@redis:6379/0"
+      QDRANT_URL: "${QDRANT_URL:-http://qdrant:6333}"
+      # Must match qdrant's QDRANT__SERVICE__API_KEY above (same default).
+      QDRANT_API_KEY: ${QDRANT_API_KEY:-aivory-internal-qdrant}
+      # --- Auth / app ---
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      BACKUP_DIR: ${BACKUP_DIR:-/app/data/backups}
+      MAX_BACKUP_BYTES: ${MAX_BACKUP_BYTES:-21474836480}
+      # No CORS config needed: the SPA is served same-origin by this process, so
+      # any domain works. (ALLOWED_ORIGINS only matters if you split the frontend
+      # onto a DIFFERENT origin than the API — not this single-container setup.)
+      # No admin is seeded from the environment — on first boot the deployment has
+      # zero users and the first account created via the setup screen becomes the
+      # administrator (§ first-run setup).
+      ENABLE_MOCK_PROVIDER: ${ENABLE_MOCK_PROVIDER:-false}
+      # --- Optional integrations (channel keys live in the DB, not here) ---
+      SEARCH_PROVIDER: ${SEARCH_PROVIDER:-}
+      SEARCH_API_KEY: ${SEARCH_API_KEY:-}
+      SEARCH_BASE_URL: ${SEARCH_BASE_URL:-}
+      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-}
+      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+      EMBEDDING_DIM: ${EMBEDDING_DIM:-1536}
+      MINERU_API_URL: ${MINERU_API_URL:-}
+      MINERU_API_KEY: ${MINERU_API_KEY:-}
+      # --- Sandbox (bundled) ---
+      # The app talks to the in-stack sandbox over the private network. It is
+      # never published to a host port, so it's unreachable from the internet.
+      # The key is a shared internal default — nothing to configure. (Leave the
+      # admin sandbox_base_url / sandbox_api_key fields BLANK so these win.)
+      SANDBOX_BASE_URL: "http://sandbox:8000"
+      SANDBOX_API_KEY: ${SANDBOX_API_KEY:-aivory-bundled-sandbox}
+    volumes:
+      # Uploads + artifacts (and the SQLite file, if ever used) are filesystem-
+      # backed regardless of DB backend. Bind-mounted to a HOST directory so the
+      # files live on the host — directly visible and backup-able — rather than
+      # trapped inside a Docker-managed volume. Override the host path with
+      # DATA_DIR in .env (defaults to ./data next to this compose file).
+      - ${DATA_DIR:-./data}:/app/data
+    networks: [internal]
+
+volumes:
+  pgdata:
+  redisdata:
+  qdrantdata:
+  sandbox-archives:  # §4.5 durable local sandbox workspace archives
+
+networks:
+  internal:
+    driver: bridge
