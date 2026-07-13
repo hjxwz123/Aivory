@@ -427,6 +427,7 @@
     "namePlaceholder": "工作空间名称",
     "members": "成员",
     "membersBody": "{{count}} 名成员",
+    "membersLoading": "正在加载成员…",
     "inviteLink": "邀请链接",
     "rotateInvite": "重置链接（旧链接立即失效）",
     "inviteRotated": "已生成新邀请链接，旧链接已失效。",

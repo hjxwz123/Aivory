@@ -1,4 +1,4 @@
-import { Suspense } from 'react'
+import { Suspense, useCallback, useRef, useState } from 'react'
 import * as DialogPrimitive from '@radix-ui/react-dialog'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
@@ -38,16 +38,32 @@ export default function SettingsLayout() {
   // return to that exact page (navigate(-1) restores its live instance + scroll).
   const backgroundLocation = (location.state as SettingsBackgroundState | null)?.backgroundLocation
   const navState = backgroundLocation ? { backgroundLocation } : undefined
-  const close = () => {
+
+  // Exit animation: this dialog is ROUTE-mounted, so navigating away on close
+  // unmounts it instantly and the data-[state=closed] fade never plays (the
+  // close felt abrupt, unlike every other Dialog). Instead: flip local `open`
+  // to false so Radix runs the exit animation, then navigate when the content's
+  // fade-out finishes — with a timeout fallback slightly over the 140ms
+  // animation so reduced-motion (which disables animations, so animationend
+  // never fires) still closes.
+  const [open, setOpen] = useState(true)
+  const closedRef = useRef(false)
+  const finishClose = useCallback(() => {
+    if (closedRef.current) return
+    closedRef.current = true
     if (backgroundLocation) navigate(-1)
     else navigate('/chat')
+  }, [backgroundLocation, navigate])
+  const requestClose = () => {
+    setOpen(false)
+    window.setTimeout(finishClose, 220)
   }
 
   return (
     <DialogPrimitive.Root
-      open
+      open={open}
       onOpenChange={(o) => {
-        if (!o) close()
+        if (!o) requestClose()
       }}
     >
       <DialogPrimitive.Portal>
@@ -65,6 +81,11 @@ export default function SettingsLayout() {
             'data-[state=open]:animate-[pop-in_220ms_var(--ease-out)]',
             'data-[state=closed]:animate-[fade-out_140ms_var(--ease-in)]',
           )}
+          onAnimationEnd={() => {
+            // Navigate as soon as the exit fade completes (the timeout in
+            // requestClose is only the reduced-motion fallback).
+            if (!open) finishClose()
+          }}
         >
           {/* ===== Left rail ===== */}
           <div

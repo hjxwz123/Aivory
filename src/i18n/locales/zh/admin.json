@@ -285,6 +285,8 @@
     "deleted": "用户已删除",
     "deleteTitle": "删除对话?",
     "deleteBody": "将永久删除「{{title}}」及其全部消息。",
+    "deleteUserTitle": "删除用户？",
+    "deleteUserBody": "将永久删除用户「{{name}}」的账号及其全部数据（对话、文件、知识库、用量记录）。删除在后台执行，此操作不可撤销。",
     "viewConversations": "对话记录",
     "backToUsers": "返回用户列表",
     "backToConversations": "返回对话列表",

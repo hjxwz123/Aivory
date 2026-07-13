@@ -15,6 +15,7 @@ import { useCopy } from '@/hooks/use-clipboard'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { initials } from '@/components/ui/avatar.utils'
 import { Button } from '@/components/ui/button'
+import { Skeleton } from '@/components/ui/skeleton'
 import { Tooltip } from '@/components/ui/tooltip'
 import {
   Dialog,
@@ -226,6 +227,9 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
   const removeWs = useWorkspaces((s) => s.remove)
   const leaveWs = useWorkspaces((s) => s.leave)
   const [members, setMembers] = useState<ApiWorkspaceMember[]>([])
+  // Distinguish "still fetching" from "loaded, empty": without it the dialog
+  // opens claiming "0 members" and the list pops in a beat later.
+  const [membersLoading, setMembersLoading] = useState(true)
   const [inviteToken, setInviteToken] = useState(ws?.invite_token ?? '')
   const { copied, copy } = useCopy()
   const isOwner = ws?.role === 'owner'
@@ -239,10 +243,12 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
   useEffect(() => {
     if (!open || !activeId) return
     setInviteToken(ws?.invite_token ?? '')
+    setMembersLoading(true)
     workspacesApi
       .members(activeId)
       .then((r) => setMembers(r.members))
       .catch(() => setMembers([]))
+      .finally(() => setMembersLoading(false))
   }, [open, activeId, ws?.invite_token])
 
   if (!ws || !activeId) return null
@@ -301,7 +307,9 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
             {ws.name}
           </DialogTitle>
           <DialogDescription>
-            {t('workspace.membersBody', { count: members.length, defaultValue: '{{count}} members' })}
+            {membersLoading
+              ? t('workspace.membersLoading', { defaultValue: 'Loading members…' })
+              : t('workspace.membersBody', { count: members.length, defaultValue: '{{count}} members' })}
           </DialogDescription>
         </DialogHeader>
 
@@ -330,9 +338,21 @@ export function WorkspaceMembersDialog({ open, onOpenChange }: { open: boolean; 
           </div>
         ) : null}
 
-        {/* Member list */}
+        {/* Member list — skeleton rows while the fetch is in flight so the
+            dialog never opens claiming "0 members" before data lands. */}
         <ul className="max-h-64 space-y-1 overflow-y-auto scrollbar-thin">
-          {members.map((m) => (
+          {membersLoading
+            ? [0, 1, 2].map((i) => (
+                <li key={`sk-${i}`} className="flex items-center gap-2.5 rounded-[8px] px-1.5 py-1.5" aria-hidden>
+                  <Skeleton className="size-6 rounded-full" />
+                  <div className="min-w-0 flex-1 space-y-1.5">
+                    <Skeleton className="h-3 w-32" />
+                    <Skeleton className="h-2.5 w-20" />
+                  </div>
+                </li>
+              ))
+            : null}
+          {!membersLoading && members.map((m) => (
             <li key={m.user_id} className="flex items-center gap-2.5 rounded-[8px] px-1.5 py-1.5">
               <Avatar size="sm">
                 {m.avatar_url ? <AvatarImage src={m.avatar_url} alt={m.name} /> : null}

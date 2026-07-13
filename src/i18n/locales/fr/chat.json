@@ -427,6 +427,7 @@
     "namePlaceholder": "Nom de l'espace",
     "members": "Membres",
     "membersBody": "{{count}} membres",
+    "membersLoading": "Chargement des membres…",
     "inviteLink": "Lien d'invitation",
     "rotateInvite": "Réinitialiser le lien (l'ancien devient invalide)",
     "inviteRotated": "Nouveau lien généré — l'ancien est mort.",

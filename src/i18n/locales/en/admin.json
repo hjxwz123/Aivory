@@ -285,6 +285,8 @@
     "deleted": "User deleted",
     "deleteTitle": "Delete conversation?",
     "deleteBody": "Permanently deletes “{{title}}” and all its messages.",
+    "deleteUserTitle": "Delete this user?",
+    "deleteUserBody": "Permanently deletes {{name}}'s account and all of their data (conversations, files, knowledge bases, usage records). Deletion runs in the background and cannot be undone.",
     "viewConversations": "Conversations",
     "backToUsers": "Back to users",
     "backToConversations": "Back to conversations",

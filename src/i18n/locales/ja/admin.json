@@ -285,6 +285,8 @@
     "deleted": "ユーザーを削除しました",
     "deleteTitle": "会話を削除しますか？",
     "deleteBody": "「{{title}}」と全メッセージを完全削除します。",
+    "deleteUserTitle": "このユーザーを削除しますか？",
+    "deleteUserBody": "「{{name}}」のアカウントとすべてのデータ（会話・ファイル・ナレッジベース・使用記録）を完全に削除します。削除はバックグラウンドで実行され、取り消せません。",
     "viewConversations": "会話",
     "backToUsers": "ユーザーに戻る",
     "backToConversations": "会話に戻る",

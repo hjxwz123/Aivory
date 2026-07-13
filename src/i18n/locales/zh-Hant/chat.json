@@ -427,6 +427,7 @@
     "namePlaceholder": "工作空間名稱",
     "members": "成員",
     "membersBody": "{{count}} 名成員",
+    "membersLoading": "正在載入成員…",
     "inviteLink": "邀請連結",
     "rotateInvite": "重設連結（舊連結立即失效）",
     "inviteRotated": "已產生新邀請連結，舊連結已失效。",
