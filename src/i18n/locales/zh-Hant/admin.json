@@ -285,6 +285,8 @@
     "deleted": "使用者已刪除",
     "deleteTitle": "刪除對話?",
     "deleteBody": "將永久刪除「{{title}}」及其全部訊息。",
+    "deleteUserTitle": "刪除用戶？",
+    "deleteUserBody": "將永久刪除用戶「{{name}}」的帳號及其全部資料（對話、檔案、知識庫、用量記錄）。刪除在後台執行，此操作不可撤銷。",
     "viewConversations": "對話記錄",
     "backToUsers": "返回使用者列表",
     "backToConversations": "返回對話列表",

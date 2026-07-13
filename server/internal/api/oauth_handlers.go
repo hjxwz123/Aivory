@@ -431,15 +431,40 @@ func unlinkIdentityHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 //  2. otherwise a *verified* provider email links to the matching account;
 //  3. otherwise a fresh account is provisioned (synthesising a placeholder
 //     email when the provider returns none, e.g. Apple "Hide My Email" opt-out).
+// adoptOAuthAvatar copies the provider's profile picture into the user's
+// settings.avatar_url — the same field the account page writes and every
+// avatar render site (sidebar, workspace members, …) already reads — but ONLY
+// when the user has no avatar yet: a picture the user chose themselves must
+// never be overwritten by a login. Best-effort; failures never block login.
+func adoptOAuthAvatar(ctx context.Context, d Deps, u *store.User, avatarURL string) {
+	avatarURL = strings.TrimSpace(avatarURL)
+	if u == nil || avatarURL == "" || len(avatarURL) > 2048 ||
+		(!strings.HasPrefix(avatarURL, "https://") && !strings.HasPrefix(avatarURL, "http://")) {
+		return
+	}
+	if raw, err := store.GetUserSettingKey(ctx, d.DB, u.ID, "avatar_url"); err == nil && len(raw) > 0 {
+		var cur string
+		if json.Unmarshal(raw, &cur) == nil && strings.TrimSpace(cur) != "" {
+			return // user already has an avatar — keep their choice
+		}
+	}
+	_, _ = store.UpdateUserSettings(ctx, d.DB, u.ID, map[string]any{"avatar_url": avatarURL})
+}
+
 func resolveOAuthUser(ctx context.Context, d Deps, p *store.OAuthProvider, info oauth.UserInfo) (*store.User, error) {
 	if uid, err := store.FindOAuthIdentityUser(ctx, d.DB, p.ID, info.Subject); err == nil {
-		return store.FindUserByID(ctx, d.DB, uid)
+		u, err := store.FindUserByID(ctx, d.DB, uid)
+		if err == nil {
+			adoptOAuthAvatar(ctx, d, u, info.AvatarURL)
+		}
+		return u, err
 	}
 
 	email := strings.ToLower(strings.TrimSpace(info.Email))
 	if email != "" && info.EmailVerified {
 		if u, err := store.FindUserByEmail(ctx, d.DB, email); err == nil && u != nil {
 			_ = store.LinkOAuthIdentity(ctx, d.DB, p.ID, info.Subject, u.ID, email)
+			adoptOAuthAvatar(ctx, d, u, info.AvatarURL)
 			return u, nil
 		}
 	}
@@ -464,6 +489,7 @@ func resolveOAuthUser(ctx context.Context, d Deps, p *store.OAuthProvider, info 
 		return nil, err
 	}
 	_ = store.LinkOAuthIdentity(ctx, d.DB, p.ID, info.Subject, u.ID, email)
+	adoptOAuthAvatar(ctx, d, u, info.AvatarURL)
 	return u, nil
 }
 

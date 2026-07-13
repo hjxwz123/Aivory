@@ -285,6 +285,8 @@
     "deleted": "Utilisateur supprimé",
     "deleteTitle": "Supprimer la conversation ?",
     "deleteBody": "Supprime définitivement « {{title}} » et tous ses messages.",
+    "deleteUserTitle": "Supprimer cet utilisateur ?",
+    "deleteUserBody": "Supprime définitivement le compte de {{name}} et toutes ses données (conversations, fichiers, bases de connaissances, historique d'utilisation). La suppression s'exécute en arrière-plan et est irréversible.",
     "viewConversations": "Conversations",
     "backToUsers": "Retour aux utilisateurs",
     "backToConversations": "Retour aux conversations",

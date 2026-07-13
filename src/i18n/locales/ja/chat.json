@@ -427,6 +427,7 @@
     "namePlaceholder": "ワークスペース名",
     "members": "メンバー",
     "membersBody": "{{count}} 名のメンバー",
+    "membersLoading": "メンバーを読み込んでいます…",
     "inviteLink": "招待リンク",
     "rotateInvite": "リンクを再発行（旧リンクは無効化）",
     "inviteRotated": "新しい招待リンクを発行しました。旧リンクは無効です。",

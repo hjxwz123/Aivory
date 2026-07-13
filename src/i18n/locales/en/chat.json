@@ -427,6 +427,7 @@
     "namePlaceholder": "Workspace name",
     "members": "Members",
     "membersBody": "{{count}} members",
+    "membersLoading": "Loading members…",
     "inviteLink": "Invite link",
     "rotateInvite": "Reset link (invalidates the old one)",
     "inviteRotated": "New invite link generated — the old one is dead.",

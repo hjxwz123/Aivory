@@ -634,7 +634,10 @@
   --color-code-bg: oklch(96% 0 0);
   --color-code-fg: oklch(30% 0 0);
 
-  --color-sidebar-bg: oklch(98.5% 0 0);
+  /* Slightly grayer than --color-bg (98.4%) so the rail reads as its own
+     surface — 98.5% was LIGHTER than the canvas and indistinguishable. Keep
+     the gap subtle (~1.2 L): mono is deliberately quiet. */
+  --color-sidebar-bg: oklch(97.2% 0 0);
   --color-sidebar-border: oklch(87% 0 0);
 }
 

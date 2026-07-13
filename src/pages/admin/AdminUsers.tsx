@@ -657,9 +657,16 @@ export default function AdminUsers() {
       <Dialog open={Boolean(deleteRow)} onOpenChange={(o) => !o && setDeleteRow(null)}>
         <DialogContent size="sm">
           <DialogHeader>
-            <DialogTitle>{t('admin:users.deleteTitle')}</DialogTitle>
+            {/* users.deleteTitle/deleteBody belong to the CONVERSATION delete
+                dialog (AdminUserConversations, {{title}}) — reusing them here
+                showed "删除对话? …{{title}}…" with a raw placeholder. */}
+            <DialogTitle>{t('admin:users.deleteUserTitle', { defaultValue: 'Delete this user?' })}</DialogTitle>
             <DialogDescription>
-              {t('admin:users.deleteBody', { name: deleteRow?.name || deleteRow?.email || '' })}
+              {t('admin:users.deleteUserBody', {
+                defaultValue:
+                  "Permanently deletes {{name}}'s account and all of their data (conversations, files, knowledge bases, usage records). Deletion runs in the background and cannot be undone.",
+                name: deleteRow?.name || deleteRow?.email || '',
+              })}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
