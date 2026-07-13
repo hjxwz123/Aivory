@@ -65,7 +65,17 @@
     "noStyles": "尚無風格。",
     "storageQuotaFull": "儲存空間已滿,無法上傳。請先到「檔案」頁清理後再試。",
     "storageQuotaAction": "去清理空間",
-    "processing": "處理中…"
+    "processing": "處理中…",
+    "features": {
+      "title": "功能",
+      "researchDesc": "多輪規劃、聯網搜尋並產生附引用的研究報告。",
+      "verifyDesc": "回答生成後由第二個模型進行事實核查。",
+      "noTools": "停用工具",
+      "noToolsDesc": "不自動呼叫任何工具，直接回答——更快更省。",
+      "webSearch": "聯網搜尋",
+      "webSearchDesc": "每次都聯網搜尋並把結果併入提示詞（不經工具呼叫）。",
+      "disable": "關閉{{name}}"
+    }
   },
   "assistant": "Aivory",
   "thinking": "思考中",

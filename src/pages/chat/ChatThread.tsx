@@ -264,6 +264,8 @@ export default function ChatThread() {
       params?: Record<string, unknown>
       imageStyleId?: string
       verify?: boolean
+      noTools?: boolean
+      webSearch?: boolean
     },
   ) {
     if (!conversation) return
@@ -276,6 +278,8 @@ export default function ChatThread() {
       params: opts.params,
       imageStyleId: opts.imageStyleId,
       verify: opts.verify,
+      noTools: opts.noTools,
+      webSearch: opts.webSearch,
     })
     // Force the view to the freshly appended turn now — don't rely on the
     // auto-follow effect, whose scroll a content reflow or a stale autoFollow

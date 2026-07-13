@@ -65,7 +65,17 @@
     "noStyles": "暂无风格。",
     "storageQuotaFull": "存储空间已满,无法上传。请先到「文件」页清理后再试。",
     "storageQuotaAction": "去清理空间",
-    "processing": "处理中…"
+    "processing": "处理中…",
+    "features": {
+      "title": "功能",
+      "researchDesc": "多轮规划、联网搜索并生成带引用的研究报告。",
+      "verifyDesc": "回答生成后由第二个模型进行事实核查。",
+      "noTools": "禁用工具",
+      "noToolsDesc": "不自动调用任何工具，直接回答——更快更省。",
+      "webSearch": "联网搜索",
+      "webSearchDesc": "每次都联网搜索并把结果拼接进提示词（不走工具调用）。",
+      "disable": "关闭{{name}}"
+    }
   },
   "assistant": "Aivory",
   "thinking": "思考中",

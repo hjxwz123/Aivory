@@ -65,7 +65,17 @@
     "noStyles": "Aucun style configuré.",
     "storageQuotaFull": "Stockage plein — libérez de l'espace dans Fichiers puis réessayez.",
     "storageQuotaAction": "Libérer de l'espace",
-    "processing": "Traitement…"
+    "processing": "Traitement…",
+    "features": {
+      "title": "Options",
+      "researchDesc": "Planifie, cherche sur le web en plusieurs tours et rédige un rapport sourcé.",
+      "verifyDesc": "Un second modèle vérifie les faits de la réponse une fois rédigée.",
+      "noTools": "Désactiver les outils",
+      "noToolsDesc": "Répond directement sans appeler d'outil — plus rapide et moins cher.",
+      "webSearch": "Recherche web",
+      "webSearchDesc": "Cherche sur le web à chaque tour et ajoute les résultats au prompt (sans appel d'outil).",
+      "disable": "Désactiver {{name}}"
+    }
   },
   "assistant": "Aivory",
   "thinking": "Réflexion",

@@ -337,7 +337,13 @@ export default function ProjectDetail() {
   async function startProjectChat(
     text: string,
     attachments: Attachment[],
-    opts: { mode?: 'default' | 'deep-research' | 'canvas'; params?: Record<string, unknown> } = {},
+    opts: {
+      mode?: 'default' | 'deep-research' | 'canvas'
+      params?: Record<string, unknown>
+      verify?: boolean
+      noTools?: boolean
+      webSearch?: boolean
+    } = {},
   ) {
     if (!project) return
     if (!pendingConvRef.current && pendingCreateRef.current) {
@@ -364,6 +370,9 @@ export default function ProjectDetail() {
       attachments,
       mode: opts.mode,
       params: opts.params,
+      verify: opts.verify,
+      noTools: opts.noTools,
+      webSearch: opts.webSearch,
     })
   }
 

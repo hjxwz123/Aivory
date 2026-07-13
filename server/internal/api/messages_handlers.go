@@ -44,7 +44,11 @@ type postMessageReq struct {
 	Mode     string `json:"mode"`
 	// Verify enables Verify mode (§verify) — a secondary auditor model checks the
 	// answer. No-op unless an admin configured `verify_model_id`.
-	Verify         bool             `json:"verify"`
+	Verify bool `json:"verify"`
+	// NoTools forces a no-tool turn (§4.13-B); WebSearch forces a non-tool web
+	// search whose results are injected into the prompt (only with NoTools).
+	NoTools        bool             `json:"no_tools"`
+	WebSearch      bool             `json:"web_search"`
 	Attachments    []llm.Attachment `json:"attachments"`
 	ParamOverrides map[string]any   `json:"params"`
 	// ImageStyleID selects an admin image style for an image-mode turn (§4.20).
@@ -52,6 +56,20 @@ type postMessageReq struct {
 	// Locale is the user's current UI language (i18next code, e.g. "en", "zh");
 	// drives the reply-language instruction (§ reply language).
 	Locale string `json:"locale"`
+}
+
+// normalizeTurnFlags enforces the composer's feature mutual-exclusion on the
+// server (defense-in-depth; the client also enforces it): deep-research needs
+// tools, so it wins over no-tools; a forced web search only applies inside a
+// no-tools turn (it replaces the tool the model can no longer call).
+func normalizeTurnFlags(mode string, noTools, webSearch bool) (bool, bool) {
+	if mode == "deep-research" {
+		return false, false
+	}
+	if !noTools {
+		return noTools, false
+	}
+	return noTools, webSearch
 }
 
 // postMessageHandler is the SSE-streaming endpoint. The orchestrator owns the
@@ -83,6 +101,7 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	if req.Mode == "deep-research" && u.Role != "admin" && !userGroupHasFeature(r.Context(), d, u.GroupID, "research") {
 		req.Mode = ""
 	}
+	req.NoTools, req.WebSearch = normalizeTurnFlags(req.Mode, req.NoTools, req.WebSearch)
 	// §8 hard rule: per-user concurrent generation cap. Reserve the slot FIRST,
 	// before the daily-message counter is incremented — otherwise a request that
 	// is rejected here (slot full) would still burn a daily count for a turn that
@@ -183,6 +202,8 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		Branch:         req.Branch,
 		Mode:           req.Mode,
 		Verify:         req.Verify,
+		NoTools:        req.NoTools,
+		ForceWebSearch: req.WebSearch,
 		ParamOverrides: req.ParamOverrides,
 		ImageStyleID:   req.ImageStyleID,
 		Locale:         req.Locale,
@@ -285,6 +306,8 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		ModelID        string         `json:"model_id"`
 		Mode           string         `json:"mode"`
 		Verify         bool           `json:"verify"`
+		NoTools        bool           `json:"no_tools"`
+		WebSearch      bool           `json:"web_search"`
 		ParamOverrides map[string]any `json:"params"`
 		Locale         string         `json:"locale"`
 	}
@@ -302,6 +325,7 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	if body.Mode == "deep-research" && u.Role != "admin" && !userGroupHasFeature(r.Context(), d, u.GroupID, "research") {
 		body.Mode = ""
 	}
+	body.NoTools, body.WebSearch = normalizeTurnFlags(body.Mode, body.NoTools, body.WebSearch)
 	// §8/§C7 daily-message + token + concurrent-gen quotas apply to regenerate
 	// too — otherwise repeated /regenerate bypasses the per-day message cap.
 	// Reserve the concurrent-gen slot FIRST so a slot-full 429 doesn't burn a
@@ -423,6 +447,8 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		ReuseExistingUserMessage: true,
 		Mode:                     body.Mode,
 		Verify:                   body.Verify,
+		NoTools:                  body.NoTools,
+		ForceWebSearch:           body.WebSearch,
 		ParamOverrides:           body.ParamOverrides,
 		Locale:                   body.Locale,
 	}, sendEvent)

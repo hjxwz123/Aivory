@@ -135,6 +135,10 @@ interface ConversationStore {
     imageStyleId?: string
     /** §verify: enable Verify mode for this turn (a second model audits the answer). */
     verify?: boolean
+    /** §4.13-B: run this turn with NO tool calling (tool_mode=none server-side). */
+    noTools?: boolean
+    /** §4.4-B: forced non-tool web search (only meaningful with noTools). */
+    webSearch?: boolean
     /** Home "instant send": the conversation is an OPTIMISTIC local placeholder
      *  (temp id) — create the real one server-side FIRST, re-key the cache to
      *  its id, then stream. Lets the home page navigate to the thread the moment
@@ -810,6 +814,9 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
           mode: input.mode,
           // §verify: enable the secondary-auditor pass for this turn.
           verify: input.verify,
+          // §4.13-B: no-tools turn (tool_mode=none) + optional forced web search.
+          no_tools: input.noTools,
+          web_search: input.webSearch,
           attachments: input.attachments?.map(attachmentToApi),
           params: input.params,
           image_style_id: input.imageStyleId,
@@ -1101,6 +1108,12 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
     // is still on, so the re-audit happens as before.)
     const verify =
       useComposerPrefs.getState().verify && useModels.getState().verifyAvailable ? true : undefined
+    // §4.13-B: regenerate honours the CURRENT no-tools / web-search toggles (same
+    // rationale as verify above). The backend re-applies mutual exclusion, so a
+    // deep-research retry still drops these.
+    const noTools = useComposerPrefs.getState().noTools ? true : undefined
+    const webSearch =
+      useComposerPrefs.getState().noTools && useComposerPrefs.getState().forceWebSearch ? true : undefined
     const placeholderId = uid('m')
     // §4.15 R2: regenerate forks at the assistant — the new reply is a SIBLING of
     // the old one under the same user turn. Seed branch metadata on the
@@ -1152,7 +1165,16 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
       let lastCitations: Citation[] = []
       for await (const frame of streamSSE(
         `/conversations/${encodeURIComponent(conversationId)}/regenerate`,
-        { assistant_id: assistantId, model_id: modelId, mode, verify, params: conv?.lastParams, locale: currentLocale() },
+        {
+          assistant_id: assistantId,
+          model_id: modelId,
+          mode,
+          verify,
+          no_tools: noTools,
+          web_search: webSearch,
+          params: conv?.lastParams,
+          locale: currentLocale(),
+        },
         abort.signal,
       )) {
         const ev = frame.data as ApiSseEvent

@@ -32,6 +32,7 @@ var (
 	researchValidateConfirmedCap  = 8
 	researchValidateDisputedCap   = 4
 	researchValidateUnverifiedCap = 6
+	forcedSearchQueryCap          = 3
 )
 
 // TaskKind enumerates the internal task purposes. Used both for routing
@@ -66,6 +67,11 @@ const (
 	// TaskModeration screens a single user prompt for policy violations using a
 	// dedicated moderation model (§ moderation).
 	TaskModeration TaskKind = "task.moderation"
+	// TaskSearchQueries turns the conversation into a few web-search queries for
+	// the forced non-tool web search (§4.4-B) — a no-tools turn with web search
+	// on. The model never calls a tool; the server searches with these queries
+	// and injects the results.
+	TaskSearchQueries TaskKind = "task.search_queries"
 )
 
 // TaskLLM dispatches small internal model calls to the configured task model.
@@ -347,6 +353,13 @@ func defaultSystem(kind TaskKind, jsonOutput bool) string {
 			`{"confirmed":[{"claim":"...","sources":[1,3]}],` +
 			`"disputed":[{"topic":"...","positions":[{"claim":"...","sources":[2]},{"claim":"...","sources":[4]}]}],` +
 			`"unverified":[{"claim":"...","source":5}]}.`
+	case TaskSearchQueries:
+		return base + fmt.Sprintf(" Read the conversation and produce up to %d concise web-search"+
+			" queries that would surface the current information needed to answer the user's LAST"+
+			" message. Resolve pronouns from context (\"its price\" → the specific product). Prefer"+
+			" specific, keyword-style queries over full sentences; drop queries that add nothing.", forcedSearchQueryCap) +
+			" Write the queries in the language most likely to have good results for the topic." +
+			` Reply with strict JSON only: {"queries":["...","..."]}.`
 	}
 	if jsonOutput {
 		return base + " Reply with strict JSON only."

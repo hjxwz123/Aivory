@@ -248,6 +248,8 @@ export default function ChatHome() {
       params?: Record<string, unknown>
       imageStyleId?: string
       verify?: boolean
+      noTools?: boolean
+      webSearch?: boolean
     } = {},
   ) {
     if (startedRef.current) return
@@ -282,6 +284,8 @@ export default function ChatHome() {
         params: opts.params,
         imageStyleId: opts.imageStyleId,
         verify: opts.verify,
+        noTools: opts.noTools,
+        webSearch: opts.webSearch,
       })
       return
     }
@@ -304,6 +308,8 @@ export default function ChatHome() {
       params: opts.params,
       imageStyleId: opts.imageStyleId,
       verify: opts.verify,
+      noTools: opts.noTools,
+      webSearch: opts.webSearch,
       // Swap temp→real id in the URL only if the user is STILL on the optimistic
       // thread. If they navigated elsewhere during the create round-trip, leave
       // them be — the stream still lands in the (re-keyed) real conversation,

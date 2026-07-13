@@ -65,7 +65,17 @@
     "noStyles": "スタイルがありません。",
     "storageQuotaFull": "ストレージが満杯のためアップロードできません。「ファイル」ページで空きを作ってから再試行してください。",
     "storageQuotaAction": "空き容量を作る",
-    "processing": "処理中…"
+    "processing": "処理中…",
+    "features": {
+      "title": "機能",
+      "researchDesc": "計画を立て、複数ラウンドでウェブ検索し、引用付きのレポートを作成します。",
+      "verifyDesc": "回答の作成後に別のモデルがファクトチェックします。",
+      "noTools": "ツールを無効化",
+      "noToolsDesc": "ツールを一切呼び出さず直接回答します — 高速・低コスト。",
+      "webSearch": "ウェブ検索",
+      "webSearchDesc": "毎ターンウェブを検索し、結果をプロンプトに追加します（ツール呼び出しなし）。",
+      "disable": "{{name}}をオフにする"
+    }
   },
   "assistant": "Aivory",
   "thinking": "思考中",

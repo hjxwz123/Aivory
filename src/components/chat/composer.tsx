@@ -12,7 +12,7 @@
  *   4. IME-aware Enter handling for CJK input.
  */
 import { activeWorkspaceId } from '@/store/workspaces'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   ArrowUp,
@@ -28,6 +28,8 @@ import {
   Check,
   AlertTriangle,
   Plus,
+  Ban,
+  Globe,
 } from 'lucide-react'
 import type { Attachment } from '@/types/chat'
 import { Textarea } from '@/components/ui/textarea'
@@ -66,6 +68,10 @@ interface ComposerProps {
       imageStyleId?: string
       /** §verify: run the secondary-auditor pass on this turn. */
       verify?: boolean
+      /** §4.13-B: run this turn with NO tool calling. */
+      noTools?: boolean
+      /** §4.4-B: forced non-tool web search (only with noTools). */
+      webSearch?: boolean
     },
   ) => void
   onStop?: () => void
@@ -209,6 +215,71 @@ function restoreConversationFile(file: ApiConversationFile, scopeId: string): Pe
   }
 }
 
+// One toggleable turn feature in the composer "+" menu (§4.13-B). Rendered as an
+// icon + name + one-line description row; `dimmed` marks a mutually-excluded
+// feature (shown but not clickable).
+interface FeatureItem {
+  key: string
+  icon: ReactNode
+  label: string
+  desc: string
+  active: boolean
+  dimmed: boolean
+  /** Row is revealed conditionally (e.g. web search only inside a no-tools turn)
+   *  — play a soft fade-in when it mounts. */
+  enter?: boolean
+  toggle: () => void
+}
+
+function FeatureRow({ item, onAfter }: { item: FeatureItem; onAfter?: () => void }) {
+  return (
+    <button
+      type="button"
+      role="menuitemcheckbox"
+      aria-checked={item.active}
+      disabled={item.dimmed}
+      onClick={() => {
+        item.toggle()
+        onAfter?.()
+      }}
+      className={cn(
+        'flex w-full items-start gap-2.5 rounded-[10px] px-2.5 py-2 text-left interactive',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+        item.enter && 'animate-[fade-in_var(--duration-base)_var(--ease-out)]',
+        item.dimmed
+          ? 'opacity-40 cursor-not-allowed'
+          : item.active
+            ? 'bg-[var(--color-secondary-soft)]'
+            : 'hover:bg-[var(--color-bg-muted)]',
+      )}
+    >
+      <span
+        className={cn(
+          'mt-0.5 inline-flex shrink-0',
+          item.active && !item.dimmed ? 'text-[var(--color-secondary)]' : 'text-[var(--color-fg-muted)]',
+        )}
+        aria-hidden
+      >
+        {item.icon}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center gap-1.5">
+          <span
+            className={cn(
+              'text-[13px] font-medium',
+              item.active && !item.dimmed ? 'text-[var(--color-secondary)]' : 'text-[var(--color-fg)]',
+            )}
+          >
+            {item.label}
+          </span>
+          {item.active && !item.dimmed ? <Check size={13} className="text-[var(--color-secondary)]" aria-hidden /> : null}
+        </span>
+        <span className="mt-0.5 block text-[11.5px] leading-snug text-[var(--color-fg-subtle)]">{item.desc}</span>
+      </span>
+    </button>
+  )
+}
+
 export function Composer({
   modelId,
   onModelChange,
@@ -233,6 +304,12 @@ export function Composer({
   // §verify: when on, the answer is fact-checked by a second model this turn.
   const verify = useComposerPrefs((s) => s.verify)
   const setVerify = useComposerPrefs((s) => s.setVerify)
+  // §4.13-B disable-tools + forced non-tool web search (mutually exclusive with
+  // deep-research; web search only inside no-tools).
+  const noTools = useComposerPrefs((s) => s.noTools)
+  const setNoTools = useComposerPrefs((s) => s.setNoTools)
+  const forceWebSearch = useComposerPrefs((s) => s.forceWebSearch)
+  const setForceWebSearch = useComposerPrefs((s) => s.setForceWebSearch)
   const cachedParamValues = useComposerPrefs((s) => (modelId ? s.paramValuesByModel[modelId] : undefined))
   const setCachedParamValues = useComposerPrefs((s) => s.setParamValues)
   const cachedDraft = useComposerPrefs((s) => (draftScope ? s.draftsByScope[draftScope] : undefined))
@@ -253,6 +330,9 @@ export function Composer({
   // stay large. 639px = Tailwind's `sm` breakpoint minus 1.
   const isMobile = useMediaQuery('(max-width: 639px)')
   const [moreOpen, setMoreOpen] = useState(false)
+  // §4.13-B feature menu (the "+" left of attach): research / verify / no-tools
+  // / web-search as an icon+name+description list.
+  const [featuresOpen, setFeaturesOpen] = useState(false)
   const loadKBList = async () => {
     try {
       const rows = await kbsApi.list(activeWorkspaceId())
@@ -378,6 +458,9 @@ export function Composer({
   const paramControls = currentModel?.param_controls
   const effectiveMode = !isImageMode && researchEnabled ? mode : 'default'
   const effectiveVerify = verify && verifyAvailable && !isImageMode
+  // §4.13-B disable-tools + forced web search — inapplicable to image models.
+  const effectiveNoTools = noTools && !isImageMode
+  const effectiveWebSearch = effectiveNoTools && forceWebSearch
   const handleParamValuesChange = useCallback(
     (next: Record<string, unknown>) => {
       setCachedParamValues(modelId, next)
@@ -440,6 +523,8 @@ export function Composer({
         params: Object.keys(params).length > 0 ? params : undefined,
         imageStyleId: isImageMode && imageStyleId ? imageStyleId : undefined,
         verify: effectiveVerify ? true : undefined,
+        noTools: effectiveNoTools ? true : undefined,
+        webSearch: effectiveWebSearch ? true : undefined,
       })
       updateValue('')
       // Stop any leftover pollers and revoke blob: URLs — uploadAttachment already
@@ -771,9 +856,74 @@ export function Composer({
     }
   }
 
-  // A tool is "armed" while collapsed → the "+" trigger shows an accent dot so
-  // the user knows research / a KB is active without expanding the menu.
-  const hasActiveTool = effectiveMode === 'deep-research' || (kbIds?.length ?? 0) > 0
+  // §4.13-B turn-feature list (composer "+" menu). Only chat models expose them.
+  // Mutual exclusion: deep-research ↔ no-tools (each dims the other); web search
+  // appears only inside a no-tools turn. Deep-research isDim when noTools is on
+  // and vice-versa; the store setters enforce the same rules on toggle.
+  const researchActive = effectiveMode === 'deep-research'
+  const featureItems: FeatureItem[] = []
+  if (!isImageMode) {
+    if (researchEnabled) {
+      featureItems.push({
+        key: 'deep-research',
+        icon: <Telescope size={16} aria-hidden />,
+        label: t('composer.research'),
+        desc: t('composer.features.researchDesc', { defaultValue: 'Plan, search the web across rounds, and write a cited report.' }),
+        active: researchActive,
+        dimmed: noTools,
+        toggle: () => setMode(researchActive ? 'default' : 'deep-research'),
+      })
+    }
+    if (verifyAvailable) {
+      featureItems.push({
+        key: 'verify',
+        icon: <ShieldCheck size={16} aria-hidden />,
+        label: t('composer.verify', { defaultValue: 'Verify' }),
+        desc: t('composer.features.verifyDesc', { defaultValue: 'A second model fact-checks the answer after it is written.' }),
+        active: verify,
+        dimmed: false,
+        toggle: () => setVerify(!verify),
+      })
+    }
+    featureItems.push({
+      key: 'no-tools',
+      icon: <Ban size={16} aria-hidden />,
+      label: t('composer.features.noTools', { defaultValue: 'Disable tools' }),
+      desc: t('composer.features.noToolsDesc', { defaultValue: "Answer directly without calling any tool — faster and cheaper." }),
+      active: noTools,
+      dimmed: researchActive,
+      toggle: () => setNoTools(!noTools),
+    })
+    if (noTools) {
+      featureItems.push({
+        key: 'web-search',
+        icon: <Globe size={16} aria-hidden />,
+        label: t('composer.features.webSearch', { defaultValue: 'Web search' }),
+        desc: t('composer.features.webSearchDesc', { defaultValue: 'Search the web every turn and add the results to the prompt (no tool call).' }),
+        active: forceWebSearch,
+        dimmed: false,
+        enter: true,
+        toggle: () => setForceWebSearch(!forceWebSearch),
+      })
+    }
+  }
+  const featureList = (onAfter?: () => void) => (
+    <div className="flex flex-col gap-0.5">
+      {featureItems.map((it) => (
+        <FeatureRow key={it.key} item={it} onAfter={onAfter} />
+      ))}
+    </div>
+  )
+  const anyFeatureActive = featureItems.some((it) => it.active && !it.dimmed)
+
+  // Active-feature chips shown right before the model picker: icon + name + an
+  // × to turn the feature off. Only genuinely active (non-dimmed) ones.
+  const activeChips = featureItems.filter((it) => it.active && !it.dimmed)
+
+  // A tool is "armed" while collapsed → the mobile "+" trigger (which now also
+  // holds the feature menu) shows an accent dot so the user knows a feature or a
+  // KB is active without expanding the menu.
+  const hasActiveTool = anyFeatureActive || (kbIds?.length ?? 0) > 0
 
   // KB checklist — shared by the desktop popover and the mobile "+" menu.
   const kbChecklist =
@@ -1173,44 +1323,11 @@ export function Composer({
                 {recording ? t('composer.voiceStop') : t('composer.voice')}
               </button>
 
-              {researchEnabled && !isImageMode ? (
+              {featureItems.length > 0 ? (
                 <>
                   <div className="my-1 h-px bg-[var(--color-divider)]" aria-hidden />
-                  <button
-                    type="button"
-                    onClick={() => setMode(effectiveMode === 'deep-research' ? 'default' : 'deep-research')}
-                    aria-pressed={effectiveMode === 'deep-research'}
-                    className={cn(
-                      'flex w-full items-center gap-2.5 rounded-[8px] px-2.5 py-2 text-left text-sm hover:bg-[var(--color-bg-muted)]',
-                      effectiveMode === 'deep-research' ? 'text-[var(--color-secondary)]' : 'text-[var(--color-fg)]',
-                    )}
-                  >
-                    <Telescope
-                      size={16}
-                      className={cn(effectiveMode !== 'deep-research' && 'text-[var(--color-fg-muted)]')}
-                      aria-hidden
-                    />
-                    <span className="flex-1">{t('composer.research')}</span>
-                    {effectiveMode === 'deep-research' ? <Check size={15} aria-hidden /> : null}
-                  </button>
+                  {featureList()}
                 </>
-              ) : null}
-
-              {verifyAvailable && !isImageMode ? (
-                <button
-                  type="button"
-                  onClick={() => setVerify(!verify)}
-                  aria-pressed={effectiveVerify}
-                  className={cn(
-                    'flex w-full items-center gap-2.5 rounded-[8px] px-2.5 py-2 text-left text-sm hover:bg-[var(--color-bg-muted)]',
-                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-                    effectiveVerify ? 'text-[var(--color-secondary)]' : 'text-[var(--color-fg)]',
-                  )}
-                >
-                  <ShieldCheck size={16} className={cn(!effectiveVerify && 'text-[var(--color-fg-muted)]')} aria-hidden />
-                  <span className="flex-1">{t('composer.verify', { defaultValue: 'Verify' })}</span>
-                  {effectiveVerify ? <Check size={15} aria-hidden /> : null}
-                </button>
               ) : null}
 
               {onKBChange && !isImageMode ? (
@@ -1254,6 +1371,33 @@ export function Composer({
         /* ── Desktop: inline scrollable left zone + pinned right zone ── */
         <div className="flex items-center gap-1 px-2.5 pb-2.5 pt-1">
           <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto scrollbar-none">
+            {featureItems.length > 0 ? (
+              <Popover open={featuresOpen} onOpenChange={setFeaturesOpen}>
+                <Tooltip content={t('composer.features.title', { defaultValue: 'Turn features' })}>
+                  <PopoverTrigger asChild>
+                    <button
+                      type="button"
+                      aria-label={t('composer.features.title', { defaultValue: 'Turn features' })}
+                      className={cn(
+                        'relative inline-flex items-center justify-center size-8 rounded-[8px] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+                        anyFeatureActive
+                          ? 'bg-[var(--color-secondary-soft)] text-[var(--color-secondary)]'
+                          : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
+                      )}
+                    >
+                      <Plus size={16} aria-hidden />
+                    </button>
+                  </PopoverTrigger>
+                </Tooltip>
+                <PopoverContent align="start" side="top" sideOffset={10} className="w-72 p-1.5">
+                  <p className="px-2.5 pb-1 pt-0.5 text-[11px] font-medium uppercase tracking-wider text-[var(--color-fg-subtle)]">
+                    {t('composer.features.title', { defaultValue: 'Turn features' })}
+                  </p>
+                  {featureList()}
+                </PopoverContent>
+              </Popover>
+            ) : null}
+
             <Tooltip content={t('composer.attach')}>
               <button
                 type="button"
@@ -1309,48 +1453,6 @@ export function Composer({
 
             {isImageMode ? <StylePicker value={imageStyleId} onChange={setImageStyleId} /> : null}
 
-            {researchEnabled && !isImageMode ? (
-              <Tooltip content={t('composer.researchTooltip')}>
-                <button
-                  type="button"
-                  onClick={() => setMode(effectiveMode === 'deep-research' ? 'default' : 'deep-research')}
-                  aria-pressed={effectiveMode === 'deep-research'}
-                  aria-label={t('composer.researchTooltip')}
-                  className={cn(
-                    'inline-flex items-center gap-1.5 h-8 px-2 rounded-[8px] text-[12px] font-medium interactive',
-                    effectiveMode === 'deep-research'
-                      ? 'bg-[var(--color-secondary-soft)] text-[var(--color-secondary)]'
-                      : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
-                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-                  )}
-                >
-                  <Telescope size={14} aria-hidden />
-                  <span>{t('composer.research')}</span>
-                </button>
-              </Tooltip>
-            ) : null}
-
-            {verifyAvailable && !isImageMode ? (
-              <Tooltip content={t('composer.verifyTooltip', { defaultValue: 'Have a second model fact-check the answer' })}>
-                <button
-                  type="button"
-                  onClick={() => setVerify(!verify)}
-                  aria-pressed={effectiveVerify}
-                  aria-label={t('composer.verifyTooltip', { defaultValue: 'Have a second model fact-check the answer' })}
-                  className={cn(
-                    'inline-flex items-center gap-1.5 h-8 px-2 rounded-[8px] text-[12px] font-medium interactive',
-                    effectiveVerify
-                      ? 'bg-[var(--color-secondary-soft)] text-[var(--color-secondary)]'
-                      : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
-                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-                  )}
-                >
-                  <ShieldCheck size={14} aria-hidden />
-                  <span>{t('composer.verify', { defaultValue: 'Verify' })}</span>
-                </button>
-              </Tooltip>
-            ) : null}
-
             {/* Per-model param_controls (§2.3-G). Picked values flow up via onSubmit(). */}
             {paramControls ? (
               <div className="flex flex-wrap items-center gap-1.5">
@@ -1394,8 +1496,26 @@ export function Composer({
             ) : null}
           </div>
 
-          {/* Right zone — pinned, never wraps: model picker + send/stop. */}
+          {/* Right zone — pinned, never wraps: active-feature chips + model picker + send/stop. */}
           <div className="flex shrink-0 items-center gap-1.5 pl-1">
+            {activeChips.map((chip) => (
+              <Tooltip key={chip.key} content={chip.desc}>
+                <span className="group inline-flex items-center gap-1 h-7 pl-2 pr-1 rounded-full bg-[var(--color-secondary-soft)] text-[var(--color-secondary)] text-[12px] font-medium">
+                  <span className="inline-flex shrink-0" aria-hidden>
+                    {chip.icon}
+                  </span>
+                  <span className="max-w-[7rem] truncate">{chip.label}</span>
+                  <button
+                    type="button"
+                    onClick={chip.toggle}
+                    aria-label={t('composer.features.disable', { defaultValue: 'Turn off {{name}}', name: chip.label })}
+                    className="inline-flex items-center justify-center size-5 rounded-full text-[var(--color-secondary)] hover:bg-[var(--color-secondary)]/15 interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                  >
+                    <X size={13} aria-hidden />
+                  </button>
+                </span>
+              </Tooltip>
+            ))}
             <ModelPicker value={modelId} onChange={onModelChange} />
             {sendBtn}
           </div>

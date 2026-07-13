@@ -271,6 +271,18 @@ type RunRequest struct {
 	// answer finalizes, a secondary auditor model fact-checks it. Honoured only
 	// when an admin has configured `verify_model_id`; otherwise a no-op.
 	Verify bool
+	// NoTools forces this turn to run with NO tool calling (tool_mode=none for
+	// this turn only): the provider request carries no `tools` field and the
+	// system prompt drops the tool-guidance segment (§4.13-B). Mutually
+	// exclusive with Mode=="deep-research" (research needs tools) — the handler
+	// clears one when both are set.
+	NoTools bool
+	// ForceWebSearch runs a NON-tool web search before generation: a task model
+	// derives search queries from the conversation, the searcher runs them, and
+	// the results are injected into the prompt as <web-search-result> context
+	// (§4.4-B). Only meaningful with NoTools (it replaces the tool the model can
+	// no longer call); ignored otherwise.
+	ForceWebSearch bool
 	// ImageStyleID selects an admin-managed image style (§4.20) for an image-mode
 	// turn (conversation model kind=image). Its hidden prompt is composed
 	// server-side into the final image prompt; ignored for chat models.
@@ -758,6 +770,16 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	if toolMode == "" {
 		toolMode = "native"
 	}
+	// §4.13-B per-turn "disable tools": the user chose to run WITHOUT any tool
+	// calling this turn. Force tool_mode=none for this run only — the provider
+	// request then carries no `tools` field, official/hosted tools are dropped,
+	// and composeSystemPrompt skips the whole tool-guidance segment (it gates on
+	// ToolMode != "none"). Deep-research is already excluded by the handler.
+	if req.NoTools {
+		toolMode = "none"
+		useOfficial = false
+		officialTools = nil
+	}
 	if toolMode != "none" && !useOfficial {
 		toolDefs = o.filterDisabledTools(o.tools.List(model.ID))
 	}
@@ -863,6 +885,22 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// otherwise the first turn after an upload is blind to the file (§4.7). 0 when
 	// nothing was retrieved.
 	ragContext := formatRAGContext(ragSnippets)
+	// §4.4-B forced non-tool web search (a no-tools turn with web search on):
+	// server-run search, results injected as a <web-search-result> block that
+	// rides the same message-layer injection as RAG. Citations join the turn's
+	// source list. Kept OUT of formatRAGContext so they aren't double-wrapped as
+	// KB context.
+	if req.NoTools && req.ForceWebSearch {
+		// Offset the search citations past any KB snippets already collected this
+		// turn so the two source sets don't both start at [1].
+		if searchText, searchCites := o.forcedWebSearch(ctx, req, conv, history, len(ragSnippets), onEvent); searchText != "" {
+			if ragContext != "" {
+				ragContext += "\n\n"
+			}
+			ragContext += searchText
+			ragSnippets = append(ragSnippets, searchCites...)
+		}
+	}
 	injectedOverhead := estimateTokens(ragContext)
 
 	keep, summaryBlocks, compactAction := PlanCompaction(o.db, conv, history, injectedOverhead)
@@ -2209,6 +2247,104 @@ func injectSummaryIntoHistory(msgs []UnifiedMessage, text string) []UnifiedMessa
 		}
 	}
 	return msgs
+}
+
+// forcedSearchHistoryTurns caps how many recent messages feed the search-query
+// task model (keep the prompt small; the latest question dominates intent).
+const forcedSearchHistoryTurns = 6
+
+// deriveSearchQueries asks the task model for a few web-search queries that
+// would answer the user's latest message given recent context. Falls back to
+// the raw user text on any failure so a search still runs.
+func (o *Orchestrator) deriveSearchQueries(ctx context.Context, req RunRequest, history []store.Message) []string {
+	var b strings.Builder
+	start := 0
+	if len(history) > forcedSearchHistoryTurns {
+		start = len(history) - forcedSearchHistoryTurns
+	}
+	for _, m := range history[start:] {
+		if m.Role != "user" && m.Role != "assistant" {
+			continue
+		}
+		var blocks []UnifiedBlock
+		_ = json.Unmarshal(m.Blocks, &blocks)
+		if t := strings.TrimSpace(renderBlocksAsText(blocks)); t != "" {
+			fmt.Fprintf(&b, "%s: %s\n", m.Role, truncate(t, 600))
+		}
+	}
+	fmt.Fprintf(&b, "user (latest): %s\n", strings.TrimSpace(req.UserText))
+
+	var out struct {
+		Queries []string `json:"queries"`
+	}
+	if o.task != nil {
+		err := o.task.RunJSON(ctx, TaskSearchQueries, b.String(), &out, RunOpts{UserID: req.UserID, ConversationID: req.ConversationID})
+		if err == nil {
+			cleaned := make([]string, 0, len(out.Queries))
+			for _, q := range out.Queries {
+				if q = strings.TrimSpace(q); q != "" {
+					cleaned = append(cleaned, q)
+				}
+				if len(cleaned) >= forcedSearchQueryCap {
+					break
+				}
+			}
+			if len(cleaned) > 0 {
+				return cleaned
+			}
+		}
+	}
+	if u := strings.TrimSpace(req.UserText); u != "" {
+		return []string{u}
+	}
+	return nil
+}
+
+// forcedWebSearch runs a NON-tool web search for a no-tools + web-search turn
+// (§4.4-B): a task model turns the conversation into queries, the configured
+// searcher runs them, progress streams to the reply area as web_search rounds,
+// and the results become a <web-search-result> block for prompt injection.
+// Returns (contextText, citations); ("", nil) when search is unconfigured or
+// yields nothing. Best-effort — a failure never blocks the turn.
+func (o *Orchestrator) forcedWebSearch(ctx context.Context, req RunRequest, conv *store.Conversation, history []store.Message, baseIndex int, onEvent func(SseEvent)) (string, []Citation) {
+	queries := o.deriveSearchQueries(ctx, req, history)
+	if len(queries) == 0 {
+		return "", nil
+	}
+	tc := &ToolContext{UserID: req.UserID, ConvID: req.ConversationID, WorkspaceID: conv.WorkspaceID, ModelID: req.ModelID}
+	var cites []Citation
+	var b strings.Builder
+	for i, q := range queries {
+		id := fmt.Sprintf("fws_%d", i+1)
+		input, _ := json.Marshal(map[string]any{"query": q})
+		onEvent(SseEvent{Type: "tool_start", Name: "web_search", ID: id, Input: input})
+		out, qcites, err := o.tools.Run(ctx, "web_search", input, tc)
+		if err != nil {
+			onEvent(SseEvent{Type: "tool_result", Name: "web_search", ID: id, Summary: "search failed", Status: "error"})
+			continue
+		}
+		// The searcher returns this exact sentence when no backend is configured
+		// (settings + env both empty). Injecting that placeholder would only add
+		// noise — stop and let the model answer from training knowledge.
+		if strings.HasPrefix(out, "Search not yet configured") {
+			onEvent(SseEvent{Type: "tool_result", Name: "web_search", ID: id, Summary: "search not configured", Status: "error"})
+			return "", nil
+		}
+		onEvent(SseEvent{Type: "tool_result", Name: "web_search", ID: id, Summary: truncate(out, 400), Status: "complete"})
+		for j := range qcites {
+			c := qcites[j]
+			// Continue past any KB snippets already numbered this turn so the two
+			// source lists never share an index.
+			c.Index = baseIndex + len(cites) + 1
+			cites = append(cites, c)
+			onEvent(SseEvent{Type: "citation", Citation: &c})
+		}
+		fmt.Fprintf(&b, "Query: %s\n%s\n\n", q, strings.TrimSpace(out))
+	}
+	if strings.TrimSpace(b.String()) == "" {
+		return "", nil
+	}
+	return "<web-search-result>\n" + strings.TrimSpace(b.String()) + "\n</web-search-result>", cites
 }
 
 // injectRAGIntoHistory appends retrieved context to the LAST user message.

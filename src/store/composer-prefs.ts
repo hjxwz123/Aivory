@@ -8,6 +8,12 @@ export type ComposerParamValues = Record<string, ParamValue>
 interface PersistedComposerPrefs {
   mode: ComposerMode
   verify: boolean
+  // §4.13-B: run this turn with NO tool calling. Mutually exclusive with the
+  // 'deep-research' mode (research needs tools) — the setters enforce it.
+  noTools: boolean
+  // Forced non-tool web search — only meaningful while noTools is on; cleared
+  // automatically when noTools turns off.
+  forceWebSearch: boolean
   paramValuesByModel: Record<string, ComposerParamValues>
   draftsByScope: Record<string, string>
 }
@@ -15,6 +21,8 @@ interface PersistedComposerPrefs {
 interface ComposerPrefsStore extends PersistedComposerPrefs {
   setMode: (mode: ComposerMode) => void
   setVerify: (verify: boolean) => void
+  setNoTools: (noTools: boolean) => void
+  setForceWebSearch: (on: boolean) => void
   setParamValues: (modelId: string, values: Record<string, unknown>) => void
   setDraft: (scope: string, value: string) => void
   clearDraft: (scope: string) => void
@@ -26,6 +34,8 @@ const MAX_DRAFT_LEN = 12_000
 const DEFAULT_PREFS: PersistedComposerPrefs = {
   mode: 'default',
   verify: false,
+  noTools: false,
+  forceWebSearch: false,
   paramValuesByModel: {},
   draftsByScope: {},
 }
@@ -82,14 +92,33 @@ function loadPrefs(): PersistedComposerPrefs {
     if (!raw) return DEFAULT_PREFS
     const parsed = JSON.parse(raw) as unknown
     if (!isRecord(parsed)) return DEFAULT_PREFS
+    const noTools = parsed.noTools === true
     return {
       mode: isMode(parsed.mode) ? parsed.mode : DEFAULT_PREFS.mode,
       verify: parsed.verify === true,
+      noTools,
+      // web search can only be on inside a no-tools turn
+      forceWebSearch: noTools && parsed.forceWebSearch === true,
       paramValuesByModel: sanitizeParamValuesByModel(parsed.paramValuesByModel),
       draftsByScope: sanitizeDraftsByScope(parsed.draftsByScope),
     }
   } catch {
     return DEFAULT_PREFS
+  }
+}
+
+// persistedFrom snapshots only the persisted keys, then merges a patch, so new
+// prefs auto-persist without every setter re-listing every field (a common
+// source of "the setting resets on reload" bugs).
+function persistedFrom(state: PersistedComposerPrefs, patch: Partial<PersistedComposerPrefs>): PersistedComposerPrefs {
+  return {
+    mode: state.mode,
+    verify: state.verify,
+    noTools: state.noTools,
+    forceWebSearch: state.forceWebSearch,
+    paramValuesByModel: state.paramValuesByModel,
+    draftsByScope: state.draftsByScope,
+    ...patch,
   }
 }
 
@@ -104,30 +133,36 @@ function persistPrefs(prefs: PersistedComposerPrefs): void {
 
 export const useComposerPrefs = create<ComposerPrefsStore>((set) => {
   const initial = loadPrefs()
+  // commit persists the merged persisted-subset and returns the same patch as
+  // the state update — the single write path for every scalar/map setter.
+  const commit = (patch: Partial<PersistedComposerPrefs>) =>
+    set((state) => {
+      persistPrefs(persistedFrom(state, patch))
+      return patch
+    })
   return {
     ...initial,
     setMode(mode) {
-      set((state) => {
-        const next: PersistedComposerPrefs = {
-          mode,
-          verify: state.verify,
-          paramValuesByModel: state.paramValuesByModel,
-          draftsByScope: state.draftsByScope,
-        }
-        persistPrefs(next)
-        return { mode }
-      })
+      // deep-research needs tools → it clears the no-tools feature.
+      if (mode === 'deep-research') commit({ mode, noTools: false, forceWebSearch: false })
+      else commit({ mode })
     },
     setVerify(verify) {
+      commit({ verify })
+    },
+    setNoTools(noTools) {
+      // no-tools ↔ deep-research are mutually exclusive; web search only lives
+      // inside a no-tools turn, so turning it off clears the web-search flag.
+      if (noTools) commit({ noTools: true, mode: 'default', forceWebSearch: false })
+      else commit({ noTools: false, forceWebSearch: false })
+    },
+    setForceWebSearch(on) {
+      // Only togglable while no-tools is on (the UI gates it too).
       set((state) => {
-        const next: PersistedComposerPrefs = {
-          mode: state.mode,
-          verify,
-          paramValuesByModel: state.paramValuesByModel,
-          draftsByScope: state.draftsByScope,
-        }
-        persistPrefs(next)
-        return { verify }
+        if (!state.noTools) return {}
+        const patch = { forceWebSearch: on }
+        persistPrefs(persistedFrom(state, patch))
+        return patch
       })
     },
     setParamValues(modelId, values) {
@@ -141,13 +176,7 @@ export const useComposerPrefs = create<ComposerPrefsStore>((set) => {
         } else {
           delete paramValuesByModel[id]
         }
-        const next: PersistedComposerPrefs = {
-          mode: state.mode,
-          verify: state.verify,
-          paramValuesByModel,
-          draftsByScope: state.draftsByScope,
-        }
-        persistPrefs(next)
+        persistPrefs(persistedFrom(state, { paramValuesByModel }))
         return { paramValuesByModel }
       })
     },
@@ -161,13 +190,7 @@ export const useComposerPrefs = create<ComposerPrefsStore>((set) => {
         } else {
           delete draftsByScope[key]
         }
-        const next: PersistedComposerPrefs = {
-          mode: state.mode,
-          verify: state.verify,
-          paramValuesByModel: state.paramValuesByModel,
-          draftsByScope,
-        }
-        persistPrefs(next)
+        persistPrefs(persistedFrom(state, { draftsByScope }))
         return { draftsByScope }
       })
     },
@@ -178,13 +201,7 @@ export const useComposerPrefs = create<ComposerPrefsStore>((set) => {
         if (state.draftsByScope[key] === undefined) return {}
         const draftsByScope = { ...state.draftsByScope }
         delete draftsByScope[key]
-        const next: PersistedComposerPrefs = {
-          mode: state.mode,
-          verify: state.verify,
-          paramValuesByModel: state.paramValuesByModel,
-          draftsByScope,
-        }
-        persistPrefs(next)
+        persistPrefs(persistedFrom(state, { draftsByScope }))
         return { draftsByScope }
       })
     },
