@@ -64,6 +64,19 @@ func contextWithProviderRequestRecorder(ctx context.Context, rec *providerReques
 	return context.WithValue(ctx, providerRequestRecorderKey{}, rec)
 }
 
+// contextWithoutProviderRequestRecorder detaches any inherited recorder so a
+// nested provider call (e.g. a task-model round issued mid chat turn, whose
+// usage is logged separately as a task.* row) does NOT get captured into the
+// outer chat turn's per-request recorder — otherwise it would surface as a
+// phantom purpose="chat" usage row and inflate the billed total (§B5-per-request
+// usage rows). Stores a typed-nil so the Value lookup + nil guards short-circuit.
+func contextWithoutProviderRequestRecorder(ctx context.Context) context.Context {
+	if ctx.Value(providerRequestRecorderKey{}) == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, providerRequestRecorderKey{}, (*providerRequestRecorder)(nil))
+}
+
 func recordProviderRequest(ctx context.Context, req *http.Request) {
 	rec, _ := ctx.Value(providerRequestRecorderKey{}).(*providerRequestRecorder)
 	if rec == nil || req == nil {
@@ -132,6 +145,16 @@ func (r *providerRequestRecorder) record(req *http.Request) {
 
 func (r *providerRequestRecorder) attachUsage(u Usage) {
 	if r == nil {
+		return
+	}
+	// Providers attach right after reading the stream, BEFORE branching on the
+	// read error — so a request that stalled at time-to-first-token and produced
+	// zero bytes arrives here with all-zero usage. Skip it: attaching would mark
+	// an empty request HasUsage, minting a phantom 0-token usage row (and, on a
+	// credit-paid turn, a 0-credit split row that leaks the turn into the free
+	// window's `credits<=0` count on reseed). A genuinely completed round always
+	// carries input tokens.
+	if u == (Usage{}) {
 		return
 	}
 	r.mu.Lock()

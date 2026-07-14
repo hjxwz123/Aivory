@@ -127,6 +127,29 @@ func (o *Orchestrator) moderationCategories() []string {
 	return out
 }
 
+// upstreamModerationMarkers are substrings that, when present in an upstream
+// provider's error body, mean the PROVIDER's OWN content filter rejected the
+// request (common on relays / regional gateways) rather than a transient/infra
+// failure. Matched case-insensitively. We surface these as a content-moderation
+// refusal to the user instead of a generic "provider returned an error".
+var upstreamModerationMarkers = []string{"sensitive_words_detected"}
+
+// isUpstreamModerationError reports whether an upstream failure was the
+// provider's content filter tripping. Returns false for a nil / cancel error
+// (the caller handles cancellation before consulting this).
+func isUpstreamModerationError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	for _, m := range upstreamModerationMarkers {
+		if strings.Contains(msg, m) {
+			return true
+		}
+	}
+	return false
+}
+
 // moderationMessage returns the admin-customised block message, or a default.
 func (o *Orchestrator) moderationMessage() string {
 	if raw, err := store.GetSetting(o.db, "moderation_message"); err == nil && len(raw) > 0 {

@@ -175,17 +175,9 @@ var (
 // python_execute or image_generate without per-model config). Per-model
 // allow-lists remain a future enhancement (needs a models column + admin UI).
 func (o *Orchestrator) filterDisabledTools(defs []ToolDef) []ToolDef {
-	raw, err := store.GetSetting(o.db, "disabled_tools")
-	if err != nil || len(raw) == 0 {
+	deny := o.disabledToolSet()
+	if len(deny) == 0 {
 		return defs
-	}
-	var names []string
-	if json.Unmarshal(raw, &names) != nil || len(names) == 0 {
-		return defs
-	}
-	deny := make(map[string]bool, len(names))
-	for _, n := range names {
-		deny[n] = true
 	}
 	out := make([]ToolDef, 0, len(defs))
 	for _, d := range defs {
@@ -194,6 +186,37 @@ func (o *Orchestrator) filterDisabledTools(defs []ToolDef) []ToolDef {
 		}
 	}
 	return out
+}
+
+// disabledToolSet reads the global `disabled_tools` admin kill-switch as a set.
+// nil when unset/unparseable (fail-open, same as filterDisabledTools).
+func (o *Orchestrator) disabledToolSet() map[string]bool {
+	if o.db == nil {
+		return nil
+	}
+	raw, err := store.GetSetting(o.db, "disabled_tools")
+	if err != nil || len(raw) == 0 {
+		return nil
+	}
+	var names []string
+	if json.Unmarshal(raw, &names) != nil || len(names) == 0 {
+		return nil
+	}
+	deny := make(map[string]bool, len(names))
+	for _, n := range names {
+		deny[n] = true
+	}
+	return deny
+}
+
+// toolCallTimeout returns the per-invocation bound for a tool (§4.3), matching
+// what orchToolRunner applies, so non-tool callers (forced web search) can hold
+// the same deadline.
+func toolCallTimeout(name string) time.Duration {
+	if d, ok := toolTimeouts[name]; ok {
+		return d
+	}
+	return toolTimeoutDefault
 }
 
 // charge increments the per-turn counters for a tool and returns an error when
@@ -588,29 +611,42 @@ func perRequestUsageRows(snaps []providerRequestSnapshot, model *store.Model, to
 	lastRow.Usage.OutputTokens = maxInt(lastRow.Usage.OutputTokens+(total.OutputTokens-summed.OutputTokens), 0)
 	lastRow.Usage.CacheReadTokens = maxInt(lastRow.Usage.CacheReadTokens+(total.CacheReadTokens-summed.CacheReadTokens), 0)
 	lastRow.Usage.CacheWriteTokens = maxInt(lastRow.Usage.CacheWriteTokens+(total.CacheWriteTokens-summed.CacheWriteTokens), 0)
-	// Costs: per-row from the model's pricing; the last row takes the exact
-	// remainder so float drift can't change what the turn billed.
-	costSum := 0.0
-	for i := range rows[:len(rows)-1] {
-		rows[i].Cost = computeCost(*model, rows[i].Usage)
-		costSum += rows[i].Cost
+	// Distribute the turn's EXACT billed totals (totalCost / totalCredits) across
+	// rows by each row's own priced weight, with the last row taking the exact
+	// remainder. Weighting by the normalized share (not by absolute per-row cost)
+	// keeps Σrows == totals even when the attached per-request usages sum to MORE
+	// than the turn total — e.g. the stop/cancel path attaches each request's
+	// full usage but bills only the partial turn. A naive "totalCost - Σper-row"
+	// would clamp a negative remainder to 0 and let Σ exceed the billed amount,
+	// silently over-charging cost AND inflating SUM(credits) (the durable
+	// timed-credit window record, § credit accounting).
+	weights := make([]float64, len(rows))
+	weightSum := 0.0
+	for i := range rows {
+		weights[i] = computeCost(*model, rows[i].Usage)
+		weightSum += weights[i]
 	}
-	lastRow.Cost = totalCost - costSum
+	costAcc, creditAcc := 0.0, 0.0
+	for i := range rows[:len(rows)-1] {
+		var share float64
+		if weightSum > 0 {
+			share = weights[i] / weightSum
+		} else {
+			share = 1.0 / float64(len(rows)) // zero-priced turn: split evenly
+		}
+		rows[i].Cost = totalCost * share
+		costAcc += rows[i].Cost
+		if totalCredits > 0 {
+			rows[i].Credits = totalCredits * share
+			creditAcc += rows[i].Credits
+		}
+	}
+	lastRow.Cost = totalCost - costAcc
 	if lastRow.Cost < 0 {
 		lastRow.Cost = 0
 	}
-	// Credits: proportional to cost share, exact remainder on the last row —
-	// SUM(credits) is the durable timed-credit window record (§ credit
-	// accounting) and must not drift.
 	if totalCredits > 0 {
-		creditSum := 0.0
-		if totalCost > 0 {
-			for i := range rows[:len(rows)-1] {
-				rows[i].Credits = totalCredits * (rows[i].Cost / totalCost)
-				creditSum += rows[i].Credits
-			}
-		}
-		lastRow.Credits = totalCredits - creditSum
+		lastRow.Credits = totalCredits - creditAcc
 		if lastRow.Credits < 0 {
 			lastRow.Credits = 0
 		}
@@ -1340,6 +1376,40 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			}
 			onEvent(SseEvent{Type: "done", MessageID: assistantMsg.ID, StopReason: "stopped", Usage: &usage, Credits: turnCredits})
 			finalAssistant, _ := store.GetMessage(ctx, o.db, assistantMsg.ID)
+			return &RunResult{UserMessage: userMsg, AssistantMessage: finalAssistant}, nil
+		}
+		// Upstream content-filter block (e.g. a relay returning
+		// `sensitive_words_detected`): classify it as content moderation — a
+		// rephrase-and-retry refusal shown to the user — rather than a generic,
+		// transient "provider returned an error". The raw error is still recorded
+		// as an error usage row below for admin diagnostics, exactly like any
+		// other upstream failure, so the reason stays visible on /admin/usage.
+		if isUpstreamModerationError(err) {
+			msg := o.moderationMessage()
+			refusalBlocks, _ := json.Marshal([]UnifiedBlock{{Kind: "text", Text: msg}})
+			_ = finishMessage(ctx, store.MessageFinishPatch{
+				Blocks: refusalBlocks, Citations: []byte("[]"), StopReason: "content_moderation", Status: "complete",
+			})
+			if o.logger != nil {
+				o.logger.Printf("orchestrator: upstream content-filter block classified as moderation (conv=%s msg=%s model=%s): %v",
+					conv.ID, assistantMsg.ID, model.ID, err)
+			}
+			reqSnapshot := reqRecorder.snapshot()
+			o.logUsage(ctx, store.UsageLog{
+				UserID: req.UserID, WorkspaceID: conv.WorkspaceID, ConversationID: conv.ID,
+				MessageID: assistantMsg.ID, ModelID: model.ID, Purpose: "chat", Currency: model.Currency,
+				ChannelID: servedChannelID, Fallback: usedFallback, Status: "error",
+				Error:         truncErr(err.Error()),
+				RequestMethod: reqSnapshot.Method, RequestURL: reqSnapshot.URL,
+				RequestHeaders: reqSnapshot.Header, RequestBody: reqSnapshot.Body,
+			})
+			onEvent(SseEvent{Type: "refusal", MessageID: assistantMsg.ID, Message: msg})
+			onEvent(SseEvent{Type: "done", MessageID: assistantMsg.ID, StopReason: "content_moderation"})
+			assistantMsg.Blocks = refusalBlocks
+			finalAssistant, _ := store.GetMessage(ctx, o.db, assistantMsg.ID)
+			if finalAssistant == nil {
+				finalAssistant = assistantMsg
+			}
 			return &RunResult{UserMessage: userMsg, AssistantMessage: finalAssistant}, nil
 		}
 		// Preserve any artifacts already produced this turn (e.g. a saved .pptx)
@@ -2424,10 +2494,17 @@ func (o *Orchestrator) deriveSearchQueries(ctx context.Context, req RunRequest, 
 // Returns (contextText, citations); ("", nil) when search is unconfigured or
 // yields nothing. Best-effort — a failure never blocks the turn.
 func (o *Orchestrator) forcedWebSearch(ctx context.Context, req RunRequest, conv *store.Conversation, history []store.Message, baseIndex int, onEvent func(SseEvent)) (string, []Citation) {
+	// Respect the admin platform kill-switch: if web_search is globally
+	// disabled, the forced-search path must not run it either (it would
+	// otherwise be a back door around `disabled_tools`).
+	if o.disabledToolSet()["web_search"] {
+		return "", nil
+	}
 	queries := o.deriveSearchQueries(ctx, req, history)
 	if len(queries) == 0 {
 		return "", nil
 	}
+	searchTimeout := toolCallTimeout("web_search")
 	tc := &ToolContext{UserID: req.UserID, ConvID: req.ConversationID, WorkspaceID: conv.WorkspaceID, ModelID: req.ModelID}
 	var cites []Citation
 	var b strings.Builder
@@ -2435,7 +2512,11 @@ func (o *Orchestrator) forcedWebSearch(ctx context.Context, req RunRequest, conv
 		id := fmt.Sprintf("fws_%d", i+1)
 		input, _ := json.Marshal(map[string]any{"query": q})
 		onEvent(SseEvent{Type: "tool_start", Name: "web_search", ID: id, Input: input})
-		out, qcites, err := o.tools.Run(ctx, "web_search", input, tc)
+		// Bound each search with the same per-call timeout orchToolRunner applies
+		// (§4.3) so a stalled search backend can't hang the turn pre-first-token.
+		sctx, cancel := context.WithTimeout(ctx, searchTimeout)
+		out, qcites, err := o.tools.Run(sctx, "web_search", input, tc)
+		cancel()
 		if err != nil {
 			onEvent(SseEvent{Type: "tool_result", Name: "web_search", ID: id, Summary: "search failed", Status: "error"})
 			continue
@@ -2448,20 +2529,59 @@ func (o *Orchestrator) forcedWebSearch(ctx context.Context, req RunRequest, conv
 			return "", nil
 		}
 		onEvent(SseEvent{Type: "tool_result", Name: "web_search", ID: id, Summary: truncate(out, 400), Status: "complete"})
+		// The searcher numbers its inline [n] markers 1..k locally (per query),
+		// but the citation RECORDS are renumbered globally with an offset so the
+		// KB + web source lists never collide. Remap the injected text's markers
+		// to the same offset numbering, or the model's [n] references point at
+		// the wrong source.
+		offset := baseIndex + len(cites)
 		for j := range qcites {
 			c := qcites[j]
-			// Continue past any KB snippets already numbered this turn so the two
-			// source lists never share an index.
-			c.Index = baseIndex + len(cites) + 1
+			c.Index = offset + j + 1
 			cites = append(cites, c)
 			onEvent(SseEvent{Type: "citation", Citation: &c})
 		}
-		fmt.Fprintf(&b, "Query: %s\n%s\n\n", q, strings.TrimSpace(out))
+		fmt.Fprintf(&b, "Query: %s\n%s\n\n", q, remapCitationMarkers(strings.TrimSpace(out), len(qcites), offset))
 	}
 	if strings.TrimSpace(b.String()) == "" {
 		return "", nil
 	}
 	return "<web-search-result>\n" + strings.TrimSpace(b.String()) + "\n</web-search-result>", cites
+}
+
+// remapCitationMarkers rewrites a searcher's local inline citation markers
+// `[1]..[maxLocal]` to `[offset+1]..[offset+maxLocal]` so injected search text
+// references the globally-renumbered citation records. Markers outside
+// 1..maxLocal (incidental bracketed numbers in snippets) are left untouched.
+// Single pass, no double-remapping (each match consumed once).
+func remapCitationMarkers(text string, maxLocal, offset int) string {
+	if maxLocal <= 0 || offset <= 0 || !strings.Contains(text, "[") {
+		return text
+	}
+	var b strings.Builder
+	for i := 0; i < len(text); {
+		if text[i] != '[' {
+			b.WriteByte(text[i])
+			i++
+			continue
+		}
+		j := i + 1
+		for j < len(text) && text[j] >= '0' && text[j] <= '9' {
+			j++
+		}
+		// A valid marker is "[<digits>]" with at least one digit.
+		if j > i+1 && j < len(text) && text[j] == ']' {
+			n, _ := strconv.Atoi(text[i+1 : j])
+			if n >= 1 && n <= maxLocal {
+				fmt.Fprintf(&b, "[%d]", offset+n)
+				i = j + 1
+				continue
+			}
+		}
+		b.WriteByte('[')
+		i++
+	}
+	return b.String()
 }
 
 // injectRAGIntoHistory appends retrieved context to the LAST user message.

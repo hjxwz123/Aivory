@@ -141,15 +141,21 @@ func QuotasForGroup(ctx context.Context, db *sql.DB, groupID string) (map[string
 // FREE allotment, and a turn the user already paid for must not also burn
 // their remaining free allowance (§ free-allowance overshoot).
 func UsageInWindow(ctx context.Context, db *sql.DB, userID, modelID string, sinceUnix int64) (cost float64, count int, err error) {
-	// §B5-per-request usage rows: one TURN can book several chat rows (one per
-	// upstream request), so count-type quotas must count DISTINCT turns
-	// (message_id), not raw rows. Legacy rows without a message_id keep a
-	// per-row identity so their historical count is unchanged.
+	// §B5-per-request usage rows: one TURN now books several chat rows (one per
+	// upstream request), so BOTH the "free vs credit-paid" decision AND the count
+	// must be per-TURN, not per-row. Grouping by message_id first, then keeping
+	// only turns whose TOTAL credits are <= 0, is essential: a credit-paid turn
+	// can split into rows where the cost remainder lands one row at 0 credits — a
+	// row-level `credits<=0` filter would wrongly count that paid turn against the
+	// FREE window (and add its cost). Legacy rows without a message_id keep a
+	// per-row identity, so their historical accounting is unchanged.
 	err = db.QueryRowContext(ctx,
-		`SELECT COALESCE(SUM(cost),0),
-		        COUNT(DISTINCT COALESCE(NULLIF(message_id,''), 'row:' || CAST(id AS TEXT)))
-		 FROM usage_logs
-		 WHERE user_id=? AND model_id=? AND purpose='chat' AND COALESCE(status,'ok')<>'error' AND COALESCE(credits,0)<=0 AND created_at>=?`,
+		`SELECT COALESCE(SUM(turn_cost),0), COUNT(*) FROM (
+		     SELECT SUM(cost) AS turn_cost, SUM(COALESCE(credits,0)) AS turn_credits
+		     FROM usage_logs
+		     WHERE user_id=? AND model_id=? AND purpose='chat' AND COALESCE(status,'ok')<>'error' AND created_at>=?
+		     GROUP BY COALESCE(NULLIF(message_id,''), 'row:' || CAST(id AS TEXT))
+		 ) t WHERE t.turn_credits <= 0`,
 		userID, modelID, sinceUnix).Scan(&cost, &count)
 	return cost, count, err
 }

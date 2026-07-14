@@ -8,7 +8,7 @@ import { Composer } from '@/components/chat/composer'
 import { SuggestionCard } from '@/components/chat/suggestion-card'
 import { MyGallery } from '@/components/chat/my-gallery'
 import { SUGGESTIONS } from '@/data/suggestions'
-import { useConversations } from '@/store/conversations'
+import { useConversations, resolveArmedTurnFlags } from '@/store/conversations'
 import { useAuth } from '@/store/auth'
 import { useModels } from '@/store/models'
 import { useUI } from '@/store/ui'
@@ -417,7 +417,7 @@ export default function ChatHome() {
                           icon={s.icon}
                           title={title}
                           prompt={prompt}
-                          onClick={() => void startNew(prompt, [])}
+                          onClick={() => void startNew(prompt, [], resolveArmedTurnFlags())}
                           className="h-full"
                         />
                       </div>

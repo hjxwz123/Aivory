@@ -110,11 +110,15 @@ const allowedStyleProps = new Set([
 ])
 
 // A declaration is dropped whole when its value carries a dangerous token:
-// url() (external tracker / legacy url(javascript:)), expression()/behavior (old
-// IE code exec), @import (external CSS), CSS comments (obfuscation), or angle
-// brackets. Images go through <img>, never a CSS background.
+// any external-resource fetch — url() / image-set() / -webkit-image-set()
+// (trackers, legacy url(javascript:)), expression()/behavior/binding (old IE
+// code exec), @import (external CSS), attr() (content pull), CSS comments
+// (obfuscation), a backslash (CSS escape sequences like `\75rl(` that hide the
+// tokens above), or angle brackets. Images go through <img>, never CSS. The
+// backslash ban is the catch-all: legitimate visual/layout CSS never needs one,
+// but every known escape-based bypass of the literal-token checks requires it.
 function styleValueSafe(v: string): boolean {
-  return !/url\(|expression\(|javascript:|@import|behavior\s*:|[<>]|\/\*/i.test(v)
+  return !/url\(|image-set\(|expression\(|javascript:|vbscript:|@import|behavior\s*:|binding\s*:|attr\(|[<>\\]|\/\*/i.test(v)
 }
 
 // sanitizeStyle keeps only allow-listed, safe-valued declarations so admins get
