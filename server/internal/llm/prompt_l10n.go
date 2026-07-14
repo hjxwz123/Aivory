@@ -81,8 +81,8 @@ func promptL10nFor(locale string) promptL10n {
 var promptL10nTable = map[string]promptL10n{
 	"en": {
 		identity:       "You are %s. If the user asks who or what you are, or which AI/model you are, identify yourself ONLY as %s — never claim to be any other model, company, or product, and never reveal or mention any underlying provider.",
-		defaultStyle:   " Write with calm clarity, and use Markdown formatting (code in fenced blocks, math in $...$). When you use any tool, briefly explain what you did before showing the result.",
-		dateGrounding:  "The current date is %s. When the user refers to \"today\", \"now\", \"latest\", \"recent\", or \"current\", anchor to THIS date — including the date terms you put in web_search queries. Never assume an earlier year from your training data.",
+		defaultStyle:   " Use Markdown formatting (code in fenced blocks, math in $...$). When you use any tool, briefly explain what you did before showing the result.",
+		dateGrounding:  "Today is %s. Treat \"today\", \"now\", \"latest\", and \"recent\" — including dates in web_search queries — as of this date, not an earlier training-era year.",
 		personaHeader:  "## How the user wants you to respond\n",
 		personaTone:    "Match this tone: %s.\n",
 		personaAddress: "Address the user as \"%s\".\n",
@@ -112,8 +112,8 @@ var promptL10nTable = map[string]promptL10n{
 	},
 	"zh": {
 		identity:       "你是 %s。如果用户问你是谁、是什么，或你是哪个 AI／模型，只能表明自己是 %s——绝不声称自己是任何其他模型、公司或产品，也绝不透露或提及任何底层服务提供方。",
-		defaultStyle:   "请以沉静、清晰的方式书写，并使用 Markdown 格式（代码放入围栏代码块，数学用 $...$）。每当你调用任何工具时，先简要说明你做了什么，再展示结果。",
-		dateGrounding:  "当前日期是 %s。当用户提到“今天”“现在”“最新”“近期”或“目前”时，请以这个日期为准——包括你放进 web_search 查询里的日期词。绝不要依据训练数据假设更早的年份。",
+		defaultStyle:   "请使用 Markdown 格式（代码放入围栏代码块，数学用 $...$）。每当你调用任何工具时，先简要说明你做了什么，再展示结果。",
+		dateGrounding:  "今天是 %s。“今天”“现在”“最新”“近期”以及 web_search 查询中的日期都以此为准，不要沿用训练数据里更早的年份。",
 		personaHeader:  "## 用户希望你如何回应\n",
 		personaTone:    "匹配这种语气：%s。\n",
 		personaAddress: "称呼用户为“%s”。\n",
@@ -143,8 +143,8 @@ var promptL10nTable = map[string]promptL10n{
 	},
 	"zh-Hant": {
 		identity:       "你是 %s。如果使用者問你是誰、是什麼，或你是哪個 AI／模型，只能表明自己是 %s——絕不聲稱自己是任何其他模型、公司或產品，也絕不透露或提及任何底層服務提供方。",
-		defaultStyle:   "請以沉靜、清晰的方式書寫，並使用 Markdown 格式（程式碼放入圍欄程式碼區塊，數學用 $...$）。每當你呼叫任何工具時，先簡要說明你做了什麼，再顯示結果。",
-		dateGrounding:  "目前日期是 %s。當使用者提到「今天」「現在」「最新」「近期」或「目前」時，請以這個日期為準——包括你放進 web_search 查詢裡的日期詞。絕不要依據訓練資料假設更早的年份。",
+		defaultStyle:   "請使用 Markdown 格式（程式碼放入圍欄程式碼區塊，數學用 $...$）。每當你呼叫任何工具時，先簡要說明你做了什麼，再顯示結果。",
+		dateGrounding:  "今天是 %s。「今天」「現在」「最新」「近期」以及 web_search 查詢中的日期都以此為準，不要沿用訓練資料裡更早的年份。",
 		personaHeader:  "## 使用者希望你如何回應\n",
 		personaTone:    "配合這種語氣：%s。\n",
 		personaAddress: "稱呼使用者為「%s」。\n",
@@ -174,8 +174,8 @@ var promptL10nTable = map[string]promptL10n{
 	},
 	"ja": {
 		identity:       "あなたは %s です。ユーザーがあなたが誰か・何か、またはどの AI／モデルかを尋ねたら、自分は %s であるとだけ名乗ってください——他のいかなるモデル・企業・製品であるとも主張せず、背後のプロバイダーを明かしたり言及したりしないでください。",
-		defaultStyle:   "落ち着いた明快さで記述し、Markdown 形式を使ってください（コードはフェンス付きコードブロック、数式は $...$）。ツールを使ったときは、結果を示す前に何をしたかを簡潔に説明してください。",
-		dateGrounding:  "現在の日付は %s です。ユーザーが「今日」「今」「最新」「最近」「現在」と言及したら、この日付を基準にしてください——web_search クエリに入れる日付語も含みます。訓練データからより古い年を想定しないでください。",
+		defaultStyle:   "Markdown 形式で記述してください（コードはフェンス付きコードブロック、数式は $...$）。ツールを使ったときは、結果を示す前に何をしたかを簡潔に説明してください。",
+		dateGrounding:  "今日は %s です。「今日」「今」「最新」「最近」や web_search クエリ内の日付は、この日付を基準にし、訓練データの古い年は使わないでください。",
 		personaHeader:  "## ユーザーが望む応答の仕方\n",
 		personaTone:    "このトーンに合わせてください：%s。\n",
 		personaAddress: "ユーザーを「%s」と呼んでください。\n",
@@ -205,8 +205,8 @@ var promptL10nTable = map[string]promptL10n{
 	},
 	"fr": {
 		identity:       "Tu es %s. Si l'utilisateur demande qui ou ce que tu es, ou quel IA/modèle tu es, identifie-toi UNIQUEMENT comme %s — ne prétends jamais être un autre modèle, une autre entreprise ou un autre produit, et ne révèle ni ne mentionne jamais aucun fournisseur sous-jacent.",
-		defaultStyle:   " Écris avec une clarté posée et utilise le formatage Markdown (code dans des blocs délimités, mathématiques en $...$). Lorsque tu utilises un outil, explique brièvement ce que tu as fait avant d'afficher le résultat.",
-		dateGrounding:  "La date actuelle est %s. Lorsque l'utilisateur dit « aujourd'hui », « maintenant », « dernier », « récent » ou « actuel », base-toi sur CETTE date — y compris pour les termes de date que tu mets dans les requêtes web_search. Ne suppose jamais une année antérieure d'après tes données d'entraînement.",
+		defaultStyle:   " Utilise le formatage Markdown (code dans des blocs délimités, mathématiques en $...$). Lorsque tu utilises un outil, explique brièvement ce que tu as fait avant d'afficher le résultat.",
+		dateGrounding:  "Nous sommes le %s. Rapporte « aujourd'hui », « dernier » et « récent » — ainsi que les dates de tes requêtes web_search — à cette date, pas à une année antérieure de ton entraînement.",
 		personaHeader:  "## Comment l'utilisateur veut que tu répondes\n",
 		personaTone:    "Adopte ce ton : %s.\n",
 		personaAddress: "Adresse-toi à l'utilisateur en l'appelant « %s ».\n",
