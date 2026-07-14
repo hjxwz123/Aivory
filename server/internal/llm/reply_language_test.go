@@ -5,51 +5,66 @@ import (
 	"testing"
 )
 
-// TestReplyLanguageDirective locks the locale → directive mapping (the directive
-// is written IN the target language) and tolerates region/case variants.
-func TestReplyLanguageDirective(t *testing.T) {
+// TestPromptLocaleKey locks the UI-locale → prompt-language folding, incl.
+// region/case variants and the Traditional-before-generic-zh ordering.
+func TestPromptLocaleKey(t *testing.T) {
 	cases := map[string]string{
-		"en":      "Always reply in English",
-		"en-US":   "Always reply in English",
-		"zh":      "请始终使用简体中文回复",
-		"zh-CN":   "请始终使用简体中文回复",
-		"zh-Hant": "請一律使用繁體中文回覆",
-		"zh-TW":   "請一律使用繁體中文回覆",
-		"ja":      "常に日本語で返信してください",
-		"fr":      "Réponds toujours en français",
+		"":        "en",
+		"en":      "en",
+		"en-US":   "en",
+		"zh":      "zh",
+		"zh-CN":   "zh",
+		"zh-Hans": "zh",
+		"zh-Hant": "zh-Hant",
+		"zh-TW":   "zh-Hant",
+		"zh-HK":   "zh-Hant",
+		"ja":      "ja",
+		"ja-JP":   "ja",
+		"fr":      "fr",
+		"fr-CA":   "fr",
+		"xx-YY":   "en",
 	}
 	for locale, want := range cases {
-		got := replyLanguageDirective(locale)
-		if !strings.Contains(got, want) {
-			t.Errorf("replyLanguageDirective(%q) = %q, want it to contain %q", locale, got, want)
+		if got := promptLocaleKey(locale); got != want {
+			t.Errorf("promptLocaleKey(%q) = %q, want %q", locale, got, want)
 		}
-	}
-	if d := replyLanguageDirective(""); d != "" {
-		t.Errorf("empty locale should yield no directive, got %q", d)
-	}
-	if d := replyLanguageDirective("xx-YY"); d != "" {
-		t.Errorf("unknown locale should yield no directive, got %q", d)
 	}
 }
 
-// TestComposeSystemPromptCarriesReplyLanguage proves the directive actually lands
-// in the composed system prompt (so an English UI forces an English reply even
-// when the model-level prompt is Chinese), and that an unknown locale omits it.
-func TestComposeSystemPromptCarriesReplyLanguage(t *testing.T) {
-	// English UI over a Chinese model-level prompt → the English directive is present.
-	sys := composeSystemPrompt(systemPromptOpts{ModelSystem: "你是一个助手。", Locale: "en"})
-	if !strings.Contains(sys, "Always reply in English") {
-		t.Errorf("composed prompt missing English reply directive:\n%s", sys)
+// TestComposeSystemPromptIsLocalized proves §4.8-L10N: the WHOLE authored prompt
+// renders in the UI language, and the old "reply in X" directive is gone.
+func TestComposeSystemPromptIsLocalized(t *testing.T) {
+	// English (default) → English identity + trust header, no Chinese.
+	en := composeSystemPrompt(systemPromptOpts{ModelLabel: "GPT-X", Locale: "en"})
+	if !strings.Contains(en, "You are GPT-X") || !strings.Contains(en, "Trust boundary") {
+		t.Errorf("english prompt not in English:\n%s", en)
 	}
-	// Chinese UI → Chinese directive.
-	sysZh := composeSystemPrompt(systemPromptOpts{Locale: "zh"})
-	if !strings.Contains(sysZh, "请始终使用简体中文回复") {
-		t.Errorf("composed prompt missing Chinese reply directive:\n%s", sysZh)
+	// Chinese UI → the whole prompt is Chinese (identity + trust header), not English.
+	zh := composeSystemPrompt(systemPromptOpts{ModelLabel: "GPT-X", Locale: "zh"})
+	if !strings.Contains(zh, "你是 GPT-X") || !strings.Contains(zh, "信任边界") {
+		t.Errorf("zh prompt not localized:\n%s", zh)
 	}
-	// No locale → no forced language line (the default prompt no longer hardcodes one).
-	sysNone := composeSystemPrompt(systemPromptOpts{})
-	if strings.Contains(sysNone, "Always reply in") || strings.Contains(sysNone, "请始终使用") {
-		t.Errorf("expected no forced reply-language line without a locale:\n%s", sysNone)
+	if strings.Contains(zh, "Trust boundary") || strings.Contains(zh, "You are") {
+		t.Errorf("zh prompt leaked English segments:\n%s", zh)
+	}
+	// The removed reply-language directive must appear in NO locale.
+	for _, loc := range []string{"", "en", "zh", "zh-Hant", "ja", "fr"} {
+		sys := composeSystemPrompt(systemPromptOpts{ModelLabel: "GPT-X", Locale: loc})
+		for _, banned := range []string{"Always reply in", "请始终使用简体中文回复", "請一律使用繁體中文回覆", "常に日本語で返信", "Réponds toujours en"} {
+			if strings.Contains(sys, banned) {
+				t.Errorf("locale %q still carries the removed reply directive %q", loc, banned)
+			}
+		}
+	}
+	// Traditional / Japanese / French each land in their own language.
+	if !strings.Contains(composeSystemPrompt(systemPromptOpts{Locale: "zh-Hant"}), "信任邊界") {
+		t.Error("zh-Hant prompt not in Traditional Chinese")
+	}
+	if !strings.Contains(composeSystemPrompt(systemPromptOpts{Locale: "ja"}), "信頼境界") {
+		t.Error("ja prompt not in Japanese")
+	}
+	if !strings.Contains(composeSystemPrompt(systemPromptOpts{Locale: "fr"}), "Frontière de confiance") {
+		t.Error("fr prompt not in French")
 	}
 }
 
