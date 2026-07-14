@@ -193,6 +193,11 @@ func (s *searxngSearcher) Search(ctx context.Context, query string, topK int) (s
 			Content     string `json:"content"`
 			PublishedAt string `json:"publishedDate"`
 		} `json:"results"`
+		// SearXNG always reports which engines failed to answer this query as
+		// [[engine, reason], …]. When results are empty this is the real cause
+		// (self-hosted instances routinely have their engines blocked/rate-
+		// limited/misconfigured), so we surface it instead of a bland "no results".
+		UnresponsiveEngines [][]any `json:"unresponsive_engines"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
 		// A 200 with a non-JSON body means the instance answered with an HTML
@@ -203,6 +208,13 @@ func (s *searxngSearcher) Search(ctx context.Context, query string, topK int) (s
 		parsed.Results = parsed.Results[:topK]
 	}
 	if len(parsed.Results) == 0 {
+		// Empty results + failed engines = the engines that could have answered
+		// didn't (blocked IP, rate limit, bad config) — a real failure, not a
+		// query with genuinely no matches. Report which engines failed so the
+		// admin can fix them (visible in /admin/usage error detail).
+		if failed := formatUnresponsiveEngines(parsed.UnresponsiveEngines); failed != "" {
+			return "", nil, fmt.Errorf("searxng: 0 results because its search engines did not respond: %s. The instance reached its engines but they failed — commonly the upstream engine (Google/Bing/…) blocks the server's IP, the engine is rate-limited, or it's misconfigured. Check the instance's outbound network and engine settings; try a different engine in settings.yml", failed)
+		}
 		// An explicit empty-result message keeps the model from reading an
 		// empty tool payload as a backend failure.
 		return "No web results found for this query.", nil, nil
@@ -221,4 +233,26 @@ func (s *searxngSearcher) Search(ctx context.Context, query string, topK int) (s
 		out.WriteString("\n")
 	}
 	return out.String(), citations, nil
+}
+
+// formatUnresponsiveEngines renders SearXNG's unresponsive_engines
+// ([[engine, reason, …], …]) as "engine (reason), …". Returns "" when none
+// failed. Tolerant of shape drift across SearXNG versions (2- or 3-element
+// entries, string or bool members).
+func formatUnresponsiveEngines(entries [][]any) string {
+	parts := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if len(e) == 0 {
+			continue
+		}
+		name := fmt.Sprintf("%v", e[0])
+		if len(e) >= 2 {
+			if reason := strings.TrimSpace(fmt.Sprintf("%v", e[1])); reason != "" {
+				parts = append(parts, fmt.Sprintf("%s (%s)", name, reason))
+				continue
+			}
+		}
+		parts = append(parts, name)
+	}
+	return strings.Join(parts, ", ")
 }
