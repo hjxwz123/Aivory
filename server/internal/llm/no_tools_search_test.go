@@ -39,6 +39,27 @@ func TestComposeSystemPromptNoToolsDropsToolGuidance(t *testing.T) {
 	}
 }
 
+// §4.13-B: a none-mode prompt WOULD inline skill instructions (models that can't
+// call use_skill get them inline) — so "disable tools = no skills" MUST be
+// enforced at skill-LOAD time in the orchestrator (which clears Skills/SkillsFull
+// when req.NoTools). This test pins that contract: none-mode + populated skills
+// still injects a "## Skills" block, and empty skills inject none.
+func TestNoneModeInlinesSkillsUnlessCleared(t *testing.T) {
+	withSkill := composeSystemPrompt(systemPromptOpts{
+		ModelLabel: "GPT-X", ToolMode: "none",
+		SkillsFull: []SkillFull{{Name: "pptx-maker", Instructions: "Build a deck."}},
+	})
+	if !strings.Contains(withSkill, "## Skills") || !strings.Contains(withSkill, "pptx-maker") {
+		t.Fatalf("none-mode WITH skills should inline them (proving the orchestrator must clear skills for NoTools):\n%s", withSkill)
+	}
+	noSkill := composeSystemPrompt(systemPromptOpts{
+		ModelLabel: "GPT-X", ToolMode: "none", SkillsFull: nil,
+	})
+	if strings.Contains(noSkill, "## Skills") {
+		t.Fatalf("no-tools turn (skills cleared) must NOT inject a skills block:\n%s", noSkill)
+	}
+}
+
 // fakeSearchRegistry implements llm.ToolRegistry, returning canned web_search
 // output so forcedWebSearch can be exercised without a live searcher.
 type fakeSearchRegistry struct {

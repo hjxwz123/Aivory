@@ -1035,7 +1035,7 @@ export function Composer({
         type="button"
         onClick={onStop}
         aria-label={t('composer.stop')}
-        className="inline-flex items-center justify-center size-9 max-sm:size-10 rounded-[10px] max-sm:rounded-full bg-[var(--color-fg)] text-[var(--color-fg-inverted)] hover:opacity-90 interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+        className="inline-flex items-center justify-center size-9 max-sm:size-11 rounded-[10px] max-sm:rounded-full bg-[var(--color-fg)] text-[var(--color-fg-inverted)] hover:opacity-90 interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
       >
         <StopCircle size={16} aria-hidden />
       </button>
@@ -1048,7 +1048,7 @@ export function Composer({
         disabled={!canSubmit}
         aria-label={t('actions.send', { ns: 'common' })}
         className={cn(
-          'inline-flex items-center justify-center size-9 max-sm:size-10 rounded-[10px] max-sm:rounded-full interactive',
+          'inline-flex items-center justify-center size-9 max-sm:size-11 rounded-[10px] max-sm:rounded-full interactive',
           canSubmit
             ? 'bg-[var(--color-accent)] text-[var(--color-accent-fg)] hover:bg-[var(--color-accent-hover)] shadow-[var(--shadow-xs)]'
             : 'bg-[var(--color-bg-muted)] text-[var(--color-fg-faint)] cursor-not-allowed',
@@ -1341,7 +1341,7 @@ export function Composer({
                 type="button"
                 aria-label={t('composer.more', { defaultValue: 'More' })}
                 className={cn(
-                  'relative inline-flex shrink-0 items-center justify-center size-10 rounded-full interactive',
+                  'relative inline-flex shrink-0 items-center justify-center size-11 rounded-full interactive',
                   'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
                   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
                 )}
@@ -1359,7 +1359,8 @@ export function Composer({
               side="top"
               align="start"
               sideOffset={10}
-              className="w-60 max-sm:w-[calc(100vw-2*var(--layout-gutter-mobile))] max-h-[60dvh] overflow-y-auto scrollbar-thin p-1.5"
+              collisionPadding={12}
+              className="w-[min(20rem,calc(100vw-1.5rem))] min-w-0 max-h-[62dvh] overflow-y-auto overscroll-contain scrollbar-thin p-1.5"
             >
               <button
                 type="button"
@@ -1367,9 +1368,9 @@ export function Composer({
                   setMoreOpen(false)
                   fileRef.current?.click()
                 }}
-                className="flex w-full items-center gap-2.5 rounded-[8px] px-2.5 py-2 text-left text-sm text-[var(--color-fg)] hover:bg-[var(--color-bg-muted)]"
+                className="flex w-full items-center gap-3 rounded-[10px] px-3 py-2.5 text-left text-[15px] text-[var(--color-fg)] hover:bg-[var(--color-bg-muted)] active:bg-[var(--color-bg-muted)]"
               >
-                <Paperclip size={16} className="text-[var(--color-fg-muted)]" aria-hidden />
+                <Paperclip size={18} className="shrink-0 text-[var(--color-fg-muted)]" aria-hidden />
                 {t('composer.attach')}
               </button>
               <button
@@ -1382,9 +1383,9 @@ export function Composer({
                   input.click()
                   input.accept = ''
                 }}
-                className="flex w-full items-center gap-2.5 rounded-[8px] px-2.5 py-2 text-left text-sm text-[var(--color-fg)] hover:bg-[var(--color-bg-muted)]"
+                className="flex w-full items-center gap-3 rounded-[10px] px-3 py-2.5 text-left text-[15px] text-[var(--color-fg)] hover:bg-[var(--color-bg-muted)] active:bg-[var(--color-bg-muted)]"
               >
-                <ImageIcon size={16} className="text-[var(--color-fg-muted)]" aria-hidden />
+                <ImageIcon size={18} className="shrink-0 text-[var(--color-fg-muted)]" aria-hidden />
                 {t('composer.addImage')}
               </button>
               <button
@@ -1395,12 +1396,12 @@ export function Composer({
                 }}
                 disabled={transcribing}
                 className={cn(
-                  'flex w-full items-center gap-2.5 rounded-[8px] px-2.5 py-2 text-left text-sm hover:bg-[var(--color-bg-muted)]',
+                  'flex w-full items-center gap-3 rounded-[10px] px-3 py-2.5 text-left text-[15px] hover:bg-[var(--color-bg-muted)] active:bg-[var(--color-bg-muted)]',
                   recording ? 'text-[var(--color-danger)]' : 'text-[var(--color-fg)]',
                   transcribing && 'cursor-not-allowed opacity-60',
                 )}
               >
-                <Mic size={16} className={cn(!recording && 'text-[var(--color-fg-muted)]')} aria-hidden />
+                <Mic size={18} className={cn('shrink-0', !recording && 'text-[var(--color-fg-muted)]')} aria-hidden />
                 {recording ? t('composer.voiceStop') : t('composer.voice')}
               </button>
 

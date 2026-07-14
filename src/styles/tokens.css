@@ -288,6 +288,12 @@
   /* clears the sticky composer + safe area */
   --text-chat-body: var(--text-base);
   /* chat body; → 16px on phone below */
+  --text-input-mobile: 1rem;
+  /* 16 — composer / command-palette input font on phones. Only consumed via a
+   * `max-sm:` utility, so one :root value suffices. MUST stay ≥16px: a smaller
+   * font makes iOS Safari zoom the viewport on focus (the field was previously
+   * referencing this token UNDEFINED, so the phone font-size silently fell back
+   * to the inherited value and the zoom guard didn't hold). */
 }
 
 /* Phone overrides (≤639px = the `phone` query). Touch-comfortable body + a

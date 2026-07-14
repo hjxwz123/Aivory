@@ -982,13 +982,19 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// 8. Skills for this model (§4.17). Native models get the slim index plus
 	//    the use_skill tool (progressive disclosure); prompt/none models can't
 	//    call a tool, so the full instructions are injected inline.
+	//    §4.13-B: a "disable tools" turn uses NO skills at all — neither the
+	//    use_skill tool (already dropped with tool_mode=none) nor the inline
+	//    full-instruction injection prompt/none models would otherwise get — so
+	//    the turn stays a plain, tool-and-skill-free answer as the user asked.
 	skillIdx := []SkillIndex{}
 	skillFull := []SkillFull{}
-	skillIDs, _ := store.SkillsForModel(ctx, o.db, model.ID)
-	for _, sid := range skillIDs {
-		if sk, err := store.GetSkill(ctx, o.db, sid); err == nil && sk.Enabled {
-			skillIdx = append(skillIdx, SkillIndex{Name: sk.Name, When: sk.Description})
-			skillFull = append(skillFull, SkillFull{Name: sk.Name, Instructions: sk.Instructions})
+	if !req.NoTools {
+		skillIDs, _ := store.SkillsForModel(ctx, o.db, model.ID)
+		for _, sid := range skillIDs {
+			if sk, err := store.GetSkill(ctx, o.db, sid); err == nil && sk.Enabled {
+				skillIdx = append(skillIdx, SkillIndex{Name: sk.Name, When: sk.Description})
+				skillFull = append(skillFull, SkillFull{Name: sk.Name, Instructions: sk.Instructions})
+			}
 		}
 	}
 
