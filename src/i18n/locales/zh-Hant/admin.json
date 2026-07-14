@@ -408,6 +408,8 @@
     "workspaceTag": "空間",
     "fallbackTag": "備援",
     "fallbackTitle": "由該模型的備援渠道處理",
+    "ttftFallbackTag": "逾時備援 → {{model}}",
+    "ttftFallbackTitle": "主模型逾時未輸出，本輪切換到備援模型 {{model}} 處理",
     "errorDetail": {
       "title": "上游報錯",
       "view": "檢視報錯詳情",

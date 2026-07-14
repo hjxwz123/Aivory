@@ -92,7 +92,12 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest,
 		// the model through the RAG text path, never native provider file blocks.
 		imgParts := []map[string]any{}
 		for _, b := range m.Blocks {
-			if b.Kind == "image" && b.Data != "" {
+			// image_url parts are only valid on the user role: OpenAI's content-part
+			// enum for system/assistant/tool accepts text only, so an image that rode
+			// onto a non-user turn (share/fork history) triggers "unknown variant
+			// `image_url`, expected `text`". Drop it here (defense in depth alongside
+			// resolveAttachments' role gate).
+			if m.Role == "user" && b.Kind == "image" && b.Data != "" {
 				imgParts = append(imgParts, map[string]any{
 					"type":      "image_url",
 					"image_url": map[string]any{"url": "data:" + b.MimeType + ";base64," + b.Data},
@@ -571,7 +576,9 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 		// intentionally excluded: PDFs/DOCX/PPTX/etc. always enter the model
 		// through the RAG text path, never native provider file blocks.
 		for _, b := range m.Blocks {
-			if b.Kind == "image" && b.Data != "" {
+			// input_image is only valid on the user role; an assistant/output message
+			// takes output_text only. Drop images that rode onto a non-user turn.
+			if m.Role == "user" && b.Kind == "image" && b.Data != "" {
 				parts = append(parts, map[string]any{
 					"type":      "input_image",
 					"image_url": "data:" + b.MimeType + ";base64," + b.Data,

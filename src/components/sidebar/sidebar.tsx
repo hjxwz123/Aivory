@@ -62,6 +62,7 @@ import { Input } from '@/components/ui/input'
 import { NewProjectDialog } from '@/components/projects/new-project-dialog'
 import { MoveToProjectSub } from '@/components/projects/move-to-project-menu'
 import { useConversations, sameConvListShape } from '@/store/conversations'
+import { useComposerPrefs } from '@/store/composer-prefs'
 import { useProjects } from '@/store/projects'
 import { useModels } from '@/store/models'
 import { useSettings } from '@/store/settings'
@@ -185,6 +186,12 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
   const [newProjectOpen, setNewProjectOpen] = useState(false)
 
   function startNewChat() {
+    // §personalization: a fresh conversation re-arms the "disable tools by
+    // default" preference (only arms — never turns tools on for the user), so
+    // every new chat honors the default even if a prior chat toggled tools on.
+    if (useComposerPrefs.getState().defaultNoTools) {
+      useComposerPrefs.getState().setNoTools(true)
+    }
     // Go to the empty home screen — the conversation is created only when the
     // user sends the first message, so clicking "New chat" never piles up blank
     // conversations.

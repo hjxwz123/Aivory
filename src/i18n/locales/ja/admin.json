@@ -412,6 +412,8 @@
     },
     "fallbackTag": "フォールバック",
     "fallbackTitle": "モデルのフォールバックチャネルで応答",
+    "ttftFallbackTag": "タイムアウト時フォールバック → {{model}}",
+    "ttftFallbackTitle": "主モデルが時間内に出力せず、このターンはフォールバックモデル {{model}} が応答しました",
     "errorDetail": {
       "title": "アップストリームエラー",
       "view": "エラー詳細を表示",

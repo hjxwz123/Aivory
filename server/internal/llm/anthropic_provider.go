@@ -45,10 +45,95 @@ type AnthropicProvider struct {
 // ID returns "anthropic".
 func (p *AnthropicProvider) ID() string { return "anthropic" }
 
+// isClaudeModel reports whether the request id names a Claude model. Used to
+// scope Claude-specific request handling (sampling-param rejection §4.3, and the
+// §4.3-B strip-thinking retry) so a channel proxying a non-Claude model is left
+// untouched.
+func isClaudeModel(requestID string) bool {
+	return strings.Contains(strings.ToLower(strings.TrimSpace(requestID)), "claude")
+}
+
 // anthropicModelRejectsSampling reports Claude models whose API rejects
 // non-default sampling params such as temperature/top_p/top_k.
 func anthropicModelRejectsSampling(requestID string) bool {
-	return strings.Contains(strings.ToLower(strings.TrimSpace(requestID)), "claude")
+	return isClaudeModel(requestID)
+}
+
+// messagesHaveThinking reports whether any message content block is a thinking /
+// redacted_thinking block. Handles both the []map[string]any shape (turns built
+// this run) and the []any shape (raw same-vendor replay), matching
+// setMessagesCacheBreakpoint. Used to gate the §4.3-B strip-thinking retry.
+func messagesHaveThinking(messages []map[string]any) bool {
+	isThinking := func(blk map[string]any) bool {
+		t, _ := blk["type"].(string)
+		return t == "thinking" || t == "redacted_thinking"
+	}
+	for _, m := range messages {
+		switch content := m["content"].(type) {
+		case []map[string]any:
+			for _, blk := range content {
+				if isThinking(blk) {
+					return true
+				}
+			}
+		case []any:
+			for _, b := range content {
+				if blk, ok := b.(map[string]any); ok && isThinking(blk) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// stripThinkingFromMessages removes every thinking / redacted_thinking block
+// from the conversation (§4.3-B strip-thinking retry). An assistant turn that
+// becomes empty after stripping (a rare thinking-only turn) is dropped entirely
+// so the API doesn't reject an empty content array — Anthropic merges any
+// consecutive same-role turns that leaves behind. historyLen is decremented for
+// each dropped message that sat in the history prefix so the run's raw-replay
+// slice (`messages[historyLen:]`) stays aligned. Returns the rebuilt slice and
+// adjusted historyLen.
+func stripThinkingFromMessages(messages []map[string]any, historyLen int) ([]map[string]any, int) {
+	isThinking := func(blk map[string]any) bool {
+		t, _ := blk["type"].(string)
+		return t == "thinking" || t == "redacted_thinking"
+	}
+	out := make([]map[string]any, 0, len(messages))
+	newHistoryLen := historyLen
+	for idx, m := range messages {
+		empty := false
+		switch content := m["content"].(type) {
+		case []map[string]any:
+			nc := make([]map[string]any, 0, len(content))
+			for _, blk := range content {
+				if !isThinking(blk) {
+					nc = append(nc, blk)
+				}
+			}
+			m["content"] = nc
+			empty = len(nc) == 0
+		case []any:
+			nc := make([]any, 0, len(content))
+			for _, b := range content {
+				if blk, ok := b.(map[string]any); ok && isThinking(blk) {
+					continue
+				}
+				nc = append(nc, b)
+			}
+			m["content"] = nc
+			empty = len(nc) == 0
+		}
+		if empty {
+			if idx < historyLen {
+				newHistoryLen--
+			}
+			continue
+		}
+		out = append(out, m)
+	}
+	return out, newHistoryLen
 }
 
 func applyAnthropicThinkingSettings(body map[string]any, requestID string, maxTok *int) {
@@ -164,62 +249,124 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 	allBlocks := []UnifiedBlock{} // full ordered content: thinking | text | tool_call (§4.3)
 	allCitations := []Citation{}
 	totalUsage := Usage{}
+	// §4.3-B: set once a 400 forces a thinking-stripped retry; keeps every later
+	// iteration this turn thinking-free so the loop can't re-poison itself.
+	thinkingStripped := false
 
 	for i := 0; i < maxIter; i++ {
 		maxTok := envcfg.Int("AIVORY_LLM_MAX_TOK", 64000)
 		if req.MaxOutputTokens > 0 {
 			maxTok = req.MaxOutputTokens
 		}
-		// §4.9 prompt caching: cache_control on the system block (stable prefix)
-		// and on the last message block (incremental history cache). Exactly two
-		// breakpoints, well under the 4-breakpoint limit.
-		setMessagesCacheBreakpoint(messages)
-		body := map[string]any{
-			"model":      req.Model.RequestID,
-			"max_tokens": maxTok,
-			"stream":     true,
-			"system":     anthropicSystemBlocks(req.SystemPrompt),
-			"messages":   messages,
-		}
-		if len(req.Tools) > 0 && !req.ToolModePrompt {
-			body["tools"] = toAnthropicTools(req.Tools)
-		}
-		if req.ToolModePrompt {
-			body["stop_sequences"] = []string{PromptToolStopSequence()}
-		}
-		// Apply the model's param_controls (thinking/effort/etc). Claude
-		// extended thinking is opt-in: if admins do not explicitly merge a
-		// `thinking` object, the provider sends no thinking field.
-		body = MergeParamControls(body, req.ParamControls, req.ParamOverrides)
-		applyAnthropicThinkingSettings(body, req.Model.RequestID, &maxTok)
-		buf, _ := json.Marshal(body)
-		resp, err := doProviderRequest(ctx, req.Model, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
-			hr, e := http.NewRequestWithContext(ctx, "POST", providerBaseURL(baseURL, "https://api.anthropic.com")+"/v1/messages", bytes.NewReader(buf))
-			if e != nil {
-				return nil, e
+		// buildBody serializes the current messages into a request body. Called
+		// again verbatim on the §4.3-B strip-thinking retry, so it must reflect
+		// the live `messages` slice and the `thinkingStripped` flag each time.
+		// Returns whether the body carries a `thinking` field (used to decide if a
+		// 400 is worth retrying without it).
+		buildBody := func() ([]byte, bool) {
+			// §4.9 prompt caching: cache_control on the system block (stable prefix)
+			// and on the last message block (incremental history cache). Exactly two
+			// breakpoints, well under the 4-breakpoint limit.
+			setMessagesCacheBreakpoint(messages)
+			body := map[string]any{
+				"model":      req.Model.RequestID,
+				"max_tokens": maxTok,
+				"stream":     true,
+				"system":     anthropicSystemBlocks(req.SystemPrompt),
+				"messages":   messages,
 			}
-			hr.Header.Set("content-type", "application/json")
-			hr.Header.Set("anthropic-version", "2023-06-01")
-			hr.Header.Set("x-api-key", apiKey)
-			hr.Header.Set("accept", "text/event-stream")
-			return hr, nil
-		})
+			if len(req.Tools) > 0 && !req.ToolModePrompt {
+				body["tools"] = toAnthropicTools(req.Tools)
+			}
+			if req.ToolModePrompt {
+				body["stop_sequences"] = []string{PromptToolStopSequence()}
+			}
+			// Apply the model's param_controls (thinking/effort/etc). Claude
+			// extended thinking is opt-in: if admins do not explicitly merge a
+			// `thinking` object, the provider sends no thinking field.
+			body = MergeParamControls(body, req.ParamControls, req.ParamOverrides)
+			// §4.3-B: once a strip-thinking retry has fired this turn, every
+			// subsequent request drops the thinking param too (the response then
+			// carries no thinking blocks, so later replays stay clean).
+			if thinkingStripped {
+				delete(body, "thinking")
+			}
+			applyAnthropicThinkingSettings(body, req.Model.RequestID, &maxTok)
+			_, hasThinking := body["thinking"]
+			buf, _ := json.Marshal(body)
+			return buf, hasThinking
+		}
+		send := func(buf []byte) (*http.Response, error) {
+			return doProviderRequest(ctx, req.Model, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
+				hr, e := http.NewRequestWithContext(ctx, "POST", providerBaseURL(baseURL, "https://api.anthropic.com")+"/v1/messages", bytes.NewReader(buf))
+				if e != nil {
+					return nil, e
+				}
+				hr.Header.Set("content-type", "application/json")
+				hr.Header.Set("anthropic-version", "2023-06-01")
+				hr.Header.Set("x-api-key", apiKey)
+				hr.Header.Set("accept", "text/event-stream")
+				return hr, nil
+			})
+		}
+		// returnStopped preserves partial output on a caller cancel / deadline
+		// (§6.2). Reads the live messages/historyLen so it stays correct after a
+		// strip-thinking retry rewrote them.
+		returnStopped := func(e error) (*UnifiedResult, error) {
+			raw, _ := json.Marshal(messages[historyLen:])
+			return &UnifiedResult{
+				Blocks: allBlocks, Raw: raw, StopReason: "stopped",
+				Usage: totalUsage, Citations: allCitations,
+			}, e
+		}
+
+		buf, hadThinking := buildBody()
+		resp, err := send(buf)
 		if err != nil {
-			// Context cancel (stop button): return partial result + err so the
-			// orchestrator persists what we got so far (§6.2 partial-content rule).
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				raw, _ := json.Marshal(messages[historyLen:])
-				return &UnifiedResult{
-					Blocks: allBlocks, Raw: raw, StopReason: "stopped",
-					Usage: totalUsage, Citations: allCitations,
-				}, err
+				return returnStopped(err)
 			}
 			return nil, err
 		}
 		if resp.StatusCode >= 400 {
 			b, _ := io.ReadAll(resp.Body)
 			resp.Body.Close()
-			return nil, fmt.Errorf("anthropic %d: %s", resp.StatusCode, string(b))
+			// §4.3-B non-genuine-upstream guard. A 400 on a Claude turn whose
+			// request carries a signed thinking block (replay) or a thinking param
+			// most often means the channel routed to a non-genuine upstream that
+			// can't validate a signature it (or a sibling instance) minted — the
+			// symptom is: first turn fine, the turn AFTER a tool call 400s. Strip
+			// ALL thinking and retry ONCE, silently: nothing has been streamed for
+			// this request yet (we're before readAnthropicStream), so the frontend
+			// shows no error and no hint — the tool rounds already streamed and the
+			// answer just arrives from the retry. Scoped narrowly so genuine 400s
+			// (malformed request) aren't masked — they simply fail the retry too and
+			// surface as before. Everything that isn't (Claude + 400 + strippable)
+			// falls through unchanged to the configured fallback/error path.
+			if resp.StatusCode == 400 && !thinkingStripped && isClaudeModel(req.Model.RequestID) && (hadThinking || messagesHaveThinking(messages)) {
+				thinkingStripped = true
+				messages, historyLen = stripThinkingFromMessages(messages, historyLen)
+				if p.logger != nil {
+					p.logger.Printf("anthropic: channel rejected thinking replay (400) for model %q (base=%s) — retried without thinking; this channel may be serving a non-genuine upstream",
+						req.Model.ID, providerBaseURL(req.Model.BaseURL, "https://api.anthropic.com"))
+				}
+				buf, _ = buildBody()
+				resp, err = send(buf)
+				if err != nil {
+					if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+						return returnStopped(err)
+					}
+					return nil, err
+				}
+				if resp.StatusCode >= 400 {
+					rb, _ := io.ReadAll(resp.Body)
+					resp.Body.Close()
+					return nil, fmt.Errorf("anthropic %d: %s", resp.StatusCode, string(rb))
+				}
+				// Retry succeeded — fall through to stream the answer below.
+			} else {
+				return nil, fmt.Errorf("anthropic %d: %s", resp.StatusCode, string(b))
+			}
 		}
 		stopReason, toolCalls, text, thinkingBlocks, citations, usage, err := readAnthropicStream(resp.Body, onEvent)
 		resp.Body.Close()
@@ -460,7 +607,10 @@ func historyToAnthropic(h []UnifiedMessage) []map[string]any {
 		for _, b := range m.Blocks {
 			switch b.Kind {
 			case "image":
-				if b.Data != "" {
+				// Image blocks are only valid on the user role; assistant content may
+				// only be text/tool_use/thinking. Drop images that rode onto a non-user
+				// turn (share/fork history) so the request isn't rejected.
+				if m.Role == "user" && b.Data != "" {
 					content = append(content, map[string]any{
 						"type":   "image",
 						"source": map[string]any{"type": "base64", "media_type": b.MimeType, "data": b.Data},
