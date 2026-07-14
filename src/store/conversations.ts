@@ -35,6 +35,7 @@ import type {
 } from '@/types/chat'
 import { uid } from '@/lib/utils'
 import { envNum } from '@/lib/env-config'
+import { markConversationsDeleted, unmarkConversationsDeleted } from '@/lib/sync-guards'
 import { toast } from '@/hooks/use-toast'
 import { activeWorkspaceId } from '@/store/workspaces'
 import { useAuth } from '@/store/auth'
@@ -347,7 +348,9 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
     try {
       const created = await conversationsApi.create({ model_id: modelId, project_id: projectId, workspace_id: activeWorkspaceId() })
       const conv = toLocalConversation(created)
-      set((s) => ({ conversations: [conv, ...s.conversations] }))
+      // replaceOrPrepend, not a raw prepend: a §23 background list sync may
+      // have inserted this row already (duplicate-id guard).
+      set((s) => ({ conversations: replaceOrPrepend(s.conversations, conv) }))
       return conv
     } catch (e) {
       // Fall back to optimistic local conversation so the UI never blocks.
@@ -394,25 +397,18 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
 
   async deleteConversation(id) {
     const prevConversations = get().conversations
-    set((s) => {
-      // Remove the conversation and every inline sub-conversation transitively
-      // anchored to it, mirroring the backend cascade so markers/drawers for the
-      // doomed sub-threads vanish immediately.
-      const doomed = new Set<string>([id])
-      for (let grew = true; grew; ) {
-        grew = false
-        for (const c of s.conversations) {
-          if (!doomed.has(c.id) && c.inline && doomed.has(c.inline.sourceConvId)) {
-            doomed.add(c.id)
-            grew = true
-          }
-        }
-      }
-      return { conversations: s.conversations.filter((c) => !doomed.has(c.id)) }
-    })
+    // Remove the conversation and every inline sub-conversation transitively
+    // anchored to it, mirroring the backend cascade so markers/drawers for the
+    // doomed sub-threads vanish immediately. Tombstoning the ids keeps a §23
+    // background list sync that was already in flight (fetched pre-delete)
+    // from resurrecting the rows when its stale response merges.
+    const doomed = collectDoomedConversationIds(prevConversations, id)
+    markConversationsDeleted(doomed)
+    set((s) => ({ conversations: s.conversations.filter((c) => !doomed.has(c.id)) }))
     try {
       await conversationsApi.remove(id)
     } catch (e) {
+      unmarkConversationsDeleted(doomed)
       set({ conversations: prevConversations })
       toast.error(errorMessage(e, 'Failed to delete conversation'))
     }
@@ -426,7 +422,13 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
       ),
     }))
     try {
-      await conversationsApi.update(id, { title })
+      const row = await conversationsApi.update(id, { title })
+      // Re-assert the committed value: a §23 background list sync fetched
+      // before this PATCH but merged after it may have clobbered the
+      // optimistic title, and the tab's own change event is echo-suppressed.
+      set((s) => ({
+        conversations: s.conversations.map((c) => (c.id === id ? { ...c, title: row.title || c.title } : c)),
+      }))
     } catch (e) {
       set({ conversations: prevConversations })
       toast.error(errorMessage(e, 'Failed to rename conversation'))
@@ -440,7 +442,10 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
       conversations: s.conversations.map((c) => (c.id === id ? { ...c, pinned: next } : c)),
     }))
     try {
-      await conversationsApi.update(id, { pinned: next })
+      const row = await conversationsApi.update(id, { pinned: next })
+      set((s) => ({
+        conversations: s.conversations.map((c) => (c.id === id ? { ...c, pinned: row.pinned } : c)),
+      }))
     } catch (e) {
       toast.error(errorMessage(e, 'Failed to update pin'))
     }
@@ -453,7 +458,10 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
       conversations: s.conversations.map((c) => (c.id === id ? { ...c, starred: next } : c)),
     }))
     try {
-      await conversationsApi.update(id, { starred: next })
+      const row = await conversationsApi.update(id, { starred: next })
+      set((s) => ({
+        conversations: s.conversations.map((c) => (c.id === id ? { ...c, starred: row.starred } : c)),
+      }))
     } catch (e) {
       toast.error(errorMessage(e, 'Failed to update star'))
     }
@@ -465,7 +473,10 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
       conversations: s.conversations.map((c) => (c.id === id ? { ...c, archived: true } : c)),
     }))
     try {
-      await conversationsApi.update(id, { archived: true })
+      const row = await conversationsApi.update(id, { archived: true })
+      set((s) => ({
+        conversations: s.conversations.map((c) => (c.id === id ? { ...c, archived: row.archived } : c)),
+      }))
     } catch (e) {
       set({ conversations: prevConversations })
       toast.error(errorMessage(e, 'Failed to archive conversation'))
@@ -649,6 +660,12 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
     if (!conv) return
     for (const msg of conv.messages) {
       if (msg.role !== 'assistant' || !msg.streaming) continue
+      // A message still keyed by its local optimistic id (uid('m') → "m_…";
+      // server ids are "msg_…") belongs to a send that started in THIS tab
+      // after the caller's snapshot — its live POST stream owns it, and a
+      // replay GET against the optimistic id would 404 and kill the healthy
+      // stream with a bogus error.
+      if (msg.id.startsWith('m_')) continue
       const existing = streamControllers.get(msg.id) ?? streamControllers.get(msg.id + '-regen')
       const hasLocalOutput =
         Boolean(msg.content?.trim()) ||
@@ -796,11 +813,16 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
       // header read right immediately, without waiting on the remount's loadOne.
       const meta = toLocalConversation(created)
       set((s) => ({
-        conversations: s.conversations.map((c) =>
-          c.id === tempId
-            ? { ...meta, messages: c.messages, title: c.title || meta.title, updatedAt: Math.max(c.updatedAt, meta.updatedAt) }
-            : c,
-        ),
+        conversations: s.conversations
+          // A §23 background list sync can insert the committed row before this
+          // re-key lands — drop it first or the map below would leave TWO rows
+          // with the same real id (duplicate React keys, double-patched state).
+          .filter((c) => c.id !== realId)
+          .map((c) =>
+            c.id === tempId
+              ? { ...meta, messages: c.messages, title: c.title || meta.title, updatedAt: Math.max(c.updatedAt, meta.updatedAt) }
+              : c,
+          ),
       }))
       input.conversationId = realId
       // Swap the temp id in the URL for the real one (navigate replace), so a
@@ -1667,7 +1689,9 @@ function applyReplayEvent(
 
 // -------- conversion helpers ----------------------------------------------
 
-function toLocalConversation(c: ApiConversation): Conversation {
+// Exported for the §23 realtime sync module (lib/realtime.ts), which merges
+// server rows into this store without flashing the sidebar loading state.
+export function toLocalConversation(c: ApiConversation): Conversation {
   return {
     id: c.id,
     workspaceId: c.workspace_id || undefined,
@@ -2048,6 +2072,23 @@ function replaceOrPrepend(list: Conversation[], next: Conversation): Conversatio
   const out = list.slice()
   out[idx] = next
   return out
+}
+
+// Exported for the §23 realtime module: a remote delete must cascade exactly
+// like a local one (the conversation plus every inline sub-conversation
+// transitively anchored to it — mirrors the backend cascade).
+export function collectDoomedConversationIds(list: Conversation[], id: string): Set<string> {
+  const doomed = new Set<string>([id])
+  for (let grew = true; grew; ) {
+    grew = false
+    for (const c of list) {
+      if (!doomed.has(c.id) && c.inline && doomed.has(c.inline.sourceConvId)) {
+        doomed.add(c.id)
+        grew = true
+      }
+    }
+  }
+  return doomed
 }
 
 function mergeStreamingSummaries(existing: Conversation[], incoming: Conversation[]): Conversation[] {

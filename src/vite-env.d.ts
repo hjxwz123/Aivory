@@ -1,5 +1,8 @@
 /// <reference types="vite/client" />
 
+// §23 version probe — the build id baked in by vite.config.ts `define`.
+declare const __APP_VERSION__: string
+
 declare module '*.css' {}
 declare module '*.svg' {
   const src: string
