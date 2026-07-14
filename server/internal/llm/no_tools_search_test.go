@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -97,6 +98,115 @@ func TestForcedWebSearchInjectsResults(t *testing.T) {
 	}
 	if !start || !result || !cite {
 		t.Fatalf("missing progress events: start=%v result=%v cite=%v", start, result, cite)
+	}
+}
+
+// §4.4-B Fix5: the searcher numbers inline [n] markers locally per query, but
+// citation records are renumbered with a global offset — the injected text's
+// markers must be remapped to match, or the model's [n] references point at the
+// wrong source.
+func TestForcedWebSearchRemapsInlineMarkers(t *testing.T) {
+	reg := &fakeSearchRegistry{
+		out:   "[1] Alpha\nsnippet a\n[2] Beta\nsnippet b\nunrelated [99] left alone",
+		cites: []Citation{{ID: "a", Title: "Alpha", URL: "https://a.example", Source: "web"}, {ID: "b", Title: "Beta", URL: "https://b.example", Source: "web"}},
+	}
+	o := &Orchestrator{tools: reg}
+	text, cites := o.forcedWebSearch(
+		context.Background(),
+		RunRequest{UserID: "u1", ConversationID: "c1", UserText: "q"},
+		&store.Conversation{ID: "c1"},
+		nil,
+		3, // 3 KB snippets already numbered → web markers must start at [4]
+		func(SseEvent) {},
+	)
+	if !strings.Contains(text, "[4] Alpha") || !strings.Contains(text, "[5] Beta") {
+		t.Fatalf("inline markers not remapped to offset numbering: %q", text)
+	}
+	if strings.Contains(text, "[1] Alpha") || strings.Contains(text, "[2] Beta") {
+		t.Fatalf("stale local markers survived: %q", text)
+	}
+	if !strings.Contains(text, "[99] left alone") {
+		t.Fatalf("incidental bracketed number should not be remapped: %q", text)
+	}
+	if len(cites) != 2 || cites[0].Index != 4 || cites[1].Index != 5 {
+		t.Fatalf("citation records not offset to match markers: %+v", cites)
+	}
+}
+
+// §4.4-B Fix3: forced web search must respect the admin `disabled_tools`
+// kill-switch — otherwise it is a back door around the platform block.
+func TestForcedWebSearchRespectsDisabledTools(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "disabled.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer db.Close()
+	if err := store.Migrate(db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if err := store.SetSetting(db, "disabled_tools", []string{"web_search"}); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	reg := &fakeSearchRegistry{out: "Result: should never run.", cites: []Citation{{ID: "w1", URL: "https://x", Source: "web"}}}
+	o := &Orchestrator{tools: reg, db: db}
+	text, cites := o.forcedWebSearch(
+		context.Background(),
+		RunRequest{UserID: "u1", ConversationID: "c1", UserText: "q"},
+		&store.Conversation{ID: "c1"},
+		nil,
+		0,
+		func(SseEvent) {},
+	)
+	if text != "" || cites != nil {
+		t.Fatalf("disabled web_search must inject nothing, got text=%q cites=%+v", text, cites)
+	}
+	if len(reg.calls) != 0 {
+		t.Fatalf("searcher must not be invoked when web_search is disabled: %+v", reg.calls)
+	}
+}
+
+// §4.4-B remapCitationMarkers unit coverage: offset only markers in 1..maxLocal.
+func TestRemapCitationMarkers(t *testing.T) {
+	got := remapCitationMarkers("see [1] and [2], but not [3] or [x] or []", 2, 5)
+	want := "see [6] and [7], but not [3] or [x] or []"
+	if got != want {
+		t.Fatalf("remap = %q, want %q", got, want)
+	}
+	if remapCitationMarkers("no offset", 3, 0) != "no offset" {
+		t.Fatal("offset 0 must be a no-op")
+	}
+}
+
+// §B5-per-request Fix4: when the attached per-request usages sum to MORE than
+// the billed turn total (the stop/cancel path attaches each request's full
+// usage but bills only a partial total), row cost AND credit sums must still
+// equal the billed totals exactly — not overshoot via clamp-to-zero remainder.
+func TestPerRequestUsageRowsNoOvershootOnPartialTotal(t *testing.T) {
+	model := &store.Model{PriceInput: 10, PriceOutput: 30}
+	// Two completed requests each attached full usage...
+	snaps := []providerRequestSnapshot{
+		{Attempt: 1, Usage: Usage{InputTokens: 2000, OutputTokens: 400}, HasUsage: true},
+		{Attempt: 2, Usage: Usage{InputTokens: 2000, OutputTokens: 400}, HasUsage: true},
+	}
+	// ...but the turn was stopped and billed only a partial total far below the
+	// sum of attaches (summed = 4000/800, total = 1000/200).
+	total := Usage{InputTokens: 1000, OutputTokens: 200}
+	totalCost := computeCost(*model, total) // 0.01 + 0.006 = 0.016
+	totalCredits := 5.0
+	rows := perRequestUsageRows(snaps, model, total, totalCost, totalCredits, false)
+	var cs, cr float64
+	for _, r := range rows {
+		if r.Cost < 0 || r.Credits < 0 {
+			t.Fatalf("no row may be negative: %+v", r)
+		}
+		cs += r.Cost
+		cr += r.Credits
+	}
+	if diff := cs - totalCost; diff > 1e-9 || diff < -1e-9 {
+		t.Fatalf("Σcost %v != billed %v (overshoot)", cs, totalCost)
+	}
+	if diff := cr - totalCredits; diff > 1e-9 || diff < -1e-9 {
+		t.Fatalf("Σcredits %v != billed %v (overshoot)", cr, totalCredits)
 	}
 }
 

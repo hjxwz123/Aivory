@@ -38,9 +38,31 @@ import { envNum } from '@/lib/env-config'
 import { toast } from '@/hooks/use-toast'
 import { activeWorkspaceId } from '@/store/workspaces'
 import { useAuth } from '@/store/auth'
-import { useComposerPrefs } from '@/store/composer-prefs'
+import { useComposerPrefs, type ComposerMode } from '@/store/composer-prefs'
 import { useModels } from '@/store/models'
 import i18n from '@/i18n'
+
+// resolveArmedTurnFlags snapshots the CURRENT composer feature toggles for turns
+// started OUTSIDE the composer's own submit — regenerate, edit-and-resend, and
+// home suggestion cards — so an armed feature (deep research / verify / disable
+// tools / forced web search) applies consistently no matter how the turn is
+// triggered, instead of silently reverting to defaults. verify is gated on
+// availability; the backend re-applies mode↔no-tools mutual exclusion and the
+// deep-research permission check, so passing the raw toggles here is safe.
+export function resolveArmedTurnFlags(): {
+  mode?: ComposerMode
+  verify?: boolean
+  noTools?: boolean
+  webSearch?: boolean
+} {
+  const p = useComposerPrefs.getState()
+  return {
+    mode: p.mode !== 'default' ? p.mode : undefined,
+    verify: p.verify && useModels.getState().verifyAvailable ? true : undefined,
+    noTools: p.noTools ? true : undefined,
+    webSearch: p.noTools && p.forceWebSearch ? true : undefined,
+  }
+}
 
 // The user's current UI language, sent with each turn so the backend can anchor
 // the reply-language instruction (§ reply language). Falls back to 'en'.
@@ -1106,14 +1128,14 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
     // badge "sticks" even though the user disabled it. (Common case is
     // unchanged: if the toggle was on for the original send and untouched, it
     // is still on, so the re-audit happens as before.)
-    const verify =
-      useComposerPrefs.getState().verify && useModels.getState().verifyAvailable ? true : undefined
-    // §4.13-B: regenerate honours the CURRENT no-tools / web-search toggles (same
-    // rationale as verify above). The backend re-applies mutual exclusion, so a
-    // deep-research retry still drops these.
-    const noTools = useComposerPrefs.getState().noTools ? true : undefined
-    const webSearch =
-      useComposerPrefs.getState().noTools && useComposerPrefs.getState().forceWebSearch ? true : undefined
+    // §4.13-B: regenerate honours the CURRENT verify / no-tools / web-search
+    // toggles (a retry should reflect what's armed now). `mode` is the EXCEPTION
+    // — it stays the original turn's mode (below), so regenerating a deep-research
+    // reply re-runs research rather than adopting whatever mode is toggled now.
+    const armed = resolveArmedTurnFlags()
+    const verify = armed.verify
+    const noTools = armed.noTools
+    const webSearch = armed.webSearch
     const placeholderId = uid('m')
     // §4.15 R2: regenerate forks at the assistant — the new reply is a SIBLING of
     // the old one under the same user turn. Seed branch metadata on the

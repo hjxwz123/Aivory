@@ -370,6 +370,18 @@ export function Composer({
   // capturing a stale closure.
   const onAttachmentsDrainedRef = useRef(onAttachmentsDrained)
   onAttachmentsDrainedRef.current = onAttachmentsDrained
+  // True only after listDraftFiles has SUCCESSFULLY enumerated this scope's
+  // server-side draft files at least once. The drain signal (discard the draft
+  // conversation) is gated on it: while the restore is in flight or after it
+  // failed, the composer's local chips may not reflect files the conversation
+  // still holds (e.g. a recovered previous-session draft), and discarding then
+  // would delete those files. Reset whenever the scope changes.
+  const draftFilesLoadedRef = useRef(false)
+  // Fire the drain signal only when we're certain the conversation holds no
+  // remaining server-side files (all local chips gone AND the server set is known).
+  const maybeSignalDrained = useCallback(() => {
+    if (draftFilesLoadedRef.current) onAttachmentsDrainedRef.current?.()
+  }, [])
   // The horizontal attachment rail (chips). A plain mouse wheel only scrolls
   // vertically, so translate dominant vertical wheel deltas into horizontal
   // scroll when the rail overflows — trackpads already pan natively. Native
@@ -647,10 +659,10 @@ export function Composer({
       setAttachments((s) => {
         const next = s.filter((a) => a.id !== local.id)
         // Failure auto-removed the last chip → same draft-conversation cleanup
-        // as a manual removal. Microtask: never call parent handlers from
-        // inside a state updater.
+        // as a manual removal (gated on Fix7's confirmed-empty check). Microtask:
+        // never call parent handlers from inside a state updater.
         if (next.length === 0 && s.length > 0) {
-          queueMicrotask(() => onAttachmentsDrainedRef.current?.())
+          queueMicrotask(() => maybeSignalDrained())
         }
         return next
       })
@@ -713,6 +725,9 @@ export function Composer({
       committedAttachmentIds.current.clear()
       setAttachments([])
     }
+    // New (or absent) scope: the server file set is not yet known, so block the
+    // drain signal until listDraftFiles confirms it below.
+    draftFilesLoadedRef.current = false
     if (!conversationId) {
       setRestoringAttachments(false)
       return
@@ -724,6 +739,8 @@ export function Composer({
       .listDraftFiles(conversationId)
       .then((files) => {
         if (cancelled) return
+        // Server draft set now known for this scope → the drain signal is armed.
+        draftFilesLoadedRef.current = true
         const restored = files.map((file) => restoreConversationFile(file, conversationId))
         setAttachments((current) => {
           const present = new Set(current.map((item) => item.id))
@@ -902,9 +919,10 @@ export function Composer({
       })
     }
     // Removed the last chip → let the page discard a draft conversation that
-    // existed only to scope these uploads (the "Untitled ghost" fix).
+    // existed only to scope these uploads (the "Untitled ghost" fix), but only
+    // once the server's draft file set is confirmed empty (Fix7 gate).
     if (!attachments.some((a) => a.id !== id)) {
-      onAttachmentsDrainedRef.current?.()
+      maybeSignalDrained()
     }
   }
 
@@ -1559,26 +1577,33 @@ export function Composer({
             ) : null}
           </div>
 
-          {/* Right zone — pinned, never wraps: active-feature chips + model picker + send/stop. */}
-          <div className="flex shrink-0 items-center gap-1.5 pl-1">
-            {activeChips.map((chip) => (
-              <Tooltip key={chip.key} content={chip.desc}>
-                <span className="group inline-flex items-center gap-1 h-7 pl-2 pr-1 rounded-full bg-[var(--color-secondary-soft)] text-[var(--color-secondary)] text-[12px] font-medium">
-                  <span className="inline-flex shrink-0" aria-hidden>
-                    {chip.icon}
+          {/* Active-feature chips — icon-only (name on hover). In their own
+              shrinkable, horizontally-scrollable track so that even many chips
+              (or a long model name) can never push the model picker / send
+              button off the composer edge. */}
+          {activeChips.length > 0 ? (
+            <div className="flex min-w-0 shrink items-center gap-1 overflow-x-auto scrollbar-none pl-1">
+              {activeChips.map((chip) => (
+                <Tooltip key={chip.key} content={chip.label}>
+                  <span className="group inline-flex shrink-0 items-center gap-0.5 h-7 pl-1.5 pr-1 rounded-full bg-[var(--color-secondary-soft)] text-[var(--color-secondary)] interactive hover:bg-[var(--color-secondary)]/20">
+                    <span className="inline-flex shrink-0" aria-hidden>
+                      {chip.icon}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={chip.toggle}
+                      aria-label={t('composer.features.disable', { defaultValue: 'Turn off {{name}}', name: chip.label })}
+                      className="inline-flex items-center justify-center size-5 rounded-full text-[var(--color-secondary)] hover:bg-[var(--color-secondary)]/20 interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                    >
+                      <X size={13} aria-hidden />
+                    </button>
                   </span>
-                  <span className="max-w-[7rem] truncate">{chip.label}</span>
-                  <button
-                    type="button"
-                    onClick={chip.toggle}
-                    aria-label={t('composer.features.disable', { defaultValue: 'Turn off {{name}}', name: chip.label })}
-                    className="inline-flex items-center justify-center size-5 rounded-full text-[var(--color-secondary)] hover:bg-[var(--color-secondary)]/15 interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-                  >
-                    <X size={13} aria-hidden />
-                  </button>
-                </span>
-              </Tooltip>
-            ))}
+                </Tooltip>
+              ))}
+            </div>
+          ) : null}
+          {/* Pinned — model picker + send/stop, always visible (never shrinks). */}
+          <div className="flex shrink-0 items-center gap-1.5 pl-1">
             <ModelPicker value={modelId} onChange={onModelChange} />
             {sendBtn}
           </div>

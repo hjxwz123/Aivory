@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { Loader2 } from 'lucide-react'
 import { MessageRow } from './message-row'
 import { useAuth } from '@/store/auth'
-import { useConversations, MSG_PAGE } from '@/store/conversations'
+import { useConversations, MSG_PAGE, resolveArmedTurnFlags } from '@/store/conversations'
 import { useSettings } from '@/store/settings'
 import { toast } from '@/hooks/use-toast'
 
@@ -177,6 +177,11 @@ export function MessageList({ conversation, scrollToMessageId, jumpKey }: Messag
       const edited = idx >= 0 ? msgs[idx] : undefined
       const parentId = edited?.parentId ?? (idx > 0 ? msgs[idx - 1].id : '')
       const carryAtts = attachments ?? edited?.attachments
+      // Edit-and-resend opens a NEW branch — treat it like a fresh send and honor
+      // the currently-armed composer features (deep research / verify / disable
+      // tools / web search); otherwise the armed chips are silently ignored on
+      // this one path while regenerate honors them.
+      const armed = resolveArmedTurnFlags()
       void sendMessage({
         conversationId: convId,
         text: newContent,
@@ -184,6 +189,10 @@ export function MessageList({ conversation, scrollToMessageId, jumpKey }: Messag
         parentId,
         attachments: carryAtts,
         branch: true,
+        mode: armed.mode,
+        verify: armed.verify,
+        noTools: armed.noTools,
+        webSearch: armed.webSearch,
       })
     },
     [convId, modelId, sendMessage],

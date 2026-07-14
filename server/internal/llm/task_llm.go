@@ -170,9 +170,14 @@ func (t *TaskLLM) Run(ctx context.Context, kind TaskKind, prompt string, opts Ru
 		MaxOutputTokens: maxTok,
 		Stream:          false,
 	}
+	// Detach any inherited per-request recorder: a task call issued mid chat
+	// turn (compaction, research plan/verify, search-query gen, …) logs its own
+	// task.* usage row below, so it must not also be captured into the outer
+	// chat turn's recorder and double-booked as a phantom chat row (§B5).
+	streamCtx := contextWithoutProviderRequestRecorder(ctx)
 	// We capture deltas but only really care about the final result.
 	captured := strings.Builder{}
-	result, err := provider.Stream(ctx, req, &noopToolRunner{}, func(ev SseEvent) {
+	result, err := provider.Stream(streamCtx, req, &noopToolRunner{}, func(ev SseEvent) {
 		if ev.Type == "text_delta" {
 			captured.WriteString(ev.Text)
 		}
