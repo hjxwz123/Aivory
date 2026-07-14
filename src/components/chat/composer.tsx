@@ -52,6 +52,7 @@ import type { ApiAttachment, ApiConversationFile, ApiDocument } from '@/api/type
 import { toast } from '@/hooks/use-toast'
 import { cn, uid, modKey } from '@/lib/utils'
 import { fileIconFor } from '@/lib/file-icon'
+import { encodeWavFromBlob } from '@/lib/audio'
 import { ProgressRing } from '@/components/ui/progress-ring'
 import { envNum } from '@/lib/env-config'
 
@@ -465,21 +466,39 @@ export function Composer({
       const blob = new Blob(chunksRef.current, { type: rec.mimeType || 'audio/webm' })
       if (blob.size === 0) return
       setTranscribing(true)
-      void audioApi
-        .transcribe(blob, 'audio.webm')
-        .then(({ text }) => {
-          if (text) {
-            const current = valueRef.current
-            updateValue((current.trim() ? current.trimEnd() + ' ' : '') + text)
-            requestAnimationFrame(() => ref.current?.focus())
-          }
-        })
-        .catch((e) => toast.error(e instanceof ApiError ? e.message : t('composer.voiceFailed')))
-        .finally(() => setTranscribing(false))
+      void transcribeRecording(blob)
     }
     recorderRef.current = rec
     rec.start()
     setRecording(true)
+  }
+
+  // Send a recording for transcription. MediaRecorder's streaming WebM often has
+  // no parseable duration, which makes some transcription upstreams 500 ("webm
+  // duration parsing requires full EBML parser"). Re-encode to a 16 kHz mono WAV
+  // (explicit duration, speech-model-native rate); fall back to the raw recording
+  // if the browser can't decode it.
+  async function transcribeRecording(blob: Blob) {
+    try {
+      let sendBlob = blob
+      let filename = blob.type.includes('mp4') ? 'audio.mp4' : 'audio.webm'
+      try {
+        sendBlob = await encodeWavFromBlob(blob)
+        filename = 'audio.wav'
+      } catch {
+        /* browser can't decode — send the original recording as-is */
+      }
+      const { text } = await audioApi.transcribe(sendBlob, filename)
+      if (text) {
+        const current = valueRef.current
+        updateValue((current.trim() ? current.trimEnd() + ' ' : '') + text)
+        requestAnimationFrame(() => ref.current?.focus())
+      }
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : t('composer.voiceFailed'))
+    } finally {
+      setTranscribing(false)
+    }
   }
   const effectivePlaceholder = placeholder ?? t('composer.placeholder')
 
