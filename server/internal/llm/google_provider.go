@@ -223,7 +223,10 @@ func historyToGemini(h []UnifiedMessage) []map[string]any {
 		}
 		parts := []map[string]any{}
 		for _, b := range m.Blocks {
-			if b.Kind == "image" && b.Data != "" {
+			// inlineData (image) parts belong on the user role; a model turn takes
+			// text/functionCall. Drop images that rode onto a non-user turn (share/fork
+			// history) so Gemini doesn't reject the content.
+			if m.Role == "user" && b.Kind == "image" && b.Data != "" {
 				parts = append(parts, map[string]any{
 					"inlineData": map[string]any{"mimeType": b.MimeType, "data": b.Data},
 				})

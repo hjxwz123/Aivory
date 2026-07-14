@@ -327,7 +327,26 @@ export default function AdminUsage() {
                         </span>
                       ) : null}
                     </td>
-                    <td className="py-2 px-4 text-[12px]">{modelLabel(r.model_id)}</td>
+                    <td className="py-2 px-4 text-[12px]">
+                      <span className="inline-flex flex-wrap items-center gap-1">
+                        {modelLabel(r.model_id)}
+                        {r.ttft_fallback_model ? (
+                          <span
+                            className="rounded-full border border-[var(--color-warning)] px-1.5 text-[10px] text-[var(--color-warning)]"
+                            title={t('usage.ttftFallbackTitle', {
+                              defaultValue:
+                                'Primary model produced no output in time; this turn was served by the fallback model {{model}}',
+                              model: r.ttft_fallback_model,
+                            })}
+                          >
+                            {t('usage.ttftFallbackTag', {
+                              defaultValue: 'Timeout fallback → {{model}}',
+                              model: r.ttft_fallback_model,
+                            })}
+                          </span>
+                        ) : null}
+                      </span>
+                    </td>
                     <td className="py-2 px-4 text-[12px]">
                       {r.channel_name || r.channel_id ? (
                         <span className="inline-flex items-center gap-1">

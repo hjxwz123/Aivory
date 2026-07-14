@@ -375,6 +375,7 @@ CREATE TABLE IF NOT EXISTS usage_logs (
   request_url        TEXT NOT NULL DEFAULT '',
   request_headers    TEXT NOT NULL DEFAULT '',
   request_body       TEXT NOT NULL DEFAULT '',
+  ttft_fallback_model TEXT NOT NULL DEFAULT '', -- non-empty = TTFT timeout model-fallback served this row (§4.6-C); value is the fallback model's display name
   created_at         BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
 );
 CREATE INDEX IF NOT EXISTS idx_usage_user_time ON usage_logs(user_id, created_at);

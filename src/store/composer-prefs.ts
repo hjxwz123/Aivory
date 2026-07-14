@@ -14,6 +14,10 @@ interface PersistedComposerPrefs {
   // Forced non-tool web search — only meaningful while noTools is on; cleared
   // automatically when noTools turns off.
   forceWebSearch: boolean
+  // §personalization: when true, new conversations start with tools disabled.
+  // Mirrors the server-side `disable_tools_default` preference; seeds `noTools`
+  // at login and re-arms it on each new chat. A per-turn override still wins.
+  defaultNoTools: boolean
   paramValuesByModel: Record<string, ComposerParamValues>
   draftsByScope: Record<string, string>
 }
@@ -22,6 +26,8 @@ interface ComposerPrefsStore extends PersistedComposerPrefs {
   setMode: (mode: ComposerMode) => void
   setVerify: (verify: boolean) => void
   setNoTools: (noTools: boolean) => void
+  // Update the mirror of the server-side default-disable-tools preference.
+  setDefaultNoTools: (on: boolean) => void
   setForceWebSearch: (on: boolean) => void
   setParamValues: (modelId: string, values: Record<string, unknown>) => void
   setDraft: (scope: string, value: string) => void
@@ -36,6 +42,7 @@ const DEFAULT_PREFS: PersistedComposerPrefs = {
   verify: false,
   noTools: false,
   forceWebSearch: false,
+  defaultNoTools: false,
   paramValuesByModel: {},
   draftsByScope: {},
 }
@@ -99,6 +106,7 @@ function loadPrefs(): PersistedComposerPrefs {
       noTools,
       // web search can only be on inside a no-tools turn
       forceWebSearch: noTools && parsed.forceWebSearch === true,
+      defaultNoTools: parsed.defaultNoTools === true,
       paramValuesByModel: sanitizeParamValuesByModel(parsed.paramValuesByModel),
       draftsByScope: sanitizeDraftsByScope(parsed.draftsByScope),
     }
@@ -116,6 +124,7 @@ function persistedFrom(state: PersistedComposerPrefs, patch: Partial<PersistedCo
     verify: state.verify,
     noTools: state.noTools,
     forceWebSearch: state.forceWebSearch,
+    defaultNoTools: state.defaultNoTools,
     paramValuesByModel: state.paramValuesByModel,
     draftsByScope: state.draftsByScope,
     ...patch,
@@ -155,6 +164,12 @@ export const useComposerPrefs = create<ComposerPrefsStore>((set) => {
       // inside a no-tools turn, so turning it off clears the web-search flag.
       if (noTools) commit({ noTools: true, mode: 'default', forceWebSearch: false })
       else commit({ noTools: false, forceWebSearch: false })
+    },
+    setDefaultNoTools(on) {
+      // Mirror-only: reflects the server-side preference. Arming of the live
+      // `noTools` toggle is done by the caller (settings toggle, login seed,
+      // new-chat re-arm) via setNoTools so the mutual-exclusion rules run.
+      commit({ defaultNoTools: on })
     },
     setForceWebSearch(on) {
       // Only togglable while no-tools is on (the UI gates it too).

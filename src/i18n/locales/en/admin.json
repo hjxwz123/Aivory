@@ -408,6 +408,8 @@
     "workspaceTag": "WS",
     "fallbackTag": "Fallback",
     "fallbackTitle": "Served by the model’s fallback channel",
+    "ttftFallbackTag": "Timeout fallback → {{model}}",
+    "ttftFallbackTitle": "Primary model produced no output in time; this turn was served by the fallback model {{model}}",
     "errorDetail": {
       "title": "Upstream error",
       "view": "View error detail",

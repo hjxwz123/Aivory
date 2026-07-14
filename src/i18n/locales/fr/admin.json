@@ -408,6 +408,8 @@
     "workspaceTag": "WS",
     "fallbackTag": "Secours",
     "fallbackTitle": "Servi par le canal de secours du modèle",
+    "ttftFallbackTag": "Secours (délai) → {{model}}",
+    "ttftFallbackTitle": "Le modèle principal n’a rien produit à temps ; ce tour a été servi par le modèle de secours {{model}}",
     "errorDetail": {
       "title": "Erreur amont",
       "view": "Voir le détail de l'erreur",

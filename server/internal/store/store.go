@@ -165,6 +165,10 @@ func Migrate(db *sql.DB) error {
 	addUsageRequestURL := `ALTER TABLE usage_logs ADD COLUMN request_url TEXT NOT NULL DEFAULT ''`
 	addUsageRequestHeaders := `ALTER TABLE usage_logs ADD COLUMN request_headers TEXT NOT NULL DEFAULT ''`
 	addUsageRequestBody := `ALTER TABLE usage_logs ADD COLUMN request_body TEXT NOT NULL DEFAULT ''`
+	// §4.6-C: non-empty = a TTFT timeout model-fallback served this row (distinct
+	// from the same-model `fallback` channel bool); value is the fallback model's
+	// display name, surfaced on the admin usage page.
+	addUsageTTFTFallback := `ALTER TABLE usage_logs ADD COLUMN ttft_fallback_model TEXT NOT NULL DEFAULT ''`
 	// Composer uploads remain drafts until the user message carrying them is
 	// persisted. This lets the client restore only unsent attachments on refresh.
 	addFileDraft := `ALTER TABLE files ADD COLUMN draft INTEGER NOT NULL DEFAULT 0`
@@ -225,6 +229,7 @@ func Migrate(db *sql.DB) error {
 		addUsageRequestURL = `ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS request_url TEXT NOT NULL DEFAULT ''`
 		addUsageRequestHeaders = `ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS request_headers TEXT NOT NULL DEFAULT ''`
 		addUsageRequestBody = `ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS request_body TEXT NOT NULL DEFAULT ''`
+		addUsageTTFTFallback = `ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS ttft_fallback_model TEXT NOT NULL DEFAULT ''`
 		addFileDraft = `ALTER TABLE files ADD COLUMN IF NOT EXISTS draft INTEGER NOT NULL DEFAULT 0`
 		addDocumentIngestUpdatedAt = `ALTER TABLE documents ADD COLUMN IF NOT EXISTS ingest_updated_at BIGINT NOT NULL DEFAULT 0`
 	}
@@ -257,7 +262,7 @@ func Migrate(db *sql.DB) error {
 		addMsgVerify,
 		addConvWorkspace, addProjWorkspace, addKBWorkspace, addMsgAuthor, addUsageWorkspace, addGroupMaxWorkspaces, addGroupMaxStorage, addGroupIsPublic,
 		addModelFallbackChannel, addUsageChannel, addUsageFallback, addUsageStatus, addUsageError,
-		addUsageRequestMethod, addUsageRequestURL, addUsageRequestHeaders, addUsageRequestBody,
+		addUsageRequestMethod, addUsageRequestURL, addUsageRequestHeaders, addUsageRequestBody, addUsageTTFTFallback,
 		addFileDraft, addDocumentIngestUpdatedAt,
 	} {
 		_, _ = db.Exec(ddl)

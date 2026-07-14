@@ -14,6 +14,7 @@ import { Field } from '@/components/ui/label'
 import { toast } from '@/hooks/use-toast'
 import { authApi } from '@/api'
 import { useSettings } from '@/store/settings'
+import { useComposerPrefs } from '@/store/composer-prefs'
 import { useAuth } from '@/store/auth'
 import { MemoryManager } from '@/components/settings/memory-manager'
 import { cn } from '@/lib/utils'
@@ -40,6 +41,11 @@ export default function Personalization() {
   // per-user toggle entirely (no one can enable it; it's gated off server-side too).
   // Absent flag (older backend) ⇒ treat as available.
   const memoryAvailable = useAuth((s) => s.user?.memory_available !== false)
+  // §personalization: "disable tools by default" mirrors into the composer store
+  // so new conversations start with tools off (seeded at login, re-armed per chat).
+  const defaultNoTools = useComposerPrefs((s) => s.defaultNoTools)
+  const setDefaultNoTools = useComposerPrefs((s) => s.setDefaultNoTools)
+  const setNoTools = useComposerPrefs((s) => s.setNoTools)
 
   const [traits, setTraits] = useState<string[]>([])
   const [nickname, setNickname] = useState('')
@@ -58,13 +64,14 @@ export default function Personalization() {
         setNickname(typeof s.persona_nickname === 'string' ? s.persona_nickname : '')
         setCustom(typeof s.persona_custom === 'string' ? s.persona_custom : '')
         if (typeof s.memory_enabled === 'boolean') setPrivacy({ memoriesEnabled: s.memory_enabled })
+        if (typeof s.disable_tools_default === 'boolean') setDefaultNoTools(s.disable_tools_default)
         setLoaded(true)
       })
       .catch(() => setLoaded(true))
     return () => {
       active = false
     }
-  }, [setPrivacy])
+  }, [setPrivacy, setDefaultNoTools])
 
   function toggleTrait(key: string) {
     setTraits((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]))
@@ -92,6 +99,20 @@ export default function Personalization() {
       await authApi.updateSettings({ memory_enabled: v })
     } catch (e) {
       setPrivacy({ memoriesEnabled: !v })
+      toast.error(t('common:actions.failed', { defaultValue: 'Failed to save' }), e instanceof Error ? e.message : undefined)
+    }
+  }
+
+  async function onToggleDisableTools(v: boolean) {
+    // Mirror + arm the live composer toggle immediately so the change takes
+    // effect in the current session, then persist. Roll back both on failure.
+    setDefaultNoTools(v)
+    setNoTools(v)
+    try {
+      await authApi.updateSettings({ disable_tools_default: v })
+    } catch (e) {
+      setDefaultNoTools(!v)
+      setNoTools(!v)
       toast.error(t('common:actions.failed', { defaultValue: 'Failed to save' }), e instanceof Error ? e.message : undefined)
     }
   }
@@ -167,6 +188,40 @@ export default function Personalization() {
             <Button loading={saving} disabled={!loaded} onClick={() => void savePersona()}>
               {t('common:actions.save')}
             </Button>
+          </div>
+        </div>
+      </section>
+
+      {/* Tools — default-disable toggle. */}
+      <section className="mb-12">
+        <div className="mb-5">
+          <h2 className="tracking-tight text-xl text-[var(--color-fg)]">
+            {t('settings:personalization.toolsTitle', { defaultValue: 'Tools' })}
+          </h2>
+          <p className="mt-1.5 text-sm text-[var(--color-fg-muted)]">
+            {t('settings:personalization.toolsSubtitle', {
+              defaultValue: 'Control whether the model may call tools (web search, Python, image generation, knowledge base).',
+            })}
+          </p>
+        </div>
+        <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)]">
+          <div className="px-5 sm:px-6 py-4 sm:py-5 flex items-center justify-between gap-6">
+            <div className="min-w-0">
+              <div className="text-sm font-medium text-[var(--color-fg)]">
+                {t('settings:personalization.disableToolsToggle', { defaultValue: 'Disable tools by default' })}
+              </div>
+              <p className="mt-1 text-xs text-[var(--color-fg-muted)] leading-relaxed max-w-md">
+                {t('settings:personalization.disableToolsBody', {
+                  defaultValue:
+                    'New conversations start with tools turned off. You can still re-enable tools for any single conversation from the composer’s “+” menu.',
+                })}
+              </p>
+            </div>
+            <Switch
+              checked={defaultNoTools}
+              disabled={!loaded}
+              onCheckedChange={(v) => void onToggleDisableTools(Boolean(v))}
+            />
           </div>
         </div>
       </section>

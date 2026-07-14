@@ -399,6 +399,10 @@ type UsageLog struct {
 	ChannelID string `json:"channel_id,omitempty"`
 	Fallback  bool   `json:"fallback,omitempty"`
 	Status    string `json:"status,omitempty"`
+	// TTFTFallbackModel is the display name of the model a TTFT timeout-fallback
+	// switched to for this row (§4.6-C). '' = no model fallback. Distinct from
+	// Fallback (that is the same-model backup-channel retry).
+	TTFTFallbackModel string `json:"ttft_fallback_model,omitempty"`
 	// Error is the upstream failure detail for status='error' rows (admin-only;
 	// may embed provider response bodies, so it is never returned to end users).
 	Error          string `json:"-"`
