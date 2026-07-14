@@ -168,6 +168,9 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("GET", "/api/auth/oauth/handoff", rateLimitedIP(d, "auth", rlOauthMax, rlOauthWindow, wrap(d, oauthHandoffHandler)))
 
 	// Authenticated endpoints.
+	// §23 realtime notify stream: one long-lived SSE connection per open tab;
+	// pushes thin conversation-change events for multi-device live sync.
+	mux.handle("GET", "/api/events", requireAuth(d, eventsStreamHandler))
 	mux.handle("GET", "/api/me", requireAuth(d, meHandler))
 	mux.handle("PATCH", "/api/me", requireAuth(d, updateMeHandler))
 	mux.handle("DELETE", "/api/me", requireAuth(d, deleteMeHandler))
@@ -444,6 +447,17 @@ func spaHandler(dir string, api http.Handler) http.Handler {
 			if strings.HasPrefix(rel, "/assets/") {
 				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 			}
+			// §23 version probe: must never be cached anywhere (browser, proxy,
+			// CDN) or open tabs keep seeing the old version and never refresh.
+			if rel == "/version.json" {
+				w.Header().Set("Cache-Control", "no-store")
+			}
+			// A cached stale index.html after a deploy would make the version
+			// check arm→reload→still-stale (loop breaker caps it, but fix the
+			// cause too). The SPA-fallback branch below already sends this.
+			if rel == "/index.html" {
+				w.Header().Set("Cache-Control", "no-cache")
+			}
 			fileServer.ServeHTTP(w, r)
 			return
 		}
@@ -487,7 +501,7 @@ func corsMiddleware(allowed []string, next http.Handler) http.Handler {
 			// (x-req-ts/nonce/token, see verifyReqToken middleware) are on every
 			// authenticated call — omitting them breaks all cross-origin API use
 			// (i.e. serving the app on a domain other than the API's origin).
-			w.Header().Set("Access-Control-Allow-Headers", "content-type, authorization, x-req-ts, x-req-nonce, x-req-token")
+			w.Header().Set("Access-Control-Allow-Headers", "content-type, authorization, x-req-ts, x-req-nonce, x-req-token, x-device-id")
 			w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PATCH,PUT,DELETE,OPTIONS")
 			w.Header().Set("Access-Control-Max-Age", strconv.Itoa(int(corsPreflightMaxAge.Seconds())))
 		}

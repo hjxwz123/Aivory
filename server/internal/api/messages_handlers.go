@@ -211,6 +211,9 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	if err != nil && !terminalSent {
 		sendEvent(llm.SseEvent{Type: "error", Message: err.Error(), MessageID: streamMessageID})
 	}
+	// §23: the turn is over (success, stop, or error — the user message and any
+	// partial answer are persisted either way); nudge the user's other devices.
+	publishUserEvent(d, r, u.ID, "conversation.updated", id)
 }
 
 func ensureAttachedDocumentsReady(ctx context.Context, db *sql.DB, convID string, atts []llm.Attachment) error {
@@ -455,6 +458,8 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	if err != nil && !terminalSent {
 		sendEvent(llm.SseEvent{Type: "error", Message: err.Error(), MessageID: streamMessageID})
 	}
+	// §23: regeneration finished — nudge the user's other devices.
+	publishUserEvent(d, r, u.ID, "conversation.updated", id)
 }
 
 // streamMessageHandler replays and follows the generation stream for one
@@ -629,6 +634,7 @@ func editMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	msgcache.Bump(d.Cache, convID)
 	updated, _ := store.GetMessage(r.Context(), d.DB, msgID)
+	publishUserEvent(d, r, u.ID, "conversation.updated", convID)
 	writeJSON(w, 200, updated)
 }
 
@@ -683,6 +689,7 @@ func deleteMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	// Enrich with sibling/branch metadata + redact admin-only cost, exactly like
 	// getConversationHandler — otherwise the swapped-in path loses its `< n/m >`
 	// branch picker and leaks per-message cost to the user.
+	publishUserEvent(d, r, u.ID, "conversation.updated", convID)
 	writeJSON(w, 200, map[string]any{"ok": true, "active_leaf_id": newLeaf, "messages": redactCost(enrichWithAuthors(d, r, enrichWithSiblings(d, r, msgs)))})
 }
 
