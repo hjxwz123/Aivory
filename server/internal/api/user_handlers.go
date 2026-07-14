@@ -175,6 +175,7 @@ var settingsAllowlist = map[string]bool{
 	"code_theme":            true,
 	"user_message_markdown": true,
 	"onboarded":             true,
+	"disable_tools_default": true,
 }
 
 // updateMeSettingsHandler merges patch keys into settings.

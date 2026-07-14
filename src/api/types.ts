@@ -613,6 +613,9 @@ export interface ApiUsageRecord {
   channel_id?: string
   channel_name?: string
   fallback?: boolean
+  /** §4.6-C: display name of the model a TTFT timeout-fallback switched to for this
+   *  row; '' = no model fallback. Distinct from `fallback` (same-model channel retry). */
+  ttft_fallback_model?: string
   status?: string
   /** Upstream failure detail for status='error' rows (admin-only; may embed provider bodies). */
   error?: string

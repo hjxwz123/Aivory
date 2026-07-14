@@ -408,6 +408,8 @@
     "workspaceTag": "空间",
     "fallbackTag": "兜底",
     "fallbackTitle": "由该模型的兜底渠道提供",
+    "ttftFallbackTag": "超时兜底 → {{model}}",
+    "ttftFallbackTitle": "主模型超时未输出，本轮切换到兜底模型 {{model}} 处理",
     "errorDetail": {
       "title": "上游报错",
       "view": "查看报错详情",

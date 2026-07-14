@@ -344,6 +344,7 @@ func (o *Orchestrator) streamWithFallback(
 	provider Provider,
 	primaryModelID string,
 	onEvent func(SseEvent),
+	servedFallbackModel *string,
 ) (*UnifiedResult, error) {
 	ttft := settingInt(o.db, "fallback_ttft_sec")
 	fbID := settingStr(o.db, "fallback_model_id")
@@ -377,10 +378,15 @@ func (o *Orchestrator) streamWithFallback(
 	if parentErr := ctx.Err(); parentErr != nil {
 		return result, err // parent already dead (shutdown) — don't bother
 	}
-	fbReq, fbProvider, ferr := o.buildFallbackRequest(ctx, provReq, fbID)
+	fbReq, fbProvider, fbName, ferr := o.buildFallbackRequest(ctx, provReq, fbID)
 	if ferr != nil {
 		o.logger.Printf("llm: fallback model %q unavailable, keeping upstream error: %v", fbID, ferr)
 		return result, err
+	}
+	// Record the switch for the usage row (§4.6-C) BEFORE streaming, so it is
+	// attributed even when the fallback attempt itself errors.
+	if servedFallbackModel != nil {
+		*servedFallbackModel = fbName
 	}
 	o.logger.Printf("llm: upstream model %q produced no output in %ds — switching to fallback %q", primaryModelID, ttft, fbID)
 	// Single attempt, no watchdog → no chaining. Streams into the SAME onEvent,
@@ -390,18 +396,18 @@ func (o *Orchestrator) streamWithFallback(
 
 // buildFallbackRequest clones the in-flight request but swaps in the fallback
 // model + its provider/channel. Messages, tools, system prompt, RAG are reused.
-func (o *Orchestrator) buildFallbackRequest(ctx context.Context, base UnifiedChatRequest, fbID string) (UnifiedChatRequest, Provider, error) {
+func (o *Orchestrator) buildFallbackRequest(ctx context.Context, base UnifiedChatRequest, fbID string) (UnifiedChatRequest, Provider, string, error) {
 	m, err := store.GetModel(ctx, o.db, fbID)
 	if err != nil {
-		return base, nil, err
+		return base, nil, "", err
 	}
 	ch, err := store.GetChannel(ctx, o.db, m.ChannelID)
 	if err != nil {
-		return base, nil, err
+		return base, nil, "", err
 	}
 	prov, err := o.reg.Get(ch.Type)
 	if err != nil {
-		return base, nil, err
+		return base, nil, "", err
 	}
 	req := base // shallow copy; slices (history/tools/…) are read-only during the stream
 	req.Model = ModelInfo{
@@ -412,7 +418,51 @@ func (o *Orchestrator) buildFallbackRequest(ctx context.Context, base UnifiedCha
 	req.ParamControls = m.ParamControls
 	req.OfficialTools = nil // hosted-tools config is model-specific; fallback uses self-built tools
 	req.ToolModePrompt = m.ToolMode == "prompt"
-	return req, prov, nil
+	// §4.6-C fallback re-gate: the images in `base.History` were inlined against the
+	// PRIMARY model's vision capability (resolveAttachments runs once, before any
+	// fallback). If the fallback model can't see images, those blocks must not ride
+	// to it — a text-only upstream rejects them ("unknown variant `image_url`,
+	// expected `text`"). Rebuild the history without image blocks (base is left
+	// untouched; the slice was shared read-only).
+	if !m.Vision {
+		req.History = stripImageBlocks(base.History)
+	}
+	name := m.Label
+	if name == "" {
+		name = m.RequestID
+	}
+	return req, prov, name, nil
+}
+
+// stripImageBlocks returns a copy of hist with every image block removed, replacing
+// each affected message's images with a single text note. Used when a turn falls
+// back to a non-vision model (§4.6-C): the images were inlined for a vision-capable
+// primary, and forwarding them to a text-only fallback triggers an upstream 400.
+func stripImageBlocks(hist []UnifiedMessage) []UnifiedMessage {
+	out := make([]UnifiedMessage, len(hist))
+	for i, m := range hist {
+		out[i] = m
+		hasImage := false
+		for _, b := range m.Blocks {
+			if b.Kind == "image" {
+				hasImage = true
+				break
+			}
+		}
+		if !hasImage {
+			continue
+		}
+		nb := make([]UnifiedBlock, 0, len(m.Blocks))
+		for _, b := range m.Blocks {
+			if b.Kind == "image" {
+				continue
+			}
+			nb = append(nb, b)
+		}
+		nb = append(nb, UnifiedBlock{Kind: "text", Text: "[image attachment skipped — fallback model lacks vision capability]"})
+		out[i].Blocks = nb
+	}
+	return out
 }
 
 // resolveFallbackChannel returns the creds + id of a model's backup channel
@@ -1267,13 +1317,17 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	reqRecorder.captureAll = o.successRequestLoggingEnabled()
 	providerCtx := contextWithProviderRequestRecorder(ctx, reqRecorder)
 	var result *UnifiedResult
+	// §4.6-C: set to the fallback model's display name when a TTFT timeout switches
+	// models mid-turn, so every usage row for the turn can be marked "timeout
+	// fallback" in admin (distinct from the same-model backup-channel `fallback`).
+	var ttftFallbackModel string
 	if req.Mode == ModeDeepResearch {
 		// Deep Research: plan → multi-round web search + source reading → verify
 		// → comprehensive cited report. Returns the same UnifiedResult shape, so
 		// all finalize/persist/usage/done logic below is path-agnostic.
 		result, err = o.runDeepResearch(providerCtx, provReq, runner, provider, streamToUser, conv, assistantMsg)
 	} else {
-		result, err = o.streamWithFallback(providerCtx, provReq, runner, provider, model.ID, streamToUser)
+		result, err = o.streamWithFallback(providerCtx, provReq, runner, provider, model.ID, streamToUser, &ttftFallbackModel)
 	}
 	// §fallback channel: which channel actually served this turn, for the usage
 	// row. If any request was retried on the fallback, the whole turn is marked
@@ -1357,25 +1411,26 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 				// rounds completed before the stop each keep their own row.
 				for _, rr := range perRequestUsageRows(reqRecorder.snapshots(), model, usage, stopChatCost, timedCredits, o.successRequestLoggingEnabled()) {
 					o.logUsage(ctx, store.UsageLog{
-						UserID:           req.UserID,
-						WorkspaceID:      conv.WorkspaceID,
-						ConversationID:   conv.ID,
-						MessageID:        assistantMsg.ID,
-						ModelID:          model.ID,
-						Purpose:          "chat",
-						InputTokens:      rr.Usage.InputTokens,
-						OutputTokens:     rr.Usage.OutputTokens,
-						CacheReadTokens:  rr.Usage.CacheReadTokens,
-						CacheWriteTokens: rr.Usage.CacheWriteTokens,
-						Cost:             rr.Cost,
-						Currency:         model.Currency,
-						Credits:          rr.Credits,
-						ChannelID:        servedChannelID,
-						Fallback:         usedFallback,
-						RequestMethod:    rr.Method,
-						RequestURL:       rr.URL,
-						RequestHeaders:   rr.Header,
-						RequestBody:      rr.Body,
+						UserID:            req.UserID,
+						WorkspaceID:       conv.WorkspaceID,
+						ConversationID:    conv.ID,
+						MessageID:         assistantMsg.ID,
+						ModelID:           model.ID,
+						Purpose:           "chat",
+						InputTokens:       rr.Usage.InputTokens,
+						OutputTokens:      rr.Usage.OutputTokens,
+						CacheReadTokens:   rr.Usage.CacheReadTokens,
+						CacheWriteTokens:  rr.Usage.CacheWriteTokens,
+						Cost:              rr.Cost,
+						Currency:          model.Currency,
+						Credits:           rr.Credits,
+						ChannelID:         servedChannelID,
+						Fallback:          usedFallback,
+						TTFTFallbackModel: ttftFallbackModel,
+						RequestMethod:     rr.Method,
+						RequestURL:        rr.URL,
+						RequestHeaders:    rr.Header,
+						RequestBody:       rr.Body,
 					})
 				}
 				o.recordQuotaUsage(ctx, req.UserID, model, stopChatCost, payWithCredits)
@@ -1404,7 +1459,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			o.logUsage(ctx, store.UsageLog{
 				UserID: req.UserID, WorkspaceID: conv.WorkspaceID, ConversationID: conv.ID,
 				MessageID: assistantMsg.ID, ModelID: model.ID, Purpose: "chat", Currency: model.Currency,
-				ChannelID: servedChannelID, Fallback: usedFallback, Status: "error",
+				ChannelID: servedChannelID, Fallback: usedFallback, TTFTFallbackModel: ttftFallbackModel, Status: "error",
 				Error:         truncErr(err.Error()),
 				RequestMethod: reqSnapshot.Method, RequestURL: reqSnapshot.URL,
 				RequestHeaders: reqSnapshot.Header, RequestBody: reqSnapshot.Body,
@@ -1450,16 +1505,17 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		// excluded from quota reseeds (store.UsageInWindow skips status='error').
 		reqSnapshot := reqRecorder.snapshot()
 		o.logUsage(ctx, store.UsageLog{
-			UserID:         req.UserID,
-			WorkspaceID:    conv.WorkspaceID,
-			ConversationID: conv.ID,
-			MessageID:      assistantMsg.ID,
-			ModelID:        model.ID,
-			Purpose:        "chat",
-			Currency:       model.Currency,
-			ChannelID:      servedChannelID,
-			Fallback:       usedFallback,
-			Status:         "error",
+			UserID:            req.UserID,
+			WorkspaceID:       conv.WorkspaceID,
+			ConversationID:    conv.ID,
+			MessageID:         assistantMsg.ID,
+			ModelID:           model.ID,
+			Purpose:           "chat",
+			Currency:          model.Currency,
+			ChannelID:         servedChannelID,
+			Fallback:          usedFallback,
+			TTFTFallbackModel: ttftFallbackModel,
+			Status:            "error",
 			// Store the raw upstream failure (status + response body) so an admin can
 			// diagnose it on /admin/usage. It's the same detail we log server-side and
 			// deliberately withhold from the user (§B5); it's admin-only on the wire.
@@ -1565,25 +1621,26 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// they share message_id, so per-turn groupings and quota reseeds hold.
 	for _, rr := range perRequestUsageRows(reqRecorder.snapshots(), model, result.Usage, chatCost, timedCredits, o.successRequestLoggingEnabled()) {
 		o.logUsage(ctx, store.UsageLog{
-			UserID:           req.UserID,
-			WorkspaceID:      conv.WorkspaceID,
-			ConversationID:   conv.ID,
-			MessageID:        assistantMsg.ID,
-			ModelID:          model.ID,
-			Purpose:          "chat",
-			InputTokens:      rr.Usage.InputTokens,
-			OutputTokens:     rr.Usage.OutputTokens,
-			CacheReadTokens:  rr.Usage.CacheReadTokens,
-			CacheWriteTokens: rr.Usage.CacheWriteTokens,
-			Cost:             rr.Cost,
-			Currency:         model.Currency,
-			Credits:          rr.Credits,
-			ChannelID:        servedChannelID,
-			Fallback:         usedFallback,
-			RequestMethod:    rr.Method,
-			RequestURL:       rr.URL,
-			RequestHeaders:   rr.Header,
-			RequestBody:      rr.Body,
+			UserID:            req.UserID,
+			WorkspaceID:       conv.WorkspaceID,
+			ConversationID:    conv.ID,
+			MessageID:         assistantMsg.ID,
+			ModelID:           model.ID,
+			Purpose:           "chat",
+			InputTokens:       rr.Usage.InputTokens,
+			OutputTokens:      rr.Usage.OutputTokens,
+			CacheReadTokens:   rr.Usage.CacheReadTokens,
+			CacheWriteTokens:  rr.Usage.CacheWriteTokens,
+			Cost:              rr.Cost,
+			Currency:          model.Currency,
+			Credits:           rr.Credits,
+			ChannelID:         servedChannelID,
+			Fallback:          usedFallback,
+			TTFTFallbackModel: ttftFallbackModel,
+			RequestMethod:     rr.Method,
+			RequestURL:        rr.URL,
+			RequestHeaders:    rr.Header,
+			RequestBody:       rr.Body,
 		})
 	}
 	// Update the fixed-window FREE quota counter for this user+model (§ user
@@ -1959,6 +2016,16 @@ func (o *Orchestrator) resolveAttachments(ctx context.Context, userID, convID st
 	notedNonVision := false
 	notedPDFRAGOnly := false
 	for i := range hist {
+		// §4.6-C role gate: attachments belong to the user turn that uploaded them.
+		// A non-user row can only carry an image attachment via a copy path (share
+		// import / fork / branch), and inlining it would emit an image content part
+		// on an assistant/model role — which every provider rejects (OpenAI: "unknown
+		// variant `image_url`, expected `text`"; Anthropic: assistant content must be
+		// text/tool_use; Gemini: media not allowed on a model turn). Resolve
+		// attachments on user turns only; the provider serializers gate again in depth.
+		if hist[i].Role != "user" {
+			continue
+		}
 		for _, a := range hist[i].Attachments {
 			if a.Kind != "image" && a.Kind != "pdf" {
 				continue
