@@ -156,6 +156,7 @@ func createConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
+	publishUserEvent(d, r, u.ID, "conversation.created", conv.ID)
 	writeJSON(w, 201, conv)
 }
 
@@ -246,6 +247,11 @@ func importConversationsHandler(d Deps, w http.ResponseWriter, r *http.Request) 
 			continue
 		}
 		ids = append(ids, convID)
+	}
+	if len(ids) > 0 {
+		// One generic created event (no id): an import can add hundreds of
+		// conversations — receivers just refresh their list once.
+		publishUserEvent(d, r, u.ID, "conversation.created", "")
 	}
 	writeJSON(w, 201, map[string]any{"imported": len(ids), "failed": failed, "conversation_ids": ids})
 }
@@ -447,6 +453,7 @@ func updateConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	msgcache.Bump(d.Cache, id)
 	stripServerConvFields(conv)
+	publishUserEvent(d, r, u.ID, "conversation.updated", id)
 	writeJSON(w, 200, conv)
 }
 
@@ -473,6 +480,7 @@ func deleteConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		cleanupRAGConversation(r.Context(), d, cid, "delete conversation "+id)
 	}
 	cleanupStoragePaths(r.Context(), d, storagePaths, "delete conversation "+id)
+	publishUserEvent(d, r, u.ID, "conversation.deleted", id)
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
@@ -665,6 +673,9 @@ func setActiveLeafHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	msgcache.Bump(d.Cache, id)
+	// §23: the active branch is persisted state — other devices viewing this
+	// conversation should switch along instead of rendering a stale branch.
+	publishUserEvent(d, r, u.ID, "conversation.updated", id)
 	msgs, _ := msgcache.ListMessages(r.Context(), d.Cache, d.DB, id, conv.ActiveLeafID)
 	stripServerConvFields(conv)
 	writeJSON(w, 200, map[string]any{
@@ -747,6 +758,7 @@ func forkConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	publishUserEvent(d, r, u.ID, "conversation.created", newConv.ID)
 	writeJSON(w, 201, newConv)
 }
 

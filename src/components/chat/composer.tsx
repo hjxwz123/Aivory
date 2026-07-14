@@ -47,6 +47,7 @@ import { useAuth } from '@/store/auth'
 import { useComposerPrefs } from '@/store/composer-prefs'
 import { useNavigate } from 'react-router-dom'
 import { api, apiUpload, ApiError } from '@/api/client'
+import { blockReload } from '@/lib/sync-guards'
 import { toastStorageQuotaFull } from '@/lib/quota-toast'
 import type { ApiAttachment, ApiConversationFile, ApiDocument } from '@/api/types'
 import { toast } from '@/hooks/use-toast'
@@ -431,6 +432,16 @@ export function Composer({
   useEffect(() => {
     valueRef.current = value
   }, [value])
+
+  // §23: the invisible-upgrade reload must never destroy unsent work. Register
+  // as a reload blocker while the composer holds anything the user would lose:
+  // typed text (thread composers keep it in React state only), staged
+  // attachments, or an active / still-transcribing voice recording.
+  const hasUnsentWork = value.trim().length > 0 || attachments.length > 0 || recording || transcribing
+  useEffect(() => {
+    if (!hasUnsentWork) return
+    return blockReload()
+  }, [hasUnsentWork])
 
   useEffect(() => {
     if (draftScopeRef.current === draftScope) return
