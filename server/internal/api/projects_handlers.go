@@ -214,6 +214,9 @@ func deleteProjectHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, errNotFound)
 		return
 	}
+	// §23: conversations silently lost their project grouping — a generic
+	// (id-less) event makes other devices re-sync their sidebar list.
+	publishUserEvent(d, r, u.ID, "conversation.updated", "")
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 

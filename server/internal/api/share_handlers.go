@@ -183,6 +183,7 @@ func cloneSharedConversationHandler(d Deps, w http.ResponseWriter, r *http.Reque
 		parentID = created.ID
 	}
 	msgcache.Bump(d.Cache, conv.ID)
+	publishUserEvent(d, r, u.ID, "conversation.created", conv.ID) // §23
 	stripServerConvFields(conv)
 	writeJSON(w, 201, conv)
 }

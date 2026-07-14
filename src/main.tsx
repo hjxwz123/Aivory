@@ -12,6 +12,28 @@ import App from './App'
 import './styles/globals.css'
 import 'katex/dist/katex.min.css'
 
+// §23: after a deploy the old tab's next lazy-chunk request 404s (hashed files
+// were replaced) and React.lazy would white-screen. Vite surfaces that failure
+// as a `vite:preloadError` event — reload once to pick up the new build. The
+// timestamp guard stops a reload loop when the server is genuinely down.
+window.addEventListener('vite:preloadError', (event) => {
+  const KEY = 'aivory.chunk-reload-at'
+  let last = 0
+  try {
+    last = Number(sessionStorage.getItem(KEY) || 0)
+  } catch {
+    /* storage unavailable — still attempt one reload */
+  }
+  if (Date.now() - last < 60_000) return // already retried recently — let the error surface
+  try {
+    sessionStorage.setItem(KEY, String(Date.now()))
+  } catch {
+    /* ignore */
+  }
+  event.preventDefault()
+  window.location.reload()
+})
+
 const root = document.getElementById('root')
 if (!root) throw new Error('Root element not found')
 

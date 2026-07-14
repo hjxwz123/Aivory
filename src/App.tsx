@@ -12,6 +12,8 @@ import { useCommandMenu } from '@/hooks/use-command-menu'
 import { useHotkeys } from '@/hooks/use-hotkeys'
 import { useSettings } from '@/store/settings'
 import { useConversations } from '@/store/conversations'
+import { initAppUpdate, maybeApplyUpdate } from '@/lib/app-update'
+import { initRealtime } from '@/lib/realtime'
 
 const Landing = lazy(() => import('@/pages/Landing'))
 const ChatLayout = lazy(() => import('@/pages/chat/ChatLayout'))
@@ -123,12 +125,29 @@ function ScrollToTop() {
 
 export default function App() {
   const location = useLocation()
+  // §23: realtime notify stream (multi-device sync) + invisible version
+  // upgrades. Both are idempotent singletons; the realtime loop follows the
+  // auth store on its own (connects after login, stops on logout).
+  useEffect(() => {
+    initRealtime()
+    initAppUpdate()
+  }, [])
   // §settings modal: when opened over a page, `backgroundLocation` holds that
   // page. The main <Routes> then render IT (so it stays live behind the modal),
   // and a second <Routes> renders the settings modal on top — its backdrop-blur
   // blurs the page behind. Absent (deep link / OAuth ?linked / fresh load) the
   // modal renders over the app shell instead.
   const backgroundLocation = (location.state as SettingsBackgroundState | null)?.backgroundLocation
+  // A route navigation is a safe, invisible moment to apply a pending upgrade
+  // (never fires while a message is streaming — see maybeApplyUpdate). Overlay
+  // navigations (the settings modal opening / switching tabs over a live
+  // backdrop) don't count: the user perceives them as staying on the page, so
+  // a full reload there would be anything but invisible. The upgrade applies
+  // on the closing navigation back to the background page instead.
+  const isOverlayNavigation = Boolean(backgroundLocation)
+  useEffect(() => {
+    if (!isOverlayNavigation) maybeApplyUpdate('navigation')
+  }, [location.pathname, isOverlayNavigation])
 
   return (
     <TooltipProvider delayDuration={280} skipDelayDuration={120}>

@@ -14,6 +14,8 @@
  */
 import type { ApiError as ApiErrorShape } from './types'
 import { toast as _sseToast } from '@/hooks/use-toast'
+import { getDeviceId } from '@/lib/device-id'
+import { blockReload } from '@/lib/sync-guards'
 import { hmacSha256 } from '@/lib/hmac-sha256'
 
 
@@ -148,6 +150,9 @@ async function apiRequest<T>(path: string, opts: ApiOptions, retried: boolean): 
     accept: 'application/json',
     ...(isForm ? {} : { 'content-type': 'application/json' }),
     ...(memoryToken ? { authorization: `Bearer ${memoryToken}` } : {}),
+    // §23 realtime sync: lets the server stamp broadcast events with their
+    // origin tab, so this tab can ignore its own echo.
+    'x-device-id': getDeviceId(),
     ...opts.headers,
   }
   if (memoryToken) {
@@ -224,6 +229,7 @@ async function xhrUpload(
   const headers: Record<string, string> = {
     accept: 'application/json',
     ...(memoryToken ? { authorization: `Bearer ${memoryToken}` } : {}),
+    'x-device-id': getDeviceId(),
     ...opts.headers,
   }
   if (memoryToken) {
@@ -234,7 +240,10 @@ async function xhrUpload(
     headers['x-req-token'] = await _sign(memoryToken, ts, nonce, path)
   }
 
-  return new Promise((resolve, reject) => {
+  // §23: an auto-reload (invisible upgrade) must never kill an upload mid-
+  // flight — register as a reload blocker for the XHR's lifetime.
+  const releaseReloadBlock = blockReload()
+  return new Promise<{ status: number; ok: boolean; parsed: unknown }>((resolve, reject) => {
     const xhr = new XMLHttpRequest()
     let settled = false
     const cleanup = () => {
@@ -291,7 +300,7 @@ async function xhrUpload(
       resolve({ status: xhr.status, ok: xhr.status >= 200 && xhr.status < 300, parsed })
     }
     xhr.send(body)
-  })
+  }).finally(releaseReloadBlock)
 }
 
 // Banned-account hook. The auth store registers a handler that clears the
@@ -372,6 +381,7 @@ export async function* streamSSE(
         'content-type': 'application/json',
         ...(memoryToken ? { authorization: `Bearer ${memoryToken}` } : {}),
         ...(memoryToken ? { 'x-req-ts': String(sseTs), 'x-req-nonce': sseNonce, 'x-req-token': sseSig } : {}),
+        'x-device-id': getDeviceId(),
       },
       body: JSON.stringify(body),
       signal,
@@ -425,6 +435,7 @@ export async function* streamSSEGet(
   path: string,
   signal?: AbortSignal,
   lastEventId?: string,
+  sseOpts?: { silentReconnect?: boolean },
 ): AsyncGenerator<{ event: string; data: unknown; id?: string }> {
   let currentLastId = lastEventId ?? ''
   let retryCount = 0
@@ -437,6 +448,7 @@ export async function* streamSSEGet(
         accept: 'text/event-stream',
         ...(memoryToken ? { authorization: `Bearer ${memoryToken}` } : {}),
         ...(currentLastId ? { 'Last-Event-ID': currentLastId } : {}),
+        'x-device-id': getDeviceId(),
       },
       signal,
     })
@@ -475,7 +487,9 @@ export async function* streamSSEGet(
       if (signal?.aborted || retryCount >= MAX_SSE_RETRIES) throw readErr
       retryCount++
       const delay = Math.pow(SSE_RECONNECT_BACKOFF_FACTOR, retryCount - 1) * SSE_RECONNECT_BACKOFF_BASE_MS
-      if (!reconnectToastShown) {
+      // Background streams (the §23 notify stream) reconnect silently — a toast
+      // for an invisible plumbing connection would only alarm the user.
+      if (!reconnectToastShown && !sseOpts?.silentReconnect) {
         reconnectToastShown = true
         _sseToast.warning('Reconnecting…', 'Connection dropped, retrying automatically.')
       }

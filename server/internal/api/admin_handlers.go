@@ -762,6 +762,12 @@ func getConversationAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 // No ownership filter — the requireAdmin gate is the authority.
 func deleteConversationAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	id := pathParam(r, "id")
+	// Capture the owner before the rows disappear — their open tabs get the
+	// §23 delete event so the conversation vanishes live, not on next reload.
+	ownerID := ""
+	if conv, err := store.GetConversationByID(r.Context(), d.DB, id); err == nil {
+		ownerID = conv.UserID
+	}
 	ids, _ := store.ConversationTreeIDs(r.Context(), d.DB, id)
 	storagePaths, _ := store.StoragePathsForConversations(r.Context(), d.DB, ids)
 	children, err := store.DeleteConversationByID(r.Context(), d.DB, id)
@@ -782,6 +788,7 @@ func deleteConversationAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		cleanupRAGConversation(r.Context(), d, cid, "admin delete conversation "+id)
 	}
 	cleanupStoragePaths(r.Context(), d, storagePaths, "admin delete conversation "+id)
+	publishUserEvent(d, r, ownerID, "conversation.deleted", id) // §23 (owner's devices)
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
