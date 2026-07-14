@@ -31,9 +31,9 @@ type promptL10n struct {
 	toolPython     string
 	toolSearchKB   string
 	toolImage      string
-	toolUseSkill   string
 	toolSaveMemory string
 	toolMultiRound string
+	toolCite       string // native mode only: cite web/KB results inline
 	sandboxHeader  string
 	sandboxBody    string
 	skillsAvailHeader  string
@@ -93,7 +93,7 @@ var promptL10nTable = map[string]promptL10n{
 		toolPython:     "- Use python_execute for calculations, data analysis, or generating downloadable files.\n",
 		toolSearchKB:   "- Use search_knowledge_base when a question is grounded in user-uploaded documents.\n",
 		toolImage:      "- Use image_generate to produce or edit images.\n",
-		toolUseSkill:   "- Call use_skill(name) to load a skill's full instructions before using it.\n",
+		toolCite:       "- Cite your sources: when you use a web_search or search_knowledge_base result, place its [n] marker inline right after the claim it supports.\n",
 		toolSaveMemory: "- Use save_memory only when the user explicitly says \"remember\".\n",
 		toolMultiRound: "- You may call tools multiple times in one turn. If a tool result is empty, irrelevant, or weak, adjust the input and run it again before answering rather than giving up or guessing.\n",
 		sandboxHeader:  "\n## Files uploaded to this conversation (sandbox: /workspace/uploads/)\n",
@@ -124,7 +124,7 @@ var promptL10nTable = map[string]promptL10n{
 		toolPython:     "- 计算、数据分析或生成可下载文件时使用 python_execute。\n",
 		toolSearchKB:   "- 当问题基于用户上传的文档时使用 search_knowledge_base。\n",
 		toolImage:      "- 使用 image_generate 生成或编辑图片。\n",
-		toolUseSkill:   "- 在使用某个技能前，先调用 use_skill(name) 加载它的完整说明。\n",
+		toolCite:       "- 标注来源：使用 web_search 或 search_knowledge_base 的结果时，在其支撑的说法紧后放置该结果的 [n] 标记进行行内引用。\n",
 		toolSaveMemory: "- 仅当用户明确说“记住”时才使用 save_memory。\n",
 		toolMultiRound: "- 你可以在一轮中多次调用工具。如果某次工具结果为空、无关或质量差，请调整输入再试一次，而不是放弃或猜测。\n",
 		sandboxHeader:  "\n## 上传到本对话的文件（沙箱：/workspace/uploads/）\n",
@@ -155,7 +155,7 @@ var promptL10nTable = map[string]promptL10n{
 		toolPython:     "- 計算、資料分析或產生可下載檔案時使用 python_execute。\n",
 		toolSearchKB:   "- 當問題基於使用者上傳的文件時使用 search_knowledge_base。\n",
 		toolImage:      "- 使用 image_generate 產生或編輯圖片。\n",
-		toolUseSkill:   "- 在使用某個技能前，先呼叫 use_skill(name) 載入它的完整說明。\n",
+		toolCite:       "- 標註來源：使用 web_search 或 search_knowledge_base 的結果時，在其支撐的說法緊後放置該結果的 [n] 標記進行行內引用。\n",
 		toolSaveMemory: "- 僅當使用者明確說「記住」時才使用 save_memory。\n",
 		toolMultiRound: "- 你可以在一輪中多次呼叫工具。如果某次工具結果為空、無關或品質差，請調整輸入再試一次，而不是放棄或猜測。\n",
 		sandboxHeader:  "\n## 上傳到本對話的檔案（沙箱：/workspace/uploads/）\n",
@@ -186,7 +186,7 @@ var promptL10nTable = map[string]promptL10n{
 		toolPython:     "- 計算・データ分析・ダウンロード可能なファイルの生成には python_execute を使ってください。\n",
 		toolSearchKB:   "- 質問がユーザーのアップロード文書に基づく場合は search_knowledge_base を使ってください。\n",
 		toolImage:      "- 画像の生成や編集には image_generate を使ってください。\n",
-		toolUseSkill:   "- スキルを使う前に use_skill(name) を呼び出して、その完全な指示を読み込んでください。\n",
+		toolCite:       "- 出典を示す：web_search や search_knowledge_base の結果を使うときは、その主張の直後に結果の [n] マーカーをインラインで置いてください。\n",
 		toolSaveMemory: "- save_memory は、ユーザーが明確に「覚えて」と言ったときだけ使ってください。\n",
 		toolMultiRound: "- 1 ターン内でツールを複数回呼び出せます。ツールの結果が空・無関係・不十分なときは、あきらめたり推測したりせず、入力を調整してもう一度実行してから回答してください。\n",
 		sandboxHeader:  "\n## この会話にアップロードされたファイル（サンドボックス：/workspace/uploads/）\n",
@@ -217,7 +217,7 @@ var promptL10nTable = map[string]promptL10n{
 		toolPython:     "- Utilise python_execute pour les calculs, l'analyse de données ou la génération de fichiers téléchargeables.\n",
 		toolSearchKB:   "- Utilise search_knowledge_base quand une question repose sur des documents téléversés par l'utilisateur.\n",
 		toolImage:      "- Utilise image_generate pour produire ou modifier des images.\n",
-		toolUseSkill:   "- Appelle use_skill(name) pour charger les instructions complètes d'une compétence avant de l'utiliser.\n",
+		toolCite:       "- Cite tes sources : quand tu utilises un résultat de web_search ou search_knowledge_base, place son marqueur [n] en ligne juste après l'affirmation qu'il appuie.\n",
 		toolSaveMemory: "- N'utilise save_memory que lorsque l'utilisateur dit explicitement « retiens ».\n",
 		toolMultiRound: "- Tu peux appeler des outils plusieurs fois dans un même tour. Si un résultat d'outil est vide, hors sujet ou faible, ajuste l'entrée et relance-le avant de répondre, plutôt que d'abandonner ou de deviner.\n",
 		sandboxHeader:  "\n## Fichiers téléversés dans cette conversation (bac à sable : /workspace/uploads/)\n",

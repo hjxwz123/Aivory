@@ -2251,36 +2251,45 @@ func composeSystemPrompt(o systemPromptOpts) string {
 		has[n] = true
 	}
 	if o.ToolMode != "none" && len(o.ToolNames) > 0 {
-		guidance := []struct{ name, line string }{
-			{"web_search", l.toolWebSearch},
-			{"python_execute", l.toolPython},
-			{"search_knowledge_base", l.toolSearchKB},
-			{"image_generate", l.toolImage},
-			{"use_skill", l.toolUseSkill},
-			{"save_memory", l.toolSaveMemory},
-		}
-		wrote := false
-		for _, g := range guidance {
-			// use_skill is a native tool only — in prompt/none mode skills are
-			// inlined (segment ③), so don't advertise the native call here.
-			if g.name == "use_skill" && o.ToolMode != "native" {
-				continue
+		if o.ToolMode == "native" {
+			// Native function-calling: each enabled tool already ships its NAME +
+			// DESCRIPTION + input schema in the request's `tools` array (the
+			// descriptions are in fact more detailed than a one-line hint), so
+			// per-tool "use X for Y" guidance here would just duplicate them.
+			// Emit ONLY the cross-cutting steering the schema doesn't carry:
+			// cite web/KB results inline, and retry weak tool results. use_skill
+			// usage is already mandated by the "## Skills available" section.
+			b.WriteString("\n\n")
+			b.WriteString(l.toolHeader)
+			if has["web_search"] || has["search_knowledge_base"] {
+				b.WriteString(l.toolCite)
 			}
-			if has[g.name] {
-				if !wrote {
-					b.WriteString("\n\n")
-					b.WriteString(l.toolHeader)
-					wrote = true
-				}
-				b.WriteString(g.line)
-			}
-		}
-		if wrote {
-			// Multi-round tools: every tool can be called repeatedly in one turn.
-			// If a result is empty, off-topic, or low-quality, refine the
-			// arguments and call again before answering — don't settle for a weak
-			// first result.
 			b.WriteString(l.toolMultiRound)
+		} else {
+			// Prompt mode (§4.13): the model has NO tool schema — it learns each
+			// tool ONLY from this section, so list every enabled one. use_skill is
+			// excluded (prompt/none mode inlines skills in segment ③).
+			guidance := []struct{ name, line string }{
+				{"web_search", l.toolWebSearch},
+				{"python_execute", l.toolPython},
+				{"search_knowledge_base", l.toolSearchKB},
+				{"image_generate", l.toolImage},
+				{"save_memory", l.toolSaveMemory},
+			}
+			wrote := false
+			for _, g := range guidance {
+				if has[g.name] {
+					if !wrote {
+						b.WriteString("\n\n")
+						b.WriteString(l.toolHeader)
+						wrote = true
+					}
+					b.WriteString(g.line)
+				}
+			}
+			if wrote {
+				b.WriteString(l.toolMultiRound)
+			}
 		}
 
 		// §4.5.1 "quality watershed": when the user asks for a downloadable

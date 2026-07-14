@@ -39,6 +39,32 @@ func TestComposeSystemPromptNoToolsDropsToolGuidance(t *testing.T) {
 	}
 }
 
+// Native function-calling ships each tool's name+description+schema in the
+// request, so the system prompt must NOT duplicate per-tool "use X for Y" hints
+// — only the cross-cutting steering the schema lacks (cite sources, retry weak
+// results). Prompt mode has no schema, so it MUST list every enabled tool.
+func TestToolGuidanceNativeVsPrompt(t *testing.T) {
+	native := composeSystemPrompt(systemPromptOpts{
+		ModelLabel: "X", ToolMode: "native", ToolNames: []string{"web_search", "python_execute"},
+	})
+	if !strings.Contains(native, "## Tool guidance") {
+		t.Fatalf("native turn missing tool-guidance header:\n%s", native)
+	}
+	if strings.Contains(native, "Use web_search for time-sensitive") || strings.Contains(native, "Use python_execute for") {
+		t.Errorf("native mode must NOT duplicate per-tool descriptions:\n%s", native)
+	}
+	if !strings.Contains(native, "Cite your sources") || !strings.Contains(native, "call tools multiple times") {
+		t.Errorf("native mode must keep the cross-cutting steering:\n%s", native)
+	}
+	// Prompt mode: no schema, so each enabled tool is listed.
+	prompt := composeSystemPrompt(systemPromptOpts{
+		ModelLabel: "X", ToolMode: "prompt", ToolNames: []string{"web_search", "python_execute"},
+	})
+	if !strings.Contains(prompt, "Use web_search for time-sensitive") || !strings.Contains(prompt, "Use python_execute for") {
+		t.Errorf("prompt mode must list each enabled tool:\n%s", prompt)
+	}
+}
+
 // §4.13-B: a none-mode prompt WOULD inline skill instructions (models that can't
 // call use_skill get them inline) — so "disable tools = no skills" MUST be
 // enforced at skill-LOAD time in the orchestrator (which clears Skills/SkillsFull
