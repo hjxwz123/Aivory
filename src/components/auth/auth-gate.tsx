@@ -68,7 +68,10 @@ export function AuthGate({ children }: { children: ReactNode }) {
     // §personalization: mirror the "disable tools by default" preference so the
     // composer + new-chat re-arm can read it synchronously. Mirror-only here (runs
     // on every settings change) — the live noTools seed is done once per login below.
-    useComposerPrefs.getState().setDefaultNoTools(user.settings.disable_tools_default === true)
+    // Opt-out semantics: absent counts as ON (new accounts and everyone who never
+    // touched the toggle default to tools-disabled); only an explicit `false`
+    // — the user flipping it off in Settings — keeps tools armed by default.
+    useComposerPrefs.getState().setDefaultNoTools(user.settings.disable_tools_default !== false)
   }, [status, user?.settings, syncUserSettings])
 
   // Once authenticated, hydrate the per-user data caches. This is keyed by user
@@ -87,7 +90,8 @@ export function AuthGate({ children }: { children: ReactNode }) {
     // (this effect is keyed by user id, not settings) so a later settings change
     // can't re-arm mid-session. Only arms (never un-arms), so it can't clobber a
     // session where the user kept tools on; new-chat re-arms it (sidebar).
-    if (useAuth.getState().user?.settings?.disable_tools_default === true) {
+    // Opt-out semantics (same as the mirror above): absent counts as ON.
+    if (useAuth.getState().user?.settings?.disable_tools_default !== false) {
       useComposerPrefs.getState().setNoTools(true)
     }
     void useWorkspaces

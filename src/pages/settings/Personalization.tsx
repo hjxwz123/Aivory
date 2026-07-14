@@ -64,7 +64,9 @@ export default function Personalization() {
         setNickname(typeof s.persona_nickname === 'string' ? s.persona_nickname : '')
         setCustom(typeof s.persona_custom === 'string' ? s.persona_custom : '')
         if (typeof s.memory_enabled === 'boolean') setPrivacy({ memoriesEnabled: s.memory_enabled })
-        if (typeof s.disable_tools_default === 'boolean') setDefaultNoTools(s.disable_tools_default)
+        // Opt-out semantics (matches auth-gate): absent counts as ON — only an
+        // explicit false (the user turned it off here) keeps tools enabled.
+        setDefaultNoTools(s.disable_tools_default !== false)
         setLoaded(true)
       })
       .catch(() => setLoaded(true))
