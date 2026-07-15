@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ZoomIn, ZoomOut, RotateCcw, Maximize2, Download, X } from 'lucide-react'
 import { useTheme } from '@/store/theme'
@@ -136,6 +136,12 @@ interface Transform {
 const MIN_SCALE = 0.2
 const MAX_SCALE = 12
 const clampScale = (s: number) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, s))
+
+// "Fit to view" may upscale a small diagram up to this factor so it doesn't
+// sit tiny in a wide viewport; larger diagrams still shrink to fit.
+const FIT_MAX_SCALE = 4
+// Breathing room (px) kept around a fitted diagram.
+const FIT_PADDING = 24
 
 function usePanZoom() {
   const [view, setView] = useState<Transform>({ scale: 1, x: 0, y: 0 })
@@ -283,34 +289,51 @@ function DiagramViewport({ svg, wheelZoom = false, fullscreen = false, onFullscr
   const theme = useTheme((s) => s.resolved)
   const containerRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
+  // Natural (viewBox) size of the injected SVG; drives the scaled wrapper.
+  const [nat, setNat] = useState<{ w: number; h: number } | null>(null)
   const { view, setView, zoomAt, onPointerDown, onPointerMove, onPointerUp, dragging } = usePanZoom()
 
-  // Center + scale the diagram to fit the viewport (never upscaling past 1×).
+  // Center + scale the diagram to fill the viewport. Small diagrams are
+  // upscaled (up to FIT_MAX_SCALE) instead of being left tiny; large ones
+  // shrink to fit. Zoom is applied by resizing the SVG (see render), so a
+  // fitted-up diagram stays crisp.
   const fit = useCallback(() => {
     const c = containerRef.current
-    const svgEl = getSvgEl(c)
-    if (!c || !svgEl) return
+    if (!c || !nat) return
     const cw = c.clientWidth
     const ch = c.clientHeight
-    const { w, h } = svgNaturalSize(svgEl)
-    if (w <= 0 || h <= 0) return
-    const scale = clampScale(Math.min(cw / w, ch / h, 1))
+    const { w, h } = nat
+    if (w <= 0 || h <= 0 || cw <= 0 || ch <= 0) return
+    const avail = Math.min((cw - FIT_PADDING) / w, (ch - FIT_PADDING) / h)
+    const scale = clampScale(Math.min(avail, FIT_MAX_SCALE))
     setView({ scale, x: (cw - w * scale) / 2, y: (ch - h * scale) / 2 })
-  }, [setView])
+  }, [nat, setView])
 
-  // Normalise the injected SVG to its natural size (mermaid ships an inline
-  // max-width that would otherwise cap zoom), then fit.
-  useEffect(() => {
-    const svgEl = getSvgEl(containerRef.current)
-    if (!svgEl) return
+  // Measure the injected SVG's natural (viewBox) size and strip mermaid's
+  // inline width/height/max-width caps, then fit — all in a layout effect so
+  // the sized wrapper is correct before the first paint (no zero-size flash).
+  // The SVG then fills its scale-driven wrapper as a vector, so zooming
+  // re-rasterises crisply instead of upscaling a cached bitmap.
+  useLayoutEffect(() => {
+    const c = containerRef.current
+    const svgEl = getSvgEl(c)
+    if (!c || !svgEl) {
+      setNat(null)
+      return
+    }
     const { w, h } = svgNaturalSize(svgEl)
-    svgEl.setAttribute('width', String(w))
-    svgEl.setAttribute('height', String(h))
     svgEl.style.maxWidth = 'none'
+    svgEl.style.removeProperty('width')
     svgEl.style.removeProperty('height')
-    const id = requestAnimationFrame(fit)
-    return () => cancelAnimationFrame(id)
-  }, [svg, fit])
+    setNat({ w, h })
+    const cw = c.clientWidth
+    const ch = c.clientHeight
+    if (w > 0 && h > 0 && cw > 0 && ch > 0) {
+      const avail = Math.min((cw - FIT_PADDING) / w, (ch - FIT_PADDING) / h)
+      const scale = clampScale(Math.min(avail, FIT_MAX_SCALE))
+      setView({ scale, x: (cw - w * scale) / 2, y: (ch - h * scale) / 2 })
+    }
+  }, [svg, setView])
 
   // Wheel zoom via a non-passive native listener (React's onWheel is passive,
   // so preventDefault there is ignored).
@@ -375,13 +398,22 @@ function DiagramViewport({ svg, wheelZoom = false, fullscreen = false, onFullscr
         <div
           ref={contentRef}
           style={{
-            transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})`,
+            // Pan only — a pure translate never rasterises, so it stays crisp.
+            // Zoom lives in the wrapper's size below, not in this transform.
+            transform: `translate(${view.x}px, ${view.y}px)`,
             transformOrigin: '0 0',
           }}
-          className="absolute left-0 top-0 p-4 will-change-transform [&_svg]:h-auto [&_svg]:max-w-none"
-          // SVG is sanitised by mermaid's securityLevel:'strict'.
-          dangerouslySetInnerHTML={{ __html: svg }}
-        />
+          className={cn('absolute left-0 top-0', dragging && 'will-change-transform')}
+        >
+          <div
+            // Size the SVG box to natural × scale; the SVG fills it as a vector,
+            // so the browser re-rasterises crisply at every zoom level.
+            style={nat ? { width: nat.w * view.scale, height: nat.h * view.scale } : undefined}
+            className="[&_svg]:block [&_svg]:!h-full [&_svg]:!w-full [&_svg]:!max-w-none"
+            // SVG is sanitised by mermaid's securityLevel:'strict'.
+            dangerouslySetInnerHTML={{ __html: svg }}
+          />
+        </div>
       </div>
 
       <div className="absolute right-2 top-2 flex items-center gap-0.5 rounded-[9px] border border-[var(--color-border)] bg-[var(--color-surface-raised)] p-0.5 shadow-[var(--shadow-md)]">

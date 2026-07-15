@@ -40,9 +40,11 @@ export default defineConfig({
       '/api': {
         target: process.env.VITE_API_TARGET ?? 'http://localhost:8787',
         changeOrigin: true,
-        // SSE: keep the response stream open all the way to the browser
-        // (Vite proxies HTTP/1.1 fine; no buffering interceptor).
-        ws: false,
+        // SSE (fetch streaming) proxies fine over HTTP/1.1. ws:true forwards the
+        // WebSocket upgrade for /api/audio/stream (live Volcano voice) to the Go
+        // backend in dev; HMR runs on Vite's own socket, so this is scoped to
+        // /api and doesn't touch it.
+        ws: true,
       },
     },
   },

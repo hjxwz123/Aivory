@@ -1018,6 +1018,14 @@ var settingsKeys = []string{
 	// Voice transcription (whisper) — admin-configurable, live-reloaded per call.
 	// base_url defaults to https://api.openai.com; model defaults to whisper-1.
 	"audio_transcribe_base_url", "audio_transcribe_api_key", "audio_transcribe_model",
+	// STT provider selector: "gpt" (OpenAI-compatible, record-then-transcribe,
+	// the keys above) or "volcano" (火山引擎 豆包 live streaming ASR, the keys
+	// below). volcano_asr_access_token is masked as a secret (see
+	// sensitiveKeywords). Live-reloaded per call, same as whisper.
+	"audio_transcribe_provider",
+	"volcano_asr_app_id", "volcano_asr_access_token", "volcano_asr_resource_id",
+	"volcano_asr_ws_url", "volcano_asr_model_name",
+	"volcano_asr_enable_itn", "volcano_asr_enable_punc", "volcano_asr_enable_ddc",
 	// §4.4 web search backend — admin-configurable, live-reloaded each call.
 	// Provider ∈ {"", "serper", "brave", "searxng", "auto"}. SearXNG is the
 	// self-hosted option and only needs base_url (no api_key). Empty provider

@@ -226,6 +226,12 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("GET", "/api/me/images", requireAuth(d, listMyImages))
 	mux.handle("GET", "/api/user-groups", requireAuth(d, listUserGroupsPublic))
 	mux.handle("POST", "/api/audio/transcriptions", requireAuth(d, transcribeAudioHandler))
+	// Which STT provider is active (gpt = record-then-transcribe, volcano = live
+	// streaming), so the composer picks the right mic flow.
+	mux.handle("GET", "/api/audio/capabilities", requireAuth(d, audioCapabilitiesHandler))
+	// Live Volcano (火山引擎 豆包) ASR relay: browser streams 16 kHz PCM over this
+	// WebSocket, we proxy it to Volcano and stream transcripts back.
+	mux.handle("GET", "/api/audio/stream", requireAuth(d, audioStreamHandler))
 
 	// Workspaces (§workspaces) — collaborative spaces. Join is invite-link-only;
 	// the token resolver + join are rate-limited per IP (uniform 404 on unknown

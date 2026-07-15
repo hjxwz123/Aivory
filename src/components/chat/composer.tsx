@@ -54,6 +54,7 @@ import { toast } from '@/hooks/use-toast'
 import { cn, uid, modKey } from '@/lib/utils'
 import { fileIconFor } from '@/lib/file-icon'
 import { encodeWavFromBlob } from '@/lib/audio'
+import { startVoiceStream, type VoiceStreamController } from '@/lib/audio-stream'
 import { ProgressRing } from '@/components/ui/progress-ring'
 import { envNum } from '@/lib/env-config'
 
@@ -115,6 +116,20 @@ interface ComposerProps {
 
 const MAX_LEN = envNum('VITE_AIVORY_MAX_LEN', 12_000)
 const EMPTY_PARAM_VALUES: Record<string, unknown> = {}
+
+// Which speech-to-text provider is active decides the mic flow: "gpt" records a
+// clip then POSTs it (Whisper); "volcano" streams live. Fetched once per tab and
+// shared across composer instances; defaults to the safe record path on failure.
+let sttProviderPromise: Promise<string> | null = null
+function loadSttProvider(): Promise<string> {
+  if (!sttProviderPromise) {
+    sttProviderPromise = audioApi
+      .capabilities()
+      .then((c) => c.provider || 'gpt')
+      .catch(() => 'gpt')
+  }
+  return sttProviderPromise
+}
 
 // §4.6-A upload size caps. The /api/files handler is authoritative; we read the
 // admin-configured per-kind caps from the upload policy once (module-level
@@ -443,6 +458,27 @@ export function Composer({
   const [transcribing, setTranscribing] = useState(false)
   const recorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
+  // Volcano live-streaming voice (§ Volcano ASR). `sttProvider` picks the flow;
+  // `streamConnecting` covers the mic-acquire + socket-connect gap before audio
+  // flows. streamBaseRef holds the composer text the live transcript appends to.
+  const [sttProvider, setSttProvider] = useState('gpt')
+  const [streamConnecting, setStreamConnecting] = useState(false)
+  const streamCtlRef = useRef<VoiceStreamController | null>(null)
+  const streamBaseRef = useRef('')
+  const streamCancelRef = useRef(false)
+
+  useEffect(() => {
+    let live = true
+    void loadSttProvider().then((p) => {
+      if (live) setSttProvider(p)
+    })
+    return () => {
+      live = false
+    }
+  }, [])
+
+  // Never leave the mic hot / a socket open when the composer unmounts.
+  useEffect(() => () => streamCtlRef.current?.cancel(), [])
   const updateValue = useCallback(
     (next: string) => {
       valueRef.current = next
@@ -460,7 +496,8 @@ export function Composer({
   // as a reload blocker while the composer holds anything the user would lose:
   // typed text (thread composers keep it in React state only), staged
   // attachments, or an active / still-transcribing voice recording.
-  const hasUnsentWork = value.trim().length > 0 || attachments.length > 0 || recording || transcribing
+  const hasUnsentWork =
+    value.trim().length > 0 || attachments.length > 0 || recording || transcribing || streamConnecting
   useEffect(() => {
     if (!hasUnsentWork) return
     return blockReload()
@@ -472,12 +509,81 @@ export function Composer({
     updateValue(draftScope ? cachedDraft ?? initialValue : initialValue)
   }, [cachedDraft, draftScope, initialValue, updateValue])
 
+  // Mic toggle. Volcano streams live; every other provider records a clip and
+  // transcribes it. A second click always stops whatever is active.
   async function toggleVoice() {
     if (transcribing) return
-    if (recording) {
-      recorderRef.current?.stop()
+    if (recording || streamConnecting || streamCtlRef.current) {
+      stopVoice()
       return
     }
+    if (sttProvider === 'volcano') {
+      await startStreaming()
+      return
+    }
+    await startRecording()
+  }
+
+  function stopVoice() {
+    if (streamCtlRef.current) {
+      // Listening → stop the mic and wait for the final transcript.
+      setTranscribing(true)
+      streamCtlRef.current.stop()
+      return
+    }
+    if (streamConnecting) {
+      // Still connecting — no controller yet; cancel as soon as it's ready.
+      streamCancelRef.current = true
+      setStreamConnecting(false)
+      return
+    }
+    recorderRef.current?.stop()
+  }
+
+  // Volcano live path: append the incremental transcript to whatever text the
+  // composer already held when recording started.
+  async function startStreaming() {
+    setStreamConnecting(true)
+    streamCancelRef.current = false
+    const base = valueRef.current
+    streamBaseRef.current = base.trim() ? base.trimEnd() + ' ' : ''
+    try {
+      const ctl = await startVoiceStream({
+        onReady: () => {
+          if (streamCancelRef.current) {
+            streamCtlRef.current?.cancel()
+            return
+          }
+          setStreamConnecting(false)
+          setRecording(true)
+        },
+        onPartial: (text) => updateValue(streamBaseRef.current + text),
+        onFinal: (text) => {
+          if (text) {
+            updateValue(streamBaseRef.current + text)
+            requestAnimationFrame(() => ref.current?.focus())
+          }
+        },
+        onError: () => toast.error(t('composer.voiceFailed')),
+        onClose: () => {
+          streamCtlRef.current = null
+          setRecording(false)
+          setStreamConnecting(false)
+          setTranscribing(false)
+        },
+      })
+      streamCtlRef.current = ctl
+      // A stop requested during the connect window applies now.
+      if (streamCancelRef.current) ctl.cancel()
+    } catch (e) {
+      setStreamConnecting(false)
+      const msg = e instanceof Error ? e.message : ''
+      toast.error(msg === 'unsupported' ? t('composer.voiceUnsupported') : t('composer.voicePermission'))
+    }
+  }
+
+  // Whisper / OpenAI-compatible path: record a clip via MediaRecorder, then POST.
+  async function startRecording() {
     if (typeof MediaRecorder === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
       toast.error(t('composer.voiceUnsupported'))
       return
@@ -1442,12 +1548,28 @@ export function Composer({
                 disabled={transcribing}
                 className={cn(
                   'flex w-full items-center gap-3 rounded-[10px] px-3 py-2.5 text-left text-[15px] hover:bg-[var(--color-bg-muted)] active:bg-[var(--color-bg-muted)]',
-                  recording ? 'text-[var(--color-danger)]' : 'text-[var(--color-fg)]',
+                  recording
+                    ? 'text-[var(--color-danger)]'
+                    : streamConnecting
+                      ? 'text-[var(--color-secondary)]'
+                      : 'text-[var(--color-fg)]',
                   transcribing && 'cursor-not-allowed opacity-60',
                 )}
               >
-                <Mic size={18} className={cn('shrink-0', !recording && 'text-[var(--color-fg-muted)]')} aria-hidden />
-                {recording ? t('composer.voiceStop') : t('composer.voice')}
+                <Mic
+                  size={18}
+                  className={cn(
+                    'shrink-0',
+                    !recording && !streamConnecting && 'text-[var(--color-fg-muted)]',
+                    (recording || streamConnecting) && 'animate-[streaming-pulse_1600ms_ease-in-out_infinite]',
+                  )}
+                  aria-hidden
+                />
+                {recording
+                  ? t('composer.voiceStop')
+                  : streamConnecting
+                    ? t('composer.voiceConnecting')
+                    : t('composer.voice')}
               </button>
 
               {featureItems.length > 0 ? (
@@ -1553,25 +1675,37 @@ export function Composer({
               </button>
             </Tooltip>
 
-            <Tooltip content={recording ? t('composer.voiceStop') : t('composer.voice')}>
+            <Tooltip
+              content={
+                recording
+                  ? t('composer.voiceStop')
+                  : streamConnecting
+                    ? t('composer.voiceConnecting')
+                    : t('composer.voice')
+              }
+            >
               <button
                 type="button"
                 onClick={() => void toggleVoice()}
                 disabled={transcribing}
                 aria-label={t('composer.voice')}
-                aria-pressed={recording}
+                aria-pressed={recording || streamConnecting}
                 className={cn(
                   'inline-flex items-center justify-center size-8 rounded-[8px] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
                   recording
                     ? 'bg-[var(--color-danger-soft)] text-[var(--color-danger)]'
-                    : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
+                    : streamConnecting
+                      ? 'bg-[var(--color-secondary-soft)] text-[var(--color-secondary)]'
+                      : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
                   transcribing && 'opacity-60 cursor-not-allowed',
                 )}
               >
                 <Mic
                   size={15}
                   aria-hidden
-                  className={cn(recording && 'animate-[streaming-pulse_1600ms_ease-in-out_infinite]')}
+                  className={cn(
+                    (recording || streamConnecting) && 'animate-[streaming-pulse_1600ms_ease-in-out_infinite]',
+                  )}
                 />
               </button>
             </Tooltip>

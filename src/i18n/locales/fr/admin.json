@@ -454,8 +454,14 @@
   },
   "audio": {
     "title": "Voix",
-    "lead": "Reconnaissance vocale du micro (endpoint compatible OpenAI).",
+    "lead": "Reconnaissance vocale du micro. Choisissez un fournisseur : endpoint compatible OpenAI, ou ASR en streaming temps réel de Volcano Engine (Doubao).",
     "saved": "Paramètres vocaux enregistrés",
+    "provider": {
+      "label": "Fournisseur",
+      "hint": "GPT enregistre un extrait puis le transcrit ; Volcano affiche le texte en direct pendant que vous parlez.",
+      "gpt": "Compatible OpenAI (Whisper)",
+      "volcano": "Volcano Engine · Doubao (streaming direct)"
+    },
     "fields": {
       "model": "Modèle de transcription",
       "modelHint": "p. ex. whisper-1 ; envoyé comme modèle.",
@@ -463,6 +469,25 @@
       "baseUrlHint": "Par défaut https://api.openai.com. Tout endpoint audio compatible OpenAI.",
       "apiKey": "Clé d'API",
       "apiKeyHint": "Clé Bearer de l'endpoint. Vide = saisie vocale désactivée."
+    },
+    "volcano": {
+      "sectionHint": "ASR en streaming temps réel via WebSocket. Créez une application dans la console Volcano et activez la ressource ASR streaming Doubao (SAUC bigmodel).",
+      "appId": "App ID",
+      "appIdHint": "X-Api-App-Key de la console Volcano.",
+      "accessToken": "Access Token",
+      "accessTokenHint": "X-Api-Access-Key. Vide = saisie vocale désactivée ; laissez le masque pour conserver le jeton enregistré.",
+      "resourceId": "Resource ID",
+      "resourceIdHint": "Par défaut volc.bigasr.sauc.duration (horaire). Passez à une ressource concurrente ou 2.0 seedasr selon votre offre.",
+      "wsUrl": "URL WebSocket",
+      "wsUrlHint": "Par défaut l'endpoint de streaming bidirectionnel bigmodel.",
+      "model": "Nom du modèle",
+      "modelHint": "Envoyé comme request.model_name. Par défaut bigmodel.",
+      "punc": "Ponctuation",
+      "puncHint": "Insère la ponctuation dans la transcription.",
+      "itn": "Mise en forme des nombres (ITN)",
+      "itnHint": "Écrit les nombres et dates en toutes lettres, p. ex. « 一九七〇 » → « 1970 ».",
+      "ddc": "Suppression des hésitations",
+      "ddcHint": "Lisse les mots de remplissage et les répétitions."
     }
   },
   "settings": {

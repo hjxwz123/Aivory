@@ -454,8 +454,14 @@
   },
   "audio": {
     "title": "音声",
-    "lead": "コンポーザーのマイク音声をテキスト化(OpenAI 互換)。",
+    "lead": "コンポーザーのマイク音声をテキスト化。プロバイダーを選択:OpenAI 互換、または火山エンジン(Doubao)のリアルタイム・ストリーミング ASR。",
     "saved": "音声設定を保存しました",
+    "provider": {
+      "label": "プロバイダー",
+      "hint": "GPT は録音してから文字起こし。Volcano は話しながらリアルタイムに表示。",
+      "gpt": "OpenAI 互換(Whisper)",
+      "volcano": "火山エンジン · Doubao(リアルタイム)"
+    },
     "fields": {
       "model": "文字起こしモデル",
       "modelHint": "例 whisper-1。model として送信。",
@@ -463,6 +469,25 @@
       "baseUrlHint": "既定 https://api.openai.com。OpenAI 互換の音声エンドポイント可。",
       "apiKey": "APIキー",
       "apiKeyHint": "エンドポイントの Bearer キー。空欄で音声入力を無効化。"
+    },
+    "volcano": {
+      "sectionHint": "WebSocket によるリアルタイム・ストリーミング ASR。火山コンソールでアプリを作成し、Doubao ストリーミング音声認識(SAUC bigmodel)リソースを有効化してください。",
+      "appId": "App ID",
+      "appIdHint": "火山コンソールの X-Api-App-Key。",
+      "accessToken": "Access Token",
+      "accessTokenHint": "X-Api-Access-Key。空欄で音声入力を無効化。マスクのままにすると保存済みトークンを保持。",
+      "resourceId": "Resource ID",
+      "resourceIdHint": "既定 volc.bigasr.sauc.duration(時間課金)。プランに応じて並行版や 2.0 seedasr リソースに変更。",
+      "wsUrl": "WebSocket URL",
+      "wsUrlHint": "既定は bigmodel の双方向ストリーミング・エンドポイント。",
+      "model": "モデル名",
+      "modelHint": "request.model_name として送信。既定 bigmodel。",
+      "punc": "句読点",
+      "puncHint": "文字起こしに句読点を挿入。",
+      "itn": "数字整形(ITN)",
+      "itnHint": "数字や日付を表記形式に変換(例:「一九七〇」→「1970」)。",
+      "ddc": "言い淀み除去",
+      "ddcHint": "フィラーや繰り返しをなめらかに整える。"
     }
   },
   "settings": {

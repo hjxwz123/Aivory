@@ -454,8 +454,14 @@
   },
   "audio": {
     "title": "語音",
-    "lead": "輸入框麥克風的語音轉文字(OpenAI 相容的轉寫介面)。",
+    "lead": "輸入框麥克風的語音轉文字。可選管道:OpenAI 相容轉寫,或火山引擎(豆包)即時串流 ASR。",
     "saved": "語音設定已儲存",
+    "provider": {
+      "label": "管道",
+      "hint": "GPT 先錄音再轉寫;火山邊說邊出字,即時上螢幕。",
+      "gpt": "OpenAI 相容(Whisper)",
+      "volcano": "火山引擎 · 豆包(即時串流)"
+    },
     "fields": {
       "model": "轉寫模型",
       "modelHint": "如 whisper-1,作為 model 傳送。",
@@ -463,6 +469,25 @@
       "baseUrlHint": "預設 https://api.openai.com,可指向任意 OpenAI 相容音訊端點。",
       "apiKey": "API Key",
       "apiKeyHint": "轉寫介面的 Bearer 金鑰。留空停用語音輸入。"
+    },
+    "volcano": {
+      "sectionHint": "基於 WebSocket 的即時串流 ASR。請在火山控制台建立應用並開通豆包串流語音辨識(SAUC bigmodel)資源。",
+      "appId": "App ID",
+      "appIdHint": "火山控制台的 X-Api-App-Key。",
+      "accessToken": "Access Token",
+      "accessTokenHint": "X-Api-Access-Key。留空停用語音輸入;保留遮罩則沿用已儲存的 Token。",
+      "resourceId": "Resource ID",
+      "resourceIdHint": "預設 volc.bigasr.sauc.duration(小時版)。可依方案改用並發版或 2.0 seedasr 資源。",
+      "wsUrl": "WebSocket 位址",
+      "wsUrlHint": "預設使用 bigmodel 雙向串流端點。",
+      "model": "模型名稱",
+      "modelHint": "作為 request.model_name 傳送,預設 bigmodel。",
+      "punc": "標點",
+      "puncHint": "在轉寫結果中加入標點。",
+      "itn": "數字規整(ITN)",
+      "itnHint": "將數字、日期轉為書面形式,如「一九七〇」→「1970」。",
+      "ddc": "語義順滑",
+      "ddcHint": "去除口頭語、重複等不流暢內容。"
     }
   },
   "settings": {

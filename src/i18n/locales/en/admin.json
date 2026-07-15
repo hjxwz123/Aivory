@@ -454,8 +454,14 @@
   },
   "audio": {
     "title": "Voice",
-    "lead": "Speech-to-text for the composer mic, via an OpenAI-compatible transcription endpoint.",
+    "lead": "Speech-to-text for the composer mic. Pick a provider: an OpenAI-compatible endpoint, or Volcano Engine (Doubao) live streaming ASR.",
     "saved": "Voice settings saved",
+    "provider": {
+      "label": "Provider",
+      "hint": "GPT records a clip then transcribes it; Volcano streams and shows text live as you speak.",
+      "gpt": "OpenAI-compatible (Whisper)",
+      "volcano": "Volcano Engine · Doubao (live streaming)"
+    },
     "fields": {
       "model": "Transcription model",
       "modelHint": "e.g. whisper-1; sent as the model.",
@@ -463,6 +469,25 @@
       "baseUrlHint": "Default https://api.openai.com. Any OpenAI-compatible audio endpoint works.",
       "apiKey": "API key",
       "apiKeyHint": "Bearer key for the endpoint. Empty disables voice input."
+    },
+    "volcano": {
+      "sectionHint": "Live streaming ASR over WebSocket. Create an app in the Volcano console and enable the Doubao streaming ASR (SAUC bigmodel) resource.",
+      "appId": "App ID",
+      "appIdHint": "X-Api-App-Key from the Volcano console.",
+      "accessToken": "Access Token",
+      "accessTokenHint": "X-Api-Access-Key. Empty disables voice input; leave the mask to keep the saved token.",
+      "resourceId": "Resource ID",
+      "resourceIdHint": "Default volc.bigasr.sauc.duration (hourly). Switch to a concurrent or 2.0 seedasr resource to match your plan.",
+      "wsUrl": "WebSocket URL",
+      "wsUrlHint": "Default is the bigmodel two-way streaming endpoint.",
+      "model": "Model name",
+      "modelHint": "Sent as request.model_name. Default bigmodel.",
+      "punc": "Punctuation",
+      "puncHint": "Insert punctuation into the transcript.",
+      "itn": "Number formatting (ITN)",
+      "itnHint": "Render numbers and dates in written form, e.g. “一九七〇” → “1970”.",
+      "ddc": "Disfluency removal",
+      "ddcHint": "Smooth out filler words and repetitions."
     }
   },
   "settings": {
