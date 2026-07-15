@@ -441,9 +441,22 @@ function tableBlock(table: Tokens.Table, ctx: BlockCtx): Table {
 
 // ------------------------------------------------------------- document
 
+// XML 1.0 (which OOXML uses) forbids most control characters — only tab, LF and
+// CR are allowed below U+0020. The `docx` library escapes <>& but passes these
+// raw into word/document.xml, which makes Word reject the WHOLE file ("Word
+// encountered an error trying to open the file"). Model output / pasted content
+// occasionally carries a stray NUL, backspace, vertical-tab, etc., so strip them
+// (and the U+FFFE/U+FFFF non-characters) from ALL text up front — one pass here
+// covers paragraphs, tables, code, list items and the extracted math TeX.
+// eslint-disable-next-line no-control-regex
+const XML_INVALID_CHARS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/g
+function stripXmlInvalidChars(s: string): string {
+  return s.replace(XML_INVALID_CHARS, '')
+}
+
 /** Build the docx Document from a markdown string (pure; also used by tests). */
 export function buildDocxDocument(markdown: string): Document {
-  const { text, slots } = extractMath(markdown ?? '')
+  const { text, slots } = extractMath(stripXmlInvalidChars(markdown ?? ''))
   const tokens = marked.lexer(text, { gfm: true, breaks: true })
   const ctx: BlockCtx = { slots, quoteDepth: 0, orderedRefs: [] }
   let blocks = walkBlocks(tokens, ctx)
@@ -492,7 +505,8 @@ export function buildDocxDocument(markdown: string): Document {
 }
 
 function sanitizeFilename(name: string): string {
-  const cleaned = name.replace(/[\\/:*?"<>| -]/g, ' ').replace(/\s+/g, ' ').trim()
+  // eslint-disable-next-line no-control-regex
+  const cleaned = name.replace(/[\\/:*?"<>|\u0000-\u001F -]/g, ' ').replace(/\s+/g, ' ').trim()
   return (cleaned || 'message').slice(0, 80)
 }
 
