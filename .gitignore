@@ -51,3 +51,6 @@ docs/设计实现核对报告.md
 
 # Docs site (kept locally; only the built output is published, to gh-pages)
 docs-site/
+
+# Vendored reference demo (火山引擎 SAUC ASR), not part of the shipped app
+sauc_go/
