@@ -21,6 +21,9 @@ interface ModelStore {
   /** §verify: true when an admin configured an auditor model, so the composer
    *  shows the Verify toggle. */
   verifyAvailable: boolean
+  /** §fast-mode: true when an admin configured a fast model, so the composer
+   *  offers the 快速 option. */
+  fastAvailable: boolean
   loaded: boolean
   loading: boolean
   error: string | null
@@ -36,6 +39,7 @@ export const useModels = create<ModelStore>((set, get) => ({
   tags: [],
   defaultId: '',
   verifyAvailable: false,
+  fastAvailable: false,
   loaded: false,
   loading: false,
   error: null,
@@ -65,6 +69,7 @@ export const useModels = create<ModelStore>((set, get) => ({
         tags,
         defaultId: userDefault?.id || globalDefault?.id || firstEnabled?.id || resp.models[0]?.id || '',
         verifyAvailable: Boolean(resp.verify_available),
+        fastAvailable: Boolean(resp.fast_available),
         loaded: true,
         loading: false,
       })

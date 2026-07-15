@@ -594,7 +594,7 @@
       "fallbackModelHint": "If the chosen model returns nothing in time, answer with this one instead (transparent to the user).",
       "fallbackNone": "Disabled",
       "fallbackTtft": "First-token timeout (s)",
-      "fallbackTtftHint": "Cut the upstream after this many seconds with no output. 0 = off.",
+      "fallbackTtftHint": "Cut the upstream after this many seconds with not even one response byte (matches what most relay/gateway dashboards call \"TTFT\"). 0 = off.",
       "imagePromptModel": "Image prompt model",
       "imagePromptModelHint": "Text model that refines image prompts before drawing. None = skip.",
       "verifyModel": "Verify (auditor) model",

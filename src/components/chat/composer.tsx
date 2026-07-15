@@ -61,6 +61,9 @@ import { envNum } from '@/lib/env-config'
 interface ComposerProps {
   modelId: string
   onModelChange: (id: string) => void
+  /** §fast-mode: current 快速/进阶 selection + setter (per-conversation). */
+  fast?: boolean
+  onFastChange?: (fast: boolean) => void
   onSubmit: (
     text: string,
     attachments: Attachment[],
@@ -75,6 +78,8 @@ interface ComposerProps {
       noTools?: boolean
       /** §4.4-B: forced non-tool web search (only with noTools). */
       webSearch?: boolean
+      /** §fast-mode: run this turn in fast mode. */
+      fast?: boolean
     },
   ) => void
   onStop?: () => void
@@ -330,6 +335,8 @@ function FeatureRow({ item, onAfter }: { item: FeatureItem; onAfter?: () => void
 export function Composer({
   modelId,
   onModelChange,
+  fast,
+  onFastChange,
   onSubmit,
   onStop,
   streaming,
@@ -659,10 +666,15 @@ export function Composer({
   // §verify: only offer the toggle when an admin has configured an auditor model.
   const verifyAvailable = useModels((s) => s.verifyAvailable)
   const paramControls = currentModel?.param_controls
-  const effectiveMode = !isImageMode && researchEnabled ? mode : 'default'
-  const effectiveVerify = verify && verifyAvailable && !isImageMode
-  // §4.13-B disable-tools + forced web search — inapplicable to image models.
-  const effectiveNoTools = noTools && !isImageMode
+  // §fast-mode: a fast turn disallows Verify / Deep Research / no-tools / the "+"
+  // menu (the picker is a chat model, so isImageMode is already false). When fast
+  // is active every other feature is forced off.
+  const fastAvailable = useModels((s) => s.fastAvailable)
+  const effectiveFast = Boolean(fast) && fastAvailable
+  const effectiveMode = !effectiveFast && !isImageMode && researchEnabled ? mode : 'default'
+  const effectiveVerify = !effectiveFast && verify && verifyAvailable && !isImageMode
+  // §4.13-B disable-tools + forced web search — inapplicable to image models / fast.
+  const effectiveNoTools = !effectiveFast && noTools && !isImageMode
   const effectiveWebSearch = effectiveNoTools && forceWebSearch
   const handleParamValuesChange = useCallback(
     (next: Record<string, unknown>) => {
@@ -728,6 +740,7 @@ export function Composer({
         verify: effectiveVerify ? true : undefined,
         noTools: effectiveNoTools ? true : undefined,
         webSearch: effectiveWebSearch ? true : undefined,
+        fast: effectiveFast ? true : undefined,
       })
       updateValue('')
       // Stop any leftover pollers and revoke blob: URLs — uploadAttachment already
@@ -1083,7 +1096,8 @@ export function Composer({
   // and vice-versa; the store setters enforce the same rules on toggle.
   const researchActive = effectiveMode === 'deep-research'
   const featureItems: FeatureItem[] = []
-  if (!isImageMode) {
+  // §fast-mode hides the entire "+" menu (no verify / DR / no-tools in fast mode).
+  if (!isImageMode && !effectiveFast) {
     if (researchEnabled) {
       featureItems.push({
         key: 'deep-research',
@@ -1611,7 +1625,7 @@ export function Composer({
               so we drop the composer's to keep the row uncluttered. New-chat
               (ChatHome) has no header picker, so it keeps this one. */}
           {!modelPickerInHeader ? (
-            <ModelPicker value={modelId} onChange={onModelChange} className="min-w-0 max-w-[40vw]" />
+            <ModelPicker value={modelId} onChange={onModelChange} fast={fast} onFastChange={onFastChange} className="min-w-0 max-w-[40vw]" />
           ) : null}
 
           <div className="ml-auto">{sendBtn}</div>
@@ -1784,7 +1798,7 @@ export function Composer({
           ) : null}
           {/* Pinned — model picker + send/stop, always visible (never shrinks). */}
           <div className="flex shrink-0 items-center gap-1.5 pl-1">
-            <ModelPicker value={modelId} onChange={onModelChange} />
+            <ModelPicker value={modelId} onChange={onModelChange} fast={fast} onFastChange={onFastChange} />
             {sendBtn}
           </div>
         </div>

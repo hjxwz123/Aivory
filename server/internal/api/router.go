@@ -318,6 +318,7 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("PATCH", "/api/admin/models/:id", requireAdmin(d, updateModelAdmin))
 	mux.handle("DELETE", "/api/admin/models/:id", requireAdmin(d, deleteModelAdmin))
 	mux.handle("PUT", "/api/admin/models/:id/skills", requireAdmin(d, setModelSkillsAdmin))
+	mux.handle("PUT", "/api/admin/models/:id/fast", requireAdmin(d, setFastModelAdmin))
 	// Model tags (§ model tags): admin CRUD of the assignable label set.
 	mux.handle("GET", "/api/admin/model-tags", requireAdmin(d, listModelTagsAdmin))
 	mux.handle("POST", "/api/admin/model-tags", requireAdmin(d, createModelTagAdmin))

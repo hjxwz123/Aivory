@@ -81,6 +81,11 @@ export default function ChatHome() {
   // so a new chat honours the picker instead of always using the default model.
   const [pickedModelId, setPickedModelId] = useState<string | null>(null)
   const modelId = pickedModelId ?? (drawDefault || defaultModelId)
+  // §fast-mode: new chats default to 快速 when a fast model is configured. Draw
+  // mode (image models) is always 进阶.
+  const fastAvailable = useModels((s) => s.fastAvailable)
+  const [pickedFast, setPickedFast] = useState<boolean | null>(null)
+  const fast = !drawMode && (pickedFast ?? fastAvailable)
 
   // When the user attaches a file BEFORE sending, we must create the
   // conversation up front so the upload is scoped + RAG-ingested (§4.11.2).
@@ -272,6 +277,7 @@ export default function ChatHome() {
       verify?: boolean
       noTools?: boolean
       webSearch?: boolean
+      fast?: boolean
     } = {},
   ) {
     if (startedRef.current) return
@@ -294,7 +300,9 @@ export default function ChatHome() {
       const conv = adoptConversation(pending)
       // The picker is the source of truth: a conversation created earlier for an
       // attachment may carry a stale model, so persist the picked one first.
-      if (modelId && conv.modelId !== modelId) void setModel(conv.id, modelId)
+      // §fast-mode: skip this for a fast turn — setModel would clear conv.fast; the
+      // send's fast flag drives the (hidden) model server-side instead.
+      if (!opts.fast && modelId && conv.modelId !== modelId) void setModel(conv.id, modelId)
       clearComposerDraft(draftScope)
       navigate(`/chat/${conv.id}`)
       void sendMessage({
@@ -308,6 +316,7 @@ export default function ChatHome() {
         verify: opts.verify,
         noTools: opts.noTools,
         webSearch: opts.webSearch,
+        fast: opts.fast,
       })
       return
     }
@@ -332,6 +341,7 @@ export default function ChatHome() {
       verify: opts.verify,
       noTools: opts.noTools,
       webSearch: opts.webSearch,
+      fast: opts.fast,
       // Swap temp→real id in the URL only if the user is STILL on the optimistic
       // thread. If they navigated elsewhere during the create round-trip, leave
       // them be — the stream still lands in the (re-keyed) real conversation,
@@ -393,6 +403,8 @@ export default function ChatHome() {
               <Composer
                 modelId={modelId}
                 onModelChange={setPickedModelId}
+                fast={fast}
+                onFastChange={setPickedFast}
                 onSubmit={(text, atts, opts) => void startNew(text, atts, opts)}
                 draftScope={draftScope}
                 conversationId={pendingConversationId}
@@ -417,7 +429,7 @@ export default function ChatHome() {
                           icon={s.icon}
                           title={title}
                           prompt={prompt}
-                          onClick={() => void startNew(prompt, [], resolveArmedTurnFlags())}
+                          onClick={() => void startNew(prompt, [], { ...resolveArmedTurnFlags(), fast })}
                           className="h-full"
                         />
                       </div>

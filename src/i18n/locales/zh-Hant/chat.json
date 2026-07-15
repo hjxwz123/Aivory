@@ -322,6 +322,11 @@
     "last_30": "近 30 天",
     "older": "更早"
   },
+  "fastMode": {
+    "label": "快速",
+    "pickerDesc": "更快的對話，模型由平台優選。",
+    "advancedSection": "進階"
+  },
   "modelPicker": {
     "section": "模型",
     "moreSoon": "更多模型即將上線",

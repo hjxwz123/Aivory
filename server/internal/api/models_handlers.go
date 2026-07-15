@@ -74,7 +74,21 @@ func listModelsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
-	writeJSON(w, 200, modelsResponse(d, r, models))
+	// §fast-mode: the fast model is resolved server-side and never named to the
+	// user, so drop it from the advanced ("进阶") picker. `fast_available` tells the
+	// composer whether to offer the 快速 option at all.
+	fastAvailable := false
+	filtered := models[:0]
+	for _, m := range models {
+		if m.Fast {
+			fastAvailable = true
+			continue
+		}
+		filtered = append(filtered, m)
+	}
+	resp := modelsResponse(d, r, filtered)
+	resp["fast_available"] = fastAvailable
+	writeJSON(w, 200, resp)
 }
 
 // listImageModelsHandler returns enabled image models.

@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { useTranslation } from 'react-i18next'
-import { GitBranch, X, ZoomIn, ZoomOut, GripHorizontal, Maximize2 } from 'lucide-react'
+import { GitBranch, X, ZoomIn, ZoomOut, GripHorizontal, Maximize2, Zap } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { mediaQuery } from '@/lib/design-tokens'
@@ -545,11 +545,18 @@ export function ConversationOutline({ conversation, scrollContainerRef, onClose 
                           ) : null}
                           <AvatarFallback>{initials(n.msg.authorName || displayName)}</AvatarFallback>
                         </Avatar>
+                      ) : n.msg.fast ? (
+                        // §fast-mode: hide the real model — bolt + 快速.
+                        <Zap size={15} aria-hidden className="text-[var(--color-fg-muted)]" />
                       ) : (
                         <ModelIcon icon={model?.icon} size={17} />
                       )}
                       <span className="truncate text-[12px] font-semibold text-[var(--color-fg)]">
-                        {isUser ? n.msg.authorName || displayName : model?.label || n.msg.modelLabel || t('assistant')}
+                        {isUser
+                          ? n.msg.authorName || displayName
+                          : n.msg.fast
+                            ? t('fastMode.label', { defaultValue: '快速' })
+                            : model?.label || n.msg.modelLabel || t('assistant')}
                       </span>
                     </span>
                     <span

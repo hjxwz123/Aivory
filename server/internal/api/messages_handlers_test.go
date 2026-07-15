@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"aivory/server/internal/llm"
+	"aivory/server/internal/store"
 )
 
 func TestEnsureAttachedDocumentsReadyRequiresReadyStatus(t *testing.T) {
@@ -77,6 +78,31 @@ func TestEnsureAttachedDocumentsReadyAllowsSandboxSheet(t *testing.T) {
 	// document — the send must NOT be rejected.
 	if err := ensureAttachedDocumentsReady(ctx, db, "c1", []llm.Attachment{{ID: "f_sheet", Kind: "doc"}}); err != nil {
 		t.Fatalf("sandbox spreadsheet rejected: %v", err)
+	}
+}
+
+// §fast-mode: redactCost is the single user-facing chokepoint that must blank a
+// fast turn's real model identity (model_id / model_label / provider) while
+// keeping `fast:true` so the client renders 快速. A normal turn's identity is
+// untouched.
+func TestRedactCostMasksFastModelIdentity(t *testing.T) {
+	ems := []enrichedMessage{
+		{Message: store.Message{ID: "m1", Fast: true, ModelID: "secret_id", ModelLabel: "SecretModel", Provider: "anthropic", Cost: 1.23, Currency: "USD"}},
+		{Message: store.Message{ID: "m2", Fast: false, ModelID: "gpt", ModelLabel: "GPT", Provider: "openai", Cost: 0.5, Currency: "USD"}},
+	}
+	out := redactCost(ems)
+	if out[0].ModelID != "" || out[0].ModelLabel != "" || out[0].Provider != "" {
+		t.Fatalf("fast turn's model identity leaked: %+v", out[0])
+	}
+	if !out[0].Fast {
+		t.Fatal("fast flag must survive redaction so the client can render 快速")
+	}
+	if out[1].ModelID != "gpt" || out[1].ModelLabel != "GPT" || out[1].Provider != "openai" {
+		t.Fatalf("a normal turn's model identity must be untouched: %+v", out[1])
+	}
+	// Cost is redacted for both regardless (pre-existing behaviour).
+	if out[0].Cost != 0 || out[1].Cost != 0 {
+		t.Fatalf("cost not redacted: %v %v", out[0].Cost, out[1].Cost)
 	}
 }
 

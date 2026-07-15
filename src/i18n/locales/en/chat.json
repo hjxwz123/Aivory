@@ -322,6 +322,11 @@
     "last_30": "Previous 30 days",
     "older": "Older"
   },
+  "fastMode": {
+    "label": "Fast",
+    "pickerDesc": "Faster replies on a platform-picked model.",
+    "advancedSection": "Advanced"
+  },
   "modelPicker": {
     "section": "Models",
     "moreSoon": "More models coming soon",

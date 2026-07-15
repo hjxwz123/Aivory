@@ -163,10 +163,14 @@ export interface Message {
   /** Set when the turn was refused because the user's group ran out of quota for
    *  this model (§ user groups) — rendered as a "quota reached → upgrade" card. */
   quotaExceeded?: boolean
-  /** Model that generated this assistant message (§7.2-6 “由 … 生成”). */
+  /** Model that generated this assistant message (§7.2-6 “由 … 生成”). §fast-mode:
+   *  blanked by the server for a fast turn — the client renders "快速" instead. */
   modelId?: string
   /** Snapshot of the model's display name at message creation time. Used as fallback when the model has been deleted. */
   modelLabel?: string
+  /** §fast-mode: this turn ran in fast mode. The real model is hidden — render
+   *  the localized "快速" label + a generic bolt icon everywhere the model would show. */
+  fast?: boolean
   /** When the user is editing a previously sent message. */
   editing?: boolean
   /** Reactions. */
@@ -208,6 +212,9 @@ export interface Conversation {
   createdAt: number
   updatedAt: number
   modelId: string
+  /** §fast-mode: the 快速/进阶 picker selection. true = fast (model resolved
+   *  server-side + hidden); false/undefined = advanced with `modelId`. */
+  fast?: boolean
   pinned?: boolean
   starred?: boolean
   archived?: boolean

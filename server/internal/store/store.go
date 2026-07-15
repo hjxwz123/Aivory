@@ -175,6 +175,11 @@ func Migrate(db *sql.DB) error {
 	// Persisted ingest heartbeat lets the RAG watchdog distinguish a live long-
 	// running parse from a task abandoned by timeout, crash, or lease expiry.
 	addDocumentIngestUpdatedAt := `ALTER TABLE documents ADD COLUMN ingest_updated_at INTEGER NOT NULL DEFAULT 0`
+	// §fast-mode: the admin's single fast model, plus the per-conversation and
+	// per-message markers that let the user boundary mask the real model name.
+	addModelFast := `ALTER TABLE models ADD COLUMN fast INTEGER NOT NULL DEFAULT 0`
+	addConvFast := `ALTER TABLE conversations ADD COLUMN fast INTEGER NOT NULL DEFAULT 0`
+	addMsgFast := `ALTER TABLE messages ADD COLUMN fast INTEGER NOT NULL DEFAULT 0`
 	if usePostgres {
 		schema = schemaPGSQL
 		addImageRef = `ALTER TABLE chunks ADD COLUMN IF NOT EXISTS image_ref TEXT`
@@ -232,6 +237,9 @@ func Migrate(db *sql.DB) error {
 		addUsageTTFTFallback = `ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS ttft_fallback_model TEXT NOT NULL DEFAULT ''`
 		addFileDraft = `ALTER TABLE files ADD COLUMN IF NOT EXISTS draft INTEGER NOT NULL DEFAULT 0`
 		addDocumentIngestUpdatedAt = `ALTER TABLE documents ADD COLUMN IF NOT EXISTS ingest_updated_at BIGINT NOT NULL DEFAULT 0`
+		addModelFast = `ALTER TABLE models ADD COLUMN IF NOT EXISTS fast INTEGER NOT NULL DEFAULT 0`
+		addConvFast = `ALTER TABLE conversations ADD COLUMN IF NOT EXISTS fast INTEGER NOT NULL DEFAULT 0`
+		addMsgFast = `ALTER TABLE messages ADD COLUMN IF NOT EXISTS fast INTEGER NOT NULL DEFAULT 0`
 	}
 	if err := dedupeSkillNames(db); err != nil {
 		return fmt.Errorf("dedupe skill names: %w", err)
@@ -264,6 +272,7 @@ func Migrate(db *sql.DB) error {
 		addModelFallbackChannel, addUsageChannel, addUsageFallback, addUsageStatus, addUsageError,
 		addUsageRequestMethod, addUsageRequestURL, addUsageRequestHeaders, addUsageRequestBody, addUsageTTFTFallback,
 		addFileDraft, addDocumentIngestUpdatedAt,
+		addModelFast, addConvFast, addMsgFast,
 	} {
 		_, _ = db.Exec(ddl)
 	}
@@ -311,13 +320,13 @@ func Migrate(db *sql.DB) error {
 	// fatal) instead of surfacing as broken reads later. WHERE 1=0 makes each probe
 	// O(1). If you add an ALTER above, add its column here.
 	columnChecks := map[string][]string{
-		"messages":        {"credits", "model_label", "search_text", "gen_ms", "feedback", "verify", "author_id"},
+		"messages":        {"credits", "model_label", "search_text", "gen_ms", "feedback", "verify", "author_id", "fast"},
 		"users":           {"group_id", "totp_secret", "totp_enabled", "group_expires_at", "previous_group_id", "password_set", "password_changed_at", "last_seen_at", "credits_permanent", "sort_order"},
 		"usage_logs":      {"credits", "workspace_id", "channel_id", "fallback", "status", "error", "request_method", "request_url", "request_headers", "request_body"},
 		"user_groups":     {"max_projects", "max_kbs", "credit_allowance", "credit_period_seconds", "max_workspaces", "is_public", "max_storage_mb"},
-		"models":          {"official_tools", "moderation_enabled", "moderation_mode", "tags", "image_timeout_sec", "research_enabled", "fallback_channel_id"},
+		"models":          {"official_tools", "moderation_enabled", "moderation_mode", "tags", "image_timeout_sec", "research_enabled", "fallback_channel_id", "fast"},
 		"refresh_tokens":  {"user_agent", "ip", "location", "last_seen"},
-		"conversations":   {"inline_source_conv", "inline_parent_id", "inline_quote", "workspace_id"},
+		"conversations":   {"inline_source_conv", "inline_parent_id", "inline_quote", "workspace_id", "fast"},
 		"projects":        {"workspace_id"},
 		"knowledge_bases": {"workspace_id"},
 		"chunks":          {"image_ref"},

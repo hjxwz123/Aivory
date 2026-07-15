@@ -317,6 +317,9 @@ export interface ApiModel {
   stream: boolean
   /** Whether this chat model exposes Deep Research in the composer. Absent from older backends ⇒ enabled. */
   research_enabled?: boolean
+  /** §fast-mode: THE fast model. Present only on the ADMIN model list (the public
+   *  /api/models list filters the fast model out of the advanced picker). */
+  fast?: boolean
   system_prompt: string
   param_controls: unknown
   /** OpenAI Responses hosted tools to enable; empty/absent = use system tools (§2.3-B). */
@@ -447,6 +450,8 @@ export interface ApiConversation {
   title: string
   provider: string
   model_id: string
+  /** §fast-mode: conversation runs in fast mode (model hidden). */
+  fast?: boolean
   kb_ids: string[]
   rag_mode: 'auto' | 'inject' | 'tool'
   summary_blocks: unknown[]
@@ -518,6 +523,9 @@ export interface ApiMessage {
   model_id: string
   /** Human-readable model name snapshotted at message creation time. Remains populated even after the model is deleted. */
   model_label?: string
+  /** §fast-mode: this turn ran in fast mode; the server blanks model_id/model_label
+   *  so the client renders "快速". */
+  fast?: boolean
   blocks: ApiBlock[]
   attachments: ApiAttachment[]
   citations: ApiCitation[]

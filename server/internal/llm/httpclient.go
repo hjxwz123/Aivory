@@ -3,9 +3,11 @@ package llm
 import (
 	"context"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -73,6 +75,7 @@ func doProviderRequest(
 	recordProviderRequest(ctx, primaryReq)
 	armProviderTTFTWatchdog(ctx)
 	resp, err := providerHTTPClient.Do(primaryReq)
+	wrapFirstByteBody(ctx, resp)
 	if m.Fallback == nil || !retryableUpstreamFailure(resp, err) {
 		return resp, err
 	}
@@ -91,6 +94,7 @@ func doProviderRequest(
 	}
 	armProviderTTFTWatchdog(ctx)
 	resp2, err2 := providerHTTPClient.Do(fbReq)
+	wrapFirstByteBody(ctx, resp2)
 	// The fallback endpoint served the (final) response — mark the turn fallback
 	// whether or not it ultimately succeeded, so an error row is still attributed
 	// to the fallback channel.
@@ -98,6 +102,32 @@ func doProviderRequest(
 		fallbackUsed.Store(true)
 	}
 	return resp2, err2
+}
+
+// wrapFirstByteBody wraps resp.Body (if present) so the TTFT watchdog disarms
+// on the first byte actually read from the upstream — see the doc comment on
+// providerTTFTWatchdog for why "first byte", not "first parsed content event".
+// A no-op when resp/resp.Body is nil (transport error) or no watchdog is armed
+// for this ctx (fallback_ttft_sec disabled).
+func wrapFirstByteBody(ctx context.Context, resp *http.Response) {
+	if resp == nil || resp.Body == nil {
+		return
+	}
+	resp.Body = &firstByteBody{ReadCloser: resp.Body, ctx: ctx}
+}
+
+type firstByteBody struct {
+	io.ReadCloser
+	ctx  context.Context
+	once sync.Once
+}
+
+func (b *firstByteBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	if n > 0 {
+		b.once.Do(func() { markProviderTTFTFirstByte(b.ctx) })
+	}
+	return n, err
 }
 
 // retryableUpstreamFailure reports whether a primary provider call failed in a

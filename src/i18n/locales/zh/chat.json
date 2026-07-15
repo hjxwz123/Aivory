@@ -71,7 +71,7 @@
       "title": "功能",
       "researchDesc": "多轮规划、联网搜索并生成带引用的研究报告。",
       "verifyDesc": "回答生成后由第二个模型进行事实核查。",
-      "noTools": "禁用工具",
+      "noTools": "禁用工具，更节省额度",
       "noToolsDesc": "不自动调用任何工具，直接回答——更快更省。",
       "webSearch": "联网搜索",
       "webSearchDesc": "每次都联网搜索并把结果拼接进提示词（不走工具调用）。",
@@ -321,6 +321,11 @@
     "last_7": "近 7 天",
     "last_30": "近 30 天",
     "older": "更早"
+  },
+  "fastMode": {
+    "label": "快速",
+    "pickerDesc": "更快的对话，模型由平台优选。",
+    "advancedSection": "进阶"
   },
   "modelPicker": {
     "section": "模型",

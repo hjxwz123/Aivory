@@ -594,7 +594,7 @@
       "fallbackModelHint": "選択モデルが時間内に返さない場合、これで代わりに回答(ユーザーに無感)。",
       "fallbackNone": "無効",
       "fallbackTtft": "初回応答タイムアウト(秒)",
-      "fallbackTtftHint": "この秒数、上流が無出力なら切断。0 = 無効。",
+      "fallbackTtftHint": "この秒数以内に1バイトも応答がなければ切断(多くの中継/ゲートウェイが言う「TTFT」と同じ基準)。0 = 無効。",
       "imagePromptModel": "画像プロンプトモデル",
       "imagePromptModelHint": "描画前にプロンプトを調整するテキストモデル。なし＝スキップ。",
       "verifyModel": "検証（監査）モデル",

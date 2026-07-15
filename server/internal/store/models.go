@@ -140,7 +140,11 @@ type Model struct {
 	ResearchEnabled   bool   `json:"research_enabled"`
 	// ResearchEnabledSet is an internal create-path marker: JSON booleans cannot
 	// distinguish omitted from explicit false once decoded into Model.
-	ResearchEnabledSet bool            `json:"-"`
+	ResearchEnabledSet bool `json:"-"`
+	// Fast marks THE fast model (§fast-mode). At most one model is fast at a time
+	// (SetFastModel enforces it). A fast model is hidden from the advanced picker
+	// and has Deep Research forced off.
+	Fast               bool            `json:"fast"`
 	SystemPrompt       string          `json:"system_prompt"`
 	ParamControls      json.RawMessage `json:"param_controls"`
 	// OfficialTools lists OpenAI Responses hosted tools to enable (e.g.
@@ -253,6 +257,11 @@ type Conversation struct {
 	Title         string          `json:"title"`
 	Provider      string          `json:"provider"`
 	ModelID       string          `json:"model_id"`
+	// Fast marks the conversation as running in fast mode (§fast-mode): the model
+	// is resolved server-side from the admin's fast model and never named to the
+	// user. ModelID keeps the user's advanced pick (used when they switch back to
+	// 进阶), but a fast turn ignores it and does NOT write the fast model onto it.
+	Fast          bool            `json:"fast"`
 	KBIDs         json.RawMessage `json:"kb_ids"`
 	RAGMode       string          `json:"rag_mode"`
 	SummaryBlocks json.RawMessage `json:"summary_blocks"`
@@ -289,6 +298,10 @@ type Message struct {
 	Provider         string          `json:"provider"`
 	ModelID          string          `json:"model_id"`
 	ModelLabel       string          `json:"model_label"`
+	// Fast marks a turn that ran in fast mode (§fast-mode). The row keeps the REAL
+	// model_id/model_label/provider (for billing + admin drill-down); the user
+	// boundary (redactCost) blanks that identity and the client renders "快速".
+	Fast             bool            `json:"fast"`
 	Blocks           json.RawMessage `json:"blocks"`
 	Raw              json.RawMessage `json:"raw,omitempty"`
 	StopReason       string          `json:"stop_reason"`

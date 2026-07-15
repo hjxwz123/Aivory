@@ -155,6 +155,10 @@ export function MessageList({ conversation, scrollToMessageId, jumpKey }: Messag
   // the store at call time (a user click) instead of closing over it. (convId is
   // declared above with the window state.)
   const modelId = conversation.modelId
+  // §fast-mode: edit-and-resend must stay fast in a fast conversation (else it
+  // escapes to the advanced model and unmasks it). regenerate reads conv.fast
+  // from the store itself, so only the edit-resend send below needs this.
+  const fastMode = conversation.fast
 
   const handleRegenerate = useCallback(
     (assistantId: string) => void regenerate(convId, assistantId, modelId),
@@ -189,13 +193,16 @@ export function MessageList({ conversation, scrollToMessageId, jumpKey }: Messag
         parentId,
         attachments: carryAtts,
         branch: true,
-        mode: armed.mode,
-        verify: armed.verify,
-        noTools: armed.noTools,
-        webSearch: armed.webSearch,
+        // §fast-mode: a fast conversation forces the other features off (the
+        // backend re-enforces this) and runs on the hidden fast model.
+        mode: fastMode ? undefined : armed.mode,
+        verify: fastMode ? undefined : armed.verify,
+        noTools: fastMode ? undefined : armed.noTools,
+        webSearch: fastMode ? undefined : armed.webSearch,
+        fast: fastMode,
       })
     },
-    [convId, modelId, sendMessage],
+    [convId, modelId, fastMode, sendMessage],
   )
 
   const handleSaveEdit = useCallback(

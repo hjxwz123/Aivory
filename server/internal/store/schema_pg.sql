@@ -118,6 +118,7 @@ CREATE TABLE IF NOT EXISTS models (
   vision            INTEGER NOT NULL DEFAULT 1,
   stream            INTEGER NOT NULL DEFAULT 1,
   research_enabled  INTEGER NOT NULL DEFAULT 1, -- expose Deep Research for this chat model
+  fast              INTEGER NOT NULL DEFAULT 0, -- §fast-mode: THE fast model (only one; hidden from the advanced picker, Deep Research forced off)
   system_prompt     TEXT NOT NULL DEFAULT '',
   param_controls    TEXT NOT NULL DEFAULT '[]',
   official_tools    TEXT NOT NULL DEFAULT '[]', -- OpenAI Responses hosted tools; [] = use system tools (§2.3-B)
@@ -219,6 +220,7 @@ CREATE TABLE IF NOT EXISTS conversations (
   title           TEXT NOT NULL DEFAULT '新对话',
   provider        TEXT NOT NULL DEFAULT '',
   model_id        TEXT NOT NULL DEFAULT '',
+  fast            INTEGER NOT NULL DEFAULT 0, -- §fast-mode: conversation runs in fast mode (model resolved server-side from the admin's fast model; name hidden from the user)
   kb_ids          TEXT NOT NULL DEFAULT '[]',
   rag_mode        TEXT NOT NULL DEFAULT 'auto',
   summary_blocks  TEXT NOT NULL DEFAULT '[]',
@@ -245,6 +247,7 @@ CREATE TABLE IF NOT EXISTS messages (
   provider           TEXT NOT NULL DEFAULT '',
   model_id           TEXT NOT NULL DEFAULT '',
   model_label        TEXT NOT NULL DEFAULT '',
+  fast               INTEGER NOT NULL DEFAULT 0, -- §fast-mode: this turn ran in fast mode; mask model_id/model_label/provider at the user boundary
   blocks             TEXT NOT NULL DEFAULT '[]',
   raw                TEXT,
   stop_reason        TEXT,

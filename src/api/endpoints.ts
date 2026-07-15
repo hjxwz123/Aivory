@@ -191,7 +191,7 @@ export const authApi = {
 // ----- Models / skills -----------------------------------------------------
 
 export const modelsApi = {
-  list: () => api<{ models: ApiModel[]; default_id: string; verify_available?: boolean }>('/models'),
+  list: () => api<{ models: ApiModel[]; default_id: string; verify_available?: boolean; fast_available?: boolean }>('/models'),
   listImage: () => api<{ models: ApiModel[]; default_id: string }>('/image-models'),
   listEmbedding: () => api<{ models: ApiModel[]; default_id: string }>('/embedding-models'),
   /** Model tags for the picker's filter chips (§ model tags). */
@@ -368,7 +368,7 @@ export const conversationsApi = {
       `/conversations/${encodeURIComponent(id)}${q ? `?${q}` : ''}`,
     )
   },
-  create: (body: { model_id?: string; project_id?: string; title?: string; workspace_id?: string }) =>
+  create: (body: { model_id?: string; project_id?: string; title?: string; workspace_id?: string; fast?: boolean }) =>
     api<ApiConversation>('/conversations', { method: 'POST', body }),
   // Bulk-import conversation trees from another platform's export OR our own
   // privacy-page "Export all data" file. History + titles (+ model for our own
@@ -515,6 +515,13 @@ export const adminApi = {
     api<{ ok: true }>(`/admin/models/${encodeURIComponent(id)}/skills`, {
       method: 'PUT',
       body: { skill_ids: skillIds },
+    }),
+  // §fast-mode: mark (or clear) THE fast model. Only one model is fast at a time;
+  // the server clears the flag on all others and forces Deep Research off on it.
+  setFastModel: (id: string, fast: boolean) =>
+    api<{ ok: true; fast: boolean }>(`/admin/models/${encodeURIComponent(id)}/fast`, {
+      method: 'PUT',
+      body: { fast },
     }),
 
   // Model tags (§ model tags): admin CRUD of the assignable label set.

@@ -179,6 +179,24 @@ export default function AdminModelEdit() {
     }
   }
 
+  // §fast-mode: mark/clear THE fast model. A dedicated endpoint (not the generic
+  // save) because it clears the flag on all other models in one transaction,
+  // forces Deep Research off, and refuses to leave the advanced picker empty —
+  // the backend's validation error surfaces via the toast.
+  async function handleFastToggle(v: boolean) {
+    try {
+      await adminApi.setFastModel(id, v)
+      patch(v ? { fast: true, research_enabled: false } : { fast: false })
+      toast.success(
+        v
+          ? t('admin:models.fastMarked', { defaultValue: 'Now the fast model' })
+          : t('admin:models.fastCleared', { defaultValue: 'No longer the fast model' }),
+      )
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
+    }
+  }
+
   return (
     <div>
       <button
@@ -456,10 +474,25 @@ export default function AdminModelEdit() {
                   <label className="flex items-center justify-between gap-3 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3 py-2.5">
                     <span className="text-sm">{t('admin:models.fields.researchEnabled')}</span>
                     <Switch
-                      checked={draft.research_enabled ?? true}
+                      // §fast-mode: the fast model can never run Deep Research.
+                      checked={draft.fast ? false : draft.research_enabled ?? true}
+                      disabled={draft.fast}
                       onCheckedChange={(v) => patch({ research_enabled: v })}
                     />
                   </label>
+                  {draft.kind === 'chat' && (
+                    <label className="col-span-2 flex items-center justify-between gap-3 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3 py-2.5">
+                      <div className="min-w-0">
+                        <span className="text-sm">{t('admin:models.fields.fastModel', { defaultValue: 'Fast model' })}</span>
+                        <p className="mt-0.5 text-xs text-[var(--color-fg-muted)]">
+                          {t('admin:models.fields.fastModelHint', {
+                            defaultValue: 'Serve “快速” mode. Hidden from the advanced picker; its name is never shown to users; Deep Research is forced off.',
+                          })}
+                        </p>
+                      </div>
+                      <Switch checked={draft.fast ?? false} onCheckedChange={handleFastToggle} />
+                    </label>
+                  )}
                 </div>
                 <Field label={t('admin:models.fields.systemPrompt')} htmlFor="m-sys" className="col-span-2">
                   <Textarea

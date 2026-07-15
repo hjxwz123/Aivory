@@ -91,6 +91,9 @@ type ToolContext struct {
 	RAG         *rag.Service
 	// DeepResearch raises the per-turn tool budgets (deep_research.go).
 	DeepResearch bool
+	// Fast quarters the per-turn tool budgets and withholds python_execute
+	// entirely (§fast-mode) — fast turns trade tool depth for speed.
+	Fast bool
 	// ImageModelID is the user's pre-selected image model (§4.12-B).
 	ImageModelID string
 	// SkipImageQuota tells image_generate NOT to meter the image model at all
@@ -170,6 +173,32 @@ var (
 	maxToolCallsPerTurnDeep = envcfg.Int("AIVORY_LLM_MAX_TOOL_CALLS_PER_TURN_DEEP", 150)
 )
 
+// §fast-mode budgets: each tool's per-turn cap is a QUARTER of normal (min 1 for
+// an available tool), python_execute is dropped entirely (never in the map, so
+// charge() also blocks it), and the global ceiling is quartered too. Derived from
+// perTurnToolLimits so operator env overrides on the base caps still propagate.
+var fastToolLimits = func() map[string]int {
+	m := make(map[string]int, len(perTurnToolLimits))
+	for k, v := range perTurnToolLimits {
+		if k == "python_execute" {
+			continue // withheld in fast mode
+		}
+		q := v / 4
+		if q < 1 {
+			q = 1
+		}
+		m[k] = q
+	}
+	return m
+}()
+
+var maxToolCallsPerTurnFast = func() int {
+	if q := maxToolCallsPerTurn / 4; q >= 1 {
+		return q
+	}
+	return 1
+}()
+
 // filterDisabledTools drops any tool named in the global `disabled_tools`
 // setting (§B6 partial: a platform-wide tool kill-switch — e.g. turn off
 // python_execute or image_generate without per-model config). Per-model
@@ -224,9 +253,18 @@ func toolCallTimeout(name string) time.Duration {
 func (tc *ToolContext) charge(name string) error {
 	limits := perTurnToolLimits
 	totalCap := maxToolCallsPerTurn
-	if tc.DeepResearch {
+	switch {
+	case tc.DeepResearch:
 		limits = deepResearchToolLimits
 		totalCap = maxToolCallsPerTurnDeep
+	case tc.Fast:
+		limits = fastToolLimits
+		totalCap = maxToolCallsPerTurnFast
+		// python_execute is withheld from fast turns; block it defensively even if
+		// it somehow reaches the runner (it's also dropped from the offered tools).
+		if name == "python_execute" {
+			return errors.New("python_execute is unavailable in fast mode")
+		}
 	}
 	tc.budgetMu.Lock()
 	defer tc.budgetMu.Unlock()
@@ -314,6 +352,13 @@ type RunRequest struct {
 	// It anchors the reply-language instruction so an English question gets an
 	// English answer even from a language-biased model (§ reply language).
 	Locale string
+	// Fast marks a fast-mode turn (§fast-mode). The model is resolved server-side
+	// from the admin's single fast model (ModelID is ignored); Verify and
+	// ModeDeepResearch are forced off; tools stay ON but each tool's per-turn
+	// budget is quartered and python_execute is withheld; and the resolved model
+	// is NOT written back onto the conversation. Every user-facing surface masks
+	// the real model as "快速".
+	Fast bool
 }
 
 // ModeDeepResearch is the RunRequest.Mode value that triggers the Deep Research
@@ -326,17 +371,28 @@ type RunResult struct {
 	AssistantMessage *store.Message
 }
 
-// streamWithFallback runs provider.Stream behind a time-to-first-token (TTFT)
+// streamWithFallback runs provider.Stream behind a time-to-first-BYTE (TTFT)
 // watchdog. The timer is armed by doProviderRequest immediately before the
-// provider HTTP call, so it measures provider API request -> first streamed
-// event and excludes RAG retrieval, context assembly, credit preflight and local
-// payload construction. If the upstream emits NOTHING within the admin-configured
-// `fallback_ttft_sec`, the connection is cut and the SAME assistant message is
-// re-generated with the admin-configured `fallback_model_id` — transparently,
-// since the user has only seen `message_start` (no text yet). Only triggers
-// before the first event (never mid-stream → no visible restart), and falls back
-// at most once (the fallback runs without a watchdog). Disabled — and zero
-// overhead, a plain provider.Stream — unless both settings are present.
+// provider HTTP call, so it measures provider API request -> first response
+// byte and excludes RAG retrieval, context assembly, credit preflight and local
+// payload construction. If the upstream sends NO BYTES within the
+// admin-configured `fallback_ttft_sec`, the connection is cut and the SAME
+// assistant message is re-generated with the admin-configured
+// `fallback_model_id` — transparently, since the user has only seen
+// `message_start` (no text yet).
+//
+// Gated on the raw first byte, not the first PARSED content event, on purpose:
+// a relay/gateway in front of the real model reports its own TTFT the same
+// way (time to first byte from the true upstream), and reasoning models can
+// go quiet for a long stretch after an early framing byte before any real
+// content streams — gating on parsed content made this fire even when the
+// upstream (and the relay's own dashboard) considered the request healthy the
+// whole time. See the doc comment on providerTTFTWatchdog.
+//
+// Only triggers before the first byte (never mid-stream → no visible
+// restart), and falls back at most once (the fallback runs without a
+// watchdog). Disabled — and zero overhead, a plain provider.Stream — unless
+// both settings are present.
 func (o *Orchestrator) streamWithFallback(
 	ctx context.Context,
 	provReq UnifiedChatRequest,
@@ -354,18 +410,12 @@ func (o *Orchestrator) streamWithFallback(
 
 	wdCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	firstEvent := make(chan struct{})
-	var firstOnce sync.Once
-	wrapped := func(ev SseEvent) {
-		firstOnce.Do(func() { close(firstEvent) })
-		onEvent(ev)
-	}
 	var stalled atomic.Bool
-	watchdog := newProviderTTFTWatchdog(time.Duration(ttft)*time.Second, cancel, firstEvent, &stalled)
+	watchdog := newProviderTTFTWatchdog(time.Duration(ttft)*time.Second, cancel, &stalled)
 	defer watchdog.stop()
 	wdCtx = contextWithProviderTTFTWatchdog(wdCtx, watchdog)
 
-	result, err := provider.Stream(wdCtx, provReq, runner, wrapped)
+	result, err := provider.Stream(wdCtx, provReq, runner, onEvent)
 	// Healthy completion, or a real user cancel on the PARENT ctx → return as-is.
 	if !stalled.Load() {
 		return result, err
@@ -719,7 +769,19 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	if err != nil {
 		return nil, err
 	}
+	// §fast-mode: a fast turn resolves the model server-side from the admin's
+	// single fast model and never uses the client's ModelID. If none is configured
+	// (or it's disabled), fall back to normal resolution so the turn still runs —
+	// the composer gates the toggle on fast_available, so this is a belt-and-
+	// suspenders degrade, not a normal path.
+	fastMode := false
 	modelID := req.ModelID
+	if req.Fast {
+		if fm, ferr := store.GetFastModel(ctx, o.db); ferr == nil && fm != nil {
+			modelID = fm.ID
+			fastMode = true
+		}
+	}
 	if modelID == "" {
 		modelID = conv.ModelID
 	}
@@ -737,6 +799,17 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	}
 	if !model.Enabled {
 		return nil, errors.New("model is disabled")
+	}
+	// §fast-mode locks the turn's shape: no Verify, no Deep Research, and tools
+	// stay ON (fast can't disable tools) but run on a quartered budget without
+	// python_execute — enforced where tools + budgets are assembled below.
+	if fastMode {
+		req.Verify = false
+		req.NoTools = false
+		req.ForceWebSearch = false
+		if req.Mode == ModeDeepResearch {
+			req.Mode = ""
+		}
 	}
 	// Deep Research is model-scoped as well as group-scoped. The API handler
 	// already strips the mode for users without the group feature; this guard
@@ -791,7 +864,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		userBlocks, _ := json.Marshal([]UnifiedBlock{{Kind: "text", Text: req.UserText}})
 		created, err := store.CreateMessage(ctx, o.db, store.Message{
 			ConversationID: conv.ID, ParentID: parentID, Role: "user",
-			Provider: channel.Type, ModelID: model.ID,
+			Provider: channel.Type, ModelID: model.ID, Fast: fastMode,
 			Blocks: userBlocks, Attachments: atts,
 			AuthorID: req.UserID, // §workspaces: shared conversations attribute each question
 		})
@@ -805,7 +878,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	turnStart := time.Now()
 	assistantMsg, err := store.CreateMessage(ctx, o.db, store.Message{
 		ConversationID: conv.ID, ParentID: assistantParent, Role: "assistant",
-		Provider: channel.Type, ModelID: model.ID,
+		Provider: channel.Type, ModelID: model.ID, Fast: fastMode,
 		Blocks: []byte("[]"), Status: "streaming",
 	})
 	if err != nil {
@@ -821,12 +894,23 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		return err
 	}
 
-	// Persist new conversation defaults.
-	tmpModelID := model.ID
-	tmpProvider := channel.Type
-	_, _ = store.UpdateConversation(ctx, o.db, conv.ID, req.UserID, store.ConversationPatch{
-		ModelID: &tmpModelID, Provider: &tmpProvider,
-	})
+	// Persist new conversation defaults. §fast-mode: a fast turn must NOT write the
+	// resolved fast model onto the conversation (that would both leak its identity
+	// to the picker and silently reuse it on the next non-fast turn). Instead only
+	// flip the conversation's `fast` marker so reopening restores the 快速 pill; a
+	// normal turn writes model/provider and clears `fast`.
+	tmpFast := fastMode
+	if fastMode {
+		_, _ = store.UpdateConversation(ctx, o.db, conv.ID, req.UserID, store.ConversationPatch{
+			Fast: &tmpFast,
+		})
+	} else {
+		tmpModelID := model.ID
+		tmpProvider := channel.Type
+		_, _ = store.UpdateConversation(ctx, o.db, conv.ID, req.UserID, store.ConversationPatch{
+			ModelID: &tmpModelID, Provider: &tmpProvider, Fast: &tmpFast,
+		})
+	}
 
 	// 2b. Per-model group quota (§ user groups): if the user's group can't use
 	//     this model, or its window quota is exhausted, persist a refusal and
@@ -950,6 +1034,18 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	}
 	if toolMode != "none" && !useOfficial {
 		toolDefs = o.filterDisabledTools(o.tools.List(model.ID))
+		// §fast-mode withholds python_execute (no sandbox on a fast turn) — drop it
+		// from the offered tools so the model never even sees it. Its budget is also
+		// quartered via ToolContext.Fast (charge()).
+		if fastMode {
+			kept := toolDefs[:0]
+			for _, d := range toolDefs {
+				if d.Name != "python_execute" {
+					kept = append(kept, d)
+				}
+			}
+			toolDefs = kept
+		}
 	}
 	toolNames := make([]string, 0, len(toolDefs))
 	skillToolAvailable := false
@@ -1316,6 +1412,8 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			// §4.20: meter chat-driven image_generate against the same credit flow.
 			ImageBilling: o,
 			DeepResearch: req.Mode == ModeDeepResearch,
+			Fast:         fastMode, // §fast-mode: quartered tool budgets + no python_execute
+
 			OnArtifact: func(a ArtifactRef) {
 				artMu.Lock()
 				producedArtifacts = append(producedArtifacts, a)

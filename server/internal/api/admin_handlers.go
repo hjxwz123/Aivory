@@ -311,6 +311,14 @@ func updateModelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
+	// §fast-mode: the fast model can never have Deep Research enabled — force it
+	// off no matter what the edit payload says. The admin UI also disables the
+	// toggle for the fast model; this is the server-side guard. (UpdateModel does
+	// not write the `fast` column, so a plain edit can't set/clear fast — that
+	// only happens through PUT .../fast → SetFastModel.)
+	if existing.Fast {
+		m.ResearchEnabled = false
+	}
 	upd, err := store.UpdateModel(r.Context(), d.DB, id, m)
 	if err != nil {
 		if errors.Is(err, store.ErrModelRequestExists) {
@@ -338,6 +346,59 @@ func deleteModelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
+// setFastModelAdmin marks (or clears) THE fast model (§fast-mode). Only one model
+// is fast at a time — SetFastModel clears the flag on all others. Marking a model
+// fast also forces Deep Research off on it, and is refused if it would leave the
+// advanced ("进阶") picker with no model.
+func setFastModelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
+	id := pathParam(r, "id")
+	var body struct {
+		Fast bool `json:"fast"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, 400, errInvalidInput)
+		return
+	}
+	if !body.Fast {
+		// Clear the fast designation entirely (only one model can be fast, so there
+		// is nothing to scope to this id).
+		if err := store.SetFastModel(r.Context(), d.DB, ""); err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"ok": true, "fast": false})
+		return
+	}
+	m, err := store.GetModel(r.Context(), d.DB, id)
+	if err != nil {
+		writeError(w, 404, errNotFound)
+		return
+	}
+	if m.Kind != "chat" {
+		writeError(w, 400, errors.New("only a chat model can be the fast model"))
+		return
+	}
+	if !m.Enabled {
+		writeError(w, 400, errors.New("enable the model before making it the fast model"))
+		return
+	}
+	// Keep at least one advanced (non-fast) chat model, or 进阶 empties out.
+	n, err := store.CountAdvancedChatModels(r.Context(), d.DB, id)
+	if err != nil {
+		writeError(w, 500, err)
+		return
+	}
+	if n < 1 {
+		writeError(w, 400, errors.New("keep at least one advanced model: you can't make the only chat model the fast model"))
+		return
+	}
+	if err := store.SetFastModel(r.Context(), d.DB, id); err != nil {
+		writeError(w, 500, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true, "fast": true})
 }
 
 type modelSkillsReq struct {

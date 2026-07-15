@@ -49,6 +49,11 @@ type postMessageReq struct {
 	// search whose results are injected into the prompt (only with NoTools).
 	NoTools        bool             `json:"no_tools"`
 	WebSearch      bool             `json:"web_search"`
+	// Fast marks a fast-mode turn (§fast-mode): the model is resolved server-side
+	// from the admin's fast model and masked from the user; Verify / Deep Research
+	// / no-tools are all forced off; tools run on a quartered budget without
+	// python_execute. Overrides ModelID (which the client omits on a fast turn).
+	Fast           bool             `json:"fast"`
 	Attachments    []llm.Attachment `json:"attachments"`
 	ParamOverrides map[string]any   `json:"params"`
 	// ImageStyleID selects an admin image style for an image-mode turn (§4.20).
@@ -98,6 +103,15 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	// Deep Research is a per-group capability (§ user groups). If the user's
 	// group isn't entitled, silently downgrade to a normal turn (the client also
 	// hides the button, so this is defense-in-depth, not the primary UX).
+	// §fast-mode overrides every other turn flag: a fast turn never runs Verify,
+	// Deep Research, no-tools, or forced web search (the orchestrator re-enforces
+	// this, but keep the request self-consistent here too).
+	if req.Fast {
+		req.Mode = ""
+		req.Verify = false
+		req.NoTools = false
+		req.WebSearch = false
+	}
 	if req.Mode == "deep-research" && u.Role != "admin" && !userGroupHasFeature(r.Context(), d, u.GroupID, "research") {
 		req.Mode = ""
 	}
@@ -204,6 +218,7 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		Verify:         req.Verify,
 		NoTools:        req.NoTools,
 		ForceWebSearch: req.WebSearch,
+		Fast:           req.Fast,
 		ParamOverrides: req.ParamOverrides,
 		ImageStyleID:   req.ImageStyleID,
 		Locale:         req.Locale,
@@ -332,6 +347,7 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		Verify         bool           `json:"verify"`
 		NoTools        bool           `json:"no_tools"`
 		WebSearch      bool           `json:"web_search"`
+		Fast           bool           `json:"fast"` // §fast-mode: honour the CURRENT picker (regenerate follows the live toggle)
 		ParamOverrides map[string]any `json:"params"`
 		Locale         string         `json:"locale"`
 	}
@@ -343,6 +359,13 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, 404, errNotFound)
 		return
+	}
+	// §fast-mode overrides all other turn flags (see postMessageHandler).
+	if body.Fast {
+		body.Mode = ""
+		body.Verify = false
+		body.NoTools = false
+		body.WebSearch = false
 	}
 	// Keep regenerate aligned with the normal send path: users without the
 	// Deep Research group feature cannot force it by calling /regenerate.
@@ -473,6 +496,7 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		Verify:                   body.Verify,
 		NoTools:                  body.NoTools,
 		ForceWebSearch:           body.WebSearch,
+		Fast:                     body.Fast,
 		ParamOverrides:           body.ParamOverrides,
 		Locale:                   body.Locale,
 	}, sendEvent)

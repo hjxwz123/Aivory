@@ -60,6 +60,7 @@ export default function ChatThread() {
   const loadOne = useConversations((s) => s.loadOne)
   const loadInlineThreads = useConversations((s) => s.loadInlineThreads)
   const setModel = useConversations((s) => s.setModel)
+  const setFast = useConversations((s) => s.setFast)
   const setKBs = useConversations((s) => s.setKBs)
   const rename = useConversations((s) => s.renameConversation)
   const star = useConversations((s) => s.toggleStar)
@@ -266,6 +267,7 @@ export default function ChatThread() {
       verify?: boolean
       noTools?: boolean
       webSearch?: boolean
+      fast?: boolean
     },
   ) {
     if (!conversation) return
@@ -280,6 +282,7 @@ export default function ChatThread() {
       verify: opts.verify,
       noTools: opts.noTools,
       webSearch: opts.webSearch,
+      fast: opts.fast,
     })
     // Force the view to the freshly appended turn now — don't rely on the
     // auto-follow effect, whose scroll a content reflow or a stale autoFollow
@@ -317,6 +320,12 @@ export default function ChatThread() {
     }
   }
 
+  // §fast-mode: switch the conversation between 快速 and 进阶.
+  function handleFastChange(next: boolean) {
+    if (!conversation) return
+    void setFast(conversation.id, next)
+  }
+
   return (
     <div className="flex-1 flex flex-col min-h-0">
       {/* Topbar — desktop keeps the full inline toolbar; mobile is a calm
@@ -341,7 +350,7 @@ export default function ChatThread() {
               </Link>
             ) : null}
           </div>
-          <ModelPicker value={conversation.modelId} onChange={handleModelChange} />
+          <ModelPicker value={conversation.modelId} onChange={handleModelChange} fast={conversation.fast} onFastChange={handleFastChange} />
           <Tooltip content={t('chat:topbar.outlineTooltip', { defaultValue: 'Conversation outline' })}>
             <button
               type="button"
@@ -425,6 +434,8 @@ export default function ChatThread() {
             <ModelPicker
               value={conversation.modelId}
               onChange={handleModelChange}
+              fast={conversation.fast}
+              onFastChange={handleFastChange}
               className="h-auto min-w-0 max-w-[62vw] gap-1 px-1.5 py-0.5 text-[11.5px] rounded-[7px]"
             />
           </div>
@@ -489,6 +500,8 @@ export default function ChatThread() {
           <Composer
             modelId={conversation.modelId}
             onModelChange={(id) => void setModel(conversation.id, id)}
+            fast={conversation.fast}
+            onFastChange={handleFastChange}
             onSubmit={submit}
             onStop={stopAll}
             streaming={Boolean(streaming)}

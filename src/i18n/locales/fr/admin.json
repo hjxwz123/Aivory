@@ -594,7 +594,7 @@
       "fallbackModelHint": "Si le modèle choisi ne répond pas à temps, répondre avec celui-ci (transparent).",
       "fallbackNone": "Désactivé",
       "fallbackTtft": "Délai 1er token (s)",
-      "fallbackTtftHint": "Couper l'amont après ce délai sans sortie. 0 = désactivé.",
+      "fallbackTtftHint": "Coupe l'amont après ce délai sans le moindre octet de réponse (correspond au « TTFT » affiché par la plupart des relais/passerelles). 0 = désactivé.",
       "imagePromptModel": "Modèle de prompt d'image",
       "imagePromptModelHint": "Modèle texte qui affine les prompts avant le dessin. Aucun = ignorer.",
       "verifyModel": "Modèle vérificateur",

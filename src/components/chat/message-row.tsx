@@ -21,7 +21,7 @@ import {
   FileSpreadsheet,
   Sparkles,
   BookText,
-  Coins, ImageOff } from 'lucide-react'
+  Coins, ImageOff, Zap } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import type { Message, Attachment } from '@/types/chat'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -257,7 +257,12 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
         )}
         {!isUser && (
           <div className="flex items-center gap-2 mb-2">
-            {model ? (
+            {/* §fast-mode: a fast turn's real model is hidden — show a bolt + 快速. */}
+            {message.fast ? (
+              <span className="flex size-5 items-center justify-center rounded-full bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)]">
+                <Zap size={13} aria-hidden />
+              </span>
+            ) : model ? (
               <ModelIcon icon={model.icon} size={20} />
             ) : (
               <Avatar size="sm" tone="sage">
@@ -265,7 +270,9 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
               </Avatar>
             )}
             <span className="font-medium text-[15px] text-[var(--color-fg)]">
-              {model?.label ?? message.modelLabel ?? t('assistant')}
+              {message.fast
+                ? t('fastMode.label', { defaultValue: '快速' })
+                : model?.label ?? message.modelLabel ?? t('assistant')}
             </span>
             {/* Per-reply generation time (§ 用时). Cost stays admin-only. */}
             {!message.streaming && message.genMs ? (

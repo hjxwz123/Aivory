@@ -137,6 +137,8 @@ interface ConversationStore {
    *  appear and optimistic flat-append siblings collapse into the tree (§4.15). */
   reloadActivePath: (id: string) => Promise<void>
   setModel: (id: string, modelId: string) => Promise<void>
+  /** §fast-mode: toggle the 快速/进阶 selection for a conversation. */
+  setFast: (id: string, fast: boolean) => Promise<void>
   /** Bind knowledge bases to the conversation (§7.2-7 composer 📚 selector). */
   setKBs: (id: string, kbIds: string[]) => Promise<void>
 
@@ -162,6 +164,9 @@ interface ConversationStore {
     noTools?: boolean
     /** §4.4-B: forced non-tool web search (only meaningful with noTools). */
     webSearch?: boolean
+    /** §fast-mode: run this turn in fast mode (model resolved server-side + masked;
+     *  verify/DR/no-tools forced off; quartered tool budget, no python_execute). */
+    fast?: boolean
     /** Home "instant send": the conversation is an OPTIMISTIC local placeholder
      *  (temp id) — create the real one server-side FIRST, re-key the cache to
      *  its id, then stream. Lets the home page navigate to the thread the moment
@@ -386,6 +391,8 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
       createdAt: now,
       updatedAt: now,
       modelId: modelId ?? '',
+      // §fast-mode: new conversations default to fast when a fast model exists.
+      fast: useModels.getState().fastAvailable,
       // Tag the active space so the sidebar (which filters by workspace) shows
       // the new chat immediately; the create + re-key confirms it server-side.
       workspaceId: activeWorkspaceId() || undefined,
@@ -632,13 +639,28 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
   },
 
   async setModel(id, modelId) {
+    // Picking an advanced model exits fast mode (§fast-mode): the 快速/进阶 picker
+    // is one axis, so choosing a concrete model means 进阶.
     set((s) => ({
-      conversations: s.conversations.map((c) => (c.id === id ? { ...c, modelId } : c)),
+      conversations: s.conversations.map((c) => (c.id === id ? { ...c, modelId, fast: false } : c)),
     }))
     try {
-      await conversationsApi.update(id, { model_id: modelId })
+      await conversationsApi.update(id, { model_id: modelId, fast: false })
     } catch (e) {
       toast.error(errorMessage(e, 'Failed to update model'))
+    }
+  },
+
+  async setFast(id, fast) {
+    // §fast-mode: pick 快速 (fast=true) — keep the user's advanced modelId so it
+    // restores when they switch back to 进阶.
+    set((s) => ({
+      conversations: s.conversations.map((c) => (c.id === id ? { ...c, fast } : c)),
+    }))
+    try {
+      await conversationsApi.update(id, { fast })
+    } catch (e) {
+      toast.error(errorMessage(e, 'Failed to update mode'))
     }
   },
 
@@ -724,7 +746,11 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
       createdAt: Date.now() + 1,
       streaming: true,
       parentId: userId,
-      modelId: input.modelId || conv0?.modelId,
+      // §fast-mode: never seed the real model on a fast turn's optimistic bubble
+      // (conv0.modelId is the user's advanced pick, not the hidden fast model) —
+      // mark it fast so the row renders "快速" from first paint.
+      modelId: input.fast ? undefined : input.modelId || conv0?.modelId,
+      fast: input.fast || undefined,
       mode: input.mode,
       // §verify: seed a "running" badge so the audit is visible the moment the
       // answer settles, not only after verify_started arrives.
@@ -848,7 +874,9 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
         `/conversations/${encodeURIComponent(input.conversationId)}/messages`,
         {
           text: input.text,
-          model_id: input.modelId,
+          // §fast-mode: a fast turn omits model_id (the server resolves + hides the
+          // fast model). Advanced turns send the picked model.
+          model_id: input.fast ? undefined : input.modelId,
           parent_id: input.parentId,
           // §4.15: tell the backend this is a branch edit so an empty parent
           // (editing the root question) stays a root sibling instead of being
@@ -861,6 +889,8 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
           // §4.13-B: no-tools turn (tool_mode=none) + optional forced web search.
           no_tools: input.noTools,
           web_search: input.webSearch,
+          // §fast-mode: run this turn on the admin's hidden fast model.
+          fast: input.fast,
           attachments: input.attachments?.map(attachmentToApi),
           params: input.params,
           image_style_id: input.imageStyleId,
@@ -1155,9 +1185,13 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
     // — it stays the original turn's mode (below), so regenerating a deep-research
     // reply re-runs research rather than adopting whatever mode is toggled now.
     const armed = resolveArmedTurnFlags()
-    const verify = armed.verify
-    const noTools = armed.noTools
-    const webSearch = armed.webSearch
+    // §fast-mode: regenerate honours the conversation's CURRENT 快速/进阶 selection
+    // (like verify/no-tools above) — a fast conversation re-runs fast; switching to
+    // 进阶 first makes the retry use the real model.
+    const fast = conv?.fast === true
+    const verify = fast ? false : armed.verify
+    const noTools = fast ? false : armed.noTools
+    const webSearch = fast ? false : armed.webSearch
     const placeholderId = uid('m')
     // §4.15 R2: regenerate forks at the assistant — the new reply is a SIBLING of
     // the old one under the same user turn. Seed branch metadata on the
@@ -1186,7 +1220,8 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
         content: '',
         createdAt: Date.now(),
         streaming: true,
-        modelId: modelId ?? conv?.modelId,
+        modelId: fast ? undefined : modelId ?? conv?.modelId,
+        fast: fast || undefined,
         mode,
         verify: verify ? { status: 'running', findings: [] } : undefined,
         branchCount: prevReplyCount + 1,
@@ -1211,11 +1246,12 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
         `/conversations/${encodeURIComponent(conversationId)}/regenerate`,
         {
           assistant_id: assistantId,
-          model_id: modelId,
+          model_id: fast ? undefined : modelId,
           mode,
           verify,
           no_tools: noTools,
           web_search: webSearch,
+          fast,
           params: conv?.lastParams,
           locale: currentLocale(),
         },
@@ -1702,6 +1738,7 @@ export function toLocalConversation(c: ApiConversation): Conversation {
     createdAt: c.created_at * 1000,
     updatedAt: c.updated_at * 1000,
     modelId: c.model_id,
+    fast: c.fast === true,
     projectId: c.project_id || undefined,
     kbIds: c.kb_ids ?? [],
     pinned: c.pinned,
@@ -1934,6 +1971,7 @@ export function toLocalMessage(m: ApiMessage): Message {
     artifacts: artifacts.length > 0 ? artifacts : undefined,
     modelId: m.model_id || undefined,
     modelLabel: m.model_label || undefined,
+    fast: m.fast === true,
     createdAt: m.created_at * 1000,
     streaming: m.status === 'streaming',
     cost: m.cost > 0 ? m.cost : undefined,

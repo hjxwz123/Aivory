@@ -108,6 +108,9 @@ type createConversationReq struct {
 	ModelID   string `json:"model_id"`
 	ProjectID string `json:"project_id"`
 	Title     string `json:"title"`
+	// Fast seeds the conversation's fast-mode flag (§fast-mode). The client
+	// defaults new conversations to fast; a fast turn later re-affirms it.
+	Fast bool `json:"fast"`
 	// '' = personal; set = create INSIDE that workspace (§workspaces, membership
 	// validated server-side).
 	WorkspaceID string `json:"workspace_id"`
@@ -150,6 +153,7 @@ func createConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		ProjectID:   req.ProjectID,
 		Title:       strings.TrimSpace(req.Title),
 		ModelID:     req.ModelID,
+		Fast:        req.Fast,
 		WorkspaceID: req.WorkspaceID,
 	})
 	if err != nil {
@@ -606,6 +610,17 @@ func redactCost(ems []enrichedMessage) []enrichedMessage {
 		// for end users. Strip it on every user-facing path; admin endpoints that
 		// intentionally skip redaction still expose it.
 		ems[i].Raw = nil
+		// §fast-mode: a fast turn's real model must never reach the user. Blank the
+		// identity (model_id / model_label / provider); `fast:true` stays on the wire
+		// so the client renders the localized "快速" label + a generic icon. This is
+		// the single user-facing chokepoint (getConversation / listMessages /
+		// setActiveLeaf / editMessage all pass through here); admin drill-down and
+		// usage analytics skip redactCost, so the real model stays intact for them.
+		if ems[i].Fast {
+			ems[i].ModelID = ""
+			ems[i].ModelLabel = ""
+			ems[i].Provider = ""
+		}
 		ems[i].Attachments = backfillAttachmentURLs(ems[i].Attachments)
 	}
 	return ems

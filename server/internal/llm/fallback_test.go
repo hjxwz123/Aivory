@@ -151,9 +151,8 @@ func TestDoProviderRequestPrimarySuccess(t *testing.T) {
 
 func TestProviderTTFTWatchdogStartsAtHTTPRequest(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	firstEvent := make(chan struct{})
 	stalled := atomic.Bool{}
-	watchdog := newProviderTTFTWatchdog(25*time.Millisecond, cancel, firstEvent, &stalled)
+	watchdog := newProviderTTFTWatchdog(25*time.Millisecond, cancel, &stalled)
 	defer watchdog.stop()
 	ctx = contextWithProviderTTFTWatchdog(ctx, watchdog)
 
@@ -164,6 +163,9 @@ func TestProviderTTFTWatchdogStartsAtHTTPRequest(t *testing.T) {
 		t.Fatalf("watchdog fired before provider HTTP request: stalled=%v err=%v", stalled.Load(), ctx.Err())
 	}
 
+	// Server never writes a body at all (not even a header) within the window —
+	// this must still trip the watchdog even though headers alone would arrive
+	// fast; only a body byte counts as "first byte" here.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(100 * time.Millisecond)
 		w.WriteHeader(http.StatusOK)
@@ -178,5 +180,48 @@ func TestProviderTTFTWatchdogStartsAtHTTPRequest(t *testing.T) {
 	}
 	if !stalled.Load() {
 		t.Fatal("watchdog did not mark the upstream request as stalled")
+	}
+}
+
+// TestProviderTTFTWatchdogDisarmsOnFirstByte pins the behavior this test file's
+// sibling above does not cover: ANY response byte disarms the watchdog, even
+// one that carries no parseable content (e.g. an SSE keep-alive/framing byte
+// sent well before the model's real answer). Regression coverage for the case
+// where the watchdog fired despite the upstream — and its own relay's TTFT
+// dashboard — having already responded (§ fallback_ttft_sec = first byte, not
+// first parsed event).
+func TestProviderTTFTWatchdogDisarmsOnFirstByte(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	stalled := atomic.Bool{}
+	watchdog := newProviderTTFTWatchdog(30*time.Millisecond, cancel, &stalled)
+	defer watchdog.stop()
+	ctx = contextWithProviderTTFTWatchdog(ctx, watchdog)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// One meaningless byte well inside the window, then silence for far
+		// longer than the watchdog's timeout — a stalled-after-first-byte
+		// stream that the watchdog is NOT supposed to protect against.
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, ":")
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		time.Sleep(150 * time.Millisecond)
+	}))
+	defer srv.Close()
+
+	resp, err := doProviderRequest(ctx, ModelInfo{BaseURL: srv.URL, APIKey: "k"}, nil, func(baseURL, apiKey string) (*http.Request, error) {
+		return http.NewRequestWithContext(ctx, "POST", baseURL+"/slow", nil)
+	})
+	if err != nil {
+		t.Fatalf("doProviderRequest err: %v", err)
+	}
+	buf := make([]byte, 1)
+	_, _ = resp.Body.Read(buf) // trigger the wrapped Read so first-byte fires
+	resp.Body.Close()
+
+	time.Sleep(60 * time.Millisecond) // well past the 30ms timeout
+	if stalled.Load() {
+		t.Fatal("watchdog fired after a byte had already arrived — first byte must permanently disarm it")
 	}
 }

@@ -594,7 +594,7 @@
       "fallbackModelHint": "所選模型逾時無回應時,改用它回答(使用者無感)。",
       "fallbackNone": "關閉",
       "fallbackTtft": "首字逾時(秒)",
-      "fallbackTtftHint": "上游這麼多秒無任何輸出就切斷。0 = 關閉。",
+      "fallbackTtftHint": "上游這麼多秒內連一個位元組都沒回傳就切斷(與多數中繼/閘道面板的「首字」口徑一致)。0 = 關閉。",
       "imagePromptModel": "圖片提示詞模型",
       "imagePromptModelHint": "繪圖前用於潤色提示詞的文字模型。選「無」則略過。",
       "verifyModel": "審校（審計）模型",
