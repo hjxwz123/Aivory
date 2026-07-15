@@ -1290,9 +1290,17 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	}
 
 	// 10. Compose the six-segment system prompt (§4.8).
+	// §fast-mode: the identity segment instructs the model to name itself as
+	// ModelLabel — so on a fast turn pass the masked "快速"/"Fast" label, never the
+	// real fast model's name (which the model would otherwise disclose in its reply
+	// text, a channel redactCost can't mask).
+	promptModelLabel := model.Label
+	if fastMode {
+		promptModelLabel = fastModeLabel(req.Locale)
+	}
 	system := composeSystemPrompt(systemPromptOpts{
 		ModelSystem:         model.SystemPrompt,
-		ModelLabel:          model.Label,
+		ModelLabel:          promptModelLabel,
 		Locale:              req.Locale,
 		ToolMode:            toolMode,
 		ToolNames:           toolNames,

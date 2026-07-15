@@ -680,6 +680,16 @@ func editMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	msgcache.Bump(d.Cache, convID)
 	updated, _ := store.GetMessage(r.Context(), d.DB, msgID)
 	publishUserEvent(d, r, u.ID, "conversation.updated", convID)
+	// This endpoint bypasses the redactCost chokepoint, so apply the same
+	// user-boundary redaction here: strip admin-only cost/raw, and §fast-mode blank
+	// the real model identity on a fast turn (a fast user row is stamped with the
+	// hidden fast model's id/label/provider — never return them).
+	if updated != nil {
+		updated.Cost, updated.Currency, updated.Raw = 0, "", nil
+		if updated.Fast {
+			updated.ModelID, updated.ModelLabel, updated.Provider = "", "", ""
+		}
+	}
 	writeJSON(w, 200, updated)
 }
 

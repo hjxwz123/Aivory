@@ -737,6 +737,7 @@ func forkConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		Title:     title,
 		Provider:  conv.Provider,
 		ModelID:   conv.ModelID,
+		Fast:      conv.Fast, // §fast-mode: a fork of a fast conversation stays fast
 		KBIDs:     conv.KBIDs,
 	})
 	if err != nil {
@@ -755,6 +756,11 @@ func forkConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 			Provider:       m.Provider,
 			ModelID:        m.ModelID,
 			ModelLabel:     m.ModelLabel, // pass the source label through; the batch insert does no per-row lookup
+			// §fast-mode: carry the fast marker forward — a forked fast row keeps the
+			// REAL model id/label/provider (copied above), so without this the fork
+			// would have fast=0 and redactCost would serve the real model name to the
+			// user on every load of the forked conversation.
+			Fast:           m.Fast,
 			Blocks:         m.Blocks,
 			Raw:            m.Raw,
 			StopReason:     m.StopReason,

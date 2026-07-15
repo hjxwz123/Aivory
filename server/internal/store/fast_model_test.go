@@ -87,3 +87,46 @@ func TestFastModelLifecycle(t *testing.T) {
 		t.Fatalf("expected no fast models after clear, got %d", cnt)
 	}
 }
+
+// §fast-mode fork foundation: CreateMessagePath (used by fork) must round-trip the
+// per-message Fast marker — otherwise a forked fast row lands with fast=0 and the
+// real model identity, and redactCost (which keys on Fast) would serve it unmasked.
+func TestCreateMessagePathPreservesFast(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(filepath.Join(t.TempDir(), "fork-fast.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer db.Close()
+	if err := Migrate(db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO users(id,email,password_hash,role) VALUES('u1','a@b.c','h','user')`); err != nil {
+		t.Fatalf("user: %v", err)
+	}
+	conv, err := CreateConversation(ctx, db, Conversation{UserID: "u1", Title: "T", Fast: true})
+	if err != nil {
+		t.Fatalf("conv: %v", err)
+	}
+	if !conv.Fast {
+		t.Fatal("conversation Fast should round-trip true")
+	}
+	if _, err := CreateMessagePath(ctx, db, []Message{
+		{ConversationID: conv.ID, Role: "user", Fast: true, ModelID: "secret", ModelLabel: "SecretModel"},
+		{ConversationID: conv.ID, Role: "assistant", Fast: true, ModelID: "secret", ModelLabel: "SecretModel"},
+	}); err != nil {
+		t.Fatalf("path: %v", err)
+	}
+	msgs, err := ListMessages(ctx, db, conv.ID, "")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("want 2 messages, got %d", len(msgs))
+	}
+	for _, m := range msgs {
+		if !m.Fast {
+			t.Fatalf("forked message lost its Fast marker: %+v", m)
+		}
+	}
+}
