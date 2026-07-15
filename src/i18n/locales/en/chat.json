@@ -28,6 +28,8 @@
     "voice": "Voice input",
     "voiceStop": "Stop recording",
     "voiceConnecting": "Connecting…",
+    "voiceTranscribing": "Transcribing…",
+    "voiceUnavailable": "Voice input isn't configured",
     "voiceUnsupported": "Voice input isn't supported in this browser.",
     "voicePermission": "Microphone access was denied.",
     "voiceFailed": "Couldn't transcribe the recording.",

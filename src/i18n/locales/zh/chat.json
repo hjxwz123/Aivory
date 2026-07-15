@@ -28,6 +28,8 @@
     "voice": "语音输入",
     "voiceStop": "停止录音",
     "voiceConnecting": "连接中…",
+    "voiceTranscribing": "转写中…",
+    "voiceUnavailable": "语音输入尚未配置",
     "voiceUnsupported": "当前浏览器不支持语音输入。",
     "voicePermission": "麦克风权限被拒绝。",
     "voiceFailed": "无法转写本次录音。",

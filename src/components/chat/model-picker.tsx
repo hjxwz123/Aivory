@@ -60,7 +60,7 @@ export function ModelPicker({ value, onChange, fast, onFastChange, className }: 
     <DropdownMenu>
       <DropdownMenuTrigger
         className={cn(
-          'inline-flex items-center gap-1.5 h-8 px-2.5 rounded-[8px]',
+          'inline-flex min-w-0 items-center gap-1.5 h-8 px-2.5 rounded-[8px]',
           'text-[13px] font-medium text-[var(--color-fg-muted)]',
           'hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
@@ -87,13 +87,19 @@ export function ModelPicker({ value, onChange, fast, onFastChange, className }: 
         // matter how many models exist or where the trigger sits (e.g. the
         // vertically-centred composer on the welcome screen).
         collisionPadding={12}
-        className="w-[320px] max-h-[var(--radix-popper-available-height)]"
+        className="min-w-0 overscroll-contain"
         // The shared menu base class sets `overflow:hidden`; an inline longhand
         // reliably wins over it (inline > class) so the list actually SCROLLS when
         // it's taller than the available height instead of clipping models off the
         // bottom. (A className override is fragile here — tailwind-merge / source
         // order can leave the base `overflow-hidden` in play.)
-        style={{ overflowX: 'hidden', overflowY: 'auto' }}
+        style={{
+          width: 'min(20rem, calc(100vw - var(--safe-left) - var(--safe-right) - 1.5rem))',
+          maxWidth: 'calc(100vw - var(--safe-left) - var(--safe-right) - 1.5rem)',
+          maxHeight: 'min(34rem, var(--radix-dropdown-menu-content-available-height))',
+          overflowX: 'hidden',
+          overflowY: 'auto',
+        }}
       >
         {fastAvailable ? (
           <>

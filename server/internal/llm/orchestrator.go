@@ -55,6 +55,10 @@ type Orchestrator struct {
 	task   *TaskLLM
 	memory *MemoryWorker
 	logger *log.Logger
+	// onConversationUpdated is installed by the API layer during startup. Async
+	// work such as title generation uses it after a durable metadata write so
+	// open clients re-fetch the committed conversation row.
+	onConversationUpdated func(userID, conversationID string)
 }
 
 // ToolRefusalError marks a tool failure that is a policy/quota REFUSAL (content
@@ -304,6 +308,13 @@ func NewOrchestrator(
 		db: db, reg: reg, tools: tools, rag: ragSvc,
 		cache: c, queue: q, task: task, memory: memory, logger: logger,
 	}
+}
+
+// SetConversationUpdatedHandler installs the API-owned notification bridge for
+// background metadata writes. It is configured once during application startup,
+// before the server accepts requests.
+func (o *Orchestrator) SetConversationUpdatedHandler(fn func(userID, conversationID string)) {
+	o.onConversationUpdated = fn
 }
 
 // RunRequest is the input the API hands to Run().
@@ -807,6 +818,10 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		req.Verify = false
 		req.NoTools = false
 		req.ForceWebSearch = false
+		// `modelId` remains on the user's last advanced choice while the UI is in
+		// fast mode. Never let its cached controls (for example `thinking`) leak
+		// into the hidden fast model, including from non-browser callers.
+		req.ParamOverrides = nil
 		if req.Mode == ModeDeepResearch {
 			req.Mode = ""
 		}
@@ -2945,12 +2960,12 @@ func (o *Orchestrator) scheduleTitle(convID, userID, userText, locale string) {
 	if o.queue == nil || o.task == nil {
 		// Fall back to deterministic clip so we always have something.
 		title := clipTitle(userText)
-		_, _ = store.UpdateConversation(context.Background(), o.db, convID, userID, store.ConversationPatch{Title: &title})
+		o.persistGeneratedTitle(context.Background(), convID, userID, title)
 		return
 	}
 	// First, set a deterministic clip so the sidebar updates immediately.
 	first := clipTitle(userText)
-	_, _ = store.UpdateConversation(context.Background(), o.db, convID, userID, store.ConversationPatch{Title: &first})
+	o.persistGeneratedTitle(context.Background(), convID, userID, first)
 	// Force the title language to the user's UI language. The task model is a
 	// separate, often language-biased model that ignores a soft "follow the user"
 	// hint, so we append an authoritative directive WRITTEN IN the target language
@@ -2975,9 +2990,25 @@ func (o *Orchestrator) scheduleTitle(convID, userID, userText, locale string) {
 		if title == "" {
 			return nil
 		}
-		_, _ = store.UpdateConversation(ctx, o.db, convID, userID, store.ConversationPatch{Title: &title})
+		o.persistGeneratedTitle(ctx, convID, userID, title)
 		return nil
 	})
+}
+
+// persistGeneratedTitle couples the asynchronous title write to the realtime
+// notification that follows it. Usage logging alone does not prove that a task
+// produced a usable, persisted title, so failed writes reach the server log.
+func (o *Orchestrator) persistGeneratedTitle(ctx context.Context, convID, userID, title string) bool {
+	if _, err := store.UpdateConversation(ctx, o.db, convID, userID, store.ConversationPatch{Title: &title}); err != nil {
+		if o.logger != nil {
+			o.logger.Printf("title generation: update conversation %s: %v", convID, err)
+		}
+		return false
+	}
+	if o.onConversationUpdated != nil {
+		o.onConversationUpdated(userID, convID)
+	}
+	return true
 }
 
 func clipTitle(s string) string {

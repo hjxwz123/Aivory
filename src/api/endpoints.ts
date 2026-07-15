@@ -243,7 +243,7 @@ export const redeemApi = {
 export const audioApi = {
   /** Which STT provider is active — "gpt" (record then transcribe) or "volcano"
    *  (live streaming). Lets the composer pick the right mic flow. */
-  capabilities: () => api<{ provider: string; streaming: boolean }>('/audio/capabilities'),
+  capabilities: () => api<{ provider: string; streaming: boolean; enabled: boolean }>('/audio/capabilities'),
   /** Transcribe a recorded audio blob via the admin-configured voice model. */
   transcribe: (file: Blob, filename = 'audio.webm') => {
     const fd = new FormData()

@@ -28,6 +28,8 @@
     "voice": "音声入力",
     "voiceStop": "録音を停止",
     "voiceConnecting": "接続中…",
+    "voiceTranscribing": "文字起こし中…",
+    "voiceUnavailable": "音声入力が設定されていません",
     "voiceUnsupported": "このブラウザでは音声入力に対応していません。",
     "voicePermission": "マイクへのアクセスが拒否されました。",
     "voiceFailed": "録音を文字起こしできませんでした。",

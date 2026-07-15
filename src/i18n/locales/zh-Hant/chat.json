@@ -28,6 +28,8 @@
     "voice": "語音輸入",
     "voiceStop": "停止錄音",
     "voiceConnecting": "連線中…",
+    "voiceTranscribing": "轉寫中…",
+    "voiceUnavailable": "語音輸入尚未設定",
     "voiceUnsupported": "當前瀏覽器不支援語音輸入。",
     "voicePermission": "麥克風許可權被拒絕。",
     "voiceFailed": "無法轉寫本次錄音。",

@@ -68,13 +68,19 @@ type streamEvent struct {
 }
 
 // audioCapabilitiesHandler tells the composer which STT provider is active so it
-// can choose record-then-transcribe (gpt) vs. live streaming (volcano). No
-// secrets are exposed — only the provider name and whether streaming is on.
+// can choose record-then-transcribe (gpt) vs. live streaming (volcano), and
+// whether its required credentials are present. No secrets are exposed.
 func audioCapabilitiesHandler(d Deps, w http.ResponseWriter, _ *http.Request) {
 	provider := settingString(d, "audio_transcribe_provider", "gpt")
+	enabled := settingString(d, "audio_transcribe_api_key", "") != ""
+	if provider == "volcano" {
+		enabled = settingString(d, "volcano_asr_app_id", "") != "" &&
+			settingString(d, "volcano_asr_access_token", "") != ""
+	}
 	writeJSON(w, 200, map[string]any{
 		"provider":  provider,
 		"streaming": provider == "volcano",
+		"enabled":   enabled,
 	})
 }
 

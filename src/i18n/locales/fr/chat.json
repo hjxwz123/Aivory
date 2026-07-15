@@ -28,6 +28,8 @@
     "voice": "Saisie vocale",
     "voiceStop": "Arrêter l'enregistrement",
     "voiceConnecting": "Connexion…",
+    "voiceTranscribing": "Transcription…",
+    "voiceUnavailable": "La saisie vocale n'est pas configurée",
     "voiceUnsupported": "La saisie vocale n'est pas prise en charge dans ce navigateur.",
     "voicePermission": "L'accès au microphone a été refusé.",
     "voiceFailed": "Impossible de transcrire l'enregistrement.",

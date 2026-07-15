@@ -50,8 +50,8 @@ export function StylePicker({ value, onChange, className }: StylePickerProps) {
               className,
             )}
           >
-            <Palette size={14} aria-hidden />
-            <span className="max-w-[7rem] truncate">
+            <Palette size={14} className="shrink-0" aria-hidden />
+            <span className="min-w-0 max-w-[7rem] truncate">
               {selected ? selected.name : t('composer.style', { defaultValue: 'Style' })}
             </span>
           </button>
@@ -61,10 +61,16 @@ export function StylePicker({ value, onChange, className }: StylePickerProps) {
         side="top"
         align="start"
         // collisionPadding keeps the popover ≥12px from every viewport edge and
-        // makes Radix expose the remaining space as --radix-popper-available-height,
+        // makes Radix expose the remaining space as
+        // --radix-popover-content-available-height,
         // so a long style list SCROLLS instead of overflowing off-screen.
         collisionPadding={12}
-        className="w-[22rem] max-w-[calc(100vw-1.5rem)] max-h-[var(--radix-popper-available-height)] overflow-y-auto p-2"
+        className="min-w-0 overflow-y-auto p-2"
+        style={{
+          width: 'min(22rem, calc(100vw - var(--safe-left) - var(--safe-right) - 1.5rem))',
+          maxWidth: 'calc(100vw - var(--safe-left) - var(--safe-right) - 1.5rem)',
+          maxHeight: 'min(34rem, var(--radix-popover-content-available-height), calc(100dvh - var(--safe-top) - var(--safe-bottom) - 1.5rem))',
+        }}
         onOpenAutoFocus={() => {
           if (!loaded) void load()
         }}

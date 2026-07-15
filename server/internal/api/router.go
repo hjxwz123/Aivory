@@ -113,6 +113,15 @@ var (
 
 // NewRouter returns the fully-wired http.Handler.
 func NewRouter(d Deps) http.Handler {
+	// Async title generation persists after the request's chat SSE has finished.
+	// Bridge its committed metadata updates into the same realtime stream used by
+	// cross-device conversation changes; background work has no originating tab.
+	if d.Orchestrator != nil {
+		d.Orchestrator.SetConversationUpdatedHandler(func(userID, conversationID string) {
+			publishUserEvent(d, nil, userID, "conversation.updated", conversationID)
+		})
+	}
+
 	// Resume account deletions stranded in status='deleting' by a previous
 	// process (§async user delete). Async: never delays startup.
 	go resumeUserDeletions(d)

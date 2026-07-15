@@ -16,9 +16,9 @@ import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } fro
 import { useTranslation } from 'react-i18next'
 import {
   ArrowUp,
+  AudioWaveform,
   Paperclip,
   Image as ImageIcon,
-  Mic,
   StopCircle,
   Telescope,
   ShieldCheck,
@@ -122,18 +122,23 @@ interface ComposerProps {
 const MAX_LEN = envNum('VITE_AIVORY_MAX_LEN', 12_000)
 const EMPTY_PARAM_VALUES: Record<string, unknown> = {}
 
-// Which speech-to-text provider is active decides the mic flow: "gpt" records a
-// clip then POSTs it (Whisper); "volcano" streams live. Fetched once per tab and
-// shared across composer instances; defaults to the safe record path on failure.
-let sttProviderPromise: Promise<string> | null = null
-function loadSttProvider(): Promise<string> {
-  if (!sttProviderPromise) {
-    sttProviderPromise = audioApi
+// Speech-to-text capability is shared across composer instances. Besides the
+// provider, the backend reports whether its required credentials exist so the
+// prominent empty-draft action never records a clip it cannot transcribe.
+interface SttCapability {
+  provider: string
+  enabled: boolean
+}
+
+let sttCapabilityPromise: Promise<SttCapability> | null = null
+function loadSttCapability(): Promise<SttCapability> {
+  if (!sttCapabilityPromise) {
+    sttCapabilityPromise = audioApi
       .capabilities()
-      .then((c) => c.provider || 'gpt')
-      .catch(() => 'gpt')
+      .then((c) => ({ provider: c.provider || 'gpt', enabled: Boolean(c.enabled) }))
+      .catch(() => ({ provider: 'gpt', enabled: false }))
   }
-  return sttProviderPromise
+  return sttCapabilityPromise
 }
 
 // §4.6-A upload size caps. The /api/files handler is authoritative; we read the
@@ -469,23 +474,53 @@ export function Composer({
   // `streamConnecting` covers the mic-acquire + socket-connect gap before audio
   // flows. streamBaseRef holds the composer text the live transcript appends to.
   const [sttProvider, setSttProvider] = useState('gpt')
+  const [voiceEnabled, setVoiceEnabled] = useState(false)
+  const [voiceStarting, setVoiceStarting] = useState(false)
   const [streamConnecting, setStreamConnecting] = useState(false)
   const streamCtlRef = useRef<VoiceStreamController | null>(null)
+  const recordingStreamRef = useRef<MediaStream | null>(null)
   const streamBaseRef = useRef('')
-  const streamCancelRef = useRef(false)
+  const streamAttemptRef = useRef(0)
+  // getUserMedia resolves after an arbitrary permission delay. A monotonically
+  // increasing attempt id lets cancel/unmount invalidate a late stream before it
+  // can create an orphan MediaRecorder or retain the microphone.
+  const voiceStartAttemptRef = useRef(0)
+  const voiceStartingRef = useRef(false)
 
   useEffect(() => {
     let live = true
-    void loadSttProvider().then((p) => {
-      if (live) setSttProvider(p)
+    void loadSttCapability().then((capability) => {
+      if (live) {
+        setSttProvider(capability.provider)
+        setVoiceEnabled(capability.enabled)
+      }
     })
     return () => {
       live = false
     }
   }, [])
 
-  // Never leave the mic hot / a socket open when the composer unmounts.
-  useEffect(() => () => streamCtlRef.current?.cancel(), [])
+  // Never leave the mic hot / a socket open when the composer unmounts. The
+  // recorded-clip path needs explicit track cleanup too; stopping only the live
+  // WebSocket path leaves the browser's microphone indicator active.
+  useEffect(
+    () => () => {
+      voiceStartAttemptRef.current += 1
+      voiceStartingRef.current = false
+      streamAttemptRef.current += 1
+      streamCtlRef.current?.cancel()
+      const recorder = recorderRef.current
+      if (recorder && recorder.state !== 'inactive') {
+        recorder.ondataavailable = null
+        recorder.onstop = null
+        recorder.stop()
+      }
+      recordingStreamRef.current?.getTracks().forEach((track) => track.stop())
+      recordingStreamRef.current = null
+      recorderRef.current = null
+    },
+    [],
+  )
   const updateValue = useCallback(
     (next: string) => {
       valueRef.current = next
@@ -504,7 +539,7 @@ export function Composer({
   // typed text (thread composers keep it in React state only), staged
   // attachments, or an active / still-transcribing voice recording.
   const hasUnsentWork =
-    value.trim().length > 0 || attachments.length > 0 || recording || transcribing || streamConnecting
+    value.trim().length > 0 || attachments.length > 0 || recording || transcribing || streamConnecting || voiceStarting
   useEffect(() => {
     if (!hasUnsentWork) return
     return blockReload()
@@ -519,8 +554,8 @@ export function Composer({
   // Mic toggle. Volcano streams live; every other provider records a clip and
   // transcribes it. A second click always stops whatever is active.
   async function toggleVoice() {
-    if (transcribing) return
-    if (recording || streamConnecting || streamCtlRef.current) {
+    if (!voiceEnabled || transcribing) return
+    if (voiceStartingRef.current || recording || streamConnecting || streamCtlRef.current) {
       stopVoice()
       return
     }
@@ -532,6 +567,12 @@ export function Composer({
   }
 
   function stopVoice() {
+    if (voiceStartingRef.current) {
+      voiceStartAttemptRef.current += 1
+      voiceStartingRef.current = false
+      setVoiceStarting(false)
+      return
+    }
     if (streamCtlRef.current) {
       // Listening → stop the mic and wait for the final transcript.
       setTranscribing(true)
@@ -539,50 +580,58 @@ export function Composer({
       return
     }
     if (streamConnecting) {
-      // Still connecting — no controller yet; cancel as soon as it's ready.
-      streamCancelRef.current = true
+      // Still connecting — invalidate this attempt. If its WebSocket resolves
+      // later, startStreaming() tears it down without touching a newer attempt.
+      streamAttemptRef.current += 1
       setStreamConnecting(false)
       return
     }
-    recorderRef.current?.stop()
+    const recorder = recorderRef.current
+    if (recorder && recorder.state !== 'inactive') recorder.stop()
   }
 
   // Volcano live path: append the incremental transcript to whatever text the
   // composer already held when recording started.
   async function startStreaming() {
+    const attempt = streamAttemptRef.current + 1
+    streamAttemptRef.current = attempt
     setStreamConnecting(true)
-    streamCancelRef.current = false
     const base = valueRef.current
     streamBaseRef.current = base.trim() ? base.trimEnd() + ' ' : ''
     try {
       const ctl = await startVoiceStream({
         onReady: () => {
-          if (streamCancelRef.current) {
-            streamCtlRef.current?.cancel()
-            return
-          }
+          if (streamAttemptRef.current !== attempt) return
           setStreamConnecting(false)
           setRecording(true)
         },
-        onPartial: (text) => updateValue(streamBaseRef.current + text),
+        onPartial: (text) => {
+          if (streamAttemptRef.current === attempt) updateValue(streamBaseRef.current + text)
+        },
         onFinal: (text) => {
-          if (text) {
+          if (streamAttemptRef.current === attempt && text) {
             updateValue(streamBaseRef.current + text)
             requestAnimationFrame(() => ref.current?.focus())
           }
         },
-        onError: () => toast.error(t('composer.voiceFailed')),
+        onError: () => {
+          if (streamAttemptRef.current === attempt) toast.error(t('composer.voiceFailed'))
+        },
         onClose: () => {
+          if (streamAttemptRef.current !== attempt) return
           streamCtlRef.current = null
           setRecording(false)
           setStreamConnecting(false)
           setTranscribing(false)
         },
       })
+      if (streamAttemptRef.current !== attempt) {
+        ctl.cancel()
+        return
+      }
       streamCtlRef.current = ctl
-      // A stop requested during the connect window applies now.
-      if (streamCancelRef.current) ctl.cancel()
     } catch (e) {
+      if (streamAttemptRef.current !== attempt) return
       setStreamConnecting(false)
       const msg = e instanceof Error ? e.message : ''
       toast.error(msg === 'unsupported' ? t('composer.voiceUnsupported') : t('composer.voicePermission'))
@@ -595,29 +644,53 @@ export function Composer({
       toast.error(t('composer.voiceUnsupported'))
       return
     }
-    let stream: MediaStream
+    const attempt = voiceStartAttemptRef.current + 1
+    voiceStartAttemptRef.current = attempt
+    voiceStartingRef.current = true
+    setVoiceStarting(true)
+    let stream: MediaStream | undefined
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      if (voiceStartAttemptRef.current !== attempt) {
+        stream.getTracks().forEach((track) => track.stop())
+        return
+      }
     } catch {
-      toast.error(t('composer.voicePermission'))
+      if (voiceStartAttemptRef.current === attempt) toast.error(t('composer.voicePermission'))
       return
+    } finally {
+      if (voiceStartAttemptRef.current === attempt) {
+        voiceStartingRef.current = false
+        setVoiceStarting(false)
+      }
     }
-    const rec = new MediaRecorder(stream)
-    chunksRef.current = []
-    rec.ondataavailable = (e) => {
-      if (e.data.size > 0) chunksRef.current.push(e.data)
+    if (!stream || voiceStartAttemptRef.current !== attempt) return
+
+    try {
+      const rec = new MediaRecorder(stream)
+      recordingStreamRef.current = stream
+      chunksRef.current = []
+      rec.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data)
+      }
+      rec.onstop = () => {
+        stream.getTracks().forEach((tr) => tr.stop())
+        if (recordingStreamRef.current === stream) recordingStreamRef.current = null
+        if (recorderRef.current === rec) recorderRef.current = null
+        setRecording(false)
+        const blob = new Blob(chunksRef.current, { type: rec.mimeType || 'audio/webm' })
+        if (blob.size === 0) return
+        setTranscribing(true)
+        void transcribeRecording(blob)
+      }
+      recorderRef.current = rec
+      rec.start()
+      setRecording(true)
+    } catch {
+      stream.getTracks().forEach((track) => track.stop())
+      if (recordingStreamRef.current === stream) recordingStreamRef.current = null
+      if (voiceStartAttemptRef.current === attempt) toast.error(t('composer.voiceUnsupported'))
     }
-    rec.onstop = () => {
-      stream.getTracks().forEach((tr) => tr.stop())
-      setRecording(false)
-      const blob = new Blob(chunksRef.current, { type: rec.mimeType || 'audio/webm' })
-      if (blob.size === 0) return
-      setTranscribing(true)
-      void transcribeRecording(blob)
-    }
-    recorderRef.current = rec
-    rec.start()
-    setRecording(true)
   }
 
   // Send a recording for transcription. MediaRecorder's streaming WebM often has
@@ -671,6 +744,10 @@ export function Composer({
   // is active every other feature is forced off.
   const fastAvailable = useModels((s) => s.fastAvailable)
   const effectiveFast = Boolean(fast) && fastAvailable
+  // A fast turn resolves to the platform-selected model, while modelId stays on
+  // the last advanced choice so switching back can restore it. Never surface or
+  // submit that advanced model's parameter controls during the fast turn.
+  const visibleParamControls = effectiveFast ? undefined : paramControls
   const effectiveMode = !effectiveFast && !isImageMode && researchEnabled ? mode : 'default'
   const effectiveVerify = !effectiveFast && verify && verifyAvailable && !isImageMode
   // §4.13-B disable-tools + forced web search — inapplicable to image models / fast.
@@ -697,12 +774,13 @@ export function Composer({
     () => attachments.some((a) => a.documentId && a.ingest !== 'ready'),
     [attachments],
   )
-  const canSubmit = value.trim().length > 0 && !streaming && !uploading && !restoringAttachments && !documentNotReady
+  const voiceActive = recording || streamConnecting || transcribing || voiceStarting
+  const canSubmit = value.trim().length > 0 && !voiceActive && !streaming && !uploading && !restoringAttachments && !documentNotReady
 
   async function handleSubmit() {
     if (submittingRef.current) return
     const text = value.trim()
-    if (!text || streaming || uploading || restoringAttachments || documentNotReady) return
+    if (!text || voiceActive || streaming || uploading || restoringAttachments || documentNotReady) return
     if (text.length > MAX_LEN) {
       // Overflow fallback (multi-paste / dictation can pass the paste hook):
       // move the whole draft into a .txt attachment; the user adds a short
@@ -732,7 +810,7 @@ export function Composer({
     try {
       // Uploads happen on attach now (so parsing starts immediately and the send is
       // gated until 'ready'); by here every attachment is already a real backend id.
-      const params = filterVisibleParams(paramControls, paramValues)
+      const params = effectiveFast ? {} : filterVisibleParams(visibleParamControls, paramValues)
       onSubmit(text, attachments, {
         mode: effectiveMode === 'default' ? undefined : effectiveMode,
         params: Object.keys(params).length > 0 ? params : undefined,
@@ -1192,17 +1270,91 @@ export function Composer({
       })
     )
 
-  // Send / stop button — shared by both layouts. On mobile it's a larger,
-  // thumb-friendly circle pinned to the right edge.
-  const sendBtn = streaming ? (
+  // One primary action owns the right edge, matching the familiar ChatGPT
+  // composer pattern: stop while generating, voice while the draft is empty,
+  // and send once text exists. Keep voice in control until live/recorded speech
+  // fully settles; a streaming transcript can populate `value` before the mic
+  // has actually stopped, and must not strand the user without a stop action.
+  const hasDraftText = value.trim().length > 0
+  const showVoiceAction = voiceActive || !hasDraftText
+  const voiceStatusLabel = transcribing
+    ? t('composer.voiceTranscribing')
+    : recording
+      ? t('composer.voiceStop')
+      : streamConnecting || voiceStarting
+        ? t('composer.voiceConnecting')
+        : voiceEnabled
+          ? t('composer.voice')
+          : t('composer.voiceUnavailable')
+  // Keep a 44px touch target on phones while reducing the visible circle to
+  // 32px. The hit area preserves mobile ergonomics without making the action
+  // visually dominate the composer.
+  const primaryActionHitArea = cn(
+    'inline-flex shrink-0 items-center justify-center size-9 max-sm:size-11 rounded-full interactive',
+    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+  )
+  const primaryActionSurface = 'inline-flex size-8 items-center justify-center rounded-full'
+
+  const primaryAction = streaming ? (
     <Tooltip content={t('composer.stop')}>
       <button
         type="button"
         onClick={onStop}
         aria-label={t('composer.stop')}
-        className="inline-flex items-center justify-center size-9 max-sm:size-11 rounded-[10px] max-sm:rounded-full bg-[var(--color-fg)] text-[var(--color-fg-inverted)] hover:opacity-90 interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+        data-composer-action="stop"
+        className={cn(primaryActionHitArea, 'hover:opacity-90')}
       >
-        <StopCircle size={16} aria-hidden />
+        <span className={cn(primaryActionSurface, 'bg-[var(--color-fg)] text-[var(--color-fg-inverted)]')}>
+          <StopCircle size={15} aria-hidden />
+        </span>
+      </button>
+    </Tooltip>
+  ) : showVoiceAction ? (
+    <Tooltip content={voiceStatusLabel}>
+      <button
+        type="button"
+        onClick={() => void toggleVoice()}
+        disabled={transcribing || !voiceEnabled}
+        aria-label={
+          transcribing
+            ? voiceStatusLabel
+            : recording || streamConnecting || voiceStarting
+              ? t('composer.voiceStop')
+              : voiceStatusLabel
+        }
+        aria-pressed={recording || streamConnecting || voiceStarting}
+        aria-busy={transcribing || streamConnecting || voiceStarting || undefined}
+        data-composer-action={transcribing ? 'transcribing' : recording ? 'voice-recording' : streamConnecting ? 'voice-connecting' : voiceStarting ? 'voice-starting' : voiceEnabled ? 'voice' : 'voice-disabled'}
+        className={cn(
+          primaryActionHitArea,
+          voiceEnabled && !recording && !streamConnecting && !voiceStarting && 'hover:opacity-90',
+          !voiceEnabled && 'cursor-not-allowed',
+          transcribing && 'cursor-wait opacity-60',
+        )}
+      >
+        <span
+          className={cn(
+            primaryActionSurface,
+            recording
+              ? 'bg-[var(--color-danger-soft)] text-[var(--color-danger)]'
+              : streamConnecting || voiceStarting
+                ? 'bg-[var(--color-secondary-soft)] text-[var(--color-secondary)]'
+                : voiceEnabled
+                  ? 'bg-[var(--color-fg)] text-[var(--color-fg-inverted)]'
+                  : 'bg-[var(--color-bg-muted)] text-[var(--color-fg-faint)]',
+          )}
+        >
+          {transcribing ? (
+            <Loader2 size={15} className="animate-spin" aria-hidden />
+          ) : (
+            <AudioWaveform
+              size={16}
+              strokeWidth={2.1}
+              className={cn((recording || streamConnecting || voiceStarting) && 'animate-[streaming-pulse_1600ms_ease-in-out_infinite]')}
+              aria-hidden
+            />
+          )}
+        </span>
       </button>
     </Tooltip>
   ) : (
@@ -1212,15 +1364,22 @@ export function Composer({
         onClick={handleSubmit}
         disabled={!canSubmit}
         aria-label={t('actions.send', { ns: 'common' })}
+        data-composer-action="send"
         className={cn(
-          'inline-flex items-center justify-center size-9 max-sm:size-11 rounded-[10px] max-sm:rounded-full interactive',
-          canSubmit
-            ? 'bg-[var(--color-accent)] text-[var(--color-accent-fg)] hover:bg-[var(--color-accent-hover)] shadow-[var(--shadow-xs)]'
-            : 'bg-[var(--color-bg-muted)] text-[var(--color-fg-faint)] cursor-not-allowed',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+          primaryActionHitArea,
+          canSubmit ? 'hover:opacity-90' : 'cursor-not-allowed',
         )}
       >
-        {uploading ? <Loader2 size={16} className="animate-spin" aria-hidden /> : <ArrowUp size={16} aria-hidden />}
+        <span
+          className={cn(
+            primaryActionSurface,
+            canSubmit
+              ? 'bg-[var(--color-fg)] text-[var(--color-fg-inverted)]'
+              : 'bg-[var(--color-bg-muted)] text-[var(--color-fg-faint)]',
+          )}
+        >
+          {uploading ? <Loader2 size={15} className="animate-spin" aria-hidden /> : <ArrowUp size={15} aria-hidden />}
+        </span>
       </button>
     </Tooltip>
   )
@@ -1244,7 +1403,7 @@ export function Composer({
         if (e.dataTransfer.files?.length) void handleAttach(e.dataTransfer.files)
       }}
       className={cn(
-        'group/composer relative w-full',
+        'group/composer relative min-w-0 w-full max-w-full',
         // Calm Gemini-style pill on phones (rounder, no resting shadow); the
         // editorial card look is kept on ≥sm.
         'rounded-[16px] max-sm:rounded-[22px] border border-[var(--color-border)] bg-[var(--color-surface)]',
@@ -1470,7 +1629,7 @@ export function Composer({
         className={cn(
           'border-none bg-transparent focus:bg-transparent focus:ring-0',
           // ≥16px on phones (--text-input-mobile) so iOS Safari doesn't zoom on focus.
-          'px-4 pt-3 pb-1 text-[0.9375rem] max-sm:text-[length:var(--text-input-mobile)]',
+          'min-h-[3.25rem] sm:min-h-[4.5rem] px-4 pt-3 pb-1 text-[0.9375rem] max-sm:text-[length:var(--text-input-mobile)]',
           'placeholder:text-[var(--color-fg-faint)]',
           compact && 'min-h-[40px]',
         )}
@@ -1492,8 +1651,8 @@ export function Composer({
       />
 
       {isMobile ? (
-        /* ── Mobile: [+ menu] [model] … [send] ── */
-        <div className="flex items-center gap-1.5 px-2 pb-2.5 pt-1">
+        /* ── Mobile: fixed [+] + scroll-safe context + fixed primary action ── */
+        <div className="flex min-w-0 items-center gap-1 px-2 pb-2.5 pt-1">
           <Popover
             open={moreOpen}
             onOpenChange={(o) => {
@@ -1525,7 +1684,12 @@ export function Composer({
               align="start"
               sideOffset={10}
               collisionPadding={12}
-              className="w-[min(20rem,calc(100vw-1.5rem))] min-w-0 max-h-[62dvh] overflow-y-auto overscroll-contain scrollbar-thin p-1.5"
+              className="min-w-0 overflow-y-auto overscroll-contain scrollbar-thin p-1.5"
+              style={{
+                width: 'min(20rem, calc(100vw - var(--safe-left) - var(--safe-right) - 1.5rem))',
+                maxWidth: 'calc(100vw - var(--safe-left) - var(--safe-right) - 1.5rem)',
+                maxHeight: 'min(62dvh, var(--radix-popover-content-available-height), calc(100dvh - var(--safe-top) - var(--safe-bottom) - 1.5rem))',
+              }}
             >
               <button
                 type="button"
@@ -1553,39 +1717,6 @@ export function Composer({
                 <ImageIcon size={18} className="shrink-0 text-[var(--color-fg-muted)]" aria-hidden />
                 {t('composer.addImage')}
               </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setMoreOpen(false)
-                  void toggleVoice()
-                }}
-                disabled={transcribing}
-                className={cn(
-                  'flex w-full items-center gap-3 rounded-[10px] px-3 py-2.5 text-left text-[15px] hover:bg-[var(--color-bg-muted)] active:bg-[var(--color-bg-muted)]',
-                  recording
-                    ? 'text-[var(--color-danger)]'
-                    : streamConnecting
-                      ? 'text-[var(--color-secondary)]'
-                      : 'text-[var(--color-fg)]',
-                  transcribing && 'cursor-not-allowed opacity-60',
-                )}
-              >
-                <Mic
-                  size={18}
-                  className={cn(
-                    'shrink-0',
-                    !recording && !streamConnecting && 'text-[var(--color-fg-muted)]',
-                    (recording || streamConnecting) && 'animate-[streaming-pulse_1600ms_ease-in-out_infinite]',
-                  )}
-                  aria-hidden
-                />
-                {recording
-                  ? t('composer.voiceStop')
-                  : streamConnecting
-                    ? t('composer.voiceConnecting')
-                    : t('composer.voice')}
-              </button>
-
               {featureItems.length > 0 ? (
                 <>
                   <div className="my-1 h-px bg-[var(--color-divider)]" aria-hidden />
@@ -1603,13 +1734,13 @@ export function Composer({
                 </>
               ) : null}
 
-              {paramControls ? (
+              {visibleParamControls ? (
                 <>
                   <div className="my-1 h-px bg-[var(--color-divider)]" aria-hidden />
                   <div className="px-1.5 py-1">
                     <ParamControls
                       key={modelId || 'default-model'}
-                      controls={paramControls}
+                      controls={visibleParamControls}
                       values={paramValues}
                       onChange={handleParamValuesChange}
                     />
@@ -1619,16 +1750,21 @@ export function Composer({
             </PopoverContent>
           </Popover>
 
-          {isImageMode ? <StylePicker value={imageStyleId} onChange={setImageStyleId} /> : null}
+          {/* Context controls can outgrow a 320px phone (image style + a long
+              model name). They get the only shrinkable/scrollable lane so the
+              two 44px edge actions never leave the viewport. */}
+          <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto overscroll-x-contain scrollbar-none">
+            {isImageMode ? <StylePicker value={imageStyleId} onChange={setImageStyleId} className="min-w-0 max-w-[42vw] shrink" /> : null}
 
-          {/* On phones the header already carries the model picker (ChatThread),
-              so we drop the composer's to keep the row uncluttered. New-chat
-              (ChatHome) has no header picker, so it keeps this one. */}
-          {!modelPickerInHeader ? (
-            <ModelPicker value={modelId} onChange={onModelChange} fast={fast} onFastChange={onFastChange} className="min-w-0 max-w-[40vw]" />
-          ) : null}
+            {/* On phones the header already carries the model picker (ChatThread),
+                so we drop the composer's to keep the row uncluttered. New-chat
+                (ChatHome) has no header picker, so it keeps this one. */}
+            {!modelPickerInHeader ? (
+              <ModelPicker value={modelId} onChange={onModelChange} fast={fast} onFastChange={onFastChange} className="min-w-0 max-w-[42vw] shrink" />
+            ) : null}
+          </div>
 
-          <div className="ml-auto">{sendBtn}</div>
+          {primaryAction}
         </div>
       ) : (
         /* ── Desktop: inline scrollable left zone + pinned right zone ── */
@@ -1689,51 +1825,16 @@ export function Composer({
               </button>
             </Tooltip>
 
-            <Tooltip
-              content={
-                recording
-                  ? t('composer.voiceStop')
-                  : streamConnecting
-                    ? t('composer.voiceConnecting')
-                    : t('composer.voice')
-              }
-            >
-              <button
-                type="button"
-                onClick={() => void toggleVoice()}
-                disabled={transcribing}
-                aria-label={t('composer.voice')}
-                aria-pressed={recording || streamConnecting}
-                className={cn(
-                  'inline-flex items-center justify-center size-8 rounded-[8px] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-                  recording
-                    ? 'bg-[var(--color-danger-soft)] text-[var(--color-danger)]'
-                    : streamConnecting
-                      ? 'bg-[var(--color-secondary-soft)] text-[var(--color-secondary)]'
-                      : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
-                  transcribing && 'opacity-60 cursor-not-allowed',
-                )}
-              >
-                <Mic
-                  size={15}
-                  aria-hidden
-                  className={cn(
-                    (recording || streamConnecting) && 'animate-[streaming-pulse_1600ms_ease-in-out_infinite]',
-                  )}
-                />
-              </button>
-            </Tooltip>
-
             <div className="mx-1 h-5 w-px bg-[var(--color-divider)]" aria-hidden />
 
             {isImageMode ? <StylePicker value={imageStyleId} onChange={setImageStyleId} /> : null}
 
             {/* Per-model param_controls (§2.3-G). Picked values flow up via onSubmit(). */}
-            {paramControls ? (
+            {visibleParamControls ? (
               <div className="flex flex-wrap items-center gap-1.5">
                 <ParamControls
                   key={modelId || 'default-model'}
-                  controls={paramControls}
+                  controls={visibleParamControls}
                   values={paramValues}
                   onChange={handleParamValuesChange}
                 />
@@ -1799,7 +1900,7 @@ export function Composer({
           {/* Pinned — model picker + send/stop, always visible (never shrinks). */}
           <div className="flex shrink-0 items-center gap-1.5 pl-1">
             <ModelPicker value={modelId} onChange={onModelChange} fast={fast} onFastChange={onFastChange} />
-            {sendBtn}
+            {primaryAction}
           </div>
         </div>
       )}

@@ -1252,7 +1252,9 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
           no_tools: noTools,
           web_search: webSearch,
           fast,
-          params: conv?.lastParams,
+          // Fast turns must not inherit parameter overrides cached from the
+          // previously selected advanced model (for example, `thinking`).
+          params: fast ? undefined : conv?.lastParams,
           locale: currentLocale(),
         },
         abort.signal,
