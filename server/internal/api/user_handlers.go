@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"aivory/server/internal/envcfg"
+	"aivory/server/internal/llm"
 	"aivory/server/internal/store"
 )
 
@@ -175,6 +176,9 @@ var settingsAllowlist = map[string]bool{
 	"code_theme":            true,
 	"user_message_markdown": true,
 	"onboarded":             true,
+	"tool_mode_default":     true,
+	// Legacy clients still write this boolean. New clients use the tri-state
+	// tool_mode_default setting; keep the old key writable during migration.
 	"disable_tools_default": true,
 }
 
@@ -194,6 +198,10 @@ func updateMeSettingsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 			delete(patch, k)
 		}
 	}
+	if err := normalizeToolModeSettingsPatch(patch); err != nil {
+		writeError(w, 400, err)
+		return
+	}
 	upd, err := store.UpdateUserSettings(r.Context(), d.DB, u.ID, patch)
 	if err != nil {
 		writeError(w, 500, err)
@@ -201,6 +209,33 @@ func updateMeSettingsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	invalidateAuthUser(d, u.ID)
 	writeJSON(w, 200, json.RawMessage(upd.Settings))
+}
+
+// Keep old and new clients coherent during rolling upgrades. A new tri-state
+// write wins when both keys are present; auto degrades to legacy "tools on".
+// A legacy-only boolean write is promoted to the equivalent explicit mode so a
+// previously stored tool_mode_default cannot make the old client's change inert.
+func normalizeToolModeSettingsPatch(patch map[string]any) error {
+	if value, ok := patch["tool_mode_default"]; ok {
+		mode, isString := value.(string)
+		if !isString || !validTurnToolMode(mode) {
+			return errors.New("tool_mode_default must be one of: auto, disabled, enabled")
+		}
+		patch["disable_tools_default"] = mode == llm.ToolModeDisabled
+		return nil
+	}
+	if value, ok := patch["disable_tools_default"]; ok {
+		disabled, isBool := value.(bool)
+		if !isBool {
+			return errors.New("disable_tools_default must be a boolean")
+		}
+		if disabled {
+			patch["tool_mode_default"] = llm.ToolModeDisabled
+		} else {
+			patch["tool_mode_default"] = llm.ToolModeEnabled
+		}
+	}
+	return nil
 }
 
 // meUsageHandler returns the user's message-count over the last N days. Cost is

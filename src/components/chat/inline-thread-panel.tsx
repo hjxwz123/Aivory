@@ -6,7 +6,7 @@ import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { Tooltip } from '@/components/ui/tooltip'
 import { Markdown } from '@/components/chat/markdown'
 import { useInlineThreadDrawer } from '@/store/inline-thread'
-import { useConversations } from '@/store/conversations'
+import { resolveArmedTurnFlags, useConversations } from '@/store/conversations'
 import { useSettings } from '@/store/settings'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { cn } from '@/lib/utils'
@@ -95,7 +95,15 @@ function ThreadBody({ quote, childId, onClose }: { quote: string; childId: strin
     const text = draft.trim()
     if (!text || !childId) return
     setDraft('')
-    void sendMessage({ conversationId: childId, text })
+    const armed = resolveArmedTurnFlags()
+    void sendMessage({
+      conversationId: childId,
+      text,
+      mode: armed.mode,
+      verify: armed.verify,
+      toolMode: armed.toolMode,
+      webSearch: armed.webSearch,
+    })
   }
 
   return (

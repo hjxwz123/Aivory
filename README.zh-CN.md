@@ -77,9 +77,11 @@
 
 **自动文件暂存机制**：每次 `python_execute` 调用前，工具运行器把以下内容全部暂存到 `/workspace/uploads/`：
 
-1. 用户在本对话中上传的所有文件（表格、CSV、PDF、图片——每个最大 20 MB）。
+1. 用户在本对话中上传的所有符合条件的文件（表格、CSV、文本、代码、图片——默认每个最大 40 MiB）。
 2. 本对话中 `image_generate` 生成的所有图片产物。
 3. 用户有权限使用的所有技能资产，位于 `/workspace/skills/<name>/`。
+
+会话上传文件的 Python 暂存上限由 `AIVORY_TOOLS_PYTHON_EXECUTE_UPLOAD_STAGING_FILE_SIZE` 控制，默认 40 MiB。`python_execute` 未向模型开放时（包括禁用工具和快速模式），CSV/XLSX 改走进程内有限预览，其单文件上限由 `AIVORY_RAG_SPREADSHEET_PREVIEW_MAX_FILE_BYTES` 控制，默认 30 MiB。两个变量都以字节为单位，修改后需重启 API。
 
 因此，如下工作流可以无缝完成：
 

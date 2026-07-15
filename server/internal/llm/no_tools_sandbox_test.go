@@ -1,7 +1,10 @@
 package llm
 
 import (
+	"archive/zip"
 	"context"
+	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +12,62 @@ import (
 
 	"aivory/server/internal/store"
 )
+
+type spreadsheetCaptureProvider struct {
+	request UnifiedChatRequest
+}
+
+func (p *spreadsheetCaptureProvider) ID() string { return "openai" }
+
+func (p *spreadsheetCaptureProvider) Stream(
+	_ context.Context,
+	req UnifiedChatRequest,
+	_ ToolRunner,
+	_ func(SseEvent),
+) (*UnifiedResult, error) {
+	p.request = req
+	return &UnifiedResult{
+		Blocks:     []UnifiedBlock{{Kind: "text", Text: "ok"}},
+		StopReason: "stop",
+		Usage:      Usage{InputTokens: 1, OutputTokens: 1},
+	}, nil
+}
+
+type spreadsheetTestTools struct{}
+
+func (spreadsheetTestTools) List(string) []ToolDef {
+	return []ToolDef{{Name: "python_execute"}, {Name: "web_search"}}
+}
+
+func (spreadsheetTestTools) Run(context.Context, string, []byte, *ToolContext) (string, []Citation, error) {
+	return "", nil, nil
+}
+
+func writeFastModeTestXLSX(t *testing.T, path string) {
+	t.Helper()
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create xlsx: %v", err)
+	}
+	zw := zip.NewWriter(f)
+	w, err := zw.Create("xl/worksheets/sheet1.xml")
+	if err != nil {
+		t.Fatalf("create worksheet: %v", err)
+	}
+	const worksheet = `<?xml version="1.0"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>
+<row r="1"><c r="A1" t="inlineStr"><is><t>FAST_MODE_XLSX_CELL</t></is></c></row>
+</sheetData></worksheet>`
+	if _, err := w.Write([]byte(worksheet)); err != nil {
+		t.Fatalf("write worksheet: %v", err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close xlsx zip: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("close xlsx: %v", err)
+	}
+}
 
 func TestSandboxFilesHaveSheet(t *testing.T) {
 	if sandboxFilesHaveSheet([]ProjectFileSummary{{Name: "a.txt", Kind: "text"}, {Name: "b.png", Kind: "image"}}) {
@@ -22,9 +81,131 @@ func TestSandboxFilesHaveSheet(t *testing.T) {
 	}
 }
 
-// A no-tools turn with a staged spreadsheet parses it IN-PROCESS (no sandbox, no
-// python_execute) and injects a bounded <uploaded-data-preview> block. Non-sheet
-// files are ignored.
+func TestShouldInjectSpreadsheetPreviewUsesActualPythonAvailability(t *testing.T) {
+	sheetFiles := []ProjectFileSummary{{Name: "data.xlsx", Kind: "sheet"}}
+	textFiles := []ProjectFileSummary{{Name: "notes.txt", Kind: "text"}}
+	cases := []struct {
+		name                   string
+		files                  []ProjectFileSummary
+		pythonExecuteAvailable bool
+		want                   bool
+	}{
+		{name: "fast mode without python", files: sheetFiles, pythonExecuteAvailable: false, want: true},
+		{name: "disable tools", files: sheetFiles, pythonExecuteAvailable: false, want: true},
+		{name: "advanced mode with python", files: sheetFiles, pythonExecuteAvailable: true, want: false},
+		{name: "no spreadsheet", files: textFiles, pythonExecuteAvailable: false, want: false},
+		{name: "no files", files: nil, pythonExecuteAvailable: false, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := shouldInjectSpreadsheetPreview(tc.files, tc.pythonExecuteAvailable); got != tc.want {
+				t.Fatalf("shouldInjectSpreadsheetPreview() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestFastModeInjectsXLSXPreviewIntoProviderHistory(t *testing.T) {
+	ctx := context.Background()
+	db, err := store.Open(filepath.Join(t.TempDir(), "fast-xlsx.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer db.Close()
+	if err := store.Migrate(db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO users(id,email,password_hash,role) VALUES('u1','a@b.c','h','admin')`); err != nil {
+		t.Fatalf("user: %v", err)
+	}
+	channel, err := store.CreateChannel(ctx, db, "Test", "openai", "chat", "https://example.invalid", "key")
+	if err != nil {
+		t.Fatalf("channel: %v", err)
+	}
+	model, err := store.CreateModel(ctx, db, store.Model{
+		ChannelID: channel.ID,
+		Kind:      "chat",
+		RequestID: "fast-test",
+		Label:     "Fast test",
+		Enabled:   true,
+		Stream:    true,
+		ToolMode:  "native",
+	})
+	if err != nil {
+		t.Fatalf("model: %v", err)
+	}
+	if err := store.SetFastModel(ctx, db, model.ID); err != nil {
+		t.Fatalf("set fast model: %v", err)
+	}
+	conv, err := store.CreateConversation(ctx, db, store.Conversation{ID: "c1", UserID: "u1", Title: "Spreadsheet test"})
+	if err != nil {
+		t.Fatalf("conversation: %v", err)
+	}
+	xlsxPath := filepath.Join(t.TempDir(), "data.xlsx")
+	writeFastModeTestXLSX(t, xlsxPath)
+	file, err := store.CreateFile(ctx, db, store.File{
+		ID:             "f1",
+		UserID:         "u1",
+		ConversationID: conv.ID,
+		Filename:       "data.xlsx",
+		MimeType:       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+		Kind:           "sheet",
+		StoragePath:    xlsxPath,
+	})
+	if err != nil {
+		t.Fatalf("file: %v", err)
+	}
+
+	logger := log.New(io.Discard, "", 0)
+	provider := &spreadsheetCaptureProvider{}
+	registry := NewRegistry(logger)
+	registry.Register(provider)
+	orchestrator := NewOrchestrator(db, registry, spreadsheetTestTools{}, nil, nil, nil, nil, nil, logger)
+	_, err = orchestrator.Run(ctx, RunRequest{
+		UserID:         "u1",
+		ConversationID: conv.ID,
+		UserText:       "Analyze this spreadsheet",
+		Fast:           true,
+		Attachments: []Attachment{{
+			ID: file.ID, Filename: file.Filename, MimeType: file.MimeType, Kind: file.Kind,
+		}},
+	}, func(SseEvent) {})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	var historyText strings.Builder
+	for _, message := range provider.request.History {
+		for _, block := range message.Blocks {
+			if block.Kind == "text" {
+				historyText.WriteString(block.Text)
+				historyText.WriteByte('\n')
+			}
+		}
+	}
+	got := historyText.String()
+	for _, want := range []string{"<uploaded-data-preview>", "data.xlsx", "FAST_MODE_XLSX_CELL"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("fast provider history missing %q:\n%s", want, got)
+		}
+	}
+	webSearchAvailable := false
+	for _, tool := range provider.request.Tools {
+		if tool.Name == "python_execute" {
+			t.Fatal("fast provider request must not expose python_execute")
+		}
+		if tool.Name == "web_search" {
+			webSearchAvailable = true
+		}
+	}
+	if !webSearchAvailable {
+		t.Fatal("fast provider request should retain non-Python tools")
+	}
+}
+
+// A turn without python_execute (including fast and no-tools modes) parses a
+// staged spreadsheet IN-PROCESS and injects a bounded
+// <uploaded-data-preview> block. Non-sheet files are ignored.
 func TestPreviewSpreadsheetFilesInjectsParsedCSV(t *testing.T) {
 	db, err := store.Open(filepath.Join(t.TempDir(), "preview.db"))
 	if err != nil {

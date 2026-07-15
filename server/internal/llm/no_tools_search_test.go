@@ -262,7 +262,7 @@ func TestPerRequestUsageRowsNoOvershootOnPartialTotal(t *testing.T) {
 // never populated) — and with empty Tools, NONE of the four provider wire
 // formats may emit a tool-calling field in the upstream request body.
 func TestEmptyToolsCarriesNoToolFieldsOnWire(t *testing.T) {
-	toolFields := []string{`"tools"`, `"tool_choice"`, `"functions"`, `"function_call"`, `"toolConfig"`, `"tool_config"`}
+	toolFields := []string{`"tools"`, `"tool_choice"`, `"functions"`, `"function_call"`, `"parallel_tool_calls"`, `"toolConfig"`, `"tool_config"`}
 	assertNoToolFields := func(t *testing.T, body []byte) {
 		t.Helper()
 		for _, f := range toolFields {
@@ -281,6 +281,17 @@ func TestEmptyToolsCarriesNoToolFieldsOnWire(t *testing.T) {
 		return srv, &captured
 	}
 	history := []UnifiedMessage{{Role: "user", Blocks: []UnifiedBlock{{Kind: "text", Text: "hello"}}}}
+	// extra_params are admin-controlled, but they must not bypass a no-tools
+	// request by injecting provider tool declarations or tool-choice fields.
+	extraToolParams := json.RawMessage(`{
+		"tools":[{"type":"function","name":"should_not_leak"}],
+		"tool_choice":"required",
+		"functions":[{"name":"should_not_leak"}],
+		"function_call":"auto",
+		"parallel_tool_calls":true,
+		"toolConfig":{"functionCallingConfig":{"mode":"ANY"}},
+		"tool_config":{"tool_choice":"auto"}
+	}`)
 	openAIChatStream := `data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}` + "\n\n"
 	openAIRespStream := `data: {"type":"response.output_text.delta","delta":"ok"}` + "\n\n"
 
@@ -288,7 +299,7 @@ func TestEmptyToolsCarriesNoToolFieldsOnWire(t *testing.T) {
 		srv, captured := capture(anthropicTextStream("ok"))
 		defer srv.Close()
 		p := &AnthropicProvider{}
-		req := UnifiedChatRequest{Model: ModelInfo{RequestID: "claude-test", BaseURL: srv.URL, APIKey: "k"}, History: history}
+		req := UnifiedChatRequest{Model: ModelInfo{RequestID: "claude-test", BaseURL: srv.URL, APIKey: "k"}, History: history, ExtraParams: extraToolParams}
 		if _, err := p.Stream(context.Background(), req, nil, func(SseEvent) {}); err != nil {
 			t.Fatal(err)
 		}
@@ -298,7 +309,7 @@ func TestEmptyToolsCarriesNoToolFieldsOnWire(t *testing.T) {
 		srv, captured := capture(openAIChatStream)
 		defer srv.Close()
 		p := &OpenAIProvider{}
-		req := UnifiedChatRequest{Model: ModelInfo{RequestID: "gpt-test", BaseURL: srv.URL, APIKey: "k"}, History: history}
+		req := UnifiedChatRequest{Model: ModelInfo{RequestID: "gpt-test", BaseURL: srv.URL, APIKey: "k"}, History: history, ExtraParams: extraToolParams}
 		if _, err := p.Stream(context.Background(), req, nil, func(SseEvent) {}); err != nil {
 			t.Fatal(err)
 		}
@@ -308,7 +319,7 @@ func TestEmptyToolsCarriesNoToolFieldsOnWire(t *testing.T) {
 		srv, captured := capture(openAIRespStream)
 		defer srv.Close()
 		p := &OpenAIProvider{}
-		req := UnifiedChatRequest{Model: ModelInfo{RequestID: "gpt-test", BaseURL: srv.URL, APIKey: "k", APIFormat: "responses"}, History: history}
+		req := UnifiedChatRequest{Model: ModelInfo{RequestID: "gpt-test", BaseURL: srv.URL, APIKey: "k", APIFormat: "responses"}, History: history, ExtraParams: extraToolParams}
 		if _, err := p.Stream(context.Background(), req, nil, func(SseEvent) {}); err != nil {
 			t.Fatal(err)
 		}
@@ -318,7 +329,7 @@ func TestEmptyToolsCarriesNoToolFieldsOnWire(t *testing.T) {
 		srv, captured := capture(geminiTextStream("ok"))
 		defer srv.Close()
 		p := &GoogleProvider{}
-		req := UnifiedChatRequest{Model: ModelInfo{RequestID: "gemini-2.5-flash", BaseURL: srv.URL, APIKey: "k"}, History: history}
+		req := UnifiedChatRequest{Model: ModelInfo{RequestID: "gemini-2.5-flash", BaseURL: srv.URL, APIKey: "k"}, History: history, ExtraParams: extraToolParams}
 		if _, err := p.Stream(context.Background(), req, nil, func(SseEvent) {}); err != nil {
 			t.Fatal(err)
 		}

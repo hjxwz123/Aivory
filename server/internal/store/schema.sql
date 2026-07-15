@@ -138,6 +138,7 @@ CREATE TABLE IF NOT EXISTS models (
   fast              INTEGER NOT NULL DEFAULT 0, -- §fast-mode: THE fast model (only one; hidden from the advanced picker, Deep Research forced off)
   system_prompt     TEXT NOT NULL DEFAULT '',
   param_controls    TEXT NOT NULL DEFAULT '[]',
+  extra_params      TEXT NOT NULL DEFAULT '{}', -- admin-only upstream request defaults; native request fields win
   official_tools    TEXT NOT NULL DEFAULT '[]', -- OpenAI Responses hosted tools; [] = use system tools (§2.3-B)
   tags              TEXT NOT NULL DEFAULT '[]', -- model_tags ids for the picker filter (§ model tags)
   moderation_enabled INTEGER NOT NULL DEFAULT 0,      -- screen prompts before generation (§ moderation)

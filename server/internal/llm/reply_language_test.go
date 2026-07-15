@@ -89,6 +89,38 @@ func TestTitleLanguageDirective(t *testing.T) {
 	}
 }
 
+// TestTitlePromptTreatsIdentityQuestionsAsMetadata guards against the task
+// model answering identity questions itself and turning that answer into a
+// first-person title such as "我是 DeepSeek".
+func TestTitlePromptTreatsIdentityQuestionsAsMetadata(t *testing.T) {
+	prompt := defaultSystem(TaskTitle, false)
+	for _, want := range []string{
+		"metadata task",
+		"source text to label",
+		"never as a request to answer",
+		"not you, the title generator",
+		"neutral noun phrase",
+		"do not role-play either participant",
+		"name, identity, model, creator, or capabilities",
+		"title the inquiry itself",
+		"Never infer or invent a name, identity",
+		`"你是谁" -> "询问助手身份"`,
+		`"你叫什么名字" -> "询问助手名称"`,
+		`"我是..."`,
+		`"我叫..."`,
+		`"I am..."`,
+		`"My name is..."`,
+		`"What's your name?" -> "Assistant identity"`,
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("title prompt missing %q:\n%s", want, prompt)
+		}
+	}
+	if strings.Contains(prompt, "DeepSeek") {
+		t.Error("title prompt must not seed a specific task-model identity")
+	}
+}
+
 // TestCleanTitleClamp guards the CJK-aware clamp: dense CJK titles stay short,
 // while a Western title gets more room and is cut on a word boundary (not
 // mid-word) so the now-English titles aren't mangled.

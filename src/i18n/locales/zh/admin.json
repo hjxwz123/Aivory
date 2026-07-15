@@ -97,6 +97,8 @@
       "fastModelHint": "作为「快速」模式的模型。从进阶选择器中隐藏；用户永远看不到它的名称；深度研究强制关闭。",
       "systemPrompt": "系统提示词",
       "paramControls": "param_controls (JSON)",
+      "extraParams": "额外上游参数（JSON）",
+      "extraParamsHint": "可选 JSON 对象，将合并到此模型的上游请求中。优先级：内建请求参数高于参数控件映射，参数控件映射高于此处的值。",
       "dim": "向量维度",
       "sortOrder": "显示顺序",
       "sortOrderHint": "数字越小越靠前。",
@@ -127,7 +129,9 @@
     "moveDown": "下移",
     "errors": {
       "missingFields": "请填写渠道、显示名和 request_id",
-      "invalidJSON": "param_controls 不是合法 JSON"
+      "invalidJSON": "param_controls 不是合法 JSON",
+      "invalidExtraParamsJSON": "额外上游参数必须是合法 JSON",
+      "extraParamsMustBeObject": "额外上游参数必须是 JSON 对象"
     },
     "permissionsLead": "可用此模型的用户组及每周期额度。全部关闭=对所有人开放。",
     "tagsHint": "给模型分配标签,用于选择器筛选。",
@@ -382,6 +386,7 @@
       "task_memory_adjudicate": "记忆裁决",
       "task_downgrade": "跨厂商降级",
       "task_image_prompt": "图片提示词",
+      "task_tool_route": "工具路由",
       "task_research_plan": "研究规划",
       "task_research_verify": "研究核验",
       "task_moderation": "内容审核",

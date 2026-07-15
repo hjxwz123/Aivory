@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { MessageCircleQuestion, CornerDownLeft } from 'lucide-react'
-import { useConversations } from '@/store/conversations'
+import { resolveArmedTurnFlags, useConversations } from '@/store/conversations'
 import { useInlineThreadDrawer } from '@/store/inline-thread'
 import { highlightThreads, threadIdForNode } from '@/lib/inline-highlight'
 
@@ -190,13 +190,21 @@ export function InlineThreadLayer({ conversationId, scrollRef }: InlineThreadLay
     if (!pending) return
     const question = draft.trim()
     if (!question) return
+    const armed = resolveArmedTurnFlags()
     const quote = pending.quote
     const messageId = pending.messageId
     dismiss()
     const child = await createInlineThread(conversationId, messageId, quote)
     if (!child) return
     openThread({ childId: child.id, quote })
-    void sendMessage({ conversationId: child.id, text: question })
+    void sendMessage({
+      conversationId: child.id,
+      text: question,
+      mode: armed.mode,
+      verify: armed.verify,
+      toolMode: armed.toolMode,
+      webSearch: armed.webSearch,
+    })
   }
 
   if (!pending) return null

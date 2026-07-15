@@ -70,11 +70,11 @@ services:
       SANDBOX_MAX_SESSIONS: "16"
       SANDBOX_MAX_CONCURRENT_EXECS: "4"
       SANDBOX_MAX_CONCURRENT_CREATES: "2"
-      SANDBOX_MAX_UPLOAD_BYTES: "20971520"
+      SANDBOX_MAX_UPLOAD_BYTES: "41943040"
       SANDBOX_MAX_FILES_PER_EXEC: "20"
       SANDBOX_MAX_TOTAL_ARTIFACT_BYTES: "52428800"
       # F5: control-plane OOM guards (reject oversized requests up front).
-      SANDBOX_MAX_BODY_BYTES: "29360128"   # 28 MiB; > 20 MiB upload after base64
+      SANDBOX_MAX_BODY_BYTES: "58720256"   # 56 MiB; > 40 MiB upload after base64
       SANDBOX_MAX_CODE_BYTES: "1048576"    # 1 MiB cap on /exec `code`
       # F6: disk-fill DoS guards. Read-only rootfs + size-bounded writable
       # /workspace tmpfs are ON by default; tune the workspace size here. Set

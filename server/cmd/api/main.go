@@ -191,6 +191,7 @@ func main() {
 	srv := &http.Server{
 		Addr:              cfg.Listen,
 		Handler:           router,
+		ErrorLog:          logger,
 		ReadHeaderTimeout: 15 * time.Second,
 		// SSE streams need long write deadlines; 30 minutes matches design.md §11.5.
 		WriteTimeout: 90 * time.Minute,

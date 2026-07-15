@@ -16,6 +16,7 @@ import {
 } from 'lucide-react'
 import type { Attachment, Conversation } from '@/types/chat'
 import type { ProjectAccent } from '@/types/project'
+import type { ToolMode } from '@/lib/tool-mode'
 import { useProjects } from '@/store/projects'
 import { useConversations, sameConvListShape } from '@/store/conversations'
 import { useModels } from '@/store/models'
@@ -360,9 +361,9 @@ export default function ProjectDetail() {
       mode?: 'default' | 'deep-research' | 'canvas'
       params?: Record<string, unknown>
       verify?: boolean
-      noTools?: boolean
+      toolMode: ToolMode
       webSearch?: boolean
-    } = {},
+    },
   ) {
     if (!project) return
     if (!pendingConvRef.current && pendingCreateRef.current) {
@@ -390,7 +391,7 @@ export default function ProjectDetail() {
       mode: opts.mode,
       params: opts.params,
       verify: opts.verify,
-      noTools: opts.noTools,
+      toolMode: opts.toolMode,
       webSearch: opts.webSearch,
     })
   }

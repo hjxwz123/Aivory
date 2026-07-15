@@ -138,7 +138,7 @@ S3_MAX_ATTEMPTS = int(os.environ.get("SANDBOX_S3_MAX_ATTEMPTS", "3"))
 S3_CONNECT_TIMEOUT_S = float(os.environ.get("SANDBOX_S3_CONNECT_TIMEOUT_S", "10"))
 S3_READ_TIMEOUT_S = float(os.environ.get("SANDBOX_S3_READ_TIMEOUT_S", "120"))
 OSS_CONNECT_TIMEOUT_S = float(os.environ.get("SANDBOX_OSS_CONNECT_TIMEOUT_S", "30"))
-MAX_UPLOAD_BYTES = int(os.environ.get("SANDBOX_MAX_UPLOAD_BYTES", str(20 * 1024 * 1024)))
+MAX_UPLOAD_BYTES = int(os.environ.get("SANDBOX_MAX_UPLOAD_BYTES", str(40 * 1024 * 1024)))
 MAX_FILES_PER_EXEC = int(os.environ.get("SANDBOX_MAX_FILES_PER_EXEC", "20"))
 MAX_TOTAL_ARTIFACT_BYTES = int(os.environ.get("SANDBOX_MAX_TOTAL_ARTIFACT_BYTES", str(50 * 1024 * 1024)))
 # L4: bound the per-exec artifact-collection wall-clock so the sidecar's worst-
@@ -150,8 +150,8 @@ MAX_TOTAL_ARTIFACT_BYTES = int(os.environ.get("SANDBOX_MAX_TOTAL_ARTIFACT_BYTES"
 MAX_COLLECT_SECONDS = float(os.environ.get("SANDBOX_MAX_COLLECT_SECONDS", "60"))
 COLLECT_FILE_TIMEOUT_S = float(os.environ.get("SANDBOX_COLLECT_FILE_TIMEOUT_S", "30"))
 # F5: reject oversized request bodies at the control plane before reading them.
-# Default ~28 MiB comfortably exceeds the 20 MiB upload cap after base64 (+JSON).
-MAX_BODY_BYTES = int(os.environ.get("SANDBOX_MAX_BODY_BYTES", str(28 * 1024 * 1024)))
+# Default 56 MiB comfortably exceeds the 40 MiB upload cap after base64 (+JSON).
+MAX_BODY_BYTES = int(os.environ.get("SANDBOX_MAX_BODY_BYTES", str(56 * 1024 * 1024)))
 # F5: hard cap on the /exec `code` field itself (1 MiB of source).
 MAX_CODE_BYTES = int(os.environ.get("SANDBOX_MAX_CODE_BYTES", str(1 * 1024 * 1024)))
 

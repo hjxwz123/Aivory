@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"aivory/server/internal/envcfg"
 )
 
 // Spreadsheet → text preview. This is deliberately stdlib-only (archive/zip +
@@ -23,9 +25,8 @@ import (
 // BOUNDED preview (per sheet: dimensions, then the first rows/cols) — enough for a
 // model to see and reason about the data, not a full re-materialisation.
 const (
-	// spreadsheetMaxFileBytes: files larger than this are skipped for inline
-	// preview (a huge sheet belongs in the sandbox with tools on, not the prompt).
-	spreadsheetMaxFileBytes = 15 << 20 // 15 MiB
+	spreadsheetMaxFileBytesEnv     = "AIVORY_RAG_SPREADSHEET_PREVIEW_MAX_FILE_BYTES"
+	defaultSpreadsheetMaxFileBytes = int64(30 << 20) // 30 MiB
 	// spreadsheetEntryReadCap bounds decompressed bytes read per zip entry — a
 	// zip-bomb guard so a tiny xlsx can't expand to gigabytes in memory.
 	spreadsheetEntryReadCap = 64 << 20 // 64 MiB
@@ -33,6 +34,14 @@ const (
 	// row count, so a million-row sheet can't pin a CPU.
 	spreadsheetMaxScanRows = 200_000
 )
+
+// Files larger than this are skipped for inline preview. Operators can raise or
+// lower the ceiling independently of the upload and python-sandbox staging caps.
+var spreadsheetMaxFileBytes = loadSpreadsheetMaxFileBytes()
+
+func loadSpreadsheetMaxFileBytes() int64 {
+	return envcfg.Int64(spreadsheetMaxFileBytesEnv, defaultSpreadsheetMaxFileBytes)
+}
 
 // SpreadsheetPreview reads a csv/tsv/xlsx/xlsm file from disk and returns a
 // bounded, model-readable text preview (per sheet: "name (R rows × C cols)"

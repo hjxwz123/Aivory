@@ -43,6 +43,7 @@ import { ConversationMinimap } from '@/components/chat/conversation-minimap'
 import { accentClasses } from '@/lib/project-helpers'
 import { cn, truncate } from '@/lib/utils'
 import type { Attachment } from '@/types/chat'
+import type { ToolMode } from '@/lib/tool-mode'
 
 export default function ChatThread() {
   const { id } = useParams<{ id: string }>()
@@ -265,7 +266,7 @@ export default function ChatThread() {
       params?: Record<string, unknown>
       imageStyleId?: string
       verify?: boolean
-      noTools?: boolean
+      toolMode: ToolMode
       webSearch?: boolean
       fast?: boolean
     },
@@ -280,7 +281,7 @@ export default function ChatThread() {
       params: opts.params,
       imageStyleId: opts.imageStyleId,
       verify: opts.verify,
-      noTools: opts.noTools,
+      toolMode: opts.toolMode,
       webSearch: opts.webSearch,
       fast: opts.fast,
     })

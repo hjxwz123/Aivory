@@ -33,6 +33,7 @@ import { useCommandMenu } from '@/hooks/use-command-menu'
 import { useOpenSettings } from '@/hooks/use-open-settings'
 import { searchApi, type SearchHit } from '@/api'
 import { useConversations, sameConvListShape } from '@/store/conversations'
+import { resetComposerToolModeToDefault } from '@/store/composer-prefs'
 import { useProjects } from '@/store/projects'
 import { useTheme } from '@/store/theme'
 import { useSettings } from '@/store/settings'
@@ -179,7 +180,14 @@ export function CommandMenu() {
                 <CommandEmpty>{t('chat:commandMenu.noMatch')}</CommandEmpty>
               )}
               <CommandGroup heading={t('chat:commandMenu.groups.actions')}>
-                <CommandItem onSelect={() => run(() => navigate('/'))}>
+                <CommandItem
+                  onSelect={() =>
+                    run(() => {
+                      resetComposerToolModeToDefault()
+                      navigate('/')
+                    })
+                  }
+                >
                   <Plus size={14} aria-hidden />
                   {t('chat:commandMenu.actions.newChat')}
                   <CommandShortcut>{modKey()} Shift O</CommandShortcut>

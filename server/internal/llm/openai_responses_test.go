@@ -158,6 +158,55 @@ func TestAppendResponsesIncludeKeepsRequiredValues(t *testing.T) {
 	}
 }
 
+func TestOpenAIResponsesOfficialToolsSurviveExtraParamsMerge(t *testing.T) {
+	var captured map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(body, &captured); err != nil {
+			t.Fatalf("decode request: %v\n%s", err, body)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(strings.Join([]string{
+			`data: {"type":"response.output_text.delta","delta":"ok"}`,
+			`data: {"type":"response.completed","response":{"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}}`,
+			`data: [DONE]`,
+			``,
+		}, "\n\n")))
+	}))
+	defer srv.Close()
+
+	p := &OpenAIProvider{}
+	_, err := p.Stream(context.Background(), UnifiedChatRequest{
+		Model:         ModelInfo{RequestID: "gpt-test", BaseURL: srv.URL, APIKey: "k", APIFormat: "responses"},
+		History:       []UnifiedMessage{{Role: "user", Blocks: []UnifiedBlock{{Kind: "text", Text: "search"}}}},
+		OfficialTools: []string{"web_search"},
+		ExtraParams:   json.RawMessage(`{"tools":[{"type":"function","name":"extra_tool"}],"include":["custom.include"]}`),
+	}, nil, func(SseEvent) {})
+	if err != nil {
+		t.Fatalf("stream: %v", err)
+	}
+	tools, ok := captured["tools"].([]any)
+	if !ok || len(tools) != 1 {
+		t.Fatalf("official tools lost or replaced by extra_params: %#v", captured["tools"])
+	}
+	tool, _ := tools[0].(map[string]any)
+	if tool["type"] != "web_search" {
+		t.Fatalf("official web search tool = %#v", tool)
+	}
+	include, _ := captured["include"].([]any)
+	seen := map[string]bool{}
+	for _, value := range include {
+		if item, ok := value.(string); ok {
+			seen[item] = true
+		}
+	}
+	for _, want := range []string{"custom.include", "web_search_call.action.sources", "reasoning.encrypted_content"} {
+		if !seen[want] {
+			t.Fatalf("include missing %q: %#v", want, captured["include"])
+		}
+	}
+}
+
 func TestOpenAIResponsesToolLoopReplaysOutputItems(t *testing.T) {
 	var requests []map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

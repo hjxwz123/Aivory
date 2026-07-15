@@ -198,6 +198,48 @@ type createModelReq struct {
 	ResearchEnabled *bool `json:"research_enabled"`
 }
 
+var errModelExtraParamsChatOnly = errors.New("extra_params are only supported for chat models")
+
+func normalizeModelExtraParams(m *store.Model) error {
+	extraParams, err := store.NormalizeModelExtraParams(m.ExtraParams)
+	if err != nil {
+		return err
+	}
+	kind := m.Kind
+	if kind == "" {
+		kind = "chat"
+	}
+	if kind != "chat" && string(extraParams) != "{}" {
+		return errModelExtraParamsChatOnly
+	}
+	m.ExtraParams = extraParams
+	return nil
+}
+
+// decodeModelPatch preserves updateModelAdmin's decode-over-existing-row
+// behavior while also reporting whether the client explicitly sent
+// extra_params. That distinction matters when a chat model becomes image or
+// embedding: an omitted field should not leave inherited chat-only values
+// behind, whereas an explicit non-empty value remains a validation error.
+func decodeModelPatch(r *http.Request, m *store.Model) (extraParamsProvided bool, err error) {
+	var raw json.RawMessage
+	if err := decodeJSON(r, &raw); err != nil {
+		return false, err
+	}
+	if len(raw) == 0 {
+		return false, nil
+	}
+	if err := json.Unmarshal(raw, m); err != nil {
+		return false, err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return false, err
+	}
+	_, extraParamsProvided = fields["extra_params"]
+	return extraParamsProvided, nil
+}
+
 func listModelsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	kind := r.URL.Query().Get("kind")
 	rows, err := store.ListModels(r.Context(), d.DB, kind, false)
@@ -234,6 +276,10 @@ func createModelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	m.Label = strings.TrimSpace(m.Label)
 	if m.ChannelID == "" || m.RequestID == "" || m.Label == "" {
 		writeError(w, 400, errors.New("channel_id, request_id, label required"))
+		return
+	}
+	if err := normalizeModelExtraParams(&m); err != nil {
+		writeError(w, http.StatusBadRequest, err)
 		return
 	}
 	if existing, err := store.GetModelByChannelRequestID(r.Context(), d.DB, m.ChannelID, m.RequestID); err == nil && existing != nil {
@@ -286,14 +332,22 @@ func updateModelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	m := *existing
-	if err := decodeJSON(r, &m); err != nil {
+	extraParamsProvided, err := decodeModelPatch(r, &m)
+	if err != nil {
 		writeError(w, 400, errInvalidInput)
 		return
+	}
+	if m.Kind != "chat" && !extraParamsProvided {
+		m.ExtraParams = json.RawMessage("{}")
 	}
 	m.RequestID = strings.TrimSpace(m.RequestID)
 	m.Label = strings.TrimSpace(m.Label)
 	if m.ChannelID == "" || m.RequestID == "" || m.Label == "" {
 		writeError(w, 400, errors.New("channel_id, request_id, label required"))
+		return
+	}
+	if err := normalizeModelExtraParams(&m); err != nil {
+		writeError(w, http.StatusBadRequest, err)
 		return
 	}
 	if existing, err := store.GetModelByChannelRequestID(r.Context(), d.DB, m.ChannelID, m.RequestID); err == nil && existing != nil && existing.ID != id {

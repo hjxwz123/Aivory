@@ -435,13 +435,14 @@ func NewRouter(d Deps) http.Handler {
 	// CORS wrapper around the API. When STATIC_DIR is set, the same process also
 	// serves the built SPA (single-container deploy) — front + back share one
 	// origin, so there's no cross-origin and any domain the server answers on
-	// works without configuring PUBLIC_ORIGIN/ALLOWED_ORIGINS. Panic recovery is
-	// the outermost layer so any handler panic is caught (§ FIX-7).
+	// works without configuring PUBLIC_ORIGIN/ALLOWED_ORIGINS. Panic recovery
+	// surrounds the application; the response logger sits outside it so the 500
+	// written for a recovered panic is included in the common non-2xx log (§ FIX-7).
 	var handler http.Handler = corsMiddleware(d.Config.AllowedOrigins, mux)
 	if d.Config.StaticDir != "" {
 		handler = spaHandler(d.Config.StaticDir, handler)
 	}
-	return recoverMiddleware(handler)
+	return errorResponseLoggingMiddleware(d.Logger, recoverMiddleware(handler))
 }
 
 // spaHandler serves the built SPA from dir and routes /api/* to the API. Any

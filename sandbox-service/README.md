@@ -209,7 +209,7 @@ You should get `stdout: "rows 3\n"`, `exit_code: 0`, and one file `p.png`
 | `SANDBOX_PIDS_LIMIT` | `256` | fork-bomb guard |
 | `SANDBOX_API_KEY` | _(empty)_ | **Required.** Bearer key clients must send. The sidecar **refuses to start** if this is empty/blank (it exposes host Docker control — RCE). Constant-time compared. |
 | `SANDBOX_ALLOW_NO_AUTH` | `0` | escape hatch: set `1` to start with **no auth** (trusted localhost-only dev only). |
-| `SANDBOX_MAX_BODY_BYTES` | `29360128` | reject requests whose `Content-Length` exceeds this (HTTP 413) before reading the body. ~28 MiB. |
+| `SANDBOX_MAX_BODY_BYTES` | `58720256` | reject requests whose `Content-Length` exceeds this (HTTP 413) before reading the body. 56 MiB, enough for a 40 MiB upload after base64 and JSON overhead. |
 | `SANDBOX_MAX_CODE_BYTES` | `1048576` | max bytes for the `/exec` `code` field (HTTP 413/422 over). 1 MiB. |
 | `SANDBOX_EXEC_TIMEOUT_CAP_MS` | `120000` | hard ceiling per exec (§4.5) |
 | `SANDBOX_IDLE_TTL_SECONDS` | `1800` | idle sessions reaped after 30 min (fallback when Go forwards no per-session `idle_ttl_sec`) |
@@ -218,7 +218,7 @@ You should get `stdout: "rows 3\n"`, `exit_code: 0`, and one file `p.png`
 | `SANDBOX_MAX_CONCURRENT_EXECS` | `4` | max concurrent `/exec` calls across sessions |
 | `SANDBOX_MAX_CONCURRENT_CREATES` | `2` | max concurrent Docker container creates |
 | `SANDBOX_QUEUE_TIMEOUT_SECONDS` | `150` | how long a request waits for an internal slot |
-| `SANDBOX_MAX_UPLOAD_BYTES` | `20971520` | max decoded size for one `/files` upload |
+| `SANDBOX_MAX_UPLOAD_BYTES` | `41943040` | max decoded size for one `/files` upload (40 MiB) |
 | `SANDBOX_MAX_FILES_PER_EXEC` | `20` | max returned artifacts per `/exec` |
 | `SANDBOX_MAX_TOTAL_ARTIFACT_BYTES` | `52428800` | max total returned artifact bytes per `/exec` |
 | `SANDBOX_READ_ONLY_ROOTFS` | `1` | **on by default** (F6 disk-fill guard): session rootfs is read-only; only `/tmp`, `$HOME` and `/workspace` are writable size-bounded tmpfs. Set `0` to disable. |

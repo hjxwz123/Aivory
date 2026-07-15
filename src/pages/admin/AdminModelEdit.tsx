@@ -36,7 +36,7 @@ const TOOL_MODES = ['native', 'prompt', 'none'] as const
 // wire `type` values OpenAI expects.
 const OFFICIAL_TOOLS = ['web_search', 'code_interpreter', 'image_generation'] as const
 
-type Draft = Partial<ApiModel> & { param_controls_text: string }
+type Draft = Partial<ApiModel> & { param_controls_text: string; extra_params_text: string }
 
 function pcToText(pc: unknown): string {
   if (typeof pc === 'string') return pc
@@ -47,10 +47,38 @@ function pcToText(pc: unknown): string {
   }
 }
 
+function extraParamsToText(params: unknown): string {
+  if (typeof params === 'string') return params
+  try {
+    return JSON.stringify(params ?? {}, null, 2)
+  } catch {
+    return '{}'
+  }
+}
+
+type ExtraParamsValidation =
+  | { valid: true; value: Record<string, unknown> }
+  | { valid: false; error: 'invalidJSON' | 'notObject' }
+
+function parseExtraParams(text: string): ExtraParamsValidation {
+  const trimmed = text.trim()
+  if (!trimmed) return { valid: true, value: {} }
+  try {
+    const parsed: unknown = JSON.parse(trimmed)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return { valid: false, error: 'notObject' }
+    }
+    return { valid: true, value: parsed as Record<string, unknown> }
+  } catch {
+    return { valid: false, error: 'invalidJSON' }
+  }
+}
+
 function modelToDraft(m: ApiModel): Draft {
   return {
     ...m,
     param_controls_text: pcToText(m.param_controls),
+    extra_params_text: extraParamsToText(m.extra_params),
   }
 }
 
@@ -126,6 +154,15 @@ export default function AdminModelEdit() {
   const channel = channels.find((c) => c.id === draft?.channel_id)
   const isOpenAIResponses = channel?.type === 'openai' && channel?.api_format === 'responses'
   const officialTools = draft?.official_tools ?? []
+  const extraParamsValidation = draft?.kind === 'chat' ? parseExtraParams(draft.extra_params_text) : null
+  const extraParamsError =
+    extraParamsValidation && !extraParamsValidation.valid
+      ? t(
+          extraParamsValidation.error === 'invalidJSON'
+            ? 'admin:models.errors.invalidExtraParamsJSON'
+            : 'admin:models.errors.extraParamsMustBeObject',
+        )
+      : undefined
 
   // §fallback channel: the backup must match the primary's type + api_format (the
   // retry reuses the primary provider's wire format — only URL/key differ). Show
@@ -150,15 +187,37 @@ export default function AdminModelEdit() {
       toast.error(t('admin:models.errors.invalidJSON'))
       return
     }
+    const parsedExtraParams = draft.kind === 'chat' ? parseExtraParams(draft.extra_params_text) : null
+    if (parsedExtraParams && !parsedExtraParams.valid) {
+      toast.error(
+        t(
+          parsedExtraParams.error === 'invalidJSON'
+            ? 'admin:models.errors.invalidExtraParamsJSON'
+            : 'admin:models.errors.extraParamsMustBeObject',
+        ),
+      )
+      return
+    }
     setSaving(true)
     try {
       // skills bind through their own endpoint (model_skills, §4.17), so keep
       // them out of the model PATCH payload.
-      const { param_controls_text: _omit, skills: skillIds, ...rest } = draft
+      const {
+        param_controls_text: _omit,
+        extra_params_text: _omitExtraParams,
+        extra_params: _omitExtraParamsValue,
+        skills: skillIds,
+        ...rest
+      } = draft
       void _omit
+      void _omitExtraParams
+      void _omitExtraParamsValue
       const payload: Partial<ApiModel> = {
         ...rest,
         param_controls: parsedPC,
+        // PATCH merges into the existing model. Non-chat kinds must explicitly
+        // clear an earlier chat-model value instead of merely omitting the key.
+        extra_params: parsedExtraParams?.valid ? parsedExtraParams.value : {},
       }
       const updated = await adminApi.updateModel(id, payload)
       if (draft.kind === 'chat') {
@@ -279,7 +338,13 @@ export default function AdminModelEdit() {
               <Field label={t('admin:models.fields.kind')} htmlFor="m-kind">
                 <Select
                   value={draft.kind ?? 'chat'}
-                  onValueChange={(v) => patch({ kind: v as ApiModel['kind'] })}
+                  onValueChange={(v) => {
+                    const kind = v as ApiModel['kind']
+                    // extra_params are supported only for chat models. Clear a
+                    // previous chat value before an image/embedding save so the
+                    // backend never receives stale unsupported configuration.
+                    patch(kind === 'chat' ? { kind } : { kind, extra_params_text: '{}' })
+                  }}
                 >
                   <SelectTrigger id="m-kind">
                     <SelectValue />
@@ -506,6 +571,23 @@ export default function AdminModelEdit() {
                   <ParamControlsEditor
                     value={draft.param_controls_text}
                     onChange={(v) => patch({ param_controls_text: v })}
+                  />
+                </Field>
+                <Field
+                  label={t('admin:models.fields.extraParams')}
+                  htmlFor="m-extra-params"
+                  hint={t('admin:models.fields.extraParamsHint')}
+                  error={extraParamsError}
+                  className="col-span-2"
+                >
+                  <Textarea
+                    id="m-extra-params"
+                    rows={5}
+                    value={draft.extra_params_text}
+                    onChange={(e) => patch({ extra_params_text: e.target.value })}
+                    placeholder={'{\n  "reasoning_effort": "medium"\n}'}
+                    invalid={Boolean(extraParamsError)}
+                    className="min-h-[7.5rem] font-mono text-[12px] leading-relaxed"
                   />
                 </Field>
 
