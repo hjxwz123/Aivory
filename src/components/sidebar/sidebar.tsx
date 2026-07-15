@@ -71,6 +71,7 @@ import { useLanguage } from '@/store/language'
 import { SUPPORTED_LANGUAGES } from '@/i18n'
 import { useCommandMenu } from '@/hooks/use-command-menu'
 import { useOpenSettings } from '@/hooks/use-open-settings'
+import { useMediaQuery } from '@/hooks/use-media-query'
 import { useCopy } from '@/hooks/use-clipboard'
 import { conversationsApi, ApiError } from '@/api'
 import { accentClasses } from '@/lib/project-helpers'
@@ -184,6 +185,40 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
   const collapsed = useSettings((s) => s.sidebarCollapsed) && variant === 'desktop'
   const toggleSidebar = useSettings((s) => s.toggleSidebar)
   const [newProjectOpen, setNewProjectOpen] = useState(false)
+
+  // Reveal the ACTIVE conversation in the history list whenever the user lands
+  // on one that isn't already visible — arriving via a gallery tile, the command
+  // menu, a project, or a deep link to a very old chat. Without this, jumping far
+  // down a long list leaves the row off-screen and the user can't find it.
+  // Scrolls ONLY the list container (never the page) and only when the row is
+  // off-screen, so clicking an already-visible row never jumps. Runs once per
+  // active id — a deep-linked row is inserted by loadOne asynchronously, so the
+  // effect re-runs as `conversations` updates until the row exists (and bails
+  // O(1) once handled). Resets on collapse so re-expanding re-centers it.
+  const reducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)')
+  const scrolledForIdRef = useRef<string | undefined>(undefined)
+  useEffect(() => {
+    if (collapsed) {
+      scrolledForIdRef.current = undefined
+      return
+    }
+    if (!currentId || scrolledForIdRef.current === currentId) return
+    const container = listScrollRef.current
+    if (!container) return
+    const row = container.querySelector<HTMLElement>(`[data-conversation-id="${CSS.escape(currentId)}"]`)
+    if (!row) return // not in the list yet (loadOne pending / cross-workspace) — retry on next update
+    const cr = container.getBoundingClientRect()
+    const rr = row.getBoundingClientRect()
+    if (rr.top < cr.top || rr.bottom > cr.bottom) {
+      // Off-screen → bring it roughly to the middle so it's easy to spot.
+      const target = Math.max(0, container.scrollTop + (rr.top - cr.top) - (cr.height - rr.height) / 2)
+      // Near jumps animate; a far jump (deep-linked OLD chat hundreds of rows
+      // down) snaps so the user isn't stuck watching a long scroll.
+      const near = Math.abs(target - container.scrollTop) < container.clientHeight * 3
+      container.scrollTo({ top: target, behavior: !reducedMotion && near ? 'smooth' : 'auto' })
+    }
+    scrolledForIdRef.current = currentId
+  }, [currentId, conversations, collapsed, reducedMotion])
 
   function startNewChat() {
     // §personalization: a fresh conversation re-arms the "disable tools by
@@ -592,7 +627,9 @@ function ConversationItem({
   }
 
   return (
-    <li>
+    // data-conversation-id lets the sidebar scroll the active row into view when
+    // the user arrives from outside the list (gallery, command menu, deep link).
+    <li data-conversation-id={conversation.id}>
       <div
         className={cn(
           'group/conv relative mx-2 my-px rounded-[10px] interactive',
