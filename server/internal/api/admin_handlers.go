@@ -963,8 +963,9 @@ var settingsKeys = []string{
 	"email_verification_required", "daily_token_limit", "max_concurrent_generations",
 	// Anti-abuse registration controls. register_ip_daily_limit: max accounts one
 	// IP may create per day (0 = off). register_captcha_required: gate signup
-	// behind the slider-puzzle captcha.
-	"register_ip_daily_limit", "register_captcha_required",
+	// behind the slider-puzzle captcha. login_captcha_required: same gate on
+	// password sign-in (anti credential-stuffing).
+	"register_ip_daily_limit", "register_captcha_required", "login_captcha_required",
 	// §credits: global USD→credit conversion rate (1 USD = N credits) and the two
 	// shared purchase links (tier upgrade + permanent-credit top-up). Per-group
 	// credit fields keep only allowance + refresh period.

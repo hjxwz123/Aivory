@@ -259,7 +259,7 @@ func rateLimitUser(d Deps, userID, scope string, perWindow int, window time.Dura
 func rateLimitedIP(d Deps, scope string, perWindow int, window time.Duration, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !rateLimitIP(d, r, scope, perWindow, window) {
-			writeError(w, http.StatusTooManyRequests, errors.New("rate limit exceeded — try again later"))
+			writeError(w, http.StatusTooManyRequests, errRateLimited)
 			return
 		}
 		next(w, r)

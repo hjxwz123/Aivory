@@ -44,7 +44,8 @@ import { envNum } from '@/lib/env-config'
 // ----- Auth ----------------------------------------------------------------
 
 export const authApi = {
-  signupOpen: () => api<{ open: boolean; captcha_required: boolean }>('/public/signup-open'),
+  signupOpen: () =>
+    api<{ open: boolean; captcha_required: boolean; login_captcha_required: boolean }>('/public/signup-open'),
   /** Fetch a fresh slider-puzzle captcha (drag the piece into the gap). */
   captcha: () =>
     api<{
@@ -89,10 +90,10 @@ export const authApi = {
   },
   /** Credit balance (timed pool + permanent pool) for the subscription page. */
   credits: () => api<ApiCredits>('/me/credits'),
-  login: (email: string, password: string) =>
+  login: (email: string, password: string, captchaToken?: string) =>
     api<ApiAuthResponse | { totp_required: true; ticket: string }>('/auth/login', {
       method: 'POST',
-      body: { email, password },
+      body: { email, password, captcha_token: captchaToken },
     }),
   /** Complete a 2FA-gated login with the ticket from the password step. */
   loginTwoFactor: (ticket: string, code: string) =>

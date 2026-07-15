@@ -164,20 +164,20 @@ func login2faHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		clear2faCookie(w) // dead ticket → the handoff cookie is useless now
 		d.Logger.Printf("[2fa] verify: ticket not found/expired (must redo sign-in)")
-		writeError(w, 401, errors.New("login session expired, please sign in again"))
+		writeError(w, 401, errTwofaSessionExpired)
 		return
 	}
 	user, err := store.FindUserByID(r.Context(), d.DB, uid)
 	if err != nil || user.Status != "active" {
 		clear2faCookie(w)
-		writeError(w, 401, errors.New("invalid login session"))
+		writeError(w, 401, errTwofaInvalidSession)
 		return
 	}
 	// Replay-attack guard: reject a code that was already consumed within the
 	// current window before we call VerifyTotp (which only checks correctness).
 	usedKey := fmt.Sprintf("2fa:used:%s:%s", uid, req.Code)
 	if _, already := d.Cache.Get(usedKey); already {
-		writeError(w, 401, errors.New("TOTP code already used"))
+		writeError(w, 401, errTwofaCodeUsed)
 		return
 	}
 	if !auth.VerifyTotp(user.TotpSecret, req.Code) {
@@ -192,7 +192,7 @@ func login2faHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 			clear2faCookie(w)
 		}
 		d.Logger.Printf("[2fa] verify: code rejected for user=%s (secretLen=%d, codeLen=%d, burned=%v)", uid, len(user.TotpSecret), len(strings.TrimSpace(req.Code)), burned)
-		writeError(w, 401, errors.New("invalid code"))
+		writeError(w, 401, errTwofaInvalidCode)
 		return
 	}
 	d.Cache.Set(usedKey, "1", 90*time.Second)

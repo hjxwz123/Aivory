@@ -482,6 +482,8 @@
       "signupOpen": "新規サインアップを開放",
       "registerCaptcha": "登録にキャプチャを要求",
       "registerCaptchaHint": "新規登録はスライダーパズルが必要。",
+      "loginCaptcha": "ログインにキャプチャを要求",
+      "loginCaptchaHint": "パスワードでのログインには毎回スライダーパズルが必要になります。クレデンシャルスタッフィング対策。",
       "registerIpDailyLimit": "IP ごとの 1 日の登録上限",
       "registerIpDailyLimitHint": "同一 IP アドレスが 1 日に作成できるアカウント数の上限。0 = 無制限。",
       "dailyMessageLimit": "1日あたりのメッセージ上限",

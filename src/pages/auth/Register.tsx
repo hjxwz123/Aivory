@@ -15,6 +15,8 @@ import { authApi, resetAuthFailureState, setAccessToken, ApiError } from '@/api'
 import { useOAuthProviders } from '@/hooks/use-oauth-providers'
 import { OAuthButtons } from '@/components/auth/oauth-buttons'
 import { PuzzleCaptchaDialog } from '@/components/auth/puzzle-captcha-dialog'
+import { authErrorText } from '@/lib/auth-errors'
+import { cn } from '@/lib/utils'
 
 const ease: [number, number, number, number] = [0.2, 0.8, 0.2, 1]
 const stagger = { hidden: {}, visible: { transition: { staggerChildren: 0.06, delayChildren: 0.04 } } }
@@ -54,6 +56,9 @@ export default function Register() {
 
   function submit(e: React.FormEvent) {
     e.preventDefault()
+    // Belt-and-braces: the fields/button are already disabled when signups are
+    // closed, but a stray Enter-key submit shouldn't reach the server either.
+    if (!signupOpen) return
     const next: typeof errors = {}
     if (!name.trim()) next.name = t('errors.required')
     if (!email) next.email = t('errors.required')
@@ -94,7 +99,7 @@ export default function Register() {
         setErrors({ general: t('register.ipLimited') })
         return
       }
-      setErrors({ general: err ?? t('errors.required') })
+      setErrors({ general: authErrorText(t, err, t('errors.required')) })
       return
     }
     toast.success(t('register.welcome'), t('register.welcomeBody'))
@@ -132,7 +137,7 @@ export default function Register() {
       toast.success(t('register.welcome'), t('register.welcomeBody'))
       navigate('/')
     } catch (err) {
-      setVerifyError(err instanceof ApiError ? err.message : t('errors.required'))
+      setVerifyError(authErrorText(t, err instanceof ApiError ? err.message : null, t('errors.required')))
     } finally {
       setVerifyLoading(false)
     }
@@ -247,7 +252,10 @@ export default function Register() {
         {t('register.subtitle')}
       </motion.p>
 
-      {providers.length > 0 ? (
+      {/* A first-time visitor clicking "Continue with …" here would be trying to
+          SIGN UP — hide the section once that's closed (an existing user
+          signing back IN via OAuth still works fine from the login page). */}
+      {providers.length > 0 && signupOpen ? (
         <>
           <motion.div variants={fadeUp} className="mt-7 flex flex-col gap-2">
             <OAuthButtons providers={providers} />
@@ -263,7 +271,11 @@ export default function Register() {
         </>
       ) : null}
 
-      <motion.form variants={stagger} className={`${providers.length > 0 ? '' : 'mt-7 '}flex flex-col gap-4`} onSubmit={(e) => void submit(e)}>
+      <motion.form
+        variants={stagger}
+        className={`${providers.length > 0 && signupOpen ? '' : 'mt-7 '}flex flex-col gap-4`}
+        onSubmit={(e) => void submit(e)}
+      >
         {!signupOpen ? (
           <motion.div
             variants={fadeUp}
@@ -290,6 +302,7 @@ export default function Register() {
               leadingIcon={<User size={14} aria-hidden />}
               autoComplete="name"
               invalid={!!errors.name}
+              disabled={!signupOpen}
             />
           </Field>
         </motion.div>
@@ -304,6 +317,7 @@ export default function Register() {
               leadingIcon={<Mail size={14} aria-hidden />}
               autoComplete="email"
               invalid={!!errors.email}
+              disabled={!signupOpen}
             />
           </Field>
         </motion.div>
@@ -317,12 +331,14 @@ export default function Register() {
               leadingIcon={<Lock size={14} aria-hidden />}
               autoComplete="new-password"
               invalid={!!errors.pw}
+              disabled={!signupOpen}
               trailingSlot={
                 <button
                   type="button"
                   onClick={() => setShowPw((s) => !s)}
+                  disabled={!signupOpen}
                   aria-label={showPw ? t('fields.hidePassword') : t('fields.showPassword')}
-                  className="inline-flex items-center justify-center size-7 rounded-[6px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]"
+                  className="inline-flex items-center justify-center size-7 rounded-[6px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] disabled:pointer-events-none disabled:opacity-60"
                 >
                   {showPw ? <EyeOff size={13} aria-hidden /> : <Eye size={13} aria-hidden />}
                 </button>
@@ -330,11 +346,18 @@ export default function Register() {
             />
           </Field>
         </motion.div>
-        <motion.label variants={fadeUp} className="flex items-start gap-3 mt-1 cursor-pointer select-none">
+        <motion.label
+          variants={fadeUp}
+          className={cn(
+            'flex items-start gap-3 mt-1 select-none',
+            signupOpen ? 'cursor-pointer' : 'cursor-not-allowed opacity-60',
+          )}
+        >
           <Switch
             checked={agree}
             onCheckedChange={(v) => setAgree(Boolean(v))}
             aria-invalid={!!errors.agree}
+            disabled={!signupOpen}
           />
           <span className="text-xs text-[var(--color-fg-muted)] leading-snug">
             <Trans
@@ -350,7 +373,14 @@ export default function Register() {
           </span>
         </motion.label>
         <motion.div variants={fadeUp}>
-          <Button type="submit" size="lg" loading={loading} trailingIcon={<ArrowRight size={15} aria-hidden />} className="w-full">
+          <Button
+            type="submit"
+            size="lg"
+            loading={loading}
+            disabled={!signupOpen}
+            trailingIcon={<ArrowRight size={15} aria-hidden />}
+            className="w-full"
+          >
             {t('register.submit')}
           </Button>
         </motion.div>

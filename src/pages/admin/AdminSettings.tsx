@@ -39,6 +39,7 @@ const OWNED_KEYS = [
   'signup_open',
   'register_ip_daily_limit',
   'register_captcha_required',
+  'login_captcha_required',
   'daily_message_limit',
   'daily_image_limit',
   'credit_preflight_enabled',
@@ -307,6 +308,14 @@ export default function AdminSettings() {
           />
           {readBool('register_captcha_required') && (
             <p className="text-xs text-[var(--color-fg-subtle)] -mt-3 pl-1">{t('admin:settings.fields.registerCaptchaHint')}</p>
+          )}
+          <ToggleRow
+            label={t('admin:settings.fields.loginCaptcha')}
+            checked={readBool('login_captcha_required')}
+            onChange={(v) => setDraft({ ...draft, login_captcha_required: v })}
+          />
+          {readBool('login_captcha_required') && (
+            <p className="text-xs text-[var(--color-fg-subtle)] -mt-3 pl-1">{t('admin:settings.fields.loginCaptchaHint')}</p>
           )}
           <Field
             label={t('admin:settings.fields.registerIpDailyLimit')}

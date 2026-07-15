@@ -482,6 +482,8 @@
       "signupOpen": "開放新註冊",
       "registerCaptcha": "註冊需要驗證碼",
       "registerCaptchaHint": "新註冊需完成滑塊拼圖。",
+      "loginCaptcha": "登入需要驗證碼",
+      "loginCaptchaHint": "每次密碼登入都需先完成滑塊拼圖——可延緩撞庫攻擊。",
       "registerIpDailyLimit": "單 IP 每日註冊上限",
       "registerIpDailyLimitHint": "同一 IP 位址每天最多可建立的帳號數。0 = 不限制。",
       "dailyMessageLimit": "每日訊息上限",

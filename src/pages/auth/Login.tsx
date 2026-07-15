@@ -12,6 +12,8 @@ import { toast } from '@/hooks/use-toast'
 import { useAuth } from '@/store/auth'
 import { useOAuthProviders } from '@/hooks/use-oauth-providers'
 import { OAuthButtons } from '@/components/auth/oauth-buttons'
+import { PuzzleCaptchaDialog } from '@/components/auth/puzzle-captcha-dialog'
+import { authErrorText } from '@/lib/auth-errors'
 
 /**
  * Only follow a post-login `from` when it's a root-relative internal path
@@ -39,6 +41,7 @@ export default function Login() {
   const pendingTwoFactor = useAuth((s) => s.pendingTwoFactor)
   const clearPendingTwoFactor = useAuth((s) => s.clearPendingTwoFactor)
   const startTwoFactor = useAuth((s) => s.startTwoFactor)
+  const loginCaptchaRequired = useAuth((s) => s.loginCaptchaRequired)
   const { providers } = useOAuthProviders()
   const [searchParams, setSearchParams] = useSearchParams()
   const [email, setEmail] = useState('')
@@ -48,6 +51,12 @@ export default function Login() {
   const [errors, setErrors] = useState<{ email?: string; pw?: string; general?: string }>({})
   const [code, setCode] = useState('')
   const show2fa = Boolean(pendingTwoFactor)
+
+  // Slider-puzzle captcha (only when the admin requires it on sign-in) — same
+  // modal + single-use pass token flow as the register form (§ anti
+  // credential-stuffing).
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null)
+  const [captchaOpen, setCaptchaOpen] = useState(false)
 
   // Surface a failed OAuth round-trip (the callback redirects here with
   // ?oauth_error=…), then strip the param so a refresh doesn't re-toast.
@@ -69,7 +78,7 @@ export default function Login() {
     setSearchParams(searchParams, { replace: true })
   }, [searchParams, setSearchParams, startTwoFactor])
 
-  async function submit(e: React.FormEvent) {
+  function submit(e: React.FormEvent) {
     e.preventDefault()
     const next: typeof errors = {}
     if (!email) next.email = t('errors.required')
@@ -77,8 +86,19 @@ export default function Login() {
     if (!pw) next.pw = t('errors.required')
     setErrors(next)
     if (Object.keys(next).length) return
+    // Captcha gate: pop the modal first (it hands back a pass token via
+    // onSolved, which then continues sign-in). No captcha required → go
+    // straight on.
+    if (loginCaptchaRequired && !captchaToken) {
+      setCaptchaOpen(true)
+      return
+    }
+    void finishLogin(captchaToken)
+  }
+
+  async function finishLogin(token: string | null) {
     setLoading(true)
-    const ok = await login(email, pw)
+    const ok = await login(email, pw, loginCaptchaRequired ? token ?? undefined : undefined)
     setLoading(false)
     if (ok === '2fa') {
       // Password accepted; the 2FA code form now takes over.
@@ -88,6 +108,14 @@ export default function Login() {
     }
     if (!ok) {
       const err = useAuth.getState().error
+      // The pass token is single-use server-side, so any failure invalidates
+      // it — clear it so the next attempt re-solves the puzzle.
+      setCaptchaToken(null)
+      if (err === 'captcha_failed') {
+        setErrors({ general: authErrorText(t, err, t('errors.required')) })
+        if (loginCaptchaRequired) setCaptchaOpen(true)
+        return
+      }
       // Suspended account → the banned banner already explains it; don't also
       // show a generic error.
       if (useAuth.getState().banned) {
@@ -100,12 +128,18 @@ export default function Login() {
         navigate('/register')
         return
       }
-      setErrors({ general: err ?? t('errors.required') })
+      setErrors({ general: authErrorText(t, err, t('errors.required')) })
       return
     }
     toast.success(t('login.welcome'), t('login.signingIn'))
     const from = safeRedirect((location.state as { from?: string } | null)?.from)
     navigate(from, { replace: true })
+  }
+
+  // The dialog verified a solution and minted a token → store it and continue.
+  function onCaptchaSolved(token: string) {
+    setCaptchaToken(token)
+    void finishLogin(token)
   }
 
   async function submitCode(e: React.FormEvent) {
@@ -118,7 +152,7 @@ export default function Login() {
     const ok = await loginTwoFactor(code.trim())
     setLoading(false)
     if (!ok) {
-      setErrors({ general: useAuth.getState().error ?? t('twofa.invalid') })
+      setErrors({ general: authErrorText(t, useAuth.getState().error, t('twofa.invalid')) })
       return
     }
     toast.success(t('login.welcome'), t('login.signingIn'))
@@ -302,6 +336,12 @@ export default function Login() {
           {t('login.noAccountAction')}
         </Link>
       </motion.p>
+
+      {/* Modal security check — opens on submit when the admin requires a
+          captcha on sign-in. */}
+      {loginCaptchaRequired ? (
+        <PuzzleCaptchaDialog open={captchaOpen} onOpenChange={setCaptchaOpen} onSolved={onCaptchaSolved} />
+      ) : null}
     </motion.div>
   )
 }

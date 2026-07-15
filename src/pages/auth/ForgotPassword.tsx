@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Field } from '@/components/ui/label'
 import { toast } from '@/hooks/use-toast'
 import { authApi, ApiError } from '@/api'
+import { authErrorText } from '@/lib/auth-errors'
 
 const ease: [number, number, number, number] = [0.2, 0.8, 0.2, 1]
 const stagger = { hidden: {}, visible: { transition: { staggerChildren: 0.06, delayChildren: 0.04 } } }
@@ -62,7 +63,7 @@ export default function ForgotPassword() {
       await authApi.resetPassword(email, code.trim(), newPw)
       setStep('done')
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : t('errors.required'))
+      setError(authErrorText(t, err instanceof ApiError ? err.message : null, t('errors.required')))
     } finally {
       setLoading(false)
     }

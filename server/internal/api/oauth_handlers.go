@@ -322,6 +322,13 @@ func oauthCallbackHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 
 	user, err := resolveOAuthUser(ctx, d, p, info)
 	if err != nil {
+		if errors.Is(err, errSignupClosed) {
+			// Not a real failure — surface the SAME code the plain register form
+			// uses, so the login page shows one consistent "signups are closed"
+			// message no matter which path a first-time visitor tried.
+			fail("signup_closed")
+			return
+		}
 		d.Logger.Printf("[oauth] %s account resolve failed: %v", p.Kind, err)
 		fail("account_error")
 		return
@@ -482,6 +489,22 @@ func resolveOAuthUser(ctx context.Context, d Deps, p *store.OAuthProvider, info 
 		if u, err := store.FindUserByEmail(ctx, d.DB, email); err == nil && u != nil {
 			return nil, errors.New("an account with this email already exists — sign in with your password first, then link this provider")
 		}
+	}
+
+	// §signup-closed gate: everything above this point either logs in an
+	// existing identity/account or falls through here because NO account
+	// matched — i.e. every remaining path is a genuine new-account signup.
+	// When the admin has closed registration, a brand-new visitor must not be
+	// able to route around the closed register form just by clicking "Continue
+	// with Google" — mirror the same signup_open check registerHandler applies.
+	// An OAuth identity that already has a linked/matching account (handled in
+	// the branches above) is unaffected — that's a login, not a signup.
+	open := true
+	if raw, err := store.GetSetting(d.DB, "signup_open"); err == nil {
+		_ = json.Unmarshal(raw, &open)
+	}
+	if !open {
+		return nil, errSignupClosed
 	}
 
 	u, err := store.CreateOAuthUser(ctx, d.DB, email, info.Name)

@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Field } from '@/components/ui/label'
 import { useAuth } from '@/store/auth'
+import { authErrorText } from '@/lib/auth-errors'
 
 /**
  * Setup — first-run screen for a fresh deployment with no accounts yet. The
@@ -38,7 +39,7 @@ export default function Setup() {
     const ok = await setup(name.trim(), email, pw)
     setLoading(false)
     if (!ok) {
-      setErrors({ general: useAuth.getState().error ?? t('errors.required') })
+      setErrors({ general: authErrorText(t, useAuth.getState().error, t('errors.required')) })
       return
     }
     navigate('/', { replace: true })

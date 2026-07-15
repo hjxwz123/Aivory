@@ -41,8 +41,11 @@ interface AuthState {
    *  Drives the suspended notice on the login screen. */
   banned: boolean
   signupOpen: boolean
-  /** True when the admin requires the arithmetic captcha on the register form. */
+  /** True when the admin requires the slider-puzzle captcha on the register form. */
   captchaRequired: boolean
+  /** True when the admin requires the slider-puzzle captcha on password sign-in
+   *  (§ anti credential-stuffing). */
+  loginCaptchaRequired: boolean
   /** True when the deployment has no users yet — the app routes to the first-run
    *  setup screen (create the first admin) instead of login (§ first-run setup). */
   needsSetup: boolean
@@ -56,7 +59,7 @@ interface AuthState {
   pendingTwoFactor: { ticket: string } | null
 
   hydrate: () => Promise<void>
-  login: (email: string, password: string) => Promise<boolean | '2fa'>
+  login: (email: string, password: string, captchaToken?: string) => Promise<boolean | '2fa'>
   loginTwoFactor: (code: string) => Promise<boolean>
   register: (
     email: string,
@@ -83,6 +86,7 @@ export const useAuth = create<AuthState>((set, get) => ({
   banned: false,
   signupOpen: true,
   captchaRequired: false,
+  loginCaptchaRequired: false,
   needsSetup: false,
   setupProbed: false,
   pendingVerification: null,
@@ -145,7 +149,11 @@ export const useAuth = create<AuthState>((set, get) => ({
       const [signup, setup] = await Promise.allSettled([authApi.signupOpen(), authApi.needsSetup()])
       if (isLatestAuthOp(seq)) {
         if (signup.status === 'fulfilled') {
-          set({ signupOpen: signup.value.open, captchaRequired: signup.value.captcha_required })
+          set({
+            signupOpen: signup.value.open,
+            captchaRequired: signup.value.captcha_required,
+            loginCaptchaRequired: signup.value.login_captcha_required,
+          })
         }
         if (setup.status === 'fulfilled') {
           set({ needsSetup: setup.value.needs_setup })
@@ -172,11 +180,11 @@ export const useAuth = create<AuthState>((set, get) => ({
     }
   },
 
-  async login(email, password) {
+  async login(email, password, captchaToken) {
     const seq = beginAuthOp()
     set({ status: 'authenticating', error: null })
     try {
-      const resp = await authApi.login(email, password)
+      const resp = await authApi.login(email, password, captchaToken)
       if (!isLatestAuthOp(seq)) return false
       // 2FA-enabled accounts get a ticket instead of a session — hold it and
       // let the UI collect the code (§ 2FA login).
@@ -197,8 +205,9 @@ export const useAuth = create<AuthState>((set, get) => ({
         set({ banned: true, error: null, status: 'unauthenticated' })
         return false
       }
-      // If the backend says "email not verified", flip to verification flow
-      if (e instanceof ApiError && msg.toLowerCase().includes('not verified')) {
+      // The backend signals an unverified account with the exact code
+      // "email_not_verified" — flip to the verification flow.
+      if (msg === 'email_not_verified') {
         set({ error: msg, status: 'unauthenticated', pendingVerification: email })
         return false
       }

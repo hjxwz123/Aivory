@@ -33,4 +33,33 @@ var (
 	// RAG embedding model lock. Once set, changing the global embedding model
 	// would strand existing Qdrant collections/chunks under the old model.
 	errEmbeddingModelLocked = errors.New("embedding_model_locked")
+
+	// Auth-flow error codes (login/register/forgot-reset/2FA-login/first-run
+	// setup/OAuth signup). Stable machine codes — every one has a matching
+	// src/i18n/*/auth.json `errorCodes.*` key so the client localizes it instead
+	// of shipping raw English prose straight to every locale. Never repurpose an
+	// existing code's meaning; add a new one instead.
+	errInvalidEmail           = errors.New("invalid_email")
+	errNameRequired           = errors.New("name_required")
+	errPasswordTooShort       = errors.New("password_too_short")
+	errAlreadyInitialized     = errors.New("already_initialized")
+	errSetupRequired          = errors.New("setup_required")
+	errEmailDomainNotAllowed  = errors.New("email_domain_not_allowed")
+	errSignupClosed           = errors.New("signup_closed")
+	errEmailAlreadyRegistered = errors.New("email_already_registered")
+	errInvalidOrExpiredCode   = errors.New("invalid_or_expired_code")
+	errInvalidVerificationReq = errors.New("invalid_verification_request")
+	errAccountNotFound        = errors.New("account_not_found")
+	errInvalidCredentials     = errors.New("invalid_credentials")
+	errEmailNotVerified       = errors.New("email_not_verified")
+	errTwofaStartFailed       = errors.New("twofa_start_failed")
+	errTwofaSessionExpired    = errors.New("twofa_session_expired")
+	errTwofaInvalidSession    = errors.New("twofa_invalid_session")
+	errTwofaCodeUsed          = errors.New("twofa_code_used")
+	errTwofaInvalidCode       = errors.New("twofa_invalid_code")
+
+	// Generic per-IP rate limit (rateLimitedIP — register/login/2FA/refresh/
+	// verify-email/send-code/forgot-reset/captcha/first-run-setup/oauth/public
+	// share links). Stable machine code, same reasoning as above.
+	errRateLimited = errors.New("rate_limited")
 )

@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"math/big"
 	"net"
@@ -65,7 +64,11 @@ func signupOpenHandler(d Deps, w http.ResponseWriter, _ *http.Request) {
 	if raw, err := store.GetSetting(d.DB, "register_captcha_required"); err == nil {
 		_ = json.Unmarshal(raw, &captcha)
 	}
-	writeJSON(w, 200, map[string]bool{"open": open, "captcha_required": captcha})
+	loginCaptcha := false
+	if raw, err := store.GetSetting(d.DB, "login_captcha_required"); err == nil {
+		_ = json.Unmarshal(raw, &loginCaptcha)
+	}
+	writeJSON(w, 200, map[string]bool{"open": open, "captcha_required": captcha, "login_captcha_required": loginCaptcha})
 }
 
 // The slider-puzzle captcha (generation + verification) lives in captcha.go.
@@ -93,7 +96,7 @@ func setupHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if n > 0 {
-		writeError(w, 409, errors.New("already initialized"))
+		writeError(w, 409, errAlreadyInitialized)
 		return
 	}
 	var req registerReq
@@ -104,15 +107,15 @@ func setupHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
 	req.Name = strings.TrimSpace(req.Name)
 	if req.Email == "" || !strings.Contains(req.Email, "@") {
-		writeError(w, 400, errors.New("valid email required"))
+		writeError(w, 400, errInvalidEmail)
 		return
 	}
 	if req.Name == "" {
-		writeError(w, 400, errors.New("name required"))
+		writeError(w, 400, errNameRequired)
 		return
 	}
 	if len(req.Password) < minimumPasswordLength {
-		writeError(w, 400, errors.New("password must be at least 8 characters"))
+		writeError(w, 400, errPasswordTooShort)
 		return
 	}
 	hash, err := store.HashPassword(req.Password)
@@ -154,11 +157,11 @@ func registerHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
 	if req.Email == "" || !strings.Contains(req.Email, "@") {
-		writeError(w, 400, errors.New("valid email required"))
+		writeError(w, 400, errInvalidEmail)
 		return
 	}
 	if len(req.Password) < minimumPasswordLength {
-		writeError(w, 400, errors.New("password must be at least 8 characters"))
+		writeError(w, 400, errPasswordTooShort)
 		return
 	}
 
@@ -167,13 +170,15 @@ func registerHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	// open registration — otherwise the first signup would be a plain user and the
 	// system would have no admin.
 	if n, err := store.CountUsers(r.Context(), d.DB); err == nil && n == 0 {
-		writeError(w, 409, errors.New("setup_required"))
+		writeError(w, 409, errSetupRequired)
 		return
 	}
 
-	// Domain whitelist check.
+	// Domain whitelist check. The exact reason (malformed email / domain not
+	// listed) is logged-worthy detail only, never shown raw to the client — map
+	// to one stable code so every locale gets a real translation.
 	if err := mail.CheckDomainWhitelist(d.DB, req.Email); err != nil {
-		writeError(w, 403, err)
+		writeError(w, 403, errEmailDomainNotAllowed)
 		return
 	}
 
@@ -184,7 +189,7 @@ func registerHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		_ = json.Unmarshal(raw, &open)
 	}
 	if !open {
-		writeError(w, 403, errors.New("signups are closed"))
+		writeError(w, 403, errSignupClosed)
 		return
 	}
 
@@ -203,7 +208,7 @@ func registerHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 
 	if u, _ := store.FindUserByEmail(r.Context(), d.DB, req.Email); u != nil {
-		writeError(w, 409, errors.New("email already registered"))
+		writeError(w, 409, errEmailAlreadyRegistered)
 		return
 	}
 
@@ -323,7 +328,7 @@ func verifyEmailHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	saved, ok := d.Cache.Get("verify:" + req.Email)
 	if !ok || !codeMatches(saved, req.Code) {
 		registerCodeFailure(d, "verify", req.Email)
-		writeError(w, 400, errors.New("invalid or expired verification code"))
+		writeError(w, 400, errInvalidOrExpiredCode)
 		return
 	}
 	d.Cache.Delete("verify:" + req.Email)
@@ -331,7 +336,7 @@ func verifyEmailHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 
 	user, err := store.FindUserByEmail(r.Context(), d.DB, req.Email)
 	if err != nil || user.Status != "pending" {
-		writeError(w, 400, errors.New("invalid verification request"))
+		writeError(w, 400, errInvalidVerificationReq)
 		return
 	}
 	if err := store.SetUserStatus(r.Context(), d.DB, user.ID, "active"); err != nil {
@@ -378,14 +383,14 @@ func resetPasswordHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
 	if len(req.NewPassword) < minimumPasswordLength {
-		writeError(w, 400, errors.New("password must be at least 8 characters"))
+		writeError(w, 400, errPasswordTooShort)
 		return
 	}
 
 	saved, ok := d.Cache.Get("reset:" + req.Email)
 	if !ok || !codeMatches(saved, req.Code) {
 		registerCodeFailure(d, "reset", req.Email)
-		writeError(w, 400, errors.New("invalid or expired reset code"))
+		writeError(w, 400, errInvalidOrExpiredCode)
 		return
 	}
 	d.Cache.Delete("reset:" + req.Email)
@@ -393,7 +398,7 @@ func resetPasswordHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 
 	user, err := store.FindUserByEmail(r.Context(), d.DB, req.Email)
 	if err != nil {
-		writeError(w, 400, errors.New("account not found"))
+		writeError(w, 400, errAccountNotFound)
 		return
 	}
 
@@ -412,6 +417,10 @@ func resetPasswordHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 type loginReq struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
+	// Single-use slider-captcha PASS token from POST /api/public/captcha/verify
+	// (only checked when login_captcha_required is on — § anti credential-
+	// stuffing). Same token shape/verification as registration's captcha_token.
+	CaptchaToken string `json:"captcha_token"`
 }
 
 // loginHandler verifies credentials and sets the auth cookie.
@@ -421,6 +430,21 @@ func loginHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errInvalidInput)
 		return
 	}
+
+	// Slider-captcha gate (admin-toggleable, off by default). Checked BEFORE any
+	// account lookup so a captcha-less credential-stuffing run never reaches the
+	// bcrypt-timed compare below — it's the cheapest possible reject.
+	loginCaptchaRequired := false
+	if raw, _ := store.GetSetting(d.DB, "login_captcha_required"); len(raw) > 0 {
+		_ = json.Unmarshal(raw, &loginCaptchaRequired)
+	}
+	if loginCaptchaRequired {
+		if !consumeCaptchaPass(d, req.CaptchaToken) {
+			writeError(w, 400, errCaptcha)
+			return
+		}
+	}
+
 	user, err := store.FindUserByEmail(r.Context(), d.DB, req.Email)
 	if err != nil {
 		// Run a dummy verify so a nonexistent account takes the same time as a
@@ -429,7 +453,7 @@ func loginHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		// enumeration). State-specific messages (unverified/blocked) are only
 		// surfaced AFTER the password is proven correct, below.
 		store.CheckPassword(dummyPasswordHash, req.Password)
-		writeError(w, 401, errors.New("invalid email or password"))
+		writeError(w, 401, errInvalidCredentials)
 		return
 	}
 	hash, err := store.PasswordFor(r.Context(), d.DB, user.ID)
@@ -438,12 +462,12 @@ func loginHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !store.CheckPassword(hash, req.Password) {
-		writeError(w, 401, errors.New("invalid email or password"))
+		writeError(w, 401, errInvalidCredentials)
 		return
 	}
 	// Password is correct — now it's safe to reveal account state to the holder.
 	if user.Status == "pending" {
-		writeError(w, 403, errors.New("email not verified"))
+		writeError(w, 403, errEmailNotVerified)
 		return
 	}
 	if user.Status != "active" {
@@ -456,7 +480,7 @@ func loginHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	if user.TotpEnabled {
 		ticket := issueTwofaTicket(d, user.ID)
 		if ticket == "" {
-			writeError(w, 500, errors.New("could not start two-factor challenge"))
+			writeError(w, 500, errTwofaStartFailed)
 			return
 		}
 		writeJSON(w, 200, map[string]any{"totp_required": true, "ticket": ticket})

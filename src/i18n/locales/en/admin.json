@@ -482,6 +482,8 @@
       "signupOpen": "New signups open",
       "registerCaptcha": "Require registration captcha",
       "registerCaptchaHint": "New signups must solve a slider puzzle.",
+      "loginCaptcha": "Require sign-in captcha",
+      "loginCaptchaHint": "Every password sign-in must solve a slider puzzle first — slows down credential-stuffing attempts.",
       "registerIpDailyLimit": "Daily registrations per IP",
       "registerIpDailyLimitHint": "Max accounts one IP address can create per day. 0 = unlimited.",
       "dailyMessageLimit": "Daily message limit",

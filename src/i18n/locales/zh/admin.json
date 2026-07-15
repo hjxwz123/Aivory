@@ -482,6 +482,8 @@
       "signupOpen": "开放新注册",
       "registerCaptcha": "注册需要验证码",
       "registerCaptchaHint": "新注册需完成滑块拼图。",
+      "loginCaptcha": "登录需要验证码",
+      "loginCaptchaHint": "每次密码登录都需先完成滑块拼图——可延缓撞库攻击。",
       "registerIpDailyLimit": "单 IP 每日注册上限",
       "registerIpDailyLimitHint": "同一 IP 地址每天最多可创建的账号数。0 = 不限制。",
       "dailyMessageLimit": "每日消息上限",

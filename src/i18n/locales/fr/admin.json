@@ -482,6 +482,8 @@
       "signupOpen": "Nouvelles inscriptions ouvertes",
       "registerCaptcha": "Exiger un captcha à l'inscription",
       "registerCaptchaHint": "Les inscriptions doivent résoudre un puzzle à curseur.",
+      "loginCaptcha": "Exiger un captcha à la connexion",
+      "loginCaptchaHint": "Chaque connexion par mot de passe doit d'abord résoudre un puzzle à curseur — ralentit le credential stuffing.",
       "registerIpDailyLimit": "Inscriptions par jour et par IP",
       "registerIpDailyLimitHint": "Nombre maximal de comptes qu'une adresse IP peut créer par jour. 0 = illimité.",
       "dailyMessageLimit": "Limite quotidienne de messages",
