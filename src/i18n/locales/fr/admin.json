@@ -95,6 +95,8 @@
       "researchEnabled": "Recherche approfondie",
       "systemPrompt": "Invite système",
       "paramControls": "param_controls (JSON)",
+      "extraParams": "Paramètres amont supplémentaires (JSON)",
+      "extraParamsHint": "Objet JSON facultatif fusionné dans la requête amont de ce modèle. Priorité : les paramètres intégrés priment sur les mappages des contrôles, qui priment sur ces valeurs.",
       "dim": "Dimension",
       "sortOrder": "Ordre d'affichage",
       "sortOrderHint": "Les plus petits d'abord.",
@@ -123,7 +125,9 @@
     "moveDown": "Descendre",
     "errors": {
       "missingFields": "Le canal, le libellé et le request_id sont requis",
-      "invalidJSON": "param_controls n'est pas un JSON valide"
+      "invalidJSON": "param_controls n'est pas un JSON valide",
+      "invalidExtraParamsJSON": "Les paramètres amont supplémentaires doivent être du JSON valide",
+      "extraParamsMustBeObject": "Les paramètres amont supplémentaires doivent être un objet JSON"
     },
     "permissionsLead": "Groupes autorisés et quota par cycle. Tout désactivé = ouvert à tous.",
     "tagsHint": "Étiquette le modèle pour le filtre du sélecteur.",
@@ -378,6 +382,7 @@
       "task_memory_adjudicate": "Arbitrage de mémoire",
       "task_downgrade": "Rétrogradation inter-fournisseurs",
       "task_image_prompt": "Prompt d'image",
+      "task_tool_route": "Routage des outils",
       "task_research_plan": "Plan de recherche",
       "task_research_verify": "Vérification de recherche",
       "task_moderation": "Modération",

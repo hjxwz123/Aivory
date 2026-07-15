@@ -284,7 +284,8 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 			// Apply the model's param_controls (thinking/effort/etc). Claude
 			// extended thinking is opt-in: if admins do not explicitly merge a
 			// `thinking` object, the provider sends no thinking field.
-			body = MergeParamControls(body, req.ParamControls, req.ParamOverrides)
+			body = MergeRequestParams(body, req.ExtraParams, req.ParamControls, req.ParamOverrides)
+			body = StripToolFields(body, len(req.Tools) > 0 && !req.ToolModePrompt)
 			// §4.3-B: once a strip-thinking retry has fired this turn, every
 			// subsequent request drops the thinking param too (the response then
 			// carries no thinking blocks, so later replays stay clean).
@@ -483,7 +484,8 @@ func (p *AnthropicProvider) promptRunOnce(req UnifiedChatRequest) PromptToolRunn
 			"messages":       msgs,
 			"stop_sequences": []string{PromptToolStopSequence()},
 		}
-		body = MergeParamControls(body, req.ParamControls, req.ParamOverrides)
+		body = MergeRequestParams(body, req.ExtraParams, req.ParamControls, req.ParamOverrides)
+		body = StripToolFields(body, false)
 		applyAnthropicThinkingSettings(body, req.Model.RequestID, &maxTok)
 		buf, _ := json.Marshal(body)
 		resp, err := doProviderRequest(ctx, req.Model, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {

@@ -591,6 +591,8 @@ func TestMaybeCompactConcurrentDeeperCutNoOverlap(t *testing.T) {
 // TestPlanCompactionHotPath verifies the synchronous planner makes NO task-model
 // call: it keeps the recent tail verbatim and only signals how to advance.
 func TestPlanCompactionHotPath(t *testing.T) {
+	store.InvalidateConfig()
+	t.Cleanup(store.InvalidateConfig)
 	db, err := sql.Open("sqlite3", ":memory:")
 	if err != nil {
 		t.Fatal(err)
@@ -902,6 +904,8 @@ func TestMaybeCompactStaleRealCountNoOverDeepening(t *testing.T) {
 // permanently invisible to every future prompt. The cut is clamped so the whole
 // in-flight round (its question included) stays verbatim.
 func TestMaybeCompactSkipsInflightAssistant(t *testing.T) {
+	store.InvalidateConfig()
+	t.Cleanup(store.InvalidateConfig)
 	db, err := sql.Open("sqlite3", ":memory:")
 	if err != nil {
 		t.Fatal(err)

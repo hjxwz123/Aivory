@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -36,6 +37,40 @@ var (
 	streamReplayBatchSize       = envcfg.Int("AIVORY_API_STREAM_REPLAY_BATCH_SIZE", 200)
 )
 
+const chatRunErrorMessage = "The message could not be processed. Please try again."
+
+type chatRunErrorMetadata struct {
+	Operation       string
+	UserID          string
+	ConversationID  string
+	Fast            bool
+	Branch          bool
+	ParentID        string
+	ReferenceID     string
+	AttachmentCount int
+}
+
+// logChatRunError records only request identifiers and turn-shape metadata.
+// User text, attachment names/content, and assembled prompts must never be
+// added here; the underlying error is enough for server-side diagnosis.
+func logChatRunError(logger *log.Logger, meta chatRunErrorMetadata, err error) {
+	if logger == nil || err == nil {
+		return
+	}
+	logger.Printf(
+		"chat run error: operation=%q user_id=%q conversation_id=%q fast=%t branch=%t parent_id=%q reference_id=%q attachment_count=%d error=%q",
+		meta.Operation,
+		meta.UserID,
+		meta.ConversationID,
+		meta.Fast,
+		meta.Branch,
+		meta.ParentID,
+		meta.ReferenceID,
+		meta.AttachmentCount,
+		err.Error(),
+	)
+}
+
 type postMessageReq struct {
 	Text     string `json:"text"`
 	ModelID  string `json:"model_id"`
@@ -45,10 +80,16 @@ type postMessageReq struct {
 	// Verify enables Verify mode (§verify) — a secondary auditor model checks the
 	// answer. No-op unless an admin configured `verify_model_id`.
 	Verify bool `json:"verify"`
-	// NoTools forces a no-tool turn (§4.13-B); WebSearch forces a non-tool web
-	// search whose results are injected into the prompt (only with NoTools).
-	NoTools        bool             `json:"no_tools"`
-	WebSearch      bool             `json:"web_search"`
+	// ToolMode is the per-turn tool policy: auto asks the configured task model,
+	// disabled exposes no tools, and enabled preserves the model's configured tool
+	// support. RawMessage distinguishes an omitted legacy request from explicit
+	// invalid values such as null, an empty string, or a non-string. NoTools
+	// remains a backwards-compatible alias; an explicit ToolMode always wins.
+	ToolMode json.RawMessage `json:"tool_mode"`
+	NoTools  bool            `json:"no_tools"`
+	// WebSearch forces a server-side non-tool web search and is only meaningful
+	// when tools are explicitly disabled.
+	WebSearch bool `json:"web_search"`
 	// Fast marks a fast-mode turn (§fast-mode): the model is resolved server-side
 	// from the admin's fast model and masked from the user; Verify / Deep Research
 	// / no-tools are all forced off; tools run on a quartered budget without
@@ -63,18 +104,44 @@ type postMessageReq struct {
 	Locale string `json:"locale"`
 }
 
-// normalizeTurnFlags enforces the composer's feature mutual-exclusion on the
-// server (defense-in-depth; the client also enforces it): deep-research needs
-// tools, so it wins over no-tools; a forced web search only applies inside a
-// no-tools turn (it replaces the tool the model can no longer call).
-func normalizeTurnFlags(mode string, noTools, webSearch bool) (bool, bool) {
+func validTurnToolMode(mode string) bool {
+	switch mode {
+	case llm.ToolModeAuto, llm.ToolModeDisabled, llm.ToolModeEnabled:
+		return true
+	}
+	return false
+}
+
+// resolveTurnToolMode maps the legacy no_tools boolean onto the tri-state
+// protocol. An omitted/false legacy flag means enabled so old clients retain
+// their previous behavior; new clients send tool_mode explicitly (normally
+// auto). Invalid explicit values are rejected instead of silently changing how
+// a turn is executed.
+func resolveTurnToolMode(explicit json.RawMessage, legacyNoTools bool) (string, error) {
+	if len(explicit) == 0 {
+		if legacyNoTools {
+			return llm.ToolModeDisabled, nil
+		}
+		return llm.ToolModeEnabled, nil
+	}
+	var mode string
+	if err := json.Unmarshal(explicit, &mode); err != nil || !validTurnToolMode(mode) {
+		return "", errors.New("tool_mode must be one of: auto, disabled, enabled")
+	}
+	return mode, nil
+}
+
+// normalizeTurnFlags enforces feature mutual exclusion server-side. Deep
+// Research always needs tools; forced web search is the explicit-disabled
+// fallback and cannot be combined with auto/enabled policies.
+func normalizeTurnFlags(mode, toolMode string, webSearch bool) (string, bool) {
 	if mode == "deep-research" {
-		return false, false
+		return llm.ToolModeEnabled, false
 	}
-	if !noTools {
-		return noTools, false
+	if toolMode != llm.ToolModeDisabled {
+		return toolMode, false
 	}
-	return noTools, webSearch
+	return toolMode, webSearch
 }
 
 // postMessageHandler is the SSE-streaming endpoint. The orchestrator owns the
@@ -83,7 +150,8 @@ func normalizeTurnFlags(mode string, noTools, webSearch bool) (bool, bool) {
 func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
 	id := pathParam(r, "id")
-	if _, err := store.GetConversation(r.Context(), d.DB, id, u.ID); err != nil {
+	conv, err := store.GetConversation(r.Context(), d.DB, id, u.ID)
+	if err != nil {
 		writeError(w, 404, errNotFound)
 		return
 	}
@@ -96,8 +164,28 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errors.New("text required"))
 		return
 	}
+	// A branch edit names the exact persisted message it forks from. Reject a
+	// stale optimistic id (or a message from another conversation) before opening
+	// the SSE response, so the client receives a clear conflict instead of a 200
+	// stream that later contains a database foreign-key error.
+	if req.Branch && req.ParentID != "" {
+		parent, parentErr := store.GetMessage(r.Context(), d.DB, req.ParentID)
+		if parentErr != nil && !errors.Is(parentErr, store.ErrNotFound) {
+			writeError(w, 500, parentErr)
+			return
+		}
+		if parentErr != nil || parent.ConversationID != id {
+			writeError(w, http.StatusConflict, llm.ErrInvalidMessageParent)
+			return
+		}
+	}
 	if err := ensureAttachedDocumentsReady(r.Context(), d.DB, id, req.Attachments); err != nil {
 		writeError(w, 409, err)
+		return
+	}
+	toolMode, err := resolveTurnToolMode(req.ToolMode, req.NoTools)
+	if err != nil {
+		writeError(w, 400, err)
 		return
 	}
 	// Deep Research is a per-group capability (§ user groups). If the user's
@@ -109,13 +197,13 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	if req.Fast {
 		req.Mode = ""
 		req.Verify = false
-		req.NoTools = false
+		toolMode = llm.ToolModeEnabled
 		req.WebSearch = false
 	}
 	if req.Mode == "deep-research" && u.Role != "admin" && !userGroupHasFeature(r.Context(), d, u.GroupID, "research") {
 		req.Mode = ""
 	}
-	req.NoTools, req.WebSearch = normalizeTurnFlags(req.Mode, req.NoTools, req.WebSearch)
+	toolMode, req.WebSearch = normalizeTurnFlags(req.Mode, toolMode, req.WebSearch)
 	// §8 hard rule: per-user concurrent generation cap. Reserve the slot FIRST,
 	// before the daily-message counter is incremented — otherwise a request that
 	// is rejected here (slot full) would still burn a daily count for a turn that
@@ -206,7 +294,7 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		_ = writer.Send(ev, ev.Type)
 	}
 
-	_, err := d.Orchestrator.Run(ctx, llm.RunRequest{
+	_, err = d.Orchestrator.Run(ctx, llm.RunRequest{
 		UserID:         u.ID,
 		ConversationID: id,
 		ModelID:        req.ModelID,
@@ -216,7 +304,7 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		Branch:         req.Branch,
 		Mode:           req.Mode,
 		Verify:         req.Verify,
-		NoTools:        req.NoTools,
+		ToolMode:       toolMode,
 		ForceWebSearch: req.WebSearch,
 		Fast:           req.Fast,
 		ParamOverrides: req.ParamOverrides,
@@ -224,7 +312,20 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		Locale:         req.Locale,
 	}, sendEvent)
 	if err != nil && !terminalSent {
-		sendEvent(llm.SseEvent{Type: "error", Message: err.Error(), MessageID: streamMessageID})
+		parentID := req.ParentID
+		if parentID == "" && !req.Branch {
+			parentID = conv.ActiveLeafID
+		}
+		logChatRunError(d.Logger, chatRunErrorMetadata{
+			Operation:       "post_message",
+			UserID:          u.ID,
+			ConversationID:  id,
+			Fast:            req.Fast,
+			Branch:          req.Branch,
+			ParentID:        parentID,
+			AttachmentCount: len(req.Attachments),
+		}, err)
+		sendEvent(llm.SseEvent{Type: "error", Message: chatRunErrorMessage, MessageID: streamMessageID})
 	}
 	// §23: the turn is over (success, stop, or error — the user message and any
 	// partial answer are persisted either way); nudge the user's other devices.
@@ -341,15 +442,16 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
 	id := pathParam(r, "id")
 	var body struct {
-		AssistantID    string         `json:"assistant_id"`
-		ModelID        string         `json:"model_id"`
-		Mode           string         `json:"mode"`
-		Verify         bool           `json:"verify"`
-		NoTools        bool           `json:"no_tools"`
-		WebSearch      bool           `json:"web_search"`
-		Fast           bool           `json:"fast"` // §fast-mode: honour the CURRENT picker (regenerate follows the live toggle)
-		ParamOverrides map[string]any `json:"params"`
-		Locale         string         `json:"locale"`
+		AssistantID    string          `json:"assistant_id"`
+		ModelID        string          `json:"model_id"`
+		Mode           string          `json:"mode"`
+		Verify         bool            `json:"verify"`
+		ToolMode       json.RawMessage `json:"tool_mode"`
+		NoTools        bool            `json:"no_tools"`
+		WebSearch      bool            `json:"web_search"`
+		Fast           bool            `json:"fast"` // §fast-mode: honour the CURRENT picker (regenerate follows the live toggle)
+		ParamOverrides map[string]any  `json:"params"`
+		Locale         string          `json:"locale"`
 	}
 	if err := decodeJSON(r, &body); err != nil {
 		writeError(w, 400, errInvalidInput)
@@ -360,11 +462,16 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, errNotFound)
 		return
 	}
+	toolMode, err := resolveTurnToolMode(body.ToolMode, body.NoTools)
+	if err != nil {
+		writeError(w, 400, err)
+		return
+	}
 	// §fast-mode overrides all other turn flags (see postMessageHandler).
 	if body.Fast {
 		body.Mode = ""
 		body.Verify = false
-		body.NoTools = false
+		toolMode = llm.ToolModeEnabled
 		body.WebSearch = false
 	}
 	// Keep regenerate aligned with the normal send path: users without the
@@ -372,7 +479,7 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	if body.Mode == "deep-research" && u.Role != "admin" && !userGroupHasFeature(r.Context(), d, u.GroupID, "research") {
 		body.Mode = ""
 	}
-	body.NoTools, body.WebSearch = normalizeTurnFlags(body.Mode, body.NoTools, body.WebSearch)
+	toolMode, body.WebSearch = normalizeTurnFlags(body.Mode, toolMode, body.WebSearch)
 	// §8/§C7 daily-message + token + concurrent-gen quotas apply to regenerate
 	// too — otherwise repeated /regenerate bypasses the per-day message cap.
 	// Reserve the concurrent-gen slot FIRST so a slot-full 429 doesn't burn a
@@ -494,14 +601,23 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		ReuseExistingUserMessage: true,
 		Mode:                     body.Mode,
 		Verify:                   body.Verify,
-		NoTools:                  body.NoTools,
+		ToolMode:                 toolMode,
 		ForceWebSearch:           body.WebSearch,
 		Fast:                     body.Fast,
 		ParamOverrides:           body.ParamOverrides,
 		Locale:                   body.Locale,
 	}, sendEvent)
 	if err != nil && !terminalSent {
-		sendEvent(llm.SseEvent{Type: "error", Message: err.Error(), MessageID: streamMessageID})
+		logChatRunError(d.Logger, chatRunErrorMetadata{
+			Operation:      "regenerate",
+			UserID:         u.ID,
+			ConversationID: id,
+			Fast:           body.Fast,
+			Branch:         true,
+			ParentID:       user.ID,
+			ReferenceID:    body.AssistantID,
+		}, err)
+		sendEvent(llm.SseEvent{Type: "error", Message: chatRunErrorMessage, MessageID: streamMessageID})
 	}
 	// §23: regeneration finished — nudge the user's other devices.
 	publishUserEvent(d, r, u.ID, "conversation.updated", id)

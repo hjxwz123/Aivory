@@ -95,6 +95,8 @@
       "researchEnabled": "深度研究",
       "systemPrompt": "系統提示詞",
       "paramControls": "param_controls (JSON)",
+      "extraParams": "額外上游參數（JSON）",
+      "extraParamsHint": "可選 JSON 物件，將合併到此模型的上游請求中。優先順序：內建請求參數高於參數控制項映射，參數控制項映射高於此處的值。",
       "dim": "向量維度",
       "sortOrder": "顯示順序",
       "sortOrderHint": "數字越小越靠前。",
@@ -123,7 +125,9 @@
     "moveDown": "下移",
     "errors": {
       "missingFields": "請填寫渠道、顯示名和 request_id",
-      "invalidJSON": "param_controls 不是合法 JSON"
+      "invalidJSON": "param_controls 不是合法 JSON",
+      "invalidExtraParamsJSON": "額外上游參數必須是合法 JSON",
+      "extraParamsMustBeObject": "額外上游參數必須是 JSON 物件"
     },
     "permissionsLead": "可用此模型的使用者群組及每週期額度。全部關閉=對所有人開放。",
     "tagsHint": "給模型指派標籤,用於選擇器篩選。",
@@ -378,6 +382,7 @@
       "task_memory_adjudicate": "記憶裁決",
       "task_downgrade": "跨廠商降級",
       "task_image_prompt": "圖片提示詞",
+      "task_tool_route": "工具路由",
       "task_research_plan": "研究規劃",
       "task_research_verify": "研究核驗",
       "task_moderation": "內容審核",

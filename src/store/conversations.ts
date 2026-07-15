@@ -34,6 +34,7 @@ import type {
   VerifyResult,
 } from '@/types/chat'
 import { uid } from '@/lib/utils'
+import { isKnownLocalMessageId, persistedMessageReference } from '@/lib/message-ids'
 import { envNum } from '@/lib/env-config'
 import { markConversationsDeleted, unmarkConversationsDeleted } from '@/lib/sync-guards'
 import { toast } from '@/hooks/use-toast'
@@ -41,27 +42,55 @@ import { activeWorkspaceId } from '@/store/workspaces'
 import { useAuth } from '@/store/auth'
 import { useComposerPrefs, type ComposerMode } from '@/store/composer-prefs'
 import { useModels } from '@/store/models'
+import type { ToolMode } from '@/lib/tool-mode'
 import i18n from '@/i18n'
 
 // resolveArmedTurnFlags snapshots the CURRENT composer feature toggles for turns
 // started OUTSIDE the composer's own submit — regenerate, edit-and-resend, and
-// home suggestion cards — so an armed feature (deep research / verify / disable
-// tools / forced web search) applies consistently no matter how the turn is
+// home suggestion cards — so an armed feature (deep research / verify / tool
+// policy / forced web search) applies consistently no matter how the turn is
 // triggered, instead of silently reverting to defaults. verify is gated on
-// availability; the backend re-applies mode↔no-tools mutual exclusion and the
-// deep-research permission check, so passing the raw toggles here is safe.
+// availability. Deep Research is normalized to enabled because its pipeline
+// always needs tools and must bypass the automatic classifier.
 export function resolveArmedTurnFlags(): {
   mode?: ComposerMode
   verify?: boolean
-  noTools?: boolean
+  toolMode: ToolMode
   webSearch?: boolean
 } {
   const p = useComposerPrefs.getState()
+  const mode = p.mode !== 'default' ? p.mode : undefined
+  const toolMode = resolveTurnToolMode(p.toolMode, { mode })
   return {
-    mode: p.mode !== 'default' ? p.mode : undefined,
+    mode,
     verify: p.verify && useModels.getState().verifyAvailable ? true : undefined,
-    noTools: p.noTools ? true : undefined,
-    webSearch: p.noTools && p.forceWebSearch ? true : undefined,
+    toolMode,
+    webSearch: toolMode === 'disabled' && p.forceWebSearch ? true : undefined,
+  }
+}
+
+/**
+ * Returns the policy that must be sent on the wire for a concrete turn. Fast
+ * mode keeps its existing fixed tool behavior, and Deep Research always needs
+ * tools; both therefore skip automatic task classification.
+ */
+export function resolveTurnToolMode(
+  toolMode: ToolMode | undefined,
+  options: { fast?: boolean; mode?: ComposerMode } = {},
+): ToolMode {
+  if (options.fast || options.mode === 'deep-research') return 'enabled'
+  return toolMode ?? 'auto'
+}
+
+/** Pure wire-policy resolver shared by normal sends and regeneration. */
+export function resolveToolRequestFlags(
+  toolMode: ToolMode | undefined,
+  options: { fast?: boolean; mode?: ComposerMode; webSearch?: boolean } = {},
+): { toolMode: ToolMode; webSearch?: true } {
+  const resolved = resolveTurnToolMode(toolMode, options)
+  return {
+    toolMode: resolved,
+    webSearch: resolved === 'disabled' && options.webSearch ? true : undefined,
   }
 }
 
@@ -160,12 +189,13 @@ interface ConversationStore {
     imageStyleId?: string
     /** §verify: enable Verify mode for this turn (a second model audits the answer). */
     verify?: boolean
-    /** §4.13-B: run this turn with NO tool calling (tool_mode=none server-side). */
-    noTools?: boolean
-    /** §4.4-B: forced non-tool web search (only meaningful with noTools). */
+    /** Per-turn tool policy. Missing legacy/internal callers normalize to auto;
+     *  the SSE request always serializes the resolved value explicitly. */
+    toolMode?: ToolMode
+    /** §4.4-B: forced non-tool web search (only meaningful in disabled mode). */
     webSearch?: boolean
     /** §fast-mode: run this turn in fast mode (model resolved server-side + masked;
-     *  verify/DR/no-tools forced off; quartered tool budget, no python_execute). */
+     *  verify/DR forced off; fixed enabled policy, quartered budget, no Python). */
     fast?: boolean
     /** Home "instant send": the conversation is an OPTIMISTIC local placeholder
      *  (temp id) — create the real one server-side FIRST, re-key the cache to
@@ -197,6 +227,190 @@ interface ConversationStore {
 
 const streamControllers = new Map<string, AbortController>()
 const streamHandoffs = new Set<string>()
+// Exact ids generated for optimistic message rows. This is intentionally an
+// explicit registry rather than a prefix test: imported/server ids are opaque
+// and may legally resemble `uid('m')` output.
+const generatedLocalMessageIds = new Set<string>()
+
+// An explicit stop can abort the POST reader before its `message_start` frame
+// reaches the browser even though the backend is still committing the stopped
+// turn. Keep one bounded canonical-path reconcile per conversation. A following
+// send waits for it, so no stale optimistic tree reference can escape on the
+// wire while the stop and persistence paths are converging.
+const stoppedPathReconciles = new Map<string, Promise<void>>()
+const stoppedPathReconcileEpochs = new Map<string, number>()
+const STOPPED_PATH_RETRY_DELAYS_MS = [0, 50, 125, 250, 500, 1000] as const
+
+interface StoppedPathBarrier {
+  promise: Promise<void>
+  resolve: () => void
+  pending: number
+}
+
+// Registered synchronously by abortStream, before AbortController dispatches
+// its event. This closes the microtask-sized race where the user could submit a
+// second turn before the first stream's catch installed its reconcile promise.
+const stoppedPathBarriers = new Map<string, StoppedPathBarrier>()
+
+function registerStoppedPathBarrier(conversationId: string): void {
+  const existing = stoppedPathBarriers.get(conversationId)
+  if (existing) {
+    existing.pending++
+    return
+  }
+  let resolve = () => {}
+  const promise = new Promise<void>((done) => {
+    resolve = done
+  })
+  stoppedPathBarriers.set(conversationId, { promise, resolve, pending: 1 })
+}
+
+function finishStoppedPathBarrier(conversationId: string): void {
+  const barrier = stoppedPathBarriers.get(conversationId)
+  if (!barrier) return
+  barrier.pending--
+  if (barrier.pending > 0) return
+  stoppedPathBarriers.delete(conversationId)
+  barrier.resolve()
+}
+
+function moveStoppedPathBarrier(fromConversationId: string, toConversationId: string): void {
+  if (fromConversationId === toConversationId) return
+  const barrier = stoppedPathBarriers.get(fromConversationId)
+  if (!barrier) return
+  stoppedPathBarriers.delete(fromConversationId)
+  stoppedPathBarriers.set(toConversationId, barrier)
+}
+
+function pendingStoppedPathWork(conversationId: string): Promise<void> | undefined {
+  return stoppedPathBarriers.get(conversationId)?.promise ?? stoppedPathReconciles.get(conversationId)
+}
+
+function pruneGeneratedLocalMessageIds(conversations: Conversation[]): void {
+  const referenced = new Set<string>()
+  for (const conversation of conversations) {
+    for (const message of conversation.messages) {
+      if (message.localOnly) referenced.add(message.id)
+      for (const siblingId of message.siblings ?? []) referenced.add(siblingId)
+    }
+  }
+  for (const id of generatedLocalMessageIds) {
+    if (!referenced.has(id)) generatedLocalMessageIds.delete(id)
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function previousPersistedLeaf(messages: readonly Message[]): string | undefined {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const id = persistedMessageReference(messages, messages[i].id, generatedLocalMessageIds)
+    if (id) return id
+  }
+  return undefined
+}
+
+// If every canonical fetch fails, remove the optimistic suffix instead of
+// leaving ids that can later become parent_id / leaf_id references. The server
+// remains authoritative and the next successful load restores the stopped turn.
+function withoutLocalOnlySuffix(messages: readonly Message[]): Message[] {
+  const firstLocal = messages.findIndex((message) => message.localOnly)
+  const kept = firstLocal >= 0 ? messages.slice(0, firstLocal) : messages.slice()
+  return kept.map((message) => ({ ...message, streaming: false, imageStatus: undefined }))
+}
+
+function scheduleStoppedPathReconcile(
+  set: (fn: (state: ConversationStore) => Partial<ConversationStore>) => void,
+  get: () => ConversationStore,
+  conversationId: string,
+  options: { previousLeaf?: string; expectedAssistantId?: string },
+): Promise<void> {
+  const epoch = (stoppedPathReconcileEpochs.get(conversationId) ?? 0) + 1
+  stoppedPathReconcileEpochs.set(conversationId, epoch)
+
+  const task = (async () => {
+    for (let attempt = 0; attempt < STOPPED_PATH_RETRY_DELAYS_MS.length; attempt++) {
+      const delay = STOPPED_PATH_RETRY_DELAYS_MS[attempt]
+      if (delay > 0) await sleep(delay)
+      if (stoppedPathReconcileEpochs.get(conversationId) !== epoch) return
+
+      const current = get().conversations.find((conversation) => conversation.id === conversationId)
+      if (!current) return
+      // A newer send/regeneration owns the visible path. Never let an older stop
+      // reconcile overwrite it; normal sends wait on this task before starting.
+      if (current.messages.some((message) => message.streaming)) return
+
+      try {
+        const resp = await conversationsApi.get(conversationId, { limit: MSG_PAGE })
+        if (stoppedPathReconcileEpochs.get(conversationId) !== epoch) return
+        const latest = get().conversations.find((conversation) => conversation.id === conversationId)
+        if (!latest || latest.messages.some((message) => message.streaming)) return
+
+        const serverStillStreaming = resp.messages.some((message) => message.status === 'streaming')
+        // A stop is terminal from the user's point of view. The backend can still
+        // report `streaming` for a few milliseconds while it handles the stop
+        // signal; never re-arm the spinner while retrying for its settled row.
+        const messages = resp.messages.map((message) => ({
+          ...toLocalMessage(message),
+          streaming: false,
+          imageStatus: undefined,
+        }))
+        set((state) => ({
+          conversations: state.conversations.map((conversation) =>
+            conversation.id !== conversationId
+              ? conversation
+              : {
+                  ...conversation,
+                  title: resp.conversation.title || conversation.title,
+                  updatedAt: resp.conversation.updated_at
+                    ? resp.conversation.updated_at * 1000
+                    : conversation.updatedAt,
+                  messages,
+                  hasOlder: Boolean(resp.has_more),
+                  olderCursor: resp.next_before,
+                },
+          ),
+        }))
+        pruneGeneratedLocalMessageIds(get().conversations)
+
+        const responseLeaf = resp.conversation.active_leaf_id || messages[messages.length - 1]?.id
+        const stoppedTurnVisible = options.expectedAssistantId
+          ? messages.some((message) => message.id === options.expectedAssistantId)
+          : Boolean(responseLeaf && responseLeaf !== options.previousLeaf)
+        if (!serverStillStreaming && stoppedTurnVisible) return
+      } catch {
+        // Stop reconciliation is best effort per attempt; the bounded loop below
+        // removes unsafe optimistic ids even if every network request fails.
+      }
+    }
+
+    // Even successful GETs can repeatedly return the pre-stop leaf while the
+    // detached handler is still settling. On exhaustion, unconditionally strip
+    // any remaining optimistic suffix so later actions cannot serialize it.
+    if (stoppedPathReconcileEpochs.get(conversationId) === epoch) {
+      set((state) => ({
+        conversations: state.conversations.map((conversation) =>
+          conversation.id === conversationId
+            ? { ...conversation, messages: withoutLocalOnlySuffix(conversation.messages) }
+            : conversation,
+        ),
+      }))
+      pruneGeneratedLocalMessageIds(get().conversations)
+    }
+  })()
+
+  stoppedPathReconciles.set(conversationId, task)
+  void task.finally(() => {
+    if (stoppedPathReconciles.get(conversationId) === task) {
+      stoppedPathReconciles.delete(conversationId)
+      if (stoppedPathReconcileEpochs.get(conversationId) === epoch) {
+        stoppedPathReconcileEpochs.delete(conversationId)
+      }
+    }
+  })
+  return task
+}
 
 // Stop every in-progress generation in a conversation: tell the backend to
 // halt (so partial output is persisted) and abort the local SSE readers. Used
@@ -529,11 +743,20 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
     // and active_leaf is only written at message creation, so a switch can never
     // clobber it — we deliberately do NOT publish a conversation-wide stop here.
     // The off-path stream keeps running and is picked up when its branch reopens.
+    const messages = get().conversations.find((conversation) => conversation.id === id)?.messages ?? []
+    // Edit-resend and regenerate temporarily add client-only ids to `siblings`
+    // so the branch picker can render before the SSE `message_start`. The active
+    // leaf endpoint treats an unknown id as a valid leaf, which would persist a
+    // dangling active_leaf_id and make the next message's parent FK fail. Only
+    // block ids explicitly marked local; an unloaded persisted sibling remains
+    // valid even if its string happens to look like one of our generated ids.
+    if (isKnownLocalMessageId(messages, leafId, generatedLocalMessageIds)) return
     try {
       const resp = await conversationsApi.setActiveLeaf(id, leafId)
       const conv = toLocalConversation(resp.conversation)
       conv.messages = resp.messages.map(toLocalMessage)
       set((s) => ({ conversations: replaceOrPrepend(s.conversations, conv) }))
+      pruneGeneratedLocalMessageIds(get().conversations)
       get().resumeStreamingMessages(id, { replaceExisting: true })
     } catch (e) {
       toast.error(errorMessage(e, 'Failed to switch branch'))
@@ -633,6 +856,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
               },
         ),
       }))
+      pruneGeneratedLocalMessageIds(get().conversations)
     } catch {
       /* keep the optimistic copy if the reconcile fetch fails */
     }
@@ -682,12 +906,11 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
     if (!conv) return
     for (const msg of conv.messages) {
       if (msg.role !== 'assistant' || !msg.streaming) continue
-      // A message still keyed by its local optimistic id (uid('m') → "m_…";
-      // server ids are "msg_…") belongs to a send that started in THIS tab
-      // after the caller's snapshot — its live POST stream owns it, and a
-      // replay GET against the optimistic id would 404 and kill the healthy
-      // stream with a bogus error.
-      if (msg.id.startsWith('m_')) continue
+      // A message still keyed by a known local optimistic id belongs to a send
+      // that started in THIS tab after the caller's snapshot. Its live POST owns
+      // it; a replay GET would 404 and kill the healthy stream. Do not infer this
+      // from an id prefix: imported/server ids are opaque and may legally be m_*.
+      if (isKnownLocalMessageId(conv.messages, msg.id, generatedLocalMessageIds)) continue
       const existing = streamControllers.get(msg.id) ?? streamControllers.get(msg.id + '-regen')
       const hasLocalOutput =
         Boolean(msg.content?.trim()) ||
@@ -713,14 +936,48 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
   },
 
   async sendMessage(input) {
+    // A stop may have closed the POST reader before its server ids arrived. Wait
+    // for the bounded canonical-path reconcile before reading the current leaf or
+    // creating another optimistic turn. The composer does not await this action,
+    // so this pauses persistence without blocking the UI thread.
+    const beforeReconcile = get().conversations.find((c) => c.id === input.conversationId)
+    const parentWasLocal = Boolean(
+      input.parentId &&
+        isKnownLocalMessageId(beforeReconcile?.messages ?? [], input.parentId, generatedLocalMessageIds),
+    )
+    const stoppedReconcile = pendingStoppedPathWork(input.conversationId)
+    if (stoppedReconcile) await stoppedReconcile
+
     // §4.15: an edit-resend creates a sibling branch. Do not stop the existing
     // branch's stream; stream frames are keyed by assistant message id and can be
     // replayed when that branch is reopened.
     const abort = new AbortController()
     const conv0 = get().conversations.find((c) => c.id === input.conversationId)
+    const requestParentId = persistedMessageReference(
+      conv0?.messages ?? [],
+      parentWasLocal ? undefined : input.parentId,
+      generatedLocalMessageIds,
+    )
+    const explicitParentIsLocal = parentWasLocal || Boolean(input.parentId && !requestParentId)
+    // Omitting a parent on a branch means "root sibling", so silently dropping a
+    // stale local parent would corrupt the tree even though it avoids the FK. Do
+    // not issue the request; the stop reconcile has already refreshed/removed the
+    // unsafe row and a retry will derive the parent from canonical state.
+    if (input.branch && explicitParentIsLocal) {
+      toast.info('Conversation is still syncing. Please try editing again.')
+      return
+    }
+    const persistedLeafBeforeTurn = previousPersistedLeaf(conv0?.messages ?? [])
+    const { toolMode: requestToolMode, webSearch: requestWebSearch } = resolveToolRequestFlags(input.toolMode, {
+      fast: input.fast,
+      mode: input.mode,
+      webSearch: input.webSearch,
+    })
     const userId = uid('m')
+    generatedLocalMessageIds.add(userId)
     const userMsg: Message = {
       id: userId,
+      localOnly: true,
       role: 'user',
       content: input.text,
       createdAt: Date.now(),
@@ -735,12 +992,18 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
       // the explicit parent. Closes the §4.15 merge bug at the source (an empty
       // parentId on a later edit would re-root onto the first message).
       parentId: input.branch
-        ? input.parentId || undefined
-        : conv0?.messages[conv0.messages.length - 1]?.id,
+        ? requestParentId
+        : persistedMessageReference(
+            conv0?.messages ?? [],
+            conv0?.messages[conv0.messages.length - 1]?.id,
+            generatedLocalMessageIds,
+          ),
     }
     const assistantId = uid('m')
+    generatedLocalMessageIds.add(assistantId)
     const assistantMsg: Message = {
       id: assistantId,
+      localOnly: true,
       role: 'assistant',
       content: '',
       createdAt: Date.now() + 1,
@@ -764,7 +1027,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
     set((s) => ({
       conversations: s.conversations.map((c) => {
         if (c.id !== input.conversationId) return c
-        const base = input.branch ? truncateToParent(c.messages, input.parentId) : c.messages
+        const base = input.branch ? truncateToParent(c.messages, requestParentId) : c.messages
         // §4.15 R1: editing a past question opens a NEW sibling QUESTION under the
         // same parent — so the `< n/m >` picker belongs on the USER bubble (the old
         // question + the new one), NOT on the answer. Seed it optimistically so the
@@ -775,7 +1038,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
         let uMsg = userMsg
         if (input.branch) {
           const oldQs = c.messages.filter(
-            (m) => m.role === 'user' && (input.parentId ? m.parentId === input.parentId : !m.parentId),
+            (m) => m.role === 'user' && (requestParentId ? m.parentId === requestParentId : !m.parentId),
           )
           const prevSiblings = oldQs.flatMap((q) => (q.siblings && q.siblings.length > 0 ? q.siblings : [q.id]))
           const uniq = Array.from(new Set(prevSiblings))
@@ -829,6 +1092,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
           error: 'Could not start the conversation. Please try again.',
         }))
         streamControllers.delete(assistantId)
+        if (abort.signal.aborted) finishStoppedPathBarrier(input.conversationId)
         return
       }
       const tempId = input.conversationId
@@ -850,6 +1114,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
               : c,
           ),
       }))
+      moveStoppedPathBarrier(tempId, realId)
       input.conversationId = realId
       // Swap the temp id in the URL for the real one (navigate replace), so a
       // refresh/share resolves and the thread keeps rendering (it re-keyed too).
@@ -861,6 +1126,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
     // never clears and the spinner spins forever). Falls back to the local id
     // for a failure before message_start (§ stream-error E7).
     let serverAssistantId = assistantId
+    let assistantStarted = false
     // When the turn errors we keep the optimistic message (with its error flag +
     // retry button) and SKIP the tree reconcile — otherwise reloadActivePath
     // would replace it with the server's empty/partial row and the error (a
@@ -877,7 +1143,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
           // §fast-mode: a fast turn omits model_id (the server resolves + hides the
           // fast model). Advanced turns send the picked model.
           model_id: input.fast ? undefined : input.modelId,
-          parent_id: input.parentId,
+          parent_id: requestParentId,
           // §4.15: tell the backend this is a branch edit so an empty parent
           // (editing the root question) stays a root sibling instead of being
           // appended to the active leaf.
@@ -886,9 +1152,10 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
           mode: input.mode,
           // §verify: enable the secondary-auditor pass for this turn.
           verify: input.verify,
-          // §4.13-B: no-tools turn (tool_mode=none) + optional forced web search.
-          no_tools: input.noTools,
-          web_search: input.webSearch,
+          // Explicit tri-state policy; only disabled mode may request the legacy
+          // server-run search injection.
+          tool_mode: requestToolMode,
+          web_search: requestWebSearch,
           // §fast-mode: run this turn on the admin's hidden fast model.
           fast: input.fast,
           attachments: input.attachments?.map(attachmentToApi),
@@ -902,13 +1169,18 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
         const ev = frame.data as ApiSseEvent
         switch (ev.type) {
           case 'message_start':
+            assistantStarted = true
             serverAssistantId = ev.message_id ?? assistantId
             // Replace local id with backend id so future actions (regenerate,
             // active-leaf) use the right id.
             updateAssistant(set, input.conversationId, assistantId, (m) => ({
               ...m,
               id: serverAssistantId,
+              localOnly: undefined,
             }))
+            // `message_start` proves the returned id is persisted even if a
+            // backend/import happens to use the same string as our placeholder.
+            generatedLocalMessageIds.delete(assistantId)
             // Re-key the abort controller so abortStream (which uses the server
             // id from the UI message) can actually cancel the local SSE reader.
             if (serverAssistantId !== assistantId) {
@@ -1129,7 +1401,14 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
       // user/assistant siblings collapse and the `< n/m >` picker appears. Skip
       // it on an error turn so the error message + retry button survive (a
       // reconcile would replace them with the server's empty row).
-      if (!errored) await get().reloadActivePath(input.conversationId)
+      if (abort.signal.aborted) {
+        await scheduleStoppedPathReconcile(set, get, input.conversationId, {
+          previousLeaf: persistedLeafBeforeTurn,
+          expectedAssistantId: assistantStarted ? serverAssistantId : undefined,
+        })
+      } else if (!errored) {
+        await get().reloadActivePath(input.conversationId)
+      }
     } catch (e) {
       if (abort.signal.aborted && (streamHandoffs.delete(serverAssistantId) || streamHandoffs.delete(serverAssistantId + '-regen'))) return
       if (!abort.signal.aborted && serverAssistantId !== assistantId) {
@@ -1141,7 +1420,8 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
       // user-initiated stop aborts the local reader before the terminal `done`
       // frame arrives — that AbortError is NOT a failure, so keep the partial
       // reply and skip the retry banner. Otherwise mark the turn failed. We do
-      // NOT reconcile here — that would wipe the (client-only) error flag.
+      // Non-stop errors do not reconcile here because that would wipe the
+      // client-only error flag. Explicit stops use the bounded reconcile below.
       updateAssistant(set, input.conversationId, serverAssistantId, (m) => ({
         ...m,
         streaming: false,
@@ -1153,15 +1433,34 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
         verify: m.verify?.status === 'running' ? undefined : m.verify,
         error: abort.signal.aborted ? m.error : errorMessage(e),
       }))
+      if (abort.signal.aborted) {
+        await scheduleStoppedPathReconcile(set, get, input.conversationId, {
+          previousLeaf: persistedLeafBeforeTurn,
+          expectedAssistantId: assistantStarted ? serverAssistantId : undefined,
+        })
+      }
     } finally {
       if (streamControllers.get(serverAssistantId) === abort) streamControllers.delete(serverAssistantId)
       if (streamControllers.get(assistantId) === abort) streamControllers.delete(assistantId)
+      if (abort.signal.aborted) finishStoppedPathBarrier(input.conversationId)
     }
   },
 
   async regenerate(conversationId, assistantId, modelId) {
+    const assistantWasLocal = isKnownLocalMessageId(
+      get().conversations.find((c) => c.id === conversationId)?.messages ?? [],
+      assistantId,
+      generatedLocalMessageIds,
+    )
+    const stoppedReconcile = pendingStoppedPathWork(conversationId)
+    if (stoppedReconcile) await stoppedReconcile
+    if (assistantWasLocal) {
+      toast.info('Conversation is still syncing. Please try again.')
+      return
+    }
     const abort = new AbortController()
     const conv = get().conversations.find((c) => c.id === conversationId)
+    const persistedLeafBeforeRegenerate = previousPersistedLeaf(conv?.messages ?? [])
     streamControllers.set(assistantId + '-regen', abort)
     // §4.15: regenerate forks at the assistant — the new reply is a SIBLING
     // of the old one under the same user turn, not an append. Truncate the
@@ -1180,19 +1479,23 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
     // badge "sticks" even though the user disabled it. (Common case is
     // unchanged: if the toggle was on for the original send and untouched, it
     // is still on, so the re-audit happens as before.)
-    // §4.13-B: regenerate honours the CURRENT verify / no-tools / web-search
+    // Regenerate honours the CURRENT verify / tool-policy / web-search
     // toggles (a retry should reflect what's armed now). `mode` is the EXCEPTION
     // — it stays the original turn's mode (below), so regenerating a deep-research
     // reply re-runs research rather than adopting whatever mode is toggled now.
     const armed = resolveArmedTurnFlags()
     // §fast-mode: regenerate honours the conversation's CURRENT 快速/进阶 selection
-    // (like verify/no-tools above) — a fast conversation re-runs fast; switching to
+    // (like verify/tool-policy above) — a fast conversation re-runs fast; switching to
     // 进阶 first makes the retry use the real model.
     const fast = conv?.fast === true
     const verify = fast ? false : armed.verify
-    const noTools = fast ? false : armed.noTools
-    const webSearch = fast ? false : armed.webSearch
+    const { toolMode, webSearch } = resolveToolRequestFlags(armed.toolMode, {
+      fast,
+      mode,
+      webSearch: armed.webSearch,
+    })
     const placeholderId = uid('m')
+    generatedLocalMessageIds.add(placeholderId)
     // §4.15 R2: regenerate forks at the assistant — the new reply is a SIBLING of
     // the old one under the same user turn. Seed branch metadata on the
     // placeholder so the `< n/m >` switcher shows under the reply IMMEDIATELY,
@@ -1213,9 +1516,11 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
     // id (re-keyed to the backend id after message_start), mirroring sendMessage
     // (§ stream-error E7).
     let serverAssistantId = placeholderId
+    let assistantStarted = false
     try {
       const placeholder: Message = {
         id: placeholderId,
+        localOnly: true,
         role: 'assistant',
         content: '',
         createdAt: Date.now(),
@@ -1249,7 +1554,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
           model_id: fast ? undefined : modelId,
           mode,
           verify,
-          no_tools: noTools,
+          tool_mode: toolMode,
           web_search: webSearch,
           fast,
           // Fast turns must not inherit parameter overrides cached from the
@@ -1331,14 +1636,17 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
             break
           }
           case 'message_start':
+            assistantStarted = true
             serverAssistantId = ev.message_id ?? placeholderId
             updateAssistant(set, conversationId, placeholderId, (m) => ({
               ...m,
               id: serverAssistantId,
+              localOnly: undefined,
               // Re-point the optimistic sibling list (R2) at the server id so the
               // `< n/m >` picker stays self-consistent until reloadActivePath.
               siblings: m.siblings?.map((sid) => (sid === placeholderId ? serverAssistantId : sid)),
             }))
+            generatedLocalMessageIds.delete(placeholderId)
             if (serverAssistantId !== placeholderId) {
               const ctrl = streamControllers.get(assistantId + '-regen')
               if (ctrl) {
@@ -1422,7 +1730,14 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
       }
       // Reconcile so the freshly generated reply and the previous one show up as
       // siblings with a `< n/m >` picker instead of two stacked bubbles (§4.15).
-      await get().reloadActivePath(conversationId)
+      if (abort.signal.aborted) {
+        await scheduleStoppedPathReconcile(set, get, conversationId, {
+          previousLeaf: persistedLeafBeforeRegenerate,
+          expectedAssistantId: assistantStarted ? serverAssistantId : undefined,
+        })
+      } else {
+        await get().reloadActivePath(conversationId)
+      }
     } catch (e) {
       if (abort.signal.aborted && (streamHandoffs.delete(serverAssistantId) || streamHandoffs.delete(assistantId + '-regen'))) return
       if (!abort.signal.aborted && serverAssistantId !== placeholderId) {
@@ -1434,7 +1749,10 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
       // without the interrupted note or error toast.
       if (abort.signal.aborted) {
         updateAssistant(set, conversationId, serverAssistantId, (m) => ({ ...m, streaming: false }))
-        await get().reloadActivePath(conversationId)
+        await scheduleStoppedPathReconcile(set, get, conversationId, {
+          previousLeaf: persistedLeafBeforeRegenerate,
+          expectedAssistantId: assistantStarted ? serverAssistantId : undefined,
+        })
       } else {
         // A mid-stream drop on regenerate must clear the placeholder's
         // streaming state (by its CURRENT id) so the spinner stops, surface a
@@ -1451,6 +1769,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
     } finally {
       if (streamControllers.get(assistantId + '-regen') === abort) streamControllers.delete(assistantId + '-regen')
       if (streamControllers.get(serverAssistantId) === abort) streamControllers.delete(serverAssistantId)
+      if (abort.signal.aborted) finishStoppedPathBarrier(conversationId)
     }
   },
 
@@ -1504,6 +1823,14 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
     const conv = state.conversations.find((c) =>
       c.messages.some((m) => m.id === assistantMessageId),
     )
+    const ctrl = streamControllers.get(assistantMessageId)
+    const regen = streamControllers.get(assistantMessageId + '-regen')
+    const willAbortLocalStream = [ctrl, regen].some(
+      (controller) => controller && !controller.signal.aborted,
+    )
+    if (conv && willAbortLocalStream && conv.messages.some((message) => message.localOnly)) {
+      registerStoppedPathBarrier(conv.id)
+    }
     if (conv) {
       // Fire-and-forget — the orchestrator subscribes on conv:<id>:stop and
       // cancels its context, which makes the SSE writer flush the in-progress
@@ -1512,10 +1839,8 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
         /* best effort — the local abort below still stops the stream */
       })
     }
-    const ctrl = streamControllers.get(assistantMessageId)
     ctrl?.abort()
     // Also try regen channel if streaming was triggered via regenerate().
-    const regen = streamControllers.get(assistantMessageId + '-regen')
     regen?.abort()
   },
 

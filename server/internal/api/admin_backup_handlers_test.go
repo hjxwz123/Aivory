@@ -262,7 +262,7 @@ func TestConfigExportImportMergesAdminConfigOnly(t *testing.T) {
 	mustExec(t, srcDB, `INSERT INTO oauth_providers(id,kind,name,client_id,client_secret,enabled,sort_order) VALUES('oa_cfg','github','GitHub','cid','osecret',1,1)`)
 	mustExec(t, srcDB, `INSERT INTO model_tags(id,name,sort_order) VALUES('tag_cfg','Fast',1)`)
 	mustExec(t, srcDB, `INSERT INTO image_styles(id,name,hidden_prompt,enabled,sort_order) VALUES('sty_cfg','Poster','hidden',1,1)`)
-	mustExec(t, srcDB, `INSERT INTO models(id,channel_id,kind,request_id,label,icon,param_controls,tags,enabled,sort_order) VALUES('m_cfg','ch_cfg','chat','gpt-x','Configured','/api/icons/abcdef123456.png','[{"name":"temperature"}]','["tag_cfg"]',1,1)`)
+	mustExec(t, srcDB, `INSERT INTO models(id,channel_id,kind,request_id,label,icon,param_controls,extra_params,tags,enabled,sort_order) VALUES('m_cfg','ch_cfg','chat','gpt-x','Configured','/api/icons/abcdef123456.png','[{"name":"temperature"}]','{"temperature":0.25}','["tag_cfg"]',1,1)`)
 	mustExec(t, srcDB, `INSERT INTO model_group_quotas(model_id,group_id,period_seconds,limit_type,limit_value) VALUES('m_cfg','ug_paid',3600,'count',20)`)
 	mustExec(t, srcDB, `INSERT INTO model_skills(model_id,skill_id) VALUES('m_cfg','sk_cfg')`)
 	mustExec(t, srcDB, `INSERT INTO redeem_codes(id,code,group_id,duration_days,max_uses,note) VALUES('rc_cfg','PROMO','ug_paid',30,10,'launch')`)
@@ -322,10 +322,10 @@ func TestConfigExportImportMergesAdminConfigOnly(t *testing.T) {
 	if apiKey != "sk-live" || chName != "Main" {
 		t.Fatalf("channel not upserted: key=%q name=%q", apiKey, chName)
 	}
-	var label, params string
-	mustQuery(t, tgtDB, `SELECT label, param_controls FROM models WHERE id='m_cfg'`).Scan(&label, &params)
-	if label != "Configured" || !strings.Contains(params, "temperature") {
-		t.Fatalf("model not imported: label=%q params=%q", label, params)
+	var label, params, extraParams string
+	mustQuery(t, tgtDB, `SELECT label, param_controls, extra_params FROM models WHERE id='m_cfg'`).Scan(&label, &params, &extraParams)
+	if label != "Configured" || !strings.Contains(params, "temperature") || !strings.Contains(extraParams, "temperature") {
+		t.Fatalf("model not imported: label=%q params=%q extra_params=%q", label, params, extraParams)
 	}
 	if b, err := os.ReadFile(filepath.Join(tgtUploads, "icons", "abcdef123456.png")); err != nil || string(b) != "icon-bytes" {
 		t.Fatalf("icon not restored: %v bytes=%q", err, string(b))

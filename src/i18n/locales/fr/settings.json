@@ -41,9 +41,23 @@
     "customPlaceholder": "Centres d'intérêt, structure de réponses préférée, choses à éviter…",
     "saved": "Personnalisation enregistrée",
     "toolsTitle": "Outils",
-    "toolsSubtitle": "Contrôlez si le modèle peut appeler des outils (recherche web, Python, génération d’images, base de connaissances).",
-    "disableToolsToggle": "Désactiver les outils par défaut",
-    "disableToolsBody": "Les nouvelles conversations démarrent sans outils. Vous pouvez réactiver les outils pour une conversation depuis le menu « + » du champ de saisie.",
+    "toolsSubtitle": "Choisissez comment l’assistant utilise les outils tels que la recherche web, Python, la génération d’images et les bases de connaissances.",
+    "toolsDefaultLabel": "Mode d’outils par défaut",
+    "toolsDefaultBody": "Appliqué au début d’une nouvelle conversation. Vous pouvez changer le mode d’une conversation depuis la zone de saisie.",
+    "toolModes": {
+      "auto": {
+        "label": "Automatique",
+        "body": "Demande au modèle de tâche si des outils sont nécessaires avant chaque réponse."
+      },
+      "disabled": {
+        "label": "Désactivés",
+        "body": "Répond directement sans mettre d’outils à la disposition du modèle de réponse."
+      },
+      "enabled": {
+        "label": "Activés",
+        "body": "Met toujours à disposition les outils configurés pour le modèle sélectionné."
+      }
+    },
     "memoryTitle": "Mémoire",
     "memorySubtitle": "L'assistant peut retenir des faits durables vous concernant d'une discussion à l'autre.",
     "memoryToggle": "Activer la mémoire",

@@ -147,6 +147,10 @@ type Model struct {
 	Fast               bool            `json:"fast"`
 	SystemPrompt       string          `json:"system_prompt"`
 	ParamControls      json.RawMessage `json:"param_controls"`
+	// ExtraParams is an admin-only JSON object merged into this model's upstream
+	// request body. It is intentionally omitted from the public model response.
+	// Native request fields and user-selected param controls take precedence.
+	ExtraParams        json.RawMessage `json:"extra_params"`
 	// OfficialTools lists OpenAI Responses hosted tools to enable (e.g.
 	// "web_search"). Empty = use the system's self-built tools (§2.3-B). Only
 	// meaningful for an openai channel with api_format=responses.

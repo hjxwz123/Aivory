@@ -62,7 +62,7 @@ import { Input } from '@/components/ui/input'
 import { NewProjectDialog } from '@/components/projects/new-project-dialog'
 import { MoveToProjectSub } from '@/components/projects/move-to-project-menu'
 import { useConversations, sameConvListShape } from '@/store/conversations'
-import { useComposerPrefs } from '@/store/composer-prefs'
+import { resetComposerToolModeToDefault } from '@/store/composer-prefs'
 import { useProjects } from '@/store/projects'
 import { useModels } from '@/store/models'
 import { useSettings } from '@/store/settings'
@@ -221,12 +221,9 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
   }, [currentId, conversations, collapsed, reducedMotion])
 
   function startNewChat() {
-    // §personalization: a fresh conversation re-arms the "disable tools by
-    // default" preference (only arms — never turns tools on for the user), so
-    // every new chat honors the default even if a prior chat toggled tools on.
-    if (useComposerPrefs.getState().defaultNoTools) {
-      useComposerPrefs.getState().setNoTools(true)
-    }
+    // A new chat starts from the account's exact three-state default, even when
+    // the previous conversation used a per-turn override.
+    resetComposerToolModeToDefault()
     // Go to the empty home screen — the conversation is created only when the
     // user sends the first message, so clicking "New chat" never piles up blank
     // conversations.
@@ -269,6 +266,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
             <div key={activeWorkspace.id} className="page-enter flex min-w-0 items-center gap-1.5">
               <Link
                 to="/"
+                onClick={resetComposerToolModeToDefault}
                 className="inline-flex min-w-0 items-center gap-2"
                 aria-label={activeWorkspace.name}
                 title={activeWorkspace.name}
@@ -291,12 +289,12 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
               </Tooltip>
             </div>
           ) : (
-          <Link key="personal" to="/" className="page-enter inline-flex items-center" aria-label={tCommon('aria.homeLink')}>
+          <Link key="personal" to="/" onClick={resetComposerToolModeToDefault} className="page-enter inline-flex items-center" aria-label={tCommon('aria.homeLink')}>
             <Logo size="sm" />
           </Link>
           )
         ) : (
-          <Link to="/" className="mx-auto" aria-label={tCommon('aria.homeLink')}>
+          <Link to="/" onClick={resetComposerToolModeToDefault} className="mx-auto" aria-label={tCommon('aria.homeLink')}>
             <LogoMark size={22} />
           </Link>
         )}

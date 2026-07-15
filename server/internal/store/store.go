@@ -119,6 +119,9 @@ func Migrate(db *sql.DB) error {
 	addInlineQuote := `ALTER TABLE conversations ADD COLUMN inline_quote TEXT NOT NULL DEFAULT ''`
 	// Model tags (§ model tags) — JSON id array on models.
 	addModelTags := `ALTER TABLE models ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'`
+	// Admin-only per-model request defaults. This must remain a JSON object so
+	// providers can deep-merge it beneath user-visible param controls.
+	addModelExtraParams := `ALTER TABLE models ADD COLUMN extra_params TEXT NOT NULL DEFAULT '{}'`
 	// Per-group resource caps (§ user groups) — max projects / KBs a member may
 	// create. 0 = unlimited.
 	addGroupMaxProjects := `ALTER TABLE user_groups ADD COLUMN max_projects INTEGER NOT NULL DEFAULT 0`
@@ -205,6 +208,7 @@ func Migrate(db *sql.DB) error {
 		addInlineParent = `ALTER TABLE conversations ADD COLUMN IF NOT EXISTS inline_parent_id TEXT NOT NULL DEFAULT ''`
 		addInlineQuote = `ALTER TABLE conversations ADD COLUMN IF NOT EXISTS inline_quote TEXT NOT NULL DEFAULT ''`
 		addModelTags = `ALTER TABLE models ADD COLUMN IF NOT EXISTS tags TEXT NOT NULL DEFAULT '[]'`
+		addModelExtraParams = `ALTER TABLE models ADD COLUMN IF NOT EXISTS extra_params TEXT NOT NULL DEFAULT '{}'`
 		addGroupMaxProjects = `ALTER TABLE user_groups ADD COLUMN IF NOT EXISTS max_projects INTEGER NOT NULL DEFAULT 0`
 		addGroupMaxKBs = `ALTER TABLE user_groups ADD COLUMN IF NOT EXISTS max_kbs INTEGER NOT NULL DEFAULT 0`
 		addGroupCreditAllowance = `ALTER TABLE user_groups ADD COLUMN IF NOT EXISTS credit_allowance REAL NOT NULL DEFAULT 0`
@@ -261,7 +265,7 @@ func Migrate(db *sql.DB) error {
 		addResearchEnabled,
 		addGroupExpires, addPrevGroup, addPasswordSet, addPasswordChangedAt, addLastSeen,
 		addInlineSource, addInlineParent, addInlineQuote,
-		addModelTags,
+		addModelTags, addModelExtraParams,
 		addGroupMaxProjects, addGroupMaxKBs,
 		addGroupCreditAllowance, addGroupCreditPeriod,
 		addUserPermCredits, addUserSortOrder, addUsageCredits, addMsgCredits,
@@ -324,7 +328,7 @@ func Migrate(db *sql.DB) error {
 		"users":           {"group_id", "totp_secret", "totp_enabled", "group_expires_at", "previous_group_id", "password_set", "password_changed_at", "last_seen_at", "credits_permanent", "sort_order"},
 		"usage_logs":      {"credits", "workspace_id", "channel_id", "fallback", "status", "error", "request_method", "request_url", "request_headers", "request_body"},
 		"user_groups":     {"max_projects", "max_kbs", "credit_allowance", "credit_period_seconds", "max_workspaces", "is_public", "max_storage_mb"},
-		"models":          {"official_tools", "moderation_enabled", "moderation_mode", "tags", "image_timeout_sec", "research_enabled", "fallback_channel_id", "fast"},
+		"models":          {"official_tools", "moderation_enabled", "moderation_mode", "tags", "extra_params", "image_timeout_sec", "research_enabled", "fallback_channel_id", "fast"},
 		"refresh_tokens":  {"user_agent", "ip", "location", "last_seen"},
 		"conversations":   {"inline_source_conv", "inline_parent_id", "inline_quote", "workspace_id", "fast"},
 		"projects":        {"workspace_id"},

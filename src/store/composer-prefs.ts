@@ -1,23 +1,24 @@
 import { create } from 'zustand'
+import { isToolMode, type ToolMode } from '@/lib/tool-mode'
 
 export type ComposerMode = 'default' | 'deep-research' | 'canvas'
 
 type ParamValue = string | number | boolean | null
 export type ComposerParamValues = Record<string, ParamValue>
 
-interface PersistedComposerPrefs {
+export interface PersistedComposerPrefs {
   mode: ComposerMode
   verify: boolean
-  // §4.13-B: run this turn with NO tool calling. Mutually exclusive with the
-  // 'deep-research' mode (research needs tools) — the setters enforce it.
-  noTools: boolean
-  // Forced non-tool web search — only meaningful while noTools is on; cleared
-  // automatically when noTools turns off.
+  // Per-turn tool policy. Deep Research requires tools, so selecting it forces
+  // this to enabled; the setters keep that invariant in persisted state.
+  toolMode: ToolMode
+  // Forced non-tool web search is only meaningful in disabled mode; switching
+  // to auto/enabled clears it automatically.
   forceWebSearch: boolean
-  // §personalization: when true, new conversations start with tools disabled.
-  // Mirrors the server-side `disable_tools_default` preference; seeds `noTools`
-  // at login and re-arms it on each new chat. A per-turn override still wins.
-  defaultNoTools: boolean
+  // Account-level default mirrored from `tool_mode_default`. New conversations
+  // reset the live toolMode to this complete value (including auto/enabled), so
+  // a prior conversation's override cannot leak into the next one.
+  defaultToolMode: ToolMode
   paramValuesByModel: Record<string, ComposerParamValues>
   draftsByScope: Record<string, string>
 }
@@ -25,9 +26,9 @@ interface PersistedComposerPrefs {
 interface ComposerPrefsStore extends PersistedComposerPrefs {
   setMode: (mode: ComposerMode) => void
   setVerify: (verify: boolean) => void
-  setNoTools: (noTools: boolean) => void
-  // Update the mirror of the server-side default-disable-tools preference.
-  setDefaultNoTools: (on: boolean) => void
+  setToolMode: (toolMode: ToolMode) => void
+  // Update the mirror of the server-side default tool policy.
+  setDefaultToolMode: (toolMode: ToolMode) => void
   setForceWebSearch: (on: boolean) => void
   setParamValues: (modelId: string, values: Record<string, unknown>) => void
   setDraft: (scope: string, value: string) => void
@@ -40,9 +41,9 @@ const MAX_DRAFT_LEN = 12_000
 const DEFAULT_PREFS: PersistedComposerPrefs = {
   mode: 'default',
   verify: false,
-  noTools: false,
+  toolMode: 'auto',
   forceWebSearch: false,
-  defaultNoTools: false,
+  defaultToolMode: 'auto',
   paramValuesByModel: {},
   draftsByScope: {},
 }
@@ -92,24 +93,33 @@ function sanitizeDraftsByScope(raw: unknown): Record<string, string> {
   return out
 }
 
+/** Sanitizes the localStorage payload and migrates the retired boolean policy. */
+export function parsePersistedComposerPrefs(parsed: unknown): PersistedComposerPrefs {
+  if (!isRecord(parsed)) return DEFAULT_PREFS
+  // Do not translate the old local `noTools` booleans here. Older clients
+  // armed that value for every account whose server setting was absent, so it
+  // cannot distinguish an explicit user choice from the retired implicit
+  // default. Auth hydration resolves explicit legacy account settings; a
+  // missing new local value intentionally starts at the new default, auto.
+  const toolMode = isToolMode(parsed.toolMode) ? parsed.toolMode : DEFAULT_PREFS.toolMode
+  return {
+    mode: isMode(parsed.mode) ? parsed.mode : DEFAULT_PREFS.mode,
+    verify: parsed.verify === true,
+    toolMode,
+    // forced search only exists inside an explicitly disabled-tools turn
+    forceWebSearch: toolMode === 'disabled' && parsed.forceWebSearch === true,
+    defaultToolMode: isToolMode(parsed.defaultToolMode) ? parsed.defaultToolMode : DEFAULT_PREFS.defaultToolMode,
+    paramValuesByModel: sanitizeParamValuesByModel(parsed.paramValuesByModel),
+    draftsByScope: sanitizeDraftsByScope(parsed.draftsByScope),
+  }
+}
+
 function loadPrefs(): PersistedComposerPrefs {
   if (typeof window === 'undefined') return DEFAULT_PREFS
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return DEFAULT_PREFS
-    const parsed = JSON.parse(raw) as unknown
-    if (!isRecord(parsed)) return DEFAULT_PREFS
-    const noTools = parsed.noTools === true
-    return {
-      mode: isMode(parsed.mode) ? parsed.mode : DEFAULT_PREFS.mode,
-      verify: parsed.verify === true,
-      noTools,
-      // web search can only be on inside a no-tools turn
-      forceWebSearch: noTools && parsed.forceWebSearch === true,
-      defaultNoTools: parsed.defaultNoTools === true,
-      paramValuesByModel: sanitizeParamValuesByModel(parsed.paramValuesByModel),
-      draftsByScope: sanitizeDraftsByScope(parsed.draftsByScope),
-    }
+    return parsePersistedComposerPrefs(JSON.parse(raw) as unknown)
   } catch {
     return DEFAULT_PREFS
   }
@@ -122,9 +132,9 @@ function persistedFrom(state: PersistedComposerPrefs, patch: Partial<PersistedCo
   return {
     mode: state.mode,
     verify: state.verify,
-    noTools: state.noTools,
+    toolMode: state.toolMode,
     forceWebSearch: state.forceWebSearch,
-    defaultNoTools: state.defaultNoTools,
+    defaultToolMode: state.defaultToolMode,
     paramValuesByModel: state.paramValuesByModel,
     draftsByScope: state.draftsByScope,
     ...patch,
@@ -152,29 +162,29 @@ export const useComposerPrefs = create<ComposerPrefsStore>((set) => {
   return {
     ...initial,
     setMode(mode) {
-      // deep-research needs tools → it clears the no-tools feature.
-      if (mode === 'deep-research') commit({ mode, noTools: false, forceWebSearch: false })
+      // Deep Research always uses tools and bypasses automatic classification.
+      if (mode === 'deep-research') commit({ mode, toolMode: 'enabled', forceWebSearch: false })
       else commit({ mode })
     },
     setVerify(verify) {
       commit({ verify })
     },
-    setNoTools(noTools) {
-      // no-tools ↔ deep-research are mutually exclusive; web search only lives
-      // inside a no-tools turn, so turning it off clears the web-search flag.
-      if (noTools) commit({ noTools: true, mode: 'default', forceWebSearch: false })
-      else commit({ noTools: false, forceWebSearch: false })
+    setToolMode(toolMode) {
+      // Auto/disabled cannot coexist with Deep Research, whose pipeline always
+      // requires tools. Only disabled mode may retain forced non-tool search.
+      if (toolMode === 'enabled') commit({ toolMode, forceWebSearch: false })
+      else if (toolMode === 'disabled') commit({ toolMode, mode: 'default', forceWebSearch: false })
+      else commit({ toolMode, mode: 'default', forceWebSearch: false })
     },
-    setDefaultNoTools(on) {
-      // Mirror-only: reflects the server-side preference. Arming of the live
-      // `noTools` toggle is done by the caller (settings toggle, login seed,
-      // new-chat re-arm) via setNoTools so the mutual-exclusion rules run.
-      commit({ defaultNoTools: on })
+    setDefaultToolMode(toolMode) {
+      // Mirror-only: callers apply the live mode through setToolMode so the
+      // Deep Research / forced-search invariants run in one place.
+      commit({ defaultToolMode: toolMode })
     },
     setForceWebSearch(on) {
-      // Only togglable while no-tools is on (the UI gates it too).
+      // Only togglable while tools are explicitly disabled (the UI gates it too).
       set((state) => {
-        if (!state.noTools) return {}
+        if (state.toolMode !== 'disabled') return {}
         const patch = { forceWebSearch: on }
         persistPrefs(persistedFrom(state, patch))
         return patch
@@ -222,3 +232,9 @@ export const useComposerPrefs = create<ComposerPrefsStore>((set) => {
     },
   }
 })
+
+/** Reset the live per-turn policy when the user explicitly starts a new chat. */
+export function resetComposerToolModeToDefault(): void {
+  const prefs = useComposerPrefs.getState()
+  prefs.setToolMode(prefs.defaultToolMode)
+}

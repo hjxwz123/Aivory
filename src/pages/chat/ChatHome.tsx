@@ -24,6 +24,7 @@ import {
 } from '@/lib/pending-conversation'
 import type { Attachment } from '@/types/chat'
 import type { ApiConversation } from '@/api/types'
+import type { ToolMode } from '@/lib/tool-mode'
 
 gsap.registerPlugin(useGSAP)
 
@@ -275,10 +276,10 @@ export default function ChatHome() {
       params?: Record<string, unknown>
       imageStyleId?: string
       verify?: boolean
-      noTools?: boolean
+      toolMode: ToolMode
       webSearch?: boolean
       fast?: boolean
-    } = {},
+    },
   ) {
     if (startedRef.current) return
     startedRef.current = true
@@ -314,7 +315,7 @@ export default function ChatHome() {
         params: opts.params,
         imageStyleId: opts.imageStyleId,
         verify: opts.verify,
-        noTools: opts.noTools,
+        toolMode: opts.toolMode,
         webSearch: opts.webSearch,
         fast: opts.fast,
       })
@@ -339,7 +340,7 @@ export default function ChatHome() {
       params: opts.params,
       imageStyleId: opts.imageStyleId,
       verify: opts.verify,
-      noTools: opts.noTools,
+      toolMode: opts.toolMode,
       webSearch: opts.webSearch,
       fast: opts.fast,
       // Swap temp→real id in the URL only if the user is STILL on the optimistic

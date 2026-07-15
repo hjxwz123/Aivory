@@ -18,6 +18,7 @@ import { useWorkspaces } from '@/store/workspaces'
 import { useLanguage, detectBrowserLanguage, toSupportedLanguage } from '@/store/language'
 import { useTheme } from '@/store/theme'
 import { persistUserSettings } from '@/lib/user-settings'
+import { resolveDefaultToolMode } from '@/lib/tool-mode'
 import { ACCENT_PRESETS, type AccentPref, type ThemePref } from '@/types/settings'
 
 const PUBLIC_PATHS = ['/welcome', '/login', '/register', '/forgot-password', '/share', '/setup', '/privacy', '/terms']
@@ -65,13 +66,10 @@ export function AuthGate({ children }: { children: ReactNode }) {
     if (typeof accent === 'string' && (ACCENT_PRESETS as readonly string[]).includes(accent)) {
       useAccent.getState().applyAccent(accent as AccentPref)
     }
-    // §personalization: mirror the "disable tools by default" preference so the
-    // composer + new-chat re-arm can read it synchronously. Mirror-only here (runs
-    // on every settings change) — the live noTools seed is done once per login below.
-    // Opt-out semantics: absent counts as ON (new accounts and everyone who never
-    // touched the toggle default to tools-disabled); only an explicit `false`
-    // — the user flipping it off in Settings — keeps tools armed by default.
-    useComposerPrefs.getState().setDefaultNoTools(user.settings.disable_tools_default !== false)
+    // Keep the account default available synchronously to the composer and the
+    // new-chat action. The resolver also preserves explicit choices from the
+    // legacy disable_tools_default boolean; an entirely absent value is auto.
+    useComposerPrefs.getState().setDefaultToolMode(resolveDefaultToolMode(user.settings))
   }, [status, user?.settings, syncUserSettings])
 
   // Once authenticated, hydrate the per-user data caches. This is keyed by user
@@ -85,15 +83,12 @@ export function AuthGate({ children }: { children: ReactNode }) {
     }
     if (hydratedDataForUser.current === userId) return
     hydratedDataForUser.current = userId
-    // §personalization: seed the composer's no-tools toggle from the user's
-    // "disable tools by default" preference, once per login. Read imperatively
-    // (this effect is keyed by user id, not settings) so a later settings change
-    // can't re-arm mid-session. Only arms (never un-arms), so it can't clobber a
-    // session where the user kept tools on; new-chat re-arms it (sidebar).
-    // Opt-out semantics (same as the mirror above): absent counts as ON.
-    if (useAuth.getState().user?.settings?.disable_tools_default !== false) {
-      useComposerPrefs.getState().setNoTools(true)
-    }
+    // Apply the account default exactly once per login. All three values matter:
+    // unlike the former boolean, auto/enabled must also be able to replace a
+    // persisted disabled mode left by another account or an earlier session.
+    const defaultToolMode = resolveDefaultToolMode(useAuth.getState().user?.settings)
+    useComposerPrefs.getState().setDefaultToolMode(defaultToolMode)
+    useComposerPrefs.getState().setToolMode(defaultToolMode)
     void useWorkspaces
       .getState()
       .load()
