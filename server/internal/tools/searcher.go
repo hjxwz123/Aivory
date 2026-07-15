@@ -79,7 +79,8 @@ func (s *serperSearcher) Search(ctx context.Context, query string, topK int) (st
 		rm, _ := r.(map[string]any)
 		title, _ := rm["title"].(string)
 		link, _ := rm["link"].(string)
-		snippet, _ := rm["snippet"].(string)
+		snippetRaw, _ := rm["snippet"].(string)
+		snippet := cleanSnippet(snippetRaw)
 		date, _ := rm["date"].(string)
 		citations = append(citations, llm.Citation{
 			ID: fmt.Sprintf("w_%d", i+1), Index: i + 1, Title: title, URL: link, Snippet: snippet, Source: "web",
@@ -126,11 +127,12 @@ func (b *braveSearcher) Search(ctx context.Context, query string, topK int) (str
 	citations := []llm.Citation{}
 	out := strings.Builder{}
 	for i, r := range parsed.Web.Results {
+		snippet := cleanSnippet(r.Description)
 		citations = append(citations, llm.Citation{
 			ID: fmt.Sprintf("w_%d", i+1), Index: i + 1,
-			Title: r.Title, URL: r.URL, Snippet: r.Description, Source: "web",
+			Title: r.Title, URL: r.URL, Snippet: snippet, Source: "web",
 		})
-		fmt.Fprintf(&out, "[%d] %s\n%s\n%s\n", i+1, r.Title, r.URL, r.Description)
+		fmt.Fprintf(&out, "[%d] %s\n%s\n%s\n", i+1, r.Title, r.URL, snippet)
 		if r.PageAge != "" {
 			fmt.Fprintf(&out, "(date: %s)\n", r.PageAge)
 		}
@@ -222,17 +224,32 @@ func (s *searxngSearcher) Search(ctx context.Context, query string, topK int) (s
 	citations := []llm.Citation{}
 	out := strings.Builder{}
 	for i, r := range parsed.Results {
+		snippet := cleanSnippet(r.Content)
 		citations = append(citations, llm.Citation{
 			ID: fmt.Sprintf("w_%d", i+1), Index: i + 1,
-			Title: r.Title, URL: r.URL, Snippet: r.Content, Source: "web",
+			Title: r.Title, URL: r.URL, Snippet: snippet, Source: "web",
 		})
-		fmt.Fprintf(&out, "[%d] %s\n%s\n%s\n", i+1, r.Title, r.URL, r.Content)
+		fmt.Fprintf(&out, "[%d] %s\n%s\n%s\n", i+1, r.Title, r.URL, snippet)
 		if r.PublishedAt != "" {
 			fmt.Fprintf(&out, "(date: %s)\n", r.PublishedAt)
 		}
 		out.WriteString("\n")
 	}
 	return out.String(), citations, nil
+}
+
+// cleanSnippet normalises a search result's snippet: it collapses every run of
+// whitespace (incl. the newlines that turn a JS-heavy page's nav/boilerplate
+// into a wall of text) to single spaces and caps the length. Noisy multi-line
+// snippets are what make weaker models echo the raw result instead of
+// synthesising; a tight one-line snippet is easier to reason over and cheaper.
+func cleanSnippet(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	const maxRunes = 320
+	if r := []rune(s); len(r) > maxRunes {
+		s = strings.TrimSpace(string(r[:maxRunes])) + "…"
+	}
+	return s
 }
 
 // formatUnresponsiveEngines renders SearXNG's unresponsive_engines

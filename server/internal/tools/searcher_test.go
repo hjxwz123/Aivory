@@ -8,6 +8,27 @@ import (
 	"testing"
 )
 
+func TestCleanSnippet(t *testing.T) {
+	// A JS-heavy page's nav boilerplate arrives as a multi-line wall — collapse
+	// the whitespace and cap the length so the model gets a tight one-liner.
+	navDump := "News\nToday's news US Politics World\n\nWeather   Climate change\tScience"
+	got := cleanSnippet(navDump)
+	if strings.Contains(got, "\n") || strings.Contains(got, "  ") {
+		t.Fatalf("snippet not collapsed to single spaces: %q", got)
+	}
+	if got != "News Today's news US Politics World Weather Climate change Science" {
+		t.Fatalf("unexpected collapse: %q", got)
+	}
+	long := strings.Repeat("字", 500)
+	capped := cleanSnippet(long)
+	if r := []rune(capped); len(r) > 321 { // 320 + the ellipsis
+		t.Fatalf("snippet not capped: %d runes", len(r))
+	}
+	if !strings.HasSuffix(capped, "…") {
+		t.Fatalf("capped snippet should end with an ellipsis: %q", capped[len(capped)-6:])
+	}
+}
+
 func TestFormatUnresponsiveEngines(t *testing.T) {
 	got := formatUnresponsiveEngines([][]any{{"google", "timeout"}, {"bing", "CAPTCHA", false}, {"lonely"}})
 	if want := "google (timeout), bing (CAPTCHA), lonely"; got != want {
