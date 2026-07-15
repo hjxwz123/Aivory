@@ -90,7 +90,11 @@ services:
     environment:
       # Shared internal default — must match the api's SANDBOX_API_KEY above.
       SANDBOX_API_KEY: ${SANDBOX_API_KEY:-aivory-bundled-sandbox}
-      # Per-session runtime image, pulled from ghcr on boot so the first call works.
+      # Per-session runtime image the sidecar `docker run`s. SANDBOX_PULL_ON_START
+      # pulls it at boot so the first call works — but that is BEST-EFFORT: a slow/
+      # flaky registry (e.g. a mirror) can leave it un-cached, and then the first
+      # session-create blocks on a cold ~600MB pull and 500s ("docker run … timed
+      # out"). Pre-pull it deterministically BEFORE `up` — see deploy/README.
       SANDBOX_IMAGE: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-hjxwz123}/aivory-sandbox:${IMAGE_TAG:-latest}
       SANDBOX_PULL_ON_START: "1"
       SANDBOX_NETWORK: ${SANDBOX_NETWORK:-none}   # "bridge" only if sandboxed code needs internet

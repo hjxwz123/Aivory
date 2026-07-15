@@ -38,6 +38,14 @@ cp .env.example .env
 # 不需要设置 domain/CORS/port 环境变量。app 在同一 origin 上同时提供 SPA 和 /api，
 # 所以它被哪个 host 访问，哪个 host 就能工作，包括多个域名。
 docker compose -f docker-compose.prod.yml pull
+# 还要预拉「沙箱运行时镜像」。sidecar 每次代码执行会话都会用 `docker run` 起一个
+# 单独的 ~600MB 镜像（SANDBOX_IMAGE），它不是 compose service，所以上面的 `pull`
+# 不会拉它。本地没有缓存时，第一次 python_execute 就会卡在冷拉镜像上并超时（sidecar
+# 报 500：`docker run … timed out`）。SANDBOX_PULL_ON_START 会在 sidecar 启动时也拉
+# 一次，但那是 best-effort（镜像站慢/不稳时可能没拉下来）——这一步让它变确定性。
+# source .env 是为了带上你可能覆盖过的 IMAGE_* 变量。
+set -a && . ./.env 2>/dev/null; set +a
+docker pull "${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-hjxwz123}/aivory-sandbox:${IMAGE_TAG:-latest}"
 docker compose -f docker-compose.prod.yml up -d
 ```
 

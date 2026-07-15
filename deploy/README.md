@@ -47,6 +47,15 @@ cp .env.example .env
 # There is NO domain/CORS/port env to set — the app serves the SPA and /api on
 # one origin, so whatever host it's reached on works (multiple domains included).
 docker compose -f docker-compose.prod.yml pull
+# Also pre-pull the sandbox RUNTIME image. The sidecar `docker run`s a SEPARATE
+# ~600MB image (SANDBOX_IMAGE) once per code-execution session; it is NOT a
+# compose service, so the `pull` above skips it. Without a warm local cache the
+# first python_execute blocks on a cold pull and times out (sidecar 500:
+# "docker run … timed out"). SANDBOX_PULL_ON_START also pulls it at sidecar boot,
+# but that is best-effort (a slow/flaky registry mirror can leave it un-cached) —
+# this step makes it deterministic. Sourcing .env picks up any IMAGE_* overrides.
+set -a && . ./.env 2>/dev/null; set +a
+docker pull "${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-hjxwz123}/aivory-sandbox:${IMAGE_TAG:-latest}"
 docker compose -f docker-compose.prod.yml up -d
 ```
 
