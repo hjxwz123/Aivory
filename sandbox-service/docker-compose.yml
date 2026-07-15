@@ -117,5 +117,19 @@ services:
       # it OUT of any session container's reach — it holds cross-session tarballs.
       - sandbox-archives:/var/lib/aivory/sandbox-archives
 
+  # Pins the runtime image locally so `docker image prune -a` (or a cleanup cron)
+  # can't evict it between sessions — the per-session containers are ephemeral, so
+  # otherwise nothing references it and the next session-create cold-pulls ~600MB
+  # and times out (500). This idle container just sleeps at ~zero cost. It carries
+  # NO `aivory.sandbox=1` label and no `aivory-sbx-` name, so the sidecar's reaper
+  # / MAX_SESSIONS counter ignore it.
+  sandbox-image-keepalive:
+    image: ghcr.io/${OWNER:-hjxwz123}/aivory-sandbox:latest
+    command: ["sleep", "infinity"]
+    restart: unless-stopped
+    network_mode: none
+    mem_limit: 64m
+    pids_limit: 16
+
 volumes:
   sandbox-archives:

@@ -91,10 +91,10 @@ services:
       # Shared internal default — must match the api's SANDBOX_API_KEY above.
       SANDBOX_API_KEY: ${SANDBOX_API_KEY:-aivory-bundled-sandbox}
       # Per-session runtime image the sidecar `docker run`s. SANDBOX_PULL_ON_START
-      # pulls it at boot so the first call works — but that is BEST-EFFORT: a slow/
-      # flaky registry (e.g. a mirror) can leave it un-cached, and then the first
-      # session-create blocks on a cold ~600MB pull and 500s ("docker run … timed
-      # out"). Pre-pull it deterministically BEFORE `up` — see deploy/README.
+      # pulls it at boot too, but that is BEST-EFFORT (a slow/flaky registry mirror
+      # can leave it un-cached). The `sandbox-image-keepalive` service below is what
+      # reliably PINS it locally — so `compose pull` fetches it and a host
+      # prune/cron can't evict it (no cold-pull 500s).
       SANDBOX_IMAGE: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-hjxwz123}/aivory-sandbox:${IMAGE_TAG:-latest}
       SANDBOX_PULL_ON_START: "1"
       SANDBOX_NETWORK: ${SANDBOX_NETWORK:-none}   # "bridge" only if sandboxed code needs internet
@@ -138,6 +138,24 @@ services:
       # §4.5 durable local archive store (SANDBOX_LOCAL_STORAGE_DIR above).
       - sandbox-archives:/var/lib/aivory/sandbox-archives
     networks: [internal]
+
+  # Pins the sandbox RUNTIME image locally so a host cleanup (`docker image prune
+  # -a` / `docker system prune -a`, or a cron) can't evict it. The per-session
+  # sandbox containers are ephemeral (the sidecar spawns them per code run and
+  # reaps them after idle), so between sessions NOTHING else references the runtime
+  # image → prune treats it as unused and deletes it → the next python_execute
+  # cold-pulls ~600MB and the sidecar 500s ("docker run … timed out"). This idle
+  # container just sleeps, keeping one live reference at ~zero cost. It carries NO
+  # `aivory.sandbox=1` label and no `aivory-sbx-` name, so the sidecar's reaper /
+  # MAX_SESSIONS counter ignore it. Bonus: as a service, the runtime image now
+  # rides `docker compose pull` — no separate pre-pull step needed.
+  sandbox-image-keepalive:
+    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-hjxwz123}/aivory-sandbox:${IMAGE_TAG:-latest}
+    command: ["sleep", "infinity"]
+    restart: unless-stopped
+    network_mode: none
+    mem_limit: 64m
+    pids_limit: 16
 
   # Single application container: the Go process serves BOTH the built SPA and
   # the /api backend from one origin (STATIC_DIR is baked into the image). No
