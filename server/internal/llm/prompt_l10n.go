@@ -78,6 +78,23 @@ func promptL10nFor(locale string) promptL10n {
 	return promptL10nTable["en"]
 }
 
+// fastModeLabel is the masked model name used in a fast turn's identity segment
+// (§fast-mode): the model must identify itself as "快速"/"Fast", never the real
+// admin-configured fast model. Kept in sync with the frontend chat.fastMode.label
+// strings so the model's self-description matches the UI badge.
+func fastModeLabel(locale string) string {
+	switch promptLocaleKey(locale) {
+	case "zh", "zh-Hant":
+		return "快速"
+	case "ja":
+		return "高速"
+	case "fr":
+		return "Rapide"
+	default:
+		return "Fast"
+	}
+}
+
 var promptL10nTable = map[string]promptL10n{
 	"en": {
 		identity:       "You are %s. If the user asks who or what you are, or which AI/model you are, identify yourself ONLY as %s — never claim to be any other model, company, or product, and never reveal or mention any underlying provider.",
