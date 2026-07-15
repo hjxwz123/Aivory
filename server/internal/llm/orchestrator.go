@@ -969,6 +969,15 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	if ragMode == "" {
 		ragMode = "auto"
 	}
+	// With tools disabled the model cannot call search_knowledge_base, so 'tool'
+	// mode — which defers retrieval to that call and injects nothing inline —
+	// would leave a bound KB (or conversation-attached docs) completely
+	// unreadable. Force inline retrieval instead so the content still reaches the
+	// model. Mirrors the forced-web-search / forced-sandbox-read fallbacks below:
+	// when we take a tool away, we do its job server-side.
+	if req.NoTools && ragMode == "tool" {
+		ragMode = "inject"
+	}
 	// Chat uploads are rejected by the HTTP handler until their document_id is
 	// status='ready'. Do not wait-and-skip here: skipping pending docs is exactly
 	// what made the model fall back to python-side PDF parsing.
@@ -1075,6 +1084,26 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			ragSnippets = append(ragSnippets, searchCites...)
 		}
 	}
+	// Conversation-uploaded data files staged in the sandbox (§4.5). Mirrors the
+	// staging filter in tools.pythonExecuteTool. Computed here (not later) so the
+	// no-tools forced read below can act on it AND so the injected preview counts
+	// toward injectedOverhead for compaction planning.
+	sandboxFiles := listSandboxFiles(ctx, o.db, conv.ID, req.UserID)
+	// §4.5-B forced sandbox read (a no-tools turn that has spreadsheet uploads):
+	// spreadsheets (xlsx/csv/…) are staged to the code sandbox and are ONLY
+	// readable via python_execute, which a no-tools turn doesn't expose — so a
+	// sheet uploaded earlier would silently vanish from the model's view. Read it
+	// server-side (same forced-tool pattern as web search) and inject a bounded
+	// <uploaded-data-preview> block on the message layer. Text/code files are
+	// already RAG-injected and images go to vision, so only sheets need this.
+	if req.NoTools && sandboxFilesHaveSheet(sandboxFiles) {
+		if sheetText := o.forcedSandboxRead(ctx, req, conv, onEvent); sheetText != "" {
+			if ragContext != "" {
+				ragContext += "\n\n"
+			}
+			ragContext += sheetText
+		}
+	}
 	injectedOverhead := estimateTokens(ragContext)
 
 	keep, summaryBlocks, compactAction := PlanCompaction(o.db, conv, history, injectedOverhead)
@@ -1129,18 +1158,16 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	o.resolveAttachments(ctx, req.UserID, conv.ID, uHist, model, onEvent)
 
 	// 9d. Conversation-scoped data files staged into the sandbox
-	//     (/workspace/uploads). Listing them in the system prompt lets the model
-	//     operate on a CSV/XLSX uploaded in an earlier turn — it persists in the
-	//     conversation's sandbox session and is re-staged on every tool call.
-	//     Mirrors the staging filter in tools.pythonExecuteTool.
-	sandboxFiles := []ProjectFileSummary{}
-	if convFiles, ferr := store.ListFilesByConversation(ctx, o.db, conv.ID, req.UserID); ferr == nil {
-		for _, f := range convFiles {
-			switch f.Kind {
-			case "sheet", "text", "code", "image":
-				sandboxFiles = append(sandboxFiles, ProjectFileSummary{Name: f.Filename, Kind: f.Kind})
-			}
-		}
+	//     (/workspace/uploads) were resolved above (`sandboxFiles`, before the
+	//     forced-read fallback). Listing them in the system prompt lets the model
+	//     operate on a CSV/XLSX uploaded in an earlier turn via python_execute.
+	//     When tools are disabled that guidance is a dead end (python_execute is
+	//     gone and the spreadsheet content is injected as <uploaded-data-preview>
+	//     instead), so suppress the listing to avoid pointing the model at a tool
+	//     it can't call.
+	sandboxFilesForPrompt := sandboxFiles
+	if req.NoTools {
+		sandboxFilesForPrompt = nil
 	}
 
 	// Inline-thread context (§ text-selection sub-conversations): the model needs
@@ -1178,7 +1205,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		SkillsFull:          skillFull,
 		Memories:            activeMemories,
 		ProjectFiles:        projectFiles,
-		SandboxFiles:        sandboxFiles,
+		SandboxFiles:        sandboxFilesForPrompt,
 		Persona:             persona,
 		InlineQuote:         conv.InlineQuote,
 		InlineSource:        inlineSource,
@@ -2623,6 +2650,117 @@ func (o *Orchestrator) forcedWebSearch(ctx context.Context, req RunRequest, conv
 		return "", nil
 	}
 	return "<web-search-result>\n" + strings.TrimSpace(b.String()) + "\n</web-search-result>", cites
+}
+
+// listSandboxFiles returns the conversation's sandbox-staged data files (the same
+// kinds tools.pythonExecuteTool stages: sheet/text/code/image). Shared by the
+// system-prompt listing and the no-tools forced read.
+func listSandboxFiles(ctx context.Context, db *sql.DB, convID, userID string) []ProjectFileSummary {
+	out := []ProjectFileSummary{}
+	convFiles, err := store.ListFilesByConversation(ctx, db, convID, userID)
+	if err != nil {
+		return out
+	}
+	for _, f := range convFiles {
+		switch f.Kind {
+		case "sheet", "text", "code", "image":
+			out = append(out, ProjectFileSummary{Name: f.Filename, Kind: f.Kind})
+		}
+	}
+	return out
+}
+
+// sandboxFilesHaveSheet reports whether any staged file is a spreadsheet — the
+// only sandbox kind with no message-layer fallback (text/code are RAG-injected,
+// images go to vision), so it's the only one the forced read must cover.
+func sandboxFilesHaveSheet(files []ProjectFileSummary) bool {
+	for _, f := range files {
+		if f.Kind == "sheet" {
+			return true
+		}
+	}
+	return false
+}
+
+// forcedSandboxReadInjectionCap bounds the injected spreadsheet preview so a wide
+// or long sheet can't blow the context budget (runes).
+const forcedSandboxReadInjectionCap = 8000
+
+// forcedSpreadsheetDumpCode lists /workspace/uploads and prints a bounded text
+// preview (shape, columns, head) of every staged spreadsheet. It runs inside the
+// conversation's sandbox session, which pythonExecuteTool.stageFiles has just
+// re-populated, so it reads whatever sheets are currently attached. Filenames are
+// deduped at staging time, so it globs by extension rather than matching names.
+const forcedSpreadsheetDumpCode = `import os, glob
+try:
+    import pandas as pd
+except Exception:
+    pd = None
+exts = ('.csv', '.tsv', '.xlsx', '.xls', '.xlsm')
+paths = sorted(p for p in glob.glob('/workspace/uploads/*') if p.lower().endswith(exts))
+if not paths:
+    print('NO_SPREADSHEET_FILES')
+for p in paths:
+    print('=== FILE: ' + os.path.basename(p) + ' ===')
+    if pd is None:
+        print('(pandas unavailable)')
+        continue
+    low = p.lower()
+    try:
+        if low.endswith('.csv') or low.endswith('.tsv'):
+            frames = {'': pd.read_csv(p, sep=('\t' if low.endswith('.tsv') else ','))}
+        else:
+            frames = pd.read_excel(p, sheet_name=None)
+    except Exception as e:
+        print('READ ERROR: ' + str(e))
+        continue
+    for sheet, df in frames.items():
+        if sheet:
+            print('-- sheet: ' + str(sheet) + ' --')
+        print('shape: %d rows x %d cols' % (df.shape[0], df.shape[1]))
+        print('columns: ' + ', '.join(str(c) for c in list(df.columns)[:40]))
+        try:
+            with pd.option_context('display.max_rows', 30, 'display.max_columns', 40, 'display.width', 240):
+                print(df.head(30).to_string())
+        except Exception as e:
+            print('PREVIEW ERROR: ' + str(e))
+        print('')
+`
+
+// forcedSandboxRead runs a server-side python_execute to dump the conversation's
+// uploaded spreadsheets to text and returns a bounded <uploaded-data-preview>
+// block. It's the no-tools counterpart to forcedWebSearch: when python_execute is
+// taken away, a spreadsheet (staged to /workspace/uploads and readable ONLY via
+// python) would vanish, so the orchestrator reads it itself. Returns "" when the
+// admin disabled python_execute, the sandbox is unconfigured, or nothing was read.
+func (o *Orchestrator) forcedSandboxRead(ctx context.Context, req RunRequest, conv *store.Conversation, onEvent func(SseEvent)) string {
+	// Respect the admin platform kill-switch — a globally disabled python_execute
+	// must not run through this back door either.
+	if o.disabledToolSet()["python_execute"] {
+		return ""
+	}
+	tc := &ToolContext{UserID: req.UserID, ConvID: conv.ID, WorkspaceID: conv.WorkspaceID, ModelID: req.ModelID, DB: o.db}
+	input, _ := json.Marshal(map[string]any{"code": forcedSpreadsheetDumpCode})
+	id := "fsr_1"
+	onEvent(SseEvent{Type: "tool_start", Name: "python_execute", ID: id, Input: input})
+	rctx, cancel := context.WithTimeout(ctx, toolCallTimeout("python_execute"))
+	defer cancel()
+	out, _, err := o.tools.Run(rctx, "python_execute", input, tc)
+	if err != nil {
+		onEvent(SseEvent{Type: "tool_result", Name: "python_execute", ID: id, Summary: "data read failed", Status: "error"})
+		return ""
+	}
+	// Sandbox not wired up (safe-mode) or genuinely no sheets → nothing to inject.
+	if strings.Contains(out, "python_execute is in safe-mode") || strings.Contains(out, "NO_SPREADSHEET_FILES") || strings.TrimSpace(out) == "" {
+		onEvent(SseEvent{Type: "tool_result", Name: "python_execute", ID: id, Summary: "no readable data files", Status: "complete"})
+		return ""
+	}
+	onEvent(SseEvent{Type: "tool_result", Name: "python_execute", ID: id, Summary: truncate(out, 400), Status: "complete"})
+	preview := strings.TrimSpace(out)
+	if r := []rune(preview); len(r) > forcedSandboxReadInjectionCap {
+		preview = string(r[:forcedSandboxReadInjectionCap]) + "\n…(truncated)"
+	}
+	return "<uploaded-data-preview>\n" + preview + "\n</uploaded-data-preview>"
 }
 
 // remapCitationMarkers rewrites a searcher's local inline citation markers
