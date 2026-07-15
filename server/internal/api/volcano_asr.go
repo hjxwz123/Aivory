@@ -33,6 +33,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -182,6 +183,7 @@ type volcResponse struct {
 	IsLastPackage bool   // server signalled the final packet
 	Text          string // cumulative transcript for result_type=full
 	ErrMessage    string // decoded error text, when Code != 0
+	Raw           string // decoded JSON payload, kept for AIVORY_ASR_DEBUG logging
 }
 
 // parseVolcResponse decodes one server frame. It is defensive about truncated
@@ -254,16 +256,33 @@ func parseVolcResponse(msg []byte) (*volcResponse, error) {
 		payload = dec
 	}
 
+	res.Raw = string(payload)
+
 	if serialization == volcSerializationJSON {
 		var body struct {
 			Result struct {
-				Text string `json:"text"`
+				Text       string `json:"text"`
+				Utterances []struct {
+					Text string `json:"text"`
+				} `json:"utterances"`
 			} `json:"result"`
 			Error   string `json:"error"`
 			Message string `json:"message"`
 		}
 		if err := json.Unmarshal(payload, &body); err == nil {
 			res.Text = body.Result.Text
+			// Live (mid-speech) frames on the bidirectional bigmodel endpoint can
+			// carry the running hypothesis only in utterances[] while result.text
+			// is still empty; concatenate them so partials surface in real time.
+			// The reference demo never hit this: it targets bigmodel_nostream,
+			// which emits a single final frame where result.text is already set.
+			if res.Text == "" && len(body.Result.Utterances) > 0 {
+				var b strings.Builder
+				for _, u := range body.Result.Utterances {
+					b.WriteString(u.Text)
+				}
+				res.Text = b.String()
+			}
 			if res.Code != 0 {
 				res.ErrMessage = firstNonEmpty(body.Message, body.Error, string(payload))
 			}

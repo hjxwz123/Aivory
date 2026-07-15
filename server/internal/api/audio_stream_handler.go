@@ -32,6 +32,11 @@ var (
 	// so 24 MB ≈ 12.5 min — a runaway-tab backstop, not a normal limit.
 	audioStreamMaxBytes = envcfg.Int64("AIVORY_API_AUDIO_STREAM_MAX_BYTES", 24*1024*1024)
 	audioStreamMaxDur   = envcfg.Dur("AIVORY_API_AUDIO_STREAM_MAX_SESSION", 15*time.Minute)
+
+	// Set AIVORY_ASR_DEBUG=1 to log every decoded Volcano frame (message code,
+	// last-package marker, transcript length, raw JSON). Off by default — the
+	// raw payloads contain the user's speech, so this is a deliberate opt-in.
+	asrDebug = envcfg.Bool("AIVORY_ASR_DEBUG", false)
 )
 
 var audioStreamUpgrader = websocket.Upgrader{
@@ -180,6 +185,14 @@ func audioStreamHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		defer cancel() // finishing (final / error / timeout) ends the session
 		for {
 			resp, rerr := vsess.readResponse()
+			if asrDebug && d.Logger != nil && rerr == nil {
+				raw := resp.Raw
+				if len(raw) > 400 {
+					raw = raw[:400]
+				}
+				d.Logger.Printf("volcano frame: code=%d last=%v textlen=%d raw=%s",
+					resp.Code, resp.IsLastPackage, len(resp.Text), raw)
+			}
 			if rerr != nil {
 				// Clean close after a final packet looks like an error here; only
 				// surface it if the context is still live (unexpected drop).
