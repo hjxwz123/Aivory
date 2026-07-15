@@ -350,6 +350,42 @@ ORDER BY f.id, d.created_at ASC`, args...)
 	return out, rows.Err()
 }
 
+// ConversationFileKinds returns the SERVER-side kind (image | sheet | pdf | doc |
+// code | text | other) for each given file id in a conversation. The send
+// preflight uses it to decide whether a file is expected to have a RAG document
+// at all: the client's attachment.kind is untrusted and can drift from the
+// server's classification (e.g. an .xlsx whose OOXML MIME "officedocument"
+// substring makes a browser-side heuristic call it 'doc' while the backend files
+// it as 'sheet' with no document row). Gating on the server kind prevents that
+// drift from 409-ing an otherwise valid turn.
+func ConversationFileKinds(ctx context.Context, db *sql.DB, convID string, fileIDs []string) (map[string]string, error) {
+	fileIDs = cleanIDs(fileIDs)
+	out := make(map[string]string, len(fileIDs))
+	if convID == "" || len(fileIDs) == 0 {
+		return out, nil
+	}
+	args := make([]any, 0, len(fileIDs)+1)
+	args = append(args, convID)
+	for _, id := range fileIDs {
+		args = append(args, id)
+	}
+	rows, err := db.QueryContext(ctx,
+		`SELECT id, kind FROM files WHERE conversation_id=? AND id IN (`+idPlaceholders(len(fileIDs))+`)`,
+		args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, kind string
+		if err := rows.Scan(&id, &kind); err != nil {
+			return nil, err
+		}
+		out[id] = kind
+	}
+	return out, rows.Err()
+}
+
 // ListIncompleteDocuments returns documents stuck in a non-terminal state —
 // used at boot to requeue ingest jobs lost to a restart (the queue is in-memory).
 func ListIncompleteDocuments(ctx context.Context, db *sql.DB) ([]Document, error) {

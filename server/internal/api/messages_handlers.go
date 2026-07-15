@@ -275,10 +275,31 @@ func ensureAttachedDocumentsReady(ctx context.Context, db *sql.DB, convID string
 		if err != nil {
 			return err
 		}
+		// The client's attachment.kind is untrusted and can drift from the server's
+		// classification — most notably an .xlsx, whose OOXML MIME carries an
+		// "officedocument" substring that trips browser-side /doc/ heuristics into
+		// labelling it 'doc', while the backend files it as 'sheet' (sandbox data,
+		// no RAG document row). Resolve the SERVER kind so "no document" is only an
+		// error for files that were actually supposed to be ingested; spreadsheets
+		// and images legitimately have none and must not block the send (the old
+		// behaviour 409'd every xlsx upload with "attached document not found").
+		serverKinds, err := store.ConversationFileKinds(ctx, db, convID, fileIDs)
+		if err != nil {
+			return err
+		}
 		for _, id := range fileIDs {
 			fileStatuses := statuses[id]
 			if len(fileStatuses) == 0 {
-				return errors.New("attached document not found")
+				// A file that genuinely doesn't exist (unknown id) or that IS a
+				// document-kind but has no ingested document is a real problem —
+				// keep rejecting it. A file the server filed as a non-document kind
+				// (sheet → sandbox, image → vision) legitimately has no document and
+				// must pass regardless of what the client called it.
+				kind, known := serverKinds[id]
+				if !known || isDocKind(kind) {
+					return errors.New("attached document not found")
+				}
+				continue
 			}
 			for _, status := range fileStatuses {
 				if status != "ready" {

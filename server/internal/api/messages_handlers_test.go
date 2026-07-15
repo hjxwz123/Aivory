@@ -59,6 +59,27 @@ func TestEnsureAttachedDocumentsReadyFallsBackToFileID(t *testing.T) {
 	}
 }
 
+// A spreadsheet (kind='sheet') is staged to the code sandbox and never creates a
+// RAG document row. When a browser mislabels its OOXML MIME as 'doc' (the
+// "officedocument" substring), the send must still go through — the preflight
+// must trust the SERVER's file kind, not the client's, or every xlsx upload 409s
+// with "attached document not found".
+func TestEnsureAttachedDocumentsReadyAllowsSandboxSheet(t *testing.T) {
+	ctx := context.Background()
+	db := openMigrated(t, filepath.Join(t.TempDir(), "attached-sheet.db"))
+	defer db.Close()
+
+	mustExec(t, db, `INSERT INTO users(id,email,password_hash,role) VALUES('u1','a@b.c','h','user')`)
+	mustExec(t, db, `INSERT INTO conversations(id,user_id,title) VALUES('c1','u1','T')`)
+	mustExec(t, db, `INSERT INTO files(id,user_id,conversation_id,filename,mime_type,size_bytes,kind,storage_path) VALUES('f_sheet','u1','c1','data.xlsx','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',10,'sheet','/tmp/data.xlsx')`)
+
+	// Client mislabels the sheet as 'doc'; the server filed it as 'sheet' with no
+	// document — the send must NOT be rejected.
+	if err := ensureAttachedDocumentsReady(ctx, db, "c1", []llm.Attachment{{ID: "f_sheet", Kind: "doc"}}); err != nil {
+		t.Fatalf("sandbox spreadsheet rejected: %v", err)
+	}
+}
+
 func TestEnsureAttachedDocumentsReadyRejectsOmittedServerDraft(t *testing.T) {
 	ctx := context.Background()
 	db := openMigrated(t, filepath.Join(t.TempDir(), "draft-preflight.db"))

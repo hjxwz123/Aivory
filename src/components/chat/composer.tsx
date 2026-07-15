@@ -197,6 +197,29 @@ function restoredAttachmentKind(kind: string): Attachment['kind'] {
   }
 }
 
+// classifyAttachmentKind mirrors the backend's kindOf (files_handlers.go) by
+// leading with the file EXTENSION, then falling back to MIME. Extension-first is
+// not cosmetic: an .xlsx's MIME is
+// `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`, whose
+// "officedocument" substring trips a naive /doc/ MIME test and mislabels the
+// spreadsheet as a 'doc'. The backend files .xlsx/.csv as 'sheet' — sandbox data
+// with NO RAG document row — so a stale 'doc' claim makes the send preflight
+// demand a document that was never created and rejects the turn with 409
+// "attached document not found". Keeping client + server in agreement on kind is
+// what prevents that.
+function classifyAttachmentKind(name: string, type: string): Attachment['kind'] {
+  const ext = name.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] ?? ''
+  if (type.startsWith('image/') || ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'heic'].includes(ext))
+    return 'image'
+  if (type === 'application/pdf' || ext === 'pdf') return 'pdf'
+  // Spreadsheets BEFORE documents — the OOXML MIME matches both.
+  if (['csv', 'tsv', 'xlsx', 'xls', 'xlsm', 'ods'].includes(ext) || /spreadsheet|ms-excel|csv/i.test(type))
+    return 'sheet'
+  if (['doc', 'docx', 'ppt', 'pptx', 'odt', 'odp', 'rtf'].includes(ext) || /word|wordprocessing|presentation/i.test(type))
+    return 'doc'
+  return 'other'
+}
+
 function restoredIngestStatus(status?: ApiDocument['status']): PendingAttachment['ingest'] {
   switch (status) {
     case 'ready':
@@ -867,15 +890,7 @@ export function Composer({
       id: uid('att'),
       name: f.name,
       size: f.size,
-      kind: f.type.startsWith('image/')
-        ? 'image'
-        : /pdf/i.test(f.type)
-          ? 'pdf'
-          : /word|doc/i.test(f.type)
-            ? 'doc'
-            : /sheet|csv|xls/i.test(f.type)
-              ? 'sheet'
-              : 'other',
+      kind: classifyAttachmentKind(f.name, f.type),
       // Local thumbnail so images preview instantly; revoked on remove/submit.
       previewUrl: f.type.startsWith('image/') ? URL.createObjectURL(f) : undefined,
       uploading: true,
