@@ -1033,10 +1033,40 @@ func validateConfigArchiveLockedEmbeddingModelRow(zr *zip.Reader, d Deps) error 
 		} else if err != nil {
 			return err
 		}
+		if err := validateConfigArchiveModelExtraParams(row); err != nil {
+			return err
+		}
 		if err := ensureLockedEmbeddingModelArchiveRowCanChange(d, row); err != nil {
 			return err
 		}
 	}
+}
+
+// validateConfigArchiveModelExtraParams keeps the config-import path aligned
+// with the model admin API: extra_params is a JSON object and is only active
+// for chat models. Exported database TEXT values arrive as JSON strings here.
+func validateConfigArchiveModelExtraParams(row map[string]json.RawMessage) error {
+	raw, present, err := backupStringField(row, "extra_params")
+	if err != nil {
+		return fmt.Errorf("invalid models.extra_params: %w", err)
+	}
+	if !present {
+		return nil
+	}
+	normalized, err := store.NormalizeModelExtraParams(json.RawMessage(raw))
+	if err != nil {
+		return err
+	}
+	kind := "chat"
+	if value, present, err := backupStringField(row, "kind"); err != nil {
+		return fmt.Errorf("invalid models.kind: %w", err)
+	} else if present && value != "" {
+		kind = value
+	}
+	if kind != "chat" && string(normalized) != "{}" {
+		return errModelExtraParamsChatOnly
+	}
+	return nil
 }
 
 func readBackupManifest(zr *zip.Reader) (backupManifest, error) {

@@ -132,7 +132,7 @@ curl -s -XPOST "$SANDBOX_URL/exec" \
 | `SANDBOX_PIDS_LIMIT` | `256` | 防 fork bomb |
 | `SANDBOX_API_KEY` | _空_ | **必填。** 客户端必须发送的 Bearer key。为空时 sidecar 会拒绝启动（它暴露 Docker 控制能力，即 RCE）。使用常量时间比较。 |
 | `SANDBOX_ALLOW_NO_AUTH` | `0` | 逃生开关：设为 `1` 表示无鉴权启动，仅限可信本机开发环境。 |
-| `SANDBOX_MAX_BODY_BYTES` | `29360128` | 在读取 body 前拒绝超过该 `Content-Length` 的请求（HTTP 413），约 28 MiB。 |
+| `SANDBOX_MAX_BODY_BYTES` | `58720256` | 在读取 body 前拒绝超过该 `Content-Length` 的请求（HTTP 413）。默认 56 MiB，可容纳 40 MiB 文件的 base64 与 JSON 开销。 |
 | `SANDBOX_MAX_CODE_BYTES` | `1048576` | `/exec` 的 `code` 字段最大字节数，超过返回 HTTP 413/422。1 MiB。 |
 | `SANDBOX_EXEC_TIMEOUT_CAP_MS` | `120000` | 单次执行硬上限（§4.5） |
 | `SANDBOX_IDLE_TTL_SECONDS` | `1800` | 空闲 session 默认 30 分钟后回收（Go 未按会话下发 `idle_ttl_sec` 时的兜底值） |
@@ -141,7 +141,7 @@ curl -s -XPOST "$SANDBOX_URL/exec" \
 | `SANDBOX_MAX_CONCURRENT_EXECS` | `4` | 所有 session 合计最大并发 `/exec` 数 |
 | `SANDBOX_MAX_CONCURRENT_CREATES` | `2` | 最大并发 Docker 容器创建数 |
 | `SANDBOX_QUEUE_TIMEOUT_SECONDS` | `150` | 请求等待内部执行槽位的最长时间 |
-| `SANDBOX_MAX_UPLOAD_BYTES` | `20971520` | 单个 `/files` 上传解码后的最大大小 |
+| `SANDBOX_MAX_UPLOAD_BYTES` | `41943040` | 单个 `/files` 上传解码后的最大大小（40 MiB） |
 | `SANDBOX_MAX_FILES_PER_EXEC` | `20` | 单次 `/exec` 返回的最大产物数量 |
 | `SANDBOX_MAX_TOTAL_ARTIFACT_BYTES` | `52428800` | 单次 `/exec` 返回产物总大小上限 |
 | `SANDBOX_READ_ONLY_ROOTFS` | `1` | **默认开启**（F6 磁盘填满防护）：session rootfs 只读，只有 `/tmp`、`$HOME`、`/workspace` 是有大小限制的可写 tmpfs。设为 `0` 可关闭。 |

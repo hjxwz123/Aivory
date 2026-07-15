@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -343,11 +344,13 @@ type RunRequest struct {
 	// answer finalizes, a secondary auditor model fact-checks it. Honoured only
 	// when an admin has configured `verify_model_id`; otherwise a no-op.
 	Verify bool
-	// NoTools forces this turn to run with NO tool calling (tool_mode=none for
-	// this turn only): the provider request carries no `tools` field and the
-	// system prompt drops the tool-guidance segment (§4.13-B). Mutually
-	// exclusive with Mode=="deep-research" (research needs tools) — the handler
-	// clears one when both are set.
+	// ToolMode is the per-turn tool policy: auto | disabled | enabled. Empty keeps
+	// backwards compatibility with callers that only set NoTools (true maps to
+	// disabled; false maps to enabled). Fast and Deep Research force enabled.
+	ToolMode string
+	// NoTools is the legacy boolean input and the resolved effective state used by
+	// the existing no-tool fallbacks later in Run. ToolMode takes precedence when
+	// it is non-empty.
 	NoTools bool
 	// ForceWebSearch runs a NON-tool web search before generation: a task model
 	// derives search queries from the conversation, the searcher runs them, and
@@ -372,9 +375,63 @@ type RunRequest struct {
 	Fast bool
 }
 
-// ModeDeepResearch is the RunRequest.Mode value that triggers the Deep Research
-// engine (plan → multi-round web search + source reading → verify → cited report).
-const ModeDeepResearch = "deep-research"
+const (
+	// ModeDeepResearch is the RunRequest.Mode value that triggers the Deep
+	// Research engine (plan → multi-round web search + source reading → verify).
+	ModeDeepResearch = "deep-research"
+	// ToolModeAuto asks the configured task model whether this turn needs tools.
+	ToolModeAuto = "auto"
+	// ToolModeDisabled exposes no tools and activates the server-side fallbacks.
+	ToolModeDisabled = "disabled"
+	// ToolModeEnabled preserves the resolved model's configured tool support.
+	ToolModeEnabled = "enabled"
+)
+
+// ErrInvalidMessageParent means a caller supplied a message parent that no
+// longer exists in this conversation (or belongs to another conversation). It
+// is deliberately a domain error: stale optimistic ids must never escape as a
+// database foreign-key failure from CreateMessage.
+var ErrInvalidMessageParent = errors.New("message parent is no longer available in this conversation")
+
+func invalidMessageParentError(parentID string) error {
+	if parentID == "" {
+		return ErrInvalidMessageParent
+	}
+	return fmt.Errorf("%w: %q", ErrInvalidMessageParent, parentID)
+}
+
+func isForeignKeyConstraintError(err error) bool {
+	if err == nil {
+		return false
+	}
+	low := strings.ToLower(err.Error())
+	return strings.Contains(low, "foreign key constraint") || strings.Contains(low, "23503")
+}
+
+func normalizeMessageCreateError(operation, parentID string, err error) error {
+	if err == nil {
+		return nil
+	}
+	if parentID != "" && isForeignKeyConstraintError(err) {
+		return invalidMessageParentError(parentID)
+	}
+	return fmt.Errorf("%s: %w", operation, err)
+}
+
+func resolveRunToolMode(req RunRequest) (string, error) {
+	if req.ToolMode == "" {
+		if req.NoTools {
+			return ToolModeDisabled, nil
+		}
+		return ToolModeEnabled, nil
+	}
+	switch req.ToolMode {
+	case ToolModeAuto, ToolModeDisabled, ToolModeEnabled:
+		return req.ToolMode, nil
+	default:
+		return "", fmt.Errorf("invalid tool mode %q", req.ToolMode)
+	}
+}
 
 // RunResult is what Run returns to the SSE handler after the stream finishes.
 type RunResult struct {
@@ -477,6 +534,10 @@ func (o *Orchestrator) buildFallbackRequest(ctx context.Context, base UnifiedCha
 	}
 	req.Stream = m.Stream
 	req.ParamControls = m.ParamControls
+	req.ExtraParams = nil
+	if m.Kind == "chat" {
+		req.ExtraParams = m.ExtraParams
+	}
 	req.OfficialTools = nil // hosted-tools config is model-specific; fallback uses self-built tools
 	req.ToolModePrompt = m.ToolMode == "prompt"
 	// §4.6-C fallback re-gate: the images in `base.History` were inlined against the
@@ -816,8 +877,6 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// python_execute — enforced where tools + budgets are assembled below.
 	if fastMode {
 		req.Verify = false
-		req.NoTools = false
-		req.ForceWebSearch = false
 		// `modelId` remains on the user's last advanced choice while the UI is in
 		// fast mode. Never let its cached controls (for example `thinking`) leak
 		// into the hidden fast model, including from non-browser callers.
@@ -833,6 +892,23 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	if req.Mode == ModeDeepResearch && !model.ResearchEnabled {
 		req.Mode = ""
 	}
+	turnToolMode, err := resolveRunToolMode(req)
+	if err != nil {
+		return nil, err
+	}
+	// These pipelines have fixed tool semantics and never pay for an automatic
+	// routing call. req.Fast is included even when no fast model is currently
+	// configured, matching the API's defense-in-depth normalization.
+	if req.Fast || req.Mode == ModeDeepResearch {
+		turnToolMode = ToolModeEnabled
+	}
+	req.ToolMode = turnToolMode
+	req.NoTools = turnToolMode == ToolModeDisabled
+	if !req.NoTools {
+		// Forced web search is the explicit-disabled fallback, not an additional
+		// behavior for enabled or automatically routed turns.
+		req.ForceWebSearch = false
+	}
 	channel, err := store.GetChannel(ctx, o.db, model.ChannelID)
 	if err != nil {
 		return nil, err
@@ -843,11 +919,46 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	}
 
 	parentID := req.ParentID
+	if parentID != "" {
+		parent, parentErr := store.GetMessage(ctx, o.db, parentID)
+		valid := parentErr == nil && parent.ConversationID == conv.ID
+		if valid && req.ReuseExistingUserMessage && parent.Role != "user" {
+			valid = false
+		}
+		if parentErr != nil && !errors.Is(parentErr, store.ErrNotFound) {
+			return nil, fmt.Errorf("validate message parent: %w", parentErr)
+		}
+		if !valid {
+			// A branch edit names the exact historical node it must fork from. Falling
+			// back here would silently graft the edit onto a different branch. A normal
+			// append, however, can safely recover to the conversation's committed leaf.
+			if req.Branch || req.ReuseExistingUserMessage {
+				return nil, invalidMessageParentError(parentID)
+			}
+			resolvedParent, _, resolveErr := store.ResolveConversationAppendParent(ctx, o.db, conv.ID, conv.ActiveLeafID)
+			if resolveErr != nil {
+				return nil, fmt.Errorf("resolve append parent: %w", resolveErr)
+			}
+			if o.logger != nil {
+				o.logger.Printf("orchestrator: recovered invalid explicit append parent (conv=%s requested_parent=%q active_leaf=%q append_parent=%q)",
+					conv.ID, parentID, conv.ActiveLeafID, resolvedParent)
+			}
+			parentID = resolvedParent
+		}
+	}
 	// Only a normal append falls back to the active leaf. A branch edit with an
 	// empty parent (editing the root question) must stay a root sibling (§4.15)
 	// rather than being grafted onto the conversation tail.
 	if parentID == "" && !req.Branch {
-		parentID = conv.ActiveLeafID
+		resolvedParent, repaired, rerr := store.ResolveConversationAppendParent(ctx, o.db, conv.ID, conv.ActiveLeafID)
+		if rerr != nil {
+			return nil, fmt.Errorf("resolve append parent: %w", rerr)
+		}
+		parentID = resolvedParent
+		if repaired && o.logger != nil {
+			o.logger.Printf("orchestrator: recovered invalid active leaf (conv=%s active_leaf=%q append_parent=%q)",
+				conv.ID, conv.ActiveLeafID, parentID)
+		}
 	}
 
 	// 2. Persist user message + assistant placeholder.
@@ -884,7 +995,10 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			AuthorID: req.UserID, // §workspaces: shared conversations attribute each question
 		})
 		if err != nil {
-			return nil, fmt.Errorf("save user message: %w", err)
+			// The parent can be deleted after the validation above but before this
+			// transaction wins the race. Preserve the domain contract even in that
+			// narrow window; never leak a PostgreSQL/SQLite FK diagnostic to callers.
+			return nil, normalizeMessageCreateError("save user message", parentID, err)
 		}
 		userMsg = created
 		assistantParent = created.ID
@@ -897,7 +1011,10 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		Blocks: []byte("[]"), Status: "streaming",
 	})
 	if err != nil {
-		return nil, err
+		// A concurrent round/conversation deletion can remove assistantParent after
+		// the user row was validated or inserted. Apply the same domain mapping as
+		// the user insert so this second FK window cannot leak database diagnostics.
+		return nil, normalizeMessageCreateError("save assistant placeholder", assistantParent, err)
 	}
 	msgcache.Bump(o.cache, conv.ID)
 	onEvent(SseEvent{Type: "message_start", MessageID: assistantMsg.ID})
@@ -1018,6 +1135,24 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	if err != nil {
 		return nil, err
 	}
+	// Resolve staged files before automatic tool routing. A spreadsheet anywhere
+	// in the conversation's persistent sandbox requires real file/data handling,
+	// so auto enables tools directly instead of spending a task-model call merely
+	// to rediscover that requirement.
+	sandboxFiles := listSandboxFiles(ctx, o.db, conv.ID, req.UserID)
+	// Load bound skill metadata before automatic routing. A request such as "use
+	// the release-notes skill" cannot be classified from the generic use_skill
+	// tool description alone; the router needs the actual enabled skill names and
+	// descriptions. Full instructions remain private to the main prompt.
+	availableSkillIdx := []SkillIndex{}
+	availableSkillFull := []SkillFull{}
+	skillIDs, _ := store.SkillsForModel(ctx, o.db, model.ID)
+	for _, sid := range skillIDs {
+		if sk, skillErr := store.GetSkill(ctx, o.db, sid); skillErr == nil && sk.Enabled {
+			availableSkillIdx = append(availableSkillIdx, SkillIndex{Name: sk.Name, When: sk.Description})
+			availableSkillFull = append(availableSkillFull, SkillFull{Name: sk.Name, Instructions: sk.Instructions})
+		}
+	}
 
 	// 5. Resolve tools for this model BEFORE composing the system prompt so the
 	//    tool-guidance segment (and the §4.13 prompt preamble) match the real,
@@ -1029,6 +1164,13 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	var officialTools []string
 	if channel.Type == "openai" && channel.APIFormat == "responses" && len(model.OfficialTools) > 0 {
 		_ = json.Unmarshal(model.OfficialTools, &officialTools)
+		kept := officialTools[:0]
+		for _, name := range officialTools {
+			if officialToolSpec(name) != nil {
+				kept = append(kept, name)
+			}
+		}
+		officialTools = kept
 	}
 	useOfficial := len(officialTools) > 0
 
@@ -1036,16 +1178,6 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	toolMode := model.ToolMode
 	if toolMode == "" {
 		toolMode = "native"
-	}
-	// §4.13-B per-turn "disable tools": the user chose to run WITHOUT any tool
-	// calling this turn. Force tool_mode=none for this run only — the provider
-	// request then carries no `tools` field, official/hosted tools are dropped,
-	// and composeSystemPrompt skips the whole tool-guidance segment (it gates on
-	// ToolMode != "none"). Deep-research is already excluded by the handler.
-	if req.NoTools {
-		toolMode = "none"
-		useOfficial = false
-		officialTools = nil
 	}
 	if toolMode != "none" && !useOfficial {
 		toolDefs = o.filterDisabledTools(o.tools.List(model.ID))
@@ -1062,12 +1194,39 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			toolDefs = kept
 		}
 	}
+	if req.ToolMode == ToolModeAuto {
+		if sandboxFilesHaveSheet(sandboxFiles) {
+			req.NoTools = false
+		} else {
+			candidates := toolRouteCandidates(toolDefs, officialTools)
+			for _, skill := range availableSkillIdx {
+				candidates = append(candidates, ToolDef{
+					Name:        "skill:" + skill.Name,
+					Description: skill.When,
+				})
+			}
+			req.NoTools = !o.autoTurnNeedsTools(ctx, req, history, candidates, sandboxFiles, conv.WorkspaceID, assistantMsg.ID)
+		}
+	}
+	// The explicit disabled policy and an auto=false verdict share exactly the
+	// same no-tools behavior: no provider/hosted declarations, no tool guidance,
+	// no skills, and server-side RAG/search/spreadsheet fallbacks below.
+	if req.NoTools {
+		toolMode = "none"
+		useOfficial = false
+		officialTools = nil
+		toolDefs = nil
+	}
 	toolNames := make([]string, 0, len(toolDefs))
 	skillToolAvailable := false
+	pythonExecuteAvailable := false
 	for _, t := range toolDefs {
 		toolNames = append(toolNames, t.Name)
 		if t.Name == "use_skill" {
 			skillToolAvailable = true
+		}
+		if t.Name == "python_execute" {
+			pythonExecuteAvailable = true
 		}
 	}
 
@@ -1159,13 +1318,8 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	skillIdx := []SkillIndex{}
 	skillFull := []SkillFull{}
 	if !req.NoTools {
-		skillIDs, _ := store.SkillsForModel(ctx, o.db, model.ID)
-		for _, sid := range skillIDs {
-			if sk, err := store.GetSkill(ctx, o.db, sid); err == nil && sk.Enabled {
-				skillIdx = append(skillIdx, SkillIndex{Name: sk.Name, When: sk.Description})
-				skillFull = append(skillFull, SkillFull{Name: sk.Name, Instructions: sk.Instructions})
-			}
-		}
+		skillIdx = availableSkillIdx
+		skillFull = availableSkillFull
 	}
 
 	// 9. Long-context compaction (§4.7) — never breaks the request path. The hot
@@ -1195,20 +1349,17 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			ragSnippets = append(ragSnippets, searchCites...)
 		}
 	}
-	// Conversation-uploaded data files staged in the sandbox (§4.5). Mirrors the
-	// staging filter in tools.pythonExecuteTool. Computed here (not later) so the
-	// no-tools forced read below can act on it AND so the injected preview counts
-	// toward injectedOverhead for compaction planning.
-	sandboxFiles := listSandboxFiles(ctx, o.db, conv.ID, req.UserID)
-	// §4.5-B no-tools spreadsheet injection. Spreadsheets (xlsx/csv/…) are staged
-	// to the code sandbox and are normally read via python_execute — which a
-	// no-tools turn doesn't expose, so a sheet uploaded earlier would silently
-	// vanish from the model's view. "Disable tools" must mean NO tool/sandbox
-	// runs at all, so we parse the sheet IN-PROCESS (stdlib, rag.SpreadsheetPreview)
+	// Conversation-uploaded data files staged in the sandbox (§4.5) were resolved
+	// before automatic tool routing. The no-Python forced read below uses that same
+	// authoritative list, and its injected preview counts toward compaction.
+	// §4.5-B spreadsheet injection without Python. Spreadsheets (xlsx/csv/…) are
+	// normally read through python_execute, but fast mode deliberately withholds
+	// that tool and a no-tools/model-disabled turn may not expose it either. In all
+	// of those cases parse the sheet IN-PROCESS (stdlib, rag.SpreadsheetPreview)
 	// and inject a bounded <uploaded-data-preview> block on the message layer.
 	// Text/code files are already RAG-injected and images go to vision, so only
 	// spreadsheets need this fallback.
-	if req.NoTools && sandboxFilesHaveSheet(sandboxFiles) {
+	if shouldInjectSpreadsheetPreview(sandboxFiles, pythonExecuteAvailable) {
 		if sheetText := o.previewSpreadsheetFiles(ctx, req.UserID, conv.ID); sheetText != "" {
 			if ragContext != "" {
 				ragContext += "\n\n"
@@ -1273,12 +1424,11 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	//     (/workspace/uploads) were resolved above (`sandboxFiles`, before the
 	//     forced-read fallback). Listing them in the system prompt lets the model
 	//     operate on a CSV/XLSX uploaded in an earlier turn via python_execute.
-	//     When tools are disabled that guidance is a dead end (python_execute is
-	//     gone and the spreadsheet content is injected as <uploaded-data-preview>
-	//     instead), so suppress the listing to avoid pointing the model at a tool
-	//     it can't call.
+	//     When python_execute is unavailable that guidance is a dead end and sheet
+	//     content is injected as <uploaded-data-preview> instead, so suppress the
+	//     listing to avoid pointing the model at a tool it can't call.
 	sandboxFilesForPrompt := sandboxFiles
-	if req.NoTools {
+	if !pythonExecuteAvailable {
 		sandboxFilesForPrompt = nil
 	}
 
@@ -1349,6 +1499,10 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		fallbackFlag = new(atomic.Bool)
 	}
 
+	extraParams := json.RawMessage(nil)
+	if model.Kind == "chat" {
+		extraParams = model.ExtraParams
+	}
 	provReq := UnifiedChatRequest{
 		UserID:         req.UserID,
 		ConversationID: conv.ID,
@@ -1373,6 +1527,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		RAGSnippets:    ragSnippets,
 		ParamOverrides: req.ParamOverrides,
 		ParamControls:  model.ParamControls,
+		ExtraParams:    extraParams,
 		Stream:         model.Stream,
 		FallbackUsed:   fallbackFlag,
 	}
@@ -2661,6 +2816,151 @@ func injectSummaryIntoHistory(msgs []UnifiedMessage, text string) []UnifiedMessa
 	return msgs
 }
 
+const (
+	toolRouteHistoryTurns    = 6
+	toolRouteHistoryTextCap  = 600
+	toolRouteDescriptionCap  = 800
+	toolRouteFileCountCap    = 20
+	toolRouteFileNameCap     = 200
+	toolRouteMaxOutputTokens = 32
+	toolRouteTimeout         = 12 * time.Second
+)
+
+type toolRouteTurn struct {
+	Role string `json:"role"`
+	Text string `json:"text"`
+}
+
+type toolRouteTool struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+type toolRouteFile struct {
+	Name string `json:"name"`
+	Kind string `json:"kind"`
+}
+
+type toolRoutePrompt struct {
+	Conversation []toolRouteTurn `json:"conversation"`
+	Available    []toolRouteTool `json:"available_tools"`
+	StagedFiles  []toolRouteFile `json:"staged_files,omitempty"`
+}
+
+// toolRouteCandidates converts either self-built definitions or the selected
+// OpenAI hosted-tool names into the same classifier input. The orchestrator only
+// calls this after model/global/fast filtering, so the task model never routes
+// based on a tool the main request cannot actually expose.
+func toolRouteCandidates(defs []ToolDef, official []string) []ToolDef {
+	if len(official) == 0 {
+		return append([]ToolDef(nil), defs...)
+	}
+	descriptions := map[string]string{
+		"web_search":       "Search the public web for current external information.",
+		"code_interpreter": "Run code for calculations, data analysis, and file processing.",
+		"image_generation": "Generate or edit images.",
+	}
+	out := make([]ToolDef, 0, len(official))
+	for _, name := range official {
+		if description, ok := descriptions[name]; ok {
+			out = append(out, ToolDef{Name: name, Description: description})
+		}
+	}
+	return out
+}
+
+// autoTurnNeedsTools asks the configured task model for one boolean decision.
+// Failures are fail-open: exposing tools is the least destructive fallback
+// because the main model can still choose not to call them, while fail-closed
+// can make current data, files, or user-requested actions impossible.
+func (o *Orchestrator) autoTurnNeedsTools(
+	ctx context.Context,
+	req RunRequest,
+	history []store.Message,
+	candidates []ToolDef,
+	files []ProjectFileSummary,
+	workspaceID, messageID string,
+) bool {
+	if o.task == nil {
+		if o.logger != nil {
+			o.logger.Printf("tool route: task model unavailable, enabling tools (conv=%s)", req.ConversationID)
+		}
+		return true
+	}
+
+	payload := toolRoutePrompt{
+		Conversation: make([]toolRouteTurn, 0, toolRouteHistoryTurns),
+		Available:    make([]toolRouteTool, 0, len(candidates)),
+		StagedFiles:  make([]toolRouteFile, 0, min(len(files), toolRouteFileCountCap)),
+	}
+	start := 0
+	if len(history) > toolRouteHistoryTurns {
+		start = len(history) - toolRouteHistoryTurns
+	}
+	for _, message := range history[start:] {
+		if message.Role != "user" && message.Role != "assistant" {
+			continue
+		}
+		var blocks []UnifiedBlock
+		_ = json.Unmarshal(message.Blocks, &blocks)
+		text := strings.TrimSpace(renderBlocksAsText(blocks))
+		if text != "" {
+			payload.Conversation = append(payload.Conversation, toolRouteTurn{
+				Role: message.Role,
+				Text: truncate(text, toolRouteHistoryTextCap),
+			})
+		}
+	}
+	for _, tool := range candidates {
+		if strings.TrimSpace(tool.Name) == "" {
+			continue
+		}
+		payload.Available = append(payload.Available, toolRouteTool{
+			Name:        tool.Name,
+			Description: truncate(strings.TrimSpace(tool.Description), toolRouteDescriptionCap),
+		})
+	}
+	for _, file := range files {
+		if len(payload.StagedFiles) >= toolRouteFileCountCap {
+			break
+		}
+		payload.StagedFiles = append(payload.StagedFiles, toolRouteFile{
+			Name: truncate(file.Name, toolRouteFileNameCap),
+			Kind: file.Kind,
+		})
+	}
+	prompt, err := json.Marshal(payload)
+	if err != nil {
+		if o.logger != nil {
+			o.logger.Printf("tool route: build request failed, enabling tools (conv=%s): %v", req.ConversationID, err)
+		}
+		return true
+	}
+
+	var decision struct {
+		UseTools *bool `json:"use_tools"`
+	}
+	routeCtx, cancel := context.WithTimeout(ctx, toolRouteTimeout)
+	defer cancel()
+	err = o.task.RunJSON(routeCtx, TaskToolRoute, string(prompt), &decision, RunOpts{
+		UserID:          req.UserID,
+		ConversationID:  req.ConversationID,
+		MessageID:       messageID,
+		WorkspaceID:     workspaceID,
+		MaxOutputTokens: toolRouteMaxOutputTokens,
+	})
+	if err != nil || decision.UseTools == nil {
+		if err == nil {
+			err = errors.New("task model omitted use_tools")
+		}
+		if o.logger != nil {
+			o.logger.Printf("tool route: decision failed, enabling tools (conv=%s): %v", req.ConversationID, err)
+		}
+		return true
+	}
+	return *decision.UseTools
+}
+
 // forcedSearchHistoryTurns caps how many recent messages feed the search-query
 // task model (keep the prompt small; the latest question dominates intent).
 const forcedSearchHistoryTurns = 6
@@ -2776,7 +3076,8 @@ func (o *Orchestrator) forcedWebSearch(ctx context.Context, req RunRequest, conv
 
 // listSandboxFiles returns the conversation's sandbox-staged data files (the same
 // kinds tools.pythonExecuteTool stages: sheet/text/code/image). Shared by the
-// system-prompt listing and the no-tools forced read.
+// system-prompt listing and the no-tools forced read. Filename detection keeps
+// older rows usable when their stored kind predates the sheet classifier.
 func listSandboxFiles(ctx context.Context, db *sql.DB, convID, userID string) []ProjectFileSummary {
 	out := []ProjectFileSummary{}
 	convFiles, err := store.ListFilesByConversation(ctx, db, convID, userID)
@@ -2784,6 +3085,10 @@ func listSandboxFiles(ctx context.Context, db *sql.DB, convID, userID string) []
 		return out
 	}
 	for _, f := range convFiles {
+		if isSandboxSpreadsheetFilename(f.Filename) {
+			out = append(out, ProjectFileSummary{Name: f.Filename, Kind: "sheet"})
+			continue
+		}
 		switch f.Kind {
 		case "sheet", "text", "code", "image":
 			out = append(out, ProjectFileSummary{Name: f.Filename, Kind: f.Kind})
@@ -2792,19 +3097,34 @@ func listSandboxFiles(ctx context.Context, db *sql.DB, convID, userID string) []
 	return out
 }
 
+func isSandboxSpreadsheetFilename(name string) bool {
+	switch strings.ToLower(filepath.Ext(strings.TrimSpace(name))) {
+	case ".csv", ".tsv", ".xlsx", ".xls", ".xlsm":
+		return true
+	}
+	return false
+}
+
 // sandboxFilesHaveSheet reports whether any staged file is a spreadsheet — the
 // only sandbox kind with no message-layer fallback (text/code are RAG-injected,
 // images go to vision), so it's the only one the forced read must cover.
 func sandboxFilesHaveSheet(files []ProjectFileSummary) bool {
 	for _, f := range files {
-		if f.Kind == "sheet" {
+		if f.Kind == "sheet" || isSandboxSpreadsheetFilename(f.Name) {
 			return true
 		}
 	}
 	return false
 }
 
-// spreadsheet preview bounds for the no-tools in-process read.
+// shouldInjectSpreadsheetPreview selects the server-side spreadsheet path when
+// the current turn cannot read staged uploads with python_execute. Fast mode and
+// explicit no-tools turns therefore share the same parsing/injection behavior.
+func shouldInjectSpreadsheetPreview(files []ProjectFileSummary, pythonExecuteAvailable bool) bool {
+	return !pythonExecuteAvailable && sandboxFilesHaveSheet(files)
+}
+
+// Spreadsheet preview bounds for the in-process read used without Python.
 const (
 	// spreadsheetPreviewInjectionCap bounds the injected preview so a wide or long
 	// sheet can't blow the context budget (runes).
@@ -2815,8 +3135,8 @@ const (
 
 // previewSpreadsheetFiles parses the conversation's uploaded spreadsheets
 // IN-PROCESS (stdlib rag.SpreadsheetPreview — no code sandbox, no python_execute)
-// and returns a bounded <uploaded-data-preview> block. It is the no-tools
-// replacement for the sandbox read: "disable tools" must invoke NO tool at all,
+// and returns a bounded <uploaded-data-preview> block. It replaces the sandbox
+// read whenever python_execute is unavailable, including fast and no-tools turns,
 // so xlsx/csv are parsed server-side and injected as prompt context. Returns ""
 // when there are no sheets or none could be parsed (each failure is logged and
 // skipped, so one bad file doesn't sink the rest).
@@ -2827,7 +3147,7 @@ func (o *Orchestrator) previewSpreadsheetFiles(ctx context.Context, userID, conv
 	}
 	var b strings.Builder
 	for _, f := range files {
-		if f.Kind != "sheet" {
+		if f.Kind != "sheet" && !isSandboxSpreadsheetFilename(f.Filename) {
 			continue
 		}
 		text, perr := rag.SpreadsheetPreview(f.StoragePath, f.Filename, spreadsheetPreviewRows, spreadsheetPreviewCols)
@@ -2922,12 +3242,12 @@ func tallyTurnSideCosts(ctx context.Context, db *sql.DB, convID, msgID string) f
 		return 0
 	}
 	var total sql.NullFloat64
-	// Include task.image_prompt: the §4.20 prompt-optimization spend is pinned to
-	// this assistant message and is part of the turn's full cost (§8). Include
-	// 'verify': the §verify auditor call is also part of this turn's full cost.
+	// Include task.image_prompt and task.tool_route: both synchronous helper calls
+	// are pinned to this assistant message and are part of the turn's full cost
+	// (§8). Include 'verify' for the same reason.
 	_ = db.QueryRowContext(ctx,
 		`SELECT COALESCE(SUM(cost),0) FROM usage_logs
-		 WHERE message_id=? AND purpose IN ('image','embedding','task.image_prompt','verify')`, msgID).Scan(&total)
+			 WHERE message_id=? AND purpose IN ('image','embedding','task.image_prompt','task.tool_route','verify')`, msgID).Scan(&total)
 	if total.Valid {
 		return total.Float64
 	}

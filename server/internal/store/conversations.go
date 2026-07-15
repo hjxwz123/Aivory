@@ -514,6 +514,30 @@ func DeleteConversationByID(ctx context.Context, db *sql.DB, id string) ([]strin
 	return children, nil
 }
 
+// ResolveConversationAppendParent validates the stored/preferred leaf used by
+// a normal append. If it no longer belongs to the conversation, recover to the
+// leaf reached from the newest surviving root by following newest children.
+// The repaired result is not persisted here: CreateMessage advances the active
+// leaf atomically when the append succeeds.
+func ResolveConversationAppendParent(ctx context.Context, db *sql.DB, convID, preferredLeaf string) (parentID string, repaired bool, err error) {
+	if preferredLeaf != "" {
+		var id string
+		err := db.QueryRowContext(ctx, `SELECT id FROM messages WHERE id=? AND conversation_id=?`, preferredLeaf, convID).Scan(&id)
+		if err == nil {
+			return preferredLeaf, false, nil
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return "", false, err
+		}
+	}
+
+	parentID, err = deepestLeafFrom(ctx, db, convID, "")
+	if err != nil {
+		return "", false, err
+	}
+	return parentID, parentID != preferredLeaf, nil
+}
+
 // ListMessages walks the active path (parent_id chain) from the active leaf
 // back to the root. If leafID is empty, the newest leaf is used. Returned in
 // chronological order (root → leaf).
@@ -1053,6 +1077,15 @@ func BatchSiblingsOf(ctx context.Context, db *sql.DB, msgs []Message) (map[strin
 // from msgID — used by "switch to this sibling" to advance the active_leaf to
 // the bottom of the chosen branch.
 func LatestAssistantInSubtree(ctx context.Context, db *sql.DB, convID, msgID string) (string, error) {
+	var start string
+	err := db.QueryRowContext(ctx, `SELECT id FROM messages WHERE id=? AND conversation_id=?`, msgID, convID).Scan(&start)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	if err != nil {
+		return "", err
+	}
+
 	current := msgID
 	for {
 		var child string
@@ -1342,14 +1375,22 @@ func messageExistsTx(ctx context.Context, tx *sql.Tx, convID, id string) bool {
 	return err == nil
 }
 
+type rowQueryer interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
 // deepestLeafFromTx walks from a node (or, when fromID is empty, the newest root)
 // down its newest-child chain to the leaf — the natural place to re-anchor the
 // active path after a deletion. Returns "" when the conversation is now empty.
 func deepestLeafFromTx(ctx context.Context, tx *sql.Tx, convID, fromID string) (string, error) {
+	return deepestLeafFrom(ctx, tx, convID, fromID)
+}
+
+func deepestLeafFrom(ctx context.Context, q rowQueryer, convID, fromID string) (string, error) {
 	current := fromID
 	if current == "" {
 		var root string
-		err := tx.QueryRowContext(ctx, `SELECT id FROM messages WHERE conversation_id=? AND parent_id IS NULL ORDER BY created_at DESC LIMIT 1`, convID).Scan(&root)
+		err := q.QueryRowContext(ctx, `SELECT id FROM messages WHERE conversation_id=? AND parent_id IS NULL ORDER BY created_at DESC LIMIT 1`, convID).Scan(&root)
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", nil
 		}
@@ -1360,7 +1401,7 @@ func deepestLeafFromTx(ctx context.Context, tx *sql.Tx, convID, fromID string) (
 	}
 	for {
 		var child string
-		err := tx.QueryRowContext(ctx, `SELECT id FROM messages WHERE conversation_id=? AND parent_id=? ORDER BY created_at DESC LIMIT 1`, convID, current).Scan(&child)
+		err := q.QueryRowContext(ctx, `SELECT id FROM messages WHERE conversation_id=? AND parent_id=? ORDER BY created_at DESC LIMIT 1`, convID, current).Scan(&child)
 		if errors.Is(err, sql.ErrNoRows) {
 			return current, nil
 		}

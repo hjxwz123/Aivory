@@ -145,7 +145,8 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest,
 		if req.ToolModePrompt {
 			body["stop"] = []string{PromptToolStopSequence()}
 		}
-		body = MergeParamControls(body, req.ParamControls, req.ParamOverrides)
+		body = MergeRequestParams(body, req.ExtraParams, req.ParamControls, req.ParamOverrides)
+		body = StripToolFields(body, len(req.Tools) > 0 && !req.ToolModePrompt)
 		raw, _ := json.Marshal(body)
 		resp, err := doProviderRequest(ctx, req.Model, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
 			hr, e := http.NewRequestWithContext(ctx, "POST", providerBaseURL(baseURL, "https://api.openai.com")+"/v1/chat/completions", bytes.NewReader(raw))
@@ -298,7 +299,8 @@ func (p *OpenAIProvider) promptRunOnce(req UnifiedChatRequest) PromptToolRunner 
 		if req.MaxOutputTokens > 0 {
 			body["max_tokens"] = req.MaxOutputTokens
 		}
-		body = MergeParamControls(body, req.ParamControls, req.ParamOverrides)
+		body = MergeRequestParams(body, req.ExtraParams, req.ParamControls, req.ParamOverrides)
+		body = StripToolFields(body, false)
 		raw, _ := json.Marshal(body)
 		resp, err := doProviderRequest(ctx, req.Model, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
 			hr, e := http.NewRequestWithContext(ctx, "POST", providerBaseURL(baseURL, "https://api.openai.com")+"/v1/chat/completions", bytes.NewReader(raw))
@@ -640,7 +642,8 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 		if len(respTools) > 0 {
 			body["tools"] = respTools
 		}
-		body = MergeParamControls(body, req.ParamControls, req.ParamOverrides)
+		body = MergeRequestParams(body, req.ExtraParams, req.ParamControls, req.ParamOverrides)
+		body = StripToolFields(body, len(respTools) > 0)
 		// Ask the API to return the sources the hosted web_search consulted, so
 		// we can surface them as citations. For stateless Responses tool loops
 		// (`store:false`), also carry encrypted reasoning items forward; otherwise

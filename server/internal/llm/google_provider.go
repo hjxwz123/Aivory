@@ -87,7 +87,9 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 		if toolsDecl != nil {
 			body["tools"] = toolsDecl
 		}
-		body = MergeParamControls(body, req.ParamControls, req.ParamOverrides)
+		body = MergeRequestParams(body, req.ExtraParams, req.ParamControls, req.ParamOverrides)
+		body = StripToolFields(body, toolsDecl != nil)
+		stripGoogleEndpointParams(body)
 		raw, _ := json.Marshal(body)
 		// §4.10-G stream: streamGenerateContent returns SSE-style JSON-array
 		// chunks; we use alt=sse to get one event per line.
@@ -192,6 +194,16 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 		StopReason: "max_iterations",
 		Usage:      totalUsage,
 	}, nil
+}
+
+// stripGoogleEndpointParams keeps endpoint-owned request identity and
+// authentication out of the JSON payload. Gemini takes model from the URL and
+// credentials from the x-goog-api-key header, so extra_params cannot override
+// either by adding body-level aliases.
+func stripGoogleEndpointParams(body map[string]any) {
+	for _, key := range []string{"model", "key", "api_key", "apiKey", "x-goog-api-key"} {
+		delete(body, key)
+	}
 }
 
 func historyToGemini(h []UnifiedMessage) []map[string]any {
@@ -484,7 +496,9 @@ func (p *GoogleProvider) promptRunOnce(req UnifiedChatRequest) PromptToolRunner 
 			"contents":          contents,
 			"generationConfig":  gc,
 		}
-		body = MergeParamControls(body, req.ParamControls, req.ParamOverrides)
+		body = MergeRequestParams(body, req.ExtraParams, req.ParamControls, req.ParamOverrides)
+		body = StripToolFields(body, false)
+		stripGoogleEndpointParams(body)
 		raw, _ := json.Marshal(body)
 		resp, err := doProviderRequest(ctx, req.Model, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
 			url := fmt.Sprintf("%s/v1beta/models/%s:generateContent", providerBaseURL(baseURL, "https://generativelanguage.googleapis.com"), req.Model.RequestID)

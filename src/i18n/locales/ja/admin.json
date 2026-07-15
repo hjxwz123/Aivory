@@ -95,6 +95,8 @@
       "researchEnabled": "ディープリサーチ",
       "systemPrompt": "システムプロンプト",
       "paramControls": "param_controls（JSON）",
+      "extraParams": "追加のアップストリームパラメータ（JSON）",
+      "extraParamsHint": "任意の JSON オブジェクトです。このモデルのアップストリームリクエストにマージされます。優先順位: 組み込みリクエストパラメータ、コントロールのマッピング、この値の順です。",
       "dim": "次元",
       "sortOrder": "表示順序",
       "sortOrderHint": "小さいほど上。",
@@ -123,7 +125,9 @@
     "moveDown": "下に移動",
     "errors": {
       "missingFields": "チャネル、ラベル、request_idは必須です",
-      "invalidJSON": "param_controlsが有効なJSONではありません"
+      "invalidJSON": "param_controlsが有効なJSONではありません",
+      "invalidExtraParamsJSON": "追加のアップストリームパラメータは有効な JSON である必要があります",
+      "extraParamsMustBeObject": "追加のアップストリームパラメータは JSON オブジェクトである必要があります"
     },
     "permissionsLead": "このモデルを使える群と周期ごとの上限。全オフ=全員に開放。",
     "tagsHint": "選択メニューの絞り込み用タグ。",
@@ -378,6 +382,7 @@
       "task_memory_adjudicate": "メモリー判定",
       "task_downgrade": "ベンダー間ダウングレード",
       "task_image_prompt": "画像プロンプト",
+      "task_tool_route": "ツール判定",
       "task_research_plan": "リサーチ計画",
       "task_research_verify": "リサーチ検証",
       "task_moderation": "モデレーション",

@@ -97,3 +97,52 @@ func TestGoogleProviderNoToolsOmitsToolsKey(t *testing.T) {
 		t.Fatalf("tool-less request must omit the tools key, got: %s", string(captured))
 	}
 }
+
+func TestGoogleProviderExtraParamsCannotOverrideEndpointFields(t *testing.T) {
+	var captured map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.URL.Path, "/models/gemini-native:streamGenerateContent") {
+			t.Fatalf("endpoint model was overridden: %s", r.URL.Path)
+		}
+		if got := r.Header.Get("x-goog-api-key"); got != "native-key" {
+			t.Fatalf("API key header = %q", got)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(`data: {"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}` + "\n\n"))
+	}))
+	defer srv.Close()
+
+	p := &GoogleProvider{}
+	_, err := p.Stream(context.Background(), UnifiedChatRequest{
+		Model: ModelInfo{RequestID: "gemini-native", BaseURL: srv.URL, APIKey: "native-key"},
+		History: []UnifiedMessage{{
+			Role: "user", Blocks: []UnifiedBlock{{Kind: "text", Text: "hi"}},
+		}},
+		ExtraParams: json.RawMessage(`{
+			"model":"extra-model",
+			"key":"extra-key",
+			"api_key":"extra-key",
+			"apiKey":"extra-key",
+			"x-goog-api-key":"extra-key",
+			"generationConfig":{"temperature":0.4}
+		}`),
+	}, nil, func(SseEvent) {})
+	if err != nil {
+		t.Fatalf("stream: %v", err)
+	}
+	for _, key := range []string{"model", "key", "api_key", "apiKey", "x-goog-api-key"} {
+		if _, has := captured[key]; has {
+			t.Fatalf("endpoint-owned %q leaked into request body: %#v", key, captured)
+		}
+	}
+	cfg, ok := captured["generationConfig"].(map[string]any)
+	if !ok || cfg["temperature"] != 0.4 {
+		t.Fatalf("extra generationConfig was not preserved: %#v", captured["generationConfig"])
+	}
+	if _, has := cfg["maxOutputTokens"]; !has {
+		t.Fatalf("native generationConfig.maxOutputTokens missing: %#v", cfg)
+	}
+}

@@ -14,13 +14,16 @@
 //   - The merge is shallow-recursive on JSON objects; arrays and scalars are
 //     replaced (not concatenated) to keep behaviour deterministic.
 //
-// This is declarative — admins cannot inject arbitrary upstream parameters
-// because the user-side only picks among declared keys.
+// User-facing controls remain declarative: users can only select among the
+// model's declared mappings. Admin-only extra_params is applied separately by
+// MergeRequestParams and never comes from a user request.
 package llm
 
 import (
 	"encoding/json"
 	"strings"
+
+	"aivory/server/internal/store"
 )
 
 // paramControl is the wire shape of one item in models.param_controls
@@ -111,22 +114,35 @@ func MergeParamControls(target map[string]any, controls json.RawMessage, picks m
 	return target
 }
 
+// MergeRequestParams builds an upstream request body with the required
+// precedence: native provider fields > selected param-control fragments >
+// admin extra_params. Every merge is recursive for object values, which keeps
+// provider-owned nested fields such as Gemini generationConfig authoritative
+// without discarding unrelated admin defaults.
+func MergeRequestParams(native map[string]any, extraParams, controls json.RawMessage, picks map[string]any) map[string]any {
+	body := store.MergeModelExtraParams(nil, extraParams)
+	body = MergeParamControls(body, controls, picks)
+	return store.DeepMergeJSONObjects(body, native)
+}
+
+// StripToolFields removes every provider tool declaration/control when native
+// tools are disabled for a turn. Admin extra_params and param-control fragments
+// must never resurrect tool calling in a no-tools or prompt-tool request.
+func StripToolFields(body map[string]any, nativeToolsEnabled bool) map[string]any {
+	if nativeToolsEnabled {
+		return body
+	}
+	for _, key := range []string{
+		"tools", "tool_choice", "toolChoice", "functions", "function_call", "functionCall",
+		"parallel_tool_calls", "tool_config", "toolConfig",
+	} {
+		delete(body, key)
+	}
+	return body
+}
+
 // deepMerge writes every key from src into dst. When both sides hold a map at
 // the same key it recurses; otherwise src replaces dst.
 func deepMerge(dst, src map[string]any) {
-	for k, v := range src {
-		existing, has := dst[k]
-		if !has {
-			dst[k] = v
-			continue
-		}
-		switch nv := v.(type) {
-		case map[string]any:
-			if em, ok := existing.(map[string]any); ok {
-				deepMerge(em, nv)
-				continue
-			}
-		}
-		dst[k] = v
-	}
+	store.DeepMergeJSONObjects(dst, src)
 }

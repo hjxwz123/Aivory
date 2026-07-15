@@ -182,8 +182,8 @@ export function MessageList({ conversation, scrollToMessageId, jumpKey }: Messag
       const parentId = edited?.parentId ?? (idx > 0 ? msgs[idx - 1].id : '')
       const carryAtts = attachments ?? edited?.attachments
       // Edit-and-resend opens a NEW branch — treat it like a fresh send and honor
-      // the currently-armed composer features (deep research / verify / disable
-      // tools / web search); otherwise the armed chips are silently ignored on
+      // the currently-armed composer features (deep research / verify / tool
+      // policy / web search); otherwise the armed controls are silently ignored on
       // this one path while regenerate honors them.
       const armed = resolveArmedTurnFlags()
       void sendMessage({
@@ -193,11 +193,11 @@ export function MessageList({ conversation, scrollToMessageId, jumpKey }: Messag
         parentId,
         attachments: carryAtts,
         branch: true,
-        // §fast-mode: a fast conversation forces the other features off (the
-        // backend re-enforces this) and runs on the hidden fast model.
+        // §fast-mode: a fast conversation forces the other features off and keeps
+        // its existing fixed enabled tool behavior, skipping auto classification.
         mode: fastMode ? undefined : armed.mode,
         verify: fastMode ? undefined : armed.verify,
-        noTools: fastMode ? undefined : armed.noTools,
+        toolMode: fastMode ? 'enabled' : armed.toolMode,
         webSearch: fastMode ? undefined : armed.webSearch,
         fast: fastMode,
       })

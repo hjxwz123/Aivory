@@ -32,12 +32,12 @@ import (
 )
 
 // Env-overridable defaults (see docs/config-reference.md). Each falls back to
-// the original hardcoded value when its AIVORY_* variable is unset.
+// its documented default when the corresponding AIVORY_* variable is unset.
 var (
 	inTopK                                 = envcfg.Int("AIVORY_TOOLS_IN_TOP_K", 5)
 	webFetchResponseBodyReadCap            = envcfg.Int64("AIVORY_TOOLS_WEB_FETCH_RESPONSE_BODY_READ_CAP", 256*1024)
 	webFetchExtractedTextCharCap           = envcfg.Int("AIVORY_TOOLS_WEB_FETCH_EXTRACTED_TEXT_CHAR_CAP", 32000)
-	pythonExecuteUploadStagingFileSize     = envcfg.Int64("AIVORY_TOOLS_PYTHON_EXECUTE_UPLOAD_STAGING_FILE_SIZE", 20*1024*1024)
+	pythonExecuteUploadStagingFileSize     = envcfg.Int64("AIVORY_TOOLS_PYTHON_EXECUTE_UPLOAD_STAGING_FILE_SIZE", 40*1024*1024)
 	pythonExecuteImageArtifactStagingSize  = envcfg.Int64("AIVORY_TOOLS_PYTHON_EXECUTE_IMAGE_ARTIFACT_STAGING_SIZE", 20*1024*1024)
 	pythonExecuteStdoutStderrTruncationCap = envcfg.Int("AIVORY_TOOLS_PYTHON_EXECUTE_STDOUT_STDERR_TRUNCATION_CAP", 32*1024)
 	inN                                    = envcfg.Int("AIVORY_TOOLS_IN_N", 4)
@@ -477,7 +477,12 @@ func (t *pythonExecuteTool) Execute(ctx context.Context, input []byte, tc *llm.T
 				// Stage data files AND images — images so they can be embedded into
 				// generated decks/docs (python-pptx/-docx read them from /workspace
 				// /uploads). Other binary kinds (audio/video/archives) stay out.
-				if f.Kind != "sheet" && f.Kind != "text" && f.Kind != "code" && f.Kind != "image" {
+				spreadsheetName := false
+				switch strings.ToLower(filepath.Ext(strings.TrimSpace(f.Filename))) {
+				case ".csv", ".tsv", ".xlsx", ".xls", ".xlsm":
+					spreadsheetName = true
+				}
+				if f.Kind != "sheet" && f.Kind != "text" && f.Kind != "code" && f.Kind != "image" && !spreadsheetName {
 					continue
 				}
 				if f.SizeBytes > pythonExecuteUploadStagingFileSize {

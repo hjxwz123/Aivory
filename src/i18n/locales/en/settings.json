@@ -41,9 +41,23 @@
     "customPlaceholder": "Interests, how you like answers structured, things to avoid…",
     "saved": "Personalization saved",
     "toolsTitle": "Tools",
-    "toolsSubtitle": "Control whether the model may call tools (web search, Python, image generation, knowledge base).",
-    "disableToolsToggle": "Disable tools by default",
-    "disableToolsBody": "New conversations start with tools turned off. You can still re-enable tools for any single conversation from the composer’s “+” menu.",
+    "toolsSubtitle": "Choose how the assistant uses tools such as web search, Python, image generation, and knowledge bases.",
+    "toolsDefaultLabel": "Default tool mode",
+    "toolsDefaultBody": "Applied when you start a new conversation. You can change the mode for an individual conversation from the composer.",
+    "toolModes": {
+      "auto": {
+        "label": "Automatic",
+        "body": "Ask the task model whether tools are needed before each response."
+      },
+      "disabled": {
+        "label": "Disabled",
+        "body": "Answer directly without making tools available to the response model."
+      },
+      "enabled": {
+        "label": "Enabled",
+        "body": "Always make the tools configured for the selected model available."
+      }
+    },
     "memoryTitle": "Memory",
     "memorySubtitle": "The assistant can remember durable facts about you across chats.",
     "memoryToggle": "Enable memory",

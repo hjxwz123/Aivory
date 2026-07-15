@@ -87,7 +87,11 @@ type UnifiedChatRequest struct {
 	// (and the deep-merge helper) to know which keys are whitelisted and how
 	// each value maps to upstream parameters (§2.3-G).
 	ParamControls json.RawMessage
-	Stream        bool
+	// ExtraParams is the admin-only JSON object of provider request defaults for
+	// this model. Providers apply it below selected param controls and native
+	// request fields, so it cannot replace model, messages, stream, or tools.
+	ExtraParams json.RawMessage
+	Stream      bool
 	// MaxOutputTokens overrides the provider's default max_tokens cap.
 	// Used by TaskLLM for short internal calls.
 	MaxOutputTokens int

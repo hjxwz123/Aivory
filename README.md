@@ -89,7 +89,9 @@ Because the sandbox shares a filesystem session across all calls in the conversa
 
 ### Persistent Python sandbox
 
-Every conversation has its own isolated sandbox container. Files persist between turns — the model can write a CSV in turn 1 and reference it in turn 5. If the sidecar is reaped (container restart, deploy), the runner detects the 404, provisions a fresh session, re-stages all uploaded files, and retries transparently.
+Every conversation has its own isolated sandbox container. Files persist between turns — the model can write a CSV in turn 1 and reference it in turn 5. If the sidecar is reaped (container restart, deploy), the runner detects the 404, provisions a fresh session, re-stages all eligible uploaded files, and retries transparently.
+
+Conversation uploads are staged into Python up to **40 MiB per file** by default (`AIVORY_TOOLS_PYTHON_EXECUTE_UPLOAD_STAGING_FILE_SIZE`). When `python_execute` is not exposed to the model, including when tools are disabled and in Fast mode, CSV/XLSX files use a bounded in-process preview capped at **30 MiB per file** by default (`AIVORY_RAG_SPREADSHEET_PREVIEW_MAX_FILE_BYTES`). Both values are byte counts and require an API restart after changes.
 
 - Full Python standard library + pip-installable packages (pandas, matplotlib, python-pptx, …)
 - `stdout` / `stderr` stream line-by-line while the code runs — you see progress, not just results

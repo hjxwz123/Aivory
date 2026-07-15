@@ -41,9 +41,23 @@
     "customPlaceholder": "兴趣、偏好的回答结构、需要避免的内容……",
     "saved": "个性化已保存",
     "toolsTitle": "工具",
-    "toolsSubtitle": "控制模型是否可以调用工具（联网搜索、Python、图片生成、知识库）。",
-    "disableToolsToggle": "默认禁用工具",
-    "disableToolsBody": "新对话默认关闭工具。你仍可在输入框的“+”菜单里为单个对话重新启用工具。",
+    "toolsSubtitle": "选择助手如何使用联网搜索、Python、图片生成和知识库等工具。",
+    "toolsDefaultLabel": "默认工具模式",
+    "toolsDefaultBody": "开始新对话时应用。你仍可在输入框中为单个对话切换模式。",
+    "toolModes": {
+      "auto": {
+        "label": "自动",
+        "body": "每次回答前，先由任务模型判断是否需要使用工具。"
+      },
+      "disabled": {
+        "label": "禁用工具",
+        "body": "不向回答模型提供工具，直接生成回答。"
+      },
+      "enabled": {
+        "label": "开启工具",
+        "body": "始终向回答模型提供当前模型已配置的工具。"
+      }
+    },
     "memoryTitle": "记忆",
     "memorySubtitle": "助手可以跨对话记住关于你的长期信息。",
     "memoryToggle": "启用记忆",

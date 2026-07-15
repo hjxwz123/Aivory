@@ -95,6 +95,8 @@
       "researchEnabled": "Deep Research",
       "systemPrompt": "System prompt",
       "paramControls": "param_controls (JSON)",
+      "extraParams": "Extra upstream parameters (JSON)",
+      "extraParamsHint": "Optional JSON object merged into this model's upstream request. Priority: built-in request parameters override control mappings, which override these values.",
       "dim": "Dimension",
       "sortOrder": "Display order",
       "sortOrderHint": "Lower numbers first.",
@@ -123,7 +125,9 @@
     "moveDown": "Move down",
     "errors": {
       "missingFields": "Channel, label and request_id are required",
-      "invalidJSON": "param_controls is not valid JSON"
+      "invalidJSON": "param_controls is not valid JSON",
+      "invalidExtraParamsJSON": "Extra upstream parameters must be valid JSON",
+      "extraParamsMustBeObject": "Extra upstream parameters must be a JSON object"
     },
     "permissionsLead": "Which groups may use this model, and their per-cycle quota. All off = open to everyone.",
     "tagsHint": "Tag the model for the picker's filter.",
@@ -378,6 +382,7 @@
       "task_memory_adjudicate": "Memory adjudication",
       "task_downgrade": "Cross-vendor downgrade",
       "task_image_prompt": "Image prompt",
+      "task_tool_route": "Tool routing",
       "task_research_plan": "Research plan",
       "task_research_verify": "Research verify",
       "task_moderation": "Moderation",

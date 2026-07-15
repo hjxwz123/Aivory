@@ -128,6 +128,10 @@ export interface ArtifactRef {
 
 export interface Message {
   id: string
+  /** Client-only optimistic row whose id has not been assigned by the server.
+   *  Such ids must never be sent back as message references (for example,
+   *  conversations.active_leaf_id). Omitted for every API-backed message. */
+  localOnly?: boolean
   /** Parent id in the conversation tree (§4.15). Empty for root. Needed by the
    *  composer so "edit a past question" opens a sibling branch under the same
    *  parent instead of appending to the active leaf. */

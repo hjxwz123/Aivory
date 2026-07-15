@@ -29,9 +29,11 @@ import {
   AlertTriangle,
   Plus,
   Ban,
+  Wrench,
   Globe,
 } from 'lucide-react'
 import type { Attachment } from '@/types/chat'
+import type { ToolMode } from '@/lib/tool-mode'
 import { Textarea } from '@/components/ui/textarea'
 import { Tooltip } from '@/components/ui/tooltip'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -74,9 +76,9 @@ interface ComposerProps {
       imageStyleId?: string
       /** §verify: run the secondary-auditor pass on this turn. */
       verify?: boolean
-      /** §4.13-B: run this turn with NO tool calling. */
-      noTools?: boolean
-      /** §4.4-B: forced non-tool web search (only with noTools). */
+      /** Tri-state tool policy, always sent explicitly. */
+      toolMode: ToolMode
+      /** §4.4-B: forced non-tool web search (only in disabled mode). */
       webSearch?: boolean
       /** §fast-mode: run this turn in fast mode. */
       fast?: boolean
@@ -282,9 +284,11 @@ interface FeatureItem {
   desc: string
   active: boolean
   dimmed: boolean
-  /** Row is revealed conditionally (e.g. web search only inside a no-tools turn)
+  /** Row is revealed conditionally (e.g. web search only in disabled mode)
    *  — play a soft fade-in when it mounts. */
   enter?: boolean
+  /** Accessible label for the active chip's clear action. */
+  clearLabel?: string
   toggle: () => void
 }
 
@@ -337,6 +341,102 @@ function FeatureRow({ item, onAfter }: { item: FeatureItem; onAfter?: () => void
   )
 }
 
+interface ToolModeOption {
+  value: ToolMode
+  label: string
+  desc: string
+}
+
+/** One mutually-exclusive tool-policy control shared by mobile and desktop menus. */
+function ToolModeSelector({
+  label,
+  description,
+  value,
+  options,
+  onChange,
+  researchActive,
+}: {
+  label: string
+  description: string
+  value: ToolMode
+  options: readonly ToolModeOption[]
+  onChange: (value: ToolMode) => void
+  researchActive: boolean
+}) {
+  const selected = options.find((option) => option.value === value) ?? options[0]
+  const optionRefs = useRef<Array<HTMLButtonElement | null>>([])
+  return (
+    <div className="px-2.5 py-2" role="group" aria-label={label}>
+      <div className="text-[13px] font-medium text-[var(--color-fg)]">{label}</div>
+      <p className="mt-0.5 text-[11.5px] leading-snug text-[var(--color-fg-subtle)]">{description}</p>
+      <div
+        role="radiogroup"
+        aria-label={label}
+        className="mt-2 grid min-h-9 grid-cols-3 rounded-[8px] bg-[var(--color-bg-muted)] p-0.5"
+      >
+        {options.map((option, index) => {
+          const checked = option.value === value
+          const disabled = researchActive && option.value !== 'enabled'
+          return (
+            <button
+              key={option.value}
+              ref={(node) => {
+                optionRefs.current[index] = node
+              }}
+              type="button"
+              role="radio"
+              aria-checked={checked}
+              aria-label={`${option.label}: ${option.desc}`}
+              disabled={disabled}
+              tabIndex={checked ? 0 : -1}
+              onClick={() => {
+                if (!checked) onChange(option.value)
+              }}
+              onKeyDown={(event) => {
+                const enabledIndexes = options.flatMap((candidate, candidateIndex) =>
+                  researchActive && candidate.value !== 'enabled' ? [] : [candidateIndex],
+                )
+                const currentPosition = enabledIndexes.indexOf(index)
+                if (currentPosition < 0 || enabledIndexes.length === 0) return
+                let nextPosition: number | undefined
+                if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+                  nextPosition = (currentPosition + 1) % enabledIndexes.length
+                } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+                  nextPosition = (currentPosition - 1 + enabledIndexes.length) % enabledIndexes.length
+                } else if (event.key === 'Home') {
+                  nextPosition = 0
+                } else if (event.key === 'End') {
+                  nextPosition = enabledIndexes.length - 1
+                }
+                if (nextPosition === undefined) return
+                event.preventDefault()
+                const nextIndex = enabledIndexes[nextPosition]
+                const nextOption = options[nextIndex]
+                if (nextOption && nextOption.value !== value) onChange(nextOption.value)
+                optionRefs.current[nextIndex]?.focus()
+              }}
+              className={cn(
+                'min-h-8 min-w-0 rounded-[6px] px-1.5 py-1 text-center text-[11.5px] font-medium leading-tight interactive',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+                checked
+                  ? 'bg-[var(--color-surface)] text-[var(--color-secondary)] shadow-[var(--shadow-xs)]'
+                  : disabled
+                    ? 'cursor-not-allowed text-[var(--color-fg-faint)] opacity-50'
+                    : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]',
+              )}
+            >
+              {option.label}
+            </button>
+          )
+        })}
+      </div>
+      <p className="mt-1.5 min-h-[2rem] text-[11.5px] leading-snug text-[var(--color-fg-subtle)]">
+        {selected.desc}
+      </p>
+    </div>
+  )
+}
+
 export function Composer({
   modelId,
   onModelChange,
@@ -364,10 +464,10 @@ export function Composer({
   // §verify: when on, the answer is fact-checked by a second model this turn.
   const verify = useComposerPrefs((s) => s.verify)
   const setVerify = useComposerPrefs((s) => s.setVerify)
-  // §4.13-B disable-tools + forced non-tool web search (mutually exclusive with
-  // deep-research; web search only inside no-tools).
-  const noTools = useComposerPrefs((s) => s.noTools)
-  const setNoTools = useComposerPrefs((s) => s.setNoTools)
+  // Tri-state tool policy + forced non-tool web search. Deep Research forces
+  // enabled mode; forced search only exists inside disabled mode.
+  const toolMode = useComposerPrefs((s) => s.toolMode)
+  const setToolMode = useComposerPrefs((s) => s.setToolMode)
   const forceWebSearch = useComposerPrefs((s) => s.forceWebSearch)
   const setForceWebSearch = useComposerPrefs((s) => s.setForceWebSearch)
   const cachedParamValues = useComposerPrefs((s) => (modelId ? s.paramValuesByModel[modelId] : undefined))
@@ -390,8 +490,8 @@ export function Composer({
   // stay large. 639px = Tailwind's `sm` breakpoint minus 1.
   const isMobile = useMediaQuery('(max-width: 639px)')
   const [moreOpen, setMoreOpen] = useState(false)
-  // §4.13-B feature menu (the "+" left of attach): research / verify / no-tools
-  // / web-search as an icon+name+description list.
+  // Turn-feature menu (the "+" left of attach): research / verify / tool policy
+  // / web-search in one shared mobile/desktop surface.
   const [featuresOpen, setFeaturesOpen] = useState(false)
   const loadKBList = async () => {
     try {
@@ -739,7 +839,7 @@ export function Composer({
   // §verify: only offer the toggle when an admin has configured an auditor model.
   const verifyAvailable = useModels((s) => s.verifyAvailable)
   const paramControls = currentModel?.param_controls
-  // §fast-mode: a fast turn disallows Verify / Deep Research / no-tools / the "+"
+  // §fast-mode: a fast turn disallows Verify / Deep Research / tool policy / the "+"
   // menu (the picker is a chat model, so isImageMode is already false). When fast
   // is active every other feature is forced off.
   const fastAvailable = useModels((s) => s.fastAvailable)
@@ -750,9 +850,11 @@ export function Composer({
   const visibleParamControls = effectiveFast ? undefined : paramControls
   const effectiveMode = !effectiveFast && !isImageMode && researchEnabled ? mode : 'default'
   const effectiveVerify = !effectiveFast && verify && verifyAvailable && !isImageMode
-  // §4.13-B disable-tools + forced web search — inapplicable to image models / fast.
-  const effectiveNoTools = !effectiveFast && noTools && !isImageMode
-  const effectiveWebSearch = effectiveNoTools && forceWebSearch
+  // Fast and image turns retain the prior fixed enabled behavior. Deep Research
+  // also requires enabled mode and bypasses the automatic task classifier.
+  const effectiveToolMode: ToolMode =
+    effectiveFast || isImageMode || effectiveMode === 'deep-research' ? 'enabled' : toolMode
+  const effectiveWebSearch = effectiveToolMode === 'disabled' && forceWebSearch
   const handleParamValuesChange = useCallback(
     (next: Record<string, unknown>) => {
       setCachedParamValues(modelId, next)
@@ -816,7 +918,7 @@ export function Composer({
         params: Object.keys(params).length > 0 ? params : undefined,
         imageStyleId: isImageMode && imageStyleId ? imageStyleId : undefined,
         verify: effectiveVerify ? true : undefined,
-        noTools: effectiveNoTools ? true : undefined,
+        toolMode: effectiveToolMode,
         webSearch: effectiveWebSearch ? true : undefined,
         fast: effectiveFast ? true : undefined,
       })
@@ -1168,14 +1270,13 @@ export function Composer({
     }
   }
 
-  // §4.13-B turn-feature list (composer "+" menu). Only chat models expose them.
-  // Mutual exclusion: deep-research ↔ no-tools (each dims the other); web search
-  // appears only inside a no-tools turn. Deep-research isDim when noTools is on
-  // and vice-versa; the store setters enforce the same rules on toggle.
+  // Turn-feature list (composer "+" menu). Fast/image turns retain their existing
+  // fixed behavior and hide it. Deep Research forces enabled; selecting it from
+  // any other policy updates both values atomically in the preference store.
   const researchActive = effectiveMode === 'deep-research'
   const featureItems: FeatureItem[] = []
-  // §fast-mode hides the entire "+" menu (no verify / DR / no-tools in fast mode).
-  if (!isImageMode && !effectiveFast) {
+  const showToolModeSelector = !isImageMode && !effectiveFast
+  if (showToolModeSelector) {
     if (researchEnabled) {
       featureItems.push({
         key: 'deep-research',
@@ -1183,7 +1284,7 @@ export function Composer({
         label: t('composer.research'),
         desc: t('composer.features.researchDesc', { defaultValue: 'Plan, search the web across rounds, and write a cited report.' }),
         active: researchActive,
-        dimmed: noTools,
+        dimmed: false,
         toggle: () => setMode(researchActive ? 'default' : 'deep-research'),
       })
     }
@@ -1198,40 +1299,97 @@ export function Composer({
         toggle: () => setVerify(!verify),
       })
     }
-    featureItems.push({
-      key: 'no-tools',
-      icon: <Ban size={16} aria-hidden />,
-      label: t('composer.features.noTools', { defaultValue: 'Disable tools' }),
-      desc: t('composer.features.noToolsDesc', { defaultValue: "Answer directly without calling any tool — faster and cheaper." }),
-      active: noTools,
-      dimmed: researchActive,
-      toggle: () => setNoTools(!noTools),
-    })
-    if (noTools) {
-      featureItems.push({
-        key: 'web-search',
-        icon: <Globe size={16} aria-hidden />,
-        label: t('composer.features.webSearch', { defaultValue: 'Web search' }),
-        desc: t('composer.features.webSearchDesc', { defaultValue: 'Search the web every turn and add the results to the prompt (no tool call).' }),
-        active: forceWebSearch,
-        dimmed: false,
-        enter: true,
-        toggle: () => setForceWebSearch(!forceWebSearch),
-      })
-    }
   }
+
+  const toolModeLabel = t('composer.features.toolMode', { defaultValue: 'Tool use' })
+  const toolModeOptions: readonly ToolModeOption[] = [
+    {
+      value: 'auto',
+      label: t('composer.features.toolModeAuto', { defaultValue: 'Auto' }),
+      desc: t('composer.features.toolModeAutoDesc', {
+        defaultValue: 'Decide automatically whether this request needs tools.',
+      }),
+    },
+    {
+      value: 'disabled',
+      label: t('composer.features.toolModeDisabled', { defaultValue: 'Disabled' }),
+      desc: t('composer.features.toolModeDisabledDesc', {
+        defaultValue: 'Answer directly without calling tools.',
+      }),
+    },
+    {
+      value: 'enabled',
+      label: t('composer.features.toolModeEnabled', { defaultValue: 'Enabled' }),
+      desc: t('composer.features.toolModeEnabledDesc', {
+        defaultValue: 'Make tools available to the model for this request.',
+      }),
+    },
+  ]
+  const autoToolModeLabel = toolModeOptions[0].label
+  const selectedToolMode = toolModeOptions.find((option) => option.value === toolMode) ?? toolModeOptions[0]
+
+  const webSearchItem: FeatureItem | undefined =
+    showToolModeSelector && toolMode === 'disabled'
+      ? {
+          key: 'web-search',
+          icon: <Globe size={16} aria-hidden />,
+          label: t('composer.features.webSearch', { defaultValue: 'Web search' }),
+          desc: t('composer.features.webSearchDesc', {
+            defaultValue: 'Search the web every turn and add the results to the prompt (no tool call).',
+          }),
+          active: forceWebSearch,
+          dimmed: false,
+          enter: true,
+          toggle: () => setForceWebSearch(!forceWebSearch),
+        }
+      : undefined
+
+  // Auto is the neutral default and should not permanently light up the "+"
+  // trigger. Explicit disabled/enabled choices are visible as removable overrides.
+  const toolModeOverride: FeatureItem | undefined =
+    showToolModeSelector && toolMode !== 'auto'
+      ? {
+          key: `tool-mode-${toolMode}`,
+          icon: toolMode === 'disabled' ? <Ban size={16} aria-hidden /> : <Wrench size={16} aria-hidden />,
+          label: selectedToolMode.label,
+          desc: selectedToolMode.desc,
+          active: true,
+          dimmed: researchActive,
+          clearLabel: `${toolModeLabel}: ${autoToolModeLabel}`,
+          toggle: () => setToolMode('auto'),
+        }
+      : undefined
+
   const featureList = (onAfter?: () => void) => (
     <div className="flex flex-col gap-0.5">
       {featureItems.map((it) => (
         <FeatureRow key={it.key} item={it} onAfter={onAfter} />
       ))}
+      {showToolModeSelector ? (
+        <ToolModeSelector
+          label={toolModeLabel}
+          description={t('composer.features.toolModeDesc', {
+            defaultValue: 'Choose whether tools are selected automatically, disabled, or enabled.',
+          })}
+          value={toolMode}
+          options={toolModeOptions}
+          onChange={setToolMode}
+          researchActive={researchActive}
+        />
+      ) : null}
+      {webSearchItem ? <FeatureRow item={webSearchItem} onAfter={onAfter} /> : null}
     </div>
   )
-  const anyFeatureActive = featureItems.some((it) => it.active && !it.dimmed)
 
   // Active-feature chips shown right before the model picker: icon + name + an
   // × to turn the feature off. Only genuinely active (non-dimmed) ones.
-  const activeChips = featureItems.filter((it) => it.active && !it.dimmed)
+  const activeChips = [
+    ...featureItems.filter((it) => it.active && !it.dimmed),
+    ...(webSearchItem?.active ? [webSearchItem] : []),
+    ...(toolModeOverride && !toolModeOverride.dimmed ? [toolModeOverride] : []),
+  ]
+  const anyFeatureActive = activeChips.length > 0
+  const featureMenuAvailable = showToolModeSelector || featureItems.length > 0
 
   // A tool is "armed" while collapsed → the mobile "+" trigger (which now also
   // holds the feature menu) shows an accent dot so the user knows a feature or a
@@ -1717,7 +1875,7 @@ export function Composer({
                 <ImageIcon size={18} className="shrink-0 text-[var(--color-fg-muted)]" aria-hidden />
                 {t('composer.addImage')}
               </button>
-              {featureItems.length > 0 ? (
+              {featureMenuAvailable ? (
                 <>
                   <div className="my-1 h-px bg-[var(--color-divider)]" aria-hidden />
                   {featureList()}
@@ -1770,7 +1928,7 @@ export function Composer({
         /* ── Desktop: inline scrollable left zone + pinned right zone ── */
         <div className="flex items-center gap-1 px-2.5 pb-2.5 pt-1">
           <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto scrollbar-none">
-            {featureItems.length > 0 ? (
+            {featureMenuAvailable ? (
               <Popover open={featuresOpen} onOpenChange={setFeaturesOpen}>
                 <Tooltip content={t('composer.features.title', { defaultValue: 'Turn features' })}>
                   <PopoverTrigger asChild>
@@ -1887,7 +2045,10 @@ export function Composer({
                     <button
                       type="button"
                       onClick={chip.toggle}
-                      aria-label={t('composer.features.disable', { defaultValue: 'Turn off {{name}}', name: chip.label })}
+                      aria-label={
+                        chip.clearLabel ??
+                        t('composer.features.disable', { defaultValue: 'Turn off {{name}}', name: chip.label })
+                      }
                       className="inline-flex items-center justify-center size-5 rounded-full text-[var(--color-secondary)] hover:bg-[var(--color-secondary)]/20 interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
                     >
                       <X size={13} aria-hidden />

@@ -111,6 +111,35 @@ func TestSpreadsheetPreviewCSVAndTruncation(t *testing.T) {
 	}
 }
 
+func TestSpreadsheetPreviewHonorsConfiguredFileLimit(t *testing.T) {
+	content := []byte("name,score\nAlice,95\n")
+	path := filepath.Join(t.TempDir(), "limited.csv")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("write csv: %v", err)
+	}
+
+	original := spreadsheetMaxFileBytes
+	spreadsheetMaxFileBytes = int64(len(content) - 1)
+	t.Cleanup(func() { spreadsheetMaxFileBytes = original })
+
+	_, err := SpreadsheetPreview(path, "limited.csv", 30, 40)
+	if err == nil || !strings.Contains(err.Error(), "spreadsheet too large for inline preview") {
+		t.Fatalf("preview error = %v, want configured size-limit rejection", err)
+	}
+}
+
+func TestLoadSpreadsheetMaxFileBytesFromEnv(t *testing.T) {
+	t.Setenv(spreadsheetMaxFileBytesEnv, "4194304")
+	if got := loadSpreadsheetMaxFileBytes(); got != 4<<20 {
+		t.Fatalf("configured spreadsheet preview limit = %d, want %d", got, 4<<20)
+	}
+
+	t.Setenv(spreadsheetMaxFileBytesEnv, "not-a-number")
+	if got := loadSpreadsheetMaxFileBytes(); got != defaultSpreadsheetMaxFileBytes {
+		t.Fatalf("invalid spreadsheet preview limit = %d, want default %d", got, defaultSpreadsheetMaxFileBytes)
+	}
+}
+
 func TestSpreadsheetPreviewRejectsLegacyXLS(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "old.xls")
 	if err := os.WriteFile(path, []byte("\xd0\xcf\x11\xe0not a zip"), 0o644); err != nil {

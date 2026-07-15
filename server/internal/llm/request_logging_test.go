@@ -22,6 +22,10 @@ func mustHTTPRequest(t *testing.T, url, body string) *http.Request {
 // rows carry the full provider request (error rows always carry it — that path
 // reads the recorder's `last` snapshot directly and is not settings-gated).
 func TestSuccessRequestLoggingGating(t *testing.T) {
+	// The settings cache is process-global while each test uses its own temporary
+	// database. Isolate repeated/shuffled runs from another fixture's values.
+	store.InvalidateConfig()
+	t.Cleanup(store.InvalidateConfig)
 	db, err := store.Open(filepath.Join(t.TempDir(), "reqlog.db"))
 	if err != nil {
 		t.Fatalf("open: %v", err)

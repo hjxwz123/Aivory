@@ -22,16 +22,17 @@ type mux struct {
 }
 
 type route struct {
-	method  string
-	pattern []string // path segments
-	handler http.HandlerFunc
+	method      string
+	patternText string
+	pattern     []string // path segments
+	handler     http.HandlerFunc
 }
 
 func newMux() *mux { return &mux{} }
 
 func (m *mux) handle(method, pattern string, h http.HandlerFunc) {
 	segs := splitPath(pattern)
-	m.routes = append(m.routes, route{method: method, pattern: segs, handler: h})
+	m.routes = append(m.routes, route{method: method, patternText: pattern, pattern: segs, handler: h})
 }
 
 type pathCtxKey struct{}
@@ -44,17 +45,25 @@ func pathParam(r *http.Request, name string) string {
 
 func (m *mux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	segs := splitPath(r.URL.Path)
+	methodMismatchPattern := ""
 	for _, rt := range m.routes {
-		if rt.method != r.Method {
-			continue
-		}
 		params, ok := matchPath(rt.pattern, segs)
 		if !ok {
 			continue
 		}
+		if rt.method != r.Method {
+			if methodMismatchPattern == "" {
+				methodMismatchPattern = rt.patternText
+			}
+			continue
+		}
+		recordResponseRoute(w, rt.patternText)
 		ctx := context.WithValue(r.Context(), pathCtxKey{}, params)
 		rt.handler.ServeHTTP(w, r.WithContext(ctx))
 		return
+	}
+	if methodMismatchPattern != "" {
+		recordResponseRoute(w, methodMismatchPattern)
 	}
 	writeJSON(w, 404, map[string]string{"error": "not found"})
 }
@@ -95,10 +104,13 @@ func writeError(w http.ResponseWriter, status int, err error) {
 		err = errors.New("unknown error")
 	}
 	msg := err.Error()
+	recorded := recordResponseError(w, err)
 	if status >= 500 {
 		// Log the real error server-side but never expose internal details to
 		// the client — stack traces, SQL, file paths, etc. (§ FIX-3).
-		slog.Error("internal error", "err", err)
+		if !recorded {
+			slog.Error("internal error", "err", err)
+		}
 		msg = "internal server error"
 	}
 	writeJSON(w, status, map[string]string{"error": msg})

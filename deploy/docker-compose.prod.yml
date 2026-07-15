@@ -101,6 +101,10 @@ services:
       SANDBOX_MEMORY: ${SANDBOX_MEMORY:-2g}
       SANDBOX_CPUS: ${SANDBOX_CPUS:-1}
       SANDBOX_MAX_SESSIONS: ${SANDBOX_MAX_SESSIONS:-16}
+      # Keep the sidecar limits aligned with the Go python staging default. The
+      # body cap includes base64 expansion plus the JSON envelope.
+      SANDBOX_MAX_UPLOAD_BYTES: ${SANDBOX_MAX_UPLOAD_BYTES:-41943040}
+      SANDBOX_MAX_BODY_BYTES: ${SANDBOX_MAX_BODY_BYTES:-58720256}
       # Hard ceiling for one execution. The admin's per-exec timeout
       # (settings.sandbox_exec_timeout_sec) is clamped to this; lower it to
       # tighten the cap. 600000ms = 10min.

@@ -406,15 +406,11 @@ var codeExts = map[string]bool{
 
 // kindOf maps mime + filename to one of the kind buckets the frontend uses.
 func kindOf(mime, name string) string {
-	switch {
-	case len(mime) >= 6 && mime[:6] == "image/":
-		return "image"
-	case mime == "application/pdf":
-		return "pdf"
-	case len(mime) >= 4 && mime[:4] == "text":
-		return "text"
-	}
-	switch ext := strings.ToLower(filepath.Ext(name)); ext {
+	// Prefer the validated filename extension for every supported format. Browser
+	// MIME guesses are inconsistent (notably text/csv), and classifying MIME first
+	// used to turn CSV into generic text before the sheet branch was reached.
+	ext := strings.ToLower(filepath.Ext(name))
+	switch ext {
 	case ".pdf":
 		return "pdf"
 	case ".png", ".jpg", ".jpeg", ".gif", ".webp":
@@ -429,6 +425,16 @@ func kindOf(mime, name string) string {
 		if codeExts[ext] {
 			return "code"
 		}
+	}
+	// Unknown/missing extensions may still carry a useful MIME supplied by the
+	// browser. This is a fallback only; uploadPolicy has already validated names.
+	switch {
+	case strings.HasPrefix(mime, "image/"):
+		return "image"
+	case mime == "application/pdf":
+		return "pdf"
+	case strings.HasPrefix(mime, "text"):
+		return "text"
 	}
 	// Unknown extension → treat as plain text so it's still ingested and the
 	// model can read it. Genuinely-binary uploads are caught at parse time

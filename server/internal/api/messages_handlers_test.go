@@ -1,7 +1,10 @@
 package api
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"log"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -9,6 +12,54 @@ import (
 	"aivory/server/internal/llm"
 	"aivory/server/internal/store"
 )
+
+func TestLogChatRunErrorIncludesMetadataWithoutRequestContent(t *testing.T) {
+	var out bytes.Buffer
+	logger := log.New(&out, "", 0)
+	underlying := errors.New(`ERROR: insert or update on table "messages" violates foreign key constraint "messages_parent_id_fkey"`)
+
+	logChatRunError(logger, chatRunErrorMetadata{
+		Operation:       "post_message",
+		UserID:          "user-1",
+		ConversationID:  "conversation-1",
+		Fast:            true,
+		Branch:          false,
+		ParentID:        "missing-parent",
+		ReferenceID:     "assistant-1",
+		AttachmentCount: 1,
+	}, underlying)
+
+	got := out.String()
+	for _, want := range []string{
+		`operation="post_message"`,
+		`user_id="user-1"`,
+		`conversation_id="conversation-1"`,
+		`fast=true`,
+		`branch=false`,
+		`parent_id="missing-parent"`,
+		`reference_id="assistant-1"`,
+		`attachment_count=1`,
+		`messages_parent_id_fkey`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("log output %q does not contain %q", got, want)
+		}
+	}
+	for _, secret := range []string{
+		"private message text",
+		"quarterly-results.xlsx",
+		"uploaded spreadsheet contents",
+		"assembled system prompt",
+	} {
+		if strings.Contains(got, secret) {
+			t.Errorf("log output leaked request content %q: %s", secret, got)
+		}
+	}
+}
+
+func TestLogChatRunErrorAllowsNilLogger(t *testing.T) {
+	logChatRunError(nil, chatRunErrorMetadata{Operation: "post_message"}, errors.New("database unavailable"))
+}
 
 func TestEnsureAttachedDocumentsReadyRequiresReadyStatus(t *testing.T) {
 	ctx := context.Background()

@@ -322,6 +322,8 @@ export interface ApiModel {
   fast?: boolean
   system_prompt: string
   param_controls: unknown
+  /** Optional chat-model JSON object merged into the upstream provider request. */
+  extra_params?: Record<string, unknown>
   /** OpenAI Responses hosted tools to enable; empty/absent = use system tools (§2.3-B). */
   official_tools?: string[]
   /** model_tags ids assigned to this model — drives the picker's tag filter (§ model tags). */
