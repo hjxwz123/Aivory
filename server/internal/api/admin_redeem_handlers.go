@@ -38,27 +38,46 @@ func listRedeemCodesAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 }
 
 // createRedeemCodeAdmin creates either a single code or a batch.
-// Body: { group_id, duration_days, max_uses, expires_at, note, batch_name,
+// Body: { kind?, group_id, duration_days, credits?, max_uses, expires_at, note,
 //
-//	quantity?: int (when >1 a batch is generated) }
+//	batch_name, quantity?: int (when >1 a batch is generated) }
+//
+// kind defaults to 'group'. 'credits' codes require credits > 0 and ignore
+// group_id / duration_days (they add permanent credits instead of a group).
 func createRedeemCodeAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
 	var body struct {
-		GroupID      string `json:"group_id"`
-		DurationDays int    `json:"duration_days"`
-		MaxUses      int    `json:"max_uses"`
-		ExpiresAt    int64  `json:"expires_at"`
-		Note         string `json:"note"`
-		BatchName    string `json:"batch_name"`
-		Code         string `json:"code"`     // optional — supply your own
-		Quantity     int    `json:"quantity"` // when >1 → bulk
+		Kind         string  `json:"kind"`
+		GroupID      string  `json:"group_id"`
+		DurationDays int     `json:"duration_days"`
+		Credits      float64 `json:"credits"`
+		MaxUses      int     `json:"max_uses"`
+		ExpiresAt    int64   `json:"expires_at"`
+		Note         string  `json:"note"`
+		BatchName    string  `json:"batch_name"`
+		Code         string  `json:"code"`     // optional — supply your own
+		Quantity     int     `json:"quantity"` // when >1 → bulk
 	}
 	if err := decodeJSON(r, &body); err != nil {
 		writeError(w, 400, errInvalidInput)
 		return
 	}
-	if body.GroupID == "" {
-		writeError(w, 400, errors.New("group_id required"))
+	if body.Kind == "" {
+		body.Kind = store.RedeemKindGroup
+	}
+	switch body.Kind {
+	case store.RedeemKindCredits:
+		if body.Credits <= 0 {
+			writeError(w, 400, errors.New("credits must be greater than 0"))
+			return
+		}
+	case store.RedeemKindGroup:
+		if body.GroupID == "" {
+			writeError(w, 400, errors.New("group_id required"))
+			return
+		}
+	default:
+		writeError(w, 400, errors.New("kind must be 'group' or 'credits'"))
 		return
 	}
 	if body.DurationDays < 0 {
@@ -76,8 +95,10 @@ func createRedeemCodeAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 
 	tpl := store.RedeemCode{
 		Code:         body.Code,
+		Kind:         body.Kind,
 		GroupID:      body.GroupID,
 		DurationDays: body.DurationDays,
+		Credits:      body.Credits,
 		MaxUses:      body.MaxUses,
 		ExpiresAt:    body.ExpiresAt,
 		Note:         body.Note,

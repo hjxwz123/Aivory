@@ -184,12 +184,18 @@ export interface ApiModelQuota {
 }
 
 /** Redeem code (§ redeem codes). Admins issue these to grant a user_group
- *  for `duration_days` (0 = permanent). `code` is the human-typeable string. */
+ *  for `duration_days` (0 = permanent), or — when `kind` is 'credits' — a
+ *  fixed amount of permanent credits. `code` is the human-typeable string. */
 export interface ApiRedeemCode {
   id: string
   code: string
+  /** 'group' grants a membership tier; 'credits' adds permanent credits. */
+  kind: 'group' | 'credits'
+  /** For 'credits' codes this holds a placeholder (default group) — ignore it. */
   group_id: string
   duration_days: number
+  /** Permanent credits granted per redemption ('credits' codes only). */
+  credits: number
   max_uses: number
   used_count: number
   /** Unix seconds after which an unredeemed code is rejected. 0 = no deadline. */
@@ -208,6 +214,8 @@ export interface ApiRedeemRedemption {
   user_id: string
   group_id: string
   previous_group_id: string
+  /** Permanent credits added ('credits' codes only; 0 for group codes). */
+  credits: number
   granted_at: number
   expires_at: number
 }
@@ -222,9 +230,13 @@ export interface ApiRedeemRedemption {
 export interface ApiRedeemResult {
   ok?: true
   user?: ApiUser
-  group_id: string
-  group_name: string
-  expires_at: number
+  /** 'credits' when the code added permanent credits instead of a group. */
+  kind?: 'group' | 'credits'
+  /** Permanent credits added (credits redemptions only). */
+  credits?: number
+  group_id?: string
+  group_name?: string
+  expires_at?: number
   /** Set when the code would switch groups and needs an explicit confirm. */
   requires_confirmation?: boolean
   /** The group the user is currently on (only on the confirmation preview). */

@@ -27,7 +27,7 @@
   "permanent": "永続",
   "redeem": {
     "title": "コードを引き換える",
-    "subtitle": "コードを入力してメンバーシップグループを有効化または延長します。",
+    "subtitle": "コードを入力すると、メンバーシップの有効化・延長、または永久クレジットの追加ができます。",
     "inputLabel": "コード",
     "inputPlaceholder": "XXXX-XXXX-XXXX",
     "submit": "引き換える",
@@ -49,7 +49,9 @@
       "disabled": "このコードは管理者によって無効化されました。",
       "alreadyOwned": "このコードは既に引き換え済みです。",
       "generic": "このコードを引き換えられませんでした。"
-    }
+    },
+    "successCredits": "クレジットを追加しました",
+    "successBodyCredits": "{{count}} クレジットが永久残高に追加されました。"
   },
   "buyCta": "購入",
   "recommended": "おすすめ",

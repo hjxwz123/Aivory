@@ -81,6 +81,18 @@ func redeemCodeHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	invalidateAuthUser(d, u.ID)
 
+	// Credits codes are additive — no group changed hands. Return the amount so
+	// the UI can celebrate and refresh the balance.
+	if red.Credits > 0 {
+		writeJSON(w, 200, map[string]any{
+			"ok":      true,
+			"kind":    store.RedeemKindCredits,
+			"user":    updated,
+			"credits": red.Credits,
+		})
+		return
+	}
+
 	// Resolve the group's display name so the success toast can say
 	// "You're now on VIP" without a second request.
 	group, _ := store.GetUserGroup(r.Context(), d.DB, red.GroupID)

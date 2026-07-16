@@ -45,8 +45,10 @@ import { PanelFallback } from '@/components/ui/panel-fallback'
 type StatusFilter = 'all' | 'unused' | 'redeemed' | 'disabled' | 'expired'
 
 interface BatchDraft {
+  kind: 'group' | 'credits'
   group_id: string
   duration_days: number
+  credits: number
   max_uses: number
   expires_at: string // datetime-local format; converted to unix on submit
   note: string
@@ -55,8 +57,10 @@ interface BatchDraft {
 }
 
 const EMPTY_DRAFT: BatchDraft = {
+  kind: 'group',
   group_id: '',
   duration_days: 30,
+  credits: 100,
   max_uses: 1,
   expires_at: '',
   note: '',
@@ -121,8 +125,12 @@ export default function AdminRedeemCodes() {
 
   async function submit() {
     if (submittingRef.current) return
-    if (!draft.group_id) {
+    if (draft.kind === 'group' && !draft.group_id) {
       toast.error(t('admin:redeemCodes.errors.groupRequired'))
+      return
+    }
+    if (draft.kind === 'credits' && draft.credits <= 0) {
+      toast.error(t('admin:redeemCodes.errors.creditsRequired'))
       return
     }
     if (draft.quantity < 1 || draft.quantity > 1000) {
@@ -138,8 +146,10 @@ export default function AdminRedeemCodes() {
     try {
       const expiresUnix = draft.expires_at ? Math.floor(new Date(draft.expires_at).getTime() / 1000) : 0
       const res = await adminApi.createRedeemCode({
-        group_id: draft.group_id,
-        duration_days: draft.duration_days,
+        kind: draft.kind,
+        ...(draft.kind === 'group'
+          ? { group_id: draft.group_id, duration_days: draft.duration_days }
+          : { credits: draft.credits }),
         max_uses: draft.max_uses,
         expires_at: expiresUnix,
         note: draft.note,
@@ -201,7 +211,7 @@ export default function AdminRedeemCodes() {
       const s = String(v ?? '')
       return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
     }
-    const header = ['code', 'group', 'status', 'duration_days', 'used_count', 'max_uses', 'batch_name', 'note', 'expires_at', 'created_at']
+    const header = ['code', 'kind', 'group', 'credits', 'status', 'duration_days', 'used_count', 'max_uses', 'batch_name', 'note', 'expires_at', 'created_at']
     const now = Math.floor(Date.now() / 1000)
     const statusOf = (r: ApiRedeemCode) => {
       if (!r.enabled) return 'disabled'
@@ -216,9 +226,11 @@ export default function AdminRedeemCodes() {
       lines.push(
         [
           esc(r.code),
-          esc(groupByID.get(r.group_id)?.name ?? r.group_id),
+          esc(r.kind ?? 'group'),
+          esc(r.kind === 'credits' ? '' : (groupByID.get(r.group_id)?.name ?? r.group_id)),
+          esc(r.kind === 'credits' ? r.credits : ''),
           esc(statusOf(r)),
-          esc(r.duration_days),
+          esc(r.kind === 'credits' ? '' : r.duration_days),
           esc(r.used_count),
           esc(r.max_uses),
           esc(r.batch_name ?? ''),
@@ -333,30 +345,65 @@ export default function AdminRedeemCodes() {
               />
             ) : (
               <div className="grid gap-4">
-                <Field label={t('admin:redeemCodes.fields.group')} htmlFor="rc-group" hint={t('admin:redeemCodes.fields.groupHint')}>
-                  <Select value={draft.group_id} onValueChange={(v) => setDraft({ ...draft, group_id: v })}>
-                    <SelectTrigger id="rc-group">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {groups.map((g) => (
-                        <SelectItem key={g.id} value={g.id}>
-                          {g.name}{g.is_default ? ` · ${t('admin:groups.default', { defaultValue: 'Default' })}` : ''}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                <Field label={t('admin:redeemCodes.fields.kind')} hint={t('admin:redeemCodes.fields.kindHint')}>
+                  <div className="flex items-center gap-2" role="radiogroup" aria-label={t('admin:redeemCodes.fields.kind')}>
+                    {(['group', 'credits'] as const).map((k) => (
+                      <button
+                        key={k}
+                        type="button"
+                        role="radio"
+                        aria-checked={draft.kind === k}
+                        onClick={() => setDraft({ ...draft, kind: k })}
+                        className={
+                          'inline-flex items-center h-8 px-3 rounded-[8px] text-[12px] interactive ' +
+                          (draft.kind === k
+                            ? 'bg-[var(--color-surface)] border border-[var(--color-border-strong)] text-[var(--color-fg)]'
+                            : 'border border-[var(--color-border)] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]')
+                        }
+                      >
+                        {t(`admin:redeemCodes.kinds.${k}`)}
+                      </button>
+                    ))}
+                  </div>
                 </Field>
-                <div className="grid grid-cols-2 gap-4">
-                  <Field label={t('admin:redeemCodes.fields.durationDays')} htmlFor="rc-dur" hint={t('admin:redeemCodes.fields.durationDaysHint')}>
+                {draft.kind === 'group' ? (
+                  <Field label={t('admin:redeemCodes.fields.group')} htmlFor="rc-group" hint={t('admin:redeemCodes.fields.groupHint')}>
+                    <Select value={draft.group_id} onValueChange={(v) => setDraft({ ...draft, group_id: v })}>
+                      <SelectTrigger id="rc-group">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {groups.map((g) => (
+                          <SelectItem key={g.id} value={g.id}>
+                            {g.name}{g.is_default ? ` · ${t('admin:groups.default', { defaultValue: 'Default' })}` : ''}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                ) : (
+                  <Field label={t('admin:redeemCodes.fields.credits')} htmlFor="rc-credits" hint={t('admin:redeemCodes.fields.creditsHint')}>
                     <Input
-                      id="rc-dur"
+                      id="rc-credits"
                       type="number"
-                      min={0}
-                      value={String(draft.duration_days)}
-                      onChange={(e) => setDraft({ ...draft, duration_days: Math.max(0, Number(e.target.value) || 0) })}
+                      min={1}
+                      value={String(draft.credits)}
+                      onChange={(e) => setDraft({ ...draft, credits: Math.max(0, Number(e.target.value) || 0) })}
                     />
                   </Field>
+                )}
+                <div className="grid grid-cols-2 gap-4">
+                  {draft.kind === 'group' ? (
+                    <Field label={t('admin:redeemCodes.fields.durationDays')} htmlFor="rc-dur" hint={t('admin:redeemCodes.fields.durationDaysHint')}>
+                      <Input
+                        id="rc-dur"
+                        type="number"
+                        min={0}
+                        value={String(draft.duration_days)}
+                        onChange={(e) => setDraft({ ...draft, duration_days: Math.max(0, Number(e.target.value) || 0) })}
+                      />
+                    </Field>
+                  ) : null}
                   <Field label={t('admin:redeemCodes.fields.quantity')} htmlFor="rc-qty" hint={t('admin:redeemCodes.fields.quantityHint')}>
                     <Input
                       id="rc-qty"
@@ -474,8 +521,10 @@ function CodeRow({
     statusVariant = 'sage'
   } else if (row.used_count > 0) statusLabel = t('admin:redeemCodes.status.partial')
 
-  const durationLabel =
-    row.duration_days === 0
+  const isCredits = row.kind === 'credits'
+  const durationLabel = isCredits
+    ? t('admin:redeemCodes.creditsAmount', { count: row.credits })
+    : row.duration_days === 0
       ? t('admin:redeemCodes.durationPermanent')
       : t('admin:redeemCodes.durationDays', { count: row.duration_days })
 
@@ -489,7 +538,11 @@ function CodeRow({
           <Badge size="xs" variant={statusVariant}>
             {statusLabel}
           </Badge>
-          {group ? (
+          {isCredits ? (
+            <Badge size="xs" variant="sage">
+              {t('admin:redeemCodes.kinds.credits')}
+            </Badge>
+          ) : group ? (
             <Badge size="xs" variant="neutral">
               {group.name}
             </Badge>
