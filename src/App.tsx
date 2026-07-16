@@ -1,6 +1,6 @@
-import { lazy, Suspense, useEffect } from 'react'
-import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
-import { useOpenSettings, type SettingsBackgroundState } from '@/hooks/use-open-settings'
+import { lazy, Suspense, useEffect, useRef } from 'react'
+import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
+import { useOpenSettings } from '@/hooks/use-open-settings'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { Toaster } from '@/components/ui/toaster'
 import { CommandMenu } from '@/components/command-menu/command-menu'
@@ -8,10 +8,13 @@ import { WelcomeCard } from '@/components/welcome/welcome-card'
 import { SetPasswordGate } from '@/components/welcome/set-password-gate'
 import { AnnouncementPopup } from '@/components/announcement/announcement-popup'
 import { AuthGate } from '@/components/auth/auth-gate'
+import SettingsDialog from '@/pages/settings/SettingsLayout'
 import { useCommandMenu } from '@/hooks/use-command-menu'
 import { useHotkeys } from '@/hooks/use-hotkeys'
 import { useSettings } from '@/store/settings'
 import { useConversations } from '@/store/conversations'
+import { useUI } from '@/store/ui'
+import { useSettingsModal } from '@/store/settings-modal'
 import { initAppUpdate, maybeApplyUpdate } from '@/lib/app-update'
 import { initRealtime } from '@/lib/realtime'
 
@@ -30,14 +33,6 @@ const Setup = lazy(() => import('@/pages/auth/Setup'))
 const ForgotPassword = lazy(() => import('@/pages/auth/ForgotPassword'))
 const Privacy = lazy(() => import('@/pages/legal/Privacy'))
 const Terms = lazy(() => import('@/pages/legal/Terms'))
-const SettingsLayout = lazy(() => import('@/pages/settings/SettingsLayout'))
-const SettingsAccount = lazy(() => import('@/pages/settings/Account'))
-const SettingsAppearance = lazy(() => import('@/pages/settings/Appearance'))
-const SettingsModels = lazy(() => import('@/pages/settings/Models'))
-const SettingsPersonalization = lazy(() => import('@/pages/settings/Personalization'))
-const SettingsPrivacy = lazy(() => import('@/pages/settings/Privacy'))
-const SettingsShortcuts = lazy(() => import('@/pages/settings/Shortcuts'))
-const SettingsAbout = lazy(() => import('@/pages/settings/About'))
 const Subscription = lazy(() => import('@/pages/subscription/Subscription'))
 const SharedConversation = lazy(() => import('@/pages/share/SharedConversation'))
 const JoinWorkspace = lazy(() => import('@/pages/workspace/JoinWorkspace'))
@@ -123,6 +118,57 @@ function ScrollToTop() {
   return null
 }
 
+// Mobile: any navigation dismisses the sidebar drawer. Individual links inside
+// the drawer already close it on tap for instant feedback, but plenty of
+// navigations bypass those handlers (user-menu items, the archived dialog, the
+// command menu, workspace switches) — this catches them all, and also resets a
+// stale open flag when returning from layouts without the drawer (e.g. /admin).
+function CloseNavOnNavigate() {
+  const { pathname, search } = useLocation()
+  const setNavOpen = useUI((s) => s.setNavOpen)
+  useEffect(() => {
+    setNavOpen(false)
+  }, [pathname, search, setNavOpen])
+  return null
+}
+
+// The settings dialog is pure UI state, so a route change underneath (browser
+// Back, sign-out redirects, command-menu navigation) must dismiss it or it
+// would float over the new page. Lives HERE — outside AuthGate — because the
+// sign-out flow remounts the AuthGate subtree, which would wipe a ref kept
+// inside the dialog; App never remounts, so the previous-path ref survives.
+// The /settings deep-link redirect is exempt: that navigation is the one that
+// OPENS the dialog (SettingsRedirect below).
+function CloseSettingsOnNavigate() {
+  const { pathname } = useLocation()
+  const prevPathRef = useRef(pathname)
+  useEffect(() => {
+    const prev = prevPathRef.current
+    prevPathRef.current = pathname
+    if (prev !== pathname && !prev.startsWith('/settings')) {
+      useSettingsModal.getState().close()
+    }
+  }, [pathname])
+  return null
+}
+
+// Settings is a pure-state dialog (§设置-去路由化) — this route shim keeps the
+// old /settings/:tab URLs working: the OAuth identity-link callback redirects
+// to /settings/account?linked=…, and older bookmarks/deep links still point
+// here. It opens the dialog on the requested tab and replaces the URL with
+// /chat, carrying the query string so the account tab's ?linked toast fires.
+function SettingsRedirect() {
+  const { tab } = useParams<{ tab?: string }>()
+  const { search } = useLocation()
+  const navigate = useNavigate()
+  const openSettings = useOpenSettings()
+  useEffect(() => {
+    openSettings(tab)
+    navigate({ pathname: '/chat', search }, { replace: true })
+  }, [tab, search, navigate, openSettings])
+  return <RouteFallback />
+}
+
 export default function App() {
   const location = useLocation()
   // §23: realtime notify stream (multi-device sync) + invisible version
@@ -132,30 +178,23 @@ export default function App() {
     initRealtime()
     initAppUpdate()
   }, [])
-  // §settings modal: when opened over a page, `backgroundLocation` holds that
-  // page. The main <Routes> then render IT (so it stays live behind the modal),
-  // and a second <Routes> renders the settings modal on top — its backdrop-blur
-  // blurs the page behind. Absent (deep link / OAuth ?linked / fresh load) the
-  // modal renders over the app shell instead.
-  const backgroundLocation = (location.state as SettingsBackgroundState | null)?.backgroundLocation
   // A route navigation is a safe, invisible moment to apply a pending upgrade
-  // (never fires while a message is streaming — see maybeApplyUpdate). Overlay
-  // navigations (the settings modal opening / switching tabs over a live
-  // backdrop) don't count: the user perceives them as staying on the page, so
-  // a full reload there would be anything but invisible. The upgrade applies
-  // on the closing navigation back to the background page instead.
-  const isOverlayNavigation = Boolean(backgroundLocation)
+  // (never fires while a message is streaming — see maybeApplyUpdate). The
+  // settings dialog no longer navigates (pure UI state), so every pathname
+  // change here is a real page swap the user already perceives as a jump.
   useEffect(() => {
-    if (!isOverlayNavigation) maybeApplyUpdate('navigation')
-  }, [location.pathname, isOverlayNavigation])
+    maybeApplyUpdate('navigation')
+  }, [location.pathname])
 
   return (
     <TooltipProvider delayDuration={280} skipDelayDuration={120}>
       <ScrollToTop />
+      <CloseNavOnNavigate />
+      <CloseSettingsOnNavigate />
       <AuthGate>
         <GlobalShortcuts />
         <Suspense fallback={<RouteFallback />}>
-          <Routes location={backgroundLocation ?? location}>
+          <Routes>
             <Route path="/welcome" element={<Landing />} />
             <Route path="/share/:token" element={<SharedConversation />} />
             <Route path="/workspace/join/:token" element={<JoinWorkspace />} />
@@ -189,21 +228,11 @@ export default function App() {
             </Route>
             <Route path="/privacy" element={<Privacy />} />
             <Route path="/terms" element={<Terms />} />
-            {/* Settings live inside ChatLayout (conversation sidebar on the
-                left, settings on the right) — like Subscription. SettingsLayout
-                supplies the in-panel header + tab nav. */}
-            <Route path="/settings" element={<ChatLayout />}>
-              <Route element={<SettingsLayout />}>
-                <Route index element={<SettingsAccount />} />
-                <Route path="account" element={<SettingsAccount />} />
-                <Route path="appearance" element={<SettingsAppearance />} />
-                <Route path="models" element={<SettingsModels />} />
-                <Route path="personalization" element={<SettingsPersonalization />} />
-                <Route path="privacy" element={<SettingsPrivacy />} />
-                <Route path="shortcuts" element={<SettingsShortcuts />} />
-                <Route path="about" element={<SettingsAbout />} />
-              </Route>
-            </Route>
+            {/* Settings is a dialog, not a page — these only catch old
+                /settings/:tab links and the OAuth ?linked callback, opening
+                the dialog and replacing the URL (see SettingsRedirect). */}
+            <Route path="/settings" element={<SettingsRedirect />} />
+            <Route path="/settings/:tab" element={<SettingsRedirect />} />
             <Route path="/admin" element={<AdminLayout />}>
               <Route index element={<Navigate to="settings" replace />} />
               <Route path="channels" element={<AdminChannels />} />
@@ -233,24 +262,10 @@ export default function App() {
             </Route>
             <Route path="*" element={<NotFound />} />
           </Routes>
-          {/* Overlay: settings modal rendered ON TOP of the live background page
-              (only when opened over one). SettingsLayout is a portaled dialog, so
-              it floats above whatever the main <Routes> rendered above. */}
-          {backgroundLocation && (
-            <Routes>
-              <Route path="/settings" element={<SettingsLayout />}>
-                <Route index element={<SettingsAccount />} />
-                <Route path="account" element={<SettingsAccount />} />
-                <Route path="appearance" element={<SettingsAppearance />} />
-                <Route path="models" element={<SettingsModels />} />
-                <Route path="personalization" element={<SettingsPersonalization />} />
-                <Route path="privacy" element={<SettingsPrivacy />} />
-                <Route path="shortcuts" element={<SettingsShortcuts />} />
-                <Route path="about" element={<SettingsAbout />} />
-              </Route>
-            </Routes>
-          )}
         </Suspense>
+        {/* Portaled dialog floating above whatever the Routes rendered; renders
+            nothing while closed (tab chunks stay unloaded until first open). */}
+        <SettingsDialog />
         <CommandMenu />
         <SetPasswordGate />
         <WelcomeCard />
