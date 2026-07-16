@@ -75,8 +75,10 @@ export function StylePicker({ value, onChange, className }: StylePickerProps) {
           if (!loaded) void load()
         }}
       >
-        {/* Sticky heading so it stays visible while the grid scrolls. */}
-        <p className="sticky top-0 z-10 -mx-2 -mt-2 mb-1 bg-[var(--color-surface-raised)] px-3 pb-1.5 pt-2 text-[11px] font-medium uppercase tracking-wider text-[var(--color-fg-subtle)]">
+        {/* Sticky heading so it stays visible while the grid scrolls. -top-2
+            offsets the popover's p-2 scroll padding — with top-0 the padding
+            band stays see-through and scrolled swatches peek out above it. */}
+        <p className="sticky -top-2 z-10 -mx-2 -mt-2 mb-1 bg-[var(--color-surface-raised)] px-3 pb-1.5 pt-2 text-[11px] font-medium uppercase tracking-wider text-[var(--color-fg-subtle)]">
           {t('composer.styleHeading', { defaultValue: 'Image style' })}
         </p>
         {styles.length === 0 ? (
