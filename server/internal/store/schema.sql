@@ -74,11 +74,16 @@ CREATE INDEX IF NOT EXISTS idx_mgq_group ON model_group_quotas(group_id);
 -- (default) makes codes single-use; admins can bump it for shared promo codes.
 -- enabled=0 lets an admin revoke an unredeemed code without deleting the row
 -- (preserves audit history).
+-- kind='credits' codes grant `credits` permanent credits instead of a group;
+-- their group_id holds the default group as an FK-satisfying placeholder and
+-- is never applied to the redeemer.
 CREATE TABLE IF NOT EXISTS redeem_codes (
   id            TEXT PRIMARY KEY,
   code          TEXT UNIQUE NOT NULL,
+  kind          TEXT NOT NULL DEFAULT 'group',
   group_id      TEXT NOT NULL REFERENCES user_groups(id) ON DELETE CASCADE,
   duration_days INTEGER NOT NULL DEFAULT 30,
+  credits       REAL NOT NULL DEFAULT 0,
   max_uses      INTEGER NOT NULL DEFAULT 1,
   used_count    INTEGER NOT NULL DEFAULT 0,
   expires_at    INTEGER NOT NULL DEFAULT 0,
@@ -100,6 +105,7 @@ CREATE TABLE IF NOT EXISTS redeem_redemptions (
   user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   group_id        TEXT NOT NULL REFERENCES user_groups(id) ON DELETE CASCADE,
   previous_group_id TEXT NOT NULL DEFAULT '',
+  credits         REAL NOT NULL DEFAULT 0,
   granted_at      INTEGER NOT NULL,
   expires_at      INTEGER NOT NULL,
   UNIQUE(code_id, user_id)

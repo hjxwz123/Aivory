@@ -750,7 +750,7 @@
   },
   "redeemCodes": {
     "title": "兑换码",
-    "lead": "生成兑换码授予用户组与有效期。",
+    "lead": "生成兑换码授予用户组与有效期，或永久积分。",
     "new": "新建批次",
     "empty": "暂无兑换码 —— 生成一个批次开始派发。",
     "copy": "复制兑换码",
@@ -800,10 +800,14 @@
       "expiresAt": "兑换码过期时间",
       "expiresAtHint": "过期后未兑换即失效。留空=永不过期。",
       "note": "备注",
-      "notePlaceholder": "关于这批兑换码你想记录的内容"
+      "notePlaceholder": "关于这批兑换码你想记录的内容",
+      "kind": "兑换码类型",
+      "kindHint": "会员码授予用户组与有效期；积分码直接充入永久积分。",
+      "credits": "积分数量",
+      "creditsHint": "兑换后充入用户永久积分余额，永不过期。"
     },
     "newTitle": "新建兑换码批次",
-    "newLead": "每个码授予所配置的用户组与有效期。",
+    "newLead": "每个码授予所配置的用户组与有效期，或固定数量的永久积分。",
     "create": "生成",
     "created": "批次已生成",
     "createdToast_one": "已生成 1 个兑换码",
@@ -826,8 +830,14 @@
     "errors": {
       "groupRequired": "请选择用户组",
       "quantityRange": "数量须在 1 到 1000 之间",
-      "durationNegative": "时长不能为负数"
-    }
+      "durationNegative": "时长不能为负数",
+      "creditsRequired": "积分数量须大于 0"
+    },
+    "kinds": {
+      "group": "会员",
+      "credits": "积分"
+    },
+    "creditsAmount": "{{count}} 积分"
   },
   "sandbox": {
     "title": "沙盒文件",

@@ -746,7 +746,7 @@
   },
   "redeemCodes": {
     "title": "兌換碼",
-    "lead": "產生兌換碼授予群組與有效期。",
+    "lead": "產生兌換碼授予使用者群組與有效期，或永久積分。",
     "new": "新建批次",
     "empty": "暫無兌換碼 —— 生成一個批次開始派發。",
     "copy": "複製兌換碼",
@@ -796,10 +796,14 @@
       "expiresAt": "兌換碼過期時間",
       "expiresAtHint": "過期後未兌換即失效。留空=永不過期。",
       "note": "備註",
-      "notePlaceholder": "關於這批兌換碼你想記錄的內容"
+      "notePlaceholder": "關於這批兌換碼你想記錄的內容",
+      "kind": "兌換碼類型",
+      "kindHint": "會員碼授予使用者群組與有效期；積分碼直接儲入永久積分。",
+      "credits": "積分數量",
+      "creditsHint": "兌換後儲入使用者永久積分餘額，永不過期。"
     },
     "newTitle": "新建兌換碼批次",
-    "newLead": "每個碼授予所設定的群組與有效期。",
+    "newLead": "每個碼授予所設定的使用者群組與有效期，或固定數量的永久積分。",
     "create": "生成",
     "created": "批次已生成",
     "createdToast_one": "已生成 1 個兌換碼",
@@ -822,8 +826,14 @@
     "errors": {
       "groupRequired": "請選擇使用者組",
       "quantityRange": "數量須在 1 到 1000 之間",
-      "durationNegative": "時長不能為負數"
-    }
+      "durationNegative": "時長不能為負數",
+      "creditsRequired": "積分數量須大於 0"
+    },
+    "kinds": {
+      "group": "會員",
+      "credits": "積分"
+    },
+    "creditsAmount": "{{count}} 積分"
   },
   "sandbox": {
     "title": "沙盒檔案",

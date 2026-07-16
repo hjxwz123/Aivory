@@ -746,7 +746,7 @@
   },
   "redeemCodes": {
     "title": "Redeem codes",
-    "lead": "Generate codes that grant a group + duration.",
+    "lead": "Generate codes that grant a group + duration, or permanent credits.",
     "new": "New batch",
     "empty": "No codes yet — generate a batch to hand out.",
     "copy": "Copy code",
@@ -796,10 +796,14 @@
       "expiresAt": "Code expires at",
       "expiresAtHint": "Unredeemed codes expire after this. Empty = never.",
       "note": "Note",
-      "notePlaceholder": "Anything you want to remember about this batch"
+      "notePlaceholder": "Anything you want to remember about this batch",
+      "kind": "Code type",
+      "kindHint": "Membership codes grant a group + duration; credits codes add permanent credits.",
+      "credits": "Credits amount",
+      "creditsHint": "Permanent credits added to the redeemer’s balance. They never expire."
     },
     "newTitle": "Generate code batch",
-    "newLead": "Each code grants the configured group + duration.",
+    "newLead": "Each code grants the configured group + duration, or a fixed amount of permanent credits.",
     "create": "Generate",
     "created": "Batch generated",
     "createdToast_one": "1 code generated",
@@ -822,8 +826,14 @@
     "errors": {
       "groupRequired": "Pick a group",
       "quantityRange": "Quantity must be between 1 and 1000",
-      "durationNegative": "Duration must be 0 or greater"
-    }
+      "durationNegative": "Duration must be 0 or greater",
+      "creditsRequired": "Credits amount must be greater than 0"
+    },
+    "kinds": {
+      "group": "Membership",
+      "credits": "Credits"
+    },
+    "creditsAmount": "{{count}} credits"
   },
   "sandbox": {
     "title": "Sandbox files",
