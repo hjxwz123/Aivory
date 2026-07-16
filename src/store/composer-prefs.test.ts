@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { parsePersistedComposerPrefs, resetComposerToolModeToDefault, useComposerPrefs } from './composer-prefs'
-import { resolveDefaultToolMode } from '@/lib/tool-mode'
+import { modelAllowsToolModeSelection, resolveDefaultToolMode } from '@/lib/tool-mode'
 import {
   resolveArmedTurnFlags,
   resolveToolRequestFlags,
@@ -69,6 +69,18 @@ describe('composer tool mode', () => {
     useComposerPrefs.getState().setToolMode('enabled')
     expect(useComposerPrefs.getState().forceWebSearch).toBe(false)
     expect(resolveArmedTurnFlags().webSearch).toBeUndefined()
+  })
+})
+
+describe('model tool capability', () => {
+  it('hides the per-turn selector only for models configured with no tool calls', () => {
+    expect(modelAllowsToolModeSelection('none')).toBe(false)
+    expect(modelAllowsToolModeSelection('native')).toBe(true)
+    expect(modelAllowsToolModeSelection('prompt')).toBe(true)
+  })
+
+  it('keeps the selector compatible with older model-list responses', () => {
+    expect(modelAllowsToolModeSelection(undefined)).toBe(true)
   })
 })
 

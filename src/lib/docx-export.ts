@@ -36,7 +36,6 @@ import {
 // Word documents are theme-independent; these mirror the brand without pure
 // black/white (kept local on purpose: docx colors are hex-without-# strings).
 const COLOR_FG = '2A241E'
-const COLOR_FG_MUTED = '6B5F53'
 const COLOR_ACCENT = 'B1552F'
 const COLOR_BORDER = 'D8D0C6'
 const FILL_CODE_BLOCK = 'F5F2EC'
@@ -96,12 +95,41 @@ function texToOmml(tex: string, display: boolean): string | null {
 
 type InlineChild = TextRun | ExternalHyperlink | ImportedXmlComponent
 
+/**
+ * `docx@9.7.x` parses an XML fragment through an anonymous document node.
+ * `ImportedXmlComponent.fromXmlString()` exposes that node as a component with
+ * an undefined root key, which serializes as `<undefined>...</undefined>` and
+ * makes Word reject the entire file. Keep the workaround local and accept a
+ * future `docx` version that may return the element itself.
+ */
+class ImportedXmlFragment extends ImportedXmlComponent {
+  static rootKeyOf(component: ImportedXmlComponent): string | undefined {
+    return (component as ImportedXmlFragment).rootKey
+  }
+
+  static firstChildOf(component: ImportedXmlComponent): unknown {
+    return (component as ImportedXmlFragment).root[0]
+  }
+}
+
+function importOmml(omml: string): ImportedXmlComponent | null {
+  const parsed = ImportedXmlComponent.fromXmlString(omml)
+  if (ImportedXmlFragment.rootKeyOf(parsed) === 'm:oMath') return parsed
+
+  const firstChild = ImportedXmlFragment.firstChildOf(parsed)
+  return firstChild instanceof ImportedXmlComponent &&
+    ImportedXmlFragment.rootKeyOf(firstChild) === 'm:oMath'
+    ? firstChild
+    : null
+}
+
 /** One math slot → native equation, or a monospace-italic TeX fallback. */
 function mathChild(slot: MathSlot): InlineChild {
   const omml = texToOmml(slot.tex, slot.display)
   if (omml) {
     try {
-      return ImportedXmlComponent.fromXmlString(omml)
+      const component = importOmml(omml)
+      if (component) return component
     } catch {
       /* fall through to text */
     }
