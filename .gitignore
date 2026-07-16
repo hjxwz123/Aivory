@@ -54,3 +54,12 @@ docs-site/
 
 # Vendored reference demo (火山引擎 SAUC ASR), not part of the shipped app
 sauc_go/
+
+# Android shell (§ mobile app) — the whole APK toolchain stays local-only:
+# generated Capacitor project, icon sources, config, build outputs, signing material
+*.apk
+*.apk.idsig
+*.keystore
+/android/
+/assets/
+/capacitor.config.ts
