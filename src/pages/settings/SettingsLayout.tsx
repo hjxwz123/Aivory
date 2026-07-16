@@ -1,69 +1,84 @@
-import { Suspense, useCallback, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, type ComponentType, type LazyExoticComponent } from 'react'
 import * as DialogPrimitive from '@radix-ui/react-dialog'
-import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { User, Wand2, Palette, Sparkles, ShieldCheck, Keyboard, Info, X } from 'lucide-react'
 import { DialogOverlay, DialogTitle } from '@/components/ui/dialog'
-import { type SettingsBackgroundState } from '@/hooks/use-open-settings'
+import { useSettingsModal, type SettingsTab } from '@/store/settings-modal'
+import { useAuth } from '@/store/auth'
 import { RouteFade } from '@/components/ui/route-fade'
 import { PanelFallback } from '@/components/ui/panel-fallback'
 import { cn } from '@/lib/utils'
 
 const tabDefs = [
-  { to: '/settings/account', key: 'account', icon: User },
-  { to: '/settings/personalization', key: 'personalization', icon: Wand2 },
-  { to: '/settings/appearance', key: 'appearance', icon: Palette },
-  { to: '/settings/models', key: 'models', icon: Sparkles },
-  { to: '/settings/privacy', key: 'privacy', icon: ShieldCheck },
-  { to: '/settings/shortcuts', key: 'shortcuts', icon: Keyboard },
-  { to: '/settings/about', key: 'about', icon: Info },
-] as const
+  { key: 'account', icon: User },
+  { key: 'personalization', icon: Wand2 },
+  { key: 'appearance', icon: Palette },
+  { key: 'models', icon: Sparkles },
+  { key: 'privacy', icon: ShieldCheck },
+  { key: 'shortcuts', icon: Keyboard },
+  { key: 'about', icon: Info },
+] as const satisfies readonly { key: SettingsTab; icon: ComponentType<{ size?: number | string }> }[]
 
-// Settings render as a MODAL over the app (§ settings modal): the conversation
-// sidebar/current page stay dimmed behind the overlay. The shell is a Radix
-// dialog with a left nav rail (vertical on desktop, a top scroll-row on mobile)
-// and a scrolling right pane that hosts the nested route <Outlet/> — so every
-// entry point (mod+, / sidebar / command menu) and the OAuth ?linked deep-link
-// keep working unchanged: they just navigate to /settings/:tab, which mounts
-// this dialog. Closing (X / Esc / backdrop) returns to /chat.
-export default function SettingsLayout() {
-  const location = useLocation()
-  const { pathname } = location
-  const navigate = useNavigate()
+// Tab bodies stay lazy so the settings chunks load only on first open — the
+// dialog shell itself ships in the main bundle (it's mounted app-wide).
+// The dynamic-import cycle with the tab pages (they import SettingsSection/
+// SettingsRow back from this module) is fine: this module is fully evaluated
+// long before a tab chunk resolves.
+const tabPages: Record<SettingsTab, LazyExoticComponent<ComponentType>> = {
+  account: lazy(() => import('./Account')),
+  personalization: lazy(() => import('./Personalization')),
+  appearance: lazy(() => import('./Appearance')),
+  models: lazy(() => import('./Models')),
+  privacy: lazy(() => import('./Privacy')),
+  shortcuts: lazy(() => import('./Shortcuts')),
+  about: lazy(() => import('./About')),
+}
+
+// Settings render as a MODAL over the app (§ settings modal, § 设置-去路由化):
+// the current page stays dimmed behind the overlay. The shell is a Radix
+// dialog with a left nav rail (vertical on desktop, a top scroll-row on
+// mobile) and a scrolling right pane hosting the active tab. It is driven
+// entirely by the useSettingsModal store — opening/switching tabs/closing
+// never touches the URL, so the page behind keeps its route, state and
+// scroll. Old /settings/:tab links and the OAuth ?linked callback still work
+// via the redirect route in App.tsx. Radix plays the exit animation on close
+// (state-driven now, no route-unmount hack needed). The file keeps its
+// pages/settings home because the tab pages and their shared SettingsSection/
+// SettingsRow helpers live here.
+export default function SettingsDialog() {
+  const open = useSettingsModal((s) => s.open)
+  const tab = useSettingsModal((s) => s.tab)
+  const setTab = useSettingsModal((s) => s.setTab)
+  const close = useSettingsModal((s) => s.close)
   const { t } = useTranslation(['settings', 'common'])
 
-  const isAccountDefault = pathname === '/settings' || pathname === '/settings/'
-  // The page the modal was opened OVER (set by useOpenSettings). Threaded through
-  // tab NavLinks so switching tabs keeps the live backdrop, and used on close to
-  // return to that exact page (navigate(-1) restores its live instance + scroll).
-  const backgroundLocation = (location.state as SettingsBackgroundState | null)?.backgroundLocation
-  const navState = backgroundLocation ? { backgroundLocation } : undefined
+  // Auth latch. Signing out INSIDE the dialog (change password / delete
+  // account → navigate('/login')) makes AuthGate remount this whole subtree —
+  // an effect watching the route here would lose its ref across that remount
+  // and leave the dialog floating over the login page (App-level
+  // CloseSettingsOnNavigate handles route changes; it can't win this race
+  // because the remount happens in the same commit). Gating the Radix `open`
+  // on auth hides the dialog synchronously in that very render — no ghost
+  // frame — and the effect then settles the store for the next session.
+  const authed = useAuth((s) => Boolean(s.user))
+  useEffect(() => {
+    if (!authed) close()
+  }, [authed, close])
 
-  // Exit animation: this dialog is ROUTE-mounted, so navigating away on close
-  // unmounts it instantly and the data-[state=closed] fade never plays (the
-  // close felt abrupt, unlike every other Dialog). Instead: flip local `open`
-  // to false so Radix runs the exit animation, then navigate when the content's
-  // fade-out finishes — with a timeout fallback slightly over the 140ms
-  // animation so reduced-motion (which disables animations, so animationend
-  // never fires) still closes.
-  const [open, setOpen] = useState(true)
-  const closedRef = useRef(false)
-  const finishClose = useCallback(() => {
-    if (closedRef.current) return
-    closedRef.current = true
-    if (backgroundLocation) navigate(-1)
-    else navigate('/chat')
-  }, [backgroundLocation, navigate])
-  const requestClose = () => {
-    setOpen(false)
-    window.setTimeout(finishClose, 220)
-  }
+  // Each tab starts reading from the top — without this the pane keeps the
+  // previous tab's scroll offset (the sticky headers made that look broken).
+  const paneRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    paneRef.current?.scrollTo({ top: 0 })
+  }, [tab])
+
+  const ActiveTab = tabPages[tab]
 
   return (
     <DialogPrimitive.Root
-      open={open}
+      open={open && authed}
       onOpenChange={(o) => {
-        if (!o) requestClose()
+        if (!o) close()
       }}
     >
       <DialogPrimitive.Portal>
@@ -81,11 +96,6 @@ export default function SettingsLayout() {
             'data-[state=open]:animate-[pop-in_220ms_var(--ease-out)]',
             'data-[state=closed]:animate-[fade-out_140ms_var(--ease-in)]',
           )}
-          onAnimationEnd={() => {
-            // Navigate as soon as the exit fade completes (the timeout in
-            // requestClose is only the reduced-motion fallback).
-            if (!open) finishClose()
-          }}
         >
           {/* ===== Left rail ===== */}
           <div
@@ -116,32 +126,29 @@ export default function SettingsLayout() {
               )}
               aria-label={t('settings:title')}
             >
-              {tabDefs.map((tab) => (
-                <NavLink
-                  key={tab.to}
-                  to={tab.to}
-                  end={tab.to === '/settings/account' ? false : undefined}
-                  // replace + carry the background so switching tabs neither
-                  // stacks history (close still returns to the backdrop page)
-                  // nor drops the live blurred backdrop.
-                  replace
-                  state={navState}
-                  className={({ isActive }) =>
-                    cn(
+              {tabDefs.map((def) => {
+                const active = def.key === tab
+                return (
+                  <button
+                    key={def.key}
+                    type="button"
+                    onClick={() => setTab(def.key)}
+                    aria-current={active ? 'page' : undefined}
+                    className={cn(
                       'inline-flex items-center gap-2.5 rounded-[10px] whitespace-nowrap interactive',
                       'px-3 py-2 text-sm font-medium',
                       'sm:w-full',
                       'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-                      isActive || (tab.to === '/settings/account' && isAccountDefault)
+                      active
                         ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)] sm:shadow-none sm:bg-[var(--color-bg-muted)]'
                         : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-bg-muted)]/60',
-                    )
-                  }
-                >
-                  <tab.icon size={15} aria-hidden className="shrink-0" />
-                  {t(`settings:tabs.${tab.key}`)}
-                </NavLink>
-              ))}
+                    )}
+                  >
+                    <def.icon size={15} aria-hidden className="shrink-0" />
+                    {t(`settings:tabs.${def.key}`)}
+                  </button>
+                )
+              })}
             </nav>
           </div>
 
@@ -161,7 +168,7 @@ export default function SettingsLayout() {
           </DialogPrimitive.Close>
           {/* scroll-padding clears the pinned page header, so focus/anchor
               auto-scrolls land visible instead of underneath it. */}
-          <div className="relative min-h-0 min-w-0 flex-1 overflow-y-auto scrollbar-hover [scroll-padding-top:7.5rem]">
+          <div ref={paneRef} className="relative min-h-0 min-w-0 flex-1 overflow-y-auto scrollbar-hover [scroll-padding-top:7.5rem]">
             <div
               className={cn(
                 // No top padding here — the pinned header carries it instead.
@@ -177,14 +184,12 @@ export default function SettingsLayout() {
                 '[&_header]:border-b [&_header]:border-[var(--color-divider)]',
               )}
             >
-              <RouteFade dep={pathname}>
-                {/* key=pathname: a router navigation runs inside startTransition,
-                    and an already-mounted Suspense boundary won't show its
-                    fallback during a transition. Re-keying mounts a fresh
-                    boundary so the tab switches instantly with a spinner while
-                    the lazy chunk loads (§ instant nav). */}
-                <Suspense key={pathname} fallback={<PanelFallback />}>
-                  <Outlet />
+              <RouteFade dep={tab}>
+                {/* key=tab: a fresh Suspense boundary per tab so switching shows
+                    the panel loader instantly while the lazy chunk loads,
+                    instead of freezing on the old tab (§ instant nav). */}
+                <Suspense key={tab} fallback={<PanelFallback />}>
+                  <ActiveTab />
                 </Suspense>
               </RouteFade>
             </div>

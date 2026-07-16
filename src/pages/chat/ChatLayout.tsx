@@ -31,7 +31,7 @@ export default function ChatLayout() {
   const pageOwnsTopBar = useUI((s) => s.pageOwnsTopBar)
   const activeWsId = useWorkspaces((s) => s.activeId)
   // Coarse section key for page transitions: collapse param routes (e.g.
-  // /chat/:id, /projects/:id, /settings/*) to their first segment so switching
+  // /chat/:id, /projects/:id, /kb/:id) to their first segment so switching
   // conversations within a section doesn't re-fade — only section-to-section
   // navigation (the abrupt jumps) animates.
   const { pathname } = useLocation()

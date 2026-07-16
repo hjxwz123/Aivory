@@ -266,7 +266,10 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
             <div key={activeWorkspace.id} className="page-enter flex min-w-0 items-center gap-1.5">
               <Link
                 to="/"
-                onClick={resetComposerToolModeToDefault}
+                onClick={() => {
+                  resetComposerToolModeToDefault()
+                  onClose?.()
+                }}
                 className="inline-flex min-w-0 items-center gap-2"
                 aria-label={activeWorkspace.name}
                 title={activeWorkspace.name}
@@ -289,7 +292,16 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
               </Tooltip>
             </div>
           ) : (
-          <Link key="personal" to="/" onClick={resetComposerToolModeToDefault} className="page-enter inline-flex items-center" aria-label={tCommon('aria.homeLink')}>
+          <Link
+            key="personal"
+            to="/"
+            onClick={() => {
+              resetComposerToolModeToDefault()
+              onClose?.()
+            }}
+            className="page-enter inline-flex items-center"
+            aria-label={tCommon('aria.homeLink')}
+          >
             <Logo size="sm" />
           </Link>
           )
