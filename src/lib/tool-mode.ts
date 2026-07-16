@@ -1,7 +1,16 @@
 export type ToolMode = 'auto' | 'disabled' | 'enabled'
+export type ModelToolMode = 'native' | 'prompt' | 'none'
 
 export function isToolMode(value: unknown): value is ToolMode {
   return value === 'auto' || value === 'disabled' || value === 'enabled'
+}
+
+/** Whether a model exposes the per-turn tool policy to users. */
+export function modelAllowsToolModeSelection(
+  modelToolMode: ModelToolMode | null | undefined,
+): boolean {
+  // Missing values preserve compatibility with older model-list responses.
+  return modelToolMode !== 'none'
 }
 
 /**

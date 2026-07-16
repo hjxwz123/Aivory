@@ -33,7 +33,7 @@ import {
   Globe,
 } from 'lucide-react'
 import type { Attachment } from '@/types/chat'
-import type { ToolMode } from '@/lib/tool-mode'
+import { modelAllowsToolModeSelection, type ToolMode } from '@/lib/tool-mode'
 import { Textarea } from '@/components/ui/textarea'
 import { Tooltip } from '@/components/ui/tooltip'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -850,10 +850,15 @@ export function Composer({
   const visibleParamControls = effectiveFast ? undefined : paramControls
   const effectiveMode = !effectiveFast && !isImageMode && researchEnabled ? mode : 'default'
   const effectiveVerify = !effectiveFast && verify && verifyAvailable && !isImageMode
+  const modelAllowsToolSelection = modelAllowsToolModeSelection(currentModel?.tool_mode)
   // Fast and image turns retain the prior fixed enabled behavior. Deep Research
-  // also requires enabled mode and bypasses the automatic task classifier.
+  // also requires enabled mode and bypasses the automatic task classifier. A
+  // model configured with tool_mode=none owns that policy at the model layer;
+  // enabled here avoids applying a hidden user override or forced web search.
   const effectiveToolMode: ToolMode =
-    effectiveFast || isImageMode || effectiveMode === 'deep-research' ? 'enabled' : toolMode
+    effectiveFast || isImageMode || effectiveMode === 'deep-research' || !modelAllowsToolSelection
+      ? 'enabled'
+      : toolMode
   const effectiveWebSearch = effectiveToolMode === 'disabled' && forceWebSearch
   const handleParamValuesChange = useCallback(
     (next: Record<string, unknown>) => {
@@ -1275,7 +1280,7 @@ export function Composer({
   // any other policy updates both values atomically in the preference store.
   const researchActive = effectiveMode === 'deep-research'
   const featureItems: FeatureItem[] = []
-  const showToolModeSelector = !isImageMode && !effectiveFast
+  const showToolModeSelector = !isImageMode && !effectiveFast && modelAllowsToolSelection
   if (showToolModeSelector) {
     if (researchEnabled) {
       featureItems.push({
