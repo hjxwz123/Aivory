@@ -133,8 +133,10 @@ export function ModelPicker({ value, onChange, fast, onFastChange, className }: 
         {shownTags.length > 0 && (
           // Tag filter chips (§ model tags). Sticky so they stay reachable while
           // the model list scrolls. Plain buttons (not menu items) so a click
-          // filters without closing the menu.
-          <div className="sticky top-0 z-10 -mx-1.5 mb-1 flex gap-1 overflow-x-auto border-b border-[var(--color-divider)] bg-[var(--color-surface-raised)] px-1.5 pb-2 pt-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          // filters without closing the menu. -top-1.5/pt-2 offset the menu's
+          // p-1.5 scroll padding — with top-0 the padding band stays see-through
+          // and scrolled model rows peek out above the pinned chips.
+          <div className="sticky -top-1.5 z-10 -mx-1.5 mb-1 flex gap-1 overflow-x-auto border-b border-[var(--color-divider)] bg-[var(--color-surface-raised)] px-1.5 pb-2 pt-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <TagChip active={activeTag === null} onClick={() => setActiveTag(null)}>
               {t('modelPicker.allTags')}
             </TagChip>
