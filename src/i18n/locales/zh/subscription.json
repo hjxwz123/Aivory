@@ -27,7 +27,7 @@
   "permanent": "永久",
   "redeem": {
     "title": "兑换码",
-    "subtitle": "输入兑换码即可激活或延长会员用户组。",
+    "subtitle": "输入兑换码即可激活或延长会员用户组，或充入永久积分。",
     "inputLabel": "兑换码",
     "inputPlaceholder": "XXXX-XXXX-XXXX",
     "submit": "兑换",
@@ -49,7 +49,9 @@
       "disabled": "该兑换码已被管理员作废。",
       "alreadyOwned": "你已兑换过此码。",
       "generic": "兑换失败，请稍后再试。"
-    }
+    },
+    "successCredits": "积分已到账",
+    "successBodyCredits": "{{count}} 积分已充入你的永久积分余额。"
   },
   "buyCta": "购买",
   "recommended": "推荐",

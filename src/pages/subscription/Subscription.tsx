@@ -42,7 +42,9 @@ export default function Subscription() {
   const [upgrade, setUpgrade] = useState<ApiUserGroup | null>(null)
   const [redeemCode, setRedeemCode] = useState('')
   const [redeeming, setRedeeming] = useState(false)
-  const [redeemSuccess, setRedeemSuccess] = useState<{ group: string; date: string } | null>(null)
+  const [redeemSuccess, setRedeemSuccess] = useState<
+    { kind: 'group'; group: string; date: string } | { kind: 'credits'; credits: number } | null
+  >(null)
   // Set when the typed code grants a group different from the current one — the
   // override (immediate, not a renewal) must be confirmed before it applies.
   const [confirmOverride, setConfirmOverride] = useState<{ code: string; current: string; granted: string; date: string } | null>(null)
@@ -103,10 +105,10 @@ export default function Subscription() {
     setRedeeming(true)
     try {
       const res = await redeemApi.redeem(code, confirm)
-      const date = res.expires_at > 0 ? formatAbsoluteDate(res.expires_at * 1000) : ''
+      const date = (res.expires_at ?? 0) > 0 ? formatAbsoluteDate((res.expires_at ?? 0) * 1000) : ''
       // The code grants a different group — confirm the immediate override first.
       if (res.requires_confirmation) {
-        setConfirmOverride({ code, current: res.current_group_name || '', granted: res.group_name, date })
+        setConfirmOverride({ code, current: res.current_group_name || '', granted: res.group_name || '', date })
         return
       }
       if (res.user) setUser(res.user)
@@ -114,7 +116,11 @@ export default function Subscription() {
       authApi.credits().then(setCredits).catch(() => undefined)
       setRedeemCode('')
       setConfirmOverride(null)
-      setRedeemSuccess({ group: res.group_name, date })
+      setRedeemSuccess(
+        res.kind === 'credits'
+          ? { kind: 'credits', credits: res.credits ?? 0 }
+          : { kind: 'group', group: res.group_name || '', date },
+      )
     } catch (e) {
       toast.error(redeemErrorMessage(e))
     } finally {
@@ -294,12 +300,18 @@ export default function Subscription() {
             <div className="mx-auto mb-1 inline-flex size-12 items-center justify-center rounded-full bg-[var(--color-secondary-soft)] text-[var(--color-secondary)]">
               <Sparkles size={22} aria-hidden />
             </div>
-            <DialogTitle className="text-center">{t('subscription:redeem.success')}</DialogTitle>
+            <DialogTitle className="text-center">
+              {redeemSuccess?.kind === 'credits'
+                ? t('subscription:redeem.successCredits')
+                : t('subscription:redeem.success')}
+            </DialogTitle>
             <DialogDescription className="text-center">
               {redeemSuccess
-                ? redeemSuccess.date
-                  ? t('subscription:redeem.successBodyUntil', { group: redeemSuccess.group, date: redeemSuccess.date })
-                  : t('subscription:redeem.successBody', { group: redeemSuccess.group })
+                ? redeemSuccess.kind === 'credits'
+                  ? t('subscription:redeem.successBodyCredits', { count: redeemSuccess.credits })
+                  : redeemSuccess.date
+                    ? t('subscription:redeem.successBodyUntil', { group: redeemSuccess.group, date: redeemSuccess.date })
+                    : t('subscription:redeem.successBody', { group: redeemSuccess.group })
                 : ''}
             </DialogDescription>
           </DialogHeader>

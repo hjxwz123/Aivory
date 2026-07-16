@@ -27,7 +27,7 @@
   "permanent": "永久",
   "redeem": {
     "title": "兌換碼",
-    "subtitle": "輸入兌換碼即可啟用或延長會員使用者組。",
+    "subtitle": "輸入兌換碼即可啟用或延長會員群組，或儲入永久積分。",
     "inputLabel": "兌換碼",
     "inputPlaceholder": "XXXX-XXXX-XXXX",
     "submit": "兌換",
@@ -49,7 +49,9 @@
       "disabled": "該兌換碼已被管理員作廢。",
       "alreadyOwned": "你已兌換過此碼。",
       "generic": "兌換失敗，請稍後再試。"
-    }
+    },
+    "successCredits": "積分已入帳",
+    "successBodyCredits": "{{count}} 積分已儲入你的永久積分餘額。"
   },
   "buyCta": "購買",
   "recommended": "推薦",

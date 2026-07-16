@@ -746,7 +746,7 @@
   },
   "redeemCodes": {
     "title": "Codes promo",
-    "lead": "Générez des codes accordant un groupe + une durée.",
+    "lead": "Générez des codes qui accordent un groupe + une durée, ou des crédits permanents.",
     "new": "Nouveau lot",
     "empty": "Aucun code pour l’instant — générez un lot à distribuer.",
     "copy": "Copier le code",
@@ -796,10 +796,14 @@
       "expiresAt": "Date d’expiration du code",
       "expiresAtHint": "Les codes non utilisés expirent après. Vide = jamais.",
       "note": "Note",
-      "notePlaceholder": "Tout ce que vous souhaitez retenir sur ce lot"
+      "notePlaceholder": "Tout ce que vous souhaitez retenir sur ce lot",
+      "kind": "Type de code",
+      "kindHint": "Les codes abonnement accordent un groupe + une durée ; les codes crédits ajoutent des crédits permanents.",
+      "credits": "Montant de crédits",
+      "creditsHint": "Crédits permanents ajoutés au solde de l’utilisateur. Ils n’expirent jamais."
     },
     "newTitle": "Générer un lot de codes",
-    "newLead": "Chaque code accorde le groupe + la durée configurés.",
+    "newLead": "Chaque code accorde le groupe + la durée configurés, ou un montant fixe de crédits permanents.",
     "create": "Générer",
     "created": "Lot généré",
     "createdToast_one": "1 code généré",
@@ -822,8 +826,14 @@
     "errors": {
       "groupRequired": "Choisissez un groupe",
       "quantityRange": "La quantité doit être entre 1 et 1000",
-      "durationNegative": "La durée doit être supérieure ou égale à 0"
-    }
+      "durationNegative": "La durée doit être supérieure ou égale à 0",
+      "creditsRequired": "Le montant de crédits doit être supérieur à 0"
+    },
+    "kinds": {
+      "group": "Abonnement",
+      "credits": "Crédits"
+    },
+    "creditsAmount": "{{count}} crédits"
   },
   "sandbox": {
     "title": "Fichiers du bac à sable",
