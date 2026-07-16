@@ -183,6 +183,11 @@ func Migrate(db *sql.DB) error {
 	addModelFast := `ALTER TABLE models ADD COLUMN fast INTEGER NOT NULL DEFAULT 0`
 	addConvFast := `ALTER TABLE conversations ADD COLUMN fast INTEGER NOT NULL DEFAULT 0`
 	addMsgFast := `ALTER TABLE messages ADD COLUMN fast INTEGER NOT NULL DEFAULT 0`
+	// §credits redeem codes: 'credits'-kind codes grant permanent credits instead
+	// of a group; redemptions record the granted amount for the audit trail.
+	addRedeemKind := `ALTER TABLE redeem_codes ADD COLUMN kind TEXT NOT NULL DEFAULT 'group'`
+	addRedeemCredits := `ALTER TABLE redeem_codes ADD COLUMN credits REAL NOT NULL DEFAULT 0`
+	addRedemptionCredits := `ALTER TABLE redeem_redemptions ADD COLUMN credits REAL NOT NULL DEFAULT 0`
 	if usePostgres {
 		schema = schemaPGSQL
 		addImageRef = `ALTER TABLE chunks ADD COLUMN IF NOT EXISTS image_ref TEXT`
@@ -244,6 +249,9 @@ func Migrate(db *sql.DB) error {
 		addModelFast = `ALTER TABLE models ADD COLUMN IF NOT EXISTS fast INTEGER NOT NULL DEFAULT 0`
 		addConvFast = `ALTER TABLE conversations ADD COLUMN IF NOT EXISTS fast INTEGER NOT NULL DEFAULT 0`
 		addMsgFast = `ALTER TABLE messages ADD COLUMN IF NOT EXISTS fast INTEGER NOT NULL DEFAULT 0`
+		addRedeemKind = `ALTER TABLE redeem_codes ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'group'`
+		addRedeemCredits = `ALTER TABLE redeem_codes ADD COLUMN IF NOT EXISTS credits REAL NOT NULL DEFAULT 0`
+		addRedemptionCredits = `ALTER TABLE redeem_redemptions ADD COLUMN IF NOT EXISTS credits REAL NOT NULL DEFAULT 0`
 	}
 	if err := dedupeSkillNames(db); err != nil {
 		return fmt.Errorf("dedupe skill names: %w", err)
@@ -277,6 +285,7 @@ func Migrate(db *sql.DB) error {
 		addUsageRequestMethod, addUsageRequestURL, addUsageRequestHeaders, addUsageRequestBody, addUsageTTFTFallback,
 		addFileDraft, addDocumentIngestUpdatedAt,
 		addModelFast, addConvFast, addMsgFast,
+		addRedeemKind, addRedeemCredits, addRedemptionCredits,
 	} {
 		_, _ = db.Exec(ddl)
 	}
@@ -336,6 +345,8 @@ func Migrate(db *sql.DB) error {
 		"chunks":          {"image_ref"},
 		"files":           {"draft"},
 		"documents":       {"ingest_updated_at"},
+		"redeem_codes":    {"kind", "credits"},
+		"redeem_redemptions": {"credits"},
 	}
 	for table, cols := range columnChecks {
 		if _, err := db.Exec(fmt.Sprintf(`SELECT %s FROM %s WHERE 1=0`, strings.Join(cols, ", "), table)); err != nil {

@@ -27,7 +27,7 @@
   "permanent": "Permanent",
   "redeem": {
     "title": "Utiliser un code",
-    "subtitle": "Saisissez un code pour activer ou prolonger un groupe d’adhésion.",
+    "subtitle": "Saisissez un code pour activer ou prolonger un abonnement, ou pour ajouter des crédits permanents.",
     "inputLabel": "Code",
     "inputPlaceholder": "XXXX-XXXX-XXXX",
     "submit": "Utiliser",
@@ -49,7 +49,9 @@
       "disabled": "Ce code a été révoqué par un administrateur.",
       "alreadyOwned": "Vous avez déjà utilisé ce code.",
       "generic": "Impossible d’utiliser ce code."
-    }
+    },
+    "successCredits": "Crédits ajoutés",
+    "successBodyCredits": "{{count}} crédits ont été ajoutés à votre solde permanent."
   },
   "buyCta": "Acheter",
   "recommended": "Recommandé",
