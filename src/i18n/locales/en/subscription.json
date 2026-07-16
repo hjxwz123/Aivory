@@ -27,7 +27,7 @@
   "permanent": "Permanent",
   "redeem": {
     "title": "Redeem a code",
-    "subtitle": "Enter a code to activate or extend a membership group.",
+    "subtitle": "Enter a code to activate or extend a membership group, or to add permanent credits.",
     "inputLabel": "Code",
     "inputPlaceholder": "XXXX-XXXX-XXXX",
     "submit": "Redeem",
@@ -49,7 +49,9 @@
       "disabled": "This code has been revoked by an admin.",
       "alreadyOwned": "You've already redeemed this code.",
       "generic": "Couldn't redeem this code."
-    }
+    },
+    "successCredits": "Credits added",
+    "successBodyCredits": "{{count}} credits have been added to your permanent balance."
   },
   "buyCta": "Purchase",
   "recommended": "Recommend",

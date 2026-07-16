@@ -602,8 +602,13 @@ export const adminApi = {
     return api<ApiRedeemCode[]>(`/admin/redeem-codes${qs ? `?${qs}` : ''}`)
   },
   createRedeemCode: (body: {
-    group_id: string
-    duration_days: number
+    /** Defaults to 'group'. 'credits' codes add permanent credits instead. */
+    kind?: 'group' | 'credits'
+    /** Required for 'group' codes; ignored for 'credits' codes. */
+    group_id?: string
+    duration_days?: number
+    /** Required (> 0) for 'credits' codes. */
+    credits?: number
     max_uses?: number
     expires_at?: number
     note?: string
