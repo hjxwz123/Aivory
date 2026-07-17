@@ -23,6 +23,7 @@
     "placeholder": "何でも聞いてください — または考えを貼り付けてください。",
     "attach": "ファイルを添付",
     "dropHint": "ドロップして添付",
+    "dropAnywhere": "どこにでもドロップして添付",
     "addImage": "画像を追加",
     "more": "その他",
     "voice": "音声入力",

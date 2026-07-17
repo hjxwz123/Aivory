@@ -234,6 +234,32 @@ export default function ChatHome() {
   }, [t])
   const cards = useMemo(() => fisherYatesPick(SUGGESTIONS, 6), [])
 
+  // The suggestion rail is a single horizontally-scrollable row. A plain mouse
+  // wheel only scrolls vertically, so without this it can't be scrolled with the
+  // wheel at all — only by dragging / trackpad-panning. Translate a dominant
+  // vertical wheel delta into horizontal scroll, yielding back to the page once
+  // the rail reaches an edge so vertical page scroll is never trapped. Native
+  // (non-passive) listener: React attaches wheel passively, so an onWheel
+  // preventDefault would be ignored.
+  const suggestionsRailRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = suggestionsRailRef.current
+    if (!el) return
+    const onWheel = (e: WheelEvent) => {
+      if (el.scrollWidth <= el.clientWidth) return
+      if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return
+      // deltaMode 1 = lines (Firefox wheel) — normalise to pixels.
+      const delta = e.deltaMode === 1 ? e.deltaY * 24 : e.deltaY
+      const atStart = el.scrollLeft <= 0
+      const atEnd = el.scrollLeft + el.clientWidth >= el.scrollWidth - 1
+      if ((delta < 0 && atStart) || (delta > 0 && atEnd)) return
+      el.scrollLeft += delta
+      e.preventDefault()
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [drawMode])
+
   // Entrance choreography — the home screen used to pop in flat. Now the
   // heading, lead, composer and suggestion cards rise + fade in sequence, with a
   // whisper-faint accent glow breathing behind the greeting for depth. All gated
@@ -417,10 +443,16 @@ export default function ChatHome() {
 
             {!drawMode && (
               <div className="mt-8 sm:mt-10 mx-auto w-full max-w-[44rem]">
-                {/* Single row, fixed-width cards, horizontally scrollable (snap).
-                    Scrollbar hidden; on phones the rail bleeds to the screen edges
-                    so the next card peeks. */}
-                <div className="flex gap-3 overflow-x-auto px-1 -mx-1 max-sm:-mx-[var(--layout-gutter-mobile)] max-sm:px-[var(--layout-gutter-mobile)] max-sm:scroll-px-[var(--layout-gutter-mobile)] pb-2 snap-x snap-mandatory [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                {/* Single row, fixed-width cards, horizontally scrollable (snap +
+                    mouse wheel, see suggestionsRailRef). Scrollbar hidden; on phones
+                    the rail bleeds to the screen edges so the next card peeks. The
+                    top/bottom padding leaves room for each card's hover lift +
+                    shadow, which `overflow-x-auto` (which also clips the y axis)
+                    would otherwise cut off. */}
+                <div
+                  ref={suggestionsRailRef}
+                  className="flex gap-3 overflow-x-auto px-1 -mx-1 max-sm:-mx-[var(--layout-gutter-mobile)] max-sm:px-[var(--layout-gutter-mobile)] max-sm:scroll-px-[var(--layout-gutter-mobile)] pt-2 pb-2 snap-x snap-mandatory [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                >
                   {cards.map((s) => {
                     const title = t(s.titleKey)
                     const prompt = t(s.promptKey)
