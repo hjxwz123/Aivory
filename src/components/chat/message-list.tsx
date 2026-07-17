@@ -263,6 +263,29 @@ export function MessageList({ conversation, scrollToMessageId, jumpKey }: Messag
     [convId, deleteMessage],
   )
 
+  // §first-exchange: the opening question and its answer anchor the conversation
+  // and must never be deletable. Deletion is round-based — removing EITHER the
+  // question or its answer drops the whole exchange — so both the first user turn
+  // and its first assistant reply are protected. Derived by role (not index 0/1)
+  // so a leading system turn can't shift the target. Only meaningful once the
+  // true root is loaded: while older turns are still paginated out (`hasOlder`)
+  // the opening exchange isn't rendered, so there's nothing here to guard.
+  const protectedFirstRoundIds = useMemo(() => {
+    const ids = new Set<string>()
+    if (conversation.hasOlder) return ids
+    const msgs = conversation.messages
+    const firstUserIdx = msgs.findIndex((m) => m.role === 'user')
+    if (firstUserIdx < 0) return ids
+    // The opening round is the first question plus every reply up to the next
+    // user turn. Deletion is round-based, so a delete button on ANY of these
+    // rows would drop the whole first exchange — protect them all.
+    for (let i = firstUserIdx; i < msgs.length; i++) {
+      if (i > firstUserIdx && msgs[i].role === 'user') break
+      ids.add(msgs[i].id)
+    }
+    return ids
+  }, [conversation.messages, conversation.hasOlder])
+
   return (
     <div
       className="chat-thread flex flex-col px-[var(--layout-gutter-mobile)] sm:px-6 lg:px-8 py-8 mx-auto w-full max-w-[var(--layout-message-max-w)]"
@@ -288,13 +311,17 @@ export function MessageList({ conversation, scrollToMessageId, jumpKey }: Messag
           onBranchSwitch={handleBranchSwitch}
           onFork={handleFork}
           onDelete={
-            // §workspaces: hide the delete-round affordance on turns the member
-            // cannot delete (server enforces author-or-creator regardless). In a
-            // shared conversation: the creator moderates everything; others only
-            // their own user turns (assistant rows have no author -> hidden).
-            !conversation.workspaceId || conversation.creatorId === meId || (m.role === 'user' && m.authorId === meId)
-              ? handleDelete
-              : undefined
+            // §first-exchange: the opening question + its answer can never be
+            // deleted, whoever owns the conversation.
+            protectedFirstRoundIds.has(m.id)
+              ? undefined
+              : // §workspaces: hide the delete-round affordance on turns the member
+                // cannot delete (server enforces author-or-creator regardless). In a
+                // shared conversation: the creator moderates everything; others only
+                // their own user turns (assistant rows have no author -> hidden).
+                !conversation.workspaceId || conversation.creatorId === meId || (m.role === 'user' && m.authorId === meId)
+                ? handleDelete
+                : undefined
           }
           userMessageMarkdown={userMessageMarkdown}
         />
