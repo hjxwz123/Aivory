@@ -13,6 +13,7 @@
  */
 import { activeWorkspaceId } from '@/store/workspaces'
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import {
   ArrowUp,
@@ -123,6 +124,24 @@ interface ComposerProps {
 
 const MAX_LEN = envNum('VITE_AIVORY_MAX_LEN', 12_000)
 const EMPTY_PARAM_VALUES: Record<string, unknown> = {}
+
+// Backend file ids already committed to a SENT message, shared across every
+// composer instance (module scope, not a per-instance ref). Sending the FIRST
+// message from the home screen navigates to the thread, which mounts a FRESH
+// composer whose draft-file restore (listDraftFiles) can race the backend's
+// commit of the just-sent file and re-add the image that was already sent. The
+// existing per-instance `committedAttachmentIds` ref can't guard a different
+// instance, so committed ids are tracked here too. Upload ids are unique, so a
+// committed id never legitimately reappears as a fresh draft; the size cap only
+// bounds memory across a long session.
+const committedFileIds = new Set<string>()
+function markFileCommitted(id: string) {
+  committedFileIds.add(id)
+  if (committedFileIds.size > 256) {
+    const oldest = committedFileIds.values().next().value
+    if (oldest !== undefined) committedFileIds.delete(oldest)
+  }
+}
 
 // Speech-to-text capability is shared across composer instances. Besides the
 // provider, the backend reports whether its required credentials exist so the
@@ -483,8 +502,15 @@ export function Composer({
   const attachmentScopeRef = useRef(conversationId)
   const [restoringAttachments, setRestoringAttachments] = useState(Boolean(conversationId))
   const [kbList, setKBList] = useState<{ id: string; name: string }[]>([])
-  // Drag-and-drop file upload over the composer surface.
+  // Drag-and-drop file upload. `dragOver` is driven by WINDOW-level listeners
+  // (see the effect below) so a file can be dropped ANYWHERE on the page, not
+  // only onto the composer surface. dragDepthRef balances nested
+  // dragenter/dragleave so the full-screen overlay doesn't flicker as the
+  // pointer crosses child elements. handleAttachRef exposes the latest attach
+  // handler to those window listeners without re-subscribing them each render.
   const [dragOver, setDragOver] = useState(false)
+  const dragDepthRef = useRef(0)
+  const handleAttachRef = useRef<(files: FileList | null) => Promise<number>>(() => Promise.resolve(0))
   // Narrow screens collapse every secondary action into a single "+" menu
   // (Gemini/ChatGPT-mobile pattern) so the row never overflows and tap targets
   // stay large. 639px = Tailwind's `sm` breakpoint minus 1.
@@ -554,6 +580,52 @@ export function Composer({
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
   }, [hasAttachments])
+  // §full-screen drop: accept image/file drops anywhere in the window, not just
+  // on the composer. Window-level listeners raise a full-viewport overlay while
+  // a file is dragged in and route the drop through the same handleAttach path.
+  // Only ONE composer is ever mounted (home / thread / project routes are
+  // mutually exclusive), so a single window listener set never double-handles.
+  useEffect(() => {
+    const hasFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes('Files')
+    const onDragEnter = (e: DragEvent) => {
+      if (!hasFiles(e)) return
+      dragDepthRef.current += 1
+      setDragOver(true)
+    }
+    const onDragOver = (e: DragEvent) => {
+      if (!hasFiles(e)) return
+      // preventDefault marks the whole window a valid drop target and stops the
+      // browser from navigating to a file dropped outside the composer.
+      e.preventDefault()
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
+      // Self-heal the overlay if a dragenter was missed (some browsers skip it
+      // when the drag originates outside the document).
+      if (dragDepthRef.current === 0) dragDepthRef.current = 1
+      setDragOver(true)
+    }
+    const onDragLeave = (e: DragEvent) => {
+      if (!hasFiles(e)) return
+      dragDepthRef.current = Math.max(0, dragDepthRef.current - 1)
+      if (dragDepthRef.current === 0) setDragOver(false)
+    }
+    const onDrop = (e: DragEvent) => {
+      if (!hasFiles(e)) return
+      e.preventDefault()
+      dragDepthRef.current = 0
+      setDragOver(false)
+      if (e.dataTransfer?.files?.length) void handleAttachRef.current(e.dataTransfer.files)
+    }
+    window.addEventListener('dragenter', onDragEnter)
+    window.addEventListener('dragover', onDragOver)
+    window.addEventListener('dragleave', onDragLeave)
+    window.addEventListener('drop', onDrop)
+    return () => {
+      window.removeEventListener('dragenter', onDragEnter)
+      window.removeEventListener('dragover', onDragOver)
+      window.removeEventListener('dragleave', onDragLeave)
+      window.removeEventListener('drop', onDrop)
+    }
+  }, [])
   useEffect(() => {
     const timers = pollTimers.current
     return () => {
@@ -934,6 +1006,9 @@ export function Composer({
       pollTimers.current.clear()
       attachments.forEach((a) => {
         committedAttachmentIds.current.add(a.id)
+        // Also record at module scope so the freshly-mounted thread composer
+        // (first send from home) filters this id out of its draft-file restore.
+        markFileCommitted(a.id)
         if (a.previewUrl && a.previewUrl.startsWith('blob:')) URL.revokeObjectURL(a.previewUrl)
       })
       setAttachments([])
@@ -1104,8 +1179,15 @@ export function Composer({
           return [
             ...current,
             // Skip anything already present OR already sent — a stale restore
-            // fetch must never resurrect a just-committed attachment.
-            ...restored.filter((item) => !present.has(item.id) && !committedAttachmentIds.current.has(item.id)),
+            // fetch must never resurrect a just-committed attachment (checked
+            // both per-instance and at module scope so a first send from the home
+            // screen doesn't bounce the image into the new thread's composer).
+            ...restored.filter(
+              (item) =>
+                !present.has(item.id) &&
+                !committedAttachmentIds.current.has(item.id) &&
+                !committedFileIds.has(item.id),
+            ),
           ]
         })
         for (const file of files) {
@@ -1219,6 +1301,9 @@ export function Composer({
     const done = await Promise.all(list.map((file, idx) => uploadAttachment(file, additions[idx], scopeId)))
     return done.filter(Boolean).length
   }
+  // Keep the window-level drag listeners calling the current closure (it reads
+  // conversationId / kbIds / ensureConversationId), without re-subscribing them.
+  handleAttachRef.current = handleAttach
 
   // Codex-style long-text overflow (§4.11-B3): text past MAX_LEN becomes a .txt
   // attachment instead of being blocked. The backend line-gates it — small
@@ -1549,22 +1634,6 @@ export function Composer({
 
   return (
     <div
-      onDragOver={(e) => {
-        // Only react to file drags; let text/selection drags pass through.
-        if (!Array.from(e.dataTransfer.types).includes('Files')) return
-        e.preventDefault()
-        setDragOver(true)
-      }}
-      onDragLeave={(e) => {
-        // Ignore leave events fired when crossing into a child element.
-        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragOver(false)
-      }}
-      onDrop={(e) => {
-        if (!Array.from(e.dataTransfer.types).includes('Files')) return
-        e.preventDefault()
-        setDragOver(false)
-        if (e.dataTransfer.files?.length) void handleAttach(e.dataTransfer.files)
-      }}
       className={cn(
         'group/composer relative min-w-0 w-full max-w-full',
         // Calm Gemini-style pill on phones (rounder, no resting shadow); the
@@ -1575,15 +1644,26 @@ export function Composer({
         dragOver && 'border-[var(--color-accent)] shadow-[var(--shadow-md)]',
       )}
     >
-      {/* Drag-and-drop overlay — shown while a file is dragged over the composer. */}
-      {dragOver && (
-        <div className="pointer-events-none absolute inset-0 z-[var(--z-raised)] grid place-items-center rounded-[16px] bg-[var(--color-accent-soft)]/80 backdrop-blur-[1px]">
-          <span className="inline-flex items-center gap-2 text-sm font-medium text-[var(--color-accent)]">
-            <Paperclip size={15} aria-hidden />
-            {t('composer.dropHint', { defaultValue: 'Drop files to attach' })}
-          </span>
-        </div>
-      )}
+      {/* Full-screen drag-and-drop overlay — shown while a file is dragged
+          anywhere over the window. Portalled to <body> so it stays viewport-fixed
+          even when an ancestor (e.g. ChatHome's GSAP-animated wrapper) carries an
+          inline transform that would otherwise become the fixed containing block.
+          pointer-events-none: the window listeners own the drop, and the overlay
+          must never intercept it. */}
+      {dragOver &&
+        createPortal(
+          <div className="pointer-events-none fixed inset-0 z-[var(--z-max)] grid place-items-center bg-[var(--color-overlay)] p-6 backdrop-blur-[2px] animate-[fade-in_var(--duration-base)_var(--ease-out)]">
+            <div className="flex flex-col items-center gap-3 rounded-[18px] border-2 border-dashed border-[var(--color-accent)] bg-[var(--color-surface)]/95 px-8 py-7 shadow-[var(--shadow-lg)]">
+              <span className="grid size-12 place-items-center rounded-full bg-[var(--color-accent-soft)] text-[var(--color-accent)]">
+                <ImageIcon size={22} aria-hidden />
+              </span>
+              <span className="text-[15px] font-medium text-[var(--color-fg)]">
+                {t('composer.dropAnywhere', { defaultValue: 'Drop anywhere to attach' })}
+              </span>
+            </div>
+          </div>,
+          document.body,
+        )}
 
       {/* Attachments preview. The armed-mode (research) state is shown by the
           toolbar button below, so we don't repeat a chip above the input.
