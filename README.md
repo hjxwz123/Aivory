@@ -58,22 +58,22 @@ This is where Aivory diverges most from the rest. The orchestrator runs **up to 
 ### Multi-step pipeline in one turn
 
 <p align="center">
-  <img src="docs/screenshots/tool-calls-1.jpg" alt="Tool call pipeline: two web searches, Python analysis, web page fetch, Python PPT generation — all in one user message" width="100%">
+  <img src="docs/screenshots/tool-calls-1.jpg" alt="Tool-call pipeline: skill load, web searches, World Bank API fetch, then Python data-crunching and PowerPoint generation — all from one user message" width="100%">
 </p>
 
-The screenshot above shows a single user prompt — *"Retrieve global GDP data for 2025 and generate a PowerPoint presentation"* — triggering a five-step pipeline without any user intervention:
+The screenshot above shows a single user prompt — *"Retrieve global GDP data for 2025 and generate a PowerPoint presentation"* — triggering a multi-step pipeline without any user intervention:
 
-1. `web_search` → IMF World Economic Outlook 2025 nominal GDP by country
-2. `web_search` → current IMF GDP projections global total
-3. `python_execute` → load and clean the data
-4. `web_fetch` → IMF external data page for the top-10 table
-5. `python_execute` → build a polished slide deck with python-pptx
+1. `use_skill` → load the `document-generation` skill pack
+2. `web_search` → locate authoritative 2025 GDP sources (IMF / World Bank)
+3. `web_fetch` → pull the numbers straight from the World Bank Open Data API
+4. `python_execute` → clean the data and compute regional shares & growth
+5. `python_execute` → render the charts and build a polished slide deck with python-pptx
 
 <p align="center">
-  <img src="docs/screenshots/tool-calls-2.jpg" alt="Result: PowerPoint and CSV artifacts ready to download, bar chart rendered inline, 10 sources cited" width="100%">
+  <img src="docs/screenshots/tool-calls-2.jpg" alt="Result: an 8-slide PowerPoint ready to download, four charts rendered inline, 20 sources cited" width="100%">
 </p>
 
-The result: a complete presentation and a data CSV, both available as download cards, with a bar chart rendered inline and 10 sources cited. No intermediate prompts. No "please attach the file." The model drives the whole pipeline.
+The result: an 8-slide deck plus a supporting data workbook, both offered as download cards, with four charts rendered inline and 20 sources cited. No intermediate prompts. No "please attach the file." The model drives the whole pipeline.
 
 ### How it works
 
