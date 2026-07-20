@@ -25,6 +25,7 @@
     "dropHint": "拖放文件以上传",
     "dropAnywhere": "拖放到任意位置即可添加",
     "addImage": "添加图片",
+    "imageUnsupported": "当前模型不支持图片输入，请选择支持视觉的模型。",
     "more": "更多",
     "voice": "语音输入",
     "voiceStop": "停止录音",
@@ -303,6 +304,7 @@
     "empty": "暂无文件。添加后模型即可读取。",
     "added": "已添加文件",
     "addFailed": "添加文件失败",
+    "imageUseComposer": "请从消息输入框添加图片，以便通过视觉 API 发送。",
     "remove": "移除 {{name}}",
     "removeFailed": "移除文件失败"
   },

@@ -383,6 +383,7 @@
       "task_downgrade": "ベンダー間ダウングレード",
       "task_image_prompt": "画像プロンプト",
       "task_tool_route": "ツール判定",
+      "task_search_queries": "検索クエリ生成",
       "task_research_plan": "リサーチ計画",
       "task_research_verify": "リサーチ検証",
       "task_moderation": "モデレーション",

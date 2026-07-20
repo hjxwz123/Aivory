@@ -70,6 +70,66 @@ func ListFilesByConversation(ctx context.Context, db *sql.DB, convID, userID str
 	return out, rows.Err()
 }
 
+// ConversationFilesByIDs returns complete server-owned metadata for the given
+// attachment ids, restricted to one conversation the caller can access. The
+// map intentionally omits unknown, cross-conversation and inaccessible ids so
+// the API can reject them without disclosing which boundary failed. A matching
+// conversation document is joined by storage_path to restore the authoritative
+// document id rather than trusting the client's attachment payload.
+func ConversationFilesByIDs(ctx context.Context, db *sql.DB, convID, userID string, fileIDs []string) (map[string]File, error) {
+	fileIDs = cleanIDs(fileIDs)
+	out := make(map[string]File, len(fileIDs))
+	if convID == "" || userID == "" || len(fileIDs) == 0 {
+		return out, nil
+	}
+	args := make([]any, 0, len(fileIDs)+3)
+	args = append(args, convID)
+	for _, id := range fileIDs {
+		args = append(args, id)
+	}
+	args = append(args, userID, userID)
+	rows, err := db.QueryContext(ctx, `
+		SELECT f.id, f.user_id, f.conversation_id, f.filename, f.mime_type,
+		       f.size_bytes, f.storage_path, f.kind, f.draft, f.created_at,
+		       COALESCE((
+		         SELECT d.id FROM documents d
+		          WHERE d.conversation_id=f.conversation_id AND d.storage_path=f.storage_path
+		          ORDER BY d.created_at DESC LIMIT 1
+		       ), '')
+		  FROM files f
+		 WHERE f.conversation_id=?
+		   AND f.id IN (`+idPlaceholders(len(fileIDs))+`)
+		   AND EXISTS (
+		     SELECT 1 FROM conversations c
+		      WHERE c.id=f.conversation_id
+		        AND (c.user_id=? OR (
+		          COALESCE(c.workspace_id,'')<>'' AND c.workspace_id IN (
+		            SELECT workspace_id FROM workspace_members WHERE user_id=?
+		          )
+		        ))
+		   )`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var f File
+		var conv sql.NullString
+		var draft int
+		if err := rows.Scan(
+			&f.ID, &f.UserID, &conv, &f.Filename, &f.MimeType,
+			&f.SizeBytes, &f.StoragePath, &f.Kind, &draft, &f.CreatedAt,
+			&f.DocumentID,
+		); err != nil {
+			return nil, err
+		}
+		f.ConversationID = conv.String
+		f.Draft = draft != 0
+		out[f.ID] = f
+	}
+	return out, rows.Err()
+}
+
 // ListDraftFilesForConversation returns composer uploads that have not yet been
 // committed to a user message. The conversation ownership check belongs to the
 // caller; this is also used by the message preflight after that check has run.

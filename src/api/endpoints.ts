@@ -191,7 +191,15 @@ export const authApi = {
 // ----- Models / skills -----------------------------------------------------
 
 export const modelsApi = {
-  list: () => api<{ models: ApiModel[]; default_id: string; verify_available?: boolean; fast_available?: boolean }>('/models'),
+  list: () =>
+    api<{
+      models: ApiModel[]
+      default_id: string
+      verify_available?: boolean
+      fast_available?: boolean
+      /** Anonymous capability only; the hidden fast model identity stays server-side. */
+      fast_vision?: boolean
+    }>('/models'),
   listImage: () => api<{ models: ApiModel[]; default_id: string }>('/image-models'),
   listEmbedding: () => api<{ models: ApiModel[]; default_id: string }>('/embedding-models'),
   /** Model tags for the picker's filter chips (§ model tags). */

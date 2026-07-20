@@ -1,14 +1,14 @@
 """
 Aivory local Python sandbox — sidecar service (design.md §4.5).
 
-Speaks the tiny 3-endpoint HTTP protocol that `server/internal/sandbox/
-sandbox.go` already expects, so the Go backend needs zero changes — just point
-SANDBOX_BASE_URL at this service:
+Speaks the HTTP protocol that `server/internal/sandbox/sandbox.go` expects, so
+the Go backend only needs SANDBOX_BASE_URL pointed at this service:
 
     POST /sessions  -> {"session_id": "..."}
     POST /exec      {session_id, code, timeout_ms}
                     -> {"stdout", "stderr", "exit_code", "files":[{name,mime_type,data_base64}]}
     POST /files     {session_id, path, data_base64}  -> {"ok": true}
+    POST /files/reset-inputs {session_id}            -> {"ok": true}
 
 Each session is one long-lived, locked-down Docker container running the
 `aivory-sandbox` image (see Dockerfile.runner). /workspace persists across
@@ -16,7 +16,7 @@ exec calls within a session — pip-installed packages, generated files and
 intermediate data survive, matching ChatGPT Code Interpreter behaviour.
 
 Design baselines honoured here (§4.5 安全基线):
-  - non-root, --network none by default, no-new-privileges, dropped caps
+  - non-root, mandatory --network none, no-new-privileges, dropped caps
   - memory / cpu / pids / nofile limits
   - 120s exec timeout (overridable per-call, capped)
   - stdout/stderr streamed through a 32KB cap before returning to the model
@@ -53,7 +53,6 @@ from pydantic import BaseModel, Field
 
 # --- Config (env-overridable) ----------------------------------------------
 IMAGE = os.environ.get("SANDBOX_IMAGE", "aivory-sandbox:latest")
-NETWORK = os.environ.get("SANDBOX_NETWORK", "none")  # set "bridge" to allow pip at runtime
 MEMORY = os.environ.get("SANDBOX_MEMORY", "2g")       # §4.5 doc rendering can be heavy
 CPUS = os.environ.get("SANDBOX_CPUS", "1")
 PIDS_LIMIT = os.environ.get("SANDBOX_PIDS_LIMIT", "256")
@@ -188,6 +187,7 @@ LABEL = "aivory.sandbox=1"
 WORKSPACE = "/workspace"
 OUTPUTS_DIR = f"{WORKSPACE}/outputs"
 UPLOADS_DIR = f"{WORKSPACE}/uploads"
+SKILLS_DIR = f"{WORKSPACE}/skills"
 
 # session_id -> last-used epoch seconds (for the idle reaper). Container state
 # itself lives in Docker, so a sidecar restart only loses TTL tracking, not
@@ -763,7 +763,11 @@ def create_session(body: Optional[CreateBody] = Body(default=None)):
             "--label", LABEL,
             "--label", f"aivory.session_id={session_id}",
             "--label", f"aivory.created_at={int(time.time())}",
-            "--network", NETWORK,
+            # Runner isolation is an invariant, not an operator setting. The
+            # sidecar remains reachable from the Go backend on its own service
+            # network, while user Python gets no Docker network namespace route
+            # and cannot bypass image-input policy with requests/curl.
+            "--network", "none",
             "--memory", MEMORY,
             "--memory-swap", MEMORY,
             "--cpus", CPUS,
@@ -820,7 +824,10 @@ def create_session(body: Optional[CreateBody] = Body(default=None)):
         if cp.returncode != 0:
             raise HTTPException(status_code=500, detail=f"docker run failed: {cp.stderr.decode(errors='replace')}")
         # Make sure the standard dirs exist (image already creates them, but be safe).
-        mk = _docker(["exec", name, "mkdir", "-p", UPLOADS_DIR, OUTPUTS_DIR], timeout=20)
+        mk = _docker(
+            ["exec", name, "mkdir", "-p", UPLOADS_DIR, OUTPUTS_DIR, SKILLS_DIR],
+            timeout=20,
+        )
         if mk.returncode != 0:
             _docker(["rm", "-f", name], timeout=30)
             raise HTTPException(status_code=500, detail=f"workspace init failed: {mk.stderr.decode(errors='replace')}")
@@ -841,6 +848,16 @@ def create_session(body: Optional[CreateBody] = Body(default=None)):
         if _storage_effective(storage):
             _restore_workspace(session_id, storage)
             _remember_storage(session_id, storage)
+        # Legacy archives may contain user-uploaded or tool-fetched images under
+        # the server-managed input directories. Inputs are authoritative in the
+        # main application's database and are re-staged for every python call,
+        # so clear both directories after restore. /workspace/outputs is left
+        # untouched, preserving Python-generated PNGs and other artifacts.
+        reset_error = _reset_input_dirs(name)
+        if reset_error is not None:
+            _docker(["rm", "-f", name], timeout=30)
+            _forget(session_id)
+            raise HTTPException(status_code=500, detail=f"reset inputs failed: {reset_error}")
         # §4.5 admin-tunable recycle window: remember the (clamped) idle TTL Go
         # forwarded so the reaper honours it for this session. 0/absent => global.
         if body is not None and body.idle_ttl_sec:
@@ -944,6 +961,12 @@ def put_file(body: FilesBody):
         path = f"{WORKSPACE}/{path}"
     if not _safe_under_workspace(path):
         raise HTTPException(status_code=400, detail="path must be under /workspace")
+    # The sandbox upload API is only for non-image data and skill inputs. Images
+    # must travel through a vision-capable provider API; rejecting by both name
+    # and file signature prevents a caller from bypassing the Go-side filter by
+    # forging metadata or changing an extension.
+    if _looks_like_image_input(path, data):
+        raise HTTPException(status_code=415, detail="image files are not accepted as sandbox inputs")
 
     with _session_lock(sid):
         if not _is_running(sid):
@@ -968,6 +991,28 @@ def put_file(body: FilesBody):
         if w.returncode != 0:
             raise HTTPException(status_code=500, detail=f"write failed: {w.stderr.decode(errors='replace')}")
 
+        _touch(sid)
+        return {"ok": True}
+
+
+@app.post("/files/reset-inputs")
+def reset_inputs(body: ListFilesBody):
+    """Clear server-managed inputs without touching generated workspace output.
+
+    This also removes image copies left by older versions from persistent
+    sessions. The paths are fixed server-side; this endpoint is deliberately not
+    a caller-controlled general deletion API.
+    """
+    sid = body.session_id
+    if not _valid_session(sid):
+        raise HTTPException(status_code=400, detail="invalid session_id")
+    name = _container(sid)
+    with _session_lock(sid):
+        if not _is_running(sid):
+            raise HTTPException(status_code=404, detail="session not found or not running")
+        reset_error = _reset_input_dirs(name)
+        if reset_error is not None:
+            raise HTTPException(status_code=500, detail=f"reset inputs failed: {reset_error}")
         _touch(sid)
         return {"ok": True}
 
@@ -1271,6 +1316,54 @@ def _collect_new_files(name: str, before: dict[str, str]) -> tuple[list[dict], s
 
 
 # --- Path safety ------------------------------------------------------------
+_IMAGE_INPUT_EXTENSIONS = {
+    ".apng", ".avif", ".bmp", ".cr2", ".cur", ".dng", ".eps", ".gif",
+    ".heic", ".heif", ".ico", ".jfif", ".jpe", ".jpeg", ".jpg", ".jxl",
+    ".nef", ".png", ".psd", ".raw", ".svg", ".tif", ".tiff", ".webp",
+}
+
+
+def _looks_like_image_input(path: str, data: bytes) -> bool:
+    """Recognise common image inputs without trusting caller-provided metadata."""
+    if os.path.splitext(path.lower())[1] in _IMAGE_INPUT_EXTENSIONS:
+        return True
+    head = data[:4096]
+    if head.startswith((b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"GIF87a", b"GIF89a", b"BM")):
+        return True
+    if head.startswith((b"II*\x00", b"MM\x00*", b"\x00\x00\x01\x00", b"\x00\x00\x02\x00")):
+        return True
+    if len(head) >= 12 and head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+        return True
+    if head.startswith((b"\xff\x0a", b"\x00\x00\x00\x0cJXL \r\n\x87\n", b"8BPS")):
+        return True
+    # AVIF/HEIF use ISO-BMFF. Check the major/compatible brand area near ftyp.
+    if len(head) >= 12 and head[4:8] == b"ftyp":
+        brands = head[8:64]
+        if any(brand in brands for brand in (
+            b"avif", b"avis", b"heic", b"heix", b"hevc", b"hevx", b"heim",
+            b"heis", b"mif1", b"msf1",
+        )):
+            return True
+    # SVG is XML/text and therefore has no binary magic. Only inspect the head;
+    # this catches BOM/XML declarations and leading comments without scanning an
+    # arbitrary large text asset.
+    if re.search(br"<svg(?:\s|>)", head, flags=re.IGNORECASE):
+        return True
+    return False
+
+
+def _reset_input_dirs(name: str) -> Optional[str]:
+    """Drop staged inputs while preserving /workspace/outputs and other state."""
+    script = (
+        f"rm -rf -- {_shq(UPLOADS_DIR)} {_shq(SKILLS_DIR)} && "
+        f"mkdir -p -- {_shq(UPLOADS_DIR)} {_shq(SKILLS_DIR)}"
+    )
+    cp = _docker(["exec", name, "sh", "-c", script], timeout=30)
+    if cp.returncode != 0:
+        return cp.stderr.decode(errors="replace")[:300]
+    return None
+
+
 def _safe_under_workspace(path: str) -> bool:
     # collapse and ensure it stays under /workspace (no .. escape)
     norm = os.path.normpath(path)
@@ -1676,7 +1769,11 @@ def _archive_workspace(session_id: str, storage: Optional[dict]) -> None:
     name = _container(session_id)
     try:
         proc = subprocess.Popen(
-            ["docker", "exec", name, "tar", "czf", "-", "-C", WORKSPACE, "."],
+            [
+                "docker", "exec", name, "tar", "czf", "-",
+                "--exclude=./uploads", "--exclude=./skills",
+                "-C", WORKSPACE, ".",
+            ],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
@@ -1833,7 +1930,7 @@ def _reaper() -> None:
 def _start_reaper() -> None:
     if PULL_ON_START:
         # Warm the runtime image in the BACKGROUND (host daemon; not affected
-        # by the per-session --network none). This is an optimization, never a
+        # by the mandatory per-session --network none). This is an optimization, never a
         # startup gate: a slow registry/proxy used to raise TimeoutExpired out
         # of this hook and crash-loop the whole sidecar. Cold-cache sessions
         # still pull lazily on first use if this hasn't finished.

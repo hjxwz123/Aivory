@@ -189,6 +189,10 @@ func (s *settingsSandbox) PutFile(ctx context.Context, sessionID, path string, d
 	return s.backend().PutFile(ctx, sessionID, path, data)
 }
 
+func (s *settingsSandbox) ResetInputs(ctx context.Context, sessionID string) error {
+	return s.backend().ResetInputs(ctx, sessionID)
+}
+
 func (s *settingsSandbox) GetFile(ctx context.Context, sessionID, path string) ([]byte, error) {
 	return s.backend().GetFile(ctx, sessionID, path)
 }

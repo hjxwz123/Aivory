@@ -49,6 +49,9 @@ func (p *OpenAIProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 	if req.Model.APIKey == "" {
 		return nil, errors.New("this channel has no API key configured")
 	}
+	if !req.Model.Vision {
+		req.History = stripImageBlocks(req.History)
+	}
 	switch req.Model.APIFormat {
 	case "responses":
 		return p.streamResponses(ctx, req, tools, onEvent)
@@ -79,7 +82,7 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest,
 			continue
 		}
 		// Same-vendor raw replay (§2.3-C).
-		if m.Role == "assistant" && len(m.Raw) > 2 {
+		if m.Role == "assistant" && len(m.Raw) > 2 && (req.Model.Vision || !nativeRawContainsImage(m.Raw)) {
 			var turns []map[string]any
 			if err := json.Unmarshal(m.Raw, &turns); err == nil && len(turns) > 0 && turns[0]["role"] != nil {
 				messages = append(messages, turns...)
@@ -97,7 +100,7 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest,
 			// onto a non-user turn (share/fork history) triggers "unknown variant
 			// `image_url`, expected `text`". Drop it here (defense in depth alongside
 			// resolveAttachments' role gate).
-			if m.Role == "user" && b.Kind == "image" && b.Data != "" {
+			if req.Model.Vision && m.Role == "user" && b.Kind == "image" && b.Data != "" {
 				imgParts = append(imgParts, map[string]any{
 					"type":      "image_url",
 					"image_url": map[string]any{"url": "data:" + b.MimeType + ";base64," + b.Data},
@@ -555,7 +558,7 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 		// output/input items (`message`, `reasoning`, `function_call`,
 		// `function_call_output`). Accept only the latter so switching an OpenAI
 		// model between chat/responses formats cannot poison the request body.
-		if m.Role == "assistant" && len(m.Raw) > 2 {
+		if m.Role == "assistant" && len(m.Raw) > 2 && (req.Model.Vision || !nativeRawContainsImage(m.Raw)) {
 			var items []map[string]any
 			if err := json.Unmarshal(m.Raw, &items); err == nil && len(items) > 0 && items[0]["type"] != nil {
 				input = append(input, items...)
@@ -580,7 +583,7 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 		for _, b := range m.Blocks {
 			// input_image is only valid on the user role; an assistant/output message
 			// takes output_text only. Drop images that rode onto a non-user turn.
-			if m.Role == "user" && b.Kind == "image" && b.Data != "" {
+			if req.Model.Vision && m.Role == "user" && b.Kind == "image" && b.Data != "" {
 				parts = append(parts, map[string]any{
 					"type":      "input_image",
 					"image_url": "data:" + b.MimeType + ";base64," + b.Data,

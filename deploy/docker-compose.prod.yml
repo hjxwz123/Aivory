@@ -97,7 +97,6 @@ services:
       # prune/cron can't evict it (no cold-pull 500s).
       SANDBOX_IMAGE: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-hjxwz123}/aivory-sandbox:${IMAGE_TAG:-latest}
       SANDBOX_PULL_ON_START: "1"
-      SANDBOX_NETWORK: ${SANDBOX_NETWORK:-none}   # "bridge" only if sandboxed code needs internet
       SANDBOX_MEMORY: ${SANDBOX_MEMORY:-2g}
       SANDBOX_CPUS: ${SANDBOX_CPUS:-1}
       SANDBOX_MAX_SESSIONS: ${SANDBOX_MAX_SESSIONS:-16}

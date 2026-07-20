@@ -12,6 +12,7 @@ import { useAuth } from '@/store/auth'
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet'
 import { RouteFade } from '@/components/ui/route-fade'
 import { PanelFallback } from '@/components/ui/panel-fallback'
+import { UserMenu } from '@/components/sidebar/sidebar'
 import { cn } from '@/lib/utils'
 
 interface AdminTab {
@@ -206,13 +207,13 @@ export default function AdminLayout() {
 
       <main className="flex-1 min-w-0 overflow-y-auto">
         {/* Mobile topbar */}
-        <div className="flex items-center gap-3 px-4 py-3 border-b border-[var(--color-divider)] md:hidden">
+        <div className="flex h-[var(--layout-topbar-h-mobile)] items-center gap-2 border-b border-[var(--color-divider)] px-2 md:hidden">
           <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
             <SheetTrigger asChild>
               <button
                 type="button"
                 aria-label={t('admin:title')}
-                className="inline-flex items-center justify-center size-9 rounded-[8px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                className="inline-flex size-[var(--tap-min)] items-center justify-center rounded-[10px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
               >
                 <Menu size={18} aria-hidden />
               </button>
@@ -234,7 +235,8 @@ export default function AdminLayout() {
               </div>
             </SheetContent>
           </Sheet>
-          <h2 className="font-serif text-[15px] text-[var(--color-fg)]">{t('admin:title')}</h2>
+          <h2 className="min-w-0 flex-1 truncate font-serif text-[15px] text-[var(--color-fg)]">{t('admin:title')}</h2>
+          <UserMenu placement="header" />
         </div>
 
         <div className="mx-auto w-full max-w-[84rem] px-5 sm:px-8 lg:px-12 py-8 sm:py-12">

@@ -45,6 +45,7 @@ const TASK_PURPOSES = [
   'task.downgrade',
   'task.image_prompt',
   'task.tool_route',
+  'task.search_queries',
   'task.research_plan',
   'task.research_verify',
   'task.research_validate',

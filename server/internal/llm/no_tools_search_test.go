@@ -372,7 +372,7 @@ func TestStoreToUnifiedStripsRawWithoutNativeTools(t *testing.T) {
 	if len(with) != 2 || len(with[1].Raw) == 0 {
 		t.Fatalf("native-tool turn must keep raw replay: %+v", with)
 	}
-	if body, _ := json.Marshal(historyToAnthropic(with)); !strings.Contains(string(body), `"tool_use"`) {
+	if body, _ := json.Marshal(historyToAnthropic(with, true)); !strings.Contains(string(body), `"tool_use"`) {
 		t.Fatalf("raw replay should splice tool_use into the wire history: %s", body)
 	}
 
@@ -385,7 +385,7 @@ func TestStoreToUnifiedStripsRawWithoutNativeTools(t *testing.T) {
 	if len(without[1].Raw) != 0 {
 		t.Fatalf("raw must be stripped on a no-native-tools turn: %s", without[1].Raw)
 	}
-	body, _ := json.Marshal(historyToAnthropic(without))
+	body, _ := json.Marshal(historyToAnthropic(without, true))
 	for _, banned := range []string{`"tool_use"`, `"tool_result"`} {
 		if strings.Contains(string(body), banned) {
 			t.Fatalf("no-native-tools history leaked %s: %s", banned, body)

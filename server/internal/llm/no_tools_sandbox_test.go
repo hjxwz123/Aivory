@@ -81,6 +81,52 @@ func TestSandboxFilesHaveSheet(t *testing.T) {
 	}
 }
 
+func TestListSandboxFilesNeverAdvertisesImages(t *testing.T) {
+	ctx := context.Background()
+	db, err := store.Open(filepath.Join(t.TempDir(), "sandbox-files.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer db.Close()
+	if err := store.Migrate(db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	for _, q := range []string{
+		`INSERT INTO users(id,email,password_hash,name) VALUES('u1','u1@example.com','hash','User')`,
+		`INSERT INTO conversations(id,user_id,title) VALUES('c1','u1','Test')`,
+		`INSERT INTO files(id,user_id,conversation_id,filename,mime_type,storage_path,kind) VALUES('data','u1','c1','data.csv','text/csv','/tmp/data.csv','sheet')`,
+		`INSERT INTO files(id,user_id,conversation_id,filename,mime_type,storage_path,kind) VALUES('renamed-image','u1','c1','renamed.csv','image/png','/tmp/renamed.csv','image')`,
+		`INSERT INTO files(id,user_id,conversation_id,filename,mime_type,storage_path,kind) VALUES('photo','u1','c1','photo.png','image/png','/tmp/photo.png','image')`,
+		`INSERT INTO files(id,user_id,conversation_id,filename,mime_type,storage_path,kind) VALUES('notes','u1','c1','notes.txt','text/plain','/tmp/notes.txt','text')`,
+	} {
+		if _, err := db.ExecContext(ctx, q); err != nil {
+			t.Fatalf("seed %q: %v", q, err)
+		}
+	}
+	legacyPath := filepath.Join(t.TempDir(), "legacy.csv")
+	png := append([]byte("\x89PNG\r\n\x1a\n"), make([]byte, 24)...)
+	if err := os.WriteFile(legacyPath, png, 0o600); err != nil {
+		t.Fatalf("write legacy image: %v", err)
+	}
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO files(id,user_id,conversation_id,filename,mime_type,size_bytes,storage_path,kind) VALUES('legacy-image','u1','c1','legacy.csv','text/csv',? ,?,'sheet')`,
+		len(png), legacyPath,
+	); err != nil {
+		t.Fatalf("seed legacy image bytes: %v", err)
+	}
+
+	files := listSandboxFiles(ctx, db, "c1", "u1")
+	want := map[string]string{"data.csv": "sheet", "notes.txt": "text"}
+	if len(files) != len(want) {
+		t.Fatalf("sandbox prompt files = %+v, want only non-images", files)
+	}
+	for _, file := range files {
+		if want[file.Name] != file.Kind {
+			t.Errorf("unexpected sandbox prompt file: %+v", file)
+		}
+	}
+}
+
 func TestShouldInjectSpreadsheetPreviewUsesActualPythonAvailability(t *testing.T) {
 	sheetFiles := []ProjectFileSummary{{Name: "data.xlsx", Kind: "sheet"}}
 	textFiles := []ProjectFileSummary{{Name: "notes.txt", Kind: "text"}}

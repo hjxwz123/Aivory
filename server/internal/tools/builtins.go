@@ -38,7 +38,6 @@ var (
 	webFetchResponseBodyReadCap            = envcfg.Int64("AIVORY_TOOLS_WEB_FETCH_RESPONSE_BODY_READ_CAP", 256*1024)
 	webFetchExtractedTextCharCap           = envcfg.Int("AIVORY_TOOLS_WEB_FETCH_EXTRACTED_TEXT_CHAR_CAP", 32000)
 	pythonExecuteUploadStagingFileSize     = envcfg.Int64("AIVORY_TOOLS_PYTHON_EXECUTE_UPLOAD_STAGING_FILE_SIZE", 40*1024*1024)
-	pythonExecuteImageArtifactStagingSize  = envcfg.Int64("AIVORY_TOOLS_PYTHON_EXECUTE_IMAGE_ARTIFACT_STAGING_SIZE", 20*1024*1024)
 	pythonExecuteStdoutStderrTruncationCap = envcfg.Int("AIVORY_TOOLS_PYTHON_EXECUTE_STDOUT_STDERR_TRUNCATION_CAP", 32*1024)
 	inN                                    = envcfg.Int("AIVORY_TOOLS_IN_N", 4)
 	inSize                                 = envcfg.Str("AIVORY_TOOLS_IN_SIZE", "1024x1024")
@@ -187,19 +186,15 @@ func stripHTML(s string) string {
 	return strings.TrimSpace(text)
 }
 
-// fetchImageTool downloads a public image into the conversation's sandbox at
-// /workspace/uploads/ so it can be embedded into a generated deck/doc. The
-// sandbox itself has no outbound network (§ security), so this Go-side fetch is
-// the bridge for "find images on the web → build a PPT". SSRF-guarded + size
-// capped, same as web_fetch.
-type fetchImageTool struct {
-	sandbox sandbox.Service
-	logger  *log.Logger
-}
+// fetchImageTool is retained only as a fail-closed compatibility target for an
+// in-flight/legacy tool call. It is no longer registered or advertised: external
+// images must be sent directly to a vision-capable provider, never downloaded
+// into the Python sandbox.
+type fetchImageTool struct{}
 
 func (t *fetchImageTool) Name() string { return "fetch_image" }
 func (t *fetchImageTool) Description() string {
-	return "Download an image from a public http(s) URL into /workspace/uploads/ so python_execute can embed it (e.g. python-pptx add_picture, python-docx, reportlab). Use this for web images — the sandbox has no internet of its own. Returns the local sandbox path to reference."
+	return "Image downloads into the Python sandbox are disabled."
 }
 func (t *fetchImageTool) InputSchema() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{"url":{"type":"string"},"filename":{"type":"string"}},"required":["url"]}`)
@@ -210,130 +205,79 @@ type fetchImageInput struct {
 	Filename string `json:"filename"`
 }
 
-func (t *fetchImageTool) Execute(ctx context.Context, input []byte, tc *llm.ToolContext) (string, []llm.Citation, error) {
-	var in fetchImageInput
-	_ = json.Unmarshal(input, &in)
-	u, err := url.Parse(strings.TrimSpace(in.URL))
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
-		return "", nil, errors.New("invalid URL")
-	}
-	if p := u.Port(); p != "" && p != "80" && p != "443" {
-		return "", nil, errors.New("blocked non-web port")
-	}
-	if t.sandbox == nil || !t.sandbox.Enabled() {
-		return "", nil, errors.New("fetch_image needs the sandbox configured (Admin → settings)")
-	}
-	if tc == nil || tc.DB == nil || tc.ConvID == "" {
-		return "", nil, errors.New("fetch_image requires a conversation context")
-	}
+func (t *fetchImageTool) Execute(_ context.Context, _ []byte, _ *llm.ToolContext) (string, []llm.Citation, error) {
+	return "", nil, errors.New("fetch_image is disabled: images must use a vision-capable model API and cannot be staged in the sandbox")
+}
 
-	req, _ := http.NewRequestWithContext(ctx, "GET", u.String(), nil)
-	req.Header.Set("user-agent", "AivoryBot/1.0")
-	resp, err := ssrfSafeClient().Do(req)
-	if err != nil {
-		return "", nil, err
+var sandboxImageExtensions = map[string]struct{}{
+	".apng": {}, ".avif": {}, ".bmp": {}, ".cr2": {}, ".cur": {}, ".dng": {},
+	".eps": {}, ".gif": {}, ".heic": {}, ".heif": {}, ".ico": {}, ".jfif": {},
+	".jpe": {}, ".jpeg": {}, ".jpg": {}, ".jxl": {}, ".nef": {}, ".png": {},
+	".psd": {}, ".raw": {}, ".svg": {}, ".tif": {}, ".tiff": {}, ".webp": {},
+}
+
+var sandboxSVGTagRe = regexp.MustCompile(`(?i)<svg(?:\s|>)`)
+
+// isSandboxImageInput classifies an input using every trustworthy signal we
+// have before it reaches sandbox.PutFile. Metadata alone is not enough: legacy
+// rows and skill manifests may be wrong, so bytes are also MIME-sniffed and the
+// text-based SVG / ISO-BMFF formats get explicit checks.
+func isSandboxImageInput(filename, mimeType, kind string, data []byte) bool {
+	if strings.EqualFold(strings.TrimSpace(kind), "image") {
+		return true
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		return "", nil, fmt.Errorf("image fetch failed: HTTP %d", resp.StatusCode)
+	mimeType = strings.ToLower(strings.TrimSpace(strings.SplitN(mimeType, ";", 2)[0]))
+	if strings.HasPrefix(mimeType, "image/") {
+		return true
 	}
-	maxImg := envcfg.Int64("AIVORY_TOOLS_MAX_IMG", 15*1024*1024)
-	data, _ := io.ReadAll(io.LimitReader(resp.Body, maxImg+1))
+	if _, ok := sandboxImageExtensions[strings.ToLower(filepath.Ext(strings.TrimSpace(filename)))]; ok {
+		return true
+	}
 	if len(data) == 0 {
-		return "", nil, errors.New("empty image response")
+		return false
 	}
-	if int64(len(data)) > maxImg {
-		return "", nil, errors.New("image too large (>15MB)")
-	}
-	ct := resp.Header.Get("content-type")
-	if !strings.HasPrefix(ct, "image/") {
-		ct = http.DetectContentType(data)
-		if !strings.HasPrefix(ct, "image/") {
-			return "", nil, errors.New("URL did not return an image")
-		}
-	}
-	name := sanitizeImageName(in.Filename, u, ct)
+	return verifiedImageMIMEFromBytes(data) != ""
+}
 
-	// Reuse (or provision) the conversation's persistent sandbox session so the
-	// image lands in the SAME /workspace python_execute will read. Serialise the
-	// get→create→persist on the SAME per-conversation lock python_execute uses, so
-	// a fetch_image and a python_execute running concurrently in one turn don't
-	// each provision a session and clobber sandbox_id (leaking a container).
-	unlock := lockConvSandbox(tc.ConvID)
-	sessionID, _ := store.GetConvProviderStateKey(ctx, tc.DB, tc.ConvID, "sandbox_id")
-	if sessionID == "" {
-		sid, err := t.sandbox.NewSession(ctx, tc.ConvID)
-		if err != nil {
-			unlock()
-			if t.logger != nil {
-				t.logger.Printf("fetch_image: sandbox NewSession failed: %v", err)
+func verifiedImageMIMEFromBytes(data []byte) string {
+	if len(data) == 0 {
+		return ""
+	}
+	if detected := strings.ToLower(http.DetectContentType(data)); strings.HasPrefix(detected, "image/") {
+		return detected
+	}
+	head := data
+	if len(head) > 4096 {
+		head = head[:4096]
+	}
+	if len(head) >= 12 && bytes.Equal(head[4:8], []byte("ftyp")) {
+		brands := head[8:]
+		for _, brand := range [][]byte{
+			[]byte("avif"), []byte("avis"),
+		} {
+			if bytes.Contains(brands, brand) {
+				return "image/avif"
 			}
-			return "", nil, fmt.Errorf("sandbox session: %w", err)
 		}
-		sessionID = sid
-		if perr := store.SetConvProviderStateKey(ctx, tc.DB, tc.ConvID, "sandbox_id", sessionID); perr != nil {
-			_ = t.sandbox.Release(ctx, sessionID)
-			unlock()
-			return "", nil, fmt.Errorf("persist sandbox session: %w", perr)
-		}
-	}
-	unlock()
-	path := "/workspace/uploads/" + name
-	if err := t.sandbox.PutFile(ctx, sessionID, path, data); err != nil {
-		return "", nil, fmt.Errorf("stage image: %w", err)
-	}
-	return fmt.Sprintf("Saved image (%d bytes, %s) to %s — embed it via python_execute, e.g. python-pptx add_picture(%q) or <img src='%s'>.", len(data), ct, path, path, path), nil, nil
-}
-
-// sanitizeImageName derives a safe /workspace filename from the requested name
-// or the URL, guaranteeing a sane image extension matching the content type.
-func sanitizeImageName(want string, u *url.URL, contentType string) string {
-	base := strings.TrimSpace(want)
-	if base == "" {
-		base = filepath.Base(u.Path)
-	}
-	base = filepath.Base(base)
-	base = strings.Map(func(r rune) rune {
-		switch {
-		case r == '/' || r == '\\' || r == ' ' || r == '?' || r == '#' || r == '&':
-			return '-'
-		default:
-			return r
-		}
-	}, base)
-	if base == "" || base == "." || base == "-" {
-		base = "image"
-	}
-	lower := strings.ToLower(base)
-	known := []string{".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"}
-	hasExt := false
-	for _, e := range known {
-		if strings.HasSuffix(lower, e) {
-			hasExt = true
-			break
+		for _, brand := range [][]byte{
+			[]byte("heic"), []byte("heix"), []byte("hevc"), []byte("hevx"),
+			[]byte("heim"), []byte("heis"), []byte("mif1"), []byte("msf1"),
+		} {
+			if bytes.Contains(brands, brand) {
+				return "image/heif"
+			}
 		}
 	}
-	if !hasExt {
-		base += imageExtForType(contentType)
+	if bytes.HasPrefix(head, []byte("8BPS")) {
+		return "image/vnd.adobe.photoshop"
 	}
-	return base
-}
-
-func imageExtForType(ct string) string {
-	switch {
-	case strings.Contains(ct, "png"):
-		return ".png"
-	case strings.Contains(ct, "jpeg"), strings.Contains(ct, "jpg"):
-		return ".jpg"
-	case strings.Contains(ct, "gif"):
-		return ".gif"
-	case strings.Contains(ct, "webp"):
-		return ".webp"
-	case strings.Contains(ct, "svg"):
-		return ".svg"
-	default:
-		return ".png"
+	if bytes.HasPrefix(head, []byte{0xff, 0x0a}) || bytes.HasPrefix(head, []byte("\x00\x00\x00\x0cJXL \r\n\x87\n")) {
+		return "image/jxl"
 	}
+	if sandboxSVGTagRe.Match(head) {
+		return "image/svg+xml"
+	}
+	return ""
 }
 
 // convSandboxMu serialises sandbox-session provisioning per conversation so two
@@ -361,7 +305,7 @@ type pythonExecuteTool struct {
 
 func (t *pythonExecuteTool) Name() string { return "python_execute" }
 func (t *pythonExecuteTool) Description() string {
-	return "Run Python in a persistent sandbox for math, data analysis, plotting, spreadsheet/CSV processing, and generating downloadable files (PDF/PPTX/DOCX/XLSX/PNG). The session and its /workspace persist across calls AND across turns in this conversation, so call it several times in a row — inspect the data first (shape/columns/head), then compute, and read again differently if the first attempt doesn't fit. ALL user-uploaded files AND any images you generated earlier are staged in /workspace/uploads/ — ALWAYS run `import os; os.listdir('/workspace/uploads')` first to see the exact filenames (there may be several; names are de-duplicated), then use them by their real paths (read spreadsheets with pandas.read_csv / pandas.read_excel; embed images with python-pptx add_picture / python-docx; pandas, numpy, openpyxl are installed). Write outputs to /workspace/outputs to return them as downloadable artifacts. Stdout/stderr is returned."
+	return "Run Python in a persistent sandbox for math, data analysis, plotting, spreadsheet/CSV processing, and generating downloadable files (PDF/PPTX/DOCX/XLSX/PNG). The session and its /workspace persist across calls AND across turns in this conversation, so call it several times in a row — inspect the data first (shape/columns/head), then compute, and read again differently if the first attempt doesn't fit. Supported non-image data uploads are staged in /workspace/uploads/; external image files are never staged and must use a vision-capable model API. Run `import os; os.listdir('/workspace/uploads')` first to see exact filenames, then use their real paths (for example pandas.read_csv / pandas.read_excel). Write outputs, including plots and other generated images, to /workspace/outputs to return them as downloadable artifacts. Stdout/stderr is returned."
 }
 func (t *pythonExecuteTool) InputSchema() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{"code":{"type":"string"}},"required":["code"]}`)
@@ -442,12 +386,17 @@ func (t *pythonExecuteTool) Execute(ctx context.Context, input []byte, tc *llm.T
 		unlockConv()
 	}
 
-	// Stage the conversation's uploaded data files into /workspace/uploads so
-	// the code can read them (§4.5). Best-effort and idempotent — the sandbox
-	// overwrites same-path files.
-	stageFiles := func(sid string) {
+	// Reset the persistent input namespaces, then stage the conversation's
+	// current non-image data files into /workspace/uploads. Reset is mandatory:
+	// older sessions/archives may still contain image copies written by previous
+	// releases, and executing user code before removing them would reopen the
+	// sandbox image-input path.
+	stageFiles := func(sid string) error {
+		if err := t.sandbox.ResetInputs(ctx, sid); err != nil {
+			return fmt.Errorf("reset sandbox inputs: %w", err)
+		}
 		if tc == nil || tc.DB == nil || tc.ConvID == "" {
-			return
+			return nil
 		}
 		// Dedupe staged names so multiple files that share a basename (e.g. four
 		// pasted "image.png") don't overwrite each other at the same path — every
@@ -474,15 +423,18 @@ func (t *pythonExecuteTool) Execute(ctx context.Context, input []byte, tc *llm.T
 		}
 		if files, err := store.ListFilesByConversation(ctx, tc.DB, tc.ConvID, tc.UserID); err == nil {
 			for _, f := range files {
-				// Stage data files AND images — images so they can be embedded into
-				// generated decks/docs (python-pptx/-docx read them from /workspace
-				// /uploads). Other binary kinds (audio/video/archives) stay out.
+				// Only data-oriented inputs are eligible. Image metadata is checked
+				// again below and file bytes are sniffed before PutFile, so a forged
+				// kind/MIME/extension cannot turn the sandbox into a vision fallback.
 				spreadsheetName := false
 				switch strings.ToLower(filepath.Ext(strings.TrimSpace(f.Filename))) {
 				case ".csv", ".tsv", ".xlsx", ".xls", ".xlsm":
 					spreadsheetName = true
 				}
-				if f.Kind != "sheet" && f.Kind != "text" && f.Kind != "code" && f.Kind != "image" && !spreadsheetName {
+				if f.Kind != "sheet" && f.Kind != "text" && f.Kind != "code" && !spreadsheetName {
+					continue
+				}
+				if isSandboxImageInput(f.Filename, f.MimeType, f.Kind, nil) {
 					continue
 				}
 				if f.SizeBytes > pythonExecuteUploadStagingFileSize {
@@ -492,24 +444,13 @@ func (t *pythonExecuteTool) Execute(ctx context.Context, input []byte, tc *llm.T
 				if err != nil {
 					continue
 				}
+				if isSandboxImageInput(f.Filename, f.MimeType, f.Kind, data) {
+					continue
+				}
 				_ = t.sandbox.PutFile(ctx, sid, "/workspace/uploads/"+uniqueName(f.Filename), data)
 			}
 		}
-		// Stage generated images (image_generate artifacts) so a follow-up turn
-		// can build a deck/doc with them — they live as artifacts, not uploads.
-		if arts, err := store.ListImageArtifactsByConversation(ctx, tc.DB, tc.ConvID, tc.UserID); err == nil {
-			for _, a := range arts {
-				if a.SizeBytes > pythonExecuteImageArtifactStagingSize {
-					continue
-				}
-				data, err := os.ReadFile(a.StoragePath)
-				if err != nil {
-					continue
-				}
-				_ = t.sandbox.PutFile(ctx, sid, "/workspace/uploads/"+uniqueName(a.Filename), data)
-			}
-		}
-		// Stage skill assets too (§4.17) so use_skill can reference scripts/data
+		// Stage non-image skill assets too (§4.17) so use_skill can reference scripts/data
 		// from /workspace/skills/<name>/. Scope to the skills bound to THIS model
 		// (model_skills) — the same set use_skill can load and the index advertises.
 		if tc.DB != nil && tc.ModelID != "" {
@@ -532,8 +473,14 @@ func (t *pythonExecuteTool) Execute(ctx context.Context, input []byte, tc *llm.T
 						skillDir = "skill"
 					}
 					for _, a := range assets {
+						if isSandboxImageInput(a.Filename, a.MimeType, "", nil) {
+							continue
+						}
 						data, err := os.ReadFile(a.StoragePath)
 						if err != nil {
+							continue
+						}
+						if isSandboxImageInput(a.Filename, a.MimeType, "", data) {
 							continue
 						}
 						assetName := filepath.Base(a.Filename)
@@ -545,8 +492,11 @@ func (t *pythonExecuteTool) Execute(ctx context.Context, input []byte, tc *llm.T
 				}
 			}
 		}
+		return nil
 	}
-	stageFiles(sessionID)
+	if err := stageFiles(sessionID); err != nil {
+		return "", nil, err
+	}
 
 	res, err := t.sandbox.Exec(ctx, sessionID, in.Code)
 	if err != nil {
@@ -590,7 +540,9 @@ func (t *pythonExecuteTool) Execute(ctx context.Context, input []byte, tc *llm.T
 			// §4.5 workspace restore: if a prior run archived /workspace, the
 			// sandbox-service auto-restores on session creation. We re-stage
 			// uploads (always cheap) so the new container has user data.
-			stageFiles(sessionID)
+			if stageErr := stageFiles(sessionID); stageErr != nil {
+				return "", nil, stageErr
+			}
 			res, err = t.sandbox.Exec(ctx, sessionID, in.Code)
 		}
 	}
@@ -1140,19 +1092,16 @@ func (t *imageGenerateTool) loadInputImages(ctx context.Context, tc *llm.ToolCon
 		// so try both. Both are ownership-scoped.
 		var data []byte
 		var mime string
-		if art, err := store.GetArtifact(ctx, t.db, id, tc.UserID); err == nil && art != nil && strings.HasPrefix(art.MimeType, "image/") {
-			b, rerr := os.ReadFile(art.StoragePath)
-			if rerr != nil {
-				continue
-			}
-			data, mime = b, art.MimeType
-		} else if f, err := store.GetFile(ctx, t.db, id, tc.UserID); err == nil && f != nil && strings.HasPrefix(f.MimeType, "image/") {
-			b, rerr := os.ReadFile(f.StoragePath)
-			if rerr != nil {
-				continue
-			}
-			data, mime = b, f.MimeType
+		if art, err := store.GetArtifact(ctx, t.db, id, tc.UserID); err == nil && art != nil {
+			data, mime = readVerifiedImageInput(art.StoragePath, art.SizeBytes)
+		} else if f, err := store.GetFile(ctx, t.db, id, tc.UserID); err == nil && f != nil && f.ConversationID == tc.ConvID {
+			// User uploads are conversation-scoped. An owned file id from a
+			// different chat cannot be smuggled into this image-model request.
+			data, mime = readVerifiedImageInput(f.StoragePath, f.SizeBytes)
 		} else {
+			continue
+		}
+		if len(data) == 0 || mime == "" {
 			continue
 		}
 		out = append(out, imageBytes{data: data, mime: mime})
@@ -1161,6 +1110,26 @@ func (t *imageGenerateTool) loadInputImages(ctx context.Context, tc *llm.ToolCon
 		}
 	}
 	return out
+}
+
+func readVerifiedImageInput(path string, storedSize int64) ([]byte, string) {
+	if fetchRemoteImageDownloadCap <= 0 || storedSize > fetchRemoteImageDownloadCap {
+		return nil, ""
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, ""
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, fetchRemoteImageDownloadCap+1))
+	if err != nil || int64(len(data)) > fetchRemoteImageDownloadCap {
+		return nil, ""
+	}
+	mimeType := verifiedImageMIMEFromBytes(data)
+	if mimeType == "" {
+		return nil, ""
+	}
+	return data, mimeType
 }
 
 // geminiGenerateImages calls generateContent with an image-capable model and

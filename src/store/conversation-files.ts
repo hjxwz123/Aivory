@@ -72,9 +72,8 @@ export const useConversationFiles = create<ConversationFilesStore>((set, get) =>
         form.append('file', file)
         // Mirror the composer: anything that isn't an image is ingested as a
         // conversation-scoped RAG document so the model can read it.
-        const isImage = file.type.startsWith('image/')
-        const qs = `conversation_id=${encodeURIComponent(convId)}${isImage ? '' : '&rag=1'}`
-        await apiUpload(`/files?${qs}`, form, {
+        const qs = new URLSearchParams({ conversation_id: convId, rag: '1' })
+        await apiUpload(`/files?${qs.toString()}`, form, {
           onProgress: (progress) => {
             if (typeof progress.percent !== 'number') return
             set({ uploadJob: { name: file.name, progress: progress.percent, phase: 'uploading' } })

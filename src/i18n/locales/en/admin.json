@@ -383,6 +383,7 @@
       "task_downgrade": "Cross-vendor downgrade",
       "task_image_prompt": "Image prompt",
       "task_tool_route": "Tool routing",
+      "task_search_queries": "Search query generation",
       "task_research_plan": "Research plan",
       "task_research_verify": "Research verify",
       "task_moderation": "Moderation",

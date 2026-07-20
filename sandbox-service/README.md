@@ -6,7 +6,7 @@
 </p>
 
 A tiny, self-hosted Python execution sandbox for local development. It implements
-the exact 3-endpoint HTTP protocol the Go backend already speaks
+the HTTP protocol the Go backend already speaks
 (`server/internal/sandbox/sandbox.go`), so wiring it up is just an env var.
 
 It is **not** a from-scratch sandbox: each session is a locked-down Docker
@@ -200,10 +200,16 @@ You should get `stdout: "rows 3\n"`, `exit_code: 0`, and one file `p.png`
 
 ## Configuration (env vars)
 
+Runner networking is deliberately not configurable. Every new session
+container is created with Docker `--network none`, even when the sidecar itself
+is attached to a Compose network so the Go backend can reach it. User Python
+therefore cannot use `requests`, `curl`, or runtime `pip install` to fetch remote
+content. Add required packages to `Dockerfile.runner` and rebuild the runner
+image instead.
+
 | Var | Default | Notes |
 |---|---|---|
 | `SANDBOX_IMAGE` | `aivory-sandbox:latest` | runtime image tag |
-| `SANDBOX_NETWORK` | `none` | set `bridge` to allow `pip install` at runtime |
 | `SANDBOX_MEMORY` | `2g` | per-container memory cap |
 | `SANDBOX_CPUS` | `1` | per-container CPU cap |
 | `SANDBOX_PIDS_LIMIT` | `256` | fork-bomb guard |
@@ -237,7 +243,7 @@ You should get `stdout: "rows 3\n"`, `exit_code: 0`, and one file `p.png`
 
 ## Security posture (dev-grade)
 
-Each session container runs **non-root**, `--network none`, `--cap-drop ALL`,
+Each session container runs **non-root**, mandatory `--network none`, `--cap-drop ALL`,
 `--security-opt no-new-privileges`, with memory/cpu/pids/nofile limits and a
 120s exec timeout. By default the rootfs is **read-only** and only `/tmp`,
 `$HOME` and `/workspace` are writable size-bounded tmpfs mounts, so a session
@@ -281,6 +287,8 @@ and the Go side stay identical (that's the whole point of the thin adapter).
 | POST | `/exec` | `{session_id, code, timeout_ms?}` | `{stdout, stderr, exit_code, files[]}` |
 | POST | `/files` | `{session_id, path, data_base64}` | `{ok}` |
 | POST | `/files/get` | `{session_id, path}` | `{data_base64}` |
+| POST | `/files/list` | `{session_id}` | `{files[]}` |
+| POST | `/files/reset-inputs` | `{session_id}` | `{ok}` |
 | DELETE | `/sessions/{id}` | `{storage?, discard?, archive_key?}` | `{ok}` |
 | POST | `/storage/put` | `{key, data_base64, content_type, expires_in?, storage}` | `{provider, key, url, expires_in}` |
 | POST | `/storage/delete` | `{key, storage}` | `{ok, key}` |
@@ -297,12 +305,17 @@ GET URL (ttl `expires_in` or 1h, capped at 24h); `/storage/delete` is idempotent
 and refuses to delete outside the configured `prefix`.
 
 When a `storage` block is forwarded on `/sessions` and `DELETE /sessions/{id}`,
-the sidecar archives `/workspace` to `<prefix>/workspaces/<session_id>.tgz`
-before a TTL/explicit teardown and restores it on the next create with that id
-(design §4.5). All best-effort: without an effective `storage` block this is a
-no-op (reaped = gone), and an archive/restore failure never fails the request.
+the sidecar archives persistent workspace state to
+`<prefix>/workspaces/<session_id>.tgz` before a TTL/explicit teardown and
+restores it on the next create with that id (design §4.5). The server-managed
+`uploads` and `skills` input directories are excluded from archives and cleared
+after every restore. All best-effort: without an effective `storage` block this
+is a no-op (reaped = gone), and an archive/restore failure never fails the
+request.
 
-Artifacts in `files[]` are whatever the code wrote under `/workspace/outputs/`
-during that exec (`{name, mime_type, data_base64}`). User uploads should be
-written to `/workspace/uploads/` via `/files` — that's the path the
-`python_execute` tool description tells the model about.
+Artifacts in `files[]` are whatever Python wrote under `/workspace/outputs/`
+during that exec (`{name, mime_type, data_base64}`), including generated PNGs.
+`/files` is only for eligible non-image data and skill inputs; it rejects image
+extensions and image signatures. `/files/reset-inputs` clears `/workspace/uploads`
+and `/workspace/skills` without touching generated outputs or other workspace
+state.

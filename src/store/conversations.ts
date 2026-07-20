@@ -114,6 +114,87 @@ let convServerOffset = 0
 // Monotonic token identifying which space the in-flight list requests belong to.
 let convLoadEpoch = 0
 
+// Realtime notifications are intentionally best-effort. A title task can finish
+// after the answer stream and its thin conversation.updated event can be missed
+// during a reconnect, leaving the optimistic first-message title on screen until
+// refresh. Reconcile only while that deterministic fallback is still visible;
+// the staggered attempts stop immediately once realtime (or a manual rename) has
+// already supplied a different server-authoritative title.
+const TITLE_RECONCILE_DELAYS_MS = [1000, 2000, 4000, 8000, 15000]
+const titleReconcileGeneration = new Map<string, number>()
+
+function deterministicServerTitle(text: string): string {
+  return Array.from(text.replace(/\s+/g, ' ').trim()).slice(0, 28).join('')
+}
+
+function scheduleGeneratedTitleReconcile(
+  conversationId: string,
+  fallbackTitle: string,
+  optimisticTitle: string,
+): void {
+  if (!conversationId || !fallbackTitle) return
+  const pendingTitles = new Set(
+    [fallbackTitle, optimisticTitle].map((title) => title.trim()).filter(Boolean),
+  )
+  const generation = (titleReconcileGeneration.get(conversationId) ?? 0) + 1
+  titleReconcileGeneration.set(conversationId, generation)
+  let attemptIndex = 0
+
+  const stop = () => {
+    if (titleReconcileGeneration.get(conversationId) === generation) {
+      titleReconcileGeneration.delete(conversationId)
+    }
+  }
+
+  const scheduleNext = () => {
+    if (attemptIndex >= TITLE_RECONCILE_DELAYS_MS.length) {
+      stop()
+      return
+    }
+    const delay = TITLE_RECONCILE_DELAYS_MS[attemptIndex]
+    attemptIndex += 1
+    setTimeout(() => void attempt(), delay)
+  }
+
+  const attempt = async () => {
+    if (titleReconcileGeneration.get(conversationId) !== generation) return
+    const current = useConversations.getState().conversations.find((c) => c.id === conversationId)
+    if (!current) {
+      stop()
+      return
+    }
+    // Realtime already landed the generated title, or the user renamed it.
+    if (current.title.trim() && !pendingTitles.has(current.title.trim())) {
+      stop()
+      return
+    }
+    try {
+      const resp = await conversationsApi.get(conversationId, { limit: 1 })
+      if (titleReconcileGeneration.get(conversationId) !== generation) return
+      const title = resp.conversation.title.trim()
+      const generated = Boolean(title && !pendingTitles.has(title))
+      const finalAttempt = attemptIndex >= TITLE_RECONCILE_DELAYS_MS.length
+      if (generated || (finalAttempt && title)) {
+        useConversations.setState((state) => ({
+          conversations: state.conversations.map((conversation) =>
+            conversation.id === conversationId ? { ...conversation, title } : conversation,
+          ),
+        }))
+      }
+      if (generated || finalAttempt) {
+        stop()
+        return
+      }
+    } catch {
+      // A transient fetch failure should not defeat later reconciliation. A
+      // deleted conversation disappears from local state and stops on next pass.
+    }
+    scheduleNext()
+  }
+
+  scheduleNext()
+}
+
 // Messages per page when opening a conversation. A bit above the render window
 // (INITIAL_WINDOW=24) so the first screen is full with a little buffer; older
 // pages are fetched on scroll-up via loadOlderMessages().
@@ -953,6 +1034,12 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
     // replayed when that branch is reopened.
     const abort = new AbortController()
     const conv0 = get().conversations.find((c) => c.id === input.conversationId)
+    const optimisticSeedTitle = input.text.replace(/\s+/g, ' ').trim().slice(0, 60).trim()
+    const initialTitle = conv0?.title.trim() ?? ''
+    const expectsGeneratedTitle =
+      (conv0?.messages.length ?? 0) === 0 &&
+      (!initialTitle || initialTitle === 'New conversation' || initialTitle === '新对话' || initialTitle === optimisticSeedTitle)
+    const generatedTitleFallback = deterministicServerTitle(input.text)
     const requestParentId = persistedMessageReference(
       conv0?.messages ?? [],
       parentWasLocal ? undefined : input.parentId,
@@ -1408,6 +1495,9 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
         })
       } else if (!errored) {
         await get().reloadActivePath(input.conversationId)
+        if (expectsGeneratedTitle) {
+          scheduleGeneratedTitleReconcile(input.conversationId, generatedTitleFallback, optimisticSeedTitle)
+        }
       }
     } catch (e) {
       if (abort.signal.aborted && (streamHandoffs.delete(serverAssistantId) || streamHandoffs.delete(serverAssistantId + '-regen'))) return

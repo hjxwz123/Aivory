@@ -60,6 +60,12 @@ import { encodeWavFromBlob } from '@/lib/audio'
 import { startVoiceStream, type VoiceStreamController } from '@/lib/audio-stream'
 import { ProgressRing } from '@/components/ui/progress-ring'
 import { envNum } from '@/lib/env-config'
+import {
+  filterFilesForImageCapability,
+  isImageFileLike,
+  NON_IMAGE_ATTACHMENT_ACCEPT,
+  resolveImageAttachmentCapability,
+} from '@/lib/vision-capability'
 
 interface ComposerProps {
   modelId: string
@@ -255,8 +261,7 @@ function restoredAttachmentKind(kind: string): Attachment['kind'] {
 // what prevents that.
 function classifyAttachmentKind(name: string, type: string): Attachment['kind'] {
   const ext = name.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] ?? ''
-  if (type.startsWith('image/') || ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'heic'].includes(ext))
-    return 'image'
+  if (isImageFileLike({ name, type })) return 'image'
   if (type === 'application/pdf' || ext === 'pdf') return 'pdf'
   // Spreadsheets BEFORE documents — the OOXML MIME matches both.
   if (['csv', 'tsv', 'xlsx', 'xls', 'xlsm', 'ods'].includes(ext) || /spreadsheet|ms-excel|csv/i.test(type))
@@ -529,6 +534,7 @@ export function Composer({
   }
   const ref = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  const imageFileRef = useRef<HTMLInputElement>(null)
   const submittingRef = useRef(false)
   // §2.7 re-entry guard for the long-draft → .txt conversion in handleSubmit.
   const convertingRef = useRef(false)
@@ -915,7 +921,13 @@ export function Composer({
   // menu (the picker is a chat model, so isImageMode is already false). When fast
   // is active every other feature is forced off.
   const fastAvailable = useModels((s) => s.fastAvailable)
+  const fastVision = useModels((s) => s.fastVision)
   const effectiveFast = Boolean(fast) && fastAvailable
+  const imageAttachmentCapability = resolveImageAttachmentCapability(currentModel, {
+    fast: effectiveFast,
+    fastVision,
+  })
+  const canAttachImages = imageAttachmentCapability === 'allowed'
   // A fast turn resolves to the platform-selected model, while modelId stays on
   // the last advanced choice so switching back can restore it. Never surface or
   // submit that advanced model's parameter controls during the fast turn.
@@ -953,13 +965,57 @@ export function Composer({
     () => attachments.some((a) => a.documentId && a.ingest !== 'ready'),
     [attachments],
   )
+  const hasUnsupportedImageAttachment = useMemo(
+    () =>
+      !canAttachImages &&
+      attachments.some(
+        (attachment) =>
+          attachment.kind === 'image' ||
+          isImageFileLike({
+            name: attachment.name,
+            // kind=image is handled by the preceding branch; an extension check
+            // catches restored legacy rows whose kind metadata was incomplete.
+            type: '',
+          }),
+      ),
+    [attachments, canAttachImages],
+  )
+  const unsupportedImageNotifiedRef = useRef(false)
+  useEffect(() => {
+    if (!hasUnsupportedImageAttachment) {
+      unsupportedImageNotifiedRef.current = false
+      return
+    }
+    if (unsupportedImageNotifiedRef.current) return
+    unsupportedImageNotifiedRef.current = true
+    toast.warning(
+      t('composer.imageUnsupported', {
+        defaultValue: 'The current model does not support image input. Choose a vision-capable model.',
+      }),
+    )
+  }, [hasUnsupportedImageAttachment, t])
   const voiceActive = recording || streamConnecting || transcribing || voiceStarting
-  const canSubmit = value.trim().length > 0 && !voiceActive && !streaming && !uploading && !restoringAttachments && !documentNotReady
+  const canSubmit =
+    value.trim().length > 0 &&
+    !voiceActive &&
+    !streaming &&
+    !uploading &&
+    !restoringAttachments &&
+    !documentNotReady &&
+    !hasUnsupportedImageAttachment
 
   async function handleSubmit() {
     if (submittingRef.current) return
     const text = value.trim()
     if (!text || voiceActive || streaming || uploading || restoringAttachments || documentNotReady) return
+    if (hasUnsupportedImageAttachment) {
+      toast.error(
+        t('composer.imageUnsupported', {
+          defaultValue: 'The current model does not support image input. Choose a vision-capable model.',
+        }),
+      )
+      return
+    }
     if (text.length > MAX_LEN) {
       // Overflow fallback (multi-paste / dictation can pass the paste hook):
       // move the whole draft into a .txt attachment; the user adds a short
@@ -1039,7 +1095,17 @@ export function Composer({
         throw new Error(t('composer.documentScopeRequired', { defaultValue: 'Create a conversation before uploading documents.' }))
       }
       const ragFlag = (kbIds && kbIds.length > 0) || isDocLike
-      const url = `/files${scopeId ? `?conversation_id=${encodeURIComponent(scopeId)}&draft=1${ragFlag ? '&rag=1' : ''}` : ''}`
+      const query = new URLSearchParams()
+      if (scopeId) {
+        query.set('conversation_id', scopeId)
+        query.set('draft', '1')
+        if (ragFlag) query.set('rag', '1')
+      }
+      if (modelId) query.set('model_id', modelId)
+      // Always send an explicit value so a concurrent mode switch cannot make
+      // the upload inherit a different conversation-level Fast setting.
+      query.set('fast', effectiveFast ? '1' : '0')
+      const url = `/files?${query.toString()}`
       const res = await apiUpload<ApiAttachment & { id: string; url?: string; document_id?: string }>(url, form, {
         onProgress: (progress) => {
           if (typeof progress.percent !== 'number') return
@@ -1244,14 +1310,24 @@ export function Composer({
   // input into an attachment (attachTextAsFile) can tell success from failure.
   async function handleAttach(files: FileList | null): Promise<number> {
     if (!files || !files.length) return 0
-    const all = Array.from(files)
+    const filtered = filterFilesForImageCapability(Array.from(files), imageAttachmentCapability)
+    if (filtered.rejectedImages.length > 0) {
+      toast.error(
+        t('composer.imageUnsupported', {
+          defaultValue: 'The current model does not support image input. Choose a vision-capable model.',
+        }),
+        filtered.rejectedImages.map((file) => file.name).join(', '),
+      )
+    }
+    const all = filtered.accepted
+    if (!all.length) return 0
     // §4.6 reject oversize files BEFORE uploading — images and other files have
     // separate admin-set caps. Rejected images would otherwise upload fine but be
     // silently dropped at chat time (base64 inline cap); documents would fail the
     // server cap after a wasted upload.
     const limits = await getUploadLimits()
-    const overImage = all.filter((f) => f.type.startsWith('image/') && f.size > limits.max_image_bytes)
-    const overFile = all.filter((f) => !f.type.startsWith('image/') && f.size > limits.max_file_bytes)
+    const overImage = all.filter((f) => isImageFileLike(f) && f.size > limits.max_image_bytes)
+    const overFile = all.filter((f) => !isImageFileLike(f) && f.size > limits.max_file_bytes)
     if (overImage.length) {
       toast.error(
         t('composer.imageTooLarge', {
@@ -1278,7 +1354,7 @@ export function Composer({
       size: f.size,
       kind: classifyAttachmentKind(f.name, f.type),
       // Local thumbnail so images preview instantly; revoked on remove/submit.
-      previewUrl: f.type.startsWith('image/') ? URL.createObjectURL(f) : undefined,
+      previewUrl: isImageFileLike(f) ? URL.createObjectURL(f) : undefined,
       uploading: true,
       uploadProgress: 0,
     }))
@@ -1887,6 +1963,18 @@ export function Composer({
         ref={fileRef}
         hidden
         multiple
+        accept={canAttachImages ? undefined : NON_IMAGE_ATTACHMENT_ACCEPT}
+        onChange={(e) => {
+          void handleAttach(e.currentTarget.files)
+          e.currentTarget.value = ''
+        }}
+      />
+      <input
+        type="file"
+        ref={imageFileRef}
+        hidden
+        multiple
+        accept="image/*,.heic,.heif,.avif"
         onChange={(e) => {
           void handleAttach(e.currentTarget.files)
           e.currentTarget.value = ''
@@ -1945,21 +2033,19 @@ export function Composer({
                 <Paperclip size={18} className="shrink-0 text-[var(--color-fg-muted)]" aria-hidden />
                 {t('composer.attach')}
               </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setMoreOpen(false)
-                  const input = fileRef.current
-                  if (!input) return
-                  input.accept = 'image/*'
-                  input.click()
-                  input.accept = ''
-                }}
-                className="flex w-full items-center gap-3 rounded-[10px] px-3 py-2.5 text-left text-[15px] text-[var(--color-fg)] hover:bg-[var(--color-bg-muted)] active:bg-[var(--color-bg-muted)]"
-              >
-                <ImageIcon size={18} className="shrink-0 text-[var(--color-fg-muted)]" aria-hidden />
-                {t('composer.addImage')}
-              </button>
+              {canAttachImages ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMoreOpen(false)
+                    imageFileRef.current?.click()
+                  }}
+                  className="flex w-full items-center gap-3 rounded-[10px] px-3 py-2.5 text-left text-[15px] text-[var(--color-fg)] hover:bg-[var(--color-bg-muted)] active:bg-[var(--color-bg-muted)]"
+                >
+                  <ImageIcon size={18} className="shrink-0 text-[var(--color-fg-muted)]" aria-hidden />
+                  {t('composer.addImage')}
+                </button>
+              ) : null}
               {featureMenuAvailable ? (
                 <>
                   <div className="my-1 h-px bg-[var(--color-divider)]" aria-hidden />
@@ -2051,22 +2137,18 @@ export function Composer({
               </button>
             </Tooltip>
 
-            <Tooltip content={t('composer.addImage')}>
-              <button
-                type="button"
-                onClick={() => {
-                  const input = fileRef.current
-                  if (!input) return
-                  input.accept = 'image/*'
-                  input.click()
-                  input.accept = ''
-                }}
-                aria-label={t('composer.addImage')}
-                className="inline-flex items-center justify-center size-8 rounded-[8px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-              >
-                <ImageIcon size={15} aria-hidden />
-              </button>
-            </Tooltip>
+            {canAttachImages ? (
+              <Tooltip content={t('composer.addImage')}>
+                <button
+                  type="button"
+                  onClick={() => imageFileRef.current?.click()}
+                  aria-label={t('composer.addImage')}
+                  className="inline-flex items-center justify-center size-8 rounded-[8px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                >
+                  <ImageIcon size={15} aria-hidden />
+                </button>
+              </Tooltip>
+            ) : null}
 
             <div className="mx-1 h-5 w-px bg-[var(--color-divider)]" aria-hidden />
 

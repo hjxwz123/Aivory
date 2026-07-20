@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -272,12 +273,61 @@ func uploadFileHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, verr)
 		return
 	}
+	// Inspect a bounded prefix before creating the application-owned destination.
+	// Filename and multipart MIME are both client-controlled; a PNG renamed to
+	// notes.txt must still be treated as an image for model-capability gating.
+	sample := make([]byte, 4096)
+	nSample, readErr := file.Read(sample)
+	if readErr != nil && !errors.Is(readErr, io.EOF) {
+		writeError(w, http.StatusBadRequest, errors.New("could not inspect upload"))
+		return
+	}
+	if _, seekErr := file.Seek(0, io.SeekStart); seekErr != nil {
+		writeError(w, http.StatusBadRequest, errors.New("could not inspect upload"))
+		return
+	}
+	sample = sample[:nSample]
 	// §4.6 per-kind size cap (admin-tunable). Images inline to vision models as
 	// base64, so they carry a tighter cap than documents; enforce it HERE so an
 	// oversize file is rejected at upload instead of being silently dropped at
 	// chat time. header.Size is the declared part size — a cheap reject before we
 	// write our own copy; the post-copy check on n stays authoritative.
-	kind := kindOf(header.Header.Get("Content-Type"), safe)
+	mimeType := header.Header.Get("Content-Type")
+	imageMIME := detectUploadedImageMIME(safe, mimeType, sample)
+	kind := kindOf(mimeType, safe)
+	if imageMIME != "" {
+		kind = "image"
+		mimeType = imageMIME
+	}
+	// Images only exist inside a conversation and go directly to a provider that
+	// supports image input. Enforce this before uploadDestPath creates a user
+	// directory or os.Create writes bytes. model_id / fast describe the current
+	// composer selection; omitted values fall back to the persisted conversation.
+	if kind == "image" {
+		if scopeConv == nil {
+			writeError(w, imageCapabilityErrorStatus(errImageConversationScope), errImageConversationScope)
+			return
+		}
+		fast, provided, err := optionalBoolQuery(r, "fast")
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		if !provided {
+			fast = scopeConv.Fast
+		}
+		model, err := resolveEffectiveConversationModel(
+			r.Context(), d.DB, scopeConv, r.URL.Query().Get("model_id"), fast,
+		)
+		if err != nil {
+			writeError(w, imageCapabilityErrorStatus(err), err)
+			return
+		}
+		if !modelSupportsImageInput(model) {
+			writeError(w, http.StatusUnprocessableEntity, errImageInputUnsupported)
+			return
+		}
+	}
 	limit := uploadLimitBytes(d, kind)
 	if header.Size > limit {
 		writeError(w, 413, uploadTooLargeError(kind, limit))
@@ -314,7 +364,7 @@ func uploadFileHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	f, err := store.CreateFile(r.Context(), d.DB, store.File{
 		UserID: u.ID, ConversationID: conv, Filename: safe,
-		MimeType: header.Header.Get("Content-Type"), SizeBytes: n,
+		MimeType: mimeType, SizeBytes: n,
 		Kind: kind, StoragePath: path,
 		Draft: conv != "" && (r.URL.Query().Get("draft") == "1" || r.URL.Query().Get("draft") == "true"),
 	})
@@ -406,6 +456,13 @@ var codeExts = map[string]bool{
 
 // kindOf maps mime + filename to one of the kind buckets the frontend uses.
 func kindOf(mime, name string) string {
+	// Treat an explicit image MIME conservatively even when the filename carries
+	// a document extension. Besides matching the browser-side gate, this keeps a
+	// renamed/pasted image out of RAG and sandbox staging. Other MIME values stay
+	// secondary because browsers commonly mislabel CSV and Office files.
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(mime)), "image/") {
+		return "image"
+	}
 	// Prefer the validated filename extension for every supported format. Browser
 	// MIME guesses are inconsistent (notably text/csv), and classifying MIME first
 	// used to turn CSV into generic text before the sheet branch was reached.
@@ -413,7 +470,8 @@ func kindOf(mime, name string) string {
 	switch ext {
 	case ".pdf":
 		return "pdf"
-	case ".png", ".jpg", ".jpeg", ".gif", ".webp":
+	case ".png", ".jpg", ".jpeg", ".jpe", ".jfif", ".gif", ".webp", ".bmp",
+		".tif", ".tiff", ".heic", ".heif", ".avif", ".ico":
 		return "image"
 	case ".csv", ".tsv", ".xlsx", ".xls", ".xlsm":
 		return "sheet"
@@ -429,8 +487,6 @@ func kindOf(mime, name string) string {
 	// Unknown/missing extensions may still carry a useful MIME supplied by the
 	// browser. This is a fallback only; uploadPolicy has already validated names.
 	switch {
-	case strings.HasPrefix(mime, "image/"):
-		return "image"
 	case mime == "application/pdf":
 		return "pdf"
 	case strings.HasPrefix(mime, "text"):
@@ -440,6 +496,87 @@ func kindOf(mime, name string) string {
 	// model can read it. Genuinely-binary uploads are caught at parse time
 	// (isProbablyText) and degrade to a placeholder rather than garbage.
 	return "text"
+}
+
+// detectUploadedImageMIME combines declared metadata, extension and a bounded
+// byte signature. It is deliberately conservative: a conflicting image signal
+// classifies the upload as an image, which keeps it out of RAG and the sandbox.
+func detectUploadedImageMIME(name, declared string, sample []byte) string {
+	declared = strings.ToLower(strings.TrimSpace(strings.SplitN(declared, ";", 2)[0]))
+	if strings.HasPrefix(declared, "image/") {
+		return declared
+	}
+	if detected := detectImageMIMEFromBytes(sample); detected != "" {
+		return detected
+	}
+
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".png", ".apng":
+		return "image/png"
+	case ".jpg", ".jpeg", ".jpe", ".jfif":
+		return "image/jpeg"
+	case ".gif":
+		return "image/gif"
+	case ".webp":
+		return "image/webp"
+	case ".bmp":
+		return "image/bmp"
+	case ".tif", ".tiff":
+		return "image/tiff"
+	case ".heic":
+		return "image/heic"
+	case ".heif":
+		return "image/heif"
+	case ".avif":
+		return "image/avif"
+	case ".ico", ".cur":
+		return "image/x-icon"
+	case ".svg":
+		return "image/svg+xml"
+	case ".jxl":
+		return "image/jxl"
+	case ".psd":
+		return "image/vnd.adobe.photoshop"
+	}
+	return ""
+}
+
+// detectImageMIMEFromBytes uses only a bounded byte sample. Unlike
+// detectUploadedImageMIME it never trusts a filename or declared MIME, which is
+// required when validating legacy rows before provider inlining.
+func detectImageMIMEFromBytes(sample []byte) string {
+	if len(sample) > 0 {
+		if detected := strings.ToLower(http.DetectContentType(sample)); strings.HasPrefix(detected, "image/") {
+			return detected
+		}
+		if len(sample) >= 12 && bytes.Equal(sample[4:8], []byte("ftyp")) {
+			brands := sample[8:]
+			if len(brands) > 64 {
+				brands = brands[:64]
+			}
+			for _, brand := range []string{"avif", "avis"} {
+				if bytes.Contains(brands, []byte(brand)) {
+					return "image/avif"
+				}
+			}
+			for _, brand := range []string{"heic", "heix", "hevc", "hevx", "heim", "heis", "mif1", "msf1"} {
+				if bytes.Contains(brands, []byte(brand)) {
+					return "image/heif"
+				}
+			}
+		}
+		if bytes.HasPrefix(sample, []byte("8BPS")) {
+			return "image/vnd.adobe.photoshop"
+		}
+		if bytes.HasPrefix(sample, []byte{0xff, 0x0a}) || bytes.HasPrefix(sample, []byte("\x00\x00\x00\x0cJXL \r\n\x87\n")) {
+			return "image/jxl"
+		}
+		trimmed := bytes.TrimSpace(bytes.TrimPrefix(sample, []byte{0xef, 0xbb, 0xbf}))
+		if bytes.Contains(bytes.ToLower(trimmed), []byte("<svg")) {
+			return "image/svg+xml"
+		}
+	}
+	return ""
 }
 
 // safeMIMEType derives a server-controlled content type for a filename.

@@ -24,6 +24,8 @@ interface ModelStore {
   /** §fast-mode: true when an admin configured a fast model, so the composer
    *  offers the 快速 option. */
   fastAvailable: boolean
+  /** Whether the hidden fast model accepts image inputs. Its identity is never exposed. */
+  fastVision: boolean
   loaded: boolean
   loading: boolean
   error: string | null
@@ -40,6 +42,7 @@ export const useModels = create<ModelStore>((set, get) => ({
   defaultId: '',
   verifyAvailable: false,
   fastAvailable: false,
+  fastVision: false,
   loaded: false,
   loading: false,
   error: null,
@@ -70,6 +73,7 @@ export const useModels = create<ModelStore>((set, get) => ({
         defaultId: userDefault?.id || globalDefault?.id || firstEnabled?.id || resp.models[0]?.id || '',
         verifyAvailable: Boolean(resp.verify_available),
         fastAvailable: Boolean(resp.fast_available),
+        fastVision: Boolean(resp.fast_vision),
         loaded: true,
         loading: false,
       })

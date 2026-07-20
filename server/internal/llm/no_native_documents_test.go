@@ -48,7 +48,7 @@ func TestOpenAIChatOmitsNativeDocumentBlocks(t *testing.T) {
 
 	p := &OpenAIProvider{}
 	req := UnifiedChatRequest{
-		Model:   ModelInfo{RequestID: "gpt-test", BaseURL: srv.URL, APIKey: "k"},
+		Model:   ModelInfo{RequestID: "gpt-test", BaseURL: srv.URL, APIKey: "k", Vision: true},
 		History: multimodalHistoryWithDocument(),
 	}
 	if _, err := p.Stream(context.Background(), req, nil, func(SseEvent) {}); err != nil {
@@ -71,7 +71,7 @@ func TestOpenAIResponsesOmitsNativeDocumentBlocks(t *testing.T) {
 
 	p := &OpenAIProvider{}
 	req := UnifiedChatRequest{
-		Model:   ModelInfo{RequestID: "gpt-test", BaseURL: srv.URL, APIKey: "k", APIFormat: "responses"},
+		Model:   ModelInfo{RequestID: "gpt-test", BaseURL: srv.URL, APIKey: "k", APIFormat: "responses", Vision: true},
 		History: multimodalHistoryWithDocument(),
 	}
 	if _, err := p.Stream(context.Background(), req, nil, func(SseEvent) {}); err != nil {
@@ -100,7 +100,7 @@ func TestAnthropicOmitsNativeDocumentBlocks(t *testing.T) {
 
 	p := &AnthropicProvider{}
 	req := UnifiedChatRequest{
-		Model:   ModelInfo{RequestID: "claude-test", BaseURL: srv.URL, APIKey: "k"},
+		Model:   ModelInfo{RequestID: "claude-test", BaseURL: srv.URL, APIKey: "k", Vision: true},
 		History: multimodalHistoryWithDocument(),
 	}
 	if _, err := p.Stream(context.Background(), req, nil, func(SseEvent) {}); err != nil {

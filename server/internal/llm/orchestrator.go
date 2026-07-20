@@ -1,13 +1,16 @@
 package llm
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -34,10 +37,15 @@ var (
 	imagePromptOptimizerOutputTokens = 400
 	ragRouterRecentHistoryCount      = 6
 	ragRouterRecentHistoryTruncate   = 200
-	titleGenerationOutputTokens      = 60
-	sandboxExecTimeoutClampRangeMax  = envcfg.Int("AIVORY_LLM_SANDBOX_EXEC_TIMEOUT_CLAMP_RANGE_MAX", 600)
-	sandboxExecTimeoutClampRangeMin  = envcfg.Int("AIVORY_LLM_SANDBOX_EXEC_TIMEOUT_CLAMP_RANGE_MIN", 10)
-	sandboxExecCtxSafetyMargin       = envcfg.Dur("AIVORY_LLM_SANDBOX_EXEC_CTX_SAFETY_MARGIN", 150*time.Second)
+	// Reasoning-capable task models count hidden reasoning against the output
+	// budget. Sixty tokens can yield a successful provider response with no
+	// visible title at all, so leave enough room for brief reasoning plus the
+	// requested <=8-word label.
+	titleGenerationOutputTokens     = 256
+	attachmentImageInlineBytes      = envcfg.Int64("AIVORY_LLM_ATTACHMENT_IMAGE_INLINE_BYTES", 20*1024*1024)
+	sandboxExecTimeoutClampRangeMax = envcfg.Int("AIVORY_LLM_SANDBOX_EXEC_TIMEOUT_CLAMP_RANGE_MAX", 600)
+	sandboxExecTimeoutClampRangeMin = envcfg.Int("AIVORY_LLM_SANDBOX_EXEC_TIMEOUT_CLAMP_RANGE_MIN", 10)
+	sandboxExecCtxSafetyMargin      = envcfg.Dur("AIVORY_LLM_SANDBOX_EXEC_CTX_SAFETY_MARGIN", 150*time.Second)
 )
 
 // Orchestrator coordinates the per-message flow described in §3.1: load
@@ -154,7 +162,6 @@ type ImageBiller interface {
 var perTurnToolLimits = map[string]int{
 	"web_search":     envcfg.Int("AIVORY_LLM_PER_TURN_TOOL_LIMITS_WEB_SEARCH", 16),
 	"web_fetch":      envcfg.Int("AIVORY_LLM_PER_TURN_TOOL_LIMITS_WEB_FETCH", 12),
-	"fetch_image":    envcfg.Int("AIVORY_LLM_PER_TURN_TOOL_LIMITS_FETCH_IMAGE", 16), // images for a deck/doc — bounded so a turn can't mass-download
 	"image_generate": envcfg.Int("AIVORY_LLM_PER_TURN_TOOL_LIMITS_IMAGE_GENERATE", 8),
 	"python_execute": envcfg.Int("AIVORY_LLM_PER_TURN_TOOL_LIMITS_PYTHON_EXECUTE", 16), // §F10: cap sandbox executions/turn (each up to 120s) to bound abuse/DoS
 }
@@ -164,7 +171,6 @@ var perTurnToolLimits = map[string]int{
 var deepResearchToolLimits = map[string]int{
 	"web_search":     envcfg.Int("AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_WEB_SEARCH", 40),
 	"web_fetch":      envcfg.Int("AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_WEB_FETCH", 25),
-	"fetch_image":    envcfg.Int("AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_FETCH_IMAGE", 12),
 	"image_generate": envcfg.Int("AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_IMAGE_GENERATE", 4),
 	"python_execute": envcfg.Int("AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_PYTHON_EXECUTE", 8),
 }
@@ -544,8 +550,8 @@ func (o *Orchestrator) buildFallbackRequest(ctx context.Context, base UnifiedCha
 	// PRIMARY model's vision capability (resolveAttachments runs once, before any
 	// fallback). If the fallback model can't see images, those blocks must not ride
 	// to it — a text-only upstream rejects them ("unknown variant `image_url`,
-	// expected `text`"). Rebuild the history without image blocks (base is left
-	// untouched; the slice was shared read-only).
+	// expected `text`"). Rebuild the history without image blocks, image
+	// attachments, or image-bearing native Raw (base remains untouched).
 	if !m.Vision {
 		req.History = stripImageBlocks(base.History)
 	}
@@ -554,37 +560,6 @@ func (o *Orchestrator) buildFallbackRequest(ctx context.Context, base UnifiedCha
 		name = m.RequestID
 	}
 	return req, prov, name, nil
-}
-
-// stripImageBlocks returns a copy of hist with every image block removed, replacing
-// each affected message's images with a single text note. Used when a turn falls
-// back to a non-vision model (§4.6-C): the images were inlined for a vision-capable
-// primary, and forwarding them to a text-only fallback triggers an upstream 400.
-func stripImageBlocks(hist []UnifiedMessage) []UnifiedMessage {
-	out := make([]UnifiedMessage, len(hist))
-	for i, m := range hist {
-		out[i] = m
-		hasImage := false
-		for _, b := range m.Blocks {
-			if b.Kind == "image" {
-				hasImage = true
-				break
-			}
-		}
-		if !hasImage {
-			continue
-		}
-		nb := make([]UnifiedBlock, 0, len(m.Blocks))
-		for _, b := range m.Blocks {
-			if b.Kind == "image" {
-				continue
-			}
-			nb = append(nb, b)
-		}
-		nb = append(nb, UnifiedBlock{Kind: "text", Text: "[image attachment skipped — fallback model lacks vision capability]"})
-		out[i].Blocks = nb
-	}
-	return out
 }
 
 // resolveFallbackChannel returns the creds + id of a model's backup channel
@@ -1416,8 +1391,12 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	//     blocks; they are parsed by RAG (local text extraction or MinerU OCR),
 	//     chunked/retrieved, and injected as text. Sheets/CSVs are surfaced to
 	//     python_execute via the sandbox upload path instead.
-	//     §4.6 vision gating: non-vision models receive a textual stub for
-	//     image attachments instead of silently dropping them.
+	//     §4.6 vision gating: strip legacy image blocks/attachments before any
+	//     provider resolution. This changes only the request copy; stored history
+	//     remains available if the user later switches back to a vision model.
+	if !model.Vision {
+		uHist = stripImageBlocks(uHist)
+	}
 	o.resolveAttachments(ctx, req.UserID, conv.ID, uHist, model, onEvent)
 
 	// 9d. Conversation-scoped data files staged into the sandbox
@@ -2316,9 +2295,10 @@ func assistantRendersEmpty(m store.Message) bool {
 // upload -> parse/OCR -> chunks -> retrieval/full-text injection. This keeps
 // provider wire formats simple and avoids gateway-specific file-block failures.
 func (o *Orchestrator) resolveAttachments(ctx context.Context, userID, convID string, hist []UnifiedMessage, model *store.Model, onEvent func(SseEvent)) {
-	visionCapable := model == nil || model.Vision
+	visionCapable := model != nil && model.Vision
 	notedNonVision := false
 	notedPDFRAGOnly := false
+	notedOversizeImage := false
 	for i := range hist {
 		// §4.6-C role gate: attachments belong to the user turn that uploaded them.
 		// A non-user row can only carry an image attachment via a copy path (share
@@ -2331,30 +2311,43 @@ func (o *Orchestrator) resolveAttachments(ctx context.Context, userID, convID st
 			continue
 		}
 		for _, a := range hist[i].Attachments {
-			if a.Kind != "image" && a.Kind != "pdf" {
+			f, err := store.GetFile(ctx, o.db, a.ID, userID)
+			if err != nil || f.ConversationID != convID {
 				continue
 			}
-			if a.Kind == "image" && !visionCapable {
-				// Surface a warning to the user via SSE + append a note to the
-				// turn so the model knows an image was dropped.
-				if !notedNonVision && onEvent != nil {
-					onEvent(SseEvent{Type: "rag", Status: "warning", Summary: "model does not support images; attached images were skipped"})
-					notedNonVision = true
+
+			data, imageMIME, imageState := readVerifiedProviderImage(f)
+			switch imageState {
+			case verifiedAttachmentImage:
+				if !visionCapable {
+					// This path covers legacy history whose stored message metadata did
+					// not say image. Current requests are rejected before SSE by the API.
+					if !notedNonVision && onEvent != nil {
+						onEvent(SseEvent{Type: "rag", Status: "warning", Summary: "model does not support images; attached images were skipped"})
+						notedNonVision = true
+					}
+					hist[i].Blocks = append(hist[i].Blocks, UnifiedBlock{
+						Kind: "text",
+						Text: "[image attachment skipped — current model lacks vision capability]",
+					})
+					continue
 				}
 				hist[i].Blocks = append(hist[i].Blocks, UnifiedBlock{
-					Kind: "text",
-					Text: "[image attachment skipped — current model lacks vision capability]",
+					Kind: "image", Data: base64.StdEncoding.EncodeToString(data), MimeType: imageMIME, Title: f.Filename,
 				})
 				continue
-			}
-			f, err := store.GetFile(ctx, o.db, a.ID, userID)
-			if err != nil {
+			case rejectedOversizeAttachmentImage:
+				if !notedOversizeImage && onEvent != nil {
+					onEvent(SseEvent{Type: "rag", Status: "warning", Summary: "image attachment exceeded the provider inline limit and was skipped"})
+					notedOversizeImage = true
+				}
 				continue
 			}
-			// No independent size cap here: an image only reaches storage after the
-			// upload handler enforced the admin-configured per-kind cap (§4.6-A), so
-			// whatever is on disk is already within the allowed size. Inline it.
-			if a.Kind == "pdf" {
+
+			// Documents use the RAG text path. Use only server-owned metadata here;
+			// a forged client kind can neither turn a PDF into an image nor suppress
+			// its document handling.
+			if storedFileIsPDF(f) {
 				if !store.ConversationDocReady(ctx, o.db, convID, f.Filename) && !notedPDFRAGOnly && onEvent != nil {
 					onEvent(SseEvent{Type: "rag", Status: "warning", Summary: "PDF attachment is still indexing; documents are read through RAG text, not native file blocks"})
 					notedPDFRAGOnly = true
@@ -2365,15 +2358,110 @@ func (o *Orchestrator) resolveAttachments(ctx context.Context, userID, convID st
 				})
 				continue
 			}
-			data, err := os.ReadFile(f.StoragePath)
-			if err != nil {
-				continue
-			}
-			hist[i].Blocks = append(hist[i].Blocks, UnifiedBlock{
-				Kind: "image", Data: base64.StdEncoding.EncodeToString(data), MimeType: f.MimeType, Title: f.Filename,
-			})
 		}
 	}
+}
+
+type verifiedAttachmentImageState uint8
+
+const (
+	notAttachmentImage verifiedAttachmentImageState = iota
+	verifiedAttachmentImage
+	rejectedOversizeAttachmentImage
+)
+
+// readVerifiedProviderImage reads at most one bounded file and classifies it
+// from bytes, not attachment or database claims. The size check happens both
+// before and during the read because legacy metadata may be stale.
+func readVerifiedProviderImage(file *store.File) ([]byte, string, verifiedAttachmentImageState) {
+	if file == nil || attachmentImageInlineBytes <= 0 {
+		return nil, "", notAttachmentImage
+	}
+	metadataImage := strings.EqualFold(strings.TrimSpace(file.Kind), "image") ||
+		strings.HasPrefix(strings.ToLower(strings.TrimSpace(file.MimeType)), "image/") ||
+		providerImageFilename(file.Filename)
+	if file.SizeBytes > attachmentImageInlineBytes {
+		if metadataImage {
+			return nil, "", rejectedOversizeAttachmentImage
+		}
+		return nil, "", notAttachmentImage
+	}
+	f, err := os.Open(file.StoragePath)
+	if err != nil {
+		return nil, "", notAttachmentImage
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, attachmentImageInlineBytes+1))
+	if err != nil {
+		return nil, "", notAttachmentImage
+	}
+	if int64(len(data)) > attachmentImageInlineBytes {
+		return nil, "", rejectedOversizeAttachmentImage
+	}
+	mimeType := providerImageMIMEFromBytes(data)
+	if mimeType == "" {
+		return nil, "", notAttachmentImage
+	}
+	return data, mimeType, verifiedAttachmentImage
+}
+
+func storedFileIsPDF(file *store.File) bool {
+	if file == nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(file.Kind), "pdf") ||
+		strings.EqualFold(strings.TrimSpace(strings.SplitN(file.MimeType, ";", 2)[0]), "application/pdf") ||
+		strings.EqualFold(filepath.Ext(file.Filename), ".pdf")
+}
+
+func providerImageFilename(filename string) bool {
+	switch strings.ToLower(filepath.Ext(strings.TrimSpace(filename))) {
+	case ".png", ".apng", ".jpg", ".jpeg", ".jpe", ".jfif", ".gif", ".webp", ".bmp",
+		".tif", ".tiff", ".heic", ".heif", ".avif", ".ico", ".cur", ".jxl", ".psd", ".svg":
+		return true
+	default:
+		return false
+	}
+}
+
+func providerImageMIMEFromBytes(data []byte) string {
+	if len(data) == 0 {
+		return ""
+	}
+	head := data
+	if len(head) > 4096 {
+		head = head[:4096]
+	}
+	if detected := strings.ToLower(http.DetectContentType(head)); strings.HasPrefix(detected, "image/") {
+		return detected
+	}
+	if len(head) >= 12 && bytes.Equal(head[4:8], []byte("ftyp")) {
+		brands := head[8:]
+		if len(brands) > 64 {
+			brands = brands[:64]
+		}
+		for _, brand := range []string{"avif", "avis"} {
+			if bytes.Contains(brands, []byte(brand)) {
+				return "image/avif"
+			}
+		}
+		for _, brand := range []string{"heic", "heix", "hevc", "hevx", "heim", "heis", "mif1", "msf1"} {
+			if bytes.Contains(brands, []byte(brand)) {
+				return "image/heif"
+			}
+		}
+	}
+	if bytes.HasPrefix(head, []byte("8BPS")) {
+		return "image/vnd.adobe.photoshop"
+	}
+	if bytes.HasPrefix(head, []byte{0xff, 0x0a}) || bytes.HasPrefix(head, []byte("\x00\x00\x00\x0cJXL \r\n\x87\n")) {
+		return "image/jxl"
+	}
+	trimmed := bytes.TrimSpace(bytes.TrimPrefix(head, []byte{0xef, 0xbb, 0xbf}))
+	if bytes.Contains(bytes.ToLower(trimmed), []byte("<svg")) {
+		return "image/svg+xml"
+	}
+	return ""
 }
 
 // renderBlocksAsText flattens a block list to plain text for history rebuild:
@@ -2425,8 +2513,8 @@ type systemPromptOpts struct {
 	SkillsFull          []SkillFull
 	Memories            []store.Memory
 	ProjectFiles        []ProjectFileSummary
-	// SandboxFiles are conversation-uploaded data files staged at
-	// /workspace/uploads (CSV/XLSX/text/code/images). Listed only when
+	// SandboxFiles are conversation-uploaded non-image data files staged at
+	// /workspace/uploads (CSV/XLSX/text/code). Listed only when
 	// python_execute is enabled.
 	SandboxFiles []ProjectFileSummary
 	// Persona is the user's personalization (tone traits + custom instructions
@@ -3075,7 +3163,7 @@ func (o *Orchestrator) forcedWebSearch(ctx context.Context, req RunRequest, conv
 }
 
 // listSandboxFiles returns the conversation's sandbox-staged data files (the same
-// kinds tools.pythonExecuteTool stages: sheet/text/code/image). Shared by the
+// kinds tools.pythonExecuteTool stages: sheet/text/code). Shared by the
 // system-prompt listing and the no-tools forced read. Filename detection keeps
 // older rows usable when their stored kind predates the sheet classifier.
 func listSandboxFiles(ctx context.Context, db *sql.DB, convID, userID string) []ProjectFileSummary {
@@ -3085,16 +3173,37 @@ func listSandboxFiles(ctx context.Context, db *sql.DB, convID, userID string) []
 		return out
 	}
 	for _, f := range convFiles {
+		// New uploads have authoritative kind/MIME metadata; the bounded prefix
+		// check also covers legacy rows whose image was renamed to data.csv before
+		// server-side byte classification existed.
+		if storedSandboxFileLooksLikeImage(f) {
+			continue
+		}
 		if isSandboxSpreadsheetFilename(f.Filename) {
 			out = append(out, ProjectFileSummary{Name: f.Filename, Kind: "sheet"})
 			continue
 		}
 		switch f.Kind {
-		case "sheet", "text", "code", "image":
+		case "sheet", "text", "code":
 			out = append(out, ProjectFileSummary{Name: f.Filename, Kind: f.Kind})
 		}
 	}
 	return out
+}
+
+func storedSandboxFileLooksLikeImage(file store.File) bool {
+	if strings.EqualFold(strings.TrimSpace(file.Kind), "image") ||
+		strings.HasPrefix(strings.ToLower(strings.TrimSpace(file.MimeType)), "image/") ||
+		providerImageFilename(file.Filename) {
+		return true
+	}
+	f, err := os.Open(file.StoragePath)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	head, err := io.ReadAll(io.LimitReader(f, 4096))
+	return err == nil && providerImageMIMEFromBytes(head) != ""
 }
 
 func isSandboxSpreadsheetFilename(name string) bool {
@@ -3303,11 +3412,20 @@ func (o *Orchestrator) scheduleTitle(convID, userID, userText, locale string) {
 			MaxOutputTokens: titleGenerationOutputTokens,
 			SystemPrompt:    sys,
 		})
-		if err != nil || strings.TrimSpace(text) == "" {
+		if err != nil {
 			return err
+		}
+		if strings.TrimSpace(text) == "" {
+			if o.logger != nil {
+				o.logger.Printf("title generation: task returned no visible text (conv=%s user=%s)", convID, userID)
+			}
+			return nil
 		}
 		title := cleanTitle(text)
 		if title == "" {
+			if o.logger != nil {
+				o.logger.Printf("title generation: task output was empty after cleanup (conv=%s user=%s)", convID, userID)
+			}
 			return nil
 		}
 		o.persistGeneratedTitle(ctx, convID, userID, title)

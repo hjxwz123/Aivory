@@ -51,7 +51,6 @@ func NewRegistry(db *sql.DB, ragSvc *rag.Service, cfg config.Config, logger *log
 	r.sandbox = sb
 	r.Register(&webSearchTool{cfg: cfg, searcher: newSettingsSearcher(db, cfg.SearchProvider, cfg.SearchAPIKey, cfg.SearchBaseURL)})
 	r.Register(&webFetchTool{})
-	r.Register(&fetchImageTool{sandbox: sb, logger: logger})
 	r.Register(&pythonExecuteTool{sandbox: sb, artifactDir: cfg.ArtifactDir, logger: logger})
 	r.Register(&imageGenerateTool{db: db, artifactDir: cfg.ArtifactDir})
 	r.Register(&searchKnowledgeBaseTool{rag: ragSvc})

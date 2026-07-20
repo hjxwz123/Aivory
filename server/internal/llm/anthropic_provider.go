@@ -229,6 +229,9 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 	if req.Model.APIKey == "" {
 		return nil, errors.New("this channel has no API key configured")
 	}
+	if !req.Model.Vision {
+		req.History = stripImageBlocks(req.History)
+	}
 	// §4.13 prompt-mode: the model has no native function calling, so drive the
 	// text-protocol loop instead of the native tool_use loop.
 	if req.ToolModePrompt {
@@ -243,7 +246,7 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 	}
 
 	maxIter := envcfg.Int("AIVORY_LLM_MAX_ITER", 20)
-	messages := historyToAnthropic(req.History)
+	messages := historyToAnthropic(req.History, req.Model.Vision)
 	historyLen := len(messages) // turns beyond this are this run's raw exchange (§2.3-C)
 	allText := strings.Builder{}
 	allBlocks := []UnifiedBlock{} // full ordered content: thinking | text | tool_call (§4.3)
@@ -474,7 +477,7 @@ func (p *AnthropicProvider) promptRunOnce(req UnifiedChatRequest) PromptToolRunn
 		if req.MaxOutputTokens > 0 {
 			maxTok = req.MaxOutputTokens
 		}
-		msgs := historyToAnthropic(history)
+		msgs := historyToAnthropic(history, req.Model.Vision)
 		setMessagesCacheBreakpoint(msgs)
 		body := map[string]any{
 			"model":          req.Model.RequestID,
@@ -586,7 +589,10 @@ func setMessagesCacheBreakpoint(messages []map[string]any) {
 	}
 }
 
-func historyToAnthropic(h []UnifiedMessage) []map[string]any {
+func historyToAnthropic(h []UnifiedMessage, vision bool) []map[string]any {
+	if !vision {
+		h = stripImageBlocks(h)
+	}
 	out := []map[string]any{}
 	for _, m := range h {
 		if m.Role != "user" && m.Role != "assistant" {
@@ -612,7 +618,7 @@ func historyToAnthropic(h []UnifiedMessage) []map[string]any {
 				// Image blocks are only valid on the user role; assistant content may
 				// only be text/tool_use/thinking. Drop images that rode onto a non-user
 				// turn (share/fork history) so the request isn't rejected.
-				if m.Role == "user" && b.Data != "" {
+				if vision && m.Role == "user" && b.Data != "" {
 					content = append(content, map[string]any{
 						"type":   "image",
 						"source": map[string]any{"type": "base64", "media_type": b.MimeType, "data": b.Data},

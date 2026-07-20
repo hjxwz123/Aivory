@@ -387,6 +387,7 @@
       "task_downgrade": "跨厂商降级",
       "task_image_prompt": "图片提示词",
       "task_tool_route": "工具路由",
+      "task_search_queries": "搜索查询生成",
       "task_research_plan": "研究规划",
       "task_research_verify": "研究核验",
       "task_moderation": "内容审核",

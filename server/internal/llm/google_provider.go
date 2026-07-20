@@ -33,6 +33,9 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 	if req.Model.APIKey == "" {
 		return nil, errors.New("this channel has no API key configured")
 	}
+	if !req.Model.Vision {
+		req.History = stripImageBlocks(req.History)
+	}
 	// §4.13 prompt-mode: drive the text protocol loop.
 	if req.ToolModePrompt {
 		_, blocks, usage, cites, err := RunPromptToolLoop(
@@ -45,7 +48,7 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 		return &UnifiedResult{Blocks: blocks, StopReason: "end_turn", Usage: usage, Citations: cites}, nil
 	}
 
-	contents := historyToGemini(req.History)
+	contents := historyToGemini(req.History, req.Model.Vision)
 	var toolsDecl []map[string]any
 	if len(req.Tools) > 0 {
 		decls := []map[string]any{}
@@ -206,7 +209,10 @@ func stripGoogleEndpointParams(body map[string]any) {
 	}
 }
 
-func historyToGemini(h []UnifiedMessage) []map[string]any {
+func historyToGemini(h []UnifiedMessage, vision bool) []map[string]any {
+	if !vision {
+		h = stripImageBlocks(h)
+	}
 	contents := []map[string]any{}
 	for _, m := range h {
 		if m.Role != "user" && m.Role != "assistant" {
@@ -238,7 +244,7 @@ func historyToGemini(h []UnifiedMessage) []map[string]any {
 			// inlineData (image) parts belong on the user role; a model turn takes
 			// text/functionCall. Drop images that rode onto a non-user turn (share/fork
 			// history) so Gemini doesn't reject the content.
-			if m.Role == "user" && b.Kind == "image" && b.Data != "" {
+			if vision && m.Role == "user" && b.Kind == "image" && b.Data != "" {
 				parts = append(parts, map[string]any{
 					"inlineData": map[string]any{"mimeType": b.MimeType, "data": b.Data},
 				})

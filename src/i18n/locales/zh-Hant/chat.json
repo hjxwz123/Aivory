@@ -25,6 +25,7 @@
     "dropHint": "拖放檔案以上傳",
     "dropAnywhere": "拖放到任意位置即可新增",
     "addImage": "新增圖片",
+    "imageUnsupported": "目前模型不支援圖片輸入，請選擇支援視覺的模型。",
     "more": "更多",
     "voice": "語音輸入",
     "voiceStop": "停止錄音",
@@ -303,6 +304,7 @@
     "empty": "尚無檔案。新增後模型即可讀取。",
     "added": "已新增檔案",
     "addFailed": "新增檔案失敗",
+    "imageUseComposer": "請從訊息輸入框附加圖片，以便透過視覺 API 傳送。",
     "remove": "移除 {{name}}",
     "removeFailed": "移除檔案失敗"
   },
