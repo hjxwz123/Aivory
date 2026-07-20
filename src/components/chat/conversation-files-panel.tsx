@@ -10,6 +10,7 @@ import { useMediaQuery } from '@/hooks/use-media-query'
 import { fileIconFor } from '@/lib/file-icon'
 import { toast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
+import { filterFilesForImageCapability, NON_IMAGE_ATTACHMENT_ACCEPT } from '@/lib/vision-capability'
 
 /**
  * ConversationFilesPanel — the right-edge drawer listing every file the
@@ -81,8 +82,22 @@ function FilesBody({ onClose }: { onClose: () => void }) {
   async function onPick(e: React.ChangeEvent<HTMLInputElement>) {
     const list = e.target.files
     if (!list || !list.length) return
+    // Files added here are conversation context, not attachments on the next
+    // user message. Images therefore cannot reach a provider-native multimodal
+    // request from this drawer and must be attached in the Composer instead.
+    const filtered = filterFilesForImageCapability(Array.from(list), 'blocked')
+    if (filtered.rejectedImages.length > 0) {
+      toast.error(
+        t('files.imageUseComposer'),
+        filtered.rejectedImages.map((file) => file.name).join(', '),
+      )
+    }
+    if (!filtered.accepted.length) {
+      e.target.value = ''
+      return
+    }
     try {
-      await upload(list)
+      await upload(filtered.accepted)
       toast.success(t('files.added'))
     } catch {
       toast.error(t('files.addFailed'))
@@ -123,7 +138,14 @@ function FilesBody({ onClose }: { onClose: () => void }) {
       </header>
 
       <div className="px-3 pt-3 shrink-0">
-        <input ref={inputRef} type="file" multiple hidden onChange={(e) => void onPick(e)} />
+        <input
+          ref={inputRef}
+          type="file"
+          multiple
+          hidden
+          accept={NON_IMAGE_ATTACHMENT_ACCEPT}
+          onChange={(e) => void onPick(e)}
+        />
         <button
           type="button"
           onClick={() => inputRef.current?.click()}

@@ -45,10 +45,10 @@ vi.mock('@/hooks/use-toast', () => ({
 
 import { useConversations } from './conversations'
 
-function localConversation(messages: Message[] = []): Conversation {
+function localConversation(messages: Message[] = [], title = 'Stop reconcile'): Conversation {
   return {
     id: 'conv_stop',
-    title: 'Stop reconcile',
+    title,
     modelId: 'model_1',
     messages,
     createdAt: 1_700_000_000_000,
@@ -56,12 +56,12 @@ function localConversation(messages: Message[] = []): Conversation {
   }
 }
 
-function apiConversation(activeLeafId: string): ApiConversation {
+function apiConversation(activeLeafId: string, title = 'Stop reconcile'): ApiConversation {
   return {
     id: 'conv_stop',
     user_id: 'user_1',
     project_id: '',
-    title: 'Stop reconcile',
+    title,
     provider: 'openai',
     model_id: 'model_1',
     kb_ids: [],
@@ -107,7 +107,7 @@ function apiMessage(
   }
 }
 
-function pathResponse(assistantStatus: ApiMessage['status']) {
+function pathResponse(assistantStatus: ApiMessage['status'], title = 'Stop reconcile') {
   const user = apiMessage('msg_server_user', 'user', '', 'complete', 'question')
   const assistant = apiMessage(
     'msg_server_assistant',
@@ -117,7 +117,7 @@ function pathResponse(assistantStatus: ApiMessage['status']) {
     'partial answer',
   )
   return {
-    conversation: apiConversation(assistant.id),
+    conversation: apiConversation(assistant.id, title),
     messages: [user, assistant],
     has_more: false,
     next_before: undefined,
@@ -180,9 +180,9 @@ function followUpPathResponse() {
   }
 }
 
-function resetStore(messages: Message[] = []) {
+function resetStore(messages: Message[] = [], title = 'Stop reconcile') {
   useConversations.setState({
-    conversations: [localConversation(messages)],
+    conversations: [localConversation(messages, title)],
     loaded: true,
     loading: false,
     loadingMore: false,
@@ -196,6 +196,43 @@ describe('stopped turn optimistic-id reconciliation', () => {
     vi.clearAllMocks()
     apiMocks.stop.mockResolvedValue({ ok: true })
     resetStore()
+  })
+
+  it('reconciles a generated first-turn title when the realtime event is missed', async () => {
+    vi.useFakeTimers()
+    try {
+      const question = 'Explain how event-driven systems coordinate several delayed asynchronous tasks safely'
+      const optimisticTitle = question.slice(0, 60)
+      resetStore([], optimisticTitle)
+      apiMocks.streamSSE.mockReturnValue(
+        events(
+          { type: 'message_start', message_id: 'msg_server_assistant' },
+          { type: 'text_delta', text: 'answer' },
+          { type: 'done' },
+        ),
+      )
+      apiMocks.get
+        // The immediate post-stream reconcile can fail independently of title
+        // generation; the optimistic 60-character title must remain retryable.
+        .mockRejectedValueOnce(new Error('temporary connection failure'))
+        // The delayed metadata reconcile sees the task model's committed title.
+        .mockResolvedValueOnce(pathResponse('complete', 'Generated title'))
+
+      await useConversations.getState().sendMessage({
+        conversationId: 'conv_stop',
+        text: question,
+        modelId: 'model_1',
+        toolMode: 'auto',
+      })
+
+      expect(useConversations.getState().conversations[0].title).toBe(optimisticTitle)
+      // First attempt (1s) fails, then the second backoff (2s) succeeds.
+      await vi.advanceTimersByTimeAsync(3000)
+      expect(useConversations.getState().conversations[0].title).toBe('Generated title')
+      expect(apiMocks.get).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('retries a stop before message_start, adopts canonical ids, and never restores the spinner', async () => {

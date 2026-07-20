@@ -76,18 +76,22 @@ func listModelsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	// §fast-mode: the fast model is resolved server-side and never named to the
 	// user, so drop it from the advanced ("进阶") picker. `fast_available` tells the
-	// composer whether to offer the 快速 option at all.
+	// composer whether to offer the 快速 option at all. `fast_vision` exposes only
+	// its image-input capability, never the hidden model's identity.
 	fastAvailable := false
+	fastVision := false
 	filtered := models[:0]
 	for _, m := range models {
 		if m.Fast {
 			fastAvailable = true
+			fastVision = modelSupportsImageInput(&m)
 			continue
 		}
 		filtered = append(filtered, m)
 	}
 	resp := modelsResponse(d, r, filtered)
 	resp["fast_available"] = fastAvailable
+	resp["fast_vision"] = fastAvailable && fastVision
 	writeJSON(w, 200, resp)
 }
 

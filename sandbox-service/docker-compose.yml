@@ -64,7 +64,6 @@ services:
     environment:
       SANDBOX_IMAGE: ghcr.io/${OWNER:-hjxwz123}/aivory-sandbox:latest
       SANDBOX_PULL_ON_START: "1"
-      SANDBOX_NETWORK: none        # set "bridge" only if code needs runtime internet
       SANDBOX_MEMORY: 2g
       SANDBOX_CPUS: "1"
       SANDBOX_MAX_SESSIONS: "16"

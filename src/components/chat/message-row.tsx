@@ -1,4 +1,4 @@
-import { memo, useState, useRef, useEffect, type ReactNode } from 'react'
+import { memo, useState, useRef, useEffect, useMemo, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Copy,
@@ -118,6 +118,16 @@ function formatGenMs(ms: number): string {
   return `${m}m${s}s`
 }
 
+function formatTurnTime(timestamp: number, locale: string): string {
+  return new Intl.DateTimeFormat(locale || undefined, {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(timestamp)
+}
+
 // Credits charged for a turn — show up to 2 decimals, trimming trailing zeros so
 // whole amounts read "12" not "12.00".
 function formatCredits(credits: number): string {
@@ -136,7 +146,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
   const isForeignUser = isUser && !isOwn
   // §7.2-6: assistant 气泡标注生成它的模型名 + 图标。
   const model = useModels((s) => (message.modelId ? s.getById(message.modelId) : undefined))
-  const { t } = useTranslation('chat')
+  const { t, i18n } = useTranslation('chat')
   const displayUserName = message.authorName ?? userName ?? t('common.you', { ns: 'common' })
   const [hovered, setHovered] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -164,6 +174,13 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
   const editRef = useRef<HTMLTextAreaElement>(null)
   const { copied, copy } = useCopy()
   const [exportingDocx, setExportingDocx] = useState(false)
+  const turnTime = useMemo(
+    () => ({
+      label: formatTurnTime(message.createdAt, i18n.resolvedLanguage || i18n.language),
+      iso: new Date(message.createdAt).toISOString(),
+    }),
+    [message.createdAt, i18n.language, i18n.resolvedLanguage],
+  )
 
   // Export THIS reply as .docx: markdown -> formatted Word, LaTeX -> native
   // equations (lib/docx-export.ts). Lazy import keeps docx/katex-omml out of
@@ -274,13 +291,15 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
                 ? t('fastMode.label', { defaultValue: '快速' })
                 : model?.label ?? message.modelLabel ?? t('assistant')}
             </span>
-            {/* Per-reply generation time (§ 用时). Cost stays admin-only. */}
-            {!message.streaming && message.genMs ? (
-              <span className="inline-flex items-center gap-1 text-[11px] text-[var(--color-fg-subtle)] tabular-nums">
-                <Clock size={11} aria-hidden />
-                {formatGenMs(message.genMs)}
-              </span>
-            ) : null}
+            {/* The turn timestamp is secondary context: reserve its space so the
+                model label never jumps, but reveal it only while this row is
+                hovered or keyboard-focused. Touch layouts keep the header clean. */}
+            <time
+              dateTime={turnTime.iso}
+              className="max-sm:hidden text-[11px] text-[var(--color-fg-subtle)] tabular-nums opacity-0 transition-opacity duration-[140ms] ease-out group-hover/msg:opacity-100 group-focus-within/msg:opacity-100"
+            >
+              {turnTime.label}
+            </time>
             {message.streaming ? (
               <span className="thinking-shimmer ml-1 text-[11px] font-medium tracking-[0.04em]">
                 {t('thinking')}…
@@ -636,6 +655,14 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
                 : 'opacity-0 pointer-events-none max-sm:opacity-100 max-sm:pointer-events-auto',
             )}
           >
+                {/* Per-reply generation time (§ 用时). It belongs with reply
+                    actions rather than model identity, immediately before Copy. */}
+                {!isUser && message.genMs ? (
+                  <span className="mr-1 inline-flex items-center gap-1 text-[11px] text-[var(--color-fg-subtle)] tabular-nums">
+                    <Clock size={11} aria-hidden />
+                    {formatGenMs(message.genMs)}
+                  </span>
+                ) : null}
                 {message.content ? (
                 <Tooltip content={copied ? t('actions.copied') : t('actions.copy')}>
                   <button

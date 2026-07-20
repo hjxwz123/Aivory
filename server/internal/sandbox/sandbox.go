@@ -10,6 +10,7 @@
 //	POST {BaseURL}/exec  {session_id, code, timeout_ms}
 //	     -> {"stdout":"...","stderr":"...","exit_code":0,
 //	         "files":[{"name":"plot.png","mime_type":"image/png","data_base64":"..."}]}
+//	POST {BaseURL}/files/reset-inputs {session_id} -> {"ok":true}
 //
 // `files` are the artifacts written under /workspace/outputs during the run.
 // The Authorization: Bearer <SANDBOX_API_KEY> header is attached when set.
@@ -106,6 +107,12 @@ type Service interface {
 	// PutFile writes a file into the session workspace (e.g.
 	// /workspace/uploads/data.csv) so python_execute can read it (§4.5).
 	PutFile(ctx context.Context, sessionID, path string, data []byte) error
+	// ResetInputs removes every previously staged input under
+	// /workspace/uploads and /workspace/skills, then recreates those directories.
+	// It intentionally leaves /workspace/outputs and all other generated workspace
+	// state alone. Callers use this before staging the current non-image inputs so
+	// an older persistent session/archive cannot retain legacy image copies.
+	ResetInputs(ctx context.Context, sessionID string) error
 	// GetFile reads a file out of the session workspace. Used when the
 	// orchestrator wants to surface a sandbox-produced file that isn't a
 	// declared artifact (e.g. an intermediate dataset the user asks about).
@@ -283,6 +290,15 @@ func (s *HTTPSandbox) PutFile(ctx context.Context, sessionID, path string, data 
 		"session_id":  sessionID,
 		"path":        path,
 		"data_base64": base64.StdEncoding.EncodeToString(data),
+	}, nil)
+}
+
+// ResetInputs clears the two server-managed input namespaces. The sidecar owns
+// the exact paths so callers cannot turn this into a general-purpose deletion
+// primitive.
+func (s *HTTPSandbox) ResetInputs(ctx context.Context, sessionID string) error {
+	return s.do(ctx, "/files/reset-inputs", map[string]any{
+		"session_id": sessionID,
 	}, nil)
 }
 

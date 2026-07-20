@@ -123,10 +123,11 @@ curl -s -XPOST "$SANDBOX_URL/exec" \
 
 ## 配置（环境变量）
 
+runner 网络隔离不是可配置项。即使 sidecar 自身接入 Compose 网络以供 Go 后端访问，每个新建 session 容器仍固定使用 Docker `--network none`。因此用户 Python 不能通过 `requests`、`curl` 或运行时 `pip install` 获取公网内容。需要新增依赖时，应修改 `Dockerfile.runner` 并重新构建 runner 镜像。
+
 | 变量 | 默认值 | 说明 |
 |---|---|---|
 | `SANDBOX_IMAGE` | `aivory-sandbox:latest` | 运行时镜像 tag |
-| `SANDBOX_NETWORK` | `none` | 设置为 `bridge` 可允许运行时 `pip install` |
 | `SANDBOX_MEMORY` | `2g` | 单容器内存上限 |
 | `SANDBOX_CPUS` | `1` | 单容器 CPU 上限 |
 | `SANDBOX_PIDS_LIMIT` | `256` | 防 fork bomb |
@@ -160,7 +161,7 @@ curl -s -XPOST "$SANDBOX_URL/exec" \
 
 ## 安全姿态（开发级）
 
-每个 session 容器都以**非 root**运行，使用 `--network none`、`--cap-drop ALL`、`--security-opt no-new-privileges`，并限制 memory/cpu/pids/nofile，单次执行 120 秒超时。默认 rootfs **只读**，只有 `/tmp`、`$HOME` 和 `/workspace` 是有大小限制的 tmpfs，因此 session 不能把宿主机磁盘写满（可设 `SANDBOX_READ_ONLY_ROOTFS=0` 关闭；在支持 overlay2+prjquota 的宿主机上也可设置 `SANDBOX_DISK_SIZE` 限制 writable layer）。可通过 `SANDBOX_SECCOMP_PROFILE` 为 session 容器固定 seccomp profile。
+每个 session 容器都以**非 root**运行，强制使用 `--network none`、`--cap-drop ALL`、`--security-opt no-new-privileges`，并限制 memory/cpu/pids/nofile，单次执行 120 秒超时。默认 rootfs **只读**，只有 `/tmp`、`$HOME` 和 `/workspace` 是有大小限制的 tmpfs，因此 session 不能把宿主机磁盘写满（可设 `SANDBOX_READ_ONLY_ROOTFS=0` 关闭；在支持 overlay2+prjquota 的宿主机上也可设置 `SANDBOX_DISK_SIZE` 限制 writable layer）。可通过 `SANDBOX_SECCOMP_PROFILE` 为 session 容器固定 seccomp profile。
 
 `/exec` 调用在同一个 session 内串行执行，并有全局并发限制。stdout/stderr 在返回前会经过 32KB 上限。生成文件限制为单个 20MB、最多 20 个、总计 50MB，与 §4.5 安全基线一致，同时保持 HTTP 合约不变。
 
@@ -180,6 +181,8 @@ sidecar 启动时还会发现已有的 `aivory.sandbox=1` 容器，因此 sideca
 | POST | `/exec` | `{session_id, code, timeout_ms?}` | `{stdout, stderr, exit_code, files[]}` |
 | POST | `/files` | `{session_id, path, data_base64}` | `{ok}` |
 | POST | `/files/get` | `{session_id, path}` | `{data_base64}` |
+| POST | `/files/list` | `{session_id}` | `{files[]}` |
+| POST | `/files/reset-inputs` | `{session_id}` | `{ok}` |
 | DELETE | `/sessions/{id}` | `{storage?, discard?, archive_key?}` | `{ok}` |
 | POST | `/storage/put` | `{key, data_base64, content_type, expires_in?, storage}` | `{provider, key, url, expires_in}` |
 | POST | `/storage/delete` | `{key, storage}` | `{ok, key}` |
@@ -189,6 +192,6 @@ sidecar 启动时还会发现已有的 `aivory.sandbox=1` 容器，因此 sideca
 
 `/storage/*` 是针对管理员配置对象存储桶的操作。Go 后端会在 `storage` 块中转发配置：`provider` 为 `s3` 或 `aliyun_oss`，并带上 `prefix` 与对应 provider 凭据。`boto3` / `oss2` 只有在实际使用对应后端时才会 lazy import。`/storage/put` 上传 base64 字节并返回预签名 GET URL（ttl 为 `expires_in` 或 1 小时，上限 24 小时）；`/storage/delete` 是幂等的，并拒绝删除配置 `prefix` 外的对象。
 
-当 `/sessions` 和 `DELETE /sessions/{id}` 请求携带 `storage` 块时，sidecar 会在 TTL 回收或显式销毁前把 `/workspace` 归档，并在下次创建 session 时恢复（设计 §4.5）。归档对象键用 `/sessions` 下发的 **`archive_key`（会话 id）**作为文件名 `<prefix>/workspaces/<archive_key>.tgz`——因为每次创建都是新的 session id，用稳定的 `archive_key` 才能**跨回收恢复**工作区（§4.5-C G2）；未下发 `archive_key` 时回退用 session id。`provider` 为 `local`（默认）/ `s3` / `aliyun_oss`。这些操作都是 best-effort：无有效 `storage` 块即 no-op（回收即丢失），归档/恢复失败也不会让请求失败。
+当 `/sessions` 和 `DELETE /sessions/{id}` 请求携带 `storage` 块时，sidecar 会在 TTL 回收或显式销毁前归档持久工作区状态，并在下次创建 session 时恢复（设计 §4.5）。服务端管理的 `uploads` 和 `skills` 输入目录不会进入归档，旧归档恢复后也会立即清空这两个目录。归档对象键用 `/sessions` 下发的 **`archive_key`（会话 id）**作为文件名 `<prefix>/workspaces/<archive_key>.tgz`——因为每次创建都是新的 session id，用稳定的 `archive_key` 才能**跨回收恢复**工作区（§4.5-C G2）；未下发 `archive_key` 时回退用 session id。`provider` 为 `local`（默认）/ `s3` / `aliyun_oss`。这些操作都是 best-effort：无有效 `storage` 块即 no-op（回收即丢失），归档/恢复失败也不会让请求失败。
 
-`files[]` 产物是本次执行期间代码写入 `/workspace/outputs/` 的文件，格式为 `{name, mime_type, data_base64}`。用户上传文件应通过 `/files` 写入 `/workspace/uploads/`，这也是 `python_execute` 工具描述中告诉模型使用的路径。
+`files[]` 产物是本次执行期间 Python 写入 `/workspace/outputs/` 的文件，格式为 `{name, mime_type, data_base64}`，其中可以包含 Python 生成的 PNG。`/files` 只接受符合条件的非图片数据和技能输入，并会按扩展名与文件签名拒绝图片。`/files/reset-inputs` 会清空 `/workspace/uploads` 与 `/workspace/skills`，但不会触碰生成产物或其他工作区状态。

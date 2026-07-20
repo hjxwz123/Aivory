@@ -32,6 +32,8 @@ interface AdminSortableListProps<T extends SortableItem> {
   moveUpLabel: string
   moveDownLabel: string
   listClassName?: string
+  /** Keep touch reordering compact on narrow screens; drag remains available. */
+  mobileDragOnly?: boolean
 }
 
 /**
@@ -48,6 +50,7 @@ export function AdminSortableList<T extends SortableItem>({
   moveUpLabel,
   moveDownLabel,
   listClassName,
+  mobileDragOnly = false,
 }: AdminSortableListProps<T>) {
   const reduceMotion = useReducedMotion()
   const itemsRef = useRef(items)
@@ -211,6 +214,7 @@ export function AdminSortableList<T extends SortableItem>({
           dragHandleLabel={dragHandleLabel}
           moveUpLabel={moveUpLabel}
           moveDownLabel={moveDownLabel}
+          mobileDragOnly={mobileDragOnly}
           onMoveBy={moveBy}
           onPointerDown={(e) => startDrag(e, item)}
           onPointerMove={updateDrag}
@@ -296,6 +300,7 @@ interface OrderControlsProps {
   dragHandleLabel: string
   moveUpLabel: string
   moveDownLabel: string
+  mobileDragOnly: boolean
   onMoveBy: (index: number, dir: -1 | 1) => void
   onPointerDown: (e: React.PointerEvent<HTMLButtonElement>) => void
   onPointerMove: (e: React.PointerEvent<HTMLButtonElement>) => void
@@ -311,6 +316,7 @@ function OrderControls({
   dragHandleLabel,
   moveUpLabel,
   moveDownLabel,
+  mobileDragOnly,
   onMoveBy,
   onPointerDown,
   onPointerMove,
@@ -321,10 +327,15 @@ function OrderControls({
   if (overlay) {
     return (
       <>
-        <span className="inline-flex size-7 items-center justify-center rounded text-[var(--color-fg-muted)]">
+        <span
+          className={cn(
+            'inline-flex size-7 items-center justify-center rounded text-[var(--color-fg-muted)]',
+            mobileDragOnly && 'max-md:size-11',
+          )}
+        >
           <GripVertical size={15} strokeWidth={1.5} aria-hidden />
         </span>
-        <div className="flex flex-col gap-0.5">
+        <div className={cn('flex flex-col gap-0.5', mobileDragOnly && 'max-md:hidden')}>
           <span className="inline-flex size-6 items-center justify-center rounded text-[var(--color-fg-subtle)]">
             <ArrowUp size={14} strokeWidth={1.5} aria-hidden />
           </span>
@@ -346,11 +357,14 @@ function OrderControls({
         onPointerCancel={onPointerCancel}
         onLostPointerCapture={onLostPointerCapture}
         aria-label={dragHandleLabel}
-        className="inline-flex size-7 touch-none items-center justify-center rounded text-[var(--color-fg-faint)] cursor-grab active:cursor-grabbing hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg-muted)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+        className={cn(
+          'inline-flex size-7 touch-none items-center justify-center rounded text-[var(--color-fg-faint)] cursor-grab active:cursor-grabbing hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg-muted)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+          mobileDragOnly && 'max-md:size-11',
+        )}
       >
         <GripVertical size={15} strokeWidth={1.5} aria-hidden />
       </button>
-      <div className="flex flex-col gap-0.5">
+      <div className={cn('flex flex-col gap-0.5', mobileDragOnly && 'max-md:hidden')}>
         <button
           type="button"
           className="inline-flex size-6 items-center justify-center rounded text-[var(--color-fg-subtle)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] disabled:pointer-events-none disabled:opacity-30 interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"

@@ -25,6 +25,7 @@
     "dropHint": "Drop files to attach",
     "dropAnywhere": "Drop anywhere to attach",
     "addImage": "Add image",
+    "imageUnsupported": "The current model does not support image input. Choose a vision-capable model.",
     "more": "More",
     "voice": "Voice input",
     "voiceStop": "Stop recording",
@@ -303,6 +304,7 @@
     "empty": "No files yet. Add one to let the model read it.",
     "added": "File added",
     "addFailed": "Could not add the file",
+    "imageUseComposer": "Attach images from the message box so they can be sent through the vision API.",
     "remove": "Remove {{name}}",
     "removeFailed": "Could not remove the file"
   },

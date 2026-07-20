@@ -17,6 +17,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
@@ -306,27 +307,27 @@ export default function AdminUsers() {
 
   return (
     <div>
-      <header className="flex items-end justify-between gap-4">
-        <div>
-          <h1 className="font-serif text-3xl tracking-tight text-[var(--color-fg)]">{t('admin:users.title')}</h1>
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">{t('admin:users.title')}</h1>
           <p className="mt-2 text-[var(--color-fg-muted)] text-sm max-w-2xl">{t('admin:users.lead')}</p>
         </div>
-        <Button leadingIcon={<Plus size={15} aria-hidden />} onClick={openCreate}>
+        <Button className="h-11 w-full sm:h-10 sm:w-auto" leadingIcon={<Plus size={16} aria-hidden />} onClick={openCreate}>
           {t('admin:users.new')}
         </Button>
       </header>
 
-      <div className="mt-6">
+      <div className="mt-5 sm:mt-6">
         <Input
           value={query}
           onChange={(e) => handleQueryChange(e.target.value)}
-          leadingIcon={<Search size={14} aria-hidden />}
+          leadingIcon={<Search size={16} aria-hidden />}
           placeholder={t('admin:users.searchPlaceholder')}
-          className="max-w-sm"
+          wrapperClassName="h-11 w-full sm:h-10 sm:max-w-sm"
         />
       </div>
 
-      <section className="mt-5">
+      <section className="mt-4 sm:mt-5">
         {loading ? (
           <PanelFallback />
         ) : (
@@ -337,58 +338,79 @@ export default function AdminUsers() {
             dragHandleLabel={t('admin:common.dragHandle')}
             moveUpLabel={t('admin:common.moveUp')}
             moveDownLabel={t('admin:common.moveDown')}
-            rowClassName="grid grid-cols-[auto_auto_1fr_auto] gap-3 items-center px-5 py-4"
+            mobileDragOnly
+            listClassName="max-md:gap-2 max-md:divide-y-0 max-md:border-0 max-md:bg-transparent"
+            rowClassName="grid grid-cols-[2.75rem_minmax(0,1fr)_2.75rem] items-start gap-x-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-3 md:grid-cols-[auto_auto_1fr_auto] md:items-center md:gap-3 md:rounded-none md:border-0 md:bg-transparent md:px-5 md:py-4"
             renderItem={(u) => {
               const isMe = me?.id === u.id
               const group = groups.find((g) => g.id === u.group_id)
               const lastSeen = u.last_seen_at ?? 0
               const online = lastSeen > 0 && Date.now() / 1000 - lastSeen < ONLINE_WINDOW_S
               const avatarUrl = (u.settings as Record<string, unknown> | undefined)?.avatar_url as string | undefined
+              const presence = online
+                ? t('admin:users.online')
+                : lastSeen > 0
+                  ? t('admin:users.lastSeen', { when: formatDateTime(lastSeen * 1000) })
+                  : t('admin:users.neverSeen')
               return (
                 <>
-                  <div className="flex min-w-0 items-center gap-3">
-                    <Avatar size="md" className="shrink-0">
+                  <div className="flex min-w-0 items-start gap-2.5 md:items-center md:gap-3">
+                    <Avatar size="md" className="mt-0.5 shrink-0 max-md:size-9 md:mt-0">
                       {avatarUrl ? <AvatarImage src={avatarUrl} alt={u.name || u.email} /> : null}
                       <AvatarFallback>{initials(u.name || u.email)}</AvatarFallback>
                     </Avatar>
                     <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span
-                        role="img"
-                        aria-label={online ? t('admin:users.online') : t('admin:users.offline')}
-                        className={cn(
-                          'size-2 shrink-0 rounded-full',
-                          online ? 'bg-[var(--color-success)]' : 'bg-[var(--color-fg-faint)]',
-                        )}
-                      />
-                      <span className="font-medium text-[var(--color-fg)]">{u.name || u.email}</span>
-                      <Badge size="xs">{t(`admin:users.role${u.role === 'admin' ? 'Admin' : 'User'}`)}</Badge>
-                      {group && !group.is_default ? <Badge size="xs" variant="neutral">{group.name}</Badge> : null}
-                      {u.status !== 'active' ? (
-                        <Badge
-                          size="xs"
-                          variant={u.status === 'deleting' ? 'warning' : 'neutral'}
-                          title={u.status === 'deleting' ? deletionProgress[u.id] : undefined}
-                        >
-                          {t(`admin:users.status.${u.status}`, { defaultValue: u.status })}
-                        </Badge>
-                      ) : null}
-                      {isMe ? <Badge size="xs" variant="neutral">{t('admin:users.you')}</Badge> : null}
-                    </div>
-                    <div className="mt-0.5 flex items-center gap-2 text-[12px] text-[var(--color-fg-subtle)]">
-                      <span className="font-mono truncate">{u.email}</span>
-                      <span aria-hidden>·</span>
-                      <span className="shrink-0">
-                        {online
-                          ? t('admin:users.online')
-                          : lastSeen > 0
-                            ? t('admin:users.lastSeen', { when: formatDateTime(lastSeen * 1000) })
-                            : t('admin:users.neverSeen')}
-                      </span>
-                    </div>
+                      <div className="flex min-w-0 items-center gap-2">
+                        <span
+                          role="img"
+                          aria-label={online ? t('admin:users.online') : t('admin:users.offline')}
+                          className={cn(
+                            'size-2 shrink-0 rounded-full',
+                            online ? 'bg-[var(--color-success)]' : 'bg-[var(--color-fg-faint)]',
+                          )}
+                        />
+                        <span className="min-w-0 font-medium leading-5 text-[var(--color-fg)] max-md:line-clamp-2 md:truncate">
+                          {u.name || u.email}
+                        </span>
+                        <div className="hidden items-center gap-2 md:flex">
+                          <Badge size="xs">{t(`admin:users.role${u.role === 'admin' ? 'Admin' : 'User'}`)}</Badge>
+                          {group && !group.is_default ? <Badge size="xs" variant="neutral">{group.name}</Badge> : null}
+                          {u.status !== 'active' ? (
+                            <Badge
+                              size="xs"
+                              variant={u.status === 'deleting' ? 'warning' : 'neutral'}
+                              title={u.status === 'deleting' ? deletionProgress[u.id] : undefined}
+                            >
+                              {t(`admin:users.status.${u.status}`, { defaultValue: u.status })}
+                            </Badge>
+                          ) : null}
+                          {isMe ? <Badge size="xs" variant="neutral">{t('admin:users.you')}</Badge> : null}
+                        </div>
+                      </div>
+                      <p className="mt-0.5 truncate font-mono text-[12px] text-[var(--color-fg-subtle)] md:hidden">{u.email}</p>
+                      <p className="mt-1 text-[12px] leading-4 text-[var(--color-fg-subtle)] md:hidden">{presence}</p>
+                      <div className="mt-2 flex flex-wrap gap-1 md:hidden">
+                        <Badge size="xs">{t(`admin:users.role${u.role === 'admin' ? 'Admin' : 'User'}`)}</Badge>
+                        {group && !group.is_default ? <Badge size="xs" variant="neutral">{group.name}</Badge> : null}
+                        {u.status !== 'active' ? (
+                          <Badge
+                            size="xs"
+                            variant={u.status === 'deleting' ? 'warning' : 'neutral'}
+                            title={u.status === 'deleting' ? deletionProgress[u.id] : undefined}
+                          >
+                            {t(`admin:users.status.${u.status}`, { defaultValue: u.status })}
+                          </Badge>
+                        ) : null}
+                        {isMe ? <Badge size="xs" variant="neutral">{t('admin:users.you')}</Badge> : null}
+                      </div>
+                      <div className="mt-0.5 hidden items-center gap-2 text-[12px] text-[var(--color-fg-subtle)] md:flex">
+                        <span className="min-w-0 truncate font-mono">{u.email}</span>
+                        <span aria-hidden>·</span>
+                        <span className="shrink-0">{presence}</span>
+                      </div>
                     </div>
                   </div>
-                  <div className="flex items-center gap-0.5">
+                  <div className="hidden items-center gap-0.5 md:flex">
                     <IconAction label={t('admin:users.viewInfo')} onClick={() => setInfoRow(u)}>
                       <Info size={15} aria-hidden />
                     </IconAction>
@@ -438,12 +460,72 @@ export default function AdminUsers() {
                       <Trash2 size={15} aria-hidden />
                     </IconAction>
                   </div>
+                  <div className="flex items-start justify-end md:hidden">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger
+                        aria-label={t('admin:users.more')}
+                        className="inline-flex size-11 items-center justify-center rounded-[8px] text-[var(--color-fg-muted)] interactive hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                      >
+                        <MoreHorizontal size={19} aria-hidden />
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-[min(17rem,calc(100vw-2rem))]">
+                        <DropdownMenuItem className="min-h-11" onClick={() => setInfoRow(u)}>
+                          <Info size={16} aria-hidden />
+                          {t('admin:users.viewInfo')}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem className="min-h-11" onClick={() => openEdit(u)}>
+                          <Pencil size={16} aria-hidden />
+                          {t('admin:common.edit')}
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem className="min-h-11" onClick={() => navigate(`/admin/users/${encodeURIComponent(u.id)}/conversations`)}>
+                          <MessageSquare size={16} aria-hidden />
+                          {t('admin:users.viewConversations')}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem className="min-h-11" onClick={() => navigate(`/admin/users/${encodeURIComponent(u.id)}/library`)}>
+                          <Library size={16} aria-hidden />
+                          {t('admin:users.viewLibrary')}
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        {u.status === 'active' ? (
+                          <DropdownMenuItem
+                            className="min-h-11"
+                            disabled={isMe || busyId === u.id}
+                            onClick={() => void ban(u)}
+                          >
+                            <Ban size={16} aria-hidden />
+                            {t('admin:users.ban')}
+                          </DropdownMenuItem>
+                        ) : (
+                          <DropdownMenuItem
+                            className="min-h-11"
+                            disabled={u.status === 'deleting' || busyId === u.id}
+                            onClick={() => void unban(u)}
+                          >
+                            <ShieldCheck size={16} aria-hidden />
+                            {t('admin:users.unban')}
+                          </DropdownMenuItem>
+                        )}
+                        <DropdownMenuItem
+                          destructive
+                          className="min-h-11"
+                          disabled={isMe}
+                          onClick={() => setDeleteRow(u)}
+                        >
+                          <Trash2 size={16} aria-hidden />
+                          {t('admin:common.delete')}
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
                 </>
               )
             }}
           />
         )}
-        {!loading ? <Pagination page={page} pageCount={pageCount} onPage={setPage} /> : null}
+        {!loading ? (
+          <Pagination className="max-sm:[&_button]:size-11" page={page} pageCount={pageCount} onPage={setPage} />
+        ) : null}
       </section>
 
       {/* New user */}
@@ -613,7 +695,7 @@ export default function AdminUsers() {
           </DialogHeader>
           <DialogBody>
             {infoRow ? (
-              <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-2.5 text-sm">
+              <dl className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] gap-x-4 gap-y-2.5 text-sm sm:gap-x-6">
                 <InfoLine label={t('admin:users.fields.email')} value={infoRow.email} mono />
                 <InfoLine
                   label={t('admin:users.fields.role')}
@@ -749,7 +831,7 @@ function InfoLine({ label, value, mono }: { label: string; value: string; mono?:
   return (
     <>
       <dt className="text-[var(--color-fg-subtle)]">{label}</dt>
-      <dd className={cn('text-right break-words text-[var(--color-fg)]', mono && 'font-mono text-[12.5px]')}>{value}</dd>
+      <dd className={cn('min-w-0 break-words text-right text-[var(--color-fg)]', mono && 'font-mono text-[12.5px]')}>{value}</dd>
     </>
   )
 }

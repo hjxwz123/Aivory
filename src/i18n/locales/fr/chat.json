@@ -25,6 +25,7 @@
     "dropHint": "Déposez les fichiers à joindre",
     "dropAnywhere": "Déposez n'importe où pour joindre",
     "addImage": "Ajouter une image",
+    "imageUnsupported": "Le modèle actuel ne prend pas en charge les images. Choisissez un modèle compatible avec la vision.",
     "more": "Plus",
     "voice": "Saisie vocale",
     "voiceStop": "Arrêter l'enregistrement",
@@ -303,6 +304,7 @@
     "empty": "Aucun fichier. Ajoutez-en un pour que le modèle puisse le lire.",
     "added": "Fichier ajouté",
     "addFailed": "Impossible d’ajouter le fichier",
+    "imageUseComposer": "Joignez les images depuis la zone de message afin de les envoyer via l’API de vision.",
     "remove": "Retirer {{name}}",
     "removeFailed": "Impossible de retirer le fichier"
   },

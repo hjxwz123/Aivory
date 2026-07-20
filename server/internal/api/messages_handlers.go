@@ -179,8 +179,25 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// Resolve every client attachment id to the complete server-owned file row
+	// before any readiness/capability check or persistence. This both enforces the
+	// conversation access boundary and prevents forged kind/MIME/name/URL fields
+	// from reaching the orchestrator and provider serializers.
+	req.Attachments, err = normalizeConversationAttachments(r.Context(), d.DB, id, u.ID, req.Attachments)
+	if err != nil {
+		writeError(w, attachmentNormalizationErrorStatus(err), err)
+		return
+	}
 	if err := ensureAttachedDocumentsReady(r.Context(), d.DB, id, req.Attachments); err != nil {
 		writeError(w, 409, err)
+		return
+	}
+	// Images are a provider-only capability. Resolve the exact model this turn
+	// will use and check SERVER-side file classifications before opening SSE; a
+	// client cannot disguise an image as another attachment kind to reach a
+	// non-vision model (or its sandbox).
+	if err := ensureImageAttachmentsSupported(r.Context(), d.DB, conv, req.ModelID, req.Fast, req.Attachments); err != nil {
+		writeError(w, imageCapabilityErrorStatus(err), err)
 		return
 	}
 	toolMode, err := resolveTurnToolMode(req.ToolMode, req.NoTools)

@@ -786,7 +786,14 @@ function ConversationItem({
   )
 }
 
-function UserMenu({ collapsed }: { collapsed: boolean }) {
+interface UserMenuProps {
+  collapsed?: boolean
+  /** Header placement keeps the same account actions while adapting the trigger
+   * and popup direction for a top-right mobile toolbar. */
+  placement?: 'sidebar' | 'header'
+}
+
+export function UserMenu({ collapsed = false, placement = 'sidebar' }: UserMenuProps) {
   const navigate = useNavigate()
   const openSettings = useOpenSettings()
   const { t } = useTranslation(['chat', 'common', 'settings'])
@@ -800,6 +807,7 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
   const [archivedOpen, setArchivedOpen] = useState(false)
   const [wsMembersOpen, setWsMembersOpen] = useState(false)
   const [wsCreateOpen, setWsCreateOpen] = useState(false)
+  const inHeader = placement === 'header'
   return (
     <>
     <DropdownMenu>
@@ -808,16 +816,16 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
           type="button"
           aria-label={t('settings:user.menuAria')}
           className={cn(
-            'flex items-center gap-2.5 rounded-[10px] interactive',
-            'hover:bg-[var(--color-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-            collapsed ? 'p-1' : 'w-full p-2',
+            'flex items-center justify-center gap-2.5 rounded-[10px] interactive',
+            'hover:bg-[var(--color-bg)] data-[state=open]:bg-[var(--color-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+            inHeader ? 'size-[var(--tap-min)]' : collapsed ? 'p-1.5' : 'w-full p-2',
           )}
         >
-          <Avatar size="md" tone="clay">
+          <Avatar size="md" tone="clay" className={cn(inHeader && 'ring-1 ring-[var(--color-border)]')}>
             {avatarUrl ? <AvatarImage src={avatarUrl} alt={displayName} /> : null}
             <AvatarFallback>{initials(displayName)}</AvatarFallback>
           </Avatar>
-          {!collapsed && (
+          {!collapsed && !inHeader && (
             <div className="flex-1 min-w-0 text-left">
               <div className="flex items-center gap-1.5">
                 <span className="text-sm font-medium text-[var(--color-fg)] truncate">{displayName}</span>
@@ -832,7 +840,14 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
           )}
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" side="top" className="min-w-[220px]">
+      <DropdownMenuContent
+        align={inHeader ? 'end' : 'start'}
+        side={inHeader ? 'bottom' : 'top'}
+        className={cn(
+          'min-w-[220px]',
+          inHeader && 'w-[min(17rem,calc(100vw-1rem))] [&_[role=menuitem]]:min-h-11',
+        )}
+      >
         <DropdownMenuItem onClick={() => openSettings('account')}>
           <Settings size={13} aria-hidden />
           {t('settings:user.settings')}

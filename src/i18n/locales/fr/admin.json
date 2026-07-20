@@ -383,6 +383,7 @@
       "task_downgrade": "Rétrogradation inter-fournisseurs",
       "task_image_prompt": "Prompt d'image",
       "task_tool_route": "Routage des outils",
+      "task_search_queries": "Génération de requêtes de recherche",
       "task_research_plan": "Plan de recherche",
       "task_research_verify": "Vérification de recherche",
       "task_moderation": "Modération",

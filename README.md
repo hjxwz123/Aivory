@@ -35,7 +35,7 @@ Most self-hosted AI frontends are thin proxies — one model, one message, one r
 |---|---|---|
 | 🔀 | **Multi-model** | Claude / GPT / Gemini behind one UI; per-message model attribution; tag-filtered picker; any OpenAI-compatible endpoint |
 | 🛠 | **Interleaved tool calls** | Up to **48 tool calls across 12 provider cycles in one turn** — search → fetch → compute → plot, chained autonomously; native function calling with a prompt-protocol fallback for models without it |
-| 🐍 | **Python sandbox** | Self-hosted sandbox cluster with **per-conversation persistent files**; uploads staged in, artifacts (plots, CSVs) streamed back inline; browser-side Pyodide runner too |
+| 🐍 | **Python sandbox** | Self-hosted sandbox cluster with **per-conversation persistent files**; eligible non-image data uploads staged in, artifacts (plots, CSVs) streamed back inline; browser-side Pyodide runner too |
 | 📚 | **RAG & knowledge bases** | Query router (intent → full-text / retrieve / none), hierarchical chunking, hybrid retrieval + RRF, similarity-based dynamic top-K, cited answers; text-layer PDFs parse locally in ms, scanned docs go to MinerU OCR |
 | 👥 | **Team workspaces** | Fully-isolated shared spaces: invite-link membership, shared conversations/projects/KBs, per-sender billing, author-attributed bubbles, owner moderation, admin oversight |
 | 🌳 | **Conversation tree** | Edit/retry creates real branches with `< 2/3 >` switching that never interrupts streaming; draggable outline window with a zoomable node graph; a minimap rail for long chats |
@@ -93,10 +93,12 @@ Every conversation has its own isolated sandbox container. Files persist between
 
 Conversation uploads are staged into Python up to **40 MiB per file** by default (`AIVORY_TOOLS_PYTHON_EXECUTE_UPLOAD_STAGING_FILE_SIZE`). When `python_execute` is not exposed to the model, including when tools are disabled and in Fast mode, CSV/XLSX files use a bounded in-process preview capped at **30 MiB per file** by default (`AIVORY_RAG_SPREADSHEET_PREVIEW_MAX_FILE_BYTES`). Both values are byte counts and require an API restart after changes.
 
-- Full Python standard library + pip-installable packages (pandas, matplotlib, python-pptx, …)
+Only eligible non-image data files (such as CSV, spreadsheets, text, and code) enter `/workspace/uploads`; non-image skill assets enter `/workspace/skills`. The server clears those input directories before every Python run and never copies user-uploaded images, generated image artifacts, or web images into the sandbox. Vision-capable models receive images through their provider's native multimodal API. Python may still generate plots and other images under `/workspace/outputs` as normal artifacts.
+
+- Full Python standard library + preinstalled packages (pandas, matplotlib, python-pptx, …); runner networking is always disabled
 - `stdout` / `stderr` stream line-by-line while the code runs — you see progress, not just results
 - Exceptions appear inline with the traceback
-- Files written to `/workspace/output/` surface as download cards at the end of the message
+- Files written to `/workspace/outputs/` surface as download cards at the end of the message
 - Admins can browse and clear any user's sandbox workspace from the inspector panel
 
 ### Run code in the browser too
@@ -111,7 +113,6 @@ HTML code blocks open a **live preview panel** alongside the chat as the assista
 |------|--------------|
 | `web_search` | Full-text web search via SearXNG (self-hosted) or Serper / Brave |
 | `web_fetch` | Fetch and extract a URL — respects robots.txt |
-| `fetch_image` | Download a public image into `/workspace/uploads/` for subsequent Python use |
 | `python_execute` | Run Python in the persistent sandbox; full stdlib, packages, real file I/O |
 | `image_generate` | Call a configured image model and save the result as an artifact |
 | `search_knowledge_base` | Hybrid dense + BM25 retrieval with RRF from any attached knowledge base |
@@ -124,7 +125,6 @@ Per-turn budget:
 |------|----------|---------------|
 | `web_search` | 16 | 40 |
 | `web_fetch` | 12 | 25 |
-| `fetch_image` | 16 | 12 |
 | `image_generate` | 8 | 4 |
 | `python_execute` | 16 | 8 |
 | **Total calls** | **48** | **150** |
@@ -261,7 +261,7 @@ graph TB
         API["Go API — REST + SSE<br/>JWT auth · per-request HMAC signing · rate limits"]
         subgraph ORCH["Orchestrator"]
             PROV["Provider registry<br/>Anthropic · OpenAI · Gemini · Mock<br/>(any OpenAI-compatible endpoint)"]
-            TOOLS["Tool layer — ≤48 calls / turn<br/>web_search · web_fetch · fetch_image<br/>python_execute · image_generate<br/>search_knowledge_base · save_memory · use_skill"]
+            TOOLS["Tool layer — ≤48 calls / turn<br/>web_search · web_fetch · python_execute<br/>image_generate · search_knowledge_base<br/>save_memory · use_skill"]
             TASK["Task LLM<br/>title · RAG router · compaction · verify · moderation"]
             RAGP["RAG pipeline<br/>parse → chunk → embed → route → retrieve"]
             MEMW["Memory worker<br/>async per-turn extraction"]

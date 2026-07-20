@@ -383,6 +383,7 @@
       "task_downgrade": "跨廠商降級",
       "task_image_prompt": "圖片提示詞",
       "task_tool_route": "工具路由",
+      "task_search_queries": "搜尋查詢生成",
       "task_research_plan": "研究規劃",
       "task_research_verify": "研究核驗",
       "task_moderation": "內容審核",
