@@ -19,6 +19,82 @@
     "largest": "大きい順",
     "smallest": "小さい順"
   },
+  "filters": {
+    "typeLabel": "ファイル形式",
+    "originLabel": "ソース",
+    "sortLabel": "並び順"
+  },
+  "types": {
+    "all": "すべての形式",
+    "pdf": "PDF",
+    "document": "文書",
+    "presentation": "プレゼンテーション",
+    "spreadsheet": "スプレッドシート",
+    "image": "画像",
+    "text": "テキスト",
+    "other": "その他"
+  },
+  "preview": {
+    "selectTitle": "ファイルを選択",
+    "selectBody": "左の一覧からプレビューするファイルを選択してください。",
+    "loading": "プレビューを読み込んでいます…",
+    "download": "ダウンロード",
+    "delete": "削除",
+    "backToList": "ファイル一覧に戻る",
+    "unsupported": "このファイル形式はプレビューできません。",
+    "tooLarge": "ファイルが大きすぎるためプレビューできません。",
+    "failed": "プレビューを読み込めませんでした。",
+    "metadata": "{{type}} · {{size}}"
+  },
+  "pdf": {
+    "previousPage": "前のページ",
+    "nextPage": "次のページ",
+    "page": "{{page}} ページ",
+    "of": "全 {{total}} ページ",
+    "zoomOut": "縮小",
+    "zoomIn": "拡大",
+    "fitWidth": "幅に合わせる",
+    "renderFailed": "この PDF を表示できませんでした。"
+  },
+  "docx": {
+    "loading": "文書を読み込んでいます…",
+    "tooLarge": "文書が大きすぎるためプレビューできません。",
+    "failed": "この文書をプレビューできませんでした。"
+  },
+  "pptx": {
+    "loading": "プレゼンテーションを読み込んでいます…",
+    "tooLarge": "プレゼンテーションが大きすぎるためプレビューできません。",
+    "failed": "このプレゼンテーションをプレビューできませんでした。"
+  },
+  "spreadsheet": {
+    "loading": "スプレッドシートを読み込んでいます…",
+    "tooLarge": "スプレッドシートが大きすぎるためプレビューできません。",
+    "failed": "このスプレッドシートをプレビューできませんでした。",
+    "sheet": "シート",
+    "row": "行",
+    "column": "列",
+    "truncated": "最初の {{rows}} 行、{{columns}} 列まで表示しています。",
+    "empty": "このシートは空です。"
+  },
+  "list": {
+    "title": "ファイル一覧",
+    "loading": "ファイルを読み込んでいます…",
+    "emptyFilteredTitle": "一致するファイルがありません",
+    "emptyFilteredBody": "検索語またはファイル形式を変更してください。",
+    "resultCount": "{{count}} 件のファイル"
+  },
+  "selection": {
+    "selected": "選択中",
+    "selectFile": "{{name}} を選択",
+    "clear": "選択を解除"
+  },
+  "accessibility": {
+    "fileList": "ファイル一覧",
+    "previewPane": "ファイルプレビュー",
+    "searchFiles": "ファイルを検索",
+    "filterByType": "ファイル形式で絞り込む",
+    "selectedFile": "選択中のファイル：{{name}}"
+  },
   "table": {
     "filename": "ファイル名",
     "type": "形式",

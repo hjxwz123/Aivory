@@ -34,6 +34,7 @@ func listFilesAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		UserID: strings.TrimSpace(q.Get("user_id")),
 		UserQ:  strings.TrimSpace(q.Get("user")),
 		Origin: q.Get("origin"),
+		Type:   q.Get("type"),
 		Sort:   q.Get("sort"),
 		Order:  q.Get("order"),
 	}

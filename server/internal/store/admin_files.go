@@ -36,6 +36,7 @@ type AdminFileFilter struct {
 	// the admin can type instead of scrolling a dropdown of every user.
 	UserQ  string
 	Origin string // "" (all) | "conversation" | "kb"
+	Type   string // ""/"all" | "pdf" | "document" | "presentation" | "spreadsheet" | "image" | "text" | "other"
 	Sort   string // "created_at" (default) | "size_bytes" | "filename"
 	Order  string // "desc" (default) | "asc"
 }
@@ -62,6 +63,72 @@ SELECT d.id, 'document',
  WHERE NOT EXISTS (SELECT 1 FROM files f2 WHERE f2.storage_path = d.storage_path)
 `
 
+// adminFileTypeExpression classifies every row in the files/documents union
+// using only server-owned SQL and a fixed extension/MIME allowlist. The CASE is
+// deliberately ordered so the categories are mutually exclusive: for example,
+// text/csv is a spreadsheet rather than also appearing under text. LOWER,
+// COALESCE, CASE, and LIKE are supported by both SQLite and PostgreSQL.
+var adminFileTypeExpression = func() string {
+	filename := "LOWER(COALESCE(t.filename,''))"
+	mimeType := "LOWER(COALESCE(t.mime_type,''))"
+	extensions := func(values ...string) string {
+		parts := make([]string, 0, len(values))
+		for _, value := range values {
+			parts = append(parts, filename+" LIKE '%."+value+"'")
+		}
+		return "(" + strings.Join(parts, " OR ") + ")"
+	}
+	mimeTypes := func(values ...string) string {
+		parts := make([]string, 0, len(values)*2)
+		for _, value := range values {
+			parts = append(parts, mimeType+" = '"+value+"'", mimeType+" LIKE '"+value+";%'")
+		}
+		return "(" + strings.Join(parts, " OR ") + ")"
+	}
+
+	image := "(" + mimeType + " LIKE 'image/%' OR " + extensions(
+		"png", "apng", "jpg", "jpeg", "jpe", "jfif", "gif", "webp", "bmp",
+		"tif", "tiff", "heic", "heif", "avif", "ico", "cur", "jxl", "psd", "svg",
+	) + ")"
+	pdf := "(" + mimeTypes("application/pdf") + " OR " + extensions("pdf") + ")"
+	document := "(" + mimeTypes("application/msword", "application/rtf", "application/vnd.ms-word.document.macroenabled.12", "application/vnd.ms-word.template.macroenabled.12", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/vnd.openxmlformats-officedocument.wordprocessingml.template", "application/vnd.oasis.opendocument.text", "text/rtf") + " OR " + extensions(
+		"doc", "docx", "docm", "dot", "dotm", "dotx", "odt", "rtf",
+	) + ")"
+	presentation := "(" + mimeTypes("application/vnd.ms-powerpoint", "application/vnd.ms-powerpoint.presentation.macroenabled.12", "application/vnd.ms-powerpoint.slideshow.macroenabled.12", "application/vnd.ms-powerpoint.template.macroenabled.12", "application/vnd.openxmlformats-officedocument.presentationml.presentation", "application/vnd.openxmlformats-officedocument.presentationml.slideshow", "application/vnd.openxmlformats-officedocument.presentationml.template", "application/vnd.oasis.opendocument.presentation") + " OR " + extensions(
+		"ppt", "pptx", "pptm", "pot", "potm", "potx", "pps", "ppsm", "ppsx", "odp",
+	) + ")"
+	spreadsheet := "(" + mimeTypes("text/csv", "text/tab-separated-values", "application/csv", "application/vnd.ms-excel", "application/vnd.ms-excel.sheet.binary.macroenabled.12", "application/vnd.ms-excel.sheet.macroenabled.12", "application/vnd.ms-excel.template.macroenabled.12", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.openxmlformats-officedocument.spreadsheetml.template", "application/vnd.oasis.opendocument.spreadsheet") + " OR " + extensions(
+		"csv", "tsv", "xls", "xlsx", "xlsm", "xlsb", "xlt", "xltm", "xltx", "ods",
+	) + ")"
+	text := "(" + mimeType + " LIKE 'text/%' OR " + mimeTypes("application/ecmascript", "application/javascript", "application/json", "application/ld+json", "application/sql", "application/toml", "application/x-httpd-php", "application/x-javascript", "application/x-sh", "application/x-yaml", "application/xhtml+xml", "application/xml") + " OR " + extensions(
+		"txt", "md", "markdown", "log", "json", "jsonl", "xml", "yaml", "yml", "toml", "ini", "cfg", "conf", "env", "properties",
+		"c", "h", "cc", "cpp", "cxx", "hpp", "cs", "java", "kt", "kts", "swift", "go", "rs", "rb", "php", "py", "pyw",
+		"js", "jsx", "ts", "tsx", "mjs", "cjs", "vue", "svelte", "sh", "bash", "zsh", "fish", "ps1", "bat", "sql", "css", "scss", "sass", "less",
+		"r", "scala", "lua", "pl", "dart", "ex", "exs", "erl", "clj", "hs", "fs", "proto", "graphql", "gql", "rst", "tex", "htm", "html",
+	) + ")"
+
+	return `(CASE
+		WHEN ` + image + ` THEN 'image'
+		WHEN ` + pdf + ` THEN 'pdf'
+		WHEN ` + document + ` THEN 'document'
+		WHEN ` + presentation + ` THEN 'presentation'
+		WHEN ` + spreadsheet + ` THEN 'spreadsheet'
+		WHEN ` + text + ` THEN 'text'
+		ELSE 'other'
+	END)`
+}()
+
+func normalizedAdminFileType(value string) string {
+	switch value = strings.ToLower(strings.TrimSpace(value)); value {
+	case "pdf", "document", "presentation", "spreadsheet", "image", "text", "other":
+		return value
+	default:
+		// Blank, "all", and unknown caller input all mean no type filter. Never
+		// interpolate the caller's value into the SQL expression.
+		return ""
+	}
+}
+
 func adminFilesWhere(f AdminFileFilter) (string, []any) {
 	conds := []string{}
 	args := []any{}
@@ -81,6 +148,10 @@ func adminFilesWhere(f AdminFileFilter) (string, []any) {
 	if f.Origin == "conversation" || f.Origin == "kb" {
 		conds = append(conds, "t.origin = ?")
 		args = append(args, f.Origin)
+	}
+	if fileType := normalizedAdminFileType(f.Type); fileType != "" {
+		conds = append(conds, adminFileTypeExpression+" = ?")
+		args = append(args, fileType)
 	}
 	if len(conds) == 0 {
 		return "", args

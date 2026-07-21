@@ -19,6 +19,82 @@
     "largest": "Plus gros d'abord",
     "smallest": "Plus petits d'abord"
   },
+  "filters": {
+    "typeLabel": "Type de fichier",
+    "originLabel": "Source",
+    "sortLabel": "Trier par"
+  },
+  "types": {
+    "all": "Tous les types",
+    "pdf": "PDF",
+    "document": "Documents",
+    "presentation": "Présentations",
+    "spreadsheet": "Feuilles de calcul",
+    "image": "Images",
+    "text": "Texte",
+    "other": "Autres"
+  },
+  "preview": {
+    "selectTitle": "Sélectionnez un fichier",
+    "selectBody": "Choisissez un fichier dans la liste pour le prévisualiser ici.",
+    "loading": "Chargement de l'aperçu…",
+    "download": "Télécharger",
+    "delete": "Supprimer",
+    "backToList": "Retour aux fichiers",
+    "unsupported": "Ce type de fichier ne peut pas être prévisualisé.",
+    "tooLarge": "Ce fichier est trop volumineux pour être prévisualisé.",
+    "failed": "Impossible de charger l'aperçu.",
+    "metadata": "{{type}} · {{size}}"
+  },
+  "pdf": {
+    "previousPage": "Page précédente",
+    "nextPage": "Page suivante",
+    "page": "Page {{page}}",
+    "of": "sur {{total}}",
+    "zoomOut": "Réduire",
+    "zoomIn": "Agrandir",
+    "fitWidth": "Ajuster à la largeur",
+    "renderFailed": "Impossible d'afficher ce PDF."
+  },
+  "docx": {
+    "loading": "Chargement du document…",
+    "tooLarge": "Ce document est trop volumineux pour être prévisualisé.",
+    "failed": "Impossible de prévisualiser ce document."
+  },
+  "pptx": {
+    "loading": "Chargement de la présentation…",
+    "tooLarge": "Cette présentation est trop volumineuse pour être prévisualisée.",
+    "failed": "Impossible de prévisualiser cette présentation."
+  },
+  "spreadsheet": {
+    "loading": "Chargement de la feuille de calcul…",
+    "tooLarge": "Cette feuille de calcul est trop volumineuse pour être prévisualisée.",
+    "failed": "Impossible de prévisualiser cette feuille de calcul.",
+    "sheet": "Feuille",
+    "row": "Ligne",
+    "column": "Colonne",
+    "truncated": "Affichage limité aux {{rows}} premières lignes et aux {{columns}} premières colonnes.",
+    "empty": "Cette feuille est vide."
+  },
+  "list": {
+    "title": "Liste des fichiers",
+    "loading": "Chargement des fichiers…",
+    "emptyFilteredTitle": "Aucun fichier correspondant",
+    "emptyFilteredBody": "Essayez une autre recherche ou un autre type de fichier.",
+    "resultCount": "{{count}} fichier(s)"
+  },
+  "selection": {
+    "selected": "Sélectionné",
+    "selectFile": "Sélectionner {{name}}",
+    "clear": "Effacer la sélection"
+  },
+  "accessibility": {
+    "fileList": "Liste des fichiers",
+    "previewPane": "Aperçu du fichier",
+    "searchFiles": "Rechercher des fichiers",
+    "filterByType": "Filtrer les fichiers par type",
+    "selectedFile": "Fichier sélectionné : {{name}}"
+  },
   "table": {
     "filename": "Nom",
     "type": "Type",

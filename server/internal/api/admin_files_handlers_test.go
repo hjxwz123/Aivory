@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
 )
 
 func TestAdminFilesListFilterAndDedupe(t *testing.T) {
@@ -67,6 +66,14 @@ func TestAdminFilesListFilterAndDedupe(t *testing.T) {
 	// Filename search, case-insensitive.
 	if got := int(list("?search=NOTES")["total"].(float64)); got != 1 {
 		t.Fatalf("search=NOTES total=%d want 1", got)
+	}
+	// Type filtering is server-side so Count and pagination use the same result.
+	if got := int(list("?type=pdf")["total"].(float64)); got != 1 {
+		t.Fatalf("type=pdf total=%d want 1", got)
+	}
+	// Unknown values are ignored rather than becoming dynamic SQL or an empty list.
+	if got := int(list("?type=unknown")["total"].(float64)); got != 2 {
+		t.Fatalf("type=unknown total=%d want unfiltered total 2", got)
 	}
 	// Size sort ascending puts the 50-byte doc first.
 	rows = list("?sort=size_bytes&order=asc")["files"].([]any)
