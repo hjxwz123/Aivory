@@ -1,21 +1,27 @@
 /**
- * UserFiles — the signed-in user's upload inventory (§ user files page):
- * conversation attachments and knowledge-base documents in one list, with a
- * storage meter on top (group-configurable quota; images don't count).
- * Deleting removes the same three layers everywhere else does: database rows,
- * search vectors, and the bytes on disk.
+ * UserFiles is a master-detail workspace over the signed-in user's uploads.
+ * Desktop keeps the compact file browser and preview visible together; smaller
+ * screens use a list -> preview flow so neither surface is squeezed.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Eye, FileText, FolderOpen, HardDrive, MessageSquare, Trash2 } from 'lucide-react'
-import { authApi, ApiError } from '@/api'
+import {
+  ArrowLeft,
+  Download,
+  FileQuestion,
+  FolderOpen,
+  HardDrive,
+  MessageSquare,
+  Search,
+  Trash2,
+} from 'lucide-react'
+import { authApi, apiUrl, ApiError } from '@/api'
 import type { ApiAdminFile } from '@/api/types'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
+import { DocumentPreview } from '@/components/files/document-preview'
 import { ContentHeader } from '@/components/layout/content-header'
+import { Button } from '@/components/ui/button'
 import {
   Dialog,
-  DialogBody,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -26,23 +32,21 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
 import { Pagination } from '@/components/ui/pagination'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Skeleton } from '@/components/ui/skeleton'
+import { Tooltip } from '@/components/ui/tooltip'
 import { toast } from '@/hooks/use-toast'
+import { useMediaQuery } from '@/hooks/use-media-query'
 import { envNum } from '@/lib/env-config'
+import { fileIconFor } from '@/lib/file-icon'
+import {
+  documentPreviewByteLimit,
+  documentPreviewKind,
+  type FileTypeFilter,
+} from '@/lib/file-preview-kind'
+import { cn } from '@/lib/utils'
 
 const PAGE_SIZE = envNum('VITE_AIVORY_PAGE_SIZE', 50)
 const ALL = 'all'
-const TEXT_PREVIEW_MAX_BYTES = 2 * 1024 * 1024
-const TEXT_EXTENSIONS = /\.(txt|md|markdown|json|csv|tsv|log|xml|yaml|yml|toml|ini|py|js|ts|go|java|c|cpp|h|rs|sh|sql|html|css)$/i
-
-type PreviewKind = 'image' | 'pdf' | 'text' | 'binary'
-
-function previewKind(f: ApiAdminFile): PreviewKind {
-  const mime = f.mime_type.toLowerCase()
-  if (mime.startsWith('image/')) return 'image'
-  if (mime === 'application/pdf' || /\.pdf$/i.test(f.filename)) return 'pdf'
-  if (mime.startsWith('text/') || TEXT_EXTENSIONS.test(f.filename)) return 'text'
-  return 'binary'
-}
 
 function fmtBytes(n: number): string {
   if (n >= 1024 * 1024 * 1024) return `${(n / (1024 * 1024 * 1024)).toFixed(1)} GB`
@@ -51,49 +55,82 @@ function fmtBytes(n: number): string {
   return `${n} B`
 }
 
-function typeLabel(f: ApiAdminFile): string {
-  const mime = f.mime_type.toLowerCase()
-  if (mime.startsWith('image/')) return mime.slice(6).toUpperCase()
-  const ext = f.filename.includes('.') ? f.filename.split('.').pop()! : ''
-  return ext ? ext.toUpperCase() : mime || '—'
+function typeLabel(file: ApiAdminFile): string {
+  const mime = file.mime_type.toLowerCase()
+  if (mime.startsWith('image/')) return mime.slice(6).split(';', 1)[0].toUpperCase()
+  const name = file.filename.split(/[?#]/, 1)[0]
+  const ext = name.includes('.') ? name.split('.').pop() ?? '' : ''
+  return ext ? ext.toUpperCase() : mime || '-'
 }
 
-function rowKey(f: ApiAdminFile): string {
-  return `${f.source}:${f.id}`
+function rowKey(file: ApiAdminFile): string {
+  return `${file.source}:${file.id}`
 }
 
 interface PreviewState {
+  key: string
   file: ApiAdminFile
-  kind: PreviewKind
   loading: boolean
+  data?: ArrayBuffer
   url?: string
-  text?: string
   error?: string
+  retryable?: boolean
+}
+
+function fileContentUrl(file: ApiAdminFile): string {
+  const query = new URLSearchParams({ source: file.source, id: file.id })
+  return apiUrl(`/me/files/content?${query}`)
 }
 
 export default function UserFiles() {
   const { t, i18n } = useTranslation(['files', 'common'])
+  const compact = useMediaQuery('(max-width: 1023px)')
   const [search, setSearch] = useState('')
   const [searchDebounced, setSearchDebounced] = useState('')
   const [origin, setOrigin] = useState(ALL)
+  const [fileType, setFileType] = useState<FileTypeFilter>('all')
   const [sort, setSort] = useState('created_at')
   const [order, setOrder] = useState<'desc' | 'asc'>('desc')
 
   const [rows, setRows] = useState<ApiAdminFile[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
+  const [listError, setListError] = useState('')
   const [page, setPage] = useState(1)
   const [storage, setStorage] = useState<{ used_bytes: number; quota_bytes: number } | null>(null)
 
+  const [selectedKey, setSelectedKey] = useState('')
+  const [mobilePreviewOpen, setMobilePreviewOpen] = useState(false)
+  const [preview, setPreview] = useState<PreviewState | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<ApiAdminFile | null>(null)
   const [busy, setBusy] = useState(false)
-  const [preview, setPreview] = useState<PreviewState | null>(null)
+
+  const listRequestRef = useRef(0)
+  const previewRequestRef = useRef(0)
+  const previewAbortRef = useRef<AbortController | null>(null)
   const previewUrlRef = useRef<string | null>(null)
 
   useEffect(() => {
-    const id = setTimeout(() => setSearchDebounced(search.trim()), 400)
-    return () => clearTimeout(id)
+    const id = window.setTimeout(() => setSearchDebounced(search.trim()), 350)
+    return () => window.clearTimeout(id)
   }, [search])
+
+  const releasePreviewResources = useCallback(() => {
+    previewAbortRef.current?.abort()
+    previewAbortRef.current = null
+    if (previewUrlRef.current) {
+      URL.revokeObjectURL(previewUrlRef.current)
+      previewUrlRef.current = null
+    }
+  }, [])
+
+  useEffect(() => releasePreviewResources, [releasePreviewResources])
+
+  const clearPreview = useCallback(() => {
+    previewRequestRef.current += 1
+    releasePreviewResources()
+    setPreview(null)
+  }, [releasePreviewResources])
 
   const loadStorage = useCallback(() => {
     authApi
@@ -103,163 +140,257 @@ export default function UserFiles() {
   }, [])
 
   const load = useCallback(async () => {
+    const request = ++listRequestRef.current
     setLoading(true)
+    setListError('')
     try {
-      const resp = await authApi.myFiles({
+      const response = await authApi.myFiles({
         search: searchDebounced,
         origin,
+        type: fileType,
         sort,
         order,
         limit: PAGE_SIZE,
         offset: (page - 1) * PAGE_SIZE,
       })
-      setRows(resp.files)
-      setTotal(resp.total)
-    } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : t('common:actions.failed', { defaultValue: 'Failed' }))
+      if (request !== listRequestRef.current) return
+      setTotal(response.total)
+      const lastPage = Math.max(1, Math.ceil(response.total / PAGE_SIZE))
+      if (page > lastPage) {
+        setRows([])
+        setPage(lastPage)
+        return
+      }
+      setRows(response.files)
+    } catch (error) {
+      if (request !== listRequestRef.current) return
+      const message = error instanceof ApiError ? error.message : t('files:preview.failed')
+      setListError(message)
+      toast.error(message)
     } finally {
-      setLoading(false)
+      if (request === listRequestRef.current) setLoading(false)
     }
-  }, [searchDebounced, origin, sort, order, page, t])
+  }, [fileType, order, origin, page, searchDebounced, sort, t])
 
   useEffect(() => {
     void load()
   }, [load])
+
   useEffect(() => {
     loadStorage()
   }, [loadStorage])
+
   useEffect(() => {
     setPage(1)
-  }, [searchDebounced, origin, sort, order])
+    setMobilePreviewOpen(false)
+  }, [searchDebounced, origin, fileType, sort, order])
 
-  const timeFmt = useMemo(
-    () => new Intl.DateTimeFormat(i18n.language, { dateStyle: 'medium', timeStyle: 'short' }),
-    [i18n.language],
+  const openPreview = useCallback(
+    async (file: ApiAdminFile, openOnCompact = true) => {
+      const key = rowKey(file)
+      setSelectedKey(key)
+      if (compact && openOnCompact) setMobilePreviewOpen(true)
+      if (preview?.key === key && (preview.loading || preview.data || preview.url)) return
+
+      const request = ++previewRequestRef.current
+      releasePreviewResources()
+      const kind = documentPreviewKind(file.filename, file.mime_type)
+      const byteLimit = documentPreviewByteLimit(kind)
+      if (byteLimit === 0) {
+        setPreview({ key, file, loading: false })
+        return
+      }
+      if (byteLimit !== null && file.size_bytes > byteLimit) {
+        setPreview({
+          key,
+          file,
+          loading: false,
+          error: t('files:preview.tooLarge'),
+          retryable: false,
+        })
+        return
+      }
+
+      const controller = new AbortController()
+      previewAbortRef.current = controller
+      setPreview({ key, file, loading: true })
+      try {
+        const blob = await authApi.myFileContentBlob(file.source, file.id, controller.signal)
+        if (request !== previewRequestRef.current || controller.signal.aborted) return
+        if (kind === 'image') {
+          const url = URL.createObjectURL(blob)
+          previewUrlRef.current = url
+          setPreview({ key, file, loading: false, url })
+          return
+        }
+        const data = await blob.arrayBuffer()
+        if (request !== previewRequestRef.current || controller.signal.aborted) return
+        setPreview({ key, file, loading: false, data })
+      } catch (error) {
+        if (controller.signal.aborted || request !== previewRequestRef.current) return
+        const message = error instanceof ApiError ? error.message : t('files:preview.failed')
+        setPreview({ key, file, loading: false, error: message })
+      } finally {
+        if (previewAbortRef.current === controller) previewAbortRef.current = null
+      }
+    },
+    [compact, preview, releasePreviewResources, t],
   )
 
-  const openPreview = async (f: ApiAdminFile) => {
-    const kind = previewKind(f)
-    if (kind === 'text' && f.size_bytes > TEXT_PREVIEW_MAX_BYTES) {
-      setPreview({ file: f, kind: 'binary', loading: false })
+  // Keep a valid selection as server-side filters and pagination change. On
+  // desktop the first result opens automatically; mobile waits for an explicit
+  // tap so entering Files never downloads a document in the background.
+  useEffect(() => {
+    if (loading) return
+    if (rows.length === 0) {
+      setSelectedKey('')
+      setMobilePreviewOpen(false)
+      clearPreview()
       return
     }
-    setPreview({ file: f, kind, loading: kind !== 'binary' })
-    if (kind === 'binary') return
-    try {
-      const blob = await authApi.myFileContentBlob(f.source, f.id)
-      if (kind === 'text') {
-        const text = await blob.text()
-        setPreview((p) => (p && p.file.id === f.id ? { ...p, loading: false, text } : p))
-      } else {
-        const url = URL.createObjectURL(blob)
-        previewUrlRef.current = url
-        setPreview((p) => (p && p.file.id === f.id ? { ...p, loading: false, url } : p))
+    const selected = rows.find((file) => rowKey(file) === selectedKey)
+    if (compact) {
+      if (selectedKey && !selected) {
+        setSelectedKey('')
+        clearPreview()
       }
-    } catch (e) {
-      const msg = e instanceof ApiError ? e.message : t('files:previewFailed')
-      setPreview((p) => (p && p.file.id === f.id ? { ...p, loading: false, error: msg } : p))
+      return
     }
-  }
+    const next = selected ?? rows[0]
+    const nextKey = rowKey(next)
+    if (!selected) setSelectedKey(nextKey)
+    if (!compact && preview?.key !== nextKey) void openPreview(next, false)
+  }, [clearPreview, compact, loading, openPreview, preview?.key, rows, selectedKey])
 
-  const closePreview = () => {
-    if (previewUrlRef.current) {
-      URL.revokeObjectURL(previewUrlRef.current)
-      previewUrlRef.current = null
-    }
-    setPreview(null)
-  }
-
-  const runDelete = async (f: ApiAdminFile) => {
+  const runDelete = async (file: ApiAdminFile) => {
     setBusy(true)
     try {
-      await authApi.deleteMyFiles([{ source: f.source, id: f.id }])
+      await authApi.deleteMyFiles([{ source: file.source, id: file.id }])
+      if (rowKey(file) === preview?.key) {
+        clearPreview()
+        setSelectedKey('')
+        setMobilePreviewOpen(false)
+      }
       toast.success(t('files:deleted'))
       setConfirmDelete(null)
       await load()
       loadStorage()
-    } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : t('common:actions.failed', { defaultValue: 'Failed' }))
+    } catch (error) {
+      toast.error(error instanceof ApiError ? error.message : t('common:actions.failed', { defaultValue: 'Failed' }))
     } finally {
       setBusy(false)
     }
   }
 
+  const timeFormat = useMemo(
+    () => new Intl.DateTimeFormat(i18n.language, { dateStyle: 'medium', timeStyle: 'short' }),
+    [i18n.language],
+  )
+  const shortDateFormat = useMemo(
+    () => new Intl.DateTimeFormat(i18n.language, { dateStyle: 'medium' }),
+    [i18n.language],
+  )
+
   const quota = storage?.quota_bytes ?? 0
   const used = storage?.used_bytes ?? 0
-  const pct = quota > 0 ? Math.min(100, (used / quota) * 100) : 0
-  const nearFull = quota > 0 && pct >= 90
+  const storagePercent = quota > 0 ? Math.min(100, (used / quota) * 100) : 0
+  const storageNearFull = quota > 0 && storagePercent >= 90
+  const pageCount = Math.ceil(total / PAGE_SIZE)
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-h-0 flex-col">
       <ContentHeader title={t('files:title')} />
-      <main className="flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-[var(--layout-content-max-w)] px-2 sm:px-8 pb-12">
-          {/* Storage meter */}
-          <section className="mt-2 rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
-            <div className="flex items-center justify-between gap-3">
-              <div className="inline-flex items-center gap-2 text-sm font-medium text-[var(--color-fg)]">
-                <HardDrive size={15} aria-hidden className="text-[var(--color-fg-subtle)]" />
-                {t('files:storage.title')}
-              </div>
-              <div className="text-[13px] tabular-nums text-[var(--color-fg-muted)]">
-                {quota > 0
-                  ? t('files:storage.usedOf', { used: fmtBytes(used), quota: fmtBytes(quota) })
-                  : t('files:storage.usedUnlimited', { used: fmtBytes(used) })}
-              </div>
-            </div>
-            {quota > 0 && (
-              <div
-                className="mt-3 h-2 w-full overflow-hidden rounded-full bg-[var(--color-bg-muted)]"
-                role="progressbar"
-                aria-valuenow={Math.round(pct)}
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-label={t('files:storage.title')}
-              >
-                <div
-                  className={
-                    nearFull
-                      ? 'h-full rounded-full bg-[var(--color-danger)] transition-[width]'
-                      : 'h-full rounded-full bg-[var(--color-accent)] transition-[width]'
-                  }
-                  style={{ width: `${pct}%` }}
-                />
-              </div>
+      <main className="min-h-0 flex-1 overflow-hidden sm:px-6 sm:pb-6">
+        <div className="mx-auto flex h-full min-h-0 w-full max-w-[96rem] overflow-hidden border-y border-[var(--color-border)] bg-[var(--color-surface)] sm:rounded-[12px] sm:border">
+          <aside
+            className={cn(
+              'min-h-0 w-full flex-col bg-[var(--color-bg)] lg:flex lg:w-[20rem] lg:shrink-0 lg:border-r lg:border-[var(--color-border)] xl:w-[21rem]',
+              mobilePreviewOpen ? 'hidden' : 'flex',
             )}
-            <p className="mt-2 text-[12px] text-[var(--color-fg-subtle)]">{t('files:storage.note')}</p>
-          </section>
+            aria-label={t('files:accessibility.fileList')}
+          >
+            <div className="border-b border-[var(--color-divider)] px-3 py-3">
+              <div className="flex items-center justify-between gap-3 text-[0.8125rem]">
+                <span className="inline-flex min-w-0 items-center gap-2 font-medium text-[var(--color-fg)]">
+                  <HardDrive size={14} className="shrink-0 text-[var(--color-fg-subtle)]" aria-hidden />
+                  <span className="truncate">{t('files:storage.title')}</span>
+                </span>
+                <span className="shrink-0 tabular-nums text-[var(--color-fg-muted)]">
+                  {quota > 0
+                    ? t('files:storage.usedOf', { used: fmtBytes(used), quota: fmtBytes(quota) })
+                    : t('files:storage.usedUnlimited', { used: fmtBytes(used) })}
+                </span>
+              </div>
+              {quota > 0 ? (
+                <div
+                  className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--color-bg-muted)]"
+                  role="progressbar"
+                  aria-label={t('files:storage.title')}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={Math.round(storagePercent)}
+                >
+                  <div
+                    className={cn(
+                      'h-full rounded-full transition-[width] duration-200',
+                      storageNearFull ? 'bg-[var(--color-danger)]' : 'bg-[var(--color-accent)]',
+                    )}
+                    style={{ width: `${storagePercent}%` }}
+                  />
+                </div>
+              ) : null}
+            </div>
 
-          {/* Filters */}
-          <section className="mt-6 flex flex-wrap items-end gap-3">
-            <div className="w-full sm:w-64">
+            <div className="space-y-2 border-b border-[var(--color-divider)] p-3">
               <Input
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                onChange={(event) => setSearch(event.target.value)}
+                leadingIcon={<Search size={15} aria-hidden />}
                 placeholder={t('files:searchPlaceholder')}
+                aria-label={t('files:searchPlaceholder')}
+                wrapperClassName="w-full"
               />
-            </div>
-            <div className="w-44">
-              <Select value={origin} onValueChange={setOrigin}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ALL}>{t('files:origin.all')}</SelectItem>
-                  <SelectItem value="conversation">{t('files:origin.conversation')}</SelectItem>
-                  <SelectItem value="kb">{t('files:origin.kb')}</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="w-44">
+              <div className="grid grid-cols-2 gap-2">
+                <Select value={fileType} onValueChange={(value) => setFileType(value as FileTypeFilter)}>
+                  <SelectTrigger
+                    aria-label={t('files:filters.typeLabel')}
+                    className="min-w-0 px-3 [&>span:first-child]:truncate"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(['all', 'pdf', 'document', 'presentation', 'spreadsheet', 'image', 'text', 'other'] as const).map(
+                      (value) => (
+                        <SelectItem key={value} value={value}>
+                          {t(`files:types.${value}`)}
+                        </SelectItem>
+                      ),
+                    )}
+                  </SelectContent>
+                </Select>
+                <Select value={origin} onValueChange={setOrigin}>
+                  <SelectTrigger
+                    aria-label={t('files:filters.originLabel')}
+                    className="min-w-0 px-3 [&>span:first-child]:truncate"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL}>{t('files:origin.all')}</SelectItem>
+                    <SelectItem value="conversation">{t('files:origin.conversation')}</SelectItem>
+                    <SelectItem value="kb">{t('files:origin.kb')}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
               <Select
                 value={`${sort}-${order}`}
-                onValueChange={(v) => {
-                  const [s, o] = v.split('-') as [string, 'desc' | 'asc']
-                  setSort(s)
-                  setOrder(o)
+                onValueChange={(value) => {
+                  const [nextSort, nextOrder] = value.split('-') as [string, 'desc' | 'asc']
+                  setSort(nextSort)
+                  setOrder(nextOrder)
                 }}
               >
-                <SelectTrigger>
+                <SelectTrigger aria-label={t('files:filters.sortLabel')} className="px-3">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -270,95 +401,203 @@ export default function UserFiles() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="ml-auto self-center text-[13px] text-[var(--color-fg-subtle)] tabular-nums">
-              {t('files:total', { count: total })}
-            </div>
-          </section>
 
-          {/* List */}
-          <section className="mt-4">
-            {loading ? (
-              <div className="py-10 text-center text-sm text-[var(--color-fg-subtle)]">
-                {t('common:loading', { defaultValue: 'Loading…' })}
+            <div className="flex min-h-0 flex-1 flex-col">
+              <div className="flex h-9 shrink-0 items-center justify-between border-b border-[var(--color-divider)] px-3 text-[0.75rem] text-[var(--color-fg-subtle)]">
+                <span>{t('files:list.title')}</span>
+                <span className="tabular-nums">{t('files:total', { count: total })}</span>
               </div>
-            ) : rows.length === 0 ? (
-              <EmptyState
-                icon={<FolderOpen size={22} aria-hidden />}
-                title={t('files:empty.title')}
-                description={t('files:empty.body')}
-              />
-            ) : (
-              <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] overflow-x-auto">
-                <table className="min-w-[760px] w-full text-sm">
-                  <thead className="bg-[var(--color-bg-muted)] text-[12px] text-[var(--color-fg-subtle)]">
-                    <tr>
-                      <th className="text-left py-2.5 px-4 font-medium">{t('files:table.filename')}</th>
-                      <th className="text-left py-2.5 px-3 font-medium">{t('files:table.type')}</th>
-                      <th className="text-left py-2.5 px-3 font-medium">{t('files:table.origin')}</th>
-                      <th className="text-right py-2.5 px-3 font-medium">{t('files:table.size')}</th>
-                      <th className="text-left py-2.5 px-3 font-medium">{t('files:table.uploaded')}</th>
-                      <th className="text-right py-2.5 px-4 font-medium" aria-label={t('files:table.actions')} />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rows.map((f) => (
-                      <tr key={rowKey(f)} className="border-t border-[var(--color-divider)]">
-                        <td className="py-2 px-4 max-w-[18rem]">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <FileText size={14} className="shrink-0 text-[var(--color-fg-subtle)]" aria-hidden />
-                            <span className="truncate" title={f.filename}>
-                              {f.filename}
-                            </span>
-                          </div>
-                        </td>
-                        <td className="py-2 px-3 text-[12px] text-[var(--color-fg-muted)] whitespace-nowrap">{typeLabel(f)}</td>
-                        <td className="py-2 px-3">
-                          {f.origin === 'kb' ? (
-                            <Badge variant="neutral" className="gap-1">
-                              <FolderOpen size={11} aria-hidden />
-                              {f.kb_name || t('files:origin.kb')}
-                            </Badge>
-                          ) : (
-                            <Badge variant="neutral" className="gap-1">
-                              <MessageSquare size={11} aria-hidden />
-                              {t('files:origin.conversation')}
-                            </Badge>
-                          )}
-                        </td>
-                        <td className="py-2 px-3 text-right tabular-nums whitespace-nowrap">{fmtBytes(f.size_bytes)}</td>
-                        <td className="py-2 px-3 text-[12px] text-[var(--color-fg-muted)] whitespace-nowrap">
-                          {timeFmt.format(new Date(f.created_at * 1000))}
-                        </td>
-                        <td className="py-2 px-4 text-right whitespace-nowrap">
-                          <Button variant="ghost" size="sm" leadingIcon={<Eye size={13} aria-hidden />} onClick={() => void openPreview(f)}>
-                            {t('files:view')}
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="text-[var(--color-danger)]"
-                            leadingIcon={<Trash2 size={13} aria-hidden />}
-                            onClick={() => setConfirmDelete(f)}
+
+              {loading ? (
+                <div className="space-y-1 p-2" aria-label={t('common:loading', { defaultValue: 'Loading' })}>
+                  {Array.from({ length: 7 }, (_, index) => (
+                    <div key={index} className="flex items-center gap-3 px-2 py-2.5">
+                      <Skeleton className="size-9 shrink-0" />
+                      <div className="min-w-0 flex-1 space-y-2">
+                        <Skeleton shape="line" className="w-4/5" />
+                        <Skeleton shape="line" className="h-2.5 w-3/5" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : listError ? (
+                <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
+                  <FileQuestion size={24} className="text-[var(--color-danger)]" aria-hidden />
+                  <p className="mt-3 text-sm text-[var(--color-fg-muted)]">{listError}</p>
+                  <Button variant="secondary" size="sm" className="mt-4" onClick={() => void load()}>
+                    {t('common:actions.tryAgain', { defaultValue: 'Try again' })}
+                  </Button>
+                </div>
+              ) : rows.length === 0 ? (
+                <EmptyState
+                  className="my-auto py-10"
+                  icon={<FolderOpen size={21} aria-hidden />}
+                  title={
+                    searchDebounced || origin !== ALL || fileType !== 'all'
+                      ? t('files:list.emptyFilteredTitle')
+                      : t('files:empty.title')
+                  }
+                  description={
+                    searchDebounced || origin !== ALL || fileType !== 'all'
+                      ? t('files:list.emptyFilteredBody')
+                      : t('files:empty.body')
+                  }
+                />
+              ) : (
+                <ul
+                  className="min-h-0 flex-1 overflow-y-auto p-1.5 scrollbar-thin"
+                  aria-label={t('files:accessibility.fileList')}
+                >
+                  {rows.map((file) => {
+                    const key = rowKey(file)
+                    const selected = key === selectedKey
+                    const FileIcon = fileIconFor(file.filename)
+                    return (
+                      <li
+                        key={key}
+                        className={cn(
+                          'group/file flex min-h-16 items-stretch rounded-[8px] transition-colors',
+                          selected ? 'bg-[var(--color-accent-soft)]' : 'hover:bg-[var(--color-bg-muted)]',
+                        )}
+                      >
+                        <button
+                          type="button"
+                          aria-current={selected ? 'true' : undefined}
+                          className="flex min-w-0 flex-1 items-center gap-2.5 rounded-l-[8px] px-2.5 py-2 text-left focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-ring)]"
+                          onClick={() => void openPreview(file)}
+                        >
+                          <span
+                            className={cn(
+                              'inline-flex size-9 shrink-0 items-center justify-center rounded-[8px]',
+                              selected
+                                ? 'bg-[var(--color-surface)] text-[var(--color-accent)]'
+                                : 'bg-[var(--color-surface-sunken)] text-[var(--color-fg-muted)]',
+                            )}
                           >
-                            {t('common:actions.delete', { defaultValue: 'Delete' })}
-                          </Button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                            <FileIcon size={17} aria-hidden />
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-[0.875rem] font-medium text-[var(--color-fg)]" title={file.filename}>
+                              {file.filename}
+                            </span>
+                            <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[0.71875rem] text-[var(--color-fg-subtle)]">
+                              <span className="shrink-0 font-medium">{typeLabel(file)}</span>
+                              <span aria-hidden>·</span>
+                              <span className="shrink-0 tabular-nums">{fmtBytes(file.size_bytes)}</span>
+                              <span aria-hidden>·</span>
+                              <span className="truncate">{shortDateFormat.format(new Date(file.created_at * 1000))}</span>
+                            </span>
+                            <span className="mt-0.5 flex min-w-0 items-center gap-1 text-[0.71875rem] text-[var(--color-fg-subtle)]">
+                              {file.origin === 'kb' ? <FolderOpen size={11} className="shrink-0" aria-hidden /> : <MessageSquare size={11} className="shrink-0" aria-hidden />}
+                              <span className="truncate">
+                                {file.origin === 'kb' ? file.kb_name || t('files:origin.kb') : t('files:origin.conversation')}
+                              </span>
+                            </span>
+                          </span>
+                        </button>
+                        <Tooltip content={t('common:actions.delete', { defaultValue: 'Delete' })} side="left">
+                          <button
+                            type="button"
+                            aria-label={`${t('common:actions.delete', { defaultValue: 'Delete' })}: ${file.filename}`}
+                            className="inline-flex w-11 shrink-0 items-center justify-center rounded-r-[8px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)] focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-ring)] lg:opacity-0 lg:group-hover/file:opacity-100 lg:group-focus-within/file:opacity-100"
+                            onClick={() => setConfirmDelete(file)}
+                          >
+                            <Trash2 size={15} aria-hidden />
+                          </button>
+                        </Tooltip>
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+
+              {pageCount > 1 ? (
+                <div className="shrink-0 border-t border-[var(--color-divider)] px-3 pb-3">
+                  <Pagination
+                    page={page}
+                    pageCount={pageCount}
+                    onPage={setPage}
+                    className="[&_button]:size-[var(--tap-min)] sm:[&_button]:size-8"
+                  />
+                </div>
+              ) : null}
+            </div>
+          </aside>
+
+          <section
+            className={cn(
+              'min-h-0 min-w-0 flex-1 flex-col bg-[var(--color-surface-sunken)] lg:flex',
+              mobilePreviewOpen ? 'flex' : 'hidden',
             )}
-            {total > PAGE_SIZE && (
-              <div className="mt-4">
-                <Pagination page={page} pageCount={Math.ceil(total / PAGE_SIZE)} onPage={setPage} />
+            aria-label={t('files:accessibility.previewPane')}
+          >
+            {preview ? (
+              <>
+                <header className="flex min-h-14 shrink-0 items-center gap-2 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-2 sm:px-4">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="lg:hidden"
+                    aria-label={t('files:preview.backToList')}
+                    onClick={() => setMobilePreviewOpen(false)}
+                  >
+                    <ArrowLeft size={18} aria-hidden />
+                  </Button>
+                  <div className="min-w-0 flex-1">
+                    <h2 className="truncate text-[0.9375rem] font-semibold text-[var(--color-fg)]" title={preview.file.filename}>
+                      {preview.file.filename}
+                    </h2>
+                    <p className="mt-0.5 truncate text-[0.71875rem] tabular-nums text-[var(--color-fg-subtle)]">
+                      {typeLabel(preview.file)} · {fmtBytes(preview.file.size_bytes)} · {timeFormat.format(new Date(preview.file.created_at * 1000))}
+                    </p>
+                  </div>
+                  <Tooltip content={t('files:preview.download')}>
+                    <Button asChild variant="ghost" size="icon" aria-label={t('files:preview.download')}>
+                      <a href={preview.url ?? fileContentUrl(preview.file)} download={preview.file.filename}>
+                        <Download size={17} aria-hidden />
+                      </a>
+                    </Button>
+                  </Tooltip>
+                  <Tooltip content={t('common:actions.delete', { defaultValue: 'Delete' })}>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="text-[var(--color-danger)]"
+                      aria-label={`${t('common:actions.delete', { defaultValue: 'Delete' })}: ${preview.file.filename}`}
+                      onClick={() => setConfirmDelete(preview.file)}
+                    >
+                      <Trash2 size={17} aria-hidden />
+                    </Button>
+                  </Tooltip>
+                </header>
+                <div className="min-h-0 flex-1">
+                  <DocumentPreview
+                    key={preview.key}
+                    name={preview.file.filename}
+                    mimeType={preview.file.mime_type}
+                    data={preview.data}
+                    objectUrl={preview.url}
+                    loading={preview.loading}
+                    error={preview.error}
+                    onRetry={preview.retryable === false ? undefined : () => void openPreview(preview.file, false)}
+                  />
+                </div>
+              </>
+            ) : (
+              <div className="flex h-full items-center justify-center p-6">
+                <div className="max-w-sm text-center">
+                  <span className="mx-auto inline-flex size-12 items-center justify-center rounded-full bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)]">
+                    <FileQuestion size={21} aria-hidden />
+                  </span>
+                  <h2 className="mt-4 text-lg font-semibold text-[var(--color-fg)]">{t('files:preview.selectTitle')}</h2>
+                  <p className="mt-2 text-sm leading-relaxed text-[var(--color-fg-muted)]">{t('files:preview.selectBody')}</p>
+                </div>
               </div>
             )}
           </section>
         </div>
       </main>
 
-      {/* Delete confirmation */}
       <Dialog open={confirmDelete !== null} onOpenChange={(open) => !open && setConfirmDelete(null)}>
         <DialogContent size="sm">
           <DialogHeader>
@@ -371,42 +610,6 @@ export default function UserFiles() {
             </Button>
             <Button variant="destructive" loading={busy} onClick={() => confirmDelete && void runDelete(confirmDelete)}>
               {t('common:actions.delete', { defaultValue: 'Delete' })}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Preview */}
-      <Dialog open={preview !== null} onOpenChange={(open) => !open && closePreview()}>
-        <DialogContent className="max-w-3xl">
-          <DialogHeader>
-            <DialogTitle className="truncate">{preview?.file.filename}</DialogTitle>
-            <DialogDescription>
-              {preview ? `${fmtBytes(preview.file.size_bytes)} · ${typeLabel(preview.file)}` : ''}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogBody>
-            {preview?.loading ? (
-              <div className="py-10 text-center text-sm text-[var(--color-fg-subtle)]">
-                {t('common:loading', { defaultValue: 'Loading…' })}
-              </div>
-            ) : preview?.error ? (
-              <div className="py-10 text-center text-sm text-[var(--color-danger)]">{preview.error}</div>
-            ) : preview?.kind === 'image' && preview.url ? (
-              <img src={preview.url} alt={preview.file.filename} className="max-h-[60vh] mx-auto rounded-[8px]" />
-            ) : preview?.kind === 'pdf' && preview.url ? (
-              <iframe src={preview.url} title={preview.file.filename} className="w-full h-[60vh] rounded-[8px] border border-[var(--color-border)]" />
-            ) : preview?.kind === 'text' && preview.text !== undefined ? (
-              <pre className="max-h-[60vh] overflow-auto rounded-[8px] bg-[var(--color-bg-muted)] p-4 text-[12.5px] leading-relaxed whitespace-pre-wrap break-words">
-                {preview.text}
-              </pre>
-            ) : preview ? (
-              <div className="py-8 text-center text-sm text-[var(--color-fg-muted)]">{t('files:noInlinePreview')}</div>
-            ) : null}
-          </DialogBody>
-          <DialogFooter>
-            <Button variant="ghost" onClick={closePreview}>
-              {t('common:actions.close', { defaultValue: 'Close' })}
             </Button>
           </DialogFooter>
         </DialogContent>

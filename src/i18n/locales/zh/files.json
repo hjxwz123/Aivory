@@ -19,6 +19,82 @@
     "largest": "最大在前",
     "smallest": "最小在前"
   },
+  "filters": {
+    "typeLabel": "文件类型",
+    "originLabel": "来源",
+    "sortLabel": "排序方式"
+  },
+  "types": {
+    "all": "全部类型",
+    "pdf": "PDF",
+    "document": "文档",
+    "presentation": "演示文稿",
+    "spreadsheet": "电子表格",
+    "image": "图片",
+    "text": "文本",
+    "other": "其他"
+  },
+  "preview": {
+    "selectTitle": "选择文件",
+    "selectBody": "从左侧列表中选择要预览的文件。",
+    "loading": "正在加载预览…",
+    "download": "下载",
+    "delete": "删除",
+    "backToList": "返回文件列表",
+    "unsupported": "该文件类型暂不支持预览。",
+    "tooLarge": "文件过大，无法预览。",
+    "failed": "无法加载预览。",
+    "metadata": "{{type}} · {{size}}"
+  },
+  "pdf": {
+    "previousPage": "上一页",
+    "nextPage": "下一页",
+    "page": "第 {{page}} 页",
+    "of": "共 {{total}} 页",
+    "zoomOut": "缩小",
+    "zoomIn": "放大",
+    "fitWidth": "适合宽度",
+    "renderFailed": "无法渲染此 PDF。"
+  },
+  "docx": {
+    "loading": "正在加载文档…",
+    "tooLarge": "文档过大，无法预览。",
+    "failed": "无法预览此文档。"
+  },
+  "pptx": {
+    "loading": "正在加载演示文稿…",
+    "tooLarge": "演示文稿过大，无法预览。",
+    "failed": "无法预览此演示文稿。"
+  },
+  "spreadsheet": {
+    "loading": "正在加载电子表格…",
+    "tooLarge": "电子表格过大，无法预览。",
+    "failed": "无法预览此电子表格。",
+    "sheet": "工作表",
+    "row": "行",
+    "column": "列",
+    "truncated": "仅显示前 {{rows}} 行和前 {{columns}} 列。",
+    "empty": "该工作表为空。"
+  },
+  "list": {
+    "title": "文件列表",
+    "loading": "正在加载文件…",
+    "emptyFilteredTitle": "没有匹配的文件",
+    "emptyFilteredBody": "请尝试其他搜索词或文件类型。",
+    "resultCount": "共 {{count}} 个文件"
+  },
+  "selection": {
+    "selected": "已选择",
+    "selectFile": "选择 {{name}}",
+    "clear": "取消选择"
+  },
+  "accessibility": {
+    "fileList": "文件列表",
+    "previewPane": "文件预览",
+    "searchFiles": "搜索文件",
+    "filterByType": "按类型筛选文件",
+    "selectedFile": "已选择文件：{{name}}"
+  },
   "table": {
     "filename": "文件名",
     "type": "类型",

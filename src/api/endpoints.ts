@@ -65,10 +65,11 @@ export const authApi = {
   me: () => api<ApiUser>('/me'),
   /** § user files page: storage meter + unified upload inventory. */
   myStorage: () => api<{ used_bytes: number; quota_bytes: number }>('/me/storage'),
-  myFiles: (params: { search?: string; origin?: string; sort?: string; order?: string; limit?: number; offset?: number } = {}) => {
+  myFiles: (params: { search?: string; origin?: string; type?: string; sort?: string; order?: string; limit?: number; offset?: number } = {}) => {
     const qs = new URLSearchParams()
     if (params.search) qs.set('search', params.search)
     if (params.origin && params.origin !== 'all') qs.set('origin', params.origin)
+    if (params.type && params.type !== 'all') qs.set('type', params.type)
     if (params.sort) qs.set('sort', params.sort)
     if (params.order) qs.set('order', params.order)
     if (params.limit) qs.set('limit', String(params.limit))
@@ -79,11 +80,12 @@ export const authApi = {
   },
   deleteMyFiles: (items: Array<{ source: 'file' | 'document'; id: string }>) =>
     api<{ deleted: number }>('/me/files/delete', { method: 'POST', body: { items } }),
-  myFileContentBlob: async (source: 'file' | 'document', id: string): Promise<Blob> => {
+  myFileContentBlob: async (source: 'file' | 'document', id: string, signal?: AbortSignal): Promise<Blob> => {
     const token = getAccessToken()
     const res = await fetch(apiUrl(`/me/files/content?source=${source}&id=${encodeURIComponent(id)}`), {
       credentials: 'include',
       headers: token ? { authorization: `Bearer ${token}` } : {},
+      signal,
     })
     if (!res.ok) throw new ApiError(res.status, `preview failed (${res.status})`, null)
     return res.blob()
@@ -729,12 +731,13 @@ export const adminApi = {
     if (params.purpose) qs.set('purpose', params.purpose)
     return api<{ deleted: number }>(`/admin/usage${qs.toString() ? `?${qs}` : ''}`, { method: 'DELETE' })
   },
-  files: (params: { search?: string; userId?: string; user?: string; origin?: string; sort?: string; order?: string; limit?: number; offset?: number } = {}) => {
+  files: (params: { search?: string; userId?: string; user?: string; origin?: string; type?: string; sort?: string; order?: string; limit?: number; offset?: number } = {}) => {
     const qs = new URLSearchParams()
     if (params.search) qs.set('search', params.search)
     if (params.userId) qs.set('user_id', params.userId)
     if (params.user) qs.set('user', params.user)
     if (params.origin && params.origin !== 'all') qs.set('origin', params.origin)
+    if (params.type && params.type !== 'all') qs.set('type', params.type)
     if (params.sort) qs.set('sort', params.sort)
     if (params.order) qs.set('order', params.order)
     if (params.limit) qs.set('limit', String(params.limit))
@@ -745,13 +748,14 @@ export const adminApi = {
   },
   deleteFiles: (items: Array<{ source: 'file' | 'document'; id: string }>) =>
     api<{ deleted: number }>('/admin/files/delete', { method: 'POST', body: { items } }),
-  // Raw bytes for the preview dialog. Same bearer-fetch pattern as
-  // backupArchiveDownload: <img>/<iframe> tags can't carry the auth header.
-  fileContentBlob: async (source: 'file' | 'document', id: string): Promise<Blob> => {
+  // Raw bytes for the preview dialog. The object URL created by the caller
+  // cannot carry an auth header, so the authenticated fetch happens first.
+  fileContentBlob: async (source: 'file' | 'document', id: string, signal?: AbortSignal): Promise<Blob> => {
     const token = getAccessToken()
     const res = await fetch(apiUrl(`/admin/files/content?source=${source}&id=${encodeURIComponent(id)}`), {
       credentials: 'include',
       headers: token ? { authorization: `Bearer ${token}` } : {},
+      signal,
     })
     if (!res.ok) throw new ApiError(res.status, `preview failed (${res.status})`, null)
     return res.blob()

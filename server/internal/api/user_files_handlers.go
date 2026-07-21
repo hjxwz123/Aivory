@@ -70,6 +70,7 @@ func listMyFilesHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		Search: q.Get("search"),
 		UserID: u.ID, // hard-locked to the caller
 		Origin: q.Get("origin"),
+		Type:   q.Get("type"),
 		Sort:   q.Get("sort"),
 		Order:  q.Get("order"),
 	}

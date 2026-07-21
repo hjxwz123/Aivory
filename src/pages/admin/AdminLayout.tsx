@@ -7,7 +7,7 @@
 import { Suspense, useEffect, useState } from 'react'
 import { NavLink, Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { ArrowLeft, BarChart3, Briefcase, Cpu, Menu, Settings2, Sparkles, Users } from 'lucide-react'
+import { ArrowLeft, BarChart3, Briefcase, Cpu, FolderOpen, Menu, Settings2, Sparkles, Users } from 'lucide-react'
 import { useAuth } from '@/store/auth'
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet'
 import { RouteFade } from '@/components/ui/route-fade'
@@ -24,6 +24,7 @@ interface AdminTab {
 interface AdminSection {
   key: string
   icon: typeof Cpu
+  labelKey: string
   /** Where the rail entry navigates (the section's first tab). */
   to: string
   tabs: AdminTab[]
@@ -35,6 +36,7 @@ const SECTIONS: AdminSection[] = [
   {
     key: 'system',
     icon: Settings2,
+    labelKey: 'admin:menu.system',
     to: '/admin/settings',
     tabs: [
       { to: '/admin/settings', labelKey: 'admin:settings.title' },
@@ -47,6 +49,7 @@ const SECTIONS: AdminSection[] = [
   {
     key: 'models',
     icon: Cpu,
+    labelKey: 'admin:menu.models',
     to: '/admin/channels',
     tabs: [
       { to: '/admin/channels', labelKey: 'admin:channels.title' },
@@ -56,6 +59,7 @@ const SECTIONS: AdminSection[] = [
   {
     key: 'capabilities',
     icon: Sparkles,
+    labelKey: 'admin:menu.capabilities',
     to: '/admin/skills',
     tabs: [
       { to: '/admin/skills', labelKey: 'admin:skills.title' },
@@ -68,6 +72,7 @@ const SECTIONS: AdminSection[] = [
   {
     key: 'users',
     icon: Users,
+    labelKey: 'admin:menu.users',
     to: '/admin/users',
     tabs: [
       { to: '/admin/users', labelKey: 'admin:users.title' },
@@ -78,18 +83,26 @@ const SECTIONS: AdminSection[] = [
   {
     key: 'workspaces',
     icon: Briefcase,
+    labelKey: 'admin:menu.workspaces',
     to: '/admin/workspaces',
     tabs: [{ to: '/admin/workspaces', labelKey: 'admin:workspaces.title' }],
   },
   {
     key: 'data',
     icon: BarChart3,
+    labelKey: 'admin:menu.data',
     to: '/admin/usage',
     tabs: [
       { to: '/admin/usage', labelKey: 'admin:usage.title' },
       { to: '/admin/analytics', labelKey: 'admin:analytics.title' },
-      { to: '/admin/files', labelKey: 'admin:files.title' },
     ],
+  },
+  {
+    key: 'files',
+    icon: FolderOpen,
+    labelKey: 'admin:files.title',
+    to: '/admin/files',
+    tabs: [{ to: '/admin/files', labelKey: 'admin:files.title' }],
   },
 ]
 
@@ -149,7 +162,7 @@ export default function AdminLayout() {
               )}
             >
               <s.icon size={14} aria-hidden />
-              {t('admin:menu.' + s.key)}
+              {t(s.labelKey)}
             </NavLink>
           )
         })}
