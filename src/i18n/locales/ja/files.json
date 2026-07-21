@@ -20,6 +20,7 @@
     "smallest": "小さい順"
   },
   "filters": {
+    "title": "フィルターと並び順",
     "typeLabel": "ファイル形式",
     "originLabel": "ソース",
     "sortLabel": "並び順"

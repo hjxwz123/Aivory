@@ -18,6 +18,7 @@ import {
 import { authApi, apiUrl, ApiError } from '@/api'
 import type { ApiAdminFile } from '@/api/types'
 import { DocumentPreview } from '@/components/files/document-preview'
+import { FileFiltersPopover } from '@/components/files/file-filters-popover'
 import { ContentHeader } from '@/components/layout/content-header'
 import { Button } from '@/components/ui/button'
 import {
@@ -31,7 +32,6 @@ import {
 import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
 import { Pagination } from '@/components/ui/pagination'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tooltip } from '@/components/ui/tooltip'
 import { toast } from '@/hooks/use-toast'
@@ -296,12 +296,16 @@ export default function UserFiles() {
   const storagePercent = quota > 0 ? Math.min(100, (used / quota) * 100) : 0
   const storageNearFull = quota > 0 && storagePercent >= 90
   const pageCount = Math.ceil(total / PAGE_SIZE)
+  const activeFilterCount =
+    (fileType !== 'all' ? 1 : 0) +
+    (origin !== ALL ? 1 : 0) +
+    (sort !== 'created_at' || order !== 'desc' ? 1 : 0)
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <ContentHeader title={t('files:title')} />
-      <main className="min-h-0 flex-1 overflow-hidden sm:px-6 sm:pb-6">
-        <div className="mx-auto flex h-full min-h-0 w-full max-w-[96rem] overflow-hidden border-y border-[var(--color-border)] bg-[var(--color-surface)] sm:rounded-[12px] sm:border">
+      <ContentHeader title={t('files:title')} fluid />
+      <main className="min-h-0 flex-1 overflow-hidden border-t border-[var(--color-divider)]">
+        <div className="flex h-full min-h-0 w-full overflow-hidden bg-[var(--color-surface)]">
           <aside
             className={cn(
               'min-h-0 w-full flex-col bg-[var(--color-bg)] lg:flex lg:w-[20rem] lg:shrink-0 lg:border-r lg:border-[var(--color-border)] xl:w-[21rem]',
@@ -341,65 +345,34 @@ export default function UserFiles() {
               ) : null}
             </div>
 
-            <div className="space-y-2 border-b border-[var(--color-divider)] p-3">
+            <div className="flex items-center gap-2 border-b border-[var(--color-divider)] px-3 py-2">
               <Input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 leadingIcon={<Search size={15} aria-hidden />}
                 placeholder={t('files:searchPlaceholder')}
                 aria-label={t('files:searchPlaceholder')}
-                wrapperClassName="w-full"
+                wrapperClassName="min-w-0 flex-1"
               />
-              <div className="grid grid-cols-2 gap-2">
-                <Select value={fileType} onValueChange={(value) => setFileType(value as FileTypeFilter)}>
-                  <SelectTrigger
-                    aria-label={t('files:filters.typeLabel')}
-                    className="min-w-0 px-3 [&>span:first-child]:truncate"
-                  >
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(['all', 'pdf', 'document', 'presentation', 'spreadsheet', 'image', 'text', 'other'] as const).map(
-                      (value) => (
-                        <SelectItem key={value} value={value}>
-                          {t(`files:types.${value}`)}
-                        </SelectItem>
-                      ),
-                    )}
-                  </SelectContent>
-                </Select>
-                <Select value={origin} onValueChange={setOrigin}>
-                  <SelectTrigger
-                    aria-label={t('files:filters.originLabel')}
-                    className="min-w-0 px-3 [&>span:first-child]:truncate"
-                  >
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={ALL}>{t('files:origin.all')}</SelectItem>
-                    <SelectItem value="conversation">{t('files:origin.conversation')}</SelectItem>
-                    <SelectItem value="kb">{t('files:origin.kb')}</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <Select
-                value={`${sort}-${order}`}
-                onValueChange={(value) => {
-                  const [nextSort, nextOrder] = value.split('-') as [string, 'desc' | 'asc']
+              <FileFiltersPopover
+                fileType={fileType}
+                onFileTypeChange={setFileType}
+                origin={origin}
+                onOriginChange={setOrigin}
+                sort={sort}
+                order={order}
+                onSortChange={(nextSort, nextOrder) => {
                   setSort(nextSort)
                   setOrder(nextOrder)
                 }}
-              >
-                <SelectTrigger aria-label={t('files:filters.sortLabel')} className="px-3">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="created_at-desc">{t('files:sort.newest')}</SelectItem>
-                  <SelectItem value="created_at-asc">{t('files:sort.oldest')}</SelectItem>
-                  <SelectItem value="size_bytes-desc">{t('files:sort.largest')}</SelectItem>
-                  <SelectItem value="size_bytes-asc">{t('files:sort.smallest')}</SelectItem>
-                </SelectContent>
-              </Select>
+                activeCount={activeFilterCount}
+                onReset={() => {
+                  setFileType('all')
+                  setOrigin(ALL)
+                  setSort('created_at')
+                  setOrder('desc')
+                }}
+              />
             </div>
 
             <div className="flex min-h-0 flex-1 flex-col">
@@ -533,11 +506,11 @@ export default function UserFiles() {
           >
             {preview ? (
               <>
-                <header className="flex min-h-14 shrink-0 items-center gap-2 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-2 sm:px-4">
+                <header className="flex min-h-12 shrink-0 items-center gap-1 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-2 sm:px-3">
                   <Button
                     variant="ghost"
-                    size="icon"
-                    className="lg:hidden"
+                    size="icon-sm"
+                    className="lg:hidden [@media(pointer:coarse)]:size-11"
                     aria-label={t('files:preview.backToList')}
                     onClick={() => setMobilePreviewOpen(false)}
                   >
@@ -552,7 +525,13 @@ export default function UserFiles() {
                     </p>
                   </div>
                   <Tooltip content={t('files:preview.download')}>
-                    <Button asChild variant="ghost" size="icon" aria-label={t('files:preview.download')}>
+                    <Button
+                      asChild
+                      variant="ghost"
+                      size="icon-sm"
+                      className="[@media(pointer:coarse)]:size-11"
+                      aria-label={t('files:preview.download')}
+                    >
                       <a href={preview.url ?? fileContentUrl(preview.file)} download={preview.file.filename}>
                         <Download size={17} aria-hidden />
                       </a>
@@ -561,8 +540,8 @@ export default function UserFiles() {
                   <Tooltip content={t('common:actions.delete', { defaultValue: 'Delete' })}>
                     <Button
                       variant="ghost"
-                      size="icon"
-                      className="text-[var(--color-danger)]"
+                      size="icon-sm"
+                      className="text-[var(--color-danger)] [@media(pointer:coarse)]:size-11"
                       aria-label={`${t('common:actions.delete', { defaultValue: 'Delete' })}: ${preview.file.filename}`}
                       onClick={() => setConfirmDelete(preview.file)}
                     >

@@ -20,6 +20,7 @@
     "smallest": "最小在前"
   },
   "filters": {
+    "title": "篩選與排序",
     "typeLabel": "檔案類型",
     "originLabel": "來源",
     "sortLabel": "排序方式"

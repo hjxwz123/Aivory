@@ -17,6 +17,8 @@ interface ContentHeaderProps {
   actions?: ReactNode
   /** Optional secondary row (e.g. a tab nav) rendered under the title row. */
   children?: ReactNode
+  /** Let full-width workspaces opt out of the standard centered content cap. */
+  fluid?: boolean
   className?: string
 }
 
@@ -27,7 +29,7 @@ interface ContentHeaderProps {
  * one component for all of these guarantees the header reads identically from
  * page to page.
  */
-export function ContentHeader({ title, backTo, backLabel, actions, children, className }: ContentHeaderProps) {
+export function ContentHeader({ title, backTo, backLabel, actions, children, fluid = false, className }: ContentHeaderProps) {
   // This bar IS the page's mobile top bar — tell the shell to drop its standalone
   // brand bar so settings/subscription show one bar (this one + a hamburger),
   // not two stacked rows. (§ mobile redesign — reuses the pageOwnsTopBar flag.)
@@ -37,7 +39,12 @@ export function ContentHeader({ title, backTo, backLabel, actions, children, cla
   }, [])
   return (
     <header className={cn('shrink-0 bg-[var(--color-bg)]', className)}>
-      <div className="mx-auto w-full max-w-[var(--layout-content-max-w)] flex items-center gap-2 sm:gap-3 px-2 sm:px-8 h-14">
+      <div
+        className={cn(
+          'flex h-14 w-full items-center gap-2 px-2 sm:gap-3 sm:px-8',
+          !fluid && 'mx-auto max-w-[var(--layout-content-max-w)]',
+        )}
+      >
         {backTo ? (
           <>
             <Link

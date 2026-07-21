@@ -18,6 +18,7 @@ import {
 import { adminApi, apiUrl, ApiError } from '@/api'
 import type { ApiAdminFile } from '@/api/types'
 import { DocumentPreview } from '@/components/files/document-preview'
+import { FileFiltersPopover } from '@/components/files/file-filters-popover'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -31,7 +32,6 @@ import {
 import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
 import { Pagination } from '@/components/ui/pagination'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tooltip } from '@/components/ui/tooltip'
 import { toast } from '@/hooks/use-toast'
@@ -92,9 +92,9 @@ interface PreviewState {
 
 export default function AdminFiles() {
   const { t, i18n } = useTranslation(['admin', 'files', 'common'])
-  // The admin rail leaves too little preview width at tablet sizes. Keep the
-  // two-pane workspace for wide desktops and use master -> detail below that.
-  const compact = useMediaQuery('(max-width: 1279px)')
+  // Below desktop width the admin rail leaves too little room for both panes,
+  // so the workspace switches to a list -> preview flow.
+  const compact = useMediaQuery('(max-width: 1023px)')
   const [search, setSearch] = useState('')
   const [searchDebounced, setSearchDebounced] = useState('')
   const [userQ, setUserQ] = useState('')
@@ -303,6 +303,11 @@ export default function AdminFiles() {
   const allChecked = rows.length > 0 && selectedRows.length === rows.length
   const partiallyChecked = selectedRows.length > 0 && !allChecked
   const pageCount = Math.ceil(total / PAGE_SIZE)
+  const activeFilterCount =
+    (userQ.trim() ? 1 : 0) +
+    (fileType !== 'all' ? 1 : 0) +
+    (origin !== ALL ? 1 : 0) +
+    (sort !== 'created_at' || order !== 'desc' ? 1 : 0)
 
   useEffect(() => {
     if (selectAllRef.current) selectAllRef.current.indeterminate = partiallyChecked
@@ -323,8 +328,8 @@ export default function AdminFiles() {
   }
 
   return (
-    <div className="flex h-[calc(100svh-var(--layout-topbar-h-mobile)-4rem)] min-h-0 flex-col sm:h-[calc(100svh-var(--layout-topbar-h-mobile)-6rem)] md:h-[calc(100svh-6rem)]">
-      <header className="mb-4 flex shrink-0 items-end justify-between gap-4">
+    <div className="flex h-full min-h-0 flex-col">
+      <header className="flex shrink-0 items-end justify-between gap-4 px-4 py-4 sm:px-6 sm:py-5 lg:px-8">
         <div className="min-w-0">
           <h1 className="font-serif text-2xl text-[var(--color-fg)] sm:text-3xl">
             {t('admin:files.title')}
@@ -338,81 +343,49 @@ export default function AdminFiles() {
         </span>
       </header>
 
-      <div className="flex min-h-0 flex-1 overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)]">
+      <div className="flex min-h-0 flex-1 overflow-hidden border-t border-[var(--color-divider)] bg-[var(--color-surface)]">
         <aside
           className={cn(
-            'min-h-0 w-full flex-col bg-[var(--color-bg)] xl:flex xl:w-[22rem] xl:shrink-0 xl:border-r xl:border-[var(--color-border)] 2xl:w-[23rem]',
+            'min-h-0 w-full flex-col bg-[var(--color-bg)] lg:flex lg:w-[19rem] lg:shrink-0 lg:border-r lg:border-[var(--color-border)] xl:w-[22rem] 2xl:w-[23rem]',
             mobilePreviewOpen ? 'hidden' : 'flex',
           )}
           aria-label={t('files:accessibility.fileList')}
         >
-          <div className="space-y-2 border-b border-[var(--color-divider)] p-3">
+          <div className="flex items-center gap-2 border-b border-[var(--color-divider)] px-3 py-2">
             <Input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               leadingIcon={<Search size={15} aria-hidden />}
               placeholder={t('admin:files.filters.searchPlaceholder')}
               aria-label={t('admin:files.filters.search')}
-              wrapperClassName="w-full"
+              wrapperClassName="min-w-0 flex-1"
             />
-            <Input
-              value={userQ}
-              onChange={(event) => setUserQ(event.target.value)}
-              leadingIcon={<UserRound size={15} aria-hidden />}
-              placeholder={t('admin:files.filters.userSearchPlaceholder')}
-              aria-label={t('admin:files.filters.user')}
-              wrapperClassName="w-full"
-            />
-            <div className="grid grid-cols-2 gap-2">
-              <Select value={fileType} onValueChange={(value) => setFileType(value as FileTypeFilter)}>
-                <SelectTrigger
-                  aria-label={t('files:filters.typeLabel')}
-                  className="min-w-0 px-3 [&>span:first-child]:truncate"
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {(['all', 'pdf', 'document', 'presentation', 'spreadsheet', 'image', 'text', 'other'] as const).map(
-                    (value) => (
-                      <SelectItem key={value} value={value}>
-                        {t(`files:types.${value}`)}
-                      </SelectItem>
-                    ),
-                  )}
-                </SelectContent>
-              </Select>
-              <Select value={origin} onValueChange={setOrigin}>
-                <SelectTrigger
-                  aria-label={t('admin:files.filters.origin')}
-                  className="min-w-0 px-3 [&>span:first-child]:truncate"
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ALL}>{t('admin:files.origin.all')}</SelectItem>
-                  <SelectItem value="conversation">{t('admin:files.origin.conversation')}</SelectItem>
-                  <SelectItem value="kb">{t('admin:files.origin.kb')}</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <Select
-              value={`${sort}-${order}`}
-              onValueChange={(value) => {
-                const [nextSort, nextOrder] = value.split('-') as [string, 'desc' | 'asc']
+            <FileFiltersPopover
+              fileType={fileType}
+              onFileTypeChange={setFileType}
+              origin={origin}
+              onOriginChange={setOrigin}
+              sort={sort}
+              order={order}
+              onSortChange={(nextSort, nextOrder) => {
                 setSort(nextSort)
                 setOrder(nextOrder)
               }}
-            >
-              <SelectTrigger aria-label={t('admin:files.filters.sort')} className="px-3">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="created_at-desc">{t('admin:files.sort.newest')}</SelectItem>
-                <SelectItem value="created_at-asc">{t('admin:files.sort.oldest')}</SelectItem>
-                <SelectItem value="size_bytes-desc">{t('admin:files.sort.largest')}</SelectItem>
-                <SelectItem value="size_bytes-asc">{t('admin:files.sort.smallest')}</SelectItem>
-              </SelectContent>
-            </Select>
+              activeCount={activeFilterCount}
+              onReset={() => {
+                setUserQ('')
+                setFileType('all')
+                setOrigin(ALL)
+                setSort('created_at')
+                setOrder('desc')
+              }}
+              ownerSearch={{
+                value: userQ,
+                onChange: setUserQ,
+                label: t('admin:files.filters.user'),
+                placeholder: t('admin:files.filters.userSearchPlaceholder'),
+              }}
+            />
           </div>
 
           <div className="flex min-h-0 flex-1 flex-col">
@@ -587,18 +560,18 @@ export default function AdminFiles() {
 
         <section
           className={cn(
-            'min-h-0 min-w-0 flex-1 flex-col bg-[var(--color-surface-sunken)] xl:flex',
+            'min-h-0 min-w-0 flex-1 flex-col bg-[var(--color-surface-sunken)] lg:flex',
             mobilePreviewOpen ? 'flex' : 'hidden',
           )}
           aria-label={t('files:accessibility.previewPane')}
         >
           {preview ? (
             <>
-              <header className="flex min-h-16 shrink-0 items-center gap-2 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-2 sm:px-4">
+              <header className="flex min-h-12 shrink-0 items-center gap-1 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-2 sm:px-3">
                 <Button
                   variant="ghost"
-                  size="icon-lg"
-                  className="xl:hidden"
+                  size="icon-sm"
+                  className="lg:hidden [@media(pointer:coarse)]:size-11"
                   aria-label={t('files:preview.backToList')}
                   onClick={() => setMobilePreviewOpen(false)}
                 >
@@ -608,15 +581,21 @@ export default function AdminFiles() {
                   <h2 className="truncate text-[0.9375rem] font-semibold text-[var(--color-fg)]" title={preview.file.filename}>
                     {preview.file.filename}
                   </h2>
-                  <p className="mt-0.5 truncate text-[0.71875rem] tabular-nums text-[var(--color-fg-subtle)]">
-                    {typeLabel(preview.file)} · {fmtBytes(preview.file.size_bytes)} · {timeFormat.format(new Date(preview.file.created_at * 1000))}
-                  </p>
-                  <p className="mt-0.5 truncate text-[0.71875rem] text-[var(--color-fg-subtle)]" title={ownerTitle(preview.file)}>
-                    {ownerLabel(preview.file)} · {preview.file.origin === 'kb' ? preview.file.kb_name || t('admin:files.origin.kb') : t('admin:files.origin.conversation')}
+                  <p
+                    className="mt-0.5 truncate text-[0.71875rem] tabular-nums text-[var(--color-fg-subtle)]"
+                    title={`${ownerTitle(preview.file)} · ${preview.file.origin === 'kb' ? preview.file.kb_name || t('admin:files.origin.kb') : t('admin:files.origin.conversation')}`}
+                  >
+                    {typeLabel(preview.file)} · {fmtBytes(preview.file.size_bytes)} · {timeFormat.format(new Date(preview.file.created_at * 1000))} · {ownerLabel(preview.file)} · {preview.file.origin === 'kb' ? preview.file.kb_name || t('admin:files.origin.kb') : t('admin:files.origin.conversation')}
                   </p>
                 </div>
                 <Tooltip content={t('admin:files.download')}>
-                  <Button asChild variant="ghost" size="icon-lg" aria-label={t('admin:files.download')}>
+                  <Button
+                    asChild
+                    variant="ghost"
+                    size="icon-sm"
+                    className="[@media(pointer:coarse)]:size-11"
+                    aria-label={t('admin:files.download')}
+                  >
                     <a href={preview.url ?? fileContentUrl(preview.file)} download={preview.file.filename}>
                       <Download size={17} aria-hidden />
                     </a>
@@ -625,8 +604,8 @@ export default function AdminFiles() {
                 <Tooltip content={t('common:actions.delete', { defaultValue: 'Delete' })}>
                   <Button
                     variant="ghost"
-                    size="icon-lg"
-                    className="text-[var(--color-danger)]"
+                    size="icon-sm"
+                    className="text-[var(--color-danger)] [@media(pointer:coarse)]:size-11"
                     aria-label={`${t('common:actions.delete', { defaultValue: 'Delete' })}: ${preview.file.filename}`}
                     onClick={() => setConfirmDelete([preview.file])}
                   >
