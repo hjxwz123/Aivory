@@ -119,18 +119,29 @@ export function CodeBlock({ code, lang, className, live = false, previewKey }: C
   return (
     <div
       className={cn(
-        'group/code relative my-3.5 overflow-hidden',
+        // `overflow-hidden` would become the sticky toolbar's scroll ancestor,
+        // so use clip to preserve the rounded crop without breaking page-level
+        // vertical sticking. The code body keeps its own horizontal scroller.
+        'group/code relative isolate my-3.5 max-w-full overflow-clip',
         'rounded-[14px] border border-[var(--color-border)]',
         'bg-[var(--color-code-bg)] text-[var(--color-code-fg)]',
         className,
       )}
     >
-      <div className="flex items-center justify-between gap-2 px-4 h-10">
-        <span className="inline-flex items-center gap-1.5 text-[12.5px] font-medium text-[var(--color-fg-muted)]">
-          <CodeXml size={14} strokeWidth={1.5} aria-hidden className="text-[var(--color-fg-subtle)]" />
+      <div
+        data-code-toolbar
+        className={cn(
+          'sticky z-[var(--z-sticky)] flex h-10 min-w-0 items-center justify-between gap-2 px-4',
+          'border-b border-[var(--color-border-subtle)] bg-[var(--color-code-bg)]',
+          'max-sm:h-[var(--tap-min)] max-sm:px-3',
+        )}
+        style={{ top: 'var(--code-toolbar-sticky-top, 0px)' }}
+      >
+        <span className="inline-flex min-w-0 items-center gap-1.5 truncate text-[12.5px] font-medium text-[var(--color-fg-muted)]">
+          <CodeXml size={14} strokeWidth={1.5} aria-hidden className="shrink-0 text-[var(--color-fg-subtle)]" />
           {langLabel(lang)}
         </span>
-        <div className="flex items-center gap-0.5">
+        <div className="flex shrink-0 items-center gap-0.5">
           {isPython && !live ? (
             running ? (
               <IconAction onClick={() => handleRef.current?.cancel()} label={t('code.stop')}>
@@ -190,7 +201,7 @@ function IconAction({ onClick, label, children }: IconActionProps) {
         onClick={onClick}
         aria-label={label}
         className={cn(
-          'inline-flex items-center justify-center size-7 rounded-[7px]',
+          'inline-flex items-center justify-center size-7 max-sm:size-[var(--tap-min)] rounded-[7px]',
           'text-[var(--color-fg-subtle)] interactive',
           'hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',

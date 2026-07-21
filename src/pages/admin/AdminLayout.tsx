@@ -144,6 +144,7 @@ export default function AdminLayout() {
 
   const path = location.pathname
   const currentSection = SECTIONS.find((s) => sectionActive(path, s))
+  const filesWorkspace = currentSection?.key === 'files'
 
   function NavItems() {
     return (
@@ -218,7 +219,12 @@ export default function AdminLayout() {
         </nav>
       </aside>
 
-      <main className="flex-1 min-w-0 overflow-y-auto">
+      <main
+        className={cn(
+          'min-w-0 flex-1',
+          filesWorkspace ? 'flex flex-col overflow-hidden' : 'overflow-y-auto',
+        )}
+      >
         {/* Mobile topbar */}
         <div className="flex h-[var(--layout-topbar-h-mobile)] items-center gap-2 border-b border-[var(--color-divider)] px-2 md:hidden">
           <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
@@ -252,7 +258,13 @@ export default function AdminLayout() {
           <UserMenu placement="header" />
         </div>
 
-        <div className="mx-auto w-full max-w-[84rem] px-5 sm:px-8 lg:px-12 py-8 sm:py-12">
+        <div
+          className={cn(
+            filesWorkspace
+              ? 'flex min-h-0 w-full flex-1 flex-col'
+              : 'mx-auto w-full max-w-[84rem] px-5 py-8 sm:px-8 sm:py-12 lg:px-12',
+          )}
+        >
           <SectionTabs />
           {/* Content-scoped Suspense: switching tabs/sections keeps the sidebar +
               tabs on screen and only this panel shows a loader while the lazy page
@@ -264,7 +276,10 @@ export default function AdminLayout() {
               until the next chunk resolves, which reads as click lag. A key change
               mounts a NEW boundary, which commits the fallback immediately: the
               section/tab switches on click, spinner while it loads (§ instant nav). */}
-          <RouteFade dep={path}>
+          <RouteFade
+            dep={path}
+            className={filesWorkspace ? 'flex min-h-0 flex-1 flex-col' : undefined}
+          >
             <Suspense key={path} fallback={<PanelFallback />}>
               <Outlet />
             </Suspense>
