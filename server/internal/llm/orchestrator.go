@@ -1148,6 +1148,18 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		officialTools = kept
 	}
 	useOfficial := len(officialTools) > 0
+	if fastMode && useOfficial {
+		// OpenAI's hosted code_interpreter is the official-tools equivalent of
+		// python_execute. Keep the model on its configured official-tool surface,
+		// but withhold code execution just as we do for the self-built tool below.
+		kept := officialTools[:0]
+		for _, name := range officialTools {
+			if name != "code_interpreter" {
+				kept = append(kept, name)
+			}
+		}
+		officialTools = kept
+	}
 
 	toolDefs := []ToolDef{}
 	toolMode := model.ToolMode
@@ -1377,8 +1389,15 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// splice the stored native tool exchange (raw) back into the history — a
 	// none/prompt/disable-tools turn would 400 upstream on tool blocks without
 	// a tools param.
-	nativeToolReplay := useOfficial || (toolMode == "native" && len(toolDefs) > 0)
+	// Fast mode cannot safely replay a provider-native exchange: Raw may contain
+	// python_execute/code_interpreter calls even though this turn no longer
+	// declares either tool. Fall back to canonical blocks for every provider, then
+	// remove the prohibited code-tool blocks below.
+	nativeToolReplay := !fastMode && (useOfficial || (toolMode == "native" && len(toolDefs) > 0))
 	uHist := storeToUnified(keep, channel.Type, nativeToolReplay)
+	if fastMode {
+		uHist = stripFastModeCodeBlocks(uHist)
+	}
 
 	// 9b. Inject the summary + RAG context into the MESSAGE layer (§4.8/§4.9),
 	//     not the system prompt — keeps the system prefix stable + cacheable.
@@ -2255,6 +2274,52 @@ func storeToUnified(msgs []store.Message, currentProvider string, nativeToolRepl
 			um.Raw = m.Raw
 		}
 		out = append(out, um)
+	}
+	return out
+}
+
+const fastModeCodeHistoryPlaceholder = "[A previous code-analysis step was omitted in Fast mode.]"
+
+// stripFastModeCodeBlocks removes canonical history for code tools that fast
+// mode does not offer. Raw replay is disabled by the caller before conversion,
+// so this provider-neutral block filter covers OpenAI Chat/Responses, Anthropic,
+// Gemini, and any fallback request built from the resulting unified history.
+func stripFastModeCodeBlocks(history []UnifiedMessage) []UnifiedMessage {
+	deniedNames := map[string]bool{
+		"python_execute":   true,
+		"code_interpreter": true,
+	}
+	deniedIDs := map[string]bool{}
+	for _, message := range history {
+		for _, block := range message.Blocks {
+			if block.Kind == "tool_call" && deniedNames[strings.ToLower(strings.TrimSpace(block.ToolName))] && block.ToolID != "" {
+				deniedIDs[block.ToolID] = true
+			}
+		}
+	}
+
+	out := make([]UnifiedMessage, len(history))
+	for i, message := range history {
+		filtered := message
+		filtered.Raw = nil
+		if message.Blocks != nil {
+			filtered.Blocks = make([]UnifiedBlock, 0, len(message.Blocks))
+		}
+		affected := false
+		for _, block := range message.Blocks {
+			nameDenied := deniedNames[strings.ToLower(strings.TrimSpace(block.ToolName))]
+			linkedOutput := block.Kind == "tool_output" && block.ToolID != "" && deniedIDs[block.ToolID]
+			if (block.Kind == "tool_call" || block.Kind == "tool_output") && (nameDenied || linkedOutput) {
+				affected = true
+				continue
+			}
+			filtered.Blocks = append(filtered.Blocks, cloneUnifiedBlock(block))
+		}
+		if affected && strings.TrimSpace(renderBlocksAsText(filtered.Blocks)) == "" {
+			filtered.Blocks = append(filtered.Blocks, UnifiedBlock{Kind: "text", Text: fastModeCodeHistoryPlaceholder})
+		}
+		filtered.Attachments = append([]Attachment(nil), message.Attachments...)
+		out[i] = filtered
 	}
 	return out
 }
@@ -3450,8 +3515,7 @@ func (o *Orchestrator) persistGeneratedTitle(ctx context.Context, convID, userID
 }
 
 func clipTitle(s string) string {
-	s = strings.ReplaceAll(s, "\n", " ")
-	s = strings.TrimSpace(s)
+	s = strings.Join(strings.Fields(titleMathContentToPlainText(s)), " ")
 	if s == "" {
 		return ""
 	}

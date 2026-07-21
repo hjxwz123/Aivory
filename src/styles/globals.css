@@ -1191,3 +1191,263 @@ mark.inline-thread-mark:hover {
   --shiki-token-deleted: var(--color-danger);
   --shiki-token-inserted: var(--color-success);
 }
+
+/* Composer math editing --------------------------------------------------
+   Tiptap owns caret/IME/undo while its math atoms are rendered by the same
+   KaTeX stack used in messages. The editor remains visually identical to the
+   former textarea until a formula appears. */
+.rich-composer-editor .ProseMirror {
+  min-height: 4.5rem;
+  max-height: calc(1.55em * 12);
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 0.75rem 1rem 0.25rem;
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+  font-size: 0.9375rem;
+  line-height: 1.55;
+  letter-spacing: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  outline: none;
+}
+
+.rich-composer-editor--mobile .ProseMirror {
+  min-height: 3.25rem;
+  max-height: calc(1.55em * 7);
+  font-size: var(--text-input-mobile);
+}
+
+.rich-composer-editor--compact .ProseMirror {
+  min-height: 2.5rem;
+}
+
+.message-edit-editor .ProseMirror {
+  min-height: 7rem;
+  max-height: calc(1.55em * 14);
+  padding: 0;
+  font-size: var(--text-chat-body);
+  line-height: 1.65;
+}
+
+.rich-composer-editor .ProseMirror p {
+  margin: 0;
+}
+
+.rich-composer-editor .ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  color: var(--color-fg-muted);
+  pointer-events: none;
+}
+
+.rich-composer-editor .tiptap-mathematics-render {
+  max-width: 100%;
+  color: var(--color-fg);
+}
+
+.rich-composer-editor .tiptap-mathematics-render--editable {
+  display: inline-flex;
+  max-width: 100%;
+  min-height: 1.65em;
+  align-items: center;
+  margin: 0 0.08em;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.05em 0.3em;
+  vertical-align: -0.18em;
+  border-radius: 0.375rem;
+  background: transparent;
+  box-shadow: none;
+  cursor: pointer;
+  transition: box-shadow var(--duration-fast);
+}
+
+.formula-atom-a11y {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.rich-composer-editor .tiptap-mathematics-render--editable:hover {
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--color-accent) 34%, transparent);
+}
+
+.rich-composer-editor .tiptap-mathematics-render--editable:focus-visible {
+  outline: 2px solid var(--color-ring);
+  outline-offset: 1px;
+}
+
+.rich-composer-editor .tiptap-mathematics-render--editable.ProseMirror-selectednode,
+.rich-composer-editor .ProseMirror-selectednode .tiptap-mathematics-render--editable {
+  box-shadow: inset 0 0 0 2px var(--color-accent);
+}
+
+.rich-composer-editor [data-type='block-math'] {
+  display: block;
+  width: 100%;
+  margin: 0.35rem 0;
+  overflow-x: auto;
+  padding: 0.35rem 0.5rem;
+  text-align: center;
+}
+
+/* MathLive is lazy-loaded with the formula dialog. Its public CSS variables
+   bridge the shadow-DOM field and optional virtual keyboard to Aivory tokens. */
+.formula-editor-dialog,
+body {
+  --keyboard-zindex: 110;
+  --keyboard-background: var(--color-surface-raised);
+  --keyboard-border: var(--color-border);
+  --keyboard-toolbar-background: var(--color-bg-muted);
+  --keyboard-toolbar-background-hover: var(--color-surface-sunken);
+  --keyboard-toolbar-background-selected: var(--color-accent-soft);
+  --keyboard-toolbar-text: var(--color-fg-muted);
+  --keyboard-toolbar-text-active: var(--color-accent);
+  --keyboard-accent-color: var(--color-accent);
+  --keycap-background: var(--color-surface);
+  --keycap-background-hover: var(--color-bg-muted);
+  --keycap-background-active: var(--color-surface-sunken);
+  --keycap-background-pressed: var(--color-accent-soft);
+  --keycap-border: var(--color-border);
+  --keycap-border-bottom: var(--color-border-strong);
+  --keycap-text: var(--color-fg);
+  --keycap-text-hover: var(--color-fg);
+  --keycap-text-active: var(--color-accent);
+  --keycap-text-pressed: var(--color-accent);
+  --keycap-primary-background: var(--color-accent);
+  --keycap-primary-background-hover: var(--color-accent-hover);
+  --keycap-primary-text: var(--color-accent-fg);
+  --keycap-secondary-background: var(--color-bg-muted);
+  --keycap-secondary-background-hover: var(--color-surface-sunken);
+  --keycap-secondary-border: var(--color-border);
+  --keycap-secondary-border-bottom: var(--color-border-strong);
+  --keycap-secondary-text: var(--color-fg);
+  --variant-panel-background: var(--color-surface-raised);
+  --variant-keycap-text: var(--color-fg);
+  --variant-keycap-text-active: var(--color-accent-fg);
+  --variant-keycap-background-active: var(--color-accent);
+  --environment-panel-background: var(--color-surface-raised);
+  --environment-panel-button-background: var(--color-surface);
+  --environment-panel-button-background-hover: var(--color-bg-muted);
+  --environment-panel-button-background-active: var(--color-accent-soft);
+  --environment-panel-button-text: var(--color-fg-muted);
+}
+
+.aivory-formula-mathfield {
+  display: block;
+  width: 100%;
+  min-height: 4.5rem;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--color-fg);
+  font-size: 1.375rem;
+  line-height: 1.45;
+  --primary: var(--color-accent);
+  --caret-color: var(--color-accent);
+  --selection-color: var(--color-fg);
+  --selection-background-color: var(--color-accent-soft);
+  --placeholder-color: var(--color-fg-muted);
+}
+
+.aivory-formula-mathfield::part(container),
+.aivory-formula-mathfield::part(content) {
+  border: 0;
+  background: transparent;
+}
+
+.aivory-formula-mathfield::part(menu-toggle),
+.aivory-formula-mathfield::part(virtual-keyboard-toggle) {
+  color: var(--color-fg-muted);
+  border-radius: 0.375rem;
+}
+
+/* MathLive positions these labels above their buttons by default. The formula
+   dialog body is a scroll container, so that direction clips the labels at the
+   body's top edge. Keep them inside the field and away from the right edge. */
+.aivory-formula-mathfield::part(menu-toggle)::after,
+.aivory-formula-mathfield::part(virtual-keyboard-toggle)::after {
+  top: calc(100% + 0.375rem);
+  right: 0;
+  left: auto;
+  z-index: var(--z-tooltip);
+  transform-origin: top right;
+}
+
+.formula-symbol-button .katex {
+  font-size: 1.05em;
+}
+
+.formula-symbol-button > span:not(.sr-only) {
+  max-width: 100%;
+}
+
+@media (max-width: 639px), (max-height: 520px) {
+  .formula-editor-dialog {
+    inset: var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left);
+    width: auto;
+    height: auto;
+    max-height: none;
+    translate: none;
+    transform: none;
+    border-radius: 0;
+  }
+
+  .formula-editor-dialog > button[aria-label] {
+    width: var(--tap-min);
+    height: var(--tap-min);
+  }
+}
+
+@media (max-height: 520px) {
+  .formula-editor-dialog .formula-symbol-button,
+  .formula-editor-dialog [role='tab'],
+  .formula-editor-dialog .formula-editor-retry,
+  .formula-editor-dialog .formula-editor-footer > button {
+    min-height: var(--tap-min);
+  }
+
+  .formula-editor-dialog[data-keyboard-open='true'] > button[aria-label],
+  .formula-editor-dialog[data-keyboard-open='true'] .formula-editor-header,
+  .formula-editor-dialog[data-keyboard-open='true'] .formula-editor-error,
+  .formula-editor-dialog[data-keyboard-open='true'] .formula-template-library {
+    display: none;
+  }
+
+  .formula-editor-dialog[data-keyboard-open='true'] .formula-editor-body {
+    gap: 0;
+    padding-top: 0.25rem;
+    padding-bottom: 0.25rem;
+  }
+
+  .formula-editor-dialog[data-keyboard-open='true'] .formula-mathfield-host {
+    min-height: 0;
+    padding: 0.5rem;
+  }
+
+  .formula-editor-dialog[data-keyboard-open='true'] .formula-editor-footer {
+    padding-top: 0.3125rem;
+    padding-bottom: 0.3125rem;
+  }
+}
+
+.math-text-block {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-block: 0.2rem;
+  text-align: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rich-composer-editor .tiptap-mathematics-render--editable {
+    transition: none;
+  }
+}

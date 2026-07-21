@@ -146,3 +146,51 @@ func seedFastModePythonHistory(t *testing.T, db *sql.DB, model *store.Model, con
 		t.Fatalf("seed previous assistant: %v", err)
 	}
 }
+
+func TestStripFastModeCodeBlocksPreservesSafeHistory(t *testing.T) {
+	history := []UnifiedMessage{
+		{
+			Role: "assistant",
+			Blocks: []UnifiedBlock{
+				{Kind: "tool_call", ToolName: "web_search", ToolID: "safe", Summary: "found a source"},
+				{Kind: "tool_call", ToolName: "python_execute", ToolID: "python", Input: json.RawMessage(`{"code":"print(42)"}`)},
+				// Legacy output blocks did not always repeat the tool name; the call ID
+				// must still keep the prohibited result paired with its call.
+				{Kind: "tool_output", ToolID: "python", Text: "42"},
+				{Kind: "text", Text: "Keep the final answer."},
+			},
+			Raw: json.RawMessage(`[{"type":"function_call","name":"python_execute"}]`),
+		},
+		{
+			Role: "assistant",
+			Blocks: []UnifiedBlock{
+				{Kind: "tool_call", ToolName: "code_interpreter", ToolID: "hosted"},
+			},
+		},
+	}
+
+	filtered := stripFastModeCodeBlocks(history)
+	if len(filtered) != 2 {
+		t.Fatalf("filtered history length = %d, want 2", len(filtered))
+	}
+	if len(filtered[0].Raw) != 0 {
+		t.Fatalf("fast history retained provider Raw: %s", filtered[0].Raw)
+	}
+	firstJSON, _ := json.Marshal(filtered[0].Blocks)
+	for _, forbidden := range []string{"python_execute", "code_interpreter", "print(42)", `"42"`} {
+		if strings.Contains(string(firstJSON), forbidden) {
+			t.Fatalf("filtered blocks retained %q: %s", forbidden, firstJSON)
+		}
+	}
+	if !strings.Contains(string(firstJSON), "web_search") || !strings.Contains(string(firstJSON), "Keep the final answer") {
+		t.Fatalf("filter lost safe history: %s", firstJSON)
+	}
+	if len(filtered[1].Blocks) != 1 || filtered[1].Blocks[0].Text != fastModeCodeHistoryPlaceholder {
+		t.Fatalf("code-only history needs a provider-safe placeholder: %+v", filtered[1].Blocks)
+	}
+	// Filtering must not mutate cached/shared history or nested Raw/Input slices.
+	filtered[0].Blocks[0].ToolName = "changed"
+	if history[0].Blocks[0].ToolName != "web_search" || len(history[0].Raw) == 0 {
+		t.Fatalf("filter mutated its input: %+v", history[0])
+	}
+}

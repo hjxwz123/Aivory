@@ -11,6 +11,8 @@ import { sharedApi, ApiError } from '@/api'
 import type { ApiAttachment, ApiBlock, ApiSharedConversation } from '@/api/types'
 import { Logo } from '@/components/brand/logo'
 import { Markdown } from '@/components/chat/markdown'
+import { MathText } from '@/components/chat/math-text'
+import { hasMathContent } from '@/lib/math-content'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
 import { toast } from '@/hooks/use-toast'
@@ -194,8 +196,8 @@ export default function SharedConversation() {
                     ) : null}
                     {m.role === 'user' ? (
                       text ? (
-                        <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3 text-[15px] leading-relaxed whitespace-pre-wrap">
-                          {text}
+                        <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3 text-[15px] leading-relaxed">
+                          {hasMathContent(text) ? <MathText content={text} /> : <span className="whitespace-pre-wrap">{text}</span>}
                         </div>
                       ) : null
                     ) : (
