@@ -93,7 +93,7 @@ export const SUPPORTED_LANGUAGES = [
 export type LanguageCode = (typeof SUPPORTED_LANGUAGES)[number]['code']
 
 export const DEFAULT_NS = 'common'
-export const NAMESPACES = ['common', 'nav', 'landing', 'chat', 'auth', 'settings', 'errors', 'projects', 'admin', 'kb', 'memory', 'subscription', 'welcome'] as const
+export const NAMESPACES = ['common', 'nav', 'landing', 'chat', 'auth', 'settings', 'errors', 'projects', 'admin', 'kb', 'files', 'memory', 'subscription', 'welcome'] as const
 
 const resources = {
   en: {

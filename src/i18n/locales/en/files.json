@@ -19,6 +19,82 @@
     "largest": "Largest first",
     "smallest": "Smallest first"
   },
+  "filters": {
+    "typeLabel": "File type",
+    "originLabel": "Source",
+    "sortLabel": "Sort by"
+  },
+  "types": {
+    "all": "All types",
+    "pdf": "PDF",
+    "document": "Documents",
+    "presentation": "Presentations",
+    "spreadsheet": "Spreadsheets",
+    "image": "Images",
+    "text": "Text",
+    "other": "Other"
+  },
+  "preview": {
+    "selectTitle": "Select a file",
+    "selectBody": "Choose a file from the list to preview it here.",
+    "loading": "Loading preview…",
+    "download": "Download",
+    "delete": "Delete",
+    "backToList": "Back to files",
+    "unsupported": "This file type cannot be previewed.",
+    "tooLarge": "This file is too large to preview.",
+    "failed": "Could not load the preview.",
+    "metadata": "{{type}} · {{size}}"
+  },
+  "pdf": {
+    "previousPage": "Previous page",
+    "nextPage": "Next page",
+    "page": "Page {{page}}",
+    "of": "of {{total}}",
+    "zoomOut": "Zoom out",
+    "zoomIn": "Zoom in",
+    "fitWidth": "Fit to width",
+    "renderFailed": "Could not render this PDF."
+  },
+  "docx": {
+    "loading": "Loading document…",
+    "tooLarge": "This document is too large to preview.",
+    "failed": "Could not preview this document."
+  },
+  "pptx": {
+    "loading": "Loading presentation…",
+    "tooLarge": "This presentation is too large to preview.",
+    "failed": "Could not preview this presentation."
+  },
+  "spreadsheet": {
+    "loading": "Loading spreadsheet…",
+    "tooLarge": "This spreadsheet is too large to preview.",
+    "failed": "Could not preview this spreadsheet.",
+    "sheet": "Sheet",
+    "row": "Row",
+    "column": "Column",
+    "truncated": "Showing the first {{rows}} rows and {{columns}} columns.",
+    "empty": "This sheet is empty."
+  },
+  "list": {
+    "title": "File list",
+    "loading": "Loading files…",
+    "emptyFilteredTitle": "No matching files",
+    "emptyFilteredBody": "Try another search or file type.",
+    "resultCount": "{{count}} file(s)"
+  },
+  "selection": {
+    "selected": "Selected",
+    "selectFile": "Select {{name}}",
+    "clear": "Clear selection"
+  },
+  "accessibility": {
+    "fileList": "File list",
+    "previewPane": "File preview",
+    "searchFiles": "Search files",
+    "filterByType": "Filter files by type",
+    "selectedFile": "Selected file: {{name}}"
+  },
   "table": {
     "filename": "Filename",
     "type": "Type",

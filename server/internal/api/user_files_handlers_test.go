@@ -134,3 +134,46 @@ func TestDeleteMyFilesOwnershipGate(t *testing.T) {
 		t.Fatal("own file bytes not removed")
 	}
 }
+
+func TestListMyFilesTypeFilterAndUnknownFallback(t *testing.T) {
+	db := openMigrated(t, filepath.Join(t.TempDir(), "my-file-types.db"))
+	defer db.Close()
+
+	mustExec(t, db, `INSERT INTO users(id,email,name,password_hash,role) VALUES('u1','a@x.test','A','h','user')`)
+	mustExec(t, db, `INSERT INTO users(id,email,name,password_hash,role) VALUES('u2','b@x.test','B','h','user')`)
+	mustExec(t, db, `INSERT INTO files(id,user_id,filename,mime_type,size_bytes,storage_path,kind,created_at) VALUES
+		('pdf-1','u1','one.pdf','application/pdf',1,'/up/one.pdf','pdf',1),
+		('pdf-2','u1','two.PDF','application/octet-stream',1,'/up/two.pdf','pdf',2),
+		('doc-1','u1','notes.docx','application/vnd.openxmlformats-officedocument.wordprocessingml.document',1,'/up/notes.docx','doc',3),
+		('other-user','u2','hidden.pdf','application/pdf',1,'/up/hidden.pdf','pdf',4)`)
+
+	list := func(query string) struct {
+		Files []store.AdminFile `json:"files"`
+		Total int               `json:"total"`
+	} {
+		req := httptest.NewRequest("GET", "/api/me/files"+query, nil)
+		req = req.WithContext(context.WithValue(req.Context(), userCtxKey{}, &store.User{ID: "u1", Role: "user", Status: "active"}))
+		rec := httptest.NewRecorder()
+		listMyFilesHandler(Deps{DB: db}, rec, req)
+		if rec.Code != 200 {
+			t.Fatalf("list %q status=%d body=%s", query, rec.Code, rec.Body.String())
+		}
+		var out struct {
+			Files []store.AdminFile `json:"files"`
+			Total int               `json:"total"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+			t.Fatalf("decode %q: %v", query, err)
+		}
+		return out
+	}
+
+	pdf := list("?type=pdf&limit=1")
+	if pdf.Total != 2 || len(pdf.Files) != 1 {
+		t.Fatalf("paginated pdf total=%d rows=%d, want total 2 and one row", pdf.Total, len(pdf.Files))
+	}
+	unknown := list("?type=made-up")
+	if unknown.Total != 3 || len(unknown.Files) != 3 {
+		t.Fatalf("unknown type total=%d rows=%d, want all 3 owned files", unknown.Total, len(unknown.Files))
+	}
+}
