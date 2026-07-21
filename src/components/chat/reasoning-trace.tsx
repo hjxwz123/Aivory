@@ -109,7 +109,7 @@ export function ReasoningTrace({ reasoning, streaming = false, settled = false }
           expanded ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]',
         )}
       >
-        <div className="overflow-hidden">
+        <div className="overflow-clip">
           <div className="space-y-2 ml-[6px] mt-1.5 pl-3.5 border-l border-[var(--color-divider)]">
             {items.map((it) => {
               if (it.kind === 'thinking' || it.kind === 'narration') {

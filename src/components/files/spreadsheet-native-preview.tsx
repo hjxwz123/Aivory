@@ -313,7 +313,7 @@ export function SpreadsheetNativePreview({
                   tabIndex={isActive ? 0 : -1}
                   title={sheet.sheet}
                   className={[
-                    'relative h-10 max-w-56 shrink-0 truncate px-3 text-[13px] font-medium',
+                    'relative h-8 max-w-56 shrink-0 truncate px-3 text-[13px] font-medium [@media(pointer:coarse)]:h-11',
                     'interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
                     isActive
                       ? 'text-[var(--color-fg)] after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:bg-[var(--color-accent)]'

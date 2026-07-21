@@ -295,18 +295,18 @@ export function PdfNativePreview({ data, name, className, labels, onError }: Pdf
       aria-busy={status === 'loading' || isRendering || undefined}
     >
       <div
-        className="flex min-h-12 flex-wrap items-center justify-center gap-x-2 gap-y-1 border-b border-[var(--color-border)] px-2 py-1.5 sm:justify-between"
+        className="flex min-h-10 flex-nowrap items-center justify-between gap-0 border-b border-[var(--color-border)] px-1 py-0.5 sm:px-2"
         role="group"
         aria-label={name}
       >
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-0.5">
           <span className="sr-only" aria-live="polite">
             {labels.page(pageNumber)}, {labels.of(pageCount || 1)}
           </span>
           <Tooltip content={labels.previousPage} side="bottom">
             <Button
               variant="ghost"
-              size="icon"
+              size="icon-sm"
               className="[@media(pointer:coarse)]:size-11"
               aria-label={labels.previousPage}
               disabled={controlsDisabled || pageNumber <= 1}
@@ -316,13 +316,13 @@ export function PdfNativePreview({ data, name, className, labels, onError }: Pdf
             </Button>
           </Tooltip>
 
-          <div className="flex h-9 items-center gap-1 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg)] px-2 text-sm tabular-nums [@media(pointer:coarse)]:h-11">
+          <div className="flex h-7 items-center gap-0.5 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg)] px-1.5 text-xs tabular-nums [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:px-2 [@media(pointer:coarse)]:text-sm">
             <label className="sr-only" htmlFor={pageInputId}>
               {labels.page(pageNumber)}
             </label>
             <input
               id={pageInputId}
-              className="w-10 rounded-[5px] bg-transparent text-center text-[var(--color-fg)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+              className="w-8 rounded-[5px] bg-transparent text-center text-[var(--color-fg)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] [@media(pointer:coarse)]:w-10"
               type="text"
               inputMode="numeric"
               pattern="[0-9]*"
@@ -340,7 +340,10 @@ export function PdfNativePreview({ data, name, className, labels, onError }: Pdf
               onFocus={(event) => event.currentTarget.select()}
               onKeyDown={handlePageInputKeyDown}
             />
-            <span className="whitespace-nowrap text-[var(--color-fg-muted)]" aria-hidden>
+            <span className="whitespace-nowrap text-[var(--color-fg-muted)] sm:hidden" aria-hidden>
+              / {pageCount || 1}
+            </span>
+            <span className="hidden whitespace-nowrap text-[var(--color-fg-muted)] sm:inline" aria-hidden>
               {labels.of(pageCount || 1)}
             </span>
           </div>
@@ -348,7 +351,7 @@ export function PdfNativePreview({ data, name, className, labels, onError }: Pdf
           <Tooltip content={labels.nextPage} side="bottom">
             <Button
               variant="ghost"
-              size="icon"
+              size="icon-sm"
               className="[@media(pointer:coarse)]:size-11"
               aria-label={labels.nextPage}
               disabled={controlsDisabled || pageNumber >= pageCount}
@@ -359,11 +362,11 @@ export function PdfNativePreview({ data, name, className, labels, onError }: Pdf
           </Tooltip>
         </div>
 
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-0.5">
           <Tooltip content={labels.zoomOut} side="bottom">
             <Button
               variant="ghost"
-              size="icon"
+              size="icon-sm"
               className="[@media(pointer:coarse)]:size-11"
               aria-label={labels.zoomOut}
               disabled={controlsDisabled || renderedScale <= MIN_SCALE}
@@ -374,7 +377,7 @@ export function PdfNativePreview({ data, name, className, labels, onError }: Pdf
           </Tooltip>
 
           <output
-            className="w-12 text-center text-xs tabular-nums text-[var(--color-fg-muted)]"
+            className="sr-only text-center text-[0.6875rem] tabular-nums text-[var(--color-fg-muted)] min-[360px]:not-sr-only min-[360px]:block min-[360px]:w-10 [@media(pointer:coarse)]:text-xs"
             aria-live="polite"
           >
             {zoomPercent}%
@@ -383,7 +386,7 @@ export function PdfNativePreview({ data, name, className, labels, onError }: Pdf
           <Tooltip content={labels.zoomIn} side="bottom">
             <Button
               variant="ghost"
-              size="icon"
+              size="icon-sm"
               className="[@media(pointer:coarse)]:size-11"
               aria-label={labels.zoomIn}
               disabled={controlsDisabled || renderedScale >= MAX_SCALE}
@@ -396,7 +399,7 @@ export function PdfNativePreview({ data, name, className, labels, onError }: Pdf
           <Tooltip content={labels.fitWidth} side="bottom">
             <Button
               variant={fitWidth ? 'secondary' : 'ghost'}
-              size="icon"
+              size="icon-sm"
               className="[@media(pointer:coarse)]:size-11"
               aria-label={labels.fitWidth}
               aria-pressed={fitWidth}

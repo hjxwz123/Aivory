@@ -20,6 +20,7 @@
     "smallest": "Plus petits d'abord"
   },
   "filters": {
+    "title": "Filtres et tri",
     "typeLabel": "Type de fichier",
     "originLabel": "Source",
     "sortLabel": "Trier par"
