@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { cn, truncate } from '@/lib/utils'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { mediaQuery } from '@/lib/design-tokens'
+import { mathContentToPlainText } from '@/lib/math-content'
 import type { Conversation } from '@/types/chat'
 
 interface ConversationMinimapProps {
@@ -127,7 +128,7 @@ export function ConversationMinimap({ conversation, scrollContainerRef }: Conver
       {userTurns.map((m, i) => {
         const active = m.id === activeId
         const text =
-          truncate((m.content ?? '').trim(), LABEL_MAX) ||
+          truncate(mathContentToPlainText(m.content ?? '').trim(), LABEL_MAX) ||
           t('minimap.untitled', { index: i + 1, defaultValue: 'Question {{index}}' })
         return (
           <button

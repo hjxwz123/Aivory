@@ -23,7 +23,7 @@
 # `npm ci` is slow and routinely crashes mid-install (the `exit code: 146` here).
 # The Go stage below still builds for the target arch. ($BUILDPLATFORM is a
 # BuildKit-provided build arg; this Dockerfile already opts into BuildKit above.)
-FROM --platform=$BUILDPLATFORM node:20-bookworm-slim AS web
+FROM --platform=$BUILDPLATFORM node:22-bookworm-slim AS web
 WORKDIR /web
 COPY package.json package-lock.json ./
 # --no-audit/--no-fund trim work + network chatter; the cache mount lets a retry

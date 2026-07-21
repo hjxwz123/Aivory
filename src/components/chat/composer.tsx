@@ -32,10 +32,10 @@ import {
   Ban,
   Wrench,
   Globe,
+  Sigma,
 } from 'lucide-react'
 import type { Attachment } from '@/types/chat'
 import { modelAllowsToolModeSelection, type ToolMode } from '@/lib/tool-mode'
-import { Textarea } from '@/components/ui/textarea'
 import { Tooltip } from '@/components/ui/tooltip'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { kbsApi, audioApi, conversationsApi } from '@/api/endpoints'
@@ -43,7 +43,6 @@ import { ModelPicker } from './model-picker'
 import { StylePicker } from './style-picker'
 import { ParamControls } from './param-controls'
 import { filterVisibleParams } from './param-controls.utils'
-import { useAutosizeTextarea } from '@/hooks/use-autosize-textarea'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { useModels } from '@/store/models'
 import { useAuth } from '@/store/auth'
@@ -66,6 +65,12 @@ import {
   NON_IMAGE_ATTACHMENT_ACCEPT,
   resolveImageAttachmentCapability,
 } from '@/lib/vision-capability'
+import {
+  RichComposerEditor,
+  type FormulaTarget,
+  type RichComposerEditorHandle,
+} from './rich-composer-editor'
+import { FormulaEditorDialog } from './formula-editor-dialog'
 
 interface ComposerProps {
   modelId: string
@@ -532,9 +537,12 @@ export function Composer({
       /* ignore */
     }
   }
-  const ref = useRef<HTMLTextAreaElement>(null)
+  const ref = useRef<RichComposerEditorHandle>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const imageFileRef = useRef<HTMLInputElement>(null)
+  const [formulaOpen, setFormulaOpen] = useState(false)
+  const [formulaTarget, setFormulaTarget] = useState<FormulaTarget | null>(null)
+  const formulaSelectionRef = useRef<{ from: number; to: number } | null>(null)
   const submittingRef = useRef(false)
   // §2.7 re-entry guard for the long-draft → .txt conversion in handleSubmit.
   const convertingRef = useRef(false)
@@ -789,7 +797,7 @@ export function Composer({
         onFinal: (text) => {
           if (streamAttemptRef.current === attempt && text) {
             updateValue(streamBaseRef.current + text)
-            requestAnimationFrame(() => ref.current?.focus())
+            requestAnimationFrame(() => ref.current?.focus('end'))
           }
         },
         onError: () => {
@@ -890,7 +898,7 @@ export function Composer({
       if (text) {
         const current = valueRef.current
         updateValue((current.trim() ? current.trimEnd() + ' ' : '') + text)
-        requestAnimationFrame(() => ref.current?.focus())
+        requestAnimationFrame(() => ref.current?.focus('end'))
       }
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t('composer.voiceFailed'))
@@ -951,12 +959,26 @@ export function Composer({
     [modelId, setCachedParamValues],
   )
 
-  // Cap textarea growth lower on phones so a long draft can't eat the viewport.
-  useAutosizeTextarea(ref, value, compact || isMobile ? 6 : 12)
-
   useEffect(() => {
-    if (autoFocus) ref.current?.focus()
+    if (autoFocus) ref.current?.focus('end')
   }, [autoFocus])
+
+  const openNewFormula = () => {
+    formulaSelectionRef.current = ref.current?.captureSelection() ?? null
+    setFormulaTarget(null)
+    setFormulaOpen(true)
+  }
+
+  const openExistingFormula = (target: FormulaTarget) => {
+    formulaSelectionRef.current = null
+    setFormulaTarget(target)
+    setFormulaOpen(true)
+  }
+
+  const handleFormulaOpenChange = (open: boolean) => {
+    setFormulaOpen(open)
+    if (!open) requestAnimationFrame(() => ref.current?.focus())
+  }
 
   const uploading = useMemo(() => attachments.some((a) => a.uploading), [attachments])
   // A document attachment must be fully RAG-ready before it can be sent. Failed
@@ -1892,67 +1914,37 @@ export function Composer({
         </div>
       )}
 
-      {/* Textarea */}
-      <Textarea
+      {/* Plain text and atomic KaTeX nodes share one ProseMirror surface. The
+          canonical value remains a string so drafts/API/provider behavior is
+          unchanged, while users never have to edit raw LaTeX in the composer. */}
+      <RichComposerEditor
         ref={ref}
         value={value}
-        onChange={(e) => updateValue(e.target.value)}
-        onKeyDown={(e) => {
-          // Don't intercept while user is mid-IME composition (CJK).
-          if (e.nativeEvent.isComposing || e.keyCode === 229) return
-          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-            e.preventDefault()
-            handleSubmit()
-            return
-          }
-          if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault()
-            handleSubmit()
-          }
+        onChange={updateValue}
+        onSubmit={handleSubmit}
+        onFormulaClick={openExistingFormula}
+        onPasteFiles={(files) => {
+          const dt = new DataTransfer()
+          files.forEach((file) => dt.items.add(file))
+          void handleAttach(dt.files)
         }}
-        onPaste={(e) => {
-          // Support pasting an image from the clipboard (screenshot / copied
-          // picture) — upload it as an attachment just like a file pick.
-          const imgs = Array.from(e.clipboardData?.items ?? [])
-            .filter((it) => it.kind === 'file' && it.type.startsWith('image/'))
-            .map((it) => it.getAsFile())
-            .filter((f): f is File => f !== null)
-          if (imgs.length > 0) {
-            e.preventDefault()
-            const dt = new DataTransfer()
-            imgs.forEach((f) => dt.items.add(f))
-            void handleAttach(dt.files)
-            return
-          }
-          // Codex-style long paste: inserting would push the draft past
-          // MAX_LEN, so attach the pasted text as a .txt file instead of
-          // flooding the textarea (and later hitting the length wall). The
-          // resulting length accounts for the selection the paste replaces.
-          const pasted = e.clipboardData?.getData('text/plain') ?? ''
-          const el = e.currentTarget
-          const replaced = (el.selectionEnd ?? 0) - (el.selectionStart ?? 0)
-          if (canAttachLongText && pasted && el.value.length - replaced + pasted.length > MAX_LEN) {
-            e.preventDefault()
-            void attachTextAsFile(pasted).then((ok) => {
-              // Upload failed (quota / allowlist) — put the text back into the
-              // draft so nothing is lost; the error toast explains what happened.
-              if (!ok) {
-                const cur = valueRef.current
-                updateValue(cur ? cur + '\n' + pasted : pasted)
-              }
-            })
-          }
+        onLongPaste={(pasted) => {
+          void attachTextAsFile(pasted).then((ok) => {
+            // Upload failed (quota / allowlist) — put the text back into the
+            // draft so nothing is lost; the error toast explains what happened.
+            if (!ok) {
+              const current = valueRef.current
+              updateValue(current ? `${current}\n${pasted}` : pasted)
+            }
+          })
         }}
+        canAttachLongText={canAttachLongText}
+        maxLength={MAX_LEN}
         placeholder={effectivePlaceholder}
-        rows={compact || isMobile ? 1 : 2}
-        className={cn(
-          'border-none bg-transparent focus:bg-transparent focus:ring-0',
-          // ≥16px on phones (--text-input-mobile) so iOS Safari doesn't zoom on focus.
-          'min-h-[3.25rem] sm:min-h-[4.5rem] px-4 pt-3 pb-1 text-[0.9375rem] max-sm:text-[length:var(--text-input-mobile)]',
-          'placeholder:text-[var(--color-fg-faint)]',
-          compact && 'min-h-[40px]',
-        )}
-        aria-label={t('composer.inputLabel', { defaultValue: 'Type a message' })}
+        ariaLabel={t('composer.inputLabel', { defaultValue: 'Type a message' })}
+        formulaEditLabel={t('composer.formula.editTitle')}
+        compact={compact}
+        mobile={isMobile}
       />
 
       {/* Toolbar row. The file input is shared by both layouts. On phones every
@@ -2032,6 +2024,17 @@ export function Composer({
               >
                 <Paperclip size={18} className="shrink-0 text-[var(--color-fg-muted)]" aria-hidden />
                 {t('composer.attach')}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setMoreOpen(false)
+                  openNewFormula()
+                }}
+                className="flex w-full items-center gap-3 rounded-[10px] px-3 py-2.5 text-left text-[15px] text-[var(--color-fg)] hover:bg-[var(--color-bg-muted)] active:bg-[var(--color-bg-muted)]"
+              >
+                <Sigma size={18} className="shrink-0 text-[var(--color-fg-muted)]" aria-hidden />
+                {t('composer.formula.action')}
               </button>
               {canAttachImages ? (
                 <button
@@ -2137,6 +2140,17 @@ export function Composer({
               </button>
             </Tooltip>
 
+            <Tooltip content={t('composer.formula.action')}>
+              <button
+                type="button"
+                onClick={openNewFormula}
+                aria-label={t('composer.formula.action')}
+                className="inline-flex items-center justify-center size-8 rounded-[8px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+              >
+                <Sigma size={15} aria-hidden />
+              </button>
+            </Tooltip>
+
             {canAttachImages ? (
               <Tooltip content={t('composer.addImage')}>
                 <button
@@ -2232,6 +2246,17 @@ export function Composer({
           </div>
         </div>
       )}
+
+      <FormulaEditorDialog
+        open={formulaOpen}
+        initialLatex={formulaTarget?.latex ?? ''}
+        editing={Boolean(formulaTarget)}
+        onOpenChange={handleFormulaOpenChange}
+        onConfirm={(latex) => {
+          ref.current?.setFormula(latex, formulaTarget, formulaSelectionRef.current)
+          formulaSelectionRef.current = null
+        }}
+      />
     </div>
   )
 }

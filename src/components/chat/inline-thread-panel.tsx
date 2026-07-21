@@ -5,11 +5,13 @@ import { MessagesSquare, X, CornerDownLeft, Quote } from 'lucide-react'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { Tooltip } from '@/components/ui/tooltip'
 import { Markdown } from '@/components/chat/markdown'
+import { MathText } from '@/components/chat/math-text'
 import { useInlineThreadDrawer } from '@/store/inline-thread'
 import { resolveArmedTurnFlags, useConversations } from '@/store/conversations'
 import { useSettings } from '@/store/settings'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { cn } from '@/lib/utils'
+import { hasMathContent } from '@/lib/math-content'
 
 /**
  * InlineThreadPanel — the right-edge drawer that renders a text-selection
@@ -148,11 +150,13 @@ function ThreadBody({ quote, childId, onClose }: { quote: string; childId: strin
                 key={m.id}
                 className={cn(
                   'self-end max-w-[85%] rounded-[12px] bg-[var(--color-bg-muted)] px-3 py-2 text-[13.5px] text-[var(--color-fg)]',
-                  userMessageMarkdown ? 'min-w-0' : 'whitespace-pre-wrap',
+                  userMessageMarkdown || hasMathContent(m.content) ? 'min-w-0' : 'whitespace-pre-wrap',
                 )}
               >
                 {userMessageMarkdown ? (
                   <Markdown content={m.content} blockKeyPrefix={`${m.id}-user-inline`} className="prose-user" breaks />
+                ) : hasMathContent(m.content) ? (
+                  <MathText content={m.content} />
                 ) : (
                   m.content
                 )}

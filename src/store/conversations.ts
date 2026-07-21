@@ -44,6 +44,7 @@ import { useComposerPrefs, type ComposerMode } from '@/store/composer-prefs'
 import { useModels } from '@/store/models'
 import type { ToolMode } from '@/lib/tool-mode'
 import i18n from '@/i18n'
+import { mathContentToPlainText } from '@/lib/math-content'
 
 // resolveArmedTurnFlags snapshots the CURRENT composer feature toggles for turns
 // started OUTSIDE the composer's own submit — regenerate, edit-and-resend, and
@@ -124,7 +125,7 @@ const TITLE_RECONCILE_DELAYS_MS = [1000, 2000, 4000, 8000, 15000]
 const titleReconcileGeneration = new Map<string, number>()
 
 function deterministicServerTitle(text: string): string {
-  return Array.from(text.replace(/\s+/g, ' ').trim()).slice(0, 28).join('')
+  return Array.from(mathContentToPlainText(text).replace(/\s+/g, ' ').trim()).slice(0, 28).join('')
 }
 
 function scheduleGeneratedTitleReconcile(
@@ -1034,7 +1035,8 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
     // replayed when that branch is reopened.
     const abort = new AbortController()
     const conv0 = get().conversations.find((c) => c.id === input.conversationId)
-    const optimisticSeedTitle = input.text.replace(/\s+/g, ' ').trim().slice(0, 60).trim()
+    const readableInputText = mathContentToPlainText(input.text)
+    const optimisticSeedTitle = readableInputText.replace(/\s+/g, ' ').trim().slice(0, 60).trim()
     const initialTitle = conv0?.title.trim() ?? ''
     const expectsGeneratedTitle =
       (conv0?.messages.length ?? 0) === 0 &&
@@ -1151,7 +1153,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
           // a blank title) OR the placeholder, regardless of locale.
           title:
             c.messages.length === 0 && (!c.title.trim() || c.title === 'New conversation')
-              ? input.text.replace(/\s+/g, ' ').trim().slice(0, 60) || c.title
+              ? readableInputText.replace(/\s+/g, ' ').trim().slice(0, 60) || c.title
               : c.title,
         }
       }),

@@ -21,7 +21,7 @@ import {
   FileSpreadsheet,
   Sparkles,
   BookText,
-  Coins, ImageOff, Zap } from 'lucide-react'
+  Coins, ImageOff, Zap, Sigma } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import type { Message, Attachment } from '@/types/chat'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -43,17 +43,23 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Textarea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { useCopy } from '@/hooks/use-clipboard'
 import { useAuth } from '@/store/auth'
 import { initials } from '@/components/ui/avatar.utils'
 import { useModels } from '@/store/models'
-import { useAutosizeTextarea } from '@/hooks/use-autosize-textarea'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { mediaQuery } from '@/lib/design-tokens'
+import { hasMathContent } from '@/lib/math-content'
 import { Markdown } from './markdown'
+import { MathText } from './math-text'
+import {
+  RichComposerEditor,
+  type FormulaTarget,
+  type RichComposerEditorHandle,
+} from './rich-composer-editor'
+import { FormulaEditorDialog } from './formula-editor-dialog'
 import { ReasoningTrace } from './reasoning-trace'
 import { ImageGenerating } from './image-generating'
 import { ResearchPanel } from './research-panel'
@@ -136,6 +142,7 @@ function formatCredits(credits: number): string {
 
 function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, onLike, onDislike, onBranchSwitch, onFork, onDelete, readOnly = false, userMessageMarkdown = false }: MessageRowProps) {
   const isUser = message.role === 'user'
+  const userHasMath = useMemo(() => isUser && hasMathContent(message.content), [isUser, message.content])
   // §workspaces: in a shared conversation "own" = authored by ME — other
   // members' questions render LEFT like the assistant, with the author's
   // name + avatar. Personal conversations (no author) keep role semantics.
@@ -171,7 +178,10 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
   // Non-image attachment preview (pdf / docx / text / fallback) — opens a modal
   // instead of letting the click download the file.
   const [filePreview, setFilePreview] = useState<{ name: string; url?: string; kind: Attachment['kind'] } | null>(null)
-  const editRef = useRef<HTMLTextAreaElement>(null)
+  const editRef = useRef<RichComposerEditorHandle>(null)
+  const [editFormulaOpen, setEditFormulaOpen] = useState(false)
+  const [editFormulaTarget, setEditFormulaTarget] = useState<FormulaTarget | null>(null)
+  const editFormulaSelectionRef = useRef<{ from: number; to: number } | null>(null)
   const { copied, copy } = useCopy()
   const [exportingDocx, setExportingDocx] = useState(false)
   const turnTime = useMemo(
@@ -199,8 +209,6 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
     }
   }
 
-  useAutosizeTextarea(editRef, draft, 14)
-
   // Seed the draft when entering edit mode — but only on the transition,
   // so streaming/external updates to message.content don't overwrite the user's typing.
   useEffect(() => {
@@ -215,7 +223,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
   // timer if the row unmounts or edit mode exits before it fires.
   useEffect(() => {
     if (!editing) return
-    const t = setTimeout(() => editRef.current?.focus(), 60)
+    const t = setTimeout(() => editRef.current?.focus('end'), 60)
     return () => clearTimeout(t)
   }, [editing])
 
@@ -236,6 +244,18 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
 
   function removeDraftAtt(id: string) {
     setDraftAtts((s) => s.filter((a) => a.id !== id))
+  }
+
+  function openNewEditFormula() {
+    editFormulaSelectionRef.current = editRef.current?.captureSelection() ?? null
+    setEditFormulaTarget(null)
+    setEditFormulaOpen(true)
+  }
+
+  function openExistingEditFormula(target: FormulaTarget) {
+    editFormulaSelectionRef.current = null
+    setEditFormulaTarget(target)
+    setEditFormulaOpen(true)
   }
 
   const visible = hovered || menuOpen || message.liked || message.disliked
@@ -327,33 +347,45 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
                 )}
               </div>
             ) : null}
-            <Textarea
+            <RichComposerEditor
               ref={editRef}
               value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.nativeEvent.isComposing || e.keyCode === 229) return
-                if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-                  e.preventDefault()
-                  commitEdit()
-                }
-                if (e.key === 'Escape') {
-                  e.preventDefault()
-                  setEditing(false)
-                }
-              }}
-              className="min-h-[112px] resize-none border-none bg-transparent p-0 text-[length:var(--text-chat-body)] leading-relaxed focus:ring-0"
+              onChange={setDraft}
+              onSubmit={commitEdit}
+              submitOnEnter={false}
+              onEscape={() => setEditing(false)}
+              onFormulaClick={openExistingEditFormula}
+              onPasteFiles={() => undefined}
+              onLongPaste={(text) => setDraft((current) => (current ? `${current}\n${text}` : text))}
+              canAttachLongText={false}
+              maxLength={Number.MAX_SAFE_INTEGER}
+              placeholder=""
+              ariaLabel={t('composer.inputLabel', { defaultValue: 'Edit message' })}
+              formulaEditLabel={t('composer.formula.editTitle')}
+              className="message-edit-editor"
             />
-            <div className="mt-2.5 flex items-center justify-end gap-2">
-              <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>
-                {t('actions.cancelEdit', { defaultValue: 'Cancel' })}
-              </Button>
-              <Button size="sm" variant="secondary" onClick={saveInPlace}>
-                {t('actions.saveInPlace', { defaultValue: 'Save' })}
-              </Button>
-              <Button size="sm" variant="primary" onClick={commitEdit}>
-                {t('actions.saveEdit', { defaultValue: 'Save & resend' })}
-              </Button>
+            <div className="mt-2.5 flex flex-wrap items-center gap-2">
+              <Tooltip content={t('composer.formula.action')}>
+                <button
+                  type="button"
+                  onClick={openNewEditFormula}
+                  aria-label={t('composer.formula.action')}
+                  className="inline-flex size-8 max-sm:size-11 items-center justify-center rounded-[8px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                >
+                  <Sigma size={15} aria-hidden />
+                </button>
+              </Tooltip>
+              <div className="ml-auto flex max-w-full flex-wrap justify-end gap-2 max-sm:w-full [&>button]:max-sm:min-h-11">
+                <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>
+                  {t('actions.cancelEdit', { defaultValue: 'Cancel' })}
+                </Button>
+                <Button size="sm" variant="secondary" onClick={saveInPlace}>
+                  {t('actions.saveInPlace', { defaultValue: 'Save' })}
+                </Button>
+                <Button size="sm" variant="primary" onClick={commitEdit}>
+                  {t('actions.saveEdit', { defaultValue: 'Save & resend' })}
+                </Button>
+              </div>
             </div>
           </div>
         ) : isUser ? (
@@ -362,7 +394,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
               'rounded-[18px] px-4 py-2.5',
               'bg-[var(--color-user-bubble)] border border-[var(--color-user-bubble-border)]',
               'text-[var(--color-fg)] text-[length:var(--text-chat-body)] leading-relaxed',
-              userMessageMarkdown ? 'min-w-0' : 'whitespace-pre-wrap break-words',
+              userMessageMarkdown || userHasMath ? 'min-w-0' : 'whitespace-pre-wrap break-words',
               'max-w-full',
             )}
           >
@@ -422,6 +454,8 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
             ) : null}
             {userMessageMarkdown ? (
               <Markdown content={message.content} blockKeyPrefix={`${message.id}-user`} className="prose-user" breaks />
+            ) : userHasMath ? (
+              <MathText content={message.content} />
             ) : (
               message.content
             )}
@@ -905,6 +939,19 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
           </SheetContent>
         </Sheet>
       )}
+      <FormulaEditorDialog
+        open={editFormulaOpen}
+        initialLatex={editFormulaTarget?.latex ?? ''}
+        editing={Boolean(editFormulaTarget)}
+        onOpenChange={(open) => {
+          setEditFormulaOpen(open)
+          if (!open && editing) requestAnimationFrame(() => editRef.current?.focus())
+        }}
+        onConfirm={(latex) => {
+          editRef.current?.setFormula(latex, editFormulaTarget, editFormulaSelectionRef.current)
+          editFormulaSelectionRef.current = null
+        }}
+      />
       {/* Delete-round confirmation — removes this question and all of its
           answers (branch-safe: earlier/later turns and other branches stay). */}
       <Dialog open={confirmDelete} onOpenChange={setConfirmDelete}>
