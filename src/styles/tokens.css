@@ -255,8 +255,10 @@
   --color-sidebar-border: oklch(87% 0.022 var(--accent-hue));
 
   /* ---------- LAYOUT --------------------------------------------------- */
+  --layout-sidebar-w-min: 14rem;
   --layout-sidebar-w: 17.5rem;
-  /* 280 */
+  --layout-sidebar-w-max: 25rem;
+  /* desktop sidebar: 224 min / 280 default / 400 max */
   --layout-sidebar-w-collapsed: 3.5rem;
   --layout-topbar-h: 3.5rem;
   --layout-composer-max-w: 50rem;

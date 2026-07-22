@@ -105,7 +105,7 @@ export const authApi = {
   enable2fa: (code: string) => api<{ ok: true }>('/me/2fa/enable', { method: 'POST', body: { code } }),
   disable2fa: (code: string) => api<{ ok: true }>('/me/2fa/disable', { method: 'POST', body: { code } }),
   register: (email: string, password: string, name: string, captchaToken?: string) =>
-    api<ApiAuthResponse | { verification_required: boolean; email: string }>('/auth/register', {
+    api<ApiAuthResponse | { verification_required: boolean; email: string; retry_after: number }>('/auth/register', {
       method: 'POST',
       body: { email, password, name, captcha_token: captchaToken },
     }),
@@ -162,10 +162,10 @@ export const authApi = {
   verifyEmail: (email: string, code: string) =>
     api<ApiAuthResponse>('/auth/verify-email', { method: 'POST', body: { email, code } }),
   sendCode: (email: string, purpose: 'verify' | 'reset') =>
-    api<{ ok: true }>('/auth/send-code', { method: 'POST', body: { email, purpose } }),
+    api<{ ok: true; retry_after: number }>('/auth/send-code', { method: 'POST', body: { email, purpose } }),
   // Password reset
   forgotPassword: (email: string) =>
-    api<{ ok: true }>('/auth/forgot-password', { method: 'POST', body: { email } }),
+    api<{ ok: true; retry_after: number }>('/auth/forgot-password', { method: 'POST', body: { email } }),
   resetPassword: (email: string, code: string, new_password: string) =>
     api<{ ok: true }>('/auth/reset-password', { method: 'POST', body: { email, code, new_password } }),
   // Enabled social-login providers for the login screen (no secrets). Empty

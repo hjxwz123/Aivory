@@ -272,6 +272,7 @@
   "sidebar": {
     "newChat": "新對話",
     "search": "搜尋",
+    "resize": "調整側邊欄寬度",
     "actions": "會話操作",
     "rename": "重新命名",
     "renameTitle": "重新命名會話",

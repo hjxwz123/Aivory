@@ -16,6 +16,7 @@ import { useOAuthProviders } from '@/hooks/use-oauth-providers'
 import { OAuthButtons } from '@/components/auth/oauth-buttons'
 import { PuzzleCaptchaDialog } from '@/components/auth/puzzle-captcha-dialog'
 import { authErrorText } from '@/lib/auth-errors'
+import { emailRetryAfterFromBody, useEmailCooldown } from '@/hooks/use-email-cooldown'
 import { cn } from '@/lib/utils'
 
 const ease: [number, number, number, number] = [0.2, 0.8, 0.2, 1]
@@ -32,6 +33,7 @@ export default function Register() {
   const signupOpen = useAuth((s) => s.signupOpen)
   const captchaRequired = useAuth((s) => s.captchaRequired)
   const pendingVerification = useAuth((s) => s.pendingVerification)
+  const pendingVerificationRetryAfter = useAuth((s) => s.pendingVerificationRetryAfter)
   const { providers } = useOAuthProviders()
 
   const [name, setName] = useState('')
@@ -53,6 +55,9 @@ export default function Register() {
   const [verifyLoading, setVerifyLoading] = useState(false)
   const [verifyError, setVerifyError] = useState<string | undefined>()
   const [resending, setResending] = useState(false)
+  const { remaining: resendCooldown, start: startResendCooldown } = useEmailCooldown(
+    pendingVerification ? pendingVerificationRetryAfter : 0,
+  )
 
   function submit(e: React.FormEvent) {
     e.preventDefault()
@@ -144,13 +149,16 @@ export default function Register() {
   }
 
   async function resendCode() {
+    if (resending || resendCooldown > 0) return
     const verifyEmail = pendingVerification ?? email
     setResending(true)
     try {
-      await authApi.sendCode(verifyEmail, 'verify')
+      const resp = await authApi.sendCode(verifyEmail, 'verify')
+      startResendCooldown(resp.retry_after)
       toast.success(t('register.codeSent'), t('register.codeSentBody'))
-    } catch {
-      // silently fail
+    } catch (err) {
+      const retryAfter = err instanceof ApiError ? emailRetryAfterFromBody(err.body) : 0
+      if (retryAfter > 0) startResendCooldown(retryAfter)
     } finally {
       setResending(false)
     }
@@ -223,10 +231,12 @@ export default function Register() {
             <button
               type="button"
               onClick={() => void resendCode()}
-              disabled={resending}
-              className="text-xs text-[var(--color-accent)] hover:text-[var(--color-accent-hover)] disabled:opacity-50"
+              disabled={resending || resendCooldown > 0}
+              className="min-w-28 text-xs tabular-nums text-[var(--color-accent)] hover:text-[var(--color-accent-hover)] disabled:opacity-50"
             >
-              {t('register.resendCode')}
+              {resendCooldown > 0
+                ? t('register.resendCountdown', { seconds: resendCooldown })
+                : t('register.resendCode')}
             </button>
           </motion.div>
         </motion.form>

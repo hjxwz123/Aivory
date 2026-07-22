@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { AppearanceSettings, ChatWidthPref, DensityPref, FontPref, FontSizePref, ModelSettings, PrivacySettings } from '@/types/settings'
+import { clampSidebarWidth } from '@/lib/sidebar-width'
 
 const RESPONSE_LENGTHS = ['concise', 'balanced', 'detailed'] as const
 const FONTS: readonly FontPref[] = ['default', 'inter', 'system', 'serif']
@@ -15,11 +16,13 @@ interface SettingsState {
   models: ModelSettings
   privacy: PrivacySettings
   sidebarCollapsed: boolean
+  sidebarWidth: number
   setAppearance: (patch: Partial<AppearanceSettings>) => void
   syncUserSettings: (settings: Record<string, unknown>) => void
   setModels: (patch: Partial<ModelSettings>) => void
   setPrivacy: (patch: Partial<PrivacySettings>) => void
   setSidebarCollapsed: (v: boolean) => void
+  setSidebarWidth: (width: number) => void
   toggleSidebar: () => void
 }
 
@@ -35,7 +38,7 @@ function load(): Partial<SettingsState> {
   }
 }
 
-function persist(s: Pick<SettingsState, 'appearance' | 'models' | 'privacy' | 'sidebarCollapsed'>) {
+function persist(s: Pick<SettingsState, 'appearance' | 'models' | 'privacy' | 'sidebarCollapsed' | 'sidebarWidth'>) {
   try {
     localStorage.setItem(
       KEY,
@@ -44,6 +47,7 @@ function persist(s: Pick<SettingsState, 'appearance' | 'models' | 'privacy' | 's
         models: s.models,
         privacy: s.privacy,
         sidebarCollapsed: s.sidebarCollapsed,
+        sidebarWidth: s.sidebarWidth,
       }),
     )
   } catch {
@@ -76,6 +80,7 @@ export const useSettings = create<SettingsState>((set) => ({
     ...(initial.privacy ?? {}),
   },
   sidebarCollapsed: initial.sidebarCollapsed ?? false,
+  sidebarWidth: clampSidebarWidth(initial.sidebarWidth),
   setAppearance(patch) {
     set((s) => {
       const next = { ...s, appearance: { ...s.appearance, ...patch } }
@@ -139,6 +144,13 @@ export const useSettings = create<SettingsState>((set) => ({
   setSidebarCollapsed(v) {
     set((s) => {
       const next = { ...s, sidebarCollapsed: v }
+      persist(next)
+      return next
+    })
+  },
+  setSidebarWidth(width) {
+    set((s) => {
+      const next = { ...s, sidebarWidth: clampSidebarWidth(width) }
       persist(next)
       return next
     })

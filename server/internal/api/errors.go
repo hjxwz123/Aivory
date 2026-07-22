@@ -57,6 +57,7 @@ var (
 	errTwofaInvalidSession    = errors.New("twofa_invalid_session")
 	errTwofaCodeUsed          = errors.New("twofa_code_used")
 	errTwofaInvalidCode       = errors.New("twofa_invalid_code")
+	errEmailCooldown          = errors.New("email_cooldown")
 
 	// Generic per-IP rate limit (rateLimitedIP — register/login/2FA/refresh/
 	// verify-email/send-code/forgot-reset/captcha/first-run-setup/oauth/public

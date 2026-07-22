@@ -1,4 +1,4 @@
-import { type ComponentType, useEffect, useRef, useState } from 'react'
+import { type ComponentType, useEffect, useId, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Brain,
@@ -15,6 +15,11 @@ import {
 import type { ReasoningItem, ToolCall } from '@/types/chat'
 import { Markdown } from './markdown'
 import { cn } from '@/lib/utils'
+import {
+  createReasoningDisclosure,
+  syncReasoningDisclosure,
+  toggleReasoningDisclosure,
+} from './reasoning-disclosure'
 
 interface ReasoningTraceProps {
   /** Ordered, interleaved trace — thinking runs + tool rounds in the exact
@@ -58,14 +63,14 @@ export function ReasoningTrace({ reasoning, streaming = false, settled = false }
   // started). Drives the pulse + auto-expand.
   const active = streaming && !settled
 
-  const [expanded, setExpanded] = useState(active)
-  const userToggled = useRef(false)
+  const [disclosure, setDisclosure] = useState(() => createReasoningDisclosure(active))
   useEffect(() => {
-    // Auto open while reasoning, auto close once it settles — unless the user
-    // has taken manual control of the disclosure.
-    if (userToggled.current) return
-    setExpanded(active)
+    // Synchronise only when the reasoning phase changes. Token/tool updates in
+    // the same phase keep the user's manual open/closed choice intact.
+    setDisclosure((current) => syncReasoningDisclosure(current, active))
   }, [active])
+  const expanded = disclosure.expanded
+  const contentId = useId()
 
   if (items.length === 0) return null
 
@@ -77,11 +82,8 @@ export function ReasoningTrace({ reasoning, streaming = false, settled = false }
       <button
         type="button"
         aria-expanded={expanded}
-        aria-controls="reasoning-content"
-        onClick={() => {
-          userToggled.current = true
-          setExpanded((v) => !v)
-        }}
+        aria-controls={contentId}
+        onClick={() => setDisclosure(toggleReasoningDisclosure)}
         className="flex items-center gap-1.5 -ml-1 px-1 py-0.5 text-left interactive rounded-[6px] text-[var(--color-fg-subtle)] hover:text-[var(--color-fg-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
       >
         <Brain
@@ -103,13 +105,13 @@ export function ReasoningTrace({ reasoning, streaming = false, settled = false }
       {/* grid 0fr→1fr animates height without measuring; the global
           prefers-reduced-motion rule neutralises the transition automatically. */}
       <div
-        id="reasoning-content"
+        id={contentId}
         className={cn(
           'grid transition-[grid-template-rows] duration-300 ease-[var(--ease-out)]',
           expanded ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]',
         )}
       >
-        <div className="overflow-clip">
+        <div className="min-h-0 overflow-clip" aria-hidden={!expanded} inert={!expanded}>
           <div className="space-y-2 ml-[6px] mt-1.5 pl-3.5 border-l border-[var(--color-divider)]">
             {items.map((it) => {
               if (it.kind === 'thinking' || it.kind === 'narration') {

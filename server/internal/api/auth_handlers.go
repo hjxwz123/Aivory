@@ -9,6 +9,7 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -29,6 +30,47 @@ var (
 	emailVerificationCodeTTL = envcfg.Dur("AIVORY_API_EMAIL_VERIFICATION_CODE_TTL", 10*time.Minute)
 	passwordResetCodeTTL     = envcfg.Dur("AIVORY_API_PASSWORD_RESET_CODE_TTL", 10*time.Minute)
 )
+
+const emailSendCooldown = 120 * time.Second
+
+// reserveEmailSend atomically claims the recipient+purpose delivery window.
+// Both public reset endpoints use purpose=reset, while registration and the
+// verification resend use purpose=verify, so switching endpoints or IPs cannot
+// send another email before the same 120-second window expires. Callers invoke
+// this before account lookup as well, keeping existing/non-existing recipients
+// indistinguishable on repeated requests.
+func reserveEmailSend(d Deps, recipient, purpose string) (retryAfter int, allowed bool) {
+	retryAfter = int(emailSendCooldown / time.Second)
+	if d.Cache == nil {
+		return retryAfter, false
+	}
+	recipient = strings.ToLower(strings.TrimSpace(recipient))
+	key := "mailcooldown:" + purpose + ":" + recipient
+	if n := d.Cache.Incr(key, emailSendCooldown); n == 1 {
+		return retryAfter, true
+	}
+	if ttl, ok := d.Cache.TTL(key); ok {
+		seconds := int((ttl + time.Second - 1) / time.Second)
+		if seconds < 1 {
+			seconds = 1
+		}
+		if seconds < retryAfter {
+			retryAfter = seconds
+		}
+	}
+	return retryAfter, false
+}
+
+func writeEmailCooldown(w http.ResponseWriter, retryAfter int) {
+	if retryAfter < 1 {
+		retryAfter = 1
+	}
+	w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
+	writeJSON(w, http.StatusTooManyRequests, map[string]any{
+		"error":       errEmailCooldown.Error(),
+		"retry_after": retryAfter,
+	})
+}
 
 // registerCodeFailure counts wrong guesses of a verify/reset code per email and,
 // once maxCodeAttempts is hit, deletes (burns) the code so it can no longer be
@@ -254,27 +296,35 @@ func registerHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		_ = json.Unmarshal(raw, &verifyRequired)
 	}
 	if verifyRequired {
-		code := genCode6()
-		d.Cache.Set("verify:"+req.Email, code, emailVerificationCodeTTL)
 		_ = store.SetUserStatus(r.Context(), d.DB, user.ID, "pending")
-		// Send off the request path: even with timeouts a slow SMTP server would
-		// otherwise make "Create account" spin for seconds. The code is already
-		// cached, so the client can move to the code screen immediately; a failed
-		// send is logged and the user can hit "resend".
-		email := req.Email
-		go func() {
-			if err := d.Mailer.SendCode(email, code, "verify"); err != nil {
-				d.Logger.Printf("[mail] failed to send verification to %s: %v", email, err)
-			}
-		}()
-		writeJSON(w, 200, map[string]any{"verification_required": true, "email": req.Email})
+		retryAfter, allowed := reserveEmailSend(d, req.Email, "verify")
+		if allowed {
+			code := genCode6()
+			d.Cache.Set("verify:"+req.Email, code, emailVerificationCodeTTL)
+			// Send off the request path: even with timeouts a slow SMTP server would
+			// otherwise make "Create account" spin for seconds. The code is already
+			// cached, so the client can move to the code screen immediately; a failed
+			// send is logged and the user can retry after the cooldown.
+			email := req.Email
+			go func() {
+				if err := d.Mailer.SendCode(email, code, "verify"); err != nil {
+					d.Logger.Printf("[mail] failed to send verification to %s: %v", email, err)
+				}
+			}()
+		}
+		writeJSON(w, 200, map[string]any{
+			"verification_required": true,
+			"email":                 req.Email,
+			"retry_after":           retryAfter,
+		})
 		return
 	}
 	finaliseSession(d, w, r, user, 0)
 }
 
-// sendCodeHandler resends a 6-digit verification code for a pending account.
-// Rate-limited at the router level (3/min per IP).
+// sendCodeHandler resends a 6-digit verification or password-reset code.
+// The router's IP budget is supplemented by the authoritative recipient and
+// purpose cooldown shared with registration and forgotPasswordHandler.
 func sendCodeHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Email   string `json:"email"`
@@ -285,15 +335,26 @@ func sendCodeHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
+	req.Purpose = strings.ToLower(strings.TrimSpace(req.Purpose))
 	if req.Purpose == "" {
 		req.Purpose = "verify"
 	}
+	if req.Purpose != "verify" && req.Purpose != "reset" {
+		writeError(w, http.StatusBadRequest, errInvalidInput)
+		return
+	}
+	retryAfter, allowed := reserveEmailSend(d, req.Email, req.Purpose)
+	if !allowed {
+		writeEmailCooldown(w, retryAfter)
+		return
+	}
 
-	// Always return 200 to avoid email-enumeration leaks. We only actually
-	// send when the account exists.
+	// For an accepted cooldown reservation, return the same success response
+	// whether or not the account exists. Nonexistent/invalid-state recipients
+	// consume the same cooldown too, avoiding email-enumeration leaks.
 	user, err := store.FindUserByEmail(r.Context(), d.DB, req.Email)
 	if err != nil {
-		writeJSON(w, 200, map[string]bool{"ok": true})
+		writeJSON(w, 200, map[string]any{"ok": true, "retry_after": retryAfter})
 		return
 	}
 
@@ -302,7 +363,7 @@ func sendCodeHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		d.Cache.Set("reset:"+req.Email, code, passwordResetCodeTTL)
 	} else {
 		if user.Status != "pending" {
-			writeJSON(w, 200, map[string]bool{"ok": true})
+			writeJSON(w, 200, map[string]any{"ok": true, "retry_after": retryAfter})
 			return
 		}
 		d.Cache.Set("verify:"+req.Email, code, emailVerificationCodeTTL)
@@ -310,7 +371,7 @@ func sendCodeHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	if err := d.Mailer.SendCode(req.Email, code, req.Purpose); err != nil {
 		d.Logger.Printf("[mail] failed to send %s code to %s: %v", req.Purpose, req.Email, err)
 	}
-	writeJSON(w, 200, map[string]bool{"ok": true})
+	writeJSON(w, 200, map[string]any{"ok": true, "retry_after": retryAfter})
 }
 
 // verifyEmailHandler activates a pending account using a 6-digit code.
@@ -347,8 +408,9 @@ func verifyEmailHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	finaliseSession(d, w, r, user, 0)
 }
 
-// forgotPasswordHandler sends a 6-digit reset code to the email.
-// Always returns 200 to prevent email enumeration.
+// forgotPasswordHandler sends a 6-digit reset code to the email. Existing and
+// nonexistent recipients receive the same success or cooldown response so the
+// endpoint cannot be used to enumerate accounts.
 func forgotPasswordHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Email string `json:"email"`
@@ -358,6 +420,11 @@ func forgotPasswordHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
+	retryAfter, allowed := reserveEmailSend(d, req.Email, "reset")
+	if !allowed {
+		writeEmailCooldown(w, retryAfter)
+		return
+	}
 
 	if user, err := store.FindUserByEmail(r.Context(), d.DB, req.Email); err == nil && user != nil {
 		code := genCode6()
@@ -366,7 +433,7 @@ func forgotPasswordHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 			d.Logger.Printf("[mail] failed to send reset code to %s: %v", req.Email, err)
 		}
 	}
-	writeJSON(w, 200, map[string]bool{"ok": true})
+	writeJSON(w, 200, map[string]any{"ok": true, "retry_after": retryAfter})
 }
 
 // resetPasswordHandler accepts email + code + new password and updates the
