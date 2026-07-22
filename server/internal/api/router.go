@@ -519,6 +519,7 @@ func corsMiddleware(allowed []string, next http.Handler) http.Handler {
 			// authenticated call — omitting them breaks all cross-origin API use
 			// (i.e. serving the app on a domain other than the API's origin).
 			w.Header().Set("Access-Control-Allow-Headers", "content-type, authorization, x-req-ts, x-req-nonce, x-req-token, x-device-id")
+			w.Header().Set("Access-Control-Expose-Headers", "Retry-After")
 			w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PATCH,PUT,DELETE,OPTIONS")
 			w.Header().Set("Access-Control-Max-Age", strconv.Itoa(int(corsPreflightMaxAge.Seconds())))
 		}

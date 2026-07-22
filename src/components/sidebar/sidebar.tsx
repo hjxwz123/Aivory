@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import {
   Search,
@@ -32,6 +32,7 @@ import {
   WorkspaceMembersDialog,
   WorkspaceMenuItems,
 } from '@/components/sidebar/workspace-menu'
+import { SidebarResizeHandle } from '@/components/sidebar/sidebar-resize-handle'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { initials } from '@/components/ui/avatar.utils'
 import { Tooltip } from '@/components/ui/tooltip'
@@ -183,7 +184,11 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
   )
   const setOpen = useCommandMenu((s) => s.setOpen)
   const collapsed = useSettings((s) => s.sidebarCollapsed) && variant === 'desktop'
+  const sidebarWidth = useSettings((s) => s.sidebarWidth)
+  const setSidebarWidth = useSettings((s) => s.setSidebarWidth)
   const toggleSidebar = useSettings((s) => s.toggleSidebar)
+  const sidebarRef = useRef<HTMLElement>(null)
+  const sidebarId = useId()
   const [newProjectOpen, setNewProjectOpen] = useState(false)
 
   // Reveal the ACTIVE conversation in the history list whenever the user lands
@@ -246,14 +251,18 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
 
   return (
     <aside
+      id={sidebarId}
+      ref={sidebarRef}
       data-variant={variant}
       data-collapsed={collapsed ? 'true' : 'false'}
       aria-label={t('sidebar.navAria', { defaultValue: 'Conversation navigation' })}
+      style={variant === 'desktop' && !collapsed ? { width: `${sidebarWidth}px` } : undefined}
       className={cn(
-        'flex flex-col h-full bg-[var(--color-sidebar-bg)]',
-        variant === 'desktop' && (collapsed ? 'w-[3.5rem]' : 'w-[17.5rem]'),
+        'relative flex h-full shrink-0 flex-col bg-[var(--color-sidebar-bg)]',
+        variant === 'desktop' && 'border-r border-[var(--color-sidebar-border)]',
+        variant === 'desktop' && collapsed && 'w-[var(--layout-sidebar-w-collapsed)]',
         variant === 'sheet' && 'w-full',
-        'transition-[width] duration-[220ms] ease-[var(--ease-out)]',
+        'transition-[width] duration-[var(--duration-base)] ease-[var(--ease-out)] data-[resizing=true]:transition-none',
       )}
     >
       {/* Header — inside a workspace the brand slot shows the WORKSPACE NAME
@@ -568,6 +577,18 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
       </div>
 
       <NewProjectDialog open={newProjectOpen} onOpenChange={setNewProjectOpen} />
+
+      {/* Keep the visual separator at the edge, but place it last in DOM order so
+          keyboard focus reaches the sidebar's navigation before its resize control. */}
+      {variant === 'desktop' && !collapsed ? (
+        <SidebarResizeHandle
+          label={t('sidebar.resize')}
+          controlsId={sidebarId}
+          targetRef={sidebarRef}
+          width={sidebarWidth}
+          onCommit={setSidebarWidth}
+        />
+      ) : null}
     </aside>
   )
 }

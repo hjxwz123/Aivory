@@ -7,6 +7,7 @@
 
 export interface ApiError {
   error: string
+  retry_after?: number
 }
 
 export interface ApiUser {

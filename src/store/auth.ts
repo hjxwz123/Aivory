@@ -55,6 +55,8 @@ interface AuthState {
   setupProbed: boolean
   /** Set when registration returns verification_required — drives the code UI. */
   pendingVerification: string | null
+  /** Server-authoritative delay before the verification email may be resent. */
+  pendingVerificationRetryAfter: number
   /** Set when password login returns totp_required — drives the 2FA code UI. */
   pendingTwoFactor: { ticket: string } | null
 
@@ -90,6 +92,7 @@ export const useAuth = create<AuthState>((set, get) => ({
   needsSetup: false,
   setupProbed: false,
   pendingVerification: null,
+  pendingVerificationRetryAfter: 0,
   pendingTwoFactor: null,
 
   setUser(user) {
@@ -106,7 +109,7 @@ export const useAuth = create<AuthState>((set, get) => ({
     set({ signupOpen: open })
   },
   clearPendingVerification() {
-    set({ pendingVerification: null })
+    set({ pendingVerification: null, pendingVerificationRetryAfter: 0 })
   },
   clearPendingTwoFactor() {
     set({ pendingTwoFactor: null })
@@ -208,7 +211,7 @@ export const useAuth = create<AuthState>((set, get) => ({
       // The backend signals an unverified account with the exact code
       // "email_not_verified" — flip to the verification flow.
       if (msg === 'email_not_verified') {
-        set({ error: msg, status: 'unauthenticated', pendingVerification: email })
+        set({ error: msg, status: 'unauthenticated', pendingVerification: email, pendingVerificationRetryAfter: 0 })
         return false
       }
       set({ error: msg, status: 'unauthenticated' })
@@ -248,7 +251,11 @@ export const useAuth = create<AuthState>((set, get) => ({
       const resp = await authApi.register(email, password, name, captchaToken)
       if (!isLatestAuthOp(seq)) return false
       if ('verification_required' in resp && resp.verification_required) {
-        set({ pendingVerification: resp.email as string, status: 'unauthenticated' })
+        set({
+          pendingVerification: resp.email as string,
+          pendingVerificationRetryAfter: resp.retry_after,
+          status: 'unauthenticated',
+        })
         return 'verify'
       }
       const auth = resp as { user: ApiUser; access_token: string }

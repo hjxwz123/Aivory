@@ -21,6 +21,9 @@ type Cache interface {
 	Get(key string) (string, bool)
 	Set(key, value string, ttl time.Duration)
 	Delete(key string)
+	// TTL returns the remaining lifetime of an expiring key. The boolean is
+	// false when the key is missing, expired, or has no expiry.
+	TTL(key string) (time.Duration, bool)
 	Incr(key string, ttl time.Duration) int64
 	// IncrBy atomically adds delta to a key (creating it with the TTL if absent),
 	// flooring at 0. Returns the new value. Used for non-negative accumulators
@@ -102,6 +105,21 @@ func (m *memory) Delete(key string) {
 	m.mu.Lock()
 	delete(m.store, key)
 	m.mu.Unlock()
+}
+
+func (m *memory) TTL(key string) (time.Duration, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	e, ok := m.store[key]
+	if !ok || e.exp <= 0 {
+		return 0, false
+	}
+	remaining := time.Until(time.Unix(0, e.exp))
+	if remaining <= 0 {
+		delete(m.store, key)
+		return 0, false
+	}
+	return remaining, true
 }
 
 func (m *memory) Incr(key string, ttl time.Duration) int64 {

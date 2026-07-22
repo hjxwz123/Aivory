@@ -752,8 +752,8 @@ export default function Landing() {
             <FooterCol
               title={t('nav:legal')}
               links={[
-                [t('nav:privacy'), '#'],
-                [t('nav:terms'), '#'],
+                [t('nav:privacy'), '/privacy'],
+                [t('nav:terms'), '/terms'],
               ]}
             />
           </div>

@@ -272,6 +272,7 @@
   "sidebar": {
     "newChat": "Nouvelle discussion",
     "search": "Rechercher",
+    "resize": "Redimensionner la barre latérale",
     "actions": "Actions de la conversation",
     "rename": "Renommer",
     "renameTitle": "Renommer la conversation",

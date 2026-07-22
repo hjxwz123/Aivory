@@ -10,6 +10,7 @@ import { Field } from '@/components/ui/label'
 import { toast } from '@/hooks/use-toast'
 import { authApi, ApiError } from '@/api'
 import { authErrorText } from '@/lib/auth-errors'
+import { emailRetryAfterFromBody, useEmailCooldown } from '@/hooks/use-email-cooldown'
 
 const ease: [number, number, number, number] = [0.2, 0.8, 0.2, 1]
 const stagger = { hidden: {}, visible: { transition: { staggerChildren: 0.06, delayChildren: 0.04 } } }
@@ -30,6 +31,7 @@ export default function ForgotPassword() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | undefined>()
   const [resending, setResending] = useState(false)
+  const { remaining: resendCooldown, start: startResendCooldown } = useEmailCooldown()
 
   async function submitEmail(e: React.FormEvent) {
     e.preventDefault()
@@ -40,9 +42,12 @@ export default function ForgotPassword() {
     setError(undefined)
     setLoading(true)
     try {
-      await authApi.forgotPassword(email)
-    } catch {
+      const resp = await authApi.forgotPassword(email)
+      startResendCooldown(resp.retry_after)
+    } catch (err) {
       // Always proceed — backend returns 200 to prevent enumeration
+      const retryAfter = err instanceof ApiError ? emailRetryAfterFromBody(err.body) : 0
+      if (retryAfter > 0) startResendCooldown(retryAfter)
     }
     setLoading(false)
     setStep('code')
@@ -70,12 +75,15 @@ export default function ForgotPassword() {
   }
 
   async function resendCode() {
+    if (resending || resendCooldown > 0) return
     setResending(true)
     try {
-      await authApi.sendCode(email, 'reset')
+      const resp = await authApi.sendCode(email, 'reset')
+      startResendCooldown(resp.retry_after)
       toast.success(t('forgot.codeSent'))
-    } catch {
-      // silent
+    } catch (err) {
+      const retryAfter = err instanceof ApiError ? emailRetryAfterFromBody(err.body) : 0
+      if (retryAfter > 0) startResendCooldown(retryAfter)
     } finally {
       setResending(false)
     }
@@ -179,10 +187,12 @@ export default function ForgotPassword() {
             <button
               type="button"
               onClick={() => void resendCode()}
-              disabled={resending}
-              className="text-xs text-[var(--color-accent)] hover:text-[var(--color-accent-hover)] disabled:opacity-50"
+              disabled={resending || resendCooldown > 0}
+              className="min-w-28 text-xs tabular-nums text-[var(--color-accent)] hover:text-[var(--color-accent-hover)] disabled:opacity-50"
             >
-              {t('forgot.resendCode')}
+              {resendCooldown > 0
+                ? t('forgot.resendCountdown', { seconds: resendCooldown })
+                : t('forgot.resendCode')}
             </button>
           </motion.div>
         </motion.form>

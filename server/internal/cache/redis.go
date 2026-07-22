@@ -17,6 +17,14 @@ import (
 // redisOpTimeout bounds every per-operation Redis command.
 var redisOpTimeout = 3 * time.Second
 
+var incrWithTTLScript = redis.NewScript(`
+local n = redis.call("INCR", KEYS[1])
+if n == 1 and tonumber(ARGV[1]) > 0 then
+  redis.call("PEXPIRE", KEYS[1], ARGV[1])
+end
+return n
+`)
+
 type redisCache struct {
 	rdb *redis.Client
 	ctx context.Context
@@ -61,18 +69,25 @@ func (c *redisCache) Delete(key string) {
 	_ = c.rdb.Del(ctx, key).Err()
 }
 
+func (c *redisCache) TTL(key string) (time.Duration, bool) {
+	ctx, cancel := context.WithTimeout(c.ctx, redisOpTimeout)
+	defer cancel()
+	ttl, err := c.rdb.PTTL(ctx, key).Result()
+	if err != nil || ttl <= 0 {
+		return 0, false
+	}
+	return ttl, true
+}
+
 // Incr atomically increments key. The TTL is applied only when the key is first
 // created (result == 1), giving a fixed-window counter — matching the in-memory
 // implementation's semantics (the window does not slide on each hit).
 func (c *redisCache) Incr(key string, ttl time.Duration) int64 {
 	ctx, cancel := context.WithTimeout(c.ctx, redisOpTimeout)
 	defer cancel()
-	n, err := c.rdb.Incr(ctx, key).Result()
+	n, err := incrWithTTLScript.Run(ctx, c.rdb, []string{key}, ttl.Milliseconds()).Int64()
 	if err != nil {
 		return 0
-	}
-	if n == 1 && ttl > 0 {
-		_ = c.rdb.Expire(ctx, key, ttl).Err()
 	}
 	return n
 }

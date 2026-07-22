@@ -272,6 +272,7 @@
   "sidebar": {
     "newChat": "新しいチャット",
     "search": "検索",
+    "resize": "サイドバーの幅を変更",
     "actions": "会話の操作",
     "rename": "名前を変更",
     "renameTitle": "会話の名前を変更",

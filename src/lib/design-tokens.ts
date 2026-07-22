@@ -75,7 +75,9 @@ export const zIndex = {
 } as const
 
 export const layout = {
+  sidebarWidthMin: '14rem',
   sidebarWidth: '17.5rem',
+  sidebarWidthMax: '25rem',
   sidebarWidthCollapsed: '3.5rem',
   topbarHeight: '3.5rem',
   topbarHeightMobile: '3rem',
