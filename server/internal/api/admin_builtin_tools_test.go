@@ -145,12 +145,12 @@ func TestPublicModelsExposeResolvedBuiltinToolCapabilities(t *testing.T) {
 	create := func(requestID, toolMode string, builtinTools json.RawMessage) *store.Model {
 		t.Helper()
 		model, err := store.CreateModel(t.Context(), db, store.Model{
-			ChannelID:   "ch1",
-			Kind:        "chat",
-			RequestID:   requestID,
-			Label:       requestID,
-			Enabled:     true,
-			ToolMode:    toolMode,
+			ChannelID:    "ch1",
+			Kind:         "chat",
+			RequestID:    requestID,
+			Label:        requestID,
+			Enabled:      true,
+			ToolMode:     toolMode,
 			BuiltinTools: builtinTools,
 		})
 		if err != nil {
@@ -162,6 +162,13 @@ func TestPublicModelsExposeResolvedBuiltinToolCapabilities(t *testing.T) {
 	customModel := create("custom", "native", json.RawMessage(`["web_search","python_execute","removed_tool"]`))
 	noneModel := create("none", "native", json.RawMessage(`[]`))
 	modeNoneModel := create("mode-none", "none", nil)
+	nativeOfficialModel := create("native-official", "native", json.RawMessage(`[]`))
+	configuredOfficial := `[{"name":"hosted_search","icon":"search","request":{"tools":[{"type":"web_search"}]}}]`
+	for _, id := range []string{modeNoneModel.ID, nativeOfficialModel.ID} {
+		if _, err := db.Exec(`UPDATE models SET official_tools=? WHERE id=?`, configuredOfficial, id); err != nil {
+			t.Fatalf("configure official tools for %s: %v", id, err)
+		}
+	}
 	if err := store.SetSetting(db, "disabled_tools", []string{"python_execute"}); err != nil {
 		t.Fatal(err)
 	}
@@ -173,16 +180,19 @@ func TestPublicModelsExposeResolvedBuiltinToolCapabilities(t *testing.T) {
 	}
 	var payload struct {
 		Models []struct {
-			ID           string   `json:"id"`
-			BuiltinTools []string `json:"builtin_tools"`
+			ID            string           `json:"id"`
+			BuiltinTools  []string         `json:"builtin_tools"`
+			OfficialTools []map[string]any `json:"official_tools"`
 		} `json:"models"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
 	}
 	got := make(map[string][]string, len(payload.Models))
+	gotOfficial := make(map[string][]map[string]any, len(payload.Models))
 	for _, model := range payload.Models {
 		got[model.ID] = model.BuiltinTools
+		gotOfficial[model.ID] = model.OfficialTools
 	}
 
 	expectedDefault := []string{}
@@ -201,6 +211,12 @@ func TestPublicModelsExposeResolvedBuiltinToolCapabilities(t *testing.T) {
 		if tools, exists := got[id]; !exists || tools == nil || len(tools) != 0 {
 			t.Fatalf("deny-all capabilities for %s=%v exists=%v, want non-nil []", id, tools, exists)
 		}
+	}
+	if tools := gotOfficial[modeNoneModel.ID]; tools == nil || len(tools) != 0 {
+		t.Fatalf("tool_mode=none official capabilities=%v, want non-nil []", tools)
+	}
+	if tools := gotOfficial[nativeOfficialModel.ID]; len(tools) != 1 || tools[0]["name"] != "hosted_search" {
+		t.Fatalf("native official capabilities=%v, want hosted_search", tools)
 	}
 }
 

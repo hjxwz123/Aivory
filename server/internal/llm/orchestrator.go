@@ -619,7 +619,12 @@ func (o *Orchestrator) buildFallbackRequest(ctx context.Context, base UnifiedCha
 	if fallbackToolMode == "" {
 		fallbackToolMode = "native"
 	}
-	if base.ToolModeOfficial {
+	// A model configured with tool_mode=none is an administrator-level ceiling
+	// over both platform and provider-hosted tools. A fallback must never broaden
+	// that policy merely because the primary request used Official mode.
+	fallbackOfficialMode := base.ToolModeOfficial && fallbackToolMode != "none"
+	req.ToolModeOfficial = fallbackOfficialMode
+	if fallbackOfficialMode {
 		// Keep the user's explicit official selection, but re-gate it against the
 		// fallback model's own allowlist and request definitions.
 		req.OfficialToolNames, req.OfficialToolRequests = selectOfficialToolRequests(m.OfficialTools, base.OfficialToolNames)
@@ -649,7 +654,7 @@ func (o *Orchestrator) buildFallbackRequest(ctx context.Context, base UnifiedCha
 		// admin behavior prompt (including the masked Fast label). Only capability-
 		// dependent guidance is rebuilt for the model that will actually serve it.
 		fallbackOpts.ToolMode = "none"
-		if !base.ToolModeOfficial && len(req.Tools) > 0 {
+		if !fallbackOfficialMode && len(req.Tools) > 0 {
 			fallbackOpts.ToolMode = fallbackToolMode
 		}
 		fallbackOpts.ToolNames = toolDefNames(req.Tools)
@@ -1293,10 +1298,15 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// 5. Resolve tools for this model BEFORE composing the system prompt so the
 	//    tool-guidance segment (and the §4.13 prompt preamble) match the real,
 	//    enabled tool list instead of a hardcoded set.
-	// Official mode is explicit per turn. Intersect the requested names with the
+	// Official mode is explicit per turn, but tool_mode=none remains the model's
+	// administrator-level deny-all ceiling. Intersect the requested names with the
 	// resolved model's configured definitions, preserving model configuration
 	// order so scalar override precedence cannot be reordered by a client.
-	officialMode := req.ToolMode == ToolModeOfficial
+	toolMode := model.ToolMode
+	if toolMode == "" {
+		toolMode = "native"
+	}
+	officialMode := req.ToolMode == ToolModeOfficial && toolMode != "none"
 	officialTools, officialRequests := selectOfficialToolRequests(model.OfficialTools, req.OfficialToolNames)
 	if !officialMode {
 		officialTools = nil
@@ -1313,10 +1323,6 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		req.NoTools = true
 	}
 	toolDefs := []ToolDef{}
-	toolMode := model.ToolMode
-	if toolMode == "" {
-		toolMode = "native"
-	}
 	if toolMode != "none" && !officialMode {
 		toolDefs = filterModelBuiltinTools(o.filterDisabledTools(o.tools.List(model.ID)), builtinTools)
 		// §fast-mode withholds python_execute (no sandbox on a fast turn) — drop it

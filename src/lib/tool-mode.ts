@@ -10,14 +10,19 @@ export interface ToolModeCapabilities {
   official: boolean
 }
 
-/** Stable menu order. Unsupported concrete modes stay visible but disabled so
- * the drill-down hierarchy does not shift between models. */
+/** Stable order for tool modes that the current model actually supports. */
 export const TOOL_MODE_MENU_ORDER: readonly ToolMode[] = ['auto', 'official', 'disabled', 'enabled']
 
 export function toolModeAvailable(mode: ToolMode, capabilities: ToolModeCapabilities): boolean {
   if (mode === 'official') return capabilities.official
   if (mode === 'enabled') return capabilities.builtin
   return true
+}
+
+/** Unsupported policies are omitted from user menus instead of being rendered
+ * as disabled rows. This keeps the control limited to actions that can work. */
+export function visibleToolModes(capabilities: ToolModeCapabilities): ToolMode[] {
+  return TOOL_MODE_MENU_ORDER.filter((mode) => toolModeAvailable(mode, capabilities))
 }
 
 /** A persisted per-turn/default choice can outlive a model switch. Concrete
@@ -35,6 +40,17 @@ export function modelAllowsToolModeSelection(
 ): boolean {
   // Missing values preserve compatibility with older model-list responses.
   return modelToolMode !== 'none'
+}
+
+/** A model-level `none` policy is authoritative for every tool family,
+ * including provider-native tools that may remain in an old saved definition. */
+export function resolveModelToolModeCapabilities(
+  modelToolMode: ModelToolMode | null | undefined,
+  capabilities: ToolModeCapabilities,
+): ToolModeCapabilities {
+  return modelAllowsToolModeSelection(modelToolMode)
+    ? capabilities
+    : { builtin: false, official: false }
 }
 
 /**
