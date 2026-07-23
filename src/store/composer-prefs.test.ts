@@ -14,6 +14,7 @@ function resetPrefs() {
     toolMode: 'auto',
     forceWebSearch: false,
     defaultToolMode: 'auto',
+    officialToolNamesByModel: {},
     paramValuesByModel: {},
     draftsByScope: {},
   })
@@ -70,6 +71,22 @@ describe('composer tool mode', () => {
     expect(useComposerPrefs.getState().forceWebSearch).toBe(false)
     expect(resolveArmedTurnFlags().webSearch).toBeUndefined()
   })
+
+  it('keeps official selections isolated by model and removes empty selections', () => {
+    const prefs = useComposerPrefs.getState()
+    prefs.setOfficialToolNames('model-a', ['web_search', 'web_search', ' code_interpreter '])
+    useComposerPrefs.getState().setOfficialToolNames('model-b', ['image_generation'])
+
+    expect(useComposerPrefs.getState().officialToolNamesByModel).toEqual({
+      'model-a': ['web_search', 'code_interpreter'],
+      'model-b': ['image_generation'],
+    })
+
+    useComposerPrefs.getState().setOfficialToolNames('model-a', [])
+    expect(useComposerPrefs.getState().officialToolNamesByModel).toEqual({
+      'model-b': ['image_generation'],
+    })
+  })
 })
 
 describe('model tool capability', () => {
@@ -89,6 +106,7 @@ describe('tool mode migration', () => {
     expect(resolveDefaultToolMode({ tool_mode_default: 'auto', disable_tools_default: true })).toBe('auto')
     expect(resolveDefaultToolMode({ tool_mode_default: 'disabled', disable_tools_default: false })).toBe('disabled')
     expect(resolveDefaultToolMode({ tool_mode_default: 'enabled', disable_tools_default: true })).toBe('enabled')
+    expect(resolveDefaultToolMode({ tool_mode_default: 'official', disable_tools_default: true })).toBe('official')
   })
 
   it('preserves explicit legacy account choices', () => {
@@ -118,6 +136,7 @@ describe('tool mode migration', () => {
       verify: true,
       toolMode: 'auto',
       defaultToolMode: 'auto',
+      officialToolNamesByModel: {},
       forceWebSearch: false,
       paramValuesByModel: { model_1: { temperature: 0.4, thinking: true } },
       draftsByScope: { 'new-chat': 'unfinished question' },
@@ -126,10 +145,11 @@ describe('tool mode migration', () => {
 })
 
 describe('turn tool policy propagation', () => {
-  it('keeps all three explicit policies distinct', () => {
+  it('keeps all four explicit policies distinct', () => {
     expect(resolveTurnToolMode('auto')).toBe('auto')
     expect(resolveTurnToolMode('disabled')).toBe('disabled')
     expect(resolveTurnToolMode('enabled')).toBe('enabled')
+    expect(resolveTurnToolMode('official')).toBe('official')
   })
 
   it('normalizes legacy/internal omissions to an explicit automatic policy', () => {
@@ -153,6 +173,35 @@ describe('turn tool policy propagation', () => {
     expect(resolveToolRequestFlags('enabled', { webSearch: true })).toEqual({
       toolMode: 'enabled',
       webSearch: undefined,
+    })
+  })
+
+  it('serializes selected official names only with official mode', () => {
+    expect(
+      resolveToolRequestFlags('official', {
+        officialToolNames: ['web_search', 'web_search', ' code_interpreter ', ''],
+      }),
+    ).toEqual({
+      toolMode: 'official',
+      webSearch: undefined,
+      officialToolNames: ['web_search', 'code_interpreter'],
+    })
+    expect(resolveToolRequestFlags('enabled', { officialToolNames: ['web_search'] })).toEqual({
+      toolMode: 'enabled',
+      webSearch: undefined,
+    })
+  })
+
+  it('keeps an empty official selection explicit instead of falling back to defaults', () => {
+    expect(resolveToolRequestFlags('official')).toEqual({
+      toolMode: 'official',
+      webSearch: undefined,
+      officialToolNames: [],
+    })
+    expect(resolveToolRequestFlags('official', { officialToolNames: [] })).toEqual({
+      toolMode: 'official',
+      webSearch: undefined,
+      officialToolNames: [],
     })
   })
 })

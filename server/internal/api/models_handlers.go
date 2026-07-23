@@ -130,12 +130,17 @@ func listSkillsPublicHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 // fields. The default model id from settings is also returned so the
 // frontend's model picker can default to it.
 func modelsResponse(d Deps, r *http.Request, models []store.Model) map[string]any {
+	type officialToolItem struct {
+		Name string `json:"name"`
+		Icon string `json:"icon"`
+	}
 	type item struct {
 		ID              string          `json:"id"`
 		Label           string          `json:"label"`
 		Description     string          `json:"description"`
 		Icon            string          `json:"icon"`
 		Kind            string          `json:"kind"`
+		Enabled         bool            `json:"enabled"`
 		Vision          bool            `json:"vision"`
 		Stream          bool            `json:"stream"`
 		ResearchEnabled bool            `json:"research_enabled"`
@@ -145,6 +150,10 @@ func modelsResponse(d Deps, r *http.Request, models []store.Model) map[string]an
 		SortOrder       int             `json:"sort_order"`
 		Currency        string          `json:"currency"`
 		Tags            json.RawMessage `json:"tags"`
+		// OfficialTools intentionally omits each definition's upstream request
+		// JSON. Users need names/icons for the per-turn picker, while provider wire
+		// configuration remains admin-only.
+		OfficialTools []officialToolItem `json:"official_tools"`
 		// UsesCredits is true when this model has NO free allotment left for the
 		// caller's group (none configured, or the per-cycle count is used up) —
 		// the picker shows the credit multiplier instead of a lock (§ credits).
@@ -191,12 +200,19 @@ func modelsResponse(d Deps, r *http.Request, models []store.Model) map[string]an
 		if usesCredits {
 			creditsPerImage = imageCreditCost(m, creditsPerUSD)
 		}
+		officialTools := []officialToolItem{}
+		if definitions, err := store.ParseOfficialTools(m.OfficialTools); err == nil {
+			for _, definition := range definitions {
+				officialTools = append(officialTools, officialToolItem{Name: definition.Name, Icon: definition.Icon})
+			}
+		}
 		items = append(items, item{
 			ID: m.ID, Label: m.Label, Description: m.Description, Icon: m.Icon,
-			Kind: m.Kind, Vision: m.Vision, Stream: m.Stream, ResearchEnabled: m.ResearchEnabled, ToolMode: m.ToolMode,
+			Kind: m.Kind, Enabled: m.Enabled, Vision: m.Vision, Stream: m.Stream, ResearchEnabled: m.ResearchEnabled, ToolMode: m.ToolMode,
 			ParamControls: m.ParamControls, ChannelID: m.ChannelID, SortOrder: m.SortOrder,
 			Currency:        m.Currency,
 			Tags:            tags,
+			OfficialTools:   officialTools,
 			UsesCredits:     usesCredits,
 			Multiplier:      creditMultiplier(m),
 			CreditsPerImage: creditsPerImage,

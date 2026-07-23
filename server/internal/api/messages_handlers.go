@@ -81,12 +81,16 @@ type postMessageReq struct {
 	// answer. No-op unless an admin configured `verify_model_id`.
 	Verify bool `json:"verify"`
 	// ToolMode is the per-turn tool policy: auto asks the configured task model,
-	// disabled exposes no tools, and enabled preserves the model's configured tool
-	// support. RawMessage distinguishes an omitted legacy request from explicit
-	// invalid values such as null, an empty string, or a non-string. NoTools
+	// disabled exposes no tools, enabled preserves the model's system tools, and
+	// official exposes only OfficialToolNames. RawMessage distinguishes an omitted
+	// legacy request from explicitly invalid values such as null, an empty string,
+	// or a non-string. NoTools
 	// remains a backwards-compatible alias; an explicit ToolMode always wins.
 	ToolMode json.RawMessage `json:"tool_mode"`
 	NoTools  bool            `json:"no_tools"`
+	// OfficialToolNames selects a subset of the resolved model's admin-defined
+	// official tools. It is honored only with tool_mode="official".
+	OfficialToolNames []string `json:"official_tool_names"`
 	// WebSearch forces a server-side non-tool web search and is only meaningful
 	// when tools are explicitly disabled.
 	WebSearch bool `json:"web_search"`
@@ -106,13 +110,13 @@ type postMessageReq struct {
 
 func validTurnToolMode(mode string) bool {
 	switch mode {
-	case llm.ToolModeAuto, llm.ToolModeDisabled, llm.ToolModeEnabled:
+	case llm.ToolModeAuto, llm.ToolModeDisabled, llm.ToolModeEnabled, llm.ToolModeOfficial:
 		return true
 	}
 	return false
 }
 
-// resolveTurnToolMode maps the legacy no_tools boolean onto the tri-state
+// resolveTurnToolMode maps the legacy no_tools boolean onto the four-state
 // protocol. An omitted/false legacy flag means enabled so old clients retain
 // their previous behavior; new clients send tool_mode explicitly (normally
 // auto). Invalid explicit values are rejected instead of silently changing how
@@ -126,7 +130,7 @@ func resolveTurnToolMode(explicit json.RawMessage, legacyNoTools bool) (string, 
 	}
 	var mode string
 	if err := json.Unmarshal(explicit, &mode); err != nil || !validTurnToolMode(mode) {
-		return "", errors.New("tool_mode must be one of: auto, disabled, enabled")
+		return "", errors.New("tool_mode must be one of: auto, disabled, enabled, official")
 	}
 	return mode, nil
 }
@@ -215,6 +219,7 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		req.Mode = ""
 		req.Verify = false
 		toolMode = llm.ToolModeEnabled
+		req.OfficialToolNames = nil
 		req.WebSearch = false
 	}
 	if req.Mode == "deep-research" && u.Role != "admin" && !userGroupHasFeature(r.Context(), d, u.GroupID, "research") {
@@ -312,21 +317,22 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, err = d.Orchestrator.Run(ctx, llm.RunRequest{
-		UserID:         u.ID,
-		ConversationID: id,
-		ModelID:        req.ModelID,
-		UserText:       req.Text,
-		Attachments:    req.Attachments,
-		ParentID:       req.ParentID,
-		Branch:         req.Branch,
-		Mode:           req.Mode,
-		Verify:         req.Verify,
-		ToolMode:       toolMode,
-		ForceWebSearch: req.WebSearch,
-		Fast:           req.Fast,
-		ParamOverrides: req.ParamOverrides,
-		ImageStyleID:   req.ImageStyleID,
-		Locale:         req.Locale,
+		UserID:            u.ID,
+		ConversationID:    id,
+		ModelID:           req.ModelID,
+		UserText:          req.Text,
+		Attachments:       req.Attachments,
+		ParentID:          req.ParentID,
+		Branch:            req.Branch,
+		Mode:              req.Mode,
+		Verify:            req.Verify,
+		ToolMode:          toolMode,
+		OfficialToolNames: req.OfficialToolNames,
+		ForceWebSearch:    req.WebSearch,
+		Fast:              req.Fast,
+		ParamOverrides:    req.ParamOverrides,
+		ImageStyleID:      req.ImageStyleID,
+		Locale:            req.Locale,
 	}, sendEvent)
 	if err != nil && !terminalSent {
 		parentID := req.ParentID
@@ -459,16 +465,17 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
 	id := pathParam(r, "id")
 	var body struct {
-		AssistantID    string          `json:"assistant_id"`
-		ModelID        string          `json:"model_id"`
-		Mode           string          `json:"mode"`
-		Verify         bool            `json:"verify"`
-		ToolMode       json.RawMessage `json:"tool_mode"`
-		NoTools        bool            `json:"no_tools"`
-		WebSearch      bool            `json:"web_search"`
-		Fast           bool            `json:"fast"` // §fast-mode: honour the CURRENT picker (regenerate follows the live toggle)
-		ParamOverrides map[string]any  `json:"params"`
-		Locale         string          `json:"locale"`
+		AssistantID       string          `json:"assistant_id"`
+		ModelID           string          `json:"model_id"`
+		Mode              string          `json:"mode"`
+		Verify            bool            `json:"verify"`
+		ToolMode          json.RawMessage `json:"tool_mode"`
+		NoTools           bool            `json:"no_tools"`
+		OfficialToolNames []string        `json:"official_tool_names"`
+		WebSearch         bool            `json:"web_search"`
+		Fast              bool            `json:"fast"` // §fast-mode: honour the CURRENT picker (regenerate follows the live toggle)
+		ParamOverrides    map[string]any  `json:"params"`
+		Locale            string          `json:"locale"`
 	}
 	if err := decodeJSON(r, &body); err != nil {
 		writeError(w, 400, errInvalidInput)
@@ -489,6 +496,7 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		body.Mode = ""
 		body.Verify = false
 		toolMode = llm.ToolModeEnabled
+		body.OfficialToolNames = nil
 		body.WebSearch = false
 	}
 	// Keep regenerate aligned with the normal send path: users without the
@@ -619,6 +627,7 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		Mode:                     body.Mode,
 		Verify:                   body.Verify,
 		ToolMode:                 toolMode,
+		OfficialToolNames:        body.OfficialToolNames,
 		ForceWebSearch:           body.WebSearch,
 		Fast:                     body.Fast,
 		ParamOverrides:           body.ParamOverrides,

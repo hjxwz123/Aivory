@@ -354,6 +354,9 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("PATCH", "/api/admin/skills/:id", requireAdmin(d, updateSkillAdmin))
 	mux.handle("DELETE", "/api/admin/skills/:id", requireAdmin(d, deleteSkillAdmin))
 	mux.handle("GET", "/api/admin/users", requireAdmin(d, listUsersAdmin))
+	// Static route must precede /:id because the mux uses first-match routing.
+	mux.handle("GET", "/api/admin/users/deletions", requireAdmin(d, listUserDeletionsAdmin))
+	mux.handle("GET", "/api/admin/users/:id", requireAdmin(d, getUserAdmin))
 	mux.handle("POST", "/api/admin/users", requireAdmin(d, createUserAdmin))
 	mux.handle("PATCH", "/api/admin/users/reorder", requireAdmin(d, reorderUsersAdmin))
 	mux.handle("DELETE", "/api/admin/users/:id", requireAdmin(d, deleteUserAdmin))
@@ -386,7 +389,6 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("DELETE", "/api/admin/usage", requireAdmin(d, usageDeleteFilteredAdmin))
 	mux.handle("DELETE", "/api/admin/usage/:id", requireAdmin(d, usageDeleteOneAdmin))
 	mux.handle("GET", "/api/admin/analytics", requireAdmin(d, analyticsAdmin))
-	mux.handle("GET", "/api/admin/users/deletions", requireAdmin(d, listUserDeletionsAdmin))
 	mux.handle("GET", "/api/admin/files", requireAdmin(d, listFilesAdmin))
 	mux.handle("POST", "/api/admin/files/delete", requireAdmin(d, deleteFilesAdmin))
 	mux.handle("GET", "/api/admin/files/content", requireAdmin(d, adminFileContentHandler))

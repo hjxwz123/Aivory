@@ -9,10 +9,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
 	"aivory/server/internal/config"
+	"aivory/server/internal/store"
 )
 
 func TestCreateModelReqTracksExplicitResearchEnabled(t *testing.T) {
@@ -33,6 +35,184 @@ func TestCreateModelReqTracksExplicitResearchEnabled(t *testing.T) {
 	}
 	if omitted.ResearchEnabled != nil {
 		t.Fatal("expected omitted research_enabled to stay nil")
+	}
+}
+
+func TestAdminModelOfficialToolsDefaultsValidationAndPublicMasking(t *testing.T) {
+	db := openMigrated(t, filepath.Join(t.TempDir(), "model-official-tools.db"))
+	defer db.Close()
+	mustExec(t, db, `INSERT INTO channels(id,name,type,api_format,base_url,api_key,enabled) VALUES
+		('ch_responses','OpenAI Responses','openai','responses','https://api.example','sk',1),
+		('ch_vendor','Vendor','claude','','https://vendor.example','sk',1)`)
+	d := Deps{
+		DB:     db,
+		Config: config.Config{UploadDir: t.TempDir(), ArtifactDir: t.TempDir()},
+		Logger: log.New(io.Discard, "", 0),
+	}
+	mx := newMux()
+	mx.handle(http.MethodPost, "/api/admin/models", func(w http.ResponseWriter, r *http.Request) {
+		createModelAdmin(d, w, r)
+	})
+	mx.handle(http.MethodPatch, "/api/admin/models/:id", func(w http.ResponseWriter, r *http.Request) {
+		updateModelAdmin(d, w, r)
+	})
+	mx.handle(http.MethodGet, "/api/models", func(w http.ResponseWriter, r *http.Request) {
+		listModelsHandler(d, w, r)
+	})
+
+	post := func(body string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/admin/models", strings.NewReader(body))
+		req.Header.Set("content-type", "application/json")
+		mx.ServeHTTP(rec, req)
+		return rec
+	}
+	decodeModel := func(rec *httptest.ResponseRecorder) store.Model {
+		t.Helper()
+		var model store.Model
+		if err := json.Unmarshal(rec.Body.Bytes(), &model); err != nil {
+			t.Fatalf("decode model: %v, body=%s", err, rec.Body.String())
+		}
+		return model
+	}
+
+	// Omission on a newly-created OpenAI Responses model installs the three
+	// historical hosted-tool definitions, including their full request objects.
+	rec := post(`{"channel_id":"ch_responses","request_id":"gpt-default-tools","label":"Defaults"}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("default create status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	defaultModel := decodeModel(rec)
+	defaultTools, err := store.ParseOfficialTools(defaultModel.OfficialTools)
+	if err != nil || len(defaultTools) != 3 {
+		t.Fatalf("default official tools = %+v, err=%v", defaultTools, err)
+	}
+	if defaultTools[0].Name != "web_search" || !strings.Contains(string(defaultTools[0].Request), `"search_context_size":"medium"`) {
+		t.Fatalf("default web search definition = %+v", defaultTools[0])
+	}
+
+	// The Responses defaults are chat capabilities. Image and embedding rows may
+	// share the same channel, but must not acquire hidden, unusable chat tools.
+	for _, kind := range []string{"image", "embedding"} {
+		rec = post(`{"channel_id":"ch_responses","kind":"` + kind + `","request_id":"gpt-` + kind + `","label":"` + kind + `"}`)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("%s create status = %d, body=%s", kind, rec.Code, rec.Body.String())
+		}
+		nonChatModel := decodeModel(rec)
+		if string(nonChatModel.OfficialTools) != "[]" {
+			t.Fatalf("%s model received chat official tools: %s", kind, nonChatModel.OfficialTools)
+		}
+	}
+
+	// Explicit [] is distinct from omission and keeps hosted tools disabled.
+	rec = post(`{"channel_id":"ch_responses","request_id":"gpt-no-tools","label":"No tools","official_tools":[]}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("explicit empty create status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	emptyModel := decodeModel(rec)
+	if string(emptyModel.OfficialTools) != "[]" {
+		t.Fatalf("explicit empty tools = %s", emptyModel.OfficialTools)
+	}
+
+	// Hosted definitions are provider-agnostic, and legacy string arrays are
+	// accepted at the API boundary then persisted in canonical object form.
+	rec = post(`{"channel_id":"ch_vendor","request_id":"vendor-tools","label":"Vendor tools","official_tools":["vendor_lookup",{"name":"maps","icon":"map","request":{"kind":"maps","options":{"region":"cn"}}}]}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("custom create status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	customModel := decodeModel(rec)
+	customTools, err := store.ParseOfficialTools(customModel.OfficialTools)
+	if err != nil || len(customTools) != 2 || customTools[0].Name != "vendor_lookup" || customTools[1].Name != "maps" {
+		t.Fatalf("custom official tools = %+v, err=%v", customTools, err)
+	}
+	var persisted string
+	if err := db.QueryRow(`SELECT official_tools FROM models WHERE id=?`, customModel.ID).Scan(&persisted); err != nil {
+		t.Fatalf("read persisted custom tools: %v", err)
+	}
+	if !strings.Contains(persisted, `"name":"vendor_lookup"`) || strings.HasPrefix(persisted, `["`) {
+		t.Fatalf("legacy tools were not canonicalized: %s", persisted)
+	}
+
+	for index, officialTools := range []string{
+		`null`,
+		`{}`,
+		`[{"name":"missing-request","icon":"wrench"}]`,
+		`[{"name":"bad-request","icon":"wrench","request":[]}]`,
+		`[{"name":"same","icon":"wrench","request":{}},{"name":"same","icon":"wrench","request":{}}]`,
+	} {
+		body := `{"channel_id":"ch_vendor","request_id":"invalid-` + strconv.Itoa(index) + `","label":"Invalid","official_tools":` + officialTools + `}`
+		rec = post(body)
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "official_tools must be a JSON array of tool definitions") {
+			t.Fatalf("invalid official_tools %s: status=%d body=%s", officialTools, rec.Code, rec.Body.String())
+		}
+	}
+
+	// PATCH omission preserves the configured list; an explicit replacement is
+	// validated through the same normalizer.
+	rec = httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPatch, "/api/admin/models/"+customModel.ID, strings.NewReader(`{"label":"Vendor tools renamed"}`))
+	req.Header.Set("content-type", "application/json")
+	mx.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("omitted patch status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	var afterOmitted string
+	if err := db.QueryRow(`SELECT official_tools FROM models WHERE id=?`, customModel.ID).Scan(&afterOmitted); err != nil {
+		t.Fatalf("read after omitted patch: %v", err)
+	}
+	if afterOmitted != persisted {
+		t.Fatalf("omitted PATCH changed official tools:\nbefore=%s\nafter=%s", persisted, afterOmitted)
+	}
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPatch, "/api/admin/models/"+customModel.ID, strings.NewReader(`{"official_tools":[{"name":"replacement","icon":"sparkles","request":{"type":"replacement"}}]}`))
+	req.Header.Set("content-type", "application/json")
+	mx.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("replacement patch status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+
+	// Public model metadata contains only name/icon. The provider request template
+	// remains available to admins but never crosses this response boundary.
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/models", nil)
+	mx.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("public models status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	var public struct {
+		Models []struct {
+			ID            string                       `json:"id"`
+			Enabled       bool                         `json:"enabled"`
+			OfficialTools []map[string]json.RawMessage `json:"official_tools"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &public); err != nil {
+		t.Fatalf("decode public models: %v", err)
+	}
+	found := false
+	for _, model := range public.Models {
+		if model.ID != customModel.ID {
+			continue
+		}
+		found = true
+		if !model.Enabled {
+			t.Fatal("public model omitted its enabled state, so the client cannot honor the configured default")
+		}
+		if len(model.OfficialTools) != 1 {
+			t.Fatalf("public official tools = %+v", model.OfficialTools)
+		}
+		if _, leaked := model.OfficialTools[0]["request"]; leaked {
+			t.Fatalf("public model leaked request JSON: %+v", model.OfficialTools[0])
+		}
+		if _, ok := model.OfficialTools[0]["name"]; !ok {
+			t.Fatalf("public model omitted tool name: %+v", model.OfficialTools[0])
+		}
+		if _, ok := model.OfficialTools[0]["icon"]; !ok {
+			t.Fatalf("public model omitted tool icon: %+v", model.OfficialTools[0])
+		}
+	}
+	if !found {
+		t.Fatalf("public response omitted model %q", customModel.ID)
 	}
 }
 

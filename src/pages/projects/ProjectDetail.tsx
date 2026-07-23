@@ -363,6 +363,7 @@ export default function ProjectDetail() {
       verify?: boolean
       toolMode: ToolMode
       webSearch?: boolean
+      officialToolNames?: string[]
     },
   ) {
     if (!project) return
@@ -393,6 +394,7 @@ export default function ProjectDetail() {
       verify: opts.verify,
       toolMode: opts.toolMode,
       webSearch: opts.webSearch,
+      officialToolNames: opts.officialToolNames,
     })
   }
 

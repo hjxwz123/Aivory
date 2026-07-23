@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"io"
 	"log"
@@ -21,6 +22,8 @@ type toolRouteCaptureProvider struct {
 	routeCalls    int
 	taskRequests  []UnifiedChatRequest
 	mainRequests  []UnifiedChatRequest
+	invokeTool    string
+	toolRunErr    error
 }
 
 func (p *toolRouteCaptureProvider) ID() string { return "openai" }
@@ -28,7 +31,7 @@ func (p *toolRouteCaptureProvider) ID() string { return "openai" }
 func (p *toolRouteCaptureProvider) Stream(
 	_ context.Context,
 	req UnifiedChatRequest,
-	_ ToolRunner,
+	tools ToolRunner,
 	_ func(SseEvent),
 ) (*UnifiedResult, error) {
 	if req.Model.RequestID == "task-route-test" {
@@ -60,6 +63,9 @@ func (p *toolRouteCaptureProvider) Stream(
 		}, nil
 	}
 	p.mainRequests = append(p.mainRequests, req)
+	if p.invokeTool != "" {
+		_, _, p.toolRunErr = tools.Run(context.Background(), p.invokeTool, nil)
+	}
 	return &UnifiedResult{
 		Blocks:     []UnifiedBlock{{Kind: "text", Text: "answer"}},
 		StopReason: "stop",
@@ -216,6 +222,116 @@ func TestExplicitToolModesSkipTaskClassifier(t *testing.T) {
 	}
 }
 
+func TestOfficialToolModeFiltersSelectionAndDisablesSystemTools(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		selected []string
+		want     []string
+	}{
+		{
+			name:     "configured subset in model order",
+			selected: []string{"second", "missing", "first", "second"},
+			want:     []string{"first", "second"},
+		},
+		{name: "empty selection means no tools"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			orchestrator, provider, model, conv, _, db := setupToolRouteTest(t)
+			configured := `[
+				{"name":"first","icon":"search","request":{"tools":[{"type":"hosted-first"}],"vendor":{"value":"first"}}},
+				{"name":"second","icon":"terminal","request":{"tools":[{"type":"hosted-second"}],"vendor":{"value":"second"}}}
+			]`
+			if _, err := db.Exec(`UPDATE models SET official_tools=? WHERE id=?`, configured, model.ID); err != nil {
+				t.Fatalf("configure official tools: %v", err)
+			}
+
+			runToolRouteTurn(t, orchestrator, model.ID, conv.ID, RunRequest{
+				ToolMode:          ToolModeOfficial,
+				OfficialToolNames: tc.selected,
+			})
+			if provider.routeCalls != 0 {
+				t.Fatalf("official mode called tool router %d times", provider.routeCalls)
+			}
+			if len(provider.mainRequests) != 1 {
+				t.Fatalf("main requests = %d, want 1", len(provider.mainRequests))
+			}
+			request := provider.mainRequests[0]
+			if !request.ToolModeOfficial {
+				t.Fatal("provider request lost official-mode state")
+			}
+			if len(request.Tools) != 0 {
+				t.Fatalf("official mode exposed system tools: %+v", request.Tools)
+			}
+			if strings.Join(request.OfficialToolNames, "\x00") != strings.Join(tc.want, "\x00") {
+				t.Fatalf("official names = %v, want %v", request.OfficialToolNames, tc.want)
+			}
+			if len(request.OfficialToolRequests) != len(tc.want) {
+				t.Fatalf("official requests = %d, want %d", len(request.OfficialToolRequests), len(tc.want))
+			}
+			for index, name := range tc.want {
+				if !strings.Contains(string(request.OfficialToolRequests[index]), "hosted-"+name) {
+					t.Fatalf("request %d does not match %q: %s", index, name, request.OfficialToolRequests[index])
+				}
+			}
+		})
+	}
+}
+
+func TestOfficialToolFallbackReappliesFallbackModelAllowlist(t *testing.T) {
+	orchestrator, _, model, _, _, db := setupToolRouteTest(t)
+	fallback, err := store.CreateModel(context.Background(), db, store.Model{
+		ChannelID: model.ChannelID,
+		Kind:      "chat",
+		RequestID: "official-fallback",
+		Label:     "Official fallback",
+		Enabled:   true,
+		Stream:    true,
+		ToolMode:  "native",
+		OfficialTools: json.RawMessage(`[
+			{"name":"second","icon":"terminal","request":{"tools":[{"type":"fallback-second"}]}},
+			{"name":"third","icon":"image","request":{"tools":[{"type":"fallback-third"}]}}
+		]`),
+	})
+	if err != nil {
+		t.Fatalf("create fallback model: %v", err)
+	}
+	base := UnifiedChatRequest{
+		Tools:                []ToolDef{{Name: "must_not_survive"}},
+		OfficialToolNames:    []string{"first", "second"},
+		OfficialToolRequests: []json.RawMessage{json.RawMessage(`{"tools":[{"type":"primary-first"}]}`), json.RawMessage(`{"tools":[{"type":"primary-second"}]}`)},
+		ToolModeOfficial:     true,
+	}
+
+	got, _, _, err := orchestrator.buildFallbackRequest(context.Background(), base, fallback.ID)
+	if err != nil {
+		t.Fatalf("build fallback request: %v", err)
+	}
+	if !got.ToolModeOfficial || len(got.Tools) != 0 {
+		t.Fatalf("fallback changed official mode or retained system tools: mode=%v tools=%+v", got.ToolModeOfficial, got.Tools)
+	}
+	if len(got.OfficialToolNames) != 1 || got.OfficialToolNames[0] != "second" {
+		t.Fatalf("fallback official names = %v, want [second]", got.OfficialToolNames)
+	}
+	if len(got.OfficialToolRequests) != 1 || !strings.Contains(string(got.OfficialToolRequests[0]), "fallback-second") {
+		t.Fatalf("fallback request did not use fallback model definition: %s", got.OfficialToolRequests)
+	}
+}
+
+func TestOfficialToolModeCannotExecuteSystemToolRunner(t *testing.T) {
+	orchestrator, provider, model, conv, _, db := setupToolRouteTest(t)
+	if _, err := db.Exec(`UPDATE models SET official_tools='["web_search"]' WHERE id=?`, model.ID); err != nil {
+		t.Fatalf("configure official tool: %v", err)
+	}
+	provider.invokeTool = "web_search"
+	runToolRouteTurn(t, orchestrator, model.ID, conv.ID, RunRequest{
+		ToolMode:          ToolModeOfficial,
+		OfficialToolNames: []string{"web_search"},
+	})
+	if provider.toolRunErr == nil || !strings.Contains(provider.toolRunErr.Error(), "unavailable in official mode") {
+		t.Fatalf("official provider reached system tool runner: %v", provider.toolRunErr)
+	}
+}
+
 func TestAutoSpreadsheetUsesServerFilenameAndSkipsClassifier(t *testing.T) {
 	orchestrator, provider, model, conv, _, db := setupToolRouteTest(t)
 	path := filepath.Join(t.TempDir(), "legacy.DATA.CSV")
@@ -252,7 +368,7 @@ func TestFastAndDeepResearchSkipToolClassifier(t *testing.T) {
 			t.Fatal("fast request exposed python_execute")
 		}
 		if !requestHasTool(provider.mainRequests[0], "web_search") {
-			t.Fatalf("fast request lost non-Python tools: tools=%+v official=%v", provider.mainRequests[0].Tools, provider.mainRequests[0].OfficialTools)
+			t.Fatalf("fast request lost non-Python tools: tools=%+v official=%v", provider.mainRequests[0].Tools, provider.mainRequests[0].OfficialToolNames)
 		}
 	})
 
@@ -334,7 +450,7 @@ func requestHasTool(req UnifiedChatRequest, name string) bool {
 			return true
 		}
 	}
-	for _, tool := range req.OfficialTools {
+	for _, tool := range req.OfficialToolNames {
 		if tool == name {
 			return true
 		}

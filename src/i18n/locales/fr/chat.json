@@ -105,10 +105,14 @@
       "toolModeDesc": "Choisissez quand les outils sont mis à la disposition du modèle de réponse.",
       "toolModeAuto": "Automatique",
       "toolModeAutoDesc": "Laisse le modèle de tâche décider si cette réponse nécessite des outils.",
-      "toolModeDisabled": "Désactivés",
+      "toolModeDisabled": "Désactivé",
       "toolModeDisabledDesc": "Répond directement sans mettre d’outils à disposition.",
-      "toolModeEnabled": "Activés",
-      "toolModeEnabledDesc": "Met toujours les outils configurés à disposition.",
+      "toolModeEnabled": "Appel d’outils",
+      "toolModeEnabledDesc": "Met à disposition les outils système configurés pour ce modèle.",
+      "toolModeOfficial": "Officiels",
+      "toolModeOfficialDesc": "Utilise uniquement les outils natifs du fournisseur que vous sélectionnez.",
+      "officialTools": "Outils officiels",
+      "officialToolsEmpty": "Aucun outil officiel n’est configuré pour ce modèle.",
       "webSearch": "Recherche web",
       "webSearchDesc": "Cherche sur le web à chaque tour et ajoute les résultats au prompt (sans appel d'outil).",
       "disable": "Désactiver {{name}}"
@@ -180,6 +184,7 @@
   "tools": {
     "web_search": "Recherche web",
     "code_interpreter": "Interpréteur de code",
+    "image_generation": "Génération d’images",
     "deep_research": "Recherche approfondie"
   },
   "sources": {

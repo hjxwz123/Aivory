@@ -51,7 +51,7 @@ var (
 	drSearchTopK      = envcfg.Int("AIVORY_LLM_DR_SEARCH_TOP_K", 8)              // results requested per search
 	drWallClock       = envcfg.Dur("AIVORY_LLM_DR_WALL_CLOCK", 5*time.Minute)    // backstop for the whole engine
 	drCallTimeout     = envcfg.Dur("AIVORY_LLM_DR_CALL_TIMEOUT", 30*time.Second) // per search/fetch call
-	drMaxBodyChars    = 4000                                                    // per-source excerpt fed to the writer
+	drMaxBodyChars    = 4000                                                     // per-source excerpt fed to the writer
 )
 
 // Overridable inline tuning constants for the deep-research engine (env-backed;
@@ -675,7 +675,9 @@ You are now writing a research-style answer WITHOUT retrieved sources (web searc
 func (rs *researcher) write(ctx context.Context, plan researchPlan) (*UnifiedResult, error) {
 	writerReq := rs.provReq
 	writerReq.Tools = nil
-	writerReq.OfficialTools = nil
+	writerReq.OfficialToolNames = nil
+	writerReq.OfficialToolRequests = nil
+	writerReq.ToolModeOfficial = false
 	writerReq.ToolModePrompt = false
 	writerReq.Stream = true
 	if len(rs.evidence) == 0 {

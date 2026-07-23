@@ -20,7 +20,6 @@ import (
 // original hardcoded value when its AIVORY_* variable is unset.
 var (
 	toolResultSummaryTruncationOpenAI = 240
-	officialWebSearchContextSize      = envcfg.Str("AIVORY_LLM_OFFICIAL_TOOL_SPEC", "medium")
 )
 
 // SSE scanner buffer sizing — low-level transport plumbing, not a tunable in
@@ -62,7 +61,7 @@ func (p *OpenAIProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 
 func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest, tools ToolRunner, onEvent func(SseEvent)) (*UnifiedResult, error) {
 	// §4.13 prompt-mode: no native function calling — drive the text protocol.
-	if req.ToolModePrompt {
+	if req.ToolModePrompt && !officialToolModeEnabled(req) {
 		_, blocks, usage, cites, err := RunPromptToolLoop(
 			ctx, req.SystemPrompt, req.History, req.Tools,
 			p.promptRunOnce(req), tools, onEvent,
@@ -131,7 +130,7 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest,
 		if req.MaxOutputTokens > 0 {
 			body["max_tokens"] = req.MaxOutputTokens
 		}
-		if len(req.Tools) > 0 && !req.ToolModePrompt {
+		if len(req.Tools) > 0 && !req.ToolModePrompt && !officialToolModeEnabled(req) {
 			openAITools := []map[string]any{}
 			for _, t := range req.Tools {
 				openAITools = append(openAITools, map[string]any{
@@ -145,11 +144,12 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest,
 			}
 			body["tools"] = openAITools
 		}
-		if req.ToolModePrompt {
+		if req.ToolModePrompt && !officialToolModeEnabled(req) {
 			body["stop"] = []string{PromptToolStopSequence()}
 		}
 		body = MergeRequestParams(body, req.ExtraParams, req.ParamControls, req.ParamOverrides)
-		body = StripToolFields(body, len(req.Tools) > 0 && !req.ToolModePrompt)
+		body = StripToolFields(body, len(req.Tools) > 0 && !req.ToolModePrompt && !officialToolModeEnabled(req))
+		body = MergeOfficialToolRequests(body, req.OfficialToolRequests)
 		raw, _ := json.Marshal(body)
 		resp, err := doProviderRequest(ctx, req.Model, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
 			hr, e := http.NewRequestWithContext(ctx, "POST", providerBaseURL(baseURL, "https://api.openai.com")+"/v1/chat/completions", bytes.NewReader(raw))
@@ -304,6 +304,7 @@ func (p *OpenAIProvider) promptRunOnce(req UnifiedChatRequest) PromptToolRunner 
 		}
 		body = MergeRequestParams(body, req.ExtraParams, req.ParamControls, req.ParamOverrides)
 		body = StripToolFields(body, false)
+		body = MergeOfficialToolRequests(body, req.OfficialToolRequests)
 		raw, _ := json.Marshal(body)
 		resp, err := doProviderRequest(ctx, req.Model, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
 			hr, e := http.NewRequestWithContext(ctx, "POST", providerBaseURL(baseURL, "https://api.openai.com")+"/v1/chat/completions", bytes.NewReader(raw))
@@ -338,26 +339,6 @@ type openAIToolCall struct {
 // ran server-side, so we can persist it as a tool_call block (§2.3-B).
 type hostedToolCall struct {
 	ID, Name, Summary string
-}
-
-// officialToolSpec maps a configured official-tool name to its Responses API
-// tool spec. Unknown names return nil (skipped). §2.3-B.
-func officialToolSpec(name string) map[string]any {
-	switch name {
-	case "web_search":
-		// search_context_size mirrors the documented default ("medium"); the
-		// other documented knobs (external_web_access, search_content_types)
-		// keep their API defaults, which match the reference, and are omitted so
-		// older OpenAI-compatible endpoints don't 400 on unknown fields. Pair
-		// this with include=["web_search_call.action.sources"] (set on the body)
-		// so the cited sources come back.
-		return map[string]any{"type": "web_search", "search_context_size": officialWebSearchContextSize}
-	case "code_interpreter":
-		return map[string]any{"type": "code_interpreter", "container": map[string]any{"type": "auto"}}
-	case "image_generation":
-		return map[string]any{"type": "image_generation"}
-	}
-	return nil
 }
 
 // hostedToolName maps a Responses hosted-tool output item type (e.g.
@@ -408,6 +389,31 @@ func appendResponsesInclude(body map[string]any, values ...string) {
 	if len(include) > 0 {
 		body["include"] = include
 	}
+}
+
+func responsesRequestHasTools(body map[string]any) bool {
+	value, ok := body["tools"]
+	if !ok {
+		return false
+	}
+	if tools, isArray := jsonArrayItems(value); isArray {
+		return len(tools) > 0
+	}
+	return value != nil
+}
+
+func responsesRequestHasToolType(body map[string]any, toolType string) bool {
+	tools, ok := jsonArrayItems(body["tools"])
+	if !ok {
+		return false
+	}
+	for _, value := range tools {
+		tool, ok := value.(map[string]any)
+		if ok && tool["type"] == toolType {
+			return true
+		}
+	}
+	return false
 }
 
 func responseOutputHasFunctionCalls(items []map[string]any) bool {
@@ -543,7 +549,7 @@ func readOpenAIChatStream(body io.Reader, onEvent func(SseEvent)) (string, strin
 //     are emitted as `thinking_delta` events so the UI's collapsed-thinking
 //     pane updates live.
 func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatRequest, tools ToolRunner, onEvent func(SseEvent)) (*UnifiedResult, error) {
-	if req.ToolModePrompt {
+	if req.ToolModePrompt && !officialToolModeEnabled(req) {
 		return p.streamChat(ctx, req, tools, onEvent)
 	}
 
@@ -597,20 +603,8 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 	}
 
 	var respTools []map[string]any
-	wantWebSearch := false
-	if len(req.OfficialTools) > 0 {
-		// §2.3-B: attach OpenAI-hosted tools; OpenAI executes them server-side.
-		// We attach NO function tools — the loop below just streams the answer,
-		// and hosted-tool rounds surface as tool_start/tool_result events.
-		for _, name := range req.OfficialTools {
-			if name == "web_search" {
-				wantWebSearch = true
-			}
-			if spec := officialToolSpec(name); spec != nil {
-				respTools = append(respTools, spec)
-			}
-		}
-	} else {
+	officialMode := officialToolModeEnabled(req)
+	if !officialMode {
 		for _, t := range req.Tools {
 			respTools = append(respTools, map[string]any{
 				"type":        "function",
@@ -647,16 +641,17 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 		}
 		body = MergeRequestParams(body, req.ExtraParams, req.ParamControls, req.ParamOverrides)
 		body = StripToolFields(body, len(respTools) > 0)
+		body = MergeOfficialToolRequests(body, req.OfficialToolRequests)
 		// Ask the API to return the sources the hosted web_search consulted, so
 		// we can surface them as citations. For stateless Responses tool loops
 		// (`store:false`), also carry encrypted reasoning items forward; otherwise
 		// reasoning models can lose their hidden chain between a function_call and
 		// the matching function_call_output.
 		includes := []string{}
-		if wantWebSearch {
+		if responsesRequestHasToolType(body, "web_search") {
 			includes = append(includes, "web_search_call.action.sources")
 		}
-		if len(respTools) > 0 {
+		if responsesRequestHasTools(body) {
 			includes = append(includes, "reasoning.encrypted_content")
 		}
 		appendResponsesInclude(body, includes...)

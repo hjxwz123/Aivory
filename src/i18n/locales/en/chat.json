@@ -105,10 +105,14 @@
       "toolModeDesc": "Choose when tools are made available to the response model.",
       "toolModeAuto": "Automatic",
       "toolModeAutoDesc": "Use the task model to decide whether this response needs tools.",
-      "toolModeDisabled": "Disabled",
+      "toolModeDisabled": "Off",
       "toolModeDisabledDesc": "Answer directly without making tools available.",
-      "toolModeEnabled": "Enabled",
-      "toolModeEnabledDesc": "Always make the configured tools available.",
+      "toolModeEnabled": "Tool use",
+      "toolModeEnabledDesc": "Make the system tools configured for this model available.",
+      "toolModeOfficial": "Official",
+      "toolModeOfficialDesc": "Use only the provider-native tools you select.",
+      "officialTools": "Official tools",
+      "officialToolsEmpty": "This model has no official tools configured.",
       "webSearch": "Web search",
       "webSearchDesc": "Search the web every turn and add the results to the prompt (no tool call).",
       "disable": "Turn off {{name}}"
@@ -180,6 +184,7 @@
   "tools": {
     "web_search": "Web search",
     "code_interpreter": "Code interpreter",
+    "image_generation": "Image generation",
     "deep_research": "Deep research"
   },
   "sources": {

@@ -185,7 +185,7 @@ export function MessageList({ conversation, scrollToMessageId, jumpKey }: Messag
       // the currently-armed composer features (deep research / verify / tool
       // policy / web search); otherwise the armed controls are silently ignored on
       // this one path while regenerate honors them.
-      const armed = resolveArmedTurnFlags()
+      const armed = resolveArmedTurnFlags(modelId)
       void sendMessage({
         conversationId: convId,
         text: newContent,
@@ -199,6 +199,7 @@ export function MessageList({ conversation, scrollToMessageId, jumpKey }: Messag
         verify: fastMode ? undefined : armed.verify,
         toolMode: fastMode ? 'enabled' : armed.toolMode,
         webSearch: fastMode ? undefined : armed.webSearch,
+        officialToolNames: fastMode ? undefined : armed.officialToolNames,
         fast: fastMode,
       })
     },

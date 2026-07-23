@@ -221,23 +221,40 @@ func normalizeModelExtraParams(m *store.Model) error {
 // extra_params. That distinction matters when a chat model becomes image or
 // embedding: an omitted field should not leave inherited chat-only values
 // behind, whereas an explicit non-empty value remains a validation error.
-func decodeModelPatch(r *http.Request, m *store.Model) (extraParamsProvided bool, err error) {
+func decodeCreateModelReq(r *http.Request, req *createModelReq) (officialToolsProvided bool, err error) {
 	var raw json.RawMessage
 	if err := decodeJSON(r, &raw); err != nil {
 		return false, err
 	}
-	if len(raw) == 0 {
-		return false, nil
-	}
-	if err := json.Unmarshal(raw, m); err != nil {
+	if err := json.Unmarshal(raw, req); err != nil {
 		return false, err
 	}
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &fields); err != nil {
 		return false, err
 	}
+	_, officialToolsProvided = fields["official_tools"]
+	return officialToolsProvided, nil
+}
+
+func decodeModelPatch(r *http.Request, m *store.Model) (extraParamsProvided, officialToolsProvided bool, err error) {
+	var raw json.RawMessage
+	if err := decodeJSON(r, &raw); err != nil {
+		return false, false, err
+	}
+	if len(raw) == 0 {
+		return false, false, nil
+	}
+	if err := json.Unmarshal(raw, m); err != nil {
+		return false, false, err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return false, false, err
+	}
 	_, extraParamsProvided = fields["extra_params"]
-	return extraParamsProvided, nil
+	_, officialToolsProvided = fields["official_tools"]
+	return extraParamsProvided, officialToolsProvided, nil
 }
 
 func listModelsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
@@ -263,7 +280,8 @@ func listModelsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 
 func createModelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	var req createModelReq
-	if err := decodeJSON(r, &req); err != nil {
+	officialToolsProvided, err := decodeCreateModelReq(r, &req)
+	if err != nil {
 		writeError(w, 400, errInvalidInput)
 		return
 	}
@@ -277,6 +295,17 @@ func createModelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	if m.ChannelID == "" || m.RequestID == "" || m.Label == "" {
 		writeError(w, 400, errors.New("channel_id, request_id, label required"))
 		return
+	}
+	if !officialToolsProvided && (m.Kind == "" || m.Kind == "chat") {
+		if channel, err := store.GetChannel(r.Context(), d.DB, m.ChannelID); err == nil && channel.Type == "openai" && channel.APIFormat == "responses" {
+			m.OfficialTools = store.DefaultOpenAIResponsesOfficialToolsJSON()
+		}
+	}
+	if officialTools, err := store.NormalizeOfficialTools(m.OfficialTools); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	} else {
+		m.OfficialTools = officialTools
 	}
 	if err := normalizeModelExtraParams(&m); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -332,7 +361,7 @@ func updateModelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	m := *existing
-	extraParamsProvided, err := decodeModelPatch(r, &m)
+	extraParamsProvided, officialToolsProvided, err := decodeModelPatch(r, &m)
 	if err != nil {
 		writeError(w, 400, errInvalidInput)
 		return
@@ -345,6 +374,17 @@ func updateModelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	if m.ChannelID == "" || m.RequestID == "" || m.Label == "" {
 		writeError(w, 400, errors.New("channel_id, request_id, label required"))
 		return
+	}
+	// Omitted official_tools preserves the existing model value. An explicit
+	// value, including [], is validated and normalized to the canonical object
+	// array; legacy string arrays are accepted and upgraded.
+	if officialToolsProvided {
+		if officialTools, err := store.NormalizeOfficialTools(m.OfficialTools); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		} else {
+			m.OfficialTools = officialTools
+		}
 	}
 	if err := normalizeModelExtraParams(&m); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -607,6 +647,19 @@ func listUsersAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"users": rows, "total": total, "limit": limit, "offset": offset})
+}
+
+func getUserAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
+	user, err := store.FindUserByID(r.Context(), d.DB, pathParam(r, "id"))
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, errNotFound)
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, user)
 }
 
 func reorderUsersAdmin(d Deps, w http.ResponseWriter, r *http.Request) {

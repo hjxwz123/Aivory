@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS models (
   system_prompt     TEXT NOT NULL DEFAULT '',
   param_controls    TEXT NOT NULL DEFAULT '[]',
   extra_params      TEXT NOT NULL DEFAULT '{}',
-  official_tools    TEXT NOT NULL DEFAULT '[]', -- OpenAI Responses hosted tools; [] = use system tools (§2.3-B)
+  official_tools    TEXT NOT NULL DEFAULT '[]', -- provider-hosted [{name,icon,request}]; legacy string arrays are migrated
   price_input       REAL NOT NULL DEFAULT 0,
   price_output      REAL NOT NULL DEFAULT 0,
   price_cache_read  REAL NOT NULL DEFAULT 0,

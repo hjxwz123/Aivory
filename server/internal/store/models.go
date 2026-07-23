@@ -144,16 +144,16 @@ type Model struct {
 	// Fast marks THE fast model (§fast-mode). At most one model is fast at a time
 	// (SetFastModel enforces it). A fast model is hidden from the advanced picker
 	// and has Deep Research forced off.
-	Fast               bool            `json:"fast"`
-	SystemPrompt       string          `json:"system_prompt"`
-	ParamControls      json.RawMessage `json:"param_controls"`
+	Fast          bool            `json:"fast"`
+	SystemPrompt  string          `json:"system_prompt"`
+	ParamControls json.RawMessage `json:"param_controls"`
 	// ExtraParams is an admin-only JSON object merged into this model's upstream
 	// request body. It is intentionally omitted from the public model response.
 	// Native request fields and user-selected param controls take precedence.
-	ExtraParams        json.RawMessage `json:"extra_params"`
-	// OfficialTools lists OpenAI Responses hosted tools to enable (e.g.
-	// "web_search"). Empty = use the system's self-built tools (§2.3-B). Only
-	// meaningful for an openai channel with api_format=responses.
+	ExtraParams json.RawMessage `json:"extra_params"`
+	// OfficialTools is a JSON array of provider-hosted tool definitions. Each
+	// entry carries name/icon/request; legacy string arrays remain readable.
+	// Empty means this model exposes no provider-hosted tools.
 	OfficialTools json.RawMessage `json:"official_tools"`
 	// Tags is a JSON array of model_tags ids assigned to this model — used by the
 	// model picker's tag filter (§ model tags). Empty = untagged.
@@ -255,12 +255,12 @@ type Project struct {
 // Conversation — §5 conversations row. kb_ids/summary_blocks/provider_state
 // are kept as raw JSON to round-trip through SQLite cleanly.
 type Conversation struct {
-	ID            string          `json:"id"`
-	UserID        string          `json:"user_id"`
-	ProjectID     string          `json:"project_id"`
-	Title         string          `json:"title"`
-	Provider      string          `json:"provider"`
-	ModelID       string          `json:"model_id"`
+	ID        string `json:"id"`
+	UserID    string `json:"user_id"`
+	ProjectID string `json:"project_id"`
+	Title     string `json:"title"`
+	Provider  string `json:"provider"`
+	ModelID   string `json:"model_id"`
 	// Fast marks the conversation as running in fast mode (§fast-mode): the model
 	// is resolved server-side from the admin's fast model and never named to the
 	// user. ModelID keeps the user's advanced pick (used when they switch back to
@@ -295,13 +295,13 @@ type Conversation struct {
 // Message — flat record over §5 messages. blocks/raw/attachments/citations are
 // JSON-encoded so the handler layer can decode/encode without a per-shape DAO.
 type Message struct {
-	ID               string          `json:"id"`
-	ConversationID   string          `json:"conversation_id"`
-	ParentID         string          `json:"parent_id"`
-	Role             string          `json:"role"`
-	Provider         string          `json:"provider"`
-	ModelID          string          `json:"model_id"`
-	ModelLabel       string          `json:"model_label"`
+	ID             string `json:"id"`
+	ConversationID string `json:"conversation_id"`
+	ParentID       string `json:"parent_id"`
+	Role           string `json:"role"`
+	Provider       string `json:"provider"`
+	ModelID        string `json:"model_id"`
+	ModelLabel     string `json:"model_label"`
 	// Fast marks a turn that ran in fast mode (§fast-mode). The row keeps the REAL
 	// model_id/model_label/provider (for billing + admin drill-down); the user
 	// boundary (redactCost) blanks that identity and the client renders "快速".

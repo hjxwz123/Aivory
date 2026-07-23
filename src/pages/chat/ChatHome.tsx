@@ -304,6 +304,7 @@ export default function ChatHome() {
       verify?: boolean
       toolMode: ToolMode
       webSearch?: boolean
+      officialToolNames?: string[]
       fast?: boolean
     },
   ) {
@@ -343,6 +344,7 @@ export default function ChatHome() {
         verify: opts.verify,
         toolMode: opts.toolMode,
         webSearch: opts.webSearch,
+        officialToolNames: opts.officialToolNames,
         fast: opts.fast,
       })
       return
@@ -368,6 +370,7 @@ export default function ChatHome() {
       verify: opts.verify,
       toolMode: opts.toolMode,
       webSearch: opts.webSearch,
+      officialToolNames: opts.officialToolNames,
       fast: opts.fast,
       // Swap temp→real id in the URL only if the user is STILL on the optimistic
       // thread. If they navigated elsewhere during the create round-trip, leave
@@ -462,7 +465,7 @@ export default function ChatHome() {
                           icon={s.icon}
                           title={title}
                           prompt={prompt}
-                          onClick={() => void startNew(prompt, [], { ...resolveArmedTurnFlags(), fast })}
+                          onClick={() => void startNew(prompt, [], { ...resolveArmedTurnFlags(modelId), fast })}
                           className="h-full"
                         />
                       </div>

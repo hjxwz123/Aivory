@@ -177,10 +177,12 @@ func TestOpenAIResponsesOfficialToolsSurviveExtraParamsMerge(t *testing.T) {
 
 	p := &OpenAIProvider{}
 	_, err := p.Stream(context.Background(), UnifiedChatRequest{
-		Model:         ModelInfo{RequestID: "gpt-test", BaseURL: srv.URL, APIKey: "k", APIFormat: "responses"},
-		History:       []UnifiedMessage{{Role: "user", Blocks: []UnifiedBlock{{Kind: "text", Text: "search"}}}},
-		OfficialTools: []string{"web_search"},
-		ExtraParams:   json.RawMessage(`{"tools":[{"type":"function","name":"extra_tool"}],"include":["custom.include"]}`),
+		Model:                ModelInfo{RequestID: "gpt-test", BaseURL: srv.URL, APIKey: "k", APIFormat: "responses"},
+		History:              []UnifiedMessage{{Role: "user", Blocks: []UnifiedBlock{{Kind: "text", Text: "search"}}}},
+		OfficialToolNames:    []string{"custom_search"},
+		OfficialToolRequests: []json.RawMessage{json.RawMessage(`{"tools":[{"type":"web_search","search_context_size":"medium"}]}`)},
+		ToolModeOfficial:     true,
+		ExtraParams:          json.RawMessage(`{"tools":[{"type":"function","name":"extra_tool"}],"include":["custom.include"]}`),
 	}, nil, func(SseEvent) {})
 	if err != nil {
 		t.Fatalf("stream: %v", err)

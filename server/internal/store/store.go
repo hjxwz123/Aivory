@@ -333,25 +333,28 @@ func Migrate(db *sql.DB) error {
 	// fatal) instead of surfacing as broken reads later. WHERE 1=0 makes each probe
 	// O(1). If you add an ALTER above, add its column here.
 	columnChecks := map[string][]string{
-		"messages":        {"credits", "model_label", "search_text", "gen_ms", "feedback", "verify", "author_id", "fast"},
-		"users":           {"group_id", "totp_secret", "totp_enabled", "group_expires_at", "previous_group_id", "password_set", "password_changed_at", "last_seen_at", "credits_permanent", "sort_order"},
-		"usage_logs":      {"credits", "workspace_id", "channel_id", "fallback", "status", "error", "request_method", "request_url", "request_headers", "request_body"},
-		"user_groups":     {"max_projects", "max_kbs", "credit_allowance", "credit_period_seconds", "max_workspaces", "is_public", "max_storage_mb"},
-		"models":          {"official_tools", "moderation_enabled", "moderation_mode", "tags", "extra_params", "image_timeout_sec", "research_enabled", "fallback_channel_id", "fast"},
-		"refresh_tokens":  {"user_agent", "ip", "location", "last_seen"},
-		"conversations":   {"inline_source_conv", "inline_parent_id", "inline_quote", "workspace_id", "fast"},
-		"projects":        {"workspace_id"},
-		"knowledge_bases": {"workspace_id"},
-		"chunks":          {"image_ref"},
-		"files":           {"draft"},
-		"documents":       {"ingest_updated_at"},
-		"redeem_codes":    {"kind", "credits"},
+		"messages":           {"credits", "model_label", "search_text", "gen_ms", "feedback", "verify", "author_id", "fast"},
+		"users":              {"group_id", "totp_secret", "totp_enabled", "group_expires_at", "previous_group_id", "password_set", "password_changed_at", "last_seen_at", "credits_permanent", "sort_order"},
+		"usage_logs":         {"credits", "workspace_id", "channel_id", "fallback", "status", "error", "request_method", "request_url", "request_headers", "request_body"},
+		"user_groups":        {"max_projects", "max_kbs", "credit_allowance", "credit_period_seconds", "max_workspaces", "is_public", "max_storage_mb"},
+		"models":             {"official_tools", "moderation_enabled", "moderation_mode", "tags", "extra_params", "image_timeout_sec", "research_enabled", "fallback_channel_id", "fast"},
+		"refresh_tokens":     {"user_agent", "ip", "location", "last_seen"},
+		"conversations":      {"inline_source_conv", "inline_parent_id", "inline_quote", "workspace_id", "fast"},
+		"projects":           {"workspace_id"},
+		"knowledge_bases":    {"workspace_id"},
+		"chunks":             {"image_ref"},
+		"files":              {"draft"},
+		"documents":          {"ingest_updated_at"},
+		"redeem_codes":       {"kind", "credits"},
 		"redeem_redemptions": {"credits"},
 	}
 	for table, cols := range columnChecks {
 		if _, err := db.Exec(fmt.Sprintf(`SELECT %s FROM %s WHERE 1=0`, strings.Join(cols, ", "), table)); err != nil {
 			return fmt.Errorf("schema column check failed for %q (an additive migration may have silently failed): %w", table, err)
 		}
+	}
+	if err := migrateOfficialToolDefinitions(db); err != nil {
+		return fmt.Errorf("migrate official tool definitions: %w", err)
 	}
 	// One-time backfill: accounts that exist only because of an OAuth login were
 	// created with a random password they never chose, so mark them as

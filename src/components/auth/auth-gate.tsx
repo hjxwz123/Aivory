@@ -19,6 +19,7 @@ import { useLanguage, detectBrowserLanguage, toSupportedLanguage } from '@/store
 import { useTheme } from '@/store/theme'
 import { persistUserSettings } from '@/lib/user-settings'
 import { resolveDefaultToolMode } from '@/lib/tool-mode'
+import { filterOfficialToolNames, resolveDefaultOfficialToolNames } from '@/lib/official-tools'
 import { ACCENT_PRESETS, type AccentPref, type ThemePref } from '@/types/settings'
 
 const PUBLIC_PATHS = ['/welcome', '/login', '/register', '/forgot-password', '/share', '/setup', '/privacy', '/terms']
@@ -36,9 +37,12 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const loadConversations = useConversations((s) => s.load)
   const loadProjects = useProjects((s) => s.load)
   const loadModels = useModels((s) => s.load)
+  const defaultModelId = useModels((s) => s.defaultId)
   const syncUserSettings = useSettings((s) => s.syncUserSettings)
   const location = useLocation()
   const hydratedDataForUser = useRef<string | null>(null)
+  const officialDefaultsUserRef = useRef<string | null>(null)
+  const officialDefaultsModelsRef = useRef<Set<string>>(new Set())
 
   useEffect(() => {
     void hydrate()
@@ -46,7 +50,17 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
   // Keep local UI preferences in sync with the authenticated profile.
   useEffect(() => {
-    if (status !== 'authenticated' || !user?.settings) return
+    if (status !== 'authenticated' || !user?.settings) {
+      if (status !== 'authenticated') {
+        officialDefaultsUserRef.current = null
+        officialDefaultsModelsRef.current.clear()
+      }
+      return
+    }
+    if (officialDefaultsUserRef.current !== user.id) {
+      officialDefaultsUserRef.current = user.id
+      officialDefaultsModelsRef.current.clear()
+    }
     syncUserSettings(user.settings)
     const language = toSupportedLanguage(user.settings.language)
     if (language) {
@@ -70,7 +84,19 @@ export function AuthGate({ children }: { children: ReactNode }) {
     // new-chat action. The resolver also preserves explicit choices from the
     // legacy disable_tools_default boolean; an entirely absent value is auto.
     useComposerPrefs.getState().setDefaultToolMode(resolveDefaultToolMode(user.settings))
-  }, [status, user?.settings, syncUserSettings])
+    const models = useModels.getState()
+    if (
+      defaultModelId &&
+      models.getById(defaultModelId) &&
+      !officialDefaultsModelsRef.current.has(defaultModelId)
+    ) {
+      officialDefaultsModelsRef.current.add(defaultModelId)
+      useComposerPrefs.getState().setOfficialToolNames(
+        defaultModelId,
+        filterOfficialToolNames(models.getById(defaultModelId), resolveDefaultOfficialToolNames(user.settings)),
+      )
+    }
+  }, [defaultModelId, status, user?.id, user?.settings, syncUserSettings])
 
   // Once authenticated, hydrate the per-user data caches. This is keyed by user
   // id so a refresh that returns an equivalent user object cannot fan out into
@@ -83,9 +109,9 @@ export function AuthGate({ children }: { children: ReactNode }) {
     }
     if (hydratedDataForUser.current === userId) return
     hydratedDataForUser.current = userId
-    // Apply the account default exactly once per login. All three values matter:
-    // unlike the former boolean, auto/enabled must also be able to replace a
-    // persisted disabled mode left by another account or an earlier session.
+    // Apply the account default exactly once per login. All four values matter:
+    // unlike the former boolean, auto/enabled/official must also replace a
+    // persisted mode left by another account or an earlier session.
     const defaultToolMode = resolveDefaultToolMode(useAuth.getState().user?.settings)
     useComposerPrefs.getState().setDefaultToolMode(defaultToolMode)
     useComposerPrefs.getState().setToolMode(defaultToolMode)
@@ -96,7 +122,24 @@ export function AuthGate({ children }: { children: ReactNode }) {
         void loadConversations()
         void loadProjects()
       })
-    void loadModels()
+    void loadModels().then(() => {
+      const models = useModels.getState()
+      const currentUser = useAuth.getState().user
+      if (!currentUser || currentUser.id !== userId || !models.defaultId) return
+      if (officialDefaultsUserRef.current !== userId) {
+        officialDefaultsUserRef.current = userId
+        officialDefaultsModelsRef.current.clear()
+      }
+      if (officialDefaultsModelsRef.current.has(models.defaultId)) return
+      officialDefaultsModelsRef.current.add(models.defaultId)
+      useComposerPrefs.getState().setOfficialToolNames(
+        models.defaultId,
+        filterOfficialToolNames(
+          models.getById(models.defaultId),
+          resolveDefaultOfficialToolNames(currentUser.settings),
+        ),
+      )
+    })
   }, [status, user?.id, loadConversations, loadProjects, loadModels])
 
   // Loading shimmer (auth check + initial paint) — reused while the first-run

@@ -350,10 +350,14 @@ type RunRequest struct {
 	// answer finalizes, a secondary auditor model fact-checks it. Honoured only
 	// when an admin has configured `verify_model_id`; otherwise a no-op.
 	Verify bool
-	// ToolMode is the per-turn tool policy: auto | disabled | enabled. Empty keeps
+	// ToolMode is the per-turn tool policy: auto | disabled | enabled | official. Empty keeps
 	// backwards compatibility with callers that only set NoTools (true maps to
 	// disabled; false maps to enabled). Fast and Deep Research force enabled.
 	ToolMode string
+	// OfficialToolNames is the explicit per-turn selection used only when
+	// ToolMode is "official". The orchestrator intersects it with the resolved
+	// model's configured official-tool definitions before any provider sees it.
+	OfficialToolNames []string
 	// NoTools is the legacy boolean input and the resolved effective state used by
 	// the existing no-tool fallbacks later in Run. ToolMode takes precedence when
 	// it is non-empty.
@@ -391,6 +395,9 @@ const (
 	ToolModeDisabled = "disabled"
 	// ToolModeEnabled preserves the resolved model's configured tool support.
 	ToolModeEnabled = "enabled"
+	// ToolModeOfficial exposes only the selected admin-defined upstream tools.
+	// It never exposes or executes the system's self-built tools.
+	ToolModeOfficial = "official"
 )
 
 // ErrInvalidMessageParent means a caller supplied a message parent that no
@@ -432,7 +439,7 @@ func resolveRunToolMode(req RunRequest) (string, error) {
 		return ToolModeEnabled, nil
 	}
 	switch req.ToolMode {
-	case ToolModeAuto, ToolModeDisabled, ToolModeEnabled:
+	case ToolModeAuto, ToolModeDisabled, ToolModeEnabled, ToolModeOfficial:
 		return req.ToolMode, nil
 	default:
 		return "", fmt.Errorf("invalid tool mode %q", req.ToolMode)
@@ -544,8 +551,17 @@ func (o *Orchestrator) buildFallbackRequest(ctx context.Context, base UnifiedCha
 	if m.Kind == "chat" {
 		req.ExtraParams = m.ExtraParams
 	}
-	req.OfficialTools = nil // hosted-tools config is model-specific; fallback uses self-built tools
-	req.ToolModePrompt = m.ToolMode == "prompt"
+	if base.ToolModeOfficial {
+		// Keep the user's explicit official selection, but re-gate it against the
+		// fallback model's own allowlist and request definitions.
+		req.OfficialToolNames, req.OfficialToolRequests = selectOfficialToolRequests(m.OfficialTools, base.OfficialToolNames)
+		req.Tools = nil
+		req.ToolModePrompt = false
+	} else {
+		req.OfficialToolNames = nil
+		req.OfficialToolRequests = nil
+		req.ToolModePrompt = m.ToolMode == "prompt"
+	}
 	// §4.6-C fallback re-gate: the images in `base.History` were inlined against the
 	// PRIMARY model's vision capability (resolveAttachments runs once, before any
 	// fallback). If the fallback model can't see images, those blocks must not ride
@@ -878,6 +894,11 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		turnToolMode = ToolModeEnabled
 	}
 	req.ToolMode = turnToolMode
+	if turnToolMode != ToolModeOfficial {
+		// A selection sent with auto/enabled/disabled must not change those modes'
+		// established system-tool semantics.
+		req.OfficialToolNames = nil
+	}
 	req.NoTools = turnToolMode == ToolModeDisabled
 	if !req.NoTools {
 		// Forced web search is the explicit-disabled fallback, not an additional
@@ -1132,41 +1153,23 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// 5. Resolve tools for this model BEFORE composing the system prompt so the
 	//    tool-guidance segment (and the §4.13 prompt preamble) match the real,
 	//    enabled tool list instead of a hardcoded set.
-	// §2.3-B: an OpenAI Responses model can opt into OpenAI-hosted tools instead
-	// of the system's self-built ones. When official tools are configured we
-	// attach NEITHER the system tools NOR the tool-guidance / document recipes —
-	// OpenAI runs its own tools server-side.
-	var officialTools []string
-	if channel.Type == "openai" && channel.APIFormat == "responses" && len(model.OfficialTools) > 0 {
-		_ = json.Unmarshal(model.OfficialTools, &officialTools)
-		kept := officialTools[:0]
-		for _, name := range officialTools {
-			if officialToolSpec(name) != nil {
-				kept = append(kept, name)
-			}
-		}
-		officialTools = kept
+	// Official mode is explicit per turn. Intersect the requested names with the
+	// resolved model's configured definitions, preserving model configuration
+	// order so scalar override precedence cannot be reordered by a client.
+	officialMode := req.ToolMode == ToolModeOfficial
+	officialTools, officialRequests := selectOfficialToolRequests(model.OfficialTools, req.OfficialToolNames)
+	if !officialMode {
+		officialTools = nil
+		officialRequests = nil
 	}
-	useOfficial := len(officialTools) > 0
-	if fastMode && useOfficial {
-		// OpenAI's hosted code_interpreter is the official-tools equivalent of
-		// python_execute. Keep the model on its configured official-tool surface,
-		// but withhold code execution just as we do for the self-built tool below.
-		kept := officialTools[:0]
-		for _, name := range officialTools {
-			if name != "code_interpreter" {
-				kept = append(kept, name)
-			}
-		}
-		officialTools = kept
-	}
+	useOfficial := officialMode && len(officialRequests) > 0
 
 	toolDefs := []ToolDef{}
 	toolMode := model.ToolMode
 	if toolMode == "" {
 		toolMode = "native"
 	}
-	if toolMode != "none" && !useOfficial {
+	if toolMode != "none" && !officialMode {
 		toolDefs = o.filterDisabledTools(o.tools.List(model.ID))
 		// §fast-mode withholds python_execute (no sandbox on a fast turn) — drop it
 		// from the offered tools so the model never even sees it. Its budget is also
@@ -1185,7 +1188,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		if sandboxFilesHaveSheet(sandboxFiles) {
 			req.NoTools = false
 		} else {
-			candidates := toolRouteCandidates(toolDefs, officialTools)
+			candidates := append([]ToolDef(nil), toolDefs...)
 			for _, skill := range availableSkillIdx {
 				candidates = append(candidates, ToolDef{
 					Name:        "skill:" + skill.Name,
@@ -1200,8 +1203,10 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// no skills, and server-side RAG/search/spreadsheet fallbacks below.
 	if req.NoTools {
 		toolMode = "none"
+		officialMode = false
 		useOfficial = false
 		officialTools = nil
+		officialRequests = nil
 		toolDefs = nil
 	}
 	toolNames := make([]string, 0, len(toolDefs))
@@ -1518,16 +1523,18 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			APIFormat: channel.APIFormat,
 			Fallback:  fallbackCreds,
 		},
-		Tools:          toolDefs,
-		OfficialTools:  officialTools,
-		ToolModePrompt: toolMode == "prompt" && !useOfficial,
-		ProjectFiles:   projectFiles,
-		RAGSnippets:    ragSnippets,
-		ParamOverrides: req.ParamOverrides,
-		ParamControls:  model.ParamControls,
-		ExtraParams:    extraParams,
-		Stream:         model.Stream,
-		FallbackUsed:   fallbackFlag,
+		Tools:                toolDefs,
+		OfficialToolNames:    officialTools,
+		OfficialToolRequests: officialRequests,
+		ToolModeOfficial:     officialMode,
+		ToolModePrompt:       toolMode == "prompt" && !officialMode,
+		ProjectFiles:         projectFiles,
+		RAGSnippets:          ragSnippets,
+		ParamOverrides:       req.ParamOverrides,
+		ParamControls:        model.ParamControls,
+		ExtraParams:          extraParams,
+		Stream:               model.Stream,
+		FallbackUsed:         fallbackFlag,
 	}
 
 	// § free-allowance overshoot: the free/credits decision above ran BEFORE the
@@ -1598,6 +1605,12 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			},
 		},
 	}
+	providerRunner := ToolRunner(runner)
+	if provReq.ToolModeOfficial {
+		// Official request fragments execute upstream. An unsolicited/local-looking
+		// function call must never reach the system tool registry in this mode.
+		providerRunner = officialModeToolRunner{}
+	}
 
 	// Non-streaming models (§4.3): suppress incremental text deltas and emit
 	// the full answer once after generation. Tool / artifact / rag events still
@@ -1629,7 +1642,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		// all finalize/persist/usage/done logic below is path-agnostic.
 		result, err = o.runDeepResearch(providerCtx, provReq, runner, provider, streamToUser, conv, assistantMsg)
 	} else {
-		result, err = o.streamWithFallback(providerCtx, provReq, runner, provider, model.ID, streamToUser, &ttftFallbackModel)
+		result, err = o.streamWithFallback(providerCtx, provReq, providerRunner, provider, model.ID, streamToUser, &ttftFallbackModel)
 	}
 	// §fallback channel: which channel actually served this turn, for the usage
 	// row. If any request was retried on the fallback, the whole turn is marked
@@ -3000,26 +3013,40 @@ type toolRoutePrompt struct {
 	StagedFiles  []toolRouteFile `json:"staged_files,omitempty"`
 }
 
-// toolRouteCandidates converts either self-built definitions or the selected
-// OpenAI hosted-tool names into the same classifier input. The orchestrator only
-// calls this after model/global/fast filtering, so the task model never routes
-// based on a tool the main request cannot actually expose.
-func toolRouteCandidates(defs []ToolDef, official []string) []ToolDef {
-	if len(official) == 0 {
-		return append([]ToolDef(nil), defs...)
+// selectOfficialToolRequests intersects a per-turn name selection with the
+// model's configured definitions. Configuration order is authoritative because
+// later request fragments override earlier scalar/object leaves; clients may
+// choose a subset, but may not reorder that precedence.
+func selectOfficialToolRequests(raw json.RawMessage, selected []string) ([]string, []json.RawMessage) {
+	if len(selected) == 0 {
+		return nil, nil
 	}
-	descriptions := map[string]string{
-		"web_search":       "Search the public web for current external information.",
-		"code_interpreter": "Run code for calculations, data analysis, and file processing.",
-		"image_generation": "Generate or edit images.",
-	}
-	out := make([]ToolDef, 0, len(official))
-	for _, name := range official {
-		if description, ok := descriptions[name]; ok {
-			out = append(out, ToolDef{Name: name, Description: description})
+	wanted := make(map[string]bool, len(selected))
+	for _, name := range selected {
+		if name = strings.TrimSpace(name); name != "" {
+			wanted[name] = true
 		}
 	}
-	return out
+	if len(wanted) == 0 {
+		return nil, nil
+	}
+	definitions, err := store.ParseOfficialTools(raw)
+	if err != nil {
+		return nil, nil
+	}
+	names := make([]string, 0, len(definitions))
+	requests := make([]json.RawMessage, 0, len(definitions))
+	seen := make(map[string]bool, len(definitions))
+	for _, definition := range definitions {
+		name := strings.TrimSpace(definition.Name)
+		if name == "" || !wanted[name] || seen[name] {
+			continue
+		}
+		seen[name] = true
+		names = append(names, name)
+		requests = append(requests, append(json.RawMessage(nil), definition.Request...))
+	}
+	return names, requests
 }
 
 // autoTurnNeedsTools asks the configured task model for one boolean decision.
@@ -3574,6 +3601,12 @@ type orchToolRunner struct {
 	orch    *Orchestrator
 	ctx     *ToolContext
 	onEvent func(SseEvent)
+}
+
+type officialModeToolRunner struct{}
+
+func (officialModeToolRunner) Run(_ context.Context, name string, _ []byte) (string, []Citation, error) {
+	return "", nil, fmt.Errorf("system tool %q is unavailable in official mode", name)
 }
 
 // toolTimeouts bounds a single tool invocation per tool type (§4.3: search

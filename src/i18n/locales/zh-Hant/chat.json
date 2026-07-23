@@ -105,10 +105,14 @@
       "toolModeDesc": "選擇何時向回答模型提供工具。",
       "toolModeAuto": "自動",
       "toolModeAutoDesc": "由任務模型判斷本次回答是否需要工具。",
-      "toolModeDisabled": "停用工具",
+      "toolModeDisabled": "關閉",
       "toolModeDisabledDesc": "不提供工具，直接產生回答。",
-      "toolModeEnabled": "開啟工具",
-      "toolModeEnabledDesc": "始終提供目前模型已設定的工具。",
+      "toolModeEnabled": "工具呼叫",
+      "toolModeEnabledDesc": "提供目前模型已設定的系統工具。",
+      "toolModeOfficial": "官方",
+      "toolModeOfficialDesc": "僅使用你所選的供應商原生工具。",
+      "officialTools": "官方工具",
+      "officialToolsEmpty": "目前模型尚未設定官方工具。",
       "webSearch": "聯網搜尋",
       "webSearchDesc": "每次都聯網搜尋並把結果併入提示詞（不經工具呼叫）。",
       "disable": "關閉{{name}}"
@@ -180,6 +184,7 @@
   "tools": {
     "web_search": "網頁搜尋",
     "code_interpreter": "程式碼直譯器",
+    "image_generation": "圖片生成",
     "deep_research": "深度研究"
   },
   "sources": {

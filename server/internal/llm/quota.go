@@ -265,7 +265,15 @@ func (o *Orchestrator) logUsage(ctx context.Context, log store.UsageLog) {
 // Used by the §credits pre-flight gate.
 func estimateRequestTokens(req UnifiedChatRequest) int {
 	t := estimateTokens(req.SystemPrompt)
-	if len(req.Tools) > 0 {
+	if officialToolModeEnabled(req) && len(req.OfficialToolRequests) > 0 {
+		// Official request fragments are part of the real upstream body and may
+		// carry large provider tool schemas. Count the final merged shape so the
+		// credit/free-quota preflight cannot be bypassed by moving a schema from
+		// the platform tool list into an admin-configured hosted tool.
+		if b, err := json.Marshal(MergeOfficialToolRequests(nil, req.OfficialToolRequests)); err == nil {
+			t += estimateTokens(string(b))
+		}
+	} else if len(req.Tools) > 0 {
 		if b, err := json.Marshal(req.Tools); err == nil {
 			t += estimateTokens(string(b))
 		}

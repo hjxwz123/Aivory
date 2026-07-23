@@ -1,8 +1,8 @@
-export type ToolMode = 'auto' | 'disabled' | 'enabled'
+export type ToolMode = 'auto' | 'disabled' | 'enabled' | 'official'
 export type ModelToolMode = 'native' | 'prompt' | 'none'
 
 export function isToolMode(value: unknown): value is ToolMode {
-  return value === 'auto' || value === 'disabled' || value === 'enabled'
+  return value === 'auto' || value === 'disabled' || value === 'enabled' || value === 'official'
 }
 
 /** Whether a model exposes the per-turn tool policy to users. */
@@ -15,7 +15,7 @@ export function modelAllowsToolModeSelection(
 
 /**
  * Resolves the account-level default while preserving choices made by clients
- * that predate the three-state tool mode. A missing legacy value was the old
+ * that predate the four-state tool mode. A missing legacy value was the old
  * implicit default, so it becomes the new default (`auto`); explicit legacy
  * booleans remain explicit user choices.
  */

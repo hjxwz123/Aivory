@@ -72,11 +72,15 @@ type UnifiedChatRequest struct {
 	History      []UnifiedMessage
 	Model        ModelInfo
 	Tools        []ToolDef
-	// OfficialTools, when non-empty, switches an OpenAI Responses model to
-	// OpenAI-hosted tools (web_search / code_interpreter / image_generation)
-	// instead of the system's self-built tools (§2.3-B). The provider attaches
-	// them to the request; OpenAI executes them server-side.
-	OfficialTools []string
+	// OfficialToolNames is the model-allowed subset explicitly selected for this
+	// turn. OfficialToolRequests holds the matching admin-defined request
+	// fragments in model configuration order. Providers merge those fragments
+	// into their native request body; they never execute the system's local tools.
+	OfficialToolNames    []string
+	OfficialToolRequests []json.RawMessage
+	// ToolModeOfficial remains true even when filtering leaves no selected tools,
+	// so fallback models and providers do not silently re-enable local tools.
+	ToolModeOfficial bool
 	// ToolModePrompt is true when §4.13 prompt-injection mode is on.
 	ToolModePrompt bool
 	ProjectFiles   []ProjectFileSummary
