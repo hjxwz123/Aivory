@@ -97,7 +97,7 @@ function ThreadBody({ quote, childId, onClose }: { quote: string; childId: strin
     const text = draft.trim()
     if (!text || !childId) return
     setDraft('')
-    const armed = resolveArmedTurnFlags()
+    const armed = resolveArmedTurnFlags(conv?.modelId)
     void sendMessage({
       conversationId: childId,
       text,
@@ -105,6 +105,7 @@ function ThreadBody({ quote, childId, onClose }: { quote: string; childId: strin
       verify: armed.verify,
       toolMode: armed.toolMode,
       webSearch: armed.webSearch,
+      officialToolNames: armed.officialToolNames,
     })
   }
 

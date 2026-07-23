@@ -14,9 +14,9 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, Plus, Trash2 } from 'lucide-react'
 import { adminApi, ApiError } from '@/api'
-import type { ApiChannel, ApiModel, ApiModelTag, ApiSkill } from '@/api/types'
+import type { ApiChannel, ApiModel, ApiModelTag, ApiOfficialToolDefinition, ApiSkill } from '@/api/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Field } from '@/components/ui/label'
@@ -24,6 +24,7 @@ import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { IconUploader } from '@/components/admin/icon-uploader'
+import { OfficialToolIcon } from '@/components/chat/official-tool-icon'
 import { ParamControlsEditor } from '@/components/admin/param-controls-editor'
 import { ModelQuotaEditor } from '@/components/admin/model-quota-editor'
 import { toast } from '@/hooks/use-toast'
@@ -32,11 +33,13 @@ import { PanelFallback } from '@/components/ui/panel-fallback'
 
 const KINDS = ['chat', 'image', 'embedding'] as const
 const TOOL_MODES = ['native', 'prompt', 'none'] as const
-// OpenAI Responses hosted tools the admin can enable (§2.3-B). Names are the
-// wire `type` values OpenAI expects.
-const OFFICIAL_TOOLS = ['web_search', 'code_interpreter', 'image_generation'] as const
-
-type Draft = Partial<ApiModel> & { param_controls_text: string; extra_params_text: string }
+type OfficialToolDraft = Omit<ApiOfficialToolDefinition, 'request'> & { request_text: string }
+type Draft = Partial<ApiModel> & {
+  param_controls_text: string
+  extra_params_text: string
+  official_tools_draft: OfficialToolDraft[]
+  official_tools_dirty: boolean
+}
 
 function pcToText(pc: unknown): string {
   if (typeof pc === 'string') return pc
@@ -74,11 +77,55 @@ function parseExtraParams(text: string): ExtraParamsValidation {
   }
 }
 
+function legacyOfficialToolDraft(value: unknown): OfficialToolDraft | null {
+  if (typeof value !== 'string') return null
+  const name = value.trim()
+  if (!name) return null
+  const known: Record<string, { icon: string; request: Record<string, unknown> }> = {
+    web_search: {
+      icon: 'search',
+      request: { tools: [{ type: 'web_search', search_context_size: 'medium' }] },
+    },
+    code_interpreter: {
+      icon: 'terminal',
+      request: { tools: [{ type: 'code_interpreter', container: { type: 'auto' } }] },
+    },
+    image_generation: {
+      icon: 'image',
+      request: { tools: [{ type: 'image_generation' }] },
+    },
+  }
+  const fallback = { icon: 'wrench', request: { tools: [{ type: name }] } }
+  const definition = known[name] ?? fallback
+  return {
+    name,
+    icon: definition.icon,
+    request_text: extraParamsToText(definition.request),
+  }
+}
+
 function modelToDraft(m: ApiModel): Draft {
+  const officialTools = Array.isArray(m.official_tools)
+    ? (m.official_tools as unknown[]).flatMap((tool) => {
+        const legacy = legacyOfficialToolDraft(tool)
+        if (legacy) return [legacy]
+        if (typeof tool !== 'object' || tool === null || typeof (tool as ApiOfficialToolDefinition).name !== 'string') {
+          return []
+        }
+        const definition = tool as ApiOfficialToolDefinition
+        return [{
+          name: definition.name,
+          icon: typeof definition.icon === 'string' ? definition.icon : '',
+          request_text: extraParamsToText(definition.request),
+        }]
+      })
+    : []
   return {
     ...m,
     param_controls_text: pcToText(m.param_controls),
     extra_params_text: extraParamsToText(m.extra_params),
+    official_tools_draft: officialTools,
+    official_tools_dirty: false,
   }
 }
 
@@ -149,11 +196,7 @@ export default function AdminModelEdit() {
     })
   }
 
-  // §2.3-B: the official/system tool switch only applies to an OpenAI channel
-  // running the Responses API.
   const channel = channels.find((c) => c.id === draft?.channel_id)
-  const isOpenAIResponses = channel?.type === 'openai' && channel?.api_format === 'responses'
-  const officialTools = draft?.official_tools ?? []
   const extraParamsValidation = draft?.kind === 'chat' ? parseExtraParams(draft.extra_params_text) : null
   const extraParamsError =
     extraParamsValidation && !extraParamsValidation.valid
@@ -198,6 +241,26 @@ export default function AdminModelEdit() {
       )
       return
     }
+    const officialTools: ApiOfficialToolDefinition[] = []
+    const seenOfficialToolNames = new Set<string>()
+    for (const tool of draft.official_tools_draft) {
+      const name = tool.name.trim()
+      if (!name) {
+        toast.error(t('admin:models.errors.officialToolNameRequired', { defaultValue: 'Every provider tool needs a name.' }))
+        return
+      }
+      if (seenOfficialToolNames.has(name)) {
+        toast.error(t('admin:models.errors.officialToolNameDuplicate', { defaultValue: 'Provider tool names must be unique.' }))
+        return
+      }
+      const parsed = parseExtraParams(tool.request_text)
+      if (!parsed.valid) {
+        toast.error(t('admin:models.errors.officialToolJSONInvalid', { name, defaultValue: `Invalid request JSON for ${name}.` }))
+        return
+      }
+      seenOfficialToolNames.add(name)
+      officialTools.push({ name, icon: tool.icon.trim(), request: parsed.value })
+    }
     setSaving(true)
     try {
       // skills bind through their own endpoint (model_skills, §4.17), so keep
@@ -206,12 +269,17 @@ export default function AdminModelEdit() {
         param_controls_text: _omit,
         extra_params_text: _omitExtraParams,
         extra_params: _omitExtraParamsValue,
+        official_tools_draft: _omitOfficialToolDraft,
+        official_tools_dirty: officialToolsDirty,
+        official_tools: _omitOfficialTools,
         skills: skillIds,
         ...rest
       } = draft
       void _omit
       void _omitExtraParams
       void _omitExtraParamsValue
+      void _omitOfficialToolDraft
+      void _omitOfficialTools
       const payload: Partial<ApiModel> = {
         ...rest,
         param_controls: parsedPC,
@@ -219,6 +287,7 @@ export default function AdminModelEdit() {
         // clear an earlier chat-model value instead of merely omitting the key.
         extra_params: parsedExtraParams?.valid ? parsedExtraParams.value : {},
       }
+      if (officialToolsDirty) payload.official_tools = officialTools
       const updated = await adminApi.updateModel(id, payload)
       if (draft.kind === 'chat') {
         await adminApi.setModelSkills(id, skillIds ?? [])
@@ -591,51 +660,122 @@ export default function AdminModelEdit() {
                   />
                 </Field>
 
-                {/* §2.3-B: OpenAI Responses — official (hosted) vs system tools. */}
-                {isOpenAIResponses && (
-                  <Field label={t('admin:models.fields.officialToolsLabel')} className="col-span-2">
-                    <div className="rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3 py-2.5">
-                      <label className="flex items-center justify-between">
-                        <span className="text-sm">{t('admin:models.fields.useOfficialTools')}</span>
-                        <Switch
-                          checked={officialTools.length > 0}
-                          onCheckedChange={(v) => patch({ official_tools: v ? ['web_search'] : [] })}
-                        />
-                      </label>
-                      {officialTools.length > 0 && (
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          {OFFICIAL_TOOLS.map((name) => {
-                            const on = officialTools.includes(name)
-                            return (
-                              <button
-                                key={name}
+                <Field
+                  label={t('admin:models.fields.officialToolsLabel')}
+                  hint={t('admin:models.fields.officialToolsHint')}
+                  className="col-span-2 min-w-0"
+                >
+                  <div className="divide-y divide-[var(--color-divider)] rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)]">
+                    {draft.official_tools_draft.length === 0 ? (
+                      <p className="px-3 py-4 text-sm text-[var(--color-fg-muted)]">
+                        {t('admin:models.fields.officialToolsEmpty', { defaultValue: 'No provider-native tools configured.' })}
+                      </p>
+                    ) : (
+                      draft.official_tools_draft.map((tool, index) => {
+                        const parsed = parseExtraParams(tool.request_text)
+                        const setTool = (next: Partial<OfficialToolDraft>) => {
+                          const tools = draft.official_tools_draft.map((item, itemIndex) =>
+                            itemIndex === index ? { ...item, ...next } : item,
+                          )
+                          patch({ official_tools_draft: tools, official_tools_dirty: true })
+                        }
+                        return (
+                          <div key={`official-tool-${index}`} className="min-w-0 px-3 py-3">
+                            <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start">
+                              <div className="min-w-0 flex-1 space-y-3">
+                                <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-[minmax(10rem,0.75fr)_minmax(16rem,1.25fr)]">
+                                  <Field
+                                    label={t('admin:models.fields.officialToolName', { defaultValue: 'Tool name' })}
+                                    htmlFor={`m-official-name-${index}`}
+                                    className="min-w-0"
+                                  >
+                                    <Input
+                                      id={`m-official-name-${index}`}
+                                      value={tool.name}
+                                      onChange={(event) => setTool({ name: event.target.value })}
+                                      placeholder="web_search"
+                                      className="min-w-0 font-mono"
+                                      wrapperClassName="min-w-0 w-full"
+                                    />
+                                  </Field>
+                                  <Field
+                                    label={t('admin:models.fields.officialToolIcon', { defaultValue: 'Icon' })}
+                                    htmlFor={`m-official-icon-${index}`}
+                                    className="min-w-0"
+                                  >
+                                    <IconUploader
+                                      id={`m-official-icon-${index}`}
+                                      value={tool.icon}
+                                      onChange={(icon) => setTool({ icon })}
+                                      preview={<OfficialToolIcon icon={tool.icon} name={tool.name} size={18} />}
+                                      placeholder="search / terminal / image"
+                                    />
+                                  </Field>
+                                </div>
+                                <Field
+                                  label={t('admin:models.fields.officialToolJSON', { defaultValue: 'Request JSON' })}
+                                  htmlFor={`m-official-request-${index}`}
+                                  error={
+                                    parsed.valid
+                                      ? undefined
+                                      : t('admin:models.errors.officialToolJSONMustBeObject', {
+                                          defaultValue: 'Enter a valid JSON object.',
+                                        })
+                                  }
+                                >
+                                  <Textarea
+                                    id={`m-official-request-${index}`}
+                                    rows={6}
+                                    value={tool.request_text}
+                                    onChange={(event) => setTool({ request_text: event.target.value })}
+                                    invalid={!parsed.valid}
+                                    spellCheck={false}
+                                    className="min-h-[8.5rem] font-mono text-[12px] leading-relaxed"
+                                    placeholder={'{\n  "tools": [\n    { "type": "web_search" }\n  ]\n}'}
+                                  />
+                                </Field>
+                              </div>
+                              <Button
                                 type="button"
+                                variant="ghost"
+                                size="icon-sm"
+                                className="self-end sm:self-auto"
+                                aria-label={t('admin:models.fields.removeOfficialTool', { defaultValue: 'Remove tool' })}
                                 onClick={() =>
                                   patch({
-                                    official_tools: on
-                                      ? officialTools.filter((x) => x !== name)
-                                      : [...officialTools, name],
+                                    official_tools_draft: draft.official_tools_draft.filter((_, itemIndex) => itemIndex !== index),
+                                    official_tools_dirty: true,
                                   })
                                 }
-                                className={cn(
-                                  'rounded-[8px] border px-2.5 py-1 font-mono text-[12px] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-                                  on
-                                    ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
-                                    : 'border-[var(--color-border)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface)]',
-                                )}
                               >
-                                {name}
-                              </button>
-                            )
-                          })}
-                        </div>
-                      )}
-                      <p className="mt-2 text-[11px] text-[var(--color-fg-subtle)]">
-                        {t('admin:models.fields.officialToolsHint')}
-                      </p>
+                                <Trash2 size={14} aria-hidden />
+                              </Button>
+                            </div>
+                          </div>
+                        )
+                      })
+                    )}
+                    <div className="px-3 py-2.5">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        leadingIcon={<Plus size={14} aria-hidden />}
+                        onClick={() =>
+                          patch({
+                            official_tools_draft: [
+                              ...draft.official_tools_draft,
+                              { name: '', icon: '', request_text: '{\n  "tools": []\n}' },
+                            ],
+                            official_tools_dirty: true,
+                          })
+                        }
+                      >
+                        {t('admin:models.fields.addOfficialTool', { defaultValue: 'Add provider tool' })}
+                      </Button>
                     </div>
-                  </Field>
-                )}
+                  </div>
+                </Field>
 
                 {/* § moderation: screen each user prompt before generation. */}
                 <Field label={t('admin:models.fields.moderationLabel')} className="col-span-2">

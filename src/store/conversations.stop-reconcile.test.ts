@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ApiConversation, ApiMessage, ApiSseEvent } from '@/api/types'
+import type { ApiConversation, ApiMessage, ApiModel, ApiSseEvent } from '@/api/types'
 import type { Conversation, Message } from '@/types/chat'
 
 const apiMocks = vi.hoisted(() => ({
@@ -44,6 +44,8 @@ vi.mock('@/hooks/use-toast', () => ({
 }))
 
 import { useConversations } from './conversations'
+import { useComposerPrefs } from './composer-prefs'
+import { useModels } from './models'
 
 function localConversation(messages: Message[] = [], title = 'Stop reconcile'): Conversation {
   return {
@@ -469,5 +471,59 @@ describe('stopped turn optimistic-id reconciliation', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('filters official tools by the request model and preserves an explicit empty selection on the wire', async () => {
+    useModels.setState({
+      models: [
+        {
+          id: 'model_1',
+          official_tools: [
+            { name: 'web_search', icon: 'search' },
+            { name: 'image_generation', icon: 'image' },
+          ],
+        } as ApiModel,
+      ],
+      defaultId: 'model_1',
+    })
+    useComposerPrefs.setState({
+      toolMode: 'official',
+      officialToolNamesByModel: {
+        model_1: ['image_generation', 'removed_tool', 'web_search'],
+      },
+    })
+    const requestBodies: Array<Record<string, unknown>> = []
+    apiMocks.streamSSE.mockImplementation((_path: string, body: Record<string, unknown>) => {
+      requestBodies.push(body)
+      return oneEvent({ type: 'error', message: 'test terminal error' })
+    })
+
+    await useConversations.getState().sendMessage({
+      conversationId: 'conv_stop',
+      text: 'use my saved tools',
+      modelId: 'model_1',
+      toolMode: 'official',
+    })
+
+    resetStore()
+    await useConversations.getState().sendMessage({
+      conversationId: 'conv_stop',
+      text: 'use no official tools',
+      modelId: 'model_1',
+      toolMode: 'official',
+      officialToolNames: [],
+    })
+
+    expect(requestBodies).toHaveLength(2)
+    expect(requestBodies[0]).toMatchObject({
+      model_id: 'model_1',
+      tool_mode: 'official',
+      official_tool_names: ['web_search', 'image_generation'],
+    })
+    expect(requestBodies[1]).toMatchObject({
+      model_id: 'model_1',
+      tool_mode: 'official',
+      official_tool_names: [],
+    })
   })
 })

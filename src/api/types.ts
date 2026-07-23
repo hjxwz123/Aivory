@@ -313,6 +313,14 @@ export interface ApiModelTag {
   created_at: number
 }
 
+/** Admin-defined provider-native tool request fragment. Public model responses
+ * omit `request`; users only need the stable name and icon for selection. */
+export interface ApiOfficialToolDefinition {
+  name: string
+  icon: string
+  request?: Record<string, unknown>
+}
+
 export interface ApiModel {
   id: string
   channel_id: string
@@ -337,8 +345,9 @@ export interface ApiModel {
   param_controls: unknown
   /** Optional chat-model JSON object merged into the upstream provider request. */
   extra_params?: Record<string, unknown>
-  /** OpenAI Responses hosted tools to enable; empty/absent = use system tools (§2.3-B). */
-  official_tools?: string[]
+  /** Provider-native tools offered by this model. Admin responses include each
+   * request fragment; public responses expose only name/icon. */
+  official_tools?: ApiOfficialToolDefinition[]
   /** model_tags ids assigned to this model — drives the picker's tag filter (§ model tags). */
   tags?: string[]
   /** skill ids bound to this model (model_skills) — these get listed in the

@@ -678,7 +678,12 @@ func restoreInto(ctx context.Context, ex store.RowExecer, zr *zip.Reader, man ba
 		if err != nil {
 			return nil, err
 		}
-		n, err := store.RestoreTable(ctx, ex, t, rc)
+		reader, err := normalizeArchiveTableReader(t, rc)
+		if err != nil {
+			_ = rc.Close()
+			return nil, err
+		}
+		n, err := store.RestoreTable(ctx, ex, t, reader)
 		_ = rc.Close()
 		if err != nil {
 			return nil, err
@@ -816,7 +821,12 @@ func mergeConfigArchive(ctx context.Context, d Deps, zr *zip.Reader, man configM
 		if err != nil {
 			return nil, err
 		}
-		n, err := store.UpsertTable(ctx, tx, t, rc)
+		reader, err := normalizeArchiveTableReader(t, rc)
+		if err != nil {
+			_ = rc.Close()
+			return nil, err
+		}
+		n, err := store.UpsertTable(ctx, tx, t, reader)
 		_ = rc.Close()
 		if err != nil {
 			return nil, err
@@ -830,6 +840,50 @@ func mergeConfigArchive(ctx context.Context, d Deps, zr *zip.Reader, man configM
 		return nil, err
 	}
 	return counts, nil
+}
+
+func normalizeArchiveTableReader(table string, r io.Reader) (io.Reader, error) {
+	if table != "models" {
+		return r, nil
+	}
+	return normalizeModelOfficialToolsArchiveRows(r)
+}
+
+// normalizeModelOfficialToolsArchiveRows upgrades legacy name arrays before
+// either backup importer writes model rows. Keeping this at the archive edge
+// preserves generic table restore semantics while ensuring newly restored data
+// always uses the canonical definition-array representation.
+func normalizeModelOfficialToolsArchiveRows(r io.Reader) (io.Reader, error) {
+	var out bytes.Buffer
+	dec := json.NewDecoder(r)
+	enc := json.NewEncoder(&out)
+	for {
+		var row map[string]json.RawMessage
+		if err := dec.Decode(&row); err == io.EOF {
+			return bytes.NewReader(out.Bytes()), nil
+		} else if err != nil {
+			return nil, fmt.Errorf("decode models row: %w", err)
+		}
+
+		raw, present, err := backupStringField(row, "official_tools")
+		if err != nil {
+			return nil, fmt.Errorf("invalid models.official_tools: %w", err)
+		}
+		if present {
+			normalized, err := store.NormalizeOfficialTools(json.RawMessage(raw))
+			if err != nil {
+				return nil, fmt.Errorf("invalid models.official_tools: %w", err)
+			}
+			cell, err := json.Marshal(string(normalized))
+			if err != nil {
+				return nil, fmt.Errorf("encode models.official_tools: %w", err)
+			}
+			row["official_tools"] = cell
+		}
+		if err := enc.Encode(row); err != nil {
+			return nil, fmt.Errorf("encode models row: %w", err)
+		}
+	}
 }
 
 func rewriteConfigSkillAssetPaths(ctx context.Context, ex store.RowExecer, man configManifest, d Deps) error {
@@ -1036,10 +1090,29 @@ func validateConfigArchiveLockedEmbeddingModelRow(zr *zip.Reader, d Deps) error 
 		if err := validateConfigArchiveModelExtraParams(row); err != nil {
 			return err
 		}
+		if err := validateConfigArchiveModelOfficialTools(row); err != nil {
+			return err
+		}
 		if err := ensureLockedEmbeddingModelArchiveRowCanChange(d, row); err != nil {
 			return err
 		}
 	}
+}
+
+// validateConfigArchiveModelOfficialTools prevents config import from bypassing
+// the same hosted-tool shape validation used by model POST/PATCH. Exported TEXT
+// values arrive as JSON strings; both legacy name arrays and current definition
+// arrays are accepted by the store normalizer.
+func validateConfigArchiveModelOfficialTools(row map[string]json.RawMessage) error {
+	raw, present, err := backupStringField(row, "official_tools")
+	if err != nil {
+		return fmt.Errorf("invalid models.official_tools: %w", err)
+	}
+	if !present {
+		return nil
+	}
+	_, err = store.NormalizeOfficialTools(json.RawMessage(raw))
+	return err
 }
 
 // validateConfigArchiveModelExtraParams keeps the config-import path aligned

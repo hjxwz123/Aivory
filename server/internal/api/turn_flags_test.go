@@ -20,6 +20,8 @@ func TestNormalizeTurnFlags(t *testing.T) {
 	}{
 		{"auto", "", llm.ToolModeAuto, false, llm.ToolModeAuto, false},
 		{"enabled", "", llm.ToolModeEnabled, false, llm.ToolModeEnabled, false},
+		{"official", "", llm.ToolModeOfficial, false, llm.ToolModeOfficial, false},
+		{"web with official is dropped", "", llm.ToolModeOfficial, true, llm.ToolModeOfficial, false},
 		{"disabled", "", llm.ToolModeDisabled, false, llm.ToolModeDisabled, false},
 		{"disabled plus web", "", llm.ToolModeDisabled, true, llm.ToolModeDisabled, true},
 		{"web with auto is dropped", "", llm.ToolModeAuto, true, llm.ToolModeAuto, false},
@@ -55,6 +57,7 @@ func TestResolveTurnToolModeCompatibilityAndPrecedence(t *testing.T) {
 		{"explicit auto", raw(llm.ToolModeAuto), false, llm.ToolModeAuto, false},
 		{"explicit disabled wins over legacy false", raw(llm.ToolModeDisabled), false, llm.ToolModeDisabled, false},
 		{"explicit enabled wins over legacy true", raw(llm.ToolModeEnabled), true, llm.ToolModeEnabled, false},
+		{"explicit official wins over legacy true", raw(llm.ToolModeOfficial), true, llm.ToolModeOfficial, false},
 		{"explicit empty is invalid", raw(""), false, "", true},
 		{"unknown is invalid", raw("sometimes"), false, "", true},
 		{"explicit null is invalid", json.RawMessage("null"), false, "", true},

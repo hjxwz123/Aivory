@@ -17,10 +17,10 @@
  *     file is validated client-side (type + size 256 KiB) before being POSTed
  *     to /api/admin/icons — the server still re-validates everything. On
  *     success we paste the returned URL into the field.
- *   - The preview chip on the left re-uses <ModelIcon> so what the admin
- *     sees here matches what users see in the model picker.
+ *   - The preview chip uses <ModelIcon> by default. Domain-specific editors can
+ *     provide their own preview so symbolic values match their user-facing UI.
  */
-import { useRef, useState } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Upload, X } from 'lucide-react'
 import { adminApi, ApiError } from '@/api'
@@ -38,9 +38,11 @@ interface IconUploaderProps {
   value: string
   onChange: (value: string) => void
   placeholder?: string
+  /** Lets domain-specific editors preview symbolic values with their own renderer. */
+  preview?: ReactNode
 }
 
-export function IconUploader({ id, value, onChange, placeholder }: IconUploaderProps) {
+export function IconUploader({ id, value, onChange, placeholder, preview }: IconUploaderProps) {
   const { t } = useTranslation(['admin', 'common'])
   const [uploading, setUploading] = useState(false)
   const fileRef = useRef<HTMLInputElement | null>(null)
@@ -72,38 +74,43 @@ export function IconUploader({ id, value, onChange, placeholder }: IconUploaderP
   }
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex min-w-0 items-center gap-2">
       <div className="shrink-0 size-9 inline-flex items-center justify-center rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)]">
-        <ModelIcon icon={value} size={18} />
+        {preview ?? <ModelIcon icon={value} size={18} />}
       </div>
-      <div className="flex-1 min-w-0">
-        <Input
-          id={id}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder={placeholder ?? '🌟 / https://… / —'}
-        />
-      </div>
-      {value ? (
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          aria-label={t('admin:icon.clear')}
-          onClick={() => onChange('')}
-        >
-          <X size={14} aria-hidden />
-        </Button>
-      ) : null}
+      <Input
+        id={id}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder ?? '🌟 / https://… / —'}
+        className="min-w-0"
+        wrapperClassName="min-w-0 flex-1"
+        trailingSlot={
+          value ? (
+            <button
+              type="button"
+              aria-label={t('admin:icon.clear')}
+              title={t('admin:icon.clear')}
+              className="-mr-1 inline-flex size-7 shrink-0 items-center justify-center rounded-[7px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+              onClick={() => onChange('')}
+            >
+              <X size={14} aria-hidden />
+            </button>
+          ) : undefined
+        }
+      />
       <Button
         type="button"
         variant="secondary"
-        size="sm"
+        size="icon"
         leadingIcon={<Upload size={13} aria-hidden />}
         loading={uploading}
+        aria-label={t('admin:icon.upload')}
+        title={t('admin:icon.upload')}
+        className="shrink-0"
         onClick={() => fileRef.current?.click()}
       >
-        {t('admin:icon.upload')}
+        <span className="sr-only">{t('admin:icon.upload')}</span>
       </Button>
       <input
         ref={fileRef}

@@ -47,19 +47,15 @@ func TestFastModeProviderRequestHidesPythonExecuteFromEveryToolSurface(t *testin
 
 			request := provider.mainRequests[0]
 			if !requestHasTool(request, "web_search") {
-				t.Fatalf("fast request lost web_search: tools=%+v official=%v", request.Tools, request.OfficialTools)
+				t.Fatalf("fast request lost web_search: tools=%+v official=%v", request.Tools, request.OfficialToolNames)
 			}
-			if tc.official {
-				if len(request.Tools) != 0 || len(request.OfficialTools) == 0 {
-					t.Fatalf("official request used wrong tool surface: tools=%+v official=%v", request.Tools, request.OfficialTools)
-				}
-			} else if len(request.Tools) == 0 || len(request.OfficialTools) != 0 {
-				t.Fatalf("self-built request used wrong tool surface: tools=%+v official=%v", request.Tools, request.OfficialTools)
+			if len(request.Tools) == 0 || len(request.OfficialToolNames) != 0 {
+				t.Fatalf("fast enabled mode used wrong tool surface: tools=%+v official=%v", request.Tools, request.OfficialToolNames)
 			}
 
-			for _, official := range request.OfficialTools {
+			for _, official := range request.OfficialToolNames {
 				if official == "code_interpreter" {
-					t.Errorf("fast request exposed official code_interpreter: %v", request.OfficialTools)
+					t.Errorf("fast request exposed official code_interpreter: %v", request.OfficialToolNames)
 				}
 			}
 
@@ -70,7 +66,7 @@ func TestFastModeProviderRequestHidesPythonExecuteFromEveryToolSurface(t *testin
 			for _, forbidden := range []string{"python_execute", "code_interpreter"} {
 				if strings.Contains(string(visibleRequest), forbidden) {
 					t.Errorf("fast provider request exposed %s outside Raw: tools=%+v official=%v system=%q",
-						forbidden, request.Tools, request.OfficialTools, request.SystemPrompt)
+						forbidden, request.Tools, request.OfficialToolNames, request.SystemPrompt)
 				}
 			}
 

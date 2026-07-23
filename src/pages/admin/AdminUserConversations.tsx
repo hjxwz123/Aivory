@@ -7,7 +7,7 @@
  * (router gate is the admin role), so it stays a viewer — no edit/delete from
  * here. Style follows the rest of /admin: card list, ghost actions, tokens-only.
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { ArrowLeft, ChevronRight, MessageSquare, Trash2 } from 'lucide-react'
@@ -42,6 +42,7 @@ export default function AdminUserConversations() {
   const [user, setUser] = useState<ApiUser | null>(null)
   const [rows, setRows] = useState<ApiConversation[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadedId, setLoadedId] = useState('')
   const [confirmDelete, setConfirmDelete] = useState<ApiConversation | null>(null)
   const [deleting, setDeleting] = useState(false)
 
@@ -63,20 +64,23 @@ export default function AdminUserConversations() {
     let cancelled = false
     async function load() {
       setLoading(true)
+      setUser(null)
+      setRows([])
       try {
-        // The users list is small enough that re-fetching it for one row is
-        // cheaper than carving out a single-user GET endpoint.
-        const [users, convs] = await Promise.all([
-          adminApi.users('', 200, 0).then((r) => r.users),
+        const [targetUser, convs] = await Promise.all([
+          adminApi.user(id),
           adminApi.userConversations(id),
         ])
         if (cancelled) return
-        setUser(users.find((u) => u.id === id) ?? null)
+        setUser(targetUser)
         setRows(convs)
       } catch (e) {
         if (!cancelled) toast.error(e instanceof ApiError ? e.message : t('common.failed'))
       } finally {
-        if (!cancelled) setLoading(false)
+        if (!cancelled) {
+          setLoadedId(id)
+          setLoading(false)
+        }
       }
     }
     void load()
@@ -85,10 +89,9 @@ export default function AdminUserConversations() {
     }
   }, [id, t])
 
-  const headerName = useMemo(() => {
-    if (!user) return id
-    return user.name || user.email
-  }, [user, id])
+  const currentUser = user?.id === id ? user : null
+  const pageLoading = loading || loadedId !== id
+  const headerName = currentUser?.name.trim() || currentUser?.email.trim() || ''
 
   return (
     <div>
@@ -102,8 +105,23 @@ export default function AdminUserConversations() {
       </button>
 
       <header>
-        <h1 className="font-serif text-3xl tracking-tight text-[var(--color-fg)]">
-          {t('users.conversationsTitle', { name: headerName })}
+        <h1
+          className="font-serif text-3xl tracking-tight text-[var(--color-fg)]"
+          aria-busy={pageLoading}
+        >
+          {pageLoading ? (
+            <span className="block" role="status" aria-live="polite">
+              <span className="sr-only">{t('admin:common.loading')}</span>
+              <span
+                aria-hidden
+                className="block h-9 w-[min(16rem,70vw)] animate-pulse rounded-[8px] bg-[var(--color-bg-muted)]"
+              />
+            </span>
+          ) : headerName ? (
+            t('users.conversationsTitle', { name: headerName })
+          ) : (
+            t('users.conversationsFallbackTitle')
+          )}
         </h1>
         <p className="mt-2 text-[var(--color-fg-muted)] text-sm max-w-2xl">
           {t('users.conversationsLead')}
@@ -111,7 +129,7 @@ export default function AdminUserConversations() {
       </header>
 
       <section className="mt-8">
-        {loading ? (
+        {pageLoading ? (
           <PanelFallback />
         ) : rows.length === 0 ? (
           <div className="text-sm text-[var(--color-fg-subtle)] rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-10 text-center">

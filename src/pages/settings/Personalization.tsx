@@ -4,7 +4,7 @@
  * settings (persona_*) and injected into the system prompt by the orchestrator;
  * the memory toggle gates both injection and extraction server-side.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Switch } from '@/components/ui/switch'
 import { Button } from '@/components/ui/button'
@@ -19,6 +19,23 @@ import { useAuth } from '@/store/auth'
 import { MemoryManager } from '@/components/settings/memory-manager'
 import { cn } from '@/lib/utils'
 import { resolveDefaultToolMode, type ToolMode } from '@/lib/tool-mode'
+import { useModels } from '@/store/models'
+import {
+  filterOfficialToolNames,
+  humanizeOfficialToolName,
+  officialToolsForModel,
+  resolveDefaultOfficialToolNames,
+} from '@/lib/official-tools'
+import { OfficialToolIcon } from '@/components/chat/official-tool-icon'
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { ArrowLeft, BadgeCheck, Ban, Check, ChevronDown, ChevronRight, Loader2, Sparkles, Wrench } from 'lucide-react'
+import { persistUserSettings } from '@/lib/user-settings'
 
 // Trait keys MUST match personaTraitPhrases on the backend (orchestrator.go).
 const TRAITS = [
@@ -34,7 +51,8 @@ const TRAITS = [
   'formal',
 ] as const
 
-const TOOL_MODES: ToolMode[] = ['auto', 'disabled', 'enabled']
+const TOOL_MODES: ToolMode[] = ['enabled', 'auto', 'disabled', 'official']
+const EMPTY_TOOL_NAMES: string[] = []
 
 export default function Personalization() {
   const { t } = useTranslation(['settings', 'memory', 'common'])
@@ -47,6 +65,19 @@ export default function Personalization() {
   const defaultToolMode = useComposerPrefs((s) => s.defaultToolMode)
   const setDefaultToolMode = useComposerPrefs((s) => s.setDefaultToolMode)
   const setToolMode = useComposerPrefs((s) => s.setToolMode)
+  const setOfficialToolNames = useComposerPrefs((s) => s.setOfficialToolNames)
+  const defaultModelId = useModels((s) => s.defaultId)
+  const defaultModel = useModels((s) => s.getById(defaultModelId))
+  const loadModels = useModels((s) => s.load)
+  const modelsLoaded = useModels((s) => s.loaded)
+  const defaultOfficialTools = useMemo(() => officialToolsForModel(defaultModel), [defaultModel])
+  const cachedDefaultOfficialToolNames = useComposerPrefs((s) =>
+    defaultModelId ? s.officialToolNamesByModel[defaultModelId] : undefined,
+  )
+  const defaultOfficialToolNames = useMemo(
+    () => filterOfficialToolNames(defaultModel, cachedDefaultOfficialToolNames ?? EMPTY_TOOL_NAMES),
+    [cachedDefaultOfficialToolNames, defaultModel],
+  )
 
   const [traits, setTraits] = useState<string[]>([])
   const [nickname, setNickname] = useState('')
@@ -54,8 +85,26 @@ export default function Personalization() {
   const [loaded, setLoaded] = useState(false)
   const [saving, setSaving] = useState(false)
   const [toolsSaving, setToolsSaving] = useState(false)
+  const [toolMenuPanel, setToolMenuPanel] = useState<'modes' | 'official'>('modes')
+  const [serverOfficialToolNames, setServerOfficialToolNames] = useState<string[] | null>(null)
+  const toolSettingsQueueRef = useRef<Promise<unknown>>(Promise.resolve())
+  const hydratedOfficialToolModelsRef = useRef<Set<string>>(new Set())
+  const confirmedOfficialToolNamesRef = useRef<string[]>([])
+  const officialToolSaveVersionRef = useRef(0)
+
+  function queueToolSettingsSave(patch: Record<string, unknown>) {
+    const request = toolSettingsQueueRef.current
+      .catch(() => undefined)
+      .then(() => persistUserSettings(patch))
+    toolSettingsQueueRef.current = request
+    return request
+  }
 
   // Load the server-side persona + memory flag (the source of truth).
+  useEffect(() => {
+    if (!modelsLoaded) void loadModels()
+  }, [loadModels, modelsLoaded])
+
   useEffect(() => {
     let active = true
     authApi
@@ -67,13 +116,30 @@ export default function Personalization() {
         setCustom(typeof s.persona_custom === 'string' ? s.persona_custom : '')
         if (typeof s.memory_enabled === 'boolean') setPrivacy({ memoriesEnabled: s.memory_enabled })
         setDefaultToolMode(resolveDefaultToolMode(s))
+        const officialToolNames = resolveDefaultOfficialToolNames(s)
+        confirmedOfficialToolNamesRef.current = officialToolNames
+        setServerOfficialToolNames(officialToolNames)
         setLoaded(true)
       })
-      .catch(() => setLoaded(true))
+      .catch(() => {
+        if (active) setLoaded(true)
+      })
     return () => {
       active = false
     }
-  }, [setPrivacy, setDefaultToolMode])
+  }, [setDefaultToolMode, setPrivacy])
+
+  // The model registry can finish loading after the account settings request.
+  // Hydrate each default model once, then leave subsequent model refreshes and
+  // local user changes alone instead of replaying a stale server response.
+  useEffect(() => {
+    if (!modelsLoaded || !defaultModelId || !defaultModel || serverOfficialToolNames === null) return
+    if (hydratedOfficialToolModelsRef.current.has(defaultModelId)) return
+    hydratedOfficialToolModelsRef.current.add(defaultModelId)
+    const officialToolNames = filterOfficialToolNames(defaultModel, serverOfficialToolNames)
+    confirmedOfficialToolNamesRef.current = officialToolNames
+    setOfficialToolNames(defaultModelId, officialToolNames)
+  }, [defaultModel, defaultModelId, modelsLoaded, serverOfficialToolNames, setOfficialToolNames])
 
   function toggleTrait(key: string) {
     setTraits((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]))
@@ -116,7 +182,7 @@ export default function Personalization() {
     setToolMode(next)
     setToolsSaving(true)
     try {
-      await authApi.updateSettings({ tool_mode_default: next })
+      await queueToolSettingsSave({ tool_mode_default: next })
     } catch (e) {
       setDefaultToolMode(previousDefault)
       setToolMode(previousCurrent)
@@ -128,6 +194,33 @@ export default function Personalization() {
       toast.error(t('common:actions.failed', { defaultValue: 'Failed to save' }), e instanceof Error ? e.message : undefined)
     } finally {
       setToolsSaving(false)
+    }
+  }
+
+  async function onToggleOfficialTool(name: string) {
+    if (!defaultModelId) return
+    const saveVersion = ++officialToolSaveVersionRef.current
+    const previous = defaultOfficialToolNames
+    const next = filterOfficialToolNames(
+      defaultModel,
+      previous.includes(name) ? previous.filter((item) => item !== name) : [...previous, name],
+    )
+    setOfficialToolNames(defaultModelId, next)
+    try {
+      await queueToolSettingsSave({ official_tool_names_default: next })
+      confirmedOfficialToolNamesRef.current = next
+      setServerOfficialToolNames(next)
+    } catch (e) {
+      // Earlier failures must not roll back newer queued clicks. If the newest
+      // request fails, restore the last server-confirmed selection rather than
+      // only undoing one click (which leaves earlier failed clicks looking saved).
+      if (saveVersion === officialToolSaveVersionRef.current) {
+        setOfficialToolNames(
+          defaultModelId,
+          filterOfficialToolNames(defaultModel, confirmedOfficialToolNamesRef.current),
+        )
+      }
+      toast.error(t('common:actions.failed', { defaultValue: 'Failed to save' }), e instanceof Error ? e.message : undefined)
     }
   }
 
@@ -219,55 +312,143 @@ export default function Personalization() {
           </p>
         </div>
         <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-5 sm:p-6">
-          <div id="tool-mode-label" className="text-sm font-medium text-[var(--color-fg)]">
-            {t('settings:personalization.toolsDefaultLabel')}
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
+            <div className="min-w-0">
+              <div id="tool-mode-label" className="text-sm font-medium text-[var(--color-fg)]">
+                {t('settings:personalization.toolsDefaultLabel')}
+              </div>
+              <p id="tool-mode-description" className="mt-1 max-w-xl text-xs leading-relaxed text-[var(--color-fg-muted)]">
+                {t('settings:personalization.toolsDefaultBody')}
+              </p>
+            </div>
+            <DropdownMenu
+              onOpenChange={(open) => {
+                if (!open) setToolMenuPanel('modes')
+              }}
+            >
+              <DropdownMenuTrigger
+                disabled={!loaded}
+                aria-labelledby="tool-mode-label"
+                aria-describedby="tool-mode-description"
+                className={cn(
+                  'inline-flex h-10 w-full shrink-0 items-center gap-2 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface-sunken)] px-3.5 text-sm text-[var(--color-fg)] sm:w-64',
+                  'hover:border-[var(--color-border-strong)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+                  !loaded && 'cursor-not-allowed opacity-50',
+                )}
+              >
+                {defaultToolMode === 'enabled' ? (
+                  <Wrench size={15} className="shrink-0 text-[var(--color-secondary)]" aria-hidden />
+                ) : defaultToolMode === 'auto' ? (
+                  <Sparkles size={15} className="shrink-0 text-[var(--color-secondary)]" aria-hidden />
+                ) : defaultToolMode === 'disabled' ? (
+                  <Ban size={15} className="shrink-0 text-[var(--color-secondary)]" aria-hidden />
+                ) : (
+                  <BadgeCheck size={15} className="shrink-0 text-[var(--color-secondary)]" aria-hidden />
+                )}
+                <span className="min-w-0 flex-1 truncate text-left">
+                  {t(`settings:personalization.toolModes.${defaultToolMode}.label`)}
+                </span>
+                {toolsSaving ? (
+                  <Loader2 size={14} className="shrink-0 animate-spin text-[var(--color-fg-muted)]" aria-hidden />
+                ) : (
+                  <ChevronDown size={14} className="shrink-0 text-[var(--color-fg-muted)]" aria-hidden />
+                )}
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-[min(20rem,calc(100vw-2rem))]">
+                {toolMenuPanel === 'official' ? (
+                  <>
+                    <DropdownMenuItem
+                      onSelect={(event) => {
+                        event.preventDefault()
+                        setToolMenuPanel('modes')
+                      }}
+                      className="py-2"
+                    >
+                      <ArrowLeft size={14} className="shrink-0 text-[var(--color-fg-muted)]" aria-hidden />
+                      <span className="min-w-0 flex-1 truncate text-[13px] font-medium">
+                        {t('chat:composer.features.officialTools', { defaultValue: 'Official tools' })}
+                      </span>
+                      <span className="text-[11px] tabular-nums text-[var(--color-fg-subtle)]">
+                        {defaultOfficialToolNames.length}/{defaultOfficialTools.length}
+                      </span>
+                    </DropdownMenuItem>
+                    <div className="my-1 h-px bg-[var(--color-divider)]" aria-hidden />
+                    {defaultOfficialTools.map((tool) => {
+                      const checked = defaultOfficialToolNames.includes(tool.name)
+                      return (
+                        <DropdownMenuCheckboxItem
+                          key={tool.name}
+                          checked={checked}
+                          onSelect={(event) => event.preventDefault()}
+                          onCheckedChange={() => {
+                            if (defaultToolMode !== 'official') void onSelectToolMode('official')
+                            void onToggleOfficialTool(tool.name)
+                          }}
+                          className="py-2"
+                        >
+                          <OfficialToolIcon
+                            icon={tool.icon}
+                            name={tool.name}
+                            size={16}
+                            className="text-[var(--color-fg-muted)]"
+                          />
+                          <span className="min-w-0 truncate">
+                            {t(`chat:tools.${tool.name}`, { defaultValue: humanizeOfficialToolName(tool.name) })}
+                          </span>
+                        </DropdownMenuCheckboxItem>
+                      )
+                    })}
+                  </>
+                ) : (
+                  TOOL_MODES.map((mode) => {
+                    const selected = defaultToolMode === mode
+                    const icon =
+                      mode === 'enabled' ? (
+                        <Wrench size={16} aria-hidden />
+                      ) : mode === 'auto' ? (
+                        <Sparkles size={16} aria-hidden />
+                      ) : mode === 'disabled' ? (
+                        <Ban size={16} aria-hidden />
+                      ) : (
+                        <BadgeCheck size={16} aria-hidden />
+                      )
+                    const label = t(`settings:personalization.toolModes.${mode}.label`)
+                    const body = t(`settings:personalization.toolModes.${mode}.body`)
+
+                    return (
+                      <DropdownMenuItem
+                        key={mode}
+                        disabled={!loaded || toolsSaving || (mode === 'official' && defaultOfficialTools.length === 0)}
+                        onSelect={(event) => {
+                          if (mode === 'official') {
+                            event.preventDefault()
+                            if (!selected) void onSelectToolMode(mode)
+                            setToolMenuPanel('official')
+                            return
+                          }
+                          void onSelectToolMode(mode)
+                        }}
+                        className={cn('items-start py-2.5', selected && 'bg-[var(--color-secondary-soft)]')}
+                      >
+                        <span className={cn('mt-0.5 shrink-0', selected ? 'text-[var(--color-secondary)]' : 'text-[var(--color-fg-muted)]')}>
+                          {icon}
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-[13px] font-medium">{label}</span>
+                          <span className="mt-0.5 block text-[11.5px] leading-snug text-[var(--color-fg-subtle)]">{body}</span>
+                        </span>
+                        {mode === 'official' ? (
+                          <ChevronRight size={14} className="mt-1 shrink-0 text-[var(--color-fg-subtle)]" aria-hidden />
+                        ) : selected ? (
+                          <Check size={14} className="mt-1 shrink-0 text-[var(--color-secondary)]" aria-hidden />
+                        ) : null}
+                      </DropdownMenuItem>
+                    )
+                  })
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
-          <p id="tool-mode-description" className="mt-1 text-xs leading-relaxed text-[var(--color-fg-muted)]">
-            {t('settings:personalization.toolsDefaultBody')}
-          </p>
-          <div
-            role="radiogroup"
-            aria-labelledby="tool-mode-label"
-            aria-describedby="tool-mode-description tool-mode-selected-description"
-            className="mt-4 grid grid-cols-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-1"
-          >
-            {TOOL_MODES.map((mode) => {
-              const selected = defaultToolMode === mode
-              return (
-                <label
-                  key={mode}
-                  className={cn(
-                    'flex min-h-11 min-w-0 items-center justify-center rounded-md px-2 py-2 text-center interactive',
-                    'has-[:focus-visible]:outline-none has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-[var(--color-ring)]',
-                    !loaded || toolsSaving ? 'cursor-not-allowed opacity-60' : 'cursor-pointer',
-                    selected
-                      ? 'bg-[var(--color-surface)] text-[var(--color-accent)] shadow-[var(--shadow-xs)]'
-                      : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-surface)] hover:text-[var(--color-fg)]',
-                  )}
-                >
-                  <input
-                    type="radio"
-                    name="default-tool-mode"
-                    value={mode}
-                    checked={selected}
-                    disabled={!loaded || toolsSaving}
-                    onChange={() => void onSelectToolMode(mode)}
-                    className="sr-only"
-                  />
-                  <span className="min-w-0 break-words text-xs font-medium leading-tight sm:text-sm">
-                    {t(`settings:personalization.toolModes.${mode}.label`)}
-                  </span>
-                </label>
-              )
-            })}
-          </div>
-          <p
-            id="tool-mode-selected-description"
-            aria-live="polite"
-            className="mt-3 min-h-10 text-xs leading-relaxed text-[var(--color-fg-muted)]"
-          >
-            {t(`settings:personalization.toolModes.${defaultToolMode}.body`)}
-          </p>
         </div>
       </section>
 

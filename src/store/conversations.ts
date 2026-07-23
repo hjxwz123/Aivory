@@ -43,6 +43,7 @@ import { useAuth } from '@/store/auth'
 import { useComposerPrefs, type ComposerMode } from '@/store/composer-prefs'
 import { useModels } from '@/store/models'
 import type { ToolMode } from '@/lib/tool-mode'
+import { filterOfficialToolNames, sanitizeOfficialToolNames } from '@/lib/official-tools'
 import i18n from '@/i18n'
 import { mathContentToPlainText } from '@/lib/math-content'
 
@@ -53,20 +54,28 @@ import { mathContentToPlainText } from '@/lib/math-content'
 // triggered, instead of silently reverting to defaults. verify is gated on
 // availability. Deep Research is normalized to enabled because its pipeline
 // always needs tools and must bypass the automatic classifier.
-export function resolveArmedTurnFlags(): {
+export function resolveArmedTurnFlags(modelId?: string): {
   mode?: ComposerMode
   verify?: boolean
   toolMode: ToolMode
   webSearch?: boolean
+  officialToolNames?: string[]
 } {
   const p = useComposerPrefs.getState()
   const mode = p.mode !== 'default' ? p.mode : undefined
   const toolMode = resolveTurnToolMode(p.toolMode, { mode })
+  const models = useModels.getState()
+  const resolvedModelId = modelId || models.defaultId
+  const model = resolvedModelId ? models.getById(resolvedModelId) : undefined
   return {
     mode,
     verify: p.verify && useModels.getState().verifyAvailable ? true : undefined,
     toolMode,
     webSearch: toolMode === 'disabled' && p.forceWebSearch ? true : undefined,
+    officialToolNames:
+      toolMode === 'official' && resolvedModelId
+        ? filterOfficialToolNames(model, p.officialToolNamesByModel[resolvedModelId])
+        : undefined,
   }
 }
 
@@ -86,12 +95,18 @@ export function resolveTurnToolMode(
 /** Pure wire-policy resolver shared by normal sends and regeneration. */
 export function resolveToolRequestFlags(
   toolMode: ToolMode | undefined,
-  options: { fast?: boolean; mode?: ComposerMode; webSearch?: boolean } = {},
-): { toolMode: ToolMode; webSearch?: true } {
+  options: { fast?: boolean; mode?: ComposerMode; webSearch?: boolean; officialToolNames?: string[] } = {},
+): { toolMode: ToolMode; webSearch?: true; officialToolNames?: string[] } {
   const resolved = resolveTurnToolMode(toolMode, options)
   return {
     toolMode: resolved,
     webSearch: resolved === 'disabled' && options.webSearch ? true : undefined,
+    // Preserve an explicit empty selection on the wire. Omitting the field in
+    // official mode makes an empty user choice indistinguishable from a legacy
+    // client asking the server to choose its defaults during a rolling deploy.
+    ...(resolved === 'official'
+      ? { officialToolNames: sanitizeOfficialToolNames(options.officialToolNames) }
+      : {}),
   }
 }
 
@@ -276,6 +291,8 @@ interface ConversationStore {
     toolMode?: ToolMode
     /** §4.4-B: forced non-tool web search (only meaningful in disabled mode). */
     webSearch?: boolean
+    /** Provider-native tool subset, serialized only with toolMode=official. */
+    officialToolNames?: string[]
     /** §fast-mode: run this turn in fast mode (model resolved server-side + masked;
      *  verify/DR forced off; fixed enabled policy, quartered budget, no Python). */
     fast?: boolean
@@ -1057,10 +1074,20 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
       return
     }
     const persistedLeafBeforeTurn = previousPersistedLeaf(conv0?.messages ?? [])
-    const { toolMode: requestToolMode, webSearch: requestWebSearch } = resolveToolRequestFlags(input.toolMode, {
+    const requestModelId = input.fast ? undefined : input.modelId || conv0?.modelId || useModels.getState().defaultId
+    const requestModel = requestModelId ? useModels.getState().getById(requestModelId) : undefined
+    const requestedOfficialToolNames =
+      input.officialToolNames ??
+      (requestModelId ? useComposerPrefs.getState().officialToolNamesByModel[requestModelId] : undefined)
+    const {
+      toolMode: requestToolMode,
+      webSearch: requestWebSearch,
+      officialToolNames: requestOfficialToolNames,
+    } = resolveToolRequestFlags(input.toolMode, {
       fast: input.fast,
       mode: input.mode,
       webSearch: input.webSearch,
+      officialToolNames: filterOfficialToolNames(requestModel, requestedOfficialToolNames),
     })
     const userId = uid('m')
     generatedLocalMessageIds.add(userId)
@@ -1241,9 +1268,10 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
           mode: input.mode,
           // §verify: enable the secondary-auditor pass for this turn.
           verify: input.verify,
-          // Explicit tri-state policy; only disabled mode may request the legacy
+          // Explicit four-state policy; only disabled mode may request the legacy
           // server-run search injection.
           tool_mode: requestToolMode,
+          official_tool_names: requestOfficialToolNames,
           web_search: requestWebSearch,
           // §fast-mode: run this turn on the admin's hidden fast model.
           fast: input.fast,
@@ -1575,16 +1603,18 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
     // toggles (a retry should reflect what's armed now). `mode` is the EXCEPTION
     // — it stays the original turn's mode (below), so regenerating a deep-research
     // reply re-runs research rather than adopting whatever mode is toggled now.
-    const armed = resolveArmedTurnFlags()
+    const regenerateModelId = modelId ?? conv?.modelId
+    const armed = resolveArmedTurnFlags(regenerateModelId)
     // §fast-mode: regenerate honours the conversation's CURRENT 快速/进阶 selection
     // (like verify/tool-policy above) — a fast conversation re-runs fast; switching to
     // 进阶 first makes the retry use the real model.
     const fast = conv?.fast === true
     const verify = fast ? false : armed.verify
-    const { toolMode, webSearch } = resolveToolRequestFlags(armed.toolMode, {
+    const { toolMode, webSearch, officialToolNames } = resolveToolRequestFlags(armed.toolMode, {
       fast,
       mode,
       webSearch: armed.webSearch,
+      officialToolNames: armed.officialToolNames,
     })
     const placeholderId = uid('m')
     generatedLocalMessageIds.add(placeholderId)
@@ -1647,6 +1677,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
           mode,
           verify,
           tool_mode: toolMode,
+          official_tool_names: officialToolNames,
           web_search: webSearch,
           fast,
           // Fast turns must not inherit parameter overrides cached from the

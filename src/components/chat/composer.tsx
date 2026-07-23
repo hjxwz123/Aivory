@@ -33,6 +33,10 @@ import {
   Wrench,
   Globe,
   Sigma,
+  ArrowLeft,
+  BadgeCheck,
+  ChevronRight,
+  Sparkles,
 } from 'lucide-react'
 import type { Attachment } from '@/types/chat'
 import { modelAllowsToolModeSelection, type ToolMode } from '@/lib/tool-mode'
@@ -71,6 +75,13 @@ import {
   type RichComposerEditorHandle,
 } from './rich-composer-editor'
 import { FormulaEditorDialog } from './formula-editor-dialog'
+import { OfficialToolIcon } from './official-tool-icon'
+import {
+  filterOfficialToolNames,
+  humanizeOfficialToolName,
+  officialToolsForModel,
+} from '@/lib/official-tools'
+import type { ApiOfficialToolDefinition } from '@/api/types'
 
 interface ComposerProps {
   modelId: string
@@ -88,10 +99,12 @@ interface ComposerProps {
       imageStyleId?: string
       /** §verify: run the secondary-auditor pass on this turn. */
       verify?: boolean
-      /** Tri-state tool policy, always sent explicitly. */
+      /** Four-state tool policy, always sent explicitly. */
       toolMode: ToolMode
       /** §4.4-B: forced non-tool web search (only in disabled mode). */
       webSearch?: boolean
+      /** Provider-native tools selected from the current model's allowlist. */
+      officialToolNames?: string[]
       /** §fast-mode: run this turn in fast mode. */
       fast?: boolean
     },
@@ -135,6 +148,7 @@ interface ComposerProps {
 
 const MAX_LEN = envNum('VITE_AIVORY_MAX_LEN', 12_000)
 const EMPTY_PARAM_VALUES: Record<string, unknown> = {}
+const EMPTY_TOOL_NAMES: string[] = []
 
 // Backend file ids already committed to a SENT message, shared across every
 // composer instance (module scope, not a per-instance ref). Sending the FIRST
@@ -374,9 +388,10 @@ interface ToolModeOption {
   value: ToolMode
   label: string
   desc: string
+  icon: ReactNode
 }
 
-/** One mutually-exclusive tool-policy control shared by mobile and desktop menus. */
+/** Four row-style policies with an inline second level for provider-native tools. */
 function ToolModeSelector({
   label,
   description,
@@ -384,6 +399,12 @@ function ToolModeSelector({
   options,
   onChange,
   researchActive,
+  officialTools,
+  officialToolNames,
+  onOfficialToolNamesChange,
+  officialToolsLabel,
+  officialToolsEmpty,
+  menuOpen,
 }: {
   label: string
   description: string
@@ -391,77 +412,156 @@ function ToolModeSelector({
   options: readonly ToolModeOption[]
   onChange: (value: ToolMode) => void
   researchActive: boolean
+  officialTools: ApiOfficialToolDefinition[]
+  officialToolNames: string[]
+  onOfficialToolNamesChange: (names: string[]) => void
+  officialToolsLabel: string
+  officialToolsEmpty: string
+  menuOpen: boolean
 }) {
-  const selected = options.find((option) => option.value === value) ?? options[0]
-  const optionRefs = useRef<Array<HTMLButtonElement | null>>([])
+  const { t } = useTranslation('chat')
+  const [panel, setPanel] = useState<'modes' | 'official'>('modes')
+  const previousPanelRef = useRef(panel)
+  const officialBackRef = useRef<HTMLButtonElement>(null)
+  const officialModeRef = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    if (researchActive) setPanel('modes')
+  }, [researchActive])
+
+  useEffect(() => {
+    if (!menuOpen) {
+      previousPanelRef.current = 'modes'
+      setPanel('modes')
+      return
+    }
+    if (previousPanelRef.current === panel) return
+    previousPanelRef.current = panel
+    if (panel === 'official') officialBackRef.current?.focus()
+    else officialModeRef.current?.focus()
+  }, [menuOpen, panel])
+
+  if (panel === 'official') {
+    return (
+      <div className="px-1 py-1" role="group" aria-label={officialToolsLabel}>
+        <button
+          ref={officialBackRef}
+          type="button"
+          onClick={() => setPanel('modes')}
+          className="flex min-h-9 w-full items-center gap-2 rounded-[8px] px-2 py-1.5 text-left text-[12.5px] font-medium text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+        >
+          <ArrowLeft size={14} aria-hidden />
+          <span className="truncate">{officialToolsLabel}</span>
+          <span className="ml-auto text-[11px] tabular-nums text-[var(--color-fg-subtle)]">
+            {officialToolNames.length}/{officialTools.length}
+          </span>
+        </button>
+        <div className="my-1 h-px bg-[var(--color-divider)]" aria-hidden />
+        {officialTools.length === 0 ? (
+          <p className="px-2.5 py-3 text-[12px] leading-relaxed text-[var(--color-fg-muted)]">{officialToolsEmpty}</p>
+        ) : (
+          officialTools.map((tool) => {
+            const checked = officialToolNames.includes(tool.name)
+            return (
+              <button
+                key={tool.name}
+                type="button"
+                role="checkbox"
+                aria-checked={checked}
+                onClick={() =>
+                  onOfficialToolNamesChange(
+                    checked
+                      ? officialToolNames.filter((name) => name !== tool.name)
+                      : [...officialToolNames, tool.name],
+                  )
+                }
+                className={cn(
+                  'flex w-full items-center gap-2.5 rounded-[10px] px-2.5 py-2 text-left interactive',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+                  checked ? 'bg-[var(--color-secondary-soft)]' : 'hover:bg-[var(--color-bg-muted)]',
+                )}
+              >
+                <OfficialToolIcon
+                  icon={tool.icon}
+                  name={tool.name}
+                  size={16}
+                  className={checked ? 'text-[var(--color-secondary)]' : 'text-[var(--color-fg-muted)]'}
+                />
+                <span
+                  className={cn(
+                    'min-w-0 flex-1 truncate text-[13px] font-medium',
+                    checked ? 'text-[var(--color-secondary)]' : 'text-[var(--color-fg)]',
+                  )}
+                >
+                  {t(`tools.${tool.name}`, { defaultValue: humanizeOfficialToolName(tool.name) })}
+                </span>
+                {checked ? <Check size={14} className="shrink-0 text-[var(--color-secondary)]" aria-hidden /> : null}
+              </button>
+            )
+          })
+        )}
+      </div>
+    )
+  }
+
   return (
-    <div className="px-2.5 py-2" role="group" aria-label={label}>
-      <div className="text-[13px] font-medium text-[var(--color-fg)]">{label}</div>
-      <p className="mt-0.5 text-[11.5px] leading-snug text-[var(--color-fg-subtle)]">{description}</p>
-      <div
-        role="radiogroup"
-        aria-label={label}
-        className="mt-2 grid min-h-9 grid-cols-3 rounded-[8px] bg-[var(--color-bg-muted)] p-0.5"
-      >
-        {options.map((option, index) => {
+    <div className="px-1 py-1" role="group" aria-label={label} aria-description={description}>
+      {options.map((option) => {
           const checked = option.value === value
-          const disabled = researchActive && option.value !== 'enabled'
+          const opensSubmenu = option.value === 'official'
+          const disabled =
+            (researchActive && option.value !== 'enabled') ||
+            (opensSubmenu && officialTools.length === 0)
           return (
             <button
               key={option.value}
-              ref={(node) => {
-                optionRefs.current[index] = node
-              }}
+              ref={opensSubmenu ? officialModeRef : undefined}
               type="button"
-              role="radio"
-              aria-checked={checked}
+              aria-pressed={checked}
               aria-label={`${option.label}: ${option.desc}`}
               disabled={disabled}
-              tabIndex={checked ? 0 : -1}
               onClick={() => {
                 if (!checked) onChange(option.value)
-              }}
-              onKeyDown={(event) => {
-                const enabledIndexes = options.flatMap((candidate, candidateIndex) =>
-                  researchActive && candidate.value !== 'enabled' ? [] : [candidateIndex],
-                )
-                const currentPosition = enabledIndexes.indexOf(index)
-                if (currentPosition < 0 || enabledIndexes.length === 0) return
-                let nextPosition: number | undefined
-                if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
-                  nextPosition = (currentPosition + 1) % enabledIndexes.length
-                } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
-                  nextPosition = (currentPosition - 1 + enabledIndexes.length) % enabledIndexes.length
-                } else if (event.key === 'Home') {
-                  nextPosition = 0
-                } else if (event.key === 'End') {
-                  nextPosition = enabledIndexes.length - 1
-                }
-                if (nextPosition === undefined) return
-                event.preventDefault()
-                const nextIndex = enabledIndexes[nextPosition]
-                const nextOption = options[nextIndex]
-                if (nextOption && nextOption.value !== value) onChange(nextOption.value)
-                optionRefs.current[nextIndex]?.focus()
+                if (opensSubmenu) setPanel('official')
               }}
               className={cn(
-                'min-h-8 min-w-0 rounded-[6px] px-1.5 py-1 text-center text-[11.5px] font-medium leading-tight interactive',
+                'flex w-full items-start gap-2.5 rounded-[10px] px-2.5 py-2 text-left interactive',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-                checked
-                  ? 'bg-[var(--color-surface)] text-[var(--color-secondary)] shadow-[var(--shadow-xs)]'
-                  : disabled
-                    ? 'cursor-not-allowed text-[var(--color-fg-faint)] opacity-50'
-                    : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]',
+                disabled
+                  ? 'cursor-not-allowed opacity-40'
+                  : checked
+                    ? 'bg-[var(--color-secondary-soft)]'
+                    : 'hover:bg-[var(--color-bg-muted)]',
               )}
             >
-              {option.label}
+              <span
+                className={cn(
+                  'mt-0.5 inline-flex shrink-0',
+                  checked && !disabled ? 'text-[var(--color-secondary)]' : 'text-[var(--color-fg-muted)]',
+                )}
+                aria-hidden
+              >
+                {option.icon}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span
+                  className={cn(
+                    'block text-[13px] font-medium',
+                    checked && !disabled ? 'text-[var(--color-secondary)]' : 'text-[var(--color-fg)]',
+                  )}
+                >
+                  {option.label}
+                </span>
+                <span className="mt-0.5 block text-[11.5px] leading-snug text-[var(--color-fg-subtle)]">{option.desc}</span>
+              </span>
+              {opensSubmenu ? (
+                <ChevronRight size={14} className="mt-1 shrink-0 text-[var(--color-fg-subtle)]" aria-hidden />
+              ) : checked && !disabled ? (
+                <Check size={14} className="mt-1 shrink-0 text-[var(--color-secondary)]" aria-hidden />
+              ) : null}
             </button>
           )
         })}
-      </div>
-      <p className="mt-1.5 min-h-[2rem] text-[11.5px] leading-snug text-[var(--color-fg-subtle)]">
-        {selected.desc}
-      </p>
     </div>
   )
 }
@@ -493,12 +593,16 @@ export function Composer({
   // §verify: when on, the answer is fact-checked by a second model this turn.
   const verify = useComposerPrefs((s) => s.verify)
   const setVerify = useComposerPrefs((s) => s.setVerify)
-  // Tri-state tool policy + forced non-tool web search. Deep Research forces
+  // Four-state tool policy + forced non-tool web search. Deep Research forces
   // enabled mode; forced search only exists inside disabled mode.
   const toolMode = useComposerPrefs((s) => s.toolMode)
   const setToolMode = useComposerPrefs((s) => s.setToolMode)
   const forceWebSearch = useComposerPrefs((s) => s.forceWebSearch)
   const setForceWebSearch = useComposerPrefs((s) => s.setForceWebSearch)
+  const cachedOfficialToolNames = useComposerPrefs((s) =>
+    modelId ? s.officialToolNamesByModel[modelId] : undefined,
+  )
+  const setOfficialToolNames = useComposerPrefs((s) => s.setOfficialToolNames)
   const cachedParamValues = useComposerPrefs((s) => (modelId ? s.paramValuesByModel[modelId] : undefined))
   const setCachedParamValues = useComposerPrefs((s) => s.setParamValues)
   const cachedDraft = useComposerPrefs((s) => (draftScope ? s.draftsByScope[draftScope] : undefined))
@@ -911,6 +1015,17 @@ export function Composer({
   const currentModel = useModels(
     (s) => s.models.find((m) => m.id === modelId) ?? s.imageModels.find((m) => m.id === modelId),
   )
+  const officialTools = useMemo(() => officialToolsForModel(currentModel), [currentModel])
+  const officialToolNames = useMemo(
+    () => filterOfficialToolNames(currentModel, cachedOfficialToolNames ?? EMPTY_TOOL_NAMES),
+    [cachedOfficialToolNames, currentModel],
+  )
+  const handleOfficialToolNamesChange = useCallback(
+    (names: string[]) => {
+      if (modelId) setOfficialToolNames(modelId, filterOfficialToolNames(currentModel, names))
+    },
+    [currentModel, modelId, setOfficialToolNames],
+  )
   // §4.20 image mode: when the selected model draws, the composer shows a style
   // picker and hides chat-only controls (research / knowledge bases).
   const isImageMode = currentModel?.kind === 'image'
@@ -943,15 +1058,24 @@ export function Composer({
   const effectiveMode = !effectiveFast && !isImageMode && researchEnabled ? mode : 'default'
   const effectiveVerify = !effectiveFast && verify && verifyAvailable && !isImageMode
   const modelAllowsToolSelection = modelAllowsToolModeSelection(currentModel?.tool_mode)
+  const hasSelectableToolPolicy = modelAllowsToolSelection || officialTools.length > 0
+  const availableToolMode = toolMode === 'official' && officialTools.length === 0 ? 'auto' : toolMode
   // Fast and image turns retain the prior fixed enabled behavior. Deep Research
   // also requires enabled mode and bypasses the automatic task classifier. A
   // model configured with tool_mode=none owns that policy at the model layer;
   // enabled here avoids applying a hidden user override or forced web search.
   const effectiveToolMode: ToolMode =
-    effectiveFast || isImageMode || effectiveMode === 'deep-research' || !modelAllowsToolSelection
+    effectiveFast || isImageMode || effectiveMode === 'deep-research' || !hasSelectableToolPolicy
       ? 'enabled'
-      : toolMode
+      : availableToolMode
   const effectiveWebSearch = effectiveToolMode === 'disabled' && forceWebSearch
+  const effectiveOfficialToolNames = effectiveToolMode === 'official' ? officialToolNames : undefined
+
+  // A global mode can outlive a model switch. Never leave the composer armed to
+  // official mode when the newly selected model offers no provider-native tools.
+  useEffect(() => {
+    if (currentModel && toolMode === 'official' && officialTools.length === 0) setToolMode('auto')
+  }, [currentModel, officialTools.length, setToolMode, toolMode])
   const handleParamValuesChange = useCallback(
     (next: Record<string, unknown>) => {
       setCachedParamValues(modelId, next)
@@ -1075,6 +1199,7 @@ export function Composer({
         verify: effectiveVerify ? true : undefined,
         toolMode: effectiveToolMode,
         webSearch: effectiveWebSearch ? true : undefined,
+        officialToolNames: effectiveOfficialToolNames,
         fast: effectiveFast ? true : undefined,
       })
       updateValue('')
@@ -1463,7 +1588,7 @@ export function Composer({
   // any other policy updates both values atomically in the preference store.
   const researchActive = effectiveMode === 'deep-research'
   const featureItems: FeatureItem[] = []
-  const showToolModeSelector = !isImageMode && !effectiveFast && modelAllowsToolSelection
+  const showToolModeSelector = !isImageMode && !effectiveFast && hasSelectableToolPolicy
   if (showToolModeSelector) {
     if (researchEnabled) {
       featureItems.push({
@@ -1492,11 +1617,20 @@ export function Composer({
   const toolModeLabel = t('composer.features.toolMode', { defaultValue: 'Tool use' })
   const toolModeOptions: readonly ToolModeOption[] = [
     {
+      value: 'enabled',
+      label: t('composer.features.toolModeEnabled', { defaultValue: 'Tool use' }),
+      desc: t('composer.features.toolModeEnabledDesc', {
+        defaultValue: 'Make the system tools configured for this model available.',
+      }),
+      icon: <Wrench size={16} aria-hidden />,
+    },
+    {
       value: 'auto',
       label: t('composer.features.toolModeAuto', { defaultValue: 'Auto' }),
       desc: t('composer.features.toolModeAutoDesc', {
         defaultValue: 'Decide automatically whether this request needs tools.',
       }),
+      icon: <Sparkles size={16} aria-hidden />,
     },
     {
       value: 'disabled',
@@ -1504,17 +1638,19 @@ export function Composer({
       desc: t('composer.features.toolModeDisabledDesc', {
         defaultValue: 'Answer directly without calling tools.',
       }),
+      icon: <Ban size={16} aria-hidden />,
     },
     {
-      value: 'enabled',
-      label: t('composer.features.toolModeEnabled', { defaultValue: 'Enabled' }),
-      desc: t('composer.features.toolModeEnabledDesc', {
-        defaultValue: 'Make tools available to the model for this request.',
+      value: 'official',
+      label: t('composer.features.toolModeOfficial', { defaultValue: 'Official' }),
+      desc: t('composer.features.toolModeOfficialDesc', {
+        defaultValue: 'Use only the provider-native tools you select.',
       }),
+      icon: <BadgeCheck size={16} aria-hidden />,
     },
   ]
-  const autoToolModeLabel = toolModeOptions[0].label
-  const selectedToolMode = toolModeOptions.find((option) => option.value === toolMode) ?? toolModeOptions[0]
+  const autoToolModeLabel = toolModeOptions.find((option) => option.value === 'auto')?.label ?? 'Auto'
+  const selectedToolMode = toolModeOptions.find((option) => option.value === toolMode) ?? toolModeOptions[1]
 
   const webSearchItem: FeatureItem | undefined =
     showToolModeSelector && toolMode === 'disabled'
@@ -1538,7 +1674,14 @@ export function Composer({
     showToolModeSelector && toolMode !== 'auto'
       ? {
           key: `tool-mode-${toolMode}`,
-          icon: toolMode === 'disabled' ? <Ban size={16} aria-hidden /> : <Wrench size={16} aria-hidden />,
+          icon:
+            toolMode === 'disabled' ? (
+              <Ban size={16} aria-hidden />
+            ) : toolMode === 'official' ? (
+              <BadgeCheck size={16} aria-hidden />
+            ) : (
+              <Wrench size={16} aria-hidden />
+            ),
           label: selectedToolMode.label,
           desc: selectedToolMode.desc,
           active: true,
@@ -1557,12 +1700,20 @@ export function Composer({
         <ToolModeSelector
           label={toolModeLabel}
           description={t('composer.features.toolModeDesc', {
-            defaultValue: 'Choose whether tools are selected automatically, disabled, or enabled.',
+            defaultValue: 'Choose automatic, disabled, system-tool, or provider-native tool use.',
           })}
           value={toolMode}
           options={toolModeOptions}
           onChange={setToolMode}
           researchActive={researchActive}
+          officialTools={officialTools}
+          officialToolNames={officialToolNames}
+          onOfficialToolNamesChange={handleOfficialToolNamesChange}
+          officialToolsLabel={t('composer.features.officialTools', { defaultValue: 'Official tools' })}
+          officialToolsEmpty={t('composer.features.officialToolsEmpty', {
+            defaultValue: 'This model has no official tools configured.',
+          })}
+          menuOpen={isMobile ? moreOpen : featuresOpen}
         />
       ) : null}
       {webSearchItem ? <FeatureRow item={webSearchItem} onAfter={onAfter} /> : null}

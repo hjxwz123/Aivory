@@ -649,6 +649,8 @@ export const adminApi = {
     api<{ users: ApiUser[]; total: number; limit: number; offset: number }>(
       `/admin/users?search=${encodeURIComponent(search)}&limit=${limit}&offset=${offset}`,
     ),
+  user: (id: string) =>
+    api<ApiUser>(`/admin/users/${encodeURIComponent(id)}`),
   reorderUsers: (ids: string[]) =>
     api<{ ok: true }>('/admin/users/reorder', { method: 'PATCH', body: { ids } }),
   createUser: (body: { email: string; name: string; password: string; role: 'user' | 'admin' }) =>

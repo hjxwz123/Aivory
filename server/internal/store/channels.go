@@ -248,6 +248,9 @@ func scanModel(s scanner) (Model, error) {
 	m.ParamControls = json.RawMessage(paramControls)
 	m.ExtraParams = json.RawMessage(orDefault(extraParams, "{}"))
 	m.OfficialTools = json.RawMessage(orDefault(officialTools, "[]"))
+	if normalized, err := NormalizeOfficialTools(m.OfficialTools); err == nil {
+		m.OfficialTools = normalized
+	}
 	m.Tags = json.RawMessage(orDefault(tags, "[]"))
 	if m.ModerationMode == "" {
 		m.ModerationMode = "keyword"
@@ -290,8 +293,10 @@ func CreateModel(ctx context.Context, db *sql.DB, m Model) (*Model, error) {
 	} else {
 		m.ExtraParams = extraParams
 	}
-	if len(m.OfficialTools) == 0 {
-		m.OfficialTools = json.RawMessage("[]")
+	if officialTools, err := NormalizeOfficialTools(m.OfficialTools); err != nil {
+		return nil, err
+	} else {
+		m.OfficialTools = officialTools
 	}
 	if len(m.Tags) == 0 {
 		m.Tags = json.RawMessage("[]")
@@ -349,8 +354,10 @@ func UpdateModel(ctx context.Context, db *sql.DB, id string, m Model) (*Model, e
 	} else {
 		m.ExtraParams = extraParams
 	}
-	if len(m.OfficialTools) == 0 {
-		m.OfficialTools = json.RawMessage("[]")
+	if officialTools, err := NormalizeOfficialTools(m.OfficialTools); err != nil {
+		return nil, err
+	} else {
+		m.OfficialTools = officialTools
 	}
 	if len(m.Tags) == 0 {
 		m.Tags = json.RawMessage("[]")

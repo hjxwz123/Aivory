@@ -21,6 +21,7 @@ package llm
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 
 	"aivory/server/internal/store"
@@ -123,6 +124,104 @@ func MergeRequestParams(native map[string]any, extraParams, controls json.RawMes
 	body := store.MergeModelExtraParams(nil, extraParams)
 	body = MergeParamControls(body, controls, picks)
 	return store.DeepMergeJSONObjects(body, native)
+}
+
+func officialToolModeEnabled(req UnifiedChatRequest) bool {
+	return req.ToolModeOfficial || len(req.OfficialToolNames) > 0 || len(req.OfficialToolRequests) > 0
+}
+
+// MergeOfficialToolRequests overlays the selected official-tool request
+// fragments in order. Objects recurse, scalar/type conflicts use the later
+// fragment, and arrays append. Array concatenation is essential for top-level
+// provider `tools` arrays: selecting multiple hosted tools must retain every
+// declaration instead of letting the last definition replace the earlier ones.
+// Malformed legacy rows are ignored at runtime; admin normalization rejects
+// them on write.
+func MergeOfficialToolRequests(target map[string]any, requests []json.RawMessage) map[string]any {
+	if target == nil {
+		target = map[string]any{}
+	}
+	for _, raw := range requests {
+		var fragment map[string]any
+		if err := json.Unmarshal(raw, &fragment); err != nil || fragment == nil {
+			continue
+		}
+		deepMergeAppendingArrays(target, fragment)
+	}
+	return target
+}
+
+func deepMergeAppendingArrays(dst, src map[string]any) {
+	for key, value := range src {
+		if sourceObject, ok := value.(map[string]any); ok {
+			if targetObject, ok := dst[key].(map[string]any); ok {
+				deepMergeAppendingArrays(targetObject, sourceObject)
+				continue
+			}
+			dst[key] = cloneOfficialRequestValue(sourceObject)
+			continue
+		}
+		if sourceArray, ok := jsonArrayItems(value); ok {
+			if targetArray, ok := jsonArrayItems(dst[key]); ok {
+				combined := make([]any, 0, len(targetArray)+len(sourceArray))
+				for _, item := range targetArray {
+					combined = append(combined, cloneOfficialRequestValue(item))
+				}
+				for _, item := range sourceArray {
+					combined = append(combined, cloneOfficialRequestValue(item))
+				}
+				dst[key] = combined
+				continue
+			}
+			dst[key] = cloneOfficialRequestValue(sourceArray)
+			continue
+		}
+		dst[key] = cloneOfficialRequestValue(value)
+	}
+}
+
+// jsonArrayItems accepts the concrete slice shapes used by provider-native
+// bodies as well as []any produced by JSON decoding. Raw JSON bytes are scalar
+// payloads here, not arrays to concatenate.
+func jsonArrayItems(value any) ([]any, bool) {
+	switch value.(type) {
+	case nil, json.RawMessage, []byte:
+		return nil, false
+	}
+	rv := reflect.ValueOf(value)
+	if rv.Kind() != reflect.Slice && rv.Kind() != reflect.Array {
+		return nil, false
+	}
+	items := make([]any, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		items[i] = rv.Index(i).Interface()
+	}
+	return items, true
+}
+
+func cloneOfficialRequestValue(value any) any {
+	if object, ok := value.(map[string]any); ok {
+		copy := make(map[string]any, len(object))
+		for key, item := range object {
+			copy[key] = cloneOfficialRequestValue(item)
+		}
+		return copy
+	}
+	if items, ok := jsonArrayItems(value); ok {
+		copy := make([]any, len(items))
+		for i, item := range items {
+			copy[i] = cloneOfficialRequestValue(item)
+		}
+		return copy
+	}
+	switch raw := value.(type) {
+	case json.RawMessage:
+		return append(json.RawMessage(nil), raw...)
+	case []byte:
+		return append([]byte(nil), raw...)
+	default:
+		return value
+	}
 }
 
 // StripToolFields removes every provider tool declaration/control when native

@@ -234,7 +234,7 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 	}
 	// §4.13 prompt-mode: the model has no native function calling, so drive the
 	// text-protocol loop instead of the native tool_use loop.
-	if req.ToolModePrompt {
+	if req.ToolModePrompt && !officialToolModeEnabled(req) {
 		_, blocks, usage, cites, err := RunPromptToolLoop(
 			ctx, req.SystemPrompt, req.History, req.Tools,
 			p.promptRunOnce(req), tools, onEvent,
@@ -278,17 +278,18 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 				"system":     anthropicSystemBlocks(req.SystemPrompt),
 				"messages":   messages,
 			}
-			if len(req.Tools) > 0 && !req.ToolModePrompt {
+			if len(req.Tools) > 0 && !req.ToolModePrompt && !officialToolModeEnabled(req) {
 				body["tools"] = toAnthropicTools(req.Tools)
 			}
-			if req.ToolModePrompt {
+			if req.ToolModePrompt && !officialToolModeEnabled(req) {
 				body["stop_sequences"] = []string{PromptToolStopSequence()}
 			}
 			// Apply the model's param_controls (thinking/effort/etc). Claude
 			// extended thinking is opt-in: if admins do not explicitly merge a
 			// `thinking` object, the provider sends no thinking field.
 			body = MergeRequestParams(body, req.ExtraParams, req.ParamControls, req.ParamOverrides)
-			body = StripToolFields(body, len(req.Tools) > 0 && !req.ToolModePrompt)
+			body = StripToolFields(body, len(req.Tools) > 0 && !req.ToolModePrompt && !officialToolModeEnabled(req))
+			body = MergeOfficialToolRequests(body, req.OfficialToolRequests)
 			// §4.3-B: once a strip-thinking retry has fired this turn, every
 			// subsequent request drops the thinking param too (the response then
 			// carries no thinking blocks, so later replays stay clean).
@@ -489,6 +490,7 @@ func (p *AnthropicProvider) promptRunOnce(req UnifiedChatRequest) PromptToolRunn
 		}
 		body = MergeRequestParams(body, req.ExtraParams, req.ParamControls, req.ParamOverrides)
 		body = StripToolFields(body, false)
+		body = MergeOfficialToolRequests(body, req.OfficialToolRequests)
 		applyAnthropicThinkingSettings(body, req.Model.RequestID, &maxTok)
 		buf, _ := json.Marshal(body)
 		resp, err := doProviderRequest(ctx, req.Model, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {

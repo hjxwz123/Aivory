@@ -50,12 +50,16 @@
         "body": "Ask the task model whether tools are needed before each response."
       },
       "disabled": {
-        "label": "Disabled",
+        "label": "Off",
         "body": "Answer directly without making tools available to the response model."
       },
       "enabled": {
-        "label": "Enabled",
-        "body": "Always make the tools configured for the selected model available."
+        "label": "Tool use",
+        "body": "Make the system tools configured for the selected model available."
+      },
+      "official": {
+        "label": "Official",
+        "body": "Use only the provider-native tools you select for the default model."
       }
     },
     "memoryTitle": "Memory",

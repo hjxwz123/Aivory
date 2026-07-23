@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"aivory/server/internal/envcfg"
 	"aivory/server/internal/llm"
@@ -159,25 +160,26 @@ func meSettingsHandler(_ Deps, w http.ResponseWriter, r *http.Request) {
 // clients cannot inject arbitrary data into the settings blob (e.g. internal
 // admin flags or future privilege-escalation vectors).
 var settingsAllowlist = map[string]bool{
-	"persona_custom":        true,
-	"persona_nickname":      true,
-	"persona_traits":        true,
-	"response_length":       true,
-	"accent_color":          true,
-	"font_family":           true,
-	"image_model_id":        true,
-	"default_model_id":      true,
-	"memory_enabled":        true,
-	"avatar_url":            true,
-	"language":              true,
-	"theme":                 true,
-	"chat_width":            true,
-	"sidebar_collapsed":     true,
-	"code_theme":            true,
-	"user_message_markdown": true,
-	"onboarded":             true,
-	"tool_mode_default":     true,
-	// Legacy clients still write this boolean. New clients use the tri-state
+	"persona_custom":              true,
+	"persona_nickname":            true,
+	"persona_traits":              true,
+	"response_length":             true,
+	"accent_color":                true,
+	"font_family":                 true,
+	"image_model_id":              true,
+	"default_model_id":            true,
+	"memory_enabled":              true,
+	"avatar_url":                  true,
+	"language":                    true,
+	"theme":                       true,
+	"chat_width":                  true,
+	"sidebar_collapsed":           true,
+	"code_theme":                  true,
+	"user_message_markdown":       true,
+	"onboarded":                   true,
+	"tool_mode_default":           true,
+	"official_tool_names_default": true,
+	// Legacy clients still write this boolean. New clients use the four-state
 	// tool_mode_default setting; keep the old key writable during migration.
 	"disable_tools_default": true,
 }
@@ -211,15 +213,35 @@ func updateMeSettingsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, json.RawMessage(upd.Settings))
 }
 
-// Keep old and new clients coherent during rolling upgrades. A new tri-state
+// Keep old and new clients coherent during rolling upgrades. A new four-state
 // write wins when both keys are present; auto degrades to legacy "tools on".
 // A legacy-only boolean write is promoted to the equivalent explicit mode so a
 // previously stored tool_mode_default cannot make the old client's change inert.
 func normalizeToolModeSettingsPatch(patch map[string]any) error {
+	if value, ok := patch["official_tool_names_default"]; ok {
+		rawNames, isArray := value.([]any)
+		if !isArray {
+			return errors.New("official_tool_names_default must be an array of strings")
+		}
+		names := make([]string, 0, len(rawNames))
+		seen := make(map[string]bool, len(rawNames))
+		for _, rawName := range rawNames {
+			name, isString := rawName.(string)
+			name = strings.TrimSpace(name)
+			if !isString || name == "" || len(name) > 128 {
+				return errors.New("official_tool_names_default must contain non-empty strings up to 128 characters")
+			}
+			if !seen[name] {
+				seen[name] = true
+				names = append(names, name)
+			}
+		}
+		patch["official_tool_names_default"] = names
+	}
 	if value, ok := patch["tool_mode_default"]; ok {
 		mode, isString := value.(string)
 		if !isString || !validTurnToolMode(mode) {
-			return errors.New("tool_mode_default must be one of: auto, disabled, enabled")
+			return errors.New("tool_mode_default must be one of: auto, disabled, enabled, official")
 		}
 		patch["disable_tools_default"] = mode == llm.ToolModeDisabled
 		return nil

@@ -50,12 +50,16 @@
         "body": "Demande au modèle de tâche si des outils sont nécessaires avant chaque réponse."
       },
       "disabled": {
-        "label": "Désactivés",
+        "label": "Désactivé",
         "body": "Répond directement sans mettre d’outils à la disposition du modèle de réponse."
       },
       "enabled": {
-        "label": "Activés",
-        "body": "Met toujours à disposition les outils configurés pour le modèle sélectionné."
+        "label": "Appel d’outils",
+        "body": "Met à disposition les outils système configurés pour le modèle sélectionné."
+      },
+      "official": {
+        "label": "Officiels",
+        "body": "Utilise uniquement les outils natifs du fournisseur sélectionnés pour le modèle par défaut."
       }
     },
     "memoryTitle": "Mémoire",

@@ -88,7 +88,7 @@
 | `AIVORY_LLM_GEMINI_MAX_TOK` | `int` | `64000` | `llm/google_provider.go:78` | Gemini 流式循环中每次请求 generationConfig.maxOutputTokens 的默认值（除非请求覆盖）。 |
 | `AIVORY_LLM_GEMINI_MAX_TOK_2` | `int` | `64000` | `llm/google_provider.go:472` | Gemini 提示词工具模式调用中 generationConfig.maxOutputTokens 的默认值（除非请求覆盖）。 |
 | `AIVORY_LLM_CONF` | `float` | `0.7` | `llm/memory_worker.go:40` | 当提取器返回的置信度不在 (0,1] 范围内时，为抽取记忆赋予的回退置信度。 |
-| `AIVORY_LLM_OFFICIAL_TOOL_SPEC` | `string` | `"medium"` | `llm/openai_provider.go:23` | 传给 OpenAI 官方内置 web_search 工具规格的 search_context_size 取值。 |
+| `AIVORY_LLM_OFFICIAL_TOOL_SPEC` | `string` | `"medium"` | `store/official_tools.go` | 新建 OpenAI Responses 默认 `web_search` 定义或迁移旧字符串配置时使用的 `search_context_size`；此后管理员显式填写的请求 JSON 优先。 |
 | `AIVORY_LLM_MAX_ITER_2` | `int` | `20` | `llm/openai_provider.go:110` | OpenAI streamChat（Chat Completions）循环中原生工具调用轮次的硬性上限。 |
 | `AIVORY_LLM_MAX_ITER_3` | `int` | `20` | `llm/openai_provider.go:610` | OpenAI streamResponses（Responses API）循环中原生工具调用轮次的硬性上限。 |
 | `AIVORY_LLM_INLINE_QUOTE_SOURCE_INJECTION_CAP` | `int` | `8000` | `llm/orchestrator.go:30` | 内联引用子对话中，随高亮摘录一并注入的来源消息文本在截断前的最大字符（rune）数。 |

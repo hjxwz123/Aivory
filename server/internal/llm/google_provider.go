@@ -37,7 +37,7 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 		req.History = stripImageBlocks(req.History)
 	}
 	// §4.13 prompt-mode: drive the text protocol loop.
-	if req.ToolModePrompt {
+	if req.ToolModePrompt && !officialToolModeEnabled(req) {
 		_, blocks, usage, cites, err := RunPromptToolLoop(
 			ctx, req.SystemPrompt, req.History, req.Tools,
 			p.promptRunOnce(req), tools, onEvent,
@@ -50,7 +50,7 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 
 	contents := historyToGemini(req.History, req.Model.Vision)
 	var toolsDecl []map[string]any
-	if len(req.Tools) > 0 {
+	if len(req.Tools) > 0 && !officialToolModeEnabled(req) {
 		decls := []map[string]any{}
 		for _, t := range req.Tools {
 			decls = append(decls, map[string]any{
@@ -92,6 +92,7 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 		}
 		body = MergeRequestParams(body, req.ExtraParams, req.ParamControls, req.ParamOverrides)
 		body = StripToolFields(body, toolsDecl != nil)
+		body = MergeOfficialToolRequests(body, req.OfficialToolRequests)
 		stripGoogleEndpointParams(body)
 		raw, _ := json.Marshal(body)
 		// §4.10-G stream: streamGenerateContent returns SSE-style JSON-array
@@ -504,6 +505,7 @@ func (p *GoogleProvider) promptRunOnce(req UnifiedChatRequest) PromptToolRunner 
 		}
 		body = MergeRequestParams(body, req.ExtraParams, req.ParamControls, req.ParamOverrides)
 		body = StripToolFields(body, false)
+		body = MergeOfficialToolRequests(body, req.OfficialToolRequests)
 		stripGoogleEndpointParams(body)
 		raw, _ := json.Marshal(body)
 		resp, err := doProviderRequest(ctx, req.Model, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {

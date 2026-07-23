@@ -34,6 +34,7 @@ export function InlineThreadLayer({ conversationId, scrollRef }: InlineThreadLay
   const { t } = useTranslation('chat')
   const createInlineThread = useConversations((s) => s.createInlineThread)
   const sendMessage = useConversations((s) => s.sendMessage)
+  const modelId = useConversations((s) => s.conversations.find((c) => c.id === conversationId)?.modelId)
   const openThread = useInlineThreadDrawer((s) => s.openThread)
 
   // A compact signature of this conversation's inline threads. Re-renders only
@@ -190,7 +191,7 @@ export function InlineThreadLayer({ conversationId, scrollRef }: InlineThreadLay
     if (!pending) return
     const question = draft.trim()
     if (!question) return
-    const armed = resolveArmedTurnFlags()
+    const armed = resolveArmedTurnFlags(modelId)
     const quote = pending.quote
     const messageId = pending.messageId
     dismiss()
@@ -204,6 +205,7 @@ export function InlineThreadLayer({ conversationId, scrollRef }: InlineThreadLay
       verify: armed.verify,
       toolMode: armed.toolMode,
       webSearch: armed.webSearch,
+      officialToolNames: armed.officialToolNames,
     })
   }
 

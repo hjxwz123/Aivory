@@ -86,7 +86,7 @@
 | `AIVORY_LLM_GEMINI_MAX_TOK` | `int` | `64000` | `llm/google_provider.go:78` | Default generationConfig.maxOutputTokens sent on each Gemini streaming request unless the request overrides it. |
 | `AIVORY_LLM_GEMINI_MAX_TOK_2` | `int` | `64000` | `llm/google_provider.go:472` | Default generationConfig.maxOutputTokens for the Gemini prompt-tool-mode call unless the request overrides it. |
 | `AIVORY_LLM_CONF` | `float` | `0.7` | `llm/memory_worker.go:40` | Fallback confidence assigned to an extracted memory when the extractor returns a value outside (0,1]. |
-| `AIVORY_LLM_OFFICIAL_TOOL_SPEC` | `string` | `"medium"` | `llm/openai_provider.go:23` | search_context_size value passed to OpenAI's official built-in web_search tool spec. |
+| `AIVORY_LLM_OFFICIAL_TOOL_SPEC` | `string` | `"medium"` | `store/official_tools.go` | `search_context_size` used when creating the default OpenAI Responses `web_search` definition or migrating its legacy string entry. An explicit admin request JSON takes precedence thereafter. |
 | `AIVORY_LLM_MAX_ITER_2` | `int` | `20` | `llm/openai_provider.go:110` | Hard cap on native tool-use rounds (Chat Completions calls) in the OpenAI streamChat loop. |
 | `AIVORY_LLM_MAX_ITER_3` | `int` | `20` | `llm/openai_provider.go:610` | Hard cap on native tool-use rounds (Responses API calls) in the OpenAI streamResponses loop. |
 | `AIVORY_LLM_INLINE_QUOTE_SOURCE_INJECTION_CAP` | `int` | `8000` | `llm/orchestrator.go:30` | Max runes of the source message text injected alongside a highlighted excerpt in an inline-quote sub-conversation before truncation. |

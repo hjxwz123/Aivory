@@ -36,6 +36,8 @@ func TestBackupExportImportEndToEnd(t *testing.T) {
 	mustExec(t, srcDB, `INSERT INTO users(id,email,password_hash,role) VALUES('u1','a@b.c','h','user')`)
 	mustExec(t, srcDB, `INSERT INTO conversations(id,user_id,title) VALUES('c1','u1','T')`)
 	mustExec(t, srcDB, `INSERT INTO messages(id,conversation_id,role) VALUES('m1','c1','assistant')`)
+	mustExec(t, srcDB, `INSERT INTO channels(id,name,type,api_format,base_url,api_key,enabled,sort_order) VALUES('ch_legacy','Legacy','openai','responses','https://api.example','sk-test',1,1)`)
+	mustExec(t, srcDB, `INSERT INTO models(id,channel_id,kind,request_id,label,official_tools,enabled,sort_order) VALUES('model_legacy','ch_legacy','chat','gpt-test','Legacy tools','["web_search","code_interpreter"]',1,1)`)
 	upPath := filepath.Join(srcUploads, "u1", "f_test.txt")
 	artPath := filepath.Join(srcArtifacts, "m1_img.png")
 	writeFile(t, upPath, []byte("hello-upload"))
@@ -133,6 +135,7 @@ func TestBackupExportImportEndToEnd(t *testing.T) {
 	if b, err := os.ReadFile(aPath); err != nil || string(b) != "PNGDATA" {
 		t.Fatalf("artifact not restored at %q: %v", aPath, err)
 	}
+	assertCanonicalOfficialTools(t, tgtDB, "model_legacy", "web_search", "code_interpreter")
 }
 
 // TestBackupImportRequiresConfirm rejects an import without the confirm token.
@@ -262,7 +265,7 @@ func TestConfigExportImportMergesAdminConfigOnly(t *testing.T) {
 	mustExec(t, srcDB, `INSERT INTO oauth_providers(id,kind,name,client_id,client_secret,enabled,sort_order) VALUES('oa_cfg','github','GitHub','cid','osecret',1,1)`)
 	mustExec(t, srcDB, `INSERT INTO model_tags(id,name,sort_order) VALUES('tag_cfg','Fast',1)`)
 	mustExec(t, srcDB, `INSERT INTO image_styles(id,name,hidden_prompt,enabled,sort_order) VALUES('sty_cfg','Poster','hidden',1,1)`)
-	mustExec(t, srcDB, `INSERT INTO models(id,channel_id,kind,request_id,label,icon,param_controls,extra_params,tags,enabled,sort_order) VALUES('m_cfg','ch_cfg','chat','gpt-x','Configured','/api/icons/abcdef123456.png','[{"name":"temperature"}]','{"temperature":0.25}','["tag_cfg"]',1,1)`)
+	mustExec(t, srcDB, `INSERT INTO models(id,channel_id,kind,request_id,label,icon,param_controls,extra_params,official_tools,tags,enabled,sort_order) VALUES('m_cfg','ch_cfg','chat','gpt-x','Configured','/api/icons/abcdef123456.png','[{"name":"temperature"}]','{"temperature":0.25}','["web_search","code_interpreter"]','["tag_cfg"]',1,1)`)
 	mustExec(t, srcDB, `INSERT INTO model_group_quotas(model_id,group_id,period_seconds,limit_type,limit_value) VALUES('m_cfg','ug_paid',3600,'count',20)`)
 	mustExec(t, srcDB, `INSERT INTO model_skills(model_id,skill_id) VALUES('m_cfg','sk_cfg')`)
 	mustExec(t, srcDB, `INSERT INTO redeem_codes(id,code,group_id,duration_days,max_uses,note) VALUES('rc_cfg','PROMO','ug_paid',30,10,'launch')`)
@@ -327,6 +330,7 @@ func TestConfigExportImportMergesAdminConfigOnly(t *testing.T) {
 	if label != "Configured" || !strings.Contains(params, "temperature") || !strings.Contains(extraParams, "temperature") {
 		t.Fatalf("model not imported: label=%q params=%q extra_params=%q", label, params, extraParams)
 	}
+	assertCanonicalOfficialTools(t, tgtDB, "m_cfg", "web_search", "code_interpreter")
 	if b, err := os.ReadFile(filepath.Join(tgtUploads, "icons", "abcdef123456.png")); err != nil || string(b) != "icon-bytes" {
 		t.Fatalf("icon not restored: %v bytes=%q", err, string(b))
 	}
@@ -582,6 +586,36 @@ func mustExec(t *testing.T, db *sql.DB, q string, args ...any) {
 func mustQuery(t *testing.T, db *sql.DB, q string) *sql.Row {
 	t.Helper()
 	return db.QueryRowContext(context.Background(), q)
+}
+
+func assertCanonicalOfficialTools(t *testing.T, db *sql.DB, modelID string, wantNames ...string) {
+	t.Helper()
+	var raw string
+	if err := db.QueryRowContext(context.Background(), `SELECT official_tools FROM models WHERE id=?`, modelID).Scan(&raw); err != nil {
+		t.Fatalf("query %s official_tools: %v", modelID, err)
+	}
+	var items []json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &items); err != nil {
+		t.Fatalf("decode persisted %s official_tools %q: %v", modelID, raw, err)
+	}
+	for i, item := range items {
+		item = bytes.TrimSpace(item)
+		if len(item) == 0 || item[0] != '{' {
+			t.Fatalf("persisted %s official_tools item %d is not canonical: %s", modelID, i, raw)
+		}
+	}
+	definitions, err := store.ParseOfficialTools(json.RawMessage(raw))
+	if err != nil {
+		t.Fatalf("parse persisted %s official_tools: %v", modelID, err)
+	}
+	if len(definitions) != len(wantNames) {
+		t.Fatalf("persisted %s official_tools count = %d, want %d: %s", modelID, len(definitions), len(wantNames), raw)
+	}
+	for i, want := range wantNames {
+		if definitions[i].Name != want {
+			t.Fatalf("persisted %s official_tools[%d].name = %q, want %q", modelID, i, definitions[i].Name, want)
+		}
+	}
 }
 
 func writeFile(t *testing.T, path string, data []byte) {
