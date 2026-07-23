@@ -13,8 +13,12 @@ export interface ToastItem {
   action?: { label: string; onClick: () => void }
 }
 
+export interface ToastStateItem extends ToastItem {
+  open: boolean
+}
+
 interface ToastStore {
-  toasts: ToastItem[]
+  toasts: ToastStateItem[]
   push: (toast: Omit<ToastItem, 'id'>) => string
   dismiss: (id: string) => void
   clear: () => void
@@ -23,10 +27,18 @@ interface ToastStore {
 let _id = 0
 const nextId = () => `t_${++_id}`
 
-// Module-scope timer registry — we own dismiss timing, not Radix.
-const timers = new Map<string, ReturnType<typeof setTimeout>>()
+// Keep a closed toast mounted long enough for Radix Presence to play its exit.
+// The CSS exit uses --duration-fast (140ms); the small buffer avoids removing
+// the node before the final animation frame is painted.
+export const TOAST_REMOVE_DELAY_MS = 160
 
-function clearTimer(id: string) {
+const dismissTimers = new Map<string, ReturnType<typeof setTimeout>>()
+const removeTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
+function clearTimer(
+  timers: Map<string, ReturnType<typeof setTimeout>>,
+  id: string,
+) {
   const t = timers.get(id)
   if (t) {
     clearTimeout(t)
@@ -34,28 +46,42 @@ function clearTimer(id: string) {
   }
 }
 
-export const useToastStore = create<ToastStore>((set) => ({
+export const useToastStore = create<ToastStore>((set, get) => ({
   toasts: [],
   push(t) {
     const id = nextId()
     const duration = t.duration ?? 4500
-    set((s) => ({ toasts: [...s.toasts, { ...t, id }] }))
+    set((s) => ({ toasts: [...s.toasts, { ...t, id, open: true }] }))
     if (duration > 0) {
       const handle = setTimeout(() => {
-        timers.delete(id)
-        set((s) => ({ toasts: s.toasts.filter((x) => x.id !== id) }))
+        dismissTimers.delete(id)
+        get().dismiss(id)
       }, duration)
-      timers.set(id, handle)
+      dismissTimers.set(id, handle)
     }
     return id
   },
   dismiss(id) {
-    clearTimer(id)
-    set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }))
+    clearTimer(dismissTimers, id)
+
+    const toast = get().toasts.find((item) => item.id === id)
+    if (!toast?.open) return
+
+    set((s) => ({
+      toasts: s.toasts.map((item) =>
+        item.id === id ? { ...item, open: false } : item,
+      ),
+    }))
+
+    const handle = setTimeout(() => {
+      removeTimers.delete(id)
+      set((s) => ({ toasts: s.toasts.filter((item) => item.id !== id) }))
+    }, TOAST_REMOVE_DELAY_MS)
+    removeTimers.set(id, handle)
   },
   clear() {
-    for (const id of timers.keys()) clearTimer(id)
-    set({ toasts: [] })
+    for (const id of dismissTimers.keys()) clearTimer(dismissTimers, id)
+    for (const toast of get().toasts) get().dismiss(toast.id)
   },
 }))
 

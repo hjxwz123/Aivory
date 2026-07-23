@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, type ComponentType, type LazyExoticComponent } from 'react'
+import { Suspense, useEffect, useRef, type ComponentType } from 'react'
 import * as DialogPrimitive from '@radix-ui/react-dialog'
 import { useTranslation } from 'react-i18next'
 import { User, Wand2, Palette, Sparkles, ShieldCheck, Keyboard, Info, X } from 'lucide-react'
@@ -7,6 +7,7 @@ import { useSettingsModal, type SettingsTab } from '@/store/settings-modal'
 import { useAuth } from '@/store/auth'
 import { RouteFade } from '@/components/ui/route-fade'
 import { PanelFallback } from '@/components/ui/panel-fallback'
+import { lazyWithPreload, type PreloadableLazy } from '@/lib/lazy-preload'
 import { cn } from '@/lib/utils'
 
 const tabDefs = [
@@ -24,15 +25,25 @@ const tabDefs = [
 // The dynamic-import cycle with the tab pages (they import SettingsSection/
 // SettingsRow back from this module) is fine: this module is fully evaluated
 // long before a tab chunk resolves.
-const tabPages: Record<SettingsTab, LazyExoticComponent<ComponentType>> = {
-  account: lazy(() => import('./Account')),
-  personalization: lazy(() => import('./Personalization')),
-  appearance: lazy(() => import('./Appearance')),
-  models: lazy(() => import('./Models')),
-  privacy: lazy(() => import('./Privacy')),
-  shortcuts: lazy(() => import('./Shortcuts')),
-  about: lazy(() => import('./About')),
+const tabPages: Record<SettingsTab, PreloadableLazy<ComponentType>> = {
+  account: lazyWithPreload(() => import('./Account')),
+  personalization: lazyWithPreload(() => import('./Personalization')),
+  appearance: lazyWithPreload(() => import('./Appearance')),
+  models: lazyWithPreload(() => import('./Models')),
+  privacy: lazyWithPreload(() => import('./Privacy')),
+  shortcuts: lazyWithPreload(() => import('./Shortcuts')),
+  about: lazyWithPreload(() => import('./About')),
 }
+
+function preloadSettingsTabs(): Promise<PromiseSettledResult<{ default: ComponentType }>[]> {
+  return Promise.allSettled(tabDefs.map(({ key }) => tabPages[key].preload()))
+}
+
+// Settings is a high-frequency global surface. Start its small page chunks as
+// soon as the shell module is evaluated, rather than making the first click on
+// each tab pay a network round-trip. The imports remain split from the initial
+// bundle and lazy() consumes these same memoized promises.
+void preloadSettingsTabs()
 
 // Settings render as a MODAL over the app (§ settings modal, § 设置-去路由化):
 // the current page stays dimmed behind the overlay. The shell is a Radix
@@ -68,11 +79,14 @@ export default function SettingsDialog() {
   // Each tab starts reading from the top — without this the pane keeps the
   // previous tab's scroll offset (the sticky headers made that look broken).
   const paneRef = useRef<HTMLDivElement>(null)
+  // Keep tab bodies mounted after their first visit while this dialog instance
+  // remains open. Switching back then preserves local form state and avoids
+  // re-running page-level data effects.
+  const visitedTabsRef = useRef<Set<SettingsTab>>(new Set([tab]))
+  visitedTabsRef.current.add(tab)
   useEffect(() => {
     paneRef.current?.scrollTo({ top: 0 })
   }, [tab])
-
-  const ActiveTab = tabPages[tab]
 
   return (
     <DialogPrimitive.Root
@@ -185,12 +199,21 @@ export default function SettingsDialog() {
               )}
             >
               <RouteFade dep={tab}>
-                {/* key=tab: a fresh Suspense boundary per tab so switching shows
-                    the panel loader instantly while the lazy chunk loads,
-                    instead of freezing on the old tab (§ instant nav). */}
-                <Suspense key={tab} fallback={<PanelFallback />}>
-                  <ActiveTab />
-                </Suspense>
+                {Array.from(visitedTabsRef.current, (visitedTab) => {
+                  const TabPage = tabPages[visitedTab]
+                  const active = visitedTab === tab
+                  return (
+                    <div key={visitedTab} hidden={!active} aria-hidden={!active || undefined}>
+                      {/* Each first visit owns a fresh local boundary. Its chunk
+                          is normally warm from preload; on a slow connection the
+                          fallback replaces only this right pane. Visited pages
+                          stay mounted so returning never repeats initialization. */}
+                      <Suspense fallback={<PanelFallback />}>
+                        <TabPage />
+                      </Suspense>
+                    </div>
+                  )
+                })}
               </RouteFade>
             </div>
           </div>

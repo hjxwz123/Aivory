@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Monitor, Smartphone, MapPin, X } from 'lucide-react'
 import { authApi, ApiError } from '@/api'
@@ -7,6 +7,15 @@ import { useLanguage } from '@/store/language'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { toast } from '@/hooks/use-toast'
+import { useAuth } from '@/store/auth'
+import { createKeyedResourceCache, resolveOwnedResourceView } from '@/lib/keyed-resource-cache'
+
+type SessionSnapshot = { sessions: ApiSession[]; current: string }
+const EMPTY_SESSION_SNAPSHOT: SessionSnapshot = { sessions: [], current: '' }
+const sessionsCache = createKeyedResourceCache<SessionSnapshot>()
+useAuth.subscribe((state, previous) => {
+  if (state.user?.id !== previous.user?.id) sessionsCache.clear()
+})
 
 /** Parse a User-Agent into a short "Browser · OS" label and a mobile flag. */
 function parseDevice(ua: string): { browser: string; os: string; mobile: boolean } {
@@ -47,32 +56,74 @@ function relativeTime(unixSec: number, locale: string): string {
 export function ActiveSessions() {
   const { t } = useTranslation(['settings', 'common'])
   const lang = useLanguage((s) => s.lang)
-  const [sessions, setSessions] = useState<ApiSession[]>([])
-  const [current, setCurrent] = useState('')
-  const [loading, setLoading] = useState(true)
+  const userId = useAuth((s) => s.user?.id ?? '')
+  const cached = userId ? sessionsCache.peek(userId) : undefined
+  const [resourceUserId, setResourceUserId] = useState(userId)
+  const [sessions, setSessions] = useState<ApiSession[]>(() => cached?.sessions ?? [])
+  const [current, setCurrent] = useState(() => cached?.current ?? '')
+  const [loading, setLoading] = useState(cached === undefined)
   const [busy, setBusy] = useState<string | null>(null)
+  const requestVersionRef = useRef(0)
 
-  async function load() {
-    try {
-      const res = await authApi.sessions()
-      setSessions(res.sessions)
-      setCurrent(res.current)
-    } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : t('settings:account.sessions.loadFailed'))
-    } finally {
-      setLoading(false)
-    }
-  }
+  // The auth store can switch owners before effects run. Derive the visible
+  // snapshot from the CURRENT owner immediately so one render can never expose
+  // the previous account's sessions.
+  const visible = resolveOwnedResourceView({
+    resourceUserId,
+    userId,
+    value: { sessions, current },
+    cached,
+    empty: EMPTY_SESSION_SNAPSHOT,
+    loading,
+  })
+  const visibleSessions = visible.value.sessions
+  const visibleCurrent = visible.value.current
+  const visibleLoading = visible.loading
+
   useEffect(() => {
-    void load()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+    const nextCached = userId ? sessionsCache.peek(userId) : undefined
+    const background = nextCached !== undefined
+    const requestVersion = ++requestVersionRef.current
+
+    setResourceUserId(userId)
+    setSessions(nextCached?.sessions ?? [])
+    setCurrent(nextCached?.current ?? '')
+    setLoading(Boolean(userId && !background))
+
+    if (!userId) return
+    const stillCurrent = () =>
+      requestVersionRef.current === requestVersion && useAuth.getState().user?.id === userId
+
+    void sessionsCache
+      .load(userId, () => authApi.sessions(), true)
+      .then((res) => {
+        if (!stillCurrent()) return
+        setResourceUserId(userId)
+        setSessions(res.sessions)
+        setCurrent(res.current)
+      })
+      .catch((error: unknown) => {
+        if (!stillCurrent() || background) return
+        toast.error(error instanceof ApiError ? error.message : t('settings:account.sessions.loadFailed'))
+      })
+      .finally(() => {
+        if (stillCurrent()) setLoading(false)
+      })
+
+    return () => {
+      if (requestVersionRef.current === requestVersion) requestVersionRef.current += 1
+    }
+  }, [t, userId])
 
   async function revoke(id: string) {
     setBusy(id)
     try {
       await authApi.revokeSession(id)
-      setSessions((s) => s.filter((x) => x.id !== id))
+      setSessions((s) => {
+        const next = s.filter((x) => x.id !== id)
+        if (userId) sessionsCache.set(userId, { sessions: next, current: visibleCurrent })
+        return next
+      })
       toast.success(t('settings:account.sessions.revoked'))
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t('settings:account.sessions.revokeFailed'))
@@ -85,7 +136,11 @@ export function ActiveSessions() {
     setBusy('others')
     try {
       await authApi.revokeOtherSessions()
-      setSessions((s) => s.filter((x) => x.id === current))
+      setSessions((s) => {
+        const next = s.filter((x) => x.id === visibleCurrent)
+        if (userId) sessionsCache.set(userId, { sessions: next, current: visibleCurrent })
+        return next
+      })
       toast.success(t('settings:account.sessions.othersRevoked'))
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t('settings:account.sessions.revokeFailed'))
@@ -94,7 +149,7 @@ export function ActiveSessions() {
     }
   }
 
-  const hasOthers = sessions.some((s) => s.id !== current)
+  const hasOthers = visibleSessions.some((s) => s.id !== visibleCurrent)
 
   return (
     <section className="mb-12">
@@ -113,18 +168,18 @@ export function ActiveSessions() {
       </div>
 
       <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] divide-y divide-[var(--color-divider)]">
-        {loading ? (
+        {visibleLoading ? (
           <div className="px-5 sm:px-6 py-8 text-sm text-[var(--color-fg-subtle)]">{t('common:common.loading')}</div>
-        ) : sessions.length === 0 ? (
+        ) : visibleSessions.length === 0 ? (
           <div className="px-5 sm:px-6 py-8 text-sm text-[var(--color-fg-subtle)]">
             {t('settings:account.sessions.empty')}
           </div>
         ) : (
-          sessions.map((s) => {
+          visibleSessions.map((s) => {
             const { browser, os, mobile } = parseDevice(s.user_agent)
             const Icon = mobile ? Smartphone : Monitor
             const device = [browser, os].filter(Boolean).join(' · ') || t('settings:account.sessions.unknownDevice')
-            const isCurrent = s.id === current
+            const isCurrent = s.id === visibleCurrent
             const place = s.location || (isLocalIp(s.ip) ? t('settings:account.sessions.localNetwork') : '')
             return (
               <div key={s.id} className="px-5 sm:px-6 py-4 flex items-center gap-4">

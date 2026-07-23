@@ -24,6 +24,13 @@ import { OAuthBrandGlyph } from '@/components/auth/oauth-glyph'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { toast } from '@/hooks/use-toast'
+import { createKeyedResourceCache, resolveOwnedResourceView } from '@/lib/keyed-resource-cache'
+
+const EMPTY_IDENTITIES: ApiOAuthIdentity[] = []
+const identitiesCache = createKeyedResourceCache<ApiOAuthIdentity[]>()
+useAuth.subscribe((state, previous) => {
+  if (state.user?.id !== previous.user?.id) identitiesCache.clear()
+})
 
 function boundDate(unixSec: number, locale: string): string {
   try {
@@ -39,26 +46,61 @@ export function IdentitySources() {
   const { t } = useTranslation(['settings', 'common'])
   const lang = useLanguage((s) => s.lang)
   const user = useAuth((s) => s.user)
+  const userId = user?.id ?? ''
   const { providers } = useOAuthProviders()
-  const [identities, setIdentities] = useState<ApiOAuthIdentity[]>([])
-  const [loading, setLoading] = useState(true)
+  const cached = userId ? identitiesCache.peek(userId) : undefined
+  const [resourceUserId, setResourceUserId] = useState(userId)
+  const [identities, setIdentities] = useState<ApiOAuthIdentity[]>(() => cached ?? [])
+  const [loading, setLoading] = useState(cached === undefined)
   const [busy, setBusy] = useState<string | null>(null)
   const [searchParams, setSearchParams] = useSearchParams()
   const handledCallback = useRef(false)
+  const requestVersionRef = useRef(0)
 
-  const load = useCallback(async () => {
+  const visible = resolveOwnedResourceView({
+    resourceUserId,
+    userId,
+    value: identities,
+    cached,
+    empty: EMPTY_IDENTITIES,
+    loading,
+  })
+  const visibleIdentities = visible.value
+  const visibleLoading = visible.loading
+
+  const load = useCallback(async (background = false) => {
+    if (!userId) return
+    const requestVersion = ++requestVersionRef.current
+    if (!background) setLoading(true)
     try {
-      setIdentities(await authApi.identities())
+      const next = await identitiesCache.load(userId, () => authApi.identities(), true)
+      if (
+        requestVersionRef.current !== requestVersion ||
+        useAuth.getState().user?.id !== userId
+      ) return
+      setResourceUserId(userId)
+      setIdentities(next)
     } catch {
       /* leave the list empty; the section stays hidden if nothing else shows */
     } finally {
-      setLoading(false)
+      if (
+        requestVersionRef.current === requestVersion &&
+        useAuth.getState().user?.id === userId
+      ) setLoading(false)
     }
-  }, [])
+  }, [userId])
 
   useEffect(() => {
-    void load()
-  }, [load])
+    const nextCached = userId ? identitiesCache.peek(userId) : undefined
+    requestVersionRef.current += 1
+    setResourceUserId(userId)
+    setIdentities(nextCached ?? [])
+    setLoading(Boolean(userId && nextCached === undefined))
+    if (userId) void load(nextCached !== undefined)
+    return () => {
+      requestVersionRef.current += 1
+    }
+  }, [load, userId])
 
   // Turn the OAuth callback's ?linked / ?link_error into a toast, then strip the
   // params so a refresh doesn't re-fire it. Runs once (StrictMode double-invoke
@@ -71,7 +113,7 @@ export function IdentitySources() {
     handledCallback.current = true
     if (linked) {
       toast.success(t('settings:account.identities.linked', { provider: linked }))
-      void load()
+      void load(false)
     } else if (err === 'conflict') {
       toast.error(t('settings:account.identities.conflict'))
     } else {
@@ -99,7 +141,11 @@ export function IdentitySources() {
     setBusy('unlink:' + key)
     try {
       await authApi.unlinkIdentity(it.provider_id, it.subject)
-      setIdentities((list) => list.filter((x) => x.provider_id !== it.provider_id || x.subject !== it.subject))
+      setIdentities((list) => {
+        const next = list.filter((x) => x.provider_id !== it.provider_id || x.subject !== it.subject)
+        if (userId) identitiesCache.set(userId, next)
+        return next
+      })
       toast.success(t('settings:account.identities.unlinked'))
     } catch (e) {
       const msg =
@@ -115,15 +161,15 @@ export function IdentitySources() {
   }
 
   // Providers not yet bound → offered as "bind" options (one row per provider).
-  const boundIDs = new Set(identities.map((i) => i.provider_id))
+  const boundIDs = new Set(visibleIdentities.map((i) => i.provider_id))
   const available = providers.filter((p) => !boundIDs.has(p.id))
 
   // Removing the only sign-in method would lock out a password-less account.
   const hasPassword = user?.has_password ?? true
-  const lockoutOnLast = !hasPassword && identities.length <= 1
+  const lockoutOnLast = !hasPassword && visibleIdentities.length <= 1
 
   // Nothing configured and nothing bound → render nothing at all.
-  if (!loading && identities.length === 0 && providers.length === 0) return null
+  if (!visibleLoading && visibleIdentities.length === 0 && providers.length === 0) return null
 
   return (
     <section className="mb-12">
@@ -135,11 +181,11 @@ export function IdentitySources() {
       </div>
 
       <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] divide-y divide-[var(--color-divider)]">
-        {loading ? (
+        {visibleLoading ? (
           <div className="px-5 sm:px-6 py-8 text-sm text-[var(--color-fg-subtle)]">{t('common:common.loading')}</div>
         ) : (
           <>
-            {identities.map((it) => {
+            {visibleIdentities.map((it) => {
               const key = it.provider_id + ':' + it.subject
               const disableUnbind = lockoutOnLast
               return (
@@ -204,7 +250,7 @@ export function IdentitySources() {
               </div>
             ))}
 
-            {identities.length === 0 && available.length === 0 ? (
+            {visibleIdentities.length === 0 && available.length === 0 ? (
               <div className="px-5 sm:px-6 py-8 text-sm text-[var(--color-fg-subtle)]">
                 {t('settings:account.identities.empty')}
               </div>

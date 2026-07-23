@@ -12,6 +12,7 @@ import type { ApiDocument, ApiKnowledgeBase } from '@/api/types'
 import { apiUpload } from '@/api/client'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
+import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
 import { ProgressRing } from '@/components/ui/progress-ring'
 import {
@@ -239,7 +240,18 @@ export default function KnowledgeBaseDetail() {
 
         <section className="mt-8">
           {loading ? (
-            <div className="text-sm text-[var(--color-fg-subtle)]">{t('common:common.loading')}</div>
+            <div className="space-y-3" role="status" aria-label={t('common:common.loading')}>
+              {Array.from({ length: 4 }, (_, index) => (
+                <div key={index} className="flex items-center gap-3 py-4">
+                  <Skeleton className="size-8 shrink-0" />
+                  <div className="flex-1 space-y-2">
+                    <Skeleton shape="line" className="w-2/5" />
+                    <Skeleton shape="line" className="h-2.5 w-3/5" />
+                  </div>
+                </div>
+              ))}
+              <span className="sr-only">{t('common:common.loading')}</span>
+            </div>
           ) : docs.length === 0 ? (
             <EmptyState
               icon={<FileText size={20} aria-hidden />}

@@ -7,6 +7,7 @@ import { ContentHeader } from '@/components/layout/content-header'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
+import { Skeleton } from '@/components/ui/skeleton'
 import { ProjectRow } from '@/components/projects/project-row'
 import { NewProjectDialog } from '@/components/projects/new-project-dialog'
 import { cn } from '@/lib/utils'
@@ -16,6 +17,10 @@ type Filter = 'all' | 'pinned'
 export default function ProjectsList() {
   const { t } = useTranslation(['projects', 'common'])
   const projects = useProjects((s) => s.projects)
+  const loaded = useProjects((s) => s.loaded)
+  const loading = useProjects((s) => s.loading)
+  const loadError = useProjects((s) => s.error)
+  const reload = useProjects((s) => s.load)
   const conversations = useConversations((s) => s.conversations)
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<Filter>('all')
@@ -75,6 +80,22 @@ export default function ProjectsList() {
             {t('projects:list.subtitle')}
           </p>
 
+          {!loaded && loadError ? (
+            <EmptyState
+              className="mt-12"
+              icon={<FolderKanban size={20} aria-hidden />}
+              title={t('common:common.error')}
+              description={loadError}
+              action={
+                <Button variant="secondary" onClick={() => void reload()}>
+                  {t('common:actions.tryAgain', { defaultValue: 'Try again' })}
+                </Button>
+              }
+            />
+          ) : !loaded || loading ? (
+            <ProjectsListSkeleton label={t('common:common.loading')} />
+          ) : (
+            <>
           {/* Controls strip. Lives directly above the list, separated by a
               single hairline (Section 4.4: no card containers around tools). */}
           {projects.length > 0 ? (
@@ -159,10 +180,39 @@ export default function ProjectsList() {
             }
           />
         )}
+            </>
+          )}
         </div>
       </div>
 
       <NewProjectDialog open={createOpen} onOpenChange={setCreateOpen} />
+    </div>
+  )
+}
+
+function ProjectsListSkeleton({ label }: { label: string }) {
+  return (
+    <div className="mt-8" role="status" aria-label={label}>
+      <div className="flex items-center justify-between border-b border-[var(--color-divider)] pb-4">
+        <Skeleton className="h-9 w-full max-w-xs" />
+        <Skeleton shape="line" className="hidden w-28 sm:block" />
+      </div>
+      <div className="mt-8 space-y-1">
+        {Array.from({ length: 4 }, (_, index) => (
+          <div key={index} className="grid grid-cols-[3px_1fr] gap-x-5 px-4 py-6 sm:grid-cols-[3px_1fr_180px] sm:gap-x-7 sm:px-6 sm:py-7">
+            <Skeleton className="h-full min-h-14 w-[3px]" />
+            <div className="space-y-3">
+              <Skeleton shape="line" className="h-5 w-2/5" />
+              <Skeleton shape="line" className="w-4/5" />
+            </div>
+            <div className="hidden space-y-2 sm:block">
+              <Skeleton shape="line" className="ml-auto w-24" />
+              <Skeleton shape="line" className="ml-auto w-32" />
+            </div>
+          </div>
+        ))}
+      </div>
+      <span className="sr-only">{label}</span>
     </div>
   )
 }

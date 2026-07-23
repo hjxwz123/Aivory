@@ -19,6 +19,9 @@
   "icon": {
     "upload": "上傳",
     "clear": "清除圖示",
+    "select": "選擇圖示",
+    "search": "搜尋圖示",
+    "noResults": "沒有符合的圖示",
     "uploaded": "圖示已上傳",
     "errBadType": "僅支援 PNG、JPEG 或 SVG 圖片。",
     "errTooLarge": "圖片大小必須小於 256 KB。"

@@ -43,8 +43,8 @@ import { Field } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { IconPicker } from '@/components/admin/icon-picker'
 import { IconUploader } from '@/components/admin/icon-uploader'
-import { OfficialToolIcon } from '@/components/chat/official-tool-icon'
 import { ParamControlsEditor } from '@/components/admin/param-controls-editor'
 import { ModelQuotaEditor } from '@/components/admin/model-quota-editor'
 import { toast } from '@/hooks/use-toast'
@@ -438,7 +438,7 @@ export default function AdminModelEdit() {
           {/* Section: Basic --------------------------------------------------- */}
           <section className="mt-8 rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-5">
             <h2 className="font-serif text-lg text-[var(--color-fg)]">{t('admin:models.sections.basic')}</h2>
-            <div className="mt-4 grid grid-cols-2 gap-4">
+            <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label={t('admin:models.fields.channel')} htmlFor="m-ch">
                 <Select
                   value={draft.channel_id ?? ''}
@@ -527,7 +527,7 @@ export default function AdminModelEdit() {
                   placeholder="claude-opus-4-8"
                 />
               </Field>
-              <Field label={t('admin:models.fields.icon')} htmlFor="m-icon" className="col-span-2">
+              <Field label={t('admin:models.fields.icon')} htmlFor="m-icon" className="sm:col-span-2">
                 <IconUploader
                   id="m-icon"
                   value={draft.icon ?? ''}
@@ -535,14 +535,14 @@ export default function AdminModelEdit() {
                   placeholder="🌟 or https://example.com/icon.png"
                 />
               </Field>
-              <Field label={t('admin:models.fields.description')} htmlFor="m-desc" className="col-span-2">
+              <Field label={t('admin:models.fields.description')} htmlFor="m-desc" className="sm:col-span-2">
                 <Input
                   id="m-desc"
                   value={draft.description ?? ''}
                   onChange={(e) => patch({ description: e.target.value })}
                 />
               </Field>
-              <label className="flex items-center justify-between rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3 py-2.5 col-span-2">
+              <label className="flex items-center justify-between rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3 py-2.5 sm:col-span-2">
                 <span className="text-sm">{t('admin:models.fields.enabled')}</span>
                 <Switch
                   checked={draft.enabled ?? true}
@@ -656,7 +656,7 @@ export default function AdminModelEdit() {
           {draft.kind === 'chat' && (
             <section className="mt-6 rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-5">
               <h2 className="font-serif text-lg text-[var(--color-fg)]">{t('admin:models.sections.behaviour')}</h2>
-              <div className="mt-4 grid grid-cols-2 gap-4">
+              <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <Field label={t('admin:models.fields.toolMode')} htmlFor="m-tool">
                   <Select
                     value={draft.tool_mode ?? 'native'}
@@ -680,7 +680,7 @@ export default function AdminModelEdit() {
                     defaultValue:
                       'Limit the platform tools this model may use through tool calling. Default all also includes tools registered in the future.',
                   })}
-                  className="col-span-2 min-w-0"
+                  className="min-w-0 sm:col-span-2"
                 >
                   <div className="overflow-hidden rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)]">
                     <div className="flex flex-col gap-2 border-b border-[var(--color-divider)] px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
@@ -848,7 +848,7 @@ export default function AdminModelEdit() {
                     )}
                   </div>
                 </Field>
-                <div className="grid grid-cols-1 gap-3 items-end sm:grid-cols-3 col-span-2">
+                <div className="grid grid-cols-1 items-end gap-3 sm:col-span-2 sm:grid-cols-3">
                   <label className="flex items-center justify-between rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3 py-2.5">
                     <span className="text-sm">{t('admin:models.fields.vision')}</span>
                     <Switch
@@ -873,7 +873,7 @@ export default function AdminModelEdit() {
                     />
                   </label>
                   {draft.kind === 'chat' && (
-                    <label className="col-span-2 flex items-center justify-between gap-3 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3 py-2.5">
+                    <label className="flex items-center justify-between gap-3 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3 py-2.5 sm:col-span-2">
                       <div className="min-w-0">
                         <span className="text-sm">{t('admin:models.fields.fastModel', { defaultValue: 'Fast model' })}</span>
                         <p className="mt-0.5 text-xs text-[var(--color-fg-muted)]">
@@ -886,7 +886,7 @@ export default function AdminModelEdit() {
                     </label>
                   )}
                 </div>
-                <Field label={t('admin:models.fields.systemPrompt')} htmlFor="m-sys" className="col-span-2">
+                <Field label={t('admin:models.fields.systemPrompt')} htmlFor="m-sys" className="sm:col-span-2">
                   <Textarea
                     id="m-sys"
                     rows={4}
@@ -897,7 +897,7 @@ export default function AdminModelEdit() {
                 <Field
                   label={t('admin:models.fields.paramControls')}
                   hint={t('admin:models.fields.paramControlsHint')}
-                  className="col-span-2"
+                  className="sm:col-span-2"
                 >
                   <ParamControlsEditor
                     value={draft.param_controls_text}
@@ -909,7 +909,7 @@ export default function AdminModelEdit() {
                   htmlFor="m-extra-params"
                   hint={t('admin:models.fields.extraParamsHint')}
                   error={extraParamsError}
-                  className="col-span-2"
+                  className="sm:col-span-2"
                 >
                   <Textarea
                     id="m-extra-params"
@@ -925,7 +925,7 @@ export default function AdminModelEdit() {
                 <Field
                   label={t('admin:models.fields.officialToolsLabel')}
                   hint={t('admin:models.fields.officialToolsHint')}
-                  className="col-span-2 min-w-0"
+                  className="min-w-0 sm:col-span-2"
                 >
                   <div className="divide-y divide-[var(--color-divider)] rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)]">
                     {draft.official_tools_draft.length === 0 ? (
@@ -965,12 +965,10 @@ export default function AdminModelEdit() {
                                     htmlFor={`m-official-icon-${index}`}
                                     className="min-w-0"
                                   >
-                                    <IconUploader
+                                    <IconPicker
                                       id={`m-official-icon-${index}`}
                                       value={tool.icon}
                                       onChange={(icon) => setTool({ icon })}
-                                      preview={<OfficialToolIcon icon={tool.icon} name={tool.name} size={18} />}
-                                      placeholder="search / terminal / image"
                                     />
                                   </Field>
                                 </div>
@@ -1040,7 +1038,7 @@ export default function AdminModelEdit() {
                 </Field>
 
                 {/* § moderation: screen each user prompt before generation. */}
-                <Field label={t('admin:models.fields.moderationLabel')} className="col-span-2">
+                <Field label={t('admin:models.fields.moderationLabel')} className="sm:col-span-2">
                   <div className="rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3 py-2.5">
                     <label className="flex items-center justify-between">
                       <span className="text-sm">{t('admin:models.fields.moderationEnable')}</span>
@@ -1111,7 +1109,7 @@ export default function AdminModelEdit() {
           {/* Section: Pricing ------------------------------------------------- */}
           <section className="mt-6 rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-5">
             <h2 className="font-serif text-lg text-[var(--color-fg)]">{t('admin:models.sections.pricing')}</h2>
-            <div className="mt-4 grid grid-cols-2 gap-4">
+            <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
               {draft.kind !== 'image' && (
                 <>
                   <Field label={t('admin:models.fields.priceIn')} htmlFor="m-pi">
@@ -1153,7 +1151,7 @@ export default function AdminModelEdit() {
                 </>
               )}
               {draft.kind === 'image' && (
-                <Field label={t('admin:models.fields.priceImage')} htmlFor="m-img" className="col-span-2">
+                <Field label={t('admin:models.fields.priceImage')} htmlFor="m-img" className="sm:col-span-2">
                   <Input
                     id="m-img"
                     type="number"
@@ -1170,7 +1168,7 @@ export default function AdminModelEdit() {
                   hint={t('admin:models.fields.imageTimeoutHint', {
                     defaultValue: 'Cut a single image request after this many seconds. 0 = no per-model cap.',
                   })}
-                  className="col-span-2"
+                  className="sm:col-span-2"
                 >
                   <Input
                     id="m-imgto"
@@ -1186,7 +1184,7 @@ export default function AdminModelEdit() {
                 </Field>
               )}
               {draft.kind === 'embedding' && (
-                <Field label={t('admin:models.fields.dim')} htmlFor="m-dim" className="col-span-2">
+                <Field label={t('admin:models.fields.dim')} htmlFor="m-dim" className="sm:col-span-2">
                   <Input
                     id="m-dim"
                     type="number"

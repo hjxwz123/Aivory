@@ -26,13 +26,16 @@
  * - Both toggle and select show their icon (lucide-react) when set.
  */
 import { useEffect, useMemo, useRef } from 'react'
-import * as Icons from 'lucide-react'
+import { SlidersHorizontal } from 'lucide-react'
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
 } from '@/components/ui/select'
+import { LucideGlyph } from '@/components/ui/lucide-icon'
+import { Tooltip } from '@/components/ui/tooltip'
+import { resolveLucideIcon } from '@/lib/lucide-icons'
 import { cn } from '@/lib/utils'
 import { parseControls, type ParamControlDef } from './param-controls.utils'
 
@@ -41,18 +44,6 @@ interface ParamControlsProps {
   values: Record<string, unknown>
   onChange: (next: Record<string, unknown>) => void
   className?: string
-}
-
-function LucideIcon({ name, size = 13 }: { name?: string; size?: number }) {
-  if (!name) return null
-  // Iconify name → PascalCase lucide-react export
-  const key = name
-    .split(/[-_]/)
-    .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
-    .join('') as keyof typeof Icons
-  const C = Icons[key] as React.ComponentType<{ size?: number; 'aria-hidden'?: boolean }> | undefined
-  if (!C) return null
-  return <C size={size} aria-hidden />
 }
 
 export function ParamControls({ controls, values, onChange, className }: ParamControlsProps) {
@@ -96,52 +87,55 @@ export function ParamControls({ controls, values, onChange, className }: ParamCo
       {defs.map((c) => {
         if (!shouldShow(c)) return null
         const label = c.label ?? c.key
-        // Shared pill look, matching the composer's "research" mode button: a
-        // single clickable chip; active = sage-soft, idle = muted.
-        const pill = (active: boolean) =>
+        // Match the adjacent knowledge-base control: the toolbar stays compact
+        // and the control name moves into a hover/focus tooltip.
+        const iconButton = (active: boolean) =>
           cn(
-            'inline-flex items-center gap-1.5 h-8 px-2.5 rounded-[8px] text-[12px] font-medium interactive',
+            'inline-flex size-8 shrink-0 items-center justify-center rounded-[8px] interactive',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
             active
               ? 'bg-[var(--color-secondary-soft)] text-[var(--color-secondary)]'
               : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
           )
         if (c.type === 'toggle') {
-          // 二选一 → a single pill that toggles on click (like "research").
           const checked = Boolean(values[c.key] ?? c.default ?? false)
+          const ControlIcon = resolveLucideIcon(c.icon) ?? SlidersHorizontal
           return (
-            <button
-              key={c.key}
-              type="button"
-              aria-pressed={checked}
-              onClick={() => onChange({ ...values, [c.key]: !checked })}
-              className={pill(checked)}
-              title={label}
-            >
-              <LucideIcon name={c.icon} />
-              <span>{label}</span>
-            </button>
+            <Tooltip key={c.key} content={label}>
+              <button
+                type="button"
+                aria-label={label}
+                aria-pressed={checked}
+                onClick={() => onChange({ ...values, [c.key]: !checked })}
+                className={iconButton(checked)}
+              >
+                <ControlIcon size={14} aria-hidden />
+              </button>
+            </Tooltip>
           )
         }
         if (c.type === 'select') {
-          // 多个调节 → same pill, click pops a dropdown of the options.
           const value = String(values[c.key] ?? c.default ?? c.options?.[0]?.value ?? '')
           const current = c.options?.find((o) => o.value === value)
           const active = c.default !== undefined ? value !== String(c.default) : Boolean(value)
+          const currentLabel = current?.label ?? current?.value
+          const ControlIcon = resolveLucideIcon(current?.icon ?? c.icon) ?? SlidersHorizontal
           return (
             <Select key={c.key} value={value} onValueChange={(v) => onChange({ ...values, [c.key]: v })}>
-              <SelectTrigger className={cn(pill(active), 'w-auto justify-start border-0')} aria-label={label} hideChevron>
-                <LucideIcon name={current?.icon ?? c.icon} />
-                <span>
-                  {label}
-                  {current ? <span className="opacity-70">：{current.label ?? current.value}</span> : null}
-                </span>
-              </SelectTrigger>
+              <Tooltip content={label}>
+                <SelectTrigger
+                  className={cn(iconButton(active), 'border-0 px-0')}
+                  aria-label={currentLabel ? `${label}: ${currentLabel}` : label}
+                  hideChevron
+                >
+                  <ControlIcon size={14} aria-hidden />
+                </SelectTrigger>
+              </Tooltip>
               <SelectContent>
                 {c.options?.map((o) => (
                   <SelectItem key={o.value} value={o.value}>
                     <span className="inline-flex items-center gap-2">
-                      <LucideIcon name={o.icon} />
+                      <LucideGlyph name={o.icon} size={13} aria-hidden />
                       {o.label ?? o.value}
                     </span>
                   </SelectItem>

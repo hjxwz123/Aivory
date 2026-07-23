@@ -19,6 +19,9 @@
   "icon": {
     "upload": "Upload",
     "clear": "Clear icon",
+    "select": "Select icon",
+    "search": "Search icons",
+    "noResults": "No matching icons",
     "uploaded": "Icon uploaded",
     "errBadType": "Only PNG, JPEG, or SVG images are allowed.",
     "errTooLarge": "Image must be smaller than 256 KB."

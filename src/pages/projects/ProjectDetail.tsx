@@ -11,7 +11,6 @@ import {
   Trash2,
   Save,
   Upload,
-  Loader2,
   X,
 } from 'lucide-react'
 import type { Attachment, Conversation } from '@/types/chat'
@@ -35,6 +34,7 @@ import { Field } from '@/components/ui/label'
 import { Tooltip } from '@/components/ui/tooltip'
 import { Switch } from '@/components/ui/switch'
 import { EmptyState } from '@/components/ui/empty-state'
+import { Skeleton } from '@/components/ui/skeleton'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -75,7 +75,6 @@ export default function ProjectDetail() {
   const { t } = useTranslation(['projects', 'chat', 'common'])
 
   const project = useProjects((s) => s.projects.find((p) => p.id === id))
-  const projectsLoaded = useProjects((s) => s.loaded)
   const loadOne = useProjects((s) => s.loadOne)
   const updateProject = useProjects((s) => s.updateProject)
   const renameProject = useProjects((s) => s.renameProject)
@@ -84,12 +83,26 @@ export default function ProjectDetail() {
   const uploadFile = useProjects((s) => s.uploadFile)
   const removeFile = useProjects((s) => s.removeFile)
   const renameFile = useProjects((s) => s.renameFile)
+  const [resolvingProject, setResolvingProject] = useState(
+    () => Boolean(id && !useProjects.getState().getProject(id)),
+  )
 
   // Project documents come from the project's knowledge library and are only
   // returned by GET /projects/:id — hydrate them whenever the id changes so the
   // file list (and count) is correct on a fresh load.
   useEffect(() => {
-    if (id) void loadOne(id)
+    if (!id) {
+      setResolvingProject(false)
+      return
+    }
+    let current = true
+    if (!useProjects.getState().getProject(id)) setResolvingProject(true)
+    void loadOne(id).finally(() => {
+      if (current) setResolvingProject(false)
+    })
+    return () => {
+      current = false
+    }
   }, [id, loadOne])
 
   // Summary-only subscription so a streaming conversation's per-token updates
@@ -248,16 +261,8 @@ export default function ProjectDetail() {
     if (pending) void conversationsApi.remove(pending.id).catch(() => {})
   }
 
-  if (!project && !projectsLoaded) {
-    // Still hydrating — show a spinner rather than a premature 404.
-    return (
-      <div className="flex-1 grid place-items-center">
-        <div className="flex flex-col items-center gap-4 text-[var(--color-fg-muted)]">
-          <Loader2 size={24} className="animate-spin" aria-hidden />
-          <span className="text-sm">{t('common:common.loading')}</span>
-        </div>
-      </div>
-    )
+  if (!project && resolvingProject) {
+    return <ProjectDetailSkeleton label={t('common:common.loading')} />
   }
 
   if (!project) {
@@ -920,6 +925,24 @@ export default function ProjectDetail() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  )
+}
+
+function ProjectDetailSkeleton({ label }: { label: string }) {
+  return (
+    <div className="flex-1 min-h-0 overflow-y-auto" role="status" aria-label={label}>
+      <div className="mx-auto w-full max-w-[var(--layout-content-max-w)] px-5 py-8 sm:px-8">
+        <Skeleton shape="line" className="h-7 w-48" />
+        <Skeleton shape="line" className="mt-4 w-full max-w-xl" />
+        <Skeleton shape="line" className="mt-2 w-3/4 max-w-md" />
+        <div className="mt-10 space-y-4">
+          <Skeleton className="h-28 w-full" />
+          <Skeleton className="h-44 w-full" />
+          <Skeleton className="h-32 w-full" />
+        </div>
+      </div>
+      <span className="sr-only">{label}</span>
     </div>
   )
 }

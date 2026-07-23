@@ -6,7 +6,7 @@
  * stay as small JSON text areas. Emits the serialized JSON string up to the
  * model-edit form; an "advanced" raw view stays in sync for power users.
  */
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Plus, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -253,11 +253,12 @@ function LabeledInput({ label, value, onChange, placeholder, cls, mono }: { labe
 }
 
 function LabeledIcon({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+  const id = useId()
   return (
-    <label className="flex min-w-0 flex-col gap-1">
-      <span className="text-[11.5px] text-[var(--color-fg-subtle)]">{label}</span>
-      <IconPicker value={value} onChange={onChange} />
-    </label>
+    <div className="flex min-w-0 flex-col gap-1">
+      <label htmlFor={id} className="text-[11.5px] text-[var(--color-fg-subtle)]">{label}</label>
+      <IconPicker id={id} value={value} onChange={onChange} />
+    </div>
   )
 }
 

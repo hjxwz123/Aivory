@@ -12,7 +12,6 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Field } from '@/components/ui/label'
 import { toast } from '@/hooks/use-toast'
-import { authApi } from '@/api'
 import { useSettings } from '@/store/settings'
 import { useComposerPrefs } from '@/store/composer-prefs'
 import { useAuth } from '@/store/auth'
@@ -20,7 +19,6 @@ import { MemoryManager } from '@/components/settings/memory-manager'
 import { cn } from '@/lib/utils'
 import {
   normalizeToolModeForCapabilities,
-  resolveDefaultToolMode,
   TOOL_MODE_MENU_ORDER,
   toolModeAvailable,
   type ToolMode,
@@ -63,6 +61,7 @@ const EMPTY_TOOL_NAMES: string[] = []
 
 export default function Personalization() {
   const { t } = useTranslation(['settings', 'memory', 'common'])
+  const initialSettings = useRef(useAuth.getState().user?.settings ?? {}).current
   const memoriesEnabled = useSettings((s) => s.privacy.memoriesEnabled)
   const setPrivacy = useSettings((s) => s.setPrivacy)
   // Global admin master switch: when memory is turned off platform-wide, hide the
@@ -97,18 +96,26 @@ export default function Personalization() {
     [cachedDefaultOfficialToolNames, defaultModel],
   )
 
-  const [traits, setTraits] = useState<string[]>([])
-  const [nickname, setNickname] = useState('')
-  const [custom, setCustom] = useState('')
-  const [loaded, setLoaded] = useState(false)
+  const [traits, setTraits] = useState<string[]>(() =>
+    Array.isArray(initialSettings.persona_traits) ? (initialSettings.persona_traits as string[]) : [],
+  )
+  const [nickname, setNickname] = useState(() =>
+    typeof initialSettings.persona_nickname === 'string' ? initialSettings.persona_nickname : '',
+  )
+  const [custom, setCustom] = useState(() =>
+    typeof initialSettings.persona_custom === 'string' ? initialSettings.persona_custom : '',
+  )
+  const loaded = true
   const [saving, setSaving] = useState(false)
   const [toolsSaving, setToolsSaving] = useState(false)
   const [toolMenuOpen, setToolMenuOpen] = useState(false)
   const [toolMenuPanel, setToolMenuPanel] = useState<'modes' | 'official'>('modes')
-  const [serverOfficialToolNames, setServerOfficialToolNames] = useState<string[] | null>(null)
+  const [serverOfficialToolNames, setServerOfficialToolNames] = useState<string[]>(() =>
+    resolveDefaultOfficialToolNames(initialSettings),
+  )
   const toolSettingsQueueRef = useRef<Promise<unknown>>(Promise.resolve())
   const hydratedOfficialToolModelsRef = useRef<Set<string>>(new Set())
-  const confirmedOfficialToolNamesRef = useRef<string[]>([])
+  const confirmedOfficialToolNamesRef = useRef<string[]>(resolveDefaultOfficialToolNames(initialSettings))
   const officialToolSaveVersionRef = useRef(0)
   const previousToolMenuPanelRef = useRef(toolMenuPanel)
   const officialBackRef = useRef<HTMLDivElement>(null)
@@ -122,40 +129,17 @@ export default function Personalization() {
     return request
   }
 
-  // Load the server-side persona + memory flag (the source of truth).
+  // AuthGate already hydrated the account settings before this dialog can open;
+  // only the model registry may still be outstanding.
   useEffect(() => {
     if (!modelsLoaded) void loadModels()
   }, [loadModels, modelsLoaded])
 
-  useEffect(() => {
-    let active = true
-    authApi
-      .getSettings()
-      .then((s) => {
-        if (!active) return
-        setTraits(Array.isArray(s.persona_traits) ? (s.persona_traits as string[]) : [])
-        setNickname(typeof s.persona_nickname === 'string' ? s.persona_nickname : '')
-        setCustom(typeof s.persona_custom === 'string' ? s.persona_custom : '')
-        if (typeof s.memory_enabled === 'boolean') setPrivacy({ memoriesEnabled: s.memory_enabled })
-        setDefaultToolMode(resolveDefaultToolMode(s))
-        const officialToolNames = resolveDefaultOfficialToolNames(s)
-        confirmedOfficialToolNamesRef.current = officialToolNames
-        setServerOfficialToolNames(officialToolNames)
-        setLoaded(true)
-      })
-      .catch(() => {
-        if (active) setLoaded(true)
-      })
-    return () => {
-      active = false
-    }
-  }, [setDefaultToolMode, setPrivacy])
-
-  // The model registry can finish loading after the account settings request.
+  // The model registry can finish loading after the account settings snapshot.
   // Hydrate each default model once, then leave subsequent model refreshes and
   // local user changes alone instead of replaying a stale server response.
   useEffect(() => {
-    if (!modelsLoaded || !defaultModelId || !defaultModel || serverOfficialToolNames === null) return
+    if (!modelsLoaded || !defaultModelId || !defaultModel) return
     if (hydratedOfficialToolModelsRef.current.has(defaultModelId)) return
     hydratedOfficialToolModelsRef.current.add(defaultModelId)
     const officialToolNames = filterOfficialToolNames(defaultModel, serverOfficialToolNames)
@@ -198,7 +182,7 @@ export default function Personalization() {
   async function savePersona() {
     setSaving(true)
     try {
-      await authApi.updateSettings({
+      await persistUserSettings({
         persona_traits: traits,
         persona_nickname: nickname.trim(),
         persona_custom: custom.trim(),
@@ -214,7 +198,7 @@ export default function Personalization() {
   async function onToggleMemory(v: boolean) {
     setPrivacy({ memoriesEnabled: v })
     try {
-      await authApi.updateSettings({ memory_enabled: v })
+      await persistUserSettings({ memory_enabled: v })
     } catch (e) {
       setPrivacy({ memoriesEnabled: !v })
       toast.error(t('common:actions.failed', { defaultValue: 'Failed to save' }), e instanceof Error ? e.message : undefined)

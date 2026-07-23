@@ -4,8 +4,7 @@ import { Lock } from 'lucide-react'
 import { SettingsRow, SettingsSection } from './SettingsLayout'
 import { useSettings } from '@/store/settings'
 import { useModels } from '@/store/models'
-import { modelsApi, authApi } from '@/api/endpoints'
-import type { ApiModel } from '@/api/types'
+import { useAuth } from '@/store/auth'
 import { Textarea } from '@/components/ui/textarea'
 import {
   Select,
@@ -17,60 +16,38 @@ import {
 import { Button } from '@/components/ui/button'
 import { toast } from '@/hooks/use-toast'
 import { persistUserSettings } from '@/lib/user-settings'
-import type { ModelSettings } from '@/types/settings'
-
-const RESPONSE_LENGTHS: readonly ModelSettings['responseLength'][] = ['concise', 'balanced', 'detailed']
-
-function isResponseLength(value: unknown): value is ModelSettings['responseLength'] {
-  return typeof value === 'string' && (RESPONSE_LENGTHS as readonly string[]).includes(value)
-}
 
 export default function Models() {
   const models = useSettings((s) => s.models)
   const setModels = useSettings((s) => s.setModels)
   const list = useModels((s) => s.models)
+  const imageModels = useModels((s) => s.imageModels)
+  const modelsLoaded = useModels((s) => s.loaded)
   const load = useModels((s) => s.load)
   const setGlobalDefaultModel = useModels((s) => s.setDefaultId)
   const { t } = useTranslation(['settings', 'common'])
 
   // Image-generation model pre-selection (§4.12-B). Persists to user settings.
-  const [imageModels, setImageModels] = useState<ApiModel[]>([])
-  const [imageModelId, setImageModelId] = useState('')
+  const [imageModelId, setImageModelId] = useState(() => {
+    const value = useAuth.getState().user?.settings?.image_model_id
+    return typeof value === 'string' ? value : ''
+  })
 
   // Custom-instructions save: in-flight guard so the request can't be double-fired.
   const savingRef = useRef(false)
   const [savingInstructions, setSavingInstructions] = useState(false)
   useEffect(() => {
-    if (list.length === 0) void load()
-    void modelsApi.listImage().then((r) => setImageModels(r.models ?? [])).catch(() => {})
-    void authApi
-      .getSettings()
-      .then((s) => {
-        setImageModelId(typeof s.image_model_id === 'string' ? s.image_model_id : '')
-        const patch: Parameters<typeof setModels>[0] = {}
-        if (typeof s.persona_custom === 'string' && s.persona_custom) {
-          patch.customInstructions = s.persona_custom
-        }
-        if (isResponseLength(s.response_length)) {
-          patch.responseLength = s.response_length
-        }
-        if (typeof s.default_model_id === 'string') {
-          patch.defaultModelId = s.default_model_id
-          setGlobalDefaultModel(s.default_model_id)
-        }
-        if (Object.keys(patch).length > 0) setModels(patch)
-      })
-      .catch(() => {})
-  }, [list.length, load, setGlobalDefaultModel, setModels])
+    if (!modelsLoaded) void load()
+  }, [load, modelsLoaded])
 
   const onPickImageModel = (id: string) => {
     setImageModelId(id)
-    void authApi.updateSettings({ image_model_id: id }).then(() => toast.success(t('common:actions.save')))
+    void persistUserSettings({ image_model_id: id }).then(() => toast.success(t('common:actions.save')))
   }
 
   const onPickResponseLength = (v: typeof models.responseLength) => {
     setModels({ responseLength: v })
-    void authApi.updateSettings({ response_length: v }).catch(() => {
+    void persistUserSettings({ response_length: v }).catch(() => {
       /* best-effort — local state is the source of truth */
     })
   }
@@ -93,7 +70,7 @@ export default function Models() {
     savingRef.current = true
     setSavingInstructions(true)
     try {
-      await authApi.updateSettings({ persona_custom: models.customInstructions })
+      await persistUserSettings({ persona_custom: models.customInstructions })
       toast.success(t('settings:models.customSaved'))
     } catch {
       toast.error(t('common:actions.failed', { defaultValue: 'Failed to save' }))
