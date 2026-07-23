@@ -1,5 +1,7 @@
-import { Image, Search, SquareTerminal, Wrench } from 'lucide-react'
+import { Wrench } from 'lucide-react'
 import { ModelIcon } from '@/components/chat/model-icon'
+import { LucideGlyph } from '@/components/ui/lucide-icon'
+import { resolveLucideIconName } from '@/lib/lucide-icons'
 import { cn } from '@/lib/utils'
 
 interface OfficialToolIconProps {
@@ -14,18 +16,18 @@ function semanticIcon(value: string) {
     case 'search':
     case 'web':
     case 'websearch':
-      return Search
+      return 'Search'
     case 'terminal':
     case 'code':
     case 'codeinterpreter':
-      return SquareTerminal
+      return 'SquareTerminal'
     case 'image':
     case 'imagegeneration':
-      return Image
+      return 'Image'
     case 'tool':
     case 'tools':
     case 'wrench':
-      return Wrench
+      return 'Wrench'
     default:
       return null
   }
@@ -34,8 +36,17 @@ function semanticIcon(value: string) {
 /** Render built-in symbolic names as Lucide icons and preserve custom emoji/URLs. */
 export function OfficialToolIcon({ icon, name, size = 16, className }: OfficialToolIconProps) {
   const configured = icon?.trim() ?? ''
-  const Icon = semanticIcon(configured) ?? (!configured ? semanticIcon(name ?? '') : null)
-  if (Icon) return <Icon size={size} aria-hidden className={cn('shrink-0', className)} />
+  const configuredLucide = resolveLucideIconName(configured)
+  // Picker output is canonical PascalCase and must render exactly as selected.
+  // Lowercase legacy aliases keep their historical semantic mapping.
+  const selectedLucide = configuredLucide === configured ? configuredLucide : null
+  const iconName = selectedLucide
+    ?? semanticIcon(configured)
+    ?? configuredLucide
+    ?? (!configured ? semanticIcon(name ?? '') ?? resolveLucideIconName(name) : null)
+  if (iconName) {
+    return <LucideGlyph name={iconName} size={size} aria-hidden className={cn('shrink-0', className)} />
+  }
   if (configured) return <ModelIcon icon={configured} size={size} className={className} />
   return <Wrench size={size} aria-hidden className={cn('shrink-0', className)} />
 }

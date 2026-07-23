@@ -5,7 +5,6 @@ import { useSettings } from '@/store/settings'
 import { useTheme } from '@/store/theme'
 import { useAccent } from '@/store/accent'
 import { useLanguage } from '@/store/language'
-import { useAuth } from '@/store/auth'
 import { SUPPORTED_LANGUAGES } from '@/i18n'
 import { type AccentPref, ACCENT_PRESETS, type ChatWidthPref, type FontPref, FONT_PRESETS } from '@/types/settings'
 import {
@@ -18,7 +17,6 @@ import {
 import { Switch } from '@/components/ui/switch'
 import { Sun, Moon, Monitor, Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { authApi } from '@/api'
 import { toast } from '@/hooks/use-toast'
 import { persistUserSettings } from '@/lib/user-settings'
 
@@ -63,8 +61,6 @@ export default function Appearance() {
   const setAppearance = useSettings((s) => s.setAppearance)
   const lang = useLanguage((s) => s.lang)
   const setLang = useLanguage((s) => s.setLang)
-  const user = useAuth((s) => s.user)
-  const setUser = useAuth((s) => s.setUser)
   const { t } = useTranslation(['settings', 'common'])
 
   useEffect(() => syncSystem(), [syncSystem])
@@ -72,23 +68,6 @@ export default function Appearance() {
   // (it's otherwise lazy-loaded only when chosen).
   useEffect(() => {
     void import('@fontsource-variable/inter')
-  }, [])
-
-  // On mount: merge server-side appearance preferences into local state.
-  // localStorage takes precedence for immediate response; server fills gaps.
-  useEffect(() => {
-    void authApi.getSettings().then((s) => {
-      if (typeof s.accent_color === 'string' && s.accent_color && !localStorage.getItem('aivory.accent')) {
-        setAccent(s.accent_color as AccentPref)
-      }
-      if (typeof s.font_family === 'string' && s.font_family && !localStorage.getItem('aivory.settings')) {
-        setAppearance({ font: s.font_family as FontPref })
-      }
-      if (typeof s.user_message_markdown === 'boolean') {
-        setAppearance({ userMessageMarkdown: s.user_message_markdown })
-      }
-    }).catch(() => {})
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   function onChangeAccent(preset: AccentPref) {
@@ -111,11 +90,7 @@ export default function Appearance() {
 
   function onToggleUserMessageMarkdown(enabled: boolean) {
     setAppearance({ userMessageMarkdown: enabled })
-    void authApi
-      .updateSettings({ user_message_markdown: enabled })
-      .then((updated) => {
-        if (user) setUser({ ...user, settings: { ...(user.settings ?? {}), ...updated } })
-      })
+    void persistUserSettings({ user_message_markdown: enabled })
       .catch((e) => {
         setAppearance({ userMessageMarkdown: !enabled })
         toast.error(t('common:actions.failed', { defaultValue: 'Failed to save' }), e instanceof Error ? e.message : undefined)

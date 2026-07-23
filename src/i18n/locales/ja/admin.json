@@ -19,6 +19,9 @@
   "icon": {
     "upload": "アップロード",
     "clear": "アイコンをクリア",
+    "select": "アイコンを選択",
+    "search": "アイコンを検索",
+    "noResults": "一致するアイコンがありません",
     "uploaded": "アイコンをアップロードしました",
     "errBadType": "PNG、JPEG、SVG画像のみ使用できます。",
     "errTooLarge": "画像は256 KB未満にしてください。"
