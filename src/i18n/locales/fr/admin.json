@@ -19,6 +19,9 @@
   "icon": {
     "upload": "Téléverser",
     "clear": "Effacer l'icône",
+    "select": "Choisir une icône",
+    "search": "Rechercher des icônes",
+    "noResults": "Aucune icône correspondante",
     "uploaded": "Icône téléversée",
     "errBadType": "Seules les images PNG, JPEG ou SVG sont autorisées.",
     "errTooLarge": "L'image doit faire moins de 256 Ko."

@@ -19,6 +19,9 @@
   "icon": {
     "upload": "上传",
     "clear": "清除图标",
+    "select": "选择图标",
+    "search": "搜索图标",
+    "noResults": "没有匹配的图标",
     "uploaded": "图标已上传",
     "errBadType": "仅支持 PNG、JPEG 或 SVG 图片。",
     "errTooLarge": "图片大小必须小于 256 KB。"
