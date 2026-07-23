@@ -214,7 +214,7 @@ export default function SharedConversation() {
                         <>
                           {text ? (
                             <div className="w-full text-[length:var(--text-chat-body)] leading-relaxed text-[var(--color-fg)]">
-                              <Markdown content={text} blockKeyPrefix={`share-${i}`} />
+                              <Markdown content={text} blockKeyPrefix={`share-${i}`} className="prose-full" />
                             </div>
                           ) : null}
                           {artifacts.length > 0 ? (

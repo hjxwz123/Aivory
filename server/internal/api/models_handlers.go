@@ -135,25 +135,25 @@ func modelsResponse(d Deps, r *http.Request, models []store.Model) map[string]an
 		Icon string `json:"icon"`
 	}
 	type item struct {
-		ID              string          `json:"id"`
-		Label           string          `json:"label"`
-		Description     string          `json:"description"`
-		Icon            string          `json:"icon"`
-		Kind            string          `json:"kind"`
-		Enabled         bool            `json:"enabled"`
-		Vision          bool            `json:"vision"`
-		Stream          bool            `json:"stream"`
-		ResearchEnabled bool            `json:"research_enabled"`
-		ToolMode        string          `json:"tool_mode"`
+		ID              string `json:"id"`
+		Label           string `json:"label"`
+		Description     string `json:"description"`
+		Icon            string `json:"icon"`
+		Kind            string `json:"kind"`
+		Enabled         bool   `json:"enabled"`
+		Vision          bool   `json:"vision"`
+		Stream          bool   `json:"stream"`
+		ResearchEnabled bool   `json:"research_enabled"`
+		ToolMode        string `json:"tool_mode"`
 		// BuiltinTools is the resolved, user-safe capability set. Unlike the
 		// nullable admin policy, this always contains only live registry tools that
 		// survive both the model allowlist and the global disabled_tools switch.
-		BuiltinTools    []string        `json:"builtin_tools"`
-		ParamControls   json.RawMessage `json:"param_controls"`
-		ChannelID       string          `json:"channel_id"`
-		SortOrder       int             `json:"sort_order"`
-		Currency        string          `json:"currency"`
-		Tags            json.RawMessage `json:"tags"`
+		BuiltinTools  []string        `json:"builtin_tools"`
+		ParamControls json.RawMessage `json:"param_controls"`
+		ChannelID     string          `json:"channel_id"`
+		SortOrder     int             `json:"sort_order"`
+		Currency      string          `json:"currency"`
+		Tags          json.RawMessage `json:"tags"`
 		// OfficialTools intentionally omits each definition's upstream request
 		// JSON. Users need names/icons for the per-turn picker, while provider wire
 		// configuration remains admin-only.
@@ -221,15 +221,20 @@ func modelsResponse(d Deps, r *http.Request, models []store.Model) map[string]an
 			creditsPerImage = imageCreditCost(m, creditsPerUSD)
 		}
 		officialTools := []officialToolItem{}
-		if definitions, err := store.ParseOfficialTools(m.OfficialTools); err == nil {
-			for _, definition := range definitions {
-				officialTools = append(officialTools, officialToolItem{Name: definition.Name, Icon: definition.Icon})
+		// tool_mode=none is the administrator-level deny-all policy. Keep the
+		// saved definitions available in the admin API for later re-enabling, but
+		// do not advertise unusable official tools to user-facing clients.
+		if m.ToolMode != "none" {
+			if definitions, err := store.ParseOfficialTools(m.OfficialTools); err == nil {
+				for _, definition := range definitions {
+					officialTools = append(officialTools, officialToolItem{Name: definition.Name, Icon: definition.Icon})
+				}
 			}
 		}
 		items = append(items, item{
 			ID: m.ID, Label: m.Label, Description: m.Description, Icon: m.Icon,
 			Kind: m.Kind, Enabled: m.Enabled, Vision: m.Vision, Stream: m.Stream, ResearchEnabled: m.ResearchEnabled, ToolMode: m.ToolMode,
-			BuiltinTools: effectivePublicBuiltinTools(m, registeredBuiltinTools, disabledBuiltinTools),
+			BuiltinTools:  effectivePublicBuiltinTools(m, registeredBuiltinTools, disabledBuiltinTools),
 			ParamControls: m.ParamControls, ChannelID: m.ChannelID, SortOrder: m.SortOrder,
 			Currency:        m.Currency,
 			Tags:            tags,

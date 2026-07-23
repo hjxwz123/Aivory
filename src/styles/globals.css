@@ -863,7 +863,9 @@
 
 /* Chat answers fill the message column (so the reply's right edge meets the user
  * bubble's), instead of the narrower editorial reading measure used elsewhere
- * (reasoning trace / inline / shared / admin keep the capped measure). The double
+ * (reasoning trace / inline / admin keep the capped measure). Public shared
+ * conversations deliberately use this same class so their read-only transcript
+ * keeps the live chat's message geometry. The double
  * class outweighs the base `.prose-aivory` max-width regardless of source order. */
 .prose-aivory.prose-full {
   max-width: none;

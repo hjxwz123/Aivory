@@ -283,6 +283,30 @@ func TestOfficialToolModeFiltersSelectionAndDisablesSystemTools(t *testing.T) {
 	}
 }
 
+func TestOfficialToolModeCannotOverrideModelNonePolicy(t *testing.T) {
+	orchestrator, provider, model, conv, _, db := setupToolRouteTest(t)
+	configured := `[{"name":"hosted","icon":"search","request":{"tools":[{"type":"hosted-search"}]}}]`
+	if _, err := db.Exec(`UPDATE models SET tool_mode='none', official_tools=? WHERE id=?`, configured, model.ID); err != nil {
+		t.Fatalf("configure deny-all model: %v", err)
+	}
+
+	runToolRouteTurn(t, orchestrator, model.ID, conv.ID, RunRequest{
+		ToolMode:          ToolModeOfficial,
+		OfficialToolNames: []string{"hosted"},
+	})
+	if len(provider.mainRequests) != 1 {
+		t.Fatalf("main requests = %d, want 1", len(provider.mainRequests))
+	}
+	request := provider.mainRequests[0]
+	if request.ToolModeOfficial || len(request.OfficialToolNames) != 0 || len(request.OfficialToolRequests) != 0 || len(request.Tools) != 0 {
+		t.Fatalf("tool_mode=none exposed tools: official=%v names=%v requests=%s local=%v",
+			request.ToolModeOfficial, request.OfficialToolNames, request.OfficialToolRequests, request.Tools)
+	}
+	if request.SystemPromptOptions == nil || request.SystemPromptOptions.ToolMode != "none" {
+		t.Fatalf("tool_mode=none prompt options = %+v", request.SystemPromptOptions)
+	}
+}
+
 func TestEmptyEffectiveOfficialSelectionUsesUnifiedNoToolsPipeline(t *testing.T) {
 	ctx := context.Background()
 	orchestrator, provider, model, conv, _, db := setupToolRouteTest(t)
@@ -428,6 +452,42 @@ func TestOfficialToolFallbackReappliesFallbackModelAllowlist(t *testing.T) {
 	}
 	if len(got.OfficialToolRequests) != 1 || !strings.Contains(string(got.OfficialToolRequests[0]), "fallback-second") {
 		t.Fatalf("fallback request did not use fallback model definition: %s", got.OfficialToolRequests)
+	}
+}
+
+func TestOfficialToolFallbackCannotOverrideFallbackNonePolicy(t *testing.T) {
+	orchestrator, _, model, _, _, db := setupToolRouteTest(t)
+	fallback, err := store.CreateModel(context.Background(), db, store.Model{
+		ChannelID: model.ChannelID,
+		Kind:      "chat",
+		RequestID: "official-fallback-none",
+		Label:     "Official fallback none",
+		Enabled:   true,
+		Stream:    true,
+		ToolMode:  "none",
+		OfficialTools: json.RawMessage(`[
+			{"name":"hosted","icon":"search","request":{"tools":[{"type":"fallback-hosted"}]}}
+		]`),
+	})
+	if err != nil {
+		t.Fatalf("create fallback model: %v", err)
+	}
+	base := UnifiedChatRequest{
+		OfficialToolNames:    []string{"hosted"},
+		OfficialToolRequests: []json.RawMessage{json.RawMessage(`{"tools":[{"type":"primary-hosted"}]}`)},
+		ToolModeOfficial:     true,
+	}
+
+	got, _, _, err := orchestrator.buildFallbackRequest(context.Background(), base, fallback.ID)
+	if err != nil {
+		t.Fatalf("build fallback request: %v", err)
+	}
+	if got.ToolModeOfficial || len(got.OfficialToolNames) != 0 || len(got.OfficialToolRequests) != 0 || len(got.Tools) != 0 {
+		t.Fatalf("fallback tool_mode=none exposed tools: official=%v names=%v requests=%s local=%v",
+			got.ToolModeOfficial, got.OfficialToolNames, got.OfficialToolRequests, got.Tools)
+	}
+	if got.SystemPromptOptions != nil && got.SystemPromptOptions.ToolMode != "none" {
+		t.Fatalf("fallback tool_mode=none prompt options = %+v", got.SystemPromptOptions)
 	}
 }
 

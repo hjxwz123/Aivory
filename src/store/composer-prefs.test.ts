@@ -4,8 +4,10 @@ import {
   modelAllowsToolModeSelection,
   normalizeToolModeForCapabilities,
   resolveDefaultToolMode,
+  resolveModelToolModeCapabilities,
   TOOL_MODE_MENU_ORDER,
   toolModeAvailable,
+  visibleToolModes,
 } from '@/lib/tool-mode'
 import {
   resolveArmedTurnFlags,
@@ -106,12 +108,40 @@ describe('model tool capability', () => {
     expect(modelAllowsToolModeSelection(undefined)).toBe(true)
   })
 
-  it('keeps the four menu rows stable and disables unsupported concrete modes', () => {
+  it('treats a model-level none policy as authoritative over every tool family', () => {
+    expect(resolveModelToolModeCapabilities('none', { builtin: true, official: true })).toEqual({
+      builtin: false,
+      official: false,
+    })
+    expect(resolveModelToolModeCapabilities('native', { builtin: true, official: true })).toEqual({
+      builtin: true,
+      official: true,
+    })
+  })
+
+  it('keeps a stable order while omitting unsupported modes from the menu', () => {
     expect(TOOL_MODE_MENU_ORDER).toEqual(['auto', 'official', 'disabled', 'enabled'])
     expect(toolModeAvailable('auto', { builtin: false, official: false })).toBe(true)
     expect(toolModeAvailable('disabled', { builtin: false, official: false })).toBe(true)
     expect(toolModeAvailable('official', { builtin: true, official: false })).toBe(false)
     expect(toolModeAvailable('enabled', { builtin: false, official: true })).toBe(false)
+    expect(visibleToolModes({ builtin: true, official: true })).toEqual([
+      'auto',
+      'official',
+      'disabled',
+      'enabled',
+    ])
+    expect(visibleToolModes({ builtin: true, official: false })).toEqual([
+      'auto',
+      'disabled',
+      'enabled',
+    ])
+    expect(visibleToolModes({ builtin: false, official: true })).toEqual([
+      'auto',
+      'official',
+      'disabled',
+    ])
+    expect(visibleToolModes({ builtin: false, official: false })).toEqual(['auto', 'disabled'])
   })
 
   it('falls an unsupported persisted selection back to automatic', () => {
