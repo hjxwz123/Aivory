@@ -4,7 +4,7 @@
  * Opened from the gear-icon "Settings" button on the AdminModels list. Three
  * sectioned blocks:
  *   1. Basic          — channel, kind, label, request_id, icon, description, enabled
- *   2. Chat behaviour — tool_mode, vision, stream, system_prompt, param_controls (chat only)
+ *   2. Model behaviour — chat tools/vision/system prompt and chat/image param_controls
  *   3. Pricing        — chat: in/out/cache_read/cache_write · image: per-image · embedding: dim
  *
  * No GET-single endpoint upstream — we re-fetch the model list and find by ID,
@@ -14,9 +14,29 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { ArrowLeft, Plus, Trash2 } from 'lucide-react'
+import {
+  ArrowLeft,
+  BookOpen,
+  Check,
+  Globe,
+  Image as ImageIcon,
+  Plus,
+  RefreshCw,
+  Search,
+  Sparkles,
+  SquareTerminal,
+  Trash2,
+  Wrench,
+} from 'lucide-react'
 import { adminApi, ApiError } from '@/api'
-import type { ApiChannel, ApiModel, ApiModelTag, ApiOfficialToolDefinition, ApiSkill } from '@/api/types'
+import type {
+  ApiBuiltinTool,
+  ApiChannel,
+  ApiModel,
+  ApiModelTag,
+  ApiOfficialToolDefinition,
+  ApiSkill,
+} from '@/api/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Field } from '@/components/ui/label'
@@ -28,11 +48,21 @@ import { OfficialToolIcon } from '@/components/chat/official-tool-icon'
 import { ParamControlsEditor } from '@/components/admin/param-controls-editor'
 import { ModelQuotaEditor } from '@/components/admin/model-quota-editor'
 import { toast } from '@/hooks/use-toast'
+import { resolveBuiltinToolNames, toggleBuiltinToolName } from '@/lib/builtin-tools'
 import { cn } from '@/lib/utils'
 import { PanelFallback } from '@/components/ui/panel-fallback'
 
 const KINDS = ['chat', 'image', 'embedding'] as const
 const TOOL_MODES = ['native', 'prompt', 'none'] as const
+const BUILTIN_TOOL_ICONS: Record<string, typeof Wrench> = {
+  web_search: Search,
+  web_fetch: Globe,
+  python_execute: SquareTerminal,
+  image_generate: ImageIcon,
+  search_knowledge_base: BookOpen,
+  use_skill: BookOpen,
+  save_memory: Sparkles,
+}
 type OfficialToolDraft = Omit<ApiOfficialToolDefinition, 'request'> & { request_text: string }
 type Draft = Partial<ApiModel> & {
   param_controls_text: string
@@ -48,6 +78,10 @@ function pcToText(pc: unknown): string {
   } catch {
     return '[]'
   }
+}
+
+function humanizeToolName(name: string): string {
+  return name.replace(/[_-]+/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
 }
 
 function extraParamsToText(params: unknown): string {
@@ -136,6 +170,9 @@ export default function AdminModelEdit() {
   const [channels, setChannels] = useState<ApiChannel[]>([])
   const [allTags, setAllTags] = useState<ApiModelTag[]>([])
   const [allSkills, setAllSkills] = useState<ApiSkill[]>([])
+  const [builtinTools, setBuiltinTools] = useState<ApiBuiltinTool[]>([])
+  const [builtinToolsLoading, setBuiltinToolsLoading] = useState(true)
+  const [builtinToolsError, setBuiltinToolsError] = useState(false)
   const [draft, setDraft] = useState<Draft | null>(null)
   const [loading, setLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
@@ -145,17 +182,28 @@ export default function AdminModelEdit() {
     let cancelled = false
     async function load() {
       setLoading(true)
+      setBuiltinToolsLoading(true)
+      setBuiltinToolsError(false)
       try {
-        const [c, m, tg, sk] = await Promise.all([
+        const [c, m, tg, sk, bt] = await Promise.all([
           adminApi.channels(),
           adminApi.models(),
           adminApi.modelTags().catch(() => [] as ApiModelTag[]),
           adminApi.skills().catch(() => [] as ApiSkill[]),
+          // Keep the rest of model editing available during a rolling deploy
+          // where an older backend may not expose the registry endpoint yet,
+          // without mistaking that failure for a real empty registry.
+          adminApi
+            .builtinTools()
+            .then((tools) => ({ tools, failed: false }))
+            .catch(() => ({ tools: [] as ApiBuiltinTool[], failed: true })),
         ])
         if (cancelled) return
         setChannels(c)
         setAllTags(tg)
         setAllSkills(sk)
+        setBuiltinTools(bt.tools)
+        setBuiltinToolsError(bt.failed)
         const found = m.find((row) => row.id === id)
         if (!found) {
           setNotFound(true)
@@ -167,7 +215,10 @@ export default function AdminModelEdit() {
       } catch (e) {
         if (!cancelled) toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
       } finally {
-        if (!cancelled) setLoading(false)
+        if (!cancelled) {
+          setBuiltinToolsLoading(false)
+          setLoading(false)
+        }
       }
     }
     void load()
@@ -196,6 +247,33 @@ export default function AdminModelEdit() {
     })
   }
 
+  function toggleBuiltinTool(name: string) {
+    const availableNames = builtinTools.map((tool) => tool.name)
+    setDraft((current) =>
+      current
+        ? {
+            ...current,
+            builtin_tools: toggleBuiltinToolName(current.builtin_tools, availableNames, name),
+          }
+        : current,
+    )
+  }
+
+  async function retryBuiltinTools() {
+    if (builtinToolsLoading) return
+    setBuiltinToolsLoading(true)
+    try {
+      const tools = await adminApi.builtinTools()
+      setBuiltinTools(tools)
+      setBuiltinToolsError(false)
+    } catch (e) {
+      setBuiltinToolsError(true)
+      toast.error(e instanceof ApiError ? e.message : t('admin:models.fields.builtinToolsLoadFailed'))
+    } finally {
+      setBuiltinToolsLoading(false)
+    }
+  }
+
   const channel = channels.find((c) => c.id === draft?.channel_id)
   const extraParamsValidation = draft?.kind === 'chat' ? parseExtraParams(draft.extra_params_text) : null
   const extraParamsError =
@@ -216,6 +294,10 @@ export default function AdminModelEdit() {
       ((c.type === channel?.type && (c.api_format ?? '') === (channel?.api_format ?? '')) ||
         c.id === draft?.fallback_channel_id),
   )
+  const builtinToolNames = builtinTools.map((tool) => tool.name)
+  const selectedBuiltinToolNames = resolveBuiltinToolNames(draft?.builtin_tools, builtinToolNames)
+  const selectedBuiltinToolSet = new Set(selectedBuiltinToolNames)
+  const builtinToolsUseDefault = draft?.builtin_tools == null
 
   async function save() {
     if (!draft) return
@@ -272,6 +354,7 @@ export default function AdminModelEdit() {
         official_tools_draft: _omitOfficialToolDraft,
         official_tools_dirty: officialToolsDirty,
         official_tools: _omitOfficialTools,
+        builtin_tools: builtinToolsConfig,
         skills: skillIds,
         ...rest
       } = draft
@@ -287,6 +370,7 @@ export default function AdminModelEdit() {
         // clear an earlier chat-model value instead of merely omitting the key.
         extra_params: parsedExtraParams?.valid ? parsedExtraParams.value : {},
       }
+      if (draft.kind === 'chat') payload.builtin_tools = builtinToolsConfig ?? null
       if (officialToolsDirty) payload.official_tools = officialTools
       const updated = await adminApi.updateModel(id, payload)
       if (draft.kind === 'chat') {
@@ -590,6 +674,180 @@ export default function AdminModelEdit() {
                     </SelectContent>
                   </Select>
                 </Field>
+                <Field
+                  label={t('admin:models.fields.builtinToolsLabel', { defaultValue: 'Built-in tools' })}
+                  hint={t('admin:models.fields.builtinToolsHint', {
+                    defaultValue:
+                      'Limit the platform tools this model may use through tool calling. Default all also includes tools registered in the future.',
+                  })}
+                  className="col-span-2 min-w-0"
+                >
+                  <div className="overflow-hidden rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)]">
+                    <div className="flex flex-col gap-2 border-b border-[var(--color-divider)] px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="inline-flex w-fit items-center gap-1 rounded-[9px] border border-[var(--color-border-subtle)] bg-[var(--color-surface)] p-0.5">
+                        <button
+                          type="button"
+                          aria-pressed={builtinToolsUseDefault}
+                          onClick={() => patch({ builtin_tools: null })}
+                          className={cn(
+                            'h-7 rounded-[7px] px-2.5 text-[12px] font-medium interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+                            builtinToolsUseDefault
+                              ? 'bg-[var(--color-fg)] text-[var(--color-fg-inverted)]'
+                              : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]',
+                          )}
+                        >
+                          {t('admin:models.fields.builtinToolsDefaultAll', { defaultValue: 'Default all' })}
+                        </button>
+                        <button
+                          type="button"
+                          aria-pressed={!builtinToolsUseDefault}
+                          disabled={builtinToolsLoading || builtinToolsError}
+                          onClick={() => patch({ builtin_tools: [...builtinToolNames] })}
+                          className={cn(
+                            'h-7 rounded-[7px] px-2.5 text-[12px] font-medium interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+                            builtinToolsLoading || builtinToolsError
+                              ? 'cursor-not-allowed opacity-40'
+                              : !builtinToolsUseDefault
+                                ? 'bg-[var(--color-fg)] text-[var(--color-fg-inverted)]'
+                                : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]',
+                          )}
+                        >
+                          {t('admin:models.fields.builtinToolsCustom', { defaultValue: 'Custom' })}
+                        </button>
+                      </div>
+                      <div className="flex min-w-0 items-center gap-1.5">
+                        <span className="mr-auto truncate text-[11.5px] tabular-nums text-[var(--color-fg-subtle)] sm:mr-1">
+                          {t('admin:models.fields.builtinToolsSelected', {
+                            selected: selectedBuiltinToolNames.length,
+                            total: builtinTools.length,
+                            defaultValue: '{{selected}}/{{total}} enabled',
+                          })}
+                        </span>
+                        {!builtinToolsUseDefault ? (
+                          <>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              disabled={builtinToolsLoading || builtinToolsError}
+                              onClick={() => patch({ builtin_tools: [...builtinToolNames] })}
+                            >
+                              {t('admin:models.fields.builtinToolsSelectAll', { defaultValue: 'Select all' })}
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              disabled={builtinToolsLoading || builtinToolsError}
+                              onClick={() => patch({ builtin_tools: [] })}
+                            >
+                              {t('admin:models.fields.builtinToolsClear', { defaultValue: 'Clear' })}
+                            </Button>
+                          </>
+                        ) : null}
+                      </div>
+                    </div>
+                    {builtinToolsError ? (
+                      <div
+                        className="flex flex-col items-start gap-2 px-3 py-4 sm:flex-row sm:items-center sm:justify-between"
+                        role="alert"
+                      >
+                        <p className="text-sm text-[var(--color-danger)]">
+                          {t('admin:models.fields.builtinToolsLoadFailed', {
+                            defaultValue: 'Could not load the built-in tool registry. The saved policy has not been changed.',
+                          })}
+                        </p>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          disabled={builtinToolsLoading}
+                          onClick={() => void retryBuiltinTools()}
+                        >
+                          <RefreshCw size={14} className={builtinToolsLoading ? 'animate-spin' : undefined} aria-hidden />
+                          {t('common:actions.tryAgain', { defaultValue: 'Try again' })}
+                        </Button>
+                      </div>
+                    ) : builtinToolsLoading ? (
+                      <p className="px-3 py-4 text-sm text-[var(--color-fg-muted)]" role="status">
+                        {t('common:common.loading', { defaultValue: 'Loading...' })}
+                      </p>
+                    ) : builtinTools.length === 0 ? (
+                      <p className="px-3 py-4 text-sm text-[var(--color-fg-muted)]">
+                        {t('admin:models.fields.builtinToolsEmpty', { defaultValue: 'No built-in tools are registered.' })}
+                      </p>
+                    ) : (
+                      <div className="grid grid-cols-1 gap-0.5 p-1 md:grid-cols-2">
+                        {builtinTools.map((tool) => {
+                          const checked = selectedBuiltinToolSet.has(tool.name)
+                          const Icon = BUILTIN_TOOL_ICONS[tool.name] ?? Wrench
+                          return (
+                            <button
+                              key={tool.name}
+                              type="button"
+                              role="checkbox"
+                              aria-checked={checked}
+                              disabled={builtinToolsUseDefault || builtinToolsLoading || builtinToolsError}
+                              onClick={() => toggleBuiltinTool(tool.name)}
+                              className={cn(
+                                'flex min-w-0 items-start gap-2.5 rounded-[8px] px-2.5 py-2 text-left',
+                                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+                                builtinToolsUseDefault || builtinToolsLoading || builtinToolsError
+                                  ? 'cursor-default'
+                                  : 'interactive',
+                                checked
+                                  ? builtinToolsUseDefault
+                                    ? 'bg-[var(--color-surface)]/70'
+                                    : 'bg-[var(--color-secondary-soft)]'
+                                  : 'hover:bg-[var(--color-surface)]',
+                              )}
+                            >
+                              <Icon
+                                size={15}
+                                aria-hidden
+                                className={cn(
+                                  'mt-0.5 shrink-0',
+                                  checked && !builtinToolsUseDefault
+                                    ? 'text-[var(--color-secondary)]'
+                                    : 'text-[var(--color-fg-muted)]',
+                                )}
+                              />
+                              <span className="min-w-0 flex-1">
+                                <span
+                                  className={cn(
+                                    'block truncate text-[12.5px] font-medium',
+                                    checked ? 'text-[var(--color-fg)]' : 'text-[var(--color-fg-muted)]',
+                                  )}
+                                >
+                                  {t(`admin:models.builtinTools.names.${tool.name}`, {
+                                    defaultValue: humanizeToolName(tool.name),
+                                  })}
+                                </span>
+                                <span className="mt-0.5 block line-clamp-2 text-[11px] leading-snug text-[var(--color-fg-subtle)]">
+                                  {t(`admin:models.builtinTools.descriptions.${tool.name}`, {
+                                    defaultValue: tool.description,
+                                  })}
+                                </span>
+                              </span>
+                              {checked ? (
+                                <Check
+                                  size={14}
+                                  aria-hidden
+                                  className={cn(
+                                    'mt-0.5 shrink-0',
+                                    builtinToolsUseDefault
+                                      ? 'text-[var(--color-fg-subtle)]'
+                                      : 'text-[var(--color-secondary)]',
+                                  )}
+                                />
+                              ) : null}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </Field>
                 <div className="grid grid-cols-1 gap-3 items-end sm:grid-cols-3 col-span-2">
                   <label className="flex items-center justify-between rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3 py-2.5">
                     <span className="text-sm">{t('admin:models.fields.vision')}</span>
@@ -636,7 +894,11 @@ export default function AdminModelEdit() {
                     onChange={(e) => patch({ system_prompt: e.target.value })}
                   />
                 </Field>
-                <Field label={t('admin:models.fields.paramControls')} className="col-span-2">
+                <Field
+                  label={t('admin:models.fields.paramControls')}
+                  hint={t('admin:models.fields.paramControlsHint')}
+                  className="col-span-2"
+                >
                   <ParamControlsEditor
                     value={draft.param_controls_text}
                     onChange={(v) => patch({ param_controls_text: v })}
@@ -807,6 +1069,27 @@ export default function AdminModelEdit() {
                       {t('admin:models.fields.moderationHint')}
                     </p>
                   </div>
+                </Field>
+              </div>
+            </section>
+          )}
+
+          {/* Image providers also consume the same declarative request-control
+              mappings; embedding models have no per-request UI controls. */}
+          {draft.kind === 'image' && (
+            <section className="mt-6 rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-5 sm:px-6">
+              <h2 className="font-serif text-lg text-[var(--color-fg)]">
+                {t('admin:models.sections.imageBehaviour', { defaultValue: 'Image generation' })}
+              </h2>
+              <div className="mt-4">
+                <Field
+                  label={t('admin:models.fields.paramControls')}
+                  hint={t('admin:models.fields.paramControlsHint')}
+                >
+                  <ParamControlsEditor
+                    value={draft.param_controls_text}
+                    onChange={(value) => patch({ param_controls_text: value })}
+                  />
                 </Field>
               </div>
             </section>

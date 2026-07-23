@@ -67,6 +67,10 @@ type UnifiedChatRequest struct {
 	MessageID    string
 	ProjectName  string
 	SystemPrompt string // pre-built (§4.8)
+	// SystemPromptOptions retains the structured inputs used to build
+	// SystemPrompt. Providers ignore it; TTFT model fallback uses a cloned copy to
+	// recompose tool/skill guidance for the fallback model's exact capabilities.
+	SystemPromptOptions *systemPromptOpts
 	// SystemExtras carries optional debug-only inspection.
 	SystemExtras []SystemPart
 	History      []UnifiedMessage
@@ -78,8 +82,9 @@ type UnifiedChatRequest struct {
 	// into their native request body; they never execute the system's local tools.
 	OfficialToolNames    []string
 	OfficialToolRequests []json.RawMessage
-	// ToolModeOfficial remains true even when filtering leaves no selected tools,
-	// so fallback models and providers do not silently re-enable local tools.
+	// ToolModeOfficial is true only when at least one selected definition survives
+	// model filtering. An empty effective selection enters the unified no-tools
+	// pipeline before a provider request is built.
 	ToolModeOfficial bool
 	// ToolModePrompt is true when §4.13 prompt-injection mode is on.
 	ToolModePrompt bool

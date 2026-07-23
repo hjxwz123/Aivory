@@ -307,6 +307,12 @@ func createModelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	} else {
 		m.OfficialTools = officialTools
 	}
+	if builtinTools, err := store.NormalizeBuiltinTools(m.BuiltinTools); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	} else {
+		m.BuiltinTools = builtinTools
+	}
 	if err := normalizeModelExtraParams(&m); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
@@ -385,6 +391,14 @@ func updateModelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		} else {
 			m.OfficialTools = officialTools
 		}
+	}
+	// The row was decoded over the existing model, so omission preserves the
+	// policy while an explicit null resets it to the default-all behavior.
+	if builtinTools, err := store.NormalizeBuiltinTools(m.BuiltinTools); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	} else {
+		m.BuiltinTools = builtinTools
 	}
 	if err := normalizeModelExtraParams(&m); err != nil {
 		writeError(w, http.StatusBadRequest, err)

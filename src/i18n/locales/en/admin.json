@@ -74,7 +74,8 @@
       "pricing": "Pricing",
       "permissions": "Permissions",
       "tags": "Tags",
-      "skills": "Skills"
+      "skills": "Skills",
+      "imageBehaviour": "Image generation"
     },
     "fields": {
       "channel": "Channel",
@@ -87,6 +88,15 @@
       "description": "Description (one line)",
       "icon": "Icon",
       "toolMode": "Tool mode",
+      "builtinToolsLabel": "Built-in tools",
+      "builtinToolsHint": "Limit the platform tools this model may use through tool calling. Default all also includes tools registered in the future.",
+      "builtinToolsDefaultAll": "Default all",
+      "builtinToolsCustom": "Custom",
+      "builtinToolsSelected": "{{selected}}/{{total}} enabled",
+      "builtinToolsSelectAll": "Select all",
+      "builtinToolsClear": "Clear",
+      "builtinToolsEmpty": "No built-in tools are registered.",
+      "builtinToolsLoadFailed": "Could not load the built-in tool registry. The saved policy has not been changed.",
       "officialToolsLabel": "Provider-native tools",
       "useOfficialTools": "Use OpenAI built-in tools",
       "officialToolsHint": "Define the request JSON appended when users select this tool. Arrays with the same key are appended in order.",
@@ -101,6 +111,7 @@
       "researchEnabled": "Deep Research",
       "systemPrompt": "System prompt",
       "paramControls": "param_controls (JSON)",
+      "paramControlsHint": "Expose model-specific choices and merge each selected value into the upstream request.",
       "extraParams": "Extra upstream parameters (JSON)",
       "extraParamsHint": "Optional JSON object merged into this model's upstream request. Priority: built-in request parameters override control mappings, which override these values.",
       "dim": "Dimension",
@@ -163,7 +174,27 @@
       "showIfKey": "Show only when (key) — optional",
       "showIfValue": "Equals (value)"
     },
-    "skillsHint": "Checked skills are advertised; the model loads them on demand via use_skill."
+    "skillsHint": "Checked skills are advertised; the model loads them on demand via use_skill.",
+    "builtinTools": {
+      "names": {
+        "web_search": "Web search",
+        "web_fetch": "Read web page",
+        "python_execute": "Python interpreter",
+        "image_generate": "Image generation",
+        "search_knowledge_base": "Knowledge base search",
+        "use_skill": "Use skill",
+        "save_memory": "Save memory"
+      },
+      "descriptions": {
+        "web_search": "Search the public web for current information.",
+        "web_fetch": "Read the main content of a specific web page.",
+        "python_execute": "Run Python for analysis, calculations, and file generation.",
+        "image_generate": "Generate or edit images with the configured image model.",
+        "search_knowledge_base": "Search the user's selected knowledge bases.",
+        "use_skill": "Load an assigned skill's full instructions on demand.",
+        "save_memory": "Save durable user information to long-term memory."
+      }
+    }
   },
   "skills": {
     "title": "Skills",

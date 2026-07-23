@@ -74,7 +74,8 @@
       "pricing": "料金",
       "permissions": "権限",
       "tags": "タグ",
-      "skills": "スキル"
+      "skills": "スキル",
+      "imageBehaviour": "画像生成"
     },
     "fields": {
       "channel": "チャネル",
@@ -87,6 +88,15 @@
       "description": "説明（1行）",
       "icon": "アイコン",
       "toolMode": "ツールモード",
+      "builtinToolsLabel": "組み込みツール",
+      "builtinToolsHint": "このモデルがツール呼び出しで利用できるプラットフォームツールを制限します。デフォルトでは今後追加されるツールもすべて有効です。",
+      "builtinToolsDefaultAll": "すべて（既定）",
+      "builtinToolsCustom": "カスタム",
+      "builtinToolsSelected": "{{selected}}/{{total}} 件を有効化",
+      "builtinToolsSelectAll": "すべて選択",
+      "builtinToolsClear": "クリア",
+      "builtinToolsEmpty": "登録済みの組み込みツールはありません。",
+      "builtinToolsLoadFailed": "組み込みツールの一覧を読み込めませんでした。保存済みの設定は変更されていません。",
       "officialToolsLabel": "プロバイダー公式ツール",
       "useOfficialTools": "OpenAI組み込みツールを使用",
       "officialToolsHint": "ユーザーがこのツールを選択したときに上流リクエストへ追加する JSON を設定します。同名の配列は順番に連結されます。",
@@ -101,6 +111,7 @@
       "researchEnabled": "ディープリサーチ",
       "systemPrompt": "システムプロンプト",
       "paramControls": "param_controls（JSON）",
+      "paramControlsHint": "モデル固有の選択肢を表示し、選択値をプロバイダーへのリクエストにマージします。",
       "extraParams": "追加のアップストリームパラメータ（JSON）",
       "extraParamsHint": "任意の JSON オブジェクトです。このモデルのアップストリームリクエストにマージされます。優先順位: 組み込みリクエストパラメータ、コントロールのマッピング、この値の順です。",
       "dim": "次元",
@@ -163,7 +174,27 @@
       "showIfKey": "表示条件（キー）· 省略可",
       "showIfValue": "等しい（値）"
     },
-    "skillsHint": "チェックした技能を提示;モデルが use_skill で随時読込。"
+    "skillsHint": "チェックした技能を提示;モデルが use_skill で随時読込。",
+    "builtinTools": {
+      "names": {
+        "web_search": "ウェブ検索",
+        "web_fetch": "ウェブページを読む",
+        "python_execute": "Python インタープリター",
+        "image_generate": "画像生成",
+        "search_knowledge_base": "ナレッジベース検索",
+        "use_skill": "スキルを使用",
+        "save_memory": "メモリに保存"
+      },
+      "descriptions": {
+        "web_search": "公開ウェブから最新情報を検索します。",
+        "web_fetch": "指定したウェブページの本文を読み取ります。",
+        "python_execute": "Python で分析、計算、ファイル生成を行います。",
+        "image_generate": "設定済みの画像モデルで画像を生成・編集します。",
+        "search_knowledge_base": "ユーザーが選択したナレッジベースを検索します。",
+        "use_skill": "割り当て済みスキルの完全な手順を必要時に読み込みます。",
+        "save_memory": "長期間有効なユーザー情報をメモリに保存します。"
+      }
+    }
   },
   "skills": {
     "title": "スキル",

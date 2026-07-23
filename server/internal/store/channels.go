@@ -190,7 +190,7 @@ func DeleteChannel(ctx context.Context, db *sql.DB, id string) error {
 // ListModels returns every model with optional kind filter (empty = all).
 // onlyEnabled restricts to enabled rows.
 func ListModels(ctx context.Context, db *sql.DB, kind string, onlyEnabled bool) ([]Model, error) {
-	q := `SELECT id, channel_id, kind, request_id, label, description, icon, fallback_channel_id, enabled, sort_order, tool_mode, vision, stream, research_enabled, fast, system_prompt, param_controls, extra_params, official_tools, tags, moderation_enabled, moderation_mode, price_input, price_output, price_cache_read, price_cache_write, price_per_image, currency, dim, image_timeout_sec, updated_at FROM models WHERE 1=1`
+	q := `SELECT id, channel_id, kind, request_id, label, description, icon, fallback_channel_id, enabled, sort_order, tool_mode, vision, stream, research_enabled, fast, system_prompt, param_controls, extra_params, official_tools, builtin_tools, tags, moderation_enabled, moderation_mode, price_input, price_output, price_cache_read, price_cache_write, price_per_image, currency, dim, image_timeout_sec, updated_at FROM models WHERE 1=1`
 	args := []any{}
 	if kind != "" {
 		q += " AND kind=?"
@@ -219,7 +219,7 @@ func ListModels(ctx context.Context, db *sql.DB, kind string, onlyEnabled bool) 
 // GetModel returns one row.
 func GetModel(ctx context.Context, db *sql.DB, id string) (*Model, error) {
 	row := db.QueryRowContext(ctx,
-		`SELECT id, channel_id, kind, request_id, label, description, icon, fallback_channel_id, enabled, sort_order, tool_mode, vision, stream, research_enabled, fast, system_prompt, param_controls, extra_params, official_tools, tags, moderation_enabled, moderation_mode, price_input, price_output, price_cache_read, price_cache_write, price_per_image, currency, dim, image_timeout_sec, updated_at FROM models WHERE id=?`, id)
+		`SELECT id, channel_id, kind, request_id, label, description, icon, fallback_channel_id, enabled, sort_order, tool_mode, vision, stream, research_enabled, fast, system_prompt, param_controls, extra_params, official_tools, builtin_tools, tags, moderation_enabled, moderation_mode, price_input, price_output, price_cache_read, price_cache_write, price_per_image, currency, dim, image_timeout_sec, updated_at FROM models WHERE id=?`, id)
 	m, err := scanModel(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -234,8 +234,9 @@ func scanModel(s scanner) (Model, error) {
 	var m Model
 	var en, vi, st, researchEn, fastI, modEn int
 	var paramControls, extraParams, officialTools, tags string
+	var builtinTools sql.NullString
 	if err := s.Scan(&m.ID, &m.ChannelID, &m.Kind, &m.RequestID, &m.Label, &m.Description, &m.Icon, &m.FallbackChannelID, &en, &m.SortOrder,
-		&m.ToolMode, &vi, &st, &researchEn, &fastI, &m.SystemPrompt, &paramControls, &extraParams, &officialTools, &tags, &modEn, &m.ModerationMode,
+		&m.ToolMode, &vi, &st, &researchEn, &fastI, &m.SystemPrompt, &paramControls, &extraParams, &officialTools, &builtinTools, &tags, &modEn, &m.ModerationMode,
 		&m.PriceInput, &m.PriceOutput, &m.PriceCacheRead, &m.PriceCacheWrite, &m.PricePerImage, &m.Currency, &m.Dim, &m.ImageTimeoutSec, &m.UpdatedAt); err != nil {
 		return m, err
 	}
@@ -250,6 +251,12 @@ func scanModel(s scanner) (Model, error) {
 	m.OfficialTools = json.RawMessage(orDefault(officialTools, "[]"))
 	if normalized, err := NormalizeOfficialTools(m.OfficialTools); err == nil {
 		m.OfficialTools = normalized
+	}
+	if builtinTools.Valid {
+		m.BuiltinTools = json.RawMessage(builtinTools.String)
+		if normalized, err := NormalizeBuiltinTools(m.BuiltinTools); err == nil {
+			m.BuiltinTools = normalized
+		}
 	}
 	m.Tags = json.RawMessage(orDefault(tags, "[]"))
 	if m.ModerationMode == "" {
@@ -298,6 +305,11 @@ func CreateModel(ctx context.Context, db *sql.DB, m Model) (*Model, error) {
 	} else {
 		m.OfficialTools = officialTools
 	}
+	if builtinTools, err := NormalizeBuiltinTools(m.BuiltinTools); err != nil {
+		return nil, err
+	} else {
+		m.BuiltinTools = builtinTools
+	}
 	if len(m.Tags) == 0 {
 		m.Tags = json.RawMessage("[]")
 	}
@@ -309,12 +321,12 @@ func CreateModel(ctx context.Context, db *sql.DB, m Model) (*Model, error) {
 	}
 	_, err := db.ExecContext(ctx, `INSERT INTO models(
 		id, channel_id, kind, request_id, label, description, icon, fallback_channel_id, enabled, sort_order,
-		tool_mode, vision, stream, research_enabled, system_prompt, param_controls, extra_params, official_tools, tags, moderation_enabled, moderation_mode,
+		tool_mode, vision, stream, research_enabled, system_prompt, param_controls, extra_params, official_tools, builtin_tools, tags, moderation_enabled, moderation_mode,
 		price_input, price_output, price_cache_read, price_cache_write, price_per_image, currency,
 		dim, image_timeout_sec, updated_at
-	) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		m.ID, m.ChannelID, m.Kind, m.RequestID, m.Label, m.Description, m.Icon, m.FallbackChannelID, boolInt(m.Enabled), m.SortOrder,
-		m.ToolMode, boolInt(m.Vision), boolInt(m.Stream), boolInt(m.ResearchEnabled), m.SystemPrompt, string(m.ParamControls), string(m.ExtraParams), string(m.OfficialTools), string(m.Tags), boolInt(m.ModerationEnabled), m.ModerationMode,
+		m.ToolMode, boolInt(m.Vision), boolInt(m.Stream), boolInt(m.ResearchEnabled), m.SystemPrompt, string(m.ParamControls), string(m.ExtraParams), string(m.OfficialTools), nullableRawJSON(m.BuiltinTools), string(m.Tags), boolInt(m.ModerationEnabled), m.ModerationMode,
 		m.PriceInput, m.PriceOutput, m.PriceCacheRead, m.PriceCacheWrite, m.PricePerImage, m.Currency,
 		m.Dim, m.ImageTimeoutSec, time.Now().Unix())
 	if err != nil {
@@ -328,7 +340,7 @@ func CreateModel(ctx context.Context, db *sql.DB, m Model) (*Model, error) {
 
 func GetModelByChannelRequestID(ctx context.Context, db *sql.DB, channelID, requestID string) (*Model, error) {
 	row := db.QueryRowContext(ctx,
-		`SELECT id, channel_id, kind, request_id, label, description, icon, fallback_channel_id, enabled, sort_order, tool_mode, vision, stream, research_enabled, fast, system_prompt, param_controls, extra_params, official_tools, tags, moderation_enabled, moderation_mode, price_input, price_output, price_cache_read, price_cache_write, price_per_image, currency, dim, image_timeout_sec, updated_at
+		`SELECT id, channel_id, kind, request_id, label, description, icon, fallback_channel_id, enabled, sort_order, tool_mode, vision, stream, research_enabled, fast, system_prompt, param_controls, extra_params, official_tools, builtin_tools, tags, moderation_enabled, moderation_mode, price_input, price_output, price_cache_read, price_cache_write, price_per_image, currency, dim, image_timeout_sec, updated_at
 		 FROM models WHERE channel_id=? AND lower(trim(request_id))=lower(trim(?)) LIMIT 1`,
 		channelID, requestID)
 	m, err := scanModel(row)
@@ -359,6 +371,11 @@ func UpdateModel(ctx context.Context, db *sql.DB, id string, m Model) (*Model, e
 	} else {
 		m.OfficialTools = officialTools
 	}
+	if builtinTools, err := NormalizeBuiltinTools(m.BuiltinTools); err != nil {
+		return nil, err
+	} else {
+		m.BuiltinTools = builtinTools
+	}
 	if len(m.Tags) == 0 {
 		m.Tags = json.RawMessage("[]")
 	}
@@ -370,12 +387,12 @@ func UpdateModel(ctx context.Context, db *sql.DB, id string, m Model) (*Model, e
 	}
 	_, err := db.ExecContext(ctx, `UPDATE models SET
 		channel_id=?, label=?, description=?, icon=?, fallback_channel_id=?, request_id=?, kind=?, enabled=?, sort_order=?,
-		tool_mode=?, vision=?, stream=?, research_enabled=?, system_prompt=?, param_controls=?, extra_params=?, official_tools=?, tags=?, moderation_enabled=?, moderation_mode=?,
+		tool_mode=?, vision=?, stream=?, research_enabled=?, system_prompt=?, param_controls=?, extra_params=?, official_tools=?, builtin_tools=?, tags=?, moderation_enabled=?, moderation_mode=?,
 		price_input=?, price_output=?, price_cache_read=?, price_cache_write=?, price_per_image=?, currency=?,
 		dim=?, image_timeout_sec=?, updated_at=?
 		WHERE id=?`,
 		m.ChannelID, m.Label, m.Description, m.Icon, m.FallbackChannelID, m.RequestID, m.Kind, boolInt(m.Enabled), m.SortOrder,
-		m.ToolMode, boolInt(m.Vision), boolInt(m.Stream), boolInt(m.ResearchEnabled), m.SystemPrompt, string(m.ParamControls), string(m.ExtraParams), string(m.OfficialTools), string(m.Tags), boolInt(m.ModerationEnabled), m.ModerationMode,
+		m.ToolMode, boolInt(m.Vision), boolInt(m.Stream), boolInt(m.ResearchEnabled), m.SystemPrompt, string(m.ParamControls), string(m.ExtraParams), string(m.OfficialTools), nullableRawJSON(m.BuiltinTools), string(m.Tags), boolInt(m.ModerationEnabled), m.ModerationMode,
 		m.PriceInput, m.PriceOutput, m.PriceCacheRead, m.PriceCacheWrite, m.PricePerImage, m.Currency,
 		m.Dim, m.ImageTimeoutSec, time.Now().Unix(), id)
 	if err != nil {
@@ -502,4 +519,14 @@ func boolInt(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+// nullableRawJSON keeps SQL NULL distinct from an explicit JSON array. The
+// models.builtin_tools policy relies on that distinction: NULL defaults to all
+// tools, while [] explicitly disables every local tool.
+func nullableRawJSON(raw json.RawMessage) any {
+	if len(raw) == 0 {
+		return nil
+	}
+	return string(raw)
 }

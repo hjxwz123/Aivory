@@ -152,7 +152,8 @@ func TestPythonExecuteResetsInputsAndStagesOnlyNonImages(t *testing.T) {
 	tool := &pythonExecuteTool{sandbox: fake, artifactDir: filepath.Join(root, "artifacts"), logger: log.New(io.Discard, "", 0)}
 	_, _, err = tool.Execute(ctx, []byte(`{"code":"print('done')"}`), &llm.ToolContext{
 		UserID: "u1", ConvID: "c1", MessageID: "msg1", ModelID: "m1", DB: db,
-		OnArtifact: func(ref llm.ArtifactRef) { outputArtifact = ref },
+		BuiltinTools: map[string]bool{"python_execute": true, "use_skill": true},
+		OnArtifact:   func(ref llm.ArtifactRef) { outputArtifact = ref },
 	})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -180,6 +181,22 @@ func TestPythonExecuteResetsInputsAndStagesOnlyNonImages(t *testing.T) {
 	}
 	if outputArtifact.MimeType != "image/png" {
 		t.Fatalf("Python image output was not preserved as an artifact: %+v", outputArtifact)
+	}
+
+	// The Python tool itself can remain enabled while use_skill is denied. In
+	// that policy, ordinary uploads are still staged but model-bound skill files
+	// must not cross into the sandbox.
+	deniedFake := &recordingSandbox{execResult: &sandbox.Result{Stdout: "done\n"}}
+	deniedTool := &pythonExecuteTool{sandbox: deniedFake, artifactDir: filepath.Join(root, "artifacts"), logger: log.New(io.Discard, "", 0)}
+	_, _, err = deniedTool.Execute(ctx, []byte(`{"code":"print('done')"}`), &llm.ToolContext{
+		UserID: "u1", ConvID: "c1", MessageID: "msg1", ModelID: "m1", DB: db,
+		BuiltinTools: map[string]bool{"python_execute": true},
+	})
+	if err != nil {
+		t.Fatalf("Execute with use_skill denied: %v", err)
+	}
+	if len(deniedFake.putFiles) != 1 || deniedFake.putFiles[0].path != "/workspace/uploads/rows.csv" {
+		t.Fatalf("use_skill denial staged model skill assets: %+v", deniedFake.putFiles)
 	}
 }
 

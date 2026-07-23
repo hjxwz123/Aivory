@@ -321,6 +321,12 @@ export interface ApiOfficialToolDefinition {
   request?: Record<string, unknown>
 }
 
+/** One platform-managed function-calling tool exposed to model administrators. */
+export interface ApiBuiltinTool {
+  name: string
+  description: string
+}
+
 export interface ApiModel {
   id: string
   channel_id: string
@@ -343,6 +349,10 @@ export interface ApiModel {
   fast?: boolean
   system_prompt: string
   param_controls: unknown
+  /** Platform function-calling allowlist. Admin responses use `null`/omitted
+   * for all registered tools (including future additions) and `[]` for none;
+   * public model responses always return the resolved effective `string[]`. */
+  builtin_tools?: string[] | null
   /** Optional chat-model JSON object merged into the upstream provider request. */
   extra_params?: Record<string, unknown>
   /** Provider-native tools offered by this model. Admin responses include each

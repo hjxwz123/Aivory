@@ -10,6 +10,7 @@ import type {
   ApiWorkspaceMember,
   ApiAnalytics,
   ApiAuthResponse,
+  ApiBuiltinTool,
   ApiChannel,
   ApiConversation,
   ApiConversationFile,
@@ -514,6 +515,7 @@ export const adminApi = {
 
   models: (kind?: 'chat' | 'image' | 'embedding') =>
     api<ApiModel[]>(`/admin/models${kind ? `?kind=${encodeURIComponent(kind)}` : ''}`),
+  builtinTools: () => api<ApiBuiltinTool[]>('/admin/tools/builtins'),
   createModel: (body: Partial<ApiModel>) => api<ApiModel>('/admin/models', { method: 'POST', body }),
   // Persist a new model order: `ids` is the full list in the desired order.
   reorderModels: (ids: string[]) =>

@@ -89,6 +89,7 @@ func Migrate(db *sql.DB) error {
 	schema := schemaSQL
 	addImageRef := `ALTER TABLE chunks ADD COLUMN image_ref TEXT`
 	addOfficialTools := `ALTER TABLE models ADD COLUMN official_tools TEXT NOT NULL DEFAULT '[]'`
+	addBuiltinTools := `ALTER TABLE models ADD COLUMN builtin_tools TEXT DEFAULT NULL`
 	addGroupID := `ALTER TABLE users ADD COLUMN group_id TEXT NOT NULL DEFAULT 'ug_free'`
 	addTotpSecret := `ALTER TABLE users ADD COLUMN totp_secret TEXT NOT NULL DEFAULT ''`
 	addTotpEnabled := `ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0`
@@ -192,6 +193,7 @@ func Migrate(db *sql.DB) error {
 		schema = schemaPGSQL
 		addImageRef = `ALTER TABLE chunks ADD COLUMN IF NOT EXISTS image_ref TEXT`
 		addOfficialTools = `ALTER TABLE models ADD COLUMN IF NOT EXISTS official_tools TEXT NOT NULL DEFAULT '[]'`
+		addBuiltinTools = `ALTER TABLE models ADD COLUMN IF NOT EXISTS builtin_tools TEXT DEFAULT NULL`
 		addGroupID = `ALTER TABLE users ADD COLUMN IF NOT EXISTS group_id TEXT NOT NULL DEFAULT 'ug_free'`
 		addTotpSecret = `ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_secret TEXT NOT NULL DEFAULT ''`
 		addTotpEnabled = `ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_enabled INTEGER NOT NULL DEFAULT 0`
@@ -267,7 +269,7 @@ func Migrate(db *sql.DB) error {
 	// duplicate-column error is expected and ignored; Postgres uses IF NOT
 	// EXISTS so it's a clean no-op.
 	for _, ddl := range []string{
-		addImageRef, addOfficialTools, addGroupID, addTotpSecret, addTotpEnabled, addFeedback, addGenMs,
+		addImageRef, addOfficialTools, addBuiltinTools, addGroupID, addTotpSecret, addTotpEnabled, addFeedback, addGenMs,
 		addSessUA, addSessIP, addSessLoc, addSessSeen,
 		addModEnabled, addModMode,
 		addResearchEnabled,
@@ -337,7 +339,7 @@ func Migrate(db *sql.DB) error {
 		"users":              {"group_id", "totp_secret", "totp_enabled", "group_expires_at", "previous_group_id", "password_set", "password_changed_at", "last_seen_at", "credits_permanent", "sort_order"},
 		"usage_logs":         {"credits", "workspace_id", "channel_id", "fallback", "status", "error", "request_method", "request_url", "request_headers", "request_body"},
 		"user_groups":        {"max_projects", "max_kbs", "credit_allowance", "credit_period_seconds", "max_workspaces", "is_public", "max_storage_mb"},
-		"models":             {"official_tools", "moderation_enabled", "moderation_mode", "tags", "extra_params", "image_timeout_sec", "research_enabled", "fallback_channel_id", "fast"},
+		"models":             {"official_tools", "builtin_tools", "moderation_enabled", "moderation_mode", "tags", "extra_params", "image_timeout_sec", "research_enabled", "fallback_channel_id", "fast"},
 		"refresh_tokens":     {"user_agent", "ip", "location", "last_seen"},
 		"conversations":      {"inline_source_conv", "inline_parent_id", "inline_quote", "workspace_id", "fast"},
 		"projects":           {"workspace_id"},
