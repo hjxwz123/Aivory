@@ -3,7 +3,7 @@
  * Compact embed used inside the Personalization settings page (replaces the
  * standalone /memory route). Reuses the `memory` i18n namespace.
  */
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Plus, Trash2, Pencil } from 'lucide-react'
 import { ApiError, memoriesApi } from '@/api'
@@ -25,8 +25,15 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from '@/hooks/use-toast'
+import { useAuth } from '@/store/auth'
+import { createKeyedResourceCache, resolveOwnedResourceView } from '@/lib/keyed-resource-cache'
 
 const STATUSES: ApiMemory['status'][] = ['ACTIVE', 'STALE', 'UNKNOWN_CURRENT', 'HISTORICAL_ONLY', 'QUERY_DEPENDENT']
+const EMPTY_MEMORIES: ApiMemory[] = []
+const memoriesCache = createKeyedResourceCache<ApiMemory[]>()
+useAuth.subscribe((state, previous) => {
+  if (state.user?.id !== previous.user?.id) memoriesCache.clear()
+})
 
 function badgeVariant(s: ApiMemory['status']) {
   switch (s) {
@@ -42,8 +49,11 @@ function badgeVariant(s: ApiMemory['status']) {
 
 export function MemoryManager() {
   const { t } = useTranslation(['memory', 'common'])
-  const [rows, setRows] = useState<ApiMemory[]>([])
-  const [loading, setLoading] = useState(true)
+  const userId = useAuth((s) => s.user?.id ?? '')
+  const cached = userId ? memoriesCache.peek(userId) : undefined
+  const [resourceUserId, setResourceUserId] = useState(userId)
+  const [rows, setRows] = useState<ApiMemory[]>(() => cached ?? [])
+  const [loading, setLoading] = useState(cached === undefined)
   const [editor, setEditor] = useState<{ open: boolean; row?: ApiMemory; draft: Partial<ApiMemory> }>({
     open: false,
     draft: { status: 'ACTIVE' },
@@ -53,21 +63,56 @@ export function MemoryManager() {
   const savingRef = useRef(false)
   const [deleting, setDeleting] = useState(false)
   const deletingRef = useRef(false)
+  const requestVersionRef = useRef(0)
 
-  async function load() {
-    setLoading(true)
+  const visible = resolveOwnedResourceView({
+    resourceUserId,
+    userId,
+    value: rows,
+    cached,
+    empty: EMPTY_MEMORIES,
+    loading,
+  })
+  const visibleRows = visible.value
+  const visibleLoading = visible.loading
+
+  const load = useCallback(async (background = false) => {
+    if (!userId) return
+    const requestVersion = ++requestVersionRef.current
+    if (!background) setLoading(true)
     try {
-      setRows(await memoriesApi.list())
+      const next = await memoriesCache.load(userId, () => memoriesApi.list(), true)
+      if (
+        requestVersionRef.current !== requestVersion ||
+        useAuth.getState().user?.id !== userId
+      ) return
+      setResourceUserId(userId)
+      setRows(next)
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : t('common:common.error'))
+      if (
+        !background &&
+        requestVersionRef.current === requestVersion &&
+        useAuth.getState().user?.id === userId
+      ) toast.error(e instanceof ApiError ? e.message : t('common:common.error'))
     } finally {
-      setLoading(false)
+      if (
+        requestVersionRef.current === requestVersion &&
+        useAuth.getState().user?.id === userId
+      ) setLoading(false)
     }
-  }
+  }, [t, userId])
+
   useEffect(() => {
-    void load()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+    const nextCached = userId ? memoriesCache.peek(userId) : undefined
+    requestVersionRef.current += 1
+    setResourceUserId(userId)
+    setRows(nextCached ?? [])
+    setLoading(Boolean(userId && nextCached === undefined))
+    if (userId) void load(nextCached !== undefined)
+    return () => {
+      requestVersionRef.current += 1
+    }
+  }, [load, userId])
 
   function openNew() {
     setEditor({ open: true, draft: { status: 'ACTIVE', memory_text: '', slot: '', value: '' } })
@@ -128,13 +173,13 @@ export function MemoryManager() {
         </Button>
       </div>
 
-      {loading ? (
+      {visibleLoading ? (
         <div className="text-sm text-[var(--color-fg-subtle)]">{t('common:common.loading')}</div>
-      ) : rows.length === 0 ? (
+      ) : visibleRows.length === 0 ? (
         <EmptyState title={t('memory:empty')} description={t('memory:emptyBody')} />
       ) : (
         <ul className="flex flex-col divide-y divide-[var(--color-divider)] rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)]">
-          {rows.map((m) => (
+          {visibleRows.map((m) => (
             <li key={m.id} className="grid grid-cols-[1fr_auto_auto] gap-2 items-center px-4 py-3">
               <div className="min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">

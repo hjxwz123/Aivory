@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
@@ -16,17 +17,24 @@ import (
 // (snapshotting the current active path), can revoke it, and the snapshot is
 // served to anyone with the token — no auth, no cost, no private fields.
 
-// publicShareMessage is the cost-stripped, identity-free message shape frozen
-// into a share snapshot and returned to public viewers. Attachments ride along
-// (id/filename/kind/url only — nothing sensitive) so shared conversations keep
-// their uploaded images/files; the viewer fetches the bytes through the
+// publicShareMessage is the cost-stripped message shape frozen into a share
+// snapshot and returned to public viewers. It carries only the display identity
+// needed by the transcript (author name/avatar or model label/icon), never user
+// ids, email addresses, provider details, or billing data. Attachments ride
+// along (id/filename/kind/url only — nothing sensitive) so shared conversations
+// keep their uploaded images/files; the viewer fetches the bytes through the
 // share-scoped public asset routes below.
 type publicShareMessage struct {
-	Role        string          `json:"role"`
-	Blocks      json.RawMessage `json:"blocks"`
-	Citations   json.RawMessage `json:"citations"`
-	Attachments json.RawMessage `json:"attachments"`
-	CreatedAt   int64           `json:"created_at"`
+	Role         string          `json:"role"`
+	Blocks       json.RawMessage `json:"blocks"`
+	Citations    json.RawMessage `json:"citations"`
+	Attachments  json.RawMessage `json:"attachments"`
+	CreatedAt    int64           `json:"created_at"`
+	AuthorName   string          `json:"author_name,omitempty"`
+	AuthorAvatar string          `json:"author_avatar,omitempty"`
+	ModelLabel   string          `json:"model_label,omitempty"`
+	ModelIcon    string          `json:"model_icon,omitempty"`
+	Fast         bool            `json:"fast,omitempty"`
 }
 
 // shareInfo is the owner-facing share descriptor (no snapshot payload).
@@ -50,6 +58,61 @@ func createShareHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
+
+	// Resolve display identities once before building the snapshot. Legacy user
+	// rows have no author_id; the conversation creator is their implied author.
+	// Likewise, very old assistant rows may rely on the conversation model id.
+	authorIDs := map[string]struct{}{}
+	modelIDs := map[string]struct{}{}
+	for _, m := range msgs {
+		switch m.Role {
+		case "user":
+			authorID := strings.TrimSpace(m.AuthorID)
+			if authorID == "" {
+				authorID = conv.UserID
+			}
+			if authorID != "" {
+				authorIDs[authorID] = struct{}{}
+			}
+		case "assistant":
+			if m.Fast {
+				continue
+			}
+			modelID := strings.TrimSpace(m.ModelID)
+			if modelID == "" {
+				modelID = strings.TrimSpace(conv.ModelID)
+			}
+			if modelID != "" {
+				modelIDs[modelID] = struct{}{}
+			}
+		}
+	}
+	authorIDList := make([]string, 0, len(authorIDs))
+	for id := range authorIDs {
+		authorIDList = append(authorIDList, id)
+	}
+	authors, err := store.UserIdentities(r.Context(), d.DB, authorIDList)
+	if err != nil {
+		writeError(w, 500, err)
+		return
+	}
+	type modelIdentity struct {
+		Label string
+		Icon  string
+	}
+	models := make(map[string]modelIdentity, len(modelIDs))
+	for id := range modelIDs {
+		model, modelErr := store.GetModel(r.Context(), d.DB, id)
+		if errors.Is(modelErr, store.ErrNotFound) {
+			continue
+		}
+		if modelErr != nil {
+			writeError(w, 500, modelErr)
+			return
+		}
+		models[id] = modelIdentity{Label: strings.TrimSpace(model.Label), Icon: strings.TrimSpace(model.Icon)}
+	}
+
 	snap := make([]publicShareMessage, 0, len(msgs))
 	for _, m := range msgs {
 		if m.Role != "user" && m.Role != "assistant" {
@@ -69,7 +132,40 @@ func createShareHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		if len(atts) == 0 {
 			atts = json.RawMessage("[]")
 		}
-		snap = append(snap, publicShareMessage{Role: m.Role, Blocks: blocks, Citations: cites, Attachments: atts, CreatedAt: m.CreatedAt})
+		sharedMessage := publicShareMessage{
+			Role:        m.Role,
+			Blocks:      blocks,
+			Citations:   cites,
+			Attachments: atts,
+			CreatedAt:   m.CreatedAt,
+		}
+		if m.Role == "user" {
+			authorID := strings.TrimSpace(m.AuthorID)
+			if authorID == "" {
+				authorID = conv.UserID
+			}
+			if identity, ok := authors[authorID]; ok {
+				sharedMessage.AuthorName = strings.TrimSpace(identity.Name)
+				sharedMessage.AuthorAvatar = strings.TrimSpace(identity.AvatarURL)
+			}
+		} else if m.Fast {
+			// Fast-mode model identity is deliberately hidden on every user-facing
+			// surface; the frontend renders the localized Fast label and generic icon.
+			sharedMessage.Fast = true
+		} else {
+			sharedMessage.ModelLabel = strings.TrimSpace(m.ModelLabel)
+			modelID := strings.TrimSpace(m.ModelID)
+			if modelID == "" {
+				modelID = strings.TrimSpace(conv.ModelID)
+			}
+			if identity, ok := models[modelID]; ok {
+				if sharedMessage.ModelLabel == "" {
+					sharedMessage.ModelLabel = identity.Label
+				}
+				sharedMessage.ModelIcon = identity.Icon
+			}
+		}
+		snap = append(snap, sharedMessage)
 	}
 	payload, _ := json.Marshal(snap)
 	share, err := store.CreateShare(r.Context(), d.DB, u.ID, conv.ID, conv.Title, payload)

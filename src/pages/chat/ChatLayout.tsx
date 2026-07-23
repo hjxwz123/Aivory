@@ -19,6 +19,7 @@ import { AnnouncementBar } from '@/components/announcement/announcement-bar'
 import { useHotkeys } from '@/hooks/use-hotkeys'
 import { Logo } from '@/components/brand/logo'
 import { RouteFade } from '@/components/ui/route-fade'
+import { chatRouteKeys } from '@/lib/chat-route'
 import { cn } from '@/lib/utils'
 
 export default function ChatLayout() {
@@ -37,7 +38,7 @@ export default function ChatLayout() {
   const { pathname } = useLocation()
   // Home ('/') and the chat thread ('/chat', '/chat/:id') are one section so
   // creating a conversation (/ → /chat/:id) doesn't flash a transition.
-  const section = pathname === '/' || pathname.startsWith('/chat') ? 'chat' : pathname.split('/')[1] || 'chat'
+  const routeKeys = chatRouteKeys(pathname)
   const isHome = pathname === '/'
 
   useEffect(() => syncSystem(), [syncSystem])
@@ -123,7 +124,7 @@ export default function ChatLayout() {
               a 44px gutter on the left so the floating expand toggle never
               sits on top of titles, breadcrumbs, or topbar content. */}
           <RouteFade
-            dep={`${section}:${activeWsId ?? 'personal'}`}
+            dep={`${routeKeys.section}:${activeWsId ?? 'personal'}`}
             className={cn(
               'flex-1 min-h-0 flex flex-col',
               isDesktop && collapsed && 'pl-11',
@@ -132,7 +133,13 @@ export default function ChatLayout() {
             {/* Content-scoped Suspense: switching section (chat/projects/kb/
                 settings/…) keeps the sidebar on screen and shows a panel loader
                 while the lazy page chunk loads, instead of blanking the whole app. */}
-            <Suspense fallback={<PanelFallback />}>
+            {/* Reset for every destination, including detail routes. React
+                Router schedules navigations as transitions; a previously
+                revealed, unkeyed boundary otherwise keeps the OLD page visible
+                until the next lazy chunk resolves. The fresh boundary commits
+                the target location + sidebar state immediately and confines
+                loading feedback to this content pane. */}
+            <Suspense key={routeKeys.content} fallback={<PanelFallback />}>
               <Outlet />
             </Suspense>
           </RouteFade>

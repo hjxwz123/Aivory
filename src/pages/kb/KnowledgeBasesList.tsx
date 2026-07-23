@@ -14,6 +14,7 @@ import { Field } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { EmptyState } from '@/components/ui/empty-state'
+import { Skeleton } from '@/components/ui/skeleton'
 import { ContentHeader } from '@/components/layout/content-header'
 import {
   DropdownMenu,
@@ -42,6 +43,7 @@ export default function KnowledgeBasesList() {
   const [rows, setRows] = useState<ApiKnowledgeBase[]>([])
   const [models, setModels] = useState<ApiModel[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
   const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState({ name: '', description: '', embedding_model_id: '' })
   const [creating, setCreating] = useState(false)
@@ -58,6 +60,7 @@ export default function KnowledgeBasesList() {
   async function load() {
     const epoch = ++loadEpochRef.current
     setLoading(true)
+    setLoadError('')
     try {
       const [kb, em] = await Promise.all([kbsApi.list(activeWorkspaceId()), modelsApi.listEmbedding()])
       if (epoch !== loadEpochRef.current) return // superseded by a space switch
@@ -68,7 +71,9 @@ export default function KnowledgeBasesList() {
       }
     } catch (e) {
       if (epoch !== loadEpochRef.current) return
-      toast.error(e instanceof ApiError ? e.message : t('common:common.error'))
+      const message = e instanceof ApiError ? e.message : t('common:common.error')
+      setLoadError(message)
+      toast.error(message)
     } finally {
       if (epoch === loadEpochRef.current) setLoading(false)
     }
@@ -145,7 +150,18 @@ export default function KnowledgeBasesList() {
 
         <section className="mt-10">
           {loading ? (
-            <div className="text-sm text-[var(--color-fg-subtle)]">{t('common:common.loading')}</div>
+            <KnowledgeBasesSkeleton label={t('common:common.loading')} />
+          ) : loadError ? (
+            <EmptyState
+              icon={<Database size={20} aria-hidden />}
+              title={t('common:common.error')}
+              description={loadError}
+              action={
+                <Button variant="secondary" onClick={() => void load()}>
+                  {t('common:actions.tryAgain', { defaultValue: 'Try again' })}
+                </Button>
+              }
+            />
           ) : rows.length === 0 ? (
             <EmptyState
               icon={<Database size={20} aria-hidden />}
@@ -280,6 +296,26 @@ export default function KnowledgeBasesList() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  )
+}
+
+function KnowledgeBasesSkeleton({ label }: { label: string }) {
+  return (
+    <div className="space-y-1" role="status" aria-label={label}>
+      {Array.from({ length: 4 }, (_, index) => (
+        <div key={index} className="grid grid-cols-[1fr_180px] items-start gap-x-6 px-4 py-7 sm:px-6">
+          <div className="space-y-3">
+            <Skeleton shape="line" className="h-5 w-2/5" />
+            <Skeleton shape="line" className="w-4/5" />
+          </div>
+          <div className="space-y-2">
+            <Skeleton shape="line" className="ml-auto w-20" />
+            <Skeleton shape="line" className="ml-auto w-28" />
+          </div>
+        </div>
+      ))}
+      <span className="sr-only">{label}</span>
     </div>
   )
 }

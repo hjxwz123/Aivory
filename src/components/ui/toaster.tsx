@@ -40,7 +40,7 @@ export function Toaster() {
         return (
           <ToastPrimitive.Root
             key={toast.id}
-            open
+            open={toast.open}
             duration={1000 * 60 * 60 * 24}
             onOpenChange={(o) => !o && dismiss(toast.id)}
             className={cn(
@@ -48,11 +48,11 @@ export function Toaster() {
               'flex items-start gap-3 w-[min(360px,calc(100vw-2rem))]',
               'rounded-[14px] bg-[var(--color-surface-raised)] border border-[var(--color-border)]',
               'p-3.5 shadow-[var(--shadow-lg)]',
-              'data-[state=open]:animate-[slide-up_220ms_var(--ease-out)]',
-              'data-[state=closed]:animate-[fade-out_140ms_var(--ease-in)]',
+              'data-[state=open]:animate-[slide-up_var(--duration-base)_var(--ease-out)]',
+              'data-[state=closed]:animate-[fade-out_var(--duration-fast)_var(--ease-in)]',
               'data-[swipe=move]:translate-x-[var(--radix-toast-swipe-move-x)]',
               'data-[swipe=cancel]:translate-x-0 data-[swipe=cancel]:transition-transform',
-              'data-[swipe=end]:animate-[fade-out_140ms_var(--ease-in)]',
+              'data-[swipe=end]:animate-[fade-out_var(--duration-fast)_var(--ease-in)]',
             )}
           >
             <span className={cn('inline-flex shrink-0 size-7 rounded-full items-center justify-center', accent)}>
