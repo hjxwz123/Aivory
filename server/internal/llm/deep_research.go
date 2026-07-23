@@ -320,6 +320,15 @@ type gapVerdict struct {
 type drQuerySpec struct{ subID, query string }
 
 func (rs *researcher) researchLoop(ctx context.Context, plan researchPlan) {
+	// Deep Research normally calls the registry directly rather than through the
+	// provider's function-call loop. Respect the model policy before creating any
+	// internal search work; synthesis can still return a no-evidence response.
+	if !rs.tc.AllowsBuiltinTool("web_search") {
+		for _, task := range rs.state.Tasks {
+			rs.setTaskStatus(task.ID, "done", 0)
+		}
+		return
+	}
 	// Map sub-question id -> its current queries for this round.
 	queriesByQ := map[string][]string{}
 	order := []string{}
@@ -412,27 +421,41 @@ func (rs *researcher) researchLoop(ctx context.Context, plan researchPlan) {
 		// carries its credibility grade (A-D) into the panel verdict and the
 		// writer's source headers (Phase 3: priority reading + graded citing).
 		if len(picked) > 0 {
-			fspecs := make([]toolCallSpec, len(picked))
-			for i, p := range picked {
-				in, _ := json.Marshal(map[string]any{"url": p.url})
-				fspecs[i] = toolCallSpec{ID: fmt.Sprintf("dr_f_%d_%d", round, i), Name: "web_fetch", Input: in}
-			}
-			fetchResults := rs.execToolsConcurrent(ctx, fspecs)
-			for i, p := range picked {
-				idx := rs.addSource(p.url, p.title, p.snippet) // registers citation + research_source(found)
-				r := fetchResults[i]
-				body := ""
-				status := "kept"
-				if r.Err != nil || strings.TrimSpace(r.Output) == "" {
-					status = "failed"
-				} else {
-					body = truncate(r.Output, drMaxBodyChars)
+			if rs.tc.AllowsBuiltinTool("web_fetch") {
+				fspecs := make([]toolCallSpec, len(picked))
+				for i, p := range picked {
+					in, _ := json.Marshal(map[string]any{"url": p.url})
+					fspecs[i] = toolCallSpec{ID: fmt.Sprintf("dr_f_%d_%d", round, i), Name: "web_fetch", Input: in}
 				}
-				grade := credibilityOf(p.url)
-				rs.updateSource(p.url, status, grade)
-				rs.evidence = append(rs.evidence, evidenceItem{
-					SubQ: questionByID[p.subID], URL: p.url, Title: p.title, Snippet: p.snippet, Body: body, Grade: grade, Index: idx,
-				})
+				fetchResults := rs.execToolsConcurrent(ctx, fspecs)
+				for i, p := range picked {
+					idx := rs.addSource(p.url, p.title, p.snippet) // registers citation + research_source(found)
+					r := fetchResults[i]
+					body := ""
+					status := "kept"
+					if r.Err != nil || strings.TrimSpace(r.Output) == "" {
+						status = "failed"
+					} else {
+						body = truncate(r.Output, drMaxBodyChars)
+					}
+					grade := credibilityOf(p.url)
+					rs.updateSource(p.url, status, grade)
+					rs.evidence = append(rs.evidence, evidenceItem{
+						SubQ: questionByID[p.subID], URL: p.url, Title: p.title, Snippet: p.snippet, Body: body, Grade: grade, Index: idx,
+					})
+				}
+			} else {
+				// Search snippets are still useful evidence when the model policy does
+				// not permit deep reads. Keep and grade them, but never synthesize a
+				// web_fetch call or pretend that a body was read.
+				for _, p := range picked {
+					idx := rs.addSource(p.url, p.title, p.snippet)
+					grade := credibilityOf(p.url)
+					rs.updateSource(p.url, "kept", grade)
+					rs.evidence = append(rs.evidence, evidenceItem{
+						SubQ: questionByID[p.subID], URL: p.url, Title: p.title, Snippet: p.snippet, Grade: grade, Index: idx,
+					})
+				}
 			}
 		}
 

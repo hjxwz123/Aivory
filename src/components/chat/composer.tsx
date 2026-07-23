@@ -39,7 +39,13 @@ import {
   Sparkles,
 } from 'lucide-react'
 import type { Attachment } from '@/types/chat'
-import { modelAllowsToolModeSelection, type ToolMode } from '@/lib/tool-mode'
+import {
+  normalizeToolModeForCapabilities,
+  TOOL_MODE_MENU_ORDER,
+  toolModeAvailable,
+  type ToolMode,
+  type ToolModeCapabilities,
+} from '@/lib/tool-mode'
 import { Tooltip } from '@/components/ui/tooltip'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { kbsApi, audioApi, conversationsApi } from '@/api/endpoints'
@@ -81,6 +87,7 @@ import {
   humanizeOfficialToolName,
   officialToolsForModel,
 } from '@/lib/official-tools'
+import { modelHasBuiltinTools, modelSupportsBuiltinTool } from '@/lib/builtin-tools'
 import type { ApiOfficialToolDefinition } from '@/api/types'
 
 interface ComposerProps {
@@ -389,9 +396,12 @@ interface ToolModeOption {
   label: string
   desc: string
   icon: ReactNode
+  available: boolean
 }
 
-/** Four row-style policies with an inline second level for provider-native tools. */
+type ToolModePanel = 'root' | 'modes' | 'official'
+
+/** A stable drill-down: root features -> four tool policies -> official tools. */
 function ToolModeSelector({
   label,
   description,
@@ -405,6 +415,9 @@ function ToolModeSelector({
   officialToolsLabel,
   officialToolsEmpty,
   menuOpen,
+  rootItems,
+  onPanelChange,
+  onAfter,
 }: {
   label: string
   description: string
@@ -418,32 +431,58 @@ function ToolModeSelector({
   officialToolsLabel: string
   officialToolsEmpty: string
   menuOpen: boolean
+  rootItems: FeatureItem[]
+  onPanelChange?: (panel: ToolModePanel) => void
+  onAfter?: () => void
 }) {
   const { t } = useTranslation('chat')
-  const [panel, setPanel] = useState<'modes' | 'official'>('modes')
+  const [panel, setPanel] = useState<ToolModePanel>('root')
   const previousPanelRef = useRef(panel)
+  const rootToolRef = useRef<HTMLButtonElement>(null)
+  const modesBackRef = useRef<HTMLButtonElement>(null)
   const officialBackRef = useRef<HTMLButtonElement>(null)
   const officialModeRef = useRef<HTMLButtonElement>(null)
+  const selectedOption = options.find((option) => option.value === value) ?? options[0]
 
   useEffect(() => {
-    if (researchActive) setPanel('modes')
+    if (researchActive) setPanel('root')
   }, [researchActive])
 
   useEffect(() => {
+    onPanelChange?.(panel)
+  }, [onPanelChange, panel])
+
+  useEffect(() => {
     if (!menuOpen) {
-      previousPanelRef.current = 'modes'
-      setPanel('modes')
+      previousPanelRef.current = 'root'
+      setPanel('root')
       return
     }
     if (previousPanelRef.current === panel) return
+    const previousPanel = previousPanelRef.current
     previousPanelRef.current = panel
-    if (panel === 'official') officialBackRef.current?.focus()
-    else officialModeRef.current?.focus()
+    if (panel === 'official') {
+      officialBackRef.current?.focus()
+    } else if (panel === 'modes') {
+      if (previousPanel === 'official') officialModeRef.current?.focus()
+      else modesBackRef.current?.focus()
+    } else {
+      rootToolRef.current?.focus()
+    }
   }, [menuOpen, panel])
 
   if (panel === 'official') {
     return (
-      <div className="px-1 py-1" role="group" aria-label={officialToolsLabel}>
+      <div
+        className="px-1 py-1"
+        role="group"
+        aria-label={officialToolsLabel}
+        onKeyDown={(event) => {
+          if (event.key !== 'ArrowLeft') return
+          event.preventDefault()
+          setPanel('modes')
+        }}
+      >
         <button
           ref={officialBackRef}
           type="button"
@@ -504,64 +543,117 @@ function ToolModeSelector({
     )
   }
 
+  if (panel === 'root') {
+    return (
+      <div className="flex flex-col gap-0.5">
+        {rootItems.map((item) => (
+          <FeatureRow key={item.key} item={item} onAfter={onAfter} />
+        ))}
+        <button
+          ref={rootToolRef}
+          type="button"
+          onClick={() => setPanel('modes')}
+          aria-label={`${label}: ${selectedOption?.label ?? ''}`}
+          className="flex w-full items-start gap-2.5 rounded-[10px] px-2.5 py-2 text-left interactive hover:bg-[var(--color-bg-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+        >
+          <span className="mt-0.5 inline-flex shrink-0 text-[var(--color-fg-muted)]" aria-hidden>
+            <Wrench size={16} />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="flex min-w-0 items-center gap-2">
+              <span className="truncate text-[13px] font-medium text-[var(--color-fg)]">{label}</span>
+              <span className="ml-auto shrink-0 text-[11.5px] text-[var(--color-fg-subtle)]">
+                {selectedOption?.label}
+              </span>
+            </span>
+            <span className="mt-0.5 block text-[11.5px] leading-snug text-[var(--color-fg-subtle)]">
+              {description}
+            </span>
+          </span>
+          <ChevronRight size={14} className="mt-1 shrink-0 text-[var(--color-fg-subtle)]" aria-hidden />
+        </button>
+      </div>
+    )
+  }
+
   return (
-    <div className="px-1 py-1" role="group" aria-label={label} aria-description={description}>
+    <div
+      className="px-1 py-1"
+      role="group"
+      aria-label={label}
+      aria-description={description}
+      onKeyDown={(event) => {
+        if (event.key !== 'ArrowLeft') return
+        event.preventDefault()
+        setPanel('root')
+      }}
+    >
+      <button
+        ref={modesBackRef}
+        type="button"
+        onClick={() => setPanel('root')}
+        className="flex min-h-9 w-full items-center gap-2 rounded-[8px] px-2 py-1.5 text-left text-[12.5px] font-medium text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+      >
+        <ArrowLeft size={14} aria-hidden />
+        <span className="truncate">{label}</span>
+        <span className="ml-auto text-[11px] text-[var(--color-fg-subtle)]">{selectedOption?.label}</span>
+      </button>
+      <div className="my-1 h-px bg-[var(--color-divider)]" aria-hidden />
       {options.map((option) => {
-          const checked = option.value === value
-          const opensSubmenu = option.value === 'official'
-          const disabled =
-            (researchActive && option.value !== 'enabled') ||
-            (opensSubmenu && officialTools.length === 0)
-          return (
-            <button
-              key={option.value}
-              ref={opensSubmenu ? officialModeRef : undefined}
-              type="button"
-              aria-pressed={checked}
-              aria-label={`${option.label}: ${option.desc}`}
-              disabled={disabled}
-              onClick={() => {
-                if (!checked) onChange(option.value)
-                if (opensSubmenu) setPanel('official')
-              }}
+        const checked = option.value === value
+        const opensSubmenu = option.value === 'official'
+        const disabled = (researchActive && option.value !== 'enabled') || !option.available
+        return (
+          <button
+            key={option.value}
+            ref={opensSubmenu ? officialModeRef : undefined}
+            type="button"
+            aria-pressed={checked}
+            aria-label={`${option.label}: ${option.desc}`}
+            disabled={disabled}
+            onClick={() => {
+              if (!checked) onChange(option.value)
+              if (opensSubmenu) setPanel('official')
+              else setPanel('root')
+            }}
+            className={cn(
+              'flex w-full items-start gap-2.5 rounded-[10px] px-2.5 py-2 text-left interactive',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+              disabled
+                ? 'cursor-not-allowed opacity-40'
+                : checked
+                  ? 'bg-[var(--color-secondary-soft)]'
+                  : 'hover:bg-[var(--color-bg-muted)]',
+            )}
+          >
+            <span
               className={cn(
-                'flex w-full items-start gap-2.5 rounded-[10px] px-2.5 py-2 text-left interactive',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-                disabled
-                  ? 'cursor-not-allowed opacity-40'
-                  : checked
-                    ? 'bg-[var(--color-secondary-soft)]'
-                    : 'hover:bg-[var(--color-bg-muted)]',
+                'mt-0.5 inline-flex shrink-0',
+                checked && !disabled ? 'text-[var(--color-secondary)]' : 'text-[var(--color-fg-muted)]',
               )}
+              aria-hidden
             >
+              {option.icon}
+            </span>
+            <span className="min-w-0 flex-1">
               <span
                 className={cn(
-                  'mt-0.5 inline-flex shrink-0',
-                  checked && !disabled ? 'text-[var(--color-secondary)]' : 'text-[var(--color-fg-muted)]',
+                  'block text-[13px] font-medium',
+                  checked && !disabled ? 'text-[var(--color-secondary)]' : 'text-[var(--color-fg)]',
                 )}
-                aria-hidden
               >
-                {option.icon}
+                {option.label}
               </span>
-              <span className="min-w-0 flex-1">
-                <span
-                  className={cn(
-                    'block text-[13px] font-medium',
-                    checked && !disabled ? 'text-[var(--color-secondary)]' : 'text-[var(--color-fg)]',
-                  )}
-                >
-                  {option.label}
-                </span>
-                <span className="mt-0.5 block text-[11.5px] leading-snug text-[var(--color-fg-subtle)]">{option.desc}</span>
-              </span>
-              {opensSubmenu ? (
-                <ChevronRight size={14} className="mt-1 shrink-0 text-[var(--color-fg-subtle)]" aria-hidden />
-              ) : checked && !disabled ? (
-                <Check size={14} className="mt-1 shrink-0 text-[var(--color-secondary)]" aria-hidden />
-              ) : null}
-            </button>
-          )
-        })}
+              <span className="mt-0.5 block text-[11.5px] leading-snug text-[var(--color-fg-subtle)]">{option.desc}</span>
+            </span>
+            {opensSubmenu ? (
+              <ChevronRight size={14} className="mt-1 shrink-0 text-[var(--color-fg-subtle)]" aria-hidden />
+            ) : checked && !disabled ? (
+              <Check size={14} className="mt-1 shrink-0 text-[var(--color-secondary)]" aria-hidden />
+            ) : null}
+          </button>
+        )
+      })}
     </div>
   )
 }
@@ -630,6 +722,7 @@ export function Composer({
   // stay large. 639px = Tailwind's `sm` breakpoint minus 1.
   const isMobile = useMediaQuery('(max-width: 639px)')
   const [moreOpen, setMoreOpen] = useState(false)
+  const [toolModePanel, setToolModePanel] = useState<ToolModePanel>('root')
   // Turn-feature menu (the "+" left of attach): research / verify / tool policy
   // / web-search in one shared mobile/desktop surface.
   const [featuresOpen, setFeaturesOpen] = useState(false)
@@ -1035,8 +1128,14 @@ export function Composer({
   const groupResearchEnabled = useAuth(
     (s) => s.user?.role === 'admin' || Boolean(s.user?.features?.includes('research')),
   )
+  const builtinToolsAvailable = !isImageMode && modelHasBuiltinTools(currentModel)
+  const supportsWebSearch = !isImageMode && modelSupportsBuiltinTool(currentModel, 'web_search')
+  const toolModeCapabilities = useMemo<ToolModeCapabilities>(
+    () => ({ builtin: builtinToolsAvailable, official: officialTools.length > 0 }),
+    [builtinToolsAvailable, officialTools.length],
+  )
   const modelResearchEnabled = currentModel?.research_enabled ?? true
-  const researchEnabled = groupResearchEnabled && modelResearchEnabled
+  const researchEnabled = groupResearchEnabled && modelResearchEnabled && supportsWebSearch
   // §verify: only offer the toggle when an admin has configured an auditor model.
   const verifyAvailable = useModels((s) => s.verifyAvailable)
   const paramControls = currentModel?.param_controls
@@ -1057,25 +1156,22 @@ export function Composer({
   const visibleParamControls = effectiveFast ? undefined : paramControls
   const effectiveMode = !effectiveFast && !isImageMode && researchEnabled ? mode : 'default'
   const effectiveVerify = !effectiveFast && verify && verifyAvailable && !isImageMode
-  const modelAllowsToolSelection = modelAllowsToolModeSelection(currentModel?.tool_mode)
-  const hasSelectableToolPolicy = modelAllowsToolSelection || officialTools.length > 0
-  const availableToolMode = toolMode === 'official' && officialTools.length === 0 ? 'auto' : toolMode
+  const availableToolMode = normalizeToolModeForCapabilities(toolMode, toolModeCapabilities)
   // Fast and image turns retain the prior fixed enabled behavior. Deep Research
-  // also requires enabled mode and bypasses the automatic task classifier. A
-  // model configured with tool_mode=none owns that policy at the model layer;
-  // enabled here avoids applying a hidden user override or forced web search.
+  // also requires enabled mode and bypasses the automatic task classifier.
   const effectiveToolMode: ToolMode =
-    effectiveFast || isImageMode || effectiveMode === 'deep-research' || !hasSelectableToolPolicy
+    effectiveFast || isImageMode || effectiveMode === 'deep-research'
       ? 'enabled'
       : availableToolMode
-  const effectiveWebSearch = effectiveToolMode === 'disabled' && forceWebSearch
+  const effectiveWebSearch = effectiveToolMode === 'disabled' && supportsWebSearch && forceWebSearch
   const effectiveOfficialToolNames = effectiveToolMode === 'official' ? officialToolNames : undefined
 
-  // A global mode can outlive a model switch. Never leave the composer armed to
-  // official mode when the newly selected model offers no provider-native tools.
+  // A global mode can outlive a model switch. Concrete modes unavailable on the
+  // new model always return to the product default instead of silently arming a
+  // different tool family.
   useEffect(() => {
-    if (currentModel && toolMode === 'official' && officialTools.length === 0) setToolMode('auto')
-  }, [currentModel, officialTools.length, setToolMode, toolMode])
+    if (currentModel && availableToolMode !== toolMode) setToolMode('auto')
+  }, [availableToolMode, currentModel, setToolMode, toolMode])
   const handleParamValuesChange = useCallback(
     (next: Record<string, unknown>) => {
       setCachedParamValues(modelId, next)
@@ -1588,7 +1684,7 @@ export function Composer({
   // any other policy updates both values atomically in the preference store.
   const researchActive = effectiveMode === 'deep-research'
   const featureItems: FeatureItem[] = []
-  const showToolModeSelector = !isImageMode && !effectiveFast && hasSelectableToolPolicy
+  const showToolModeSelector = !isImageMode && !effectiveFast
   if (showToolModeSelector) {
     if (researchEnabled) {
       featureItems.push({
@@ -1615,45 +1711,50 @@ export function Composer({
   }
 
   const toolModeLabel = t('composer.features.toolMode', { defaultValue: 'Tool use' })
-  const toolModeOptions: readonly ToolModeOption[] = [
-    {
-      value: 'enabled',
-      label: t('composer.features.toolModeEnabled', { defaultValue: 'Tool use' }),
-      desc: t('composer.features.toolModeEnabledDesc', {
-        defaultValue: 'Make the system tools configured for this model available.',
-      }),
-      icon: <Wrench size={16} aria-hidden />,
-    },
-    {
+  const toolModeOptionsByValue: Record<ToolMode, ToolModeOption> = {
+    auto: {
       value: 'auto',
       label: t('composer.features.toolModeAuto', { defaultValue: 'Auto' }),
       desc: t('composer.features.toolModeAutoDesc', {
         defaultValue: 'Decide automatically whether this request needs tools.',
       }),
       icon: <Sparkles size={16} aria-hidden />,
+      available: true,
     },
-    {
-      value: 'disabled',
-      label: t('composer.features.toolModeDisabled', { defaultValue: 'Disabled' }),
-      desc: t('composer.features.toolModeDisabledDesc', {
-        defaultValue: 'Answer directly without calling tools.',
-      }),
-      icon: <Ban size={16} aria-hidden />,
-    },
-    {
+    official: {
       value: 'official',
       label: t('composer.features.toolModeOfficial', { defaultValue: 'Official' }),
       desc: t('composer.features.toolModeOfficialDesc', {
         defaultValue: 'Use only the provider-native tools you select.',
       }),
       icon: <BadgeCheck size={16} aria-hidden />,
+      available: toolModeAvailable('official', toolModeCapabilities),
     },
-  ]
+    disabled: {
+      value: 'disabled',
+      label: t('composer.features.toolModeDisabled', { defaultValue: 'Off' }),
+      desc: t('composer.features.toolModeDisabledDesc', {
+        defaultValue: 'Answer directly without calling tools.',
+      }),
+      icon: <Ban size={16} aria-hidden />,
+      available: true,
+    },
+    enabled: {
+      value: 'enabled',
+      label: t('composer.features.toolModeEnabled', { defaultValue: 'Built-in' }),
+      desc: t('composer.features.toolModeEnabledDesc', {
+        defaultValue: 'Use the built-in tools enabled for this model by the administrator.',
+      }),
+      icon: <Wrench size={16} aria-hidden />,
+      available: toolModeAvailable('enabled', toolModeCapabilities),
+    },
+  }
+  const toolModeOptions = TOOL_MODE_MENU_ORDER.map((value) => toolModeOptionsByValue[value])
   const autoToolModeLabel = toolModeOptions.find((option) => option.value === 'auto')?.label ?? 'Auto'
-  const selectedToolMode = toolModeOptions.find((option) => option.value === toolMode) ?? toolModeOptions[1]
+  const selectedToolMode = toolModeOptions.find((option) => option.value === availableToolMode) ?? toolModeOptions[0]
 
   const webSearchItem: FeatureItem | undefined =
-    showToolModeSelector && toolMode === 'disabled'
+    showToolModeSelector && supportsWebSearch && availableToolMode === 'disabled'
       ? {
           key: 'web-search',
           icon: <Globe size={16} aria-hidden />,
@@ -1671,13 +1772,13 @@ export function Composer({
   // Auto is the neutral default and should not permanently light up the "+"
   // trigger. Explicit disabled/enabled choices are visible as removable overrides.
   const toolModeOverride: FeatureItem | undefined =
-    showToolModeSelector && toolMode !== 'auto'
+    showToolModeSelector && availableToolMode !== 'auto'
       ? {
-          key: `tool-mode-${toolMode}`,
+          key: `tool-mode-${availableToolMode}`,
           icon:
-            toolMode === 'disabled' ? (
+            availableToolMode === 'disabled' ? (
               <Ban size={16} aria-hidden />
-            ) : toolMode === 'official' ? (
+            ) : availableToolMode === 'official' ? (
               <BadgeCheck size={16} aria-hidden />
             ) : (
               <Wrench size={16} aria-hidden />
@@ -1693,16 +1794,13 @@ export function Composer({
 
   const featureList = (onAfter?: () => void) => (
     <div className="flex flex-col gap-0.5">
-      {featureItems.map((it) => (
-        <FeatureRow key={it.key} item={it} onAfter={onAfter} />
-      ))}
       {showToolModeSelector ? (
         <ToolModeSelector
           label={toolModeLabel}
           description={t('composer.features.toolModeDesc', {
             defaultValue: 'Choose automatic, disabled, system-tool, or provider-native tool use.',
           })}
-          value={toolMode}
+          value={availableToolMode}
           options={toolModeOptions}
           onChange={setToolMode}
           researchActive={researchActive}
@@ -1714,9 +1812,13 @@ export function Composer({
             defaultValue: 'This model has no official tools configured.',
           })}
           menuOpen={isMobile ? moreOpen : featuresOpen}
+          rootItems={[...featureItems, ...(webSearchItem ? [webSearchItem] : [])]}
+          onPanelChange={setToolModePanel}
+          onAfter={onAfter}
         />
-      ) : null}
-      {webSearchItem ? <FeatureRow item={webSearchItem} onAfter={onAfter} /> : null}
+      ) : (
+        featureItems.map((item) => <FeatureRow key={item.key} item={item} onAfter={onAfter} />)
+      )}
     </div>
   )
 
@@ -2131,6 +2233,7 @@ export function Composer({
             open={moreOpen}
             onOpenChange={(o) => {
               setMoreOpen(o)
+              if (!o) setToolModePanel('root')
               if (o && onKBChange) void loadKBList()
             }}
           >
@@ -2165,49 +2268,53 @@ export function Composer({
                 maxHeight: 'min(62dvh, var(--radix-popover-content-available-height), calc(100dvh - var(--safe-top) - var(--safe-bottom) - 1.5rem))',
               }}
             >
-              <button
-                type="button"
-                onClick={() => {
-                  setMoreOpen(false)
-                  fileRef.current?.click()
-                }}
-                className="flex w-full items-center gap-3 rounded-[10px] px-3 py-2.5 text-left text-[15px] text-[var(--color-fg)] hover:bg-[var(--color-bg-muted)] active:bg-[var(--color-bg-muted)]"
-              >
-                <Paperclip size={18} className="shrink-0 text-[var(--color-fg-muted)]" aria-hidden />
-                {t('composer.attach')}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setMoreOpen(false)
-                  openNewFormula()
-                }}
-                className="flex w-full items-center gap-3 rounded-[10px] px-3 py-2.5 text-left text-[15px] text-[var(--color-fg)] hover:bg-[var(--color-bg-muted)] active:bg-[var(--color-bg-muted)]"
-              >
-                <Sigma size={18} className="shrink-0 text-[var(--color-fg-muted)]" aria-hidden />
-                {t('composer.formula.action')}
-              </button>
-              {canAttachImages ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMoreOpen(false)
-                    imageFileRef.current?.click()
-                  }}
-                  className="flex w-full items-center gap-3 rounded-[10px] px-3 py-2.5 text-left text-[15px] text-[var(--color-fg)] hover:bg-[var(--color-bg-muted)] active:bg-[var(--color-bg-muted)]"
-                >
-                  <ImageIcon size={18} className="shrink-0 text-[var(--color-fg-muted)]" aria-hidden />
-                  {t('composer.addImage')}
-                </button>
+              {toolModePanel === 'root' ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMoreOpen(false)
+                      fileRef.current?.click()
+                    }}
+                    className="flex w-full items-center gap-3 rounded-[10px] px-3 py-2.5 text-left text-[15px] text-[var(--color-fg)] hover:bg-[var(--color-bg-muted)] active:bg-[var(--color-bg-muted)]"
+                  >
+                    <Paperclip size={18} className="shrink-0 text-[var(--color-fg-muted)]" aria-hidden />
+                    {t('composer.attach')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMoreOpen(false)
+                      openNewFormula()
+                    }}
+                    className="flex w-full items-center gap-3 rounded-[10px] px-3 py-2.5 text-left text-[15px] text-[var(--color-fg)] hover:bg-[var(--color-bg-muted)] active:bg-[var(--color-bg-muted)]"
+                  >
+                    <Sigma size={18} className="shrink-0 text-[var(--color-fg-muted)]" aria-hidden />
+                    {t('composer.formula.action')}
+                  </button>
+                  {canAttachImages ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMoreOpen(false)
+                        imageFileRef.current?.click()
+                      }}
+                      className="flex w-full items-center gap-3 rounded-[10px] px-3 py-2.5 text-left text-[15px] text-[var(--color-fg)] hover:bg-[var(--color-bg-muted)] active:bg-[var(--color-bg-muted)]"
+                    >
+                      <ImageIcon size={18} className="shrink-0 text-[var(--color-fg-muted)]" aria-hidden />
+                      {t('composer.addImage')}
+                    </button>
+                  ) : null}
+                </>
               ) : null}
               {featureMenuAvailable ? (
                 <>
-                  <div className="my-1 h-px bg-[var(--color-divider)]" aria-hidden />
+                  {toolModePanel === 'root' ? <div className="my-1 h-px bg-[var(--color-divider)]" aria-hidden /> : null}
                   {featureList()}
                 </>
               ) : null}
 
-              {onKBChange && !isImageMode ? (
+              {toolModePanel === 'root' && onKBChange && !isImageMode ? (
                 <>
                   <div className="my-1 h-px bg-[var(--color-divider)]" aria-hidden />
                   <p className="px-2.5 pb-1 pt-0.5 text-[11px] font-medium uppercase tracking-wider text-[var(--color-fg-subtle)]">
@@ -2217,7 +2324,7 @@ export function Composer({
                 </>
               ) : null}
 
-              {visibleParamControls ? (
+              {toolModePanel === 'root' && visibleParamControls ? (
                 <>
                   <div className="my-1 h-px bg-[var(--color-divider)]" aria-hidden />
                   <div className="px-1.5 py-1">

@@ -155,6 +155,10 @@ type Model struct {
 	// entry carries name/icon/request; legacy string arrays remain readable.
 	// Empty means this model exposes no provider-hosted tools.
 	OfficialTools json.RawMessage `json:"official_tools"`
+	// BuiltinTools is the optional allowlist for Aivory's locally-executed tools.
+	// nil/null means the backwards-compatible default (all registered tools);
+	// an explicit [] means no local tools. Only chat orchestration consumes it.
+	BuiltinTools json.RawMessage `json:"builtin_tools"`
 	// Tags is a JSON array of model_tags ids assigned to this model — used by the
 	// model picker's tag filter (§ model tags). Empty = untagged.
 	Tags json.RawMessage `json:"tags"`

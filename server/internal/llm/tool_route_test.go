@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"aivory/server/internal/rag"
 	"aivory/server/internal/store"
 )
 
@@ -224,14 +225,16 @@ func TestExplicitToolModesSkipTaskClassifier(t *testing.T) {
 
 func TestOfficialToolModeFiltersSelectionAndDisablesSystemTools(t *testing.T) {
 	for _, tc := range []struct {
-		name     string
-		selected []string
-		want     []string
+		name         string
+		selected     []string
+		want         []string
+		wantOfficial bool
 	}{
 		{
-			name:     "configured subset in model order",
-			selected: []string{"second", "missing", "first", "second"},
-			want:     []string{"first", "second"},
+			name:         "configured subset in model order",
+			selected:     []string{"second", "missing", "first", "second"},
+			want:         []string{"first", "second"},
+			wantOfficial: true,
 		},
 		{name: "empty selection means no tools"},
 	} {
@@ -256,8 +259,8 @@ func TestOfficialToolModeFiltersSelectionAndDisablesSystemTools(t *testing.T) {
 				t.Fatalf("main requests = %d, want 1", len(provider.mainRequests))
 			}
 			request := provider.mainRequests[0]
-			if !request.ToolModeOfficial {
-				t.Fatal("provider request lost official-mode state")
+			if request.ToolModeOfficial != tc.wantOfficial {
+				t.Fatalf("provider official mode = %v, want %v", request.ToolModeOfficial, tc.wantOfficial)
 			}
 			if len(request.Tools) != 0 {
 				t.Fatalf("official mode exposed system tools: %+v", request.Tools)
@@ -273,7 +276,118 @@ func TestOfficialToolModeFiltersSelectionAndDisablesSystemTools(t *testing.T) {
 					t.Fatalf("request %d does not match %q: %s", index, name, request.OfficialToolRequests[index])
 				}
 			}
+			if !tc.wantOfficial && (request.SystemPromptOptions == nil || request.SystemPromptOptions.ToolMode != "none") {
+				t.Fatalf("empty official selection did not enter no-tools prompt pipeline: %+v", request.SystemPromptOptions)
+			}
 		})
+	}
+}
+
+func TestEmptyEffectiveOfficialSelectionUsesUnifiedNoToolsPipeline(t *testing.T) {
+	ctx := context.Background()
+	orchestrator, provider, model, conv, _, db := setupToolRouteTest(t)
+	if _, err := db.Exec(`UPDATE models SET official_tools=? WHERE id=?`, `[
+		{"name":"configured","icon":"search","request":{"tools":[{"type":"hosted-search"}]}}
+	]`, model.ID); err != nil {
+		t.Fatalf("configure official tools: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE conversations SET rag_mode='tool' WHERE id=?`, conv.ID); err != nil {
+		t.Fatalf("set tool RAG mode: %v", err)
+	}
+
+	doc, err := store.CreateDocument(ctx, db, store.Document{
+		ConversationID: conv.ID,
+		Filename:       "official-empty-context.txt",
+		MimeType:       "text/plain",
+		SizeBytes:      32,
+		Status:         "ready",
+	})
+	if err != nil {
+		t.Fatalf("create RAG document: %v", err)
+	}
+	const ragText = "official-empty-rag-fallback-marker"
+	if err := store.CreateChunk(ctx, db, doc.ID, "", conv.ID, 0, ragText, ""); err != nil {
+		t.Fatalf("create RAG chunk: %v", err)
+	}
+	orchestrator.rag = rag.New(db, nil, log.New(io.Discard, "", 0))
+
+	skill, err := store.CreateSkill(ctx, db, store.Skill{
+		ID:           "sk-official-empty",
+		Name:         "official-empty-secret-skill",
+		Description:  "must not be advertised on a no-tools turn",
+		Instructions: "official-empty-secret-instructions",
+		Enabled:      true,
+	})
+	if err != nil {
+		t.Fatalf("create skill: %v", err)
+	}
+	if err := store.SetSkillsForModel(ctx, db, model.ID, []string{skill.ID}); err != nil {
+		t.Fatalf("bind skill: %v", err)
+	}
+
+	previousUserBlocks, _ := json.Marshal([]UnifiedBlock{{Kind: "text", Text: "old question"}})
+	previousUser, err := store.CreateMessage(ctx, db, store.Message{
+		ConversationID: conv.ID,
+		Role:           "user",
+		Provider:       "openai",
+		ModelID:        model.ID,
+		Blocks:         previousUserBlocks,
+	})
+	if err != nil {
+		t.Fatalf("create previous user message: %v", err)
+	}
+	previousAssistantBlocks, _ := json.Marshal([]UnifiedBlock{
+		{Kind: "tool_call", ToolName: "legacy_disallowed_tool", ToolID: "legacy-call"},
+		{Kind: "tool_output", ToolID: "legacy-call", Text: "legacy-tool-output"},
+		{Kind: "text", Text: "ordinary-prior-answer"},
+	})
+	if _, err := store.CreateMessage(ctx, db, store.Message{
+		ConversationID: conv.ID,
+		ParentID:       previousUser.ID,
+		Role:           "assistant",
+		Provider:       "openai",
+		ModelID:        model.ID,
+		Blocks:         previousAssistantBlocks,
+		Raw:            json.RawMessage(`[{"type":"function_call","name":"legacy_disallowed_tool"}]`),
+	}); err != nil {
+		t.Fatalf("create previous assistant message: %v", err)
+	}
+
+	// "stale" is non-empty on the wire but does not survive the model-definition
+	// intersection, so it must behave exactly like an explicit empty selection.
+	runToolRouteTurn(t, orchestrator, model.ID, conv.ID, RunRequest{
+		ToolMode:          ToolModeOfficial,
+		OfficialToolNames: []string{"stale"},
+		UserText:          "Use the attached context",
+	})
+	if len(provider.mainRequests) != 1 {
+		t.Fatalf("main requests = %d, want 1", len(provider.mainRequests))
+	}
+	request := provider.mainRequests[0]
+	if request.ToolModeOfficial || request.ToolModePrompt || len(request.Tools) != 0 ||
+		len(request.OfficialToolNames) != 0 || len(request.OfficialToolRequests) != 0 {
+		t.Fatalf("empty effective official selection exposed tools: official=%v prompt=%v local=%+v names=%v requests=%s",
+			request.ToolModeOfficial, request.ToolModePrompt, request.Tools, request.OfficialToolNames, request.OfficialToolRequests)
+	}
+	if request.SystemPromptOptions == nil || request.SystemPromptOptions.ToolMode != "none" || request.SystemPromptOptions.SkillsAllowed {
+		t.Fatalf("empty effective official selection did not use no-tools prompt options: %+v", request.SystemPromptOptions)
+	}
+	for _, forbidden := range []string{"official-empty-secret-skill", "official-empty-secret-instructions"} {
+		if strings.Contains(request.SystemPrompt, forbidden) {
+			t.Fatalf("no-tools prompt leaked skill %q:\n%s", forbidden, request.SystemPrompt)
+		}
+	}
+	if len(request.RAGSnippets) != 1 || !strings.Contains(request.RAGSnippets[0].Snippet, ragText) {
+		t.Fatalf("rag_mode=tool did not fall back to inline retrieval: %+v", request.RAGSnippets)
+	}
+	historyJSON, _ := json.Marshal(request.History)
+	for _, forbidden := range []string{"legacy_disallowed_tool", "legacy-tool-output"} {
+		if strings.Contains(string(historyJSON), forbidden) {
+			t.Fatalf("no-tools history retained %q: %s", forbidden, historyJSON)
+		}
+	}
+	if !strings.Contains(string(historyJSON), "ordinary-prior-answer") || !strings.Contains(string(historyJSON), ragText) {
+		t.Fatalf("no-tools history lost ordinary answer or inline RAG context: %s", historyJSON)
 	}
 }
 

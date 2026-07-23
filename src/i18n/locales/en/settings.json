@@ -54,8 +54,8 @@
         "body": "Answer directly without making tools available to the response model."
       },
       "enabled": {
-        "label": "Tool use",
-        "body": "Make the system tools configured for the selected model available."
+        "label": "Built-in",
+        "body": "Use the built-in tools enabled for the selected model by the administrator."
       },
       "official": {
         "label": "Official",

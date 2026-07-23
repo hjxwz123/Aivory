@@ -74,7 +74,8 @@
       "pricing": "計費",
       "permissions": "許可權",
       "tags": "標籤",
-      "skills": "技能"
+      "skills": "技能",
+      "imageBehaviour": "圖片生成"
     },
     "fields": {
       "channel": "渠道",
@@ -87,6 +88,15 @@
       "description": "簡介(一行)",
       "icon": "圖示",
       "toolMode": "工具模式",
+      "builtinToolsLabel": "內建工具",
+      "builtinToolsHint": "限制此模型透過工具呼叫可使用的平台工具。「預設全部」也會自動包含日後新增的工具。",
+      "builtinToolsDefaultAll": "預設全部",
+      "builtinToolsCustom": "自訂",
+      "builtinToolsSelected": "已啟用 {{selected}}/{{total}}",
+      "builtinToolsSelectAll": "全選",
+      "builtinToolsClear": "清空",
+      "builtinToolsEmpty": "暫無已註冊的內建工具。",
+      "builtinToolsLoadFailed": "無法載入內建工具清單，已儲存的設定未被變更。",
       "officialToolsLabel": "官方工具",
       "useOfficialTools": "使用 OpenAI 官方工具",
       "officialToolsHint": "設定使用者選擇此工具時附加至上游請求的 JSON；同名陣列會依序附加。",
@@ -101,6 +111,7 @@
       "researchEnabled": "深度研究",
       "systemPrompt": "系統提示詞",
       "paramControls": "param_controls (JSON)",
+      "paramControlsHint": "設定模型專屬選項，並將使用者所選值映射合併到上游請求。",
       "extraParams": "額外上游參數（JSON）",
       "extraParamsHint": "可選 JSON 物件，將合併到此模型的上游請求中。優先順序：內建請求參數高於參數控制項映射，參數控制項映射高於此處的值。",
       "dim": "向量維度",
@@ -163,7 +174,27 @@
       "showIfKey": "僅當（鍵）顯示 · 可選",
       "showIfValue": "等於（值）"
     },
-    "skillsHint": "勾選的技能進入系統提示;模型用 use_skill 按需載入。"
+    "skillsHint": "勾選的技能進入系統提示;模型用 use_skill 按需載入。",
+    "builtinTools": {
+      "names": {
+        "web_search": "網頁搜尋",
+        "web_fetch": "網頁讀取",
+        "python_execute": "Python 直譯器",
+        "image_generate": "圖片生成",
+        "search_knowledge_base": "知識庫檢索",
+        "use_skill": "技能呼叫",
+        "save_memory": "儲存記憶"
+      },
+      "descriptions": {
+        "web_search": "搜尋公開網頁中的最新資訊。",
+        "web_fetch": "讀取指定網頁的主要內容。",
+        "python_execute": "執行 Python，完成分析、計算及檔案生成。",
+        "image_generate": "使用已設定的圖片模型生成或編輯圖片。",
+        "search_knowledge_base": "檢索使用者目前選取的知識庫。",
+        "use_skill": "按需載入已綁定技能的完整說明。",
+        "save_memory": "將長期有效的使用者資訊儲存到記憶。"
+      }
+    }
   },
   "skills": {
     "title": "技能",

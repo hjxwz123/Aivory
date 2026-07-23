@@ -38,6 +38,7 @@ func TestComposeSystemPromptDocGenSkill(t *testing.T) {
 		ToolMode:           "native",
 		ToolNames:          []string{"python_execute", "use_skill"},
 		SkillToolAvailable: true,
+		SkillsAllowed:      true,
 	})
 	if strings.Contains(s, "## Document-generation recipes") {
 		t.Error("recipes must not be inlined when use_skill can load them on demand")
@@ -48,8 +49,9 @@ func TestComposeSystemPromptDocGenSkill(t *testing.T) {
 
 	// No use_skill (prompt mode) → recipes inlined, no index entry.
 	s2 := composeSystemPrompt(systemPromptOpts{
-		ToolMode:  "prompt",
-		ToolNames: []string{"python_execute"},
+		ToolMode:      "prompt",
+		ToolNames:     []string{"python_execute"},
+		SkillsAllowed: true,
 	})
 	if !strings.Contains(s2, "## Document-generation recipes") {
 		t.Error("recipes must stay inline when the model cannot call use_skill")
@@ -63,6 +65,7 @@ func TestComposeSystemPromptDocGenSkill(t *testing.T) {
 		ToolMode:           "native",
 		ToolNames:          []string{"web_search", "use_skill"},
 		SkillToolAvailable: true,
+		SkillsAllowed:      true,
 	})
 	if strings.Contains(s3, DocGenSkillName) || strings.Contains(s3, "## Document-generation recipes") {
 		t.Error("document-generation must not appear without python_execute")
@@ -73,6 +76,7 @@ func TestComposeSystemPromptDocGenSkill(t *testing.T) {
 		ToolMode:           "native",
 		ToolNames:          []string{"python_execute", "use_skill"},
 		SkillToolAvailable: true,
+		SkillsAllowed:      true,
 		Skills:             []SkillIndex{{Name: "Document-Generation", When: "admin override"}},
 	})
 	if n := strings.Count(strings.ToLower(s4), "document-generation"); n != 1 {
@@ -80,5 +84,21 @@ func TestComposeSystemPromptDocGenSkill(t *testing.T) {
 	}
 	if !strings.Contains(s4, "admin override") {
 		t.Error("admin-defined description should win over the built-in")
+	}
+
+	// An explicit use_skill policy denial blocks both assigned skills and the
+	// built-in DocGen recipes, even while python_execute remains available.
+	denied := composeSystemPrompt(systemPromptOpts{
+		ToolMode:  "prompt",
+		ToolNames: []string{"python_execute"},
+		SkillsFull: []SkillFull{{
+			Name: "must-not-appear", Instructions: "PRIVATE-SKILL-INSTRUCTIONS",
+		}},
+		SkillsAllowed: false,
+	})
+	for _, forbidden := range []string{"## Document-generation recipes", "must-not-appear", "PRIVATE-SKILL-INSTRUCTIONS"} {
+		if strings.Contains(denied, forbidden) {
+			t.Errorf("use_skill denial leaked %q into prompt: %s", forbidden, denied)
+		}
 	}
 }

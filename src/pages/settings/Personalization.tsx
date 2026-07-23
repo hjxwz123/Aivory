@@ -18,7 +18,15 @@ import { useComposerPrefs } from '@/store/composer-prefs'
 import { useAuth } from '@/store/auth'
 import { MemoryManager } from '@/components/settings/memory-manager'
 import { cn } from '@/lib/utils'
-import { resolveDefaultToolMode, type ToolMode } from '@/lib/tool-mode'
+import {
+  normalizeToolModeForCapabilities,
+  resolveDefaultToolMode,
+  TOOL_MODE_MENU_ORDER,
+  toolModeAvailable,
+  type ToolMode,
+  type ToolModeCapabilities,
+} from '@/lib/tool-mode'
+import { modelHasBuiltinTools } from '@/lib/builtin-tools'
 import { useModels } from '@/store/models'
 import {
   filterOfficialToolNames,
@@ -51,7 +59,6 @@ const TRAITS = [
   'formal',
 ] as const
 
-const TOOL_MODES: ToolMode[] = ['enabled', 'auto', 'disabled', 'official']
 const EMPTY_TOOL_NAMES: string[] = []
 
 export default function Personalization() {
@@ -71,6 +78,17 @@ export default function Personalization() {
   const loadModels = useModels((s) => s.load)
   const modelsLoaded = useModels((s) => s.loaded)
   const defaultOfficialTools = useMemo(() => officialToolsForModel(defaultModel), [defaultModel])
+  const defaultToolModeCapabilities = useMemo<ToolModeCapabilities>(
+    () => ({
+      builtin: modelHasBuiltinTools(defaultModel),
+      official: defaultOfficialTools.length > 0,
+    }),
+    [defaultModel, defaultOfficialTools.length],
+  )
+  const availableDefaultToolMode =
+    modelsLoaded && defaultModel
+      ? normalizeToolModeForCapabilities(defaultToolMode, defaultToolModeCapabilities)
+      : defaultToolMode
   const cachedDefaultOfficialToolNames = useComposerPrefs((s) =>
     defaultModelId ? s.officialToolNamesByModel[defaultModelId] : undefined,
   )
@@ -85,12 +103,16 @@ export default function Personalization() {
   const [loaded, setLoaded] = useState(false)
   const [saving, setSaving] = useState(false)
   const [toolsSaving, setToolsSaving] = useState(false)
+  const [toolMenuOpen, setToolMenuOpen] = useState(false)
   const [toolMenuPanel, setToolMenuPanel] = useState<'modes' | 'official'>('modes')
   const [serverOfficialToolNames, setServerOfficialToolNames] = useState<string[] | null>(null)
   const toolSettingsQueueRef = useRef<Promise<unknown>>(Promise.resolve())
   const hydratedOfficialToolModelsRef = useRef<Set<string>>(new Set())
   const confirmedOfficialToolNamesRef = useRef<string[]>([])
   const officialToolSaveVersionRef = useRef(0)
+  const previousToolMenuPanelRef = useRef(toolMenuPanel)
+  const officialBackRef = useRef<HTMLDivElement>(null)
+  const officialModeRef = useRef<HTMLDivElement>(null)
 
   function queueToolSettingsSave(patch: Record<string, unknown>) {
     const request = toolSettingsQueueRef.current
@@ -140,6 +162,34 @@ export default function Personalization() {
     confirmedOfficialToolNamesRef.current = officialToolNames
     setOfficialToolNames(defaultModelId, officialToolNames)
   }, [defaultModel, defaultModelId, modelsLoaded, serverOfficialToolNames, setOfficialToolNames])
+
+  // Account defaults can outlive an administrator changing the default model's
+  // capabilities. Wait for the registry before falling back so initial loading
+  // never overwrites a valid official/built-in preference with automatic.
+  useEffect(() => {
+    if (!modelsLoaded || !defaultModel || availableDefaultToolMode === defaultToolMode) return
+    setDefaultToolMode(availableDefaultToolMode)
+    setToolMode(availableDefaultToolMode)
+  }, [
+    availableDefaultToolMode,
+    defaultModel,
+    defaultToolMode,
+    modelsLoaded,
+    setDefaultToolMode,
+    setToolMode,
+  ])
+
+  useEffect(() => {
+    if (!toolMenuOpen) {
+      previousToolMenuPanelRef.current = 'modes'
+      return
+    }
+    if (previousToolMenuPanelRef.current === toolMenuPanel) return
+    const previousPanel = previousToolMenuPanelRef.current
+    previousToolMenuPanelRef.current = toolMenuPanel
+    if (toolMenuPanel === 'official') officialBackRef.current?.focus()
+    else if (previousPanel === 'official') officialModeRef.current?.focus()
+  }, [toolMenuOpen, toolMenuPanel])
 
   function toggleTrait(key: string) {
     setTraits((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]))
@@ -322,8 +372,13 @@ export default function Personalization() {
               </p>
             </div>
             <DropdownMenu
+              open={toolMenuOpen}
               onOpenChange={(open) => {
-                if (!open) setToolMenuPanel('modes')
+                setToolMenuOpen(open)
+                if (!open) {
+                  previousToolMenuPanelRef.current = 'modes'
+                  setToolMenuPanel('modes')
+                }
               }}
             >
               <DropdownMenuTrigger
@@ -336,17 +391,17 @@ export default function Personalization() {
                   !loaded && 'cursor-not-allowed opacity-50',
                 )}
               >
-                {defaultToolMode === 'enabled' ? (
+                {availableDefaultToolMode === 'enabled' ? (
                   <Wrench size={15} className="shrink-0 text-[var(--color-secondary)]" aria-hidden />
-                ) : defaultToolMode === 'auto' ? (
+                ) : availableDefaultToolMode === 'auto' ? (
                   <Sparkles size={15} className="shrink-0 text-[var(--color-secondary)]" aria-hidden />
-                ) : defaultToolMode === 'disabled' ? (
+                ) : availableDefaultToolMode === 'disabled' ? (
                   <Ban size={15} className="shrink-0 text-[var(--color-secondary)]" aria-hidden />
                 ) : (
                   <BadgeCheck size={15} className="shrink-0 text-[var(--color-secondary)]" aria-hidden />
                 )}
                 <span className="min-w-0 flex-1 truncate text-left">
-                  {t(`settings:personalization.toolModes.${defaultToolMode}.label`)}
+                  {t(`settings:personalization.toolModes.${availableDefaultToolMode}.label`)}
                 </span>
                 {toolsSaving ? (
                   <Loader2 size={14} className="shrink-0 animate-spin text-[var(--color-fg-muted)]" aria-hidden />
@@ -354,10 +409,24 @@ export default function Personalization() {
                   <ChevronDown size={14} className="shrink-0 text-[var(--color-fg-muted)]" aria-hidden />
                 )}
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-[min(20rem,calc(100vw-2rem))]">
+              <DropdownMenuContent
+                align="end"
+                className="w-[min(20rem,calc(100vw-2rem))]"
+                onEscapeKeyDown={(event) => {
+                  if (toolMenuPanel !== 'official') return
+                  event.preventDefault()
+                  setToolMenuPanel('modes')
+                }}
+                onKeyDown={(event) => {
+                  if (toolMenuPanel !== 'official' || event.key !== 'ArrowLeft') return
+                  event.preventDefault()
+                  setToolMenuPanel('modes')
+                }}
+              >
                 {toolMenuPanel === 'official' ? (
                   <>
                     <DropdownMenuItem
+                      ref={officialBackRef}
                       onSelect={(event) => {
                         event.preventDefault()
                         setToolMenuPanel('modes')
@@ -379,9 +448,10 @@ export default function Personalization() {
                         <DropdownMenuCheckboxItem
                           key={tool.name}
                           checked={checked}
+                          disabled={toolsSaving}
                           onSelect={(event) => event.preventDefault()}
                           onCheckedChange={() => {
-                            if (defaultToolMode !== 'official') void onSelectToolMode('official')
+                            if (availableDefaultToolMode !== 'official') void onSelectToolMode('official')
                             void onToggleOfficialTool(tool.name)
                           }}
                           className="py-2"
@@ -400,8 +470,9 @@ export default function Personalization() {
                     })}
                   </>
                 ) : (
-                  TOOL_MODES.map((mode) => {
-                    const selected = defaultToolMode === mode
+                  TOOL_MODE_MENU_ORDER.map((mode) => {
+                    const selected = availableDefaultToolMode === mode
+                    const available = toolModeAvailable(mode, defaultToolModeCapabilities)
                     const icon =
                       mode === 'enabled' ? (
                         <Wrench size={16} aria-hidden />
@@ -418,7 +489,8 @@ export default function Personalization() {
                     return (
                       <DropdownMenuItem
                         key={mode}
-                        disabled={!loaded || toolsSaving || (mode === 'official' && defaultOfficialTools.length === 0)}
+                        ref={mode === 'official' ? officialModeRef : undefined}
+                        disabled={!loaded || toolsSaving || !available}
                         onSelect={(event) => {
                           if (mode === 'official') {
                             event.preventDefault()

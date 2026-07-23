@@ -54,7 +54,7 @@ func MergeParamControls(target map[string]any, controls json.RawMessage, picks m
 	if target == nil {
 		target = map[string]any{}
 	}
-	if len(controls) == 0 || len(picks) == 0 {
+	if len(controls) == 0 {
 		return target
 	}
 	var defs []paramControl
@@ -62,8 +62,24 @@ func MergeParamControls(target map[string]any, controls json.RawMessage, picks m
 		// Malformed — drop silently and return target as-is.
 		return target
 	}
+	// Defaults are request semantics, not merely a frontend convenience. Resolve
+	// them before evaluating show_if so mobile/API clients that never mount the
+	// visual control produce the same request (and image quota projection) as the
+	// desktop composer. Explicit client values always win over defaults.
+	effectivePicks := make(map[string]any, len(picks)+len(defs))
+	for key, value := range picks {
+		effectivePicks[key] = value
+	}
 	for _, c := range defs {
-		raw, ok := picks[c.Key]
+		if _, exists := effectivePicks[c.Key]; !exists && c.Default != nil {
+			effectivePicks[c.Key] = c.Default
+		}
+	}
+	for _, c := range defs {
+		if !paramControlVisible(c.ShowIf, effectivePicks) {
+			continue
+		}
+		raw, ok := effectivePicks[c.Key]
 		if !ok {
 			continue
 		}
@@ -113,6 +129,15 @@ func MergeParamControls(target map[string]any, controls json.RawMessage, picks m
 		}
 	}
 	return target
+}
+
+func paramControlVisible(showIf map[string]any, picks map[string]any) bool {
+	for key, expected := range showIf {
+		if actual, exists := picks[key]; !exists || !reflect.DeepEqual(actual, expected) {
+			return false
+		}
+	}
+	return true
 }
 
 // MergeRequestParams builds an upstream request body with the required

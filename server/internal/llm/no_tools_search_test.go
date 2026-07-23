@@ -72,7 +72,7 @@ func TestToolGuidanceNativeVsPrompt(t *testing.T) {
 // still injects a "## Skills" block, and empty skills inject none.
 func TestNoneModeInlinesSkillsUnlessCleared(t *testing.T) {
 	withSkill := composeSystemPrompt(systemPromptOpts{
-		ModelLabel: "GPT-X", ToolMode: "none",
+		ModelLabel: "GPT-X", ToolMode: "none", SkillsAllowed: true,
 		SkillsFull: []SkillFull{{Name: "pptx-maker", Instructions: "Build a deck."}},
 	})
 	if !strings.Contains(withSkill, "## Skills") || !strings.Contains(withSkill, "pptx-maker") {
@@ -120,6 +120,7 @@ func TestForcedWebSearchInjectsResults(t *testing.T) {
 		&store.Conversation{ID: "c1"},
 		nil,
 		2, // two KB snippets already numbered this turn → web cite continues at 3
+		nil,
 		func(ev SseEvent) { events = append(events, ev) },
 	)
 	if !strings.Contains(text, "<web-search-result>") || !strings.Contains(text, "Aurelia is a chat app") {
@@ -164,6 +165,7 @@ func TestForcedWebSearchRemapsInlineMarkers(t *testing.T) {
 		&store.Conversation{ID: "c1"},
 		nil,
 		3, // 3 KB snippets already numbered → web markers must start at [4]
+		nil,
 		func(SseEvent) {},
 	)
 	if !strings.Contains(text, "[4] Alpha") || !strings.Contains(text, "[5] Beta") {
@@ -202,6 +204,7 @@ func TestForcedWebSearchRespectsDisabledTools(t *testing.T) {
 		&store.Conversation{ID: "c1"},
 		nil,
 		0,
+		nil,
 		func(SseEvent) {},
 	)
 	if text != "" || cites != nil {
@@ -409,6 +412,7 @@ func TestForcedWebSearchUnconfiguredInjectsNothing(t *testing.T) {
 		&store.Conversation{ID: "c1"},
 		nil,
 		0,
+		nil,
 		func(SseEvent) {},
 	)
 	if text != "" || cites != nil {
