@@ -107,9 +107,7 @@ func (o *Orchestrator) checkModelQuota(ctx context.Context, userID string, model
 // permanent) when the user can cover it; otherwise block. Counts images for a
 // count-limit, summed cost for a cost-limit. Admins are exempt.
 func (o *Orchestrator) checkImageQuota(ctx context.Context, userID string, model *store.Model, n int) (string, bool, bool) {
-	if n <= 0 {
-		n = 1
-	}
+	n = ClampImageGenerationCount(n)
 	if u, err := store.FindUserByID(ctx, o.db, userID); err == nil && u.Role == "admin" {
 		return "", true, false
 	}
@@ -146,7 +144,17 @@ func (o *Orchestrator) checkImageQuota(ctx context.Context, userID string, model
 		return "", true, false // free use within the group's per-cycle allotment
 	}
 	// Free image allotment exhausted → pay with credits (shared with chat credits).
-	return o.creditDecision(ctx, userID, groupID)
+	// Unlike chat, image cost is exact before the request starts, so require the
+	// balance to cover the whole clamped batch instead of merely being positive.
+	msg, ok, useCredits := o.creditDecision(ctx, userID, groupID)
+	if !ok || !useCredits {
+		return msg, ok, useCredits
+	}
+	requiredCredits := float64(n) * model.PricePerImage * o.creditsPerUSD()
+	if requiredCredits > o.availableCredits(ctx, userID, groupID) {
+		return o.quotaMessage(), false, false
+	}
+	return "", true, true
 }
 
 // CheckImageCredits / ChargeImageCredits implement the ImageBiller interface so

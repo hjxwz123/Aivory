@@ -54,8 +54,8 @@
         "body": "Répond directement sans mettre d’outils à la disposition du modèle de réponse."
       },
       "enabled": {
-        "label": "Appel d’outils",
-        "body": "Met à disposition les outils système configurés pour le modèle sélectionné."
+        "label": "Intégrés",
+        "body": "Utilise les outils intégrés autorisés pour le modèle sélectionné par l’administrateur."
       },
       "official": {
         "label": "Officiels",

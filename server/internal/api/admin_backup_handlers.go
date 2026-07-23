@@ -849,10 +849,10 @@ func normalizeArchiveTableReader(table string, r io.Reader) (io.Reader, error) {
 	return normalizeModelOfficialToolsArchiveRows(r)
 }
 
-// normalizeModelOfficialToolsArchiveRows upgrades legacy name arrays before
-// either backup importer writes model rows. Keeping this at the archive edge
-// preserves generic table restore semantics while ensuring newly restored data
-// always uses the canonical definition-array representation.
+// normalizeModelOfficialToolsArchiveRows upgrades legacy hosted-tool arrays and
+// validates/canonicalizes the nullable built-in-tool policy before either
+// importer writes model rows. The historical function name is retained to keep
+// this compatibility path stable.
 func normalizeModelOfficialToolsArchiveRows(r io.Reader) (io.Reader, error) {
 	var out bytes.Buffer
 	dec := json.NewDecoder(r)
@@ -879,6 +879,25 @@ func normalizeModelOfficialToolsArchiveRows(r io.Reader) (io.Reader, error) {
 				return nil, fmt.Errorf("encode models.official_tools: %w", err)
 			}
 			row["official_tools"] = cell
+		}
+		builtinRaw, builtinPresent, builtinNull, err := backupNullableStringField(row, "builtin_tools")
+		if err != nil {
+			return nil, fmt.Errorf("invalid models.builtin_tools: %w", err)
+		}
+		if builtinPresent && !builtinNull {
+			normalized, err := store.NormalizeBuiltinTools(json.RawMessage(builtinRaw))
+			if err != nil {
+				return nil, fmt.Errorf("invalid models.builtin_tools: %w", err)
+			}
+			if normalized == nil {
+				row["builtin_tools"] = json.RawMessage("null")
+			} else {
+				cell, err := json.Marshal(string(normalized))
+				if err != nil {
+					return nil, fmt.Errorf("encode models.builtin_tools: %w", err)
+				}
+				row["builtin_tools"] = cell
+			}
 		}
 		if err := enc.Encode(row); err != nil {
 			return nil, fmt.Errorf("encode models row: %w", err)
@@ -1093,6 +1112,9 @@ func validateConfigArchiveLockedEmbeddingModelRow(zr *zip.Reader, d Deps) error 
 		if err := validateConfigArchiveModelOfficialTools(row); err != nil {
 			return err
 		}
+		if err := validateConfigArchiveModelBuiltinTools(row); err != nil {
+			return err
+		}
 		if err := ensureLockedEmbeddingModelArchiveRowCanChange(d, row); err != nil {
 			return err
 		}
@@ -1113,6 +1135,35 @@ func validateConfigArchiveModelOfficialTools(row map[string]json.RawMessage) err
 	}
 	_, err = store.NormalizeOfficialTools(json.RawMessage(raw))
 	return err
+}
+
+func validateConfigArchiveModelBuiltinTools(row map[string]json.RawMessage) error {
+	raw, present, isNull, err := backupNullableStringField(row, "builtin_tools")
+	if err != nil {
+		return fmt.Errorf("invalid models.builtin_tools: %w", err)
+	}
+	if !present || isNull {
+		return nil
+	}
+	_, err = store.NormalizeBuiltinTools(json.RawMessage(raw))
+	return err
+}
+
+// backupNullableStringField reads an exported nullable TEXT cell. It differs
+// from backupStringField because JSON null is a meaningful default-all policy
+// for models.builtin_tools rather than malformed input.
+func backupNullableStringField(row map[string]json.RawMessage, key string) (value string, present, isNull bool, err error) {
+	raw, ok := row[key]
+	if !ok {
+		return "", false, false, nil
+	}
+	if strings.TrimSpace(string(raw)) == "null" {
+		return "", true, true, nil
+	}
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return "", true, false, err
+	}
+	return strings.TrimSpace(value), true, false, nil
 }
 
 // validateConfigArchiveModelExtraParams keeps the config-import path aligned

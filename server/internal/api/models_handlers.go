@@ -145,6 +145,10 @@ func modelsResponse(d Deps, r *http.Request, models []store.Model) map[string]an
 		Stream          bool            `json:"stream"`
 		ResearchEnabled bool            `json:"research_enabled"`
 		ToolMode        string          `json:"tool_mode"`
+		// BuiltinTools is the resolved, user-safe capability set. Unlike the
+		// nullable admin policy, this always contains only live registry tools that
+		// survive both the model allowlist and the global disabled_tools switch.
+		BuiltinTools    []string        `json:"builtin_tools"`
 		ParamControls   json.RawMessage `json:"param_controls"`
 		ChannelID       string          `json:"channel_id"`
 		SortOrder       int             `json:"sort_order"`
@@ -189,6 +193,22 @@ func modelsResponse(d Deps, r *http.Request, models []store.Model) map[string]an
 		_ = json.Unmarshal(raw, &creditsPerUSD)
 	}
 
+	registeredBuiltinTools := []string{}
+	if d.Tools != nil {
+		for _, definition := range d.Tools.List("") {
+			registeredBuiltinTools = append(registeredBuiltinTools, definition.Name)
+		}
+	}
+	disabledBuiltinTools := map[string]bool{}
+	if raw, err := store.GetSetting(d.DB, "disabled_tools"); err == nil && len(raw) > 0 {
+		var names []string
+		if json.Unmarshal(raw, &names) == nil {
+			for _, name := range names {
+				disabledBuiltinTools[name] = true
+			}
+		}
+	}
+
 	items := []item{}
 	for _, m := range models {
 		tags := m.Tags
@@ -209,6 +229,7 @@ func modelsResponse(d Deps, r *http.Request, models []store.Model) map[string]an
 		items = append(items, item{
 			ID: m.ID, Label: m.Label, Description: m.Description, Icon: m.Icon,
 			Kind: m.Kind, Enabled: m.Enabled, Vision: m.Vision, Stream: m.Stream, ResearchEnabled: m.ResearchEnabled, ToolMode: m.ToolMode,
+			BuiltinTools: effectivePublicBuiltinTools(m, registeredBuiltinTools, disabledBuiltinTools),
 			ParamControls: m.ParamControls, ChannelID: m.ChannelID, SortOrder: m.SortOrder,
 			Currency:        m.Currency,
 			Tags:            tags,
@@ -236,4 +257,30 @@ func modelsResponse(d Deps, r *http.Request, models []store.Model) map[string]an
 		"default_id":       defaultID,
 		"verify_available": verifyAvailable,
 	}
+}
+
+// effectivePublicBuiltinTools resolves the nullable persisted policy into an
+// exact public capability list. Iterating the registry list (rather than the
+// configured names) also drops stale/unknown names and preserves deterministic
+// registry order. Invalid non-null policies fail closed, matching orchestration.
+func effectivePublicBuiltinTools(m store.Model, registered []string, disabled map[string]bool) []string {
+	resolved := []string{}
+	if m.Kind != "chat" || m.ToolMode == "none" {
+		return resolved
+	}
+	configuredNames, configured, err := store.ParseBuiltinTools(m.BuiltinTools)
+	if err != nil {
+		return resolved
+	}
+	configuredSet := make(map[string]bool, len(configuredNames))
+	for _, name := range configuredNames {
+		configuredSet[name] = true
+	}
+	for _, name := range registered {
+		if disabled[name] || (configured && !configuredSet[name]) {
+			continue
+		}
+		resolved = append(resolved, name)
+	}
+	return resolved
 }

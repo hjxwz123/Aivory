@@ -1,6 +1,12 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { parsePersistedComposerPrefs, resetComposerToolModeToDefault, useComposerPrefs } from './composer-prefs'
-import { modelAllowsToolModeSelection, resolveDefaultToolMode } from '@/lib/tool-mode'
+import {
+  modelAllowsToolModeSelection,
+  normalizeToolModeForCapabilities,
+  resolveDefaultToolMode,
+  TOOL_MODE_MENU_ORDER,
+  toolModeAvailable,
+} from '@/lib/tool-mode'
 import {
   resolveArmedTurnFlags,
   resolveToolRequestFlags,
@@ -98,6 +104,20 @@ describe('model tool capability', () => {
 
   it('keeps the selector compatible with older model-list responses', () => {
     expect(modelAllowsToolModeSelection(undefined)).toBe(true)
+  })
+
+  it('keeps the four menu rows stable and disables unsupported concrete modes', () => {
+    expect(TOOL_MODE_MENU_ORDER).toEqual(['auto', 'official', 'disabled', 'enabled'])
+    expect(toolModeAvailable('auto', { builtin: false, official: false })).toBe(true)
+    expect(toolModeAvailable('disabled', { builtin: false, official: false })).toBe(true)
+    expect(toolModeAvailable('official', { builtin: true, official: false })).toBe(false)
+    expect(toolModeAvailable('enabled', { builtin: false, official: true })).toBe(false)
+  })
+
+  it('falls an unsupported persisted selection back to automatic', () => {
+    expect(normalizeToolModeForCapabilities('enabled', { builtin: false, official: true })).toBe('auto')
+    expect(normalizeToolModeForCapabilities('official', { builtin: true, official: false })).toBe('auto')
+    expect(normalizeToolModeForCapabilities('disabled', { builtin: false, official: false })).toBe('disabled')
   })
 })
 

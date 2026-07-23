@@ -66,9 +66,10 @@ func (r *Registry) Register(t Tool) {
 	r.mu.Unlock()
 }
 
-// List returns the tool definitions visible to a model. The list is sorted by
-// name so serialization is deterministic across requests — unstable ordering
-// busts the upstream prompt-prefix cache (pitfall D5, §4.9).
+// List returns every registered tool definition. The orchestrator applies the
+// loaded model's allowlist and global kill-switch; keeping storage access out of
+// the registry avoids duplicate queries and also lets this list drive the admin
+// capability endpoint. The list is sorted for deterministic serialization.
 func (r *Registry) List(_ string) []llm.ToolDef {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -86,6 +87,9 @@ func (r *Registry) List(_ string) []llm.ToolDef {
 
 // Run executes a tool by name.
 func (r *Registry) Run(ctx context.Context, name string, input []byte, tc *llm.ToolContext) (string, []llm.Citation, error) {
+	if !tc.AllowsBuiltinTool(name) {
+		return "", nil, errors.New("tool is not enabled for this model: " + name)
+	}
 	r.mu.RLock()
 	t, ok := r.tools[name]
 	r.mu.RUnlock()

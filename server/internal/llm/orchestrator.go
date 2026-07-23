@@ -107,8 +107,17 @@ type ToolContext struct {
 	// Fast quarters the per-turn tool budgets and withholds python_execute
 	// entirely (§fast-mode) — fast turns trade tool depth for speed.
 	Fast bool
+	// BuiltinTools is the model's resolved local-tool allowlist. nil means the
+	// backwards-compatible default (all registered tools); a non-nil empty map
+	// means the administrator explicitly disabled every local tool.
+	BuiltinTools map[string]bool
 	// ImageModelID is the user's pre-selected image model (§4.12-B).
 	ImageModelID string
+	// ImageRequestParams is the already allowlisted request fragment produced
+	// from the selected image model's param_controls. It is carried out-of-band
+	// instead of in image_generate's public schema so a chat model cannot forge
+	// arbitrary provider fields.
+	ImageRequestParams map[string]any
 	// SkipImageQuota tells image_generate NOT to meter the image model at all
 	// (§4.20): set on the drawing-mode path, where the orchestrator already ran the
 	// credit-aware checkImageQuota AND charges in runImageTurn, so the tool must not
@@ -129,6 +138,16 @@ type ToolContext struct {
 	// budgetMu guards counts; charged centrally by the runner before each call.
 	budgetMu sync.Mutex
 	counts   map[string]int
+}
+
+// AllowsBuiltinTool is the final execution-boundary policy check. Keeping it
+// on ToolContext makes native, prompt-mode, Deep Research, and direct internal
+// tool paths share the same fail-closed decision.
+func (tc *ToolContext) AllowsBuiltinTool(name string) bool {
+	if tc == nil || tc.BuiltinTools == nil {
+		return true
+	}
+	return tc.BuiltinTools[name]
 }
 
 // AddImageCredits accumulates the total credits the tool charged for images this
@@ -212,8 +231,8 @@ var maxToolCallsPerTurnFast = func() int {
 
 // filterDisabledTools drops any tool named in the global `disabled_tools`
 // setting (§B6 partial: a platform-wide tool kill-switch — e.g. turn off
-// python_execute or image_generate without per-model config). Per-model
-// allow-lists remain a future enhancement (needs a models column + admin UI).
+// python_execute or image_generate). The per-model policy is applied immediately
+// afterward by filterModelBuiltinTools.
 func (o *Orchestrator) filterDisabledTools(defs []ToolDef) []ToolDef {
 	deny := o.disabledToolSet()
 	if len(deny) == 0 {
@@ -226,6 +245,46 @@ func (o *Orchestrator) filterDisabledTools(defs []ToolDef) []ToolDef {
 		}
 	}
 	return out
+}
+
+// modelBuiltinToolSet resolves a persisted model policy for execution. nil is
+// default-all; an explicit [] and malformed non-null data both produce a
+// non-nil empty set (deny all).
+func modelBuiltinToolSet(raw json.RawMessage) map[string]bool {
+	names, configured, err := store.ParseBuiltinTools(raw)
+	if err != nil {
+		return map[string]bool{}
+	}
+	if !configured {
+		return nil
+	}
+	allowed := make(map[string]bool, len(names))
+	for _, name := range names {
+		allowed[name] = true
+	}
+	return allowed
+}
+
+func filterModelBuiltinTools(defs []ToolDef, allowed map[string]bool) []ToolDef {
+	if allowed == nil {
+		return defs
+	}
+	out := make([]ToolDef, 0, len(defs))
+	for _, definition := range defs {
+		if allowed[definition.Name] {
+			out = append(out, definition)
+		}
+	}
+	return out
+}
+
+func toolDefsContain(defs []ToolDef, name string) bool {
+	for _, definition := range defs {
+		if definition.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 // disabledToolSet reads the global `disabled_tools` admin kill-switch as a set.
@@ -262,6 +321,9 @@ func toolCallTimeout(name string) time.Duration {
 // charge increments the per-turn counters for a tool and returns an error when
 // either the per-tool or the global per-turn limit is exceeded.
 func (tc *ToolContext) charge(name string) error {
+	if !tc.AllowsBuiltinTool(name) {
+		return fmt.Errorf("tool %q is not enabled for this model", name)
+	}
 	limits := perTurnToolLimits
 	totalCap := maxToolCallsPerTurn
 	switch {
@@ -522,11 +584,11 @@ func (o *Orchestrator) streamWithFallback(
 	o.logger.Printf("llm: upstream model %q produced no output in %ds — switching to fallback %q", primaryModelID, ttft, fbID)
 	// Single attempt, no watchdog → no chaining. Streams into the SAME onEvent,
 	// so the frontend just keeps filling the existing (empty) message.
-	return fbProvider.Stream(ctx, fbReq, runner, onEvent)
+	return fbProvider.Stream(ctx, fbReq, toolRunnerForModelRequest(runner, fbID, fbReq.Tools), onEvent)
 }
 
 // buildFallbackRequest clones the in-flight request but swaps in the fallback
-// model + its provider/channel. Messages, tools, system prompt, RAG are reused.
+// model + its provider/channel and re-gates every capability-dependent field.
 func (o *Orchestrator) buildFallbackRequest(ctx context.Context, base UnifiedChatRequest, fbID string) (UnifiedChatRequest, Provider, string, error) {
 	m, err := store.GetModel(ctx, o.db, fbID)
 	if err != nil {
@@ -551,6 +613,12 @@ func (o *Orchestrator) buildFallbackRequest(ctx context.Context, base UnifiedCha
 	if m.Kind == "chat" {
 		req.ExtraParams = m.ExtraParams
 	}
+	fallbackBuiltinTools := modelBuiltinToolSet(m.BuiltinTools)
+	globalDisabledTools := o.disabledToolSet()
+	fallbackToolMode := m.ToolMode
+	if fallbackToolMode == "" {
+		fallbackToolMode = "native"
+	}
 	if base.ToolModeOfficial {
 		// Keep the user's explicit official selection, but re-gate it against the
 		// fallback model's own allowlist and request definitions.
@@ -560,7 +628,49 @@ func (o *Orchestrator) buildFallbackRequest(ctx context.Context, base UnifiedCha
 	} else {
 		req.OfficialToolNames = nil
 		req.OfficialToolRequests = nil
-		req.ToolModePrompt = m.ToolMode == "prompt"
+		if fallbackToolMode == "none" || len(base.Tools) == 0 {
+			req.Tools = nil
+		} else {
+			// Re-resolve the fallback model's registry surface and apply its own
+			// allowlist. Intersect with the primary request so turn-level restrictions
+			// such as fast mode cannot be loosened during a TTFT switch.
+			fallbackTools := filterModelBuiltinTools(o.filterDisabledTools(o.tools.List(m.ID)), fallbackBuiltinTools)
+			req.Tools = intersectToolDefs(fallbackTools, base.Tools)
+		}
+		req.ToolModePrompt = fallbackToolMode == "prompt" && len(req.Tools) > 0
+		// The primary history may contain native/canonical calls that the fallback
+		// does not declare. Remove those before switching providers; execution is
+		// independently bound to the same exact set below.
+		req.History = stripDisallowedBuiltinToolBlocks(req.History, toolDefNameSet(req.Tools))
+	}
+	if base.SystemPromptOptions != nil {
+		fallbackOpts := *base.SystemPromptOptions
+		// TTFT fallback is transparent: preserve the primary turn's identity and
+		// admin behavior prompt (including the masked Fast label). Only capability-
+		// dependent guidance is rebuilt for the model that will actually serve it.
+		fallbackOpts.ToolMode = "none"
+		if !base.ToolModeOfficial && len(req.Tools) > 0 {
+			fallbackOpts.ToolMode = fallbackToolMode
+		}
+		fallbackOpts.ToolNames = toolDefNames(req.Tools)
+		fallbackOpts.SkillToolAvailable = toolDefsContain(req.Tools, "use_skill")
+		if !toolDefsContain(req.Tools, "python_execute") {
+			fallbackOpts.SandboxFiles = nil
+		}
+
+		// Skills are model-bound. Never carry the primary model's index or full
+		// instructions across a TTFT switch, and do not let fallback broaden a
+		// primary/global/per-turn policy that excluded use_skill.
+		fallbackOpts.Skills = nil
+		fallbackOpts.SkillsFull = nil
+		fallbackAllowsSkills := fallbackBuiltinTools == nil || fallbackBuiltinTools["use_skill"]
+		if fallbackOpts.SkillsAllowed && fallbackAllowsSkills && !globalDisabledTools["use_skill"] {
+			fallbackOpts.Skills, fallbackOpts.SkillsFull = loadEnabledModelSkills(ctx, o.db, m.ID)
+		}
+		fallbackOpts.SkillsAllowed = fallbackOpts.SkillsAllowed && fallbackAllowsSkills && !globalDisabledTools["use_skill"]
+
+		req.SystemPrompt = composeSystemPrompt(fallbackOpts)
+		req.SystemPromptOptions = &fallbackOpts
 	}
 	// §4.6-C fallback re-gate: the images in `base.History` were inlined against the
 	// PRIMARY model's vision capability (resolveAttachments runs once, before any
@@ -569,13 +679,40 @@ func (o *Orchestrator) buildFallbackRequest(ctx context.Context, base UnifiedCha
 	// expected `text`"). Rebuild the history without image blocks, image
 	// attachments, or image-bearing native Raw (base remains untouched).
 	if !m.Vision {
-		req.History = stripImageBlocks(base.History)
+		req.History = stripImageBlocks(req.History)
 	}
 	name := m.Label
 	if name == "" {
 		name = m.RequestID
 	}
 	return req, prov, name, nil
+}
+
+func intersectToolDefs(candidates, ceiling []ToolDef) []ToolDef {
+	allowed := toolDefNameSet(ceiling)
+	out := make([]ToolDef, 0, len(candidates))
+	for _, definition := range candidates {
+		if allowed[definition.Name] {
+			out = append(out, definition)
+		}
+	}
+	return out
+}
+
+func toolDefNameSet(definitions []ToolDef) map[string]bool {
+	set := make(map[string]bool, len(definitions))
+	for _, definition := range definitions {
+		set[definition.Name] = true
+	}
+	return set
+}
+
+func toolDefNames(definitions []ToolDef) []string {
+	names := make([]string, 0, len(definitions))
+	for _, definition := range definitions {
+		names = append(names, definition.Name)
+	}
+	return names
 }
 
 // resolveFallbackChannel returns the creds + id of a model's backup channel
@@ -1049,13 +1186,17 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	//     (tc.SkipImageQuota) so the orchestrator's credit decision governs.
 	var msg string
 	var ok, payWithCredits bool
+	var imageRequestParams map[string]any
+	imageGenerationCount := imageModeForcedGenerationCount
 	// Remaining free allowance (USD) when admitted under a finite cost-type
 	// allotment; -1 otherwise. Re-checked against the assembled request below
 	// (§ free-allowance overshoot). Image turns already pre-project their cost
 	// (checkImageQuota counts n × price before deciding), so they don't need it.
 	freeRemainingUSD := -1.0
 	if model.Kind == "image" {
-		msg, ok, payWithCredits = o.checkImageQuota(ctx, req.UserID, model, 1)
+		imageRequestParams = MergeParamControls(nil, model.ParamControls, req.ParamOverrides)
+		imageGenerationCount = imageGenerationCountFromParams(imageRequestParams)
+		msg, ok, payWithCredits = o.checkImageQuota(ctx, req.UserID, model, imageGenerationCount)
 	} else {
 		msg, ok, payWithCredits, freeRemainingUSD = o.checkModelQuota(ctx, req.UserID, model)
 	}
@@ -1091,7 +1232,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	//     assistant message. Chat tools (python/sandbox) stay available by
 	//     switching back to a chat model in the same conversation.
 	if model.Kind == "image" {
-		return o.runImageTurn(ctx, conv, model, userMsg, assistantMsg, req, turnStart, payWithCredits, onEvent)
+		return o.runImageTurn(ctx, conv, model, userMsg, assistantMsg, req, imageRequestParams, imageGenerationCount, turnStart, payWithCredits, onEvent)
 	}
 
 	// 3. Build context.
@@ -1136,18 +1277,17 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// so auto enables tools directly instead of spending a task-model call merely
 	// to rediscover that requirement.
 	sandboxFiles := listSandboxFiles(ctx, o.db, conv.ID, req.UserID)
+	builtinTools := modelBuiltinToolSet(model.BuiltinTools)
+	globalDisabledTools := o.disabledToolSet()
 	// Load bound skill metadata before automatic routing. A request such as "use
 	// the release-notes skill" cannot be classified from the generic use_skill
 	// tool description alone; the router needs the actual enabled skill names and
 	// descriptions. Full instructions remain private to the main prompt.
 	availableSkillIdx := []SkillIndex{}
 	availableSkillFull := []SkillFull{}
-	skillIDs, _ := store.SkillsForModel(ctx, o.db, model.ID)
-	for _, sid := range skillIDs {
-		if sk, skillErr := store.GetSkill(ctx, o.db, sid); skillErr == nil && sk.Enabled {
-			availableSkillIdx = append(availableSkillIdx, SkillIndex{Name: sk.Name, When: sk.Description})
-			availableSkillFull = append(availableSkillFull, SkillFull{Name: sk.Name, Instructions: sk.Instructions})
-		}
+	skillsAllowed := (builtinTools == nil || builtinTools["use_skill"]) && !globalDisabledTools["use_skill"]
+	if skillsAllowed {
+		availableSkillIdx, availableSkillFull = loadEnabledModelSkills(ctx, o.db, model.ID)
 	}
 
 	// 5. Resolve tools for this model BEFORE composing the system prompt so the
@@ -1163,14 +1303,22 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		officialRequests = nil
 	}
 	useOfficial := officialMode && len(officialRequests) > 0
-
+	// An explicit Official choice can resolve to an empty set because the user
+	// unchecked every tool, selected stale names, or an administrator changed the
+	// model configuration between selection and send. Treat that as the same
+	// effective no-tools policy as Disabled. Merely retaining the official-mode
+	// marker would suppress local declarations but skip the no-tools fallbacks
+	// (notably inline RAG for rag_mode=tool), skill clearing, and history cleanup.
+	if officialMode && !useOfficial {
+		req.NoTools = true
+	}
 	toolDefs := []ToolDef{}
 	toolMode := model.ToolMode
 	if toolMode == "" {
 		toolMode = "native"
 	}
 	if toolMode != "none" && !officialMode {
-		toolDefs = o.filterDisabledTools(o.tools.List(model.ID))
+		toolDefs = filterModelBuiltinTools(o.filterDisabledTools(o.tools.List(model.ID)), builtinTools)
 		// §fast-mode withholds python_execute (no sandbox on a fast turn) — drop it
 		// from the offered tools so the model never even sees it. Its budget is also
 		// quartered via ToolContext.Fast (charge()).
@@ -1185,15 +1333,23 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		}
 	}
 	if req.ToolMode == ToolModeAuto {
-		if sandboxFilesHaveSheet(sandboxFiles) {
+		// An effective deny-all policy has nothing the classifier could enable.
+		// Enter the same no-tools pipeline immediately: besides avoiding a wasted
+		// task-model round trip, this activates server-side fallbacks such as inline
+		// RAG for conversations configured with rag_mode=tool.
+		if len(toolDefs) == 0 {
+			req.NoTools = true
+		} else if sandboxFilesHaveSheet(sandboxFiles) {
 			req.NoTools = false
 		} else {
 			candidates := append([]ToolDef(nil), toolDefs...)
-			for _, skill := range availableSkillIdx {
-				candidates = append(candidates, ToolDef{
-					Name:        "skill:" + skill.Name,
-					Description: skill.When,
-				})
+			if toolDefsContain(toolDefs, "use_skill") {
+				for _, skill := range availableSkillIdx {
+					candidates = append(candidates, ToolDef{
+						Name:        "skill:" + skill.Name,
+						Description: skill.When,
+					})
+				}
 			}
 			req.NoTools = !o.autoTurnNeedsTools(ctx, req, history, candidates, sandboxFiles, conv.WorkspaceID, assistantMsg.ID)
 		}
@@ -1330,10 +1486,10 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// rides the same message-layer injection as RAG. Citations join the turn's
 	// source list. Kept OUT of formatRAGContext so they aren't double-wrapped as
 	// KB context.
-	if req.NoTools && req.ForceWebSearch {
+	if req.NoTools && req.ForceWebSearch && (builtinTools == nil || builtinTools["web_search"]) {
 		// Offset the search citations past any KB snippets already collected this
 		// turn so the two source sets don't both start at [1].
-		if searchText, searchCites := o.forcedWebSearch(ctx, req, conv, history, len(ragSnippets), onEvent); searchText != "" {
+		if searchText, searchCites := o.forcedWebSearch(ctx, req, conv, history, len(ragSnippets), builtinTools, onEvent); searchText != "" {
 			if ragContext != "" {
 				ragContext += "\n\n"
 			}
@@ -1400,6 +1556,9 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// remove the prohibited code-tool blocks below.
 	nativeToolReplay := !fastMode && (useOfficial || (toolMode == "native" && len(toolDefs) > 0))
 	uHist := storeToUnified(keep, channel.Type, nativeToolReplay)
+	if !officialMode {
+		uHist = stripDisallowedBuiltinToolBlocks(uHist, toolDefNameSet(toolDefs))
+	}
 	if fastMode {
 		uHist = stripFastModeCodeBlocks(uHist)
 	}
@@ -1466,7 +1625,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	if fastMode {
 		promptModelLabel = fastModeLabel(req.Locale)
 	}
-	system := composeSystemPrompt(systemPromptOpts{
+	systemOpts := systemPromptOpts{
 		ModelSystem:         model.SystemPrompt,
 		ModelLabel:          promptModelLabel,
 		Locale:              req.Locale,
@@ -1483,7 +1642,9 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		InlineQuote:         conv.InlineQuote,
 		InlineSource:        inlineSource,
 		SkillToolAvailable:  skillToolAvailable,
-	})
+		SkillsAllowed:       skillsAllowed && !req.NoTools,
+	}
+	system := composeSystemPrompt(systemOpts)
 
 	// 11. Title generation (§6.3) — fire-and-forget the first time.
 	if shouldGenerateTitle(conv) {
@@ -1507,12 +1668,13 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		extraParams = model.ExtraParams
 	}
 	provReq := UnifiedChatRequest{
-		UserID:         req.UserID,
-		ConversationID: conv.ID,
-		MessageID:      assistantMsg.ID,
-		ProjectName:    projectName,
-		SystemPrompt:   system,
-		History:        uHist,
+		UserID:              req.UserID,
+		ConversationID:      conv.ID,
+		MessageID:           assistantMsg.ID,
+		ProjectName:         projectName,
+		SystemPrompt:        system,
+		SystemPromptOptions: &systemOpts,
+		History:             uHist,
 		Model: ModelInfo{
 			ID:        model.ID,
 			RequestID: model.RequestID,
@@ -1527,7 +1689,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		OfficialToolNames:    officialTools,
 		OfficialToolRequests: officialRequests,
 		ToolModeOfficial:     officialMode,
-		ToolModePrompt:       toolMode == "prompt" && !officialMode,
+		ToolModePrompt:       toolMode == "prompt" && !officialMode && len(toolDefs) > 0,
 		ProjectFiles:         projectFiles,
 		RAGSnippets:          ragSnippets,
 		ParamOverrides:       req.ParamOverrides,
@@ -1596,6 +1758,11 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			ImageBilling: o,
 			DeepResearch: req.Mode == ModeDeepResearch,
 			Fast:         fastMode, // §fast-mode: quartered tool budgets + no python_execute
+			// Bind execution to the exact definitions declared for this turn. This
+			// includes model policy, global disabled_tools, fast mode, official/no-
+			// tools state, and prevents an unsolicited provider call from bypassing
+			// declaration filtering.
+			BuiltinTools: toolDefNameSet(toolDefs),
 
 			OnArtifact: func(a ArtifactRef) {
 				artMu.Lock()
@@ -1610,6 +1777,8 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		// Official request fragments execute upstream. An unsolicited/local-looking
 		// function call must never reach the system tool registry in this mode.
 		providerRunner = officialModeToolRunner{}
+	} else {
+		providerRunner = toolDefAllowlistRunner{next: runner, allowed: toolDefNameSet(provReq.Tools)}
 	}
 
 	// Non-streaming models (§4.3): suppress incremental text deltas and emit
@@ -2013,6 +2182,8 @@ func (o *Orchestrator) runImageTurn(
 	model *store.Model,
 	userMsg, assistantMsg *store.Message,
 	req RunRequest,
+	imageRequestParams map[string]any,
+	imageGenerationCount int,
 	turnStart time.Time,
 	payWithCredits bool,
 	onEvent func(SseEvent),
@@ -2049,22 +2220,28 @@ func (o *Orchestrator) runImageTurn(
 
 	// Force-call image_generate. tc.ImageModelID = the conversation's image model
 	// so resolveImageModel uses exactly it.
+	imageGenerationCount = ClampImageGenerationCount(imageGenerationCount)
+	imageSize := imageModeForcedGenerationSize
+	if configuredSize, ok := imageRequestParams["size"].(string); ok && strings.TrimSpace(configuredSize) != "" {
+		imageSize = configuredSize
+	}
 	toolInput, _ := json.Marshal(map[string]any{
 		"prompt":       finalPrompt,
-		"n":            imageModeForcedGenerationCount,
-		"size":         imageModeForcedGenerationSize,
+		"n":            imageGenerationCount,
+		"size":         imageSize,
 		"input_images": inputImageIDs,
 	})
 	var mu sync.Mutex
 	artifacts := []ArtifactRef{}
 	tc := &ToolContext{
-		UserID:       req.UserID,
-		WorkspaceID:  conv.WorkspaceID,
-		ConvID:       conv.ID,
-		MessageID:    assistantMsg.ID,
-		ModelID:      model.ID,
-		ImageModelID: model.ID,
-		DB:           o.db,
+		UserID:             req.UserID,
+		WorkspaceID:        conv.WorkspaceID,
+		ConvID:             conv.ID,
+		MessageID:          assistantMsg.ID,
+		ModelID:            model.ID,
+		ImageModelID:       model.ID,
+		ImageRequestParams: imageRequestParams,
+		DB:                 o.db,
 		// The orchestrator already ran the credit-aware checkImageQuota above, so
 		// the tool must not also hard-cap this turn (§4.20).
 		SkipImageQuota: true,
@@ -2292,6 +2469,56 @@ func storeToUnified(msgs []store.Message, currentProvider string, nativeToolRepl
 }
 
 const fastModeCodeHistoryPlaceholder = "[A previous code-analysis step was omitted in Fast mode.]"
+
+const unsupportedToolHistoryPlaceholder = "[A previous tool step was omitted because this model does not support that tool.]"
+
+// stripDisallowedBuiltinToolBlocks removes historical calls that are outside a
+// configured model allowlist. Provider-native Raw is dropped on an affected
+// message because its vendor-specific call/output items cannot be safely
+// filtered here; unaffected messages retain Raw for reasoning/tool continuity.
+// Canonical blocks retain only allowed calls and paired outputs. Stored messages
+// remain untouched.
+func stripDisallowedBuiltinToolBlocks(history []UnifiedMessage, allowed map[string]bool) []UnifiedMessage {
+	if allowed == nil {
+		return history
+	}
+	deniedIDs := map[string]bool{}
+	for _, message := range history {
+		for _, block := range message.Blocks {
+			if block.Kind == "tool_call" && !allowed[strings.TrimSpace(block.ToolName)] && block.ToolID != "" {
+				deniedIDs[block.ToolID] = true
+			}
+		}
+	}
+	out := make([]UnifiedMessage, len(history))
+	for index, message := range history {
+		filtered := message
+		if message.Blocks != nil {
+			filtered.Blocks = make([]UnifiedBlock, 0, len(message.Blocks))
+		}
+		affected := false
+		for _, block := range message.Blocks {
+			nameDenied := strings.TrimSpace(block.ToolName) != "" && !allowed[strings.TrimSpace(block.ToolName)]
+			linkedOutput := block.Kind == "tool_output" && block.ToolID != "" && deniedIDs[block.ToolID]
+			if (block.Kind == "tool_call" || block.Kind == "tool_output") && (nameDenied || linkedOutput) {
+				affected = true
+				continue
+			}
+			filtered.Blocks = append(filtered.Blocks, cloneUnifiedBlock(block))
+		}
+		if affected && strings.TrimSpace(renderBlocksAsText(filtered.Blocks)) == "" {
+			filtered.Blocks = append(filtered.Blocks, UnifiedBlock{Kind: "text", Text: unsupportedToolHistoryPlaceholder})
+		}
+		if affected {
+			filtered.Raw = nil
+		} else {
+			filtered.Raw = append(json.RawMessage(nil), message.Raw...)
+		}
+		filtered.Attachments = append([]Attachment(nil), message.Attachments...)
+		out[index] = filtered
+	}
+	return out
+}
 
 // stripFastModeCodeBlocks removes canonical history for code tools that fast
 // mode does not offer. Raw replay is disabled by the caller before conversion,
@@ -2575,6 +2802,21 @@ type SkillFull struct {
 	Instructions string
 }
 
+func loadEnabledModelSkills(ctx context.Context, db *sql.DB, modelID string) ([]SkillIndex, []SkillFull) {
+	indexes := []SkillIndex{}
+	full := []SkillFull{}
+	skillIDs, _ := store.SkillsForModel(ctx, db, modelID)
+	for _, skillID := range skillIDs {
+		skill, err := store.GetSkill(ctx, db, skillID)
+		if err != nil || !skill.Enabled {
+			continue
+		}
+		indexes = append(indexes, SkillIndex{Name: skill.Name, When: skill.Description})
+		full = append(full, SkillFull{Name: skill.Name, Instructions: skill.Instructions})
+	}
+	return indexes, full
+}
+
 type systemPromptOpts struct {
 	ModelSystem string
 	// ModelLabel is the admin-configured display name of the model. It drives the
@@ -2609,6 +2851,11 @@ type systemPromptOpts struct {
 	// use_skill disabled), skills are inlined in full so they still take effect
 	// instead of pointing the model at a tool it can't call.
 	SkillToolAvailable bool
+	// SkillsAllowed captures the primary request ceiling separately from whether
+	// use_skill is natively declared. It remains true for tool_mode=none models
+	// that inline skills, but false for a per-turn disable or model/global policy.
+	// TTFT fallback uses it to avoid broadening the original request policy.
+	SkillsAllowed bool
 }
 
 // UserPersona is the per-user personalization read from settings.
@@ -2839,7 +3086,7 @@ func composeSystemPrompt(o systemPromptOpts) string {
 		// produces a document is dead weight. Models that can't call use_skill
 		// still get them inline.
 		if has["python_execute"] {
-			if !o.SkillToolAvailable {
+			if o.SkillsAllowed && !o.SkillToolAvailable {
 				b.WriteString("\n")
 				b.WriteString(DocGenRecipes)
 			}
@@ -2864,8 +3111,11 @@ func composeSystemPrompt(o systemPromptOpts) string {
 	// The built-in document-generation skill (§4.5.1) joins the index when the
 	// model can run python_execute; an admin skill with the same name shadows
 	// it (mirrored in useSkillTool's lookup order).
-	skillIdx := o.Skills
-	if o.SkillToolAvailable && o.ToolMode != "none" && has["python_execute"] {
+	skillIdx := []SkillIndex(nil)
+	if o.SkillsAllowed {
+		skillIdx = o.Skills
+	}
+	if o.SkillsAllowed && o.SkillToolAvailable && o.ToolMode != "none" && has["python_execute"] {
 		shadowed := false
 		for _, s := range o.Skills {
 			if strings.EqualFold(s.Name, DocGenSkillName) {
@@ -2877,13 +3127,13 @@ func composeSystemPrompt(o systemPromptOpts) string {
 			skillIdx = append(append([]SkillIndex{}, o.Skills...), SkillIndex{Name: DocGenSkillName, When: DocGenWhen})
 		}
 	}
-	if o.SkillToolAvailable && len(skillIdx) > 0 {
+	if o.SkillsAllowed && o.SkillToolAvailable && len(skillIdx) > 0 {
 		b.WriteString(l.skillsAvailHeader)
 		b.WriteString(l.skillsAvailBody)
 		for _, s := range skillIdx {
 			fmt.Fprintf(&b, "- %s: %s\n", s.Name, s.When)
 		}
-	} else if len(o.SkillsFull) > 0 {
+	} else if o.SkillsAllowed && len(o.SkillsFull) > 0 {
 		b.WriteString(l.skillsInlineHeader)
 		b.WriteString(l.skillsInlineBody)
 		for _, s := range o.SkillsFull {
@@ -3198,11 +3448,14 @@ func (o *Orchestrator) deriveSearchQueries(ctx context.Context, req RunRequest, 
 // and the results become a <web-search-result> block for prompt injection.
 // Returns (contextText, citations); ("", nil) when search is unconfigured or
 // yields nothing. Best-effort — a failure never blocks the turn.
-func (o *Orchestrator) forcedWebSearch(ctx context.Context, req RunRequest, conv *store.Conversation, history []store.Message, baseIndex int, onEvent func(SseEvent)) (string, []Citation) {
+func (o *Orchestrator) forcedWebSearch(ctx context.Context, req RunRequest, conv *store.Conversation, history []store.Message, baseIndex int, allowedTools map[string]bool, onEvent func(SseEvent)) (string, []Citation) {
 	// Respect the admin platform kill-switch: if web_search is globally
 	// disabled, the forced-search path must not run it either (it would
 	// otherwise be a back door around `disabled_tools`).
 	if o.disabledToolSet()["web_search"] {
+		return "", nil
+	}
+	if allowedTools != nil && !allowedTools["web_search"] {
 		return "", nil
 	}
 	queries := o.deriveSearchQueries(ctx, req, history)
@@ -3210,7 +3463,7 @@ func (o *Orchestrator) forcedWebSearch(ctx context.Context, req RunRequest, conv
 		return "", nil
 	}
 	searchTimeout := toolCallTimeout("web_search")
-	tc := &ToolContext{UserID: req.UserID, ConvID: req.ConversationID, WorkspaceID: conv.WorkspaceID, ModelID: req.ModelID}
+	tc := &ToolContext{UserID: req.UserID, ConvID: req.ConversationID, WorkspaceID: conv.WorkspaceID, ModelID: req.ModelID, BuiltinTools: allowedTools}
 	var cites []Citation
 	var b strings.Builder
 	for i, q := range queries {
@@ -3607,6 +3860,61 @@ type officialModeToolRunner struct{}
 
 func (officialModeToolRunner) Run(_ context.Context, name string, _ []byte) (string, []Citation, error) {
 	return "", nil, fmt.Errorf("system tool %q is unavailable in official mode", name)
+}
+
+// toolDefAllowlistRunner binds execution to the exact definitions sent in the
+// current provider request. It blocks unsolicited or stale calls even when a
+// broader persisted model policy would otherwise allow the tool.
+type toolDefAllowlistRunner struct {
+	next    ToolRunner
+	allowed map[string]bool
+}
+
+func (r toolDefAllowlistRunner) Run(ctx context.Context, name string, input []byte) (string, []Citation, error) {
+	if !r.allowed[name] {
+		return "", nil, fmt.Errorf("tool %q is not enabled for the current model request", name)
+	}
+	return r.next.Run(ctx, name, input)
+}
+
+// toolRunnerForModelRequest retargets the concrete orchestrator runner during a
+// TTFT model switch. In particular, use_skill must query bindings for the
+// fallback model, not the primary model whose context built the first request.
+func toolRunnerForModelRequest(runner ToolRunner, modelID string, definitions []ToolDef) ToolRunner {
+	base := runner
+	if restricted, ok := runner.(toolDefAllowlistRunner); ok {
+		base = restricted.next
+	}
+	if current, ok := base.(*orchToolRunner); ok && current.ctx != nil {
+		source := current.ctx
+		params := make(map[string]any, len(source.ImageRequestParams))
+		for key, value := range source.ImageRequestParams {
+			params[key] = value
+		}
+		fallbackContext := &ToolContext{
+			UserID:             source.UserID,
+			ConvID:             source.ConvID,
+			MessageID:          source.MessageID,
+			WorkspaceID:        source.WorkspaceID,
+			ModelID:            modelID,
+			KBIDs:              append([]string(nil), source.KBIDs...),
+			ProjectID:          source.ProjectID,
+			ProjectName:        source.ProjectName,
+			DB:                 source.DB,
+			RAG:                source.RAG,
+			DeepResearch:       source.DeepResearch,
+			Fast:               source.Fast,
+			BuiltinTools:       toolDefNameSet(definitions),
+			ImageModelID:       source.ImageModelID,
+			ImageRequestParams: params,
+			SkipImageQuota:     source.SkipImageQuota,
+			ImageBilling:       source.ImageBilling,
+			OnArtifact:         source.OnArtifact,
+			counts:             map[string]int{},
+		}
+		base = &orchToolRunner{orch: current.orch, ctx: fallbackContext, onEvent: current.onEvent}
+	}
+	return toolDefAllowlistRunner{next: base, allowed: toolDefNameSet(definitions)}
 }
 
 // toolTimeouts bounds a single tool invocation per tool type (§4.3: search

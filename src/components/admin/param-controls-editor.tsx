@@ -145,8 +145,8 @@ export function ParamControlsEditor({ value, onChange }: Props) {
   return (
     <div className="flex flex-col gap-3">
       {controls.map((c, i) => (
-        <div key={i} className="rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] p-3.5 flex flex-col gap-3">
-          <div className="flex items-center gap-2">
+        <div key={i} className="min-w-0 rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] p-3 sm:p-3.5 flex flex-col gap-3">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
             <div className="inline-flex items-center gap-1 p-0.5 rounded-[9px] bg-[var(--color-bg-muted)] border border-[var(--color-border-subtle)]">
               {(['toggle', 'select'] as const).map((ty) => (
                 <button
@@ -176,7 +176,7 @@ export function ParamControlsEditor({ value, onChange }: Props) {
             </Button>
           </div>
 
-          <div className="grid grid-cols-2 gap-2.5">
+          <div className="grid min-w-0 grid-cols-1 gap-2.5 sm:grid-cols-2">
             <LabeledInput label={tt('key')} value={c.key} onChange={(v) => setAt(i, { key: v })} placeholder="thinking" cls={inputCls} mono />
             <LabeledInput label={tt('label')} value={c.label} onChange={(v) => setAt(i, { label: v })} placeholder={t('models.pc.labelPlaceholder')} cls={inputCls} />
             <LabeledIcon label={tt('icon')} value={c.icon} onChange={(v) => setAt(i, { icon: v })} />
@@ -184,7 +184,7 @@ export function ParamControlsEditor({ value, onChange }: Props) {
           </div>
 
           {c.type === 'toggle' ? (
-            <div className="grid grid-cols-2 gap-2.5">
+            <div className="grid min-w-0 grid-cols-1 gap-2.5 sm:grid-cols-2">
               <LabeledArea label={tt('onFragment')} value={c.onFragment} onChange={(v) => setAt(i, { onFragment: v })} />
               <LabeledArea label={tt('offFragment')} value={c.offFragment} onChange={(v) => setAt(i, { offFragment: v })} />
             </div>
@@ -193,11 +193,11 @@ export function ParamControlsEditor({ value, onChange }: Props) {
               <span className="text-[12px] text-[var(--color-fg-subtle)]">{tt('options')}</span>
               {c.options.map((op, j) => (
                 <div key={j} className="rounded-[10px] border border-[var(--color-border-subtle)] bg-[var(--color-bg-muted)] p-2.5 flex flex-col gap-2">
-                  <div className="grid grid-cols-[1fr_1fr_1fr_auto] gap-2 items-end">
+                  <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto] lg:items-end">
                     <LabeledInput label={tt('optValue')} value={op.value} onChange={(v) => setAt(i, { options: c.options.map((x, k) => (k === j ? { ...x, value: v } : x)) })} placeholder="high" cls={inputCls} mono />
                     <LabeledInput label={tt('optLabel')} value={op.label} onChange={(v) => setAt(i, { options: c.options.map((x, k) => (k === j ? { ...x, label: v } : x)) })} placeholder={t('models.pc.labelPlaceholder')} cls={inputCls} />
                     <LabeledIcon label={tt('icon')} value={op.icon} onChange={(v) => setAt(i, { options: c.options.map((x, k) => (k === j ? { ...x, icon: v } : x)) })} />
-                    <Button variant="ghost" size="sm" className="text-[var(--color-danger)] h-8" onClick={() => setAt(i, { options: c.options.filter((_, k) => k !== j) })}>
+                    <Button variant="ghost" size="sm" className="h-8 justify-self-end text-[var(--color-danger)]" onClick={() => setAt(i, { options: c.options.filter((_, k) => k !== j) })}>
                       <Trash2 size={13} aria-hidden />
                     </Button>
                   </div>
@@ -215,7 +215,7 @@ export function ParamControlsEditor({ value, onChange }: Props) {
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-2.5">
+          <div className="grid min-w-0 grid-cols-1 gap-2.5 sm:grid-cols-2">
             <LabeledInput label={tt('showIfKey')} value={c.showIfKey} onChange={(v) => setAt(i, { showIfKey: v })} placeholder="thinking" cls={inputCls} mono />
             <LabeledInput label={tt('showIfValue')} value={c.showIfValue} onChange={(v) => setAt(i, { showIfValue: v })} placeholder="true" cls={inputCls} mono />
           </div>
@@ -245,7 +245,7 @@ export function ParamControlsEditor({ value, onChange }: Props) {
 
 function LabeledInput({ label, value, onChange, placeholder, cls, mono }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string; cls?: string; mono?: boolean }) {
   return (
-    <label className="flex flex-col gap-1">
+    <label className="flex min-w-0 flex-col gap-1">
       <span className="text-[11.5px] text-[var(--color-fg-subtle)]">{label}</span>
       <Input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className={(cls ?? '') + (mono ? ' font-mono' : '')} />
     </label>
@@ -254,7 +254,7 @@ function LabeledInput({ label, value, onChange, placeholder, cls, mono }: { labe
 
 function LabeledIcon({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
   return (
-    <label className="flex flex-col gap-1">
+    <label className="flex min-w-0 flex-col gap-1">
       <span className="text-[11.5px] text-[var(--color-fg-subtle)]">{label}</span>
       <IconPicker value={value} onChange={onChange} />
     </label>
@@ -263,7 +263,7 @@ function LabeledIcon({ label, value, onChange }: { label: string; value: string;
 
 function LabeledArea({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
   return (
-    <label className="flex flex-col gap-1">
+    <label className="flex min-w-0 flex-col gap-1">
       <span className="text-[11.5px] text-[var(--color-fg-subtle)]">{label}</span>
       <Textarea rows={4} value={value} onChange={(e) => onChange(e.target.value)} className="font-mono text-[12px]" />
     </label>

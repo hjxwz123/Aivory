@@ -74,7 +74,8 @@
       "pricing": "计费",
       "permissions": "权限",
       "tags": "标签",
-      "skills": "技能"
+      "skills": "技能",
+      "imageBehaviour": "图片生成"
     },
     "fields": {
       "channel": "渠道",
@@ -87,6 +88,15 @@
       "description": "简介(一行)",
       "icon": "图标",
       "toolMode": "工具模式",
+      "builtinToolsLabel": "内置工具",
+      "builtinToolsHint": "限制此模型通过工具调用可使用的平台工具。“默认全部”也会自动包含以后新增的工具。",
+      "builtinToolsDefaultAll": "默认全部",
+      "builtinToolsCustom": "自定义",
+      "builtinToolsSelected": "已启用 {{selected}}/{{total}}",
+      "builtinToolsSelectAll": "全选",
+      "builtinToolsClear": "清空",
+      "builtinToolsEmpty": "暂无已注册的内置工具。",
+      "builtinToolsLoadFailed": "无法加载内置工具列表，已保存的配置未被更改。",
       "officialToolsLabel": "官方工具",
       "useOfficialTools": "使用 OpenAI 官方工具",
       "officialToolsHint": "配置用户选择该工具时附加到上游请求的 JSON；重名数组会按顺序追加。",
@@ -103,6 +113,7 @@
       "fastModelHint": "作为「快速」模式的模型。从进阶选择器中隐藏；用户永远看不到它的名称；深度研究强制关闭。",
       "systemPrompt": "系统提示词",
       "paramControls": "param_controls (JSON)",
+      "paramControlsHint": "配置模型专属选项，并将用户所选值映射合并到上游请求。",
       "extraParams": "额外上游参数（JSON）",
       "extraParamsHint": "可选 JSON 对象，将合并到此模型的上游请求中。优先级：内建请求参数高于参数控件映射，参数控件映射高于此处的值。",
       "dim": "向量维度",
@@ -167,7 +178,27 @@
       "showIfKey": "仅当(键)显示 · 可选",
       "showIfValue": "等于(值)"
     },
-    "skillsHint": "勾选的技能进入系统提示;模型用 use_skill 按需加载。"
+    "skillsHint": "勾选的技能进入系统提示;模型用 use_skill 按需加载。",
+    "builtinTools": {
+      "names": {
+        "web_search": "网页搜索",
+        "web_fetch": "网页读取",
+        "python_execute": "Python 解释器",
+        "image_generate": "图片生成",
+        "search_knowledge_base": "知识库检索",
+        "use_skill": "技能调用",
+        "save_memory": "保存记忆"
+      },
+      "descriptions": {
+        "web_search": "搜索公开网页中的最新信息。",
+        "web_fetch": "读取指定网页的主要内容。",
+        "python_execute": "运行 Python，完成分析、计算和文件生成。",
+        "image_generate": "使用已配置的图片模型生成或编辑图片。",
+        "search_knowledge_base": "检索用户当前选择的知识库。",
+        "use_skill": "按需加载已绑定技能的完整说明。",
+        "save_memory": "将长期有效的用户信息保存到记忆。"
+      }
+    }
   },
   "skills": {
     "title": "技能",

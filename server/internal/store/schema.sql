@@ -146,6 +146,7 @@ CREATE TABLE IF NOT EXISTS models (
   param_controls    TEXT NOT NULL DEFAULT '[]',
   extra_params      TEXT NOT NULL DEFAULT '{}', -- admin-only upstream request defaults; native request fields win
   official_tools    TEXT NOT NULL DEFAULT '[]', -- provider-hosted [{name,icon,request}]; legacy string arrays are migrated
+  builtin_tools     TEXT DEFAULT NULL, -- local-tool allowlist; NULL=all (backwards compatible), []=none
   tags              TEXT NOT NULL DEFAULT '[]', -- model_tags ids for the picker filter (§ model tags)
   moderation_enabled INTEGER NOT NULL DEFAULT 0,      -- screen prompts before generation (§ moderation)
   moderation_mode   TEXT NOT NULL DEFAULT 'keyword',  -- keyword | model

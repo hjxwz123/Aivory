@@ -18,6 +18,8 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -39,7 +41,6 @@ var (
 	webFetchExtractedTextCharCap           = envcfg.Int("AIVORY_TOOLS_WEB_FETCH_EXTRACTED_TEXT_CHAR_CAP", 32000)
 	pythonExecuteUploadStagingFileSize     = envcfg.Int64("AIVORY_TOOLS_PYTHON_EXECUTE_UPLOAD_STAGING_FILE_SIZE", 40*1024*1024)
 	pythonExecuteStdoutStderrTruncationCap = envcfg.Int("AIVORY_TOOLS_PYTHON_EXECUTE_STDOUT_STDERR_TRUNCATION_CAP", 32*1024)
-	inN                                    = envcfg.Int("AIVORY_TOOLS_IN_N", 4)
 	inSize                                 = envcfg.Str("AIVORY_TOOLS_IN_SIZE", "1024x1024")
 	dailyImageLimitResetWindow             = envcfg.Dur("AIVORY_TOOLS_DAILY_IMAGE_LIMIT_RESET_WINDOW", 24*time.Hour)
 	imageQuotaDefaultPeriod                = int64(604800)
@@ -453,7 +454,7 @@ func (t *pythonExecuteTool) Execute(ctx context.Context, input []byte, tc *llm.T
 		// Stage non-image skill assets too (§4.17) so use_skill can reference scripts/data
 		// from /workspace/skills/<name>/. Scope to the skills bound to THIS model
 		// (model_skills) — the same set use_skill can load and the index advertises.
-		if tc.DB != nil && tc.ModelID != "" {
+		if tc.DB != nil && tc.ModelID != "" && tc.AllowsBuiltinTool("use_skill") {
 			if skillIDs, err := store.SkillsForModel(ctx, tc.DB, tc.ModelID); err == nil {
 				for _, sid2 := range skillIDs {
 					sk, err := store.GetSkill(ctx, tc.DB, sid2)
@@ -770,14 +771,16 @@ func (t *imageGenerateTool) Execute(ctx context.Context, input []byte, tc *llm.T
 	if strings.TrimSpace(in.Prompt) == "" {
 		return "", nil, errors.New("prompt required")
 	}
-	if in.N <= 0 {
-		in.N = 1
-	}
-	if in.N > inN {
-		in.N = inN
-	}
+	in.N = llm.ClampImageGenerationCount(in.N)
 	if in.Size == "" {
 		in.Size = inSize
+	}
+	imageRequestParams := map[string]any(nil)
+	if tc != nil {
+		imageRequestParams = sanitizeImageRequestParams(tc.ImageRequestParams)
+		if configuredSize, ok := imageRequestParams["size"].(string); ok && strings.TrimSpace(configuredSize) != "" {
+			in.Size = configuredSize
+		}
 	}
 
 	// §4.12-E 内容安全: 生成前 prompt 过审（关键词来自管理员配置，非硬编码）。
@@ -850,14 +853,20 @@ func (t *imageGenerateTool) Execute(ctx context.Context, input []byte, tc *llm.T
 	var images []imageBytes
 	switch {
 	case isGemini:
-		images, err = geminiGenerateImages(genCtx, channel.BaseURL, channel.APIKey, model.RequestID, in, inputImgs)
+		images, err = geminiGenerateImages(genCtx, channel.BaseURL, channel.APIKey, model.RequestID, in, inputImgs, imageRequestParams)
 	case channel.Type == "openai":
-		images, err = openaiGenerateImages(genCtx, channel.BaseURL, channel.APIKey, model.RequestID, in, inputImgs)
+		images, err = openaiGenerateImages(genCtx, channel.BaseURL, channel.APIKey, model.RequestID, in, inputImgs, imageRequestParams)
 	default:
 		return "", nil, fmt.Errorf("image generation not supported for channel type %q", channel.Type)
 	}
 	if err != nil {
 		return "", nil, err
+	}
+	// Treat the clamped request count as an output boundary too. A provider that
+	// returns extra candidates must not bypass the daily/quota preflight, persist
+	// more artifacts than requested, or debit more credits than were approved.
+	if len(images) > in.N {
+		images = images[:in.N]
 	}
 	if len(images) == 0 {
 		// A per-model timeout (genCtx) can fire DURING a url-fetch of the result;
@@ -1136,7 +1145,7 @@ func readVerifiedImageInput(path string, storedSize int64) ([]byte, string) {
 // extracts inlineData parts (§4.12-C). Input images (explicit image-to-image
 // or the conversation's image_session) ride along as inline_data parts so the
 // model edits rather than starts fresh (§4.12-D).
-func geminiGenerateImages(ctx context.Context, baseURL, apiKey, requestID string, in imgInput, inputImgs []imageBytes) ([]imageBytes, error) {
+func geminiGenerateImages(ctx context.Context, baseURL, apiKey, requestID string, in imgInput, inputImgs []imageBytes, requestParams map[string]any) ([]imageBytes, error) {
 	base := strings.TrimRight(baseURL, "/")
 	if base == "" {
 		base = "https://generativelanguage.googleapis.com"
@@ -1154,10 +1163,14 @@ func geminiGenerateImages(ctx context.Context, baseURL, apiKey, requestID string
 		})
 	}
 	parts = append(parts, map[string]any{"text": in.Prompt})
-	body := map[string]any{
-		"contents":         []map[string]any{{"role": "user", "parts": parts}},
-		"generationConfig": map[string]any{"responseModalities": []string{"IMAGE"}},
+	native := map[string]any{
+		"contents": []map[string]any{{"role": "user", "parts": parts}},
+		"generationConfig": map[string]any{
+			"responseModalities": []string{"IMAGE"},
+			"candidateCount":     llm.ClampImageGenerationCount(in.N),
+		},
 	}
+	body := store.DeepMergeJSONObjects(sanitizeImageRequestParams(requestParams), native)
 	raw, _ := json.Marshal(body)
 	url := fmt.Sprintf("%s/v1beta/models/%s:generateContent?key=%s", base, requestID, apiKey)
 	req, _ := http.NewRequestWithContext(ctx, "POST", url, strings.NewReader(string(raw)))
@@ -1207,7 +1220,7 @@ func geminiGenerateImages(ctx context.Context, baseURL, apiKey, requestID string
 // openaiGenerateImages calls the Images API (§4.12-C): plain generation via
 // /v1/images/generations, or — when input images are supplied — image editing
 // via the multipart /v1/images/edits endpoint.
-func openaiGenerateImages(ctx context.Context, baseURL, apiKey, requestID string, in imgInput, inputImgs []imageBytes) ([]imageBytes, error) {
+func openaiGenerateImages(ctx context.Context, baseURL, apiKey, requestID string, in imgInput, inputImgs []imageBytes, requestParams map[string]any) ([]imageBytes, error) {
 	base := strings.TrimRight(baseURL, "/")
 	if base == "" {
 		base = "https://api.openai.com"
@@ -1217,17 +1230,30 @@ func openaiGenerateImages(ctx context.Context, baseURL, apiKey, requestID string
 	// param; only the DALL·E models accept it. Send it only for dall-e and parse
 	// both b64_json and url responses so either model family works.
 	isDalle := strings.Contains(strings.ToLower(requestID), "dall")
+	native := map[string]any{
+		"model":  requestID,
+		"prompt": in.Prompt,
+		"n":      llm.ClampImageGenerationCount(in.N),
+		"size":   in.Size,
+	}
+	if isDalle {
+		native["response_format"] = "b64_json"
+	}
+	body := store.DeepMergeJSONObjects(sanitizeImageRequestParams(requestParams), native)
 	var req *http.Request
 	if len(inputImgs) > 0 {
 		// Image edit (图生图): multipart form with the source image + prompt.
 		var buf bytes.Buffer
 		mw := multipart.NewWriter(&buf)
-		_ = mw.WriteField("model", requestID)
-		_ = mw.WriteField("prompt", in.Prompt)
-		_ = mw.WriteField("n", fmt.Sprintf("%d", in.N))
-		_ = mw.WriteField("size", in.Size)
-		if isDalle {
-			_ = mw.WriteField("response_format", "b64_json")
+		keys := make([]string, 0, len(body))
+		for key := range body {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			if value, ok := imageMultipartScalar(body[key]); ok {
+				_ = mw.WriteField(key, value)
+			}
 		}
 		fw, err := mw.CreateFormFile("image", "input"+extForMime(inputImgs[0].mime))
 		if err != nil {
@@ -1240,15 +1266,6 @@ func openaiGenerateImages(ctx context.Context, baseURL, apiKey, requestID string
 		req, _ = http.NewRequestWithContext(ctx, "POST", base+"/v1/images/edits", &buf)
 		req.Header.Set("content-type", mw.FormDataContentType())
 	} else {
-		body := map[string]any{
-			"model":  requestID,
-			"prompt": in.Prompt,
-			"n":      in.N,
-			"size":   in.Size,
-		}
-		if isDalle {
-			body["response_format"] = "b64_json"
-		}
 		raw, _ := json.Marshal(body)
 		req, _ = http.NewRequestWithContext(ctx, "POST", base+"/v1/images/generations", strings.NewReader(string(raw)))
 		req.Header.Set("content-type", "application/json")
@@ -1289,6 +1306,60 @@ func openaiGenerateImages(ctx context.Context, baseURL, apiKey, requestID string
 		}
 	}
 	return out, nil
+}
+
+// sanitizeImageRequestParams clones the admin-declared param-control fragment
+// and removes fields that belong to server routing, identity, authentication,
+// or user content. Provider-specific generation options remain available, but
+// they can never redirect the request or replace the prompt/reference images.
+func sanitizeImageRequestParams(params map[string]any) map[string]any {
+	clean := store.DeepMergeJSONObjects(nil, params)
+	for key := range clean {
+		normalized := strings.NewReplacer("_", "", "-", "").Replace(strings.ToLower(key))
+		switch normalized {
+		case "model", "prompt", "n", "inputimages", "contents", "responsemodalities", "image", "images", "mask",
+			"apikey", "baseurl", "url", "endpoint", "headers", "authorization":
+			delete(clean, key)
+		}
+	}
+	return clean
+}
+
+func imageMultipartScalar(value any) (string, bool) {
+	switch v := value.(type) {
+	case string:
+		return v, true
+	case bool:
+		return strconv.FormatBool(v), true
+	case json.Number:
+		return v.String(), true
+	case float64:
+		return strconv.FormatFloat(v, 'f', -1, 64), true
+	case float32:
+		return strconv.FormatFloat(float64(v), 'f', -1, 32), true
+	case int:
+		return strconv.Itoa(v), true
+	case int8:
+		return strconv.FormatInt(int64(v), 10), true
+	case int16:
+		return strconv.FormatInt(int64(v), 10), true
+	case int32:
+		return strconv.FormatInt(int64(v), 10), true
+	case int64:
+		return strconv.FormatInt(v, 10), true
+	case uint:
+		return strconv.FormatUint(uint64(v), 10), true
+	case uint8:
+		return strconv.FormatUint(uint64(v), 10), true
+	case uint16:
+		return strconv.FormatUint(uint64(v), 10), true
+	case uint32:
+		return strconv.FormatUint(uint64(v), 10), true
+	case uint64:
+		return strconv.FormatUint(v, 10), true
+	default:
+		return "", false
+	}
 }
 
 // fetchRemoteImage downloads an image URL returned by an image API, returning

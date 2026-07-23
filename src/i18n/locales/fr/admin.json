@@ -74,7 +74,8 @@
       "pricing": "Tarification",
       "permissions": "Permissions",
       "tags": "Étiquettes",
-      "skills": "Compétences"
+      "skills": "Compétences",
+      "imageBehaviour": "Génération d’images"
     },
     "fields": {
       "channel": "Canal",
@@ -87,6 +88,15 @@
       "description": "Description (une ligne)",
       "icon": "Icône",
       "toolMode": "Mode outil",
+      "builtinToolsLabel": "Outils intégrés",
+      "builtinToolsHint": "Limitez les outils de la plateforme accessibles à ce modèle via les appels d'outils. Le mode par défaut inclut aussi les futurs outils.",
+      "builtinToolsDefaultAll": "Tous par défaut",
+      "builtinToolsCustom": "Personnalisé",
+      "builtinToolsSelected": "{{selected}}/{{total}} activés",
+      "builtinToolsSelectAll": "Tout sélectionner",
+      "builtinToolsClear": "Effacer",
+      "builtinToolsEmpty": "Aucun outil intégré n’est enregistré.",
+      "builtinToolsLoadFailed": "Impossible de charger le registre des outils intégrés. La configuration enregistrée n’a pas été modifiée.",
       "officialToolsLabel": "Outils natifs du fournisseur",
       "useOfficialTools": "Utiliser les outils intégrés d'OpenAI",
       "officialToolsHint": "Définissez le JSON ajouté à la requête lorsque l'utilisateur choisit cet outil. Les tableaux de même clé sont concaténés.",
@@ -101,6 +111,7 @@
       "researchEnabled": "Recherche approfondie",
       "systemPrompt": "Invite système",
       "paramControls": "param_controls (JSON)",
+      "paramControlsHint": "Exposez des choix propres au modèle et fusionnez chaque valeur sélectionnée dans la requête au fournisseur.",
       "extraParams": "Paramètres amont supplémentaires (JSON)",
       "extraParamsHint": "Objet JSON facultatif fusionné dans la requête amont de ce modèle. Priorité : les paramètres intégrés priment sur les mappages des contrôles, qui priment sur ces valeurs.",
       "dim": "Dimension",
@@ -163,7 +174,27 @@
       "showIfKey": "Afficher si (clé) · facultatif",
       "showIfValue": "Égale (valeur)"
     },
-    "skillsHint": "Les compétences cochées sont annoncées ; chargées via use_skill."
+    "skillsHint": "Les compétences cochées sont annoncées ; chargées via use_skill.",
+    "builtinTools": {
+      "names": {
+        "web_search": "Recherche web",
+        "web_fetch": "Lire une page web",
+        "python_execute": "Interpréteur Python",
+        "image_generate": "Génération d’images",
+        "search_knowledge_base": "Recherche dans les connaissances",
+        "use_skill": "Utiliser une compétence",
+        "save_memory": "Enregistrer en mémoire"
+      },
+      "descriptions": {
+        "web_search": "Rechercher des informations récentes sur le web public.",
+        "web_fetch": "Lire le contenu principal d’une page web précise.",
+        "python_execute": "Exécuter Python pour analyser, calculer et générer des fichiers.",
+        "image_generate": "Générer ou modifier des images avec le modèle configuré.",
+        "search_knowledge_base": "Rechercher dans les bases de connaissances sélectionnées.",
+        "use_skill": "Charger à la demande les instructions complètes d’une compétence.",
+        "save_memory": "Conserver durablement des informations sur l’utilisateur."
+      }
+    }
   },
   "skills": {
     "title": "Compétences",
