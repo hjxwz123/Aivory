@@ -197,10 +197,11 @@ export default function AdminLayout() {
     )
   }
 
-  // h-full (not h-svh) on the shell root: #root resolves to a concrete viewport
-  // height via the html/body height:100% chain, so matching it exactly avoids
-  // 100svh overshooting that height and the document gaining a scrollbar
-  // alongside <main>'s — the "two scrollbars" bug.
+  // The shell matches #root's concrete viewport height. <main> is also a
+  // permanent positioning context: RouteFade temporarily creates one while its
+  // transform animation runs, then removes it. Without a positioned scroll
+  // root, deep absolute `sr-only` controls can jump to document coordinates
+  // when that animation ends and make <html> scroll alongside <main>.
   return (
     <div className="flex h-full w-full overflow-hidden bg-[var(--color-bg)] text-[var(--color-fg)]">
       {/* Desktop sidebar */}
@@ -221,7 +222,7 @@ export default function AdminLayout() {
 
       <main
         className={cn(
-          'min-w-0 flex-1',
+          'relative min-h-0 min-w-0 flex-1 overscroll-y-contain',
           filesWorkspace ? 'flex flex-col overflow-hidden' : 'overflow-y-auto',
         )}
       >

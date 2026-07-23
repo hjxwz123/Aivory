@@ -109,7 +109,9 @@ export interface ApiShareInfo {
   created_at: number
 }
 
-/** One message in a public share snapshot — cost-stripped, identity-free. */
+/** One message in a public share snapshot. It is cost-stripped and carries only
+ *  the display identity needed by the transcript; ids/email/provider details
+ *  remain private. Identity fields are optional for legacy snapshots. */
 export interface ApiSharedMessage {
   role: 'user' | 'assistant'
   blocks: ApiBlock[]
@@ -118,6 +120,12 @@ export interface ApiSharedMessage {
    *  before shares carried assets — re-share to include uploads. */
   attachments?: ApiAttachment[]
   created_at: number
+  author_name?: string
+  author_avatar?: string
+  model_label?: string
+  model_icon?: string
+  /** Fast turns preserve the product-wide model-identity masking contract. */
+  fast?: boolean
 }
 
 /** The public read-only conversation served at /share/:token. */
