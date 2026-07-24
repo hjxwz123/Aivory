@@ -10,8 +10,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"io"
 	"log"
+	"math"
 	"mime/multipart"
 	"net/http"
 	"net/url"
@@ -24,6 +29,8 @@ import (
 	"sync"
 	"time"
 	"unicode"
+
+	_ "golang.org/x/image/webp"
 
 	"aivory/server/internal/config"
 	"aivory/server/internal/envcfg"
@@ -41,7 +48,7 @@ var (
 	webFetchExtractedTextCharCap           = envcfg.Int("AIVORY_TOOLS_WEB_FETCH_EXTRACTED_TEXT_CHAR_CAP", 32000)
 	pythonExecuteUploadStagingFileSize     = envcfg.Int64("AIVORY_TOOLS_PYTHON_EXECUTE_UPLOAD_STAGING_FILE_SIZE", 40*1024*1024)
 	pythonExecuteStdoutStderrTruncationCap = envcfg.Int("AIVORY_TOOLS_PYTHON_EXECUTE_STDOUT_STDERR_TRUNCATION_CAP", 32*1024)
-	inSize                                 = envcfg.Str("AIVORY_TOOLS_IN_SIZE", "1024x1024")
+	inSize                                 = envcfg.Str("AIVORY_TOOLS_IN_SIZE", "")
 	dailyImageLimitResetWindow             = envcfg.Dur("AIVORY_TOOLS_DAILY_IMAGE_LIMIT_RESET_WINDOW", 24*time.Hour)
 	imageQuotaDefaultPeriod                = int64(604800)
 	imageImageInputImageCap                = envcfg.Int("AIVORY_TOOLS_IMAGE_IMAGE_INPUT_IMAGE_CAP", 3)
@@ -755,7 +762,7 @@ func (t *imageGenerateTool) Description() string {
 	return "Generate or edit an image from a textual prompt. Use when the user explicitly asks for an illustration, poster, diagram, or photo. Returns the image as a downloadable artifact."
 }
 func (t *imageGenerateTool) InputSchema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"prompt":{"type":"string","description":"What to draw"},"n":{"type":"integer","default":1},"size":{"type":"string","enum":["256x256","512x512","1024x1024","1792x1024","1024x1792"],"default":"1024x1024"},"input_images":{"type":"array","items":{"type":"string"},"description":"Artifact ids of images to edit (image-to-image)"}},"required":["prompt"]}`)
+	return json.RawMessage(`{"type":"object","properties":{"prompt":{"type":"string","description":"What to draw"},"n":{"type":"integer","default":1},"size":{"type":"string","description":"Optional output size. Omit to let the image model choose automatically. GPT Image 1.x supports 1024x1024, 1536x1024, and 1024x1536; GPT Image 2 also supports valid WIDTHxHEIGHT values."},"input_images":{"type":"array","items":{"type":"string"},"description":"Artifact ids of images to edit (image-to-image)"}},"required":["prompt"]}`)
 }
 
 type imgInput struct {
@@ -772,8 +779,9 @@ func (t *imageGenerateTool) Execute(ctx context.Context, input []byte, tc *llm.T
 		return "", nil, errors.New("prompt required")
 	}
 	in.N = llm.ClampImageGenerationCount(in.N)
+	in.Size = strings.TrimSpace(in.Size)
 	if in.Size == "" {
-		in.Size = inSize
+		in.Size = strings.TrimSpace(inSize)
 	}
 	imageRequestParams := map[string]any(nil)
 	if tc != nil {
@@ -1230,16 +1238,30 @@ func openaiGenerateImages(ctx context.Context, baseURL, apiKey, requestID string
 	// param; only the DALL·E models accept it. Send it only for dall-e and parse
 	// both b64_json and url responses so either model family works.
 	isDalle := strings.Contains(strings.ToLower(requestID), "dall")
+	cleanParams := sanitizeImageRequestParams(requestParams)
+	requestedSize := strings.TrimSpace(in.Size)
+	if configuredSize, ok := cleanParams["size"].(string); ok && strings.TrimSpace(configuredSize) != "" {
+		requestedSize = strings.TrimSpace(configuredSize)
+	} else {
+		// A malformed or empty admin fragment must not suppress provider auto-sizing.
+		delete(cleanParams, "size")
+	}
+	if requestedSize == "" && len(inputImgs) > 0 {
+		requestedSize = inferredOpenAIEditSize(requestID, inputImgs[0])
+	}
+
 	native := map[string]any{
 		"model":  requestID,
 		"prompt": in.Prompt,
 		"n":      llm.ClampImageGenerationCount(in.N),
-		"size":   in.Size,
+	}
+	if requestedSize != "" {
+		native["size"] = requestedSize
 	}
 	if isDalle {
 		native["response_format"] = "b64_json"
 	}
-	body := store.DeepMergeJSONObjects(sanitizeImageRequestParams(requestParams), native)
+	body := store.DeepMergeJSONObjects(cleanParams, native)
 	var req *http.Request
 	if len(inputImgs) > 0 {
 		// Image edit (图生图): multipart form with the source image + prompt.
@@ -1306,6 +1328,115 @@ func openaiGenerateImages(ctx context.Context, baseURL, apiKey, requestID string
 		}
 	}
 	return out, nil
+}
+
+const (
+	gptImage2MinPixels    = 655360
+	gptImage2MaxPixels    = 8294400
+	gptImage2MaxEdge      = 3840
+	gptImage2MaxAspect    = 3.0
+	gptImage2TargetPixels = 1024 * 1024
+)
+
+// inferredOpenAIEditSize preserves the first edit image's canvas as closely as
+// the selected GPT Image generation supports. Unknown models and undecodable
+// formats deliberately return empty so the provider's default `auto` behavior
+// remains authoritative instead of falling back to a square.
+func inferredOpenAIEditSize(requestID string, source imageBytes) string {
+	config, _, err := image.DecodeConfig(bytes.NewReader(source.data))
+	if err != nil || config.Width <= 0 || config.Height <= 0 {
+		return ""
+	}
+
+	modelID := strings.ToLower(strings.TrimSpace(requestID))
+	switch {
+	case isOpenAIModelOrSnapshot(modelID, "gpt-image-2"):
+		return closestGPTImage2Size(config.Width, config.Height)
+	case isOpenAIModelOrSnapshot(modelID, "gpt-image-1.5"),
+		isOpenAIModelOrSnapshot(modelID, "gpt-image-1-mini"),
+		isOpenAIModelOrSnapshot(modelID, "gpt-image-1"):
+		return closestGPTImage1Size(config.Width, config.Height)
+	default:
+		return ""
+	}
+}
+
+func isOpenAIModelOrSnapshot(modelID, base string) bool {
+	if modelID == base {
+		return true
+	}
+	snapshot, ok := strings.CutPrefix(modelID, base+"-")
+	if !ok {
+		return false
+	}
+	_, err := time.Parse("2006-01-02", snapshot)
+	return err == nil
+}
+
+// closestGPTImage1Size maps arbitrary input canvases to the three sizes that
+// GPT Image models before gpt-image-2 accept.
+func closestGPTImage1Size(width, height int) string {
+	if width <= 0 || height <= 0 {
+		return ""
+	}
+	targetRatio := float64(width) / float64(height)
+	candidates := []struct {
+		size  string
+		ratio float64
+	}{
+		{size: "1024x1024", ratio: 1},
+		{size: "1536x1024", ratio: 1.5},
+		{size: "1024x1536", ratio: 2.0 / 3.0},
+	}
+	best := candidates[0]
+	bestError := math.Abs(math.Log(best.ratio / targetRatio))
+	for _, candidate := range candidates[1:] {
+		err := math.Abs(math.Log(candidate.ratio / targetRatio))
+		if err < bestError {
+			best = candidate
+			bestError = err
+		}
+	}
+	return best.size
+}
+
+// closestGPTImage2Size searches a conservative ~1 MP band for the legal
+// multiple-of-16 canvas whose ratio is closest to the source. Keeping the area
+// near the former 1024-square budget avoids silently turning a large upload
+// into an expensive experimental-size output while preserving its shape.
+func closestGPTImage2Size(width, height int) string {
+	if width <= 0 || height <= 0 {
+		return ""
+	}
+	targetRatio := float64(width) / float64(height)
+	targetRatio = math.Max(1/gptImage2MaxAspect, math.Min(gptImage2MaxAspect, targetRatio))
+	searchMinPixels := 3 * gptImage2TargetPixels / 4
+	searchMaxPixels := 5 * gptImage2TargetPixels / 4
+
+	bestWidth, bestHeight := 0, 0
+	bestRatioError, bestAreaError := math.MaxFloat64, math.MaxFloat64
+	for candidateWidth := 16; candidateWidth <= gptImage2MaxEdge; candidateWidth += 16 {
+		for candidateHeight := 16; candidateHeight <= gptImage2MaxEdge; candidateHeight += 16 {
+			pixels := candidateWidth * candidateHeight
+			if pixels < searchMinPixels || pixels > searchMaxPixels || pixels < gptImage2MinPixels || pixels > gptImage2MaxPixels {
+				continue
+			}
+			candidateRatio := float64(candidateWidth) / float64(candidateHeight)
+			if candidateRatio > gptImage2MaxAspect || candidateRatio < 1/gptImage2MaxAspect {
+				continue
+			}
+			ratioError := math.Abs(math.Log(candidateRatio / targetRatio))
+			areaError := math.Abs(math.Log(float64(pixels) / gptImage2TargetPixels))
+			if ratioError < bestRatioError-1e-12 || (math.Abs(ratioError-bestRatioError) <= 1e-12 && areaError < bestAreaError) {
+				bestWidth, bestHeight = candidateWidth, candidateHeight
+				bestRatioError, bestAreaError = ratioError, areaError
+			}
+		}
+	}
+	if bestWidth == 0 || bestHeight == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%dx%d", bestWidth, bestHeight)
 }
 
 // sanitizeImageRequestParams clones the admin-declared param-control fragment
