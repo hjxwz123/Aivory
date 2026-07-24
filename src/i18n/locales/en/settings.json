@@ -47,7 +47,7 @@
     "toolModes": {
       "auto": {
         "label": "Automatic",
-        "body": "Ask the task model whether tools are needed before each response."
+        "body": "Automatically decide whether tool calls are needed."
       },
       "disabled": {
         "label": "Off",
@@ -55,7 +55,7 @@
       },
       "enabled": {
         "label": "Built-in",
-        "body": "Use the built-in tools enabled for the selected model by the administrator."
+        "body": "Use built-in tool calls."
       },
       "official": {
         "label": "Official",

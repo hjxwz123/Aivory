@@ -104,11 +104,11 @@
       "toolMode": "工具调用",
       "toolModeDesc": "选择自动、官方、关闭或内置工具模式。",
       "toolModeAuto": "自动",
-      "toolModeAutoDesc": "由任务模型判断本次回答是否需要工具。",
+      "toolModeAutoDesc": "自动判断是否需要工具调用。",
       "toolModeDisabled": "关闭",
       "toolModeDisabledDesc": "不提供工具，直接生成回答。",
       "toolModeEnabled": "内置",
-      "toolModeEnabledDesc": "使用管理员为当前模型启用的内置工具。",
+      "toolModeEnabledDesc": "使用内置工具调用。",
       "toolModeOfficial": "官方",
       "toolModeOfficialDesc": "仅使用你选择的服务商原生工具。",
       "officialTools": "官方工具",
@@ -185,13 +185,13 @@
   "tools": {
     "web_search": "网页搜索",
     "code_interpreter": "代码解释器",
-    "image_generation": "OpenAI 托管图片生成",
+    "image_generation": "图片生成",
     "deep_research": "深度研究"
   },
   "toolDescriptions": {
     "web_search": "实时检索全网最新资讯",
     "code_interpreter": "运行代码并分析文件",
-    "image_generation": "由 OpenAI 托管工具生成或编辑图片；图片模型和参数由 OpenAI 选择，不使用站内预选图片模型"
+    "image_generation": "生成或编辑图片"
   },
   "sources": {
     "label": "来源",
