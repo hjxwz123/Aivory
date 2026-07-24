@@ -91,9 +91,12 @@ export function AuthGate({ children }: { children: ReactNode }) {
       !officialDefaultsModelsRef.current.has(defaultModelId)
     ) {
       officialDefaultsModelsRef.current.add(defaultModelId)
+      const savedOfficialTools = resolveDefaultOfficialToolNames(user.settings)
       useComposerPrefs.getState().setOfficialToolNames(
         defaultModelId,
-        filterOfficialToolNames(models.getById(defaultModelId), resolveDefaultOfficialToolNames(user.settings)),
+        savedOfficialTools === undefined
+          ? undefined
+          : filterOfficialToolNames(models.getById(defaultModelId), savedOfficialTools),
       )
     }
   }, [defaultModelId, status, user?.id, user?.settings, syncUserSettings])
@@ -132,12 +135,12 @@ export function AuthGate({ children }: { children: ReactNode }) {
       }
       if (officialDefaultsModelsRef.current.has(models.defaultId)) return
       officialDefaultsModelsRef.current.add(models.defaultId)
+      const savedOfficialTools = resolveDefaultOfficialToolNames(currentUser.settings)
       useComposerPrefs.getState().setOfficialToolNames(
         models.defaultId,
-        filterOfficialToolNames(
-          models.getById(models.defaultId),
-          resolveDefaultOfficialToolNames(currentUser.settings),
-        ),
+        savedOfficialTools === undefined
+          ? undefined
+          : filterOfficialToolNames(models.getById(models.defaultId), savedOfficialTools),
       )
     })
   }, [status, user?.id, loadConversations, loadProjects, loadModels])

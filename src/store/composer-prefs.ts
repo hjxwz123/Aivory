@@ -33,7 +33,7 @@ interface ComposerPrefsStore extends PersistedComposerPrefs {
   setToolMode: (toolMode: ToolMode) => void
   // Update the mirror of the server-side default tool policy.
   setDefaultToolMode: (toolMode: ToolMode) => void
-  setOfficialToolNames: (modelId: string, names: string[]) => void
+  setOfficialToolNames: (modelId: string, names: string[] | undefined) => void
   setForceWebSearch: (on: boolean) => void
   setParamValues: (modelId: string, values: Record<string, unknown>) => void
   setDraft: (scope: string, value: string) => void
@@ -94,9 +94,8 @@ function sanitizeOfficialToolNamesByModel(raw: unknown): Record<string, string[]
   const out: Record<string, string[]> = {}
   for (const [modelId, value] of Object.entries(raw)) {
     const id = modelId.trim()
-    if (!id) continue
-    const names = sanitizeOfficialToolNames(value)
-    if (names.length > 0) out[id] = names
+    if (!id || !Array.isArray(value)) continue
+    out[id] = sanitizeOfficialToolNames(value)
   }
   return out
 }
@@ -206,9 +205,8 @@ export const useComposerPrefs = create<ComposerPrefsStore>((set) => {
       if (!id) return
       set((state) => {
         const officialToolNamesByModel = { ...state.officialToolNamesByModel }
-        const clean = sanitizeOfficialToolNames(names)
-        if (clean.length > 0) officialToolNamesByModel[id] = clean
-        else delete officialToolNamesByModel[id]
+        if (names === undefined) delete officialToolNamesByModel[id]
+        else officialToolNamesByModel[id] = sanitizeOfficialToolNames(names)
         persistPrefs(persistedFrom(state, { officialToolNamesByModel }))
         return { officialToolNamesByModel }
       })

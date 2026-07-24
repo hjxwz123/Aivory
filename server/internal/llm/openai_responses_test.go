@@ -1,7 +1,9 @@
 package llm
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -9,6 +11,115 @@ import (
 	"strings"
 	"testing"
 )
+
+func testPNGBytes(payloadSize int) []byte {
+	data := append([]byte(nil), []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}...)
+	return append(data, bytes.Repeat([]byte{0}, payloadSize)...)
+}
+
+func TestOpenAIResponsesHostedImageLargeEventReturnsBinaryWithoutRawBase64(t *testing.T) {
+	imageData := testPNGBytes(900_000)
+	encoded := base64.StdEncoding.EncodeToString(imageData)
+	if len(encoded) <= 1<<20 {
+		t.Fatalf("fixture must exceed the old Scanner limit, got %d bytes", len(encoded))
+	}
+	stream := strings.Join([]string{
+		`data: {"type":"response.output_item.added","item":{"id":"ig_1","type":"image_generation_call"}}`,
+		`data: {"type":"response.output_item.done","item":{"id":"ig_1","type":"image_generation_call","status":"completed","result":"` + encoded + `"}}`,
+		`data: {"type":"response.completed","response":{"usage":{"input_tokens":9,"output_tokens":3},"output":[{"id":"ig_1","type":"image_generation_call","status":"completed","result":"` + encoded + `"}]}}`,
+		`data: [DONE]`,
+		``,
+	}, "\n\n")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, stream)
+	}))
+	defer srv.Close()
+
+	result, err := (&OpenAIProvider{}).Stream(context.Background(), UnifiedChatRequest{
+		Model:                ModelInfo{RequestID: "gpt-test", BaseURL: srv.URL, APIKey: "k", APIFormat: "responses"},
+		History:              []UnifiedMessage{{Role: "user", Blocks: []UnifiedBlock{{Kind: "text", Text: "draw"}}}},
+		OfficialToolNames:    []string{"image_generation"},
+		OfficialToolRequests: []json.RawMessage{json.RawMessage(`{"tools":[{"type":"image_generation"}]}`)},
+		ToolModeOfficial:     true,
+	}, nil, func(SseEvent) {})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	if len(result.GeneratedImages) != 1 || !bytes.Equal(result.GeneratedImages[0].Data, imageData) || result.GeneratedImages[0].MimeType != "image/png" {
+		t.Fatalf("generated images = %#v", result.GeneratedImages)
+	}
+	if bytes.Contains(result.Raw, []byte(`"result"`)) || bytes.Contains(result.Raw, []byte(encoded[:128])) {
+		t.Fatal("multi-megabyte image result leaked into persisted Responses raw")
+	}
+}
+
+func TestResponsesHostedImageUsesLatestPartialWhenFinalResultIsOmitted(t *testing.T) {
+	imageData := testPNGBytes(32)
+	encoded := base64.StdEncoding.EncodeToString(imageData)
+	stream := strings.Join([]string{
+		`data: {"type":"response.output_item.added","item":{"id":"ig_partial","type":"image_generation_call"}}`,
+		`data: {"type":"response.image_generation_call.partial_image","item_id":"ig_partial","partial_image_index":0,"partial_image":"aW52YWxpZA=="}`,
+		`data: {"type":"response.image_generation_call.partial_image","item_id":"ig_partial","partial_image_index":1,"partial_image_b64":"` + encoded + `"}`,
+		`data: {"type":"response.output_item.done","item":{"id":"ig_partial","type":"image_generation_call","status":"completed"}}`,
+		`data: {"type":"response.completed","response":{"output":[{"id":"ig_partial","type":"image_generation_call","status":"completed"}]}}`,
+		`data: [DONE]`,
+		``,
+	}, "\n\n")
+
+	_, _, _, hosted, _, _, outputItems, err := readOpenAIResponsesStream(strings.NewReader(stream), func(SseEvent) {})
+	if err != nil {
+		t.Fatalf("read stream: %v", err)
+	}
+	hosted, images, err := decodeHostedGeneratedImages(hosted)
+	if err != nil {
+		t.Fatalf("decode partial image: %v", err)
+	}
+	if len(images) != 1 || !bytes.Equal(images[0].Data, imageData) {
+		t.Fatalf("partial fallback images = %#v", images)
+	}
+	if hosted[0].ImageBase64 != "" {
+		t.Fatal("decoded base64 was retained in hosted tool state")
+	}
+	raw, _ := json.Marshal(outputItems)
+	if bytes.Contains(raw, []byte(`"result"`)) {
+		t.Fatalf("output items retained image result: %s", raw)
+	}
+}
+
+func TestResponsesHostedImageCompletedWithoutUsableResultFails(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		encoded string
+	}{
+		{name: "missing"},
+		{name: "invalid base64", encoded: "%%%"},
+		{name: "unsupported bytes", encoded: base64.StdEncoding.EncodeToString([]byte("plain text"))},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, images, err := decodeHostedGeneratedImages([]hostedToolCall{{
+				ID: "ig_bad", Name: "image_generate", Status: "completed", ImageBase64: tc.encoded,
+			}})
+			if err == nil || len(images) != 0 {
+				t.Fatalf("images=%#v err=%v, want a decoding failure", images, err)
+			}
+		})
+	}
+}
+
+func TestResponsesHostedItemWithoutIDDoesNotPanic(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"type":"response.output_item.added","item":{"type":"image_generation_call"}}`,
+		`data: {"type":"response.completed","response":{"output":[]}}`,
+		`data: [DONE]`,
+		``,
+	}, "\n\n")
+	_, _, _, hosted, _, _, _, err := readOpenAIResponsesStream(strings.NewReader(stream), func(SseEvent) {})
+	if err != nil || len(hosted) != 0 {
+		t.Fatalf("hosted=%#v err=%v", hosted, err)
+	}
+}
 
 // TestResponsesWebSearchCitations verifies the hosted web_search citation path:
 // inline url_citation annotations AND the web_search_call.action.sources list

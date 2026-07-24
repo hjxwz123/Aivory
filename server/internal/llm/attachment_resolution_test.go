@@ -11,6 +11,67 @@ import (
 	"aivory/server/internal/store"
 )
 
+func TestImageAttachmentIDsKeepsOnlyUniqueImageUploads(t *testing.T) {
+	attachments := []Attachment{
+		{ID: " image-kind ", Kind: "image"},
+		{ID: "mime-kind", Kind: "other", MimeType: "image/webp"},
+		{ID: "document", Kind: "pdf", MimeType: "application/pdf"},
+		{ID: "image-kind", Kind: "image", MimeType: "image/png"},
+		{ID: "", Kind: "image"},
+	}
+	got := imageAttachmentIDs(attachments)
+	if len(got) != 2 || got[0] != "image-kind" || got[1] != "mime-kind" {
+		t.Fatalf("imageAttachmentIDs() = %#v", got)
+	}
+}
+
+func TestResolveImageArtifactBlocksHydratesOnlyOwnedVerifiedImages(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "generated-image-artifacts.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := store.Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	for _, query := range []string{
+		`INSERT INTO users(id,email,password_hash,name) VALUES('u1','u1@example.test','hash','Owner')`,
+		`INSERT INTO users(id,email,password_hash,name) VALUES('u2','u2@example.test','hash','Other')`,
+		`INSERT INTO conversations(id,user_id,title) VALUES('c1','u1','Images')`,
+		`INSERT INTO messages(id,conversation_id,role) VALUES('a1','c1','assistant')`,
+	} {
+		if _, err := db.Exec(query); err != nil {
+			t.Fatal(err)
+		}
+	}
+	imageData := append([]byte("\x89PNG\r\n\x1a\n"), make([]byte, 24)...)
+	imagePath := filepath.Join(t.TempDir(), "generated.bin")
+	if err := os.WriteFile(imagePath, imageData, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := store.CreateArtifact(context.Background(), db, store.Artifact{
+		MessageID: "a1", Filename: "generated.bin", StoragePath: imagePath,
+		MimeType: "text/plain", SizeBytes: int64(len(imageData)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	owned := []UnifiedMessage{{Role: "assistant", Blocks: []UnifiedBlock{{
+		Kind: "artifact", FileRef: artifact.ID, MimeType: "text/plain",
+	}}}}
+	(&Orchestrator{db: db}).resolveImageArtifactBlocks(context.Background(), "u1", owned)
+	if got := owned[0].Blocks[0]; got.Data != base64.StdEncoding.EncodeToString(imageData) || got.MimeType != "image/png" {
+		t.Fatalf("owned generated image was not byte-verified and hydrated: %+v", got)
+	}
+
+	notOwned := []UnifiedMessage{{Role: "assistant", Blocks: []UnifiedBlock{{Kind: "artifact", FileRef: artifact.ID}}}}
+	(&Orchestrator{db: db}).resolveImageArtifactBlocks(context.Background(), "u2", notOwned)
+	if notOwned[0].Blocks[0].Data != "" {
+		t.Fatal("another user's generated image was hydrated into provider history")
+	}
+}
+
 func TestResolveAttachmentsUsesConversationFileBytesNotClientMetadata(t *testing.T) {
 	oldLimit := attachmentImageInlineBytes
 	attachmentImageInlineBytes = 64

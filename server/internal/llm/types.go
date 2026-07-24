@@ -218,11 +218,23 @@ type Usage struct {
 	CacheWriteTokens int `json:"cache_write_tokens"`
 }
 
+// GeneratedImage is provider-produced binary image output that has not yet
+// been persisted as an application artifact. Local image_generate calls save
+// their own artifacts; hosted provider tools (OpenAI Responses image_generation)
+// return these to the orchestrator so both paths share the same durable output
+// and SSE contract without embedding multi-megabyte base64 payloads in blocks.
+type GeneratedImage struct {
+	Data     []byte
+	MimeType string
+	SourceID string
+}
+
 // UnifiedResult is what the provider returns after the loop terminates.
 type UnifiedResult struct {
-	Blocks     []UnifiedBlock
-	Raw        json.RawMessage
-	StopReason string
-	Usage      Usage
-	Citations  []Citation
+	Blocks          []UnifiedBlock
+	Raw             json.RawMessage
+	StopReason      string
+	Usage           Usage
+	Citations       []Citation
+	GeneratedImages []GeneratedImage
 }

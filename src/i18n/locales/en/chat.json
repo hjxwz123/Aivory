@@ -112,6 +112,7 @@
       "toolModeOfficial": "Official",
       "toolModeOfficialDesc": "Use only the provider-native tools you select.",
       "officialTools": "Official tools",
+      "officialToolsSelected": "Selected {{selected}}/{{total}}",
       "officialToolsEmpty": "This model has no official tools configured.",
       "webSearch": "Web search",
       "webSearchDesc": "Search the web every turn and add the results to the prompt (no tool call).",
@@ -184,8 +185,13 @@
   "tools": {
     "web_search": "Web search",
     "code_interpreter": "Code interpreter",
-    "image_generation": "Image generation",
+    "image_generation": "OpenAI hosted image generation",
     "deep_research": "Deep research"
+  },
+  "toolDescriptions": {
+    "web_search": "Search the latest information on the web",
+    "code_interpreter": "Run code and analyze files",
+    "image_generation": "Generate or edit images with OpenAI's hosted tool; OpenAI selects the image model and settings instead of the image model preselected in this app"
   },
   "sources": {
     "label": "Sources",

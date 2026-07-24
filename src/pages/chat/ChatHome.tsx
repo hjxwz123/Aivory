@@ -71,7 +71,10 @@ export default function ChatHome() {
   const [searchParams] = useSearchParams()
   const drawMode = searchParams.get('mode') === 'draw'
   const draftScope = drawMode ? 'new-draw' : 'new-chat'
-  const drawDefault = drawMode && imageModels[0] ? imageModels[0].id : ''
+  const savedImageModelId =
+    typeof user?.settings?.image_model_id === 'string' ? user.settings.image_model_id : ''
+  const savedImageModelAvailable = imageModels.some((model) => model.id === savedImageModelId)
+  const drawDefault = drawMode ? (savedImageModelAvailable ? savedImageModelId : imageModels[0]?.id ?? '') : ''
   const pendingStorageKey = useMemo(
     () => pendingConversationKey(user?.id, draftScope, workspaceId),
     [draftScope, user?.id, workspaceId],

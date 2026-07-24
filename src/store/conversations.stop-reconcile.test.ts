@@ -473,7 +473,7 @@ describe('stopped turn optimistic-id reconciliation', () => {
     }
   })
 
-  it('filters official tools by the request model and preserves an explicit empty selection on the wire', async () => {
+  it('defaults to every official tool while preserving customized and explicit empty selections on the wire', async () => {
     useModels.setState({
       models: [
         {
@@ -514,7 +514,19 @@ describe('stopped turn optimistic-id reconciliation', () => {
       officialToolNames: [],
     })
 
-    expect(requestBodies).toHaveLength(2)
+    resetStore()
+    useComposerPrefs.setState({
+      toolMode: 'official',
+      officialToolNamesByModel: {},
+    })
+    await useConversations.getState().sendMessage({
+      conversationId: 'conv_stop',
+      text: 'use every official tool by default',
+      modelId: 'model_1',
+      toolMode: 'official',
+    })
+
+    expect(requestBodies).toHaveLength(3)
     expect(requestBodies[0]).toMatchObject({
       model_id: 'model_1',
       tool_mode: 'official',
@@ -524,6 +536,11 @@ describe('stopped turn optimistic-id reconciliation', () => {
       model_id: 'model_1',
       tool_mode: 'official',
       official_tool_names: [],
+    })
+    expect(requestBodies[2]).toMatchObject({
+      model_id: 'model_1',
+      tool_mode: 'official',
+      official_tool_names: ['web_search', 'image_generation'],
     })
   })
 })

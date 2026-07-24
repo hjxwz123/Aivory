@@ -84,6 +84,13 @@ type ToolRegistry interface {
 	Run(ctx context.Context, name string, input []byte, tc *ToolContext) (output string, citations []Citation, err error)
 }
 
+// providerArtifactRegistry is optionally implemented by the concrete tools
+// registry. It lets provider-hosted tools persist binary output through the same
+// storage path and OnArtifact callback as local tools.
+type providerArtifactRegistry interface {
+	SaveArtifact(ctx context.Context, tc *ToolContext, name, mime string, data []byte) error
+}
+
 // ToolContext is the runtime context passed to tools.
 type ToolContext struct {
 	UserID    string
@@ -117,6 +124,14 @@ type ToolContext struct {
 	// instead of in image_generate's public schema so a chat model cannot forge
 	// arbitrary provider fields.
 	ImageRequestParams map[string]any
+	// ImageInputIDs are the current user turn's image attachments. They are bound
+	// server-side so image_generate edits the actual upload even though provider
+	// tool schemas do not expose internal file ids to the chat model.
+	ImageInputIDs []string
+	// ImageUserPrompt preserves the exact current-turn instruction for attached-
+	// image edits. The chat model may elaborate a generation prompt, but it must
+	// not translate or paraphrase source text the user asked to change literally.
+	ImageUserPrompt string
 	// SkipImageQuota tells image_generate NOT to meter the image model at all
 	// (§4.20): set on the drawing-mode path, where the orchestrator already ran the
 	// credit-aware checkImageQuota AND charges in runImageTurn, so the tool must not
@@ -1214,6 +1229,18 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		assistantMsg.Blocks = refusalBlocks
 		return &RunResult{UserMessage: userMsg, AssistantMessage: assistantMsg}, nil
 	}
+	if model.Kind == "image" {
+		// Direct drawing and normal-chat image_generate must resolve the same image
+		// model and the same last user selections. Store control PICKS (not provider
+		// fields); MergeParamControls re-validates them when the chat tool uses them.
+		_, _ = store.UpdateUserSettings(ctx, o.db, req.UserID, map[string]any{
+			"image_model_id": model.ID,
+			"image_model_params": map[string]any{
+				"model_id": model.ID,
+				"params":   req.ParamOverrides,
+			},
+		})
+	}
 
 	// 2c. Content moderation (§ moderation): screen the new user prompt alone
 	//     (no history) before any provider call. On block, persist a refusal and
@@ -1231,8 +1258,8 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 
 	// 2d. §4.20 Image mode: when the conversation model is an image model, this
 	//     turn DRAWS instead of chatting. We force-call the existing image_generate
-	//     tool (which owns the Gemini/OpenAI gen+edit protocols, image_session
-	//     multi-turn, quota and usage logging) and persist its artifacts as the
+	//     tool (which owns the Gemini/OpenAI generation/edit protocols and
+	//     branch-aware continuation, quota and usage logging) and persist its artifacts as the
 	//     assistant message. Chat tools (python/sandbox) stay available by
 	//     switching back to a chat model in the same conversation.
 	if model.Kind == "image" {
@@ -1312,6 +1339,34 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		officialRequests = nil
 	}
 	useOfficial := officialMode && len(officialRequests) > 0
+	hostedImageOfficial := useOfficial && channel.Type == "openai" && channel.APIFormat == "responses" &&
+		responsesRequestHasToolType(MergeOfficialToolRequests(nil, officialRequests), "image_generation")
+	officialImagePayCredits := false
+	if hostedImageOfficial {
+		if dailyErr := o.checkDailyImageLimit(ctx, req.UserID, 1); dailyErr != nil {
+			message := dailyErr.Error()
+			refusalBlocks, _ := json.Marshal([]UnifiedBlock{{Kind: "text", Text: message}})
+			_ = finishMessage(ctx, store.MessageFinishPatch{
+				Blocks: refusalBlocks, Citations: []byte("[]"), StopReason: "quota_exceeded", Status: "complete",
+			})
+			onEvent(SseEvent{Type: "refusal", MessageID: assistantMsg.ID, Message: message})
+			onEvent(SseEvent{Type: "done", MessageID: assistantMsg.ID, StopReason: "quota_exceeded"})
+			assistantMsg.Blocks = refusalBlocks
+			return &RunResult{UserMessage: userMsg, AssistantMessage: assistantMsg}, nil
+		}
+		quotaMessage, imageAllowed, payImageCredits := o.checkImageQuota(ctx, req.UserID, model, 1)
+		if !imageAllowed {
+			refusalBlocks, _ := json.Marshal([]UnifiedBlock{{Kind: "text", Text: quotaMessage}})
+			_ = finishMessage(ctx, store.MessageFinishPatch{
+				Blocks: refusalBlocks, Citations: []byte("[]"), StopReason: "quota_exceeded", Status: "complete",
+			})
+			onEvent(SseEvent{Type: "refusal", MessageID: assistantMsg.ID, Message: quotaMessage})
+			onEvent(SseEvent{Type: "done", MessageID: assistantMsg.ID, StopReason: "quota_exceeded"})
+			assistantMsg.Blocks = refusalBlocks
+			return &RunResult{UserMessage: userMsg, AssistantMessage: assistantMsg}, nil
+		}
+		officialImagePayCredits = payImageCredits
+	}
 	// An explicit Official choice can resolve to an empty set because the user
 	// unchecked every tool, selected stale names, or an administrator changed the
 	// model configuration between selection and send. Treat that as the same
@@ -1586,6 +1641,9 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		uHist = stripImageBlocks(uHist)
 	}
 	o.resolveAttachments(ctx, req.UserID, conv.ID, uHist, model, onEvent)
+	if hostedImageOfficial {
+		o.resolveImageArtifactBlocks(ctx, req.UserID, uHist)
+	}
 
 	// 9d. Conversation-scoped data files staged into the sandbox
 	//     (/workspace/uploads) were resolved above (`sandboxFiles`, before the
@@ -1759,6 +1817,8 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			WorkspaceID: conv.WorkspaceID, ConvID: conv.ID, MessageID: assistantMsg.ID, ModelID: model.ID,
 			KBIDs: kbIDs, ProjectID: conv.ProjectID, ProjectName: projectName,
 			DB: o.db, RAG: o.rag, ImageModelID: imageModelID,
+			ImageInputIDs:   imageAttachmentIDs(req.Attachments),
+			ImageUserPrompt: req.UserText,
 			// §4.20: meter chat-driven image_generate against the same credit flow.
 			ImageBilling: o,
 			DeepResearch: req.Mode == ModeDeepResearch,
@@ -1806,6 +1866,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	reqRecorder.captureAll = o.successRequestLoggingEnabled()
 	providerCtx := contextWithProviderRequestRecorder(ctx, reqRecorder)
 	var result *UnifiedResult
+	hostedImageCount := 0
 	// §4.6-C: set to the fallback model's display name when a TTFT timeout switches
 	// models mid-turn, so every usage row for the turn can be marked "timeout
 	// fallback" in admin (distinct from the same-model backup-channel `fallback`).
@@ -1817,6 +1878,23 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		result, err = o.runDeepResearch(providerCtx, provReq, runner, provider, streamToUser, conv, assistantMsg)
 	} else {
 		result, err = o.streamWithFallback(providerCtx, provReq, providerRunner, provider, model.ID, streamToUser, &ttftFallbackModel)
+	}
+	// OpenAI Responses executes image_generation upstream, outside the local tool
+	// runner. Materialize those bytes now through the registry's shared artifact
+	// writer so the UI, persistence, downloads, and later edits see a normal image
+	// artifact. Use a detached context because a final image may arrive alongside a
+	// stop/deadline and must not be lost after the provider has already produced it.
+	if result != nil && len(result.GeneratedImages) > 0 {
+		persistedCount, persistErr := o.persistProviderGeneratedImages(context.WithoutCancel(ctx), runner.ctx, result.GeneratedImages)
+		hostedImageCount = persistedCount
+		if persistErr != nil {
+			if err == nil {
+				err = persistErr
+			} else {
+				err = errors.Join(err, persistErr)
+			}
+		}
+		result.GeneratedImages = nil
 	}
 	// §fallback channel: which channel actually served this turn, for the usage
 	// row. If any request was retried on the fallback, the whole turn is marked
@@ -1831,6 +1909,22 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	servedChannelID := model.ChannelID
 	if usedFallback {
 		servedChannelID = fallbackChannelID
+	}
+	if hostedImageCount > 0 {
+		persistCtx := context.WithoutCancel(ctx)
+		imageCost := float64(hostedImageCount) * model.PricePerImage
+		var timedImageCredits float64
+		if officialImagePayCredits && imageCost > 0 {
+			timed, total := o.ChargeImageCredits(persistCtx, req.UserID, imageCost)
+			timedImageCredits = timed
+			runner.ctx.AddImageCredits(total)
+		}
+		o.logUsage(persistCtx, store.UsageLog{
+			UserID: req.UserID, WorkspaceID: conv.WorkspaceID, ConversationID: conv.ID,
+			MessageID: assistantMsg.ID, ModelID: model.ID, Purpose: "image",
+			ImagesCount: hostedImageCount, Cost: imageCost, Credits: timedImageCredits,
+			Currency: model.Currency, ChannelID: servedChannelID, Fallback: usedFallback,
+		})
 	}
 	if err != nil {
 		// §6.2 stop-button semantics: when the user (or the kill switch) cancels
@@ -2176,9 +2270,23 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	return &RunResult{UserMessage: userMsg, AssistantMessage: finalAssistant}, nil
 }
 
+func imageAttachmentIDs(attachments []Attachment) []string {
+	ids := make([]string, 0, len(attachments))
+	seen := make(map[string]bool, len(attachments))
+	for _, attachment := range attachments {
+		id := strings.TrimSpace(attachment.ID)
+		if id == "" || seen[id] || (attachment.Kind != "image" && !strings.HasPrefix(attachment.MimeType, "image/")) {
+			continue
+		}
+		seen[id] = true
+		ids = append(ids, id)
+	}
+	return ids
+}
+
 // runImageTurn handles a §4.20 image-mode turn: compose the final prompt (style
 // hidden prompt + optional text-model optimization), force-call image_generate
-// (the tool owns the Gemini/OpenAI gen+edit protocols, image_session multi-turn,
+// (the tool owns the Gemini/OpenAI generation/edit protocols, branch continuation,
 // quota and image usage logging), and persist its artifacts as the assistant
 // message. The "image_status" events drive the studio's dedicated generating UI.
 func (o *Orchestrator) runImageTurn(
@@ -2197,7 +2305,7 @@ func (o *Orchestrator) runImageTurn(
 
 	// Style: the composer sends image_style_id on a fresh turn. Regenerate doesn't
 	// resend it, so fall back to the last style remembered on the conversation
-	// (provider_state, like image_session) and re-persist it — so a re-draw keeps
+	// (provider_state) and re-persist it — so a re-draw keeps
 	// the original look instead of silently dropping the style.
 	styleID := req.ImageStyleID
 	if styleID == "" {
@@ -2214,12 +2322,7 @@ func (o *Orchestrator) runImageTurn(
 
 	// Reference images: the user's image attachments become input images (edit /
 	// image-to-image). loadInputImages resolves file ids too (§4.20).
-	inputImageIDs := []string{}
-	for _, a := range req.Attachments {
-		if a.Kind == "image" || strings.HasPrefix(a.MimeType, "image/") {
-			inputImageIDs = append(inputImageIDs, a.ID)
-		}
-	}
+	inputImageIDs := imageAttachmentIDs(req.Attachments)
 
 	onEvent(SseEvent{Type: "image_status", MessageID: assistantMsg.ID, Status: "generating"})
 
@@ -2245,6 +2348,8 @@ func (o *Orchestrator) runImageTurn(
 		ModelID:            model.ID,
 		ImageModelID:       model.ID,
 		ImageRequestParams: imageRequestParams,
+		ImageInputIDs:      inputImageIDs,
+		ImageUserPrompt:    req.UserText,
 		DB:                 o.db,
 		// The orchestrator already ran the credit-aware checkImageQuota above, so
 		// the tool must not also hard-cap this turn (§4.20).
@@ -2668,6 +2773,83 @@ func (o *Orchestrator) resolveAttachments(ctx context.Context, userID, convID st
 				continue
 			}
 		}
+	}
+}
+
+// resolveImageArtifactBlocks hydrates generated-image artifact blocks only for a
+// provider path that explicitly needs them as model input (currently OpenAI's
+// hosted Responses image tool). The database remains metadata-only; base64 lives
+// only in this request copy and is ownership-checked and byte-sniffed.
+func (o *Orchestrator) resolveImageArtifactBlocks(ctx context.Context, userID string, hist []UnifiedMessage) {
+	for i := range hist {
+		if hist[i].Role != "assistant" {
+			continue
+		}
+		for j := range hist[i].Blocks {
+			block := &hist[i].Blocks[j]
+			if block.Kind != "artifact" || block.Data != "" {
+				continue
+			}
+			artifactID := strings.TrimSpace(block.FileRef)
+			if artifactID == "" && len(block.Artifacts) > 0 {
+				artifactID = strings.TrimSpace(block.Artifacts[0].ID)
+			}
+			if artifactID == "" {
+				continue
+			}
+			artifact, err := store.GetArtifact(ctx, o.db, artifactID, userID)
+			if err != nil || artifact == nil || artifact.SizeBytes <= 0 || artifact.SizeBytes > attachmentImageInlineBytes {
+				continue
+			}
+			file, err := os.Open(artifact.StoragePath)
+			if err != nil {
+				continue
+			}
+			data, readErr := io.ReadAll(io.LimitReader(file, attachmentImageInlineBytes+1))
+			_ = file.Close()
+			if readErr != nil || int64(len(data)) > attachmentImageInlineBytes {
+				continue
+			}
+			mimeType := providerImageMIMEFromBytes(data)
+			if mimeType == "" {
+				continue
+			}
+			block.Data = base64.StdEncoding.EncodeToString(data)
+			block.MimeType = mimeType
+		}
+	}
+}
+
+func (o *Orchestrator) persistProviderGeneratedImages(ctx context.Context, tc *ToolContext, images []GeneratedImage) (int, error) {
+	registry, ok := o.tools.(providerArtifactRegistry)
+	if !ok {
+		return 0, errors.New("provider image artifact storage is unavailable")
+	}
+	persisted := 0
+	for i, image := range images {
+		mimeType := providerImageMIMEFromBytes(image.Data)
+		if mimeType == "" {
+			return persisted, fmt.Errorf("provider generated image %d has an unsupported format", i+1)
+		}
+		name := fmt.Sprintf("image_%d%s", i+1, providerImageExtension(mimeType))
+		if err := registry.SaveArtifact(ctx, tc, name, mimeType, image.Data); err != nil {
+			return persisted, fmt.Errorf("persist provider generated image %d: %w", i+1, err)
+		}
+		persisted++
+	}
+	return persisted, nil
+}
+
+func providerImageExtension(mimeType string) string {
+	switch strings.ToLower(strings.TrimSpace(mimeType)) {
+	case "image/jpeg":
+		return ".jpg"
+	case "image/webp":
+		return ".webp"
+	case "image/gif":
+		return ".gif"
+	default:
+		return ".png"
 	}
 }
 
@@ -3891,9 +4073,12 @@ func toolRunnerForModelRequest(runner ToolRunner, modelID string, definitions []
 	}
 	if current, ok := base.(*orchToolRunner); ok && current.ctx != nil {
 		source := current.ctx
-		params := make(map[string]any, len(source.ImageRequestParams))
-		for key, value := range source.ImageRequestParams {
-			params[key] = value
+		var params map[string]any
+		if source.ImageRequestParams != nil {
+			params = make(map[string]any, len(source.ImageRequestParams))
+			for key, value := range source.ImageRequestParams {
+				params[key] = value
+			}
 		}
 		fallbackContext := &ToolContext{
 			UserID:             source.UserID,
@@ -3911,6 +4096,8 @@ func toolRunnerForModelRequest(runner ToolRunner, modelID string, definitions []
 			BuiltinTools:       toolDefNameSet(definitions),
 			ImageModelID:       source.ImageModelID,
 			ImageRequestParams: params,
+			ImageInputIDs:      append([]string(nil), source.ImageInputIDs...),
+			ImageUserPrompt:    source.ImageUserPrompt,
 			SkipImageQuota:     source.SkipImageQuota,
 			ImageBilling:       source.ImageBilling,
 			OnArtifact:         source.OnArtifact,

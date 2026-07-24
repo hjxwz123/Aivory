@@ -263,7 +263,10 @@ func TestImageGenerateReferenceUploadsAreVerifiedAndConversationScoped(t *testin
 	}
 
 	tool := &imageGenerateTool{db: db}
-	images := tool.loadInputImages(ctx, &llm.ToolContext{DB: db, UserID: "u1", ConvID: "c1"}, []string{"same", "cross", "fake"})
+	images, tooMany := tool.loadInputImages(ctx, &llm.ToolContext{DB: db, UserID: "u1", ConvID: "c1"}, []string{"same", "cross", "fake"}, 3)
+	if tooMany {
+		t.Fatal("unexpected reference-image truncation")
+	}
 	if len(images) != 1 || images[0].mime != "image/png" || string(images[0].data) != string(png) {
 		t.Fatalf("verified reference images = %+v, want only same-conversation PNG bytes", images)
 	}

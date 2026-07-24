@@ -42,21 +42,28 @@ export function officialToolsForModel(
   return tools
 }
 
-/** Keep only names still allowed by the model, in administrator-defined order. */
+/**
+ * Resolve a model-scoped selection in administrator-defined order.
+ * Missing means the user has never customized this model, so every configured
+ * official tool is enabled by default. An explicit empty array remains empty.
+ */
 export function filterOfficialToolNames(
   model: Pick<ApiModel, 'official_tools'> | null | undefined,
   selected: unknown,
 ): string[] {
+  const tools = officialToolsForModel(model)
+  if (selected === undefined) return tools.map((tool) => tool.name)
   const wanted = new Set(sanitizeOfficialToolNames(selected))
-  return officialToolsForModel(model)
+  return tools
     .map((tool) => tool.name)
     .filter((name) => wanted.has(name))
 }
 
 export function resolveDefaultOfficialToolNames(
   settings: Record<string, unknown> | null | undefined,
-): string[] {
-  return sanitizeOfficialToolNames(settings?.official_tool_names_default)
+): string[] | undefined {
+  const value = settings?.official_tool_names_default
+  return Array.isArray(value) ? sanitizeOfficialToolNames(value) : undefined
 }
 
 export function humanizeOfficialToolName(name: string): string {

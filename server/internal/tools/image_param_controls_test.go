@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -54,6 +56,8 @@ func TestImageGenerateToolUsesOneClampedCountForQuotaRequestAndUsage(t *testing.
 		`INSERT INTO users(id,email,password_hash,name) VALUES('u_image','image@example.test','hash','Image User')`,
 		`INSERT INTO channels(id,name,type,base_url,api_key) VALUES('ch_image','Image Channel','openai','https://images.example.test','server-secret')`,
 		`INSERT INTO models(id,channel_id,kind,request_id,label,price_per_image) VALUES('m_image','ch_image','image','gpt-image-1','Image Model',0.25)`,
+		`INSERT INTO conversations(id,user_id,title,model_id) VALUES('c_image','u_image','Image','m_image')`,
+		`INSERT INTO messages(id,conversation_id,role,model_id) VALUES('msg_image','c_image','assistant','m_image')`,
 	} {
 		if _, err := db.Exec(query); err != nil {
 			t.Fatalf("seed %q: %v", query, err)
@@ -93,6 +97,8 @@ func TestImageGenerateToolUsesOneClampedCountForQuotaRequestAndUsage(t *testing.
 	tool := &imageGenerateTool{db: db, artifactDir: t.TempDir()}
 	output, _, err := tool.Execute(context.Background(), []byte(`{"prompt":"draw","n":999,"size":"1024x1024"}`), &llm.ToolContext{
 		UserID:             "u_image",
+		ConvID:             "c_image",
+		MessageID:          "msg_image",
 		ImageModelID:       "m_image",
 		ImageBilling:       biller,
 		ImageRequestParams: requestParams,
@@ -119,6 +125,96 @@ func TestImageGenerateToolUsesOneClampedCountForQuotaRequestAndUsage(t *testing.
 	}
 	if loggedCount != clampedN {
 		t.Fatalf("usage images_count=%d, want %d", loggedCount, clampedN)
+	}
+}
+
+func TestImageGenerateToolFaithfullyEditsCurrentAttachmentWithModelDefaults(t *testing.T) {
+	db := openToolsTestDB(t)
+	controls := `[{"key":"render","type":"select","default":"faithful","options":[{"value":"faithful"}],"map":{"faithful":{"quality":"high","background":"opaque","input_fidelity":"low"}}}]`
+	for _, query := range []string{
+		`INSERT INTO users(id,email,password_hash,name) VALUES('u_edit','edit@example.test','hash','Edit User')`,
+		`INSERT INTO channels(id,name,type,base_url,api_key) VALUES('ch_edit','Edit Channel','openai','https://images.example.test','server-secret')`,
+	} {
+		if _, err := db.Exec(query); err != nil {
+			t.Fatalf("seed %q: %v", query, err)
+		}
+	}
+	if _, err := db.Exec(`INSERT INTO models(id,channel_id,kind,request_id,label,param_controls) VALUES('m_edit','ch_edit','image','gpt-image-2','GPT Image 2',?)`, controls); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO conversations(id,user_id,title,model_id) VALUES('c_edit','u_edit','Edit','m_edit')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO messages(id,conversation_id,role,model_id) VALUES('msg_edit','c_edit','assistant','m_edit')`); err != nil {
+		t.Fatal(err)
+	}
+
+	inputData := sizedPNG(t, 1600, 900)
+	inputPath := filepath.Join(t.TempDir(), "terminal.png")
+	if err := os.WriteFile(inputPath, inputData, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CreateFile(context.Background(), db, store.File{
+		ID: "f_terminal", UserID: "u_edit", ConversationID: "c_edit", Filename: "terminal.png",
+		MimeType: "image/png", Kind: "image", SizeBytes: int64(len(inputData)), StoragePath: inputPath,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	const exactInstruction = "把所有 07 点改成 09 点，08 点改成 10 点，其他内容一律不变"
+	useImageTestHTTPClient(t, func(req *http.Request) (*http.Response, error) {
+		if got := req.URL.String(); got != "https://images.example.test/v1/images/edits" {
+			t.Fatalf("request URL = %q", got)
+		}
+		if err := req.ParseMultipartForm(4 << 20); err != nil {
+			t.Fatalf("parse multipart: %v", err)
+		}
+		if got := req.FormValue("quality"); got != "high" {
+			t.Fatalf("quality = %q, want selected image-model default", got)
+		}
+		if got := req.FormValue("background"); got != "opaque" {
+			t.Fatalf("background = %q, want selected image-model default", got)
+		}
+		if got := req.FormValue("input_fidelity"); got != "" {
+			t.Fatalf("GPT Image 2 must omit unsupported input_fidelity, got %q", got)
+		}
+		if got := req.FormValue("size"); got != "1280x720" {
+			t.Fatalf("source-ratio size = %q, want 1280x720", got)
+		}
+		prompt := req.FormValue("prompt")
+		if !strings.Contains(prompt, exactInstruction) || !strings.Contains(prompt, "Preserve every other detail") {
+			t.Fatalf("faithful edit prompt = %q", prompt)
+		}
+		if strings.Contains(prompt, "rewrite the whole terminal") {
+			t.Fatalf("chat-model paraphrase replaced exact user instruction: %q", prompt)
+		}
+		files := req.MultipartForm.File["image"]
+		if len(files) != 1 {
+			t.Fatalf("bound current attachment count = %d, want 1", len(files))
+		}
+		file, err := files[0].Open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer file.Close()
+		gotImage, err := io.ReadAll(file)
+		if err != nil || string(gotImage) != string(inputData) {
+			t.Fatalf("bound current attachment changed, err=%v", err)
+		}
+		return imageSuccessResponse(`{"data":[{"b64_json":"ZWRpdGVk"}]}`), nil
+	})
+
+	tool := &imageGenerateTool{db: db, artifactDir: t.TempDir()}
+	_, _, err := tool.Execute(
+		context.Background(),
+		[]byte(`{"prompt":"rewrite the whole terminal","n":1}`),
+		&llm.ToolContext{
+			UserID: "u_edit", ConvID: "c_edit", MessageID: "msg_edit", ImageModelID: "m_edit", DB: db,
+			ImageInputIDs: []string{"f_terminal"}, ImageUserPrompt: exactInstruction,
+		},
+	)
+	if err != nil {
+		t.Fatalf("image_generate Execute: %v", err)
 	}
 }
 
