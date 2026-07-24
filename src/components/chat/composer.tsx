@@ -1750,7 +1750,7 @@ export function Composer({
       value: 'auto',
       label: t('composer.features.toolModeAuto', { defaultValue: 'Auto' }),
       desc: t('composer.features.toolModeAutoDesc', {
-        defaultValue: 'Decide automatically whether this request needs tools.',
+        defaultValue: 'Automatically decide whether tool calls are needed.',
       }),
       icon: <Sparkles size={16} aria-hidden />,
     },
@@ -1774,7 +1774,7 @@ export function Composer({
       value: 'enabled',
       label: t('composer.features.toolModeEnabled', { defaultValue: 'Built-in' }),
       desc: t('composer.features.toolModeEnabledDesc', {
-        defaultValue: 'Use the built-in tools enabled for this model by the administrator.',
+        defaultValue: 'Use built-in tool calls.',
       }),
       icon: <Wrench size={16} aria-hidden />,
     },

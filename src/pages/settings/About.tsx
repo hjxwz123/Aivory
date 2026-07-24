@@ -2,7 +2,7 @@ import { useTranslation } from 'react-i18next'
 import { ExternalLink, Github, FileText, Tag } from 'lucide-react'
 import { Logo } from '@/components/brand/logo'
 
-const APP_VERSION = '2.2.2'
+const APP_VERSION = '2.2.3'
 const GITHUB_URL = 'https://github.com/hjxwz123/Aivory'
 const LICENSE_URL = 'https://github.com/hjxwz123/Aivory/blob/main/LICENSE'
 
