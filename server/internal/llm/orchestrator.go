@@ -32,7 +32,6 @@ import (
 // docs/config-reference.md).
 var (
 	inlineQuoteSourceInjectionCap    = envcfg.Int("AIVORY_LLM_INLINE_QUOTE_SOURCE_INJECTION_CAP", 8000)
-	imageModeForcedGenerationSize    = "1024x1024"
 	imageModeForcedGenerationCount   = 1
 	imagePromptOptimizerOutputTokens = 400
 	ragRouterRecentHistoryCount      = 6
@@ -2227,16 +2226,15 @@ func (o *Orchestrator) runImageTurn(
 	// Force-call image_generate. tc.ImageModelID = the conversation's image model
 	// so resolveImageModel uses exactly it.
 	imageGenerationCount = ClampImageGenerationCount(imageGenerationCount)
-	imageSize := imageModeForcedGenerationSize
-	if configuredSize, ok := imageRequestParams["size"].(string); ok && strings.TrimSpace(configuredSize) != "" {
-		imageSize = configuredSize
-	}
-	toolInput, _ := json.Marshal(map[string]any{
+	toolPayload := map[string]any{
 		"prompt":       finalPrompt,
 		"n":            imageGenerationCount,
-		"size":         imageSize,
 		"input_images": inputImageIDs,
-	})
+	}
+	if configuredSize, ok := imageRequestParams["size"].(string); ok && strings.TrimSpace(configuredSize) != "" {
+		toolPayload["size"] = strings.TrimSpace(configuredSize)
+	}
+	toolInput, _ := json.Marshal(toolPayload)
 	var mu sync.Mutex
 	artifacts := []ArtifactRef{}
 	tc := &ToolContext{
