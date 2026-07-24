@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { parsePersistedComposerPrefs, resetComposerToolModeToDefault, useComposerPrefs } from './composer-prefs'
 import {
   modelAllowsToolModeSelection,
@@ -30,6 +30,10 @@ function resetPrefs() {
 
 describe('composer tool mode', () => {
   beforeEach(resetPrefs)
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
 
   it('starts from the new automatic default', () => {
     const prefs = useComposerPrefs.getState()
@@ -80,7 +84,7 @@ describe('composer tool mode', () => {
     expect(resolveArmedTurnFlags().webSearch).toBeUndefined()
   })
 
-  it('keeps official selections isolated by model and removes empty selections', () => {
+  it('keeps official selections isolated by model and preserves an explicit empty selection', () => {
     const prefs = useComposerPrefs.getState()
     prefs.setOfficialToolNames('model-a', ['web_search', 'web_search', ' code_interpreter '])
     useComposerPrefs.getState().setOfficialToolNames('model-b', ['image_generation'])
@@ -92,8 +96,31 @@ describe('composer tool mode', () => {
 
     useComposerPrefs.getState().setOfficialToolNames('model-a', [])
     expect(useComposerPrefs.getState().officialToolNamesByModel).toEqual({
+      'model-a': [],
       'model-b': ['image_generation'],
     })
+  })
+
+  it('persists an explicit empty selection and uses undefined to restore inheritance', () => {
+    const setItem = vi.fn()
+    vi.stubGlobal('window', {})
+    vi.stubGlobal('localStorage', { setItem })
+
+    useComposerPrefs.getState().setOfficialToolNames(' model-a ', [])
+
+    expect(useComposerPrefs.getState().officialToolNamesByModel).toEqual({ 'model-a': [] })
+    expect(setItem).toHaveBeenLastCalledWith(
+      'aivory.composer-prefs.v1',
+      expect.stringContaining('"officialToolNamesByModel":{"model-a":[]}'),
+    )
+
+    useComposerPrefs.getState().setOfficialToolNames('model-a', undefined)
+
+    expect(useComposerPrefs.getState().officialToolNamesByModel).toEqual({})
+    expect(setItem).toHaveBeenLastCalledWith(
+      'aivory.composer-prefs.v1',
+      expect.stringContaining('"officialToolNamesByModel":{}'),
+    )
   })
 })
 
@@ -190,6 +217,21 @@ describe('tool mode migration', () => {
       forceWebSearch: false,
       paramValuesByModel: { model_1: { temperature: 0.4, thinking: true } },
       draftsByScope: { 'new-chat': 'unfinished question' },
+    })
+  })
+
+  it('keeps explicit empty official selections when loading persisted preferences', () => {
+    const migrated = parsePersistedComposerPrefs({
+      officialToolNamesByModel: {
+        model_1: [],
+        model_2: [' web_search ', 'web_search'],
+        invalid_model: 'image_generation',
+      },
+    })
+
+    expect(migrated.officialToolNamesByModel).toEqual({
+      model_1: [],
+      model_2: ['web_search'],
     })
   })
 })

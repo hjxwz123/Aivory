@@ -51,10 +51,12 @@ var (
 	inSize                                 = envcfg.Str("AIVORY_TOOLS_IN_SIZE", "")
 	dailyImageLimitResetWindow             = envcfg.Dur("AIVORY_TOOLS_DAILY_IMAGE_LIMIT_RESET_WINDOW", 24*time.Hour)
 	imageQuotaDefaultPeriod                = int64(604800)
-	imageImageInputImageCap                = envcfg.Int("AIVORY_TOOLS_IMAGE_IMAGE_INPUT_IMAGE_CAP", 3)
-	fetchRemoteImageDownloadCap            = envcfg.Int64("AIVORY_TOOLS_FETCHREMOTEIMAGE_DOWNLOAD_CAP", 32<<20)
-	inTopK2                                = envcfg.Int("AIVORY_TOOLS_IN_TOP_K_2", 5)
-	saveMemoryConfidence                   = envcfg.F64("AIVORY_TOOLS_CONFIDENCE", 0.95)
+	// 0 selects the provider/model-specific limit. A positive value remains an
+	// operator override for gateways with a stricter custom boundary.
+	imageImageInputImageCap     = envcfg.Int("AIVORY_TOOLS_IMAGE_IMAGE_INPUT_IMAGE_CAP", 0)
+	fetchRemoteImageDownloadCap = envcfg.Int64("AIVORY_TOOLS_FETCHREMOTEIMAGE_DOWNLOAD_CAP", 32<<20)
+	inTopK2                     = envcfg.Int("AIVORY_TOOLS_IN_TOP_K_2", 5)
+	saveMemoryConfidence        = envcfg.F64("AIVORY_TOOLS_CONFIDENCE", 0.95)
 )
 
 // webSearchTool implements §4.4 via a pluggable Searcher. When no backend is
@@ -560,7 +562,9 @@ func (t *pythonExecuteTool) Execute(ctx context.Context, input []byte, tc *llm.T
 
 	// Persist produced files as artifacts + surface them to the orchestrator.
 	for _, f := range res.Files {
-		saveArtifact(ctx, tc, t.artifactDir, f.Name, f.MimeType, f.Data)
+		if _, err := saveArtifact(ctx, tc, t.artifactDir, f.Name, f.MimeType, f.Data); err != nil {
+			return "", nil, fmt.Errorf("persist artifact %q: %w", f.Name, err)
+		}
 	}
 
 	// Pitfall A5: truncate sandbox output at 32KB so a huge stdout can't flood
@@ -587,15 +591,17 @@ func (t *pythonExecuteTool) Execute(ctx context.Context, input []byte, tc *llm.T
 // saveArtifact writes a tool-produced file to ArtifactDir, records it, and
 // notifies the orchestrator so it streams an artifact event + persists a block.
 // Shared by python_execute (sandbox outputs) and image_generate.
-func saveArtifact(ctx context.Context, tc *llm.ToolContext, artifactDir, name, mime string, data []byte) *store.Artifact {
+func saveArtifact(ctx context.Context, tc *llm.ToolContext, artifactDir, name, mime string, data []byte) (*store.Artifact, error) {
 	if tc == nil || tc.DB == nil || tc.MessageID == "" {
-		return nil
+		return nil, errors.New("artifact context is incomplete")
 	}
 	dir := artifactDir
 	if dir == "" {
 		dir = "./data/artifacts"
 	}
-	_ = os.MkdirAll(dir, 0o755)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, err
+	}
 	safe := filepath.Base(name)
 	// Unique on-disk name: a single turn can produce several artifacts that share
 	// a display name (e.g. three image_generate calls each emitting "image_1.png").
@@ -606,7 +612,7 @@ func saveArtifact(ctx context.Context, tc *llm.ToolContext, artifactDir, name, m
 	_, _ = rand.Read(tok)
 	path := filepath.Join(dir, tc.MessageID+"_"+hex.EncodeToString(tok)+"_"+safe)
 	if err := os.WriteFile(path, data, 0o644); err != nil {
-		return nil
+		return nil, err
 	}
 	art, err := store.CreateArtifact(ctx, tc.DB, store.Artifact{
 		MessageID:   tc.MessageID,
@@ -616,7 +622,11 @@ func saveArtifact(ctx context.Context, tc *llm.ToolContext, artifactDir, name, m
 		SizeBytes:   int64(len(data)),
 	})
 	if err != nil || art == nil {
-		return nil
+		_ = os.Remove(path)
+		if err == nil {
+			err = errors.New("artifact row was not created")
+		}
+		return nil, err
 	}
 	if tc.OnArtifact != nil {
 		tc.OnArtifact(llm.ArtifactRef{
@@ -624,7 +634,7 @@ func saveArtifact(ctx context.Context, tc *llm.ToolContext, artifactDir, name, m
 			MimeType: mime, Size: int64(len(data)),
 		})
 	}
-	return art
+	return art, nil
 }
 
 // tryQuickArithmetic returns the result of a single `print(expr)` line.
@@ -759,10 +769,10 @@ type imageGenerateTool struct {
 
 func (t *imageGenerateTool) Name() string { return "image_generate" }
 func (t *imageGenerateTool) Description() string {
-	return "Generate or edit an image from a textual prompt. Use when the user explicitly asks for an illustration, poster, diagram, or photo. Returns the image as a downloadable artifact."
+	return "Generate a new image or faithfully edit a user-provided image. Current-turn image attachments are supplied automatically; do not invent file ids. For edits, describe only the requested change and preserve all other source details. Returns the image as a downloadable artifact."
 }
 func (t *imageGenerateTool) InputSchema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"prompt":{"type":"string","description":"What to draw"},"n":{"type":"integer","default":1},"size":{"type":"string","description":"Optional output size. Omit to let the image model choose automatically. GPT Image 1.x supports 1024x1024, 1536x1024, and 1024x1536; GPT Image 2 also supports valid WIDTHxHEIGHT values."},"input_images":{"type":"array","items":{"type":"string"},"description":"Artifact ids of images to edit (image-to-image)"}},"required":["prompt"]}`)
+	return json.RawMessage(`{"type":"object","properties":{"prompt":{"type":"string","description":"The requested image or exact edit instruction. For edits, do not translate, paraphrase, or restyle text that should remain unchanged."},"n":{"type":"integer","default":1},"size":{"type":"string","description":"Optional output size. Omit for edits to preserve the source aspect ratio automatically. GPT Image 1.x supports 1024x1024, 1536x1024, and 1024x1536; GPT Image 2 also supports valid WIDTHxHEIGHT values."},"input_images":{"type":"array","items":{"type":"string"},"description":"Optional artifact ids from earlier turns. Current-turn image attachments are included automatically."}},"required":["prompt"]}`)
 }
 
 type imgInput struct {
@@ -775,31 +785,23 @@ type imgInput struct {
 func (t *imageGenerateTool) Execute(ctx context.Context, input []byte, tc *llm.ToolContext) (string, []llm.Citation, error) {
 	var in imgInput
 	_ = json.Unmarshal(input, &in)
+	var inputFields map[string]json.RawMessage
+	_ = json.Unmarshal(input, &inputFields)
+	_, nProvided := inputFields["n"]
 	if strings.TrimSpace(in.Prompt) == "" {
 		return "", nil, errors.New("prompt required")
 	}
-	in.N = llm.ClampImageGenerationCount(in.N)
 	in.Size = strings.TrimSpace(in.Size)
 	if in.Size == "" {
 		in.Size = strings.TrimSpace(inSize)
 	}
 	imageRequestParams := map[string]any(nil)
+	resolvedImageRequestParams := map[string]any(nil)
 	if tc != nil {
-		imageRequestParams = sanitizeImageRequestParams(tc.ImageRequestParams)
+		resolvedImageRequestParams = tc.ImageRequestParams
+		imageRequestParams = sanitizeImageRequestParams(resolvedImageRequestParams)
 		if configuredSize, ok := imageRequestParams["size"].(string); ok && strings.TrimSpace(configuredSize) != "" {
 			in.Size = configuredSize
-		}
-	}
-
-	// §4.12-E 内容安全: 生成前 prompt 过审（关键词来自管理员配置，非硬编码）。
-	if err := t.moderateImagePrompt(in.Prompt); err != nil {
-		return "", nil, &llm.ToolRefusalError{Message: err.Error()}
-	}
-
-	// §8.2 每用户每日图像张数限额（按 usage_logs 当日累计）。
-	if tc != nil && tc.DB != nil {
-		if err := t.checkDailyImageLimit(ctx, tc.UserID, in.N); err != nil {
-			return "", nil, &llm.ToolRefusalError{Message: err.Error()}
 		}
 	}
 
@@ -808,6 +810,31 @@ func (t *imageGenerateTool) Execute(ctx context.Context, input []byte, tc *llm.T
 	model, err := t.resolveImageModel(ctx, tc)
 	if err != nil {
 		return "", nil, err
+	}
+	// Drawing mode passes its already-selected mappings explicitly. Chat tool
+	// calls historically passed nil here, silently dropping the selected image
+	// model's quality/background defaults even though both paths used one model.
+	if tc == nil || tc.ImageRequestParams == nil {
+		picks := t.storedImageParamPicks(ctx, tc, model.ID)
+		resolvedImageRequestParams = llm.MergeParamControls(nil, model.ParamControls, picks)
+		imageRequestParams = sanitizeImageRequestParams(resolvedImageRequestParams)
+	}
+	if !nProvided {
+		// n is a server-owned request boundary and is intentionally stripped by
+		// sanitizeImageRequestParams before provider merging. Read it from the
+		// validated param-control result first so chat tools inherit the same count
+		// as direct drawing without allowing arbitrary provider fields through.
+		in.N = llm.ImageGenerationCountFromParams(resolvedImageRequestParams)
+	}
+	in.N = llm.ClampImageGenerationCount(in.N)
+
+	// §8.2 每用户每日图像张数限额（按 usage_logs 当日累计）。 Resolve
+	// n after model defaults so direct mode and chat tool calls project the same
+	// quantity before either reaches the provider.
+	if tc != nil && tc.DB != nil {
+		if err := t.checkDailyImageLimit(ctx, tc.UserID, in.N); err != nil {
+			return "", nil, &llm.ToolRefusalError{Message: err.Error()}
+		}
 	}
 	channel, err := store.GetChannel(ctx, t.db, model.ChannelID)
 	if err != nil {
@@ -838,15 +865,41 @@ func (t *imageGenerateTool) Execute(ctx context.Context, input []byte, tc *llm.T
 		}
 	}
 
-	// §4.12-C/D 图生图: load explicit input images (artifact ids); for Gemini,
-	// fall back to the conversation's image_session so multi-turn edits stay
-	// anchored on the previous generation.
-	inputImgs := t.loadInputImages(ctx, tc, in.InputImages)
+	// §4.12-C/D 图生图: load explicit input images first. With no explicit
+	// reference, walk the current message's parent chain and reuse the closest
+	// generated image. This is provider-neutral and branch-aware: OpenAI and Gemini
+	// both continue the active branch, while regenerate (an assistant sibling under
+	// the original user message) starts from that user's original inputs.
+	inputImageIDs := mergeImageInputIDs(nil, in.InputImages)
+	if tc != nil {
+		// Current-turn uploads are the primary source image and must stay first. For
+		// GPT Image 1.x the first image receives the richest texture preservation.
+		inputImageIDs = mergeImageInputIDs(tc.ImageInputIDs, inputImageIDs)
+	}
+	inputLimit := imageInputImageLimit(channel.Type, model.RequestID)
+	inputImgs, tooManyInputs := t.loadInputImages(ctx, tc, inputImageIDs, inputLimit)
+	if tooManyInputs {
+		return "", nil, fmt.Errorf("the selected image model accepts at most %d reference image(s)", inputLimit)
+	}
 	isGemini := channel.Type == "google" || channel.Type == "gemini"
-	if isGemini && len(inputImgs) == 0 && tc != nil && tc.DB != nil && tc.ConvID != "" {
-		if sessRef, _ := store.GetConvProviderStateKey(ctx, tc.DB, tc.ConvID, "image_session"); sessRef != "" {
-			inputImgs = t.loadInputImages(ctx, tc, []string{sessRef})
+	if len(inputImageIDs) == 0 && len(inputImgs) == 0 {
+		if previous := t.loadNearestBranchImage(ctx, tc); previous != nil {
+			inputImgs = []imageBytes{*previous}
 		}
+	}
+	// The exact user instruction is authoritative whenever this request becomes an
+	// edit, including automatic branch continuation with no new attachment. A chat
+	// or prompt-optimization model must not broaden a literal edit into a restyle.
+	if len(inputImgs) > 0 && tc != nil && strings.TrimSpace(tc.ImageUserPrompt) != "" {
+		in.Prompt = strings.TrimSpace(tc.ImageUserPrompt)
+	}
+	// §4.12-E 内容安全: screen the final provider prompt after edit resolution.
+	if err := t.moderateImagePrompt(in.Prompt); err != nil {
+		return "", nil, &llm.ToolRefusalError{Message: err.Error()}
+	}
+	providerInput := in
+	if len(inputImgs) > 0 {
+		providerInput.Prompt = faithfulImageEditPrompt(in.Prompt)
 	}
 
 	// §4.20 per-model image timeout: cap this single generation/edit request when
@@ -861,9 +914,9 @@ func (t *imageGenerateTool) Execute(ctx context.Context, input []byte, tc *llm.T
 	var images []imageBytes
 	switch {
 	case isGemini:
-		images, err = geminiGenerateImages(genCtx, channel.BaseURL, channel.APIKey, model.RequestID, in, inputImgs, imageRequestParams)
+		images, err = geminiGenerateImages(genCtx, channel.BaseURL, channel.APIKey, model.RequestID, providerInput, inputImgs, imageRequestParams)
 	case channel.Type == "openai":
-		images, err = openaiGenerateImages(genCtx, channel.BaseURL, channel.APIKey, model.RequestID, in, inputImgs, imageRequestParams)
+		images, err = openaiGenerateImages(genCtx, channel.BaseURL, channel.APIKey, model.RequestID, providerInput, inputImgs, imageRequestParams)
 	default:
 		return "", nil, fmt.Errorf("image generation not supported for channel type %q", channel.Type)
 	}
@@ -883,25 +936,19 @@ func (t *imageGenerateTool) Execute(ctx context.Context, input []byte, tc *llm.T
 		if genCtx.Err() != nil {
 			return "", nil, genCtx.Err()
 		}
-		return "The image model returned no images.", nil, nil
+		return "", nil, errors.New("the image model returned no images")
 	}
 
 	// The bytes are in hand → persist the artifacts + meter on a DETACHED context
 	// so a stop / timeout landing in this narrow window can't drop a delivered
 	// image or skip its usage row (which feeds the daily limit + per-model quota).
 	persistCtx := context.WithoutCancel(ctx)
-	lastArtifactID := ""
 	for i, img := range images {
 		ext := extForMime(img.mime)
 		name := fmt.Sprintf("image_%d%s", i+1, ext)
-		if art := saveArtifact(persistCtx, tc, t.artifactDir, name, img.mime, img.data); art != nil {
-			lastArtifactID = art.ID
+		if _, saveErr := saveArtifact(persistCtx, tc, t.artifactDir, name, img.mime, img.data); saveErr != nil {
+			return "", nil, fmt.Errorf("persist generated image %d: %w", i+1, saveErr)
 		}
-	}
-	// §4.12-D Gemini 多轮编辑: remember the latest generation on the
-	// conversation so the next image_generate call edits it by default.
-	if isGemini && lastArtifactID != "" && tc != nil && tc.DB != nil && tc.ConvID != "" {
-		_ = store.SetConvProviderStateKey(persistCtx, tc.DB, tc.ConvID, "image_session", lastArtifactID)
 	}
 
 	// §4.20: if the image model's free allotment is exhausted, charge the image
@@ -931,6 +978,24 @@ func (t *imageGenerateTool) Execute(ctx context.Context, input []byte, tc *llm.T
 		})
 	}
 	return fmt.Sprintf("Generated %d image(s) for: %s. They are attached as downloadable artifacts.", len(images), in.Prompt), nil, nil
+}
+
+func (t *imageGenerateTool) storedImageParamPicks(ctx context.Context, tc *llm.ToolContext, modelID string) map[string]any {
+	if tc == nil || tc.DB == nil || tc.UserID == "" || modelID == "" {
+		return nil
+	}
+	raw, err := store.GetUserSettingKey(ctx, tc.DB, tc.UserID, "image_model_params")
+	if err != nil || len(raw) == 0 {
+		return nil
+	}
+	var saved struct {
+		ModelID string         `json:"model_id"`
+		Params  map[string]any `json:"params"`
+	}
+	if json.Unmarshal(raw, &saved) != nil || saved.ModelID != modelID {
+		return nil
+	}
+	return saved.Params
 }
 
 // resolveImageModel picks the user's pre-selected image model, falling back to
@@ -1096,11 +1161,35 @@ func (t *imageGenerateTool) checkModelImageQuota(ctx context.Context, userID str
 	return nil
 }
 
+func mergeImageInputIDs(primary, additional []string) []string {
+	out := make([]string, 0, len(primary)+len(additional))
+	seen := make(map[string]bool, len(primary)+len(additional))
+	for _, ids := range [][]string{primary, additional} {
+		for _, rawID := range ids {
+			id := strings.TrimSpace(rawID)
+			if id == "" || seen[id] {
+				continue
+			}
+			seen[id] = true
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+func faithfulImageEditPrompt(instruction string) string {
+	return `Faithfully edit the supplied source image according to the instruction below.
+Treat the source image as authoritative. Change only what the instruction explicitly requests. Preserve every other detail as closely as possible, especially the canvas and crop, composition, layout, colors, background, lighting, texture, text content, language, typography, spacing, and alignment. Do not translate, paraphrase, retype, add, remove, or restyle anything unless the instruction explicitly requires it.
+
+Exact user edit instruction:
+` + strings.TrimSpace(instruction)
+}
+
 // loadInputImages resolves artifact ids to raw image bytes (ownership-checked)
 // for image-to-image workflows (§4.12-C).
-func (t *imageGenerateTool) loadInputImages(ctx context.Context, tc *llm.ToolContext, ids []string) []imageBytes {
+func (t *imageGenerateTool) loadInputImages(ctx context.Context, tc *llm.ToolContext, ids []string, limit int) ([]imageBytes, bool) {
 	if tc == nil || tc.DB == nil {
-		return nil
+		return nil, false
 	}
 	out := []imageBytes{}
 	for _, id := range ids {
@@ -1121,12 +1210,57 @@ func (t *imageGenerateTool) loadInputImages(ctx context.Context, tc *llm.ToolCon
 		if len(data) == 0 || mime == "" {
 			continue
 		}
-		out = append(out, imageBytes{data: data, mime: mime})
-		if len(out) >= imageImageInputImageCap {
-			break
+		if limit > 0 && len(out) >= limit {
+			return out, true
 		}
+		out = append(out, imageBytes{data: data, mime: mime})
 	}
-	return out
+	return out, false
+}
+
+func imageInputImageLimit(channelType, requestID string) int {
+	if imageImageInputImageCap > 0 {
+		return imageImageInputImageCap
+	}
+	channelType = strings.ToLower(strings.TrimSpace(channelType))
+	modelID := strings.ToLower(strings.TrimSpace(requestID))
+	switch {
+	case strings.Contains(modelID, "dall-e"):
+		return 1
+	case channelType == "openai":
+		return 16
+	case (channelType == "google" || channelType == "gemini") && strings.Contains(modelID, "gemini-3"):
+		return 14
+	case channelType == "google" || channelType == "gemini":
+		return 3
+	default:
+		return 3
+	}
+}
+
+// loadNearestBranchImage follows persisted parent links from the assistant
+// currently being generated. It also checks the current assistant first so a
+// second image_generate call in one tool loop can edit the first call's output.
+func (t *imageGenerateTool) loadNearestBranchImage(ctx context.Context, tc *llm.ToolContext) *imageBytes {
+	if tc == nil || tc.DB == nil || tc.ConvID == "" || tc.MessageID == "" {
+		return nil
+	}
+	messageID := tc.MessageID
+	seen := map[string]bool{}
+	for messageID != "" && !seen[messageID] {
+		seen[messageID] = true
+		if artifact, err := store.FirstImageArtifactForMessage(ctx, tc.DB, messageID, tc.ConvID); err == nil && artifact != nil {
+			if data, mimeType := readVerifiedImageInput(artifact.StoragePath, artifact.SizeBytes); len(data) > 0 && mimeType != "" {
+				return &imageBytes{data: data, mime: mimeType}
+			}
+		}
+		message, err := store.GetMessage(ctx, tc.DB, messageID)
+		if err != nil || message == nil || message.ConversationID != tc.ConvID {
+			return nil
+		}
+		messageID = message.ParentID
+	}
+	return nil
 }
 
 func readVerifiedImageInput(path string, storedSize int64) ([]byte, string) {
@@ -1150,8 +1284,8 @@ func readVerifiedImageInput(path string, storedSize int64) ([]byte, string) {
 }
 
 // geminiGenerateImages calls generateContent with an image-capable model and
-// extracts inlineData parts (§4.12-C). Input images (explicit image-to-image
-// or the conversation's image_session) ride along as inline_data parts so the
+// extracts inlineData parts (§4.12-C). Explicit or branch-resolved input images
+// ride along as inline_data parts so the
 // model edits rather than starts fresh (§4.12-D).
 func geminiGenerateImages(ctx context.Context, baseURL, apiKey, requestID string, in imgInput, inputImgs []imageBytes, requestParams map[string]any) ([]imageBytes, error) {
 	base := strings.TrimRight(baseURL, "/")
@@ -1179,9 +1313,15 @@ func geminiGenerateImages(ctx context.Context, baseURL, apiKey, requestID string
 		},
 	}
 	body := store.DeepMergeJSONObjects(sanitizeImageRequestParams(requestParams), native)
-	raw, _ := json.Marshal(body)
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
 	url := fmt.Sprintf("%s/v1beta/models/%s:generateContent?key=%s", base, requestID, apiKey)
-	req, _ := http.NewRequestWithContext(ctx, "POST", url, strings.NewReader(string(raw)))
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(raw))
+	if err != nil {
+		return nil, err
+	}
 	req.Header.Set("content-type", "application/json")
 	resp, err := toolHTTPClient.Do(req)
 	if err != nil {
@@ -1218,6 +1358,9 @@ func geminiGenerateImages(ctx context.Context, baseURL, apiKey, requestID string
 			}
 			data, err := base64.StdEncoding.DecodeString(b64)
 			if err == nil && len(data) > 0 {
+				if detected := verifiedImageMIMEFromBytes(data); detected != "" {
+					mime = detected
+				}
 				out = append(out, imageBytes{data: data, mime: orDefaultStr(mime, "image/png")})
 			}
 		}
@@ -1239,6 +1382,23 @@ func openaiGenerateImages(ctx context.Context, baseURL, apiKey, requestID string
 	// both b64_json and url responses so either model family works.
 	isDalle := strings.Contains(strings.ToLower(requestID), "dall")
 	cleanParams := sanitizeImageRequestParams(requestParams)
+	if len(inputImgs) > 0 {
+		modelID := strings.ToLower(strings.TrimSpace(requestID))
+		switch {
+		case isOpenAIModelOrSnapshot(modelID, "gpt-image-2"):
+			// GPT Image 2 always processes edit inputs at high fidelity and rejects
+			// input_fidelity as a configurable field.
+			delete(cleanParams, "input_fidelity")
+		case isOpenAIModelOrSnapshot(modelID, "gpt-image-1.5"),
+			isOpenAIModelOrSnapshot(modelID, "gpt-image-1-mini"),
+			isOpenAIModelOrSnapshot(modelID, "gpt-image-1"):
+			// Older GPT Image models default to lower input fidelity. Make faithful
+			// editing the safe default while still honoring an explicit admin control.
+			if _, configured := cleanParams["input_fidelity"]; !configured {
+				cleanParams["input_fidelity"] = "high"
+			}
+		}
+	}
 	requestedSize := strings.TrimSpace(in.Size)
 	if configuredSize, ok := cleanParams["size"].(string); ok && strings.TrimSpace(configuredSize) != "" {
 		requestedSize = strings.TrimSpace(configuredSize)
@@ -1263,6 +1423,7 @@ func openaiGenerateImages(ctx context.Context, baseURL, apiKey, requestID string
 	}
 	body := store.DeepMergeJSONObjects(cleanParams, native)
 	var req *http.Request
+	var err error
 	if len(inputImgs) > 0 {
 		// Image edit (图生图): multipart form with the source image + prompt.
 		var buf bytes.Buffer
@@ -1274,22 +1435,46 @@ func openaiGenerateImages(ctx context.Context, baseURL, apiKey, requestID string
 		sort.Strings(keys)
 		for _, key := range keys {
 			if value, ok := imageMultipartScalar(body[key]); ok {
-				_ = mw.WriteField(key, value)
+				if err := mw.WriteField(key, value); err != nil {
+					return nil, err
+				}
 			}
 		}
-		fw, err := mw.CreateFormFile("image", "input"+extForMime(inputImgs[0].mime))
+		requestImages := inputImgs
+		if isDalle && len(requestImages) > 1 {
+			requestImages = requestImages[:1]
+		}
+		imageField := "image"
+		if len(requestImages) > 1 {
+			imageField = "image[]"
+		}
+		for i, inputImg := range requestImages {
+			filename := fmt.Sprintf("input_%d%s", i+1, extForMime(inputImg.mime))
+			fw, err := mw.CreateFormFile(imageField, filename)
+			if err != nil {
+				return nil, err
+			}
+			if _, err := fw.Write(inputImg.data); err != nil {
+				return nil, err
+			}
+		}
+		if err := mw.Close(); err != nil {
+			return nil, err
+		}
+		req, err = http.NewRequestWithContext(ctx, "POST", base+"/v1/images/edits", &buf)
 		if err != nil {
 			return nil, err
 		}
-		if _, err := fw.Write(inputImgs[0].data); err != nil {
-			return nil, err
-		}
-		_ = mw.Close()
-		req, _ = http.NewRequestWithContext(ctx, "POST", base+"/v1/images/edits", &buf)
 		req.Header.Set("content-type", mw.FormDataContentType())
 	} else {
-		raw, _ := json.Marshal(body)
-		req, _ = http.NewRequestWithContext(ctx, "POST", base+"/v1/images/generations", strings.NewReader(string(raw)))
+		raw, marshalErr := json.Marshal(body)
+		if marshalErr != nil {
+			return nil, marshalErr
+		}
+		req, err = http.NewRequestWithContext(ctx, "POST", base+"/v1/images/generations", bytes.NewReader(raw))
+		if err != nil {
+			return nil, err
+		}
 		req.Header.Set("content-type", "application/json")
 	}
 	req.Header.Set("authorization", "Bearer "+apiKey)
@@ -1315,7 +1500,11 @@ func openaiGenerateImages(ctx context.Context, baseURL, apiKey, requestID string
 	for _, d := range parsed.Data {
 		if d.B64JSON != "" {
 			if data, err := base64.StdEncoding.DecodeString(d.B64JSON); err == nil {
-				out = append(out, imageBytes{data: data, mime: "image/png"})
+				mimeType := outputFormatMIME(cleanParams["output_format"])
+				if detected := verifiedImageMIMEFromBytes(data); detected != "" {
+					mimeType = detected
+				}
+				out = append(out, imageBytes{data: data, mime: mimeType})
 			}
 			continue
 		}
@@ -1328,6 +1517,18 @@ func openaiGenerateImages(ctx context.Context, baseURL, apiKey, requestID string
 		}
 	}
 	return out, nil
+}
+
+func outputFormatMIME(value any) string {
+	format, _ := value.(string)
+	switch strings.ToLower(strings.TrimSpace(format)) {
+	case "jpeg", "jpg":
+		return "image/jpeg"
+	case "webp":
+		return "image/webp"
+	default:
+		return "image/png"
+	}
 }
 
 const (
@@ -1519,13 +1720,13 @@ func fetchRemoteImage(ctx context.Context, rawURL string) ([]byte, string) {
 	if resp.StatusCode >= 400 {
 		return nil, ""
 	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, fetchRemoteImageDownloadCap)) // 32MB cap
-	if err != nil || len(data) == 0 {
+	data, err := io.ReadAll(io.LimitReader(resp.Body, fetchRemoteImageDownloadCap+1))
+	if err != nil || len(data) == 0 || int64(len(data)) > fetchRemoteImageDownloadCap {
 		return nil, ""
 	}
-	mime := resp.Header.Get("content-type")
-	if !strings.HasPrefix(mime, "image/") {
-		mime = "image/png"
+	mime := verifiedImageMIMEFromBytes(data)
+	if mime == "" {
+		return nil, ""
 	}
 	return data, mime
 }

@@ -94,7 +94,7 @@ export function ParamControls({ controls, values, onChange, className }: ParamCo
             'inline-flex size-8 shrink-0 items-center justify-center rounded-[8px] interactive',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
             active
-              ? 'bg-[var(--color-secondary-soft)] text-[var(--color-secondary)]'
+              ? 'bg-[var(--color-tool-selection-soft)] text-[var(--color-tool-selection-text)]'
               : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
           )
         if (c.type === 'toggle') {

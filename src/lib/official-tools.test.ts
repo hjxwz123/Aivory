@@ -22,6 +22,13 @@ describe('official tool selections', () => {
     ])
   })
 
+  it('distinguishes a missing account default from an explicit empty default', () => {
+    expect(resolveDefaultOfficialToolNames(undefined)).toBeUndefined()
+    expect(resolveDefaultOfficialToolNames({})).toBeUndefined()
+    expect(resolveDefaultOfficialToolNames({ official_tool_names_default: 'web_search' })).toBeUndefined()
+    expect(resolveDefaultOfficialToolNames({ official_tool_names_default: [] })).toEqual([])
+  })
+
   it('reads public definitions and remains compatible with the legacy string array', () => {
     expect(
       officialToolsForModel(
@@ -38,7 +45,30 @@ describe('official tool selections', () => {
     ])
   })
 
-  it('drops stale names and restores administrator order after a model switch', () => {
+  it('enables every configured tool when the user has not customized the model', () => {
+    const model = modelWithOfficialTools([
+      { name: 'web_search', icon: 'search' },
+      { name: 'code_interpreter', icon: 'terminal' },
+      { name: 'image_generation', icon: 'image' },
+    ])
+
+    expect(filterOfficialToolNames(model, undefined)).toEqual([
+      'web_search',
+      'code_interpreter',
+      'image_generation',
+    ])
+  })
+
+  it('preserves an explicit empty selection', () => {
+    const model = modelWithOfficialTools([
+      { name: 'web_search', icon: 'search' },
+      { name: 'image_generation', icon: 'image' },
+    ])
+
+    expect(filterOfficialToolNames(model, [])).toEqual([])
+  })
+
+  it('drops stale names and restores administrator order for a selected subset', () => {
     const model = modelWithOfficialTools([
       { name: 'web_search', icon: 'search' },
       { name: 'code_interpreter', icon: 'terminal' },
@@ -53,6 +83,5 @@ describe('official tool selections', () => {
         'image_generation',
       ]),
     ).toEqual(['web_search', 'image_generation'])
-    expect(filterOfficialToolNames(model, undefined)).toEqual([])
   })
 })

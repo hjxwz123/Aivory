@@ -206,6 +206,71 @@ func TestOpenAIImageEditExplicitSizeOverridesInference(t *testing.T) {
 	}
 }
 
+func TestOpenAIImageEditSendsEveryGPTImageReference(t *testing.T) {
+	first := sizedPNG(t, 1600, 900)
+	second := sizedPNG(t, 800, 800)
+	useImageTestHTTPClient(t, func(req *http.Request) (*http.Response, error) {
+		if err := req.ParseMultipartForm(8 << 20); err != nil {
+			t.Fatalf("parse multipart: %v", err)
+		}
+		files := req.MultipartForm.File["image[]"]
+		if len(files) != 2 {
+			t.Fatalf("multipart image[] count = %d, want 2", len(files))
+		}
+		for i, want := range [][]byte{first, second} {
+			file, err := files[i].Open()
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, readErr := io.ReadAll(file)
+			_ = file.Close()
+			if readErr != nil || !bytes.Equal(got, want) {
+				t.Fatalf("multipart image[%d] changed, err=%v", i, readErr)
+			}
+		}
+		return imageSuccessResponse(`{"data":[{"b64_json":"ZWRpdGVk"}]}`), nil
+	})
+
+	_, err := openaiGenerateImages(
+		context.Background(),
+		"https://images.example.test",
+		"server-secret",
+		"gpt-image-2",
+		imgInput{Prompt: "combine the references", N: 1},
+		[]imageBytes{{data: first, mime: "image/png"}, {data: second, mime: "image/png"}},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("openaiGenerateImages: %v", err)
+	}
+}
+
+func TestOpenAIImage1EditDefaultsToHighInputFidelity(t *testing.T) {
+	inputData := sizedPNG(t, 1200, 800)
+	useImageTestHTTPClient(t, func(req *http.Request) (*http.Response, error) {
+		if err := req.ParseMultipartForm(4 << 20); err != nil {
+			t.Fatalf("parse multipart: %v", err)
+		}
+		if got := req.FormValue("input_fidelity"); got != "high" {
+			t.Fatalf("input_fidelity = %q, want high", got)
+		}
+		return imageSuccessResponse(`{"data":[{"b64_json":"ZWRpdGVk"}]}`), nil
+	})
+
+	_, err := openaiGenerateImages(
+		context.Background(),
+		"https://images.example.test",
+		"server-secret",
+		"gpt-image-1.5",
+		imgInput{Prompt: "small local edit", N: 1},
+		[]imageBytes{{data: inputData, mime: "image/png"}},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("openaiGenerateImages: %v", err)
+	}
+}
+
 func TestOpenAIImageEditUnknownModelLetsProviderChoose(t *testing.T) {
 	inputData := sizedPNG(t, 1920, 1080)
 	useImageTestHTTPClient(t, func(req *http.Request) (*http.Response, error) {

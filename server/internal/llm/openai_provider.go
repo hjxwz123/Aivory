@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,10 +26,8 @@ var (
 // SSE scanner buffer sizing — low-level transport plumbing, not a tunable in
 // practice, so hardcoded rather than env-overridable (unlike the knobs above).
 const (
-	readOpenAIChatStreamBufInit      = 64 * 1024
-	readOpenAIChatStreamBufMax       = 1024 * 1024
-	readOpenAIResponsesStreamBufInit = 64 * 1024
-	readOpenAIResponsesStreamBufMax  = 1024 * 1024
+	readOpenAIChatStreamBufInit = 64 * 1024
+	readOpenAIChatStreamBufMax  = 1024 * 1024
 )
 
 // OpenAIProvider supports both the Chat Completions ("chat") and Responses
@@ -48,7 +47,10 @@ func (p *OpenAIProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 	if req.Model.APIKey == "" {
 		return nil, errors.New("this channel has no API key configured")
 	}
-	if !req.Model.Vision {
+	// A Responses-hosted image tool can continue editing one of its own generated
+	// artifacts even when the administrator did not mark the mainline text model
+	// as generally vision-capable. User uploads are still gated by the API layer.
+	if !req.Model.Vision && !officialImageGenerationEnabled(req) {
 		req.History = stripImageBlocks(req.History)
 	}
 	switch req.Model.APIFormat {
@@ -57,6 +59,14 @@ func (p *OpenAIProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 	default:
 		return p.streamChat(ctx, req, tools, onEvent)
 	}
+}
+
+func officialImageGenerationEnabled(req UnifiedChatRequest) bool {
+	if !officialToolModeEnabled(req) {
+		return false
+	}
+	body := MergeOfficialToolRequests(nil, req.OfficialToolRequests)
+	return responsesRequestHasToolType(body, "image_generation")
 }
 
 func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest, tools ToolRunner, onEvent func(SseEvent)) (*UnifiedResult, error) {
@@ -338,7 +348,53 @@ type openAIToolCall struct {
 // hostedToolCall records an OpenAI-hosted tool round (web_search etc.) the model
 // ran server-side, so we can persist it as a tool_call block (§2.3-B).
 type hostedToolCall struct {
-	ID, Name, Summary string
+	ID, Name, Summary, Status string
+	// ImageBase64 is populated for OpenAI-hosted image_generation calls. It is
+	// deliberately kept out of outputItems/Raw and decoded only when building the
+	// UnifiedResult, preventing a generated image from being duplicated in SQL.
+	ImageBase64       string
+	ImagePartialIndex int
+}
+
+// responseLineScanner has the small Scanner API used below but no token-size
+// ceiling. Responses image_generation completion events contain the final image
+// as one base64 JSON field and routinely exceed bufio.Scanner's 1 MiB limit.
+type responseLineScanner struct {
+	reader *bufio.Reader
+	text   string
+	err    error
+}
+
+func newResponseLineScanner(r io.Reader) *responseLineScanner {
+	return &responseLineScanner{reader: bufio.NewReaderSize(r, 64*1024)}
+}
+
+func (s *responseLineScanner) Scan() bool {
+	if s.err != nil {
+		return false
+	}
+	line, err := s.reader.ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		s.err = err
+		return false
+	}
+	if len(line) == 0 && errors.Is(err, io.EOF) {
+		return false
+	}
+	s.text = strings.TrimSuffix(strings.TrimSuffix(line, "\n"), "\r")
+	if errors.Is(err, io.EOF) {
+		s.err = io.EOF
+	}
+	return true
+}
+
+func (s *responseLineScanner) Text() string { return s.text }
+
+func (s *responseLineScanner) Err() error {
+	if errors.Is(s.err, io.EOF) {
+		return nil
+	}
+	return s.err
 }
 
 // hostedToolName maps a Responses hosted-tool output item type (e.g.
@@ -553,8 +609,13 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 		return p.streamChat(ctx, req, tools, onEvent)
 	}
 
-	// Build the input list from history.
+	// Build the input list from history. Hosted image output is persisted as an
+	// artifact, then attached to the following user turn as input_image. This keeps
+	// multi-turn editing stateless (`store:false`) without replaying the original
+	// multi-megabyte image_generation_call.result from message Raw.
 	input := []map[string]any{}
+	pendingGeneratedImages := []map[string]any{}
+	hostedImageContext := officialImageGenerationEnabled(req)
 	for _, m := range req.History {
 		if m.Role != "user" && m.Role != "assistant" {
 			continue
@@ -564,25 +625,23 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 		// output/input items (`message`, `reasoning`, `function_call`,
 		// `function_call_output`). Accept only the latter so switching an OpenAI
 		// model between chat/responses formats cannot poison the request body.
-		if m.Role == "assistant" && len(m.Raw) > 2 && (req.Model.Vision || !nativeRawContainsImage(m.Raw)) {
+		if m.Role == "assistant" && len(m.Raw) > 2 && !nativeRawContainsImage(m.Raw) {
 			var items []map[string]any
 			if err := json.Unmarshal(m.Raw, &items); err == nil && len(items) > 0 && items[0]["type"] != nil {
 				input = append(input, items...)
 				continue
 			}
 		}
-		text := strings.Builder{}
-		for _, b := range m.Blocks {
-			if b.Kind == "text" {
-				text.WriteString(b.Text)
-				text.WriteString("\n")
-			}
-		}
+		messageText := renderBlocksAsText(m.Blocks)
 		ctype := "input_text"
 		if m.Role == "assistant" {
 			ctype = "output_text"
 		}
-		parts := []map[string]any{{"type": ctype, "text": strings.TrimRight(text.String(), "\n")}}
+		parts := []map[string]any{{"type": ctype, "text": messageText}}
+		if m.Role == "user" && len(pendingGeneratedImages) > 0 {
+			parts = append(parts, pendingGeneratedImages...)
+			pendingGeneratedImages = nil
+		}
 		// Multimodal: pass image blocks through. Document attachments are
 		// intentionally excluded: PDFs/DOCX/PPTX/etc. always enter the model
 		// through the RAG text path, never native provider file blocks.
@@ -600,6 +659,16 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 			"role":    m.Role,
 			"content": parts,
 		})
+		if hostedImageContext && m.Role == "assistant" {
+			for _, b := range m.Blocks {
+				if b.Kind == "artifact" && b.Data != "" && strings.HasPrefix(strings.ToLower(b.MimeType), "image/") {
+					pendingGeneratedImages = append(pendingGeneratedImages, map[string]any{
+						"type":      "input_image",
+						"image_url": "data:" + b.MimeType + ";base64," + b.Data,
+					})
+				}
+			}
+		}
 	}
 
 	var respTools []map[string]any
@@ -620,6 +689,7 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 	allText := strings.Builder{}
 	allBlocks := []UnifiedBlock{}
 	allCitations := []Citation{}
+	allGeneratedImages := []GeneratedImage{}
 	usage := Usage{}
 
 	for i := 0; i < maxIter; i++ {
@@ -677,6 +747,15 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 
 		text, reasoning, calls, hosted, citations, u, outputItems, err := readOpenAIResponsesStream(resp.Body, onEvent)
 		resp.Body.Close()
+		hosted, generatedImages, imageErr := decodeHostedGeneratedImages(hosted)
+		allGeneratedImages = append(allGeneratedImages, generatedImages...)
+		if imageErr != nil {
+			if err == nil {
+				err = imageErr
+			} else {
+				err = errors.Join(err, imageErr)
+			}
+		}
 		// §B5-per-request usage rows: pin this iteration's usage to its request.
 		attachProviderRequestUsage(ctx, u)
 		if err != nil {
@@ -700,11 +779,11 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 			// Stop button / kill: preserve the partial (§6.2).
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				raw, _ := json.Marshal(input[historyLen:])
-				return &UnifiedResult{Blocks: partialBlocks, Raw: raw, StopReason: "stopped", Usage: partialUsage, Citations: partialCitations}, err
+				return &UnifiedResult{Blocks: partialBlocks, Raw: raw, StopReason: "stopped", Usage: partialUsage, Citations: partialCitations, GeneratedImages: allGeneratedImages}, err
 			}
 			if len(partialBlocks) > 0 || len(partialCitations) > len(allCitations) || partialUsage.InputTokens > 0 || partialUsage.OutputTokens > 0 {
 				raw, _ := json.Marshal(input[historyLen:])
-				return &UnifiedResult{Blocks: partialBlocks, Raw: raw, StopReason: "error", Usage: partialUsage, Citations: partialCitations}, err
+				return &UnifiedResult{Blocks: partialBlocks, Raw: raw, StopReason: "error", Usage: partialUsage, Citations: partialCitations, GeneratedImages: allGeneratedImages}, err
 			}
 			return nil, err
 		}
@@ -741,11 +820,12 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 		if len(calls) == 0 {
 			raw, _ := json.Marshal(input[historyLen:])
 			return &UnifiedResult{
-				Blocks:     allBlocks,
-				Raw:        raw,
-				StopReason: "end_turn",
-				Usage:      usage,
-				Citations:  allCitations,
+				Blocks:          allBlocks,
+				Raw:             raw,
+				StopReason:      "end_turn",
+				Usage:           usage,
+				Citations:       allCitations,
+				GeneratedImages: allGeneratedImages,
 			}, nil
 		}
 
@@ -796,12 +876,52 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 	}
 	raw, _ := json.Marshal(input[historyLen:])
 	return &UnifiedResult{
-		Blocks:     allBlocks,
-		Raw:        raw,
-		StopReason: "max_iterations",
-		Usage:      usage,
-		Citations:  allCitations,
+		Blocks:          allBlocks,
+		Raw:             raw,
+		StopReason:      "max_iterations",
+		Usage:           usage,
+		Citations:       allCitations,
+		GeneratedImages: allGeneratedImages,
 	}, nil
+}
+
+func decodeHostedGeneratedImages(hosted []hostedToolCall) ([]hostedToolCall, []GeneratedImage, error) {
+	images := make([]GeneratedImage, 0, len(hosted))
+	var decodeErrors []error
+	for i := range hosted {
+		if hosted[i].Name != "image_generate" {
+			continue
+		}
+		encoded := hosted[i].ImageBase64
+		hosted[i].ImageBase64 = ""
+		if encoded == "" {
+			if strings.EqualFold(hosted[i].Status, "completed") {
+				hosted[i].Summary = "The hosted image result was missing."
+				decodeErrors = append(decodeErrors, fmt.Errorf("hosted image result %q was missing", hosted[i].ID))
+			}
+			continue
+		}
+		data, err := base64.StdEncoding.DecodeString(encoded)
+		if err != nil {
+			hosted[i].Summary = "The hosted image result could not be decoded."
+			decodeErrors = append(decodeErrors, fmt.Errorf("decode hosted image result %q: %w", hosted[i].ID, err))
+			continue
+		}
+		if len(data) == 0 {
+			hosted[i].Summary = "The hosted image result was empty."
+			decodeErrors = append(decodeErrors, fmt.Errorf("hosted image result %q was empty", hosted[i].ID))
+			continue
+		}
+		mimeType := providerImageMIMEFromBytes(data)
+		if mimeType == "" {
+			hosted[i].Summary = "The hosted image result had an unsupported format."
+			decodeErrors = append(decodeErrors, fmt.Errorf("hosted image result %q had an unsupported format", hosted[i].ID))
+			continue
+		}
+		hosted[i].Summary = mimeType
+		images = append(images, GeneratedImage{Data: data, MimeType: mimeType, SourceID: hosted[i].ID})
+	}
+	return hosted, images, errors.Join(decodeErrors...)
 }
 
 // readOpenAIResponsesStream consumes the Responses SSE event stream. The event
@@ -817,8 +937,7 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 // usage, and the finalized response.output items needed to continue stateless
 // Responses tool loops.
 func readOpenAIResponsesStream(body io.Reader, onEvent func(SseEvent)) (string, string, []openAIToolCall, []hostedToolCall, []Citation, Usage, []map[string]any, error) {
-	scanner := bufio.NewScanner(body)
-	scanner.Buffer(make([]byte, readOpenAIResponsesStreamBufInit), readOpenAIResponsesStreamBufMax)
+	scanner := newResponseLineScanner(body)
 	text := strings.Builder{}
 	reasoning := strings.Builder{}
 	usage := Usage{}
@@ -851,6 +970,36 @@ func readOpenAIResponsesStream(body io.Reader, onEvent func(SseEvent)) (string, 
 	outputByItem := map[string]map[string]any{} // item_id → finalized output item
 	outputOrder := []string{}
 	completedOutput := []map[string]any{}
+	ensureHosted := func(itemID, itemType string) *hostedToolCall {
+		if itemID == "" || !strings.HasSuffix(itemType, "_call") || itemType == "function_call" {
+			return nil
+		}
+		if existing := hostedByItem[itemID]; existing != nil {
+			return existing
+		}
+		h := &hostedToolCall{ID: itemID, Name: hostedToolName(itemType), ImagePartialIndex: -1}
+		hostedByItem[itemID] = h
+		hostedOrder = append(hostedOrder, itemID)
+		return h
+	}
+	captureHostedImage := func(item map[string]any) {
+		itemID, _ := item["id"].(string)
+		itemType, _ := item["type"].(string)
+		h := ensureHosted(itemID, itemType)
+		if h == nil || itemType != "image_generation_call" {
+			return
+		}
+		if status, _ := item["status"].(string); status != "" {
+			h.Status = status
+		}
+		if result, _ := item["result"].(string); result != "" {
+			h.ImageBase64 = result
+			h.ImagePartialIndex = int(^uint(0) >> 1)
+		}
+		// The durable artifact is the source of truth. Persisting this field would
+		// duplicate several megabytes in messages.raw and every replay request.
+		delete(item, "result")
+	}
 	// Set once response.completed arrives. Per the Responses protocol, completed
 	// is a TERMINAL state — yet some relay gateways append a bogus
 	// response.failed afterwards (their own upstream-accounting hiccup while
@@ -910,11 +1059,12 @@ func readOpenAIResponsesStream(body io.Reader, onEvent func(SseEvent)) (string, 
 				// §2.3-B OpenAI-hosted tool round (web_search_call, …). OpenAI
 				// runs it server-side; surface a live tool step to the UI.
 				itemID, _ := it["id"].(string)
-				name := hostedToolName(t)
-				hostedByItem[itemID] = &hostedToolCall{ID: itemID, Name: name}
-				hostedOrder = append(hostedOrder, itemID)
+				h := ensureHosted(itemID, t)
+				if h == nil {
+					continue
+				}
 				outputOrder = append(outputOrder, itemID)
-				onEvent(SseEvent{Type: "tool_start", Name: name, ID: itemID})
+				onEvent(SseEvent{Type: "tool_start", Name: h.Name, ID: itemID})
 			} else if itemID, _ := it["id"].(string); itemID != "" {
 				outputOrder = append(outputOrder, itemID)
 			}
@@ -924,6 +1074,7 @@ func readOpenAIResponsesStream(body io.Reader, onEvent func(SseEvent)) (string, 
 				continue
 			}
 			itemID, _ := it["id"].(string)
+			captureHostedImage(it)
 			if itemID != "" {
 				outputByItem[itemID] = it
 				outputOrder = append(outputOrder, itemID)
@@ -967,6 +1118,24 @@ func readOpenAIResponsesStream(body io.Reader, onEvent func(SseEvent)) (string, 
 				}
 				onEvent(SseEvent{Type: "tool_result", Name: h.Name, ID: itemID, Status: status})
 			}
+		case "response.image_generation_call.partial_image":
+			itemID, _ := ev["item_id"].(string)
+			h := ensureHosted(itemID, "image_generation_call")
+			if h == nil {
+				continue
+			}
+			partial, _ := ev["partial_image_b64"].(string)
+			if partial == "" {
+				partial, _ = ev["partial_image"].(string)
+			}
+			if partial == "" {
+				partial, _ = ev["b64_json"].(string)
+			}
+			index := intOf(ev["partial_image_index"])
+			if partial != "" && index >= h.ImagePartialIndex {
+				h.ImageBase64 = partial
+				h.ImagePartialIndex = index
+			}
 		case "response.function_call_arguments.delta":
 			itemID, _ := ev["item_id"].(string)
 			cb := callsByItem[itemID]
@@ -998,6 +1167,13 @@ func readOpenAIResponsesStream(body io.Reader, onEvent func(SseEvent)) (string, 
 					completedOutput = completedOutput[:0]
 					for _, raw := range out {
 						if item, _ := raw.(map[string]any); item != nil {
+							captureHostedImage(item)
+							itemID, _ := item["id"].(string)
+							if itemType, _ := item["type"].(string); itemType == "image_generation_call" {
+								if h := hostedByItem[itemID]; h != nil && h.Status == "" {
+									h.Status = "completed"
+								}
+							}
 							completedOutput = append(completedOutput, item)
 						}
 					}

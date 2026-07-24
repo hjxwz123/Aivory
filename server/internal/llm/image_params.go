@@ -34,6 +34,13 @@ func clampImageGenerationCount(n, maxCount int) int {
 // a declared param-control mapping. JSON decoding normally yields float64, but
 // the other scalar forms keep this helper reliable in direct/internal callers.
 func imageGenerationCountFromParams(params map[string]any) int {
+	return ImageGenerationCountFromParams(params)
+}
+
+// ImageGenerationCountFromParams is exported for image_generate so a normal
+// chat tool call that omits n can inherit the selected image model's declared
+// default exactly like direct drawing mode.
+func ImageGenerationCountFromParams(params map[string]any) int {
 	if len(params) == 0 {
 		return ClampImageGenerationCount(1)
 	}

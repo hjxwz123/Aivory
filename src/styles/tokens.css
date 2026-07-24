@@ -73,6 +73,13 @@
   --color-danger-soft: oklch(95% 0.045 18);
   --color-info: oklch(60% 0.13 235);
   --color-info-soft: oklch(95% 0.03 235);
+  /* Composer tools derive from the user's accent instead of owning a fixed hue. */
+  --color-tool-selection: color-mix(in oklch, var(--color-accent) 66%, white);
+  --color-tool-selection-hover: color-mix(in oklch, var(--color-accent) 74%, white);
+  --color-tool-selection-soft: color-mix(in oklch, var(--color-accent-soft) 58%, var(--color-surface));
+  --color-tool-selection-border: color-mix(in oklch, var(--color-accent) 30%, var(--color-border-subtle));
+  --color-tool-selection-text: color-mix(in oklch, var(--color-accent) 80%, black);
+  --color-tool-idle: color-mix(in oklch, var(--color-fg) 4%, var(--color-surface));
 
   /* Focus ring — violet, calm */
   --color-ring: oklch(58% 0.225 290 / 0.55);
@@ -435,6 +442,12 @@
   --color-danger-soft: oklch(28% 0.07 18);
   --color-info: oklch(72% 0.13 235);
   --color-info-soft: oklch(28% 0.05 235);
+  --color-tool-selection: color-mix(in oklch, var(--color-accent) 72%, white);
+  --color-tool-selection-hover: color-mix(in oklch, var(--color-accent) 82%, white);
+  --color-tool-selection-soft: color-mix(in oklch, var(--color-accent-soft) 78%, var(--color-surface));
+  --color-tool-selection-border: color-mix(in oklch, var(--color-accent) 32%, var(--color-border-strong));
+  --color-tool-selection-text: color-mix(in oklch, var(--color-accent) 82%, white);
+  --color-tool-idle: color-mix(in oklch, var(--color-fg) 6%, var(--color-surface));
 
   --color-ring: oklch(72% 0.215 290 / 0.50);
 
@@ -617,6 +630,9 @@
   --color-accent-hover: oklch(20% 0 0);
   --color-accent-soft: oklch(93% 0 0);
   --color-ring: oklch(40% 0 0 / 0.55);
+  --color-tool-selection: color-mix(in oklch, var(--color-accent) 42%, white);
+  --color-tool-selection-hover: color-mix(in oklch, var(--color-accent) 50%, white);
+  --color-tool-selection-border: color-mix(in oklch, var(--color-accent) 18%, var(--color-border-subtle));
 
   /* Neutral surfaces — chroma 0 (keep the base L values) */
   --color-bg: oklch(98.4% 0 0);
