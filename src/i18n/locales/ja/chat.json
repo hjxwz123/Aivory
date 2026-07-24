@@ -104,11 +104,11 @@
       "toolMode": "ツール利用",
       "toolModeDesc": "自動、公式、オフ、組み込みからツール利用方法を選択します。",
       "toolModeAuto": "自動",
-      "toolModeAutoDesc": "この回答にツールが必要かどうかをタスクモデルが判断します。",
+      "toolModeAutoDesc": "ツール呼び出しが必要かどうかを自動的に判断します。",
       "toolModeDisabled": "オフ",
       "toolModeDisabledDesc": "ツールを提供せず、そのまま回答します。",
       "toolModeEnabled": "組み込み",
-      "toolModeEnabledDesc": "管理者がこのモデルに許可した組み込みツールを使用します。",
+      "toolModeEnabledDesc": "組み込みツール呼び出しを使用します。",
       "toolModeOfficial": "公式",
       "toolModeOfficialDesc": "選択したプロバイダー公式ツールのみを使用します。",
       "officialTools": "公式ツール",
@@ -185,13 +185,13 @@
   "tools": {
     "web_search": "ウェブ検索",
     "code_interpreter": "コードインタープリター",
-    "image_generation": "OpenAI ホスト画像生成",
+    "image_generation": "画像生成",
     "deep_research": "ディープリサーチ"
   },
   "toolDescriptions": {
     "web_search": "ウェブから最新情報を検索します",
     "code_interpreter": "コードを実行してファイルを分析します",
-    "image_generation": "OpenAI のホストツールで画像を生成・編集します。アプリで事前選択した画像モデルではなく、OpenAI が画像モデルと設定を選択します"
+    "image_generation": "画像を生成または編集します"
   },
   "sources": {
     "label": "ソース",

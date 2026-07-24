@@ -104,11 +104,11 @@
       "toolMode": "Utilisation des outils",
       "toolModeDesc": "Choisissez le mode automatique, officiel, désactivé ou intégré.",
       "toolModeAuto": "Automatique",
-      "toolModeAutoDesc": "Laisse le modèle de tâche décider si cette réponse nécessite des outils.",
+      "toolModeAutoDesc": "Détermine automatiquement si des appels d’outils sont nécessaires.",
       "toolModeDisabled": "Désactivé",
       "toolModeDisabledDesc": "Répond directement sans mettre d’outils à disposition.",
       "toolModeEnabled": "Intégrés",
-      "toolModeEnabledDesc": "Utilise les outils intégrés autorisés pour ce modèle par l’administrateur.",
+      "toolModeEnabledDesc": "Utilise les appels d’outils intégrés.",
       "toolModeOfficial": "Officiels",
       "toolModeOfficialDesc": "Utilise uniquement les outils natifs du fournisseur que vous sélectionnez.",
       "officialTools": "Outils officiels",
@@ -185,13 +185,13 @@
   "tools": {
     "web_search": "Recherche web",
     "code_interpreter": "Interpréteur de code",
-    "image_generation": "Génération d’images hébergée par OpenAI",
+    "image_generation": "Génération d’images",
     "deep_research": "Recherche approfondie"
   },
   "toolDescriptions": {
     "web_search": "Rechercher les informations les plus récentes sur le web",
     "code_interpreter": "Exécuter du code et analyser des fichiers",
-    "image_generation": "Générer ou modifier des images avec l’outil hébergé d’OpenAI ; OpenAI choisit le modèle et les paramètres plutôt que le modèle d’image présélectionné dans l’application"
+    "image_generation": "Générer ou modifier des images"
   },
   "sources": {
     "label": "Sources",

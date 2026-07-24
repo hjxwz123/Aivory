@@ -104,11 +104,11 @@
       "toolMode": "Tool use",
       "toolModeDesc": "Choose automatic, official, off, or built-in tool use.",
       "toolModeAuto": "Automatic",
-      "toolModeAutoDesc": "Use the task model to decide whether this response needs tools.",
+      "toolModeAutoDesc": "Automatically decide whether tool calls are needed.",
       "toolModeDisabled": "Off",
       "toolModeDisabledDesc": "Answer directly without making tools available.",
       "toolModeEnabled": "Built-in",
-      "toolModeEnabledDesc": "Use the built-in tools enabled for this model by the administrator.",
+      "toolModeEnabledDesc": "Use built-in tool calls.",
       "toolModeOfficial": "Official",
       "toolModeOfficialDesc": "Use only the provider-native tools you select.",
       "officialTools": "Official tools",
@@ -185,13 +185,13 @@
   "tools": {
     "web_search": "Web search",
     "code_interpreter": "Code interpreter",
-    "image_generation": "OpenAI hosted image generation",
+    "image_generation": "Image generation",
     "deep_research": "Deep research"
   },
   "toolDescriptions": {
     "web_search": "Search the latest information on the web",
     "code_interpreter": "Run code and analyze files",
-    "image_generation": "Generate or edit images with OpenAI's hosted tool; OpenAI selects the image model and settings instead of the image model preselected in this app"
+    "image_generation": "Generate or edit images"
   },
   "sources": {
     "label": "Sources",
