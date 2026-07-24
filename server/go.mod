@@ -17,6 +17,7 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.22
 	github.com/redis/go-redis/v9 v9.7.0
 	golang.org/x/crypto v0.21.0
+	golang.org/x/image v0.36.0
 )
 
 require (
@@ -41,9 +42,9 @@ require (
 	github.com/jackc/puddle/v2 v2.2.1 // indirect
 	github.com/robfig/cron/v3 v3.0.1 // indirect
 	github.com/spf13/cast v1.7.0 // indirect
-	golang.org/x/sync v0.1.0 // indirect
+	golang.org/x/sync v0.19.0 // indirect
 	golang.org/x/sys v0.27.0 // indirect
-	golang.org/x/text v0.14.0 // indirect
+	golang.org/x/text v0.34.0 // indirect
 	golang.org/x/time v0.8.0 // indirect
 	google.golang.org/protobuf v1.35.2 // indirect
 )
