@@ -1113,6 +1113,29 @@ func GetArtifact(ctx context.Context, db *sql.DB, id, userID string) (*Artifact,
 	return &a, nil
 }
 
+// FirstImageArtifactForMessage returns the deterministic primary generated
+// image attached to one message, scoped to its conversation. It is used while
+// walking a message parent chain so image editing follows the active branch
+// rather than a conversation-global "last image" pointer.
+func FirstImageArtifactForMessage(ctx context.Context, db *sql.DB, messageID, conversationID string) (*Artifact, error) {
+	var a Artifact
+	err := db.QueryRowContext(ctx,
+		`SELECT a.id, a.message_id, a.filename, a.storage_path, a.mime_type, a.size_bytes, a.created_at
+		 FROM artifacts a
+		 JOIN messages m ON m.id=a.message_id
+		 WHERE a.message_id=? AND m.conversation_id=? AND a.mime_type LIKE 'image/%'
+		 ORDER BY a.filename ASC, a.created_at ASC, a.id ASC
+		 LIMIT 1`, messageID, conversationID).Scan(
+		&a.ID, &a.MessageID, &a.Filename, &a.StoragePath, &a.MimeType, &a.SizeBytes, &a.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &a, nil
+}
+
 // ListImageArtifactsByConversation returns image artifacts (generated images)
 // produced anywhere in a conversation, oldest first. Used to stage generated
 // images into the sandbox so a follow-up python_execute can embed them

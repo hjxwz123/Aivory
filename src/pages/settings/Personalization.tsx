@@ -58,8 +58,6 @@ const TRAITS = [
   'formal',
 ] as const
 
-const EMPTY_TOOL_NAMES: string[] = []
-
 export default function Personalization() {
   const { t } = useTranslation(['settings', 'memory', 'common'])
   const initialSettings = useRef(useAuth.getState().user?.settings ?? {}).current
@@ -101,7 +99,7 @@ export default function Personalization() {
     defaultModelId ? s.officialToolNamesByModel[defaultModelId] : undefined,
   )
   const defaultOfficialToolNames = useMemo(
-    () => filterOfficialToolNames(defaultModel, cachedDefaultOfficialToolNames ?? EMPTY_TOOL_NAMES),
+    () => filterOfficialToolNames(defaultModel, cachedDefaultOfficialToolNames),
     [cachedDefaultOfficialToolNames, defaultModel],
   )
 
@@ -119,12 +117,12 @@ export default function Personalization() {
   const [toolsSaving, setToolsSaving] = useState(false)
   const [toolMenuOpen, setToolMenuOpen] = useState(false)
   const [toolMenuPanel, setToolMenuPanel] = useState<'modes' | 'official'>('modes')
-  const [serverOfficialToolNames, setServerOfficialToolNames] = useState<string[]>(() =>
+  const [serverOfficialToolNames, setServerOfficialToolNames] = useState<string[] | undefined>(() =>
     resolveDefaultOfficialToolNames(initialSettings),
   )
   const toolSettingsQueueRef = useRef<Promise<unknown>>(Promise.resolve())
   const hydratedOfficialToolModelsRef = useRef<Set<string>>(new Set())
-  const confirmedOfficialToolNamesRef = useRef<string[]>(resolveDefaultOfficialToolNames(initialSettings))
+  const confirmedOfficialToolNamesRef = useRef<string[] | undefined>(resolveDefaultOfficialToolNames(initialSettings))
   const officialToolSaveVersionRef = useRef(0)
   const previousToolMenuPanelRef = useRef(toolMenuPanel)
   const officialBackRef = useRef<HTMLDivElement>(null)
@@ -151,9 +149,12 @@ export default function Personalization() {
     if (!modelsLoaded || !defaultModelId || !defaultModel) return
     if (hydratedOfficialToolModelsRef.current.has(defaultModelId)) return
     hydratedOfficialToolModelsRef.current.add(defaultModelId)
-    const officialToolNames = filterOfficialToolNames(defaultModel, serverOfficialToolNames)
-    confirmedOfficialToolNamesRef.current = officialToolNames
-    setOfficialToolNames(defaultModelId, officialToolNames)
+    const savedOfficialTools =
+      serverOfficialToolNames === undefined
+        ? undefined
+        : filterOfficialToolNames(defaultModel, serverOfficialToolNames)
+    confirmedOfficialToolNamesRef.current = savedOfficialTools
+    setOfficialToolNames(defaultModelId, savedOfficialTools)
   }, [defaultModel, defaultModelId, modelsLoaded, serverOfficialToolNames, setOfficialToolNames])
 
   // Account defaults can outlive an administrator changing the default model's
@@ -264,9 +265,10 @@ export default function Personalization() {
       // request fails, restore the last server-confirmed selection rather than
       // only undoing one click (which leaves earlier failed clicks looking saved).
       if (saveVersion === officialToolSaveVersionRef.current) {
+        const confirmed = confirmedOfficialToolNamesRef.current
         setOfficialToolNames(
           defaultModelId,
-          filterOfficialToolNames(defaultModel, confirmedOfficialToolNamesRef.current),
+          confirmed === undefined ? undefined : filterOfficialToolNames(defaultModel, confirmed),
         )
       }
       toast.error(t('common:actions.failed', { defaultValue: 'Failed to save' }), e instanceof Error ? e.message : undefined)
@@ -393,13 +395,13 @@ export default function Personalization() {
                   )}
                 >
                   {availableDefaultToolMode === 'enabled' ? (
-                    <Wrench size={15} className="shrink-0 text-[var(--color-secondary)]" aria-hidden />
+                    <Wrench size={15} className="shrink-0 text-[var(--color-tool-selection-text)]" aria-hidden />
                   ) : availableDefaultToolMode === 'auto' ? (
-                    <Sparkles size={15} className="shrink-0 text-[var(--color-secondary)]" aria-hidden />
+                    <Sparkles size={15} className="shrink-0 text-[var(--color-tool-selection-text)]" aria-hidden />
                   ) : availableDefaultToolMode === 'disabled' ? (
-                    <Ban size={15} className="shrink-0 text-[var(--color-secondary)]" aria-hidden />
+                    <Ban size={15} className="shrink-0 text-[var(--color-tool-selection-text)]" aria-hidden />
                   ) : (
-                    <BadgeCheck size={15} className="shrink-0 text-[var(--color-secondary)]" aria-hidden />
+                    <BadgeCheck size={15} className="shrink-0 text-[var(--color-tool-selection-text)]" aria-hidden />
                   )}
                   <span className="min-w-0 flex-1 truncate text-left">
                     {t(`settings:personalization.toolModes.${availableDefaultToolMode}.label`)}
@@ -455,15 +457,19 @@ export default function Personalization() {
                               if (availableDefaultToolMode !== 'official') void onSelectToolMode('official')
                               void onToggleOfficialTool(tool.name)
                             }}
-                            className="py-2"
+                            className={cn(
+                              'py-2',
+                              checked &&
+                                'bg-[var(--color-tool-selection-soft)] text-[var(--color-tool-selection-text)] data-[highlighted]:bg-[var(--color-tool-selection-soft)] data-[highlighted]:text-[var(--color-tool-selection-text)]',
+                            )}
                           >
                             <OfficialToolIcon
                               icon={tool.icon}
                               name={tool.name}
                               size={16}
-                              className="text-[var(--color-fg-muted)]"
+                              className={checked ? 'text-[var(--color-tool-selection-text)]' : 'text-[var(--color-fg-muted)]'}
                             />
-                            <span className="min-w-0 truncate">
+                            <span className="min-w-0 truncate text-[var(--color-fg)]">
                               {t(`chat:tools.${tool.name}`, { defaultValue: humanizeOfficialToolName(tool.name) })}
                             </span>
                           </DropdownMenuCheckboxItem>
@@ -500,9 +506,20 @@ export default function Personalization() {
                             }
                             void onSelectToolMode(mode)
                           }}
-                          className={cn('items-start py-2.5', selected && 'bg-[var(--color-secondary-soft)]')}
+                          className={cn(
+                            'items-start py-2.5',
+                            selected &&
+                              'bg-[var(--color-tool-selection-soft)] data-[highlighted]:bg-[var(--color-tool-selection-soft)]',
+                          )}
                         >
-                          <span className={cn('mt-0.5 shrink-0', selected ? 'text-[var(--color-secondary)]' : 'text-[var(--color-fg-muted)]')}>
+                          <span
+                            className={cn(
+                              'mt-0.5 shrink-0',
+                              selected
+                                ? 'text-[var(--color-tool-selection-text)]'
+                                : 'text-[var(--color-fg-muted)]',
+                            )}
+                          >
                             {icon}
                           </span>
                           <span className="min-w-0 flex-1">
@@ -512,7 +529,7 @@ export default function Personalization() {
                           {mode === 'official' ? (
                             <ChevronRight size={14} className="mt-1 shrink-0 text-[var(--color-fg-subtle)]" aria-hidden />
                           ) : selected ? (
-                            <Check size={14} className="mt-1 shrink-0 text-[var(--color-secondary)]" aria-hidden />
+                            <Check size={14} className="mt-1 shrink-0 text-[var(--color-tool-selection-text)]" aria-hidden />
                           ) : null}
                         </DropdownMenuItem>
                       )

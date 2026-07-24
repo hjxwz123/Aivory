@@ -77,14 +77,14 @@ export function ReasoningTrace({ reasoning, streaming = false, settled = false }
   const headline = active ? t('thinking') : t('reasoning.title')
 
   return (
-    <div className="mb-3">
+    <div className="mb-3 w-full min-w-0 max-w-full">
       {/* Minimal, box-free disclosure — just an icon + "thinking" label + caret. */}
       <button
         type="button"
         aria-expanded={expanded}
         aria-controls={contentId}
         onClick={() => setDisclosure(toggleReasoningDisclosure)}
-        className="flex items-center gap-1.5 -ml-1 px-1 py-0.5 text-left interactive rounded-[6px] text-[var(--color-fg-subtle)] hover:text-[var(--color-fg-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+        className="-ml-1 flex max-w-full min-w-0 items-center gap-1.5 rounded-[6px] px-1 py-0.5 text-left text-[var(--color-fg-subtle)] interactive hover:text-[var(--color-fg-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
       >
         <Brain
           size={13}
@@ -111,8 +111,8 @@ export function ReasoningTrace({ reasoning, streaming = false, settled = false }
           expanded ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]',
         )}
       >
-        <div className="min-h-0 overflow-clip" aria-hidden={!expanded} inert={!expanded}>
-          <div className="space-y-2 ml-[6px] mt-1.5 pl-3.5 border-l border-[var(--color-divider)]">
+        <div className="min-h-0 min-w-0 max-w-full overflow-clip" aria-hidden={!expanded} inert={!expanded}>
+          <div className="ml-[6px] mt-1.5 min-w-0 max-w-full space-y-2 border-l border-[var(--color-divider)] pl-3.5">
             {items.map((it) => {
               if (it.kind === 'thinking' || it.kind === 'narration') {
                 // Render the model's chain-of-thought / narration as full
@@ -162,42 +162,47 @@ function ToolStep({ toolCall }: { toolCall: ToolCall }) {
     // Box-free: each tool step is a flat row (no border/surface card), matching
     // the rest of the trace. A subtle rounded hover affords the expand toggle;
     // expanded code/output drop into a calm rounded well, no dividing borders.
-    <div>
+    <div className="min-w-0 max-w-full">
       <button
         type="button"
         onClick={() => hasBody && setExpanded((v) => !v)}
+        title={subtitle ?? undefined}
         className={cn(
-          'flex w-full items-center gap-2 rounded-[7px] px-1.5 py-1 text-left',
+          'grid w-full min-w-0 max-w-full grid-cols-[auto_auto_minmax(0,1fr)_auto_auto] items-center gap-x-2 gap-y-0.5 overflow-hidden rounded-[7px] px-1.5 py-1 text-left',
           hasBody ? 'interactive cursor-pointer hover:bg-[var(--color-bg-muted)]/60' : 'cursor-default',
         )}
       >
         <StatusDot status={status} />
         <Icon size={12} className="shrink-0 text-[var(--color-fg-subtle)]" />
-        <span className="shrink-0 text-[12.5px] font-medium text-[var(--color-fg)]">{displayName}</span>
-        {subtitle ? (
-          <span className="min-w-0 truncate font-mono text-[11.5px] text-[var(--color-fg-muted)]">{subtitle}</span>
-        ) : null}
-        <span className="ml-auto shrink-0 tabular-nums text-[10.5px] text-[var(--color-fg-subtle)]">{elapsed}</span>
+        <span className="min-w-0 truncate text-[12.5px] font-medium text-[var(--color-fg)]">{displayName}</span>
+        <span className="col-start-4 row-start-1 shrink-0 tabular-nums text-[10.5px] text-[var(--color-fg-subtle)]">
+          {elapsed}
+        </span>
         {hasBody ? (
           <ChevronRight
             size={12}
             aria-hidden
             className={cn(
-              'shrink-0 text-[var(--color-fg-subtle)] transition-transform duration-150',
+              'col-start-5 row-start-1 shrink-0 text-[var(--color-fg-subtle)] transition-transform duration-150',
               expanded && 'rotate-90',
             )}
           />
         ) : null}
+        {subtitle ? (
+          <span className="col-start-3 col-end-[-1] row-start-2 min-w-0 max-w-full line-clamp-2 break-words [overflow-wrap:anywhere] font-mono text-[11.5px] leading-[1.45] text-[var(--color-fg-muted)]">
+            {subtitle}
+          </span>
+        ) : null}
       </button>
       {expanded && code ? (
-        <pre className="mt-1 max-h-[300px] overflow-auto rounded-[10px] bg-[var(--color-code-bg)] px-3 py-2.5 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-[var(--color-code-fg)]">
+        <pre className="mt-1 max-h-[300px] min-w-0 max-w-full overflow-auto rounded-[10px] bg-[var(--color-code-bg)] px-3 py-2.5 font-mono text-[11px] leading-relaxed whitespace-pre-wrap [overflow-wrap:anywhere] text-[var(--color-code-fg)]">
           {code}
         </pre>
       ) : null}
       {expanded && output ? (
         <div
           className={cn(
-            'mt-1 text-[11.5px] leading-relaxed',
+            'mt-1 min-w-0 max-w-full break-words whitespace-pre-wrap [overflow-wrap:anywhere] text-[11.5px] leading-relaxed',
             isPython
               ? 'max-h-[320px] overflow-auto rounded-[10px] bg-[var(--color-code-bg)] px-3 py-2.5 font-mono whitespace-pre-wrap text-[var(--color-code-fg)]'
               : 'px-1.5 text-[var(--color-fg-muted)]',

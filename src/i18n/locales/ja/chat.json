@@ -112,6 +112,7 @@
       "toolModeOfficial": "公式",
       "toolModeOfficialDesc": "選択したプロバイダー公式ツールのみを使用します。",
       "officialTools": "公式ツール",
+      "officialToolsSelected": "選択済み {{selected}}/{{total}}",
       "officialToolsEmpty": "このモデルには公式ツールが設定されていません。",
       "webSearch": "ウェブ検索",
       "webSearchDesc": "毎ターンウェブを検索し、結果をプロンプトに追加します（ツール呼び出しなし）。",
@@ -184,8 +185,13 @@
   "tools": {
     "web_search": "ウェブ検索",
     "code_interpreter": "コードインタープリター",
-    "image_generation": "画像生成",
+    "image_generation": "OpenAI ホスト画像生成",
     "deep_research": "ディープリサーチ"
+  },
+  "toolDescriptions": {
+    "web_search": "ウェブから最新情報を検索します",
+    "code_interpreter": "コードを実行してファイルを分析します",
+    "image_generation": "OpenAI のホストツールで画像を生成・編集します。アプリで事前選択した画像モデルではなく、OpenAI が画像モデルと設定を選択します"
   },
   "sources": {
     "label": "ソース",

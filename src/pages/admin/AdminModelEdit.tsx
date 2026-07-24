@@ -409,6 +409,9 @@ export default function AdminModelEdit() {
     }
   }
 
+  const hasOfficialImageGeneration =
+    draft?.official_tools_draft.some((tool) => tool.name === 'image_generation') ?? false
+
   return (
     <div>
       <button
@@ -1074,7 +1077,7 @@ export default function AdminModelEdit() {
 
           {/* Image providers also consume the same declarative request-control
               mappings; embedding models have no per-request UI controls. */}
-          {draft.kind === 'image' && (
+          {(draft.kind === 'image' || hasOfficialImageGeneration) && (
             <section className="mt-6 rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-5 sm:px-6">
               <h2 className="font-serif text-lg text-[var(--color-fg)]">
                 {t('admin:models.sections.imageBehaviour', { defaultValue: 'Image generation' })}
@@ -1150,7 +1153,7 @@ export default function AdminModelEdit() {
                   </Field>
                 </>
               )}
-              {draft.kind === 'image' && (
+              {(draft.kind === 'image' || hasOfficialImageGeneration) && (
                 <Field label={t('admin:models.fields.priceImage')} htmlFor="m-img" className="sm:col-span-2">
                   <Input
                     id="m-img"

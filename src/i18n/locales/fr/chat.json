@@ -112,6 +112,7 @@
       "toolModeOfficial": "Officiels",
       "toolModeOfficialDesc": "Utilise uniquement les outils natifs du fournisseur que vous sélectionnez.",
       "officialTools": "Outils officiels",
+      "officialToolsSelected": "Sélection : {{selected}}/{{total}}",
       "officialToolsEmpty": "Aucun outil officiel n’est configuré pour ce modèle.",
       "webSearch": "Recherche web",
       "webSearchDesc": "Cherche sur le web à chaque tour et ajoute les résultats au prompt (sans appel d'outil).",
@@ -184,8 +185,13 @@
   "tools": {
     "web_search": "Recherche web",
     "code_interpreter": "Interpréteur de code",
-    "image_generation": "Génération d’images",
+    "image_generation": "Génération d’images hébergée par OpenAI",
     "deep_research": "Recherche approfondie"
+  },
+  "toolDescriptions": {
+    "web_search": "Rechercher les informations les plus récentes sur le web",
+    "code_interpreter": "Exécuter du code et analyser des fichiers",
+    "image_generation": "Générer ou modifier des images avec l’outil hébergé d’OpenAI ; OpenAI choisit le modèle et les paramètres plutôt que le modèle d’image présélectionné dans l’application"
   },
   "sources": {
     "label": "Sources",

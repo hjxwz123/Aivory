@@ -112,6 +112,7 @@
       "toolModeOfficial": "官方",
       "toolModeOfficialDesc": "仅使用你选择的服务商原生工具。",
       "officialTools": "官方工具",
+      "officialToolsSelected": "已选 {{selected}}/{{total}}",
       "officialToolsEmpty": "当前模型尚未配置官方工具。",
       "webSearch": "联网搜索",
       "webSearchDesc": "每次都联网搜索并把结果拼接进提示词（不走工具调用）。",
@@ -184,8 +185,13 @@
   "tools": {
     "web_search": "网页搜索",
     "code_interpreter": "代码解释器",
-    "image_generation": "图片生成",
+    "image_generation": "OpenAI 托管图片生成",
     "deep_research": "深度研究"
+  },
+  "toolDescriptions": {
+    "web_search": "实时检索全网最新资讯",
+    "code_interpreter": "运行代码并分析文件",
+    "image_generation": "由 OpenAI 托管工具生成或编辑图片；图片模型和参数由 OpenAI 选择，不使用站内预选图片模型"
   },
   "sources": {
     "label": "来源",

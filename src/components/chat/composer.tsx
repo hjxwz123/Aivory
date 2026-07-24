@@ -53,7 +53,7 @@ import { kbsApi, audioApi, conversationsApi } from '@/api/endpoints'
 import { ModelPicker } from './model-picker'
 import { StylePicker } from './style-picker'
 import { ParamControls } from './param-controls'
-import { filterVisibleParams } from './param-controls.utils'
+import { filterVisibleParams, parseControls } from './param-controls.utils'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { useModels } from '@/store/models'
 import { useAuth } from '@/store/auth'
@@ -156,8 +156,6 @@ interface ComposerProps {
 
 const MAX_LEN = envNum('VITE_AIVORY_MAX_LEN', 12_000)
 const EMPTY_PARAM_VALUES: Record<string, unknown> = {}
-const EMPTY_TOOL_NAMES: string[] = []
-
 // Backend file ids already committed to a SENT message, shared across every
 // composer instance (module scope, not a per-instance ref). Sending the FIRST
 // message from the home screen navigates to the thread, which mounts a FRESH
@@ -346,41 +344,40 @@ function FeatureRow({ item, onAfter }: { item: FeatureItem; onAfter?: () => void
   return (
     <button
       type="button"
-      role="menuitemcheckbox"
+      role="checkbox"
       aria-checked={item.active}
       onClick={() => {
         item.toggle()
         onAfter?.()
       }}
       className={cn(
-        'flex w-full items-start gap-2.5 rounded-[10px] px-2.5 py-2 text-left interactive',
+        'flex w-full min-w-0 max-w-full items-start gap-2.5 overflow-hidden rounded-[12px] border px-2.5 py-2 text-left interactive',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
         item.enter && 'animate-[fade-in_var(--duration-base)_var(--ease-out)]',
-        item.active ? 'bg-[var(--color-secondary-soft)]' : 'hover:bg-[var(--color-bg-muted)]',
+        item.active
+          ? 'border-[var(--color-tool-selection-border)] bg-[var(--color-tool-selection-soft)]'
+          : 'border-transparent hover:bg-[var(--color-bg-muted)]',
       )}
     >
       <span
         className={cn(
           'mt-0.5 inline-flex shrink-0',
-          item.active ? 'text-[var(--color-secondary)]' : 'text-[var(--color-fg-muted)]',
+          item.active ? 'text-[var(--color-tool-selection-text)]' : 'text-[var(--color-fg-muted)]',
         )}
         aria-hidden
       >
         {item.icon}
       </span>
-      <span className="min-w-0 flex-1">
-        <span className="flex items-center gap-1.5">
-          <span
-            className={cn(
-              'text-[13px] font-medium',
-              item.active ? 'text-[var(--color-secondary)]' : 'text-[var(--color-fg)]',
-            )}
-          >
+      <span className="min-w-0 max-w-full flex-1">
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="min-w-0 truncate text-[13px] font-medium text-[var(--color-fg)]">
             {item.label}
           </span>
-          {item.active ? <Check size={13} className="text-[var(--color-secondary)]" aria-hidden /> : null}
+          {item.active ? <Check size={13} className="text-[var(--color-tool-selection-text)]" aria-hidden /> : null}
         </span>
-        <span className="mt-0.5 block text-[11.5px] leading-snug text-[var(--color-fg-subtle)]">{item.desc}</span>
+        <span className="mt-0.5 block max-w-full break-words [overflow-wrap:anywhere] text-[11.5px] leading-snug text-[var(--color-fg-subtle)]">
+          {item.desc}
+        </span>
       </span>
     </button>
   )
@@ -438,6 +435,7 @@ function ToolModeSelector({
   const visibleOptions = researchActive
     ? options.filter((option) => option.value === 'enabled')
     : options
+  const toolModeIsOverride = value !== 'auto' && !researchActive
 
   useEffect(() => {
     if (researchActive) setPanel('root')
@@ -486,54 +484,73 @@ function ToolModeSelector({
           ref={officialBackRef}
           type="button"
           onClick={() => setPanel('modes')}
-          className="flex min-h-9 w-full items-center gap-2 rounded-[8px] px-2 py-1.5 text-left text-[12.5px] font-medium text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+          className="flex min-h-10 w-full items-center gap-2 rounded-[10px] px-2.5 py-1.5 text-left text-[13px] font-medium text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
         >
-          <ArrowLeft size={14} aria-hidden />
+          <ArrowLeft size={16} aria-hidden />
           <span className="truncate">{officialToolsLabel}</span>
-          <span className="ml-auto text-[11px] tabular-nums text-[var(--color-fg-subtle)]">
-            {officialToolNames.length}/{officialTools.length}
+          <span className="ml-auto shrink-0 rounded-[10px] bg-[var(--color-tool-selection-soft)] px-2 py-1 text-[11.5px] font-semibold tabular-nums text-[var(--color-tool-selection-text)]">
+            {t('composer.features.officialToolsSelected', {
+              selected: officialToolNames.length,
+              total: officialTools.length,
+              defaultValue: 'Selected {{selected}}/{{total}}',
+            })}
           </span>
         </button>
         <div className="my-1 h-px bg-[var(--color-divider)]" aria-hidden />
-        {officialTools.map((tool) => {
-          const checked = officialToolNames.includes(tool.name)
-          return (
-            <button
-              key={tool.name}
-              type="button"
-              role="checkbox"
-              aria-checked={checked}
-              onClick={() =>
-                onOfficialToolNamesChange(
-                  checked
-                    ? officialToolNames.filter((name) => name !== tool.name)
-                    : [...officialToolNames, tool.name],
-                )
-              }
-              className={cn(
-                'flex w-full items-center gap-2.5 rounded-[10px] px-2.5 py-2 text-left interactive',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-                checked ? 'bg-[var(--color-secondary-soft)]' : 'hover:bg-[var(--color-bg-muted)]',
-              )}
-            >
-              <OfficialToolIcon
-                icon={tool.icon}
-                name={tool.name}
-                size={16}
-                className={checked ? 'text-[var(--color-secondary)]' : 'text-[var(--color-fg-muted)]'}
-              />
-              <span
+        <div className="flex flex-col gap-1">
+          {officialTools.map((tool) => {
+            const checked = officialToolNames.includes(tool.name)
+            const toolLabel = t(`tools.${tool.name}`, { defaultValue: humanizeOfficialToolName(tool.name) })
+            const toolDescription = t(`toolDescriptions.${tool.name}`, { defaultValue: '' })
+            return (
+              <button
+                key={tool.name}
+                type="button"
+                role="checkbox"
+                aria-checked={checked}
+                onClick={() =>
+                  onOfficialToolNamesChange(
+                    checked
+                      ? officialToolNames.filter((name) => name !== tool.name)
+                      : [...officialToolNames, tool.name],
+                  )
+                }
                 className={cn(
-                  'min-w-0 flex-1 truncate text-[13px] font-medium',
-                  checked ? 'text-[var(--color-secondary)]' : 'text-[var(--color-fg)]',
+                  'flex w-full min-w-0 max-w-full items-start gap-2.5 overflow-hidden rounded-[12px] border px-2.5 py-2 text-left interactive',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+                  checked
+                    ? 'border-[var(--color-tool-selection-border)] bg-[var(--color-tool-selection-soft)]'
+                    : 'border-transparent hover:bg-[var(--color-bg-muted)]',
                 )}
               >
-                {t(`tools.${tool.name}`, { defaultValue: humanizeOfficialToolName(tool.name) })}
-              </span>
-              {checked ? <Check size={14} className="shrink-0 text-[var(--color-secondary)]" aria-hidden /> : null}
-            </button>
-          )
-        })}
+                <span
+                  className={cn(
+                    'mt-0.5 inline-flex shrink-0',
+                    checked ? 'text-[var(--color-tool-selection-text)]' : 'text-[var(--color-fg-muted)]',
+                  )}
+                  aria-hidden
+                >
+                  <OfficialToolIcon icon={tool.icon} name={tool.name} size={16} />
+                </span>
+                <span className="min-w-0 max-w-full flex-1">
+                  <span className="block truncate text-[13px] font-medium text-[var(--color-fg)]">{toolLabel}</span>
+                  {toolDescription ? (
+                    <span className="mt-0.5 block truncate text-[11.5px] leading-snug text-[var(--color-fg-subtle)]">
+                      {toolDescription}
+                    </span>
+                  ) : null}
+                </span>
+                {checked ? (
+                  <Check
+                    size={14}
+                    className="mt-1 shrink-0 text-[var(--color-tool-selection-text)]"
+                    aria-hidden
+                  />
+                ) : null}
+              </button>
+            )
+          })}
+        </div>
       </div>
     )
   }
@@ -549,19 +566,42 @@ function ToolModeSelector({
           type="button"
           onClick={() => setPanel('modes')}
           aria-label={`${label}: ${selectedOption?.label ?? ''}`}
-          className="flex w-full items-start gap-2.5 rounded-[10px] px-2.5 py-2 text-left interactive hover:bg-[var(--color-bg-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+          className={cn(
+            'flex w-full min-w-0 max-w-full items-start gap-2.5 overflow-hidden rounded-[12px] border px-2.5 py-2 text-left interactive',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+            toolModeIsOverride
+              ? 'border-[var(--color-tool-selection-border)] bg-[var(--color-tool-selection-soft)]'
+              : 'border-transparent hover:bg-[var(--color-bg-muted)]',
+          )}
         >
-          <span className="mt-0.5 inline-flex shrink-0 text-[var(--color-fg-muted)]" aria-hidden>
+          <span
+            className={cn(
+              'mt-0.5 inline-flex shrink-0',
+              toolModeIsOverride
+                ? 'text-[var(--color-tool-selection-text)]'
+                : 'text-[var(--color-fg-muted)]',
+            )}
+            aria-hidden
+          >
             <Wrench size={16} />
           </span>
-          <span className="min-w-0 flex-1">
+          <span className="min-w-0 max-w-full flex-1">
             <span className="flex min-w-0 items-center gap-2">
-              <span className="truncate text-[13px] font-medium text-[var(--color-fg)]">{label}</span>
-              <span className="ml-auto shrink-0 text-[11.5px] text-[var(--color-fg-subtle)]">
+              <span className="truncate text-[13px] font-medium text-[var(--color-fg)]">
+                {label}
+              </span>
+              <span
+                className={cn(
+                  'ml-auto shrink-0 text-[11.5px]',
+                  toolModeIsOverride
+                    ? 'text-[var(--color-tool-selection-text)]'
+                    : 'text-[var(--color-fg-subtle)]',
+                )}
+              >
                 {selectedOption?.label}
               </span>
             </span>
-            <span className="mt-0.5 block text-[11.5px] leading-snug text-[var(--color-fg-subtle)]">
+            <span className="mt-0.5 block max-w-full break-words [overflow-wrap:anywhere] text-[11.5px] leading-snug text-[var(--color-fg-subtle)]">
               {description}
             </span>
           </span>
@@ -610,35 +650,34 @@ function ToolModeSelector({
               else setPanel('root')
             }}
             className={cn(
-              'flex w-full items-start gap-2.5 rounded-[10px] px-2.5 py-2 text-left interactive',
+              'flex w-full min-w-0 max-w-full items-start gap-2.5 overflow-hidden rounded-[12px] border px-2.5 py-2 text-left interactive',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-              checked ? 'bg-[var(--color-secondary-soft)]' : 'hover:bg-[var(--color-bg-muted)]',
+              checked
+                ? 'border-[var(--color-tool-selection-border)] bg-[var(--color-tool-selection-soft)]'
+                : 'border-transparent hover:bg-[var(--color-bg-muted)]',
             )}
           >
             <span
               className={cn(
                 'mt-0.5 inline-flex shrink-0',
-                checked ? 'text-[var(--color-secondary)]' : 'text-[var(--color-fg-muted)]',
+                checked ? 'text-[var(--color-tool-selection-text)]' : 'text-[var(--color-fg-muted)]',
               )}
               aria-hidden
             >
               {option.icon}
             </span>
-            <span className="min-w-0 flex-1">
-              <span
-                className={cn(
-                  'block text-[13px] font-medium',
-                  checked ? 'text-[var(--color-secondary)]' : 'text-[var(--color-fg)]',
-                )}
-              >
+            <span className="min-w-0 max-w-full flex-1">
+              <span className="block text-[13px] font-medium text-[var(--color-fg)]">
                 {option.label}
               </span>
-              <span className="mt-0.5 block text-[11.5px] leading-snug text-[var(--color-fg-subtle)]">{option.desc}</span>
+              <span className="mt-0.5 block max-w-full break-words [overflow-wrap:anywhere] text-[11.5px] leading-snug text-[var(--color-fg-subtle)]">
+                {option.desc}
+              </span>
             </span>
             {opensSubmenu ? (
               <ChevronRight size={14} className="mt-1 shrink-0 text-[var(--color-fg-subtle)]" aria-hidden />
             ) : checked ? (
-              <Check size={14} className="mt-1 shrink-0 text-[var(--color-secondary)]" aria-hidden />
+              <Check size={14} className="mt-1 shrink-0 text-[var(--color-tool-selection-text)]" aria-hidden />
             ) : null}
           </button>
         )
@@ -1099,7 +1138,7 @@ export function Composer({
   )
   const officialTools = useMemo(() => officialToolsForModel(currentModel), [currentModel])
   const officialToolNames = useMemo(
-    () => filterOfficialToolNames(currentModel, cachedOfficialToolNames ?? EMPTY_TOOL_NAMES),
+    () => filterOfficialToolNames(currentModel, cachedOfficialToolNames),
     [cachedOfficialToolNames, currentModel],
   )
   const handleOfficialToolNamesChange = useCallback(
@@ -1817,11 +1856,39 @@ export function Composer({
   ]
   const anyFeatureActive = activeChips.length > 0
   const featureMenuAvailable = showToolModeSelector || featureItems.length > 0
+  const hasActiveParamControl = useMemo(
+    () =>
+      parseControls(visibleParamControls).some((control) => {
+        if (
+          control.show_if &&
+          Object.entries(control.show_if).some(([key, expected]) => paramValues[key] !== expected)
+        ) {
+          return false
+        }
+        if (control.type === 'toggle') {
+          return Boolean(paramValues[control.key] ?? control.default ?? false)
+        }
+        const current = String(
+          paramValues[control.key] ?? control.default ?? control.options?.[0]?.value ?? '',
+        )
+        return control.default !== undefined ? current !== String(control.default) : Boolean(current)
+      }),
+    [paramValues, visibleParamControls],
+  )
 
-  // A tool is "armed" while collapsed → the mobile "+" trigger (which now also
-  // holds the feature menu) shows an accent dot so the user knows a feature or a
-  // KB is active without expanding the menu.
-  const hasActiveTool = anyFeatureActive || (kbIds?.length ?? 0) > 0
+  // The mobile "+" turns blue whenever a persistent choice inside it is active.
+  // Hidden KB/tool policies must not leak into image or fast turns.
+  const hasActiveTool =
+    anyFeatureActive ||
+    hasActiveParamControl ||
+    (!isImageMode && Boolean(onKBChange) && (kbIds?.length ?? 0) > 0)
+  const officialToolBadgeCount = effectiveOfficialToolNames?.length ?? 0
+  const officialToolBadge = officialToolBadgeCount > 99 ? '99+' : String(officialToolBadgeCount)
+  const officialToolSelectionLabel = t('composer.features.officialToolsSelected', {
+    selected: officialToolBadgeCount,
+    total: officialTools.length,
+    defaultValue: 'Selected {{selected}}/{{total}}',
+  })
 
   // KB checklist — shared by the desktop popover and the mobile "+" menu.
   const kbChecklist =
@@ -1834,6 +1901,8 @@ export function Composer({
           <button
             key={kb.id}
             type="button"
+            role="checkbox"
+            aria-checked={checked}
             onClick={() =>
               onKBChange?.(checked ? (kbIds ?? []).filter((x) => x !== kb.id) : [...(kbIds ?? []), kb.id])
             }
@@ -1843,7 +1912,7 @@ export function Composer({
               className={cn(
                 'inline-flex size-4 items-center justify-center rounded border',
                 checked
-                  ? 'border-[var(--color-accent)] bg-[var(--color-accent)] text-[var(--color-accent-fg)]'
+                  ? 'border-[var(--color-tool-selection)] bg-[var(--color-tool-selection)] text-[var(--color-accent-fg)]'
                   : 'border-[var(--color-border-strong)]',
               )}
             >
@@ -1973,12 +2042,11 @@ export function Composer({
     <div
       className={cn(
         'group/composer relative min-w-0 w-full max-w-full',
-        // Calm Gemini-style pill on phones (rounder, no resting shadow); the
-        // editorial card look is kept on ≥sm.
-        'rounded-[16px] max-sm:rounded-[22px] border border-[var(--color-border)] bg-[var(--color-surface)]',
-        'shadow-[var(--shadow-sm)] max-sm:shadow-none transition-[border-color,box-shadow] duration-200',
-        'focus-within:border-[var(--color-border-strong)] focus-within:shadow-[var(--shadow-md)]',
-        dragOver && 'border-[var(--color-accent)] shadow-[var(--shadow-md)]',
+        'rounded-[22px] max-sm:rounded-[24px] border-0 bg-[var(--color-surface)]',
+        'shadow-[var(--shadow-sm)] transition-[box-shadow] duration-200',
+        dragOver
+          ? 'ring-2 ring-[var(--color-tool-selection)] shadow-[var(--shadow-md)]'
+          : 'focus-within:shadow-[var(--shadow-md)]',
       )}
     >
       {/* Full-screen drag-and-drop overlay — shown while a file is dragged
@@ -2226,19 +2294,27 @@ export function Composer({
             <PopoverTrigger asChild>
               <button
                 type="button"
-                aria-label={t('composer.more', { defaultValue: 'More' })}
+                aria-label={
+                  officialToolBadgeCount > 0
+                    ? `${t('composer.more', { defaultValue: 'More' })}: ${officialToolSelectionLabel}`
+                    : t('composer.more', { defaultValue: 'More' })
+                }
                 className={cn(
                   'relative inline-flex shrink-0 items-center justify-center size-11 rounded-full interactive',
-                  'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
+                  hasActiveTool
+                    ? 'bg-[var(--color-tool-selection)] text-[var(--color-accent-fg)] ring-4 ring-[var(--color-tool-selection-soft)] hover:bg-[var(--color-tool-selection-hover)]'
+                    : 'bg-[var(--color-tool-idle)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]',
                   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
                 )}
               >
                 <Plus size={18} aria-hidden />
-                {hasActiveTool ? (
+                {officialToolBadgeCount > 0 ? (
                   <span
-                    className="absolute right-1 top-1 size-2 rounded-full bg-[var(--color-accent)] ring-2 ring-[var(--color-surface)]"
+                    className="absolute -right-1 -top-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--color-danger)] px-1 text-[10.5px] font-bold leading-none text-[var(--color-fg-inverted)] ring-2 ring-[var(--color-surface)]"
                     aria-hidden
-                  />
+                  >
+                    {officialToolBadge}
+                  </span>
                 ) : null}
               </button>
             </PopoverTrigger>
@@ -2247,7 +2323,7 @@ export function Composer({
               align="start"
               sideOffset={10}
               collisionPadding={12}
-              className="min-w-0 overflow-y-auto overscroll-contain scrollbar-thin p-1.5"
+              className="min-w-0 overflow-y-auto overscroll-contain rounded-[16px] border-0 p-1.5 shadow-[var(--shadow-lg)] scrollbar-thin"
               style={{
                 width: 'min(20rem, calc(100vw - var(--safe-left) - var(--safe-right) - 1.5rem))',
                 maxWidth: 'calc(100vw - var(--safe-left) - var(--safe-right) - 1.5rem)',
@@ -2345,29 +2421,43 @@ export function Composer({
       ) : (
         /* ── Desktop: inline scrollable left zone + pinned right zone ── */
         <div className="flex items-center gap-1 px-2.5 pb-2.5 pt-1">
-          <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto scrollbar-none">
+          <div className="-my-1.5 flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto py-1.5 scrollbar-none">
             {featureMenuAvailable ? (
               <Popover open={featuresOpen} onOpenChange={setFeaturesOpen}>
                 <Tooltip content={t('composer.features.title', { defaultValue: 'Turn features' })}>
                   <PopoverTrigger asChild>
                     <button
                       type="button"
-                      aria-label={t('composer.features.title', { defaultValue: 'Turn features' })}
+                      aria-label={
+                        officialToolBadgeCount > 0
+                          ? `${t('composer.features.title', { defaultValue: 'Turn features' })}: ${officialToolSelectionLabel}`
+                          : t('composer.features.title', { defaultValue: 'Turn features' })
+                      }
                       className={cn(
-                        'relative inline-flex items-center justify-center size-8 rounded-[8px] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+                        'relative mx-1 inline-flex size-8 items-center justify-center rounded-[8px] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
                         anyFeatureActive
-                          ? 'bg-[var(--color-secondary-soft)] text-[var(--color-secondary)]'
-                          : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
+                          ? 'bg-[var(--color-tool-selection)] text-[var(--color-accent-fg)] ring-4 ring-[var(--color-tool-selection-soft)] hover:bg-[var(--color-tool-selection-hover)]'
+                          : 'bg-[var(--color-tool-idle)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]',
                       )}
                     >
                       <Plus size={16} aria-hidden />
+                      {officialToolBadgeCount > 0 ? (
+                        <span
+                          className="absolute -right-1.5 -top-1.5 inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-[var(--color-danger)] px-1 text-[10px] font-bold leading-none text-[var(--color-fg-inverted)] ring-2 ring-[var(--color-surface)]"
+                          aria-hidden
+                        >
+                          {officialToolBadge}
+                        </span>
+                      ) : null}
                     </button>
                   </PopoverTrigger>
                 </Tooltip>
-                <PopoverContent align="start" side="top" sideOffset={10} className="w-72 p-1.5">
-                  <p className="px-2.5 pb-1 pt-0.5 text-[11px] font-medium uppercase tracking-wider text-[var(--color-fg-subtle)]">
-                    {t('composer.features.title', { defaultValue: 'Turn features' })}
-                  </p>
+                <PopoverContent
+                  align="start"
+                  side="top"
+                  sideOffset={10}
+                  className="max-h-[min(70vh,var(--radix-popover-content-available-height))] w-72 overflow-y-auto overscroll-contain rounded-[16px] border-0 p-1.5 shadow-[var(--shadow-lg)] scrollbar-thin"
+                >
                   {featureList()}
                 </PopoverContent>
               </Popover>
@@ -2435,7 +2525,7 @@ export function Composer({
                       className={cn(
                         'inline-flex items-center gap-1.5 h-8 px-2 rounded-[8px] text-[12px] font-medium interactive',
                         (kbIds?.length ?? 0) > 0
-                          ? 'bg-[var(--color-secondary-soft)] text-[var(--color-secondary)]'
+                          ? 'bg-[var(--color-tool-selection-soft)] text-[var(--color-tool-selection-text)]'
                           : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
                         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
                       )}
@@ -2463,7 +2553,7 @@ export function Composer({
             <div className="flex min-w-0 shrink items-center gap-1 overflow-x-auto scrollbar-none pl-1">
               {activeChips.map((chip) => (
                 <Tooltip key={chip.key} content={chip.label}>
-                  <span className="group inline-flex shrink-0 items-center gap-0.5 h-7 pl-1.5 pr-1 rounded-full bg-[var(--color-secondary-soft)] text-[var(--color-secondary)] interactive hover:bg-[var(--color-secondary)]/20">
+                  <span className="group inline-flex h-7 shrink-0 items-center gap-0.5 rounded-full bg-[var(--color-tool-selection-soft)] pl-1.5 pr-1 text-[var(--color-tool-selection-text)] interactive hover:bg-[var(--color-tool-selection)]/15">
                     <span className="inline-flex shrink-0" aria-hidden>
                       {chip.icon}
                     </span>
@@ -2474,7 +2564,7 @@ export function Composer({
                         chip.clearLabel ??
                         t('composer.features.disable', { defaultValue: 'Turn off {{name}}', name: chip.label })
                       }
-                      className="inline-flex items-center justify-center size-5 rounded-full text-[var(--color-secondary)] hover:bg-[var(--color-secondary)]/20 interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                      className="inline-flex size-5 items-center justify-center rounded-full text-[var(--color-tool-selection-text)] hover:bg-[var(--color-tool-selection)]/15 interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
                     >
                       <X size={13} aria-hidden />
                     </button>

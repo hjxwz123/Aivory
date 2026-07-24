@@ -12,6 +12,8 @@ import (
 	"aivory/server/internal/store"
 )
 
+var dailyImageLimitResetWindow = envcfg.Dur("AIVORY_TOOLS_DAILY_IMAGE_LIMIT_RESET_WINDOW", 24*time.Hour)
+
 // Window cost is accumulated in integer micro-units so it can use the cache's
 // atomic IncrBy (§B3) — a float Get/modify/Set loses concurrent increments.
 func costToMicros(c float64) int64 { return int64(math.Round(c * 1e6)) }
@@ -164,6 +166,30 @@ func (o *Orchestrator) checkImageQuota(ctx context.Context, userID string, model
 func (o *Orchestrator) CheckImageCredits(ctx context.Context, userID string, model *store.Model, n int) (bool, bool, string) {
 	msg, ok, payCredits := o.checkImageQuota(ctx, userID, model, n)
 	return ok, payCredits, msg
+}
+
+// checkDailyImageLimit mirrors image_generate's deployment-wide daily boundary
+// for provider-hosted image tools, which never enter the local tool executor.
+func (o *Orchestrator) checkDailyImageLimit(ctx context.Context, userID string, n int) error {
+	limit := 30
+	if raw, err := store.GetSetting(o.db, "daily_image_limit"); err == nil {
+		_ = json.Unmarshal(raw, &limit)
+	}
+	if limit <= 0 {
+		return nil
+	}
+	n = ClampImageGenerationCount(n)
+	dayStart := time.Now().Truncate(dailyImageLimitResetWindow).Unix()
+	var used int
+	if err := o.db.QueryRowContext(ctx,
+		`SELECT COALESCE(SUM(images_count),0) FROM usage_logs WHERE user_id=? AND purpose='image' AND created_at>=?`,
+		userID, dayStart).Scan(&used); err != nil {
+		return err
+	}
+	if used+n > limit {
+		return fmt.Errorf("daily image limit reached (%d/%d)", used, limit)
+	}
+	return nil
 }
 
 func (o *Orchestrator) ChargeImageCredits(ctx context.Context, userID string, costUSD float64) (float64, float64) {
