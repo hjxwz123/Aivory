@@ -17,7 +17,7 @@ import { GradientText } from '@/components/landing/fx/gradient-text'
 import { ShinyText } from '@/components/landing/fx/shiny-text'
 import { SplitText } from '@/components/landing/fx/split-text'
 import { StarBorder } from '@/components/landing/fx/star-border'
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -365,7 +365,7 @@ export function WelcomeCard() {
             </div>
 
             {/* Footer nav */}
-            <div className="shrink-0 border-t border-[var(--color-divider)] px-6 sm:px-8 py-4 flex items-center justify-between gap-3">
+            <DialogFooter className="justify-between px-6 sm:px-8">
               <Button variant="ghost" onClick={() => void handleSkip()} loading={saving}>
                 {t('welcome:actions.skip')}
               </Button>
@@ -383,7 +383,7 @@ export function WelcomeCard() {
                   </Button>
                 )}
               </div>
-            </div>
+            </DialogFooter>
           </div>
         </div>
       </DialogContent>

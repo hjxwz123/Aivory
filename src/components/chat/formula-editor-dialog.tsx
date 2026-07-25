@@ -499,7 +499,7 @@ export function FormulaEditorDialog({
           </Tabs>
         </DialogBody>
 
-        <DialogFooter className="formula-editor-footer px-4 py-3 sm:px-5 [&>button]:max-sm:min-h-11">
+        <DialogFooter className="formula-editor-footer px-4 sm:px-5 [&>button]:max-sm:min-h-11">
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
             {t('composer.formula.cancel')}
           </Button>

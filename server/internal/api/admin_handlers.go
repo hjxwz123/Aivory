@@ -549,8 +549,8 @@ func createSkillAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	s.DisplayDescription = strings.TrimSpace(s.DisplayDescription)
 	s.Icon = strings.TrimSpace(s.Icon)
 	s.Instructions = strings.TrimSpace(s.Instructions)
-	if s.Name == "" || s.Description == "" || s.DisplayDescription == "" || s.Instructions == "" {
-		writeError(w, 400, errors.New("name, display_description, description, instructions required"))
+	if s.Name == "" || s.Description == "" || s.Instructions == "" {
+		writeError(w, 400, errors.New("name, description, instructions required"))
 		return
 	}
 	if len(s.DisplayDescription) > libraryDescriptionMaxBytes {
@@ -603,8 +603,8 @@ func updateSkillAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	s.DisplayDescription = strings.TrimSpace(s.DisplayDescription)
 	s.Icon = strings.TrimSpace(s.Icon)
 	s.Instructions = strings.TrimSpace(s.Instructions)
-	if s.Name == "" || s.Description == "" || s.DisplayDescription == "" || s.Instructions == "" {
-		writeError(w, 400, errors.New("name, display_description, description, instructions required"))
+	if s.Name == "" || s.Description == "" || s.Instructions == "" {
+		writeError(w, 400, errors.New("name, description, instructions required"))
 		return
 	}
 	if len(s.DisplayDescription) > libraryDescriptionMaxBytes {

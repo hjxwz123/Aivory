@@ -208,7 +208,7 @@
       "name": "Nom",
       "icon": "Icône",
       "displayDescription": "Description d’affichage",
-      "displayDescriptionHint": "Affichée uniquement dans les catalogues et les listes ; elle n’influence pas le déclenchement.",
+      "displayDescriptionHint": "Facultative et réservée aux listes ; vide, elle reprend la description « Quand l’utiliser ».",
       "when": "Quand l'utiliser (une phrase)",
       "whenHint": "Va dans l'index du prompt — formulez-le comme un déclencheur.",
       "instructions": "Instructions (Markdown)",

@@ -208,7 +208,7 @@
       "name": "名稱",
       "icon": "圖示",
       "displayDescription": "展示描述",
-      "displayDescriptionHint": "僅用於技能目錄和清單展示，不參與模型觸發判斷。",
+      "displayDescriptionHint": "選填，僅用於目錄和清單；留空時顯示「何時使用」的描述。",
       "when": "何時使用(一句話)",
       "whenHint": "注入系統提示索引,決定召回率,寫成觸發條件。",
       "instructions": "完整指令(Markdown)",

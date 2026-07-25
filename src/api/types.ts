@@ -435,6 +435,10 @@ export interface ApiUserSkill {
   id: string
   name: string
   description: string
+  /** Current administrator catalog copy for imported skills. When the
+   * administrator leaves it empty, the API falls back to the source skill's
+   * model-facing description. Personal skills omit this field. */
+  display_description?: string
   icon: string
   instructions: string
   source_skill_id?: string

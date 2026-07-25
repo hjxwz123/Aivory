@@ -50,6 +50,50 @@ func TestCreatePromptAdminPreservesExplicitDisabledAndDefaultsOmittedEnabled(t *
 	}
 }
 
+func TestAdminSkillDisplayDescriptionIsOptional(t *testing.T) {
+	db := openMigrated(t, filepath.Join(t.TempDir(), "optional-skill-display-description.db"))
+	defer db.Close()
+	d := Deps{DB: db}
+
+	rec := httptest.NewRecorder()
+	createSkillAdmin(d, rec, httptest.NewRequest(http.MethodPost, "/api/admin/skills", strings.NewReader(
+		`{"name":"meeting-notes","description":"Use when meeting notes need structure","instructions":"Extract decisions and owners."}`,
+	)))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var created store.Skill
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	if created.DisplayDescription != "" {
+		t.Fatalf("display_description=%q want empty", created.DisplayDescription)
+	}
+
+	mx := newMux()
+	mx.handle(http.MethodPatch, "/api/admin/skills/:id", func(w http.ResponseWriter, r *http.Request) {
+		updateSkillAdmin(d, w, r)
+	})
+	for _, displayDescription := range []string{"Structure meeting notes", ""} {
+		rec = httptest.NewRecorder()
+		body, err := json.Marshal(map[string]string{"display_description": displayDescription})
+		if err != nil {
+			t.Fatal(err)
+		}
+		mx.ServeHTTP(rec, httptest.NewRequest(http.MethodPatch, "/api/admin/skills/"+created.ID, strings.NewReader(string(body))))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("update display_description=%q status=%d body=%s", displayDescription, rec.Code, rec.Body.String())
+		}
+		var updated store.Skill
+		if err := json.Unmarshal(rec.Body.Bytes(), &updated); err != nil {
+			t.Fatal(err)
+		}
+		if updated.DisplayDescription != displayDescription {
+			t.Fatalf("display_description=%q want=%q", updated.DisplayDescription, displayDescription)
+		}
+	}
+}
+
 func TestPrivateSkillRejectsFileAndPathFieldsRegardlessOfCaseOrNesting(t *testing.T) {
 	db := openMigrated(t, filepath.Join(t.TempDir(), "private-skill-fields.db"))
 	defer db.Close()
@@ -79,7 +123,7 @@ func TestPrivateSkillRejectsFileAndPathFieldsRegardlessOfCaseOrNesting(t *testin
 	}
 }
 
-func TestLibraryCatalogNeverExposesSkillTriggerInstructionsAssetsOrPromptContent(t *testing.T) {
+func TestLibraryCatalogPrefersDisplayDescriptionAndFallsBackToWhenToUseWithoutPrivateContent(t *testing.T) {
 	db := openMigrated(t, filepath.Join(t.TempDir(), "catalog-redaction.db"))
 	defer db.Close()
 	mustExec(t, db, `INSERT INTO users(id,email,password_hash) VALUES('u1','u1@example.test','h')`)
@@ -87,6 +131,13 @@ func TestLibraryCatalogNeverExposesSkillTriggerInstructionsAssetsOrPromptContent
 	_, err := store.CreateSkill(ctx, db, store.Skill{
 		Name: "catalog-skill", Description: "TRIGGER_SECRET", DisplayDescription: "Public summary",
 		Icon: "Presentation", Instructions: "INSTRUCTION_SECRET", Assets: json.RawMessage(`[{"storage_path":"ASSET_SECRET"}]`), Enabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.CreateSkill(ctx, db, store.Skill{
+		Name: "legacy-skill", Description: "Use when legacy work is requested",
+		Icon: "WandSparkles", Instructions: "LEGACY_INSTRUCTION_SECRET", Enabled: true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -103,13 +154,10 @@ func TestLibraryCatalogNeverExposesSkillTriggerInstructionsAssetsOrPromptContent
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	for _, secret := range []string{"TRIGGER_SECRET", "INSTRUCTION_SECRET", "ASSET_SECRET", "PROMPT_CONTENT_SECRET", "storage_path", "instructions", "content"} {
+	for _, secret := range []string{"TRIGGER_SECRET", "INSTRUCTION_SECRET", "LEGACY_INSTRUCTION_SECRET", "ASSET_SECRET", "PROMPT_CONTENT_SECRET", "storage_path", "instructions", "content"} {
 		if strings.Contains(body, secret) {
 			t.Fatalf("catalog leaked %q: %s", secret, body)
 		}
-	}
-	if !strings.Contains(body, "Public summary") || !strings.Contains(body, "Prompt summary") {
-		t.Fatalf("catalog lost safe display metadata: %s", body)
 	}
 	var catalog struct {
 		Skills []catalogSkill `json:"skills"`
@@ -117,39 +165,122 @@ func TestLibraryCatalogNeverExposesSkillTriggerInstructionsAssetsOrPromptContent
 	if err := json.Unmarshal(rec.Body.Bytes(), &catalog); err != nil {
 		t.Fatal(err)
 	}
-	if len(catalog.Skills) != 1 || catalog.Skills[0].Icon != "Presentation" {
-		t.Fatalf("catalog skill icon=%+v", catalog.Skills)
+	if len(catalog.Skills) != 2 {
+		t.Fatalf("catalog skills=%+v", catalog.Skills)
+	}
+	byName := make(map[string]catalogSkill, len(catalog.Skills))
+	for _, skill := range catalog.Skills {
+		byName[skill.Name] = skill
+	}
+	configured := byName["catalog-skill"]
+	if configured.DisplayDescription != "Public summary" || configured.Description != "Public summary" || configured.Icon != "Presentation" {
+		t.Fatalf("configured catalog skill=%+v", configured)
+	}
+	legacy := byName["legacy-skill"]
+	if legacy.DisplayDescription != "" || legacy.Description != "Use when legacy work is requested" || legacy.Icon != "WandSparkles" {
+		t.Fatalf("legacy catalog skill=%+v", legacy)
+	}
+	if !strings.Contains(body, "Prompt summary") {
+		t.Fatalf("catalog lost prompt display metadata: %s", body)
 	}
 }
 
-func TestCatalogSkillCopyPreservesAdministratorIcon(t *testing.T) {
+func TestCatalogSkillCopyUsesDisplayDescriptionThenFallsBackToWhenToUse(t *testing.T) {
 	db := openMigrated(t, filepath.Join(t.TempDir(), "catalog-skill-icon.db"))
 	defer db.Close()
 	mustExec(t, db, `INSERT INTO users(id,email,password_hash) VALUES('u1','u1@example.test','h')`)
-	source, err := store.CreateSkill(t.Context(), db, store.Skill{
-		Name: "slide-builder", Description: "Use for slide requests", DisplayDescription: "Build presentation decks",
-		Icon: "Presentation", Instructions: "Create the requested deck.", Enabled: true,
+	type copiedSource struct {
+		source *store.Skill
+		copy   store.UserSkill
+	}
+	copiedSources := make([]copiedSource, 0, 2)
+	for _, tc := range []struct {
+		name               string
+		description        string
+		displayDescription string
+		wantDisplay        string
+	}{
+		{
+			name: "slide-builder", description: "Use for slide requests", displayDescription: "Build presentation decks",
+			wantDisplay: "Build presentation decks",
+		},
+		{
+			name: "legacy-helper", description: "Use for legacy requests",
+			wantDisplay: "Use for legacy requests",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source, err := store.CreateSkill(t.Context(), db, store.Skill{
+				Name: tc.name, Description: tc.description, DisplayDescription: tc.displayDescription,
+				Icon: "Presentation", Instructions: "Create the requested result.", Enabled: true,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			rec := httptest.NewRecorder()
+			copySkillFromCatalogHandler(Deps{DB: db}, rec, libraryRequest(t, http.MethodPost, "/api/me/skills/from-catalog",
+				`{"source_id":"`+source.ID+`"}`, "u1"))
+			if rec.Code != http.StatusCreated {
+				t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+			}
+			var copied store.UserSkill
+			if err := json.Unmarshal(rec.Body.Bytes(), &copied); err != nil {
+				t.Fatal(err)
+			}
+			if copied.Icon != "Presentation" || copied.Description != tc.description || copied.DisplayDescription != tc.wantDisplay || copied.SourceSkillID != source.ID {
+				t.Fatalf("copied skill=%+v", copied)
+			}
+			stored, err := store.GetUserSkill(t.Context(), db, copied.ID, "u1")
+			if err != nil || stored.Icon != "Presentation" || stored.Description != tc.description || stored.DisplayDescription != tc.wantDisplay {
+				t.Fatalf("stored skill=%+v err=%v", stored, err)
+			}
+			copiedSources = append(copiedSources, copiedSource{source: source, copy: copied})
+		})
+	}
+
+	personal, err := store.CreateUserSkill(t.Context(), db, store.UserSkill{
+		UserID: "u1", Name: "personal-helper", Description: "Use my own helper", Instructions: "Help me.",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	rec := httptest.NewRecorder()
-	copySkillFromCatalogHandler(Deps{DB: db}, rec, libraryRequest(t, http.MethodPost, "/api/me/skills/catalog",
-		`{"source_id":"`+source.ID+`"}`, "u1"))
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	if personal.DisplayDescription != "" {
+		t.Fatalf("personal skill unexpectedly received display description: %+v", personal)
 	}
-	var copied store.UserSkill
-	if err := json.Unmarshal(rec.Body.Bytes(), &copied); err != nil {
+
+	configuredSource := *copiedSources[0].source
+	configuredSource.DisplayDescription = "Updated presentation summary"
+	if _, err := store.UpdateSkill(t.Context(), db, configuredSource.ID, configuredSource); err != nil {
 		t.Fatal(err)
 	}
-	if copied.Icon != "Presentation" || copied.Description != "Build presentation decks" || copied.SourceSkillID != source.ID {
-		t.Fatalf("copied skill=%+v", copied)
+	legacySource := *copiedSources[1].source
+	legacySource.Description = "Use for updated legacy requests"
+	if _, err := store.UpdateSkill(t.Context(), db, legacySource.ID, legacySource); err != nil {
+		t.Fatal(err)
 	}
-	stored, err := store.GetUserSkill(t.Context(), db, copied.ID, "u1")
-	if err != nil || stored.Icon != "Presentation" {
-		t.Fatalf("stored skill=%+v err=%v", stored, err)
+
+	rec := httptest.NewRecorder()
+	listMySkillsHandler(Deps{DB: db}, rec, libraryRequest(t, http.MethodGet, "/api/me/skills", "", "u1"))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var listed []store.UserSkill
+	if err := json.Unmarshal(rec.Body.Bytes(), &listed); err != nil {
+		t.Fatal(err)
+	}
+	byName := make(map[string]store.UserSkill, len(listed))
+	for _, skill := range listed {
+		byName[skill.Name] = skill
+	}
+	if got := byName[copiedSources[0].copy.Name]; got.Description != "Use for slide requests" || got.DisplayDescription != "Updated presentation summary" {
+		t.Fatalf("configured listed skill=%+v", got)
+	}
+	if got := byName[copiedSources[1].copy.Name]; got.Description != "Use for legacy requests" || got.DisplayDescription != "Use for updated legacy requests" {
+		t.Fatalf("legacy listed skill=%+v", got)
+	}
+	if got := byName[personal.Name]; got.Description != "Use my own helper" || got.DisplayDescription != "" {
+		t.Fatalf("personal listed skill=%+v", got)
 	}
 }
 

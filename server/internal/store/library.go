@@ -115,9 +115,11 @@ func DeletePrompt(ctx context.Context, db *sql.DB, id string) error {
 }
 
 func ListUserSkills(ctx context.Context, db *sql.DB, userID string) ([]UserSkill, error) {
-	rows, err := db.QueryContext(ctx, `SELECT id, user_id, name, description, icon, instructions,
-		COALESCE(source_skill_id,''), created_at, updated_at FROM user_skills
-		WHERE user_id=? ORDER BY updated_at DESC, name`, userID)
+	rows, err := db.QueryContext(ctx, `SELECT us.id, us.user_id, us.name, us.description,
+		COALESCE(NULLIF(TRIM(s.display_description),''), s.description, ''), us.icon, us.instructions,
+		COALESCE(us.source_skill_id,''), us.created_at, us.updated_at
+		FROM user_skills us LEFT JOIN skills s ON s.id=us.source_skill_id
+		WHERE us.user_id=? ORDER BY us.updated_at DESC, us.name`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -125,7 +127,7 @@ func ListUserSkills(ctx context.Context, db *sql.DB, userID string) ([]UserSkill
 	out := []UserSkill{}
 	for rows.Next() {
 		var skill UserSkill
-		if err := rows.Scan(&skill.ID, &skill.UserID, &skill.Name, &skill.Description, &skill.Icon, &skill.Instructions,
+		if err := rows.Scan(&skill.ID, &skill.UserID, &skill.Name, &skill.Description, &skill.DisplayDescription, &skill.Icon, &skill.Instructions,
 			&skill.SourceSkillID, &skill.CreatedAt, &skill.UpdatedAt); err != nil {
 			return nil, err
 		}
@@ -136,9 +138,12 @@ func ListUserSkills(ctx context.Context, db *sql.DB, userID string) ([]UserSkill
 
 func GetUserSkill(ctx context.Context, db *sql.DB, id, userID string) (*UserSkill, error) {
 	var skill UserSkill
-	err := db.QueryRowContext(ctx, `SELECT id, user_id, name, description, icon, instructions,
-		COALESCE(source_skill_id,''), created_at, updated_at FROM user_skills WHERE id=? AND user_id=?`, id, userID,
-	).Scan(&skill.ID, &skill.UserID, &skill.Name, &skill.Description, &skill.Icon, &skill.Instructions,
+	err := db.QueryRowContext(ctx, `SELECT us.id, us.user_id, us.name, us.description,
+		COALESCE(NULLIF(TRIM(s.display_description),''), s.description, ''), us.icon, us.instructions,
+		COALESCE(us.source_skill_id,''), us.created_at, us.updated_at
+		FROM user_skills us LEFT JOIN skills s ON s.id=us.source_skill_id
+		WHERE us.id=? AND us.user_id=?`, id, userID,
+	).Scan(&skill.ID, &skill.UserID, &skill.Name, &skill.Description, &skill.DisplayDescription, &skill.Icon, &skill.Instructions,
 		&skill.SourceSkillID, &skill.CreatedAt, &skill.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound

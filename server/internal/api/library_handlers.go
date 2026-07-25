@@ -136,8 +136,12 @@ func listLibraryCatalogHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	safeSkills := make([]catalogSkill, 0, len(skills))
 	for _, skill := range skills {
 		displayDescription := strings.TrimSpace(skill.DisplayDescription)
+		effectiveDescription := displayDescription
+		if effectiveDescription == "" {
+			effectiveDescription = strings.TrimSpace(skill.Description)
+		}
 		safeSkills = append(safeSkills, catalogSkill{
-			ID: skill.ID, Name: skill.Name, Description: displayDescription,
+			ID: skill.ID, Name: skill.Name, Description: effectiveDescription,
 			DisplayDescription: displayDescription, Icon: skill.Icon, Source: "admin", Added: addedSkills[skill.ID],
 		})
 	}
@@ -329,12 +333,8 @@ func copySkillFromCatalogHandler(d Deps, w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	description := strings.TrimSpace(source.DisplayDescription)
-	if description == "" {
-		description = source.Description
-	}
 	skill := store.UserSkill{
-		UserID: authUser(r).ID, Name: privateSkillNameFromCatalog(source.Name, source.ID), Description: description,
+		UserID: authUser(r).ID, Name: privateSkillNameFromCatalog(source.Name, source.ID), Description: source.Description,
 		Icon: source.Icon, Instructions: source.Instructions, SourceSkillID: source.ID,
 	}
 	normalizeUserSkill(&skill)

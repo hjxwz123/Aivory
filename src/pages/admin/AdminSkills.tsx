@@ -113,7 +113,6 @@ export default function AdminSkills() {
       draft: {
         ...ed.draft,
         name: parsed.name ?? ed.draft.name,
-        display_description: ed.draft.display_description ?? parsed.description,
         description: parsed.description ?? ed.draft.description,
         instructions: parsed.instructions || ed.draft.instructions,
       },
@@ -124,7 +123,7 @@ export default function AdminSkills() {
   async function submit() {
     if (savingRef.current) return
     const d = editor.draft
-    if (!d.name || !d.display_description || !d.description || !d.instructions) {
+    if (!d.name || !d.description || !d.instructions) {
       toast.error(t('admin:skills.errors.missingFields'))
       return
     }

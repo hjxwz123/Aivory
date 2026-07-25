@@ -4,7 +4,7 @@ import { ShieldCheck } from 'lucide-react'
 import { authApi, ApiError } from '@/api'
 import { useAuth } from '@/store/auth'
 import { toast } from '@/hooks/use-toast'
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
@@ -107,7 +107,7 @@ export function SetPasswordGate() {
             </div>
           </div>
 
-          <div className="mt-7 border-t border-[var(--color-divider)] px-6 sm:px-8 py-4">
+          <DialogFooter className="mt-7 px-6 sm:px-8">
             <Button
               type="submit"
               className="w-full"
@@ -116,7 +116,7 @@ export function SetPasswordGate() {
             >
               {t('welcome:setPassword.submit')}
             </Button>
-          </div>
+          </DialogFooter>
         </form>
       </DialogContent>
     </Dialog>

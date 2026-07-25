@@ -13,6 +13,8 @@ import { LucideGlyph } from '@/components/ui/lucide-icon'
 import { LUCIDE_ICON_NAMES, resolveLucideIconName } from '@/lib/lucide-icons'
 import { cn } from '@/lib/utils'
 
+const ICON_BATCH_SIZE = 120
+
 // "Brain" → "brain", "ArrowUp" → "arrow up" for fuzzy search matching.
 function searchable(name: string): string {
   return name.replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase()
@@ -30,18 +32,37 @@ export function IconPicker({ id, value, onChange, className, 'aria-label': ariaL
   const { t } = useTranslation(['admin', 'common'])
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
+  const [visibleCount, setVisibleCount] = useState(ICON_BATCH_SIZE)
 
   const previewName = useMemo(() => resolveLucideIconName(value) ?? '', [value])
 
-  const results = useMemo(() => {
+  const filteredResults = useMemo(() => {
     const q = query.trim().toLowerCase()
-    if (!q) return LUCIDE_ICON_NAMES.slice(0, 120)
-    return LUCIDE_ICON_NAMES.filter((name) => searchable(name).includes(q)).slice(0, 120)
+    if (!q) return LUCIDE_ICON_NAMES
+    const compactQuery = q.replace(/\s+/g, '')
+    return LUCIDE_ICON_NAMES.filter((name) => {
+      const indexedName = searchable(name)
+      return indexedName.includes(q) || indexedName.replace(/\s+/g, '').includes(compactQuery)
+    })
   }, [query])
+  const results = filteredResults.slice(0, visibleCount)
+  const hasMore = results.length < filteredResults.length
+
+  function setPickerOpen(nextOpen: boolean) {
+    setOpen(nextOpen)
+    if (!nextOpen) {
+      setQuery('')
+      setVisibleCount(ICON_BATCH_SIZE)
+    }
+  }
+
+  function revealNextBatch() {
+    setVisibleCount((current) => Math.min(current + ICON_BATCH_SIZE, filteredResults.length))
+  }
 
   return (
     <div className="relative min-w-0 w-full">
-      <Popover open={open} onOpenChange={setOpen}>
+      <Popover modal open={open} onOpenChange={setPickerOpen}>
         <PopoverTrigger asChild>
           <button
             id={id}
@@ -60,28 +81,48 @@ export function IconPicker({ id, value, onChange, className, 'aria-label': ariaL
             {!value ? <ChevronDown size={14} aria-hidden className="text-[var(--color-fg-faint)]" /> : null}
           </button>
         </PopoverTrigger>
-        <PopoverContent align="start" className="w-[280px] max-w-[calc(100vw-1rem)] p-2">
-          <div className="relative mb-2">
+        <PopoverContent
+          align="start"
+          collisionPadding={12}
+          className="flex w-[280px] max-w-[calc(100vw-1rem)] flex-col overflow-hidden p-2"
+          style={{
+            maxHeight: 'min(24rem, var(--radix-popover-content-available-height), calc(100dvh - 1.5rem))',
+          }}
+        >
+          <div className="relative mb-2 shrink-0">
             <Search size={13} aria-hidden className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--color-fg-faint)]" />
             <Input
               autoFocus
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={(e) => {
+                setQuery(e.target.value)
+                setVisibleCount(ICON_BATCH_SIZE)
+              }}
               placeholder={t('admin:icon.search', { defaultValue: 'Search icons' })}
               className="h-8 pl-8 text-[12px]"
             />
           </div>
-          <div className="grid grid-cols-6 gap-1 max-h-[240px] overflow-y-auto scrollbar-thin">
+          <div
+            role="group"
+            aria-label={t('admin:icon.select', { defaultValue: 'Select icon' })}
+            className="grid min-h-0 flex-1 grid-cols-6 gap-1 overflow-y-auto overscroll-contain pr-1 scrollbar-thin"
+            onScroll={(event) => {
+              const target = event.currentTarget
+              if (hasMore && target.scrollHeight - target.scrollTop - target.clientHeight < 72) {
+                revealNextBatch()
+              }
+            }}
+          >
             {results.map((name) => (
               <button
                 key={name}
                 type="button"
                 title={name}
                 aria-label={name}
+                aria-pressed={previewName === name}
                 onClick={() => {
                   onChange(name)
-                  setOpen(false)
-                  setQuery('')
+                  setPickerOpen(false)
                 }}
                 className={cn(
                   'inline-flex items-center justify-center size-9 rounded-[8px] text-[var(--color-fg-muted)] interactive hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
@@ -95,6 +136,15 @@ export function IconPicker({ id, value, onChange, className, 'aria-label': ariaL
               <p className="col-span-6 px-1 py-3 text-center text-[12px] text-[var(--color-fg-subtle)]">
                 {t('admin:icon.noResults', { defaultValue: 'No matching icons' })}
               </p>
+            ) : null}
+            {hasMore ? (
+              <button
+                type="button"
+                onClick={revealNextBatch}
+                className="col-span-6 min-h-8 rounded-[8px] px-2 text-[12px] font-medium text-[var(--color-fg-muted)] interactive hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+              >
+                {t('common:actions.more')}
+              </button>
             ) : null}
           </div>
         </PopoverContent>

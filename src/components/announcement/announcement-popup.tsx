@@ -14,7 +14,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { authApi } from '@/api'
 import { useAuth } from '@/store/auth'
-import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogFooter, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { sanitizeHtml } from '@/lib/markdown'
 import { cn } from '@/lib/utils'
@@ -111,11 +111,11 @@ export function AnnouncementPopup() {
               )}
               dangerouslySetInnerHTML={{ __html: sanitizeHtml(data.body) }}
             />
-            <div className="shrink-0 border-t border-[var(--color-divider)] px-7 py-3.5 flex justify-end">
+            <DialogFooter className="px-7">
               <Button size="sm" onClick={close}>
                 {t('common.gotIt', { defaultValue: 'Got it' })}
               </Button>
-            </div>
+            </DialogFooter>
           </div>
         </div>
       </DialogContent>
