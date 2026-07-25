@@ -939,7 +939,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
       {/* Phone: per-message actions as a bottom Sheet (§ mobile redesign). */}
       {isPhone && (
         <Sheet open={actionSheetOpen} onOpenChange={setActionSheetOpen}>
-          <SheetContent side="bottom" size="sm" label={t('actions.more')} className="h-auto max-h-[85dvh] rounded-t-[20px]">
+          <SheetContent side="bottom" size="sm" label={t('actions.more')} className="h-auto max-h-[85dvh]">
             <div className="flex flex-col px-2 py-2">
               {message.content ? (
                 <MsgActionRow

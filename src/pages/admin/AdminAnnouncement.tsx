@@ -265,7 +265,7 @@ export default function AdminAnnouncement() {
               <p className="mb-2 text-[12px] uppercase tracking-[0.08em] text-[var(--color-fg-subtle)]">
                 {t('admin:announcement.preview')}
               </p>
-              <div className="flex overflow-hidden rounded-[16px] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-md)]">
+              <div className="flex overflow-hidden rounded-popup border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-md)]">
                 {imageUrl.trim() ? (
                   <div className="w-2/5 shrink-0 bg-[var(--color-bg-muted)]">
                     <img src={imageUrl} alt="" className="h-full w-full object-cover" />

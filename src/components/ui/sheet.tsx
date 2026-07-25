@@ -77,8 +77,8 @@ export const SheetContent = forwardRef<ElementRef<typeof DialogPrimitive.Content
             safeClass[side],
             side === 'left' && 'border-r',
             side === 'right' && 'border-l',
-            side === 'top' && 'border-b',
-            side === 'bottom' && 'border-t',
+            side === 'top' && 'rounded-b-popup border-b',
+            side === 'bottom' && 'rounded-t-popup border-t',
             'shadow-[var(--shadow-xl)] focus-visible:outline-none flex flex-col',
             className,
           )}

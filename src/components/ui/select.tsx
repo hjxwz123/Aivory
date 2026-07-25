@@ -57,7 +57,7 @@ export const SelectContent = forwardRef<
           // fold are unreachable and the page feels frozen. Cap to the space
           // Radix measured (popper) and let the viewport scroll.
           'max-h-[min(22rem,var(--radix-select-content-available-height))]',
-          'rounded-[12px] bg-[var(--color-surface-raised)] border border-[var(--color-border)]',
+          'rounded-popup bg-[var(--color-surface-raised)] border border-[var(--color-border)]',
           'shadow-[var(--shadow-popover)] p-1',
           'data-[state=open]:animate-[slide-down_180ms_var(--ease-out)]',
           'data-[state=closed]:animate-[fade-out_120ms_var(--ease-in)]',

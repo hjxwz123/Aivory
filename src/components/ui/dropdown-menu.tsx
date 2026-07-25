@@ -12,7 +12,7 @@ export const DropdownMenuRadioGroup = DropdownPrimitive.RadioGroup
 
 const menuClass = cn(
   'z-[70] min-w-[200px] overflow-hidden',
-  'rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface-raised)]',
+  'rounded-popup border border-[var(--color-border)] bg-[var(--color-surface-raised)]',
   'shadow-[var(--shadow-popover)]',
   'p-1.5',
   'data-[state=open]:animate-[slide-down_180ms_var(--ease-out)]',

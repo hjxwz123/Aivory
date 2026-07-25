@@ -232,7 +232,7 @@ export function InlineThreadLayer({ conversationId, scrollRef }: InlineThreadLay
           {t('inline.ask', { defaultValue: 'Ask' })}
         </button>
       ) : (
-        <div className="w-[300px] rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-lg)] p-2">
+        <div className="w-[300px] rounded-popup border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-lg)] p-2">
           <p className="px-1 pt-0.5 pb-1.5 text-[11px] text-[var(--color-fg-subtle)] line-clamp-2">
             “{pending.quote}”
           </p>

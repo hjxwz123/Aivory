@@ -106,7 +106,7 @@ export default function SettingsDialog() {
             'inset-0 flex flex-col',
             'sm:inset-auto sm:left-1/2 sm:top-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2',
             'sm:w-[min(94vw,60rem)] sm:h-[min(88vh,44rem)] sm:flex-row',
-            'sm:rounded-[18px] sm:border sm:border-[var(--color-border)] sm:shadow-[var(--shadow-xl)]',
+            'sm:rounded-popup sm:border sm:border-[var(--color-border)] sm:shadow-[var(--shadow-xl)]',
             'data-[state=open]:animate-[pop-in_220ms_var(--ease-out)]',
             'data-[state=closed]:animate-[fade-out_140ms_var(--ease-in)]',
           )}

@@ -535,7 +535,7 @@ export default function ChatThread() {
       {/* Mobile action sheet — outline / files / rename / star / share / archive /
           delete, collapsed out of the cramped header (§ mobile redesign). */}
       <Sheet open={actionsOpen} onOpenChange={setActionsOpen}>
-        <SheetContent side="bottom" size="sm" label={t('chat:actions.more')} className="h-auto max-h-[85dvh] rounded-t-[20px]">
+        <SheetContent side="bottom" size="sm" label={t('chat:actions.more')} className="h-auto max-h-[85dvh]">
           <div className="flex flex-col px-2 py-2">
             <ThreadActionRow
               icon={<GitBranch size={18} aria-hidden />}

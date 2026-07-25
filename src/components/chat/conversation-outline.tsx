@@ -415,8 +415,8 @@ export function ConversationOutline({ conversation, scrollContainerRef, onClose 
         className={cn(
           'fixed z-[200] flex flex-col border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-xl)] select-none overflow-hidden',
           isPhone
-            ? 'rounded-t-[20px] pb-[var(--safe-bottom)] animate-[sheet-in-b_280ms_var(--ease-out)]'
-            : 'rounded-[12px]',
+            ? 'rounded-t-popup pb-[var(--safe-bottom)] animate-[sheet-in-b_280ms_var(--ease-out)]'
+            : 'rounded-popup',
         )}
       >
       {/* Header — a drag handle on desktop; a static title bar on phone */}
