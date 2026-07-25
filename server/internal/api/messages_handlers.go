@@ -796,9 +796,10 @@ func checkDailyMessageLimit(d Deps, userID string) bool {
 	return int(n) <= limit
 }
 
-// editMessageHandler edits a user message's text IN PLACE (no new branch, no
-// regeneration) — the "save edit" action. Only the conversation owner may edit,
-// and only their own `user` messages.
+// editMessageHandler edits a user question or assistant reply's visible text IN
+// PLACE. User-message authorship remains protected in shared workspaces;
+// assistant replies belong to the shared conversation and may be edited by any
+// member who can access it.
 func editMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
 	convID := pathParam(r, "id")
@@ -819,7 +820,7 @@ func editMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	msg, err := store.GetMessage(r.Context(), d.DB, msgID)
-	if err != nil || msg.ConversationID != convID || msg.Role != "user" {
+	if err != nil || msg.ConversationID != convID || (msg.Role != "user" && msg.Role != "assistant") {
 		writeError(w, 404, errNotFound)
 		return
 	}
@@ -829,7 +830,16 @@ func editMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, errNotFound)
 		return
 	}
-	blocks, _ := json.Marshal([]llm.UnifiedBlock{{Kind: "text", Text: body.Text}})
+	var blocks json.RawMessage
+	if msg.Role == "assistant" {
+		blocks, err = replaceAssistantReplyText(msg.Blocks, body.Text)
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+	} else {
+		blocks, _ = json.Marshal([]llm.UnifiedBlock{{Kind: "text", Text: body.Text}})
+	}
 	if err := store.UpdateMessageContent(r.Context(), d.DB, msgID, blocks); err != nil {
 		writeError(w, 500, err)
 		return
@@ -848,6 +858,32 @@ func editMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, 200, updated)
+}
+
+// replaceAssistantReplyText overwrites exactly the Markdown that MessageRow
+// renders as the final answer: text blocks after the last tool call (or all text
+// blocks on a tool-free reply). Thinking, tool, research, image and artifact
+// blocks remain intact.
+func replaceAssistantReplyText(raw json.RawMessage, text string) (json.RawMessage, error) {
+	var blocks []llm.UnifiedBlock
+	if err := json.Unmarshal(raw, &blocks); err != nil {
+		return nil, fmt.Errorf("decode assistant blocks: %w", err)
+	}
+	lastToolCall := -1
+	for i, block := range blocks {
+		if block.Kind == "tool_call" {
+			lastToolCall = i
+		}
+	}
+	next := make([]llm.UnifiedBlock, 0, len(blocks)+1)
+	for i, block := range blocks {
+		if block.Kind == "text" && i > lastToolCall {
+			continue
+		}
+		next = append(next, block)
+	}
+	next = append(next, llm.UnifiedBlock{Kind: "text", Text: text})
+	return json.Marshal(next)
 }
 
 // deleteMessageHandler deletes ONE conversational round (the user question + all

@@ -924,9 +924,10 @@ func FinishMessage(ctx context.Context, db *sql.DB, id string, p MessageFinishPa
 	return err
 }
 
-// UpdateMessageContent overwrites a message's blocks in place — used by the
-// user "save edit" action that edits a question WITHOUT branching. The caller
-// must verify ownership (conversation belongs to the user) first.
+// UpdateMessageContent overwrites a message's canonical blocks in place. Native
+// provider raw must be cleared at the same time: after a user edits an assistant
+// reply, replaying the original raw response would silently ignore that edit in
+// subsequent model turns. The caller must verify conversation access first.
 func UpdateMessageContent(ctx context.Context, db *sql.DB, id string, blocks json.RawMessage) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -942,7 +943,7 @@ func UpdateMessageContent(ctx context.Context, db *sql.DB, id string, blocks jso
 		}
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE messages SET blocks=?, search_text=? WHERE id=?`, string(blocks), searchTextFromBlocks(blocks), id); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE messages SET blocks=?, raw='', search_text=? WHERE id=?`, string(blocks), searchTextFromBlocks(blocks), id); err != nil {
 		return err
 	}
 	// A saved edit changes the historical truth for this message. Any summary

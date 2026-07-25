@@ -44,6 +44,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+import { Textarea } from '@/components/ui/textarea'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { useCopy } from '@/hooks/use-clipboard'
 import { useAuth } from '@/store/auth'
@@ -95,8 +96,8 @@ interface MessageRowProps {
    * in edit mode); when omitted the row keeps the original list.
    */
   onEdit?: (id: string, content: string, attachments?: Attachment[]) => void
-  /** "Save" — overwrite the question text in place, no branch, no regenerate. */
-  onSaveEdit?: (id: string, content: string) => void
+  /** "Save" — overwrite the visible Markdown text in place. */
+  onSaveEdit?: (id: string, content: string) => void | Promise<void>
   onLike?: (id: string, liked: boolean) => void
   onDislike?: (id: string, disliked: boolean) => void
   /** Called when the user clicks `<` / `>` to switch between sibling
@@ -163,6 +164,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
   const [actionSheetOpen, setActionSheetOpen] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [editing, setEditing] = useState(false)
+  const [savingEdit, setSavingEdit] = useState(false)
   const [draft, setDraft] = useState(message.content)
   // Attachments the user keeps in the edit dialog. Seeded from the original
   // message on entering edit mode; removing an item here does NOT touch the
@@ -179,6 +181,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
   // instead of letting the click download the file.
   const [filePreview, setFilePreview] = useState<{ name: string; url?: string; kind: Attachment['kind'] } | null>(null)
   const editRef = useRef<RichComposerEditorHandle>(null)
+  const assistantEditRef = useRef<HTMLTextAreaElement>(null)
   const [editFormulaOpen, setEditFormulaOpen] = useState(false)
   const [editFormulaTarget, setEditFormulaTarget] = useState<FormulaTarget | null>(null)
   const editFormulaSelectionRef = useRef<{ from: number; to: number } | null>(null)
@@ -223,9 +226,16 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
   // timer if the row unmounts or edit mode exits before it fires.
   useEffect(() => {
     if (!editing) return
-    const t = setTimeout(() => editRef.current?.focus('end'), 60)
+    const t = setTimeout(() => {
+      if (isUser) editRef.current?.focus('end')
+      else {
+        assistantEditRef.current?.focus()
+        const end = assistantEditRef.current?.value.length ?? 0
+        assistantEditRef.current?.setSelectionRange(end, end)
+      }
+    }, 60)
     return () => clearTimeout(t)
-  }, [editing])
+  }, [editing, isUser])
 
   function commitEdit() {
     const next = draft.trim()
@@ -234,12 +244,20 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
     setEditing(false)
   }
 
-  // "Save" — overwrite the message text in place (no new branch / regenerate).
-  function saveInPlace() {
-    const next = draft.trim()
-    if (!next) return
-    onSaveEdit?.(message.id, next)
-    setEditing(false)
+  // "Save" — overwrite the message text in place. Assistant replies keep the
+  // exact Markdown source, including intentional leading/trailing whitespace.
+  async function saveInPlace() {
+    const next = isUser ? draft.trim() : draft
+    if (!next.trim() || savingEdit || !onSaveEdit) return
+    setSavingEdit(true)
+    try {
+      await onSaveEdit(message.id, next)
+      setEditing(false)
+    } catch {
+      toast.error(t('actions.editSaveFailed'))
+    } finally {
+      setSavingEdit(false)
+    }
   }
 
   function removeDraftAtt(id: string) {
@@ -376,16 +394,54 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
                 </button>
               </Tooltip>
               <div className="ml-auto flex max-w-full flex-wrap justify-end gap-2 max-sm:w-full [&>button]:max-sm:min-h-11">
-                <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>
+                <Button size="sm" variant="ghost" disabled={savingEdit} onClick={() => setEditing(false)}>
                   {t('actions.cancelEdit', { defaultValue: 'Cancel' })}
                 </Button>
-                <Button size="sm" variant="secondary" onClick={saveInPlace}>
+                <Button size="sm" variant="secondary" loading={savingEdit} onClick={() => void saveInPlace()}>
                   {t('actions.saveInPlace', { defaultValue: 'Save' })}
                 </Button>
-                <Button size="sm" variant="primary" onClick={commitEdit}>
+                <Button size="sm" variant="primary" disabled={savingEdit} onClick={commitEdit}>
                   {t('actions.saveEdit', { defaultValue: 'Save & resend' })}
                 </Button>
               </div>
+            </div>
+          </div>
+        ) : editing ? (
+          <div className="w-full">
+            <Textarea
+              ref={assistantEditRef}
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape' && !savingEdit) setEditing(false)
+                if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+                  event.preventDefault()
+                  void saveInPlace()
+                }
+              }}
+              readOnly={savingEdit}
+              spellCheck={false}
+              aria-label={t('actions.editReplySource')}
+              className="min-h-64 resize-y bg-[var(--color-surface-sunken)] font-mono text-[13px] leading-relaxed"
+            />
+            <div className="mt-3 flex justify-end gap-2 max-sm:[&>button]:min-h-11">
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={savingEdit}
+                onClick={() => setEditing(false)}
+              >
+                {t('actions.cancelEdit')}
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                loading={savingEdit}
+                disabled={!draft.trim() || draft === message.content}
+                onClick={() => void saveInPlace()}
+              >
+                {t('actions.saveInPlace')}
+              </Button>
             </div>
           </div>
         ) : isUser ? (
@@ -710,6 +766,19 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
                 </Tooltip>
                 ) : null}
 
+                {!isUser && message.content && onSaveEdit ? (
+                  <Tooltip content={t('actions.edit')}>
+                    <button
+                      type="button"
+                      onClick={() => setEditing(true)}
+                      aria-label={t('actions.edit')}
+                      className="inline-flex items-center justify-center size-7 max-sm:size-9 rounded-[7px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                    >
+                      <Pencil size={13} aria-hidden />
+                    </button>
+                  </Tooltip>
+                ) : null}
+
                 {!isUser && (
                   <>
                     {message.content ? (
@@ -881,6 +950,13 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
               ) : null}
               {!isUser ? (
                 <>
+                  {message.content && onSaveEdit ? (
+                    <MsgActionRow
+                      icon={<Pencil size={18} aria-hidden />}
+                      label={t('actions.edit')}
+                      onClick={() => { setActionSheetOpen(false); setEditing(true) }}
+                    />
+                  ) : null}
                   {message.content ? (
                     <MsgActionRow
                       icon={<FileDown size={18} aria-hidden />}
