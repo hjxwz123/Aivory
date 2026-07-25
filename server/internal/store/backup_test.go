@@ -234,6 +234,8 @@ func TestConfigTableOrderExcludesUserDataTables(t *testing.T) {
 		"refresh_tokens",
 		"oauth_identities",
 		"redeem_redemptions",
+		"user_skills",
+		"user_prompts",
 	} {
 		if configured[tbl] {
 			t.Fatalf("config export must not include user/business table %q", tbl)
@@ -247,6 +249,7 @@ func TestConfigTableOrderExcludesUserDataTables(t *testing.T) {
 		"model_group_quotas",
 		"model_tags",
 		"skills",
+		"prompts",
 		"model_skills",
 		"oauth_providers",
 		"image_styles",

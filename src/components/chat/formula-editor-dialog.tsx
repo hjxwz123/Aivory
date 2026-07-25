@@ -409,7 +409,7 @@ export function FormulaEditorDialog({
         }}
       >
         <DialogHeader className="formula-editor-header px-4 pb-3 pt-4 sm:px-5 sm:pt-5">
-          <DialogTitle className="flex items-center gap-2 pr-10 text-[1.125rem] font-semibold tracking-normal">
+          <DialogTitle className="flex items-center gap-2 pr-10">
             <Sigma size={18} className="text-[var(--color-accent)]" aria-hidden />
             {editing ? t('composer.formula.editTitle') : t('composer.formula.title')}
           </DialogTitle>

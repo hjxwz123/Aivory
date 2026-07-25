@@ -172,6 +172,7 @@ CREATE TABLE IF NOT EXISTS skills (
   id           TEXT PRIMARY KEY,
   name         TEXT NOT NULL,
   description  TEXT NOT NULL,
+  display_description TEXT NOT NULL DEFAULT '', -- catalog-only copy; description remains model-facing trigger metadata
   icon         TEXT NOT NULL DEFAULT '',
   instructions TEXT NOT NULL,
   assets       TEXT NOT NULL DEFAULT '[]',
@@ -180,6 +181,49 @@ CREATE TABLE IF NOT EXISTS skills (
   updated_at   BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_skills_name_unique ON skills(lower(trim(name)));
+
+CREATE TABLE IF NOT EXISTS prompts (
+  id          TEXT PRIMARY KEY,
+  name        TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  icon        TEXT NOT NULL DEFAULT '',
+  content     TEXT NOT NULL,
+  enabled     INTEGER NOT NULL DEFAULT 1,
+  sort_order  INTEGER NOT NULL DEFAULT 0,
+  updated_at  BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_prompts_name_unique ON prompts(lower(trim(name)));
+
+-- Private user Agent Skills are instruction-only. The absence of assets and
+-- storage columns is an intentional sandbox security boundary.
+CREATE TABLE IF NOT EXISTS user_skills (
+  id              TEXT PRIMARY KEY,
+  user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name            TEXT NOT NULL,
+  description     TEXT NOT NULL,
+  icon            TEXT NOT NULL DEFAULT '',
+  instructions    TEXT NOT NULL,
+  source_skill_id TEXT REFERENCES skills(id) ON DELETE SET NULL,
+  created_at      BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint),
+  updated_at      BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
+);
+CREATE INDEX IF NOT EXISTS idx_user_skills_user ON user_skills(user_id, updated_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_skills_user_name_unique ON user_skills(user_id, lower(trim(name)));
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_skills_source_unique ON user_skills(user_id, source_skill_id);
+
+CREATE TABLE IF NOT EXISTS user_prompts (
+  id               TEXT PRIMARY KEY,
+  user_id          TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name             TEXT NOT NULL,
+  description      TEXT NOT NULL DEFAULT '',
+  content          TEXT NOT NULL,
+  source_prompt_id TEXT REFERENCES prompts(id) ON DELETE SET NULL,
+  created_at       BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint),
+  updated_at       BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
+);
+CREATE INDEX IF NOT EXISTS idx_user_prompts_user ON user_prompts(user_id, updated_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_prompts_user_name_unique ON user_prompts(user_id, lower(trim(name)));
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_prompts_source_unique ON user_prompts(user_id, source_prompt_id);
 
 CREATE TABLE IF NOT EXISTS model_skills (
   model_id TEXT NOT NULL REFERENCES models(id) ON DELETE CASCADE,
@@ -257,6 +301,7 @@ CREATE TABLE IF NOT EXISTS messages (
   raw                TEXT,
   stop_reason        TEXT,
   attachments        TEXT NOT NULL DEFAULT '[]',
+  selected_user_skill_ids TEXT NOT NULL DEFAULT '[]', -- private skill ids applied to this user turn
   citations          TEXT NOT NULL DEFAULT '[]',
   input_tokens       BIGINT NOT NULL DEFAULT 0,
   output_tokens      BIGINT NOT NULL DEFAULT 0,

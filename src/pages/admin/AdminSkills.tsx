@@ -23,35 +23,17 @@ import {
 import { toast } from '@/hooks/use-toast'
 import { Badge } from '@/components/ui/badge'
 import { PanelFallback } from '@/components/ui/panel-fallback'
+import { parseSkillDocument } from '@/lib/skill-document'
+import { IconPicker } from '@/components/admin/icon-picker'
+import { SkillIcon } from '@/components/ui/skill-icon'
 
 type Draft = Partial<ApiSkill>
-const defaultDraft: Draft = { enabled: true }
+const defaultDraft: Draft = { enabled: true, icon: '' }
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
   return `${(n / 1024 / 1024).toFixed(1)} MB`
-}
-
-/**
- * parseSkillMd reads an Anthropic-style SKILL.md: a YAML frontmatter block
- * (--- … ---) carrying `name` + `description` (the "when to use" line), followed
- * by the markdown body which becomes the instructions. With no frontmatter the
- * whole text is treated as instructions.
- */
-function parseSkillMd(md: string): { name?: string; description?: string; instructions: string } {
-  const m = md.match(/^\s*---\s*\n([\s\S]*?)\n---\s*\n?([\s\S]*)$/)
-  if (!m) return { instructions: md.trim() }
-  const fm = m[1]
-  const body = m[2].trim()
-  const unquote = (s: string) => s.trim().replace(/^["']|["']$/g, '').trim()
-  const nameLine = fm.match(/^\s*name:\s*(.+)$/m)?.[1]
-  const descLine = fm.match(/^\s*description:\s*(.+)$/m)?.[1]
-  return {
-    name: nameLine ? unquote(nameLine) : undefined,
-    description: descLine ? unquote(descLine) : undefined,
-    instructions: body,
-  }
 }
 
 export default function AdminSkills() {
@@ -121,7 +103,7 @@ export default function AdminSkills() {
 
   // Parse a pasted SKILL.md and fill name / description / instructions.
   function applyImport() {
-    const parsed = parseSkillMd(importMd)
+    const parsed = parseSkillDocument(importMd)
     if (!importMd.trim() || (!parsed.name && !parsed.description && !parsed.instructions)) {
       toast.error(t('admin:skills.importFailed'))
       return
@@ -131,6 +113,7 @@ export default function AdminSkills() {
       draft: {
         ...ed.draft,
         name: parsed.name ?? ed.draft.name,
+        display_description: ed.draft.display_description ?? parsed.description,
         description: parsed.description ?? ed.draft.description,
         instructions: parsed.instructions || ed.draft.instructions,
       },
@@ -141,7 +124,7 @@ export default function AdminSkills() {
   async function submit() {
     if (savingRef.current) return
     const d = editor.draft
-    if (!d.name || !d.description || !d.instructions) {
+    if (!d.name || !d.display_description || !d.description || !d.instructions) {
       toast.error(t('admin:skills.errors.missingFields'))
       return
     }
@@ -188,12 +171,16 @@ export default function AdminSkills() {
 
   return (
     <div>
-      <header className="flex items-end justify-between gap-4">
+      <header className="flex flex-col items-start gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="font-serif text-3xl tracking-tight text-[var(--color-fg)]">{t('admin:skills.title')}</h1>
           <p className="mt-2 text-[var(--color-fg-muted)] text-sm max-w-2xl">{t('admin:skills.lead')}</p>
         </div>
-        <Button leadingIcon={<Plus size={15} aria-hidden />} onClick={openNew}>
+        <Button
+          leadingIcon={<Plus size={15} aria-hidden />}
+          onClick={openNew}
+          className="max-sm:min-h-[var(--tap-min)]"
+        >
           {t('admin:skills.new')}
         </Button>
       </header>
@@ -208,20 +195,48 @@ export default function AdminSkills() {
         ) : (
           <ul className="flex flex-col divide-y divide-[var(--color-divider)] rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)]">
             {rows.map((s) => (
-              <li key={s.id} className="grid grid-cols-[1fr_auto_auto] gap-3 items-center px-5 py-4">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-medium text-[var(--color-fg)] truncate">{s.name}</span>
-                    {!s.enabled ? <Badge size="xs" variant="neutral">{t('admin:skills.disabledTag')}</Badge> : null}
+              <li
+                key={s.id}
+                className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-3 py-3.5 sm:px-5 sm:py-4"
+              >
+                <div className="flex min-w-0 items-center gap-3">
+                  <span className="grid size-9 shrink-0 place-items-center rounded-[9px] bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)]">
+                    <SkillIcon name={s.icon} size={16} aria-hidden />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="min-w-0 flex-1 truncate font-medium text-[var(--color-fg)]" title={s.name}>
+                        {s.name}
+                      </span>
+                      {!s.enabled ? <Badge size="xs" variant="neutral">{t('admin:skills.disabledTag')}</Badge> : null}
+                    </div>
+                    <div className="mt-0.5 text-[12px] text-[var(--color-fg-subtle)] line-clamp-2">
+                      {s.display_description || s.description}
+                    </div>
                   </div>
-                  <div className="mt-0.5 text-[12px] text-[var(--color-fg-subtle)] line-clamp-2">{s.description}</div>
                 </div>
-                <Button variant="ghost" size="sm" leadingIcon={<Pencil size={13} aria-hidden />} onClick={() => openEdit(s)}>
-                  {t('admin:common.edit')}
-                </Button>
-                <Button variant="ghost" size="sm" leadingIcon={<Trash2 size={13} aria-hidden />} onClick={() => setConfirmDelete(s)}>
-                  {t('admin:common.remove')}
-                </Button>
+                <div className="flex shrink-0 items-center gap-1">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    leadingIcon={<Pencil size={13} aria-hidden />}
+                    aria-label={`${t('admin:common.edit')}: ${s.name}`}
+                    onClick={() => openEdit(s)}
+                    className="max-sm:size-[var(--tap-min)] max-sm:gap-0 max-sm:px-0"
+                  >
+                    <span className="max-sm:sr-only">{t('admin:common.edit')}</span>
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    leadingIcon={<Trash2 size={13} aria-hidden />}
+                    aria-label={`${t('admin:common.remove')}: ${s.name}`}
+                    onClick={() => setConfirmDelete(s)}
+                    className="max-sm:size-[var(--tap-min)] max-sm:gap-0 max-sm:px-0"
+                  >
+                    <span className="max-sm:sr-only">{t('admin:common.remove')}</span>
+                  </Button>
+                </div>
               </li>
             ))}
           </ul>
@@ -235,8 +250,13 @@ export default function AdminSkills() {
           </DialogHeader>
           <DialogBody>
             <div className="grid gap-4">
-              <Field label={t('admin:skills.fields.importMd')} hint={t('admin:skills.fields.importMdHint')}>
+              <Field
+                label={t('admin:skills.fields.importMd')}
+                htmlFor="admin-skill-import"
+                hint={t('admin:skills.fields.importMdHint')}
+              >
                 <Textarea
+                  id="admin-skill-import"
                   rows={4}
                   value={importMd}
                   onChange={(e) => setImportMd(e.target.value)}
@@ -255,6 +275,30 @@ export default function AdminSkills() {
                   value={editor.draft.name ?? ''}
                   onChange={(e) => setEditor({ ...editor, draft: { ...editor.draft, name: e.target.value } })}
                   placeholder="make_ppt"
+                />
+              </Field>
+              <Field label={t('admin:skills.fields.icon')} htmlFor="s-icon">
+                <IconPicker
+                  id="s-icon"
+                  value={editor.draft.icon ?? ''}
+                  onChange={(icon) => setEditor({ ...editor, draft: { ...editor.draft, icon } })}
+                  aria-label={t('admin:skills.fields.icon')}
+                />
+              </Field>
+              <Field
+                label={t('admin:skills.fields.displayDescription')}
+                htmlFor="s-display-desc"
+                hint={t('admin:skills.fields.displayDescriptionHint')}
+              >
+                <Input
+                  id="s-display-desc"
+                  value={editor.draft.display_description ?? ''}
+                  onChange={(e) =>
+                    setEditor({
+                      ...editor,
+                      draft: { ...editor.draft, display_description: e.target.value },
+                    })
+                  }
                 />
               </Field>
               <Field
@@ -297,7 +341,7 @@ export default function AdminSkills() {
                             type="button"
                             onClick={() => removeAsset(i)}
                             aria-label={t('admin:common.remove')}
-                            className="inline-flex items-center justify-center size-6 rounded-[6px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                            className="inline-flex size-6 items-center justify-center rounded-[6px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-sm:size-[var(--tap-min)]"
                           >
                             <X size={13} aria-hidden />
                           </button>
@@ -319,9 +363,13 @@ export default function AdminSkills() {
                   </div>
                 </div>
               </Field>
-              <label className="flex items-center justify-between rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3 py-2.5">
+              <label
+                htmlFor="admin-skill-enabled"
+                className="flex items-center justify-between rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3 py-2.5"
+              >
                 <span className="text-sm">{t('admin:skills.fields.enabled')}</span>
                 <Switch
+                  id="admin-skill-enabled"
                   checked={editor.draft.enabled ?? true}
                   onCheckedChange={(v) => setEditor({ ...editor, draft: { ...editor.draft, enabled: v } })}
                 />
@@ -337,7 +385,12 @@ export default function AdminSkills() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={Boolean(confirmDelete)} onOpenChange={(o) => !o && setConfirmDelete(null)}>
+      <Dialog
+        open={Boolean(confirmDelete)}
+        onOpenChange={(open) => {
+          if (!open && !deletingRef.current) setConfirmDelete(null)
+        }}
+      >
         <DialogContent size="sm">
           <DialogHeader>
             <DialogTitle>{t('admin:skills.removeTitle')}</DialogTitle>

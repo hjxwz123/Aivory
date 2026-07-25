@@ -206,6 +206,9 @@
     "empty": "Aucune compétence pour l'instant.",
     "fields": {
       "name": "Nom",
+      "icon": "Icône",
+      "displayDescription": "Description d’affichage",
+      "displayDescriptionHint": "Affichée uniquement dans les catalogues et les listes ; elle n’influence pas le déclenchement.",
       "when": "Quand l'utiliser (une phrase)",
       "whenHint": "Va dans l'index du prompt — formulez-le comme un déclencheur.",
       "instructions": "Instructions (Markdown)",
@@ -232,6 +235,22 @@
     },
     "disabledTag": "désactivée",
     "manage": "Gérer les compétences"
+  },
+  "prompts": {
+    "title": "Invites",
+    "lead": "Invites publiques que les utilisateurs peuvent ajouter à leur bibliothèque personnelle.",
+    "new": "Nouvelle invite",
+    "empty": "Aucune invite pour le moment.",
+    "disabledTag": "Désactivée",
+    "editorTitle": "Modifier l’invite",
+    "newTitle": "Nouvelle invite",
+    "fields": { "name": "Nom", "description": "Description d’affichage", "content": "Contenu de l’invite", "enabled": "Activée" },
+    "removeTitle": "Supprimer l’invite ?",
+    "removeBody": "« {{name}} » sera supprimée. Les copies déjà ajoutées aux bibliothèques personnelles restent inchangées.",
+    "created": "Invite créée",
+    "updated": "Invite mise à jour",
+    "removed": "Invite supprimée",
+    "errors": { "missingFields": "Renseignez le nom, la description et le contenu de l’invite.", "nameExists": "Une invite portant ce nom existe déjà." }
   },
   "oauth": {
     "title": "Méthodes de connexion",

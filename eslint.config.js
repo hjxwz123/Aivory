@@ -8,7 +8,7 @@ export default tseslint.config(
   { ignores: ['dist', 'node_modules', 'public', 'coverage', '.vite', '**/*.tsbuildinfo', 'tailwind.config.ts', 'postcss.config.js'] },
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
-    files: ['src/**/*.{ts,tsx}'],
+    files: ['src/**/*.{ts,tsx}', 'tests/frontend/**/*.{ts,tsx}'],
     languageOptions: {
       ecmaVersion: 2022,
       globals: globals.browser,

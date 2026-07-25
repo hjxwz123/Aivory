@@ -13,5 +13,6 @@
   "newProject": "新しいプロジェクト",
   "allProjects": "すべてのプロジェクト",
   "draw": "画像生成",
-  "files": "ファイル"
+  "files": "ファイル",
+  "skillsPrompts": "スキルとプロンプト"
 }

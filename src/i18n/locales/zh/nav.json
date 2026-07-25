@@ -13,5 +13,6 @@
   "newProject": "新建项目",
   "allProjects": "全部项目",
   "draw": "绘图",
-  "files": "文件"
+  "files": "文件",
+  "skillsPrompts": "技能与提示词"
 }

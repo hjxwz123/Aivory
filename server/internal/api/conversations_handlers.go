@@ -764,17 +764,18 @@ func forkConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 			// REAL model id/label/provider (copied above), so without this the fork
 			// would have fast=0 and redactCost would serve the real model name to the
 			// user on every load of the forked conversation.
-			Fast:         m.Fast,
-			Blocks:       m.Blocks,
-			Raw:          m.Raw,
-			StopReason:   m.StopReason,
-			Attachments:  m.Attachments,
-			Citations:    m.Citations,
-			InputTokens:  m.InputTokens,
-			OutputTokens: m.OutputTokens,
-			Cost:         m.Cost,
-			Currency:     m.Currency,
-			Status:       "complete",
+			Fast:                 m.Fast,
+			Blocks:               m.Blocks,
+			Raw:                  m.Raw,
+			StopReason:           m.StopReason,
+			Attachments:          m.Attachments,
+			SelectedUserSkillIDs: m.SelectedUserSkillIDs,
+			Citations:            m.Citations,
+			InputTokens:          m.InputTokens,
+			OutputTokens:         m.OutputTokens,
+			Cost:                 m.Cost,
+			Currency:             m.Currency,
+			Status:               "complete",
 		})
 	}
 	if len(copies) > 0 {

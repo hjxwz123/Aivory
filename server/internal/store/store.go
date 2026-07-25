@@ -184,6 +184,12 @@ func Migrate(db *sql.DB) error {
 	addModelFast := `ALTER TABLE models ADD COLUMN fast INTEGER NOT NULL DEFAULT 0`
 	addConvFast := `ALTER TABLE conversations ADD COLUMN fast INTEGER NOT NULL DEFAULT 0`
 	addMsgFast := `ALTER TABLE messages ADD COLUMN fast INTEGER NOT NULL DEFAULT 0`
+	// User skills/prompts: administrator skill descriptions retain their model
+	// trigger meaning, while display_description is catalog-only. Selected private
+	// skill ids are persisted on each user turn for branch/regenerate fidelity.
+	addSkillDisplayDescription := `ALTER TABLE skills ADD COLUMN display_description TEXT NOT NULL DEFAULT ''`
+	addUserSkillIcon := `ALTER TABLE user_skills ADD COLUMN icon TEXT NOT NULL DEFAULT ''`
+	addMsgSelectedUserSkills := `ALTER TABLE messages ADD COLUMN selected_user_skill_ids TEXT NOT NULL DEFAULT '[]'`
 	// §credits redeem codes: 'credits'-kind codes grant permanent credits instead
 	// of a group; redemptions record the granted amount for the audit trail.
 	addRedeemKind := `ALTER TABLE redeem_codes ADD COLUMN kind TEXT NOT NULL DEFAULT 'group'`
@@ -251,6 +257,9 @@ func Migrate(db *sql.DB) error {
 		addModelFast = `ALTER TABLE models ADD COLUMN IF NOT EXISTS fast INTEGER NOT NULL DEFAULT 0`
 		addConvFast = `ALTER TABLE conversations ADD COLUMN IF NOT EXISTS fast INTEGER NOT NULL DEFAULT 0`
 		addMsgFast = `ALTER TABLE messages ADD COLUMN IF NOT EXISTS fast INTEGER NOT NULL DEFAULT 0`
+		addSkillDisplayDescription = `ALTER TABLE skills ADD COLUMN IF NOT EXISTS display_description TEXT NOT NULL DEFAULT ''`
+		addUserSkillIcon = `ALTER TABLE user_skills ADD COLUMN IF NOT EXISTS icon TEXT NOT NULL DEFAULT ''`
+		addMsgSelectedUserSkills = `ALTER TABLE messages ADD COLUMN IF NOT EXISTS selected_user_skill_ids TEXT NOT NULL DEFAULT '[]'`
 		addRedeemKind = `ALTER TABLE redeem_codes ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'group'`
 		addRedeemCredits = `ALTER TABLE redeem_codes ADD COLUMN IF NOT EXISTS credits REAL NOT NULL DEFAULT 0`
 		addRedemptionCredits = `ALTER TABLE redeem_redemptions ADD COLUMN IF NOT EXISTS credits REAL NOT NULL DEFAULT 0`
@@ -287,6 +296,7 @@ func Migrate(db *sql.DB) error {
 		addUsageRequestMethod, addUsageRequestURL, addUsageRequestHeaders, addUsageRequestBody, addUsageTTFTFallback,
 		addFileDraft, addDocumentIngestUpdatedAt,
 		addModelFast, addConvFast, addMsgFast,
+		addSkillDisplayDescription, addUserSkillIcon, addMsgSelectedUserSkills,
 		addRedeemKind, addRedeemCredits, addRedemptionCredits,
 	} {
 		_, _ = db.Exec(ddl)
@@ -335,7 +345,11 @@ func Migrate(db *sql.DB) error {
 	// fatal) instead of surfacing as broken reads later. WHERE 1=0 makes each probe
 	// O(1). If you add an ALTER above, add its column here.
 	columnChecks := map[string][]string{
-		"messages":           {"credits", "model_label", "search_text", "gen_ms", "feedback", "verify", "author_id", "fast"},
+		"messages":           {"credits", "model_label", "search_text", "gen_ms", "feedback", "verify", "author_id", "fast", "selected_user_skill_ids"},
+		"skills":             {"display_description"},
+		"prompts":            {"name", "description", "content", "enabled", "sort_order"},
+		"user_skills":        {"user_id", "name", "description", "icon", "instructions", "source_skill_id"},
+		"user_prompts":       {"user_id", "name", "description", "content", "source_prompt_id"},
 		"users":              {"group_id", "totp_secret", "totp_enabled", "group_expires_at", "previous_group_id", "password_set", "password_changed_at", "last_seen_at", "credits_permanent", "sort_order"},
 		"usage_logs":         {"credits", "workspace_id", "channel_id", "fallback", "status", "error", "request_method", "request_url", "request_headers", "request_body"},
 		"user_groups":        {"max_projects", "max_kbs", "credit_allowance", "credit_period_seconds", "max_workspaces", "is_public", "max_storage_mb"},

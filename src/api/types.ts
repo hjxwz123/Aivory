@@ -409,6 +409,9 @@ export interface ApiSkillAsset {
 export interface ApiSkill {
   id: string
   name: string
+  /** Short catalog copy used only for display. The existing `description`
+   * remains the model-facing trigger description. */
+  display_description?: string
   description: string
   icon: string
   instructions: string
@@ -416,6 +419,62 @@ export interface ApiSkill {
   enabled: boolean
   sort_order: number
   updated_at: number
+}
+
+export interface ApiPrompt {
+  id: string
+  name: string
+  description: string
+  content: string
+  enabled: boolean
+  sort_order: number
+  updated_at: number
+}
+
+export interface ApiUserSkill {
+  id: string
+  name: string
+  description: string
+  icon: string
+  instructions: string
+  source_skill_id?: string
+  created_at: number
+  updated_at: number
+}
+
+export interface ApiUserPrompt {
+  id: string
+  name: string
+  description: string
+  content: string
+  source_prompt_id?: string
+  created_at: number
+  updated_at: number
+}
+
+export interface ApiLibraryCatalogSkill {
+  id: string
+  name: string
+  description?: string
+  /** Omitted for migrated administrator skills that have not yet received
+   * catalog copy. The catalog's optional `description` is also safe display metadata. */
+  display_description?: string
+  icon?: string
+  source?: 'admin'
+  added?: boolean
+}
+
+export interface ApiLibraryCatalogPrompt {
+  id: string
+  name: string
+  description: string
+  icon?: string
+  added?: boolean
+}
+
+export interface ApiLibraryCatalog {
+  skills: ApiLibraryCatalogSkill[]
+  prompts: ApiLibraryCatalogPrompt[]
 }
 
 export interface ApiProject {

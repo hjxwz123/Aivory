@@ -1,0 +1,66 @@
+{
+  "title": "スキルとプロンプト",
+  "new": "新規",
+  "newSkill": "新しいスキル",
+  "kinds": {
+    "skill": "スキル",
+    "prompt": "プロンプト"
+  },
+  "tabs": {
+    "mine": "マイライブラリ",
+    "catalog": "カタログ"
+  },
+  "search": "スキルとプロンプトを検索",
+  "filter": {
+    "label": "種類で絞り込む",
+    "all": "すべて",
+    "skill": "スキル",
+    "prompt": "プロンプト"
+  },
+  "empty": {
+    "search": "一致する項目はありません",
+    "mine": "スキルやプロンプトはまだありません",
+    "catalog": "カタログは空です"
+  },
+  "catalog": {
+    "fromAdmin": "カタログから追加",
+    "add": "追加",
+    "added": "ライブラリに追加しました",
+    "addedLabel": "追加済み"
+  },
+  "editor": {
+    "newSkill": "新しいスキル",
+    "editSkill": "スキルを編集",
+    "newPrompt": "新しいプロンプト",
+    "editPrompt": "プロンプトを編集",
+    "importLabel": "SKILL.md を読み込む",
+    "importHint": "name、description、本文を含む標準形式に対応します。添付ファイルには対応しません。",
+    "importAction": "解析して入力",
+    "importInvalid": "SKILL.md に name、description、本文が必要です。",
+    "imported": "SKILL.md から入力しました",
+    "name": "名前",
+    "skillNameHint": "meeting-follow-up のように、小文字・数字・ハイフンを使用します。",
+    "promptNamePlaceholder": "週報を整える",
+    "when": "使用する場面",
+    "description": "説明",
+    "instructions": "完全な指示",
+    "promptContent": "プロンプト本文",
+    "missingFields": "名前、説明、内容を入力してください。",
+    "invalidSkillName": "スキル名は 64 文字以内の kebab-case にしてください。",
+    "nameExists": "同じ名前の項目がすでにあります。",
+    "created": "作成しました",
+    "updated": "更新しました"
+  },
+  "remove": {
+    "title": "この項目を削除しますか？",
+    "body": "「{{name}}」をライブラリから削除します。",
+    "done": "削除しました"
+  },
+  "command": {
+    "skills": "スキル",
+    "prompts": "プロンプト",
+    "empty": "一致するスキルやプロンプトはありません",
+    "loading": "読み込み中…",
+    "removeSkill": "スキル {{name}} を外す"
+  }
+}

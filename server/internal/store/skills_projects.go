@@ -15,7 +15,7 @@ var ErrSkillNameExists = errors.New("skill name already exists")
 
 // ListSkills returns every skill.
 func ListSkills(ctx context.Context, db *sql.DB, onlyEnabled bool) ([]Skill, error) {
-	q := `SELECT id, name, description, icon, instructions, assets, enabled, sort_order, updated_at FROM skills`
+	q := `SELECT id, name, description, COALESCE(display_description,''), icon, instructions, assets, enabled, sort_order, updated_at FROM skills`
 	if onlyEnabled {
 		q += " WHERE enabled=1"
 	}
@@ -30,7 +30,7 @@ func ListSkills(ctx context.Context, db *sql.DB, onlyEnabled bool) ([]Skill, err
 		var s Skill
 		var en int
 		var assets string
-		if err := rows.Scan(&s.ID, &s.Name, &s.Description, &s.Icon, &s.Instructions, &assets, &en, &s.SortOrder, &s.UpdatedAt); err != nil {
+		if err := rows.Scan(&s.ID, &s.Name, &s.Description, &s.DisplayDescription, &s.Icon, &s.Instructions, &assets, &en, &s.SortOrder, &s.UpdatedAt); err != nil {
 			return nil, err
 		}
 		s.Enabled = en == 1
@@ -46,8 +46,8 @@ func GetSkill(ctx context.Context, db *sql.DB, id string) (*Skill, error) {
 	var en int
 	var assets string
 	err := db.QueryRowContext(ctx,
-		`SELECT id, name, description, icon, instructions, assets, enabled, sort_order, updated_at FROM skills WHERE id=?`, id,
-	).Scan(&s.ID, &s.Name, &s.Description, &s.Icon, &s.Instructions, &assets, &en, &s.SortOrder, &s.UpdatedAt)
+		`SELECT id, name, description, COALESCE(display_description,''), icon, instructions, assets, enabled, sort_order, updated_at FROM skills WHERE id=?`, id,
+	).Scan(&s.ID, &s.Name, &s.Description, &s.DisplayDescription, &s.Icon, &s.Instructions, &assets, &en, &s.SortOrder, &s.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -65,9 +65,9 @@ func GetSkillByName(ctx context.Context, db *sql.DB, name string) (*Skill, error
 	var en int
 	var assets string
 	err := db.QueryRowContext(ctx,
-		`SELECT id, name, description, icon, instructions, assets, enabled, sort_order, updated_at FROM skills WHERE lower(trim(name))=lower(trim(?)) LIMIT 1`,
+		`SELECT id, name, description, COALESCE(display_description,''), icon, instructions, assets, enabled, sort_order, updated_at FROM skills WHERE lower(trim(name))=lower(trim(?)) LIMIT 1`,
 		name,
-	).Scan(&s.ID, &s.Name, &s.Description, &s.Icon, &s.Instructions, &assets, &en, &s.SortOrder, &s.UpdatedAt)
+	).Scan(&s.ID, &s.Name, &s.Description, &s.DisplayDescription, &s.Icon, &s.Instructions, &assets, &en, &s.SortOrder, &s.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -83,6 +83,8 @@ func GetSkillByName(ctx context.Context, db *sql.DB, name string) (*Skill, error
 func CreateSkill(ctx context.Context, db *sql.DB, s Skill) (*Skill, error) {
 	s.Name = strings.TrimSpace(s.Name)
 	s.Description = strings.TrimSpace(s.Description)
+	s.DisplayDescription = strings.TrimSpace(s.DisplayDescription)
+	s.Icon = strings.TrimSpace(s.Icon)
 	s.Instructions = strings.TrimSpace(s.Instructions)
 	if s.ID == "" {
 		s.ID = genID("sk")
@@ -90,9 +92,9 @@ func CreateSkill(ctx context.Context, db *sql.DB, s Skill) (*Skill, error) {
 	if len(s.Assets) == 0 {
 		s.Assets = json.RawMessage("[]")
 	}
-	_, err := db.ExecContext(ctx, `INSERT INTO skills(id, name, description, icon, instructions, assets, enabled, sort_order, updated_at)
-		VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		s.ID, s.Name, s.Description, s.Icon, s.Instructions, string(s.Assets), boolInt(s.Enabled), s.SortOrder, time.Now().Unix())
+	_, err := db.ExecContext(ctx, `INSERT INTO skills(id, name, description, display_description, icon, instructions, assets, enabled, sort_order, updated_at)
+		VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		s.ID, s.Name, s.Description, s.DisplayDescription, s.Icon, s.Instructions, string(s.Assets), boolInt(s.Enabled), s.SortOrder, time.Now().Unix())
 	if err != nil {
 		if isSkillNameUniqueErr(err) {
 			return nil, ErrSkillNameExists
@@ -106,17 +108,22 @@ func CreateSkill(ctx context.Context, db *sql.DB, s Skill) (*Skill, error) {
 func UpdateSkill(ctx context.Context, db *sql.DB, id string, s Skill) (*Skill, error) {
 	s.Name = strings.TrimSpace(s.Name)
 	s.Description = strings.TrimSpace(s.Description)
+	s.DisplayDescription = strings.TrimSpace(s.DisplayDescription)
+	s.Icon = strings.TrimSpace(s.Icon)
 	s.Instructions = strings.TrimSpace(s.Instructions)
 	if len(s.Assets) == 0 {
 		s.Assets = json.RawMessage("[]")
 	}
-	_, err := db.ExecContext(ctx, `UPDATE skills SET name=?, description=?, icon=?, instructions=?, assets=?, enabled=?, sort_order=?, updated_at=? WHERE id=?`,
-		s.Name, s.Description, s.Icon, s.Instructions, string(s.Assets), boolInt(s.Enabled), s.SortOrder, time.Now().Unix(), id)
+	result, err := db.ExecContext(ctx, `UPDATE skills SET name=?, description=?, display_description=?, icon=?, instructions=?, assets=?, enabled=?, sort_order=?, updated_at=? WHERE id=?`,
+		s.Name, s.Description, s.DisplayDescription, s.Icon, s.Instructions, string(s.Assets), boolInt(s.Enabled), s.SortOrder, time.Now().Unix(), id)
 	if err != nil {
 		if isSkillNameUniqueErr(err) {
 			return nil, ErrSkillNameExists
 		}
 		return nil, err
+	}
+	if n, _ := result.RowsAffected(); n == 0 {
+		return nil, ErrNotFound
 	}
 	return GetSkill(ctx, db, id)
 }
@@ -127,8 +134,14 @@ func isSkillNameUniqueErr(err error) bool {
 
 // DeleteSkill removes the row.
 func DeleteSkill(ctx context.Context, db *sql.DB, id string) error {
-	_, err := db.ExecContext(ctx, "DELETE FROM skills WHERE id=?", id)
-	return err
+	result, err := db.ExecContext(ctx, "DELETE FROM skills WHERE id=?", id)
+	if err != nil {
+		return err
+	}
+	if n, _ := result.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // SkillAsset describes one downloadable file bundled with a skill (§4.17 — the

@@ -10,76 +10,75 @@ interface ProjectRowProps {
   chatCount: number
 }
 
-/**
- * Editorial table-of-contents row. Replaces the prior tinted-card grid:
- * a 3px accent rule on the left, a Fraunces project name, a Geist sub-line,
- * and tabular metadata right-aligned at the baseline. Hover dims the page
- * background tint and lengthens the accent rule. No halos, no chips.
- */
+/** A compact project index row with a stable 64px desktop rhythm. */
 export function ProjectRow({ project, chatCount }: ProjectRowProps) {
   const { t } = useTranslation('projects')
   const accent = accentClasses(project.accent)
+  const marker = project.emoji?.trim() || project.name.trim().charAt(0).toUpperCase() || '\u00b7'
 
   return (
     <Link
       to={`/projects/${project.id}`}
       aria-label={t('card.openAria', { name: project.name })}
       className={cn(
-        'group/row relative grid items-baseline',
-        'grid-cols-[3px_1fr] gap-x-5 gap-y-2',
-        'sm:grid-cols-[3px_1fr_180px] sm:gap-x-7',
-        'py-6 sm:py-7 px-4 sm:px-6 -mx-4 sm:-mx-6',
-        'rounded-[12px] interactive',
+        'group/row relative grid min-h-16 items-center',
+        'grid-cols-[2rem_minmax(0,1fr)] gap-x-3',
+        'sm:grid-cols-[2rem_minmax(0,1fr)_auto]',
+        'px-2.5 py-2 -mx-2.5 sm:px-3 sm:-mx-3',
+        'rounded-[8px] interactive',
         'hover:bg-[var(--color-bg-muted)]',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
       )}
     >
-      {/* Accent rule */}
+      {/* The marker carries the project accent without adding card chrome. */}
       <span
         className={cn(
-          'self-stretch rounded-full transition-[transform,opacity] duration-[180ms] ease-out',
-          'origin-top scale-y-[0.85] opacity-80 group-hover/row:scale-y-100 group-hover/row:opacity-100',
-          accent.bar,
+          'row-span-2 sm:row-span-1 inline-flex size-8 shrink-0 items-center justify-center',
+          'self-start sm:self-center rounded-[8px] text-[14px] font-medium leading-none',
+          'transition-colors duration-150',
+          accent.tint,
+          accent.text,
         )}
         aria-hidden
-      />
+      >
+        {marker}
+      </span>
 
       {/* Title block */}
-      <div className="min-w-0">
-        <div className="flex items-baseline gap-2 flex-wrap">
-          <h3 className="text-[22px] sm:text-[26px] leading-[1.15] tracking-tight text-[var(--color-fg)] truncate-2">
+      <div className="min-w-0 self-center">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <h3 className="truncate text-[14.5px] font-medium leading-[18px] tracking-normal text-[var(--color-fg)]">
             {project.name}
           </h3>
           {project.pinned ? (
             <Pin
-              size={11}
-              className={cn('shrink-0 translate-y-[-1px]', accent.text)}
+              size={12}
+              className={cn('shrink-0', accent.text)}
               aria-hidden
             />
           ) : null}
         </div>
         {project.description ? (
-          <p className="mt-2 text-[13.5px] sm:text-[14px] text-[var(--color-fg-muted)] leading-relaxed max-w-[60ch]">
-            {truncate(project.description, 160)}
+          <p className="truncate text-[12.5px] leading-4 text-[var(--color-fg-muted)]">
+            {truncate(project.description, 120)}
           </p>
         ) : null}
       </div>
 
-      {/* Metadata column. Mobile: stacks under title in its own row spanning
-          both content columns; desktop: right-aligned third column. */}
+      {/* Metadata wraps only when a narrow viewport cannot hold both groups. */}
       <div
         className={cn(
-          'col-start-2 sm:col-start-3 flex flex-col gap-1 self-start',
-          'text-[11.5px] text-[var(--color-fg-subtle)] tabular-nums',
-          'sm:text-right sm:mt-1',
+          'col-start-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0',
+          'text-[11.5px] leading-4 text-[var(--color-fg-subtle)] tabular-nums',
+          'sm:col-start-3 sm:row-start-1 sm:flex-nowrap sm:justify-end sm:pl-4 sm:text-right',
         )}
       >
-        <span>
+        <span className="whitespace-nowrap">
           {t('card.files', { count: project.files.length })}
           <span aria-hidden className="mx-1.5 opacity-50">·</span>
           {t('card.chats', { count: chatCount })}
         </span>
-        <time dateTime={new Date(project.updatedAt).toISOString()}>
+        <time className="whitespace-nowrap" dateTime={new Date(project.updatedAt).toISOString()}>
           {t('card.updated', { when: formatRelativeDate(project.updatedAt) })}
         </time>
       </div>

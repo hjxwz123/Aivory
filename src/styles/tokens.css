@@ -79,6 +79,7 @@
   --color-tool-selection-soft: color-mix(in oklch, var(--color-accent-soft) 58%, var(--color-surface));
   --color-tool-selection-border: color-mix(in oklch, var(--color-accent) 30%, var(--color-border-subtle));
   --color-tool-selection-text: color-mix(in oklch, var(--color-accent) 80%, black);
+  --color-tool-selection-fg: color-mix(in oklch, var(--color-accent) 65%, black);
   --color-tool-idle: color-mix(in oklch, var(--color-fg) 4%, var(--color-surface));
 
   /* Focus ring — violet, calm */
@@ -447,6 +448,7 @@
   --color-tool-selection-soft: color-mix(in oklch, var(--color-accent-soft) 78%, var(--color-surface));
   --color-tool-selection-border: color-mix(in oklch, var(--color-accent) 32%, var(--color-border-strong));
   --color-tool-selection-text: color-mix(in oklch, var(--color-accent) 82%, white);
+  --color-tool-selection-fg: var(--color-accent-fg);
   --color-tool-idle: color-mix(in oklch, var(--color-fg) 6%, var(--color-surface));
 
   --color-ring: oklch(72% 0.215 290 / 0.50);

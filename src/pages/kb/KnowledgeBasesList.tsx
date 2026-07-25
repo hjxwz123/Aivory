@@ -145,80 +145,95 @@ export default function KnowledgeBasesList() {
         }
       />
       <div className="flex-1 min-h-0 overflow-y-auto">
-        <div className="mx-auto w-full max-w-[var(--layout-content-max-w)] px-5 sm:px-8 py-8 pb-24">
-          <p className="max-w-[60ch] text-[var(--color-fg-muted)] text-[15px] leading-relaxed">{t('kb:lead')}</p>
+        <div className="mx-auto w-full max-w-[var(--layout-content-max-w)] px-5 pb-24 pt-5 sm:px-8 sm:pt-6">
+          <p className="max-w-[60ch] text-[13.5px] leading-relaxed text-[var(--color-fg-muted)]">
+            {t('kb:lead')}
+          </p>
 
-        <section className="mt-10">
-          {loading ? (
-            <KnowledgeBasesSkeleton label={t('common:common.loading')} />
-          ) : loadError ? (
-            <EmptyState
-              icon={<Database size={20} aria-hidden />}
-              title={t('common:common.error')}
-              description={loadError}
-              action={
-                <Button variant="secondary" onClick={() => void load()}>
-                  {t('common:actions.tryAgain', { defaultValue: 'Try again' })}
-                </Button>
-              }
-            />
-          ) : rows.length === 0 ? (
-            <EmptyState
-              icon={<Database size={20} aria-hidden />}
-              title={t('kb:emptyTitle')}
-              description={t('kb:emptyBody')}
-              action={<Button variant="secondary" onClick={() => setOpen(true)}>{t('kb:createFirst')}</Button>}
-            />
-          ) : (
-            <ul className="flex flex-col divide-y divide-[var(--color-divider)]">
-              {rows.map((kb) => (
-                <li key={kb.id} className="group/kb relative">
-                  <Link
-                    to={`/kb/${kb.id}`}
-                    className="grid grid-cols-[1fr_180px] items-baseline gap-x-6 px-4 sm:px-6 -mx-4 sm:-mx-6 py-7 rounded-[12px] interactive hover:bg-[var(--color-bg-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-                  >
-                    <div className="min-w-0 pr-10">
-                      <h3 className="text-[22px] leading-[1.15] tracking-tight text-[var(--color-fg)] truncate">
-                        {kb.name}
-                      </h3>
-                      {kb.description ? (
-                        <p className="mt-1.5 text-[13.5px] text-[var(--color-fg-muted)] leading-relaxed line-clamp-2">
-                          {kb.description}
-                        </p>
-                      ) : null}
-                    </div>
-                    <div className="text-[11.5px] text-[var(--color-fg-subtle)] tabular-nums text-right">
-                      <div>{t('kb:stats.dim', { dim: kb.embedding_dim })}</div>
-                      <time dateTime={new Date(kb.created_at * 1000).toISOString()}>
-                        {t('kb:stats.created', { when: formatRelativeDate(kb.created_at * 1000) })}
-                      </time>
-                    </div>
-                  </Link>
-                  {/* Row actions — kept OUTSIDE the Link so a menu click never
-                      navigates into the KB. Revealed on hover / focus. */}
-                  <div className="absolute right-1 top-4">
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <button
-                          type="button"
-                          aria-label={t('common:actions.more', { defaultValue: 'More' })}
-                          className="inline-flex items-center justify-center size-8 rounded-[8px] text-[var(--color-fg-subtle)] opacity-0 group-hover/kb:opacity-100 focus-visible:opacity-100 hover:bg-[var(--color-bg)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+          <section className="mt-6">
+            {loading ? (
+              <KnowledgeBasesSkeleton label={t('common:common.loading')} />
+            ) : loadError ? (
+              <EmptyState
+                icon={<Database size={20} aria-hidden />}
+                title={t('common:common.error')}
+                description={loadError}
+                action={
+                  <Button variant="secondary" onClick={() => void load()}>
+                    {t('common:actions.tryAgain', { defaultValue: 'Try again' })}
+                  </Button>
+                }
+              />
+            ) : rows.length === 0 ? (
+              <EmptyState
+                icon={<Database size={20} aria-hidden />}
+                title={t('kb:emptyTitle')}
+                description={t('kb:emptyBody')}
+                action={
+                  <Button variant="secondary" onClick={() => setOpen(true)}>
+                    {t('kb:createFirst')}
+                  </Button>
+                }
+              />
+            ) : (
+              <ul className="flex flex-col divide-y divide-[var(--color-divider)] border-b border-[var(--color-divider)]">
+                {rows.map((kb) => (
+                  <li key={kb.id} className="group/kb flex min-w-0 items-center gap-1 py-1">
+                    <Link
+                      to={`/kb/${kb.id}`}
+                      className="flex min-h-14 min-w-0 flex-1 items-center gap-3 rounded-[10px] px-2 py-2 interactive hover:bg-[var(--color-bg-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                    >
+                      <span
+                        className="grid size-8 shrink-0 place-items-center rounded-[8px] bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)]"
+                        aria-hidden
+                      >
+                        <Database size={15} />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <h3
+                          title={kb.name}
+                          className="truncate text-[14.5px] font-medium leading-snug tracking-normal text-[var(--color-fg)]"
                         >
-                          <MoreHorizontal size={16} aria-hidden />
-                        </button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem destructive onSelect={() => setToDelete(kb)}>
-                          <Trash2 size={13} aria-hidden /> {t('common:actions.delete')}
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
+                          {kb.name}
+                        </h3>
+                        {kb.description ? (
+                          <p className="mt-0.5 truncate text-[12px] leading-snug text-[var(--color-fg-muted)]">
+                            {kb.description}
+                          </p>
+                        ) : null}
+                      </div>
+                      <time
+                        className="hidden shrink-0 text-[11px] tabular-nums text-[var(--color-fg-subtle)] sm:block"
+                        dateTime={new Date(kb.created_at * 1000).toISOString()}
+                      >
+                        {t('kb:stats.created', {
+                          when: formatRelativeDate(kb.created_at * 1000),
+                        })}
+                      </time>
+                    </Link>
+                    <div className="shrink-0">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            type="button"
+                            aria-label={`${t('common:actions.more', { defaultValue: 'More' })}: ${kb.name}`}
+                            className="inline-flex size-[var(--tap-min)] items-center justify-center rounded-[8px] text-[var(--color-fg-subtle)] opacity-100 hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] sm:size-8 sm:opacity-0 sm:group-hover/kb:opacity-100 sm:data-[state=open]:opacity-100 sm:focus-visible:opacity-100"
+                          >
+                            <MoreHorizontal size={16} aria-hidden />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem destructive onSelect={() => setToDelete(kb)}>
+                            <Trash2 size={13} aria-hidden /> {t('common:actions.delete')}
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
         </div>
       </div>
 
@@ -257,7 +272,7 @@ export default function KnowledgeBasesList() {
                   <SelectContent>
                     {models.map((m) => (
                       <SelectItem key={m.id} value={m.id}>
-                        {m.label} · dim {m.dim}
+                        {m.label}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -269,12 +284,19 @@ export default function KnowledgeBasesList() {
             <Button variant="ghost" onClick={() => setOpen(false)} disabled={creating}>
               {t('common:actions.cancel')}
             </Button>
-            <Button onClick={() => void create()} loading={creating}>{t('kb:dialog.create')}</Button>
+            <Button onClick={() => void create()} loading={creating}>
+              {t('kb:dialog.create')}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      <Dialog open={toDelete !== null} onOpenChange={(o) => { if (!o) setToDelete(null) }}>
+      <Dialog
+        open={toDelete !== null}
+        onOpenChange={(next) => {
+          if (!next && !deleting) setToDelete(null)
+        }}
+      >
         <DialogContent size="sm">
           <DialogHeader>
             <DialogTitle>{t('kb:deleteTitle', { defaultValue: 'Delete knowledge base?' })}</DialogTitle>
@@ -302,17 +324,16 @@ export default function KnowledgeBasesList() {
 
 function KnowledgeBasesSkeleton({ label }: { label: string }) {
   return (
-    <div className="space-y-1" role="status" aria-label={label}>
+    <div className="divide-y divide-[var(--color-divider)]" role="status" aria-label={label}>
       {Array.from({ length: 4 }, (_, index) => (
-        <div key={index} className="grid grid-cols-[1fr_180px] items-start gap-x-6 px-4 py-7 sm:px-6">
-          <div className="space-y-3">
-            <Skeleton shape="line" className="h-5 w-2/5" />
-            <Skeleton shape="line" className="w-4/5" />
+        <div key={index} className="flex min-h-16 items-center gap-3 px-2 py-2">
+          <Skeleton className="size-8 shrink-0 rounded-[8px]" />
+          <div className="min-w-0 flex-1 space-y-2">
+            <Skeleton shape="line" className="h-3.5 w-2/5" />
+            <Skeleton shape="line" className="w-3/5" />
           </div>
-          <div className="space-y-2">
-            <Skeleton shape="line" className="ml-auto w-20" />
-            <Skeleton shape="line" className="ml-auto w-28" />
-          </div>
+          <Skeleton shape="line" className="hidden w-24 sm:block" />
+          <Skeleton className="size-8 shrink-0 rounded-[8px]" />
         </div>
       ))}
       <span className="sr-only">{label}</span>

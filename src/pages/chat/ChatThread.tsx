@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { MoreHorizontal, Pencil, Share2, Star, Trash2, Archive, ArrowDown, FolderKanban, Copy, Check, Globe, Loader2, Menu, Files, GitBranch } from 'lucide-react'
+import { MoreHorizontal, Pencil, Share2, Star, Trash2, Archive, ArrowDown, FolderKanban, Loader2, Menu, Files, GitBranch } from 'lucide-react'
 import { Composer } from '@/components/chat/composer'
 import { MessageList } from '@/components/chat/message-list'
 import { InlineThreadLayer } from '@/components/chat/inline-thread-layer'
 import { ModelPicker } from '@/components/chat/model-picker'
+import { ShareConversationDialog } from '@/components/chat/share-conversation-dialog'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Button } from '@/components/ui/button'
 import {
@@ -16,15 +17,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Tooltip } from '@/components/ui/tooltip'
-import {
-  Dialog,
-  DialogBody,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
+import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { useConversations } from '@/store/conversations'
@@ -34,10 +27,7 @@ import { useUI } from '@/store/ui'
 import { useWorkspaces } from '@/store/workspaces'
 import { useConversationFiles } from '@/store/conversation-files'
 import { useMediaQuery } from '@/hooks/use-media-query'
-import { conversationsApi, ApiError } from '@/api'
-import type { ApiShareInfo } from '@/api/types'
 import { toast } from '@/hooks/use-toast'
-import { useCopy } from '@/hooks/use-clipboard'
 import { ConversationOutline } from '@/components/chat/conversation-outline'
 import { ConversationMinimap } from '@/components/chat/conversation-minimap'
 import { accentClasses } from '@/lib/project-helpers'
@@ -103,58 +93,11 @@ export default function ChatThread() {
   const [renameError, setRenameError] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
-  const [share, setShare] = useState<ApiShareInfo | null>(null)
-  const [shareLoading, setShareLoading] = useState(false)
-  const [shareBusy, setShareBusy] = useState(false)
   const [outlineOpen, setOutlineOpen] = useState(false)
   // Mobile: the thread's secondary actions (outline / files / rename / share /
   // archive / delete) collapse into one trailing overflow that opens this bottom
   // action Sheet, keeping the header a calm three-zone bar (§ mobile redesign).
   const [actionsOpen, setActionsOpen] = useState(false)
-  const { copied, copy } = useCopy()
-  const shareUrl = share ? `${window.location.origin}/share/${share.id}` : ''
-
-  // Load the current share state whenever the dialog opens.
-  useEffect(() => {
-    if (!shareOpen || !id) return
-    let active = true
-    setShareLoading(true)
-    conversationsApi
-      .getShare(id)
-      .then((r) => active && setShare(r.share))
-      .catch(() => active && setShare(null))
-      .finally(() => active && setShareLoading(false))
-    return () => {
-      active = false
-    }
-  }, [shareOpen, id])
-
-  async function createShare() {
-    if (!id) return
-    setShareBusy(true)
-    try {
-      setShare(await conversationsApi.createShare(id))
-    } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : t('chat:share.failed'))
-    } finally {
-      setShareBusy(false)
-    }
-  }
-
-  async function revokeShare() {
-    if (!id) return
-    setShareBusy(true)
-    try {
-      await conversationsApi.deleteShare(id)
-      setShare(null)
-      toast.success(t('chat:share.revoked'))
-    } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : t('chat:share.failed'))
-    } finally {
-      setShareBusy(false)
-    }
-  }
-
   const streaming = useMemo(
     () => conversation?.messages.some((m) => m.streaming),
     [conversation?.messages],
@@ -269,6 +212,7 @@ export default function ChatThread() {
       toolMode: ToolMode
       webSearch?: boolean
       officialToolNames?: string[]
+      selectedUserSkillIds?: string[]
       fast?: boolean
     },
   ) {
@@ -285,6 +229,7 @@ export default function ChatThread() {
       toolMode: opts.toolMode,
       webSearch: opts.webSearch,
       officialToolNames: opts.officialToolNames,
+      selectedUserSkillIds: opts.selectedUserSkillIds,
       fast: opts.fast,
     })
     // Force the view to the freshly appended turn now — don't rely on the
@@ -640,73 +585,11 @@ export default function ChatThread() {
         </SheetContent>
       </Sheet>
 
-      <Dialog open={shareOpen} onOpenChange={setShareOpen}>
-        <DialogContent size="sm">
-          <DialogHeader>
-            <DialogTitle>{t('chat:share.title')}</DialogTitle>
-            <DialogDescription>
-              {share ? t('chat:share.bodyShared') : t('chat:share.body')}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogBody>
-            {shareLoading ? (
-              <div className="flex items-center gap-2 text-sm text-[var(--color-fg-subtle)] py-2">
-                <Loader2 size={14} className="animate-spin" aria-hidden />
-                {t('common:common.loading')}
-              </div>
-            ) : share ? (
-              <div className="flex flex-col gap-3">
-                <div className="flex items-center gap-2">
-                  <Input
-                    readOnly
-                    value={shareUrl}
-                    onFocus={(e) => e.currentTarget.select()}
-                    wrapperClassName="flex-1 min-w-0"
-                    className="font-mono text-[12px]"
-                  />
-                  <Button
-                    variant="secondary"
-                    className="shrink-0"
-                    leadingIcon={copied ? <Check size={14} aria-hidden /> : <Copy size={14} aria-hidden />}
-                    onClick={() => void copy(shareUrl)}
-                  >
-                    {copied ? t('common:actions.copied') : t('common:actions.copy')}
-                  </Button>
-                </div>
-                <p className="inline-flex items-center gap-1.5 text-[12px] text-[var(--color-fg-subtle)]">
-                  <Globe size={12} aria-hidden />
-                  {t('chat:share.publicHint')}
-                </p>
-              </div>
-            ) : (
-              <div className="flex flex-col items-start gap-3 py-1">
-                <Button
-                  onClick={() => void createShare()}
-                  loading={shareBusy}
-                  leadingIcon={<Globe size={14} aria-hidden />}
-                >
-                  {t('chat:share.createCta')}
-                </Button>
-              </div>
-            )}
-          </DialogBody>
-          {share ? (
-            <DialogFooter>
-              <Button variant="ghost" onClick={() => setShareOpen(false)}>
-                {t('common:actions.close')}
-              </Button>
-              <Button
-                variant="destructive"
-                loading={shareBusy}
-                leadingIcon={<Trash2 size={14} aria-hidden />}
-                onClick={() => void revokeShare()}
-              >
-                {t('chat:share.revokeCta')}
-              </Button>
-            </DialogFooter>
-          ) : null}
-        </DialogContent>
-      </Dialog>
+      <ShareConversationDialog
+        conversationId={conversation.id}
+        open={shareOpen}
+        onOpenChange={setShareOpen}
+      />
     </div>
   )
 }

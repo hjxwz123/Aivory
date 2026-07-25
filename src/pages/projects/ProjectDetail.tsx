@@ -108,6 +108,7 @@ export default function ProjectDetail() {
   // Summary-only subscription so a streaming conversation's per-token updates
   // don't re-render this page (same fix as sidebar/command-menu).
   const allConversations = useConversations((s) => s.conversations, sameConvListShape)
+  const loadProjectConversations = useConversations((s) => s.loadProjectConversations)
   const createConversation = useConversations((s) => s.createConversation)
   const adoptConversation = useConversations((s) => s.adoptConversation)
   const defaultModelId = useModels((s) => s.defaultId)
@@ -115,7 +116,23 @@ export default function ProjectDetail() {
   const workspaceId = useWorkspaces((s) => s.activeId ?? undefined)
   const setGlobalDefaultModel = useModels((s) => s.setDefaultId)
   const [projectComposerModelId, setProjectComposerModelId] = useState('')
+  const [loadingProjectChats, setLoadingProjectChats] = useState(Boolean(id))
   const effectiveProjectModelId = projectComposerModelId || defaultModelId
+
+  useEffect(() => {
+    if (!id) {
+      setLoadingProjectChats(false)
+      return
+    }
+    let current = true
+    setLoadingProjectChats(true)
+    void loadProjectConversations(id).finally(() => {
+      if (current) setLoadingProjectChats(false)
+    })
+    return () => {
+      current = false
+    }
+  }, [id, loadProjectConversations])
 
   const projectChats = useMemo<Conversation[]>(
     () =>
@@ -277,8 +294,6 @@ export default function ProjectDetail() {
     )
   }
 
-  const accent = accentClasses(project.accent)
-
   function startInstructionsEdit() {
     if (!project) return
     setInstructionsDraft(project.instructions)
@@ -369,6 +384,7 @@ export default function ProjectDetail() {
       toolMode: ToolMode
       webSearch?: boolean
       officialToolNames?: string[]
+      selectedUserSkillIds?: string[]
     },
   ) {
     if (!project) return
@@ -400,6 +416,7 @@ export default function ProjectDetail() {
       toolMode: opts.toolMode,
       webSearch: opts.webSearch,
       officialToolNames: opts.officialToolNames,
+      selectedUserSkillIds: opts.selectedUserSkillIds,
     })
   }
 
@@ -416,7 +433,7 @@ export default function ProjectDetail() {
                 <button
                   type="button"
                   aria-label={t('chat:actions.more')}
-                  className="inline-flex items-center justify-center size-9 rounded-[10px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                  className="inline-flex size-9 items-center justify-center rounded-[10px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-lg:size-[var(--tap-min)]"
                 >
                   <MoreHorizontal size={15} aria-hidden />
                 </button>
@@ -446,12 +463,11 @@ export default function ProjectDetail() {
       />
       <div className="flex-1 min-h-0 overflow-y-auto">
         <div className="mx-auto w-full max-w-[var(--layout-content-max-w)] px-5 sm:px-8 py-8 pb-24">
-          {/* Identity strip: a slim accent rule, the description, and metadata.
-              The name itself lives in the header above, so it isn't repeated. */}
+          {/* Project description and metadata. The name itself lives in the
+              header above, so it is not repeated. */}
           <div className="min-w-0">
-            <span className={cn('block h-1 w-10 rounded-full', accent.bar)} aria-hidden />
             {project.description ? (
-              <p className="mt-4 text-[var(--color-fg-muted)] text-[15px] sm:text-[17px] leading-relaxed max-w-[60ch]">
+              <p className="max-w-[60ch] text-[15px] leading-relaxed text-[var(--color-fg-muted)] sm:text-[17px]">
                 {project.description}
               </p>
             ) : null}
@@ -468,44 +484,40 @@ export default function ProjectDetail() {
             </dl>
           </div>
 
-        {/* Composer. Centered, with a small inline label so the project
-            context is unmistakable. */}
-        <section className="mt-12 sm:mt-16">
-          <div className="mx-auto max-w-[44rem]">
-            <p className="mb-3 text-[12px] text-[var(--color-fg-subtle)]">
-              {t('projects:detail.newChat')}
-            </p>
-            <Composer
-              modelId={effectiveProjectModelId}
-              onModelChange={(modelId) => {
-                setProjectComposerModelId(modelId)
-                useSettings.getState().setModels({ defaultModelId: modelId })
-                setGlobalDefaultModel(modelId)
-                void persistUserSettings({ default_model_id: modelId }).catch(() => {})
-              }}
-              onSubmit={(text, atts, opts) => void startProjectChat(text, atts, opts)}
-              conversationId={pendingConversationId}
-              ensureConversationId={ensureProjectConversation}
-              onAttachmentsDrained={discardDraftConversation}
-            />
-          </div>
-        </section>
+          {/* Composer. Centered, with a small inline label so the project
+              context is unmistakable. */}
+          <section className="mt-12 sm:mt-16">
+            <div className="mx-auto max-w-[44rem]">
+              <p className="mb-3 text-[12px] text-[var(--color-fg-subtle)]">
+                {t('projects:detail.newChat')}
+              </p>
+              <Composer
+                modelId={effectiveProjectModelId}
+                onModelChange={(modelId) => {
+                  setProjectComposerModelId(modelId)
+                  useSettings.getState().setModels({ defaultModelId: modelId })
+                  setGlobalDefaultModel(modelId)
+                  void persistUserSettings({ default_model_id: modelId }).catch(() => {})
+                }}
+                onSubmit={(text, atts, opts) => void startProjectChat(text, atts, opts)}
+                conversationId={pendingConversationId}
+                ensureConversationId={ensureProjectConversation}
+                onAttachmentsDrained={discardDraftConversation}
+              />
+            </div>
+          </section>
 
-        {/* Instructions + Files. Asymmetric split: instructions are the
-            voice of the project (1fr, serif body), files are the supporting
-            library (360px, hairline-divided list). No tinted chips. */}
-        <section className="mt-16 sm:mt-20 grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-10 lg:gap-14">
-          {/* Instructions */}
-          <div className="min-w-0">
+          {/* Instructions, files, and chats are separate full-width bands. This
+              keeps the reading order stable at every viewport width. */}
+          <section className="mt-14 border-t border-[var(--color-divider)] pt-8 sm:mt-16 sm:pt-10">
             <SectionHeader
               title={t('projects:detail.instructionsSection')}
-              hint={t('projects:detail.instructionsHint')}
               action={
                 !editingInstructions && project.instructions ? (
                   <button
                     type="button"
                     onClick={startInstructionsEdit}
-                    className="inline-flex items-center gap-1.5 text-[12px] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] interactive rounded-[6px] px-1.5 py-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                    className="inline-flex min-h-8 items-center gap-1.5 rounded-[6px] px-2 text-[12px] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-sm:min-h-[var(--tap-min)]"
                   >
                     <Pencil size={12} aria-hidden />
                     {t('projects:detail.instructionsEdit')}
@@ -519,9 +531,10 @@ export default function ProjectDetail() {
                 <Textarea
                   value={instructionsDraft}
                   onChange={(e) => setInstructionsDraft(e.target.value)}
+                  aria-label={t('projects:detail.instructionsSection')}
                   placeholder={t('projects:detail.instructionsPlaceholder')}
                   rows={9}
-                  className="font-serif text-[15px] leading-relaxed"
+                  className="text-[15px] leading-relaxed"
                 />
                 <div className="flex items-center justify-end gap-2">
                   <Button
@@ -529,16 +542,25 @@ export default function ProjectDetail() {
                     variant="ghost"
                     leadingIcon={<X size={13} aria-hidden />}
                     onClick={() => setEditingInstructions(false)}
+                    className="max-sm:min-h-[var(--tap-min)]"
                   >
                     {t('common:actions.cancel')}
                   </Button>
-                  <Button size="sm" variant="secondary" leadingIcon={<Save size={13} aria-hidden />} onClick={() => void saveInstructions()} loading={savingInstructions} disabled={savingInstructions}>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    leadingIcon={<Save size={13} aria-hidden />}
+                    onClick={() => void saveInstructions()}
+                    loading={savingInstructions}
+                    disabled={savingInstructions}
+                    className="max-sm:min-h-[var(--tap-min)]"
+                  >
                     {t('projects:detail.instructionsSave')}
                   </Button>
                 </div>
               </div>
             ) : project.instructions ? (
-              <div className="mt-4 font-serif text-[15.5px] leading-[1.7] text-[var(--color-fg)] whitespace-pre-wrap max-w-[62ch]">
+              <div className="mt-4 max-w-[62ch] whitespace-pre-wrap text-[15px] leading-[1.7] text-[var(--color-fg)]">
                 {project.instructions}
               </div>
             ) : (
@@ -559,10 +581,9 @@ export default function ProjectDetail() {
                 </span>
               </button>
             )}
-          </div>
+          </section>
 
-          {/* Files */}
-          <aside className="lg:sticky lg:top-6 lg:self-start">
+          <section className="mt-12 border-t border-[var(--color-divider)] pt-8 sm:mt-14 sm:pt-10">
             <SectionHeader
               title={t('projects:detail.filesSection')}
               count={project.files.length}
@@ -572,6 +593,7 @@ export default function ProjectDetail() {
                   variant="ghost"
                   leadingIcon={<Plus size={12} aria-hidden />}
                   onClick={() => setAddFileOpen(true)}
+                  className="max-sm:min-h-[var(--tap-min)]"
                 >
                   {t('projects:detail.filesAdd')}
                 </Button>
@@ -602,14 +624,14 @@ export default function ProjectDetail() {
                   const Icon = fileKindIcon(f.kind)
                   return (
                     <li key={f.id}>
-                      <div className="group/file relative flex items-start gap-3 py-3.5 pr-1">
+                      <div className="group/file relative flex min-w-0 items-start gap-3 py-3.5 pr-1">
                         <Icon
                           size={14}
                           className="mt-1 shrink-0 text-[var(--color-fg-subtle)]"
                           aria-hidden
                         />
                         <div className="flex-1 min-w-0">
-                          <div className="font-serif text-[14px] leading-snug text-[var(--color-fg)]">
+                          <div className="break-words text-[14px] font-medium leading-snug text-[var(--color-fg)]">
                             {f.name}
                           </div>
                           <div className="mt-1 text-[10.5px] text-[var(--color-fg-subtle)] tabular-nums">
@@ -631,8 +653,8 @@ export default function ProjectDetail() {
                           <DropdownMenuTrigger asChild>
                             <button
                               type="button"
-                              aria-label={t('chat:actions.more')}
-                              className="inline-flex items-center justify-center size-7 rounded-[6px] text-[var(--color-fg-faint)] opacity-0 group-hover/file:opacity-100 data-[state=open]:opacity-100 hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg-muted)] interactive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                              aria-label={`${t('chat:actions.more')}: ${f.name}`}
+                              className="inline-flex size-7 shrink-0 items-center justify-center rounded-[6px] text-[var(--color-fg-faint)] opacity-0 group-hover/file:opacity-100 data-[state=open]:opacity-100 hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg-muted)] interactive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-lg:size-[var(--tap-min)] max-lg:opacity-100"
                             >
                               <MoreHorizontal size={13} aria-hidden />
                             </button>
@@ -661,65 +683,76 @@ export default function ProjectDetail() {
                 })}
               </ul>
             )}
-          </aside>
-        </section>
+          </section>
 
-        {/* Conversations TOC */}
-        <section className="mt-16 sm:mt-20">
-          <SectionHeader
-            title={t('projects:detail.chatsSection')}
-            count={projectChats.length}
-          />
+          {/* Conversations TOC */}
+          <section className="mt-12 border-t border-[var(--color-divider)] pt-8 sm:mt-14 sm:pt-10">
+            <SectionHeader
+              title={t('projects:detail.chatsSection')}
+              count={projectChats.length}
+            />
 
-          {projectChats.length === 0 ? (
-            <p className="mt-4 max-w-[60ch] text-[13.5px] text-[var(--color-fg-subtle)] leading-relaxed">
-              {t('projects:detail.chatsEmptyBody')}
-            </p>
-          ) : (
-            <ul className="mt-3 flex flex-col divide-y divide-[var(--color-divider)] border-t border-[var(--color-divider)]">
-              {projectChats.map((c) => (
-                <li key={c.id}>
-                  <div className="group/chatrow relative -mx-2 rounded-[10px] interactive hover:bg-[var(--color-bg-muted)]">
-                    <Link
-                      to={`/chat/${c.id}`}
-                      aria-label={t('projects:detail.openChatAria', { title: c.title })}
-                      className={cn(
-                        'grid items-baseline grid-cols-[1fr_auto] gap-x-5 py-4 pl-2 pr-11 rounded-[10px]',
-                        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-                      )}
-                    >
-                      <span className="font-serif text-[16px] sm:text-[17px] leading-snug text-[var(--color-fg)] truncate">
-                        {truncate(c.title, 90)}
-                      </span>
-                      <time
-                        className="text-[11.5px] text-[var(--color-fg-subtle)] tabular-nums shrink-0"
-                        dateTime={new Date(c.updatedAt).toISOString()}
+            {loadingProjectChats && projectChats.length === 0 ? (
+              <div
+                className="mt-3 flex min-h-16 items-center gap-3 border-t border-[var(--color-divider)] py-3"
+                role="status"
+                aria-label={t('common:common.loading')}
+              >
+                <Skeleton className="h-4 w-2/5" />
+                <Skeleton className="ml-auto h-3 w-20" />
+              </div>
+            ) : projectChats.length === 0 ? (
+              <p className="mt-4 max-w-[60ch] text-[13.5px] leading-relaxed text-[var(--color-fg-subtle)]">
+                {t('projects:detail.chatsEmptyBody')}
+              </p>
+            ) : (
+              <ul className="mt-3 flex flex-col divide-y divide-[var(--color-divider)] border-t border-[var(--color-divider)]">
+                {projectChats.map((c) => (
+                  <li key={c.id}>
+                    <div className="group/chatrow relative -mx-2 rounded-[10px] interactive hover:bg-[var(--color-bg-muted)]">
+                      <Link
+                        to={`/chat/${c.id}`}
+                        aria-label={t('projects:detail.openChatAria', { title: c.title })}
+                        className={cn(
+                          'grid grid-cols-1 items-baseline gap-y-1 rounded-[10px] py-3.5 pl-2 pr-12 sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-x-5 sm:py-4 sm:pr-11',
+                          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+                        )}
                       >
-                        {formatRelativeDate(c.updatedAt)}
-                      </time>
-                    </Link>
-                    <div className="absolute right-1 top-1/2 -translate-y-1/2">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <button
-                            type="button"
-                            aria-label={t('chat:actions.more')}
-                            className="inline-flex items-center justify-center size-7 rounded-[6px] text-[var(--color-fg-faint)] opacity-0 group-hover/chatrow:opacity-100 data-[state=open]:opacity-100 hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg-muted)] interactive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-                          >
-                            <MoreHorizontal size={13} aria-hidden />
-                          </button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <MoveToProjectSub conversationId={c.id} currentProjectId={project.id} />
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+                        <span
+                          title={c.title}
+                          className="truncate text-[15px] font-medium leading-snug text-[var(--color-fg)] sm:text-[16px]"
+                        >
+                          {truncate(c.title, 90)}
+                        </span>
+                        <time
+                          className="shrink-0 text-[11.5px] tabular-nums text-[var(--color-fg-subtle)]"
+                          dateTime={new Date(c.updatedAt).toISOString()}
+                        >
+                          {formatRelativeDate(c.updatedAt)}
+                        </time>
+                      </Link>
+                      <div className="absolute right-1 top-1/2 -translate-y-1/2">
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <button
+                              type="button"
+                              aria-label={`${t('chat:actions.more')}: ${c.title}`}
+                              className="inline-flex size-7 items-center justify-center rounded-[6px] text-[var(--color-fg-faint)] opacity-0 group-hover/chatrow:opacity-100 data-[state=open]:opacity-100 hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg-muted)] interactive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-lg:size-[var(--tap-min)] max-lg:opacity-100"
+                            >
+                              <MoreHorizontal size={13} aria-hidden />
+                            </button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <MoveToProjectSub conversationId={c.id} currentProjectId={project.id} />
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
                     </div>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
         </div>
       </div>
 
@@ -959,29 +992,22 @@ function Meta({ children }: { children: React.ReactNode }) {
 
 function SectionHeader({
   title,
-  hint,
   count,
   action,
 }: {
   title: string
-  hint?: string
   count?: number
   action?: React.ReactNode
 }) {
   return (
-    <div className="flex items-baseline gap-3">
-      <h2 className="font-serif text-[20px] sm:text-[22px] tracking-tight text-[var(--color-fg)]">
+    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+      <h2 className="min-w-0 break-words text-[18px] font-semibold tracking-normal text-[var(--color-fg)] sm:text-[20px]">
         {title}
       </h2>
       {typeof count === 'number' ? (
         <span className="text-[12px] text-[var(--color-fg-subtle)] tabular-nums">
           {count}
         </span>
-      ) : null}
-      {hint ? (
-        <p className="hidden sm:block text-[12px] text-[var(--color-fg-subtle)] leading-relaxed flex-1 min-w-0 max-w-[44ch]">
-          {hint}
-        </p>
       ) : null}
       {action ? <div className="ml-auto shrink-0">{action}</div> : null}
     </div>

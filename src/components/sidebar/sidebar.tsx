@@ -11,7 +11,6 @@ import {
   Archive,
   MoreHorizontal,
   Share2,
-  FolderKanban,
   ChevronRight,
   BookText,
   ImagePlus,
@@ -23,6 +22,7 @@ import {
   ArrowLeftRight,
   Briefcase,
   FolderOpen,
+  LibraryBig,
 } from 'lucide-react'
 import { Logo, LogoMark } from '@/components/brand/logo'
 import { useWorkspaces } from '@/store/workspaces'
@@ -76,6 +76,7 @@ import { useMediaQuery } from '@/hooks/use-media-query'
 import { useCopy } from '@/hooks/use-clipboard'
 import { conversationsApi, ApiError } from '@/api'
 import { accentClasses } from '@/lib/project-helpers'
+import { partitionConversationNavigation } from '@/lib/conversation-navigation'
 import { type DateBucket, bucketFor, modKey, cn, truncate } from '@/lib/utils'
 import { toast } from '@/hooks/use-toast'
 import { useTranslation } from 'react-i18next'
@@ -118,6 +119,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
   const hasMore = useConversations((s) => s.hasMore)
   const loadingMore = useConversations((s) => s.loadingMore)
   const loadMore = useConversations((s) => s.loadMore)
+  const loadProjectConversations = useConversations((s) => s.loadProjectConversations)
   // Infinite scroll: reveal older conversations when the sentinel nears view.
   const listScrollRef = useRef<HTMLDivElement>(null)
   const loadMoreRef = useRef<HTMLDivElement>(null)
@@ -135,7 +137,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
     io.observe(node)
     return () => io.disconnect()
   }, [hasMore, loadMore])
-  const conversations = useMemo(
+  const activeConversations = useMemo(
     // Sort by last-updated so a conversation jumps to the top the moment the
     // user sends/continues a message in it (sendMessage bumps updatedAt). The
     // date buckets below preserve this order within each group.
@@ -151,6 +153,15 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
         }),
     [allConversations],
   )
+  // The shared cache intentionally includes project conversations because the
+  // project list/detail pages consume it too. Split only at the sidebar render
+  // boundary so project chats can never leak into global Starred/date buckets.
+  const navigationConversations = useMemo(
+    () => partitionConversationNavigation(activeConversations),
+    [activeConversations],
+  )
+  const conversations = navigationConversations.ordinary
+  const projectConversationsById = navigationConversations.byProject
   const projects = useProjects((s) => s.projects)
   // §4.20: show the Draw entry only when an image model is configured.
   const hasImageModels = useModels((s) => s.imageModels.length > 0)
@@ -166,21 +177,27 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
   // draw mode). Elsewhere (/chat/:id, /projects, /kb, …) it's just an action,
   // not the selected entry — so it must not keep a permanent "selected" fill.
   const newChatActive = location.pathname === '/' && !drawActive
-  // Projects and Files are their own routes — highlight the rail entry when the
-  // current path is under them (parity with the Draw entry, which was the only
-  // secondary nav row that reflected its selected state).
-  const projectsActive = location.pathname === '/projects' || location.pathname.startsWith('/projects/')
+  // Projects, Files, and Skills are their own routes — highlight their entry
+  // when the current path is under them.
   const filesActive = location.pathname === '/files'
-  const recentProjects = useMemo(
+  const skillsActive = location.pathname === '/skills' || location.pathname.startsWith('/skills/')
+  const sortedProjects = useMemo(
     () =>
       projects
         .slice()
         .sort((a, b) => {
           if ((a.pinned ? 1 : 0) !== (b.pinned ? 1 : 0)) return a.pinned ? -1 : 1
-          return b.updatedAt - a.updatedAt
-        })
-        .slice(0, 5),
-    [projects],
+          const aUpdatedAt = Math.max(
+            a.updatedAt,
+            projectConversationsById.get(a.id)?.[0]?.updatedAt ?? 0,
+          )
+          const bUpdatedAt = Math.max(
+            b.updatedAt,
+            projectConversationsById.get(b.id)?.[0]?.updatedAt ?? 0,
+          )
+          return bUpdatedAt - aUpdatedAt
+        }),
+    [projectConversationsById, projects],
   )
   const setOpen = useCommandMenu((s) => s.setOpen)
   const collapsed = useSettings((s) => s.sidebarCollapsed) && variant === 'desktop'
@@ -190,6 +207,93 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
   const sidebarRef = useRef<HTMLElement>(null)
   const sidebarId = useId()
   const [newProjectOpen, setNewProjectOpen] = useState(false)
+  const [expandedProjectIds, setExpandedProjectIds] = useState<Set<string>>(() => new Set())
+  const [loadingProjectIds, setLoadingProjectIds] = useState<Set<string>>(() => new Set())
+  const loadedProjectIdsRef = useRef<Set<string>>(new Set())
+  const loadingProjectIdsRef = useRef<Set<string>>(new Set())
+  const expandedWorkspaceIdRef = useRef(activeWsId)
+  const activeProjectId = useMemo(() => {
+    if (!currentId) return undefined
+    if (location.pathname.startsWith('/projects/')) {
+      return projects.some((project) => project.id === currentId) ? currentId : undefined
+    }
+    if (location.pathname.startsWith('/chat/')) {
+      return activeConversations.find((conversation) => conversation.id === currentId)?.projectId
+    }
+    return undefined
+  }, [activeConversations, currentId, location.pathname, projects])
+
+  // Expansion belongs to the current workspace. Prune deleted projects and
+  // always reveal whichever project owns the active route/conversation.
+  useEffect(() => {
+    setExpandedProjectIds((previous) => {
+      const workspaceChanged = expandedWorkspaceIdRef.current !== activeWsId
+      expandedWorkspaceIdRef.current = activeWsId
+      const availableIds = new Set(projects.map((project) => project.id))
+      const next = workspaceChanged
+        ? new Set<string>()
+        : new Set([...previous].filter((projectId) => availableIds.has(projectId)))
+      if (activeProjectId && availableIds.has(activeProjectId)) next.add(activeProjectId)
+      if (
+        !workspaceChanged &&
+        next.size === previous.size &&
+        [...next].every((projectId) => previous.has(projectId))
+      ) {
+        return previous
+      }
+      return next
+    })
+  }, [activeProjectId, activeWsId, projects])
+
+  useEffect(() => {
+    loadedProjectIdsRef.current = new Set()
+    loadingProjectIdsRef.current = new Set()
+    setLoadingProjectIds(new Set())
+  }, [activeWsId])
+
+  function ensureProjectConversations(projectId: string) {
+    if (loadedProjectIdsRef.current.has(projectId) || loadingProjectIdsRef.current.has(projectId)) return
+    loadingProjectIdsRef.current.add(projectId)
+    setLoadingProjectIds((previous) => new Set(previous).add(projectId))
+    void loadProjectConversations(projectId).then((loaded) => {
+      if (loaded) loadedProjectIdsRef.current.add(projectId)
+      loadingProjectIdsRef.current.delete(projectId)
+      setLoadingProjectIds((previous) => {
+        const next = new Set(previous)
+        next.delete(projectId)
+        return next
+      })
+    })
+  }
+
+  function toggleProject(projectId: string, expanded: boolean) {
+    setExpandedProjectIds((previous) => {
+      const next = new Set(previous)
+      if (expanded) next.delete(projectId)
+      else next.add(projectId)
+      return next
+    })
+    if (!expanded) ensureProjectConversations(projectId)
+  }
+
+  useEffect(() => {
+    if (!activeProjectId) return
+    if (loadedProjectIdsRef.current.has(activeProjectId) || loadingProjectIdsRef.current.has(activeProjectId)) {
+      return
+    }
+    const projectId = activeProjectId
+    loadingProjectIdsRef.current.add(projectId)
+    setLoadingProjectIds((previous) => new Set(previous).add(projectId))
+    void loadProjectConversations(projectId).then((loaded) => {
+      if (loaded) loadedProjectIdsRef.current.add(projectId)
+      loadingProjectIdsRef.current.delete(projectId)
+      setLoadingProjectIds((previous) => {
+        const next = new Set(previous)
+        next.delete(projectId)
+        return next
+      })
+    })
+  }, [activeProjectId, loadProjectConversations])
 
   // Reveal the ACTIVE conversation in the history list whenever the user lands
   // on one that isn't already visible — arriving via a gallery tile, the command
@@ -223,7 +327,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
       container.scrollTo({ top: target, behavior: !reducedMotion && near ? 'smooth' : 'auto' })
     }
     scrolledForIdRef.current = currentId
-  }, [currentId, conversations, collapsed, reducedMotion])
+  }, [activeConversations, collapsed, currentId, expandedProjectIds, reducedMotion])
 
   function startNewChat() {
     // A new chat starts from the account's exact four-state default, even when
@@ -346,7 +450,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
       </div>
 
       {/* Actions */}
-      <div className={cn('px-3 flex flex-col gap-1', collapsed && 'items-center')}>
+      <div className={cn('flex flex-col gap-0.5 px-3', collapsed && 'items-center')}>
         <Tooltip content={collapsed ? t('sidebar.newChat') : ''} side="right">
           <button
             type="button"
@@ -389,32 +493,6 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
             </span>
             {!collapsed && <KeyboardShortcut combo={[modKey(), 'K']} className="max-lg:hidden" />}
           </button>
-        </Tooltip>
-
-        <Tooltip content={collapsed ? tNav('projects') : ''} side="right">
-          <Link
-            to="/projects"
-            onClick={onClose}
-            aria-current={projectsActive ? 'page' : undefined}
-            className={cn(
-              'inline-flex items-center gap-2 h-9 max-lg:h-[var(--tap-min)] rounded-[10px] text-sm interactive',
-              projectsActive
-                ? 'bg-[var(--color-bg-muted)] text-[var(--color-fg)] font-medium'
-                : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-              collapsed ? 'w-9 justify-center px-0' : 'w-full justify-between px-3',
-            )}
-          >
-            <span className="inline-flex items-center gap-2">
-              <FolderKanban size={15} aria-hidden />
-              {!collapsed && <span>{tNav('projects')}</span>}
-            </span>
-            {!collapsed && projects.length > 0 && (
-              <span className="text-[10.5px] tabular-nums text-[var(--color-fg-subtle)]">
-                {projects.length}
-              </span>
-            )}
-          </Link>
         </Tooltip>
 
         {/* §4.20 Draw — opens a new conversation pre-set to an image model. */}
@@ -463,62 +541,29 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
             </Link>
           </Tooltip>
         )}
-      </div>
 
-      {/* Projects (expanded only) */}
-      {!collapsed && recentProjects.length > 0 && (
-        <div className="mt-3 px-1">
-          <div className="flex items-center justify-between px-3 py-1">
-            <h3 className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-fg-subtle)]">
-              {tNav('projects')}
-            </h3>
-            <Tooltip content={tProjects('nav.newProject')}>
-              <button
-                type="button"
-                onClick={() => setNewProjectOpen(true)}
-                aria-label={tProjects('nav.newProject')}
-                className="inline-flex items-center justify-center size-5 max-lg:size-9 rounded-[5px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-bg)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-              >
-                <Plus size={11} aria-hidden />
-              </button>
-            </Tooltip>
-          </div>
-          <ul className="px-1">
-            {recentProjects.map((p) => {
-              const accent = accentClasses(p.accent)
-              return (
-                <li key={p.id}>
-                  <Link
-                    to={`/projects/${p.id}`}
-                    onClick={onClose}
-                    className={cn(
-                      'group/p flex items-center gap-2 px-2 py-1.5 rounded-[8px] interactive',
-                      'text-[13px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg)] hover:text-[var(--color-fg)]',
-                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-                    )}
-                  >
-                    <span
-                      className={cn(
-                        'inline-flex items-center justify-center size-5 rounded-[6px] shrink-0 text-[11px] font-medium',
-                        accent.chip,
-                      )}
-                      aria-hidden
-                    >
-                      {p.emoji ?? p.name.trim().slice(0, 1).toUpperCase()}
-                    </span>
-                    <span className="flex-1 truncate">{truncate(p.name, 30)}</span>
-                    <ChevronRight
-                      size={11}
-                      aria-hidden
-                      className="text-[var(--color-fg-faint)] opacity-0 group-hover/p:opacity-100"
-                    />
-                  </Link>
-                </li>
-              )
-            })}
-          </ul>
-        </div>
-      )}
+        <Tooltip
+          content={collapsed ? tNav('skillsPrompts', { defaultValue: 'Skills & prompts' }) : ''}
+          side="right"
+        >
+          <Link
+            to="/skills"
+            onClick={onClose}
+            aria-current={skillsActive ? 'page' : undefined}
+            className={cn(
+              'inline-flex items-center gap-2 h-9 max-lg:h-[var(--tap-min)] rounded-[10px] text-sm interactive',
+              skillsActive
+                ? 'bg-[var(--color-bg-muted)] text-[var(--color-fg)] font-medium'
+                : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+              collapsed ? 'w-9 justify-center px-0' : 'w-full justify-start px-3',
+            )}
+          >
+            <LibraryBig size={15} aria-hidden />
+            {!collapsed && <span>{tNav('skillsPrompts', { defaultValue: 'Skills & prompts' })}</span>}
+          </Link>
+        </Tooltip>
+      </div>
 
       {/* Conversation list — while a workspace switch is reloading data, the list
           fades out and a spinner takes its place instead of flashing the old
@@ -532,6 +577,128 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
               switching && 'opacity-0 pointer-events-none',
             )}
           >
+            <section className="py-1.5">
+              <div className="flex items-center pr-2">
+                <h3 className="min-w-0 flex-1 px-4 py-1 text-[10px] font-medium uppercase tracking-wider text-[var(--color-fg-subtle)] max-lg:py-1.5 max-lg:text-[11px]">
+                  <Link
+                    to="/projects"
+                    onClick={onClose}
+                    aria-current={location.pathname === '/projects' ? 'page' : undefined}
+                    className="rounded-[5px] interactive hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                  >
+                    {tNav('projects')}
+                  </Link>
+                </h3>
+                <Tooltip content={tProjects('nav.newProject')}>
+                  <button
+                    type="button"
+                    onClick={() => setNewProjectOpen(true)}
+                    aria-label={tProjects('nav.newProject')}
+                    className="inline-flex size-6 shrink-0 items-center justify-center rounded-[6px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-bg)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-lg:size-10"
+                  >
+                    <Plus size={12} aria-hidden />
+                  </button>
+                </Tooltip>
+              </div>
+
+              {sortedProjects.length === 0 ? (
+                <p className="px-4 py-2 text-[11.5px] text-[var(--color-fg-subtle)]">
+                  {tProjects('nav.empty')}
+                </p>
+              ) : (
+                <ul>
+                  {sortedProjects.map((project) => {
+                    const accent = accentClasses(project.accent)
+                    const expanded = expandedProjectIds.has(project.id)
+                    const projectConversations = projectConversationsById.get(project.id) ?? []
+                    const childListId = `${sidebarId}-project-${project.id}`
+                    const projectActive = activeProjectId === project.id
+                    return (
+                      <li key={project.id}>
+                        <div
+                          className={cn(
+                            'group/project mx-1 flex min-h-8 items-center rounded-[8px] interactive max-lg:min-h-[var(--tap-min)]',
+                            projectActive ? 'bg-[var(--color-bg)]' : 'hover:bg-[var(--color-bg)]',
+                          )}
+                        >
+                          <button
+                            type="button"
+                            aria-label={project.name}
+                            aria-expanded={expanded}
+                            aria-controls={childListId}
+                            onClick={() => toggleProject(project.id, expanded)}
+                            className="inline-flex size-8 shrink-0 items-center justify-center rounded-[7px] text-[var(--color-fg-faint)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-lg:size-[var(--tap-min)]"
+                          >
+                            <ChevronRight
+                              size={13}
+                              aria-hidden
+                              className={cn('transition-transform duration-150', expanded && 'rotate-90')}
+                            />
+                          </button>
+                          <Link
+                            to={`/projects/${project.id}`}
+                            onClick={onClose}
+                            aria-label={project.name}
+                            aria-current={location.pathname === `/projects/${project.id}` ? 'page' : undefined}
+                            title={project.name}
+                            className="flex min-h-8 min-w-0 flex-1 items-center gap-2 rounded-[7px] py-1.5 pl-0.5 pr-2 text-[13px] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-lg:min-h-[var(--tap-min)]"
+                          >
+                            <span
+                              className={cn(
+                                'inline-flex size-5 shrink-0 items-center justify-center rounded-[6px] text-[11px] font-medium',
+                                accent.chip,
+                              )}
+                              aria-hidden
+                            >
+                              {project.emoji?.trim() || project.name.trim().slice(0, 1).toUpperCase()}
+                            </span>
+                            <span className={cn('min-w-0 flex-1 truncate', projectActive && 'font-medium text-[var(--color-fg)]')}>
+                              {truncate(project.name, 30)}
+                            </span>
+                            {projectConversations.length > 0 ? (
+                              <span className="shrink-0 text-[10.5px] tabular-nums text-[var(--color-fg-subtle)]">
+                                {projectConversations.length}
+                              </span>
+                            ) : null}
+                          </Link>
+                        </div>
+                        {expanded ? (
+                          <ul id={childListId}>
+                            {loadingProjectIds.has(project.id) && projectConversations.length === 0 ? (
+                              <li
+                                role="status"
+                                aria-label={tCommon('common.loading')}
+                                className="ml-11 flex min-h-8 items-center text-[var(--color-fg-subtle)]"
+                              >
+                                <Loader2 size={12} className="animate-spin" aria-hidden />
+                              </li>
+                            ) : null}
+                            {projectConversations.map((conversation) => (
+                              <ConversationItem
+                                key={conversation.id}
+                                conversation={conversation}
+                                active={conversation.id === currentId}
+                                onSelect={onClose}
+                                t={t}
+                                nested
+                              />
+                            ))}
+                            {!loadingProjectIds.has(project.id) &&
+                              loadedProjectIdsRef.current.has(project.id) &&
+                              projectConversations.length === 0 ? (
+                              <li className="ml-11 min-h-8 py-1.5 pr-2 text-[11.5px] text-[var(--color-fg-subtle)]">
+                                {tProjects('detail.chatsEmpty')}
+                              </li>
+                            ) : null}
+                          </ul>
+                        ) : null}
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+            </section>
+
             {starred.length > 0 && (
               <Group label={t('sidebar.starred')} items={starred} currentId={currentId} onSelect={onClose} t={t} />
             )}
@@ -625,11 +792,13 @@ function ConversationItem({
   active,
   onSelect,
   t,
+  nested = false,
 }: {
   conversation: ReturnType<typeof useConversations.getState>['conversations'][number]
   active: boolean
   onSelect?: () => void
   t: TFunction<'chat'>
+  nested?: boolean
 }) {
   const meId = useAuth((s) => s.user?.id)
   const rename = useConversations((s) => s.renameConversation)
@@ -663,19 +832,24 @@ function ConversationItem({
     <li data-conversation-id={conversation.id}>
       <div
         className={cn(
-          'group/conv relative mx-2 my-px rounded-[10px] interactive',
+          'group/conv relative my-px rounded-[10px] interactive',
+          nested ? 'ml-9 mr-1' : 'mx-2',
           active ? 'bg-[var(--color-surface)] shadow-[var(--shadow-xs)]' : 'hover:bg-[var(--color-bg)]',
         )}
       >
         <Link
           to={`/chat/${conversation.id}`}
           onClick={onSelect}
-          className="block px-2.5 py-2 pr-9 max-lg:py-2.5 max-lg:pr-12 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] rounded-[10px]"
+          className={cn(
+            'block rounded-[10px] px-2.5 pr-9 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-lg:pr-12',
+            nested ? 'py-1.5 max-lg:py-2.5' : 'py-2 max-lg:py-2.5',
+          )}
         >
           <span className="flex items-center gap-2">
             <span
               className={cn(
-                'min-w-0 flex-1 truncate text-[13.5px] max-lg:text-[15px] leading-snug',
+                'min-w-0 flex-1 truncate leading-snug max-lg:text-[15px]',
+                nested ? 'text-[12.5px]' : 'text-[13.5px]',
                 active ? 'text-[var(--color-fg)] font-medium' : 'text-[var(--color-fg-muted)]',
               )}
             >

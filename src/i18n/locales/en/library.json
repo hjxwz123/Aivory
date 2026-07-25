@@ -1,0 +1,66 @@
+{
+  "title": "Skills & prompts",
+  "new": "New",
+  "newSkill": "New skill",
+  "kinds": {
+    "skill": "Skill",
+    "prompt": "Prompt"
+  },
+  "tabs": {
+    "mine": "Mine",
+    "catalog": "Catalog"
+  },
+  "search": "Search skills and prompts",
+  "filter": {
+    "label": "Filter by type",
+    "all": "All",
+    "skill": "Skills",
+    "prompt": "Prompts"
+  },
+  "empty": {
+    "search": "No matching items",
+    "mine": "You have no skills or prompts yet",
+    "catalog": "The catalog is empty"
+  },
+  "catalog": {
+    "fromAdmin": "From catalog",
+    "add": "Add",
+    "added": "Added to your library",
+    "addedLabel": "Added"
+  },
+  "editor": {
+    "newSkill": "New skill",
+    "editSkill": "Edit skill",
+    "newPrompt": "New prompt",
+    "editPrompt": "Edit prompt",
+    "importLabel": "Import SKILL.md",
+    "importHint": "Accepts the standard name, description, and instruction body. Attached files are not supported.",
+    "importAction": "Parse and fill",
+    "importInvalid": "SKILL.md must include name, description, and an instruction body.",
+    "imported": "Filled from SKILL.md",
+    "name": "Name",
+    "skillNameHint": "Use lowercase letters, numbers, and hyphens, such as meeting-follow-up.",
+    "promptNamePlaceholder": "Polish weekly update",
+    "when": "When to use",
+    "description": "Description",
+    "instructions": "Instructions",
+    "promptContent": "Prompt content",
+    "missingFields": "Enter a name, description, and content.",
+    "invalidSkillName": "Skill names must be kebab-case and at most 64 characters.",
+    "nameExists": "An item with this name already exists in your library.",
+    "created": "Created",
+    "updated": "Updated"
+  },
+  "remove": {
+    "title": "Delete this item?",
+    "body": "“{{name}}” will be removed from your library.",
+    "done": "Deleted"
+  },
+  "command": {
+    "skills": "Skills",
+    "prompts": "Prompts",
+    "empty": "No matching skills or prompts",
+    "loading": "Loading…",
+    "removeSkill": "Remove skill {{name}}"
+  }
+}

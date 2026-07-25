@@ -119,7 +119,7 @@ export default function SettingsDialog() {
             )}
           >
             <div className="flex items-center justify-between gap-2 px-4 sm:px-5 pt-4 sm:pt-5 pb-2 sm:pb-4">
-              <DialogTitle className="!text-lg sm:!text-xl">{t('settings:title')}</DialogTitle>
+              <DialogTitle>{t('settings:title')}</DialogTitle>
               <DialogPrimitive.Close
                 aria-label={t('common:aria.close', { defaultValue: 'Close' })}
                 className={cn(
@@ -235,7 +235,7 @@ export function SettingsSection({
   return (
     <section className="mb-12">
       <div className="mb-5">
-        <h2 className="tracking-tight text-xl text-[var(--color-fg)]">{title}</h2>
+        <h2 className="text-lg font-medium tracking-normal text-[var(--color-fg)]">{title}</h2>
         {description ? (
           <p className="mt-1.5 text-sm text-[var(--color-fg-muted)]">{description}</p>
         ) : null}

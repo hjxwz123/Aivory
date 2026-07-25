@@ -37,6 +37,7 @@ import {
   BadgeCheck,
   ChevronRight,
   Sparkles,
+  FileText,
 } from 'lucide-react'
 import type { Attachment } from '@/types/chat'
 import {
@@ -49,7 +50,7 @@ import {
 } from '@/lib/tool-mode'
 import { Tooltip } from '@/components/ui/tooltip'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { kbsApi, audioApi, conversationsApi } from '@/api/endpoints'
+import { kbsApi, audioApi, conversationsApi, libraryApi } from '@/api/endpoints'
 import { ModelPicker } from './model-picker'
 import { StylePicker } from './style-picker'
 import { ParamControls } from './param-controls'
@@ -58,17 +59,22 @@ import { useMediaQuery } from '@/hooks/use-media-query'
 import { useModels } from '@/store/models'
 import { useAuth } from '@/store/auth'
 import { useComposerPrefs } from '@/store/composer-prefs'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { api, apiUpload, ApiError } from '@/api/client'
 import { blockReload } from '@/lib/sync-guards'
 import { toastStorageQuotaFull } from '@/lib/quota-toast'
-import type { ApiAttachment, ApiConversationFile, ApiDocument } from '@/api/types'
+import type { ApiAttachment, ApiConversationFile, ApiDocument, ApiUserPrompt, ApiUserSkill } from '@/api/types'
 import { toast } from '@/hooks/use-toast'
 import { cn, uid, modKey } from '@/lib/utils'
 import { fileIconFor } from '@/lib/file-icon'
+import {
+  addSelectedUserSkill,
+  selectedUserSkillIdsForRequest,
+} from '@/lib/composer-commands'
 import { encodeWavFromBlob } from '@/lib/audio'
 import { startVoiceStream, type VoiceStreamController } from '@/lib/audio-stream'
 import { ProgressRing } from '@/components/ui/progress-ring'
+import { SkillIcon } from '@/components/ui/skill-icon'
 import { envNum } from '@/lib/env-config'
 import {
   filterFilesForImageCapability,
@@ -78,6 +84,7 @@ import {
 } from '@/lib/vision-capability'
 import {
   RichComposerEditor,
+  type ComposerCommandQuery,
   type FormulaTarget,
   type RichComposerEditorHandle,
 } from './rich-composer-editor'
@@ -113,6 +120,8 @@ interface ComposerProps {
       webSearch?: boolean
       /** Provider-native tools selected from the current model's allowlist. */
       officialToolNames?: string[]
+      /** User-owned skills explicitly selected for this turn. */
+      selectedUserSkillIds?: string[]
       /** §fast-mode: run this turn in fast mode. */
       fast?: boolean
     },
@@ -339,6 +348,10 @@ interface FeatureItem {
   clearLabel?: string
   toggle: () => void
 }
+
+type ComposerCommandItem =
+  | { kind: 'skill'; id: string; name: string; description: string; skill: ApiUserSkill }
+  | { kind: 'prompt'; id: string; name: string; description: string; prompt: ApiUserPrompt }
 
 function FeatureRow({ item, onAfter }: { item: FeatureItem; onAfter?: () => void }) {
   return (
@@ -706,8 +719,9 @@ export function Composer({
   onKBChange,
   modelPickerInHeader = false,
 }: ComposerProps) {
-  const { t } = useTranslation('chat')
+  const { t } = useTranslation(['chat', 'library'])
   const navigate = useNavigate()
+  const { pathname } = useLocation()
   const mode = useComposerPrefs((s) => s.mode)
   const setMode = useComposerPrefs((s) => s.setMode)
   // §verify: when on, the answer is fact-checked by a second model this turn.
@@ -736,6 +750,23 @@ export function Composer({
   const attachmentScopeRef = useRef(conversationId)
   const [restoringAttachments, setRestoringAttachments] = useState(Boolean(conversationId))
   const [kbList, setKBList] = useState<{ id: string; name: string }[]>([])
+  const [librarySkills, setLibrarySkills] = useState<ApiUserSkill[]>([])
+  const [libraryPrompts, setLibraryPrompts] = useState<ApiUserPrompt[]>([])
+  const [libraryLoading, setLibraryLoading] = useState(true)
+  const [selectedSkills, setSelectedSkills] = useState<ApiUserSkill[]>([])
+  const [commandQuery, setCommandQuery] = useState<ComposerCommandQuery | null>(null)
+  const [commandIndex, setCommandIndex] = useState(0)
+  const [dismissedCommandKey, setDismissedCommandKey] = useState('')
+  const commandMenuRef = useRef<HTMLDivElement>(null)
+  const composerRootRef = useRef<HTMLDivElement>(null)
+  const [commandPosition, setCommandPosition] = useState<{
+    left: number
+    top?: number
+    bottom?: number
+    width: number
+    maxHeight: number
+    placement: 'up' | 'down'
+  } | null>(null)
   // Drag-and-drop file upload. `dragOver` is driven by WINDOW-level listeners
   // (see the effect below) so a file can be dropped ANYWHERE on the page, not
   // only onto the composer surface. dragDepthRef balances nested
@@ -806,6 +837,33 @@ export function Composer({
   // would be ignored via onWheel).
   const chipsRailRef = useRef<HTMLDivElement | null>(null)
   const hasAttachments = attachments.length > 0
+
+  useEffect(() => {
+    let current = true
+    setLibraryLoading(true)
+    void Promise.all([libraryApi.skills(), libraryApi.prompts()])
+      .then(([skills, prompts]) => {
+        if (!current) return
+        setLibrarySkills(skills)
+        setLibraryPrompts(prompts)
+      })
+      .catch(() => {
+        if (!current) return
+        setLibrarySkills([])
+        setLibraryPrompts([])
+      })
+      .finally(() => {
+        if (current) setLibraryLoading(false)
+      })
+    return () => {
+      current = false
+    }
+  }, [])
+
+  useEffect(() => {
+    setSelectedSkills([])
+    setCommandQuery(null)
+  }, [conversationId, draftScope])
   useEffect(() => {
     const el = chipsRailRef.current
     if (!el) return
@@ -950,7 +1008,13 @@ export function Composer({
   // typed text (thread composers keep it in React state only), staged
   // attachments, or an active / still-transcribing voice recording.
   const hasUnsentWork =
-    value.trim().length > 0 || attachments.length > 0 || recording || transcribing || streamConnecting || voiceStarting
+    value.trim().length > 0 ||
+    attachments.length > 0 ||
+    selectedSkills.length > 0 ||
+    recording ||
+    transcribing ||
+    streamConnecting ||
+    voiceStarting
   useEffect(() => {
     if (!hasUnsentWork) return
     return blockReload()
@@ -1331,6 +1395,7 @@ export function Composer({
         toolMode: effectiveToolMode,
         webSearch: effectiveWebSearch ? true : undefined,
         officialToolNames: effectiveOfficialToolNames,
+        selectedUserSkillIds: selectedUserSkillIdsForRequest(selectedSkills),
         fast: effectiveFast ? true : undefined,
       })
       updateValue('')
@@ -1346,6 +1411,7 @@ export function Composer({
         if (a.previewUrl && a.previewUrl.startsWith('blob:')) URL.revokeObjectURL(a.previewUrl)
       })
       setAttachments([])
+      setSelectedSkills([])
     } finally {
       submittingRef.current = false
     }
@@ -1912,7 +1978,7 @@ export function Composer({
               className={cn(
                 'inline-flex size-4 items-center justify-center rounded border',
                 checked
-                  ? 'border-[var(--color-tool-selection)] bg-[var(--color-tool-selection)] text-[var(--color-accent-fg)]'
+                  ? 'border-[var(--color-tool-selection)] bg-[var(--color-tool-selection)] text-[var(--color-tool-selection-fg)]'
                   : 'border-[var(--color-border-strong)]',
               )}
             >
@@ -1923,6 +1989,136 @@ export function Composer({
         )
       })
     )
+
+  const commandKey = commandQuery
+    ? `${commandQuery.from}:${commandQuery.to}:${commandQuery.query}`
+    : ''
+  const commandOpen = Boolean(commandQuery && commandKey !== dismissedCommandKey)
+  const commandItems = useMemo<ComposerCommandItem[]>(() => {
+    if (!commandQuery) return []
+    const query = commandQuery.query.trim().toLocaleLowerCase()
+    const matches = (name: string, description: string) =>
+      !query || name.toLocaleLowerCase().includes(query) || description.toLocaleLowerCase().includes(query)
+    const skillItems: ComposerCommandItem[] = librarySkills
+      .filter((skill) => matches(skill.name, skill.description))
+      .map((skill) => ({
+        kind: 'skill' as const,
+        id: skill.id,
+        name: skill.name,
+        description: skill.description,
+        skill,
+      }))
+    const promptItems: ComposerCommandItem[] = libraryPrompts
+      .filter((prompt) => matches(prompt.name, prompt.description))
+      .map((prompt) => ({
+        kind: 'prompt' as const,
+        id: prompt.id,
+        name: prompt.name,
+        description: prompt.description,
+        prompt,
+      }))
+    const limit = 10
+    if (skillItems.length > 0 && promptItems.length > 0) {
+      const perKind = Math.floor(limit / 2)
+      return [...skillItems.slice(0, perKind), ...promptItems.slice(0, perKind)]
+    }
+    return [...skillItems, ...promptItems].slice(0, limit)
+  }, [commandQuery, libraryPrompts, librarySkills])
+
+  useEffect(() => {
+    setCommandIndex(0)
+  }, [commandKey])
+
+  useEffect(() => {
+    if (!commandOpen) {
+      setCommandPosition(null)
+      return
+    }
+    const opensDownward = pathname === '/' || pathname === '/chat'
+    const update = () => {
+      const root = composerRootRef.current
+      if (!root) return
+      const rect = root.getBoundingClientRect()
+      const gutter = 12
+      const gap = 8
+      const viewportWidth = document.documentElement.clientWidth || window.innerWidth
+      const viewportHeight = document.documentElement.clientHeight || window.innerHeight
+      const width = Math.min(rect.width, Math.max(0, viewportWidth - gutter * 2))
+      const maxLeft = Math.max(gutter, viewportWidth - width - gutter)
+      const left = Math.min(Math.max(rect.left, gutter), maxLeft)
+      if (opensDownward) {
+        const top = rect.bottom + gap
+        setCommandPosition({
+          left,
+          top,
+          width,
+          maxHeight: Math.min(280, Math.max(0, viewportHeight - top - gutter)),
+          placement: 'down',
+        })
+        return
+      }
+      setCommandPosition({
+        left,
+        bottom: Math.max(gutter, viewportHeight - rect.top + gap),
+        width,
+        maxHeight: Math.min(280, Math.max(0, rect.top - gutter - gap)),
+        placement: 'up',
+      })
+    }
+    update()
+    window.addEventListener('resize', update)
+    window.addEventListener('scroll', update, true)
+    return () => {
+      window.removeEventListener('resize', update)
+      window.removeEventListener('scroll', update, true)
+    }
+  }, [commandOpen, pathname])
+
+  useEffect(() => {
+    const active = commandMenuRef.current?.querySelector<HTMLElement>(`[data-command-index="${commandIndex}"]`)
+    active?.scrollIntoView({ block: 'nearest' })
+  }, [commandIndex])
+
+  function chooseCommand(item: ComposerCommandItem) {
+    const query = commandQuery
+    if (!query) return
+    if (item.kind === 'skill') {
+      ref.current?.replaceRange(query.from, query.to, '')
+      setSelectedSkills((current) => addSelectedUserSkill(current, item.skill))
+    } else {
+      ref.current?.replaceRange(query.from, query.to, item.prompt.content)
+    }
+    setDismissedCommandKey(commandKey)
+    setCommandQuery(null)
+  }
+
+  function handleCommandKeyDown(event: KeyboardEvent): boolean {
+    if (!commandOpen) return false
+    if (event.key === 'ArrowDown') {
+      event.preventDefault()
+      setCommandIndex((current) => (commandItems.length > 0 ? (current + 1) % commandItems.length : 0))
+      return true
+    }
+    if (event.key === 'ArrowUp') {
+      event.preventDefault()
+      setCommandIndex((current) =>
+        commandItems.length > 0 ? (current - 1 + commandItems.length) % commandItems.length : 0,
+      )
+      return true
+    }
+    if (event.key === 'Enter' || event.key === 'Tab') {
+      event.preventDefault()
+      const item = commandItems[commandIndex]
+      if (item) chooseCommand(item)
+      return true
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      setDismissedCommandKey(commandKey)
+      return true
+    }
+    return false
+  }
 
   // One primary action owns the right edge, matching the familiar ChatGPT
   // composer pattern: stop while generating, voice while the draft is empty,
@@ -2040,6 +2236,7 @@ export function Composer({
 
   return (
     <div
+      ref={composerRootRef}
       className={cn(
         'group/composer relative min-w-0 w-full max-w-full',
         'rounded-[22px] max-sm:rounded-[24px] border-0 bg-[var(--color-surface)]',
@@ -2069,6 +2266,112 @@ export function Composer({
           </div>,
           document.body,
         )}
+
+      {commandOpen && commandPosition
+        ? createPortal(
+            <div
+              ref={commandMenuRef}
+              role="listbox"
+              aria-label={t('library:title')}
+              data-command-placement={commandPosition.placement}
+              className={cn(
+                'fixed z-[var(--z-popover)] overflow-y-auto overscroll-contain rounded-[22px] bg-[var(--color-surface-raised)] p-1 shadow-[var(--shadow-md)] scrollbar-thin max-sm:rounded-[24px]',
+                commandPosition.placement === 'down'
+                  ? 'animate-[slide-down_160ms_var(--ease-out)]'
+                  : 'animate-[slide-up_160ms_var(--ease-out)]',
+              )}
+              style={{
+                left: commandPosition.left,
+                top: commandPosition.top,
+                bottom: commandPosition.bottom,
+                width: commandPosition.width,
+                maxHeight: commandPosition.maxHeight,
+              }}
+            >
+              {libraryLoading ? (
+                <div className="flex items-center gap-2 px-2.5 py-2 text-[13px] text-[var(--color-fg-muted)]">
+                  <Loader2 size={14} className="animate-spin" aria-hidden />
+                  {t('library:command.loading')}
+                </div>
+              ) : commandItems.length === 0 ? (
+                <p className="px-2.5 py-2 text-[13px] text-[var(--color-fg-muted)]">
+                  {t('library:command.empty')}
+                </p>
+              ) : (
+                (['skill', 'prompt'] as const).map((kind) => {
+                  const items = commandItems
+                    .map((item, index) => ({ item, index }))
+                    .filter(({ item }) => item.kind === kind)
+                  if (items.length === 0) return null
+                  const labelId = `composer-command-${kind}`
+                  return (
+                    <div key={kind} role="group" aria-labelledby={labelId} className="mt-0.5 first:mt-0">
+                      <p
+                        id={labelId}
+                        className="px-2.5 pb-0.5 pt-1 text-[10.5px] font-medium tracking-normal text-[var(--color-fg-subtle)]"
+                      >
+                        {t(`library:command.${kind === 'skill' ? 'skills' : 'prompts'}`)}
+                      </p>
+                      {items.map(({ item, index }) => {
+                        const active = index === commandIndex
+                        return (
+                          <button
+                            key={`${item.kind}:${item.id}`}
+                            type="button"
+                            role="option"
+                            aria-selected={active}
+                            data-command-index={index}
+                            onMouseDown={(event) => event.preventDefault()}
+                            onMouseEnter={() => setCommandIndex(index)}
+                            onClick={() => chooseCommand(item)}
+                            className={cn(
+                              'flex min-h-9 w-full min-w-0 items-center gap-2 rounded-[10px] px-2.5 py-1.5 text-left interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-sm:min-h-10',
+                              active ? 'bg-[var(--color-bg-muted)]' : 'hover:bg-[var(--color-bg-muted)]',
+                            )}
+                          >
+                            <span
+                              className={cn(
+                                'inline-flex size-5 shrink-0 items-center justify-center',
+                                item.kind === 'skill'
+                                  ? 'text-[var(--color-accent)]'
+                                  : 'text-[var(--color-secondary)]',
+                              )}
+                              data-command-icon
+                            >
+                              {item.kind === 'skill' ? (
+                                <SkillIcon name={item.skill.icon} size={16} aria-hidden />
+                              ) : (
+                                <FileText size={16} aria-hidden />
+                              )}
+                            </span>
+                            <span className="flex min-w-0 flex-1 items-baseline gap-2 overflow-hidden">
+                              <span
+                                className="max-w-[55%] shrink-0 truncate text-[13px] font-medium text-[var(--color-fg)]"
+                                data-command-name
+                              >
+                                {item.name}
+                              </span>
+                              {item.description ? (
+                                <span
+                                  className="min-w-0 flex-1 truncate text-[11.5px] text-[var(--color-fg-subtle)]"
+                                  data-command-description
+                                >
+                                  {item.description}
+                                </span>
+                              ) : null}
+                            </span>
+                            {active ? <Check size={14} className="shrink-0 text-[var(--color-accent)]" aria-hidden /> : null}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )
+                })
+              )}
+            </div>,
+            document.body,
+          )
+        : null}
 
       {/* Attachments preview. The armed-mode (research) state is shown by the
           toolbar button below, so we don't repeat a chip above the input.
@@ -2221,6 +2524,28 @@ export function Composer({
         </div>
       )}
 
+      {selectedSkills.length > 0 ? (
+        <div className="flex items-center gap-1.5 overflow-x-auto px-3 pb-1 pt-2.5 scrollbar-none">
+          {selectedSkills.map((skill) => (
+            <span
+              key={skill.id}
+              className="inline-flex h-7 max-w-[15rem] shrink-0 items-center gap-1.5 px-0.5 text-[12px] font-medium text-[var(--color-accent)]"
+            >
+              <SkillIcon name={skill.icon} size={13} className="shrink-0" aria-hidden />
+              <span className="truncate">{skill.name}</span>
+              <button
+                type="button"
+                onClick={() => setSelectedSkills((current) => current.filter((item) => item.id !== skill.id))}
+                aria-label={t('library:command.removeSkill', { name: skill.name })}
+                className="inline-flex size-6 shrink-0 items-center justify-center rounded-full text-[var(--color-fg-faint)] interactive hover:text-[var(--color-fg-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-sm:size-8"
+              >
+                <X size={12} aria-hidden />
+              </button>
+            </span>
+          ))}
+        </div>
+      ) : null}
+
       {/* Plain text and atomic KaTeX nodes share one ProseMirror surface. The
           canonical value remains a string so drafts/API/provider behavior is
           unchanged, while users never have to edit raw LaTeX in the composer. */}
@@ -2230,6 +2555,8 @@ export function Composer({
         onChange={updateValue}
         onSubmit={handleSubmit}
         onFormulaClick={openExistingFormula}
+        onCommandQueryChange={setCommandQuery}
+        onCommandKeyDown={handleCommandKeyDown}
         onPasteFiles={(files) => {
           const dt = new DataTransfer()
           files.forEach((file) => dt.items.add(file))
@@ -2302,7 +2629,7 @@ export function Composer({
                 className={cn(
                   'relative inline-flex shrink-0 items-center justify-center size-11 rounded-full interactive',
                   hasActiveTool
-                    ? 'bg-[var(--color-tool-selection)] text-[var(--color-accent-fg)] ring-4 ring-[var(--color-tool-selection-soft)] hover:bg-[var(--color-tool-selection-hover)]'
+                    ? 'bg-[var(--color-tool-selection)] text-[var(--color-tool-selection-fg)] ring-4 ring-[var(--color-tool-selection-soft)] hover:bg-[var(--color-tool-selection-hover)]'
                     : 'bg-[var(--color-tool-idle)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]',
                   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
                 )}
@@ -2436,7 +2763,7 @@ export function Composer({
                       className={cn(
                         'relative mx-1 inline-flex size-8 items-center justify-center rounded-[8px] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
                         anyFeatureActive
-                          ? 'bg-[var(--color-tool-selection)] text-[var(--color-accent-fg)] ring-4 ring-[var(--color-tool-selection-soft)] hover:bg-[var(--color-tool-selection-hover)]'
+                          ? 'bg-[var(--color-tool-selection)] text-[var(--color-tool-selection-fg)] ring-4 ring-[var(--color-tool-selection-soft)] hover:bg-[var(--color-tool-selection-hover)]'
                           : 'bg-[var(--color-tool-idle)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]',
                       )}
                     >

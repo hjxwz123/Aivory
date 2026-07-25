@@ -91,6 +91,10 @@ type postMessageReq struct {
 	// OfficialToolNames selects a subset of the resolved model's admin-defined
 	// official tools. It is honored only with tool_mode="official".
 	OfficialToolNames []string `json:"official_tool_names"`
+	// SelectedUserSkillIDs applies up to five private, user-owned Agent Skills to
+	// this turn. The handler resolves ownership before opening SSE; the
+	// orchestrator re-validates and persists the normalized ids.
+	SelectedUserSkillIDs []string `json:"selected_user_skill_ids"`
 	// WebSearch forces a server-side non-tool web search and is only meaningful
 	// when tools are explicitly disabled.
 	WebSearch bool `json:"web_search"`
@@ -168,6 +172,16 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errors.New("text required"))
 		return
 	}
+	_, normalizedSkillIDs, err := store.ResolveUserSkillSelection(r.Context(), d.DB, u.ID, req.SelectedUserSkillIDs, true)
+	if err != nil {
+		if errors.Is(err, store.ErrInvalidUserSkillSelection) {
+			writeError(w, http.StatusBadRequest, err)
+		} else {
+			writeError(w, http.StatusInternalServerError, err)
+		}
+		return
+	}
+	req.SelectedUserSkillIDs = normalizedSkillIDs
 	// A branch edit names the exact persisted message it forks from. Reject a
 	// stale optimistic id (or a message from another conversation) before opening
 	// the SSE response, so the client receives a clear conflict instead of a 200
@@ -317,22 +331,23 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, err = d.Orchestrator.Run(ctx, llm.RunRequest{
-		UserID:            u.ID,
-		ConversationID:    id,
-		ModelID:           req.ModelID,
-		UserText:          req.Text,
-		Attachments:       req.Attachments,
-		ParentID:          req.ParentID,
-		Branch:            req.Branch,
-		Mode:              req.Mode,
-		Verify:            req.Verify,
-		ToolMode:          toolMode,
-		OfficialToolNames: req.OfficialToolNames,
-		ForceWebSearch:    req.WebSearch,
-		Fast:              req.Fast,
-		ParamOverrides:    req.ParamOverrides,
-		ImageStyleID:      req.ImageStyleID,
-		Locale:            req.Locale,
+		UserID:               u.ID,
+		ConversationID:       id,
+		ModelID:              req.ModelID,
+		UserText:             req.Text,
+		Attachments:          req.Attachments,
+		ParentID:             req.ParentID,
+		Branch:               req.Branch,
+		Mode:                 req.Mode,
+		Verify:               req.Verify,
+		ToolMode:             toolMode,
+		OfficialToolNames:    req.OfficialToolNames,
+		SelectedUserSkillIDs: req.SelectedUserSkillIDs,
+		ForceWebSearch:       req.WebSearch,
+		Fast:                 req.Fast,
+		ParamOverrides:       req.ParamOverrides,
+		ImageStyleID:         req.ImageStyleID,
+		Locale:               req.Locale,
 	}, sendEvent)
 	if err != nil && !terminalSent {
 		parentID := req.ParentID
