@@ -46,7 +46,7 @@ export function Toaster() {
             className={cn(
               'group/toast pointer-events-auto',
               'flex items-start gap-3 w-[min(360px,calc(100vw-2rem))]',
-              'rounded-[14px] bg-[var(--color-surface-raised)] border border-[var(--color-border)]',
+              'rounded-popup bg-[var(--color-surface-raised)] border border-[var(--color-border)]',
               'p-3.5 shadow-[var(--shadow-lg)]',
               'data-[state=open]:animate-[slide-up_var(--duration-base)_var(--ease-out)]',
               'data-[state=closed]:animate-[fade-out_var(--duration-fast)_var(--ease-in)]',

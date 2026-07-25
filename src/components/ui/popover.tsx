@@ -18,7 +18,7 @@ export const PopoverContent = forwardRef<
         sideOffset={sideOffset}
         className={cn(
           'z-[70] min-w-[260px] outline-none',
-          'rounded-[12px] bg-[var(--color-surface-raised)] border border-[var(--color-border)]',
+          'rounded-popup bg-[var(--color-surface-raised)] border border-[var(--color-border)]',
           'shadow-[var(--shadow-popover)] p-2',
           'data-[state=open]:animate-[slide-down_180ms_var(--ease-out)]',
           'data-[state=closed]:animate-[fade-out_120ms_var(--ease-in)]',

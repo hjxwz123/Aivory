@@ -11,7 +11,7 @@ export const Command = forwardRef<
     <CommandPrimitive
       ref={ref}
       className={cn(
-        'flex flex-col w-full rounded-[14px] bg-[var(--color-surface-raised)] text-[var(--color-fg)]',
+        'flex flex-col w-full rounded-popup bg-[var(--color-surface-raised)] text-[var(--color-fg)]',
         'overflow-hidden',
         className,
       )}

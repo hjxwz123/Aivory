@@ -142,7 +142,7 @@ export function ShareConversationDialog({
         size="sm"
         showClose={!busyAction}
         aria-busy={busyAction ? true : undefined}
-        className="rounded-[22px] border-0 shadow-[var(--shadow-lg)] max-sm:rounded-[24px] sm:max-w-[27rem]"
+        className="border-0 shadow-[var(--shadow-lg)] sm:max-w-[27rem]"
       >
         <DialogHeader className="px-5 pb-3 pr-12 pt-5 sm:px-6 sm:pb-3 sm:pr-12 sm:pt-6">
           <DialogTitle>{t('chat:share.title')}</DialogTitle>

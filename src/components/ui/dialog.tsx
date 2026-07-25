@@ -59,7 +59,7 @@ export const DialogContent = forwardRef<
           // Never exceed the viewport: cap height and let the body scroll while
           // the header/footer stay pinned (see DialogBody/DialogHeader/Footer).
           'flex flex-col max-h-[calc(100dvh-2rem)]',
-          'rounded-[18px] bg-[var(--color-surface)] border border-[var(--color-border)]',
+          'rounded-popup bg-[var(--color-surface)] border border-[var(--color-border)]',
           'shadow-[var(--shadow-xl)]',
           'data-[state=open]:animate-[pop-in_220ms_var(--ease-out)]',
           'data-[state=closed]:animate-[fade-out_140ms_var(--ease-in)]',

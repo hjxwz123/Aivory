@@ -153,7 +153,7 @@ export function CommandMenu() {
           className={cn(
             'fixed z-[70] bg-[var(--color-surface-raised)] shadow-[var(--shadow-xl)] overflow-hidden focus:outline-none',
             // Desktop: a centered floating palette.
-            'left-1/2 top-[18%] -translate-x-1/2 w-[min(92vw,560px)] rounded-[18px] border border-[var(--color-border)]',
+            'left-1/2 top-[18%] -translate-x-1/2 w-[min(92vw,560px)] rounded-popup border border-[var(--color-border)]',
             'data-[state=open]:animate-[pop-in_220ms_var(--ease-out)] data-[state=closed]:animate-[fade-out_140ms_var(--ease-in)]',
             // Phone: a full-screen search surface (with safe-area insets).
             'max-sm:inset-0 max-sm:left-0 max-sm:top-0 max-sm:w-full max-sm:translate-x-0 max-sm:rounded-none max-sm:border-0',
@@ -161,7 +161,7 @@ export function CommandMenu() {
           )}
         >
           <DialogPrimitive.Title className="sr-only">{t('chat:commandMenu.title')}</DialogPrimitive.Title>
-          <Command className="max-sm:h-full">
+          <Command className="max-sm:h-full max-sm:rounded-none">
             <CommandInput
               placeholder={t('chat:commandMenu.placeholder')}
               autoFocus

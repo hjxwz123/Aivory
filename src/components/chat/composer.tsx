@@ -2241,7 +2241,7 @@ export function Composer({
       ref={composerRootRef}
       className={cn(
         'group/composer relative min-w-0 w-full max-w-full',
-        'rounded-[22px] max-sm:rounded-[24px] border-0 bg-[var(--color-surface)]',
+        'rounded-popup border-0 bg-[var(--color-surface)]',
         'shadow-[var(--shadow-sm)] transition-[box-shadow] duration-200',
         dragOver
           ? 'ring-2 ring-[var(--color-tool-selection)] shadow-[var(--shadow-md)]'
@@ -2257,7 +2257,7 @@ export function Composer({
       {dragOver &&
         createPortal(
           <div className="pointer-events-none fixed inset-0 z-[var(--z-max)] grid place-items-center bg-[var(--color-overlay)] p-6 backdrop-blur-[2px] animate-[fade-in_var(--duration-base)_var(--ease-out)]">
-            <div className="flex flex-col items-center gap-3 rounded-[18px] border-2 border-dashed border-[var(--color-accent)] bg-[var(--color-surface)]/95 px-8 py-7 shadow-[var(--shadow-lg)]">
+            <div className="flex flex-col items-center gap-3 rounded-popup border-2 border-dashed border-[var(--color-accent)] bg-[var(--color-surface)]/95 px-8 py-7 shadow-[var(--shadow-lg)]">
               <span className="grid size-12 place-items-center rounded-full bg-[var(--color-accent-soft)] text-[var(--color-accent)]">
                 <ImageIcon size={22} aria-hidden />
               </span>
@@ -2277,7 +2277,7 @@ export function Composer({
               aria-label={t('library:title')}
               data-command-placement={commandPosition.placement}
               className={cn(
-                'fixed z-[var(--z-popover)] overflow-y-auto overscroll-contain rounded-[22px] bg-[var(--color-surface-raised)] p-1 shadow-[var(--shadow-md)] scrollbar-thin max-sm:rounded-[24px]',
+                'fixed z-[var(--z-popover)] overflow-y-auto overscroll-contain rounded-popup bg-[var(--color-surface-raised)] p-1 shadow-[var(--shadow-md)] scrollbar-thin',
                 commandPosition.placement === 'down'
                   ? 'animate-[slide-down_160ms_var(--ease-out)]'
                   : 'animate-[slide-up_160ms_var(--ease-out)]',
@@ -2652,7 +2652,7 @@ export function Composer({
               align="start"
               sideOffset={10}
               collisionPadding={12}
-              className="min-w-0 overflow-y-auto overscroll-contain rounded-[16px] border-0 p-1.5 shadow-[var(--shadow-lg)] scrollbar-thin"
+              className="min-w-0 overflow-y-auto overscroll-contain p-1.5 scrollbar-thin"
               style={{
                 width: 'min(20rem, calc(100vw - var(--safe-left) - var(--safe-right) - 1.5rem))',
                 maxWidth: 'calc(100vw - var(--safe-left) - var(--safe-right) - 1.5rem)',
@@ -2785,7 +2785,7 @@ export function Composer({
                   align="start"
                   side="top"
                   sideOffset={10}
-                  className="max-h-[min(70vh,var(--radix-popover-content-available-height))] w-72 overflow-y-auto overscroll-contain rounded-[16px] border-0 p-1.5 shadow-[var(--shadow-lg)] scrollbar-thin"
+                  className="max-h-[min(70vh,var(--radix-popover-content-available-height))] w-72 overflow-y-auto overscroll-contain p-1.5 scrollbar-thin"
                 >
                   {featureList()}
                 </PopoverContent>

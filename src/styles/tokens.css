@@ -186,6 +186,8 @@
   --radius-xl: 1rem;
   --radius-2xl: 1.25rem;
   --radius-3xl: 1.75rem;
+  /* One shell radius for the composer, popup menus, dialogs, and notices. */
+  --radius-popup: 1.375rem;
   --radius-full: 9999px;
 
   /* ---------- SHADOWS — calm, layered ---------------------------------- */

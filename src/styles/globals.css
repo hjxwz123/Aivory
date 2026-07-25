@@ -90,6 +90,7 @@
   --radius-xl: var(--radius-xl);
   --radius-2xl: var(--radius-2xl);
   --radius-3xl: var(--radius-3xl);
+  --radius-popup: var(--radius-popup);
 
   --shadow-xs: var(--shadow-xs);
   --shadow-sm: var(--shadow-sm);
