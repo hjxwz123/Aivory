@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import {
   AlertCircle,
   AlertTriangle,
+  Check,
   Copy,
   Link2,
   Trash2,
@@ -22,6 +23,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Tooltip } from '@/components/ui/tooltip'
 
 type LoadState = 'idle' | 'loading' | 'ready' | 'error'
 type BusyAction = 'share' | 'revoke' | null
@@ -48,7 +50,7 @@ export function ShareConversationDialog({
   const [busyAction, setBusyAction] = useState<BusyAction>(null)
   const [confirmRevoke, setConfirmRevoke] = useState(false)
   const requestVersion = useRef(0)
-  const { copy } = useCopy()
+  const { copied, copy } = useCopy()
 
   const shareUrl = publicShareUrl(share?.id)
 
@@ -83,22 +85,38 @@ export function ShareConversationDialog({
     onOpenChange(next)
   }
 
-  async function saveShare(updateAndCopy: boolean) {
+  async function saveShare(mode: 'create' | 'update') {
     setBusyAction('share')
     try {
       const nextShare = await conversationsApi.createShare(conversationId)
       setShare(nextShare)
       setLoadState('ready')
-      if (updateAndCopy) {
-        const copied = await copy(publicShareUrl(nextShare.id))
-        if (copied) toast.success(t('chat:share.updatedAndCopied'))
-        else toast.error(t('chat:share.updatedCopyFailed'))
+      const copied = await copy(publicShareUrl(nextShare.id))
+      if (copied) {
+        toast.success(
+          mode === 'create'
+            ? t('chat:share.createdAndCopied')
+            : t('chat:share.updatedAndCopied'),
+        )
+      } else {
+        toast.error(
+          mode === 'create'
+            ? t('chat:share.createdCopyFailed')
+            : t('chat:share.updatedCopyFailed'),
+        )
       }
     } catch (error) {
       toast.error(error instanceof ApiError ? error.message : t('chat:share.failed'))
     } finally {
       setBusyAction(null)
     }
+  }
+
+  async function copyShareLink() {
+    if (!shareUrl) return
+    const copied = await copy(shareUrl)
+    if (copied) toast.success(t('chat:share.linkCopied'))
+    else toast.error(t('chat:share.copyFailed'))
   }
 
   async function revokeShare() {
@@ -167,7 +185,7 @@ export function ShareConversationDialog({
                 </div>
               </div>
             ) : share ? (
-              <div className="flex min-w-0 items-start gap-2.5 rounded-[12px] bg-[var(--color-bg-muted)] px-3 py-2.5">
+              <div className="flex min-w-0 items-center gap-2 rounded-[12px] bg-[var(--color-bg-muted)] py-1.5 pl-3 pr-1.5">
                 <Link2 size={15} className="mt-0.5 shrink-0 text-[var(--color-fg-subtle)]" aria-hidden />
                 <input
                   id="share-conversation-link"
@@ -181,6 +199,17 @@ export function ShareConversationDialog({
                   onFocus={(event) => event.currentTarget.select()}
                   className="h-5 min-w-0 flex-1 cursor-text bg-transparent p-0 font-mono text-[11.5px] leading-5 text-[var(--color-fg-muted)] outline-none selection:bg-[var(--color-accent-soft)] selection:text-[var(--color-fg)]"
                 />
+                <Tooltip content={copied ? t('common:actions.copied') : t('chat:share.copyCta')}>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-8 shrink-0 rounded-[8px]"
+                    aria-label={t('chat:share.copyCta')}
+                    onClick={() => void copyShareLink()}
+                  >
+                    {copied ? <Check size={15} aria-hidden /> : <Copy size={15} aria-hidden />}
+                  </Button>
+                </Tooltip>
               </div>
             ) : null}
           </DialogBody>
@@ -217,7 +246,7 @@ export function ShareConversationDialog({
             <Button
               loading={busyAction === 'share'}
               leadingIcon={<Link2 size={15} aria-hidden />}
-              onClick={() => void saveShare(false)}
+              onClick={() => void saveShare('create')}
             >
               {busyAction === 'share'
                 ? t('chat:share.creatingLink')
@@ -239,7 +268,7 @@ export function ShareConversationDialog({
               className="min-w-0 whitespace-normal px-2 leading-tight"
               loading={busyAction === 'share'}
               leadingIcon={<Copy size={15} aria-hidden />}
-              onClick={() => void saveShare(true)}
+              onClick={() => void saveShare('update')}
             >
               {busyAction === 'share'
                 ? t('chat:share.updatingAndCopying')

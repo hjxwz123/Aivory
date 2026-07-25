@@ -207,12 +207,18 @@ export function MessageList({ conversation, scrollToMessageId, jumpKey }: Messag
   )
 
   const handleSaveEdit = useCallback(
-    (id: string, newContent: string) => {
-      void editMessageInPlace(convId, id, newContent).then(() => {
+    async (id: string, newContent: string) => {
+      await editMessageInPlace(convId, id, newContent)
+      const edited = useConversations.getState().conversations
+        .find((c) => c.id === convId)
+        ?.messages.find((m) => m.id === id)
+      // A saved user-question edit keeps its existing behavior: regenerate the
+      // answer below it. Editing an assistant reply is a plain overwrite.
+      if (edited?.role === 'user') {
         const msgs = useConversations.getState().conversations.find((c) => c.id === convId)?.messages
         const child = msgs?.find((m) => m.parentId === id && m.role === 'assistant')
         if (child) void regenerate(convId, child.id, modelId)
-      })
+      }
     },
     [convId, modelId, editMessageInPlace, regenerate],
   )
