@@ -1,0 +1,66 @@
+{
+  "title": "Compétences et invites",
+  "new": "Nouveau",
+  "newSkill": "Nouvelle compétence",
+  "kinds": {
+    "skill": "Compétence",
+    "prompt": "Invite"
+  },
+  "tabs": {
+    "mine": "Ma bibliothèque",
+    "catalog": "Catalogue"
+  },
+  "search": "Rechercher des compétences et invites",
+  "filter": {
+    "label": "Filtrer par type",
+    "all": "Tout",
+    "skill": "Compétences",
+    "prompt": "Invites"
+  },
+  "empty": {
+    "search": "Aucun élément correspondant",
+    "mine": "Vous n’avez encore aucune compétence ni invite",
+    "catalog": "Le catalogue est vide"
+  },
+  "catalog": {
+    "fromAdmin": "Depuis le catalogue",
+    "add": "Ajouter",
+    "added": "Ajouté à votre bibliothèque",
+    "addedLabel": "Ajouté"
+  },
+  "editor": {
+    "newSkill": "Nouvelle compétence",
+    "editSkill": "Modifier la compétence",
+    "newPrompt": "Nouvelle invite",
+    "editPrompt": "Modifier l’invite",
+    "importLabel": "Importer un SKILL.md",
+    "importHint": "Accepte le format standard avec name, description et corps d’instructions. Les fichiers joints ne sont pas pris en charge.",
+    "importAction": "Analyser et remplir",
+    "importInvalid": "Le SKILL.md doit contenir name, description et un corps d’instructions.",
+    "imported": "Champs remplis depuis le SKILL.md",
+    "name": "Nom",
+    "skillNameHint": "Utilisez des minuscules, des chiffres et des tirets, par exemple meeting-follow-up.",
+    "promptNamePlaceholder": "Améliorer le compte rendu",
+    "when": "Quand l’utiliser",
+    "description": "Description",
+    "instructions": "Instructions complètes",
+    "promptContent": "Contenu de l’invite",
+    "missingFields": "Renseignez le nom, la description et le contenu.",
+    "invalidSkillName": "Le nom doit être en kebab-case et contenir au plus 64 caractères.",
+    "nameExists": "Un élément portant ce nom existe déjà dans votre bibliothèque.",
+    "created": "Créé",
+    "updated": "Mis à jour"
+  },
+  "remove": {
+    "title": "Supprimer cet élément ?",
+    "body": "« {{name}} » sera retiré de votre bibliothèque.",
+    "done": "Supprimé"
+  },
+  "command": {
+    "skills": "Compétences",
+    "prompts": "Invites",
+    "empty": "Aucune compétence ou invite correspondante",
+    "loading": "Chargement…",
+    "removeSkill": "Retirer la compétence {{name}}"
+  }
+}

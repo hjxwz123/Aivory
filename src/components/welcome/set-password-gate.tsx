@@ -74,7 +74,7 @@ export function SetPasswordGate() {
             <span className="inline-flex items-center justify-center size-11 rounded-[12px] bg-[var(--color-bg-muted)] border border-[var(--color-border)] text-[var(--color-secondary)]">
               <ShieldCheck size={20} aria-hidden />
             </span>
-            <DialogTitle className="mt-5 font-serif text-2xl tracking-tight text-[var(--color-fg)]">
+            <DialogTitle className="mt-5">
               {t('welcome:setPassword.title')}
             </DialogTitle>
             <DialogDescription className="mt-2 text-sm leading-relaxed text-[var(--color-fg-muted)]">

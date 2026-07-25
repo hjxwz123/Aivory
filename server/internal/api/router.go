@@ -227,6 +227,19 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("GET", "/api/image-models", requireAuth(d, listImageModelsHandler))
 	mux.handle("GET", "/api/embedding-models", requireAuth(d, listEmbeddingModelsHandler))
 	mux.handle("GET", "/api/skills", requireAuth(d, listSkillsPublicHandler))
+	// User skill/prompt library. The catalog exposes display metadata only;
+	// copying an item creates an independent user-owned row.
+	mux.handle("GET", "/api/library/catalog", requireAuth(d, listLibraryCatalogHandler))
+	mux.handle("GET", "/api/me/skills", requireAuth(d, listMySkillsHandler))
+	mux.handle("POST", "/api/me/skills", requireAuth(d, createMySkillHandler))
+	mux.handle("POST", "/api/me/skills/from-catalog", requireAuth(d, copySkillFromCatalogHandler))
+	mux.handle("PATCH", "/api/me/skills/:id", requireAuth(d, updateMySkillHandler))
+	mux.handle("DELETE", "/api/me/skills/:id", requireAuth(d, deleteMySkillHandler))
+	mux.handle("GET", "/api/me/prompts", requireAuth(d, listMyPromptsHandler))
+	mux.handle("POST", "/api/me/prompts", requireAuth(d, createMyPromptHandler))
+	mux.handle("POST", "/api/me/prompts/from-catalog", requireAuth(d, copyPromptFromCatalogHandler))
+	mux.handle("PATCH", "/api/me/prompts/:id", requireAuth(d, updateMyPromptHandler))
+	mux.handle("DELETE", "/api/me/prompts/:id", requireAuth(d, deleteMyPromptHandler))
 	mux.handle("GET", "/api/model-tags", requireAuth(d, listModelTagsPublic))
 	// §4.20 Image styles — enabled catalog for the composer style picker (hidden
 	// prompt stripped). Image generation itself reuses the chat message endpoint.
@@ -354,6 +367,10 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("POST", "/api/admin/skills/assets", requireAdmin(d, uploadSkillAssetAdmin))
 	mux.handle("PATCH", "/api/admin/skills/:id", requireAdmin(d, updateSkillAdmin))
 	mux.handle("DELETE", "/api/admin/skills/:id", requireAdmin(d, deleteSkillAdmin))
+	mux.handle("GET", "/api/admin/prompts", requireAdmin(d, listPromptsAdmin))
+	mux.handle("POST", "/api/admin/prompts", requireAdmin(d, createPromptAdmin))
+	mux.handle("PATCH", "/api/admin/prompts/:id", requireAdmin(d, updatePromptAdmin))
+	mux.handle("DELETE", "/api/admin/prompts/:id", requireAdmin(d, deletePromptAdmin))
 	mux.handle("GET", "/api/admin/users", requireAdmin(d, listUsersAdmin))
 	// Static route must precede /:id because the mux uses first-match routing.
 	mux.handle("GET", "/api/admin/users/deletions", requireAdmin(d, listUserDeletionsAdmin))

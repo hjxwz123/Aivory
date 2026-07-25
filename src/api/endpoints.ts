@@ -33,10 +33,14 @@ import type {
   ApiUserGroup,
   ApiPublicOAuthProvider,
   ApiOAuthIdentity,
+  ApiPrompt,
+  ApiLibraryCatalog,
   ApiShareInfo,
   ApiSharedConversation,
   ApiSkill,
   ApiSkillAsset,
+  ApiUserPrompt,
+  ApiUserSkill,
   ApiUsageRecord,
   ApiUser,
 } from './types'
@@ -223,6 +227,28 @@ export const imageApi = {
 
 export const skillsApi = {
   list: () => api<ApiSkill[]>('/skills'),
+}
+
+export const libraryApi = {
+  catalog: () => api<ApiLibraryCatalog>('/library/catalog'),
+  skills: () => api<ApiUserSkill[]>('/me/skills'),
+  createSkill: (body: Pick<ApiUserSkill, 'name' | 'description' | 'instructions'>) =>
+    api<ApiUserSkill>('/me/skills', { method: 'POST', body }),
+  updateSkill: (id: string, body: Partial<Pick<ApiUserSkill, 'name' | 'description' | 'instructions'>>) =>
+    api<ApiUserSkill>(`/me/skills/${encodeURIComponent(id)}`, { method: 'PATCH', body }),
+  removeSkill: (id: string) =>
+    api<{ ok: true }>(`/me/skills/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  addCatalogSkill: (sourceId: string) =>
+    api<ApiUserSkill>('/me/skills/from-catalog', { method: 'POST', body: { source_id: sourceId } }),
+  prompts: () => api<ApiUserPrompt[]>('/me/prompts'),
+  createPrompt: (body: Pick<ApiUserPrompt, 'name' | 'description' | 'content'>) =>
+    api<ApiUserPrompt>('/me/prompts', { method: 'POST', body }),
+  updatePrompt: (id: string, body: Partial<Pick<ApiUserPrompt, 'name' | 'description' | 'content'>>) =>
+    api<ApiUserPrompt>(`/me/prompts/${encodeURIComponent(id)}`, { method: 'PATCH', body }),
+  removePrompt: (id: string) =>
+    api<{ ok: true }>(`/me/prompts/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  addCatalogPrompt: (sourceId: string) =>
+    api<ApiUserPrompt>('/me/prompts/from-catalog', { method: 'POST', body: { source_id: sourceId } }),
 }
 
 // ----- User groups (membership tiers) --------------------------------------
@@ -566,6 +592,13 @@ export const adminApi = {
     fd.append('file', file)
     return api<ApiSkillAsset>('/admin/skills/assets', { method: 'POST', body: fd })
   },
+
+  prompts: () => api<ApiPrompt[]>('/admin/prompts'),
+  createPrompt: (body: Partial<ApiPrompt>) => api<ApiPrompt>('/admin/prompts', { method: 'POST', body }),
+  updatePrompt: (id: string, body: Partial<ApiPrompt>) =>
+    api<ApiPrompt>(`/admin/prompts/${encodeURIComponent(id)}`, { method: 'PATCH', body }),
+  removePrompt: (id: string) =>
+    api<{ ok: true }>(`/admin/prompts/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 
   // OAuth / social login providers. client_secret is write-only — send it on
   // create/update, never expect it back (has_secret flags whether one is set).

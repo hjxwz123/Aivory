@@ -99,7 +99,7 @@ export function FilePreview({ open, onOpenChange, file }: FilePreviewProps) {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent size="full" className="h-[min(92dvh,56rem)]">
         <DialogHeader>
-          <DialogTitle className="truncate pr-8 text-lg">{file.name}</DialogTitle>
+          <DialogTitle className="truncate pr-8">{file.name}</DialogTitle>
         </DialogHeader>
 
         <DialogBody className="min-h-0 overflow-hidden border-t border-[var(--color-divider)] px-0 pb-0">

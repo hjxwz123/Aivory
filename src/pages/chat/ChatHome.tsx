@@ -308,6 +308,7 @@ export default function ChatHome() {
       toolMode: ToolMode
       webSearch?: boolean
       officialToolNames?: string[]
+      selectedUserSkillIds?: string[]
       fast?: boolean
     },
   ) {
@@ -348,6 +349,7 @@ export default function ChatHome() {
         toolMode: opts.toolMode,
         webSearch: opts.webSearch,
         officialToolNames: opts.officialToolNames,
+        selectedUserSkillIds: opts.selectedUserSkillIds,
         fast: opts.fast,
       })
       return
@@ -374,6 +376,7 @@ export default function ChatHome() {
       toolMode: opts.toolMode,
       webSearch: opts.webSearch,
       officialToolNames: opts.officialToolNames,
+      selectedUserSkillIds: opts.selectedUserSkillIds,
       fast: opts.fast,
       // Swap temp→real id in the URL only if the user is STILL on the optimistic
       // thread. If they navigated elsewhere during the create round-trip, leave

@@ -179,6 +179,7 @@ CREATE TABLE IF NOT EXISTS skills (
   id           TEXT PRIMARY KEY,
   name         TEXT NOT NULL,
   description  TEXT NOT NULL,
+  display_description TEXT NOT NULL DEFAULT '', -- catalog-only copy; description remains model-facing trigger metadata
   icon         TEXT NOT NULL DEFAULT '',
   instructions TEXT NOT NULL,
   assets       TEXT NOT NULL DEFAULT '[]',
@@ -187,6 +188,51 @@ CREATE TABLE IF NOT EXISTS skills (
   updated_at   INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_skills_name_unique ON skills(lower(trim(name)));
+
+-- Administrator prompt templates. Prompt content is copied into user_prompts;
+-- the public catalog only exposes name/description/icon metadata.
+CREATE TABLE IF NOT EXISTS prompts (
+  id          TEXT PRIMARY KEY,
+  name        TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  icon        TEXT NOT NULL DEFAULT '',
+  content     TEXT NOT NULL,
+  enabled     INTEGER NOT NULL DEFAULT 1,
+  sort_order  INTEGER NOT NULL DEFAULT 0,
+  updated_at  INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_prompts_name_unique ON prompts(lower(trim(name)));
+
+-- Private user Agent Skills. Deliberately no assets/storage columns: private
+-- skills are instruction-only and can never stage files into the sandbox.
+CREATE TABLE IF NOT EXISTS user_skills (
+  id              TEXT PRIMARY KEY,
+  user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name            TEXT NOT NULL,
+  description     TEXT NOT NULL,
+  icon            TEXT NOT NULL DEFAULT '',
+  instructions    TEXT NOT NULL,
+  source_skill_id TEXT REFERENCES skills(id) ON DELETE SET NULL,
+  created_at      INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+  updated_at      INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+);
+CREATE INDEX IF NOT EXISTS idx_user_skills_user ON user_skills(user_id, updated_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_skills_user_name_unique ON user_skills(user_id, lower(trim(name)));
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_skills_source_unique ON user_skills(user_id, source_skill_id);
+
+CREATE TABLE IF NOT EXISTS user_prompts (
+  id               TEXT PRIMARY KEY,
+  user_id          TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name             TEXT NOT NULL,
+  description      TEXT NOT NULL DEFAULT '',
+  content          TEXT NOT NULL,
+  source_prompt_id TEXT REFERENCES prompts(id) ON DELETE SET NULL,
+  created_at       INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+  updated_at       INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+);
+CREATE INDEX IF NOT EXISTS idx_user_prompts_user ON user_prompts(user_id, updated_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_prompts_user_name_unique ON user_prompts(user_id, lower(trim(name)));
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_prompts_source_unique ON user_prompts(user_id, source_prompt_id);
 
 CREATE TABLE IF NOT EXISTS model_skills (
   model_id TEXT NOT NULL REFERENCES models(id) ON DELETE CASCADE,
@@ -266,6 +312,7 @@ CREATE TABLE IF NOT EXISTS messages (
   raw                TEXT,
   stop_reason        TEXT,
   attachments        TEXT NOT NULL DEFAULT '[]',
+  selected_user_skill_ids TEXT NOT NULL DEFAULT '[]', -- private skill ids applied to this user turn
   citations          TEXT NOT NULL DEFAULT '[]',
   input_tokens       INTEGER NOT NULL DEFAULT 0,
   output_tokens      INTEGER NOT NULL DEFAULT 0,

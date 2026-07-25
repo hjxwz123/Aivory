@@ -12,6 +12,10 @@ import {
   useRef,
 } from 'react'
 import { composerDocumentToValue, composerValueToDocument } from '@/lib/composer-document'
+import {
+  findComposerCommandQuery,
+  type ComposerCommandQuery,
+} from '@/lib/composer-commands'
 import { hasMathContent } from '@/lib/math-content'
 import { cn } from '@/lib/utils'
 
@@ -20,6 +24,8 @@ export interface FormulaTarget {
   pos: number
   latex: string
 }
+
+export type { ComposerCommandQuery } from '@/lib/composer-commands'
 
 interface SelectionRange {
   from: number
@@ -60,6 +66,7 @@ export interface RichComposerEditorHandle {
   focus: (position?: 'start' | 'end') => void
   captureSelection: () => SelectionRange
   setFormula: (latex: string, target: FormulaTarget | null, selection?: SelectionRange | null) => void
+  replaceRange: (from: number, to: number, value: string) => void
 }
 
 interface RichComposerEditorProps {
@@ -76,6 +83,8 @@ interface RichComposerEditorProps {
   formulaEditLabel: string
   submitOnEnter?: boolean
   onEscape?: () => void
+  onCommandQueryChange?: (query: ComposerCommandQuery | null) => void
+  onCommandKeyDown?: (event: KeyboardEvent) => boolean
   compact?: boolean
   mobile?: boolean
   className?: string
@@ -97,6 +106,19 @@ function enhanceFormulaNodes(editor: Editor, editLabel: string): void {
       .trim()
     label.textContent = renderedFormula ? `${editLabel}: ${renderedFormula}` : editLabel
   })
+}
+
+function readCommandQuery(editor: Editor): ComposerCommandQuery | null {
+  const { selection } = editor.state
+  if (!selection.empty) return null
+  const { $from } = selection
+  if (!$from.parent.inlineContent) return null
+  const before = $from.parent.textBetween(0, $from.parentOffset, '', '\uFFFC')
+  return findComposerCommandQuery(before, $from.start(), selection.from)
+}
+
+function emitCommandQuery(editor: Editor, props: RichComposerEditorProps): void {
+  props.onCommandQueryChange?.(readCommandQuery(editor))
 }
 
 export const RichComposerEditor = forwardRef<RichComposerEditorHandle, RichComposerEditorProps>(
@@ -165,6 +187,7 @@ export const RichComposerEditor = forwardRef<RichComposerEditorHandle, RichCompo
           },
           handleKeyDown: (view, event) => {
             if (event.isComposing || event.keyCode === 229) return false
+            if (propsRef.current.onCommandKeyDown?.(event)) return true
             const formula = event.target instanceof HTMLElement
               ? event.target.closest<HTMLElement>('.tiptap-mathematics-render--editable')
               : null
@@ -253,7 +276,10 @@ export const RichComposerEditor = forwardRef<RichComposerEditorHandle, RichCompo
           lastEmittedValueRef.current = next
           propsRef.current.onChange(next)
           enhanceFormulaNodes(currentEditor, propsRef.current.formulaEditLabel)
+          emitCommandQuery(currentEditor, propsRef.current)
         },
+        onSelectionUpdate: ({ editor: currentEditor }) => emitCommandQuery(currentEditor, propsRef.current),
+        onBlur: () => propsRef.current.onCommandQueryChange?.(null),
         onMount: ({ editor: mountedEditor }) => {
           mountedEditor.view.dom.setAttribute('aria-label', propsRef.current.ariaLabel)
           const nextValue = propsRef.current.value
@@ -263,7 +289,9 @@ export const RichComposerEditor = forwardRef<RichComposerEditorHandle, RichCompo
             lastEmittedValueRef.current = nextValue
           }
           enhanceFormulaNodes(mountedEditor, propsRef.current.formulaEditLabel)
+          emitCommandQuery(mountedEditor, propsRef.current)
         },
+        onDestroy: () => propsRef.current.onCommandQueryChange?.(null),
       },
       [],
     )
@@ -336,6 +364,26 @@ export const RichComposerEditor = forwardRef<RichComposerEditorHandle, RichCompo
           view.dispatch(transaction.scrollIntoView())
           enhanceFormulaNodes(currentEditor, propsRef.current.formulaEditLabel)
           view.focus()
+        },
+        replaceRange: (from, to, value) => {
+          const currentEditor = editorRef.current
+          if (!currentEditor || currentEditor.isDestroyed) return
+          const max = currentEditor.state.doc.content.size
+          const start = Math.max(0, Math.min(from, max))
+          const end = Math.max(start, Math.min(to, max))
+          let transaction = currentEditor.state.tr
+          if (value) {
+            const parsed = currentEditor.state.schema.nodeFromJSON(composerValueToDocument(value))
+            const slice = Slice.maxOpen(parsed.content)
+            transaction = transaction.replaceRange(start, end, slice)
+            const cursor = Math.max(0, Math.min(start + slice.size, transaction.doc.content.size))
+            transaction.setSelection(TextSelection.near(transaction.doc.resolve(cursor)))
+          } else {
+            transaction = transaction.deleteRange(start, end)
+            transaction.setSelection(TextSelection.near(transaction.doc.resolve(Math.min(start, transaction.doc.content.size))))
+          }
+          currentEditor.view.dispatch(transaction.scrollIntoView())
+          currentEditor.view.focus()
         },
       }),
       [],

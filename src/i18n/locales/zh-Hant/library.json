@@ -1,0 +1,66 @@
+{
+  "title": "技能與提示詞",
+  "new": "新增",
+  "newSkill": "新增技能",
+  "kinds": {
+    "skill": "技能",
+    "prompt": "提示詞"
+  },
+  "tabs": {
+    "mine": "我的",
+    "catalog": "公共目錄"
+  },
+  "search": "搜尋技能與提示詞",
+  "filter": {
+    "label": "類型篩選",
+    "all": "全部",
+    "skill": "技能",
+    "prompt": "提示詞"
+  },
+  "empty": {
+    "search": "沒有符合的內容",
+    "mine": "還沒有自己的技能或提示詞",
+    "catalog": "公共目錄暫無內容"
+  },
+  "catalog": {
+    "fromAdmin": "來自公共目錄",
+    "add": "加入",
+    "added": "已加入我的內容",
+    "addedLabel": "已加入"
+  },
+  "editor": {
+    "newSkill": "新增技能",
+    "editSkill": "編輯技能",
+    "newPrompt": "新增提示詞",
+    "editPrompt": "編輯提示詞",
+    "importLabel": "從 SKILL.md 匯入",
+    "importHint": "支援包含 name、description 和正文的標準格式，不支援附加檔案。",
+    "importAction": "解析並填入",
+    "importInvalid": "SKILL.md 缺少 name、description 或正文。",
+    "imported": "已從 SKILL.md 填入",
+    "name": "名稱",
+    "skillNameHint": "使用小寫字母、數字和連字號，例如 meeting-follow-up。",
+    "promptNamePlaceholder": "週報潤飾",
+    "when": "何時使用",
+    "description": "描述",
+    "instructions": "完整指令",
+    "promptContent": "提示詞內容",
+    "missingFields": "請填寫名稱、描述和內容。",
+    "invalidSkillName": "技能名稱須為不超過 64 個字元的 kebab-case。",
+    "nameExists": "我的內容中已存在同名項目。",
+    "created": "已建立",
+    "updated": "已更新"
+  },
+  "remove": {
+    "title": "刪除這項內容？",
+    "body": "將從你的內容中刪除「{{name}}」。",
+    "done": "已刪除"
+  },
+  "command": {
+    "skills": "技能",
+    "prompts": "提示詞",
+    "empty": "沒有符合的技能或提示詞",
+    "loading": "正在載入…",
+    "removeSkill": "移除技能 {{name}}"
+  }
+}

@@ -206,6 +206,9 @@
     "empty": "暫無技能。",
     "fields": {
       "name": "名稱",
+      "icon": "圖示",
+      "displayDescription": "展示描述",
+      "displayDescriptionHint": "僅用於技能目錄和清單展示，不參與模型觸發判斷。",
       "when": "何時使用(一句話)",
       "whenHint": "注入系統提示索引,決定召回率,寫成觸發條件。",
       "instructions": "完整指令(Markdown)",
@@ -232,6 +235,22 @@
     },
     "disabledTag": "已停用",
     "manage": "管理技能"
+  },
+  "prompts": {
+    "title": "提示詞",
+    "lead": "供使用者加入個人庫的公共提示詞。",
+    "new": "新增提示詞",
+    "empty": "暫無提示詞。",
+    "disabledTag": "已停用",
+    "editorTitle": "編輯提示詞",
+    "newTitle": "新增提示詞",
+    "fields": { "name": "名稱", "description": "展示描述", "content": "提示詞內容", "enabled": "啟用" },
+    "removeTitle": "刪除提示詞？",
+    "removeBody": "將刪除「{{name}}」。已加入使用者個人庫的副本不受影響。",
+    "created": "提示詞已建立",
+    "updated": "提示詞已更新",
+    "removed": "提示詞已刪除",
+    "errors": { "missingFields": "請填寫名稱、描述和提示詞內容。", "nameExists": "已存在同名提示詞。" }
   },
   "oauth": {
     "title": "登入方式",

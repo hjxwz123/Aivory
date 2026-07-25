@@ -75,14 +75,14 @@ export default function ProjectsList() {
         }
       />
       <div className="flex-1 min-h-0 overflow-y-auto">
-        <div className="mx-auto w-full max-w-[var(--layout-content-max-w)] px-5 sm:px-8 py-8 pb-24">
-          <p className="max-w-[60ch] text-[var(--color-fg-muted)] text-[15px] leading-relaxed">
+        <div className="mx-auto w-full max-w-[var(--layout-content-max-w)] px-5 py-5 pb-16 sm:px-8 sm:py-6 sm:pb-20">
+          <p className="max-w-[60ch] text-[14px] leading-6 text-[var(--color-fg-muted)]">
             {t('projects:list.subtitle')}
           </p>
 
           {!loaded && loadError ? (
             <EmptyState
-              className="mt-12"
+              className="mt-8"
               icon={<FolderKanban size={20} aria-hidden />}
               title={t('common:common.error')}
               description={loadError}
@@ -96,10 +96,9 @@ export default function ProjectsList() {
             <ProjectsListSkeleton label={t('common:common.loading')} />
           ) : (
             <>
-          {/* Controls strip. Lives directly above the list, separated by a
-              single hairline (Section 4.4: no card containers around tools). */}
+          {/* Controls stay close to the list and use a divider instead of a container. */}
           {projects.length > 0 ? (
-            <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-b border-[var(--color-divider)] pb-4">
+            <div className="mt-5 flex flex-col gap-2.5 border-b border-[var(--color-divider)] pb-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="sm:max-w-xs w-full">
               <Input
                 leadingIcon={<Search size={14} aria-hidden />}
@@ -134,7 +133,7 @@ export default function ProjectsList() {
 
         {/* List body */}
         {totalVisible > 0 ? (
-          <div className="mt-2">
+          <div className="mt-1">
             {pinned.length > 0 && filter !== 'pinned' ? (
               <Band label={t('projects:list.filterPinned')}>
                 <RowList>
@@ -165,7 +164,7 @@ export default function ProjectsList() {
           </div>
         ) : (
           <EmptyState
-            className="mt-12"
+            className="mt-8"
             icon={<FolderKanban size={20} aria-hidden />}
             title={t('projects:list.emptyTitle')}
             description={t('projects:list.emptyBody')}
@@ -192,22 +191,25 @@ export default function ProjectsList() {
 
 function ProjectsListSkeleton({ label }: { label: string }) {
   return (
-    <div className="mt-8" role="status" aria-label={label}>
-      <div className="flex items-center justify-between border-b border-[var(--color-divider)] pb-4">
-        <Skeleton className="h-9 w-full max-w-xs" />
+    <div className="mt-5" role="status" aria-label={label}>
+      <div className="flex items-center justify-between border-b border-[var(--color-divider)] pb-3">
+        <Skeleton className="h-10 w-full max-w-xs" />
         <Skeleton shape="line" className="hidden w-28 sm:block" />
       </div>
-      <div className="mt-8 space-y-1">
+      <div className="mt-4 divide-y divide-[var(--color-divider)]">
         {Array.from({ length: 4 }, (_, index) => (
-          <div key={index} className="grid grid-cols-[3px_1fr] gap-x-5 px-4 py-6 sm:grid-cols-[3px_1fr_180px] sm:gap-x-7 sm:px-6 sm:py-7">
-            <Skeleton className="h-full min-h-14 w-[3px]" />
-            <div className="space-y-3">
-              <Skeleton shape="line" className="h-5 w-2/5" />
-              <Skeleton shape="line" className="w-4/5" />
+          <div
+            key={index}
+            className="grid min-h-16 grid-cols-[2rem_minmax(0,1fr)] items-center gap-x-3 px-2.5 py-2 sm:grid-cols-[2rem_minmax(0,1fr)_auto] sm:px-3"
+          >
+            <Skeleton className="row-span-2 size-8 rounded-[8px] sm:row-span-1" />
+            <div className="min-w-0 space-y-1">
+              <Skeleton shape="line" className="h-3.5 w-2/5" />
+              <Skeleton shape="line" className="h-3 w-3/5" />
             </div>
-            <div className="hidden space-y-2 sm:block">
-              <Skeleton shape="line" className="ml-auto w-24" />
-              <Skeleton shape="line" className="ml-auto w-32" />
+            <div className="col-start-2 flex items-center gap-2 sm:col-start-3 sm:row-start-1 sm:pl-4">
+              <Skeleton shape="line" className="h-3 w-20" />
+              <Skeleton shape="line" className="h-3 w-24" />
             </div>
           </div>
         ))}
@@ -222,9 +224,9 @@ function ProjectsListSkeleton({ label }: { label: string }) {
    eyebrow) so it reads as a section divider, not section chrome. */
 function Band({ label, children }: { label?: string; children: React.ReactNode }) {
   return (
-    <section className="mt-10 first:mt-6">
+    <section className="mt-5 first:mt-4">
       {label ? (
-        <h2 className="text-[13.5px] text-[var(--color-fg-subtle)] tracking-tight mb-1 px-4 sm:px-6 -mx-4 sm:-mx-6">
+        <h2 className="mb-1 px-2.5 text-[12.5px] leading-5 text-[var(--color-fg-subtle)] sm:px-3">
           {label}
         </h2>
       ) : null}

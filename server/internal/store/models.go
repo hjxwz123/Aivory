@@ -227,15 +227,57 @@ type OAuthIdentity struct {
 
 // Skill is the §4.17 record. Assets carry references to template files.
 type Skill struct {
-	ID           string          `json:"id"`
-	Name         string          `json:"name"`
-	Description  string          `json:"description"`
-	Icon         string          `json:"icon"`
-	Instructions string          `json:"instructions"`
-	Assets       json.RawMessage `json:"assets"`
-	Enabled      bool            `json:"enabled"`
-	SortOrder    int             `json:"sort_order"`
-	UpdatedAt    int64           `json:"updated_at"`
+	ID                 string          `json:"id"`
+	Name               string          `json:"name"`
+	Description        string          `json:"description"`
+	DisplayDescription string          `json:"display_description"`
+	Icon               string          `json:"icon"`
+	Instructions       string          `json:"instructions"`
+	Assets             json.RawMessage `json:"assets"`
+	Enabled            bool            `json:"enabled"`
+	SortOrder          int             `json:"sort_order"`
+	UpdatedAt          int64           `json:"updated_at"`
+}
+
+// Prompt is an administrator-managed prompt template published in the shared
+// catalog. Content is only returned by administrator endpoints; the user-facing
+// catalog exposes display metadata and copies content into a user-owned row.
+type Prompt struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Icon        string `json:"icon,omitempty"`
+	Content     string `json:"content"`
+	Enabled     bool   `json:"enabled"`
+	SortOrder   int    `json:"sort_order"`
+	UpdatedAt   int64  `json:"updated_at"`
+}
+
+// UserSkill is a private, instruction-only Agent Skill. Unlike administrator
+// skills it has no assets, storage paths, or sandbox staging surface.
+type UserSkill struct {
+	ID            string `json:"id"`
+	UserID        string `json:"-"`
+	Name          string `json:"name"`
+	Description   string `json:"description"`
+	Icon          string `json:"icon"`
+	Instructions  string `json:"instructions"`
+	SourceSkillID string `json:"source_skill_id,omitempty"`
+	CreatedAt     int64  `json:"created_at"`
+	UpdatedAt     int64  `json:"updated_at"`
+}
+
+// UserPrompt is a private prompt template. A catalog copy is independent from
+// its administrator source and remains after that source is deleted.
+type UserPrompt struct {
+	ID             string `json:"id"`
+	UserID         string `json:"-"`
+	Name           string `json:"name"`
+	Description    string `json:"description"`
+	Content        string `json:"content"`
+	SourcePromptID string `json:"source_prompt_id,omitempty"`
+	CreatedAt      int64  `json:"created_at"`
+	UpdatedAt      int64  `json:"updated_at"`
 }
 
 // Project — §4.14.
@@ -339,6 +381,11 @@ type Message struct {
 	// attribute each question). '' on legacy rows and assistant turns: the
 	// conversation creator is the implied author.
 	AuthorID string `json:"author_id,omitempty"`
+	// SelectedUserSkillIDs records the private skills applied to this user turn.
+	// The instruction bodies are never elevated into the system prompt; the
+	// orchestrator resolves these ids under the message author's ownership and
+	// appends their content to the last user-role history entry.
+	SelectedUserSkillIDs json.RawMessage `json:"-"`
 }
 
 // KnowledgeBase — §5 knowledge_bases row.

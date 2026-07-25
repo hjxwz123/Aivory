@@ -58,10 +58,12 @@ const AdminAnnouncement = lazy(() => import('@/pages/admin/AdminAnnouncement'))
 const AdminDocuments = lazy(() => import('@/pages/admin/AdminDocuments'))
 const AdminFiles = lazy(() => import('@/pages/admin/AdminFiles'))
 const UserFiles = lazy(() => import('@/pages/files/UserFiles'))
+const SkillsPrompts = lazy(() => import('@/pages/library/SkillsPrompts'))
 const AdminTools = lazy(() => import('@/pages/admin/AdminTools'))
 const AdminAudio = lazy(() => import('@/pages/admin/AdminAudio'))
 const AdminOAuth = lazy(() => import('@/pages/admin/AdminOAuth'))
 const AdminRedeemCodes = lazy(() => import('@/pages/admin/AdminRedeemCodes'))
+const AdminPrompts = lazy(() => import('@/pages/admin/AdminPrompts'))
 const NotFound = lazy(() => import('@/pages/NotFound'))
 
 function GlobalShortcuts() {
@@ -213,6 +215,9 @@ export default function App() {
             <Route path="/files" element={<ChatLayout />}>
               <Route index element={<UserFiles />} />
             </Route>
+            <Route path="/skills" element={<ChatLayout />}>
+              <Route index element={<SkillsPrompts />} />
+            </Route>
             <Route path="/kb" element={<ChatLayout />}>
               <Route index element={<KnowledgeBasesList />} />
               <Route path=":id" element={<KnowledgeBaseDetail />} />
@@ -240,6 +245,7 @@ export default function App() {
               <Route path="models/:id" element={<AdminModelEdit />} />
               <Route path="model-tags" element={<AdminModelTags />} />
               <Route path="skills" element={<AdminSkills />} />
+              <Route path="prompts" element={<AdminPrompts />} />
               <Route path="image-styles" element={<AdminImageStyles />} />
               <Route path="users" element={<AdminUsers />} />
               <Route path="user-groups" element={<AdminUserGroups />} />

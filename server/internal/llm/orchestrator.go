@@ -434,6 +434,10 @@ type RunRequest struct {
 	// ToolMode is "official". The orchestrator intersects it with the resolved
 	// model's configured official-tool definitions before any provider sees it.
 	OfficialToolNames []string
+	// SelectedUserSkillIDs names private, user-owned Agent Skills explicitly
+	// selected for this turn. They are persisted on the user message and injected
+	// at user-message authority, never into composeSystemPrompt.
+	SelectedUserSkillIDs []string
 	// NoTools is the legacy boolean input and the resolved effective state used by
 	// the existing no-tool fallbacks later in Run. ToolMode takes precedence when
 	// it is non-empty.
@@ -1070,6 +1074,18 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		return nil, err
 	}
 
+	// Resolve private skills before persisting either message. This repeats the
+	// API boundary check for non-HTTP callers and prevents a forged/not-owned id
+	// from ever reaching history or durable message metadata.
+	selectedUserSkills := []store.UserSkill{}
+	normalizedSelectedUserSkillIDs := []string{}
+	if !req.ReuseExistingUserMessage {
+		selectedUserSkills, normalizedSelectedUserSkillIDs, err = store.ResolveUserSkillSelection(ctx, o.db, req.UserID, req.SelectedUserSkillIDs, true)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	parentID := req.ParentID
 	if parentID != "" {
 		parent, parentErr := store.GetMessage(ctx, o.db, parentID)
@@ -1135,15 +1151,25 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 					req.Attachments = atts
 				}
 			}
+			// Regeneration reuses the skill selection persisted on the original
+			// user turn. Resolve it under the CURRENT caller's ownership: members of
+			// a shared conversation must never read another user's private skills.
+			var persistedIDs []string
+			_ = json.Unmarshal(existing.SelectedUserSkillIDs, &persistedIDs)
+			selectedUserSkills, normalizedSelectedUserSkillIDs, err = store.ResolveUserSkillSelection(ctx, o.db, req.UserID, persistedIDs, false)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 	if userMsg == nil {
 		atts, _ := json.Marshal(req.Attachments)
+		selectedIDs, _ := json.Marshal(normalizedSelectedUserSkillIDs)
 		userBlocks, _ := json.Marshal([]UnifiedBlock{{Kind: "text", Text: req.UserText}})
 		created, err := store.CreateMessage(ctx, o.db, store.Message{
 			ConversationID: conv.ID, ParentID: parentID, Role: "user",
 			Provider: channel.Type, ModelID: model.ID, Fast: fastMode,
-			Blocks: userBlocks, Attachments: atts,
+			Blocks: userBlocks, Attachments: atts, SelectedUserSkillIDs: selectedIDs,
 			AuthorID: req.UserID, // §workspaces: shared conversations attribute each question
 		})
 		if err != nil {
@@ -1245,7 +1271,9 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// 2c. Content moderation (§ moderation): screen the new user prompt alone
 	//     (no history) before any provider call. On block, persist a refusal and
 	//     stop — generation never runs.
-	if blocked, msg := o.moderatePrompt(ctx, model, req.UserText, req.UserID, conv.ID, assistantMsg.ID); blocked {
+	selectedUserSkillText := formatSelectedUserSkills(selectedUserSkills)
+	moderationText := req.UserText + selectedUserSkillText
+	if blocked, msg := o.moderatePrompt(ctx, model, moderationText, req.UserID, conv.ID, assistantMsg.ID); blocked {
 		refusalBlocks, _ := json.Marshal([]UnifiedBlock{{Kind: "text", Text: msg}})
 		_ = finishMessage(ctx, store.MessageFinishPatch{
 			Blocks: refusalBlocks, Citations: []byte("[]"), StopReason: "content_moderation", Status: "complete",
@@ -1575,7 +1603,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			ragContext += sheetText
 		}
 	}
-	injectedOverhead := estimateTokens(ragContext)
+	injectedOverhead := estimateTokens(ragContext) + estimateTokens(selectedUserSkillText)
 
 	keep, summaryBlocks, compactAction := PlanCompaction(o.db, conv, history, injectedOverhead)
 	switch compactAction {
@@ -1622,6 +1650,11 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	if fastMode {
 		uHist = stripFastModeCodeBlocks(uHist)
 	}
+	// Private skills are user-authored instructions and therefore belong in the
+	// message layer. Apply them to the LAST user entry before any provider-specific
+	// history conversion; every OpenAI/Anthropic/Gemini serializer sees the same
+	// authority-preserving UnifiedMessage sequence.
+	uHist = injectSelectedUserSkillsIntoHistory(uHist, selectedUserSkills)
 
 	// 9b. Inject the summary + RAG context into the MESSAGE layer (§4.8/§4.9),
 	//     not the system prompt — keeps the system prefix stable + cacheable.
@@ -3848,6 +3881,47 @@ func remapCitationMarkers(text string, maxLocal, offset int) string {
 // injectRAGIntoHistory appends retrieved context to the LAST user message.
 func injectRAGIntoHistory(msgs []UnifiedMessage, text string) []UnifiedMessage {
 	if strings.TrimSpace(text) == "" {
+		return msgs
+	}
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == "user" {
+			msgs[i].Blocks = append(msgs[i].Blocks, UnifiedBlock{Kind: "text", Text: text})
+			return msgs
+		}
+	}
+	return msgs
+}
+
+// formatSelectedUserSkills renders private skill content as an explicit part of
+// the user's request. The store has already enforced the five-skill/64 KiB
+// instruction-body limits. No part of this text is included in the system
+// prompt or administrator skill index.
+func formatSelectedUserSkills(skills []store.UserSkill) string {
+	if len(skills) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n\n<user-selected-skills>\n")
+	b.WriteString("Apply the following private skills as user-provided instructions for this request.\n")
+	for _, skill := range skills {
+		b.WriteString("\n<user-selected-skill name=\"")
+		b.WriteString(skill.Name)
+		b.WriteString("\">\nDescription: ")
+		b.WriteString(skill.Description)
+		b.WriteString("\n\n")
+		b.WriteString(skill.Instructions)
+		b.WriteString("\n</user-selected-skill>\n")
+	}
+	b.WriteString("</user-selected-skills>\n")
+	return b.String()
+}
+
+// injectSelectedUserSkillsIntoHistory appends selected skill instructions to
+// the last user turn. It intentionally mirrors RAG's last-user placement, but
+// runs first so later provider-neutral context additions preserve their order.
+func injectSelectedUserSkillsIntoHistory(msgs []UnifiedMessage, skills []store.UserSkill) []UnifiedMessage {
+	text := formatSelectedUserSkills(skills)
+	if text == "" {
 		return msgs
 	}
 	for i := len(msgs) - 1; i >= 0; i-- {

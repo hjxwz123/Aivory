@@ -46,6 +46,7 @@ import type { ToolMode } from '@/lib/tool-mode'
 import { filterOfficialToolNames, sanitizeOfficialToolNames } from '@/lib/official-tools'
 import i18n from '@/i18n'
 import { mathContentToPlainText } from '@/lib/math-content'
+import { normalizeSelectedUserSkillIds } from '@/lib/composer-commands'
 
 // resolveArmedTurnFlags snapshots the CURRENT composer feature toggles for turns
 // started OUTSIDE the composer's own submit — regenerate, edit-and-resend, and
@@ -229,6 +230,10 @@ interface ConversationStore {
   load: () => Promise<void>
   /** Append the next page of (older) conversations — sidebar infinite scroll. */
   loadMore: () => Promise<void>
+  /** Load active conversation summaries for one project and merge them into the
+   * shared cache without replacing the ordinary sidebar page or hydrated
+   * transcripts. Project conversations are intentionally excluded from load(). */
+  loadProjectConversations: (projectId: string) => Promise<boolean>
   /** Load a conversation. By default only the latest page of messages is
    *  fetched (older loaded on scroll); pass {full:true} to load the whole active
    *  path up front (used when jumping to a specific message). */
@@ -293,6 +298,8 @@ interface ConversationStore {
     webSearch?: boolean
     /** Provider-native tool subset, serialized only with toolMode=official. */
     officialToolNames?: string[]
+    /** User-owned skill ids selected explicitly for this turn. */
+    selectedUserSkillIds?: string[]
     /** §fast-mode: run this turn in fast mode (model resolved server-side + masked;
      *  verify/DR forced off; fixed enabled policy, quartered budget, no Python). */
     fast?: boolean
@@ -584,6 +591,39 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
       })
     } catch {
       set({ loadingMore: false })
+    }
+  },
+
+  async loadProjectConversations(projectId) {
+    const normalizedProjectId = projectId.trim()
+    if (!normalizedProjectId) return false
+    const ws = activeWorkspaceId()
+    try {
+      const { conversations: rows } = await conversationsApi.list(
+        normalizedProjectId,
+        envNum('VITE_AIVORY_PROJECT_CONVERSATIONS_API_LIST_LIMIT', 500),
+        0,
+        ws,
+      )
+      // A workspace switch can finish while this project request is in flight.
+      // Its rows must never leak into the newly active space.
+      if (activeWorkspaceId() !== ws) return false
+      const incoming = mergeStreamingSummaries(
+        get().conversations,
+        rows.map(toLocalConversation),
+      )
+      set((state) => {
+        let conversations = state.conversations
+        // replaceOrPrepend prepends new rows; reverse iteration preserves the
+        // API's newest-first ordering before the sidebar applies its own sort.
+        for (const conversation of incoming.slice().reverse()) {
+          conversations = replaceOrPrepend(conversations, conversation)
+        }
+        return { conversations }
+      })
+      return true
+    } catch {
+      return false
     }
   },
 
@@ -1272,6 +1312,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
           // server-run search injection.
           tool_mode: requestToolMode,
           official_tool_names: requestOfficialToolNames,
+          selected_user_skill_ids: normalizeSelectedUserSkillIds(input.selectedUserSkillIds),
           web_search: requestWebSearch,
           // §fast-mode: run this turn on the admin's hidden fast model.
           fast: input.fast,

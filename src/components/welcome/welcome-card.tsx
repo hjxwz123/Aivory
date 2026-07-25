@@ -354,7 +354,7 @@ export function WelcomeCard() {
               {/* Step content — re-keyed so it animates in on each change; the
                   step title drifts into focus with it (BlurText replays per key). */}
               <div key={step} className="mt-7 animate-[welcome-step_300ms_var(--ease-out)]">
-                <h3 className="font-serif text-2xl tracking-tight text-[var(--color-fg)]">
+                <h3 className="font-serif text-xl tracking-normal text-[var(--color-fg)]">
                   <BlurText text={t(`welcome:fields.${current}`)} delay={90} />
                 </h3>
                 <p className="mt-1.5 text-sm text-[var(--color-fg-muted)] leading-relaxed">
@@ -398,7 +398,7 @@ export function WelcomeCard() {
         <div className="relative flex flex-col items-center gap-4 px-6 pt-8 pb-6 sm:px-8">
           <Logo size="lg" />
           <div>
-            <DialogTitle className="font-serif text-2xl tracking-tight text-[var(--color-fg)]">
+            <DialogTitle>
               {/* One warm clay glint pans through the celebration line. */}
               <GradientText
                 colors={['var(--color-fg)', 'var(--color-accent)', 'var(--color-fg)']}

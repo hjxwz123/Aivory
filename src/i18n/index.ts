@@ -17,6 +17,7 @@ import enFiles from './locales/en/files.json'
 import enMemory from './locales/en/memory.json'
 import enSubscription from './locales/en/subscription.json'
 import enWelcome from './locales/en/welcome.json'
+import enLibrary from './locales/en/library.json'
 
 // Chinese bundles
 import zhCommon from './locales/zh/common.json'
@@ -33,6 +34,7 @@ import zhFiles from './locales/zh/files.json'
 import zhMemory from './locales/zh/memory.json'
 import zhSubscription from './locales/zh/subscription.json'
 import zhWelcome from './locales/zh/welcome.json'
+import zhLibrary from './locales/zh/library.json'
 
 // Traditional Chinese bundles (generated from zh via OpenCC s2twp)
 import zhHantCommon from './locales/zh-Hant/common.json'
@@ -49,6 +51,7 @@ import zhHantFiles from './locales/zh-Hant/files.json'
 import zhHantMemory from './locales/zh-Hant/memory.json'
 import zhHantSubscription from './locales/zh-Hant/subscription.json'
 import zhHantWelcome from './locales/zh-Hant/welcome.json'
+import zhHantLibrary from './locales/zh-Hant/library.json'
 
 // Japanese bundles
 import jaCommon from './locales/ja/common.json'
@@ -65,6 +68,7 @@ import jaFiles from './locales/ja/files.json'
 import jaMemory from './locales/ja/memory.json'
 import jaSubscription from './locales/ja/subscription.json'
 import jaWelcome from './locales/ja/welcome.json'
+import jaLibrary from './locales/ja/library.json'
 
 // French bundles
 import frCommon from './locales/fr/common.json'
@@ -81,6 +85,7 @@ import frFiles from './locales/fr/files.json'
 import frMemory from './locales/fr/memory.json'
 import frSubscription from './locales/fr/subscription.json'
 import frWelcome from './locales/fr/welcome.json'
+import frLibrary from './locales/fr/library.json'
 
 export const SUPPORTED_LANGUAGES = [
   { code: 'en', label: 'English', short: 'EN' },
@@ -93,7 +98,7 @@ export const SUPPORTED_LANGUAGES = [
 export type LanguageCode = (typeof SUPPORTED_LANGUAGES)[number]['code']
 
 export const DEFAULT_NS = 'common'
-export const NAMESPACES = ['common', 'nav', 'landing', 'chat', 'auth', 'settings', 'errors', 'projects', 'admin', 'kb', 'files', 'memory', 'subscription', 'welcome'] as const
+export const NAMESPACES = ['common', 'nav', 'landing', 'chat', 'auth', 'settings', 'errors', 'projects', 'admin', 'kb', 'files', 'memory', 'subscription', 'welcome', 'library'] as const
 
 const resources = {
   en: {
@@ -111,6 +116,7 @@ const resources = {
     memory: enMemory,
     subscription: enSubscription,
     welcome: enWelcome,
+    library: enLibrary,
   },
   zh: {
     common: zhCommon,
@@ -127,6 +133,7 @@ const resources = {
     memory: zhMemory,
     subscription: zhSubscription,
     welcome: zhWelcome,
+    library: zhLibrary,
   },
   'zh-Hant': {
     common: zhHantCommon,
@@ -143,6 +150,7 @@ const resources = {
     memory: zhHantMemory,
     subscription: zhHantSubscription,
     welcome: zhHantWelcome,
+    library: zhHantLibrary,
   },
   ja: {
     common: jaCommon,
@@ -159,6 +167,7 @@ const resources = {
     memory: jaMemory,
     subscription: jaSubscription,
     welcome: jaWelcome,
+    library: jaLibrary,
   },
   fr: {
     common: frCommon,
@@ -175,6 +184,7 @@ const resources = {
     memory: frMemory,
     subscription: frSubscription,
     welcome: frWelcome,
+    library: frLibrary,
   },
 } as const
 

@@ -206,6 +206,9 @@
     "empty": "スキルはまだありません。",
     "fields": {
       "name": "名前",
+      "icon": "アイコン",
+      "displayDescription": "表示用の説明",
+      "displayDescriptionHint": "カタログと一覧にのみ表示され、スキルの判定には使用されません。",
       "when": "使用するタイミング（1文）",
       "whenHint": "プロンプト索引に入る—発火条件として書く。",
       "instructions": "手順（Markdown）",
@@ -232,6 +235,22 @@
     },
     "disabledTag": "無効",
     "manage": "スキルを管理"
+  },
+  "prompts": {
+    "title": "プロンプト",
+    "lead": "ユーザーが個人ライブラリへ追加できる公開プロンプトです。",
+    "new": "新しいプロンプト",
+    "empty": "プロンプトはまだありません。",
+    "disabledTag": "無効",
+    "editorTitle": "プロンプトを編集",
+    "newTitle": "新しいプロンプト",
+    "fields": { "name": "名前", "description": "表示用の説明", "content": "プロンプト本文", "enabled": "有効" },
+    "removeTitle": "プロンプトを削除しますか？",
+    "removeBody": "「{{name}}」を削除します。すでに個人ライブラリへ追加されたコピーには影響しません。",
+    "created": "プロンプトを作成しました",
+    "updated": "プロンプトを更新しました",
+    "removed": "プロンプトを削除しました",
+    "errors": { "missingFields": "名前、説明、プロンプト本文を入力してください。", "nameExists": "同じ名前のプロンプトがすでにあります。" }
   },
   "oauth": {
     "title": "ログイン方法",

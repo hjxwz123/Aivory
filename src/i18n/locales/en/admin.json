@@ -206,6 +206,9 @@
     "empty": "No skills yet.",
     "fields": {
       "name": "Name",
+      "icon": "Icon",
+      "displayDescription": "Display description",
+      "displayDescriptionHint": "Shown in catalogs and lists only. It does not affect skill matching.",
       "when": "When to use (one sentence)",
       "whenHint": "Goes into the prompt index — write it as a trigger.",
       "instructions": "Instructions (Markdown)",
@@ -232,6 +235,22 @@
     },
     "disabledTag": "disabled",
     "manage": "Manage skills"
+  },
+  "prompts": {
+    "title": "Prompts",
+    "lead": "Public prompts users can add to their personal libraries.",
+    "new": "New prompt",
+    "empty": "No prompts yet.",
+    "disabledTag": "Disabled",
+    "editorTitle": "Edit prompt",
+    "newTitle": "New prompt",
+    "fields": { "name": "Name", "description": "Display description", "content": "Prompt content", "enabled": "Enabled" },
+    "removeTitle": "Delete prompt?",
+    "removeBody": "“{{name}}” will be deleted. Copies already added to personal libraries are unchanged.",
+    "created": "Prompt created",
+    "updated": "Prompt updated",
+    "removed": "Prompt deleted",
+    "errors": { "missingFields": "Enter a name, description, and prompt content.", "nameExists": "A prompt with this name already exists." }
   },
   "oauth": {
     "title": "Login methods",

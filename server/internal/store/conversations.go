@@ -595,7 +595,7 @@ func ListMessages(ctx context.Context, db *sql.DB, convID, leafID string) ([]Mes
 // branch — used by clients that render the full tree (sibling counts/branch
 // switching). Sorted by created_at ascending.
 func ListAllMessages(ctx context.Context, db *sql.DB, convID string) ([]Message, error) {
-	rows, err := db.QueryContext(ctx, `SELECT id, conversation_id, COALESCE(parent_id,''), role, provider, model_id, COALESCE(model_label,''), fast, blocks, COALESCE(raw,''), COALESCE(stop_reason,''), attachments, citations, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost, currency, credits, status, error, COALESCE(feedback,''), created_at, gen_ms, COALESCE(verify,''), COALESCE(author_id,'') FROM messages WHERE conversation_id=? ORDER BY created_at ASC`, convID)
+	rows, err := db.QueryContext(ctx, `SELECT id, conversation_id, COALESCE(parent_id,''), role, provider, model_id, COALESCE(model_label,''), fast, blocks, COALESCE(raw,''), COALESCE(stop_reason,''), attachments, COALESCE(selected_user_skill_ids,'[]'), citations, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost, currency, credits, status, error, COALESCE(feedback,''), created_at, gen_ms, COALESCE(verify,''), COALESCE(author_id,'') FROM messages WHERE conversation_id=? ORDER BY created_at ASC`, convID)
 	if err != nil {
 		return nil, err
 	}
@@ -613,7 +613,7 @@ func ListAllMessages(ctx context.Context, db *sql.DB, convID string) ([]Message,
 
 // GetMessage returns one row.
 func GetMessage(ctx context.Context, db *sql.DB, id string) (*Message, error) {
-	row := db.QueryRowContext(ctx, `SELECT id, conversation_id, COALESCE(parent_id,''), role, provider, model_id, COALESCE(model_label,''), fast, blocks, COALESCE(raw,''), COALESCE(stop_reason,''), attachments, citations, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost, currency, credits, status, error, COALESCE(feedback,''), created_at, gen_ms, COALESCE(verify,''), COALESCE(author_id,'') FROM messages WHERE id=?`, id)
+	row := db.QueryRowContext(ctx, `SELECT id, conversation_id, COALESCE(parent_id,''), role, provider, model_id, COALESCE(model_label,''), fast, blocks, COALESCE(raw,''), COALESCE(stop_reason,''), attachments, COALESCE(selected_user_skill_ids,'[]'), citations, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost, currency, credits, status, error, COALESCE(feedback,''), created_at, gen_ms, COALESCE(verify,''), COALESCE(author_id,'') FROM messages WHERE id=?`, id)
 	m, err := scanMessage(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -626,9 +626,9 @@ func GetMessage(ctx context.Context, db *sql.DB, id string) (*Message, error) {
 
 func scanMessage(s scanner) (Message, error) {
 	var m Message
-	var blocks, raw, atts, cites, verify string
+	var blocks, raw, atts, selectedSkills, cites, verify string
 	var fastI int
-	if err := s.Scan(&m.ID, &m.ConversationID, &m.ParentID, &m.Role, &m.Provider, &m.ModelID, &m.ModelLabel, &fastI, &blocks, &raw, &m.StopReason, &atts, &cites, &m.InputTokens, &m.OutputTokens, &m.CacheReadTokens, &m.CacheWriteTokens, &m.Cost, &m.Currency, &m.Credits, &m.Status, &m.Error, &m.Feedback, &m.CreatedAt, &m.GenMs, &verify, &m.AuthorID); err != nil {
+	if err := s.Scan(&m.ID, &m.ConversationID, &m.ParentID, &m.Role, &m.Provider, &m.ModelID, &m.ModelLabel, &fastI, &blocks, &raw, &m.StopReason, &atts, &selectedSkills, &cites, &m.InputTokens, &m.OutputTokens, &m.CacheReadTokens, &m.CacheWriteTokens, &m.Cost, &m.Currency, &m.Credits, &m.Status, &m.Error, &m.Feedback, &m.CreatedAt, &m.GenMs, &verify, &m.AuthorID); err != nil {
 		return m, err
 	}
 	m.Fast = fastI == 1
@@ -637,6 +637,7 @@ func scanMessage(s scanner) (Message, error) {
 		m.Raw = json.RawMessage(raw)
 	}
 	m.Attachments = json.RawMessage(orDefault(atts, "[]"))
+	m.SelectedUserSkillIDs = json.RawMessage(orDefault(selectedSkills, "[]"))
 	m.Citations = json.RawMessage(orDefault(cites, "[]"))
 	// Only set Verify when audited, so `omitempty` keeps it off the wire otherwise.
 	if verify != "" {
@@ -655,6 +656,9 @@ func CreateMessage(ctx context.Context, db *sql.DB, m Message) (*Message, error)
 	}
 	if len(m.Attachments) == 0 {
 		m.Attachments = json.RawMessage("[]")
+	}
+	if len(m.SelectedUserSkillIDs) == 0 {
+		m.SelectedUserSkillIDs = json.RawMessage("[]")
 	}
 	if len(m.Citations) == 0 {
 		m.Citations = json.RawMessage("[]")
@@ -691,11 +695,11 @@ func CreateMessage(ctx context.Context, db *sql.DB, m Message) (*Message, error)
 	}
 	defer tx.Rollback() //nolint:errcheck
 	_, err = tx.ExecContext(ctx, `INSERT INTO messages(
-		id, conversation_id, parent_id, role, provider, model_id, model_label, fast, blocks, raw, stop_reason, attachments, citations,
+		id, conversation_id, parent_id, role, provider, model_id, model_label, fast, blocks, raw, stop_reason, attachments, selected_user_skill_ids, citations,
 		input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost, currency, status, error, search_text, author_id, created_at
-	) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		m.ID, m.ConversationID, parent, m.Role, m.Provider, m.ModelID, m.ModelLabel, boolInt(m.Fast), string(m.Blocks), raw, m.StopReason,
-		string(m.Attachments), string(m.Citations),
+		string(m.Attachments), string(m.SelectedUserSkillIDs), string(m.Citations),
 		m.InputTokens, m.OutputTokens, m.CacheReadTokens, m.CacheWriteTokens, m.Cost, m.Currency, m.Status, m.Error, searchTextFromBlocks(m.Blocks), m.AuthorID, m.CreatedAt)
 	if err != nil {
 		return nil, err
@@ -746,9 +750,9 @@ func CreateMessagePath(ctx context.Context, db *sql.DB, msgs []Message) (string,
 	}
 	defer tx.Rollback() //nolint:errcheck
 	stmt, err := tx.PrepareContext(ctx, `INSERT INTO messages(
-		id, conversation_id, parent_id, role, provider, model_id, model_label, fast, blocks, raw, stop_reason, attachments, citations,
+		id, conversation_id, parent_id, role, provider, model_id, model_label, fast, blocks, raw, stop_reason, attachments, selected_user_skill_ids, citations,
 		input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost, currency, status, error, search_text, author_id, created_at
-	) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return "", err
 	}
@@ -763,6 +767,9 @@ func CreateMessagePath(ctx context.Context, db *sql.DB, msgs []Message) (string,
 		}
 		if len(m.Attachments) == 0 {
 			m.Attachments = json.RawMessage("[]")
+		}
+		if len(m.SelectedUserSkillIDs) == 0 {
+			m.SelectedUserSkillIDs = json.RawMessage("[]")
 		}
 		if len(m.Citations) == 0 {
 			m.Citations = json.RawMessage("[]")
@@ -790,7 +797,7 @@ func CreateMessagePath(ctx context.Context, db *sql.DB, msgs []Message) (string,
 		}
 		if _, err := stmt.ExecContext(ctx,
 			m.ID, m.ConversationID, parentArg, m.Role, m.Provider, m.ModelID, m.ModelLabel, boolInt(m.Fast), string(m.Blocks), raw, m.StopReason,
-			string(m.Attachments), string(m.Citations),
+			string(m.Attachments), string(m.SelectedUserSkillIDs), string(m.Citations),
 			m.InputTokens, m.OutputTokens, m.CacheReadTokens, m.CacheWriteTokens, m.Cost, m.Currency, m.Status, m.Error,
 			searchTextFromBlocks(m.Blocks), m.AuthorID, m.CreatedAt); err != nil {
 			return "", err

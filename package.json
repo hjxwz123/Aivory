@@ -9,7 +9,8 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "typecheck": "tsc -b --noEmit",
-    "test": "vitest run"
+    "test": "vitest run --dir tests/frontend",
+    "test:sandbox": "python3 -m unittest discover -s tests/sandbox-service -p 'test_*.py'"
   },
   "dependencies": {
     "@aiden0z/pptx-renderer": "^1.2.4",
