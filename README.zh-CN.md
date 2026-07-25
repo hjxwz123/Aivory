@@ -1,5 +1,9 @@
 # Aivory
 
+<p align="center">
+  <img src="docs/screenshots/aivory-readme-cover.png" alt="Aivory——自部署 AI 工作空间" width="100%">
+</p>
+
 > 5 分钟自部署、厂商中立的多模型 AI 对话平台。Claude、GPT、Gemini、各种开源模型，统一在一套有编辑感的 UI 下：流式输出、多轮工具调用、RAG、团队工作空间、深度研究、完整管理后台——全是标配。
 
 <p align="center">
@@ -29,6 +33,10 @@
 **对话树，不是线性日志** — 编辑历史问题、重新生成回答、换模型重试，每次操作都开一个新分支，通过 `< 2/3 >` 控件切换。数据库保留完整树形结构；发给模型的上下文按需压缩历史摘要，不影响原始存档。
 
 **无需重启的管理后台** — 渠道、模型、技能、用户、用量报表、所有系统设置，全部在一流的管理 UI 里操作。任何改动保存后，下一次请求立即生效，无需重启。渠道 API key 存在数据库里，不放 env 文件，轮换密钥不用碰宿主机。
+
+<p align="center">
+  <img src="docs/screenshots/hero.png" alt="Aivory 多模型 AI 对话工作空间" width="100%">
+</p>
 
 ---
 
@@ -236,6 +244,10 @@ docker compose -f docker-compose.prod.yml up -d
 ---
 
 ## 架构图
+
+<p align="center">
+  <img src="docs/screenshots/aivory-architecture-poster.png" alt="Aivory 项目架构——统一编排模型、工具、知识、沙箱和数据服务" width="100%">
+</p>
 
 ```mermaid
 graph TB

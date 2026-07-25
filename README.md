@@ -1,7 +1,7 @@
 # Aivory
 
 <p align="center">
-  <img src="docs/screenshots/hero.png" alt="Aivory — multi-model AI chat platform" width="100%">
+  <img src="docs/screenshots/aivory-readme-cover.png" alt="Aivory — self-hosted AI workspace" width="100%">
 </p>
 
 <p align="center">
@@ -28,6 +28,10 @@
 ## Why Aivory
 
 Most self-hosted AI frontends are thin proxies — one model, one message, one response. Aivory is built as a production platform: the same depth you expect from Claude.ai or ChatGPT, with the control of running it yourself.
+
+<p align="center">
+  <img src="docs/screenshots/hero.png" alt="Aivory multi-model AI chat workspace" width="100%">
+</p>
 
 ## Feature highlights
 
@@ -251,6 +255,10 @@ Open `http://localhost:5173`. First launch shows the setup screen.
 ---
 
 ## Architecture
+
+<p align="center">
+  <img src="docs/screenshots/aivory-architecture-poster.png" alt="Aivory architecture — models, tools, knowledge, sandbox, and data coordinated through one workspace" width="100%">
+</p>
 
 ```mermaid
 graph TB
