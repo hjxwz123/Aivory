@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import {
   Search,
@@ -75,6 +75,7 @@ import { useOpenSettings } from '@/hooks/use-open-settings'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { useCopy } from '@/hooks/use-clipboard'
 import { conversationsApi, ApiError } from '@/api'
+import { duration } from '@/lib/design-tokens'
 import { accentClasses } from '@/lib/project-helpers'
 import { partitionConversationNavigation } from '@/lib/conversation-navigation'
 import { type DateBucket, bucketFor, modKey, cn, truncate } from '@/lib/utils'
@@ -632,7 +633,10 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
                             <ChevronRight
                               size={13}
                               aria-hidden
-                              className={cn('transition-transform duration-150', expanded && 'rotate-90')}
+                              className={cn(
+                                'transition-transform duration-[var(--duration-base)] ease-[var(--ease-out)]',
+                                expanded && 'rotate-90',
+                              )}
                             />
                           </button>
                           <Link
@@ -662,36 +666,41 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
                             ) : null}
                           </Link>
                         </div>
-                        {expanded ? (
-                          <ul id={childListId}>
-                            {loadingProjectIds.has(project.id) && projectConversations.length === 0 ? (
-                              <li
-                                role="status"
-                                aria-label={tCommon('common.loading')}
-                                className="ml-11 flex min-h-8 items-center text-[var(--color-fg-subtle)]"
-                              >
-                                <Loader2 size={12} className="animate-spin" aria-hidden />
-                              </li>
-                            ) : null}
-                            {projectConversations.map((conversation) => (
-                              <ConversationItem
-                                key={conversation.id}
-                                conversation={conversation}
-                                active={conversation.id === currentId}
-                                onSelect={onClose}
-                                t={t}
-                                nested
-                              />
-                            ))}
-                            {!loadingProjectIds.has(project.id) &&
-                              loadedProjectIdsRef.current.has(project.id) &&
-                              projectConversations.length === 0 ? (
-                              <li className="ml-11 min-h-8 py-1.5 pr-2 text-[11.5px] text-[var(--color-fg-subtle)]">
-                                {tProjects('detail.chatsEmpty')}
-                              </li>
-                            ) : null}
-                          </ul>
-                        ) : null}
+                        <ProjectConversationDisclosure
+                          id={childListId}
+                          expanded={expanded}
+                        >
+                          {() => (
+                            <ul>
+                              {loadingProjectIds.has(project.id) && projectConversations.length === 0 ? (
+                                <li
+                                  role="status"
+                                  aria-label={tCommon('common.loading')}
+                                  className="ml-11 flex min-h-8 items-center text-[var(--color-fg-subtle)]"
+                                >
+                                  <Loader2 size={12} className="animate-spin" aria-hidden />
+                                </li>
+                              ) : null}
+                              {projectConversations.map((conversation) => (
+                                <ConversationItem
+                                  key={conversation.id}
+                                  conversation={conversation}
+                                  active={conversation.id === currentId}
+                                  onSelect={onClose}
+                                  t={t}
+                                  nested
+                                />
+                              ))}
+                              {!loadingProjectIds.has(project.id) &&
+                                loadedProjectIdsRef.current.has(project.id) &&
+                                projectConversations.length === 0 ? (
+                                <li className="ml-11 min-h-8 py-1.5 pr-2 text-[11.5px] text-[var(--color-fg-subtle)]">
+                                  {tProjects('detail.chatsEmpty')}
+                                </li>
+                              ) : null}
+                            </ul>
+                          )}
+                        </ProjectConversationDisclosure>
                       </li>
                     )
                   })}
@@ -783,6 +792,75 @@ function Group({
           <ConversationItem key={c.id} conversation={c} active={c.id === currentId} onSelect={onSelect} t={t} />
         ))}
       </ul>
+    </div>
+  )
+}
+
+function ProjectConversationDisclosure({
+  id,
+  expanded,
+  children,
+}: {
+  id: string
+  expanded: boolean
+  children: () => ReactNode
+}) {
+  const renderedRef = useRef(expanded)
+  const [rendered, setRendered] = useState(expanded)
+  const [visible, setVisible] = useState(expanded)
+  // Mount on the opening render so the parent's active-row locator can find
+  // the conversation; retain it only until the closing transition finishes.
+  const shouldRender = expanded || rendered
+
+  useEffect(() => {
+    let firstFrame = 0
+    let secondFrame = 0
+    let unmountTimer: number | undefined
+
+    if (expanded) {
+      if (renderedRef.current) {
+        setVisible(true)
+      } else {
+        renderedRef.current = true
+        setRendered(true)
+        setVisible(false)
+        firstFrame = window.requestAnimationFrame(() => {
+          secondFrame = window.requestAnimationFrame(() => setVisible(true))
+        })
+      }
+    } else {
+      setVisible(false)
+      unmountTimer = window.setTimeout(() => {
+        renderedRef.current = false
+        setRendered(false)
+      }, duration.base + duration.instant)
+    }
+
+    return () => {
+      window.cancelAnimationFrame(firstFrame)
+      window.cancelAnimationFrame(secondFrame)
+      if (unmountTimer !== undefined) window.clearTimeout(unmountTimer)
+    }
+  }, [expanded])
+
+  return (
+    <div
+      id={id}
+      aria-hidden={!expanded}
+      inert={!expanded}
+      onTransitionEnd={(event) => {
+        if (event.currentTarget !== event.target || expanded) return
+        renderedRef.current = false
+        setRendered(false)
+      }}
+      className={cn(
+        'grid transition-[grid-template-rows,opacity] duration-[var(--duration-base)] ease-[var(--ease-out)]',
+        visible
+          ? 'grid-rows-[1fr] opacity-100'
+          : 'pointer-events-none grid-rows-[0fr] opacity-0',
+      )}
+    >
+      {shouldRender ? <div className="min-h-0 overflow-hidden">{children()}</div> : null}
     </div>
   )
 }

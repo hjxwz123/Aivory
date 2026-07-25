@@ -45,6 +45,7 @@ import { SkillIcon } from '@/components/ui/skill-icon'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { toast } from '@/hooks/use-toast'
+import { skillDisplayDescription } from '@/lib/skill-description'
 import { isValidSkillName, parseSkillDocument } from '@/lib/skill-document'
 import { cn } from '@/lib/utils'
 
@@ -69,10 +70,6 @@ const emptyCatalog: ApiLibraryCatalog = { skills: [], prompts: [] }
 
 function newEditor(kind: ItemKind): EditorState {
   return { open: true, kind, name: '', description: '', content: '', importText: '' }
-}
-
-function catalogSkillDescription(item: ApiLibraryCatalogSkill): string {
-  return item.display_description ?? item.description ?? ''
 }
 
 export default function SkillsPrompts() {
@@ -126,7 +123,7 @@ export default function SkillsPrompts() {
           kindFilter !== 'prompt' &&
           (!normalizedQuery ||
             item.name.toLocaleLowerCase().includes(normalizedQuery) ||
-            item.description.toLocaleLowerCase().includes(normalizedQuery)),
+            skillDisplayDescription(item).toLocaleLowerCase().includes(normalizedQuery)),
       ),
     [kindFilter, normalizedQuery, skills],
   )
@@ -148,7 +145,7 @@ export default function SkillsPrompts() {
           kindFilter !== 'prompt' &&
           (!normalizedQuery ||
             item.name.toLocaleLowerCase().includes(normalizedQuery) ||
-            catalogSkillDescription(item).toLocaleLowerCase().includes(normalizedQuery)),
+            skillDisplayDescription(item).toLocaleLowerCase().includes(normalizedQuery)),
       ),
     [catalog.skills, kindFilter, normalizedQuery],
   )
@@ -367,7 +364,7 @@ export default function SkillsPrompts() {
                           key={`skill:${item.id}`}
                           kind="skill"
                           name={item.name}
-                          description={item.description}
+                          description={skillDisplayDescription(item)}
                           icon={item.icon}
                           imported={Boolean(item.source_skill_id)}
                           onEdit={() => editSkill(item)}
@@ -566,7 +563,7 @@ function CatalogRow({
   t: ReturnType<typeof useTranslation>['t']
 }) {
   const description =
-    kind === 'skill' ? catalogSkillDescription(item as ApiLibraryCatalogSkill) : item.description
+    kind === 'skill' ? skillDisplayDescription(item as ApiLibraryCatalogSkill) : item.description
   return (
     <li className="flex min-w-0 items-center gap-3 py-3 sm:px-2">
       <span className="grid size-9 shrink-0 place-items-center rounded-[9px] bg-[var(--color-accent-soft)] text-[var(--color-accent)]">

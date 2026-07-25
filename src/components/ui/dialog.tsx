@@ -101,7 +101,9 @@ export function DialogFooter({ className, ...rest }: HTMLAttributes<HTMLDivEleme
   return (
     <div
       className={cn(
-        'shrink-0 px-6 py-4 border-t border-[var(--color-divider)] flex items-center justify-end gap-2',
+        'shrink-0 border-t border-[var(--color-divider)] flex items-center justify-end gap-1.5 px-5 py-2.5 sm:px-6',
+        '[&_button]:h-8 [&_button]:px-3 [&_button]:text-sm [&_a]:h-8 [&_a]:px-3 [&_a]:text-sm',
+        'max-sm:[&_button]:h-10 max-sm:[&_a]:h-10',
         className,
       )}
       {...rest}

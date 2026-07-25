@@ -208,7 +208,7 @@
       "name": "名前",
       "icon": "アイコン",
       "displayDescription": "表示用の説明",
-      "displayDescriptionHint": "カタログと一覧にのみ表示され、スキルの判定には使用されません。",
+      "displayDescriptionHint": "任意の表示用説明です。空欄の場合は「使用するタイミング」の説明を表示します。",
       "when": "使用するタイミング（1文）",
       "whenHint": "プロンプト索引に入る—発火条件として書く。",
       "instructions": "手順（Markdown）",

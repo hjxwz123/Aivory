@@ -71,6 +71,7 @@ import {
   addSelectedUserSkill,
   selectedUserSkillIdsForRequest,
 } from '@/lib/composer-commands'
+import { skillDisplayDescription } from '@/lib/skill-description'
 import { encodeWavFromBlob } from '@/lib/audio'
 import { startVoiceStream, type VoiceStreamController } from '@/lib/audio-stream'
 import { ProgressRing } from '@/components/ui/progress-ring'
@@ -2000,12 +2001,13 @@ export function Composer({
     const matches = (name: string, description: string) =>
       !query || name.toLocaleLowerCase().includes(query) || description.toLocaleLowerCase().includes(query)
     const skillItems: ComposerCommandItem[] = librarySkills
-      .filter((skill) => matches(skill.name, skill.description))
+      .filter((skill) => !selectedSkills.some((selected) => selected.id === skill.id))
+      .filter((skill) => matches(skill.name, skillDisplayDescription(skill)))
       .map((skill) => ({
         kind: 'skill' as const,
         id: skill.id,
         name: skill.name,
-        description: skill.description,
+        description: skillDisplayDescription(skill),
         skill,
       }))
     const promptItems: ComposerCommandItem[] = libraryPrompts
@@ -2023,7 +2025,7 @@ export function Composer({
       return [...skillItems.slice(0, perKind), ...promptItems.slice(0, perKind)]
     }
     return [...skillItems, ...promptItems].slice(0, limit)
-  }, [commandQuery, libraryPrompts, librarySkills])
+  }, [commandQuery, libraryPrompts, librarySkills, selectedSkills])
 
   useEffect(() => {
     setCommandIndex(0)
@@ -2087,8 +2089,8 @@ export function Composer({
       setSelectedSkills((current) => addSelectedUserSkill(current, item.skill))
     } else {
       ref.current?.replaceRange(query.from, query.to, item.prompt.content)
+      setDismissedCommandKey(commandKey)
     }
-    setDismissedCommandKey(commandKey)
     setCommandQuery(null)
   }
 

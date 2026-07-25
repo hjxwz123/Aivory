@@ -256,15 +256,16 @@ type Prompt struct {
 // UserSkill is a private, instruction-only Agent Skill. Unlike administrator
 // skills it has no assets, storage paths, or sandbox staging surface.
 type UserSkill struct {
-	ID            string `json:"id"`
-	UserID        string `json:"-"`
-	Name          string `json:"name"`
-	Description   string `json:"description"`
-	Icon          string `json:"icon"`
-	Instructions  string `json:"instructions"`
-	SourceSkillID string `json:"source_skill_id,omitempty"`
-	CreatedAt     int64  `json:"created_at"`
-	UpdatedAt     int64  `json:"updated_at"`
+	ID                 string `json:"id"`
+	UserID             string `json:"-"`
+	Name               string `json:"name"`
+	Description        string `json:"description"`
+	DisplayDescription string `json:"display_description,omitempty"`
+	Icon               string `json:"icon"`
+	Instructions       string `json:"instructions"`
+	SourceSkillID      string `json:"source_skill_id,omitempty"`
+	CreatedAt          int64  `json:"created_at"`
+	UpdatedAt          int64  `json:"updated_at"`
 }
 
 // UserPrompt is a private prompt template. A catalog copy is independent from

@@ -187,16 +187,16 @@ export function ShareConversationDialog({
         ) : null}
 
         {loadState === 'error' ? (
-          <DialogFooter className="border-t-0 px-5 pb-5 pt-3 sm:px-6 sm:pb-6 sm:pt-3">
-            <Button className="min-h-11 w-full sm:min-h-10" onClick={() => void loadShare()}>
+          <DialogFooter className="border-t-0">
+            <Button onClick={() => void loadShare()}>
               {t('common:actions.tryAgain')}
             </Button>
           </DialogFooter>
         ) : confirmRevoke ? (
-          <DialogFooter className="grid grid-cols-2 gap-2 border-t-0 px-5 pb-5 pt-3 sm:px-6 sm:pb-6 sm:pt-3">
+          <DialogFooter className="border-t-0 max-sm:grid max-sm:grid-cols-2">
             <Button
               variant="ghost"
-              className="min-h-11 whitespace-normal px-2 py-2 leading-tight sm:min-h-10"
+              className="min-w-0 whitespace-normal px-2 leading-tight"
               disabled={Boolean(busyAction)}
               onClick={() => setConfirmRevoke(false)}
             >
@@ -204,7 +204,7 @@ export function ShareConversationDialog({
             </Button>
             <Button
               variant="destructive"
-              className="min-h-11 whitespace-normal px-2 py-2 leading-tight sm:min-h-10"
+              className="min-w-0 whitespace-normal px-2 leading-tight"
               loading={busyAction === 'revoke'}
               leadingIcon={<Trash2 size={15} aria-hidden />}
               onClick={() => void revokeShare()}
@@ -213,10 +213,9 @@ export function ShareConversationDialog({
             </Button>
           </DialogFooter>
         ) : loadState === 'ready' && !share ? (
-          <DialogFooter className="border-t-0 px-5 pb-5 pt-2 sm:px-6 sm:pb-6 sm:pt-3">
+          <DialogFooter className="border-t-0">
             <Button
               loading={busyAction === 'share'}
-              className="min-h-11 w-full sm:min-h-10"
               leadingIcon={<Link2 size={15} aria-hidden />}
               onClick={() => void saveShare(false)}
             >
@@ -226,10 +225,10 @@ export function ShareConversationDialog({
             </Button>
           </DialogFooter>
         ) : loadState === 'ready' && share ? (
-          <DialogFooter className="grid grid-cols-[auto_minmax(0,1fr)] gap-2 border-t-0 px-5 pb-5 pt-3 sm:px-6 sm:pb-6 sm:pt-3">
+          <DialogFooter className="border-t-0 max-sm:grid max-sm:grid-cols-[auto_minmax(0,1fr)]">
             <Button
               variant="ghost"
-              className="min-h-11 min-w-0 whitespace-normal px-2.5 py-2 leading-tight text-[var(--color-danger)] hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)] sm:min-h-10"
+              className="min-w-0 whitespace-normal px-2.5 leading-tight text-[var(--color-danger)] hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)]"
               disabled={Boolean(busyAction)}
               leadingIcon={<Trash2 size={15} aria-hidden />}
               onClick={() => setConfirmRevoke(true)}
@@ -237,7 +236,7 @@ export function ShareConversationDialog({
               {t('chat:share.revokeCta')}
             </Button>
             <Button
-              className="min-h-11 min-w-0 whitespace-normal px-2 py-2 leading-tight sm:min-h-10"
+              className="min-w-0 whitespace-normal px-2 leading-tight"
               loading={busyAction === 'share'}
               leadingIcon={<Copy size={15} aria-hidden />}
               onClick={() => void saveShare(true)}

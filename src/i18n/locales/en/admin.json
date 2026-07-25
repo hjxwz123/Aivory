@@ -208,7 +208,7 @@
       "name": "Name",
       "icon": "Icon",
       "displayDescription": "Display description",
-      "displayDescriptionHint": "Shown in catalogs and lists only. It does not affect skill matching.",
+      "displayDescriptionHint": "Optional catalog copy. When blank, lists show the “when to use” description.",
       "when": "When to use (one sentence)",
       "whenHint": "Goes into the prompt index — write it as a trigger.",
       "instructions": "Instructions (Markdown)",
