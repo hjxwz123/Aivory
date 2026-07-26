@@ -21,7 +21,12 @@ import {
   FileSpreadsheet,
   Sparkles,
   BookText,
-  Coins, ImageOff, Zap, Sigma } from 'lucide-react'
+  Coins,
+  ImageOff,
+  Zap,
+  Sigma,
+  Square,
+} from 'lucide-react'
 import { Link } from 'react-router-dom'
 import type { Message, Attachment } from '@/types/chat'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -70,6 +75,7 @@ import { ImageLightbox } from './image-lightbox'
 import { FilePreview } from './file-preview'
 import { toast } from '@/hooks/use-toast'
 import { cn, safeHref } from '@/lib/utils'
+import { isEmptyStoppedMessage, messageHasActions } from '@/lib/message-state'
 
 /**
  * ThinkingLogo — the "still forming a reply" indicator shown before the first
@@ -187,6 +193,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
   const editFormulaSelectionRef = useRef<{ from: number; to: number } | null>(null)
   const { copied, copy } = useCopy()
   const [exportingDocx, setExportingDocx] = useState(false)
+  const emptyStopped = isEmptyStoppedMessage(message)
   const turnTime = useMemo(
     () => ({
       label: formatTurnTime(message.createdAt, i18n.resolvedLanguage || i18n.language),
@@ -573,6 +580,11 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
               <div className="py-1">
                 <ThinkingLogo />
               </div>
+            ) : emptyStopped ? (
+              <div role="status" className="my-1 inline-flex items-center gap-2 text-sm text-[var(--color-fg-muted)]">
+                <Square size={11} className="shrink-0 fill-current" aria-hidden />
+                <span>{t('message.stopped', { defaultValue: 'Generation stopped.' })}</span>
+              </div>
             ) : message.quotaExceeded ? (
               <div className="my-1 overflow-hidden rounded-xl border border-[var(--color-secondary)]/40 bg-[var(--color-secondary-soft)]/50 px-4 py-3.5">
                 <div className="flex items-center gap-2 text-[var(--color-secondary)] font-medium text-sm">
@@ -718,7 +730,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
             via opacity + pointer-events so nothing below is pushed around.
             Also show the action bar when a message has an error but no content
             so the user can retry the failed message. */}
-        {!readOnly && !editing && !message.streaming && (message.content || message.error || (message.artifacts && message.artifacts.length > 0)) ? (
+        {!readOnly && !editing && !message.streaming && messageHasActions(message) ? (
           isPhone ? (
             <div className="mt-1.5 flex items-center gap-2">
               <button

@@ -162,6 +162,7 @@
   },
   "message": {
     "refused": "Le modèle a refusé de répondre à cette demande.",
+    "stopped": "Génération arrêtée.",
     "ragFullText": "Document(s) intégral/intégraux injecté(s)",
     "ragFullDoc": "Contexte du document entier",
     "ragNone": "Récupération ignorée",

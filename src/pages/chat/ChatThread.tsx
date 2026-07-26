@@ -242,8 +242,15 @@ export default function ChatThread() {
 
   function stopAll() {
     if (!conversation) return
-    for (const m of conversation.messages) {
-      if (m.streaming) abortStream(m.id)
+    // The composer belongs to the active visible branch. Stop its newest live
+    // assistant only; an older sibling may still be generating off-path and must
+    // continue independently.
+    for (let index = conversation.messages.length - 1; index >= 0; index--) {
+      const message = conversation.messages[index]
+      if (message.role === 'assistant' && message.streaming) {
+        abortStream(message.id)
+        return
+      }
     }
   }
 

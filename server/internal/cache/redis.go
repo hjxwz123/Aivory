@@ -138,6 +138,20 @@ func (c *redisCache) Publish(topic, payload string) {
 // small buffer; slow consumers drop messages rather than block the bridge.
 func (c *redisCache) Subscribe(topic string) (chan string, func()) {
 	ps := c.rdb.Subscribe(c.ctx, topic)
+	// Wait for Redis to acknowledge SUBSCRIBE before callers perform their
+	// post-subscribe marker check. Without this handshake, Set+Publish can land
+	// after Get reports no marker but before the server has activated the channel,
+	// losing a stop signal in the exact first-token race the marker is meant to
+	// close. The in-memory cache is synchronous and needs no equivalent step.
+	ackCtx, ackCancel := context.WithTimeout(c.ctx, redisOpTimeout)
+	_, ackErr := ps.Receive(ackCtx)
+	ackCancel()
+	if ackErr != nil {
+		_ = ps.Close()
+		out := make(chan string)
+		close(out)
+		return out, func() {}
+	}
 	out := make(chan string, 16)
 	var once sync.Once
 	done := make(chan struct{})

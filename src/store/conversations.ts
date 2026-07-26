@@ -332,7 +332,18 @@ interface ConversationStore {
 }
 
 const streamControllers = new Map<string, AbortController>()
-const streamHandoffs = new Set<string>()
+// A live request starts with a client generation id so Stop works even before
+// message_start assigns a persisted assistant id. Keep aliases while re-keying;
+// replayed streams after refresh fall back to message_id targeting instead.
+const streamGenerationIds = new Map<string, string>()
+// Controller aliases can change at message_start. Keep the owning conversation
+// alongside each live alias so a click from a just-replaced row can still route
+// Stop to the real conversation during the React re-key window.
+const streamConversationIds = new Map<string, string>()
+// A replay takeover deliberately aborts an existing POST reader. Track that by
+// controller identity, not message-id aliases: id markers can survive a replay
+// takeover and incorrectly swallow a later, genuine user stop.
+const streamHandoffs = new WeakSet<AbortController>()
 // Exact ids generated for optimistic message rows. This is intentionally an
 // explicit registry rather than a prefix test: imported/server ids are opaque
 // and may legally resemble `uid('m')` output.
@@ -409,6 +420,12 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+function createGenerationId(): string {
+  const bytes = new Uint8Array(16)
+  crypto.getRandomValues(bytes)
+  return `gen_${Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')}`
+}
+
 function previousPersistedLeaf(messages: readonly Message[]): string | undefined {
   for (let i = messages.length - 1; i >= 0; i--) {
     const id = persistedMessageReference(messages, messages[i].id, generatedLocalMessageIds)
@@ -454,14 +471,24 @@ function scheduleStoppedPathReconcile(
         if (!latest || latest.messages.some((message) => message.streaming)) return
 
         const serverStillStreaming = resp.messages.some((message) => message.status === 'streaming')
-        // A stop is terminal from the user's point of view. The backend can still
-        // report `streaming` for a few milliseconds while it handles the stop
-        // signal; never re-arm the spinner while retrying for its settled row.
         const messages = resp.messages.map((message) => ({
           ...toLocalMessage(message),
           streaming: false,
           imageStatus: undefined,
         }))
+        const responseLeaf = resp.conversation.active_leaf_id || messages[messages.length - 1]?.id
+        const stoppedTurnVisible = options.expectedAssistantId
+          ? messages.some((message) => message.id === options.expectedAssistantId)
+          : Boolean(responseLeaf && responseLeaf !== options.previousLeaf)
+
+        // A stop is terminal from the user's point of view. Until the server has
+        // both settled and returned the exact stopped turn, preserve the local
+        // stopped row. Applying an early `status=streaming` snapshot as
+        // `streaming:false` would recreate the empty, actionless bubble this
+        // reconciliation exists to eliminate; an old-leaf snapshot could remove
+        // the stopped turn altogether.
+        if (serverStillStreaming || !stoppedTurnVisible) continue
+
         set((state) => ({
           conversations: state.conversations.map((conversation) =>
             conversation.id !== conversationId
@@ -479,12 +506,7 @@ function scheduleStoppedPathReconcile(
           ),
         }))
         pruneGeneratedLocalMessageIds(get().conversations)
-
-        const responseLeaf = resp.conversation.active_leaf_id || messages[messages.length - 1]?.id
-        const stoppedTurnVisible = options.expectedAssistantId
-          ? messages.some((message) => message.id === options.expectedAssistantId)
-          : Boolean(responseLeaf && responseLeaf !== options.previousLeaf)
-        if (!serverStillStreaming && stoppedTurnVisible) return
+        return
       } catch {
         // Stop reconciliation is best effort per attempt; the bounded loop below
         // removes unsafe optimistic ids even if every network request fails.
@@ -1058,8 +1080,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
         (msg.citations?.length ?? 0) > 0
       if (existing) {
         if (!opts?.replaceExisting && hasLocalOutput) continue
-        streamHandoffs.add(msg.id)
-        streamHandoffs.add(msg.id + '-regen')
+        streamHandoffs.add(existing)
         existing.abort()
         streamControllers.delete(msg.id)
         streamControllers.delete(msg.id + '-regen')
@@ -1156,6 +1177,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
           ),
     }
     const assistantId = uid('m')
+    const generationId = createGenerationId()
     generatedLocalMessageIds.add(assistantId)
     const assistantMsg: Message = {
       id: assistantId,
@@ -1176,6 +1198,8 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
       verify: input.verify ? { status: 'running', findings: [] } : undefined,
     }
     streamControllers.set(assistantId, abort)
+    streamGenerationIds.set(assistantId, generationId)
+    streamConversationIds.set(assistantId, input.conversationId)
     // Optimistically update the local cache. For a normal turn we append to the
     // active leaf; for an edit-branch (§4.15) we truncate the visible path to
     // the edited message's parent first, so the new question REPLACES the old
@@ -1248,6 +1272,8 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
           error: 'Could not start the conversation. Please try again.',
         }))
         streamControllers.delete(assistantId)
+        streamGenerationIds.delete(assistantId)
+        streamConversationIds.delete(assistantId)
         if (abort.signal.aborted) finishStoppedPathBarrier(input.conversationId)
         return
       }
@@ -1272,10 +1298,20 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
       }))
       moveStoppedPathBarrier(tempId, realId)
       input.conversationId = realId
+      if (streamConversationIds.get(assistantId) === tempId) {
+        streamConversationIds.set(assistantId, realId)
+      }
       // Swap the temp id in the URL for the real one (navigate replace), so a
       // refresh/share resolves and the thread keeps rendering (it re-keyed too).
       input.onConversationId?.(realId)
     }
+    // If Stop was clicked while an optimistic first conversation was still
+    // being created, its first request targeted a temporary conversation id and
+    // the logical controller is already aborted. Use a short-lived transport
+    // controller to persist the turn, then stop it by the server message id as
+    // soon as message_start proves the placeholder exists.
+    const stoppedDuringFirstCreate = Boolean(input.createFirst && abort.signal.aborted)
+    const transportAbort = stoppedDuringFirstCreate ? new AbortController() : abort
     // Hoisted out of the try so the catch below targets the message by its
     // CURRENT id: after `message_start` the message is re-keyed to the backend
     // id, and a mid-stream network drop must patch THAT id (else streaming:true
@@ -1296,6 +1332,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
         `/conversations/${encodeURIComponent(input.conversationId)}/messages`,
         {
           text: input.text,
+          generation_id: generationId,
           // §fast-mode: a fast turn omits model_id (the server resolves + hides the
           // fast model). Advanced turns send the picked model.
           model_id: input.fast ? undefined : input.modelId,
@@ -1322,7 +1359,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
           // UI language → backend anchors the reply language to it (§ reply language).
           locale: currentLocale(),
         },
-        abort.signal,
+        transportAbort.signal,
       )) {
         const ev = frame.data as ApiSseEvent
         switch (ev.type) {
@@ -1345,8 +1382,14 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
               const ctrl = streamControllers.get(assistantId)
               if (ctrl) {
                 streamControllers.set(serverAssistantId, ctrl)
-                streamControllers.delete(assistantId)
               }
+              streamGenerationIds.set(serverAssistantId, generationId)
+            }
+            streamConversationIds.set(serverAssistantId, input.conversationId)
+            if (stoppedDuringFirstCreate) {
+              await conversationsApi.stop(input.conversationId, { message_id: serverAssistantId }).catch(() => {
+                /* The bounded path reconcile below remains the fallback. */
+              })
             }
             break
           case 'text_delta':
@@ -1526,6 +1569,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
               credits: ev.credits && ev.credits > 0 ? ev.credits : m.credits,
               moderation: ev.stop_reason === 'content_moderation' ? true : m.moderation,
               quotaExceeded: ev.stop_reason === 'quota_exceeded' ? true : m.quotaExceeded,
+              stopped: ev.stop_reason === 'stopped' ? true : m.stopped,
             }))
             break
         }
@@ -1550,6 +1594,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
             // §4.20: clear the drawing placeholder on any non-terminal stream end
             // (the `done`/`error`/`artifact` cases already do) so it can't spin forever.
             imageStatus: undefined,
+            stopped: stopped ? true : m.stopped,
             error: stopped || hasOutput ? m.error : m.error || 'The reply ended unexpectedly. Please try again.',
           }))
           if (!hasOutput && !stopped) errored = true
@@ -1571,7 +1616,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
         }
       }
     } catch (e) {
-      if (abort.signal.aborted && (streamHandoffs.delete(serverAssistantId) || streamHandoffs.delete(serverAssistantId + '-regen'))) return
+      if (abort.signal.aborted && streamHandoffs.delete(abort)) return
       if (!abort.signal.aborted && serverAssistantId !== assistantId) {
         window.setTimeout(() => get().resumeStreamingMessages(input.conversationId, { replaceExisting: true }), 0)
         return
@@ -1592,6 +1637,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
         // §verify: a drop between verify_finding and verify_done would leave a
         // perpetual "Verifying…" chip — settle it (no reconcile runs on error).
         verify: m.verify?.status === 'running' ? undefined : m.verify,
+        stopped: abort.signal.aborted ? true : m.stopped,
         error: abort.signal.aborted ? m.error : errorMessage(e),
       }))
       if (abort.signal.aborted) {
@@ -1603,6 +1649,11 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
     } finally {
       if (streamControllers.get(serverAssistantId) === abort) streamControllers.delete(serverAssistantId)
       if (streamControllers.get(assistantId) === abort) streamControllers.delete(assistantId)
+      if (streamGenerationIds.get(serverAssistantId) === generationId) streamGenerationIds.delete(serverAssistantId)
+      if (streamGenerationIds.get(assistantId) === generationId) streamGenerationIds.delete(assistantId)
+      if (streamConversationIds.get(serverAssistantId) === input.conversationId) streamConversationIds.delete(serverAssistantId)
+      if (streamConversationIds.get(assistantId) === input.conversationId) streamConversationIds.delete(assistantId)
+      if (transportAbort !== abort) transportAbort.abort()
       if (abort.signal.aborted) finishStoppedPathBarrier(input.conversationId)
     }
   },
@@ -1622,7 +1673,6 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
     const abort = new AbortController()
     const conv = get().conversations.find((c) => c.id === conversationId)
     const persistedLeafBeforeRegenerate = previousPersistedLeaf(conv?.messages ?? [])
-    streamControllers.set(assistantId + '-regen', abort)
     // §4.15: regenerate forks at the assistant — the new reply is a SIBLING
     // of the old one under the same user turn, not an append. Truncate the
     // visible path to that user parent (dropping the old reply and anything
@@ -1658,7 +1708,17 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
       officialToolNames: armed.officialToolNames,
     })
     const placeholderId = uid('m')
+    const generationId = createGenerationId()
     generatedLocalMessageIds.add(placeholderId)
+    // The visible Stop button targets the optimistic placeholder before
+    // message_start, while the legacy alias keeps callers holding the source
+    // assistant id working during the same narrow window.
+    streamControllers.set(placeholderId, abort)
+    streamControllers.set(assistantId + '-regen', abort)
+    streamGenerationIds.set(placeholderId, generationId)
+    streamGenerationIds.set(assistantId + '-regen', generationId)
+    streamConversationIds.set(placeholderId, conversationId)
+    streamConversationIds.set(assistantId + '-regen', conversationId)
     // §4.15 R2: regenerate forks at the assistant — the new reply is a SIBLING of
     // the old one under the same user turn. Seed branch metadata on the
     // placeholder so the `< n/m >` switcher shows under the reply IMMEDIATELY,
@@ -1714,6 +1774,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
         `/conversations/${encodeURIComponent(conversationId)}/regenerate`,
         {
           assistant_id: assistantId,
+          generation_id: generationId,
           model_id: fast ? undefined : modelId,
           mode,
           verify,
@@ -1812,12 +1873,13 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
             }))
             generatedLocalMessageIds.delete(placeholderId)
             if (serverAssistantId !== placeholderId) {
-              const ctrl = streamControllers.get(assistantId + '-regen')
+              const ctrl = streamControllers.get(placeholderId) ?? streamControllers.get(assistantId + '-regen')
               if (ctrl) {
                 streamControllers.set(serverAssistantId, ctrl)
-                streamControllers.delete(assistantId + '-regen')
               }
+              streamGenerationIds.set(serverAssistantId, generationId)
             }
+            streamConversationIds.set(serverAssistantId, conversationId)
             break
           case 'text_delta':
             updateAssistant(set, conversationId, serverAssistantId, (m) => ({
@@ -1880,6 +1942,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
               // §verify: clear a never-settled audit badge (see sendMessage).
               verify: m.verify?.status === 'running' ? undefined : m.verify,
               moderation: ev.stop_reason === 'content_moderation' ? true : m.moderation,
+              stopped: ev.stop_reason === 'stopped' ? true : m.stopped,
             }))
             break
           case 'error':
@@ -1895,6 +1958,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
       // Reconcile so the freshly generated reply and the previous one show up as
       // siblings with a `< n/m >` picker instead of two stacked bubbles (§4.15).
       if (abort.signal.aborted) {
+        updateAssistant(set, conversationId, serverAssistantId, (m) => ({ ...m, streaming: false, stopped: true }))
         await scheduleStoppedPathReconcile(set, get, conversationId, {
           previousLeaf: persistedLeafBeforeRegenerate,
           expectedAssistantId: assistantStarted ? serverAssistantId : undefined,
@@ -1903,7 +1967,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
         await get().reloadActivePath(conversationId)
       }
     } catch (e) {
-      if (abort.signal.aborted && (streamHandoffs.delete(serverAssistantId) || streamHandoffs.delete(assistantId + '-regen'))) return
+      if (abort.signal.aborted && streamHandoffs.delete(abort)) return
       if (!abort.signal.aborted && serverAssistantId !== placeholderId) {
         window.setTimeout(() => get().resumeStreamingMessages(conversationId, { replaceExisting: true }), 0)
         return
@@ -1912,7 +1976,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
       // the partial reply and reconcile to the server's persisted stopped turn,
       // without the interrupted note or error toast.
       if (abort.signal.aborted) {
-        updateAssistant(set, conversationId, serverAssistantId, (m) => ({ ...m, streaming: false }))
+        updateAssistant(set, conversationId, serverAssistantId, (m) => ({ ...m, streaming: false, stopped: true }))
         await scheduleStoppedPathReconcile(set, get, conversationId, {
           previousLeaf: persistedLeafBeforeRegenerate,
           expectedAssistantId: assistantStarted ? serverAssistantId : undefined,
@@ -1932,7 +1996,14 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
       }
     } finally {
       if (streamControllers.get(assistantId + '-regen') === abort) streamControllers.delete(assistantId + '-regen')
+      if (streamControllers.get(placeholderId) === abort) streamControllers.delete(placeholderId)
       if (streamControllers.get(serverAssistantId) === abort) streamControllers.delete(serverAssistantId)
+      if (streamGenerationIds.get(assistantId + '-regen') === generationId) streamGenerationIds.delete(assistantId + '-regen')
+      if (streamGenerationIds.get(placeholderId) === generationId) streamGenerationIds.delete(placeholderId)
+      if (streamGenerationIds.get(serverAssistantId) === generationId) streamGenerationIds.delete(serverAssistantId)
+      if (streamConversationIds.get(assistantId + '-regen') === conversationId) streamConversationIds.delete(assistantId + '-regen')
+      if (streamConversationIds.get(placeholderId) === conversationId) streamConversationIds.delete(placeholderId)
+      if (streamConversationIds.get(serverAssistantId) === conversationId) streamConversationIds.delete(serverAssistantId)
       if (abort.signal.aborted) finishStoppedPathBarrier(conversationId)
     }
   },
@@ -1995,18 +2066,32 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
   },
 
   abortStream(assistantMessageId) {
-    // Two-phase stop: tell the backend to stop generating (so partial blocks are
-    // persisted with status='stopped' instead of being abandoned), then abort
-    // the local SSE reader so we stop accepting late frames.
+    // Two-phase stop: target exactly this generation on the backend (so a live
+    // sibling branch keeps running and partial blocks are persisted), then abort
+    // only this local SSE reader so late frames cannot revive the stopped row.
     // We look up the conversation id by walking the cache — abortStream is
     // called with an assistantId and not the conv id, but the assistant always
     // belongs to exactly one conversation.
     const state = get()
-    const conv = state.conversations.find((c) =>
+    const directConversation = state.conversations.find((c) =>
       c.messages.some((m) => m.id === assistantMessageId),
     )
     const ctrl = streamControllers.get(assistantMessageId)
     const regen = streamControllers.get(assistantMessageId + '-regen')
+    const controller = ctrl ?? regen
+    const aliasConversationId =
+      streamConversationIds.get(assistantMessageId) ??
+      streamConversationIds.get(assistantMessageId + '-regen')
+    const conv = directConversation ?? state.conversations.find((conversation) => conversation.id === aliasConversationId)
+    const message =
+      conv?.messages.find((item) => item.id === assistantMessageId) ??
+      (controller
+        ? conv?.messages.find(
+            (item) =>
+              streamControllers.get(item.id) === controller ||
+              streamControllers.get(item.id + '-regen') === controller,
+          )
+        : undefined)
     const willAbortLocalStream = [ctrl, regen].some(
       (controller) => controller && !controller.signal.aborted,
     )
@@ -2014,12 +2099,24 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
       registerStoppedPathBarrier(conv.id)
     }
     if (conv) {
-      // Fire-and-forget — the orchestrator subscribes on conv:<id>:stop and
-      // cancels its context, which makes the SSE writer flush the in-progress
-      // text as the final block before persisting.
-      void conversationsApi.stop(conv.id).catch(() => {
+      const generationId =
+        streamGenerationIds.get(assistantMessageId) ??
+        streamGenerationIds.get(assistantMessageId + '-regen') ??
+        (message ? streamGenerationIds.get(message.id) : undefined) ??
+        (message ? streamGenerationIds.get(message.id + '-regen') : undefined) ??
+        (message?.localOnly ? assistantMessageId : undefined)
+      const target = generationId
+        ? { generation_id: generationId }
+        : { message_id: message?.id ?? assistantMessageId }
+      void conversationsApi.stop(conv.id, target).catch(() => {
         /* best effort — the local abort below still stops the stream */
       })
+      updateAssistant(set, conv.id, message?.id ?? assistantMessageId, (item) => ({
+        ...item,
+        streaming: false,
+        imageStatus: undefined,
+        stopped: true,
+      }))
     }
     ctrl?.abort()
     // Also try regen channel if streaming was triggered via regenerate().
@@ -2064,7 +2161,10 @@ async function consumeReplayStream(
     }
     await get().reloadActivePath(conversationId)
   } catch (e) {
-    if (abort.signal.aborted) return
+    if (abort.signal.aborted) {
+      streamHandoffs.delete(abort)
+      return
+    }
     updateAssistant(set, conversationId, assistantId, (m) => ({
       ...m,
       streaming: false,
@@ -2095,6 +2195,7 @@ function applyReplayEvent(
         research: undefined,
         ragInjection: undefined,
         error: undefined,
+        stopped: undefined,
       }))
       break
     case 'text_delta':
@@ -2218,6 +2319,7 @@ function applyReplayEvent(
         credits: ev.credits && ev.credits > 0 ? ev.credits : m.credits,
         moderation: ev.stop_reason === 'content_moderation' ? true : m.moderation,
         quotaExceeded: ev.stop_reason === 'quota_exceeded' ? true : m.quotaExceeded,
+        stopped: ev.stop_reason === 'stopped' ? true : m.stopped,
       }))
       break
     case 'error':
@@ -2483,6 +2585,7 @@ export function toLocalMessage(m: ApiMessage): Message {
     fast: m.fast === true,
     createdAt: m.created_at * 1000,
     streaming: m.status === 'streaming',
+    stopped: m.stop_reason === 'stopped' || m.status === 'stopped',
     cost: m.cost > 0 ? m.cost : undefined,
     credits: m.credits && m.credits > 0 ? m.credits : undefined,
     genMs: m.gen_ms && m.gen_ms > 0 ? m.gen_ms : undefined,

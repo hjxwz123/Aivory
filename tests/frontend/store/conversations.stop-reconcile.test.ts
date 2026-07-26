@@ -3,6 +3,7 @@ import type { ApiConversation, ApiMessage, ApiModel, ApiSseEvent } from '@/api/t
 import type { Conversation, Message } from '@/types/chat'
 
 const apiMocks = vi.hoisted(() => ({
+  create: vi.fn(),
   get: vi.fn(),
   stop: vi.fn(),
   streamSSE: vi.fn(),
@@ -24,6 +25,7 @@ vi.mock('@/api', () => {
   return {
     ApiError,
     conversationsApi: {
+      create: apiMocks.create,
       get: apiMocks.get,
       stop: apiMocks.stop,
     },
@@ -43,9 +45,10 @@ vi.mock('@/hooks/use-toast', () => ({
   },
 }))
 
-import { useConversations } from '@/store/conversations'
+import { toLocalMessage, useConversations } from '@/store/conversations'
 import { useComposerPrefs } from '@/store/composer-prefs'
 import { useModels } from '@/store/models'
+import { messageHasActions } from '@/lib/message-state'
 
 function localConversation(messages: Message[] = [], title = 'Stop reconcile'): Conversation {
   return {
@@ -246,11 +249,16 @@ describe('stopped turn optimistic-id reconciliation', () => {
       .mockResolvedValueOnce(pathResponse('stopped'))
 
     const serverSpinnerStates: boolean[] = []
+    const settledStoppedStates: boolean[] = []
     const unsubscribe = useConversations.subscribe((state) => {
       const assistant = state.conversations[0]?.messages.find(
         (message) => message.id === 'msg_server_assistant',
       )
       if (assistant) serverSpinnerStates.push(assistant.streaming === true)
+      const visibleAssistant = state.conversations[0]?.messages.find((message) => message.role === 'assistant')
+      if (visibleAssistant && !visibleAssistant.streaming) {
+        settledStoppedStates.push(visibleAssistant.stopped === true)
+      }
     })
 
     const sending = useConversations.getState().sendMessage({
@@ -276,6 +284,413 @@ describe('stopped turn optimistic-id reconciliation', () => {
     ])
     expect(messages.every((message) => !message.localOnly && !message.streaming)).toBe(true)
     expect(serverSpinnerStates).not.toContain(true)
+    expect(settledStoppedStates.every(Boolean)).toBe(true)
+    expect(messageHasActions(messages[1])).toBe(true)
+  })
+
+  it('routes a stop from the pre-message_start optimistic id after the row is re-keyed', async () => {
+    let release: (() => void) | undefined
+    apiMocks.streamSSE.mockImplementation(
+      (_path: string, _body: Record<string, unknown>, signal: AbortSignal) =>
+        (async function* () {
+          yield { data: { type: 'message_start', message_id: 'msg_rekeyed_assistant' } as ApiSseEvent }
+          await new Promise<void>((resolve, reject) => {
+            release = resolve
+            const onAbort = () => reject(new DOMException('Aborted', 'AbortError'))
+            if (signal.aborted) onAbort()
+            else signal.addEventListener('abort', onAbort, { once: true })
+          })
+        })(),
+    )
+    const stoppedUser = apiMessage('msg_rekeyed_user', 'user', '', 'complete', 'question')
+    const stoppedAssistant = apiMessage(
+      'msg_rekeyed_assistant',
+      'assistant',
+      stoppedUser.id,
+      'stopped',
+      '',
+    )
+    stoppedAssistant.blocks = []
+    apiMocks.get.mockResolvedValue({
+      conversation: apiConversation(stoppedAssistant.id),
+      messages: [stoppedUser, stoppedAssistant],
+      has_more: false,
+      next_before: undefined,
+    })
+
+    const sending = useConversations.getState().sendMessage({
+      conversationId: 'conv_stop',
+      text: 'question',
+      modelId: 'model_1',
+      toolMode: 'auto',
+    })
+    const optimisticId = useConversations
+      .getState()
+      .conversations[0].messages.find((message) => message.localOnly && message.role === 'assistant')!.id
+
+    await vi.waitFor(() => {
+      expect(
+        useConversations.getState().conversations[0].messages.some((message) => message.id === 'msg_rekeyed_assistant'),
+      ).toBe(true)
+    })
+    useConversations.getState().abortStream(optimisticId)
+
+    expect(apiMocks.stop).toHaveBeenCalledWith('conv_stop', {
+      generation_id: expect.stringMatching(/^gen_[0-9a-f]{32}$/),
+    })
+    await sending
+    release?.()
+  })
+
+  it('persists and stops the first turn when Stop is clicked while its real conversation is being created', async () => {
+    let resolveCreate: ((conversation: ApiConversation) => void) | undefined
+    apiMocks.create.mockReturnValue(
+      new Promise<ApiConversation>((resolve) => {
+        resolveCreate = resolve
+      }),
+    )
+    let transportSignal: AbortSignal | undefined
+    let transportWasAbortedAtStart: boolean | undefined
+    let requestGenerationId: unknown
+    apiMocks.streamSSE.mockImplementation(
+      (_path: string, body: Record<string, unknown>, signal: AbortSignal) => {
+        transportSignal = signal
+        transportWasAbortedAtStart = signal.aborted
+        requestGenerationId = body.generation_id
+        return events(
+          { type: 'message_start', message_id: 'msg_first_server_assistant' },
+          { type: 'done', stop_reason: 'stopped' },
+        )
+      },
+    )
+    const firstUser = apiMessage('msg_first_server_user', 'user', '', 'complete', 'first question')
+    const firstAssistant = apiMessage(
+      'msg_first_server_assistant',
+      'assistant',
+      firstUser.id,
+      'stopped',
+      '',
+    )
+    firstAssistant.blocks = []
+    apiMocks.get.mockResolvedValue({
+      conversation: { ...apiConversation(firstAssistant.id), id: 'conv_real' },
+      messages: [firstUser, firstAssistant],
+      has_more: false,
+      next_before: undefined,
+    })
+    useConversations.setState({ conversations: [] })
+    const tempId = useConversations.getState().beginOptimisticConversation('first question', 'model_1')
+
+    const sending = useConversations.getState().sendMessage({
+      conversationId: tempId,
+      createFirst: true,
+      text: 'first question',
+      modelId: 'model_1',
+      toolMode: 'auto',
+    })
+    const optimisticAssistant = useConversations
+      .getState()
+      .conversations.find((conversation) => conversation.id === tempId)!
+      .messages.find((message) => message.role === 'assistant')!
+    useConversations.getState().abortStream(optimisticAssistant.id)
+
+    resolveCreate?.({ ...apiConversation(''), id: 'conv_real', active_leaf_id: '' })
+    await sending
+
+    expect(transportWasAbortedAtStart).toBe(false)
+    expect(transportSignal?.aborted).toBe(true)
+    expect(requestGenerationId).toMatch(/^gen_[0-9a-f]{32}$/)
+    expect(apiMocks.stop).toHaveBeenCalledWith(tempId, {
+      generation_id: requestGenerationId,
+    })
+    expect(apiMocks.stop).toHaveBeenCalledWith('conv_real', {
+      message_id: 'msg_first_server_assistant',
+    })
+    const realConversation = useConversations
+      .getState()
+      .conversations.find((conversation) => conversation.id === 'conv_real')
+    expect(realConversation?.messages.map((message) => message.id)).toEqual([
+      firstUser.id,
+      firstAssistant.id,
+    ])
+    expect(realConversation?.messages[1]).toMatchObject({ stopped: true, streaming: false })
+  })
+
+  it('can stop a regeneration through the source assistant alias after message_start', async () => {
+    const sourceUser: Message = {
+      id: 'msg_source_user',
+      role: 'user',
+      content: 'question',
+      createdAt: 1,
+    }
+    const sourceAssistant: Message = {
+      id: 'msg_source_assistant',
+      parentId: sourceUser.id,
+      role: 'assistant',
+      content: 'old answer',
+      createdAt: 2,
+    }
+    resetStore([sourceUser, sourceAssistant])
+    apiMocks.streamSSE.mockImplementation(
+      (_path: string, _body: Record<string, unknown>, signal: AbortSignal) =>
+        (async function* () {
+          yield { data: { type: 'message_start', message_id: 'msg_regenerated_server' } as ApiSseEvent }
+          await new Promise<void>((_resolve, reject) => {
+            const onAbort = () => reject(new DOMException('Aborted', 'AbortError'))
+            if (signal.aborted) onAbort()
+            else signal.addEventListener('abort', onAbort, { once: true })
+          })
+        })(),
+    )
+    const stoppedAssistant = apiMessage(
+      'msg_regenerated_server',
+      'assistant',
+      sourceUser.id,
+      'stopped',
+      '',
+    )
+    stoppedAssistant.blocks = []
+    apiMocks.get.mockResolvedValue({
+      conversation: apiConversation(stoppedAssistant.id),
+      messages: [apiMessage(sourceUser.id, 'user', '', 'complete', sourceUser.content), stoppedAssistant],
+      has_more: false,
+      next_before: undefined,
+    })
+
+    const regenerating = useConversations
+      .getState()
+      .regenerate('conv_stop', sourceAssistant.id, 'model_1')
+    await vi.waitFor(() => {
+      expect(
+        useConversations.getState().conversations[0].messages.some((message) => message.id === 'msg_regenerated_server'),
+      ).toBe(true)
+    })
+    useConversations.getState().abortStream(sourceAssistant.id)
+
+    expect(apiMocks.stop).toHaveBeenCalledWith('conv_stop', {
+      generation_id: expect.stringMatching(/^gen_[0-9a-f]{32}$/),
+    })
+    await regenerating
+    expect(useConversations.getState().conversations[0].messages.at(-1)).toMatchObject({
+      id: 'msg_regenerated_server',
+      stopped: true,
+      streaming: false,
+    })
+  })
+
+  it('does not let a replay handoff marker swallow a later regeneration stop', async () => {
+    let postCall = 0
+    apiMocks.streamSSE.mockImplementation(
+      (_path: string, _body: Record<string, unknown>, signal: AbortSignal) =>
+        (async function* () {
+          const messageId = postCall++ === 0 ? 'msg_handoff_assistant' : 'msg_after_handoff_regen'
+          yield { data: { type: 'message_start', message_id: messageId } as ApiSseEvent }
+          await new Promise<void>((_resolve, reject) => {
+            const onAbort = () => reject(new DOMException('Aborted', 'AbortError'))
+            if (signal.aborted) onAbort()
+            else signal.addEventListener('abort', onAbort, { once: true })
+          })
+        })(),
+    )
+    apiMocks.streamSSEGet.mockReturnValue(events({ type: 'done', stop_reason: 'stop' }))
+
+    const user = apiMessage('msg_handoff_user', 'user', '', 'complete', 'question')
+    const completed = apiMessage(
+      'msg_handoff_assistant',
+      'assistant',
+      user.id,
+      'complete',
+      'completed through replay',
+    )
+    const stopped = apiMessage(
+      'msg_after_handoff_regen',
+      'assistant',
+      user.id,
+      'stopped',
+      '',
+    )
+    stopped.blocks = []
+    apiMocks.get
+      .mockResolvedValueOnce({
+        conversation: apiConversation(completed.id),
+        messages: [user, completed],
+        has_more: false,
+        next_before: undefined,
+      })
+      .mockResolvedValueOnce({
+        conversation: apiConversation(stopped.id),
+        messages: [user, stopped],
+        has_more: false,
+        next_before: undefined,
+      })
+
+    const firstSending = useConversations.getState().sendMessage({
+      conversationId: 'conv_stop',
+      text: 'question',
+      modelId: 'model_1',
+      toolMode: 'auto',
+    })
+    await vi.waitFor(() => {
+      expect(
+        useConversations.getState().conversations[0].messages.some((message) => message.id === completed.id),
+      ).toBe(true)
+    })
+    useConversations.getState().resumeStreamingMessages('conv_stop', { replaceExisting: true })
+    await firstSending
+    await vi.waitFor(() => {
+      expect(apiMocks.get).toHaveBeenCalledTimes(1)
+      expect(useConversations.getState().conversations[0].messages.at(-1)).toMatchObject({
+        id: completed.id,
+        streaming: false,
+      })
+    })
+
+    const regenerating = useConversations
+      .getState()
+      .regenerate('conv_stop', completed.id, 'model_1')
+    await vi.waitFor(() => {
+      expect(
+        useConversations.getState().conversations[0].messages.some((message) => message.id === stopped.id),
+      ).toBe(true)
+    })
+    useConversations.getState().abortStream(stopped.id)
+    await regenerating
+
+    expect(apiMocks.get).toHaveBeenCalledTimes(2)
+    expect(useConversations.getState().conversations[0].messages.at(-1)).toMatchObject({
+      id: stopped.id,
+      stopped: true,
+      streaming: false,
+    })
+  })
+
+  it('targets the current generation without aborting a concurrent sibling branch', async () => {
+    type ControlledStream = {
+      body: Record<string, unknown>
+      signal: AbortSignal
+      release?: () => void
+    }
+
+    const streams: ControlledStream[] = []
+    apiMocks.streamSSE.mockImplementation(
+      (_path: string, body: Record<string, unknown>, signal: AbortSignal) => {
+        const index = streams.length
+        const stream: ControlledStream = { body, signal }
+        streams.push(stream)
+
+        return (async function* () {
+          yield {
+            data: {
+              type: 'message_start',
+              message_id: index === 0 ? 'msg_server_first' : 'msg_server_second',
+            } as ApiSseEvent,
+          }
+          await new Promise<void>((resolve, reject) => {
+            let settled = false
+            const finish = (next: () => void) => {
+              if (settled) return
+              settled = true
+              signal.removeEventListener('abort', onAbort)
+              next()
+            }
+            const onAbort = () => finish(() => reject(new DOMException('Aborted', 'AbortError')))
+            stream.release = () => finish(resolve)
+            if (signal.aborted) onAbort()
+            else signal.addEventListener('abort', onAbort, { once: true })
+          })
+          yield { data: { type: 'done' } as ApiSseEvent }
+        })()
+      },
+    )
+
+    const secondUser = apiMessage('msg_server_second_user', 'user', '', 'complete', 'edited question')
+    const secondAssistant = apiMessage(
+      'msg_server_second',
+      'assistant',
+      secondUser.id,
+      'stopped',
+      '',
+    )
+    secondAssistant.blocks = []
+    apiMocks.get.mockResolvedValue({
+      conversation: apiConversation(secondAssistant.id),
+      messages: [secondUser, secondAssistant],
+      has_more: false,
+      next_before: undefined,
+    })
+
+    const firstSend = useConversations.getState().sendMessage({
+      conversationId: 'conv_stop',
+      text: 'original question',
+      modelId: 'model_1',
+      toolMode: 'auto',
+    })
+    await vi.waitFor(() => {
+      expect(streams).toHaveLength(1)
+      expect(
+        useConversations
+          .getState()
+          .conversations[0].messages.some((message) => message.id === 'msg_server_first'),
+      ).toBe(true)
+      expect(streams[0].release).toBeTypeOf('function')
+    })
+
+    const secondSend = useConversations.getState().sendMessage({
+      conversationId: 'conv_stop',
+      text: 'edited question',
+      modelId: 'model_1',
+      branch: true,
+      toolMode: 'auto',
+    })
+    await vi.waitFor(() => {
+      expect(streams).toHaveLength(2)
+      expect(
+        useConversations
+          .getState()
+          .conversations[0].messages.some((message) => message.id === 'msg_server_second'),
+      ).toBe(true)
+      expect(streams[1].release).toBeTypeOf('function')
+    })
+
+    try {
+      const firstGenerationId = streams[0].body.generation_id
+      const secondGenerationId = streams[1].body.generation_id
+      expect(firstGenerationId).toEqual(expect.any(String))
+      expect(secondGenerationId).toEqual(expect.any(String))
+      expect(secondGenerationId).not.toBe(firstGenerationId)
+
+      useConversations.getState().abortStream('msg_server_second')
+
+      expect(apiMocks.stop).toHaveBeenCalledTimes(1)
+      expect(apiMocks.stop).toHaveBeenCalledWith('conv_stop', {
+        generation_id: secondGenerationId,
+      })
+      expect(streams[1].signal.aborted).toBe(true)
+      expect(streams[0].signal.aborted).toBe(false)
+
+      await secondSend
+    } finally {
+      for (const stream of streams) stream.release?.()
+      await Promise.allSettled([firstSend, secondSend])
+    }
+  })
+
+  it('maps an empty stopped API assistant to a deliberate stopped state without an error', () => {
+    const stopped = apiMessage(
+      'msg_empty_stopped',
+      'assistant',
+      'msg_stopped_user',
+      'stopped',
+      '',
+    )
+    stopped.blocks = []
+
+    const local = toLocalMessage(stopped)
+
+    expect(local.content).toBe('')
+    expect(local.streaming).toBe(false)
+    expect((local as Message & { stopped?: boolean }).stopped).toBe(true)
+    expect(local.error).toBeUndefined()
   })
 
   it('blocks edit-resend when its explicit parent is still client-only', async () => {

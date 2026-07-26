@@ -973,7 +973,8 @@ func deleteConversationFileHandler(d Deps, w http.ResponseWriter, r *http.Reques
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
-// stopHandler signals a generation cancel for the conversation.
+// stopHandler signals either one generation/message cancel or, for legacy
+// clients with an empty body, a conversation-wide cancel.
 func stopHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
 	id := pathParam(r, "id")
@@ -981,6 +982,39 @@ func stopHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, errNotFound)
 		return
 	}
+	var body struct {
+		GenerationID string `json:"generation_id"`
+		MessageID    string `json:"message_id"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, 400, errInvalidInput)
+		return
+	}
+	if body.GenerationID != "" && body.MessageID != "" {
+		writeError(w, 400, errors.New("provide generation_id or message_id, not both"))
+		return
+	}
+	if body.GenerationID != "" {
+		if !validGenerationID(body.GenerationID) {
+			writeError(w, 400, errors.New("invalid generation_id"))
+			return
+		}
+		publishScopedStop(d, generationStopTopic(u.ID, id, body.GenerationID))
+		writeJSON(w, 200, map[string]bool{"ok": true})
+		return
+	}
+	if body.MessageID != "" {
+		message, err := store.GetMessage(r.Context(), d.DB, body.MessageID)
+		if err != nil || message.ConversationID != id || message.Role != "assistant" {
+			writeError(w, 404, errNotFound)
+			return
+		}
+		publishScopedStop(d, messageStopTopic(u.ID, id, body.MessageID))
+		writeJSON(w, 200, map[string]bool{"ok": true})
+		return
+	}
+	// Backwards compatibility and explicit whole-conversation teardown (for
+	// example deleting a round while its visible path still has live writers).
 	d.Cache.Publish("conv:"+id+":stop", "1")
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }

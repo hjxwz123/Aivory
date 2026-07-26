@@ -162,6 +162,7 @@
   },
   "message": {
     "refused": "The model declined to answer this request.",
+    "stopped": "Generation stopped.",
     "ragFullText": "Injected full document(s)",
     "ragFullDoc": "Whole-document context",
     "ragNone": "Skipped retrieval",

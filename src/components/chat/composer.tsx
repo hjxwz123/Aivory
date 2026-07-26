@@ -1666,20 +1666,42 @@ export function Composer({
     }
     const all = filtered.accepted
     if (!all.length) return 0
+    // A local preview is the acknowledgement for paste / picker / drop. Add it
+    // before any network work so a cold upload-policy request cannot leave the
+    // composer looking unchanged and tempt the user to attach the same file
+    // repeatedly. Oversize candidates are removed again after policy validation.
+    const candidates = all.map((file) => ({
+      file,
+      attachment: {
+        id: uid('att'),
+        name: file.name,
+        size: file.size,
+        kind: classifyAttachmentKind(file.name, file.type),
+        previewUrl: isImageFileLike(file) ? URL.createObjectURL(file) : undefined,
+        uploading: true,
+        uploadProgress: 0,
+      } satisfies PendingAttachment,
+    }))
+    setAttachments((current) => [...current, ...candidates.map(({ attachment }) => attachment)])
+
     // §4.6 reject oversize files BEFORE uploading — images and other files have
     // separate admin-set caps. Rejected images would otherwise upload fine but be
     // silently dropped at chat time (base64 inline cap); documents would fail the
     // server cap after a wasted upload.
     const limits = await getUploadLimits()
-    const overImage = all.filter((f) => isImageFileLike(f) && f.size > limits.max_image_bytes)
-    const overFile = all.filter((f) => !isImageFileLike(f) && f.size > limits.max_file_bytes)
+    const overImage = candidates.filter(
+      ({ file }) => isImageFileLike(file) && file.size > limits.max_image_bytes,
+    )
+    const overFile = candidates.filter(
+      ({ file }) => !isImageFileLike(file) && file.size > limits.max_file_bytes,
+    )
     if (overImage.length) {
       toast.error(
         t('composer.imageTooLarge', {
           defaultValue: 'Images must be under {{mb}} MB',
           mb: Math.floor(limits.max_image_bytes / (1024 * 1024)),
         }),
-        overImage.map((f) => f.name).join(', '),
+        overImage.map(({ file }) => file.name).join(', '),
       )
     }
     if (overFile.length) {
@@ -1688,24 +1710,38 @@ export function Composer({
           defaultValue: 'Files must be under {{mb}} MB',
           mb: Math.floor(limits.max_file_bytes / (1024 * 1024)),
         }),
-        overFile.map((f) => f.name).join(', '),
+        overFile.map(({ file }) => file.name).join(', '),
       )
     }
-    const list = all.filter((f) => !overImage.includes(f) && !overFile.includes(f))
-    if (!list.length) return 0
-    const additions: PendingAttachment[] = list.map((f) => ({
-      id: uid('att'),
-      name: f.name,
-      size: f.size,
-      kind: classifyAttachmentKind(f.name, f.type),
-      // Local thumbnail so images preview instantly; revoked on remove/submit.
-      previewUrl: isImageFileLike(f) ? URL.createObjectURL(f) : undefined,
-      uploading: true,
-      uploadProgress: 0,
-    }))
-    setAttachments((s) => [...s, ...additions])
+
+    const rejectedIds = new Set([...overImage, ...overFile].map(({ attachment }) => attachment.id))
+    if (rejectedIds.size > 0) {
+      candidates.forEach(({ attachment }) => {
+        if (rejectedIds.has(attachment.id) && attachment.previewUrl?.startsWith('blob:')) {
+          URL.revokeObjectURL(attachment.previewUrl)
+        }
+      })
+      setAttachments((current) => {
+        const next = current.filter((attachment) => !rejectedIds.has(attachment.id))
+        if (next.length === 0 && current.length > 0) queueMicrotask(() => maybeSignalDrained())
+        return next
+      })
+    }
+
+    // Removal can happen while upload-policy validation is in flight. Do not
+    // resurrect or upload a candidate the user has already dismissed.
+    const accepted = candidates.filter(({ attachment }) => {
+      if (rejectedIds.has(attachment.id)) {
+        removedAttachmentIds.current.delete(attachment.id)
+        return false
+      }
+      if (!removedAttachmentIds.current.has(attachment.id)) return true
+      removedAttachmentIds.current.delete(attachment.id)
+      return false
+    })
+    if (!accepted.length) return 0
     toast.success(
-      t(additions.length === 1 ? 'composer.attachedSingle' : 'composer.attachedMultiple', { count: additions.length }),
+      t(accepted.length === 1 ? 'composer.attachedSingle' : 'composer.attachedMultiple', { count: accepted.length }),
     )
     // Upload immediately so parsing/ingestion starts the moment the file is
     // attached (the user sees progress and can't send until it's ready). On the
@@ -1719,7 +1755,9 @@ export function Composer({
         scopeId = undefined
       }
     }
-    const done = await Promise.all(list.map((file, idx) => uploadAttachment(file, additions[idx], scopeId)))
+    const done = await Promise.all(
+      accepted.map(({ file, attachment }) => uploadAttachment(file, attachment, scopeId)),
+    )
     return done.filter(Boolean).length
   }
   // Keep the window-level drag listeners calling the current closure (it reads

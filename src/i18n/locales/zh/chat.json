@@ -162,6 +162,7 @@
   },
   "message": {
     "refused": "模型拒绝回答此请求。",
+    "stopped": "已停止生成。",
     "ragFullText": "已注入完整文档",
     "ragFullDoc": "全文档上下文",
     "ragNone": "跳过检索",
