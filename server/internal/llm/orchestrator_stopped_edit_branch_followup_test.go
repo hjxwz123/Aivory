@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -67,6 +68,198 @@ func (stoppedEditBranchTools) List(string) []ToolDef { return nil }
 
 func (stoppedEditBranchTools) Run(context.Context, string, []byte, *ToolContext) (string, []Citation, error) {
 	return "", nil, nil
+}
+
+type preTokenStopProvider struct {
+	calls int
+}
+
+type completeThenCancelProvider struct {
+	cancel context.CancelFunc
+}
+
+func (p *completeThenCancelProvider) ID() string { return "openai" }
+
+func (p *completeThenCancelProvider) Stream(
+	_ context.Context,
+	_ UnifiedChatRequest,
+	_ ToolRunner,
+	onEvent func(SseEvent),
+) (*UnifiedResult, error) {
+	onEvent(SseEvent{Type: "text_delta", Text: "complete answer"})
+	p.cancel()
+	return &UnifiedResult{
+		Blocks:     []UnifiedBlock{{Kind: "text", Text: "complete answer"}},
+		StopReason: "stop",
+		Usage:      Usage{InputTokens: 3, OutputTokens: 2},
+	}, nil
+}
+
+func (p *preTokenStopProvider) ID() string { return "openai" }
+
+func (p *preTokenStopProvider) Stream(
+	context.Context,
+	UnifiedChatRequest,
+	ToolRunner,
+	func(SseEvent),
+) (*UnifiedResult, error) {
+	p.calls++
+	return &UnifiedResult{Blocks: []UnifiedBlock{{Kind: "text", Text: "unexpected"}}, StopReason: "stop"}, nil
+}
+
+func TestOrchestratorStopAfterMessageStartSettlesPlaceholderBeforeFirstToken(t *testing.T) {
+	ctx := context.Background()
+	db, err := store.Open(filepath.Join(t.TempDir(), "pre-token-stop.db"))
+	if err != nil {
+		t.Fatalf("open isolated database: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := store.Migrate(db); err != nil {
+		t.Fatalf("migrate isolated database: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO users(id,email,password_hash,role) VALUES('u1','pre-token@example.com','h','admin')`); err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+
+	channel, err := store.CreateChannel(ctx, db, "Pre-token stop", "openai", "chat", "https://example.invalid", "key")
+	if err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	model, err := store.CreateModel(ctx, db, store.Model{
+		ChannelID:         channel.ID,
+		Kind:              "chat",
+		RequestID:         "pre-token-stop-model",
+		Label:             "Pre-token stop model",
+		Enabled:           true,
+		Stream:            true,
+		ToolMode:          "native",
+		ModerationEnabled: true,
+		ModerationMode:    "keyword",
+	})
+	if err != nil {
+		t.Fatalf("create model: %v", err)
+	}
+	if err := store.SetFastModel(ctx, db, model.ID); err != nil {
+		t.Fatalf("set fast model: %v", err)
+	}
+	if err := store.SetSetting(db, "moderation_keywords", []string{"blocked-before-token"}); err != nil {
+		t.Fatalf("set moderation keywords: %v", err)
+	}
+	conversation, err := store.CreateConversation(ctx, db, store.Conversation{
+		ID: "c_pre_token_stop", UserID: "u1", Title: "Pre-token stop", ModelID: model.ID,
+	})
+	if err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+
+	provider := &preTokenStopProvider{}
+	logger := log.New(io.Discard, "", 0)
+	registry := NewRegistry(logger)
+	registry.Register(provider)
+	orchestrator := NewOrchestrator(db, registry, stoppedEditBranchTools{}, nil, nil, nil, nil, nil, logger)
+
+	turnCtx, cancelTurn := context.WithCancel(ctx)
+	assistantID := ""
+	_, err = orchestrator.Run(turnCtx, RunRequest{
+		UserID:         "u1",
+		ConversationID: conversation.ID,
+		UserText:       "blocked-before-token",
+		Fast:           true,
+		ToolMode:       ToolModeEnabled,
+	}, func(event SseEvent) {
+		if event.Type == "message_start" {
+			assistantID = event.MessageID
+			cancelTurn()
+		}
+	})
+	if err != nil {
+		t.Fatalf("run canceled after message_start: %v", err)
+	}
+	if assistantID == "" {
+		t.Fatal("message_start did not expose an assistant id")
+	}
+	if provider.calls != 0 {
+		t.Fatalf("provider calls = %d, want 0 before first token", provider.calls)
+	}
+
+	persisted, err := store.GetMessage(context.Background(), db, assistantID)
+	if err != nil {
+		t.Fatalf("load stopped assistant: %v", err)
+	}
+	if persisted.Status != "stopped" || persisted.StopReason != "stopped" {
+		t.Fatalf("assistant status=%q stop_reason=%q, want stopped/stopped", persisted.Status, persisted.StopReason)
+	}
+	if string(persisted.Blocks) != "[]" {
+		t.Fatalf("assistant blocks=%s, want []", persisted.Blocks)
+	}
+}
+
+func TestOrchestratorLateStopDoesNotReplaceCompletedAnswerWithEmptyBlocks(t *testing.T) {
+	ctx := context.Background()
+	db, err := store.Open(filepath.Join(t.TempDir(), "late-stop-complete.db"))
+	if err != nil {
+		t.Fatalf("open isolated database: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := store.Migrate(db); err != nil {
+		t.Fatalf("migrate isolated database: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO users(id,email,password_hash,role) VALUES('u1','late-stop@example.com','h','admin')`); err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+	channel, err := store.CreateChannel(ctx, db, "Late stop", "openai", "chat", "https://example.invalid", "key")
+	if err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	model, err := store.CreateModel(ctx, db, store.Model{
+		ChannelID: channel.ID, Kind: "chat", RequestID: "late-stop-model", Label: "Late stop model",
+		Enabled: true, Stream: true, ToolMode: "native",
+	})
+	if err != nil {
+		t.Fatalf("create model: %v", err)
+	}
+	if err := store.SetFastModel(ctx, db, model.ID); err != nil {
+		t.Fatalf("set fast model: %v", err)
+	}
+	conversation, err := store.CreateConversation(ctx, db, store.Conversation{
+		ID: "c_late_stop", UserID: "u1", Title: "Late stop", ModelID: model.ID,
+	})
+	if err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+
+	turnCtx, cancelTurn := context.WithCancel(ctx)
+	provider := &completeThenCancelProvider{cancel: cancelTurn}
+	logger := log.New(io.Discard, "", 0)
+	registry := NewRegistry(logger)
+	registry.Register(provider)
+	orchestrator := NewOrchestrator(db, registry, stoppedEditBranchTools{}, nil, nil, nil, nil, nil, logger)
+	assistantID := ""
+	_, err = orchestrator.Run(turnCtx, RunRequest{
+		UserID: "u1", ConversationID: conversation.ID, UserText: "finish at the stop boundary",
+		Fast: true, ToolMode: ToolModeEnabled,
+	}, func(event SseEvent) {
+		if event.Type == "message_start" {
+			assistantID = event.MessageID
+		}
+	})
+	if err != nil {
+		t.Fatalf("run completed result at stop boundary: %v", err)
+	}
+	if assistantID == "" {
+		t.Fatal("message_start did not expose an assistant id")
+	}
+
+	persisted, err := store.GetMessage(context.Background(), db, assistantID)
+	if err != nil {
+		t.Fatalf("load completed assistant: %v", err)
+	}
+	if persisted.Status != "complete" || persisted.StopReason != "stop" {
+		t.Fatalf("assistant status=%q stop_reason=%q, want complete/stop", persisted.Status, persisted.StopReason)
+	}
+	if !strings.Contains(string(persisted.Blocks), "complete answer") {
+		t.Fatalf("completed assistant blocks were lost: %s", persisted.Blocks)
+	}
 }
 
 func TestOrchestratorStoppedRootEditBranchAllowsFollowUp(t *testing.T) {

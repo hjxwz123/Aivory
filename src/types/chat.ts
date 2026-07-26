@@ -142,6 +142,9 @@ export interface Message {
   createdAt: number
   /** True while the model is producing tokens. */
   streaming?: boolean
+  /** The user deliberately stopped this generation. A stopped reply may have
+   *  partial content or be completely empty when stopped before the first token. */
+  stopped?: boolean
   /** §4.20 image-mode: the drawing phase, driving the dedicated generating UI
    *  (distinct from the chat thinking/tool-call trace). Set by the `image_status`
    *  SSE event; cleared once the image artifact arrives. */

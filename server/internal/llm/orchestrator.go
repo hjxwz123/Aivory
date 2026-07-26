@@ -1196,13 +1196,73 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	}
 	msgcache.Bump(o.cache, conv.ID)
 	onEvent(SseEvent{Type: "message_start", MessageID: assistantMsg.ID})
-	finishMessage := func(ctx context.Context, p store.MessageFinishPatch) error {
-		err := store.FinishMessage(ctx, o.db, assistantMsg.ID, p)
+	messageTerminal := false
+	providerCompleted := false
+	finishMessage := func(writeCtx context.Context, p store.MessageFinishPatch) error {
+		// Before a provider has successfully returned, an explicit turn cancel wins
+		// over quota/moderation/setup exits that happen to race with Stop. Once the
+		// provider has completed, its full result wins over a late Stop at the narrow
+		// DB-finalization boundary.
+		if ctx.Err() != nil && !providerCompleted && p.StopReason != "stopped" {
+			p = store.MessageFinishPatch{
+				Blocks:     []byte("[]"),
+				Citations:  []byte("[]"),
+				StopReason: "stopped",
+				Status:     "stopped",
+				GenMs:      time.Since(turnStart).Milliseconds(),
+			}
+		}
+		// Terminal persistence must outlive the generation signal. A Stop can arrive
+		// after the provider has returned a complete result but just before the DB
+		// update; writing on the canceled turn context would fail and let the fallback
+		// replace a full answer with empty stopped blocks.
+		persistCtx, persistCancel := context.WithTimeout(context.WithoutCancel(writeCtx), 10*time.Second)
+		defer persistCancel()
+		err := store.FinishMessage(persistCtx, o.db, assistantMsg.ID, p)
 		if err == nil {
 			msgcache.Bump(o.cache, conv.ID)
+			if p.Status != "" && p.Status != "streaming" {
+				messageTerminal = true
+			}
 		}
 		return err
 	}
+
+	// The assistant placeholder is already visible and persisted. From here on,
+	// every exit must settle it, including cancellation during quota/moderation,
+	// image setup, history/RAG loading, or another early failure before the
+	// provider loop reaches its normal finalize block.
+	defer func() {
+		if messageTerminal {
+			return
+		}
+		persistCtx, persistCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer persistCancel()
+
+		// Image turns own their normal finalization path and do not call the local
+		// finishMessage wrapper. Preserve a terminal row they already committed;
+		// only repair a placeholder that is still streaming.
+		if persisted, err := store.GetMessage(persistCtx, o.db, assistantMsg.ID); err == nil &&
+			persisted.Status != "" && persisted.Status != "streaming" {
+			return
+		}
+
+		patch := store.MessageFinishPatch{
+			Blocks:    []byte("[]"),
+			Citations: []byte("[]"),
+			Status:    "error",
+			Error:     "The message could not be processed. Please try again.",
+			GenMs:     time.Since(turnStart).Milliseconds(),
+		}
+		if ctx.Err() != nil {
+			patch.Status = "stopped"
+			patch.StopReason = "stopped"
+			patch.Error = ""
+		}
+		if err := finishMessage(persistCtx, patch); err != nil && o.logger != nil {
+			o.logger.Printf("orchestrator: settle abandoned assistant placeholder (conv=%s msg=%s): %v", conv.ID, assistantMsg.ID, err)
+		}
+	}()
 
 	// Persist new conversation defaults. §fast-mode: a fast turn must NOT write the
 	// resolved fast model onto the conversation (that would both leak its identity
@@ -1912,6 +1972,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	} else {
 		result, err = o.streamWithFallback(providerCtx, provReq, providerRunner, provider, model.ID, streamToUser, &ttftFallbackModel)
 	}
+	providerCompleted = err == nil && result != nil
 	// OpenAI Responses executes image_generation upstream, outside the local tool
 	// runner. Materialize those bytes now through the registry's shared artifact
 	// writer so the UI, persistence, downloads, and later edits see a normal image

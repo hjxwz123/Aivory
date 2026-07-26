@@ -9,6 +9,8 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"aivory/server/internal/envcfg"
@@ -72,11 +74,12 @@ func logChatRunError(logger *log.Logger, meta chatRunErrorMetadata, err error) {
 }
 
 type postMessageReq struct {
-	Text     string `json:"text"`
-	ModelID  string `json:"model_id"`
-	ParentID string `json:"parent_id"`
-	Branch   bool   `json:"branch"`
-	Mode     string `json:"mode"`
+	Text         string `json:"text"`
+	ModelID      string `json:"model_id"`
+	ParentID     string `json:"parent_id"`
+	Branch       bool   `json:"branch"`
+	Mode         string `json:"mode"`
+	GenerationID string `json:"generation_id"`
 	// Verify enables Verify mode (§verify) — a secondary auditor model checks the
 	// answer. No-op unless an admin configured `verify_model_id`.
 	Verify bool `json:"verify"`
@@ -110,6 +113,153 @@ type postMessageReq struct {
 	// Locale is the user's current UI language (i18next code, e.g. "en", "zh");
 	// drives the reply-language instruction (§ reply language).
 	Locale string `json:"locale"`
+}
+
+const maxGenerationIDLength = 128
+
+func validGenerationID(id string) bool {
+	if id == "" || len(id) > maxGenerationIDLength {
+		return false
+	}
+	for _, char := range id {
+		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') ||
+			(char >= '0' && char <= '9') || char == '-' || char == '_' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func generationStopTopic(userID, conversationID, generationID string) string {
+	return "user:" + userID + ":conv:" + conversationID + ":generation:" + generationID + ":stop"
+}
+
+func messageStopTopic(userID, conversationID, messageID string) string {
+	return "user:" + userID + ":conv:" + conversationID + ":message:" + messageID + ":stop"
+}
+
+func scopedStopIntentKey(topic string) string {
+	return "stop-intent:" + topic
+}
+
+func scopedStopIntentTTL() time.Duration {
+	if maxGenDuration > 0 {
+		return maxGenDuration + time.Minute
+	}
+	return 90*time.Minute + time.Minute
+}
+
+func publishScopedStop(d Deps, topic string) {
+	// Pub/Sub is intentionally best-effort. The short-lived marker closes the
+	// race where Stop reaches the server before the generation has subscribed.
+	d.Cache.Set(scopedStopIntentKey(topic), "1", scopedStopIntentTTL())
+	d.Cache.Publish(topic, "1")
+}
+
+func subscribeScopedStop(d Deps, ctx context.Context, onStop func(), topic string) func() {
+	ch, unsubscribe := d.Cache.Subscribe(topic)
+	go func() {
+		select {
+		case _, ok := <-ch:
+			if ok {
+				onStop()
+			}
+		case <-ctx.Done():
+		}
+	}()
+	// Subscribe first, then inspect the durable marker. A stop arriving on either
+	// side of this check is therefore observed by the marker or the channel.
+	if _, stopped := d.Cache.Get(scopedStopIntentKey(topic)); stopped {
+		onStop()
+	}
+	return func() {
+		unsubscribe()
+		d.Cache.Delete(scopedStopIntentKey(topic))
+	}
+}
+
+type generationStopWatcher struct {
+	d               Deps
+	ctx             context.Context
+	cancel          context.CancelFunc
+	userID          string
+	conversationID  string
+	generationUnsub func()
+	messageOnce     sync.Once
+	messageUnsub    func()
+	stopRequested   atomic.Bool
+	active          atomic.Bool
+}
+
+func newGenerationStopWatcher(
+	d Deps,
+	ctx context.Context,
+	cancel context.CancelFunc,
+	userID, conversationID, generationID string,
+) *generationStopWatcher {
+	watcher := &generationStopWatcher{
+		d: d, ctx: ctx, cancel: cancel, userID: userID, conversationID: conversationID,
+	}
+	if generationID != "" {
+		watcher.generationUnsub = subscribeScopedStop(
+			d,
+			ctx,
+			watcher.requestStop,
+			generationStopTopic(userID, conversationID, generationID),
+		)
+	}
+	return watcher
+}
+
+func (watcher *generationStopWatcher) requestStop() {
+	if watcher == nil {
+		return
+	}
+	watcher.stopRequested.Store(true)
+	if watcher.active.Load() {
+		watcher.cancel()
+	}
+}
+
+// activate applies a stop only after the assistant placeholder exists and its
+// message-scoped watcher is installed. Before that point a generation marker is
+// remembered but must not cancel database setup, or the user row/assistant row
+// can be left missing or half-created when Stop wins the subscription race.
+func (watcher *generationStopWatcher) activate() {
+	if watcher == nil {
+		return
+	}
+	watcher.active.Store(true)
+	if watcher.stopRequested.Load() {
+		watcher.cancel()
+	}
+}
+
+func (watcher *generationStopWatcher) watchMessage(messageID string) {
+	if watcher == nil || messageID == "" {
+		return
+	}
+	watcher.messageOnce.Do(func() {
+		watcher.messageUnsub = subscribeScopedStop(
+			watcher.d,
+			watcher.ctx,
+			watcher.requestStop,
+			messageStopTopic(watcher.userID, watcher.conversationID, messageID),
+		)
+	})
+}
+
+func (watcher *generationStopWatcher) close() {
+	if watcher == nil {
+		return
+	}
+	if watcher.generationUnsub != nil {
+		watcher.generationUnsub()
+	}
+	if watcher.messageUnsub != nil {
+		watcher.messageUnsub()
+	}
 }
 
 func validTurnToolMode(mode string) bool {
@@ -166,6 +316,10 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	var req postMessageReq
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, 400, errInvalidInput)
+		return
+	}
+	if req.GenerationID != "" && !validGenerationID(req.GenerationID) {
+		writeError(w, 400, errors.New("invalid generation_id"))
 		return
 	}
 	if strings.TrimSpace(req.Text) == "" {
@@ -279,6 +433,8 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	// cancel it now.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), maxGenDuration)
 	defer cancel()
+	scopedStop := newGenerationStopWatcher(d, ctx, cancel, u.ID, id, req.GenerationID)
+	defer scopedStop.close()
 	stopCh, unsub := d.Cache.Subscribe("conv:" + id + ":stop")
 	defer unsub()
 	killCh, unsubKill := d.Cache.Subscribe("user:" + u.ID + ":kill")
@@ -314,6 +470,10 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	sendEvent := func(ev llm.SseEvent) {
 		if ev.Type == "message_start" && ev.MessageID != "" {
 			streamMessageID = ev.MessageID
+			// Install message-scoped cancellation before exposing the persisted id
+			// to the browser, so an immediate Stop cannot outrun the subscription.
+			scopedStop.watchMessage(streamMessageID)
+			scopedStop.activate()
 		}
 		if streamMessageID != "" && ev.MessageID == "" {
 			ev.MessageID = streamMessageID
@@ -350,6 +510,11 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		Locale:               req.Locale,
 	}, sendEvent)
 	if err != nil && !terminalSent {
+		if ctx.Err() != nil {
+			sendEvent(llm.SseEvent{Type: "done", Message: "", MessageID: streamMessageID, StopReason: "stopped"})
+			publishUserEvent(d, r, u.ID, "conversation.updated", id)
+			return
+		}
 		parentID := req.ParentID
 		if parentID == "" && !req.Branch {
 			parentID = conv.ActiveLeafID
@@ -481,6 +646,7 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	id := pathParam(r, "id")
 	var body struct {
 		AssistantID       string          `json:"assistant_id"`
+		GenerationID      string          `json:"generation_id"`
 		ModelID           string          `json:"model_id"`
 		Mode              string          `json:"mode"`
 		Verify            bool            `json:"verify"`
@@ -494,6 +660,10 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	if err := decodeJSON(r, &body); err != nil {
 		writeError(w, 400, errInvalidInput)
+		return
+	}
+	if body.GenerationID != "" && !validGenerationID(body.GenerationID) {
+		writeError(w, 400, errors.New("invalid generation_id"))
 		return
 	}
 	conv, err := store.GetConversation(r.Context(), d.DB, id, u.ID)
@@ -583,6 +753,8 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	// cancel it now.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), maxGenDuration)
 	defer cancel()
+	scopedStop := newGenerationStopWatcher(d, ctx, cancel, u.ID, id, body.GenerationID)
+	defer scopedStop.close()
 	stopCh, unsub := d.Cache.Subscribe("conv:" + id + ":stop")
 	defer unsub()
 	killCh, unsubKill := d.Cache.Subscribe("user:" + u.ID + ":kill")
@@ -616,6 +788,8 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	sendEvent := func(ev llm.SseEvent) {
 		if ev.Type == "message_start" && ev.MessageID != "" {
 			streamMessageID = ev.MessageID
+			scopedStop.watchMessage(streamMessageID)
+			scopedStop.activate()
 		}
 		if streamMessageID != "" && ev.MessageID == "" {
 			ev.MessageID = streamMessageID
@@ -649,6 +823,11 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		Locale:                   body.Locale,
 	}, sendEvent)
 	if err != nil && !terminalSent {
+		if ctx.Err() != nil {
+			sendEvent(llm.SseEvent{Type: "done", MessageID: streamMessageID, StopReason: "stopped"})
+			publishUserEvent(d, r, u.ID, "conversation.updated", id)
+			return
+		}
 		logChatRunError(d.Logger, chatRunErrorMetadata{
 			Operation:      "regenerate",
 			UserID:         u.ID,

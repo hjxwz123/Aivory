@@ -7,6 +7,7 @@ import { useAuth } from '@/store/auth'
 import { useConversations, MSG_PAGE, resolveArmedTurnFlags } from '@/store/conversations'
 import { useSettings } from '@/store/settings'
 import { toast } from '@/hooks/use-toast'
+import { protectedFirstRoundMessageIds } from '@/lib/message-state'
 
 import type { Attachment, Conversation } from '@/types/chat'
 
@@ -278,20 +279,8 @@ export function MessageList({ conversation, scrollToMessageId, jumpKey }: Messag
   // true root is loaded: while older turns are still paginated out (`hasOlder`)
   // the opening exchange isn't rendered, so there's nothing here to guard.
   const protectedFirstRoundIds = useMemo(() => {
-    const ids = new Set<string>()
-    if (conversation.hasOlder) return ids
-    const msgs = conversation.messages
-    const firstUserIdx = msgs.findIndex((m) => m.role === 'user')
-    if (firstUserIdx < 0) return ids
-    // The opening round is the first question plus every reply up to the next
-    // user turn. Deletion is round-based, so a delete button on ANY of these
-    // rows would drop the whole first exchange — protect them all.
-    for (let i = firstUserIdx; i < msgs.length; i++) {
-      if (i > firstUserIdx && msgs[i].role === 'user') break
-      ids.add(msgs[i].id)
-    }
-    return ids
-  }, [conversation.messages, conversation.hasOlder])
+    return protectedFirstRoundMessageIds(conversation)
+  }, [conversation])
 
   return (
     <div
