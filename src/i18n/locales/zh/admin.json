@@ -674,7 +674,7 @@
       "verifyModel": "审校（审计）模型",
       "verifyModelHint": "在审校模式下核查答案的第二个模型。选「无」则关闭审校。",
       "storageLocal": "本机磁盘（服务器卷）",
-      "storageLocalNote": "零配置持久化：被回收的工作区归档到沙盒服务器挂载的目录（SANDBOX_LOCAL_STORAGE_DIR），下次该对话再执行代码时自动恢复，无需外部对象存储。仅适用于单节点；MinerU 文档解析仍需对象存储。",
+      "storageLocalNote": "本机模式下，头像等应用对象由 API 直接写入 AIVORY_LOCAL_STORAGE_DIR（默认 UPLOAD_DIR/object-storage）；沙盒工作区仍归档到 SANDBOX_LOCAL_STORAGE_DIR。仅适用于单节点；MinerU 文档解析仍需对象存储。",
       "sandboxIdleTtl": "闲置回收（秒）",
       "sandboxIdleTtlHint": "沙盒闲置这么多秒后回收（回收前先归档其工作区）。留空 = 1800（30 分钟）。范围 60–86400。",
       "logFullRequests": "记录完整请求体",

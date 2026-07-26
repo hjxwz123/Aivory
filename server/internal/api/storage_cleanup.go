@@ -97,6 +97,24 @@ func cleanupRAGConversation(ctx context.Context, d Deps, convID, label string) {
 }
 
 func objectStorageClient(d Deps) *storage.Client {
+	cfg := objectStorageConfig(d)
+	if cfg == nil {
+		return nil
+	}
+	base := settingString(d, "sandbox_base_url", d.Config.SandboxBaseURL)
+	key := settingString(d, "sandbox_api_key", d.Config.SandboxAPIKey)
+	return storage.New(base, key, cfg)
+}
+
+func privateObjectStorage(d Deps) *storage.PrivateStore {
+	cfg := objectStorageConfig(d)
+	if cfg == nil {
+		return nil
+	}
+	return storage.NewPrivateStore(cfg, d.Config.LocalStorageDir)
+}
+
+func objectStorageConfig(d Deps) *sandbox.StorageConfig {
 	provider := settingString(d, "storage_provider", "")
 	if provider != "s3" && provider != "aliyun_oss" && provider != "local" {
 		return nil
@@ -121,9 +139,7 @@ func objectStorageClient(d Deps) *storage.Client {
 	if !cfg.Effective() {
 		return nil
 	}
-	base := settingString(d, "sandbox_base_url", d.Config.SandboxBaseURL)
-	key := settingString(d, "sandbox_api_key", d.Config.SandboxAPIKey)
-	return storage.New(base, key, cfg)
+	return cfg
 }
 
 func objectStorageKey(p string, c *storage.Client) (string, bool) {

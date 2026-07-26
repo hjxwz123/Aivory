@@ -670,7 +670,7 @@
       "verifyModel": "Verify (auditor) model",
       "verifyModelHint": "Second model that fact-checks answers in Verify mode. None = Verify off.",
       "storageLocal": "Local disk (server volume)",
-      "storageLocalNote": "Zero-config persistence: recycled workspaces are archived to the sandbox server's mounted directory (SANDBOX_LOCAL_STORAGE_DIR) and restored when the conversation runs code again — no external object store needed. Single-node only; MinerU document parsing still needs an object store.",
+      "storageLocalNote": "In local mode, application objects such as avatars are written directly by the API to AIVORY_LOCAL_STORAGE_DIR (default: UPLOAD_DIR/object-storage); sandbox workspaces still use SANDBOX_LOCAL_STORAGE_DIR. Single-node only; MinerU document parsing still needs an object store.",
       "sandboxIdleTtl": "Idle recycle (seconds)",
       "sandboxIdleTtlHint": "Recycle a sandbox after this many idle seconds (its workspace is archived first). Empty = 1800 (30 min). Range 60–86400.",
       "logFullRequests": "Log full request bodies",
