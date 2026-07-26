@@ -1,6 +1,19 @@
 {
   "back": "Retour à la discussion",
   "title": "Abonnement",
+  "catalog": {
+    "label": "Catalogue d’abonnement",
+    "userGroups": "Groupes d’utilisateurs",
+    "creditPackages": "Crédits permanents"
+  },
+  "billing": {
+    "label": "Période de facturation",
+    "monthly": "Mensuel",
+    "yearly": "Annuel",
+    "perMonth": "/ mois",
+    "perYear": "/ an",
+    "unavailable": "Indisponible pour cette période"
+  },
   "subtitle": "Votre groupe d'adhésion détermine les modèles que vous pouvez utiliser et dans quelle mesure.",
   "currentPlan": "Groupe actuel",
   "free": "Gratuit",
@@ -15,6 +28,14 @@
     "topUp": "Recharger des crédits",
     "topUpUnavailable": "La recharge n’est pas disponible pour le moment."
   },
+  "packages": {
+    "title": "Forfaits de crédits permanents",
+    "subtitle": "Achetez des crédits sans expiration, utilisés après les crédits temporaires.",
+    "count": "{{count}} forfaits",
+    "credits": "Crédits permanents",
+    "buy": "Acheter ce forfait",
+    "empty": "Aucun forfait de crédits permanents n’est disponible."
+  },
   "current": "Actuel",
   "youreOnThis": "Vous êtes dans ce groupe",
   "switchCta": "Changer",
@@ -23,6 +44,8 @@
   "upgradeBody": "Les changements de groupe sont gérés par un administrateur. Contactez l'administrateur de votre espace de travail pour rejoindre ce groupe.",
   "priceFree": "Gratuit",
   "loadFailed": "Impossible de charger les groupes",
+  "loadPackagesFailed": "Impossible de charger les forfaits de crédits permanents",
+  "noGroups": "Aucun groupe d’utilisateurs n’est disponible.",
   "expiresOn": "Jusqu’au {{date}}",
   "permanent": "Permanent",
   "redeem": {

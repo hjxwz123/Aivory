@@ -569,6 +569,9 @@
     "lead": "影响全员的几项:默认/任务模型、压缩、注册、配额。",
     "saved": "已保存设置",
     "fields": {
+      "settlementCurrency": "结算货币",
+      "settlementCurrencyHint": "用户组和永久积分价格使用的三位 ISO 4217 货币代码。修改后不会自动换算现有价格。",
+      "settlementCurrencyInvalid": "请输入有效的三位货币代码。",
       "defaultModel": "默认对话模型",
       "taskModel": "任务模型(内部 LLM 调用)",
       "taskModelHint": "用于标题、查询路由、压缩摘要、记忆抽取。",
@@ -688,8 +691,11 @@
     "lead": "会员等级:价格与功能。按模型用量限制在模型页配。",
     "new": "新建用户组",
     "default": "默认",
-    "creditsRatioLabel": "每美元积分数（全局）",
-    "creditsRatioHint": "全局:1 美元 = 多少积分。0 = 停用积分。",
+    "monthlyShort": "/月",
+    "yearlyShort": "/年",
+    "freePrice": "免费",
+    "creditsRatioLabel": "模型成本内部换算（每 USD）",
+    "creditsRatioHint": "每 1 USD 模型成本扣除的积分数，与用户结算货币无关。0 = 停用积分。",
     "groupBuyUrlLabel": "用户组购买链接（全局）",
     "groupBuyUrlHint": "付费组卡片的「购买」按钮链接。留空显示「联系管理员」。",
     "creditBuyUrlLabel": "积分补充链接（全局）",
@@ -697,7 +703,7 @@
     "quotaMsgLabel": "超额提示",
     "quotaMsgHint": "用户达到该模型用量上限时显示。",
     "quotaMsgPlaceholder": "您已达到当前套餐对此模型的使用上限，升级套餐即可继续使用。",
-    "msgSaved": "提示已保存",
+    "msgSaved": "设置已保存",
     "editorTitle": "编辑用户组",
     "newTitle": "新建用户组",
     "editorLead": "名称、价格和功能将展示在用户的订阅页面。",
@@ -706,12 +712,46 @@
     "removed": "用户组已删除",
     "removeTitle": "删除用户组？",
     "removeBody": "组内成员将移至免费组。不可撤销。",
+    "creditPackages": {
+      "title": "永久积分套餐",
+      "lead": "配置使用全局结算货币定价的积分补充套餐。",
+      "new": "新建套餐",
+      "empty": "还没有积分套餐。",
+      "disabled": "已停用",
+      "creditCount": "{{count}} 永久积分",
+      "enabledLabel": "切换 {{name}}",
+      "editorTitle": "编辑积分套餐",
+      "newTitle": "新建积分套餐",
+      "editorLead": "每个套餐按一个结算货币价格发放永久积分。",
+      "created": "积分套餐已创建",
+      "updated": "积分套餐已更新",
+      "removed": "积分套餐已删除",
+      "removeTitle": "删除积分套餐？",
+      "removeBody": "确定删除“{{name}}”吗？此操作不可撤销。",
+      "fields": {
+        "name": "名称",
+        "description": "说明",
+        "descriptionPlaceholder": "可选，将随套餐展示",
+        "credits": "永久积分数",
+        "creditsHint": "购买后加入不会过期的积分余额。",
+        "price": "价格（{{currency}}）",
+        "priceHint": "使用全局结算货币；0 表示暂不向用户展示。",
+        "enabled": "向用户开放",
+        "enabledHint": "启用且价格大于 0 时，在订阅页展示此套餐。"
+      },
+      "errors": {
+        "nameRequired": "请填写名称",
+        "creditsInvalid": "请输入大于 0 的积分数。",
+        "priceInvalid": "请输入符合结算货币小数位的非负价格。"
+      }
+    },
     "fields": {
       "name": "名称",
       "description": "简短介绍",
       "descriptionPlaceholder": "面向需要更多额度的高级用户",
-      "priceUsd": "价格（美元）",
-      "priceCny": "价格（人民币）",
+      "monthlyPrice": "月付价格（{{currency}}）",
+      "yearlyPrice": "年付价格（{{currency}}）",
+      "priceHint": "使用全局结算货币；0 表示不提供该付费周期。",
       "features": "功能介绍",
       "research": "深度研究",
       "researchHint": "允许该用户组使用深度研究功能。",
@@ -736,7 +776,8 @@
       "isPublicHint": "关闭后该用户组不再出现在订阅页（已在该组的用户不受影响）。"
     },
     "errors": {
-      "nameRequired": "请填写名称"
+      "nameRequired": "请填写名称",
+      "priceInvalid": "请输入符合结算货币小数位的非负价格。"
     },
     "maxStorage": "存储空间(MB)",
     "maxStorageHint": "0 表示不限制;仅统计非图片文件。"

@@ -1,6 +1,19 @@
 {
   "back": "チャットに戻る",
   "title": "サブスクリプション",
+  "catalog": {
+    "label": "サブスクリプション一覧",
+    "userGroups": "ユーザーグループ",
+    "creditPackages": "永久クレジット"
+  },
+  "billing": {
+    "label": "請求期間",
+    "monthly": "月払い",
+    "yearly": "年払い",
+    "perMonth": "/ 月",
+    "perYear": "/ 年",
+    "unavailable": "この請求期間では購入できません"
+  },
   "subtitle": "所属するメンバーシップグループによって、利用できるモデルとその利用量が決まります。",
   "currentPlan": "現在のグループ",
   "free": "無料",
@@ -15,6 +28,14 @@
     "topUp": "クレジットを補充",
     "topUpUnavailable": "現在、補充はご利用いただけません。"
   },
+  "packages": {
+    "title": "永久クレジットパッケージ",
+    "subtitle": "期限がなく、期間限定クレジットの後に使われるクレジットを購入できます。",
+    "count": "{{count}} 件のパッケージ",
+    "credits": "永久クレジット",
+    "buy": "パッケージを購入",
+    "empty": "購入できる永久クレジットパッケージはありません。"
+  },
   "current": "現在",
   "youreOnThis": "現在このグループです",
   "switchCta": "切り替える",
@@ -23,6 +44,8 @@
   "upgradeBody": "グループの変更は管理者が行います。このグループに移るには、ワークスペースの管理者にお問い合わせください。",
   "priceFree": "無料",
   "loadFailed": "グループを読み込めませんでした",
+  "loadPackagesFailed": "永久クレジットパッケージを読み込めませんでした",
+  "noGroups": "利用できるユーザーグループはありません。",
   "expiresOn": "{{date}} まで有効",
   "permanent": "永続",
   "redeem": {

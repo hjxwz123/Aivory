@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -690,6 +691,12 @@ func restoreInto(ctx context.Context, ex store.RowExecer, zr *zip.Reader, man ba
 		}
 		counts[t] = n
 	}
+	if err := store.EnsureSettlementCurrencySetting(ctx, ex); err != nil {
+		return nil, fmt.Errorf("ensure settlement currency setting: %w", err)
+	}
+	if err := store.MigrateLegacyCreditPackage(ctx, ex); err != nil {
+		return nil, fmt.Errorf("migrate legacy permanent-credit package: %w", err)
+	}
 	if store.IsPostgres() {
 		// Ancient data may carry genuinely dangling parent ids (pre-FK eras).
 		// Promote those replies to roots instead of failing the whole import.
@@ -833,6 +840,12 @@ func mergeConfigArchive(ctx context.Context, d Deps, zr *zip.Reader, man configM
 		}
 		counts[t] = n
 	}
+	if err := store.EnsureSettlementCurrencySetting(ctx, tx); err != nil {
+		return nil, fmt.Errorf("ensure settlement currency setting: %w", err)
+	}
+	if err := store.MigrateLegacyCreditPackage(ctx, tx); err != nil {
+		return nil, fmt.Errorf("migrate legacy permanent-credit package: %w", err)
+	}
 	if err := rewriteConfigSkillAssetPaths(ctx, tx, man, d); err != nil {
 		return nil, err
 	}
@@ -843,10 +856,75 @@ func mergeConfigArchive(ctx context.Context, d Deps, zr *zip.Reader, man configM
 }
 
 func normalizeArchiveTableReader(table string, r io.Reader) (io.Reader, error) {
-	if table != "models" {
+	switch table {
+	case "models":
+		return normalizeModelOfficialToolsArchiveRows(r)
+	case "user_groups":
+		return normalizeLegacyUserGroupPriceArchiveRows(r)
+	default:
 		return r, nil
 	}
-	return normalizeModelOfficialToolsArchiveRows(r)
+}
+
+// normalizeLegacyUserGroupPriceArchiveRows upgrades both previous price shapes:
+// the single settlement price becomes the monthly price, while the older
+// USD/CNY pair follows the product default (USD, with CNY as a zero-USD
+// fallback). Historical archives never had a yearly offer, so it starts at 0.
+func normalizeLegacyUserGroupPriceArchiveRows(r io.Reader) (io.Reader, error) {
+	var out bytes.Buffer
+	dec := json.NewDecoder(r)
+	enc := json.NewEncoder(&out)
+	for {
+		var row map[string]json.RawMessage
+		if err := dec.Decode(&row); err == io.EOF {
+			return bytes.NewReader(out.Bytes()), nil
+		} else if err != nil {
+			return nil, fmt.Errorf("decode user_groups row: %w", err)
+		}
+		if raw, current := row["monthly_price_amount_minor"]; current {
+			var minor int64
+			if json.Unmarshal(raw, &minor) != nil || minor < 0 {
+				return nil, fmt.Errorf("invalid user_groups.monthly_price_amount_minor")
+			}
+		} else {
+			minor := int64(0)
+			if raw, ok := row["price_amount_minor"]; ok && string(raw) != "null" {
+				if json.Unmarshal(raw, &minor) != nil || minor < 0 {
+					return nil, fmt.Errorf("invalid user_groups.price_amount_minor")
+				}
+			} else {
+				price := 0.0
+				if raw, ok := row["price_usd"]; ok && string(raw) != "null" {
+					if err := json.Unmarshal(raw, &price); err != nil {
+						return nil, fmt.Errorf("invalid user_groups.price_usd: %w", err)
+					}
+				}
+				if price == 0 {
+					if raw, ok := row["price_cny"]; ok && string(raw) != "null" {
+						if err := json.Unmarshal(raw, &price); err != nil {
+							return nil, fmt.Errorf("invalid user_groups.price_cny: %w", err)
+						}
+					}
+				}
+				if price < 0 {
+					return nil, fmt.Errorf("invalid negative user_groups price")
+				}
+				minor = int64(math.Round(price * 100))
+			}
+			row["monthly_price_amount_minor"], _ = json.Marshal(minor)
+		}
+		if raw, current := row["yearly_price_amount_minor"]; current {
+			var minor int64
+			if json.Unmarshal(raw, &minor) != nil || minor < 0 {
+				return nil, fmt.Errorf("invalid user_groups.yearly_price_amount_minor")
+			}
+		} else {
+			row["yearly_price_amount_minor"] = json.RawMessage("0")
+		}
+		if err := enc.Encode(row); err != nil {
+			return nil, fmt.Errorf("encode user_groups row: %w", err)
+		}
+	}
 }
 
 // normalizeModelOfficialToolsArchiveRows upgrades legacy hosted-tool arrays and

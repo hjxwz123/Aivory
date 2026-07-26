@@ -1,6 +1,19 @@
 {
   "back": "返回對話",
   "title": "訂閱",
+  "catalog": {
+    "label": "訂閱內容",
+    "userGroups": "使用者組",
+    "creditPackages": "永久積分"
+  },
+  "billing": {
+    "label": "結算週期",
+    "monthly": "月付",
+    "yearly": "年付",
+    "perMonth": "/ 月",
+    "perYear": "/ 年",
+    "unavailable": "此付費週期暫不可購買"
+  },
   "subtitle": "你所在的使用者組決定了你可以使用哪些模型以及多少額度。",
   "currentPlan": "當前使用者組",
   "free": "免費",
@@ -15,6 +28,14 @@
     "topUp": "補充積分",
     "topUpUnavailable": "暫不支援補充。"
   },
+  "packages": {
+    "title": "永久積分方案",
+    "subtitle": "購買永久有效的積分，限時積分用完後再使用。",
+    "count": "{{count}} 個方案",
+    "credits": "永久積分",
+    "buy": "購買此方案",
+    "empty": "暫無可購買的永久積分方案。"
+  },
   "current": "當前",
   "youreOnThis": "你正在使用此使用者組",
   "switchCta": "切換",
@@ -23,6 +44,8 @@
   "upgradeBody": "使用者組的變更由管理員處理。如需切換到此使用者組，請聯絡工作區管理員。",
   "priceFree": "免費",
   "loadFailed": "載入使用者組失敗",
+  "loadPackagesFailed": "載入永久積分方案失敗",
+  "noGroups": "暫無可用的使用者組。",
   "expiresOn": "有效期至 {{date}}",
   "permanent": "永久",
   "redeem": {

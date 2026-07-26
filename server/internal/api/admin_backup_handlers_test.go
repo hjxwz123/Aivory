@@ -259,7 +259,8 @@ func TestConfigExportImportMergesAdminConfigOnly(t *testing.T) {
 	mustExec(t, srcDB, `INSERT INTO settings(key,value) VALUES('default_model_id','"m_cfg"')`)
 	mustExec(t, srcDB, `INSERT INTO settings(key,value) VALUES('search_api_key','"search-secret"')`)
 	mustExec(t, srcDB, `INSERT INTO settings(key,value) VALUES('fallback_model_id','null')`)
-	mustExec(t, srcDB, `INSERT INTO user_groups(id,name,description,features,price_usd,price_cny,is_default,sort_order) VALUES('ug_paid','Paid','P','["fast"]',9,69,1,1)`)
+	mustExec(t, srcDB, `INSERT INTO user_groups(id,name,description,features,monthly_price_amount_minor,yearly_price_amount_minor,is_default,sort_order) VALUES('ug_paid','Paid','P','["fast"]',1299,12999,1,1)`)
+	mustExec(t, srcDB, `INSERT INTO credit_packages(id,name,description,credits,price_amount_minor,enabled,sort_order) VALUES('cp_cfg','Credits','P',10000,899,1,1)`)
 	mustExec(t, srcDB, `INSERT INTO channels(id,name,type,api_format,base_url,api_key,enabled,sort_order) VALUES('ch_cfg','Main','openai','chat','https://api.example','sk-live',1,1)`)
 	mustExec(t, srcDB, `INSERT INTO skills(id,name,description,instructions,assets,enabled,sort_order) VALUES('sk_cfg','Skill','desc','do it',?,1,1)`, string(assetJSON))
 	mustExec(t, srcDB, `INSERT INTO oauth_providers(id,kind,name,client_id,client_secret,enabled,sort_order) VALUES('oa_cfg','github','GitHub','cid','osecret',1,1)`)
@@ -307,7 +308,7 @@ func TestConfigExportImportMergesAdminConfigOnly(t *testing.T) {
 	if err := json.Unmarshal(irec.Body.Bytes(), &res); err != nil {
 		t.Fatalf("decode config import: %v (%s)", err, irec.Body.String())
 	}
-	if !res.OK || res.Tables["channels"] != 1 || res.Tables["models"] != 1 || res.Tables["settings"] != 2 {
+	if !res.OK || res.Tables["channels"] != 1 || res.Tables["models"] != 1 || res.Tables["settings"] != 2 || res.Tables["credit_packages"] != 1 {
 		t.Fatalf("unexpected config import result: %+v", res)
 	}
 	if res.AssetsRestored != 2 {
@@ -339,6 +340,17 @@ func TestConfigExportImportMergesAdminConfigOnly(t *testing.T) {
 	if quota != 20 {
 		t.Fatalf("quota = %v, want 20", quota)
 	}
+	var monthlyPrice, yearlyPrice int64
+	mustQuery(t, tgtDB, `SELECT monthly_price_amount_minor, yearly_price_amount_minor FROM user_groups WHERE id='ug_paid'`).Scan(&monthlyPrice, &yearlyPrice)
+	if monthlyPrice != 1299 || yearlyPrice != 12999 {
+		t.Fatalf("user-group monthly/yearly prices = %d/%d, want 1299/12999", monthlyPrice, yearlyPrice)
+	}
+	var packageCredits float64
+	var packagePrice int64
+	mustQuery(t, tgtDB, `SELECT credits, price_amount_minor FROM credit_packages WHERE id='cp_cfg'`).Scan(&packageCredits, &packagePrice)
+	if packageCredits != 10000 || packagePrice != 899 {
+		t.Fatalf("credit package = %v/%d, want 10000/899", packageCredits, packagePrice)
+	}
 	var skillCount, redeemCount int
 	mustQuery(t, tgtDB, `SELECT COUNT(*) FROM model_skills WHERE model_id='m_cfg' AND skill_id='sk_cfg'`).Scan(&skillCount)
 	mustQuery(t, tgtDB, `SELECT COUNT(*) FROM redeem_codes WHERE code='PROMO'`).Scan(&redeemCount)
@@ -366,6 +378,97 @@ func TestConfigExportImportMergesAdminConfigOnly(t *testing.T) {
 	mustQuery(t, tgtDB, `SELECT COUNT(*) FROM settings WHERE key='fallback_model_id' AND value='null'`).Scan(&nullRows)
 	if nullRows != 0 {
 		t.Fatalf("null settings should not be exported/imported")
+	}
+}
+
+func TestNormalizeLegacyUserGroupPriceArchiveRows(t *testing.T) {
+	input := strings.NewReader(strings.Join([]string{
+		`{"id":"ug_monthly","monthly_price_amount_minor":1499,"yearly_price_amount_minor":14999,"price_amount_minor":999}`,
+		`{"id":"ug_single","price_amount_minor":1299,"price_usd":99}`,
+		`{"id":"ug_usd","price_usd":9.99,"price_cny":69}`,
+		`{"id":"ug_cny","price_usd":0,"price_cny":68.5}`,
+	}, "\n"))
+
+	normalized, err := normalizeLegacyUserGroupPriceArchiveRows(input)
+	if err != nil {
+		t.Fatalf("normalize legacy user-group prices: %v", err)
+	}
+
+	dec := json.NewDecoder(normalized)
+	want := []struct {
+		id      string
+		monthly int64
+		yearly  int64
+	}{
+		{id: "ug_monthly", monthly: 1499, yearly: 14999},
+		{id: "ug_single", monthly: 1299},
+		{id: "ug_usd", monthly: 999},
+		{id: "ug_cny", monthly: 6850},
+	}
+	for _, tc := range want {
+		var row struct {
+			ID                      string `json:"id"`
+			MonthlyPriceAmountMinor int64  `json:"monthly_price_amount_minor"`
+			YearlyPriceAmountMinor  int64  `json:"yearly_price_amount_minor"`
+		}
+		if err := dec.Decode(&row); err != nil {
+			t.Fatalf("decode normalized %s row: %v", tc.id, err)
+		}
+		if row.ID != tc.id || row.MonthlyPriceAmountMinor != tc.monthly || row.YearlyPriceAmountMinor != tc.yearly {
+			t.Fatalf("normalized row = %+v, want id=%q monthly/yearly=%d/%d", row, tc.id, tc.monthly, tc.yearly)
+		}
+	}
+}
+
+func TestRestoreLegacyPricingSettingsPersistsCurrencyAndCreatesPackage(t *testing.T) {
+	db := openMigrated(t, filepath.Join(t.TempDir(), "legacy-pricing-restore.db"))
+	defer db.Close()
+
+	var archive bytes.Buffer
+	zw := zip.NewWriter(&archive)
+	w, err := zw.Create("db/settings.jsonl")
+	if err != nil {
+		t.Fatalf("create legacy settings entry: %v", err)
+	}
+	for _, row := range []string{
+		`{"key":"permanent_credit_purchase_credits","value":"10000","updated_at":0}`,
+		`{"key":"permanent_credit_purchase_price_amount_minor","value":"899","updated_at":0}`,
+	} {
+		if _, err := io.WriteString(w, row+"\n"); err != nil {
+			t.Fatalf("write legacy settings row: %v", err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close legacy archive: %v", err)
+	}
+	zr, err := zip.NewReader(bytes.NewReader(archive.Bytes()), int64(archive.Len()))
+	if err != nil {
+		t.Fatalf("open legacy archive: %v", err)
+	}
+
+	tx, err := db.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("begin restore: %v", err)
+	}
+	deps := Deps{DB: db, Config: config.Config{UploadDir: t.TempDir(), ArtifactDir: t.TempDir()}}
+	if _, err := restoreInto(context.Background(), tx, zr, backupManifest{}, deps); err != nil {
+		_ = tx.Rollback()
+		t.Fatalf("restore legacy pricing settings: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit restore: %v", err)
+	}
+
+	var currency string
+	mustQuery(t, db, `SELECT value FROM settings WHERE key='settlement_currency'`).Scan(&currency)
+	if currency != `"USD"` {
+		t.Fatalf("settlement currency setting = %s, want %q", currency, `"USD"`)
+	}
+	var credits float64
+	var price int64
+	mustQuery(t, db, `SELECT credits, price_amount_minor FROM credit_packages WHERE id='cp_legacy_default'`).Scan(&credits, &price)
+	if credits != 10000 || price != 899 {
+		t.Fatalf("legacy credit package = %v/%d, want 10000/899", credits, price)
 	}
 }
 

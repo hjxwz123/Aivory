@@ -565,6 +565,9 @@
     "lead": "全体設定:既定/タスクモデル、圧縮、登録、上限。",
     "saved": "設定を保存しました",
     "fields": {
+      "settlementCurrency": "決済通貨",
+      "settlementCurrencyHint": "ユーザーグループと永久クレジットの価格に使う3文字の ISO 4217 通貨コードです。変更しても既存価格は自動換算されません。",
+      "settlementCurrencyInvalid": "有効な3文字の通貨コードを入力してください。",
       "defaultModel": "既定のチャットモデル",
       "taskModel": "タスクモデル（内部LLM呼び出し）",
       "taskModelHint": "タイトル、クエリルーティング、圧縮の要約、メモリーのトリアージに使用されます。",
@@ -684,8 +687,11 @@
     "lead": "会員ランク:価格と機能。モデル別上限はモデル頁で。",
     "new": "新規グループ",
     "default": "既定",
-    "creditsRatioLabel": "1 USD あたりのクレジット（全体）",
-    "creditsRatioHint": "全体:1 ドルあたりのクレジット。0 で無効。",
+    "monthlyShort": "/月",
+    "yearlyShort": "/年",
+    "freePrice": "無料",
+    "creditsRatioLabel": "モデルコストの内部換算（USD あたり）",
+    "creditsRatioHint": "モデルコスト 1 USD あたりに消費するクレジット数。決済通貨とは別です。0 で無効。",
     "groupBuyUrlLabel": "ティア購入リンク（全体）",
     "groupBuyUrlHint": "有料カードの「購入」リンク。空欄で「管理者に連絡」。",
     "creditBuyUrlLabel": "クレジット補充リンク（全体）",
@@ -693,7 +699,7 @@
     "quotaMsgLabel": "クォータ超過メッセージ",
     "quotaMsgHint": "このモデルの上限に達した時に表示。",
     "quotaMsgPlaceholder": "このモデルでのプランの上限に達しました。続行するにはプランをアップグレードしてください。",
-    "msgSaved": "メッセージを保存しました",
+    "msgSaved": "設定を保存しました",
     "editorTitle": "グループを編集",
     "newTitle": "新規グループ",
     "editorLead": "名前、価格、機能はサブスクリプションページでメンバーに表示されます。",
@@ -702,12 +708,46 @@
     "removed": "グループを削除しました",
     "removeTitle": "グループを削除しますか？",
     "removeBody": "メンバーは無料グループに移動。取り消し不可。",
+    "creditPackages": {
+      "title": "永久クレジットパッケージ",
+      "lead": "グローバル決済通貨で価格を設定する補充パッケージを管理します。",
+      "new": "新規パッケージ",
+      "empty": "クレジットパッケージはまだありません。",
+      "disabled": "無効",
+      "creditCount": "永久クレジット {{count}}",
+      "enabledLabel": "{{name}} の有効状態を切り替え",
+      "editorTitle": "クレジットパッケージを編集",
+      "newTitle": "新規クレジットパッケージ",
+      "editorLead": "各パッケージは1つの決済通貨価格で永久クレジットを付与します。",
+      "created": "クレジットパッケージを作成しました",
+      "updated": "クレジットパッケージを更新しました",
+      "removed": "クレジットパッケージを削除しました",
+      "removeTitle": "クレジットパッケージを削除しますか？",
+      "removeBody": "「{{name}}」を削除しますか？この操作は取り消せません。",
+      "fields": {
+        "name": "名前",
+        "description": "説明",
+        "descriptionPlaceholder": "任意。パッケージと一緒に表示されます",
+        "credits": "永久クレジット数",
+        "creditsHint": "期限のないクレジット残高に追加されます。",
+        "price": "価格（{{currency}}）",
+        "priceHint": "グローバル決済通貨を使用します。0 の場合はメンバーに表示されません。",
+        "enabled": "メンバーに公開",
+        "enabledHint": "有効かつ価格が 0 より大きい場合、サブスクリプションページに表示します。"
+      },
+      "errors": {
+        "nameRequired": "名前は必須です",
+        "creditsInvalid": "0 より大きいクレジット数を入力してください。",
+        "priceInvalid": "決済通貨の小数桁に合う0以上の価格を入力してください。"
+      }
+    },
     "fields": {
       "name": "名前",
       "description": "短い説明",
       "descriptionPlaceholder": "より多くの余裕が必要なパワーユーザー向け",
-      "priceUsd": "価格（USD）",
-      "priceCny": "価格（CNY）",
+      "monthlyPrice": "月額（{{currency}}）",
+      "yearlyPrice": "年額（{{currency}}）",
+      "priceHint": "グローバル決済通貨を使用します。0 の場合はその支払周期を提供しません。",
       "features": "機能",
       "research": "ディープリサーチ",
       "researchHint": "このグループにディープリサーチ機能の利用を許可します。",
@@ -732,7 +772,8 @@
       "isPublicHint": "オフにすると公開サブスクリプションページに表示されません（既存メンバーには影響しません）。"
     },
     "errors": {
-      "nameRequired": "名前は必須です"
+      "nameRequired": "名前は必須です",
+      "priceInvalid": "決済通貨の小数桁に合う0以上の価格を入力してください。"
     },
     "maxStorage": "ストレージ(MB)",
     "maxStorageHint": "0 = 無制限。画像以外のファイルのみ計上。"

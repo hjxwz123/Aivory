@@ -32,7 +32,7 @@ const BackupVersion = 1
 // (messages.parent_id) is satisfied by exporting messages in creation order —
 // a reply is always created after the message it answers.
 var backupTableOrder = []string{
-	"settings", "users", "workspaces", "workspace_members", "user_groups", "channels", "skills", "prompts", "user_skills", "user_prompts", "oauth_providers",
+	"settings", "users", "workspaces", "workspace_members", "user_groups", "credit_packages", "channels", "skills", "prompts", "user_skills", "user_prompts", "oauth_providers",
 	"models", "model_group_quotas", "model_tags", "image_styles",
 	"redeem_codes", "redeem_redemptions",
 	"model_skills", "knowledge_bases", "projects", "conversations", "messages",
@@ -49,6 +49,7 @@ var backupTableOrder = []string{
 var configTableOrder = []string{
 	"settings",
 	"user_groups",
+	"credit_packages",
 	"channels",
 	"skills",
 	"prompts",
@@ -99,6 +100,7 @@ type RowQuerier interface {
 type RowExecer interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
 // binCell is the JSON wrapper for binary column values (BLOB on SQLite / BYTEA
@@ -270,6 +272,7 @@ var tablePrimaryKeys = map[string][]string{
 	"workspaces":              {"id"},
 	"workspace_members":       {"workspace_id", "user_id"},
 	"user_groups":             {"id"},
+	"credit_packages":         {"id"},
 	"channels":                {"id"},
 	"skills":                  {"id"},
 	"prompts":                 {"id"},

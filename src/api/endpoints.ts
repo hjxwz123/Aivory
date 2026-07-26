@@ -14,6 +14,7 @@ import type {
   ApiChannel,
   ApiConversation,
   ApiConversationFile,
+  ApiCreditPackage,
   ApiCredits,
   ApiDocument,
   ApiKnowledgeBase,
@@ -258,6 +259,13 @@ export const groupsApi = {
   list: () => api<ApiUserGroup[]>('/user-groups'),
   /** Public membership tiers for the landing page (no auth required). */
   publicList: () => api<ApiUserGroup[]>('/public/user-groups'),
+}
+
+// ----- Permanent-credit packages ------------------------------------------
+
+export const creditPackagesApi = {
+  /** Enabled packages visible to signed-in members. */
+  list: () => api<ApiCreditPackage[]>('/credit-packages'),
 }
 
 // ----- Redeem codes (§ redeem codes) ---------------------------------------
@@ -621,6 +629,15 @@ export const adminApi = {
     api<ApiUserGroup>(`/admin/user-groups/${encodeURIComponent(id)}`, { method: 'PATCH', body }),
   removeUserGroup: (id: string) =>
     api<{ ok: true }>(`/admin/user-groups/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  creditPackages: () => api<ApiCreditPackage[]>('/admin/credit-packages'),
+  createCreditPackage: (body: Partial<ApiCreditPackage>) =>
+    api<ApiCreditPackage>('/admin/credit-packages', { method: 'POST', body }),
+  reorderCreditPackages: (ids: string[]) =>
+    api<{ ok: true }>('/admin/credit-packages/reorder', { method: 'PATCH', body: { ids } }),
+  updateCreditPackage: (id: string, body: Partial<ApiCreditPackage>) =>
+    api<ApiCreditPackage>(`/admin/credit-packages/${encodeURIComponent(id)}`, { method: 'PATCH', body }),
+  removeCreditPackage: (id: string) =>
+    api<{ ok: true }>(`/admin/credit-packages/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   /** Assign a membership group; group_expires_at is unix seconds (0 = permanent). */
   setUserGroup: (id: string, group_id: string, group_expires_at = 0) =>
     api<{ ok: true }>(`/admin/users/${encodeURIComponent(id)}/group`, {

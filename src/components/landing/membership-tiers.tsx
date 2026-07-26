@@ -6,11 +6,11 @@ import { groupsApi } from '@/api'
 import type { ApiUserGroup } from '@/api/types'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { CountUp } from '@/components/landing/fx/count-up'
 import { SpotlightCard } from '@/components/landing/fx/spotlight-card'
 import { ScrollFloat } from '@/components/landing/fx/scroll-float'
 import { StarBorder } from '@/components/landing/fx/star-border'
 import { cn } from '@/lib/utils'
+import { formatCurrencyMinor } from '@/lib/currency'
 
 type T = (key: string, opts?: Record<string, unknown>) => string
 
@@ -60,8 +60,9 @@ export function MembershipTiers() {
 
   const sorted = (groups ?? []).slice().sort((a, b) => a.sort_order - b.sort_order)
   const recommendedId =
-    sorted.find((g) => g.price_usd > 0 || g.price_cny > 0)?.id ?? sorted.find((g) => g.is_default)?.id ?? ''
-  const zh = i18n.language.startsWith('zh')
+    sorted.find((g) => g.monthly_price_amount_minor > 0 || g.yearly_price_amount_minor > 0)?.id ??
+    sorted.find((g) => g.is_default)?.id ??
+    ''
 
   return (
     <section id="pricing" className="py-24 sm:py-32 border-t border-[var(--color-divider)]">
@@ -96,9 +97,9 @@ export function MembershipTiers() {
           >
             {sorted.map((g, i) => {
               const rec = g.id === recommendedId
-              const free = g.price_usd <= 0 && g.price_cny <= 0
-              const price = zh ? g.price_cny : g.price_usd
-              const cur = zh ? '¥' : '$'
+              const monthly = g.monthly_price_amount_minor > 0
+              const price = monthly ? g.monthly_price_amount_minor : g.yearly_price_amount_minor
+              const free = g.is_default || price <= 0
               const featureRows = [
                 g.credit_allowance > 0 && (
                   <FeatureRow key="credits" icon={<Sparkles size={13} aria-hidden />}>
@@ -166,12 +167,10 @@ export function MembershipTiers() {
                     ) : (
                       <>
                         <span className="font-serif text-[2.5rem] leading-none text-[var(--color-fg)] tabular-nums">
-                          {cur}
-                          {/* The price counts up as the card scrolls in. */}
-                          <CountUp to={price} duration={1.2} />
+                          {formatCurrencyMinor(price, g.settlement_currency, i18n.resolvedLanguage)}
                         </span>
                         <span className="text-[13px] text-[var(--color-fg-subtle)]">
-                          {periodLabel(t, g.credit_period_seconds)}
+                          {t(monthly ? 'landing:membership.perMonth' : 'landing:membership.perYear')}
                         </span>
                       </>
                     )}

@@ -565,6 +565,9 @@
     "lead": "Quelques réglages globaux : modèle par défaut/tâche, compaction, inscriptions, quotas.",
     "saved": "Paramètres enregistrés",
     "fields": {
+      "settlementCurrency": "Devise de règlement",
+      "settlementCurrencyHint": "Code ISO 4217 à trois lettres utilisé pour les prix des groupes et des crédits permanents. Le modifier ne convertit pas les prix existants.",
+      "settlementCurrencyInvalid": "Saisissez un code devise valide à trois lettres.",
       "defaultModel": "Modèle de chat par défaut",
       "taskModel": "Modèle de tâches (appels LLM internes)",
       "taskModelHint": "Utilisé pour les titres, le routage de requêtes, les résumés de compression, le triage de mémoire.",
@@ -684,8 +687,11 @@
     "lead": "Paliers : prix + fonctions. Les quotas par modèle sont sur la page du modèle.",
     "new": "Nouveau groupe",
     "default": "Par défaut",
-    "creditsRatioLabel": "Crédits par USD (global)",
-    "creditsRatioHint": "Global : crédits par 1 $. 0 désactive les crédits.",
+    "monthlyShort": "/ mois",
+    "yearlyShort": "/ an",
+    "freePrice": "Gratuit",
+    "creditsRatioLabel": "Conversion interne du coût modèle (par USD)",
+    "creditsRatioHint": "Crédits débités par USD de coût modèle, indépendamment de la devise de règlement. 0 désactive les crédits.",
     "groupBuyUrlLabel": "Lien d'achat de palier (global)",
     "groupBuyUrlHint": "Lien « Acheter » des paliers payants. Vide → « contacter l'admin ».",
     "creditBuyUrlLabel": "Lien de recharge de crédits (global)",
@@ -693,7 +699,7 @@
     "quotaMsgLabel": "Message de dépassement de quota",
     "quotaMsgHint": "Affiché quand l'utilisateur atteint le quota du modèle.",
     "quotaMsgPlaceholder": "Vous avez atteint la limite de votre forfait pour ce modèle. Améliorez votre forfait pour continuer.",
-    "msgSaved": "Message enregistré",
+    "msgSaved": "Paramètres enregistrés",
     "editorTitle": "Modifier le groupe",
     "newTitle": "Nouveau groupe",
     "editorLead": "Le nom, le prix et les fonctionnalités sont présentés aux membres sur la page d'abonnement.",
@@ -702,12 +708,46 @@
     "removed": "Groupe retiré",
     "removeTitle": "Retirer le groupe ?",
     "removeBody": "Les membres passent au groupe gratuit. Irréversible.",
+    "creditPackages": {
+      "title": "Forfaits de crédits permanents",
+      "lead": "Configurez les offres de recharge dans la devise de règlement globale.",
+      "new": "Nouveau forfait",
+      "empty": "Aucun forfait de crédits pour le moment.",
+      "disabled": "Désactivé",
+      "creditCount": "{{count}} crédits permanents",
+      "enabledLabel": "Activer ou désactiver {{name}}",
+      "editorTitle": "Modifier le forfait de crédits",
+      "newTitle": "Nouveau forfait de crédits",
+      "editorLead": "Chaque forfait accorde des crédits permanents à un prix dans la devise de règlement.",
+      "created": "Forfait de crédits créé",
+      "updated": "Forfait de crédits mis à jour",
+      "removed": "Forfait de crédits supprimé",
+      "removeTitle": "Supprimer le forfait de crédits ?",
+      "removeBody": "Supprimer « {{name}} » ? Cette action est irréversible.",
+      "fields": {
+        "name": "Nom",
+        "description": "Description",
+        "descriptionPlaceholder": "Note facultative affichée avec le forfait",
+        "credits": "Crédits permanents",
+        "creditsHint": "Crédits ajoutés au solde sans expiration.",
+        "price": "Prix ({{currency}})",
+        "priceHint": "Utilise la devise de règlement globale. 0 masque le forfait aux membres.",
+        "enabled": "Disponible pour les membres",
+        "enabledHint": "Affiche ce forfait sur la page d'abonnement lorsque son prix est supérieur à 0."
+      },
+      "errors": {
+        "nameRequired": "Le nom est requis",
+        "creditsInvalid": "Saisissez un nombre de crédits supérieur à 0.",
+        "priceInvalid": "Saisissez un prix positif ou nul avec les décimales de la devise de règlement."
+      }
+    },
     "fields": {
       "name": "Nom",
       "description": "Description courte",
       "descriptionPlaceholder": "Pour les utilisateurs avancés qui ont besoin de plus de marge",
-      "priceUsd": "Prix (USD)",
-      "priceCny": "Prix (CNY)",
+      "monthlyPrice": "Prix mensuel ({{currency}})",
+      "yearlyPrice": "Prix annuel ({{currency}})",
+      "priceHint": "Utilise la devise de règlement globale. 0 désactive cette périodicité.",
       "features": "Fonctionnalités",
       "research": "Recherche approfondie",
       "researchHint": "Autoriser ce groupe à utiliser le mode Recherche approfondie.",
@@ -732,7 +772,8 @@
       "isPublicHint": "Désactivé, ce palier n'apparaît plus sur la page d'abonnement publique (les membres gardent leur offre)."
     },
     "errors": {
-      "nameRequired": "Le nom est requis"
+      "nameRequired": "Le nom est requis",
+      "priceInvalid": "Saisissez un prix positif ou nul avec les décimales de la devise de règlement."
     },
     "maxStorage": "Stockage (Mo)",
     "maxStorageHint": "0 = illimité. Fichiers non-image uniquement."

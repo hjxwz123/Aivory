@@ -1,6 +1,19 @@
 {
   "back": "Back to chat",
   "title": "Subscription",
+  "catalog": {
+    "label": "Subscription catalog",
+    "userGroups": "User groups",
+    "creditPackages": "Permanent credits"
+  },
+  "billing": {
+    "label": "Billing period",
+    "monthly": "Monthly",
+    "yearly": "Yearly",
+    "perMonth": "/ month",
+    "perYear": "/ year",
+    "unavailable": "Unavailable for this billing period"
+  },
   "subtitle": "Your membership group determines which models you can use and how much.",
   "currentPlan": "Current group",
   "free": "Free",
@@ -15,6 +28,14 @@
     "topUp": "Top up credits",
     "topUpUnavailable": "Top-up isn’t available right now."
   },
+  "packages": {
+    "title": "Permanent credit packages",
+    "subtitle": "Purchase credits that do not expire and are used after timed credits.",
+    "count": "{{count}} packages",
+    "credits": "Permanent credits",
+    "buy": "Purchase package",
+    "empty": "No permanent credit packages are available."
+  },
   "current": "Current",
   "youreOnThis": "You’re on this group",
   "switchCta": "Switch",
@@ -23,6 +44,8 @@
   "upgradeBody": "Group changes are handled by an administrator. Contact your workspace admin to move to this group.",
   "priceFree": "Free",
   "loadFailed": "Couldn’t load groups",
+  "loadPackagesFailed": "Couldn’t load permanent credit packages",
+  "noGroups": "No user groups are available.",
   "expiresOn": "Until {{date}}",
   "permanent": "Permanent",
   "redeem": {

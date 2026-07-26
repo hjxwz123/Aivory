@@ -244,6 +244,7 @@ func TestConfigTableOrderExcludesUserDataTables(t *testing.T) {
 	for _, tbl := range []string{
 		"settings",
 		"user_groups",
+		"credit_packages",
 		"channels",
 		"models",
 		"model_group_quotas",

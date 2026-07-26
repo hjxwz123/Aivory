@@ -1,6 +1,19 @@
 {
   "back": "返回对话",
   "title": "订阅",
+  "catalog": {
+    "label": "订阅内容",
+    "userGroups": "用户组",
+    "creditPackages": "永久积分"
+  },
+  "billing": {
+    "label": "结算周期",
+    "monthly": "月付",
+    "yearly": "年付",
+    "perMonth": "/ 月",
+    "perYear": "/ 年",
+    "unavailable": "该付费周期暂不可购买"
+  },
   "subtitle": "你所在的用户组决定了你可以使用哪些模型以及多少额度。",
   "currentPlan": "当前用户组",
   "free": "免费",
@@ -15,6 +28,14 @@
     "topUp": "补充积分",
     "topUpUnavailable": "暂不支持补充。"
   },
+  "packages": {
+    "title": "永久积分套餐",
+    "subtitle": "购买永久有效的积分，限时积分用完后再使用。",
+    "count": "{{count}} 个套餐",
+    "credits": "永久积分",
+    "buy": "购买此套餐",
+    "empty": "暂无可购买的永久积分套餐。"
+  },
   "current": "当前",
   "youreOnThis": "你正在使用此用户组",
   "switchCta": "切换",
@@ -23,6 +44,8 @@
   "upgradeBody": "用户组的变更由管理员处理。如需切换到此用户组，请联系工作区管理员。",
   "priceFree": "免费",
   "loadFailed": "加载用户组失败",
+  "loadPackagesFailed": "加载永久积分套餐失败",
+  "noGroups": "暂无可用的用户组。",
   "expiresOn": "有效期至 {{date}}",
   "permanent": "永久",
   "redeem": {
