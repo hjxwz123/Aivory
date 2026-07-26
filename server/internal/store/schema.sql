@@ -33,14 +33,15 @@ CREATE TABLE IF NOT EXISTS users (
 
 -- Membership tiers. Exactly one row is the default (is_default=1, seeded as
 -- ug_free). features is a JSON array of feature strings shown on the
--- subscription page; prices are display-only (no payment integration).
+-- subscription page. Prices use the deployment-wide settlement currency and
+-- are stored in that currency's smallest unit.
 CREATE TABLE IF NOT EXISTS user_groups (
   id          TEXT PRIMARY KEY,
   name        TEXT NOT NULL,
   description TEXT NOT NULL DEFAULT '',
   features    TEXT NOT NULL DEFAULT '[]',
-  price_usd   REAL NOT NULL DEFAULT 0,
-  price_cny   REAL NOT NULL DEFAULT 0,
+  monthly_price_amount_minor INTEGER NOT NULL DEFAULT 0,
+  yearly_price_amount_minor  INTEGER NOT NULL DEFAULT 0,
   is_default  INTEGER NOT NULL DEFAULT 0,
   sort_order  INTEGER NOT NULL DEFAULT 0,
   max_projects INTEGER NOT NULL DEFAULT 0,
@@ -53,6 +54,21 @@ CREATE TABLE IF NOT EXISTS user_groups (
   updated_at  INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_user_groups_name_unique ON user_groups(lower(trim(name)));
+
+-- Administrator-defined permanent-credit top-up packages. Prices use the
+-- deployment-wide settlement currency and are stored in its smallest unit.
+CREATE TABLE IF NOT EXISTS credit_packages (
+  id                 TEXT PRIMARY KEY,
+  name               TEXT NOT NULL,
+  description        TEXT NOT NULL DEFAULT '',
+  credits            REAL NOT NULL,
+  price_amount_minor INTEGER NOT NULL DEFAULT 0,
+  enabled            INTEGER NOT NULL DEFAULT 1,
+  sort_order         INTEGER NOT NULL DEFAULT 0,
+  created_at         INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+  updated_at         INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+);
+CREATE INDEX IF NOT EXISTS idx_credit_packages_order ON credit_packages(sort_order, name);
 
 -- Per-model, per-group access + usage cap. A model with NO rows here is open to
 -- everyone (unlimited). Once a model has any row, only listed groups may use it;

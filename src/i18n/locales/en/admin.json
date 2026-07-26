@@ -565,6 +565,9 @@
     "lead": "A few platform-wide knobs: default/task model, compaction, signups, quotas.",
     "saved": "Settings saved",
     "fields": {
+      "settlementCurrency": "Settlement currency",
+      "settlementCurrencyHint": "Three-letter ISO 4217 code used for group and permanent-credit prices. Changing it does not convert existing prices.",
+      "settlementCurrencyInvalid": "Enter a valid three-letter currency code.",
       "defaultModel": "Default chat model",
       "taskModel": "Task model (internal LLM calls)",
       "taskModelHint": "Used for titles, query routing, compression summaries, memory triage.",
@@ -684,8 +687,11 @@
     "lead": "Membership tiers: price + features. Per-model quotas live on the model page.",
     "new": "New group",
     "default": "Default",
-    "creditsRatioLabel": "Credits per USD (global)",
-    "creditsRatioHint": "Global: credits per $1. 0 disables credits.",
+    "monthlyShort": "/ month",
+    "yearlyShort": "/ year",
+    "freePrice": "Free",
+    "creditsRatioLabel": "Internal model-cost multiplier (per USD)",
+    "creditsRatioHint": "Credits charged per USD of model cost. This is separate from the settlement currency. 0 disables credits.",
     "groupBuyUrlLabel": "Tier purchase link (global)",
     "groupBuyUrlHint": "“Buy” link on paid tier cards. Empty shows “contact admin”.",
     "creditBuyUrlLabel": "Credit top-up link (global)",
@@ -693,7 +699,7 @@
     "quotaMsgLabel": "Over-quota message",
     "quotaMsgHint": "Shown when a user hits this model's quota.",
     "quotaMsgPlaceholder": "You’ve reached your plan’s limit for this model. Upgrade your plan to continue.",
-    "msgSaved": "Message saved",
+    "msgSaved": "Settings saved",
     "editorTitle": "Edit group",
     "newTitle": "New group",
     "editorLead": "Name, price and features are shown to members on the subscription page.",
@@ -702,12 +708,46 @@
     "removed": "Group removed",
     "removeTitle": "Remove group?",
     "removeBody": "Members move to the free group. Can't be undone.",
+    "creditPackages": {
+      "title": "Permanent credit packages",
+      "lead": "Configure top-up offers priced in the global settlement currency.",
+      "new": "New package",
+      "empty": "No credit packages yet.",
+      "disabled": "Disabled",
+      "creditCount": "{{count}} permanent credits",
+      "enabledLabel": "Toggle {{name}}",
+      "editorTitle": "Edit credit package",
+      "newTitle": "New credit package",
+      "editorLead": "Each package grants permanent credits at one settlement-currency price.",
+      "created": "Credit package created",
+      "updated": "Credit package updated",
+      "removed": "Credit package removed",
+      "removeTitle": "Remove credit package?",
+      "removeBody": "Delete “{{name}}”? This can't be undone.",
+      "fields": {
+        "name": "Name",
+        "description": "Description",
+        "descriptionPlaceholder": "Optional note shown with this package",
+        "credits": "Permanent credits",
+        "creditsHint": "Credits added to the non-expiring balance.",
+        "price": "Price ({{currency}})",
+        "priceHint": "Uses the global settlement currency. 0 keeps the package hidden from members.",
+        "enabled": "Available to members",
+        "enabledHint": "Show this package on the subscription page when it has a positive price."
+      },
+      "errors": {
+        "nameRequired": "Name is required",
+        "creditsInvalid": "Enter a positive credit amount.",
+        "priceInvalid": "Enter a valid non-negative price for the settlement currency."
+      }
+    },
     "fields": {
       "name": "Name",
       "description": "Short description",
       "descriptionPlaceholder": "For power users who need more headroom",
-      "priceUsd": "Price (USD)",
-      "priceCny": "Price (CNY)",
+      "monthlyPrice": "Monthly price ({{currency}})",
+      "yearlyPrice": "Yearly price ({{currency}})",
+      "priceHint": "Uses the global settlement currency. 0 leaves this billing option unavailable.",
       "features": "Features",
       "research": "Deep Research",
       "researchHint": "Allow this group to use the Deep Research mode.",
@@ -732,7 +772,8 @@
       "isPublicHint": "When off, this tier is hidden from the public subscription page (members keep their plan)."
     },
     "errors": {
-      "nameRequired": "Name is required"
+      "nameRequired": "Name is required",
+      "priceInvalid": "Enter a valid non-negative price for the settlement currency."
     },
     "maxStorage": "Storage (MB)",
     "maxStorageHint": "0 = unlimited. Non-image uploads only."

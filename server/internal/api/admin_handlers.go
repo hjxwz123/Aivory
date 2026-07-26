@@ -1160,10 +1160,12 @@ var settingsKeys = []string{
 	// behind the slider-puzzle captcha. login_captcha_required: same gate on
 	// password sign-in (anti credential-stuffing).
 	"register_ip_daily_limit", "register_captcha_required", "login_captcha_required",
-	// §credits: global USD→credit conversion rate (1 USD = N credits) and the two
-	// shared purchase links (tier upgrade + permanent-credit top-up). Per-group
-	// credit fields keep only allowance + refresh period.
-	"credits_per_usd", "group_buy_url", "credit_buy_url",
+	// §credits / settlement pricing: credits_per_usd remains the internal model
+	// cost conversion. User-facing group and permanent-credit prices share one
+	// deployment-wide settlement currency and two external purchase links.
+	"credits_per_usd", "settlement_currency",
+	"permanent_credit_purchase_credits", "permanent_credit_purchase_price_amount_minor",
+	"group_buy_url", "credit_buy_url",
 	// §B6 partial: JSON array of tool names disabled platform-wide (kill-switch),
 	// e.g. ["python_execute","image_generate"].
 	"disabled_tools",
@@ -1346,6 +1348,26 @@ func applyAdminSettingsPatch(d Deps, body map[string]json.RawMessage, skipNull b
 				// The byte ceiling (env MaxUploadBytes) is applied at read time.
 				var n int
 				if json.Unmarshal(v, &n) != nil || n < 0 {
+					return 0, errInvalidInput
+				}
+			case "settlement_currency":
+				var code string
+				if json.Unmarshal(v, &code) != nil {
+					return 0, errInvalidInput
+				}
+				code = strings.ToUpper(strings.TrimSpace(code))
+				if !validSettlementCurrency(code) {
+					return 0, errInvalidInput
+				}
+				v, _ = json.Marshal(code)
+			case "permanent_credit_purchase_credits":
+				var amount float64
+				if json.Unmarshal(v, &amount) != nil || amount < 0 {
+					return 0, errInvalidInput
+				}
+			case "permanent_credit_purchase_price_amount_minor":
+				var amount int64
+				if json.Unmarshal(v, &amount) != nil || amount < 0 {
 					return 0, errInvalidInput
 				}
 			case "embedding_model_id":

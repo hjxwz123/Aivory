@@ -61,16 +61,19 @@ type User struct {
 }
 
 // UserGroup is a membership tier (§ user groups). Features is a JSON array of
-// strings; prices are display-only.
+// strings. MonthlyPriceAmountMinor and YearlyPriceAmountMinor use the
+// deployment-wide settlement currency; SettlementCurrency is attached by the
+// API and is not persisted per group.
 type UserGroup struct {
-	ID          string          `json:"id"`
-	Name        string          `json:"name"`
-	Description string          `json:"description"`
-	Features    json.RawMessage `json:"features"`
-	PriceUSD    float64         `json:"price_usd"`
-	PriceCNY    float64         `json:"price_cny"`
-	IsDefault   bool            `json:"is_default"`
-	SortOrder   int             `json:"sort_order"`
+	ID                      string          `json:"id"`
+	Name                    string          `json:"name"`
+	Description             string          `json:"description"`
+	Features                json.RawMessage `json:"features"`
+	MonthlyPriceAmountMinor int64           `json:"monthly_price_amount_minor"`
+	YearlyPriceAmountMinor  int64           `json:"yearly_price_amount_minor"`
+	SettlementCurrency      string          `json:"settlement_currency,omitempty"`
+	IsDefault               bool            `json:"is_default"`
+	SortOrder               int             `json:"sort_order"`
 	// MaxProjects / MaxKBs cap how many projects / knowledge bases a member may
 	// create (§ user groups). 0 = unlimited.
 	MaxProjects int `json:"max_projects"`

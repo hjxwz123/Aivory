@@ -6,6 +6,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	_ "embed"
 	"fmt"
@@ -86,6 +87,22 @@ func Open(dataSource string) (*sql.DB, error) {
 
 // Migrate applies the embedded schema for the active dialect. Idempotent.
 func Migrate(db *sql.DB) error {
+	groupMonthlyPriceExisted, err := columnExists(db, "user_groups", "monthly_price_amount_minor")
+	if err != nil {
+		return fmt.Errorf("inspect user-group monthly settlement price: %w", err)
+	}
+	legacyGroupPriceAmountMinor, err := columnExists(db, "user_groups", "price_amount_minor")
+	if err != nil {
+		return fmt.Errorf("inspect legacy user-group settlement price: %w", err)
+	}
+	legacyGroupPriceUSD, err := columnExists(db, "user_groups", "price_usd")
+	if err != nil {
+		return fmt.Errorf("inspect legacy user-group USD price: %w", err)
+	}
+	legacyGroupPriceCNY, err := columnExists(db, "user_groups", "price_cny")
+	if err != nil {
+		return fmt.Errorf("inspect legacy user-group CNY price: %w", err)
+	}
 	schema := schemaSQL
 	addImageRef := `ALTER TABLE chunks ADD COLUMN image_ref TEXT`
 	addOfficialTools := `ALTER TABLE models ADD COLUMN official_tools TEXT NOT NULL DEFAULT '[]'`
@@ -132,6 +149,8 @@ func Migrate(db *sql.DB) error {
 	// purchase links are global settings, not columns.)
 	addGroupCreditAllowance := `ALTER TABLE user_groups ADD COLUMN credit_allowance REAL NOT NULL DEFAULT 0`
 	addGroupCreditPeriod := `ALTER TABLE user_groups ADD COLUMN credit_period_seconds INTEGER NOT NULL DEFAULT 0`
+	addGroupMonthlyPriceAmountMinor := `ALTER TABLE user_groups ADD COLUMN monthly_price_amount_minor INTEGER NOT NULL DEFAULT 0`
+	addGroupYearlyPriceAmountMinor := `ALTER TABLE user_groups ADD COLUMN yearly_price_amount_minor INTEGER NOT NULL DEFAULT 0`
 	addUserPermCredits := `ALTER TABLE users ADD COLUMN credits_permanent REAL NOT NULL DEFAULT 0`
 	addUserSortOrder := `ALTER TABLE users ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0`
 	addUsageCredits := `ALTER TABLE usage_logs ADD COLUMN credits REAL NOT NULL DEFAULT 0`
@@ -226,6 +245,8 @@ func Migrate(db *sql.DB) error {
 		addGroupMaxKBs = `ALTER TABLE user_groups ADD COLUMN IF NOT EXISTS max_kbs INTEGER NOT NULL DEFAULT 0`
 		addGroupCreditAllowance = `ALTER TABLE user_groups ADD COLUMN IF NOT EXISTS credit_allowance REAL NOT NULL DEFAULT 0`
 		addGroupCreditPeriod = `ALTER TABLE user_groups ADD COLUMN IF NOT EXISTS credit_period_seconds INTEGER NOT NULL DEFAULT 0`
+		addGroupMonthlyPriceAmountMinor = `ALTER TABLE user_groups ADD COLUMN IF NOT EXISTS monthly_price_amount_minor BIGINT NOT NULL DEFAULT 0`
+		addGroupYearlyPriceAmountMinor = `ALTER TABLE user_groups ADD COLUMN IF NOT EXISTS yearly_price_amount_minor BIGINT NOT NULL DEFAULT 0`
 		addUserPermCredits = `ALTER TABLE users ADD COLUMN IF NOT EXISTS credits_permanent REAL NOT NULL DEFAULT 0`
 		addUserSortOrder = `ALTER TABLE users ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 0`
 		addUsageCredits = `ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS credits REAL NOT NULL DEFAULT 0`
@@ -286,7 +307,7 @@ func Migrate(db *sql.DB) error {
 		addInlineSource, addInlineParent, addInlineQuote,
 		addModelTags, addModelExtraParams,
 		addGroupMaxProjects, addGroupMaxKBs,
-		addGroupCreditAllowance, addGroupCreditPeriod,
+		addGroupCreditAllowance, addGroupCreditPeriod, addGroupMonthlyPriceAmountMinor, addGroupYearlyPriceAmountMinor,
 		addUserPermCredits, addUserSortOrder, addUsageCredits, addMsgCredits,
 		addMsgModelLabel, addMsgSearchText,
 		addImageTimeout,
@@ -352,7 +373,7 @@ func Migrate(db *sql.DB) error {
 		"user_prompts":       {"user_id", "name", "description", "content", "source_prompt_id"},
 		"users":              {"group_id", "totp_secret", "totp_enabled", "group_expires_at", "previous_group_id", "password_set", "password_changed_at", "last_seen_at", "credits_permanent", "sort_order"},
 		"usage_logs":         {"credits", "workspace_id", "channel_id", "fallback", "status", "error", "request_method", "request_url", "request_headers", "request_body"},
-		"user_groups":        {"max_projects", "max_kbs", "credit_allowance", "credit_period_seconds", "max_workspaces", "is_public", "max_storage_mb"},
+		"user_groups":        {"monthly_price_amount_minor", "yearly_price_amount_minor", "max_projects", "max_kbs", "credit_allowance", "credit_period_seconds", "max_workspaces", "is_public", "max_storage_mb"},
 		"models":             {"official_tools", "builtin_tools", "moderation_enabled", "moderation_mode", "tags", "extra_params", "image_timeout_sec", "research_enabled", "fallback_channel_id", "fast"},
 		"refresh_tokens":     {"user_agent", "ip", "location", "last_seen"},
 		"conversations":      {"inline_source_conv", "inline_parent_id", "inline_quote", "workspace_id", "fast"},
@@ -368,6 +389,30 @@ func Migrate(db *sql.DB) error {
 		if _, err := db.Exec(fmt.Sprintf(`SELECT %s FROM %s WHERE 1=0`, strings.Join(cols, ", "), table)); err != nil {
 			return fmt.Errorf("schema column check failed for %q (an additive migration may have silently failed): %w", table, err)
 		}
+	}
+	// Older deployments stored either one settlement price or the still older
+	// USD/CNY display pair. Only backfill when the monthly column itself was added
+	// by this invocation. Column presence, rather than the settings marker, is the
+	// safety boundary: deleting or losing the marker must never overwrite prices
+	// that an administrator has already configured in the current columns.
+	if !groupMonthlyPriceExisted && (legacyGroupPriceAmountMinor || legacyGroupPriceUSD || legacyGroupPriceCNY) {
+		source := "CAST(ROUND(price_cny * 100) AS BIGINT)"
+		if legacyGroupPriceAmountMinor {
+			source = "CAST(price_amount_minor AS BIGINT)"
+		} else if legacyGroupPriceUSD && legacyGroupPriceCNY {
+			source = "CAST(ROUND((CASE WHEN price_usd <> 0 THEN price_usd ELSE price_cny END) * 100) AS BIGINT)"
+		} else if legacyGroupPriceUSD {
+			source = "CAST(ROUND(price_usd * 100) AS BIGINT)"
+		}
+		if _, err := db.Exec(`UPDATE user_groups SET monthly_price_amount_minor=` + source); err != nil {
+			return fmt.Errorf("backfill user-group billing prices: %w", err)
+		}
+		if _, err := db.Exec(`INSERT INTO settings(key, value) VALUES('user_group_billing_prices_backfill_v2', '1') ON CONFLICT(key) DO NOTHING`); err != nil {
+			return fmt.Errorf("mark user-group billing price backfill: %w", err)
+		}
+	}
+	if err := MigrateLegacyCreditPackage(context.Background(), db); err != nil {
+		return fmt.Errorf("migrate legacy permanent-credit package: %w", err)
 	}
 	if err := migrateOfficialToolDefinitions(db); err != nil {
 		return fmt.Errorf("migrate official tool definitions: %w", err)
@@ -747,6 +792,11 @@ func Seed(db *sql.DB, cfg config.Config) error {
 		// Global credit conversion rate (§ credits): 1 USD of model cost = N
 		// credits. Shared by every group; 0 disables credits platform-wide.
 		"credits_per_usd": `0`,
+		// User-facing prices use one administrator-selected settlement currency.
+		// The fixed permanent-credit offer is optional (both values 0 = unset).
+		"settlement_currency":                          `"USD"`,
+		"permanent_credit_purchase_credits":            `0`,
+		"permanent_credit_purchase_price_amount_minor": `0`,
 		// Global purchase links (§ credits / user groups): one tier-upgrade link
 		// and one permanent-credit top-up link, shared by every group.
 		"group_buy_url":    `""`,
@@ -787,7 +837,7 @@ func Seed(db *sql.DB, cfg config.Config) error {
 
 	// Default "Free" membership group — always present. New users and any
 	// legacy user without a group resolve to it (§ user groups).
-	if _, err := db.Exec(`INSERT INTO user_groups(id, name, description, features, price_usd, price_cny, is_default, sort_order)
+	if _, err := db.Exec(`INSERT INTO user_groups(id, name, description, features, monthly_price_amount_minor, yearly_price_amount_minor, is_default, sort_order)
 		VALUES('ug_free', 'Free', 'Default access tier.', '[]', 0, 0, 1, 0)
 		ON CONFLICT(id) DO NOTHING`); err != nil {
 		return fmt.Errorf("seed free group: %w", err)

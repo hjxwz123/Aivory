@@ -41,8 +41,8 @@ CREATE TABLE IF NOT EXISTS user_groups (
   name        TEXT NOT NULL,
   description TEXT NOT NULL DEFAULT '',
   features    TEXT NOT NULL DEFAULT '[]',
-  price_usd   REAL NOT NULL DEFAULT 0,
-  price_cny   REAL NOT NULL DEFAULT 0,
+  monthly_price_amount_minor BIGINT NOT NULL DEFAULT 0,
+  yearly_price_amount_minor  BIGINT NOT NULL DEFAULT 0,
   is_default  INTEGER NOT NULL DEFAULT 0,
   sort_order  INTEGER NOT NULL DEFAULT 0,
   max_projects INTEGER NOT NULL DEFAULT 0,
@@ -55,6 +55,19 @@ CREATE TABLE IF NOT EXISTS user_groups (
   updated_at  BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_user_groups_name_unique ON user_groups(lower(trim(name)));
+
+CREATE TABLE IF NOT EXISTS credit_packages (
+  id                 TEXT PRIMARY KEY,
+  name               TEXT NOT NULL,
+  description        TEXT NOT NULL DEFAULT '',
+  credits            REAL NOT NULL,
+  price_amount_minor BIGINT NOT NULL DEFAULT 0,
+  enabled            INTEGER NOT NULL DEFAULT 1,
+  sort_order         INTEGER NOT NULL DEFAULT 0,
+  created_at         BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint),
+  updated_at         BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
+);
+CREATE INDEX IF NOT EXISTS idx_credit_packages_order ON credit_packages(sort_order, name);
 
 -- NOTE: model_group_quotas REFERENCES models(id) — it is created AFTER the models
 -- table below. Postgres rejects a forward FK reference in a single-batch Exec, so

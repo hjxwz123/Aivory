@@ -20,9 +20,11 @@ func listUserGroupsPublic(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	// Public/subscription page lists only tiers the admin marked visible
 	// (is_public). Admins keep the full list via listUserGroupsAdmin.
+	currency := globalSettlementCurrency(d)
 	visible := make([]store.UserGroup, 0, len(rows))
 	for _, g := range rows {
 		if g.IsPublic {
+			g.SettlementCurrency = currency
 			visible = append(visible, g)
 		}
 	}
@@ -35,6 +37,7 @@ func listUserGroupsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
+	attachSettlementCurrency(rows, globalSettlementCurrency(d))
 	writeJSON(w, 200, rows)
 }
 
@@ -47,6 +50,10 @@ func createUserGroupAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	g.Name = strings.TrimSpace(g.Name)
 	if g.Name == "" {
 		writeError(w, 400, errors.New("name required"))
+		return
+	}
+	if g.MonthlyPriceAmountMinor < 0 || g.YearlyPriceAmountMinor < 0 {
+		writeError(w, 400, errInvalidInput)
 		return
 	}
 	if existing, err := store.GetUserGroupByName(r.Context(), d.DB, g.Name); err == nil && existing != nil {
@@ -65,6 +72,7 @@ func createUserGroupAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
+	created.SettlementCurrency = globalSettlementCurrency(d)
 	writeJSON(w, 201, created)
 }
 
@@ -105,6 +113,14 @@ func updateUserGroupAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if p.MonthlyPriceAmountMinor != nil && *p.MonthlyPriceAmountMinor < 0 {
+		writeError(w, 400, errInvalidInput)
+		return
+	}
+	if p.YearlyPriceAmountMinor != nil && *p.YearlyPriceAmountMinor < 0 {
+		writeError(w, 400, errInvalidInput)
+		return
+	}
 	upd, err := store.UpdateUserGroup(r.Context(), d.DB, id, p)
 	if err != nil {
 		if errors.Is(err, store.ErrUserGroupNameExists) {
@@ -114,7 +130,14 @@ func updateUserGroupAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, errNotFound)
 		return
 	}
+	upd.SettlementCurrency = globalSettlementCurrency(d)
 	writeJSON(w, 200, upd)
+}
+
+func attachSettlementCurrency(groups []store.UserGroup, currency string) {
+	for i := range groups {
+		groups[i].SettlementCurrency = currency
+	}
 }
 
 func deleteUserGroupAdmin(d Deps, w http.ResponseWriter, r *http.Request) {

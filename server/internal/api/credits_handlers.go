@@ -7,6 +7,7 @@ import (
 	"math"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -49,9 +50,21 @@ func creditWindowUsed(ctx context.Context, d Deps, userID string, periodSeconds 
 // the separate permanent pool, plus the top-up link.
 func meCreditsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
+	currency := globalSettlementCurrency(d)
+	permanent, err := store.PermanentCredits(r.Context(), d.DB, u.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
 	g, err := store.GetUserGroup(r.Context(), d.DB, groupOrDefault(u.GroupID))
 	if err != nil || g == nil {
-		writeJSON(w, 200, map[string]any{"enabled": false, "permanent": u.CreditsPermanent})
+		writeJSON(w, 200, map[string]any{
+			"enabled":             false,
+			"permanent":           permanent,
+			"settlement_currency": currency,
+			"buy_url":             globalSettingStr(d, "credit_buy_url"),
+			"group_buy_url":       globalSettingStr(d, "group_buy_url"),
+		})
 		return
 	}
 	used, windowStart := creditWindowUsed(r.Context(), d, u.ID, g.CreditPeriodSeconds)
@@ -72,10 +85,36 @@ func meCreditsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 			"period_seconds": period,
 			"resets_at":      resetsAt,
 		},
-		"permanent":     u.CreditsPermanent,
-		"buy_url":       globalSettingStr(d, "credit_buy_url"),
-		"group_buy_url": globalSettingStr(d, "group_buy_url"),
+		"permanent":           permanent,
+		"settlement_currency": currency,
+		"buy_url":             globalSettingStr(d, "credit_buy_url"),
+		"group_buy_url":       globalSettingStr(d, "group_buy_url"),
 	})
+}
+
+const defaultSettlementCurrency = store.DefaultSettlementCurrency
+
+func validSettlementCurrency(code string) bool {
+	if len(code) != 3 {
+		return false
+	}
+	for _, ch := range code {
+		if ch < 'A' || ch > 'Z' {
+			return false
+		}
+	}
+	return true
+}
+
+// globalSettlementCurrency is deliberately code-based rather than a hardcoded
+// currency list so self-hosters can use any ISO-4217 code supported by their
+// payment provider. Invalid or missing restored settings fail safely to USD.
+func globalSettlementCurrency(d Deps) string {
+	code := strings.ToUpper(strings.TrimSpace(globalSettingStr(d, "settlement_currency")))
+	if !validSettlementCurrency(code) {
+		return defaultSettlementCurrency
+	}
+	return code
 }
 
 // globalSettingStr reads a string-valued global setting (§ credits purchase

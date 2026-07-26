@@ -19,6 +19,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch'
 import { toast } from '@/hooks/use-toast'
 import { PanelFallback } from '@/components/ui/panel-fallback'
+import { isSettlementCurrencyCode } from '@/lib/currency'
 
 type Settings = Record<string, unknown>
 
@@ -43,6 +44,7 @@ const OWNED_KEYS = [
   'daily_message_limit',
   'daily_image_limit',
   'credit_preflight_enabled',
+  'settlement_currency',
   'email_verification_required',
   'email_domain_whitelist',
   'smtp_host',
@@ -78,12 +80,18 @@ export default function AdminSettings() {
   }, [])
 
   async function save() {
+    const settlementCurrency = readString('settlement_currency', 'USD').trim().toUpperCase()
+    if (!isSettlementCurrencyCode(settlementCurrency)) {
+      toast.error(t('admin:settings.fields.settlementCurrencyInvalid'))
+      return
+    }
     setSaving(true)
     try {
       const patch: Settings = {}
       for (const k of OWNED_KEYS) {
         if (k in draft) patch[k] = draft[k]
       }
+      patch.settlement_currency = settlementCurrency
       await adminApi.updateSettings(patch)
       toast.success(t('admin:settings.saved'))
     } catch (e) {
@@ -117,6 +125,22 @@ export default function AdminSettings() {
         <PanelFallback />
       ) : (
         <section className="mt-8 flex flex-col gap-5">
+          <Field
+            label={t('admin:settings.fields.settlementCurrency')}
+            htmlFor="settlement-currency"
+            hint={t('admin:settings.fields.settlementCurrencyHint')}
+          >
+            <Input
+              id="settlement-currency"
+              value={readString('settlement_currency', 'USD').toUpperCase()}
+              maxLength={3}
+              autoCapitalize="characters"
+              spellCheck={false}
+              className="font-mono uppercase"
+              onChange={(e) => setDraft({ ...draft, settlement_currency: e.target.value.toUpperCase() })}
+            />
+          </Field>
+
           <Field label={t('admin:settings.fields.defaultModel')} htmlFor="def-model">
             <Select
               value={readString('default_model_id')}

@@ -163,15 +163,19 @@ export interface ApiUserGroup {
   name: string
   description: string
   features: string[]
-  price_usd: number
-  price_cny: number
+  /** Monthly price in the deployment settlement currency's smallest unit. */
+  monthly_price_amount_minor: number
+  /** Yearly price in the deployment settlement currency's smallest unit. */
+  yearly_price_amount_minor: number
+  /** Global, read-only settlement currency attached to each group response. */
+  settlement_currency: string
   is_default: boolean
   sort_order: number
   /** Max projects / knowledge bases a member may create. 0 = unlimited. */
   max_projects: number
   max_kbs: number
   /** Credit system (§ credits): per-group timed allowance + refresh cycle (unused
-   *  voided). The USD→credit rate and purchase links are global settings. */
+   *  voided). The internal USD→credit rate and purchase links are global settings. */
   credit_allowance: number
   credit_period_seconds: number
   created_at: number
@@ -181,6 +185,22 @@ export interface ApiUserGroup {
   max_storage_mb?: number
   /** Listed on the public subscription page. */
   is_public?: boolean
+}
+
+/** Purchasable package of permanent (non-expiring) credits. */
+export interface ApiCreditPackage {
+  id: string
+  name: string
+  description: string
+  credits: number
+  /** Price in the deployment settlement currency's smallest unit. */
+  price_amount_minor: number
+  /** Global, read-only settlement currency attached to each package response. */
+  settlement_currency: string
+  enabled: boolean
+  sort_order: number
+  created_at: number
+  updated_at: number
 }
 
 /** Per-model, per-group usage cap. */
@@ -527,6 +547,7 @@ export interface ApiCredits {
   enabled: boolean
   timed?: { remaining: number; allowance: number; period_seconds: number; resets_at: number }
   permanent: number
+  settlement_currency: string
   /** Global permanent-credit top-up link. */
   buy_url?: string
   /** Global tier-purchase link (shown on every group card). */

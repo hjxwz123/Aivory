@@ -156,6 +156,9 @@ func NewRouter(d Deps) http.Handler {
 	// Membership tiers for the public landing page (§ user groups) — read-only,
 	// marketing info (names / prices / features / allowances), no secrets.
 	mux.handle("GET", "/api/public/user-groups", wrap(d, listUserGroupsPublic))
+	// Permanent-credit packages are public pricing data. Only enabled, positive
+	// offers are returned; administration uses the protected routes below.
+	mux.handle("GET", "/api/credit-packages", wrap(d, listCreditPackagesPublic))
 	// Public read-only conversation share (token in the path; no auth). Rate
 	// limited (§D1) so the token space can't be swept even though it's now 192-bit.
 	mux.handle("GET", "/api/public/shared/:token", rateLimitedIP(d, "share", rlPublicSharedConversationMax, rlPublicSharedConversationWindow, wrap(d, publicSharedHandler)))
@@ -360,6 +363,11 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("PATCH", "/api/admin/user-groups/reorder", requireAdmin(d, reorderUserGroupsAdmin))
 	mux.handle("PATCH", "/api/admin/user-groups/:id", requireAdmin(d, updateUserGroupAdmin))
 	mux.handle("DELETE", "/api/admin/user-groups/:id", requireAdmin(d, deleteUserGroupAdmin))
+	mux.handle("GET", "/api/admin/credit-packages", requireAdmin(d, listCreditPackagesAdmin))
+	mux.handle("POST", "/api/admin/credit-packages", requireAdmin(d, createCreditPackageAdmin))
+	mux.handle("PATCH", "/api/admin/credit-packages/reorder", requireAdmin(d, reorderCreditPackagesAdmin))
+	mux.handle("PATCH", "/api/admin/credit-packages/:id", requireAdmin(d, updateCreditPackageAdmin))
+	mux.handle("DELETE", "/api/admin/credit-packages/:id", requireAdmin(d, deleteCreditPackageAdmin))
 	mux.handle("POST", "/api/admin/users/:id/group", requireAdmin(d, setUserGroupAdmin))
 	mux.handle("POST", "/api/admin/users/:id/credits", requireAdmin(d, setUserCreditsAdmin))
 	mux.handle("GET", "/api/admin/skills", requireAdmin(d, listSkillsAdmin))

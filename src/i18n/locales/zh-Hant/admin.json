@@ -565,6 +565,9 @@
     "lead": "影響全員的幾項:預設/任務模型、壓縮、註冊、配額。",
     "saved": "已儲存設定",
     "fields": {
+      "settlementCurrency": "結算貨幣",
+      "settlementCurrencyHint": "使用者組與永久積分價格使用的三位 ISO 4217 貨幣代碼。修改後不會自動換算現有價格。",
+      "settlementCurrencyInvalid": "請輸入有效的三位貨幣代碼。",
       "defaultModel": "預設對話模型",
       "taskModel": "任務模型(內部 LLM 呼叫)",
       "taskModelHint": "用於標題、查詢路由、壓縮摘要、記憶抽取。",
@@ -684,8 +687,11 @@
     "lead": "會員等級:價格與功能。各模型用量限制在模型頁設。",
     "new": "新建使用者組",
     "default": "預設",
-    "creditsRatioLabel": "每美元積分數（全域）",
-    "creditsRatioHint": "全域:1 美元 = 多少點數。0 = 停用點數。",
+    "monthlyShort": "/月",
+    "yearlyShort": "/年",
+    "freePrice": "免費",
+    "creditsRatioLabel": "模型成本內部換算（每 USD）",
+    "creditsRatioHint": "每 1 USD 模型成本扣除的積分數，與使用者結算貨幣無關。0 = 停用積分。",
     "groupBuyUrlLabel": "使用者組購買連結（全域）",
     "groupBuyUrlHint": "付費組卡片的「購買」連結。留空顯示「聯絡管理員」。",
     "creditBuyUrlLabel": "積分補充連結（全域）",
@@ -693,7 +699,7 @@
     "quotaMsgLabel": "超額提示",
     "quotaMsgHint": "使用者達到該模型用量上限時顯示。",
     "quotaMsgPlaceholder": "您已達到當前套餐對此模型的使用上限，升級套餐即可繼續使用。",
-    "msgSaved": "提示已儲存",
+    "msgSaved": "設定已儲存",
     "editorTitle": "編輯使用者組",
     "newTitle": "新建使用者組",
     "editorLead": "名稱、價格和功能將展示在使用者的訂閱頁面。",
@@ -702,12 +708,46 @@
     "removed": "使用者組已刪除",
     "removeTitle": "刪除使用者組？",
     "removeBody": "群組內成員將移至免費組。無法復原。",
+    "creditPackages": {
+      "title": "永久積分方案",
+      "lead": "設定使用全域結算貨幣定價的積分補充方案。",
+      "new": "新增方案",
+      "empty": "尚未建立積分方案。",
+      "disabled": "已停用",
+      "creditCount": "{{count}} 永久積分",
+      "enabledLabel": "切換 {{name}}",
+      "editorTitle": "編輯積分方案",
+      "newTitle": "新增積分方案",
+      "editorLead": "每個方案按一個結算貨幣價格發放永久積分。",
+      "created": "積分方案已建立",
+      "updated": "積分方案已更新",
+      "removed": "積分方案已刪除",
+      "removeTitle": "刪除積分方案？",
+      "removeBody": "確定刪除「{{name}}」嗎？此操作無法復原。",
+      "fields": {
+        "name": "名稱",
+        "description": "說明",
+        "descriptionPlaceholder": "選填，將隨方案顯示",
+        "credits": "永久積分數",
+        "creditsHint": "購買後加入不會過期的積分餘額。",
+        "price": "價格（{{currency}}）",
+        "priceHint": "使用全域結算貨幣；0 表示暫不向使用者顯示。",
+        "enabled": "向使用者開放",
+        "enabledHint": "啟用且價格大於 0 時，在訂閱頁顯示此方案。"
+      },
+      "errors": {
+        "nameRequired": "請填寫名稱",
+        "creditsInvalid": "請輸入大於 0 的積分數。",
+        "priceInvalid": "請輸入符合結算貨幣小數位的非負價格。"
+      }
+    },
     "fields": {
       "name": "名稱",
       "description": "簡短介紹",
       "descriptionPlaceholder": "面向需要更多額度的高階使用者",
-      "priceUsd": "價格（美元）",
-      "priceCny": "價格（人民幣）",
+      "monthlyPrice": "月付價格（{{currency}}）",
+      "yearlyPrice": "年付價格（{{currency}}）",
+      "priceHint": "使用全域結算貨幣；0 表示不提供該付費週期。",
       "features": "功能介紹",
       "research": "深度研究",
       "researchHint": "允許該使用者群組使用深度研究功能。",
@@ -732,7 +772,8 @@
       "isPublicHint": "關閉後該用戶組不再出現在訂閱頁（已在該組的用戶不受影響）。"
     },
     "errors": {
-      "nameRequired": "請填寫名稱"
+      "nameRequired": "請填寫名稱",
+      "priceInvalid": "請輸入符合結算貨幣小數位的非負價格。"
     },
     "maxStorage": "儲存空間(MB)",
     "maxStorageHint": "0 表示不限制;僅統計非圖片檔案。"
