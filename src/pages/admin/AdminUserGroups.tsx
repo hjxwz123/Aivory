@@ -284,7 +284,7 @@ export default function AdminUserGroups() {
       </section>
 
       {/* Global credit settings + over-quota prompt */}
-      <section className="mt-8 max-w-xl flex flex-col gap-5">
+      <section className="mt-8 flex w-full flex-col gap-5">
         <Field
           label={t('admin:groups.creditsRatioLabel')}
           htmlFor="credits-per-usd"

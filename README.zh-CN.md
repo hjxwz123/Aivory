@@ -239,7 +239,7 @@ docker compose -f docker-compose.prod.yml up -d
 | `sandbox` | `ghcr.io/hjxwz123/aivory-sandbox-sidecar:latest` | 内置代码执行沙箱（仅内网） |
 | `app` | `ghcr.io/hjxwz123/aivory-app:latest` | 单容器：Go HTTP + SSE 服务 **同时**托管前端 SPA，同源 |
 
-**数据持久化**：Postgres / Redis / Qdrant 数据落在命名卷（`pgdata` / `redisdata` / `qdrantdata`）。上传文件和生成产物绑定挂载到**宿主机**目录（`DATA_DIR`，默认 `./data`），文件直接落在宿主机文件系统，不进容器，方便查看与备份。备份时把命名卷和 `DATA_DIR` 一起打包，保证数据库行、向量和磁盘文件三者一致。管理员后台也可以异步生成全量迁移 ZIP，包含数据库行、文件和 Qdrant 向量；生成后的归档位于 `BACKUP_DIR`（默认 `DATA_DIR/backups`）。
+**数据持久化**：Postgres / Redis / Qdrant 数据落在命名卷（`pgdata` / `redisdata` / `qdrantdata`）。上传文件、生成产物以及头像等 API 本地对象绑定挂载到**宿主机**目录（`DATA_DIR`，默认 `./data`），文件直接落在宿主机文件系统，不进容器，方便查看与备份。本地对象默认保存在 `UPLOAD_DIR/object-storage`，需要时可通过 `AIVORY_LOCAL_STORAGE_DIR` 覆盖。备份时把命名卷和 `DATA_DIR` 一起打包，保证数据库行、向量和磁盘文件三者一致。管理员后台也可以异步生成全量迁移 ZIP，包含数据库行、文件和 Qdrant 向量；生成后的归档位于 `BACKUP_DIR`（默认 `DATA_DIR/backups`）。
 
 ---
 

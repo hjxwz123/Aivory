@@ -107,82 +107,68 @@ var errIconBadBytes = errors.New("icon: file bytes do not match a supported imag
 var errIconExtMismatch = errors.New("icon: extension does not match file bytes")
 var errIconUnsafeSVG = errors.New("icon: SVG contains scripts or active content — re-export a static SVG")
 
-// uploadIconAdmin — POST /api/admin/icons, multipart form, field name "file".
-// Returns {"url": "/api/icons/<hex>.<ext>", "filename": "<hex>.<ext>"} so the
-// frontend can drop the URL straight into the model's `icon` column.
-func uploadIconAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
-	// 1. Multipart with a tight envelope cap. ParseMultipartForm enforces the
-	//    in-memory ceiling; bytes beyond it stream to a temp file we control.
+// readValidatedImageUpload applies the shared icon/avatar upload boundary. SVG
+// is accepted only for admin-managed icons; profile avatars stay raster-only.
+func readValidatedImageUpload(r *http.Request, allowSVG bool, badExt error) ([]byte, string, string, int, error) {
 	if err := r.ParseMultipartForm(maxIconBytes + 1024); err != nil {
-		writeError(w, 400, err)
-		return
+		return nil, "", "", http.StatusBadRequest, err
 	}
 	file, header, err := r.FormFile("file")
 	if err != nil {
-		writeError(w, 400, err)
-		return
+		return nil, "", "", http.StatusBadRequest, err
 	}
 	defer file.Close()
 
-	// 2. Extension check on the multipart filename — only used to decide
-	//    "is this file even worth reading". The bytes still have to match.
 	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(header.Filename), "."))
 	expectedMime, ok := allowedIconExt[ext]
-	if !ok {
-		writeError(w, 400, errIconBadExt)
-		return
+	if !ok || (!allowSVG && ext == "svg") {
+		return nil, "", "", http.StatusBadRequest, badExt
 	}
 
-	// 3. Read with a hard byte cap. io.LimitReader caps at +1 so we can
-	//    detect oversize files vs files that happen to be exactly at the cap.
 	buf := &bytes.Buffer{}
 	n, err := io.Copy(buf, io.LimitReader(file, maxIconBytes+1))
 	if err != nil {
-		writeError(w, 500, err)
-		return
+		return nil, "", "", http.StatusInternalServerError, err
 	}
 	if n > maxIconBytes {
-		writeError(w, 400, errIconTooLarge)
-		return
+		return nil, "", "", http.StatusBadRequest, errIconTooLarge
 	}
 	if n == 0 {
-		writeError(w, 400, errIconBadBytes)
-		return
+		return nil, "", "", http.StatusBadRequest, errIconBadBytes
 	}
 	data := buf.Bytes()
 
 	if ext == "svg" {
-		// 4a. SVG is XML, not a raster image — validate it carries no active
-		//     content (script / event handlers / foreignObject / XXE) instead of
-		//     the sniff + raster-decode checks below.
 		if err := validateSVG(data); err != nil {
-			writeError(w, 400, err)
-			return
+			return nil, "", "", http.StatusBadRequest, err
 		}
 	} else {
-		// 4. Sniff Content-Type from the actual bytes — never trust the multipart
-		//    header (Content-Type there is client-supplied). Must agree with the
-		//    extension we accepted.
 		sniff := http.DetectContentType(data)
-		// DetectContentType may append "; charset=..." for some types; icons are
-		// always media types but split to be safe.
 		if i := strings.IndexByte(sniff, ';'); i > 0 {
 			sniff = strings.TrimSpace(sniff[:i])
 		}
 		if sniff != expectedMime {
-			writeError(w, 400, errIconExtMismatch)
-			return
+			return nil, "", "", http.StatusBadRequest, errIconExtMismatch
 		}
-
-		// 5. Structural decode — image.DecodeConfig parses the header (width /
-		//    height / colorspace) without decoding the pixels. Catches polyglots
-		//    where the first 512 bytes look like one format but the rest is
-		//    something else. We don't keep the config; the call is purely a
-		//    "does this parse" check.
 		if _, _, err := image.DecodeConfig(bytes.NewReader(data)); err != nil {
-			writeError(w, 400, errIconBadBytes)
-			return
+			return nil, "", "", http.StatusBadRequest, errIconBadBytes
 		}
+	}
+
+	if ext == "jpg" {
+		ext = "jpeg"
+	}
+	return data, ext, expectedMime, http.StatusOK, nil
+}
+
+// uploadIconAdmin — POST /api/admin/icons, multipart form, field name "file".
+// Returns {"url": "/api/icons/<hex>.<ext>", "filename": "<hex>.<ext>"} so the
+// frontend can drop the URL straight into the model's `icon` column.
+func uploadIconAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
+	data, ext, _, status, err := readValidatedImageUpload(r, true, errIconBadExt)
+	if err != nil {
+		writeError(w, status, err)
+		return
 	}
 
 	// 6. Random 12-byte filename. Hex-encoded → 24 chars + extension.
@@ -196,13 +182,7 @@ func uploadIconAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
-	// Canonicalise jpg→jpeg for stored extension so the lookup table on GET
-	// stays small. The returned URL still uses what we wrote to disk.
-	storedExt := ext
-	if storedExt == "jpg" {
-		storedExt = "jpeg"
-	}
-	filename := id + "." + storedExt
+	filename := id + "." + ext
 	path := filepath.Join(dir, filename)
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		writeError(w, 500, err)

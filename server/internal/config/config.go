@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -31,6 +32,7 @@ type Config struct {
 	AllowedOrigins     []string
 	StaticDir          string
 	UploadDir          string
+	LocalStorageDir    string
 	ArtifactDir        string
 	BackupDir          string
 	MaxUploadBytes     int64
@@ -105,7 +107,12 @@ func Load() Config {
 		OAuthCallbackBaseURL: strings.TrimRight(getenv("OAUTH_CALLBACK_BASE_URL", ""), "/"),
 		OAuthReturnOrigins:   getenvList("OAUTH_RETURN_ORIGINS", nil),
 	}
+	cfg.LocalStorageDir = strings.TrimSpace(os.Getenv("AIVORY_LOCAL_STORAGE_DIR"))
+	if cfg.LocalStorageDir == "" {
+		cfg.LocalStorageDir = filepath.Join(cfg.UploadDir, "object-storage")
+	}
 	_ = os.MkdirAll(cfg.UploadDir, 0o755)
+	_ = os.MkdirAll(cfg.LocalStorageDir, 0o755)
 	_ = os.MkdirAll(cfg.ArtifactDir, 0o755)
 	_ = os.MkdirAll(cfg.BackupDir, 0o755)
 

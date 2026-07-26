@@ -189,9 +189,9 @@ func NewRouter(d Deps) http.Handler {
 	// gets throttled.
 	mux.handle("PATCH", "/api/me/password", rateLimitedIP(d, "password-change", rlPasswordChangeMax, rlPasswordChangeWindow, requireAuth(d, changePasswordHandler)))
 	mux.handle("POST", "/api/me/password/set", rateLimitedIP(d, "password-change", rlPasswordChangeMax, rlPasswordChangeWindow, requireAuth(d, setPasswordHandler)))
-	// User avatar upload — reuses the image-validating icon handler (returns
-	// {url}); the client stores that URL in the user's settings (avatar_url).
-	mux.handle("POST", "/api/me/avatar", requireAuth(d, uploadIconAdmin))
+	// User avatars are validated by the same image boundary as model icons, then
+	// uploaded directly by the API to the configured local/S3/Aliyun backend.
+	mux.handle("POST", "/api/me/avatar", requireAuth(d, uploadAvatar))
 	mux.handle("GET", "/api/me/usage", requireAuth(d, meUsageHandler))
 	mux.handle("GET", "/api/me/credits", requireAuth(d, meCreditsHandler))
 	mux.handle("GET", "/api/me/settings", requireAuth(d, meSettingsHandler))
@@ -451,6 +451,10 @@ func NewRouter(d Deps) http.Handler {
 	// "after a while" until a full reload. Filenames are random hex with
 	// validated image content, so there's nothing sensitive to protect.
 	mux.handle("GET", "/api/icons/:filename", wrap(d, serveIcon))
+	// Avatar objects live in a private configured backend. Serve them directly
+	// from the API through a stable public application URL so shared conversations
+	// and <img> requests do not depend on expiring presigned URLs or token refresh.
+	mux.handle("GET", "/api/avatars/:filename", wrap(d, serveAvatar))
 
 	// CORS wrapper around the API. When STATIC_DIR is set, the same process also
 	// serves the built SPA (single-container deploy) — front + back share one

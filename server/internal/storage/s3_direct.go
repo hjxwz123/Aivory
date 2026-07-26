@@ -303,7 +303,7 @@ func (c *Client) aliyunOSSBucket() (*aliyunoss.Bucket, error) {
 func (c *Client) fullObjectKey(key string, existing bool) (string, error) {
 	key = strings.TrimSpace(key)
 	key = strings.TrimLeft(key, "/")
-	if key == "" || strings.Contains(key, "\x00") || strings.Contains(key, "..") {
+	if key == "" || strings.Contains(key, "\x00") || strings.Contains(key, "..") || strings.Contains(key, `\`) {
 		return "", fmt.Errorf("storage: invalid object key")
 	}
 	prefix := storagePrefix(c.Storage)
