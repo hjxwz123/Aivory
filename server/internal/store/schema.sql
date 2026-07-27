@@ -70,6 +70,101 @@ CREATE TABLE IF NOT EXISTS credit_packages (
 );
 CREATE INDEX IF NOT EXISTS idx_credit_packages_order ON credit_packages(sort_order, name);
 
+-- Payment-provider accounts. config is the provider-specific JSON document
+-- (including credentials); it is stored verbatim and masked only by the API.
+CREATE TABLE IF NOT EXISTS payment_channels (
+  id         TEXT PRIMARY KEY,
+  name       TEXT NOT NULL,
+  provider   TEXT NOT NULL,
+  environment TEXT NOT NULL DEFAULT 'live',
+  config     TEXT NOT NULL DEFAULT '{}',
+  enabled    INTEGER NOT NULL DEFAULT 1,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+  updated_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_channels_name_unique ON payment_channels(lower(trim(name)));
+CREATE INDEX IF NOT EXISTS idx_payment_channels_order ON payment_channels(sort_order, name);
+
+-- User-selectable methods exposed by a payment channel (for example Stripe
+-- Checkout or an EPay Alipay route). Channel deletion is deliberately
+-- restricted until its methods have been removed explicitly.
+CREATE TABLE IF NOT EXISTS payment_methods (
+  id         TEXT PRIMARY KEY,
+  channel_id TEXT NOT NULL REFERENCES payment_channels(id) ON DELETE RESTRICT,
+  name       TEXT NOT NULL,
+  type       TEXT NOT NULL,
+  icon       TEXT NOT NULL DEFAULT '',
+  config     TEXT NOT NULL DEFAULT '{}',
+  enabled    INTEGER NOT NULL DEFAULT 1,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+  updated_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_methods_channel_name_unique ON payment_methods(channel_id, lower(trim(name)));
+CREATE INDEX IF NOT EXISTS idx_payment_methods_order ON payment_methods(channel_id, sort_order, name);
+
+-- Immutable commercial snapshot plus mutable processing state. Provider,
+-- channel/method, product name, amount/currency and entitlement fields are
+-- copied at creation so later administrator edits cannot change an order.
+CREATE TABLE IF NOT EXISTS payment_orders (
+  id                TEXT PRIMARY KEY,
+  user_id           TEXT REFERENCES users(id) ON DELETE SET NULL,
+  user_email        TEXT NOT NULL,
+  provider          TEXT NOT NULL,
+  environment       TEXT NOT NULL DEFAULT 'live',
+  channel_id        TEXT NOT NULL,
+  channel_name      TEXT NOT NULL,
+  method_id         TEXT NOT NULL,
+  method_name       TEXT NOT NULL,
+  method_type       TEXT NOT NULL,
+  method_config     TEXT NOT NULL DEFAULT '{}',
+  product_type      TEXT NOT NULL,
+  product_id        TEXT NOT NULL,
+  product_name      TEXT NOT NULL,
+  amount_minor      INTEGER NOT NULL,
+  paid_amount_minor INTEGER NOT NULL DEFAULT 0,
+  tax_amount_minor  INTEGER NOT NULL DEFAULT 0,
+  currency          TEXT NOT NULL,
+  credits           REAL NOT NULL DEFAULT 0,
+  user_group_id     TEXT NOT NULL DEFAULT '',
+  billing_cycle     TEXT NOT NULL DEFAULT '',
+  provider_order_id TEXT NOT NULL DEFAULT '',
+  provider_payment_id TEXT NOT NULL DEFAULT '',
+  checkout_session_id TEXT NOT NULL DEFAULT '',
+  checkout_expires_at INTEGER NOT NULL DEFAULT 0,
+  last_reconciled_at INTEGER NOT NULL DEFAULT 0,
+  reconcile_error   TEXT NOT NULL DEFAULT '',
+  status            TEXT NOT NULL DEFAULT 'pending',
+  failure_code      TEXT NOT NULL DEFAULT '',
+  failure_message   TEXT NOT NULL DEFAULT '',
+  paid_at           INTEGER NOT NULL DEFAULT 0,
+  fulfilled_at      INTEGER NOT NULL DEFAULT 0,
+  created_at        INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+  updated_at        INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+);
+CREATE INDEX IF NOT EXISTS idx_payment_orders_user_created ON payment_orders(user_id, created_at DESC, id);
+CREATE INDEX IF NOT EXISTS idx_payment_orders_channel_status ON payment_orders(channel_id, status, created_at);
+CREATE INDEX IF NOT EXISTS idx_payment_orders_status_created ON payment_orders(status, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_orders_provider_order_unique
+  ON payment_orders(provider, channel_id, provider_order_id) WHERE provider_order_id<>'';
+
+-- Raw, verified provider notifications. The composite unique key is the first
+-- idempotency barrier; fulfillment also locks/checks the order so a provider
+-- emitting two different success event ids still cannot grant value twice.
+CREATE TABLE IF NOT EXISTS payment_events (
+  id           TEXT PRIMARY KEY,
+  provider     TEXT NOT NULL,
+  channel_id   TEXT NOT NULL,
+  event_id     TEXT NOT NULL,
+  order_id     TEXT NOT NULL REFERENCES payment_orders(id) ON DELETE CASCADE,
+  event_type   TEXT NOT NULL DEFAULT '',
+  created_at   INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+  processed_at INTEGER NOT NULL DEFAULT 0,
+  UNIQUE(provider, channel_id, event_id)
+);
+CREATE INDEX IF NOT EXISTS idx_payment_events_order_created ON payment_events(order_id, created_at, id);
+
 -- Per-model, per-group access + usage cap. A model with NO rows here is open to
 -- everyone (unlimited). Once a model has any row, only listed groups may use it;
 -- each row caps usage within a fixed window: limit_type 'cost' (in the model's

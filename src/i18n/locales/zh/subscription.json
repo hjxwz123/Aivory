@@ -21,10 +21,11 @@
   "planCount": "{{count}} 个套餐",
   "credits": {
     "sectionTitle": "积分余额",
-    "timedTitle": "限时积分",
-    "permanentTitle": "永久积分",
+    "timedTitle": "限时积分余额",
+    "permanentTitle": "永久积分余额",
     "permanentHint": "购买的积分永不过期，会在限时积分用完后才扣除。",
     "resetsOn": "{{date}} 刷新",
+    "loadFailed": "无法加载积分余额。",
     "topUp": "补充积分",
     "topUpUnavailable": "暂不支持补充。"
   },
@@ -76,7 +77,65 @@
     "successCredits": "积分已到账",
     "successBodyCredits": "{{count}} 积分已充入你的永久积分余额。"
   },
+  "payment": {
+    "title": "选择支付方式",
+    "description": "选择购买「{{name}}」的支付方式。",
+    "loading": "正在加载支付方式…",
+    "loadError": "无法加载支付方式，请重试。",
+    "retry": "重新加载",
+    "invalidUrl": "支付链接无效，请联系管理员。",
+    "checkoutError": "无法发起支付，请重试。",
+    "checkoutTimeout": "支付服务响应超时，请重试。",
+    "errors": {
+      "methodUnavailable": "该支付方式暂不可用，请选择其他方式。",
+      "productUnavailable": "该商品已下架或价格已变更，请刷新页面后重试。",
+      "checkoutUnavailable": "支付服务暂不可用，请稍后重试。"
+    },
+    "or": "或",
+    "cardPurchase": "卡密购买",
+    "empty": "暂无可用的支付方式",
+    "emptyHint": "请联系管理员配置支付渠道或卡密购买链接。",
+    "return": {
+      "checking": "正在确认支付状态…",
+      "paid": "支付成功",
+      "paidHint": "你的账户权益已更新。",
+      "failed": "支付失败",
+      "cancelled": "已取消支付。",
+      "expired": "支付订单已过期，请重新购买。",
+      "statusError": "暂时无法确认支付状态，请刷新页面后重试。",
+      "pending": "支付仍在处理中，请稍后刷新页面查看。"
+    }
+  },
+  "history": {
+    "title": "支付记录",
+    "description": "查看你最近购买永久积分和用户组的记录。",
+    "columns": {
+      "name": "名称",
+      "time": "时间",
+      "amount": "金额",
+      "method": "支付方式",
+      "status": "状态"
+    },
+    "target": {
+      "credit_package": "永久积分",
+      "user_group": "用户组"
+    },
+    "status": {
+      "pending": "待支付",
+      "processing": "处理中",
+      "paid": "已支付",
+      "failed": "支付失败",
+      "expired": "已过期"
+    },
+    "empty": "暂无支付记录。",
+    "loadError": "无法加载支付记录。",
+    "retry": "重试",
+    "previous": "上一页",
+    "next": "下一页",
+    "page": "第 {{current}} / {{total}} 页"
+  },
   "buyCta": "购买",
+  "renewCta": "续费",
   "recommended": "推荐",
   "cycleFee": "当前周期费用"
 }

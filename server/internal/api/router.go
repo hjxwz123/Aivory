@@ -105,6 +105,12 @@ var (
 	rlRedeemCodeMax    = envcfg.Int("AIVORY_API_RATE_LIMIT_REDEEM_CODE_MAX", 10)
 	rlRedeemCodeWindow = envcfg.Dur("AIVORY_API_RATE_LIMIT_REDEEM_CODE_WINDOW", 60*time.Second)
 
+	rlPaymentCheckoutMax    = envcfg.Int("AIVORY_API_RATE_LIMIT_PAYMENT_CHECKOUT_MAX", 15)
+	rlPaymentCheckoutWindow = envcfg.Dur("AIVORY_API_RATE_LIMIT_PAYMENT_CHECKOUT_WINDOW", 60*time.Second)
+
+	rlPaymentWebhookMax    = envcfg.Int("AIVORY_API_RATE_LIMIT_PAYMENT_WEBHOOK_MAX", 600)
+	rlPaymentWebhookWindow = envcfg.Dur("AIVORY_API_RATE_LIMIT_PAYMENT_WEBHOOK_WINDOW", 60*time.Second)
+
 	rlWorkspaceJoinMax    = envcfg.Int("AIVORY_API_RATE_LIMIT_WORKSPACE_JOIN_MAX", 30)
 	rlWorkspaceJoinWindow = envcfg.Dur("AIVORY_API_RATE_LIMIT_WORKSPACE_JOIN_WINDOW", 60*time.Second)
 
@@ -159,6 +165,11 @@ func NewRouter(d Deps) http.Handler {
 	// Permanent-credit packages are public pricing data. Only enabled, positive
 	// offers are returned; administration uses the protected routes below.
 	mux.handle("GET", "/api/credit-packages", wrap(d, listCreditPackagesPublic))
+	// Provider notifications are anonymous by protocol and authenticated by the
+	// channel-specific signature. GET is required by EPay-compatible gateways;
+	// Stripe and Waffo use POST. Disabled channels still accept old-order events.
+	mux.handle("GET", "/api/payments/webhooks/:channelId", rateLimitedIP(d, "payment-webhook", rlPaymentWebhookMax, rlPaymentWebhookWindow, wrap(d, paymentWebhookHandler)))
+	mux.handle("POST", "/api/payments/webhooks/:channelId", rateLimitedIP(d, "payment-webhook", rlPaymentWebhookMax, rlPaymentWebhookWindow, wrap(d, paymentWebhookHandler)))
 	// Public read-only conversation share (token in the path; no auth). Rate
 	// limited (§D1) so the token space can't be swept even though it's now 192-bit.
 	mux.handle("GET", "/api/public/shared/:token", rateLimitedIP(d, "share", rlPublicSharedConversationMax, rlPublicSharedConversationWindow, wrap(d, publicSharedHandler)))
@@ -218,7 +229,6 @@ func NewRouter(d Deps) http.Handler {
 	// duration (§ redeem codes). Tight rate limit so a stolen code can't be
 	// brute-force-typed by an attacker who knows the alphabet.
 	mux.handle("POST", "/api/me/redeem", rateLimitedIP(d, "redeem", rlRedeemCodeMax, rlRedeemCodeWindow, requireAuth(d, redeemCodeHandler)))
-
 	// Active sessions (§ account → active sessions). Registered under /api/auth
 	// so the refresh-token cookie (scoped to /api/auth) is sent — that's how we
 	// detect which session is the current one.
@@ -250,6 +260,10 @@ func NewRouter(d Deps) http.Handler {
 	// §4.20 the signed-in user's own generated-image gallery.
 	mux.handle("GET", "/api/me/images", requireAuth(d, listMyImages))
 	mux.handle("GET", "/api/user-groups", requireAuth(d, listUserGroupsPublic))
+	mux.handle("GET", "/api/payment-methods", requireAuth(d, listPaymentMethodsPublic))
+	mux.handle("POST", "/api/payments/checkout", rateLimitedIP(d, "payment-checkout", rlPaymentCheckoutMax, rlPaymentCheckoutWindow, requireAuth(d, createPaymentCheckoutHandler)))
+	mux.handle("GET", "/api/payments/orders", requireAuth(d, listPaymentOrdersForUserHandler))
+	mux.handle("GET", "/api/payments/orders/:id", requireAuth(d, getPaymentOrderHandler))
 	mux.handle("POST", "/api/audio/transcriptions", requireAuth(d, transcribeAudioHandler))
 	// Which STT provider is active (gpt = record-then-transcribe, volcano = live
 	// streaming), so the composer picks the right mic flow.
@@ -368,6 +382,17 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("PATCH", "/api/admin/credit-packages/reorder", requireAdmin(d, reorderCreditPackagesAdmin))
 	mux.handle("PATCH", "/api/admin/credit-packages/:id", requireAdmin(d, updateCreditPackageAdmin))
 	mux.handle("DELETE", "/api/admin/credit-packages/:id", requireAdmin(d, deleteCreditPackageAdmin))
+	mux.handle("GET", "/api/admin/payment-channels", requireAdmin(d, listPaymentChannelsAdmin))
+	mux.handle("POST", "/api/admin/payment-channels", requireAdmin(d, createPaymentChannelAdmin))
+	mux.handle("PATCH", "/api/admin/payment-channels/:id", requireAdmin(d, updatePaymentChannelAdmin))
+	mux.handle("DELETE", "/api/admin/payment-channels/:id", requireAdmin(d, deletePaymentChannelAdmin))
+	mux.handle("GET", "/api/admin/payment-methods", requireAdmin(d, listPaymentMethodsAdmin))
+	mux.handle("POST", "/api/admin/payment-methods", requireAdmin(d, createPaymentMethodAdmin))
+	mux.handle("PATCH", "/api/admin/payment-methods/reorder", requireAdmin(d, reorderPaymentMethodsAdmin))
+	mux.handle("PATCH", "/api/admin/payment-methods/:id", requireAdmin(d, updatePaymentMethodAdmin))
+	mux.handle("DELETE", "/api/admin/payment-methods/:id", requireAdmin(d, deletePaymentMethodAdmin))
+	mux.handle("GET", "/api/admin/payment-orders", requireAdmin(d, listPaymentOrdersAdmin))
+	mux.handle("POST", "/api/admin/payment-orders/:id/reconcile", requireAdmin(d, reconcilePaymentOrderAdmin))
 	mux.handle("POST", "/api/admin/users/:id/group", requireAdmin(d, setUserGroupAdmin))
 	mux.handle("POST", "/api/admin/users/:id/credits", requireAdmin(d, setUserCreditsAdmin))
 	mux.handle("GET", "/api/admin/skills", requireAdmin(d, listSkillsAdmin))

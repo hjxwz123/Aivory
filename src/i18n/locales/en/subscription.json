@@ -21,10 +21,11 @@
   "planCount": "{{count}} plans",
   "credits": {
     "sectionTitle": "Credit balance",
-    "timedTitle": "Timed credits",
-    "permanentTitle": "Permanent credits",
+    "timedTitle": "Timed credit balance",
+    "permanentTitle": "Permanent credit balance",
     "permanentHint": "Purchased credits never expire and are used after your timed credits run out.",
     "resetsOn": "Refreshes on {{date}}",
+    "loadFailed": "Couldn’t load your credit balance.",
     "topUp": "Top up credits",
     "topUpUnavailable": "Top-up isn’t available right now."
   },
@@ -76,7 +77,65 @@
     "successCredits": "Credits added",
     "successBodyCredits": "{{count}} credits have been added to your permanent balance."
   },
+  "payment": {
+    "title": "Choose a payment method",
+    "description": "Choose how you’d like to pay for \"{{name}}\".",
+    "loading": "Loading payment methods…",
+    "loadError": "Couldn’t load payment methods. Try again.",
+    "retry": "Reload",
+    "invalidUrl": "The payment link is invalid. Contact an administrator.",
+    "checkoutError": "Couldn’t start checkout. Try again.",
+    "checkoutTimeout": "The payment service took too long to respond. Try again.",
+    "errors": {
+      "methodUnavailable": "This payment method is unavailable. Choose another method.",
+      "productUnavailable": "This item is no longer available or its price changed. Refresh the page and try again.",
+      "checkoutUnavailable": "The payment service is temporarily unavailable. Try again later."
+    },
+    "or": "or",
+    "cardPurchase": "Purchase a prepaid code",
+    "empty": "No payment methods are available",
+    "emptyHint": "Ask an administrator to configure a payment channel or prepaid-code purchase link.",
+    "return": {
+      "checking": "Confirming payment status…",
+      "paid": "Payment successful",
+      "paidHint": "Your account benefits have been updated.",
+      "failed": "Payment failed",
+      "cancelled": "Payment cancelled.",
+      "expired": "This payment order has expired. Please try again.",
+      "statusError": "We couldn’t confirm the payment status. Refresh the page to try again.",
+      "pending": "The payment is still processing. Refresh the page in a moment to check again."
+    }
+  },
+  "history": {
+    "title": "Payment history",
+    "description": "Review your recent permanent-credit and user-group purchases.",
+    "columns": {
+      "name": "Name",
+      "time": "Time",
+      "amount": "Amount",
+      "method": "Payment method",
+      "status": "Status"
+    },
+    "target": {
+      "credit_package": "Permanent credits",
+      "user_group": "User group"
+    },
+    "status": {
+      "pending": "Pending payment",
+      "processing": "Processing",
+      "paid": "Paid",
+      "failed": "Payment failed",
+      "expired": "Expired"
+    },
+    "empty": "No payment history yet.",
+    "loadError": "Couldn’t load your payment history.",
+    "retry": "Try again",
+    "previous": "Previous page",
+    "next": "Next page",
+    "page": "Page {{current}} of {{total}}"
+  },
   "buyCta": "Purchase",
-  "recommended": "Recommend",
+  "renewCta": "Renew",
+  "recommended": "Recommended",
   "cycleFee": "Current cycle fee"
 }

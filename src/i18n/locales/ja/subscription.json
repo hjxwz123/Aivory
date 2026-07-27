@@ -21,10 +21,11 @@
   "planCount": "{{count}} 件のプラン",
   "credits": {
     "sectionTitle": "クレジット残高",
-    "timedTitle": "期間限定クレジット",
-    "permanentTitle": "永久クレジット",
+    "timedTitle": "期間限定クレジット残高",
+    "permanentTitle": "永久クレジット残高",
     "permanentHint": "購入したクレジットは失効せず、期間限定クレジットを使い切った後に消費されます。",
     "resetsOn": "{{date}} に更新",
+    "loadFailed": "クレジット残高を読み込めませんでした。",
     "topUp": "クレジットを補充",
     "topUpUnavailable": "現在、補充はご利用いただけません。"
   },
@@ -76,7 +77,65 @@
     "successCredits": "クレジットを追加しました",
     "successBodyCredits": "{{count}} クレジットが永久残高に追加されました。"
   },
+  "payment": {
+    "title": "お支払い方法を選択",
+    "description": "「{{name}}」のお支払い方法を選択してください。",
+    "loading": "お支払い方法を読み込み中…",
+    "loadError": "お支払い方法を読み込めませんでした。もう一度お試しください。",
+    "retry": "再読み込み",
+    "invalidUrl": "お支払いリンクが無効です。管理者にお問い合わせください。",
+    "checkoutError": "お支払いを開始できませんでした。もう一度お試しください。",
+    "checkoutTimeout": "決済サービスからの応答がタイムアウトしました。もう一度お試しください。",
+    "errors": {
+      "methodUnavailable": "このお支払い方法は現在利用できません。別の方法を選択してください。",
+      "productUnavailable": "この商品は販売終了、または価格が変更されています。ページを再読み込みしてもう一度お試しください。",
+      "checkoutUnavailable": "決済サービスは一時的に利用できません。しばらくしてからもう一度お試しください。"
+    },
+    "or": "または",
+    "cardPurchase": "プリペイドコードを購入",
+    "empty": "利用できるお支払い方法がありません",
+    "emptyHint": "管理者に、支払いチャネルまたはプリペイドコード購入リンクの設定を依頼してください。",
+    "return": {
+      "checking": "お支払い状況を確認しています…",
+      "paid": "お支払いが完了しました",
+      "paidHint": "アカウントの権限を更新しました。",
+      "failed": "お支払いに失敗しました",
+      "cancelled": "お支払いをキャンセルしました。",
+      "expired": "この支払い注文は期限切れです。もう一度購入してください。",
+      "statusError": "お支払い状況を確認できません。ページを再読み込みして、もう一度お試しください。",
+      "pending": "お支払いはまだ処理中です。しばらくしてからページを再読み込みしてください。"
+    }
+  },
+  "history": {
+    "title": "お支払い履歴",
+    "description": "永久クレジットとユーザーグループの最近の購入履歴を確認できます。",
+    "columns": {
+      "name": "名称",
+      "time": "日時",
+      "amount": "金額",
+      "method": "お支払い方法",
+      "status": "状態"
+    },
+    "target": {
+      "credit_package": "永久クレジット",
+      "user_group": "ユーザーグループ"
+    },
+    "status": {
+      "pending": "お支払い待ち",
+      "processing": "処理中",
+      "paid": "お支払い済み",
+      "failed": "お支払い失敗",
+      "expired": "期限切れ"
+    },
+    "empty": "お支払い履歴はまだありません。",
+    "loadError": "お支払い履歴を読み込めませんでした。",
+    "retry": "再試行",
+    "previous": "前のページ",
+    "next": "次のページ",
+    "page": "{{total}} ページ中 {{current}} ページ"
+  },
   "buyCta": "購入",
+  "renewCta": "更新",
   "recommended": "おすすめ",
   "cycleFee": "現在の周期料金"
 }

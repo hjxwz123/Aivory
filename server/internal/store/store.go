@@ -87,6 +87,10 @@ func Open(dataSource string) (*sql.DB, error) {
 
 // Migrate applies the embedded schema for the active dialect. Idempotent.
 func Migrate(db *sql.DB) error {
+	paymentChannelEnvironmentExisted, err := columnExists(db, "payment_channels", "environment")
+	if err != nil {
+		return fmt.Errorf("inspect payment-channel environment: %w", err)
+	}
 	groupMonthlyPriceExisted, err := columnExists(db, "user_groups", "monthly_price_amount_minor")
 	if err != nil {
 		return fmt.Errorf("inspect user-group monthly settlement price: %w", err)
@@ -214,6 +218,17 @@ func Migrate(db *sql.DB) error {
 	addRedeemKind := `ALTER TABLE redeem_codes ADD COLUMN kind TEXT NOT NULL DEFAULT 'group'`
 	addRedeemCredits := `ALTER TABLE redeem_codes ADD COLUMN credits REAL NOT NULL DEFAULT 0`
 	addRedemptionCredits := `ALTER TABLE redeem_redemptions ADD COLUMN credits REAL NOT NULL DEFAULT 0`
+	// Provider-settled totals are distinct from the tax-exclusive catalog
+	// snapshot for processors such as Waffo Pancake that add VAT/GST at checkout.
+	addPaymentPaidAmount := `ALTER TABLE payment_orders ADD COLUMN paid_amount_minor INTEGER NOT NULL DEFAULT 0`
+	addPaymentTaxAmount := `ALTER TABLE payment_orders ADD COLUMN tax_amount_minor INTEGER NOT NULL DEFAULT 0`
+	addPaymentChannelEnvironment := `ALTER TABLE payment_channels ADD COLUMN environment TEXT NOT NULL DEFAULT 'live'`
+	addPaymentOrderEnvironment := `ALTER TABLE payment_orders ADD COLUMN environment TEXT NOT NULL DEFAULT 'live'`
+	addPaymentProviderPaymentID := `ALTER TABLE payment_orders ADD COLUMN provider_payment_id TEXT NOT NULL DEFAULT ''`
+	addPaymentCheckoutSessionID := `ALTER TABLE payment_orders ADD COLUMN checkout_session_id TEXT NOT NULL DEFAULT ''`
+	addPaymentCheckoutExpiresAt := `ALTER TABLE payment_orders ADD COLUMN checkout_expires_at INTEGER NOT NULL DEFAULT 0`
+	addPaymentLastReconciledAt := `ALTER TABLE payment_orders ADD COLUMN last_reconciled_at INTEGER NOT NULL DEFAULT 0`
+	addPaymentReconcileError := `ALTER TABLE payment_orders ADD COLUMN reconcile_error TEXT NOT NULL DEFAULT ''`
 	if usePostgres {
 		schema = schemaPGSQL
 		addImageRef = `ALTER TABLE chunks ADD COLUMN IF NOT EXISTS image_ref TEXT`
@@ -284,6 +299,15 @@ func Migrate(db *sql.DB) error {
 		addRedeemKind = `ALTER TABLE redeem_codes ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'group'`
 		addRedeemCredits = `ALTER TABLE redeem_codes ADD COLUMN IF NOT EXISTS credits REAL NOT NULL DEFAULT 0`
 		addRedemptionCredits = `ALTER TABLE redeem_redemptions ADD COLUMN IF NOT EXISTS credits REAL NOT NULL DEFAULT 0`
+		addPaymentPaidAmount = `ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS paid_amount_minor BIGINT NOT NULL DEFAULT 0`
+		addPaymentTaxAmount = `ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS tax_amount_minor BIGINT NOT NULL DEFAULT 0`
+		addPaymentChannelEnvironment = `ALTER TABLE payment_channels ADD COLUMN IF NOT EXISTS environment TEXT NOT NULL DEFAULT 'live'`
+		addPaymentOrderEnvironment = `ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS environment TEXT NOT NULL DEFAULT 'live'`
+		addPaymentProviderPaymentID = `ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS provider_payment_id TEXT NOT NULL DEFAULT ''`
+		addPaymentCheckoutSessionID = `ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS checkout_session_id TEXT NOT NULL DEFAULT ''`
+		addPaymentCheckoutExpiresAt = `ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS checkout_expires_at BIGINT NOT NULL DEFAULT 0`
+		addPaymentLastReconciledAt = `ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS last_reconciled_at BIGINT NOT NULL DEFAULT 0`
+		addPaymentReconcileError = `ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS reconcile_error TEXT NOT NULL DEFAULT ''`
 	}
 	if err := dedupeSkillNames(db); err != nil {
 		return fmt.Errorf("dedupe skill names: %w", err)
@@ -319,6 +343,8 @@ func Migrate(db *sql.DB) error {
 		addModelFast, addConvFast, addMsgFast,
 		addSkillDisplayDescription, addUserSkillIcon, addMsgSelectedUserSkills,
 		addRedeemKind, addRedeemCredits, addRedemptionCredits,
+		addPaymentPaidAmount, addPaymentTaxAmount, addPaymentChannelEnvironment, addPaymentOrderEnvironment,
+		addPaymentProviderPaymentID, addPaymentCheckoutSessionID, addPaymentCheckoutExpiresAt, addPaymentLastReconciledAt, addPaymentReconcileError,
 	} {
 		_, _ = db.Exec(ddl)
 	}
@@ -335,6 +361,7 @@ func Migrate(db *sql.DB) error {
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_messages_conv_created ON messages(conversation_id, created_at)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_conv_user_updated ON conversations(user_id, archived, pinned DESC, updated_at DESC)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_users_sort_order ON users(sort_order, created_at DESC)`)
+	_, _ = db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_orders_provider_payment_unique ON payment_orders(provider, channel_id, provider_payment_id) WHERE provider_payment_id<>''`)
 	// Workspace-scoped listings (§workspaces) — mirror the personal composites.
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_conv_workspace_updated ON conversations(workspace_id, archived, pinned DESC, updated_at DESC)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_projects_workspace ON projects(workspace_id)`)
@@ -384,10 +411,17 @@ func Migrate(db *sql.DB) error {
 		"documents":          {"ingest_updated_at"},
 		"redeem_codes":       {"kind", "credits"},
 		"redeem_redemptions": {"credits"},
+		"payment_channels":   {"environment"},
+		"payment_orders":     {"paid_amount_minor", "tax_amount_minor", "environment", "provider_payment_id", "checkout_session_id", "checkout_expires_at", "last_reconciled_at", "reconcile_error"},
 	}
 	for table, cols := range columnChecks {
 		if _, err := db.Exec(fmt.Sprintf(`SELECT %s FROM %s WHERE 1=0`, strings.Join(cols, ", "), table)); err != nil {
 			return fmt.Errorf("schema column check failed for %q (an additive migration may have silently failed): %w", table, err)
+		}
+	}
+	if !paymentChannelEnvironmentExisted {
+		if err := backfillPaymentEnvironments(db); err != nil {
+			return fmt.Errorf("backfill payment environments: %w", err)
 		}
 	}
 	// Older deployments stored either one settlement price or the still older
@@ -799,10 +833,11 @@ func Seed(db *sql.DB, cfg config.Config) error {
 		"permanent_credit_purchase_price_amount_minor": `0`,
 		// Global purchase links (§ credits / user groups): one tier-upgrade link
 		// and one permanent-credit top-up link, shared by every group.
-		"group_buy_url":    `""`,
-		"credit_buy_url":   `""`,
-		"sandbox_base_url": `""`,
-		"sandbox_api_key":  `""`,
+		"group_buy_url":     `""`,
+		"credit_buy_url":    `""`,
+		"card_purchase_url": `""`,
+		"sandbox_base_url":  `""`,
+		"sandbox_api_key":   `""`,
 		// §4.5-F default sandbox archiving to the zero-dependency local backend so
 		// a fresh deployment persists /workspace across the idle reaper with no
 		// external object store. This is only meaningful because archives are keyed

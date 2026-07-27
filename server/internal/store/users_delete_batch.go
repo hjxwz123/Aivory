@@ -139,37 +139,88 @@ func ListPendingStorageCleanup(ctx context.Context, db *sql.DB) ([]string, error
 	return out, rows.Err()
 }
 
-// MarkUserDeleting flips the account into the terminal 'deleting' state with
-// the last-admin guard folded into the UPDATE itself, closing the TOCTOU
-// where two admins deleting each other could leave zero active admins.
+// MarkUserDeleting flips the account into the terminal 'deleting' state.
+// Payment-order creation and account deletion both lock the user row, so a
+// checkout can never be inserted after the pending-order check. Active admin
+// rows are locked in a stable order to keep the last-admin guard safe when two
+// administrators try to delete accounts concurrently.
 // Returns (false, nil) when the row is already 'deleting' (idempotent), and
 // ErrLastAdmin when the guard blocked the transition.
 func MarkUserDeleting(ctx context.Context, db *sql.DB, userID string) (bool, error) {
-	res, err := db.ExecContext(ctx, `
-		UPDATE users SET status='deleting'
-		 WHERE id=? AND status<>'deleting'
-		   AND (role<>'admin' OR EXISTS (
-		     SELECT 1 FROM users u2 WHERE u2.role='admin' AND u2.status='active' AND u2.id<>users.id
-		   ))`, userID)
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return false, err
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		var status string
-		if qerr := db.QueryRowContext(ctx, `SELECT status FROM users WHERE id=?`, userID).Scan(&status); qerr != nil {
-			return false, qerr
+	defer tx.Rollback() //nolint:errcheck
+
+	adminQuery := `SELECT id FROM users WHERE role='admin' AND status='active' ORDER BY id`
+	if usePostgres {
+		adminQuery += ` FOR UPDATE`
+	}
+	rows, err := tx.QueryContext(ctx, adminQuery)
+	if err != nil {
+		return false, err
+	}
+	activeAdminIDs := make([]string, 0, 2)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			return false, err
 		}
-		if status == "deleting" {
-			return false, nil
+		activeAdminIDs = append(activeAdminIDs, id)
+	}
+	if err := rows.Close(); err != nil {
+		return false, err
+	}
+	if err := rows.Err(); err != nil {
+		return false, err
+	}
+
+	userQuery := `SELECT status, role FROM users WHERE id=?`
+	if usePostgres {
+		userQuery += ` FOR UPDATE`
+	}
+	var status, role string
+	if err := tx.QueryRowContext(ctx, userQuery, userID).Scan(&status, &role); err != nil {
+		return false, err
+	}
+	if status == "deleting" {
+		return false, nil
+	}
+	if pending, err := hasPendingPaymentOrdersForUser(ctx, tx, userID); err != nil {
+		return false, err
+	} else if pending {
+		return false, ErrPaymentOrdersPendingForUser
+	}
+	if role == "admin" {
+		hasOtherActiveAdmin := false
+		for _, id := range activeAdminIDs {
+			if id != userID {
+				hasOtherActiveAdmin = true
+				break
+			}
 		}
+		if !hasOtherActiveAdmin {
+			return false, ErrLastAdmin
+		}
+	}
+
+	res, err := tx.ExecContext(ctx,
+		`UPDATE users SET status='deleting', token_ver=token_ver+1 WHERE id=? AND status<>'deleting'`, userID)
+	if err != nil {
+		return false, err
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
 		return false, ErrLastAdmin
 	}
-	// Same instant lockout a ban performs (§8.1).
-	if err := BumpTokenVersion(ctx, db, userID); err != nil {
-		return true, err
+	if _, err := tx.ExecContext(ctx, `UPDATE refresh_tokens SET revoked=1 WHERE user_id=?`, userID); err != nil {
+		return false, err
 	}
-	_, err = db.ExecContext(ctx, `UPDATE refresh_tokens SET revoked=1 WHERE user_id=?`, userID)
-	return true, err
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // SetUserStatusGuarded is SetUserStatus for ban/unban paths: it refuses to

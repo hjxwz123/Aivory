@@ -69,6 +69,90 @@ CREATE TABLE IF NOT EXISTS credit_packages (
 );
 CREATE INDEX IF NOT EXISTS idx_credit_packages_order ON credit_packages(sort_order, name);
 
+CREATE TABLE IF NOT EXISTS payment_channels (
+  id         TEXT PRIMARY KEY,
+  name       TEXT NOT NULL,
+  provider   TEXT NOT NULL,
+  environment TEXT NOT NULL DEFAULT 'live',
+  config     TEXT NOT NULL DEFAULT '{}',
+  enabled    INTEGER NOT NULL DEFAULT 1,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint),
+  updated_at BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_channels_name_unique ON payment_channels(lower(trim(name)));
+CREATE INDEX IF NOT EXISTS idx_payment_channels_order ON payment_channels(sort_order, name);
+
+CREATE TABLE IF NOT EXISTS payment_methods (
+  id         TEXT PRIMARY KEY,
+  channel_id TEXT NOT NULL REFERENCES payment_channels(id) ON DELETE RESTRICT,
+  name       TEXT NOT NULL,
+  type       TEXT NOT NULL,
+  icon       TEXT NOT NULL DEFAULT '',
+  config     TEXT NOT NULL DEFAULT '{}',
+  enabled    INTEGER NOT NULL DEFAULT 1,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint),
+  updated_at BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_methods_channel_name_unique ON payment_methods(channel_id, lower(trim(name)));
+CREATE INDEX IF NOT EXISTS idx_payment_methods_order ON payment_methods(channel_id, sort_order, name);
+
+CREATE TABLE IF NOT EXISTS payment_orders (
+  id                TEXT PRIMARY KEY,
+  user_id           TEXT REFERENCES users(id) ON DELETE SET NULL,
+  user_email        TEXT NOT NULL,
+  provider          TEXT NOT NULL,
+  environment       TEXT NOT NULL DEFAULT 'live',
+  channel_id        TEXT NOT NULL,
+  channel_name      TEXT NOT NULL,
+  method_id         TEXT NOT NULL,
+  method_name       TEXT NOT NULL,
+  method_type       TEXT NOT NULL,
+  method_config     TEXT NOT NULL DEFAULT '{}',
+  product_type      TEXT NOT NULL,
+  product_id        TEXT NOT NULL,
+  product_name      TEXT NOT NULL,
+  amount_minor      BIGINT NOT NULL,
+  paid_amount_minor BIGINT NOT NULL DEFAULT 0,
+  tax_amount_minor  BIGINT NOT NULL DEFAULT 0,
+  currency          TEXT NOT NULL,
+  credits           DOUBLE PRECISION NOT NULL DEFAULT 0,
+  user_group_id     TEXT NOT NULL DEFAULT '',
+  billing_cycle     TEXT NOT NULL DEFAULT '',
+  provider_order_id TEXT NOT NULL DEFAULT '',
+  provider_payment_id TEXT NOT NULL DEFAULT '',
+  checkout_session_id TEXT NOT NULL DEFAULT '',
+  checkout_expires_at BIGINT NOT NULL DEFAULT 0,
+  last_reconciled_at BIGINT NOT NULL DEFAULT 0,
+  reconcile_error   TEXT NOT NULL DEFAULT '',
+  status            TEXT NOT NULL DEFAULT 'pending',
+  failure_code      TEXT NOT NULL DEFAULT '',
+  failure_message   TEXT NOT NULL DEFAULT '',
+  paid_at           BIGINT NOT NULL DEFAULT 0,
+  fulfilled_at      BIGINT NOT NULL DEFAULT 0,
+  created_at        BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint),
+  updated_at        BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
+);
+CREATE INDEX IF NOT EXISTS idx_payment_orders_user_created ON payment_orders(user_id, created_at DESC, id);
+CREATE INDEX IF NOT EXISTS idx_payment_orders_channel_status ON payment_orders(channel_id, status, created_at);
+CREATE INDEX IF NOT EXISTS idx_payment_orders_status_created ON payment_orders(status, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_orders_provider_order_unique
+  ON payment_orders(provider, channel_id, provider_order_id) WHERE provider_order_id<>'';
+
+CREATE TABLE IF NOT EXISTS payment_events (
+  id           TEXT PRIMARY KEY,
+  provider     TEXT NOT NULL,
+  channel_id   TEXT NOT NULL,
+  event_id     TEXT NOT NULL,
+  order_id     TEXT NOT NULL REFERENCES payment_orders(id) ON DELETE CASCADE,
+  event_type   TEXT NOT NULL DEFAULT '',
+  created_at   BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint),
+  processed_at BIGINT NOT NULL DEFAULT 0,
+  UNIQUE(provider, channel_id, event_id)
+);
+CREATE INDEX IF NOT EXISTS idx_payment_events_order_created ON payment_events(order_id, created_at, id);
+
 -- NOTE: model_group_quotas REFERENCES models(id) — it is created AFTER the models
 -- table below. Postgres rejects a forward FK reference in a single-batch Exec, so
 -- this table MUST stay after `models`; do not move it earlier.

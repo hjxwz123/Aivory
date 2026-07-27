@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"aivory/server/internal/config"
+	paymentcore "aivory/server/internal/payment"
 	"aivory/server/internal/store"
 )
 
@@ -381,6 +382,219 @@ func TestConfigExportImportMergesAdminConfigOnly(t *testing.T) {
 	}
 }
 
+func TestConfigImportProtectsIncompletePaymentOrdersAndRollsBack(t *testing.T) {
+	for _, status := range []string{store.PaymentOrderPending, store.PaymentOrderProcessing} {
+		t.Run(status, func(t *testing.T) {
+			fx := newPaymentAdminFixture(t)
+			if err := store.SetSetting(fx.db, "settlement_currency", "USD"); err != nil {
+				t.Fatalf("set settlement currency: %v", err)
+			}
+			channel := createPaymentChannelForAdminTest(t, fx, "Protected import Stripe", paymentcore.ProviderStripe,
+				paymentcore.StripeConfig{SecretKey: "sk_test_config_import_original", WebhookSecret: "whsec_config_import_original"}, 0)
+			method := createPaymentMethodForAdminTest(t, fx, "Protected import card", "credit-card", channel.ID,
+				paymentcore.StripeMethodConfig{}, 0)
+			mustExec(t, fx.db, `INSERT INTO payment_orders(
+				id, user_email, provider, environment, channel_id, channel_name,
+				method_id, method_name, method_type, product_type, product_id,
+				product_name, amount_minor, currency, status
+			) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+				"po_config_import_"+status, "config-import@example.test", channel.Provider, channel.Environment,
+				channel.ID, channel.Name, method.ID, method.Name, channel.Provider,
+				store.PaymentProductCreditPackage, "cp_config_import", "Config import package", 1299, "USD", status,
+			)
+			before, err := store.GetPaymentChannel(context.Background(), fx.db, channel.ID)
+			if err != nil {
+				t.Fatalf("get payment channel before import: %v", err)
+			}
+
+			archive := paymentConfigArchiveForTest(t, map[string][]map[string]any{
+				"settings": {{"key": "settlement_currency", "value": `"EUR"`, "updated_at": 2}},
+				"payment_channels": {{
+					"id": channel.ID, "name": "Changed import Stripe", "provider": paymentcore.ProviderStripe,
+					"environment": store.PaymentEnvironmentTest,
+					"config": paymentConfigArchiveJSONText(t, paymentcore.StripeConfig{
+						SecretKey: "sk_test_config_import_changed", WebhookSecret: "whsec_config_import_changed",
+					}),
+					"enabled": 1, "sort_order": 0,
+				}},
+			})
+			rec := importPaymentConfigArchiveForTest(t, fx.d, archive)
+			if rec.Code != http.StatusConflict {
+				t.Fatalf("config import with %s order status = %d, want 409; body=%s", status, rec.Code, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), store.ErrPaymentChannelHasPending.Error()) {
+				t.Fatalf("config import conflict is not recognizable: %s", rec.Body.String())
+			}
+
+			after, err := store.GetPaymentChannel(context.Background(), fx.db, channel.ID)
+			if err != nil {
+				t.Fatalf("get payment channel after import: %v", err)
+			}
+			if after.Name != before.Name || string(after.Config) != string(before.Config) {
+				t.Fatalf("rejected import changed payment channel: before=%+v after=%+v", before, after)
+			}
+			assertConfigImportSettlementCurrency(t, fx.db, `"USD"`)
+		})
+	}
+}
+
+func TestConfigImportRejectsProviderChangeWithBoundMethods(t *testing.T) {
+	fx := newPaymentAdminFixture(t)
+	if err := store.SetSetting(fx.db, "settlement_currency", "USD"); err != nil {
+		t.Fatalf("set settlement currency: %v", err)
+	}
+	channel := createPaymentChannelForAdminTest(t, fx, "Bound import Stripe", paymentcore.ProviderStripe,
+		paymentcore.StripeConfig{SecretKey: "sk_test_bound_import", WebhookSecret: "whsec_bound_import"}, 0)
+	createPaymentMethodForAdminTest(t, fx, "Bound import card", "credit-card", channel.ID,
+		paymentcore.StripeMethodConfig{}, 0)
+
+	archive := paymentConfigArchiveForTest(t, map[string][]map[string]any{
+		"settings": {{"key": "settlement_currency", "value": `"EUR"`, "updated_at": 2}},
+		"payment_channels": {{
+			"id": channel.ID, "name": channel.Name, "provider": paymentcore.ProviderEPay,
+			"environment": store.PaymentEnvironmentTest,
+			"config": paymentConfigArchiveJSONText(t, paymentcore.EPayConfig{
+				GatewayURL: "https://epay.example.test", MerchantID: "bound-import",
+				MerchantKey: "bound-import-secret", Currency: "USD",
+			}),
+			"enabled": 1, "sort_order": 0,
+		}},
+	})
+	rec := importPaymentConfigArchiveForTest(t, fx.d, archive)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("provider-changing config import status = %d, want 409; body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), store.ErrPaymentChannelHasMethods.Error()) {
+		t.Fatalf("bound-method conflict is not recognizable: %s", rec.Body.String())
+	}
+	stored, err := store.GetPaymentChannel(context.Background(), fx.db, channel.ID)
+	if err != nil {
+		t.Fatalf("get payment channel after rejected import: %v", err)
+	}
+	if stored.Provider != paymentcore.ProviderStripe {
+		t.Fatalf("rejected import changed provider to %q", stored.Provider)
+	}
+	assertConfigImportSettlementCurrency(t, fx.db, `"USD"`)
+}
+
+func TestConfigImportRejectsInvalidPaymentRowsAndRollsBack(t *testing.T) {
+	t.Run("channel", func(t *testing.T) {
+		fx := newPaymentAdminFixture(t)
+		if err := store.SetSetting(fx.db, "settlement_currency", "USD"); err != nil {
+			t.Fatalf("set settlement currency: %v", err)
+		}
+		archive := paymentConfigArchiveForTest(t, map[string][]map[string]any{
+			"settings": {{"key": "settlement_currency", "value": `"EUR"`, "updated_at": 2}},
+			"payment_channels": {{
+				"id": "paych_invalid_archive", "name": "Invalid provider", "provider": "unsupported",
+				"environment": store.PaymentEnvironmentLive, "config": `{}`, "enabled": 1, "sort_order": 0,
+			}},
+		})
+		rec := importPaymentConfigArchiveForTest(t, fx.d, archive)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("invalid channel import status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+		}
+		if !strings.Contains(rec.Body.String(), errInvalidPaymentConfigArchive.Error()) {
+			t.Fatalf("invalid channel error is not recognizable: %s", rec.Body.String())
+		}
+		var count int
+		mustQuery(t, fx.db, `SELECT COUNT(*) FROM payment_channels WHERE id='paych_invalid_archive'`).Scan(&count)
+		if count != 0 {
+			t.Fatalf("invalid payment channel was imported")
+		}
+		assertConfigImportSettlementCurrency(t, fx.db, `"USD"`)
+	})
+
+	t.Run("method", func(t *testing.T) {
+		fx := newPaymentAdminFixture(t)
+		if err := store.SetSetting(fx.db, "settlement_currency", "USD"); err != nil {
+			t.Fatalf("set settlement currency: %v", err)
+		}
+		channel := createPaymentChannelForAdminTest(t, fx, "Invalid method EPay", paymentcore.ProviderEPay,
+			paymentcore.EPayConfig{
+				GatewayURL: "https://epay.example.test", MerchantID: "invalid-method",
+				MerchantKey: "invalid-method-secret", Currency: "USD",
+			}, 0)
+		archive := paymentConfigArchiveForTest(t, map[string][]map[string]any{
+			"settings": {{"key": "settlement_currency", "value": `"EUR"`, "updated_at": 2}},
+			"payment_methods": {{
+				"id": "paym_invalid_archive", "channel_id": channel.ID, "name": "Invalid route",
+				"type": paymentcore.ProviderStripe, "icon": "scan-line", "config": `{"type":"not valid"}`,
+				"enabled": 1, "sort_order": 0,
+			}},
+		})
+		rec := importPaymentConfigArchiveForTest(t, fx.d, archive)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("invalid method import status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+		}
+		if !strings.Contains(rec.Body.String(), errInvalidPaymentConfigArchive.Error()) {
+			t.Fatalf("invalid method error is not recognizable: %s", rec.Body.String())
+		}
+		var count int
+		mustQuery(t, fx.db, `SELECT COUNT(*) FROM payment_methods WHERE id='paym_invalid_archive'`).Scan(&count)
+		if count != 0 {
+			t.Fatalf("invalid payment method was imported")
+		}
+		assertConfigImportSettlementCurrency(t, fx.db, `"USD"`)
+	})
+}
+
+func TestConfigImportNormalizesPaymentChannelsAndMethods(t *testing.T) {
+	fx := newPaymentAdminFixture(t)
+	archive := paymentConfigArchiveForTest(t, map[string][]map[string]any{
+		"payment_channels": {{
+			"id": "paych_normalized_archive", "name": "  Imported EPay  ", "provider": " EPAY ",
+			"environment": " LIVE ",
+			"config": paymentConfigArchiveJSONText(t, paymentcore.EPayConfig{
+				GatewayURL: "  https://epay.example.test/base  ", MerchantID: " imported-merchant ",
+				MerchantKey: " imported-secret ", Currency: " usd ",
+			}),
+			"enabled": true, "sort_order": 7,
+		}},
+		"payment_methods": {{
+			"id": "paym_normalized_archive", "channel_id": " paych_normalized_archive ",
+			"name": "  WeChat Pay  ", "type": paymentcore.ProviderStripe, "icon": "  scan-line  ",
+			"config":  paymentConfigArchiveJSONText(t, paymentcore.EPayMethodConfig{Type: " wxpay "}),
+			"enabled": true, "sort_order": 3,
+		}},
+	})
+	rec := importPaymentConfigArchiveForTest(t, fx.d, archive)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("normalized payment config import status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+
+	channel, err := store.GetPaymentChannel(context.Background(), fx.db, "paych_normalized_archive")
+	if err != nil {
+		t.Fatalf("get imported payment channel: %v", err)
+	}
+	if channel.Name != "Imported EPay" || channel.Provider != paymentcore.ProviderEPay ||
+		channel.Environment != store.PaymentEnvironmentLive || !channel.Enabled || channel.SortOrder != 7 {
+		t.Fatalf("imported payment channel was not normalized: %+v", channel)
+	}
+	var channelConfig paymentcore.EPayConfig
+	if err := json.Unmarshal(channel.Config, &channelConfig); err != nil {
+		t.Fatalf("decode imported EPay config: %v", err)
+	}
+	if channelConfig.GatewayURL != "https://epay.example.test/base" ||
+		channelConfig.MerchantID != "imported-merchant" || channelConfig.MerchantKey != "imported-secret" ||
+		channelConfig.Currency != "USD" {
+		t.Fatalf("imported EPay config was not normalized: %+v", channelConfig)
+	}
+
+	method, err := store.GetPaymentMethod(context.Background(), fx.db, "paym_normalized_archive")
+	if err != nil {
+		t.Fatalf("get imported payment method: %v", err)
+	}
+	if method.ChannelID != channel.ID || method.Name != "WeChat Pay" || method.Icon != "scan-line" ||
+		method.Type != paymentcore.ProviderEPay || !method.Enabled || method.SortOrder != 3 {
+		t.Fatalf("imported payment method was not normalized: %+v", method)
+	}
+	var methodConfig paymentcore.EPayMethodConfig
+	if err := json.Unmarshal(method.ProviderMethodConfig, &methodConfig); err != nil || methodConfig.Type != "wxpay" {
+		t.Fatalf("imported EPay method config = %+v, err=%v", methodConfig, err)
+	}
+}
+
 func TestNormalizeLegacyUserGroupPriceArchiveRows(t *testing.T) {
 	input := strings.NewReader(strings.Join([]string{
 		`{"id":"ug_monthly","monthly_price_amount_minor":1499,"yearly_price_amount_minor":14999,"price_amount_minor":999}`,
@@ -728,6 +942,77 @@ func writeFile(t *testing.T, path string, data []byte) {
 	}
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+func paymentConfigArchiveJSONText(t *testing.T, value any) string {
+	t.Helper()
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal payment config archive JSON: %v", err)
+	}
+	return string(encoded)
+}
+
+func paymentConfigArchiveForTest(t *testing.T, rowsByTable map[string][]map[string]any) []byte {
+	t.Helper()
+	var archive bytes.Buffer
+	zw := zip.NewWriter(&archive)
+	tables := make([]string, 0, len(rowsByTable))
+	counts := make(map[string]int64, len(rowsByTable))
+	for _, table := range []string{"settings", "payment_channels", "payment_methods"} {
+		rows, ok := rowsByTable[table]
+		if !ok {
+			continue
+		}
+		tables = append(tables, table)
+		counts[table] = int64(len(rows))
+		entry, err := zw.Create("db/" + table + ".jsonl")
+		if err != nil {
+			t.Fatalf("create config archive %s entry: %v", table, err)
+		}
+		enc := json.NewEncoder(entry)
+		for _, row := range rows {
+			if err := enc.Encode(row); err != nil {
+				t.Fatalf("encode config archive %s row: %v", table, err)
+			}
+		}
+	}
+	manifestEntry, err := zw.Create("manifest.json")
+	if err != nil {
+		t.Fatalf("create config archive manifest: %v", err)
+	}
+	if err := json.NewEncoder(manifestEntry).Encode(configManifest{
+		Format: "aivory-config", Version: configArchiveVersion, Tables: tables, Counts: counts,
+		MergeMode: "upsert", SecretsIncluded: true,
+	}); err != nil {
+		t.Fatalf("encode config archive manifest: %v", err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close config archive: %v", err)
+	}
+	return append([]byte(nil), archive.Bytes()...)
+}
+
+func importPaymentConfigArchiveForTest(t *testing.T, d Deps, archive []byte) *httptest.ResponseRecorder {
+	t.Helper()
+	if d.Logger == nil {
+		d.Logger = log.New(io.Discard, "", 0)
+	}
+	body, contentType := multipartArchive(t, archive)
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/config/import", body)
+	req.Header.Set("content-type", contentType)
+	rec := httptest.NewRecorder()
+	importConfigAdmin(d, rec, req)
+	return rec
+}
+
+func assertConfigImportSettlementCurrency(t *testing.T, db *sql.DB, want string) {
+	t.Helper()
+	var got string
+	mustQuery(t, db, `SELECT value FROM settings WHERE key='settlement_currency'`).Scan(&got)
+	if got != want {
+		t.Fatalf("settlement currency after config import = %q, want %q", got, want)
 	}
 }
 

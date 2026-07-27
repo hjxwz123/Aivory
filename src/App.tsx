@@ -64,6 +64,9 @@ const AdminAudio = lazy(() => import('@/pages/admin/AdminAudio'))
 const AdminOAuth = lazy(() => import('@/pages/admin/AdminOAuth'))
 const AdminRedeemCodes = lazy(() => import('@/pages/admin/AdminRedeemCodes'))
 const AdminPrompts = lazy(() => import('@/pages/admin/AdminPrompts'))
+const AdminPaymentChannels = lazy(() => import('@/pages/admin/AdminPaymentChannels'))
+const AdminPaymentMethods = lazy(() => import('@/pages/admin/AdminPaymentMethods'))
+const AdminPaymentOrders = lazy(() => import('@/pages/admin/AdminPaymentOrders'))
 const NotFound = lazy(() => import('@/pages/NotFound'))
 
 function GlobalShortcuts() {
@@ -265,6 +268,9 @@ export default function App() {
               <Route path="announcement" element={<AdminAnnouncement />} />
               <Route path="settings" element={<AdminSettings />} />
               <Route path="backup" element={<AdminBackup />} />
+              <Route path="payment-channels" element={<AdminPaymentChannels />} />
+              <Route path="payment-methods" element={<AdminPaymentMethods />} />
+              <Route path="payment-orders" element={<AdminPaymentOrders />} />
             </Route>
             <Route path="*" element={<NotFound />} />
           </Routes>

@@ -1,0 +1,137 @@
+package api
+
+import (
+	"context"
+	"net/http"
+	"testing"
+	"time"
+
+	paymentcore "aivory/server/internal/payment"
+	"aivory/server/internal/store"
+)
+
+func TestEPayAdminCloseRequiresDisabledChannelAndAuditReason(t *testing.T) {
+	fx, channel, order := createEPayReconciliationFixture(t)
+	path := "/api/admin/payment-orders/" + order.ID + "/reconcile"
+
+	reconcile := fx.request(t, http.MethodPost, path, map[string]any{"action": "reconcile"})
+	if reconcile.Code != http.StatusConflict {
+		t.Fatalf("EPay automatic reconciliation status = %d, want 409; body=%s", reconcile.Code, reconcile.Body.String())
+	}
+	unconfirmed := fx.request(t, http.MethodPost, path, map[string]any{
+		"action": "close", "reason": "verified at gateway",
+	})
+	if unconfirmed.Code != http.StatusBadRequest {
+		t.Fatalf("unconfirmed EPay close status = %d, want 400; body=%s", unconfirmed.Code, unconfirmed.Body.String())
+	}
+	whileEnabled := fx.request(t, http.MethodPost, path, map[string]any{
+		"action": "close", "confirm": true, "reason": "verified at gateway",
+	})
+	if whileEnabled.Code != http.StatusConflict {
+		t.Fatalf("enabled-channel EPay close status = %d, want 409; body=%s", whileEnabled.Code, whileEnabled.Body.String())
+	}
+
+	disable := fx.request(t, http.MethodPatch, "/api/admin/payment-channels/"+channel.ID, map[string]any{"enabled": false})
+	decodePaymentAdminResponse[adminPaymentChannelResponse](t, disable, http.StatusOK)
+	closedRec := fx.request(t, http.MethodPost, path, map[string]any{
+		"action": "close", "confirm": true, "reason": "Gateway order was verified and closed",
+	})
+	closed := decodePaymentAdminResponse[adminPaymentOrderResponse](t, closedRec, http.StatusOK)
+	if closed.Status != store.PaymentOrderCancelled || closed.FailureReason == nil ||
+		*closed.FailureReason != "Gateway order was verified and closed" || closed.LastReconciledAt == nil {
+		t.Fatalf("closed EPay order response = %+v", closed)
+	}
+
+	stored, err := store.GetPaymentOrder(context.Background(), fx.db, order.ID)
+	if err != nil {
+		t.Fatalf("get manually closed EPay order: %v", err)
+	}
+	if stored.Status != store.PaymentOrderCancelled || stored.FailureCode != "admin_manual_close" ||
+		stored.FailureMessage != "Gateway order was verified and closed" || stored.LastReconciledAt == 0 {
+		t.Fatalf("stored manually closed EPay order = %+v", stored)
+	}
+	events, err := store.ListPaymentEventsForOrder(context.Background(), fx.db, order.ID)
+	if err != nil {
+		t.Fatalf("list EPay close audit events: %v", err)
+	}
+	if len(events) != 1 || events[0].EventType != "admin.manual_close" || events[0].ProcessedAt == 0 {
+		t.Fatalf("EPay close audit events = %+v", events)
+	}
+
+	repeated := fx.request(t, http.MethodPost, path, map[string]any{
+		"action": "close", "confirm": true, "reason": "Gateway order was verified and closed",
+	})
+	if repeated.Code != http.StatusConflict {
+		t.Fatalf("repeated EPay close status = %d, want 409; body=%s", repeated.Code, repeated.Body.String())
+	}
+	events, err = store.ListPaymentEventsForOrder(context.Background(), fx.db, order.ID)
+	if err != nil || len(events) != 1 {
+		t.Fatalf("repeated EPay close changed audit events: %+v, %v", events, err)
+	}
+}
+
+func TestPaymentOrdersAdminReturnsReconciliationMetadata(t *testing.T) {
+	fx, _, order := createEPayReconciliationFixture(t)
+	const (
+		providerOrderID = "epay-provider-order"
+		sessionID       = "checkout-session-id"
+	)
+	expiresAt := time.Now().Add(time.Hour).Unix()
+	if _, err := store.MarkPaymentOrderCheckoutStarted(
+		context.Background(), fx.db, order.ID, providerOrderID, sessionID, expiresAt,
+	); err != nil {
+		t.Fatalf("persist checkout metadata: %v", err)
+	}
+	if _, err := store.MarkPaymentOrderReconciled(context.Background(), fx.db, order.ID, "temporary provider timeout"); err != nil {
+		t.Fatalf("persist reconciliation metadata: %v", err)
+	}
+
+	rec := fx.request(t, http.MethodGet, "/api/admin/payment-orders", nil)
+	response := decodePaymentAdminResponse[struct {
+		Orders []adminPaymentOrderResponse `json:"orders"`
+		Total  int                         `json:"total"`
+	}](t, rec, http.StatusOK)
+	if response.Total != 1 || len(response.Orders) != 1 {
+		t.Fatalf("payment order list = %+v", response)
+	}
+	got := response.Orders[0]
+	if got.ProviderOrderID != providerOrderID || got.CheckoutSessionID != sessionID ||
+		got.CheckoutExpiresAt == nil || *got.CheckoutExpiresAt != expiresAt || got.LastReconciledAt == nil ||
+		got.ReconcileError == nil || *got.ReconcileError != "temporary provider timeout" ||
+		got.Environment != store.PaymentEnvironmentLive {
+		t.Fatalf("payment reconciliation metadata = %+v", got)
+	}
+}
+
+func createEPayReconciliationFixture(t *testing.T) (paymentAdminFixture, adminPaymentChannelResponse, *store.PaymentOrder) {
+	t.Helper()
+	fx := newPaymentAdminFixture(t)
+	if err := store.SetSetting(fx.db, "settlement_currency", "USD"); err != nil {
+		t.Fatalf("set settlement currency: %v", err)
+	}
+	mustExec(t, fx.db,
+		`INSERT INTO users(id,email,password_hash,role,group_id) VALUES(?,?,?,?,?)`,
+		"epay-reconcile-admin", "epay-reconcile@example.test", "hash", "admin", store.DefaultGroupID,
+	)
+	pkg, err := store.CreateCreditPackage(context.Background(), fx.db, store.CreditPackage{
+		Name: "Reconciliation package", Credits: 500, PriceAmountMinor: 1234, Enabled: true,
+	})
+	if err != nil {
+		t.Fatalf("create reconciliation credit package: %v", err)
+	}
+	channel := createPaymentChannelForAdminTest(t, fx, "Reconciliation EPay", paymentcore.ProviderEPay,
+		paymentcore.EPayConfig{
+			GatewayURL: "https://epay.example.test", MerchantID: "reconcile-merchant",
+			MerchantKey: "reconcile-secret", Currency: "USD",
+		}, 0)
+	method := createPaymentMethodForAdminTest(t, fx, "EPay card", "credit-card", channel.ID,
+		paymentcore.EPayMethodConfig{Type: "card"}, 0)
+	order, err := store.CreatePaymentOrder(context.Background(), fx.db, store.PaymentOrderCreateInput{
+		UserID: "epay-reconcile-admin", PaymentMethodID: method.ID,
+		ProductType: store.PaymentProductCreditPackage, ProductID: pkg.ID,
+	})
+	if err != nil {
+		t.Fatalf("create EPay reconciliation order: %v", err)
+	}
+	return fx, channel, order
+}

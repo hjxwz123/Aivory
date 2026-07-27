@@ -333,6 +333,116 @@ export interface ApiChannel {
   updated_at: number
 }
 
+export type ApiPaymentProvider = 'stripe' | 'epay' | 'waffo'
+export type ApiPaymentEnvironment = 'live' | 'test'
+
+/** Admin-only payment gateway credentials. Sensitive config values are returned
+ * as the `••••••` sentinel; sending that value back keeps the saved secret. */
+export interface ApiPaymentChannel {
+  id: string
+  name: string
+  provider: ApiPaymentProvider
+  environment: ApiPaymentEnvironment
+  config: Record<string, unknown>
+  enabled: boolean
+  /** Absolute callback URL to register in the upstream provider console. */
+  webhook_url?: string
+  created_at: number
+  updated_at: number
+}
+
+/** A user-facing payment choice bound to exactly one configured channel. */
+export interface ApiPaymentMethod {
+  id: string
+  name: string
+  icon: string
+  channel_id: string
+  provider: ApiPaymentProvider
+  provider_method_config: Record<string, unknown>
+  enabled: boolean
+  sort_order: number
+  created_at: number
+  updated_at: number
+}
+
+/** Enabled payment choice exposed to signed-in buyers. Channel credentials and
+ * provider-specific method configuration are intentionally admin-only. */
+export interface ApiPublicPaymentMethod {
+  id: string
+  name: string
+  icon: string
+  provider: ApiPaymentProvider
+}
+
+export interface ApiPaymentCheckoutAction {
+  type: 'redirect' | 'form_post'
+  url: string
+  fields?: Record<string, string>
+}
+
+export type ApiPaymentOrderStatus =
+  | 'pending'
+  | 'processing'
+  | 'fulfilled'
+  | 'failed'
+  | 'expired'
+  | 'cancelled'
+export type ApiPaymentTargetType = 'credit_package' | 'user_group'
+
+/** Public order state after the API maps internal `fulfilled` to `paid` and
+ * internal `cancelled` to `expired`. */
+export type ApiUserPaymentOrderStatus =
+  | 'pending'
+  | 'processing'
+  | 'paid'
+  | 'failed'
+  | 'expired'
+
+/** Immutable payment-order snapshot shown in the admin audit table. */
+export interface ApiPaymentOrder {
+  id: string
+  user_email: string
+  target_type: ApiPaymentTargetType
+  target_name: string
+  billing_cycle: '' | 'monthly' | 'yearly'
+  amount_minor: number
+  tax_amount_minor?: number
+  currency: string
+  channel_name: string
+  method_name: string
+  provider: ApiPaymentProvider
+  environment: ApiPaymentEnvironment
+  provider_order_id?: string
+  checkout_session_id?: string
+  checkout_expires_at?: number | null
+  last_reconciled_at?: number | null
+  reconcile_error?: string
+  status: ApiPaymentOrderStatus
+  created_at: number
+  paid_at?: number | null
+  fulfilled_at?: number | null
+  failure_reason?: string
+}
+
+/** Buyer-visible order snapshot. It never exposes channel or method config. */
+export interface ApiUserPaymentOrder {
+  id: string
+  status: ApiUserPaymentOrderStatus
+  target_type: ApiPaymentTargetType
+  target_name: string
+  billing_cycle: '' | 'monthly' | 'yearly'
+  amount_minor: number
+  tax_amount_minor?: number
+  currency: string
+  provider: ApiPaymentProvider
+  method_name: string
+  method_type: string
+  failure_reason?: string
+  created_at: number
+  paid_at?: number
+  fulfilled_at?: number
+}
+
 /** An admin-managed model tag (§ model tags) used to filter the picker. */
 export interface ApiModelTag {
   id: string

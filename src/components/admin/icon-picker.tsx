@@ -70,7 +70,7 @@ export function IconPicker({ id, value, onChange, className, 'aria-label': ariaL
             aria-label={ariaLabel}
             className={cn(
               'flex h-9 w-full items-center gap-2 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg)] px-2.5 text-left text-[13px] text-[var(--color-fg)] interactive hover:bg-[var(--color-bg-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-              value && 'pr-9',
+              value && 'pr-12',
               className,
             )}
           >
@@ -84,7 +84,7 @@ export function IconPicker({ id, value, onChange, className, 'aria-label': ariaL
         <PopoverContent
           align="start"
           collisionPadding={12}
-          className="flex w-[280px] max-w-[calc(100vw-1rem)] flex-col overflow-hidden p-2"
+          className="flex w-[280px] max-w-[calc(100vw-1rem)] flex-col overflow-hidden p-2 max-sm:w-[320px]"
           style={{
             maxHeight: 'min(24rem, var(--radix-popover-content-available-height), calc(100dvh - 1.5rem))',
           }}
@@ -99,6 +99,7 @@ export function IconPicker({ id, value, onChange, className, 'aria-label': ariaL
                 setVisibleCount(ICON_BATCH_SIZE)
               }}
               placeholder={t('admin:icon.search', { defaultValue: 'Search icons' })}
+              wrapperClassName="max-sm:h-11"
               className="h-8 pl-8 text-[12px]"
             />
           </div>
@@ -125,7 +126,7 @@ export function IconPicker({ id, value, onChange, className, 'aria-label': ariaL
                   setPickerOpen(false)
                 }}
                 className={cn(
-                  'inline-flex items-center justify-center size-9 rounded-[8px] text-[var(--color-fg-muted)] interactive hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+                  'inline-flex items-center justify-center size-9 rounded-[8px] text-[var(--color-fg-muted)] interactive hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-sm:size-11',
                   previewName === name && 'bg-[var(--color-secondary-soft)] text-[var(--color-secondary)]',
                 )}
               >
@@ -141,7 +142,7 @@ export function IconPicker({ id, value, onChange, className, 'aria-label': ariaL
               <button
                 type="button"
                 onClick={revealNextBatch}
-                className="col-span-6 min-h-8 rounded-[8px] px-2 text-[12px] font-medium text-[var(--color-fg-muted)] interactive hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                className="col-span-6 min-h-8 rounded-[8px] px-2 text-[12px] font-medium text-[var(--color-fg-muted)] interactive hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-sm:min-h-11"
               >
                 {t('common:actions.more')}
               </button>
@@ -155,7 +156,7 @@ export function IconPicker({ id, value, onChange, className, 'aria-label': ariaL
           aria-label={t('admin:icon.clear', { defaultValue: 'Clear icon' })}
           title={t('admin:icon.clear', { defaultValue: 'Clear icon' })}
           onClick={() => onChange('')}
-          className="absolute right-1 top-1/2 inline-flex size-7 -translate-y-1/2 items-center justify-center rounded-[7px] text-[var(--color-fg-faint)] interactive hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+          className="absolute right-1 top-1/2 inline-flex size-7 -translate-y-1/2 items-center justify-center rounded-[7px] text-[var(--color-fg-faint)] interactive hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-sm:right-0 max-sm:size-11"
         >
           <X size={13} aria-hidden />
         </button>
