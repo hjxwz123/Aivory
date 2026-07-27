@@ -82,12 +82,10 @@ export default function AdminUserGroups() {
   }>({ open: false, draft: {} })
   const [confirmDelete, setConfirmDelete] = useState<ApiUserGroup | null>(null)
   const [confirmPackageDelete, setConfirmPackageDelete] = useState<ApiCreditPackage | null>(null)
-  // Global over-quota / purchase settings + the internal USD→credit rate.
+  // Global over-quota settings + the internal USD→credit rate.
   const [quotaMsg, setQuotaMsg] = useState('')
   const [creditsPerUsd, setCreditsPerUsd] = useState(0)
   const [settlementCurrency, setSettlementCurrency] = useState('USD')
-  const [groupBuyUrl, setGroupBuyUrl] = useState('')
-  const [creditBuyUrl, setCreditBuyUrl] = useState('')
   const [savingMsg, setSavingMsg] = useState(false)
   const [saving, setSaving] = useState(false)
   const savingRef = useRef(false)
@@ -113,8 +111,6 @@ export default function AdminUserGroups() {
       setSettlementCurrency(currency)
       setQuotaMsg(typeof settings.quota_exceeded_message === 'string' ? settings.quota_exceeded_message : '')
       setCreditsPerUsd(Number(settings.credits_per_usd) || 0)
-      setGroupBuyUrl(typeof settings.group_buy_url === 'string' ? settings.group_buy_url : '')
-      setCreditBuyUrl(typeof settings.credit_buy_url === 'string' ? settings.credit_buy_url : '')
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
     } finally {
@@ -383,8 +379,6 @@ export default function AdminUserGroups() {
       await adminApi.updateSettings({
         quota_exceeded_message: quotaMsg,
         credits_per_usd: Math.max(0, Number(creditsPerUsd) || 0),
-        group_buy_url: groupBuyUrl.trim(),
-        credit_buy_url: creditBuyUrl.trim(),
       })
       toast.success(t('admin:groups.msgSaved'))
     } catch (e) {
@@ -565,30 +559,6 @@ export default function AdminUserGroups() {
             min={0}
             value={String(creditsPerUsd)}
             onChange={(e) => setCreditsPerUsd(Math.max(0, Number(e.target.value) || 0))}
-          />
-        </Field>
-        <Field
-          label={t('admin:groups.groupBuyUrlLabel')}
-          htmlFor="group-buy-url"
-          hint={t('admin:groups.groupBuyUrlHint')}
-        >
-          <Input
-            id="group-buy-url"
-            value={groupBuyUrl}
-            placeholder="https://…"
-            onChange={(e) => setGroupBuyUrl(e.target.value)}
-          />
-        </Field>
-        <Field
-          label={t('admin:groups.creditBuyUrlLabel')}
-          htmlFor="credit-buy-url"
-          hint={t('admin:groups.creditBuyUrlHint')}
-        >
-          <Input
-            id="credit-buy-url"
-            value={creditBuyUrl}
-            placeholder="https://…"
-            onChange={(e) => setCreditBuyUrl(e.target.value)}
           />
         </Field>
         <Field label={t('admin:groups.quotaMsgLabel')} htmlFor="quota-msg" hint={t('admin:groups.quotaMsgHint')}>

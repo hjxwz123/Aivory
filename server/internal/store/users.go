@@ -628,6 +628,21 @@ func DeleteUser(ctx context.Context, db *sql.DB, userID string) error {
 		return fmt.Errorf("delete user: begin tx: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck — intentional best-effort rollback
+	userLockQuery := `SELECT id FROM users WHERE id=?`
+	if usePostgres {
+		userLockQuery += ` FOR UPDATE`
+	}
+	var lockedUserID string
+	if err := tx.QueryRowContext(ctx, userLockQuery, userID).Scan(&lockedUserID); errors.Is(err, sql.ErrNoRows) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("delete user: lock user: %w", err)
+	}
+	if pending, err := hasPendingPaymentOrdersForUser(ctx, tx, userID); err != nil {
+		return fmt.Errorf("delete user: inspect payment orders: %w", err)
+	} else if pending {
+		return ErrPaymentOrdersPendingForUser
+	}
 
 	// Collect storage paths before deleting rows so we can clean up disk files
 	// after the transaction commits.

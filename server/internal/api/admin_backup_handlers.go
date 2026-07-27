@@ -25,6 +25,7 @@ import (
 var (
 	configImportMultipartMemoryBuffer = envcfg.Int64("AIVORY_API_CONFIG_IMPORT_MULTIPART_MEMORY_BUFFER", 16<<20)
 	backupImportMultipartMemoryBuffer = envcfg.Int64("AIVORY_API_BACKUP_IMPORT_MULTIPART_MEMORY_BUFFER", 32<<20)
+	errInvalidPaymentConfigArchive    = errors.New("invalid payment configuration in config archive")
 )
 
 // Database backup / migration (§ admin → data migration).
@@ -425,7 +426,17 @@ func importConfigAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		}
 		counts, err := mergeConfigArchive(ctx, d, zr, man)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, fmt.Errorf("config import failed (no changes committed): %w", err))
+			switch {
+			case errors.Is(err, errInvalidPaymentConfigArchive):
+				writeError(w, http.StatusBadRequest, err)
+			case errors.Is(err, store.ErrPaymentChannelHasPending),
+				errors.Is(err, store.ErrPaymentChannelHasMethods),
+				errors.Is(err, store.ErrPaymentChannelNameExists),
+				errors.Is(err, store.ErrPaymentMethodNameExists):
+				writeError(w, http.StatusConflict, err)
+			default:
+				writeError(w, http.StatusInternalServerError, fmt.Errorf("config import failed (no changes committed): %w", err))
+			}
 			return
 		}
 		assetsRestored := 0
@@ -828,7 +839,7 @@ func mergeConfigArchive(ctx context.Context, d Deps, zr *zip.Reader, man configM
 		if err != nil {
 			return nil, err
 		}
-		reader, err := normalizeArchiveTableReader(t, rc)
+		reader, err := normalizeConfigArchiveTableReader(ctx, tx, t, rc)
 		if err != nil {
 			_ = rc.Close()
 			return nil, err
@@ -853,6 +864,401 @@ func mergeConfigArchive(ctx context.Context, d Deps, zr *zip.Reader, man configM
 		return nil, err
 	}
 	return counts, nil
+}
+
+// normalizeConfigArchiveTableReader applies the same provider-specific
+// validation as the payment admin API before generic config UPSERTs can write
+// payment rows. State-dependent checks run on tx so a failure rolls back the
+// entire archive, including tables merged before the payment tables.
+func normalizeConfigArchiveTableReader(ctx context.Context, tx *sql.Tx, table string, r io.Reader) (io.Reader, error) {
+	switch table {
+	case "payment_channels":
+		return normalizeConfigPaymentChannelRows(ctx, tx, r)
+	case "payment_methods":
+		return normalizeConfigPaymentMethodRows(ctx, tx, r)
+	default:
+		return normalizeArchiveTableReader(table, r)
+	}
+}
+
+type configPaymentChannelState struct {
+	Name        string
+	Provider    string
+	Environment string
+	Config      json.RawMessage
+}
+
+func invalidPaymentConfigArchivef(format string, args ...any) error {
+	return fmt.Errorf("%w: %s", errInvalidPaymentConfigArchive, fmt.Sprintf(format, args...))
+}
+
+func setConfigArchiveString(row map[string]json.RawMessage, key, value string) {
+	row[key], _ = json.Marshal(value)
+}
+
+func validateConfigArchiveCommonPaymentFields(table, id string, row map[string]json.RawMessage) error {
+	if enabled, present, err := backupBoolField(row, "enabled"); err != nil {
+		return invalidPaymentConfigArchivef("%s[%s].enabled: %v", table, id, err)
+	} else if present {
+		if enabled {
+			row["enabled"] = json.RawMessage("1")
+		} else {
+			row["enabled"] = json.RawMessage("0")
+		}
+	}
+	for _, field := range []string{"sort_order", "created_at", "updated_at"} {
+		if _, _, err := backupIntField(row, field); err != nil {
+			return invalidPaymentConfigArchivef("%s[%s].%s: %v", table, id, field, err)
+		}
+	}
+	return nil
+}
+
+func configPaymentChannelForUpdate(ctx context.Context, tx *sql.Tx, id string) (configPaymentChannelState, bool, error) {
+	query := `SELECT name, provider, environment, config FROM payment_channels WHERE id=?`
+	if store.IsPostgres() {
+		// CreatePaymentOrder takes FOR SHARE on this row. FOR UPDATE therefore
+		// serializes credential/provider imports with checkout creation: either
+		// the new order is visible to the pending check, or checkout starts only
+		// after the import commits with the new channel configuration.
+		query += ` FOR UPDATE`
+	}
+	var state configPaymentChannelState
+	var config string
+	err := tx.QueryRowContext(ctx, query, id).Scan(&state.Name, &state.Provider, &state.Environment, &config)
+	if errors.Is(err, sql.ErrNoRows) {
+		return state, false, nil
+	}
+	if err != nil {
+		return state, false, err
+	}
+	state.Config = json.RawMessage(config)
+	return state, true, nil
+}
+
+func configPaymentChannelHasMethods(ctx context.Context, tx *sql.Tx, channelID string) (bool, error) {
+	var exists int
+	err := tx.QueryRowContext(ctx, `SELECT CASE WHEN EXISTS(
+		SELECT 1 FROM payment_methods WHERE channel_id=?
+	) THEN 1 ELSE 0 END`, channelID).Scan(&exists)
+	return exists != 0, err
+}
+
+func configPaymentChannelHasPendingOrders(ctx context.Context, tx *sql.Tx, channelID string) (bool, error) {
+	var exists int
+	err := tx.QueryRowContext(ctx, `SELECT CASE WHEN EXISTS(
+		SELECT 1 FROM payment_orders
+		 WHERE channel_id=? AND status IN (?, ?)
+	) THEN 1 ELSE 0 END`, channelID, store.PaymentOrderPending, store.PaymentOrderProcessing).Scan(&exists)
+	return exists != 0, err
+}
+
+func ensureConfigPaymentChannelNameAvailable(ctx context.Context, tx *sql.Tx, id, name string) error {
+	var otherID string
+	err := tx.QueryRowContext(ctx,
+		`SELECT id FROM payment_channels WHERE lower(trim(name))=lower(trim(?)) AND id<>? LIMIT 1`,
+		name, id,
+	).Scan(&otherID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return fmt.Errorf("%w: payment channel name %q", store.ErrPaymentChannelNameExists, name)
+}
+
+func normalizeConfigPaymentChannelRows(ctx context.Context, tx *sql.Tx, r io.Reader) (io.Reader, error) {
+	var out bytes.Buffer
+	dec := json.NewDecoder(r)
+	enc := json.NewEncoder(&out)
+	seenIDs := map[string]bool{}
+	seenNames := map[string]string{}
+	for {
+		var row map[string]json.RawMessage
+		if err := dec.Decode(&row); err == io.EOF {
+			return bytes.NewReader(out.Bytes()), nil
+		} else if err != nil {
+			return nil, invalidPaymentConfigArchivef("decode payment_channels row: %v", err)
+		}
+
+		id, idPresent, err := backupStringField(row, "id")
+		if err != nil || !idPresent || id == "" {
+			return nil, invalidPaymentConfigArchivef("payment_channels row has an invalid id")
+		}
+		if seenIDs[id] {
+			return nil, invalidPaymentConfigArchivef("payment_channels contains duplicate id %s", id)
+		}
+		seenIDs[id] = true
+		existing, exists, err := configPaymentChannelForUpdate(ctx, tx, id)
+		if err != nil {
+			return nil, err
+		}
+
+		name, namePresent, err := backupStringField(row, "name")
+		if err != nil {
+			return nil, invalidPaymentConfigArchivef("payment_channels[%s].name: %v", id, err)
+		}
+		if !namePresent && exists {
+			name = strings.TrimSpace(existing.Name)
+		}
+		if name == "" || len(name) > 120 {
+			return nil, invalidPaymentConfigArchivef("payment_channels[%s].name is required or too long", id)
+		}
+		nameKey := strings.ToLower(name)
+		if otherID, duplicate := seenNames[nameKey]; duplicate && otherID != id {
+			return nil, fmt.Errorf("%w: payment channel name %q", store.ErrPaymentChannelNameExists, name)
+		}
+		seenNames[nameKey] = id
+
+		providerInput, providerPresent, err := backupStringField(row, "provider")
+		if err != nil {
+			return nil, invalidPaymentConfigArchivef("payment_channels[%s].provider: %v", id, err)
+		}
+		if !providerPresent && exists {
+			providerInput = existing.Provider
+		}
+		provider, err := normalizePaymentProvider(providerInput)
+		if err != nil {
+			return nil, invalidPaymentConfigArchivef("payment_channels[%s].provider: %v", id, err)
+		}
+		providerChanged := exists && provider != existing.Provider
+
+		configText, configPresent, err := backupStringField(row, "config")
+		if err != nil {
+			return nil, invalidPaymentConfigArchivef("payment_channels[%s].config: %v", id, err)
+		}
+		if !configPresent {
+			if !exists || providerChanged {
+				return nil, invalidPaymentConfigArchivef("payment_channels[%s].config is required", id)
+			}
+			configText = string(existing.Config)
+		}
+		// Config archives contain plaintext secrets. Starting with an empty base
+		// rejects masked secrets instead of accidentally retaining credentials
+		// from the deployment receiving the archive.
+		mergedConfig, err := mergePaymentChannelConfig(nil, json.RawMessage(configText))
+		if err != nil {
+			return nil, invalidPaymentConfigArchivef("payment_channels[%s].config: %v", id, err)
+		}
+		config, err := normalizePaymentChannelConfig(provider, mergedConfig)
+		if err != nil {
+			return nil, invalidPaymentConfigArchivef("payment_channels[%s].config: %v", id, err)
+		}
+
+		environmentInput, environmentPresent, err := backupStringField(row, "environment")
+		if err != nil {
+			return nil, invalidPaymentConfigArchivef("payment_channels[%s].environment: %v", id, err)
+		}
+		if !environmentPresent && exists {
+			environmentInput = existing.Environment
+		}
+		environment, err := normalizePaymentEnvironment(provider, config, environmentInput)
+		if err != nil {
+			return nil, invalidPaymentConfigArchivef("payment_channels[%s].environment: %v", id, err)
+		}
+
+		if err := ensureConfigPaymentChannelNameAvailable(ctx, tx, id, name); err != nil {
+			return nil, err
+		}
+		if providerChanged {
+			hasMethods, checkErr := configPaymentChannelHasMethods(ctx, tx, id)
+			if checkErr != nil {
+				return nil, checkErr
+			}
+			if hasMethods {
+				return nil, fmt.Errorf("%w: payment channel %s", store.ErrPaymentChannelHasMethods, id)
+			}
+		}
+
+		configChanged := false
+		if exists {
+			currentConfig, currentErr := normalizePaymentChannelConfig(existing.Provider, existing.Config)
+			configChanged = currentErr != nil || providerChanged || !bytes.Equal(currentConfig, config)
+		}
+		environmentChanged := exists && environment != existing.Environment
+		if exists && (providerChanged || configChanged || environmentChanged) {
+			hasPending, checkErr := configPaymentChannelHasPendingOrders(ctx, tx, id)
+			if checkErr != nil {
+				return nil, checkErr
+			}
+			if hasPending {
+				return nil, fmt.Errorf("%w: payment channel %s", store.ErrPaymentChannelHasPending, id)
+			}
+		}
+
+		if err := validateConfigArchiveCommonPaymentFields("payment_channels", id, row); err != nil {
+			return nil, err
+		}
+		setConfigArchiveString(row, "id", id)
+		setConfigArchiveString(row, "name", name)
+		setConfigArchiveString(row, "provider", provider)
+		setConfigArchiveString(row, "environment", environment)
+		setConfigArchiveString(row, "config", string(config))
+		if err := enc.Encode(row); err != nil {
+			return nil, invalidPaymentConfigArchivef("encode payment_channels[%s]: %v", id, err)
+		}
+	}
+}
+
+type configPaymentMethodState struct {
+	ChannelID string
+	Name      string
+	Icon      string
+	Config    json.RawMessage
+}
+
+func configPaymentMethodForUpdate(ctx context.Context, tx *sql.Tx, id string) (configPaymentMethodState, bool, error) {
+	query := `SELECT channel_id, name, icon, config FROM payment_methods WHERE id=?`
+	if store.IsPostgres() {
+		query += ` FOR UPDATE`
+	}
+	var state configPaymentMethodState
+	var config string
+	err := tx.QueryRowContext(ctx, query, id).Scan(&state.ChannelID, &state.Name, &state.Icon, &config)
+	if errors.Is(err, sql.ErrNoRows) {
+		return state, false, nil
+	}
+	if err != nil {
+		return state, false, err
+	}
+	state.Config = json.RawMessage(config)
+	return state, true, nil
+}
+
+func configPaymentChannelProviderForMethod(ctx context.Context, tx *sql.Tx, channelID string) (string, error) {
+	query := `SELECT provider FROM payment_channels WHERE id=?`
+	if store.IsPostgres() {
+		// A method-only archive must not validate against a provider that changes
+		// concurrently before the method UPSERT commits.
+		query += ` FOR SHARE`
+	}
+	var provider string
+	if err := tx.QueryRowContext(ctx, query, channelID).Scan(&provider); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", invalidPaymentConfigArchivef("payment method references unknown channel %s", channelID)
+		}
+		return "", err
+	}
+	provider, err := normalizePaymentProvider(provider)
+	if err != nil {
+		return "", invalidPaymentConfigArchivef("payment channel %s provider: %v", channelID, err)
+	}
+	return provider, nil
+}
+
+func ensureConfigPaymentMethodNameAvailable(ctx context.Context, tx *sql.Tx, id, channelID, name string) error {
+	var otherID string
+	err := tx.QueryRowContext(ctx,
+		`SELECT id FROM payment_methods
+		  WHERE channel_id=? AND lower(trim(name))=lower(trim(?)) AND id<>? LIMIT 1`,
+		channelID, name, id,
+	).Scan(&otherID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return fmt.Errorf("%w: payment method name %q", store.ErrPaymentMethodNameExists, name)
+}
+
+func normalizeConfigPaymentMethodRows(ctx context.Context, tx *sql.Tx, r io.Reader) (io.Reader, error) {
+	var out bytes.Buffer
+	dec := json.NewDecoder(r)
+	enc := json.NewEncoder(&out)
+	seenIDs := map[string]bool{}
+	seenNames := map[string]string{}
+	for {
+		var row map[string]json.RawMessage
+		if err := dec.Decode(&row); err == io.EOF {
+			return bytes.NewReader(out.Bytes()), nil
+		} else if err != nil {
+			return nil, invalidPaymentConfigArchivef("decode payment_methods row: %v", err)
+		}
+
+		id, idPresent, err := backupStringField(row, "id")
+		if err != nil || !idPresent || id == "" {
+			return nil, invalidPaymentConfigArchivef("payment_methods row has an invalid id")
+		}
+		if seenIDs[id] {
+			return nil, invalidPaymentConfigArchivef("payment_methods contains duplicate id %s", id)
+		}
+		seenIDs[id] = true
+		existing, exists, err := configPaymentMethodForUpdate(ctx, tx, id)
+		if err != nil {
+			return nil, err
+		}
+
+		channelID, channelPresent, err := backupStringField(row, "channel_id")
+		if err != nil {
+			return nil, invalidPaymentConfigArchivef("payment_methods[%s].channel_id: %v", id, err)
+		}
+		if !channelPresent && exists {
+			channelID = strings.TrimSpace(existing.ChannelID)
+		}
+		if channelID == "" {
+			return nil, invalidPaymentConfigArchivef("payment_methods[%s].channel_id is required", id)
+		}
+		provider, err := configPaymentChannelProviderForMethod(ctx, tx, channelID)
+		if err != nil {
+			return nil, err
+		}
+
+		name, namePresent, err := backupStringField(row, "name")
+		if err != nil {
+			return nil, invalidPaymentConfigArchivef("payment_methods[%s].name: %v", id, err)
+		}
+		if !namePresent && exists {
+			name = strings.TrimSpace(existing.Name)
+		}
+		icon, iconPresent, err := backupStringField(row, "icon")
+		if err != nil {
+			return nil, invalidPaymentConfigArchivef("payment_methods[%s].icon: %v", id, err)
+		}
+		if !iconPresent && exists {
+			icon = strings.TrimSpace(existing.Icon)
+		}
+		if err := validatePaymentMethodText(name, icon); err != nil {
+			return nil, invalidPaymentConfigArchivef("payment_methods[%s]: %v", id, err)
+		}
+		nameKey := channelID + "\x00" + strings.ToLower(name)
+		if otherID, duplicate := seenNames[nameKey]; duplicate && otherID != id {
+			return nil, fmt.Errorf("%w: payment method name %q", store.ErrPaymentMethodNameExists, name)
+		}
+		seenNames[nameKey] = id
+
+		configText, configPresent, err := backupStringField(row, "config")
+		if err != nil {
+			return nil, invalidPaymentConfigArchivef("payment_methods[%s].config: %v", id, err)
+		}
+		if !configPresent {
+			if !exists {
+				return nil, invalidPaymentConfigArchivef("payment_methods[%s].config is required", id)
+			}
+			configText = string(existing.Config)
+		}
+		config, err := normalizePaymentMethodConfig(provider, json.RawMessage(configText))
+		if err != nil {
+			return nil, invalidPaymentConfigArchivef("payment_methods[%s].config: %v", id, err)
+		}
+		if err := ensureConfigPaymentMethodNameAvailable(ctx, tx, id, channelID, name); err != nil {
+			return nil, err
+		}
+		if err := validateConfigArchiveCommonPaymentFields("payment_methods", id, row); err != nil {
+			return nil, err
+		}
+
+		setConfigArchiveString(row, "id", id)
+		setConfigArchiveString(row, "channel_id", channelID)
+		setConfigArchiveString(row, "name", name)
+		setConfigArchiveString(row, "icon", icon)
+		setConfigArchiveString(row, "type", provider)
+		setConfigArchiveString(row, "config", string(config))
+		if err := enc.Encode(row); err != nil {
+			return nil, invalidPaymentConfigArchivef("encode payment_methods[%s]: %v", id, err)
+		}
+	}
 }
 
 func normalizeArchiveTableReader(table string, r io.Reader) (io.Reader, error) {

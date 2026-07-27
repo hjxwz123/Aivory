@@ -1057,13 +1057,218 @@
     "emptyHint": "尚無標籤——請到「模型標籤」頁面建立。",
     "manage": "管理標籤"
   },
+  "paymentProviders": {
+    "stripe": "Stripe",
+    "epay": "EPay 相容介面",
+    "waffo": "Waffo"
+  },
+  "paymentChannels": {
+    "title": "支付渠道",
+    "lead": "依協定設定閘道憑證。同一種協定可以建立多個渠道。",
+    "new": "新增渠道",
+    "newTitle": "新增支付渠道",
+    "editTitle": "編輯支付渠道",
+    "editorDescription": "憑證只保留在伺服器，不會提供給購買者。",
+    "emptyTitle": "尚無支付渠道",
+    "empty": "建立支付方式前，請先新增 Stripe、EPay 相容介面或 Waffo 渠道。",
+    "loadFailed": "無法載入支付渠道。",
+    "retry": "重試",
+    "disabled": "已停用",
+    "testEnvironment": "測試環境",
+    "copyWebhook": "複製回呼網址",
+    "copied": "已複製",
+    "copyFailed": "無法複製回呼網址。",
+    "secretHint": "如果顯示遮罩值，保持不變即可保留已儲存的密鑰。",
+    "created": "支付渠道已建立",
+    "updated": "支付渠道已更新",
+    "removed": "支付渠道已刪除",
+    "updatedAt": "更新於 {{date}}",
+    "removeTitle": "刪除支付渠道？",
+    "removeBody": "確定刪除「{{name}}」？請先移除綁定的支付方式並處理進行中的訂單。",
+    "summary": {
+      "stripe": "Stripe Checkout",
+      "waffo": "Waffo 商戶"
+    },
+    "fields": {
+      "name": "渠道名稱",
+      "namePlaceholder": "Stripe 正式環境",
+      "provider": "協定",
+      "environment": "渠道環境",
+      "environmentHint": "測試渠道僅管理員可見和使用。Stripe 金鑰或 Waffo 模式必須與此項一致。",
+      "environmentLive": "正式",
+      "environmentTest": "測試",
+      "webhookUrl": "回呼網址",
+      "webhookUrlNew": "儲存渠道後會產生回呼網址。",
+      "secretKey": "Secret Key",
+      "webhookSecret": "Webhook 簽名密鑰",
+      "webhookSecretHint": "首次設定時，請先停用並儲存渠道，將產生的回呼網址註冊到 Stripe，再把 whsec_… 密鑰填到這裡並啟用。已有遮罩值保持不變即可保留。",
+      "gatewayUrl": "閘道網址",
+      "merchantId": "商戶 ID",
+      "merchantKey": "商戶密鑰",
+      "currency": "EPay 幣別",
+      "currencyHint": "三位大寫幣別代碼。只有與全域結算幣別一致時，才會向購買者顯示此渠道。",
+      "storeId": "商店 ID",
+      "storeIdHint": "請使用 Waffo Dashboard 的商店 ID（STO_*）。",
+      "productId": "商品 ID",
+      "productIdHint": "必須使用在 Waffo Dashboard 建立的一次性（one-time）基礎商品 PROD_* ID。",
+      "mode": "環境",
+      "modeHint": "必須與此渠道使用的 Waffo 環境一致。",
+      "modeTest": "測試",
+      "modeProd": "正式",
+      "privateKey": "私鑰",
+      "webhookPublicKey": "Webhook 公鑰",
+      "webhookPublicKeyHint": "進階選填。留空則使用 Waffo SDK 針對所選環境內建的官方公鑰。",
+      "enabled": "啟用",
+      "enabledHint": "只有啟用的渠道可提供給購買者。"
+    },
+    "errors": {
+      "nameRequired": "請輸入渠道名稱。",
+      "configRequired": "請填寫所有必填的協定參數。",
+      "currencyInvalid": "EPay 幣別必須是 CNY 這類三位代碼。",
+      "modeInvalid": "請選擇 Waffo 測試或正式環境。"
+    }
+  },
+  "paymentMethods": {
+    "title": "支付方式",
+    "lead": "建立購買者可見的支付選項，並將每個選項綁定到一個具體渠道。",
+    "new": "新增方式",
+    "newTitle": "新增支付方式",
+    "editTitle": "編輯支付方式",
+    "editorDescription": "顯示名稱與圖示會公開，協定參數只保留在伺服器。",
+    "emptyTitle": "尚無支付方式",
+    "empty": "建立第一個提供給購買者的支付選項。",
+    "noChannelsTitle": "請先建立支付渠道",
+    "noChannels": "每個支付方式都必須綁定一個已設定的渠道。",
+    "configureChannels": "設定渠道",
+    "loadFailed": "無法載入支付方式。",
+    "retry": "重試",
+    "disabled": "已停用",
+    "channelDisabled": "渠道已停用",
+    "channelMissing": "渠道不存在",
+    "boundChannel": "渠道：{{name}}",
+    "created": "支付方式已建立",
+    "updated": "支付方式已更新",
+    "removed": "支付方式已刪除",
+    "reorderFailed": "無法儲存支付方式順序。",
+    "removeTitle": "刪除支付方式？",
+    "removeBody": "確定刪除「{{name}}」？它會立即從購買者的支付視窗消失。",
+    "cardPurchase": {
+      "label": "卡密購買連結",
+      "hint": "設定後，支付視窗會增加一個開啟此網址的卡密購買選項；留空則不顯示。",
+      "placeholder": "https://shop.example.com/cards",
+      "save": "儲存連結",
+      "saved": "卡密購買連結已儲存",
+      "invalid": "請輸入 HTTP(S) 網址，或以 / 開頭的站內路徑。",
+      "saveFailed": "無法儲存卡密購買連結。"
+    },
+    "fields": {
+      "name": "顯示名稱",
+      "namePlaceholder": "信用卡",
+      "icon": "圖示",
+      "channel": "支付渠道",
+      "channelHint": "此選項決定結帳使用的協定與憑證。",
+      "epayType": "EPay 類型",
+      "epayTypeHint": "閘道要求的類型值，例如 alipay、wxpay 或 qqpay。",
+      "enabled": "啟用",
+      "enabledHint": "只有啟用且所屬渠道也啟用的方式會向購買者顯示。"
+    },
+    "errors": {
+      "nameRequired": "請輸入支付方式名稱。",
+      "channelRequired": "請選擇可用的支付渠道。",
+      "epayTypeRequired": "請輸入 EPay 類型。"
+    }
+  },
+  "paymentOrders": {
+    "title": "支付訂單",
+    "lead": "檢視結帳、驗證與履約狀態，並對帳或安全關閉停滯訂單。",
+    "loadFailed": "無法載入支付訂單。",
+    "retry": "重試",
+    "total": "共 {{count}} 筆訂單",
+    "emptyTitle": "尚無支付訂單",
+    "empty": "購買者開始結帳後，訂單會顯示在這裡。",
+    "emptyFilteredTitle": "沒有符合條件的訂單",
+    "emptyFiltered": "請嘗試其他訂單號、信箱、狀態或供應商。",
+    "paidAt": "付款於 {{date}}",
+    "fulfilledAt": "履約於 {{date}}",
+    "checkoutExpiresAt": "結帳工作階段到期於 {{date}}",
+    "lastReconciledAt": "對帳於 {{date}}",
+    "notReconciled": "尚未對帳",
+    "reconciliation": "對帳錯誤",
+    "reconcileError": "對帳失敗：{{error}}",
+    "copyOrder": "複製訂單號",
+    "copied": "訂單號已複製",
+    "copyFailed": "無法複製訂單號。",
+    "failureReason": "失敗原因",
+    "environment": {
+      "live": "正式",
+      "test": "測試"
+    },
+    "actions": {
+      "reconcile": "對帳",
+      "close": "關閉",
+      "manualClose": "手動關閉",
+      "reconciled": "支付訂單已完成對帳。",
+      "closed": "支付訂單已關閉。",
+      "reconcileFailed": "無法對支付訂單進行對帳。",
+      "closeFailed": "無法關閉支付訂單。"
+    },
+    "closeDialog": {
+      "title": "關閉支付訂單？",
+      "description": "訂單 {{id}} 只會在檢查支付渠道狀態後關閉。",
+      "providerWarning": "伺服器會要求支付渠道關閉此次結帳。已付款或渠道不允許關閉的訂單會被拒絕。",
+      "epayWarning": "EPay 相容閘道沒有可靠的通用對帳介面。請先在閘道關閉該訂單，並停用其支付渠道；渠道仍啟用時伺服器會拒絕關閉。",
+      "reason": "關閉原因",
+      "reasonPlaceholder": "說明你在支付渠道核實了哪些資訊",
+      "reasonHint": "原因會寫入稽核記錄，必填 5–500 個字元。",
+      "acknowledge": "我已確認沒有付款成功，並了解訂單關閉後無法復原。",
+      "epayAcknowledge": "我已在 EPay 閘道關閉訂單、停用對應渠道，並確認沒有付款成功。"
+    },
+    "filters": {
+      "search": "搜尋訂單",
+      "searchPlaceholder": "訂單號或使用者信箱",
+      "status": "訂單狀態",
+      "provider": "供應商",
+      "apply": "搜尋",
+      "clear": "清除篩選"
+    },
+    "providers": {
+      "all": "全部供應商"
+    },
+    "status": {
+      "all": "全部狀態",
+      "pending": "等待中",
+      "processing": "處理中",
+      "fulfilled": "已履約",
+      "failed": "失敗",
+      "expired": "已過期",
+      "cancelled": "已取消"
+    },
+    "targets": {
+      "credit_package": "永久積分包",
+      "user_group": "使用者群組"
+    },
+    "cycles": {
+      "monthly": "月付",
+      "yearly": "年付"
+    },
+    "table": {
+      "order": "訂單",
+      "user": "使用者",
+      "product": "商品",
+      "amount": "金額",
+      "method": "方式 / 渠道",
+      "status": "狀態",
+      "time": "時間線"
+    }
+  },
   "menu": {
     "models": "模型",
     "capabilities": "能力",
     "users": "使用者",
     "data": "資料",
     "system": "系統",
-    "workspaces": "工作空間"
+    "workspaces": "工作空間",
+    "payments": "支付"
   },
   "imageStyles": {
     "title": "圖片風格",

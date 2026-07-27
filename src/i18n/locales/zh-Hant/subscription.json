@@ -21,10 +21,11 @@
   "planCount": "{{count}} 個方案",
   "credits": {
     "sectionTitle": "積分餘額",
-    "timedTitle": "限時積分",
-    "permanentTitle": "永久積分",
+    "timedTitle": "限時積分餘額",
+    "permanentTitle": "永久積分餘額",
     "permanentHint": "購買的積分永不過期，會在限時積分用完後才扣除。",
     "resetsOn": "{{date}} 刷新",
+    "loadFailed": "無法載入積分餘額。",
     "topUp": "補充積分",
     "topUpUnavailable": "暫不支援補充。"
   },
@@ -76,7 +77,65 @@
     "successCredits": "積分已入帳",
     "successBodyCredits": "{{count}} 積分已儲入你的永久積分餘額。"
   },
+  "payment": {
+    "title": "選擇付款方式",
+    "description": "選擇購買「{{name}}」的付款方式。",
+    "loading": "正在載入付款方式…",
+    "loadError": "無法載入付款方式，請重試。",
+    "retry": "重新載入",
+    "invalidUrl": "付款連結無效，請聯絡管理員。",
+    "checkoutError": "無法發起付款，請重試。",
+    "checkoutTimeout": "付款服務回應逾時，請重試。",
+    "errors": {
+      "methodUnavailable": "此付款方式暫不可用，請選擇其他方式。",
+      "productUnavailable": "此商品已下架或價格已變更，請重新整理頁面後再試。",
+      "checkoutUnavailable": "付款服務暫不可用，請稍後重試。"
+    },
+    "or": "或",
+    "cardPurchase": "卡密購買",
+    "empty": "暫無可用的付款方式",
+    "emptyHint": "請聯絡管理員設定付款渠道或卡密購買連結。",
+    "return": {
+      "checking": "正在確認付款狀態…",
+      "paid": "付款成功",
+      "paidHint": "你的帳戶權益已更新。",
+      "failed": "付款失敗",
+      "cancelled": "已取消付款。",
+      "expired": "付款訂單已過期，請重新購買。",
+      "statusError": "暫時無法確認付款狀態，請重新整理頁面後再試。",
+      "pending": "付款仍在處理中，請稍後重新整理頁面查看。"
+    }
+  },
+  "history": {
+    "title": "付款記錄",
+    "description": "查看你最近購買永久積分和使用者組的記錄。",
+    "columns": {
+      "name": "名稱",
+      "time": "時間",
+      "amount": "金額",
+      "method": "付款方式",
+      "status": "狀態"
+    },
+    "target": {
+      "credit_package": "永久積分",
+      "user_group": "使用者組"
+    },
+    "status": {
+      "pending": "待付款",
+      "processing": "處理中",
+      "paid": "已付款",
+      "failed": "付款失敗",
+      "expired": "已過期"
+    },
+    "empty": "暫無付款記錄。",
+    "loadError": "無法載入付款記錄。",
+    "retry": "重試",
+    "previous": "上一頁",
+    "next": "下一頁",
+    "page": "第 {{current}} / {{total}} 頁"
+  },
   "buyCta": "購買",
+  "renewCta": "續費",
   "recommended": "推薦",
   "cycleFee": "當前週期費用"
 }

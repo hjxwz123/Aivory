@@ -7,7 +7,7 @@
 import { Suspense, useEffect, useState } from 'react'
 import { NavLink, Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { ArrowLeft, BarChart3, Briefcase, Cpu, FolderOpen, Menu, Settings2, Sparkles, Users } from 'lucide-react'
+import { ArrowLeft, BarChart3, Briefcase, Cpu, CreditCard, FolderOpen, Menu, Settings2, Sparkles, Users } from 'lucide-react'
 import { useAuth } from '@/store/auth'
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet'
 import { RouteFade } from '@/components/ui/route-fade'
@@ -96,6 +96,17 @@ const SECTIONS: AdminSection[] = [
     tabs: [
       { to: '/admin/usage', labelKey: 'admin:usage.title' },
       { to: '/admin/analytics', labelKey: 'admin:analytics.title' },
+    ],
+  },
+  {
+    key: 'payments',
+    icon: CreditCard,
+    labelKey: 'admin:menu.payments',
+    to: '/admin/payment-channels',
+    tabs: [
+      { to: '/admin/payment-channels', labelKey: 'admin:paymentChannels.title' },
+      { to: '/admin/payment-methods', labelKey: 'admin:paymentMethods.title' },
+      { to: '/admin/payment-orders', labelKey: 'admin:paymentOrders.title' },
     ],
   },
   {

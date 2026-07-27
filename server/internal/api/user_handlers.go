@@ -312,6 +312,10 @@ func deleteMeHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	// Heavy cleanup (bulk SQL, vectors, disk) runs in a background job; this
 	// request only locks the account out and returns. §async user delete.
 	if _, err := startUserDeletion(d, u.ID, u.Email); err != nil {
+		if errors.Is(err, store.ErrPaymentOrdersPendingForUser) {
+			writeError(w, http.StatusConflict, err)
+			return
+		}
 		writeError(w, 500, err)
 		return
 	}

@@ -1057,13 +1057,218 @@
     "emptyHint": "タグはまだありません——「モデルタグ」ページで作成してください。",
     "manage": "タグを管理"
   },
+  "paymentProviders": {
+    "stripe": "Stripe",
+    "epay": "EPay 互換",
+    "waffo": "Waffo"
+  },
+  "paymentChannels": {
+    "title": "決済チャネル",
+    "lead": "プロトコルごとにゲートウェイ認証情報を設定します。同じプロトコルで複数のチャネルを作成できます。",
+    "new": "チャネルを追加",
+    "newTitle": "決済チャネルを追加",
+    "editTitle": "決済チャネルを編集",
+    "editorDescription": "認証情報はサーバー内に保持され、購入者には公開されません。",
+    "emptyTitle": "決済チャネルがありません",
+    "empty": "決済方法を作成する前に、Stripe、EPay 互換、または Waffo のチャネルを追加してください。",
+    "loadFailed": "決済チャネルを読み込めませんでした。",
+    "retry": "再試行",
+    "disabled": "無効",
+    "testEnvironment": "テスト環境",
+    "copyWebhook": "コールバック URL をコピー",
+    "copied": "コピーしました",
+    "copyFailed": "コールバック URL をコピーできませんでした。",
+    "secretHint": "マスクされた値が表示されている場合は、変更せずに保存すると既存の秘密情報を保持します。",
+    "created": "決済チャネルを作成しました",
+    "updated": "決済チャネルを更新しました",
+    "removed": "決済チャネルを削除しました",
+    "updatedAt": "{{date}} 更新",
+    "removeTitle": "決済チャネルを削除しますか？",
+    "removeBody": "「{{name}}」を削除しますか？先に紐づく決済方法と処理中の注文を解消してください。",
+    "summary": {
+      "stripe": "Stripe Checkout",
+      "waffo": "Waffo マーチャント"
+    },
+    "fields": {
+      "name": "チャネル名",
+      "namePlaceholder": "Stripe 本番環境",
+      "provider": "プロトコル",
+      "environment": "環境",
+      "environmentHint": "テストチャネルを表示・利用できるのは管理者のみです。Stripe キーまたは Waffo モードと一致させてください。",
+      "environmentLive": "本番",
+      "environmentTest": "テスト",
+      "webhookUrl": "コールバック URL",
+      "webhookUrlNew": "保存するとコールバック URL が生成されます。",
+      "secretKey": "シークレットキー",
+      "webhookSecret": "Webhook 署名シークレット",
+      "webhookSecretHint": "初回設定では、チャネルを無効のまま保存し、生成されたコールバック URL を Stripe に登録してから、whsec_… シークレットをここに入力して有効にしてください。マスクされた値は変更しなければ保持されます。",
+      "gatewayUrl": "ゲートウェイ URL",
+      "merchantId": "マーチャント ID",
+      "merchantKey": "マーチャントキー",
+      "currency": "EPay 通貨",
+      "currencyHint": "大文字3文字のコードです。このチャネルを表示するには、全体の決済通貨と一致させてください。",
+      "storeId": "ストア ID",
+      "storeIdHint": "Waffo Dashboard のストア ID（STO_*）を使用してください。",
+      "productId": "商品 ID",
+      "productIdHint": "Waffo Dashboard で作成した one-time 基本商品の PROD_* ID を使用してください。",
+      "mode": "環境",
+      "modeHint": "このチャネルで使用する Waffo 環境と一致させてください。",
+      "modeTest": "テスト",
+      "modeProd": "本番",
+      "privateKey": "秘密鍵",
+      "webhookPublicKey": "Webhook 公開鍵",
+      "webhookPublicKeyHint": "高度な任意設定です。空欄の場合は、選択した環境向けに Waffo SDK に組み込まれた公式公開鍵を使用します。",
+      "enabled": "有効",
+      "enabledHint": "有効なチャネルのみ購入者に提供できます。"
+    },
+    "errors": {
+      "nameRequired": "チャネル名を入力してください。",
+      "configRequired": "プロトコルの必須項目をすべて入力してください。",
+      "currencyInvalid": "EPay 通貨は CNY などの3文字コードで入力してください。",
+      "modeInvalid": "Waffo のテスト環境または本番環境を選択してください。"
+    }
+  },
+  "paymentMethods": {
+    "title": "決済方法",
+    "lead": "購入者に表示する選択肢を作成し、それぞれを特定の決済チャネルに紐づけます。",
+    "new": "決済方法を追加",
+    "newTitle": "決済方法を追加",
+    "editTitle": "決済方法を編集",
+    "editorDescription": "表示名とアイコンは公開され、プロトコルのパラメータはサーバー内に保持されます。",
+    "emptyTitle": "決済方法がありません",
+    "empty": "購入者向けの最初の決済方法を作成してください。",
+    "noChannelsTitle": "先に決済チャネルを作成してください",
+    "noChannels": "各決済方法は設定済みのチャネル1つに紐づける必要があります。",
+    "configureChannels": "チャネルを設定",
+    "loadFailed": "決済方法を読み込めませんでした。",
+    "retry": "再試行",
+    "disabled": "無効",
+    "channelDisabled": "チャネル無効",
+    "channelMissing": "チャネルなし",
+    "boundChannel": "チャネル: {{name}}",
+    "created": "決済方法を作成しました",
+    "updated": "決済方法を更新しました",
+    "removed": "決済方法を削除しました",
+    "reorderFailed": "決済方法の順序を保存できませんでした。",
+    "removeTitle": "決済方法を削除しますか？",
+    "removeBody": "「{{name}}」を削除しますか？購入者の決済ダイアログから直ちに消えます。",
+    "cardPurchase": {
+      "label": "プリペイドコード購入リンク",
+      "hint": "設定すると、決済ダイアログにこの URL を開くプリペイドコードの選択肢が追加されます。空欄にすると非表示になります。",
+      "placeholder": "https://shop.example.com/cards",
+      "save": "リンクを保存",
+      "saved": "プリペイドコード購入リンクを保存しました",
+      "invalid": "HTTP(S) URL、または / で始まるルート相対パスを入力してください。",
+      "saveFailed": "プリペイドコード購入リンクを保存できませんでした。"
+    },
+    "fields": {
+      "name": "表示名",
+      "namePlaceholder": "クレジットカード",
+      "icon": "アイコン",
+      "channel": "決済チャネル",
+      "channelHint": "チェックアウトに使用するプロトコルと認証情報が決まります。",
+      "epayType": "EPay タイプ",
+      "epayTypeHint": "alipay、wxpay、qqpay など、ゲートウェイが受け付ける値です。",
+      "enabled": "有効",
+      "enabledHint": "有効なチャネルに紐づく有効な決済方法だけが購入者に表示されます。"
+    },
+    "errors": {
+      "nameRequired": "決済方法名を入力してください。",
+      "channelRequired": "利用可能な決済チャネルを選択してください。",
+      "epayTypeRequired": "EPay タイプを入力してください。"
+    }
+  },
+  "paymentOrders": {
+    "title": "決済注文",
+    "lead": "チェックアウト、検証、付与の状態を確認し、停止した注文を照合または安全に終了します。",
+    "loadFailed": "決済注文を読み込めませんでした。",
+    "retry": "再試行",
+    "total": "{{count}} 件",
+    "emptyTitle": "決済注文がありません",
+    "empty": "購入者がチェックアウトを開始すると、ここに注文が表示されます。",
+    "emptyFilteredTitle": "一致する注文がありません",
+    "emptyFiltered": "注文番号、メールアドレス、状態、またはプロバイダーを変更してください。",
+    "paidAt": "{{date}} 支払完了",
+    "fulfilledAt": "{{date}} 付与完了",
+    "checkoutExpiresAt": "チェックアウト期限 {{date}}",
+    "lastReconciledAt": "{{date}} 照合済み",
+    "notReconciled": "未照合",
+    "reconciliation": "照合エラー",
+    "reconcileError": "照合に失敗しました：{{error}}",
+    "copyOrder": "注文番号をコピー",
+    "copied": "注文番号をコピーしました",
+    "copyFailed": "注文番号をコピーできませんでした。",
+    "failureReason": "失敗理由",
+    "environment": {
+      "live": "本番",
+      "test": "テスト"
+    },
+    "actions": {
+      "reconcile": "照合",
+      "close": "終了",
+      "manualClose": "手動で終了",
+      "reconciled": "決済注文を照合しました。",
+      "closed": "決済注文を終了しました。",
+      "reconcileFailed": "決済注文を照合できませんでした。",
+      "closeFailed": "決済注文を終了できませんでした。"
+    },
+    "closeDialog": {
+      "title": "決済注文を終了しますか？",
+      "description": "注文 {{id}} はプロバイダーの状態を確認した後にのみ終了されます。",
+      "providerWarning": "サーバーがプロバイダーにチェックアウトの終了を要求します。支払済み、または終了できない決済は拒否されます。",
+      "epayWarning": "EPay 互換ゲートウェイには信頼できる共通の照合 API がありません。先にゲートウェイで注文を終了し、決済チャネルを無効にしてください。チャネルが有効な間はサーバーが拒否します。",
+      "reason": "終了理由",
+      "reasonPlaceholder": "プロバイダー側で確認した内容を入力",
+      "reasonHint": "監査記録に必須です。5～500文字で入力してください。",
+      "acknowledge": "支払いが完了していないことを確認し、注文の終了を元に戻せないことを理解しました。",
+      "epayAcknowledge": "EPay ゲートウェイで注文を終了し、チャネルを無効にして、支払いが完了していないことを確認しました。"
+    },
+    "filters": {
+      "search": "注文を検索",
+      "searchPlaceholder": "注文番号またはユーザーのメール",
+      "status": "注文状態",
+      "provider": "プロバイダー",
+      "apply": "検索",
+      "clear": "フィルターを解除"
+    },
+    "providers": {
+      "all": "すべてのプロバイダー"
+    },
+    "status": {
+      "all": "すべての状態",
+      "pending": "支払い待ち",
+      "processing": "決済処理中",
+      "fulfilled": "付与完了",
+      "failed": "失敗",
+      "expired": "期限切れ",
+      "cancelled": "キャンセル"
+    },
+    "targets": {
+      "credit_package": "クレジットパック",
+      "user_group": "ユーザーグループ"
+    },
+    "cycles": {
+      "monthly": "月払い",
+      "yearly": "年払い"
+    },
+    "table": {
+      "order": "注文",
+      "user": "ユーザー",
+      "product": "商品",
+      "amount": "金額",
+      "method": "決済方法 / チャネル",
+      "status": "状態",
+      "time": "タイムライン"
+    }
+  },
   "menu": {
     "models": "モデル",
     "capabilities": "機能",
     "users": "ユーザー",
     "data": "分析",
     "system": "システム",
-    "workspaces": "ワークスペース"
+    "workspaces": "ワークスペース",
+    "payments": "決済"
   },
   "imageStyles": {
     "title": "画像スタイル",

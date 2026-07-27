@@ -34,6 +34,15 @@ import type {
   ApiUserGroup,
   ApiPublicOAuthProvider,
   ApiOAuthIdentity,
+  ApiPaymentChannel,
+  ApiPaymentCheckoutAction,
+  ApiPaymentMethod,
+  ApiPaymentOrder,
+  ApiPaymentOrderStatus,
+  ApiPaymentProvider,
+  ApiPaymentTargetType,
+  ApiPublicPaymentMethod,
+  ApiUserPaymentOrder,
   ApiPrompt,
   ApiLibraryCatalog,
   ApiShareInfo,
@@ -266,6 +275,39 @@ export const groupsApi = {
 export const creditPackagesApi = {
   /** Enabled packages visible to signed-in members. */
   list: () => api<ApiCreditPackage[]>('/credit-packages'),
+}
+
+// ----- Payments -----------------------------------------------------------
+
+export const paymentsApi = {
+  /** Enabled, valid payment choices for the selected catalog target. */
+  methods: (targetType: ApiPaymentTargetType, signal?: AbortSignal) =>
+    api<{ methods: ApiPublicPaymentMethod[]; card_purchase_url: string }>(
+      `/payment-methods?target_type=${encodeURIComponent(targetType)}`,
+      { signal },
+    ),
+  checkout: (body: {
+    payment_method_id: string
+    target_type: ApiPaymentTargetType
+    target_id: string
+    billing_cycle?: 'monthly' | 'yearly'
+  }, signal?: AbortSignal) =>
+    api<{ order_id: string; action: ApiPaymentCheckoutAction }>('/payments/checkout', {
+      method: 'POST',
+      body,
+      signal,
+    }),
+  /** Returns only the current user's order; server-side status names are
+   * normalized for the buyer-facing flow. */
+  order: (id: string) =>
+    api<ApiUserPaymentOrder>(`/payments/orders/${encodeURIComponent(id)}`),
+  /** Paginated payment history for the signed-in buyer. */
+  orders: (limit = 10, offset = 0) => {
+    const qs = new URLSearchParams({ limit: String(limit), offset: String(offset) })
+    return api<{ orders: ApiUserPaymentOrder[]; total: number; limit: number; offset: number }>(
+      `/payments/orders?${qs}`,
+    )
+  },
 }
 
 // ----- Redeem codes (§ redeem codes) ---------------------------------------
@@ -547,6 +589,62 @@ export const adminApi = {
     api<ApiChannel>(`/admin/channels/${encodeURIComponent(id)}`, { method: 'PATCH', body }),
   removeChannel: (id: string) =>
     api<{ ok: true }>(`/admin/channels/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+
+  // Payment channels keep protocol credentials in the database. Masked values
+  // returned by the server can be sent back unchanged to preserve the secret.
+  paymentChannels: () => api<ApiPaymentChannel[]>('/admin/payment-channels'),
+  createPaymentChannel: (body: Pick<ApiPaymentChannel, 'name' | 'provider' | 'environment' | 'config' | 'enabled'>) =>
+    api<ApiPaymentChannel>('/admin/payment-channels', { method: 'POST', body }),
+  updatePaymentChannel: (
+    id: string,
+    body: Partial<Pick<ApiPaymentChannel, 'name' | 'provider' | 'environment' | 'config' | 'enabled'>>,
+  ) => api<ApiPaymentChannel>(`/admin/payment-channels/${encodeURIComponent(id)}`, { method: 'PATCH', body }),
+  removePaymentChannel: (id: string) =>
+    api<{ ok: true }>(`/admin/payment-channels/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+
+  paymentMethods: () => api<ApiPaymentMethod[]>('/admin/payment-methods'),
+  createPaymentMethod: (
+    body: Pick<ApiPaymentMethod, 'name' | 'icon' | 'channel_id' | 'provider_method_config' | 'enabled' | 'sort_order'>,
+  ) => api<ApiPaymentMethod>('/admin/payment-methods', { method: 'POST', body }),
+  updatePaymentMethod: (
+    id: string,
+    body: Partial<Pick<ApiPaymentMethod, 'name' | 'icon' | 'channel_id' | 'provider_method_config' | 'enabled' | 'sort_order'>>,
+  ) => api<ApiPaymentMethod>(`/admin/payment-methods/${encodeURIComponent(id)}`, { method: 'PATCH', body }),
+  reorderPaymentMethods: (ids: string[]) =>
+    api<{ ok: true }>('/admin/payment-methods/reorder', { method: 'PATCH', body: { ids } }),
+  removePaymentMethod: (id: string) =>
+    api<{ ok: true }>(`/admin/payment-methods/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+
+  paymentOrders: (
+    params: {
+      status?: ApiPaymentOrderStatus
+      provider?: ApiPaymentProvider
+      search?: string
+      limit?: number
+      offset?: number
+    } = {},
+  ) => {
+    const qs = new URLSearchParams()
+    if (params.status) qs.set('status', params.status)
+    if (params.provider) qs.set('provider', params.provider)
+    if (params.search) qs.set('search', params.search)
+    if (params.limit !== undefined) qs.set('limit', String(params.limit))
+    if (params.offset !== undefined) qs.set('offset', String(params.offset))
+    return api<{ orders: ApiPaymentOrder[]; total: number }>(
+      `/admin/payment-orders${qs.toString() ? `?${qs}` : ''}`,
+    )
+  },
+  reconcilePaymentOrder: (
+    id: string,
+    body: {
+      action: 'reconcile' | 'close'
+      confirm?: boolean
+      reason?: string
+    },
+  ) => api<ApiPaymentOrder>(`/admin/payment-orders/${encodeURIComponent(id)}/reconcile`, {
+    method: 'POST',
+    body,
+  }),
 
   models: (kind?: 'chat' | 'image' | 'embedding') =>
     api<ApiModel[]>(`/admin/models${kind ? `?kind=${encodeURIComponent(kind)}` : ''}`),

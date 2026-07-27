@@ -753,6 +753,10 @@ func deleteUserAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 			writeError(w, 400, err)
 			return
 		}
+		if errors.Is(err, store.ErrPaymentOrdersPendingForUser) {
+			writeError(w, http.StatusConflict, err)
+			return
+		}
 		writeError(w, 500, err)
 		return
 	}
@@ -1165,7 +1169,7 @@ var settingsKeys = []string{
 	// deployment-wide settlement currency and two external purchase links.
 	"credits_per_usd", "settlement_currency",
 	"permanent_credit_purchase_credits", "permanent_credit_purchase_price_amount_minor",
-	"group_buy_url", "credit_buy_url",
+	"group_buy_url", "credit_buy_url", "card_purchase_url",
 	// §B6 partial: JSON array of tool names disabled platform-wide (kill-switch),
 	// e.g. ["python_execute","image_generate"].
 	"disabled_tools",
@@ -1370,6 +1374,16 @@ func applyAdminSettingsPatch(d Deps, body map[string]json.RawMessage, skipNull b
 				if json.Unmarshal(v, &amount) != nil || amount < 0 {
 					return 0, errInvalidInput
 				}
+			case "card_purchase_url":
+				var purchaseURL string
+				if json.Unmarshal(v, &purchaseURL) != nil {
+					return 0, errInvalidInput
+				}
+				purchaseURL = strings.TrimSpace(purchaseURL)
+				if purchaseURL != "" && !validPaymentHTTPURL(purchaseURL) {
+					return 0, errInvalidInput
+				}
+				v, _ = json.Marshal(purchaseURL)
 			case "embedding_model_id":
 				if err := ensureEmbeddingModelSettingCanChange(d, v); err != nil {
 					return 0, err

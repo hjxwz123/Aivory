@@ -211,19 +211,39 @@ func DeleteUserGroup(ctx context.Context, db *sql.DB, id string) error {
 	if id == DefaultGroupID {
 		return errors.New("the default group cannot be deleted")
 	}
-	g, err := GetUserGroup(ctx, db, id)
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	if g.IsDefault {
+	defer func() { _ = tx.Rollback() }()
+	groupQuery := `SELECT is_default FROM user_groups WHERE id=?`
+	if usePostgres {
+		groupQuery += ` FOR UPDATE`
+	}
+	var isDefault int
+	if err := tx.QueryRowContext(ctx, groupQuery, id).Scan(&isDefault); errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	} else if err != nil {
+		return err
+	}
+	if isDefault != 0 {
 		return errors.New("the default group cannot be deleted")
 	}
-	if _, err := db.ExecContext(ctx, `UPDATE users SET group_id=? WHERE group_id=?`, DefaultGroupID, id); err != nil {
+	hasPendingOrders, err := hasPendingPaymentOrdersForUserGroup(ctx, tx, id)
+	if err != nil {
+		return err
+	}
+	if hasPendingOrders {
+		return ErrPaymentOrdersPendingForGroup
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE users SET group_id=? WHERE group_id=?`, DefaultGroupID, id); err != nil {
 		return err
 	}
 	// model_group_quotas rows cascade via FK.
-	_, err = db.ExecContext(ctx, `DELETE FROM user_groups WHERE id=?`, id)
-	return err
+	if _, err := tx.ExecContext(ctx, `DELETE FROM user_groups WHERE id=?`, id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // SetUserGroup assigns a user to a group (admin action). Bumps the token

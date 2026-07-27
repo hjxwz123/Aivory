@@ -1057,13 +1057,218 @@
     "emptyHint": "No tags yet — create them on the Model Tags page.",
     "manage": "Manage tags"
   },
+  "paymentProviders": {
+    "stripe": "Stripe",
+    "epay": "EPay compatible",
+    "waffo": "Waffo"
+  },
+  "paymentChannels": {
+    "title": "Payment channels",
+    "lead": "Configure gateway credentials by protocol. You can create multiple channels for the same protocol.",
+    "new": "New channel",
+    "newTitle": "New payment channel",
+    "editTitle": "Edit payment channel",
+    "editorDescription": "Credentials stay on the server and are never exposed to buyers.",
+    "emptyTitle": "No payment channels",
+    "empty": "Add a Stripe, EPay-compatible, or Waffo channel before creating payment methods.",
+    "loadFailed": "Could not load payment channels.",
+    "retry": "Retry",
+    "disabled": "Disabled",
+    "testEnvironment": "Test environment",
+    "copyWebhook": "Copy callback URL",
+    "copied": "Copied",
+    "copyFailed": "Could not copy the callback URL.",
+    "secretHint": "If a masked value is shown, leave it unchanged to keep the saved secret.",
+    "created": "Payment channel created",
+    "updated": "Payment channel updated",
+    "removed": "Payment channel removed",
+    "updatedAt": "Updated {{date}}",
+    "removeTitle": "Delete payment channel?",
+    "removeBody": "Delete “{{name}}”? Channels with bound payment methods or active orders must be cleared first.",
+    "summary": {
+      "stripe": "Stripe Checkout",
+      "waffo": "Waffo merchant"
+    },
+    "fields": {
+      "name": "Channel name",
+      "namePlaceholder": "Production Stripe",
+      "provider": "Protocol",
+      "environment": "Environment",
+      "environmentHint": "Test channels are visible and usable only by administrators. Stripe keys or Waffo mode must match.",
+      "environmentLive": "Live",
+      "environmentTest": "Test",
+      "webhookUrl": "Callback URL",
+      "webhookUrlNew": "Save the channel to generate its callback URL.",
+      "secretKey": "Secret key",
+      "webhookSecret": "Webhook signing secret",
+      "webhookSecretHint": "For first-time setup, save the channel disabled, register the generated callback URL in Stripe, then paste the whsec_… secret here and enable it. Leave a masked value unchanged to keep it.",
+      "gatewayUrl": "Gateway URL",
+      "merchantId": "Merchant ID",
+      "merchantKey": "Merchant key",
+      "currency": "EPay currency",
+      "currencyHint": "Three-letter uppercase code. It must match the global settlement currency for this channel to be offered.",
+      "storeId": "Store ID",
+      "storeIdHint": "Use the store ID from the Waffo Dashboard (STO_*).",
+      "productId": "Product ID",
+      "productIdHint": "Must be the PROD_* ID of a one-time base product created in the Waffo Dashboard.",
+      "mode": "Environment",
+      "modeHint": "Must match the Waffo environment used by this channel.",
+      "modeTest": "Test",
+      "modeProd": "Production",
+      "privateKey": "Private key",
+      "webhookPublicKey": "Webhook public key",
+      "webhookPublicKeyHint": "Advanced and optional. Leave empty to use the official public key built into the Waffo SDK for the selected environment.",
+      "enabled": "Enabled",
+      "enabledHint": "Only enabled channels can be offered to buyers."
+    },
+    "errors": {
+      "nameRequired": "Enter a channel name.",
+      "configRequired": "Complete all required protocol fields.",
+      "currencyInvalid": "EPay currency must be a three-letter code such as CNY.",
+      "modeInvalid": "Choose the Waffo test or production environment."
+    }
+  },
+  "paymentMethods": {
+    "title": "Payment methods",
+    "lead": "Create the choices buyers see and bind each one to a specific payment channel.",
+    "new": "New method",
+    "newTitle": "New payment method",
+    "editTitle": "Edit payment method",
+    "editorDescription": "The display name and icon are public; protocol parameters remain server-side.",
+    "emptyTitle": "No payment methods",
+    "empty": "Create the first buyer-facing payment choice.",
+    "noChannelsTitle": "Create a payment channel first",
+    "noChannels": "Every payment method must be bound to one configured channel.",
+    "configureChannels": "Configure channels",
+    "loadFailed": "Could not load payment methods.",
+    "retry": "Retry",
+    "disabled": "Disabled",
+    "channelDisabled": "Channel disabled",
+    "channelMissing": "Channel missing",
+    "boundChannel": "Channel: {{name}}",
+    "created": "Payment method created",
+    "updated": "Payment method updated",
+    "removed": "Payment method removed",
+    "reorderFailed": "Could not save the payment method order.",
+    "removeTitle": "Delete payment method?",
+    "removeBody": "Delete “{{name}}”? It will immediately disappear from the buyer's payment dialog.",
+    "cardPurchase": {
+      "label": "Card-code purchase link",
+      "hint": "When set, the buyer's payment dialog adds a card-code option that opens this URL. Leave empty to hide it.",
+      "placeholder": "https://shop.example.com/cards",
+      "save": "Save link",
+      "saved": "Card-code purchase link saved",
+      "invalid": "Enter an HTTP(S) URL or a root-relative path beginning with /.",
+      "saveFailed": "Could not save the card-code purchase link."
+    },
+    "fields": {
+      "name": "Display name",
+      "namePlaceholder": "Credit card",
+      "icon": "Icon",
+      "channel": "Payment channel",
+      "channelHint": "This determines the protocol and credentials used for checkout.",
+      "epayType": "EPay type",
+      "epayTypeHint": "Gateway type value, such as alipay, wxpay, or qqpay.",
+      "enabled": "Enabled",
+      "enabledHint": "Only enabled methods with an enabled channel appear to buyers."
+    },
+    "errors": {
+      "nameRequired": "Enter a payment method name.",
+      "channelRequired": "Choose an available payment channel.",
+      "epayTypeRequired": "Enter the EPay type."
+    }
+  },
+  "paymentOrders": {
+    "title": "Payment orders",
+    "lead": "Inspect checkout, verification, and fulfillment status, then reconcile or safely close stalled orders.",
+    "loadFailed": "Could not load payment orders.",
+    "retry": "Retry",
+    "total": "{{count}} order(s)",
+    "emptyTitle": "No payment orders",
+    "empty": "Orders will appear here after a buyer starts checkout.",
+    "emptyFilteredTitle": "No matching orders",
+    "emptyFiltered": "Try a different order number, email, status, or provider.",
+    "paidAt": "Paid {{date}}",
+    "fulfilledAt": "Fulfilled {{date}}",
+    "checkoutExpiresAt": "Checkout expires {{date}}",
+    "lastReconciledAt": "Reconciled {{date}}",
+    "notReconciled": "Not reconciled",
+    "reconciliation": "Reconciliation error",
+    "reconcileError": "Reconciliation failed: {{error}}",
+    "copyOrder": "Copy order number",
+    "copied": "Order number copied",
+    "copyFailed": "Could not copy the order number.",
+    "failureReason": "Failure reason",
+    "environment": {
+      "live": "Live",
+      "test": "Test"
+    },
+    "actions": {
+      "reconcile": "Reconcile",
+      "close": "Close",
+      "manualClose": "Manual close",
+      "reconciled": "Payment order reconciled.",
+      "closed": "Payment order closed.",
+      "reconcileFailed": "Could not reconcile the payment order.",
+      "closeFailed": "Could not close the payment order."
+    },
+    "closeDialog": {
+      "title": "Close payment order?",
+      "description": "Order {{id}} will be closed only after its provider state is checked.",
+      "providerWarning": "The server will ask the provider to close this checkout. A completed or otherwise non-closable payment will be rejected.",
+      "epayWarning": "EPay-compatible gateways do not provide reliable universal reconciliation. First close this order at the gateway and disable its payment channel. The server will refuse while the channel remains enabled.",
+      "reason": "Closure reason",
+      "reasonPlaceholder": "Describe what you verified at the provider",
+      "reasonHint": "Required for the audit record; enter 5–500 characters.",
+      "acknowledge": "I verified that no payment completed and understand that closing the order cannot be undone.",
+      "epayAcknowledge": "I closed the order at the EPay gateway, disabled its channel, and verified that no payment completed."
+    },
+    "filters": {
+      "search": "Search orders",
+      "searchPlaceholder": "Order number or user email",
+      "status": "Order status",
+      "provider": "Provider",
+      "apply": "Search",
+      "clear": "Clear filters"
+    },
+    "providers": {
+      "all": "All providers"
+    },
+    "status": {
+      "all": "All statuses",
+      "pending": "Pending",
+      "processing": "Processing",
+      "fulfilled": "Fulfilled",
+      "failed": "Failed",
+      "expired": "Expired",
+      "cancelled": "Cancelled"
+    },
+    "targets": {
+      "credit_package": "Credit package",
+      "user_group": "User group"
+    },
+    "cycles": {
+      "monthly": "Monthly",
+      "yearly": "Yearly"
+    },
+    "table": {
+      "order": "Order",
+      "user": "User",
+      "product": "Product",
+      "amount": "Amount",
+      "method": "Method / channel",
+      "status": "Status",
+      "time": "Timeline"
+    }
+  },
   "menu": {
     "models": "Models",
     "capabilities": "Capabilities",
     "users": "Users",
     "data": "Analytics",
     "system": "System",
-    "workspaces": "Workspaces"
+    "workspaces": "Workspaces",
+    "payments": "Payments"
   },
   "imageStyles": {
     "title": "Image styles",

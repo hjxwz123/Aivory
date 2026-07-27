@@ -21,10 +21,11 @@
   "planCount": "{{count}} forfaits",
   "credits": {
     "sectionTitle": "Solde de crédits",
-    "timedTitle": "Crédits temporaires",
-    "permanentTitle": "Crédits permanents",
+    "timedTitle": "Solde de crédits temporaires",
+    "permanentTitle": "Solde de crédits permanents",
     "permanentHint": "Les crédits achetés n’expirent jamais et sont utilisés une fois vos crédits temporaires épuisés.",
     "resetsOn": "Renouvellement le {{date}}",
+    "loadFailed": "Impossible de charger votre solde de crédits.",
     "topUp": "Recharger des crédits",
     "topUpUnavailable": "La recharge n’est pas disponible pour le moment."
   },
@@ -76,7 +77,65 @@
     "successCredits": "Crédits ajoutés",
     "successBodyCredits": "{{count}} crédits ont été ajoutés à votre solde permanent."
   },
+  "payment": {
+    "title": "Choisir un moyen de paiement",
+    "description": "Choisissez comment régler « {{name}} ».",
+    "loading": "Chargement des moyens de paiement…",
+    "loadError": "Impossible de charger les moyens de paiement. Réessayez.",
+    "retry": "Recharger",
+    "invalidUrl": "Le lien de paiement n’est pas valide. Contactez un administrateur.",
+    "checkoutError": "Impossible de lancer le paiement. Réessayez.",
+    "checkoutTimeout": "Le service de paiement a mis trop de temps à répondre. Réessayez.",
+    "errors": {
+      "methodUnavailable": "Ce moyen de paiement n’est pas disponible. Choisissez-en un autre.",
+      "productUnavailable": "Cet article n’est plus disponible ou son prix a changé. Actualisez la page et réessayez.",
+      "checkoutUnavailable": "Le service de paiement est temporairement indisponible. Réessayez plus tard."
+    },
+    "or": "ou",
+    "cardPurchase": "Acheter un code prépayé",
+    "empty": "Aucun moyen de paiement disponible",
+    "emptyHint": "Demandez à un administrateur de configurer un canal de paiement ou un lien d’achat de codes prépayés.",
+    "return": {
+      "checking": "Vérification de l’état du paiement…",
+      "paid": "Paiement réussi",
+      "paidHint": "Les droits de votre compte ont été mis à jour.",
+      "failed": "Échec du paiement",
+      "cancelled": "Paiement annulé.",
+      "expired": "Cette commande de paiement a expiré. Veuillez recommencer.",
+      "statusError": "Impossible de confirmer l’état du paiement. Actualisez la page pour réessayer.",
+      "pending": "Le paiement est toujours en cours. Actualisez la page dans un instant pour vérifier son état."
+    }
+  },
+  "history": {
+    "title": "Historique des paiements",
+    "description": "Consultez vos achats récents de crédits permanents et de groupes d’utilisateurs.",
+    "columns": {
+      "name": "Nom",
+      "time": "Date",
+      "amount": "Montant",
+      "method": "Moyen de paiement",
+      "status": "Statut"
+    },
+    "target": {
+      "credit_package": "Crédits permanents",
+      "user_group": "Groupe d’utilisateurs"
+    },
+    "status": {
+      "pending": "En attente de paiement",
+      "processing": "En cours",
+      "paid": "Payé",
+      "failed": "Échec du paiement",
+      "expired": "Expiré"
+    },
+    "empty": "Aucun paiement pour le moment.",
+    "loadError": "Impossible de charger votre historique des paiements.",
+    "retry": "Réessayer",
+    "previous": "Page précédente",
+    "next": "Page suivante",
+    "page": "Page {{current}} sur {{total}}"
+  },
   "buyCta": "Acheter",
+  "renewCta": "Renouveler",
   "recommended": "Recommandé",
   "cycleFee": "Coût du cycle actuel"
 }

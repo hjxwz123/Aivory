@@ -1057,13 +1057,218 @@
     "emptyHint": "Aucune étiquette — créez-en sur la page Étiquettes de modèle.",
     "manage": "Gérer les étiquettes"
   },
+  "paymentProviders": {
+    "stripe": "Stripe",
+    "epay": "Compatible EPay",
+    "waffo": "Waffo"
+  },
+  "paymentChannels": {
+    "title": "Canaux de paiement",
+    "lead": "Configurez les identifiants par protocole. Plusieurs canaux peuvent utiliser le même protocole.",
+    "new": "Nouveau canal",
+    "newTitle": "Nouveau canal de paiement",
+    "editTitle": "Modifier le canal de paiement",
+    "editorDescription": "Les identifiants restent sur le serveur et ne sont jamais exposés aux acheteurs.",
+    "emptyTitle": "Aucun canal de paiement",
+    "empty": "Ajoutez un canal Stripe, compatible EPay ou Waffo avant de créer des modes de paiement.",
+    "loadFailed": "Impossible de charger les canaux de paiement.",
+    "retry": "Réessayer",
+    "disabled": "Désactivé",
+    "testEnvironment": "Environnement de test",
+    "copyWebhook": "Copier l’URL de rappel",
+    "copied": "Copiée",
+    "copyFailed": "Impossible de copier l’URL de rappel.",
+    "secretHint": "Si une valeur masquée est affichée, laissez-la inchangée pour conserver le secret enregistré.",
+    "created": "Canal de paiement créé",
+    "updated": "Canal de paiement mis à jour",
+    "removed": "Canal de paiement supprimé",
+    "updatedAt": "Mis à jour le {{date}}",
+    "removeTitle": "Supprimer le canal de paiement ?",
+    "removeBody": "Supprimer « {{name}} » ? Retirez d’abord ses modes de paiement liés et ses commandes actives.",
+    "summary": {
+      "stripe": "Stripe Checkout",
+      "waffo": "Marchand Waffo"
+    },
+    "fields": {
+      "name": "Nom du canal",
+      "namePlaceholder": "Stripe production",
+      "provider": "Protocole",
+      "environment": "Environnement",
+      "environmentHint": "Les canaux de test sont visibles et utilisables uniquement par les administrateurs. La clé Stripe ou le mode Waffo doit correspondre.",
+      "environmentLive": "Production",
+      "environmentTest": "Test",
+      "webhookUrl": "URL de rappel",
+      "webhookUrlNew": "Enregistrez le canal pour générer son URL de rappel.",
+      "secretKey": "Clé secrète",
+      "webhookSecret": "Secret de signature du webhook",
+      "webhookSecretHint": "Pour la première configuration, enregistrez le canal désactivé, ajoutez l’URL de rappel générée dans Stripe, puis saisissez ici le secret whsec_… et activez le canal. Laissez une valeur masquée inchangée pour la conserver.",
+      "gatewayUrl": "URL de la passerelle",
+      "merchantId": "Identifiant marchand",
+      "merchantKey": "Clé marchand",
+      "currency": "Devise EPay",
+      "currencyHint": "Code majuscule à trois lettres. Il doit correspondre à la devise globale pour que ce canal soit proposé.",
+      "storeId": "Identifiant de boutique",
+      "storeIdHint": "Utilisez l’identifiant de boutique du Dashboard Waffo (STO_*).",
+      "productId": "Identifiant du produit",
+      "productIdHint": "Doit être l’identifiant PROD_* d’un produit de base one-time créé dans le Dashboard Waffo.",
+      "mode": "Environnement",
+      "modeHint": "Doit correspondre à l’environnement Waffo utilisé par ce canal.",
+      "modeTest": "Test",
+      "modeProd": "Production",
+      "privateKey": "Clé privée",
+      "webhookPublicKey": "Clé publique du webhook",
+      "webhookPublicKeyHint": "Option avancée et facultative. Laissez vide pour utiliser la clé publique officielle intégrée au SDK Waffo pour l’environnement sélectionné.",
+      "enabled": "Activé",
+      "enabledHint": "Seuls les canaux activés peuvent être proposés aux acheteurs."
+    },
+    "errors": {
+      "nameRequired": "Saisissez un nom de canal.",
+      "configRequired": "Renseignez tous les champs obligatoires du protocole.",
+      "currencyInvalid": "La devise EPay doit être un code à trois lettres, par exemple CNY.",
+      "modeInvalid": "Choisissez l’environnement Waffo de test ou de production."
+    }
+  },
+  "paymentMethods": {
+    "title": "Modes de paiement",
+    "lead": "Créez les choix visibles par les acheteurs et liez chacun à un canal précis.",
+    "new": "Nouveau mode",
+    "newTitle": "Nouveau mode de paiement",
+    "editTitle": "Modifier le mode de paiement",
+    "editorDescription": "Le nom et l’icône sont publics ; les paramètres du protocole restent côté serveur.",
+    "emptyTitle": "Aucun mode de paiement",
+    "empty": "Créez le premier choix de paiement destiné aux acheteurs.",
+    "noChannelsTitle": "Créez d’abord un canal de paiement",
+    "noChannels": "Chaque mode de paiement doit être lié à un canal configuré.",
+    "configureChannels": "Configurer les canaux",
+    "loadFailed": "Impossible de charger les modes de paiement.",
+    "retry": "Réessayer",
+    "disabled": "Désactivé",
+    "channelDisabled": "Canal désactivé",
+    "channelMissing": "Canal introuvable",
+    "boundChannel": "Canal : {{name}}",
+    "created": "Mode de paiement créé",
+    "updated": "Mode de paiement mis à jour",
+    "removed": "Mode de paiement supprimé",
+    "reorderFailed": "Impossible d’enregistrer l’ordre des modes de paiement.",
+    "removeTitle": "Supprimer le mode de paiement ?",
+    "removeBody": "Supprimer « {{name}} » ? Il disparaîtra immédiatement de la fenêtre de paiement.",
+    "cardPurchase": {
+      "label": "Lien d’achat par code prépayé",
+      "hint": "Lorsqu’il est défini, la fenêtre de paiement ajoute une option qui ouvre cette URL. Laissez vide pour la masquer.",
+      "placeholder": "https://boutique.example.com/cartes",
+      "save": "Enregistrer",
+      "saved": "Lien d’achat par code prépayé enregistré",
+      "invalid": "Saisissez une URL HTTP(S) ou un chemin relatif à la racine commençant par /.",
+      "saveFailed": "Impossible d’enregistrer le lien d’achat par code prépayé."
+    },
+    "fields": {
+      "name": "Nom affiché",
+      "namePlaceholder": "Carte bancaire",
+      "icon": "Icône",
+      "channel": "Canal de paiement",
+      "channelHint": "Il détermine le protocole et les identifiants utilisés lors du paiement.",
+      "epayType": "Type EPay",
+      "epayTypeHint": "Valeur attendue par la passerelle, comme alipay, wxpay ou qqpay.",
+      "enabled": "Activé",
+      "enabledHint": "Seuls les modes activés liés à un canal activé sont affichés aux acheteurs."
+    },
+    "errors": {
+      "nameRequired": "Saisissez un nom de mode de paiement.",
+      "channelRequired": "Choisissez un canal de paiement disponible.",
+      "epayTypeRequired": "Saisissez le type EPay."
+    }
+  },
+  "paymentOrders": {
+    "title": "Commandes de paiement",
+    "lead": "Consultez l’état du paiement, de la vérification et de l’exécution, puis rapprochez ou fermez en toute sécurité les commandes bloquées.",
+    "loadFailed": "Impossible de charger les commandes de paiement.",
+    "retry": "Réessayer",
+    "total": "{{count}} commande(s)",
+    "emptyTitle": "Aucune commande de paiement",
+    "empty": "Les commandes apparaîtront ici lorsqu’un acheteur commencera le paiement.",
+    "emptyFilteredTitle": "Aucune commande correspondante",
+    "emptyFiltered": "Essayez un autre numéro, e-mail, état ou fournisseur.",
+    "paidAt": "Payée le {{date}}",
+    "fulfilledAt": "Exécutée le {{date}}",
+    "checkoutExpiresAt": "Expiration du paiement le {{date}}",
+    "lastReconciledAt": "Rapprochée le {{date}}",
+    "notReconciled": "Non rapprochée",
+    "reconciliation": "Erreur de rapprochement",
+    "reconcileError": "Échec du rapprochement : {{error}}",
+    "copyOrder": "Copier le numéro de commande",
+    "copied": "Numéro de commande copié",
+    "copyFailed": "Impossible de copier le numéro de commande.",
+    "failureReason": "Motif de l’échec",
+    "environment": {
+      "live": "Production",
+      "test": "Test"
+    },
+    "actions": {
+      "reconcile": "Rapprocher",
+      "close": "Fermer",
+      "manualClose": "Fermeture manuelle",
+      "reconciled": "Commande de paiement rapprochée.",
+      "closed": "Commande de paiement fermée.",
+      "reconcileFailed": "Impossible de rapprocher la commande de paiement.",
+      "closeFailed": "Impossible de fermer la commande de paiement."
+    },
+    "closeDialog": {
+      "title": "Fermer la commande de paiement ?",
+      "description": "La commande {{id}} ne sera fermée qu’après vérification de son état chez le fournisseur.",
+      "providerWarning": "Le serveur demandera au fournisseur de fermer ce paiement. Un paiement terminé ou impossible à fermer sera refusé.",
+      "epayWarning": "Les passerelles compatibles EPay ne fournissent pas de rapprochement universel fiable. Fermez d’abord cette commande sur la passerelle et désactivez son canal de paiement. Le serveur refusera tant que le canal reste activé.",
+      "reason": "Motif de fermeture",
+      "reasonPlaceholder": "Décrivez les vérifications effectuées chez le fournisseur",
+      "reasonHint": "Requis pour le journal d’audit ; saisissez entre 5 et 500 caractères.",
+      "acknowledge": "J’ai vérifié qu’aucun paiement n’a abouti et je comprends que la fermeture est irréversible.",
+      "epayAcknowledge": "J’ai fermé la commande sur la passerelle EPay, désactivé son canal et vérifié qu’aucun paiement n’a abouti."
+    },
+    "filters": {
+      "search": "Rechercher des commandes",
+      "searchPlaceholder": "Numéro de commande ou e-mail",
+      "status": "État de la commande",
+      "provider": "Fournisseur",
+      "apply": "Rechercher",
+      "clear": "Effacer les filtres"
+    },
+    "providers": {
+      "all": "Tous les fournisseurs"
+    },
+    "status": {
+      "all": "Tous les états",
+      "pending": "En attente",
+      "processing": "En cours",
+      "fulfilled": "Exécutée",
+      "failed": "Échouée",
+      "expired": "Expirée",
+      "cancelled": "Annulée"
+    },
+    "targets": {
+      "credit_package": "Pack de crédits",
+      "user_group": "Groupe d’utilisateurs"
+    },
+    "cycles": {
+      "monthly": "Mensuel",
+      "yearly": "Annuel"
+    },
+    "table": {
+      "order": "Commande",
+      "user": "Utilisateur",
+      "product": "Produit",
+      "amount": "Montant",
+      "method": "Mode / canal",
+      "status": "État",
+      "time": "Chronologie"
+    }
+  },
   "menu": {
     "models": "Modèles",
     "capabilities": "Capacités",
     "users": "Utilisateurs",
     "data": "Analyses",
     "system": "Système",
-    "workspaces": "Espaces de travail"
+    "workspaces": "Espaces de travail",
+    "payments": "Paiements"
   },
   "imageStyles": {
     "title": "Styles d'image",

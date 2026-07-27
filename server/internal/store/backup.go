@@ -32,7 +32,9 @@ const BackupVersion = 1
 // (messages.parent_id) is satisfied by exporting messages in creation order —
 // a reply is always created after the message it answers.
 var backupTableOrder = []string{
-	"settings", "users", "workspaces", "workspace_members", "user_groups", "credit_packages", "channels", "skills", "prompts", "user_skills", "user_prompts", "oauth_providers",
+	"settings", "users", "workspaces", "workspace_members", "user_groups", "credit_packages",
+	"payment_channels", "payment_methods", "payment_orders", "payment_events",
+	"channels", "skills", "prompts", "user_skills", "user_prompts", "oauth_providers",
 	"models", "model_group_quotas", "model_tags", "image_styles",
 	"redeem_codes", "redeem_redemptions",
 	"model_skills", "knowledge_bases", "projects", "conversations", "messages",
@@ -50,6 +52,8 @@ var configTableOrder = []string{
 	"settings",
 	"user_groups",
 	"credit_packages",
+	"payment_channels",
+	"payment_methods",
 	"channels",
 	"skills",
 	"prompts",
@@ -273,6 +277,10 @@ var tablePrimaryKeys = map[string][]string{
 	"workspace_members":       {"workspace_id", "user_id"},
 	"user_groups":             {"id"},
 	"credit_packages":         {"id"},
+	"payment_channels":        {"id"},
+	"payment_methods":         {"id"},
+	"payment_orders":          {"id"},
+	"payment_events":          {"id"},
 	"channels":                {"id"},
 	"skills":                  {"id"},
 	"prompts":                 {"id"},
