@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync/atomic"
 )
 
 var (
@@ -142,6 +143,8 @@ func (t *TaskLLM) Run(ctx context.Context, kind TaskKind, prompt string, opts Ru
 	if err != nil {
 		return "", err
 	}
+	fallbackCreds, fallbackChannelID := resolveFallbackChannelForModel(ctx, t.db, t.logger, model, channel)
+	var fallbackFlag atomic.Bool
 
 	system := opts.SystemPrompt
 	if system == "" {
@@ -171,12 +174,14 @@ func (t *TaskLLM) Run(ctx context.Context, kind TaskKind, prompt string, opts Ru
 			BaseURL:   channel.BaseURL,
 			APIKey:    channel.APIKey,
 			APIFormat: channel.APIFormat,
+			Fallback:  fallbackCreds,
 		},
 		// Task calls never use tools.
 		Tools:           nil,
 		ExtraParams:     extraParams,
 		MaxOutputTokens: maxTok,
 		Stream:          false,
+		FallbackUsed:    &fallbackFlag,
 	}
 	// Detach any inherited per-request recorder: a task call issued mid chat
 	// turn (compaction, research plan/verify, search-query gen, …) logs its own
@@ -190,6 +195,11 @@ func (t *TaskLLM) Run(ctx context.Context, kind TaskKind, prompt string, opts Ru
 			captured.WriteString(ev.Text)
 		}
 	})
+	usedFallback := fallbackFlag.Load()
+	servedChannelID := model.ChannelID
+	if usedFallback {
+		servedChannelID = fallbackChannelID
+	}
 	if err != nil {
 		// Task-model failures were previously invisible: no usage row, no log —
 		// callers like compaction silently fall back (deterministic clip) and the
@@ -208,6 +218,8 @@ func (t *TaskLLM) Run(ctx context.Context, kind TaskKind, prompt string, opts Ru
 				ModelID:        model.ID,
 				Purpose:        string(kind),
 				Currency:       model.Currency,
+				ChannelID:      servedChannelID,
+				Fallback:       usedFallback,
 				Status:         "error",
 				Error:          truncErr(err.Error()),
 			})
@@ -245,6 +257,8 @@ func (t *TaskLLM) Run(ctx context.Context, kind TaskKind, prompt string, opts Ru
 			CacheWriteTokens: result.Usage.CacheWriteTokens,
 			Cost:             cost,
 			Currency:         model.Currency,
+			ChannelID:        servedChannelID,
+			Fallback:         usedFallback,
 		})
 	}
 	return final, nil

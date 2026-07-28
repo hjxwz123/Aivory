@@ -92,6 +92,7 @@
       "methodUnavailable": "このお支払い方法は現在利用できません。別の方法を選択してください。",
       "productUnavailable": "この商品は販売終了、または価格が変更されています。ページを再読み込みしてもう一度お試しください。",
       "checkoutUnavailable": "決済サービスは一時的に利用できません。しばらくしてからもう一度お試しください。",
+      "waffoProductCurrencyUnsupported": "この Waffo 商品は選択した決済通貨に対応していません。商品価格または決済チャネル設定を管理者に確認してください。",
       "userGroupAlreadyPermanent": "このユーザーグループはすでに永久利用できるため、再度購入する必要はありません。"
     },
     "or": "または",

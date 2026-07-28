@@ -703,6 +703,62 @@ func TestCreditPaymentFulfillmentIsStrictlyIdempotent(t *testing.T) {
 	if events, err := ListPaymentEventsForOrder(ctx, db, failed.ID); err != nil || len(events) != 0 {
 		t.Fatalf("failed-order fulfillment left event = %+v, %v", events, err)
 	}
+
+	manuallyClosed := createOrder()
+	if _, err := CancelPaymentOrderByAdmin(ctx, db, manuallyClosed.ID, ""); err != nil {
+		t.Fatalf("manually close payment without reason: %v", err)
+	}
+	manualAmount := manuallyClosed.AmountMinor
+	manualInput := PaymentFulfillmentInput{
+		PaymentEventInput: PaymentEventInput{
+			Provider: channel.Provider, ChannelID: channel.ID, EventID: "evt_after_manual_close", OrderID: manuallyClosed.ID,
+			EventType: "checkout.session.completed",
+		},
+		ProviderOrderID: "pi_after_manual_close", AmountMinor: &manualAmount, Currency: manuallyClosed.Currency,
+	}
+	result, err = FulfillPaymentOrder(ctx, db, manualInput)
+	if err != nil || !result.Applied || result.Order.Status != PaymentOrderFulfilled {
+		t.Fatalf("verified payment after manual close = %+v, %v", result, err)
+	}
+	result, err = FulfillPaymentOrder(ctx, db, manualInput)
+	if err != nil || result.Applied || !result.DuplicateEvent {
+		t.Fatalf("duplicate payment after manual close = %+v, %v", result, err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT credits_permanent FROM users WHERE id='u_credit'`).Scan(&balance); err != nil {
+		t.Fatalf("read credits after manual-close recovery: %v", err)
+	}
+	if balance != 7500 {
+		t.Fatalf("credits after manual-close recovery = %v, want 7500", balance)
+	}
+	events, err = ListPaymentEventsForOrder(ctx, db, manuallyClosed.ID)
+	if err != nil || len(events) != 2 {
+		t.Fatalf("manual-close recovery events = %+v, %v", events, err)
+	}
+	eventTypes := make(map[string]bool, len(events))
+	for _, paymentEvent := range events {
+		eventTypes[paymentEvent.EventType] = paymentEvent.ProcessedAt > 0
+	}
+	if !eventTypes["admin.manual_close"] || !eventTypes["checkout.session.completed"] {
+		t.Fatalf("manual-close recovery event types = %+v", events)
+	}
+
+	providerCancelled := createOrder()
+	if _, err := MarkPaymentOrderCancelled(ctx, db, providerCancelled.ID, "provider_cancelled", "terminal"); err != nil {
+		t.Fatalf("mark provider-cancelled order: %v", err)
+	}
+	providerCancelledAmount := providerCancelled.AmountMinor
+	if _, err := FulfillPaymentOrder(ctx, db, PaymentFulfillmentInput{
+		PaymentEventInput: PaymentEventInput{
+			Provider: channel.Provider, ChannelID: channel.ID, EventID: "evt_after_provider_cancel", OrderID: providerCancelled.ID,
+			EventType: "checkout.session.completed",
+		},
+		AmountMinor: &providerCancelledAmount, Currency: providerCancelled.Currency,
+	}); !errors.Is(err, ErrPaymentOrderNotFulfillable) {
+		t.Fatalf("fulfilled provider-cancelled order, err=%v", err)
+	}
+	if events, err := ListPaymentEventsForOrder(ctx, db, providerCancelled.ID); err != nil || len(events) != 0 {
+		t.Fatalf("provider-cancelled fulfillment left event = %+v, %v", events, err)
+	}
 }
 
 func TestUserGroupPaymentUsesCalendarRenewal(t *testing.T) {

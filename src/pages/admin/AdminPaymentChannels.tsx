@@ -23,7 +23,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { toast } from '@/hooks/use-toast'
-import { updateEPayCurrencyConfig } from '@/lib/payment-channel-config'
+import { updatePaymentProviderCurrencyConfig } from '@/lib/payment-channel-config'
 import { adminPaymentChannelErrorKey } from '@/lib/payment-errors'
 import { formatDateTime } from '@/lib/utils'
 
@@ -46,6 +46,7 @@ function emptyConfig(provider: ApiPaymentProvider): Record<string, unknown> {
     private_key: '',
     store_id: '',
     product_id: '',
+    currency: 'USD',
     mode: 'test',
     webhook_public_key: '',
   }
@@ -55,6 +56,13 @@ function configString(config: Record<string, unknown>, key: string): string {
   const value = config[key]
   if (typeof value === 'string') return value
   return typeof value === 'number' && Number.isFinite(value) ? String(value) : ''
+}
+
+function conversionSummary(config: Record<string, unknown>, fallbackCurrency = ''): string {
+  const currency = configString(config, 'currency').trim().toUpperCase() || fallbackCurrency
+  const rate = configString(config, 'conversion_rate')
+  const base = configString(config, 'conversion_rate_base_currency').trim().toUpperCase()
+  return rate && base && base !== currency ? `1 ${base} = ${rate} ${currency}` : ''
 }
 
 function editableConfig(provider: ApiPaymentProvider, config: Record<string, unknown>): Record<string, unknown> {
@@ -71,6 +79,9 @@ function editableConfig(provider: ApiPaymentProvider, config: Record<string, unk
     private_key: configString(config, 'private_key'),
     store_id: configString(config, 'store_id'),
     product_id: configString(config, 'product_id'),
+    currency: configString(config, 'currency').trim().toUpperCase() || 'USD',
+    conversion_rate: configString(config, 'conversion_rate'),
+    conversion_rate_base_currency: configString(config, 'conversion_rate_base_currency').trim().toUpperCase(),
     mode: configString(config, 'mode') === 'prod' ? 'prod' : 'test',
     webhook_public_key: configString(config, 'webhook_public_key'),
   }
@@ -81,7 +92,7 @@ function submitConfig(
   config: Record<string, unknown>,
   settlementCurrency: string,
 ): Record<string, unknown> {
-  if (provider === 'epay') {
+  if (provider === 'epay' || provider === 'waffo') {
     const currency = configString(config, 'currency').trim().toUpperCase()
     const next: Record<string, unknown> = {
       ...config,
@@ -94,17 +105,21 @@ function submitConfig(
       next.conversion_rate = configString(config, 'conversion_rate').trim()
       next.conversion_rate_base_currency = settlementCurrency
     }
-    return next
-  }
-  if (provider === 'waffo') {
-    return {
+    if (provider === 'epay') return next
+    const waffoConfig: Record<string, unknown> = {
       merchant_id: configString(config, 'merchant_id').trim(),
       private_key: configString(config, 'private_key'),
       store_id: configString(config, 'store_id').trim(),
       product_id: configString(config, 'product_id').trim(),
+      currency,
       mode: configString(config, 'mode').trim(),
       webhook_public_key: configString(config, 'webhook_public_key'),
     }
+    if (currency !== settlementCurrency) {
+      waffoConfig.conversion_rate = next.conversion_rate
+      waffoConfig.conversion_rate_base_currency = next.conversion_rate_base_currency
+    }
+    return waffoConfig
   }
   return config
 }
@@ -208,7 +223,7 @@ export default function AdminPaymentChannels() {
     setCopiedWebhook('')
     const config = editableConfig(row.provider, row.config)
     if (
-      row.provider === 'epay' &&
+      (row.provider === 'epay' || row.provider === 'waffo') &&
       configString(config, 'currency').trim().toUpperCase() !== settlementCurrency &&
       configString(config, 'conversion_rate_base_currency').trim().toUpperCase() !== settlementCurrency
     ) {
@@ -244,12 +259,12 @@ export default function AdminPaymentChannels() {
     }))
   }
 
-  function setEPayCurrency(value: string) {
+  function setProviderCurrency(value: string) {
     setEditor((current) => ({
       ...current,
       draft: {
         ...current.draft,
-        config: updateEPayCurrencyConfig(current.draft.config, value, settlementCurrency),
+        config: updatePaymentProviderCurrencyConfig(current.draft.config, value, settlementCurrency),
       },
     }))
   }
@@ -274,14 +289,15 @@ export default function AdminPaymentChannels() {
       ? ['secret_key', ...(draft.enabled ? ['webhook_secret'] : [])]
       : draft.provider === 'epay'
         ? ['gateway_url', 'merchant_id', 'merchant_key', 'currency']
-        : ['merchant_id', 'private_key', 'store_id', 'product_id', 'mode']
+        : ['merchant_id', 'private_key', 'store_id', 'product_id', 'currency', 'mode']
     if (required.some((key) => !configString(draft.config, key).trim())) {
       return t('admin:paymentChannels.errors.configRequired')
     }
-    if (draft.provider === 'epay' && !/^[A-Z]{3}$/.test(configString(draft.config, 'currency').trim().toUpperCase())) {
+    const hasProviderCurrency = draft.provider === 'epay' || draft.provider === 'waffo'
+    if (hasProviderCurrency && !/^[A-Z]{3}$/.test(configString(draft.config, 'currency').trim().toUpperCase())) {
       return t('admin:paymentChannels.errors.currencyInvalid')
     }
-    if (draft.provider === 'epay') {
+    if (hasProviderCurrency) {
       const providerCurrency = configString(draft.config, 'currency').trim().toUpperCase()
       if (providerCurrency !== settlementCurrency && !validPositiveDecimal(configString(draft.config, 'conversion_rate'))) {
         return t('admin:paymentChannels.errors.conversionRateInvalid')
@@ -401,9 +417,7 @@ export default function AdminPaymentChannels() {
     if (row.provider === 'stripe') return t('admin:paymentChannels.summary.stripe')
     if (row.provider === 'epay') {
       const currency = configString(row.config, 'currency').toUpperCase()
-      const rate = configString(row.config, 'conversion_rate')
-      const base = configString(row.config, 'conversion_rate_base_currency').toUpperCase()
-      const conversion = rate && base && base !== currency ? `1 ${base} = ${rate} ${currency}` : ''
+      const conversion = conversionSummary(row.config)
       return [configString(row.config, 'gateway_url'), currency, conversion]
         .filter(Boolean)
         .join(' · ')
@@ -412,6 +426,8 @@ export default function AdminPaymentChannels() {
       configString(row.config, 'merchant_id'),
       configString(row.config, 'store_id'),
       configString(row.config, 'product_id'),
+      configString(row.config, 'currency').trim().toUpperCase() || 'USD',
+      conversionSummary(row.config, 'USD'),
     ]
       .filter(Boolean)
       .join(' · ') || t('admin:paymentChannels.summary.waffo')
@@ -690,7 +706,7 @@ export default function AdminPaymentChannels() {
                         className="uppercase"
                         maxLength={3}
                         value={configString(editor.draft.config, 'currency')}
-                        onChange={(event) => setEPayCurrency(event.target.value)}
+                        onChange={(event) => setProviderCurrency(event.target.value)}
                         placeholder="CNY"
                       />
                     </Field>
@@ -758,7 +774,14 @@ export default function AdminPaymentChannels() {
                       />
                     </Field>
                   </div>
-                  <Field label={t('admin:paymentChannels.fields.productId')} htmlFor="payment-channel-waffo-product" hint={t('admin:paymentChannels.fields.productIdHint')}>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Field
+                      label={t('admin:paymentChannels.fields.productId')}
+                      htmlFor="payment-channel-waffo-product"
+                      hint={t('admin:paymentChannels.fields.productIdHint', {
+                        currency: configString(editor.draft.config, 'currency').trim().toUpperCase() || 'USD',
+                      })}
+                    >
                       <Input
                         id="payment-channel-waffo-product"
                         required
@@ -768,7 +791,49 @@ export default function AdminPaymentChannels() {
                         onChange={(event) => setConfig('product_id', event.target.value)}
                         placeholder="PROD_…"
                       />
-                  </Field>
+                    </Field>
+                    <Field
+                      label={t('admin:paymentChannels.fields.waffoCurrency')}
+                      htmlFor="payment-channel-waffo-currency"
+                      hint={t('admin:paymentChannels.fields.waffoCurrencyHint')}
+                    >
+                      <Input
+                        id="payment-channel-waffo-currency"
+                        required
+                        wrapperClassName="rounded-[8px] max-sm:h-11"
+                        className="uppercase"
+                        maxLength={3}
+                        value={configString(editor.draft.config, 'currency')}
+                        onChange={(event) => setProviderCurrency(event.target.value)}
+                        placeholder="USD"
+                      />
+                    </Field>
+                  </div>
+                  {configString(editor.draft.config, 'currency').trim().toUpperCase() !== settlementCurrency ? (
+                    <Field
+                      label={t('admin:paymentChannels.fields.conversionRate', {
+                        base: settlementCurrency,
+                        target: configString(editor.draft.config, 'currency').trim().toUpperCase() || '---',
+                      })}
+                      htmlFor="payment-channel-waffo-conversion-rate"
+                      hint={t('admin:paymentChannels.fields.conversionRateHint', {
+                        base: settlementCurrency,
+                        target: configString(editor.draft.config, 'currency').trim().toUpperCase() || '---',
+                      })}
+                    >
+                      <Input
+                        id="payment-channel-waffo-conversion-rate"
+                        type="text"
+                        inputMode="decimal"
+                        required
+                        wrapperClassName="rounded-[8px] max-sm:h-11"
+                        className="font-mono tabular-nums"
+                        value={configString(editor.draft.config, 'conversion_rate')}
+                        onChange={(event) => setConfig('conversion_rate', event.target.value)}
+                        placeholder="0.14"
+                      />
+                    </Field>
+                  ) : null}
                   <div className="grid gap-3 md:grid-cols-2">
                     <Field label={t('admin:paymentChannels.fields.privateKey')} htmlFor="payment-channel-waffo-private" hint={t('admin:paymentChannels.secretHint')}>
                       <Textarea

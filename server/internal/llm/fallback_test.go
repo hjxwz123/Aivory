@@ -28,6 +28,7 @@ func TestRetryableUpstreamFailure(t *testing.T) {
 		{"user cancel", nil, context.Canceled, false},
 		{"deadline", nil, context.DeadlineExceeded, false},
 		{"200 ok", resp(200), nil, false},
+		{"302 redirect is not a provider success", resp(302), nil, true},
 		{"400 bad request (relay quota/model errors)", resp(400), nil, true},
 		{"401 unauthorized", resp(401), nil, true}, // bad key on primary → other key may work
 		{"402 payment required (relay balance)", resp(402), nil, true},

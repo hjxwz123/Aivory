@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	paymentcore "aivory/server/internal/payment"
 	"aivory/server/internal/store"
@@ -587,7 +588,7 @@ func nonzeroPaymentTime(value int64) *int64 {
 func adminPaymentOrderJSON(order store.PaymentOrder) adminPaymentOrderResponse {
 	var failure *string
 	reason := strings.TrimSpace(order.FailureMessage)
-	if reason == "" {
+	if reason == "" && order.FailureCode != "admin_manual_close" && order.FailureCode != "admin_reconciled_close" {
 		reason = strings.TrimSpace(order.FailureCode)
 	}
 	if reason != "" {
@@ -645,8 +646,12 @@ func reconcilePaymentOrderAdmin(d Deps, w http.ResponseWriter, r *http.Request) 
 	}
 	closeOrder := body.Action == "close"
 	body.Reason = strings.TrimSpace(body.Reason)
-	if closeOrder && (!body.Confirm || len(body.Reason) < 5 || len(body.Reason) > 500) {
-		writeError(w, http.StatusBadRequest, errors.New("closing a payment order requires confirmation and a reason"))
+	if closeOrder && !body.Confirm {
+		writeError(w, http.StatusBadRequest, errors.New("closing a payment order requires confirmation"))
+		return
+	}
+	if closeOrder && utf8.RuneCountInString(body.Reason) > 500 {
+		writeError(w, http.StatusBadRequest, errors.New("payment order closure reason must not exceed 500 characters"))
 		return
 	}
 	channel, err := store.GetPaymentChannel(r.Context(), d.DB, order.ChannelID)
@@ -658,10 +663,6 @@ func reconcilePaymentOrderAdmin(d Deps, w http.ResponseWriter, r *http.Request) 
 	if order.Provider == paymentcore.ProviderEPay {
 		if !closeOrder {
 			writeError(w, http.StatusConflict, paymentcore.ErrReconciliationUnsupported)
-			return
-		}
-		if channel.Enabled {
-			writeError(w, http.StatusConflict, errors.New("disable the EPay channel and close the order at the gateway before manual closure"))
 			return
 		}
 		closed, err := store.CancelPaymentOrderByAdmin(r.Context(), d.DB, order.ID, body.Reason)

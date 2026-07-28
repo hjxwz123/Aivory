@@ -206,6 +206,7 @@ export default function Login() {
                 leadingIcon={<ShieldCheck size={14} aria-hidden />}
                 placeholder="000000"
                 className="tracking-[0.4em] font-mono text-center text-lg"
+                wrapperClassName="focus-within:ring-0"
               />
             </Field>
           </motion.div>
@@ -292,6 +293,7 @@ export default function Login() {
               leadingIcon={<Mail size={14} aria-hidden />}
               placeholder={t('fields.emailPlaceholder')}
               invalid={!!errors.email}
+              wrapperClassName="focus-within:ring-0"
             />
           </Field>
         </motion.div>
@@ -305,6 +307,7 @@ export default function Login() {
               onChange={(e) => setPw(e.target.value)}
               leadingIcon={<Lock size={14} aria-hidden />}
               invalid={!!errors.pw}
+              wrapperClassName="focus-within:ring-0"
               trailingSlot={
                 <button
                   type="button"

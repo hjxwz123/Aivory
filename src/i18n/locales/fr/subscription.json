@@ -92,6 +92,7 @@
       "methodUnavailable": "Ce moyen de paiement n’est pas disponible. Choisissez-en un autre.",
       "productUnavailable": "Cet article n’est plus disponible ou son prix a changé. Actualisez la page et réessayez.",
       "checkoutUnavailable": "Le service de paiement est temporairement indisponible. Réessayez plus tard.",
+      "waffoProductCurrencyUnsupported": "Ce produit Waffo ne prend pas en charge la devise de paiement sélectionnée. Demandez à un administrateur de vérifier le prix du produit ou les réglages du canal de paiement.",
       "userGroupAlreadyPermanent": "Vous disposez déjà de ce groupe d’utilisateurs de façon permanente ; il n’est pas nécessaire de l’acheter à nouveau."
     },
     "or": "ou",

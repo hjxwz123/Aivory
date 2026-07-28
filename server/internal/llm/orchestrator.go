@@ -741,25 +741,32 @@ func toolDefNames(definitions []ToolDef) []string {
 // resolveFallbackChannel returns the creds + id of a model's backup channel
 // (§fallback channel), or (nil, "") when there is none or it's unusable. It is
 // honoured only when the configured channel is DISTINCT from the primary, is
-// enabled, carries an API key, and matches the primary's type + api_format — the
-// retry reuses the primary provider's code path, so a different vendor/format
-// would be sent the wrong wire shape. An unusable configured fallback is logged
-// and ignored; the turn still runs on the primary channel.
+// enabled, carries an API key, and matches the primary's provider family +
+// api_format. Provider aliases such as anthropic/claude and google/gemini are
+// equivalent; a genuinely different wire format would receive the wrong payload.
+// An unusable configured fallback is logged and ignored; the turn still runs on
+// the primary channel.
 func (o *Orchestrator) resolveFallbackChannel(ctx context.Context, model *store.Model, primary *store.Channel) (*ChannelCreds, string) {
+	return resolveFallbackChannelForModel(ctx, o.db, o.logger, model, primary)
+}
+
+func resolveFallbackChannelForModel(ctx context.Context, db *sql.DB, logger *log.Logger, model *store.Model, primary *store.Channel) (*ChannelCreds, string) {
 	fid := strings.TrimSpace(model.FallbackChannelID)
 	if fid == "" || fid == model.ChannelID {
 		return nil, ""
 	}
-	fc, err := store.GetChannel(ctx, o.db, fid)
+	fc, err := store.GetChannel(ctx, db, fid)
 	if err != nil {
-		if o.logger != nil {
-			o.logger.Printf("llm: model %q fallback channel %q not found — ignoring", model.ID, fid)
+		if logger != nil {
+			logger.Printf("llm: model %q fallback channel %q not found — ignoring", model.ID, fid)
 		}
 		return nil, ""
 	}
-	if !fc.Enabled || fc.Type != primary.Type || fc.APIFormat != primary.APIFormat || fc.APIKey == "" {
-		if o.logger != nil {
-			o.logger.Printf("llm: model %q fallback channel %q unusable (enabled=%v type=%q/%q format=%q/%q hasKey=%v) — ignoring",
+	sameProvider := providerIDForChannelType(fc.Type) != "" && providerIDForChannelType(fc.Type) == providerIDForChannelType(primary.Type)
+	sameFormat := strings.EqualFold(strings.TrimSpace(fc.APIFormat), strings.TrimSpace(primary.APIFormat))
+	if !fc.Enabled || !sameProvider || !sameFormat || fc.APIKey == "" {
+		if logger != nil {
+			logger.Printf("llm: model %q fallback channel %q unusable (enabled=%v type=%q/%q format=%q/%q hasKey=%v) — ignoring",
 				model.ID, fid, fc.Enabled, fc.Type, primary.Type, fc.APIFormat, primary.APIFormat, fc.APIKey != "")
 		}
 		return nil, ""
@@ -878,13 +885,15 @@ func (o *Orchestrator) successRequestLoggingEnabled() bool {
 // requestUsageRow is one per-upstream-request slice of a finished turn's usage
 // (§B5-per-request usage rows).
 type requestUsageRow struct {
-	Usage   Usage
-	Cost    float64
-	Credits float64
-	Method  string
-	URL     string
-	Header  string
-	Body    string
+	Usage              Usage
+	Cost               float64
+	Credits            float64
+	Method             string
+	URL                string
+	Header             string
+	Body               string
+	Fallback           bool
+	ChannelAttribution bool
 }
 
 // perRequestUsageRows splits one finished turn into per-upstream-request usage
@@ -910,6 +919,10 @@ func perRequestUsageRows(snaps []providerRequestSnapshot, model *store.Model, to
 	}
 	if len(withUsage) < 2 {
 		row := requestUsageRow{Usage: total, Cost: totalCost, Credits: totalCredits}
+		if len(snaps) > 0 {
+			row.Fallback = last.Fallback
+			row.ChannelAttribution = true
+		}
 		if includeReq {
 			row.Method, row.URL, row.Header, row.Body = last.Method, last.URL, last.Header, last.Body
 		}
@@ -918,7 +931,7 @@ func perRequestUsageRows(snaps []providerRequestSnapshot, model *store.Model, to
 	rows := make([]requestUsageRow, len(withUsage))
 	summed := Usage{}
 	for i, s := range withUsage {
-		rows[i] = requestUsageRow{Usage: s.Usage}
+		rows[i] = requestUsageRow{Usage: s.Usage, Fallback: s.Fallback, ChannelAttribution: true}
 		if includeReq {
 			rows[i].Method, rows[i].URL, rows[i].Header, rows[i].Body = s.Method, s.URL, s.Header, s.Body
 		}
@@ -975,6 +988,19 @@ func perRequestUsageRows(snaps []providerRequestSnapshot, model *store.Model, to
 		}
 	}
 	return rows
+}
+
+func requestUsageChannel(row requestUsageRow, primaryChannelID, fallbackChannelID string, turnUsedFallback bool) (string, bool) {
+	if row.ChannelAttribution {
+		if row.Fallback && fallbackChannelID != "" {
+			return fallbackChannelID, true
+		}
+		return primaryChannelID, false
+	}
+	if turnUsedFallback && fallbackChannelID != "" {
+		return fallbackChannelID, true
+	}
+	return primaryChannelID, false
 }
 
 func maxInt(a, b int) int {
@@ -2087,6 +2113,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 				// §B5-per-request rows: same split as the success path — tool
 				// rounds completed before the stop each keep their own row.
 				for _, rr := range perRequestUsageRows(reqRecorder.snapshots(), model, usage, stopChatCost, timedCredits, o.successRequestLoggingEnabled()) {
+					requestChannelID, requestFallback := requestUsageChannel(rr, model.ChannelID, fallbackChannelID, usedFallback)
 					o.logUsage(ctx, store.UsageLog{
 						UserID:            req.UserID,
 						WorkspaceID:       conv.WorkspaceID,
@@ -2101,8 +2128,8 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 						Cost:              rr.Cost,
 						Currency:          model.Currency,
 						Credits:           rr.Credits,
-						ChannelID:         servedChannelID,
-						Fallback:          usedFallback,
+						ChannelID:         requestChannelID,
+						Fallback:          requestFallback,
 						TTFTFallbackModel: ttftFallbackModel,
 						RequestMethod:     rr.Method,
 						RequestURL:        rr.URL,
@@ -2297,6 +2324,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// request snapshot. Row sums equal the old single-row totals exactly, and
 	// they share message_id, so per-turn groupings and quota reseeds hold.
 	for _, rr := range perRequestUsageRows(reqRecorder.snapshots(), model, result.Usage, chatCost, timedCredits, o.successRequestLoggingEnabled()) {
+		requestChannelID, requestFallback := requestUsageChannel(rr, model.ChannelID, fallbackChannelID, usedFallback)
 		o.logUsage(ctx, store.UsageLog{
 			UserID:            req.UserID,
 			WorkspaceID:       conv.WorkspaceID,
@@ -2311,8 +2339,8 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			Cost:              rr.Cost,
 			Currency:          model.Currency,
 			Credits:           rr.Credits,
-			ChannelID:         servedChannelID,
-			Fallback:          usedFallback,
+			ChannelID:         requestChannelID,
+			Fallback:          requestFallback,
 			TTFTFallbackModel: ttftFallbackModel,
 			RequestMethod:     rr.Method,
 			RequestURL:        rr.URL,

@@ -63,7 +63,7 @@ export function ModelPicker({ value, onChange, fast, onFastChange, className }: 
           'inline-flex min-w-0 items-center gap-1.5 h-8 px-2.5 rounded-[8px]',
           'text-[13px] font-medium text-[var(--color-fg-muted)]',
           'hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+          'focus-visible:outline-none focus-visible:bg-[var(--color-bg-muted)] focus-visible:text-[var(--color-fg)]',
           'max-w-[180px]',
           className,
         )}

@@ -226,7 +226,7 @@ func intFromJSONNumber(v any) (int, bool) {
 
 // Stream runs the Anthropic chat turn (with up to 12 tool iterations).
 func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, tools ToolRunner, onEvent func(SseEvent)) (*UnifiedResult, error) {
-	if req.Model.APIKey == "" {
+	if req.Model.APIKey == "" && req.Model.Fallback == nil {
 		return nil, errors.New("this channel has no API key configured")
 	}
 	if !req.Model.Vision {
@@ -301,8 +301,22 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 			buf, _ := json.Marshal(body)
 			return buf, hasThinking
 		}
-		send := func(buf []byte) (*http.Response, error) {
-			return doProviderRequest(ctx, req.Model, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
+		var (
+			stopReason     string
+			toolCalls      []anthropicToolCall
+			text           string
+			thinkingBlocks []anthropicThinkingBlock
+			citations      []Citation
+			usage          Usage
+		)
+		send := func(buf []byte) error {
+			stopReason = ""
+			toolCalls = nil
+			text = ""
+			thinkingBlocks = nil
+			citations = nil
+			usage = Usage{}
+			return doProviderParsedRequest(ctx, req.Model, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
 				hr, e := http.NewRequestWithContext(ctx, "POST", providerBaseURL(baseURL, "https://api.anthropic.com")+"/v1/messages", bytes.NewReader(buf))
 				if e != nil {
 					return nil, e
@@ -312,69 +326,34 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 				hr.Header.Set("x-api-key", apiKey)
 				hr.Header.Set("accept", "text/event-stream")
 				return hr, nil
-			})
+			}, func(resp *http.Response, emit func(SseEvent)) error {
+				stopReason, text, usage = "", "", Usage{}
+				toolCalls, thinkingBlocks, citations = nil, nil, nil
+				if statusErr := requireProviderSuccess(resp, "anthropic"); statusErr != nil {
+					return statusErr
+				}
+				var readErr error
+				stopReason, toolCalls, text, thinkingBlocks, citations, usage, readErr = readAnthropicStream(resp.Body, emit)
+				return readErr
+			}, onEvent)
 		}
-		// returnStopped preserves partial output on a caller cancel / deadline
-		// (§6.2). Reads the live messages/historyLen so it stays correct after a
-		// strip-thinking retry rewrote them.
-		returnStopped := func(e error) (*UnifiedResult, error) {
-			raw, _ := json.Marshal(messages[historyLen:])
-			return &UnifiedResult{
-				Blocks: allBlocks, Raw: raw, StopReason: "stopped",
-				Usage: totalUsage, Citations: allCitations,
-			}, e
-		}
-
 		buf, hadThinking := buildBody()
-		resp, err := send(buf)
-		if err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				return returnStopped(err)
+		err := send(buf)
+		// §4.3-B non-genuine-upstream guard. Preserve the existing one-time
+		// thinking-strip retry after both configured channels reject the signed
+		// payload with HTTP 400. Each send still gets its own channel fallback.
+		var statusErr *providerStatusError
+		if errors.As(err, &statusErr) && statusErr.StatusCode == http.StatusBadRequest &&
+			!thinkingStripped && isClaudeModel(req.Model.RequestID) && (hadThinking || messagesHaveThinking(messages)) {
+			thinkingStripped = true
+			messages, historyLen = stripThinkingFromMessages(messages, historyLen)
+			if p.logger != nil {
+				p.logger.Printf("anthropic: channel rejected thinking replay (400) for model %q (base=%s) — retried without thinking; this channel may be serving a non-genuine upstream",
+					req.Model.ID, providerBaseURL(req.Model.BaseURL, "https://api.anthropic.com"))
 			}
-			return nil, err
+			buf, _ = buildBody()
+			err = send(buf)
 		}
-		if resp.StatusCode >= 400 {
-			b, _ := io.ReadAll(resp.Body)
-			resp.Body.Close()
-			// §4.3-B non-genuine-upstream guard. A 400 on a Claude turn whose
-			// request carries a signed thinking block (replay) or a thinking param
-			// most often means the channel routed to a non-genuine upstream that
-			// can't validate a signature it (or a sibling instance) minted — the
-			// symptom is: first turn fine, the turn AFTER a tool call 400s. Strip
-			// ALL thinking and retry ONCE, silently: nothing has been streamed for
-			// this request yet (we're before readAnthropicStream), so the frontend
-			// shows no error and no hint — the tool rounds already streamed and the
-			// answer just arrives from the retry. Scoped narrowly so genuine 400s
-			// (malformed request) aren't masked — they simply fail the retry too and
-			// surface as before. Everything that isn't (Claude + 400 + strippable)
-			// falls through unchanged to the configured fallback/error path.
-			if resp.StatusCode == 400 && !thinkingStripped && isClaudeModel(req.Model.RequestID) && (hadThinking || messagesHaveThinking(messages)) {
-				thinkingStripped = true
-				messages, historyLen = stripThinkingFromMessages(messages, historyLen)
-				if p.logger != nil {
-					p.logger.Printf("anthropic: channel rejected thinking replay (400) for model %q (base=%s) — retried without thinking; this channel may be serving a non-genuine upstream",
-						req.Model.ID, providerBaseURL(req.Model.BaseURL, "https://api.anthropic.com"))
-				}
-				buf, _ = buildBody()
-				resp, err = send(buf)
-				if err != nil {
-					if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-						return returnStopped(err)
-					}
-					return nil, err
-				}
-				if resp.StatusCode >= 400 {
-					rb, _ := io.ReadAll(resp.Body)
-					resp.Body.Close()
-					return nil, fmt.Errorf("anthropic %d: %s", resp.StatusCode, string(rb))
-				}
-				// Retry succeeded — fall through to stream the answer below.
-			} else {
-				return nil, fmt.Errorf("anthropic %d: %s", resp.StatusCode, string(b))
-			}
-		}
-		stopReason, toolCalls, text, thinkingBlocks, citations, usage, err := readAnthropicStream(resp.Body, onEvent)
-		resp.Body.Close()
 		// §B5-per-request usage rows: pin this iteration's usage to the request
 		// that produced it (also on cancel — the partial stream was still billed).
 		attachProviderRequestUsage(ctx, usage)
@@ -493,7 +472,11 @@ func (p *AnthropicProvider) promptRunOnce(req UnifiedChatRequest) PromptToolRunn
 		body = MergeOfficialToolRequests(body, req.OfficialToolRequests)
 		applyAnthropicThinkingSettings(body, req.Model.RequestID, &maxTok)
 		buf, _ := json.Marshal(body)
-		resp, err := doProviderRequest(ctx, req.Model, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
+		var (
+			text  string
+			usage Usage
+		)
+		err := doProviderParsedRequest(ctx, req.Model, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
 			hr, e := http.NewRequestWithContext(ctx, "POST", providerBaseURL(baseURL, "https://api.anthropic.com")+"/v1/messages", bytes.NewReader(buf))
 			if e != nil {
 				return nil, e
@@ -503,16 +486,15 @@ func (p *AnthropicProvider) promptRunOnce(req UnifiedChatRequest) PromptToolRunn
 			hr.Header.Set("x-api-key", apiKey)
 			hr.Header.Set("accept", "text/event-stream")
 			return hr, nil
-		})
-		if err != nil {
-			return "", Usage{}, err
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode >= 400 {
-			b, _ := io.ReadAll(resp.Body)
-			return "", Usage{}, fmt.Errorf("anthropic %d: %s", resp.StatusCode, string(b))
-		}
-		_, _, text, _, _, usage, err := readAnthropicStream(resp.Body, func(SseEvent) {})
+		}, func(resp *http.Response, emit func(SseEvent)) error {
+			text, usage = "", Usage{}
+			if statusErr := requireProviderSuccess(resp, "anthropic"); statusErr != nil {
+				return statusErr
+			}
+			var readErr error
+			_, _, text, _, _, usage, readErr = readAnthropicStream(resp.Body, emit)
+			return readErr
+		}, func(SseEvent) {})
 		return text, usage, err
 	}
 }
@@ -675,13 +657,14 @@ func readAnthropicStream(body io.Reader, onEvent func(SseEvent)) (string, []anth
 	scanner.Buffer(make([]byte, anthropicScannerBufInit), anthropicScannerBufMax)
 	stopReason := "end_turn"
 	text := strings.Builder{}
-	thinking := strings.Builder{}
 	thinkingBlocks := []anthropicThinkingBlock{}
 	currentThinking := strings.Builder{}
 	currentThinkingActive := false
 	toolCalls := []anthropicToolCall{}
 	citations := []Citation{}
 	usage := Usage{}
+	sawEvent := false
+	terminal := false
 
 	var currentTool *anthropicToolCall
 	var partialJSON strings.Builder
@@ -693,15 +676,24 @@ func readAnthropicStream(body io.Reader, onEvent func(SseEvent)) (string, []anth
 		}
 		payload := strings.TrimPrefix(line, "data:")
 		payload = strings.TrimSpace(payload)
-		if payload == "" || payload == "[DONE]" {
+		if payload == "" {
 			continue
+		}
+		if payload == "[DONE]" {
+			terminal = true
+			break
 		}
 		var ev map[string]any
 		if err := json.Unmarshal([]byte(payload), &ev); err != nil {
-			continue
+			return stopReason, toolCalls, text.String(), thinkingBlocks, citations, usage,
+				fmt.Errorf("anthropic stream invalid JSON: %w", err)
+		}
+		if streamErr := providerEventError("anthropic", ev); streamErr != nil {
+			return stopReason, toolCalls, text.String(), thinkingBlocks, citations, usage, streamErr
 		}
 		switch ev["type"] {
 		case "content_block_start":
+			sawEvent = true
 			block, _ := ev["content_block"].(map[string]any)
 			if t, _ := block["type"].(string); t == "tool_use" {
 				id, _ := block["id"].(string)
@@ -714,6 +706,7 @@ func readAnthropicStream(body io.Reader, onEvent func(SseEvent)) (string, []anth
 				currentThinkingActive = true
 			}
 		case "content_block_delta":
+			sawEvent = true
 			delta, _ := ev["delta"].(map[string]any)
 			switch delta["type"] {
 			case "text_delta":
@@ -723,7 +716,6 @@ func readAnthropicStream(body io.Reader, onEvent func(SseEvent)) (string, []anth
 				}
 			case "thinking_delta":
 				if s, _ := delta["thinking"].(string); s != "" {
-					thinking.WriteString(s)
 					currentThinking.WriteString(s)
 					onEvent(SseEvent{Type: "thinking_delta", Text: s})
 				}
@@ -753,6 +745,7 @@ func readAnthropicStream(body io.Reader, onEvent func(SseEvent)) (string, []anth
 				}
 			}
 		case "content_block_stop":
+			sawEvent = true
 			if currentTool != nil {
 				currentTool.Input = json.RawMessage(partialJSON.String())
 				if len(currentTool.Input) == 0 {
@@ -773,9 +766,11 @@ func readAnthropicStream(body io.Reader, onEvent func(SseEvent)) (string, []anth
 				currentThinking.Reset()
 			}
 		case "message_delta":
+			sawEvent = true
 			if delta, ok := ev["delta"].(map[string]any); ok {
 				if sr, _ := delta["stop_reason"].(string); sr != "" {
 					stopReason = sr
+					terminal = true
 				}
 			}
 			if u, ok := ev["usage"].(map[string]any); ok {
@@ -784,17 +779,30 @@ func readAnthropicStream(body io.Reader, onEvent func(SseEvent)) (string, []anth
 				usage.CacheWriteTokens += intOf(u["cache_creation_input_tokens"])
 			}
 		case "message_start":
+			sawEvent = true
 			if msg, ok := ev["message"].(map[string]any); ok {
 				if u, ok := msg["usage"].(map[string]any); ok {
 					usage.InputTokens = intOf(u["input_tokens"])
 				}
 			}
+		case "message_stop":
+			sawEvent = true
+			terminal = true
+		}
+		if terminal {
+			break
 		}
 	}
-	if err := scanner.Err(); err != nil {
+	if err := scanner.Err(); err != nil && !terminal {
 		// Return whatever was accumulated before the error (e.g. on context cancel)
 		// rather than discarding it — partial text must survive a stop signal.
-		return text.String(), toolCalls, thinking.String(), thinkingBlocks, citations, usage, err
+		return stopReason, toolCalls, text.String(), thinkingBlocks, citations, usage, err
+	}
+	if !sawEvent {
+		return stopReason, toolCalls, text.String(), thinkingBlocks, citations, usage, invalidProviderStream("anthropic", "empty response")
+	}
+	if !terminal {
+		return stopReason, toolCalls, text.String(), thinkingBlocks, citations, usage, invalidProviderStream("anthropic", "response ended before a terminal event")
 	}
 	return stopReason, toolCalls, text.String(), thinkingBlocks, citations, usage, nil
 }

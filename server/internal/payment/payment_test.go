@@ -22,6 +22,7 @@ import (
 
 	"github.com/stripe/stripe-go/v86"
 	"github.com/stripe/stripe-go/v86/webhook"
+	pancake "github.com/waffo-com/waffo-pancake-sdk-go"
 )
 
 func TestMinorAmountRoundTrip(t *testing.T) {
@@ -649,6 +650,90 @@ func TestWaffoPancakeCheckoutUsesAuthenticatedDynamicPrice(t *testing.T) {
 	metadata, _ := checkoutBody["metadata"].(map[string]any)
 	if metadata["aivory_order_id"] != "po_waffo_test" {
 		t.Fatalf("unexpected Waffo metadata: %#v", metadata)
+	}
+}
+
+func TestWaffoProviderAmountUsesConfiguredProductCurrency(t *testing.T) {
+	keys := newWaffoTestKeys(t)
+	cfg := testWaffoConfig(keys)
+	cfg.Currency = "USD"
+	cfg.ConversionRate = "0.14"
+	cfg.ConversionRateBaseCurrency = "CNY"
+
+	amount, currency, rate, err := WaffoProviderAmount(28000, "CNY", cfg)
+	if err != nil {
+		t.Fatalf("convert Waffo provider amount: %v", err)
+	}
+	if amount != 3920 || currency != "USD" || rate != "0.14" {
+		t.Fatalf("Waffo provider snapshot = %d %s rate %q, want 3920 USD rate 0.14", amount, currency, rate)
+	}
+
+	legacy := testWaffoConfig(keys)
+	amount, currency, rate, err = WaffoProviderAmount(28000, "CNY", legacy)
+	if err != nil {
+		t.Fatalf("legacy Waffo provider amount: %v", err)
+	}
+	if amount != 28000 || currency != "CNY" || rate != "" {
+		t.Fatalf("legacy Waffo provider snapshot = %d %s rate %q", amount, currency, rate)
+	}
+
+	cfg.ConversionRateBaseCurrency = "EUR"
+	if _, _, _, err := WaffoProviderAmount(28000, "CNY", cfg); err == nil {
+		t.Fatal("Waffo conversion with a stale base currency unexpectedly succeeded")
+	}
+}
+
+func TestWaffoProductCurrencyErrorClassification(t *testing.T) {
+	t.Parallel()
+	unsupported := &pancake.Error{
+		Status: http.StatusBadRequest,
+		Errors: []pancake.APIError{{Message: "Currency CNY is not supported for this product"}},
+	}
+	if !waffoProductCurrencyUnsupported(unsupported) {
+		t.Fatal("documented Waffo product-currency error was not classified")
+	}
+	if !errors.Is(fmt.Errorf("%w: %v", ErrWaffoProductCurrencyUnsupported, unsupported), ErrWaffoProductCurrencyUnsupported) {
+		t.Fatal("Waffo product-currency error does not preserve its public error code")
+	}
+	for _, err := range []error{
+		&pancake.Error{Status: http.StatusInternalServerError, Errors: []pancake.APIError{{Message: unsupported.Error()}}},
+		&pancake.Error{Status: http.StatusBadRequest, Errors: []pancake.APIError{{Message: "Product not found"}}},
+		errors.New("Currency CNY is not supported for this product"),
+	} {
+		if waffoProductCurrencyUnsupported(err) {
+			t.Fatalf("unrelated Waffo error was classified as a product-currency error: %v", err)
+		}
+	}
+}
+
+func TestWaffoCheckoutMapsUnsupportedProductCurrency(t *testing.T) {
+	keys := newWaffoTestKeys(t)
+	cfg := testWaffoConfig(keys)
+	cfg.Currency = "CNY"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1/actions/auth/issue-session-token":
+			_, _ = io.WriteString(w, `{"data":{"token":"jwt_test_token","expiresAt":"2026-07-27T12:05:00Z"}}`)
+		case "/v1/actions/checkout/create-session":
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = io.WriteString(w, `{"data":null,"errors":[{"message":"Currency CNY is not supported for this product","layer":"product"}]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	_, err := (WaffoGateway{Config: cfg, BaseURL: server.URL, HTTPClient: server.Client()}).CreateCheckout(
+		context.Background(),
+		CheckoutRequest{
+			OrderID: "po_waffo_cny", Name: "Credits", AmountMinor: 28000, Currency: "CNY",
+			TaxCategory: TaxCategoryDigitalGoods, UserID: "user_123",
+			SuccessURL: "https://aivory.example.test/subscription?payment=return",
+		},
+	)
+	if !errors.Is(err, ErrWaffoProductCurrencyUnsupported) {
+		t.Fatalf("Waffo unsupported product currency error = %v, want %v", err, ErrWaffoProductCurrencyUnsupported)
 	}
 }
 

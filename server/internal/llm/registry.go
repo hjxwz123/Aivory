@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"strings"
 	"sync"
 )
 
@@ -65,13 +66,21 @@ var ErrUnknownProvider = errors.New("unknown provider")
 func (r *Registry) Get(channelType string) (Provider, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	switch channelType {
-	case "anthropic", "claude":
-		return r.providers["anthropic"], nil
-	case "openai":
-		return r.providers["openai"], nil
-	case "google", "gemini":
-		return r.providers["google"], nil
+	if providerID := providerIDForChannelType(channelType); providerID != "" {
+		return r.providers[providerID], nil
 	}
 	return nil, ErrUnknownProvider
+}
+
+func providerIDForChannelType(channelType string) string {
+	switch strings.ToLower(strings.TrimSpace(channelType)) {
+	case "anthropic", "claude":
+		return "anthropic"
+	case "openai":
+		return "openai"
+	case "google", "gemini":
+		return "google"
+	default:
+		return ""
+	}
 }

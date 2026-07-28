@@ -173,7 +173,7 @@ export default function AdminPaymentOrders() {
 
   async function closeOrder(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!closeTarget || !closeAcknowledged || closeReason.trim().length < 5) return
+    if (!closeTarget || !closeAcknowledged) return
 
     const order = closeTarget
     setOrderBusy(order.id, 'close')
@@ -181,7 +181,7 @@ export default function AdminPaymentOrders() {
       const updated = await adminApi.reconcilePaymentOrder(order.id, {
         action: 'close',
         confirm: true,
-        reason: closeReason.trim(),
+        reason: closeReason.trim() || undefined,
       })
       updateOrder(updated)
       dismissCloseDialog()
@@ -519,9 +519,7 @@ export default function AdminPaymentOrders() {
                 value={closeReason}
                 onChange={(event) => setCloseReason(event.target.value)}
                 placeholder={t('admin:paymentOrders.closeDialog.reasonPlaceholder')}
-                minLength={5}
                 maxLength={500}
-                required
                 disabled={Boolean(closeTarget && busyOrders[closeTarget.id] === 'close')}
                 aria-describedby="payment-order-close-reason-hint"
               />
@@ -559,7 +557,7 @@ export default function AdminPaymentOrders() {
                 type="submit"
                 variant="destructive"
                 loading={Boolean(closeTarget && busyOrders[closeTarget.id] === 'close')}
-                disabled={!closeAcknowledged || closeReason.trim().length < 5}
+                disabled={!closeAcknowledged}
               >
                 {closeTarget?.provider === 'epay'
                   ? t('admin:paymentOrders.actions.manualClose')

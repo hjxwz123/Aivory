@@ -89,6 +89,23 @@ func paymentAPIRequest(req *http.Request, user *store.User, pathValues map[strin
 	return req.WithContext(ctx)
 }
 
+func TestPaymentCheckoutFailureDetailsPreservesWaffoCurrencyError(t *testing.T) {
+	status, responseErr, failureCode, failureMessage := paymentCheckoutFailureDetails(
+		fmt.Errorf("provider rejected checkout: %w", payment.ErrWaffoProductCurrencyUnsupported),
+	)
+	if status != http.StatusUnprocessableEntity ||
+		!errors.Is(responseErr, payment.ErrWaffoProductCurrencyUnsupported) ||
+		failureCode != payment.ErrWaffoProductCurrencyUnsupported.Error() || failureMessage == "" {
+		t.Fatalf("Waffo checkout failure details = %d, %v, %q, %q", status, responseErr, failureCode, failureMessage)
+	}
+
+	status, responseErr, failureCode, failureMessage = paymentCheckoutFailureDetails(errors.New("provider unavailable"))
+	if status != http.StatusBadGateway || responseErr.Error() != "payment_checkout_unavailable" ||
+		failureCode != "provider_checkout_failed" || failureMessage == "" {
+		t.Fatalf("generic checkout failure details = %d, %v, %q, %q", status, responseErr, failureCode, failureMessage)
+	}
+}
+
 func createEPayCheckoutForTest(t *testing.T, fx paymentAPIFixture) (string, payment.CheckoutAction) {
 	t.Helper()
 	body := fmt.Sprintf(
@@ -760,6 +777,53 @@ func TestEPayWebhookFulfillsCreditOrderExactlyOnce(t *testing.T) {
 	}
 	if eventCount != 1 {
 		t.Fatalf("payment event count = %d, want 1 for duplicate callback", eventCount)
+	}
+}
+
+func TestEPayWebhookFulfillsManuallyClosedOrderExactlyOnce(t *testing.T) {
+	fx := newPaymentAPIFixture(t)
+	orderID, _ := createEPayCheckoutForTest(t, fx)
+	closed, err := store.CancelPaymentOrderByAdmin(context.Background(), fx.db, orderID, "")
+	if err != nil || closed.Status != store.PaymentOrderCancelled || closed.FailureCode != "admin_manual_close" {
+		t.Fatalf("manually close EPay order = %+v, %v", closed, err)
+	}
+	params := map[string]string{
+		"pid": testEPayMerchantID, "type": "alipay", "out_trade_no": orderID,
+		"trade_no": "epay_trade_after_manual_close", "trade_status": "TRADE_SUCCESS", "money": "123.45",
+	}
+
+	for attempt := 1; attempt <= 2; attempt++ {
+		rec := serveEPayCallback(t, fx, cloneStringMap(params))
+		if rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != "success" {
+			t.Fatalf("callback after manual close attempt %d = status %d body %q", attempt, rec.Code, rec.Body.String())
+		}
+	}
+
+	var credits float64
+	if err := fx.db.QueryRow(`SELECT credits_permanent FROM users WHERE id=?`, fx.user.ID).Scan(&credits); err != nil {
+		t.Fatalf("query permanent credits after manual-close recovery: %v", err)
+	}
+	if credits != 25+fx.pkg.Credits {
+		t.Fatalf("permanent credits after manual-close recovery = %v, want %v", credits, 25+fx.pkg.Credits)
+	}
+	fulfilled, err := store.GetPaymentOrder(context.Background(), fx.db, orderID)
+	if err != nil {
+		t.Fatalf("get recovered EPay order: %v", err)
+	}
+	if fulfilled.Status != store.PaymentOrderFulfilled || fulfilled.ProviderOrderID != "epay_trade_after_manual_close" ||
+		fulfilled.FailureCode != "" || fulfilled.FailureMessage != "" || fulfilled.PaidAt == 0 || fulfilled.FulfilledAt == 0 {
+		t.Fatalf("recovered EPay order = %+v", fulfilled)
+	}
+	events, err := store.ListPaymentEventsForOrder(context.Background(), fx.db, orderID)
+	if err != nil || len(events) != 2 {
+		t.Fatalf("manual-close webhook events = %+v, %v", events, err)
+	}
+	eventTypes := make(map[string]bool, len(events))
+	for _, paymentEvent := range events {
+		eventTypes[paymentEvent.EventType] = paymentEvent.ProcessedAt > 0
+	}
+	if !eventTypes["admin.manual_close"] || !eventTypes["payment_notification"] {
+		t.Fatalf("manual-close webhook event types = %+v", events)
 	}
 }
 
