@@ -15,12 +15,15 @@ import (
 const waffoCheckoutTimeout = 30 * time.Second
 
 type WaffoConfig struct {
-	MerchantID       string `json:"merchant_id"`
-	PrivateKey       string `json:"private_key"`
-	StoreID          string `json:"store_id"`
-	ProductID        string `json:"product_id"`
-	Mode             string `json:"mode"`
-	WebhookPublicKey string `json:"webhook_public_key,omitempty"`
+	MerchantID                 string      `json:"merchant_id"`
+	PrivateKey                 string      `json:"private_key"`
+	StoreID                    string      `json:"store_id"`
+	ProductID                  string      `json:"product_id"`
+	Currency                   string      `json:"currency,omitempty"`
+	ConversionRate             json.Number `json:"conversion_rate,omitempty"`
+	ConversionRateBaseCurrency string      `json:"conversion_rate_base_currency,omitempty"`
+	Mode                       string      `json:"mode"`
+	WebhookPublicKey           string      `json:"webhook_public_key,omitempty"`
 }
 
 type WaffoMethodConfig struct{}
@@ -49,11 +52,77 @@ func ValidateWaffoConfig(cfg WaffoConfig) error {
 	if !validWaffoShortID(cfg.ProductID, "PROD") {
 		return errors.New("invalid Waffo Pancake product ID")
 	}
+	// Currency was added after the first Waffo integration. An empty value is
+	// retained for legacy records and resolved to the settlement currency by
+	// ValidateWaffoSettlementConfig.
+	if cfg.Currency != "" && !validCurrencyCode(cfg.Currency) {
+		return errors.New("Waffo Pancake currency must be a three-letter code")
+	}
+	if rate := strings.TrimSpace(cfg.ConversionRate.String()); rate != "" {
+		if _, err := NormalizeConversionRate(rate); err != nil {
+			return err
+		}
+	}
+	if cfg.ConversionRateBaseCurrency != "" && !validCurrencyCode(cfg.ConversionRateBaseCurrency) {
+		return errors.New("Waffo Pancake conversion-rate base currency must be a three-letter code")
+	}
 	_, err := newWaffoClient(cfg, "", nil)
 	if err != nil {
 		return fmt.Errorf("invalid Waffo Pancake channel configuration: %w", err)
 	}
 	return nil
+}
+
+// ValidateWaffoSettlementConfig verifies that the Waffo product currency can
+// be derived from the application's settlement currency. Waffo requires the
+// checkout currency to exist in the selected product's prices map even when a
+// runtime priceSnapshot overrides the amount.
+func ValidateWaffoSettlementConfig(cfg WaffoConfig, settlementCurrency string) error {
+	if err := ValidateWaffoConfig(cfg); err != nil {
+		return err
+	}
+	settlementCurrency = strings.ToUpper(strings.TrimSpace(settlementCurrency))
+	if !validCurrencyCode(settlementCurrency) {
+		return errors.New("invalid settlement currency")
+	}
+	providerCurrency := strings.ToUpper(strings.TrimSpace(cfg.Currency))
+	if providerCurrency == "" {
+		providerCurrency = settlementCurrency
+	}
+	if providerCurrency == settlementCurrency {
+		return nil
+	}
+	if strings.ToUpper(strings.TrimSpace(cfg.ConversionRateBaseCurrency)) != settlementCurrency {
+		return errors.New("Waffo Pancake conversion-rate base currency must match the settlement currency")
+	}
+	if _, err := NormalizeConversionRate(cfg.ConversionRate.String()); err != nil {
+		return err
+	}
+	return nil
+}
+
+// WaffoProviderAmount returns the immutable provider-side amount, currency and
+// exchange-rate snapshots used by checkout and webhook verification.
+func WaffoProviderAmount(amountMinor int64, settlementCurrency string, cfg WaffoConfig) (int64, string, string, error) {
+	if err := ValidateWaffoSettlementConfig(cfg, settlementCurrency); err != nil {
+		return 0, "", "", err
+	}
+	settlementCurrency = strings.ToUpper(strings.TrimSpace(settlementCurrency))
+	providerCurrency := strings.ToUpper(strings.TrimSpace(cfg.Currency))
+	if providerCurrency == "" {
+		providerCurrency = settlementCurrency
+	}
+	if providerCurrency == settlementCurrency {
+		if amountMinor <= 0 {
+			return 0, "", "", errors.New("payment amount must be positive")
+		}
+		return amountMinor, providerCurrency, "", nil
+	}
+	converted, rate, err := ConvertMinorAmount(amountMinor, settlementCurrency, providerCurrency, cfg.ConversionRate.String())
+	if err != nil {
+		return 0, "", "", err
+	}
+	return converted, providerCurrency, rate, nil
 }
 
 func (g WaffoGateway) CreateCheckout(ctx context.Context, req CheckoutRequest) (CheckoutAction, error) {
@@ -69,6 +138,10 @@ func (g WaffoGateway) CreateCheckout(ctx context.Context, req CheckoutRequest) (
 	}
 	if !validRedirectURL(req.SuccessURL) {
 		return CheckoutAction{}, errors.New("invalid Waffo Pancake success URL")
+	}
+	requestCurrency := strings.ToUpper(strings.TrimSpace(req.Currency))
+	if cfg.Currency != "" && cfg.Currency != requestCurrency {
+		return CheckoutAction{}, errors.New("Waffo Pancake channel currency does not match the order provider currency")
 	}
 	amount, err := FormatMinorAmount(req.AmountMinor, req.Currency)
 	if err != nil {
@@ -87,7 +160,7 @@ func (g WaffoGateway) CreateCheckout(ctx context.Context, req CheckoutRequest) (
 	params := pancake.AuthenticatedCheckoutParams{
 		CreateCheckoutSessionParams: pancake.CreateCheckoutSessionParams{
 			ProductID: cfg.ProductID,
-			Currency:  strings.ToUpper(strings.TrimSpace(req.Currency)),
+			Currency:  requestCurrency,
 			PriceSnapshot: &pancake.PriceInfo{
 				Amount:      amount,
 				TaxCategory: taxCategory,
@@ -105,6 +178,9 @@ func (g WaffoGateway) CreateCheckout(ctx context.Context, req CheckoutRequest) (
 	}
 	session, err := client.Checkout.Authenticated.Create(ctx, params)
 	if err != nil {
+		if waffoProductCurrencyUnsupported(err) {
+			return CheckoutAction{}, fmt.Errorf("%w: %v", ErrWaffoProductCurrencyUnsupported, err)
+		}
 		return CheckoutAction{}, fmt.Errorf("create Waffo Pancake checkout session: %w", err)
 	}
 	if session == nil || strings.TrimSpace(session.SessionID) == "" || !validRedirectURL(session.CheckoutURL) {
@@ -427,9 +503,22 @@ func normalizeWaffoConfig(cfg WaffoConfig) WaffoConfig {
 	cfg.PrivateKey = strings.TrimSpace(cfg.PrivateKey)
 	cfg.StoreID = strings.TrimSpace(cfg.StoreID)
 	cfg.ProductID = strings.TrimSpace(cfg.ProductID)
+	cfg.Currency = strings.ToUpper(strings.TrimSpace(cfg.Currency))
+	cfg.ConversionRateBaseCurrency = strings.ToUpper(strings.TrimSpace(cfg.ConversionRateBaseCurrency))
 	cfg.Mode = strings.ToLower(strings.TrimSpace(cfg.Mode))
 	cfg.WebhookPublicKey = strings.TrimSpace(cfg.WebhookPublicKey)
 	return cfg
+}
+
+func waffoProductCurrencyUnsupported(err error) bool {
+	var providerErr *pancake.Error
+	if !errors.As(err, &providerErr) || providerErr.Status != http.StatusBadRequest {
+		return false
+	}
+	message := strings.ToLower(strings.TrimSpace(providerErr.Error()))
+	return strings.HasPrefix(message, "currency ") &&
+		(strings.Contains(message, " is not supported for this product") ||
+			strings.Contains(message, " is not supported for onetime payments"))
 }
 
 func newWaffoClient(cfg WaffoConfig, baseURL string, httpClient *http.Client) (*pancake.Client, error) {

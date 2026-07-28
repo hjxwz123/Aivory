@@ -77,10 +77,10 @@ func TestPerRequestUsageRowsSplitAndTotals(t *testing.T) {
 		{Method: "POST", URL: "https://api/1", Body: "b1", Attempt: 1,
 			Usage: Usage{InputTokens: 1000, OutputTokens: 200}, HasUsage: true},
 		{Method: "POST", URL: "https://api/2", Body: "b2", Attempt: 2,
-			Usage: Usage{InputTokens: 3000, OutputTokens: 500}, HasUsage: true},
+			Usage: Usage{InputTokens: 3000, OutputTokens: 500}, HasUsage: true, Fallback: true},
 		// A request that never completed a stream (e.g. failed then fell back):
 		// no usage attached → no row of its own.
-		{Method: "POST", URL: "https://api/3", Body: "b3", Attempt: 3},
+		{Method: "POST", URL: "https://api/3", Body: "b3", Attempt: 3, Fallback: true},
 	}
 	// Turn totals carry MORE than the two attaches (residual 500/100 from an
 	// overflow/fallback round) — the last row must absorb it.
@@ -111,6 +111,13 @@ func TestPerRequestUsageRowsSplitAndTotals(t *testing.T) {
 	// Request snapshots ride along when includeReq is true.
 	if rows[0].Body != "b1" || rows[1].Body != "b2" {
 		t.Fatalf("request bodies not carried per row: %q %q", rows[0].Body, rows[1].Body)
+	}
+	primaryID, fallbackID := "primary-channel", "fallback-channel"
+	if channelID, fallback := requestUsageChannel(rows[0], primaryID, fallbackID, true); channelID != primaryID || fallback {
+		t.Fatalf("primary row attribution = %q/%v, want %q/false", channelID, fallback, primaryID)
+	}
+	if channelID, fallback := requestUsageChannel(rows[1], primaryID, fallbackID, true); channelID != fallbackID || !fallback {
+		t.Fatalf("fallback row attribution = %q/%v, want %q/true", channelID, fallback, fallbackID)
 	}
 
 	// includeReq=false → no request fields on any row.

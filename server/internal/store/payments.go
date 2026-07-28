@@ -861,12 +861,25 @@ func CreatePaymentOrder(ctx context.Context, db *sql.DB, input PaymentOrderCreat
 
 	order.ProviderAmountMinor = order.AmountMinor
 	order.ProviderCurrency = order.Currency
-	if order.Provider == paymentcore.ProviderEPay {
+	switch order.Provider {
+	case paymentcore.ProviderEPay:
 		var cfg paymentcore.EPayConfig
 		if json.Unmarshal([]byte(channelConfig), &cfg) != nil {
 			return nil, ErrPaymentMethodUnavailable
 		}
 		providerAmount, providerCurrency, rate, err := paymentcore.EPayProviderAmount(order.AmountMinor, order.Currency, cfg)
+		if err != nil {
+			return nil, ErrPaymentMethodUnavailable
+		}
+		order.ProviderAmountMinor = providerAmount
+		order.ProviderCurrency = providerCurrency
+		order.ConversionRate = rate
+	case paymentcore.ProviderWaffo:
+		var cfg paymentcore.WaffoConfig
+		if json.Unmarshal([]byte(channelConfig), &cfg) != nil {
+			return nil, ErrPaymentMethodUnavailable
+		}
+		providerAmount, providerCurrency, rate, err := paymentcore.WaffoProviderAmount(order.AmountMinor, order.Currency, cfg)
 		if err != nil {
 			return nil, ErrPaymentMethodUnavailable
 		}
@@ -1212,9 +1225,6 @@ func AnnotateClosedPaymentOrder(ctx context.Context, db *sql.DB, id, code, messa
 
 func CancelPaymentOrderByAdmin(ctx context.Context, db *sql.DB, id, reason string) (*PaymentOrder, error) {
 	reason = strings.TrimSpace(reason)
-	if reason == "" {
-		return nil, ErrInvalidPaymentEvent
-	}
 	tx, err := db.BeginTx(ctx, paymentWriteTxOptions())
 	if err != nil {
 		return nil, err
@@ -1528,7 +1538,10 @@ func FulfillPaymentOrder(ctx context.Context, db *sql.DB, input PaymentFulfillme
 		}
 		return &PaymentFulfillmentResult{Order: order, Event: event}, nil
 	}
-	if order.Status != PaymentOrderPending && order.Status != PaymentOrderProcessing {
+	// EPay manual close is local-only. A later verified payment must still grant
+	// the purchased entitlement so a buyer is never charged without delivery.
+	recoverableManualClose := order.Status == PaymentOrderCancelled && order.FailureCode == "admin_manual_close"
+	if order.Status != PaymentOrderPending && order.Status != PaymentOrderProcessing && !recoverableManualClose {
 		return nil, ErrPaymentOrderNotFulfillable
 	}
 
@@ -1645,8 +1658,10 @@ func FulfillPaymentOrder(ctx context.Context, db *sql.DB, input PaymentFulfillme
 		    SET provider_order_id=?, provider_payment_id=?, status=?, paid_amount_minor=?, tax_amount_minor=?, failure_code='', failure_message='',
 		        paid_at=CASE WHEN paid_at=0 THEN ? ELSE paid_at END,
 		        fulfilled_at=?, updated_at=?
-		  WHERE id=? AND status<>?`,
-		providerOrderID, providerPaymentID, PaymentOrderFulfilled, paidAmount, taxAmount, now, now, now, order.ID, PaymentOrderFulfilled)
+		  WHERE id=?
+		    AND (status IN (?, ?) OR (status=? AND failure_code='admin_manual_close'))`,
+		providerOrderID, providerPaymentID, PaymentOrderFulfilled, paidAmount, taxAmount, now, now, now, order.ID,
+		PaymentOrderPending, PaymentOrderProcessing, PaymentOrderCancelled)
 	if err != nil {
 		if isUniqueIndexErr(err, "idx_payment_orders_provider_order_unique", "payment_orders.provider_order_id") ||
 			isUniqueIndexErr(err, "idx_payment_orders_provider_payment_unique", "payment_orders.provider_payment_id") {

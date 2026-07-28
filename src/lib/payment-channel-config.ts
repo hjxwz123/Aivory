@@ -4,7 +4,7 @@ function configText(config: Record<string, unknown>, key: string): string {
   return typeof value === 'number' && Number.isFinite(value) ? String(value) : ''
 }
 
-export function updateEPayCurrencyConfig(
+export function updatePaymentProviderCurrencyConfig(
   config: Record<string, unknown>,
   value: string,
   settlementCurrency: string,

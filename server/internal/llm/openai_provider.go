@@ -44,7 +44,7 @@ func (p *OpenAIProvider) ID() string { return "openai" }
 
 // Stream runs one model turn against either OpenAI format.
 func (p *OpenAIProvider) Stream(ctx context.Context, req UnifiedChatRequest, tools ToolRunner, onEvent func(SseEvent)) (*UnifiedResult, error) {
-	if req.Model.APIKey == "" {
+	if req.Model.APIKey == "" && req.Model.Fallback == nil {
 		return nil, errors.New("this channel has no API key configured")
 	}
 	// A Responses-hosted image tool can continue editing one of its own generated
@@ -161,7 +161,14 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest,
 		body = StripToolFields(body, len(req.Tools) > 0 && !req.ToolModePrompt && !officialToolModeEnabled(req))
 		body = MergeOfficialToolRequests(body, req.OfficialToolRequests)
 		raw, _ := json.Marshal(body)
-		resp, err := doProviderRequest(ctx, req.Model, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
+		var (
+			text      string
+			reasoning string
+			calls     []openAIToolCall
+			finish    string
+			u         Usage
+		)
+		err := doProviderParsedRequest(ctx, req.Model, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
 			hr, e := http.NewRequestWithContext(ctx, "POST", providerBaseURL(baseURL, "https://api.openai.com")+"/v1/chat/completions", bytes.NewReader(raw))
 			if e != nil {
 				return nil, e
@@ -170,17 +177,16 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest,
 			hr.Header.Set("content-type", "application/json")
 			hr.Header.Set("accept", "text/event-stream")
 			return hr, nil
-		})
-		if err != nil {
-			return nil, err
-		}
-		if resp.StatusCode >= 400 {
-			b, _ := io.ReadAll(resp.Body)
-			resp.Body.Close()
-			return nil, fmt.Errorf("openai %d: %s", resp.StatusCode, string(b))
-		}
-		text, reasoning, calls, finish, u, err := readOpenAIChatStream(resp.Body, onEvent)
-		resp.Body.Close()
+		}, func(resp *http.Response, emit func(SseEvent)) error {
+			text, reasoning, finish, u = "", "", "", Usage{}
+			calls = nil
+			if statusErr := requireProviderSuccess(resp, "openai"); statusErr != nil {
+				return statusErr
+			}
+			var readErr error
+			text, reasoning, calls, finish, u, readErr = readOpenAIChatStream(resp.Body, emit)
+			return readErr
+		}, onEvent)
 		// §B5-per-request usage rows: pin this iteration's usage to its request.
 		attachProviderRequestUsage(ctx, u)
 		if err != nil {
@@ -316,7 +322,11 @@ func (p *OpenAIProvider) promptRunOnce(req UnifiedChatRequest) PromptToolRunner 
 		body = StripToolFields(body, false)
 		body = MergeOfficialToolRequests(body, req.OfficialToolRequests)
 		raw, _ := json.Marshal(body)
-		resp, err := doProviderRequest(ctx, req.Model, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
+		var (
+			text string
+			u    Usage
+		)
+		err := doProviderParsedRequest(ctx, req.Model, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
 			hr, e := http.NewRequestWithContext(ctx, "POST", providerBaseURL(baseURL, "https://api.openai.com")+"/v1/chat/completions", bytes.NewReader(raw))
 			if e != nil {
 				return nil, e
@@ -325,16 +335,15 @@ func (p *OpenAIProvider) promptRunOnce(req UnifiedChatRequest) PromptToolRunner 
 			hr.Header.Set("content-type", "application/json")
 			hr.Header.Set("accept", "text/event-stream")
 			return hr, nil
-		})
-		if err != nil {
-			return "", Usage{}, err
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode >= 400 {
-			b, _ := io.ReadAll(resp.Body)
-			return "", Usage{}, fmt.Errorf("openai %d: %s", resp.StatusCode, string(b))
-		}
-		text, _, _, _, u, err := readOpenAIChatStream(resp.Body, func(SseEvent) {})
+		}, func(resp *http.Response, emit func(SseEvent)) error {
+			text, u = "", Usage{}
+			if statusErr := requireProviderSuccess(resp, "openai"); statusErr != nil {
+				return statusErr
+			}
+			var readErr error
+			text, _, _, _, u, readErr = readOpenAIChatStream(resp.Body, emit)
+			return readErr
+		}, func(SseEvent) {})
 		return text, u, err
 	}
 }
@@ -494,6 +503,8 @@ func readOpenAIChatStream(body io.Reader, onEvent func(SseEvent)) (string, strin
 	reasoning := strings.Builder{}
 	usage := Usage{}
 	finish := "end_turn"
+	sawEvent := false
+	terminal := false
 	// Tool calls are accumulated by index — OpenAI streams partial args.
 	toolByIdx := map[int]*openAIToolCall{}
 	toolStarted := map[int]bool{}
@@ -503,14 +514,38 @@ func readOpenAIChatStream(body io.Reader, onEvent func(SseEvent)) (string, strin
 			continue
 		}
 		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		if payload == "" || payload == "[DONE]" {
+		if payload == "" {
+			continue
+		}
+		if payload == "[DONE]" {
+			terminal = true
+			break
+		}
+		// Some Chat-compatible gateways send the usage-only chunk after the
+		// finish_reason frame. Keep that accounting, but never let trailing proxy
+		// noise turn an already completed response into a retry.
+		if terminal {
+			var trailer map[string]any
+			if json.Unmarshal([]byte(payload), &trailer) == nil {
+				if u, ok := trailer["usage"].(map[string]any); ok {
+					usage.InputTokens = intOf(u["prompt_tokens"])
+					usage.OutputTokens = intOf(u["completion_tokens"])
+				}
+			}
 			continue
 		}
 		var ev map[string]any
 		if err := json.Unmarshal([]byte(payload), &ev); err != nil {
-			continue
+			return text.String(), reasoning.String(), nil, finish, usage,
+				fmt.Errorf("openai chat stream invalid JSON: %w", err)
+		}
+		if streamErr := providerEventError("openai chat", ev); streamErr != nil {
+			return text.String(), reasoning.String(), nil, finish, usage, streamErr
 		}
 		choices, _ := ev["choices"].([]any)
+		if len(choices) > 0 {
+			sawEvent = true
+		}
 		for _, c := range choices {
 			ch, _ := c.(map[string]any)
 			delta, _ := ch["delta"].(map[string]any)
@@ -561,9 +596,11 @@ func readOpenAIChatStream(body io.Reader, onEvent func(SseEvent)) (string, strin
 			}
 			if fr, _ := ch["finish_reason"].(string); fr != "" {
 				finish = fr
+				terminal = true
 			}
 		}
 		if u, ok := ev["usage"].(map[string]any); ok {
+			sawEvent = true
 			usage.InputTokens = intOf(u["prompt_tokens"])
 			usage.OutputTokens = intOf(u["completion_tokens"])
 		}
@@ -581,8 +618,14 @@ func readOpenAIChatStream(body io.Reader, onEvent func(SseEvent)) (string, strin
 		}
 		calls = append(calls, *c)
 	}
-	if err := scanner.Err(); err != nil {
+	if err := scanner.Err(); err != nil && !terminal {
 		return text.String(), reasoning.String(), calls, finish, usage, err
+	}
+	if !sawEvent {
+		return text.String(), reasoning.String(), calls, finish, usage, invalidProviderStream("openai chat", "empty response")
+	}
+	if !terminal {
+		return text.String(), reasoning.String(), calls, finish, usage, invalidProviderStream("openai chat", "response ended before a terminal event")
 	}
 	return text.String(), reasoning.String(), calls, finish, usage, nil
 }
@@ -726,7 +769,17 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 		}
 		appendResponsesInclude(body, includes...)
 		raw, _ := json.Marshal(body)
-		resp, err := doProviderRequest(ctx, req.Model, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
+		var (
+			text        string
+			reasoning   string
+			calls       []openAIToolCall
+			hosted      []hostedToolCall
+			citations   []Citation
+			u           Usage
+			outputItems []map[string]any
+			generated   []GeneratedImage
+		)
+		err := doProviderParsedRequest(ctx, req.Model, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
 			hr, e := http.NewRequestWithContext(ctx, "POST", providerBaseURL(baseURL, "https://api.openai.com")+"/v1/responses", bytes.NewReader(raw))
 			if e != nil {
 				return nil, e
@@ -735,27 +788,22 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 			hr.Header.Set("content-type", "application/json")
 			hr.Header.Set("accept", "text/event-stream")
 			return hr, nil
-		})
-		if err != nil {
-			return nil, err
-		}
-		if resp.StatusCode >= 400 {
-			b, _ := io.ReadAll(resp.Body)
-			resp.Body.Close()
-			return nil, fmt.Errorf("openai responses %d: %s", resp.StatusCode, string(b))
-		}
-
-		text, reasoning, calls, hosted, citations, u, outputItems, err := readOpenAIResponsesStream(resp.Body, onEvent)
-		resp.Body.Close()
-		hosted, generatedImages, imageErr := decodeHostedGeneratedImages(hosted)
-		allGeneratedImages = append(allGeneratedImages, generatedImages...)
-		if imageErr != nil {
-			if err == nil {
-				err = imageErr
-			} else {
-				err = errors.Join(err, imageErr)
+		}, func(resp *http.Response, emit func(SseEvent)) error {
+			text, reasoning, u = "", "", Usage{}
+			calls, hosted, citations, outputItems, generated = nil, nil, nil, nil, nil
+			if statusErr := requireProviderSuccess(resp, "openai responses"); statusErr != nil {
+				return statusErr
 			}
-		}
+			var readErr error
+			text, reasoning, calls, hosted, citations, u, outputItems, readErr = readOpenAIResponsesStream(resp.Body, emit)
+			if readErr != nil {
+				return readErr
+			}
+			var imageErr error
+			hosted, generated, imageErr = decodeHostedGeneratedImages(hosted)
+			return imageErr
+		}, onEvent)
+		allGeneratedImages = append(allGeneratedImages, generated...)
 		// §B5-per-request usage rows: pin this iteration's usage to its request.
 		attachProviderRequestUsage(ctx, u)
 		if err != nil {
@@ -1000,38 +1048,48 @@ func readOpenAIResponsesStream(body io.Reader, onEvent func(SseEvent)) (string, 
 		// duplicate several megabytes in messages.raw and every replay request.
 		delete(item, "result")
 	}
-	// Set once response.completed arrives. Per the Responses protocol, completed
-	// is a TERMINAL state — yet some relay gateways append a bogus
-	// response.failed afterwards (their own upstream-accounting hiccup while
-	// closing the connection). Without this guard that trailing event flipped a
-	// fully-delivered, usage-carrying turn into a user-visible error.
-	completed := false
+	sawEvent := false
+	terminal := false
+responseLoop:
 	for scanner.Scan() {
 		line := scanner.Text()
 		if !strings.HasPrefix(line, "data:") {
 			continue
 		}
 		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		if payload == "" || payload == "[DONE]" {
+		if payload == "" {
 			continue
+		}
+		if payload == "[DONE]" {
+			terminal = true
+			break
 		}
 		var ev map[string]any
 		if err := json.Unmarshal([]byte(payload), &ev); err != nil {
-			continue
+			calls, hosted, outputItems := finalizeOpenAIResponsesStream(callsByItem, order, hostedByItem, hostedOrder, outputByItem, outputOrder, completedOutput)
+			return text.String(), reasoning.String(), calls, hosted, citations, usage, outputItems,
+				fmt.Errorf("openai responses stream invalid JSON: %w", err)
+		}
+		if streamErr := providerEventError("openai responses", ev); streamErr != nil {
+			calls, hosted, outputItems := finalizeOpenAIResponsesStream(callsByItem, order, hostedByItem, hostedOrder, outputByItem, outputOrder, completedOutput)
+			return text.String(), reasoning.String(), calls, hosted, citations, usage, outputItems, streamErr
 		}
 		typ, _ := ev["type"].(string)
 		switch typ {
 		case "response.output_text.delta":
+			sawEvent = true
 			if s, _ := ev["delta"].(string); s != "" {
 				text.WriteString(s)
 				onEvent(SseEvent{Type: "text_delta", Text: s})
 			}
 		case "response.reasoning_summary_text.delta", "response.reasoning.delta":
+			sawEvent = true
 			if s, _ := ev["delta"].(string); s != "" {
 				reasoning.WriteString(s)
 				onEvent(SseEvent{Type: "thinking_delta", Text: s})
 			}
 		case "response.output_text.annotation.added":
+			sawEvent = true
 			// Inline web-search citations the model attached to the answer text.
 			if ann, _ := ev["annotation"].(map[string]any); ann != nil {
 				if at, _ := ann["type"].(string); at == "url_citation" {
@@ -1041,6 +1099,7 @@ func readOpenAIResponsesStream(body io.Reader, onEvent func(SseEvent)) (string, 
 				}
 			}
 		case "response.output_item.added":
+			sawEvent = true
 			it, _ := ev["item"].(map[string]any)
 			if it == nil {
 				continue
@@ -1069,6 +1128,7 @@ func readOpenAIResponsesStream(body io.Reader, onEvent func(SseEvent)) (string, 
 				outputOrder = append(outputOrder, itemID)
 			}
 		case "response.output_item.done":
+			sawEvent = true
 			it, _ := ev["item"].(map[string]any)
 			if it == nil {
 				continue
@@ -1119,6 +1179,7 @@ func readOpenAIResponsesStream(body io.Reader, onEvent func(SseEvent)) (string, 
 				onEvent(SseEvent{Type: "tool_result", Name: h.Name, ID: itemID, Status: status})
 			}
 		case "response.image_generation_call.partial_image":
+			sawEvent = true
 			itemID, _ := ev["item_id"].(string)
 			h := ensureHosted(itemID, "image_generation_call")
 			if h == nil {
@@ -1137,6 +1198,7 @@ func readOpenAIResponsesStream(body io.Reader, onEvent func(SseEvent)) (string, 
 				h.ImagePartialIndex = index
 			}
 		case "response.function_call_arguments.delta":
+			sawEvent = true
 			itemID, _ := ev["item_id"].(string)
 			cb := callsByItem[itemID]
 			if cb == nil {
@@ -1147,6 +1209,7 @@ func readOpenAIResponsesStream(body io.Reader, onEvent func(SseEvent)) (string, 
 				onEvent(SseEvent{Type: "tool_input", ID: cb.ID, Name: cb.Name, PartialJson: d})
 			}
 		case "response.function_call_arguments.done":
+			sawEvent = true
 			itemID, _ := ev["item_id"].(string)
 			cb := callsByItem[itemID]
 			if cb == nil {
@@ -1156,7 +1219,8 @@ func readOpenAIResponsesStream(body io.Reader, onEvent func(SseEvent)) (string, 
 				cb.Args.WriteString(a)
 			}
 		case "response.completed":
-			completed = true
+			sawEvent = true
+			terminal = true
 			r, _ := ev["response"].(map[string]any)
 			if r != nil {
 				if u, ok := r["usage"].(map[string]any); ok {
@@ -1179,14 +1243,11 @@ func readOpenAIResponsesStream(body io.Reader, onEvent func(SseEvent)) (string, 
 					}
 				}
 			}
+			// response.completed is terminal by protocol. Relays occasionally append
+			// a bogus response.failed/error while closing; it must not replay a
+			// completed (and potentially billable hosted-tool) request.
+			break responseLoop
 		case "response.failed":
-			// A failed AFTER completed is a protocol violation (completed is
-			// terminal) — a relay-side artifact, not a real failure: the answer
-			// and its usage are already in hand. Ignore it instead of flipping
-			// the delivered turn into an error.
-			if completed {
-				continue
-			}
 			r, _ := ev["response"].(map[string]any)
 			if r != nil {
 				if errObj, ok := r["error"].(map[string]any); ok {
@@ -1197,11 +1258,20 @@ func readOpenAIResponsesStream(body io.Reader, onEvent func(SseEvent)) (string, 
 			}
 			calls, hosted, outputItems := finalizeOpenAIResponsesStream(callsByItem, order, hostedByItem, hostedOrder, outputByItem, outputOrder, completedOutput)
 			return text.String(), reasoning.String(), calls, hosted, citations, usage, outputItems, fmt.Errorf("openai responses failed")
+		case "response.incomplete":
+			// Incomplete is a valid terminal response (for example a configured
+			// max-output limit), not a channel transport/protocol failure.
+			sawEvent = true
+			terminal = true
+			break responseLoop
 		}
 	}
 	calls, hosted, outputItems := finalizeOpenAIResponsesStream(callsByItem, order, hostedByItem, hostedOrder, outputByItem, outputOrder, completedOutput)
-	if err := scanner.Err(); err != nil {
+	if err := scanner.Err(); err != nil && !terminal {
 		return text.String(), reasoning.String(), calls, hosted, citations, usage, outputItems, err
+	}
+	if !sawEvent {
+		return text.String(), reasoning.String(), calls, hosted, citations, usage, outputItems, invalidProviderStream("openai responses", "empty response")
 	}
 	return text.String(), reasoning.String(), calls, hosted, citations, usage, outputItems, nil
 }

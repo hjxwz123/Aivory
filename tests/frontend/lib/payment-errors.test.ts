@@ -7,6 +7,9 @@ describe('payment error translation keys', () => {
     expect(checkoutPaymentErrorKey('payment_method_unavailable')).toBe('payment.errors.methodUnavailable')
     expect(checkoutPaymentErrorKey('payment_product_unavailable')).toBe('payment.errors.productUnavailable')
     expect(checkoutPaymentErrorKey('payment_checkout_unavailable')).toBe('payment.errors.checkoutUnavailable')
+    expect(checkoutPaymentErrorKey('payment_waffo_product_currency_unsupported')).toBe(
+      'payment.errors.waffoProductCurrencyUnsupported',
+    )
     expect(checkoutPaymentErrorKey('payment_user_group_already_permanent')).toBe(
       'payment.errors.userGroupAlreadyPermanent',
     )

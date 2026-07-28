@@ -219,6 +219,7 @@ export default function Register() {
                 maxLength={6}
                 className="tracking-[0.3em] text-lg font-mono"
                 invalid={!!verifyError}
+                wrapperClassName="focus-within:ring-0"
               />
             </Field>
           </motion.div>
@@ -313,6 +314,7 @@ export default function Register() {
               autoComplete="name"
               invalid={!!errors.name}
               disabled={!signupOpen}
+              wrapperClassName="focus-within:ring-0"
             />
           </Field>
         </motion.div>
@@ -328,6 +330,7 @@ export default function Register() {
               autoComplete="email"
               invalid={!!errors.email}
               disabled={!signupOpen}
+              wrapperClassName="focus-within:ring-0"
             />
           </Field>
         </motion.div>
@@ -342,6 +345,7 @@ export default function Register() {
               autoComplete="new-password"
               invalid={!!errors.pw}
               disabled={!signupOpen}
+              wrapperClassName="focus-within:ring-0"
               trailingSlot={
                 <button
                   type="button"

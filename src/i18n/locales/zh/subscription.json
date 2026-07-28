@@ -92,6 +92,7 @@
       "methodUnavailable": "该支付方式暂不可用，请选择其他方式。",
       "productUnavailable": "该商品已下架或价格已变更，请刷新页面后重试。",
       "checkoutUnavailable": "支付服务暂不可用，请稍后重试。",
+      "waffoProductCurrencyUnsupported": "该 Waffo 商品不支持当前支付币种，请联系管理员检查商品价格或支付渠道设置。",
       "userGroupAlreadyPermanent": "你已永久拥有该用户组，无需重复购买。"
     },
     "or": "或",

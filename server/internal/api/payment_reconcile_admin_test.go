@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,7 +11,7 @@ import (
 	"aivory/server/internal/store"
 )
 
-func TestEPayAdminCloseRequiresDisabledChannelAndAuditReason(t *testing.T) {
+func TestEPayAdminCloseAllowsEnabledChannelAndOptionalReason(t *testing.T) {
 	fx, channel, order := createEPayReconciliationFixture(t)
 	path := "/api/admin/payment-orders/" + order.ID + "/reconcile"
 
@@ -19,26 +20,16 @@ func TestEPayAdminCloseRequiresDisabledChannelAndAuditReason(t *testing.T) {
 		t.Fatalf("EPay automatic reconciliation status = %d, want 409; body=%s", reconcile.Code, reconcile.Body.String())
 	}
 	unconfirmed := fx.request(t, http.MethodPost, path, map[string]any{
-		"action": "close", "reason": "verified at gateway",
+		"action": "close",
 	})
 	if unconfirmed.Code != http.StatusBadRequest {
 		t.Fatalf("unconfirmed EPay close status = %d, want 400; body=%s", unconfirmed.Code, unconfirmed.Body.String())
 	}
-	whileEnabled := fx.request(t, http.MethodPost, path, map[string]any{
-		"action": "close", "confirm": true, "reason": "verified at gateway",
-	})
-	if whileEnabled.Code != http.StatusConflict {
-		t.Fatalf("enabled-channel EPay close status = %d, want 409; body=%s", whileEnabled.Code, whileEnabled.Body.String())
-	}
-
-	disable := fx.request(t, http.MethodPatch, "/api/admin/payment-channels/"+channel.ID, map[string]any{"enabled": false})
-	decodePaymentAdminResponse[adminPaymentChannelResponse](t, disable, http.StatusOK)
 	closedRec := fx.request(t, http.MethodPost, path, map[string]any{
-		"action": "close", "confirm": true, "reason": "Gateway order was verified and closed",
+		"action": "close", "confirm": true,
 	})
 	closed := decodePaymentAdminResponse[adminPaymentOrderResponse](t, closedRec, http.StatusOK)
-	if closed.Status != store.PaymentOrderCancelled || closed.FailureReason == nil ||
-		*closed.FailureReason != "Gateway order was verified and closed" || closed.LastReconciledAt == nil ||
+	if closed.Status != store.PaymentOrderCancelled || closed.FailureReason != nil || closed.LastReconciledAt == nil ||
 		closed.AmountMinor != 1234 || closed.Currency != "USD" ||
 		closed.ProviderAmountMinor != 8638 || closed.ProviderCurrency != "CNY" || closed.ConversionRate != "7" {
 		t.Fatalf("closed EPay order response = %+v", closed)
@@ -49,10 +40,14 @@ func TestEPayAdminCloseRequiresDisabledChannelAndAuditReason(t *testing.T) {
 		t.Fatalf("get manually closed EPay order: %v", err)
 	}
 	if stored.Status != store.PaymentOrderCancelled || stored.FailureCode != "admin_manual_close" ||
-		stored.FailureMessage != "Gateway order was verified and closed" || stored.LastReconciledAt == 0 ||
+		stored.FailureMessage != "" || stored.LastReconciledAt == 0 ||
 		stored.AmountMinor != 1234 || stored.Currency != "USD" ||
 		stored.ProviderAmountMinor != 8638 || stored.ProviderCurrency != "CNY" || stored.ConversionRate != "7" {
 		t.Fatalf("stored manually closed EPay order = %+v", stored)
+	}
+	storedChannel, err := store.GetPaymentChannel(context.Background(), fx.db, channel.ID)
+	if err != nil || !storedChannel.Enabled {
+		t.Fatalf("manual order close changed enabled EPay channel: %+v, %v", storedChannel, err)
 	}
 	events, err := store.ListPaymentEventsForOrder(context.Background(), fx.db, order.ID)
 	if err != nil {
@@ -63,7 +58,7 @@ func TestEPayAdminCloseRequiresDisabledChannelAndAuditReason(t *testing.T) {
 	}
 
 	repeated := fx.request(t, http.MethodPost, path, map[string]any{
-		"action": "close", "confirm": true, "reason": "Gateway order was verified and closed",
+		"action": "close", "confirm": true,
 	})
 	if repeated.Code != http.StatusConflict {
 		t.Fatalf("repeated EPay close status = %d, want 409; body=%s", repeated.Code, repeated.Body.String())
@@ -72,6 +67,45 @@ func TestEPayAdminCloseRequiresDisabledChannelAndAuditReason(t *testing.T) {
 	if err != nil || len(events) != 1 {
 		t.Fatalf("repeated EPay close changed audit events: %+v, %v", events, err)
 	}
+}
+
+func TestPaymentOrderCloseReasonAcceptsShortUnicodeAndRejectsOverLimit(t *testing.T) {
+	t.Run("single character", func(t *testing.T) {
+		fx, _, order := createEPayReconciliationFixture(t)
+		rec := fx.request(t, http.MethodPost, "/api/admin/payment-orders/"+order.ID+"/reconcile", map[string]any{
+			"action": "close", "confirm": true, "reason": "已",
+		})
+		closed := decodePaymentAdminResponse[adminPaymentOrderResponse](t, rec, http.StatusOK)
+		if closed.FailureReason == nil || *closed.FailureReason != "已" {
+			t.Fatalf("single-character close reason = %+v", closed.FailureReason)
+		}
+	})
+
+	t.Run("five hundred unicode characters", func(t *testing.T) {
+		fx, _, order := createEPayReconciliationFixture(t)
+		reason := strings.Repeat("由", 500)
+		rec := fx.request(t, http.MethodPost, "/api/admin/payment-orders/"+order.ID+"/reconcile", map[string]any{
+			"action": "close", "confirm": true, "reason": reason,
+		})
+		closed := decodePaymentAdminResponse[adminPaymentOrderResponse](t, rec, http.StatusOK)
+		if closed.FailureReason == nil || *closed.FailureReason != reason {
+			t.Fatalf("500-character close reason length = %d", len(reason))
+		}
+	})
+
+	t.Run("more than five hundred unicode characters", func(t *testing.T) {
+		fx, _, order := createEPayReconciliationFixture(t)
+		rec := fx.request(t, http.MethodPost, "/api/admin/payment-orders/"+order.ID+"/reconcile", map[string]any{
+			"action": "close", "confirm": true, "reason": strings.Repeat("由", 501),
+		})
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("overlong close reason status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+		}
+		stored, err := store.GetPaymentOrder(context.Background(), fx.db, order.ID)
+		if err != nil || stored.Status != store.PaymentOrderPending {
+			t.Fatalf("overlong reason changed payment order: %+v, %v", stored, err)
+		}
+	})
 }
 
 func TestEPayPendingOrderCanBeDisabledAfterSettlementCurrencyChanges(t *testing.T) {

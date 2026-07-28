@@ -18,7 +18,7 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.22
 	github.com/redis/go-redis/v9 v9.7.0
 	github.com/stripe/stripe-go/v86 v86.1.1
-	github.com/waffo-com/waffo-pancake-sdk-go v0.6.0
+	github.com/waffo-com/waffo-pancake-sdk-go v0.7.0
 	golang.org/x/crypto v0.21.0
 	golang.org/x/image v0.36.0
 )

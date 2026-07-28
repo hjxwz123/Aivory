@@ -70,6 +70,7 @@ export default function Setup() {
             leadingIcon={<User size={14} aria-hidden />}
             autoComplete="name"
             invalid={!!errors.name}
+            wrapperClassName="focus-within:ring-0"
           />
         </Field>
         <Field label={t('fields.email')} htmlFor="setup-email" error={errors.email}>
@@ -82,6 +83,7 @@ export default function Setup() {
             leadingIcon={<Mail size={14} aria-hidden />}
             autoComplete="email"
             invalid={!!errors.email}
+            wrapperClassName="focus-within:ring-0"
           />
         </Field>
         <Field label={t('fields.password')} htmlFor="setup-pw" hint={t('fields.passwordHint')} error={errors.pw}>
@@ -93,6 +95,7 @@ export default function Setup() {
             leadingIcon={<Lock size={14} aria-hidden />}
             autoComplete="new-password"
             invalid={!!errors.pw}
+            wrapperClassName="focus-within:ring-0"
           />
         </Field>
         <Button type="submit" size="lg" loading={loading} trailingIcon={<ArrowRight size={15} aria-hidden />} className="w-full">

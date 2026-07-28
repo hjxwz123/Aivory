@@ -26,6 +26,16 @@ const (
 	paymentCheckoutStateTimeout    = 10 * time.Second
 )
 
+func paymentCheckoutFailureDetails(err error) (int, error, string, string) {
+	if errors.Is(err, payment.ErrWaffoProductCurrencyUnsupported) {
+		return http.StatusUnprocessableEntity, payment.ErrWaffoProductCurrencyUnsupported,
+			payment.ErrWaffoProductCurrencyUnsupported.Error(),
+			"Waffo product does not support the configured checkout currency"
+	}
+	return http.StatusBadGateway, errors.New("payment_checkout_unavailable"),
+		"provider_checkout_failed", "Payment provider could not create checkout"
+}
+
 type publicPaymentMethod struct {
 	ID       string `json:"id"`
 	Name     string `json:"name"`
@@ -186,14 +196,15 @@ func createPaymentCheckoutHandler(d Deps, w http.ResponseWriter, r *http.Request
 	providerCancel()
 	if err != nil {
 		stateCtx, stateCancel := paymentDetachedContext(r, paymentCheckoutStateTimeout)
+		responseStatus, responseErr, failureCode, failureMessage := paymentCheckoutFailureDetails(err)
 		if payment.IsCheckoutStateUnknown(err) {
 			_, _ = store.MarkPaymentOrderProcessing(stateCtx, d.DB, order.ID, "")
 		} else {
-			_, _ = store.MarkPaymentOrderFailed(stateCtx, d.DB, order.ID, "provider_checkout_failed", "Payment provider could not create checkout")
+			_, _ = store.MarkPaymentOrderFailed(stateCtx, d.DB, order.ID, failureCode, failureMessage)
 		}
 		stateCancel()
 		slog.Error("payment checkout creation failed", "provider", order.Provider, "channel_id", order.ChannelID, "order_id", order.ID, "err", err)
-		writeError(w, http.StatusBadGateway, errors.New("payment_checkout_unavailable"))
+		writeError(w, responseStatus, responseErr)
 		return
 	}
 	if !validAbsolutePaymentHTTPURL(action.URL) || (action.Type != payment.ActionRedirect && action.Type != payment.ActionFormPost) {

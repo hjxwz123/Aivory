@@ -33,6 +33,10 @@ type providerRequestSnapshot struct {
 	Header  string
 	Body    string
 	Attempt int
+	// Fallback identifies the channel credentials used for this exact upstream
+	// request. A turn may switch after one or more successful primary tool rounds,
+	// so attribution cannot be derived from a single turn-wide flag.
+	Fallback bool
 	// Usage of the stream this request produced, attached by the provider once
 	// the response has been read (§B5-per-request usage rows). HasUsage marks
 	// requests that completed a stream — only those become usage rows.
@@ -78,11 +82,15 @@ func contextWithoutProviderRequestRecorder(ctx context.Context) context.Context 
 }
 
 func recordProviderRequest(ctx context.Context, req *http.Request) {
+	recordProviderRequestAttempt(ctx, req, false)
+}
+
+func recordProviderRequestAttempt(ctx context.Context, req *http.Request, fallback bool) {
 	rec, _ := ctx.Value(providerRequestRecorderKey{}).(*providerRequestRecorder)
 	if rec == nil || req == nil {
 		return
 	}
-	rec.record(req)
+	rec.record(req, fallback)
 }
 
 // attachProviderRequestUsage pins one stream's parsed usage onto the most
@@ -119,20 +127,22 @@ func (r *providerRequestRecorder) snapshots() []providerRequestSnapshot {
 	return out
 }
 
-func (r *providerRequestRecorder) record(req *http.Request) {
+func (r *providerRequestRecorder) record(req *http.Request, fallbackAttempt ...bool) {
 	if r == nil || req == nil {
 		return
 	}
+	fallback := len(fallbackAttempt) > 0 && fallbackAttempt[0]
 	body := snapshotRequestBody(req)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.attempt++
 	r.last = providerRequestSnapshot{
-		Method:  req.Method,
-		URL:     sanitizeProviderRequestURL(req.URL),
-		Header:  sanitizeProviderRequestHeaders(req.Header),
-		Body:    sanitizeProviderRequestBody(body),
-		Attempt: r.attempt,
+		Method:   req.Method,
+		URL:      sanitizeProviderRequestURL(req.URL),
+		Header:   sanitizeProviderRequestHeaders(req.Header),
+		Body:     sanitizeProviderRequestBody(body),
+		Attempt:  r.attempt,
+		Fallback: fallback,
 	}
 	if len(r.all) < maxProviderRequestSnapshots {
 		entry := r.last

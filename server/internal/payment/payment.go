@@ -12,6 +12,7 @@ import (
 var ErrCheckoutStateUnknown = errors.New("payment provider checkout state is unknown")
 var ErrCheckoutNotClosable = errors.New("payment provider checkout cannot be closed safely")
 var ErrReconciliationUnsupported = errors.New("payment provider reconciliation is unsupported")
+var ErrWaffoProductCurrencyUnsupported = errors.New("payment_waffo_product_currency_unsupported")
 
 // IsCheckoutStateUnknown classifies transport failures where the provider may
 // have accepted the request even though Aivory did not receive a response.

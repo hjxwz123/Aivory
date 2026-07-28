@@ -104,10 +104,11 @@ type UnifiedChatRequest struct {
 	// MaxOutputTokens overrides the provider's default max_tokens cap.
 	// Used by TaskLLM for short internal calls.
 	MaxOutputTokens int
-	// FallbackUsed, when non-nil, is set by the provider (via doProviderRequest)
-	// the first time it serves ANY request in this turn — including a tool-loop
-	// round — through Model.Fallback. The orchestrator reads it after Stream to
-	// flag the turn's usage row as fallback (§fallback channel). nil = untracked.
+	// FallbackUsed, when non-nil, is set by the provider the first time it serves
+	// ANY request in this turn — including a tool-loop round — through
+	// Model.Fallback. Once set, later rounds stay on that channel. The
+	// orchestrator reads it after Stream to flag the turn's usage row as fallback
+	// (§fallback channel). nil = untracked.
 	FallbackUsed *atomic.Bool
 }
 
@@ -120,10 +121,11 @@ type ModelInfo struct {
 	BaseURL   string
 	APIKey    string
 	APIFormat string
-	// Fallback, when non-nil, is the backup endpoint retried when a primary
-	// request fails in a way a different channel could fix (transport error /
-	// 401 / 403 / 408 / 429 / 5xx). Same channel type + format as the primary —
-	// only the URL and key differ (§fallback channel). nil = no fallback.
+	// Fallback, when non-nil, is the backup endpoint retried when a complete
+	// primary round fails (request construction, transport, non-2xx status, SSE
+	// error, malformed protocol, empty body, or interrupted body). Same provider
+	// family + format as the primary — only URL and key differ (§fallback
+	// channel). nil = no fallback.
 	Fallback *ChannelCreds
 }
 

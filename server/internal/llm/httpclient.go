@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -31,10 +32,10 @@ func providerBaseURL(baseURL, vendorDefault string) string {
 // minutes before the first SSE frame. The request context plus the provider
 // TTFT watchdog/admin generation cap are the right owners of that decision.
 //
-// Retries are intentionally NOT applied to streaming generation: replaying after
-// partial output (already-streamed tokens / tool calls) is unsafe. A transient
-// upstream 429/5xx surfaces as a turn error and the user re-sends; the prior
-// timeout-less http.DefaultClient could instead hang a goroutine indefinitely.
+// A configured channel fallback may retry one complete upstream response before
+// that response's buffered events are committed to the client. It never replays
+// a tool that has already run: providers retry the failed HTTP/SSE round in
+// place, then keep the fallback channel sticky for the rest of the turn.
 var providerHTTPClient = &http.Client{
 	Transport: &http.Transport{
 		Proxy:                 http.ProxyFromEnvironment,
@@ -72,10 +73,7 @@ func doProviderRequest(
 	if err != nil {
 		return nil, err
 	}
-	recordProviderRequest(ctx, primaryReq)
-	armProviderTTFTWatchdog(ctx)
-	resp, err := providerHTTPClient.Do(primaryReq)
-	wrapFirstByteBody(ctx, resp)
+	resp, err := sendProviderRequest(ctx, primaryReq, false)
 	if m.Fallback == nil || !retryableUpstreamFailure(resp, err) {
 		return resp, err
 	}
@@ -87,14 +85,11 @@ func doProviderRequest(
 	if berr != nil {
 		return resp, err // keep the original (unclosed) failure; couldn't build the retry
 	}
-	recordProviderRequest(ctx, fbReq)
 	// Release the primary connection now that we're committed to the retry.
 	if resp != nil && resp.Body != nil {
 		_ = resp.Body.Close()
 	}
-	armProviderTTFTWatchdog(ctx)
-	resp2, err2 := providerHTTPClient.Do(fbReq)
-	wrapFirstByteBody(ctx, resp2)
+	resp2, err2 := sendProviderRequest(ctx, fbReq, true)
 	// The fallback endpoint served the (final) response — mark the turn fallback
 	// whether or not it ultimately succeeded, so an error row is still attributed
 	// to the fallback channel.
@@ -102,6 +97,173 @@ func doProviderRequest(
 		fallbackUsed.Store(true)
 	}
 	return resp2, err2
+}
+
+// doProviderParsedRequest owns one complete upstream HTTP response, including
+// status validation and body/SSE parsing performed by consume. With a configured
+// fallback channel, primary events are buffered until consume succeeds. If ANY
+// non-cancellation failure occurs (transport, HTTP status, malformed protocol,
+// explicit SSE error, or interrupted body), the buffered events are discarded
+// and the same round is attempted once against the fallback credentials.
+//
+// A successful switch is sticky for the rest of the provider's tool loop: later
+// rounds go directly to the fallback. This avoids mixing provider-side state or
+// signed reasoning blocks between channels. The fallback attempt itself streams
+// live because there is no third attempt that could require another rollback.
+// Caller cancellation/deadline is not a channel failure and is never replayed;
+// buffered partial events are flushed so stop semantics remain unchanged.
+func doProviderParsedRequest(
+	ctx context.Context,
+	m ModelInfo,
+	fallbackUsed *atomic.Bool,
+	build func(baseURL, apiKey string) (*http.Request, error),
+	consume func(resp *http.Response, onEvent func(SseEvent)) error,
+	onEvent func(SseEvent),
+) error {
+	if onEvent == nil {
+		onEvent = func(SseEvent) {}
+	}
+
+	consumeAttempt := func(req *http.Request, fallback bool, emit func(SseEvent)) error {
+		resp, err := sendProviderRequest(ctx, req, fallback)
+		if err != nil {
+			if resp != nil && resp.Body != nil {
+				_ = resp.Body.Close()
+			}
+			return err
+		}
+		if resp == nil {
+			return errors.New("provider returned no HTTP response")
+		}
+		if resp.Body != nil {
+			defer resp.Body.Close()
+		}
+		return consume(resp, emit)
+	}
+
+	// Once a prior round switched channels, do not probe the failed primary
+	// again. FallbackUsed is turn-scoped and shared by every provider iteration.
+	useStickyFallback := m.Fallback != nil && (m.APIKey == "" || (fallbackUsed != nil && fallbackUsed.Load()))
+	if useStickyFallback {
+		fbReq, err := build(m.Fallback.BaseURL, m.Fallback.APIKey)
+		if err != nil {
+			return err
+		}
+		if fallbackUsed != nil {
+			fallbackUsed.Store(true)
+		}
+		return consumeAttempt(fbReq, true, onEvent)
+	}
+
+	primaryReq, err := build(m.BaseURL, m.APIKey)
+	if err != nil && m.Fallback == nil {
+		return err
+	}
+	if m.Fallback == nil {
+		return consumeAttempt(primaryReq, false, onEvent)
+	}
+
+	buffered := make([]SseEvent, 0, 32)
+	emitBuffered := func(ev SseEvent) { buffered = append(buffered, ev) }
+	primaryErr := err
+	if primaryErr == nil {
+		primaryErr = consumeAttempt(primaryReq, false, emitBuffered)
+	}
+	if primaryErr == nil {
+		for _, ev := range buffered {
+			onEvent(ev)
+		}
+		return nil
+	}
+	if !fallbackAllowedAfter(ctx, primaryErr) {
+		for _, ev := range buffered {
+			onEvent(ev)
+		}
+		return primaryErr
+	}
+
+	// Build before discarding the primary's partial events. If the configured
+	// fallback URL itself is invalid, preserve the primary result/error exactly.
+	fbReq, buildErr := build(m.Fallback.BaseURL, m.Fallback.APIKey)
+	if buildErr != nil {
+		for _, ev := range buffered {
+			onEvent(ev)
+		}
+		return primaryErr
+	}
+	if fallbackUsed != nil {
+		fallbackUsed.Store(true)
+	}
+	return consumeAttempt(fbReq, true, onEvent)
+}
+
+func sendProviderRequest(ctx context.Context, req *http.Request, fallback bool) (*http.Response, error) {
+	recordProviderRequestAttempt(ctx, req, fallback)
+	armProviderTTFTWatchdog(ctx)
+	resp, err := providerHTTPClient.Do(req)
+	wrapFirstByteBody(ctx, resp)
+	return resp, err
+}
+
+func fallbackAllowedAfter(ctx context.Context, err error) bool {
+	if err == nil || ctx.Err() != nil {
+		return false
+	}
+	return !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded)
+}
+
+// providerStatusError keeps the numeric status available to provider-specific
+// compatibility paths (notably Anthropic's one-time thinking-strip retry) while
+// preserving the existing admin-visible error text.
+type providerStatusError struct {
+	Provider   string
+	StatusCode int
+	Body       string
+}
+
+func (e *providerStatusError) Error() string {
+	return fmt.Sprintf("%s %d: %s", e.Provider, e.StatusCode, e.Body)
+}
+
+func requireProviderSuccess(resp *http.Response, provider string) error {
+	if resp != nil && resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices {
+		return nil
+	}
+	if resp == nil {
+		return errors.New("provider returned no HTTP response")
+	}
+	b, _ := io.ReadAll(resp.Body)
+	return &providerStatusError{Provider: provider, StatusCode: resp.StatusCode, Body: string(b)}
+}
+
+func providerEventError(provider string, event map[string]any) error {
+	raw, ok := event["error"]
+	if !ok || raw == nil {
+		typeName, _ := event["type"].(string)
+		if !strings.EqualFold(strings.TrimSpace(typeName), "error") {
+			return nil
+		}
+		raw = event
+	}
+	message := "upstream reported an error"
+	switch value := raw.(type) {
+	case string:
+		if strings.TrimSpace(value) != "" {
+			message = strings.TrimSpace(value)
+		}
+	case map[string]any:
+		for _, key := range []string{"message", "detail", "type", "code", "status"} {
+			if text, _ := value[key].(string); strings.TrimSpace(text) != "" {
+				message = strings.TrimSpace(text)
+				break
+			}
+		}
+	}
+	return fmt.Errorf("%s stream error: %s", provider, message)
+}
+
+func invalidProviderStream(provider, detail string) error {
+	return fmt.Errorf("%s stream protocol error: %s", provider, detail)
 }
 
 // wrapFirstByteBody wraps resp.Body (if present) so the TTFT watchdog disarms
@@ -153,5 +315,5 @@ func retryableUpstreamFailure(resp *http.Response, err error) bool {
 	if resp == nil {
 		return true
 	}
-	return resp.StatusCode >= 400
+	return resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices
 }

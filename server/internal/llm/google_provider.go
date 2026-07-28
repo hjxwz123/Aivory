@@ -30,7 +30,7 @@ func (p *GoogleProvider) ID() string { return "google" }
 // compatible with Vertex AI, OpenAI-compatible gateways, and the official
 // API. Tool calls are surfaced through the unified events.)
 func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, tools ToolRunner, onEvent func(SseEvent)) (*UnifiedResult, error) {
-	if req.Model.APIKey == "" {
+	if req.Model.APIKey == "" && req.Model.Fallback == nil {
 		return nil, errors.New("this channel has no API key configured")
 	}
 	if !req.Model.Vision {
@@ -99,7 +99,14 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 		// chunks; we use alt=sse to get one event per line.
 		// §B5: API key travels in the x-goog-api-key header, NOT the query string
 		// (URLs leak into proxy/access logs, Referer, and error wrappers).
-		resp, err := doProviderRequest(ctx, req.Model, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
+		var (
+			text         string
+			thinkingText string
+			calls        []geminiCall
+			modelParts   []map[string]any
+			u            Usage
+		)
+		err := doProviderParsedRequest(ctx, req.Model, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
 			streamURL := fmt.Sprintf("%s/v1beta/models/%s:streamGenerateContent?alt=sse", providerBaseURL(baseURL, "https://generativelanguage.googleapis.com"), req.Model.RequestID)
 			hr, e := http.NewRequestWithContext(ctx, "POST", streamURL, bytes.NewReader(raw))
 			if e != nil {
@@ -109,18 +116,16 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 			hr.Header.Set("accept", "text/event-stream")
 			hr.Header.Set("x-goog-api-key", apiKey)
 			return hr, nil
-		})
-		if err != nil {
-			return nil, err
-		}
-		if resp.StatusCode >= 400 {
-			respBytes, _ := io.ReadAll(resp.Body)
-			resp.Body.Close()
-			return nil, fmt.Errorf("google %d: %s", resp.StatusCode, string(respBytes))
-		}
-
-		text, thinkingText, calls, modelParts, u, err := readGeminiStream(resp.Body, onEvent)
-		resp.Body.Close()
+		}, func(resp *http.Response, emit func(SseEvent)) error {
+			text, thinkingText, u = "", "", Usage{}
+			calls, modelParts = nil, nil
+			if statusErr := requireProviderSuccess(resp, "google"); statusErr != nil {
+				return statusErr
+			}
+			var readErr error
+			text, thinkingText, calls, modelParts, u, readErr = readGeminiStream(resp.Body, emit)
+			return readErr
+		}, onEvent)
 		// §B5-per-request usage rows: pin this iteration's usage to its request.
 		attachProviderRequestUsage(ctx, u)
 		if err != nil {
@@ -359,6 +364,8 @@ func readGeminiStream(body io.Reader, onEvent func(SseEvent)) (string, string, [
 	calls := []geminiCall{}
 	modelParts := []map[string]any{}
 	usage := Usage{}
+	sawEvent := false
+	terminal := false
 	// Most recent thought signature seen this turn — Gemini 3 may attach it to a
 	// thought part (or an earlier streaming chunk) instead of the functionCall
 	// part. We carry it forward so every replayed functionCall keeps a signature.
@@ -372,13 +379,27 @@ func readGeminiStream(body io.Reader, onEvent func(SseEvent)) (string, string, [
 		if payload == "" {
 			continue
 		}
+		if payload == "[DONE]" {
+			terminal = true
+			break
+		}
 		var parsed map[string]any
 		if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
-			continue
+			return text.String(), thinking.String(), calls, modelParts, usage,
+				fmt.Errorf("google stream invalid JSON: %w", err)
+		}
+		if streamErr := providerEventError("google", parsed); streamErr != nil {
+			return text.String(), thinking.String(), calls, modelParts, usage, streamErr
 		}
 		cs, _ := parsed["candidates"].([]any)
+		if len(cs) > 0 {
+			sawEvent = true
+		}
 		for _, c := range cs {
 			cm, _ := c.(map[string]any)
+			if finishReason, _ := cm["finishReason"].(string); finishReason != "" {
+				terminal = true
+			}
 			content, _ := cm["content"].(map[string]any)
 			parts, _ := content["parts"].([]any)
 			for _, pr := range parts {
@@ -421,12 +442,26 @@ func readGeminiStream(body io.Reader, onEvent func(SseEvent)) (string, string, [
 			}
 		}
 		if u, ok := parsed["usageMetadata"].(map[string]any); ok {
+			sawEvent = true
+			terminal = true
 			usage.InputTokens = intOf(u["promptTokenCount"])
 			usage.OutputTokens = intOf(u["candidatesTokenCount"])
 		}
+		if parsed["promptFeedback"] != nil {
+			// A safety/block response is a valid terminal model decision, not a
+			// broken payment/provider channel that should be retried elsewhere.
+			sawEvent = true
+			terminal = true
+		}
+		if terminal {
+			break
+		}
 	}
-	if err := scanner.Err(); err != nil {
+	if err := scanner.Err(); err != nil && !terminal {
 		return text.String(), thinking.String(), calls, modelParts, usage, err
+	}
+	if !sawEvent {
+		return text.String(), thinking.String(), calls, modelParts, usage, invalidProviderStream("google", "empty response")
 	}
 	if len(modelParts) == 0 {
 		modelParts = append(modelParts, map[string]any{"text": ""})
@@ -508,7 +543,11 @@ func (p *GoogleProvider) promptRunOnce(req UnifiedChatRequest) PromptToolRunner 
 		body = MergeOfficialToolRequests(body, req.OfficialToolRequests)
 		stripGoogleEndpointParams(body)
 		raw, _ := json.Marshal(body)
-		resp, err := doProviderRequest(ctx, req.Model, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
+		var (
+			text  string
+			usage Usage
+		)
+		err := doProviderParsedRequest(ctx, req.Model, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
 			url := fmt.Sprintf("%s/v1beta/models/%s:generateContent", providerBaseURL(baseURL, "https://generativelanguage.googleapis.com"), req.Model.RequestID)
 			hr, e := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(raw))
 			if e != nil {
@@ -517,39 +556,47 @@ func (p *GoogleProvider) promptRunOnce(req UnifiedChatRequest) PromptToolRunner 
 			hr.Header.Set("content-type", "application/json")
 			hr.Header.Set("x-goog-api-key", apiKey) // §B5: key in header, not URL
 			return hr, nil
-		})
-		if err != nil {
-			return "", Usage{}, err
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode >= 400 {
-			b, _ := io.ReadAll(resp.Body)
-			return "", Usage{}, fmt.Errorf("google %d: %s", resp.StatusCode, string(b))
-		}
-		respBytes, _ := io.ReadAll(resp.Body)
-		var parsed map[string]any
-		if err := json.Unmarshal(respBytes, &parsed); err != nil {
-			return "", Usage{}, err
-		}
-		text := ""
-		if cs, ok := parsed["candidates"].([]any); ok {
-			for _, c := range cs {
-				cm, _ := c.(map[string]any)
-				content, _ := cm["content"].(map[string]any)
-				parts, _ := content["parts"].([]any)
-				for _, pr := range parts {
-					prm, _ := pr.(map[string]any)
-					if t, _ := prm["text"].(string); t != "" {
-						text += t
+		}, func(resp *http.Response, _ func(SseEvent)) error {
+			text, usage = "", Usage{}
+			if statusErr := requireProviderSuccess(resp, "google"); statusErr != nil {
+				return statusErr
+			}
+			respBytes, readErr := io.ReadAll(resp.Body)
+			if readErr != nil {
+				return readErr
+			}
+			var parsed map[string]any
+			if parseErr := json.Unmarshal(respBytes, &parsed); parseErr != nil {
+				return parseErr
+			}
+			if streamErr := providerEventError("google", parsed); streamErr != nil {
+				return streamErr
+			}
+			text = ""
+			cs, hasCandidates := parsed["candidates"].([]any)
+			if hasCandidates {
+				for _, c := range cs {
+					cm, _ := c.(map[string]any)
+					content, _ := cm["content"].(map[string]any)
+					parts, _ := content["parts"].([]any)
+					for _, pr := range parts {
+						prm, _ := pr.(map[string]any)
+						if t, _ := prm["text"].(string); t != "" {
+							text += t
+						}
 					}
 				}
 			}
-		}
-		usage := Usage{}
-		if u, ok := parsed["usageMetadata"].(map[string]any); ok {
-			usage.InputTokens = intOf(u["promptTokenCount"])
-			usage.OutputTokens = intOf(u["candidatesTokenCount"])
-		}
-		return text, usage, nil
+			usage = Usage{}
+			if u, ok := parsed["usageMetadata"].(map[string]any); ok {
+				usage.InputTokens = intOf(u["promptTokenCount"])
+				usage.OutputTokens = intOf(u["candidatesTokenCount"])
+			}
+			if (!hasCandidates || len(cs) == 0) && parsed["promptFeedback"] == nil {
+				return invalidProviderStream("google", "response contained no candidates")
+			}
+			return nil
+		}, func(SseEvent) {})
+		return text, usage, err
 	}
 }

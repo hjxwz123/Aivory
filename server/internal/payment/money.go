@@ -94,16 +94,16 @@ func ParseMinorAmount(value, currency string) (int64, error) {
 func NormalizeConversionRate(value string) (string, error) {
 	value = strings.TrimSpace(value)
 	if value == "" || len(value) > 128 || strings.HasPrefix(value, "-") || strings.HasPrefix(value, "+") {
-		return "", errors.New("EPay conversion rate must be a positive decimal")
+		return "", errors.New("payment conversion rate must be a positive decimal")
 	}
 	parts := strings.Split(value, ".")
 	if len(parts) > 2 || parts[0] == "" || (len(parts) == 2 && parts[1] == "") {
-		return "", errors.New("EPay conversion rate must be a positive decimal")
+		return "", errors.New("payment conversion rate must be a positive decimal")
 	}
 	for _, part := range parts {
 		for _, ch := range part {
 			if ch < '0' || ch > '9' {
-				return "", errors.New("EPay conversion rate must be a positive decimal")
+				return "", errors.New("payment conversion rate must be a positive decimal")
 			}
 		}
 	}
@@ -116,7 +116,7 @@ func NormalizeConversionRate(value string) (string, error) {
 		fraction = strings.TrimRight(parts[1], "0")
 	}
 	if integer == "0" && fraction == "" {
-		return "", errors.New("EPay conversion rate must be greater than zero")
+		return "", errors.New("payment conversion rate must be greater than zero")
 	}
 	if fraction == "" {
 		return integer, nil
@@ -145,7 +145,7 @@ func ConvertMinorAmount(amountMinor int64, sourceCurrency, targetCurrency, rate 
 	}
 	rateNumerator, ok := new(big.Int).SetString(rateDigits, 10)
 	if !ok || rateNumerator.Sign() <= 0 {
-		return 0, "", errors.New("EPay conversion rate must be a positive decimal")
+		return 0, "", errors.New("payment conversion rate must be a positive decimal")
 	}
 	rateDenominator := pow10Big(fractionDigits)
 
@@ -159,10 +159,10 @@ func ConvertMinorAmount(amountMinor int64, sourceCurrency, targetCurrency, rate 
 		quotient.Add(quotient, big.NewInt(1))
 	}
 	if quotient.Sign() <= 0 {
-		return 0, "", errors.New("converted EPay amount rounds to zero")
+		return 0, "", errors.New("converted payment amount rounds to zero")
 	}
 	if !quotient.IsInt64() {
-		return 0, "", errors.New("converted EPay amount is out of range")
+		return 0, "", errors.New("converted payment amount is out of range")
 	}
 	return quotient.Int64(), normalizedRate, nil
 }

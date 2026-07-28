@@ -101,7 +101,7 @@ func mergePaymentChannelConfig(provider string, existing, incoming json.RawMessa
 		if err != nil {
 			return nil, err
 		}
-		if provider == paymentcore.ProviderEPay && paymentConfigCurrencyChanged(current, next) {
+		if (provider == paymentcore.ProviderEPay || provider == paymentcore.ProviderWaffo) && paymentConfigCurrencyChanged(current, next) {
 			// A conversion rate belongs to one provider/settlement currency pair.
 			// Do not silently reinterpret an inherited rate after the provider
 			// currency changes; the administrator must submit the new pair.
@@ -204,6 +204,15 @@ func normalizePaymentChannelConfigForState(provider string, raw json.RawMessage,
 		cfg.PrivateKey = strings.TrimSpace(cfg.PrivateKey)
 		cfg.StoreID = strings.TrimSpace(cfg.StoreID)
 		cfg.ProductID = strings.TrimSpace(cfg.ProductID)
+		cfg.Currency = strings.ToUpper(strings.TrimSpace(cfg.Currency))
+		cfg.ConversionRateBaseCurrency = strings.ToUpper(strings.TrimSpace(cfg.ConversionRateBaseCurrency))
+		if rate := strings.TrimSpace(cfg.ConversionRate.String()); rate != "" {
+			normalizedRate, err := paymentcore.NormalizeConversionRate(rate)
+			if err != nil {
+				return nil, err
+			}
+			cfg.ConversionRate = json.Number(normalizedRate)
+		}
 		cfg.Mode = strings.ToLower(strings.TrimSpace(cfg.Mode))
 		cfg.WebhookPublicKey = strings.TrimSpace(cfg.WebhookPublicKey)
 		if err := paymentcore.ValidateWaffoConfig(cfg); err != nil {
@@ -291,22 +300,35 @@ func normalizePaymentMethodConfig(provider string, raw json.RawMessage) (json.Ra
 }
 
 func paymentChannelSupportsCurrency(provider string, config json.RawMessage, currency string) bool {
-	if provider != paymentcore.ProviderEPay {
+	switch provider {
+	case paymentcore.ProviderEPay:
+		var cfg paymentcore.EPayConfig
+		return json.Unmarshal(config, &cfg) == nil && paymentcore.ValidateEPaySettlementConfig(cfg, currency) == nil
+	case paymentcore.ProviderWaffo:
+		var cfg paymentcore.WaffoConfig
+		return json.Unmarshal(config, &cfg) == nil && paymentcore.ValidateWaffoSettlementConfig(cfg, currency) == nil
+	default:
 		return true
 	}
-	var cfg paymentcore.EPayConfig
-	return json.Unmarshal(config, &cfg) == nil && paymentcore.ValidateEPaySettlementConfig(cfg, currency) == nil
 }
 
 func validatePaymentChannelSettlementConfig(provider string, config json.RawMessage, currency string) error {
-	if provider != paymentcore.ProviderEPay {
+	switch provider {
+	case paymentcore.ProviderEPay:
+		var cfg paymentcore.EPayConfig
+		if json.Unmarshal(config, &cfg) != nil {
+			return errors.New("invalid EPay configuration")
+		}
+		return paymentcore.ValidateEPaySettlementConfig(cfg, currency)
+	case paymentcore.ProviderWaffo:
+		var cfg paymentcore.WaffoConfig
+		if json.Unmarshal(config, &cfg) != nil {
+			return errors.New("invalid Waffo configuration")
+		}
+		return paymentcore.ValidateWaffoSettlementConfig(cfg, currency)
+	default:
 		return nil
 	}
-	var cfg paymentcore.EPayConfig
-	if json.Unmarshal(config, &cfg) != nil {
-		return errors.New("invalid EPay configuration")
-	}
-	return paymentcore.ValidateEPaySettlementConfig(cfg, currency)
 }
 
 func paymentGateway(provider string, channelConfig, methodConfig json.RawMessage) (paymentcore.CheckoutCreator, error) {

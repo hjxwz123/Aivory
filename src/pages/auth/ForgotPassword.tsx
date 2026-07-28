@@ -163,6 +163,7 @@ export default function ForgotPassword() {
                 inputMode="numeric"
                 maxLength={6}
                 className="tracking-[0.3em] text-lg font-mono"
+                wrapperClassName="focus-within:ring-0"
               />
             </Field>
           </motion.div>
@@ -175,6 +176,7 @@ export default function ForgotPassword() {
                 onChange={(e) => setNewPw(e.target.value)}
                 leadingIcon={<Lock size={14} aria-hidden />}
                 autoComplete="new-password"
+                wrapperClassName="focus-within:ring-0"
               />
             </Field>
           </motion.div>
@@ -243,6 +245,7 @@ export default function ForgotPassword() {
               leadingIcon={<Mail size={14} aria-hidden />}
               autoComplete="email"
               invalid={!!error}
+              wrapperClassName="focus-within:ring-0"
             />
           </Field>
         </motion.div>

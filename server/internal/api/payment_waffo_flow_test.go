@@ -22,6 +22,60 @@ import (
 	"aivory/server/internal/store"
 )
 
+func TestWaffoPaymentOrderSnapshotsConfiguredProductCurrency(t *testing.T) {
+	db := openMigrated(t, filepath.Join(t.TempDir(), "waffo-currency.db"))
+	t.Cleanup(func() { _ = db.Close() })
+	if err := store.SetSetting(db, "settlement_currency", "CNY"); err != nil {
+		t.Fatalf("set settlement currency: %v", err)
+	}
+	mustExec(t, db,
+		`INSERT INTO users(id,email,password_hash,group_id) VALUES(?,?,?,?)`,
+		"waffo_currency_user", "waffo-currency@example.test", "hash", store.DefaultGroupID,
+	)
+	_, privatePEM, _ := newAPIWaffoKeyPair(t)
+	cfg := payment.WaffoConfig{
+		MerchantID: "MER_0123456789abcdefghijkl", PrivateKey: privatePEM,
+		StoreID: "STO_0123456789abcdefghijkl", ProductID: "PROD_0123456789abcdefghijkl",
+		Currency: "USD", ConversionRate: "0.14", ConversionRateBaseCurrency: "CNY", Mode: "test",
+	}
+	rawConfig, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("marshal Waffo currency config: %v", err)
+	}
+	channel, err := store.CreatePaymentChannel(context.Background(), db, store.PaymentChannel{
+		ID: "paych_waffo_currency", Name: "Waffo USD", Provider: payment.ProviderWaffo,
+		Config: rawConfig, Enabled: true,
+	})
+	if err != nil {
+		t.Fatalf("create Waffo currency channel: %v", err)
+	}
+	method, err := store.CreatePaymentMethod(context.Background(), db, store.PaymentMethod{
+		ID: "paym_waffo_currency", ChannelID: channel.ID, Name: "Waffo card", Type: payment.ProviderWaffo,
+		ProviderMethodConfig: json.RawMessage(`{}`), Enabled: true,
+	})
+	if err != nil {
+		t.Fatalf("create Waffo currency method: %v", err)
+	}
+	pkg, err := store.CreateCreditPackage(context.Background(), db, store.CreditPackage{
+		ID: "cp_waffo_currency", Name: "CNY package", Credits: 2800, PriceAmountMinor: 28000, Enabled: true,
+	})
+	if err != nil {
+		t.Fatalf("create Waffo currency package: %v", err)
+	}
+
+	order, err := store.CreatePaymentOrder(context.Background(), db, store.PaymentOrderCreateInput{
+		UserID: "waffo_currency_user", PaymentMethodID: method.ID,
+		ProductType: store.PaymentProductCreditPackage, ProductID: pkg.ID,
+	})
+	if err != nil {
+		t.Fatalf("create Waffo currency order: %v", err)
+	}
+	if order.AmountMinor != 28000 || order.Currency != "CNY" ||
+		order.ProviderAmountMinor != 3920 || order.ProviderCurrency != "USD" || order.ConversionRate != "0.14" {
+		t.Fatalf("Waffo currency snapshots = %+v", order)
+	}
+}
+
 func TestWaffoPancakeWebhookFulfillsCreditOrderExactlyOnce(t *testing.T) {
 	db := openMigrated(t, filepath.Join(t.TempDir(), "waffo-payment.db"))
 	t.Cleanup(func() { _ = db.Close() })

@@ -2,6 +2,7 @@ const CHECKOUT_ERROR_KEYS = {
   payment_method_unavailable: 'payment.errors.methodUnavailable',
   payment_product_unavailable: 'payment.errors.productUnavailable',
   payment_checkout_unavailable: 'payment.errors.checkoutUnavailable',
+  payment_waffo_product_currency_unsupported: 'payment.errors.waffoProductCurrencyUnsupported',
   payment_user_group_already_permanent: 'payment.errors.userGroupAlreadyPermanent',
 } as const
 
