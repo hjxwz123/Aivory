@@ -3,6 +3,7 @@ package api
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -160,13 +161,15 @@ func login2faHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	// even a correct one. (The password flow keeps its ticket in the request
 	// body, so it tolerated retries; the OAuth flow got exactly one shot.) We
 	// only clear the cookie once the ticket is actually consumed or burned.
-	uid, ok := d.Cache.Get("2fa:" + ticket)
+	rawTicket, ok := d.Cache.Get("2fa:" + ticket)
 	if !ok {
 		clear2faCookie(w) // dead ticket → the handoff cookie is useless now
 		d.Logger.Printf("[2fa] verify: ticket not found/expired (must redo sign-in)")
 		writeError(w, 401, errTwofaSessionExpired)
 		return
 	}
+	ticketData := parseTwofaLoginTicket(rawTicket)
+	uid := ticketData.UserID
 	user, err := store.FindUserByID(r.Context(), d.DB, uid)
 	if err != nil || user.Status != "active" {
 		clear2faCookie(w)
@@ -199,7 +202,11 @@ func login2faHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	d.Cache.Delete("2fa:" + ticket)
 	d.Cache.Delete("2fa:fail:" + ticket)
 	clear2faCookie(w)
-	finaliseSession(d, w, r, user, 0)
+	method := store.LoginMethodPassword2FA
+	if ticketData.Source == store.LoginMethodOAuth {
+		method = store.LoginMethodOAuth2FA
+	}
+	finaliseLoginSession(d, w, r, user, method)
 }
 
 // clear2faCookie expires the OAuth 2FA handoff cookie (Path must match the one
@@ -215,12 +222,38 @@ func clear2faCookie(w http.ResponseWriter) {
 
 // issueTwofaTicket mints a short-lived ticket that stands in for a verified
 // password until the user supplies their 2FA code.
-func issueTwofaTicket(d Deps, userID string) string {
+type twofaLoginTicket struct {
+	UserID string `json:"user_id"`
+	Source string `json:"source"`
+}
+
+func issueTwofaTicket(d Deps, userID, source string) string {
 	buf := make([]byte, 16)
 	if _, err := rand.Read(buf); err != nil {
 		return ""
 	}
 	ticket := hex.EncodeToString(buf)
-	d.Cache.Set("2fa:"+ticket, userID, issueTwofaTicketTTL)
+	if source != store.LoginMethodOAuth {
+		source = store.LoginMethodPassword
+	}
+	payload, err := json.Marshal(twofaLoginTicket{UserID: userID, Source: source})
+	if err != nil {
+		return ""
+	}
+	d.Cache.Set("2fa:"+ticket, string(payload), issueTwofaTicketTTL)
 	return ticket
+}
+
+// parseTwofaLoginTicket keeps pre-upgrade in-flight tickets usable. Legacy
+// cache values contained only the user id and are conservatively attributed to
+// the password flow because their source cannot be recovered after deployment.
+func parseTwofaLoginTicket(raw string) twofaLoginTicket {
+	var ticket twofaLoginTicket
+	if json.Unmarshal([]byte(raw), &ticket) == nil && ticket.UserID != "" {
+		if ticket.Source != store.LoginMethodOAuth {
+			ticket.Source = store.LoginMethodPassword
+		}
+		return ticket
+	}
+	return twofaLoginTicket{UserID: raw, Source: store.LoginMethodPassword}
 }

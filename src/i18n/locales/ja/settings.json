@@ -15,6 +15,11 @@
     "version": "バージョン",
     "license": "ライセンス",
     "source": "ソースコード",
+    "terms": "利用規約",
+    "viewTerms": "利用規約を見る",
+    "privacyPolicy": "プライバシーポリシー",
+    "viewPrivacy": "ポリシーを見る",
+    "contactEmail": "連絡先メール",
     "copyright": "© {{year}} hjxwz123 · Apache 2.0 ライセンス"
   },
   "personalization": {

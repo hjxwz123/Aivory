@@ -159,6 +159,9 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("GET", "/api/public/needs-setup", wrap(d, needsSetupHandler))
 	mux.handle("POST", "/api/setup", rateLimitedIP(d, "auth", rlFirstRunSetupMax, rlFirstRunSetupWindow, wrap(d, setupHandler)))
 	mux.handle("GET", "/api/public/oauth-providers", wrap(d, oauthProvidersPublicHandler))
+	// Public operator contact + optional policy overrides. The handler exposes a
+	// strict three-field DTO rather than the administrator settings map.
+	mux.handle("GET", "/api/public/legal-config", wrap(d, legalConfigPublicHandler))
 	// Membership tiers for the public landing page (§ user groups) — read-only,
 	// marketing info (names / prices / features / allowances), no secrets.
 	mux.handle("GET", "/api/public/user-groups", wrap(d, listUserGroupsPublic))
@@ -424,6 +427,7 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("GET", "/api/admin/users/:id/conversations", requireAdmin(d, listUserConversationsAdmin))
 	mux.handle("GET", "/api/admin/users/:id/projects", requireAdmin(d, listUserProjectsAdmin))
 	mux.handle("GET", "/api/admin/users/:id/memories", requireAdmin(d, listUserMemoriesAdmin))
+	mux.handle("GET", "/api/admin/users/:id/login-history", requireAdmin(d, listUserLoginHistoryAdmin))
 	// §4.20/§8.1 admin drill-down: a user's generated-image gallery.
 	mux.handle("GET", "/api/admin/users/:id/images", requireAdmin(d, listUserImagesAdmin))
 	mux.handle("GET", "/api/admin/users/:id/kbs", requireAdmin(d, listUserKBsAdmin))

@@ -15,6 +15,11 @@
     "version": "Version",
     "license": "Licence",
     "source": "Code source",
+    "terms": "Conditions d’utilisation",
+    "viewTerms": "Voir les conditions",
+    "privacyPolicy": "Politique de confidentialité",
+    "viewPrivacy": "Voir la politique",
+    "contactEmail": "E-mail de contact",
     "copyright": "© {{year}} hjxwz123 · Sous licence Apache 2.0"
   },
   "personalization": {

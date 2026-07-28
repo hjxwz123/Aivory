@@ -446,7 +446,10 @@
     "knowledge": "知識庫",
     "admin": "管理後臺",
     "subscription": "訂閱",
-    "language": "語言"
+    "language": "語言",
+    "help": "幫助",
+    "terms": "使用者協議",
+    "privacyPolicy": "隱私政策"
   },
   "suggestions": {
     "outline-essay": {

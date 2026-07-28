@@ -127,7 +127,7 @@ func completeOAuthLogin(d Deps, w http.ResponseWriter, r *http.Request, user *st
 	// — hand off to the login page's code step via a short-lived ticket instead of
 	// minting a session here.
 	if user.TotpEnabled {
-		ticket := issueTwofaTicket(d, user.ID)
+		ticket := issueTwofaTicket(d, user.ID, store.LoginMethodOAuth)
 		if ticket == "" {
 			fail("session_error")
 			return
@@ -146,6 +146,7 @@ func completeOAuthLogin(d Deps, w http.ResponseWriter, r *http.Request, user *st
 		fail("session_error")
 		return
 	}
+	recordSuccessfulLogin(d, r, user.ID, store.LoginMethodOAuth)
 	http.Redirect(w, r, base+"/", http.StatusFound)
 }
 

@@ -6,6 +6,7 @@
 import { api, apiUrl, getAccessToken, ApiError, apiUpload, type UploadProgress } from './client'
 import type {
   ApiAdminFile,
+  ApiAdminLoginHistoryPage,
   ApiWorkspace,
   ApiWorkspaceMember,
   ApiAnalytics,
@@ -61,6 +62,9 @@ import { envNum } from '@/lib/env-config'
 export const authApi = {
   signupOpen: () =>
     api<{ open: boolean; captcha_required: boolean; login_captcha_required: boolean }>('/public/signup-open'),
+  /** Public operator contact and optional Markdown policy overrides. */
+  legalConfig: () =>
+    api<{ contact_email: string; terms_text: string; privacy_text: string }>('/public/legal-config'),
   /** Fetch a fresh slider-puzzle captcha (drag the piece into the gap). */
   captcha: () =>
     api<{
@@ -806,6 +810,11 @@ export const adminApi = {
     ),
   user: (id: string) =>
     api<ApiUser>(`/admin/users/${encodeURIComponent(id)}`),
+  /** Successful sign-in audit trail for one user (newest first). */
+  userLoginHistory: (id: string, limit = 50, offset = 0) =>
+    api<ApiAdminLoginHistoryPage>(
+      `/admin/users/${encodeURIComponent(id)}/login-history?limit=${limit}&offset=${offset}`,
+    ),
   reorderUsers: (ids: string[]) =>
     api<{ ok: true }>('/admin/users/reorder', { method: 'PATCH', body: { ids } }),
   createUser: (body: { email: string; name: string; password: string; role: 'user' | 'admin' }) =>

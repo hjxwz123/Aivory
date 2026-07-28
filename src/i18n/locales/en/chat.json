@@ -446,7 +446,10 @@
     "knowledge": "Knowledge",
     "admin": "Admin",
     "subscription": "Subscription",
-    "language": "Language"
+    "language": "Language",
+    "help": "Help",
+    "terms": "Terms of Service",
+    "privacyPolicy": "Privacy Policy"
   },
   "suggestions": {
     "outline-essay": {

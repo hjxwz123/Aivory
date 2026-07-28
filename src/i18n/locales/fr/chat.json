@@ -446,7 +446,10 @@
     "knowledge": "Connaissances",
     "admin": "Admin",
     "subscription": "Abonnement",
-    "language": "Langue"
+    "language": "Langue",
+    "help": "Aide",
+    "terms": "Conditions d’utilisation",
+    "privacyPolicy": "Politique de confidentialité"
   },
   "suggestions": {
     "outline-essay": {

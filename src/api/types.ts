@@ -103,6 +103,26 @@ export interface ApiSession {
   last_seen: number
 }
 
+/** One successful authentication event in an administrator's user audit view. */
+export interface ApiAdminLoginHistoryEntry {
+  id: string
+  user_id: string
+  login_at: number
+  ip: string
+  location: string
+  user_agent: string
+  /** Known methods are listed explicitly; keep string extensibility so a newer
+   * server method still renders instead of being dropped by the client. */
+  method: 'password' | 'password_2fa' | 'oauth' | 'oauth_2fa' | (string & {})
+}
+
+export interface ApiAdminLoginHistoryPage {
+  items: ApiAdminLoginHistoryEntry[]
+  total: number
+  limit: number
+  offset: number
+}
+
 /** Owner-facing descriptor of a conversation's public share (§ sharing). */
 export interface ApiShareInfo {
   id: string

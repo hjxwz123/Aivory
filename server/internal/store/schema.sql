@@ -31,6 +31,20 @@ CREATE TABLE IF NOT EXISTS users (
   created_at    INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 );
 
+-- Immutable successful-login audit trail. Unlike refresh_tokens, these rows
+-- survive logout/session rotation so administrators can review account access.
+CREATE TABLE IF NOT EXISTS login_histories (
+  id         TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  login_at   INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+  ip         TEXT NOT NULL DEFAULT '',
+  location   TEXT NOT NULL DEFAULT '',
+  user_agent TEXT NOT NULL DEFAULT '',
+  method     TEXT NOT NULL DEFAULT 'password'
+);
+CREATE INDEX IF NOT EXISTS idx_login_histories_user_time
+  ON login_histories(user_id, login_at DESC, id DESC);
+
 -- Membership tiers. Exactly one row is the default (is_default=1, seeded as
 -- ug_free). features is a JSON array of feature strings shown on the
 -- subscription page. Prices use the deployment-wide settlement currency and

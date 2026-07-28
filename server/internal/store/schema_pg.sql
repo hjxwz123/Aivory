@@ -36,6 +36,19 @@ CREATE TABLE IF NOT EXISTS users (
   created_at    BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
 );
 
+-- Immutable successful-login audit trail (see schema.sql).
+CREATE TABLE IF NOT EXISTS login_histories (
+  id         TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  login_at   BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint),
+  ip         TEXT NOT NULL DEFAULT '',
+  location   TEXT NOT NULL DEFAULT '',
+  user_agent TEXT NOT NULL DEFAULT '',
+  method     TEXT NOT NULL DEFAULT 'password'
+);
+CREATE INDEX IF NOT EXISTS idx_login_histories_user_time
+  ON login_histories(user_id, login_at DESC, id DESC);
+
 CREATE TABLE IF NOT EXISTS user_groups (
   id          TEXT PRIMARY KEY,
   name        TEXT NOT NULL,
