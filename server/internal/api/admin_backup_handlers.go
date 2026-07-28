@@ -969,6 +969,7 @@ func ensureConfigPaymentChannelNameAvailable(ctx context.Context, tx *sql.Tx, id
 }
 
 func normalizeConfigPaymentChannelRows(ctx context.Context, tx *sql.Tx, r io.Reader) (io.Reader, error) {
+	settlementCurrency := configArchiveSettlementCurrency(ctx, tx)
 	var out bytes.Buffer
 	dec := json.NewDecoder(r)
 	enc := json.NewEncoder(&out)
@@ -1037,12 +1038,15 @@ func normalizeConfigPaymentChannelRows(ctx context.Context, tx *sql.Tx, r io.Rea
 		// Config archives contain plaintext secrets. Starting with an empty base
 		// rejects masked secrets instead of accidentally retaining credentials
 		// from the deployment receiving the archive.
-		mergedConfig, err := mergePaymentChannelConfig(nil, json.RawMessage(configText))
+		mergedConfig, err := mergePaymentChannelConfig(provider, nil, json.RawMessage(configText))
 		if err != nil {
 			return nil, invalidPaymentConfigArchivef("payment_channels[%s].config: %v", id, err)
 		}
 		config, err := normalizePaymentChannelConfig(provider, mergedConfig)
 		if err != nil {
+			return nil, invalidPaymentConfigArchivef("payment_channels[%s].config: %v", id, err)
+		}
+		if err := validatePaymentChannelSettlementConfig(provider, config, settlementCurrency); err != nil {
 			return nil, invalidPaymentConfigArchivef("payment_channels[%s].config: %v", id, err)
 		}
 
@@ -1099,6 +1103,21 @@ func normalizeConfigPaymentChannelRows(ctx context.Context, tx *sql.Tx, r io.Rea
 			return nil, invalidPaymentConfigArchivef("encode payment_channels[%s]: %v", id, err)
 		}
 	}
+}
+
+func configArchiveSettlementCurrency(ctx context.Context, tx *sql.Tx) string {
+	currency := store.DefaultSettlementCurrency
+	var raw string
+	if err := tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key='settlement_currency'`).Scan(&raw); err == nil {
+		var configured string
+		if json.Unmarshal([]byte(raw), &configured) == nil {
+			configured = strings.ToUpper(strings.TrimSpace(configured))
+			if validSettlementCurrency(configured) {
+				currency = configured
+			}
+		}
+	}
+	return currency
 }
 
 type configPaymentMethodState struct {

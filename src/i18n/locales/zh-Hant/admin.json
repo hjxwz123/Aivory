@@ -283,8 +283,7 @@
       "keyId": "Key ID",
       "enabled": "啟用(在登入頁顯示)",
       "redirectUri": "回撥地址(Redirect URI)",
-      "redirectUriHint": "填到第三方主控台的回呼 URI。",
-      "redirectUriNew": "請先儲存 — 儲存後會生成需要在第三方控制檯登記的回撥地址。"
+      "redirectUriHint": "將這個完整 URI 填到第三方主控台，儲存後網址不會變更。"
     },
     "hints": {
       "google": "在 Google Cloud → 憑證 建立 OAuth 用戶端。",
@@ -301,7 +300,9 @@
     "removed": "已刪除登入方式",
     "copy": "複製回撥地址",
     "errors": {
-      "nameRequired": "請填寫按鈕文字"
+      "nameRequired": "請填寫按鈕文字",
+      "callbackLoadFailed": "無法產生回呼網址，請重試。",
+      "idConflict": "該回呼網址已被占用，請關閉並重新開啟表單以產生新網址。"
     },
     "copied": "已複製"
   },
@@ -387,6 +388,15 @@
       "created": "建立於"
     },
     "viewLibrary": "專案與知識庫",
+    "viewMemories": "記憶",
+    "memoriesTitle": "{{name}} 的記憶",
+    "memoriesFallbackTitle": "使用者記憶",
+    "memoriesLead": "查看為該使用者儲存的長期資訊。",
+    "memoriesLoadFailed": "無法載入該使用者的記憶。",
+    "memoriesRetry": "重試",
+    "noMemories": "暫無儲存的記憶",
+    "noMemoriesBody": "該使用者還沒有長期記憶。",
+    "memoryUpdatedAt": "更新於 {{when}}",
     "libraryTitle": "{{name}} 的資料庫",
     "libraryLead": "該使用者的專案與知識庫(唯讀)。",
     "projectsHeading": "專案",
@@ -1081,10 +1091,13 @@
     "secretHint": "如果顯示遮罩值，保持不變即可保留已儲存的密鑰。",
     "created": "支付渠道已建立",
     "updated": "支付渠道已更新",
+    "disableAction": "停用渠道",
+    "disabledSuccess": "支付渠道已停用",
     "removed": "支付渠道已刪除",
     "updatedAt": "更新於 {{date}}",
     "removeTitle": "刪除支付渠道？",
     "removeBody": "確定刪除「{{name}}」？請先移除綁定的支付方式並處理進行中的訂單。",
+    "resolvePendingOrders": "查看支付訂單",
     "summary": {
       "stripe": "Stripe Checkout",
       "waffo": "Waffo 商戶"
@@ -1098,15 +1111,17 @@
       "environmentLive": "正式",
       "environmentTest": "測試",
       "webhookUrl": "回呼網址",
-      "webhookUrlNew": "儲存渠道後會產生回呼網址。",
+      "webhookUrlHint": "將這個完整網址登記到支付平台，儲存後網址不會變更。",
       "secretKey": "Secret Key",
       "webhookSecret": "Webhook 簽名密鑰",
-      "webhookSecretHint": "首次設定時，請先停用並儲存渠道，將產生的回呼網址註冊到 Stripe，再把 whsec_… 密鑰填到這裡並啟用。已有遮罩值保持不變即可保留。",
+      "webhookSecretHint": "將上方回呼網址註冊到 Stripe，再把 whsec_… 密鑰填到這裡並啟用渠道。已有遮罩值保持不變即可保留。",
       "gatewayUrl": "閘道網址",
       "merchantId": "商戶 ID",
       "merchantKey": "商戶密鑰",
       "currency": "EPay 幣別",
-      "currencyHint": "三位大寫幣別代碼。只有與全域結算幣別一致時，才會向購買者顯示此渠道。",
+      "currencyHint": "三位大寫幣別代碼。若與全域結算幣別不同，請在下方填寫換算比例。",
+      "conversionRate": "換算比例：1 {{base}} 對應多少 {{target}}",
+      "conversionRateHint": "填寫 1 {{base}} 需要收取多少 {{target}}，支援 7.23 這類小數。",
       "storeId": "商店 ID",
       "storeIdHint": "請使用 Waffo Dashboard 的商店 ID（STO_*）。",
       "productId": "商品 ID",
@@ -1125,7 +1140,11 @@
       "nameRequired": "請輸入渠道名稱。",
       "configRequired": "請填寫所有必填的協定參數。",
       "currencyInvalid": "EPay 幣別必須是 CNY 這類三位代碼。",
-      "modeInvalid": "請選擇 Waffo 測試或正式環境。"
+      "conversionRateInvalid": "請輸入大於 0 的 EPay 換算比例，例如 7.23。",
+      "modeInvalid": "請選擇 Waffo 測試或正式環境。",
+      "callbackLoadFailed": "無法產生回呼網址，請重試。",
+      "idConflict": "該回呼網址已被占用，請關閉並重新開啟表單以產生新網址。",
+      "pendingOrders": "此渠道存在待付款或處理中的訂單。請前往「支付訂單」頁面完成或關閉這些訂單，再修改渠道協定、憑證或環境。"
     }
   },
   "paymentMethods": {

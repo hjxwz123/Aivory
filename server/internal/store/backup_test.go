@@ -118,6 +118,85 @@ func TestBackupRoundTrip(t *testing.T) {
 	}
 }
 
+func TestPaymentOrderBackupRestoresProviderSnapshotsAcrossVersions(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(filepath.Join(t.TempDir(), "payment-snapshots.db"))
+	if err != nil {
+		t.Fatalf("open payment snapshot database: %v", err)
+	}
+	defer db.Close()
+	if err := Migrate(db); err != nil {
+		t.Fatalf("migrate payment snapshot database: %v", err)
+	}
+
+	baseRow := func(id string) map[string]any {
+		return map[string]any{
+			"id": id, "user_email": "backup@example.test", "provider": "epay",
+			"channel_id": "paych_backup", "channel_name": "Backup EPay",
+			"method_id": "paym_backup", "method_name": "Alipay", "method_type": "epay",
+			"product_type": PaymentProductCreditPackage, "product_id": "cp_backup",
+			"product_name": "Backup package", "amount_minor": 4000, "currency": "USD",
+		}
+	}
+	restoreRow := func(row map[string]any) {
+		t.Helper()
+		encoded, marshalErr := json.Marshal(row)
+		if marshalErr != nil {
+			t.Fatalf("marshal payment-order backup row: %v", marshalErr)
+		}
+		count, restoreErr := RestoreTable(ctx, db, "payment_orders", bytes.NewReader(encoded))
+		if restoreErr != nil {
+			t.Fatalf("restore payment-order backup row: %v", restoreErr)
+		}
+		if count != 1 {
+			t.Fatalf("restored payment-order rows = %d, want 1", count)
+		}
+	}
+
+	legacy := baseRow("po_backup_legacy")
+	restoreRow(legacy)
+	legacyOrder, err := GetPaymentOrder(ctx, db, "po_backup_legacy")
+	if err != nil {
+		t.Fatalf("get restored legacy payment order: %v", err)
+	}
+	if legacyOrder.ProviderAmountMinor != 4000 || legacyOrder.ProviderCurrency != "USD" || legacyOrder.ConversionRate != "" {
+		t.Fatalf("restored legacy provider snapshots = %+v", legacyOrder)
+	}
+
+	converted := baseRow("po_backup_converted")
+	converted["provider_amount_minor"] = 28000
+	converted["provider_currency"] = "CNY"
+	converted["conversion_rate"] = "7"
+	restoreRow(converted)
+
+	var dump bytes.Buffer
+	if _, err := ExportTable(ctx, db, "payment_orders", &dump); err != nil {
+		t.Fatalf("export payment-order snapshots: %v", err)
+	}
+	destination, err := Open(filepath.Join(t.TempDir(), "payment-snapshots-restored.db"))
+	if err != nil {
+		t.Fatalf("open restored payment snapshot database: %v", err)
+	}
+	defer destination.Close()
+	if err := Migrate(destination); err != nil {
+		t.Fatalf("migrate restored payment snapshot database: %v", err)
+	}
+	if count, err := RestoreTable(ctx, destination, "payment_orders", bytes.NewReader(dump.Bytes())); err != nil {
+		t.Fatalf("round-trip payment-order snapshots: %v", err)
+	} else if count != 2 {
+		t.Fatalf("round-trip payment-order rows = %d, want 2", count)
+	}
+	convertedOrder, err := GetPaymentOrder(ctx, destination, "po_backup_converted")
+	if err != nil {
+		t.Fatalf("get round-tripped converted payment order: %v", err)
+	}
+	if convertedOrder.AmountMinor != 4000 || convertedOrder.Currency != "USD" ||
+		convertedOrder.ProviderAmountMinor != 28000 || convertedOrder.ProviderCurrency != "CNY" ||
+		convertedOrder.ConversionRate != "7" {
+		t.Fatalf("round-tripped provider snapshots = %+v", convertedOrder)
+	}
+}
+
 func TestMigrateDropsLegacyChunkEmbedding(t *testing.T) {
 	ctx := context.Background()
 	db, err := Open(filepath.Join(t.TempDir(), "legacy.db"))

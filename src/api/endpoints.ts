@@ -593,7 +593,9 @@ export const adminApi = {
   // Payment channels keep protocol credentials in the database. Masked values
   // returned by the server can be sent back unchanged to preserve the secret.
   paymentChannels: () => api<ApiPaymentChannel[]>('/admin/payment-channels'),
-  createPaymentChannel: (body: Pick<ApiPaymentChannel, 'name' | 'provider' | 'environment' | 'config' | 'enabled'>) =>
+  preparePaymentChannel: () =>
+    api<Pick<ApiPaymentChannel, 'id' | 'webhook_url'>>('/admin/payment-channels/prepare', { method: 'POST' }),
+  createPaymentChannel: (body: Pick<ApiPaymentChannel, 'id' | 'name' | 'provider' | 'environment' | 'config' | 'enabled'>) =>
     api<ApiPaymentChannel>('/admin/payment-channels', { method: 'POST', body }),
   updatePaymentChannel: (
     id: string,
@@ -710,6 +712,8 @@ export const adminApi = {
   // OAuth / social login providers. client_secret is write-only — send it on
   // create/update, never expect it back (has_secret flags whether one is set).
   oauthProviders: () => api<ApiOAuthProvider[]>('/admin/oauth-providers'),
+  prepareOAuthProvider: () =>
+    api<Pick<ApiOAuthProvider, 'id' | 'redirect_uri'>>('/admin/oauth-providers/prepare', { method: 'POST' }),
   createOAuthProvider: (body: Partial<ApiOAuthProvider> & { client_secret?: string }) =>
     api<ApiOAuthProvider>('/admin/oauth-providers', { method: 'POST', body }),
   updateOAuthProvider: (id: string, body: Partial<ApiOAuthProvider> & { client_secret?: string }) =>
@@ -839,6 +843,9 @@ export const adminApi = {
   ) => api<ApiAdminImage[]>(`/admin/users/${encodeURIComponent(id)}/images?limit=${limit}&offset=${offset}`),
   userKbs: (id: string) =>
     api<ApiKnowledgeBase[]>(`/admin/users/${encodeURIComponent(id)}/kbs`),
+  /** Read-only long-term memory inventory for one user (admin drill-down). */
+  userMemories: (id: string) =>
+    api<ApiMemory[]>(`/admin/users/${encodeURIComponent(id)}/memories`),
   kbDocuments: (kbId: string) =>
     api<ApiDocument[]>(`/admin/kbs/${encodeURIComponent(kbId)}/documents`),
   conversation: (id: string) =>

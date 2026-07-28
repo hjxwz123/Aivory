@@ -90,7 +90,7 @@ func paymentConfigObject(raw json.RawMessage) (map[string]json.RawMessage, error
 	return object, nil
 }
 
-func mergePaymentChannelConfig(existing, incoming json.RawMessage) (json.RawMessage, error) {
+func mergePaymentChannelConfig(provider string, existing, incoming json.RawMessage) (json.RawMessage, error) {
 	next, err := paymentConfigObject(incoming)
 	if err != nil {
 		return nil, err
@@ -100,6 +100,13 @@ func mergePaymentChannelConfig(existing, incoming json.RawMessage) (json.RawMess
 		current, err := paymentConfigObject(existing)
 		if err != nil {
 			return nil, err
+		}
+		if provider == paymentcore.ProviderEPay && paymentConfigCurrencyChanged(current, next) {
+			// A conversion rate belongs to one provider/settlement currency pair.
+			// Do not silently reinterpret an inherited rate after the provider
+			// currency changes; the administrator must submit the new pair.
+			delete(current, "conversion_rate")
+			delete(current, "conversion_rate_base_currency")
 		}
 		for key, value := range current {
 			merged[key] = value
@@ -125,6 +132,22 @@ func mergePaymentChannelConfig(existing, incoming json.RawMessage) (json.RawMess
 		merged[key] = value
 	}
 	return json.Marshal(merged)
+}
+
+func paymentConfigCurrencyChanged(current, incoming map[string]json.RawMessage) bool {
+	raw, ok := incoming["currency"]
+	if !ok {
+		return false
+	}
+	var nextCurrency string
+	if json.Unmarshal(raw, &nextCurrency) != nil {
+		return false
+	}
+	var currentCurrency string
+	if raw, ok := current["currency"]; ok {
+		_ = json.Unmarshal(raw, &currentCurrency)
+	}
+	return strings.ToUpper(strings.TrimSpace(nextCurrency)) != strings.ToUpper(strings.TrimSpace(currentCurrency))
 }
 
 func normalizePaymentChannelConfig(provider string, raw json.RawMessage) (json.RawMessage, error) {
@@ -160,6 +183,14 @@ func normalizePaymentChannelConfigForState(provider string, raw json.RawMessage,
 		cfg.MerchantID = strings.TrimSpace(cfg.MerchantID)
 		cfg.MerchantKey = strings.TrimSpace(cfg.MerchantKey)
 		cfg.Currency = strings.ToUpper(strings.TrimSpace(cfg.Currency))
+		cfg.ConversionRateBaseCurrency = strings.ToUpper(strings.TrimSpace(cfg.ConversionRateBaseCurrency))
+		if rate := strings.TrimSpace(cfg.ConversionRate.String()); rate != "" {
+			normalizedRate, err := paymentcore.NormalizeConversionRate(rate)
+			if err != nil {
+				return nil, err
+			}
+			cfg.ConversionRate = json.Number(normalizedRate)
+		}
 		if err := paymentcore.ValidateEPayConfig(cfg); err != nil {
 			return nil, err
 		}
@@ -264,7 +295,18 @@ func paymentChannelSupportsCurrency(provider string, config json.RawMessage, cur
 		return true
 	}
 	var cfg paymentcore.EPayConfig
-	return json.Unmarshal(config, &cfg) == nil && strings.EqualFold(strings.TrimSpace(cfg.Currency), currency)
+	return json.Unmarshal(config, &cfg) == nil && paymentcore.ValidateEPaySettlementConfig(cfg, currency) == nil
+}
+
+func validatePaymentChannelSettlementConfig(provider string, config json.RawMessage, currency string) error {
+	if provider != paymentcore.ProviderEPay {
+		return nil
+	}
+	var cfg paymentcore.EPayConfig
+	if json.Unmarshal(config, &cfg) != nil {
+		return errors.New("invalid EPay configuration")
+	}
+	return paymentcore.ValidateEPaySettlementConfig(cfg, currency)
 }
 
 func paymentGateway(provider string, channelConfig, methodConfig json.RawMessage) (paymentcore.CheckoutCreator, error) {

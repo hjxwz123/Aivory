@@ -104,13 +104,94 @@ func TestEPaySignAndVerify(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if event.Status != EventPaid || event.OrderID != "po_test" || event.AmountMinor != 100 ||
-		event.PaidAmountMinor != 100 || event.TaxAmountMinor != 0 || event.MethodType != "alipay" {
+	if event.Status != EventPaid || event.OrderID != "po_test" || event.AmountMajor != "1.00" ||
+		event.AmountMinor != 0 || event.PaidAmountMinor != 0 || event.Currency != "" || event.MethodType != "alipay" {
 		t.Fatalf("unexpected EPay event: %#v", event)
 	}
 	params["money"] = "0.01"
 	if _, err := VerifyEPayEvent(params, EPayConfig{MerchantID: "1000", MerchantKey: "secret", Currency: "USD"}); err == nil {
 		t.Fatal("tampered EPay payload unexpectedly verified")
+	}
+}
+
+func TestEPayProviderAmountUsesExactCurrencyExponentsAndRounding(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name               string
+		amountMinor        int64
+		settlementCurrency string
+		providerCurrency   string
+		rate               json.Number
+		wantAmount         int64
+		wantRate           string
+	}{
+		{name: "same currency needs no rate", amountMinor: 4000, settlementCurrency: "USD", providerCurrency: "USD", wantAmount: 4000},
+		{name: "USD to CNY example", amountMinor: 4000, settlementCurrency: "USD", providerCurrency: "CNY", rate: "7.0000", wantAmount: 28000, wantRate: "7"},
+		{name: "USD to zero-decimal JPY rounds half up", amountMinor: 1, settlementCurrency: "USD", providerCurrency: "JPY", rate: "150", wantAmount: 2, wantRate: "150"},
+		{name: "JPY to three-decimal KWD rounds half up", amountMinor: 1, settlementCurrency: "JPY", providerCurrency: "KWD", rate: "0.0025", wantAmount: 3, wantRate: "0.0025"},
+		{name: "KWD to JPY uses source exponent", amountMinor: 2, settlementCurrency: "KWD", providerCurrency: "JPY", rate: "250", wantAmount: 1, wantRate: "250"},
+		{name: "USD to KWD exact", amountMinor: 4000, settlementCurrency: "USD", providerCurrency: "KWD", rate: "0.3075", wantAmount: 12300, wantRate: "0.3075"},
+	}
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := EPayConfig{
+				GatewayURL: "https://epay.example.test", MerchantID: "merchant", MerchantKey: "secret",
+				Currency: tc.providerCurrency, ConversionRate: tc.rate,
+			}
+			if tc.providerCurrency != tc.settlementCurrency {
+				cfg.ConversionRateBaseCurrency = tc.settlementCurrency
+			}
+			amount, currency, rate, err := EPayProviderAmount(tc.amountMinor, tc.settlementCurrency, cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if amount != tc.wantAmount || currency != tc.providerCurrency || rate != tc.wantRate {
+				t.Fatalf("EPayProviderAmount() = %d %s rate %q, want %d %s rate %q", amount, currency, rate, tc.wantAmount, tc.providerCurrency, tc.wantRate)
+			}
+		})
+	}
+}
+
+func TestEPayCrossCurrencyRequiresPositiveRateBoundToSettlementCurrency(t *testing.T) {
+	t.Parallel()
+	base := EPayConfig{
+		GatewayURL: "https://epay.example.test", MerchantID: "merchant", MerchantKey: "secret", Currency: "CNY",
+	}
+	tests := []struct {
+		name string
+		rate json.Number
+		base string
+	}{
+		{name: "missing rate", base: "USD"},
+		{name: "missing base", rate: "7"},
+		{name: "zero rate", rate: "0", base: "USD"},
+		{name: "negative rate", rate: "-1", base: "USD"},
+		{name: "scientific notation", rate: "7e0", base: "USD"},
+		{name: "wrong base currency", rate: "7", base: "EUR"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := base
+			cfg.ConversionRate = tc.rate
+			cfg.ConversionRateBaseCurrency = tc.base
+			if err := ValidateEPaySettlementConfig(cfg, "USD"); err == nil {
+				t.Fatal("cross-currency EPay config unexpectedly validated")
+			}
+		})
+	}
+	base.Currency = "USD"
+	if err := ValidateEPaySettlementConfig(base, "USD"); err != nil {
+		t.Fatalf("same-currency EPay config required a rate: %v", err)
+	}
+}
+
+func TestConvertMinorAmountRejectsInt64Overflow(t *testing.T) {
+	t.Parallel()
+	maxInt64 := int64(^uint64(0) >> 1)
+	if _, _, err := ConvertMinorAmount(maxInt64, "JPY", "KWD", "999999999999999999999999"); err == nil {
+		t.Fatal("overflowing provider amount unexpectedly succeeded")
 	}
 }
 
@@ -145,6 +226,27 @@ func TestEPayCreateCheckoutAcceptsGatewayRootAndSubmitURL(t *testing.T) {
 				t.Fatalf("checkout action = %+v, want form POST to %q", action, tc.wantURL)
 			}
 		})
+	}
+}
+
+func TestEPayCreateCheckoutUsesProviderAmountSnapshot(t *testing.T) {
+	t.Parallel()
+	action, err := (EPayGateway{
+		Config: EPayConfig{
+			GatewayURL: "https://epay.example.test", MerchantID: "1000", MerchantKey: "secret", Currency: "CNY",
+			ConversionRate: "7", ConversionRateBaseCurrency: "USD",
+		},
+		Method: EPayMethodConfig{Type: "alipay"},
+	}).CreateCheckout(context.Background(), CheckoutRequest{
+		OrderID: "po_epay_converted", Name: "Credits", AmountMinor: 28000, Currency: "CNY",
+		NotifyURL:  "https://app.example.test/api/payments/webhooks/paych_epay",
+		SuccessURL: "https://app.example.test/subscription?payment=return",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if action.Fields["money"] != "280.00" {
+		t.Fatalf("EPay checkout money = %q, want 280.00", action.Fields["money"])
 	}
 }
 

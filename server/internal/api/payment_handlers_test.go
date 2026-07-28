@@ -162,6 +162,14 @@ func TestListPaymentMethodsPublicFiltersUnavailableAndInvalidMethods(t *testing.
 	}
 
 	createChannelAndMethod("paych_currency_mismatch", "paym_currency_mismatch", "Wrong currency", "CNY", true, true, nil)
+	validCrossCurrencyConfig, err := json.Marshal(payment.EPayConfig{
+		GatewayURL: "https://epay.example.test", MerchantID: "pid-cross", MerchantKey: "key-cross", Currency: "CNY",
+		ConversionRate: "7", ConversionRateBaseCurrency: "USD",
+	})
+	if err != nil {
+		t.Fatalf("marshal valid cross-currency config: %v", err)
+	}
+	createChannelAndMethod("paych_currency_converted", "paym_currency_converted", "Converted currency", "CNY", true, true, validCrossCurrencyConfig)
 	createChannelAndMethod("paych_disabled", "paym_disabled_channel", "Disabled channel", "USD", false, true, nil)
 	createChannelAndMethod("paych_method_disabled", "paym_disabled", "Disabled method", "USD", true, false, nil)
 	createChannelAndMethod(
@@ -185,9 +193,13 @@ func TestListPaymentMethodsPublicFiltersUnavailableAndInvalidMethods(t *testing.
 	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
 		t.Fatalf("decode public payment methods: %v (%s)", err, rec.Body.String())
 	}
-	if len(response.Methods) != 1 || response.Methods[0].ID != fx.method.ID ||
-		response.Methods[0].Provider != payment.ProviderEPay || response.Methods[0].Name != "Alipay" {
-		t.Fatalf("public methods = %+v, want only valid enabled method %q", response.Methods, fx.method.ID)
+	visibleIDs := map[string]bool{}
+	for _, method := range response.Methods {
+		visibleIDs[method.ID] = true
+	}
+	if len(response.Methods) != 2 || !visibleIDs[fx.method.ID] || !visibleIDs["paym_currency_converted"] ||
+		visibleIDs["paym_currency_mismatch"] {
+		t.Fatalf("public methods = %+v, want same-currency and configured cross-currency methods", response.Methods)
 	}
 	if response.CardPurchaseURL != "https://cards.example.test/buy" {
 		t.Fatalf("card_purchase_url = %q", response.CardPurchaseURL)
@@ -258,7 +270,7 @@ func TestTestPaymentChannelsAreRestrictedToAdministrators(t *testing.T) {
 	}
 }
 
-func TestListPaymentMethodsPublicUsesTargetFallbackUntilGlobalCardURLIsSet(t *testing.T) {
+func TestListPaymentMethodsPublicIgnoresLegacyPurchaseLinks(t *testing.T) {
 	fx := newPaymentAPIFixture(t)
 	for key, value := range map[string]string{
 		"card_purchase_url": "",
@@ -287,11 +299,11 @@ func TestListPaymentMethodsPublicUsesTargetFallbackUntilGlobalCardURLIsSet(t *te
 		return response.CardPurchaseURL
 	}
 
-	if got := requestCardURL(store.PaymentProductCreditPackage); got != "https://legacy.example.test/credits" {
-		t.Fatalf("credit-package fallback URL = %q", got)
+	if got := requestCardURL(store.PaymentProductCreditPackage); got != "" {
+		t.Fatalf("legacy credit-package URL leaked into payment methods: %q", got)
 	}
-	if got := requestCardURL(store.PaymentProductUserGroup); got != "https://legacy.example.test/groups" {
-		t.Fatalf("user-group fallback URL = %q", got)
+	if got := requestCardURL(store.PaymentProductUserGroup); got != "" {
+		t.Fatalf("legacy user-group URL leaked into payment methods: %q", got)
 	}
 
 	if err := store.SetSetting(fx.db, "card_purchase_url", "/redeem-card"); err != nil {
@@ -508,6 +520,91 @@ func TestEPayCheckoutUsesDatabaseProductSnapshot(t *testing.T) {
 	}
 }
 
+func TestEPayCrossCurrencyCheckoutWebhookAndHistoryUseOrderSnapshots(t *testing.T) {
+	fx := newPaymentAPIFixture(t)
+	mustExec(t, fx.db, `UPDATE credit_packages SET price_amount_minor=? WHERE id=?`, 4000, fx.pkg.ID)
+	fx.pkg.PriceAmountMinor = 4000
+
+	channelConfig, err := json.Marshal(payment.EPayConfig{
+		GatewayURL: "https://epay.example.test/gateway", MerchantID: testEPayMerchantID,
+		MerchantKey: testEPayMerchantKey, Currency: "CNY",
+		ConversionRate: "7", ConversionRateBaseCurrency: "USD",
+	})
+	if err != nil {
+		t.Fatalf("marshal cross-currency EPay config: %v", err)
+	}
+	rawChannelConfig := json.RawMessage(channelConfig)
+	if _, err := store.UpdatePaymentChannel(context.Background(), fx.db, fx.channel.ID, store.PaymentChannelPatch{Config: &rawChannelConfig}); err != nil {
+		t.Fatalf("configure cross-currency EPay channel: %v", err)
+	}
+
+	orderID, action := createEPayCheckoutForTest(t, fx)
+	if got := action.Fields["money"]; got != "280.00" {
+		t.Fatalf("cross-currency checkout money = %q, want 280.00", got)
+	}
+	order, err := store.GetPaymentOrder(context.Background(), fx.db, orderID)
+	if err != nil {
+		t.Fatalf("get cross-currency order: %v", err)
+	}
+	if order.AmountMinor != 4000 || order.Currency != "USD" ||
+		order.ProviderAmountMinor != 28000 || order.ProviderCurrency != "CNY" || order.ConversionRate != "7" {
+		t.Fatalf("cross-currency order snapshot = %+v", order)
+	}
+
+	// Simulate a later channel-rate edit outside the guarded admin API. Existing
+	// orders must still validate against the immutable provider-side snapshot.
+	changedConfig, err := json.Marshal(payment.EPayConfig{
+		GatewayURL: "https://epay.example.test/gateway", MerchantID: testEPayMerchantID,
+		MerchantKey: testEPayMerchantKey, Currency: "CNY",
+		ConversionRate: "8", ConversionRateBaseCurrency: "USD",
+	})
+	if err != nil {
+		t.Fatalf("marshal changed EPay rate: %v", err)
+	}
+	mustExec(t, fx.db, `UPDATE payment_channels SET config=? WHERE id=?`, string(changedConfig), fx.channel.ID)
+
+	bad := serveEPayCallback(t, fx, map[string]string{
+		"pid": testEPayMerchantID, "type": "alipay", "out_trade_no": orderID,
+		"trade_no": "epay_cross_currency_bad_amount", "trade_status": "TRADE_SUCCESS", "money": "279.99",
+	})
+	assertRejectedEPayFulfillment(t, fx, orderID, bad)
+
+	paid := serveEPayCallback(t, fx, map[string]string{
+		"pid": testEPayMerchantID, "type": "alipay", "out_trade_no": orderID,
+		"trade_no": "epay_cross_currency_paid", "trade_status": "TRADE_SUCCESS", "money": "280.00",
+	})
+	if paid.Code != http.StatusOK || strings.TrimSpace(paid.Body.String()) != "success" {
+		t.Fatalf("cross-currency callback = status %d body %q", paid.Code, paid.Body.String())
+	}
+	order, err = store.GetPaymentOrder(context.Background(), fx.db, orderID)
+	if err != nil {
+		t.Fatalf("get fulfilled cross-currency order: %v", err)
+	}
+	if order.Status != store.PaymentOrderFulfilled || order.PaidAmountMinor != 4000 || order.AmountMinor != 4000 ||
+		order.Currency != "USD" || order.ProviderAmountMinor != 28000 || order.ProviderCurrency != "CNY" ||
+		order.ConversionRate != "7" {
+		t.Fatalf("fulfilled cross-currency order = %+v", order)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/payments/orders", nil)
+	req = paymentAPIRequest(req, fx.user, nil)
+	rec := httptest.NewRecorder()
+	listPaymentOrdersForUserHandler(fx.d, rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list cross-currency payment history status = %d; body=%s", rec.Code, rec.Body.String())
+	}
+	var history struct {
+		Orders []publicPaymentOrderListItem `json:"orders"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &history); err != nil {
+		t.Fatalf("decode cross-currency payment history: %v", err)
+	}
+	if len(history.Orders) != 1 || history.Orders[0].ID != orderID || history.Orders[0].AmountMinor != 4000 ||
+		history.Orders[0].Currency != "USD" || history.Orders[0].Status != "paid" {
+		t.Fatalf("cross-currency payment history = %+v", history.Orders)
+	}
+}
+
 func TestPaymentCheckoutUsesAllowedFrontendOriginForReturnURL(t *testing.T) {
 	fx := newPaymentAPIFixture(t)
 	fx.d.Config.AllowedOrigins = []string{"https://app.example.test"}
@@ -690,7 +787,7 @@ func TestEPayWebhookAcceptsExistingOrderAfterChannelIsDisabled(t *testing.T) {
 	}
 }
 
-func TestEPayWebhookRejectsAmountAndCurrencyMismatch(t *testing.T) {
+func TestEPayWebhookRejectsAmountAndIdentityMismatchAndUsesOrderCurrencySnapshot(t *testing.T) {
 	t.Run("amount", func(t *testing.T) {
 		fx := newPaymentAPIFixture(t)
 		orderID, _ := createEPayCheckoutForTest(t, fx)
@@ -701,7 +798,7 @@ func TestEPayWebhookRejectsAmountAndCurrencyMismatch(t *testing.T) {
 		assertRejectedEPayFulfillment(t, fx, orderID, rec)
 	})
 
-	t.Run("currency", func(t *testing.T) {
+	t.Run("channel currency changed after checkout", func(t *testing.T) {
 		fx := newPaymentAPIFixture(t)
 		orderID, _ := createEPayCheckoutForTest(t, fx)
 		changedConfig, err := json.Marshal(payment.EPayConfig{
@@ -716,9 +813,18 @@ func TestEPayWebhookRejectsAmountAndCurrencyMismatch(t *testing.T) {
 		mustExec(t, fx.db, `UPDATE payment_channels SET config=? WHERE id=?`, string(changedConfig), fx.channel.ID)
 		rec := serveEPayCallback(t, fx, map[string]string{
 			"pid": testEPayMerchantID, "type": "alipay", "out_trade_no": orderID,
-			"trade_no": "epay_trade_bad_currency", "trade_status": "TRADE_SUCCESS", "money": "123.45",
+			"trade_no": "epay_trade_snapshot_currency", "trade_status": "TRADE_SUCCESS", "money": "123.45",
 		})
-		assertRejectedEPayFulfillment(t, fx, orderID, rec)
+		if rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != "success" {
+			t.Fatalf("snapshot-currency callback = status %d body %q", rec.Code, rec.Body.String())
+		}
+		order, err := store.GetPaymentOrder(context.Background(), fx.db, orderID)
+		if err != nil {
+			t.Fatalf("get snapshot-currency order: %v", err)
+		}
+		if order.Status != store.PaymentOrderFulfilled || order.Currency != "USD" || order.ProviderCurrency != "USD" {
+			t.Fatalf("snapshot-currency order = %+v", order)
+		}
 	})
 
 	t.Run("merchant", func(t *testing.T) {

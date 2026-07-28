@@ -35,6 +35,7 @@ func newPaymentAdminFixture(t *testing.T) paymentAdminFixture {
 	d := Deps{DB: db}
 	mx := newMux()
 	mx.handle(http.MethodGet, "/api/admin/payment-channels", wrap(d, listPaymentChannelsAdmin))
+	mx.handle(http.MethodPost, "/api/admin/payment-channels/prepare", wrap(d, preparePaymentChannelAdmin))
 	mx.handle(http.MethodPost, "/api/admin/payment-channels", wrap(d, createPaymentChannelAdmin))
 	mx.handle(http.MethodPatch, "/api/admin/payment-channels/:id", wrap(d, updatePaymentChannelAdmin))
 	mx.handle(http.MethodDelete, "/api/admin/payment-channels/:id", wrap(d, deletePaymentChannelAdmin))
@@ -118,6 +119,56 @@ func assertMaskedPaymentKeys(t *testing.T, raw json.RawMessage, keys ...string) 
 		if got := config[key]; got != paymentSecretMask {
 			t.Errorf("config[%q] = %q, want mask", key, got)
 		}
+	}
+}
+
+func TestPaymentChannelPreparedIDPersistsAndConflictsCleanly(t *testing.T) {
+	fx := newPaymentAdminFixture(t)
+	prepared := decodePaymentAdminResponse[preparedPaymentChannelResponse](t,
+		fx.request(t, http.MethodPost, "/api/admin/payment-channels/prepare", nil), http.StatusOK)
+	if !validPreparedRecordID(prepared.ID, "paych") {
+		t.Fatalf("prepared payment channel id = %q, want paych_<12 lowercase hex>", prepared.ID)
+	}
+	wantURLSuffix := "/api/payments/webhooks/" + url.PathEscape(prepared.ID)
+	if !strings.HasSuffix(prepared.WebhookURL, wantURLSuffix) {
+		t.Fatalf("prepared webhook URL = %q, want suffix %q", prepared.WebhookURL, wantURLSuffix)
+	}
+
+	body := map[string]any{
+		"id": prepared.ID, "name": "Prepared EPay", "provider": paymentcore.ProviderEPay,
+		"environment": store.PaymentEnvironmentLive, "enabled": true,
+		"config": map[string]any{
+			"gateway_url": "https://epay.example.test/gateway", "merchant_id": "merchant-prepared",
+			"merchant_key": "prepared-secret", "currency": "USD",
+		},
+	}
+	created := decodePaymentAdminResponse[adminPaymentChannelResponse](t,
+		fx.request(t, http.MethodPost, "/api/admin/payment-channels", body), http.StatusCreated)
+	if created.ID != prepared.ID {
+		t.Fatalf("created id = %q, want prepared id %q", created.ID, prepared.ID)
+	}
+	if created.WebhookURL != prepared.WebhookURL {
+		t.Fatalf("created webhook URL = %q, want prepared URL %q", created.WebhookURL, prepared.WebhookURL)
+	}
+
+	invalidBody := map[string]any{
+		"id": "paych_NOT_HEX", "name": "Invalid ID", "provider": paymentcore.ProviderEPay,
+		"config": body["config"],
+	}
+	if rec := fx.request(t, http.MethodPost, "/api/admin/payment-channels", invalidBody); rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid prepared id status = %d, want %d; body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+
+	duplicateBody := map[string]any{
+		"id": prepared.ID, "name": "Different channel name", "provider": paymentcore.ProviderEPay,
+		"config": body["config"],
+	}
+	duplicate := fx.request(t, http.MethodPost, "/api/admin/payment-channels", duplicateBody)
+	if duplicate.Code != http.StatusConflict {
+		t.Fatalf("duplicate prepared id status = %d, want %d; body=%s", duplicate.Code, http.StatusConflict, duplicate.Body.String())
+	}
+	if !strings.Contains(duplicate.Body.String(), store.ErrPaymentChannelIDExists.Error()) {
+		t.Fatalf("duplicate prepared id body = %s, want %q", duplicate.Body.String(), store.ErrPaymentChannelIDExists)
 	}
 }
 
@@ -245,6 +296,7 @@ func TestPaymentChannelsAdminCRUDMasksAndPreservesSecrets(t *testing.T) {
 		"config": map[string]any{
 			"gateway_url": "https://replacement.example.test", "merchant_id": "replacement",
 			"merchant_key": "replacement-secret", "currency": "EUR",
+			"conversion_rate": 0.9, "conversion_rate_base_currency": "USD",
 		},
 	})
 	changed := decodePaymentAdminResponse[adminPaymentChannelResponse](t, providerUpdate, http.StatusOK)
@@ -258,6 +310,174 @@ func TestPaymentChannelsAdminCRUDMasksAndPreservesSecrets(t *testing.T) {
 		if _, err := store.GetPaymentChannel(context.Background(), fx.db, id); !errors.Is(err, store.ErrNotFound) {
 			t.Fatalf("deleted channel %s lookup error = %v, want not found", id, err)
 		}
+	}
+}
+
+func TestEPayChannelConversionRateValidationAndCanonicalization(t *testing.T) {
+	fx := newPaymentAdminFixture(t)
+	if err := store.SetSetting(fx.db, "settlement_currency", "USD"); err != nil {
+		t.Fatalf("set settlement currency: %v", err)
+	}
+	baseConfig := func() map[string]any {
+		return map[string]any{
+			"gateway_url":  "https://epay.example.test/gateway",
+			"merchant_id":  "conversion-merchant",
+			"merchant_key": "conversion-secret",
+			"currency":     "CNY",
+		}
+	}
+	for _, tc := range []struct {
+		name  string
+		patch map[string]any
+	}{
+		{name: "missing rate", patch: map[string]any{"conversion_rate_base_currency": "USD"}},
+		{name: "zero rate", patch: map[string]any{"conversion_rate": 0, "conversion_rate_base_currency": "USD"}},
+		{name: "negative rate", patch: map[string]any{"conversion_rate": -7, "conversion_rate_base_currency": "USD"}},
+		{name: "missing base", patch: map[string]any{"conversion_rate": 7}},
+		{name: "wrong base", patch: map[string]any{"conversion_rate": 7, "conversion_rate_base_currency": "EUR"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			config := baseConfig()
+			for key, value := range tc.patch {
+				config[key] = value
+			}
+			rec := fx.request(t, http.MethodPost, "/api/admin/payment-channels", map[string]any{
+				"name": "Invalid conversion " + tc.name, "provider": paymentcore.ProviderEPay, "config": config,
+			})
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("invalid EPay conversion status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+
+	config := baseConfig()
+	config["conversion_rate"] = 7
+	config["conversion_rate_base_currency"] = "usd"
+	channel := createPaymentChannelForAdminTest(t, fx, "Canonical conversion", paymentcore.ProviderEPay, config, 0)
+	var responseConfig paymentcore.EPayConfig
+	if err := json.Unmarshal(channel.Config, &responseConfig); err != nil {
+		t.Fatalf("decode canonical response config: %v", err)
+	}
+	if responseConfig.ConversionRate.String() != "7" || responseConfig.ConversionRateBaseCurrency != "USD" {
+		t.Fatalf("canonical response config = %+v", responseConfig)
+	}
+
+	mustExec(t, fx.db,
+		`INSERT INTO users(id,email,password_hash,group_id) VALUES(?,?,?,?)`,
+		"conversion-user", "conversion@example.test", "hash", store.DefaultGroupID,
+	)
+	pkg, err := store.CreateCreditPackage(context.Background(), fx.db, store.CreditPackage{
+		Name: "Conversion package", Credits: 100, PriceAmountMinor: 4000, Enabled: true,
+	})
+	if err != nil {
+		t.Fatalf("create conversion package: %v", err)
+	}
+	method := createPaymentMethodForAdminTest(t, fx, "Conversion Alipay", "wallet-cards", channel.ID,
+		paymentcore.EPayMethodConfig{Type: "alipay"}, 0)
+	if _, err := store.CreatePaymentOrder(context.Background(), fx.db, store.PaymentOrderCreateInput{
+		UserID: "conversion-user", PaymentMethodID: method.ID,
+		ProductType: store.PaymentProductCreditPackage, ProductID: pkg.ID,
+	}); err != nil {
+		t.Fatalf("create pending conversion order: %v", err)
+	}
+
+	// A quoted rate from an editor must normalize to the same stored numeric
+	// value. The masked-secret merge must not invent a configuration change and
+	// block an otherwise harmless save while an order is pending.
+	unchanged := fx.request(t, http.MethodPatch, "/api/admin/payment-channels/"+channel.ID, map[string]any{
+		"config": map[string]any{
+			"gateway_url":                   "https://epay.example.test/gateway",
+			"merchant_id":                   "conversion-merchant",
+			"merchant_key":                  paymentSecretMask,
+			"currency":                      "CNY",
+			"conversion_rate":               "7.000",
+			"conversion_rate_base_currency": "usd",
+		},
+	})
+	decodePaymentAdminResponse[adminPaymentChannelResponse](t, unchanged, http.StatusOK)
+
+	stored, err := store.GetPaymentChannel(context.Background(), fx.db, channel.ID)
+	if err != nil {
+		t.Fatalf("get canonical EPay channel: %v", err)
+	}
+	var storedConfig paymentcore.EPayConfig
+	if err := json.Unmarshal(stored.Config, &storedConfig); err != nil {
+		t.Fatalf("decode stored canonical EPay config: %v", err)
+	}
+	if storedConfig.ConversionRate.String() != "7" || storedConfig.ConversionRateBaseCurrency != "USD" ||
+		storedConfig.MerchantKey != "conversion-secret" {
+		t.Fatalf("stored canonical EPay config = %+v", storedConfig)
+	}
+}
+
+func TestEPayChannelCurrencyChangeRequiresNewConversionRate(t *testing.T) {
+	fx := newPaymentAdminFixture(t)
+	if err := store.SetSetting(fx.db, "settlement_currency", "USD"); err != nil {
+		t.Fatalf("set settlement currency: %v", err)
+	}
+	channel := createPaymentChannelForAdminTest(t, fx, "Currency-pair EPay", paymentcore.ProviderEPay,
+		paymentcore.EPayConfig{
+			GatewayURL: "https://epay.example.test", MerchantID: "currency-pair-merchant",
+			MerchantKey: "currency-pair-secret", Currency: "CNY",
+			ConversionRate: "7", ConversionRateBaseCurrency: "USD",
+		}, 0)
+
+	missingRate := fx.request(t, http.MethodPatch, "/api/admin/payment-channels/"+channel.ID, map[string]any{
+		"config": map[string]any{"currency": "JPY"},
+	})
+	if missingRate.Code != http.StatusBadRequest {
+		t.Fatalf("currency change without a new rate status = %d, want 400; body=%s", missingRate.Code, missingRate.Body.String())
+	}
+	stored, err := store.GetPaymentChannel(context.Background(), fx.db, channel.ID)
+	if err != nil {
+		t.Fatalf("get unchanged EPay channel: %v", err)
+	}
+	var unchanged paymentcore.EPayConfig
+	if err := json.Unmarshal(stored.Config, &unchanged); err != nil {
+		t.Fatalf("decode unchanged EPay config: %v", err)
+	}
+	if unchanged.Currency != "CNY" || unchanged.ConversionRate.String() != "7" || unchanged.ConversionRateBaseCurrency != "USD" {
+		t.Fatalf("failed currency change altered stored config: %+v", unchanged)
+	}
+
+	updatedRec := fx.request(t, http.MethodPatch, "/api/admin/payment-channels/"+channel.ID, map[string]any{
+		"config": map[string]any{
+			"currency": "JPY", "conversion_rate": "150",
+			"conversion_rate_base_currency": "USD",
+		},
+	})
+	updated := decodePaymentAdminResponse[adminPaymentChannelResponse](t, updatedRec, http.StatusOK)
+	var updatedConfig paymentcore.EPayConfig
+	if err := json.Unmarshal(updated.Config, &updatedConfig); err != nil {
+		t.Fatalf("decode updated EPay config: %v", err)
+	}
+	if updatedConfig.Currency != "JPY" || updatedConfig.ConversionRate.String() != "150" ||
+		updatedConfig.ConversionRateBaseCurrency != "USD" {
+		t.Fatalf("updated EPay currency pair = %+v", updatedConfig)
+	}
+
+	mustExec(t, fx.db,
+		`INSERT INTO users(id,email,password_hash,group_id) VALUES(?,?,?,?)`,
+		"currency-pair-user", "currency-pair@example.test", "hash", store.DefaultGroupID,
+	)
+	pkg, err := store.CreateCreditPackage(context.Background(), fx.db, store.CreditPackage{
+		Name: "Currency-pair package", Credits: 100, PriceAmountMinor: 4000, Enabled: true,
+	})
+	if err != nil {
+		t.Fatalf("create currency-pair package: %v", err)
+	}
+	method := createPaymentMethodForAdminTest(t, fx, "Currency-pair EPay method", "wallet-cards", channel.ID,
+		paymentcore.EPayMethodConfig{Type: "alipay"}, 0)
+	order, err := store.CreatePaymentOrder(context.Background(), fx.db, store.PaymentOrderCreateInput{
+		UserID: "currency-pair-user", PaymentMethodID: method.ID,
+		ProductType: store.PaymentProductCreditPackage, ProductID: pkg.ID,
+	})
+	if err != nil {
+		t.Fatalf("create JPY payment order: %v", err)
+	}
+	if order.AmountMinor != 4000 || order.Currency != "USD" || order.ProviderAmountMinor != 6000 ||
+		order.ProviderCurrency != "JPY" || order.ConversionRate != "150" {
+		t.Fatalf("JPY payment order snapshot = %+v", order)
 	}
 }
 
@@ -524,6 +744,7 @@ func TestPaymentRouterExposesCanonicalRoutesOnly(t *testing.T) {
 		{http.MethodPost, "/api/payments/checkout", http.StatusUnauthorized},
 		{http.MethodGet, "/api/payments/orders/order-id", http.StatusUnauthorized},
 		{http.MethodGet, "/api/admin/payment-channels", http.StatusUnauthorized},
+		{http.MethodPost, "/api/admin/payment-channels/prepare", http.StatusUnauthorized},
 		{http.MethodPost, "/api/admin/payment-channels", http.StatusUnauthorized},
 		{http.MethodPatch, "/api/admin/payment-channels/channel-id", http.StatusUnauthorized},
 		{http.MethodDelete, "/api/admin/payment-channels/channel-id", http.StatusUnauthorized},

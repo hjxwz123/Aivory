@@ -241,6 +241,7 @@ func RestoreTable(ctx context.Context, ex RowExecer, table string, r io.Reader) 
 		} else if err != nil {
 			return n, fmt.Errorf("decode %s row: %w", table, err)
 		}
+		applyLegacyPaymentOrderSnapshotDefaults(table, raw)
 		cols := make([]string, 0, len(liveCols))
 		args := make([]any, 0, len(liveCols))
 		for _, c := range liveCols { // stable, schema-defined order
@@ -268,6 +269,22 @@ func RestoreTable(ctx context.Context, ex RowExecer, table string, r io.Reader) 
 		n++
 	}
 	return n, nil
+}
+
+func applyLegacyPaymentOrderSnapshotDefaults(table string, row map[string]json.RawMessage) {
+	if table != "payment_orders" {
+		return
+	}
+	if _, present := row["provider_amount_minor"]; !present {
+		if amount, ok := row["amount_minor"]; ok {
+			row["provider_amount_minor"] = amount
+		}
+	}
+	if _, present := row["provider_currency"]; !present {
+		if currency, ok := row["currency"]; ok {
+			row["provider_currency"] = currency
+		}
+	}
 }
 
 var tablePrimaryKeys = map[string][]string{

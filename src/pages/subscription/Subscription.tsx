@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   AlertTriangle,
-  Check,
   ChevronLeft,
   ChevronRight,
   Clock,
@@ -17,9 +16,11 @@ import type { ApiCreditPackage, ApiCredits, ApiUserGroup, ApiUserPaymentOrder } 
 import { useAuth } from '@/store/auth'
 import { ContentHeader } from '@/components/layout/content-header'
 import { PaymentMethodDialog } from '@/components/payment/PaymentMethodDialog'
+import { UserGroupTierCard } from '@/components/subscription/user-group-tier-card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
+import { SegmentedControl } from '@/components/ui/segmented-control'
 import {
   Dialog,
   DialogContent,
@@ -30,20 +31,16 @@ import {
 } from '@/components/ui/dialog'
 import { toast } from '@/hooks/use-toast'
 import { formatCurrencyMinor } from '@/lib/currency'
+import { groupPriceAmount, type BillingCycle } from '@/lib/user-group-tier'
 import { cn, formatAbsoluteDate, formatDateTime } from '@/lib/utils'
 
 type TFn = (key: string, options?: Record<string, unknown>) => string
 type CatalogTab = 'groups' | 'credit-packages'
-type BillingCycle = 'monthly' | 'yearly'
 type PurchaseTarget =
   | { type: 'credit_package'; id: string; name: string }
   | { type: 'user_group'; id: string; name: string; billingCycle: BillingCycle }
 
 const PAYMENT_HISTORY_PAGE_SIZE = 10
-
-function groupPriceAmount(group: ApiUserGroup, cycle: BillingCycle): number {
-  return cycle === 'monthly' ? group.monthly_price_amount_minor : group.yearly_price_amount_minor
-}
 
 export default function Subscription() {
   const { t, i18n } = useTranslation(['subscription', 'common'])
@@ -299,17 +296,22 @@ export default function Subscription() {
     [creditPackages],
   )
   const current = sortedGroups.find((group) => group.id === currentId)
+  const currentGroupName = user?.group_name?.trim() || current?.name || ''
+  const expiresAt = user?.group_expires_at ?? 0
+  const permanentBaselineId = expiresAt > 0 ? user?.previous_group_id || '' : ''
   const recommendedId = useMemo(() => {
     const paid = sortedGroups.filter(
-      (group) => !group.is_default && group.id !== currentId && groupPriceAmount(group, billingCycle) > 0,
+      (group) =>
+        !group.is_default &&
+        group.id !== currentId &&
+        group.id !== permanentBaselineId &&
+        groupPriceAmount(group, billingCycle) > 0,
     )
     if (paid.length === 0) return null
     return paid.reduce((best, group) =>
       groupPriceAmount(group, billingCycle) > groupPriceAmount(best, billingCycle) ? group : best,
     ).id
-  }, [billingCycle, currentId, sortedGroups])
-
-  const expiresAt = user?.group_expires_at ?? 0
+  }, [billingCycle, currentId, permanentBaselineId, sortedGroups])
   const expiresLabel = expiresAt > 0 ? t('subscription:expiresOn', { date: formatAbsoluteDate(expiresAt * 1000) }) : null
 
   function redeemErrorMessage(error: unknown): string {
@@ -374,7 +376,8 @@ export default function Subscription() {
 
   const creditsOn = Boolean(credits?.enabled)
   const showCreditsPanel = creditsLoading || creditsLoadError || creditsOn
-  const showAccount = Boolean(current) || showCreditsPanel
+  const hasCurrentGroup = Boolean(currentGroupName)
+  const showAccount = hasCurrentGroup || showCreditsPanel
   const showingGroups = catalogTab === 'groups'
   const catalogCount = showingGroups ? sortedGroups.length : sortedPackages.length
 
@@ -386,22 +389,22 @@ export default function Subscription() {
           {groupsLoading ? (
             <AccountSkeleton t={t} />
           ) : showAccount ? (
-            <section className="overflow-hidden rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)]">
+            <section className="overflow-hidden rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)]">
               <div
                 className={cn(
-                  current && showCreditsPanel &&
+                  hasCurrentGroup && showCreditsPanel &&
                     'md:grid md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.7fr)]',
                 )}
               >
-                {current ? (
+                {hasCurrentGroup ? (
                   <div className="min-w-0 p-3.5 sm:p-4">
                     <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-[var(--color-fg-muted)]">
                       <span className="size-1.5 rounded-full bg-[var(--color-secondary)]" aria-hidden />
                       {t('subscription:currentPlan')}
                     </span>
                     <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                      <h2 className="min-w-0 break-words text-[1.125rem] font-semibold leading-tight text-[var(--color-fg)] [overflow-wrap:anywhere]">{current.name}</h2>
-                      {current.is_default ? (
+                      <h2 className="min-w-0 break-words text-[1.125rem] font-semibold leading-tight text-[var(--color-fg)] [overflow-wrap:anywhere]">{currentGroupName}</h2>
+                      {current?.is_default ? (
                         <Badge size="sm" variant="neutral">
                           {t('subscription:free')}
                         </Badge>
@@ -412,7 +415,7 @@ export default function Subscription() {
                         </Badge>
                       ) : null}
                     </div>
-                    {current.description ? (
+                    {current?.description ? (
                       <p className="mt-1 max-w-prose break-words text-[11.5px] leading-snug text-[var(--color-fg-muted)] [overflow-wrap:anywhere]">
                         {current.description}
                       </p>
@@ -421,16 +424,16 @@ export default function Subscription() {
                 ) : null}
 
                 {creditsLoading ? (
-                  <BalanceState hasPlanHeader={Boolean(current)} loading t={t} />
+                  <BalanceState hasPlanHeader={hasCurrentGroup} loading t={t} />
                 ) : creditsLoadError ? (
                   <BalanceState
-                    hasPlanHeader={Boolean(current)}
+                    hasPlanHeader={hasCurrentGroup}
                     loading={false}
                     onRetry={() => setCreditsReloadKey((value) => value + 1)}
                     t={t}
                   />
                 ) : creditsOn && credits ? (
-                  <Balance credits={credits} hasPlanHeader={Boolean(current)} locale={i18n.resolvedLanguage} t={t} />
+                  <Balance credits={credits} hasPlanHeader={hasCurrentGroup} locale={i18n.resolvedLanguage} t={t} />
                 ) : null}
               </div>
             </section>
@@ -498,12 +501,13 @@ export default function Subscription() {
                 ) : sortedGroups.length > 0 ? (
                   <div className="grid items-stretch gap-3 sm:grid-cols-2 lg:grid-cols-3">
                     {sortedGroups.map((group) => (
-                      <TierCard
+                      <UserGroupTierCard
                         key={group.id}
                         group={group}
                         billingCycle={billingCycle}
                         isCurrent={group.id === currentId}
                         canRenew={group.id === currentId && !group.is_default && expiresAt > 0}
+                        isPermanentlyOwned={group.id === permanentBaselineId}
                         isRecommended={group.id === recommendedId}
                         onSwitch={() => setUpgrade(group)}
                         onPurchase={() =>
@@ -515,7 +519,6 @@ export default function Subscription() {
                           })
                         }
                         locale={i18n.resolvedLanguage}
-                        t={t}
                       />
                     ))}
                   </div>
@@ -710,59 +713,6 @@ export default function Subscription() {
   )
 }
 
-function SegmentedControl<T extends string>({
-  label,
-  value,
-  options,
-  onChange,
-  fullWidthOnMobile = false,
-  compact = false,
-}: {
-  label: string
-  value: T
-  options: Array<{ value: T; label: string }>
-  onChange: (value: T) => void
-  fullWidthOnMobile?: boolean
-  compact?: boolean
-}) {
-  return (
-    <div
-      role="group"
-      aria-label={label}
-      className={cn(
-        'inline-flex max-w-full items-center gap-0.5 rounded-[8px] bg-[var(--color-bg-muted)] p-0.5',
-        compact ? 'min-h-7' : 'min-h-8',
-        fullWidthOnMobile && 'w-full sm:w-auto',
-      )}
-    >
-      {options.map((option) => {
-        const active = option.value === value
-        return (
-          <button
-            key={option.value}
-            type="button"
-            aria-pressed={active}
-            onClick={() => onChange(option.value)}
-            className={cn(
-              'min-w-0 rounded-[6px] text-center font-medium leading-tight transition-colors',
-              compact
-                ? "relative min-h-6 px-2 py-0.5 text-[11.5px] after:absolute after:-inset-y-2.5 after:inset-x-0 after:content-['']"
-                : "min-h-7 px-2.5 py-1 text-[12px] max-sm:relative max-sm:min-h-8 max-sm:px-3 max-sm:text-[12.5px] max-sm:after:absolute max-sm:after:-inset-y-1.5 max-sm:after:inset-x-0 max-sm:after:content-['']",
-              fullWidthOnMobile && 'flex-1 sm:flex-none',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-              active
-                ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)]'
-                : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]',
-            )}
-          >
-            {option.label}
-          </button>
-        )
-      })}
-    </div>
-  )
-}
-
 function Balance({
   credits,
   hasPlanHeader,
@@ -911,165 +861,6 @@ function BalanceState({
   )
 }
 
-function TierCard({
-  group,
-  billingCycle,
-  isCurrent,
-  canRenew,
-  isRecommended,
-  onSwitch,
-  onPurchase,
-  locale,
-  t,
-}: {
-  group: ApiUserGroup
-  billingCycle: BillingCycle
-  isCurrent: boolean
-  canRenew: boolean
-  isRecommended: boolean
-  onSwitch: () => void
-  onPurchase: () => void
-  locale?: string
-  t: TFn
-}) {
-  const features = group.features.filter((feature) => feature !== 'research')
-  const amount = groupPriceAmount(group, billingCycle)
-  const available = group.is_default || amount > 0
-  const canPurchaseRenewal = isCurrent && canRenew && amount > 0
-
-  return (
-    <article
-      className={cn(
-        'flex min-w-0 flex-col rounded-[8px] border bg-[var(--color-surface)] p-5 sm:row-span-5 sm:grid sm:grid-rows-subgrid',
-        isRecommended
-          ? 'border-[var(--color-accent)]'
-          : isCurrent
-            ? 'border-[var(--color-border)] bg-[var(--color-bg-muted)]'
-            : 'border-[var(--color-border)]',
-      )}
-    >
-      <div className="flex min-h-6 items-start justify-between gap-2">
-        <h3 className="min-w-0 break-words text-[1rem] font-semibold leading-snug text-[var(--color-fg)] [overflow-wrap:anywhere]">{group.name}</h3>
-        <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
-          {isCurrent ? (
-            <Badge size="sm" variant="accent">
-              {t('subscription:current')}
-            </Badge>
-          ) : group.is_default ? (
-            <Badge size="sm" variant="neutral">
-              {t('subscription:free')}
-            </Badge>
-          ) : null}
-          {isRecommended ? (
-            <Badge size="sm" variant="sage">
-              {t('subscription:recommended')}
-            </Badge>
-          ) : null}
-        </div>
-      </div>
-
-      <p
-        className="mt-2 break-words text-[12.5px] leading-relaxed text-[var(--color-fg-muted)] [overflow-wrap:anywhere] sm:mt-0"
-        aria-hidden={!group.description}
-      >
-        {group.description}
-      </p>
-
-      <div className="mt-4 min-h-8 sm:mt-0">
-        <PriceTag group={group} billingCycle={billingCycle} locale={locale} t={t} />
-      </div>
-
-      <ul
-        className={cn(
-          'mt-4 flex flex-col gap-2 border-t border-[var(--color-divider)] pt-4 sm:mt-0 sm:pt-3',
-          features.length === 0 && 'hidden sm:flex',
-        )}
-      >
-        {features.map((feature, index) => (
-          <li key={index} className="flex items-start gap-2 text-[12.5px] text-[var(--color-fg)]">
-            <Check
-              size={14}
-              aria-hidden
-              className={cn('mt-0.5 shrink-0', isCurrent ? 'text-[var(--color-secondary)]' : 'text-[var(--color-accent)]')}
-            />
-            <span className="min-w-0 break-words leading-snug [overflow-wrap:anywhere]">{feature}</span>
-          </li>
-        ))}
-      </ul>
-
-      <div className="mt-5 flex grow items-end sm:mt-0">
-        {canPurchaseRenewal ? (
-          <Button
-            size="sm"
-            variant="primary"
-            className="h-auto min-h-11 w-full whitespace-normal py-1.5 text-center leading-snug sm:min-h-8"
-            onClick={onPurchase}
-          >
-            {t('subscription:renewCta')}
-          </Button>
-        ) : isCurrent ? (
-          <Button
-            size="sm"
-            variant="secondary"
-            disabled
-            className="h-auto min-h-11 w-full whitespace-normal py-1.5 text-center leading-snug sm:min-h-8"
-          >
-            {t('subscription:youreOnThis')}
-          </Button>
-        ) : !available ? (
-          <Button
-            size="sm"
-            variant="secondary"
-            disabled
-            className="h-auto min-h-11 w-full whitespace-normal py-1.5 text-center leading-snug sm:min-h-8"
-          >
-            {t('subscription:billing.unavailable')}
-          </Button>
-        ) : (
-          <Button
-            size="sm"
-            variant={group.is_default ? 'secondary' : 'primary'}
-            className="h-auto min-h-11 w-full whitespace-normal py-1.5 text-center leading-snug sm:min-h-8"
-            onClick={group.is_default ? onSwitch : onPurchase}
-          >
-            {group.is_default ? t('subscription:switchCta') : t('subscription:buyCta')}
-          </Button>
-        )}
-      </div>
-    </article>
-  )
-}
-
-function PriceTag({
-  group,
-  billingCycle,
-  locale,
-  t,
-}: {
-  group: ApiUserGroup
-  billingCycle: BillingCycle
-  locale?: string
-  t: TFn
-}) {
-  const amount = groupPriceAmount(group, billingCycle)
-  if (group.is_default) {
-    return <span className="text-[1.5rem] font-semibold leading-none text-[var(--color-fg)]">{t('subscription:priceFree')}</span>
-  }
-  if (amount <= 0) {
-    return <span className="text-[13px] font-medium text-[var(--color-fg-subtle)]">{t('subscription:billing.unavailable')}</span>
-  }
-  return (
-    <div className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-1">
-      <span className="text-[1.5rem] font-semibold leading-none tabular-nums text-[var(--color-fg)]">
-        {formatCurrencyMinor(amount, group.settlement_currency, locale)}
-      </span>
-      <span className="text-[12px] text-[var(--color-fg-subtle)]">
-        {billingCycle === 'monthly' ? t('subscription:billing.perMonth') : t('subscription:billing.perYear')}
-      </span>
-    </div>
-  )
-}
-
 function CreditPackageCard({
   creditPackage,
   onPurchase,
@@ -1082,7 +873,7 @@ function CreditPackageCard({
   t: TFn
 }) {
   return (
-    <article className="flex min-w-0 flex-col rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
+    <article className="flex min-w-0 flex-col rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
       <div className="flex min-h-6 items-start justify-between gap-2">
         <h3 className="min-w-0 break-words text-[1rem] font-semibold leading-snug text-[var(--color-fg)] [overflow-wrap:anywhere]">{creditPackage.name}</h3>
         <Badge size="sm" variant="neutral" className="shrink-0">
@@ -1177,7 +968,7 @@ function PaymentHistory({
       </div>
 
       <div
-        className="mt-3 overflow-hidden rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)]"
+        className="mt-3 overflow-hidden rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)]"
         aria-busy={loading}
       >
         {loading ? (
@@ -1407,7 +1198,7 @@ function balanceValueSize(value: string): string {
 
 function EmptyCatalog({ children }: { children: string }) {
   return (
-    <div className="rounded-[8px] border border-dashed border-[var(--color-border)] px-4 py-8 text-center text-[13px] text-[var(--color-fg-muted)]">
+    <div className="rounded-[10px] border border-dashed border-[var(--color-border)] px-4 py-8 text-center text-[13px] text-[var(--color-fg-muted)]">
       {children}
     </div>
   )
@@ -1417,7 +1208,7 @@ function CatalogLoadError({ message, onRetry, t }: { message: string; onRetry: (
   return (
     <div
       role="alert"
-      className="flex flex-col items-start gap-3 rounded-[8px] border border-[var(--color-danger)]/25 bg-[var(--color-danger-soft)] px-4 py-3 text-[13px] text-[var(--color-danger)] sm:flex-row sm:items-center sm:justify-between"
+      className="flex flex-col items-start gap-3 rounded-[10px] border border-[var(--color-danger)]/25 bg-[var(--color-danger-soft)] px-4 py-3 text-[13px] text-[var(--color-danger)] sm:flex-row sm:items-center sm:justify-between"
     >
       <span>{message}</span>
       <Button
@@ -1436,7 +1227,7 @@ function CatalogLoadError({ message, onRetry, t }: { message: string; onRetry: (
 function AccountSkeleton({ t }: { t: TFn }) {
   return (
     <div
-      className="animate-pulse overflow-hidden rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)]"
+      className="animate-pulse overflow-hidden rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)]"
       role="status"
       aria-label={t('common:aria.loading')}
     >
@@ -1476,7 +1267,7 @@ function CardsSkeleton({ t }: { t: TFn }) {
       {Array.from({ length: 3 }).map((_, index) => (
         <div
           key={index}
-          className="animate-pulse rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] p-5"
+          className="animate-pulse rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] p-5"
         >
           <div className="h-5 w-24 rounded bg-[var(--color-bg-muted)]" />
           <div className="mt-3 h-3.5 w-full rounded bg-[var(--color-bg-muted)]" />
@@ -1485,7 +1276,7 @@ function CardsSkeleton({ t }: { t: TFn }) {
             <div className="h-3 w-full rounded bg-[var(--color-bg-muted)]" />
             <div className="h-3 w-5/6 rounded bg-[var(--color-bg-muted)]" />
           </div>
-          <div className="mt-5 h-8 w-full rounded-[8px] bg-[var(--color-bg-muted)]" />
+          <div className="mt-5 h-8 w-full rounded-[10px] bg-[var(--color-bg-muted)]" />
         </div>
       ))}
     </div>

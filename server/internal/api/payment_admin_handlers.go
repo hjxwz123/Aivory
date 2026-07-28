@@ -14,6 +14,7 @@ import (
 )
 
 type paymentChannelPayload struct {
+	ID          *string          `json:"id"`
 	Name        *string          `json:"name"`
 	Provider    *string          `json:"provider"`
 	Environment *string          `json:"environment"`
@@ -35,6 +36,11 @@ type adminPaymentChannelResponse struct {
 	UpdatedAt   int64           `json:"updated_at"`
 }
 
+type preparedPaymentChannelResponse struct {
+	ID         string `json:"id"`
+	WebhookURL string `json:"webhook_url"`
+}
+
 func paymentWebhookURL(r *http.Request, channelID string) string {
 	return strings.TrimRight(externalBaseURL(r), "/") + "/api/payments/webhooks/" + url.PathEscape(channelID)
 }
@@ -53,7 +59,8 @@ func writePaymentError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, store.ErrNotFound):
 		writeError(w, http.StatusNotFound, errNotFound)
-	case errors.Is(err, store.ErrPaymentChannelNameExists), errors.Is(err, store.ErrPaymentMethodNameExists),
+	case errors.Is(err, store.ErrPaymentChannelNameExists), errors.Is(err, store.ErrPaymentChannelIDExists),
+		errors.Is(err, store.ErrPaymentMethodNameExists),
 		errors.Is(err, store.ErrPaymentChannelHasMethods), errors.Is(err, store.ErrPaymentChannelHasPending),
 		errors.Is(err, store.ErrPaymentOrdersPendingForGroup), errors.Is(err, store.ErrPaymentOrdersPendingForUser),
 		errors.Is(err, store.ErrPaymentProviderOrderConflict), errors.Is(err, store.ErrPaymentOrderNotMutable):
@@ -80,6 +87,23 @@ func listPaymentChannelsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
+func preparePaymentChannelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
+	for range 4 {
+		id := store.GenID("paych")
+		if _, err := store.GetPaymentChannel(r.Context(), d.DB, id); errors.Is(err, store.ErrNotFound) {
+			writeJSON(w, http.StatusOK, preparedPaymentChannelResponse{
+				ID:         id,
+				WebhookURL: paymentWebhookURL(r, id),
+			})
+			return
+		} else if err != nil {
+			writePaymentError(w, err)
+			return
+		}
+	}
+	writeError(w, http.StatusInternalServerError, errors.New("could not allocate payment channel id"))
+}
+
 func createPaymentChannelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	var body paymentChannelPayload
 	if err := decodeJSON(r, &body); err != nil || body.Name == nil || body.Provider == nil || body.Config == nil {
@@ -91,6 +115,14 @@ func createPaymentChannelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("payment channel name is required"))
 		return
 	}
+	id := ""
+	if body.ID != nil {
+		id = strings.TrimSpace(*body.ID)
+		if !validPreparedRecordID(id, "paych") {
+			writeError(w, http.StatusBadRequest, errors.New("invalid_payment_channel_id"))
+			return
+		}
+	}
 	provider, err := normalizePaymentProvider(*body.Provider)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -100,13 +132,17 @@ func createPaymentChannelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	if body.Enabled != nil {
 		enabled = *body.Enabled
 	}
-	merged, err := mergePaymentChannelConfig(nil, *body.Config)
+	merged, err := mergePaymentChannelConfig(provider, nil, *body.Config)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
 	config, err := normalizePaymentChannelConfigForState(provider, merged, enabled)
 	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := validatePaymentChannelSettlementConfig(provider, config, globalSettlementCurrency(d)); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
@@ -124,7 +160,7 @@ func createPaymentChannelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		sortOrder = *body.SortOrder
 	}
 	created, err := store.CreatePaymentChannel(r.Context(), d.DB, store.PaymentChannel{
-		Name: name, Provider: provider, Environment: environment, Config: config, Enabled: enabled, SortOrder: sortOrder,
+		ID: id, Name: name, Provider: provider, Environment: environment, Config: config, Enabled: enabled, SortOrder: sortOrder,
 	})
 	if err != nil {
 		writePaymentError(w, err)
@@ -143,6 +179,15 @@ func updatePaymentChannelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	var body paymentChannelPayload
 	if err := decodeJSON(r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, errInvalidInput)
+		return
+	}
+	if paymentChannelDisableOnly(body) {
+		updated, updateErr := store.UpdatePaymentChannel(r.Context(), d.DB, id, store.PaymentChannelPatch{Enabled: body.Enabled})
+		if updateErr != nil {
+			writePaymentError(w, updateErr)
+			return
+		}
+		writeJSON(w, http.StatusOK, adminPaymentChannelJSON(*updated, r))
 		return
 	}
 	provider := existing.Provider
@@ -177,7 +222,7 @@ func updatePaymentChannelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		if providerChanged {
 			base = nil
 		}
-		merged, mergeErr := mergePaymentChannelConfig(base, *body.Config)
+		merged, mergeErr := mergePaymentChannelConfig(provider, base, *body.Config)
 		if mergeErr != nil {
 			writeError(w, http.StatusBadRequest, mergeErr)
 			return
@@ -209,6 +254,10 @@ func updatePaymentChannelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	environmentChanged := environment != existing.Environment
+	if err := validatePaymentChannelSettlementConfig(provider, config, globalSettlementCurrency(d)); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
 	if providerChanged || configChanged || environmentChanged {
 		hasPending, checkErr := store.HasPendingPaymentOrdersByChannel(r.Context(), d.DB, id)
 		if checkErr != nil {
@@ -245,6 +294,11 @@ func updatePaymentChannelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, adminPaymentChannelJSON(*updated, r))
+}
+
+func paymentChannelDisableOnly(body paymentChannelPayload) bool {
+	return body.Enabled != nil && !*body.Enabled && body.ID == nil && body.Name == nil &&
+		body.Provider == nil && body.Environment == nil && body.Config == nil && body.SortOrder == nil
 }
 
 func deletePaymentChannelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
@@ -495,29 +549,32 @@ func deletePaymentMethodAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 }
 
 type adminPaymentOrderResponse struct {
-	ID                string  `json:"id"`
-	UserEmail         string  `json:"user_email"`
-	TargetType        string  `json:"target_type"`
-	TargetName        string  `json:"target_name"`
-	BillingCycle      string  `json:"billing_cycle"`
-	AmountMinor       int64   `json:"amount_minor"`
-	TaxAmountMinor    int64   `json:"tax_amount_minor,omitempty"`
-	Currency          string  `json:"currency"`
-	ChannelName       string  `json:"channel_name"`
-	MethodName        string  `json:"method_name"`
-	Provider          string  `json:"provider"`
-	Environment       string  `json:"environment"`
-	ProviderOrderID   string  `json:"provider_order_id,omitempty"`
-	ProviderPaymentID string  `json:"provider_payment_id,omitempty"`
-	CheckoutSessionID string  `json:"checkout_session_id,omitempty"`
-	CheckoutExpiresAt *int64  `json:"checkout_expires_at"`
-	LastReconciledAt  *int64  `json:"last_reconciled_at"`
-	ReconcileError    *string `json:"reconcile_error,omitempty"`
-	Status            string  `json:"status"`
-	CreatedAt         int64   `json:"created_at"`
-	PaidAt            *int64  `json:"paid_at"`
-	FulfilledAt       *int64  `json:"fulfilled_at"`
-	FailureReason     *string `json:"failure_reason,omitempty"`
+	ID                  string  `json:"id"`
+	UserEmail           string  `json:"user_email"`
+	TargetType          string  `json:"target_type"`
+	TargetName          string  `json:"target_name"`
+	BillingCycle        string  `json:"billing_cycle"`
+	AmountMinor         int64   `json:"amount_minor"`
+	TaxAmountMinor      int64   `json:"tax_amount_minor,omitempty"`
+	Currency            string  `json:"currency"`
+	ProviderAmountMinor int64   `json:"provider_amount_minor"`
+	ProviderCurrency    string  `json:"provider_currency"`
+	ConversionRate      string  `json:"conversion_rate,omitempty"`
+	ChannelName         string  `json:"channel_name"`
+	MethodName          string  `json:"method_name"`
+	Provider            string  `json:"provider"`
+	Environment         string  `json:"environment"`
+	ProviderOrderID     string  `json:"provider_order_id,omitempty"`
+	ProviderPaymentID   string  `json:"provider_payment_id,omitempty"`
+	CheckoutSessionID   string  `json:"checkout_session_id,omitempty"`
+	CheckoutExpiresAt   *int64  `json:"checkout_expires_at"`
+	LastReconciledAt    *int64  `json:"last_reconciled_at"`
+	ReconcileError      *string `json:"reconcile_error,omitempty"`
+	Status              string  `json:"status"`
+	CreatedAt           int64   `json:"created_at"`
+	PaidAt              *int64  `json:"paid_at"`
+	FulfilledAt         *int64  `json:"fulfilled_at"`
+	FailureReason       *string `json:"failure_reason,omitempty"`
 }
 
 func nonzeroPaymentTime(value int64) *int64 {
@@ -544,7 +601,8 @@ func adminPaymentOrderJSON(order store.PaymentOrder) adminPaymentOrderResponse {
 		ID: order.ID, UserEmail: order.UserEmail, TargetType: order.ProductType,
 		TargetName: order.ProductName, BillingCycle: order.BillingCycle,
 		AmountMinor: paymentOrderDisplayAmount(order), TaxAmountMinor: order.TaxAmountMinor,
-		Currency:    order.Currency,
+		Currency: order.Currency, ProviderAmountMinor: order.ProviderAmountMinor,
+		ProviderCurrency: order.ProviderCurrency, ConversionRate: order.ConversionRate,
 		ChannelName: order.ChannelName, MethodName: order.MethodName,
 		Provider: order.Provider, Environment: order.Environment,
 		ProviderOrderID: order.ProviderOrderID, ProviderPaymentID: order.ProviderPaymentID,
@@ -616,7 +674,7 @@ func reconcilePaymentOrderAdmin(d Deps, w http.ResponseWriter, r *http.Request) 
 	}
 
 	reconcileRequest := paymentcore.ReconcileRequest{
-		OrderID: order.ID, UserID: order.UserID, AmountMinor: order.AmountMinor, Currency: order.Currency,
+		OrderID: order.ID, UserID: order.UserID, AmountMinor: order.ProviderAmountMinor, Currency: order.ProviderCurrency,
 		SessionID: order.CheckoutSessionID, SessionExpiresAt: order.CheckoutExpiresAt, Close: closeOrder,
 	}
 	var event paymentcore.ProviderEvent

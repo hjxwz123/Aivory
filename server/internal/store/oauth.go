@@ -115,6 +115,9 @@ func CreateOAuthProvider(ctx context.Context, db *sql.DB, p OAuthProvider) (*OAu
 		if isUniqueIndexErr(err, "idx_oauth_providers_name_unique", "oauth_providers.name") {
 			return nil, ErrOAuthProviderNameExists
 		}
+		if isUniqueIndexErr(err, "oauth_providers.id", "oauth_providers_pkey") {
+			return nil, ErrOAuthProviderIDExists
+		}
 		return nil, err
 	}
 	out, err := GetOAuthProvider(ctx, db, p.ID)

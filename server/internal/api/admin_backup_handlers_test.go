@@ -456,6 +456,7 @@ func TestConfigImportRejectsProviderChangeWithBoundMethods(t *testing.T) {
 			"config": paymentConfigArchiveJSONText(t, paymentcore.EPayConfig{
 				GatewayURL: "https://epay.example.test", MerchantID: "bound-import",
 				MerchantKey: "bound-import-secret", Currency: "USD",
+				ConversionRate: "1.1", ConversionRateBaseCurrency: "EUR",
 			}),
 			"enabled": 1, "sort_order": 0,
 		}},

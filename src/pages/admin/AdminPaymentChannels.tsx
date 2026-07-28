@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Check, Copy, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { Check, Copy, Pencil, Plus, PowerOff, RefreshCw, Trash2 } from 'lucide-react'
 
 import { adminApi, ApiError } from '@/api'
 import type { ApiPaymentChannel, ApiPaymentEnvironment, ApiPaymentProvider } from '@/api/types'
@@ -22,9 +23,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { toast } from '@/hooks/use-toast'
+import { updateEPayCurrencyConfig } from '@/lib/payment-channel-config'
+import { adminPaymentChannelErrorKey } from '@/lib/payment-errors'
 import { formatDateTime } from '@/lib/utils'
 
 type ChannelDraft = Pick<ApiPaymentChannel, 'name' | 'provider' | 'environment' | 'config' | 'enabled'>
+  & Partial<Pick<ApiPaymentChannel, 'id' | 'webhook_url'>>
 
 const PROVIDERS: ApiPaymentProvider[] = ['stripe', 'epay', 'waffo']
 
@@ -49,10 +53,18 @@ function emptyConfig(provider: ApiPaymentProvider): Record<string, unknown> {
 
 function configString(config: Record<string, unknown>, key: string): string {
   const value = config[key]
-  return typeof value === 'string' ? value : ''
+  if (typeof value === 'string') return value
+  return typeof value === 'number' && Number.isFinite(value) ? String(value) : ''
 }
 
 function editableConfig(provider: ApiPaymentProvider, config: Record<string, unknown>): Record<string, unknown> {
+  if (provider === 'epay') {
+    return {
+      ...config,
+      conversion_rate: configString(config, 'conversion_rate'),
+      conversion_rate_base_currency: configString(config, 'conversion_rate_base_currency').toUpperCase(),
+    }
+  }
   if (provider !== 'waffo') return { ...config }
   return {
     merchant_id: configString(config, 'merchant_id'),
@@ -64,12 +76,25 @@ function editableConfig(provider: ApiPaymentProvider, config: Record<string, unk
   }
 }
 
-function submitConfig(provider: ApiPaymentProvider, config: Record<string, unknown>): Record<string, unknown> {
+function submitConfig(
+  provider: ApiPaymentProvider,
+  config: Record<string, unknown>,
+  settlementCurrency: string,
+): Record<string, unknown> {
   if (provider === 'epay') {
-    return {
+    const currency = configString(config, 'currency').trim().toUpperCase()
+    const next: Record<string, unknown> = {
       ...config,
-      currency: configString(config, 'currency').trim().toUpperCase(),
+      currency,
     }
+    if (currency === settlementCurrency) {
+      delete next.conversion_rate
+      delete next.conversion_rate_base_currency
+    } else {
+      next.conversion_rate = configString(config, 'conversion_rate').trim()
+      next.conversion_rate_base_currency = settlementCurrency
+    }
+    return next
   }
   if (provider === 'waffo') {
     return {
@@ -84,6 +109,11 @@ function submitConfig(provider: ApiPaymentProvider, config: Record<string, unkno
   return config
 }
 
+function validPositiveDecimal(value: string): boolean {
+  const normalized = value.trim()
+  return normalized.length <= 128 && /^\d+(?:\.\d+)?$/.test(normalized) && /[1-9]/.test(normalized)
+}
+
 function timestamp(value: number): Date {
   return new Date(value < 1_000_000_000_000 ? value * 1000 : value)
 }
@@ -91,8 +121,10 @@ function timestamp(value: number): Date {
 export default function AdminPaymentChannels() {
   const { t } = useTranslation(['admin', 'common'])
   const [rows, setRows] = useState<ApiPaymentChannel[]>([])
+  const [settlementCurrency, setSettlementCurrency] = useState('USD')
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
+  const [saveError, setSaveError] = useState<{ code: string; message: string } | null>(null)
   const [editor, setEditor] = useState<{
     open: boolean
     row?: ApiPaymentChannel
@@ -103,7 +135,11 @@ export default function AdminPaymentChannels() {
   })
   const [confirmDelete, setConfirmDelete] = useState<ApiPaymentChannel | null>(null)
   const [saving, setSaving] = useState(false)
+  const [disabling, setDisabling] = useState(false)
   const savingRef = useRef(false)
+  const [preparingWebhook, setPreparingWebhook] = useState(false)
+  const [prepareError, setPrepareError] = useState('')
+  const prepareVersionRef = useRef(0)
   const [deleting, setDeleting] = useState(false)
   const deletingRef = useRef(false)
   const [copiedWebhook, setCopiedWebhook] = useState('')
@@ -112,7 +148,15 @@ export default function AdminPaymentChannels() {
     setLoading(true)
     setLoadError('')
     try {
-      setRows(await adminApi.paymentChannels())
+      const [paymentChannels, settings] = await Promise.all([
+        adminApi.paymentChannels(),
+        adminApi.settings(),
+      ])
+      const configuredCurrency = typeof settings.settlement_currency === 'string'
+        ? settings.settlement_currency.trim().toUpperCase()
+        : ''
+      setSettlementCurrency(/^[A-Z]{3}$/.test(configuredCurrency) ? configuredCurrency : 'USD')
+      setRows(paymentChannels)
     } catch (error) {
       const message = error instanceof ApiError ? error.message : t('admin:paymentChannels.loadFailed')
       setLoadError(message)
@@ -127,20 +171,62 @@ export default function AdminPaymentChannels() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  async function prepareNewChannel() {
+    const version = ++prepareVersionRef.current
+    setPreparingWebhook(true)
+    setPrepareError('')
+    try {
+      const prepared = await adminApi.preparePaymentChannel()
+      if (prepareVersionRef.current !== version) return
+      setEditor((current) => current.open && !current.row
+        ? { ...current, draft: { ...current.draft, id: prepared.id, webhook_url: prepared.webhook_url } }
+        : current)
+    } catch (error) {
+      if (prepareVersionRef.current !== version) return
+      setPrepareError(error instanceof ApiError ? error.message : t('admin:paymentChannels.errors.callbackLoadFailed'))
+    } finally {
+      if (prepareVersionRef.current === version) setPreparingWebhook(false)
+    }
+  }
+
   function openNew() {
     setCopiedWebhook('')
+    setPrepareError('')
+    setSaveError(null)
     setEditor({
       open: true,
       draft: { name: '', provider: 'stripe', environment: 'test', config: emptyConfig('stripe'), enabled: false },
     })
+    void prepareNewChannel()
   }
 
   function openEdit(row: ApiPaymentChannel) {
+    prepareVersionRef.current += 1
+    setPreparingWebhook(false)
+    setPrepareError('')
+    setSaveError(null)
     setCopiedWebhook('')
+    const config = editableConfig(row.provider, row.config)
+    if (
+      row.provider === 'epay' &&
+      configString(config, 'currency').trim().toUpperCase() !== settlementCurrency &&
+      configString(config, 'conversion_rate_base_currency').trim().toUpperCase() !== settlementCurrency
+    ) {
+      config.conversion_rate = ''
+      config.conversion_rate_base_currency = settlementCurrency
+    }
     setEditor({
       open: true,
       row,
-      draft: { name: row.name, provider: row.provider, environment: row.environment, config: editableConfig(row.provider, row.config), enabled: row.enabled },
+      draft: {
+        id: row.id,
+        name: row.name,
+        provider: row.provider,
+        environment: row.environment,
+        config,
+        enabled: row.enabled,
+        webhook_url: row.webhook_url,
+      },
     })
   }
 
@@ -154,6 +240,16 @@ export default function AdminPaymentChannels() {
       draft: {
         ...current.draft,
         config: { ...current.draft.config, [key]: value },
+      },
+    }))
+  }
+
+  function setEPayCurrency(value: string) {
+    setEditor((current) => ({
+      ...current,
+      draft: {
+        ...current.draft,
+        config: updateEPayCurrencyConfig(current.draft.config, value, settlementCurrency),
       },
     }))
   }
@@ -185,6 +281,12 @@ export default function AdminPaymentChannels() {
     if (draft.provider === 'epay' && !/^[A-Z]{3}$/.test(configString(draft.config, 'currency').trim().toUpperCase())) {
       return t('admin:paymentChannels.errors.currencyInvalid')
     }
+    if (draft.provider === 'epay') {
+      const providerCurrency = configString(draft.config, 'currency').trim().toUpperCase()
+      if (providerCurrency !== settlementCurrency && !validPositiveDecimal(configString(draft.config, 'conversion_rate'))) {
+        return t('admin:paymentChannels.errors.conversionRateInvalid')
+      }
+    }
     if (draft.provider === 'waffo' && !['test', 'prod'].includes(configString(draft.config, 'mode').trim())) {
       return t('admin:paymentChannels.errors.modeInvalid')
     }
@@ -198,29 +300,73 @@ export default function AdminPaymentChannels() {
       toast.error(validationError)
       return
     }
+    if (!editor.row && (!editor.draft.id || !editor.draft.webhook_url)) {
+      toast.error(t('admin:paymentChannels.errors.callbackLoadFailed'))
+      return
+    }
 
     savingRef.current = true
     setSaving(true)
+    setSaveError(null)
     try {
-      const body: ChannelDraft = {
-        ...editor.draft,
+      const body = {
         name: editor.draft.name.trim(),
-        config: submitConfig(editor.draft.provider, editor.draft.config),
+        provider: editor.draft.provider,
+        environment: editor.draft.environment,
+        config: submitConfig(editor.draft.provider, editor.draft.config, settlementCurrency),
+        enabled: editor.draft.enabled,
       }
       if (editor.row) {
         await adminApi.updatePaymentChannel(editor.row.id, body)
         toast.success(t('admin:paymentChannels.updated'))
       } else {
-        await adminApi.createPaymentChannel(body)
+        await adminApi.createPaymentChannel({ ...body, id: editor.draft.id! })
         toast.success(t('admin:paymentChannels.created'))
       }
       setEditor((current) => ({ ...current, open: false }))
       await load()
     } catch (error) {
-      toast.error(error instanceof ApiError ? error.message : t('admin:common.failed'))
+      if (error instanceof ApiError) {
+        const key = adminPaymentChannelErrorKey(error.message)
+        const message = key ? t(key) : error.message
+        setSaveError({ code: error.message, message })
+        toast.error(message)
+      } else {
+        const message = t('admin:common.failed')
+        setSaveError({ code: '', message })
+        toast.error(message)
+      }
     } finally {
       savingRef.current = false
       setSaving(false)
+    }
+  }
+
+  async function disableCurrentChannel() {
+    const row = editor.row
+    if (!row?.enabled || savingRef.current) return
+    savingRef.current = true
+    setDisabling(true)
+    setSaveError(null)
+    try {
+      await adminApi.updatePaymentChannel(row.id, { enabled: false })
+      toast.success(t('admin:paymentChannels.disabledSuccess'))
+      setEditor((current) => ({ ...current, open: false }))
+      await load()
+    } catch (error) {
+      if (error instanceof ApiError) {
+        const key = adminPaymentChannelErrorKey(error.message)
+        const message = key ? t(key) : error.message
+        setSaveError({ code: error.message, message })
+        toast.error(message)
+      } else {
+        const message = t('admin:common.failed')
+        setSaveError({ code: '', message })
+        toast.error(message)
+      }
+    } finally {
+      savingRef.current = false
+      setDisabling(false)
     }
   }
 
@@ -254,7 +400,11 @@ export default function AdminPaymentChannels() {
   function channelSummary(row: ApiPaymentChannel): string {
     if (row.provider === 'stripe') return t('admin:paymentChannels.summary.stripe')
     if (row.provider === 'epay') {
-      return [configString(row.config, 'gateway_url'), configString(row.config, 'currency')]
+      const currency = configString(row.config, 'currency').toUpperCase()
+      const rate = configString(row.config, 'conversion_rate')
+      const base = configString(row.config, 'conversion_rate_base_currency').toUpperCase()
+      const conversion = rate && base && base !== currency ? `1 ${base} = ${rate} ${currency}` : ''
+      return [configString(row.config, 'gateway_url'), currency, conversion]
         .filter(Boolean)
         .join(' · ')
     }
@@ -271,7 +421,7 @@ export default function AdminPaymentChannels() {
     <div className="min-w-0 max-w-full font-sans">
       <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div className="min-w-0">
-          <h1 className="text-2xl font-semibold tracking-normal text-[var(--color-fg)]">
+          <h1 className="font-serif text-3xl tracking-tight text-[var(--color-fg)]">
             {t('admin:paymentChannels.title')}
           </h1>
           <p className="mt-1 max-w-2xl text-[13px] leading-5 text-[var(--color-fg-muted)]">
@@ -356,7 +506,18 @@ export default function AdminPaymentChannels() {
         )}
       </section>
 
-      <Dialog open={editor.open} onOpenChange={(open) => !savingRef.current && setEditor((current) => ({ ...current, open }))}>
+      <Dialog
+        open={editor.open}
+        onOpenChange={(open) => {
+          if (savingRef.current) return
+          if (!open) {
+            prepareVersionRef.current += 1
+            setPreparingWebhook(false)
+            setPrepareError('')
+          }
+          setEditor((current) => ({ ...current, open }))
+        }}
+      >
         <DialogContent size="lg" className="rounded-[8px] font-sans max-sm:[&>button]:size-11">
           <form
             className="flex min-h-0 flex-1 flex-col"
@@ -391,6 +552,7 @@ export default function AdminPaymentChannels() {
                     value={editor.draft.provider}
                     onValueChange={(value) => {
                       const provider = value as ApiPaymentProvider
+                      setSaveError(null)
                       setDraft({ provider, environment: defaultEnvironment(provider), config: emptyConfig(provider) })
                     }}
                   >
@@ -422,14 +584,14 @@ export default function AdminPaymentChannels() {
                 </Field>
               </div>
 
-              <Field label={t('admin:paymentChannels.fields.webhookUrl')} hint={editor.row ? undefined : t('admin:paymentChannels.fields.webhookUrlNew')}>
-                {editor.row?.webhook_url ? (
+              <Field label={t('admin:paymentChannels.fields.webhookUrl')} hint={t('admin:paymentChannels.fields.webhookUrlHint')}>
+                {editor.draft.webhook_url ? (
                   <div className="flex min-w-0 gap-1.5">
                     <Input
                       readOnly
                       wrapperClassName="min-w-0 flex-1 rounded-[8px] max-sm:h-11"
                       className="font-mono text-[12px]"
-                      value={editor.row.webhook_url}
+                      value={editor.draft.webhook_url}
                       onFocus={(event) => event.currentTarget.select()}
                     />
                     <Button
@@ -438,14 +600,28 @@ export default function AdminPaymentChannels() {
                       size="icon"
                       title={copiedWebhook === 'editor' ? t('admin:paymentChannels.copied') : t('admin:paymentChannels.copyWebhook')}
                       aria-label={copiedWebhook === 'editor' ? t('admin:paymentChannels.copied') : t('admin:paymentChannels.copyWebhook')}
-                      onClick={() => void copyWebhook(editor.row!.webhook_url!, 'editor')}
+                      onClick={() => void copyWebhook(editor.draft.webhook_url!, 'editor')}
                     >
                       {copiedWebhook === 'editor' ? <Check size={14} aria-hidden /> : <Copy size={14} aria-hidden />}
                     </Button>
                   </div>
+                ) : preparingWebhook ? (
+                  <div className="h-10 animate-pulse rounded-[8px] bg-[var(--color-bg-muted)]" role="status">
+                    <span className="sr-only">{t('common:common.loading')}</span>
+                  </div>
                 ) : (
-                  <div className="min-h-10 rounded-[8px] border border-dashed border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3 py-2 text-[12px] text-[var(--color-fg-subtle)]">
-                    {t('admin:paymentChannels.fields.webhookUrlNew')}
+                  <div className="flex min-h-10 items-center justify-between gap-3 rounded-[8px] bg-[var(--color-danger-soft)] px-3 py-2 text-[12px] text-[var(--color-danger)]">
+                    <span>{prepareError || t('admin:paymentChannels.errors.callbackLoadFailed')}</span>
+                    <Button
+                      type="button"
+                      className="shrink-0 rounded-[8px]"
+                      variant="ghost"
+                      size="xs"
+                      leadingIcon={<RefreshCw size={12} aria-hidden />}
+                      onClick={() => void prepareNewChannel()}
+                    >
+                      {t('common:actions.tryAgain')}
+                    </Button>
                   </div>
                 )}
               </Field>
@@ -514,11 +690,36 @@ export default function AdminPaymentChannels() {
                         className="uppercase"
                         maxLength={3}
                         value={configString(editor.draft.config, 'currency')}
-                        onChange={(event) => setConfig('currency', event.target.value.toUpperCase())}
+                        onChange={(event) => setEPayCurrency(event.target.value)}
                         placeholder="CNY"
                       />
                     </Field>
                   </div>
+                  {configString(editor.draft.config, 'currency').trim().toUpperCase() !== settlementCurrency ? (
+                    <Field
+                      label={t('admin:paymentChannels.fields.conversionRate', {
+                        base: settlementCurrency,
+                        target: configString(editor.draft.config, 'currency').trim().toUpperCase() || '---',
+                      })}
+                      htmlFor="payment-channel-epay-conversion-rate"
+                      hint={t('admin:paymentChannels.fields.conversionRateHint', {
+                        base: settlementCurrency,
+                        target: configString(editor.draft.config, 'currency').trim().toUpperCase() || '---',
+                      })}
+                    >
+                      <Input
+                        id="payment-channel-epay-conversion-rate"
+                        type="text"
+                        inputMode="decimal"
+                        required
+                        wrapperClassName="rounded-[8px] max-sm:h-11"
+                        className="font-mono tabular-nums"
+                        value={configString(editor.draft.config, 'conversion_rate')}
+                        onChange={(event) => setConfig('conversion_rate', event.target.value)}
+                        placeholder="7.23"
+                      />
+                    </Field>
+                  ) : null}
                   <Field label={t('admin:paymentChannels.fields.merchantKey')} htmlFor="payment-channel-epay-key" hint={t('admin:paymentChannels.secretHint')}>
                     <Input
                       id="payment-channel-epay-key"
@@ -597,15 +798,46 @@ export default function AdminPaymentChannels() {
                   <span className="block text-[13px] font-medium text-[var(--color-fg)]">{t('admin:paymentChannels.fields.enabled')}</span>
                   <span className="block text-[12px] text-[var(--color-fg-subtle)]">{t('admin:paymentChannels.fields.enabledHint')}</span>
                 </span>
-                <Switch checked={editor.draft.enabled} onCheckedChange={(enabled) => setDraft({ enabled })} />
+                <Switch disabled={saving || disabling} checked={editor.draft.enabled} onCheckedChange={(enabled) => setDraft({ enabled })} />
               </label>
+              {saveError ? (
+                <div
+                  role="alert"
+                  className="flex flex-col items-start gap-2 rounded-[8px] bg-[var(--color-danger-soft)] px-3 py-2.5 text-[12.5px] leading-relaxed text-[var(--color-danger)] sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <span>{saveError.message}</span>
+                  {saveError.code === 'payment_channel_has_pending_orders' ? (
+                    <Button asChild type="button" size="xs" variant="secondary" className="shrink-0 rounded-[8px]">
+                      <Link to="/admin/payment-orders">{t('admin:paymentChannels.resolvePendingOrders')}</Link>
+                    </Button>
+                  ) : null}
+                </div>
+              ) : null}
               </div>
             </DialogBody>
             <DialogFooter className="max-sm:[&_button]:!h-11">
-              <Button className="rounded-[8px]" variant="ghost" disabled={saving} onClick={() => setEditor((current) => ({ ...current, open: false }))}>
+              {editor.row?.enabled ? (
+                <Button
+                  type="button"
+                  className="mr-auto rounded-[8px]"
+                  variant="secondary"
+                  leadingIcon={<PowerOff size={14} aria-hidden />}
+                  loading={disabling}
+                  disabled={saving}
+                  onClick={() => void disableCurrentChannel()}
+                >
+                  {t('admin:paymentChannels.disableAction')}
+                </Button>
+              ) : null}
+              <Button className="rounded-[8px]" variant="ghost" disabled={saving || disabling} onClick={() => setEditor((current) => ({ ...current, open: false }))}>
                 {t('common:actions.cancel')}
               </Button>
-              <Button type="submit" className="rounded-[8px]" loading={saving}>
+              <Button
+                type="submit"
+                className="rounded-[8px]"
+                loading={saving}
+                disabled={disabling || (!editor.row && (preparingWebhook || !editor.draft.webhook_url))}
+              >
                 {t('common:actions.save')}
               </Button>
             </DialogFooter>

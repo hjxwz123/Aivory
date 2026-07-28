@@ -100,10 +100,13 @@ type ProviderEvent struct {
 	PaidAmountMinor int64
 	TaxAmountMinor  int64
 	Currency        string
-	MethodType      string
-	MethodName      string
-	UserID          string
-	FailureReason   string
+	// AmountMajor carries EPay's signed decimal money field until the API can
+	// parse it using the immutable provider-currency snapshot on the order.
+	AmountMajor   string
+	MethodType    string
+	MethodName    string
+	UserID        string
+	FailureReason string
 }
 
 const (

@@ -38,6 +38,8 @@
     "empty": "暂无可购买的永久积分套餐。"
   },
   "current": "当前",
+  "permanentlyOwned": "永久拥有",
+  "alreadyOwned": "已永久拥有",
   "youreOnThis": "你正在使用此用户组",
   "switchCta": "切换",
   "upgradeCta": "升级",
@@ -89,7 +91,8 @@
     "errors": {
       "methodUnavailable": "该支付方式暂不可用，请选择其他方式。",
       "productUnavailable": "该商品已下架或价格已变更，请刷新页面后重试。",
-      "checkoutUnavailable": "支付服务暂不可用，请稍后重试。"
+      "checkoutUnavailable": "支付服务暂不可用，请稍后重试。",
+      "userGroupAlreadyPermanent": "你已永久拥有该用户组，无需重复购买。"
     },
     "or": "或",
     "cardPurchase": "卡密购买",

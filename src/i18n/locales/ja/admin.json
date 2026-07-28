@@ -283,8 +283,7 @@
       "keyId": "Key ID",
       "enabled": "有効（ログイン画面に表示）",
       "redirectUri": "リダイレクトURI",
-      "redirectUriHint": "プロバイダのリダイレクト URI に登録。",
-      "redirectUriNew": "先に方法を保存してください。プロバイダーに登録するリダイレクトURIは、IDが付与されると表示されます。"
+      "redirectUriHint": "この URI をそのままプロバイダーに登録してください。保存後も変更されません。"
     },
     "hints": {
       "google": "Google Cloud → 認証情報 で OAuth クライアントを作成。",
@@ -301,7 +300,9 @@
     "removed": "ログイン方法を削除しました",
     "copy": "リダイレクトURIをコピー",
     "errors": {
-      "nameRequired": "ボタンのラベルは必須です"
+      "nameRequired": "ボタンのラベルは必須です",
+      "callbackLoadFailed": "リダイレクト URI を準備できませんでした。再試行してください。",
+      "idConflict": "このリダイレクト URI は使用済みです。フォームを閉じて開き直し、新しい URI を生成してください。"
     },
     "copied": "コピーしました"
   },
@@ -387,6 +388,15 @@
       "created": "作成日"
     },
     "viewLibrary": "プロジェクトとナレッジ",
+    "viewMemories": "メモリー",
+    "memoriesTitle": "{{name}}のメモリー",
+    "memoriesFallbackTitle": "ユーザーのメモリー",
+    "memoriesLead": "このユーザーに保存された長期的な情報を確認できます。",
+    "memoriesLoadFailed": "このユーザーのメモリーを読み込めませんでした。",
+    "memoriesRetry": "再試行",
+    "noMemories": "保存されたメモリーはありません",
+    "noMemoriesBody": "このユーザーにはまだ長期メモリーがありません。",
+    "memoryUpdatedAt": "更新: {{when}}",
     "libraryTitle": "{{name}} のライブラリ",
     "libraryLead": "このユーザーのプロジェクトとナレッジベース(読み取り専用)。",
     "projectsHeading": "プロジェクト",
@@ -1081,10 +1091,13 @@
     "secretHint": "マスクされた値が表示されている場合は、変更せずに保存すると既存の秘密情報を保持します。",
     "created": "決済チャネルを作成しました",
     "updated": "決済チャネルを更新しました",
+    "disableAction": "チャネルを無効化",
+    "disabledSuccess": "決済チャネルを無効化しました",
     "removed": "決済チャネルを削除しました",
     "updatedAt": "{{date}} 更新",
     "removeTitle": "決済チャネルを削除しますか？",
     "removeBody": "「{{name}}」を削除しますか？先に紐づく決済方法と処理中の注文を解消してください。",
+    "resolvePendingOrders": "決済注文を確認",
     "summary": {
       "stripe": "Stripe Checkout",
       "waffo": "Waffo マーチャント"
@@ -1098,15 +1111,17 @@
       "environmentLive": "本番",
       "environmentTest": "テスト",
       "webhookUrl": "コールバック URL",
-      "webhookUrlNew": "保存するとコールバック URL が生成されます。",
+      "webhookUrlHint": "この URL をそのまま決済サービスに登録してください。保存後も変更されません。",
       "secretKey": "シークレットキー",
       "webhookSecret": "Webhook 署名シークレット",
-      "webhookSecretHint": "初回設定では、チャネルを無効のまま保存し、生成されたコールバック URL を Stripe に登録してから、whsec_… シークレットをここに入力して有効にしてください。マスクされた値は変更しなければ保持されます。",
+      "webhookSecretHint": "上のコールバック URL を Stripe に登録し、whsec_… シークレットをここに入力してからチャネルを有効にしてください。マスクされた値は変更しなければ保持されます。",
       "gatewayUrl": "ゲートウェイ URL",
       "merchantId": "マーチャント ID",
       "merchantKey": "マーチャントキー",
       "currency": "EPay 通貨",
-      "currencyHint": "大文字3文字のコードです。このチャネルを表示するには、全体の決済通貨と一致させてください。",
+      "currencyHint": "大文字3文字のコードです。全体の決済通貨と異なる場合は、下に換算レートを入力してください。",
+      "conversionRate": "換算レート（1 {{base}} あたりの {{target}}）",
+      "conversionRateHint": "1 {{base}} に対して請求する {{target}} の数量を入力してください。7.23 のような小数も使用できます。",
       "storeId": "ストア ID",
       "storeIdHint": "Waffo Dashboard のストア ID（STO_*）を使用してください。",
       "productId": "商品 ID",
@@ -1125,7 +1140,11 @@
       "nameRequired": "チャネル名を入力してください。",
       "configRequired": "プロトコルの必須項目をすべて入力してください。",
       "currencyInvalid": "EPay 通貨は CNY などの3文字コードで入力してください。",
-      "modeInvalid": "Waffo のテスト環境または本番環境を選択してください。"
+      "conversionRateInvalid": "0 より大きい EPay 換算レートを入力してください（例：7.23）。",
+      "modeInvalid": "Waffo のテスト環境または本番環境を選択してください。",
+      "callbackLoadFailed": "コールバック URL を準備できませんでした。再試行してください。",
+      "idConflict": "このコールバック URL は使用済みです。フォームを閉じて開き直し、新しい URL を生成してください。",
+      "pendingOrders": "このチャネルには支払い待ち、または処理中の注文があります。「決済注文」を開き、対象の注文を完了または終了してから、プロトコル、認証情報、環境を変更してください。"
     }
   },
   "paymentMethods": {

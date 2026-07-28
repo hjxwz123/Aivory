@@ -103,17 +103,9 @@ func listPaymentMethodsPublic(d Deps, w http.ResponseWriter, r *http.Request) {
 			ID: method.ID, Name: method.Name, Icon: method.Icon, Provider: method.Provider,
 		})
 	}
+	// The new payment dialog is controlled only by card_purchase_url. Legacy
+	// group_buy_url/credit_buy_url values must not silently create a card option.
 	cardURL := strings.TrimSpace(globalSettingStr(d, "card_purchase_url"))
-	if cardURL == "" {
-		// Existing deployments may still have the old target-specific purchase
-		// links. Keep them as a read-only fallback while all new configuration
-		// is stored in the single card_purchase_url setting.
-		if targetType == store.PaymentProductCreditPackage {
-			cardURL = strings.TrimSpace(globalSettingStr(d, "credit_buy_url"))
-		} else {
-			cardURL = strings.TrimSpace(globalSettingStr(d, "group_buy_url"))
-		}
-	}
 	if cardURL != "" && !validPaymentHTTPURL(cardURL) {
 		cardURL = ""
 	}
@@ -184,7 +176,7 @@ func createPaymentCheckoutHandler(d Deps, w http.ResponseWriter, r *http.Request
 	}
 	providerCtx, providerCancel := paymentDetachedContext(r, paymentCheckoutProviderTimeout)
 	action, err := createPaymentCheckout(providerCtx, gateway, payment.CheckoutRequest{
-		OrderID: order.ID, Name: order.ProductName, AmountMinor: order.AmountMinor, Currency: order.Currency,
+		OrderID: order.ID, Name: order.ProductName, AmountMinor: order.ProviderAmountMinor, Currency: order.ProviderCurrency,
 		TaxCategory: taxCategory,
 		UserID:      order.UserID, UserEmail: order.UserEmail,
 		NotifyURL:  paymentAbsoluteWebhookURL(r, order.ChannelID),
@@ -392,6 +384,10 @@ func applyProviderEvent(r *http.Request, d Deps, provider, channelID string, eve
 		return nil, err
 	}
 	event.OrderID = order.ID
+	event, err = normalizeProviderEventForOrder(*order, provider, event)
+	if err != nil {
+		return nil, err
+	}
 	if err := validateProviderEvent(*order, provider, channelID, event); err != nil {
 		return nil, err
 	}
@@ -405,9 +401,18 @@ func applyProviderEvent(r *http.Request, d Deps, provider, channelID string, eve
 			paidAmount = amount
 		}
 		taxAmount := event.TaxAmountMinor
+		currency := event.Currency
+		if provider == payment.ProviderEPay {
+			// EPay's signed amount is in the provider currency. Entitlements and
+			// user-visible history remain denominated in the settlement snapshot.
+			amount = order.AmountMinor
+			paidAmount = order.AmountMinor
+			taxAmount = 0
+			currency = order.Currency
+		}
 		result, err := store.FulfillPaymentOrder(r.Context(), d.DB, store.PaymentFulfillmentInput{
 			PaymentEventInput: eventInput, ProviderOrderID: event.ProviderOrderID, ProviderPaymentID: event.ProviderPaymentID,
-			AmountMinor: &amount, PaidAmountMinor: &paidAmount, TaxAmountMinor: &taxAmount, Currency: event.Currency,
+			AmountMinor: &amount, PaidAmountMinor: &paidAmount, TaxAmountMinor: &taxAmount, Currency: currency,
 		})
 		if err != nil {
 			return nil, err
@@ -448,6 +453,21 @@ func applyProviderEvent(r *http.Request, d Deps, provider, channelID string, eve
 	return nil, nil
 }
 
+func normalizeProviderEventForOrder(order store.PaymentOrder, provider string, event payment.ProviderEvent) (payment.ProviderEvent, error) {
+	if provider != payment.ProviderEPay {
+		return event, nil
+	}
+	amount, err := payment.ParseMinorAmount(event.AmountMajor, order.ProviderCurrency)
+	if err != nil {
+		return event, err
+	}
+	event.AmountMinor = amount
+	event.PaidAmountMinor = amount
+	event.TaxAmountMinor = 0
+	event.Currency = order.ProviderCurrency
+	return event, nil
+}
+
 func paymentOrderForProviderEvent(r *http.Request, d Deps, provider, channelID string, event payment.ProviderEvent) (*store.PaymentOrder, error) {
 	if strings.TrimSpace(event.OrderID) != "" {
 		return store.GetPaymentOrder(r.Context(), d.DB, event.OrderID)
@@ -465,10 +485,16 @@ func validateProviderEvent(order store.PaymentOrder, provider, channelID string,
 	if order.Provider != provider || order.ChannelID != channelID {
 		return store.ErrPaymentEventConflict
 	}
-	if order.AmountMinor != event.AmountMinor {
+	expectedAmount := order.AmountMinor
+	expectedCurrency := order.Currency
+	if provider == payment.ProviderEPay {
+		expectedAmount = order.ProviderAmountMinor
+		expectedCurrency = order.ProviderCurrency
+	}
+	if expectedAmount != event.AmountMinor {
 		return store.ErrPaymentAmountMismatch
 	}
-	if !strings.EqualFold(order.Currency, event.Currency) {
+	if !strings.EqualFold(expectedCurrency, event.Currency) {
 		return store.ErrPaymentCurrencyMismatch
 	}
 	if order.ProviderOrderID != "" && event.ProviderOrderID != "" && order.ProviderOrderID != event.ProviderOrderID {

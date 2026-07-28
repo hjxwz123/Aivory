@@ -8,6 +8,7 @@ import (
 var (
 	ErrChannelNameExists       = errors.New("name_exists")
 	ErrOAuthProviderNameExists = errors.New("name_exists")
+	ErrOAuthProviderIDExists   = errors.New("oauth_provider_id_exists")
 	ErrUserGroupNameExists     = errors.New("name_exists")
 	ErrModelRequestExists      = errors.New("model_request_exists")
 	ErrModelTagNameExists      = errors.New("name_exists")
