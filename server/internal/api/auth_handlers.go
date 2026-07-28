@@ -545,7 +545,7 @@ func loginHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	// a session — return a short-lived ticket the client redeems with a code via
 	// /auth/login/2fa.
 	if user.TotpEnabled {
-		ticket := issueTwofaTicket(d, user.ID)
+		ticket := issueTwofaTicket(d, user.ID, store.LoginMethodPassword)
 		if ticket == "" {
 			writeError(w, 500, errTwofaStartFailed)
 			return
@@ -553,7 +553,7 @@ func loginHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"totp_required": true, "ticket": ticket})
 		return
 	}
-	finaliseSession(d, w, r, user, 0)
+	finaliseLoginSession(d, w, r, user, store.LoginMethodPassword)
 }
 
 // logoutHandler clears the cookies. Also revokes the refresh token if present.
@@ -601,6 +601,17 @@ func refreshHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 }
 
 func finaliseSession(d Deps, w http.ResponseWriter, r *http.Request, user *store.User, inheritCreatedAt int64) {
+	finaliseSessionResponse(d, w, r, user, inheritCreatedAt, "")
+}
+
+// finaliseLoginSession is the fresh-login counterpart to finaliseSession.
+// Keeping the method explicit prevents refresh-token rotation (which calls
+// finaliseSession above) from creating duplicate login-history rows.
+func finaliseLoginSession(d Deps, w http.ResponseWriter, r *http.Request, user *store.User, method string) {
+	finaliseSessionResponse(d, w, r, user, 0, method)
+}
+
+func finaliseSessionResponse(d Deps, w http.ResponseWriter, r *http.Request, user *store.User, inheritCreatedAt int64, loginMethod string) {
 	// A login/refresh is the moment that matters most for token_ver correctness:
 	// clear any stale hot auth entry before the browser starts its first burst of
 	// authenticated data requests with the newly minted access token.
@@ -610,10 +621,22 @@ func finaliseSession(d Deps, w http.ResponseWriter, r *http.Request, user *store
 		writeError(w, 500, err)
 		return
 	}
+	if loginMethod != "" {
+		recordSuccessfulLogin(d, r, user.ID, loginMethod)
+	}
 	// Carry the tier label + feature flags so the client renders the sidebar
 	// group name immediately after login, without waiting for the next /api/me.
 	attachGroupInfo(d, r, user)
 	writeJSON(w, 200, authResp{User: user, AccessToken: access, ExpiresAt: exp.Unix()})
+}
+
+// recordSuccessfulLogin is deliberately best-effort after the session has
+// already been minted. A transient audit-write failure must not return a 500
+// alongside valid cookies; it is logged for operators instead.
+func recordSuccessfulLogin(d Deps, r *http.Request, userID, method string) {
+	if _, err := store.RecordLoginHistory(context.Background(), d.DB, userID, method, sessionMeta(r, 0)); err != nil && d.Logger != nil {
+		d.Logger.Printf("[auth] record login history for user=%s method=%s: %v", userID, method, err)
+	}
 }
 
 // issueSessionCookies mints the access + refresh tokens, persists the refresh
@@ -631,19 +654,23 @@ func issueSessionCookies(d Deps, w http.ResponseWriter, r *http.Request, user *s
 	if err != nil {
 		return "", time.Time{}, err
 	}
-	ip := clientIP(r)
-	_ = store.SaveRefreshToken(context.Background(), d.DB, jti, user.ID, refreshExp, store.SessionMeta{
-		IP:        ip,
-		UserAgent: r.UserAgent(),
-		Location:  sessionLocation(r, ip),
-		CreatedAt: inheritCreatedAt,
-	})
+	_ = store.SaveRefreshToken(context.Background(), d.DB, jti, user.ID, refreshExp, sessionMeta(r, inheritCreatedAt))
 
 	secure := secureCookie(r)
 	clearCookie(w, "auth_token")
 	setCookie(w, "auth_token", access, exp, false, secure)
 	setCookie(w, "refresh_token", refresh, refreshExp, true, secure)
 	return access, exp, nil
+}
+
+func sessionMeta(r *http.Request, createdAt int64) store.SessionMeta {
+	ip := clientIP(r)
+	return store.SessionMeta{
+		IP:        ip,
+		UserAgent: r.UserAgent(),
+		Location:  sessionLocation(r, ip),
+		CreatedAt: createdAt,
+	}
 }
 
 // secureCookie reports whether session cookies should carry the Secure flag —

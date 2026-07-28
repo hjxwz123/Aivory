@@ -446,7 +446,10 @@
     "knowledge": "ナレッジ",
     "admin": "管理",
     "subscription": "サブスクリプション",
-    "language": "言語"
+    "language": "言語",
+    "help": "ヘルプ",
+    "terms": "利用規約",
+    "privacyPolicy": "プライバシーポリシー"
   },
   "suggestions": {
     "outline-essay": {

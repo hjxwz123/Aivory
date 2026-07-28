@@ -1164,6 +1164,10 @@ var settingsKeys = []string{
 	// behind the slider-puzzle captcha. login_captcha_required: same gate on
 	// password sign-in (anti credential-stuffing).
 	"register_ip_daily_limit", "register_captcha_required", "login_captcha_required",
+	// Public legal/support information. Blank policy text means the frontend uses
+	// its complete localized default; a blank contact email falls back to the
+	// project default in legalConfigPublicHandler.
+	"contact_email", "terms_text", "privacy_text",
 	// §credits / settlement pricing: credits_per_usd remains the internal model
 	// cost conversion. User-facing group and permanent-credit prices share one
 	// deployment-wide settlement currency and two external purchase links.
@@ -1384,6 +1388,22 @@ func applyAdminSettingsPatch(d Deps, body map[string]json.RawMessage, skipNull b
 					return 0, errInvalidInput
 				}
 				v, _ = json.Marshal(purchaseURL)
+			case "contact_email":
+				var email string
+				if json.Unmarshal(v, &email) != nil {
+					return 0, errInvalidInput
+				}
+				email = strings.TrimSpace(email)
+				if email != "" && !validContactEmail(email) {
+					return 0, errInvalidInput
+				}
+				v, _ = json.Marshal(email)
+			case "terms_text", "privacy_text":
+				var text string
+				if json.Unmarshal(v, &text) != nil || len(text) > legalPolicyTextMaxBytes {
+					return 0, errInvalidInput
+				}
+				v, _ = json.Marshal(strings.TrimSpace(text))
 			case "embedding_model_id":
 				if err := ensureEmbeddingModelSettingCanChange(d, v); err != nil {
 					return 0, err

@@ -15,6 +15,11 @@
     "version": "版本",
     "license": "许可证",
     "source": "开源地址",
+    "terms": "用户协议",
+    "viewTerms": "查看用户协议",
+    "privacyPolicy": "隐私政策",
+    "viewPrivacy": "查看隐私政策",
+    "contactEmail": "联系邮箱",
     "copyright": "© {{year}} hjxwz123 · 基于 Apache 2.0 协议开源"
   },
   "personalization": {

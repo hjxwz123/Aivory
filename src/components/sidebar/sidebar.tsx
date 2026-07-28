@@ -23,6 +23,8 @@ import {
   Briefcase,
   FolderOpen,
   LibraryBig,
+  CircleHelp,
+  FileText,
 } from 'lucide-react'
 import { Logo, LogoMark } from '@/components/brand/logo'
 import { useWorkspaces } from '@/store/workspaces'
@@ -1158,6 +1160,22 @@ export function UserMenu({ collapsed = false, placement = 'sidebar' }: UserMenuP
                 </DropdownMenuRadioItem>
               ))}
             </DropdownMenuRadioGroup>
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger>
+            <CircleHelp size={13} aria-hidden />
+            {t('chat:userMenu.help', { defaultValue: 'Help' })}
+          </DropdownMenuSubTrigger>
+          <DropdownMenuSubContent>
+            <DropdownMenuItem onClick={() => window.open('/terms', '_blank', 'noopener,noreferrer')}>
+              <FileText size={13} aria-hidden />
+              {t('chat:userMenu.terms', { defaultValue: 'Terms of Service' })}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => window.open('/privacy', '_blank', 'noopener,noreferrer')}>
+              <ShieldCheck size={13} aria-hidden />
+              {t('chat:userMenu.privacyPolicy', { defaultValue: 'Privacy Policy' })}
+            </DropdownMenuItem>
           </DropdownMenuSubContent>
         </DropdownMenuSub>
         <DropdownMenuSeparator />

@@ -446,7 +446,10 @@
     "knowledge": "知识库",
     "admin": "管理后台",
     "subscription": "订阅",
-    "language": "语言"
+    "language": "语言",
+    "help": "帮助",
+    "terms": "用户协议",
+    "privacyPolicy": "隐私政策"
   },
   "suggestions": {
     "outline-essay": {

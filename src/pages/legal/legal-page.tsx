@@ -5,6 +5,8 @@ import { ArrowLeft, ArrowRight, ChevronDown } from 'lucide-react'
 import { Logo, LogoMark } from '@/components/brand/logo'
 import { LanguageToggle } from '@/components/ui/language-toggle'
 import { ThemeToggle } from '@/components/ui/theme-toggle'
+import { Markdown } from '@/components/chat/markdown'
+import { useLegalConfig } from '@/hooks/use-legal-config'
 
 interface LegalSection {
   id: string
@@ -14,7 +16,10 @@ interface LegalSection {
   note?: string
 }
 
-const EFFECTIVE_DATE = '2026-07-22'
+const EFFECTIVE_DATES = {
+  privacy: '2026-07-22',
+  terms: '2026-07-28',
+} as const
 
 function sectionAnchor(doc: 'privacy' | 'terms', section: LegalSection, index: number) {
   return section.id || `${doc}-section-${index + 1}`
@@ -78,8 +83,13 @@ function Contents({
 export function LegalPage({ doc }: { doc: 'privacy' | 'terms' }) {
   const { t } = useTranslation(['auth', 'common'])
   const { hash } = useLocation()
-  const sectionsValue = t(`legal.${doc}.sections`, { returnObjects: true })
+  const legalConfig = useLegalConfig()
+  const sectionsValue = t(`legal.${doc}.sections`, {
+    returnObjects: true,
+    contactEmail: legalConfig.contactEmail,
+  })
   const sections = Array.isArray(sectionsValue) ? (sectionsValue as LegalSection[]) : []
+  const customText = doc === 'terms' ? legalConfig.termsText : legalConfig.privacyText
   const title = t(`legal.${doc}.title`)
   const contentsLabel = t('legal.contents')
   const otherDoc = doc === 'privacy' ? 'terms' : 'privacy'
@@ -129,8 +139,14 @@ export function LegalPage({ doc }: { doc: 'privacy' | 'terms' }) {
         </div>
       </header>
 
-      <main className="mx-auto grid w-full max-w-[72rem] grid-cols-1 gap-10 px-5 py-10 sm:px-8 sm:py-14 lg:grid-cols-[15rem_minmax(0,46rem)] lg:gap-12 lg:py-16">
-        <Contents doc={doc} sections={sections} label={contentsLabel} />
+      <main
+        className={
+          customText
+            ? 'mx-auto w-full max-w-[52rem] px-5 py-10 sm:px-8 sm:py-14 lg:py-16'
+            : 'mx-auto grid w-full max-w-[72rem] grid-cols-1 gap-10 px-5 py-10 sm:px-8 sm:py-14 lg:grid-cols-[15rem_minmax(0,46rem)] lg:gap-12 lg:py-16'
+        }
+      >
+        {!customText ? <Contents doc={doc} sections={sections} label={contentsLabel} /> : null}
 
         <article className="min-w-0 break-words">
           <header>
@@ -139,7 +155,7 @@ export function LegalPage({ doc }: { doc: 'privacy' | 'terms' }) {
             </h1>
             <p className="mt-3 text-sm text-[var(--color-fg-subtle)]">
               {t('legal.updated')}{' '}
-              <time dateTime={EFFECTIVE_DATE}>{t(`legal.${doc}.effectiveDate`)}</time>
+              <time dateTime={EFFECTIVE_DATES[doc]}>{t(`legal.${doc}.effectiveDate`)}</time>
             </p>
             <p className="mt-6 max-w-[68ch] text-pretty text-base leading-7 text-[var(--color-fg)]">
               {t(`legal.${doc}.intro`)}
@@ -147,15 +163,24 @@ export function LegalPage({ doc }: { doc: 'privacy' | 'terms' }) {
             <aside className="mt-8 border-y border-[var(--color-divider)] py-4">
               <h2 className="text-sm font-medium text-[var(--color-fg)]">{t('legal.operatorNotice')}</h2>
               <p className="mt-2 max-w-[68ch] text-pretty text-sm leading-6 text-[var(--color-fg-muted)]">
-                {t(`legal.${doc}.notice`)}
+                {t(`legal.${doc}.notice`, { contactEmail: legalConfig.contactEmail })}
               </p>
+              <a
+                href={`mailto:${legalConfig.contactEmail}`}
+                className="mt-2 inline-flex rounded-[4px] text-sm font-medium text-[var(--color-accent)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+              >
+                {legalConfig.contactEmail}
+              </a>
             </aside>
           </header>
 
-          <Contents doc={doc} sections={sections} label={contentsLabel} mobile />
+          {!customText ? <Contents doc={doc} sections={sections} label={contentsLabel} mobile /> : null}
 
-          <div className="mt-10">
-            {sections.map((section, index) => {
+          {customText ? (
+            <Markdown content={customText} className="mt-10 max-w-[68ch] text-base leading-7" />
+          ) : (
+            <div className="mt-10">
+              {sections.map((section, index) => {
               const anchor = sectionAnchor(doc, section, index)
               const paragraphs = Array.isArray(section.paragraphs) ? section.paragraphs : []
               const items = Array.isArray(section.items) ? section.items : []
@@ -190,8 +215,9 @@ export function LegalPage({ doc }: { doc: 'privacy' | 'terms' }) {
                   ) : null}
                 </section>
               )
-            })}
-          </div>
+              })}
+            </div>
+          )}
 
           <footer className="border-t border-[var(--color-divider)] pb-6 pt-7">
             <Link

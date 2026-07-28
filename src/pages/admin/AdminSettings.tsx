@@ -14,6 +14,7 @@ import { adminApi, ApiError } from '@/api'
 import type { ApiModel } from '@/api/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { Field } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
@@ -41,6 +42,9 @@ const OWNED_KEYS = [
   'register_ip_daily_limit',
   'register_captcha_required',
   'login_captcha_required',
+  'contact_email',
+  'terms_text',
+  'privacy_text',
   'daily_message_limit',
   'daily_image_limit',
   'credit_preflight_enabled',
@@ -83,6 +87,11 @@ export default function AdminSettings() {
     const settlementCurrency = readString('settlement_currency', 'USD').trim().toUpperCase()
     if (!isSettlementCurrencyCode(settlementCurrency)) {
       toast.error(t('admin:settings.fields.settlementCurrencyInvalid'))
+      return
+    }
+    const contactEmail = readString('contact_email').trim()
+    if (contactEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail)) {
+      toast.error(t('admin:settings.fields.contactEmailInvalid'))
       return
     }
     setSaving(true)
@@ -437,6 +446,60 @@ export default function AdminSettings() {
               value={readString('email_domain_whitelist')}
               placeholder="example.com, company.io"
               onChange={(e) => setDraft({ ...draft, email_domain_whitelist: e.target.value })}
+            />
+          </Field>
+
+          <div className="border-t border-[var(--color-divider)] pt-4">
+            <h2 className="font-serif text-xl tracking-tight text-[var(--color-fg)]">
+              {t('admin:settings.fields.legalSection')}
+            </h2>
+            <p className="mt-1 max-w-3xl text-xs leading-5 text-[var(--color-fg-muted)]">
+              {t('admin:settings.fields.legalLead')}
+            </p>
+          </div>
+
+          <Field
+            label={t('admin:settings.fields.contactEmail')}
+            htmlFor="contact-email"
+            hint={t('admin:settings.fields.contactEmailHint')}
+          >
+            <Input
+              id="contact-email"
+              type="email"
+              maxLength={320}
+              value={readString('contact_email')}
+              placeholder="admin@aivory.local"
+              onChange={(e) => setDraft({ ...draft, contact_email: e.target.value })}
+            />
+          </Field>
+
+          <Field
+            label={t('admin:settings.fields.termsText')}
+            htmlFor="terms-text"
+            hint={t('admin:settings.fields.termsTextHint')}
+          >
+            <Textarea
+              id="terms-text"
+              value={readString('terms_text')}
+              maxLength={100000}
+              className="min-h-56 resize-y font-mono text-[13px]"
+              placeholder={t('admin:settings.fields.policyTextPlaceholder')}
+              onChange={(e) => setDraft({ ...draft, terms_text: e.target.value })}
+            />
+          </Field>
+
+          <Field
+            label={t('admin:settings.fields.privacyText')}
+            htmlFor="privacy-text"
+            hint={t('admin:settings.fields.privacyTextHint')}
+          >
+            <Textarea
+              id="privacy-text"
+              value={readString('privacy_text')}
+              maxLength={100000}
+              className="min-h-56 resize-y font-mono text-[13px]"
+              placeholder={t('admin:settings.fields.policyTextPlaceholder')}
+              onChange={(e) => setDraft({ ...draft, privacy_text: e.target.value })}
             />
           </Field>
 

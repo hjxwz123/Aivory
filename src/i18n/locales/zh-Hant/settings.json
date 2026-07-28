@@ -15,6 +15,11 @@
     "version": "版本",
     "license": "授權條款",
     "source": "原始碼",
+    "terms": "使用者協議",
+    "viewTerms": "查看使用者協議",
+    "privacyPolicy": "隱私政策",
+    "viewPrivacy": "查看隱私政策",
+    "contactEmail": "聯絡信箱",
     "copyright": "© {{year}} hjxwz123 · 基於 Apache 2.0 協議開源"
   },
   "personalization": {
