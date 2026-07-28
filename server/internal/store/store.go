@@ -222,6 +222,9 @@ func Migrate(db *sql.DB) error {
 	// snapshot for processors such as Waffo Pancake that add VAT/GST at checkout.
 	addPaymentPaidAmount := `ALTER TABLE payment_orders ADD COLUMN paid_amount_minor INTEGER NOT NULL DEFAULT 0`
 	addPaymentTaxAmount := `ALTER TABLE payment_orders ADD COLUMN tax_amount_minor INTEGER NOT NULL DEFAULT 0`
+	addPaymentProviderAmount := `ALTER TABLE payment_orders ADD COLUMN provider_amount_minor INTEGER NOT NULL DEFAULT 0`
+	addPaymentProviderCurrency := `ALTER TABLE payment_orders ADD COLUMN provider_currency TEXT NOT NULL DEFAULT ''`
+	addPaymentConversionRate := `ALTER TABLE payment_orders ADD COLUMN conversion_rate TEXT NOT NULL DEFAULT ''`
 	addPaymentChannelEnvironment := `ALTER TABLE payment_channels ADD COLUMN environment TEXT NOT NULL DEFAULT 'live'`
 	addPaymentOrderEnvironment := `ALTER TABLE payment_orders ADD COLUMN environment TEXT NOT NULL DEFAULT 'live'`
 	addPaymentProviderPaymentID := `ALTER TABLE payment_orders ADD COLUMN provider_payment_id TEXT NOT NULL DEFAULT ''`
@@ -301,6 +304,9 @@ func Migrate(db *sql.DB) error {
 		addRedemptionCredits = `ALTER TABLE redeem_redemptions ADD COLUMN IF NOT EXISTS credits REAL NOT NULL DEFAULT 0`
 		addPaymentPaidAmount = `ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS paid_amount_minor BIGINT NOT NULL DEFAULT 0`
 		addPaymentTaxAmount = `ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS tax_amount_minor BIGINT NOT NULL DEFAULT 0`
+		addPaymentProviderAmount = `ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS provider_amount_minor BIGINT NOT NULL DEFAULT 0`
+		addPaymentProviderCurrency = `ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS provider_currency TEXT NOT NULL DEFAULT ''`
+		addPaymentConversionRate = `ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS conversion_rate TEXT NOT NULL DEFAULT ''`
 		addPaymentChannelEnvironment = `ALTER TABLE payment_channels ADD COLUMN IF NOT EXISTS environment TEXT NOT NULL DEFAULT 'live'`
 		addPaymentOrderEnvironment = `ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS environment TEXT NOT NULL DEFAULT 'live'`
 		addPaymentProviderPaymentID = `ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS provider_payment_id TEXT NOT NULL DEFAULT ''`
@@ -343,11 +349,16 @@ func Migrate(db *sql.DB) error {
 		addModelFast, addConvFast, addMsgFast,
 		addSkillDisplayDescription, addUserSkillIcon, addMsgSelectedUserSkills,
 		addRedeemKind, addRedeemCredits, addRedemptionCredits,
-		addPaymentPaidAmount, addPaymentTaxAmount, addPaymentChannelEnvironment, addPaymentOrderEnvironment,
+		addPaymentPaidAmount, addPaymentTaxAmount, addPaymentProviderAmount, addPaymentProviderCurrency, addPaymentConversionRate,
+		addPaymentChannelEnvironment, addPaymentOrderEnvironment,
 		addPaymentProviderPaymentID, addPaymentCheckoutSessionID, addPaymentCheckoutExpiresAt, addPaymentLastReconciledAt, addPaymentReconcileError,
 	} {
 		_, _ = db.Exec(ddl)
 	}
+	// Orders created before provider-side snapshots existed always settled in the
+	// system currency. Preserve that exact meaning for upgraded databases.
+	_, _ = db.Exec(`UPDATE payment_orders SET provider_amount_minor=amount_minor WHERE provider_amount_minor<=0`)
+	_, _ = db.Exec(`UPDATE payment_orders SET provider_currency=currency WHERE trim(provider_currency)=''`)
 	if err := dropLegacyChunkEmbeddingColumn(db); err != nil {
 		return fmt.Errorf("drop legacy chunks.embedding column: %w", err)
 	}
@@ -412,7 +423,7 @@ func Migrate(db *sql.DB) error {
 		"redeem_codes":       {"kind", "credits"},
 		"redeem_redemptions": {"credits"},
 		"payment_channels":   {"environment"},
-		"payment_orders":     {"paid_amount_minor", "tax_amount_minor", "environment", "provider_payment_id", "checkout_session_id", "checkout_expires_at", "last_reconciled_at", "reconcile_error"},
+		"payment_orders":     {"paid_amount_minor", "tax_amount_minor", "provider_amount_minor", "provider_currency", "conversion_rate", "environment", "provider_payment_id", "checkout_session_id", "checkout_expires_at", "last_reconciled_at", "reconcile_error"},
 	}
 	for table, cols := range columnChecks {
 		if _, err := db.Exec(fmt.Sprintf(`SELECT %s FROM %s WHERE 1=0`, strings.Join(cols, ", "), table)); err != nil {

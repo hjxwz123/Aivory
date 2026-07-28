@@ -283,8 +283,7 @@
       "keyId": "Key ID",
       "enabled": "Activé (affiché sur l'écran de connexion)",
       "redirectUri": "URI de redirection",
-      "redirectUriHint": "À ajouter aux URI de redirection du fournisseur.",
-      "redirectUriNew": "Enregistrez d'abord la méthode — l'URI de redirection à enregistrer auprès du fournisseur apparaît une fois qu'elle a un ID."
+      "redirectUriHint": "Ajoutez cet URI exact au fournisseur. Il ne change pas après l'enregistrement."
     },
     "hints": {
       "google": "Créez un client OAuth dans Google Cloud → Identifiants.",
@@ -301,7 +300,9 @@
     "removed": "Méthode de connexion retirée",
     "copy": "Copier l'URI de redirection",
     "errors": {
-      "nameRequired": "Libellé du bouton requis"
+      "nameRequired": "Libellé du bouton requis",
+      "callbackLoadFailed": "Impossible de préparer l'URI de redirection. Réessayez.",
+      "idConflict": "Cet URI de redirection est déjà utilisé. Fermez puis rouvrez le formulaire pour en générer un autre."
     },
     "copied": "Copié"
   },
@@ -387,6 +388,15 @@
       "created": "Créé le"
     },
     "viewLibrary": "Projets et bases",
+    "viewMemories": "Mémoires",
+    "memoriesTitle": "Mémoires de {{name}}",
+    "memoriesFallbackTitle": "Mémoires utilisateur",
+    "memoriesLead": "Consultez les informations durables enregistrées pour cet utilisateur.",
+    "memoriesLoadFailed": "Impossible de charger les mémoires de cet utilisateur.",
+    "memoriesRetry": "Réessayer",
+    "noMemories": "Aucune mémoire enregistrée",
+    "noMemoriesBody": "Cet utilisateur n'a pas encore de mémoire à long terme.",
+    "memoryUpdatedAt": "Mise à jour {{when}}",
     "libraryTitle": "Bibliothèque de {{name}}",
     "libraryLead": "Projets et bases de connaissances de cet utilisateur (lecture seule).",
     "projectsHeading": "Projets",
@@ -1081,10 +1091,13 @@
     "secretHint": "Si une valeur masquée est affichée, laissez-la inchangée pour conserver le secret enregistré.",
     "created": "Canal de paiement créé",
     "updated": "Canal de paiement mis à jour",
+    "disableAction": "Désactiver le canal",
+    "disabledSuccess": "Canal de paiement désactivé",
     "removed": "Canal de paiement supprimé",
     "updatedAt": "Mis à jour le {{date}}",
     "removeTitle": "Supprimer le canal de paiement ?",
     "removeBody": "Supprimer « {{name}} » ? Retirez d’abord ses modes de paiement liés et ses commandes actives.",
+    "resolvePendingOrders": "Voir les commandes de paiement",
     "summary": {
       "stripe": "Stripe Checkout",
       "waffo": "Marchand Waffo"
@@ -1098,15 +1111,17 @@
       "environmentLive": "Production",
       "environmentTest": "Test",
       "webhookUrl": "URL de rappel",
-      "webhookUrlNew": "Enregistrez le canal pour générer son URL de rappel.",
+      "webhookUrlHint": "Enregistrez cette URL exacte auprès du prestataire. Elle ne change pas après l'enregistrement.",
       "secretKey": "Clé secrète",
       "webhookSecret": "Secret de signature du webhook",
-      "webhookSecretHint": "Pour la première configuration, enregistrez le canal désactivé, ajoutez l’URL de rappel générée dans Stripe, puis saisissez ici le secret whsec_… et activez le canal. Laissez une valeur masquée inchangée pour la conserver.",
+      "webhookSecretHint": "Ajoutez l’URL de rappel ci-dessus dans Stripe, saisissez ici le secret whsec_…, puis activez le canal. Laissez une valeur masquée inchangée pour la conserver.",
       "gatewayUrl": "URL de la passerelle",
       "merchantId": "Identifiant marchand",
       "merchantKey": "Clé marchand",
       "currency": "Devise EPay",
-      "currencyHint": "Code majuscule à trois lettres. Il doit correspondre à la devise globale pour que ce canal soit proposé.",
+      "currencyHint": "Code majuscule à trois lettres. Si cette devise diffère de la devise globale, renseignez le taux de conversion ci-dessous.",
+      "conversionRate": "Taux de conversion : {{target}} pour 1 {{base}}",
+      "conversionRateHint": "Indiquez combien de {{target}} facturer pour 1 {{base}}. Les valeurs décimales, par exemple 7.23, sont acceptées.",
       "storeId": "Identifiant de boutique",
       "storeIdHint": "Utilisez l’identifiant de boutique du Dashboard Waffo (STO_*).",
       "productId": "Identifiant du produit",
@@ -1125,7 +1140,11 @@
       "nameRequired": "Saisissez un nom de canal.",
       "configRequired": "Renseignez tous les champs obligatoires du protocole.",
       "currencyInvalid": "La devise EPay doit être un code à trois lettres, par exemple CNY.",
-      "modeInvalid": "Choisissez l’environnement Waffo de test ou de production."
+      "conversionRateInvalid": "Saisissez un taux de conversion EPay supérieur à 0, par exemple 7.23.",
+      "modeInvalid": "Choisissez l’environnement Waffo de test ou de production.",
+      "callbackLoadFailed": "Impossible de préparer l’URL de rappel. Réessayez.",
+      "idConflict": "Cette URL de rappel est déjà utilisée. Fermez puis rouvrez le formulaire pour en générer une autre.",
+      "pendingOrders": "Ce canal contient des commandes en attente ou en cours de traitement. Ouvrez la page Commandes de paiement pour les terminer ou les clôturer avant de modifier son protocole, ses identifiants ou son environnement."
     }
   },
   "paymentMethods": {

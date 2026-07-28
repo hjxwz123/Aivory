@@ -7,8 +7,8 @@
  */
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Plus, Pencil, Trash2, Copy, Check } from 'lucide-react'
-import { adminApi, ApiError, apiUrl } from '@/api'
+import { Plus, Pencil, Trash2, Copy, Check, RefreshCw } from 'lucide-react'
+import { adminApi, ApiError } from '@/api'
 import type { ApiOAuthProvider, OAuthKind } from '@/api/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -35,13 +35,6 @@ type Editable = Partial<ApiOAuthProvider> & { client_secret?: string }
 
 const KINDS: OAuthKind[] = ['google', 'github', 'apple', 'oidc']
 
-// Build the redirect URI an admin must register in the provider console. Uses
-// the same API base the app talks to, resolved to an absolute URL.
-function redirectUriFor(id: string): string {
-  const cb = apiUrl(`/auth/oauth/${id}/callback`)
-  return cb.startsWith('http') ? cb : window.location.origin + cb
-}
-
 export default function AdminOAuth() {
   const { t } = useTranslation(['admin', 'common'])
   const [rows, setRows] = useState<ApiOAuthProvider[]>([])
@@ -54,6 +47,9 @@ export default function AdminOAuth() {
   const [copied, setCopied] = useState(false)
   const [saving, setSaving] = useState(false)
   const savingRef = useRef(false)
+  const [preparingRedirect, setPreparingRedirect] = useState(false)
+  const [prepareError, setPrepareError] = useState('')
+  const prepareVersionRef = useRef(0)
   const [deleting, setDeleting] = useState(false)
   const deletingRef = useRef(false)
 
@@ -72,11 +68,34 @@ export default function AdminOAuth() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  async function prepareNewProvider() {
+    const version = ++prepareVersionRef.current
+    setPreparingRedirect(true)
+    setPrepareError('')
+    try {
+      const prepared = await adminApi.prepareOAuthProvider()
+      if (prepareVersionRef.current !== version) return
+      setEditor((current) => current.open && !current.row
+        ? { ...current, draft: { ...current.draft, id: prepared.id, redirect_uri: prepared.redirect_uri } }
+        : current)
+    } catch (error) {
+      if (prepareVersionRef.current !== version) return
+      setPrepareError(error instanceof ApiError ? error.message : t('admin:oauth.errors.callbackLoadFailed'))
+    } finally {
+      if (prepareVersionRef.current === version) setPreparingRedirect(false)
+    }
+  }
+
   function openNew() {
     setCopied(false)
+    setPrepareError('')
     setEditor({ open: true, draft: { kind: 'google', enabled: true, name: 'Google' } })
+    void prepareNewProvider()
   }
   function openEdit(row: ApiOAuthProvider) {
+    prepareVersionRef.current += 1
+    setPreparingRedirect(false)
+    setPrepareError('')
     setCopied(false)
     setEditor({ open: true, row, draft: { ...row, client_secret: '' } })
   }
@@ -92,20 +111,28 @@ export default function AdminOAuth() {
       toast.error(t('admin:oauth.errors.nameRequired'))
       return
     }
+    if (!editor.row && (!d.id || !d.redirect_uri)) {
+      toast.error(t('admin:oauth.errors.callbackLoadFailed'))
+      return
+    }
     savingRef.current = true
     setSaving(true)
     try {
+      const payload = { ...d }
+      delete payload.redirect_uri
       if (editor.row) {
-        await adminApi.updateOAuthProvider(editor.row.id, d)
+        await adminApi.updateOAuthProvider(editor.row.id, payload)
         toast.success(t('admin:oauth.updated'))
       } else {
-        await adminApi.createOAuthProvider(d)
+        await adminApi.createOAuthProvider(payload)
         toast.success(t('admin:oauth.created'))
       }
       setEditor({ ...editor, open: false })
       await load()
     } catch (e) {
-      if (e instanceof ApiError && e.status === 409) {
+      if (e instanceof ApiError && e.message === 'oauth_provider_id_exists') {
+        toast.error(t('admin:oauth.errors.idConflict'))
+      } else if (e instanceof ApiError && e.status === 409) {
         toast.error(t('admin:common.nameExists', { defaultValue: 'A record with this name already exists.' }))
       } else {
         toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
@@ -134,9 +161,10 @@ export default function AdminOAuth() {
   }
 
   async function copyRedirect() {
-    if (!editor.row) return
+    const redirectURI = editor.draft.redirect_uri
+    if (!redirectURI) return
     try {
-      await navigator.clipboard.writeText(redirectUriFor(editor.row.id))
+      await navigator.clipboard.writeText(redirectURI)
       setCopied(true)
       setTimeout(() => setCopied(false), 1800)
     } catch {
@@ -196,7 +224,18 @@ export default function AdminOAuth() {
         )}
       </section>
 
-      <Dialog open={editor.open} onOpenChange={(o) => !savingRef.current && setEditor({ ...editor, open: o })}>
+      <Dialog
+        open={editor.open}
+        onOpenChange={(open) => {
+          if (savingRef.current) return
+          if (!open) {
+            prepareVersionRef.current += 1
+            setPreparingRedirect(false)
+            setPrepareError('')
+          }
+          setEditor((current) => ({ ...current, open }))
+        }}
+      >
         <DialogContent size="md">
           <DialogHeader>
             <DialogTitle>{editor.row ? t('admin:oauth.editorTitle') : t('admin:oauth.newTitle')}</DialogTitle>
@@ -237,7 +276,7 @@ export default function AdminOAuth() {
                   <span className="text-sm font-medium text-[var(--color-fg)]">
                     {t('admin:oauth.fields.redirectUri')}
                   </span>
-                  {editor.row ? (
+                  {editor.draft.redirect_uri ? (
                     <Button
                       type="button"
                       variant="ghost"
@@ -249,17 +288,31 @@ export default function AdminOAuth() {
                     </Button>
                   ) : null}
                 </div>
-                {editor.row ? (
+                {editor.draft.redirect_uri ? (
                   <Input
                     readOnly
-                    value={redirectUriFor(editor.row.id)}
+                    value={editor.draft.redirect_uri}
                     onFocus={(e) => e.currentTarget.select()}
                     className="mt-2 font-mono text-[12px]"
                   />
+                ) : preparingRedirect ? (
+                  <div className="mt-2 h-10 animate-pulse rounded-[8px] bg-[var(--color-surface)]" role="status">
+                    <span className="sr-only">{t('common:common.loading')}</span>
+                  </div>
                 ) : (
-                  <p className="mt-1.5 text-[12px] text-[var(--color-fg-subtle)] leading-relaxed">
-                    {t('admin:oauth.fields.redirectUriNew')}
-                  </p>
+                  <div className="mt-2 flex items-center justify-between gap-3 rounded-[8px] bg-[var(--color-danger-soft)] px-3 py-2 text-[12px] text-[var(--color-danger)]">
+                    <span>{prepareError || t('admin:oauth.errors.callbackLoadFailed')}</span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="xs"
+                      className="shrink-0"
+                      leadingIcon={<RefreshCw size={12} aria-hidden />}
+                      onClick={() => void prepareNewProvider()}
+                    >
+                      {t('common:actions.tryAgain')}
+                    </Button>
+                  </div>
                 )}
                 <p className="mt-2 text-[12px] text-[var(--color-fg-subtle)] leading-relaxed">
                   {t('admin:oauth.fields.redirectUriHint')}
@@ -388,7 +441,13 @@ export default function AdminOAuth() {
             <Button variant="ghost" disabled={saving} onClick={() => setEditor({ ...editor, open: false })}>
               {t('common:actions.cancel')}
             </Button>
-            <Button loading={saving} onClick={() => void submit()}>{t('common:actions.save')}</Button>
+            <Button
+              loading={saving}
+              disabled={!editor.row && (preparingRedirect || !editor.draft.redirect_uri)}
+              onClick={() => void submit()}
+            >
+              {t('common:actions.save')}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

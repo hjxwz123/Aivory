@@ -383,6 +383,7 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("PATCH", "/api/admin/credit-packages/:id", requireAdmin(d, updateCreditPackageAdmin))
 	mux.handle("DELETE", "/api/admin/credit-packages/:id", requireAdmin(d, deleteCreditPackageAdmin))
 	mux.handle("GET", "/api/admin/payment-channels", requireAdmin(d, listPaymentChannelsAdmin))
+	mux.handle("POST", "/api/admin/payment-channels/prepare", requireAdmin(d, preparePaymentChannelAdmin))
 	mux.handle("POST", "/api/admin/payment-channels", requireAdmin(d, createPaymentChannelAdmin))
 	mux.handle("PATCH", "/api/admin/payment-channels/:id", requireAdmin(d, updatePaymentChannelAdmin))
 	mux.handle("DELETE", "/api/admin/payment-channels/:id", requireAdmin(d, deletePaymentChannelAdmin))
@@ -422,6 +423,7 @@ func NewRouter(d Deps) http.Handler {
 	// admin can verify a report without needing to log in as the user.
 	mux.handle("GET", "/api/admin/users/:id/conversations", requireAdmin(d, listUserConversationsAdmin))
 	mux.handle("GET", "/api/admin/users/:id/projects", requireAdmin(d, listUserProjectsAdmin))
+	mux.handle("GET", "/api/admin/users/:id/memories", requireAdmin(d, listUserMemoriesAdmin))
 	// §4.20/§8.1 admin drill-down: a user's generated-image gallery.
 	mux.handle("GET", "/api/admin/users/:id/images", requireAdmin(d, listUserImagesAdmin))
 	mux.handle("GET", "/api/admin/users/:id/kbs", requireAdmin(d, listUserKBsAdmin))
@@ -444,6 +446,7 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("POST", "/api/admin/files/delete", requireAdmin(d, deleteFilesAdmin))
 	mux.handle("GET", "/api/admin/files/content", requireAdmin(d, adminFileContentHandler))
 	mux.handle("GET", "/api/admin/oauth-providers", requireAdmin(d, listOAuthProvidersAdmin))
+	mux.handle("POST", "/api/admin/oauth-providers/prepare", requireAdmin(d, prepareOAuthProviderAdmin))
 	mux.handle("POST", "/api/admin/oauth-providers", requireAdmin(d, createOAuthProviderAdmin))
 	mux.handle("PATCH", "/api/admin/oauth-providers/:id", requireAdmin(d, updateOAuthProviderAdmin))
 	mux.handle("DELETE", "/api/admin/oauth-providers/:id", requireAdmin(d, deleteOAuthProviderAdmin))

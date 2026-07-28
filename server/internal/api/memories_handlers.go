@@ -24,6 +24,27 @@ func listMemoriesHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, rows)
 }
 
+// listUserMemoriesAdmin returns one user's memories for the admin user-detail
+// view. The route is read-only and gated by requireAdmin in router.go.
+func listUserMemoriesAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
+	userID := pathParam(r, "id")
+	if _, err := store.FindUserByID(r.Context(), d.DB, userID); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, errNotFound)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	rows, err := store.ListMemories(r.Context(), d.DB, userID, r.URL.Query().Get("status"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, rows)
+}
+
 type createMemoryReq struct {
 	MemoryText string `json:"memory_text"`
 	Slot       string `json:"slot"`

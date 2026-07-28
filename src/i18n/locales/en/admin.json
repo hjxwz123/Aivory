@@ -283,8 +283,7 @@
       "keyId": "Key ID",
       "enabled": "Enabled (shown on the login screen)",
       "redirectUri": "Redirect URI",
-      "redirectUriHint": "Add this to the provider's redirect URIs.",
-      "redirectUriNew": "Save the method first — the redirect URI to register with the provider appears once it has an ID."
+      "redirectUriHint": "Add this exact URI to the provider. It remains unchanged after saving."
     },
     "hints": {
       "google": "Create an OAuth client in Google Cloud → Credentials.",
@@ -301,7 +300,9 @@
     "removed": "Login method removed",
     "copy": "Copy redirect URI",
     "errors": {
-      "nameRequired": "Button label required"
+      "nameRequired": "Button label required",
+      "callbackLoadFailed": "Could not prepare the redirect URI. Try again.",
+      "idConflict": "This redirect URI is already in use. Close and reopen the form to generate another one."
     },
     "copied": "Copied"
   },
@@ -387,6 +388,15 @@
       "created": "Created"
     },
     "viewLibrary": "Projects & KBs",
+    "viewMemories": "Memories",
+    "memoriesTitle": "{{name}}'s memories",
+    "memoriesFallbackTitle": "User memories",
+    "memoriesLead": "Review the long-term facts saved for this user.",
+    "memoriesLoadFailed": "Could not load this user's memories.",
+    "memoriesRetry": "Retry",
+    "noMemories": "No saved memories.",
+    "noMemoriesBody": "This user has no long-term memories yet.",
+    "memoryUpdatedAt": "Updated {{when}}",
     "libraryTitle": "{{name}}'s library",
     "libraryLead": "Projects and knowledge bases owned by this user. Read-only.",
     "projectsHeading": "Projects",
@@ -1081,10 +1091,13 @@
     "secretHint": "If a masked value is shown, leave it unchanged to keep the saved secret.",
     "created": "Payment channel created",
     "updated": "Payment channel updated",
+    "disableAction": "Disable channel",
+    "disabledSuccess": "Payment channel disabled",
     "removed": "Payment channel removed",
     "updatedAt": "Updated {{date}}",
     "removeTitle": "Delete payment channel?",
     "removeBody": "Delete “{{name}}”? Channels with bound payment methods or active orders must be cleared first.",
+    "resolvePendingOrders": "View payment orders",
     "summary": {
       "stripe": "Stripe Checkout",
       "waffo": "Waffo merchant"
@@ -1098,15 +1111,17 @@
       "environmentLive": "Live",
       "environmentTest": "Test",
       "webhookUrl": "Callback URL",
-      "webhookUrlNew": "Save the channel to generate its callback URL.",
+      "webhookUrlHint": "Register this exact URL with the provider. It remains unchanged after saving.",
       "secretKey": "Secret key",
       "webhookSecret": "Webhook signing secret",
-      "webhookSecretHint": "For first-time setup, save the channel disabled, register the generated callback URL in Stripe, then paste the whsec_… secret here and enable it. Leave a masked value unchanged to keep it.",
+      "webhookSecretHint": "Register the callback URL shown above in Stripe, paste the whsec_… secret here, then enable the channel. Leave a masked value unchanged to keep it.",
       "gatewayUrl": "Gateway URL",
       "merchantId": "Merchant ID",
       "merchantKey": "Merchant key",
       "currency": "EPay currency",
-      "currencyHint": "Three-letter uppercase code. It must match the global settlement currency for this channel to be offered.",
+      "currencyHint": "Three-letter uppercase code. If it differs from the global settlement currency, enter a conversion rate below.",
+      "conversionRate": "Conversion rate: {{target}} per 1 {{base}}",
+      "conversionRateHint": "Enter how many {{target}} to charge for 1 {{base}}. Decimals such as 7.23 are supported.",
       "storeId": "Store ID",
       "storeIdHint": "Use the store ID from the Waffo Dashboard (STO_*).",
       "productId": "Product ID",
@@ -1125,7 +1140,11 @@
       "nameRequired": "Enter a channel name.",
       "configRequired": "Complete all required protocol fields.",
       "currencyInvalid": "EPay currency must be a three-letter code such as CNY.",
-      "modeInvalid": "Choose the Waffo test or production environment."
+      "conversionRateInvalid": "Enter an EPay conversion rate greater than 0, such as 7.23.",
+      "modeInvalid": "Choose the Waffo test or production environment.",
+      "callbackLoadFailed": "Could not prepare the callback URL. Try again.",
+      "idConflict": "This callback URL is already in use. Close and reopen the form to generate another one.",
+      "pendingOrders": "This channel has pending or processing orders. Open the Payment orders page and complete or close them before changing its protocol, credentials, or environment."
     }
   },
   "paymentMethods": {

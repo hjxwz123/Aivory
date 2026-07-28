@@ -287,8 +287,7 @@
       "keyId": "Key ID",
       "enabled": "启用(在登录页显示)",
       "redirectUri": "回调地址(Redirect URI)",
-      "redirectUriHint": "填到第三方控制台的回调 URI。",
-      "redirectUriNew": "请先保存 — 保存后会生成需要在第三方控制台登记的回调地址。"
+      "redirectUriHint": "将这个完整 URI 填到第三方控制台，保存后地址不会变化。"
     },
     "hints": {
       "google": "在 Google Cloud → 凭据 创建 OAuth 客户端。",
@@ -305,7 +304,9 @@
     "removed": "已删除登录方式",
     "copy": "复制回调地址",
     "errors": {
-      "nameRequired": "请填写按钮文字"
+      "nameRequired": "请填写按钮文字",
+      "callbackLoadFailed": "无法生成回调地址，请重试。",
+      "idConflict": "该回调地址已被占用，请关闭并重新打开表单以生成新地址。"
     },
     "copied": "已复制"
   },
@@ -391,6 +392,15 @@
       "created": "创建于"
     },
     "viewLibrary": "项目与知识库",
+    "viewMemories": "记忆",
+    "memoriesTitle": "{{name}} 的记忆",
+    "memoriesFallbackTitle": "用户记忆",
+    "memoriesLead": "查看为该用户保存的长期信息。",
+    "memoriesLoadFailed": "无法加载该用户的记忆。",
+    "memoriesRetry": "重试",
+    "noMemories": "暂无保存的记忆",
+    "noMemoriesBody": "该用户还没有长期记忆。",
+    "memoryUpdatedAt": "更新于 {{when}}",
     "libraryTitle": "{{name}} 的资料库",
     "libraryLead": "该用户的项目与知识库(只读)。",
     "projectsHeading": "项目",
@@ -1085,10 +1095,13 @@
     "secretHint": "如果显示掩码值，保持不变即可保留已保存的密钥。",
     "created": "支付渠道已创建",
     "updated": "支付渠道已更新",
+    "disableAction": "停用渠道",
+    "disabledSuccess": "支付渠道已停用",
     "removed": "支付渠道已删除",
     "updatedAt": "更新于 {{date}}",
     "removeTitle": "删除支付渠道？",
     "removeBody": "确定删除“{{name}}”？请先移除绑定的支付方式并处理进行中的订单。",
+    "resolvePendingOrders": "查看支付订单",
     "summary": {
       "stripe": "Stripe Checkout",
       "waffo": "Waffo 商户"
@@ -1102,15 +1115,17 @@
       "environmentLive": "生产",
       "environmentTest": "测试",
       "webhookUrl": "回调地址",
-      "webhookUrlNew": "保存渠道后会生成回调地址。",
+      "webhookUrlHint": "将这个完整地址登记到支付平台，保存后地址不会变化。",
       "secretKey": "Secret Key",
       "webhookSecret": "Webhook 签名密钥",
-      "webhookSecretHint": "首次配置时，请先停用并保存渠道，将生成的回调地址注册到 Stripe，再把 whsec_… 密钥填到这里并启用。已有掩码值保持不变即可保留。",
+      "webhookSecretHint": "将上方回调地址注册到 Stripe，再把 whsec_… 密钥填到这里并启用渠道。已有掩码值保持不变即可保留。",
       "gatewayUrl": "网关地址",
       "merchantId": "商户 ID",
       "merchantKey": "商户密钥",
       "currency": "EPay 币种",
-      "currencyHint": "三位大写币种代码。只有与全局结算货币一致时，才会向用户显示此渠道。",
+      "currencyHint": "三位大写币种代码。若与全局结算货币不同，请在下方填写换算比例。",
+      "conversionRate": "换算比例：1 {{base}} 对应多少 {{target}}",
+      "conversionRateHint": "填写 1 {{base}} 需要收取多少 {{target}}，支持 7.23 这类小数。",
       "storeId": "店铺 ID",
       "storeIdHint": "请使用 Waffo Dashboard 中的店铺 ID（STO_*）。",
       "productId": "商品 ID",
@@ -1129,7 +1144,11 @@
       "nameRequired": "请输入渠道名称。",
       "configRequired": "请填写所有必填的协议参数。",
       "currencyInvalid": "EPay 币种必须是 CNY 这类三位代码。",
-      "modeInvalid": "请选择 Waffo 测试或生产环境。"
+      "conversionRateInvalid": "请输入大于 0 的 EPay 换算比例，例如 7.23。",
+      "modeInvalid": "请选择 Waffo 测试或生产环境。",
+      "callbackLoadFailed": "无法生成回调地址，请重试。",
+      "idConflict": "该回调地址已被占用，请关闭并重新打开表单以生成新地址。",
+      "pendingOrders": "该渠道存在待支付或处理中的订单。请前往“支付订单”页面完成或关闭这些订单，再修改渠道协议、凭证或环境。"
     }
   },
   "paymentMethods": {

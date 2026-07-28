@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	paymentcore "aivory/server/internal/payment"
 )
 
 func openPaymentsTestDB(t *testing.T) (*sql.DB, context.Context) {
@@ -287,6 +289,127 @@ func TestPaymentOrderSnapshotsFiltersAndTerminalUpdates(t *testing.T) {
 	}
 	if stored.UserID != "" || stored.UserEmail != "Buyer@Example.com" {
 		t.Fatalf("deleted-user order identity snapshot = %+v", stored)
+	}
+}
+
+func TestEPayPaymentOrderSnapshotsCrossCurrencyConversion(t *testing.T) {
+	db, ctx := openPaymentsTestDB(t)
+	createPaymentsTestUser(t, db, "u_epay_conversion", "conversion@example.test")
+	if err := SetSetting(db, "settlement_currency", "USD"); err != nil {
+		t.Fatalf("set settlement currency: %v", err)
+	}
+	pkg, err := CreateCreditPackage(ctx, db, CreditPackage{
+		Name: "USD conversion package", Credits: 400, PriceAmountMinor: 4000, Enabled: true,
+	})
+	if err != nil {
+		t.Fatalf("create conversion package: %v", err)
+	}
+	channelConfig, err := json.Marshal(paymentcore.EPayConfig{
+		GatewayURL: "https://epay.example.test", MerchantID: "conversion-merchant", MerchantKey: "conversion-secret",
+		Currency: "CNY", ConversionRate: "7", ConversionRateBaseCurrency: "USD",
+	})
+	if err != nil {
+		t.Fatalf("marshal EPay conversion config: %v", err)
+	}
+	channel, err := CreatePaymentChannel(ctx, db, PaymentChannel{
+		Name: "Converted EPay", Provider: paymentcore.ProviderEPay, Config: channelConfig, Enabled: true,
+	})
+	if err != nil {
+		t.Fatalf("create EPay conversion channel: %v", err)
+	}
+	method, err := CreatePaymentMethod(ctx, db, PaymentMethod{
+		ChannelID: channel.ID, Name: "Converted Alipay", Type: paymentcore.ProviderEPay,
+		ProviderMethodConfig: json.RawMessage(`{"type":"alipay"}`), Enabled: true,
+	})
+	if err != nil {
+		t.Fatalf("create EPay conversion method: %v", err)
+	}
+
+	order, err := CreatePaymentOrder(ctx, db, PaymentOrderCreateInput{
+		UserID: "u_epay_conversion", PaymentMethodID: method.ID,
+		ProductType: PaymentProductCreditPackage, ProductID: pkg.ID,
+	})
+	if err != nil {
+		t.Fatalf("create cross-currency EPay order: %v", err)
+	}
+	if order.AmountMinor != 4000 || order.Currency != "USD" ||
+		order.ProviderAmountMinor != 28000 || order.ProviderCurrency != "CNY" || order.ConversionRate != "7" {
+		t.Fatalf("cross-currency EPay snapshots = %+v", order)
+	}
+
+	changedConfig, err := json.Marshal(paymentcore.EPayConfig{
+		GatewayURL: "https://epay.example.test", MerchantID: "conversion-merchant", MerchantKey: "conversion-secret",
+		Currency: "CNY", ConversionRate: "8", ConversionRateBaseCurrency: "USD",
+	})
+	if err != nil {
+		t.Fatalf("marshal changed EPay conversion config: %v", err)
+	}
+	exec(t, db, `UPDATE payment_channels SET config=? WHERE id=?`, string(changedConfig), channel.ID)
+	stored, err := GetPaymentOrder(ctx, db, order.ID)
+	if err != nil {
+		t.Fatalf("get cross-currency EPay order: %v", err)
+	}
+	if stored.ProviderAmountMinor != 28000 || stored.ProviderCurrency != "CNY" || stored.ConversionRate != "7" {
+		t.Fatalf("EPay order snapshots changed with channel rate: %+v", stored)
+	}
+
+	if err := SetSetting(db, "settlement_currency", "EUR"); err != nil {
+		t.Fatalf("change settlement currency: %v", err)
+	}
+	if _, err := CreatePaymentOrder(ctx, db, PaymentOrderCreateInput{
+		UserID: "u_epay_conversion", PaymentMethodID: method.ID,
+		ProductType: PaymentProductCreditPackage, ProductID: pkg.ID,
+	}); !errors.Is(err, ErrPaymentMethodUnavailable) {
+		t.Fatalf("order with stale rate base error = %v, want %v", err, ErrPaymentMethodUnavailable)
+	}
+	if err := SetSetting(db, "settlement_currency", "USD"); err != nil {
+		t.Fatalf("restore settlement currency: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name string
+		cfg  paymentcore.EPayConfig
+	}{
+		{
+			name: "missing rate",
+			cfg: paymentcore.EPayConfig{
+				GatewayURL: "https://epay.example.test", MerchantID: "missing-rate", MerchantKey: "secret",
+				Currency: "CNY", ConversionRateBaseCurrency: "USD",
+			},
+		},
+		{
+			name: "wrong base",
+			cfg: paymentcore.EPayConfig{
+				GatewayURL: "https://epay.example.test", MerchantID: "wrong-base", MerchantKey: "secret",
+				Currency: "CNY", ConversionRate: "7", ConversionRateBaseCurrency: "EUR",
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, marshalErr := json.Marshal(tc.cfg)
+			if marshalErr != nil {
+				t.Fatalf("marshal invalid EPay config: %v", marshalErr)
+			}
+			invalidChannel, createErr := CreatePaymentChannel(ctx, db, PaymentChannel{
+				Name: "Invalid EPay " + tc.name, Provider: paymentcore.ProviderEPay, Config: raw, Enabled: true,
+			})
+			if createErr != nil {
+				t.Fatalf("create invalid EPay channel fixture: %v", createErr)
+			}
+			invalidMethod, createErr := CreatePaymentMethod(ctx, db, PaymentMethod{
+				ChannelID: invalidChannel.ID, Name: "Invalid " + tc.name, Type: paymentcore.ProviderEPay,
+				ProviderMethodConfig: json.RawMessage(`{"type":"alipay"}`), Enabled: true,
+			})
+			if createErr != nil {
+				t.Fatalf("create invalid EPay method fixture: %v", createErr)
+			}
+			if _, createErr = CreatePaymentOrder(ctx, db, PaymentOrderCreateInput{
+				UserID: "u_epay_conversion", PaymentMethodID: invalidMethod.ID,
+				ProductType: PaymentProductCreditPackage, ProductID: pkg.ID,
+			}); !errors.Is(createErr, ErrPaymentMethodUnavailable) {
+				t.Fatalf("invalid EPay conversion order error = %v, want %v", createErr, ErrPaymentMethodUnavailable)
+			}
+		})
 	}
 }
 
@@ -719,6 +842,47 @@ func TestUserGroupPaymentUsesCalendarRenewal(t *testing.T) {
 	}
 	if expiry != 0 {
 		t.Fatalf("rejected same-group purchase changed permanent membership to %d", expiry)
+	}
+}
+
+func TestPaymentProviderSnapshotMigrationBackfillsLegacyOrders(t *testing.T) {
+	db, ctx := openPaymentsTestDB(t)
+	for _, column := range []string{"provider_amount_minor", "provider_currency", "conversion_rate"} {
+		if _, err := db.ExecContext(ctx, `ALTER TABLE payment_orders DROP COLUMN `+column); err != nil {
+			t.Fatalf("drop provider snapshot column %s: %v", column, err)
+		}
+	}
+	exec(t, db,
+		`INSERT INTO payment_orders(
+		   id, user_email, provider, channel_id, channel_name, method_id, method_name, method_type,
+		   product_type, product_id, product_name, amount_minor, currency
+		 ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		"po_legacy_provider_snapshot", "legacy@example.test", paymentcore.ProviderEPay,
+		"paych_legacy", "Legacy EPay", "paym_legacy", "Legacy Alipay", paymentcore.ProviderEPay,
+		PaymentProductCreditPackage, "cp_legacy", "Legacy package", 4321, "USD",
+	)
+	if err := Migrate(db); err != nil {
+		t.Fatalf("migrate legacy provider snapshots: %v", err)
+	}
+
+	order, err := GetPaymentOrder(ctx, db, "po_legacy_provider_snapshot")
+	if err != nil {
+		t.Fatalf("get migrated legacy payment order: %v", err)
+	}
+	if order.ProviderAmountMinor != 4321 || order.ProviderCurrency != "USD" || order.ConversionRate != "" {
+		t.Fatalf("migrated legacy provider snapshots = %+v", order)
+	}
+	for _, column := range []string{"provider_amount_minor", "provider_currency", "conversion_rate"} {
+		if _, err := db.ExecContext(ctx, `SELECT `+column+` FROM payment_orders WHERE 1=0`); err != nil {
+			t.Fatalf("provider snapshot column %s missing after migration: %v", column, err)
+		}
+	}
+	for _, fragment := range []string{
+		"provider_amount_minor BIGINT", "provider_currency TEXT", "conversion_rate   TEXT",
+	} {
+		if !strings.Contains(schemaPGSQL, fragment) {
+			t.Fatalf("PostgreSQL schema missing %q", fragment)
+		}
 	}
 }
 

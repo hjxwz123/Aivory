@@ -298,6 +298,8 @@ export interface ApiOAuthProvider {
   enabled: boolean
   sort_order: number
   updated_at: number
+  /** Canonical URI computed by the server, including OAUTH_CALLBACK_BASE_URL. */
+  redirect_uri: string
 }
 
 /** Minimal provider shape exposed to the public login page. */

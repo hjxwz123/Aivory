@@ -5,6 +5,7 @@ import (
 	"crypto/md5"
 	"crypto/subtle"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"net/url"
 	"path"
@@ -13,10 +14,12 @@ import (
 )
 
 type EPayConfig struct {
-	GatewayURL  string `json:"gateway_url"`
-	MerchantID  string `json:"merchant_id"`
-	MerchantKey string `json:"merchant_key"`
-	Currency    string `json:"currency"`
+	GatewayURL                 string      `json:"gateway_url"`
+	MerchantID                 string      `json:"merchant_id"`
+	MerchantKey                string      `json:"merchant_key"`
+	Currency                   string      `json:"currency"`
+	ConversionRate             json.Number `json:"conversion_rate,omitempty"`
+	ConversionRateBaseCurrency string      `json:"conversion_rate_base_currency,omitempty"`
 }
 
 type EPayMethodConfig struct {
@@ -44,7 +47,62 @@ func ValidateEPayConfig(cfg EPayConfig) error {
 			return errors.New("EPay currency must be a three-letter code")
 		}
 	}
+	if rate := strings.TrimSpace(cfg.ConversionRate.String()); rate != "" {
+		if _, err := NormalizeConversionRate(rate); err != nil {
+			return err
+		}
+	}
+	if base := strings.ToUpper(strings.TrimSpace(cfg.ConversionRateBaseCurrency)); base != "" {
+		if !validCurrencyCode(base) {
+			return errors.New("EPay conversion-rate base currency must be a three-letter code")
+		}
+	}
 	return nil
+}
+
+// ValidateEPaySettlementConfig verifies that a cross-currency channel has a
+// positive rate bound to the current settlement currency. Same-currency
+// channels intentionally need neither a rate nor a base currency.
+func ValidateEPaySettlementConfig(cfg EPayConfig, settlementCurrency string) error {
+	if err := ValidateEPayConfig(cfg); err != nil {
+		return err
+	}
+	settlementCurrency = strings.ToUpper(strings.TrimSpace(settlementCurrency))
+	if !validCurrencyCode(settlementCurrency) {
+		return errors.New("invalid settlement currency")
+	}
+	providerCurrency := strings.ToUpper(strings.TrimSpace(cfg.Currency))
+	if providerCurrency == settlementCurrency {
+		return nil
+	}
+	if strings.ToUpper(strings.TrimSpace(cfg.ConversionRateBaseCurrency)) != settlementCurrency {
+		return errors.New("EPay conversion-rate base currency must match the settlement currency")
+	}
+	if _, err := NormalizeConversionRate(cfg.ConversionRate.String()); err != nil {
+		return err
+	}
+	return nil
+}
+
+// EPayProviderAmount returns the immutable provider-side checkout snapshot.
+// The rate is target/provider major units per source/settlement major unit.
+func EPayProviderAmount(amountMinor int64, settlementCurrency string, cfg EPayConfig) (int64, string, string, error) {
+	if err := ValidateEPaySettlementConfig(cfg, settlementCurrency); err != nil {
+		return 0, "", "", err
+	}
+	settlementCurrency = strings.ToUpper(strings.TrimSpace(settlementCurrency))
+	providerCurrency := strings.ToUpper(strings.TrimSpace(cfg.Currency))
+	if providerCurrency == settlementCurrency {
+		if amountMinor <= 0 {
+			return 0, "", "", errors.New("payment amount must be positive")
+		}
+		return amountMinor, providerCurrency, "", nil
+	}
+	converted, rate, err := ConvertMinorAmount(amountMinor, settlementCurrency, providerCurrency, cfg.ConversionRate.String())
+	if err != nil {
+		return 0, "", "", err
+	}
+	return converted, providerCurrency, rate, nil
 }
 
 func (g EPayGateway) CreateCheckout(_ context.Context, req CheckoutRequest) (CheckoutAction, error) {
@@ -57,7 +115,7 @@ func (g EPayGateway) CreateCheckout(_ context.Context, req CheckoutRequest) (Che
 		return CheckoutAction{}, errors.New("EPay payment type is required")
 	}
 	if !strings.EqualFold(strings.TrimSpace(g.Config.Currency), req.Currency) {
-		return CheckoutAction{}, errors.New("EPay channel currency does not match the settlement currency")
+		return CheckoutAction{}, errors.New("EPay channel currency does not match the order provider currency")
 	}
 	money, err := FormatMinorAmount(req.AmountMinor, req.Currency)
 	if err != nil {
@@ -116,9 +174,8 @@ func VerifyEPayEvent(params map[string]string, cfg EPayConfig) (ProviderEvent, e
 	if params["pid"] != strings.TrimSpace(cfg.MerchantID) {
 		return ProviderEvent{}, errors.New("EPay merchant does not match the channel")
 	}
-	currency := strings.ToUpper(strings.TrimSpace(cfg.Currency))
-	amount, err := ParseMinorAmount(params["money"], currency)
-	if err != nil {
+	amountMajor := strings.TrimSpace(params["money"])
+	if err := ValidateMajorAmount(amountMajor); err != nil {
 		return ProviderEvent{}, err
 	}
 	status := EventIgnored
@@ -136,11 +193,21 @@ func VerifyEPayEvent(params map[string]string, cfg EPayConfig) (ProviderEvent, e
 		Status:          status,
 		OrderID:         strings.TrimSpace(params["out_trade_no"]),
 		ProviderOrderID: providerOrderID,
-		AmountMinor:     amount,
-		PaidAmountMinor: amount,
-		Currency:        currency,
+		AmountMajor:     amountMajor,
 		MethodType:      strings.TrimSpace(params["type"]),
 	}, nil
+}
+
+func validCurrencyCode(currency string) bool {
+	if len(currency) != 3 {
+		return false
+	}
+	for _, ch := range currency {
+		if ch < 'A' || ch > 'Z' {
+			return false
+		}
+	}
+	return true
 }
 
 func validateGatewayURL(raw string) (*url.URL, error) {

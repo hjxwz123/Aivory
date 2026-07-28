@@ -76,6 +76,10 @@ func oauthCallbackBase(d Deps, r *http.Request) string {
 	return externalBaseURL(r)
 }
 
+func oauthRedirectURI(callbackBase, providerID string) string {
+	return strings.TrimRight(callbackBase, "/") + "/api/auth/oauth/" + url.PathEscape(providerID) + "/callback"
+}
+
 // allowedReturnOrigin reports whether origin (scheme://host) is an exact match
 // for one of the configured return targets. This is the open-redirect guard for
 // the hand-off: a value that fails here is NEVER used as a redirect destination.
@@ -207,7 +211,7 @@ func oauthStartHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	stash, _ := json.Marshal(map[string]string{"provider_id": id, "verifier": verifier, "origin": origin})
 	d.Cache.Set("oauth:state:"+state, string(stash), oauthStateCacheTTL)
 
-	redirectURI := callbackBase + "/api/auth/oauth/" + id + "/callback"
+	redirectURI := oauthRedirectURI(callbackBase, id)
 	http.Redirect(w, r, cfg.AuthCodeURL(redirectURI, state, challenge), http.StatusFound)
 }
 
@@ -276,7 +280,7 @@ func oauthCallbackHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cfg := oauth.Resolve(toOAuthConfig(p))
-	redirectURI := callbackBase + "/api/auth/oauth/" + id + "/callback"
+	redirectURI := oauthRedirectURI(callbackBase, id)
 
 	ctx, cancel := context.WithTimeout(r.Context(), oauthTokenExchangeCtxTimeout)
 	defer cancel()
@@ -382,7 +386,7 @@ func oauthLinkStartHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		"provider_id": id, "verifier": verifier, "link_user_id": u.ID, "origin": origin,
 	})
 	d.Cache.Set("oauth:state:"+state, string(stash), oauthStateCacheTTL)
-	redirectURI := callbackBase + "/api/auth/oauth/" + id + "/callback"
+	redirectURI := oauthRedirectURI(callbackBase, id)
 	writeJSON(w, 200, map[string]string{"authorize_url": cfg.AuthCodeURL(redirectURI, state, challenge)})
 }
 
@@ -438,6 +442,7 @@ func unlinkIdentityHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 //  2. otherwise a *verified* provider email links to the matching account;
 //  3. otherwise a fresh account is provisioned (synthesising a placeholder
 //     email when the provider returns none, e.g. Apple "Hide My Email" opt-out).
+//
 // adoptOAuthAvatar copies the provider's profile picture into the user's
 // settings.avatar_url — the same field the account page writes and every
 // avatar render site (sidebar, workspace members, …) already reads — but ONLY
@@ -564,13 +569,51 @@ func shortHash(s string) string {
 
 // ===== Admin CRUD =====
 
+type adminOAuthProviderResponse struct {
+	store.OAuthProvider
+	RedirectURI string `json:"redirect_uri"`
+}
+
+type preparedOAuthProviderResponse struct {
+	ID          string `json:"id"`
+	RedirectURI string `json:"redirect_uri"`
+}
+
+func adminOAuthProviderJSON(p store.OAuthProvider, d Deps, r *http.Request) adminOAuthProviderResponse {
+	return adminOAuthProviderResponse{
+		OAuthProvider: p,
+		RedirectURI:   oauthRedirectURI(oauthCallbackBase(d, r), p.ID),
+	}
+}
+
+func prepareOAuthProviderAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
+	for range 4 {
+		id := store.GenID("oa")
+		if _, err := store.GetOAuthProvider(r.Context(), d.DB, id); errors.Is(err, store.ErrNotFound) {
+			writeJSON(w, http.StatusOK, preparedOAuthProviderResponse{
+				ID:          id,
+				RedirectURI: oauthRedirectURI(oauthCallbackBase(d, r), id),
+			})
+			return
+		} else if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+	}
+	writeError(w, http.StatusInternalServerError, errors.New("could not allocate oauth provider id"))
+}
+
 func listOAuthProvidersAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	rows, err := store.ListOAuthProviders(r.Context(), d.DB)
 	if err != nil {
 		writeError(w, 500, err)
 		return
 	}
-	writeJSON(w, 200, rows)
+	out := make([]adminOAuthProviderResponse, 0, len(rows))
+	for _, p := range rows {
+		out = append(out, adminOAuthProviderJSON(p, d, r))
+	}
+	writeJSON(w, 200, out)
 }
 
 func createOAuthProviderAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
@@ -581,6 +624,11 @@ func createOAuthProviderAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	if err := validateOAuthKind(p.Kind); err != nil {
 		writeError(w, 400, err)
+		return
+	}
+	p.ID = strings.TrimSpace(p.ID)
+	if p.ID != "" && !validPreparedRecordID(p.ID, "oa") {
+		writeError(w, http.StatusBadRequest, errors.New("invalid_oauth_provider_id"))
 		return
 	}
 	p.Name = strings.TrimSpace(p.Name)
@@ -597,14 +645,14 @@ func createOAuthProviderAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	created, err := store.CreateOAuthProvider(r.Context(), d.DB, p)
 	if err != nil {
-		if errors.Is(err, store.ErrOAuthProviderNameExists) {
+		if errors.Is(err, store.ErrOAuthProviderNameExists) || errors.Is(err, store.ErrOAuthProviderIDExists) {
 			writeError(w, 409, err)
 			return
 		}
 		writeError(w, 500, err)
 		return
 	}
-	writeJSON(w, 201, created)
+	writeJSON(w, 201, adminOAuthProviderJSON(*created, d, r))
 }
 
 func updateOAuthProviderAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
@@ -644,7 +692,7 @@ func updateOAuthProviderAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, errNotFound)
 		return
 	}
-	writeJSON(w, 200, upd)
+	writeJSON(w, 200, adminOAuthProviderJSON(*upd, d, r))
 }
 
 func deleteOAuthProviderAdmin(d Deps, w http.ResponseWriter, r *http.Request) {

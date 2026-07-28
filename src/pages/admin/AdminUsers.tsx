@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useNavigate } from 'react-router-dom'
-import { MessageSquare, Plus, Pencil, Trash2, Search, Info, Ban, ShieldCheck, Library, MoreHorizontal } from 'lucide-react'
+import { Brain, MessageSquare, Plus, Pencil, Trash2, Search, Info, Ban, ShieldCheck, Library, MoreHorizontal } from 'lucide-react'
 import { adminApi, ApiError } from '@/api'
 import type { ApiUser, ApiUserGroup } from '@/api/types'
 import { AdminSortableList } from '@/components/admin/AdminSortableList'
@@ -435,6 +435,10 @@ export default function AdminUsers() {
                           <Library size={14} aria-hidden />
                           {t('admin:users.viewLibrary')}
                         </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => navigate(`/admin/users/${encodeURIComponent(u.id)}/memories`)}>
+                          <Brain size={14} aria-hidden />
+                          {t('admin:users.viewMemories')}
+                        </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
                     {u.status === 'active' ? (
@@ -485,6 +489,10 @@ export default function AdminUsers() {
                         <DropdownMenuItem className="min-h-11" onClick={() => navigate(`/admin/users/${encodeURIComponent(u.id)}/library`)}>
                           <Library size={16} aria-hidden />
                           {t('admin:users.viewLibrary')}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem className="min-h-11" onClick={() => navigate(`/admin/users/${encodeURIComponent(u.id)}/memories`)}>
+                          <Brain size={16} aria-hidden />
+                          {t('admin:users.viewMemories')}
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
                         {u.status === 'active' ? (

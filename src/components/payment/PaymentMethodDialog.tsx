@@ -3,7 +3,7 @@ import { AlertTriangle, ArrowRight, CreditCard, KeyRound } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { paymentsApi, ApiError } from '@/api'
 import type { ApiPublicPaymentMethod } from '@/api/types'
-import { LucideGlyph } from '@/components/ui/lucide-icon'
+import { PaymentMethodIcon } from '@/components/payment/payment-method-icon'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -13,6 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { checkoutPaymentErrorKey } from '@/lib/payment-errors'
 import { safeHref } from '@/lib/utils'
 
 type PaymentTargetType = 'credit_package' | 'user_group'
@@ -112,16 +113,8 @@ export function PaymentMethodDialog({
 
   function checkoutErrorMessage(error: unknown): string {
     if (!(error instanceof ApiError)) return t('payment.checkoutError')
-    switch (error.message) {
-      case 'payment_method_unavailable':
-        return t('payment.errors.methodUnavailable')
-      case 'payment_product_unavailable':
-        return t('payment.errors.productUnavailable')
-      case 'payment_checkout_unavailable':
-        return t('payment.errors.checkoutUnavailable')
-      default:
-        return t('payment.checkoutError')
-    }
+    const key = checkoutPaymentErrorKey(error.message)
+    return key ? t(key) : t('payment.checkoutError')
   }
 
   async function startCheckout(method: ApiPublicPaymentMethod) {
@@ -250,7 +243,7 @@ export function PaymentMethodDialog({
                           className="flex min-h-11 w-full items-center gap-3 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-left transition-colors hover:bg-[var(--color-bg-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] disabled:cursor-not-allowed disabled:opacity-55"
                         >
                           <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-[6px] bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)]">
-                            <LucideGlyph name={method.icon || 'CreditCard'} size={16} aria-hidden />
+                            <PaymentMethodIcon icon={method.icon} size={18} />
                           </span>
                           <span className="min-w-0 flex-1 break-words text-[13px] font-medium leading-5 text-[var(--color-fg)] [overflow-wrap:anywhere]">
                             {method.name}

@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	paymentcore "aivory/server/internal/payment"
 )
 
 const (
@@ -33,6 +35,7 @@ const (
 var (
 	ErrInvalidPaymentChannel        = errors.New("invalid_payment_channel")
 	ErrPaymentChannelNameExists     = errors.New("payment_channel_name_exists")
+	ErrPaymentChannelIDExists       = errors.New("payment_channel_id_exists")
 	ErrPaymentChannelHasMethods     = errors.New("payment_channel_has_methods")
 	ErrPaymentChannelHasPending     = errors.New("payment_channel_has_pending_orders")
 	ErrInvalidPaymentMethod         = errors.New("invalid_payment_method")
@@ -152,6 +155,9 @@ func CreatePaymentChannel(ctx context.Context, db *sql.DB, channel PaymentChanne
 	if err != nil {
 		if isUniqueIndexErr(err, "idx_payment_channels_name_unique", "payment_channels.name") {
 			return nil, ErrPaymentChannelNameExists
+		}
+		if isUniqueIndexErr(err, "payment_channels.id", "payment_channels_pkey") {
+			return nil, ErrPaymentChannelIDExists
 		}
 		return nil, err
 	}
@@ -578,40 +584,43 @@ func DeletePaymentMethod(ctx context.Context, db *sql.DB, id string) error {
 // PaymentOrder contains immutable purchase snapshots and mutable processing
 // state. IDs are suitable for external merchant-order references.
 type PaymentOrder struct {
-	ID                string          `json:"id"`
-	UserID            string          `json:"user_id,omitempty"`
-	UserEmail         string          `json:"user_email"`
-	Provider          string          `json:"provider"`
-	Environment       string          `json:"environment"`
-	ChannelID         string          `json:"channel_id"`
-	ChannelName       string          `json:"channel_name"`
-	MethodID          string          `json:"method_id"`
-	MethodName        string          `json:"method_name"`
-	MethodType        string          `json:"method_type"`
-	MethodConfig      json.RawMessage `json:"method_config"`
-	ProductType       string          `json:"product_type"`
-	ProductID         string          `json:"product_id"`
-	ProductName       string          `json:"product_name"`
-	AmountMinor       int64           `json:"amount_minor"`
-	PaidAmountMinor   int64           `json:"paid_amount_minor"`
-	TaxAmountMinor    int64           `json:"tax_amount_minor"`
-	Currency          string          `json:"currency"`
-	Credits           float64         `json:"credits"`
-	UserGroupID       string          `json:"user_group_id"`
-	BillingCycle      string          `json:"billing_cycle"`
-	ProviderOrderID   string          `json:"provider_order_id"`
-	ProviderPaymentID string          `json:"provider_payment_id"`
-	CheckoutSessionID string          `json:"checkout_session_id"`
-	CheckoutExpiresAt int64           `json:"checkout_expires_at"`
-	LastReconciledAt  int64           `json:"last_reconciled_at"`
-	ReconcileError    string          `json:"reconcile_error"`
-	Status            string          `json:"status"`
-	FailureCode       string          `json:"failure_code"`
-	FailureMessage    string          `json:"failure_message"`
-	PaidAt            int64           `json:"paid_at"`
-	FulfilledAt       int64           `json:"fulfilled_at"`
-	CreatedAt         int64           `json:"created_at"`
-	UpdatedAt         int64           `json:"updated_at"`
+	ID                  string          `json:"id"`
+	UserID              string          `json:"user_id,omitempty"`
+	UserEmail           string          `json:"user_email"`
+	Provider            string          `json:"provider"`
+	Environment         string          `json:"environment"`
+	ChannelID           string          `json:"channel_id"`
+	ChannelName         string          `json:"channel_name"`
+	MethodID            string          `json:"method_id"`
+	MethodName          string          `json:"method_name"`
+	MethodType          string          `json:"method_type"`
+	MethodConfig        json.RawMessage `json:"method_config"`
+	ProductType         string          `json:"product_type"`
+	ProductID           string          `json:"product_id"`
+	ProductName         string          `json:"product_name"`
+	AmountMinor         int64           `json:"amount_minor"`
+	PaidAmountMinor     int64           `json:"paid_amount_minor"`
+	TaxAmountMinor      int64           `json:"tax_amount_minor"`
+	Currency            string          `json:"currency"`
+	ProviderAmountMinor int64           `json:"provider_amount_minor"`
+	ProviderCurrency    string          `json:"provider_currency"`
+	ConversionRate      string          `json:"conversion_rate,omitempty"`
+	Credits             float64         `json:"credits"`
+	UserGroupID         string          `json:"user_group_id"`
+	BillingCycle        string          `json:"billing_cycle"`
+	ProviderOrderID     string          `json:"provider_order_id"`
+	ProviderPaymentID   string          `json:"provider_payment_id"`
+	CheckoutSessionID   string          `json:"checkout_session_id"`
+	CheckoutExpiresAt   int64           `json:"checkout_expires_at"`
+	LastReconciledAt    int64           `json:"last_reconciled_at"`
+	ReconcileError      string          `json:"reconcile_error"`
+	Status              string          `json:"status"`
+	FailureCode         string          `json:"failure_code"`
+	FailureMessage      string          `json:"failure_message"`
+	PaidAt              int64           `json:"paid_at"`
+	FulfilledAt         int64           `json:"fulfilled_at"`
+	CreatedAt           int64           `json:"created_at"`
+	UpdatedAt           int64           `json:"updated_at"`
 }
 
 type PaymentOrderCreateInput struct {
@@ -633,7 +642,7 @@ type PaymentOrderFilter struct {
 	Offset      int
 }
 
-const paymentOrderCols = `id, user_id, user_email, provider, environment, channel_id, channel_name, method_id, method_name, method_type, method_config, product_type, product_id, product_name, amount_minor, paid_amount_minor, tax_amount_minor, currency, credits, user_group_id, billing_cycle, provider_order_id, provider_payment_id, checkout_session_id, checkout_expires_at, last_reconciled_at, reconcile_error, status, failure_code, failure_message, paid_at, fulfilled_at, created_at, updated_at`
+const paymentOrderCols = `id, user_id, user_email, provider, environment, channel_id, channel_name, method_id, method_name, method_type, method_config, product_type, product_id, product_name, amount_minor, paid_amount_minor, tax_amount_minor, currency, provider_amount_minor, provider_currency, conversion_rate, credits, user_group_id, billing_cycle, provider_order_id, provider_payment_id, checkout_session_id, checkout_expires_at, last_reconciled_at, reconcile_error, status, failure_code, failure_message, paid_at, fulfilled_at, created_at, updated_at`
 
 func scanPaymentOrder(s scanner) (PaymentOrder, error) {
 	var order PaymentOrder
@@ -658,6 +667,9 @@ func scanPaymentOrder(s scanner) (PaymentOrder, error) {
 		&order.PaidAmountMinor,
 		&order.TaxAmountMinor,
 		&order.Currency,
+		&order.ProviderAmountMinor,
+		&order.ProviderCurrency,
+		&order.ConversionRate,
 		&order.Credits,
 		&order.UserGroupID,
 		&order.BillingCycle,
@@ -677,6 +689,12 @@ func scanPaymentOrder(s scanner) (PaymentOrder, error) {
 	)
 	order.UserID = userID.String
 	order.MethodConfig = json.RawMessage(methodConfig)
+	if order.ProviderAmountMinor <= 0 {
+		order.ProviderAmountMinor = order.AmountMinor
+	}
+	if strings.TrimSpace(order.ProviderCurrency) == "" {
+		order.ProviderCurrency = order.Currency
+	}
 	return order, err
 }
 
@@ -717,8 +735,9 @@ func CreatePaymentOrder(ctx context.Context, db *sql.DB, input PaymentOrderCreat
 
 	var method EnabledPaymentMethod
 	var methodConfig string
+	var channelConfig string
 	var paymentEnvironment string
-	methodQuery := `SELECT pm.id, pm.channel_id, pc.name, pc.provider, pc.environment, pm.name, pm.type, pm.icon, pm.config, pm.sort_order
+	methodQuery := `SELECT pm.id, pm.channel_id, pc.name, pc.provider, pc.environment, pc.config, pm.name, pm.type, pm.icon, pm.config, pm.sort_order
 		   FROM payment_methods pm
 		   JOIN payment_channels pc ON pc.id=pm.channel_id
 		  WHERE pm.id=? AND pm.enabled=1 AND pc.enabled=1`
@@ -731,6 +750,7 @@ func CreatePaymentOrder(ctx context.Context, db *sql.DB, input PaymentOrderCreat
 		&method.ChannelName,
 		&method.Provider,
 		&paymentEnvironment,
+		&channelConfig,
 		&method.Name,
 		&method.Type,
 		&method.Icon,
@@ -839,20 +859,38 @@ func CreatePaymentOrder(ctx context.Context, db *sql.DB, input PaymentOrderCreat
 		return nil, ErrInvalidPaymentProduct
 	}
 
+	order.ProviderAmountMinor = order.AmountMinor
+	order.ProviderCurrency = order.Currency
+	if order.Provider == paymentcore.ProviderEPay {
+		var cfg paymentcore.EPayConfig
+		if json.Unmarshal([]byte(channelConfig), &cfg) != nil {
+			return nil, ErrPaymentMethodUnavailable
+		}
+		providerAmount, providerCurrency, rate, err := paymentcore.EPayProviderAmount(order.AmountMinor, order.Currency, cfg)
+		if err != nil {
+			return nil, ErrPaymentMethodUnavailable
+		}
+		order.ProviderAmountMinor = providerAmount
+		order.ProviderCurrency = providerCurrency
+		order.ConversionRate = rate
+	}
+
 	now := time.Now().Unix()
 	order.CreatedAt = now
 	order.UpdatedAt = now
 	_, err = tx.ExecContext(ctx,
 		`INSERT INTO payment_orders(
 		   id, user_id, user_email, provider, environment, channel_id, channel_name, method_id, method_name, method_type, method_config,
-		   product_type, product_id, product_name, amount_minor, paid_amount_minor, tax_amount_minor, currency, credits,
+		   product_type, product_id, product_name, amount_minor, paid_amount_minor, tax_amount_minor, currency,
+		   provider_amount_minor, provider_currency, conversion_rate, credits,
 		   user_group_id, billing_cycle, provider_order_id, provider_payment_id, checkout_session_id, checkout_expires_at,
 		   last_reconciled_at, reconcile_error, status, failure_code,
 		   failure_message, paid_at, fulfilled_at, created_at, updated_at
-		 ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, '', '', '', 0, 0, '', ?, '', '', 0, 0, ?, ?)`,
+		 ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?, '', '', '', 0, 0, '', ?, '', '', 0, 0, ?, ?)`,
 		order.ID, order.UserID, order.UserEmail, order.Provider, order.Environment, order.ChannelID, order.ChannelName, order.MethodID, order.MethodName, order.MethodType,
 		string(order.MethodConfig),
-		order.ProductType, order.ProductID, order.ProductName, order.AmountMinor, order.Currency, order.Credits,
+		order.ProductType, order.ProductID, order.ProductName, order.AmountMinor, order.Currency,
+		order.ProviderAmountMinor, order.ProviderCurrency, order.ConversionRate, order.Credits,
 		order.UserGroupID, order.BillingCycle, order.Status, now, now)
 	if err != nil {
 		return nil, err

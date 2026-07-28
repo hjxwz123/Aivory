@@ -38,6 +38,8 @@
     "empty": "Aucun forfait de crédits permanents n’est disponible."
   },
   "current": "Actuel",
+  "permanentlyOwned": "Acquis à vie",
+  "alreadyOwned": "Déjà acquis",
   "youreOnThis": "Vous êtes dans ce groupe",
   "switchCta": "Changer",
   "upgradeCta": "Passer à un forfait supérieur",
@@ -89,7 +91,8 @@
     "errors": {
       "methodUnavailable": "Ce moyen de paiement n’est pas disponible. Choisissez-en un autre.",
       "productUnavailable": "Cet article n’est plus disponible ou son prix a changé. Actualisez la page et réessayez.",
-      "checkoutUnavailable": "Le service de paiement est temporairement indisponible. Réessayez plus tard."
+      "checkoutUnavailable": "Le service de paiement est temporairement indisponible. Réessayez plus tard.",
+      "userGroupAlreadyPermanent": "Vous disposez déjà de ce groupe d’utilisateurs de façon permanente ; il n’est pas nécessaire de l’acheter à nouveau."
     },
     "or": "ou",
     "cardPurchase": "Acheter un code prépayé",

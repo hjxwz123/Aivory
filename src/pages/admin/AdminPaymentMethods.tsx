@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
-import { ArrowDown, ArrowUp, CreditCard, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react'
+import { ArrowDown, ArrowUp, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react'
 
 import { adminApi, ApiError } from '@/api'
 import type { ApiPaymentChannel, ApiPaymentMethod, ApiPaymentProvider } from '@/api/types'
-import { IconPicker } from '@/components/admin/icon-picker'
+import { IconUploader } from '@/components/admin/icon-uploader'
+import { PaymentMethodIcon } from '@/components/payment/payment-method-icon'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -19,7 +20,6 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Field } from '@/components/ui/label'
-import { LucideGlyph } from '@/components/ui/lucide-icon'
 import { PanelFallback } from '@/components/ui/panel-fallback'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
@@ -285,7 +285,7 @@ export default function AdminPaymentMethods() {
     <div className="min-w-0 max-w-full font-sans">
       <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div className="min-w-0">
-          <h1 className="text-2xl font-semibold tracking-normal text-[var(--color-fg)]">{t('admin:paymentMethods.title')}</h1>
+          <h1 className="font-serif text-3xl tracking-tight text-[var(--color-fg)]">{t('admin:paymentMethods.title')}</h1>
           <p className="mt-1 max-w-2xl text-[13px] leading-5 text-[var(--color-fg-muted)]">{t('admin:paymentMethods.lead')}</p>
         </div>
         <Button
@@ -358,7 +358,7 @@ export default function AdminPaymentMethods() {
               return (
                 <li key={row.id} className="grid grid-cols-[auto_minmax(0,1fr)] gap-3 px-3 py-3 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-center sm:px-4">
                   <span className="inline-flex size-8 items-center justify-center rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)]">
-                    {row.icon ? <LucideGlyph name={row.icon} size={15} aria-hidden /> : <CreditCard size={15} aria-hidden />}
+                    <PaymentMethodIcon icon={row.icon} size={16} />
                   </span>
                   <div className="min-w-0">
                     <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -411,8 +411,14 @@ export default function AdminPaymentMethods() {
               <Field className="min-w-0" label={t('admin:paymentMethods.fields.name')} htmlFor="payment-method-name">
                 <Input id="payment-method-name" required wrapperClassName="rounded-[8px] max-sm:h-11" value={editor.draft.name} onChange={(event) => setDraft({ name: event.target.value })} placeholder={t('admin:paymentMethods.fields.namePlaceholder')} />
               </Field>
-              <Field label={t('admin:paymentMethods.fields.icon')}>
-                <IconPicker className="max-sm:h-11" value={editor.draft.icon} onChange={(icon) => setDraft({ icon })} aria-label={t('admin:paymentMethods.fields.icon')} />
+              <Field label={t('admin:paymentMethods.fields.icon')} htmlFor="payment-method-icon">
+                <IconUploader
+                  id="payment-method-icon"
+                  value={editor.draft.icon}
+                  onChange={(icon) => setDraft({ icon })}
+                  placeholder="CreditCard / https://..."
+                  preview={<PaymentMethodIcon icon={editor.draft.icon} size={18} />}
+                />
               </Field>
               <Field className="min-w-0" label={t('admin:paymentMethods.fields.channel')} htmlFor="payment-method-channel" hint={t('admin:paymentMethods.fields.channelHint')}>
                 <Select

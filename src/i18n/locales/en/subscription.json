@@ -38,6 +38,8 @@
     "empty": "No permanent credit packages are available."
   },
   "current": "Current",
+  "permanentlyOwned": "Permanently owned",
+  "alreadyOwned": "Already owned",
   "youreOnThis": "You’re on this group",
   "switchCta": "Switch",
   "upgradeCta": "Upgrade",
@@ -89,7 +91,8 @@
     "errors": {
       "methodUnavailable": "This payment method is unavailable. Choose another method.",
       "productUnavailable": "This item is no longer available or its price changed. Refresh the page and try again.",
-      "checkoutUnavailable": "The payment service is temporarily unavailable. Try again later."
+      "checkoutUnavailable": "The payment service is temporarily unavailable. Try again later.",
+      "userGroupAlreadyPermanent": "You already own this user group permanently, so it doesn’t need to be purchased again."
     },
     "or": "or",
     "cardPurchase": "Purchase a prepaid code",

@@ -276,7 +276,7 @@ export default function AdminPaymentOrders() {
   return (
     <div className="min-w-0 font-sans">
       <header>
-        <h1 className="text-2xl font-semibold tracking-normal text-[var(--color-fg)]">{t('admin:paymentOrders.title')}</h1>
+        <h1 className="font-serif text-3xl tracking-tight text-[var(--color-fg)]">{t('admin:paymentOrders.title')}</h1>
         <p className="mt-1 max-w-2xl text-[13px] leading-5 text-[var(--color-fg-muted)]">{t('admin:paymentOrders.lead')}</p>
       </header>
 
