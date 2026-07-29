@@ -1,13 +1,9 @@
 /**
- * AdminLayout — task-oriented admin navigation.
- *
- * The old shell exposed one rail item per broad area and then rendered a second
- * tab bar above the page. That hid most destinations until a parent area was
- * opened and wrapped badly as the console grew. The grouped rail below links
- * directly to every top-level admin surface.
+ * AdminLayout keeps broad task areas in the rail and exposes the current area's
+ * destinations as a route-aware tab row above the page.
  */
 import { Suspense, useEffect, useState } from 'react'
-import { NavLink, Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { Link, Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import {
   ArrowLeft,
@@ -25,159 +21,25 @@ import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet'
 import { RouteFade } from '@/components/ui/route-fade'
 import { PanelFallback } from '@/components/ui/panel-fallback'
 import { UserMenu } from '@/components/sidebar/sidebar'
+import {
+  ADMIN_NAV_GROUPS,
+  ADMIN_OVERVIEW,
+  adminNavGroupActive,
+  adminNavGroupForPath,
+  adminNavItemActive,
+  underAdminPath,
+  type AdminNavGroupKey,
+} from '@/lib/admin-navigation'
 import { cn } from '@/lib/utils'
 
-interface AdminNavItem {
-  to: string
-  labelKey: string
-  defaultLabel: string
-  /** Drill-down routes that should keep this item selected. */
-  also?: string[]
-}
-
-interface AdminNavGroup {
-  key: string
-  icon: typeof Cpu
-  labelKey: string
-  defaultLabel: string
-  items: AdminNavItem[]
-}
-
-const OVERVIEW: AdminNavItem = {
-  to: '/admin/overview',
-  labelKey: 'admin:menu.overview',
-  defaultLabel: 'Overview',
-}
-
-const GROUPS: AdminNavGroup[] = [
-  {
-    key: 'ai',
-    icon: Cpu,
-    labelKey: 'admin:menu.aiModels',
-    defaultLabel: 'AI & models',
-    items: [
-      { to: '/admin/channels', labelKey: 'admin:channels.title', defaultLabel: 'Channels' },
-      {
-        to: '/admin/models',
-        labelKey: 'admin:models.title',
-        defaultLabel: 'Models',
-        also: ['/admin/model-tags'],
-      },
-      {
-        to: '/admin/settings/model-policy',
-        labelKey: 'admin:menu.modelPolicy',
-        defaultLabel: 'Model policy',
-      },
-      {
-        to: '/admin/settings/context-memory',
-        labelKey: 'admin:menu.contextMemory',
-        defaultLabel: 'Context & memory',
-      },
-      { to: '/admin/moderation', labelKey: 'admin:moderation.title', defaultLabel: 'Moderation' },
-    ],
-  },
-  {
-    key: 'capabilities',
-    icon: Sparkles,
-    labelKey: 'admin:menu.capabilities',
-    defaultLabel: 'Capabilities & integrations',
-    items: [
-      { to: '/admin/skills', labelKey: 'admin:skills.title', defaultLabel: 'Skills' },
-      { to: '/admin/prompts', labelKey: 'admin:prompts.title', defaultLabel: 'Prompt library' },
-      { to: '/admin/tools', labelKey: 'admin:tools.title', defaultLabel: 'Tools' },
-      { to: '/admin/documents', labelKey: 'admin:documents.title', defaultLabel: 'Documents & knowledge' },
-      { to: '/admin/image-styles', labelKey: 'admin:imageStyles.title', defaultLabel: 'Image generation' },
-      { to: '/admin/audio', labelKey: 'admin:audio.title', defaultLabel: 'Speech' },
-    ],
-  },
-  {
-    key: 'access',
-    icon: Users,
-    labelKey: 'admin:menu.usersAccess',
-    defaultLabel: 'Users & access',
-    items: [
-      {
-        to: '/admin/users',
-        labelKey: 'admin:users.title',
-        defaultLabel: 'Users',
-      },
-      {
-        to: '/admin/settings/registration',
-        labelKey: 'admin:menu.registrationPolicy',
-        defaultLabel: 'Registration policy',
-      },
-      { to: '/admin/oauth', labelKey: 'admin:oauth.title', defaultLabel: 'Login providers' },
-      { to: '/admin/workspaces', labelKey: 'admin:workspaces.title', defaultLabel: 'Workspaces' },
-    ],
-  },
-  {
-    key: 'billing',
-    icon: CreditCard,
-    labelKey: 'admin:menu.billing',
-    defaultLabel: 'Billing & entitlements',
-    items: [
-      { to: '/admin/user-groups', labelKey: 'admin:groups.title', defaultLabel: 'Plans' },
-      { to: '/admin/credits', labelKey: 'admin:menu.creditsQuotas', defaultLabel: 'Credits & quotas' },
-      { to: '/admin/redeem-codes', labelKey: 'admin:redeemCodes.title', defaultLabel: 'Redeem codes' },
-      {
-        to: '/admin/payment-channels',
-        labelKey: 'admin:paymentChannels.title',
-        defaultLabel: 'Payment channels',
-      },
-      {
-        to: '/admin/payment-methods',
-        labelKey: 'admin:paymentMethods.title',
-        defaultLabel: 'Payment methods',
-      },
-      { to: '/admin/payment-orders', labelKey: 'admin:paymentOrders.title', defaultLabel: 'Payment orders' },
-    ],
-  },
-  {
-    key: 'operations',
-    icon: BarChart3,
-    labelKey: 'admin:menu.operations',
-    defaultLabel: 'Data & operations',
-    items: [
-      { to: '/admin/analytics', labelKey: 'admin:analytics.title', defaultLabel: 'Analytics' },
-      { to: '/admin/usage', labelKey: 'admin:usage.title', defaultLabel: 'Usage records' },
-      { to: '/admin/files', labelKey: 'admin:files.title', defaultLabel: 'Files' },
-    ],
-  },
-  {
-    key: 'platform',
-    icon: Settings2,
-    labelKey: 'admin:menu.platform',
-    defaultLabel: 'System',
-    items: [
-      { to: '/admin/announcement', labelKey: 'admin:announcement.title', defaultLabel: 'Announcement' },
-      {
-        to: '/admin/settings/email',
-        labelKey: 'admin:menu.emailService',
-        defaultLabel: 'Email service',
-      },
-      { to: '/admin/storage', labelKey: 'admin:menu.storageUploads', defaultLabel: 'Storage & uploads' },
-      {
-        to: '/admin/settings/legal',
-        labelKey: 'admin:menu.legalContact',
-        defaultLabel: 'Legal & contact',
-      },
-      {
-        to: '/admin/settings/logging',
-        labelKey: 'admin:menu.loggingPrivacy',
-        defaultLabel: 'Logging & privacy',
-      },
-      { to: '/admin/backup', labelKey: 'admin:backup.title', defaultLabel: 'Backup & migration' },
-    ],
-  },
-]
-
-function underPath(path: string, to: string): boolean {
-  return path === to || path.startsWith(to.endsWith('/') ? to : `${to}/`)
-}
-
-function itemActive(path: string, item: AdminNavItem): boolean {
-  return underPath(path, item.to) || (item.also ?? []).some((prefix) => underPath(path, prefix))
-}
+const GROUP_ICONS = {
+  ai: Cpu,
+  capabilities: Sparkles,
+  access: Users,
+  billing: CreditCard,
+  operations: BarChart3,
+  platform: Settings2,
+} satisfies Record<AdminNavGroupKey, typeof Cpu>
 
 export default function AdminLayout() {
   const navigate = useNavigate()
@@ -200,53 +62,90 @@ export default function AdminLayout() {
   }
 
   const path = location.pathname
-  const filesWorkspace = underPath(path, '/admin/files')
-
-  function LinkItem({ item }: { item: AdminNavItem }) {
-    const active = itemActive(path, item)
-    return (
-      <NavLink
-        to={item.to}
-        className={cn(
-          'flex h-8 items-center rounded-[7px] pl-8 pr-2 text-[12.5px] interactive',
-          active
-            ? 'bg-[var(--color-surface)] font-medium text-[var(--color-fg)] shadow-[inset_2px_0_0_var(--color-accent)]'
-            : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
-        )}
-      >
-        <span className="truncate">{t(item.labelKey, { defaultValue: item.defaultLabel })}</span>
-      </NavLink>
-    )
-  }
+  const currentGroup = adminNavGroupForPath(path)
+  const filesWorkspace = underAdminPath(path, '/admin/files')
 
   function NavItems() {
+    const overviewActive = adminNavItemActive(path, ADMIN_OVERVIEW)
     return (
-      <>
-        <NavLink
-          to={OVERVIEW.to}
+      <div className="flex flex-col gap-0.5">
+        <Link
+          to={ADMIN_OVERVIEW.to}
+          aria-current={overviewActive ? 'page' : undefined}
+          onClick={() => setMobileOpen(false)}
           className={cn(
-            'mb-3 flex h-9 items-center gap-2.5 rounded-[8px] px-3 text-[13px] interactive',
-            itemActive(path, OVERVIEW)
+            'flex h-9 items-center gap-2.5 rounded-[8px] px-3 text-[13px] interactive',
+            overviewActive
               ? 'bg-[var(--color-surface)] font-medium text-[var(--color-fg)]'
               : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
           )}
         >
           <LayoutDashboard size={14} aria-hidden />
-          {t(OVERVIEW.labelKey, { defaultValue: OVERVIEW.defaultLabel })}
-        </NavLink>
+          <span className="truncate">
+            {t(ADMIN_OVERVIEW.labelKey, { defaultValue: ADMIN_OVERVIEW.defaultLabel })}
+          </span>
+        </Link>
 
-        {GROUPS.map((group) => (
-          <section key={group.key} className="mb-3">
-            <div className="flex h-7 items-center gap-2 px-3 text-[11px] font-medium uppercase text-[var(--color-fg-subtle)]">
-              <group.icon size={12} aria-hidden />
-              <span className="truncate">{t(group.labelKey, { defaultValue: group.defaultLabel })}</span>
-            </div>
-            <div className="mt-0.5 flex flex-col gap-px">
-              {group.items.map((item) => <LinkItem key={item.to} item={item} />)}
-            </div>
-          </section>
-        ))}
-      </>
+        {ADMIN_NAV_GROUPS.map((group) => {
+          const active = adminNavGroupActive(path, group)
+          const Icon = GROUP_ICONS[group.key]
+          return (
+            <Link
+              key={group.key}
+              to={group.to}
+              aria-current={active ? 'location' : undefined}
+              onClick={() => setMobileOpen(false)}
+              className={cn(
+                'flex h-9 items-center gap-2.5 rounded-[8px] px-3 text-[13px] interactive',
+                active
+                  ? 'bg-[var(--color-surface)] font-medium text-[var(--color-fg)]'
+                  : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
+              )}
+            >
+              <Icon size={14} aria-hidden />
+              <span className="truncate">
+                {t(group.labelKey, { defaultValue: group.defaultLabel })}
+              </span>
+            </Link>
+          )
+        })}
+      </div>
+    )
+  }
+
+  function GroupTabs() {
+    if (!currentGroup) return null
+
+    const groupLabel = t(currentGroup.labelKey, { defaultValue: currentGroup.defaultLabel })
+    return (
+      <nav
+        aria-label={groupLabel}
+        className={cn(
+          'shrink-0 overflow-x-auto border-b border-[var(--color-divider)] scrollbar-none',
+          filesWorkspace ? 'px-5 pt-4 sm:px-8 lg:px-12' : 'mb-6',
+        )}
+      >
+        <div className="flex w-max min-w-full items-end gap-1">
+          {currentGroup.items.map((item) => {
+            const active = adminNavItemActive(path, item)
+            return (
+              <Link
+                key={item.to}
+                to={item.to}
+                aria-current={active ? 'page' : undefined}
+                className={cn(
+                  '-mb-px inline-flex h-9 shrink-0 items-center whitespace-nowrap border-b-2 px-3.5 text-[13px] interactive',
+                  active
+                    ? 'border-[var(--color-accent)] font-medium text-[var(--color-fg)]'
+                    : 'border-transparent text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]',
+                )}
+              >
+                {t(item.labelKey, { defaultValue: item.defaultLabel })}
+              </Link>
+            )
+          })}
+        </div>
+      </nav>
     )
   }
 
@@ -312,6 +211,7 @@ export default function AdminLayout() {
               : 'mx-auto w-full max-w-[84rem] px-5 py-8 sm:px-8 sm:py-12 lg:px-12',
           )}
         >
+          <GroupTabs />
           <RouteFade dep={path} className={filesWorkspace ? 'flex min-h-0 flex-1 flex-col' : undefined}>
             <Suspense key={path} fallback={<PanelFallback />}>
               <Outlet />
