@@ -381,6 +381,7 @@ export interface ApiPaymentChannel {
   environment: ApiPaymentEnvironment
   config: Record<string, unknown>
   enabled: boolean
+  sort_order: number
   /** Absolute callback URL to register in the upstream provider console. */
   webhook_url?: string
   created_at: number

@@ -90,6 +90,42 @@ func listPaymentChannelsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
+func reorderPaymentChannelsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		IDs []string `json:"ids"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, errInvalidInput)
+		return
+	}
+	channels, err := store.ListPaymentChannels(r.Context(), d.DB)
+	if err != nil {
+		writePaymentError(w, err)
+		return
+	}
+	if len(body.IDs) != len(channels) {
+		writeError(w, http.StatusBadRequest, errors.New("payment channel reorder list must include every channel"))
+		return
+	}
+	valid := make(map[string]bool, len(channels))
+	for _, channel := range channels {
+		valid[channel.ID] = true
+	}
+	seen := map[string]bool{}
+	for _, id := range body.IDs {
+		if !valid[id] || seen[id] {
+			writeError(w, http.StatusBadRequest, errInvalidInput)
+			return
+		}
+		seen[id] = true
+	}
+	if err := store.ReorderPaymentChannels(r.Context(), d.DB, body.IDs); err != nil {
+		writePaymentError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
 func preparePaymentChannelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	for range 4 {
 		id := store.GenID("paych")

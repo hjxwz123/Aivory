@@ -1012,6 +1012,9 @@
       "loading": "正在載入歸檔列表…",
       "noArchives": "還沒有可下載的備份歸檔。",
       "download": "下載",
+      "deleteConfirmTitle": "刪除此歸檔？",
+      "deleteConfirmLead": "將從伺服器永久刪除 {{name}}。",
+      "deleteDone": "已刪除歸檔：{{name}}",
       "progress": {
         "preparing": "準備中",
         "reading_database": "讀取資料庫",
@@ -1079,7 +1082,7 @@
       },
       "import": {
         "title": "匯入設定",
-        "lead": "匯入設定 ZIP（也相容舊 JSON），依 ID 合併/覆寫設定；不會匯入使用者、對話、檔案或日誌。",
+        "lead": "匯入設定 ZIP，依 ID 合併/覆寫設定；不會匯入使用者、對話、檔案或日誌。",
         "action": "匯入設定歸檔…",
         "invalid": "該檔案不是有效的 Aivory 設定匯出檔。",
         "done": "已匯入設定（{{count}} 列）。",
@@ -1126,6 +1129,7 @@
     "disableAction": "停用渠道",
     "disabledSuccess": "支付渠道已停用",
     "removed": "支付渠道已刪除",
+    "reorderFailed": "無法儲存支付渠道順序。",
     "updatedAt": "更新於 {{date}}",
     "removeTitle": "刪除支付渠道？",
     "removeBody": "確定刪除「{{name}}」？請先移除綁定的支付方式並處理進行中的訂單。",

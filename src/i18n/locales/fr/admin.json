@@ -1012,6 +1012,9 @@
       "loading": "Chargement de la liste des archives…",
       "noArchives": "Aucune archive de sauvegarde téléchargeable pour l’instant.",
       "download": "Télécharger",
+      "deleteConfirmTitle": "Supprimer cette archive ?",
+      "deleteConfirmLead": "{{name}} sera définitivement supprimée du serveur.",
+      "deleteDone": "Archive supprimée : {{name}}",
       "progress": {
         "preparing": "Préparation",
         "reading_database": "Lecture de la base",
@@ -1079,7 +1082,7 @@
       },
       "import": {
         "title": "Importer la configuration",
-        "lead": "Importez une archive ZIP de configuration (anciens JSON acceptés). Les lignes sont fusionnées par ID ; utilisateurs, conversations, fichiers et journaux ne sont pas importés.",
+        "lead": "Importez une archive ZIP de configuration. Les lignes sont fusionnées par ID ; utilisateurs, conversations, fichiers et journaux ne sont pas importés.",
         "action": "Importer l'archive de config…",
         "invalid": "Ce fichier n'est pas un export de configuration Aivory valide.",
         "done": "Configuration importée ({{count}} lignes).",
@@ -1126,6 +1129,7 @@
     "disableAction": "Désactiver le canal",
     "disabledSuccess": "Canal de paiement désactivé",
     "removed": "Canal de paiement supprimé",
+    "reorderFailed": "Impossible d’enregistrer l’ordre des canaux de paiement.",
     "updatedAt": "Mis à jour le {{date}}",
     "removeTitle": "Supprimer le canal de paiement ?",
     "removeBody": "Supprimer « {{name}} » ? Retirez d’abord ses modes de paiement liés et ses commandes actives.",
