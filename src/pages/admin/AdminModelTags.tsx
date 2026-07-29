@@ -14,11 +14,16 @@ import { Input } from '@/components/ui/input'
 import { AdminSortableList } from '@/components/admin/AdminSortableList'
 import { toast } from '@/hooks/use-toast'
 import { PanelFallback } from '@/components/ui/panel-fallback'
+import { useModels } from '@/store/models'
 
 export default function AdminModelTags() {
   const { t } = useTranslation(['admin', 'common'])
   const navigate = useNavigate()
-  const [tags, setTags] = useState<ApiModelTag[]>([])
+  // Share the picker cache instead of keeping an admin-only copy. Every CRUD
+  // operation and optimistic reorder is then reflected in the chat picker as
+  // soon as the admin returns to it, without requiring a full page reload.
+  const tags = useModels((state) => state.tags)
+  const setTags = useModels((state) => state.setTags)
   const [loading, setLoading] = useState(true)
   const [newName, setNewName] = useState('')
   const [creating, setCreating] = useState(false)
