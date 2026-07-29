@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Check, CircleX, Copy, RefreshCw, Search, ShieldAlert, X } from 'lucide-react'
+import { Check, CircleX, Copy, RefreshCw, Search, ShieldAlert, Trash2, X } from 'lucide-react'
 
 import { adminApi, ApiError } from '@/api'
 import type {
@@ -24,13 +24,16 @@ import { Pagination } from '@/components/ui/pagination'
 import { PanelFallback } from '@/components/ui/panel-fallback'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
+import { Tooltip } from '@/components/ui/tooltip'
 import { toast } from '@/hooks/use-toast'
 import { formatCurrencyMinor } from '@/lib/currency'
+import { adminPaymentOrderErrorKey } from '@/lib/payment-errors'
+import { canDeletePaymentOrder } from '@/lib/payment-order-state'
 import { copyText, formatDateTime } from '@/lib/utils'
 
 type StatusFilter = 'all' | ApiPaymentOrderStatus
 type ProviderFilter = 'all' | ApiPaymentProvider
-type PaymentOrderAction = 'reconcile' | 'close'
+type PaymentOrderAction = 'reconcile' | 'close' | 'delete'
 
 const STATUSES: StatusFilter[] = ['all', 'pending', 'processing', 'fulfilled', 'failed', 'expired', 'cancelled']
 const PROVIDERS: ProviderFilter[] = ['all', 'stripe', 'epay', 'waffo']
@@ -67,6 +70,8 @@ export default function AdminPaymentOrders() {
   const [closeTarget, setCloseTarget] = useState<ApiPaymentOrder | null>(null)
   const [closeReason, setCloseReason] = useState('')
   const [closeAcknowledged, setCloseAcknowledged] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<ApiPaymentOrder | null>(null)
+  const [deleteGatewayAcknowledged, setDeleteGatewayAcknowledged] = useState(false)
   const requestSequence = useRef(0)
   const copyResetTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -196,6 +201,51 @@ export default function AdminPaymentOrders() {
     }
   }
 
+  function canDeleteOrder(order: ApiPaymentOrder): boolean {
+    return canDeletePaymentOrder(order)
+  }
+
+  function openDeleteDialog(order: ApiPaymentOrder) {
+    setDeleteGatewayAcknowledged(false)
+    setDeleteTarget(order)
+  }
+
+  function dismissDeleteDialog() {
+    setDeleteTarget(null)
+    setDeleteGatewayAcknowledged(false)
+  }
+
+  async function deleteOrder() {
+    if (!deleteTarget || !canDeleteOrder(deleteTarget)) return
+    if (deleteTarget.delete_requires_gateway_confirmation && !deleteGatewayAcknowledged) return
+
+    const order = deleteTarget
+    setOrderBusy(order.id, 'delete')
+    try {
+      await adminApi.deletePaymentOrder(order.id, deleteGatewayAcknowledged)
+      setOrders((current) => current.filter((item) => item.id !== order.id))
+      setTotal((current) => Math.max(0, current - 1))
+      dismissDeleteDialog()
+      toast.success(t('admin:paymentOrders.actions.deleted'))
+      if (orders.length === 1 && page > 1) {
+        setPage((current) => Math.max(1, current - 1))
+      } else {
+        setReloadKey((value) => value + 1)
+      }
+    } catch (error: unknown) {
+      const errorKey = error instanceof ApiError ? adminPaymentOrderErrorKey(error.message) : undefined
+      const message = errorKey
+        ? t(errorKey)
+        : error instanceof ApiError
+          ? error.message
+          : t('admin:paymentOrders.actions.deleteFailed')
+      toast.error(message)
+      setReloadKey((value) => value + 1)
+    } finally {
+      setOrderBusy(order.id)
+    }
+  }
+
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE))
   const filtersActive = status !== 'all' || provider !== 'all' || Boolean(searchTerm)
 
@@ -239,11 +289,12 @@ export default function AdminPaymentOrders() {
   }
 
   function renderOrderActions(order: ApiPaymentOrder) {
-    if (order.status !== 'pending' && order.status !== 'processing') return null
+    const active = order.status === 'pending' || order.status === 'processing'
+    const deletable = canDeleteOrder(order)
     const busyAction = busyOrders[order.id]
     return (
       <div className="mt-1.5 flex flex-wrap gap-1">
-        {order.provider !== 'epay' ? (
+        {active && order.provider !== 'epay' ? (
           <Button
             className="rounded-[8px]"
             size="xs"
@@ -256,19 +307,49 @@ export default function AdminPaymentOrders() {
             {t('admin:paymentOrders.actions.reconcile')}
           </Button>
         ) : null}
-        <Button
-          className="rounded-[8px] text-[var(--color-danger)] hover:text-[var(--color-danger)]"
-          size="xs"
-          variant="ghost"
-          leadingIcon={<CircleX size={11} aria-hidden />}
-          loading={busyAction === 'close'}
-          disabled={Boolean(busyAction)}
-          onClick={() => openCloseDialog(order)}
+        {active ? (
+          <Button
+            className="rounded-[8px] text-[var(--color-danger)] hover:text-[var(--color-danger)]"
+            size="xs"
+            variant="ghost"
+            leadingIcon={<CircleX size={11} aria-hidden />}
+            loading={busyAction === 'close'}
+            disabled={Boolean(busyAction)}
+            onClick={() => openCloseDialog(order)}
+          >
+            {order.provider === 'epay'
+              ? t('admin:paymentOrders.actions.manualClose')
+              : t('admin:paymentOrders.actions.close')}
+          </Button>
+        ) : null}
+        <Tooltip
+          content={deletable
+            ? t('admin:paymentOrders.actions.delete')
+            : t('admin:paymentOrders.actions.deleteUnavailable')}
+          side="top"
         >
-          {order.provider === 'epay'
-            ? t('admin:paymentOrders.actions.manualClose')
-            : t('admin:paymentOrders.actions.close')}
-        </Button>
+          <span
+            className="inline-flex"
+            tabIndex={deletable ? undefined : 0}
+            aria-label={deletable
+              ? undefined
+              : t('admin:paymentOrders.actions.deleteUnavailable')}
+          >
+            <Button
+              className="rounded-[8px] text-[var(--color-danger)] hover:text-[var(--color-danger)]"
+              size="icon-sm"
+              variant="ghost"
+              aria-label={deletable
+                ? t('admin:paymentOrders.actions.delete')
+                : t('admin:paymentOrders.actions.deleteUnavailable')}
+              loading={busyAction === 'delete'}
+              disabled={!deletable || Boolean(busyAction)}
+              onClick={() => openDeleteDialog(order)}
+            >
+              <Trash2 size={12} aria-hidden />
+            </Button>
+          </span>
+        </Tooltip>
       </div>
     )
   }
@@ -565,6 +646,82 @@ export default function AdminPaymentOrders() {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(deleteTarget)}
+        onOpenChange={(open) => {
+          if (!open && (!deleteTarget || busyOrders[deleteTarget.id] !== 'delete')) dismissDeleteDialog()
+        }}
+      >
+        <DialogContent size="sm" className="rounded-[8px] font-sans max-sm:[&>button]:size-11">
+          <DialogHeader className="px-5 pt-5 pb-3 max-sm:pr-16">
+            <DialogTitle>{t('admin:paymentOrders.deleteDialog.title')}</DialogTitle>
+            <DialogDescription className="mt-1 break-words text-[13px] [overflow-wrap:anywhere]">
+              {deleteTarget
+                ? t('admin:paymentOrders.deleteDialog.description', { id: deleteTarget.id })
+                : ''}
+            </DialogDescription>
+          </DialogHeader>
+          {deleteTarget ? (
+            <DialogBody className="px-5 pb-5">
+              <dl className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-x-3 gap-y-2 text-[12px]">
+                <dt className="text-[var(--color-fg-subtle)]">{t('admin:paymentOrders.table.order')}</dt>
+                <dd className="break-all font-mono text-[11px] text-[var(--color-fg)]">{deleteTarget.id}</dd>
+                <dt className="text-[var(--color-fg-subtle)]">{t('admin:paymentOrders.table.user')}</dt>
+                <dd className="break-all text-[var(--color-fg)]">{deleteTarget.user_email}</dd>
+                <dt className="text-[var(--color-fg-subtle)]">{t('admin:paymentOrders.table.product')}</dt>
+                <dd className="break-words text-[var(--color-fg)] [overflow-wrap:anywhere]">{targetLabel(deleteTarget)}</dd>
+                <dt className="text-[var(--color-fg-subtle)]">{t('admin:paymentOrders.table.amount')}</dt>
+                <dd className="font-medium tabular-nums text-[var(--color-fg)]">
+                  {formatCurrencyMinor(deleteTarget.amount_minor, deleteTarget.currency, i18n.resolvedLanguage)}
+                  <span className="ml-1 text-[var(--color-fg-subtle)]">{deleteTarget.currency.toUpperCase()}</span>
+                </dd>
+              </dl>
+              <p className="mt-4 rounded-[8px] bg-[var(--color-danger-soft)] px-3 py-2.5 text-[12px] leading-5 text-[var(--color-danger)]" role="note">
+                {t('admin:paymentOrders.deleteDialog.warning')}
+              </p>
+              {deleteTarget.delete_requires_gateway_confirmation ? (
+                <>
+                  <div className="mt-3 flex gap-2.5 rounded-[8px] border border-[var(--color-warning)]/25 bg-[var(--color-warning-soft)] px-3 py-2.5 text-[12px] leading-5 text-[var(--color-fg-muted)]" role="note">
+                    <ShieldAlert className="mt-0.5 size-4 shrink-0 text-[var(--color-warning)]" aria-hidden />
+                    <p>{t('admin:paymentOrders.deleteDialog.gatewayWarning')}</p>
+                  </div>
+                  <label className="mt-3 flex cursor-pointer items-start gap-2.5 rounded-[8px] border border-[var(--color-border)] px-3 py-2.5 text-[12px] leading-5 text-[var(--color-fg-muted)]">
+                    <input
+                      type="checkbox"
+                      className="mt-1 size-4 shrink-0 cursor-pointer accent-[var(--color-danger)]"
+                      checked={deleteGatewayAcknowledged}
+                      onChange={(event) => setDeleteGatewayAcknowledged(event.target.checked)}
+                      required
+                      disabled={busyOrders[deleteTarget.id] === 'delete'}
+                    />
+                    <span>{t('admin:paymentOrders.deleteDialog.gatewayAcknowledge')}</span>
+                  </label>
+                </>
+              ) : null}
+            </DialogBody>
+          ) : null}
+          <DialogFooter className="max-sm:[&_button]:!h-11">
+            <Button
+              className="rounded-[8px]"
+              variant="ghost"
+              disabled={Boolean(deleteTarget && busyOrders[deleteTarget.id] === 'delete')}
+              onClick={dismissDeleteDialog}
+            >
+              {t('common:actions.cancel')}
+            </Button>
+            <Button
+              className="rounded-[8px]"
+              variant="destructive"
+              loading={Boolean(deleteTarget && busyOrders[deleteTarget.id] === 'delete')}
+              disabled={Boolean(deleteTarget?.delete_requires_gateway_confirmation && !deleteGatewayAcknowledged)}
+              onClick={() => void deleteOrder()}
+            >
+              {t('admin:paymentOrders.deleteDialog.confirm')}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

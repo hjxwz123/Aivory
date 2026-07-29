@@ -13,14 +13,17 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import {
+  CHECKOUT_REQUEST_TIMEOUT_MS,
+  executePaymentCheckoutAction,
+  paymentCheckoutHref,
+  PaymentCheckoutActionError,
+} from '@/lib/payment-checkout'
 import { checkoutPaymentErrorKey } from '@/lib/payment-errors'
-import { safeHref } from '@/lib/utils'
 
 type PaymentTargetType = 'credit_package' | 'user_group'
 type BillingCycle = 'monthly' | 'yearly'
 type MethodLoadState = 'loading' | 'ready' | 'error'
-
-const CHECKOUT_REQUEST_TIMEOUT_MS = 55_000
 
 interface PaymentMethodDialogProps {
   open: boolean
@@ -29,37 +32,6 @@ interface PaymentMethodDialogProps {
   targetId: string
   targetName: string
   billingCycle?: BillingCycle
-}
-
-function paymentHref(value?: string): string | undefined {
-  const href = safeHref(value)
-  if (!href || href.toLowerCase().startsWith('mailto:')) return undefined
-  try {
-    const parsed = new URL(href, window.location.origin)
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return undefined
-    return href
-  } catch {
-    return undefined
-  }
-}
-
-function submitPaymentForm(url: string, fields?: Record<string, string>): void {
-  const form = document.createElement('form')
-  form.action = url
-  form.method = 'POST'
-  form.hidden = true
-
-  Object.entries(fields ?? {}).forEach(([name, value]) => {
-    const input = document.createElement('input')
-    input.type = 'hidden'
-    input.name = name
-    input.value = String(value)
-    form.appendChild(input)
-  })
-
-  document.body.appendChild(form)
-  form.submit()
-  form.remove()
 }
 
 export function PaymentMethodDialog({
@@ -112,6 +84,7 @@ export function PaymentMethodDialog({
   useEffect(() => () => checkoutAbortRef.current?.abort('dismissed'), [])
 
   function checkoutErrorMessage(error: unknown): string {
+    if (error instanceof PaymentCheckoutActionError) return t('payment.invalidUrl')
     if (!(error instanceof ApiError)) return t('payment.checkoutError')
     const key = checkoutPaymentErrorKey(error.message)
     return key ? t(key) : t('payment.checkoutError')
@@ -136,16 +109,7 @@ export function PaymentMethodDialog({
         target_id: targetId,
         ...(targetType === 'user_group' && billingCycle ? { billing_cycle: billingCycle } : {}),
       }, controller.signal)
-      const href = paymentHref(result.action.url)
-      if (!href) {
-        setCheckoutError(t('payment.invalidUrl'))
-        return
-      }
-      if (result.action.type === 'form_post') {
-        submitPaymentForm(href, result.action.fields)
-        return
-      }
-      window.location.assign(href)
+      executePaymentCheckoutAction(result.action)
     } catch (error) {
       if (controller.signal.aborted && !timedOut) return
       setCheckoutError(timedOut ? t('payment.checkoutTimeout') : checkoutErrorMessage(error))
@@ -160,7 +124,7 @@ export function PaymentMethodDialog({
 
   function openCardPurchase() {
     if (submittingId) return
-    const href = paymentHref(cardPurchaseUrl)
+    const href = paymentCheckoutHref(cardPurchaseUrl)
     if (!href) {
       setCheckoutError(t('payment.invalidUrl'))
       return

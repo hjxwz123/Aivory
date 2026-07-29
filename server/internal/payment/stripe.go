@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/stripe/stripe-go/v86"
 	"github.com/stripe/stripe-go/v86/webhook"
@@ -100,6 +101,63 @@ func (g StripeGateway) CreateCheckout(ctx context.Context, req CheckoutRequest) 
 	return CheckoutAction{
 		Type: ActionRedirect, URL: session.URL, ProviderOrderID: session.ID,
 		SessionID: session.ID, ExpiresAt: session.ExpiresAt,
+	}, nil
+}
+
+// ResumeCheckout retrieves and returns the exact Checkout Session saved on the
+// local order. It deliberately has no recovery/create fallback: an expired or
+// otherwise inactive Session requires a separately recorded payment attempt.
+func (g StripeGateway) ResumeCheckout(ctx context.Context, req CheckoutResumeRequest) (CheckoutAction, error) {
+	if err := ValidateStripeConfig(g.Config); err != nil {
+		return CheckoutAction{}, err
+	}
+	orderID := strings.TrimSpace(req.OrderID)
+	sessionID := strings.TrimSpace(req.SessionID)
+	if orderID == "" || sessionID == "" {
+		return CheckoutAction{}, fmt.Errorf("%w: Stripe order and Checkout session references are required", ErrCheckoutNotResumable)
+	}
+	if providerOrderID := strings.TrimSpace(req.ProviderOrderID); providerOrderID != "" && providerOrderID != sessionID {
+		return CheckoutAction{}, fmt.Errorf("%w: saved Stripe Checkout session references do not match", ErrCheckoutNotResumable)
+	}
+
+	options := []stripe.ClientOption{}
+	if g.Backends != nil {
+		options = append(options, stripe.WithBackends(g.Backends))
+	}
+	client := stripe.NewClient(strings.TrimSpace(g.Config.SecretKey), options...)
+	session, err := client.V1CheckoutSessions.Retrieve(ctx, sessionID, nil)
+	if err != nil {
+		return CheckoutAction{}, fmt.Errorf("retrieve Stripe Checkout session for resume: %w", err)
+	}
+	if session == nil || strings.TrimSpace(session.ID) != sessionID {
+		return CheckoutAction{}, fmt.Errorf("%w: Stripe returned a different Checkout session", ErrCheckoutNotResumable)
+	}
+	reference, err := stripeOrderReference(
+		strings.TrimSpace(session.ClientReferenceID),
+		stripeMetadataOrderID(session.Metadata),
+		stripePaymentIntentMetadataOrderID(session.PaymentIntent),
+	)
+	if err != nil || reference != orderID {
+		return CheckoutAction{}, fmt.Errorf("%w: Stripe Checkout session does not belong to the payment order", ErrCheckoutNotResumable)
+	}
+	if session.Mode != stripe.CheckoutSessionModePayment {
+		return CheckoutAction{}, fmt.Errorf("%w: Stripe Checkout session mode is %s", ErrCheckoutNotResumable, session.Mode)
+	}
+	if session.Status == stripe.CheckoutSessionStatusExpired || (session.ExpiresAt > 0 && time.Now().Unix() >= session.ExpiresAt) {
+		return CheckoutAction{}, fmt.Errorf("%w: Stripe Checkout session is no longer active", ErrCheckoutExpired)
+	}
+	if session.Status != stripe.CheckoutSessionStatusOpen || session.PaymentStatus != stripe.CheckoutSessionPaymentStatusUnpaid {
+		return CheckoutAction{}, fmt.Errorf(
+			"%w: Stripe Checkout session is %s/%s",
+			ErrCheckoutNotResumable, session.Status, session.PaymentStatus,
+		)
+	}
+	if session.ExpiresAt <= 0 || !validRedirectURL(session.URL) {
+		return CheckoutAction{}, fmt.Errorf("%w: Stripe Checkout session has no active URL", ErrCheckoutNotResumable)
+	}
+	return CheckoutAction{
+		Type: ActionRedirect, URL: session.URL, ResumeMode: CheckoutResumeOriginalSession,
+		ProviderOrderID: session.ID, SessionID: session.ID, ExpiresAt: session.ExpiresAt,
 	}, nil
 }
 

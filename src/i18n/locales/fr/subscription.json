@@ -92,6 +92,12 @@
       "methodUnavailable": "Ce moyen de paiement n’est pas disponible. Choisissez-en un autre.",
       "productUnavailable": "Cet article n’est plus disponible ou son prix a changé. Actualisez la page et réessayez.",
       "checkoutUnavailable": "Le service de paiement est temporairement indisponible. Réessayez plus tard.",
+      "checkoutExpired": "Cette session de paiement a expiré. Actualisez la liste des commandes et réessayez.",
+      "checkoutNotResumable": "Ce paiement ne peut plus être repris. Actualisez la liste des commandes pour afficher son dernier état.",
+      "orderAlreadyPaid": "Cette commande a déjà été payée. Actualisez la liste des commandes pour mettre à jour son état.",
+      "resumeUnavailable": "Ce paiement ne peut pas être repris actuellement. Vérifiez la commande auprès du fournisseur de paiement avant de réessayer.",
+      "orderStateChanged": "Cette commande a changé pendant sa consultation. Actualisez la liste des commandes et réessayez.",
+      "checkoutStateUnknown": "Le fournisseur de paiement n’a pas pu confirmer si ce paiement peut continuer. Vérifiez la commande auprès du fournisseur avant de réessayer.",
       "waffoProductCurrencyUnsupported": "Ce produit Waffo ne prend pas en charge la devise de paiement sélectionnée. Demandez à un administrateur de vérifier le prix du produit ou les réglages du canal de paiement.",
       "userGroupAlreadyPermanent": "Vous disposez déjà de ce groupe d’utilisateurs de façon permanente ; il n’est pas nécessaire de l’acheter à nouveau."
     },
@@ -131,8 +137,19 @@
       "failed": "Échec du paiement",
       "expired": "Expiré"
     },
+    "actions": {
+      "continue": "Continuer le paiement",
+      "retry": "Relancer le paiement"
+    },
+    "retryConfirm": {
+      "title": "Relancer ce paiement ?",
+      "description": "Une nouvelle demande de paiement sera créée pour « {{name}} ».",
+      "warning": "L’ancienne session de paiement ne sera pas fermée automatiquement. Continuez uniquement après avoir vérifié que le paiement précédent n’a pas abouti ; payer les deux sessions peut entraîner un double débit.",
+      "confirm": "Relancer le paiement"
+    },
     "empty": "Aucun paiement pour le moment.",
     "loadError": "Impossible de charger votre historique des paiements.",
+    "resumeError": "Impossible de reprendre ce paiement. Actualisez la liste des commandes et réessayez.",
     "retry": "Réessayer",
     "previous": "Page précédente",
     "next": "Page suivante",

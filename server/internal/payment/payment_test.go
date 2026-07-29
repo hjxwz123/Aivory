@@ -363,7 +363,7 @@ func TestStripeGatewayCreatesHostedCheckout(t *testing.T) {
 		t.Fatalf("create Stripe checkout: %v", err)
 	}
 	if action.Type != ActionRedirect || action.URL != "https://checkout.stripe.com/c/pay/"+sessionID ||
-		action.ProviderOrderID != sessionID || action.SessionID != sessionID || action.ExpiresAt != expiresAt {
+		action.ProviderOrderID != sessionID || action.SessionID != sessionID || action.SessionURL != "" || action.ExpiresAt != expiresAt {
 		t.Fatalf("Stripe checkout action = %+v", action)
 	}
 }
@@ -625,7 +625,9 @@ func TestWaffoPancakeCheckoutUsesAuthenticatedDynamicPrice(t *testing.T) {
 		t.Fatalf("create Waffo Pancake checkout: %v", err)
 	}
 	if action.Type != ActionRedirect || action.ProviderOrderID != "" ||
-		action.URL != "https://pancake.example.test/checkout/SES_0123456789abcdefghijkl#token=jwt_test_token" {
+		action.URL != "https://pancake.example.test/checkout/SES_0123456789abcdefghijkl#token=jwt_test_token" ||
+		action.SessionURL != "https://pancake.example.test/checkout/SES_0123456789abcdefghijkl" ||
+		strings.Contains(action.SessionURL, "token=") {
 		t.Fatalf("unexpected Waffo checkout action: %#v", action)
 	}
 

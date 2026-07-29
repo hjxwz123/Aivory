@@ -149,6 +149,7 @@ CREATE TABLE IF NOT EXISTS payment_orders (
   provider_order_id TEXT NOT NULL DEFAULT '',
   provider_payment_id TEXT NOT NULL DEFAULT '',
   checkout_session_id TEXT NOT NULL DEFAULT '',
+  checkout_url      TEXT NOT NULL DEFAULT '',
   checkout_expires_at INTEGER NOT NULL DEFAULT 0,
   last_reconciled_at INTEGER NOT NULL DEFAULT 0,
   reconcile_error   TEXT NOT NULL DEFAULT '',
@@ -165,6 +166,25 @@ CREATE INDEX IF NOT EXISTS idx_payment_orders_channel_status ON payment_orders(c
 CREATE INDEX IF NOT EXISTS idx_payment_orders_status_created ON payment_orders(status, created_at);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_orders_provider_order_unique
   ON payment_orders(provider, channel_id, provider_order_id) WHERE provider_order_id<>'';
+
+-- Provider-facing checkout attempts belonging to one commercial order. EPay
+-- retries receive a fresh merchant_order_id while entitlement fulfillment
+-- remains idempotent on payment_orders.
+CREATE TABLE IF NOT EXISTS payment_order_attempts (
+  merchant_order_id TEXT PRIMARY KEY,
+  order_id          TEXT NOT NULL REFERENCES payment_orders(id) ON DELETE CASCADE,
+  provider          TEXT NOT NULL,
+  channel_id        TEXT NOT NULL,
+  provider_order_id TEXT NOT NULL DEFAULT '',
+  status            TEXT NOT NULL DEFAULT 'issued',
+  paid_at           INTEGER NOT NULL DEFAULT 0,
+  created_at        INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+  updated_at        INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+);
+CREATE INDEX IF NOT EXISTS idx_payment_order_attempts_order_created
+  ON payment_order_attempts(order_id, created_at, merchant_order_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_order_attempts_provider_order_unique
+  ON payment_order_attempts(provider, channel_id, provider_order_id) WHERE provider_order_id<>'';
 
 -- Raw, verified provider notifications. The composite unique key is the first
 -- idempotency barrier; fulfillment also locks/checks the order so a provider

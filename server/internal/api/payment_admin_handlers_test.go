@@ -46,6 +46,7 @@ func newPaymentAdminFixture(t *testing.T) paymentAdminFixture {
 	mx.handle(http.MethodDelete, "/api/admin/payment-methods/:id", wrap(d, deletePaymentMethodAdmin))
 	mx.handle(http.MethodGet, "/api/admin/payment-orders", wrap(d, listPaymentOrdersAdmin))
 	mx.handle(http.MethodPost, "/api/admin/payment-orders/:id/reconcile", wrap(d, reconcilePaymentOrderAdmin))
+	mx.handle(http.MethodDelete, "/api/admin/payment-orders/:id", wrap(d, deletePaymentOrderAdmin))
 	return paymentAdminFixture{db: db, d: d, mux: mx}
 }
 

@@ -79,7 +79,7 @@ func TestWaffoPaymentOrderSnapshotsConfiguredProductCurrency(t *testing.T) {
 func TestWaffoPancakeWebhookFulfillsCreditOrderExactlyOnce(t *testing.T) {
 	db := openMigrated(t, filepath.Join(t.TempDir(), "waffo-payment.db"))
 	t.Cleanup(func() { _ = db.Close() })
-	if err := store.SetSetting(db, "settlement_currency", "USD"); err != nil {
+	if err := store.SetSetting(db, "settlement_currency", "CNY"); err != nil {
 		t.Fatalf("set settlement currency: %v", err)
 	}
 	user := &store.User{ID: "waffo_user", Email: "waffo-buyer@example.test", GroupID: store.DefaultGroupID}
@@ -92,6 +92,7 @@ func TestWaffoPancakeWebhookFulfillsCreditOrderExactlyOnce(t *testing.T) {
 	cfg := payment.WaffoConfig{
 		MerchantID: "MER_0123456789abcdefghijkl", PrivateKey: privatePEM,
 		StoreID: "STO_0123456789abcdefghijkl", ProductID: "PROD_0123456789abcdefghijkl",
+		Currency: "USD", ConversionRate: "0.14", ConversionRateBaseCurrency: "CNY",
 		Mode: "test", WebhookPublicKey: publicPEM,
 	}
 	rawConfig, err := json.Marshal(cfg)
@@ -113,7 +114,7 @@ func TestWaffoPancakeWebhookFulfillsCreditOrderExactlyOnce(t *testing.T) {
 		t.Fatalf("create Waffo method: %v", err)
 	}
 	pkg, err := store.CreateCreditPackage(context.Background(), db, store.CreditPackage{
-		ID: "cp_waffo_flow", Name: "1,200 credits", Credits: 1200, PriceAmountMinor: 12345, Enabled: true,
+		ID: "cp_waffo_flow", Name: "1,200 credits", Credits: 1200, PriceAmountMinor: 28000, Enabled: true,
 	})
 	if err != nil {
 		t.Fatalf("create Waffo credit package: %v", err)
@@ -127,6 +128,9 @@ func TestWaffoPancakeWebhookFulfillsCreditOrderExactlyOnce(t *testing.T) {
 	}
 	if _, err := store.MarkPaymentOrderProcessing(context.Background(), db, order.ID, ""); err != nil {
 		t.Fatalf("mark Waffo order processing: %v", err)
+	}
+	if order.ProviderAmountMinor != 3920 || order.ProviderCurrency != "USD" || order.Currency != "CNY" {
+		t.Fatalf("cross-currency Waffo order snapshot = %+v", order)
 	}
 
 	payload := apiWaffoWebhookPayload(t, cfg, *order)
@@ -161,7 +165,7 @@ func TestWaffoPancakeWebhookFulfillsCreditOrderExactlyOnce(t *testing.T) {
 		t.Fatalf("get fulfilled Waffo order: %v", err)
 	}
 	if stored.Status != store.PaymentOrderFulfilled || stored.ProviderOrderID != "ORD_0123456789abcdefghijkl" ||
-		stored.PaidAmountMinor != 13580 || stored.TaxAmountMinor != 1235 ||
+		stored.PaidAmountMinor != 4312 || stored.TaxAmountMinor != 392 ||
 		stored.PaidAt == 0 || stored.FulfilledAt == 0 {
 		t.Fatalf("fulfilled Waffo order = %+v", stored)
 	}
@@ -188,7 +192,7 @@ func TestWaffoPancakeWebhookFulfillsCreditOrderExactlyOnce(t *testing.T) {
 	}
 	if len(history.Orders) != 1 || history.Orders[0].ID != order.ID || history.Orders[0].Status != "paid" ||
 		history.Orders[0].MethodName != method.Name || history.Orders[0].TargetName != pkg.Name ||
-		history.Orders[0].AmountMinor != 13580 || history.Orders[0].TaxAmountMinor != 1235 || history.Orders[0].Currency != "USD" {
+		history.Orders[0].AmountMinor != 4312 || history.Orders[0].TaxAmountMinor != 392 || history.Orders[0].Currency != "USD" {
 		t.Fatalf("Waffo payment history = %+v", history.Orders)
 	}
 }
@@ -214,6 +218,20 @@ func newAPIWaffoKeyPair(t *testing.T) (*rsa.PrivateKey, string, string) {
 
 func apiWaffoWebhookPayload(t *testing.T, cfg payment.WaffoConfig, order store.PaymentOrder) []byte {
 	t.Helper()
+	taxMinor := (order.ProviderAmountMinor + 9) / 10
+	totalMinor := order.ProviderAmountMinor + taxMinor
+	subtotal, err := payment.FormatMinorAmount(order.ProviderAmountMinor, order.ProviderCurrency)
+	if err != nil {
+		t.Fatalf("format Waffo webhook subtotal: %v", err)
+	}
+	tax, err := payment.FormatMinorAmount(taxMinor, order.ProviderCurrency)
+	if err != nil {
+		t.Fatalf("format Waffo webhook tax: %v", err)
+	}
+	total, err := payment.FormatMinorAmount(totalMinor, order.ProviderCurrency)
+	if err != nil {
+		t.Fatalf("format Waffo webhook total: %v", err)
+	}
 	payload := map[string]any{
 		"id": "delivery_waffo_flow", "timestamp": time.Now().UTC().Format(time.RFC3339),
 		"eventType": "order.completed", "eventId": "PAY_0123456789abcdefghijkl",
@@ -224,8 +242,8 @@ func apiWaffoWebhookPayload(t *testing.T, cfg payment.WaffoConfig, order store.P
 			"merchantProvidedBuyerIdentity": payment.WaffoBuyerIdentity(order.UserID),
 			"orderMerchantExternalId":       order.ID,
 			"orderMetadata":                 map[string]string{"aivory_order_id": order.ID},
-			"currency":                      order.Currency, "amount": "135.80", "taxAmount": "12.35",
-			"subtotal": "123.45", "total": "135.80",
+			"currency":                      order.ProviderCurrency, "amount": total, "taxAmount": tax,
+			"subtotal": subtotal, "total": total,
 			"productName": order.ProductName, "paymentId": "PAY_0123456789abcdefghijkl",
 			"paymentStatus": "succeeded", "paymentMethod": "card", "paymentLast4": "0110",
 		},

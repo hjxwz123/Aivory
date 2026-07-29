@@ -11,6 +11,8 @@ import (
 
 var ErrCheckoutStateUnknown = errors.New("payment provider checkout state is unknown")
 var ErrCheckoutNotClosable = errors.New("payment provider checkout cannot be closed safely")
+var ErrCheckoutNotResumable = errors.New("payment provider checkout cannot be resumed")
+var ErrCheckoutExpired = errors.New("payment provider checkout has expired")
 var ErrReconciliationUnsupported = errors.New("payment provider reconciliation is unsupported")
 var ErrWaffoProductCurrencyUnsupported = errors.New("payment_waffo_product_currency_unsupported")
 
@@ -48,6 +50,11 @@ const (
 )
 
 const (
+	CheckoutResumeOriginalSession = "original_session"
+	CheckoutResumeRetrySubmission = "retry_submission"
+)
+
+const (
 	EventPaid       = "paid"
 	EventProcessing = "processing"
 	EventFailed     = "failed"
@@ -66,25 +73,41 @@ type ReconcileRequest struct {
 }
 
 type CheckoutRequest struct {
-	OrderID     string
-	Name        string
-	AmountMinor int64
-	Currency    string
-	TaxCategory string
-	UserID      string
-	UserEmail   string
-	NotifyURL   string
-	SuccessURL  string
-	CancelURL   string
+	OrderID         string
+	MerchantOrderID string
+	Name            string
+	AmountMinor     int64
+	Currency        string
+	TaxCategory     string
+	UserID          string
+	UserEmail       string
+	NotifyURL       string
+	SuccessURL      string
+	CancelURL       string
+}
+
+// CheckoutResumeRequest combines the immutable local checkout snapshot with
+// the provider session identifiers saved when checkout was first created.
+// SessionURL must never contain short-lived credentials such as Waffo's JWT
+// fragment.
+type CheckoutResumeRequest struct {
+	CheckoutRequest
+	ProviderOrderID  string
+	SessionID        string
+	SessionURL       string
+	SessionExpiresAt int64
 }
 
 type CheckoutAction struct {
 	Type            string            `json:"type"`
 	URL             string            `json:"url"`
 	Fields          map[string]string `json:"fields,omitempty"`
+	ResumeMode      string            `json:"resume_mode,omitempty"`
 	ProviderOrderID string            `json:"-"`
 	SessionID       string            `json:"-"`
-	ExpiresAt       int64             `json:"-"`
+	// SessionURL is the credential-free URL persisted for a later resume.
+	SessionURL string `json:"-"`
+	ExpiresAt  int64  `json:"-"`
 }
 
 type ProviderEvent struct {
@@ -117,4 +140,8 @@ const (
 
 type CheckoutCreator interface {
 	CreateCheckout(context.Context, CheckoutRequest) (CheckoutAction, error)
+}
+
+type CheckoutResumer interface {
+	ResumeCheckout(context.Context, CheckoutResumeRequest) (CheckoutAction, error)
 }

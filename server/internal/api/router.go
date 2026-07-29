@@ -267,6 +267,7 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("POST", "/api/payments/checkout", rateLimitedIP(d, "payment-checkout", rlPaymentCheckoutMax, rlPaymentCheckoutWindow, requireAuth(d, createPaymentCheckoutHandler)))
 	mux.handle("GET", "/api/payments/orders", requireAuth(d, listPaymentOrdersForUserHandler))
 	mux.handle("GET", "/api/payments/orders/:id", requireAuth(d, getPaymentOrderHandler))
+	mux.handle("POST", "/api/payments/orders/:id/resume", rateLimitedIP(d, "payment-resume", rlPaymentCheckoutMax, rlPaymentCheckoutWindow, requireAuth(d, resumePaymentOrderHandler)))
 	mux.handle("POST", "/api/audio/transcriptions", requireAuth(d, transcribeAudioHandler))
 	// Which STT provider is active (gpt = record-then-transcribe, volcano = live
 	// streaming), so the composer picks the right mic flow.
@@ -397,6 +398,7 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("DELETE", "/api/admin/payment-methods/:id", requireAdmin(d, deletePaymentMethodAdmin))
 	mux.handle("GET", "/api/admin/payment-orders", requireAdmin(d, listPaymentOrdersAdmin))
 	mux.handle("POST", "/api/admin/payment-orders/:id/reconcile", requireAdmin(d, reconcilePaymentOrderAdmin))
+	mux.handle("DELETE", "/api/admin/payment-orders/:id", requireAdmin(d, deletePaymentOrderAdmin))
 	mux.handle("POST", "/api/admin/users/:id/group", requireAdmin(d, setUserGroupAdmin))
 	mux.handle("POST", "/api/admin/users/:id/credits", requireAdmin(d, setUserCreditsAdmin))
 	mux.handle("GET", "/api/admin/skills", requireAdmin(d, listSkillsAdmin))

@@ -458,7 +458,7 @@ func TestListPaymentOrdersForUserIsolatedPaginatedOrderedAndSafe(t *testing.T) {
 	expectedFields := map[string]bool{
 		"id": true, "status": true, "provider": true, "method_name": true, "method_type": true,
 		"target_type": true, "target_name": true, "amount_minor": true, "currency": true,
-		"billing_cycle": true, "created_at": true, "paid_at": true,
+		"billing_cycle": true, "created_at": true, "paid_at": true, "can_resume": true, "can_retry": true,
 	}
 	for index, item := range raw.Orders {
 		if len(item) != len(expectedFields) {
@@ -473,6 +473,7 @@ func TestListPaymentOrdersForUserIsolatedPaginatedOrderedAndSafe(t *testing.T) {
 	responseBody := firstRec.Body.String()
 	for _, forbidden := range []string{
 		"method_config", "channel_id", "provider_order_id", "failure_message", "failure_reason",
+		"checkout_url", "checkout_session_id",
 		"user_id", "user_email", "merchant_key", "do-not-leak", "private decline detail",
 		fx.user.Email, otherUser.Email,
 	} {
@@ -937,7 +938,8 @@ func TestPaymentURLValidation(t *testing.T) {
 func TestValidateProviderEventRequiresWaffoBuyerIdentity(t *testing.T) {
 	order := store.PaymentOrder{
 		Provider: payment.ProviderWaffo, ChannelID: "paych_waffo", UserID: "user_123",
-		AmountMinor: 1999, Currency: "USD", MethodConfig: json.RawMessage(`{}`),
+		AmountMinor: 1999, Currency: "USD", ProviderAmountMinor: 1999, ProviderCurrency: "USD",
+		MethodConfig: json.RawMessage(`{}`),
 	}
 	event := payment.ProviderEvent{
 		AmountMinor: 1999, Currency: "USD", MethodType: "card",
@@ -986,7 +988,7 @@ func TestMarkPaymentCheckoutStartedHandlesFulfilledWebhookRace(t *testing.T) {
 				t.Fatalf("fulfill raced payment order: %v", err)
 			}
 
-			err = markPaymentCheckoutStarted(context.Background(), fx.d, order.ID, tc.checkoutProviderOrderID, "", 0)
+			err = markPaymentCheckoutStarted(context.Background(), fx.d, order.ID, tc.checkoutProviderOrderID, "", 0, "")
 			if tc.wantErr == nil && err != nil {
 				t.Fatalf("fulfilled checkout race returned error: %v", err)
 			}

@@ -30,6 +30,9 @@ const (
 	PaymentOrderFailed     = "failed"
 	PaymentOrderCancelled  = "cancelled"
 	PaymentOrderExpired    = "expired"
+
+	PaymentOrderAttemptIssued = "issued"
+	PaymentOrderAttemptPaid   = "paid"
 )
 
 var (
@@ -46,6 +49,8 @@ var (
 	ErrPaymentUserUnavailable       = errors.New("payment_user_unavailable")
 	ErrPaymentUserGroupPermanent    = errors.New("payment_user_group_already_permanent")
 	ErrPaymentOrderNotMutable       = errors.New("payment_order_not_mutable")
+	ErrPaymentOrderNotDeletable     = errors.New("payment_order_not_deletable")
+	ErrPaymentOrderDeleteNeedsAck   = errors.New("payment_order_delete_requires_gateway_confirmation")
 	ErrPaymentOrderNotFulfillable   = errors.New("payment_order_not_fulfillable")
 	ErrPaymentProviderOrderConflict = errors.New("payment_provider_order_conflict")
 	ErrPaymentProviderOrderMismatch = errors.New("payment_provider_order_mismatch")
@@ -611,6 +616,7 @@ type PaymentOrder struct {
 	ProviderOrderID     string          `json:"provider_order_id"`
 	ProviderPaymentID   string          `json:"provider_payment_id"`
 	CheckoutSessionID   string          `json:"checkout_session_id"`
+	CheckoutURL         string          `json:"checkout_url"`
 	CheckoutExpiresAt   int64           `json:"checkout_expires_at"`
 	LastReconciledAt    int64           `json:"last_reconciled_at"`
 	ReconcileError      string          `json:"reconcile_error"`
@@ -642,7 +648,7 @@ type PaymentOrderFilter struct {
 	Offset      int
 }
 
-const paymentOrderCols = `id, user_id, user_email, provider, environment, channel_id, channel_name, method_id, method_name, method_type, method_config, product_type, product_id, product_name, amount_minor, paid_amount_minor, tax_amount_minor, currency, provider_amount_minor, provider_currency, conversion_rate, credits, user_group_id, billing_cycle, provider_order_id, provider_payment_id, checkout_session_id, checkout_expires_at, last_reconciled_at, reconcile_error, status, failure_code, failure_message, paid_at, fulfilled_at, created_at, updated_at`
+const paymentOrderCols = `id, user_id, user_email, provider, environment, channel_id, channel_name, method_id, method_name, method_type, method_config, product_type, product_id, product_name, amount_minor, paid_amount_minor, tax_amount_minor, currency, provider_amount_minor, provider_currency, conversion_rate, credits, user_group_id, billing_cycle, provider_order_id, provider_payment_id, checkout_session_id, checkout_url, checkout_expires_at, last_reconciled_at, reconcile_error, status, failure_code, failure_message, paid_at, fulfilled_at, created_at, updated_at`
 
 func scanPaymentOrder(s scanner) (PaymentOrder, error) {
 	var order PaymentOrder
@@ -676,6 +682,7 @@ func scanPaymentOrder(s scanner) (PaymentOrder, error) {
 		&order.ProviderOrderID,
 		&order.ProviderPaymentID,
 		&order.CheckoutSessionID,
+		&order.CheckoutURL,
 		&order.CheckoutExpiresAt,
 		&order.LastReconciledAt,
 		&order.ReconcileError,
@@ -896,10 +903,10 @@ func CreatePaymentOrder(ctx context.Context, db *sql.DB, input PaymentOrderCreat
 		   id, user_id, user_email, provider, environment, channel_id, channel_name, method_id, method_name, method_type, method_config,
 		   product_type, product_id, product_name, amount_minor, paid_amount_minor, tax_amount_minor, currency,
 		   provider_amount_minor, provider_currency, conversion_rate, credits,
-		   user_group_id, billing_cycle, provider_order_id, provider_payment_id, checkout_session_id, checkout_expires_at,
+		   user_group_id, billing_cycle, provider_order_id, provider_payment_id, checkout_session_id, checkout_url, checkout_expires_at,
 		   last_reconciled_at, reconcile_error, status, failure_code,
 		   failure_message, paid_at, fulfilled_at, created_at, updated_at
-		 ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?, '', '', '', 0, 0, '', ?, '', '', 0, 0, ?, ?)`,
+		 ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?, '', '', '', '', 0, 0, '', ?, '', '', 0, 0, ?, ?)`,
 		order.ID, order.UserID, order.UserEmail, order.Provider, order.Environment, order.ChannelID, order.ChannelName, order.MethodID, order.MethodName, order.MethodType,
 		string(order.MethodConfig),
 		order.ProductType, order.ProductID, order.ProductName, order.AmountMinor, order.Currency,
@@ -932,6 +939,127 @@ func GetPaymentOrderForUser(ctx context.Context, db *sql.DB, id, userID string) 
 		return nil, err
 	}
 	return &order, nil
+}
+
+// PaymentOrderAttempt maps one provider-facing merchant order reference to the
+// immutable Aivory purchase order. EPay retries create a new attempt because
+// the compatible protocol cannot reopen a provider checkout session reliably.
+type PaymentOrderAttempt struct {
+	MerchantOrderID string `json:"merchant_order_id"`
+	OrderID         string `json:"order_id"`
+	Provider        string `json:"provider"`
+	ChannelID       string `json:"channel_id"`
+	ProviderOrderID string `json:"provider_order_id"`
+	Status          string `json:"status"`
+	PaidAt          int64  `json:"paid_at"`
+	CreatedAt       int64  `json:"created_at"`
+	UpdatedAt       int64  `json:"updated_at"`
+}
+
+const paymentOrderAttemptCols = `merchant_order_id, order_id, provider, channel_id, provider_order_id, status, paid_at, created_at, updated_at`
+
+func scanPaymentOrderAttempt(s scanner) (PaymentOrderAttempt, error) {
+	var attempt PaymentOrderAttempt
+	err := s.Scan(
+		&attempt.MerchantOrderID,
+		&attempt.OrderID,
+		&attempt.Provider,
+		&attempt.ChannelID,
+		&attempt.ProviderOrderID,
+		&attempt.Status,
+		&attempt.PaidAt,
+		&attempt.CreatedAt,
+		&attempt.UpdatedAt,
+	)
+	return attempt, err
+}
+
+func paymentOrderAttemptByMerchantID(ctx context.Context, q paymentRowQueryer, provider, channelID, merchantOrderID string, lock bool) (PaymentOrderAttempt, error) {
+	query := `SELECT ` + paymentOrderAttemptCols + ` FROM payment_order_attempts
+		WHERE provider=? AND channel_id=? AND merchant_order_id=?`
+	if lock && usePostgres {
+		query += ` FOR UPDATE`
+	}
+	attempt, err := scanPaymentOrderAttempt(q.QueryRowContext(
+		ctx, query, normalizePaymentIdentifier(provider), strings.TrimSpace(channelID), strings.TrimSpace(merchantOrderID),
+	))
+	if errors.Is(err, sql.ErrNoRows) {
+		return attempt, ErrNotFound
+	}
+	return attempt, err
+}
+
+func paymentOrderAttemptByID(ctx context.Context, q paymentRowQueryer, merchantOrderID string) (PaymentOrderAttempt, error) {
+	attempt, err := scanPaymentOrderAttempt(q.QueryRowContext(ctx,
+		`SELECT `+paymentOrderAttemptCols+` FROM payment_order_attempts WHERE merchant_order_id=?`,
+		strings.TrimSpace(merchantOrderID),
+	))
+	if errors.Is(err, sql.ErrNoRows) {
+		return attempt, ErrNotFound
+	}
+	return attempt, err
+}
+
+// CreatePaymentOrderAttempt atomically reserves an EPay merchant order number
+// only while the parent order can still accept payment. Passing an empty
+// merchantOrderID mints a fresh 128-bit reference for a retry submission.
+func CreatePaymentOrderAttempt(ctx context.Context, db *sql.DB, orderID, merchantOrderID string) (*PaymentOrderAttempt, error) {
+	orderID = strings.TrimSpace(orderID)
+	merchantOrderID = strings.TrimSpace(merchantOrderID)
+	if orderID == "" {
+		return nil, ErrNotFound
+	}
+	generatedMerchantOrderID := merchantOrderID == ""
+	if generatedMerchantOrderID {
+		var err error
+		merchantOrderID, err = newPaymentOrderAttemptID()
+		if err != nil {
+			return nil, fmt.Errorf("generate payment attempt id: %w", err)
+		}
+	}
+	now := time.Now().Unix()
+	result, err := db.ExecContext(ctx,
+		`INSERT INTO payment_order_attempts(
+		   merchant_order_id, order_id, provider, channel_id, provider_order_id, status, paid_at, created_at, updated_at
+		 )
+		 SELECT ?, id, provider, channel_id, '', ?, 0, ?, ?
+		   FROM payment_orders
+		  WHERE id=? AND provider=? AND status IN (?, ?)`,
+		merchantOrderID, PaymentOrderAttemptIssued, now, now, orderID, paymentcore.ProviderEPay,
+		PaymentOrderPending, PaymentOrderProcessing,
+	)
+	if err != nil {
+		if !generatedMerchantOrderID {
+			if existing, getErr := paymentOrderAttemptByID(ctx, db, merchantOrderID); getErr == nil &&
+				existing.OrderID == orderID && existing.Provider == paymentcore.ProviderEPay {
+				return &existing, nil
+			}
+		}
+		return nil, err
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		order, getErr := GetPaymentOrder(ctx, db, orderID)
+		if getErr != nil {
+			return nil, getErr
+		}
+		if order.Provider != paymentcore.ProviderEPay {
+			return nil, ErrPaymentEventConflict
+		}
+		return nil, ErrPaymentOrderNotMutable
+	}
+	attempt, err := paymentOrderAttemptByID(ctx, db, merchantOrderID)
+	if err != nil {
+		return nil, err
+	}
+	return &attempt, nil
+}
+
+func GetPaymentOrderAttemptByMerchantID(ctx context.Context, db *sql.DB, provider, channelID, merchantOrderID string) (*PaymentOrderAttempt, error) {
+	attempt, err := paymentOrderAttemptByMerchantID(ctx, db, provider, channelID, merchantOrderID, false)
+	if err != nil {
+		return nil, err
+	}
+	return &attempt, nil
 }
 
 func GetPaymentOrderByProviderID(ctx context.Context, db *sql.DB, provider, channelID, providerOrderID string) (*PaymentOrder, error) {
@@ -1083,12 +1211,13 @@ func HasPendingPaymentOrdersForUser(ctx context.Context, db *sql.DB, userID stri
 }
 
 func MarkPaymentOrderProcessing(ctx context.Context, db *sql.DB, id, providerOrderID string) (*PaymentOrder, error) {
-	return MarkPaymentOrderCheckoutStarted(ctx, db, id, providerOrderID, "", 0)
+	return MarkPaymentOrderCheckoutStarted(ctx, db, id, providerOrderID, "", 0, "")
 }
 
-func MarkPaymentOrderCheckoutStarted(ctx context.Context, db *sql.DB, id, providerOrderID, sessionID string, expiresAt int64) (*PaymentOrder, error) {
+func MarkPaymentOrderCheckoutStarted(ctx context.Context, db *sql.DB, id, providerOrderID, sessionID string, expiresAt int64, checkoutURL string) (*PaymentOrder, error) {
 	providerOrderID = strings.TrimSpace(providerOrderID)
 	sessionID = strings.TrimSpace(sessionID)
+	storedCheckoutURL := strings.TrimSpace(checkoutURL)
 	if expiresAt < 0 {
 		expiresAt = 0
 	}
@@ -1096,14 +1225,17 @@ func MarkPaymentOrderCheckoutStarted(ctx context.Context, db *sql.DB, id, provid
 		`UPDATE payment_orders
 		    SET status=?, provider_order_id=CASE WHEN provider_order_id='' THEN ? ELSE provider_order_id END,
 		        checkout_session_id=CASE WHEN checkout_session_id='' THEN ? ELSE checkout_session_id END,
+		        checkout_url=CASE WHEN checkout_url='' THEN ? ELSE checkout_url END,
 		        checkout_expires_at=CASE WHEN checkout_expires_at=0 THEN ? ELSE checkout_expires_at END,
 		        reconcile_error='',
 		        updated_at=?
 		  WHERE id=? AND status IN (?, ?)
 		    AND (?='' OR provider_order_id='' OR provider_order_id=?)
-		    AND (?='' OR checkout_session_id='' OR checkout_session_id=?)`,
-		PaymentOrderProcessing, providerOrderID, sessionID, expiresAt, time.Now().Unix(), id,
-		PaymentOrderPending, PaymentOrderProcessing, providerOrderID, providerOrderID, sessionID, sessionID)
+		    AND (?='' OR checkout_session_id='' OR checkout_session_id=?)
+		    AND (?='' OR checkout_url='' OR checkout_url=?)`,
+		PaymentOrderProcessing, providerOrderID, sessionID, storedCheckoutURL, expiresAt, time.Now().Unix(), id,
+		PaymentOrderPending, PaymentOrderProcessing, providerOrderID, providerOrderID, sessionID, sessionID,
+		storedCheckoutURL, storedCheckoutURL)
 	if err != nil {
 		if isUniqueIndexErr(err, "idx_payment_orders_provider_order_unique", "payment_orders.provider_order_id") {
 			return nil, ErrPaymentProviderOrderConflict
@@ -1123,9 +1255,67 @@ func MarkPaymentOrderCheckoutStarted(ctx context.Context, db *sql.DB, id, provid
 			sessionID != "" && order.CheckoutSessionID != "" && order.CheckoutSessionID != sessionID {
 			return order, ErrPaymentProviderOrderMismatch
 		}
+		if (order.Status == PaymentOrderPending || order.Status == PaymentOrderProcessing) &&
+			storedCheckoutURL != "" && order.CheckoutURL != "" && order.CheckoutURL != storedCheckoutURL {
+			return order, ErrPaymentProviderOrderMismatch
+		}
 		return order, ErrPaymentOrderNotMutable
 	}
 	return GetPaymentOrder(ctx, db, id)
+}
+
+// DeletePaymentOrder permanently removes an order and its ON DELETE CASCADE
+// attempts/events. In-flight orders are intentionally excluded by the DELETE
+// predicate so a concurrent checkout or webhook cannot lose its local audit
+// record.
+func DeletePaymentOrder(ctx context.Context, db *sql.DB, id string, gatewayFinalAcknowledged bool) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return ErrNotFound
+	}
+	manualClosePredicate := `AND NOT (status=? AND failure_code='admin_manual_close')`
+	args := []any{
+		id, PaymentOrderFulfilled, PaymentOrderFailed, PaymentOrderExpired, PaymentOrderCancelled,
+	}
+	if gatewayFinalAcknowledged {
+		manualClosePredicate = ""
+	} else {
+		args = append(args, PaymentOrderCancelled)
+	}
+	result, err := db.ExecContext(ctx,
+		`DELETE FROM payment_orders
+		  WHERE id=? AND status IN (?, ?, ?, ?) `+manualClosePredicate,
+		args...)
+	if err != nil {
+		return err
+	}
+	if affected, _ := result.RowsAffected(); affected > 0 {
+		return nil
+	}
+	var status, failureCode string
+	err = db.QueryRowContext(ctx, `SELECT status, failure_code FROM payment_orders WHERE id=?`, id).Scan(&status, &failureCode)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if status == PaymentOrderCancelled && failureCode == "admin_manual_close" {
+		return ErrPaymentOrderDeleteNeedsAck
+	}
+	return ErrPaymentOrderNotDeletable
+}
+
+// PaymentOrderDeletePolicy mirrors DeletePaymentOrder's atomic predicate for
+// administrator UI hints. A locally closed EPay order remains recoverable until
+// the administrator explicitly confirms that the gateway can no longer charge.
+func PaymentOrderDeletePolicy(order PaymentOrder) (canDelete, requiresGatewayConfirmation bool) {
+	switch order.Status {
+	case PaymentOrderFulfilled, PaymentOrderFailed, PaymentOrderExpired, PaymentOrderCancelled:
+		return true, order.Status == PaymentOrderCancelled && order.FailureCode == "admin_manual_close"
+	default:
+		return false, false
+	}
 }
 
 func MarkPaymentOrderFailed(ctx context.Context, db *sql.DB, id, code, message string) (*PaymentOrder, error) {
@@ -1410,12 +1600,62 @@ func ListPaymentEventsForOrder(ctx context.Context, db *sql.DB, orderID string) 
 
 type PaymentFulfillmentInput struct {
 	PaymentEventInput
+	MerchantOrderID   string `json:"merchant_order_id,omitempty"`
 	ProviderOrderID   string `json:"provider_order_id"`
 	ProviderPaymentID string `json:"provider_payment_id"`
 	AmountMinor       *int64 `json:"amount_minor,omitempty"`
 	PaidAmountMinor   *int64 `json:"paid_amount_minor,omitempty"`
 	TaxAmountMinor    *int64 `json:"tax_amount_minor,omitempty"`
 	Currency          string `json:"currency,omitempty"`
+}
+
+func markPaymentOrderAttemptPaid(ctx context.Context, tx *sql.Tx, input PaymentFulfillmentInput, now int64) (*PaymentOrderAttempt, error) {
+	if input.MerchantOrderID == "" {
+		return nil, nil
+	}
+	attempt, err := paymentOrderAttemptByMerchantID(
+		ctx, tx, input.Provider, input.ChannelID, input.MerchantOrderID, true,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if attempt.OrderID != input.OrderID {
+		return nil, ErrPaymentEventConflict
+	}
+	if attempt.Status != PaymentOrderAttemptIssued && attempt.Status != PaymentOrderAttemptPaid {
+		return nil, ErrInvalidPaymentEvent
+	}
+	if input.ProviderOrderID != "" && attempt.ProviderOrderID != "" && attempt.ProviderOrderID != input.ProviderOrderID {
+		return nil, ErrPaymentProviderOrderMismatch
+	}
+	result, err := tx.ExecContext(ctx,
+		`UPDATE payment_order_attempts
+		    SET provider_order_id=CASE WHEN provider_order_id='' AND ?<>'' THEN ? ELSE provider_order_id END,
+		        status=?, paid_at=CASE WHEN paid_at=0 THEN ? ELSE paid_at END, updated_at=?
+		  WHERE merchant_order_id=? AND provider=? AND channel_id=?
+		    AND (?='' OR provider_order_id='' OR provider_order_id=?)`,
+		input.ProviderOrderID, input.ProviderOrderID, PaymentOrderAttemptPaid, now, now,
+		input.MerchantOrderID, input.Provider, input.ChannelID, input.ProviderOrderID,
+		input.ProviderOrderID,
+	)
+	if err != nil {
+		if isUniqueIndexErr(err, "idx_payment_order_attempts_provider_order_unique", "payment_order_attempts.provider_order_id") {
+			return nil, ErrPaymentProviderOrderConflict
+		}
+		return nil, err
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return nil, ErrPaymentProviderOrderMismatch
+	}
+	if attempt.ProviderOrderID == "" {
+		attempt.ProviderOrderID = input.ProviderOrderID
+	}
+	attempt.Status = PaymentOrderAttemptPaid
+	if attempt.PaidAt == 0 {
+		attempt.PaidAt = now
+	}
+	attempt.UpdatedAt = now
+	return &attempt, nil
 }
 
 type PaymentFulfillmentResult struct {
@@ -1434,6 +1674,7 @@ func FulfillPaymentOrder(ctx context.Context, db *sql.DB, input PaymentFulfillme
 		return nil, err
 	}
 	input.PaymentEventInput = eventInput
+	input.MerchantOrderID = strings.TrimSpace(input.MerchantOrderID)
 	input.ProviderOrderID = strings.TrimSpace(input.ProviderOrderID)
 	input.ProviderPaymentID = strings.TrimSpace(input.ProviderPaymentID)
 	rawCurrency := strings.TrimSpace(input.Currency)
@@ -1449,6 +1690,9 @@ func FulfillPaymentOrder(ctx context.Context, db *sql.DB, input PaymentFulfillme
 	defer func() { _ = tx.Rollback() }()
 
 	now := time.Now().Unix()
+	if _, err := markPaymentOrderAttemptPaid(ctx, tx, input, now); err != nil {
+		return nil, err
+	}
 	event := PaymentEvent{
 		ID:        genID("pe"),
 		Provider:  eventInput.Provider,
@@ -1479,6 +1723,11 @@ func FulfillPaymentOrder(ctx context.Context, db *sql.DB, input PaymentFulfillme
 		if err != nil {
 			return nil, err
 		}
+		if input.MerchantOrderID != "" {
+			if err := tx.Commit(); err != nil {
+				return nil, err
+			}
+		}
 		return &PaymentFulfillmentResult{
 			Order: order, Event: *existing, Applied: false, DuplicateEvent: true,
 		}, nil
@@ -1491,10 +1740,10 @@ func FulfillPaymentOrder(ctx context.Context, db *sql.DB, input PaymentFulfillme
 	if order.Provider != event.Provider || order.ChannelID != event.ChannelID {
 		return nil, ErrPaymentEventConflict
 	}
-	if order.ProviderOrderID != "" && input.ProviderOrderID != "" && order.ProviderOrderID != input.ProviderOrderID {
+	if input.MerchantOrderID == "" && order.ProviderOrderID != "" && input.ProviderOrderID != "" && order.ProviderOrderID != input.ProviderOrderID {
 		return nil, ErrPaymentProviderOrderMismatch
 	}
-	if order.ProviderPaymentID != "" && input.ProviderPaymentID != "" && order.ProviderPaymentID != input.ProviderPaymentID {
+	if input.MerchantOrderID == "" && order.ProviderPaymentID != "" && input.ProviderPaymentID != "" && order.ProviderPaymentID != input.ProviderPaymentID {
 		return nil, ErrPaymentProviderOrderMismatch
 	}
 	if input.AmountMinor != nil && order.AmountMinor != *input.AmountMinor {
@@ -1782,6 +2031,14 @@ func newPaymentOrderID() (string, error) {
 		return "", err
 	}
 	return "po_" + base64.RawURLEncoding.EncodeToString(entropy[:]), nil
+}
+
+func newPaymentOrderAttemptID() (string, error) {
+	var entropy [16]byte
+	if _, err := rand.Read(entropy[:]); err != nil {
+		return "", err
+	}
+	return "pa_" + base64.RawURLEncoding.EncodeToString(entropy[:]), nil
 }
 
 func normalizePaymentIdentifier(value string) string {

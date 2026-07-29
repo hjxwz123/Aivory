@@ -153,7 +153,7 @@ func TestPaymentOrdersAdminReturnsReconciliationMetadata(t *testing.T) {
 	)
 	expiresAt := time.Now().Add(time.Hour).Unix()
 	if _, err := store.MarkPaymentOrderCheckoutStarted(
-		context.Background(), fx.db, order.ID, providerOrderID, sessionID, expiresAt,
+		context.Background(), fx.db, order.ID, providerOrderID, sessionID, expiresAt, "",
 	); err != nil {
 		t.Fatalf("persist checkout metadata: %v", err)
 	}

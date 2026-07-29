@@ -1262,10 +1262,16 @@
       "reconcile": "Reconcile",
       "close": "Close",
       "manualClose": "Manual close",
+      "delete": "Permanently delete order",
+      "deleteUnavailable": "Close the order or confirm its payment result before permanently deleting it",
+      "deletePendingCallback": "This manually closed EPay order requires gateway confirmation before deletion",
+      "deleteGatewayConfirmationRequired": "Confirm that the EPay order is unpaid or closed at the gateway before permanently deleting it",
       "reconciled": "Payment order reconciled.",
       "closed": "Payment order closed.",
+      "deleted": "Payment order permanently deleted.",
       "reconcileFailed": "Could not reconcile the payment order.",
-      "closeFailed": "Could not close the payment order."
+      "closeFailed": "Could not close the payment order.",
+      "deleteFailed": "Could not permanently delete the payment order."
     },
     "closeDialog": {
       "title": "Close payment order?",
@@ -1277,6 +1283,14 @@
       "reasonHint": "Optional; up to 500 characters. When provided, it is saved in the audit record.",
       "acknowledge": "I verified that no payment completed and understand that closing the order cannot be undone.",
       "epayAcknowledge": "I verified that this EPay order has not completed and understand that this closes only the local order; a later verified payment will still complete it and grant its benefits."
+    },
+    "deleteDialog": {
+      "title": "Permanently delete payment order?",
+      "description": "Review this terminal order before permanently deleting its local records.",
+      "warning": "This removes the order from the buyer’s payment history and deletes its related local payment events. It cannot be undone. It does not refund or cancel a provider payment, revoke granted benefits, or delete records held by the payment provider.",
+      "gatewayWarning": "A manual EPay close only changed Aivory’s local state. A delayed successful payment can still arrive; after deletion, Aivory can no longer recognize it or grant the purchased benefits.",
+      "gatewayAcknowledge": "I have confirmed at the EPay gateway that this order is unpaid or closed, and I accept that any later successful callback cannot be fulfilled.",
+      "confirm": "Delete permanently"
     },
     "filters": {
       "search": "Search orders",
