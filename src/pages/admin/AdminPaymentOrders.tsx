@@ -363,7 +363,7 @@ export default function AdminPaymentOrders() {
 
       <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">{copyAnnouncement}</p>
 
-      <form className="mt-5 grid min-w-0 grid-cols-1 gap-2 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] p-3 sm:grid-cols-2 lg:grid-cols-[minmax(14rem,1fr)_minmax(9rem,10rem)_minmax(9rem,10rem)_auto]" onSubmit={applySearch}>
+      <form className="mt-5 grid min-w-0 grid-cols-1 gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-3 sm:grid-cols-2 lg:grid-cols-[minmax(14rem,1fr)_minmax(9rem,10rem)_minmax(9rem,10rem)_auto]" onSubmit={applySearch}>
         <Input
           wrapperClassName="min-w-0 rounded-[8px] max-sm:h-11 sm:col-span-2 lg:col-span-1"
           leadingIcon={<Search size={14} aria-hidden />}
@@ -411,19 +411,19 @@ export default function AdminPaymentOrders() {
         {loading && orders.length === 0 ? (
           <PanelFallback />
         ) : loadError ? (
-          <div className="flex flex-col items-start gap-3 rounded-[8px] border border-[var(--color-danger)]/25 bg-[var(--color-danger-soft)] px-4 py-3 text-[13px] text-[var(--color-danger)] sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-col items-start gap-3 rounded-xl border border-[var(--color-danger)]/25 bg-[var(--color-danger-soft)] px-4 py-3 text-[13px] text-[var(--color-danger)] sm:flex-row sm:items-center sm:justify-between">
             <span>{loadError}</span>
             <Button className="rounded-[8px] max-sm:h-11" variant="secondary" size="sm" leadingIcon={<RefreshCw size={13} aria-hidden />} onClick={() => setReloadKey((value) => value + 1)}>{t('admin:paymentOrders.retry')}</Button>
           </div>
         ) : orders.length === 0 ? (
-          <div className="rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-8 text-center">
+          <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-8 text-center">
             <p className="text-sm font-medium text-[var(--color-fg)]">{filtersActive ? t('admin:paymentOrders.emptyFilteredTitle') : t('admin:paymentOrders.emptyTitle')}</p>
             <p className="mx-auto mt-1 max-w-lg text-[13px] text-[var(--color-fg-muted)]">{filtersActive ? t('admin:paymentOrders.emptyFiltered') : t('admin:paymentOrders.empty')}</p>
             {filtersActive ? <Button className="mt-4 rounded-[8px] max-sm:h-11" variant="secondary" size="sm" onClick={clearFilters}>{t('admin:paymentOrders.filters.clear')}</Button> : null}
           </div>
         ) : (
           <>
-            <div className="hidden max-w-full overflow-x-auto rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] xl:block">
+            <div className="hidden max-w-full overflow-x-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] xl:block">
               <table className="w-full min-w-[72rem] table-fixed border-collapse text-left text-[12px]">
                 <colgroup>
                   <col className="w-[12%]" />
@@ -497,7 +497,7 @@ export default function AdminPaymentOrders() {
               </table>
             </div>
 
-            <ul className="divide-y divide-[var(--color-divider)] overflow-hidden rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] xl:hidden">
+            <ul className="divide-y divide-[var(--color-divider)] overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] xl:hidden">
               {orders.map((order) => {
                 return (
                   <li key={order.id} className="px-3 py-3">

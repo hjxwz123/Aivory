@@ -18,7 +18,6 @@ import {
 } from 'lucide-react'
 import { useAuth } from '@/store/auth'
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet'
-import { RouteFade } from '@/components/ui/route-fade'
 import { PanelFallback } from '@/components/ui/panel-fallback'
 import { UserMenu } from '@/components/sidebar/sidebar'
 import {
@@ -65,7 +64,7 @@ export default function AdminLayout() {
   const currentGroup = adminNavGroupForPath(path)
   const filesWorkspace = underAdminPath(path, '/admin/files')
 
-  function NavItems() {
+  function renderNavItems() {
     const overviewActive = adminNavItemActive(path, ADMIN_OVERVIEW)
     return (
       <div className="flex flex-col gap-0.5">
@@ -113,7 +112,7 @@ export default function AdminLayout() {
     )
   }
 
-  function GroupTabs() {
+  function renderGroupTabs() {
     if (!currentGroup) return null
 
     const groupLabel = t(currentGroup.labelKey, { defaultValue: currentGroup.defaultLabel })
@@ -162,7 +161,7 @@ export default function AdminLayout() {
         </button>
         <h2 className="px-5 pt-1 font-serif text-[15px] text-[var(--color-fg)]">{t('admin:title')}</h2>
         <nav className="mt-4 min-h-0 flex-1 overflow-y-auto px-3 pb-4">
-          <NavItems />
+          {renderNavItems()}
         </nav>
       </aside>
 
@@ -195,7 +194,7 @@ export default function AdminLayout() {
                 </button>
                 <h2 className="px-5 pt-1 font-serif text-[15px] text-[var(--color-fg)]">{t('admin:title')}</h2>
                 <nav className="mt-4 min-h-0 flex-1 overflow-y-auto px-3 pb-4">
-                  <NavItems />
+                  {renderNavItems()}
                 </nav>
               </div>
             </SheetContent>
@@ -211,12 +210,12 @@ export default function AdminLayout() {
               : 'mx-auto w-full max-w-[84rem] px-5 py-8 sm:px-8 sm:py-12 lg:px-12',
           )}
         >
-          <GroupTabs />
-          <RouteFade dep={path} className={filesWorkspace ? 'flex min-h-0 flex-1 flex-col' : undefined}>
-            <Suspense key={path} fallback={<PanelFallback />}>
+          {renderGroupTabs()}
+          <div className={filesWorkspace ? 'flex min-h-0 flex-1 flex-col' : undefined}>
+            <Suspense fallback={<PanelFallback />}>
               <Outlet />
             </Suspense>
-          </RouteFade>
+          </div>
         </div>
       </main>
     </div>

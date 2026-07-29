@@ -459,6 +459,32 @@ func TestBuiltinToolHistoryDropsDisallowedCallsAndRaw(t *testing.T) {
 	}
 }
 
+func TestRetiredKnowledgeSearchHistoryIsRemovedInOfficialMode(t *testing.T) {
+	history := []UnifiedMessage{{
+		Role: "assistant",
+		Blocks: []UnifiedBlock{
+			{Kind: "tool_call", ToolName: "search_knowledge_base", ToolID: "retired-search"},
+			{Kind: "tool_output", ToolID: "retired-search", Text: "legacy document result"},
+			{Kind: "tool_call", ToolName: "hosted_search", ToolID: "official-search"},
+			{Kind: "text", Text: "ordinary answer"},
+		},
+		Raw: json.RawMessage(`[{
+			"type":"function_call","name":"search_knowledge_base"
+		}]`),
+	}}
+	filtered := stripRetiredKnowledgeSearchToolBlocks(history)
+	encoded, _ := json.Marshal(filtered)
+	if strings.Contains(string(encoded), "search_knowledge_base") || strings.Contains(string(encoded), "legacy document result") {
+		t.Fatalf("retired document-search history survived: %s", encoded)
+	}
+	if !strings.Contains(string(encoded), "hosted_search") || !strings.Contains(string(encoded), "ordinary answer") {
+		t.Fatalf("unrelated official history was removed: %s", encoded)
+	}
+	if len(filtered[0].Raw) != 0 {
+		t.Fatalf("affected provider Raw survived: %s", filtered[0].Raw)
+	}
+}
+
 func TestDefaultAllPolicyStillDropsHistoryForUnregisteredTool(t *testing.T) {
 	orchestrator, provider, model, conversation, _, db := setupToolRouteTest(t)
 	// builtin_tools remains NULL (default all). "retired_tool" is deliberately

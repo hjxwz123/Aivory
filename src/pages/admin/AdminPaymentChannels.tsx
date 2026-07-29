@@ -453,20 +453,20 @@ export default function AdminPaymentChannels() {
         {loading ? (
           <PanelFallback />
         ) : loadError ? (
-          <div className="flex flex-col items-start gap-3 rounded-[8px] border border-[var(--color-danger)]/25 bg-[var(--color-danger-soft)] px-4 py-3 text-[13px] text-[var(--color-danger)] sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-col items-start gap-3 rounded-xl border border-[var(--color-danger)]/25 bg-[var(--color-danger-soft)] px-4 py-3 text-[13px] text-[var(--color-danger)] sm:flex-row sm:items-center sm:justify-between">
             <span>{loadError}</span>
             <Button className="rounded-[8px]" variant="secondary" size="sm" leadingIcon={<RefreshCw size={13} aria-hidden />} onClick={() => void load()}>
               {t('admin:paymentChannels.retry')}
             </Button>
           </div>
         ) : rows.length === 0 ? (
-          <div className="rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-8 text-center">
+          <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-8 text-center">
             <p className="text-sm font-medium text-[var(--color-fg)]">{t('admin:paymentChannels.emptyTitle')}</p>
             <p className="mx-auto mt-1 max-w-lg text-[13px] text-[var(--color-fg-muted)]">{t('admin:paymentChannels.empty')}</p>
             <Button className="mt-4 rounded-[8px]" size="sm" onClick={openNew}>{t('admin:paymentChannels.new')}</Button>
           </div>
         ) : (
-          <ul className="divide-y divide-[var(--color-divider)] overflow-hidden rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)]">
+          <ul className="divide-y divide-[var(--color-divider)] overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]">
             {rows.map((row) => (
               <li key={row.id} className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-3 py-3 sm:px-4">
                 <div className="min-w-0">

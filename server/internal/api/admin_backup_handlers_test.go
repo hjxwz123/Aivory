@@ -636,6 +636,53 @@ func TestNormalizeLegacyUserGroupPriceArchiveRows(t *testing.T) {
 	}
 }
 
+func TestNormalizeConversationArchiveRemovesRetiredRAGMode(t *testing.T) {
+	input := strings.NewReader(strings.Join([]string{
+		`{"id":"legacy","rag_mode":"tool"}`,
+		`{"id":"inject","rag_mode":"inject"}`,
+		`{"id":"unknown","rag_mode":"future-mode"}`,
+	}, "\n"))
+	normalized, err := normalizeConversationRAGModeArchiveRows(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dec := json.NewDecoder(normalized)
+	for _, want := range []struct{ id, mode string }{
+		{id: "legacy", mode: "auto"},
+		{id: "inject", mode: "inject"},
+		{id: "unknown", mode: "auto"},
+	} {
+		var row struct {
+			ID      string `json:"id"`
+			RAGMode string `json:"rag_mode"`
+		}
+		if err := dec.Decode(&row); err != nil {
+			t.Fatal(err)
+		}
+		if row.ID != want.id || row.RAGMode != want.mode {
+			t.Fatalf("normalized conversation=%+v want=%+v", row, want)
+		}
+	}
+}
+
+func TestNormalizeSettingsArchiveRemovesRetiredBuiltinTool(t *testing.T) {
+	input := strings.NewReader(`{"key":"disabled_tools","value":"[\"search_knowledge_base\",\"python_execute\"]","updated_at":0}`)
+	normalized, err := normalizeSettingsArchiveRows(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var row struct {
+		Key   string `json:"key"`
+		Value string `json:"value"`
+	}
+	if err := json.NewDecoder(normalized).Decode(&row); err != nil {
+		t.Fatal(err)
+	}
+	if row.Key != "disabled_tools" || row.Value != `["python_execute"]` {
+		t.Fatalf("normalized settings row=%+v", row)
+	}
+}
+
 func TestRestoreLegacyPricingSettingsPersistsCurrencyAndCreatesPackage(t *testing.T) {
 	db := openMigrated(t, filepath.Join(t.TempDir(), "legacy-pricing-restore.db"))
 	defer db.Close()

@@ -12,6 +12,12 @@ import (
 	"testing"
 )
 
+func TestHostedFileSearchUsesItsOwnToolName(t *testing.T) {
+	if got := hostedToolName("file_search_call"); got != "file_search" {
+		t.Fatalf("hostedToolName(file_search_call) = %q, want file_search", got)
+	}
+}
+
 func testPNGBytes(payloadSize int) []byte {
 	data := append([]byte(nil), []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}...)
 	return append(data, bytes.Repeat([]byte{0}, payloadSize)...)

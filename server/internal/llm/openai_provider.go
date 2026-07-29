@@ -418,7 +418,7 @@ func hostedToolName(itemType string) string {
 	case "image_generation_call":
 		return "image_generate"
 	case "file_search_call":
-		return "search_knowledge_base"
+		return "file_search"
 	}
 	return strings.TrimSuffix(itemType, "_call")
 }

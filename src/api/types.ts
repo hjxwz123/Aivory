@@ -10,6 +10,15 @@ export interface ApiError {
   retry_after?: number
 }
 
+/** Live timed-credit balance for the user's current refresh window. */
+export interface ApiTimedCredits {
+  remaining: number
+  allowance: number
+  period_seconds: number
+  /** Unix seconds at which the current timed-credit window resets. */
+  resets_at: number
+}
+
 export interface ApiUser {
   id: string
   email: string
@@ -37,6 +46,9 @@ export interface ApiUser {
   last_seen_at?: number
   /** Non-expiring credit balance (§ credits) — admin-editable on the users page. */
   credits_permanent?: number
+  /** Live timed-credit balance. Populated by the admin user-detail endpoint,
+   *  not by the paginated users list. */
+  credits_timed?: ApiTimedCredits
   /** Admin-defined order for the users page. */
   sort_order?: number
   /** Capability flags from the user's group (e.g. "research"). Populated on the
@@ -687,7 +699,7 @@ export interface ApiDocument {
 /** Credit balance for the subscription page (§ credits). */
 export interface ApiCredits {
   enabled: boolean
-  timed?: { remaining: number; allowance: number; period_seconds: number; resets_at: number }
+  timed?: ApiTimedCredits
   permanent: number
   settlement_currency: string
 }
@@ -717,7 +729,7 @@ export interface ApiConversation {
   /** §fast-mode: conversation runs in fast mode (model hidden). */
   fast?: boolean
   kb_ids: string[]
-  rag_mode: 'auto' | 'inject' | 'tool'
+  rag_mode: 'auto' | 'inject'
   summary_blocks: unknown[]
   active_leaf_id: string
   provider_state: Record<string, unknown>

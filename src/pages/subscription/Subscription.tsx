@@ -1436,7 +1436,7 @@ function CardsSkeleton({ t }: { t: TFn }) {
       {Array.from({ length: 3 }).map((_, index) => (
         <div
           key={index}
-          className="animate-pulse rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] p-5"
+          className="animate-pulse rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5"
         >
           <div className="h-5 w-24 rounded bg-[var(--color-bg-muted)]" />
           <div className="mt-3 h-3.5 w-full rounded bg-[var(--color-bg-muted)]" />
