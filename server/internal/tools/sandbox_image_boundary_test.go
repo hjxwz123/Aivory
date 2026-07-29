@@ -213,7 +213,7 @@ func TestPythonExecuteFailsClosedWhenPersistentInputsCannotBeReset(t *testing.T)
 }
 
 func TestFetchImageIsNotAdvertisedAndAlwaysFailsClosed(t *testing.T) {
-	registry := NewRegistry(nil, nil, config.Config{}, log.New(io.Discard, "", 0))
+	registry := NewRegistry(nil, config.Config{}, log.New(io.Discard, "", 0))
 	for _, def := range registry.List("") {
 		if def.Name == "fetch_image" {
 			t.Fatal("fetch_image must not be advertised to models")

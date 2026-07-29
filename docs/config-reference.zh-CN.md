@@ -231,7 +231,6 @@ web_search 结果条数与超时、Python 安全模式、SSRF / 网络安全护�
 | `AIVORY_TOOLS_DAILY_IMAGE_LIMIT_RESET_WINDOW` | `duration` | `24*time.Hour` | `tools/builtins.go:45` | 计算每用户图像生成配额账本起始边界时对 Now() 取整的时间窗口。 |
 | `AIVORY_TOOLS_IMAGE_IMAGE_INPUT_IMAGE_CAP` | `int` | `0` | `tools/builtins.go:56` | 图生图参考图片数量的全局覆盖值。`0` 表示按模型选择上限（DALL-E 1 张、OpenAI 16 张、Gemini 3 系列 14 张、其他 Gemini 3 张）。 |
 | `AIVORY_TOOLS_FETCHREMOTEIMAGE_DOWNLOAD_CAP` | `int64` | `32<<20` | `tools/builtins.go:48` | 通过 SSRF 安全客户端下载图像 API 响应中返回的图像 URL 的字节上限。 |
-| `AIVORY_TOOLS_IN_TOP_K_2` | `int` | `5` | `tools/builtins.go:49` | 调用未指定 top_k 时 search_knowledge_base 工具的默认片段数量。 |
 | `AIVORY_TOOLS_CONFIDENCE` | `float` | `0.95` | `tools/builtins.go:50` | save_memory 工具创建的每条记忆记录上存储的置信度分数。 |
 
 

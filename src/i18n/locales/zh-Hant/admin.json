@@ -184,7 +184,6 @@
         "web_fetch": "網頁讀取",
         "python_execute": "Python 直譯器",
         "image_generate": "圖片生成",
-        "search_knowledge_base": "知識庫檢索",
         "use_skill": "技能呼叫",
         "save_memory": "儲存記憶"
       },
@@ -193,7 +192,6 @@
         "web_fetch": "讀取指定網頁的主要內容。",
         "python_execute": "執行 Python，完成分析、計算及檔案生成。",
         "image_generate": "使用已設定的圖片模型生成或編輯圖片。",
-        "search_knowledge_base": "檢索使用者目前選取的知識庫。",
         "use_skill": "按需載入已綁定技能的完整說明。",
         "save_memory": "將長期有效的使用者資訊儲存到記憶。"
       }
@@ -382,7 +380,8 @@
       "status": "狀態",
       "expiry": "到期",
       "permanent": "永久",
-      "allowance": "點數額度",
+      "allowance": "限時積分（剩餘 / 額度）",
+      "loadFailed": "無法載入最新使用者資訊。",
       "twofa": "兩步驗證",
       "enabled": "已啟用",
       "disabled": "未啟用",

@@ -25,6 +25,7 @@ import {
 import type { Attachment } from '@/types/chat'
 import type { ApiConversation } from '@/api/types'
 import type { ToolMode } from '@/lib/tool-mode'
+import { resolveNewConversationFastMode } from '@/lib/chat-defaults'
 
 gsap.registerPlugin(useGSAP)
 
@@ -85,11 +86,14 @@ export default function ChatHome() {
   // so a new chat honours the picker instead of always using the default model.
   const [pickedModelId, setPickedModelId] = useState<string | null>(null)
   const modelId = pickedModelId ?? (drawDefault || defaultModelId)
-  // §fast-mode: new chats default to 快速 when a fast model is configured. Draw
-  // mode (image models) is always 进阶.
+  // A user's explicit default model starts new chats in advanced mode. Accounts
+  // without one start in 快速 when the deployment provides a fast model. Draw
+  // mode (image models) is always advanced.
   const fastAvailable = useModels((s) => s.fastAvailable)
   const [pickedFast, setPickedFast] = useState<boolean | null>(null)
-  const fast = !drawMode && (pickedFast ?? fastAvailable)
+  const fast =
+    !drawMode &&
+    (pickedFast ?? resolveNewConversationFastMode(user?.settings, fastAvailable, drawMode))
 
   // When the user attaches a file BEFORE sending, we must create the
   // conversation up front so the upload is scoped + RAG-ingested (§4.11.2).
@@ -181,6 +185,7 @@ export default function ChatHome() {
           const created = await conversationsApi.create({
             model_id: modelId || undefined,
             workspace_id: workspaceId,
+            fast,
           })
           // A suggestion card can bypass the composer's upload gate while this
           // create is in flight. A mode/workspace switch also invalidates this
@@ -363,7 +368,7 @@ export default function ChatHome() {
     // the cache, and swap the id in the URL. So the user lands on the thread the
     // moment they hit send — never staring at the home screen during the create
     // round-trip (and never re-clicking because "nothing happened").
-    const tempId = beginOptimisticConversation(text, modelId)
+    const tempId = beginOptimisticConversation(text, modelId, opts.fast === true)
     clearComposerDraft(draftScope)
     navigate(`/chat/${tempId}`)
     void sendMessage({

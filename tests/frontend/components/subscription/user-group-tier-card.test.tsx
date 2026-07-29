@@ -59,7 +59,7 @@ describe('UserGroupTierCard', () => {
     expect(html).toContain('Priority models')
     expect(html).not.toContain('research')
     expect(html).toContain('href="/register"')
-    expect(html).toContain('rounded-[10px]')
+    expect(html).toContain('rounded-xl')
   })
 
   it('does not expose a registration link when the selected cycle is unavailable', () => {

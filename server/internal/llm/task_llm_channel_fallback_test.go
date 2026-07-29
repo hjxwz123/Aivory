@@ -79,7 +79,43 @@ func writeOpenAIChatSSEError(w http.ResponseWriter, message string) {
 	_, _ = io.WriteString(w, `data: {"error":{"message":"`+message+`"}}`+"\n\n")
 }
 
-func TestTaskLLMFallbackSuccessLogsOnlySuccessfulFallbackUsage(t *testing.T) {
+type taskFallbackUsageRow struct {
+	Status                    string
+	Error                     string
+	ChannelID                 string
+	Fallback                  int
+	InputTokens, OutputTokens int
+	Cost, Credits             float64
+	RequestBody               string
+}
+
+func taskFallbackUsageRows(t *testing.T, db *sql.DB, modelID string) []taskFallbackUsageRow {
+	t.Helper()
+	rows, err := db.Query(`
+		SELECT status, error, channel_id, fallback, input_tokens, output_tokens, cost, credits, request_body
+		FROM usage_logs
+		WHERE user_id=? AND model_id=? AND purpose=?
+		ORDER BY id`, taskFallbackTestUserID, modelID, string(TaskTitle))
+	if err != nil {
+		t.Fatalf("query task usage: %v", err)
+	}
+	defer rows.Close()
+	out := []taskFallbackUsageRow{}
+	for rows.Next() {
+		var row taskFallbackUsageRow
+		if err := rows.Scan(&row.Status, &row.Error, &row.ChannelID, &row.Fallback,
+			&row.InputTokens, &row.OutputTokens, &row.Cost, &row.Credits, &row.RequestBody); err != nil {
+			t.Fatalf("scan task usage: %v", err)
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate task usage: %v", err)
+	}
+	return out
+}
+
+func TestTaskLLMFallbackSuccessLogsPrimaryErrorAndFallbackUsage(t *testing.T) {
 	var primaryHits atomic.Int32
 	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		primaryHits.Add(1)
@@ -100,7 +136,7 @@ func TestTaskLLMFallbackSuccessLogsOnlySuccessfulFallbackUsage(t *testing.T) {
 	t.Cleanup(fallback.Close)
 
 	db := openTaskChannelFallbackTestDB(t)
-	model, _, fallbackChannel := createTaskChannelFallbackModel(t, db, primary.URL, fallback.URL)
+	model, primaryChannel, fallbackChannel := createTaskChannelFallbackModel(t, db, primary.URL, fallback.URL)
 	answer, err := newTaskChannelFallbackRunner(db).Run(context.Background(), TaskTitle, "hello", RunOpts{
 		ModelID: model.ID,
 		UserID:  taskFallbackTestUserID,
@@ -115,44 +151,37 @@ func TestTaskLLMFallbackSuccessLogsOnlySuccessfulFallbackUsage(t *testing.T) {
 		t.Fatalf("request counts primary/fallback = %d/%d, want 1/1", primaryHits.Load(), fallbackHits.Load())
 	}
 
-	var (
-		status                    string
-		errorText                 string
-		channelID                 string
-		fallbackUsed              int
-		inputTokens, outputTokens int
-		matchingUsageRowCount     int
-	)
-	if err := db.QueryRow(`
-		SELECT status, error, channel_id, fallback, input_tokens, output_tokens
-		FROM usage_logs
-		WHERE user_id=? AND model_id=? AND purpose=?`,
-		taskFallbackTestUserID, model.ID, string(TaskTitle),
-	).Scan(&status, &errorText, &channelID, &fallbackUsed, &inputTokens, &outputTokens); err != nil {
-		t.Fatalf("read task usage: %v", err)
+	usageRows := taskFallbackUsageRows(t, db, model.ID)
+	if len(usageRows) != 2 {
+		t.Fatalf("matching usage rows = %d, want primary error + fallback success", len(usageRows))
 	}
-	if err := db.QueryRow(`
-		SELECT COUNT(*) FROM usage_logs
-		WHERE user_id=? AND model_id=? AND purpose=?`,
-		taskFallbackTestUserID, model.ID, string(TaskTitle),
-	).Scan(&matchingUsageRowCount); err != nil {
-		t.Fatalf("count task usage: %v", err)
+	primaryFailure := usageRows[0]
+	if primaryFailure.Status != "error" || !strings.Contains(primaryFailure.Error, "primary SSE failure") {
+		t.Fatalf("primary status/error = %q/%q", primaryFailure.Status, primaryFailure.Error)
 	}
-	if matchingUsageRowCount != 1 {
-		t.Fatalf("matching usage rows = %d, want exactly 1", matchingUsageRowCount)
+	if primaryFailure.ChannelID != primaryChannel.ID || primaryFailure.Fallback != 0 {
+		t.Fatalf("primary channel/fallback = %q/%d, want %q/0", primaryFailure.ChannelID, primaryFailure.Fallback, primaryChannel.ID)
 	}
-	if status != "ok" || errorText != "" {
-		t.Fatalf("usage status/error = %q/%q, want ok with no error", status, errorText)
+	if primaryFailure.InputTokens != 0 || primaryFailure.OutputTokens != 0 || primaryFailure.Cost != 0 || primaryFailure.Credits != 0 {
+		t.Fatalf("primary failure must be free: %+v", primaryFailure)
 	}
-	if channelID != fallbackChannel.ID || fallbackUsed != 1 {
-		t.Fatalf("usage channel/fallback = %q/%d, want %q/1", channelID, fallbackUsed, fallbackChannel.ID)
+	if primaryFailure.RequestBody == "" {
+		t.Fatal("primary error row must retain its sanitized request body")
 	}
-	if inputTokens != 7 || outputTokens != 3 {
-		t.Fatalf("usage tokens = %d/%d, want 7/3", inputTokens, outputTokens)
+
+	fallbackSuccess := usageRows[1]
+	if fallbackSuccess.Status != "ok" || fallbackSuccess.Error != "" {
+		t.Fatalf("fallback status/error = %q/%q, want ok with no error", fallbackSuccess.Status, fallbackSuccess.Error)
+	}
+	if fallbackSuccess.ChannelID != fallbackChannel.ID || fallbackSuccess.Fallback != 1 {
+		t.Fatalf("fallback channel/fallback = %q/%d, want %q/1", fallbackSuccess.ChannelID, fallbackSuccess.Fallback, fallbackChannel.ID)
+	}
+	if fallbackSuccess.InputTokens != 7 || fallbackSuccess.OutputTokens != 3 {
+		t.Fatalf("fallback usage tokens = %d/%d, want 7/3", fallbackSuccess.InputTokens, fallbackSuccess.OutputTokens)
 	}
 }
 
-func TestTaskLLMFinalFailureLogsFallbackChannelUsage(t *testing.T) {
+func TestTaskLLMFinalFailureLogsBothChannelErrors(t *testing.T) {
 	var primaryHits atomic.Int32
 	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		primaryHits.Add(1)
@@ -168,7 +197,7 @@ func TestTaskLLMFinalFailureLogsFallbackChannelUsage(t *testing.T) {
 	t.Cleanup(fallback.Close)
 
 	db := openTaskChannelFallbackTestDB(t)
-	model, _, fallbackChannel := createTaskChannelFallbackModel(t, db, primary.URL, fallback.URL)
+	model, primaryChannel, fallbackChannel := createTaskChannelFallbackModel(t, db, primary.URL, fallback.URL)
 	_, runErr := newTaskChannelFallbackRunner(db).Run(context.Background(), TaskTitle, "hello", RunOpts{
 		ModelID: model.ID,
 		UserID:  taskFallbackTestUserID,
@@ -183,36 +212,22 @@ func TestTaskLLMFinalFailureLogsFallbackChannelUsage(t *testing.T) {
 		t.Fatalf("request counts primary/fallback = %d/%d, want 1/1", primaryHits.Load(), fallbackHits.Load())
 	}
 
-	var (
-		status       string
-		errorText    string
-		channelID    string
-		fallbackUsed int
-		rowCount     int
-	)
-	if err := db.QueryRow(`
-		SELECT status, error, channel_id, fallback
-		FROM usage_logs
-		WHERE user_id=? AND model_id=? AND purpose=?`,
-		taskFallbackTestUserID, model.ID, string(TaskTitle),
-	).Scan(&status, &errorText, &channelID, &fallbackUsed); err != nil {
-		t.Fatalf("read failed task usage: %v", err)
+	usageRows := taskFallbackUsageRows(t, db, model.ID)
+	if len(usageRows) != 2 {
+		t.Fatalf("matching usage rows = %d, want both channel failures", len(usageRows))
 	}
-	if err := db.QueryRow(`
-		SELECT COUNT(*) FROM usage_logs
-		WHERE user_id=? AND model_id=? AND purpose=?`,
-		taskFallbackTestUserID, model.ID, string(TaskTitle),
-	).Scan(&rowCount); err != nil {
-		t.Fatalf("count failed task usage: %v", err)
+	if usageRows[0].Status != "error" || !strings.Contains(usageRows[0].Error, "primary SSE failure") ||
+		usageRows[0].ChannelID != primaryChannel.ID || usageRows[0].Fallback != 0 {
+		t.Fatalf("primary failure row = %+v", usageRows[0])
 	}
-	if rowCount != 1 {
-		t.Fatalf("matching usage rows = %d, want exactly 1", rowCount)
+	if usageRows[1].Status != "error" || !strings.Contains(usageRows[1].Error, "fallback SSE failure") ||
+		usageRows[1].ChannelID != fallbackChannel.ID || usageRows[1].Fallback != 1 {
+		t.Fatalf("fallback failure row = %+v", usageRows[1])
 	}
-	if status != "error" || !strings.Contains(errorText, "fallback SSE failure") {
-		t.Fatalf("usage status/error = %q/%q, want final fallback error", status, errorText)
-	}
-	if channelID != fallbackChannel.ID || fallbackUsed != 1 {
-		t.Fatalf("usage channel/fallback = %q/%d, want %q/1", channelID, fallbackUsed, fallbackChannel.ID)
+	for _, row := range usageRows {
+		if row.InputTokens != 0 || row.OutputTokens != 0 || row.Cost != 0 || row.Credits != 0 {
+			t.Fatalf("failed attempts must be free: %+v", row)
+		}
 	}
 }
 

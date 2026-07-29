@@ -229,7 +229,6 @@ web_search 结果条数与超时、Python 安全模式、SSRF / 网络安全护�
 | `AIVORY_TOOLS_DAILY_IMAGE_LIMIT_RESET_WINDOW` | `duration` | `24*time.Hour` | `tools/builtins.go:45` | Window Now() is truncated to for the day-start boundary of the per-user image-generation quota ledger. |
 | `AIVORY_TOOLS_IMAGE_IMAGE_INPUT_IMAGE_CAP` | `int` | `0` | `tools/builtins.go:56` | Global override for reference images loaded by image-to-image calls. `0` selects the model-specific limit (DALL-E 1, OpenAI 16, Gemini 3 models 14, other Gemini models 3). |
 | `AIVORY_TOOLS_FETCHREMOTEIMAGE_DOWNLOAD_CAP` | `int64` | `32<<20` | `tools/builtins.go:48` | Byte cap on downloading an image URL returned in an image-API response via the SSRF-safe client. |
-| `AIVORY_TOOLS_IN_TOP_K_2` | `int` | `5` | `tools/builtins.go:49` | Default snippet count for the search_knowledge_base tool when the call omits top_k. |
 | `AIVORY_TOOLS_CONFIDENCE` | `float` | `0.95` | `tools/builtins.go:50` | Confidence score stored on each memory record the save_memory tool creates. |
 
 

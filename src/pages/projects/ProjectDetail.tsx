@@ -62,6 +62,7 @@ import {
 } from '@/lib/pending-conversation'
 import { conversationsApi } from '@/api/endpoints'
 import type { ApiConversation } from '@/api/types'
+import { resolveNewConversationFastMode } from '@/lib/chat-defaults'
 
 type ProjectUploadHandlers = {
   onFileStart: (file: File) => void
@@ -112,12 +113,17 @@ export default function ProjectDetail() {
   const createConversation = useConversations((s) => s.createConversation)
   const adoptConversation = useConversations((s) => s.adoptConversation)
   const defaultModelId = useModels((s) => s.defaultId)
-  const userId = useAuth((s) => s.user?.id)
+  const fastAvailable = useModels((s) => s.fastAvailable)
+  const user = useAuth((s) => s.user)
+  const userId = user?.id
   const workspaceId = useWorkspaces((s) => s.activeId ?? undefined)
   const setGlobalDefaultModel = useModels((s) => s.setDefaultId)
   const [projectComposerModelId, setProjectComposerModelId] = useState('')
+  const [pickedFast, setPickedFast] = useState<boolean | null>(null)
   const [loadingProjectChats, setLoadingProjectChats] = useState(Boolean(id))
   const effectiveProjectModelId = projectComposerModelId || defaultModelId
+  const projectFast =
+    pickedFast ?? resolveNewConversationFastMode(user?.settings, fastAvailable)
 
   useEffect(() => {
     if (!id) {
@@ -240,6 +246,7 @@ export default function ProjectDetail() {
             model_id: effectiveProjectModelId || undefined,
             project_id: projectId,
             workspace_id: workspaceId,
+            fast: projectFast,
           })
           if (
             pendingConsumedRef.current ||
@@ -385,6 +392,7 @@ export default function ProjectDetail() {
       webSearch?: boolean
       officialToolNames?: string[]
       selectedUserSkillIds?: string[]
+      fast?: boolean
     },
   ) {
     if (!project) return
@@ -396,12 +404,14 @@ export default function ProjectDetail() {
     pendingConvRef.current = null
     setPendingConversationId(undefined)
     clearPendingConversation(pendingStorageKey)
-    const conv = pending ? adoptConversation(pending) : await createConversation(effectiveProjectModelId, project.id)
+    const conv = pending
+      ? adoptConversation(pending)
+      : await createConversation(effectiveProjectModelId, project.id, opts.fast === true)
     if (!conv) {
       pendingConsumedRef.current = false
       return
     }
-    if (effectiveProjectModelId && conv.modelId !== effectiveProjectModelId) {
+    if (!opts.fast && effectiveProjectModelId && conv.modelId !== effectiveProjectModelId) {
       void useConversations.getState().setModel(conv.id, effectiveProjectModelId)
     }
     navigate(`/chat/${conv.id}`)
@@ -417,6 +427,7 @@ export default function ProjectDetail() {
       webSearch: opts.webSearch,
       officialToolNames: opts.officialToolNames,
       selectedUserSkillIds: opts.selectedUserSkillIds,
+      fast: opts.fast,
     })
   }
 
@@ -493,6 +504,8 @@ export default function ProjectDetail() {
               </p>
               <Composer
                 modelId={effectiveProjectModelId}
+                fast={projectFast}
+                onFastChange={setPickedFast}
                 onModelChange={(modelId) => {
                   setProjectComposerModelId(modelId)
                   useSettings.getState().setModels({ defaultModelId: modelId })

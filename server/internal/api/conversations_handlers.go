@@ -1,6 +1,8 @@
 package api
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -108,9 +110,9 @@ type createConversationReq struct {
 	ModelID   string `json:"model_id"`
 	ProjectID string `json:"project_id"`
 	Title     string `json:"title"`
-	// Fast seeds the conversation's fast-mode flag (§fast-mode). The client
-	// defaults new conversations to fast; a fast turn later re-affirms it.
-	Fast bool `json:"fast"`
+	// Nil lets the server apply the account default for old clients and direct
+	// API calls. An explicit value always represents a user's picker choice.
+	Fast *bool `json:"fast"`
 	// '' = personal; set = create INSIDE that workspace (§workspaces, membership
 	// validated server-side).
 	WorkspaceID string `json:"workspace_id"`
@@ -124,11 +126,31 @@ func createConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errInvalidInput)
 		return
 	}
+	explicitModel := strings.TrimSpace(req.ModelID) != ""
+	req.ModelID = strings.TrimSpace(req.ModelID)
+	userDefaultModelID := ""
+	if !explicitModel {
+		userDefaultModelID = validUserDefaultConversationModel(r.Context(), d.DB, u.Settings)
+		req.ModelID = userDefaultModelID
+	}
 	if req.ModelID == "" {
-		// Take default.
+		// Fall back to the administrator's default model. Fast mode still resolves
+		// its hidden model independently when the first turn starts.
 		if raw, err := store.GetSetting(d.DB, "default_model_id"); err == nil {
 			_ = json.Unmarshal(raw, &req.ModelID)
 		}
+		req.ModelID = strings.TrimSpace(req.ModelID)
+	}
+	fast := false
+	if req.Fast != nil {
+		fast = *req.Fast
+	} else if !explicitModel && userDefaultModelID == "" {
+		fastModel, err := store.GetFastModel(r.Context(), d.DB)
+		if err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		fast = fastModel != nil
 	}
 	// Workspace binding (§workspaces): only members may create inside a space.
 	req.WorkspaceID = strings.TrimSpace(req.WorkspaceID)
@@ -153,7 +175,7 @@ func createConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		ProjectID:   req.ProjectID,
 		Title:       strings.TrimSpace(req.Title),
 		ModelID:     req.ModelID,
-		Fast:        req.Fast,
+		Fast:        fast,
 		WorkspaceID: req.WorkspaceID,
 	})
 	if err != nil {
@@ -162,6 +184,24 @@ func createConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	publishUserEvent(d, r, u.ID, "conversation.created", conv.ID)
 	writeJSON(w, 201, conv)
+}
+
+func validUserDefaultConversationModel(ctx context.Context, db *sql.DB, settings json.RawMessage) string {
+	var profile struct {
+		DefaultModelID string `json:"default_model_id"`
+	}
+	if json.Unmarshal(settings, &profile) != nil {
+		return ""
+	}
+	id := strings.TrimSpace(profile.DefaultModelID)
+	if id == "" {
+		return ""
+	}
+	model, err := store.GetModel(ctx, db, id)
+	if err != nil || !model.Enabled || model.Kind != "chat" || model.Fast {
+		return ""
+	}
+	return id
 }
 
 // Import limits — bound the work a single import request can schedule.

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -20,6 +21,9 @@ func TestGetUserAdmin(t *testing.T) {
 
 	mustExec(t, db, `INSERT INTO users(id,email,name,password_hash,role,status)
 		VALUES('admin','admin@example.test','Admin','admin-password-hash','admin','active')`)
+	const creditPeriod = 86400
+	mustExec(t, db, `INSERT INTO user_groups(id,name,is_default,credit_allowance,credit_period_seconds)
+		VALUES('ug_free','Free',1,100,?)`, creditPeriod)
 	mustExec(t, db, `INSERT INTO users(
 		id,email,name,password_hash,role,status,token_ver,settings,group_id,
 		totp_secret,totp_enabled,password_set,password_changed_at,credits_permanent,
@@ -44,6 +48,10 @@ func TestGetUserAdmin(t *testing.T) {
 		t.Fatalf("issue admin access token: %v", err)
 	}
 	c.Set("seen:"+admin.ID, "1", time.Minute)
+	windowStart := (time.Now().Unix() / creditPeriod) * creditPeriod
+	// The cache can be ahead of usage_logs while a generation is being recorded.
+	// Admin detail must use this live value, matching the actual debit path.
+	c.Set("credit:v1:u1:"+strconv.FormatInt(windowStart, 10), strconv.FormatInt(creditMicros(37.25), 10), time.Hour)
 
 	mx := newMux()
 	mx.handle(http.MethodGet, "/api/admin/users/:id", requireAdmin(d, getUserAdmin))
@@ -67,17 +75,33 @@ func TestGetUserAdmin(t *testing.T) {
 			t.Fatalf("decode response: %v", err)
 		}
 		for key, want := range map[string]any{
-			"id":           "u1",
-			"email":        "user@example.test",
-			"name":         "Test User",
-			"role":         "user",
-			"status":       "active",
-			"group_id":     "ug_free",
-			"totp_enabled": true,
+			"id":                "u1",
+			"email":             "user@example.test",
+			"name":              "Test User",
+			"role":              "user",
+			"status":            "active",
+			"group_id":          "ug_free",
+			"totp_enabled":      true,
+			"credits_permanent": 42.5,
 		} {
 			if got := body[key]; got != want {
 				t.Errorf("%s = %#v, want %#v", key, got, want)
 			}
+		}
+		var creditBody struct {
+			CreditsTimed struct {
+				Remaining     float64 `json:"remaining"`
+				Allowance     float64 `json:"allowance"`
+				PeriodSeconds int     `json:"period_seconds"`
+				ResetsAt      int64   `json:"resets_at"`
+			} `json:"credits_timed"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &creditBody); err != nil {
+			t.Fatalf("decode timed credits: %v", err)
+		}
+		timed := creditBody.CreditsTimed
+		if timed.Remaining != 62.75 || timed.Allowance != 100 || timed.PeriodSeconds != creditPeriod || timed.ResetsAt != windowStart+creditPeriod {
+			t.Errorf("credits_timed = %+v, want remaining=62.75 allowance=100 period=%d resets_at=%d", timed, creditPeriod, windowStart+creditPeriod)
 		}
 		for _, key := range []string{"password", "password_hash", "token_ver", "totp_secret"} {
 			if _, ok := body[key]; ok {

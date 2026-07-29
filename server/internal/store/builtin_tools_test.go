@@ -31,17 +31,86 @@ func TestBuiltinToolsPolicyDistinguishesDefaultAllFromExplicitNone(t *testing.T)
 }
 
 func TestNormalizeBuiltinToolsCanonicalizesAndRejectsInvalidValues(t *testing.T) {
-	normalized, err := NormalizeBuiltinTools(json.RawMessage(`[" web_search ","python_execute","web_search"]`))
+	normalized, err := NormalizeBuiltinTools(json.RawMessage(`[" web_search ","search_knowledge_base","python_execute","web_search"]`))
 	if err != nil || string(normalized) != `["web_search","python_execute"]` {
 		t.Fatalf("normalized = %s, err=%v", normalized, err)
 	}
-	if !BuiltinToolAllowed(normalized, "web_search") || BuiltinToolAllowed(normalized, "save_memory") {
+	if !BuiltinToolAllowed(normalized, "web_search") || BuiltinToolAllowed(normalized, "save_memory") ||
+		BuiltinToolAllowed(json.RawMessage(`["search_knowledge_base"]`), "search_knowledge_base") {
 		t.Fatalf("canonical policy allowed the wrong tools: %s", normalized)
+	}
+	retiredOnly, err := NormalizeBuiltinTools(json.RawMessage(`["search_knowledge_base"]`))
+	if err != nil || string(retiredOnly) != "[]" {
+		t.Fatalf("retired-only policy = %s, err=%v; want explicit none", retiredOnly, err)
 	}
 	for _, raw := range []string{`{}`, `"web_search"`, `[null]`, `[""]`, `["   "]`} {
 		if _, err := NormalizeBuiltinTools(json.RawMessage(raw)); !errors.Is(err, ErrBuiltinToolsInvalid) {
 			t.Fatalf("NormalizeBuiltinTools(%s) error = %v", raw, err)
 		}
+	}
+}
+
+func TestMigrateRemovesRetiredKnowledgeBaseSearchTool(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "retired-kb-tool.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if _, err := db.Exec(`INSERT INTO users(id,email,password_hash,role) VALUES('u1','retired-tool@example.test','hash','user')`); err != nil {
+		t.Fatal(err)
+	}
+	conversation, err := CreateConversation(ctx, db, Conversation{ID: "c1", UserID: "u1", Title: "Legacy RAG"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	channel, err := CreateChannel(ctx, db, "main", "openai", "chat", "https://example.invalid", "key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	model, err := CreateModel(ctx, db, Model{ChannelID: channel.ID, RequestID: "legacy", Label: "Legacy"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE conversations SET rag_mode='tool' WHERE id=?`, conversation.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE models SET builtin_tools=? WHERE id=?`, `["web_search","search_knowledge_base"]`, model.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetSetting(db, "disabled_tools", []string{"search_knowledge_base", "python_execute"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	var ragMode, builtinTools string
+	if err := db.QueryRow(`SELECT rag_mode FROM conversations WHERE id=?`, conversation.ID).Scan(&ragMode); err != nil || ragMode != "auto" {
+		t.Fatalf("migrated rag_mode=%q err=%v", ragMode, err)
+	}
+	if err := db.QueryRow(`SELECT builtin_tools FROM models WHERE id=?`, model.ID).Scan(&builtinTools); err != nil || builtinTools != `["web_search"]` {
+		t.Fatalf("migrated builtin_tools=%q err=%v", builtinTools, err)
+	}
+	raw, err := GetSetting(db, "disabled_tools")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var disabled []string
+	if err := json.Unmarshal(raw, &disabled); err != nil || len(disabled) != 1 || disabled[0] != "python_execute" {
+		t.Fatalf("migrated disabled_tools=%s decoded=%v err=%v", raw, disabled, err)
+	}
+
+	legacyMode := "tool"
+	updated, err := UpdateConversation(ctx, db, conversation.ID, "u1", ConversationPatch{RAGMode: &legacyMode})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.RAGMode != "auto" {
+		t.Fatalf("legacy patch mode=%q", updated.RAGMode)
 	}
 }
 
