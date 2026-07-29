@@ -216,7 +216,9 @@ export default function AdminTools() {
               >
                 <Input
                   id="sandbox-url"
+                  name="sandbox_base_url"
                   type="url"
+                  autoComplete="off"
                   placeholder="http://your-server:48217"
                   value={readString('sandbox_base_url')}
                   onChange={(e) => setDraft({ ...draft, sandbox_base_url: e.target.value })}
@@ -229,8 +231,9 @@ export default function AdminTools() {
               >
                 <Input
                   id="sandbox-key"
+                  name="sandbox_api_key"
                   type="password"
-                  autoComplete="off"
+                  autoComplete="new-password"
                   value={readString('sandbox_api_key')}
                   onChange={(e) => setDraft({ ...draft, sandbox_api_key: e.target.value })}
                 />
