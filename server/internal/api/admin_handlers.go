@@ -584,6 +584,25 @@ func createSkillAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 201, created)
 }
 
+func reorderSkillsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		IDs []string `json:"ids"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, errInvalidInput)
+		return
+	}
+	if err := store.ReorderSkills(r.Context(), d.DB, body.IDs); err != nil {
+		if errors.Is(err, store.ErrInvalidReorder) {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
 func updateSkillAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	id := pathParam(r, "id")
 	// Load the existing row and decode the request body OVER it, so a PARTIAL

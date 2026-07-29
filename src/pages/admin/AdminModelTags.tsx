@@ -4,11 +4,11 @@
  * page and drive the picker's filter chips.
  */
 import { useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { Plus, Trash2, Tag, ArrowLeft } from 'lucide-react'
+import { Plus, Trash2, Tag } from 'lucide-react'
 import { adminApi, ApiError } from '@/api'
 import type { ApiModelTag } from '@/api/types'
+import { AdminDetailHeader } from '@/components/admin/admin-detail-header'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { AdminSortableList } from '@/components/admin/AdminSortableList'
@@ -18,7 +18,6 @@ import { useModels } from '@/store/models'
 
 export default function AdminModelTags() {
   const { t } = useTranslation(['admin', 'common'])
-  const navigate = useNavigate()
   // Share the picker cache instead of keeping an admin-only copy. Every CRUD
   // operation and optimistic reorder is then reflected in the chat picker as
   // soon as the admin returns to it, without requiring a full page reload.
@@ -134,14 +133,7 @@ export default function AdminModelTags() {
       {/* This page has no top-nav entry of its own (it's reached via "Manage
           tags" on the model editor), so the nav still reads "Models". Mirror the
           model-editor's back link so admins can return to the list. */}
-      <button
-        type="button"
-        onClick={() => navigate('/admin/models')}
-        className="inline-flex items-center gap-1.5 text-[12.5px] text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)] interactive rounded-[6px] -ml-2 px-2 py-1.5 mb-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-      >
-        <ArrowLeft size={12} aria-hidden />
-        {t('admin:models.backToList')}
-      </button>
+      <AdminDetailHeader backTo="/admin/models" backLabel={t('admin:models.backToList')} />
 
       <header>
         <h1 className="font-serif text-3xl tracking-tight text-[var(--color-fg)]">{t('admin:modelTags.title')}</h1>

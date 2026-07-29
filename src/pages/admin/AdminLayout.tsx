@@ -2,7 +2,7 @@
  * AdminLayout keeps broad task areas in the rail and exposes the current area's
  * destinations as a route-aware tab row above the page.
  */
-import { Suspense, useEffect, useState } from 'react'
+import { Suspense, useEffect, useRef, useState } from 'react'
 import { Link, Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import {
@@ -47,9 +47,11 @@ export default function AdminLayout() {
   const status = useAuth((s) => s.status)
   const { t } = useTranslation(['admin', 'nav', 'common'])
   const [mobileOpen, setMobileOpen] = useState(false)
+  const contentScrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     setMobileOpen(false)
+    contentScrollRef.current?.scrollTo(0, 0)
   }, [location.pathname])
 
   if (user) {
@@ -121,7 +123,7 @@ export default function AdminLayout() {
         aria-label={groupLabel}
         className={cn(
           'shrink-0 overflow-x-auto border-b border-[var(--color-divider)] scrollbar-none',
-          filesWorkspace ? 'px-5 pt-4 sm:px-8 lg:px-12' : 'mb-6',
+          filesWorkspace && 'px-5 pt-4 sm:px-8 lg:px-12',
         )}
       >
         <div className="flex w-max min-w-full items-end gap-1">
@@ -167,11 +169,11 @@ export default function AdminLayout() {
 
       <main
         className={cn(
-          'relative min-h-0 min-w-0 flex-1 overscroll-y-contain',
-          filesWorkspace ? 'flex flex-col overflow-hidden' : 'overflow-y-auto',
+          'relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden',
+          filesWorkspace && 'overscroll-y-contain',
         )}
       >
-        <div className="flex h-[var(--layout-topbar-h-mobile)] items-center gap-2 border-b border-[var(--color-divider)] px-2 md:hidden">
+        <div className="flex h-[var(--layout-topbar-h-mobile)] shrink-0 items-center gap-2 border-b border-[var(--color-divider)] px-2 md:hidden">
           <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
             <SheetTrigger asChild>
               <button
@@ -203,20 +205,39 @@ export default function AdminLayout() {
           <UserMenu placement="header" />
         </div>
 
-        <div
-          className={cn(
-            filesWorkspace
-              ? 'flex min-h-0 w-full flex-1 flex-col'
-              : 'mx-auto w-full max-w-[84rem] px-5 py-8 sm:px-8 sm:py-12 lg:px-12',
-          )}
-        >
-          {renderGroupTabs()}
-          <div className={filesWorkspace ? 'flex min-h-0 flex-1 flex-col' : undefined}>
-            <Suspense fallback={<PanelFallback />}>
-              <Outlet />
-            </Suspense>
+        {filesWorkspace ? (
+          <div className="flex min-h-0 w-full flex-1 flex-col">
+            {renderGroupTabs()}
+            <div className="flex min-h-0 flex-1 flex-col">
+              <Suspense fallback={<PanelFallback />}>
+                <Outlet />
+              </Suspense>
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="flex min-h-0 w-full flex-1 flex-col">
+            {currentGroup ? (
+              <div className="mx-auto w-full max-w-[84rem] shrink-0 px-5 pt-8 sm:px-8 sm:pt-12 lg:px-12">
+                {renderGroupTabs()}
+              </div>
+            ) : null}
+            <div
+              ref={contentScrollRef}
+              className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain scrollbar-thin"
+            >
+              <div
+                className={cn(
+                  'mx-auto w-full max-w-[84rem] px-5 pb-8 sm:px-8 sm:pb-12 lg:px-12',
+                  currentGroup ? 'pt-6' : 'pt-8 sm:pt-12',
+                )}
+              >
+                <Suspense fallback={<PanelFallback />}>
+                  <Outlet />
+                </Suspense>
+              </div>
+            </div>
+          </div>
+        )}
       </main>
     </div>
   )

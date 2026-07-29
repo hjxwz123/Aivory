@@ -197,6 +197,25 @@ func createPromptAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, created)
 }
 
+func reorderPromptsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		IDs []string `json:"ids"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, errInvalidInput)
+		return
+	}
+	if err := store.ReorderPrompts(r.Context(), d.DB, body.IDs); err != nil {
+		if errors.Is(err, store.ErrInvalidReorder) {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
 func updatePromptAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	id := pathParam(r, "id")
 	current, err := store.GetPrompt(r.Context(), d.DB, id)
