@@ -47,7 +47,7 @@ func creditWindowUsed(ctx context.Context, d Deps, userID string, periodSeconds 
 
 // meCreditsHandler reports the signed-in user's credit balance for the
 // subscription page: the timed pool (remaining / allowance + next refresh) and
-// the separate permanent pool, plus the top-up link.
+// the separate permanent pool.
 func meCreditsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
 	currency := globalSettlementCurrency(d)
@@ -62,8 +62,6 @@ func meCreditsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 			"enabled":             false,
 			"permanent":           permanent,
 			"settlement_currency": currency,
-			"buy_url":             globalSettingStr(d, "credit_buy_url"),
-			"group_buy_url":       globalSettingStr(d, "group_buy_url"),
 		})
 		return
 	}
@@ -87,8 +85,6 @@ func meCreditsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		},
 		"permanent":           permanent,
 		"settlement_currency": currency,
-		"buy_url":             globalSettingStr(d, "credit_buy_url"),
-		"group_buy_url":       globalSettingStr(d, "group_buy_url"),
 	})
 }
 
@@ -117,8 +113,7 @@ func globalSettlementCurrency(d Deps) string {
 	return code
 }
 
-// globalSettingStr reads a string-valued global setting (§ credits purchase
-// links). Empty when unset.
+// globalSettingStr reads a string-valued global setting. Empty when unset.
 func globalSettingStr(d Deps, key string) string {
 	raw, err := store.GetSetting(d.DB, key)
 	if err != nil || len(raw) == 0 {

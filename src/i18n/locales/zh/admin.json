@@ -556,11 +556,16 @@
     "ragDynamicTopk": "动态 Top-K(按相似度)",
     "ragDynamicTopkHint": "不再固定数量,而是把相似度超过下方阈值的片段全部注入。",
     "ragSimThreshold": "相似度阈值(0–1)",
-    "ragSimThresholdHint": "余弦相似度下限,达到或超过即注入。"
+    "ragSimThresholdHint": "余弦相似度下限,达到或超过即注入。",
+    "mineruStorageRequired": "MinerU 需要完整的 S3 或阿里云 OSS 配置。",
+    "configureStorage": "配置存储"
   },
   "tools": {
     "title": "工具",
-    "lead": "对话过程中助手会调用的外部服务。"
+    "lead": "对话过程中助手会调用的外部服务。",
+    "availabilityTitle": "全局工具可用性",
+    "availabilityLead": "停用后，该工具会从所有模型中移除，包括已明确允许它的模型。",
+    "availabilityEmpty": "当前没有已注册的平台工具。"
   },
   "audio": {
     "title": "语音",
@@ -601,8 +606,6 @@
     }
   },
   "settings": {
-    "title": "全局设置",
-    "lead": "影响全员的几项:默认/任务模型、压缩、注册、配额。",
     "saved": "已保存设置",
     "fields": {
       "settlementCurrency": "结算货币",
@@ -632,7 +635,6 @@
       "emailVerificationHint": "开启后新注册用户需要输入 6 位邮箱验证码才能登录。",
       "domainWhitelist": "允许注册的邮箱域名",
       "domainWhitelistHint": "用逗号分隔。仅列出的域名可以注册。留空允许所有域名。",
-      "legalSection": "法律条款与联系信息",
       "legalLead": "配置登录页、关于页、服务条款和隐私政策页面公开显示的联系方式与政策文本。政策文本留空时使用完整的五语默认内容。",
       "contactEmail": "联系邮箱",
       "contactEmailHint": "用于支持、支付咨询、退款申请、隐私请求、违规举报与申诉。留空默认为 admin@aivory.local。",
@@ -643,7 +645,6 @@
       "privacyTextHint": "可选 Markdown，设置后替换内置本地化隐私政策。",
       "policyTextPlaceholder": "留空以使用本地化默认政策。",
       "pickModel": "选择一个模型",
-      "smtpSection": "邮件 (SMTP)",
       "smtpLead": "发送验证码和密码重置邮件。",
       "smtpHost": "SMTP 服务器",
       "smtpHostHint": "如 smtp.qq.com、smtp.163.com、smtp.gmail.com",
@@ -728,7 +729,6 @@
       "sandboxIdleTtlHint": "沙盒闲置这么多秒后回收（回收前先归档其工作区）。留空 = 1800（30 分钟）。范围 60–86400。",
       "logFullRequests": "记录完整请求体",
       "logFullRequestsLead": "在每条用量记录上保存完整（已脱敏）的上游请求体，便于调试。失败请求无论此项是否开启都始终记录。",
-      "logErrorsOnly": "仅记录失败请求",
       "logErrorsOnlyHint": "开启：维持只记录失败请求。关闭：记录全部请求的完整请求体——数据库更大，且更多敏感提示词落盘。"
     }
   },
@@ -742,14 +742,9 @@
     "freePrice": "免费",
     "creditsRatioLabel": "模型成本内部换算（每 USD）",
     "creditsRatioHint": "每 1 USD 模型成本扣除的积分数，与用户结算货币无关。0 = 停用积分。",
-    "groupBuyUrlLabel": "用户组购买链接（全局）",
-    "groupBuyUrlHint": "付费组卡片的「购买」按钮链接。留空显示「联系管理员」。",
-    "creditBuyUrlLabel": "积分补充链接（全局）",
-    "creditBuyUrlHint": "用户购买永久积分的地址。",
     "quotaMsgLabel": "超额提示",
     "quotaMsgHint": "用户达到该模型用量上限时显示。",
     "quotaMsgPlaceholder": "您已达到当前套餐对此模型的使用上限，升级套餐即可继续使用。",
-    "msgSaved": "设置已保存",
     "editorTitle": "编辑用户组",
     "newTitle": "新建用户组",
     "editorLead": "名称、价格和功能将展示在用户的订阅页面。",
@@ -1338,14 +1333,75 @@
       "time": "时间线"
     }
   },
+  "overview": {
+    "title": "管理概览",
+    "lead": "查看当前部署的配置健康状态和主要管理资源。",
+    "loadFailed": "无法加载管理概览。",
+    "healthTitle": "配置健康状态",
+    "healthLead": "向用户开放相关功能前，请先处理以下警告。",
+    "metrics": {
+      "users": "用户",
+      "models": "模型",
+      "channels": "渠道",
+      "plans": "会员方案"
+    },
+    "checks": {
+      "channels": "上游渠道",
+      "channelsReady": "已配置 {{count}} 个渠道",
+      "channelsMissing": "创建可用模型前需要先配置渠道。",
+      "defaultModel": "默认对话模型",
+      "defaultModelMissing": "选择有效的默认模型后才能开始对话。",
+      "taskModel": "内部任务模型",
+      "taskModelMissing": "标题、路由、摘要和记忆抽取需要任务模型。",
+      "configured": "已配置",
+      "email": "邮箱验证",
+      "notRequired": "未要求",
+      "smtpReady": "SMTP 已配置",
+      "smtpMissing": "已要求邮箱验证，但 SMTP 配置不完整。",
+      "storage": "持久化存储",
+      "storageReady": "存储方式：{{provider}}",
+      "storageLocal": "已选择本机存储；工作空间持久化仍需挂载沙盒存储卷。",
+      "storageIncomplete": "已选择 {{provider}}，但必要的存储配置尚不完整。",
+      "storageMissing": "工作空间归档和应用对象目前不会持久化。",
+      "payments": "支付结账",
+      "paymentsUnused": "尚未配置支付渠道",
+      "paymentMethodsReady": "已有 {{count}} 个支付方式",
+      "paymentMethodMissing": "已有支付渠道，但尚未绑定用户可见的支付方式。"
+    }
+  },
+  "creditSettings": {
+    "title": "积分与配额",
+    "lead": "配置计费换算、平台级使用限制和永久积分套餐。",
+    "policyTitle": "计费策略",
+    "policyLead": "这些设置适用于所有会员和所有扣积分模型。",
+    "limitsTitle": "平台限制",
+    "limitsLead": "按用户限制；数值设为 0 表示不限制。",
+    "zeroUnlimited": "0 = 不限制。",
+    "dailyTokenLimit": "每日 Token 上限",
+    "dailyTokenLimitHint": "每位用户每个 UTC 日的输入与输出 Token 总上限。0 = 不限制。",
+    "maxConcurrentGenerations": "每用户并发生成数",
+    "maxConcurrentGenerationsHint": "每位用户同时进行的响应流上限。0 = 不限制。"
+  },
+  "systemStorage": {
+    "title": "存储与上传",
+    "lead": "配置平台对象存储、归档保留时间和上传限制。"
+  },
   "menu": {
-    "models": "模型",
-    "capabilities": "能力",
-    "users": "用户",
-    "data": "数据",
-    "system": "系统",
-    "workspaces": "工作空间",
-    "payments": "支付"
+    "overview": "总览",
+    "aiModels": "AI 与模型",
+    "modelPolicy": "模型策略",
+    "contextMemory": "上下文与记忆",
+    "capabilities": "能力与集成",
+    "usersAccess": "用户与访问",
+    "registrationPolicy": "注册策略",
+    "billing": "计费与权益",
+    "creditsQuotas": "积分与配额",
+    "operations": "数据与运营",
+    "platform": "系统",
+    "emailService": "邮件服务",
+    "storageUploads": "存储与上传",
+    "legalContact": "法律与联系",
+    "loggingPrivacy": "日志与隐私"
   },
   "imageStyles": {
     "title": "图片风格",

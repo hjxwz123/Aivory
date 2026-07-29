@@ -149,7 +149,7 @@ func TestAdminSettingsRejectsInvalidSettlementCurrency(t *testing.T) {
 	}
 }
 
-func TestMeCreditsIncludesCurrencyLinksAndFreshPermanentBalance(t *testing.T) {
+func TestMeCreditsIncludesCurrencyAndFreshPermanentBalance(t *testing.T) {
 	db := openMigrated(t, filepath.Join(t.TempDir(), "me-credits-pricing.db"))
 	defer db.Close()
 	mustExec(t, db, `INSERT INTO user_groups(id,name,is_default,is_public,credit_allowance,credit_period_seconds) VALUES('ug_free','Free',1,1,100,86400)`)
@@ -157,8 +157,6 @@ func TestMeCreditsIncludesCurrencyLinksAndFreshPermanentBalance(t *testing.T) {
 	for key, value := range map[string]any{
 		"credits_per_usd":     100.0,
 		"settlement_currency": "EUR",
-		"credit_buy_url":      "https://pay.example.test/credits",
-		"group_buy_url":       "https://pay.example.test/groups",
 	} {
 		if err := store.SetSetting(db, key, value); err != nil {
 			t.Fatalf("set %s: %v", key, err)
@@ -180,8 +178,6 @@ func TestMeCreditsIncludesCurrencyLinksAndFreshPermanentBalance(t *testing.T) {
 		Enabled            bool    `json:"enabled"`
 		Permanent          float64 `json:"permanent"`
 		SettlementCurrency string  `json:"settlement_currency"`
-		BuyURL             string  `json:"buy_url"`
-		GroupBuyURL        string  `json:"group_buy_url"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode credits response: %v (%s)", err, rec.Body.String())
@@ -195,14 +191,11 @@ func TestMeCreditsIncludesCurrencyLinksAndFreshPermanentBalance(t *testing.T) {
 	if body.SettlementCurrency != "EUR" {
 		t.Fatalf("settlement currency = %q, want EUR", body.SettlementCurrency)
 	}
-	if body.BuyURL != "https://pay.example.test/credits" || body.GroupBuyURL != "https://pay.example.test/groups" {
-		t.Fatalf("purchase URLs mismatch: %+v", body)
-	}
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
 		t.Fatal(err)
 	}
-	for _, retired := range []string{"purchase_enabled", "permanent_credit_purchase_credits", "permanent_credit_purchase_price_amount_minor"} {
+	for _, retired := range []string{"buy_url", "group_buy_url"} {
 		if _, ok := raw[retired]; ok {
 			t.Fatalf("credits response still exposes retired field %q: %s", retired, rec.Body.String())
 		}
