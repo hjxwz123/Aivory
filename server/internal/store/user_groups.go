@@ -13,17 +13,18 @@ import (
 // DefaultGroupID is the always-present free tier id (seeded in Seed).
 const DefaultGroupID = "ug_free"
 
-const userGroupCols = `id, name, description, features, COALESCE(monthly_price_amount_minor,0), COALESCE(yearly_price_amount_minor,0), is_default, sort_order, COALESCE(max_projects,0), COALESCE(max_kbs,0), COALESCE(credit_allowance,0), COALESCE(credit_period_seconds,0), COALESCE(max_workspaces,0), COALESCE(is_public,1), COALESCE(max_storage_mb,0), created_at, updated_at`
+const userGroupCols = `id, name, description, features, COALESCE(monthly_price_amount_minor,0), COALESCE(yearly_price_amount_minor,0), is_default, sort_order, COALESCE(max_projects,0), COALESCE(max_kbs,0), COALESCE(credit_allowance,0), COALESCE(credit_period_seconds,0), COALESCE(max_workspaces,0), COALESCE(is_public,1), COALESCE(is_purchasable,1), COALESCE(max_storage_mb,0), created_at, updated_at`
 
 func scanUserGroup(s scanner) (UserGroup, error) {
 	var g UserGroup
 	var features string
-	var def, isPub int
-	if err := s.Scan(&g.ID, &g.Name, &g.Description, &features, &g.MonthlyPriceAmountMinor, &g.YearlyPriceAmountMinor, &def, &g.SortOrder, &g.MaxProjects, &g.MaxKBs, &g.CreditAllowance, &g.CreditPeriodSeconds, &g.MaxWorkspaces, &isPub, &g.MaxStorageMB, &g.CreatedAt, &g.UpdatedAt); err != nil {
+	var def, isPub, isPurchasable int
+	if err := s.Scan(&g.ID, &g.Name, &g.Description, &features, &g.MonthlyPriceAmountMinor, &g.YearlyPriceAmountMinor, &def, &g.SortOrder, &g.MaxProjects, &g.MaxKBs, &g.CreditAllowance, &g.CreditPeriodSeconds, &g.MaxWorkspaces, &isPub, &isPurchasable, &g.MaxStorageMB, &g.CreatedAt, &g.UpdatedAt); err != nil {
 		return g, err
 	}
 	g.IsDefault = def == 1
 	g.IsPublic = isPub == 1
+	g.IsPurchasable = isPurchasable == 1
 	g.Features = json.RawMessage(orDefaultJSON(features))
 	return g, nil
 }
@@ -79,6 +80,17 @@ func GetUserGroupByName(ctx context.Context, db *sql.DB, name string) (*UserGrou
 
 // CreateUserGroup inserts a non-default group.
 func CreateUserGroup(ctx context.Context, db *sql.DB, g UserGroup) (*UserGroup, error) {
+	return createUserGroup(ctx, db, g, true)
+}
+
+// CreateUserGroupWithPurchaseAvailability inserts a non-default group and
+// explicitly sets whether members may purchase it. CreateUserGroup retains the
+// historical default of allowing purchases for callers that predate this flag.
+func CreateUserGroupWithPurchaseAvailability(ctx context.Context, db *sql.DB, g UserGroup, isPurchasable bool) (*UserGroup, error) {
+	return createUserGroup(ctx, db, g, isPurchasable)
+}
+
+func createUserGroup(ctx context.Context, db *sql.DB, g UserGroup, isPurchasable bool) (*UserGroup, error) {
 	if g.ID == "" {
 		g.ID = genID("ug")
 	}
@@ -89,9 +101,9 @@ func CreateUserGroup(ctx context.Context, db *sql.DB, g UserGroup) (*UserGroup, 
 	}
 	now := time.Now().Unix()
 	_, err := db.ExecContext(ctx,
-		`INSERT INTO user_groups(id, name, description, features, monthly_price_amount_minor, yearly_price_amount_minor, is_default, sort_order, max_projects, max_kbs, credit_allowance, credit_period_seconds, max_workspaces, is_public, max_storage_mb, created_at, updated_at)
-		 VALUES(?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		g.ID, g.Name, g.Description, string(g.Features), g.MonthlyPriceAmountMinor, g.YearlyPriceAmountMinor, g.SortOrder, g.MaxProjects, g.MaxKBs, g.CreditAllowance, g.CreditPeriodSeconds, g.MaxWorkspaces, boolInt(g.IsPublic), g.MaxStorageMB, now, now)
+		`INSERT INTO user_groups(id, name, description, features, monthly_price_amount_minor, yearly_price_amount_minor, is_default, sort_order, max_projects, max_kbs, credit_allowance, credit_period_seconds, max_workspaces, is_public, is_purchasable, max_storage_mb, created_at, updated_at)
+		 VALUES(?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		g.ID, g.Name, g.Description, string(g.Features), g.MonthlyPriceAmountMinor, g.YearlyPriceAmountMinor, g.SortOrder, g.MaxProjects, g.MaxKBs, g.CreditAllowance, g.CreditPeriodSeconds, g.MaxWorkspaces, boolInt(g.IsPublic), boolInt(isPurchasable), g.MaxStorageMB, now, now)
 	if err != nil {
 		if isUniqueIndexErr(err, "idx_user_groups_name_unique", "user_groups.name") {
 			return nil, ErrUserGroupNameExists
@@ -134,6 +146,7 @@ type UserGroupPatch struct {
 	MaxWorkspaces           *int             `json:"max_workspaces"`
 	MaxStorageMB            *int             `json:"max_storage_mb"`
 	IsPublic                *bool            `json:"is_public"`
+	IsPurchasable           *bool            `json:"is_purchasable"`
 }
 
 func UpdateUserGroup(ctx context.Context, db *sql.DB, id string, p UserGroupPatch) (*UserGroup, error) {
@@ -191,6 +204,10 @@ func UpdateUserGroup(ctx context.Context, db *sql.DB, id string, p UserGroupPatc
 		parts = append(parts, "is_public=?")
 		args = append(args, boolInt(*p.IsPublic))
 	}
+	if p.IsPurchasable != nil {
+		parts = append(parts, "is_purchasable=?")
+		args = append(args, boolInt(*p.IsPurchasable))
+	}
 	if len(parts) == 0 {
 		return GetUserGroup(ctx, db, id)
 	}
@@ -203,6 +220,27 @@ func UpdateUserGroup(ctx context.Context, db *sql.DB, id string, p UserGroupPatc
 		return nil, err
 	}
 	return GetUserGroup(ctx, db, id)
+}
+
+// ValidatePaymentUserGroupPurchasable checks that a membership tier may still
+// be purchased. It is used when resuming an order created before an admin
+// paused a tier; checkout creation performs the same check under its order
+// transaction in CreatePaymentOrder.
+func ValidatePaymentUserGroupPurchasable(ctx context.Context, db *sql.DB, id string) error {
+	g, err := GetUserGroup(ctx, db, id)
+	if errors.Is(err, ErrNotFound) {
+		return ErrPaymentProductUnavailable
+	}
+	if err != nil {
+		return err
+	}
+	if g.IsDefault || !g.IsPublic {
+		return ErrPaymentProductUnavailable
+	}
+	if !g.IsPurchasable {
+		return ErrPaymentUserGroupNotPurchasable
+	}
+	return nil
 }
 
 // DeleteUserGroup removes a group and reassigns its members to the default.

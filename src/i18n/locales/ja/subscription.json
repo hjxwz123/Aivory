@@ -99,7 +99,8 @@
       "orderStateChanged": "表示中に注文の状態が変更されました。注文履歴を更新して、もう一度お試しください。",
       "checkoutStateUnknown": "決済事業者がこの支払いを続行できるか確認できませんでした。再試行する前に決済事業者側の注文を確認してください。",
       "waffoProductCurrencyUnsupported": "この Waffo 商品は選択した決済通貨に対応していません。商品価格または決済チャネル設定を管理者に確認してください。",
-      "userGroupAlreadyPermanent": "このユーザーグループはすでに永久利用できるため、再度購入する必要はありません。"
+      "userGroupAlreadyPermanent": "このユーザーグループはすでに永久利用できるため、再度購入する必要はありません。",
+      "userGroupNotPurchasable": "このユーザーグループは現在一時的に購入できません。しばらくしてからもう一度お試しください。"
     },
     "or": "または",
     "cardPurchase": "プリペイドコードを購入",
@@ -157,6 +158,7 @@
   },
   "buyCta": "購入",
   "renewCta": "更新",
+  "purchaseUnavailable": "現在購入できません",
   "recommended": "おすすめ",
   "cycleFee": "現在の周期料金"
 }

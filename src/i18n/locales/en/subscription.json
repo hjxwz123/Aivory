@@ -99,7 +99,8 @@
       "orderStateChanged": "This order changed while you were viewing it. Refresh the order list and try again.",
       "checkoutStateUnknown": "The payment provider could not confirm whether this checkout can continue. Check the provider order before trying again.",
       "waffoProductCurrencyUnsupported": "This Waffo product does not support the selected payment currency. Ask an administrator to check the product price or payment-channel settings.",
-      "userGroupAlreadyPermanent": "You already own this user group permanently, so it doesn’t need to be purchased again."
+      "userGroupAlreadyPermanent": "You already own this user group permanently, so it doesn’t need to be purchased again.",
+      "userGroupNotPurchasable": "This user group is temporarily unavailable for purchase. Try again later."
     },
     "or": "or",
     "cardPurchase": "Purchase a prepaid code",
@@ -157,6 +158,7 @@
   },
   "buyCta": "Purchase",
   "renewCta": "Renew",
+  "purchaseUnavailable": "Temporarily unavailable",
   "recommended": "Recommended",
   "cycleFee": "Current cycle fee"
 }

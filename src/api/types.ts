@@ -205,6 +205,8 @@ export interface ApiUserGroup {
   max_storage_mb?: number
   /** Listed on the public subscription page. */
   is_public?: boolean
+  /** Whether users may purchase this group while it is listed. */
+  is_purchasable?: boolean
 }
 
 /** Purchasable package of permanent (non-expiring) credits. */

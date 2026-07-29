@@ -10,6 +10,7 @@ const CHECKOUT_ERROR_KEYS = {
   payment_checkout_state_unknown: 'payment.errors.checkoutStateUnknown',
   payment_waffo_product_currency_unsupported: 'payment.errors.waffoProductCurrencyUnsupported',
   payment_user_group_already_permanent: 'payment.errors.userGroupAlreadyPermanent',
+  payment_user_group_not_purchasable: 'payment.errors.userGroupNotPurchasable',
 } as const
 
 const ADMIN_PAYMENT_CHANNEL_ERROR_KEYS = {

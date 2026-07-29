@@ -815,7 +815,9 @@
       "workspaces": "Workspaces",
       "workspacesHint": "Allow this group to create workspaces (max above; 0 = unlimited).",
       "isPublic": "Show on subscription page",
-      "isPublicHint": "When off, this tier is hidden from the public subscription page (members keep their plan)."
+      "isPublicHint": "When off, this tier is hidden from the public subscription page (members keep their plan).",
+      "purchaseEnabled": "Allow purchases",
+      "purchaseEnabledHint": "When off, the tier can still be shown, but users will temporarily be unable to purchase it."
     },
     "errors": {
       "nameRequired": "Name is required",

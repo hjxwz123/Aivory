@@ -815,7 +815,9 @@
       "workspaces": "工作空間",
       "workspacesHint": "允許該用戶組建立工作空間（數量上限見上；0 = 不限）。",
       "isPublic": "在訂閱頁展示",
-      "isPublicHint": "關閉後該用戶組不再出現在訂閱頁（已在該組的用戶不受影響）。"
+      "isPublicHint": "關閉後該用戶組不再出現在訂閱頁（已在該組的用戶不受影響）。",
+      "purchaseEnabled": "允許購買",
+      "purchaseEnabledHint": "關閉後方案仍可展示，但使用者暫時無法購買。"
     },
     "errors": {
       "nameRequired": "請填寫名稱",

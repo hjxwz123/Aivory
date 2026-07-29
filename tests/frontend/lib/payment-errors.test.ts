@@ -27,6 +27,9 @@ describe('payment error translation keys', () => {
     expect(checkoutPaymentErrorKey('payment_user_group_already_permanent')).toBe(
       'payment.errors.userGroupAlreadyPermanent',
     )
+    expect(checkoutPaymentErrorKey('payment_user_group_not_purchasable')).toBe(
+      'payment.errors.userGroupNotPurchasable',
+    )
   })
 
   it('maps payment-channel conflicts to administrator-facing messages', () => {

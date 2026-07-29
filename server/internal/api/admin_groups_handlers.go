@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -42,8 +43,20 @@ func listUserGroupsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 }
 
 func createUserGroupAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
+	var raw json.RawMessage
+	if err := decodeJSON(r, &raw); err != nil {
+		writeError(w, 400, errInvalidInput)
+		return
+	}
 	var g store.UserGroup
-	if err := decodeJSON(r, &g); err != nil {
+	if err := json.Unmarshal(raw, &g); err != nil {
+		writeError(w, 400, errInvalidInput)
+		return
+	}
+	var purchase struct {
+		IsPurchasable *bool `json:"is_purchasable"`
+	}
+	if err := json.Unmarshal(raw, &purchase); err != nil {
 		writeError(w, 400, errInvalidInput)
 		return
 	}
@@ -63,7 +76,11 @@ func createUserGroupAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
-	created, err := store.CreateUserGroup(r.Context(), d.DB, g)
+	isPurchasable := true
+	if purchase.IsPurchasable != nil {
+		isPurchasable = *purchase.IsPurchasable
+	}
+	created, err := store.CreateUserGroupWithPurchaseAvailability(r.Context(), d.DB, g, isPurchasable)
 	if err != nil {
 		if errors.Is(err, store.ErrUserGroupNameExists) {
 			writeError(w, 409, err)

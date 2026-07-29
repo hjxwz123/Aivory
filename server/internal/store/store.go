@@ -180,6 +180,9 @@ func Migrate(db *sql.DB) error {
 	addGroupMaxStorage := `ALTER TABLE user_groups ADD COLUMN max_storage_mb INTEGER NOT NULL DEFAULT 0`
 	// Whether the tier is listed on the public subscription page (§ user groups).
 	addGroupIsPublic := `ALTER TABLE user_groups ADD COLUMN is_public INTEGER NOT NULL DEFAULT 1`
+	// Whether a public tier can currently be purchased. Existing tiers retain
+	// their previous behavior because the migration defaults to enabled.
+	addGroupIsPurchasable := `ALTER TABLE user_groups ADD COLUMN is_purchasable INTEGER NOT NULL DEFAULT 1`
 	// §fallback channel: per-model backup channel retried on primary request
 	// failure ('' = none); usage rows record which channel served the request,
 	// whether the fallback was used, and error requests are logged too.
@@ -282,6 +285,7 @@ func Migrate(db *sql.DB) error {
 		addGroupMaxWorkspaces = `ALTER TABLE user_groups ADD COLUMN IF NOT EXISTS max_workspaces INTEGER NOT NULL DEFAULT 0`
 		addGroupMaxStorage = `ALTER TABLE user_groups ADD COLUMN IF NOT EXISTS max_storage_mb INTEGER NOT NULL DEFAULT 0`
 		addGroupIsPublic = `ALTER TABLE user_groups ADD COLUMN IF NOT EXISTS is_public INTEGER NOT NULL DEFAULT 1`
+		addGroupIsPurchasable = `ALTER TABLE user_groups ADD COLUMN IF NOT EXISTS is_purchasable INTEGER NOT NULL DEFAULT 1`
 		addModelFallbackChannel = `ALTER TABLE models ADD COLUMN IF NOT EXISTS fallback_channel_id TEXT NOT NULL DEFAULT ''`
 		addUsageChannel = `ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS channel_id TEXT NOT NULL DEFAULT ''`
 		addUsageFallback = `ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS fallback INTEGER NOT NULL DEFAULT 0`
@@ -344,7 +348,7 @@ func Migrate(db *sql.DB) error {
 		addMsgModelLabel, addMsgSearchText,
 		addImageTimeout,
 		addMsgVerify,
-		addConvWorkspace, addProjWorkspace, addKBWorkspace, addMsgAuthor, addUsageWorkspace, addGroupMaxWorkspaces, addGroupMaxStorage, addGroupIsPublic,
+		addConvWorkspace, addProjWorkspace, addKBWorkspace, addMsgAuthor, addUsageWorkspace, addGroupMaxWorkspaces, addGroupMaxStorage, addGroupIsPublic, addGroupIsPurchasable,
 		addModelFallbackChannel, addUsageChannel, addUsageFallback, addUsageStatus, addUsageError,
 		addUsageRequestMethod, addUsageRequestURL, addUsageRequestHeaders, addUsageRequestBody, addUsageTTFTFallback,
 		addFileDraft, addDocumentIngestUpdatedAt,
@@ -413,7 +417,7 @@ func Migrate(db *sql.DB) error {
 		"user_prompts":       {"user_id", "name", "description", "content", "source_prompt_id"},
 		"users":              {"group_id", "totp_secret", "totp_enabled", "group_expires_at", "previous_group_id", "password_set", "password_changed_at", "last_seen_at", "credits_permanent", "sort_order"},
 		"usage_logs":         {"credits", "workspace_id", "channel_id", "fallback", "status", "error", "request_method", "request_url", "request_headers", "request_body"},
-		"user_groups":        {"monthly_price_amount_minor", "yearly_price_amount_minor", "max_projects", "max_kbs", "credit_allowance", "credit_period_seconds", "max_workspaces", "is_public", "max_storage_mb"},
+		"user_groups":        {"monthly_price_amount_minor", "yearly_price_amount_minor", "max_projects", "max_kbs", "credit_allowance", "credit_period_seconds", "max_workspaces", "is_public", "is_purchasable", "max_storage_mb"},
 		"models":             {"official_tools", "builtin_tools", "moderation_enabled", "moderation_mode", "tags", "extra_params", "image_timeout_sec", "research_enabled", "fallback_channel_id", "fast"},
 		"refresh_tokens":     {"user_agent", "ip", "location", "last_seen"},
 		"conversations":      {"inline_source_conv", "inline_parent_id", "inline_quote", "workspace_id", "fast"},

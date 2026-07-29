@@ -99,7 +99,8 @@
       "orderStateChanged": "此訂單的狀態已變更，請重新整理訂單記錄後再試。",
       "checkoutStateUnknown": "支付服務商無法確認此次結帳是否可繼續，請先在支付服務商核實訂單後再試。",
       "waffoProductCurrencyUnsupported": "此 Waffo 商品不支援目前的支付幣別，請聯絡管理員檢查商品價格或支付渠道設定。",
-      "userGroupAlreadyPermanent": "你已永久擁有此使用者組，無需重複購買。"
+      "userGroupAlreadyPermanent": "你已永久擁有此使用者組，無需重複購買。",
+      "userGroupNotPurchasable": "此使用者組暫時無法購買，請稍後再試。"
     },
     "or": "或",
     "cardPurchase": "卡密購買",
@@ -157,6 +158,7 @@
   },
   "buyCta": "購買",
   "renewCta": "續費",
+  "purchaseUnavailable": "暫時無法購買",
   "recommended": "推薦",
   "cycleFee": "當前週期費用"
 }

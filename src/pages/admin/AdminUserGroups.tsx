@@ -132,6 +132,7 @@ export default function AdminUserGroups() {
         researchEnabled: false,
         workspacesEnabled: false,
         is_public: true,
+        is_purchasable: true,
         max_workspaces: 0,
         max_storage_mb: 0,
         creditPeriodValue: 0,
@@ -161,6 +162,7 @@ export default function AdminUserGroups() {
         featuresText: feats.filter((f) => f !== RESEARCH_FEATURE && f !== WORKSPACES_FEATURE).join('\n'),
         researchEnabled: feats.includes(RESEARCH_FEATURE),
         workspacesEnabled: feats.includes(WORKSPACES_FEATURE),
+        is_purchasable: row.is_purchasable !== false,
         creditPeriodValue: period.value,
         creditPeriodUnit: period.unit,
       },
@@ -243,6 +245,7 @@ export default function AdminUserGroups() {
       max_workspaces: Math.max(0, Number(d.max_workspaces) || 0),
       max_storage_mb: Math.max(0, Number(d.max_storage_mb) || 0),
       is_public: d.is_public !== false,
+      is_purchasable: d.is_purchasable !== false,
       credit_allowance: Math.max(0, Number(d.credit_allowance) || 0),
       credit_period_seconds: periodSeconds,
     }
@@ -767,6 +770,24 @@ export default function AdminUserGroups() {
                   checked={editor.draft.is_public !== false}
                   onCheckedChange={(v) => setDraft({ is_public: v })}
                   aria-label={t('admin:groups.fields.isPublic', { defaultValue: 'Show on subscription page' })}
+                />
+              </div>
+              <div className="flex items-center justify-between gap-3 rounded-[10px] border border-[var(--color-border)] px-3 py-2.5">
+                <div className="min-w-0">
+                  <p className="text-sm text-[var(--color-fg)]">
+                    {t('admin:groups.fields.purchaseEnabled', { defaultValue: 'Allow purchases' })}
+                  </p>
+                  <p className="text-[12px] text-[var(--color-fg-subtle)]">
+                    {t('admin:groups.fields.purchaseEnabledHint', {
+                      defaultValue:
+                        'When off, the tier can still be shown, but users will temporarily be unable to purchase it.',
+                    })}
+                  </p>
+                </div>
+                <Switch
+                  checked={editor.draft.is_purchasable !== false}
+                  onCheckedChange={(v) => setDraft({ is_purchasable: v })}
+                  aria-label={t('admin:groups.fields.purchaseEnabled', { defaultValue: 'Allow purchases' })}
                 />
               </div>
             </div>

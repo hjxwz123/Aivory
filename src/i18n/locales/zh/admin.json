@@ -819,7 +819,9 @@
       "workspaces": "工作空间",
       "workspacesHint": "允许该用户组创建工作空间（数量上限见上；0 = 不限）。",
       "isPublic": "在订阅页展示",
-      "isPublicHint": "关闭后该用户组不再出现在订阅页（已在该组的用户不受影响）。"
+      "isPublicHint": "关闭后该用户组不再出现在订阅页（已在该组的用户不受影响）。",
+      "purchaseEnabled": "允许购买",
+      "purchaseEnabledHint": "关闭后套餐仍可展示，但用户暂时无法购买。"
     },
     "errors": {
       "nameRequired": "请填写名称",

@@ -45,7 +45,8 @@ export function UserGroupTierCard({
   const features = group.features.filter((feature) => feature !== 'research')
   const amount = groupPriceAmount(group, billingCycle)
   const available = group.is_default || amount > 0
-  const canPurchaseRenewal = isCurrent && canRenew && amount > 0
+  const purchaseUnavailable = !group.is_default && group.is_purchasable === false
+  const canPurchaseRenewal = isCurrent && canRenew && amount > 0 && !purchaseUnavailable
 
   return (
     <article
@@ -117,7 +118,11 @@ export function UserGroupTierCard({
       </ul>
 
       <div className="mt-5 flex grow items-end sm:mt-0">
-        {canPurchaseRenewal ? (
+        {isCurrent && canRenew && purchaseUnavailable ? (
+          <Button size="sm" variant="secondary" disabled className={actionClassName}>
+            {t('purchaseUnavailable')}
+          </Button>
+        ) : canPurchaseRenewal ? (
           <Button size="sm" variant="primary" className={actionClassName} onClick={onPurchase}>
             {t('renewCta')}
           </Button>
@@ -128,6 +133,10 @@ export function UserGroupTierCard({
         ) : isPermanentlyOwned ? (
           <Button size="sm" variant="secondary" disabled className={actionClassName}>
             {t('alreadyOwned')}
+          </Button>
+        ) : purchaseUnavailable ? (
+          <Button size="sm" variant="secondary" disabled className={actionClassName}>
+            {t('purchaseUnavailable')}
           </Button>
         ) : !available ? (
           <Button size="sm" variant="secondary" disabled className={actionClassName}>

@@ -27,6 +27,7 @@ function userGroup(patch: Partial<ApiUserGroup> = {}): ApiUserGroup {
     credit_period_seconds: 0,
     created_at: 1,
     updated_at: 1,
+    is_purchasable: true,
     ...patch,
   }
 }
@@ -77,5 +78,30 @@ describe('UserGroupTierCard', () => {
 
     expect(html).toContain('priceFree')
     expect(html).toContain('href="/register"')
+  })
+
+  it('shows a disabled purchase-unavailable action while keeping the paid group visible', () => {
+    const html = renderCard(userGroup({ is_purchasable: false }), 'monthly')
+
+    expect(html).toContain('purchaseUnavailable')
+    expect(html).toContain('disabled=""')
+    expect(html).toContain('$12.00')
+    expect(html).not.toContain('href="/register"')
+  })
+
+  it('does not apply the purchase flag to switching into the default group', () => {
+    const html = renderCard(
+      userGroup({
+        is_default: true,
+        is_purchasable: false,
+        monthly_price_amount_minor: 0,
+        yearly_price_amount_minor: 0,
+      }),
+      'monthly',
+    )
+
+    expect(html).toContain('priceFree')
+    expect(html).toContain('href="/register"')
+    expect(html).not.toContain('purchaseUnavailable')
   })
 })

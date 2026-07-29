@@ -331,6 +331,7 @@ export default function Subscription() {
     const paid = sortedGroups.filter(
       (group) =>
         !group.is_default &&
+        group.is_purchasable !== false &&
         group.id !== currentId &&
         group.id !== permanentBaselineId &&
         groupPriceAmount(group, billingCycle) > 0,
@@ -592,14 +593,15 @@ export default function Subscription() {
                         isPermanentlyOwned={group.id === permanentBaselineId}
                         isRecommended={group.id === recommendedId}
                         onSwitch={() => setUpgrade(group)}
-                        onPurchase={() =>
+                        onPurchase={() => {
+                          if (group.is_purchasable === false) return
                           setPurchaseTarget({
                             type: 'user_group',
                             id: group.id,
                             name: group.name,
                             billingCycle,
                           })
-                        }
+                        }}
                         locale={i18n.resolvedLanguage}
                       />
                     ))}

@@ -81,6 +81,10 @@ type UserGroup struct {
 	// IsPublic controls whether the tier is listed on the public subscription
 	// page (admins always see every group). Default true.
 	IsPublic bool `json:"is_public"`
+	// IsPurchasable controls whether members may start or resume payment for the
+	// tier. A tier may remain public while purchases are temporarily paused.
+	// Default true so existing tiers keep their current behavior.
+	IsPurchasable bool `json:"is_purchasable"`
 	// MaxStorageMB caps the total size of a member's non-image uploads
 	// (files + KB documents), in MB. 0 = unlimited (§ user files page).
 	MaxStorageMB int `json:"max_storage_mb"`
