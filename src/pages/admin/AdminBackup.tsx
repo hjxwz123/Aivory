@@ -762,7 +762,7 @@ export default function AdminBackup() {
           <input
             ref={cfgFileRef}
             type="file"
-            accept=".zip,.json,application/zip,application/json"
+            accept=".zip,application/zip"
             className="sr-only"
             onChange={onPickConfig}
           />
