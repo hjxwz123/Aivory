@@ -25,6 +25,7 @@ import { Badge } from '@/components/ui/badge'
 import { PanelFallback } from '@/components/ui/panel-fallback'
 import { parseSkillDocument } from '@/lib/skill-document'
 import { IconPicker } from '@/components/admin/icon-picker'
+import { AdminSortableList } from '@/components/admin/AdminSortableList'
 import { SkillIcon } from '@/components/ui/skill-icon'
 
 type Draft = Partial<ApiSkill>
@@ -94,7 +95,7 @@ export default function AdminSkills() {
 
   function openNew() {
     setImportMd('')
-    setEditor({ open: true, draft: { ...defaultDraft } })
+    setEditor({ open: true, draft: { ...defaultDraft, sort_order: rows.length } })
   }
   function openEdit(row: ApiSkill) {
     setImportMd('')
@@ -168,6 +169,17 @@ export default function AdminSkills() {
     }
   }
 
+  function setOrderedRows(next: ApiSkill[]) {
+    setRows(next.map((row, sortOrder) => ({ ...row, sort_order: sortOrder })))
+  }
+
+  function persistOrder(next: ApiSkill[], previous: ApiSkill[]) {
+    void adminApi.reorderSkills(next.map((row) => row.id)).catch((error) => {
+      setRows(previous)
+      toast.error(error instanceof ApiError ? error.message : t('admin:common.reorderFailed'))
+    })
+  }
+
   return (
     <div>
       <header className="flex flex-col items-start gap-4 sm:flex-row sm:items-end sm:justify-between">
@@ -192,12 +204,17 @@ export default function AdminSkills() {
             {t('admin:skills.empty')}
           </div>
         ) : (
-          <ul className="flex flex-col divide-y divide-[var(--color-divider)] rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)]">
-            {rows.map((s) => (
-              <li
-                key={s.id}
-                className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-3 py-3.5 sm:px-5 sm:py-4"
-              >
+          <AdminSortableList
+            items={rows}
+            onItemsChange={setOrderedRows}
+            onOrderCommit={persistOrder}
+            dragHandleLabel={t('admin:common.dragHandle')}
+            moveUpLabel={t('admin:common.moveUp')}
+            moveDownLabel={t('admin:common.moveDown')}
+            mobileDragOnly
+            rowClassName="grid grid-cols-[2.75rem_minmax(0,1fr)_auto] items-center gap-2 px-2 py-3.5 md:grid-cols-[auto_auto_minmax(0,1fr)_auto] md:gap-3 md:px-5 md:py-4"
+            renderItem={(s) => (
+              <>
                 <div className="flex min-w-0 items-center gap-3">
                   <span className="grid size-9 shrink-0 place-items-center rounded-[9px] bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)]">
                     <SkillIcon name={s.icon} size={16} aria-hidden />
@@ -236,9 +253,9 @@ export default function AdminSkills() {
                     <span className="max-sm:sr-only">{t('admin:common.remove')}</span>
                   </Button>
                 </div>
-              </li>
-            ))}
-          </ul>
+              </>
+            )}
+          />
         )}
       </section>
 

@@ -8,11 +8,12 @@
  * here. Style follows the rest of /admin: card list, ghost actions, tokens-only.
  */
 import { useEffect, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { ArrowLeft, ChevronRight, MessageSquare, Trash2 } from 'lucide-react'
+import { ChevronRight, MessageSquare, Trash2 } from 'lucide-react'
 import { adminApi, ApiError } from '@/api'
 import type { ApiConversation, ApiUser } from '@/api/types'
+import { AdminDetailHeader } from '@/components/admin/admin-detail-header'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -37,7 +38,6 @@ function formatStamp(unixSec: number): string {
 
 export default function AdminUserConversations() {
   const { t } = useTranslation(['admin', 'common'])
-  const navigate = useNavigate()
   const { id = '' } = useParams<{ id: string }>()
   const [user, setUser] = useState<ApiUser | null>(null)
   const [rows, setRows] = useState<ApiConversation[]>([])
@@ -95,14 +95,7 @@ export default function AdminUserConversations() {
 
   return (
     <div>
-      <button
-        type="button"
-        onClick={() => navigate('/admin/users')}
-        className="inline-flex items-center gap-1.5 text-[12.5px] text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)] interactive rounded-[6px] -ml-2 px-2 py-1.5 mb-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-      >
-        <ArrowLeft size={12} aria-hidden />
-        {t('users.backToUsers')}
-      </button>
+      <AdminDetailHeader backTo="/admin/users" backLabel={t('users.backToUsers')} />
 
       <header>
         <h1

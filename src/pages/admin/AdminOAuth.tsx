@@ -30,6 +30,7 @@ import { Badge } from '@/components/ui/badge'
 import { IconUploader } from '@/components/admin/icon-uploader'
 import { OAuthBrandGlyph } from '@/components/auth/oauth-glyph'
 import { PanelFallback } from '@/components/ui/panel-fallback'
+import { AdminSortableList } from '@/components/admin/AdminSortableList'
 
 type Editable = Partial<ApiOAuthProvider> & { client_secret?: string }
 
@@ -89,7 +90,7 @@ export default function AdminOAuth() {
   function openNew() {
     setCopied(false)
     setPrepareError('')
-    setEditor({ open: true, draft: { kind: 'google', enabled: true, name: 'Google' } })
+    setEditor({ open: true, draft: { kind: 'google', enabled: true, name: 'Google', sort_order: rows.length } })
     void prepareNewProvider()
   }
   function openEdit(row: ApiOAuthProvider) {
@@ -102,6 +103,17 @@ export default function AdminOAuth() {
 
   function setDraft(patch: Partial<Editable>) {
     setEditor((ed) => ({ ...ed, draft: { ...ed.draft, ...patch } }))
+  }
+
+  function setOrderedRows(next: ApiOAuthProvider[]) {
+    setRows(next.map((row, sortOrder) => ({ ...row, sort_order: sortOrder })))
+  }
+
+  function persistOrder(next: ApiOAuthProvider[], previous: ApiOAuthProvider[]) {
+    void adminApi.reorderOAuthProviders(next.map((row) => row.id)).catch((error) => {
+      setRows(previous)
+      toast.error(error instanceof ApiError ? error.message : t('admin:common.reorderFailed'))
+    })
   }
 
   async function submit() {
@@ -196,9 +208,17 @@ export default function AdminOAuth() {
             {t('admin:oauth.empty')}
           </div>
         ) : (
-          <ul className="flex flex-col divide-y divide-[var(--color-divider)] rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)]">
-            {rows.map((p) => (
-              <li key={p.id} className="grid grid-cols-[auto_1fr_auto_auto] items-center gap-3 px-5 py-4">
+          <AdminSortableList
+            items={rows}
+            onItemsChange={setOrderedRows}
+            onOrderCommit={persistOrder}
+            dragHandleLabel={t('admin:common.dragHandle')}
+            moveUpLabel={t('admin:common.moveUp')}
+            moveDownLabel={t('admin:common.moveDown')}
+            mobileDragOnly
+            rowClassName="grid grid-cols-[2.75rem_auto_minmax(0,1fr)_auto_auto] items-center gap-2 px-2 py-4 md:grid-cols-[auto_auto_auto_minmax(0,1fr)_auto_auto] md:gap-3 md:px-5"
+            renderItem={(p) => (
+              <>
                 <div className="shrink-0 size-9 inline-flex items-center justify-center rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] text-[var(--color-fg)]">
                   <OAuthBrandGlyph kind={p.kind} icon={p.icon} size={18} />
                 </div>
@@ -218,9 +238,9 @@ export default function AdminOAuth() {
                 <Button variant="ghost" size="sm" leadingIcon={<Trash2 size={13} aria-hidden />} onClick={() => setConfirmDelete(p)}>
                   {t('admin:common.remove')}
                 </Button>
-              </li>
-            ))}
-          </ul>
+              </>
+            )}
+          />
         )}
       </section>
 

@@ -7,9 +7,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { ArrowLeft, FolderClosed, Library, ChevronDown, FileText, ImageIcon } from 'lucide-react'
+import { FolderClosed, Library, ChevronDown, FileText, ImageIcon } from 'lucide-react'
 import { adminApi, ApiError } from '@/api'
 import type { ApiProject, ApiKnowledgeBase, ApiDocument, ApiUser, ApiAdminImage } from '@/api/types'
+import { AdminDetailHeader } from '@/components/admin/admin-detail-header'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { useModels } from '@/store/models'
@@ -127,14 +128,7 @@ export default function AdminUserLibrary() {
 
   return (
     <div>
-      <button
-        type="button"
-        onClick={() => navigate('/admin/users')}
-        className="inline-flex items-center gap-1.5 text-[12.5px] text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)] interactive rounded-[6px] -ml-2 px-2 py-1.5 mb-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-      >
-        <ArrowLeft size={12} aria-hidden />
-        {t('users.backToUsers')}
-      </button>
+      <AdminDetailHeader backTo="/admin/users" backLabel={t('users.backToUsers')} />
 
       <header>
         <h1 className="font-serif text-3xl tracking-tight text-[var(--color-fg)]">

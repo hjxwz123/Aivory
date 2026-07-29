@@ -18,6 +18,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { IconUploader } from '@/components/admin/icon-uploader'
 import { toast } from '@/hooks/use-toast'
 import { PanelFallback } from '@/components/ui/panel-fallback'
+import { AdminSortableList } from '@/components/admin/AdminSortableList'
 
 export default function AdminImageStyles() {
   const { t } = useTranslation(['admin', 'common'])
@@ -104,6 +105,17 @@ export default function AdminImageStyles() {
     setStyles((s) => s.map((x) => (x.id === id ? { ...x, ...patch } : x)))
   }
 
+  function setOrderedStyles(next: ApiImageStyle[]) {
+    setStyles(next.map((style, sortOrder) => ({ ...style, sort_order: sortOrder })))
+  }
+
+  function persistOrder(next: ApiImageStyle[], previous: ApiImageStyle[]) {
+    void adminApi.reorderImageStyles(next.map((style) => style.id)).catch((error) => {
+      setStyles(previous)
+      toast.error(error instanceof ApiError ? error.message : t('admin:common.reorderFailed'))
+    })
+  }
+
   return (
     <div className="mx-auto max-w-[76rem]">
       <header>
@@ -172,17 +184,25 @@ export default function AdminImageStyles() {
             {t('admin:imageStyles.empty', { defaultValue: 'No styles yet. Add one above.' })}
           </div>
         ) : (
-          <ul className="mt-6 flex flex-col gap-3">
-            {styles.map((st) => (
+          <AdminSortableList
+            items={styles}
+            onItemsChange={setOrderedStyles}
+            onOrderCommit={persistOrder}
+            dragHandleLabel={t('admin:common.dragHandle')}
+            moveUpLabel={t('admin:common.moveUp')}
+            moveDownLabel={t('admin:common.moveDown')}
+            mobileDragOnly
+            listClassName="mt-6"
+            rowClassName="grid grid-cols-[2.75rem_minmax(0,1fr)] items-start gap-2 p-3 md:grid-cols-[auto_auto_minmax(0,1fr)] md:gap-3 md:p-4"
+            renderItem={(st) => (
               <StyleCard
-                key={st.id}
                 style={st}
                 removing={busyId === st.id}
                 onPatch={(p) => patchLocal(st.id, p)}
                 onRemove={() => void remove(st.id)}
               />
-            ))}
-          </ul>
+            )}
+          />
         )}
       </section>
     </div>
@@ -232,8 +252,8 @@ function StyleCard({
   }
 
   return (
-    <li className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-      <div className="flex gap-4">
+    <div className="min-w-0">
+      <div className="flex flex-col gap-4 sm:flex-row">
         {/* Example thumbnail */}
         <div className="size-20 shrink-0 overflow-hidden rounded-[10px] border border-[var(--color-border-subtle)] bg-[var(--color-bg-muted)]">
           {style.example_image_url ? (
@@ -247,22 +267,12 @@ function StyleCard({
 
         <div className="flex min-w-0 flex-1 flex-col gap-3">
           <div className="flex flex-wrap items-end gap-3">
-            <div className="min-w-[12rem] flex-1">
+            <div className="min-w-0 flex-1 sm:min-w-[12rem]">
               <Label htmlFor={`name-${style.id}`}>{t('admin:imageStyles.name', { defaultValue: 'Name' })}</Label>
               <Input
                 id={`name-${style.id}`}
                 value={style.name}
                 onChange={(e) => onPatch({ name: e.target.value })}
-                className="mt-1 h-9"
-              />
-            </div>
-            <div className="w-24">
-              <Label htmlFor={`order-${style.id}`}>{t('admin:imageStyles.order', { defaultValue: 'Order' })}</Label>
-              <Input
-                id={`order-${style.id}`}
-                type="number"
-                value={style.sort_order}
-                onChange={(e) => onPatch({ sort_order: Number(e.target.value) || 0 })}
                 className="mt-1 h-9"
               />
             </div>
@@ -332,6 +342,6 @@ function StyleCard({
           </div>
         </div>
       </div>
-    </li>
+    </div>
   )
 }
