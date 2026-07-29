@@ -237,27 +237,30 @@ export default function ChatHome() {
   }, [t])
   const cards = useMemo(() => fisherYatesPick(SUGGESTIONS, 6), [])
 
-  // The suggestion rail is a single horizontally-scrollable row. A plain mouse
-  // wheel only scrolls vertically, so without this it can't be scrolled with the
-  // wheel at all — only by dragging / trackpad-panning. Translate a dominant
-  // vertical wheel delta into horizontal scroll, yielding back to the page once
-  // the rail reaches an edge so vertical page scroll is never trapped. Native
-  // (non-passive) listener: React attaches wheel passively, so an onWheel
-  // preventDefault would be ignored.
+  // The suggestion rail is a single horizontally-scrollable row. Translate a
+  // dominant vertical mouse-wheel delta into horizontal movement while leaving
+  // native horizontal trackpad gestures untouched. Yield back to page scrolling
+  // at either edge, and do not intercept browser/trackpad pinch zoom. A native
+  // non-passive listener is required because React delegates wheel passively.
   const suggestionsRailRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const el = suggestionsRailRef.current
     if (!el) return
     const onWheel = (e: WheelEvent) => {
-      if (el.scrollWidth <= el.clientWidth) return
+      if (e.ctrlKey || e.metaKey || el.scrollWidth <= el.clientWidth) return
       if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return
-      // deltaMode 1 = lines (Firefox wheel) — normalise to pixels.
-      const delta = e.deltaMode === 1 ? e.deltaY * 24 : e.deltaY
-      const atStart = el.scrollLeft <= 0
-      const atEnd = el.scrollLeft + el.clientWidth >= el.scrollWidth - 1
-      if ((delta < 0 && atStart) || (delta > 0 && atEnd)) return
-      el.scrollLeft += delta
+
+      const scale = e.deltaMode === WheelEvent.DOM_DELTA_LINE
+        ? 24
+        : e.deltaMode === WheelEvent.DOM_DELTA_PAGE
+          ? el.clientWidth
+          : 1
+      const current = el.scrollLeft
+      const next = Math.min(el.scrollWidth - el.clientWidth, Math.max(0, current + e.deltaY * scale))
+      if (Math.abs(next - current) < 1) return
+
       e.preventDefault()
+      el.scrollLeft = next
     }
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
@@ -452,21 +455,21 @@ export default function ChatHome() {
 
             {!drawMode && (
               <div className="mt-8 sm:mt-10 mx-auto w-full max-w-[44rem]">
-                {/* Single row, fixed-width cards, horizontally scrollable (snap +
-                    mouse wheel, see suggestionsRailRef). Scrollbar hidden; on phones
-                    the rail bleeds to the screen edges so the next card peeks. The
-                    top/bottom padding leaves room for each card's hover lift +
-                    shadow, which `overflow-x-auto` (which also clips the y axis)
-                    would otherwise cut off. */}
+                {/* Single row, fixed-width cards, horizontally scrollable by mouse
+                    wheel or native horizontal gestures. Mandatory snapping is
+                    touch-only: on desktop it can pull small wheel deltas back to the
+                    current card and make the rail appear frozen. Scrollbar hidden;
+                    on phones the rail bleeds to the screen edges so the next card
+                    peeks. The vertical padding leaves room for the hover lift. */}
                 <div
                   ref={suggestionsRailRef}
-                  className="flex gap-3 overflow-x-auto px-1 -mx-1 max-sm:-mx-[var(--layout-gutter-mobile)] max-sm:px-[var(--layout-gutter-mobile)] max-sm:scroll-px-[var(--layout-gutter-mobile)] pt-2 pb-2 snap-x snap-mandatory [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                  className="flex gap-3 overflow-x-auto overscroll-x-contain px-1 -mx-1 max-sm:-mx-[var(--layout-gutter-mobile)] max-sm:px-[var(--layout-gutter-mobile)] max-sm:scroll-px-[var(--layout-gutter-mobile)] pt-2 pb-2 max-sm:snap-x max-sm:snap-mandatory [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
                 >
                   {cards.map((s) => {
                     const title = t(s.titleKey)
                     const prompt = t(s.promptKey)
                     return (
-                      <div key={s.id} className="home-card w-[13.5rem] sm:w-[15.5rem] shrink-0 snap-start">
+                      <div key={s.id} className="home-card w-[13.5rem] sm:w-[15.5rem] shrink-0 max-sm:snap-start">
                         <SuggestionCard
                           icon={s.icon}
                           title={title}
