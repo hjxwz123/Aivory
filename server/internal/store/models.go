@@ -94,7 +94,7 @@ type UserGroup struct {
 	MaxWorkspaces int `json:"max_workspaces"`
 	// Credit system (§ credits). CreditAllowance is the timed-credit budget granted
 	// each CreditPeriodSeconds cycle (unused voided on refresh). The USD→credit
-	// rate and both purchase links are global settings, not per-group fields.
+	// rate is a global setting, not a per-group field.
 	CreditAllowance     float64 `json:"credit_allowance"`
 	CreditPeriodSeconds int     `json:"credit_period_seconds"`
 	CreatedAt           int64   `json:"created_at"`

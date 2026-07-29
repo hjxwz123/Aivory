@@ -174,8 +174,6 @@ func ReorderCreditPackages(ctx context.Context, db *sql.DB, ids []string) error 
 	return tx.Commit()
 }
 
-const legacyCreditPackageMigrationMarker = "credit_packages_from_legacy_settings_v1"
-
 type settingMigrationExecer interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
 }
@@ -196,17 +194,10 @@ func EnsureSettlementCurrencySetting(ctx context.Context, ex settingMigrationExe
 }
 
 // MigrateLegacyCreditPackage imports the retired single-offer settings into one
-// regular package. The fixed id plus marker make retries and old backup imports
-// idempotent.
+// regular package, then removes every retired purchase setting. The fixed row ID
+// makes retries and old backup imports idempotent without leaving a marker or
+// deprecated keys in the active settings table.
 func MigrateLegacyCreditPackage(ctx context.Context, ex creditPackageMigrationExecer) error {
-	var marker string
-	err := ex.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=?`, legacyCreditPackageMigrationMarker).Scan(&marker)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return err
-	}
-	if marker != "" {
-		return nil
-	}
 	var creditsRaw, priceRaw string
 	creditsErr := ex.QueryRowContext(ctx, `SELECT value FROM settings WHERE key='permanent_credit_purchase_credits'`).Scan(&creditsRaw)
 	priceErr := ex.QueryRowContext(ctx, `SELECT value FROM settings WHERE key='permanent_credit_purchase_price_amount_minor'`).Scan(&priceRaw)
@@ -218,19 +209,21 @@ func MigrateLegacyCreditPackage(ctx context.Context, ex creditPackageMigrationEx
 	}
 	var credits float64
 	var price int64
-	if json.Unmarshal([]byte(creditsRaw), &credits) != nil || json.Unmarshal([]byte(priceRaw), &price) != nil || credits <= 0 || price <= 0 {
-		return nil
+	if json.Unmarshal([]byte(creditsRaw), &credits) == nil && json.Unmarshal([]byte(priceRaw), &price) == nil && credits > 0 && price > 0 {
+		now := time.Now().Unix()
+		if _, err := ex.ExecContext(ctx,
+			`INSERT INTO credit_packages(id, name, description, credits, price_amount_minor, enabled, sort_order, created_at, updated_at)
+			 VALUES('cp_legacy_default', 'Permanent credits', '', ?, ?, 1, 0, ?, ?)
+			 ON CONFLICT(id) DO NOTHING`, credits, price, now, now); err != nil {
+			return err
+		}
 	}
-	now := time.Now().Unix()
-	if _, err := ex.ExecContext(ctx,
-		`INSERT INTO credit_packages(id, name, description, credits, price_amount_minor, enabled, sort_order, created_at, updated_at)
-		 VALUES('cp_legacy_default', 'Permanent credits', '', ?, ?, 1, 0, ?, ?)
-		 ON CONFLICT(id) DO NOTHING`, credits, price, now, now); err != nil {
-		return err
-	}
-	_, err = ex.ExecContext(ctx,
-		`INSERT INTO settings(key, value, updated_at) VALUES(?, '1', ?)
-		 ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`,
-		legacyCreditPackageMigrationMarker, now)
+	_, err := ex.ExecContext(ctx, `DELETE FROM settings WHERE key IN (
+		'permanent_credit_purchase_credits',
+		'permanent_credit_purchase_price_amount_minor',
+		'group_buy_url',
+		'credit_buy_url',
+		'credit_packages_from_legacy_settings_v1'
+	)`)
 	return err
 }
