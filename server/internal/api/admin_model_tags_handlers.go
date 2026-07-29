@@ -10,7 +10,7 @@ import (
 
 // Model tags (§ model tags) — admin-managed labels assigned to models. Any
 // authenticated user can LIST them (the picker renders the filter chips); only
-// an admin can create / rename / delete.
+// an admin can create / rename / reorder / delete.
 
 // listModelTagsPublic returns the tags for the model-picker filter.
 func listModelTagsPublic(d Deps, w http.ResponseWriter, r *http.Request) {
@@ -66,26 +66,44 @@ func createModelTagAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 201, tag)
 }
 
+func reorderModelTagsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		IDs []string `json:"ids"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, errInvalidInput)
+		return
+	}
+	if err := store.ReorderModelTags(r.Context(), d.DB, body.IDs); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
 func updateModelTagAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	id := pathParam(r, "id")
-	var req modelTagReq
-	if err := decodeJSON(r, &req); err != nil {
+	var patch store.ModelTagPatch
+	if err := decodeJSON(r, &patch); err != nil {
 		writeError(w, 400, errInvalidInput)
 		return
 	}
-	req.Name = strings.TrimSpace(req.Name)
-	if req.Name == "" {
-		writeError(w, 400, errors.New("name required"))
-		return
+	if patch.Name != nil {
+		name := strings.TrimSpace(*patch.Name)
+		if name == "" {
+			writeError(w, 400, errors.New("name required"))
+			return
+		}
+		patch.Name = &name
+		if existing, err := store.GetModelTagByName(r.Context(), d.DB, name); err == nil && existing != nil && existing.ID != id {
+			writeError(w, 409, store.ErrModelTagNameExists)
+			return
+		} else if err != nil && !errors.Is(err, store.ErrNotFound) {
+			writeError(w, 500, err)
+			return
+		}
 	}
-	if existing, err := store.GetModelTagByName(r.Context(), d.DB, req.Name); err == nil && existing != nil && existing.ID != id {
-		writeError(w, 409, store.ErrModelTagNameExists)
-		return
-	} else if err != nil && !errors.Is(err, store.ErrNotFound) {
-		writeError(w, 500, err)
-		return
-	}
-	tag, err := store.UpdateModelTag(r.Context(), d.DB, id, req.Name, req.SortOrder)
+	tag, err := store.UpdateModelTag(r.Context(), d.DB, id, patch)
 	if err != nil {
 		if errors.Is(err, store.ErrModelTagNameExists) {
 			writeError(w, 409, err)

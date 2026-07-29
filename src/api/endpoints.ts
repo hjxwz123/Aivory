@@ -690,6 +690,8 @@ export const adminApi = {
   modelTags: () => api<ApiModelTag[]>('/admin/model-tags'),
   createModelTag: (name: string, sortOrder = 0) =>
     api<ApiModelTag>('/admin/model-tags', { method: 'POST', body: { name, sort_order: sortOrder } }),
+  reorderModelTags: (ids: string[]) =>
+    api<{ ok: true }>('/admin/model-tags/reorder', { method: 'PATCH', body: { ids } }),
   updateModelTag: (id: string, body: { name: string; sort_order?: number }) =>
     api<ApiModelTag>(`/admin/model-tags/${encodeURIComponent(id)}`, { method: 'PATCH', body }),
   removeModelTag: (id: string) =>

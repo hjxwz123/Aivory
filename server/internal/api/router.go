@@ -366,6 +366,7 @@ func NewRouter(d Deps) http.Handler {
 	// Model tags (§ model tags): admin CRUD of the assignable label set.
 	mux.handle("GET", "/api/admin/model-tags", requireAdmin(d, listModelTagsAdmin))
 	mux.handle("POST", "/api/admin/model-tags", requireAdmin(d, createModelTagAdmin))
+	mux.handle("PATCH", "/api/admin/model-tags/reorder", requireAdmin(d, reorderModelTagsAdmin))
 	mux.handle("PATCH", "/api/admin/model-tags/:id", requireAdmin(d, updateModelTagAdmin))
 	mux.handle("DELETE", "/api/admin/model-tags/:id", requireAdmin(d, deleteModelTagAdmin))
 	// §4.20 Image styles — admin CRUD (full row incl. hidden_prompt). Example
