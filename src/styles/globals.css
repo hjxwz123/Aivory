@@ -753,6 +753,11 @@
     display: none;
   }
 
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklch, var(--color-fg-faint) 30%, transparent) transparent;
+  }
+
   .scrollbar-thin::-webkit-scrollbar {
     width: 6px;
     height: 6px;
