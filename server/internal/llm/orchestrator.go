@@ -103,11 +103,9 @@ type ToolContext struct {
 	// only load the skills an admin checked for it — the same set the system-prompt
 	// index advertises.
 	ModelID     string
-	KBIDs       []string
 	ProjectID   string
 	ProjectName string
 	DB          *sql.DB
-	RAG         *rag.Service
 	// DeepResearch raises the per-turn tool budgets (deep_research.go).
 	DeepResearch bool
 	// Fast quarters the per-turn tool budgets and withholds python_execute
@@ -896,10 +894,12 @@ type requestUsageRow struct {
 	ChannelAttribution bool
 }
 
-// perRequestUsageRows splits one finished turn into per-upstream-request usage
-// rows: every provider round the recorder captured (native tool loop iteration,
-// prompt-protocol round, deep-research call) becomes its own row carrying that
-// round's tokens and its own request snapshot. Billing invariants hold exactly:
+// perRequestUsageRows splits one finished turn into successful per-upstream-
+// request usage rows. Failed attempts are emitted separately by
+// providerFailureUsageLogs and never share the successful turn's bill. Every
+// completed provider round (native tool loop iteration, prompt-protocol round,
+// deep-research call) carries its own tokens and request snapshot. Billing
+// invariants hold exactly:
 // row token sums equal the turn totals (any un-attached residual — list
 // overflow, TTFT model fallback — folds into the LAST row), row costs sum to
 // totalCost, and row credits sum to totalCredits (distributed by cost share so
@@ -909,7 +909,7 @@ type requestUsageRow struct {
 func perRequestUsageRows(snaps []providerRequestSnapshot, model *store.Model, total Usage, totalCost, totalCredits float64, includeReq bool) []requestUsageRow {
 	withUsage := make([]providerRequestSnapshot, 0, len(snaps))
 	for _, s := range snaps {
-		if s.HasUsage {
+		if s.HasUsage && strings.TrimSpace(s.Error) == "" {
 			withUsage = append(withUsage, s)
 		}
 	}
@@ -1001,6 +1001,54 @@ func requestUsageChannel(row requestUsageRow, primaryChannelID, fallbackChannelI
 		return fallbackChannelID, true
 	}
 	return primaryChannelID, false
+}
+
+// providerFailureUsageLogs converts failed upstream attempts into zero-cost
+// admin usage rows. A recovered primary failure and its successful fallback use
+// the same message_id but remain separate records, so observability improves
+// without changing billing, quota, or credit accounting.
+func providerFailureUsageLogs(snaps []providerRequestSnapshot, base store.UsageLog, primaryChannelID, fallbackChannelID string) []store.UsageLog {
+	rows := make([]store.UsageLog, 0, len(snaps))
+	for _, snap := range snaps {
+		if strings.TrimSpace(snap.Error) == "" {
+			continue
+		}
+		row := base
+		row.InputTokens = 0
+		row.OutputTokens = 0
+		row.CacheReadTokens = 0
+		row.CacheWriteTokens = 0
+		row.ImagesCount = 0
+		row.Cost = 0
+		row.Credits = 0
+		row.Status = "error"
+		row.Error = snap.Error
+		row.RequestMethod = snap.Method
+		row.RequestURL = snap.URL
+		row.RequestHeaders = snap.Header
+		row.RequestBody = snap.Body
+		row.Fallback = snap.Fallback
+		if snap.Fallback {
+			row.ChannelID = fallbackChannelID
+		} else {
+			row.ChannelID = primaryChannelID
+		}
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+func providerFailureCaptured(snaps []providerRequestSnapshot, err error) bool {
+	if err == nil {
+		return false
+	}
+	target := truncErr(err.Error())
+	for _, snap := range snaps {
+		if snap.Error == target {
+			return true
+		}
+	}
+	return false
 }
 
 func maxInt(a, b int) int {
@@ -1406,8 +1454,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	}
 	// §C1 cross-user isolation: a conversation's kb_ids are user-supplied (PATCH
 	// /conversations/:id writes them verbatim) and the retrieval layer scopes only
-	// by kb_id — so drop any KB the user doesn't own BEFORE it reaches inline RAG
-	// or the search_knowledge_base tool (ToolContext.KBIDs below).
+	// by kb_id — so drop any KB the user doesn't own BEFORE it reaches inline RAG.
 	if len(kbIDs) > 0 {
 		kbIDs = store.OwnedKBIDs(ctx, o.db, req.UserID, conv.WorkspaceID, kbIDs)
 	}
@@ -1485,8 +1532,8 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// unchecked every tool, selected stale names, or an administrator changed the
 	// model configuration between selection and send. Treat that as the same
 	// effective no-tools policy as Disabled. Merely retaining the official-mode
-	// marker would suppress local declarations but skip the no-tools fallbacks
-	// (notably inline RAG for rag_mode=tool), skill clearing, and history cleanup.
+	// marker would suppress local declarations but skip skill clearing and history
+	// cleanup.
 	if officialMode && !useOfficial {
 		req.NoTools = true
 	}
@@ -1508,9 +1555,8 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	}
 	if req.ToolMode == ToolModeAuto {
 		// An effective deny-all policy has nothing the classifier could enable.
-		// Enter the same no-tools pipeline immediately: besides avoiding a wasted
-		// task-model round trip, this activates server-side fallbacks such as inline
-		// RAG for conversations configured with rag_mode=tool.
+		// Enter the same no-tools pipeline immediately and avoid a wasted task-model
+		// round trip.
 		if len(toolDefs) == 0 {
 			req.NoTools = true
 		} else if sandboxFilesHaveSheet(sandboxFiles) {
@@ -1554,31 +1600,17 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 
 	// 6. RAG via the §4.11-B query router (intent-classify + query-rewrite),
 	//    not a blind always-on retrieve. The session's rag_mode overrides:
-	//    inject = always retrieve without routing; tool = no inline injection
-	//    (the model calls search_knowledge_base itself); auto = router.
+	//    inject = always retrieve without routing; auto = router. Retired or
+	//    otherwise unknown values degrade to auto so documents are never hidden.
 	ragSnippets := []Citation{}
-	ragMode := conv.RAGMode
-	if ragMode == "" {
-		ragMode = "auto"
-	}
-	// With tools disabled the model cannot call search_knowledge_base, so 'tool'
-	// mode — which defers retrieval to that call and injects nothing inline —
-	// would leave a bound KB (or conversation-attached docs) completely
-	// unreadable. Force inline retrieval instead so the content still reaches the
-	// model. Mirrors the forced-web-search / forced-sandbox-read fallbacks below:
-	// when we take a tool away, we do its job server-side.
-	if req.NoTools && ragMode == "tool" {
-		ragMode = "inject"
-	}
+	ragMode := store.NormalizeConversationRAGMode(conv.RAGMode)
 	// Chat uploads are rejected by the HTTP handler until their document_id is
 	// status='ready'. Do not wait-and-skip here: skipping pending docs is exactly
 	// what made the model fall back to python-side PDF parsing.
 	// §4.11-B: run inline RAG when a KB is bound OR the conversation itself has an
-	// ingested upload (chat-attached files are conversation-scoped, not in a KB —
-	// without this they'd only be retrievable if the model voluntarily called the
-	// search tool, so a non-tool model or an unprompted one would never see them).
+	// ingested upload (chat-attached files are conversation-scoped, not in a KB).
 	ragScoped := len(kbIDs) > 0 || (o.rag != nil && store.ConversationHasReadyDocs(ctx, o.db, conv.ID))
-	if o.rag != nil && ragScoped && ragMode != "tool" && req.Mode != ModeDeepResearch {
+	if o.rag != nil && ragScoped && req.Mode != ModeDeepResearch {
 		recent := recentHistoryStrings(history, ragRouterRecentHistoryCount)
 		var snippets []rag.Snippet
 		var decision rag.RouteDecision
@@ -1730,6 +1762,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// remove the prohibited code-tool blocks below.
 	nativeToolReplay := !fastMode && (useOfficial || (toolMode == "native" && len(toolDefs) > 0))
 	uHist := storeToUnified(keep, channel.Type, nativeToolReplay)
+	uHist = stripRetiredKnowledgeSearchToolBlocks(uHist)
 	if !officialMode {
 		uHist = stripDisallowedBuiltinToolBlocks(uHist, toolDefNameSet(toolDefs))
 	}
@@ -1934,8 +1967,8 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		ctx: &ToolContext{
 			UserID:      req.UserID,
 			WorkspaceID: conv.WorkspaceID, ConvID: conv.ID, MessageID: assistantMsg.ID, ModelID: model.ID,
-			KBIDs: kbIDs, ProjectID: conv.ProjectID, ProjectName: projectName,
-			DB: o.db, RAG: o.rag, ImageModelID: imageModelID,
+			ProjectID: conv.ProjectID, ProjectName: projectName,
+			DB: o.db, ImageModelID: imageModelID,
 			ImageInputIDs:   imageAttachmentIDs(req.Attachments),
 			ImageUserPrompt: req.UserText,
 			// §4.20: meter chat-driven image_generate against the same credit flow.
@@ -2030,6 +2063,17 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	if usedFallback {
 		servedChannelID = fallbackChannelID
 	}
+	providerFailureBase := store.UsageLog{
+		UserID: req.UserID, WorkspaceID: conv.WorkspaceID, ConversationID: conv.ID,
+		MessageID: assistantMsg.ID, ModelID: model.ID, Purpose: "chat",
+		Currency: model.Currency, TTFTFallbackModel: ttftFallbackModel,
+	}
+	logProviderFailures := func(logCtx context.Context) {
+		rows := providerFailureUsageLogs(reqRecorder.snapshots(), providerFailureBase, model.ChannelID, fallbackChannelID)
+		for _, row := range rows {
+			o.logUsage(logCtx, row)
+		}
+	}
 	if hostedImageCount > 0 {
 		persistCtx := context.WithoutCancel(ctx)
 		imageCost := float64(hostedImageCount) * model.PricePerImage
@@ -2109,6 +2153,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			// Bill + count what the model produced before the stop. The usage_logs row
 			// and the window-quota increment go together so the cache counter and the
 			// usage_logs COUNT(*) cold-reseed stay in agreement (§B3).
+			logProviderFailures(ctx)
 			if produced {
 				// §B5-per-request rows: same split as the success path — tool
 				// rounds completed before the stop each keep their own row.
@@ -2159,15 +2204,18 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 				o.logger.Printf("orchestrator: upstream content-filter block classified as moderation (conv=%s msg=%s model=%s): %v",
 					conv.ID, assistantMsg.ID, model.ID, err)
 			}
-			reqSnapshot := reqRecorder.snapshot()
-			o.logUsage(ctx, store.UsageLog{
-				UserID: req.UserID, WorkspaceID: conv.WorkspaceID, ConversationID: conv.ID,
-				MessageID: assistantMsg.ID, ModelID: model.ID, Purpose: "chat", Currency: model.Currency,
-				ChannelID: servedChannelID, Fallback: usedFallback, TTFTFallbackModel: ttftFallbackModel, Status: "error",
-				Error:         truncErr(err.Error()),
-				RequestMethod: reqSnapshot.Method, RequestURL: reqSnapshot.URL,
-				RequestHeaders: reqSnapshot.Header, RequestBody: reqSnapshot.Body,
-			})
+			logProviderFailures(ctx)
+			if !providerFailureCaptured(reqRecorder.snapshots(), err) {
+				reqSnapshot := reqRecorder.snapshot()
+				o.logUsage(ctx, store.UsageLog{
+					UserID: req.UserID, WorkspaceID: conv.WorkspaceID, ConversationID: conv.ID,
+					MessageID: assistantMsg.ID, ModelID: model.ID, Purpose: "chat", Currency: model.Currency,
+					ChannelID: servedChannelID, Fallback: usedFallback, TTFTFallbackModel: ttftFallbackModel, Status: "error",
+					Error:         truncErr(err.Error()),
+					RequestMethod: reqSnapshot.Method, RequestURL: reqSnapshot.URL,
+					RequestHeaders: reqSnapshot.Header, RequestBody: reqSnapshot.Body,
+				})
+			}
 			onEvent(SseEvent{Type: "refusal", MessageID: assistantMsg.ID, Message: msg})
 			onEvent(SseEvent{Type: "done", MessageID: assistantMsg.ID, StopReason: "content_moderation"})
 			assistantMsg.Blocks = refusalBlocks
@@ -2207,28 +2255,31 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		// shows which channel served it (and whether the fallback was used). No
 		// output was produced, so it carries zero tokens/cost/credits and is
 		// excluded from quota reseeds (store.UsageInWindow skips status='error').
-		reqSnapshot := reqRecorder.snapshot()
-		o.logUsage(ctx, store.UsageLog{
-			UserID:            req.UserID,
-			WorkspaceID:       conv.WorkspaceID,
-			ConversationID:    conv.ID,
-			MessageID:         assistantMsg.ID,
-			ModelID:           model.ID,
-			Purpose:           "chat",
-			Currency:          model.Currency,
-			ChannelID:         servedChannelID,
-			Fallback:          usedFallback,
-			TTFTFallbackModel: ttftFallbackModel,
-			Status:            "error",
-			// Store the raw upstream failure (status + response body) so an admin can
-			// diagnose it on /admin/usage. It's the same detail we log server-side and
-			// deliberately withhold from the user (§B5); it's admin-only on the wire.
-			Error:          truncErr(err.Error()),
-			RequestMethod:  reqSnapshot.Method,
-			RequestURL:     reqSnapshot.URL,
-			RequestHeaders: reqSnapshot.Header,
-			RequestBody:    reqSnapshot.Body,
-		})
+		logProviderFailures(ctx)
+		if !providerFailureCaptured(reqRecorder.snapshots(), err) {
+			reqSnapshot := reqRecorder.snapshot()
+			o.logUsage(ctx, store.UsageLog{
+				UserID:            req.UserID,
+				WorkspaceID:       conv.WorkspaceID,
+				ConversationID:    conv.ID,
+				MessageID:         assistantMsg.ID,
+				ModelID:           model.ID,
+				Purpose:           "chat",
+				Currency:          model.Currency,
+				ChannelID:         servedChannelID,
+				Fallback:          usedFallback,
+				TTFTFallbackModel: ttftFallbackModel,
+				Status:            "error",
+				// Store the raw upstream failure (status + response body) so an admin can
+				// diagnose it on /admin/usage. It's the same detail we log server-side and
+				// deliberately withhold from the user (§B5); it's admin-only on the wire.
+				Error:          truncErr(err.Error()),
+				RequestMethod:  reqSnapshot.Method,
+				RequestURL:     reqSnapshot.URL,
+				RequestHeaders: reqSnapshot.Header,
+				RequestBody:    reqSnapshot.Body,
+			})
+		}
 		onEvent(SseEvent{Type: "error", Message: safeErr})
 		return nil, err
 	}
@@ -2323,6 +2374,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// with its own tokens/cost and (when full request logging is on) its own
 	// request snapshot. Row sums equal the old single-row totals exactly, and
 	// they share message_id, so per-turn groupings and quota reseeds hold.
+	logProviderFailures(ctx)
 	for _, rr := range perRequestUsageRows(reqRecorder.snapshots(), model, result.Usage, chatCost, timedCredits, o.successRequestLoggingEnabled()) {
 		requestChannelID, requestFallback := requestUsageChannel(rr, model.ChannelID, fallbackChannelID, usedFallback)
 		o.logUsage(ctx, store.UsageLog{
@@ -2702,6 +2754,32 @@ func storeToUnified(msgs []store.Message, currentProvider string, nativeToolRepl
 const fastModeCodeHistoryPlaceholder = "[A previous code-analysis step was omitted in Fast mode.]"
 
 const unsupportedToolHistoryPlaceholder = "[A previous tool step was omitted because this model does not support that tool.]"
+
+// stripRetiredKnowledgeSearchToolBlocks removes persisted calls from the former
+// model-driven document-search path. Automatic server-side RAG now owns all
+// knowledge retrieval, including turns using provider-hosted Official tools.
+func stripRetiredKnowledgeSearchToolBlocks(history []UnifiedMessage) []UnifiedMessage {
+	const retiredName = "search_knowledge_base"
+	allowed := map[string]bool{}
+	found := false
+	for _, message := range history {
+		for _, block := range message.Blocks {
+			name := strings.TrimSpace(block.ToolName)
+			if name == "" {
+				continue
+			}
+			if name == retiredName {
+				found = true
+				continue
+			}
+			allowed[name] = true
+		}
+	}
+	if !found {
+		return history
+	}
+	return stripDisallowedBuiltinToolBlocks(history, allowed)
+}
 
 // stripDisallowedBuiltinToolBlocks removes historical calls that are outside a
 // configured model allowlist. Provider-native Raw is dropped on an affected
@@ -3353,7 +3431,7 @@ func composeSystemPrompt(o systemPromptOpts) string {
 			// usage is already mandated by the "## Skills available" section.
 			b.WriteString("\n\n")
 			b.WriteString(l.toolHeader)
-			if has["web_search"] || has["search_knowledge_base"] {
+			if has["web_search"] {
 				b.WriteString(l.toolCite)
 			}
 			b.WriteString(l.toolMultiRound)
@@ -3364,7 +3442,6 @@ func composeSystemPrompt(o systemPromptOpts) string {
 			guidance := []struct{ name, line string }{
 				{"web_search", l.toolWebSearch},
 				{"python_execute", l.toolPython},
-				{"search_knowledge_base", l.toolSearchKB},
 				{"image_generate", l.toolImage},
 				{"save_memory", l.toolSaveMemory},
 			}
@@ -4249,11 +4326,9 @@ func toolRunnerForModelRequest(runner ToolRunner, modelID string, definitions []
 			MessageID:          source.MessageID,
 			WorkspaceID:        source.WorkspaceID,
 			ModelID:            modelID,
-			KBIDs:              append([]string(nil), source.KBIDs...),
 			ProjectID:          source.ProjectID,
 			ProjectName:        source.ProjectName,
 			DB:                 source.DB,
-			RAG:                source.RAG,
 			DeepResearch:       source.DeepResearch,
 			Fast:               source.Fast,
 			BuiltinTools:       toolDefNameSet(definitions),

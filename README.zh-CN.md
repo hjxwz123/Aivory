@@ -72,7 +72,6 @@
 | `web_fetch` | 抓取指定 URL 并提取正文，遵守 robots.txt 与内容安全过滤。 |
 | `python_execute` | 在无网络的隔离沙箱中运行 Python 代码。支持完整标准库、预装依赖和文件 I/O。 |
 | `image_generate` | 调用配置的图像模型（Gemini Imagen、OpenAI DALL-E 等）生成图片并保存为产物。 |
-| `search_knowledge_base` | 对挂载的知识库执行混合密集向量 + BM25 检索，RRF 融合排序。 |
 | `save_memory` | 把一条事实写入用户记忆库，后续对话会自动注入。 |
 | `use_skill` | 执行管理员预定义的技能（提示词模板 + 资产包）。 |
 
@@ -166,7 +165,7 @@
 
 ### 知识库
 
-每个账号可创建多个知识库。每个知识库支持文件上传（文本 / PDF / DOCX / XLSX / 图片）、状态跟踪（pending → parsing → embedding → ready）、按文档管理。在对话中挂载知识库后，可通过 `search_knowledge_base` 工具检索。
+每个账号可创建多个知识库。每个知识库支持文件上传（文本 / PDF / DOCX / XLSX / 图片）、状态跟踪（pending → parsing → embedding → ready）、按文档管理。在对话中挂载知识库后，系统会自动路由查询，并将全文或混合检索命中的相关片段注入模型上下文。
 
 ### 管理后台
 
@@ -258,7 +257,7 @@ graph TB
         API["Go API — REST + SSE<br/>JWT 鉴权 · 每请求 HMAC 签名 · 限速"]
         subgraph ORCH["编排器 Orchestrator"]
             PROV["Provider 注册表<br/>Anthropic · OpenAI · Gemini · Mock<br/>(任意 OpenAI 兼容端点)"]
-            TOOLS["工具层 — 单轮 ≤48 次调用<br/>web_search · web_fetch · python_execute<br/>image_generate · search_knowledge_base<br/>save_memory · use_skill"]
+            TOOLS["工具层 — 单轮 ≤48 次调用<br/>web_search · web_fetch · python_execute<br/>image_generate · save_memory · use_skill"]
             TASK["任务 LLM<br/>标题 · RAG 路由 · 压缩 · 审校 · 审核"]
             RAGP["RAG 流水线<br/>解析 → 分块 → 嵌入 → 路由 → 检索"]
             MEMW["记忆 Worker<br/>每轮异步提取"]
@@ -387,7 +386,7 @@ workflow 只需要 `GITHUB_TOKEN`（GitHub 自动注入）。首次成功跑完�
 │       ├── api/              HTTP handler、路由、上传安全
 │       ├── llm/              Provider 适配 + 编排器 + 任务 LLM + 记忆 Worker
 │       ├── tools/            web_search / web_fetch / python_execute / image_generate /
-│       │                     search_knowledge_base / save_memory / use_skill
+│       │                     save_memory / use_skill
 │       ├── rag/              解析 → 切块 → 嵌入 → 查询路由 → 检索
 │       ├── vector/           Qdrant 客户端（+ PG 兜底）
 │       ├── store/            Postgres / SQLite 表结构与查询

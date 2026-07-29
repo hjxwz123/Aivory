@@ -130,15 +130,22 @@ func doProviderParsedRequest(
 			if resp != nil && resp.Body != nil {
 				_ = resp.Body.Close()
 			}
+			recordProviderRequestFailure(ctx, fallback, err)
 			return err
 		}
 		if resp == nil {
-			return errors.New("provider returned no HTTP response")
+			err = errors.New("provider returned no HTTP response")
+			recordProviderRequestFailure(ctx, fallback, err)
+			return err
 		}
 		if resp.Body != nil {
 			defer resp.Body.Close()
 		}
-		return consume(resp, emit)
+		err = consume(resp, emit)
+		if err != nil {
+			recordProviderRequestFailure(ctx, fallback, err)
+		}
+		return err
 	}
 
 	// Once a prior round switched channels, do not probe the failed primary
@@ -147,6 +154,7 @@ func doProviderParsedRequest(
 	if useStickyFallback {
 		fbReq, err := build(m.Fallback.BaseURL, m.Fallback.APIKey)
 		if err != nil {
+			recordProviderRequestBuildFailure(ctx, true, err)
 			return err
 		}
 		if fallbackUsed != nil {
@@ -157,6 +165,7 @@ func doProviderParsedRequest(
 
 	primaryReq, err := build(m.BaseURL, m.APIKey)
 	if err != nil && m.Fallback == nil {
+		recordProviderRequestBuildFailure(ctx, false, err)
 		return err
 	}
 	if m.Fallback == nil {
@@ -166,6 +175,9 @@ func doProviderParsedRequest(
 	buffered := make([]SseEvent, 0, 32)
 	emitBuffered := func(ev SseEvent) { buffered = append(buffered, ev) }
 	primaryErr := err
+	if primaryErr != nil {
+		recordProviderRequestBuildFailure(ctx, false, primaryErr)
+	}
 	if primaryErr == nil {
 		primaryErr = consumeAttempt(primaryReq, false, emitBuffered)
 	}
@@ -186,6 +198,7 @@ func doProviderParsedRequest(
 	// fallback URL itself is invalid, preserve the primary result/error exactly.
 	fbReq, buildErr := build(m.Fallback.BaseURL, m.Fallback.APIKey)
 	if buildErr != nil {
+		recordProviderRequestBuildFailure(ctx, true, buildErr)
 		for _, ev := range buffered {
 			onEvent(ev)
 		}

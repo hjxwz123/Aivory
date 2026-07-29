@@ -1282,12 +1282,80 @@ func normalizeConfigPaymentMethodRows(ctx context.Context, tx *sql.Tx, r io.Read
 
 func normalizeArchiveTableReader(table string, r io.Reader) (io.Reader, error) {
 	switch table {
+	case "settings":
+		return normalizeSettingsArchiveRows(r)
 	case "models":
 		return normalizeModelOfficialToolsArchiveRows(r)
+	case "conversations":
+		return normalizeConversationRAGModeArchiveRows(r)
 	case "user_groups":
 		return normalizeLegacyUserGroupPriceArchiveRows(r)
 	default:
 		return r, nil
+	}
+}
+
+func normalizeSettingsArchiveRows(r io.Reader) (io.Reader, error) {
+	var out bytes.Buffer
+	dec := json.NewDecoder(r)
+	enc := json.NewEncoder(&out)
+	for {
+		var row map[string]json.RawMessage
+		if err := dec.Decode(&row); err == io.EOF {
+			return bytes.NewReader(out.Bytes()), nil
+		} else if err != nil {
+			return nil, fmt.Errorf("decode settings row: %w", err)
+		}
+		key, present, err := backupStringField(row, "key")
+		if err != nil {
+			return nil, fmt.Errorf("invalid settings.key: %w", err)
+		}
+		if present && key == "disabled_tools" {
+			value, valuePresent, err := backupStringField(row, "value")
+			if err != nil {
+				return nil, fmt.Errorf("invalid settings.disabled_tools: %w", err)
+			}
+			if valuePresent {
+				normalized, err := store.NormalizeBuiltinTools(json.RawMessage(value))
+				if err != nil {
+					return nil, fmt.Errorf("invalid settings.disabled_tools: %w", err)
+				}
+				if normalized == nil {
+					normalized = json.RawMessage("[]")
+				}
+				row["value"], _ = json.Marshal(string(normalized))
+			}
+		}
+		if err := enc.Encode(row); err != nil {
+			return nil, fmt.Errorf("encode settings row: %w", err)
+		}
+	}
+}
+
+// normalizeConversationRAGModeArchiveRows prevents a legacy full backup from
+// restoring the removed model-driven document-search mode. The rag_mode column
+// remains because auto and inject are still supported.
+func normalizeConversationRAGModeArchiveRows(r io.Reader) (io.Reader, error) {
+	var out bytes.Buffer
+	dec := json.NewDecoder(r)
+	enc := json.NewEncoder(&out)
+	for {
+		var row map[string]json.RawMessage
+		if err := dec.Decode(&row); err == io.EOF {
+			return bytes.NewReader(out.Bytes()), nil
+		} else if err != nil {
+			return nil, fmt.Errorf("decode conversations row: %w", err)
+		}
+		mode, present, err := backupStringField(row, "rag_mode")
+		if err != nil {
+			return nil, fmt.Errorf("invalid conversations.rag_mode: %w", err)
+		}
+		if present {
+			row["rag_mode"], _ = json.Marshal(store.NormalizeConversationRAGMode(mode))
+		}
+		if err := enc.Encode(row); err != nil {
+			return nil, fmt.Errorf("encode conversations row: %w", err)
+		}
 	}
 }
 

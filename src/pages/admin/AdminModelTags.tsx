@@ -11,6 +11,7 @@ import { adminApi, ApiError } from '@/api'
 import type { ApiModelTag } from '@/api/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { AdminSortableList } from '@/components/admin/AdminSortableList'
 import { toast } from '@/hooks/use-toast'
 import { PanelFallback } from '@/components/ui/panel-fallback'
 
@@ -22,6 +23,8 @@ export default function AdminModelTags() {
   const [newName, setNewName] = useState('')
   const [creating, setCreating] = useState(false)
   const creatingRef = useRef(false)
+  const reorderQueueRef = useRef(Promise.resolve())
+  const reorderVersionRef = useRef(0)
   // Per-row guard: a rename/delete in flight blocks re-entrancy and drives the
   // row's disabled/loading feedback (mirrors `creating` for the create field).
   const [busyId, setBusyId] = useState<string | null>(null)
@@ -48,7 +51,8 @@ export default function AdminModelTags() {
     creatingRef.current = true
     setCreating(true)
     try {
-      const tag = await adminApi.createModelTag(name, tags.length)
+      const sortOrder = tags.reduce((max, tag) => Math.max(max, tag.sort_order), -1) + 1
+      const tag = await adminApi.createModelTag(name, sortOrder)
       setTags((ts) => [...ts, tag])
       setNewName('')
     } catch (e) {
@@ -96,6 +100,30 @@ export default function AdminModelTags() {
     }
   }
 
+  // Serialize saves so an earlier slow request cannot overwrite a newer order.
+  function persistOrder(next: ApiModelTag[]) {
+    const version = ++reorderVersionRef.current
+    const ordered = next.map((tag, sortOrder) => ({ ...tag, sort_order: sortOrder }))
+    setTags(ordered)
+
+    reorderQueueRef.current = reorderQueueRef.current.then(async () => {
+      try {
+        await adminApi.reorderModelTags(ordered.map((tag) => tag.id))
+      } catch (e) {
+        if (version !== reorderVersionRef.current) return
+        try {
+          const persisted = await adminApi.modelTags()
+          if (version === reorderVersionRef.current) setTags(persisted)
+        } catch {
+          // Keep the visible order when the authoritative reload also fails.
+        }
+        if (version === reorderVersionRef.current) {
+          toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
+        }
+      }
+    })
+  }
+
   return (
     <div className="mx-auto max-w-[76rem]">
       {/* This page has no top-nav entry of its own (it's reached via "Manage
@@ -141,9 +169,17 @@ export default function AdminModelTags() {
             {t('admin:modelTags.empty')}
           </div>
         ) : (
-          <ul className="mt-6 flex flex-col divide-y divide-[var(--color-divider)] rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)]">
-            {tags.map((tag) => (
-              <li key={tag.id} className="flex items-center gap-3 px-4 py-2.5">
+          <AdminSortableList
+            items={tags}
+            onItemsChange={setTags}
+            onOrderCommit={persistOrder}
+            dragHandleLabel={t('admin:common.dragHandle')}
+            moveUpLabel={t('admin:common.moveUp')}
+            moveDownLabel={t('admin:common.moveDown')}
+            listClassName="mt-6"
+            rowClassName="flex items-center gap-3 px-4 py-2.5"
+            renderItem={(tag) => (
+              <>
                 <Tag size={14} className="shrink-0 text-[var(--color-fg-subtle)]" aria-hidden />
                 <Input
                   defaultValue={tag.name}
@@ -163,9 +199,9 @@ export default function AdminModelTags() {
                   leadingIcon={<Trash2 size={14} aria-hidden />}
                   className="size-8 rounded-[8px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)]"
                 />
-              </li>
-            ))}
-          </ul>
+              </>
+            )}
+          />
         )}
       </section>
     </div>

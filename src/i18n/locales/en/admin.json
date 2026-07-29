@@ -184,7 +184,6 @@
         "web_fetch": "Read web page",
         "python_execute": "Python interpreter",
         "image_generate": "Image generation",
-        "search_knowledge_base": "Knowledge base search",
         "use_skill": "Use skill",
         "save_memory": "Save memory"
       },
@@ -193,7 +192,6 @@
         "web_fetch": "Read the main content of a specific web page.",
         "python_execute": "Run Python for analysis, calculations, and file generation.",
         "image_generate": "Generate or edit images with the configured image model.",
-        "search_knowledge_base": "Search the user's selected knowledge bases.",
         "use_skill": "Load an assigned skill's full instructions on demand.",
         "save_memory": "Save durable user information to long-term memory."
       }
@@ -382,7 +380,8 @@
       "status": "Status",
       "expiry": "Expiry",
       "permanent": "Permanent",
-      "allowance": "Credit allowance",
+      "allowance": "Timed credits (remaining / allowance)",
+      "loadFailed": "Could not load the latest user information.",
       "twofa": "Two-factor",
       "enabled": "Enabled",
       "disabled": "Disabled",

@@ -18,7 +18,7 @@ import (
 )
 
 func TestListBuiltinToolsAdminUsesLiveSortedRegistry(t *testing.T) {
-	registry := toolpkg.NewRegistry(nil, nil, config.Config{}, log.New(io.Discard, "", 0))
+	registry := toolpkg.NewRegistry(nil, config.Config{}, log.New(io.Discard, "", 0))
 	rec := httptest.NewRecorder()
 	listBuiltinToolsAdmin(Deps{Tools: registry}, rec, httptest.NewRequest(http.MethodGet, "/api/admin/tools/builtins", nil))
 	if rec.Code != http.StatusOK {
@@ -38,6 +38,9 @@ func TestListBuiltinToolsAdminUsesLiveSortedRegistry(t *testing.T) {
 	for i, item := range items {
 		if item.Name == "" || item.Description == "" {
 			t.Fatalf("incomplete item: %+v", item)
+		}
+		if item.Name == "search_knowledge_base" {
+			t.Fatal("retired search_knowledge_base tool remains registered")
 		}
 		names[i] = item.Name
 	}
@@ -139,7 +142,7 @@ func TestPublicModelsExposeResolvedBuiltinToolCapabilities(t *testing.T) {
 	db := openMigrated(t, filepath.Join(t.TempDir(), "public-model-builtin-tools.db"))
 	defer db.Close()
 	mustExec(t, db, `INSERT INTO channels(id,name,type,api_format,base_url,api_key,enabled) VALUES('ch1','Main','openai','chat','https://api.example','sk',1)`)
-	registry := toolpkg.NewRegistry(db, nil, config.Config{}, log.New(io.Discard, "", 0))
+	registry := toolpkg.NewRegistry(db, config.Config{}, log.New(io.Discard, "", 0))
 	d := Deps{DB: db, Tools: registry}
 
 	create := func(requestID, toolMode string, builtinTools json.RawMessage) *store.Model {
