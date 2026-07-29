@@ -287,12 +287,11 @@ func TestTestPaymentChannelsAreRestrictedToAdministrators(t *testing.T) {
 	}
 }
 
-func TestListPaymentMethodsPublicIgnoresLegacyPurchaseLinks(t *testing.T) {
+func TestListPaymentMethodsPublicReturnsCardPurchaseURL(t *testing.T) {
 	fx := newPaymentAPIFixture(t)
 	for key, value := range map[string]string{
-		"card_purchase_url": "",
-		"credit_buy_url":    "https://legacy.example.test/credits",
-		"group_buy_url":     "https://legacy.example.test/groups",
+		"credit_buy_url": "https://legacy.example.test/credits",
+		"group_buy_url":  "https://legacy.example.test/groups",
 	} {
 		if err := store.SetSetting(fx.db, key, value); err != nil {
 			t.Fatalf("set %s: %v", key, err)
@@ -317,10 +316,10 @@ func TestListPaymentMethodsPublicIgnoresLegacyPurchaseLinks(t *testing.T) {
 	}
 
 	if got := requestCardURL(store.PaymentProductCreditPackage); got != "" {
-		t.Fatalf("legacy credit-package URL leaked into payment methods: %q", got)
+		t.Fatalf("retired credit-package URL leaked into payment methods: %q", got)
 	}
 	if got := requestCardURL(store.PaymentProductUserGroup); got != "" {
-		t.Fatalf("legacy user-group URL leaked into payment methods: %q", got)
+		t.Fatalf("retired user-group URL leaked into payment methods: %q", got)
 	}
 
 	if err := store.SetSetting(fx.db, "card_purchase_url", "/redeem-card"); err != nil {

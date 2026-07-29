@@ -130,8 +130,6 @@ func listPaymentMethodsPublic(d Deps, w http.ResponseWriter, r *http.Request) {
 			ID: method.ID, Name: method.Name, Icon: method.Icon, Provider: method.Provider,
 		})
 	}
-	// The new payment dialog is controlled only by card_purchase_url. Legacy
-	// group_buy_url/credit_buy_url values must not silently create a card option.
 	cardURL := strings.TrimSpace(globalSettingStr(d, "card_purchase_url"))
 	if cardURL != "" && !validPaymentHTTPURL(cardURL) {
 		cardURL = ""
