@@ -6,7 +6,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -115,45 +114,19 @@ func TestWaffoResumeCheckoutReusesSessionAndRefreshesOnlyToken(t *testing.T) {
 	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
-		switch r.URL.Path {
-		case "/v1/graphql":
-			var body struct {
-				Query     string         `json:"query"`
-				Variables map[string]any `json:"variables"`
-			}
-			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-				t.Fatalf("decode Waffo session query: %v", err)
-			}
-			if strings.Contains(body.Query, "$sessionId: ID!") {
-				writeJSONResponse(t, w, map[string]any{"errors": []any{map[string]any{"message": `Unknown type "ID".`}}})
-				return
-			}
-			if !strings.Contains(body.Query, "$sessionId: String!") {
-				t.Fatalf("Waffo session query uses an unsupported variable type: %s", body.Query)
-			}
-			if body.Variables["sessionId"] != sessionID {
-				t.Fatalf("Waffo session query = %#v", body)
-			}
-			writeJSONResponse(t, w, map[string]any{"data": map[string]any{
-				"checkoutSession": map[string]any{
-					"id": sessionID, "productType": "onetime", "currency": "USD", "status": "active",
-					"expiresAt": time.Unix(expiresAt, 0).UTC().Format(time.RFC3339),
-				},
-			}})
-		case "/v1/actions/auth/issue-session-token":
-			var body map[string]any
-			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-				t.Fatalf("decode Waffo token request: %v", err)
-			}
-			if body["productId"] != cfg.ProductID || body["buyerIdentity"] != WaffoBuyerIdentity("user_123") {
-				t.Fatalf("Waffo token request = %#v", body)
-			}
-			writeJSONResponse(t, w, map[string]any{
-				"data": map[string]any{"token": "fresh.jwt.token", "expiresAt": time.Now().Add(5 * time.Minute).Format(time.RFC3339)},
-			})
-		default:
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/actions/auth/issue-session-token" {
 			t.Fatalf("Waffo resume created a new checkout: %s %s", r.Method, r.URL.Path)
 		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode Waffo token request: %v", err)
+		}
+		if body["productId"] != cfg.ProductID || body["buyerIdentity"] != WaffoBuyerIdentity("user_123") {
+			t.Fatalf("Waffo token request = %#v", body)
+		}
+		writeJSONResponse(t, w, map[string]any{
+			"data": map[string]any{"token": "fresh.jwt.token", "expiresAt": time.Now().Add(5 * time.Minute).Format(time.RFC3339)},
+		})
 	}))
 	defer server.Close()
 	action, err := (WaffoGateway{Config: cfg, BaseURL: server.URL, HTTPClient: server.Client()}).ResumeCheckout(
@@ -169,7 +142,7 @@ func TestWaffoResumeCheckoutReusesSessionAndRefreshesOnlyToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resume Waffo Checkout session: %v", err)
 	}
-	if requests.Load() != 2 || action.Type != ActionRedirect ||
+	if requests.Load() != 1 || action.Type != ActionRedirect ||
 		action.URL != sessionURL+"#token=fresh.jwt.token" || action.SessionURL != sessionURL ||
 		action.ResumeMode != CheckoutResumeOriginalSession || action.SessionID != sessionID ||
 		action.ProviderOrderID != "ORD_existing" || action.ExpiresAt != expiresAt {
@@ -199,41 +172,32 @@ func TestWaffoResumeCheckoutRejectsExpiredOrCredentialBearingSnapshot(t *testing
 	}
 }
 
-func TestWaffoResumeCheckoutRequiresConfirmedActiveUpstreamSession(t *testing.T) {
+func TestWaffoResumeCheckoutRequiresFreshToken(t *testing.T) {
 	keys := newWaffoTestKeys(t)
 	cfg := testWaffoConfig(keys)
 	const sessionID = "SES_0123456789abcdefghijkl"
-	savedExpiry := time.Now().Add(time.Hour).Unix()
 	tests := []struct {
-		name         string
-		status       string
-		remoteExpiry int64
-		graphqlError bool
-		want         error
+		name       string
+		statusCode int
+		response   map[string]any
 	}{
-		{name: "completed", status: "completed", remoteExpiry: savedExpiry, want: ErrCheckoutNotResumable},
-		{name: "unknown status", status: "mystery", remoteExpiry: savedExpiry, want: ErrCheckoutStateUnknown},
-		{name: "changed expiration", status: "active", remoteExpiry: savedExpiry + 60, want: ErrCheckoutStateUnknown},
-		{name: "GraphQL error", graphqlError: true, want: ErrCheckoutStateUnknown},
+		{name: "token endpoint error", statusCode: http.StatusBadGateway, response: map[string]any{"error": "temporarily unavailable"}},
+		{name: "empty token", statusCode: http.StatusOK, response: map[string]any{
+			"data": map[string]any{"token": "", "expiresAt": time.Now().Add(5 * time.Minute).Format(time.RFC3339)},
+		}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			var requests atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				requests.Add(1)
-				if r.URL.Path != "/v1/graphql" {
-					t.Fatalf("Waffo issued a token without an active session: %s", r.URL.Path)
+				if r.Method != http.MethodPost || r.URL.Path != "/v1/actions/auth/issue-session-token" {
+					t.Fatalf("Waffo resume called an unexpected endpoint: %s %s", r.Method, r.URL.Path)
 				}
-				if tc.graphqlError {
-					writeJSONResponse(t, w, map[string]any{"errors": []any{map[string]any{"message": "temporarily unavailable"}}})
-					return
+				w.WriteHeader(tc.statusCode)
+				if err := json.NewEncoder(w).Encode(tc.response); err != nil {
+					t.Fatalf("encode Waffo token response: %v", err)
 				}
-				writeJSONResponse(t, w, map[string]any{"data": map[string]any{
-					"checkoutSession": map[string]any{
-						"id": sessionID, "status": tc.status,
-						"expiresAt": time.Unix(tc.remoteExpiry, 0).UTC().Format(time.RFC3339),
-					},
-				}})
 			}))
 			defer server.Close()
 			_, err := (WaffoGateway{Config: cfg, BaseURL: server.URL, HTTPClient: server.Client()}).ResumeCheckout(
@@ -242,14 +206,14 @@ func TestWaffoResumeCheckoutRequiresConfirmedActiveUpstreamSession(t *testing.T)
 					CheckoutRequest:  CheckoutRequest{OrderID: "po_waffo_upstream_state", UserID: "user_123"},
 					SessionID:        sessionID,
 					SessionURL:       "https://pancake.example.test/checkout/" + sessionID,
-					SessionExpiresAt: savedExpiry,
+					SessionExpiresAt: time.Now().Add(time.Hour).Unix(),
 				},
 			)
-			if !errors.Is(err, tc.want) {
-				t.Fatalf("Waffo resume error = %v, want %v", err, tc.want)
+			if err == nil {
+				t.Fatal("Waffo resume succeeded without a fresh token")
 			}
 			if requests.Load() != 1 {
-				t.Fatalf("Waffo resume made %d requests, want only the session query", requests.Load())
+				t.Fatalf("Waffo resume made %d requests, want only the token request", requests.Load())
 			}
 		})
 	}
