@@ -119,7 +119,7 @@ func main() {
 	} else {
 		logger.Printf("rag queue: in-process (dev)")
 	}
-	toolRegistry := tools.NewRegistry(db, ragSvc, cfg, logger)
+	toolRegistry := tools.NewRegistry(db, cfg, logger)
 	// Surface the sandbox wiring at boot — the #1 reason python_execute silently
 	// falls back to "safe-mode" (and the model says it can't run code / host
 	// downloads) is an empty SANDBOX_BASE_URL in the API container.

@@ -36,7 +36,6 @@ const TOOL_ICON: Record<string, ComponentType<{ size?: number; className?: strin
   web_search: Search,
   web_fetch: Globe,
   python_execute: Terminal,
-  search_knowledge_base: BookOpen,
   use_skill: BookOpen,
   image_generate: ImageIcon,
   save_memory: Sparkles,
@@ -45,7 +44,7 @@ const TOOL_ICON: Record<string, ComponentType<{ size?: number; className?: strin
 /**
  * ReasoningTrace — the unified "thinking" panel (§1.1 / §7.1-4). It folds the
  * model's extended-thinking text AND its tool rounds (web_search, python_execute,
- * search_knowledge_base, image_generate, …) into ONE collapsible trace instead
+ * image_generate, …) into ONE collapsible trace instead
  * of a separate thinking block + a stack of tool cards.
  *
  * Live feedback (the user's ask): while streaming, the panel is open, the brain
@@ -256,7 +255,7 @@ function formatElapsed(ms: number): string {
 
 function pickSubtitle(name: string, input: ToolCall['input']): string | null {
   const inp = (input ?? {}) as Record<string, unknown>
-  if ((name === 'web_search' || name === 'search_knowledge_base') && typeof inp.query === 'string') {
+  if (name === 'web_search' && typeof inp.query === 'string') {
     return inp.query
   }
   if (name === 'web_fetch' && typeof inp.url === 'string') return inp.url

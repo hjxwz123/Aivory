@@ -47,6 +47,7 @@ import { filterOfficialToolNames, sanitizeOfficialToolNames } from '@/lib/offici
 import i18n from '@/i18n'
 import { mathContentToPlainText } from '@/lib/math-content'
 import { normalizeSelectedUserSkillIds } from '@/lib/composer-commands'
+import { resolveNewConversationFastMode } from '@/lib/chat-defaults'
 
 // resolveArmedTurnFlags snapshots the CURRENT composer feature toggles for turns
 // started OUTSIDE the composer's own submit — regenerate, edit-and-resend, and
@@ -241,7 +242,7 @@ interface ConversationStore {
   /** Prepend the next older page of messages to a conversation (scroll-up). */
   loadOlderMessages: (id: string) => Promise<void>
 
-  createConversation: (modelId?: string, projectId?: string) => Promise<Conversation>
+  createConversation: (modelId?: string, projectId?: string, fast?: boolean) => Promise<Conversation>
   /** Insert a conversation created OUTSIDE the store (the home page's
    *  attachment-scoped draft, kept off the sidebar until first send). */
   adoptConversation: (row: ApiConversation) => Conversation
@@ -315,7 +316,7 @@ interface ConversationStore {
   /** Insert an OPTIMISTIC (client-only, temp id) conversation so the home page
    *  can navigate to its thread instantly; the real one is created on send via
    *  sendMessage({ createFirst }). Returns the temp id. */
-  beginOptimisticConversation: (text: string, modelId?: string) => string
+  beginOptimisticConversation: (text: string, modelId?: string, fast?: boolean) => string
   regenerate: (conversationId: string, assistantId: string, modelId?: string) => Promise<void>
   resumeStreamingMessages: (conversationId: string, opts?: { replaceExisting?: boolean }) => void
   /** Edit a user question or assistant reply IN PLACE. User questions may be
@@ -724,9 +725,25 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
     }
   },
 
-  async createConversation(modelId, projectId) {
+  async createConversation(modelId, projectId, fast) {
+    const models = useModels.getState()
+    const resolvedModelId = modelId || models.defaultId
+    const resolvedFast =
+      fast ??
+      (models.loaded
+        ? resolveNewConversationFastMode(
+            useAuth.getState().user?.settings,
+            models.fastAvailable,
+            Boolean(modelId),
+          )
+        : undefined)
     try {
-      const created = await conversationsApi.create({ model_id: modelId, project_id: projectId, workspace_id: activeWorkspaceId() })
+      const created = await conversationsApi.create({
+        model_id: resolvedModelId || undefined,
+        project_id: projectId,
+        workspace_id: activeWorkspaceId(),
+        fast: resolvedFast,
+      })
       const conv = toLocalConversation(created)
       // replaceOrPrepend, not a raw prepend: a §23 background list sync may
       // have inserted this row already (duplicate-id guard).
@@ -740,7 +757,8 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
         title: 'New conversation',
         createdAt: now,
         updatedAt: now,
-        modelId: modelId ?? '',
+        modelId: resolvedModelId,
+        fast: resolvedFast === true,
         projectId,
         messages: [],
       }
@@ -755,9 +773,17 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
     return conv
   },
 
-  beginOptimisticConversation(text, modelId) {
+  beginOptimisticConversation(text, modelId, fast) {
     const id = uid('c')
     const now = Date.now()
+    const models = useModels.getState()
+    const resolvedFast =
+      fast ??
+      resolveNewConversationFastMode(
+        useAuth.getState().user?.settings,
+        models.fastAvailable,
+        Boolean(modelId),
+      )
     const conv: Conversation = {
       id,
       // Seed the first-message title so the sidebar/header read right instantly;
@@ -766,8 +792,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
       createdAt: now,
       updatedAt: now,
       modelId: modelId ?? '',
-      // §fast-mode: new conversations default to fast when a fast model exists.
-      fast: useModels.getState().fastAvailable,
+      fast: resolvedFast,
       // Tag the active space so the sidebar (which filters by workspace) shows
       // the new chat immediately; the create + re-key confirms it server-side.
       workspaceId: activeWorkspaceId() || undefined,
@@ -1261,6 +1286,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
         created = await conversationsApi.create({
           model_id: input.modelId || undefined,
           workspace_id: activeWorkspaceId(),
+          fast: input.fast === true,
         })
       } catch {
         // Create failed — settle the optimistic turn as an error (the SSE would
@@ -2781,8 +2807,6 @@ function prettyToolLabel(name: string): string {
       return 'Running Python'
     case 'image_generate':
       return 'Generating an image'
-    case 'search_knowledge_base':
-      return 'Searching documents'
     case 'use_skill':
       return 'Loading a skill'
     case 'save_memory':

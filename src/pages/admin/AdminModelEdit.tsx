@@ -59,7 +59,6 @@ const BUILTIN_TOOL_ICONS: Record<string, typeof Wrench> = {
   web_fetch: Globe,
   python_execute: SquareTerminal,
   image_generate: ImageIcon,
-  search_knowledge_base: BookOpen,
   use_skill: BookOpen,
   save_memory: Sparkles,
 }

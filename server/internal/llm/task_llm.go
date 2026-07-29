@@ -186,8 +186,11 @@ func (t *TaskLLM) Run(ctx context.Context, kind TaskKind, prompt string, opts Ru
 	// Detach any inherited per-request recorder: a task call issued mid chat
 	// turn (compaction, research plan/verify, search-query gen, …) logs its own
 	// task.* usage row below, so it must not also be captured into the outer
-	// chat turn's recorder and double-booked as a phantom chat row (§B5).
+	// chat turn's recorder and double-booked as a phantom chat row (§B5). Attach a
+	// dedicated recorder so recovered channel failures still get task.* error rows.
 	streamCtx := contextWithoutProviderRequestRecorder(ctx)
+	requestRecorder := newProviderRequestRecorder()
+	streamCtx = contextWithProviderRequestRecorder(streamCtx, requestRecorder)
 	// We capture deltas but only really care about the final result.
 	captured := strings.Builder{}
 	result, err := provider.Stream(streamCtx, req, &noopToolRunner{}, func(ev SseEvent) {
@@ -200,6 +203,17 @@ func (t *TaskLLM) Run(ctx context.Context, kind TaskKind, prompt string, opts Ru
 	if usedFallback {
 		servedChannelID = fallbackChannelID
 	}
+	failureBase := store.UsageLog{
+		WorkspaceID: opts.WorkspaceID, UserID: opts.UserID,
+		ConversationID: opts.ConversationID, MessageID: opts.MessageID,
+		ModelID: model.ID, Purpose: string(kind), Currency: model.Currency,
+	}
+	logProviderFailures := func(logCtx context.Context) {
+		rows := providerFailureUsageLogs(requestRecorder.snapshots(), failureBase, model.ChannelID, fallbackChannelID)
+		for _, row := range rows {
+			_ = store.LogUsage(logCtx, t.db, row)
+		}
+	}
 	if err != nil {
 		// Task-model failures were previously invisible: no usage row, no log —
 		// callers like compaction silently fall back (deterministic clip) and the
@@ -210,19 +224,15 @@ func (t *TaskLLM) Run(ctx context.Context, kind TaskKind, prompt string, opts Ru
 			t.logger.Printf("task: %s call failed (model=%s user=%s conv=%s): %v", kind, model.ID, opts.UserID, opts.ConversationID, err)
 		}
 		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-			_ = store.LogUsage(ctx, t.db, store.UsageLog{
-				WorkspaceID:    opts.WorkspaceID,
-				UserID:         opts.UserID,
-				ConversationID: opts.ConversationID,
-				MessageID:      opts.MessageID,
-				ModelID:        model.ID,
-				Purpose:        string(kind),
-				Currency:       model.Currency,
-				ChannelID:      servedChannelID,
-				Fallback:       usedFallback,
-				Status:         "error",
-				Error:          truncErr(err.Error()),
-			})
+			logProviderFailures(ctx)
+			if !providerFailureCaptured(requestRecorder.snapshots(), err) {
+				row := failureBase
+				row.ChannelID = servedChannelID
+				row.Fallback = usedFallback
+				row.Status = "error"
+				row.Error = truncErr(err.Error())
+				_ = store.LogUsage(ctx, t.db, row)
+			}
 		}
 		return "", err
 	}
@@ -242,6 +252,7 @@ func (t *TaskLLM) Run(ctx context.Context, kind TaskKind, prompt string, opts Ru
 	final = strings.TrimSpace(final)
 
 	// Record usage so we can split task cost on the report.
+	logProviderFailures(ctx)
 	if result != nil {
 		cost := computeCost(*model, result.Usage)
 		_ = store.LogUsage(ctx, t.db, store.UsageLog{

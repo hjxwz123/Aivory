@@ -25,6 +25,7 @@ import {
 import type { Attachment } from '@/types/chat'
 import type { ApiConversation } from '@/api/types'
 import type { ToolMode } from '@/lib/tool-mode'
+import { resolveNewConversationFastMode } from '@/lib/chat-defaults'
 
 gsap.registerPlugin(useGSAP)
 
@@ -85,11 +86,14 @@ export default function ChatHome() {
   // so a new chat honours the picker instead of always using the default model.
   const [pickedModelId, setPickedModelId] = useState<string | null>(null)
   const modelId = pickedModelId ?? (drawDefault || defaultModelId)
-  // §fast-mode: new chats default to 快速 when a fast model is configured. Draw
-  // mode (image models) is always 进阶.
+  // A user's explicit default model starts new chats in advanced mode. Accounts
+  // without one start in 快速 when the deployment provides a fast model. Draw
+  // mode (image models) is always advanced.
   const fastAvailable = useModels((s) => s.fastAvailable)
   const [pickedFast, setPickedFast] = useState<boolean | null>(null)
-  const fast = !drawMode && (pickedFast ?? fastAvailable)
+  const fast =
+    !drawMode &&
+    (pickedFast ?? resolveNewConversationFastMode(user?.settings, fastAvailable, drawMode))
 
   // When the user attaches a file BEFORE sending, we must create the
   // conversation up front so the upload is scoped + RAG-ingested (§4.11.2).
@@ -181,6 +185,7 @@ export default function ChatHome() {
           const created = await conversationsApi.create({
             model_id: modelId || undefined,
             workspace_id: workspaceId,
+            fast,
           })
           // A suggestion card can bypass the composer's upload gate while this
           // create is in flight. A mode/workspace switch also invalidates this
@@ -237,27 +242,30 @@ export default function ChatHome() {
   }, [t])
   const cards = useMemo(() => fisherYatesPick(SUGGESTIONS, 6), [])
 
-  // The suggestion rail is a single horizontally-scrollable row. A plain mouse
-  // wheel only scrolls vertically, so without this it can't be scrolled with the
-  // wheel at all — only by dragging / trackpad-panning. Translate a dominant
-  // vertical wheel delta into horizontal scroll, yielding back to the page once
-  // the rail reaches an edge so vertical page scroll is never trapped. Native
-  // (non-passive) listener: React attaches wheel passively, so an onWheel
-  // preventDefault would be ignored.
+  // The suggestion rail is a single horizontally-scrollable row. Translate a
+  // dominant vertical mouse-wheel delta into horizontal movement while leaving
+  // native horizontal trackpad gestures untouched. Yield back to page scrolling
+  // at either edge, and do not intercept browser/trackpad pinch zoom. A native
+  // non-passive listener is required because React delegates wheel passively.
   const suggestionsRailRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const el = suggestionsRailRef.current
     if (!el) return
     const onWheel = (e: WheelEvent) => {
-      if (el.scrollWidth <= el.clientWidth) return
+      if (e.ctrlKey || e.metaKey || el.scrollWidth <= el.clientWidth) return
       if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return
-      // deltaMode 1 = lines (Firefox wheel) — normalise to pixels.
-      const delta = e.deltaMode === 1 ? e.deltaY * 24 : e.deltaY
-      const atStart = el.scrollLeft <= 0
-      const atEnd = el.scrollLeft + el.clientWidth >= el.scrollWidth - 1
-      if ((delta < 0 && atStart) || (delta > 0 && atEnd)) return
-      el.scrollLeft += delta
+
+      const scale = e.deltaMode === WheelEvent.DOM_DELTA_LINE
+        ? 24
+        : e.deltaMode === WheelEvent.DOM_DELTA_PAGE
+          ? el.clientWidth
+          : 1
+      const current = el.scrollLeft
+      const next = Math.min(el.scrollWidth - el.clientWidth, Math.max(0, current + e.deltaY * scale))
+      if (Math.abs(next - current) < 1) return
+
       e.preventDefault()
+      el.scrollLeft = next
     }
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
@@ -360,7 +368,7 @@ export default function ChatHome() {
     // the cache, and swap the id in the URL. So the user lands on the thread the
     // moment they hit send — never staring at the home screen during the create
     // round-trip (and never re-clicking because "nothing happened").
-    const tempId = beginOptimisticConversation(text, modelId)
+    const tempId = beginOptimisticConversation(text, modelId, opts.fast === true)
     clearComposerDraft(draftScope)
     navigate(`/chat/${tempId}`)
     void sendMessage({
@@ -452,21 +460,21 @@ export default function ChatHome() {
 
             {!drawMode && (
               <div className="mt-8 sm:mt-10 mx-auto w-full max-w-[44rem]">
-                {/* Single row, fixed-width cards, horizontally scrollable (snap +
-                    mouse wheel, see suggestionsRailRef). Scrollbar hidden; on phones
-                    the rail bleeds to the screen edges so the next card peeks. The
-                    top/bottom padding leaves room for each card's hover lift +
-                    shadow, which `overflow-x-auto` (which also clips the y axis)
-                    would otherwise cut off. */}
+                {/* Single row, fixed-width cards, horizontally scrollable by mouse
+                    wheel or native horizontal gestures. Mandatory snapping is
+                    touch-only: on desktop it can pull small wheel deltas back to the
+                    current card and make the rail appear frozen. Scrollbar hidden;
+                    on phones the rail bleeds to the screen edges so the next card
+                    peeks. The vertical padding leaves room for the hover lift. */}
                 <div
                   ref={suggestionsRailRef}
-                  className="flex gap-3 overflow-x-auto px-1 -mx-1 max-sm:-mx-[var(--layout-gutter-mobile)] max-sm:px-[var(--layout-gutter-mobile)] max-sm:scroll-px-[var(--layout-gutter-mobile)] pt-2 pb-2 snap-x snap-mandatory [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                  className="flex gap-3 overflow-x-auto overscroll-x-contain px-1 -mx-1 max-sm:-mx-[var(--layout-gutter-mobile)] max-sm:px-[var(--layout-gutter-mobile)] max-sm:scroll-px-[var(--layout-gutter-mobile)] pt-2 pb-2 max-sm:snap-x max-sm:snap-mandatory [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
                 >
                   {cards.map((s) => {
                     const title = t(s.titleKey)
                     const prompt = t(s.promptKey)
                     return (
-                      <div key={s.id} className="home-card w-[13.5rem] sm:w-[15.5rem] shrink-0 snap-start">
+                      <div key={s.id} className="home-card w-[13.5rem] sm:w-[15.5rem] shrink-0 max-sm:snap-start">
                         <SuggestionCard
                           icon={s.icon}
                           title={title}

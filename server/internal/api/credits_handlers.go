@@ -45,6 +45,34 @@ func creditWindowUsed(ctx context.Context, d Deps, userID string, periodSeconds 
 	return used, windowStart
 }
 
+type timedCreditsSnapshot struct {
+	Remaining     float64 `json:"remaining"`
+	Allowance     float64 `json:"allowance"`
+	PeriodSeconds int     `json:"period_seconds"`
+	ResetsAt      int64   `json:"resets_at"`
+}
+
+// currentTimedCredits returns the same live timed-credit view used by the
+// deduction path: cache-backed consumption for the current fixed window, with
+// usage_logs as the cold-cache source of truth.
+func currentTimedCredits(ctx context.Context, d Deps, userID string, group *store.UserGroup) timedCreditsSnapshot {
+	snapshot := timedCreditsSnapshot{}
+	if group == nil {
+		return snapshot
+	}
+	used, windowStart := creditWindowUsed(ctx, d, userID, group.CreditPeriodSeconds)
+	snapshot.Remaining = group.CreditAllowance - used
+	if snapshot.Remaining < 0 {
+		snapshot.Remaining = 0
+	}
+	snapshot.Allowance = group.CreditAllowance
+	snapshot.PeriodSeconds = group.CreditPeriodSeconds
+	if snapshot.PeriodSeconds > 0 {
+		snapshot.ResetsAt = windowStart + int64(snapshot.PeriodSeconds)
+	}
+	return snapshot
+}
+
 // meCreditsHandler reports the signed-in user's credit balance for the
 // subscription page: the timed pool (remaining / allowance + next refresh) and
 // the separate permanent pool.
@@ -65,24 +93,9 @@ func meCreditsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	used, windowStart := creditWindowUsed(r.Context(), d, u.ID, g.CreditPeriodSeconds)
-	remaining := g.CreditAllowance - used
-	if remaining < 0 {
-		remaining = 0
-	}
-	period := g.CreditPeriodSeconds
-	resetsAt := int64(0)
-	if period > 0 {
-		resetsAt = windowStart + int64(period)
-	}
 	writeJSON(w, 200, map[string]any{
-		"enabled": globalCreditsPerUSD(d) > 0,
-		"timed": map[string]any{
-			"remaining":      remaining,
-			"allowance":      g.CreditAllowance,
-			"period_seconds": period,
-			"resets_at":      resetsAt,
-		},
+		"enabled":             globalCreditsPerUSD(d) > 0,
+		"timed":               currentTimedCredits(r.Context(), d, u.ID, g),
 		"permanent":           permanent,
 		"settlement_currency": currency,
 	})

@@ -17,6 +17,16 @@ var (
 	listWorkspaceConversationsLimit2 = 500
 )
 
+// NormalizeConversationRAGMode keeps the two server-owned retrieval policies.
+// The retired model-driven "tool" mode and any unknown legacy value become
+// auto so a stale client or restored database can never suppress document RAG.
+func NormalizeConversationRAGMode(mode string) string {
+	if strings.EqualFold(strings.TrimSpace(mode), "inject") {
+		return "inject"
+	}
+	return "auto"
+}
+
 // GetConvProviderStateKey reads one key from a conversation's provider_state
 // JSON blob (used to look up the persistent sandbox session id — §4.5).
 func GetConvProviderStateKey(ctx context.Context, db *sql.DB, convID, key string) (string, error) {
@@ -135,6 +145,7 @@ func ListWorkspaceConversations(ctx context.Context, db *sql.DB, workspaceID, pr
 		c.Starred = starred == 1
 		c.Fast = fastI == 1
 		c.KBIDs = json.RawMessage(orDefault(kbIDs, "[]"))
+		c.RAGMode = NormalizeConversationRAGMode(c.RAGMode)
 		c.SummaryBlocks = json.RawMessage(orDefault(sumBlocks, "[]"))
 		c.ProviderState = json.RawMessage(orDefault(provState, "{}"))
 		c.CreatorAvatar = avatarFromSettings(settings)
@@ -205,6 +216,7 @@ func scanConversationWithCreator(s scanner) (Conversation, error) {
 	c.Starred = starred == 1
 	c.Fast = fastI == 1
 	c.KBIDs = json.RawMessage(orDefault(kbIDs, "[]"))
+	c.RAGMode = NormalizeConversationRAGMode(c.RAGMode)
 	c.SummaryBlocks = json.RawMessage(orDefault(sumBlocks, "[]"))
 	c.ProviderState = json.RawMessage(orDefault(provState, "{}"))
 	c.CreatorAvatar = avatarFromSettings(settings)
@@ -240,6 +252,7 @@ func scanConversation(s scanner) (Conversation, error) {
 	c.Starred = starred == 1
 	c.Fast = fastI == 1
 	c.KBIDs = json.RawMessage(orDefault(kbIDs, "[]"))
+	c.RAGMode = NormalizeConversationRAGMode(c.RAGMode)
 	c.SummaryBlocks = json.RawMessage(orDefault(sumBlocks, "[]"))
 	c.ProviderState = json.RawMessage(orDefault(provState, "{}"))
 	return c, nil
@@ -266,9 +279,7 @@ func CreateConversation(ctx context.Context, db *sql.DB, c Conversation) (*Conve
 	if len(c.ProviderState) == 0 {
 		c.ProviderState = json.RawMessage("{}")
 	}
-	if c.RAGMode == "" {
-		c.RAGMode = "auto"
-	}
+	c.RAGMode = NormalizeConversationRAGMode(c.RAGMode)
 	now := time.Now().Unix()
 	var projectID any
 	if c.ProjectID == "" {
@@ -340,7 +351,7 @@ func UpdateConversation(ctx context.Context, db *sql.DB, id, userID string, p Co
 	}
 	if p.RAGMode != nil {
 		parts = append(parts, "rag_mode=?")
-		args = append(args, *p.RAGMode)
+		args = append(args, NormalizeConversationRAGMode(*p.RAGMode))
 	}
 	if p.Pinned != nil {
 		parts = append(parts, "pinned=?")

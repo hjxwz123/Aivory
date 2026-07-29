@@ -184,7 +184,6 @@
         "web_fetch": "ウェブページを読む",
         "python_execute": "Python インタープリター",
         "image_generate": "画像生成",
-        "search_knowledge_base": "ナレッジベース検索",
         "use_skill": "スキルを使用",
         "save_memory": "メモリに保存"
       },
@@ -193,7 +192,6 @@
         "web_fetch": "指定したウェブページの本文を読み取ります。",
         "python_execute": "Python で分析、計算、ファイル生成を行います。",
         "image_generate": "設定済みの画像モデルで画像を生成・編集します。",
-        "search_knowledge_base": "ユーザーが選択したナレッジベースを検索します。",
         "use_skill": "割り当て済みスキルの完全な手順を必要時に読み込みます。",
         "save_memory": "長期間有効なユーザー情報をメモリに保存します。"
       }
@@ -382,7 +380,8 @@
       "status": "ステータス",
       "expiry": "期限",
       "permanent": "無期限",
-      "allowance": "クレジット枠",
+      "allowance": "期限付きクレジット（残高 / 上限）",
+      "loadFailed": "最新のユーザー情報を読み込めませんでした。",
       "twofa": "二段階認証",
       "enabled": "有効",
       "disabled": "無効",
