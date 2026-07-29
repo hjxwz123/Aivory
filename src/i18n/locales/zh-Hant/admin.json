@@ -552,11 +552,16 @@
     "ragDynamicTopk": "動態 Top-K(按相似度)",
     "ragDynamicTopkHint": "不再固定數量,而是把相似度超過下方閾值的片段全部注入。",
     "ragSimThreshold": "相似度閾值(0–1)",
-    "ragSimThresholdHint": "餘弦相似度下限,達到或超過即注入。"
+    "ragSimThresholdHint": "餘弦相似度下限,達到或超過即注入。",
+    "mineruStorageRequired": "MinerU 需要完整的 S3 或阿里雲 OSS 設定。",
+    "configureStorage": "設定儲存"
   },
   "tools": {
     "title": "工具",
-    "lead": "對話過程中助手會呼叫的外部服務。"
+    "lead": "對話過程中助手會呼叫的外部服務。",
+    "availabilityTitle": "全域工具可用性",
+    "availabilityLead": "停用後，該工具會從所有模型中移除，包括已明確允許它的模型。",
+    "availabilityEmpty": "目前沒有已註冊的平台工具。"
   },
   "audio": {
     "title": "語音",
@@ -597,8 +602,6 @@
     }
   },
   "settings": {
-    "title": "全域性設定",
-    "lead": "影響全員的幾項:預設/任務模型、壓縮、註冊、配額。",
     "saved": "已儲存設定",
     "fields": {
       "settlementCurrency": "結算貨幣",
@@ -628,7 +631,6 @@
       "emailVerificationHint": "開啟後新註冊使用者需要輸入 6 位郵箱驗證碼才能登入。",
       "domainWhitelist": "允許註冊的郵箱域名",
       "domainWhitelistHint": "用逗號分隔。僅列出的域名可以註冊。留空允許所有域名。",
-      "legalSection": "法律條款與聯絡資訊",
       "legalLead": "設定登入頁、關於頁、服務條款與隱私政策頁面公開顯示的聯絡方式及政策文字。政策文字留空時使用完整的多語預設內容。",
       "contactEmail": "聯絡信箱",
       "contactEmailHint": "用於支援、付款諮詢、退款申請、隱私請求、違規檢舉與申訴。留空預設為 admin@aivory.local。",
@@ -639,7 +641,6 @@
       "privacyTextHint": "可選 Markdown，設定後取代內建本地化隱私政策。",
       "policyTextPlaceholder": "留空以使用本地化預設政策。",
       "pickModel": "選擇一個模型",
-      "smtpSection": "郵件 (SMTP)",
       "smtpLead": "寄送驗證碼與密碼重設郵件。",
       "smtpHost": "SMTP 伺服器",
       "smtpHostHint": "如 smtp.qq.com、smtp.163.com、smtp.gmail.com",
@@ -724,7 +725,6 @@
       "sandboxIdleTtlHint": "沙箱閒置這麼多秒後回收（回收前先歸檔其工作區）。留空 = 1800（30 分鐘）。範圍 60–86400。",
       "logFullRequests": "記錄完整請求體",
       "logFullRequestsLead": "在每條用量記錄上保存完整（已脫敏）的上游請求體，便於除錯。失敗請求無論此項是否開啟都始終記錄。",
-      "logErrorsOnly": "僅記錄失敗請求",
       "logErrorsOnlyHint": "開啟：維持只記錄失敗請求。關閉：記錄全部請求的完整請求體——資料庫更大，且更多敏感提示詞落盤。"
     }
   },
@@ -738,14 +738,9 @@
     "freePrice": "免費",
     "creditsRatioLabel": "模型成本內部換算（每 USD）",
     "creditsRatioHint": "每 1 USD 模型成本扣除的積分數，與使用者結算貨幣無關。0 = 停用積分。",
-    "groupBuyUrlLabel": "使用者組購買連結（全域）",
-    "groupBuyUrlHint": "付費組卡片的「購買」連結。留空顯示「聯絡管理員」。",
-    "creditBuyUrlLabel": "積分補充連結（全域）",
-    "creditBuyUrlHint": "使用者購買永久積分的網址。",
     "quotaMsgLabel": "超額提示",
     "quotaMsgHint": "使用者達到該模型用量上限時顯示。",
     "quotaMsgPlaceholder": "您已達到當前套餐對此模型的使用上限，升級套餐即可繼續使用。",
-    "msgSaved": "設定已儲存",
     "editorTitle": "編輯使用者組",
     "newTitle": "新建使用者組",
     "editorLead": "名稱、價格和功能將展示在使用者的訂閱頁面。",
@@ -1334,14 +1329,75 @@
       "time": "時間線"
     }
   },
+  "overview": {
+    "title": "管理總覽",
+    "lead": "查看目前部署的設定健康狀態與主要管理資源。",
+    "loadFailed": "無法載入管理總覽。",
+    "healthTitle": "設定健康狀態",
+    "healthLead": "向使用者開放相關功能前，請先處理以下警告。",
+    "metrics": {
+      "users": "使用者",
+      "models": "模型",
+      "channels": "渠道",
+      "plans": "會員方案"
+    },
+    "checks": {
+      "channels": "上游渠道",
+      "channelsReady": "已設定 {{count}} 個渠道",
+      "channelsMissing": "建立可用模型前需要先設定渠道。",
+      "defaultModel": "預設對話模型",
+      "defaultModelMissing": "選擇有效的預設模型後才能開始對話。",
+      "taskModel": "內部任務模型",
+      "taskModelMissing": "標題、路由、摘要與記憶擷取需要任務模型。",
+      "configured": "已設定",
+      "email": "電子郵件驗證",
+      "notRequired": "未要求",
+      "smtpReady": "SMTP 已設定",
+      "smtpMissing": "已要求電子郵件驗證，但 SMTP 設定不完整。",
+      "storage": "持久化儲存",
+      "storageReady": "儲存方式：{{provider}}",
+      "storageLocal": "已選擇本機儲存；工作空間持久化仍需掛載沙箱儲存卷。",
+      "storageIncomplete": "已選擇 {{provider}}，但必要的儲存設定尚不完整。",
+      "storageMissing": "工作空間封存與應用程式物件目前不會持久化。",
+      "payments": "支付結帳",
+      "paymentsUnused": "尚未設定支付渠道",
+      "paymentMethodsReady": "已有 {{count}} 個支付方式",
+      "paymentMethodMissing": "已有支付渠道，但尚未綁定使用者可見的支付方式。"
+    }
+  },
+  "creditSettings": {
+    "title": "積分與配額",
+    "lead": "設定計費換算、平台級使用限制與永久積分套餐。",
+    "policyTitle": "計費策略",
+    "policyLead": "這些設定適用於所有會員與所有扣積分模型。",
+    "limitsTitle": "平台限制",
+    "limitsLead": "按使用者限制；數值設為 0 表示不限制。",
+    "zeroUnlimited": "0 = 不限制。",
+    "dailyTokenLimit": "每日 Token 上限",
+    "dailyTokenLimitHint": "每位使用者每個 UTC 日的輸入與輸出 Token 總上限。0 = 不限制。",
+    "maxConcurrentGenerations": "每位使用者並行生成數",
+    "maxConcurrentGenerationsHint": "每位使用者同時進行的回應串流上限。0 = 不限制。"
+  },
+  "systemStorage": {
+    "title": "儲存與上傳",
+    "lead": "設定平台物件儲存、封存保留時間與上傳限制。"
+  },
   "menu": {
-    "models": "模型",
-    "capabilities": "能力",
-    "users": "使用者",
-    "data": "資料",
-    "system": "系統",
-    "workspaces": "工作空間",
-    "payments": "支付"
+    "overview": "總覽",
+    "aiModels": "AI 與模型",
+    "modelPolicy": "模型策略",
+    "contextMemory": "上下文與記憶",
+    "capabilities": "能力與整合",
+    "usersAccess": "使用者與存取",
+    "registrationPolicy": "註冊策略",
+    "billing": "計費與權益",
+    "creditsQuotas": "積分與配額",
+    "operations": "資料與營運",
+    "platform": "系統",
+    "emailService": "郵件服務",
+    "storageUploads": "儲存與上傳",
+    "legalContact": "法律與聯絡",
+    "loggingPrivacy": "日誌與隱私"
   },
   "imageStyles": {
     "title": "圖片風格",

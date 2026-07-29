@@ -1,13 +1,25 @@
 /**
- * AdminLayout — flat left rail of merged admin sections. Related pages are
- * consolidated under one rail entry; a secondary tab bar at the top of the
- * content area switches between the sibling pages. Every page/route/config is
- * unchanged — this only groups how they're reached. Gates access to admins only.
+ * AdminLayout — task-oriented admin navigation.
+ *
+ * The old shell exposed one rail item per broad area and then rendered a second
+ * tab bar above the page. That hid most destinations until a parent area was
+ * opened and wrapped badly as the console grew. The grouped rail below links
+ * directly to every top-level admin surface.
  */
 import { Suspense, useEffect, useState } from 'react'
 import { NavLink, Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { ArrowLeft, BarChart3, Briefcase, Cpu, CreditCard, FolderOpen, Menu, Settings2, Sparkles, Users } from 'lucide-react'
+import {
+  ArrowLeft,
+  BarChart3,
+  Cpu,
+  CreditCard,
+  LayoutDashboard,
+  Menu,
+  Settings2,
+  Sparkles,
+  Users,
+} from 'lucide-react'
 import { useAuth } from '@/store/auth'
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet'
 import { RouteFade } from '@/components/ui/route-fade'
@@ -15,118 +27,156 @@ import { PanelFallback } from '@/components/ui/panel-fallback'
 import { UserMenu } from '@/components/sidebar/sidebar'
 import { cn } from '@/lib/utils'
 
-interface AdminTab {
+interface AdminNavItem {
   to: string
   labelKey: string
-  /** Extra path prefixes that still belong to this tab (drill-down routes). */
+  defaultLabel: string
+  /** Drill-down routes that should keep this item selected. */
   also?: string[]
 }
-interface AdminSection {
+
+interface AdminNavGroup {
   key: string
   icon: typeof Cpu
   labelKey: string
-  /** Where the rail entry navigates (the section's first tab). */
-  to: string
-  tabs: AdminTab[]
+  defaultLabel: string
+  items: AdminNavItem[]
 }
 
-// Merged sections (flat rail). Each groups similar pages; the rail shows one
-// entry per section, and the section's pages appear as tabs in the content area.
-const SECTIONS: AdminSection[] = [
+const OVERVIEW: AdminNavItem = {
+  to: '/admin/overview',
+  labelKey: 'admin:menu.overview',
+  defaultLabel: 'Overview',
+}
+
+const GROUPS: AdminNavGroup[] = [
   {
-    key: 'system',
-    icon: Settings2,
-    labelKey: 'admin:menu.system',
-    to: '/admin/settings',
-    tabs: [
-      { to: '/admin/settings', labelKey: 'admin:settings.title' },
-      { to: '/admin/oauth', labelKey: 'admin:oauth.title' },
-      { to: '/admin/moderation', labelKey: 'admin:moderation.title' },
-      { to: '/admin/announcement', labelKey: 'admin:announcement.title' },
-      { to: '/admin/backup', labelKey: 'admin:backup.title' },
-    ],
-  },
-  {
-    key: 'models',
+    key: 'ai',
     icon: Cpu,
-    labelKey: 'admin:menu.models',
-    to: '/admin/channels',
-    tabs: [
-      { to: '/admin/channels', labelKey: 'admin:channels.title' },
-      { to: '/admin/models', labelKey: 'admin:models.title', also: ['/admin/model-tags'] },
+    labelKey: 'admin:menu.aiModels',
+    defaultLabel: 'AI & models',
+    items: [
+      { to: '/admin/channels', labelKey: 'admin:channels.title', defaultLabel: 'Channels' },
+      {
+        to: '/admin/models',
+        labelKey: 'admin:models.title',
+        defaultLabel: 'Models',
+        also: ['/admin/model-tags'],
+      },
+      {
+        to: '/admin/settings/model-policy',
+        labelKey: 'admin:menu.modelPolicy',
+        defaultLabel: 'Model policy',
+      },
+      {
+        to: '/admin/settings/context-memory',
+        labelKey: 'admin:menu.contextMemory',
+        defaultLabel: 'Context & memory',
+      },
+      { to: '/admin/moderation', labelKey: 'admin:moderation.title', defaultLabel: 'Moderation' },
     ],
   },
   {
     key: 'capabilities',
     icon: Sparkles,
     labelKey: 'admin:menu.capabilities',
-    to: '/admin/skills',
-    tabs: [
-      { to: '/admin/skills', labelKey: 'admin:skills.title' },
-      { to: '/admin/prompts', labelKey: 'admin:prompts.title' },
-      { to: '/admin/image-styles', labelKey: 'admin:imageStyles.title' },
-      { to: '/admin/tools', labelKey: 'admin:tools.title' },
-      { to: '/admin/documents', labelKey: 'admin:documents.title' },
-      { to: '/admin/audio', labelKey: 'admin:audio.title' },
+    defaultLabel: 'Capabilities & integrations',
+    items: [
+      { to: '/admin/skills', labelKey: 'admin:skills.title', defaultLabel: 'Skills' },
+      { to: '/admin/prompts', labelKey: 'admin:prompts.title', defaultLabel: 'Prompt library' },
+      { to: '/admin/tools', labelKey: 'admin:tools.title', defaultLabel: 'Tools' },
+      { to: '/admin/documents', labelKey: 'admin:documents.title', defaultLabel: 'Documents & knowledge' },
+      { to: '/admin/image-styles', labelKey: 'admin:imageStyles.title', defaultLabel: 'Image generation' },
+      { to: '/admin/audio', labelKey: 'admin:audio.title', defaultLabel: 'Speech' },
     ],
   },
   {
-    key: 'users',
+    key: 'access',
     icon: Users,
-    labelKey: 'admin:menu.users',
-    to: '/admin/users',
-    tabs: [
-      { to: '/admin/users', labelKey: 'admin:users.title' },
-      { to: '/admin/user-groups', labelKey: 'admin:groups.title' },
-      { to: '/admin/redeem-codes', labelKey: 'admin:redeemCodes.title' },
+    labelKey: 'admin:menu.usersAccess',
+    defaultLabel: 'Users & access',
+    items: [
+      {
+        to: '/admin/users',
+        labelKey: 'admin:users.title',
+        defaultLabel: 'Users',
+      },
+      {
+        to: '/admin/settings/registration',
+        labelKey: 'admin:menu.registrationPolicy',
+        defaultLabel: 'Registration policy',
+      },
+      { to: '/admin/oauth', labelKey: 'admin:oauth.title', defaultLabel: 'Login providers' },
+      { to: '/admin/workspaces', labelKey: 'admin:workspaces.title', defaultLabel: 'Workspaces' },
     ],
   },
   {
-    key: 'workspaces',
-    icon: Briefcase,
-    labelKey: 'admin:menu.workspaces',
-    to: '/admin/workspaces',
-    tabs: [{ to: '/admin/workspaces', labelKey: 'admin:workspaces.title' }],
-  },
-  {
-    key: 'data',
-    icon: BarChart3,
-    labelKey: 'admin:menu.data',
-    to: '/admin/usage',
-    tabs: [
-      { to: '/admin/usage', labelKey: 'admin:usage.title' },
-      { to: '/admin/analytics', labelKey: 'admin:analytics.title' },
-    ],
-  },
-  {
-    key: 'payments',
+    key: 'billing',
     icon: CreditCard,
-    labelKey: 'admin:menu.payments',
-    to: '/admin/payment-channels',
-    tabs: [
-      { to: '/admin/payment-channels', labelKey: 'admin:paymentChannels.title' },
-      { to: '/admin/payment-methods', labelKey: 'admin:paymentMethods.title' },
-      { to: '/admin/payment-orders', labelKey: 'admin:paymentOrders.title' },
+    labelKey: 'admin:menu.billing',
+    defaultLabel: 'Billing & entitlements',
+    items: [
+      { to: '/admin/user-groups', labelKey: 'admin:groups.title', defaultLabel: 'Plans' },
+      { to: '/admin/credits', labelKey: 'admin:menu.creditsQuotas', defaultLabel: 'Credits & quotas' },
+      { to: '/admin/redeem-codes', labelKey: 'admin:redeemCodes.title', defaultLabel: 'Redeem codes' },
+      {
+        to: '/admin/payment-channels',
+        labelKey: 'admin:paymentChannels.title',
+        defaultLabel: 'Payment channels',
+      },
+      {
+        to: '/admin/payment-methods',
+        labelKey: 'admin:paymentMethods.title',
+        defaultLabel: 'Payment methods',
+      },
+      { to: '/admin/payment-orders', labelKey: 'admin:paymentOrders.title', defaultLabel: 'Payment orders' },
     ],
   },
   {
-    key: 'files',
-    icon: FolderOpen,
-    labelKey: 'admin:files.title',
-    to: '/admin/files',
-    tabs: [{ to: '/admin/files', labelKey: 'admin:files.title' }],
+    key: 'operations',
+    icon: BarChart3,
+    labelKey: 'admin:menu.operations',
+    defaultLabel: 'Data & operations',
+    items: [
+      { to: '/admin/analytics', labelKey: 'admin:analytics.title', defaultLabel: 'Analytics' },
+      { to: '/admin/usage', labelKey: 'admin:usage.title', defaultLabel: 'Usage records' },
+      { to: '/admin/files', labelKey: 'admin:files.title', defaultLabel: 'Files' },
+    ],
+  },
+  {
+    key: 'platform',
+    icon: Settings2,
+    labelKey: 'admin:menu.platform',
+    defaultLabel: 'System',
+    items: [
+      { to: '/admin/announcement', labelKey: 'admin:announcement.title', defaultLabel: 'Announcement' },
+      {
+        to: '/admin/settings/email',
+        labelKey: 'admin:menu.emailService',
+        defaultLabel: 'Email service',
+      },
+      { to: '/admin/storage', labelKey: 'admin:menu.storageUploads', defaultLabel: 'Storage & uploads' },
+      {
+        to: '/admin/settings/legal',
+        labelKey: 'admin:menu.legalContact',
+        defaultLabel: 'Legal & contact',
+      },
+      {
+        to: '/admin/settings/logging',
+        labelKey: 'admin:menu.loggingPrivacy',
+        defaultLabel: 'Logging & privacy',
+      },
+      { to: '/admin/backup', labelKey: 'admin:backup.title', defaultLabel: 'Backup & migration' },
+    ],
   },
 ]
 
-// True when `path` is `to` exactly or a drill-down under it (`to/...`).
 function underPath(path: string, to: string): boolean {
-  return path === to || path.startsWith(to + '/')
+  return path === to || path.startsWith(to.endsWith('/') ? to : `${to}/`)
 }
-function tabActive(path: string, tab: AdminTab): boolean {
-  return underPath(path, tab.to) || (tab.also ?? []).some((p) => underPath(path, p))
-}
-function sectionActive(path: string, section: AdminSection): boolean {
-  return section.tabs.some((tab) => tabActive(path, tab))
+
+function itemActive(path: string, item: AdminNavItem): boolean {
+  return underPath(path, item.to) || (item.also ?? []).some((prefix) => underPath(path, prefix))
 }
 
 export default function AdminLayout() {
@@ -137,15 +187,10 @@ export default function AdminLayout() {
   const { t } = useTranslation(['admin', 'nav', 'common'])
   const [mobileOpen, setMobileOpen] = useState(false)
 
-  // Close mobile nav on route change.
   useEffect(() => {
     setMobileOpen(false)
   }, [location.pathname])
 
-  // Render-gate (not a post-mount effect): a non-admin must never mount the
-  // admin pages or fire their API calls, even for a frame. While auth is still
-  // resolving (hydrate in flight: user null, status idle/authenticating) we
-  // render nothing rather than flashing a redirect.
   if (user) {
     if (user.role !== 'admin') return <Navigate to="/" replace />
   } else if (status === 'unauthenticated') {
@@ -155,79 +200,69 @@ export default function AdminLayout() {
   }
 
   const path = location.pathname
-  const currentSection = SECTIONS.find((s) => sectionActive(path, s))
-  const filesWorkspace = currentSection?.key === 'files'
+  const filesWorkspace = underPath(path, '/admin/files')
+
+  function LinkItem({ item }: { item: AdminNavItem }) {
+    const active = itemActive(path, item)
+    return (
+      <NavLink
+        to={item.to}
+        className={cn(
+          'flex h-8 items-center rounded-[7px] pl-8 pr-2 text-[12.5px] interactive',
+          active
+            ? 'bg-[var(--color-surface)] font-medium text-[var(--color-fg)] shadow-[inset_2px_0_0_var(--color-accent)]'
+            : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
+        )}
+      >
+        <span className="truncate">{t(item.labelKey, { defaultValue: item.defaultLabel })}</span>
+      </NavLink>
+    )
+  }
 
   function NavItems() {
     return (
       <>
-        {SECTIONS.map((s) => {
-          const active = sectionActive(path, s)
-          return (
-            <NavLink
-              key={s.key}
-              to={s.to}
-              className={cn(
-                'flex items-center gap-2.5 h-9 px-3 rounded-[8px] text-[13px] interactive',
-                active
-                  ? 'bg-[var(--color-surface)] text-[var(--color-fg)] font-medium'
-                  : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
-              )}
-            >
-              <s.icon size={14} aria-hidden />
-              {t(s.labelKey)}
-            </NavLink>
-          )
-        })}
+        <NavLink
+          to={OVERVIEW.to}
+          className={cn(
+            'mb-3 flex h-9 items-center gap-2.5 rounded-[8px] px-3 text-[13px] interactive',
+            itemActive(path, OVERVIEW)
+              ? 'bg-[var(--color-surface)] font-medium text-[var(--color-fg)]'
+              : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
+          )}
+        >
+          <LayoutDashboard size={14} aria-hidden />
+          {t(OVERVIEW.labelKey, { defaultValue: OVERVIEW.defaultLabel })}
+        </NavLink>
+
+        {GROUPS.map((group) => (
+          <section key={group.key} className="mb-3">
+            <div className="flex h-7 items-center gap-2 px-3 text-[11px] font-medium uppercase text-[var(--color-fg-subtle)]">
+              <group.icon size={12} aria-hidden />
+              <span className="truncate">{t(group.labelKey, { defaultValue: group.defaultLabel })}</span>
+            </div>
+            <div className="mt-0.5 flex flex-col gap-px">
+              {group.items.map((item) => <LinkItem key={item.to} item={item} />)}
+            </div>
+          </section>
+        ))}
       </>
     )
   }
 
-  // Secondary tab bar for the active section (only when it has >1 page).
-  function SectionTabs() {
-    if (!currentSection || currentSection.tabs.length < 2) return null
-    return (
-      <div className="mb-6 flex flex-wrap gap-1 border-b border-[var(--color-divider)]">
-        {currentSection.tabs.map((tab) => {
-          const active = tabActive(path, tab)
-          return (
-            <NavLink
-              key={tab.to}
-              to={tab.to}
-              className={cn(
-                '-mb-px inline-flex items-center h-9 px-3.5 text-[13px] border-b-2 interactive',
-                active
-                  ? 'border-[var(--color-accent)] text-[var(--color-fg)] font-medium'
-                  : 'border-transparent text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]',
-              )}
-            >
-              {t(tab.labelKey)}
-            </NavLink>
-          )
-        })}
-      </div>
-    )
-  }
-
-  // The shell matches #root's concrete viewport height. <main> is also a
-  // permanent positioning context: RouteFade temporarily creates one while its
-  // transform animation runs, then removes it. Without a positioned scroll
-  // root, deep absolute `sr-only` controls can jump to document coordinates
-  // when that animation ends and make <html> scroll alongside <main>.
   return (
     <div className="flex h-full w-full overflow-hidden bg-[var(--color-bg)] text-[var(--color-fg)]">
-      {/* Desktop sidebar */}
-      <aside className="hidden md:flex w-[15rem] flex-col border-r border-[var(--color-divider)] bg-[var(--color-bg-muted)]/40">
+      <aside className="hidden w-[16rem] flex-col border-r border-[var(--color-divider)] bg-[var(--color-bg-muted)]/40 md:flex">
         <button
           type="button"
           onClick={() => navigate('/')}
-          className="m-3 inline-flex items-center gap-2 text-[12.5px] text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)] interactive rounded-[6px] px-2 py-1.5 self-start"
+          className="m-3 inline-flex items-center gap-2 self-start rounded-[6px] px-2 py-1.5 text-[12.5px] text-[var(--color-fg-subtle)] interactive hover:text-[var(--color-fg)]"
         >
           <ArrowLeft size={12} aria-hidden />
           {t('admin:backToChat')}
         </button>
-        <h2 className="px-5 pt-2 font-serif text-[15px] text-[var(--color-fg)]">{t('admin:title')}</h2>
-        <nav className="mt-4 flex-1 px-3 flex flex-col gap-0.5">
+        <h2 className="px-5 pt-1 font-serif text-[15px] text-[var(--color-fg)]">{t('admin:title')}</h2>
+        <nav className="mt-4 min-h-0 flex-1 overflow-y-auto px-3 pb-4">
           <NavItems />
         </nav>
       </aside>
@@ -238,30 +273,29 @@ export default function AdminLayout() {
           filesWorkspace ? 'flex flex-col overflow-hidden' : 'overflow-y-auto',
         )}
       >
-        {/* Mobile topbar */}
         <div className="flex h-[var(--layout-topbar-h-mobile)] items-center gap-2 border-b border-[var(--color-divider)] px-2 md:hidden">
           <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
             <SheetTrigger asChild>
               <button
                 type="button"
                 aria-label={t('admin:title')}
-                className="inline-flex size-[var(--tap-min)] items-center justify-center rounded-[10px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                className="inline-flex size-[var(--tap-min)] items-center justify-center rounded-[10px] text-[var(--color-fg-muted)] interactive hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
               >
                 <Menu size={18} aria-hidden />
               </button>
             </SheetTrigger>
             <SheetContent side="left" size="sm" label={t('admin:title')}>
-              <div className="flex flex-col h-full">
+              <div className="flex h-full flex-col">
                 <button
                   type="button"
                   onClick={() => { setMobileOpen(false); navigate('/') }}
-                  className="m-3 inline-flex items-center gap-2 text-[12.5px] text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)] interactive rounded-[6px] px-2 py-1.5 self-start"
+                  className="m-3 inline-flex items-center gap-2 self-start rounded-[6px] px-2 py-1.5 text-[12.5px] text-[var(--color-fg-subtle)] interactive hover:text-[var(--color-fg)]"
                 >
                   <ArrowLeft size={12} aria-hidden />
                   {t('admin:backToChat')}
                 </button>
-                <h2 className="px-5 pt-2 font-serif text-[15px] text-[var(--color-fg)]">{t('admin:title')}</h2>
-                <nav className="mt-4 flex-1 px-3 flex flex-col gap-0.5">
+                <h2 className="px-5 pt-1 font-serif text-[15px] text-[var(--color-fg)]">{t('admin:title')}</h2>
+                <nav className="mt-4 min-h-0 flex-1 overflow-y-auto px-3 pb-4">
                   <NavItems />
                 </nav>
               </div>
@@ -278,21 +312,7 @@ export default function AdminLayout() {
               : 'mx-auto w-full max-w-[84rem] px-5 py-8 sm:px-8 sm:py-12 lg:px-12',
           )}
         >
-          <SectionTabs />
-          {/* Content-scoped Suspense: switching tabs/sections keeps the sidebar +
-              tabs on screen and only this panel shows a loader while the lazy page
-              chunk loads — instead of the whole admin shell blanking to the
-              app-level full-screen spinner.
-              key=path: router navigations run inside startTransition, and an
-              ALREADY-MOUNTED boundary doesn't show its fallback during a
-              transition — React freezes the old page (rail/tab highlight included)
-              until the next chunk resolves, which reads as click lag. A key change
-              mounts a NEW boundary, which commits the fallback immediately: the
-              section/tab switches on click, spinner while it loads (§ instant nav). */}
-          <RouteFade
-            dep={path}
-            className={filesWorkspace ? 'flex min-h-0 flex-1 flex-col' : undefined}
-          >
+          <RouteFade dep={path} className={filesWorkspace ? 'flex min-h-0 flex-1 flex-col' : undefined}>
             <Suspense key={path} fallback={<PanelFallback />}>
               <Outlet />
             </Suspense>
