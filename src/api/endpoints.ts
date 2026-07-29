@@ -1013,6 +1013,8 @@ export const adminApi = {
     }
     return res.blob()
   },
+  backupArchiveDelete: (name: string) =>
+    api<{ deleted: string }>(`/admin/backup/archives/${encodeURIComponent(name)}`, { method: 'DELETE' }),
   backupImport: (file: File) => {
     const fd = new FormData()
     fd.append('confirm', 'REPLACE')

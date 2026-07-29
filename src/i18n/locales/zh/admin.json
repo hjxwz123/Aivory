@@ -1016,6 +1016,9 @@
       "loading": "正在加载归档列表…",
       "noArchives": "还没有可下载的备份归档。",
       "download": "下载",
+      "deleteConfirmTitle": "删除此归档？",
+      "deleteConfirmLead": "将从服务器永久删除 {{name}}。",
+      "deleteDone": "已删除归档：{{name}}",
       "progress": {
         "preparing": "准备中",
         "reading_database": "读取数据库",

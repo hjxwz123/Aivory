@@ -1012,6 +1012,9 @@
       "loading": "Loading archive list…",
       "noArchives": "No downloadable backup archives yet.",
       "download": "Download",
+      "deleteConfirmTitle": "Delete this archive?",
+      "deleteConfirmLead": "{{name}} will be permanently deleted from the server.",
+      "deleteDone": "Archive deleted: {{name}}",
       "progress": {
         "preparing": "Preparing",
         "reading_database": "Reading database",
