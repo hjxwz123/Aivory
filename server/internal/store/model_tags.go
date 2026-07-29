@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -35,6 +36,20 @@ func ListModelTags(ctx context.Context, db *sql.DB) ([]ModelTag, error) {
 	return out, rows.Err()
 }
 
+// GetModelTag returns one tag by id.
+func GetModelTag(ctx context.Context, db *sql.DB, id string) (*ModelTag, error) {
+	var t ModelTag
+	err := db.QueryRowContext(ctx, `SELECT id, name, sort_order, created_at FROM model_tags WHERE id=?`, id).
+		Scan(&t.ID, &t.Name, &t.SortOrder, &t.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &t, nil
+}
+
 // GetModelTagByName returns a tag by case-insensitive, trimmed name.
 func GetModelTagByName(ctx context.Context, db *sql.DB, name string) (*ModelTag, error) {
 	var t ModelTag
@@ -64,25 +79,52 @@ func CreateModelTag(ctx context.Context, db *sql.DB, name string, sortOrder int)
 	return &t, nil
 }
 
-// UpdateModelTag renames / reorders a tag.
-func UpdateModelTag(ctx context.Context, db *sql.DB, id, name string, sortOrder int) (*ModelTag, error) {
-	name = strings.TrimSpace(name)
-	if _, err := db.ExecContext(ctx, `UPDATE model_tags SET name=?, sort_order=? WHERE id=?`, name, sortOrder, id); err != nil {
+type ModelTagPatch struct {
+	Name      *string `json:"name"`
+	SortOrder *int    `json:"sort_order"`
+}
+
+// UpdateModelTag only writes fields present in patch.
+func UpdateModelTag(ctx context.Context, db *sql.DB, id string, patch ModelTagPatch) (*ModelTag, error) {
+	parts := []string{}
+	args := []any{}
+	if patch.Name != nil {
+		parts = append(parts, "name=?")
+		args = append(args, strings.TrimSpace(*patch.Name))
+	}
+	if patch.SortOrder != nil {
+		parts = append(parts, "sort_order=?")
+		args = append(args, *patch.SortOrder)
+	}
+	if len(parts) == 0 {
+		return GetModelTag(ctx, db, id)
+	}
+	args = append(args, id)
+	if _, err := db.ExecContext(ctx,
+		fmt.Sprintf("UPDATE model_tags SET %s WHERE id=?", strings.Join(parts, ", ")),
+		args...); err != nil {
 		if isUniqueIndexErr(err, "idx_model_tags_name_unique", "model_tags.name") {
 			return nil, ErrModelTagNameExists
 		}
 		return nil, err
 	}
-	var t ModelTag
-	err := db.QueryRowContext(ctx, `SELECT id, name, sort_order, created_at FROM model_tags WHERE id=?`, id).
-		Scan(&t.ID, &t.Name, &t.SortOrder, &t.CreatedAt)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrNotFound
-	}
+	return GetModelTag(ctx, db, id)
+}
+
+// ReorderModelTags assigns sort_order = position for each id in one
+// transaction, matching the model and channel reorder operations.
+func ReorderModelTags(ctx context.Context, db *sql.DB, ids []string) error {
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	return &t, nil
+	defer func() { _ = tx.Rollback() }()
+	for i, id := range ids {
+		if _, err := tx.ExecContext(ctx, `UPDATE model_tags SET sort_order=? WHERE id=?`, i, id); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // DeleteModelTag removes a tag definition. Stale ids that may remain inside
