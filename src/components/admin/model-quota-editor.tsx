@@ -1,9 +1,9 @@
 /**
  * ModelQuotaEditor — per-model access + usage caps by user group (§ user groups).
- * Toggle which groups may use the model; for each granted group set a fixed
- * window (period) and a cap (cost in the model's currency, or call count;
- * 0 = unlimited). A model with NO grants is open to everyone. Self-contained:
- * loads + saves its own state.
+ * Toggle which groups receive a free allowance; for each granted group set a
+ * fixed window (period) and a cap (cost in the model's currency, or call count;
+ * 0 = unlimited). A missing grant means that group has no free allowance and
+ * every call consumes credits. Self-contained: loads + saves its own state.
  */
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'

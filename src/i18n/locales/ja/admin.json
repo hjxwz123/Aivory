@@ -153,7 +153,7 @@
       "officialToolJSONInvalid": "{{name}} のリクエスト JSON が無効です。",
       "officialToolJSONMustBeObject": "有効な JSON オブジェクトを入力してください。"
     },
-    "permissionsLead": "このモデルを使える群と周期ごとの上限。全オフ=全員に開放。",
+    "permissionsLead": "このモデルのグループ別無料枠を設定します。無効なグループは利用ごとにクレジットを消費します。",
     "tagsHint": "選択メニューの絞り込み用タグ。",
     "pc": {
       "toggle": "トグル",
@@ -321,6 +321,7 @@
     "create": "ユーザーを作成",
     "created": "ユーザーを作成しました",
     "editTitle": "{{name}}を編集",
+    "emailChanged": "メールアドレスを更新しました",
     "roleUser": "ユーザー",
     "roleAdmin": "管理者",
     "roleChanged": "ロールを更新しました",
@@ -344,6 +345,7 @@
     },
     "errors": {
       "emailRequired": "有効なメールアドレスが必要です。",
+      "emailExists": "このメールアドレスは別のユーザーが使用しています。",
       "passwordShort": "パスワードは8文字以上にしてください。"
     },
     "ban": "禁止",
@@ -824,8 +826,8 @@
   },
   "quota": {
     "saved": "権限を保存しました",
-    "restrictedHint": "有効な群のみ利用可、他はロック表示。",
-    "openHint": "群未設定—全員に無制限開放。",
+    "restrictedHint": "有効なグループには設定済みの無料枠が適用され、その他のグループは利用ごとにクレジットを消費します。",
+    "openHint": "有効なグループなし：通常ユーザーは利用ごとにクレジットを消費します。",
     "every": "ごと",
     "days": "日",
     "hours": "時間",

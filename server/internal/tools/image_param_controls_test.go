@@ -132,7 +132,8 @@ func TestImageGenerateToolFaithfullyEditsCurrentAttachmentWithModelDefaults(t *t
 	db := openToolsTestDB(t)
 	controls := `[{"key":"render","type":"select","default":"faithful","options":[{"value":"faithful"}],"map":{"faithful":{"quality":"high","background":"opaque","input_fidelity":"low"}}}]`
 	for _, query := range []string{
-		`INSERT INTO users(id,email,password_hash,name) VALUES('u_edit','edit@example.test','hash','Edit User')`,
+		`INSERT INTO user_groups(id,name,is_default) VALUES('ug_edit','Image Edit',0)`,
+		`INSERT INTO users(id,email,password_hash,name,group_id) VALUES('u_edit','edit@example.test','hash','Edit User','ug_edit')`,
 		`INSERT INTO channels(id,name,type,base_url,api_key) VALUES('ch_edit','Edit Channel','openai','https://images.example.test','server-secret')`,
 	} {
 		if _, err := db.Exec(query); err != nil {
@@ -140,6 +141,9 @@ func TestImageGenerateToolFaithfullyEditsCurrentAttachmentWithModelDefaults(t *t
 		}
 	}
 	if _, err := db.Exec(`INSERT INTO models(id,channel_id,kind,request_id,label,param_controls) VALUES('m_edit','ch_edit','image','gpt-image-2','GPT Image 2',?)`, controls); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO model_group_quotas(model_id,group_id,period_seconds,limit_type,limit_value) VALUES('m_edit','ug_edit',604800,'count',0)`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(`INSERT INTO conversations(id,user_id,title,model_id) VALUES('c_edit','u_edit','Edit','m_edit')`); err != nil {

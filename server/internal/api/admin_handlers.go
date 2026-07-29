@@ -825,6 +825,34 @@ func createUserAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 201, user)
 }
 
+// setUserEmailAdmin changes an account's sign-in email without touching its
+// display name or any membership, credit, and security fields.
+func setUserEmailAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
+	id := pathParam(r, "id")
+	var req struct {
+		Email string `json:"email"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, errInvalidInput)
+		return
+	}
+	if err := store.SetUserEmail(r.Context(), d.DB, id, req.Email); err != nil {
+		switch {
+		case errors.Is(err, store.ErrNotFound):
+			writeError(w, http.StatusNotFound, errNotFound)
+		case errors.Is(err, store.ErrUserEmailInvalid):
+			writeError(w, http.StatusBadRequest, errInvalidEmail)
+		case errors.Is(err, store.ErrUserEmailExists):
+			writeError(w, http.StatusConflict, errEmailAlreadyRegistered)
+		default:
+			writeError(w, http.StatusInternalServerError, err)
+		}
+		return
+	}
+	invalidateAuthUser(d, id)
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
 // setUserPasswordAdmin resets another user's password without the
 // current-password check (admin authority). Bumps token version + drops live
 // sessions so the user must re-authenticate with the new credential.

@@ -86,16 +86,16 @@ func ImageUsageInWindow(ctx context.Context, db *sql.DB, userID, modelID string,
 	return cost, images, err
 }
 
-// ModelHasAnyQuota reports whether a model is restricted (has ≥1 quota row).
-// A model with no rows is open to everyone, unlimited.
+// ModelHasAnyQuota reports whether any group has an explicit free allowance for
+// the model. A model with no rows is credit-paid for every non-admin user.
 func ModelHasAnyQuota(ctx context.Context, db *sql.DB, modelID string) (bool, error) {
 	var n int
 	err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM model_group_quotas WHERE model_id=?`, modelID).Scan(&n)
 	return n > 0, err
 }
 
-// RestrictedModelIDs returns the set of model ids that have ≥1 quota row, so
-// callers can compute "locked" for many models with one query.
+// RestrictedModelIDs returns the model ids that have at least one explicit
+// group free-allowance row.
 func RestrictedModelIDs(ctx context.Context, db *sql.DB) (map[string]bool, error) {
 	rows, err := db.QueryContext(ctx, `SELECT DISTINCT model_id FROM model_group_quotas`)
 	if err != nil {
@@ -113,8 +113,8 @@ func RestrictedModelIDs(ctx context.Context, db *sql.DB) (map[string]bool, error
 	return out, rows.Err()
 }
 
-// QuotasForGroup returns model_id → quota for one group (used to compute which
-// restricted models a group can access, for the picker).
+// QuotasForGroup returns model_id → free allowance for one group. A missing
+// model entry means that group's calls are paid with credits.
 func QuotasForGroup(ctx context.Context, db *sql.DB, groupID string) (map[string]ModelGroupQuota, error) {
 	rows, err := db.QueryContext(ctx,
 		`SELECT model_id, group_id, period_seconds, limit_type, limit_value FROM model_group_quotas WHERE group_id=?`, groupID)

@@ -1122,8 +1122,13 @@ func (t *imageGenerateTool) checkModelImageQuota(ctx context.Context, userID str
 		return nil // admins are exempt from usage quotas
 	}
 	has, err := store.ModelHasAnyQuota(ctx, t.db, model.ID)
-	if err != nil || !has {
-		return nil // no quota rows → unlimited (fail-open on error)
+	if err != nil {
+		return errors.New(imageQuotaMessage(t.db))
+	}
+	if !has {
+		// This legacy path has no ImageBilling implementation with which to debit
+		// credits. Never turn the all-toggles-off state into a free image call.
+		return errors.New(imageQuotaMessage(t.db))
 	}
 	groupID := store.DefaultGroupID
 	if u != nil && u.GroupID != "" {
@@ -1131,7 +1136,8 @@ func (t *imageGenerateTool) checkModelImageQuota(ctx context.Context, userID str
 	}
 	q, err := store.GetModelQuota(ctx, t.db, model.ID, groupID)
 	if err != nil {
-		// Restricted model with no row for this group → not available to them.
+		// No free allowance. Without a biller this fallback cannot charge credits,
+		// so refuse instead of silently producing a free image.
 		return errors.New(imageQuotaMessage(t.db))
 	}
 	if q.LimitValue <= 0 {

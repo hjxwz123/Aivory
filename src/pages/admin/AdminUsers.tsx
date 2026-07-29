@@ -67,8 +67,9 @@ export default function AdminUsers() {
   const [creating, setCreating] = useState(false)
   const creatingRef = useRef(false)
 
-  // Edit-user dialog (role + reset password)
+  // Edit-user dialog (email, role + reset password)
   const [editRow, setEditRow] = useState<ApiUser | null>(null)
+  const [editEmail, setEditEmail] = useState('')
   const [editRole, setEditRole] = useState<Role>('user')
   const [editGroup, setEditGroup] = useState('')
   // Membership expiry as a yyyy-mm-dd date input value ('' = permanent).
@@ -264,6 +265,7 @@ export default function AdminUsers() {
 
   function openEdit(u: ApiUser) {
     setEditRow(u)
+    setEditEmail(u.email)
     setEditRole(u.role)
     setEditGroup(u.group_id || (groups.find((g) => g.is_default)?.id ?? ''))
     setEditExpiry(expiryToInput(u.group_expires_at ?? 0))
@@ -273,12 +275,21 @@ export default function AdminUsers() {
 
   async function submitEdit() {
     if (!editRow) return
+    const normalizedEmail = editEmail.trim().toLowerCase()
+    if (!normalizedEmail || !normalizedEmail.includes('@')) {
+      toast.error(t('admin:users.errors.emailRequired'))
+      return
+    }
     if (editPassword && editPassword.length < 8) {
       toast.error(t('admin:users.errors.passwordShort'))
       return
     }
     setSaving(true)
     try {
+      if (normalizedEmail !== editRow.email.trim().toLowerCase()) {
+        await adminApi.setUserEmail(editRow.id, normalizedEmail)
+        toast.success(t('admin:users.emailChanged'))
+      }
       if (editRole !== editRow.role) {
         await adminApi.setUserRole(editRow.id, editRole)
         toast.success(t('admin:users.roleChanged'))
@@ -299,7 +310,13 @@ export default function AdminUsers() {
       setEditRow(null)
       await reload()
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
+      if (e instanceof ApiError && e.message === 'email_already_registered') {
+        toast.error(t('admin:users.errors.emailExists'))
+      } else if (e instanceof ApiError && e.message === 'invalid_email') {
+        toast.error(t('admin:users.errors.emailRequired'))
+      } else {
+        toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
+      }
     } finally {
       setSaving(false)
     }
@@ -603,7 +620,7 @@ export default function AdminUsers() {
         </DialogContent>
       </Dialog>
 
-      {/* Edit user — role + reset password */}
+      {/* Edit user — email, role + reset password */}
       <Dialog open={Boolean(editRow)} onOpenChange={(o) => !o && setEditRow(null)}>
         <DialogContent size="sm">
           <DialogHeader>
@@ -611,6 +628,15 @@ export default function AdminUsers() {
           </DialogHeader>
           <DialogBody>
             <div className="grid gap-4">
+              <Field label={t('admin:users.fields.email')} htmlFor="e-email">
+                <Input
+                  id="e-email"
+                  type="email"
+                  value={editEmail}
+                  onChange={(e) => setEditEmail(e.target.value)}
+                  autoComplete="off"
+                />
+              </Field>
               <Field label={t('admin:users.fields.role')} htmlFor="e-role">
                 <Select
                   value={editRole}
