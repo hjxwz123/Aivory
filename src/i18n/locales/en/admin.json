@@ -552,11 +552,16 @@
     "ragDynamicTopk": "Dynamic Top-K (by similarity)",
     "ragDynamicTopkHint": "Instead of a fixed K, inject every retrieved chunk whose similarity clears the threshold.",
     "ragSimThreshold": "Similarity threshold (0–1)",
-    "ragSimThresholdHint": "Cosine-similarity cutoff. Chunks scoring at/above this are injected."
+    "ragSimThresholdHint": "Cosine-similarity cutoff. Chunks scoring at/above this are injected.",
+    "mineruStorageRequired": "MinerU requires a complete S3 or Aliyun OSS configuration.",
+    "configureStorage": "Configure storage"
   },
   "tools": {
     "title": "Tools",
-    "lead": "External services the assistant calls during a conversation."
+    "lead": "External services the assistant calls during a conversation.",
+    "availabilityTitle": "Global tool availability",
+    "availabilityLead": "A disabled tool is removed from every model, including models that explicitly allow it.",
+    "availabilityEmpty": "No platform tools are registered."
   },
   "audio": {
     "title": "Voice",
@@ -597,8 +602,6 @@
     }
   },
   "settings": {
-    "title": "Global settings",
-    "lead": "A few platform-wide knobs: default/task model, compaction, signups, quotas.",
     "saved": "Settings saved",
     "fields": {
       "settlementCurrency": "Settlement currency",
@@ -628,7 +631,6 @@
       "emailVerificationHint": "New registrations must verify their email with a 6-digit code before signing in.",
       "domainWhitelist": "Allowed email domains",
       "domainWhitelistHint": "Comma-separated. Only these domains can register. Leave empty to allow all.",
-      "legalSection": "Legal and support",
       "legalLead": "Public contact and policy content shown on sign-in, About, Terms, and Privacy pages. Leave policy text empty to use the complete localized defaults.",
       "contactEmail": "Contact email",
       "contactEmailHint": "Used for support, payment questions, refund requests, privacy requests, reports, and appeals. Blank defaults to admin@aivory.local.",
@@ -639,7 +641,6 @@
       "privacyTextHint": "Optional Markdown that replaces the built-in localized Privacy Policy.",
       "policyTextPlaceholder": "Leave empty to use the localized default policy.",
       "pickModel": "Pick a model",
-      "smtpSection": "Email (SMTP)",
       "smtpLead": "Sends verification and password-reset emails.",
       "smtpHost": "SMTP host",
       "smtpHostHint": "e.g. smtp.gmail.com, smtp.resend.com",
@@ -724,7 +725,6 @@
       "sandboxIdleTtlHint": "Recycle a sandbox after this many idle seconds (its workspace is archived first). Empty = 1800 (30 min). Range 60–86400.",
       "logFullRequests": "Log full request bodies",
       "logFullRequestsLead": "Store the complete (sanitized) upstream request body on every usage record for debugging. Failed requests are always stored regardless of this setting.",
-      "logErrorsOnly": "Only failed requests",
       "logErrorsOnlyHint": "On: keep storing only failed requests. Off: store the full body of every request — larger database and more sensitive prompt data at rest."
     }
   },
@@ -738,14 +738,9 @@
     "freePrice": "Free",
     "creditsRatioLabel": "Internal model-cost multiplier (per USD)",
     "creditsRatioHint": "Credits charged per USD of model cost. This is separate from the settlement currency. 0 disables credits.",
-    "groupBuyUrlLabel": "Tier purchase link (global)",
-    "groupBuyUrlHint": "“Buy” link on paid tier cards. Empty shows “contact admin”.",
-    "creditBuyUrlLabel": "Credit top-up link (global)",
-    "creditBuyUrlHint": "Where members buy permanent (non-expiring) credits.",
     "quotaMsgLabel": "Over-quota message",
     "quotaMsgHint": "Shown when a user hits this model's quota.",
     "quotaMsgPlaceholder": "You’ve reached your plan’s limit for this model. Upgrade your plan to continue.",
-    "msgSaved": "Settings saved",
     "editorTitle": "Edit group",
     "newTitle": "New group",
     "editorLead": "Name, price and features are shown to members on the subscription page.",
@@ -1334,14 +1329,75 @@
       "time": "Timeline"
     }
   },
+  "overview": {
+    "title": "Admin overview",
+    "lead": "Configuration health and the main resources managed by this deployment.",
+    "loadFailed": "Could not load the admin overview.",
+    "healthTitle": "Configuration health",
+    "healthLead": "Resolve warnings before enabling the related feature for users.",
+    "metrics": {
+      "users": "Users",
+      "models": "Models",
+      "channels": "Channels",
+      "plans": "Plans"
+    },
+    "checks": {
+      "channels": "Upstream channel",
+      "channelsReady": "{{count}} channel(s) configured",
+      "channelsMissing": "Create a channel before adding usable models.",
+      "defaultModel": "Default chat model",
+      "defaultModelMissing": "Chat cannot start until a valid default model is selected.",
+      "taskModel": "Internal task model",
+      "taskModelMissing": "Titles, routing, summaries and memory extraction need a task model.",
+      "configured": "Configured",
+      "email": "Email verification",
+      "notRequired": "Not required",
+      "smtpReady": "SMTP is configured",
+      "smtpMissing": "Verification is enabled but SMTP is incomplete.",
+      "storage": "Persistent storage",
+      "storageReady": "Provider: {{provider}}",
+      "storageLocal": "Local storage selected; workspace persistence still requires the sandbox volume to be mounted.",
+      "storageIncomplete": "{{provider}} is selected but required storage fields are incomplete.",
+      "storageMissing": "Archived workspaces and application objects are not persisted.",
+      "payments": "Payment checkout",
+      "paymentsUnused": "No payment channel configured",
+      "paymentMethodsReady": "{{count}} payment method(s) available",
+      "paymentMethodMissing": "A channel exists but no user-facing payment method is bound to it."
+    }
+  },
+  "creditSettings": {
+    "title": "Credits and quotas",
+    "lead": "Configure billing conversion, platform-wide usage limits and permanent-credit packages.",
+    "policyTitle": "Billing policy",
+    "policyLead": "These settings apply to every member and every credit-charged model.",
+    "limitsTitle": "Platform limits",
+    "limitsLead": "Per-user limits. Set a numeric limit to 0 to leave that limit unrestricted.",
+    "zeroUnlimited": "0 = unlimited.",
+    "dailyTokenLimit": "Daily token limit",
+    "dailyTokenLimitHint": "Maximum input plus output tokens per user per UTC day. 0 = unlimited.",
+    "maxConcurrentGenerations": "Concurrent generations per user",
+    "maxConcurrentGenerationsHint": "Maximum active response streams per user. 0 = unlimited."
+  },
+  "systemStorage": {
+    "title": "Storage & uploads",
+    "lead": "Configure platform object storage, archive retention, and upload restrictions."
+  },
   "menu": {
-    "models": "Models",
-    "capabilities": "Capabilities",
-    "users": "Users",
-    "data": "Analytics",
-    "system": "System",
-    "workspaces": "Workspaces",
-    "payments": "Payments"
+    "overview": "Overview",
+    "aiModels": "AI & models",
+    "modelPolicy": "Model policy",
+    "contextMemory": "Context & memory",
+    "capabilities": "Capabilities & integrations",
+    "usersAccess": "Users & access",
+    "registrationPolicy": "Registration policy",
+    "billing": "Billing & entitlements",
+    "creditsQuotas": "Credits & quotas",
+    "operations": "Data & operations",
+    "platform": "System",
+    "emailService": "Email service",
+    "storageUploads": "Storage & uploads",
+    "legalContact": "Legal & contact",
+    "loggingPrivacy": "Logging & privacy"
   },
   "imageStyles": {
     "title": "Image styles",

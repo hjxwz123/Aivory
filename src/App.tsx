@@ -37,6 +37,7 @@ const Subscription = lazy(() => import('@/pages/subscription/Subscription'))
 const SharedConversation = lazy(() => import('@/pages/share/SharedConversation'))
 const JoinWorkspace = lazy(() => import('@/pages/workspace/JoinWorkspace'))
 const AdminLayout = lazy(() => import('@/pages/admin/AdminLayout'))
+const AdminOverview = lazy(() => import('@/pages/admin/AdminOverview'))
 const AdminChannels = lazy(() => import('@/pages/admin/AdminChannels'))
 const AdminModels = lazy(() => import('@/pages/admin/AdminModels'))
 const AdminModelEdit = lazy(() => import('@/pages/admin/AdminModelEdit'))
@@ -53,7 +54,14 @@ const AdminUserMemories = lazy(() => import('@/pages/admin/AdminUserMemories'))
 const AdminUserLoginHistory = lazy(() => import('@/pages/admin/AdminUserLoginHistory'))
 const AdminUsage = lazy(() => import('@/pages/admin/AdminUsage'))
 const AdminAnalytics = lazy(() => import('@/pages/admin/AdminAnalytics'))
-const AdminSettings = lazy(() => import('@/pages/admin/AdminSettings'))
+const AdminModelPolicy = lazy(() => import('@/pages/admin/AdminModelPolicy'))
+const AdminContextMemory = lazy(() => import('@/pages/admin/AdminContextMemory'))
+const AdminRegistration = lazy(() => import('@/pages/admin/AdminRegistration'))
+const AdminSystemEmail = lazy(() => import('@/pages/admin/AdminSystemEmail'))
+const AdminSystemLegal = lazy(() => import('@/pages/admin/AdminSystemLegal'))
+const AdminSystemLogging = lazy(() => import('@/pages/admin/AdminSystemLogging'))
+const AdminSystemStorage = lazy(() => import('@/pages/admin/AdminSystemStorage'))
+const AdminCreditSettings = lazy(() => import('@/pages/admin/AdminCreditSettings'))
 const AdminBackup = lazy(() => import('@/pages/admin/AdminBackup'))
 const AdminModeration = lazy(() => import('@/pages/admin/AdminModeration'))
 const AdminAnnouncement = lazy(() => import('@/pages/admin/AdminAnnouncement'))
@@ -244,7 +252,8 @@ export default function App() {
             <Route path="/settings" element={<SettingsRedirect />} />
             <Route path="/settings/:tab" element={<SettingsRedirect />} />
             <Route path="/admin" element={<AdminLayout />}>
-              <Route index element={<Navigate to="settings" replace />} />
+              <Route index element={<Navigate to="overview" replace />} />
+              <Route path="overview" element={<AdminOverview />} />
               <Route path="channels" element={<AdminChannels />} />
               <Route path="models" element={<AdminModels />} />
               <Route path="models/:id" element={<AdminModelEdit />} />
@@ -270,7 +279,15 @@ export default function App() {
               <Route path="oauth" element={<AdminOAuth />} />
               <Route path="moderation" element={<AdminModeration />} />
               <Route path="announcement" element={<AdminAnnouncement />} />
-              <Route path="settings" element={<AdminSettings />} />
+              <Route path="settings" element={<Navigate to="/admin/settings/model-policy" replace />} />
+              <Route path="settings/model-policy" element={<AdminModelPolicy />} />
+              <Route path="settings/context-memory" element={<AdminContextMemory />} />
+              <Route path="settings/registration" element={<AdminRegistration />} />
+              <Route path="settings/email" element={<AdminSystemEmail />} />
+              <Route path="settings/legal" element={<AdminSystemLegal />} />
+              <Route path="settings/logging" element={<AdminSystemLogging />} />
+              <Route path="storage" element={<AdminSystemStorage />} />
+              <Route path="credits" element={<AdminCreditSettings />} />
               <Route path="backup" element={<AdminBackup />} />
               <Route path="payment-channels" element={<AdminPaymentChannels />} />
               <Route path="payment-methods" element={<AdminPaymentMethods />} />

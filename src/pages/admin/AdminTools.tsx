@@ -9,16 +9,19 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { adminApi, ApiError } from '@/api'
+import type { ApiBuiltinTool } from '@/api/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Field } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
 import { toast } from '@/hooks/use-toast'
 import { PanelFallback } from '@/components/ui/panel-fallback'
 
 type Settings = Record<string, unknown>
 
 const OWNED_KEYS = [
+  'disabled_tools',
   'search_provider',
   'search_base_url',
   'search_api_key',
@@ -31,14 +34,19 @@ const OWNED_KEYS = [
 export default function AdminTools() {
   const { t } = useTranslation(['admin', 'common'])
   const [draft, setDraft] = useState<Settings>({})
+  const [builtinTools, setBuiltinTools] = useState<ApiBuiltinTool[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
 
   async function load() {
     setLoading(true)
     try {
-      const s = await adminApi.settings()
+      const [s, tools] = await Promise.all([
+        adminApi.settings(),
+        adminApi.builtinTools().catch(() => [] as ApiBuiltinTool[]),
+      ])
       setDraft(s)
+      setBuiltinTools(tools)
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
     } finally {
@@ -71,6 +79,18 @@ export default function AdminTools() {
     return typeof v === 'string' ? v : fallback
   }
 
+  function readStringArray(key: string): string[] {
+    const value = draft[key]
+    return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
+  }
+
+  function setToolEnabled(name: string, enabled: boolean) {
+    const disabled = new Set(readStringArray('disabled_tools'))
+    if (enabled) disabled.delete(name)
+    else disabled.add(name)
+    setDraft({ ...draft, disabled_tools: [...disabled] })
+  }
+
   const searchProvider = readString('search_provider')
 
   return (
@@ -84,6 +104,41 @@ export default function AdminTools() {
         <PanelFallback />
       ) : (
         <section className="mt-8 flex flex-col gap-5">
+          <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-5">
+            <h2 className="font-serif text-lg text-[var(--color-fg)]">
+              {t('admin:tools.availabilityTitle', { defaultValue: 'Global tool availability' })}
+            </h2>
+            <p className="mt-1 text-xs text-[var(--color-fg-subtle)]">
+              {t('admin:tools.availabilityLead', {
+                defaultValue: 'A disabled tool is removed from every model, including models that explicitly allow it.',
+              })}
+            </p>
+            {builtinTools.length === 0 ? (
+              <p className="mt-4 text-sm text-[var(--color-fg-muted)]">
+                {t('admin:tools.availabilityEmpty', { defaultValue: 'No platform tools are registered.' })}
+              </p>
+            ) : (
+              <div className="mt-4 divide-y divide-[var(--color-divider)] border-y border-[var(--color-divider)]">
+                {builtinTools.map((tool) => {
+                  const enabled = !readStringArray('disabled_tools').includes(tool.name)
+                  return (
+                    <label key={tool.name} className="flex min-h-14 items-center gap-4 py-2.5">
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-[13px] font-medium text-[var(--color-fg)]">
+                          {t(`admin:models.builtinTools.names.${tool.name}`, { defaultValue: tool.name })}
+                        </span>
+                        <span className="mt-0.5 block text-[12px] leading-4 text-[var(--color-fg-subtle)]">
+                          {t(`admin:models.builtinTools.descriptions.${tool.name}`, { defaultValue: tool.description })}
+                        </span>
+                      </span>
+                      <Switch checked={enabled} onCheckedChange={(value) => setToolEnabled(tool.name, value)} />
+                    </label>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+
           {/* Web search ------------------------------------------------------ */}
           <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-5">
             <h2 className="font-serif text-lg text-[var(--color-fg)]">{t('admin:settings.fields.searchSection')}</h2>
