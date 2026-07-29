@@ -51,7 +51,7 @@ export function UserGroupTierCard({
   return (
     <article
       className={cn(
-        'flex min-w-0 flex-col rounded-[10px] border bg-[var(--color-surface)] p-5 font-sans sm:row-span-5 sm:grid sm:grid-rows-subgrid',
+        'flex min-w-0 flex-col rounded-xl border bg-[var(--color-surface)] p-5 font-sans sm:row-span-5 sm:grid sm:grid-rows-subgrid',
         isRecommended
           ? 'border-[var(--color-accent)]'
           : isCurrent
