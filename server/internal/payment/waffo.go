@@ -294,7 +294,10 @@ func queryWaffoCheckoutSession(ctx context.Context, client *pancake.Client, sess
 		CheckoutSession *waffoCheckoutSessionSnapshot `json:"checkoutSession"`
 	}
 	response, err := pancake.GraphQLQuery[queryData](ctx, client, pancake.GraphQLParams{
-		Query: `query($sessionId: ID!) {
+		// Waffo's live schema exposes checkout-session identifiers as String.
+		// Its documentation currently shows ID!, which the API rejects with
+		// `Unknown type "ID"` before it evaluates the session lookup.
+		Query: `query($sessionId: String!) {
 			checkoutSession(id: $sessionId) {
 				id productType currency status expiresAt
 			}

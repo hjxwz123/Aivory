@@ -914,9 +914,8 @@ func (s *Service) logEmbeddingUsage(ctx context.Context, kbID, convID, embedder 
 	})
 }
 
-// Snippet is the slim search hit returned by Retrieve. The orchestrator
-// and the `search_knowledge_base` tool convert it to llm.Citation for the
-// downstream message + SSE pipeline.
+// Snippet is the slim search hit returned by Retrieve. The orchestrator converts
+// it to llm.Citation for the downstream message + SSE pipeline.
 type Snippet struct {
 	ID      string `json:"id"`
 	Index   int    `json:"index"`
@@ -1095,10 +1094,10 @@ func (s *Service) Retrieve(ctx context.Context, userID, convID string, kbIDs []s
 	}
 	// Surface in-scope chunks that were intentionally left UNEMBEDDED (small
 	// conversation docs, code/config — runPipeline's skipEmbed). They live in
-	// neither Qdrant nor the dense search set, so without this the
-	// search_knowledge_base tool and inject-mode retrieval couldn't find a
-	// freshly-uploaded small/code file at all — only auto-mode's pinned injection
-	// covered them. Conversation-scoped only (KB docs always embed). (§4.11 skip-embed)
+	// neither Qdrant nor the dense search set, so without this direct inject-mode
+	// retrieval couldn't find a freshly-uploaded small/code file at all — only
+	// auto-mode's pinned injection covered them. Conversation-scoped only (KB docs
+	// always embed). (§4.11 skip-embed)
 	if convID != "" {
 		seen := make(map[string]bool, len(cands))
 		for _, c := range cands {
@@ -1172,10 +1171,9 @@ func (s *Service) Retrieve(ctx context.Context, userID, convID string, kbIDs []s
 // embedded (runPipeline's skipEmbed: small conversation docs, code/config),
 // scored by keyword overlap only. Such chunks have no vector in Qdrant and are
 // skipped by the dense/keyword Qdrant legs, so this is the ONLY query-driven way
-// the search_knowledge_base tool / inject-mode retrieval can reach them when
-// Qdrant itself is available. Only chunks that actually match the query (bm > 0)
-// are surfaced — a query-driven search shouldn't dump every unembedded chunk
-// into context.
+// inject-mode retrieval can reach them when Qdrant itself is available. Only
+// chunks that actually match the query (bm > 0) are surfaced — a query-driven
+// search shouldn't dump every unembedded chunk into context.
 func (s *Service) keywordOnlyUnembedded(ctx context.Context, kbIDs []string, convID string, terms []string) []retrievalCandidate {
 	if len(terms) == 0 {
 		return nil

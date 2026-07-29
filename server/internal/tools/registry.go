@@ -15,7 +15,6 @@ import (
 
 	"aivory/server/internal/config"
 	"aivory/server/internal/llm"
-	"aivory/server/internal/rag"
 	"aivory/server/internal/sandbox"
 )
 
@@ -33,7 +32,6 @@ type Registry struct {
 	tools   map[string]Tool
 	cfg     config.Config
 	db      *sql.DB
-	rag     *rag.Service
 	logger  *log.Logger
 	sandbox sandbox.Service
 }
@@ -43,8 +41,8 @@ type Registry struct {
 func (r *Registry) Sandbox() sandbox.Service { return r.sandbox }
 
 // NewRegistry builds the default registry with the built-in tools.
-func NewRegistry(db *sql.DB, ragSvc *rag.Service, cfg config.Config, logger *log.Logger) *Registry {
-	r := &Registry{tools: map[string]Tool{}, cfg: cfg, db: db, rag: ragSvc, logger: logger}
+func NewRegistry(db *sql.DB, cfg config.Config, logger *log.Logger) *Registry {
+	r := &Registry{tools: map[string]Tool{}, cfg: cfg, db: db, logger: logger}
 	// Sandbox config comes from admin settings (sandbox_base_url /
 	// sandbox_api_key), re-read per call, with env as the fallback default.
 	sb := newSettingsSandbox(db, cfg.SandboxBaseURL, cfg.SandboxAPIKey)
@@ -53,7 +51,6 @@ func NewRegistry(db *sql.DB, ragSvc *rag.Service, cfg config.Config, logger *log
 	r.Register(&webFetchTool{})
 	r.Register(&pythonExecuteTool{sandbox: sb, artifactDir: cfg.ArtifactDir, logger: logger})
 	r.Register(&imageGenerateTool{db: db, artifactDir: cfg.ArtifactDir})
-	r.Register(&searchKnowledgeBaseTool{rag: ragSvc})
 	r.Register(&useSkillTool{db: db})
 	r.Register(&saveMemoryTool{db: db})
 	return r

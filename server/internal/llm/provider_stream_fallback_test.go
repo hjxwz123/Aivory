@@ -155,6 +155,12 @@ func TestDoProviderParsedRequestFallsBackOnPrimaryHTTPFailure(t *testing.T) {
 	if len(snapshots) != 2 || snapshots[0].Fallback || !snapshots[1].Fallback {
 		t.Fatalf("request channel attempts = %+v, want primary then fallback", snapshots)
 	}
+	if !strings.Contains(snapshots[0].Error, "primary unavailable") {
+		t.Fatalf("primary failure was not captured: %+v", snapshots[0])
+	}
+	if snapshots[1].Error != "" {
+		t.Fatalf("successful fallback was marked failed: %+v", snapshots[1])
+	}
 }
 
 func TestDoProviderParsedRequestReturnsFallbackFailureWithoutThirdAttempt(t *testing.T) {
@@ -246,8 +252,10 @@ func TestDoProviderParsedRequestDoesNotFallbackOnContextErrors(t *testing.T) {
 			}))
 			defer fallback.Close()
 
-			ctx, cancel := context.WithCancel(context.Background())
+			baseCtx, cancel := context.WithCancel(context.Background())
 			defer cancel()
+			recorder := newProviderRequestRecorder()
+			ctx := contextWithProviderRequestRecorder(baseCtx, recorder)
 			flag := new(atomic.Bool)
 			var events []SseEvent
 			err := doProviderParsedRequest(
@@ -286,6 +294,11 @@ func TestDoProviderParsedRequestDoesNotFallbackOnContextErrors(t *testing.T) {
 			}
 			if len(events) != 1 || events[0].Text != "primary-partial" {
 				t.Fatalf("committed events = %+v, want the primary partial to be flushed", events)
+			}
+			for _, snapshot := range recorder.snapshots() {
+				if snapshot.Error != "" {
+					t.Fatalf("caller cancellation/deadline was logged as a channel error: %+v", snapshot)
+				}
 			}
 		})
 	}

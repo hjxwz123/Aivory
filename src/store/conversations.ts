@@ -2781,8 +2781,6 @@ function prettyToolLabel(name: string): string {
       return 'Running Python'
     case 'image_generate':
       return 'Generating an image'
-    case 'search_knowledge_base':
-      return 'Searching documents'
     case 'use_skill':
       return 'Loading a skill'
     case 'save_memory':

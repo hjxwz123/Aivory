@@ -119,7 +119,6 @@ HTML code blocks open a **live preview panel** alongside the chat as the assista
 | `web_fetch` | Fetch and extract a URL — respects robots.txt |
 | `python_execute` | Run Python in the persistent sandbox; full stdlib, packages, real file I/O |
 | `image_generate` | Call a configured image model and save the result as an artifact |
-| `search_knowledge_base` | Hybrid dense + BM25 retrieval with RRF from any attached knowledge base |
 | `save_memory` | Persist a user fact for injection in future conversations |
 | `use_skill` | Execute an admin-defined skill (prompt + asset bundle) |
 
@@ -269,7 +268,7 @@ graph TB
         API["Go API — REST + SSE<br/>JWT auth · per-request HMAC signing · rate limits"]
         subgraph ORCH["Orchestrator"]
             PROV["Provider registry<br/>Anthropic · OpenAI · Gemini · Mock<br/>(any OpenAI-compatible endpoint)"]
-            TOOLS["Tool layer — ≤48 calls / turn<br/>web_search · web_fetch · python_execute<br/>image_generate · search_knowledge_base<br/>save_memory · use_skill"]
+            TOOLS["Tool layer — ≤48 calls / turn<br/>web_search · web_fetch · python_execute<br/>image_generate · save_memory · use_skill"]
             TASK["Task LLM<br/>title · RAG router · compaction · verify · moderation"]
             RAGP["RAG pipeline<br/>parse → chunk → embed → route → retrieve"]
             MEMW["Memory worker<br/>async per-turn extraction"]
