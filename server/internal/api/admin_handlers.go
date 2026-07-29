@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -1198,10 +1199,9 @@ var settingsKeys = []string{
 	"contact_email", "terms_text", "privacy_text",
 	// §credits / settlement pricing: credits_per_usd remains the internal model
 	// cost conversion. User-facing group and permanent-credit prices share one
-	// deployment-wide settlement currency and two external purchase links.
-	"credits_per_usd", "settlement_currency",
-	"permanent_credit_purchase_credits", "permanent_credit_purchase_price_amount_minor",
-	"group_buy_url", "credit_buy_url", "card_purchase_url",
+	// deployment-wide settlement currency; card_purchase_url is the only external
+	// checkout link outside the configured payment methods.
+	"credits_per_usd", "settlement_currency", "card_purchase_url",
 	// §B6 partial: JSON array of tool names disabled platform-wide (kill-switch),
 	// e.g. ["python_execute","image_generate"].
 	"disabled_tools",
@@ -1276,7 +1276,6 @@ var settingsKeys = []string{
 	// SMTP mail — live-reloaded on each send (see internal/mail).
 	"smtp_host", "smtp_port", "smtp_user", "smtp_password",
 	"smtp_from", "smtp_tls",
-	"email_verification_required",
 	"email_domain_whitelist",
 	// §4.20 Image Generation: the TEXT model used to optimize/expand a user's
 	// image prompt (and fold in the style's hidden prompt) before generation.
@@ -1374,9 +1373,16 @@ func applyAdminSettingsPatch(d Deps, body map[string]json.RawMessage, skipNull b
 			// token_trigger inverts the early-exit guard and a zero/negative
 			// summary length makes the tiered merge churn the cache every turn.
 			switch k {
-			case "keep_recent_rounds", "summary_max_tokens", "compaction_token_trigger":
+			case "keep_recent_rounds", "summary_max_tokens", "compaction_token_trigger",
+				"daily_message_limit", "daily_image_limit", "daily_token_limit",
+				"max_concurrent_generations", "register_ip_daily_limit", "fallback_ttft_sec":
 				var n int
 				if json.Unmarshal(v, &n) != nil || n < 0 {
+					return 0, errInvalidInput
+				}
+			case "credits_per_usd":
+				var amount float64
+				if json.Unmarshal(v, &amount) != nil || amount < 0 || math.IsNaN(amount) || math.IsInf(amount, 0) {
 					return 0, errInvalidInput
 				}
 			case "max_image_upload_mb", "max_file_upload_mb":
@@ -1386,6 +1392,29 @@ func applyAdminSettingsPatch(d Deps, body map[string]json.RawMessage, skipNull b
 				if json.Unmarshal(v, &n) != nil || n < 0 {
 					return 0, errInvalidInput
 				}
+			case "storage_archive_ttl_days":
+				// Older admin pages stored this value as a JSON string. Accept that
+				// representation, validate it, and normalize future writes to a
+				// non-negative integer.
+				var days int
+				if json.Unmarshal(v, &days) != nil {
+					var raw string
+					if json.Unmarshal(v, &raw) != nil {
+						return 0, errInvalidInput
+					}
+					raw = strings.TrimSpace(raw)
+					if raw != "" {
+						var err error
+						days, err = strconv.Atoi(raw)
+						if err != nil {
+							return 0, errInvalidInput
+						}
+					}
+				}
+				if days < 0 {
+					return 0, errInvalidInput
+				}
+				v, _ = json.Marshal(days)
 			case "settlement_currency":
 				var code string
 				if json.Unmarshal(v, &code) != nil {
@@ -1396,16 +1425,6 @@ func applyAdminSettingsPatch(d Deps, body map[string]json.RawMessage, skipNull b
 					return 0, errInvalidInput
 				}
 				v, _ = json.Marshal(code)
-			case "permanent_credit_purchase_credits":
-				var amount float64
-				if json.Unmarshal(v, &amount) != nil || amount < 0 {
-					return 0, errInvalidInput
-				}
-			case "permanent_credit_purchase_price_amount_minor":
-				var amount int64
-				if json.Unmarshal(v, &amount) != nil || amount < 0 {
-					return 0, errInvalidInput
-				}
 			case "card_purchase_url":
 				var purchaseURL string
 				if json.Unmarshal(v, &purchaseURL) != nil {

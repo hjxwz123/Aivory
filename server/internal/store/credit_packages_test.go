@@ -108,8 +108,14 @@ func TestMigrateLegacyCreditPackageIsIdempotent(t *testing.T) {
 	if len(packages) != 1 || packages[0].ID != "cp_legacy_default" || packages[0].Credits != 10000 || packages[0].PriceAmountMinor != 899 {
 		t.Fatalf("migrated packages = %+v", packages)
 	}
-	var marker string
-	if err := db.QueryRow(`SELECT value FROM settings WHERE key=?`, legacyCreditPackageMigrationMarker).Scan(&marker); err != nil || marker != "1" {
-		t.Fatalf("migration marker = %q, err=%v", marker, err)
+	var legacyCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM settings WHERE key IN (
+		'permanent_credit_purchase_credits',
+		'permanent_credit_purchase_price_amount_minor',
+		'group_buy_url',
+		'credit_buy_url',
+		'credit_packages_from_legacy_settings_v1'
+	)`).Scan(&legacyCount); err != nil || legacyCount != 0 {
+		t.Fatalf("legacy settings remaining = %d, err=%v", legacyCount, err)
 	}
 }

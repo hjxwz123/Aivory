@@ -8,12 +8,13 @@ import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Plus, Trash2, Palette } from 'lucide-react'
 import { adminApi, ApiError } from '@/api'
-import type { ApiImageStyle } from '@/api/types'
+import type { ApiImageStyle, ApiModel } from '@/api/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
-import { Label } from '@/components/ui/label'
+import { Field, Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { IconUploader } from '@/components/admin/icon-uploader'
 import { toast } from '@/hooks/use-toast'
 import { PanelFallback } from '@/components/ui/panel-fallback'
@@ -21,7 +22,10 @@ import { PanelFallback } from '@/components/ui/panel-fallback'
 export default function AdminImageStyles() {
   const { t } = useTranslation(['admin', 'common'])
   const [styles, setStyles] = useState<ApiImageStyle[]>([])
+  const [models, setModels] = useState<ApiModel[]>([])
+  const [imagePromptModelId, setImagePromptModelId] = useState('')
   const [loading, setLoading] = useState(true)
+  const [savingPromptModel, setSavingPromptModel] = useState(false)
   const [newName, setNewName] = useState('')
   const [creating, setCreating] = useState(false)
   const creatingRef = useRef(false)
@@ -30,7 +34,14 @@ export default function AdminImageStyles() {
   async function load() {
     setLoading(true)
     try {
-      setStyles(await adminApi.imageStyles())
+      const [nextStyles, settings, chatModels] = await Promise.all([
+        adminApi.imageStyles(),
+        adminApi.settings(),
+        adminApi.models('chat'),
+      ])
+      setStyles(nextStyles)
+      setModels(chatModels)
+      setImagePromptModelId(typeof settings.image_prompt_model_id === 'string' ? settings.image_prompt_model_id : '')
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
     } finally {
@@ -41,6 +52,18 @@ export default function AdminImageStyles() {
     void load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  async function savePromptModel() {
+    setSavingPromptModel(true)
+    try {
+      await adminApi.updateSettings({ image_prompt_model_id: imagePromptModelId })
+      toast.success(t('admin:settings.saved'))
+    } catch (error) {
+      toast.error(error instanceof ApiError ? error.message : t('admin:common.failed'))
+    } finally {
+      setSavingPromptModel(false)
+    }
+  }
 
   async function create() {
     if (creatingRef.current) return
@@ -93,6 +116,35 @@ export default function AdminImageStyles() {
           })}
         </p>
       </header>
+
+      {!loading ? (
+        <section className="mt-8 flex items-end gap-3 border-y border-[var(--color-divider)] py-4 max-sm:flex-col max-sm:items-stretch">
+          <Field
+            className="min-w-0 flex-1"
+            label={t('admin:settings.fields.imagePromptModel')}
+            htmlFor="image-prompt-model"
+            hint={t('admin:settings.fields.imagePromptModelHint')}
+          >
+            <Select
+              value={imagePromptModelId || 'none'}
+              onValueChange={(value) => setImagePromptModelId(value === 'none' ? '' : value)}
+            >
+              <SelectTrigger id="image-prompt-model">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">{t('admin:settings.fields.fallbackNone')}</SelectItem>
+                {models.map((model) => (
+                  <SelectItem key={model.id} value={model.id}>{model.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+          <Button variant="secondary" loading={savingPromptModel} onClick={() => void savePromptModel()}>
+            {t('common:actions.save')}
+          </Button>
+        </section>
+      ) : null}
 
       <section className="mt-8">
         <div className="flex gap-2">

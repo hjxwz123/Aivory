@@ -686,6 +686,11 @@ func TestRestoreLegacyPricingSettingsPersistsCurrencyAndCreatesPackage(t *testin
 	if credits != 10000 || price != 899 {
 		t.Fatalf("legacy credit package = %v/%d, want 10000/899", credits, price)
 	}
+	var retired int
+	mustQuery(t, db, `SELECT COUNT(*) FROM settings WHERE key IN ('permanent_credit_purchase_credits','permanent_credit_purchase_price_amount_minor','group_buy_url','credit_buy_url','credit_packages_from_legacy_settings_v1')`).Scan(&retired)
+	if retired != 0 {
+		t.Fatalf("legacy pricing settings remaining after restore = %d", retired)
+	}
 }
 
 func TestAdminSettingsPatchSkipsNullValues(t *testing.T) {

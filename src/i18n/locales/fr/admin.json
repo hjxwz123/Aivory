@@ -552,11 +552,16 @@
     "ragDynamicTopk": "Top-K dynamique (par similarité)",
     "ragDynamicTopkHint": "Au lieu d'un K fixe, injecte chaque passage dont la similarité dépasse le seuil.",
     "ragSimThreshold": "Seuil de similarité (0–1)",
-    "ragSimThresholdHint": "Seuil de similarité cosinus. Les passages au-dessus sont injectés."
+    "ragSimThresholdHint": "Seuil de similarité cosinus. Les passages au-dessus sont injectés.",
+    "mineruStorageRequired": "MinerU nécessite une configuration S3 ou Aliyun OSS complète.",
+    "configureStorage": "Configurer le stockage"
   },
   "tools": {
     "title": "Outils",
-    "lead": "Services externes appelés par l'assistant pendant une conversation."
+    "lead": "Services externes appelés par l'assistant pendant une conversation.",
+    "availabilityTitle": "Disponibilité globale des outils",
+    "availabilityLead": "Un outil désactivé est retiré de tous les modèles, même de ceux qui l’autorisent explicitement.",
+    "availabilityEmpty": "Aucun outil de plateforme n’est enregistré."
   },
   "audio": {
     "title": "Voix",
@@ -597,8 +602,6 @@
     }
   },
   "settings": {
-    "title": "Paramètres globaux",
-    "lead": "Quelques réglages globaux : modèle par défaut/tâche, compaction, inscriptions, quotas.",
     "saved": "Paramètres enregistrés",
     "fields": {
       "settlementCurrency": "Devise de règlement",
@@ -628,7 +631,6 @@
       "emailVerificationHint": "Les nouvelles inscriptions doivent vérifier leur e-mail avec un code à 6 chiffres avant de se connecter.",
       "domainWhitelist": "Domaines d'e-mail autorisés",
       "domainWhitelistHint": "Séparés par des virgules. Seuls ces domaines peuvent s'inscrire. Laissez vide pour tout autoriser.",
-      "legalSection": "Mentions légales et assistance",
       "legalLead": "Coordonnées et politiques publiques affichées sur les pages de connexion, À propos, Conditions et Confidentialité. Laissez les textes vides pour utiliser les versions localisées complètes.",
       "contactEmail": "E-mail de contact",
       "contactEmailHint": "Utilisé pour l’assistance, les paiements, remboursements, demandes de confidentialité, signalements et recours. Vide : admin@aivory.local.",
@@ -639,7 +641,6 @@
       "privacyTextHint": "Markdown facultatif remplaçant la Politique de confidentialité localisée.",
       "policyTextPlaceholder": "Laissez vide pour utiliser la politique localisée par défaut.",
       "pickModel": "Choisir un modèle",
-      "smtpSection": "E-mail (SMTP)",
       "smtpLead": "Envoie les e-mails de vérification et de réinitialisation.",
       "smtpHost": "Hôte SMTP",
       "smtpHostHint": "p. ex. smtp.gmail.com, smtp.resend.com",
@@ -724,7 +725,6 @@
       "sandboxIdleTtlHint": "Recycle un sandbox après ce nombre de secondes d'inactivité (son espace de travail est archivé d'abord). Vide = 1800 (30 min). Plage 60–86400.",
       "logFullRequests": "Journaliser le corps complet des requêtes",
       "logFullRequestsLead": "Enregistre le corps complet (assaini) de la requête en amont sur chaque enregistrement d'usage pour le débogage. Les requêtes en échec sont toujours enregistrées, indépendamment de ce réglage.",
-      "logErrorsOnly": "Uniquement les requêtes en échec",
       "logErrorsOnlyHint": "Activé : ne conserver que les requêtes en échec. Désactivé : enregistrer le corps complet de chaque requête — base de données plus volumineuse et davantage de données de prompt sensibles stockées."
     }
   },
@@ -738,14 +738,9 @@
     "freePrice": "Gratuit",
     "creditsRatioLabel": "Conversion interne du coût modèle (par USD)",
     "creditsRatioHint": "Crédits débités par USD de coût modèle, indépendamment de la devise de règlement. 0 désactive les crédits.",
-    "groupBuyUrlLabel": "Lien d'achat de palier (global)",
-    "groupBuyUrlHint": "Lien « Acheter » des paliers payants. Vide → « contacter l'admin ».",
-    "creditBuyUrlLabel": "Lien de recharge de crédits (global)",
-    "creditBuyUrlHint": "Où les membres achètent des crédits permanents.",
     "quotaMsgLabel": "Message de dépassement de quota",
     "quotaMsgHint": "Affiché quand l'utilisateur atteint le quota du modèle.",
     "quotaMsgPlaceholder": "Vous avez atteint la limite de votre forfait pour ce modèle. Améliorez votre forfait pour continuer.",
-    "msgSaved": "Paramètres enregistrés",
     "editorTitle": "Modifier le groupe",
     "newTitle": "Nouveau groupe",
     "editorLead": "Le nom, le prix et les fonctionnalités sont présentés aux membres sur la page d'abonnement.",
@@ -1334,14 +1329,75 @@
       "time": "Chronologie"
     }
   },
+  "overview": {
+    "title": "Vue d’ensemble de l’administration",
+    "lead": "État de la configuration et principales ressources gérées par ce déploiement.",
+    "loadFailed": "Impossible de charger la vue d’ensemble.",
+    "healthTitle": "État de la configuration",
+    "healthLead": "Corrigez les avertissements avant d’activer la fonctionnalité concernée pour les utilisateurs.",
+    "metrics": {
+      "users": "Utilisateurs",
+      "models": "Modèles",
+      "channels": "Canaux",
+      "plans": "Offres"
+    },
+    "checks": {
+      "channels": "Canal amont",
+      "channelsReady": "{{count}} canal/canaux configuré(s)",
+      "channelsMissing": "Créez un canal avant d’ajouter des modèles utilisables.",
+      "defaultModel": "Modèle de chat par défaut",
+      "defaultModelMissing": "Le chat nécessite un modèle par défaut valide.",
+      "taskModel": "Modèle de tâches interne",
+      "taskModelMissing": "Les titres, le routage, les résumés et la mémoire nécessitent un modèle de tâches.",
+      "configured": "Configuré",
+      "email": "Vérification de l’e-mail",
+      "notRequired": "Non requise",
+      "smtpReady": "SMTP configuré",
+      "smtpMissing": "La vérification est activée, mais la configuration SMTP est incomplète.",
+      "storage": "Stockage persistant",
+      "storageReady": "Fournisseur : {{provider}}",
+      "storageLocal": "Stockage local sélectionné ; la persistance des espaces nécessite toujours le montage du volume sandbox.",
+      "storageIncomplete": "{{provider}} est sélectionné, mais des champs de stockage requis sont incomplets.",
+      "storageMissing": "Les archives d’espaces et objets applicatifs ne sont pas persistés.",
+      "payments": "Paiement",
+      "paymentsUnused": "Aucun canal de paiement configuré",
+      "paymentMethodsReady": "{{count}} moyen(s) de paiement disponible(s)",
+      "paymentMethodMissing": "Un canal existe, mais aucun moyen de paiement visible n’y est associé."
+    }
+  },
+  "creditSettings": {
+    "title": "Crédits et quotas",
+    "lead": "Configurez la conversion, les limites globales et les packs de crédits permanents.",
+    "policyTitle": "Politique de facturation",
+    "policyLead": "Ces paramètres s’appliquent à tous les membres et modèles facturés en crédits.",
+    "limitsTitle": "Limites de la plateforme",
+    "limitsLead": "Limites par utilisateur. La valeur 0 signifie illimité.",
+    "zeroUnlimited": "0 = illimité.",
+    "dailyTokenLimit": "Limite quotidienne de Token",
+    "dailyTokenLimitHint": "Total maximal de Token en entrée et sortie par utilisateur et par jour UTC. 0 = illimité.",
+    "maxConcurrentGenerations": "Générations simultanées par utilisateur",
+    "maxConcurrentGenerationsHint": "Nombre maximal de flux de réponse actifs par utilisateur. 0 = illimité."
+  },
+  "systemStorage": {
+    "title": "Stockage et téléversements",
+    "lead": "Configurez le stockage objet, la rétention des archives et les restrictions de téléversement."
+  },
   "menu": {
-    "models": "Modèles",
-    "capabilities": "Capacités",
-    "users": "Utilisateurs",
-    "data": "Analyses",
-    "system": "Système",
-    "workspaces": "Espaces de travail",
-    "payments": "Paiements"
+    "overview": "Vue d’ensemble",
+    "aiModels": "IA et modèles",
+    "modelPolicy": "Politique des modèles",
+    "contextMemory": "Contexte et mémoire",
+    "capabilities": "Capacités et intégrations",
+    "usersAccess": "Utilisateurs et accès",
+    "registrationPolicy": "Politique d’inscription",
+    "billing": "Facturation et droits",
+    "creditsQuotas": "Crédits et quotas",
+    "operations": "Données et opérations",
+    "platform": "Système",
+    "emailService": "Service e-mail",
+    "storageUploads": "Stockage et téléversements",
+    "legalContact": "Mentions et contact",
+    "loggingPrivacy": "Journaux et confidentialité"
   },
   "imageStyles": {
     "title": "Styles d'image",

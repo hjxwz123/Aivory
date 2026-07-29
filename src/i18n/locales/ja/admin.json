@@ -552,11 +552,16 @@
     "ragDynamicTopk": "動的 Top-K(類似度ベース)",
     "ragDynamicTopkHint": "固定数ではなく、類似度がしきい値以上のチャンクをすべて注入します。",
     "ragSimThreshold": "類似度しきい値(0–1)",
-    "ragSimThresholdHint": "コサイン類似度の下限。これ以上のチャンクを注入します。"
+    "ragSimThresholdHint": "コサイン類似度の下限。これ以上のチャンクを注入します。",
+    "mineruStorageRequired": "MinerU には完全な S3 または Aliyun OSS 設定が必要です。",
+    "configureStorage": "ストレージを設定"
   },
   "tools": {
     "title": "ツール",
-    "lead": "会話中にアシスタントが呼び出す外部サービス。"
+    "lead": "会話中にアシスタントが呼び出す外部サービス。",
+    "availabilityTitle": "グローバルツールの可用性",
+    "availabilityLead": "無効にしたツールは、明示的に許可したモデルを含むすべてのモデルから除外されます。",
+    "availabilityEmpty": "登録済みのプラットフォームツールはありません。"
   },
   "audio": {
     "title": "音声",
@@ -597,8 +602,6 @@
     }
   },
   "settings": {
-    "title": "グローバル設定",
-    "lead": "全体設定:既定/タスクモデル、圧縮、登録、上限。",
     "saved": "設定を保存しました",
     "fields": {
       "settlementCurrency": "決済通貨",
@@ -628,7 +631,6 @@
       "emailVerificationHint": "新規登録では、サインイン前に6桁のコードでメールアドレスを認証する必要があります。",
       "domainWhitelist": "許可するメールドメイン",
       "domainWhitelistHint": "カンマ区切り。これらのドメインのみが登録できます。空欄にするとすべて許可します。",
-      "legalSection": "法的情報とサポート",
       "legalLead": "サインイン、概要、利用規約、プライバシーページに公開する連絡先とポリシーです。空欄の場合は完全な各言語の既定文を使用します。",
       "contactEmail": "連絡先メール",
       "contactEmailHint": "サポート、決済、返金、プライバシー請求、通報、異議申立てに使用します。空欄の場合は admin@aivory.local です。",
@@ -639,7 +641,6 @@
       "privacyTextHint": "任意の Markdown。設定すると既定の各言語のプライバシーポリシーを置き換えます。",
       "policyTextPlaceholder": "空欄にすると各言語の既定ポリシーを使用します。",
       "pickModel": "モデルを選択",
-      "smtpSection": "メール（SMTP）",
       "smtpLead": "確認コード・パスワード再設定メールを送信。",
       "smtpHost": "SMTPホスト",
       "smtpHostHint": "例：smtp.gmail.com、smtp.resend.com",
@@ -724,7 +725,6 @@
       "sandboxIdleTtlHint": "この秒数アイドルが続いたらサンドボックスを回収します（回収前にワークスペースをアーカイブ）。空欄 = 1800（30 分）。範囲 60–86400。",
       "logFullRequests": "完全なリクエストボディを記録",
       "logFullRequestsLead": "デバッグ用に、すべての使用記録へ完全な（サニタイズ済み）上流リクエストボディを保存します。失敗したリクエストはこの設定に関わらず常に保存されます。",
-      "logErrorsOnly": "失敗したリクエストのみ",
       "logErrorsOnlyHint": "オン：失敗したリクエストのみ保存を維持。オフ：すべてのリクエストの完全なボディを保存します——データベースが大きくなり、機密性の高いプロンプトが保存されます。"
     }
   },
@@ -738,14 +738,9 @@
     "freePrice": "無料",
     "creditsRatioLabel": "モデルコストの内部換算（USD あたり）",
     "creditsRatioHint": "モデルコスト 1 USD あたりに消費するクレジット数。決済通貨とは別です。0 で無効。",
-    "groupBuyUrlLabel": "ティア購入リンク（全体）",
-    "groupBuyUrlHint": "有料カードの「購入」リンク。空欄で「管理者に連絡」。",
-    "creditBuyUrlLabel": "クレジット補充リンク（全体）",
-    "creditBuyUrlHint": "ユーザーが永久クレジットを購入する場所。",
     "quotaMsgLabel": "クォータ超過メッセージ",
     "quotaMsgHint": "このモデルの上限に達した時に表示。",
     "quotaMsgPlaceholder": "このモデルでのプランの上限に達しました。続行するにはプランをアップグレードしてください。",
-    "msgSaved": "設定を保存しました",
     "editorTitle": "グループを編集",
     "newTitle": "新規グループ",
     "editorLead": "名前、価格、機能はサブスクリプションページでメンバーに表示されます。",
@@ -1334,14 +1329,75 @@
       "time": "タイムライン"
     }
   },
+  "overview": {
+    "title": "管理概要",
+    "lead": "この環境の設定状態と主要な管理リソースを確認します。",
+    "loadFailed": "管理概要を読み込めませんでした。",
+    "healthTitle": "設定の健全性",
+    "healthLead": "関連機能をユーザーに公開する前に警告を解消してください。",
+    "metrics": {
+      "users": "ユーザー",
+      "models": "モデル",
+      "channels": "チャネル",
+      "plans": "プラン"
+    },
+    "checks": {
+      "channels": "上流チャネル",
+      "channelsReady": "{{count}} 件のチャネルを設定済み",
+      "channelsMissing": "利用可能なモデルを追加する前にチャネルを作成してください。",
+      "defaultModel": "既定のチャットモデル",
+      "defaultModelMissing": "有効な既定モデルを選択するまでチャットを開始できません。",
+      "taskModel": "内部タスクモデル",
+      "taskModelMissing": "タイトル、ルーティング、要約、メモリ抽出にはタスクモデルが必要です。",
+      "configured": "設定済み",
+      "email": "メール認証",
+      "notRequired": "不要",
+      "smtpReady": "SMTP 設定済み",
+      "smtpMissing": "メール認証が有効ですが SMTP 設定が不完全です。",
+      "storage": "永続ストレージ",
+      "storageReady": "プロバイダー：{{provider}}",
+      "storageLocal": "ローカルストレージが選択されています。ワークスペースの永続化には sandbox ボリュームのマウントが必要です。",
+      "storageIncomplete": "{{provider}} が選択されていますが、必須のストレージ項目が不足しています。",
+      "storageMissing": "ワークスペースのアーカイブとアプリケーションオブジェクトが永続化されません。",
+      "payments": "決済チェックアウト",
+      "paymentsUnused": "決済チャネル未設定",
+      "paymentMethodsReady": "{{count}} 件の決済方法を利用可能",
+      "paymentMethodMissing": "決済チャネルはありますが、ユーザー向けの決済方法が紐付いていません。"
+    }
+  },
+  "creditSettings": {
+    "title": "クレジットと上限",
+    "lead": "課金換算、プラットフォーム全体の利用上限、永続クレジットパッケージを設定します。",
+    "policyTitle": "課金ポリシー",
+    "policyLead": "すべてのメンバーとクレジット課金モデルに適用されます。",
+    "limitsTitle": "プラットフォーム上限",
+    "limitsLead": "ユーザー単位の上限です。0 にすると無制限になります。",
+    "zeroUnlimited": "0 = 無制限。",
+    "dailyTokenLimit": "1 日の Token 上限",
+    "dailyTokenLimitHint": "ユーザーごとの UTC 1 日あたり入出力 Token 合計上限。0 = 無制限。",
+    "maxConcurrentGenerations": "ユーザーごとの同時生成数",
+    "maxConcurrentGenerationsHint": "ユーザーごとの同時応答ストリーム上限。0 = 無制限。"
+  },
+  "systemStorage": {
+    "title": "ストレージとアップロード",
+    "lead": "オブジェクトストレージ、アーカイブ保持期間、アップロード制限を設定します。"
+  },
   "menu": {
-    "models": "モデル",
-    "capabilities": "機能",
-    "users": "ユーザー",
-    "data": "分析",
-    "system": "システム",
-    "workspaces": "ワークスペース",
-    "payments": "決済"
+    "overview": "概要",
+    "aiModels": "AI とモデル",
+    "modelPolicy": "モデルポリシー",
+    "contextMemory": "コンテキストとメモリ",
+    "capabilities": "機能と連携",
+    "usersAccess": "ユーザーとアクセス",
+    "registrationPolicy": "登録ポリシー",
+    "billing": "課金と権限",
+    "creditsQuotas": "クレジットと上限",
+    "operations": "データと運用",
+    "platform": "システム",
+    "emailService": "メールサービス",
+    "storageUploads": "ストレージとアップロード",
+    "legalContact": "法務と連絡先",
+    "loggingPrivacy": "ログとプライバシー"
   },
   "imageStyles": {
     "title": "画像スタイル",

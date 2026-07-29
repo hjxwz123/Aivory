@@ -149,8 +149,8 @@ func Migrate(db *sql.DB) error {
 	addGroupMaxProjects := `ALTER TABLE user_groups ADD COLUMN max_projects INTEGER NOT NULL DEFAULT 0`
 	addGroupMaxKBs := `ALTER TABLE user_groups ADD COLUMN max_kbs INTEGER NOT NULL DEFAULT 0`
 	// Credit system (§ credits): per-group timed allowance + refresh cycle;
-	// per-user non-expiring balance; per-row charge. (The USD↔credit rate and the
-	// purchase links are global settings, not columns.)
+	// per-user non-expiring balance; per-row charge. The USD↔credit rate is a
+	// global setting rather than a group column.
 	addGroupCreditAllowance := `ALTER TABLE user_groups ADD COLUMN credit_allowance REAL NOT NULL DEFAULT 0`
 	addGroupCreditPeriod := `ALTER TABLE user_groups ADD COLUMN credit_period_seconds INTEGER NOT NULL DEFAULT 0`
 	addGroupMonthlyPriceAmountMinor := `ALTER TABLE user_groups ADD COLUMN monthly_price_amount_minor INTEGER NOT NULL DEFAULT 0`
@@ -832,29 +832,27 @@ func Seed(db *sql.DB, cfg config.Config) error {
 		"memory_enabled":              `true`,
 		"daily_message_limit":         fmt.Sprintf("%d", cfg.DailyMessages),
 		"daily_image_limit":           fmt.Sprintf("%d", cfg.DailyImages),
+		"daily_token_limit":           `0`,
+		"max_concurrent_generations":  `3`,
 		"signup_open":                 `true`,
 		"email_verification_required": `false`,
+		"email_domain_whitelist":      `""`,
 		// Anti-abuse registration controls. register_ip_daily_limit caps how many
 		// accounts one client IP may create per calendar day (0 = unlimited).
 		// register_captcha_required gates signup behind the arithmetic captcha
 		// (a text math question — no image/OCR).
 		"register_ip_daily_limit":   `0`,
 		"register_captcha_required": `false`,
+		"login_captcha_required":    `false`,
 		// Global credit conversion rate (§ credits): 1 USD of model cost = N
 		// credits. Shared by every group; 0 disables credits platform-wide.
 		"credits_per_usd": `0`,
 		// User-facing prices use one administrator-selected settlement currency.
-		// The fixed permanent-credit offer is optional (both values 0 = unset).
-		"settlement_currency":                          `"USD"`,
-		"permanent_credit_purchase_credits":            `0`,
-		"permanent_credit_purchase_price_amount_minor": `0`,
-		// Global purchase links (§ credits / user groups): one tier-upgrade link
-		// and one permanent-credit top-up link, shared by every group.
-		"group_buy_url":     `""`,
-		"credit_buy_url":    `""`,
-		"card_purchase_url": `""`,
-		"sandbox_base_url":  `""`,
-		"sandbox_api_key":   `""`,
+		"settlement_currency": `"USD"`,
+		"card_purchase_url":   `""`,
+		"disabled_tools":      `[]`,
+		"sandbox_base_url":    `""`,
+		"sandbox_api_key":     `""`,
 		// §4.5-F default sandbox archiving to the zero-dependency local backend so
 		// a fresh deployment persists /workspace across the idle reaper with no
 		// external object store. This is only meaningful because archives are keyed
@@ -870,12 +868,14 @@ func Seed(db *sql.DB, cfg config.Config) error {
 		"storage_archive_ttl_days": `30`,
 		// §4.6 default image upload cap: 5 MB. Non-image files have no seeded cap
 		// (blank → the MAX_UPLOAD_BYTES env ceiling). Admins tune both in
-		// /admin/documents; the env ceiling remains the absolute maximum.
+		// /admin/storage; the env ceiling remains the absolute maximum.
 		"max_image_upload_mb":   `5`,
 		"moderation_keywords":   `[]`,
 		"moderation_model_id":   `""`,
 		"moderation_categories": `["politics","pornography","violence or gore","terrorism","illegal activity","hate speech","self-harm"]`,
 		"moderation_message":    `"Your message was blocked by content moderation. Please rephrase and try again."`,
+		"log_full_requests":     `false`,
+		"log_errors_only":       `true`,
 		// § announcement: a single global notice shown to users on load. image_url
 		// non-empty → image announcement (image left, text right). remember_dismiss
 		// false → re-show every visit; updated_at doubles as the dismiss version.

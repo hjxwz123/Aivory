@@ -195,7 +195,7 @@ export interface ApiUserGroup {
   max_projects: number
   max_kbs: number
   /** Credit system (§ credits): per-group timed allowance + refresh cycle (unused
-   *  voided). The internal USD→credit rate and purchase links are global settings. */
+   *  voided). The internal USD→credit rate is a global setting. */
   credit_allowance: number
   credit_period_seconds: number
   created_at: number
@@ -690,10 +690,6 @@ export interface ApiCredits {
   timed?: { remaining: number; allowance: number; period_seconds: number; resets_at: number }
   permanent: number
   settlement_currency: string
-  /** Global permanent-credit top-up link. */
-  buy_url?: string
-  /** Global tier-purchase link (shown on every group card). */
-  group_buy_url?: string
 }
 
 /** A file referenced by a conversation (§ conversation files drawer). */
