@@ -153,7 +153,7 @@
       "officialToolJSONInvalid": "Invalid request JSON for {{name}}.",
       "officialToolJSONMustBeObject": "Enter a valid JSON object."
     },
-    "permissionsLead": "Which groups may use this model, and their per-cycle quota. All off = open to everyone.",
+    "permissionsLead": "Set each group's free allowance for this model. Groups left off spend credits on every use.",
     "tagsHint": "Tag the model for the picker's filter.",
     "pc": {
       "toggle": "Toggle",
@@ -321,6 +321,7 @@
     "create": "Create user",
     "created": "User created",
     "editTitle": "Edit {{name}}",
+    "emailChanged": "Email updated",
     "roleUser": "User",
     "roleAdmin": "Admin",
     "roleChanged": "Role updated",
@@ -344,6 +345,7 @@
     },
     "errors": {
       "emailRequired": "A valid email is required.",
+      "emailExists": "This email is already assigned to another user.",
       "passwordShort": "Password must be at least 8 characters."
     },
     "ban": "Ban",
@@ -824,8 +826,8 @@
   },
   "quota": {
     "saved": "Permissions saved",
-    "restrictedHint": "Only enabled groups can use it; others see it locked.",
-    "openHint": "No groups enabled — open to everyone.",
+    "restrictedHint": "Enabled groups receive the configured free allowance; other groups spend credits on every use.",
+    "openHint": "No groups enabled: every regular user spends credits on every use.",
     "every": "Every",
     "days": "days",
     "hours": "hours",

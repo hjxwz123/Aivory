@@ -68,3 +68,24 @@ func TestImageQuotaRequiresCreditsForWholeClampedBatch(t *testing.T) {
 		t.Fatalf("clamped image credits = (%q,%v,%v), want admitted credit turn for n=%d", msg, ok, payCredits, clamped)
 	}
 }
+
+func TestImageQuotaWithoutAnyFreeGrantUsesCredits(t *testing.T) {
+	ctx := context.Background()
+	orchestrator, _, db := setupImageQuotaTest(t)
+	model := &store.Model{ID: "m_images_paid", PricePerImage: 0.5}
+	if _, err := db.Exec(`INSERT INTO models(id,channel_id,kind,request_id,label,price_per_image) VALUES('m_images_paid','ch_images','image','image-paid','Paid Image',0.5)`); err != nil {
+		t.Fatalf("insert paid image model: %v", err)
+	}
+
+	// No model_group_quotas rows means no free allowance, not free unlimited use.
+	if msg, ok, payCredits := orchestrator.checkImageQuota(ctx, "u_images", model, 1); msg == "" || ok || payCredits {
+		t.Fatalf("insufficient credits = (%q,%v,%v), want blocked", msg, ok, payCredits)
+	}
+
+	if err := store.SetPermanentCredits(ctx, db, "u_images", 5); err != nil {
+		t.Fatalf("set exact credits: %v", err)
+	}
+	if msg, ok, payCredits := orchestrator.checkImageQuota(ctx, "u_images", model, 1); msg != "" || !ok || !payCredits {
+		t.Fatalf("no free grant = (%q,%v,%v), want admitted paid image turn", msg, ok, payCredits)
+	}
+}

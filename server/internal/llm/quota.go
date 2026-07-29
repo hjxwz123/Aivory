@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"strconv"
@@ -19,11 +20,11 @@ var dailyImageLimitResetWindow = envcfg.Dur("AIVORY_TOOLS_DAILY_IMAGE_LIMIT_RESE
 func costToMicros(c float64) int64 { return int64(math.Round(c * 1e6)) }
 func microsToCost(m int64) float64 { return float64(m) / 1e6 }
 
-// Per-model, per-group usage quotas (§ user groups). A model with no quota rows
-// is open to everyone. Otherwise a user's group must have a row (else the model
-// is locked for them), and usage is capped within a fixed window. The window
-// count/cost lives in the cache (O(1) per request), seeded from usage_logs when
-// the cache is cold, so the check stays cheap at scale.
+// Per-model, per-group usage quotas (§ user groups). A quota row grants that
+// group a free allowance. A missing row, including a model with no rows at all,
+// means the call is paid with credits. The window count/cost lives in the cache
+// (O(1) per request), seeded from usage_logs when the cache is cold, so the
+// check stays cheap at scale.
 
 // quotaWindow computes the fixed-window start + ttl for a period.
 func quotaWindow(periodSeconds int) (start int64, ttl time.Duration) {
@@ -56,29 +57,21 @@ func (o *Orchestrator) checkModelQuota(ctx context.Context, userID string, model
 	if u, err := store.FindUserByID(ctx, o.db, userID); err == nil && u.Role == "admin" {
 		return "", true, false, -1
 	}
-	has, err := store.ModelHasAnyQuota(ctx, o.db, model.ID)
-	if err != nil {
-		// §B11: fail OPEN on a DB error (availability over enforcement) but log it.
-		if o.logger != nil {
-			o.logger.Printf("quota: ModelHasAnyQuota(%s) failed, allowing (fail-open): %v", model.ID, err)
-		}
-		return "", true, false, -1
-	}
-	if !has {
-		return "", true, false, -1 // no quota rows → open to everyone, free + unlimited
-	}
 	groupID := o.userGroupID(ctx, userID)
 	q, err := store.GetModelQuota(ctx, o.db, model.ID, groupID)
-	if err != nil {
-		// Restricted model, but THIS group has no free-allotment row → it gets no
-		// free uses, yet it can still PAY with credits. This MUST match the model
-		// picker's `uses_credits` badge (modelUsesCredits returns true for exactly
-		// this case), or the user is shown "pay with credits" and then blocked when
-		// they actually send. creditDecision still blocks when credits are disabled
-		// (credits_per_usd=0) or the user can't cover the cost, so non-credit
-		// deployments stay hard-locked exactly as before.
+	if errors.Is(err, store.ErrNotFound) {
+		// No free allowance for this group. This also covers the all-toggles-off
+		// state, where the model has no quota rows at all.
 		msg, ok, useCredits := o.creditDecision(ctx, userID, groupID)
 		return msg, ok, useCredits, -1
+	}
+	if err != nil {
+		// §B11: fail OPEN on an unexpected DB error (availability over enforcement)
+		// but do not confuse it with the intentional no-free-allowance state above.
+		if o.logger != nil {
+			o.logger.Printf("quota: GetModelQuota(%s,%s) failed, allowing (fail-open): %v", model.ID, groupID, err)
+		}
+		return "", true, false, -1
 	}
 	if q.LimitValue <= 0 {
 		return "", true, false, -1 // granted unlimited free
@@ -113,21 +106,16 @@ func (o *Orchestrator) checkImageQuota(ctx context.Context, userID string, model
 	if u, err := store.FindUserByID(ctx, o.db, userID); err == nil && u.Role == "admin" {
 		return "", true, false
 	}
-	has, err := store.ModelHasAnyQuota(ctx, o.db, model.ID)
-	if err != nil {
-		if o.logger != nil {
-			o.logger.Printf("imagequota: ModelHasAnyQuota(%s) failed, allowing (fail-open): %v", model.ID, err)
-		}
-		return "", true, false
-	}
-	if !has {
-		return "", true, false // no quota rows → free + unlimited
-	}
 	groupID := o.userGroupID(ctx, userID)
 	q, err := store.GetModelQuota(ctx, o.db, model.ID, groupID)
+	if errors.Is(err, store.ErrNotFound) {
+		return o.checkPaidImageQuota(ctx, userID, groupID, model, n)
+	}
 	if err != nil {
-		// Restricted model with no row for this group → not available to them.
-		return o.quotaMessage(), false, false
+		if o.logger != nil {
+			o.logger.Printf("imagequota: GetModelQuota(%s,%s) failed, allowing (fail-open): %v", model.ID, groupID, err)
+		}
+		return "", true, false
 	}
 	if q.LimitValue <= 0 {
 		return "", true, false // granted unlimited free
@@ -148,6 +136,10 @@ func (o *Orchestrator) checkImageQuota(ctx context.Context, userID string, model
 	// Free image allotment exhausted → pay with credits (shared with chat credits).
 	// Unlike chat, image cost is exact before the request starts, so require the
 	// balance to cover the whole clamped batch instead of merely being positive.
+	return o.checkPaidImageQuota(ctx, userID, groupID, model, n)
+}
+
+func (o *Orchestrator) checkPaidImageQuota(ctx context.Context, userID, groupID string, model *store.Model, n int) (string, bool, bool) {
 	msg, ok, useCredits := o.creditDecision(ctx, userID, groupID)
 	if !ok || !useCredits {
 		return msg, ok, useCredits

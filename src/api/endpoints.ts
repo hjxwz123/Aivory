@@ -832,6 +832,12 @@ export const adminApi = {
     api<ApiUser>('/admin/users', { method: 'POST', body }),
   setUserPassword: (id: string, new_password: string) =>
     api<{ ok: true }>(`/admin/users/${encodeURIComponent(id)}/password`, { method: 'POST', body: { new_password } }),
+  /** Change a user's login email (admin-only; the server normalizes it). */
+  setUserEmail: (id: string, email: string) =>
+    api<{ ok: true }>(`/admin/users/${encodeURIComponent(id)}/email`, {
+      method: 'POST',
+      body: { email },
+    }),
   setUserRole: (id: string, role: 'user' | 'admin') =>
     api<{ ok: true }>(`/admin/users/${encodeURIComponent(id)}/role`, { method: 'POST', body: { role } }),
   banUser: (id: string) => api<{ ok: true }>(`/admin/users/${encodeURIComponent(id)}/ban`, { method: 'POST' }),

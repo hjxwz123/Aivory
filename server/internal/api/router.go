@@ -420,6 +420,7 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("POST", "/api/admin/users/:id/ban", requireAdmin(d, banUserAdmin))
 	mux.handle("POST", "/api/admin/users/:id/unban", requireAdmin(d, unbanUserAdmin))
 	mux.handle("POST", "/api/admin/users/:id/password", requireAdmin(d, setUserPasswordAdmin))
+	mux.handle("POST", "/api/admin/users/:id/email", requireAdmin(d, setUserEmailAdmin))
 	mux.handle("POST", "/api/admin/users/:id/role", requireAdmin(d, setUserRoleAdmin))
 	mux.handle("POST", "/api/admin/users/:id/2fa/disable", requireAdmin(d, adminDisableTwofaHandler))
 	// User drill-down for support / abuse triage. The list endpoint returns

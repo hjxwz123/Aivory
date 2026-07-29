@@ -40,17 +40,13 @@ func creditMultiplier(m store.Model) float64 {
 	return math.Round(v*10) / 10
 }
 
-// modelUsesCredits reports whether the model would be CREDIT-charged for this
-// user's group right now: it has a quota (restricted) but the group has no free
-// grant, or the per-cycle free allotment is used up (§ credits). Models with no
-// quota rows are free + unlimited → false.
-func modelUsesCredits(ctx context.Context, d Deps, userID string, m store.Model, restricted bool, grants map[string]store.ModelGroupQuota) bool {
-	if !restricted {
-		return false
-	}
+// modelUsesCredits reports whether the model would be credit-charged for this
+// user's group right now. A missing grant, including the all-toggles-off state,
+// means there is no free allowance and every call uses credits.
+func modelUsesCredits(ctx context.Context, d Deps, userID string, m store.Model, grants map[string]store.ModelGroupQuota) bool {
 	q, granted := grants[m.ID]
 	if !granted {
-		return true // group has no free grant → credits
+		return true
 	}
 	if q.LimitValue <= 0 {
 		return false // granted unlimited free
@@ -171,9 +167,8 @@ func modelsResponse(d Deps, r *http.Request, models []store.Model) map[string]an
 		CreditsPerImage float64 `json:"credits_per_image"`
 	}
 
-	// Resolve per-model free-allotment state for the caller's group. Restricted =
-	// the model has any quota row; grants = the group's quotas (with limits).
-	restricted, _ := store.RestrictedModelIDs(r.Context(), d.DB)
+	// Resolve per-model free-allotment state for the caller's group. Missing rows
+	// mean paid usage; an explicit row grants the configured free allowance.
 	caller := authUser(r)
 	isAdmin := caller != nil && caller.Role == "admin"
 	groupID := store.DefaultGroupID
@@ -215,7 +210,7 @@ func modelsResponse(d Deps, r *http.Request, models []store.Model) map[string]an
 		if tags == nil {
 			tags = json.RawMessage("[]")
 		}
-		usesCredits := !isAdmin && modelUsesCredits(r.Context(), d, userID, m, restricted[m.ID], grants)
+		usesCredits := !isAdmin && modelUsesCredits(r.Context(), d, userID, m, grants)
 		creditsPerImage := 0.0
 		if usesCredits {
 			creditsPerImage = imageCreditCost(m, creditsPerUSD)

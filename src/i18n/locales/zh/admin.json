@@ -157,7 +157,7 @@
       "officialToolJSONInvalid": "{{name}} 的请求 JSON 无效。",
       "officialToolJSONMustBeObject": "请输入有效的 JSON 对象。"
     },
-    "permissionsLead": "可用此模型的用户组及每周期额度。全部关闭=对所有人开放。",
+    "permissionsLead": "为用户组设置此模型的周期免费额度；关闭的用户组每次使用都会扣积分。",
     "tagsHint": "给模型分配标签,用于选择器筛选。",
     "pc": {
       "toggle": "开关",
@@ -325,6 +325,7 @@
     "create": "创建用户",
     "created": "用户已创建",
     "editTitle": "编辑 {{name}}",
+    "emailChanged": "邮箱已更新",
     "roleUser": "普通用户",
     "roleAdmin": "管理员",
     "roleChanged": "角色已更新",
@@ -348,6 +349,7 @@
     },
     "errors": {
       "emailRequired": "请输入有效的邮箱。",
+      "emailExists": "该邮箱已被其他用户使用。",
       "passwordShort": "密码至少 8 个字符。"
     },
     "ban": "封禁",
@@ -828,8 +830,8 @@
   },
   "quota": {
     "saved": "权限已保存",
-    "restrictedHint": "仅启用的用户组可用,其余显示锁定。",
-    "openHint": "未启用任何组——对所有人无限开放。",
+    "restrictedHint": "启用的用户组享受所设免费额度；未启用的用户组每次使用都会扣积分。",
+    "openHint": "未启用任何用户组：所有普通用户每次使用都会扣积分。",
     "every": "每",
     "days": "天",
     "hours": "小时",

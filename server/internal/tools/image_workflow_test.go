@@ -31,9 +31,11 @@ func seedImageWorkflow(t *testing.T, channelType, requestID string) (*imageGener
 	t.Helper()
 	db := openToolsTestDB(t)
 	for _, query := range []string{
-		`INSERT INTO users(id,email,password_hash,name) VALUES('u_flow','flow@example.test','hash','Flow User')`,
+		`INSERT INTO user_groups(id,name,is_default) VALUES('ug_flow','Image Flow',0)`,
+		`INSERT INTO users(id,email,password_hash,name,group_id) VALUES('u_flow','flow@example.test','hash','Flow User','ug_flow')`,
 		`INSERT INTO channels(id,name,type,base_url,api_key) VALUES('ch_flow','Image Channel','` + channelType + `','https://images.example.test','server-secret')`,
 		`INSERT INTO models(id,channel_id,kind,request_id,label) VALUES('m_flow','ch_flow','image','` + requestID + `','Image Model')`,
+		`INSERT INTO model_group_quotas(model_id,group_id,period_seconds,limit_type,limit_value) VALUES('m_flow','ug_flow',604800,'count',0)`,
 		`INSERT INTO conversations(id,user_id,title,model_id) VALUES('c_flow','u_flow','Image flow','m_flow')`,
 	} {
 		if _, err := db.Exec(query); err != nil {
@@ -179,6 +181,9 @@ func TestGeminiReferenceLimitsAreModelSpecificAndRejectOverflow(t *testing.T) {
 
 	tool, convID := seedImageWorkflow(t, "gemini", "gemini-2.5-flash-image")
 	if _, err := tool.db.Exec(`INSERT INTO models(id,channel_id,kind,request_id,label) VALUES('m_gemini3','ch_flow','image','gemini-3-pro-image-preview','Gemini 3')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tool.db.Exec(`INSERT INTO model_group_quotas(model_id,group_id,period_seconds,limit_type,limit_value) VALUES('m_gemini3','ug_flow',604800,'count',0)`); err != nil {
 		t.Fatal(err)
 	}
 	for _, messageID := range []string{"a_gemini25", "a_gemini3"} {

@@ -153,7 +153,7 @@
       "officialToolJSONInvalid": "{{name}} 的請求 JSON 無效。",
       "officialToolJSONMustBeObject": "請輸入有效的 JSON 物件。"
     },
-    "permissionsLead": "可用此模型的使用者群組及每週期額度。全部關閉=對所有人開放。",
+    "permissionsLead": "為使用者群組設定此模型的週期免費額度；關閉的群組每次使用都會扣除積分。",
     "tagsHint": "給模型指派標籤,用於選擇器篩選。",
     "pc": {
       "toggle": "開關",
@@ -321,6 +321,7 @@
     "create": "建立使用者",
     "created": "使用者已建立",
     "editTitle": "編輯 {{name}}",
+    "emailChanged": "電子郵件已更新",
     "roleUser": "普通使用者",
     "roleAdmin": "管理員",
     "roleChanged": "角色已更新",
@@ -344,6 +345,7 @@
     },
     "errors": {
       "emailRequired": "請輸入有效的郵箱。",
+      "emailExists": "此郵箱已由其他使用者使用。",
       "passwordShort": "密碼至少 8 個字元。"
     },
     "ban": "封禁",
@@ -824,8 +826,8 @@
   },
   "quota": {
     "saved": "許可權已儲存",
-    "restrictedHint": "僅啟用的群組可用,其餘顯示鎖定。",
-    "openHint": "未啟用任何群組——對所有人無限開放。",
+    "restrictedHint": "啟用的使用者群組享有所設免費額度；未啟用的群組每次使用都會扣除積分。",
+    "openHint": "未啟用任何使用者群組：所有一般使用者每次使用都會扣除積分。",
     "every": "每",
     "days": "天",
     "hours": "小時",

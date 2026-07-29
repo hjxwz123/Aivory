@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/mail"
 	"os"
 	"strings"
 	"time"
@@ -14,6 +15,13 @@ import (
 
 // ErrNotFound is returned when a queried row is missing.
 var ErrNotFound = errors.New("not found")
+
+// ErrUserEmailInvalid and ErrUserEmailExists distinguish invalid input from a
+// collision when an administrator changes an account's sign-in email.
+var (
+	ErrUserEmailInvalid = errors.New("invalid user email")
+	ErrUserEmailExists  = errors.New("user email already exists")
+)
 
 // Pagination defaults/caps.
 var (
@@ -351,6 +359,54 @@ func UpdateUserProfile(ctx context.Context, db *sql.DB, userID string, name, ema
 	return FindUserByID(ctx, db, userID)
 }
 
+// SetUserEmail changes only a user's sign-in email. The address is stored in a
+// canonical lowercase form so admin edits cannot create case-only duplicates.
+func SetUserEmail(ctx context.Context, db *sql.DB, userID, email string) error {
+	email = strings.ToLower(strings.TrimSpace(email))
+	if len(email) > 320 {
+		return ErrUserEmailInvalid
+	}
+	address, err := mail.ParseAddress(email)
+	if err != nil || address.Address != email || !strings.Contains(email, "@") {
+		return ErrUserEmailInvalid
+	}
+
+	var targetID string
+	err = db.QueryRowContext(ctx, `SELECT id FROM users WHERE id=?`, userID).Scan(&targetID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+
+	var existingID string
+	err = db.QueryRowContext(ctx,
+		`SELECT id FROM users WHERE lower(trim(email))=? AND id<>? LIMIT 1`, email, userID,
+	).Scan(&existingID)
+	if err == nil {
+		return ErrUserEmailExists
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+
+	result, err := db.ExecContext(ctx, `UPDATE users SET email=? WHERE id=?`, email, userID)
+	if err != nil {
+		low := strings.ToLower(err.Error())
+		if strings.Contains(low, "unique") || strings.Contains(low, "duplicate") {
+			return ErrUserEmailExists
+		}
+		return err
+	}
+	if n, err := result.RowsAffected(); err != nil {
+		return err
+	} else if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // UpdateUserPassword writes a new bcrypt hash, rotates the token version (kills
 // outstanding access tokens) AND revokes all refresh tokens (§A4) — otherwise a
 // stolen refresh token survives a password reset and can re-mint a session,
@@ -480,7 +536,17 @@ func ListUsersBySearch(ctx context.Context, db *sql.DB, search string, limit, of
 	if err != nil {
 		return nil, err
 	}
-	return scanUsers(rows)
+	users, err := scanUsers(rows)
+	if err != nil {
+		return nil, err
+	}
+	// Membership expiry is lazy elsewhere (FindUserByID/Email). Normalize only
+	// the rows returned by this paged admin query, after the cursor is closed, so
+	// an admin page reflects current tiers without scanning the whole user table.
+	for i := range users {
+		maybeExpireGroup(ctx, db, &users[i])
+	}
+	return users, nil
 }
 
 // ReorderUsers persists the visible admin users page order. Because the users

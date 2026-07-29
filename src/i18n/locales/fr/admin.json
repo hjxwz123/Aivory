@@ -153,7 +153,7 @@
       "officialToolJSONInvalid": "JSON de requête invalide pour {{name}}.",
       "officialToolJSONMustBeObject": "Saisissez un objet JSON valide."
     },
-    "permissionsLead": "Groupes autorisés et quota par cycle. Tout désactivé = ouvert à tous.",
+    "permissionsLead": "Définissez le quota gratuit de chaque groupe pour ce modèle. Les groupes désactivés dépensent des crédits à chaque utilisation.",
     "tagsHint": "Étiquette le modèle pour le filtre du sélecteur.",
     "pc": {
       "toggle": "Bascule",
@@ -321,6 +321,7 @@
     "create": "Créer l'utilisateur",
     "created": "Utilisateur créé",
     "editTitle": "Modifier {{name}}",
+    "emailChanged": "E-mail mis à jour",
     "roleUser": "Utilisateur",
     "roleAdmin": "Admin",
     "roleChanged": "Rôle mis à jour",
@@ -344,6 +345,7 @@
     },
     "errors": {
       "emailRequired": "Un e-mail valide est requis.",
+      "emailExists": "Cet e-mail est déjà attribué à un autre utilisateur.",
       "passwordShort": "Le mot de passe doit comporter au moins 8 caractères."
     },
     "ban": "Bannir",
@@ -824,8 +826,8 @@
   },
   "quota": {
     "saved": "Permissions enregistrées",
-    "restrictedHint": "Seuls les groupes activés y accèdent ; les autres le voient verrouillé.",
-    "openHint": "Aucun groupe activé — ouvert à tous.",
+    "restrictedHint": "Les groupes activés bénéficient du quota gratuit configuré ; les autres dépensent des crédits à chaque utilisation.",
+    "openHint": "Aucun groupe activé : chaque utilisateur standard dépense des crédits à chaque utilisation.",
     "every": "Tous les",
     "days": "jours",
     "hours": "heures",
