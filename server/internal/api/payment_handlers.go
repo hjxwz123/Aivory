@@ -21,6 +21,15 @@ const paymentWebhookBodyLimit int64 = 1 << 20
 
 var errPaymentProviderReferencePending = errors.New("payment provider reference is not mapped yet")
 
+var (
+	errPaymentOrderNotResumable = errors.New("payment_order_not_resumable")
+	errPaymentOrderAlreadyPaid  = errors.New("payment_order_already_paid")
+	errPaymentCheckoutExpired   = errors.New("payment_checkout_expired")
+	errPaymentResumeUnavailable = errors.New("payment_resume_unavailable")
+	errPaymentCheckoutUnknown   = errors.New("payment_checkout_state_unknown")
+	errPaymentOrderStateChanged = errors.New("payment_order_state_changed")
+)
+
 const (
 	paymentCheckoutProviderTimeout = 45 * time.Second
 	paymentCheckoutStateTimeout    = 10 * time.Second
@@ -44,37 +53,45 @@ type publicPaymentMethod struct {
 }
 
 type publicPaymentOrder struct {
-	ID             string `json:"id"`
-	Status         string `json:"status"`
-	Provider       string `json:"provider"`
-	MethodName     string `json:"method_name"`
-	MethodType     string `json:"method_type"`
-	TargetType     string `json:"target_type"`
-	TargetName     string `json:"target_name"`
-	BillingCycle   string `json:"billing_cycle"`
-	AmountMinor    int64  `json:"amount_minor"`
-	TaxAmountMinor int64  `json:"tax_amount_minor,omitempty"`
-	Currency       string `json:"currency"`
-	FailureReason  string `json:"failure_reason,omitempty"`
-	CreatedAt      int64  `json:"created_at"`
-	PaidAt         int64  `json:"paid_at,omitempty"`
-	FulfilledAt    int64  `json:"fulfilled_at,omitempty"`
+	ID                string `json:"id"`
+	Status            string `json:"status"`
+	CanResume         bool   `json:"can_resume"`
+	CanRetry          bool   `json:"can_retry"`
+	ResumeMode        string `json:"resume_mode,omitempty"`
+	CheckoutExpiresAt *int64 `json:"checkout_expires_at,omitempty"`
+	Provider          string `json:"provider"`
+	MethodName        string `json:"method_name"`
+	MethodType        string `json:"method_type"`
+	TargetType        string `json:"target_type"`
+	TargetName        string `json:"target_name"`
+	BillingCycle      string `json:"billing_cycle"`
+	AmountMinor       int64  `json:"amount_minor"`
+	TaxAmountMinor    int64  `json:"tax_amount_minor,omitempty"`
+	Currency          string `json:"currency"`
+	FailureReason     string `json:"failure_reason,omitempty"`
+	CreatedAt         int64  `json:"created_at"`
+	PaidAt            int64  `json:"paid_at,omitempty"`
+	FulfilledAt       int64  `json:"fulfilled_at,omitempty"`
 }
 
 type publicPaymentOrderListItem struct {
-	ID             string `json:"id"`
-	Status         string `json:"status"`
-	Provider       string `json:"provider"`
-	MethodName     string `json:"method_name"`
-	MethodType     string `json:"method_type"`
-	TargetType     string `json:"target_type"`
-	TargetName     string `json:"target_name"`
-	AmountMinor    int64  `json:"amount_minor"`
-	TaxAmountMinor int64  `json:"tax_amount_minor,omitempty"`
-	Currency       string `json:"currency"`
-	BillingCycle   string `json:"billing_cycle"`
-	CreatedAt      int64  `json:"created_at"`
-	PaidAt         int64  `json:"paid_at"`
+	ID                string `json:"id"`
+	Status            string `json:"status"`
+	CanResume         bool   `json:"can_resume"`
+	CanRetry          bool   `json:"can_retry"`
+	ResumeMode        string `json:"resume_mode,omitempty"`
+	CheckoutExpiresAt *int64 `json:"checkout_expires_at,omitempty"`
+	Provider          string `json:"provider"`
+	MethodName        string `json:"method_name"`
+	MethodType        string `json:"method_type"`
+	TargetType        string `json:"target_type"`
+	TargetName        string `json:"target_name"`
+	AmountMinor       int64  `json:"amount_minor"`
+	TaxAmountMinor    int64  `json:"tax_amount_minor,omitempty"`
+	Currency          string `json:"currency"`
+	BillingCycle      string `json:"billing_cycle"`
+	CreatedAt         int64  `json:"created_at"`
+	PaidAt            int64  `json:"paid_at"`
 }
 
 func listPaymentMethodsPublic(d Deps, w http.ResponseWriter, r *http.Request) {
@@ -176,6 +193,17 @@ func createPaymentCheckoutHandler(d Deps, w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusConflict, store.ErrPaymentMethodUnavailable)
 		return
 	}
+	merchantOrderID := ""
+	if order.Provider == payment.ProviderEPay {
+		attempt, attemptErr := store.CreatePaymentOrderAttempt(orderStateCtx, d.DB, order.ID, order.ID)
+		if attemptErr != nil {
+			orderStateCancel()
+			slog.Error("payment checkout attempt creation failed", "provider", order.Provider, "channel_id", order.ChannelID, "order_id", order.ID, "err", attemptErr)
+			writeError(w, http.StatusInternalServerError, errors.New("payment_checkout_unavailable"))
+			return
+		}
+		merchantOrderID = attempt.MerchantOrderID
+	}
 	orderStateCancel()
 	baseURL := paymentReturnBaseURL(d, r)
 	returnQuery := url.Values{"payment": {"return"}, "order": {order.ID}}
@@ -186,7 +214,8 @@ func createPaymentCheckoutHandler(d Deps, w http.ResponseWriter, r *http.Request
 	}
 	providerCtx, providerCancel := paymentDetachedContext(r, paymentCheckoutProviderTimeout)
 	action, err := createPaymentCheckout(providerCtx, gateway, payment.CheckoutRequest{
-		OrderID: order.ID, Name: order.ProductName, AmountMinor: order.ProviderAmountMinor, Currency: order.ProviderCurrency,
+		OrderID: order.ID, MerchantOrderID: merchantOrderID,
+		Name: order.ProductName, AmountMinor: order.ProviderAmountMinor, Currency: order.ProviderCurrency,
 		TaxCategory: taxCategory,
 		UserID:      order.UserID, UserEmail: order.UserEmail,
 		NotifyURL:  paymentAbsoluteWebhookURL(r, order.ChannelID),
@@ -207,7 +236,8 @@ func createPaymentCheckoutHandler(d Deps, w http.ResponseWriter, r *http.Request
 		writeError(w, responseStatus, responseErr)
 		return
 	}
-	if !validAbsolutePaymentHTTPURL(action.URL) || (action.Type != payment.ActionRedirect && action.Type != payment.ActionFormPost) {
+	if !validAbsolutePaymentHTTPURL(action.URL) || !validStoredPaymentSessionURL(action.SessionURL) ||
+		(action.Type != payment.ActionRedirect && action.Type != payment.ActionFormPost) {
 		stateCtx, stateCancel := paymentDetachedContext(r, paymentCheckoutStateTimeout)
 		_, _ = store.MarkPaymentOrderFailed(stateCtx, d.DB, order.ID, "provider_checkout_invalid", "Payment provider returned an invalid checkout action")
 		stateCancel()
@@ -215,7 +245,7 @@ func createPaymentCheckoutHandler(d Deps, w http.ResponseWriter, r *http.Request
 		return
 	}
 	stateCtx, stateCancel := paymentDetachedContext(r, paymentCheckoutStateTimeout)
-	err = markPaymentCheckoutStarted(stateCtx, d, order.ID, action.ProviderOrderID, action.SessionID, action.ExpiresAt)
+	err = persistPaymentCheckoutAction(stateCtx, d, order.ID, action)
 	stateCancel()
 	if err != nil {
 		slog.Error("payment checkout state update failed", "provider", order.Provider, "channel_id", order.ChannelID, "order_id", order.ID, "err", err)
@@ -224,6 +254,7 @@ func createPaymentCheckoutHandler(d Deps, w http.ResponseWriter, r *http.Request
 	}
 	action.ProviderOrderID = ""
 	action.SessionID = ""
+	action.SessionURL = ""
 	action.ExpiresAt = 0
 	writeJSON(w, http.StatusCreated, map[string]any{"order_id": order.ID, "action": action})
 }
@@ -232,8 +263,8 @@ func paymentDetachedContext(r *http.Request, timeout time.Duration) (context.Con
 	return context.WithTimeout(context.WithoutCancel(r.Context()), timeout)
 }
 
-func markPaymentCheckoutStarted(ctx context.Context, d Deps, orderID, providerOrderID, sessionID string, expiresAt int64) error {
-	order, err := store.MarkPaymentOrderCheckoutStarted(ctx, d.DB, orderID, providerOrderID, sessionID, expiresAt)
+func markPaymentCheckoutStarted(ctx context.Context, d Deps, orderID, providerOrderID, sessionID string, expiresAt int64, sessionURL string) error {
+	order, err := store.MarkPaymentOrderCheckoutStarted(ctx, d.DB, orderID, providerOrderID, sessionID, expiresAt, sessionURL)
 	if err == nil {
 		return nil
 	}
@@ -246,6 +277,232 @@ func markPaymentCheckoutStarted(ctx context.Context, d Deps, orderID, providerOr
 		return store.ErrPaymentProviderOrderMismatch
 	}
 	return nil
+}
+
+func persistPaymentCheckoutAction(ctx context.Context, d Deps, orderID string, action payment.CheckoutAction) error {
+	return markPaymentCheckoutStarted(
+		ctx, d, orderID, action.ProviderOrderID, action.SessionID, action.ExpiresAt, action.SessionURL,
+	)
+}
+
+func validStoredPaymentSessionURL(raw string) bool {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return true
+	}
+	parsed, err := url.Parse(raw)
+	return err == nil && parsed.Fragment == "" && validAbsolutePaymentHTTPURL(raw)
+}
+
+func resumePaymentOrderHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	orderID := strings.TrimSpace(pathParam(r, "id"))
+	order, err := store.GetPaymentOrderForUser(r.Context(), d.DB, orderID, authUser(r).ID)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, errNotFound)
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if order.Status != store.PaymentOrderPending && order.Status != store.PaymentOrderProcessing {
+		writePaymentResumeStatusError(w, order.Status)
+		return
+	}
+
+	channel, err := store.GetPaymentChannel(r.Context(), d.DB, order.ChannelID)
+	if err != nil || !channel.Enabled || channel.Provider != order.Provider || channel.Environment != order.Environment {
+		writeError(w, http.StatusConflict, errPaymentOrderNotResumable)
+		return
+	}
+	gateway, err := paymentGateway(order.Provider, channel.Config, order.MethodConfig)
+	if err != nil {
+		writeError(w, http.StatusConflict, errPaymentOrderNotResumable)
+		return
+	}
+	resumer, ok := gateway.(payment.CheckoutResumer)
+	if !ok {
+		writeError(w, http.StatusConflict, errPaymentOrderNotResumable)
+		return
+	}
+
+	providerCtx, providerCancel := paymentDetachedContext(r, paymentCheckoutProviderTimeout)
+	defer providerCancel()
+	providerRequest := r.WithContext(providerCtx)
+	if order.Provider == payment.ProviderStripe || order.Provider == payment.ProviderWaffo {
+		order, err = reconcilePaymentOrderBeforeResume(providerRequest, d, *order, gateway)
+		if err != nil {
+			status := http.StatusBadGateway
+			responseErr := errPaymentResumeUnavailable
+			if errors.Is(err, payment.ErrCheckoutStateUnknown) {
+				status = http.StatusConflict
+				responseErr = errPaymentCheckoutUnknown
+			} else if errors.Is(err, errPaymentOrderStateChanged) {
+				status = http.StatusConflict
+				responseErr = errPaymentOrderStateChanged
+			}
+			slog.Warn("payment checkout resume reconciliation failed", "provider", order.Provider, "channel_id", order.ChannelID, "order_id", order.ID, "err", err)
+			writeError(w, status, responseErr)
+			return
+		}
+		if order.Status != store.PaymentOrderPending && order.Status != store.PaymentOrderProcessing {
+			writePaymentResumeStatusError(w, order.Status)
+			return
+		}
+	}
+
+	baseURL := paymentReturnBaseURL(d, r)
+	returnQuery := url.Values{"payment": {"return"}, "order": {order.ID}}
+	cancelQuery := url.Values{"payment": {"cancel"}, "order": {order.ID}}
+	taxCategory := payment.TaxCategoryDigitalGoods
+	if order.ProductType == store.PaymentProductUserGroup {
+		taxCategory = payment.TaxCategorySaaS
+	}
+	merchantOrderID := ""
+	if order.Provider == payment.ProviderEPay {
+		attempt, attemptErr := store.CreatePaymentOrderAttempt(providerCtx, d.DB, order.ID, "")
+		if attemptErr != nil {
+			if errors.Is(attemptErr, store.ErrPaymentOrderNotMutable) {
+				updated, getErr := store.GetPaymentOrderForUser(providerCtx, d.DB, order.ID, order.UserID)
+				if getErr == nil {
+					writePaymentResumeStatusError(w, updated.Status)
+					return
+				}
+			}
+			slog.Error("payment retry attempt creation failed", "provider", order.Provider, "channel_id", order.ChannelID, "order_id", order.ID, "err", attemptErr)
+			writeError(w, http.StatusInternalServerError, errPaymentResumeUnavailable)
+			return
+		}
+		merchantOrderID = attempt.MerchantOrderID
+	}
+	action, err := resumer.ResumeCheckout(providerCtx, payment.CheckoutResumeRequest{
+		CheckoutRequest: payment.CheckoutRequest{
+			OrderID: order.ID, MerchantOrderID: merchantOrderID, Name: order.ProductName,
+			AmountMinor: order.ProviderAmountMinor, Currency: order.ProviderCurrency,
+			TaxCategory: taxCategory, UserID: order.UserID, UserEmail: order.UserEmail,
+			NotifyURL:  paymentAbsoluteWebhookURL(r, order.ChannelID),
+			SuccessURL: baseURL + "/subscription?" + returnQuery.Encode(),
+			CancelURL:  baseURL + "/subscription?" + cancelQuery.Encode(),
+		},
+		ProviderOrderID: order.ProviderOrderID, SessionID: order.CheckoutSessionID,
+		SessionURL: order.CheckoutURL, SessionExpiresAt: order.CheckoutExpiresAt,
+	})
+	if err != nil {
+		if errors.Is(err, payment.ErrCheckoutExpired) {
+			updated, markErr := store.MarkPaymentOrderExpired(providerCtx, d.DB, order.ID, order.ProviderOrderID)
+			if markErr != nil && !errors.Is(markErr, store.ErrPaymentOrderNotMutable) {
+				slog.Error("mark resumed payment checkout expired", "order_id", order.ID, "err", markErr)
+			}
+			if updated != nil && updated.Status != store.PaymentOrderExpired {
+				writePaymentResumeStatusError(w, updated.Status)
+				return
+			}
+			writeError(w, http.StatusConflict, errPaymentCheckoutExpired)
+			return
+		}
+		if errors.Is(err, payment.ErrCheckoutNotResumable) {
+			writeError(w, http.StatusConflict, errPaymentOrderNotResumable)
+			return
+		}
+		slog.Error("payment checkout resume failed", "provider", order.Provider, "channel_id", order.ChannelID, "order_id", order.ID, "err", err)
+		writeError(w, http.StatusBadGateway, errPaymentResumeUnavailable)
+		return
+	}
+	expectedMode := payment.CheckoutResumeOriginalSession
+	if order.Provider == payment.ProviderEPay {
+		expectedMode = payment.CheckoutResumeRetrySubmission
+	}
+	if !validAbsolutePaymentHTTPURL(action.URL) || !validStoredPaymentSessionURL(action.SessionURL) ||
+		(action.Type != payment.ActionRedirect && action.Type != payment.ActionFormPost) || action.ResumeMode != expectedMode {
+		slog.Error("payment provider returned invalid resume action", "provider", order.Provider, "channel_id", order.ChannelID, "order_id", order.ID)
+		writeError(w, http.StatusBadGateway, errPaymentResumeUnavailable)
+		return
+	}
+	// Unlike first checkout creation, resume must lose a race with fulfillment:
+	// never return a reusable action after a webhook has made the order terminal.
+	_, err = store.MarkPaymentOrderCheckoutStarted(
+		providerCtx, d.DB, order.ID, action.ProviderOrderID, action.SessionID, action.ExpiresAt, action.SessionURL,
+	)
+	if err != nil {
+		if errors.Is(err, store.ErrPaymentOrderNotMutable) || errors.Is(err, store.ErrPaymentProviderOrderMismatch) {
+			updated, getErr := store.GetPaymentOrderForUser(providerCtx, d.DB, order.ID, order.UserID)
+			if getErr == nil {
+				writePaymentResumeStatusError(w, updated.Status)
+				return
+			}
+			writeError(w, http.StatusConflict, errPaymentOrderNotResumable)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	action.ProviderOrderID = ""
+	action.SessionID = ""
+	action.SessionURL = ""
+	action.ExpiresAt = 0
+	writeJSON(w, http.StatusOK, map[string]any{"order_id": order.ID, "action": action})
+}
+
+func reconcilePaymentOrderBeforeResume(r *http.Request, d Deps, order store.PaymentOrder, gateway payment.CheckoutCreator) (*store.PaymentOrder, error) {
+	req := payment.ReconcileRequest{
+		OrderID: order.ID, UserID: order.UserID, AmountMinor: order.ProviderAmountMinor, Currency: order.ProviderCurrency,
+		SessionID: order.CheckoutSessionID, SessionExpiresAt: order.CheckoutExpiresAt,
+	}
+	var event payment.ProviderEvent
+	var err error
+	switch gateway := gateway.(type) {
+	case payment.StripeGateway:
+		event, err = (payment.StripeReconciler{Config: gateway.Config, Backends: gateway.Backends}).Reconcile(r.Context(), req)
+	case payment.WaffoGateway:
+		event, err = (payment.WaffoReconciler{Config: gateway.Config, BaseURL: gateway.BaseURL, HTTPClient: gateway.HTTPClient}).Reconcile(r.Context(), req)
+	default:
+		return &order, payment.ErrReconciliationUnsupported
+	}
+	if err != nil {
+		_, _ = store.MarkPaymentOrderReconciled(r.Context(), d.DB, order.ID, err.Error())
+		return &order, err
+	}
+	return applyPaymentResumeReconciliationEvent(r, d, order, event)
+}
+
+func applyPaymentResumeReconciliationEvent(r *http.Request, d Deps, order store.PaymentOrder, event payment.ProviderEvent) (*store.PaymentOrder, error) {
+	appliedOrder, err := applyProviderEvent(r, d, order.Provider, order.ChannelID, event)
+	if err != nil {
+		_, _ = store.MarkPaymentOrderReconciled(r.Context(), d.DB, order.ID, err.Error())
+		return &order, err
+	}
+	if appliedOrder != nil && appliedOrder.UserID != "" {
+		invalidateAuthUser(d, appliedOrder.UserID)
+	}
+	updated, err := store.GetPaymentOrderForUser(r.Context(), d.DB, order.ID, order.UserID)
+	if err != nil {
+		return &order, err
+	}
+	if order.Provider == payment.ProviderStripe && updated.CheckoutSessionID == "" && event.ProviderOrderID != "" &&
+		(updated.Status == store.PaymentOrderPending || updated.Status == store.PaymentOrderProcessing) {
+		updated, err = store.MarkPaymentOrderCheckoutStarted(
+			r.Context(), d.DB, updated.ID, event.ProviderOrderID, event.ProviderOrderID, updated.CheckoutExpiresAt, "",
+		)
+		if err != nil {
+			return &order, err
+		}
+	}
+	updated, err = store.MarkPaymentOrderReconciled(r.Context(), d.DB, order.ID, "")
+	if err != nil {
+		return &order, err
+	}
+	return updated, nil
+}
+
+func writePaymentResumeStatusError(w http.ResponseWriter, status string) {
+	switch status {
+	case store.PaymentOrderFulfilled:
+		writeError(w, http.StatusConflict, errPaymentOrderAlreadyPaid)
+	case store.PaymentOrderExpired, store.PaymentOrderCancelled:
+		writeError(w, http.StatusConflict, errPaymentCheckoutExpired)
+	default:
+		writeError(w, http.StatusConflict, errPaymentOrderNotResumable)
+	}
 }
 
 func getPaymentOrderHandler(d Deps, w http.ResponseWriter, r *http.Request) {
@@ -390,7 +647,7 @@ func verifyProviderWebhook(w http.ResponseWriter, r *http.Request, provider stri
 }
 
 func applyProviderEvent(r *http.Request, d Deps, provider, channelID string, event payment.ProviderEvent) (*store.PaymentOrder, error) {
-	order, err := paymentOrderForProviderEvent(r, d, provider, channelID, event)
+	order, merchantOrderID, err := paymentOrderForProviderEvent(r, d, provider, channelID, event)
 	if err != nil {
 		return nil, err
 	}
@@ -420,9 +677,16 @@ func applyProviderEvent(r *http.Request, d Deps, provider, channelID string, eve
 			paidAmount = order.AmountMinor
 			taxAmount = 0
 			currency = order.Currency
+		} else if provider == payment.ProviderWaffo && !strings.EqualFold(order.Currency, order.ProviderCurrency) {
+			// Waffo reports actual totals in the product currency. Validate those
+			// provider amounts above, then fulfill against the immutable settlement
+			// snapshot while retaining paid/tax totals for provider-currency display.
+			amount = order.AmountMinor
+			currency = order.Currency
 		}
 		result, err := store.FulfillPaymentOrder(r.Context(), d.DB, store.PaymentFulfillmentInput{
-			PaymentEventInput: eventInput, ProviderOrderID: event.ProviderOrderID, ProviderPaymentID: event.ProviderPaymentID,
+			PaymentEventInput: eventInput, MerchantOrderID: merchantOrderID,
+			ProviderOrderID: event.ProviderOrderID, ProviderPaymentID: event.ProviderPaymentID,
 			AmountMinor: &amount, PaidAmountMinor: &paidAmount, TaxAmountMinor: &taxAmount, Currency: currency,
 		})
 		if err != nil {
@@ -479,17 +743,31 @@ func normalizeProviderEventForOrder(order store.PaymentOrder, provider string, e
 	return event, nil
 }
 
-func paymentOrderForProviderEvent(r *http.Request, d Deps, provider, channelID string, event payment.ProviderEvent) (*store.PaymentOrder, error) {
-	if strings.TrimSpace(event.OrderID) != "" {
-		return store.GetPaymentOrder(r.Context(), d.DB, event.OrderID)
+func paymentOrderForProviderEvent(r *http.Request, d Deps, provider, channelID string, event payment.ProviderEvent) (*store.PaymentOrder, string, error) {
+	merchantOrderID := strings.TrimSpace(event.OrderID)
+	if merchantOrderID != "" {
+		if provider == payment.ProviderEPay {
+			attempt, err := store.GetPaymentOrderAttemptByMerchantID(r.Context(), d.DB, provider, channelID, merchantOrderID)
+			if err == nil {
+				order, orderErr := store.GetPaymentOrder(r.Context(), d.DB, attempt.OrderID)
+				return order, merchantOrderID, orderErr
+			}
+			if !errors.Is(err, store.ErrNotFound) {
+				return nil, "", err
+			}
+			// Existing deployments used the Aivory order ID directly before
+			// payment_order_attempts existed. Keep those signed callbacks valid.
+		}
+		order, err := store.GetPaymentOrder(r.Context(), d.DB, merchantOrderID)
+		return order, "", err
 	}
 	order, err := store.GetPaymentOrderByProviderPaymentID(
 		r.Context(), d.DB, provider, channelID, event.ProviderPaymentID,
 	)
 	if errors.Is(err, store.ErrNotFound) {
-		return nil, fmt.Errorf("%w: %s", errPaymentProviderReferencePending, event.ProviderPaymentID)
+		return nil, "", fmt.Errorf("%w: %s", errPaymentProviderReferencePending, event.ProviderPaymentID)
 	}
-	return order, err
+	return order, "", err
 }
 
 func validateProviderEvent(order store.PaymentOrder, provider, channelID string, event payment.ProviderEvent) error {
@@ -498,7 +776,7 @@ func validateProviderEvent(order store.PaymentOrder, provider, channelID string,
 	}
 	expectedAmount := order.AmountMinor
 	expectedCurrency := order.Currency
-	if provider == payment.ProviderEPay {
+	if provider == payment.ProviderEPay || provider == payment.ProviderWaffo {
 		expectedAmount = order.ProviderAmountMinor
 		expectedCurrency = order.ProviderCurrency
 	}
@@ -508,10 +786,10 @@ func validateProviderEvent(order store.PaymentOrder, provider, channelID string,
 	if !strings.EqualFold(expectedCurrency, event.Currency) {
 		return store.ErrPaymentCurrencyMismatch
 	}
-	if order.ProviderOrderID != "" && event.ProviderOrderID != "" && order.ProviderOrderID != event.ProviderOrderID {
+	if provider != payment.ProviderEPay && order.ProviderOrderID != "" && event.ProviderOrderID != "" && order.ProviderOrderID != event.ProviderOrderID {
 		return store.ErrPaymentProviderOrderMismatch
 	}
-	if order.ProviderPaymentID != "" && event.ProviderPaymentID != "" && order.ProviderPaymentID != event.ProviderPaymentID {
+	if provider != payment.ProviderEPay && order.ProviderPaymentID != "" && event.ProviderPaymentID != "" && order.ProviderPaymentID != event.ProviderPaymentID {
 		return store.ErrPaymentProviderOrderMismatch
 	}
 	switch provider {
@@ -630,30 +908,69 @@ func isPermanentPaymentEventError(err error) bool {
 }
 
 func publicPaymentOrderResponse(order store.PaymentOrder) publicPaymentOrder {
+	canResume, canRetry, resumeMode, checkoutExpiresAt := publicPaymentOrderResumeMetadata(order, time.Now().Unix())
+	displayAmount, displayCurrency := paymentOrderDisplayAmountCurrency(order)
 	return publicPaymentOrder{
-		ID: order.ID, Status: publicPaymentOrderStatus(order.Status),
+		ID: order.ID, Status: publicPaymentOrderStatus(order.Status), CanResume: canResume, CanRetry: canRetry,
+		ResumeMode: resumeMode, CheckoutExpiresAt: checkoutExpiresAt,
 		Provider: order.Provider, MethodName: order.MethodName, MethodType: order.MethodType,
 		TargetType: order.ProductType, TargetName: order.ProductName,
-		BillingCycle: order.BillingCycle, AmountMinor: paymentOrderDisplayAmount(order), TaxAmountMinor: order.TaxAmountMinor, Currency: order.Currency,
+		BillingCycle: order.BillingCycle, AmountMinor: displayAmount, TaxAmountMinor: order.TaxAmountMinor, Currency: displayCurrency,
 		FailureReason: order.FailureMessage, CreatedAt: order.CreatedAt, PaidAt: order.PaidAt, FulfilledAt: order.FulfilledAt,
 	}
 }
 
 func publicPaymentOrderListResponse(order store.PaymentOrder) publicPaymentOrderListItem {
+	canResume, canRetry, resumeMode, checkoutExpiresAt := publicPaymentOrderResumeMetadata(order, time.Now().Unix())
+	displayAmount, displayCurrency := paymentOrderDisplayAmountCurrency(order)
 	return publicPaymentOrderListItem{
-		ID: order.ID, Status: publicPaymentOrderStatus(order.Status), Provider: order.Provider,
+		ID: order.ID, Status: publicPaymentOrderStatus(order.Status), CanResume: canResume, CanRetry: canRetry,
+		ResumeMode: resumeMode, CheckoutExpiresAt: checkoutExpiresAt, Provider: order.Provider,
 		MethodName: order.MethodName, MethodType: order.MethodType,
 		TargetType: order.ProductType, TargetName: order.ProductName,
-		AmountMinor: paymentOrderDisplayAmount(order), TaxAmountMinor: order.TaxAmountMinor, Currency: order.Currency, BillingCycle: order.BillingCycle,
+		AmountMinor: displayAmount, TaxAmountMinor: order.TaxAmountMinor, Currency: displayCurrency, BillingCycle: order.BillingCycle,
 		CreatedAt: order.CreatedAt, PaidAt: order.PaidAt,
 	}
 }
 
-func paymentOrderDisplayAmount(order store.PaymentOrder) int64 {
-	if order.PaidAmountMinor > 0 {
-		return order.PaidAmountMinor
+func publicPaymentOrderResumeMetadata(order store.PaymentOrder, now int64) (bool, bool, string, *int64) {
+	var checkoutExpiresAt *int64
+	if (order.Provider == payment.ProviderStripe || order.Provider == payment.ProviderWaffo) && order.CheckoutExpiresAt > 0 {
+		expiresAt := order.CheckoutExpiresAt
+		checkoutExpiresAt = &expiresAt
 	}
-	return order.AmountMinor
+	if order.Status != store.PaymentOrderPending && order.Status != store.PaymentOrderProcessing {
+		return false, false, "", checkoutExpiresAt
+	}
+	switch order.Provider {
+	case payment.ProviderStripe:
+		// Stripe can locate a Checkout Session by the immutable order metadata
+		// even when the original create response timed out before its ID was saved.
+		if order.CheckoutExpiresAt > 0 && now >= order.CheckoutExpiresAt {
+			return false, false, "", checkoutExpiresAt
+		}
+		return true, false, payment.CheckoutResumeOriginalSession, checkoutExpiresAt
+	case payment.ProviderWaffo:
+		if order.CheckoutSessionID == "" || order.CheckoutURL == "" || order.CheckoutExpiresAt <= 0 || now >= order.CheckoutExpiresAt {
+			return false, false, "", checkoutExpiresAt
+		}
+		return true, false, payment.CheckoutResumeOriginalSession, checkoutExpiresAt
+	case payment.ProviderEPay:
+		return false, true, payment.CheckoutResumeRetrySubmission, nil
+	default:
+		return false, false, "", checkoutExpiresAt
+	}
+}
+
+func paymentOrderDisplayAmountCurrency(order store.PaymentOrder) (int64, string) {
+	if order.PaidAmountMinor > 0 {
+		if order.Provider == payment.ProviderWaffo && order.ProviderCurrency != "" &&
+			!strings.EqualFold(order.ProviderCurrency, order.Currency) {
+			return order.PaidAmountMinor, order.ProviderCurrency
+		}
+		return order.PaidAmountMinor, order.Currency
+	}
+	return order.AmountMinor, order.Currency
 }
 
 func publicPaymentOrderStatus(status string) string {

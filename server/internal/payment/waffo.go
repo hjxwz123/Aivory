@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
+	"path"
 	"strings"
 	"time"
 
@@ -186,6 +188,11 @@ func (g WaffoGateway) CreateCheckout(ctx context.Context, req CheckoutRequest) (
 	if session == nil || strings.TrimSpace(session.SessionID) == "" || !validRedirectURL(session.CheckoutURL) {
 		return CheckoutAction{}, errors.New("Waffo Pancake returned an invalid checkout session")
 	}
+	sessionID := strings.TrimSpace(session.SessionID)
+	sessionURL, err := tokenFreeWaffoCheckoutURL(session.CheckoutURL, sessionID, true)
+	if err != nil {
+		return CheckoutAction{}, fmt.Errorf("Waffo Pancake returned an invalid checkout URL: %w", err)
+	}
 	expiresAt, err := time.Parse(time.RFC3339, strings.TrimSpace(session.ExpiresAt))
 	if err != nil || expiresAt.Unix() <= 0 {
 		return CheckoutAction{}, errors.New("Waffo Pancake returned an invalid checkout expiration")
@@ -194,8 +201,139 @@ func (g WaffoGateway) CreateCheckout(ctx context.Context, req CheckoutRequest) (
 	// Persisting the session ID as provider_order_id would reject valid events.
 	return CheckoutAction{
 		Type: ActionRedirect, URL: session.CheckoutURL,
-		SessionID: strings.TrimSpace(session.SessionID), ExpiresAt: expiresAt.Unix(),
+		SessionID: sessionID, SessionURL: sessionURL, ExpiresAt: expiresAt.Unix(),
 	}, nil
+}
+
+// ResumeCheckout reuses an unexpired Waffo Checkout Session and only issues a
+// fresh buyer token. It never invokes the create-session endpoint.
+func (g WaffoGateway) ResumeCheckout(ctx context.Context, req CheckoutResumeRequest) (CheckoutAction, error) {
+	cfg := normalizeWaffoConfig(g.Config)
+	if err := ValidateWaffoConfig(cfg); err != nil {
+		return CheckoutAction{}, err
+	}
+	if strings.TrimSpace(req.OrderID) == "" || strings.TrimSpace(req.UserID) == "" {
+		return CheckoutAction{}, fmt.Errorf("%w: Waffo Pancake order and buyer references are required", ErrCheckoutNotResumable)
+	}
+	sessionID := strings.TrimSpace(req.SessionID)
+	if sessionID == "" || req.SessionExpiresAt <= 0 {
+		return CheckoutAction{}, fmt.Errorf("%w: Waffo Pancake checkout session snapshot is incomplete", ErrCheckoutNotResumable)
+	}
+	if time.Now().Unix() >= req.SessionExpiresAt {
+		return CheckoutAction{}, fmt.Errorf("%w: Waffo Pancake checkout session is no longer active", ErrCheckoutExpired)
+	}
+	sessionURL, err := tokenFreeWaffoCheckoutURL(req.SessionURL, sessionID, false)
+	if err != nil {
+		return CheckoutAction{}, fmt.Errorf("%w: invalid saved Waffo Pancake checkout URL: %v", ErrCheckoutNotResumable, err)
+	}
+	client, err := newWaffoClient(cfg, g.BaseURL, g.HTTPClient)
+	if err != nil {
+		return CheckoutAction{}, err
+	}
+	remoteSession, err := queryWaffoCheckoutSession(ctx, client, sessionID)
+	if err != nil {
+		return CheckoutAction{}, err
+	}
+	if strings.TrimSpace(remoteSession.ID) != sessionID {
+		return CheckoutAction{}, fmt.Errorf("%w: Waffo Pancake returned a different checkout session", ErrCheckoutNotResumable)
+	}
+	remoteExpiresAt, err := time.Parse(time.RFC3339, strings.TrimSpace(remoteSession.ExpiresAt))
+	if err != nil || remoteExpiresAt.Unix() <= 0 {
+		return CheckoutAction{}, fmt.Errorf("%w: Waffo Pancake returned an invalid checkout expiration", ErrCheckoutStateUnknown)
+	}
+	if remoteExpiresAt.Unix() != req.SessionExpiresAt {
+		return CheckoutAction{}, fmt.Errorf("%w: Waffo Pancake checkout expiration does not match the saved session", ErrCheckoutStateUnknown)
+	}
+	if time.Now().Unix() >= remoteExpiresAt.Unix() {
+		return CheckoutAction{}, fmt.Errorf("%w: Waffo Pancake checkout session is no longer active", ErrCheckoutExpired)
+	}
+	switch strings.ToLower(strings.TrimSpace(remoteSession.Status)) {
+	case "active":
+		// Waffo's active state is the only state safe to resume.
+	case "expired":
+		return CheckoutAction{}, fmt.Errorf("%w: Waffo Pancake checkout session has expired", ErrCheckoutExpired)
+	case "completed", "used", "consumed", "canceled", "cancelled", "closed":
+		return CheckoutAction{}, fmt.Errorf("%w: Waffo Pancake checkout session is %s", ErrCheckoutNotResumable, remoteSession.Status)
+	default:
+		return CheckoutAction{}, fmt.Errorf("%w: unknown Waffo Pancake checkout session status %q", ErrCheckoutStateUnknown, remoteSession.Status)
+	}
+	if remoteCurrency := strings.ToUpper(strings.TrimSpace(remoteSession.Currency)); remoteCurrency != "" &&
+		strings.TrimSpace(req.Currency) != "" && remoteCurrency != strings.ToUpper(strings.TrimSpace(req.Currency)) {
+		return CheckoutAction{}, fmt.Errorf("%w: Waffo Pancake checkout currency does not match the saved order", ErrCheckoutNotResumable)
+	}
+	productID := cfg.ProductID
+	token, err := client.Auth.IssueSessionToken(ctx, pancake.IssueSessionTokenParams{
+		BuyerIdentity: WaffoBuyerIdentity(req.UserID), ProductID: &productID,
+	})
+	if err != nil {
+		return CheckoutAction{}, fmt.Errorf("issue Waffo Pancake checkout resume token: %w", err)
+	}
+	if token == nil || strings.TrimSpace(token.Token) == "" {
+		return CheckoutAction{}, errors.New("Waffo Pancake returned an invalid checkout resume token")
+	}
+	if time.Now().Unix() >= remoteExpiresAt.Unix() {
+		return CheckoutAction{}, fmt.Errorf("%w: Waffo Pancake checkout session expired while resuming", ErrCheckoutExpired)
+	}
+	return CheckoutAction{
+		Type: ActionRedirect, URL: sessionURL + "#token=" + strings.TrimSpace(token.Token),
+		ResumeMode: CheckoutResumeOriginalSession, ProviderOrderID: strings.TrimSpace(req.ProviderOrderID),
+		SessionID: sessionID, SessionURL: sessionURL, ExpiresAt: req.SessionExpiresAt,
+	}, nil
+}
+
+type waffoCheckoutSessionSnapshot struct {
+	ID          string `json:"id"`
+	ProductType string `json:"productType"`
+	Currency    string `json:"currency"`
+	Status      string `json:"status"`
+	ExpiresAt   string `json:"expiresAt"`
+}
+
+func queryWaffoCheckoutSession(ctx context.Context, client *pancake.Client, sessionID string) (waffoCheckoutSessionSnapshot, error) {
+	type queryData struct {
+		CheckoutSession *waffoCheckoutSessionSnapshot `json:"checkoutSession"`
+	}
+	response, err := pancake.GraphQLQuery[queryData](ctx, client, pancake.GraphQLParams{
+		Query: `query($sessionId: ID!) {
+			checkoutSession(id: $sessionId) {
+				id productType currency status expiresAt
+			}
+		}`,
+		Variables: map[string]any{"sessionId": sessionID},
+	})
+	if err != nil {
+		return waffoCheckoutSessionSnapshot{}, fmt.Errorf("%w: query Waffo Pancake checkout session: %v", ErrCheckoutStateUnknown, err)
+	}
+	if response == nil {
+		return waffoCheckoutSessionSnapshot{}, fmt.Errorf("%w: Waffo Pancake returned no checkout session response", ErrCheckoutStateUnknown)
+	}
+	if len(response.Errors) > 0 {
+		return waffoCheckoutSessionSnapshot{}, fmt.Errorf("%w: query Waffo Pancake checkout session: %s", ErrCheckoutStateUnknown, response.Errors[0].Message)
+	}
+	if response.Data.CheckoutSession == nil {
+		return waffoCheckoutSessionSnapshot{}, fmt.Errorf("%w: Waffo Pancake checkout session was not found", ErrCheckoutStateUnknown)
+	}
+	return *response.Data.CheckoutSession, nil
+}
+
+func tokenFreeWaffoCheckoutURL(raw, sessionID string, allowTokenFragment bool) (string, error) {
+	raw = strings.TrimSpace(raw)
+	sessionID = strings.TrimSpace(sessionID)
+	if !validRedirectURL(raw) || sessionID == "" {
+		return "", errors.New("invalid checkout URL")
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return "", errors.New("invalid checkout URL")
+	}
+	if parsed.Fragment != "" && !allowTokenFragment {
+		return "", errors.New("checkout URL contains credentials")
+	}
+	if path.Base(strings.TrimRight(parsed.Path, "/")) != sessionID {
+		return "", errors.New("checkout URL does not match the saved session")
+	}
+	parsed.Fragment = ""
+	return parsed.String(), nil
 }
 
 type waffoReconcilePayment struct {

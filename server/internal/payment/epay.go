@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/url"
 	"path"
 	"sort"
@@ -117,6 +118,13 @@ func (g EPayGateway) CreateCheckout(_ context.Context, req CheckoutRequest) (Che
 	if !strings.EqualFold(strings.TrimSpace(g.Config.Currency), req.Currency) {
 		return CheckoutAction{}, errors.New("EPay channel currency does not match the order provider currency")
 	}
+	merchantOrderID := strings.TrimSpace(req.MerchantOrderID)
+	if merchantOrderID == "" {
+		merchantOrderID = strings.TrimSpace(req.OrderID)
+	}
+	if merchantOrderID == "" {
+		return CheckoutAction{}, errors.New("EPay merchant order reference is required")
+	}
 	money, err := FormatMinorAmount(req.AmountMinor, req.Currency)
 	if err != nil {
 		return CheckoutAction{}, err
@@ -130,7 +138,7 @@ func (g EPayGateway) CreateCheckout(_ context.Context, req CheckoutRequest) (Che
 	fields := map[string]string{
 		"pid":          strings.TrimSpace(g.Config.MerchantID),
 		"type":         method,
-		"out_trade_no": req.OrderID,
+		"out_trade_no": merchantOrderID,
 		"notify_url":   req.NotifyURL,
 		"return_url":   req.SuccessURL,
 		"name":         req.Name,
@@ -140,6 +148,23 @@ func (g EPayGateway) CreateCheckout(_ context.Context, req CheckoutRequest) (Che
 	}
 	fields["sign"] = EPaySign(fields, g.Config.MerchantKey)
 	return CheckoutAction{Type: ActionFormPost, URL: base.String(), Fields: fields}, nil
+}
+
+// ResumeCheckout signs a new provider-facing merchant order reference while it
+// keeps the same local Aivory purchase snapshot. The EPay-compatible protocol
+// has no portable session retrieval API, so callers must present this as a
+// retry submission, not as restoration of a provider-hosted session.
+func (g EPayGateway) ResumeCheckout(ctx context.Context, req CheckoutResumeRequest) (CheckoutAction, error) {
+	merchantOrderID := strings.TrimSpace(req.MerchantOrderID)
+	if strings.TrimSpace(req.OrderID) == "" || merchantOrderID == "" || merchantOrderID == strings.TrimSpace(req.OrderID) {
+		return CheckoutAction{}, fmt.Errorf("%w: EPay retry requires a new merchant order reference", ErrCheckoutNotResumable)
+	}
+	action, err := g.CreateCheckout(ctx, req.CheckoutRequest)
+	if err != nil {
+		return CheckoutAction{}, err
+	}
+	action.ResumeMode = CheckoutResumeRetrySubmission
+	return action, nil
 }
 
 func EPaySign(params map[string]string, key string) string {

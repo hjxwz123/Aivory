@@ -229,6 +229,7 @@ func Migrate(db *sql.DB) error {
 	addPaymentOrderEnvironment := `ALTER TABLE payment_orders ADD COLUMN environment TEXT NOT NULL DEFAULT 'live'`
 	addPaymentProviderPaymentID := `ALTER TABLE payment_orders ADD COLUMN provider_payment_id TEXT NOT NULL DEFAULT ''`
 	addPaymentCheckoutSessionID := `ALTER TABLE payment_orders ADD COLUMN checkout_session_id TEXT NOT NULL DEFAULT ''`
+	addPaymentCheckoutURL := `ALTER TABLE payment_orders ADD COLUMN checkout_url TEXT NOT NULL DEFAULT ''`
 	addPaymentCheckoutExpiresAt := `ALTER TABLE payment_orders ADD COLUMN checkout_expires_at INTEGER NOT NULL DEFAULT 0`
 	addPaymentLastReconciledAt := `ALTER TABLE payment_orders ADD COLUMN last_reconciled_at INTEGER NOT NULL DEFAULT 0`
 	addPaymentReconcileError := `ALTER TABLE payment_orders ADD COLUMN reconcile_error TEXT NOT NULL DEFAULT ''`
@@ -311,6 +312,7 @@ func Migrate(db *sql.DB) error {
 		addPaymentOrderEnvironment = `ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS environment TEXT NOT NULL DEFAULT 'live'`
 		addPaymentProviderPaymentID = `ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS provider_payment_id TEXT NOT NULL DEFAULT ''`
 		addPaymentCheckoutSessionID = `ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS checkout_session_id TEXT NOT NULL DEFAULT ''`
+		addPaymentCheckoutURL = `ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS checkout_url TEXT NOT NULL DEFAULT ''`
 		addPaymentCheckoutExpiresAt = `ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS checkout_expires_at BIGINT NOT NULL DEFAULT 0`
 		addPaymentLastReconciledAt = `ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS last_reconciled_at BIGINT NOT NULL DEFAULT 0`
 		addPaymentReconcileError = `ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS reconcile_error TEXT NOT NULL DEFAULT ''`
@@ -351,7 +353,7 @@ func Migrate(db *sql.DB) error {
 		addRedeemKind, addRedeemCredits, addRedemptionCredits,
 		addPaymentPaidAmount, addPaymentTaxAmount, addPaymentProviderAmount, addPaymentProviderCurrency, addPaymentConversionRate,
 		addPaymentChannelEnvironment, addPaymentOrderEnvironment,
-		addPaymentProviderPaymentID, addPaymentCheckoutSessionID, addPaymentCheckoutExpiresAt, addPaymentLastReconciledAt, addPaymentReconcileError,
+		addPaymentProviderPaymentID, addPaymentCheckoutSessionID, addPaymentCheckoutURL, addPaymentCheckoutExpiresAt, addPaymentLastReconciledAt, addPaymentReconcileError,
 	} {
 		_, _ = db.Exec(ddl)
 	}
@@ -423,7 +425,7 @@ func Migrate(db *sql.DB) error {
 		"redeem_codes":       {"kind", "credits"},
 		"redeem_redemptions": {"credits"},
 		"payment_channels":   {"environment"},
-		"payment_orders":     {"paid_amount_minor", "tax_amount_minor", "provider_amount_minor", "provider_currency", "conversion_rate", "environment", "provider_payment_id", "checkout_session_id", "checkout_expires_at", "last_reconciled_at", "reconcile_error"},
+		"payment_orders":     {"paid_amount_minor", "tax_amount_minor", "provider_amount_minor", "provider_currency", "conversion_rate", "environment", "provider_payment_id", "checkout_session_id", "checkout_url", "checkout_expires_at", "last_reconciled_at", "reconcile_error"},
 	}
 	for table, cols := range columnChecks {
 		if _, err := db.Exec(fmt.Sprintf(`SELECT %s FROM %s WHERE 1=0`, strings.Join(cols, ", "), table)); err != nil {

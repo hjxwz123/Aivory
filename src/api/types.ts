@@ -440,6 +440,8 @@ export interface ApiPaymentOrder {
   last_reconciled_at?: number | null
   reconcile_error?: string
   status: ApiPaymentOrderStatus
+  can_delete?: boolean
+  delete_requires_gateway_confirmation?: boolean
   created_at: number
   paid_at?: number | null
   fulfilled_at?: number | null
@@ -450,6 +452,11 @@ export interface ApiPaymentOrder {
 export interface ApiUserPaymentOrder {
   id: string
   status: ApiUserPaymentOrderStatus
+  can_resume: boolean
+  can_retry: boolean
+  resume_mode?: 'original_session' | 'retry_submission'
+  /** Compatibility field used by older payment backends. */
+  resume_kind?: 'continue' | 'retry'
   target_type: ApiPaymentTargetType
   target_name: string
   billing_cycle: '' | 'monthly' | 'yearly'
@@ -460,6 +467,7 @@ export interface ApiUserPaymentOrder {
   method_name: string
   method_type: string
   failure_reason?: string
+  checkout_expires_at?: number
   created_at: number
   paid_at?: number
   fulfilled_at?: number

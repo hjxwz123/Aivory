@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -410,6 +411,117 @@ func TestEPayPaymentOrderSnapshotsCrossCurrencyConversion(t *testing.T) {
 				t.Fatalf("invalid EPay conversion order error = %v, want %v", createErr, ErrPaymentMethodUnavailable)
 			}
 		})
+	}
+}
+
+func TestEPayPaymentOrderAttemptsMapDistinctPaymentsToOneFulfillment(t *testing.T) {
+	db, ctx := openPaymentsTestDB(t)
+	createPaymentsTestUser(t, db, "u_epay_attempts", "attempts@example.test")
+	pkg, err := CreateCreditPackage(ctx, db, CreditPackage{
+		Name: "Attempt package", Credits: 75, PriceAmountMinor: 12345, Enabled: true,
+	})
+	if err != nil {
+		t.Fatalf("create attempt package: %v", err)
+	}
+	channelConfig, err := json.Marshal(paymentcore.EPayConfig{
+		GatewayURL: "https://epay.example.test", MerchantID: "attempt-merchant", MerchantKey: "attempt-secret", Currency: "USD",
+	})
+	if err != nil {
+		t.Fatalf("marshal EPay config: %v", err)
+	}
+	channel, err := CreatePaymentChannel(ctx, db, PaymentChannel{
+		Name: "Attempt EPay", Provider: paymentcore.ProviderEPay, Config: channelConfig, Enabled: true,
+	})
+	if err != nil {
+		t.Fatalf("create EPay channel: %v", err)
+	}
+	method, err := CreatePaymentMethod(ctx, db, PaymentMethod{
+		ChannelID: channel.ID, Name: "Attempt Alipay", Type: paymentcore.ProviderEPay,
+		ProviderMethodConfig: json.RawMessage(`{"type":"alipay"}`), Enabled: true,
+	})
+	if err != nil {
+		t.Fatalf("create EPay method: %v", err)
+	}
+	order, err := CreatePaymentOrder(ctx, db, PaymentOrderCreateInput{
+		UserID: "u_epay_attempts", PaymentMethodID: method.ID,
+		ProductType: PaymentProductCreditPackage, ProductID: pkg.ID,
+	})
+	if err != nil {
+		t.Fatalf("create EPay order: %v", err)
+	}
+	initial, err := CreatePaymentOrderAttempt(ctx, db, order.ID, order.ID)
+	if err != nil {
+		t.Fatalf("create initial attempt: %v", err)
+	}
+	retry, err := CreatePaymentOrderAttempt(ctx, db, order.ID, "")
+	if err != nil {
+		t.Fatalf("create retry attempt: %v", err)
+	}
+	conflicting, err := CreatePaymentOrderAttempt(ctx, db, order.ID, "")
+	if err != nil {
+		t.Fatalf("create provider-id conflict attempt: %v", err)
+	}
+	if initial.MerchantOrderID != order.ID || retry.MerchantOrderID == order.ID ||
+		!strings.HasPrefix(retry.MerchantOrderID, "pa_") || retry.OrderID != order.ID {
+		t.Fatalf("EPay attempts = initial %+v retry %+v", initial, retry)
+	}
+
+	amount := order.AmountMinor
+	first, err := FulfillPaymentOrder(ctx, db, PaymentFulfillmentInput{
+		PaymentEventInput: PaymentEventInput{
+			Provider: paymentcore.ProviderEPay, ChannelID: channel.ID,
+			EventID: "epay-attempt-first:success", OrderID: order.ID, EventType: "payment_notification",
+		},
+		MerchantOrderID: retry.MerchantOrderID, ProviderOrderID: "epay-provider-first",
+		AmountMinor: &amount, PaidAmountMinor: &amount, Currency: order.Currency,
+	})
+	if err != nil || !first.Applied || first.Order.Status != PaymentOrderFulfilled {
+		t.Fatalf("first attempt fulfillment = %+v, %v", first, err)
+	}
+	if _, err := FulfillPaymentOrder(ctx, db, PaymentFulfillmentInput{
+		PaymentEventInput: PaymentEventInput{
+			Provider: paymentcore.ProviderEPay, ChannelID: channel.ID,
+			EventID: "epay-attempt-conflict:success", OrderID: order.ID, EventType: "payment_notification",
+		},
+		MerchantOrderID: conflicting.MerchantOrderID, ProviderOrderID: "epay-provider-first",
+		AmountMinor: &amount, PaidAmountMinor: &amount, Currency: order.Currency,
+	}); !errors.Is(err, ErrPaymentProviderOrderConflict) {
+		t.Fatalf("reuse provider order id error = %v, want %v", err, ErrPaymentProviderOrderConflict)
+	}
+	late, err := FulfillPaymentOrder(ctx, db, PaymentFulfillmentInput{
+		PaymentEventInput: PaymentEventInput{
+			Provider: paymentcore.ProviderEPay, ChannelID: channel.ID,
+			EventID: "epay-attempt-late:success", OrderID: order.ID, EventType: "payment_notification",
+		},
+		MerchantOrderID: initial.MerchantOrderID, ProviderOrderID: "epay-provider-late",
+		AmountMinor: &amount, PaidAmountMinor: &amount, Currency: order.Currency,
+	})
+	if err != nil || late.Applied || late.Order.Status != PaymentOrderFulfilled {
+		t.Fatalf("late attempt fulfillment = %+v, %v", late, err)
+	}
+
+	var credits float64
+	if err := db.QueryRowContext(ctx, `SELECT credits_permanent FROM users WHERE id=?`, order.UserID).Scan(&credits); err != nil {
+		t.Fatalf("read fulfilled credits: %v", err)
+	}
+	if credits != pkg.Credits {
+		t.Fatalf("credits after two paid attempts = %v, want %v", credits, pkg.Credits)
+	}
+	for merchantOrderID, providerOrderID := range map[string]string{
+		retry.MerchantOrderID:   "epay-provider-first",
+		initial.MerchantOrderID: "epay-provider-late",
+	} {
+		attempt, getErr := GetPaymentOrderAttemptByMerchantID(ctx, db, paymentcore.ProviderEPay, channel.ID, merchantOrderID)
+		if getErr != nil || attempt.Status != PaymentOrderAttemptPaid || attempt.ProviderOrderID != providerOrderID || attempt.PaidAt == 0 {
+			t.Fatalf("paid attempt %q = %+v, %v", merchantOrderID, attempt, getErr)
+		}
+	}
+	conflicting, err = GetPaymentOrderAttemptByMerchantID(ctx, db, paymentcore.ProviderEPay, channel.ID, conflicting.MerchantOrderID)
+	if err != nil || conflicting.Status != PaymentOrderAttemptIssued || conflicting.ProviderOrderID != "" {
+		t.Fatalf("rolled-back conflicting attempt = %+v, %v", conflicting, err)
+	}
+	if _, err := CreatePaymentOrderAttempt(ctx, db, order.ID, ""); !errors.Is(err, ErrPaymentOrderNotMutable) {
+		t.Fatalf("create attempt for fulfilled order error = %v, want %v", err, ErrPaymentOrderNotMutable)
 	}
 }
 
@@ -903,7 +1015,7 @@ func TestUserGroupPaymentUsesCalendarRenewal(t *testing.T) {
 
 func TestPaymentProviderSnapshotMigrationBackfillsLegacyOrders(t *testing.T) {
 	db, ctx := openPaymentsTestDB(t)
-	for _, column := range []string{"provider_amount_minor", "provider_currency", "conversion_rate"} {
+	for _, column := range []string{"provider_amount_minor", "provider_currency", "conversion_rate", "checkout_url"} {
 		if _, err := db.ExecContext(ctx, `ALTER TABLE payment_orders DROP COLUMN `+column); err != nil {
 			t.Fatalf("drop provider snapshot column %s: %v", column, err)
 		}
@@ -928,17 +1040,122 @@ func TestPaymentProviderSnapshotMigrationBackfillsLegacyOrders(t *testing.T) {
 	if order.ProviderAmountMinor != 4321 || order.ProviderCurrency != "USD" || order.ConversionRate != "" {
 		t.Fatalf("migrated legacy provider snapshots = %+v", order)
 	}
-	for _, column := range []string{"provider_amount_minor", "provider_currency", "conversion_rate"} {
+	if order.CheckoutURL != "" {
+		t.Fatalf("migrated legacy checkout URL = %q, want empty", order.CheckoutURL)
+	}
+	for _, column := range []string{"provider_amount_minor", "provider_currency", "conversion_rate", "checkout_url"} {
 		if _, err := db.ExecContext(ctx, `SELECT `+column+` FROM payment_orders WHERE 1=0`); err != nil {
 			t.Fatalf("provider snapshot column %s missing after migration: %v", column, err)
 		}
 	}
+	if _, err := db.ExecContext(ctx,
+		`SELECT merchant_order_id, order_id, provider, channel_id, provider_order_id, status, paid_at
+		   FROM payment_order_attempts WHERE 1=0`,
+	); err != nil {
+		t.Fatalf("payment attempt table missing after migration: %v", err)
+	}
 	for _, fragment := range []string{
-		"provider_amount_minor BIGINT", "provider_currency TEXT", "conversion_rate   TEXT",
+		"provider_amount_minor BIGINT", "provider_currency TEXT", "conversion_rate   TEXT", "checkout_url      TEXT",
+		"CREATE TABLE IF NOT EXISTS payment_order_attempts", "merchant_order_id TEXT PRIMARY KEY",
 	} {
 		if !strings.Contains(schemaPGSQL, fragment) {
 			t.Fatalf("PostgreSQL schema missing %q", fragment)
 		}
+	}
+}
+
+func TestDeletePaymentOrderRequiresTerminalStatusAndCascadesEvents(t *testing.T) {
+	db, ctx := openPaymentsTestDB(t)
+	createPaymentsTestUser(t, db, "u_delete_orders", "delete-orders@example.test")
+	packageRecord, err := CreateCreditPackage(ctx, db, CreditPackage{
+		Name: "Deletion package", Credits: 10, PriceAmountMinor: 100, Enabled: true,
+	})
+	if err != nil {
+		t.Fatalf("create credit package: %v", err)
+	}
+	_, method := createPaymentsTestMethod(t, ctx, db)
+	createOrder := func(t *testing.T, status string) *PaymentOrder {
+		t.Helper()
+		order, createErr := CreatePaymentOrder(ctx, db, PaymentOrderCreateInput{
+			UserID: "u_delete_orders", PaymentMethodID: method.ID,
+			ProductType: PaymentProductCreditPackage, ProductID: packageRecord.ID,
+		})
+		if createErr != nil {
+			t.Fatalf("create %s order: %v", status, createErr)
+		}
+		if status != PaymentOrderPending {
+			exec(t, db, `UPDATE payment_orders SET status=? WHERE id=?`, status, order.ID)
+			order.Status = status
+		}
+		return order
+	}
+
+	for _, status := range []string{PaymentOrderPending, PaymentOrderProcessing} {
+		order := createOrder(t, status)
+		if err := DeletePaymentOrder(ctx, db, order.ID, false); !errors.Is(err, ErrPaymentOrderNotDeletable) {
+			t.Fatalf("delete %s order error = %v, want %v", status, err, ErrPaymentOrderNotDeletable)
+		}
+		if _, err := GetPaymentOrder(ctx, db, order.ID); err != nil {
+			t.Fatalf("protected %s order disappeared: %v", status, err)
+		}
+	}
+
+	manualClose := createOrder(t, PaymentOrderCancelled)
+	exec(t, db, `UPDATE payment_orders SET failure_code='admin_manual_close' WHERE id=?`, manualClose.ID)
+	if err := DeletePaymentOrder(ctx, db, manualClose.ID, false); !errors.Is(err, ErrPaymentOrderDeleteNeedsAck) {
+		t.Fatalf("delete recoverable manual-close order error = %v, want %v", err, ErrPaymentOrderDeleteNeedsAck)
+	}
+	protected, err := GetPaymentOrder(ctx, db, manualClose.ID)
+	if err != nil {
+		t.Fatalf("recoverable manual-close order deletion state = %+v, %v", protected, err)
+	}
+	canDelete, needsGatewayConfirmation := PaymentOrderDeletePolicy(*protected)
+	if !canDelete || !needsGatewayConfirmation {
+		t.Fatalf("recoverable manual-close order deletion policy = %v/%v", canDelete, needsGatewayConfirmation)
+	}
+	if err := DeletePaymentOrder(ctx, db, manualClose.ID, true); err != nil {
+		t.Fatalf("delete gateway-confirmed manual-close order: %v", err)
+	}
+	if _, err := GetPaymentOrder(ctx, db, manualClose.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("gateway-confirmed manual-close order still exists: %v", err)
+	}
+
+	for index, status := range []string{PaymentOrderFulfilled, PaymentOrderFailed, PaymentOrderExpired, PaymentOrderCancelled} {
+		order := createOrder(t, status)
+		eventID := fmt.Sprintf("pe_delete_%d", index)
+		attemptID := fmt.Sprintf("pa_delete_%d", index)
+		exec(t, db,
+			`INSERT INTO payment_order_attempts(merchant_order_id, order_id, provider, channel_id) VALUES(?,?,?,?)`,
+			attemptID, order.ID, order.Provider, order.ChannelID,
+		)
+		exec(t, db,
+			`INSERT INTO payment_events(id, provider, channel_id, event_id, order_id) VALUES(?,?,?,?,?)`,
+			eventID, order.Provider, order.ChannelID, "provider-event-"+eventID, order.ID,
+		)
+		if err := DeletePaymentOrder(ctx, db, order.ID, false); err != nil {
+			t.Fatalf("delete %s order: %v", status, err)
+		}
+		if _, err := GetPaymentOrder(ctx, db, order.ID); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("get deleted %s order error = %v, want %v", status, err, ErrNotFound)
+		}
+		var eventCount int
+		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM payment_events WHERE order_id=?`, order.ID).Scan(&eventCount); err != nil {
+			t.Fatalf("count events for deleted %s order: %v", status, err)
+		}
+		if eventCount != 0 {
+			t.Fatalf("events remaining for deleted %s order = %d", status, eventCount)
+		}
+		var attemptCount int
+		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM payment_order_attempts WHERE order_id=?`, order.ID).Scan(&attemptCount); err != nil {
+			t.Fatalf("count attempts for deleted %s order: %v", status, err)
+		}
+		if attemptCount != 0 {
+			t.Fatalf("attempts remaining for deleted %s order = %d", status, attemptCount)
+		}
+	}
+
+	if err := DeletePaymentOrder(ctx, db, "po_missing", false); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("delete missing order error = %v, want %v", err, ErrNotFound)
 	}
 }
 
@@ -1020,7 +1237,7 @@ func TestPaymentBackupScopes(t *testing.T) {
 	for _, table := range ConfigTableOrder() {
 		config[table] = true
 	}
-	for _, table := range []string{"payment_channels", "payment_methods", "payment_orders", "payment_events"} {
+	for _, table := range []string{"payment_channels", "payment_methods", "payment_orders", "payment_order_attempts", "payment_events"} {
 		if !full[table] {
 			t.Errorf("full backup omits %s", table)
 		}
@@ -1030,7 +1247,7 @@ func TestPaymentBackupScopes(t *testing.T) {
 			t.Errorf("config backup omits %s", table)
 		}
 	}
-	for _, table := range []string{"payment_orders", "payment_events"} {
+	for _, table := range []string{"payment_orders", "payment_order_attempts", "payment_events"} {
 		if config[table] {
 			t.Errorf("config backup contains financial data table %s", table)
 		}

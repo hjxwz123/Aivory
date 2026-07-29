@@ -92,6 +92,12 @@
       "methodUnavailable": "该支付方式暂不可用，请选择其他方式。",
       "productUnavailable": "该商品已下架或价格已变更，请刷新页面后重试。",
       "checkoutUnavailable": "支付服务暂不可用，请稍后重试。",
+      "checkoutExpired": "本次结账会话已过期，请刷新订单记录后重试。",
+      "checkoutNotResumable": "该笔支付已无法继续，请刷新订单记录查看最新状态。",
+      "orderAlreadyPaid": "该订单已经支付，请刷新订单记录更新支付状态。",
+      "resumeUnavailable": "当前无法继续该笔支付，请先到支付服务商核实订单后再试。",
+      "orderStateChanged": "该订单状态已发生变化，请刷新订单记录后重试。",
+      "checkoutStateUnknown": "支付服务商无法确认本次结账能否继续，请先到支付服务商核实订单后再试。",
       "waffoProductCurrencyUnsupported": "该 Waffo 商品不支持当前支付币种，请联系管理员检查商品价格或支付渠道设置。",
       "userGroupAlreadyPermanent": "你已永久拥有该用户组，无需重复购买。"
     },
@@ -131,8 +137,19 @@
       "failed": "支付失败",
       "expired": "已过期"
     },
+    "actions": {
+      "continue": "继续支付",
+      "retry": "重新发起支付"
+    },
+    "retryConfirm": {
+      "title": "确认重新发起支付？",
+      "description": "系统将为「{{name}}」创建新的支付请求。",
+      "warning": "旧支付会话不会自动关闭。请仅在确认旧支付尚未完成时继续；同时支付旧会话和新会话可能造成重复扣款。",
+      "confirm": "确认重新发起"
+    },
     "empty": "暂无支付记录。",
     "loadError": "无法加载支付记录。",
+    "resumeError": "无法继续此笔支付，请刷新订单记录后重试。",
     "retry": "重试",
     "previous": "上一页",
     "next": "下一页",

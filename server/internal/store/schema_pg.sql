@@ -139,6 +139,7 @@ CREATE TABLE IF NOT EXISTS payment_orders (
   provider_order_id TEXT NOT NULL DEFAULT '',
   provider_payment_id TEXT NOT NULL DEFAULT '',
   checkout_session_id TEXT NOT NULL DEFAULT '',
+  checkout_url      TEXT NOT NULL DEFAULT '',
   checkout_expires_at BIGINT NOT NULL DEFAULT 0,
   last_reconciled_at BIGINT NOT NULL DEFAULT 0,
   reconcile_error   TEXT NOT NULL DEFAULT '',
@@ -155,6 +156,22 @@ CREATE INDEX IF NOT EXISTS idx_payment_orders_channel_status ON payment_orders(c
 CREATE INDEX IF NOT EXISTS idx_payment_orders_status_created ON payment_orders(status, created_at);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_orders_provider_order_unique
   ON payment_orders(provider, channel_id, provider_order_id) WHERE provider_order_id<>'';
+
+CREATE TABLE IF NOT EXISTS payment_order_attempts (
+  merchant_order_id TEXT PRIMARY KEY,
+  order_id          TEXT NOT NULL REFERENCES payment_orders(id) ON DELETE CASCADE,
+  provider          TEXT NOT NULL,
+  channel_id        TEXT NOT NULL,
+  provider_order_id TEXT NOT NULL DEFAULT '',
+  status            TEXT NOT NULL DEFAULT 'issued',
+  paid_at           BIGINT NOT NULL DEFAULT 0,
+  created_at        BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint),
+  updated_at        BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
+);
+CREATE INDEX IF NOT EXISTS idx_payment_order_attempts_order_created
+  ON payment_order_attempts(order_id, created_at, merchant_order_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_order_attempts_provider_order_unique
+  ON payment_order_attempts(provider, channel_id, provider_order_id) WHERE provider_order_id<>'';
 
 CREATE TABLE IF NOT EXISTS payment_events (
   id           TEXT PRIMARY KEY,

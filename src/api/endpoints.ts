@@ -305,6 +305,13 @@ export const paymentsApi = {
    * normalized for the buyer-facing flow. */
   order: (id: string) =>
     api<ApiUserPaymentOrder>(`/payments/orders/${encodeURIComponent(id)}`),
+  /** Resume a valid provider session, or create a new EPay merchant attempt
+   * that still belongs to the same unfinished Aivory order. */
+  resumeOrder: (id: string, signal?: AbortSignal) =>
+    api<{ order_id: string; action: ApiPaymentCheckoutAction }>(
+      `/payments/orders/${encodeURIComponent(id)}/resume`,
+      { method: 'POST', signal },
+    ),
   /** Paginated payment history for the signed-in buyer. */
   orders: (limit = 10, offset = 0) => {
     const qs = new URLSearchParams({ limit: String(limit), offset: String(offset) })
@@ -651,6 +658,10 @@ export const adminApi = {
     method: 'POST',
     body,
   }),
+  deletePaymentOrder: (id: string, gatewayFinalAcknowledged = false) => {
+    const query = gatewayFinalAcknowledged ? '?gateway_final_acknowledged=true' : ''
+    return api<{ ok: true }>(`/admin/payment-orders/${encodeURIComponent(id)}${query}`, { method: 'DELETE' })
+  },
 
   models: (kind?: 'chat' | 'image' | 'embedding') =>
     api<ApiModel[]>(`/admin/models${kind ? `?kind=${encodeURIComponent(kind)}` : ''}`),

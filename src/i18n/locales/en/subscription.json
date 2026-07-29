@@ -92,6 +92,12 @@
       "methodUnavailable": "This payment method is unavailable. Choose another method.",
       "productUnavailable": "This item is no longer available or its price changed. Refresh the page and try again.",
       "checkoutUnavailable": "The payment service is temporarily unavailable. Try again later.",
+      "checkoutExpired": "This checkout session has expired. Refresh the order list and try again.",
+      "checkoutNotResumable": "This payment can no longer be continued. Refresh the order list to see its latest status.",
+      "orderAlreadyPaid": "This order has already been paid. Refresh the order list to update your payment status.",
+      "resumeUnavailable": "This payment cannot be resumed right now. Check the payment provider’s order before trying again.",
+      "orderStateChanged": "This order changed while you were viewing it. Refresh the order list and try again.",
+      "checkoutStateUnknown": "The payment provider could not confirm whether this checkout can continue. Check the provider order before trying again.",
       "waffoProductCurrencyUnsupported": "This Waffo product does not support the selected payment currency. Ask an administrator to check the product price or payment-channel settings.",
       "userGroupAlreadyPermanent": "You already own this user group permanently, so it doesn’t need to be purchased again."
     },
@@ -131,8 +137,19 @@
       "failed": "Payment failed",
       "expired": "Expired"
     },
+    "actions": {
+      "continue": "Continue payment",
+      "retry": "Start payment again"
+    },
+    "retryConfirm": {
+      "title": "Start this payment again?",
+      "description": "A new payment request will be created for \"{{name}}\".",
+      "warning": "The previous checkout will not close automatically. Continue only after confirming that the earlier payment was not completed; paying both checkouts may result in duplicate charges.",
+      "confirm": "Start payment again"
+    },
     "empty": "No payment history yet.",
     "loadError": "Couldn’t load your payment history.",
+    "resumeError": "Couldn’t continue this payment. Refresh the order list and try again.",
     "retry": "Try again",
     "previous": "Previous page",
     "next": "Next page",

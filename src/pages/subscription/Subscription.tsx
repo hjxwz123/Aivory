@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   AlertTriangle,
+  ArrowRight,
   ChevronLeft,
   ChevronRight,
   Clock,
@@ -23,6 +24,7 @@ import { Input } from '@/components/ui/input'
 import { SegmentedControl } from '@/components/ui/segmented-control'
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -31,6 +33,17 @@ import {
 } from '@/components/ui/dialog'
 import { toast } from '@/hooks/use-toast'
 import { formatCurrencyMinor } from '@/lib/currency'
+import {
+  CHECKOUT_REQUEST_TIMEOUT_MS,
+  PaymentCheckoutActionRunner,
+  PaymentCheckoutActionError,
+} from '@/lib/payment-checkout'
+import { checkoutPaymentErrorKey } from '@/lib/payment-errors'
+import {
+  canResumePaymentOrder,
+  PaymentOrderRecoveryCoordinator,
+  paymentOrderResumeKind,
+} from '@/lib/payment-order-state'
 import { groupPriceAmount, type BillingCycle } from '@/lib/user-group-tier'
 import { cn, formatAbsoluteDate, formatDateTime } from '@/lib/utils'
 
@@ -64,6 +77,8 @@ export default function Subscription() {
   const [paymentHistoryLoading, setPaymentHistoryLoading] = useState(true)
   const [paymentHistoryError, setPaymentHistoryError] = useState(false)
   const [paymentHistoryReloadKey, setPaymentHistoryReloadKey] = useState(0)
+  const [resumingPaymentOrderId, setResumingPaymentOrderId] = useState('')
+  const [retryPaymentOrder, setRetryPaymentOrder] = useState<ApiUserPaymentOrder | null>(null)
   const [catalogTab, setCatalogTab] = useState<CatalogTab>('groups')
   const [billingCycle, setBillingCycle] = useState<BillingCycle>('monthly')
   const [purchaseTarget, setPurchaseTarget] = useState<PurchaseTarget | null>(null)
@@ -79,6 +94,17 @@ export default function Subscription() {
     granted: string
     date: string
   } | null>(null)
+  const paymentResumeAbortRef = useRef<AbortController | null>(null)
+  const paymentResumeRunnerRef = useRef<PaymentCheckoutActionRunner | null>(null)
+  const paymentRecoveryCoordinatorRef = useRef<PaymentOrderRecoveryCoordinator<ApiUserPaymentOrder> | null>(null)
+  if (!paymentResumeRunnerRef.current) {
+    paymentResumeRunnerRef.current = new PaymentCheckoutActionRunner(setResumingPaymentOrderId)
+  }
+  if (!paymentRecoveryCoordinatorRef.current) {
+    paymentRecoveryCoordinatorRef.current = new PaymentOrderRecoveryCoordinator<ApiUserPaymentOrder>(
+      setRetryPaymentOrder,
+    )
+  }
 
   useEffect(() => {
     let active = true
@@ -163,6 +189,8 @@ export default function Subscription() {
       active = false
     }
   }, [paymentHistoryPage, paymentHistoryReloadKey])
+
+  useEffect(() => () => paymentResumeAbortRef.current?.abort('unmounted'), [])
 
   useEffect(() => {
     const url = new URL(window.location.href)
@@ -372,6 +400,60 @@ export default function Subscription() {
       return
     }
     void applyRedeem(code, false)
+  }
+
+  function resumePaymentErrorMessage(error: unknown): string {
+    if (error instanceof PaymentCheckoutActionError) return t('subscription:payment.invalidUrl')
+    if (!(error instanceof ApiError)) return t('subscription:history.resumeError')
+    const key = checkoutPaymentErrorKey(error.message)
+    return key ? t(`subscription:${key}`) : t('subscription:history.resumeError')
+  }
+
+  async function resumePaymentOrder(order: ApiUserPaymentOrder) {
+    if (!canResumePaymentOrder(order)) return
+
+    const attempt: {
+      controller: AbortController | null
+      timedOut: boolean
+      timeoutId?: number
+    } = { controller: null, timedOut: false }
+    const result = await paymentResumeRunnerRef.current!.run(order.id, async () => {
+      attempt.controller = new AbortController()
+      paymentResumeAbortRef.current = attempt.controller
+      attempt.timeoutId = window.setTimeout(() => {
+        attempt.timedOut = true
+        attempt.controller?.abort('timeout')
+      }, CHECKOUT_REQUEST_TIMEOUT_MS)
+      const response = await paymentsApi.resumeOrder(order.id, attempt.controller.signal)
+      return response.action
+    })
+
+    if (attempt.timeoutId !== undefined) window.clearTimeout(attempt.timeoutId)
+    if (attempt.controller && paymentResumeAbortRef.current === attempt.controller) {
+      paymentResumeAbortRef.current = null
+    }
+
+    if (result.status === 'error') {
+      if (attempt.controller?.signal.aborted && !attempt.timedOut) return
+      toast.error(
+        attempt.timedOut
+          ? t('subscription:payment.checkoutTimeout')
+          : resumePaymentErrorMessage(result.error),
+      )
+      setPaymentHistoryReloadKey((value) => value + 1)
+    }
+  }
+
+  function requestPaymentOrderResume(order: ApiUserPaymentOrder) {
+    paymentRecoveryCoordinatorRef.current!.request(order, (selectedOrder) => {
+      void resumePaymentOrder(selectedOrder)
+    })
+  }
+
+  function confirmPaymentOrderRetry() {
+    paymentRecoveryCoordinatorRef.current!.confirmRetry((order) => {
+      void resumePaymentOrder(order)
+    })
   }
 
   const creditsOn = Boolean(credits?.enabled)
@@ -612,7 +694,9 @@ export default function Subscription() {
             loading={paymentHistoryLoading}
             error={paymentHistoryError}
             locale={i18n.resolvedLanguage}
+            resumingOrderId={resumingPaymentOrderId}
             onRetry={() => setPaymentHistoryReloadKey((value) => value + 1)}
+            onResume={requestPaymentOrderResume}
             onPageChange={setPaymentHistoryPage}
             t={t}
           />
@@ -629,6 +713,45 @@ export default function Subscription() {
           billingCycle={purchaseTarget.type === 'user_group' ? purchaseTarget.billingCycle : undefined}
         />
       ) : null}
+
+      <Dialog
+        open={Boolean(retryPaymentOrder)}
+        onOpenChange={(open) => {
+          if (!open) paymentRecoveryCoordinatorRef.current!.cancelRetry()
+        }}
+      >
+        <DialogContent size="sm" className="rounded-[8px] font-sans max-sm:[&>button]:size-11">
+          <DialogHeader className="px-5 pt-5 pb-3 max-sm:pr-16">
+            <DialogTitle>{t('subscription:history.retryConfirm.title')}</DialogTitle>
+            <DialogDescription className="mt-1 break-words text-[13px] [overflow-wrap:anywhere]">
+              {retryPaymentOrder
+                ? t('subscription:history.retryConfirm.description', { name: retryPaymentOrder.target_name })
+                : ''}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogBody className="px-5 pb-5">
+            <div
+              className="flex gap-2.5 rounded-[8px] border border-[var(--color-warning)]/25 bg-[var(--color-warning-soft)] px-3 py-2.5 text-[12px] leading-5 text-[var(--color-fg-muted)]"
+              role="note"
+            >
+              <AlertTriangle className="mt-0.5 size-4 shrink-0 text-[var(--color-warning)]" aria-hidden />
+              <p>{t('subscription:history.retryConfirm.warning')}</p>
+            </div>
+          </DialogBody>
+          <DialogFooter className="max-sm:[&_button]:!h-11">
+            <Button
+              className="rounded-[8px]"
+              variant="ghost"
+              onClick={() => paymentRecoveryCoordinatorRef.current!.cancelRetry()}
+            >
+              {t('common:actions.cancel')}
+            </Button>
+            <Button className="rounded-[8px]" onClick={confirmPaymentOrderRetry}>
+              {t('subscription:history.retryConfirm.confirm')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={Boolean(redeemSuccess)} onOpenChange={(open) => !open && setRedeemSuccess(null)}>
         <DialogContent size="sm" className="font-sans">
@@ -917,7 +1040,9 @@ function PaymentHistory({
   loading,
   error,
   locale,
+  resumingOrderId,
   onRetry,
+  onResume,
   onPageChange,
   t,
 }: {
@@ -927,7 +1052,9 @@ function PaymentHistory({
   loading: boolean
   error: boolean
   locale?: string
+  resumingOrderId: string
   onRetry: () => void
+  onResume: (order: ApiUserPaymentOrder) => void
   onPageChange: (page: number) => void
   t: TFn
 }) {
@@ -1000,11 +1127,11 @@ function PaymentHistory({
               <caption className="sr-only">{t('subscription:history.title')}</caption>
               <thead className="border-b border-[var(--color-divider)] bg-[var(--color-bg-muted)] text-[11px] text-[var(--color-fg-muted)]">
                 <tr>
-                  <th className="w-[28%] px-3 py-2 font-medium">{t('subscription:history.columns.name')}</th>
-                  <th className="w-[18%] px-3 py-2 font-medium">{t('subscription:history.columns.time')}</th>
-                  <th className="w-[15%] px-3 py-2 font-medium">{t('subscription:history.columns.amount')}</th>
-                  <th className="w-[22%] px-3 py-2 font-medium">{t('subscription:history.columns.method')}</th>
-                  <th className="w-[17%] px-3 py-2 text-right font-medium">{t('subscription:history.columns.status')}</th>
+                  <th className="w-[25%] px-3 py-2 font-medium">{t('subscription:history.columns.name')}</th>
+                  <th className="w-[17%] px-3 py-2 font-medium">{t('subscription:history.columns.time')}</th>
+                  <th className="w-[14%] px-3 py-2 font-medium">{t('subscription:history.columns.amount')}</th>
+                  <th className="w-[20%] px-3 py-2 font-medium">{t('subscription:history.columns.method')}</th>
+                  <th className="w-[24%] px-3 py-2 text-right font-medium">{t('subscription:history.columns.status')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[var(--color-divider)]">
@@ -1033,7 +1160,12 @@ function PaymentHistory({
                       </span>
                     </td>
                     <td className="px-3 py-2.5 text-right align-top">
-                      <PaymentHistoryStatus status={order.status} t={t} />
+                      <PaymentHistoryStatus
+                        order={order}
+                        resuming={resumingOrderId === order.id}
+                        onResume={onResume}
+                        t={t}
+                      />
                     </td>
                   </tr>
                 ))}
@@ -1052,7 +1184,12 @@ function PaymentHistory({
                         {paymentHistoryTargetLabel(order, t)}
                       </p>
                     </div>
-                    <PaymentHistoryStatus status={order.status} t={t} />
+                    <PaymentHistoryStatus
+                      order={order}
+                      resuming={resumingOrderId === order.id}
+                      onResume={onResume}
+                      t={t}
+                    />
                   </div>
                   <dl className="mt-2.5 grid grid-cols-2 gap-x-4 gap-y-2">
                     <div className="min-w-0">
@@ -1123,7 +1260,18 @@ function PaymentHistory({
   )
 }
 
-function PaymentHistoryStatus({ status, t }: { status: ApiUserPaymentOrder['status']; t: TFn }) {
+function PaymentHistoryStatus({
+  order,
+  resuming,
+  onResume,
+  t,
+}: {
+  order: ApiUserPaymentOrder
+  resuming: boolean
+  onResume: (order: ApiUserPaymentOrder) => void
+  t: TFn
+}) {
+  const { status } = order
   const variant =
     status === 'paid'
       ? 'success'
@@ -1134,10 +1282,29 @@ function PaymentHistoryStatus({ status, t }: { status: ApiUserPaymentOrder['stat
           : status === 'processing'
             ? 'info'
             : 'warning'
+  const resumeLabel = paymentOrderResumeKind(order) === 'retry'
+    ? t('subscription:history.actions.retry')
+    : t('subscription:history.actions.continue')
+
   return (
-    <Badge className="shrink-0" size="xs" variant={variant}>
-      {t(`subscription:history.status.${status}`)}
-    </Badge>
+    <div className="flex min-w-0 shrink-0 flex-wrap items-center justify-end gap-1.5">
+      <Badge className="shrink-0" size="xs" variant={variant}>
+        {t(`subscription:history.status.${status}`)}
+      </Badge>
+      {canResumePaymentOrder(order) ? (
+        <Button
+          className="h-7 shrink-0 rounded-[8px] px-2 text-[11px]"
+          size="xs"
+          variant="secondary"
+          trailingIcon={<ArrowRight size={11} aria-hidden />}
+          loading={resuming}
+          disabled={resuming}
+          onClick={() => onResume(order)}
+        >
+          {resumeLabel}
+        </Button>
+      ) : null}
+    </div>
   )
 }
 

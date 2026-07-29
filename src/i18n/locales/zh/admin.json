@@ -1266,10 +1266,16 @@
       "reconcile": "对账",
       "close": "关闭",
       "manualClose": "手动关闭",
+      "delete": "永久删除订单",
+      "deleteUnavailable": "请先关闭订单或确认支付结果，再永久删除",
+      "deletePendingCallback": "此 EPay 手动关闭订单需要先确认支付服务商端状态才能删除",
+      "deleteGatewayConfirmationRequired": "永久删除前，请先确认 EPay 支付服务商端的订单未支付或已关闭",
       "reconciled": "支付订单已完成对账。",
       "closed": "支付订单已关闭。",
+      "deleted": "支付订单已永久删除。",
       "reconcileFailed": "无法对支付订单进行对账。",
-      "closeFailed": "无法关闭支付订单。"
+      "closeFailed": "无法关闭支付订单。",
+      "deleteFailed": "无法永久删除支付订单。"
     },
     "closeDialog": {
       "title": "关闭支付订单？",
@@ -1281,6 +1287,14 @@
       "reasonHint": "选填，最多 500 个字符；填写后会保存到审计记录。",
       "acknowledge": "我已确认没有支付成功，并知晓订单关闭后无法撤销。",
       "epayAcknowledge": "我已核实该 EPay 订单目前没有支付成功，并知晓这里只关闭本地订单；之后如收到经过验证的成功通知，订单仍会完成并发放权益。"
+    },
+    "deleteDialog": {
+      "title": "永久删除支付订单？",
+      "description": "永久删除本地记录前，请核对此笔已结束订单。",
+      "warning": "该订单将从用户的支付记录中消失，关联的本地支付事件也会一并删除，且无法恢复。此操作不会退款或取消支付渠道中的付款、不会收回已发放权益，也不会删除支付服务商保留的记录。",
+      "gatewayWarning": "EPay 手动关闭只修改 Aivory 的本地状态，之后仍可能收到延迟的支付成功通知；删除后 Aivory 将无法识别该付款，也无法发放已购买的权益。",
+      "gatewayAcknowledge": "我已在 EPay 支付服务商端确认此订单未支付或已关闭，并接受以后若收到支付成功回调，系统将无法履约。",
+      "confirm": "永久删除"
     },
     "filters": {
       "search": "搜索订单",

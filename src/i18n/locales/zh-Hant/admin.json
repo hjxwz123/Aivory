@@ -1262,10 +1262,16 @@
       "reconcile": "對帳",
       "close": "關閉",
       "manualClose": "手動關閉",
+      "delete": "永久刪除訂單",
+      "deleteUnavailable": "請先關閉訂單或確認付款結果，再永久刪除",
+      "deletePendingCallback": "此 EPay 手動關閉訂單需先確認支付服務商端狀態才能刪除",
+      "deleteGatewayConfirmationRequired": "永久刪除前，請先確認 EPay 支付服務商端的訂單未付款或已關閉",
       "reconciled": "支付訂單已完成對帳。",
       "closed": "支付訂單已關閉。",
+      "deleted": "支付訂單已永久刪除。",
       "reconcileFailed": "無法對支付訂單進行對帳。",
-      "closeFailed": "無法關閉支付訂單。"
+      "closeFailed": "無法關閉支付訂單。",
+      "deleteFailed": "無法永久刪除支付訂單。"
     },
     "closeDialog": {
       "title": "關閉支付訂單？",
@@ -1277,6 +1283,14 @@
       "reasonHint": "選填，最多 500 個字元；填寫後會儲存至稽核記錄。",
       "acknowledge": "我已確認沒有付款成功，並了解訂單關閉後無法復原。",
       "epayAcknowledge": "我已核實該 EPay 訂單目前沒有付款成功，並了解這只會關閉本機訂單；之後如收到經過驗證的成功通知，訂單仍會完成並發放權益。"
+    },
+    "deleteDialog": {
+      "title": "永久刪除支付訂單？",
+      "description": "永久刪除本機記錄前，請核對此筆已結束訂單。",
+      "warning": "此訂單將從使用者的付款記錄中消失，相關本機支付事件也會一併刪除，且無法復原。此操作不會退款或取消支付渠道中的付款、不會收回已發放權益，也不會刪除支付服務商保留的記錄。",
+      "gatewayWarning": "EPay 手動關閉只修改 Aivory 的本機狀態，之後仍可能收到延遲的付款成功通知；刪除後 Aivory 將無法識別該付款，也無法發放已購買的權益。",
+      "gatewayAcknowledge": "我已在 EPay 支付服務商端確認此訂單未付款或已關閉，並接受日後若收到付款成功回呼，系統將無法履約。",
+      "confirm": "永久刪除"
     },
     "filters": {
       "search": "搜尋訂單",

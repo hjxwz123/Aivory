@@ -31,6 +31,12 @@ func TestBackupRoundTrip(t *testing.T) {
 	}{
 		{`INSERT INTO settings(key,value) VALUES('default_model_id','"m_x"')`, nil},
 		{`INSERT INTO users(id,email,password_hash,name,role) VALUES('u1','a@b.c','h','A','user')`, nil},
+		{`INSERT INTO credit_packages(id,name,credits,price_amount_minor) VALUES('cp1','Credits',10,100)`, nil},
+		{`INSERT INTO payment_channels(id,name,provider,config) VALUES('paych1','EPay','epay','{}')`, nil},
+		{`INSERT INTO payment_methods(id,channel_id,name,type,config) VALUES('paym1','paych1','Alipay','epay','{"type":"alipay"}')`, nil},
+		{`INSERT INTO payment_orders(id,user_id,user_email,provider,channel_id,channel_name,method_id,method_name,method_type,product_type,product_id,product_name,amount_minor,currency) VALUES('po1','u1','a@b.c','epay','paych1','EPay','paym1','Alipay','epay','credit_package','cp1','Credits',100,'USD')`, nil},
+		{`INSERT INTO payment_order_attempts(merchant_order_id,order_id,provider,channel_id,provider_order_id,status,paid_at) VALUES('pa1','po1','epay','paych1','trade1','paid',123)`, nil},
+		{`INSERT INTO payment_events(id,provider,channel_id,event_id,order_id,event_type,processed_at) VALUES('pe1','epay','paych1','trade1:success','po1','payment_notification',123)`, nil},
 		{`INSERT INTO workspaces(id,name,owner_id,invite_token) VALUES('ws1','Team','u1','invite1')`, nil},
 		{`INSERT INTO workspace_members(workspace_id,user_id,role) VALUES('ws1','u1','owner')`, nil},
 		{`INSERT INTO conversations(id,user_id,title,workspace_id) VALUES('c1','u1','T','ws1')`, nil},
@@ -107,7 +113,10 @@ func TestBackupRoundTrip(t *testing.T) {
 	}
 
 	// Row counts.
-	for tbl, want := range map[string]int{"users": 1, "workspaces": 1, "workspace_members": 1, "conversations": 1, "messages": 2, "chunks": 1, "documents": 1} {
+	for tbl, want := range map[string]int{
+		"users": 1, "payment_orders": 1, "payment_order_attempts": 1, "payment_events": 1,
+		"workspaces": 1, "workspace_members": 1, "conversations": 1, "messages": 2, "chunks": 1, "documents": 1,
+	} {
 		var n int
 		if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+tbl).Scan(&n); err != nil {
 			t.Fatalf("count %s: %v", tbl, err)
@@ -162,11 +171,15 @@ func TestPaymentOrderBackupRestoresProviderSnapshotsAcrossVersions(t *testing.T)
 	if legacyOrder.ProviderAmountMinor != 4000 || legacyOrder.ProviderCurrency != "USD" || legacyOrder.ConversionRate != "" {
 		t.Fatalf("restored legacy provider snapshots = %+v", legacyOrder)
 	}
+	if legacyOrder.CheckoutURL != "" {
+		t.Fatalf("restored legacy checkout URL = %q, want empty", legacyOrder.CheckoutURL)
+	}
 
 	converted := baseRow("po_backup_converted")
 	converted["provider_amount_minor"] = 28000
 	converted["provider_currency"] = "CNY"
 	converted["conversion_rate"] = "7"
+	converted["checkout_url"] = "https://checkout.example.test/session/original"
 	restoreRow(converted)
 
 	var dump bytes.Buffer
@@ -192,7 +205,7 @@ func TestPaymentOrderBackupRestoresProviderSnapshotsAcrossVersions(t *testing.T)
 	}
 	if convertedOrder.AmountMinor != 4000 || convertedOrder.Currency != "USD" ||
 		convertedOrder.ProviderAmountMinor != 28000 || convertedOrder.ProviderCurrency != "CNY" ||
-		convertedOrder.ConversionRate != "7" {
+		convertedOrder.ConversionRate != "7" || convertedOrder.CheckoutURL != "https://checkout.example.test/session/original" {
 		t.Fatalf("round-tripped provider snapshots = %+v", convertedOrder)
 	}
 }

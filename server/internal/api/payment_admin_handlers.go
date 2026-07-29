@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -64,7 +65,8 @@ func writePaymentError(w http.ResponseWriter, err error) {
 		errors.Is(err, store.ErrPaymentMethodNameExists),
 		errors.Is(err, store.ErrPaymentChannelHasMethods), errors.Is(err, store.ErrPaymentChannelHasPending),
 		errors.Is(err, store.ErrPaymentOrdersPendingForGroup), errors.Is(err, store.ErrPaymentOrdersPendingForUser),
-		errors.Is(err, store.ErrPaymentProviderOrderConflict), errors.Is(err, store.ErrPaymentOrderNotMutable):
+		errors.Is(err, store.ErrPaymentProviderOrderConflict), errors.Is(err, store.ErrPaymentOrderNotMutable),
+		errors.Is(err, store.ErrPaymentOrderNotDeletable), errors.Is(err, store.ErrPaymentOrderDeleteNeedsAck):
 		writeError(w, http.StatusConflict, err)
 	case errors.Is(err, store.ErrInvalidPaymentChannel), errors.Is(err, store.ErrInvalidPaymentMethod),
 		errors.Is(err, store.ErrInvalidPaymentProduct), errors.Is(err, store.ErrPaymentMethodUnavailable),
@@ -550,32 +552,34 @@ func deletePaymentMethodAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 }
 
 type adminPaymentOrderResponse struct {
-	ID                  string  `json:"id"`
-	UserEmail           string  `json:"user_email"`
-	TargetType          string  `json:"target_type"`
-	TargetName          string  `json:"target_name"`
-	BillingCycle        string  `json:"billing_cycle"`
-	AmountMinor         int64   `json:"amount_minor"`
-	TaxAmountMinor      int64   `json:"tax_amount_minor,omitempty"`
-	Currency            string  `json:"currency"`
-	ProviderAmountMinor int64   `json:"provider_amount_minor"`
-	ProviderCurrency    string  `json:"provider_currency"`
-	ConversionRate      string  `json:"conversion_rate,omitempty"`
-	ChannelName         string  `json:"channel_name"`
-	MethodName          string  `json:"method_name"`
-	Provider            string  `json:"provider"`
-	Environment         string  `json:"environment"`
-	ProviderOrderID     string  `json:"provider_order_id,omitempty"`
-	ProviderPaymentID   string  `json:"provider_payment_id,omitempty"`
-	CheckoutSessionID   string  `json:"checkout_session_id,omitempty"`
-	CheckoutExpiresAt   *int64  `json:"checkout_expires_at"`
-	LastReconciledAt    *int64  `json:"last_reconciled_at"`
-	ReconcileError      *string `json:"reconcile_error,omitempty"`
-	Status              string  `json:"status"`
-	CreatedAt           int64   `json:"created_at"`
-	PaidAt              *int64  `json:"paid_at"`
-	FulfilledAt         *int64  `json:"fulfilled_at"`
-	FailureReason       *string `json:"failure_reason,omitempty"`
+	ID                             string  `json:"id"`
+	UserEmail                      string  `json:"user_email"`
+	TargetType                     string  `json:"target_type"`
+	TargetName                     string  `json:"target_name"`
+	BillingCycle                   string  `json:"billing_cycle"`
+	AmountMinor                    int64   `json:"amount_minor"`
+	TaxAmountMinor                 int64   `json:"tax_amount_minor,omitempty"`
+	Currency                       string  `json:"currency"`
+	ProviderAmountMinor            int64   `json:"provider_amount_minor"`
+	ProviderCurrency               string  `json:"provider_currency"`
+	ConversionRate                 string  `json:"conversion_rate,omitempty"`
+	ChannelName                    string  `json:"channel_name"`
+	MethodName                     string  `json:"method_name"`
+	Provider                       string  `json:"provider"`
+	Environment                    string  `json:"environment"`
+	ProviderOrderID                string  `json:"provider_order_id,omitempty"`
+	ProviderPaymentID              string  `json:"provider_payment_id,omitempty"`
+	CheckoutSessionID              string  `json:"checkout_session_id,omitempty"`
+	CheckoutExpiresAt              *int64  `json:"checkout_expires_at"`
+	LastReconciledAt               *int64  `json:"last_reconciled_at"`
+	ReconcileError                 *string `json:"reconcile_error,omitempty"`
+	Status                         string  `json:"status"`
+	CanDelete                      bool    `json:"can_delete"`
+	DeleteNeedsGatewayConfirmation bool    `json:"delete_requires_gateway_confirmation,omitempty"`
+	CreatedAt                      int64   `json:"created_at"`
+	PaidAt                         *int64  `json:"paid_at"`
+	FulfilledAt                    *int64  `json:"fulfilled_at"`
+	FailureReason                  *string `json:"failure_reason,omitempty"`
 }
 
 func nonzeroPaymentTime(value int64) *int64 {
@@ -598,11 +602,13 @@ func adminPaymentOrderJSON(order store.PaymentOrder) adminPaymentOrderResponse {
 	if value := strings.TrimSpace(order.ReconcileError); value != "" {
 		reconcileError = &value
 	}
+	displayAmount, displayCurrency := paymentOrderDisplayAmountCurrency(order)
+	canDelete, deleteNeedsGatewayConfirmation := store.PaymentOrderDeletePolicy(order)
 	return adminPaymentOrderResponse{
 		ID: order.ID, UserEmail: order.UserEmail, TargetType: order.ProductType,
 		TargetName: order.ProductName, BillingCycle: order.BillingCycle,
-		AmountMinor: paymentOrderDisplayAmount(order), TaxAmountMinor: order.TaxAmountMinor,
-		Currency: order.Currency, ProviderAmountMinor: order.ProviderAmountMinor,
+		AmountMinor: displayAmount, TaxAmountMinor: order.TaxAmountMinor,
+		Currency: displayCurrency, ProviderAmountMinor: order.ProviderAmountMinor,
 		ProviderCurrency: order.ProviderCurrency, ConversionRate: order.ConversionRate,
 		ChannelName: order.ChannelName, MethodName: order.MethodName,
 		Provider: order.Provider, Environment: order.Environment,
@@ -610,8 +616,9 @@ func adminPaymentOrderJSON(order store.PaymentOrder) adminPaymentOrderResponse {
 		CheckoutSessionID: order.CheckoutSessionID,
 		CheckoutExpiresAt: nonzeroPaymentTime(order.CheckoutExpiresAt),
 		LastReconciledAt:  nonzeroPaymentTime(order.LastReconciledAt), ReconcileError: reconcileError,
-		Status: order.Status, CreatedAt: order.CreatedAt,
-		PaidAt: nonzeroPaymentTime(order.PaidAt), FulfilledAt: nonzeroPaymentTime(order.FulfilledAt),
+		Status: order.Status, CanDelete: canDelete, DeleteNeedsGatewayConfirmation: deleteNeedsGatewayConfirmation,
+		CreatedAt: order.CreatedAt,
+		PaidAt:    nonzeroPaymentTime(order.PaidAt), FulfilledAt: nonzeroPaymentTime(order.FulfilledAt),
 		FailureReason: failure,
 	}
 }
@@ -801,4 +808,20 @@ func listPaymentOrdersAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		response = append(response, adminPaymentOrderJSON(order))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"orders": response, "total": total})
+}
+
+func deletePaymentOrderAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
+	orderID := strings.TrimSpace(pathParam(r, "id"))
+	gatewayFinalAcknowledged := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("gateway_final_acknowledged")), "true")
+	adminID := ""
+	if admin := authUser(r); admin != nil {
+		adminID = admin.ID
+	}
+	if err := store.DeletePaymentOrder(r.Context(), d.DB, orderID, gatewayFinalAcknowledged); err != nil {
+		slog.Warn("admin payment order permanent deletion rejected", "admin_id", adminID, "order_id", orderID, "gateway_final_acknowledged", gatewayFinalAcknowledged, "result", "rejected", "err", err)
+		writePaymentError(w, err)
+		return
+	}
+	slog.Info("admin permanently deleted payment order", "admin_id", adminID, "order_id", orderID, "gateway_final_acknowledged", gatewayFinalAcknowledged, "result", "deleted")
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }

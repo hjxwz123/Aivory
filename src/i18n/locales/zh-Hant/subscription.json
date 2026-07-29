@@ -92,6 +92,12 @@
       "methodUnavailable": "此付款方式暫不可用，請選擇其他方式。",
       "productUnavailable": "此商品已下架或價格已變更，請重新整理頁面後再試。",
       "checkoutUnavailable": "付款服務暫不可用，請稍後重試。",
+      "checkoutExpired": "此次結帳工作階段已過期，請重新整理訂單記錄後再試。",
+      "checkoutNotResumable": "此筆付款已無法繼續，請重新整理訂單記錄以查看最新狀態。",
+      "orderAlreadyPaid": "此訂單已付款，請重新整理訂單記錄以更新付款狀態。",
+      "resumeUnavailable": "目前無法繼續此筆付款，請先在支付服務商核實訂單後再試。",
+      "orderStateChanged": "此訂單的狀態已變更，請重新整理訂單記錄後再試。",
+      "checkoutStateUnknown": "支付服務商無法確認此次結帳是否可繼續，請先在支付服務商核實訂單後再試。",
       "waffoProductCurrencyUnsupported": "此 Waffo 商品不支援目前的支付幣別，請聯絡管理員檢查商品價格或支付渠道設定。",
       "userGroupAlreadyPermanent": "你已永久擁有此使用者組，無需重複購買。"
     },
@@ -131,8 +137,19 @@
       "failed": "付款失敗",
       "expired": "已過期"
     },
+    "actions": {
+      "continue": "繼續付款",
+      "retry": "重新發起付款"
+    },
+    "retryConfirm": {
+      "title": "確認重新發起付款？",
+      "description": "系統將為「{{name}}」建立新的付款請求。",
+      "warning": "舊付款工作階段不會自動關閉。請僅在確認舊付款尚未完成時繼續；同時支付舊工作階段與新工作階段可能造成重複扣款。",
+      "confirm": "確認重新發起"
+    },
     "empty": "暫無付款記錄。",
     "loadError": "無法載入付款記錄。",
+    "resumeError": "無法繼續此筆付款，請重新整理訂單記錄後再試。",
     "retry": "重試",
     "previous": "上一頁",
     "next": "下一頁",

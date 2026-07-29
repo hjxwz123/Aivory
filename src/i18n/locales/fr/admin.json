@@ -1262,10 +1262,16 @@
       "reconcile": "Rapprocher",
       "close": "Fermer",
       "manualClose": "Fermeture manuelle",
+      "delete": "Supprimer définitivement la commande",
+      "deleteUnavailable": "Fermez la commande ou confirmez le résultat du paiement avant de la supprimer définitivement",
+      "deletePendingCallback": "Cette commande EPay fermée manuellement nécessite une confirmation côté passerelle avant sa suppression",
+      "deleteGatewayConfirmationRequired": "Confirmez que la commande EPay est impayée ou fermée auprès de la passerelle avant de la supprimer définitivement",
       "reconciled": "Commande de paiement rapprochée.",
       "closed": "Commande de paiement fermée.",
+      "deleted": "Commande de paiement supprimée définitivement.",
       "reconcileFailed": "Impossible de rapprocher la commande de paiement.",
-      "closeFailed": "Impossible de fermer la commande de paiement."
+      "closeFailed": "Impossible de fermer la commande de paiement.",
+      "deleteFailed": "Impossible de supprimer définitivement la commande de paiement."
     },
     "closeDialog": {
       "title": "Fermer la commande de paiement ?",
@@ -1277,6 +1283,14 @@
       "reasonHint": "Facultatif, 500 caractères maximum ; s’il est renseigné, il est enregistré dans le journal d’audit.",
       "acknowledge": "J’ai vérifié qu’aucun paiement n’a abouti et je comprends que la fermeture est irréversible.",
       "epayAcknowledge": "J’ai vérifié que cette commande EPay n’est pas encore payée et je comprends que seule la commande locale est fermée ; un paiement valide reçu ultérieurement la finalisera et accordera les droits."
+    },
+    "deleteDialog": {
+      "title": "Supprimer définitivement la commande de paiement ?",
+      "description": "Vérifiez cette commande terminée avant de supprimer définitivement ses données locales.",
+      "warning": "La commande disparaîtra de l’historique de paiement de l’acheteur et les événements de paiement locaux associés seront supprimés. Cette action est irréversible. Elle ne rembourse ni n’annule un paiement auprès du fournisseur, ne retire pas les droits accordés et ne supprime pas les données détenues par le fournisseur de paiement.",
+      "gatewayWarning": "Une fermeture manuelle EPay ne modifie que l’état local d’Aivory. Un paiement réussi peut encore être signalé tardivement ; après suppression, Aivory ne pourra plus le reconnaître ni accorder les droits achetés.",
+      "gatewayAcknowledge": "J’ai confirmé auprès de la passerelle EPay que cette commande est impayée ou fermée, et j’accepte qu’un éventuel callback de succès ultérieur ne puisse plus être honoré.",
+      "confirm": "Supprimer définitivement"
     },
     "filters": {
       "search": "Rechercher des commandes",
