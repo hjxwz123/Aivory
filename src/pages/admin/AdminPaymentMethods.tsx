@@ -333,12 +333,12 @@ export default function AdminPaymentMethods() {
         {loading ? (
           <PanelFallback />
         ) : loadError ? (
-          <div className="flex flex-col items-start gap-3 rounded-[8px] border border-[var(--color-danger)]/25 bg-[var(--color-danger-soft)] px-4 py-3 text-[13px] text-[var(--color-danger)] sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-col items-start gap-3 rounded-xl border border-[var(--color-danger)]/25 bg-[var(--color-danger-soft)] px-4 py-3 text-[13px] text-[var(--color-danger)] sm:flex-row sm:items-center sm:justify-between">
             <span>{loadError}</span>
             <Button className="rounded-[8px]" variant="secondary" size="sm" leadingIcon={<RefreshCw size={13} aria-hidden />} onClick={() => void load()}>{t('admin:paymentMethods.retry')}</Button>
           </div>
         ) : channels.length === 0 ? (
-          <div className="rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-8 text-center">
+          <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-8 text-center">
             <p className="text-sm font-medium text-[var(--color-fg)]">{t('admin:paymentMethods.noChannelsTitle')}</p>
             <p className="mx-auto mt-1 max-w-lg text-[13px] text-[var(--color-fg-muted)]">{t('admin:paymentMethods.noChannels')}</p>
             <Button asChild className="mt-4 rounded-[8px]" size="sm" variant="secondary">
@@ -346,13 +346,13 @@ export default function AdminPaymentMethods() {
             </Button>
           </div>
         ) : rows.length === 0 ? (
-          <div className="rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-8 text-center">
+          <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-5 py-8 text-center">
             <p className="text-sm font-medium text-[var(--color-fg)]">{t('admin:paymentMethods.emptyTitle')}</p>
             <p className="mx-auto mt-1 max-w-lg text-[13px] text-[var(--color-fg-muted)]">{t('admin:paymentMethods.empty')}</p>
             <Button className="mt-4 rounded-[8px]" size="sm" onClick={openNew}>{t('admin:paymentMethods.new')}</Button>
           </div>
         ) : (
-          <ul className="divide-y divide-[var(--color-divider)] overflow-hidden rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)]">
+          <ul className="divide-y divide-[var(--color-divider)] overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]">
             {rows.map((row, index) => {
               const channel = channelFor(row.channel_id)
               return (
