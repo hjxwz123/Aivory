@@ -107,9 +107,10 @@ export const useSettings = create<SettingsState>((set) => ({
           modelsPatch.responseLength = v
         }
       }
-      if (typeof settings.default_model_id === 'string') {
-        modelsPatch.defaultModelId = settings.default_model_id
-      }
+      // The authenticated profile is authoritative. Clear a cached model left
+      // by another account when this user has never configured a default.
+      modelsPatch.defaultModelId =
+        typeof settings.default_model_id === 'string' ? settings.default_model_id : ''
       if (typeof settings.persona_custom === 'string') {
         modelsPatch.customInstructions = settings.persona_custom
       }
