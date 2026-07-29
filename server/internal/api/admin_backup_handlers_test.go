@@ -260,7 +260,7 @@ func TestConfigExportImportMergesAdminConfigOnly(t *testing.T) {
 	mustExec(t, srcDB, `INSERT INTO settings(key,value) VALUES('default_model_id','"m_cfg"')`)
 	mustExec(t, srcDB, `INSERT INTO settings(key,value) VALUES('search_api_key','"search-secret"')`)
 	mustExec(t, srcDB, `INSERT INTO settings(key,value) VALUES('fallback_model_id','null')`)
-	mustExec(t, srcDB, `INSERT INTO user_groups(id,name,description,features,monthly_price_amount_minor,yearly_price_amount_minor,is_default,sort_order) VALUES('ug_paid','Paid','P','["fast"]',1299,12999,1,1)`)
+	mustExec(t, srcDB, `INSERT INTO user_groups(id,name,description,features,monthly_price_amount_minor,yearly_price_amount_minor,is_default,sort_order,is_purchasable) VALUES('ug_paid','Paid','P','["fast"]',1299,12999,1,1,0)`)
 	mustExec(t, srcDB, `INSERT INTO credit_packages(id,name,description,credits,price_amount_minor,enabled,sort_order) VALUES('cp_cfg','Credits','P',10000,899,1,1)`)
 	mustExec(t, srcDB, `INSERT INTO channels(id,name,type,api_format,base_url,api_key,enabled,sort_order) VALUES('ch_cfg','Main','openai','chat','https://api.example','sk-live',1,1)`)
 	mustExec(t, srcDB, `INSERT INTO skills(id,name,description,instructions,assets,enabled,sort_order) VALUES('sk_cfg','Skill','desc','do it',?,1,1)`, string(assetJSON))
@@ -342,9 +342,10 @@ func TestConfigExportImportMergesAdminConfigOnly(t *testing.T) {
 		t.Fatalf("quota = %v, want 20", quota)
 	}
 	var monthlyPrice, yearlyPrice int64
-	mustQuery(t, tgtDB, `SELECT monthly_price_amount_minor, yearly_price_amount_minor FROM user_groups WHERE id='ug_paid'`).Scan(&monthlyPrice, &yearlyPrice)
-	if monthlyPrice != 1299 || yearlyPrice != 12999 {
-		t.Fatalf("user-group monthly/yearly prices = %d/%d, want 1299/12999", monthlyPrice, yearlyPrice)
+	var isPurchasable int
+	mustQuery(t, tgtDB, `SELECT monthly_price_amount_minor, yearly_price_amount_minor, is_purchasable FROM user_groups WHERE id='ug_paid'`).Scan(&monthlyPrice, &yearlyPrice, &isPurchasable)
+	if monthlyPrice != 1299 || yearlyPrice != 12999 || isPurchasable != 0 {
+		t.Fatalf("user-group monthly/yearly prices and purchase availability = %d/%d/%d, want 1299/12999/0", monthlyPrice, yearlyPrice, isPurchasable)
 	}
 	var packageCredits float64
 	var packagePrice int64

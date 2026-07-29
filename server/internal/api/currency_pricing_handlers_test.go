@@ -53,6 +53,82 @@ func TestUserGroupHandlersRejectNegativeSettlementPrice(t *testing.T) {
 	}
 }
 
+func TestUserGroupPurchaseAvailabilityIsPersistedAndPublic(t *testing.T) {
+	db := openMigrated(t, filepath.Join(t.TempDir(), "group-purchase-availability.db"))
+	defer db.Close()
+	d := Deps{DB: db}
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/admin/user-groups", strings.NewReader(`{
+		"name":"Waitlist", "is_public":true, "is_purchasable":false,
+		"monthly_price_amount_minor":1200, "yearly_price_amount_minor":12000
+	}`))
+	createRec := httptest.NewRecorder()
+	createUserGroupAdmin(d, createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, want %d; body=%s", createRec.Code, http.StatusCreated, createRec.Body.String())
+	}
+	var created store.UserGroup
+	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode created group: %v (%s)", err, createRec.Body.String())
+	}
+	if created.IsPurchasable {
+		t.Fatalf("created group is_purchasable = true, want false")
+	}
+	var stored int
+	if err := db.QueryRow(`SELECT is_purchasable FROM user_groups WHERE id=?`, created.ID).Scan(&stored); err != nil {
+		t.Fatalf("read stored purchase availability: %v", err)
+	}
+	if stored != 0 {
+		t.Fatalf("stored is_purchasable = %d, want 0", stored)
+	}
+
+	publicRec := httptest.NewRecorder()
+	listUserGroupsPublic(d, publicRec, httptest.NewRequest(http.MethodGet, "/api/public/user-groups", nil))
+	if publicRec.Code != http.StatusOK {
+		t.Fatalf("public list status = %d, want %d; body=%s", publicRec.Code, http.StatusOK, publicRec.Body.String())
+	}
+	var publicGroups []store.UserGroup
+	if err := json.Unmarshal(publicRec.Body.Bytes(), &publicGroups); err != nil {
+		t.Fatalf("decode public groups: %v (%s)", err, publicRec.Body.String())
+	}
+	if len(publicGroups) != 1 || publicGroups[0].ID != created.ID || publicGroups[0].IsPurchasable {
+		t.Fatalf("public groups = %+v, want displayed non-purchasable group", publicGroups)
+	}
+
+	mx := newMux()
+	mx.handle(http.MethodPatch, "/api/admin/user-groups/:id", wrap(d, updateUserGroupAdmin))
+	updateReq := httptest.NewRequest(http.MethodPatch, "/api/admin/user-groups/"+created.ID, strings.NewReader(`{"is_purchasable":true}`))
+	updateRec := httptest.NewRecorder()
+	mx.ServeHTTP(updateRec, updateReq)
+	if updateRec.Code != http.StatusOK {
+		t.Fatalf("update status = %d, want %d; body=%s", updateRec.Code, http.StatusOK, updateRec.Body.String())
+	}
+	var updated store.UserGroup
+	if err := json.Unmarshal(updateRec.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("decode updated group: %v (%s)", err, updateRec.Body.String())
+	}
+	if !updated.IsPurchasable {
+		t.Fatalf("updated group is_purchasable = false, want true")
+	}
+
+	defaultReq := httptest.NewRequest(http.MethodPost, "/api/admin/user-groups", strings.NewReader(`{
+		"name":"Default purchase availability", "is_public":true,
+		"monthly_price_amount_minor":800, "yearly_price_amount_minor":8000
+	}`))
+	defaultRec := httptest.NewRecorder()
+	createUserGroupAdmin(d, defaultRec, defaultReq)
+	if defaultRec.Code != http.StatusCreated {
+		t.Fatalf("default create status = %d, want %d; body=%s", defaultRec.Code, http.StatusCreated, defaultRec.Body.String())
+	}
+	var defaultGroup store.UserGroup
+	if err := json.Unmarshal(defaultRec.Body.Bytes(), &defaultGroup); err != nil {
+		t.Fatalf("decode default group: %v (%s)", err, defaultRec.Body.String())
+	}
+	if !defaultGroup.IsPurchasable {
+		t.Fatalf("omitted is_purchasable defaulted to false, want true")
+	}
+}
+
 func TestAdminSettingsRejectsInvalidSettlementCurrency(t *testing.T) {
 	db := openMigrated(t, filepath.Join(t.TempDir(), "invalid-settlement-currency.db"))
 	defer db.Close()

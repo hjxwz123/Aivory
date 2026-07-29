@@ -36,30 +36,31 @@ const (
 )
 
 var (
-	ErrInvalidPaymentChannel        = errors.New("invalid_payment_channel")
-	ErrPaymentChannelNameExists     = errors.New("payment_channel_name_exists")
-	ErrPaymentChannelIDExists       = errors.New("payment_channel_id_exists")
-	ErrPaymentChannelHasMethods     = errors.New("payment_channel_has_methods")
-	ErrPaymentChannelHasPending     = errors.New("payment_channel_has_pending_orders")
-	ErrInvalidPaymentMethod         = errors.New("invalid_payment_method")
-	ErrPaymentMethodNameExists      = errors.New("payment_method_name_exists")
-	ErrPaymentMethodUnavailable     = errors.New("payment_method_unavailable")
-	ErrInvalidPaymentProduct        = errors.New("invalid_payment_product")
-	ErrPaymentProductUnavailable    = errors.New("payment_product_unavailable")
-	ErrPaymentUserUnavailable       = errors.New("payment_user_unavailable")
-	ErrPaymentUserGroupPermanent    = errors.New("payment_user_group_already_permanent")
-	ErrPaymentOrderNotMutable       = errors.New("payment_order_not_mutable")
-	ErrPaymentOrderNotDeletable     = errors.New("payment_order_not_deletable")
-	ErrPaymentOrderDeleteNeedsAck   = errors.New("payment_order_delete_requires_gateway_confirmation")
-	ErrPaymentOrderNotFulfillable   = errors.New("payment_order_not_fulfillable")
-	ErrPaymentProviderOrderConflict = errors.New("payment_provider_order_conflict")
-	ErrPaymentProviderOrderMismatch = errors.New("payment_provider_order_mismatch")
-	ErrPaymentAmountMismatch        = errors.New("payment_amount_mismatch")
-	ErrPaymentCurrencyMismatch      = errors.New("payment_currency_mismatch")
-	ErrPaymentEventConflict         = errors.New("payment_event_conflict")
-	ErrInvalidPaymentEvent          = errors.New("invalid_payment_event")
-	ErrPaymentOrdersPendingForGroup = errors.New("payment_orders_pending_for_group")
-	ErrPaymentOrdersPendingForUser  = errors.New("payment_orders_pending_for_user")
+	ErrInvalidPaymentChannel          = errors.New("invalid_payment_channel")
+	ErrPaymentChannelNameExists       = errors.New("payment_channel_name_exists")
+	ErrPaymentChannelIDExists         = errors.New("payment_channel_id_exists")
+	ErrPaymentChannelHasMethods       = errors.New("payment_channel_has_methods")
+	ErrPaymentChannelHasPending       = errors.New("payment_channel_has_pending_orders")
+	ErrInvalidPaymentMethod           = errors.New("invalid_payment_method")
+	ErrPaymentMethodNameExists        = errors.New("payment_method_name_exists")
+	ErrPaymentMethodUnavailable       = errors.New("payment_method_unavailable")
+	ErrInvalidPaymentProduct          = errors.New("invalid_payment_product")
+	ErrPaymentProductUnavailable      = errors.New("payment_product_unavailable")
+	ErrPaymentUserGroupNotPurchasable = errors.New("payment_user_group_not_purchasable")
+	ErrPaymentUserUnavailable         = errors.New("payment_user_unavailable")
+	ErrPaymentUserGroupPermanent      = errors.New("payment_user_group_already_permanent")
+	ErrPaymentOrderNotMutable         = errors.New("payment_order_not_mutable")
+	ErrPaymentOrderNotDeletable       = errors.New("payment_order_not_deletable")
+	ErrPaymentOrderDeleteNeedsAck     = errors.New("payment_order_delete_requires_gateway_confirmation")
+	ErrPaymentOrderNotFulfillable     = errors.New("payment_order_not_fulfillable")
+	ErrPaymentProviderOrderConflict   = errors.New("payment_provider_order_conflict")
+	ErrPaymentProviderOrderMismatch   = errors.New("payment_provider_order_mismatch")
+	ErrPaymentAmountMismatch          = errors.New("payment_amount_mismatch")
+	ErrPaymentCurrencyMismatch        = errors.New("payment_currency_mismatch")
+	ErrPaymentEventConflict           = errors.New("payment_event_conflict")
+	ErrInvalidPaymentEvent            = errors.New("invalid_payment_event")
+	ErrPaymentOrdersPendingForGroup   = errors.New("payment_orders_pending_for_group")
+	ErrPaymentOrdersPendingForUser    = errors.New("payment_orders_pending_for_user")
 )
 
 // PaymentChannel is one configured provider account. Config is intentionally
@@ -833,13 +834,13 @@ func CreatePaymentOrder(ctx context.Context, db *sql.DB, input PaymentOrderCreat
 			return nil, ErrInvalidPaymentProduct
 		}
 		var monthlyPrice, yearlyPrice int64
-		var isDefault, isPublic int
-		groupQuery := `SELECT name, monthly_price_amount_minor, yearly_price_amount_minor, is_default, COALESCE(is_public,1)
-			   FROM user_groups WHERE id=?`
+		var isDefault, isPublic, isPurchasable int
+		groupQuery := `SELECT name, monthly_price_amount_minor, yearly_price_amount_minor, is_default, COALESCE(is_public,1), COALESCE(is_purchasable,1)
+		   FROM user_groups WHERE id=?`
 		if usePostgres {
 			groupQuery += ` FOR KEY SHARE`
 		}
-		err = tx.QueryRowContext(ctx, groupQuery, input.ProductID).Scan(&order.ProductName, &monthlyPrice, &yearlyPrice, &isDefault, &isPublic)
+		err = tx.QueryRowContext(ctx, groupQuery, input.ProductID).Scan(&order.ProductName, &monthlyPrice, &yearlyPrice, &isDefault, &isPublic, &isPurchasable)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrPaymentProductUnavailable
 		}
@@ -848,6 +849,9 @@ func CreatePaymentOrder(ctx context.Context, db *sql.DB, input PaymentOrderCreat
 		}
 		if isDefault != 0 || isPublic == 0 {
 			return nil, ErrPaymentProductUnavailable
+		}
+		if isPurchasable == 0 {
+			return nil, ErrPaymentUserGroupNotPurchasable
 		}
 		if input.BillingCycle == PaymentBillingMonthly {
 			order.AmountMinor = monthlyPrice

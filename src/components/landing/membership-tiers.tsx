@@ -28,7 +28,10 @@ export function MembershipTiers() {
 
   const sorted = (groups ?? []).slice().sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name))
   const paidGroups = sorted.filter(
-    (group) => !group.is_default && groupPriceAmount(group, billingCycle) > 0,
+    (group) =>
+      !group.is_default &&
+      group.is_purchasable !== false &&
+      groupPriceAmount(group, billingCycle) > 0,
   )
   const recommendedId =
     paidGroups.length === 0

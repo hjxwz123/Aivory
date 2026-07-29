@@ -815,7 +815,9 @@
       "workspaces": "Espaces de travail",
       "workspacesHint": "Autoriser ce groupe à créer des espaces (max ci-dessus ; 0 = illimité).",
       "isPublic": "Afficher sur la page d'abonnement",
-      "isPublicHint": "Désactivé, ce palier n'apparaît plus sur la page d'abonnement publique (les membres gardent leur offre)."
+      "isPublicHint": "Désactivé, ce palier n'apparaît plus sur la page d'abonnement publique (les membres gardent leur offre).",
+      "purchaseEnabled": "Autoriser les achats",
+      "purchaseEnabledHint": "Désactivé, le palier peut rester affiché, mais les utilisateurs ne peuvent temporairement pas l'acheter."
     },
     "errors": {
       "nameRequired": "Le nom est requis",

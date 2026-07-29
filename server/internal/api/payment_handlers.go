@@ -170,7 +170,7 @@ func createPaymentCheckoutHandler(d Deps, w http.ResponseWriter, r *http.Request
 	}
 	if errors.Is(err, store.ErrPaymentMethodUnavailable) || errors.Is(err, store.ErrPaymentProductUnavailable) ||
 		errors.Is(err, store.ErrPaymentUserUnavailable) ||
-		errors.Is(err, store.ErrPaymentUserGroupPermanent) {
+		errors.Is(err, store.ErrPaymentUserGroupPermanent) || errors.Is(err, store.ErrPaymentUserGroupNotPurchasable) {
 		writeError(w, http.StatusConflict, err)
 		return
 	}
@@ -308,6 +308,16 @@ func resumePaymentOrderHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	if order.Status != store.PaymentOrderPending && order.Status != store.PaymentOrderProcessing {
 		writePaymentResumeStatusError(w, order.Status)
 		return
+	}
+	if order.ProductType == store.PaymentProductUserGroup {
+		if err := store.ValidatePaymentUserGroupPurchasable(r.Context(), d.DB, order.UserGroupID); err != nil {
+			if errors.Is(err, store.ErrPaymentProductUnavailable) || errors.Is(err, store.ErrPaymentUserGroupNotPurchasable) {
+				writeError(w, http.StatusConflict, err)
+				return
+			}
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
 	}
 
 	channel, err := store.GetPaymentChannel(r.Context(), d.DB, order.ChannelID)

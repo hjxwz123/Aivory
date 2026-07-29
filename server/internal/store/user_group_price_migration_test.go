@@ -48,6 +48,13 @@ func TestMigrateLegacyUserGroupPriceBackfillRunsOnce(t *testing.T) {
 	if monthly != 999 || yearly != 0 {
 		t.Fatalf("migrated monthly/yearly prices = %d/%d, want 999/0", monthly, yearly)
 	}
+	var isPurchasable int
+	if err := db.QueryRow(`SELECT is_purchasable FROM user_groups WHERE id='ug_legacy'`).Scan(&isPurchasable); err != nil {
+		t.Fatalf("read migrated purchase availability: %v", err)
+	}
+	if isPurchasable != 1 {
+		t.Fatalf("migrated is_purchasable = %d, want 1 to preserve existing group behavior", isPurchasable)
+	}
 	var marker string
 	if err := db.QueryRow(`SELECT value FROM settings WHERE key='user_group_billing_prices_backfill_v2'`).Scan(&marker); err != nil {
 		t.Fatalf("read migration marker: %v", err)

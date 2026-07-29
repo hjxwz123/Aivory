@@ -64,6 +64,7 @@ CREATE TABLE IF NOT EXISTS user_groups (
   max_storage_mb INTEGER NOT NULL DEFAULT 0,
   credit_allowance      REAL NOT NULL DEFAULT 0,    -- timed credits granted each cycle
   credit_period_seconds INTEGER NOT NULL DEFAULT 0, -- refresh cycle length (0 = no timed credits)
+  is_purchasable INTEGER NOT NULL DEFAULT 1,      -- displayed tier may temporarily pause checkout
   created_at  INTEGER NOT NULL DEFAULT (strftime('%s','now')),
   updated_at  INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 );

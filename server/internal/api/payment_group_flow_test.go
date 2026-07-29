@@ -294,3 +294,73 @@ func TestPaymentCheckoutRejectsPermanentUserGroupAndAllowsFiniteRenewal(t *testi
 		})
 	}
 }
+
+func TestPaymentCheckoutAndResumeRejectNonPurchasableUserGroup(t *testing.T) {
+	fx := newPaymentAPIFixture(t)
+	group, err := store.CreateUserGroup(context.Background(), fx.db, store.UserGroup{
+		ID:                      "ug_paused_purchase",
+		Name:                    "Paused purchase",
+		MonthlyPriceAmountMinor: 1200,
+		YearlyPriceAmountMinor:  12000,
+		IsPublic:                true,
+	})
+	if err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+	paused := false
+	if _, err := store.UpdateUserGroup(context.Background(), fx.db, group.ID, store.UserGroupPatch{IsPurchasable: &paused}); err != nil {
+		t.Fatalf("pause group purchase: %v", err)
+	}
+	checkout := func() *httptest.ResponseRecorder {
+		body := fmt.Sprintf(`{"payment_method_id":%q,"target_type":%q,"target_id":%q,"billing_cycle":%q}`,
+			fx.method.ID, store.PaymentProductUserGroup, group.ID, store.PaymentBillingMonthly)
+		req := httptest.NewRequest(http.MethodPost, "https://aivory.example.test/api/payments/checkout", strings.NewReader(body))
+		req = paymentAPIRequest(req, fx.user, nil)
+		rec := httptest.NewRecorder()
+		createPaymentCheckoutHandler(fx.d, rec, req)
+		return rec
+	}
+
+	blocked := checkout()
+	if blocked.Code != http.StatusConflict || !strings.Contains(blocked.Body.String(), store.ErrPaymentUserGroupNotPurchasable.Error()) {
+		t.Fatalf("paused-group checkout = status %d body=%s, want 409/%q", blocked.Code, blocked.Body.String(), store.ErrPaymentUserGroupNotPurchasable)
+	}
+	var count int
+	if err := fx.db.QueryRow(`SELECT COUNT(*) FROM payment_orders WHERE user_id=?`, fx.user.ID).Scan(&count); err != nil {
+		t.Fatalf("count orders after blocked checkout: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("blocked checkout created %d orders, want 0", count)
+	}
+
+	enabled := true
+	if _, err := store.UpdateUserGroup(context.Background(), fx.db, group.ID, store.UserGroupPatch{IsPurchasable: &enabled}); err != nil {
+		t.Fatalf("resume group purchase: %v", err)
+	}
+	created := checkout()
+	if created.Code != http.StatusCreated {
+		t.Fatalf("enabled-group checkout = status %d, want %d; body=%s", created.Code, http.StatusCreated, created.Body.String())
+	}
+	var response struct {
+		OrderID string `json:"order_id"`
+	}
+	if err := json.Unmarshal(created.Body.Bytes(), &response); err != nil || response.OrderID == "" {
+		t.Fatalf("decode created checkout: order=%+v err=%v body=%s", response, err, created.Body.String())
+	}
+	if _, err := store.UpdateUserGroup(context.Background(), fx.db, group.ID, store.UserGroupPatch{IsPurchasable: &paused}); err != nil {
+		t.Fatalf("pause group before resume: %v", err)
+	}
+	resumeReq := httptest.NewRequest(http.MethodPost, "/api/payments/orders/"+response.OrderID+"/resume", nil)
+	resumeReq = paymentAPIRequest(resumeReq, fx.user, map[string]string{"id": response.OrderID})
+	resumeRec := httptest.NewRecorder()
+	resumePaymentOrderHandler(fx.d, resumeRec, resumeReq)
+	if resumeRec.Code != http.StatusConflict || !strings.Contains(resumeRec.Body.String(), store.ErrPaymentUserGroupNotPurchasable.Error()) {
+		t.Fatalf("paused-group resume = status %d body=%s, want 409/%q", resumeRec.Code, resumeRec.Body.String(), store.ErrPaymentUserGroupNotPurchasable)
+	}
+	if err := fx.db.QueryRow(`SELECT COUNT(*) FROM payment_order_attempts WHERE order_id=?`, response.OrderID).Scan(&count); err != nil {
+		t.Fatalf("count attempts after blocked resume: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("blocked resume created %d payment attempts, want only original attempt", count)
+	}
+}

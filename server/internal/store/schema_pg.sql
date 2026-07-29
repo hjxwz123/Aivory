@@ -64,6 +64,7 @@ CREATE TABLE IF NOT EXISTS user_groups (
   max_storage_mb INTEGER NOT NULL DEFAULT 0,
   credit_allowance      REAL NOT NULL DEFAULT 0,
   credit_period_seconds INTEGER NOT NULL DEFAULT 0,
+  is_purchasable INTEGER NOT NULL DEFAULT 1,
   created_at  BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint),
   updated_at  BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
 );
