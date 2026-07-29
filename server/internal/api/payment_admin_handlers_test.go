@@ -37,6 +37,7 @@ func newPaymentAdminFixture(t *testing.T) paymentAdminFixture {
 	mx.handle(http.MethodGet, "/api/admin/payment-channels", wrap(d, listPaymentChannelsAdmin))
 	mx.handle(http.MethodPost, "/api/admin/payment-channels/prepare", wrap(d, preparePaymentChannelAdmin))
 	mx.handle(http.MethodPost, "/api/admin/payment-channels", wrap(d, createPaymentChannelAdmin))
+	mx.handle(http.MethodPatch, "/api/admin/payment-channels/reorder", wrap(d, reorderPaymentChannelsAdmin))
 	mx.handle(http.MethodPatch, "/api/admin/payment-channels/:id", wrap(d, updatePaymentChannelAdmin))
 	mx.handle(http.MethodDelete, "/api/admin/payment-channels/:id", wrap(d, deletePaymentChannelAdmin))
 	mx.handle(http.MethodGet, "/api/admin/payment-methods", wrap(d, listPaymentMethodsAdmin))
@@ -225,6 +226,24 @@ func TestPaymentChannelsAdminCRUDMasksAndPreservesSecrets(t *testing.T) {
 		if strings.Contains(listRec.Body.String(), secret) {
 			t.Fatalf("admin channel list leaked a credential beginning with %.24q", secret)
 		}
+	}
+
+	reorderRec := fx.request(t, http.MethodPatch, "/api/admin/payment-channels/reorder", map[string]any{
+		"ids": []string{waffo.ID, stripe.ID, epay.ID},
+	})
+	decodePaymentAdminResponse[map[string]bool](t, reorderRec, http.StatusOK)
+	reorderedRec := fx.request(t, http.MethodGet, "/api/admin/payment-channels", nil)
+	reordered := decodePaymentAdminResponse[[]adminPaymentChannelResponse](t, reorderedRec, http.StatusOK)
+	if len(reordered) != 3 || reordered[0].ID != waffo.ID || reordered[0].SortOrder != 0 ||
+		reordered[1].ID != stripe.ID || reordered[1].SortOrder != 1 ||
+		reordered[2].ID != epay.ID || reordered[2].SortOrder != 2 {
+		t.Fatalf("reordered channels = %+v", reordered)
+	}
+	badReorder := fx.request(t, http.MethodPatch, "/api/admin/payment-channels/reorder", map[string]any{
+		"ids": []string{stripe.ID, stripe.ID, epay.ID},
+	})
+	if badReorder.Code != http.StatusBadRequest {
+		t.Fatalf("duplicate channel reorder status = %d, want 400; body=%s", badReorder.Code, badReorder.Body.String())
 	}
 
 	stripeUpdate := fx.request(t, http.MethodPatch, "/api/admin/payment-channels/"+stripe.ID, map[string]any{
@@ -747,6 +766,7 @@ func TestPaymentRouterExposesCanonicalRoutesOnly(t *testing.T) {
 		{http.MethodGet, "/api/admin/payment-channels", http.StatusUnauthorized},
 		{http.MethodPost, "/api/admin/payment-channels/prepare", http.StatusUnauthorized},
 		{http.MethodPost, "/api/admin/payment-channels", http.StatusUnauthorized},
+		{http.MethodPatch, "/api/admin/payment-channels/reorder", http.StatusUnauthorized},
 		{http.MethodPatch, "/api/admin/payment-channels/channel-id", http.StatusUnauthorized},
 		{http.MethodDelete, "/api/admin/payment-channels/channel-id", http.StatusUnauthorized},
 		{http.MethodGet, "/api/admin/payment-methods", http.StatusUnauthorized},

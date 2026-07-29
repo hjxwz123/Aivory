@@ -1126,6 +1126,7 @@
     "disableAction": "停用渠道",
     "disabledSuccess": "支付渠道已停用",
     "removed": "支付渠道已刪除",
+    "reorderFailed": "無法儲存支付渠道順序。",
     "updatedAt": "更新於 {{date}}",
     "removeTitle": "刪除支付渠道？",
     "removeBody": "確定刪除「{{name}}」？請先移除綁定的支付方式並處理進行中的訂單。",

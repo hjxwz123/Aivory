@@ -390,6 +390,7 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("GET", "/api/admin/payment-channels", requireAdmin(d, listPaymentChannelsAdmin))
 	mux.handle("POST", "/api/admin/payment-channels/prepare", requireAdmin(d, preparePaymentChannelAdmin))
 	mux.handle("POST", "/api/admin/payment-channels", requireAdmin(d, createPaymentChannelAdmin))
+	mux.handle("PATCH", "/api/admin/payment-channels/reorder", requireAdmin(d, reorderPaymentChannelsAdmin))
 	mux.handle("PATCH", "/api/admin/payment-channels/:id", requireAdmin(d, updatePaymentChannelAdmin))
 	mux.handle("DELETE", "/api/admin/payment-channels/:id", requireAdmin(d, deletePaymentChannelAdmin))
 	mux.handle("GET", "/api/admin/payment-methods", requireAdmin(d, listPaymentMethodsAdmin))

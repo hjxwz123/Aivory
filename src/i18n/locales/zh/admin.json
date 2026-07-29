@@ -1130,6 +1130,7 @@
     "disableAction": "停用渠道",
     "disabledSuccess": "支付渠道已停用",
     "removed": "支付渠道已删除",
+    "reorderFailed": "无法保存支付渠道顺序。",
     "updatedAt": "更新于 {{date}}",
     "removeTitle": "删除支付渠道？",
     "removeBody": "确定删除“{{name}}”？请先移除绑定的支付方式并处理进行中的订单。",

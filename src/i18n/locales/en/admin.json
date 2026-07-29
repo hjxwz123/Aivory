@@ -1126,6 +1126,7 @@
     "disableAction": "Disable channel",
     "disabledSuccess": "Payment channel disabled",
     "removed": "Payment channel removed",
+    "reorderFailed": "Could not save the payment channel order.",
     "updatedAt": "Updated {{date}}",
     "removeTitle": "Delete payment channel?",
     "removeBody": "Delete “{{name}}”? Channels with bound payment methods or active orders must be cleared first.",

@@ -170,6 +170,22 @@ func CreatePaymentChannel(ctx context.Context, db *sql.DB, channel PaymentChanne
 	return GetPaymentChannel(ctx, db, channel.ID)
 }
 
+func ReorderPaymentChannels(ctx context.Context, db *sql.DB, ids []string) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	now := time.Now().Unix()
+	for index, id := range ids {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE payment_channels SET sort_order=?, updated_at=? WHERE id=?`, index, now, id); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 func UpdatePaymentChannel(ctx context.Context, db *sql.DB, id string, patch PaymentChannelPatch) (*PaymentChannel, error) {
 	// Channel mutations must share the same lock as checkout creation. The API
 	// performs friendly validation before calling this function, but the store
