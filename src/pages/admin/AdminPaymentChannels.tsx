@@ -5,6 +5,7 @@ import { Check, Copy, Pencil, Plus, PowerOff, RefreshCw, Trash2 } from 'lucide-r
 
 import { adminApi, ApiError } from '@/api'
 import type { ApiPaymentChannel, ApiPaymentEnvironment, ApiPaymentProvider } from '@/api/types'
+import { AdminSortableList } from '@/components/admin/AdminSortableList'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -171,7 +172,7 @@ export default function AdminPaymentChannels() {
         ? settings.settlement_currency.trim().toUpperCase()
         : ''
       setSettlementCurrency(/^[A-Z]{3}$/.test(configuredCurrency) ? configuredCurrency : 'USD')
-      setRows(paymentChannels)
+      setRows([...paymentChannels].sort((a, b) => a.sort_order - b.sort_order))
     } catch (error) {
       const message = error instanceof ApiError ? error.message : t('admin:paymentChannels.loadFailed')
       setLoadError(message)
@@ -336,7 +337,7 @@ export default function AdminPaymentChannels() {
         await adminApi.updatePaymentChannel(editor.row.id, body)
         toast.success(t('admin:paymentChannels.updated'))
       } else {
-        await adminApi.createPaymentChannel({ ...body, id: editor.draft.id! })
+        await adminApi.createPaymentChannel({ ...body, id: editor.draft.id!, sort_order: rows.length })
         toast.success(t('admin:paymentChannels.created'))
       }
       setEditor((current) => ({ ...current, open: false }))
@@ -403,6 +404,17 @@ export default function AdminPaymentChannels() {
     }
   }
 
+  function setOrderedRows(next: ApiPaymentChannel[]) {
+    setRows(next.map((row, sortOrder) => row.sort_order === sortOrder ? row : { ...row, sort_order: sortOrder }))
+  }
+
+  function persistOrder(next: ApiPaymentChannel[], prev: ApiPaymentChannel[]) {
+    void adminApi.reorderPaymentChannels(next.map((row) => row.id)).catch((error) => {
+      setRows(prev)
+      toast.error(error instanceof ApiError ? error.message : t('admin:paymentChannels.reorderFailed'))
+    })
+  }
+
   async function copyWebhook(url: string, key: string) {
     try {
       await navigator.clipboard.writeText(url)
@@ -466,9 +478,18 @@ export default function AdminPaymentChannels() {
             <Button className="mt-4 rounded-[8px]" size="sm" onClick={openNew}>{t('admin:paymentChannels.new')}</Button>
           </div>
         ) : (
-          <ul className="divide-y divide-[var(--color-divider)] overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]">
-            {rows.map((row) => (
-              <li key={row.id} className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-3 py-3 sm:px-4">
+          <AdminSortableList
+            items={rows}
+            onItemsChange={setOrderedRows}
+            onOrderCommit={persistOrder}
+            dragHandleLabel={t('admin:common.dragHandle')}
+            moveUpLabel={t('admin:common.moveUp')}
+            moveDownLabel={t('admin:common.moveDown')}
+            mobileDragOnly
+            listClassName="overflow-hidden"
+            rowClassName="grid min-w-0 grid-cols-[2.75rem_minmax(0,1fr)_auto] items-center gap-x-1 px-2 py-3 sm:grid-cols-[auto_auto_minmax(0,1fr)_auto] sm:gap-3 sm:px-4"
+            renderItem={(row) => (
+              <>
                 <div className="min-w-0">
                   <div className="flex min-w-0 flex-wrap items-center gap-2">
                     <span className="min-w-0 break-words text-[13px] font-medium text-[var(--color-fg)] [overflow-wrap:anywhere]">{row.name}</span>
@@ -516,9 +537,9 @@ export default function AdminPaymentChannels() {
                     <Trash2 size={14} aria-hidden />
                   </Button>
                 </div>
-              </li>
-            ))}
-          </ul>
+              </>
+            )}
+          />
         )}
       </section>
 

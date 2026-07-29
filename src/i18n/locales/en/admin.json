@@ -1012,6 +1012,9 @@
       "loading": "Loading archive list…",
       "noArchives": "No downloadable backup archives yet.",
       "download": "Download",
+      "deleteConfirmTitle": "Delete this archive?",
+      "deleteConfirmLead": "{{name}} will be permanently deleted from the server.",
+      "deleteDone": "Archive deleted: {{name}}",
       "progress": {
         "preparing": "Preparing",
         "reading_database": "Reading database",
@@ -1079,7 +1082,7 @@
       },
       "import": {
         "title": "Import configuration",
-        "lead": "Import a config ZIP (old JSON files are still accepted). Rows are merged by ID; users, conversations, files, and logs are not imported.",
+        "lead": "Import a config ZIP. Rows are merged by ID; users, conversations, files, and logs are not imported.",
         "action": "Import config archive…",
         "invalid": "That file isn't a valid Aivory configuration export.",
         "done": "Configuration imported ({{count}} rows).",
@@ -1126,6 +1129,7 @@
     "disableAction": "Disable channel",
     "disabledSuccess": "Payment channel disabled",
     "removed": "Payment channel removed",
+    "reorderFailed": "Could not save the payment channel order.",
     "updatedAt": "Updated {{date}}",
     "removeTitle": "Delete payment channel?",
     "removeBody": "Delete “{{name}}”? Channels with bound payment methods or active orders must be cleared first.",

@@ -15,7 +15,7 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
-import { CheckCircle2, Download, Upload, TriangleAlert, FileArchive, FileJson, Braces, Clock3, XCircle, Database, Wrench } from 'lucide-react'
+import { CheckCircle2, Download, Upload, TriangleAlert, FileArchive, FileJson, Braces, Clock3, XCircle, Database, Wrench, Trash2 } from 'lucide-react'
 import {
   adminApi,
   ApiError,
@@ -125,6 +125,8 @@ export default function AdminBackup() {
   const [archives, setArchives] = useState<BackupArchiveFile[]>([])
   const [recentJobs, setRecentJobs] = useState<BackupExportJob[]>([])
   const [downloadingArchive, setDownloadingArchive] = useState<string | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<BackupArchiveFile | null>(null)
+  const [deletingArchive, setDeletingArchive] = useState<string | null>(null)
   const runningExportID = runningExport?.id
 
   const [loadingVectors, setLoadingVectors] = useState(true)
@@ -245,6 +247,22 @@ export default function AdminBackup() {
       toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
     } finally {
       setDownloadingArchive(null)
+    }
+  }
+
+  async function onDeleteArchive() {
+    if (!deleteTarget) return
+    const name = deleteTarget.name
+    setDeletingArchive(name)
+    try {
+      await adminApi.backupArchiveDelete(name)
+      setArchives((current) => current.filter((archive) => archive.name !== name))
+      setDeleteTarget(null)
+      toast.success(t('admin:backup.export.deleteDone', { name }))
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
+    } finally {
+      setDeletingArchive(null)
     }
   }
 
@@ -454,16 +472,27 @@ export default function AdminBackup() {
                         {formatBytes(archive.size_bytes)} · {formatDate(archive.created_at)}
                       </p>
                     </div>
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      className="self-start sm:self-auto"
-                      loading={downloadingArchive === archive.name}
-                      onClick={() => void onDownloadArchive(archive)}
-                      leadingIcon={<Download size={13} aria-hidden />}
-                    >
-                      {t('admin:backup.export.download')}
-                    </Button>
+                    <div className="flex shrink-0 items-center gap-2 self-start sm:self-auto">
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        loading={downloadingArchive === archive.name}
+                        disabled={deletingArchive === archive.name}
+                        onClick={() => void onDownloadArchive(archive)}
+                        leadingIcon={<Download size={13} aria-hidden />}
+                      >
+                        {t('admin:backup.export.download')}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        disabled={downloadingArchive === archive.name || deletingArchive === archive.name}
+                        onClick={() => setDeleteTarget(archive)}
+                        leadingIcon={<Trash2 size={13} aria-hidden />}
+                      >
+                        {t('common:actions.delete')}
+                      </Button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -537,6 +566,34 @@ export default function AdminBackup() {
           )}
         </div>
       </section>
+
+      {/* Generated archive delete confirm ----------------------------------- */}
+      <Dialog
+        open={Boolean(deleteTarget)}
+        onOpenChange={(open) => !open && !deletingArchive && setDeleteTarget(null)}
+      >
+        <DialogContent size="sm">
+          <DialogHeader>
+            <DialogTitle>{t('admin:backup.export.deleteConfirmTitle')}</DialogTitle>
+            <DialogDescription className="break-words [overflow-wrap:anywhere]">
+              {deleteTarget ? t('admin:backup.export.deleteConfirmLead', { name: deleteTarget.name }) : ''}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setDeleteTarget(null)} disabled={Boolean(deletingArchive)}>
+              {t('common:actions.cancel')}
+            </Button>
+            <Button
+              variant="destructive"
+              loading={Boolean(deletingArchive)}
+              onClick={() => void onDeleteArchive()}
+              leadingIcon={<Trash2 size={14} aria-hidden />}
+            >
+              {t('common:actions.delete')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Vector index maintenance ----------------------------------------- */}
       <section className="mt-10">
@@ -705,7 +762,7 @@ export default function AdminBackup() {
           <input
             ref={cfgFileRef}
             type="file"
-            accept=".zip,.json,application/zip,application/json"
+            accept=".zip,application/zip"
             className="sr-only"
             onChange={onPickConfig}
           />

@@ -402,72 +402,25 @@ func importConfigAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	if zr, err := zip.NewReader(file, header.Size); err == nil {
-		man, err := readConfigManifest(zr)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, err)
-			return
-		}
-		if !acceptedArchiveFormat(man.Format, "aivory-config") {
-			writeError(w, http.StatusBadRequest, errors.New("unrecognized config archive (missing aivory-config manifest)"))
-			return
-		}
-		if man.Version > configArchiveVersion {
-			writeError(w, http.StatusBadRequest, fmt.Errorf("config archive format v%d is newer than this server supports (v%d)", man.Version, configArchiveVersion))
-			return
-		}
-		if err := validateConfigArchiveEmbeddingModelLock(zr, d); err != nil {
-			if errors.Is(err, errEmbeddingModelLocked) {
-				writeError(w, http.StatusConflict, errEmbeddingModelLocked)
-				return
-			}
-			writeError(w, http.StatusBadRequest, err)
-			return
-		}
-		counts, err := mergeConfigArchive(ctx, d, zr, man)
-		if err != nil {
-			switch {
-			case errors.Is(err, errInvalidPaymentConfigArchive):
-				writeError(w, http.StatusBadRequest, err)
-			case errors.Is(err, store.ErrPaymentChannelHasPending),
-				errors.Is(err, store.ErrPaymentChannelHasMethods),
-				errors.Is(err, store.ErrPaymentChannelNameExists),
-				errors.Is(err, store.ErrPaymentMethodNameExists):
-				writeError(w, http.StatusConflict, err)
-			default:
-				writeError(w, http.StatusInternalServerError, fmt.Errorf("config import failed (no changes committed): %w", err))
-			}
-			return
-		}
-		assetsRestored := 0
-		if man.IncludesAssets {
-			assetsRestored = restoreConfigAssetsFromZip(d, zr)
-		}
-		broadcastConfigInvalidate(d)
-		d.Logger.Printf("config import: merged %d tables, %d assets (source dialect=%s)", len(counts), assetsRestored, man.Dialect)
-		writeJSON(w, http.StatusOK, map[string]any{
-			"ok":               true,
-			"tables":           counts,
-			"assets_restored":  assetsRestored,
-			"merge_mode":       "upsert",
-			"relogin_required": false,
-		})
-		return
-	}
-
-	// Backward compatibility: accept the old frontend-only JSON shape
-	// {"format":"aivory-config","settings":{...}} and apply settings only.
-	if _, err := file.Seek(0, io.SeekStart); err != nil {
-		writeError(w, http.StatusBadRequest, errors.New("invalid config file"))
-		return
-	}
-	var buf bytes.Buffer
-	if _, err := io.Copy(&buf, file); err != nil {
-		writeError(w, http.StatusBadRequest, errors.New("invalid config file"))
-		return
-	}
-	n, err := importLegacySettingsConfig(d, buf.Bytes())
+	zr, err := zip.NewReader(file, header.Size)
 	if err != nil {
+		writeError(w, http.StatusBadRequest, errors.New("invalid config archive: expected a ZIP file"))
+		return
+	}
+	man, err := readConfigManifest(zr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if !acceptedArchiveFormat(man.Format, "aivory-config") {
+		writeError(w, http.StatusBadRequest, errors.New("unrecognized config archive (missing aivory-config manifest)"))
+		return
+	}
+	if man.Version > configArchiveVersion {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("config archive format v%d is newer than this server supports (v%d)", man.Version, configArchiveVersion))
+		return
+	}
+	if err := validateConfigArchiveEmbeddingModelLock(zr, d); err != nil {
 		if errors.Is(err, errEmbeddingModelLocked) {
 			writeError(w, http.StatusConflict, errEmbeddingModelLocked)
 			return
@@ -475,14 +428,35 @@ func importConfigAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	counts, err := mergeConfigArchive(ctx, d, zr, man)
+	if err != nil {
+		switch {
+		case errors.Is(err, errInvalidPaymentConfigArchive):
+			writeError(w, http.StatusBadRequest, err)
+		case errors.Is(err, store.ErrPaymentChannelHasPending),
+			errors.Is(err, store.ErrPaymentChannelHasMethods),
+			errors.Is(err, store.ErrPaymentChannelNameExists),
+			errors.Is(err, store.ErrPaymentMethodNameExists):
+			writeError(w, http.StatusConflict, err)
+		default:
+			writeError(w, http.StatusInternalServerError, fmt.Errorf("config import failed (no changes committed): %w", err))
+		}
+		return
+	}
+	assetsRestored := 0
+	if man.IncludesAssets {
+		assetsRestored = restoreConfigAssetsFromZip(d, zr)
+	}
 	broadcastConfigInvalidate(d)
+	d.Logger.Printf("config import: merged %d tables, %d assets (source dialect=%s)", len(counts), assetsRestored, man.Dialect)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":               true,
-		"tables":           map[string]int64{"settings": n},
-		"assets_restored":  0,
-		"merge_mode":       "settings",
+		"tables":           counts,
+		"assets_restored":  assetsRestored,
+		"merge_mode":       "upsert",
 		"relogin_required": false,
 	})
+	return
 }
 
 // importBackupAdmin replaces ALL data from an uploaded archive. Destructive by
@@ -1608,20 +1582,6 @@ func readConfigManifest(zr *zip.Reader) (configManifest, error) {
 		return man, fmt.Errorf("invalid manifest.json: %w", err)
 	}
 	return man, nil
-}
-
-func importLegacySettingsConfig(d Deps, data []byte) (int64, error) {
-	var payload struct {
-		Format   string                     `json:"format"`
-		Settings map[string]json.RawMessage `json:"settings"`
-	}
-	if err := json.Unmarshal(data, &payload); err != nil {
-		return 0, errors.New("not a valid Aivory configuration export")
-	}
-	if !acceptedArchiveFormat(payload.Format, "aivory-config") || payload.Settings == nil {
-		return 0, errors.New("not a valid Aivory configuration export")
-	}
-	return applyAdminSettingsPatch(d, payload.Settings, true)
 }
 
 func validateConfigArchiveEmbeddingModelLock(zr *zip.Reader, d Deps) error {

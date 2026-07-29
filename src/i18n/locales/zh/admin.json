@@ -1016,6 +1016,9 @@
       "loading": "正在加载归档列表…",
       "noArchives": "还没有可下载的备份归档。",
       "download": "下载",
+      "deleteConfirmTitle": "删除此归档？",
+      "deleteConfirmLead": "将从服务器永久删除 {{name}}。",
+      "deleteDone": "已删除归档：{{name}}",
       "progress": {
         "preparing": "准备中",
         "reading_database": "读取数据库",
@@ -1083,7 +1086,7 @@
       },
       "import": {
         "title": "导入配置",
-        "lead": "导入配置 ZIP（也兼容旧 JSON），按 ID 合并/覆盖配置；不会导入用户、对话、文件或日志。",
+        "lead": "导入配置 ZIP，按 ID 合并/覆盖配置；不会导入用户、对话、文件或日志。",
         "action": "导入配置归档…",
         "invalid": "该文件不是有效的 Aivory 配置导出文件。",
         "done": "已导入配置（{{count}} 行）。",
@@ -1130,6 +1133,7 @@
     "disableAction": "停用渠道",
     "disabledSuccess": "支付渠道已停用",
     "removed": "支付渠道已删除",
+    "reorderFailed": "无法保存支付渠道顺序。",
     "updatedAt": "更新于 {{date}}",
     "removeTitle": "删除支付渠道？",
     "removeBody": "确定删除“{{name}}”？请先移除绑定的支付方式并处理进行中的订单。",

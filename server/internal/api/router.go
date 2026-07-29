@@ -390,6 +390,7 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("GET", "/api/admin/payment-channels", requireAdmin(d, listPaymentChannelsAdmin))
 	mux.handle("POST", "/api/admin/payment-channels/prepare", requireAdmin(d, preparePaymentChannelAdmin))
 	mux.handle("POST", "/api/admin/payment-channels", requireAdmin(d, createPaymentChannelAdmin))
+	mux.handle("PATCH", "/api/admin/payment-channels/reorder", requireAdmin(d, reorderPaymentChannelsAdmin))
 	mux.handle("PATCH", "/api/admin/payment-channels/:id", requireAdmin(d, updatePaymentChannelAdmin))
 	mux.handle("DELETE", "/api/admin/payment-channels/:id", requireAdmin(d, deletePaymentChannelAdmin))
 	mux.handle("GET", "/api/admin/payment-methods", requireAdmin(d, listPaymentMethodsAdmin))
@@ -466,6 +467,7 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("POST", "/api/admin/backup/export-jobs", requireAdmin(d, startBackupExportAdmin))
 	mux.handle("GET", "/api/admin/backup/export-jobs", requireAdmin(d, listBackupExportsAdmin))
 	mux.handle("GET", "/api/admin/backup/archives/:name", requireAdmin(d, downloadBackupArchiveAdmin))
+	mux.handle("DELETE", "/api/admin/backup/archives/:name", requireAdmin(d, deleteBackupArchiveAdmin))
 	mux.handle("POST", "/api/admin/backup/import", requireAdmin(d, importBackupAdmin))
 	// Configuration migration. Exports/imports admin configuration tables and
 	// admin assets (icons / skill-assets), deliberately leaving users,
