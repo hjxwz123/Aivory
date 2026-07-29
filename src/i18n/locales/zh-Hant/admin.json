@@ -1012,6 +1012,9 @@
       "loading": "正在載入歸檔列表…",
       "noArchives": "還沒有可下載的備份歸檔。",
       "download": "下載",
+      "deleteConfirmTitle": "刪除此歸檔？",
+      "deleteConfirmLead": "將從伺服器永久刪除 {{name}}。",
+      "deleteDone": "已刪除歸檔：{{name}}",
       "progress": {
         "preparing": "準備中",
         "reading_database": "讀取資料庫",

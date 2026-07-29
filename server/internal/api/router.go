@@ -467,6 +467,7 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("POST", "/api/admin/backup/export-jobs", requireAdmin(d, startBackupExportAdmin))
 	mux.handle("GET", "/api/admin/backup/export-jobs", requireAdmin(d, listBackupExportsAdmin))
 	mux.handle("GET", "/api/admin/backup/archives/:name", requireAdmin(d, downloadBackupArchiveAdmin))
+	mux.handle("DELETE", "/api/admin/backup/archives/:name", requireAdmin(d, deleteBackupArchiveAdmin))
 	mux.handle("POST", "/api/admin/backup/import", requireAdmin(d, importBackupAdmin))
 	// Configuration migration. Exports/imports admin configuration tables and
 	// admin assets (icons / skill-assets), deliberately leaving users,

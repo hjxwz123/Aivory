@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -19,6 +20,10 @@ import (
 )
 
 const backupArchivePrefix = "aivory-docker-backup-"
+
+var backupArchiveNamePattern = regexp.MustCompile(
+	"^" + regexp.QuoteMeta(backupArchivePrefix) + `[0-9]{8}-[0-9]{6}-[0-9a-f]{10}\.zip$`,
+)
 
 // Env-overridable backup-export knobs. Defaults match the historical hardcoded
 // values (see docs/config-reference.md).
@@ -101,13 +106,13 @@ func listBackupExportsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 
 func downloadBackupArchiveAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	name := pathParam(r, "name")
-	if !safeBackupArchiveName(name) {
+	path, err := backupArchivePath(d.Config.BackupDir, name)
+	if err != nil {
 		writeError(w, http.StatusBadRequest, errors.New("invalid archive name"))
 		return
 	}
-	path := filepath.Join(d.Config.BackupDir, name)
-	info, err := os.Stat(path)
-	if err != nil || info.IsDir() {
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() {
 		writeError(w, http.StatusNotFound, errors.New("archive not found"))
 		return
 	}
@@ -115,6 +120,33 @@ func downloadBackupArchiveAdmin(d Deps, w http.ResponseWriter, r *http.Request) 
 	w.Header().Set("content-disposition", fmt.Sprintf(`attachment; filename="%s"`, name))
 	w.Header().Set("x-content-type-options", "nosniff")
 	http.ServeFile(w, r, path)
+}
+
+func deleteBackupArchiveAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
+	name := pathParam(r, "name")
+	path, err := backupArchivePath(d.Config.BackupDir, name)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, errors.New("invalid archive name"))
+		return
+	}
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) || (err == nil && !info.Mode().IsRegular()) {
+		writeError(w, http.StatusNotFound, errors.New("archive not found"))
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Errorf("inspect backup archive: %w", err))
+		return
+	}
+	if err := os.Remove(path); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			writeError(w, http.StatusNotFound, errors.New("archive not found"))
+			return
+		}
+		writeError(w, http.StatusInternalServerError, fmt.Errorf("delete backup archive: %w", err))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"deleted": name})
 }
 
 func buildBackupExportState(d Deps) backupExportState {
@@ -273,7 +305,7 @@ func listBackupArchiveFiles(dir string) []backupArchiveFile {
 			continue
 		}
 		info, err := entry.Info()
-		if err != nil {
+		if err != nil || !info.Mode().IsRegular() {
 			continue
 		}
 		out = append(out, backupArchiveFile{
@@ -287,11 +319,21 @@ func listBackupArchiveFiles(dir string) []backupArchiveFile {
 }
 
 func safeBackupArchiveName(name string) bool {
-	if name == "" || filepath.Base(name) != name {
-		return false
+	return filepath.Base(name) == name && backupArchiveNamePattern.MatchString(name)
+}
+
+func backupArchivePath(dir, name string) (string, error) {
+	if !safeBackupArchiveName(name) {
+		return "", errors.New("invalid archive name")
 	}
-	if !strings.HasPrefix(name, backupArchivePrefix) || !strings.HasSuffix(name, ".zip") {
-		return false
+	base, err := filepath.Abs(dir)
+	if err != nil {
+		return "", fmt.Errorf("resolve backup directory: %w", err)
 	}
-	return !strings.Contains(name, "..")
+	target := filepath.Join(base, name)
+	rel, err := filepath.Rel(base, target)
+	if err != nil || rel != name {
+		return "", errors.New("archive path escapes backup directory")
+	}
+	return target, nil
 }
