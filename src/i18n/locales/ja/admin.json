@@ -1126,6 +1126,7 @@
     "disableAction": "チャネルを無効化",
     "disabledSuccess": "決済チャネルを無効化しました",
     "removed": "決済チャネルを削除しました",
+    "reorderFailed": "決済チャネルの順序を保存できませんでした。",
     "updatedAt": "{{date}} 更新",
     "removeTitle": "決済チャネルを削除しますか？",
     "removeBody": "「{{name}}」を削除しますか？先に紐づく決済方法と処理中の注文を解消してください。",

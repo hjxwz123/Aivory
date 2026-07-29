@@ -1126,6 +1126,7 @@
     "disableAction": "Désactiver le canal",
     "disabledSuccess": "Canal de paiement désactivé",
     "removed": "Canal de paiement supprimé",
+    "reorderFailed": "Impossible d’enregistrer l’ordre des canaux de paiement.",
     "updatedAt": "Mis à jour le {{date}}",
     "removeTitle": "Supprimer le canal de paiement ?",
     "removeBody": "Supprimer « {{name}} » ? Retirez d’abord ses modes de paiement liés et ses commandes actives.",

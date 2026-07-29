@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
-import { ArrowDown, ArrowUp, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react'
+import { Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react'
 
 import { adminApi, ApiError } from '@/api'
 import type { ApiPaymentChannel, ApiPaymentMethod, ApiPaymentProvider } from '@/api/types'
+import { AdminSortableList } from '@/components/admin/AdminSortableList'
 import { IconUploader } from '@/components/admin/icon-uploader'
 import { PaymentMethodIcon } from '@/components/payment/payment-method-icon'
 import { Badge } from '@/components/ui/badge'
@@ -83,8 +84,6 @@ export default function AdminPaymentMethods() {
   const savingRef = useRef(false)
   const [deleting, setDeleting] = useState(false)
   const deletingRef = useRef(false)
-  const [reordering, setReordering] = useState(false)
-  const reorderingRef = useRef(false)
 
   async function load() {
     setLoading(true)
@@ -235,26 +234,15 @@ export default function AdminPaymentMethods() {
     }
   }
 
-  async function move(index: number, direction: -1 | 1) {
-    if (reorderingRef.current) return
-    const target = index + direction
-    if (target < 0 || target >= rows.length) return
-    const previous = rows
-    const next = [...rows]
-    const [item] = next.splice(index, 1)
-    next.splice(target, 0, item)
-    setRows(next.map((row, sortOrder) => ({ ...row, sort_order: sortOrder })))
-    reorderingRef.current = true
-    setReordering(true)
-    try {
-      await adminApi.reorderPaymentMethods(next.map((row) => row.id))
-    } catch (error) {
-      setRows(previous)
+  function setOrderedRows(next: ApiPaymentMethod[]) {
+    setRows(next.map((row, sortOrder) => row.sort_order === sortOrder ? row : { ...row, sort_order: sortOrder }))
+  }
+
+  function persistOrder(next: ApiPaymentMethod[], prev: ApiPaymentMethod[]) {
+    void adminApi.reorderPaymentMethods(next.map((row) => row.id)).catch((error) => {
+      setRows(prev)
       toast.error(error instanceof ApiError ? error.message : t('admin:paymentMethods.reorderFailed'))
-    } finally {
-      reorderingRef.current = false
-      setReordering(false)
-    }
+    })
   }
 
   async function saveCardPurchaseUrl() {
@@ -352,15 +340,24 @@ export default function AdminPaymentMethods() {
             <Button className="mt-4 rounded-[8px]" size="sm" onClick={openNew}>{t('admin:paymentMethods.new')}</Button>
           </div>
         ) : (
-          <ul className="divide-y divide-[var(--color-divider)] overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]">
-            {rows.map((row, index) => {
+          <AdminSortableList
+            items={rows}
+            onItemsChange={setOrderedRows}
+            onOrderCommit={persistOrder}
+            dragHandleLabel={t('admin:common.dragHandle')}
+            moveUpLabel={t('admin:common.moveUp')}
+            moveDownLabel={t('admin:common.moveDown')}
+            mobileDragOnly
+            listClassName="overflow-hidden"
+            rowClassName="grid grid-cols-[2.75rem_auto_minmax(0,1fr)] items-center gap-x-1 gap-y-2 px-2 py-3 sm:grid-cols-[auto_auto_auto_minmax(0,1fr)_auto] sm:gap-3 sm:px-4"
+            renderItem={(row) => {
               const channel = channelFor(row.channel_id)
               return (
-                <li key={row.id} className="grid grid-cols-[auto_minmax(0,1fr)] gap-3 px-3 py-3 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-center sm:px-4">
-                  <span className="inline-flex size-8 items-center justify-center rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)]">
+                <>
+                  <span className="col-start-2 row-start-1 inline-flex size-8 items-center justify-center rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)] sm:col-start-auto sm:row-start-auto">
                     <PaymentMethodIcon icon={row.icon} size={16} />
                   </span>
-                  <div className="min-w-0">
+                  <div className="col-start-3 row-start-1 min-w-0 sm:col-start-auto sm:row-start-auto">
                     <div className="flex min-w-0 flex-wrap items-center gap-2">
                       <span className="min-w-0 break-words text-[13px] font-medium text-[var(--color-fg)] [overflow-wrap:anywhere]">{row.name}</span>
                       <Badge size="xs" variant="info">{t(`admin:paymentProviders.${row.provider}`)}</Badge>
@@ -372,13 +369,7 @@ export default function AdminPaymentMethods() {
                       {t('admin:paymentMethods.boundChannel', { name: channel?.name ?? row.channel_id })}
                     </p>
                   </div>
-                  <div className="col-span-2 flex items-center justify-end gap-1 sm:col-span-1">
-                    <Button className="rounded-[8px] max-sm:size-11" variant="ghost" size="icon-sm" disabled={reordering || index === 0} title={t('admin:common.moveUp')} aria-label={t('admin:common.moveUp')} onClick={() => void move(index, -1)}>
-                      <ArrowUp size={14} aria-hidden />
-                    </Button>
-                    <Button className="rounded-[8px] max-sm:size-11" variant="ghost" size="icon-sm" disabled={reordering || index === rows.length - 1} title={t('admin:common.moveDown')} aria-label={t('admin:common.moveDown')} onClick={() => void move(index, 1)}>
-                      <ArrowDown size={14} aria-hidden />
-                    </Button>
+                  <div className="col-span-3 row-start-2 flex items-center justify-end gap-1 sm:col-span-1 sm:col-start-auto sm:row-start-auto">
                     <Button className="rounded-[8px] max-sm:size-11" variant="ghost" size="icon-sm" title={t('admin:common.edit')} aria-label={t('admin:common.edit')} onClick={() => openEdit(row)}>
                       <Pencil size={14} aria-hidden />
                     </Button>
@@ -386,10 +377,10 @@ export default function AdminPaymentMethods() {
                       <Trash2 size={14} aria-hidden />
                     </Button>
                   </div>
-                </li>
+                </>
               )
-            })}
-          </ul>
+            }}
+          />
         )}
       </section>
 

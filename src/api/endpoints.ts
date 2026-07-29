@@ -606,11 +606,13 @@ export const adminApi = {
   paymentChannels: () => api<ApiPaymentChannel[]>('/admin/payment-channels'),
   preparePaymentChannel: () =>
     api<Pick<ApiPaymentChannel, 'id' | 'webhook_url'>>('/admin/payment-channels/prepare', { method: 'POST' }),
-  createPaymentChannel: (body: Pick<ApiPaymentChannel, 'id' | 'name' | 'provider' | 'environment' | 'config' | 'enabled'>) =>
+  createPaymentChannel: (body: Pick<ApiPaymentChannel, 'id' | 'name' | 'provider' | 'environment' | 'config' | 'enabled' | 'sort_order'>) =>
     api<ApiPaymentChannel>('/admin/payment-channels', { method: 'POST', body }),
+  reorderPaymentChannels: (ids: string[]) =>
+    api<{ ok: true }>('/admin/payment-channels/reorder', { method: 'PATCH', body: { ids } }),
   updatePaymentChannel: (
     id: string,
-    body: Partial<Pick<ApiPaymentChannel, 'name' | 'provider' | 'environment' | 'config' | 'enabled'>>,
+    body: Partial<Pick<ApiPaymentChannel, 'name' | 'provider' | 'environment' | 'config' | 'enabled' | 'sort_order'>>,
   ) => api<ApiPaymentChannel>(`/admin/payment-channels/${encodeURIComponent(id)}`, { method: 'PATCH', body }),
   removePaymentChannel: (id: string) =>
     api<{ ok: true }>(`/admin/payment-channels/${encodeURIComponent(id)}`, { method: 'DELETE' }),
