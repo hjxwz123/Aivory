@@ -468,6 +468,9 @@ func Migrate(db *sql.DB) error {
 	if err := migrateOfficialToolDefinitions(db); err != nil {
 		return fmt.Errorf("migrate official tool definitions: %w", err)
 	}
+	if err := migrateRetiredKnowledgeBaseSearchTool(db); err != nil {
+		return fmt.Errorf("remove retired knowledge-base search tool: %w", err)
+	}
 	// One-time backfill: accounts that exist only because of an OAuth login were
 	// created with a random password they never chose, so mark them as
 	// password-unset to force them through the set-password gate. Guarded by a

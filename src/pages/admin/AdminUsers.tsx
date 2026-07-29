@@ -40,6 +40,7 @@ import { useAuth } from '@/store/auth'
 import { formatDateTime, cn } from '@/lib/utils'
 import { envNum } from '@/lib/env-config'
 import { PanelFallback } from '@/components/ui/panel-fallback'
+import { Skeleton } from '@/components/ui/skeleton'
 
 // A user counts as online if they made an authenticated request in the last 5
 // minutes (the middleware refreshes last_seen_at at most once/min).
@@ -83,6 +84,10 @@ export default function AdminUsers() {
   const resetting2faRef = useRef(false)
   // Read-only user info dialog.
   const [infoRow, setInfoRow] = useState<ApiUser | null>(null)
+  const [infoDetails, setInfoDetails] = useState<ApiUser | null>(null)
+  const [infoLoading, setInfoLoading] = useState(false)
+  const [infoLoadFailed, setInfoLoadFailed] = useState(false)
+  const infoRequestRef = useRef(0)
   // Delete-user confirmation.
   const [deleteRow, setDeleteRow] = useState<ApiUser | null>(null)
   const [deleting, setDeleting] = useState(false)
@@ -135,6 +140,10 @@ export default function AdminUsers() {
   useEffect(() => {
     void load(committedQuery, page)
   }, [committedQuery, page, load])
+
+  useEffect(() => () => {
+    infoRequestRef.current += 1
+  }, [])
 
   // While any account is being purged in the background, refresh periodically
   // (silently — no loading flash) so the row disappears once the job completes,
@@ -271,6 +280,36 @@ export default function AdminUsers() {
     setEditExpiry(expiryToInput(u.group_expires_at ?? 0))
     setEditPassword('')
     setEditCredits(u.credits_permanent ?? 0)
+  }
+
+  function closeInfo() {
+    infoRequestRef.current += 1
+    setInfoRow(null)
+    setInfoDetails(null)
+    setInfoLoading(false)
+    setInfoLoadFailed(false)
+  }
+
+  function openInfo(u: ApiUser) {
+    setInfoRow(u)
+    void loadInfo(u)
+  }
+
+  async function loadInfo(u: ApiUser) {
+    const requestID = ++infoRequestRef.current
+    setInfoDetails(null)
+    setInfoLoading(true)
+    setInfoLoadFailed(false)
+    try {
+      const detail = await adminApi.user(u.id)
+      if (requestID !== infoRequestRef.current) return
+      setInfoDetails(detail)
+    } catch {
+      if (requestID !== infoRequestRef.current) return
+      setInfoLoadFailed(true)
+    } finally {
+      if (requestID === infoRequestRef.current) setInfoLoading(false)
+    }
   }
 
   async function submitEdit() {
@@ -428,7 +467,7 @@ export default function AdminUsers() {
                     </div>
                   </div>
                   <div className="hidden items-center gap-0.5 md:flex">
-                    <IconAction label={t('admin:users.viewInfo')} onClick={() => setInfoRow(u)}>
+                    <IconAction label={t('admin:users.viewInfo')} onClick={() => openInfo(u)}>
                       <Info size={15} aria-hidden />
                     </IconAction>
                     <IconAction label={t('admin:common.edit')} onClick={() => openEdit(u)}>
@@ -494,7 +533,7 @@ export default function AdminUsers() {
                         <MoreHorizontal size={19} aria-hidden />
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end" className="w-[min(17rem,calc(100vw-2rem))]">
-                        <DropdownMenuItem className="min-h-11" onClick={() => setInfoRow(u)}>
+                        <DropdownMenuItem className="min-h-11" onClick={() => openInfo(u)}>
                           <Info size={16} aria-hidden />
                           {t('admin:users.viewInfo')}
                         </DropdownMenuItem>
@@ -730,56 +769,73 @@ export default function AdminUsers() {
       </Dialog>
 
       {/* User info (read-only) */}
-      <Dialog open={Boolean(infoRow)} onOpenChange={(o) => !o && setInfoRow(null)}>
+      <Dialog open={Boolean(infoRow)} onOpenChange={(o) => !o && closeInfo()}>
         <DialogContent size="sm">
           <DialogHeader>
-            <DialogTitle>{infoRow ? infoRow.name || infoRow.email : ''}</DialogTitle>
+            <DialogTitle>{infoDetails?.name || infoDetails?.email || infoRow?.name || infoRow?.email || ''}</DialogTitle>
           </DialogHeader>
           <DialogBody>
-            {infoRow ? (
+            {infoLoading ? (
+              <UserInfoSkeleton label={t('common:common.loading')} />
+            ) : infoLoadFailed ? (
+              <div className="flex min-h-40 flex-col items-center justify-center gap-3 text-center" role="alert">
+                <p className="max-w-xs text-sm leading-relaxed text-[var(--color-fg-muted)]">
+                  {t('admin:users.info.loadFailed')}
+                </p>
+                <Button variant="secondary" size="sm" onClick={() => infoRow && void loadInfo(infoRow)}>
+                  {t('common:actions.tryAgain')}
+                </Button>
+              </div>
+            ) : infoDetails ? (
               <dl className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] gap-x-4 gap-y-2.5 text-sm sm:gap-x-6">
-                <InfoLine label={t('admin:users.fields.email')} value={infoRow.email} mono />
+                <InfoLine label={t('admin:users.fields.email')} value={infoDetails.email} mono />
                 <InfoLine
                   label={t('admin:users.fields.role')}
-                  value={t(`admin:users.role${infoRow.role === 'admin' ? 'Admin' : 'User'}`)}
+                  value={t(`admin:users.role${infoDetails.role === 'admin' ? 'Admin' : 'User'}`)}
                 />
-                <InfoLine label={t('admin:users.info.status')} value={infoRow.status} />
+                <InfoLine label={t('admin:users.info.status')} value={infoDetails.status} />
                 <InfoLine
                   label={t('admin:users.fields.group')}
-                  value={groups.find((g) => g.id === infoRow.group_id)?.name ?? '—'}
+                  value={groups.find((g) => g.id === infoDetails.group_id)?.name ?? '—'}
                 />
                 <InfoLine
                   label={t('admin:users.info.expiry')}
                   value={
-                    (infoRow.group_expires_at ?? 0) > 0
-                      ? formatDateTime((infoRow.group_expires_at ?? 0) * 1000)
+                    (infoDetails.group_expires_at ?? 0) > 0
+                      ? formatDateTime((infoDetails.group_expires_at ?? 0) * 1000)
                       : t('admin:users.info.permanent')
                   }
                 />
                 <InfoLine
                   label={t('admin:users.fields.permanentCredits')}
-                  value={(infoRow.credits_permanent ?? 0).toLocaleString()}
+                  value={formatCredits(infoDetails.credits_permanent ?? 0)}
                 />
-                {(() => {
-                  const g = groups.find((x) => x.id === infoRow.group_id)
-                  return g && g.credit_allowance > 0 ? (
-                    <InfoLine label={t('admin:users.info.allowance')} value={g.credit_allowance.toLocaleString()} />
-                  ) : null
-                })()}
+                <InfoLine
+                  label={t('admin:users.info.allowance')}
+                  value={
+                    infoDetails.credits_timed
+                      ? `${formatCredits(infoDetails.credits_timed.remaining)} / ${formatCredits(infoDetails.credits_timed.allowance)}`
+                      : '—'
+                  }
+                />
                 <InfoLine
                   label={t('admin:users.info.twofa')}
-                  value={infoRow.totp_enabled ? t('admin:users.info.enabled') : t('admin:users.info.disabled')}
+                  value={infoDetails.totp_enabled ? t('admin:users.info.enabled') : t('admin:users.info.disabled')}
                 />
                 <InfoLine
                   label={t('admin:users.info.lastSeen')}
-                  value={infoRow.last_seen_at ? formatDateTime(infoRow.last_seen_at * 1000) : t('admin:users.neverSeen')}
+                  value={
+                    infoDetails.last_seen_at || infoRow?.last_seen_at
+                      ? formatDateTime((infoDetails.last_seen_at || infoRow?.last_seen_at || 0) * 1000)
+                      : t('admin:users.neverSeen')
+                  }
                 />
-                <InfoLine label={t('admin:users.info.created')} value={formatDateTime(infoRow.created_at * 1000)} />
+                <InfoLine label={t('admin:users.info.created')} value={formatDateTime(infoDetails.created_at * 1000)} />
               </dl>
             ) : null}
           </DialogBody>
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setInfoRow(null)}>
+            <Button variant="ghost" onClick={closeInfo}>
               {t('common:actions.close', { defaultValue: 'Close' })}
             </Button>
           </DialogFooter>
@@ -876,6 +932,23 @@ function InfoLine({ label, value, mono }: { label: string; value: string; mono?:
       <dd className={cn('min-w-0 break-words text-right text-[var(--color-fg)]', mono && 'font-mono text-[12.5px]')}>{value}</dd>
     </>
   )
+}
+
+function UserInfoSkeleton({ label }: { label: string }) {
+  return (
+    <div className="space-y-2.5 py-0.5" role="status" aria-label={label}>
+      {Array.from({ length: 10 }, (_, index) => (
+        <div key={index} className="flex h-4 items-center justify-between gap-6" aria-hidden>
+          <Skeleton shape="line" className="h-3 w-20 sm:w-24" />
+          <Skeleton shape="line" className="h-3 w-28 sm:w-36" />
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function formatCredits(value: number): string {
+  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 6 }).format(value)
 }
 
 // Membership expiry conversions between the API's unix seconds and the

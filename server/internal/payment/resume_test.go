@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -122,6 +123,13 @@ func TestWaffoResumeCheckoutReusesSessionAndRefreshesOnlyToken(t *testing.T) {
 			}
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				t.Fatalf("decode Waffo session query: %v", err)
+			}
+			if strings.Contains(body.Query, "$sessionId: ID!") {
+				writeJSONResponse(t, w, map[string]any{"errors": []any{map[string]any{"message": `Unknown type "ID".`}}})
+				return
+			}
+			if !strings.Contains(body.Query, "$sessionId: String!") {
+				t.Fatalf("Waffo session query uses an unsupported variable type: %s", body.Query)
 			}
 			if body.Variables["sessionId"] != sessionID {
 				t.Fatalf("Waffo session query = %#v", body)

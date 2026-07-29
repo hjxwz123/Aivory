@@ -315,10 +315,6 @@ func TestEmptyEffectiveOfficialSelectionUsesUnifiedNoToolsPipeline(t *testing.T)
 	]`, model.ID); err != nil {
 		t.Fatalf("configure official tools: %v", err)
 	}
-	if _, err := db.Exec(`UPDATE conversations SET rag_mode='tool' WHERE id=?`, conv.ID); err != nil {
-		t.Fatalf("set tool RAG mode: %v", err)
-	}
-
 	doc, err := store.CreateDocument(ctx, db, store.Document{
 		ConversationID: conv.ID,
 		Filename:       "official-empty-context.txt",
@@ -329,7 +325,7 @@ func TestEmptyEffectiveOfficialSelectionUsesUnifiedNoToolsPipeline(t *testing.T)
 	if err != nil {
 		t.Fatalf("create RAG document: %v", err)
 	}
-	const ragText = "official-empty-rag-fallback-marker"
+	const ragText = "official-empty-rag-marker"
 	if err := store.CreateChunk(ctx, db, doc.ID, "", conv.ID, 0, ragText, ""); err != nil {
 		t.Fatalf("create RAG chunk: %v", err)
 	}
@@ -402,7 +398,7 @@ func TestEmptyEffectiveOfficialSelectionUsesUnifiedNoToolsPipeline(t *testing.T)
 		}
 	}
 	if len(request.RAGSnippets) != 1 || !strings.Contains(request.RAGSnippets[0].Snippet, ragText) {
-		t.Fatalf("rag_mode=tool did not fall back to inline retrieval: %+v", request.RAGSnippets)
+		t.Fatalf("automatic RAG was disabled with the tool surface: %+v", request.RAGSnippets)
 	}
 	historyJSON, _ := json.Marshal(request.History)
 	for _, forbidden := range []string{"legacy_disallowed_tool", "legacy-tool-output"} {

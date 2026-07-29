@@ -188,7 +188,6 @@
         "web_fetch": "网页读取",
         "python_execute": "Python 解释器",
         "image_generate": "图片生成",
-        "search_knowledge_base": "知识库检索",
         "use_skill": "技能调用",
         "save_memory": "保存记忆"
       },
@@ -197,7 +196,6 @@
         "web_fetch": "读取指定网页的主要内容。",
         "python_execute": "运行 Python，完成分析、计算和文件生成。",
         "image_generate": "使用已配置的图片模型生成或编辑图片。",
-        "search_knowledge_base": "检索用户当前选择的知识库。",
         "use_skill": "按需加载已绑定技能的完整说明。",
         "save_memory": "将长期有效的用户信息保存到记忆。"
       }
@@ -386,7 +384,8 @@
       "status": "状态",
       "expiry": "到期",
       "permanent": "永久",
-      "allowance": "积分额度",
+      "allowance": "限时积分（剩余 / 额度）",
+      "loadFailed": "无法加载最新用户信息。",
       "twofa": "两步验证",
       "enabled": "已启用",
       "disabled": "未启用",

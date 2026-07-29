@@ -686,7 +686,18 @@ func getUserAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, user)
+	group, err := store.GetUserGroup(r.Context(), d.DB, groupOrDefault(user.GroupID))
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, struct {
+		*store.User
+		CreditsTimed timedCreditsSnapshot `json:"credits_timed"`
+	}{
+		User:         user,
+		CreditsTimed: currentTimedCredits(r.Context(), d, user.ID, group),
+	})
 }
 
 func reorderUsersAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
@@ -1455,6 +1466,15 @@ func applyAdminSettingsPatch(d Deps, body map[string]json.RawMessage, skipNull b
 				if err := ensureEmbeddingModelSettingCanChange(d, v); err != nil {
 					return 0, err
 				}
+			case "disabled_tools":
+				normalized, err := store.NormalizeBuiltinTools(v)
+				if err != nil {
+					return 0, errInvalidInput
+				}
+				if normalized == nil {
+					normalized = json.RawMessage("[]")
+				}
+				v = normalized
 			}
 			if err := store.SetSetting(d.DB, k, json.RawMessage(v)); err != nil {
 				return n, err

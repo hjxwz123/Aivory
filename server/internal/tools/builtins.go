@@ -35,7 +35,6 @@ import (
 	"aivory/server/internal/config"
 	"aivory/server/internal/envcfg"
 	"aivory/server/internal/llm"
-	"aivory/server/internal/rag"
 	"aivory/server/internal/sandbox"
 	"aivory/server/internal/store"
 )
@@ -55,7 +54,6 @@ var (
 	// operator override for gateways with a stricter custom boundary.
 	imageImageInputImageCap     = envcfg.Int("AIVORY_TOOLS_IMAGE_IMAGE_INPUT_IMAGE_CAP", 0)
 	fetchRemoteImageDownloadCap = envcfg.Int64("AIVORY_TOOLS_FETCHREMOTEIMAGE_DOWNLOAD_CAP", 32<<20)
-	inTopK2                     = envcfg.Int("AIVORY_TOOLS_IN_TOP_K_2", 5)
 	saveMemoryConfidence        = envcfg.F64("AIVORY_TOOLS_CONFIDENCE", 0.95)
 )
 
@@ -1781,47 +1779,6 @@ func orDefaultStr(s, def string) string {
 		return def
 	}
 	return s
-}
-
-// searchKnowledgeBaseTool — design.md §4.11 (optional tool-mode path). Calls
-// the same rag.Retrieve the orchestrator uses for the always-on inject path.
-type searchKnowledgeBaseTool struct {
-	rag *rag.Service
-}
-
-func (t *searchKnowledgeBaseTool) Name() string { return "search_knowledge_base" }
-func (t *searchKnowledgeBaseTool) Description() string {
-	return "Search the user's attached knowledge bases or conversation files. Use when the question is about uploaded documents. Returns numbered snippets."
-}
-func (t *searchKnowledgeBaseTool) InputSchema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"},"top_k":{"type":"integer","default":5}},"required":["query"]}`)
-}
-
-type kbInput struct {
-	Query string `json:"query"`
-	TopK  int    `json:"top_k"`
-}
-
-func (t *searchKnowledgeBaseTool) Execute(ctx context.Context, input []byte, tc *llm.ToolContext) (string, []llm.Citation, error) {
-	var in kbInput
-	_ = json.Unmarshal(input, &in)
-	if in.TopK <= 0 {
-		in.TopK = inTopK2
-	}
-	snippets, err := tc.RAG.Retrieve(ctx, tc.UserID, tc.ConvID, tc.KBIDs, in.Query, in.TopK)
-	if err != nil {
-		return "", nil, err
-	}
-	out := strings.Builder{}
-	cites := []llm.Citation{}
-	for _, c := range snippets {
-		out.WriteString(fmt.Sprintf("[%d] %s\n%s\n\n", c.Index, c.Title, c.Snippet))
-		cites = append(cites, llm.Citation{ID: c.ID, Index: c.Index, Title: c.Title, URL: c.URL, Snippet: c.Snippet, Source: c.Source})
-	}
-	if out.Len() == 0 {
-		return "No matching content found in the user's documents.", nil, nil
-	}
-	return out.String(), cites, nil
 }
 
 // useSkillTool — design.md §4.17.

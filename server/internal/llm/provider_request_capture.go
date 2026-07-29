@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
@@ -42,6 +43,10 @@ type providerRequestSnapshot struct {
 	// requests that completed a stream — only those become usage rows.
 	Usage    Usage
 	HasUsage bool
+	// Error is populated for any failed upstream attempt, whether a later channel
+	// fallback recovered the turn or the whole turn failed. Keeping it on the
+	// exact attempt preserves both channel outcomes for admin diagnostics.
+	Error string
 }
 
 type providerRequestRecorder struct {
@@ -50,8 +55,8 @@ type providerRequestRecorder struct {
 	all     []providerRequestSnapshot
 	attempt int
 	// captureAll keeps the sanitized header/body on EVERY list entry (admin
-	// enabled full success-request logging). Off, list entries keep only
-	// method/URL/usage — `last` always keeps the full snapshot for the error row.
+	// enabled full success-request logging). Off, successful entries keep only
+	// method/URL/usage; attachFailure restores full diagnostics for error entries.
 	captureAll bool
 }
 
@@ -104,6 +109,34 @@ func attachProviderRequestUsage(ctx context.Context, u Usage) {
 		return
 	}
 	rec.attachUsage(u)
+}
+
+// recordProviderRequestFailure pins a non-cancellation transport, HTTP, or
+// response-parsing failure to the most recent sent request attempt.
+func recordProviderRequestFailure(ctx context.Context, fallback bool, err error) {
+	if err == nil || ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return
+	}
+	rec, _ := ctx.Value(providerRequestRecorderKey{}).(*providerRequestRecorder)
+	if rec == nil {
+		return
+	}
+	rec.attachFailure(fallback, truncErr(err.Error()))
+}
+
+// recordProviderRequestBuildFailure records an attempt that failed before an
+// *http.Request existed. It must always create a new snapshot: attaching it to
+// the recorder's last request would incorrectly turn a prior successful round
+// into an error when a later tool-loop request cannot be constructed.
+func recordProviderRequestBuildFailure(ctx context.Context, fallback bool, err error) {
+	if err == nil || ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return
+	}
+	rec, _ := ctx.Value(providerRequestRecorderKey{}).(*providerRequestRecorder)
+	if rec == nil {
+		return
+	}
+	rec.appendFailure(fallback, truncErr(err.Error()))
 }
 
 func (r *providerRequestRecorder) snapshot() providerRequestSnapshot {
@@ -175,6 +208,46 @@ func (r *providerRequestRecorder) attachUsage(u Usage) {
 	if n := len(r.all); n > 0 && r.all[n-1].Attempt == r.attempt {
 		r.all[n-1].Usage = u
 		r.all[n-1].HasUsage = true
+	}
+}
+
+func (r *providerRequestRecorder) attachFailure(fallback bool, message string) {
+	if r == nil || strings.TrimSpace(message) == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// sendProviderRequest recorded this attempt immediately before the failure.
+	// Restore the full sanitized request onto the list entry even when captureAll
+	// is off: error rows always retain diagnostics, while success rows remain
+	// governed by the administrator's request-logging setting.
+	if r.attempt > 0 && r.last.Attempt == r.attempt && r.last.Fallback == fallback && r.last.Error == "" {
+		r.last.Error = message
+		if n := len(r.all); n > 0 && r.all[n-1].Attempt == r.attempt {
+			r.all[n-1] = r.last
+		}
+		return
+	}
+
+	// Preserve a failure even if the matching request snapshot was not retained.
+	r.attempt++
+	r.last = providerRequestSnapshot{Attempt: r.attempt, Fallback: fallback, Error: message}
+	if len(r.all) < maxProviderRequestSnapshots {
+		r.all = append(r.all, r.last)
+	}
+}
+
+func (r *providerRequestRecorder) appendFailure(fallback bool, message string) {
+	if r == nil || strings.TrimSpace(message) == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.attempt++
+	r.last = providerRequestSnapshot{Attempt: r.attempt, Fallback: fallback, Error: message}
+	if len(r.all) < maxProviderRequestSnapshots {
+		r.all = append(r.all, r.last)
 	}
 }
 

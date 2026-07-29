@@ -146,7 +146,7 @@ func TestMessagesHTTPStoppedRootEditBranchAllowsFollowUp(t *testing.T) {
 	providers := llm.NewRegistry(logger)
 	provider := &branchHTTPProvider{firstStarted: make(chan struct{})}
 	providers.Register(provider)
-	toolRegistry := tools.NewRegistry(db, nil, cfg, logger)
+	toolRegistry := tools.NewRegistry(db, cfg, logger)
 	orchestrator := llm.NewOrchestrator(db, providers, toolRegistry, nil, memoryCache, nil, nil, nil, logger)
 	authService := authsvc.New(secret, cfg.AccessTTL, cfg.RefreshTTL, memoryCache)
 	token, _, err := authService.IssueAccess(user.ID, user.Role, user.TokenVer)

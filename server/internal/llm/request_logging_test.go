@@ -2,6 +2,8 @@ package llm
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"net/http"
 	"path/filepath"
 	"testing"
@@ -81,6 +83,10 @@ func TestPerRequestUsageRowsSplitAndTotals(t *testing.T) {
 		// A request that never completed a stream (e.g. failed then fell back):
 		// no usage attached → no row of its own.
 		{Method: "POST", URL: "https://api/3", Body: "b3", Attempt: 3, Fallback: true},
+		// A failed stream can report partial usage before returning its error. It
+		// remains an error-only row and must not share the successful turn's bill.
+		{Method: "POST", URL: "https://api/4", Body: "b4", Attempt: 4,
+			Usage: Usage{InputTokens: 9000, OutputTokens: 900}, HasUsage: true, Error: "primary failed"},
 	}
 	// Turn totals carry MORE than the two attaches (residual 500/100 from an
 	// overflow/fallback round) — the last row must absorb it.
@@ -90,7 +96,7 @@ func TestPerRequestUsageRowsSplitAndTotals(t *testing.T) {
 
 	rows := perRequestUsageRows(snaps, model, total, totalCost, totalCredits, true)
 	if len(rows) != 2 {
-		t.Fatalf("rows = %d, want 2 (only requests with usage)", len(rows))
+		t.Fatalf("rows = %d, want 2 (only successful requests with usage)", len(rows))
 	}
 	if rows[0].Usage.InputTokens != 1000 || rows[0].Usage.OutputTokens != 200 {
 		t.Fatalf("row0 usage = %+v", rows[0].Usage)
@@ -118,6 +124,15 @@ func TestPerRequestUsageRowsSplitAndTotals(t *testing.T) {
 	}
 	if channelID, fallback := requestUsageChannel(rows[1], primaryID, fallbackID, true); channelID != fallbackID || !fallback {
 		t.Fatalf("fallback row attribution = %q/%v, want %q/true", channelID, fallback, fallbackID)
+	}
+	failures := providerFailureUsageLogs(snaps, store.UsageLog{
+		UserID: "u1", MessageID: "msg1", ModelID: "m1", Purpose: "chat", Currency: "USD",
+	}, primaryID, fallbackID)
+	if len(failures) != 1 || failures[0].Status != "error" || failures[0].Error != "primary failed" {
+		t.Fatalf("failure rows = %+v", failures)
+	}
+	if failures[0].ChannelID != primaryID || failures[0].Fallback || failures[0].Cost != 0 || failures[0].Credits != 0 {
+		t.Fatalf("failure attribution/billing = %+v", failures[0])
 	}
 
 	// includeReq=false → no request fields on any row.
@@ -159,6 +174,28 @@ func TestProviderRequestRecorderPerRequestList(t *testing.T) {
 	}
 	if rec.snapshot().Body == "" {
 		t.Fatal("last snapshot must always keep the full body for the error row")
+	}
+
+	// Error snapshots retain their full sanitized request in the ordered list
+	// even when success request logging is disabled.
+	recErr := newProviderRequestRecorder()
+	recErr.record(mustHTTPRequest(t, "https://api.example/v1/fail", `{"secret":"safe"}`))
+	recErr.attachFailure(false, "upstream failed")
+	failed := recErr.snapshots()
+	if len(failed) != 1 || failed[0].Error != "upstream failed" || failed[0].Body == "" {
+		t.Fatalf("error snapshot lost diagnostics: %+v", failed)
+	}
+
+	// A later request-build failure is a new attempt and must not overwrite the
+	// preceding successful round merely because both use the primary channel.
+	recBuild := newProviderRequestRecorder()
+	recBuild.record(mustHTTPRequest(t, "https://api.example/v1/first", `{}`))
+	recBuild.attachUsage(Usage{InputTokens: 2, OutputTokens: 1})
+	buildCtx := contextWithProviderRequestRecorder(context.Background(), recBuild)
+	recordProviderRequestBuildFailure(buildCtx, false, errors.New("build failed"))
+	built := recBuild.snapshots()
+	if len(built) != 2 || built[0].Error != "" || !built[0].HasUsage || built[1].Error != "build failed" || built[1].Attempt != 2 {
+		t.Fatalf("request-build failure attribution = %+v", built)
 	}
 
 	// captureAll on → bodies kept per entry.
