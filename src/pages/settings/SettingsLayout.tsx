@@ -105,7 +105,7 @@ export default function SettingsDialog() {
             // Mobile: full-screen sheet. Desktop: centered panel.
             'inset-0 flex flex-col',
             'sm:inset-auto sm:left-1/2 sm:top-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2',
-            'sm:w-[min(94vw,60rem)] sm:h-[min(88vh,44rem)] sm:flex-row',
+            'sm:w-[min(94vw,60rem)] sm:h-[min(44rem,calc(100dvh-2rem))] sm:max-h-[calc(100dvh-2rem)] sm:flex-row',
             'sm:rounded-popup sm:border sm:border-[var(--color-border)] sm:shadow-[var(--shadow-xl)]',
             'data-[state=open]:animate-[pop-in_220ms_var(--ease-out)]',
             'data-[state=closed]:animate-[fade-out_140ms_var(--ease-in)]',
@@ -154,7 +154,7 @@ export default function SettingsDialog() {
                       'sm:w-full',
                       'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
                       active
-                        ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)] sm:shadow-none sm:bg-[var(--color-bg-muted)]'
+                        ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)] ring-1 ring-inset ring-[var(--color-accent)] sm:shadow-none sm:bg-[var(--color-bg-muted)]'
                         : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-bg-muted)]/60',
                     )}
                   >
@@ -182,7 +182,10 @@ export default function SettingsDialog() {
           </DialogPrimitive.Close>
           {/* scroll-padding clears the pinned page header, so focus/anchor
               auto-scrolls land visible instead of underneath it. */}
-          <div ref={paneRef} className="relative min-h-0 min-w-0 flex-1 overflow-y-auto scrollbar-hover [scroll-padding-top:7.5rem]">
+          <div
+            ref={paneRef}
+            className="relative min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain scrollbar-thin [scroll-padding-top:7.5rem]"
+          >
             <div
               className={cn(
                 // No top padding here — the pinned header carries it instead.
