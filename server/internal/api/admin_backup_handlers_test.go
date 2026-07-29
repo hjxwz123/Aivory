@@ -383,6 +383,43 @@ func TestConfigExportImportMergesAdminConfigOnly(t *testing.T) {
 	}
 }
 
+func TestConfigImportRejectsLegacyJSON(t *testing.T) {
+	db := openMigrated(t, filepath.Join(t.TempDir(), "config-json.db"))
+	defer db.Close()
+	mustExec(t, db, `INSERT INTO settings(key,value) VALUES('search_api_key','"current-secret"')`)
+	d := Deps{DB: db, Config: config.Config{UploadDir: t.TempDir(), ArtifactDir: t.TempDir()}, Logger: log.New(io.Discard, "", 0)}
+
+	legacy := []byte(`{"format":"aivory-config","settings":{"search_api_key":"legacy-secret"}}`)
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	fw, err := mw.CreateFormFile("file", "config.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fw.Write(legacy); err != nil {
+		t.Fatal(err)
+	}
+	if err := mw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/config/import", &body)
+	req.Header.Set("content-type", mw.FormDataContentType())
+	importConfigAdmin(d, rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("legacy JSON import status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "expected a ZIP file") {
+		t.Fatalf("legacy JSON import error = %s", rec.Body.String())
+	}
+	var got string
+	mustQuery(t, db, `SELECT value FROM settings WHERE key='search_api_key'`).Scan(&got)
+	if got != `"current-secret"` {
+		t.Fatalf("legacy JSON import changed settings: %q", got)
+	}
+}
+
 func TestConfigImportProtectsIncompletePaymentOrdersAndRollsBack(t *testing.T) {
 	for _, status := range []string{store.PaymentOrderPending, store.PaymentOrderProcessing} {
 		t.Run(status, func(t *testing.T) {

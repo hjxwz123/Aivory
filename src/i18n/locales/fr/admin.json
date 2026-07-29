@@ -1082,7 +1082,7 @@
       },
       "import": {
         "title": "Importer la configuration",
-        "lead": "Importez une archive ZIP de configuration (anciens JSON acceptés). Les lignes sont fusionnées par ID ; utilisateurs, conversations, fichiers et journaux ne sont pas importés.",
+        "lead": "Importez une archive ZIP de configuration. Les lignes sont fusionnées par ID ; utilisateurs, conversations, fichiers et journaux ne sont pas importés.",
         "action": "Importer l'archive de config…",
         "invalid": "Ce fichier n'est pas un export de configuration Aivory valide.",
         "done": "Configuration importée ({{count}} lignes).",
