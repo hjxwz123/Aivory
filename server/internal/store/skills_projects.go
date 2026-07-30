@@ -128,6 +128,10 @@ func UpdateSkill(ctx context.Context, db *sql.DB, id string, s Skill) (*Skill, e
 	return GetSkill(ctx, db, id)
 }
 
+func ReorderSkills(ctx context.Context, db *sql.DB, ids []string) error {
+	return reorderAdminRecords(ctx, db, "skills", ids)
+}
+
 func isSkillNameUniqueErr(err error) bool {
 	return isUniqueIndexErr(err, "idx_skills_name_unique", "skills.name")
 }

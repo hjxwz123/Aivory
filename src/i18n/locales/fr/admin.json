@@ -9,6 +9,7 @@
     "createFirst": "Créez votre premier {{kind}}",
     "saved": "Enregistré",
     "failed": "Échec",
+    "reorderFailed": "Impossible d’enregistrer le nouvel ordre.",
     "dragHandle": "Faire glisser pour réordonner",
     "moveUp": "Monter",
     "moveDown": "Descendre",
@@ -118,8 +119,6 @@
       "extraParams": "Paramètres amont supplémentaires (JSON)",
       "extraParamsHint": "Objet JSON facultatif fusionné dans la requête amont de ce modèle. Priorité : les paramètres intégrés priment sur les mappages des contrôles, qui priment sur ces valeurs.",
       "dim": "Dimension",
-      "sortOrder": "Ordre d'affichage",
-      "sortOrderHint": "Les plus petits d'abord.",
       "priceIn": "Prix en entrée (par 1M de tokens)",
       "priceOut": "Prix en sortie (par 1M de tokens)",
       "priceCacheRead": "Lecture cache $/1M",
@@ -905,16 +904,15 @@
     "filters": {
       "all": "Tous",
       "unused": "Inutilisés",
-      "redeemed": "Utilisés",
-      "disabled": "Désactivés",
-      "expired": "Expirés"
+      "partial": "Partiellement utilisés",
+      "used": "Utilisés",
+      "invalid": "Invalides"
     },
     "status": {
       "unused": "Inutilisé",
-      "redeemed": "Utilisé",
       "partial": "Partiellement utilisé",
-      "disabled": "Désactivé",
-      "expired": "Expiré"
+      "used": "Utilisé",
+      "invalid": "Invalide"
     },
     "table": {
       "code": "Code",
@@ -1409,7 +1407,6 @@
     "empty": "Aucun style. Ajoutez-en un ci-dessus.",
     "namePlaceholder": "Nom du style (ex. Aquarelle)",
     "name": "Nom",
-    "order": "Ordre",
     "enabled": "Activé",
     "example": "Image d'exemple",
     "examplePlaceholder": "URL de l'image ou téléverser",

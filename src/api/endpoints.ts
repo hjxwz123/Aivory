@@ -703,6 +703,8 @@ export const adminApi = {
   imageStyles: () => api<ApiImageStyle[]>('/admin/image-styles'),
   createImageStyle: (body: Partial<ApiImageStyle>) =>
     api<ApiImageStyle>('/admin/image-styles', { method: 'POST', body }),
+  reorderImageStyles: (ids: string[]) =>
+    api<{ ok: true }>('/admin/image-styles/reorder', { method: 'PATCH', body: { ids } }),
   updateImageStyle: (id: string, body: Partial<ApiImageStyle>) =>
     api<ApiImageStyle>(`/admin/image-styles/${encodeURIComponent(id)}`, { method: 'PATCH', body }),
   removeImageStyle: (id: string) =>
@@ -710,6 +712,8 @@ export const adminApi = {
 
   skills: () => api<ApiSkill[]>('/admin/skills'),
   createSkill: (body: Partial<ApiSkill>) => api<ApiSkill>('/admin/skills', { method: 'POST', body }),
+  reorderSkills: (ids: string[]) =>
+    api<{ ok: true }>('/admin/skills/reorder', { method: 'PATCH', body: { ids } }),
   updateSkill: (id: string, body: Partial<ApiSkill>) =>
     api<ApiSkill>(`/admin/skills/${encodeURIComponent(id)}`, { method: 'PATCH', body }),
   removeSkill: (id: string) => api<{ ok: true }>(`/admin/skills/${encodeURIComponent(id)}`, { method: 'DELETE' }),
@@ -723,6 +727,8 @@ export const adminApi = {
 
   prompts: () => api<ApiPrompt[]>('/admin/prompts'),
   createPrompt: (body: Partial<ApiPrompt>) => api<ApiPrompt>('/admin/prompts', { method: 'POST', body }),
+  reorderPrompts: (ids: string[]) =>
+    api<{ ok: true }>('/admin/prompts/reorder', { method: 'PATCH', body: { ids } }),
   updatePrompt: (id: string, body: Partial<ApiPrompt>) =>
     api<ApiPrompt>(`/admin/prompts/${encodeURIComponent(id)}`, { method: 'PATCH', body }),
   removePrompt: (id: string) =>
@@ -735,6 +741,8 @@ export const adminApi = {
     api<Pick<ApiOAuthProvider, 'id' | 'redirect_uri'>>('/admin/oauth-providers/prepare', { method: 'POST' }),
   createOAuthProvider: (body: Partial<ApiOAuthProvider> & { client_secret?: string }) =>
     api<ApiOAuthProvider>('/admin/oauth-providers', { method: 'POST', body }),
+  reorderOAuthProviders: (ids: string[]) =>
+    api<{ ok: true }>('/admin/oauth-providers/reorder', { method: 'PATCH', body: { ids } }),
   updateOAuthProvider: (id: string, body: Partial<ApiOAuthProvider> & { client_secret?: string }) =>
     api<ApiOAuthProvider>(`/admin/oauth-providers/${encodeURIComponent(id)}`, { method: 'PATCH', body }),
   removeOAuthProvider: (id: string) =>
@@ -776,7 +784,7 @@ export const adminApi = {
     api<{ ok: true }>(`/admin/models/${encodeURIComponent(id)}/quotas`, { method: 'PUT', body: { quotas } }),
 
   // Redeem codes (§ redeem codes).
-  redeemCodes: (params?: { batch?: string; status?: 'unused' | 'redeemed' | 'disabled' | 'expired'; limit?: number; offset?: number }) => {
+  redeemCodes: (params?: { batch?: string; status?: 'unused' | 'partial' | 'used' | 'invalid'; limit?: number; offset?: number }) => {
     const q = new URLSearchParams()
     if (params?.batch) q.set('batch', params.batch)
     if (params?.status) q.set('status', params.status)

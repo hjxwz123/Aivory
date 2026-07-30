@@ -121,6 +121,10 @@ func UpdateImageStyle(ctx context.Context, db *sql.DB, s ImageStyle) (*ImageStyl
 	return GetImageStyle(ctx, db, s.ID)
 }
 
+func ReorderImageStyles(ctx context.Context, db *sql.DB, ids []string) error {
+	return reorderAdminRecords(ctx, db, "image_styles", ids)
+}
+
 // DeleteImageStyle removes a style. A dangling style_id elsewhere is harmless.
 func DeleteImageStyle(ctx context.Context, db *sql.DB, id string) error {
 	_, err := db.ExecContext(ctx, `DELETE FROM image_styles WHERE id=?`, id)

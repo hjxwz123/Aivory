@@ -20,6 +20,7 @@ import { PanelFallback } from '@/components/ui/panel-fallback'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { toast } from '@/hooks/use-toast'
+import { AdminSortableList } from '@/components/admin/AdminSortableList'
 
 type PromptDraft = Pick<ApiPrompt, 'name' | 'description' | 'content' | 'enabled' | 'sort_order'>
 
@@ -62,7 +63,7 @@ export default function AdminPrompts() {
   }, [])
 
   function openNew() {
-    setEditor({ open: true, draft: { ...emptyDraft } })
+    setEditor({ open: true, draft: { ...emptyDraft, sort_order: rows.length } })
   }
 
   function openEdit(row: ApiPrompt) {
@@ -132,6 +133,17 @@ export default function AdminPrompts() {
     }
   }
 
+  function setOrderedRows(next: ApiPrompt[]) {
+    setRows(next.map((row, sortOrder) => ({ ...row, sort_order: sortOrder })))
+  }
+
+  function persistOrder(next: ApiPrompt[], previous: ApiPrompt[]) {
+    void adminApi.reorderPrompts(next.map((row) => row.id)).catch((error) => {
+      setRows(previous)
+      toast.error(error instanceof ApiError ? error.message : t('admin:common.reorderFailed'))
+    })
+  }
+
   return (
     <div>
       <header className="flex flex-col items-start gap-4 sm:flex-row sm:items-end sm:justify-between">
@@ -161,9 +173,17 @@ export default function AdminPrompts() {
             <p className="text-sm text-[var(--color-fg-muted)]">{t('admin:prompts.empty')}</p>
           </div>
         ) : (
-          <ul className="flex flex-col divide-y divide-[var(--color-divider)] rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)]">
-            {rows.map((row) => (
-              <li key={row.id} className="flex min-w-0 items-center gap-3 px-4 py-3.5 sm:px-5">
+          <AdminSortableList
+            items={rows}
+            onItemsChange={setOrderedRows}
+            onOrderCommit={persistOrder}
+            dragHandleLabel={t('admin:common.dragHandle')}
+            moveUpLabel={t('admin:common.moveUp')}
+            moveDownLabel={t('admin:common.moveDown')}
+            mobileDragOnly
+            rowClassName="grid grid-cols-[2.75rem_auto_minmax(0,1fr)_2.75rem_2.75rem] items-center gap-2 px-2 py-3.5 md:grid-cols-[auto_auto_auto_minmax(0,1fr)_auto_auto] md:gap-3 md:px-5"
+            renderItem={(row) => (
+              <>
                 <span className="grid size-8 shrink-0 place-items-center rounded-[8px] bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)]">
                   <FileText size={15} aria-hidden />
                 </span>
@@ -203,9 +223,9 @@ export default function AdminPrompts() {
                 >
                   <Trash2 size={14} aria-hidden />
                 </Button>
-              </li>
-            ))}
-          </ul>
+              </>
+            )}
+          />
         )}
       </section>
 

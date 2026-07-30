@@ -1471,6 +1471,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	sandboxFiles := listSandboxFiles(ctx, o.db, conv.ID, req.UserID)
 	builtinTools := modelBuiltinToolSet(model.BuiltinTools)
 	globalDisabledTools := o.disabledToolSet()
+	memoryEnabled := store.MemoryEnabledForUser(ctx, o.db, req.UserID)
 	// Load bound skill metadata before automatic routing. A request such as "use
 	// the release-notes skill" cannot be classified from the generic use_skill
 	// tool description alone; the router needs the actual enabled skill names and
@@ -1540,6 +1541,15 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	toolDefs := []ToolDef{}
 	if toolMode != "none" && !officialMode {
 		toolDefs = filterModelBuiltinTools(o.filterDisabledTools(o.tools.List(model.ID)), builtinTools)
+		if !memoryEnabled {
+			kept := toolDefs[:0]
+			for _, definition := range toolDefs {
+				if definition.Name != "save_memory" {
+					kept = append(kept, definition)
+				}
+			}
+			toolDefs = kept
+		}
 		// §fast-mode withholds python_execute (no sandbox on a fast turn) — drop it
 		// from the offered tools so the model never even sees it. Its budget is also
 		// quartered via ToolContext.Fast (charge()).
@@ -1650,7 +1660,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	activeMemories := []store.Memory{}
 	// §workspaces privacy: personal memories/persona never leak into SHARED
 	// conversations — replies there are visible to every member.
-	if conv.WorkspaceID == "" && store.MemoryEnabledForUser(ctx, o.db, req.UserID) {
+	if conv.WorkspaceID == "" && memoryEnabled {
 		activeMemories, _ = store.ListMemoriesActive(ctx, o.db, req.UserID)
 	}
 

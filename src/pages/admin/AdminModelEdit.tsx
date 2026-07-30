@@ -15,7 +15,6 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import {
-  ArrowLeft,
   BookOpen,
   Check,
   Globe,
@@ -38,6 +37,7 @@ import type {
   ApiSkill,
 } from '@/api/types'
 import { Button } from '@/components/ui/button'
+import { AdminDetailHeader } from '@/components/admin/admin-detail-header'
 import { Input } from '@/components/ui/input'
 import { Field } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
@@ -47,8 +47,14 @@ import { IconPicker } from '@/components/admin/icon-picker'
 import { IconUploader } from '@/components/admin/icon-uploader'
 import { ParamControlsEditor } from '@/components/admin/param-controls-editor'
 import { ModelQuotaEditor } from '@/components/admin/model-quota-editor'
+import { AdminSortableList } from '@/components/admin/AdminSortableList'
 import { toast } from '@/hooks/use-toast'
-import { resolveBuiltinToolNames, toggleBuiltinToolName } from '@/lib/builtin-tools'
+import {
+  replaceVisibleBuiltinToolNames,
+  resolveBuiltinToolNames,
+  toggleBuiltinToolName,
+} from '@/lib/builtin-tools'
+import { showsDedicatedImageControls } from '@/lib/admin-model-sections'
 import { cn } from '@/lib/utils'
 import { PanelFallback } from '@/components/ui/panel-fallback'
 
@@ -62,7 +68,14 @@ const BUILTIN_TOOL_ICONS: Record<string, typeof Wrench> = {
   use_skill: BookOpen,
   save_memory: Sparkles,
 }
-type OfficialToolDraft = Omit<ApiOfficialToolDefinition, 'request'> & { request_text: string }
+let officialToolDraftSequence = 0
+
+function officialToolDraftId(): string {
+  officialToolDraftSequence += 1
+  return `official-tool-${officialToolDraftSequence}`
+}
+
+type OfficialToolDraft = Omit<ApiOfficialToolDefinition, 'request'> & { id: string; request_text: string }
 type Draft = Partial<ApiModel> & {
   param_controls_text: string
   extra_params_text: string
@@ -131,6 +144,7 @@ function legacyOfficialToolDraft(value: unknown): OfficialToolDraft | null {
   const fallback = { icon: 'wrench', request: { tools: [{ type: name }] } }
   const definition = known[name] ?? fallback
   return {
+    id: officialToolDraftId(),
     name,
     icon: definition.icon,
     request_text: extraParamsToText(definition.request),
@@ -147,6 +161,7 @@ function modelToDraft(m: ApiModel): Draft {
         }
         const definition = tool as ApiOfficialToolDefinition
         return [{
+          id: officialToolDraftId(),
           name: definition.name,
           icon: typeof definition.icon === 'string' ? definition.icon : '',
           request_text: extraParamsToText(definition.request),
@@ -247,12 +262,12 @@ export default function AdminModelEdit() {
   }
 
   function toggleBuiltinTool(name: string) {
-    const availableNames = builtinTools.map((tool) => tool.name)
+    const registeredNames = builtinTools.map((tool) => tool.name)
     setDraft((current) =>
       current
         ? {
             ...current,
-            builtin_tools: toggleBuiltinToolName(current.builtin_tools, availableNames, name),
+            builtin_tools: toggleBuiltinToolName(current.builtin_tools, registeredNames, name),
           }
         : current,
     )
@@ -293,10 +308,28 @@ export default function AdminModelEdit() {
       ((c.type === channel?.type && (c.api_format ?? '') === (channel?.api_format ?? '')) ||
         c.id === draft?.fallback_channel_id),
   )
-  const builtinToolNames = builtinTools.map((tool) => tool.name)
-  const selectedBuiltinToolNames = resolveBuiltinToolNames(draft?.builtin_tools, builtinToolNames)
+  const availableBuiltinTools = builtinTools.filter((tool) => tool.globally_enabled !== false)
+  const registeredBuiltinToolNames = builtinTools.map((tool) => tool.name)
+  const availableBuiltinToolNames = availableBuiltinTools.map((tool) => tool.name)
+  const selectedBuiltinToolNames = resolveBuiltinToolNames(draft?.builtin_tools, availableBuiltinToolNames)
   const selectedBuiltinToolSet = new Set(selectedBuiltinToolNames)
   const builtinToolsUseDefault = draft?.builtin_tools == null
+
+  function replaceVisibleBuiltinTools(selectedNames: string[]) {
+    setDraft((current) =>
+      current
+        ? {
+            ...current,
+            builtin_tools: replaceVisibleBuiltinToolNames(
+              current.builtin_tools,
+              registeredBuiltinToolNames,
+              availableBuiltinToolNames,
+              selectedNames,
+            ),
+          }
+        : current,
+    )
+  }
 
   async function save() {
     if (!draft) return
@@ -413,14 +446,7 @@ export default function AdminModelEdit() {
 
   return (
     <div>
-      <button
-        type="button"
-        onClick={() => navigate('/admin/models')}
-        className="inline-flex items-center gap-1.5 text-[12.5px] text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)] interactive rounded-[6px] -ml-2 px-2 py-1.5 mb-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-      >
-        <ArrowLeft size={12} aria-hidden />
-        {t('admin:models.backToList')}
-      </button>
+      <AdminDetailHeader backTo="/admin/models" backLabel={t('admin:models.backToList')} />
 
       {loading ? (
         <PanelFallback />
@@ -551,14 +577,6 @@ export default function AdminModelEdit() {
                   onCheckedChange={(v) => patch({ enabled: v })}
                 />
               </label>
-              <Field label={t('admin:models.fields.sortOrder')} htmlFor="m-sort" hint={t('admin:models.fields.sortOrderHint')}>
-                <Input
-                  id="m-sort"
-                  type="number"
-                  value={String(draft.sort_order ?? 0)}
-                  onChange={(e) => patch({ sort_order: Number(e.target.value) })}
-                />
-              </Field>
             </div>
           </section>
 
@@ -704,7 +722,7 @@ export default function AdminModelEdit() {
                           type="button"
                           aria-pressed={!builtinToolsUseDefault}
                           disabled={builtinToolsLoading || builtinToolsError}
-                          onClick={() => patch({ builtin_tools: [...builtinToolNames] })}
+                          onClick={() => patch({ builtin_tools: [...registeredBuiltinToolNames] })}
                           className={cn(
                             'h-7 rounded-[7px] px-2.5 text-[12px] font-medium interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
                             builtinToolsLoading || builtinToolsError
@@ -721,7 +739,7 @@ export default function AdminModelEdit() {
                         <span className="mr-auto truncate text-[11.5px] tabular-nums text-[var(--color-fg-subtle)] sm:mr-1">
                           {t('admin:models.fields.builtinToolsSelected', {
                             selected: selectedBuiltinToolNames.length,
-                            total: builtinTools.length,
+                            total: availableBuiltinTools.length,
                             defaultValue: '{{selected}}/{{total}} enabled',
                           })}
                         </span>
@@ -732,7 +750,7 @@ export default function AdminModelEdit() {
                               variant="ghost"
                               size="sm"
                               disabled={builtinToolsLoading || builtinToolsError}
-                              onClick={() => patch({ builtin_tools: [...builtinToolNames] })}
+                              onClick={() => replaceVisibleBuiltinTools(availableBuiltinToolNames)}
                             >
                               {t('admin:models.fields.builtinToolsSelectAll', { defaultValue: 'Select all' })}
                             </Button>
@@ -741,7 +759,7 @@ export default function AdminModelEdit() {
                               variant="ghost"
                               size="sm"
                               disabled={builtinToolsLoading || builtinToolsError}
-                              onClick={() => patch({ builtin_tools: [] })}
+                              onClick={() => replaceVisibleBuiltinTools([])}
                             >
                               {t('admin:models.fields.builtinToolsClear', { defaultValue: 'Clear' })}
                             </Button>
@@ -774,13 +792,13 @@ export default function AdminModelEdit() {
                       <p className="px-3 py-4 text-sm text-[var(--color-fg-muted)]" role="status">
                         {t('common:common.loading', { defaultValue: 'Loading...' })}
                       </p>
-                    ) : builtinTools.length === 0 ? (
+                    ) : availableBuiltinTools.length === 0 ? (
                       <p className="px-3 py-4 text-sm text-[var(--color-fg-muted)]">
                         {t('admin:models.fields.builtinToolsEmpty', { defaultValue: 'No built-in tools are registered.' })}
                       </p>
                     ) : (
                       <div className="grid grid-cols-1 gap-0.5 p-1 md:grid-cols-2">
-                        {builtinTools.map((tool) => {
+                        {availableBuiltinTools.map((tool) => {
                           const checked = selectedBuiltinToolSet.has(tool.name)
                           const Icon = BUILTIN_TOOL_ICONS[tool.name] ?? Wrench
                           return (
@@ -929,95 +947,108 @@ export default function AdminModelEdit() {
                   hint={t('admin:models.fields.officialToolsHint')}
                   className="min-w-0 sm:col-span-2"
                 >
-                  <div className="divide-y divide-[var(--color-divider)] rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)]">
+                  <div className="flex min-w-0 flex-col gap-2">
                     {draft.official_tools_draft.length === 0 ? (
-                      <p className="px-3 py-4 text-sm text-[var(--color-fg-muted)]">
+                      <p className="rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-3 py-4 text-sm text-[var(--color-fg-muted)]">
                         {t('admin:models.fields.officialToolsEmpty', { defaultValue: 'No provider-native tools configured.' })}
                       </p>
                     ) : (
-                      draft.official_tools_draft.map((tool, index) => {
-                        const parsed = parseExtraParams(tool.request_text)
-                        const setTool = (next: Partial<OfficialToolDraft>) => {
-                          const tools = draft.official_tools_draft.map((item, itemIndex) =>
-                            itemIndex === index ? { ...item, ...next } : item,
-                          )
-                          patch({ official_tools_draft: tools, official_tools_dirty: true })
-                        }
-                        return (
-                          <div key={`official-tool-${index}`} className="min-w-0 px-3 py-3">
-                            <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start">
-                              <div className="min-w-0 flex-1 space-y-3">
-                                <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-[minmax(10rem,0.75fr)_minmax(16rem,1.25fr)]">
+                      <AdminSortableList
+                        items={draft.official_tools_draft}
+                        onItemsChange={(officialTools) => patch({
+                          official_tools_draft: officialTools,
+                          official_tools_dirty: true,
+                        })}
+                        dragHandleLabel={t('admin:common.dragHandle')}
+                        moveUpLabel={t('admin:common.moveUp')}
+                        moveDownLabel={t('admin:common.moveDown')}
+                        mobileDragOnly
+                        listClassName="bg-[var(--color-bg-muted)]"
+                        rowClassName="grid grid-cols-[2.75rem_minmax(0,1fr)] items-start gap-2 p-3 md:grid-cols-[auto_auto_minmax(0,1fr)]"
+                        renderItem={(tool, index) => {
+                          const parsed = parseExtraParams(tool.request_text)
+                          const setTool = (next: Partial<OfficialToolDraft>) => {
+                            const tools = draft.official_tools_draft.map((item, itemIndex) =>
+                              itemIndex === index ? { ...item, ...next } : item,
+                            )
+                            patch({ official_tools_draft: tools, official_tools_dirty: true })
+                          }
+                          return (
+                            <div className="min-w-0">
+                              <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start">
+                                <div className="min-w-0 flex-1 space-y-3">
+                                  <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-[minmax(10rem,0.75fr)_minmax(16rem,1.25fr)]">
+                                    <Field
+                                      label={t('admin:models.fields.officialToolName', { defaultValue: 'Tool name' })}
+                                      htmlFor={`m-official-name-${index}`}
+                                      className="min-w-0"
+                                    >
+                                      <Input
+                                        id={`m-official-name-${index}`}
+                                        value={tool.name}
+                                        onChange={(event) => setTool({ name: event.target.value })}
+                                        placeholder="web_search"
+                                        className="min-w-0 font-mono"
+                                        wrapperClassName="min-w-0 w-full"
+                                      />
+                                    </Field>
+                                    <Field
+                                      label={t('admin:models.fields.officialToolIcon', { defaultValue: 'Icon' })}
+                                      htmlFor={`m-official-icon-${index}`}
+                                      className="min-w-0"
+                                    >
+                                      <IconPicker
+                                        id={`m-official-icon-${index}`}
+                                        value={tool.icon}
+                                        onChange={(icon) => setTool({ icon })}
+                                      />
+                                    </Field>
+                                  </div>
                                   <Field
-                                    label={t('admin:models.fields.officialToolName', { defaultValue: 'Tool name' })}
-                                    htmlFor={`m-official-name-${index}`}
-                                    className="min-w-0"
+                                    label={t('admin:models.fields.officialToolJSON', { defaultValue: 'Request JSON' })}
+                                    htmlFor={`m-official-request-${index}`}
+                                    error={
+                                      parsed.valid
+                                        ? undefined
+                                        : t('admin:models.errors.officialToolJSONMustBeObject', {
+                                            defaultValue: 'Enter a valid JSON object.',
+                                          })
+                                    }
                                   >
-                                    <Input
-                                      id={`m-official-name-${index}`}
-                                      value={tool.name}
-                                      onChange={(event) => setTool({ name: event.target.value })}
-                                      placeholder="web_search"
-                                      className="min-w-0 font-mono"
-                                      wrapperClassName="min-w-0 w-full"
-                                    />
-                                  </Field>
-                                  <Field
-                                    label={t('admin:models.fields.officialToolIcon', { defaultValue: 'Icon' })}
-                                    htmlFor={`m-official-icon-${index}`}
-                                    className="min-w-0"
-                                  >
-                                    <IconPicker
-                                      id={`m-official-icon-${index}`}
-                                      value={tool.icon}
-                                      onChange={(icon) => setTool({ icon })}
+                                    <Textarea
+                                      id={`m-official-request-${index}`}
+                                      rows={6}
+                                      value={tool.request_text}
+                                      onChange={(event) => setTool({ request_text: event.target.value })}
+                                      invalid={!parsed.valid}
+                                      spellCheck={false}
+                                      className="min-h-[8.5rem] font-mono text-[12px] leading-relaxed"
+                                      placeholder={'{\n  "tools": [\n    { "type": "web_search" }\n  ]\n}'}
                                     />
                                   </Field>
                                 </div>
-                                <Field
-                                  label={t('admin:models.fields.officialToolJSON', { defaultValue: 'Request JSON' })}
-                                  htmlFor={`m-official-request-${index}`}
-                                  error={
-                                    parsed.valid
-                                      ? undefined
-                                      : t('admin:models.errors.officialToolJSONMustBeObject', {
-                                          defaultValue: 'Enter a valid JSON object.',
-                                        })
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon-sm"
+                                  className="self-end sm:self-auto"
+                                  aria-label={t('admin:models.fields.removeOfficialTool', { defaultValue: 'Remove tool' })}
+                                  onClick={() =>
+                                    patch({
+                                      official_tools_draft: draft.official_tools_draft.filter((_, itemIndex) => itemIndex !== index),
+                                      official_tools_dirty: true,
+                                    })
                                   }
                                 >
-                                  <Textarea
-                                    id={`m-official-request-${index}`}
-                                    rows={6}
-                                    value={tool.request_text}
-                                    onChange={(event) => setTool({ request_text: event.target.value })}
-                                    invalid={!parsed.valid}
-                                    spellCheck={false}
-                                    className="min-h-[8.5rem] font-mono text-[12px] leading-relaxed"
-                                    placeholder={'{\n  "tools": [\n    { "type": "web_search" }\n  ]\n}'}
-                                  />
-                                </Field>
+                                  <Trash2 size={14} aria-hidden />
+                                </Button>
                               </div>
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon-sm"
-                                className="self-end sm:self-auto"
-                                aria-label={t('admin:models.fields.removeOfficialTool', { defaultValue: 'Remove tool' })}
-                                onClick={() =>
-                                  patch({
-                                    official_tools_draft: draft.official_tools_draft.filter((_, itemIndex) => itemIndex !== index),
-                                    official_tools_dirty: true,
-                                  })
-                                }
-                              >
-                                <Trash2 size={14} aria-hidden />
-                              </Button>
                             </div>
-                          </div>
-                        )
-                      })
+                          )
+                        }}
+                      />
                     )}
-                    <div className="px-3 py-2.5">
+                    <div className="pt-0.5">
                       <Button
                         type="button"
                         variant="secondary"
@@ -1027,7 +1058,7 @@ export default function AdminModelEdit() {
                           patch({
                             official_tools_draft: [
                               ...draft.official_tools_draft,
-                              { name: '', icon: '', request_text: '{\n  "tools": []\n}' },
+                              { id: officialToolDraftId(), name: '', icon: '', request_text: '{\n  "tools": []\n}' },
                             ],
                             official_tools_dirty: true,
                           })
@@ -1074,9 +1105,9 @@ export default function AdminModelEdit() {
             </section>
           )}
 
-          {/* Image providers also consume the same declarative request-control
-              mappings; embedding models have no per-request UI controls. */}
-          {(draft.kind === 'image' || hasOfficialImageGeneration) && (
+          {/* Hosted image_generation is configured in the chat model's official
+              tools. Only dedicated image models own image request controls. */}
+          {showsDedicatedImageControls(draft.kind) && (
             <section className="mt-6 rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-5 sm:px-6">
               <h2 className="font-serif text-lg text-[var(--color-fg)]">
                 {t('admin:models.sections.imageBehaviour', { defaultValue: 'Image generation' })}

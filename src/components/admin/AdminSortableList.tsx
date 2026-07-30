@@ -25,7 +25,7 @@ interface DragState {
 interface AdminSortableListProps<T extends SortableItem> {
   items: T[]
   onItemsChange: (items: T[]) => void
-  onOrderCommit: (next: T[], prev: T[]) => void
+  onOrderCommit?: (next: T[], prev: T[]) => void
   renderItem: (item: T, index: number) => ReactNode
   rowClassName: string
   dragHandleLabel: string
@@ -188,7 +188,7 @@ export function AdminSortableList<T extends SortableItem>({
     dragStartItems.current = null
     setDragState(null)
     if (prev && prev.some((item, i) => item.id !== next[i]?.id)) {
-      onOrderCommit(next, prev)
+      onOrderCommit?.(next, prev)
     }
   }
 
@@ -201,7 +201,7 @@ export function AdminSortableList<T extends SortableItem>({
     next.splice(to, 0, item)
     itemsRef.current = next
     onItemsChange(next)
-    onOrderCommit(next, prev)
+    onOrderCommit?.(next, prev)
   }
 
   function rowContent(item: T, index: number, overlay = false) {

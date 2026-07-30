@@ -9,6 +9,7 @@
     "createFirst": "最初の{{kind}}を作成",
     "saved": "保存しました",
     "failed": "失敗しました",
+    "reorderFailed": "新しい並び順を保存できませんでした。",
     "dragHandle": "ドラッグして並べ替え",
     "moveUp": "上に移動",
     "moveDown": "下に移動",
@@ -118,8 +119,6 @@
       "extraParams": "追加のアップストリームパラメータ（JSON）",
       "extraParamsHint": "任意の JSON オブジェクトです。このモデルのアップストリームリクエストにマージされます。優先順位: 組み込みリクエストパラメータ、コントロールのマッピング、この値の順です。",
       "dim": "次元",
-      "sortOrder": "表示順序",
-      "sortOrderHint": "小さいほど上。",
       "priceIn": "入力料金（100万トークンあたり）",
       "priceOut": "出力料金（100万トークンあたり）",
       "priceCacheRead": "キャッシュ読み取り $/100万",
@@ -905,16 +904,15 @@
     "filters": {
       "all": "すべて",
       "unused": "未使用",
-      "redeemed": "引き換え済み",
-      "disabled": "無効",
-      "expired": "期限切れ"
+      "partial": "一部使用",
+      "used": "使用済み",
+      "invalid": "失効"
     },
     "status": {
       "unused": "未使用",
-      "redeemed": "引き換え済み",
       "partial": "一部使用",
-      "disabled": "無効",
-      "expired": "期限切れ"
+      "used": "使用済み",
+      "invalid": "失効"
     },
     "table": {
       "code": "コード",
@@ -1409,7 +1407,6 @@
     "empty": "スタイルがありません。上で追加してください。",
     "namePlaceholder": "スタイル名（例：水彩）",
     "name": "名前",
-    "order": "並び順",
     "enabled": "有効",
     "example": "サンプル画像",
     "examplePlaceholder": "画像URLまたはアップロード",

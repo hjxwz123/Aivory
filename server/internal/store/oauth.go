@@ -211,6 +211,10 @@ func UpdateOAuthProvider(ctx context.Context, db *sql.DB, id string, patch OAuth
 	return out, nil
 }
 
+func ReorderOAuthProviders(ctx context.Context, db *sql.DB, ids []string) error {
+	return reorderAdminRecords(ctx, db, "oauth_providers", ids)
+}
+
 // DeleteOAuthProvider removes the provider. Orphaned oauth_identities rows are
 // harmless (a future provider gets a new id and never matches the old subject),
 // so we leave them rather than cascade.
