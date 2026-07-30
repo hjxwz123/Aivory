@@ -62,7 +62,7 @@ func (o *Orchestrator) checkModelQuota(ctx context.Context, userID string, model
 	if errors.Is(err, store.ErrNotFound) {
 		// No free allowance for this group. This also covers the all-toggles-off
 		// state, where the model has no quota rows at all.
-		msg, ok, useCredits := o.creditDecision(ctx, userID, groupID)
+		msg, ok, useCredits := o.creditDecision(ctx, userID)
 		return msg, ok, useCredits, -1
 	}
 	if err != nil {
@@ -90,7 +90,7 @@ func (o *Orchestrator) checkModelQuota(ctx context.Context, userID string, model
 		return "", true, false, remaining // free use within the group's per-cycle allotment
 	}
 	// Free allotment exhausted → pay with credits.
-	msg, ok, useCredits := o.creditDecision(ctx, userID, groupID)
+	msg, ok, useCredits := o.creditDecision(ctx, userID)
 	return msg, ok, useCredits, -1
 }
 
@@ -109,7 +109,7 @@ func (o *Orchestrator) checkImageQuota(ctx context.Context, userID string, model
 	groupID := o.userGroupID(ctx, userID)
 	q, err := store.GetModelQuota(ctx, o.db, model.ID, groupID)
 	if errors.Is(err, store.ErrNotFound) {
-		return o.checkPaidImageQuota(ctx, userID, groupID, model, n)
+		return o.checkPaidImageQuota(ctx, userID, model, n)
 	}
 	if err != nil {
 		if o.logger != nil {
@@ -136,16 +136,16 @@ func (o *Orchestrator) checkImageQuota(ctx context.Context, userID string, model
 	// Free image allotment exhausted → pay with credits (shared with chat credits).
 	// Unlike chat, image cost is exact before the request starts, so require the
 	// balance to cover the whole clamped batch instead of merely being positive.
-	return o.checkPaidImageQuota(ctx, userID, groupID, model, n)
+	return o.checkPaidImageQuota(ctx, userID, model, n)
 }
 
-func (o *Orchestrator) checkPaidImageQuota(ctx context.Context, userID, groupID string, model *store.Model, n int) (string, bool, bool) {
-	msg, ok, useCredits := o.creditDecision(ctx, userID, groupID)
+func (o *Orchestrator) checkPaidImageQuota(ctx context.Context, userID string, model *store.Model, n int) (string, bool, bool) {
+	msg, ok, useCredits := o.creditDecision(ctx, userID)
 	if !ok || !useCredits {
 		return msg, ok, useCredits
 	}
 	requiredCredits := float64(n) * model.PricePerImage * o.creditsPerUSD()
-	if requiredCredits > o.availableCredits(ctx, userID, groupID) {
+	if requiredCredits > o.availableCredits(ctx, userID) {
 		return o.quotaMessage(), false, false
 	}
 	return "", true, true
@@ -202,81 +202,49 @@ func (o *Orchestrator) creditsPerUSD() float64 {
 
 // creditDecision checks whether the user can cover a credit-charged turn from
 // their timed + permanent balance. Returns (msg, ok, useCredits).
-func (o *Orchestrator) creditDecision(ctx context.Context, userID, groupID string) (string, bool, bool) {
-	g, err := store.GetUserGroup(ctx, o.db, groupID)
-	if err != nil || g == nil || o.creditsPerUSD() <= 0 {
+func (o *Orchestrator) creditDecision(ctx context.Context, userID string) (string, bool, bool) {
+	if o.creditsPerUSD() <= 0 {
 		// Credits disabled (no global rate) → nothing to charge against.
 		return o.quotaMessage(), false, false
 	}
-	// A group credit allowance is honoured even with no explicit refresh period:
-	// the admin form defaults the period to 0, and silently ignoring a configured
-	// allowance ("100 credits") is a footgun. With period<=0 it uses the default
-	// window (creditWindow → 7 days); set a period to change the refresh cadence.
-	timedRemaining := 0.0
-	if g.CreditAllowance > 0 {
-		start, ttl := creditWindow(g.CreditPeriodSeconds)
-		timedRemaining = g.CreditAllowance - o.readTimedCreditsUsed(ctx, userID, start, ttl)
-		if timedRemaining < 0 {
-			timedRemaining = 0
+	balance, err := store.GetCreditBalance(ctx, o.db, userID)
+	if err != nil {
+		if o.logger != nil {
+			o.logger.Printf("credit balance read failed (user=%s): %v", userID, err)
 		}
+		return o.quotaMessage(), false, false
 	}
-	perm, _ := store.PermanentCredits(ctx, o.db, userID)
-	if timedRemaining+perm > 0 {
+	if balance.Available > 0 {
 		return "", true, true
 	}
 	return o.quotaMessage(), false, false
 }
 
-// chargeTurnCredits debits a credit-charged turn: timed credits first (so the
-// expiring balance is spent before the permanent one), then permanent. Returns
-// (timed, total): the timed portion — which the caller records in
-// usage_logs.credits so the timed window can be reseeded across restarts — and
-// the total credits charged this turn (timed + permanent), which the caller
-// surfaces to the user as "credits used".
+// chargeTurnCredits debits a credit-charged turn atomically: timed credits first,
+// then permanent. The ledger remains authoritative even if analytics usage logs
+// are deleted.
 func (o *Orchestrator) chargeTurnCredits(ctx context.Context, userID string, usdCost float64) (float64, float64) {
 	if usdCost <= 0 {
 		return 0, 0
 	}
-	g, err := store.GetUserGroup(ctx, o.db, o.userGroupID(ctx, userID))
 	ratio := o.creditsPerUSD()
-	if err != nil || g == nil || ratio <= 0 {
+	if ratio <= 0 {
 		return 0, 0
 	}
 	credits := usdCost * ratio
-	// Spend the group allowance (timed) first, then the permanent balance. Mirror
-	// creditDecision: a configured allowance counts even with no explicit period
-	// (default window via creditWindow). Read/charge MUST agree or the decision and
-	// the debit drift apart.
-	var remaining float64
-	var start int64
-	var ttl time.Duration
-	if g.CreditAllowance > 0 {
-		start, ttl = creditWindow(g.CreditPeriodSeconds)
-		remaining = g.CreditAllowance - o.readTimedCreditsUsed(ctx, userID, start, ttl)
-		if remaining < 0 {
-			remaining = 0
+	debit, err := store.DebitCredits(ctx, o.db, userID, credits, "llm", "")
+	if err != nil {
+		if o.logger != nil {
+			o.logger.Printf("credit debit failed (user=%s, amount=%.4f): %v", userID, credits, err)
 		}
+		return 0, 0
 	}
-	fromTimed := credits
-	if fromTimed > remaining {
-		fromTimed = remaining
-	}
-	if fromTimed > 0 && o.cache != nil {
-		o.cache.IncrBy(creditKey(userID, start), costToMicros(fromTimed), ttl)
-	}
-	if fromPermanent := credits - fromTimed; fromPermanent > 0 {
-		if err := store.SpendPermanentCredits(ctx, o.db, userID, fromPermanent); err != nil && o.logger != nil {
-			o.logger.Printf("credit debit (permanent, user=%s, amount=%.4f) failed: %v", userID, fromPermanent, err)
-		}
-	}
-	return fromTimed, credits
+	return debit.Timed, debit.Total
 }
 
-// logUsage writes a usage_logs row and LOGS (rather than silently swallows) a
-// failure. usage_logs.credits is the only durable record of timed-credit
-// consumption — it reseeds the window across restarts (CreditsUsedInWindow) — so
-// a silent write failure would refund the user on the next restart. Make it
-// observable (§ credit accounting).
+// logUsage writes an analytics row. Credit debits are already durable in the
+// independent billing ledger, so deleting or failing to write this row cannot
+// refund a user.
 func (o *Orchestrator) logUsage(ctx context.Context, log store.UsageLog) {
 	if err := store.LogUsage(ctx, o.db, log); err != nil && o.logger != nil {
 		o.logger.Printf("usage log write failed (msg=%s purpose=%s): %v", log.MessageID, log.Purpose, err)
@@ -326,17 +294,12 @@ func estimateRequestTokens(req UnifiedChatRequest) int {
 
 // availableCredits returns the user's spendable credits right now (timed-window
 // remaining + permanent balance), mirroring creditDecision's read.
-func (o *Orchestrator) availableCredits(ctx context.Context, userID, groupID string) float64 {
-	timed := 0.0
-	if g, err := store.GetUserGroup(ctx, o.db, groupID); err == nil && g != nil && g.CreditAllowance > 0 {
-		start, ttl := creditWindow(g.CreditPeriodSeconds)
-		timed = g.CreditAllowance - o.readTimedCreditsUsed(ctx, userID, start, ttl)
-		if timed < 0 {
-			timed = 0
-		}
+func (o *Orchestrator) availableCredits(ctx context.Context, userID string) float64 {
+	balance, err := store.GetCreditBalance(ctx, o.db, userID)
+	if err != nil {
+		return 0
 	}
-	perm, _ := store.PermanentCredits(ctx, o.db, userID)
-	return timed + perm
+	return balance.Available
 }
 
 // preflightCredit estimates, BEFORE generating, whether a credit-charged turn is
@@ -358,42 +321,11 @@ func (o *Orchestrator) preflightCredit(ctx context.Context, userID string, model
 	outputReserve := envcfg.Int("AIVORY_LLM_OUTPUT_RESERVE", 2000) // input + a fixed 2k output reserve (admin choice)
 	estIn := estimateRequestTokens(req)
 	need := computeCost(*model, Usage{InputTokens: estIn, OutputTokens: outputReserve}) * o.creditsPerUSD()
-	have := o.availableCredits(ctx, userID, o.userGroupID(ctx, userID))
+	have := o.availableCredits(ctx, userID)
 	if need > have {
 		return fmt.Sprintf("This message is estimated to need about %.1f credits (≈%d input tokens) but your balance is %.1f. Reduce the context (fewer referenced files / shorter conversation) or top up, then try again.", need, estIn, have), false
 	}
 	return "", true
-}
-
-// creditWindow computes the fixed-window start + ttl for the credit refresh cycle.
-func creditWindow(periodSeconds int) (int64, time.Duration) {
-	p := int64(periodSeconds)
-	if p <= 0 {
-		p = 604800
-	}
-	now := time.Now().Unix()
-	return (now / p) * p, time.Duration(p) * time.Second
-}
-
-func creditKey(userID string, windowStart int64) string {
-	return fmt.Sprintf("credit:v1:%s:%d", userID, windowStart)
-}
-
-// readTimedCreditsUsed returns the timed credits consumed in the current window,
-// preferring the cache (micro-units) and seeding from usage_logs when cold.
-func (o *Orchestrator) readTimedCreditsUsed(ctx context.Context, userID string, start int64, ttl time.Duration) float64 {
-	key := creditKey(userID, start)
-	if o.cache != nil {
-		if v, ok := o.cache.Get(key); ok {
-			micros, _ := strconv.ParseInt(v, 10, 64)
-			return microsToCost(micros)
-		}
-	}
-	used, _ := store.CreditsUsedInWindow(ctx, o.db, userID, start)
-	if o.cache != nil {
-		o.cache.Set(key, strconv.FormatInt(costToMicros(used), 10), ttl)
-	}
-	return used
 }
 
 // freeQuotaOvershootGracePct: a turn admitted under the free allotment flips to

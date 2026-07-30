@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"net/mail"
 	"os"
 	"strings"
@@ -82,7 +83,8 @@ func FindUserByID(ctx context.Context, db *sql.DB, id string) (*User, error) {
 // Best-effort: if the DB write fails (concurrent expiry race), the in-memory
 // User still reflects the expired state so the caller sees the right tier.
 func maybeExpireGroup(ctx context.Context, db *sql.DB, u *User) {
-	if u.GroupExpiresAt <= 0 || time.Now().Unix() < u.GroupExpiresAt {
+	now := time.Now().Unix()
+	if u.GroupExpiresAt <= 0 || now < u.GroupExpiresAt {
 		return
 	}
 	prev := u.PreviousGroupID
@@ -96,8 +98,14 @@ func maybeExpireGroup(ctx context.Context, db *sql.DB, u *User) {
 		prev = DefaultGroupID
 	}
 	_, _ = db.ExecContext(ctx,
-		`UPDATE users SET group_id=?, group_expires_at=0, previous_group_id='' WHERE id=? AND group_expires_at=?`,
-		prev, u.ID, u.GroupExpiresAt)
+		`UPDATE users
+		    SET group_id=?, group_expires_at=0, previous_group_id='',
+		        credit_cycle_anchor=CASE
+		            WHEN credit_cycle_anchor>=? THEN credit_cycle_anchor+1
+		            ELSE ?
+		        END
+		  WHERE id=? AND group_expires_at=?`,
+		prev, now, now, u.ID, u.GroupExpiresAt)
 	u.GroupID = prev
 	u.GroupExpiresAt = 0
 	u.PreviousGroupID = ""
@@ -139,8 +147,8 @@ func CreateUserWithRole(ctx context.Context, db *sql.DB, email, name, pwHash, ro
 	// New accounts default long-term memory OFF (opt-in): the user turns it on in
 	// onboarding / Personalization if the global master switch allows. (§ memory)
 	_, err := db.ExecContext(ctx,
-		`INSERT INTO users(id, email, password_hash, name, role, settings, sort_order) VALUES(?, ?, ?, ?, ?, '{"memory_enabled":false}', ?)`,
-		id, email, pwHash, name, role, sortOrder)
+		`INSERT INTO users(id, email, password_hash, name, role, settings, credit_cycle_anchor, sort_order) VALUES(?, ?, ?, ?, ?, '{"memory_enabled":false}', ?, ?)`,
+		id, email, pwHash, name, role, time.Now().Unix(), sortOrder)
 	if err != nil {
 		return nil, err
 	}
@@ -613,6 +621,9 @@ func CountUsersBySearch(ctx context.Context, db *sql.DB, search string) (int, er
 // SetPermanentCredits overwrites a user's non-expiring credit balance (admin
 // edit on the users page, § credits). Floored at 0.
 func SetPermanentCredits(ctx context.Context, db *sql.DB, userID string, credits float64) error {
+	if math.IsNaN(credits) || math.IsInf(credits, 0) {
+		return ErrInvalidCreditAmount
+	}
 	if credits < 0 {
 		credits = 0
 	}
@@ -620,27 +631,16 @@ func SetPermanentCredits(ctx context.Context, db *sql.DB, userID string, credits
 	return err
 }
 
-// AddPermanentCredits atomically adds delta (may be negative) to a user's
-// permanent balance, flooring at 0. Used to top up after a purchase. For debiting
-// a paid turn use SpendPermanentCredits, whose intent (and error) is explicit.
+// AddPermanentCredits atomically applies a positive top-up. A negative existing
+// balance represents fully recorded provider usage that exceeded preflight, so
+// top-ups repay it rather than silently flooring the account at zero. Debits must
+// use DebitCredits so they are recorded in the billing ledger.
 func AddPermanentCredits(ctx context.Context, db *sql.DB, userID string, delta float64) error {
-	_, err := db.ExecContext(ctx,
-		`UPDATE users SET credits_permanent = MAX(0, credits_permanent + ?) WHERE id=?`, delta, userID)
-	return err
-}
-
-// SpendPermanentCredits atomically debits up to `amount` from a user's permanent
-// balance in a SINGLE conditional statement (never below 0), so concurrent debits
-// serialize at the row and can neither lose updates nor drive the balance
-// negative. The caller checks the returned error so a failed debit is observable
-// rather than silently swallowed (§ credit accounting).
-func SpendPermanentCredits(ctx context.Context, db *sql.DB, userID string, amount float64) error {
-	if amount <= 0 {
-		return nil
+	if math.IsNaN(delta) || math.IsInf(delta, 0) || delta <= 0 {
+		return ErrInvalidCreditAmount
 	}
 	_, err := db.ExecContext(ctx,
-		`UPDATE users SET credits_permanent = CASE WHEN credits_permanent > ? THEN credits_permanent - ? ELSE 0 END WHERE id=?`,
-		amount, amount, userID)
+		`UPDATE users SET credits_permanent=COALESCE(credits_permanent,0)+? WHERE id=?`, delta, userID)
 	return err
 }
 

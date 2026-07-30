@@ -705,17 +705,19 @@ func getUserAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	group, err := store.GetUserGroup(r.Context(), d.DB, groupOrDefault(user.GroupID))
-	if err != nil && !errors.Is(err, store.ErrNotFound) {
+	balance, err := store.GetCreditBalance(r.Context(), d.DB, user.ID)
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, struct {
 		*store.User
-		CreditsTimed timedCreditsSnapshot `json:"credits_timed"`
+		CreditsTimed     timedCreditsSnapshot `json:"credits_timed"`
+		CreditsAvailable float64              `json:"credits_available"`
 	}{
-		User:         user,
-		CreditsTimed: currentTimedCredits(r.Context(), d, user.ID, group),
+		User:             user,
+		CreditsTimed:     timedCreditsFromBalance(balance),
+		CreditsAvailable: balance.Available,
 	})
 }
 

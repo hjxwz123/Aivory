@@ -5,13 +5,10 @@ import { useTranslation } from 'react-i18next'
 import { Aurora } from '@/components/landing/fx/aurora'
 import { ShinyText } from '@/components/landing/fx/shiny-text'
 import { SplitText } from '@/components/landing/fx/split-text'
+import { AIVORY_MARK_PATH } from '@/components/brand/logo'
 import { cn } from '@/lib/utils'
 
 gsap.registerPlugin(useGSAP)
-
-// The Aivory mark — the hollow triangular vessel from components/brand/logo.
-const MARK_PATH =
-  'M16 4.5c-1.05 0-2.02.6-2.47 1.55L4.34 24.6c-.74 1.55.4 3.4 2.13 3.4h19.06c1.74 0 2.87-1.85 2.13-3.4L18.47 6.05A2.72 2.72 0 0 0 16 4.5Zm0 4.3 9.8 20.6H6.2L16 8.8Z'
 
 /**
  * AuthHero — the interactive brand scene on the auth pages' left panel. Built
@@ -181,7 +178,7 @@ export function AuthHero() {
 /** The large animated mark: soft fill, self-drawing outline, a running light, glowing apex. */
 function AnimatedMark() {
   return (
-    <svg width={172} height={172} viewBox="0 0 32 32" role="img" aria-label="Aivory" className="overflow-visible">
+    <svg width={172} height={172} viewBox="0 0 32 32" role="img" aria-label="Aivory" shapeRendering="geometricPrecision" className="overflow-visible">
       <defs>
         <linearGradient id="hero-stroke" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
           <stop offset="0" stopColor="var(--color-accent)" />
@@ -197,10 +194,10 @@ function AnimatedMark() {
       </defs>
 
       {/* Soft inner fill */}
-      <path d={MARK_PATH} fill="url(#hero-fill)" />
+      <path d={AIVORY_MARK_PATH} fill="url(#hero-fill)" fillRule="evenodd" clipRule="evenodd" />
       {/* Base outline (draws on entrance) */}
       <path
-        d={MARK_PATH}
+        d={AIVORY_MARK_PATH}
         pathLength={100}
         fill="none"
         stroke="url(#hero-stroke)"
@@ -211,7 +208,7 @@ function AnimatedMark() {
       />
       {/* Bright segment that runs along the outline */}
       <path
-        d={MARK_PATH}
+        d={AIVORY_MARK_PATH}
         pathLength={100}
         fill="none"
         stroke="var(--color-accent)"
@@ -223,8 +220,8 @@ function AnimatedMark() {
         filter="url(#hero-blur)"
       />
       {/* Apex accent: a glow that breathes + a crisp dot */}
-      <circle cx="16" cy="22.2" r="2.6" fill="var(--color-accent)" opacity="0.4" filter="url(#hero-blur)" className="hero-glow" />
-      <circle cx="16" cy="22.2" r="1.4" fill="var(--color-accent)" className="hero-apex" />
+      <circle cx="16" cy="20.9" r="2.6" fill="var(--color-accent)" opacity="0.4" filter="url(#hero-blur)" className="hero-glow" />
+      <circle cx="16" cy="20.9" r="1.4" fill="var(--color-accent)" className="hero-apex" />
     </svg>
   )
 }

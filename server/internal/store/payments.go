@@ -1814,13 +1814,13 @@ func FulfillPaymentOrder(ctx context.Context, db *sql.DB, input PaymentFulfillme
 		return nil, ErrPaymentOrderNotFulfillable
 	}
 
-	userLock := `SELECT group_id, group_expires_at, previous_group_id FROM users WHERE id=?`
+	userLock := `SELECT group_id, group_expires_at, previous_group_id, COALESCE(credit_cycle_anchor,0) FROM users WHERE id=?`
 	if usePostgres {
 		userLock += ` FOR UPDATE`
 	}
 	var currentGroup, previousGroup string
-	var currentExpiry int64
-	if err := tx.QueryRowContext(ctx, userLock, order.UserID).Scan(&currentGroup, &currentExpiry, &previousGroup); err != nil {
+	var currentExpiry, currentCreditAnchor int64
+	if err := tx.QueryRowContext(ctx, userLock, order.UserID).Scan(&currentGroup, &currentExpiry, &previousGroup, &currentCreditAnchor); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -1899,11 +1899,15 @@ func FulfillPaymentOrder(ctx context.Context, db *sql.DB, input PaymentFulfillme
 				return nil, err
 			}
 		}
+		newCreditAnchor := currentCreditAnchor
+		if currentGroup != order.UserGroupID || currentExpiry > 0 && currentExpiry <= now {
+			newCreditAnchor = nextCreditCycleAnchor(currentCreditAnchor, now)
+		}
 		result, err := tx.ExecContext(ctx,
 			`UPDATE users
-			    SET group_id=?, group_expires_at=?, previous_group_id=?, token_ver=token_ver+1
+			    SET group_id=?, group_expires_at=?, previous_group_id=?, credit_cycle_anchor=?, token_ver=token_ver+1
 			  WHERE id=?`,
-			order.UserGroupID, newExpiry, newPrevious, order.UserID)
+			order.UserGroupID, newExpiry, newPrevious, newCreditAnchor, order.UserID)
 		if err != nil {
 			return nil, err
 		}

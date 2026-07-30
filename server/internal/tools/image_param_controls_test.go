@@ -38,16 +38,19 @@ func imageSuccessResponse(body string) *http.Response {
 }
 
 type recordingImageBiller struct {
-	checkedN int
+	checkedN   int
+	payCredits bool
+	timed      float64
+	total      float64
 }
 
 func (b *recordingImageBiller) CheckImageCredits(_ context.Context, _ string, _ *store.Model, n int) (bool, bool, string) {
 	b.checkedN = n
-	return true, false, ""
+	return true, b.payCredits, ""
 }
 
 func (b *recordingImageBiller) ChargeImageCredits(context.Context, string, float64) (float64, float64) {
-	return 0, 0
+	return b.timed, b.total
 }
 
 func TestImageGenerateToolUsesOneClampedCountForQuotaRequestAndUsage(t *testing.T) {
@@ -93,7 +96,7 @@ func TestImageGenerateToolUsesOneClampedCountForQuotaRequestAndUsage(t *testing.
 		return imageSuccessResponse(string(body)), nil
 	})
 
-	biller := &recordingImageBiller{}
+	biller := &recordingImageBiller{payCredits: true, timed: 1, total: 2}
 	tool := &imageGenerateTool{db: db, artifactDir: t.TempDir()}
 	output, _, err := tool.Execute(context.Background(), []byte(`{"prompt":"draw","n":999,"size":"1024x1024"}`), &llm.ToolContext{
 		UserID:             "u_image",
@@ -120,11 +123,15 @@ func TestImageGenerateToolUsesOneClampedCountForQuotaRequestAndUsage(t *testing.
 		t.Fatalf("output = %q", output)
 	}
 	var loggedCount int
-	if err := db.QueryRow(`SELECT images_count FROM usage_logs WHERE user_id='u_image' AND model_id='m_image' AND purpose='image'`).Scan(&loggedCount); err != nil {
+	var loggedCredits float64
+	if err := db.QueryRow(`SELECT images_count, credits FROM usage_logs WHERE user_id='u_image' AND model_id='m_image' AND purpose='image'`).Scan(&loggedCount, &loggedCredits); err != nil {
 		t.Fatalf("read image usage: %v", err)
 	}
 	if loggedCount != clampedN {
 		t.Fatalf("usage images_count=%d, want %d", loggedCount, clampedN)
+	}
+	if loggedCredits != biller.total {
+		t.Fatalf("usage credits=%v, want full charge %v (not timed-only %v)", loggedCredits, biller.total, biller.timed)
 	}
 }
 
