@@ -1860,6 +1860,9 @@ type memInput struct {
 }
 
 func (t *saveMemoryTool) Execute(ctx context.Context, input []byte, tc *llm.ToolContext) (string, []llm.Citation, error) {
+	if t.db == nil || tc == nil || !store.MemoryEnabledForUser(ctx, t.db, tc.UserID) {
+		return "", nil, errors.New("memory is disabled")
+	}
 	var in memInput
 	_ = json.Unmarshal(input, &in)
 	if in.MemoryText == "" {

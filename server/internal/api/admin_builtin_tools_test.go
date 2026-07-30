@@ -25,8 +25,9 @@ func TestListBuiltinToolsAdminUsesLiveSortedRegistry(t *testing.T) {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
 	var items []struct {
-		Name        string `json:"name"`
-		Description string `json:"description"`
+		Name            string `json:"name"`
+		Description     string `json:"description"`
+		GloballyEnabled bool   `json:"globally_enabled"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &items); err != nil {
 		t.Fatal(err)
@@ -36,7 +37,7 @@ func TestListBuiltinToolsAdminUsesLiveSortedRegistry(t *testing.T) {
 	}
 	names := make([]string, len(items))
 	for i, item := range items {
-		if item.Name == "" || item.Description == "" {
+		if item.Name == "" || item.Description == "" || !item.GloballyEnabled {
 			t.Fatalf("incomplete item: %+v", item)
 		}
 		if item.Name == "search_knowledge_base" {
@@ -52,6 +53,42 @@ func TestListBuiltinToolsAdminUsesLiveSortedRegistry(t *testing.T) {
 	listBuiltinToolsAdmin(Deps{}, rec, httptest.NewRequest(http.MethodGet, "/api/admin/tools/builtins", nil))
 	if strings.TrimSpace(rec.Body.String()) != "[]" {
 		t.Fatalf("nil registry response = %s", rec.Body.String())
+	}
+}
+
+func TestListBuiltinToolsAdminMarksGlobalAvailability(t *testing.T) {
+	db := openMigrated(t, filepath.Join(t.TempDir(), "builtin-tools-availability.db"))
+	defer db.Close()
+	t.Cleanup(store.InvalidateConfig)
+	if err := store.SetSetting(db, "disabled_tools", []string{"python_execute"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetSetting(db, "memory_enabled", false); err != nil {
+		t.Fatal(err)
+	}
+
+	registry := toolpkg.NewRegistry(db, config.Config{}, log.New(io.Discard, "", 0))
+	rec := httptest.NewRecorder()
+	listBuiltinToolsAdmin(Deps{DB: db, Tools: registry}, rec, httptest.NewRequest(http.MethodGet, "/api/admin/tools/builtins", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var items []struct {
+		Name            string `json:"name"`
+		GloballyEnabled bool   `json:"globally_enabled"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &items); err != nil {
+		t.Fatal(err)
+	}
+	availability := map[string]bool{}
+	for _, item := range items {
+		availability[item.Name] = item.GloballyEnabled
+	}
+	if availability["python_execute"] || availability["save_memory"] {
+		t.Fatalf("disabled tools reported available: %+v", availability)
+	}
+	if !availability["web_search"] {
+		t.Fatalf("enabled tool reported unavailable: %+v", availability)
 	}
 }
 

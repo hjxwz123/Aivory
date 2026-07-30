@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   modelHasBuiltinTools,
   modelSupportsBuiltinTool,
+  replaceVisibleBuiltinToolNames,
   resolveBuiltinToolNames,
   toggleBuiltinToolName,
 } from '@/lib/builtin-tools'
@@ -31,6 +32,26 @@ describe('built-in tool selection', () => {
       'web_search',
     ])
     expect(toggleBuiltinToolName(['image_generate', 'web_search'], AVAILABLE, 'python_execute')).toEqual(AVAILABLE)
+  })
+
+  it('changes visible tools without losing hidden selections', () => {
+    const visible = ['image_generate', 'web_search']
+
+    expect(
+      replaceVisibleBuiltinToolNames(
+        ['image_generate', 'python_execute'],
+        AVAILABLE,
+        visible,
+        ['web_search'],
+      ),
+    ).toEqual(['python_execute', 'web_search'])
+    expect(replaceVisibleBuiltinToolNames(['image_generate'], AVAILABLE, visible, [])).toEqual([])
+  })
+
+  it('materializes default-all while retaining globally hidden tools', () => {
+    expect(replaceVisibleBuiltinToolNames(null, AVAILABLE, ['image_generate', 'web_search'], [])).toEqual([
+      'python_execute',
+    ])
   })
 
   it('reads resolved public capabilities and keeps legacy default-all compatibility', () => {

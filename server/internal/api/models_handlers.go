@@ -203,6 +203,13 @@ func modelsResponse(d Deps, r *http.Request, models []store.Model) map[string]an
 			}
 		}
 	}
+	memoryEnabled := store.MemoryEnabledGlobal(d.DB)
+	if memoryEnabled && userID != "" {
+		memoryEnabled = store.MemoryEnabledForUser(r.Context(), d.DB, userID)
+	}
+	if !memoryEnabled {
+		disabledBuiltinTools["save_memory"] = true
+	}
 
 	items := []item{}
 	for _, m := range models {

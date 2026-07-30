@@ -508,6 +508,8 @@ export interface ApiOfficialToolDefinition {
 export interface ApiBuiltinTool {
   name: string
   description: string
+  /** Effective instance-level availability. Absent on older servers means enabled. */
+  globally_enabled?: boolean
 }
 
 export interface ApiModel {
