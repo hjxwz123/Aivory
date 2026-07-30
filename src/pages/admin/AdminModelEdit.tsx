@@ -50,6 +50,7 @@ import { ModelQuotaEditor } from '@/components/admin/model-quota-editor'
 import { AdminSortableList } from '@/components/admin/AdminSortableList'
 import { toast } from '@/hooks/use-toast'
 import { resolveBuiltinToolNames, toggleBuiltinToolName } from '@/lib/builtin-tools'
+import { showsDedicatedImageControls } from '@/lib/admin-model-sections'
 import { cn } from '@/lib/utils'
 import { PanelFallback } from '@/components/ui/panel-fallback'
 
@@ -1082,9 +1083,9 @@ export default function AdminModelEdit() {
             </section>
           )}
 
-          {/* Image providers also consume the same declarative request-control
-              mappings; embedding models have no per-request UI controls. */}
-          {(draft.kind === 'image' || hasOfficialImageGeneration) && (
+          {/* Hosted image_generation is configured in the chat model's official
+              tools. Only dedicated image models own image request controls. */}
+          {showsDedicatedImageControls(draft.kind) && (
             <section className="mt-6 rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-5 sm:px-6">
               <h2 className="font-serif text-lg text-[var(--color-fg)]">
                 {t('admin:models.sections.imageBehaviour', { defaultValue: 'Image generation' })}
