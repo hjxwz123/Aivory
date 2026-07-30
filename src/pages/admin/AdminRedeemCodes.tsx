@@ -260,44 +260,47 @@ export default function AdminRedeemCodes() {
 
   return (
     <div>
-      <header className="flex items-end justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="font-serif text-3xl tracking-tight text-[var(--color-fg)]">{t('admin:redeemCodes.title')}</h1>
+      <header className="flex flex-col items-stretch gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">{t('admin:redeemCodes.title')}</h1>
           <p className="mt-2 text-[var(--color-fg-muted)] text-sm max-w-2xl">{t('admin:redeemCodes.lead')}</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:items-center">
           <Button
             variant="secondary"
+            className="w-full sm:w-auto"
             leadingIcon={<Download size={15} aria-hidden />}
             disabled={rows.length === 0}
             onClick={exportCsv}
           >
             {t('admin:redeemCodes.export', { defaultValue: 'Export CSV' })}
           </Button>
-          <Button leadingIcon={<Plus size={15} aria-hidden />} onClick={openNew}>
+          <Button className="w-full sm:w-auto" leadingIcon={<Plus size={15} aria-hidden />} onClick={openNew}>
             {t('admin:redeemCodes.new')}
           </Button>
         </div>
       </header>
 
       {/* Filters */}
-      <div className="mt-6 flex items-center gap-2 flex-wrap">
-        {(['all', 'unused', 'partial', 'used', 'invalid'] as StatusFilter[]).map((s) => (
-          <button
-            key={s}
-            type="button"
-            onClick={() => setStatus(s)}
-            className={
-              'inline-flex items-center h-8 px-3 rounded-[8px] text-[12px] interactive ' +
-              (status === s
-                ? 'bg-[var(--color-surface)] border border-[var(--color-border-strong)] text-[var(--color-fg)]'
-                : 'border border-[var(--color-border)] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]')
-            }
-          >
-            {t(`admin:redeemCodes.filters.${s}`)}
-          </button>
-        ))}
-        <div className="ml-auto w-56">
+      <div className="mt-6 grid gap-3 sm:flex sm:flex-wrap sm:items-center sm:gap-2">
+        <div className="grid w-full grid-cols-2 gap-2 min-[420px]:grid-cols-3 sm:flex sm:w-auto sm:flex-wrap">
+          {(['all', 'unused', 'partial', 'used', 'invalid'] as StatusFilter[]).map((s) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => setStatus(s)}
+              className={
+                'inline-flex min-h-11 items-center justify-center rounded-[8px] px-3 text-[12px] interactive last:col-span-2 sm:h-8 sm:min-h-0 ' +
+                (status === s
+                  ? 'bg-[var(--color-surface)] border border-[var(--color-border-strong)] text-[var(--color-fg)]'
+                  : 'border border-[var(--color-border)] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]')
+              }
+            >
+              {t(`admin:redeemCodes.filters.${s}`)}
+            </button>
+          ))}
+        </div>
+        <div className="w-full sm:ml-auto sm:w-56">
           <Input
             placeholder={t('admin:redeemCodes.table.batch')}
             value={batchFilter}
@@ -306,17 +309,17 @@ export default function AdminRedeemCodes() {
         </div>
       </div>
 
-      <section className="mt-6">
+      <section className="mt-4 sm:mt-6">
         {loading ? (
           <PanelFallback />
         ) : rows.length === 0 ? (
-          <div className="grid place-items-center px-6 py-16 rounded-[14px] border border-dashed border-[var(--color-border)] bg-[var(--color-bg-muted)]/30">
+          <div className="grid place-items-center rounded-[14px] border border-dashed border-[var(--color-border)] bg-[var(--color-bg-muted)]/30 px-4 py-10 sm:px-6 sm:py-16">
             <Ticket size={28} className="text-[var(--color-fg-faint)]" aria-hidden />
             <p className="mt-4 text-sm text-[var(--color-fg-muted)]">{t('admin:redeemCodes.empty')}</p>
           </div>
         ) : (
           <>
-            <ul className="flex flex-col divide-y divide-[var(--color-divider)] rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)]">
+            <ul className="flex flex-col divide-y divide-[var(--color-divider)] overflow-hidden rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)]">
               {pageRows.map((rc) => (
                 <CodeRow
                   key={rc.id}
@@ -398,7 +401,7 @@ export default function AdminRedeemCodes() {
                     />
                   </Field>
                 )}
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-4 sm:grid-cols-2">
                   {draft.kind === 'group' ? (
                     <Field label={t('admin:redeemCodes.fields.durationDays')} htmlFor="rc-dur" hint={t('admin:redeemCodes.fields.durationDaysHint')}>
                       <Input
@@ -421,7 +424,7 @@ export default function AdminRedeemCodes() {
                     />
                   </Field>
                 </div>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-4 sm:grid-cols-2">
                   <Field label={t('admin:redeemCodes.fields.maxUses')} htmlFor="rc-max" hint={t('admin:redeemCodes.fields.maxUsesHint')}>
                     <Input
                       id="rc-max"
@@ -542,7 +545,7 @@ function CodeRow({
       : t('admin:redeemCodes.durationDays', { count: row.duration_days })
 
   return (
-    <li className="grid grid-cols-[1fr_auto] gap-3 items-center px-5 py-4">
+    <li className="grid grid-cols-1 gap-3 px-3 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-5 sm:py-4">
       <div className="min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           <code className="font-mono text-[13px] tracking-[0.08em] text-[var(--color-fg)] bg-[var(--color-bg-muted)] px-2 py-0.5 rounded-[6px]">
@@ -579,35 +582,46 @@ function CodeRow({
           <p className="mt-1 text-[12px] text-[var(--color-fg-muted)] line-clamp-1">{row.note}</p>
         ) : null}
       </div>
-      <div className="flex items-center gap-1">
+      <div className="flex items-center justify-end gap-1 border-t border-[var(--color-divider)] pt-2 sm:border-0 sm:pt-0">
         <Tooltip content={copied ? t('admin:redeemCodes.copied') : t('admin:redeemCodes.copy')}>
           <Button
             variant="ghost"
-            size="sm"
-            aria-label={t('admin:redeemCodes.copy')}
+            size="icon-sm"
+            className="max-sm:size-11"
+            aria-label={`${t('admin:redeemCodes.copy')}: ${row.code}`}
             onClick={() => void copy(row.code)}
           >
             {copied ? <Check size={13} aria-hidden /> : <Copy size={13} aria-hidden />}
           </Button>
         </Tooltip>
-        <Button
-          variant="ghost"
-          size="sm"
-          leadingIcon={<RotateCcw size={13} aria-hidden />}
-          loading={toggling}
-          disabled={toggling}
-          onClick={onToggleEnabled}
-        >
-          {row.enabled ? t('admin:redeemCodes.disable') : t('admin:redeemCodes.enable')}
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          leadingIcon={<Trash2 size={13} aria-hidden />}
-          onClick={onDelete}
-        >
-          {t('common:actions.delete')}
-        </Button>
+        <Tooltip content={row.enabled ? t('admin:redeemCodes.disable') : t('admin:redeemCodes.enable')}>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="max-sm:size-11 max-sm:px-0"
+            leadingIcon={<RotateCcw size={13} aria-hidden />}
+            loading={toggling}
+            disabled={toggling}
+            onClick={onToggleEnabled}
+            aria-label={`${row.enabled ? t('admin:redeemCodes.disable') : t('admin:redeemCodes.enable')}: ${row.code}`}
+          >
+            <span className="hidden sm:inline">
+              {row.enabled ? t('admin:redeemCodes.disable') : t('admin:redeemCodes.enable')}
+            </span>
+          </Button>
+        </Tooltip>
+        <Tooltip content={t('common:actions.delete')}>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-[var(--color-fg-subtle)] hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)] max-sm:size-11 max-sm:px-0"
+            leadingIcon={<Trash2 size={13} aria-hidden />}
+            onClick={onDelete}
+            aria-label={`${t('common:actions.delete')}: ${row.code}`}
+          >
+            <span className="hidden sm:inline">{t('common:actions.delete')}</span>
+          </Button>
+        </Tooltip>
       </div>
     </li>
   )
@@ -622,7 +636,7 @@ function GeneratedList({ codes, onDone }: { codes: ApiRedeemCode[]; onDone: () =
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-[12px] text-[var(--color-fg-muted)]">
           {t('admin:redeemCodes.createdToast', { count: codes.length })}
         </p>
@@ -639,12 +653,13 @@ function GeneratedList({ codes, onDone }: { codes: ApiRedeemCode[]; onDone: () =
         {codes.map((c) => (
           <li
             key={c.id}
-            className="flex items-center justify-between gap-2 px-3 py-1.5 border-b border-[var(--color-divider)] last:border-b-0"
+            className="flex min-w-0 items-center justify-between gap-2 border-b border-[var(--color-divider)] px-3 py-2 last:border-b-0"
           >
-            <code className="font-mono text-[13px] tracking-[0.08em] text-[var(--color-fg)]">{c.code}</code>
+            <code className="min-w-0 break-all font-mono text-[13px] tracking-[0.08em] text-[var(--color-fg)]">{c.code}</code>
             <Button
               variant="ghost"
-              size="sm"
+              size="icon-sm"
+              className="shrink-0 max-sm:size-11"
               aria-label={t('admin:redeemCodes.copy')}
               onClick={() => void copy(c.code)}
             >

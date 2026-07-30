@@ -89,7 +89,7 @@ export default function AdminSystemStorage() {
   return (
     <div className="mx-auto max-w-[76rem]">
       <header>
-        <h1 className="font-serif text-3xl tracking-tight text-[var(--color-fg)]">
+        <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">
           {t('admin:systemStorage.title', { defaultValue: 'Storage & uploads' })}
         </h1>
         <p className="mt-2 max-w-2xl text-sm text-[var(--color-fg-muted)]">
@@ -102,8 +102,8 @@ export default function AdminSystemStorage() {
       {loading ? (
         <PanelFallback />
       ) : (
-        <section className="mt-8 flex flex-col gap-5">
-          <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-5">
+        <section className="mt-6 flex flex-col gap-4 sm:mt-8 sm:gap-5">
+          <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-4 sm:px-6 sm:py-5">
             <h2 className="font-serif text-lg text-[var(--color-fg)]">{t('admin:settings.fields.storageSection')}</h2>
             <p className="mt-1 text-xs text-[var(--color-fg-subtle)]">{t('admin:settings.fields.storageLead')}</p>
             <div className="mt-4 flex flex-col gap-5">
@@ -162,13 +162,13 @@ export default function AdminSystemStorage() {
               )}
 
               {storageProvider === 'local' && (
-                <p className="rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-4 text-xs leading-relaxed text-[var(--color-fg-muted)]">
+                <p className="rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-3 text-xs leading-relaxed text-[var(--color-fg-muted)] sm:p-4">
                   {t('admin:settings.fields.storageLocalNote')}
                 </p>
               )}
 
               {storageProvider === 's3' && (
-                <div className="flex flex-col gap-5 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-4">
+                <div className="flex flex-col gap-4 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-3 sm:gap-5 sm:p-4">
                   <Field label={t('admin:settings.fields.s3Bucket')} htmlFor="s3-bucket">
                     <Input
                       id="s3-bucket"
@@ -176,7 +176,7 @@ export default function AdminSystemStorage() {
                       onChange={(e) => setDraft({ ...draft, storage_s3_bucket: e.target.value })}
                     />
                   </Field>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid gap-4 sm:grid-cols-2">
                     <Field label={t('admin:settings.fields.s3Region')} htmlFor="s3-region">
                       <Input
                         id="s3-region"
@@ -198,7 +198,7 @@ export default function AdminSystemStorage() {
                       />
                     </Field>
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid gap-4 sm:grid-cols-2">
                     <Field label={t('admin:settings.fields.s3AccessKey')} htmlFor="s3-ak">
                       <Input
                         id="s3-ak"
@@ -222,7 +222,7 @@ export default function AdminSystemStorage() {
               )}
 
               {storageProvider === 'aliyun_oss' && (
-                <div className="flex flex-col gap-5 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-4">
+                <div className="flex flex-col gap-4 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-3 sm:gap-5 sm:p-4">
                   <Field label={t('admin:settings.fields.ossBucket')} htmlFor="oss-bucket">
                     <Input
                       id="oss-bucket"
@@ -242,7 +242,7 @@ export default function AdminSystemStorage() {
                       onChange={(e) => setDraft({ ...draft, storage_aliyun_endpoint: e.target.value })}
                     />
                   </Field>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid gap-4 sm:grid-cols-2">
                     <Field label={t('admin:settings.fields.ossAccessKeyId')} htmlFor="oss-akid">
                       <Input
                         id="oss-akid"
@@ -267,7 +267,7 @@ export default function AdminSystemStorage() {
             </div>
           </div>
 
-          <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-5">
+          <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-4 sm:px-6 sm:py-5">
             <h2 className="font-serif text-lg text-[var(--color-fg)]">{t('admin:settings.fields.uploadsSection')}</h2>
             <p className="mt-1 text-xs text-[var(--color-fg-subtle)]">{t('admin:settings.fields.uploadsLead')}</p>
             <div className="mt-4 flex flex-col gap-5">
@@ -325,7 +325,7 @@ export default function AdminSystemStorage() {
           </div>
 
           <div className="flex justify-end">
-            <Button loading={saving} onClick={() => void save()}>
+            <Button className="w-full sm:w-auto" loading={saving} onClick={() => void save()}>
               {t('common:actions.save')}
             </Button>
           </div>

@@ -449,7 +449,7 @@ export default function AdminPaymentChannels() {
     <div className="min-w-0 max-w-full font-sans">
       <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div className="min-w-0">
-          <h1 className="font-serif text-3xl tracking-tight text-[var(--color-fg)]">
+          <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">
             {t('admin:paymentChannels.title')}
           </h1>
           <p className="mt-1 max-w-2xl text-[13px] leading-5 text-[var(--color-fg-muted)]">

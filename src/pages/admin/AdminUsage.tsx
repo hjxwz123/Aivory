@@ -177,9 +177,9 @@ export default function AdminUsage() {
 
   return (
     <div>
-      <header className="flex items-end justify-between gap-4">
+      <header className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-end sm:justify-between sm:gap-4">
         <div>
-          <h1 className="font-serif text-3xl tracking-tight text-[var(--color-fg)]">{t('usage.title')}</h1>
+          <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">{t('usage.title')}</h1>
           <p className="mt-2 text-[var(--color-fg-muted)] text-sm max-w-2xl">
             {t('usage.leadRecords', { defaultValue: 'Every API call, one row. Filter and prune the log below.' })}
           </p>
@@ -189,14 +189,15 @@ export default function AdminUsage() {
           leadingIcon={<Trash2 size={13} aria-hidden />}
           disabled={total === 0 || loading}
           onClick={() => setConfirmBulk(true)}
+          className="w-full sm:w-auto"
         >
           {t('usage.deleteFiltered', { defaultValue: 'Delete filtered' })}
         </Button>
       </header>
 
       {/* Filters: time range · user · model */}
-      <section className="mt-6 flex flex-wrap items-end gap-3">
-        <div className="w-40">
+      <section className="mt-5 grid min-w-0 grid-cols-2 gap-3 rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] p-3 sm:grid-cols-3 lg:grid-cols-5">
+        <div className="min-w-0">
           <label className="block text-[12px] text-[var(--color-fg-subtle)] mb-1">{t('usage.filters.range', { defaultValue: 'Time range' })}</label>
           <Select value={days} onValueChange={setDays}>
             <SelectTrigger>
@@ -211,7 +212,7 @@ export default function AdminUsage() {
             </SelectContent>
           </Select>
         </div>
-        <div className="w-56">
+        <div className="col-span-2 min-w-0 sm:col-span-1">
           <label className="block text-[12px] text-[var(--color-fg-subtle)] mb-1">{t('usage.filters.user', { defaultValue: 'User' })}</label>
           <Input
             value={userQ}
@@ -219,7 +220,7 @@ export default function AdminUsage() {
             placeholder={t('usage.filters.userPlaceholder', { defaultValue: 'Email or ID' })}
           />
         </div>
-        <div className="w-56">
+        <div className="col-span-2 min-w-0 sm:col-span-1">
           <label className="block text-[12px] text-[var(--color-fg-subtle)] mb-1">{t('usage.filters.model', { defaultValue: 'Model' })}</label>
           <Select value={modelId} onValueChange={setModelId}>
             <SelectTrigger>
@@ -235,7 +236,7 @@ export default function AdminUsage() {
             </SelectContent>
           </Select>
         </div>
-        <div className="w-44">
+        <div className="min-w-0">
           <label className="block text-[12px] text-[var(--color-fg-subtle)] mb-1">{t('usage.filters.status', { defaultValue: 'Status' })}</label>
           <Select value={status} onValueChange={setStatus}>
             <SelectTrigger>
@@ -247,7 +248,7 @@ export default function AdminUsage() {
             </SelectContent>
           </Select>
         </div>
-        <div className="w-48">
+        <div className="col-span-2 min-w-0 sm:col-span-1">
           <label className="block text-[12px] text-[var(--color-fg-subtle)] mb-1">{t('usage.filters.purpose', { defaultValue: 'Purpose' })}</label>
           <Select value={purpose} onValueChange={setPurpose}>
             <SelectTrigger>
@@ -270,7 +271,7 @@ export default function AdminUsage() {
         </div>
       </section>
 
-      <section className="mt-6 grid grid-cols-2 gap-3">
+      <section className="mt-4 grid grid-cols-2 gap-2 sm:mt-6 sm:gap-3">
         <Stat label={t('usage.stats.totalCost')} value={`$${totalCost.toFixed(4)}`} />
         <Stat label={t('usage.stats.rows')} value={String(total)} />
       </section>
@@ -283,7 +284,8 @@ export default function AdminUsage() {
             {t('usage.empty')}
           </div>
         ) : (
-          <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] overflow-x-auto">
+          <>
+          <div className="hidden rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] overflow-x-auto xl:block">
             <table className="min-w-[1120px] w-full text-sm tabular-nums">
               <thead className="bg-[var(--color-bg-muted)] text-[12px] text-[var(--color-fg-subtle)]">
                 <tr>
@@ -414,6 +416,96 @@ export default function AdminUsage() {
               </tbody>
             </table>
           </div>
+          <ul className="divide-y divide-[var(--color-divider)] overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] xl:hidden">
+            {records.map((r) => (
+              <li key={r.id} className="min-w-0 px-3 py-3.5 sm:px-4">
+                <div className="flex min-w-0 items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="font-medium text-[var(--color-fg)]">{purposeLabel(r.purpose)}</span>
+                      {r.status === 'error' ? (
+                        <button
+                          type="button"
+                          onClick={() => setErrorDetail(r)}
+                          className="inline-flex h-6 items-center rounded-[6px] bg-[var(--color-danger-soft)] px-2 text-[11px] text-[var(--color-danger)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                        >
+                          {t('usage.statusError', { defaultValue: 'Error' })}
+                        </button>
+                      ) : r.request_method || r.request_url || r.request_body ? (
+                        <button
+                          type="button"
+                          onClick={() => setErrorDetail(r)}
+                          className="inline-flex h-6 items-center rounded-[6px] bg-[var(--color-bg-muted)] px-2 text-[11px] text-[var(--color-fg-muted)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                        >
+                          {t('usage.requestDetail.tag', { defaultValue: 'Request' })}
+                        </button>
+                      ) : null}
+                    </div>
+                    <p className="mt-1 truncate text-[12px] text-[var(--color-fg-muted)]">{r.user_email || r.user_id}</p>
+                    <p className="mt-0.5 text-[11px] tabular-nums text-[var(--color-fg-subtle)]">
+                      {timeFmt.format(new Date(r.created_at * 1000))}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void deleteOne(r.id)}
+                    disabled={busy}
+                    aria-label={t('usage.deleteRow', { defaultValue: 'Delete record' })}
+                    className="inline-flex size-10 shrink-0 items-center justify-center rounded-[8px] text-[var(--color-fg-subtle)] interactive hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] disabled:opacity-40"
+                  >
+                    <Trash2 size={15} aria-hidden />
+                  </button>
+                </div>
+
+                <dl className="mt-3 grid min-w-0 grid-cols-2 gap-x-4 gap-y-2 text-[12px]">
+                  <div className="min-w-0">
+                    <dt className="text-[11px] text-[var(--color-fg-subtle)]">{t('usage.table.model')}</dt>
+                    <dd className="mt-0.5 truncate text-[var(--color-fg)]">{modelLabel(r.model_id)}</dd>
+                    {r.ttft_fallback_model ? (
+                      <dd className="mt-1 text-[10px] leading-4 text-[var(--color-warning)]">
+                        {t('usage.ttftFallbackTag', { defaultValue: 'Timeout fallback → {{model}}', model: r.ttft_fallback_model })}
+                      </dd>
+                    ) : null}
+                  </div>
+                  <div className="min-w-0">
+                    <dt className="text-[11px] text-[var(--color-fg-subtle)]">{t('usage.table.channel', { defaultValue: 'Channel' })}</dt>
+                    <dd className="mt-0.5 flex min-w-0 flex-wrap items-center gap-1 text-[var(--color-fg-muted)]">
+                      <span className="max-w-full truncate">{r.channel_name || r.channel_id || '—'}</span>
+                      {r.fallback ? (
+                        <span className="rounded-[5px] border border-[var(--color-warning)] px-1.5 text-[10px] text-[var(--color-warning)]">
+                          {t('usage.fallbackTag', { defaultValue: 'Fallback' })}
+                        </span>
+                      ) : null}
+                    </dd>
+                  </div>
+                  <div className="col-span-2 min-w-0">
+                    <dt className="text-[11px] text-[var(--color-fg-subtle)]">{t('usage.table.conversation', { defaultValue: 'Conversation' })}</dt>
+                    <dd className="mt-0.5 min-w-0">
+                      {r.conversation_deleted ? (
+                        <span className="italic text-[var(--color-fg-faint)]">{t('usage.conversationDeleted', { defaultValue: 'Deleted' })}</span>
+                      ) : r.conversation_id ? (
+                        <Link
+                          to={`/admin/users/${encodeURIComponent(r.user_id)}/conversations/${encodeURIComponent(r.conversation_id)}`}
+                          className="block truncate text-[var(--color-accent)]"
+                        >
+                          {r.conversation_title || r.conversation_id}
+                        </Link>
+                      ) : (
+                        <span className="text-[var(--color-fg-faint)]">—</span>
+                      )}
+                    </dd>
+                  </div>
+                </dl>
+
+                <div className="mt-3 grid grid-cols-3 divide-x divide-[var(--color-divider)] rounded-[8px] bg-[var(--color-bg-muted)] py-2 text-center tabular-nums">
+                  <UsageMetric label={t('usage.table.in')} value={String(r.input_tokens)} />
+                  <UsageMetric label={t('usage.table.out')} value={String(r.output_tokens)} />
+                  <UsageMetric label={t('usage.table.cost')} value={`$${r.cost.toFixed(4)}`} />
+                </div>
+              </li>
+            ))}
+          </ul>
+          </>
         )}
         {!loading && total > PAGE_SIZE ? <Pagination page={page} pageCount={pageCount} onPage={setPage} /> : null}
       </section>
@@ -500,9 +592,18 @@ function ErrorDetailBlock({ title, content }: { title: string; content: string }
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-      <div className="text-[12px] text-[var(--color-fg-subtle)] uppercase tracking-wide">{label}</div>
-      <div className="mt-1 font-serif text-2xl text-[var(--color-fg)]">{value}</div>
+    <div className="rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] p-3 sm:rounded-[12px] sm:p-4">
+      <div className="text-[11px] text-[var(--color-fg-subtle)] sm:text-[12px]">{label}</div>
+      <div className="mt-1 font-serif text-xl tabular-nums text-[var(--color-fg)] sm:text-2xl">{value}</div>
+    </div>
+  )
+}
+
+function UsageMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0 px-1.5">
+      <div className="text-[10px] text-[var(--color-fg-subtle)]">{label}</div>
+      <div className="mt-0.5 truncate text-[11px] text-[var(--color-fg)]">{value}</div>
     </div>
   )
 }

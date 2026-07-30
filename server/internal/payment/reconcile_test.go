@@ -235,6 +235,9 @@ func TestWaffoReconcilerPendingAndClose(t *testing.T) {
 		mu.Unlock()
 		switch r.URL.Path {
 		case "/v1/graphql":
+			if got := r.Header.Get("X-Environment"); got != "" {
+				t.Fatalf("merchant GraphQL request unexpectedly has customer environment %q", got)
+			}
 			return map[string]any{"data": map[string]any{
 				"payments": []any{},
 				"onetimeOrders": []map[string]any{{
@@ -242,12 +245,18 @@ func TestWaffoReconcilerPendingAndClose(t *testing.T) {
 				}},
 			}}
 		case "/v1/actions/auth/issue-session-token":
+			if got := r.Header.Get("X-Environment"); got != "" {
+				t.Fatalf("session-token request unexpectedly has customer environment %q", got)
+			}
 			return map[string]any{"data": map[string]any{
 				"token": "customer_test_token", "expiresAt": "2026-07-27T12:05:00Z",
 			}}
 		case "/v1/actions/onetime-order/cancel-order":
 			if got := r.Header.Get("Authorization"); got != "Bearer customer_test_token" {
 				t.Fatalf("Waffo cancel authorization = %q", got)
+			}
+			if got := r.Header.Get("X-Environment"); got != cfg.Mode {
+				t.Fatalf("Waffo cancel environment = %q, want %q", got, cfg.Mode)
 			}
 			return map[string]any{"data": map[string]any{"orderId": providerOrderID, "status": "canceled"}}
 		default:

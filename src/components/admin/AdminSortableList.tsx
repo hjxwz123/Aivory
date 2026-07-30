@@ -244,7 +244,7 @@ export function AdminSortableList<T extends SortableItem>({
     <>
       <ul
         className={cn(
-          'flex flex-col divide-y divide-[var(--color-divider)] rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]',
+          'flex min-w-0 max-w-full flex-col divide-y divide-[var(--color-divider)] overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]',
           drag && 'select-none',
           listClassName,
         )}
@@ -258,6 +258,7 @@ export function AdminSortableList<T extends SortableItem>({
               layout={reduceMotion ? false : 'position'}
               transition={{ duration: duration.fast / 1000, ease: easing.out }}
               className={cn(
+                'min-w-0 max-w-full',
                 rowClassName,
                 isDragging ? 'opacity-0' : 'opacity-100',
               )}
@@ -274,6 +275,7 @@ export function AdminSortableList<T extends SortableItem>({
           aria-hidden
           inert
           className={cn(
+            'min-w-0 max-w-full',
             rowClassName,
             'pointer-events-none fixed rounded-xl border border-[var(--color-border-strong)] bg-[var(--color-surface)] shadow-[var(--shadow-xl)]',
           )}

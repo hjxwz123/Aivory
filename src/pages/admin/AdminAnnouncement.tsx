@@ -1,12 +1,11 @@
 /**
  * AdminAnnouncement — the global notice shown to users on load (§ announcement).
  *
- * Stored as the single `announcement` setting (JSON). An image makes it an
- * "image announcement" (rendered image-left / text-right in the popup); without
- * one it's a plain text notice. `remember_dismiss` controls whether closing it
- * is remembered (off → it re-shows every visit). Saving stamps `updated_at`,
- * which doubles as the dismiss version so an edited notice re-appears for
- * everyone who had dismissed the previous one.
+ * Stored as the single `announcement` setting (JSON). The optional title is
+ * plain text; the body supports sanitized HTML. An image makes it an "image
+ * announcement" (rendered image-left / text-right in the popup). Saving stamps
+ * `updated_at`, which doubles as the dismiss version so an edited notice
+ * re-appears for everyone who had dismissed the previous one.
  */
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -24,6 +23,7 @@ import { PanelFallback } from '@/components/ui/panel-fallback'
 
 interface AnnouncementConfig {
   enabled: boolean
+  title: string
   body: string
   image_url: string
   remember_dismiss: boolean
@@ -37,6 +37,7 @@ interface AnnouncementConfig {
 export default function AdminAnnouncement() {
   const { t } = useTranslation(['admin', 'common'])
   const [enabled, setEnabled] = useState(false)
+  const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
   const [imageUrl, setImageUrl] = useState('')
   const [remember, setRemember] = useState(true)
@@ -58,6 +59,7 @@ export default function AdminAnnouncement() {
       const s = await adminApi.settings()
       const a = (s.announcement ?? {}) as Partial<AnnouncementConfig>
       setEnabled(Boolean(a.enabled))
+      setTitle(typeof a.title === 'string' ? a.title : '')
       setBody(typeof a.body === 'string' ? a.body : '')
       setImageUrl(typeof a.image_url === 'string' ? a.image_url : '')
       setRemember(a.remember_dismiss !== false)
@@ -103,6 +105,7 @@ export default function AdminAnnouncement() {
         barEnabled !== barLoaded.current.enabled || barHtml.trim() !== barLoaded.current.html.trim()
       const payload: AnnouncementConfig = {
         enabled,
+        title: title.trim(),
         body: body.trim(),
         image_url: imageUrl.trim(),
         remember_dismiss: remember,
@@ -126,17 +129,17 @@ export default function AdminAnnouncement() {
   return (
     <div className="mx-auto max-w-[76rem]">
       <header>
-        <h1 className="font-serif text-3xl tracking-tight text-[var(--color-fg)]">{t('admin:announcement.title')}</h1>
+        <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">{t('admin:announcement.title')}</h1>
         <p className="mt-2 text-[var(--color-fg-muted)] text-sm max-w-2xl">{t('admin:announcement.lead')}</p>
       </header>
 
       {loading ? (
         <PanelFallback />
       ) : (
-        <section className="mt-8 flex flex-col gap-6">
+        <section className="mt-5 flex flex-col gap-4 sm:mt-8 sm:gap-6">
           {/* Enabled */}
           <label className="flex items-center justify-between gap-4 rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3.5">
-            <span>
+            <span className="min-w-0">
               <span className="block text-sm font-medium text-[var(--color-fg)]">{t('admin:announcement.enabledLabel')}</span>
               <span className="mt-0.5 block text-[12.5px] text-[var(--color-fg-muted)]">{t('admin:announcement.enabledHint')}</span>
             </span>
@@ -145,16 +148,27 @@ export default function AdminAnnouncement() {
 
           {/* Remember dismiss */}
           <label className="flex items-center justify-between gap-4 rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3.5">
-            <span>
+            <span className="min-w-0">
               <span className="block text-sm font-medium text-[var(--color-fg)]">{t('admin:announcement.rememberLabel')}</span>
               <span className="mt-0.5 block text-[12.5px] text-[var(--color-fg-muted)]">{t('admin:announcement.rememberHint')}</span>
             </span>
             <Switch checked={remember} onCheckedChange={setRemember} />
           </label>
 
+          {/* Optional plain-text title. */}
+          <Field label={t('admin:announcement.titleLabel')} htmlFor="ann-title" hint={t('admin:announcement.titleHint')}>
+            <Input
+              id="ann-title"
+              value={title}
+              maxLength={120}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder={t('admin:announcement.titlePlaceholder')}
+            />
+          </Field>
+
           {/* Image (optional → image announcement) */}
           <Field label={t('admin:announcement.imageLabel')} htmlFor="ann-img" hint={t('admin:announcement.imageHint')}>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
               <Input
                 id="ann-img"
                 wrapperClassName="flex-1 min-w-0"
@@ -176,6 +190,7 @@ export default function AdminAnnouncement() {
                 loading={uploading}
                 leadingIcon={<Upload size={13} aria-hidden />}
                 onClick={() => fileRef.current?.click()}
+                className="w-full sm:w-auto"
               >
                 {t('admin:announcement.upload')}
               </Button>
@@ -260,33 +275,40 @@ export default function AdminAnnouncement() {
           </div>
 
           {/* Live preview */}
-          {enabled && (body.trim() || imageUrl.trim()) ? (
+          {enabled && (title.trim() || body.trim() || imageUrl.trim()) ? (
             <div>
               <p className="mb-2 text-[12px] uppercase tracking-[0.08em] text-[var(--color-fg-subtle)]">
                 {t('admin:announcement.preview')}
               </p>
-              <div className="flex overflow-hidden rounded-popup border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-md)]">
+              <div className="flex flex-col overflow-hidden rounded-popup border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-md)] sm:flex-row">
                 {imageUrl.trim() ? (
-                  <div className="w-2/5 shrink-0 bg-[var(--color-bg-muted)]">
-                    <img src={imageUrl} alt="" className="h-full w-full object-cover" />
+                  <div className="aspect-[16/7] w-full shrink-0 bg-[var(--color-bg-muted)] sm:aspect-auto sm:w-2/5">
+                    <img src={imageUrl} alt="" className="size-full object-cover" />
                   </div>
                 ) : (
                   <span aria-hidden className="block w-1 shrink-0 self-stretch bg-[var(--color-accent)]" />
                 )}
-                {body.trim() ? (
-                  <div
-                    className="flex-1 p-5 text-[14px] leading-relaxed text-[var(--color-fg)] break-words [&_a]:text-[var(--color-accent)] [&_a]:underline [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5"
-                    dangerouslySetInnerHTML={{ __html: sanitizeHtml(body) }}
-                  />
-                ) : (
-                  <div className="flex-1 p-5 text-[14px] text-[var(--color-fg-subtle)]">{t('admin:announcement.bodyPlaceholder')}</div>
-                )}
+                <div className="min-w-0 flex-1 space-y-2 p-4 sm:p-5">
+                  {title.trim() ? (
+                    <h3 className="break-words text-lg font-semibold leading-6 text-[var(--color-fg)]">
+                      {title.trim()}
+                    </h3>
+                  ) : null}
+                  {body.trim() ? (
+                    <div
+                      className="break-words text-[14px] leading-relaxed text-[var(--color-fg)] [&_a]:text-[var(--color-accent)] [&_a]:underline [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:list-disc [&_ul]:pl-5"
+                      dangerouslySetInnerHTML={{ __html: sanitizeHtml(body) }}
+                    />
+                  ) : title.trim() ? null : (
+                    <div className="text-[14px] text-[var(--color-fg-subtle)]">{t('admin:announcement.bodyPlaceholder')}</div>
+                  )}
+                </div>
               </div>
             </div>
           ) : null}
 
           <div className="flex items-center gap-3">
-            <Button onClick={() => void save()} loading={saving} leadingIcon={<Megaphone size={14} aria-hidden />}>
+            <Button className="w-full sm:w-auto" onClick={() => void save()} loading={saving} leadingIcon={<Megaphone size={14} aria-hidden />}>
               {t('common:actions.save')}
             </Button>
           </div>

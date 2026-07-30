@@ -17,7 +17,7 @@ export function Pagination({ page, pageCount, onPage, className }: PaginationPro
   const { t } = useTranslation('common')
   if (pageCount <= 1) return null
   const btn =
-    'inline-flex items-center justify-center size-8 rounded-[8px] border border-[var(--color-border)] text-[var(--color-fg-muted)] interactive hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] disabled:opacity-40 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]'
+    'inline-flex items-center justify-center size-[var(--tap-min)] rounded-[8px] border border-[var(--color-border)] text-[var(--color-fg-muted)] interactive hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] disabled:opacity-40 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] sm:size-8'
   return (
     <div className={cn('flex items-center justify-center gap-3 pt-4', className)}>
       <button type="button" className={btn} disabled={page <= 1} onClick={() => onPage(page - 1)} aria-label={t('pagination.prev', { defaultValue: 'Previous' })}>

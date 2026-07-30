@@ -879,10 +879,11 @@ func Seed(db *sql.DB, cfg config.Config) error {
 		"moderation_message":    `"Your message was blocked by content moderation. Please rephrase and try again."`,
 		"log_full_requests":     `false`,
 		"log_errors_only":       `true`,
-		// § announcement: a single global notice shown to users on load. image_url
-		// non-empty → image announcement (image left, text right). remember_dismiss
-		// false → re-show every visit; updated_at doubles as the dismiss version.
-		"announcement": `{"enabled":false,"body":"","image_url":"","remember_dismiss":true,"updated_at":0}`,
+		// § announcement: a single global notice shown to users on load. title is
+		// optional; image_url non-empty → image announcement (image left, text right).
+		// remember_dismiss false → re-show every visit; updated_at doubles as the
+		// dismiss version.
+		"announcement": `{"enabled":false,"title":"","body":"","image_url":"","remember_dismiss":true,"updated_at":0}`,
 	} {
 		if _, err := db.Exec(`INSERT INTO settings(key, value) VALUES(?, ?)
 			ON CONFLICT(key) DO NOTHING`, k, v); err != nil {

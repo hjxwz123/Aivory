@@ -1274,8 +1274,9 @@ var settingsKeys = []string{
 	// screens for (model-mode), and the message shown when a prompt is blocked.
 	// Per-model toggle + mode live on the model row.
 	"moderation_keywords", "moderation_model_id", "moderation_categories", "moderation_message",
-	// § announcement: global notice config (enabled/body/image_url/remember_dismiss
-	// /updated_at) shown to users on load. Edited via the admin announcement page.
+	// § announcement: global notice config (enabled/title/body/image_url/
+	// remember_dismiss/updated_at) shown to users on load. Edited via the admin
+	// announcement page.
 	"announcement",
 	// Voice transcription (whisper) — admin-configurable, live-reloaded per call.
 	// base_url defaults to https://api.openai.com; model defaults to whisper-1.

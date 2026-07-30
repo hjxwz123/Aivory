@@ -61,7 +61,7 @@ export default function AdminContextMemory() {
   return (
     <div className="mx-auto max-w-[76rem]">
       <header>
-        <h1 className="font-serif text-3xl tracking-tight text-[var(--color-fg)]">
+        <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">
           {t('admin:menu.contextMemory', { defaultValue: 'Context and memory' })}
         </h1>
       </header>

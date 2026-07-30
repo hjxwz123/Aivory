@@ -75,7 +75,7 @@ export default function AdminLayout() {
           aria-current={overviewActive ? 'page' : undefined}
           onClick={() => setMobileOpen(false)}
           className={cn(
-            'flex h-9 items-center gap-2.5 rounded-[8px] px-3 text-[13px] interactive',
+            'flex h-11 items-center gap-2.5 rounded-[8px] px-3 text-[13px] interactive md:h-9',
             overviewActive
               ? 'bg-[var(--color-surface)] font-medium text-[var(--color-fg)]'
               : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
@@ -97,7 +97,7 @@ export default function AdminLayout() {
               aria-current={active ? 'location' : undefined}
               onClick={() => setMobileOpen(false)}
               className={cn(
-                'flex h-9 items-center gap-2.5 rounded-[8px] px-3 text-[13px] interactive',
+                'flex h-11 items-center gap-2.5 rounded-[8px] px-3 text-[13px] interactive md:h-9',
                 active
                   ? 'bg-[var(--color-surface)] font-medium text-[var(--color-fg)]'
                   : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
@@ -122,8 +122,8 @@ export default function AdminLayout() {
       <nav
         aria-label={groupLabel}
         className={cn(
-          'shrink-0 overflow-x-auto border-b border-[var(--color-divider)] scrollbar-none',
-          filesWorkspace && 'px-5 pt-4 sm:px-8 lg:px-12',
+          'min-w-0 shrink-0 overflow-x-auto overscroll-x-contain border-b border-[var(--color-divider)] scrollbar-none',
+          filesWorkspace && 'px-4 pt-3 sm:px-8 sm:pt-4 lg:px-12',
         )}
       >
         <div className="flex w-max min-w-full items-end gap-1">
@@ -135,7 +135,7 @@ export default function AdminLayout() {
                 to={item.to}
                 aria-current={active ? 'page' : undefined}
                 className={cn(
-                  '-mb-px inline-flex h-9 shrink-0 items-center whitespace-nowrap border-b-2 px-3.5 text-[13px] interactive',
+                  '-mb-px inline-flex h-11 shrink-0 items-center whitespace-nowrap border-b-2 px-3 text-[13px] interactive sm:h-9 sm:px-3.5',
                   active
                     ? 'border-[var(--color-accent)] font-medium text-[var(--color-fg)]'
                     : 'border-transparent text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]',
@@ -173,7 +173,7 @@ export default function AdminLayout() {
           filesWorkspace && 'overscroll-y-contain',
         )}
       >
-        <div className="flex h-[var(--layout-topbar-h-mobile)] shrink-0 items-center gap-2 border-b border-[var(--color-divider)] px-2 md:hidden">
+        <div className="flex h-[calc(var(--layout-topbar-h-mobile)+var(--safe-top))] shrink-0 items-center gap-2 border-b border-[var(--color-divider)] pl-[max(.5rem,var(--safe-left))] pr-[max(.5rem,var(--safe-right))] pt-[var(--safe-top)] md:hidden">
           <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
             <SheetTrigger asChild>
               <button
@@ -217,18 +217,18 @@ export default function AdminLayout() {
         ) : (
           <div className="flex min-h-0 w-full flex-1 flex-col">
             {currentGroup ? (
-              <div className="mx-auto w-full max-w-[84rem] shrink-0 px-5 pt-8 sm:px-8 sm:pt-12 lg:px-12">
+              <div className="mx-auto w-full max-w-[84rem] shrink-0 px-4 pt-3 sm:px-8 sm:pt-8 lg:px-12 lg:pt-10">
                 {renderGroupTabs()}
               </div>
             ) : null}
             <div
               ref={contentScrollRef}
-              className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain scrollbar-thin"
+              className="min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-auto overscroll-contain scrollbar-thin"
             >
               <div
                 className={cn(
-                  'mx-auto w-full max-w-[84rem] px-5 pb-8 sm:px-8 sm:pb-12 lg:px-12',
-                  currentGroup ? 'pt-6' : 'pt-8 sm:pt-12',
+                  'mx-auto min-w-0 w-full max-w-[84rem] px-4 pb-[max(1.5rem,var(--safe-bottom))] sm:px-8 sm:pb-12 lg:px-12',
+                  currentGroup ? 'pt-5 sm:pt-6' : 'pt-5 sm:pt-12',
                 )}
               >
                 <Suspense fallback={<PanelFallback />}>

@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { Briefcase, ChevronLeft, Trash2, Users } from 'lucide-react'
+import { Briefcase, ChevronLeft, ChevronRight, Trash2, Users } from 'lucide-react'
 import { workspacesApi } from '@/api'
 import type { ApiConversation, ApiKnowledgeBase, ApiProject, ApiWorkspace, ApiWorkspaceMember } from '@/api/types'
 import { toast } from '@/hooks/use-toast'
@@ -74,7 +74,7 @@ export default function AdminWorkspaces() {
 
   return (
     <section>
-      <h1 className="font-serif text-2xl text-[var(--color-fg)]">
+      <h1 className="font-serif text-2xl text-[var(--color-fg)] sm:text-3xl">
         {t('workspaces.title', { defaultValue: 'Workspaces' })}
       </h1>
       <p className="mt-1 text-sm text-[var(--color-fg-muted)]">
@@ -91,7 +91,8 @@ export default function AdminWorkspaces() {
           />
         </div>
       ) : (
-        <div className="mt-6 overflow-x-auto rounded-[12px] border border-[var(--color-border)]">
+        <>
+        <div className="mt-6 hidden overflow-x-auto rounded-[12px] border border-[var(--color-border)] md:block">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-[var(--color-divider)] bg-[var(--color-bg-muted)] text-left text-[11px] uppercase tracking-wide text-[var(--color-fg-subtle)]">
@@ -127,6 +128,34 @@ export default function AdminWorkspaces() {
             </tbody>
           </table>
         </div>
+        <ul className="mt-5 divide-y divide-[var(--color-divider)] overflow-hidden rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] md:hidden">
+          {rows.map((w) => (
+            <li key={w.id}>
+              <button
+                type="button"
+                onClick={() => setSelected(w.id)}
+                aria-label={`${t('workspaces.view', { defaultValue: 'View' })}: ${w.name}`}
+                className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_2.5rem] items-center gap-2 px-3 py-3.5 text-left interactive hover:bg-[var(--color-bg-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-ring)]"
+              >
+                <span className="min-w-0">
+                  <span className="block truncate text-sm font-medium text-[var(--color-fg)]">{w.name}</span>
+                  <span className="mt-0.5 block truncate text-[12px] text-[var(--color-fg-muted)]">{w.owner_name || w.owner_id}</span>
+                  <span className="mt-2 flex items-center gap-3 text-[11px] text-[var(--color-fg-subtle)]">
+                    <span className="inline-flex items-center gap-1 tabular-nums">
+                      <Users size={12} aria-hidden />
+                      {w.member_count ?? 0}
+                    </span>
+                    <span className="tabular-nums">{fmtDate(w.created_at)}</span>
+                  </span>
+                </span>
+                <span className="inline-flex size-10 items-center justify-center text-[var(--color-fg-subtle)]">
+                  <ChevronRight size={17} aria-hidden />
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+        </>
       )}
     </section>
   )
@@ -180,11 +209,11 @@ function WorkspaceDetail({
         <ChevronLeft size={14} aria-hidden />
         {t('workspaces.back', { defaultValue: 'All workspaces' })}
       </button>
-      <div className="mt-3 flex items-start justify-between gap-3">
-        <div>
-          <h1 className="flex items-center gap-2 font-serif text-2xl text-[var(--color-fg)]">
+      <div className="mt-3 flex flex-col items-stretch gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="flex min-w-0 items-center gap-2 font-serif text-2xl text-[var(--color-fg)]">
             <Briefcase size={20} aria-hidden className="text-[var(--color-fg-muted)]" />
-            {workspace.name}
+            <span className="min-w-0 break-words">{workspace.name}</span>
           </h1>
           <p className="mt-1 flex items-center gap-1.5 text-sm text-[var(--color-fg-muted)]">
             <Users size={13} aria-hidden />
@@ -195,13 +224,13 @@ function WorkspaceDetail({
             })}
           </p>
         </div>
-        <Button variant="destructive" onClick={() => onDelete(id)}>
+        <Button variant="destructive" onClick={() => onDelete(id)} className="w-full sm:w-auto">
           <Trash2 size={13} aria-hidden />
           {t('workspaces.delete', { defaultValue: 'Delete workspace' })}
         </Button>
       </div>
 
-      <div className="mt-6 grid gap-6 lg:grid-cols-2">
+      <div className="mt-5 grid gap-3 sm:mt-6 sm:gap-6 lg:grid-cols-2">
         <Panel title={t('workspaces.members', { defaultValue: 'Members' })}>
           {members.map((m) => (
             <Row key={m.user_id} main={m.name || m.email} sub={m.role === 'owner' ? t('workspaces.roleOwner', { defaultValue: 'Owner' }) : t('workspaces.roleMember', { defaultValue: 'Member' })} />
@@ -260,8 +289,8 @@ function WorkspaceDetail({
 
 function Panel({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-      <h2 className="text-[12px] font-medium uppercase tracking-wide text-[var(--color-fg-subtle)]">{title}</h2>
+    <div className="min-w-0 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] p-3 sm:rounded-[12px] sm:p-4">
+      <h2 className="text-[12px] font-medium text-[var(--color-fg-subtle)]">{title}</h2>
       <ul className="mt-2 max-h-72 space-y-1 overflow-y-auto scrollbar-thin">{children}</ul>
     </div>
   )

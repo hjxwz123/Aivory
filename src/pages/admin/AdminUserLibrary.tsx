@@ -131,7 +131,7 @@ export default function AdminUserLibrary() {
       <AdminDetailHeader backTo="/admin/users" backLabel={t('users.backToUsers')} />
 
       <header>
-        <h1 className="font-serif text-3xl tracking-tight text-[var(--color-fg)]">
+        <h1 className="break-words font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">
           {t('users.libraryTitle', { name: headerName })}
         </h1>
         <p className="mt-2 text-[var(--color-fg-muted)] text-sm max-w-2xl">{t('users.libraryLead')}</p>
@@ -155,18 +155,18 @@ export default function AdminUserLibrary() {
             ) : (
               <ul className="mt-3 flex flex-col divide-y divide-[var(--color-divider)] rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)]">
                 {projects.map((p) => (
-                  <li key={p.id} className="grid grid-cols-[auto_1fr_auto] items-center gap-3 px-5 py-4">
+                  <li key={p.id} className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 gap-y-1 px-3 py-3 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-center sm:px-5 sm:py-4">
                     <span aria-hidden className="text-lg">{p.emoji || '📁'}</span>
                     <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium text-[var(--color-fg)] truncate">{p.name}</span>
+                      <div className="flex min-w-0 flex-wrap items-center gap-1.5 sm:gap-2">
+                        <span className="line-clamp-2 min-w-0 break-words font-medium text-[var(--color-fg)] sm:line-clamp-1">{p.name}</span>
                         {p.pinned ? <Badge size="xs" variant="neutral">{t('users.pinned')}</Badge> : null}
                       </div>
                       {p.description ? (
-                        <div className="mt-0.5 text-[12px] text-[var(--color-fg-subtle)] line-clamp-1">{p.description}</div>
+                        <div className="mt-0.5 line-clamp-2 text-[12px] text-[var(--color-fg-subtle)] sm:line-clamp-1">{p.description}</div>
                       ) : null}
                     </div>
-                    <span className="text-[11.5px] text-[var(--color-fg-subtle)] font-mono shrink-0">
+                    <span className="col-start-2 text-[11.5px] font-mono text-[var(--color-fg-subtle)] sm:col-auto sm:row-auto sm:shrink-0">
                       {formatStamp(p.created_at)}
                     </span>
                   </li>
@@ -190,9 +190,11 @@ export default function AdminUserLibrary() {
               <ul className="mt-3 flex flex-col divide-y divide-[var(--color-divider)] rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)]">
                 {kbs.map((k) => {
                   const model = k.embedding_model_id ? getModelById(k.embedding_model_id)?.label : ''
-                  const meta = [model || k.embedding_model_id, k.embedding_dim ? `${k.embedding_dim}d` : '', formatStamp(k.created_at)]
-                    .filter(Boolean)
-                    .join(' · ')
+                  const meta = [
+                    model || k.embedding_model_id,
+                    k.embedding_dim ? `${k.embedding_dim}d` : '',
+                    formatStamp(k.created_at),
+                  ].filter(Boolean)
                   const open = openKb === k.id
                   const docs = kbDocs[k.id]
                   return (
@@ -201,12 +203,12 @@ export default function AdminUserLibrary() {
                         type="button"
                         onClick={() => void toggleKb(k.id)}
                         aria-expanded={open}
-                        className="w-full grid grid-cols-[auto_1fr_auto] items-center gap-3 px-5 py-4 text-left interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                        className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-2.5 px-3 py-3 text-left interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] sm:items-center sm:gap-3 sm:px-5 sm:py-4"
                       >
-                        <Library size={14} aria-hidden className="text-[var(--color-fg-subtle)]" />
+                        <Library size={14} aria-hidden className="mt-1 text-[var(--color-fg-subtle)] sm:mt-0" />
                         <div className="min-w-0">
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium text-[var(--color-fg)] truncate">{k.name}</span>
+                          <div className="flex min-w-0 flex-wrap items-center gap-1.5 sm:gap-2">
+                            <span className="line-clamp-2 min-w-0 break-words font-medium text-[var(--color-fg)] sm:line-clamp-1">{k.name}</span>
                             {k.project_id ? (
                               <Badge size="xs" variant="neutral">
                                 {projectName(k.project_id) || t('users.inProject')}
@@ -214,35 +216,49 @@ export default function AdminUserLibrary() {
                             ) : null}
                           </div>
                           {k.description ? (
-                            <div className="mt-0.5 text-[12px] text-[var(--color-fg-subtle)] line-clamp-1">{k.description}</div>
+                            <div className="mt-0.5 line-clamp-2 text-[12px] text-[var(--color-fg-subtle)] sm:line-clamp-1">{k.description}</div>
                           ) : null}
-                          <div className="mt-0.5 text-[11.5px] text-[var(--color-fg-subtle)] font-mono truncate">{meta}</div>
+                          <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-[11.5px] font-mono text-[var(--color-fg-subtle)] sm:mt-0.5">
+                            {meta.map((part, index) => (
+                              <span key={`${part}-${index}`} className="flex min-w-0 items-center gap-2 break-all sm:break-normal">
+                                {index > 0 ? <span aria-hidden className="hidden sm:inline">·</span> : null}
+                                {part}
+                              </span>
+                            ))}
+                          </div>
                         </div>
                         <ChevronDown
                           size={15}
                           aria-hidden
-                          className={cn('text-[var(--color-fg-subtle)] transition-transform', open && 'rotate-180')}
+                          className={cn('mt-1 text-[var(--color-fg-subtle)] transition-transform sm:mt-0', open && 'rotate-180')}
                         />
                       </button>
                       {open ? (
-                        <div className="border-t border-[var(--color-divider)] bg-[var(--color-bg-muted)]/40 px-5 py-3">
+                        <div className="border-t border-[var(--color-divider)] bg-[var(--color-bg-muted)]/40 px-3 py-3 sm:px-5">
                           {kbLoading === k.id ? (
                             <PanelFallback />
                           ) : docs && docs.length > 0 ? (
                             <ul className="flex flex-col gap-1.5">
                               {docs.map((doc) => (
-                                <li key={doc.id} className="flex items-center gap-2.5 text-[13px]">
-                                  <FileText size={13} aria-hidden className="shrink-0 text-[var(--color-fg-subtle)]" />
-                                  <span className="min-w-0 flex-1 truncate text-[var(--color-fg)]">{doc.filename}</span>
+                                <li key={doc.id} className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-2.5 gap-y-1 py-1 text-[13px] sm:grid-cols-[auto_minmax(0,1fr)_auto_auto] sm:items-center sm:py-0">
+                                  <FileText size={13} aria-hidden className="mt-0.5 shrink-0 text-[var(--color-fg-subtle)] sm:mt-0" />
+                                  <span className="line-clamp-2 min-w-0 break-all text-[var(--color-fg)] sm:line-clamp-1">{doc.filename}</span>
                                   {doc.status !== 'ready' ? (
-                                    <Badge size="xs" variant={doc.status === 'failed' ? 'danger' : 'neutral'}>
-                                      {doc.status}
-                                    </Badge>
+                                    <span className="col-start-2 sm:col-auto">
+                                      <Badge size="xs" variant={doc.status === 'failed' ? 'danger' : 'neutral'}>
+                                        {doc.status}
+                                      </Badge>
+                                    </span>
                                   ) : null}
-                                  <span className="shrink-0 text-[11px] text-[var(--color-fg-subtle)] font-mono tabular-nums">
+                                  <span className="col-start-2 flex flex-wrap gap-x-2 text-[11px] font-mono tabular-nums text-[var(--color-fg-subtle)] sm:col-auto sm:shrink-0">
                                     {[doc.chunk_count ? t('users.chunks', { count: doc.chunk_count }) : '', formatBytes(doc.size_bytes)]
                                       .filter(Boolean)
-                                      .join(' · ')}
+                                      .map((part, index) => (
+                                        <span key={`${part}-${index}`} className="flex items-center gap-2">
+                                          {index > 0 ? <span aria-hidden className="hidden sm:inline">·</span> : null}
+                                          {part}
+                                        </span>
+                                      ))}
                                   </span>
                                 </li>
                               ))}

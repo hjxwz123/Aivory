@@ -80,7 +80,7 @@ export default function AdminUserMemories() {
       <AdminDetailHeader backTo="/admin/users" backLabel={t('admin:users.backToUsers')} />
 
       <header>
-        <h1 className="font-serif text-3xl tracking-tight text-[var(--color-fg)]" aria-busy={pageLoading}>
+        <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl" aria-busy={pageLoading}>
           {pageLoading ? (
             <span className="block" role="status" aria-live="polite">
               <span className="sr-only">{t('admin:common.loading')}</span>
