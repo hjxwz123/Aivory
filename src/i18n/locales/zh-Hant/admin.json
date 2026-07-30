@@ -904,16 +904,15 @@
     "filters": {
       "all": "全部",
       "unused": "未使用",
-      "redeemed": "已兌換",
-      "disabled": "已停用",
-      "expired": "已過期"
+      "partial": "部分使用",
+      "used": "已使用",
+      "invalid": "已失效"
     },
     "status": {
       "unused": "未使用",
-      "redeemed": "已兌換",
       "partial": "部分使用",
-      "disabled": "已停用",
-      "expired": "已過期"
+      "used": "已使用",
+      "invalid": "已失效"
     },
     "table": {
       "code": "兌換碼",

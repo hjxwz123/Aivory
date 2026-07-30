@@ -904,16 +904,15 @@
     "filters": {
       "all": "すべて",
       "unused": "未使用",
-      "redeemed": "引き換え済み",
-      "disabled": "無効",
-      "expired": "期限切れ"
+      "partial": "一部使用",
+      "used": "使用済み",
+      "invalid": "失効"
     },
     "status": {
       "unused": "未使用",
-      "redeemed": "引き換え済み",
       "partial": "一部使用",
-      "disabled": "無効",
-      "expired": "期限切れ"
+      "used": "使用済み",
+      "invalid": "失効"
     },
     "table": {
       "code": "コード",
