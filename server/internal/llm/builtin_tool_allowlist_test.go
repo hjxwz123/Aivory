@@ -62,6 +62,16 @@ func (r *toolContextRecordingRegistry) Run(_ context.Context, _ string, _ []byte
 	return "ok", nil, nil
 }
 
+type memoryToolRegistry struct{}
+
+func (memoryToolRegistry) List(string) []ToolDef {
+	return []ToolDef{{Name: "save_memory"}, {Name: "web_search"}}
+}
+
+func (memoryToolRegistry) Run(_ context.Context, name string, _ []byte, _ *ToolContext) (string, []Citation, error) {
+	return "ran " + name, nil, nil
+}
+
 func TestBuiltinToolAllowlistFiltersNativeDeclarationsAndFinalRunner(t *testing.T) {
 	orchestrator, provider, model, conversation, _, db := setupToolRouteTest(t)
 	if _, err := db.Exec(`UPDATE models SET builtin_tools='["web_search"]' WHERE id=?`, model.ID); err != nil {
@@ -96,6 +106,26 @@ func TestGlobalDisabledToolsRemainDeniedAtFinalRunner(t *testing.T) {
 	}
 	if provider.toolRunErr == nil || !strings.Contains(provider.toolRunErr.Error(), "not enabled") {
 		t.Fatalf("globally disabled forged call reached execution: %v", provider.toolRunErr)
+	}
+}
+
+func TestMemoryDisabledRemovesSaveMemoryAndDeniesForgedCall(t *testing.T) {
+	orchestrator, provider, model, conversation, _, db := setupToolRouteTest(t)
+	orchestrator.tools = memoryToolRegistry{}
+	if err := store.SetSetting(db, "memory_enabled", false); err != nil {
+		t.Fatal(err)
+	}
+	provider.invokeTool = "save_memory"
+	runToolRouteTurn(t, orchestrator, model.ID, conversation.ID, RunRequest{ToolMode: ToolModeEnabled})
+	request := provider.mainRequests[0]
+	if requestHasTool(request, "save_memory") {
+		t.Fatalf("memory-disabled request declared save_memory: %+v", request.Tools)
+	}
+	if !requestHasTool(request, "web_search") {
+		t.Fatalf("memory-disabled request lost unrelated tools: %+v", request.Tools)
+	}
+	if provider.toolRunErr == nil || !strings.Contains(provider.toolRunErr.Error(), "not enabled") {
+		t.Fatalf("forged save_memory call reached execution: %v", provider.toolRunErr)
 	}
 }
 

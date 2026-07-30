@@ -49,7 +49,11 @@ import { ParamControlsEditor } from '@/components/admin/param-controls-editor'
 import { ModelQuotaEditor } from '@/components/admin/model-quota-editor'
 import { AdminSortableList } from '@/components/admin/AdminSortableList'
 import { toast } from '@/hooks/use-toast'
-import { resolveBuiltinToolNames, toggleBuiltinToolName } from '@/lib/builtin-tools'
+import {
+  replaceVisibleBuiltinToolNames,
+  resolveBuiltinToolNames,
+  toggleBuiltinToolName,
+} from '@/lib/builtin-tools'
 import { showsDedicatedImageControls } from '@/lib/admin-model-sections'
 import { cn } from '@/lib/utils'
 import { PanelFallback } from '@/components/ui/panel-fallback'
@@ -258,12 +262,12 @@ export default function AdminModelEdit() {
   }
 
   function toggleBuiltinTool(name: string) {
-    const availableNames = builtinTools.map((tool) => tool.name)
+    const registeredNames = builtinTools.map((tool) => tool.name)
     setDraft((current) =>
       current
         ? {
             ...current,
-            builtin_tools: toggleBuiltinToolName(current.builtin_tools, availableNames, name),
+            builtin_tools: toggleBuiltinToolName(current.builtin_tools, registeredNames, name),
           }
         : current,
     )
@@ -304,10 +308,28 @@ export default function AdminModelEdit() {
       ((c.type === channel?.type && (c.api_format ?? '') === (channel?.api_format ?? '')) ||
         c.id === draft?.fallback_channel_id),
   )
-  const builtinToolNames = builtinTools.map((tool) => tool.name)
-  const selectedBuiltinToolNames = resolveBuiltinToolNames(draft?.builtin_tools, builtinToolNames)
+  const availableBuiltinTools = builtinTools.filter((tool) => tool.globally_enabled !== false)
+  const registeredBuiltinToolNames = builtinTools.map((tool) => tool.name)
+  const availableBuiltinToolNames = availableBuiltinTools.map((tool) => tool.name)
+  const selectedBuiltinToolNames = resolveBuiltinToolNames(draft?.builtin_tools, availableBuiltinToolNames)
   const selectedBuiltinToolSet = new Set(selectedBuiltinToolNames)
   const builtinToolsUseDefault = draft?.builtin_tools == null
+
+  function replaceVisibleBuiltinTools(selectedNames: string[]) {
+    setDraft((current) =>
+      current
+        ? {
+            ...current,
+            builtin_tools: replaceVisibleBuiltinToolNames(
+              current.builtin_tools,
+              registeredBuiltinToolNames,
+              availableBuiltinToolNames,
+              selectedNames,
+            ),
+          }
+        : current,
+    )
+  }
 
   async function save() {
     if (!draft) return
@@ -700,7 +722,7 @@ export default function AdminModelEdit() {
                           type="button"
                           aria-pressed={!builtinToolsUseDefault}
                           disabled={builtinToolsLoading || builtinToolsError}
-                          onClick={() => patch({ builtin_tools: [...builtinToolNames] })}
+                          onClick={() => patch({ builtin_tools: [...registeredBuiltinToolNames] })}
                           className={cn(
                             'h-7 rounded-[7px] px-2.5 text-[12px] font-medium interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
                             builtinToolsLoading || builtinToolsError
@@ -717,7 +739,7 @@ export default function AdminModelEdit() {
                         <span className="mr-auto truncate text-[11.5px] tabular-nums text-[var(--color-fg-subtle)] sm:mr-1">
                           {t('admin:models.fields.builtinToolsSelected', {
                             selected: selectedBuiltinToolNames.length,
-                            total: builtinTools.length,
+                            total: availableBuiltinTools.length,
                             defaultValue: '{{selected}}/{{total}} enabled',
                           })}
                         </span>
@@ -728,7 +750,7 @@ export default function AdminModelEdit() {
                               variant="ghost"
                               size="sm"
                               disabled={builtinToolsLoading || builtinToolsError}
-                              onClick={() => patch({ builtin_tools: [...builtinToolNames] })}
+                              onClick={() => replaceVisibleBuiltinTools(availableBuiltinToolNames)}
                             >
                               {t('admin:models.fields.builtinToolsSelectAll', { defaultValue: 'Select all' })}
                             </Button>
@@ -737,7 +759,7 @@ export default function AdminModelEdit() {
                               variant="ghost"
                               size="sm"
                               disabled={builtinToolsLoading || builtinToolsError}
-                              onClick={() => patch({ builtin_tools: [] })}
+                              onClick={() => replaceVisibleBuiltinTools([])}
                             >
                               {t('admin:models.fields.builtinToolsClear', { defaultValue: 'Clear' })}
                             </Button>
@@ -770,13 +792,13 @@ export default function AdminModelEdit() {
                       <p className="px-3 py-4 text-sm text-[var(--color-fg-muted)]" role="status">
                         {t('common:common.loading', { defaultValue: 'Loading...' })}
                       </p>
-                    ) : builtinTools.length === 0 ? (
+                    ) : availableBuiltinTools.length === 0 ? (
                       <p className="px-3 py-4 text-sm text-[var(--color-fg-muted)]">
                         {t('admin:models.fields.builtinToolsEmpty', { defaultValue: 'No built-in tools are registered.' })}
                       </p>
                     ) : (
                       <div className="grid grid-cols-1 gap-0.5 p-1 md:grid-cols-2">
-                        {builtinTools.map((tool) => {
+                        {availableBuiltinTools.map((tool) => {
                           const checked = selectedBuiltinToolSet.has(tool.name)
                           const Icon = BUILTIN_TOOL_ICONS[tool.name] ?? Wrench
                           return (
