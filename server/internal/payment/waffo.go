@@ -360,6 +360,9 @@ func (r WaffoReconciler) Reconcile(ctx context.Context, req ReconcileRequest) (P
 				if err != nil {
 					return ProviderEvent{}, fmt.Errorf("issue Waffo Pancake reconciliation session: %w", err)
 				}
+				if token == nil || strings.TrimSpace(token.Token) == "" {
+					return ProviderEvent{}, errors.New("Waffo Pancake returned an invalid reconciliation session token")
+				}
 				cancelled, err := client.Customer(token.Token).CancelOnetimeOrder(ctx, pancake.CancelOnetimeOrderParams{OrderID: providerOrder.ID})
 				if err != nil {
 					return ProviderEvent{}, fmt.Errorf("cancel Waffo Pancake order: %w", err)
@@ -599,6 +602,7 @@ func newWaffoClient(cfg WaffoConfig, baseURL string, httpClient *http.Client) (*
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: waffoCheckoutTimeout}
 	}
+	httpClient = waffoCustomerEnvironmentClient(httpClient, cfg.Mode)
 	return pancake.New(pancake.Config{
 		MerchantID: cfg.MerchantID,
 		PrivateKey: cfg.PrivateKey,
@@ -608,6 +612,42 @@ func newWaffoClient(cfg WaffoConfig, baseURL string, httpClient *http.Client) (*
 			Shared: cfg.WebhookPublicKey,
 		},
 	})
+}
+
+// The Waffo customer portal requires X-Environment in addition to the session
+// token. pancake-go v0.7.0 sends only Authorization on Customer requests, so
+// add the missing header at the transport boundary without changing merchant-
+// signed requests handled by the same SDK client.
+func waffoCustomerEnvironmentClient(client *http.Client, environment string) *http.Client {
+	transport := client.Transport
+	if transport == nil {
+		transport = http.DefaultTransport
+	}
+	return &http.Client{
+		Transport: waffoCustomerEnvironmentTransport{
+			base:        transport,
+			environment: strings.ToLower(strings.TrimSpace(environment)),
+		},
+		CheckRedirect: client.CheckRedirect,
+		Jar:           client.Jar,
+		Timeout:       client.Timeout,
+	}
+}
+
+type waffoCustomerEnvironmentTransport struct {
+	base        http.RoundTripper
+	environment string
+}
+
+func (t waffoCustomerEnvironmentTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if strings.HasPrefix(strings.TrimSpace(req.Header.Get("Authorization")), "Bearer ") &&
+		req.Header.Get("X-Environment") == "" {
+		clone := req.Clone(req.Context())
+		clone.Header = req.Header.Clone()
+		clone.Header.Set("X-Environment", t.environment)
+		req = clone
+	}
+	return t.base.RoundTrip(req)
 }
 
 func validWaffoShortID(value, prefix string) bool {

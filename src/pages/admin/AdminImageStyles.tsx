@@ -119,7 +119,7 @@ export default function AdminImageStyles() {
   return (
     <div className="mx-auto max-w-[76rem]">
       <header>
-        <h1 className="font-serif text-3xl tracking-tight text-[var(--color-fg)]">
+        <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">
           {t('admin:imageStyles.title', { defaultValue: 'Image styles' })}
         </h1>
         <p className="mt-2 max-w-2xl text-sm text-[var(--color-fg-muted)]">
@@ -152,17 +152,23 @@ export default function AdminImageStyles() {
               </SelectContent>
             </Select>
           </Field>
-          <Button variant="secondary" loading={savingPromptModel} onClick={() => void savePromptModel()}>
+          <Button
+            variant="secondary"
+            className="w-full sm:w-auto"
+            loading={savingPromptModel}
+            onClick={() => void savePromptModel()}
+          >
             {t('common:actions.save')}
           </Button>
         </section>
       ) : null}
 
       <section className="mt-8">
-        <div className="flex gap-2">
+        <div className="flex flex-col gap-2 sm:flex-row">
           <Input
             value={newName}
             disabled={creating}
+            wrapperClassName="w-full min-w-0 sm:flex-1"
             onChange={(e) => setNewName(e.target.value)}
             placeholder={t('admin:imageStyles.namePlaceholder', { defaultValue: 'Style name (e.g. Watercolor)' })}
             onKeyDown={(e) => {
@@ -172,7 +178,12 @@ export default function AdminImageStyles() {
               }
             }}
           />
-          <Button onClick={() => void create()} loading={creating} leadingIcon={<Plus size={14} aria-hidden />}>
+          <Button
+            className="w-full sm:w-auto"
+            onClick={() => void create()}
+            loading={creating}
+            leadingIcon={<Plus size={14} aria-hidden />}
+          >
             {t('admin:imageStyles.add', { defaultValue: 'Add style' })}
           </Button>
         </div>
@@ -325,7 +336,7 @@ function StyleCard({
               disabled={removing}
               aria-busy={removing || undefined}
               aria-label={t('common:actions.delete', { defaultValue: 'Delete' })}
-              className="inline-flex size-9 items-center justify-center rounded-[8px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)] interactive disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none"
+              className="inline-flex size-11 items-center justify-center rounded-[8px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)] interactive disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none sm:size-9"
             >
               {removing ? (
                 <span

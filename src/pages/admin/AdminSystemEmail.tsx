@@ -55,7 +55,7 @@ export default function AdminSystemEmail() {
   return (
     <div className="mx-auto max-w-[76rem]">
       <header>
-        <h1 className="font-serif text-3xl tracking-tight text-[var(--color-fg)]">
+        <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">
           {t('admin:menu.emailService', { defaultValue: 'Email service' })}
         </h1>
         <p className="mt-2 max-w-2xl text-sm text-[var(--color-fg-muted)]">

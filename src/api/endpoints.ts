@@ -157,6 +157,7 @@ export const authApi = {
   announcement: () =>
     api<{
       enabled: boolean
+      title: string
       body: string
       image_url: string
       remember_dismiss: boolean

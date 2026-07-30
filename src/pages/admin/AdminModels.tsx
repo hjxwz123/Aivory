@@ -182,20 +182,21 @@ export default function AdminModels() {
 
   return (
     <div>
-      <header className="flex items-end justify-between gap-4">
-        <div>
-          <h1 className="font-serif text-3xl tracking-tight text-[var(--color-fg)]">{t('admin:models.title')}</h1>
+      <header className="flex flex-col items-start gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">{t('admin:models.title')}</h1>
           <p className="mt-2 text-[var(--color-fg-muted)] text-sm max-w-2xl">{t('admin:models.lead')}</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:items-center">
           <Button
             variant="secondary"
+            className="min-h-[var(--tap-min)] min-w-0 px-2 sm:min-h-0 sm:px-4"
             leadingIcon={<TagsIcon size={15} aria-hidden />}
             onClick={() => navigate('/admin/model-tags')}
           >
             {t('admin:modelTags.manage', { defaultValue: 'Manage tags' })}
           </Button>
-          <Button leadingIcon={<Plus size={15} aria-hidden />} onClick={openNew}>
+          <Button className="min-h-[var(--tap-min)] min-w-0 px-2 sm:min-h-0 sm:px-4" leadingIcon={<Plus size={15} aria-hidden />} onClick={openNew}>
             {t('admin:models.new')}
           </Button>
         </div>
@@ -216,15 +217,16 @@ export default function AdminModels() {
             dragHandleLabel={t('admin:common.dragHandle')}
             moveUpLabel={t('admin:common.moveUp')}
             moveDownLabel={t('admin:common.moveDown')}
-            rowClassName="grid grid-cols-[auto_auto_auto_minmax(0,1fr)_auto_auto_auto] gap-2 items-center px-5 py-4"
+            mobileDragOnly
+            rowClassName="grid grid-cols-[2.75rem_auto_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-2 px-2 py-3.5 md:grid-cols-[auto_auto_auto_minmax(0,1fr)_auto_auto_auto] md:gap-2 md:px-5 md:py-4"
             renderItem={(m) => {
               const ch = channels.find((c) => c.id === m.channel_id)
               return (
                 <>
-                  <div className="grid size-9 shrink-0 place-items-center rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-muted)]">
+                  <div className="col-start-2 row-start-1 grid size-9 shrink-0 place-items-center rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-muted)] md:col-start-auto md:row-start-auto">
                     <ModelIcon icon={m.icon} size={22} />
                   </div>
-                  <div className="min-w-0">
+                  <div className="col-start-3 row-start-1 min-w-0 md:col-start-auto md:row-start-auto">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-medium text-[var(--color-fg)] truncate">{m.label}</span>
                       <Badge size="xs">{m.kind}</Badge>
@@ -239,26 +241,32 @@ export default function AdminModels() {
                     </div>
                   </div>
                   <Tooltip content={t('admin:models.visibleToggle', { defaultValue: m.enabled ? 'Visible to users' : 'Hidden from users' })}>
-                    <span className="shrink-0">
+                    <span className="col-start-4 row-start-1 shrink-0 md:col-start-auto md:row-start-auto">
                       <Switch checked={m.enabled} onCheckedChange={() => void toggleEnabled(m)} aria-label={t('admin:models.visibleToggle', { defaultValue: 'Show in app' })} />
                     </span>
                   </Tooltip>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    leadingIcon={<SettingsIcon size={13} aria-hidden />}
-                    onClick={() => navigate(`/admin/models/${encodeURIComponent(m.id)}`)}
-                  >
-                    {t('admin:models.settings')}
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    leadingIcon={<Trash2 size={13} aria-hidden />}
-                    onClick={() => setConfirmDelete(m)}
-                  >
-                    {t('admin:common.remove')}
-                  </Button>
+                  <div className="col-span-4 row-start-2 flex items-center justify-end gap-1 md:contents">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="max-md:size-[var(--tap-min)] max-md:gap-0 max-md:px-0"
+                      aria-label={`${t('admin:models.settings')}: ${m.label}`}
+                      leadingIcon={<SettingsIcon size={13} aria-hidden />}
+                      onClick={() => navigate(`/admin/models/${encodeURIComponent(m.id)}`)}
+                    >
+                      <span className="max-md:sr-only">{t('admin:models.settings')}</span>
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="max-md:size-[var(--tap-min)] max-md:gap-0 max-md:px-0"
+                      aria-label={`${t('admin:common.remove')}: ${m.label}`}
+                      leadingIcon={<Trash2 size={13} aria-hidden />}
+                      onClick={() => setConfirmDelete(m)}
+                    >
+                      <span className="max-md:sr-only">{t('admin:common.remove')}</span>
+                    </Button>
+                  </div>
                 </>
               )
             }}
@@ -275,7 +283,7 @@ export default function AdminModels() {
             <DialogDescription>{t('admin:models.newDialogLead')}</DialogDescription>
           </DialogHeader>
           <DialogBody>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label={t('admin:models.fields.channel')} htmlFor="m-new-ch">
                 <Select
                   value={creator.draft.channel_id}
@@ -330,7 +338,7 @@ export default function AdminModels() {
                   placeholder="claude-opus-4-8"
                 />
               </Field>
-              <Field label={t('admin:models.fields.icon')} htmlFor="m-new-icon" className="col-span-2">
+              <Field label={t('admin:models.fields.icon')} htmlFor="m-new-icon" className="sm:col-span-2">
                 <IconUploader
                   id="m-new-icon"
                   value={creator.draft.icon}
@@ -338,7 +346,7 @@ export default function AdminModels() {
                   placeholder="🌟 or https://example.com/icon.png"
                 />
               </Field>
-              <Field label={t('admin:models.fields.description')} htmlFor="m-new-desc" className="col-span-2">
+              <Field label={t('admin:models.fields.description')} htmlFor="m-new-desc" className="sm:col-span-2">
                 <Input
                   id="m-new-desc"
                   value={creator.draft.description}

@@ -102,7 +102,7 @@ export default function AdminUserConversation() {
 
       <header>
         <div className="flex items-center gap-2 flex-wrap">
-          <h1 className="font-serif text-3xl tracking-tight text-[var(--color-fg)] truncate">
+          <h1 className="truncate font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">
             {headerTitle}
           </h1>
           {conv?.archived ? (

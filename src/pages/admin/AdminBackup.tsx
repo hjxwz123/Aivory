@@ -382,7 +382,7 @@ export default function AdminBackup() {
   return (
     <div className="mx-auto max-w-[76rem]">
       <header>
-        <h1 className="font-serif text-3xl tracking-tight text-[var(--color-fg)]">{t('admin:backup.title')}</h1>
+        <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">{t('admin:backup.title')}</h1>
         <p className="mt-2 max-w-2xl text-sm text-[var(--color-fg-muted)]">{t('admin:backup.lead')}</p>
       </header>
 

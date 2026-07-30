@@ -126,12 +126,12 @@ export default function AdminChannels() {
 
   return (
     <div>
-      <header className="flex items-end justify-between gap-4">
-        <div>
-          <h1 className="font-serif text-3xl tracking-tight text-[var(--color-fg)]">{t('admin:channels.title')}</h1>
+      <header className="flex flex-col items-start gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">{t('admin:channels.title')}</h1>
           <p className="mt-2 text-[var(--color-fg-muted)] text-sm max-w-2xl">{t('admin:channels.lead')}</p>
         </div>
-        <Button leadingIcon={<Plus size={15} aria-hidden />} onClick={openNew}>
+        <Button className="min-h-[var(--tap-min)] w-full sm:min-h-0 sm:w-auto" leadingIcon={<Plus size={15} aria-hidden />} onClick={openNew}>
           {t('admin:channels.new')}
         </Button>
       </header>
@@ -154,10 +154,11 @@ export default function AdminChannels() {
             dragHandleLabel={t('admin:common.dragHandle')}
             moveUpLabel={t('admin:common.moveUp')}
             moveDownLabel={t('admin:common.moveDown')}
-            rowClassName="grid grid-cols-[auto_auto_1fr_auto_auto] items-center gap-4 px-5 py-4"
+            mobileDragOnly
+            rowClassName="grid grid-cols-[2.75rem_minmax(0,1fr)] items-start gap-x-2 gap-y-2 px-2 py-3.5 md:grid-cols-[auto_auto_minmax(0,1fr)_auto_auto] md:items-center md:gap-4 md:px-5 md:py-4"
             renderItem={(r) => (
               <>
-                <div className="min-w-0">
+                <div className="col-start-2 row-start-1 min-w-0 md:col-start-auto md:row-start-auto">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-medium text-[var(--color-fg)] truncate">{r.name}</span>
                     <Badge size="xs">{r.type}</Badge>
@@ -168,12 +169,28 @@ export default function AdminChannels() {
                     {r.base_url || t('admin:channels.labels.defaultEndpoint')} · {r.has_api_key ? t('admin:channels.labels.keySet') : t('admin:channels.labels.noKey')}
                   </div>
                 </div>
-                <Button variant="ghost" size="sm" leadingIcon={<Pencil size={13} aria-hidden />} onClick={() => openEdit(r)}>
-                  {t('admin:common.edit')}
-                </Button>
-                <Button variant="ghost" size="sm" leadingIcon={<Trash2 size={13} aria-hidden />} onClick={() => setConfirmDelete(r)}>
-                  {t('admin:common.remove')}
-                </Button>
+                <div className="col-span-2 row-start-2 flex items-center justify-end gap-1 md:contents">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="max-md:size-[var(--tap-min)] max-md:gap-0 max-md:px-0"
+                    aria-label={`${t('admin:common.edit')}: ${r.name}`}
+                    leadingIcon={<Pencil size={13} aria-hidden />}
+                    onClick={() => openEdit(r)}
+                  >
+                    <span className="max-md:sr-only">{t('admin:common.edit')}</span>
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="max-md:size-[var(--tap-min)] max-md:gap-0 max-md:px-0"
+                    aria-label={`${t('admin:common.remove')}: ${r.name}`}
+                    leadingIcon={<Trash2 size={13} aria-hidden />}
+                    onClick={() => setConfirmDelete(r)}
+                  >
+                    <span className="max-md:sr-only">{t('admin:common.remove')}</span>
+                  </Button>
+                </div>
               </>
             )}
           />
@@ -198,7 +215,7 @@ export default function AdminChannels() {
                   placeholder="Anthropic production"
                 />
               </Field>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <Field label={t('admin:channels.fields.type')} htmlFor="ch-type">
                   <Select
                     value={editor.draft.type ?? 'openai'}

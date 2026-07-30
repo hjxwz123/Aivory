@@ -184,7 +184,7 @@ export default function AdminSkills() {
     <div>
       <header className="flex flex-col items-start gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="font-serif text-3xl tracking-tight text-[var(--color-fg)]">{t('admin:skills.title')}</h1>
+          <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">{t('admin:skills.title')}</h1>
           <p className="mt-2 text-[var(--color-fg-muted)] text-sm max-w-2xl">{t('admin:skills.lead')}</p>
         </div>
         <Button

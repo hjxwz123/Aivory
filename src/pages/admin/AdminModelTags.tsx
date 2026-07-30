@@ -136,15 +136,16 @@ export default function AdminModelTags() {
       <AdminDetailHeader backTo="/admin/models" backLabel={t('admin:models.backToList')} />
 
       <header>
-        <h1 className="font-serif text-3xl tracking-tight text-[var(--color-fg)]">{t('admin:modelTags.title')}</h1>
+        <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">{t('admin:modelTags.title')}</h1>
         <p className="mt-2 max-w-2xl text-sm text-[var(--color-fg-muted)]">{t('admin:modelTags.lead')}</p>
       </header>
 
       <section className="mt-8">
-        <div className="flex gap-2">
+        <div className="flex flex-col gap-2 sm:flex-row">
           <Input
             value={newName}
             disabled={creating}
+            wrapperClassName="h-11 min-w-0 flex-1 sm:h-10"
             onChange={(e) => setNewName(e.target.value)}
             placeholder={t('admin:modelTags.namePlaceholder')}
             onKeyDown={(e) => {
@@ -154,7 +155,7 @@ export default function AdminModelTags() {
               }
             }}
           />
-          <Button onClick={() => void create()} loading={creating} leadingIcon={<Plus size={14} aria-hidden />}>
+          <Button className="min-h-[var(--tap-min)] w-full sm:min-h-0 sm:w-auto" onClick={() => void create()} loading={creating} leadingIcon={<Plus size={14} aria-hidden />}>
             {t('admin:modelTags.add')}
           </Button>
         </div>
@@ -173,8 +174,9 @@ export default function AdminModelTags() {
             dragHandleLabel={t('admin:common.dragHandle')}
             moveUpLabel={t('admin:common.moveUp')}
             moveDownLabel={t('admin:common.moveDown')}
+            mobileDragOnly
             listClassName="mt-6"
-            rowClassName="flex items-center gap-3 px-4 py-2.5"
+            rowClassName="grid grid-cols-[2.75rem_auto_minmax(0,1fr)_2.75rem] items-center gap-2 px-2 py-2.5 md:grid-cols-[auto_auto_auto_minmax(0,1fr)_auto] md:gap-3 md:px-4"
             renderItem={(tag) => (
               <>
                 <Tag size={14} className="shrink-0 text-[var(--color-fg-subtle)]" aria-hidden />
@@ -184,7 +186,7 @@ export default function AdminModelTags() {
                   onBlur={(e) => {
                     if (e.target.value.trim() && e.target.value !== tag.name) void rename(tag.id, e.target.value)
                   }}
-                  className="h-8 flex-1"
+                  wrapperClassName="h-8 min-w-0 max-md:h-11"
                 />
                 <Button
                   variant="ghost"
@@ -192,9 +194,9 @@ export default function AdminModelTags() {
                   loading={busyId === tag.id}
                   disabled={busyId === tag.id}
                   onClick={() => void remove(tag.id)}
-                  aria-label={t('common:actions.delete', { defaultValue: 'Delete' })}
+                  aria-label={`${t('common:actions.delete', { defaultValue: 'Delete' })}: ${tag.name}`}
                   leadingIcon={<Trash2 size={14} aria-hidden />}
-                  className="size-8 rounded-[8px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)]"
+                  className="size-8 rounded-[8px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)] max-md:size-[var(--tap-min)]"
                 />
               </>
             )}

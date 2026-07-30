@@ -116,7 +116,7 @@ export default function AdminUserLoginHistory() {
       <AdminDetailHeader backTo="/admin/users" backLabel={t('admin:users.backToUsers')} />
 
       <header>
-        <h1 className="font-serif text-3xl tracking-tight text-[var(--color-fg)]" aria-busy={firstLoad}>
+        <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl" aria-busy={firstLoad}>
           {firstLoad ? (
             <span className="block" role="status" aria-live="polite">
               <span className="sr-only">{t('admin:common.loading')}</span>

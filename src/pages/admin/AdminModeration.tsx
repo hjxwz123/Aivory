@@ -88,7 +88,7 @@ export default function AdminModeration() {
   return (
     <div className="mx-auto max-w-[76rem]">
       <header>
-        <h1 className="font-serif text-3xl tracking-tight text-[var(--color-fg)]">{t('admin:moderation.title')}</h1>
+        <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">{t('admin:moderation.title')}</h1>
         <p className="mt-2 text-[var(--color-fg-muted)] text-sm max-w-2xl">{t('admin:moderation.lead')}</p>
       </header>
 

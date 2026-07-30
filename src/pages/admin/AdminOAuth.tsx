@@ -190,12 +190,12 @@ export default function AdminOAuth() {
 
   return (
     <div>
-      <header className="flex items-end justify-between gap-4">
-        <div>
-          <h1 className="font-serif text-3xl tracking-tight text-[var(--color-fg)]">{t('admin:oauth.title')}</h1>
+      <header className="flex flex-col items-start gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">{t('admin:oauth.title')}</h1>
           <p className="mt-2 text-[var(--color-fg-muted)] text-sm max-w-2xl">{t('admin:oauth.lead')}</p>
         </div>
-        <Button leadingIcon={<Plus size={15} aria-hidden />} onClick={openNew}>
+        <Button className="min-h-[var(--tap-min)] w-full sm:min-h-0 sm:w-auto" leadingIcon={<Plus size={15} aria-hidden />} onClick={openNew}>
           {t('admin:oauth.new')}
         </Button>
       </header>
@@ -216,13 +216,13 @@ export default function AdminOAuth() {
             moveUpLabel={t('admin:common.moveUp')}
             moveDownLabel={t('admin:common.moveDown')}
             mobileDragOnly
-            rowClassName="grid grid-cols-[2.75rem_auto_minmax(0,1fr)_auto_auto] items-center gap-2 px-2 py-4 md:grid-cols-[auto_auto_auto_minmax(0,1fr)_auto_auto] md:gap-3 md:px-5"
+            rowClassName="grid grid-cols-[2.75rem_auto_minmax(0,1fr)] items-center gap-x-2 gap-y-2 px-2 py-3.5 md:grid-cols-[auto_auto_auto_minmax(0,1fr)_auto_auto] md:gap-3 md:px-5 md:py-4"
             renderItem={(p) => (
               <>
-                <div className="shrink-0 size-9 inline-flex items-center justify-center rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] text-[var(--color-fg)]">
+                <div className="col-start-2 row-start-1 inline-flex size-9 shrink-0 items-center justify-center rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] text-[var(--color-fg)] md:col-start-auto md:row-start-auto">
                   <OAuthBrandGlyph kind={p.kind} icon={p.icon} size={18} />
                 </div>
-                <div className="min-w-0">
+                <div className="col-start-3 row-start-1 min-w-0 md:col-start-auto md:row-start-auto">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-medium text-[var(--color-fg)] truncate">{p.name}</span>
                     <Badge size="xs">{t(`admin:oauth.kinds.${p.kind}`)}</Badge>
@@ -232,12 +232,28 @@ export default function AdminOAuth() {
                     {p.client_id || t('admin:oauth.noClientId')} · {p.has_secret ? t('admin:channels.labels.keySet') : t('admin:channels.labels.noKey')}
                   </div>
                 </div>
-                <Button variant="ghost" size="sm" leadingIcon={<Pencil size={13} aria-hidden />} onClick={() => openEdit(p)}>
-                  {t('admin:common.edit')}
-                </Button>
-                <Button variant="ghost" size="sm" leadingIcon={<Trash2 size={13} aria-hidden />} onClick={() => setConfirmDelete(p)}>
-                  {t('admin:common.remove')}
-                </Button>
+                <div className="col-span-3 row-start-2 flex items-center justify-end gap-1 md:contents">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="max-md:size-[var(--tap-min)] max-md:gap-0 max-md:px-0"
+                    aria-label={`${t('admin:common.edit')}: ${p.name}`}
+                    leadingIcon={<Pencil size={13} aria-hidden />}
+                    onClick={() => openEdit(p)}
+                  >
+                    <span className="max-md:sr-only">{t('admin:common.edit')}</span>
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="max-md:size-[var(--tap-min)] max-md:gap-0 max-md:px-0"
+                    aria-label={`${t('admin:common.remove')}: ${p.name}`}
+                    leadingIcon={<Trash2 size={13} aria-hidden />}
+                    onClick={() => setConfirmDelete(p)}
+                  >
+                    <span className="max-md:sr-only">{t('admin:common.remove')}</span>
+                  </Button>
+                </div>
               </>
             )}
           />
@@ -263,7 +279,7 @@ export default function AdminOAuth() {
           </DialogHeader>
           <DialogBody>
             <div className="grid gap-4">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <Field label={t('admin:oauth.fields.kind')} htmlFor="oa-kind">
                   <Select value={kind} onValueChange={(v) => setDraft({ kind: v as OAuthKind })}>
                     <SelectTrigger id="oa-kind">
@@ -391,7 +407,7 @@ export default function AdminOAuth() {
               </Field>
 
               {isApple ? (
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <Field label={t('admin:oauth.fields.teamId')} htmlFor="oa-team">
                     <Input
                       id="oa-team"

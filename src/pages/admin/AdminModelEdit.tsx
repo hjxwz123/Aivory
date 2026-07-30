@@ -457,7 +457,7 @@ export default function AdminModelEdit() {
       ) : (
         <>
           <header>
-            <h1 className="font-serif text-3xl tracking-tight text-[var(--color-fg)]">
+            <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">
               {draft.label || t('admin:models.editorTitle')}
             </h1>
             <p className="mt-2 text-[var(--color-fg-muted)] text-sm font-mono">{draft.request_id}</p>

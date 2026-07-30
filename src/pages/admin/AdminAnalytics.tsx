@@ -7,7 +7,7 @@
  * chart. Charts are token-driven monochrome SVG/divs — no chart library, no
  * accent overuse.
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { useTranslation } from 'react-i18next'
 import { adminApi, ApiError } from '@/api'
 import type { ApiAnalytics, ApiUsageBreakdownRow, ApiUsageSeriesPoint } from '@/api/types'
@@ -93,12 +93,14 @@ export default function AdminAnalytics() {
 
   return (
     <div>
-      <header className="flex items-end justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="font-serif text-3xl tracking-tight text-[var(--color-fg)]">{t('analytics.title')}</h1>
+      <header className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">
+            {t('analytics.title')}
+          </h1>
           <p className="mt-2 text-[var(--color-fg-muted)] text-sm max-w-2xl">{t('analytics.lead')}</p>
         </div>
-        <div className="w-40">
+        <div className="w-full sm:w-40">
           <Select value={days} onValueChange={setDays}>
             <SelectTrigger>
               <SelectValue />
@@ -115,7 +117,7 @@ export default function AdminAnalytics() {
       </header>
 
       {/* KPI cards */}
-      <section className="mt-6 grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <section className="mt-6 grid grid-cols-2 gap-2.5 sm:gap-3 lg:grid-cols-4">
         <Stat label={t('analytics.stats.calls')} value={totals ? compactNum(totals.calls) : '—'} />
         <Stat
           label={t('analytics.stats.tokens')}
@@ -126,7 +128,7 @@ export default function AdminAnalytics() {
       </section>
 
       {/* Metric toggle */}
-      <div className="mt-6 inline-flex items-center gap-1 p-0.5 rounded-[10px] bg-[var(--color-bg-muted)] border border-[var(--color-border)]">
+      <div className="mt-6 grid w-full grid-cols-3 items-stretch gap-1 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-1 sm:inline-grid sm:w-auto sm:p-0.5">
         {METRICS.map((m) => (
           <button
             key={m}
@@ -134,7 +136,7 @@ export default function AdminAnalytics() {
             onClick={() => setMetric(m)}
             aria-pressed={metric === m}
             className={cn(
-              'px-3.5 h-8 rounded-[8px] text-sm font-medium transition-colors interactive',
+              'min-w-0 min-h-11 rounded-[8px] px-1.5 text-xs font-medium leading-tight transition-colors interactive sm:min-h-8 sm:px-3.5 sm:text-sm',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
               metric === m
                 ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)]'
@@ -155,7 +157,7 @@ export default function AdminAnalytics() {
       ) : (
         <>
           {/* Overall trend */}
-          <section className="mt-6 rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
+          <section className="mt-6 rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 sm:p-5">
             <h2 className="text-sm font-medium text-[var(--color-fg)]">
               {hourly ? t('analytics.sections.hourly') : t('analytics.sections.daily')}
             </h2>
@@ -169,7 +171,7 @@ export default function AdminAnalytics() {
           </section>
 
           {/* Breakdowns */}
-          <section className="mt-6 grid lg:grid-cols-2 gap-6">
+          <section className="mt-6 grid gap-4 lg:grid-cols-2 lg:gap-6">
             <Breakdown
               title={t('analytics.sections.byModel')}
               rows={data.by_model}
@@ -193,9 +195,11 @@ export default function AdminAnalytics() {
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-      <div className="text-[12px] text-[var(--color-fg-subtle)] uppercase tracking-wide">{label}</div>
-      <div className="mt-1 font-serif text-2xl text-[var(--color-fg)] tabular-nums">{value}</div>
+    <div className="min-w-0 rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] p-3 sm:p-4">
+      <div className="break-words text-[11px] uppercase tracking-wide text-[var(--color-fg-subtle)] sm:text-[12px]">
+        {label}
+      </div>
+      <div className="mt-1 break-all font-serif text-xl tabular-nums text-[var(--color-fg)] sm:text-2xl">{value}</div>
     </div>
   )
 }
@@ -203,20 +207,49 @@ function Stat({ label, value }: { label: string; value: string }) {
 /** Vertical bar chart over the time axis. Monochrome ink-on-paper. */
 function TrendBars({ values, labels, format }: { values: number[]; labels: string[]; format: (v: number) => string }) {
   const max = Math.max(1, ...values)
+  const [activeIndex, setActiveIndex] = useState(Math.max(0, values.length - 1))
+  useEffect(() => {
+    setActiveIndex(Math.max(0, values.length - 1))
+  }, [values.length])
+  const selectedIndex = Math.min(activeIndex, Math.max(0, values.length - 1))
+
   return (
     <div>
-      <div className="flex items-end gap-[2px] h-44">
-        {values.map((v, i) => (
-          <div key={i} className="group relative flex-1 min-w-0 h-full flex flex-col justify-end">
-            <div
-              className="w-full rounded-t-[2px] bg-[var(--color-fg-muted)] group-hover:bg-[var(--color-fg)] transition-colors"
-              style={{ height: `${Math.max(v > 0 ? 2 : 0, Math.round((v / max) * 100))}%` }}
-            />
-            <div className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover:block whitespace-nowrap rounded-[6px] bg-[var(--color-fg)] px-2 py-1 text-[11px] text-[var(--color-fg-inverted)] shadow-[var(--shadow-md)] z-10">
-              {labels[i]} · {format(v)}
-            </div>
-          </div>
-        ))}
+      {values.length > 0 ? (
+        <div className="mb-3 flex min-h-5 flex-wrap items-baseline justify-between gap-x-3 gap-y-1 text-xs">
+          <span className="text-[var(--color-fg-muted)]">{labels[selectedIndex]}</span>
+          <span className="font-medium tabular-nums text-[var(--color-fg)]">{format(values[selectedIndex])}</span>
+        </div>
+      ) : null}
+      <div className="overflow-x-auto pb-1">
+        <div
+          className="flex h-44 min-w-full w-[var(--mobile-chart-width)] items-end gap-[2px] sm:w-full"
+          style={{ '--mobile-chart-width': values.length > 14 ? `${values.length * 1.5}rem` : '100%' } as CSSProperties}
+        >
+          {values.map((v, i) => (
+            <button
+              key={i}
+              type="button"
+              onClick={() => setActiveIndex(i)}
+              onFocus={() => setActiveIndex(i)}
+              aria-label={`${labels[i]} · ${format(v)}`}
+              aria-pressed={selectedIndex === i}
+              className="group relative flex h-full min-w-0 flex-1 flex-col justify-end rounded-t-[2px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+            >
+              <span
+                aria-hidden
+                className={cn(
+                  'block w-full rounded-t-[2px] bg-[var(--color-fg-muted)] transition-colors group-hover:bg-[var(--color-fg)]',
+                  selectedIndex === i && 'bg-[var(--color-fg)]',
+                )}
+                style={{ height: `${Math.max(v > 0 ? 2 : 0, Math.round((v / max) * 100))}%` }}
+              />
+              <span className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1 hidden -translate-x-1/2 whitespace-nowrap rounded-[6px] bg-[var(--color-fg)] px-2 py-1 text-[11px] text-[var(--color-fg-inverted)] shadow-[var(--shadow-md)] group-hover:block">
+                {labels[i]} · {format(v)}
+              </span>
+            </button>
+          ))}
+        </div>
       </div>
       {labels.length > 0 ? (
         <div className="mt-2 flex justify-between text-[11px] text-[var(--color-fg-subtle)]">
@@ -272,7 +305,7 @@ function Breakdown({
   const { t } = useTranslation('admin')
   const max = Math.max(1, ...rows.map((r) => metricVal(r, metric)))
   return (
-    <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
+    <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 sm:p-5">
       <h2 className="text-sm font-medium text-[var(--color-fg)]">{title}</h2>
       {rows.length === 0 ? (
         <div className="mt-4 text-sm text-[var(--color-fg-subtle)]">{t('analytics.empty')}</div>
@@ -281,7 +314,7 @@ function Breakdown({
           {rows.map((r) => {
             const v = metricVal(r, metric)
             return (
-              <li key={r.key} className="py-2.5 flex items-center gap-3">
+              <li key={r.key} className="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:gap-3 sm:py-2.5">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-[13px] text-[var(--color-fg)] truncate">{labelFor(r)}</span>
@@ -296,7 +329,7 @@ function Breakdown({
                     />
                   </div>
                 </div>
-                <div className="shrink-0">
+                <div className="flex w-full shrink-0 justify-end sm:w-auto">
                   <Spark values={series(r.key)} />
                 </div>
               </li>

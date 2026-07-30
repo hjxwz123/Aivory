@@ -293,7 +293,7 @@ export default function AdminCreditSettings() {
   return (
     <div className="mx-auto max-w-[76rem]">
       <header>
-        <h1 className="font-serif text-3xl tracking-tight text-[var(--color-fg)]">
+        <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">
           {t('admin:creditSettings.title', { defaultValue: 'Credits and quotas' })}
         </h1>
         <p className="mt-2 max-w-2xl text-sm text-[var(--color-fg-muted)]">
@@ -462,8 +462,8 @@ export default function AdminCreditSettings() {
           </section>
 
           <section className="mt-10 border-t border-[var(--color-divider)] pt-8">
-            <div className="flex items-end justify-between gap-4">
-              <div>
+            <div className="flex flex-col items-stretch gap-4 sm:flex-row sm:items-end sm:justify-between">
+              <div className="min-w-0">
                 <h2 className="font-serif text-xl tracking-tight text-[var(--color-fg)]">
                   {t('admin:groups.creditPackages.title')}
                 </h2>
@@ -474,6 +474,7 @@ export default function AdminCreditSettings() {
               <Button
                 variant="secondary"
                 size="sm"
+                className="w-full sm:w-auto"
                 leadingIcon={<Plus size={14} aria-hidden />}
                 onClick={openNewPackage}
               >
@@ -493,8 +494,9 @@ export default function AdminCreditSettings() {
                 dragHandleLabel={t('admin:common.dragHandle')}
                 moveUpLabel={t('admin:common.moveUp')}
                 moveDownLabel={t('admin:common.moveDown')}
+                mobileDragOnly
                 listClassName="mt-4"
-                rowClassName="grid grid-cols-[auto_auto_minmax(0,1fr)_auto_auto] gap-3 items-center px-4 py-3"
+                rowClassName="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-2 gap-y-1.5 px-3 py-3 md:grid-cols-[auto_auto_minmax(0,1fr)_auto] md:gap-3 md:px-4"
                 renderItem={(item) => (
                   <>
                     <div className="min-w-0">
@@ -517,28 +519,31 @@ export default function AdminCreditSettings() {
                         {item.description ? <span className="basis-full truncate">{item.description}</span> : null}
                       </div>
                     </div>
-                    <Switch
-                      checked={item.enabled}
-                      disabled={packageBusyId === item.id}
-                      onCheckedChange={(enabled) => void togglePackage(item, enabled)}
-                      aria-label={t('admin:groups.creditPackages.enabledLabel', { name: item.name })}
-                    />
-                    <div className="flex items-center gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        leadingIcon={<Pencil size={14} aria-hidden />}
-                        onClick={() => openEditPackage(item)}
-                        aria-label={`${t('admin:common.edit')}: ${item.name}`}
+                    <div className="flex items-center gap-1 max-md:col-start-2 max-md:w-full max-md:justify-between">
+                      <Switch
+                        checked={item.enabled}
+                        disabled={packageBusyId === item.id}
+                        onCheckedChange={(enabled) => void togglePackage(item, enabled)}
+                        aria-label={t('admin:groups.creditPackages.enabledLabel', { name: item.name })}
                       />
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        leadingIcon={<Trash2 size={14} aria-hidden />}
-                        onClick={() => setConfirmPackageDelete(item)}
-                        aria-label={`${t('admin:common.remove')}: ${item.name}`}
-                        className="text-[var(--color-fg-subtle)] hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)]"
-                      />
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          className="max-md:size-11"
+                          leadingIcon={<Pencil size={14} aria-hidden />}
+                          onClick={() => openEditPackage(item)}
+                          aria-label={`${t('admin:common.edit')}: ${item.name}`}
+                        />
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          leadingIcon={<Trash2 size={14} aria-hidden />}
+                          onClick={() => setConfirmPackageDelete(item)}
+                          aria-label={`${t('admin:common.remove')}: ${item.name}`}
+                          className="text-[var(--color-fg-subtle)] hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)] max-md:size-11"
+                        />
+                      </div>
                     </div>
                   </>
                 )}
