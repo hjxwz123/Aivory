@@ -908,16 +908,15 @@
     "filters": {
       "all": "全部",
       "unused": "未使用",
-      "redeemed": "已兑换",
-      "disabled": "已禁用",
-      "expired": "已过期"
+      "partial": "部分使用",
+      "used": "已使用",
+      "invalid": "已失效"
     },
     "status": {
       "unused": "未使用",
-      "redeemed": "已兑换",
       "partial": "部分使用",
-      "disabled": "已禁用",
-      "expired": "已过期"
+      "used": "已使用",
+      "invalid": "已失效"
     },
     "table": {
       "code": "兑换码",

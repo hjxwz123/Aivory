@@ -904,16 +904,15 @@
     "filters": {
       "all": "Tous",
       "unused": "Inutilisés",
-      "redeemed": "Utilisés",
-      "disabled": "Désactivés",
-      "expired": "Expirés"
+      "partial": "Partiellement utilisés",
+      "used": "Utilisés",
+      "invalid": "Invalides"
     },
     "status": {
       "unused": "Inutilisé",
-      "redeemed": "Utilisé",
       "partial": "Partiellement utilisé",
-      "disabled": "Désactivé",
-      "expired": "Expiré"
+      "used": "Utilisé",
+      "invalid": "Invalide"
     },
     "table": {
       "code": "Code",

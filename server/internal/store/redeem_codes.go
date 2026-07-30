@@ -209,7 +209,7 @@ func FindRedeemCodeByCode(ctx context.Context, db *sql.DB, code string) (*Redeem
 // RedeemCodeFilter narrows ListRedeemCodes.
 type RedeemCodeFilter struct {
 	BatchName string // exact match if set
-	Status    string // "" | "unused" | "redeemed" | "disabled" | "expired"
+	Status    string // "" | "unused" | "partial" | "used" | "invalid"
 	Limit     int
 	Offset    int
 }
@@ -235,9 +235,17 @@ func ListRedeemCodes(ctx context.Context, db *sql.DB, f RedeemCodeFilter) ([]Red
 	}
 	switch f.Status {
 	case "unused":
-		q += ` AND used_count<max_uses AND enabled=1`
-	case "redeemed":
-		q += ` AND used_count>=max_uses`
+		q += ` AND used_count=0 AND enabled=1 AND (expires_at=0 OR expires_at>=?)`
+		args = append(args, time.Now().Unix())
+	case "partial":
+		q += ` AND used_count>0 AND used_count<max_uses AND enabled=1 AND (expires_at=0 OR expires_at>=?)`
+		args = append(args, time.Now().Unix())
+	case "used", "redeemed": // "redeemed" is retained for older API clients.
+		q += ` AND used_count>=max_uses AND enabled=1 AND (expires_at=0 OR expires_at>=?)`
+		args = append(args, time.Now().Unix())
+	case "invalid":
+		q += ` AND (enabled=0 OR (expires_at>0 AND expires_at<?))`
+		args = append(args, time.Now().Unix())
 	case "disabled":
 		q += ` AND enabled=0`
 	case "expired":

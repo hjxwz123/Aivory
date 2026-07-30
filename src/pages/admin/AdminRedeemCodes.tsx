@@ -16,7 +16,19 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Copy, Plus, Trash2, RotateCcw, Ticket, Check, Download } from 'lucide-react'
+import {
+  Check,
+  CheckCheck,
+  CircleCheck,
+  CircleDotDashed,
+  CircleX,
+  Copy,
+  Download,
+  Plus,
+  RotateCcw,
+  Ticket,
+  Trash2,
+} from 'lucide-react'
 import { adminApi, ApiError } from '@/api'
 import type { ApiRedeemCode, ApiUserGroup } from '@/api/types'
 import { Button } from '@/components/ui/button'
@@ -41,8 +53,9 @@ import { useCopy } from '@/hooks/use-clipboard'
 import { formatRelativeDate } from '@/lib/utils'
 import { envNum } from '@/lib/env-config'
 import { PanelFallback } from '@/components/ui/panel-fallback'
+import { getRedeemCodeStatus, type RedeemCodeStatus } from '@/lib/redeem-code-status'
 
-type StatusFilter = 'all' | 'unused' | 'redeemed' | 'disabled' | 'expired'
+type StatusFilter = 'all' | RedeemCodeStatus
 
 interface BatchDraft {
   kind: 'group' | 'credits'
@@ -213,13 +226,6 @@ export default function AdminRedeemCodes() {
     }
     const header = ['code', 'kind', 'group', 'credits', 'status', 'duration_days', 'used_count', 'max_uses', 'batch_name', 'note', 'expires_at', 'created_at']
     const now = Math.floor(Date.now() / 1000)
-    const statusOf = (r: ApiRedeemCode) => {
-      if (!r.enabled) return 'disabled'
-      if (r.expires_at > 0 && r.expires_at < now) return 'expired'
-      if (r.used_count >= r.max_uses) return 'redeemed'
-      if (r.used_count > 0) return 'partial'
-      return 'unused'
-    }
     const iso = (unix: number) => (unix > 0 ? new Date(unix * 1000).toISOString() : '')
     const lines = [header.join(',')]
     for (const r of rows) {
@@ -229,7 +235,7 @@ export default function AdminRedeemCodes() {
           esc(r.kind ?? 'group'),
           esc(r.kind === 'credits' ? '' : (groupByID.get(r.group_id)?.name ?? r.group_id)),
           esc(r.kind === 'credits' ? r.credits : ''),
-          esc(statusOf(r)),
+          esc(getRedeemCodeStatus(r, now)),
           esc(r.kind === 'credits' ? '' : r.duration_days),
           esc(r.used_count),
           esc(r.max_uses),
@@ -276,7 +282,7 @@ export default function AdminRedeemCodes() {
 
       {/* Filters */}
       <div className="mt-6 flex items-center gap-2 flex-wrap">
-        {(['all', 'unused', 'redeemed', 'disabled', 'expired'] as StatusFilter[]).map((s) => (
+        {(['all', 'unused', 'partial', 'used', 'invalid'] as StatusFilter[]).map((s) => (
           <button
             key={s}
             type="button"
@@ -508,18 +514,25 @@ function CodeRow({
   const { t } = useTranslation(['admin', 'common'])
   const { copied, copy } = useCopy()
 
-  const now = Math.floor(Date.now() / 1000)
-  const codeExpired = row.expires_at > 0 && row.expires_at < now
-  const fullyUsed = row.used_count >= row.max_uses
-
-  let statusLabel = t('admin:redeemCodes.status.unused')
-  let statusVariant: 'neutral' | 'sage' = 'neutral'
-  if (!row.enabled) statusLabel = t('admin:redeemCodes.status.disabled')
-  else if (codeExpired) statusLabel = t('admin:redeemCodes.status.expired')
-  else if (fullyUsed) {
-    statusLabel = t('admin:redeemCodes.status.redeemed')
-    statusVariant = 'sage'
-  } else if (row.used_count > 0) statusLabel = t('admin:redeemCodes.status.partial')
+  const codeStatus = getRedeemCodeStatus(row)
+  const statusPresentation = {
+    unused: {
+      variant: 'success' as const,
+      icon: <CircleCheck size={11} aria-hidden />,
+    },
+    partial: {
+      variant: 'warning' as const,
+      icon: <CircleDotDashed size={11} aria-hidden />,
+    },
+    used: {
+      variant: 'neutral' as const,
+      icon: <CheckCheck size={11} aria-hidden />,
+    },
+    invalid: {
+      variant: 'danger' as const,
+      icon: <CircleX size={11} aria-hidden />,
+    },
+  }[codeStatus]
 
   const isCredits = row.kind === 'credits'
   const durationLabel = isCredits
@@ -535,8 +548,8 @@ function CodeRow({
           <code className="font-mono text-[13px] tracking-[0.08em] text-[var(--color-fg)] bg-[var(--color-bg-muted)] px-2 py-0.5 rounded-[6px]">
             {row.code}
           </code>
-          <Badge size="xs" variant={statusVariant}>
-            {statusLabel}
+          <Badge size="xs" variant={statusPresentation.variant} leadingIcon={statusPresentation.icon}>
+            {t(`admin:redeemCodes.status.${codeStatus}`)}
           </Badge>
           {isCredits ? (
             <Badge size="xs" variant="sage">

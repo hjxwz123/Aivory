@@ -784,7 +784,7 @@ export const adminApi = {
     api<{ ok: true }>(`/admin/models/${encodeURIComponent(id)}/quotas`, { method: 'PUT', body: { quotas } }),
 
   // Redeem codes (§ redeem codes).
-  redeemCodes: (params?: { batch?: string; status?: 'unused' | 'redeemed' | 'disabled' | 'expired'; limit?: number; offset?: number }) => {
+  redeemCodes: (params?: { batch?: string; status?: 'unused' | 'partial' | 'used' | 'invalid'; limit?: number; offset?: number }) => {
     const q = new URLSearchParams()
     if (params?.batch) q.set('batch', params.batch)
     if (params?.status) q.set('status', params.status)
