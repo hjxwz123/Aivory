@@ -13,14 +13,24 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { IconPicker } from '@/components/admin/icon-picker'
+import { AdminSortableList } from '@/components/admin/AdminSortableList'
+
+let editorItemSequence = 0
+
+function editorItemId(prefix: string): string {
+  editorItemSequence += 1
+  return `${prefix}-${editorItemSequence}`
+}
 
 interface EditorOption {
+  id: string
   value: string
   label: string
   icon: string
   fragment: string
 }
 interface EditorControl {
+  id: string
   key: string
   type: 'toggle' | 'select'
   label: string
@@ -66,6 +76,7 @@ function parse(text: string): EditorControl[] {
     const showIf = (c.show_if ?? {}) as Record<string, unknown>
     const showKey = Object.keys(showIf)[0] ?? ''
     return {
+      id: editorItemId('control'),
       key: String(c.key ?? ''),
       type: c.type === 'select' ? 'select' : 'toggle',
       label: String(c.label ?? ''),
@@ -74,6 +85,7 @@ function parse(text: string): EditorControl[] {
       onFragment: pretty(map.on),
       offFragment: pretty(map.off),
       options: opts.map((o) => ({
+        id: editorItemId('option'),
         value: String(o.value ?? ''),
         label: String(o.label ?? ''),
         icon: String(o.icon ?? ''),
@@ -111,7 +123,7 @@ function serialize(controls: EditorControl[]): string {
 }
 
 const blankControl = (): EditorControl => ({
-  key: '', type: 'toggle', label: '', icon: '', def: 'false',
+  id: editorItemId('control'), key: '', type: 'toggle', label: '', icon: '', def: 'false',
   onFragment: '{\n  \n}', offFragment: '{\n  \n}', options: [], showIfKey: '', showIfValue: '',
 })
 
@@ -144,83 +156,117 @@ export function ParamControlsEditor({ value, onChange }: Props) {
 
   return (
     <div className="flex flex-col gap-3">
-      {controls.map((c, i) => (
-        <div key={i} className="min-w-0 rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] p-3 sm:p-3.5 flex flex-col gap-3">
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <div className="inline-flex items-center gap-1 p-0.5 rounded-[9px] bg-[var(--color-bg-muted)] border border-[var(--color-border-subtle)]">
-              {(['toggle', 'select'] as const).map((ty) => (
-                <button
-                  key={ty}
-                  type="button"
-                  onClick={() => setAt(i, { type: ty })}
-                  className={
-                    'px-2.5 h-7 rounded-[7px] text-[12px] font-medium interactive ' +
-                    (c.type === ty
-                      ? 'bg-[var(--color-fg)] text-[var(--color-fg-inverted)]'
-                      : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]')
-                  }
-                >
-                  {ty === 'toggle' ? tt('toggle') : tt('select')}
-                </button>
-              ))}
-            </div>
-            <div className="ml-auto" />
-            <Button
-              variant="ghost"
-              size="sm"
-              leadingIcon={<Trash2 size={13} aria-hidden />}
-              className="text-[var(--color-danger)]"
-              onClick={() => commit(controls.filter((_, idx) => idx !== i))}
-            >
-              {tt('removeControl')}
-            </Button>
-          </div>
-
-          <div className="grid min-w-0 grid-cols-1 gap-2.5 sm:grid-cols-2">
-            <LabeledInput label={tt('key')} value={c.key} onChange={(v) => setAt(i, { key: v })} placeholder="thinking" cls={inputCls} mono />
-            <LabeledInput label={tt('label')} value={c.label} onChange={(v) => setAt(i, { label: v })} placeholder={t('models.pc.labelPlaceholder')} cls={inputCls} />
-            <LabeledIcon label={tt('icon')} value={c.icon} onChange={(v) => setAt(i, { icon: v })} />
-            <LabeledInput label={tt('default')} value={c.def} onChange={(v) => setAt(i, { def: v })} placeholder={c.type === 'toggle' ? 'true / false' : 'medium'} cls={inputCls} mono />
-          </div>
-
-          {c.type === 'toggle' ? (
-            <div className="grid min-w-0 grid-cols-1 gap-2.5 sm:grid-cols-2">
-              <LabeledArea label={tt('onFragment')} value={c.onFragment} onChange={(v) => setAt(i, { onFragment: v })} />
-              <LabeledArea label={tt('offFragment')} value={c.offFragment} onChange={(v) => setAt(i, { offFragment: v })} />
-            </div>
-          ) : (
-            <div className="flex flex-col gap-2">
-              <span className="text-[12px] text-[var(--color-fg-subtle)]">{tt('options')}</span>
-              {c.options.map((op, j) => (
-                <div key={j} className="rounded-[10px] border border-[var(--color-border-subtle)] bg-[var(--color-bg-muted)] p-2.5 flex flex-col gap-2">
-                  <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto] lg:items-end">
-                    <LabeledInput label={tt('optValue')} value={op.value} onChange={(v) => setAt(i, { options: c.options.map((x, k) => (k === j ? { ...x, value: v } : x)) })} placeholder="high" cls={inputCls} mono />
-                    <LabeledInput label={tt('optLabel')} value={op.label} onChange={(v) => setAt(i, { options: c.options.map((x, k) => (k === j ? { ...x, label: v } : x)) })} placeholder={t('models.pc.labelPlaceholder')} cls={inputCls} />
-                    <LabeledIcon label={tt('icon')} value={op.icon} onChange={(v) => setAt(i, { options: c.options.map((x, k) => (k === j ? { ...x, icon: v } : x)) })} />
-                    <Button variant="ghost" size="sm" className="h-8 justify-self-end text-[var(--color-danger)]" onClick={() => setAt(i, { options: c.options.filter((_, k) => k !== j) })}>
-                      <Trash2 size={13} aria-hidden />
-                    </Button>
-                  </div>
-                  <LabeledArea label={tt('fragment')} value={op.fragment} onChange={(v) => setAt(i, { options: c.options.map((x, k) => (k === j ? { ...x, fragment: v } : x)) })} />
+      {controls.length > 0 ? (
+        <AdminSortableList
+          items={controls}
+          onItemsChange={commit}
+          dragHandleLabel={t('common.dragHandle')}
+          moveUpLabel={t('common.moveUp')}
+          moveDownLabel={t('common.moveDown')}
+          mobileDragOnly
+          rowClassName="grid grid-cols-[2.75rem_minmax(0,1fr)] items-start gap-2 p-3 md:grid-cols-[auto_auto_minmax(0,1fr)] md:p-3.5"
+          renderItem={(c, i) => (
+            <div className="flex min-w-0 flex-col gap-3">
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <div className="inline-flex items-center gap-1 rounded-[9px] border border-[var(--color-border-subtle)] bg-[var(--color-bg-muted)] p-0.5">
+                  {(['toggle', 'select'] as const).map((ty) => (
+                    <button
+                      key={ty}
+                      type="button"
+                      onClick={() => setAt(i, { type: ty })}
+                      className={
+                        'interactive h-7 rounded-[7px] px-2.5 text-[12px] font-medium ' +
+                        (c.type === ty
+                          ? 'bg-[var(--color-fg)] text-[var(--color-fg-inverted)]'
+                          : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]')
+                      }
+                    >
+                      {ty === 'toggle' ? tt('toggle') : tt('select')}
+                    </button>
+                  ))}
                 </div>
-              ))}
-              <Button
-                variant="secondary"
-                size="sm"
-                leadingIcon={<Plus size={13} aria-hidden />}
-                onClick={() => setAt(i, { options: [...c.options, { value: '', label: '', icon: '', fragment: '{\n  \n}' }] })}
-              >
-                {tt('addOption')}
-              </Button>
+                <div className="ml-auto" />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  leadingIcon={<Trash2 size={13} aria-hidden />}
+                  className="text-[var(--color-danger)]"
+                  onClick={() => commit(controls.filter((_, idx) => idx !== i))}
+                >
+                  {tt('removeControl')}
+                </Button>
+              </div>
+
+              <div className="grid min-w-0 grid-cols-1 gap-2.5 sm:grid-cols-2">
+                <LabeledInput label={tt('key')} value={c.key} onChange={(v) => setAt(i, { key: v })} placeholder="thinking" cls={inputCls} mono />
+                <LabeledInput label={tt('label')} value={c.label} onChange={(v) => setAt(i, { label: v })} placeholder={t('models.pc.labelPlaceholder')} cls={inputCls} />
+                <LabeledIcon label={tt('icon')} value={c.icon} onChange={(v) => setAt(i, { icon: v })} />
+                <LabeledInput label={tt('default')} value={c.def} onChange={(v) => setAt(i, { def: v })} placeholder={c.type === 'toggle' ? 'true / false' : 'medium'} cls={inputCls} mono />
+              </div>
+
+              {c.type === 'toggle' ? (
+                <div className="grid min-w-0 grid-cols-1 gap-2.5 sm:grid-cols-2">
+                  <LabeledArea label={tt('onFragment')} value={c.onFragment} onChange={(v) => setAt(i, { onFragment: v })} />
+                  <LabeledArea label={tt('offFragment')} value={c.offFragment} onChange={(v) => setAt(i, { offFragment: v })} />
+                </div>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  <span className="text-[12px] text-[var(--color-fg-subtle)]">{tt('options')}</span>
+                  {c.options.length > 0 ? (
+                    <AdminSortableList
+                      items={c.options}
+                      onItemsChange={(options) => setAt(i, { options })}
+                      dragHandleLabel={t('common.dragHandle')}
+                      moveUpLabel={t('common.moveUp')}
+                      moveDownLabel={t('common.moveDown')}
+                      mobileDragOnly
+                      listClassName="border-[var(--color-border-subtle)] bg-[var(--color-bg-muted)]"
+                      rowClassName="grid grid-cols-[2.75rem_minmax(0,1fr)] items-start gap-2 p-2.5 md:grid-cols-[auto_auto_minmax(0,1fr)]"
+                      renderItem={(op, j) => (
+                        <div className="flex min-w-0 flex-col gap-2">
+                          <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto] lg:items-end">
+                            <LabeledInput label={tt('optValue')} value={op.value} onChange={(v) => setAt(i, { options: c.options.map((x, k) => (k === j ? { ...x, value: v } : x)) })} placeholder="high" cls={inputCls} mono />
+                            <LabeledInput label={tt('optLabel')} value={op.label} onChange={(v) => setAt(i, { options: c.options.map((x, k) => (k === j ? { ...x, label: v } : x)) })} placeholder={t('models.pc.labelPlaceholder')} cls={inputCls} />
+                            <LabeledIcon label={tt('icon')} value={op.icon} onChange={(v) => setAt(i, { options: c.options.map((x, k) => (k === j ? { ...x, icon: v } : x)) })} />
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 justify-self-end text-[var(--color-danger)]"
+                              aria-label={t('common.remove')}
+                              onClick={() => setAt(i, { options: c.options.filter((_, k) => k !== j) })}
+                            >
+                              <Trash2 size={13} aria-hidden />
+                            </Button>
+                          </div>
+                          <LabeledArea label={tt('fragment')} value={op.fragment} onChange={(v) => setAt(i, { options: c.options.map((x, k) => (k === j ? { ...x, fragment: v } : x)) })} />
+                        </div>
+                      )}
+                    />
+                  ) : null}
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    leadingIcon={<Plus size={13} aria-hidden />}
+                    onClick={() => setAt(i, {
+                      options: [
+                        ...c.options,
+                        { id: editorItemId('option'), value: '', label: '', icon: '', fragment: '{\n  \n}' },
+                      ],
+                    })}
+                  >
+                    {tt('addOption')}
+                  </Button>
+                </div>
+              )}
+
+              <div className="grid min-w-0 grid-cols-1 gap-2.5 sm:grid-cols-2">
+                <LabeledInput label={tt('showIfKey')} value={c.showIfKey} onChange={(v) => setAt(i, { showIfKey: v })} placeholder="thinking" cls={inputCls} mono />
+                <LabeledInput label={tt('showIfValue')} value={c.showIfValue} onChange={(v) => setAt(i, { showIfValue: v })} placeholder="true" cls={inputCls} mono />
+              </div>
             </div>
           )}
-
-          <div className="grid min-w-0 grid-cols-1 gap-2.5 sm:grid-cols-2">
-            <LabeledInput label={tt('showIfKey')} value={c.showIfKey} onChange={(v) => setAt(i, { showIfKey: v })} placeholder="thinking" cls={inputCls} mono />
-            <LabeledInput label={tt('showIfValue')} value={c.showIfValue} onChange={(v) => setAt(i, { showIfValue: v })} placeholder="true" cls={inputCls} mono />
-          </div>
-        </div>
-      ))}
+        />
+      ) : null}
 
       <div className="flex items-center gap-2">
         <Button variant="secondary" size="sm" leadingIcon={<Plus size={14} aria-hidden />} onClick={() => commit([...controls, blankControl()])}>

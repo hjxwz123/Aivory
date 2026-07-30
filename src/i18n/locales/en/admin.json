@@ -9,6 +9,7 @@
     "createFirst": "Create your first {{kind}}",
     "saved": "Saved",
     "failed": "Failed",
+    "reorderFailed": "Could not save the new order.",
     "dragHandle": "Drag to reorder",
     "moveUp": "Move up",
     "moveDown": "Move down",
@@ -118,8 +119,6 @@
       "extraParams": "Extra upstream parameters (JSON)",
       "extraParamsHint": "Optional JSON object merged into this model's upstream request. Priority: built-in request parameters override control mappings, which override these values.",
       "dim": "Dimension",
-      "sortOrder": "Display order",
-      "sortOrderHint": "Lower numbers first.",
       "priceIn": "Price in (per 1M token)",
       "priceOut": "Price out (per 1M token)",
       "priceCacheRead": "Cache read $/1M",
@@ -905,16 +904,15 @@
     "filters": {
       "all": "All",
       "unused": "Unused",
-      "redeemed": "Redeemed",
-      "disabled": "Disabled",
-      "expired": "Expired"
+      "partial": "Partially used",
+      "used": "Used",
+      "invalid": "Invalid"
     },
     "status": {
       "unused": "Unused",
-      "redeemed": "Redeemed",
       "partial": "Partially used",
-      "disabled": "Disabled",
-      "expired": "Expired"
+      "used": "Used",
+      "invalid": "Invalid"
     },
     "table": {
       "code": "Code",
@@ -1409,7 +1407,6 @@
     "empty": "No styles yet. Add one above.",
     "namePlaceholder": "Style name (e.g. Watercolor)",
     "name": "Name",
-    "order": "Order",
     "enabled": "Enabled",
     "example": "Example image",
     "examplePlaceholder": "Image URL or upload",

@@ -103,6 +103,10 @@ func UpdatePrompt(ctx context.Context, db *sql.DB, id string, prompt Prompt) (*P
 	return GetPrompt(ctx, db, id)
 }
 
+func ReorderPrompts(ctx context.Context, db *sql.DB, ids []string) error {
+	return reorderAdminRecords(ctx, db, "prompts", ids)
+}
+
 func DeletePrompt(ctx context.Context, db *sql.DB, id string) error {
 	result, err := db.ExecContext(ctx, `DELETE FROM prompts WHERE id=?`, id)
 	if err != nil {

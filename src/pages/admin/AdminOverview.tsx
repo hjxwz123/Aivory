@@ -183,10 +183,34 @@ export default function AdminOverview() {
   ]
 
   const summary = [
-    { key: 'users', icon: Users, label: t('admin:overview.metrics.users', { defaultValue: 'Users' }), value: data.userCount },
-    { key: 'models', icon: Cpu, label: t('admin:overview.metrics.models', { defaultValue: 'Models' }), value: data.modelCount },
-    { key: 'channels', icon: Network, label: t('admin:overview.metrics.channels', { defaultValue: 'Channels' }), value: data.channelCount },
-    { key: 'groups', icon: CircleDollarSign, label: t('admin:overview.metrics.plans', { defaultValue: 'Plans' }), value: data.groupCount },
+    {
+      key: 'users',
+      icon: Users,
+      label: t('admin:overview.metrics.users', { defaultValue: 'Users' }),
+      value: data.userCount,
+      to: '/admin/users',
+    },
+    {
+      key: 'models',
+      icon: Cpu,
+      label: t('admin:overview.metrics.models', { defaultValue: 'Models' }),
+      value: data.modelCount,
+      to: '/admin/models',
+    },
+    {
+      key: 'channels',
+      icon: Network,
+      label: t('admin:overview.metrics.channels', { defaultValue: 'Channels' }),
+      value: data.channelCount,
+      to: '/admin/channels',
+    },
+    {
+      key: 'groups',
+      icon: CircleDollarSign,
+      label: t('admin:overview.metrics.plans', { defaultValue: 'Plans' }),
+      value: data.groupCount,
+      to: '/admin/user-groups',
+    },
   ]
 
   return (
@@ -200,17 +224,27 @@ export default function AdminOverview() {
         </p>
       </header>
 
-      <dl className="mt-8 grid grid-cols-2 border-y border-[var(--color-divider)] lg:grid-cols-4">
+      <div className="mt-8 grid grid-cols-2 border-y border-[var(--color-divider)] lg:grid-cols-4">
         {summary.map((item) => (
-          <div key={item.key} className="flex min-w-0 items-center gap-3 border-[var(--color-divider)] px-4 py-4 even:border-l lg:border-l lg:first:border-l-0">
-            <item.icon size={17} className="shrink-0 text-[var(--color-fg-subtle)]" aria-hidden />
+          <Link
+            key={item.key}
+            to={item.to}
+            className="group flex min-w-0 items-center gap-3 border-[var(--color-divider)] px-4 py-4 interactive even:border-l hover:bg-[var(--color-bg-muted)]/55 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-ring)] lg:border-l lg:first:border-l-0"
+          >
+            <item.icon
+              size={17}
+              className="shrink-0 text-[var(--color-fg-subtle)] group-hover:text-[var(--color-fg-muted)]"
+              aria-hidden
+            />
             <div className="min-w-0">
-              <dd className="text-lg font-semibold tabular-nums text-[var(--color-fg)]">{item.value.toLocaleString()}</dd>
-              <dt className="truncate text-[12px] text-[var(--color-fg-subtle)]">{item.label}</dt>
+              <span className="block text-lg font-semibold tabular-nums text-[var(--color-fg)]">
+                {item.value.toLocaleString()}
+              </span>
+              <span className="block truncate text-[12px] text-[var(--color-fg-subtle)]">{item.label}</span>
             </div>
-          </div>
+          </Link>
         ))}
-      </dl>
+      </div>
 
       <section className="mt-9">
         <div className="flex items-end justify-between gap-4">

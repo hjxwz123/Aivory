@@ -22,6 +22,25 @@ export function toggleBuiltinToolName(
   return availableNames.filter((toolName) => selected.has(toolName))
 }
 
+/** Replace the selection for the currently visible subset without changing
+ * the saved choice for registered tools hidden by a global availability rule. */
+export function replaceVisibleBuiltinToolNames(
+  configured: string[] | null | undefined,
+  availableNames: string[],
+  visibleNames: string[],
+  selectedVisibleNames: string[],
+): string[] {
+  const selected = new Set(resolveBuiltinToolNames(configured, availableNames))
+  const visible = new Set(visibleNames)
+  const nextVisible = new Set(selectedVisibleNames)
+
+  for (const name of visible) selected.delete(name)
+  for (const name of nextVisible) {
+    if (visible.has(name)) selected.add(name)
+  }
+  return availableNames.filter((name) => selected.has(name))
+}
+
 interface BuiltinToolCapabilityModel {
   tool_mode?: string | null
   builtin_tools?: string[] | null

@@ -5,10 +5,11 @@
  */
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useNavigate, useParams } from 'react-router-dom'
-import { AlertCircle, ArrowLeft, Brain, RefreshCw } from 'lucide-react'
+import { useParams } from 'react-router-dom'
+import { AlertCircle, Brain, RefreshCw } from 'lucide-react'
 import { adminApi, ApiError } from '@/api'
 import type { ApiMemory, ApiUser } from '@/api/types'
+import { AdminDetailHeader } from '@/components/admin/admin-detail-header'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
@@ -29,7 +30,6 @@ function statusVariant(status: ApiMemory['status']) {
 
 export default function AdminUserMemories() {
   const { t } = useTranslation(['admin', 'memory', 'common'])
-  const navigate = useNavigate()
   const { id = '' } = useParams<{ id: string }>()
   const [user, setUser] = useState<ApiUser | null>(null)
   const [rows, setRows] = useState<ApiMemory[]>([])
@@ -77,14 +77,7 @@ export default function AdminUserMemories() {
 
   return (
     <div>
-      <button
-        type="button"
-        onClick={() => navigate('/admin/users')}
-        className="mb-4 -ml-2 inline-flex items-center gap-1.5 rounded-[6px] px-2 py-1.5 text-[12.5px] text-[var(--color-fg-subtle)] interactive hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-      >
-        <ArrowLeft size={12} aria-hidden />
-        {t('admin:users.backToUsers')}
-      </button>
+      <AdminDetailHeader backTo="/admin/users" backLabel={t('admin:users.backToUsers')} />
 
       <header>
         <h1 className="font-serif text-3xl tracking-tight text-[var(--color-fg)]" aria-busy={pageLoading}>

@@ -656,6 +656,25 @@ func createOAuthProviderAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 201, adminOAuthProviderJSON(*created, d, r))
 }
 
+func reorderOAuthProvidersAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		IDs []string `json:"ids"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, errInvalidInput)
+		return
+	}
+	if err := store.ReorderOAuthProviders(r.Context(), d.DB, body.IDs); err != nil {
+		if errors.Is(err, store.ErrInvalidReorder) {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
 func updateOAuthProviderAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	id := pathParam(r, "id")
 	var patch store.OAuthProviderPatch

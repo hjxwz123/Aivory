@@ -10,10 +10,11 @@
  * intentionally limited to inspection. Style follows the rest of /admin.
  */
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { ArrowLeft, FileText, HardDrive, RefreshCw, Trash2, ExternalLink, ChevronDown } from 'lucide-react'
+import { FileText, HardDrive, RefreshCw, Trash2, ExternalLink, ChevronDown } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { AdminDetailHeader } from '@/components/admin/admin-detail-header'
 import { adminApi, ApiError } from '@/api'
 import type { ApiConversation, ApiUser } from '@/api/types'
 import type { Message } from '@/types/chat'
@@ -36,7 +37,6 @@ function formatStamp(unixMs: number): string {
 
 export default function AdminUserConversation() {
   const { t } = useTranslation('admin')
-  const navigate = useNavigate()
   const { id = '', cid = '' } = useParams<{ id: string; cid: string }>()
   const [conv, setConv] = useState<ApiConversation | null>(null)
   // The FULL message tree (all branches) + which leaf is shown. Branch switching
@@ -95,14 +95,10 @@ export default function AdminUserConversation() {
 
   return (
     <div>
-      <button
-        type="button"
-        onClick={() => navigate(`/admin/users/${encodeURIComponent(id)}/conversations`)}
-        className="inline-flex items-center gap-1.5 text-[12.5px] text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)] interactive rounded-[6px] -ml-2 px-2 py-1.5 mb-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-      >
-        <ArrowLeft size={12} aria-hidden />
-        {t('users.backToConversations')}
-      </button>
+      <AdminDetailHeader
+        backTo={`/admin/users/${encodeURIComponent(id)}/conversations`}
+        backLabel={t('users.backToConversations')}
+      />
 
       <header>
         <div className="flex items-center gap-2 flex-wrap">
