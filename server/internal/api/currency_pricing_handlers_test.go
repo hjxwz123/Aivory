@@ -177,6 +177,7 @@ func TestMeCreditsIncludesCurrencyAndFreshPermanentBalance(t *testing.T) {
 	var body struct {
 		Enabled            bool    `json:"enabled"`
 		Permanent          float64 `json:"permanent"`
+		Available          float64 `json:"available"`
 		SettlementCurrency string  `json:"settlement_currency"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
@@ -187,6 +188,9 @@ func TestMeCreditsIncludesCurrencyAndFreshPermanentBalance(t *testing.T) {
 	}
 	if body.Permanent != 42.5 {
 		t.Fatalf("permanent = %v, want fresh database balance 42.5", body.Permanent)
+	}
+	if body.Available != 142.5 {
+		t.Fatalf("available = %v, want timed + permanent balance 142.5", body.Available)
 	}
 	if body.SettlementCurrency != "EUR" {
 		t.Fatalf("settlement currency = %q, want EUR", body.SettlementCurrency)

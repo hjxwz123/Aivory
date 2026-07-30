@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS users (
   password_changed_at INTEGER NOT NULL DEFAULT 0,  -- unix seconds of last password change (0 = never since signup)
   last_seen_at  INTEGER NOT NULL DEFAULT 0,        -- unix seconds of last authenticated activity (online status)
   credits_permanent REAL NOT NULL DEFAULT 0,       -- non-expiring credits (purchased / admin-set)
+  credit_cycle_anchor INTEGER NOT NULL DEFAULT (strftime('%s','now')), -- current group's timed-credit cycle origin
   sort_order    INTEGER NOT NULL DEFAULT 0,        -- admin-defined display order
   created_at    INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 );
@@ -69,6 +70,25 @@ CREATE TABLE IF NOT EXISTS user_groups (
   updated_at  INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_user_groups_name_unique ON user_groups(lower(trim(name)));
+
+-- Authoritative credit debit ledger. Unlike usage_logs, these rows are billing
+-- records and are never deleted by the admin usage-log cleanup controls.
+CREATE TABLE IF NOT EXISTS credit_ledger (
+  id           TEXT PRIMARY KEY,
+  user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  group_id     TEXT NOT NULL,
+  cycle_anchor INTEGER NOT NULL DEFAULT 0,
+  cycle_start  INTEGER NOT NULL DEFAULT 0,
+  kind         TEXT NOT NULL, -- timed_debit | permanent_debit
+  amount       REAL NOT NULL,
+  source_type  TEXT NOT NULL DEFAULT '',
+  source_id    TEXT NOT NULL DEFAULT '',
+  created_at   INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+);
+CREATE INDEX IF NOT EXISTS idx_credit_ledger_timed
+  ON credit_ledger(user_id, group_id, cycle_anchor, cycle_start, kind);
+CREATE INDEX IF NOT EXISTS idx_credit_ledger_user_time
+  ON credit_ledger(user_id, created_at);
 
 -- Administrator-defined permanent-credit top-up packages. Prices use the
 -- deployment-wide settlement currency and are stored in its smallest unit.

@@ -49,6 +49,8 @@ export interface ApiUser {
   /** Live timed-credit balance. Populated by the admin user-detail endpoint,
    *  not by the paginated users list. */
   credits_timed?: ApiTimedCredits
+  /** Spendable timed + permanent credits after any recorded overage debt. */
+  credits_available?: number
   /** Admin-defined order for the users page. */
   sort_order?: number
   /** Capability flags from the user's group (e.g. "research"). Populated on the
@@ -704,6 +706,8 @@ export interface ApiCredits {
   enabled: boolean
   timed?: ApiTimedCredits
   permanent: number
+  /** Total amount that can be spent now; never negative. */
+  available?: number
   settlement_currency: string
 }
 

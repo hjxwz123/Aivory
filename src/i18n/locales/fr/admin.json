@@ -380,6 +380,8 @@
       "expiry": "Expiration",
       "permanent": "Permanent",
       "allowance": "Crédits temporaires (restants / quota)",
+      "availableCredits": "Crédits disponibles",
+      "creditReset": "Prochain renouvellement des crédits",
       "loadFailed": "Impossible de charger les dernières informations de l'utilisateur.",
       "twofa": "Double authentification",
       "enabled": "Activé",
@@ -800,10 +802,11 @@
       "creditAllowance": "Crédits par cycle",
       "creditAllowanceHint": "Crédits temporaires accordés à chaque renouvellement ; le solde inutilisé est perdu.",
       "creditPeriod": "Renouveler tous les",
-      "creditPeriodHint": "Fréquence de réinitialisation des crédits temporaires.",
+      "creditPeriodHint": "Fréquence de réinitialisation des crédits temporaires. Un mois correspond à 30 jours.",
       "unitHour": "heures",
       "unitDay": "jours",
       "unitWeek": "semaines",
+      "unitMonth": "mois",
       "maxWorkspaces": "Espaces max",
       "workspaces": "Espaces de travail",
       "workspacesHint": "Autoriser ce groupe à créer des espaces (max ci-dessus ; 0 = illimité).",
@@ -814,7 +817,8 @@
     },
     "errors": {
       "nameRequired": "Le nom est requis",
-      "priceInvalid": "Saisissez un prix positif ou nul avec les décimales de la devise de règlement."
+      "priceInvalid": "Saisissez un prix positif ou nul avec les décimales de la devise de règlement.",
+      "creditPeriodRequired": "Définissez une période de renouvellement lorsque les crédits temporaires sont supérieurs à zéro."
     },
     "maxStorage": "Stockage (Mo)",
     "maxStorageHint": "0 = illimité. Fichiers non-image uniquement."

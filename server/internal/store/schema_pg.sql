@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS users (
   password_changed_at BIGINT NOT NULL DEFAULT 0,
   last_seen_at  BIGINT NOT NULL DEFAULT 0,
   credits_permanent REAL NOT NULL DEFAULT 0,
+  credit_cycle_anchor BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint),
   sort_order    INTEGER NOT NULL DEFAULT 0,
   created_at    BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
 );
@@ -69,6 +70,23 @@ CREATE TABLE IF NOT EXISTS user_groups (
   updated_at  BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_user_groups_name_unique ON user_groups(lower(trim(name)));
+
+CREATE TABLE IF NOT EXISTS credit_ledger (
+  id           TEXT PRIMARY KEY,
+  user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  group_id     TEXT NOT NULL,
+  cycle_anchor BIGINT NOT NULL DEFAULT 0,
+  cycle_start  BIGINT NOT NULL DEFAULT 0,
+  kind         TEXT NOT NULL,
+  amount       DOUBLE PRECISION NOT NULL,
+  source_type  TEXT NOT NULL DEFAULT '',
+  source_id    TEXT NOT NULL DEFAULT '',
+  created_at   BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
+);
+CREATE INDEX IF NOT EXISTS idx_credit_ledger_timed
+  ON credit_ledger(user_id, group_id, cycle_anchor, cycle_start, kind);
+CREATE INDEX IF NOT EXISTS idx_credit_ledger_user_time
+  ON credit_ledger(user_id, created_at);
 
 CREATE TABLE IF NOT EXISTS credit_packages (
   id                 TEXT PRIMARY KEY,

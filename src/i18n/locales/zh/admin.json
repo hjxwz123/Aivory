@@ -384,6 +384,8 @@
       "expiry": "到期",
       "permanent": "永久",
       "allowance": "限时积分（剩余 / 额度）",
+      "availableCredits": "当前可用总积分",
+      "creditReset": "下次积分刷新",
       "loadFailed": "无法加载最新用户信息。",
       "twofa": "两步验证",
       "enabled": "已启用",
@@ -804,10 +806,11 @@
       "creditAllowance": "每周期积分",
       "creditAllowanceHint": "每次刷新发放的限时积分，未用完作废。",
       "creditPeriod": "刷新周期",
-      "creditPeriodHint": "限时积分多久重置一次。",
+      "creditPeriodHint": "限时积分多久重置一次。1 个月固定按 30 天计算。",
       "unitHour": "小时",
       "unitDay": "天",
       "unitWeek": "周",
+      "unitMonth": "月",
       "maxWorkspaces": "最多工作空间数",
       "workspaces": "工作空间",
       "workspacesHint": "允许该用户组创建工作空间（数量上限见上；0 = 不限）。",
@@ -818,7 +821,8 @@
     },
     "errors": {
       "nameRequired": "请填写名称",
-      "priceInvalid": "请输入符合结算货币小数位的非负价格。"
+      "priceInvalid": "请输入符合结算货币小数位的非负价格。",
+      "creditPeriodRequired": "限时积分大于 0 时必须设置刷新周期。"
     },
     "maxStorage": "存储空间(MB)",
     "maxStorageHint": "0 表示不限制;仅统计非图片文件。"

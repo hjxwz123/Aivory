@@ -903,7 +903,7 @@ type requestUsageRow struct {
 // row token sums equal the turn totals (any un-attached residual — list
 // overflow, TTFT model fallback — folds into the LAST row), row costs sum to
 // totalCost, and row credits sum to totalCredits (distributed by cost share so
-// the §12.2 timed-credit window reseed stays exact). When fewer than two rounds
+// analytics retain the exact turn charge). When fewer than two rounds
 // carried usage, the turn stays a single row exactly as before. includeReq
 // gates the request-snapshot fields per the §B5 admin settings.
 func perRequestUsageRows(snaps []providerRequestSnapshot, model *store.Model, total Usage, totalCost, totalCredits float64, includeReq bool) []requestUsageRow {
@@ -954,8 +954,7 @@ func perRequestUsageRows(snaps []providerRequestSnapshot, model *store.Model, to
 	// than the turn total — e.g. the stop/cancel path attaches each request's
 	// full usage but bills only the partial turn. A naive "totalCost - Σper-row"
 	// would clamp a negative remainder to 0 and let Σ exceed the billed amount,
-	// silently over-charging cost AND inflating SUM(credits) (the durable
-	// timed-credit window record, § credit accounting).
+	// silently over-charging cost and inflating the analytics credit total.
 	weights := make([]float64, len(rows))
 	weightSum := 0.0
 	for i := range rows {
@@ -2087,16 +2086,16 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	if hostedImageCount > 0 {
 		persistCtx := context.WithoutCancel(ctx)
 		imageCost := float64(hostedImageCount) * model.PricePerImage
-		var timedImageCredits float64
+		var imageCredits float64
 		if officialImagePayCredits && imageCost > 0 {
-			timed, total := o.ChargeImageCredits(persistCtx, req.UserID, imageCost)
-			timedImageCredits = timed
+			_, total := o.ChargeImageCredits(persistCtx, req.UserID, imageCost)
+			imageCredits = total
 			runner.ctx.AddImageCredits(total)
 		}
 		o.logUsage(persistCtx, store.UsageLog{
 			UserID: req.UserID, WorkspaceID: conv.WorkspaceID, ConversationID: conv.ID,
 			MessageID: assistantMsg.ID, ModelID: model.ID, Purpose: "image",
-			ImagesCount: hostedImageCount, Cost: imageCost, Credits: timedImageCredits,
+			ImagesCount: hostedImageCount, Cost: imageCost, Credits: imageCredits,
 			Currency: model.Currency, ChannelID: servedChannelID, Fallback: usedFallback,
 		})
 	}
@@ -2140,9 +2139,9 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			// true provider failures and pre-send refusals stay free.
 			stopChatCost := computeCost(*model, usage)
 			produced := usage.InputTokens > 0 || usage.OutputTokens > 0
-			var timedCredits, stopCredits float64
+			var stopCredits float64
 			if payWithCredits && produced {
-				timedCredits, stopCredits = o.chargeTurnCredits(ctx, req.UserID, stopChatCost)
+				_, stopCredits = o.chargeTurnCredits(ctx, req.UserID, stopChatCost)
 			}
 			// Image credits (a tool that drew before the stop) are already debited by
 			// ImageBilling; fold them into the per-turn total the user sees.
@@ -2167,7 +2166,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			if produced {
 				// §B5-per-request rows: same split as the success path — tool
 				// rounds completed before the stop each keep their own row.
-				for _, rr := range perRequestUsageRows(reqRecorder.snapshots(), model, usage, stopChatCost, timedCredits, o.successRequestLoggingEnabled()) {
+				for _, rr := range perRequestUsageRows(reqRecorder.snapshots(), model, usage, stopChatCost, stopCredits, o.successRequestLoggingEnabled()) {
 					requestChannelID, requestFallback := requestUsageChannel(rr, model.ChannelID, fallbackChannelID, usedFallback)
 					o.logUsage(ctx, store.UsageLog{
 						UserID:            req.UserID,
@@ -2356,11 +2355,11 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		chatCreditBase = 0
 	}
 	// §credits: when this turn is past the group's free allotment, convert the
-	// chat spend to credits and debit timed-first-then-permanent. The timed portion
-	// is recorded in usage_logs.credits below so the window survives restarts.
-	var timedCredits, chatCredits float64
+	// chat spend to credits and debit timed-first-then-permanent. Usage rows store
+	// the total charge so every credit-paid turn is excluded from free quota.
+	var chatCredits float64
 	if payWithCredits {
-		timedCredits, chatCredits = o.chargeTurnCredits(ctx, req.UserID, chatCreditBase)
+		_, chatCredits = o.chargeTurnCredits(ctx, req.UserID, chatCreditBase)
 	}
 	// Total credits the user sees for this turn = chat credits + image credits the
 	// tool charged (ImageBilling), so a chat turn that drew an image shows both.
@@ -2385,7 +2384,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// request snapshot. Row sums equal the old single-row totals exactly, and
 	// they share message_id, so per-turn groupings and quota reseeds hold.
 	logProviderFailures(ctx)
-	for _, rr := range perRequestUsageRows(reqRecorder.snapshots(), model, result.Usage, chatCost, timedCredits, o.successRequestLoggingEnabled()) {
+	for _, rr := range perRequestUsageRows(reqRecorder.snapshots(), model, result.Usage, chatCost, chatCredits, o.successRequestLoggingEnabled()) {
 		requestChannelID, requestFallback := requestUsageChannel(rr, model.ChannelID, fallbackChannelID, usedFallback)
 		o.logUsage(ctx, store.UsageLog{
 			UserID:            req.UserID,
@@ -2628,14 +2627,14 @@ func (o *Orchestrator) runImageTurn(
 	// side costs (image + any prompt-optimization). Credits debited when the
 	// group's free image allotment is exhausted (§4.20 — same flow as chat).
 	turnTotal := tallyTurnSideCosts(persistCtx, o.db, conv.ID, assistantMsg.ID)
-	var timedCredits, turnCredits float64
+	var turnCredits float64
 	if payWithCredits && turnTotal > 0 {
-		timedCredits, turnCredits = o.chargeTurnCredits(persistCtx, req.UserID, turnTotal)
+		_, turnCredits = o.chargeTurnCredits(persistCtx, req.UserID, turnTotal)
 	}
-	// Record the timed-credit portion in usage_logs.credits so the timed window
-	// survives a cache cold/restart (mirrors the chat path). images_count/cost=0 so
-	// it doesn't perturb the image quota or cost totals.
-	if timedCredits > 0 {
+	// The image cost row was written before the orchestrator knew the final credit
+	// charge. Add a zero-cost attribution row so the turn is still recognized as
+	// credit-paid without perturbing image counts or cost totals.
+	if turnCredits > 0 {
 		o.logUsage(persistCtx, store.UsageLog{
 			UserID:         req.UserID,
 			WorkspaceID:    conv.WorkspaceID,
@@ -2643,7 +2642,7 @@ func (o *Orchestrator) runImageTurn(
 			MessageID:      assistantMsg.ID,
 			ModelID:        model.ID,
 			Purpose:        "image",
-			Credits:        timedCredits,
+			Credits:        turnCredits,
 			Currency:       model.Currency,
 		})
 	}
