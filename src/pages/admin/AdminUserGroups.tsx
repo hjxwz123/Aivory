@@ -35,27 +35,20 @@ import {
   minorAmountToInput,
   normalizeSettlementCurrency,
 } from '@/lib/currency'
+import {
+  CREDIT_PERIOD_SECONDS,
+  splitCreditPeriod,
+  type CreditPeriodUnit,
+} from '@/lib/credit-period'
 
-type PeriodUnit = 'hour' | 'day' | 'week'
 type Draft = Partial<ApiUserGroup> & {
   featuresText?: string
   researchEnabled?: boolean
   workspacesEnabled?: boolean
   creditPeriodValue?: number
-  creditPeriodUnit?: PeriodUnit
+  creditPeriodUnit?: CreditPeriodUnit
   monthlyPriceInput?: string
   yearlyPriceInput?: string
-}
-
-const UNIT_SECONDS: Record<PeriodUnit, number> = { hour: 3600, day: 86400, week: 604800 }
-
-// Convert stored seconds into the largest whole unit for display, and back.
-function splitPeriod(seconds: number): { value: number; unit: PeriodUnit } {
-  if (!seconds || seconds <= 0) return { value: 0, unit: 'day' }
-  for (const u of ['week', 'day', 'hour'] as const) {
-    if (seconds % UNIT_SECONDS[u] === 0) return { value: seconds / UNIT_SECONDS[u], unit: u }
-  }
-  return { value: Math.round(seconds / 3600), unit: 'hour' }
 }
 
 // Reserved functional feature flag (not a marketing bullet) — gates the Deep
@@ -114,7 +107,7 @@ export default function AdminUserGroups() {
   }
   function openEdit(row: ApiUserGroup) {
     const feats = row.features ?? []
-    const period = splitPeriod(row.credit_period_seconds ?? 0)
+    const period = splitCreditPeriod(row.credit_period_seconds ?? 0)
     setEditor({
       open: true,
       row,
@@ -162,7 +155,13 @@ export default function AdminUserGroups() {
       ...(d.researchEnabled ? [RESEARCH_FEATURE] : []),
       ...(d.workspacesEnabled ? [WORKSPACES_FEATURE] : []),
     ]
-    const periodSeconds = Math.max(0, Number(d.creditPeriodValue) || 0) * UNIT_SECONDS[d.creditPeriodUnit ?? 'day']
+    const periodSeconds = Math.max(0, Number(d.creditPeriodValue) || 0)
+      * CREDIT_PERIOD_SECONDS[d.creditPeriodUnit ?? 'day']
+    const creditAllowance = Math.max(0, Number(d.credit_allowance) || 0)
+    if (creditAllowance > 0 && periodSeconds <= 0) {
+      toast.error(t('admin:groups.errors.creditPeriodRequired'))
+      return
+    }
     const monthlyPriceAmountMinor = inputAmountToMinor(
       d.monthlyPriceInput ?? '',
       settlementCurrency,
@@ -189,7 +188,7 @@ export default function AdminUserGroups() {
       max_storage_mb: Math.max(0, Number(d.max_storage_mb) || 0),
       is_public: d.is_public !== false,
       is_purchasable: d.is_purchasable !== false,
-      credit_allowance: Math.max(0, Number(d.credit_allowance) || 0),
+      credit_allowance: creditAllowance,
       credit_period_seconds: periodSeconds,
     }
     savingRef.current = true
@@ -433,7 +432,7 @@ export default function AdminUserGroups() {
                   />
                   <Select
                     value={editor.draft.creditPeriodUnit ?? 'day'}
-                    onValueChange={(v) => setDraft({ creditPeriodUnit: v as PeriodUnit })}
+                    onValueChange={(v) => setDraft({ creditPeriodUnit: v as CreditPeriodUnit })}
                   >
                     <SelectTrigger className="w-[120px] shrink-0">
                       <SelectValue />
@@ -442,6 +441,7 @@ export default function AdminUserGroups() {
                       <SelectItem value="hour">{t('admin:groups.fields.unitHour')}</SelectItem>
                       <SelectItem value="day">{t('admin:groups.fields.unitDay')}</SelectItem>
                       <SelectItem value="week">{t('admin:groups.fields.unitWeek')}</SelectItem>
+                      <SelectItem value="month">{t('admin:groups.fields.unitMonth')}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

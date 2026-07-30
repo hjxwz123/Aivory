@@ -29,7 +29,7 @@ func TestRedeemConfirmOverride(t *testing.T) {
 	}
 
 	origExpiry := time.Now().Add(10 * 24 * time.Hour).Unix()
-	exec(t, db, `INSERT INTO users(id,email,password_hash,role,group_id,group_expires_at) VALUES('u1','a@b.c','h','user','ug_pro',?)`, origExpiry)
+	exec(t, db, `INSERT INTO users(id,email,password_hash,role,group_id,group_expires_at,credit_cycle_anchor) VALUES('u1','a@b.c','h','user','ug_pro',?,1234)`, origExpiry)
 
 	proCode, err := CreateRedeemCode(ctx, db, RedeemCode{GroupID: "ug_pro", DurationDays: 30})
 	if err != nil {
@@ -51,6 +51,13 @@ func TestRedeemConfirmOverride(t *testing.T) {
 	}
 	if want := origExpiry + 30*86400; u.GroupExpiresAt != want {
 		t.Fatalf("same-group expiry = %d, want %d (stacked)", u.GroupExpiresAt, want)
+	}
+	var anchor int64
+	if err := db.QueryRowContext(ctx, `SELECT credit_cycle_anchor FROM users WHERE id='u1'`).Scan(&anchor); err != nil {
+		t.Fatalf("read same-group anchor: %v", err)
+	}
+	if anchor != 1234 {
+		t.Fatalf("same-group redemption reset credit anchor to %d, want 1234", anchor)
 	}
 
 	// 2) Different group, no confirm → ErrRedeemNeedsConfirm, nothing consumed.
@@ -94,5 +101,11 @@ func TestRedeemConfirmOverride(t *testing.T) {
 	wantLow, wantHigh := before+30*86400-5, time.Now().Unix()+30*86400+5
 	if u3.GroupExpiresAt < wantLow || u3.GroupExpiresAt > wantHigh {
 		t.Fatalf("confirm expiry = %d, want ~now+30d (%d..%d) — must reset, not stack", u3.GroupExpiresAt, wantLow, wantHigh)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT credit_cycle_anchor FROM users WHERE id='u1'`).Scan(&anchor); err != nil {
+		t.Fatalf("read switched-group anchor: %v", err)
+	}
+	if anchor < before || anchor > time.Now().Unix() {
+		t.Fatalf("different-group redemption anchor = %d, want activation time >= %d", anchor, before)
 	}
 }

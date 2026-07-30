@@ -156,6 +156,7 @@ func Migrate(db *sql.DB) error {
 	addGroupMonthlyPriceAmountMinor := `ALTER TABLE user_groups ADD COLUMN monthly_price_amount_minor INTEGER NOT NULL DEFAULT 0`
 	addGroupYearlyPriceAmountMinor := `ALTER TABLE user_groups ADD COLUMN yearly_price_amount_minor INTEGER NOT NULL DEFAULT 0`
 	addUserPermCredits := `ALTER TABLE users ADD COLUMN credits_permanent REAL NOT NULL DEFAULT 0`
+	addUserCreditCycleAnchor := `ALTER TABLE users ADD COLUMN credit_cycle_anchor INTEGER NOT NULL DEFAULT 0`
 	addUserSortOrder := `ALTER TABLE users ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0`
 	addUsageCredits := `ALTER TABLE usage_logs ADD COLUMN credits REAL NOT NULL DEFAULT 0`
 	addMsgCredits := `ALTER TABLE messages ADD COLUMN credits REAL NOT NULL DEFAULT 0`
@@ -270,6 +271,7 @@ func Migrate(db *sql.DB) error {
 		addGroupMonthlyPriceAmountMinor = `ALTER TABLE user_groups ADD COLUMN IF NOT EXISTS monthly_price_amount_minor BIGINT NOT NULL DEFAULT 0`
 		addGroupYearlyPriceAmountMinor = `ALTER TABLE user_groups ADD COLUMN IF NOT EXISTS yearly_price_amount_minor BIGINT NOT NULL DEFAULT 0`
 		addUserPermCredits = `ALTER TABLE users ADD COLUMN IF NOT EXISTS credits_permanent REAL NOT NULL DEFAULT 0`
+		addUserCreditCycleAnchor = `ALTER TABLE users ADD COLUMN IF NOT EXISTS credit_cycle_anchor BIGINT NOT NULL DEFAULT 0`
 		addUserSortOrder = `ALTER TABLE users ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 0`
 		addUsageCredits = `ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS credits REAL NOT NULL DEFAULT 0`
 		addMsgCredits = `ALTER TABLE messages ADD COLUMN IF NOT EXISTS credits DOUBLE PRECISION NOT NULL DEFAULT 0`
@@ -344,7 +346,7 @@ func Migrate(db *sql.DB) error {
 		addModelTags, addModelExtraParams,
 		addGroupMaxProjects, addGroupMaxKBs,
 		addGroupCreditAllowance, addGroupCreditPeriod, addGroupMonthlyPriceAmountMinor, addGroupYearlyPriceAmountMinor,
-		addUserPermCredits, addUserSortOrder, addUsageCredits, addMsgCredits,
+		addUserPermCredits, addUserCreditCycleAnchor, addUserSortOrder, addUsageCredits, addMsgCredits,
 		addMsgModelLabel, addMsgSearchText,
 		addImageTimeout,
 		addMsgVerify,
@@ -378,6 +380,8 @@ func Migrate(db *sql.DB) error {
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_messages_conv_created ON messages(conversation_id, created_at)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_conv_user_updated ON conversations(user_id, archived, pinned DESC, updated_at DESC)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_users_sort_order ON users(sort_order, created_at DESC)`)
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_credit_ledger_timed ON credit_ledger(user_id, group_id, cycle_anchor, cycle_start, kind)`)
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_credit_ledger_user_time ON credit_ledger(user_id, created_at)`)
 	_, _ = db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_orders_provider_payment_unique ON payment_orders(provider, channel_id, provider_payment_id) WHERE provider_payment_id<>''`)
 	// Workspace-scoped listings (§workspaces) — mirror the personal composites.
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_conv_workspace_updated ON conversations(workspace_id, archived, pinned DESC, updated_at DESC)`)
@@ -415,7 +419,7 @@ func Migrate(db *sql.DB) error {
 		"prompts":            {"name", "description", "content", "enabled", "sort_order"},
 		"user_skills":        {"user_id", "name", "description", "icon", "instructions", "source_skill_id"},
 		"user_prompts":       {"user_id", "name", "description", "content", "source_prompt_id"},
-		"users":              {"group_id", "totp_secret", "totp_enabled", "group_expires_at", "previous_group_id", "password_set", "password_changed_at", "last_seen_at", "credits_permanent", "sort_order"},
+		"users":              {"group_id", "totp_secret", "totp_enabled", "group_expires_at", "previous_group_id", "password_set", "password_changed_at", "last_seen_at", "credits_permanent", "credit_cycle_anchor", "sort_order"},
 		"usage_logs":         {"credits", "workspace_id", "channel_id", "fallback", "status", "error", "request_method", "request_url", "request_headers", "request_body"},
 		"user_groups":        {"monthly_price_amount_minor", "yearly_price_amount_minor", "max_projects", "max_kbs", "credit_allowance", "credit_period_seconds", "max_workspaces", "is_public", "is_purchasable", "max_storage_mb"},
 		"models":             {"official_tools", "builtin_tools", "moderation_enabled", "moderation_mode", "tags", "extra_params", "image_timeout_sec", "research_enabled", "fallback_channel_id", "fast"},
@@ -464,6 +468,9 @@ func Migrate(db *sql.DB) error {
 	}
 	if err := MigrateLegacyCreditPackage(context.Background(), db); err != nil {
 		return fmt.Errorf("migrate legacy permanent-credit package: %w", err)
+	}
+	if err := migrateCreditLedger(context.Background(), db); err != nil {
+		return fmt.Errorf("migrate timed-credit ledger: %w", err)
 	}
 	if err := migrateOfficialToolDefinitions(db); err != nil {
 		return fmt.Errorf("migrate official tool definitions: %w", err)
