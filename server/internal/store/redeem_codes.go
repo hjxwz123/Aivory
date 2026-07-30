@@ -548,8 +548,15 @@ func RedeemCodeForUser(ctx context.Context, db *sql.DB, userID, raw string, conf
 
 	// Flip the user's group + expiry.
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE users SET group_id=?, group_expires_at=?, previous_group_id=? WHERE id=?`,
-		rc.GroupID, newExpiresAt, prevGroup, userID); err != nil {
+		`UPDATE users
+		    SET credit_cycle_anchor=CASE
+		            WHEN group_id<>? OR (group_expires_at>0 AND group_expires_at<=?) THEN
+		                CASE WHEN credit_cycle_anchor>=? THEN credit_cycle_anchor+1 ELSE ? END
+		            ELSE credit_cycle_anchor
+		        END,
+		        group_id=?, group_expires_at=?, previous_group_id=?
+		  WHERE id=?`,
+		rc.GroupID, now, now, now, rc.GroupID, newExpiresAt, prevGroup, userID); err != nil {
 		return nil, nil, err
 	}
 

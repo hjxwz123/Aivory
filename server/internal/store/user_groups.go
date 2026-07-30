@@ -6,12 +6,25 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 )
 
 // DefaultGroupID is the always-present free tier id (seeded in Seed).
 const DefaultGroupID = "ug_free"
+
+var ErrInvalidCreditConfig = errors.New("invalid credit allowance or refresh period")
+
+func validateCreditConfig(allowance float64, periodSeconds int) error {
+	if math.IsNaN(allowance) || math.IsInf(allowance, 0) || allowance < 0 || periodSeconds < 0 {
+		return ErrInvalidCreditConfig
+	}
+	if allowance > 0 && periodSeconds == 0 {
+		return ErrInvalidCreditConfig
+	}
+	return nil
+}
 
 const userGroupCols = `id, name, description, features, COALESCE(monthly_price_amount_minor,0), COALESCE(yearly_price_amount_minor,0), is_default, sort_order, COALESCE(max_projects,0), COALESCE(max_kbs,0), COALESCE(credit_allowance,0), COALESCE(credit_period_seconds,0), COALESCE(max_workspaces,0), COALESCE(is_public,1), COALESCE(is_purchasable,1), COALESCE(max_storage_mb,0), created_at, updated_at`
 
@@ -99,6 +112,9 @@ func createUserGroup(ctx context.Context, db *sql.DB, g UserGroup, isPurchasable
 	if len(g.Features) == 0 {
 		g.Features = json.RawMessage("[]")
 	}
+	if err := validateCreditConfig(g.CreditAllowance, g.CreditPeriodSeconds); err != nil {
+		return nil, err
+	}
 	now := time.Now().Unix()
 	_, err := db.ExecContext(ctx,
 		`INSERT INTO user_groups(id, name, description, features, monthly_price_amount_minor, yearly_price_amount_minor, is_default, sort_order, max_projects, max_kbs, credit_allowance, credit_period_seconds, max_workspaces, is_public, is_purchasable, max_storage_mb, created_at, updated_at)
@@ -150,6 +166,35 @@ type UserGroupPatch struct {
 }
 
 func UpdateUserGroup(ctx context.Context, db *sql.DB, id string, p UserGroupPatch) (*UserGroup, error) {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	currentQuery := `SELECT ` + userGroupCols + ` FROM user_groups WHERE id=?`
+	if usePostgres {
+		currentQuery += ` FOR UPDATE`
+	}
+	current, err := scanUserGroup(tx.QueryRowContext(ctx, currentQuery, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	allowance := current.CreditAllowance
+	periodSeconds := current.CreditPeriodSeconds
+	if p.CreditAllowance != nil {
+		allowance = *p.CreditAllowance
+	}
+	if p.CreditPeriodSeconds != nil {
+		periodSeconds = *p.CreditPeriodSeconds
+	}
+	if err := validateCreditConfig(allowance, periodSeconds); err != nil {
+		return nil, err
+	}
+	creditConfigChanged := allowance != current.CreditAllowance || periodSeconds != current.CreditPeriodSeconds
+
 	parts := []string{}
 	args := []any{}
 	if p.Name != nil {
@@ -209,17 +254,37 @@ func UpdateUserGroup(ctx context.Context, db *sql.DB, id string, p UserGroupPatc
 		args = append(args, boolInt(*p.IsPurchasable))
 	}
 	if len(parts) == 0 {
-		return GetUserGroup(ctx, db, id)
+		return &current, nil
 	}
 	parts = append(parts, "updated_at=?")
 	args = append(args, time.Now().Unix(), id)
-	if _, err := db.ExecContext(ctx, fmt.Sprintf("UPDATE user_groups SET %s WHERE id=?", strings.Join(parts, ", ")), args...); err != nil {
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf("UPDATE user_groups SET %s WHERE id=?", strings.Join(parts, ", ")), args...); err != nil {
 		if isUniqueIndexErr(err, "idx_user_groups_name_unique", "user_groups.name") {
 			return nil, ErrUserGroupNameExists
 		}
 		return nil, err
 	}
-	return GetUserGroup(ctx, db, id)
+	if creditConfigChanged {
+		now := time.Now().Unix()
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE users
+			    SET credit_cycle_anchor=CASE
+			            WHEN credit_cycle_anchor>=? THEN credit_cycle_anchor+1
+			            ELSE ?
+			        END
+			  WHERE group_id=?`,
+			now, now, id); err != nil {
+			return nil, err
+		}
+	}
+	updated, err := scanUserGroup(tx.QueryRowContext(ctx, `SELECT `+userGroupCols+` FROM user_groups WHERE id=?`, id))
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return &updated, nil
 }
 
 // ValidatePaymentUserGroupPurchasable checks that a membership tier may still
@@ -274,7 +339,19 @@ func DeleteUserGroup(ctx context.Context, db *sql.DB, id string) error {
 	if hasPendingOrders {
 		return ErrPaymentOrdersPendingForGroup
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE users SET group_id=? WHERE group_id=?`, DefaultGroupID, id); err != nil {
+	now := time.Now().Unix()
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE users
+		    SET group_id=?, group_expires_at=0, previous_group_id='',
+		        credit_cycle_anchor=CASE
+		            WHEN credit_cycle_anchor>=? THEN credit_cycle_anchor+1
+		            ELSE ?
+		        END
+		  WHERE group_id=?`,
+		DefaultGroupID, now, now, id); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE users SET previous_group_id='' WHERE previous_group_id=?`, id); err != nil {
 		return err
 	}
 	// model_group_quotas rows cascade via FK.
@@ -284,10 +361,9 @@ func DeleteUserGroup(ctx context.Context, db *sql.DB, id string) error {
 	return tx.Commit()
 }
 
-// SetUserGroup assigns a user to a group (admin action). Bumps the token
-// version so the group change (and its quota limits) takes effect immediately —
-// the group_id lives in the access-token claims, so outstanding tokens must be
-// invalidated (§ FIX-4, same pattern as SetUserRole / SetUserStatus).
+// SetUserGroup assigns a user to a group (admin action). Bumps the token version
+// so the group change and its quota limits take effect immediately (same pattern
+// as SetUserRole / SetUserStatus).
 // expiresAt is the unix-seconds expiry (0 = permanent). When set, the group
 // downgrades back to the default tier once it passes (see maybeExpireGroup), so
 // previous_group_id is cleared.
@@ -298,10 +374,18 @@ func SetUserGroup(ctx context.Context, db *sql.DB, userID, groupID string, expir
 	if expiresAt < 0 {
 		expiresAt = 0
 	}
+	now := time.Now().Unix()
 	if _, err := db.ExecContext(ctx,
-		`UPDATE users SET group_id=?, group_expires_at=?, previous_group_id='' WHERE id=?`,
-		groupID, expiresAt, userID); err != nil {
+		`UPDATE users
+		    SET credit_cycle_anchor=CASE
+		            WHEN group_id<>? OR (group_expires_at>0 AND group_expires_at<=?) THEN
+		                CASE WHEN credit_cycle_anchor>=? THEN credit_cycle_anchor+1 ELSE ? END
+		            ELSE credit_cycle_anchor
+		        END,
+		        group_id=?, group_expires_at=?, previous_group_id='', token_ver=token_ver+1
+		  WHERE id=?`,
+		groupID, now, now, now, groupID, expiresAt, userID); err != nil {
 		return err
 	}
-	return BumpTokenVersion(ctx, db, userID)
+	return nil
 }

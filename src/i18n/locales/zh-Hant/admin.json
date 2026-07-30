@@ -380,6 +380,8 @@
       "expiry": "到期",
       "permanent": "永久",
       "allowance": "限時積分（剩餘 / 額度）",
+      "availableCredits": "目前可用總積分",
+      "creditReset": "下次積分刷新",
       "loadFailed": "無法載入最新使用者資訊。",
       "twofa": "兩步驗證",
       "enabled": "已啟用",
@@ -800,10 +802,11 @@
       "creditAllowance": "每週期積分",
       "creditAllowanceHint": "每次刷新發放的限時積分，未用完作廢。",
       "creditPeriod": "刷新週期",
-      "creditPeriodHint": "限時積分多久重置一次。",
+      "creditPeriodHint": "限時積分多久重置一次。1 個月固定按 30 天計算。",
       "unitHour": "小時",
       "unitDay": "天",
       "unitWeek": "週",
+      "unitMonth": "月",
       "maxWorkspaces": "最多工作空間數",
       "workspaces": "工作空間",
       "workspacesHint": "允許該用戶組建立工作空間（數量上限見上；0 = 不限）。",
@@ -814,7 +817,8 @@
     },
     "errors": {
       "nameRequired": "請填寫名稱",
-      "priceInvalid": "請輸入符合結算貨幣小數位的非負價格。"
+      "priceInvalid": "請輸入符合結算貨幣小數位的非負價格。",
+      "creditPeriodRequired": "限時積分大於 0 時必須設定刷新週期。"
     },
     "maxStorage": "儲存空間(MB)",
     "maxStorageHint": "0 表示不限制;僅統計非圖片檔案。"

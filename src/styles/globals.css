@@ -366,23 +366,17 @@
   animation: text-shimmer 2s linear infinite;
 }
 
-/* Brand "thinking" mark — the Aivory logo breathes + glows inside a slow scan
-   ring while the reply is still forming (before the first token). The ring
-   highlight and the glow use the sage AI-status color (§2.4); the global
-   reduced-motion rule holds the logo static. */
+/* Brand "thinking" mark — keep the small SVG on whole-pixel geometry while its
+   opacity breathes. Scaling or blurring this 24px mark softens its edges. */
 @keyframes core-breathe {
 
   0%,
   100% {
-    transform: scale(0.94);
     opacity: 0.72;
-    filter: drop-shadow(0 0 2px color-mix(in oklch, var(--color-secondary) 15%, transparent));
   }
 
   50% {
-    transform: scale(1.06);
     opacity: 1;
-    filter: drop-shadow(0 0 9px color-mix(in oklch, var(--color-secondary) 45%, transparent));
   }
 }
 

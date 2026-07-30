@@ -534,11 +534,9 @@ func LogUsage(ctx context.Context, db *sql.DB, u UsageLog) error {
 	return err
 }
 
-// CreditsUsedInWindow sums the timed credits a user has spent since the given
-// window start — used to seed the cold credit-window cache and compute remaining
-// timed credits (§ credits). usage_logs.credits holds ONLY the timed portion of a
-// charge; permanent-credit debits live on the user row, so this is purely the
-// timed-window consumption.
+// CreditsUsedInWindow sums historical usage-log credits. It is retained only for
+// migrating deployments that predate credit_ledger; live balances never depend
+// on deletable analytics rows.
 func CreditsUsedInWindow(ctx context.Context, db *sql.DB, userID string, sinceUnix int64) (float64, error) {
 	var c sql.NullFloat64
 	err := db.QueryRowContext(ctx,
