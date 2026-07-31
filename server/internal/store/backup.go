@@ -32,7 +32,7 @@ const BackupVersion = 1
 // (messages.parent_id) is satisfied by exporting messages in creation order —
 // a reply is always created after the message it answers.
 var backupTableOrder = []string{
-	"settings", "users", "login_histories", "workspaces", "workspace_members", "user_groups", "credit_ledger", "credit_packages",
+	"settings", "users", "login_histories", "workspaces", "workspace_members", "user_groups", "credit_ledger", "credit_reservations", "quota_ledger", "billing_usage", "credit_packages",
 	"payment_channels", "payment_methods", "payment_orders", "payment_order_attempts", "payment_events",
 	"channels", "skills", "prompts", "user_skills", "user_prompts", "oauth_providers",
 	"models", "model_group_quotas", "model_tags", "image_styles",
@@ -242,6 +242,7 @@ func RestoreTable(ctx context.Context, ex RowExecer, table string, r io.Reader) 
 			return n, fmt.Errorf("decode %s row: %w", table, err)
 		}
 		applyLegacyPaymentOrderSnapshotDefaults(table, raw)
+		applyLegacyCreditMicrosDefaults(table, raw)
 		cols := make([]string, 0, len(liveCols))
 		args := make([]any, 0, len(liveCols))
 		for _, c := range liveCols { // stable, schema-defined order
@@ -287,6 +288,36 @@ func applyLegacyPaymentOrderSnapshotDefaults(table string, row map[string]json.R
 	}
 }
 
+func applyLegacyCreditMicrosDefaults(table string, row map[string]json.RawMessage) {
+	var floatColumn, microsColumn string
+	switch table {
+	case "users":
+		floatColumn, microsColumn = "credits_permanent", "credits_permanent_micros"
+	case "user_groups":
+		floatColumn, microsColumn = "credit_allowance", "credit_allowance_micros"
+	case "credit_ledger":
+		floatColumn, microsColumn = "amount", "amount_micros"
+	default:
+		return
+	}
+	if _, present := row[microsColumn]; present {
+		return
+	}
+	raw, present := row[floatColumn]
+	if !present || strings.TrimSpace(string(raw)) == "null" {
+		return
+	}
+	var amount float64
+	if json.Unmarshal(raw, &amount) != nil {
+		return
+	}
+	micros, err := CreditsToMicros(amount)
+	if err != nil {
+		return
+	}
+	row[microsColumn], _ = json.Marshal(micros)
+}
+
 var tablePrimaryKeys = map[string][]string{
 	"settings":                {"key"},
 	"users":                   {"id"},
@@ -295,6 +326,9 @@ var tablePrimaryKeys = map[string][]string{
 	"workspace_members":       {"workspace_id", "user_id"},
 	"user_groups":             {"id"},
 	"credit_ledger":           {"id"},
+	"credit_reservations":     {"id"},
+	"quota_ledger":            {"id"},
+	"billing_usage":           {"id"},
 	"credit_packages":         {"id"},
 	"payment_channels":        {"id"},
 	"payment_methods":         {"id"},
@@ -360,6 +394,7 @@ func UpsertTable(ctx context.Context, ex RowExecer, table string, r io.Reader) (
 		} else if err != nil {
 			return n, fmt.Errorf("decode %s row: %w", table, err)
 		}
+		applyLegacyCreditMicrosDefaults(table, raw)
 		cols := make([]string, 0, len(liveCols))
 		args := make([]any, 0, len(liveCols))
 		colSet := make(map[string]bool, len(liveCols))

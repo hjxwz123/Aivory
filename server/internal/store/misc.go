@@ -519,8 +519,32 @@ func ListMemoriesActive(ctx context.Context, db *sql.DB, userID string) ([]Memor
 	return out, rows.Err()
 }
 
-// LogUsage writes a single usage row. Best-effort — callers ignore errors.
+// LogUsage writes a successful call to the durable billing ledger before the
+// deletable analytics row. Callers must handle the returned error for billable
+// provider calls; otherwise a delivered result could escape accounting.
 func LogUsage(ctx context.Context, db *sql.DB, u UsageLog) error {
+	status := u.Status
+	if status == "" {
+		status = "ok"
+	}
+	if status != "error" {
+		if err := RecordBillingUsage(ctx, db, u); err != nil {
+			return err
+		}
+	}
+	return LogUsageAnalytics(ctx, db, u)
+}
+
+// LogUsageAnalytics writes only the deletable reporting row. It is used when a
+// caller must durably record provider cost before a later credit settlement.
+func LogUsageAnalytics(ctx context.Context, db *sql.DB, u UsageLog) error {
+	// usage_logs predates system-owned task calls and requires a concrete user
+	// foreign key. The durable billing ledger accepts a NULL owner, so preserve
+	// those provider costs there without manufacturing a fake user solely for
+	// deletable analytics.
+	if u.UserID == "" {
+		return nil
+	}
 	status := u.Status
 	if status == "" {
 		status = "ok"

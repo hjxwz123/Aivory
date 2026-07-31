@@ -152,11 +152,15 @@ func Migrate(db *sql.DB) error {
 	// per-user non-expiring balance; per-row charge. The USD↔credit rate is a
 	// global setting rather than a group column.
 	addGroupCreditAllowance := `ALTER TABLE user_groups ADD COLUMN credit_allowance REAL NOT NULL DEFAULT 0`
+	addGroupCreditAllowanceMicros := `ALTER TABLE user_groups ADD COLUMN credit_allowance_micros INTEGER NOT NULL DEFAULT 0`
 	addGroupCreditPeriod := `ALTER TABLE user_groups ADD COLUMN credit_period_seconds INTEGER NOT NULL DEFAULT 0`
 	addGroupMonthlyPriceAmountMinor := `ALTER TABLE user_groups ADD COLUMN monthly_price_amount_minor INTEGER NOT NULL DEFAULT 0`
 	addGroupYearlyPriceAmountMinor := `ALTER TABLE user_groups ADD COLUMN yearly_price_amount_minor INTEGER NOT NULL DEFAULT 0`
 	addUserPermCredits := `ALTER TABLE users ADD COLUMN credits_permanent REAL NOT NULL DEFAULT 0`
+	addUserPermCreditsMicros := `ALTER TABLE users ADD COLUMN credits_permanent_micros INTEGER NOT NULL DEFAULT 0`
 	addUserCreditCycleAnchor := `ALTER TABLE users ADD COLUMN credit_cycle_anchor INTEGER NOT NULL DEFAULT 0`
+	addUserQuotaCycleAnchor := `ALTER TABLE users ADD COLUMN quota_cycle_anchor INTEGER NOT NULL DEFAULT 0`
+	addCreditLedgerAmountMicros := `ALTER TABLE credit_ledger ADD COLUMN amount_micros INTEGER NOT NULL DEFAULT 0`
 	addUserSortOrder := `ALTER TABLE users ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0`
 	addUsageCredits := `ALTER TABLE usage_logs ADD COLUMN credits REAL NOT NULL DEFAULT 0`
 	addMsgCredits := `ALTER TABLE messages ADD COLUMN credits REAL NOT NULL DEFAULT 0`
@@ -267,11 +271,15 @@ func Migrate(db *sql.DB) error {
 		addGroupMaxProjects = `ALTER TABLE user_groups ADD COLUMN IF NOT EXISTS max_projects INTEGER NOT NULL DEFAULT 0`
 		addGroupMaxKBs = `ALTER TABLE user_groups ADD COLUMN IF NOT EXISTS max_kbs INTEGER NOT NULL DEFAULT 0`
 		addGroupCreditAllowance = `ALTER TABLE user_groups ADD COLUMN IF NOT EXISTS credit_allowance REAL NOT NULL DEFAULT 0`
+		addGroupCreditAllowanceMicros = `ALTER TABLE user_groups ADD COLUMN IF NOT EXISTS credit_allowance_micros BIGINT NOT NULL DEFAULT 0`
 		addGroupCreditPeriod = `ALTER TABLE user_groups ADD COLUMN IF NOT EXISTS credit_period_seconds INTEGER NOT NULL DEFAULT 0`
 		addGroupMonthlyPriceAmountMinor = `ALTER TABLE user_groups ADD COLUMN IF NOT EXISTS monthly_price_amount_minor BIGINT NOT NULL DEFAULT 0`
 		addGroupYearlyPriceAmountMinor = `ALTER TABLE user_groups ADD COLUMN IF NOT EXISTS yearly_price_amount_minor BIGINT NOT NULL DEFAULT 0`
 		addUserPermCredits = `ALTER TABLE users ADD COLUMN IF NOT EXISTS credits_permanent REAL NOT NULL DEFAULT 0`
+		addUserPermCreditsMicros = `ALTER TABLE users ADD COLUMN IF NOT EXISTS credits_permanent_micros BIGINT NOT NULL DEFAULT 0`
 		addUserCreditCycleAnchor = `ALTER TABLE users ADD COLUMN IF NOT EXISTS credit_cycle_anchor BIGINT NOT NULL DEFAULT 0`
+		addUserQuotaCycleAnchor = `ALTER TABLE users ADD COLUMN IF NOT EXISTS quota_cycle_anchor BIGINT NOT NULL DEFAULT 0`
+		addCreditLedgerAmountMicros = `ALTER TABLE credit_ledger ADD COLUMN IF NOT EXISTS amount_micros BIGINT NOT NULL DEFAULT 0`
 		addUserSortOrder = `ALTER TABLE users ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 0`
 		addUsageCredits = `ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS credits REAL NOT NULL DEFAULT 0`
 		addMsgCredits = `ALTER TABLE messages ADD COLUMN IF NOT EXISTS credits DOUBLE PRECISION NOT NULL DEFAULT 0`
@@ -345,8 +353,8 @@ func Migrate(db *sql.DB) error {
 		addInlineSource, addInlineParent, addInlineQuote,
 		addModelTags, addModelExtraParams,
 		addGroupMaxProjects, addGroupMaxKBs,
-		addGroupCreditAllowance, addGroupCreditPeriod, addGroupMonthlyPriceAmountMinor, addGroupYearlyPriceAmountMinor,
-		addUserPermCredits, addUserCreditCycleAnchor, addUserSortOrder, addUsageCredits, addMsgCredits,
+		addGroupCreditAllowance, addGroupCreditAllowanceMicros, addGroupCreditPeriod, addGroupMonthlyPriceAmountMinor, addGroupYearlyPriceAmountMinor,
+		addUserPermCredits, addUserPermCreditsMicros, addUserCreditCycleAnchor, addUserQuotaCycleAnchor, addCreditLedgerAmountMicros, addUserSortOrder, addUsageCredits, addMsgCredits,
 		addMsgModelLabel, addMsgSearchText,
 		addImageTimeout,
 		addMsgVerify,
@@ -414,26 +422,30 @@ func Migrate(db *sql.DB) error {
 	// fatal) instead of surfacing as broken reads later. WHERE 1=0 makes each probe
 	// O(1). If you add an ALTER above, add its column here.
 	columnChecks := map[string][]string{
-		"messages":           {"credits", "model_label", "search_text", "gen_ms", "feedback", "verify", "author_id", "fast", "selected_user_skill_ids"},
-		"skills":             {"display_description"},
-		"prompts":            {"name", "description", "content", "enabled", "sort_order"},
-		"user_skills":        {"user_id", "name", "description", "icon", "instructions", "source_skill_id"},
-		"user_prompts":       {"user_id", "name", "description", "content", "source_prompt_id"},
-		"users":              {"group_id", "totp_secret", "totp_enabled", "group_expires_at", "previous_group_id", "password_set", "password_changed_at", "last_seen_at", "credits_permanent", "credit_cycle_anchor", "sort_order"},
-		"usage_logs":         {"credits", "workspace_id", "channel_id", "fallback", "status", "error", "request_method", "request_url", "request_headers", "request_body"},
-		"user_groups":        {"monthly_price_amount_minor", "yearly_price_amount_minor", "max_projects", "max_kbs", "credit_allowance", "credit_period_seconds", "max_workspaces", "is_public", "is_purchasable", "max_storage_mb"},
-		"models":             {"official_tools", "builtin_tools", "moderation_enabled", "moderation_mode", "tags", "extra_params", "image_timeout_sec", "research_enabled", "fallback_channel_id", "fast"},
-		"refresh_tokens":     {"user_agent", "ip", "location", "last_seen"},
-		"conversations":      {"inline_source_conv", "inline_parent_id", "inline_quote", "workspace_id", "fast"},
-		"projects":           {"workspace_id"},
-		"knowledge_bases":    {"workspace_id"},
-		"chunks":             {"image_ref"},
-		"files":              {"draft"},
-		"documents":          {"ingest_updated_at"},
-		"redeem_codes":       {"kind", "credits"},
-		"redeem_redemptions": {"credits"},
-		"payment_channels":   {"environment"},
-		"payment_orders":     {"paid_amount_minor", "tax_amount_minor", "provider_amount_minor", "provider_currency", "conversion_rate", "environment", "provider_payment_id", "checkout_session_id", "checkout_url", "checkout_expires_at", "last_reconciled_at", "reconcile_error"},
+		"messages":            {"credits", "model_label", "search_text", "gen_ms", "feedback", "verify", "author_id", "fast", "selected_user_skill_ids"},
+		"skills":              {"display_description"},
+		"prompts":             {"name", "description", "content", "enabled", "sort_order"},
+		"user_skills":         {"user_id", "name", "description", "icon", "instructions", "source_skill_id"},
+		"user_prompts":        {"user_id", "name", "description", "content", "source_prompt_id"},
+		"users":               {"group_id", "totp_secret", "totp_enabled", "group_expires_at", "previous_group_id", "password_set", "password_changed_at", "last_seen_at", "credits_permanent", "credits_permanent_micros", "credit_cycle_anchor", "quota_cycle_anchor", "sort_order"},
+		"usage_logs":          {"credits", "workspace_id", "channel_id", "fallback", "status", "error", "request_method", "request_url", "request_headers", "request_body"},
+		"user_groups":         {"monthly_price_amount_minor", "yearly_price_amount_minor", "max_projects", "max_kbs", "credit_allowance", "credit_allowance_micros", "credit_period_seconds", "max_workspaces", "is_public", "is_purchasable", "max_storage_mb"},
+		"credit_ledger":       {"amount", "amount_micros", "source_type", "source_id"},
+		"credit_reservations": {"user_id", "amount_micros", "actual_micros", "source_type", "source_id", "status", "expires_at"},
+		"quota_ledger":        {"user_id", "scope_type", "model_id", "group_id", "cycle_anchor", "window_start", "limit_type", "reserved_micros", "actual_micros", "status", "expires_at"},
+		"billing_usage":       {"user_id", "message_id", "model_id", "purpose", "cost_micros", "images_count", "input_tokens", "output_tokens", "currency"},
+		"models":              {"official_tools", "builtin_tools", "moderation_enabled", "moderation_mode", "tags", "extra_params", "image_timeout_sec", "research_enabled", "fallback_channel_id", "fast"},
+		"refresh_tokens":      {"user_agent", "ip", "location", "last_seen"},
+		"conversations":       {"inline_source_conv", "inline_parent_id", "inline_quote", "workspace_id", "fast"},
+		"projects":            {"workspace_id"},
+		"knowledge_bases":     {"workspace_id"},
+		"chunks":              {"image_ref"},
+		"files":               {"draft"},
+		"documents":           {"ingest_updated_at"},
+		"redeem_codes":        {"kind", "credits"},
+		"redeem_redemptions":  {"credits"},
+		"payment_channels":    {"environment"},
+		"payment_orders":      {"paid_amount_minor", "tax_amount_minor", "provider_amount_minor", "provider_currency", "conversion_rate", "environment", "provider_payment_id", "checkout_session_id", "checkout_url", "checkout_expires_at", "last_reconciled_at", "reconcile_error"},
 	}
 	for table, cols := range columnChecks {
 		if _, err := db.Exec(fmt.Sprintf(`SELECT %s FROM %s WHERE 1=0`, strings.Join(cols, ", "), table)); err != nil {
@@ -471,6 +483,9 @@ func Migrate(db *sql.DB) error {
 	}
 	if err := migrateCreditLedger(context.Background(), db); err != nil {
 		return fmt.Errorf("migrate timed-credit ledger: %w", err)
+	}
+	if err := migrateDailyTokenQuotaLedger(context.Background(), db); err != nil {
+		return fmt.Errorf("migrate daily-token quota ledger: %w", err)
 	}
 	if err := migrateOfficialToolDefinitions(db); err != nil {
 		return fmt.Errorf("migrate official tool definitions: %w", err)

@@ -403,14 +403,20 @@ func TestMergeOldestBlocksFoldsAtLeastTwo(t *testing.T) {
 		{Level: 7, FromMessageID: "m2", AnchorMessageID: "m3", Text: strings.Repeat("beta ", 80), Tokens: 120},
 		{Level: 1, FromMessageID: "m4", AnchorMessageID: "m5", Text: "tail", Tokens: 5},
 	}
-	got2 := mergeOldestBlocks(context.Background(), nil, &store.Conversation{ID: "c1"}, "u1", blocks[:2], 256)
+	got2, err := mergeOldestBlocks(context.Background(), nil, &store.Conversation{ID: "c1"}, "u1", blocks[:2], 256)
+	if err != nil {
+		t.Fatalf("merge 2 blocks: %v", err)
+	}
 	if len(got2) != 1 || got2[0].FromMessageID != "m0" || got2[0].AnchorMessageID != "m3" {
 		t.Fatalf("2-block merge = %+v, want one coarse block covering m0..m3", got2)
 	}
 	if got2[0].Level != 8 {
 		t.Fatalf("coarse level = %d, want max+1 = 8", got2[0].Level)
 	}
-	got3 := mergeOldestBlocks(context.Background(), nil, &store.Conversation{ID: "c1"}, "u1", blocks, 256)
+	got3, err := mergeOldestBlocks(context.Background(), nil, &store.Conversation{ID: "c1"}, "u1", blocks, 256)
+	if err != nil {
+		t.Fatalf("merge 3 blocks: %v", err)
+	}
 	if len(got3) != 2 || got3[0].AnchorMessageID != "m3" || got3[1].AnchorMessageID != "m5" {
 		t.Fatalf("3-block merge = %+v, want first two folded and tail preserved", got3)
 	}
@@ -427,10 +433,13 @@ func TestCJKFallbacksClipByTokens(t *testing.T) {
 		t.Fatalf("clipOlder did not visibly truncate CJK text: len=%d", len([]rune(clipped)))
 	}
 
-	merged := mergeOldestBlocks(context.Background(), nil, &store.Conversation{ID: "c1"}, "u1", []SummaryBlock{
+	merged, err := mergeOldestBlocks(context.Background(), nil, &store.Conversation{ID: "c1"}, "u1", []SummaryBlock{
 		{Level: 1, FromMessageID: "m0", AnchorMessageID: "m1", Text: cjk, Tokens: estimateTokens(cjk)},
 		{Level: 1, FromMessageID: "m2", AnchorMessageID: "m3", Text: cjk, Tokens: estimateTokens(cjk)},
 	}, 256)
+	if err != nil {
+		t.Fatalf("merge CJK blocks: %v", err)
+	}
 	if len(merged) != 1 {
 		t.Fatalf("merge fallback produced %d blocks, want 1", len(merged))
 	}

@@ -26,8 +26,10 @@ CREATE TABLE IF NOT EXISTS users (
   password_set  INTEGER NOT NULL DEFAULT 1,        -- 0 = OAuth account that never chose its own password
   password_changed_at INTEGER NOT NULL DEFAULT 0,  -- unix seconds of last password change (0 = never since signup)
   last_seen_at  INTEGER NOT NULL DEFAULT 0,        -- unix seconds of last authenticated activity (online status)
-  credits_permanent REAL NOT NULL DEFAULT 0,       -- non-expiring credits (purchased / admin-set)
+  credits_permanent REAL NOT NULL DEFAULT 0,       -- compatibility/display mirror
+  credits_permanent_micros INTEGER NOT NULL DEFAULT 0, -- authoritative fixed-point balance
   credit_cycle_anchor INTEGER NOT NULL DEFAULT (strftime('%s','now')), -- current group's timed-credit cycle origin
+  quota_cycle_anchor INTEGER NOT NULL DEFAULT (strftime('%s','now')), -- current group's model-quota cycle origin
   sort_order    INTEGER NOT NULL DEFAULT 0,        -- admin-defined display order
   created_at    INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 );
@@ -63,7 +65,8 @@ CREATE TABLE IF NOT EXISTS user_groups (
   max_kbs      INTEGER NOT NULL DEFAULT 0,
   -- Storage quota for non-image uploads, MB (0 = unlimited, § user files page).
   max_storage_mb INTEGER NOT NULL DEFAULT 0,
-  credit_allowance      REAL NOT NULL DEFAULT 0,    -- timed credits granted each cycle
+  credit_allowance      REAL NOT NULL DEFAULT 0,    -- compatibility/display mirror
+  credit_allowance_micros INTEGER NOT NULL DEFAULT 0, -- authoritative fixed-point allowance
   credit_period_seconds INTEGER NOT NULL DEFAULT 0, -- refresh cycle length (0 = no timed credits)
   is_purchasable INTEGER NOT NULL DEFAULT 1,      -- displayed tier may temporarily pause checkout
   created_at  INTEGER NOT NULL DEFAULT (strftime('%s','now')),
@@ -81,6 +84,7 @@ CREATE TABLE IF NOT EXISTS credit_ledger (
   cycle_start  INTEGER NOT NULL DEFAULT 0,
   kind         TEXT NOT NULL, -- timed_debit | permanent_debit
   amount       REAL NOT NULL,
+  amount_micros INTEGER NOT NULL DEFAULT 0,
   source_type  TEXT NOT NULL DEFAULT '',
   source_id    TEXT NOT NULL DEFAULT '',
   created_at   INTEGER NOT NULL DEFAULT (strftime('%s','now'))
@@ -89,6 +93,60 @@ CREATE INDEX IF NOT EXISTS idx_credit_ledger_timed
   ON credit_ledger(user_id, group_id, cycle_anchor, cycle_start, kind);
 CREATE INDEX IF NOT EXISTS idx_credit_ledger_user_time
   ON credit_ledger(user_id, created_at);
+
+CREATE TABLE IF NOT EXISTS credit_reservations (
+  id              TEXT PRIMARY KEY,
+  user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  amount_micros   INTEGER NOT NULL CHECK(amount_micros > 0),
+  actual_micros   INTEGER NOT NULL DEFAULT 0 CHECK(actual_micros >= 0),
+  source_type     TEXT NOT NULL DEFAULT '',
+  source_id       TEXT NOT NULL DEFAULT '',
+  status          TEXT NOT NULL DEFAULT 'reserved' CHECK(status IN ('reserved','settling','settled','released')),
+  expires_at      INTEGER NOT NULL CHECK(expires_at > 0),
+  created_at      INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+  updated_at      INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+  UNIQUE(source_type, source_id)
+);
+CREATE INDEX IF NOT EXISTS idx_credit_reservations_user_status
+  ON credit_reservations(user_id, status, expires_at);
+
+CREATE TABLE IF NOT EXISTS quota_ledger (
+  id              TEXT PRIMARY KEY,
+  user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  scope_type      TEXT NOT NULL CHECK(length(trim(scope_type)) > 0),
+  model_id        TEXT NOT NULL DEFAULT '',
+  group_id        TEXT NOT NULL DEFAULT '',
+  cycle_anchor    INTEGER NOT NULL DEFAULT 0,
+  window_start    INTEGER NOT NULL CHECK(window_start > 0),
+  limit_type      TEXT NOT NULL CHECK(limit_type IN ('count','cost')),
+  reserved_micros INTEGER NOT NULL DEFAULT 0 CHECK(reserved_micros >= 0),
+  actual_micros   INTEGER NOT NULL DEFAULT 0 CHECK(actual_micros >= 0),
+  status          TEXT NOT NULL DEFAULT 'reserved' CHECK(status IN ('reserved','finalized','released')),
+  expires_at      INTEGER NOT NULL CHECK(expires_at > window_start),
+  created_at      INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+  updated_at      INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+);
+CREATE INDEX IF NOT EXISTS idx_quota_ledger_scope
+  ON quota_ledger(user_id, scope_type, model_id, group_id, cycle_anchor, window_start, status);
+
+CREATE TABLE IF NOT EXISTS billing_usage (
+  id              TEXT PRIMARY KEY,
+  user_id         TEXT REFERENCES users(id) ON DELETE SET NULL,
+  conversation_id TEXT NOT NULL DEFAULT '',
+  message_id      TEXT NOT NULL DEFAULT '',
+  model_id        TEXT NOT NULL DEFAULT '',
+  purpose         TEXT NOT NULL DEFAULT '',
+  cost_micros     INTEGER NOT NULL DEFAULT 0 CHECK(cost_micros >= 0),
+  images_count    INTEGER NOT NULL DEFAULT 0 CHECK(images_count >= 0),
+  input_tokens    INTEGER NOT NULL DEFAULT 0 CHECK(input_tokens >= 0),
+  output_tokens   INTEGER NOT NULL DEFAULT 0 CHECK(output_tokens >= 0),
+  currency        TEXT NOT NULL DEFAULT 'USD' CHECK(length(trim(currency)) > 0),
+  created_at      INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+);
+CREATE INDEX IF NOT EXISTS idx_billing_usage_message
+  ON billing_usage(message_id, purpose, created_at);
+CREATE INDEX IF NOT EXISTS idx_billing_usage_user_time
+  ON billing_usage(user_id, created_at);
 
 -- Administrator-defined permanent-credit top-up packages. Prices use the
 -- deployment-wide settlement currency and are stored in its smallest unit.
@@ -230,9 +288,9 @@ CREATE INDEX IF NOT EXISTS idx_payment_events_order_created ON payment_events(or
 CREATE TABLE IF NOT EXISTS model_group_quotas (
   model_id       TEXT NOT NULL REFERENCES models(id) ON DELETE CASCADE,
   group_id       TEXT NOT NULL REFERENCES user_groups(id) ON DELETE CASCADE,
-  period_seconds INTEGER NOT NULL DEFAULT 604800,
-  limit_type     TEXT NOT NULL DEFAULT 'count',  -- cost | count
-  limit_value    REAL NOT NULL DEFAULT 0,
+  period_seconds INTEGER NOT NULL DEFAULT 604800 CHECK(period_seconds > 0),
+  limit_type     TEXT NOT NULL DEFAULT 'count' CHECK(limit_type IN ('cost','count')),  -- cost | count
+  limit_value    REAL NOT NULL DEFAULT 0 CHECK(limit_value >= 0),
   PRIMARY KEY (model_id, group_id)
 );
 CREATE INDEX IF NOT EXISTS idx_mgq_group ON model_group_quotas(group_id);
@@ -251,11 +309,11 @@ CREATE TABLE IF NOT EXISTS redeem_codes (
   code          TEXT UNIQUE NOT NULL,
   kind          TEXT NOT NULL DEFAULT 'group',
   group_id      TEXT NOT NULL REFERENCES user_groups(id) ON DELETE CASCADE,
-  duration_days INTEGER NOT NULL DEFAULT 30,
-  credits       REAL NOT NULL DEFAULT 0,
-  max_uses      INTEGER NOT NULL DEFAULT 1,
-  used_count    INTEGER NOT NULL DEFAULT 0,
-  expires_at    INTEGER NOT NULL DEFAULT 0,
+  duration_days INTEGER NOT NULL DEFAULT 30 CHECK(duration_days >= 0),
+  credits       REAL NOT NULL DEFAULT 0 CHECK(credits >= 0),
+  max_uses      INTEGER NOT NULL DEFAULT 1 CHECK(max_uses > 0),
+  used_count    INTEGER NOT NULL DEFAULT 0 CHECK(used_count >= 0 AND used_count <= max_uses),
+  expires_at    INTEGER NOT NULL DEFAULT 0 CHECK(expires_at >= 0),
   enabled       INTEGER NOT NULL DEFAULT 1,
   note          TEXT NOT NULL DEFAULT '',
   batch_name    TEXT NOT NULL DEFAULT '',

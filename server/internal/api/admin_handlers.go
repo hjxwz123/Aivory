@@ -332,6 +332,10 @@ func createModelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 			writeError(w, 409, err)
 			return
 		}
+		if errors.Is(err, store.ErrInvalidModelBilling) {
+			writeError(w, http.StatusBadRequest, errInvalidInput)
+			return
+		}
 		writeError(w, 500, err)
 		return
 	}
@@ -432,6 +436,10 @@ func updateModelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(err, store.ErrModelRequestExists) {
 			writeError(w, 409, err)
+			return
+		}
+		if errors.Is(err, store.ErrInvalidModelBilling) {
+			writeError(w, http.StatusBadRequest, errInvalidInput)
 			return
 		}
 		writeError(w, 404, errNotFound)
@@ -1415,6 +1423,9 @@ func applyAdminSettingsPatch(d Deps, body map[string]json.RawMessage, skipNull b
 			case "credits_per_usd":
 				var amount float64
 				if json.Unmarshal(v, &amount) != nil || amount < 0 || math.IsNaN(amount) || math.IsInf(amount, 0) {
+					return 0, errInvalidInput
+				}
+				if micros, err := store.CreditsToMicros(amount); err != nil || amount > 0 && micros == 0 {
 					return 0, errInvalidInput
 				}
 			case "max_image_upload_mb", "max_file_upload_mb":
