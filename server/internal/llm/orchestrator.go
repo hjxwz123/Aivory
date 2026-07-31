@@ -1061,6 +1061,8 @@ func maxInt(a, b int) int {
 // Run executes one turn end to end. It blocks while streaming.
 // onEvent is invoked on every SSE event so the HTTP handler can flush.
 func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(SseEvent)) (*RunResult, error) {
+	visibleOutput := new(atomic.Bool)
+	onEvent = observeProviderVisibleOutput(onEvent, visibleOutput)
 	// 1. Load conversation + resolve model.
 	conv, err := store.GetConversation(ctx, o.db, req.ConversationID, req.UserID)
 	if err != nil {
@@ -2027,6 +2029,8 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// keeps the full snapshot for the error row either way.
 	reqRecorder.captureAll = o.successRequestLoggingEnabled()
 	providerCtx := contextWithProviderRequestRecorder(ctx, reqRecorder)
+	providerCtx = contextWithProviderVisibleOutput(providerCtx, visibleOutput)
+	providerCtx = contextWithProviderTextDeltaVisibility(providerCtx, model.Stream)
 	var result *UnifiedResult
 	hostedImageCount := 0
 	// §4.6-C: set to the fallback model's display name when a TTFT timeout switches
@@ -2249,22 +2253,45 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			})
 		}
 		errBlocksJSON, _ := json.Marshal(errBlocks)
+		errCites := append([]Citation{}, ragSnippets...)
+		errUsage := Usage{}
+		var errRaw json.RawMessage
+		if result != nil {
+			errCites = append(errCites, result.Citations...)
+			errUsage = result.Usage
+			errRaw = result.Raw
+		}
+		for i := range errCites {
+			errCites[i].Index = i + 1
+		}
+		errCitesJSON, _ := json.Marshal(errCites)
 		// §B5: the raw error may embed upstream response bodies (org/request ids,
-		// echoed prompt fragments). Log it server-side; show the user a generic
-		// message and persist only that.
+		// echoed prompt fragments). Log that error server-side and expose only a
+		// generic message; result.Raw contains the partial model exchange, not the
+		// provider error body, and remains useful for same-provider history replay.
 		if o.logger != nil {
 			o.logger.Printf("orchestrator: generation error (conv=%s msg=%s model=%s provider=%s format=%s media=%s): %v",
 				conv.ID, assistantMsg.ID, model.ID, channel.Type, channel.APIFormat, providerRequestMediaStats(provReq), err)
 		}
 		const safeErr = "The model provider returned an error. Please try again in a moment."
 		_ = finishMessage(ctx, store.MessageFinishPatch{
-			Blocks: errBlocksJSON, Citations: []byte("[]"),
-			Status: "error", Error: safeErr,
+			Blocks:           errBlocksJSON,
+			Raw:              errRaw,
+			Citations:        errCitesJSON,
+			StopReason:       "generation_interrupted",
+			InputTokens:      errUsage.InputTokens,
+			OutputTokens:     errUsage.OutputTokens,
+			CacheReadTokens:  errUsage.CacheReadTokens,
+			CacheWriteTokens: errUsage.CacheWriteTokens,
+			Status:           "error",
+			Error:            safeErr,
+			GenMs:            time.Since(turnStart).Milliseconds(),
 		})
 		// §usage errors: record the failed request so admin/usage counts it and
-		// shows which channel served it (and whether the fallback was used). No
-		// output was produced, so it carries zero tokens/cost/credits and is
-		// excluded from quota reseeds (store.UsageInWindow skips status='error').
+		// shows which channel served it (and whether the fallback was used). The
+		// persisted message keeps any parsed partial usage for diagnostics, while
+		// failed usage rows remain zero-cost and are excluded from quota reseeds
+		// (store.UsageInWindow skips status='error').
 		logProviderFailures(ctx)
 		if !providerFailureCaptured(reqRecorder.snapshots(), err) {
 			reqSnapshot := reqRecorder.snapshot()
@@ -2290,7 +2317,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 				RequestBody:    reqSnapshot.Body,
 			})
 		}
-		onEvent(SseEvent{Type: "error", Message: safeErr})
+		onEvent(SseEvent{Type: "error", MessageID: assistantMsg.ID, Message: safeErr, Code: "generation_interrupted"})
 		return nil, err
 	}
 

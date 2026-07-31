@@ -6,6 +6,9 @@
 
 export type MessageRole = 'user' | 'assistant' | 'system'
 
+/** Stable backend/UI marker for a generation that failed after output became visible. */
+export const GENERATION_INTERRUPTED_ERROR_CODE = 'generation_interrupted'
+
 export interface ToolCall {
   id: string
   /** Symbolic tool name, e.g. "web_search", "code_interpreter" */
@@ -164,6 +167,8 @@ export interface Message {
   /** Set when the turn failed (API/provider/stream error). Drives a red
    *  "reply failed — retry" banner + a retry (regenerate) button. */
   error?: string
+  /** Stable machine-readable error marker. Display copy is resolved through i18n. */
+  errorCode?: string
   /** Set when the prompt was blocked by content moderation (§ moderation) —
    *  rendered as a prominent red notice asking the user to re-edit. */
   moderation?: boolean

@@ -182,6 +182,7 @@
     },
     "error": {
       "title": "Échec de la réponse — veuillez réessayer",
+      "interrupted": "Génération interrompue. Veuillez réessayer.",
       "retry": "Réessayer"
     }
   },

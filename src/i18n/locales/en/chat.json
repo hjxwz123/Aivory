@@ -182,6 +182,7 @@
     },
     "error": {
       "title": "Reply failed — please try again",
+      "interrupted": "Generation interrupted. Please try again.",
       "retry": "Retry"
     }
   },

@@ -107,7 +107,7 @@ func TestOfficialToolRequestsReachEveryProviderBody(t *testing.T) {
 	})
 
 	t.Run("google", func(t *testing.T) {
-		captured, server := captureProviderBody(t, `data: {"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}`+"\n\n")
+		captured, server := captureProviderBody(t, `data: {"candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}]}`+"\n\n")
 		defer server.Close()
 		req := base
 		req.Model = ModelInfo{RequestID: "gemini-test", BaseURL: server.URL, APIKey: "k"}

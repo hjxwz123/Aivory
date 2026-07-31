@@ -972,7 +972,7 @@ export type ApiSseEvent =
   | { type: 'image_status'; message_id?: string; status?: string }
   | { type: 'rag'; status?: string; summary?: string }
   | { type: 'refusal'; message_id?: string; message?: string }
-  | { type: 'error'; message: string }
+  | { type: 'error'; message: string; code?: string }
   | { type: 'done'; stop_reason?: string; usage?: { input_tokens: number; output_tokens: number }; credits?: number }
   // Deep Research progress (§ deep-research mode).
   | { type: 'research_plan'; message_id?: string; text?: string; summary?: string }

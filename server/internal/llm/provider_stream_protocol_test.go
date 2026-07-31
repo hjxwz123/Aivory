@@ -218,8 +218,10 @@ func TestProvidersFallBackAfterExplicitSSEError(t *testing.T) {
 			defer fallback.Close()
 
 			flag := new(atomic.Bool)
+			visible := new(atomic.Bool)
+			ctx := contextWithProviderVisibleOutput(context.Background(), visible)
 			var events []SseEvent
-			result, err := tc.provider.Stream(context.Background(), UnifiedChatRequest{
+			result, err := tc.provider.Stream(ctx, UnifiedChatRequest{
 				Model: ModelInfo{
 					RequestID: tc.requestID,
 					BaseURL:   primary.URL,
@@ -232,7 +234,7 @@ func TestProvidersFallBackAfterExplicitSSEError(t *testing.T) {
 				},
 				History:      []UnifiedMessage{{Role: "user", Blocks: []UnifiedBlock{{Kind: "text", Text: "hello"}}}},
 				FallbackUsed: flag,
-			}, nil, func(ev SseEvent) { events = append(events, ev) })
+			}, nil, observeProviderVisibleOutput(func(ev SseEvent) { events = append(events, ev) }, visible))
 			if err != nil {
 				t.Fatalf("Stream: %v", err)
 			}

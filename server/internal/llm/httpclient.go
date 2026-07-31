@@ -48,7 +48,7 @@ var providerHTTPClient = &http.Client{
 }
 
 // doProviderRequest issues one upstream call against the model's PRIMARY channel.
-// If that fails (transport error, or ANY non-2xx HTTP status — see
+// If that fails (transport error, or ANY HTTP status other than 200 — see
 // retryableUpstreamFailure for why 4xx is included) AND the model has a fallback
 // channel, it rebuilds the request against the fallback creds and retries ONCE,
 // flagging req.FallbackUsed so the whole turn is marked fallback (§fallback channel).
@@ -101,15 +101,19 @@ func doProviderRequest(
 
 // doProviderParsedRequest owns one complete upstream HTTP response, including
 // status validation and body/SSE parsing performed by consume. With a configured
-// fallback channel, primary events are buffered until consume succeeds. If ANY
-// non-cancellation failure occurs (transport, HTTP status, malformed protocol,
-// explicit SSE error, or interrupted body), the buffered events are discarded
-// and the same round is attempted once against the fallback credentials.
+// fallback channel, primary events are buffered only until the first event that
+// is actually visible to the user. If a non-cancellation failure occurs before
+// that commit point, the buffered metadata is discarded and the same round is
+// attempted once against the fallback credentials. After the commit point,
+// events stream live and a failure is returned without replaying another channel.
 //
 // A successful switch is sticky for the rest of the provider's tool loop: later
 // rounds go directly to the fallback. This avoids mixing provider-side state or
 // signed reasoning blocks between channels. The fallback attempt itself streams
 // live because there is no third attempt that could require another rollback.
+// The commit flag is turn-scoped through ctx, so a visible tool event in one
+// round also prevents a later round from switching channels. Calls without a
+// shared flag are internal/hidden calls and retain full-response buffering.
 // Caller cancellation/deadline is not a channel failure and is never replayed;
 // buffered partial events are flushed so stop semantics remain unchanged.
 func doProviderParsedRequest(
@@ -123,6 +127,7 @@ func doProviderParsedRequest(
 	if onEvent == nil {
 		onEvent = func(SseEvent) {}
 	}
+	visibleOutput := providerVisibleOutputFromContext(ctx)
 
 	consumeAttempt := func(req *http.Request, fallback bool, emit func(SseEvent)) error {
 		resp, err := sendProviderRequest(ctx, req, fallback)
@@ -171,9 +176,48 @@ func doProviderParsedRequest(
 	if m.Fallback == nil {
 		return consumeAttempt(primaryReq, false, onEvent)
 	}
+	// A prior round (or an earlier visible tool event in this turn) has already
+	// committed output. From this point on, switching channels would visibly mix
+	// two responses, so this primary attempt must stream live and fail in place.
+	if visibleOutput != nil && visibleOutput.Load() {
+		if err != nil {
+			recordProviderRequestBuildFailure(ctx, false, err)
+			return err
+		}
+		return consumeAttempt(primaryReq, false, onEvent)
+	}
 
 	buffered := make([]SseEvent, 0, 32)
-	emitBuffered := func(ev SseEvent) { buffered = append(buffered, ev) }
+	flushBuffered := func() {
+		for _, ev := range buffered {
+			onEvent(ev)
+		}
+		buffered = buffered[:0]
+	}
+	emitBuffered := func(ev SseEvent) {
+		// No turn-scoped marker means this is an internal/hidden provider call.
+		// Preserve the prior all-or-nothing buffering behavior for those callers.
+		if visibleOutput == nil {
+			buffered = append(buffered, ev)
+			return
+		}
+		if visibleOutput.Load() {
+			flushBuffered()
+			onEvent(ev)
+			return
+		}
+		if !providerEventCommitsVisibleOutputInContext(ctx, ev) {
+			buffered = append(buffered, ev)
+			return
+		}
+
+		// Release metadata immediately before the first visible event. The outer
+		// observer sets visibleOutput only when this callback really reaches the
+		// user; prompt-tool raw-token callbacks are no-ops and therefore stay
+		// uncommitted and eligible for transparent fallback.
+		flushBuffered()
+		onEvent(ev)
+	}
 	primaryErr := err
 	if primaryErr != nil {
 		recordProviderRequestBuildFailure(ctx, false, primaryErr)
@@ -182,25 +226,26 @@ func doProviderParsedRequest(
 		primaryErr = consumeAttempt(primaryReq, false, emitBuffered)
 	}
 	if primaryErr == nil {
-		for _, ev := range buffered {
-			onEvent(ev)
-		}
+		flushBuffered()
 		return nil
 	}
 	if !fallbackAllowedAfter(ctx, primaryErr) {
-		for _, ev := range buffered {
-			onEvent(ev)
-		}
+		flushBuffered()
+		return primaryErr
+	}
+	if visibleOutput != nil && visibleOutput.Load() {
+		flushBuffered()
 		return primaryErr
 	}
 
-	// Build before discarding the primary's partial events. If the configured
-	// fallback URL itself is invalid, preserve the primary result/error exactly.
+	// Build before discarding the primary's partial events. Hidden calls preserve
+	// the legacy buffered result when the fallback URL itself is invalid; a user
+	// turn that has not committed output keeps the failed primary events hidden.
 	fbReq, buildErr := build(m.Fallback.BaseURL, m.Fallback.APIKey)
 	if buildErr != nil {
 		recordProviderRequestBuildFailure(ctx, true, buildErr)
-		for _, ev := range buffered {
-			onEvent(ev)
+		if visibleOutput == nil {
+			flushBuffered()
 		}
 		return primaryErr
 	}
@@ -239,7 +284,7 @@ func (e *providerStatusError) Error() string {
 }
 
 func requireProviderSuccess(resp *http.Response, provider string) error {
-	if resp != nil && resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices {
+	if resp != nil && resp.StatusCode == http.StatusOK {
 		return nil
 	}
 	if resp == nil {
@@ -308,7 +353,7 @@ func (b *firstByteBody) Read(p []byte) (int, error) {
 // retryableUpstreamFailure reports whether a primary provider call failed in a
 // way the fallback channel should absorb. A caller cancellation or deadline is
 // intentional and never retried; everything else — transport errors and ANY
-// non-2xx status — retries once on the backup.
+// status other than 200 — retries once on the backup.
 //
 // 4xx used to be excluded on the theory "our payload is malformed, a different
 // endpoint fails identically". In practice relay/proxy channels answer 400/402/
@@ -328,5 +373,5 @@ func retryableUpstreamFailure(resp *http.Response, err error) bool {
 	if resp == nil {
 		return true
 	}
-	return resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices
+	return resp.StatusCode != http.StatusOK
 }

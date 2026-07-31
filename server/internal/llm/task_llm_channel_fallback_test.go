@@ -137,7 +137,10 @@ func TestTaskLLMFallbackSuccessLogsPrimaryErrorAndFallbackUsage(t *testing.T) {
 
 	db := openTaskChannelFallbackTestDB(t)
 	model, primaryChannel, fallbackChannel := createTaskChannelFallbackModel(t, db, primary.URL, fallback.URL)
-	answer, err := newTaskChannelFallbackRunner(db).Run(context.Background(), TaskTitle, "hello", RunOpts{
+	outerVisible := new(atomic.Bool)
+	outerVisible.Store(true)
+	ctx := contextWithProviderVisibleOutput(context.Background(), outerVisible)
+	answer, err := newTaskChannelFallbackRunner(db).Run(ctx, TaskTitle, "hello", RunOpts{
 		ModelID: model.ID,
 		UserID:  taskFallbackTestUserID,
 	})

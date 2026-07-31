@@ -240,7 +240,7 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 			p.promptRunOnce(req), tools, onEvent,
 		)
 		if err != nil {
-			return nil, err
+			return promptToolErrorResult(ctx, blocks, usage, cites, err)
 		}
 		return &UnifiedResult{Blocks: blocks, StopReason: "end_turn", Usage: usage, Citations: cites}, nil
 	}
@@ -358,21 +358,47 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 		// that produced it (also on cancel — the partial stream was still billed).
 		attachProviderRequestUsage(ctx, usage)
 		if err != nil {
+			partialBlocks := append([]UnifiedBlock{}, allBlocks...)
+			thinkingText := joinThinkingText(thinkingBlocks)
+			if thinkingText != "" {
+				partialBlocks = append(partialBlocks, UnifiedBlock{Kind: "thinking", Text: thinkingText})
+			}
+			if text != "" {
+				partialBlocks = append(partialBlocks, UnifiedBlock{Kind: "text", Text: text})
+			}
+			for _, tc := range toolCalls {
+				partialBlocks = append(partialBlocks, UnifiedBlock{
+					Kind: "tool_call", ToolName: tc.Name, ToolID: tc.ID, Input: tc.Input,
+				})
+			}
+			partialCitations := append(append([]Citation{}, allCitations...), citations...)
+			partialUsage := totalUsage
+			partialUsage.InputTokens += usage.InputTokens
+			partialUsage.OutputTokens += usage.OutputTokens
+			partialUsage.CacheReadTokens += usage.CacheReadTokens
+			partialUsage.CacheWriteTokens += usage.CacheWriteTokens
+
+			partialMessages := append([]map[string]any{}, messages...)
+			currentTurn := buildAssistantTurn(text, thinkingBlocks, nil)
+			if content, ok := currentTurn["content"].([]map[string]any); ok && len(content) > 0 {
+				// A provider error after tool_start must not leave a native tool_use
+				// without its required tool_result in replay history. The canonical
+				// block still keeps the visible tool trace for reload.
+				partialMessages = append(partialMessages, currentTurn)
+			}
+			raw, _ := json.Marshal(partialMessages[historyLen:])
+
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				allText.WriteString(text)
-				thinkingText := joinThinkingText(thinkingBlocks)
-				if thinkingText != "" {
-					allBlocks = append(allBlocks, UnifiedBlock{Kind: "thinking", Text: thinkingText})
-				}
-				if text != "" {
-					allBlocks = append(allBlocks, UnifiedBlock{Kind: "text", Text: text})
-				}
-				allCitations = append(allCitations, citations...)
-				totalUsage.OutputTokens += usage.OutputTokens
-				raw, _ := json.Marshal(messages[historyLen:])
 				return &UnifiedResult{
-					Blocks: allBlocks, Raw: raw, StopReason: "stopped",
-					Usage: totalUsage, Citations: allCitations,
+					Blocks: partialBlocks, Raw: raw, StopReason: "stopped",
+					Usage: partialUsage, Citations: partialCitations,
+				}, err
+			}
+			visible := providerVisibleOutputFromContext(ctx)
+			if len(partialBlocks) > 0 || len(partialCitations) > 0 || usageHasValue(partialUsage) || (visible != nil && visible.Load()) {
+				return &UnifiedResult{
+					Blocks: partialBlocks, Raw: raw, StopReason: "error",
+					Usage: partialUsage, Citations: partialCitations,
 				}, err
 			}
 			return nil, err
@@ -668,6 +694,32 @@ func readAnthropicStream(body io.Reader, onEvent func(SseEvent)) (string, []anth
 
 	var currentTool *anthropicToolCall
 	var partialJSON strings.Builder
+	snapshotToolCalls := func() []anthropicToolCall {
+		out := append([]anthropicToolCall{}, toolCalls...)
+		if currentTool == nil {
+			return out
+		}
+		partial := *currentTool
+		if input := partialJSON.String(); json.Valid([]byte(input)) {
+			partial.Input = json.RawMessage(input)
+		}
+		return append(out, partial)
+	}
+	snapshotThinkingBlocks := func() []anthropicThinkingBlock {
+		out := append([]anthropicThinkingBlock{}, thinkingBlocks...)
+		if !currentThinkingActive || currentThinking.Len() == 0 {
+			return out
+		}
+		current := currentThinking.String()
+		if len(out) > 0 && out[len(out)-1].Signature != "" && strings.HasPrefix(current, out[len(out)-1].Text) {
+			out[len(out)-1].Text = current
+			return out
+		}
+		if len(out) == 0 || out[len(out)-1].Text != current {
+			out = append(out, anthropicThinkingBlock{Text: current})
+		}
+		return out
+	}
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -685,11 +737,11 @@ func readAnthropicStream(body io.Reader, onEvent func(SseEvent)) (string, []anth
 		}
 		var ev map[string]any
 		if err := json.Unmarshal([]byte(payload), &ev); err != nil {
-			return stopReason, toolCalls, text.String(), thinkingBlocks, citations, usage,
+			return stopReason, snapshotToolCalls(), text.String(), snapshotThinkingBlocks(), citations, usage,
 				fmt.Errorf("anthropic stream invalid JSON: %w", err)
 		}
 		if streamErr := providerEventError("anthropic", ev); streamErr != nil {
-			return stopReason, toolCalls, text.String(), thinkingBlocks, citations, usage, streamErr
+			return stopReason, snapshotToolCalls(), text.String(), snapshotThinkingBlocks(), citations, usage, streamErr
 		}
 		switch ev["type"] {
 		case "content_block_start":
@@ -796,13 +848,13 @@ func readAnthropicStream(body io.Reader, onEvent func(SseEvent)) (string, []anth
 	if err := scanner.Err(); err != nil && !terminal {
 		// Return whatever was accumulated before the error (e.g. on context cancel)
 		// rather than discarding it — partial text must survive a stop signal.
-		return stopReason, toolCalls, text.String(), thinkingBlocks, citations, usage, err
+		return stopReason, snapshotToolCalls(), text.String(), snapshotThinkingBlocks(), citations, usage, err
 	}
 	if !sawEvent {
 		return stopReason, toolCalls, text.String(), thinkingBlocks, citations, usage, invalidProviderStream("anthropic", "empty response")
 	}
 	if !terminal {
-		return stopReason, toolCalls, text.String(), thinkingBlocks, citations, usage, invalidProviderStream("anthropic", "response ended before a terminal event")
+		return stopReason, snapshotToolCalls(), text.String(), snapshotThinkingBlocks(), citations, usage, invalidProviderStream("anthropic", "response ended before a terminal event")
 	}
 	return stopReason, toolCalls, text.String(), thinkingBlocks, citations, usage, nil
 }

@@ -122,7 +122,8 @@ type ModelInfo struct {
 	APIKey    string
 	APIFormat string
 	// Fallback, when non-nil, is the backup endpoint retried when a complete
-	// primary round fails (request construction, transport, non-2xx status, SSE
+	// primary round fails before user-visible output is committed (request
+	// construction, transport, non-200 status, SSE
 	// error, malformed protocol, empty body, or interrupted body). Same provider
 	// family + format as the primary — only URL and key differ (§fallback
 	// channel). nil = no fallback.
@@ -179,6 +180,7 @@ type SseEvent struct {
 	StopReason  string          `json:"stop_reason,omitempty"`
 	Usage       *Usage          `json:"usage,omitempty"`
 	Message     string          `json:"message,omitempty"`
+	Code        string          `json:"code,omitempty"`
 	ToolID      string          `json:"tool_id,omitempty"`
 	Status      string          `json:"status,omitempty"`
 	// Credits charged for this turn (emitted on the `done` event so the UI can
