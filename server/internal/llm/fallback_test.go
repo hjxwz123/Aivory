@@ -6,13 +6,14 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 )
 
 // TestRetryableUpstreamFailure pins the fallback trigger: transport errors and
-// ANY non-2xx status retry on the backup channel; only a 2xx and a caller
+// ANY non-200 status retry on the backup channel; only 200 and a caller
 // cancellation do NOT (§fallback channel). 4xx is deliberately retryable:
 // relay channels answer 400/402/404 for channel-side conditions (quota, model
 // not enabled, region) that a backup relay serves fine.
@@ -28,6 +29,9 @@ func TestRetryableUpstreamFailure(t *testing.T) {
 		{"user cancel", nil, context.Canceled, false},
 		{"deadline", nil, context.DeadlineExceeded, false},
 		{"200 ok", resp(200), nil, false},
+		{"201 created is not a provider success", resp(201), nil, true},
+		{"202 accepted is not a provider success", resp(202), nil, true},
+		{"204 no content is not a provider success", resp(204), nil, true},
 		{"302 redirect is not a provider success", resp(302), nil, true},
 		{"400 bad request (relay quota/model errors)", resp(400), nil, true},
 		{"401 unauthorized", resp(401), nil, true}, // bad key on primary → other key may work
@@ -43,6 +47,28 @@ func TestRetryableUpstreamFailure(t *testing.T) {
 		if got := retryableUpstreamFailure(c.resp, c.err); got != c.want {
 			t.Errorf("%s: retryableUpstreamFailure = %v, want %v", c.name, got, c.want)
 		}
+	}
+}
+
+func TestRequireProviderSuccessOnlyAccepts200(t *testing.T) {
+	for _, status := range []int{http.StatusOK, http.StatusCreated, http.StatusAccepted, http.StatusNoContent, http.StatusMultipleChoices, http.StatusBadRequest, http.StatusBadGateway} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			resp := &http.Response{
+				StatusCode: status,
+				Body:       io.NopCloser(strings.NewReader(http.StatusText(status))),
+			}
+			err := requireProviderSuccess(resp, "test")
+			if status == http.StatusOK {
+				if err != nil {
+					t.Fatalf("status 200 error = %v", err)
+				}
+				return
+			}
+			var statusErr *providerStatusError
+			if !errors.As(err, &statusErr) || statusErr.StatusCode != status {
+				t.Fatalf("status %d error = %v, want providerStatusError", status, err)
+			}
+		})
 	}
 }
 

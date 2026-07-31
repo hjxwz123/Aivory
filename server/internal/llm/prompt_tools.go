@@ -166,16 +166,28 @@ func RunPromptToolLoop(
 
 	for i := 0; i < promptMaxIter; i++ {
 		text, u, err := runner(ctx, history, sys)
-		if err != nil {
-			return "", blocks, usage, citations, err
-		}
 		// §B5-per-request usage rows: one attach per prompt-protocol round —
-		// covers every provider's prompt mode from this single loop.
+		// covers every provider's prompt mode from this single loop, including a
+		// failed stream that reported partial usage.
 		attachProviderRequestUsage(ctx, u)
 		usage.InputTokens += u.InputTokens
 		usage.OutputTokens += u.OutputTokens
 		usage.CacheReadTokens += u.CacheReadTokens
 		usage.CacheWriteTokens += u.CacheWriteTokens
+		if err != nil {
+			// Raw provider deltas are hidden in prompt mode until their protocol
+			// envelope can be stripped. Surface and persist only the safe prefix
+			// before a possible <tool_call> marker.
+			visible, _, _ := SplitTextAndCall(text)
+			if visible != "" {
+				full.WriteString(visible)
+				onEvent(SseEvent{Type: "text_delta", Text: visible})
+			}
+			if full.Len() > 0 {
+				blocks = append(blocks, UnifiedBlock{Kind: "text", Text: full.String()})
+			}
+			return full.String(), blocks, usage, citations, err
+		}
 
 		visible, call, parseErr := SplitTextAndCall(text)
 		if visible != "" {

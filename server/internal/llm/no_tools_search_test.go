@@ -296,7 +296,8 @@ func TestEmptyToolsCarriesNoToolFieldsOnWire(t *testing.T) {
 		"tool_config":{"tool_choice":"auto"}
 	}`)
 	openAIChatStream := `data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}` + "\n\n"
-	openAIRespStream := `data: {"type":"response.output_text.delta","delta":"ok"}` + "\n\n"
+	openAIRespStream := `data: {"type":"response.output_text.delta","delta":"ok"}` + "\n\n" +
+		`data: {"type":"response.completed","response":{"output":[]}}` + "\n\n"
 
 	t.Run("anthropic", func(t *testing.T) {
 		srv, captured := capture(anthropicTextStream("ok"))

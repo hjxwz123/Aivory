@@ -33,6 +33,7 @@ import type {
   VerifyFinding,
   VerifyResult,
 } from '@/types/chat'
+import { GENERATION_INTERRUPTED_ERROR_CODE } from '@/types/chat'
 import { uid } from '@/lib/utils'
 import { isKnownLocalMessageId, persistedMessageReference } from '@/lib/message-ids'
 import { envNum } from '@/lib/env-config'
@@ -1580,7 +1581,9 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
               ...m,
               streaming: false,
               imageStatus: undefined,
+              reasoning: interruptRunningTools(m.reasoning),
               error: ev.message || 'error',
+              errorCode: ev.code || GENERATION_INTERRUPTED_ERROR_CODE,
             }))
             break
           case 'done':
@@ -1603,14 +1606,12 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
       // The stream ended. If we never received a terminal `done`/`error` (a
       // clean EOF mid-flight, or the upstream closed without a final event), the
       // assistant could be stuck `streaming:true` — never leave an empty,
-      // spinning bubble. Finalize it: keep partial content, else mark it failed.
+      // spinning bubble. Preserve partial content and mark the turn interrupted.
       {
         const am = get()
           .conversations.find((c) => c.id === input.conversationId)
           ?.messages.find((m) => m.id === serverAssistantId)
         if (am?.streaming) {
-          const hasOutput =
-            Boolean(am.content?.trim()) || (am.reasoning?.length ?? 0) > 0 || (am.artifacts?.length ?? 0) > 0
           // A user-initiated stop is a deliberate halt, not a failure — keep the
           // partial reply and never show the retry banner.
           const stopped = abort.signal.aborted
@@ -1621,9 +1622,11 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
             // (the `done`/`error`/`artifact` cases already do) so it can't spin forever.
             imageStatus: undefined,
             stopped: stopped ? true : m.stopped,
-            error: stopped || hasOutput ? m.error : m.error || 'The reply ended unexpectedly. Please try again.',
+            reasoning: stopped ? m.reasoning : interruptRunningTools(m.reasoning),
+            error: stopped ? m.error : m.error || 'The reply ended unexpectedly. Please try again.',
+            errorCode: stopped ? m.errorCode : m.errorCode || GENERATION_INTERRUPTED_ERROR_CODE,
           }))
-          if (!hasOutput && !stopped) errored = true
+          if (!stopped) errored = true
         }
       }
       // Stream finished cleanly — reconcile to the canonical tree path so the
@@ -1664,7 +1667,9 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
         // perpetual "Verifying…" chip — settle it (no reconcile runs on error).
         verify: m.verify?.status === 'running' ? undefined : m.verify,
         stopped: abort.signal.aborted ? true : m.stopped,
+        reasoning: abort.signal.aborted ? m.reasoning : interruptRunningTools(m.reasoning),
         error: abort.signal.aborted ? m.error : errorMessage(e),
+        errorCode: abort.signal.aborted ? m.errorCode : GENERATION_INTERRUPTED_ERROR_CODE,
       }))
       if (abort.signal.aborted) {
         await scheduleStoppedPathReconcile(set, get, input.conversationId, {
@@ -1766,6 +1771,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
     // (§ stream-error E7).
     let serverAssistantId = placeholderId
     let assistantStarted = false
+    let errored = false
     try {
       const placeholder: Message = {
         id: placeholderId,
@@ -1972,11 +1978,15 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
             }))
             break
           case 'error':
+            errored = true
             updateAssistant(set, conversationId, serverAssistantId, (m) => ({
               ...m,
               streaming: false,
               imageStatus: undefined,
-              content: m.content + `\n\n*Regeneration failed: ${ev.message}*`,
+              verify: m.verify?.status === 'running' ? undefined : m.verify,
+              reasoning: interruptRunningTools(m.reasoning),
+              error: ev.message || 'error',
+              errorCode: ev.code || GENERATION_INTERRUPTED_ERROR_CODE,
             }))
             break
         }
@@ -1989,7 +1999,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
           previousLeaf: persistedLeafBeforeRegenerate,
           expectedAssistantId: assistantStarted ? serverAssistantId : undefined,
         })
-      } else {
+      } else if (!errored) {
         await get().reloadActivePath(conversationId)
       }
     } catch (e) {
@@ -2015,10 +2025,13 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
         updateAssistant(set, conversationId, serverAssistantId, (m) => ({
           ...m,
           streaming: false,
-          content: m.content + (m.content ? '\n\n' : '') + `*Regeneration interrupted: ${errorMessage(e)}*`,
+          imageStatus: undefined,
+          verify: m.verify?.status === 'running' ? undefined : m.verify,
+          reasoning: interruptRunningTools(m.reasoning),
+          error: errorMessage(e),
+          errorCode: GENERATION_INTERRUPTED_ERROR_CODE,
         }))
         toast.error(errorMessage(e, 'Regeneration failed'))
-        await get().reloadActivePath(conversationId)
       }
     } finally {
       if (streamControllers.get(assistantId + '-regen') === abort) streamControllers.delete(assistantId + '-regen')
@@ -2196,7 +2209,9 @@ async function consumeReplayStream(
       streaming: false,
       imageStatus: undefined,
       verify: m.verify?.status === 'running' ? undefined : m.verify,
+      reasoning: interruptRunningTools(m.reasoning),
       error: errorMessage(e, 'Stream replay failed'),
+      errorCode: GENERATION_INTERRUPTED_ERROR_CODE,
     }))
   }
 }
@@ -2221,6 +2236,7 @@ function applyReplayEvent(
         research: undefined,
         ragInjection: undefined,
         error: undefined,
+        errorCode: undefined,
         stopped: undefined,
       }))
       break
@@ -2354,7 +2370,9 @@ function applyReplayEvent(
         streaming: false,
         imageStatus: undefined,
         verify: m.verify?.status === 'running' ? undefined : m.verify,
+        reasoning: interruptRunningTools(m.reasoning),
         error: ev.message || 'error',
+        errorCode: ev.code || GENERATION_INTERRUPTED_ERROR_CODE,
       }))
       break
   }
@@ -2517,6 +2535,18 @@ function patchReasoningTool(
   )
 }
 
+function interruptRunningTools(reasoning: ReasoningItem[] | undefined): ReasoningItem[] | undefined {
+  if (!reasoning?.some((item) => item.kind === 'tool' && item.tool.status === 'running')) {
+    return reasoning
+  }
+  const endedAt = Date.now()
+  return reasoning.map((item) =>
+    item.kind === 'tool' && item.tool.status === 'running'
+      ? { ...item, tool: { ...item.tool, status: 'error', endedAt } }
+      : item,
+  )
+}
+
 export function toLocalMessage(m: ApiMessage): Message {
   // Walk blocks IN ORDER so the reasoning trace interleaves thinking runs and
   // tool rounds exactly as they occurred (§7.1-4). Text blocks accumulate into
@@ -2524,12 +2554,17 @@ export function toLocalMessage(m: ApiMessage): Message {
   const reasoning: ReasoningItem[] = []
   const artifacts: Message['artifacts'] = []
   let research: ResearchState | undefined
+  const blocks = m.blocks ?? []
+  const lastToolBlockIndex = blocks.reduce(
+    (lastIndex, block, blockIndex) => (block.kind === 'tool_call' ? blockIndex + 1 : lastIndex),
+    0,
+  )
   // Text accumulates into `pendingText`; when a tool_call follows, that text was
   // pre-tool narration → flush it into the trace. Only the trailing text (after
   // the last tool_call) is the final answer (§4.3 — mirrors the live flush).
   let pendingText = ''
   let idx = 0
-  for (const b of m.blocks ?? []) {
+  for (const b of blocks) {
     idx++
     if (b.kind === 'text') {
       pendingText += b.text ?? ''
@@ -2577,7 +2612,10 @@ export function toLocalMessage(m: ApiMessage): Message {
           id,
           name: b.tool_name ?? 'tool',
           label: prettyToolLabel(b.tool_name ?? 'tool'),
-          status: 'complete',
+          status:
+            m.status === 'error' && idx === lastToolBlockIndex && !b.summary
+              ? 'error'
+              : 'complete',
           startedAt: m.created_at * 1000,
           endedAt: m.created_at * 1000,
           output: b.summary,
@@ -2665,6 +2703,10 @@ export function toLocalMessage(m: ApiMessage): Message {
       m.stop_reason === 'content_filter' ||
       m.stop_reason === 'refusal' ||
       m.stop_reason === 'safety',
+    errorCode:
+      m.stop_reason === GENERATION_INTERRUPTED_ERROR_CODE || m.status === 'error'
+        ? GENERATION_INTERRUPTED_ERROR_CODE
+        : undefined,
     // Never render an empty bubble: surface a persisted error, and treat a
     // finished-but-empty assistant turn (upstream failed without a usable reply,
     // no refusal/moderation/quota) as a failure so the retry banner shows.
@@ -2683,6 +2725,9 @@ function errorFromApiMessage(
   artifactCount: number,
   hasResearch: boolean,
 ): string | undefined {
+  if (m.stop_reason === GENERATION_INTERRUPTED_ERROR_CODE) {
+    return m.error?.trim() || 'Generation interrupted. Please try again.'
+  }
   if (m.error && m.error.trim()) return m.error.trim()
   const refusalLike =
     m.stop_reason === 'content_moderation' ||

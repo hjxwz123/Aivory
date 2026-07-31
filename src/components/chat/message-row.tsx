@@ -28,7 +28,7 @@ import {
   Square,
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import type { Message, Attachment } from '@/types/chat'
+import { GENERATION_INTERRUPTED_ERROR_CODE, type Message, type Attachment } from '@/types/chat'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { LogoMark } from '@/components/brand/logo'
 import { ModelIcon } from '@/components/chat/model-icon'
@@ -637,9 +637,13 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
                   >
                     <div className="flex items-center gap-2 text-[var(--color-danger)] font-medium text-sm">
                       <AlertTriangle size={16} aria-hidden />
-                      {t('message.error.title')}
+                      {message.errorCode === GENERATION_INTERRUPTED_ERROR_CODE
+                        ? t('message.error.interrupted')
+                        : t('message.error.title')}
                     </div>
-                    <p className="mt-1 text-[12.5px] text-[var(--color-fg-subtle)] break-words">{message.error}</p>
+                    {message.errorCode !== GENERATION_INTERRUPTED_ERROR_CODE ? (
+                      <p className="mt-1 text-[12.5px] text-[var(--color-fg-subtle)] break-words">{message.error}</p>
+                    ) : null}
                     <button
                       type="button"
                       onClick={() => onRegenerate?.(message.id)}

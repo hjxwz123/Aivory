@@ -73,7 +73,8 @@ func TestOpenAIResponsesDropsAssistantOwnedImage(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		captured, _ = io.ReadAll(r.Body)
 		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = w.Write([]byte(`data: {"type":"response.output_text.delta","delta":"ok"}` + "\n\n"))
+		_, _ = w.Write([]byte(`data: {"type":"response.output_text.delta","delta":"ok"}` + "\n\n" +
+			`data: {"type":"response.completed","response":{"output":[]}}` + "\n\n"))
 	}))
 	defer srv.Close()
 
@@ -248,7 +249,8 @@ func TestNonVisionProvidersOmitUnifiedAndNativeImages(t *testing.T) {
 			provider:  &OpenAIProvider{},
 			apiFormat: "responses",
 			requestID: "gpt-test",
-			response:  `data: {"type":"response.output_text.delta","delta":"ok"}` + "\n\n",
+			response: `data: {"type":"response.output_text.delta","delta":"ok"}` + "\n\n" +
+				`data: {"type":"response.completed","response":{"output":[]}}` + "\n\n",
 			nativeRaw: json.RawMessage(`[{"type":"message","role":"assistant","content":[{"type":"input_image","image_url":"data:image/png;base64,cmF3"}]}]`),
 		},
 		{

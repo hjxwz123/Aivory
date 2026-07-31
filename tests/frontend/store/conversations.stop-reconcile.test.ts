@@ -693,6 +693,151 @@ describe('stopped turn optimistic-id reconciliation', () => {
     expect(local.error).toBeUndefined()
   })
 
+  it('keeps the interruption marker and partial answer from a normal send', async () => {
+    apiMocks.streamSSE.mockReturnValue(
+      events(
+        { type: 'message_start', message_id: 'msg_interrupted_send' },
+        { type: 'tool_start', id: 'tool_interrupted', name: 'web_search' },
+        { type: 'text_delta', text: 'partial answer' },
+        {
+          type: 'error',
+          message: 'The model provider returned an error.',
+        },
+      ),
+    )
+
+    await useConversations.getState().sendMessage({
+      conversationId: 'conv_stop',
+      text: 'question',
+      modelId: 'model_1',
+      toolMode: 'auto',
+    })
+
+    expect(useConversations.getState().conversations[0].messages.at(-1)).toMatchObject({
+      id: 'msg_interrupted_send',
+      content: 'partial answer',
+      streaming: false,
+      error: 'The model provider returned an error.',
+      errorCode: 'generation_interrupted',
+      reasoning: [
+        expect.objectContaining({
+          kind: 'tool',
+          tool: expect.objectContaining({ id: 'tool_interrupted', status: 'error' }),
+        }),
+      ],
+    })
+    expect(apiMocks.get).not.toHaveBeenCalled()
+  })
+
+  it('uses structured interruption state for regeneration without appending English markdown', async () => {
+    const sourceUser: Message = {
+      id: 'msg_interrupted_regen_user',
+      role: 'user',
+      content: 'question',
+      createdAt: 1,
+    }
+    const sourceAssistant: Message = {
+      id: 'msg_interrupted_regen_source',
+      parentId: sourceUser.id,
+      role: 'assistant',
+      content: 'old answer',
+      createdAt: 2,
+    }
+    resetStore([sourceUser, sourceAssistant])
+    apiMocks.streamSSE.mockReturnValue(
+      events(
+        { type: 'message_start', message_id: 'msg_interrupted_regen' },
+        { type: 'text_delta', text: 'partial new answer' },
+        {
+          type: 'error',
+          message: 'The model provider returned an error.',
+          code: 'generation_interrupted',
+        },
+      ),
+    )
+
+    await useConversations
+      .getState()
+      .regenerate('conv_stop', sourceAssistant.id, 'model_1')
+
+    const regenerated = useConversations.getState().conversations[0].messages.at(-1)
+    expect(regenerated).toMatchObject({
+      id: 'msg_interrupted_regen',
+      content: 'partial new answer',
+      streaming: false,
+      error: 'The model provider returned an error.',
+      errorCode: 'generation_interrupted',
+    })
+    expect(regenerated?.content).not.toContain('Regeneration failed')
+    expect(regenerated?.content).not.toContain('Regeneration interrupted')
+    expect(apiMocks.get).not.toHaveBeenCalled()
+  })
+
+  it('keeps the interruption marker when a resumed stream replays an error', async () => {
+    resetStore([
+      {
+        id: 'msg_replay_user',
+        role: 'user',
+        content: 'question',
+        createdAt: 1,
+      },
+      {
+        id: 'msg_replay_interrupted',
+        parentId: 'msg_replay_user',
+        role: 'assistant',
+        content: 'partial replayed answer',
+        createdAt: 2,
+        streaming: true,
+      },
+    ])
+    apiMocks.streamSSEGet.mockReturnValue(
+      oneEvent({
+        type: 'error',
+        message: 'The model provider returned an error.',
+        code: 'generation_interrupted',
+      }),
+    )
+
+    useConversations.getState().resumeStreamingMessages('conv_stop')
+
+    await vi.waitFor(() => {
+      expect(useConversations.getState().conversations[0].messages.at(-1)).toMatchObject({
+        id: 'msg_replay_interrupted',
+        content: 'partial replayed answer',
+        streaming: false,
+        errorCode: 'generation_interrupted',
+      })
+    })
+  })
+
+  it('rehydrates a persisted generation interruption after refresh', () => {
+    const interrupted = apiMessage(
+      'msg_reloaded_interrupted',
+      'assistant',
+      'msg_reloaded_user',
+      'error',
+      'persisted partial answer',
+    )
+    interrupted.stop_reason = 'generation_interrupted'
+    interrupted.error = 'The model provider returned an error.'
+    interrupted.blocks = [
+      { kind: 'tool_call', tool_id: 'tool_reloaded_interrupted', tool_name: 'web_search' },
+      { kind: 'text', text: 'persisted partial answer' },
+    ]
+
+    expect(toLocalMessage(interrupted)).toMatchObject({
+      content: 'persisted partial answer',
+      error: 'The model provider returned an error.',
+      errorCode: 'generation_interrupted',
+      reasoning: [
+        expect.objectContaining({
+          kind: 'tool',
+          tool: expect.objectContaining({ id: 'tool_reloaded_interrupted', status: 'error' }),
+        }),
+      ],
+    })
+  })
+
   it('blocks edit-resend when its explicit parent is still client-only', async () => {
     const messages: Message[] = [
       {

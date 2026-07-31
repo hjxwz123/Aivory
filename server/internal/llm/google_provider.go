@@ -43,7 +43,7 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 			p.promptRunOnce(req), tools, onEvent,
 		)
 		if err != nil {
-			return nil, err
+			return promptToolErrorResult(ctx, blocks, usage, cites, err)
 		}
 		return &UnifiedResult{Blocks: blocks, StopReason: "end_turn", Usage: usage, Citations: cites}, nil
 	}
@@ -129,15 +129,44 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 		// §B5-per-request usage rows: pin this iteration's usage to its request.
 		attachProviderRequestUsage(ctx, u)
 		if err != nil {
+			partialBlocks := append([]UnifiedBlock{}, allBlocks...)
+			if thinkingText != "" {
+				partialBlocks = append(partialBlocks, UnifiedBlock{Kind: "thinking", Text: thinkingText})
+			}
+			if text != "" {
+				partialBlocks = append(partialBlocks, UnifiedBlock{Kind: "text", Text: text})
+			}
+			for _, call := range calls {
+				partialBlocks = append(partialBlocks, UnifiedBlock{
+					Kind: "tool_call", ToolName: call.Name, ToolID: call.Name, Input: call.Args,
+				})
+			}
+			partialUsage := totalUsage
+			partialUsage.InputTokens += u.InputTokens
+			partialUsage.OutputTokens += u.OutputTokens
+			partialUsage.CacheReadTokens += u.CacheReadTokens
+			partialUsage.CacheWriteTokens += u.CacheWriteTokens
+
+			partialContents := append([]map[string]any{}, contents...)
+			partialModelParts := make([]map[string]any, 0, len(modelParts))
+			for _, part := range modelParts {
+				if _, isToolCall := part["functionCall"]; !isToolCall {
+					partialModelParts = append(partialModelParts, part)
+				}
+			}
+			if len(partialModelParts) > 0 {
+				// Do not persist a dangling functionCall in native replay. Its
+				// canonical tool_call block remains visible after a refresh.
+				partialContents = append(partialContents, map[string]any{"role": "model", "parts": partialModelParts})
+			}
+			partialRaw, _ := json.Marshal(partialContents[historyLen:])
 			// Stop button / kill: preserve the partial (§6.2).
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				if thinkingText != "" {
-					allBlocks = append(allBlocks, UnifiedBlock{Kind: "thinking", Text: thinkingText})
-				}
-				if text != "" {
-					allBlocks = append(allBlocks, UnifiedBlock{Kind: "text", Text: text})
-				}
-				return &UnifiedResult{Blocks: allBlocks, StopReason: "stopped", Usage: totalUsage}, err
+				return &UnifiedResult{Blocks: partialBlocks, Raw: partialRaw, StopReason: "stopped", Usage: partialUsage}, err
+			}
+			visible := providerVisibleOutputFromContext(ctx)
+			if len(partialBlocks) > 0 || usageHasValue(partialUsage) || (visible != nil && visible.Load()) {
+				return &UnifiedResult{Blocks: partialBlocks, Raw: partialRaw, StopReason: "error", Usage: partialUsage}, err
 			}
 			return nil, err
 		}
@@ -462,6 +491,9 @@ func readGeminiStream(body io.Reader, onEvent func(SseEvent)) (string, string, [
 	}
 	if !sawEvent {
 		return text.String(), thinking.String(), calls, modelParts, usage, invalidProviderStream("google", "empty response")
+	}
+	if !terminal {
+		return text.String(), thinking.String(), calls, modelParts, usage, invalidProviderStream("google", "response ended before a terminal event")
 	}
 	if len(modelParts) == 0 {
 		modelParts = append(modelParts, map[string]any{"text": ""})

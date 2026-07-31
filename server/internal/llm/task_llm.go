@@ -189,6 +189,7 @@ func (t *TaskLLM) Run(ctx context.Context, kind TaskKind, prompt string, opts Ru
 	// chat turn's recorder and double-booked as a phantom chat row (§B5). Attach a
 	// dedicated recorder so recovered channel failures still get task.* error rows.
 	streamCtx := contextWithoutProviderRequestRecorder(ctx)
+	streamCtx = contextWithoutProviderVisibleOutput(streamCtx)
 	requestRecorder := newProviderRequestRecorder()
 	streamCtx = contextWithProviderRequestRecorder(streamCtx, requestRecorder)
 	// We capture deltas but only really care about the final result.
