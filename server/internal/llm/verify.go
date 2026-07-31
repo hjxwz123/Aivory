@@ -9,6 +9,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 
@@ -46,16 +47,16 @@ type verifyReport struct {
 // runVerify runs auditor model B over A's finished answer. It MUST be called
 // after `result` is finalized but BEFORE tallyTurnSideCosts, so its usage row
 // (purpose=verify, pinned to msgID) folds into the turn cost + credit charge.
-func (o *Orchestrator) runVerify(ctx context.Context, conv *store.Conversation, senderID, msgID, userText string, result *UnifiedResult, onEvent func(SseEvent)) {
+func (o *Orchestrator) runVerify(ctx context.Context, conv *store.Conversation, senderID, msgID, userText string, result *UnifiedResult, onEvent func(SseEvent)) error {
 	if o == nil || o.task == nil || result == nil || conv == nil {
-		return
+		return nil
 	}
 	var modelID string
 	if raw, err := store.GetSetting(o.db, "verify_model_id"); err == nil && len(raw) > 0 {
 		_ = json.Unmarshal(raw, &modelID)
 	}
 	if strings.TrimSpace(modelID) == "" {
-		return // unset ⇒ Verify mode disabled platform-wide
+		return nil // unset ⇒ Verify mode disabled platform-wide
 	}
 
 	// Reconstruct A's answer from the finalized TEXT blocks — never streamed
@@ -67,7 +68,7 @@ func (o *Orchestrator) runVerify(ctx context.Context, conv *store.Conversation, 
 		}
 	}
 	if strings.TrimSpace(answer.String()) == "" {
-		return // nothing to audit (e.g. an image-only or empty answer)
+		return nil // nothing to audit (e.g. an image-only or empty answer)
 	}
 
 	onEvent(SseEvent{Type: "verify_started", MessageID: msgID})
@@ -93,10 +94,13 @@ func (o *Orchestrator) runVerify(ctx context.Context, conv *store.Conversation, 
 		MessageID:       msgID, // pins the usage row to this turn for tallyTurnSideCosts
 		MaxOutputTokens: 800,
 	}); err != nil {
+		if errors.Is(err, ErrTaskBillingRecord) {
+			return err
+		}
 		if o.logger != nil {
 			o.logger.Printf("verify model %q error (fail-open): %v", modelID, err)
 		}
-		return
+		return nil
 	}
 
 	// Normalize each finding's severity to the 3-value enum the UI expects (the
@@ -126,6 +130,7 @@ func (o *Orchestrator) runVerify(ctx context.Context, conv *store.Conversation, 
 		onEvent(SseEvent{Type: "verify_finding", MessageID: msgID, Finding: &f})
 	}
 	onEvent(SseEvent{Type: "verify_done", MessageID: msgID, Verdict: rep.Verdict})
+	return nil
 }
 
 // normalizeSeverity coerces an auditor's free-form severity into the 3-value enum

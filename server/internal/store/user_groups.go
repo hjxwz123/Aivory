@@ -20,10 +20,34 @@ func validateCreditConfig(allowance float64, periodSeconds int) error {
 	if math.IsNaN(allowance) || math.IsInf(allowance, 0) || allowance < 0 || periodSeconds < 0 {
 		return ErrInvalidCreditConfig
 	}
+	micros, err := CreditsToMicros(allowance)
+	if err != nil || allowance > 0 && micros == 0 {
+		return ErrInvalidCreditConfig
+	}
 	if allowance > 0 && periodSeconds == 0 {
 		return ErrInvalidCreditConfig
 	}
 	return nil
+}
+
+func validateUserGroupBilling(g UserGroup) error {
+	if err := validateCreditConfig(g.CreditAllowance, g.CreditPeriodSeconds); err != nil {
+		return err
+	}
+	if g.MonthlyPriceAmountMinor < 0 || g.YearlyPriceAmountMinor < 0 ||
+		g.MaxProjects < 0 || g.MaxKBs < 0 || g.MaxWorkspaces < 0 || g.MaxStorageMB < 0 {
+		return ErrInvalidCreditConfig
+	}
+	return nil
+}
+
+func ValidateUserGroupBilling(g UserGroup) error {
+	return validateUserGroupBilling(g)
+}
+
+func mustCreditMicros(amount float64) int64 {
+	micros, _ := CreditsToMicros(amount)
+	return micros
 }
 
 const userGroupCols = `id, name, description, features, COALESCE(monthly_price_amount_minor,0), COALESCE(yearly_price_amount_minor,0), is_default, sort_order, COALESCE(max_projects,0), COALESCE(max_kbs,0), COALESCE(credit_allowance,0), COALESCE(credit_period_seconds,0), COALESCE(max_workspaces,0), COALESCE(is_public,1), COALESCE(is_purchasable,1), COALESCE(max_storage_mb,0), created_at, updated_at`
@@ -112,14 +136,14 @@ func createUserGroup(ctx context.Context, db *sql.DB, g UserGroup, isPurchasable
 	if len(g.Features) == 0 {
 		g.Features = json.RawMessage("[]")
 	}
-	if err := validateCreditConfig(g.CreditAllowance, g.CreditPeriodSeconds); err != nil {
+	if err := validateUserGroupBilling(g); err != nil {
 		return nil, err
 	}
 	now := time.Now().Unix()
 	_, err := db.ExecContext(ctx,
-		`INSERT INTO user_groups(id, name, description, features, monthly_price_amount_minor, yearly_price_amount_minor, is_default, sort_order, max_projects, max_kbs, credit_allowance, credit_period_seconds, max_workspaces, is_public, is_purchasable, max_storage_mb, created_at, updated_at)
-		 VALUES(?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		g.ID, g.Name, g.Description, string(g.Features), g.MonthlyPriceAmountMinor, g.YearlyPriceAmountMinor, g.SortOrder, g.MaxProjects, g.MaxKBs, g.CreditAllowance, g.CreditPeriodSeconds, g.MaxWorkspaces, boolInt(g.IsPublic), boolInt(isPurchasable), g.MaxStorageMB, now, now)
+		`INSERT INTO user_groups(id, name, description, features, monthly_price_amount_minor, yearly_price_amount_minor, is_default, sort_order, max_projects, max_kbs, credit_allowance, credit_allowance_micros, credit_period_seconds, max_workspaces, is_public, is_purchasable, max_storage_mb, created_at, updated_at)
+		 VALUES(?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		g.ID, g.Name, g.Description, string(g.Features), g.MonthlyPriceAmountMinor, g.YearlyPriceAmountMinor, g.SortOrder, g.MaxProjects, g.MaxKBs, g.CreditAllowance, mustCreditMicros(g.CreditAllowance), g.CreditPeriodSeconds, g.MaxWorkspaces, boolInt(g.IsPublic), boolInt(isPurchasable), g.MaxStorageMB, now, now)
 	if err != nil {
 		if isUniqueIndexErr(err, "idx_user_groups_name_unique", "user_groups.name") {
 			return nil, ErrUserGroupNameExists
@@ -193,6 +217,14 @@ func UpdateUserGroup(ctx context.Context, db *sql.DB, id string, p UserGroupPatc
 	if err := validateCreditConfig(allowance, periodSeconds); err != nil {
 		return nil, err
 	}
+	if p.MonthlyPriceAmountMinor != nil && *p.MonthlyPriceAmountMinor < 0 ||
+		p.YearlyPriceAmountMinor != nil && *p.YearlyPriceAmountMinor < 0 ||
+		p.MaxProjects != nil && *p.MaxProjects < 0 ||
+		p.MaxKBs != nil && *p.MaxKBs < 0 ||
+		p.MaxWorkspaces != nil && *p.MaxWorkspaces < 0 ||
+		p.MaxStorageMB != nil && *p.MaxStorageMB < 0 {
+		return nil, ErrInvalidCreditConfig
+	}
 	creditConfigChanged := allowance != current.CreditAllowance || periodSeconds != current.CreditPeriodSeconds
 
 	parts := []string{}
@@ -230,8 +262,8 @@ func UpdateUserGroup(ctx context.Context, db *sql.DB, id string, p UserGroupPatc
 		args = append(args, *p.MaxKBs)
 	}
 	if p.CreditAllowance != nil {
-		parts = append(parts, "credit_allowance=?")
-		args = append(args, *p.CreditAllowance)
+		parts = append(parts, "credit_allowance=?", "credit_allowance_micros=?")
+		args = append(args, *p.CreditAllowance, mustCreditMicros(*p.CreditAllowance))
 	}
 	if p.CreditPeriodSeconds != nil {
 		parts = append(parts, "credit_period_seconds=?")
@@ -271,9 +303,13 @@ func UpdateUserGroup(ctx context.Context, db *sql.DB, id string, p UserGroupPatc
 			    SET credit_cycle_anchor=CASE
 			            WHEN credit_cycle_anchor>=? THEN credit_cycle_anchor+1
 			            ELSE ?
+			        END,
+			        quota_cycle_anchor=CASE
+			            WHEN quota_cycle_anchor>=? THEN quota_cycle_anchor+1
+			            ELSE ?
 			        END
 			  WHERE group_id=?`,
-			now, now, id); err != nil {
+			now, now, now, now, id); err != nil {
 			return nil, err
 		}
 	}
@@ -346,9 +382,13 @@ func DeleteUserGroup(ctx context.Context, db *sql.DB, id string) error {
 		        credit_cycle_anchor=CASE
 		            WHEN credit_cycle_anchor>=? THEN credit_cycle_anchor+1
 		            ELSE ?
+		        END,
+		        quota_cycle_anchor=CASE
+		            WHEN quota_cycle_anchor>=? THEN quota_cycle_anchor+1
+		            ELSE ?
 		        END
 		  WHERE group_id=?`,
-		DefaultGroupID, now, now, id); err != nil {
+		DefaultGroupID, now, now, now, now, id); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE users SET previous_group_id='' WHERE previous_group_id=?`, id); err != nil {
@@ -382,9 +422,14 @@ func SetUserGroup(ctx context.Context, db *sql.DB, userID, groupID string, expir
 		                CASE WHEN credit_cycle_anchor>=? THEN credit_cycle_anchor+1 ELSE ? END
 		            ELSE credit_cycle_anchor
 		        END,
+		        quota_cycle_anchor=CASE
+		            WHEN group_id<>? OR (group_expires_at>0 AND group_expires_at<=?) THEN
+		                CASE WHEN quota_cycle_anchor>=? THEN quota_cycle_anchor+1 ELSE ? END
+		            ELSE quota_cycle_anchor
+		        END,
 		        group_id=?, group_expires_at=?, previous_group_id='', token_ver=token_ver+1
 		  WHERE id=?`,
-		groupID, now, now, now, groupID, expiresAt, userID); err != nil {
+		groupID, now, now, now, groupID, now, now, now, groupID, expiresAt, userID); err != nil {
 		return err
 	}
 	return nil

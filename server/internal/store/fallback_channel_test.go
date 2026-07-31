@@ -51,8 +51,8 @@ func TestModelFallbackChannelRoundTrip(t *testing.T) {
 
 // TestUsageChannelFallbackStatus verifies usage rows persist channel_id/fallback/
 // status, that AdminUsageRecords surfaces them (with the channel-name join and a
-// status=error filter), and that error rows are EXCLUDED from the quota reseed
-// (UsageInWindow) — a failed request must not burn a count quota (§usage errors).
+// status=error filter). Quota accounting is covered separately by quota_ledger
+// tests and deliberately does not depend on these deletable analytics rows.
 func TestUsageChannelFallbackStatus(t *testing.T) {
 	ctx := context.Background()
 	db, err := Open(filepath.Join(t.TempDir(), "usagefb.db"))
@@ -114,18 +114,6 @@ func TestUsageChannelFallbackStatus(t *testing.T) {
 	only, _ := AdminUsageRecords(ctx, db, UsageFilter{Status: "error"}, 50, 0)
 	if len(only) != 1 || only[0].Status != "error" {
 		t.Fatalf("status filter = %+v, want 1 error row", only)
-	}
-
-	// Quota reseed counts the 2 OK chat rows but NOT the error row.
-	cost, count, err := UsageInWindow(ctx, db, "u1", "m1", 0)
-	if err != nil {
-		t.Fatalf("UsageInWindow: %v", err)
-	}
-	if count != 2 {
-		t.Errorf("UsageInWindow count = %d, want 2 (error row excluded)", count)
-	}
-	if cost < 0.29 || cost > 0.31 {
-		t.Errorf("UsageInWindow cost = %.4f, want ~0.30", cost)
 	}
 
 	// The user-facing message count and the admin analytics totals both exclude

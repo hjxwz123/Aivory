@@ -24,6 +24,7 @@ import (
 	"log"
 	"strings"
 	"sync/atomic"
+	"time"
 )
 
 var (
@@ -35,6 +36,8 @@ var (
 	researchValidateUnverifiedCap = 6
 	forcedSearchQueryCap          = 3
 )
+
+var ErrTaskBillingRecord = errors.New("task billing record failed")
 
 // TaskKind enumerates the internal task purposes. Used both for routing
 // (lookup of task_model_id today, future per-task models tomorrow) and for
@@ -111,6 +114,20 @@ type RunOpts struct {
 	ModelID string
 }
 
+type taskBillingMessageContextKey struct{}
+
+func withTaskBillingMessageID(ctx context.Context, messageID string) context.Context {
+	if messageID == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, taskBillingMessageContextKey{}, messageID)
+}
+
+func taskBillingMessageID(ctx context.Context) string {
+	messageID, _ := ctx.Value(taskBillingMessageContextKey{}).(string)
+	return messageID
+}
+
 // Run issues a single non-streaming task model call and returns the raw text
 // response. The call is logged to usage_logs with the kind as `purpose`.
 //
@@ -119,6 +136,9 @@ type RunOpts struct {
 func (t *TaskLLM) Run(ctx context.Context, kind TaskKind, prompt string, opts RunOpts) (string, error) {
 	if t == nil || t.db == nil {
 		return "", errors.New("task llm not initialised")
+	}
+	if opts.MessageID == "" {
+		opts.MessageID = taskBillingMessageID(ctx)
 	}
 	modelID := opts.ModelID
 	if modelID == "" {
@@ -183,6 +203,21 @@ func (t *TaskLLM) Run(ctx context.Context, kind TaskKind, prompt string, opts Ru
 		Stream:          false,
 		FallbackUsed:    &fallbackFlag,
 	}
+	dailyTokens, allowed, err := store.ReserveDailyTokenQuota(ctx, t.db, opts.UserID, estimateTurnTokens(req))
+	if err != nil {
+		return "", err
+	}
+	if !allowed {
+		return "", store.ErrDailyTokenQuotaExceeded
+	}
+	dailyFinalized := false
+	defer func() {
+		if dailyTokens != nil && !dailyFinalized {
+			releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+			defer cancel()
+			_ = store.ReleaseQuotaReservation(releaseCtx, t.db, dailyTokens.ID)
+		}
+	}()
 	// Detach any inherited per-request recorder: a task call issued mid chat
 	// turn (compaction, research plan/verify, search-query gen, …) logs its own
 	// task.* usage row below, so it must not also be captured into the outer
@@ -252,10 +287,23 @@ func (t *TaskLLM) Run(ctx context.Context, kind TaskKind, prompt string, opts Ru
 	final = strings.TrimSpace(final)
 
 	// Record usage so we can split task cost on the report.
-	logProviderFailures(ctx)
+	billingCtx, billingCancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+	defer billingCancel()
+	logProviderFailures(billingCtx)
 	if result != nil {
+		if dailyTokens != nil {
+			// The provider already consumed tokens. Keep the reservation if the
+			// durable finalize fails; releasing it would reopen the daily limit.
+			dailyFinalized = true
+			_, settleErr := store.FinalizeQuotaReservation(
+				billingCtx, t.db, dailyTokens.ID, float64(result.Usage.InputTokens+result.Usage.OutputTokens),
+			)
+			if settleErr != nil {
+				return "", fmt.Errorf("%w: %v", ErrTaskBillingRecord, settleErr)
+			}
+		}
 		cost := computeCost(*model, result.Usage)
-		_ = store.LogUsage(ctx, t.db, store.UsageLog{
+		if err := store.LogUsage(billingCtx, t.db, store.UsageLog{
 			WorkspaceID:      opts.WorkspaceID,
 			UserID:           opts.UserID,
 			ConversationID:   opts.ConversationID,
@@ -270,7 +318,9 @@ func (t *TaskLLM) Run(ctx context.Context, kind TaskKind, prompt string, opts Ru
 			Currency:         model.Currency,
 			ChannelID:        servedChannelID,
 			Fallback:         usedFallback,
-		})
+		}); err != nil {
+			return "", fmt.Errorf("%w: %v", ErrTaskBillingRecord, err)
+		}
 	}
 	return final, nil
 }

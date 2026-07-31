@@ -75,6 +75,8 @@ var (
 	docHintsMaxCount            = envcfg.Int("AIVORY_RAG_COLLECT_DOC_HINTS_2", 12)
 )
 
+var ErrBillingRecord = errors.New("rag billing record failed")
+
 // Service is the public façade.
 type Service struct {
 	db           *sql.DB
@@ -127,6 +129,7 @@ type TaskRouter interface {
 type RouterOpts struct {
 	UserID         string
 	ConversationID string
+	MessageID      string
 }
 
 // New builds the service. The vector backend defaults to Disabled; call
@@ -807,10 +810,12 @@ func (s *Service) runPipeline(ctx context.Context, docID string, cache *parseCac
 			s.logger.Printf("rag: qdrant upsert done doc=%s file=%q points=%d dim=%d took=%s", docID, d.Filename, len(points), dim, time.Since(stageStart).Round(time.Millisecond))
 		}
 	}
-	// Record embedding spend (§8.3, purpose=embedding) — best-effort. Skipped
+	// Record embedding spend (§8.3, purpose=embedding). Skipped
 	// when we intentionally inject the conversation document in full.
 	if !skipEmbed {
-		s.logEmbeddingUsage(ctx, d.KBID, d.ConversationID, emName, totalTokens)
+		if err := s.logEmbeddingUsage(ctx, d.KBID, d.ConversationID, emName, totalTokens); err != nil {
+			return fmt.Errorf("%w: %v", ErrBillingRecord, err)
+		}
 	}
 	if err := store.UpdateDocumentStatus(ctx, s.db, docID, "ready", "", written); err != nil {
 		return err
@@ -885,9 +890,9 @@ func (s *Service) logEmbeddingError(ctx context.Context, kbID, convID, embedder 
 
 // logEmbeddingUsage writes one usage_logs row for an embedding batch. The
 // owning user is resolved through the KB or conversation.
-func (s *Service) logEmbeddingUsage(ctx context.Context, kbID, convID, embedder string, tokens int) {
+func (s *Service) logEmbeddingUsage(ctx context.Context, kbID, convID, embedder string, tokens int) error {
 	if tokens == 0 || strings.HasPrefix(embedder, "aivory-local") {
-		return // local hash embedder is free — don't pollute the report
+		return nil // local hash embedder is free — don't pollute the report
 	}
 	// §workspaces: shared-KB / shared-conversation indexing is billed to the
 	// KB/conversation CREATOR (shared-infrastructure cost — documents carry no
@@ -901,17 +906,41 @@ func (s *Service) logEmbeddingUsage(ctx context.Context, kbID, convID, embedder 
 		_ = s.db.QueryRowContext(ctx, `SELECT user_id, COALESCE(workspace_id,'') FROM conversations WHERE id=?`, convID).Scan(&userID, &wsID)
 	}
 	if userID == "" {
-		return
+		return nil
 	}
 	modelID := strings.TrimPrefix(embedder, "emb:")
-	_ = store.LogUsage(ctx, s.db, store.UsageLog{
+	cost := 0.0
+	currency := "USD"
+	if modelID != "" && modelID != "env" {
+		model, err := store.GetModel(ctx, s.db, modelID)
+		if err != nil {
+			return err
+		}
+		cost = float64(tokens) / 1_000_000 * model.PriceInput
+		currency = model.Currency
+	}
+	return store.LogUsage(ctx, s.db, store.UsageLog{
 		UserID:         userID,
 		WorkspaceID:    wsID,
 		ConversationID: convID,
+		MessageID:      billingMessageID(ctx),
 		ModelID:        modelID,
 		Purpose:        "embedding",
 		InputTokens:    tokens,
+		Cost:           cost,
+		Currency:       currency,
 	})
+}
+
+type billingMessageContextKey struct{}
+
+func WithBillingMessageID(ctx context.Context, messageID string) context.Context {
+	return context.WithValue(ctx, billingMessageContextKey{}, messageID)
+}
+
+func billingMessageID(ctx context.Context) string {
+	messageID, _ := ctx.Value(billingMessageContextKey{}).(string)
+	return messageID
 }
 
 // Snippet is the slim search hit returned by Retrieve. The orchestrator converts
@@ -1245,15 +1274,9 @@ func (s *Service) searchScope(ctx context.Context, userID, convID string, em Emb
 	// Query embedding is billable (§8.3) — but only when we actually called the API
 	// (no call on a query-vector cache hit, or for the local embedder).
 	if !cached && !strings.HasPrefix(emName, "aivory-local") && userID != "" {
-		var wsID string
-		if convID != "" {
-			_ = s.db.QueryRowContext(ctx, `SELECT COALESCE(workspace_id,'') FROM conversations WHERE id=?`, convID).Scan(&wsID)
+		if err := s.logEmbeddingUsage(ctx, "", convID, emName, estimateTokens(query)); err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrBillingRecord, err)
 		}
-		_ = store.LogUsage(ctx, s.db, store.UsageLog{
-			UserID: userID, WorkspaceID: wsID, ConversationID: convID,
-			ModelID: strings.TrimPrefix(emName, "emb:"),
-			Purpose: "embedding", InputTokens: estimateTokens(query),
-		})
 	}
 	// §4.11-E independent legs: 30 dense ∥ 30 keyword, fused later; the same scope
 	// so a chunk that hits in only one leg survives.
@@ -2293,7 +2316,9 @@ func (s *Service) RouteAndRetrieve(ctx context.Context, userID, convID string, k
 	// the original query (the same fallback as s.task == nil), not stall the
 	// user's reply for minutes.
 	rctx, cancelRouter := context.WithTimeout(ctx, routerCallTimeout)
-	err := s.task.RunJSON(rctx, "task.router", prompt, &d, RouterOpts{UserID: userID, ConversationID: convID})
+	err := s.task.RunJSON(rctx, "task.router", prompt, &d, RouterOpts{
+		UserID: userID, ConversationID: convID, MessageID: billingMessageID(ctx),
+	})
 	cancelRouter()
 	if err == nil {
 		if d.Strategy != "" {
@@ -2411,7 +2436,9 @@ func (s *Service) mapReduceSummarise(ctx context.Context, userID, convID string,
 			Summary string `json:"summary"`
 		}
 		text := ""
-		if err := s.task.RunJSON(ctx, "task.router", b.String()+`\n以 JSON 回复: {"summary":"..."}`, &summary, RouterOpts{UserID: userID, ConversationID: convID}); err == nil {
+		if err := s.task.RunJSON(ctx, "task.router", b.String()+`\n以 JSON 回复: {"summary":"..."}`, &summary, RouterOpts{
+			UserID: userID, ConversationID: convID, MessageID: billingMessageID(ctx),
+		}); err == nil {
 			text = summary.Summary
 		}
 		if strings.TrimSpace(text) == "" {

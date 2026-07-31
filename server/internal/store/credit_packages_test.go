@@ -2,9 +2,28 @@ package store
 
 import (
 	"context"
+	"errors"
+	"math"
 	"path/filepath"
 	"testing"
 )
+
+func TestCreditPackageRejectsUnrepresentableCredits(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "invalid-credit-package.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	_, err = CreateCreditPackage(context.Background(), db, CreditPackage{
+		Name: "Overflow", Credits: math.MaxFloat64, PriceAmountMinor: 1, Enabled: true,
+	})
+	if !errors.Is(err, ErrInvalidCreditPackage) {
+		t.Fatalf("overflow package error = %v, want %v", err, ErrInvalidCreditPackage)
+	}
+}
 
 func TestCreditPackageCRUDAndPublicFiltering(t *testing.T) {
 	ctx := context.Background()

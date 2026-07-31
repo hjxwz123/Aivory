@@ -49,7 +49,6 @@ var (
 	pythonExecuteStdoutStderrTruncationCap = envcfg.Int("AIVORY_TOOLS_PYTHON_EXECUTE_STDOUT_STDERR_TRUNCATION_CAP", 32*1024)
 	inSize                                 = envcfg.Str("AIVORY_TOOLS_IN_SIZE", "")
 	dailyImageLimitResetWindow             = envcfg.Dur("AIVORY_TOOLS_DAILY_IMAGE_LIMIT_RESET_WINDOW", 24*time.Hour)
-	imageQuotaDefaultPeriod                = int64(604800)
 	// 0 selects the provider/model-specific limit. A positive value remains an
 	// operator override for gateways with a stricter custom boundary.
 	imageImageInputImageCap     = envcfg.Int("AIVORY_TOOLS_IMAGE_IMAGE_INPUT_IMAGE_CAP", 0)
@@ -829,10 +828,20 @@ func (t *imageGenerateTool) Execute(ctx context.Context, input []byte, tc *llm.T
 	// §8.2 每用户每日图像张数限额（按 usage_logs 当日累计）。 Resolve
 	// n after model defaults so direct mode and chat tool calls project the same
 	// quantity before either reaches the provider.
+	var dailyReservation *store.QuotaReservation
+	providerDelivered := false
 	if tc != nil && tc.DB != nil {
-		if err := t.checkDailyImageLimit(ctx, tc.UserID, in.N); err != nil {
+		dailyReservation, err = t.checkDailyImageLimit(ctx, tc.UserID, in.N)
+		if err != nil {
 			return "", nil, &llm.ToolRefusalError{Message: err.Error()}
 		}
+		defer func() {
+			if dailyReservation != nil && !providerDelivered {
+				releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+				defer cancel()
+				_ = store.ReleaseQuotaReservation(releaseCtx, t.db, dailyReservation.ID)
+			}
+		}()
 	}
 	channel, err := store.GetChannel(ctx, t.db, model.ChannelID)
 	if err != nil {
@@ -850,16 +859,41 @@ func (t *imageGenerateTool) Execute(ctx context.Context, input []byte, tc *llm.T
 	// block decision via ImageBilling so it matches drawing mode; payImageCredits
 	// is honored after generation. (Falls back to the legacy hard cap only if no
 	// biller is wired, e.g. a non-orchestrator caller.)
-	payImageCredits := false
+	var imageBillingReservation *llm.ImageBillingReservation
+	var legacyModelQuota *store.QuotaReservation
 	if tc != nil && tc.DB != nil && !tc.SkipImageQuota {
 		if tc.ImageBilling != nil {
-			allow, pay, refuseMsg := tc.ImageBilling.CheckImageCredits(ctx, tc.UserID, model, in.N)
+			var allow bool
+			var refuseMsg string
+			var billingErr error
+			imageBillingReservation, allow, refuseMsg, billingErr = tc.ImageBilling.ReserveImageBilling(
+				ctx, tc.UserID, model, in.N, tc.NextImageBillingSourceID(),
+			)
+			if billingErr != nil {
+				return "", nil, billingErr
+			}
 			if !allow {
 				return "", nil, &llm.ToolRefusalError{Message: refuseMsg}
 			}
-			payImageCredits = pay
-		} else if err := t.checkModelImageQuota(ctx, tc.UserID, model, in.N); err != nil {
-			return "", nil, &llm.ToolRefusalError{Message: err.Error()}
+			defer func() {
+				if imageBillingReservation != nil && !providerDelivered {
+					releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+					defer cancel()
+					_ = tc.ImageBilling.ReleaseImageBilling(releaseCtx, imageBillingReservation)
+				}
+			}()
+		} else {
+			legacyModelQuota, err = t.checkModelImageQuota(ctx, tc.UserID, model, in.N)
+			if err != nil {
+				return "", nil, &llm.ToolRefusalError{Message: err.Error()}
+			}
+			defer func() {
+				if legacyModelQuota != nil && !providerDelivered {
+					releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+					defer cancel()
+					_ = store.ReleaseQuotaReservation(releaseCtx, t.db, legacyModelQuota.ID)
+				}
+			}()
 		}
 	}
 
@@ -948,32 +982,54 @@ func (t *imageGenerateTool) Execute(ctx context.Context, input []byte, tc *llm.T
 			return "", nil, fmt.Errorf("persist generated image %d: %w", i+1, saveErr)
 		}
 	}
+	providerDelivered = true
+	if dailyReservation != nil {
+		if _, err := store.FinalizeQuotaReservation(persistCtx, t.db, dailyReservation.ID, float64(len(images))); err != nil {
+			return "", nil, fmt.Errorf("finalize daily image quota: %w", err)
+		}
+	}
+	imageCost := float64(len(images)) * model.PricePerImage
+	if legacyModelQuota != nil {
+		actual := imageCost
+		if legacyModelQuota.LimitType == "count" {
+			actual = float64(len(images))
+		}
+		if _, err := store.FinalizeQuotaReservation(persistCtx, t.db, legacyModelQuota.ID, actual); err != nil {
+			return "", nil, fmt.Errorf("finalize image model quota: %w", err)
+		}
+	}
 
 	// §4.20: if the image model's free allotment is exhausted, charge the image
 	// cost in credits (same flow as drawing mode) via ImageBilling, and record the
 	// full charge so the turn is not misclassified as free quota usage.
-	imageCost := float64(len(images)) * model.PricePerImage
 	var imageCredits float64
-	if payImageCredits && imageCost > 0 && tc != nil && tc.ImageBilling != nil {
-		_, total := tc.ImageBilling.ChargeImageCredits(persistCtx, tc.UserID, imageCost)
+	usage := store.UsageLog{ModelID: model.ID, Purpose: "image", ImagesCount: len(images), Cost: imageCost, Currency: model.Currency}
+	if tc != nil {
+		usage.UserID = tc.UserID
+		usage.WorkspaceID = tc.WorkspaceID
+		usage.ConversationID = tc.ConvID
+		usage.MessageID = tc.MessageID
+	}
+	if tc != nil && tc.DB != nil {
+		if err := store.RecordBillingUsage(persistCtx, t.db, usage); err != nil {
+			return "", nil, fmt.Errorf("record image billing: %w", err)
+		}
+	}
+	if imageBillingReservation != nil && tc != nil && tc.ImageBilling != nil {
+		_, total, settleErr := tc.ImageBilling.SettleImageBilling(persistCtx, imageBillingReservation, len(images), imageCost)
+		if settleErr != nil {
+			return "", nil, fmt.Errorf("settle image credits: %w", settleErr)
+		}
 		imageCredits = total
 		tc.AddImageCredits(total)
 	}
 
 	// Record cost (§8.3) — one usage row, images_count = N.
 	if tc != nil && tc.DB != nil {
-		_ = store.LogUsage(persistCtx, t.db, store.UsageLog{
-			UserID:         tc.UserID,
-			WorkspaceID:    tc.WorkspaceID,
-			ConversationID: tc.ConvID,
-			MessageID:      tc.MessageID,
-			ModelID:        model.ID,
-			Purpose:        "image",
-			ImagesCount:    len(images),
-			Cost:           imageCost,
-			Credits:        imageCredits,
-			Currency:       model.Currency,
-		})
+		usage.Credits = imageCredits
+		if err := store.LogUsageAnalytics(persistCtx, t.db, usage); err != nil {
+			return "", nil, fmt.Errorf("record image billing: %w", err)
+		}
 	}
 	return fmt.Sprintf("Generated %d image(s) for: %s. They are attached as downloadable artifacts.", len(images), in.Prompt), nil, nil
 }
@@ -1064,36 +1120,31 @@ func normalizeForModeration(s string) string {
 	return b.String()
 }
 
-// checkDailyImageLimit enforces the per-user daily image quota (§8.2) from the
-// usage_logs ledger — robust across restarts and multi-process deployments.
-func (t *imageGenerateTool) checkDailyImageLimit(ctx context.Context, userID string, n int) error {
+// checkDailyImageLimit atomically reserves the per-user daily image quota.
+func (t *imageGenerateTool) checkDailyImageLimit(ctx context.Context, userID string, n int) (*store.QuotaReservation, error) {
 	limit := 30
 	if raw, err := store.GetSetting(t.db, "daily_image_limit"); err == nil {
-		_ = json.Unmarshal(raw, &limit)
+		if json.Unmarshal(raw, &limit) != nil || limit < 0 {
+			return nil, store.ErrInvalidCreditConfig
+		}
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
 	}
 	if limit <= 0 {
-		return nil
+		return nil, nil
 	}
 	dayStart := time.Now().Truncate(dailyImageLimitResetWindow).Unix()
-	var used int
-	_ = t.db.QueryRowContext(ctx,
-		`SELECT COALESCE(SUM(images_count),0) FROM usage_logs WHERE user_id=? AND purpose='image' AND created_at>=?`,
-		userID, dayStart).Scan(&used)
-	if used+n > limit {
-		return fmt.Errorf("daily image limit reached (%d/%d)", used, limit)
+	reservation, allowed, err := store.ReserveFixedQuota(
+		ctx, t.db, userID, store.QuotaScopeDailyImage, n, limit, dayStart,
+		dayStart+int64(dailyImageLimitResetWindow/time.Second),
+	)
+	if err != nil {
+		return nil, err
 	}
-	return nil
-}
-
-// imageQuotaWindow computes the fixed-window start for a period (mirrors the
-// orchestrator's quotaWindow; blank/0 period defaults to 7 days).
-func imageQuotaWindow(periodSeconds int) int64 {
-	p := int64(periodSeconds)
-	if p <= 0 {
-		p = imageQuotaDefaultPeriod
+	if !allowed {
+		return nil, fmt.Errorf("daily image limit reached")
 	}
-	now := time.Now().Unix()
-	return (now / p) * p
+	return reservation, nil
 }
 
 // imageQuotaMessage is the admin-configurable over-limit prompt.
@@ -1107,26 +1158,27 @@ func imageQuotaMessage(db *sql.DB) string {
 	return "You've reached your plan's image quota for this model."
 }
 
-// checkModelImageQuota enforces the image model's per-group quota (§ user groups)
-// from the shared usage_logs image ledger, so drawing-mode and chat tool-call
-// generations on the SAME model draw from one pool (§4.20). Admins are exempt.
-// This is a hard cap (no credit fallback), consistent with the daily image limit.
-func (t *imageGenerateTool) checkModelImageQuota(ctx context.Context, userID string, model *store.Model, n int) error {
+// checkModelImageQuota atomically reserves the image model's per-group quota for
+// legacy tool callers that do not expose the credit-aware ImageBilling API.
+func (t *imageGenerateTool) checkModelImageQuota(ctx context.Context, userID string, model *store.Model, n int) (*store.QuotaReservation, error) {
 	if userID == "" {
-		return nil
+		return nil, nil
 	}
-	u, _ := store.FindUserByID(ctx, t.db, userID)
+	u, err := store.FindUserByID(ctx, t.db, userID)
+	if err != nil {
+		return nil, errors.New(imageQuotaMessage(t.db))
+	}
 	if u != nil && u.Role == "admin" {
-		return nil // admins are exempt from usage quotas
+		return nil, nil // admins are exempt from usage quotas
 	}
 	has, err := store.ModelHasAnyQuota(ctx, t.db, model.ID)
 	if err != nil {
-		return errors.New(imageQuotaMessage(t.db))
+		return nil, errors.New(imageQuotaMessage(t.db))
 	}
 	if !has {
 		// This legacy path has no ImageBilling implementation with which to debit
 		// credits. Never turn the all-toggles-off state into a free image call.
-		return errors.New(imageQuotaMessage(t.db))
+		return nil, errors.New(imageQuotaMessage(t.db))
 	}
 	groupID := store.DefaultGroupID
 	if u != nil && u.GroupID != "" {
@@ -1136,33 +1188,25 @@ func (t *imageGenerateTool) checkModelImageQuota(ctx context.Context, userID str
 	if err != nil {
 		// No free allowance. Without a biller this fallback cannot charge credits,
 		// so refuse instead of silently producing a free image.
-		return errors.New(imageQuotaMessage(t.db))
+		return nil, errors.New(imageQuotaMessage(t.db))
 	}
 	if q.LimitValue <= 0 {
-		return nil // granted unlimited
+		return nil, nil // granted unlimited
 	}
 	if n <= 0 {
 		n = 1
 	}
-	start := imageQuotaWindow(q.PeriodSeconds)
-	cost, images, err := store.ImageUsageInWindow(ctx, t.db, userID, model.ID, start)
-	if err != nil {
-		// Hard cap → fail CLOSED on a usage-ledger read error rather than silently
-		// disabling the quota (a fail-open here would let the cap be bypassed).
-		return errors.New(imageQuotaMessage(t.db))
-	}
-	over := false
+	requested := float64(n) * model.PricePerImage
 	if q.LimitType == "count" {
-		over = images+n > int(q.LimitValue+0.5)
-	} else {
-		// Pre-project this request's cost (n × per-image) like the count branch,
-		// so the cap enforces before the overshoot, not after.
-		over = cost+float64(n)*model.PricePerImage > q.LimitValue
+		requested = float64(n)
 	}
-	if over {
-		return errors.New(imageQuotaMessage(t.db))
+	reservation, allowed, err := store.ReserveModelQuota(
+		ctx, t.db, userID, model.ID, store.QuotaScopeModelImage, *q, requested, false,
+	)
+	if err != nil || !allowed {
+		return nil, errors.New(imageQuotaMessage(t.db))
 	}
-	return nil
+	return reservation, nil
 }
 
 func mergeImageInputIDs(primary, additional []string) []string {

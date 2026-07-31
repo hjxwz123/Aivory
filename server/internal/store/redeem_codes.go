@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 )
@@ -89,7 +90,8 @@ func CreateRedeemCode(ctx context.Context, db *sql.DB, rc RedeemCode) (*RedeemCo
 	}
 	switch rc.Kind {
 	case RedeemKindCredits:
-		if rc.Credits <= 0 {
+		creditMicros, err := CreditsToMicros(rc.Credits)
+		if err != nil || creditMicros <= 0 {
 			return nil, errors.New("credits must be greater than 0")
 		}
 		// FK-satisfying placeholder — never applied to the redeemer.
@@ -97,6 +99,9 @@ func CreateRedeemCode(ctx context.Context, db *sql.DB, rc RedeemCode) (*RedeemCo
 		rc.DurationDays = 0
 	case RedeemKindGroup:
 		rc.Credits = 0
+		if _, err := redeemDurationSeconds(rc.DurationDays); err != nil {
+			return nil, err
+		}
 		if strings.TrimSpace(rc.GroupID) == "" {
 			return nil, errors.New("group_id required")
 		}
@@ -106,6 +111,9 @@ func CreateRedeemCode(ctx context.Context, db *sql.DB, rc RedeemCode) (*RedeemCo
 	default:
 		return nil, errors.New("kind must be 'group' or 'credits'")
 	}
+	if rc.ExpiresAt < 0 || rc.UsedCount < 0 {
+		return nil, ErrRedeemCodeInvalid
+	}
 	if rc.ID == "" {
 		rc.ID = genID("rc")
 	}
@@ -114,11 +122,11 @@ func CreateRedeemCode(ctx context.Context, db *sql.DB, rc RedeemCode) (*RedeemCo
 	} else {
 		rc.Code = NormalizeRedeemCode(rc.Code)
 	}
-	if rc.DurationDays < 0 {
-		rc.DurationDays = 0
-	}
 	if rc.MaxUses <= 0 {
 		rc.MaxUses = 1
+	}
+	if rc.UsedCount > rc.MaxUses {
+		return nil, ErrRedeemCodeInvalid
 	}
 	en := 1
 	if !rc.Enabled && rc.CreatedAt > 0 {
@@ -388,6 +396,9 @@ func RedeemCodeForUser(ctx context.Context, db *sql.DB, userID, raw string, conf
 		return nil, nil, err
 	}
 	rc.Enabled = enabled != 0
+	if rc.Kind != RedeemKindCredits && rc.Kind != RedeemKindGroup || rc.ExpiresAt < 0 || rc.UsedCount < 0 || rc.MaxUses <= 0 {
+		return nil, nil, ErrRedeemCodeInvalid
+	}
 	if !rc.Enabled {
 		return nil, nil, ErrRedeemCodeDisabled
 	}
@@ -415,9 +426,19 @@ func RedeemCodeForUser(ctx context.Context, db *sql.DB, userID, raw string, conf
 	var settings string
 	var totpEnabled int
 	var passwordSet int
-	err = tx.QueryRowContext(ctx,
-		`SELECT id, email, name, role, status, token_ver, settings, group_id, group_expires_at, previous_group_id, totp_secret, totp_enabled, password_set, COALESCE(credits_permanent,0), sort_order, created_at FROM users WHERE id=?`, userID,
-	).Scan(&u.ID, &u.Email, &u.Name, &u.Role, &u.Status, &u.TokenVer, &settings, &u.GroupID, &u.GroupExpiresAt, &u.PreviousGroupID, &u.TotpSecret, &totpEnabled, &passwordSet, &u.CreditsPermanent, &u.SortOrder, &u.CreatedAt)
+	userQuery := `SELECT id, email, name, role, status, token_ver, settings, group_id, group_expires_at, previous_group_id, totp_secret, totp_enabled, password_set,
+		CASE WHEN COALESCE(credits_permanent_micros,0)=0 AND COALESCE(credits_permanent,0)<>0
+		     THEN CAST(ROUND(credits_permanent*1000000) AS BIGINT) ELSE COALESCE(credits_permanent_micros,0) END,
+		sort_order, created_at FROM users WHERE id=?`
+	if usePostgres {
+		userQuery += ` FOR UPDATE`
+	}
+	var permanentMicros int64
+	err = tx.QueryRowContext(ctx, userQuery, userID).Scan(
+		&u.ID, &u.Email, &u.Name, &u.Role, &u.Status, &u.TokenVer, &settings, &u.GroupID,
+		&u.GroupExpiresAt, &u.PreviousGroupID, &u.TotpSecret, &totpEnabled, &passwordSet,
+		&permanentMicros, &u.SortOrder, &u.CreatedAt,
+	)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -427,6 +448,7 @@ func RedeemCodeForUser(ctx context.Context, db *sql.DB, userID, raw string, conf
 	// third-party login). Carry the real flag.
 	u.HasPassword = passwordSet != 0
 	u.Settings = json.RawMessage(settings)
+	u.CreditsPermanent = creditsFromMicros(permanentMicros)
 
 	// Prevent the same user from redeeming the same code twice (matches the
 	// UNIQUE(code_id, user_id) index — checked here for a clean error).
@@ -444,6 +466,10 @@ func RedeemCodeForUser(ctx context.Context, db *sql.DB, userID, raw string, conf
 	// round-trip. Record the redemption, bump used_count, and add the amount to
 	// the user's permanent balance — all inside the same transaction.
 	if rc.Kind == RedeemKindCredits {
+		creditMicros, err := CreditsToMicros(rc.Credits)
+		if err != nil || creditMicros <= 0 {
+			return nil, nil, ErrRedeemCodeInvalid
+		}
 		red := RedeemRedemption{
 			ID:              genID("rd"),
 			CodeID:          rc.ID,
@@ -468,9 +494,7 @@ func RedeemCodeForUser(ctx context.Context, db *sql.DB, userID, raw string, conf
 		if n, _ := res.RowsAffected(); n == 0 {
 			return nil, nil, ErrRedeemCodeUsed
 		}
-		if _, err := tx.ExecContext(ctx,
-			`UPDATE users SET credits_permanent=COALESCE(credits_permanent,0)+? WHERE id=?`,
-			rc.Credits, userID); err != nil {
+		if err := addPermanentCreditsMicrosTx(ctx, tx, userID, creditMicros); err != nil {
 			return nil, nil, err
 		}
 		if err := tx.Commit(); err != nil {
@@ -480,6 +504,10 @@ func RedeemCodeForUser(ctx context.Context, db *sql.DB, userID, raw string, conf
 		return &red, &u, nil
 	}
 
+	durationSeconds, err := redeemDurationSeconds(rc.DurationDays)
+	if err != nil {
+		return nil, nil, ErrRedeemCodeInvalid
+	}
 	var newExpiresAt int64
 	if rc.DurationDays > 0 {
 		// If the user is already on the same group with time left, stack the
@@ -489,7 +517,10 @@ func RedeemCodeForUser(ctx context.Context, db *sql.DB, userID, raw string, conf
 		if u.GroupID == rc.GroupID && u.GroupExpiresAt > now {
 			base = u.GroupExpiresAt
 		}
-		newExpiresAt = base + int64(rc.DurationDays)*86400
+		newExpiresAt, err = checkedRedeemExpiry(base, durationSeconds)
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 	// previous_group_id: keep what's already there if the user is moving to a
 	// new tier from a non-default one; reset to "" when granting permanent
@@ -527,13 +558,6 @@ func RedeemCodeForUser(ctx context.Context, db *sql.DB, userID, raw string, conf
 		return &red, &u, ErrRedeemNeedsConfirm
 	}
 
-	// Insert the redemption row.
-	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO redeem_redemptions(id, code_id, user_id, group_id, previous_group_id, credits, granted_at, expires_at) VALUES(?,?,?,?,?,?,?,?)`,
-		red.ID, red.CodeID, red.UserID, red.GroupID, red.PreviousGroupID, red.Credits, red.GrantedAt, red.ExpiresAt); err != nil {
-		return nil, nil, err
-	}
-
 	// Bump the code's used_count, guarding the cap atomically inside the TX.
 	res, err := tx.ExecContext(ctx,
 		`UPDATE redeem_codes SET used_count=used_count+1 WHERE id=? AND used_count<max_uses`,
@@ -546,7 +570,14 @@ func RedeemCodeForUser(ctx context.Context, db *sql.DB, userID, raw string, conf
 		return nil, nil, ErrRedeemCodeUsed
 	}
 
-	// Flip the user's group + expiry.
+	// Flip the user's group + expiry. Same-group finite grants extend the value
+	// currently stored in the row, not the earlier Go snapshot. This matters on
+	// SQLite, where FOR UPDATE is unavailable: two concurrent redemptions can no
+	// longer overwrite one another with the same precomputed expiry.
+	startingExpiry, err := checkedRedeemExpiry(now, durationSeconds)
+	if err != nil {
+		return nil, nil, err
+	}
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE users
 		    SET credit_cycle_anchor=CASE
@@ -554,9 +585,37 @@ func RedeemCodeForUser(ctx context.Context, db *sql.DB, userID, raw string, conf
 		                CASE WHEN credit_cycle_anchor>=? THEN credit_cycle_anchor+1 ELSE ? END
 		            ELSE credit_cycle_anchor
 		        END,
-		        group_id=?, group_expires_at=?, previous_group_id=?
+		        quota_cycle_anchor=CASE
+		            WHEN group_id<>? OR (group_expires_at>0 AND group_expires_at<=?) THEN
+		                CASE WHEN quota_cycle_anchor>=? THEN quota_cycle_anchor+1 ELSE ? END
+		            ELSE quota_cycle_anchor
+		        END,
+		        previous_group_id=CASE
+		            WHEN ?=0 THEN ''
+		            WHEN group_id<>? THEN ?
+		            ELSE previous_group_id
+		        END,
+		        group_expires_at=CASE
+		            WHEN ?=0 THEN 0
+		            WHEN group_id=? AND group_expires_at>? THEN group_expires_at+?
+		            ELSE ?
+		        END,
+		        group_id=?
 		  WHERE id=?`,
-		rc.GroupID, now, now, now, rc.GroupID, newExpiresAt, prevGroup, userID); err != nil {
+		rc.GroupID, now, now, now, rc.GroupID, now, now, now,
+		durationSeconds, rc.GroupID, prevGroup,
+		durationSeconds, rc.GroupID, now, durationSeconds, startingExpiry,
+		rc.GroupID, userID); err != nil {
+		return nil, nil, err
+	}
+	if err := tx.QueryRowContext(ctx,
+		`SELECT group_expires_at, previous_group_id FROM users WHERE id=?`, userID).
+		Scan(&red.ExpiresAt, &red.PreviousGroupID); err != nil {
+		return nil, nil, err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO redeem_redemptions(id, code_id, user_id, group_id, previous_group_id, credits, granted_at, expires_at) VALUES(?,?,?,?,?,?,?,?)`,
+		red.ID, red.CodeID, red.UserID, red.GroupID, red.PreviousGroupID, red.Credits, red.GrantedAt, red.ExpiresAt); err != nil {
 		return nil, nil, err
 	}
 
@@ -565,9 +624,23 @@ func RedeemCodeForUser(ctx context.Context, db *sql.DB, userID, raw string, conf
 	}
 
 	u.GroupID = rc.GroupID
-	u.GroupExpiresAt = newExpiresAt
-	u.PreviousGroupID = prevGroup
+	u.GroupExpiresAt = red.ExpiresAt
+	u.PreviousGroupID = red.PreviousGroupID
 	return &red, &u, nil
+}
+
+func redeemDurationSeconds(days int) (int64, error) {
+	if days < 0 || int64(days) > math.MaxInt64/86400 {
+		return 0, ErrRedeemCodeInvalid
+	}
+	return int64(days) * 86400, nil
+}
+
+func checkedRedeemExpiry(base, durationSeconds int64) (int64, error) {
+	if durationSeconds < 0 || base > math.MaxInt64-durationSeconds {
+		return 0, ErrRedeemCodeInvalid
+	}
+	return base + durationSeconds, nil
 }
 
 // ListRedemptionsForUser returns the audit trail for a single user (most

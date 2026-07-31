@@ -103,9 +103,13 @@ func maybeExpireGroup(ctx context.Context, db *sql.DB, u *User) {
 		        credit_cycle_anchor=CASE
 		            WHEN credit_cycle_anchor>=? THEN credit_cycle_anchor+1
 		            ELSE ?
+		        END,
+		        quota_cycle_anchor=CASE
+		            WHEN quota_cycle_anchor>=? THEN quota_cycle_anchor+1
+		            ELSE ?
 		        END
 		  WHERE id=? AND group_expires_at=?`,
-		prev, now, now, u.ID, u.GroupExpiresAt)
+		prev, now, now, now, now, u.ID, u.GroupExpiresAt)
 	u.GroupID = prev
 	u.GroupExpiresAt = 0
 	u.PreviousGroupID = ""
@@ -147,8 +151,8 @@ func CreateUserWithRole(ctx context.Context, db *sql.DB, email, name, pwHash, ro
 	// New accounts default long-term memory OFF (opt-in): the user turns it on in
 	// onboarding / Personalization if the global master switch allows. (§ memory)
 	_, err := db.ExecContext(ctx,
-		`INSERT INTO users(id, email, password_hash, name, role, settings, credit_cycle_anchor, sort_order) VALUES(?, ?, ?, ?, ?, '{"memory_enabled":false}', ?, ?)`,
-		id, email, pwHash, name, role, time.Now().Unix(), sortOrder)
+		`INSERT INTO users(id, email, password_hash, name, role, settings, credit_cycle_anchor, quota_cycle_anchor, sort_order) VALUES(?, ?, ?, ?, ?, '{"memory_enabled":false}', ?, ?, ?)`,
+		id, email, pwHash, name, role, time.Now().Unix(), time.Now().Unix(), sortOrder)
 	if err != nil {
 		return nil, err
 	}
@@ -621,13 +625,16 @@ func CountUsersBySearch(ctx context.Context, db *sql.DB, search string) (int, er
 // SetPermanentCredits overwrites a user's non-expiring credit balance (admin
 // edit on the users page, § credits). Floored at 0.
 func SetPermanentCredits(ctx context.Context, db *sql.DB, userID string, credits float64) error {
-	if math.IsNaN(credits) || math.IsInf(credits, 0) {
-		return ErrInvalidCreditAmount
-	}
 	if credits < 0 {
 		credits = 0
 	}
-	_, err := db.ExecContext(ctx, `UPDATE users SET credits_permanent=? WHERE id=?`, credits, userID)
+	micros, err := CreditsToMicros(credits)
+	if err != nil {
+		return err
+	}
+	_, err = db.ExecContext(ctx,
+		`UPDATE users SET credits_permanent=?, credits_permanent_micros=? WHERE id=?`,
+		creditsFromMicros(micros), micros, userID)
 	return err
 }
 
@@ -636,19 +643,65 @@ func SetPermanentCredits(ctx context.Context, db *sql.DB, userID string, credits
 // top-ups repay it rather than silently flooring the account at zero. Debits must
 // use DebitCredits so they are recorded in the billing ledger.
 func AddPermanentCredits(ctx context.Context, db *sql.DB, userID string, delta float64) error {
-	if math.IsNaN(delta) || math.IsInf(delta, 0) || delta <= 0 {
+	micros, err := CreditsToMicros(delta)
+	if err != nil || micros <= 0 {
 		return ErrInvalidCreditAmount
 	}
-	_, err := db.ExecContext(ctx,
-		`UPDATE users SET credits_permanent=COALESCE(credits_permanent,0)+? WHERE id=?`, delta, userID)
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := addPermanentCreditsMicrosTx(ctx, tx, userID, micros); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func addPermanentCreditsMicrosTx(ctx context.Context, tx *sql.Tx, userID string, deltaMicros int64) error {
+	if deltaMicros <= 0 {
+		return ErrInvalidCreditAmount
+	}
+	if !usePostgres {
+		if _, err := tx.ExecContext(ctx, `UPDATE users SET credits_permanent_micros=credits_permanent_micros WHERE id=?`, userID); err != nil {
+			return err
+		}
+	}
+	query := `SELECT CASE
+	    WHEN COALESCE(credits_permanent_micros,0)=0 AND COALESCE(credits_permanent,0)<>0
+	    THEN CAST(ROUND(credits_permanent*1000000) AS BIGINT)
+	    ELSE COALESCE(credits_permanent_micros,0)
+	 END FROM users WHERE id=?`
+	if usePostgres {
+		query += ` FOR UPDATE`
+	}
+	var current int64
+	if err := tx.QueryRowContext(ctx, query, userID).Scan(&current); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	}
+	if current > 0 && deltaMicros > math.MaxInt64-current {
+		return ErrInvalidCreditAmount
+	}
+	next := current + deltaMicros
+	_, err := tx.ExecContext(ctx,
+		`UPDATE users SET credits_permanent_micros=?, credits_permanent=CAST(? AS DOUBLE PRECISION)/1000000.0 WHERE id=?`,
+		next, next, userID)
 	return err
 }
 
 // PermanentCredits returns a user's non-expiring balance.
 func PermanentCredits(ctx context.Context, db *sql.DB, userID string) (float64, error) {
-	var c float64
-	err := db.QueryRowContext(ctx, `SELECT COALESCE(credits_permanent,0) FROM users WHERE id=?`, userID).Scan(&c)
-	return c, err
+	var micros int64
+	err := db.QueryRowContext(ctx,
+		`SELECT CASE
+		    WHEN COALESCE(credits_permanent_micros,0)=0 AND COALESCE(credits_permanent,0)<>0
+		    THEN CAST(ROUND(credits_permanent*1000000) AS BIGINT)
+		    ELSE COALESCE(credits_permanent_micros,0)
+		 END FROM users WHERE id=?`, userID).Scan(&micros)
+	return creditsFromMicros(micros), err
 }
 
 // ActiveAdminCount returns how many active admin accounts exist — used to refuse

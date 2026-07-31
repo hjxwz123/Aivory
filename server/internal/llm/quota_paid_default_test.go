@@ -101,7 +101,10 @@ func TestChargeTurnCreditsUsesAuthoritativeLedger(t *testing.T) {
 	}
 
 	orchestrator := &Orchestrator{db: db}
-	timed, total := orchestrator.chargeTurnCredits(context.Background(), "u_ledger", 0.7)
+	timed, total, err := orchestrator.chargeTurnCredits(context.Background(), "u_ledger", 0.7)
+	if err != nil {
+		t.Fatalf("charge credits: %v", err)
+	}
 	if timed != 5 || total != 7 {
 		t.Fatalf("charge = timed %.2f total %.2f, want 5/7", timed, total)
 	}
@@ -111,5 +114,63 @@ func TestChargeTurnCreditsUsesAuthoritativeLedger(t *testing.T) {
 	}
 	if balance.TimedRemaining != 0 || balance.Permanent != 2 || balance.Available != 2 {
 		t.Fatalf("balance after charge = %+v, want timed 0 permanent/available 2", balance)
+	}
+}
+
+func TestCostQuotaReservesRemainingAllowanceAndChargesOnlyOverage(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "quota-cost-overage.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := store.Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	for _, query := range []string{
+		`INSERT INTO user_groups(id,name,is_default) VALUES('ug_cost','Cost',0)`,
+		`INSERT INTO users(id,email,password_hash,role,group_id) VALUES('u_cost','cost@example.test','hash','user','ug_cost')`,
+		`INSERT INTO channels(id,name,type) VALUES('ch_cost','Cost','openai')`,
+		`INSERT INTO models(id,channel_id,kind,request_id,label,price_input,price_output,currency) VALUES('m_cost','ch_cost','chat','cost','Cost',1,1,'USD')`,
+		`INSERT INTO model_group_quotas(model_id,group_id,period_seconds,limit_type,limit_value) VALUES('m_cost','ug_cost',604800,'cost',1)`,
+	} {
+		if _, err := db.Exec(query); err != nil {
+			t.Fatalf("seed %q: %v", query, err)
+		}
+	}
+	if err := store.SetSetting(db, "credits_per_usd", 10.0); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetPermanentCredits(context.Background(), db, "u_cost", 10); err != nil {
+		t.Fatal(err)
+	}
+
+	o := &Orchestrator{db: db}
+	model, err := store.GetModel(context.Background(), db, "m_cost")
+	if err != nil {
+		t.Fatal(err)
+	}
+	admission, message, err := o.reserveUsageBilling(
+		context.Background(), "u_cost", model, store.QuotaScopeModelChat,
+		1, 1.2, 0, "llm_turn", "cost-overage",
+	)
+	if err != nil || admission == nil || message != "" {
+		t.Fatalf("reserve cost quota: admission=%+v message=%q err=%v", admission, message, err)
+	}
+	if admission.Quota == nil || admission.Quota.ReservedValue != 1 || !admission.CreditReserved {
+		t.Fatalf("cost admission = %+v, want full free allowance plus overage reservation", admission)
+	}
+	debit, err := o.settleUsageBilling(context.Background(), admission, 1, 1.2, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if debit.Total != 2 {
+		t.Fatalf("overage debit = %v, want 2 credits", debit.Total)
+	}
+	balance, err := store.GetCreditBalance(context.Background(), db, "u_cost")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if balance.Permanent != 8 || balance.Available != 8 {
+		t.Fatalf("balance after overage = %+v, want 8 permanent/available", balance)
 	}
 }
