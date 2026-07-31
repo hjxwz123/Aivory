@@ -295,22 +295,32 @@ export default function AdminUsers() {
     void loadInfo(u)
   }
 
-  async function loadInfo(u: ApiUser) {
+  async function loadInfo(u: ApiUser, silent = false) {
     const requestID = ++infoRequestRef.current
-    setInfoDetails(null)
-    setInfoLoading(true)
-    setInfoLoadFailed(false)
+    if (!silent) {
+      setInfoDetails(null)
+      setInfoLoading(true)
+      setInfoLoadFailed(false)
+    }
     try {
       const detail = await adminApi.user(u.id)
       if (requestID !== infoRequestRef.current) return
       setInfoDetails(detail)
     } catch {
       if (requestID !== infoRequestRef.current) return
-      setInfoLoadFailed(true)
+      if (!silent) setInfoLoadFailed(true)
     } finally {
-      if (requestID === infoRequestRef.current) setInfoLoading(false)
+      if (!silent && requestID === infoRequestRef.current) setInfoLoading(false)
     }
   }
+
+  useEffect(() => {
+    if (!infoRow) return
+    const timer = window.setInterval(() => {
+      void loadInfo(infoRow, true)
+    }, 5000)
+    return () => window.clearInterval(timer)
+  }, [infoRow])
 
   async function submitEdit() {
     if (!editRow) return
@@ -815,6 +825,18 @@ export default function AdminUsers() {
                   value={
                     infoDetails.credits_timed
                       ? `${formatCredits(infoDetails.credits_timed.remaining)} / ${formatCredits(infoDetails.credits_timed.allowance)}`
+                      : '—'
+                  }
+                />
+                <InfoLine
+                  label={t('admin:users.info.availableCredits')}
+                  value={formatCredits(infoDetails.credits_available ?? 0)}
+                />
+                <InfoLine
+                  label={t('admin:users.info.creditReset')}
+                  value={
+                    (infoDetails.credits_timed?.resets_at ?? 0) > 0
+                      ? formatDateTime((infoDetails.credits_timed?.resets_at ?? 0) * 1000)
                       : '—'
                   }
                 />

@@ -2,48 +2,10 @@ package api
 
 import (
 	"aivory/server/internal/store"
-	"context"
 	"encoding/json"
-	"math"
 	"net/http"
-	"strconv"
 	"strings"
-	"time"
 )
-
-// creditWindowPeriodFallbackSeconds is the default timed-window length in
-// seconds (604800 = 7 days) used when no explicit period is supplied.
-var creditWindowPeriodFallbackSeconds int64 = 604800
-
-// Credit balance (§ credits). The timed pool refreshes every cycle (unused
-// voided); the permanent pool is bought / admin-set and never expires. The
-// timed-window consumption mirrors the orchestrator's accounting: a per-window
-// cache key in micro-units, seeded from usage_logs.credits when cold, so this
-// read agrees with what the deduction path writes.
-
-func creditMicros(c float64) int64 { return int64(math.Round(c * 1e6)) }
-
-// creditWindowUsed returns the timed credits consumed in the current window plus
-// the window start, matching internal/llm/quota.go's key + seeding.
-func creditWindowUsed(ctx context.Context, d Deps, userID string, periodSeconds int) (used float64, windowStart int64) {
-	p := int64(periodSeconds)
-	if p <= 0 {
-		p = creditWindowPeriodFallbackSeconds
-	}
-	windowStart = (time.Now().Unix() / p) * p
-	key := "credit:v1:" + userID + ":" + strconv.FormatInt(windowStart, 10)
-	if d.Cache != nil {
-		if v, ok := d.Cache.Get(key); ok {
-			micros, _ := strconv.ParseInt(v, 10, 64)
-			return float64(micros) / 1e6, windowStart
-		}
-	}
-	used, _ = store.CreditsUsedInWindow(ctx, d.DB, userID, windowStart)
-	if d.Cache != nil {
-		d.Cache.Set(key, strconv.FormatInt(creditMicros(used), 10), time.Duration(p)*time.Second)
-	}
-	return used, windowStart
-}
 
 type timedCreditsSnapshot struct {
 	Remaining     float64 `json:"remaining"`
@@ -52,25 +14,13 @@ type timedCreditsSnapshot struct {
 	ResetsAt      int64   `json:"resets_at"`
 }
 
-// currentTimedCredits returns the same live timed-credit view used by the
-// deduction path: cache-backed consumption for the current fixed window, with
-// usage_logs as the cold-cache source of truth.
-func currentTimedCredits(ctx context.Context, d Deps, userID string, group *store.UserGroup) timedCreditsSnapshot {
-	snapshot := timedCreditsSnapshot{}
-	if group == nil {
-		return snapshot
+func timedCreditsFromBalance(balance store.CreditBalance) timedCreditsSnapshot {
+	return timedCreditsSnapshot{
+		Remaining:     balance.TimedRemaining,
+		Allowance:     balance.Allowance,
+		PeriodSeconds: balance.PeriodSeconds,
+		ResetsAt:      balance.ResetsAt,
 	}
-	used, windowStart := creditWindowUsed(ctx, d, userID, group.CreditPeriodSeconds)
-	snapshot.Remaining = group.CreditAllowance - used
-	if snapshot.Remaining < 0 {
-		snapshot.Remaining = 0
-	}
-	snapshot.Allowance = group.CreditAllowance
-	snapshot.PeriodSeconds = group.CreditPeriodSeconds
-	if snapshot.PeriodSeconds > 0 {
-		snapshot.ResetsAt = windowStart + int64(snapshot.PeriodSeconds)
-	}
-	return snapshot
 }
 
 // meCreditsHandler reports the signed-in user's credit balance for the
@@ -79,24 +29,16 @@ func currentTimedCredits(ctx context.Context, d Deps, userID string, group *stor
 func meCreditsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
 	currency := globalSettlementCurrency(d)
-	permanent, err := store.PermanentCredits(r.Context(), d.DB, u.ID)
+	balance, err := store.GetCreditBalance(r.Context(), d.DB, u.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	g, err := store.GetUserGroup(r.Context(), d.DB, groupOrDefault(u.GroupID))
-	if err != nil || g == nil {
-		writeJSON(w, 200, map[string]any{
-			"enabled":             false,
-			"permanent":           permanent,
-			"settlement_currency": currency,
-		})
-		return
-	}
 	writeJSON(w, 200, map[string]any{
 		"enabled":             globalCreditsPerUSD(d) > 0,
-		"timed":               currentTimedCredits(r.Context(), d, u.ID, g),
-		"permanent":           permanent,
+		"timed":               timedCreditsFromBalance(balance),
+		"permanent":           balance.Permanent,
+		"available":           balance.Available,
 		"settlement_currency": currency,
 	})
 }

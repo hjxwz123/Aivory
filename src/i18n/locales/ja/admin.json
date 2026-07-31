@@ -380,6 +380,8 @@
       "expiry": "期限",
       "permanent": "無期限",
       "allowance": "期限付きクレジット（残高 / 上限）",
+      "availableCredits": "利用可能クレジット",
+      "creditReset": "次回クレジット更新",
       "loadFailed": "最新のユーザー情報を読み込めませんでした。",
       "twofa": "二段階認証",
       "enabled": "有効",
@@ -800,10 +802,11 @@
       "creditAllowance": "サイクルごとのクレジット",
       "creditAllowanceHint": "更新ごとに付与される期間限定クレジット。未使用分は失効します。",
       "creditPeriod": "更新間隔",
-      "creditPeriodHint": "期間限定クレジットがリセットされる頻度。",
+      "creditPeriodHint": "期間限定クレジットがリセットされる頻度。1か月は30日固定で計算されます。",
       "unitHour": "時間",
       "unitDay": "日",
       "unitWeek": "週",
+      "unitMonth": "か月",
       "maxWorkspaces": "最大ワークスペース数",
       "workspaces": "ワークスペース",
       "workspacesHint": "このグループにワークスペース作成を許可（上限は上記、0 = 無制限）。",
@@ -814,7 +817,8 @@
     },
     "errors": {
       "nameRequired": "名前は必須です",
-      "priceInvalid": "決済通貨の小数桁に合う0以上の価格を入力してください。"
+      "priceInvalid": "決済通貨の小数桁に合う0以上の価格を入力してください。",
+      "creditPeriodRequired": "期限付きクレジットが 0 より大きい場合は更新期間を設定してください。"
     },
     "maxStorage": "ストレージ(MB)",
     "maxStorageHint": "0 = 無制限。画像以外のファイルのみ計上。"

@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"strings"
 
@@ -82,6 +83,10 @@ func createUserGroupAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	created, err := store.CreateUserGroupWithPurchaseAvailability(r.Context(), d.DB, g, isPurchasable)
 	if err != nil {
+		if errors.Is(err, store.ErrInvalidCreditConfig) {
+			writeError(w, 400, errInvalidInput)
+			return
+		}
 		if errors.Is(err, store.ErrUserGroupNameExists) {
 			writeError(w, 409, err)
 			return
@@ -140,11 +145,19 @@ func updateUserGroupAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	upd, err := store.UpdateUserGroup(r.Context(), d.DB, id, p)
 	if err != nil {
+		if errors.Is(err, store.ErrInvalidCreditConfig) {
+			writeError(w, 400, errInvalidInput)
+			return
+		}
 		if errors.Is(err, store.ErrUserGroupNameExists) {
 			writeError(w, 409, err)
 			return
 		}
-		writeError(w, 404, errNotFound)
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, 404, errNotFound)
+			return
+		}
+		writeError(w, 500, err)
 		return
 	}
 	upd.SettlementCurrency = globalSettlementCurrency(d)
@@ -194,6 +207,10 @@ func setUserCreditsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		CreditsPermanent float64 `json:"credits_permanent"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, 400, errInvalidInput)
+		return
+	}
+	if math.IsNaN(req.CreditsPermanent) || math.IsInf(req.CreditsPermanent, 0) {
 		writeError(w, 400, errInvalidInput)
 		return
 	}

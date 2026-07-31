@@ -78,3 +78,38 @@ func TestExplicitUnlimitedGrantRemainsFree(t *testing.T) {
 		t.Fatalf("checkModelQuota = (%q,%v,%v,%v), want explicit unlimited free grant", msg, ok, payCredits, remaining)
 	}
 }
+
+func TestChargeTurnCreditsUsesAuthoritativeLedger(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "quota-credit-ledger.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := store.Migrate(db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	for _, query := range []string{
+		`INSERT INTO user_groups(id,name,is_default,credit_allowance,credit_period_seconds) VALUES('ug_ledger','Ledger',0,5,604800)`,
+		`INSERT INTO users(id,email,password_hash,role,group_id,credits_permanent) VALUES('u_ledger','ledger@example.test','hash','user','ug_ledger',4)`,
+	} {
+		if _, err := db.Exec(query); err != nil {
+			t.Fatalf("seed %q: %v", query, err)
+		}
+	}
+	if err := store.SetSetting(db, "credits_per_usd", 10.0); err != nil {
+		t.Fatalf("set credits rate: %v", err)
+	}
+
+	orchestrator := &Orchestrator{db: db}
+	timed, total := orchestrator.chargeTurnCredits(context.Background(), "u_ledger", 0.7)
+	if timed != 5 || total != 7 {
+		t.Fatalf("charge = timed %.2f total %.2f, want 5/7", timed, total)
+	}
+	balance, err := store.GetCreditBalance(context.Background(), db, "u_ledger")
+	if err != nil {
+		t.Fatalf("get balance: %v", err)
+	}
+	if balance.TimedRemaining != 0 || balance.Permanent != 2 || balance.Available != 2 {
+		t.Fatalf("balance after charge = %+v, want timed 0 permanent/available 2", balance)
+	}
+}

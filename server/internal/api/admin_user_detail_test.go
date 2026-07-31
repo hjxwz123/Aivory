@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -48,10 +47,13 @@ func TestGetUserAdmin(t *testing.T) {
 		t.Fatalf("issue admin access token: %v", err)
 	}
 	c.Set("seen:"+admin.ID, "1", time.Minute)
-	windowStart := (time.Now().Unix() / creditPeriod) * creditPeriod
-	// The cache can be ahead of usage_logs while a generation is being recorded.
-	// Admin detail must use this live value, matching the actual debit path.
-	c.Set("credit:v1:u1:"+strconv.FormatInt(windowStart, 10), strconv.FormatInt(creditMicros(37.25), 10), time.Hour)
+	if _, err := store.DebitCredits(t.Context(), db, "u1", 37.25, "test", "admin-detail"); err != nil {
+		t.Fatalf("debit timed credits: %v", err)
+	}
+	expectedBalance, err := store.GetCreditBalance(t.Context(), db, "u1")
+	if err != nil {
+		t.Fatalf("get expected balance: %v", err)
+	}
 
 	mx := newMux()
 	mx.handle(http.MethodGet, "/api/admin/users/:id", requireAdmin(d, getUserAdmin))
@@ -89,7 +91,8 @@ func TestGetUserAdmin(t *testing.T) {
 			}
 		}
 		var creditBody struct {
-			CreditsTimed struct {
+			CreditsAvailable float64 `json:"credits_available"`
+			CreditsTimed     struct {
 				Remaining     float64 `json:"remaining"`
 				Allowance     float64 `json:"allowance"`
 				PeriodSeconds int     `json:"period_seconds"`
@@ -100,8 +103,11 @@ func TestGetUserAdmin(t *testing.T) {
 			t.Fatalf("decode timed credits: %v", err)
 		}
 		timed := creditBody.CreditsTimed
-		if timed.Remaining != 62.75 || timed.Allowance != 100 || timed.PeriodSeconds != creditPeriod || timed.ResetsAt != windowStart+creditPeriod {
-			t.Errorf("credits_timed = %+v, want remaining=62.75 allowance=100 period=%d resets_at=%d", timed, creditPeriod, windowStart+creditPeriod)
+		if timed.Remaining != 62.75 || timed.Allowance != 100 || timed.PeriodSeconds != creditPeriod || timed.ResetsAt != expectedBalance.ResetsAt {
+			t.Errorf("credits_timed = %+v, want remaining=62.75 allowance=100 period=%d resets_at=%d", timed, creditPeriod, expectedBalance.ResetsAt)
+		}
+		if creditBody.CreditsAvailable != 105.25 {
+			t.Errorf("credits_available = %v, want 105.25", creditBody.CreditsAvailable)
 		}
 		for _, key := range []string{"password", "password_hash", "token_ver", "totp_secret"} {
 			if _, ok := body[key]; ok {

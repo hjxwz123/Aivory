@@ -79,13 +79,16 @@ import { isEmptyStoppedMessage, messageHasActions } from '@/lib/message-state'
 
 /**
  * ThinkingLogo — the "still forming a reply" indicator shown before the first
- * token: the Aivory mark breathing + glowing inside a slow scan ring. The ring
- * highlight and glow use the sage AI-status colour (§2.4); the global
+ * token: the Aivory mark breathing inside a slow scan ring. The global
  * prefers-reduced-motion rule holds it static.
  */
 function ThinkingLogo() {
   return (
-    <div className="relative grid size-11 place-items-center" aria-hidden>
+    <div
+      className="relative grid size-11 cursor-default select-none place-items-center caret-transparent"
+      aria-hidden
+      onMouseDown={(event) => event.preventDefault()}
+    >
       <span className="absolute inset-0 rounded-full border border-[var(--color-border)] [border-top-color:var(--color-secondary)] animate-[spin_1200ms_cubic-bezier(0.6,0.1,0.4,0.9)_infinite]" />
       <LogoMark size={24} className="animate-[core-breathe_2400ms_ease-in-out_infinite]" />
     </div>

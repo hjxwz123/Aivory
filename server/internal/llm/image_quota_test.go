@@ -42,7 +42,7 @@ func TestImageQuotaRequiresCreditsForWholeClampedBatch(t *testing.T) {
 
 	// Preserve chat's existing decision semantics: any positive balance admits a
 	// turn to the later chat preflight. The stricter exact-cost check is image-only.
-	if msg, ok, payCredits := orchestrator.creditDecision(ctx, "u_images", "ug_images"); msg != "" || !ok || !payCredits {
+	if msg, ok, payCredits := orchestrator.creditDecision(ctx, "u_images"); msg != "" || !ok || !payCredits {
 		t.Fatalf("chat creditDecision = (%q,%v,%v), want admitted credit turn", msg, ok, payCredits)
 	}
 

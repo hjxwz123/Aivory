@@ -31,6 +31,7 @@ func TestBackupRoundTrip(t *testing.T) {
 	}{
 		{`INSERT INTO settings(key,value) VALUES('default_model_id','"m_x"')`, nil},
 		{`INSERT INTO users(id,email,password_hash,name,role) VALUES('u1','a@b.c','h','A','user')`, nil},
+		{`INSERT INTO credit_ledger(id,user_id,group_id,cycle_anchor,cycle_start,kind,amount) VALUES('cl1','u1','ug_free',100,100,'timed_debit',3.5)`, nil},
 		{`INSERT INTO credit_packages(id,name,credits,price_amount_minor) VALUES('cp1','Credits',10,100)`, nil},
 		{`INSERT INTO payment_channels(id,name,provider,config) VALUES('paych1','EPay','epay','{}')`, nil},
 		{`INSERT INTO payment_methods(id,channel_id,name,type,config) VALUES('paym1','paych1','Alipay','epay','{"type":"alipay"}')`, nil},
@@ -114,7 +115,7 @@ func TestBackupRoundTrip(t *testing.T) {
 
 	// Row counts.
 	for tbl, want := range map[string]int{
-		"users": 1, "payment_orders": 1, "payment_order_attempts": 1, "payment_events": 1,
+		"users": 1, "credit_ledger": 1, "payment_orders": 1, "payment_order_attempts": 1, "payment_events": 1,
 		"workspaces": 1, "workspace_members": 1, "conversations": 1, "messages": 2, "chunks": 1, "documents": 1,
 	} {
 		var n int

@@ -916,32 +916,33 @@ func TestUserGroupPaymentUsesCalendarRenewal(t *testing.T) {
 	}
 
 	base := time.Date(2030, time.January, 31, 12, 0, 0, 0, time.UTC).Unix()
-	exec(t, db, `UPDATE users SET group_id=?, group_expires_at=?, previous_group_id='' WHERE id='u_group'`, pro.ID, base)
+	exec(t, db, `UPDATE users SET group_id=?, group_expires_at=?, previous_group_id='', credit_cycle_anchor=12345 WHERE id='u_group'`, pro.ID, base)
 	monthly := createGroupOrder(pro.ID, PaymentBillingMonthly)
 	fulfill(monthly, "monthly")
 	wantMonthly := time.Unix(base, 0).UTC().AddDate(0, 1, 0).Unix()
 	var groupID, previousGroup string
 	var expiry int64
+	var creditAnchor int64
 	var tokenVersion int
 	if err := db.QueryRowContext(ctx,
-		`SELECT group_id, group_expires_at, previous_group_id, token_ver FROM users WHERE id='u_group'`,
-	).Scan(&groupID, &expiry, &previousGroup, &tokenVersion); err != nil {
+		`SELECT group_id, group_expires_at, previous_group_id, credit_cycle_anchor, token_ver FROM users WHERE id='u_group'`,
+	).Scan(&groupID, &expiry, &previousGroup, &creditAnchor, &tokenVersion); err != nil {
 		t.Fatalf("read monthly membership: %v", err)
 	}
-	if groupID != pro.ID || expiry != wantMonthly || tokenVersion != 1 {
-		t.Fatalf("monthly membership = group %q expiry %d token %d, want %q/%d/1", groupID, expiry, tokenVersion, pro.ID, wantMonthly)
+	if groupID != pro.ID || expiry != wantMonthly || creditAnchor != 12345 || tokenVersion != 1 {
+		t.Fatalf("monthly membership = group %q expiry %d anchor %d token %d, want %q/%d/12345/1", groupID, expiry, creditAnchor, tokenVersion, pro.ID, wantMonthly)
 	}
 
 	yearly := createGroupOrder(pro.ID, PaymentBillingYearly)
 	fulfill(yearly, "yearly")
 	wantYearly := time.Unix(wantMonthly, 0).UTC().AddDate(1, 0, 0).Unix()
 	if err := db.QueryRowContext(ctx,
-		`SELECT group_id, group_expires_at, previous_group_id, token_ver FROM users WHERE id='u_group'`,
-	).Scan(&groupID, &expiry, &previousGroup, &tokenVersion); err != nil {
+		`SELECT group_id, group_expires_at, previous_group_id, credit_cycle_anchor, token_ver FROM users WHERE id='u_group'`,
+	).Scan(&groupID, &expiry, &previousGroup, &creditAnchor, &tokenVersion); err != nil {
 		t.Fatalf("read yearly membership: %v", err)
 	}
-	if groupID != pro.ID || expiry != wantYearly || tokenVersion != 2 {
-		t.Fatalf("yearly membership = group %q expiry %d token %d, want %q/%d/2", groupID, expiry, tokenVersion, pro.ID, wantYearly)
+	if groupID != pro.ID || expiry != wantYearly || creditAnchor != 12345 || tokenVersion != 2 {
+		t.Fatalf("yearly membership = group %q expiry %d anchor %d token %d, want %q/%d/12345/2", groupID, expiry, creditAnchor, tokenVersion, pro.ID, wantYearly)
 	}
 
 	before := time.Now().UTC()
@@ -949,15 +950,15 @@ func TestUserGroupPaymentUsesCalendarRenewal(t *testing.T) {
 	fulfill(vipOrder, "vip")
 	after := time.Now().UTC()
 	if err := db.QueryRowContext(ctx,
-		`SELECT group_id, group_expires_at, previous_group_id FROM users WHERE id='u_group'`,
-	).Scan(&groupID, &expiry, &previousGroup); err != nil {
+		`SELECT group_id, group_expires_at, previous_group_id, credit_cycle_anchor FROM users WHERE id='u_group'`,
+	).Scan(&groupID, &expiry, &previousGroup, &creditAnchor); err != nil {
 		t.Fatalf("read switched membership: %v", err)
 	}
 	low := before.AddDate(0, 1, 0).Unix()
 	high := after.AddDate(0, 1, 0).Unix()
-	if groupID != vip.ID || previousGroup != "" || expiry < low || expiry > high {
-		t.Fatalf("switched membership = group %q prev %q expiry %d, want %q/%q in %d..%d",
-			groupID, previousGroup, expiry, vip.ID, "", low, high)
+	if groupID != vip.ID || previousGroup != "" || expiry < low || expiry > high || creditAnchor < before.Unix() || creditAnchor > after.Unix() {
+		t.Fatalf("switched membership = group %q prev %q expiry %d anchor %d, want %q/%q in %d..%d with fresh anchor",
+			groupID, previousGroup, expiry, creditAnchor, vip.ID, "", low, high)
 	}
 
 	// Replacing finite Pro with finite VIP must not restore Pro as a permanent

@@ -5,6 +5,10 @@ interface LogoMarkProps {
   className?: string
 }
 
+/** Symmetric compound path shared by every rendering of the brand mark. */
+export const AIVORY_MARK_PATH =
+  'M16 4.5c-1.05 0-2.01.61-2.45 1.56L4.78 24.5c-.7 1.5.4 3.2 2.05 3.2h18.34c1.65 0 2.75-1.7 2.05-3.2L18.45 6.06A2.7 2.7 0 0 0 16 4.5Zm0 4.55 7.15 15.15H8.85L16 9.05Z'
+
 /**
  * Aivory mark — abstract triangular vessel suggesting attention focusing
  * to a point. Rendered as SVG, single accent fill, scales to any size.
@@ -17,7 +21,9 @@ export function LogoMark({ size = 24, className }: LogoMarkProps) {
       viewBox="0 0 32 32"
       role="img"
       aria-label="Aivory"
-      className={cn('inline-block', className)}
+      focusable="false"
+      shapeRendering="geometricPrecision"
+      className={cn('block shrink-0 select-none', className)}
     >
       <defs>
         <linearGradient id="aivory-mark" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
@@ -26,10 +32,12 @@ export function LogoMark({ size = 24, className }: LogoMarkProps) {
         </linearGradient>
       </defs>
       <path
-        d="M16 4.5c-1.05 0-2.02.6-2.47 1.55L4.34 24.6c-.74 1.55.4 3.4 2.13 3.4h19.06c1.74 0 2.87-1.85 2.13-3.4L18.47 6.05A2.72 2.72 0 0 0 16 4.5Zm0 4.3 9.8 20.6H6.2L16 8.8Z"
+        d={AIVORY_MARK_PATH}
         fill="url(#aivory-mark)"
+        fillRule="evenodd"
+        clipRule="evenodd"
       />
-      <circle cx="16" cy="22.2" r="1.4" fill="var(--color-accent)" />
+      <circle cx="16" cy="20.9" r="1.4" fill="var(--color-accent)" />
     </svg>
   )
 }
