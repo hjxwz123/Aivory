@@ -4,6 +4,7 @@ import (
 	"aivory/server/internal/store"
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"unicode"
 )
@@ -28,44 +29,46 @@ var moderationVerdictMaxOutputTokens = 8
 //     if that model is unset or errors, it falls back to the keyword screen so
 //     enabling moderation never silently disables protection — but an infra
 //     error never hard-blocks a benign chat (fail-open on error).
-func (o *Orchestrator) moderatePrompt(ctx context.Context, model *store.Model, userText, userID, convID, msgID string) (bool, string) {
+func (o *Orchestrator) moderatePrompt(ctx context.Context, model *store.Model, userText, userID, convID, msgID string) (bool, string, error) {
 	if model == nil || !model.ModerationEnabled || strings.TrimSpace(userText) == "" {
-		return false, ""
+		return false, "", nil
 	}
 	mode := model.ModerationMode
 	if mode == "" {
 		mode = "keyword"
 	}
 	if mode == "model" {
-		if blocked, decided := o.moderateByModel(ctx, userText, userID, convID, msgID); decided {
+		if blocked, decided, err := o.moderateByModel(ctx, userText, userID, convID, msgID); err != nil {
+			return false, "", err
+		} else if decided {
 			if blocked {
-				return true, o.moderationMessage()
+				return true, o.moderationMessage(), nil
 			}
-			return false, ""
+			return false, "", nil
 		}
 		// Moderation model unavailable/errored — fall through to keywords.
 	}
 	if kw := o.moderationKeywords(); len(kw) > 0 {
 		if _, hit := matchKeyword(kw, userText); hit {
-			return true, o.moderationMessage()
+			return true, o.moderationMessage(), nil
 		}
 	}
-	return false, ""
+	return false, "", nil
 }
 
 // moderateByModel runs the configured moderation model. The second return value
 // reports whether a verdict was actually obtained (false ⇒ caller should fall
 // back / fail open).
-func (o *Orchestrator) moderateByModel(ctx context.Context, userText, userID, convID, msgID string) (blocked bool, decided bool) {
+func (o *Orchestrator) moderateByModel(ctx context.Context, userText, userID, convID, msgID string) (blocked bool, decided bool, err error) {
 	if o.task == nil {
-		return false, false
+		return false, false, nil
 	}
 	var modelID string
 	if raw, err := store.GetSetting(o.db, "moderation_model_id"); err == nil && len(raw) > 0 {
 		_ = json.Unmarshal(raw, &modelID)
 	}
 	if strings.TrimSpace(modelID) == "" {
-		return false, false
+		return false, false, nil
 	}
 	// When the admin has configured violation categories, screen specifically
 	// against them; otherwise fall back to the generic safety prompt.
@@ -85,13 +88,16 @@ func (o *Orchestrator) moderateByModel(ctx context.Context, userText, userID, co
 		MaxOutputTokens: moderationVerdictMaxOutputTokens,
 	})
 	if err != nil {
+		if errors.Is(err, ErrTaskBillingRecord) {
+			return false, false, err
+		}
 		if o.logger != nil {
 			o.logger.Printf("moderation model %q error (fail-open): %v", modelID, err)
 		}
-		return false, false
+		return false, false, nil
 	}
 	v := strings.ToUpper(strings.TrimSpace(verdict))
-	return strings.Contains(v, "BLOCK"), true
+	return strings.Contains(v, "BLOCK"), true, nil
 }
 
 // moderationKeywords reads the admin-managed keyword blocklist.

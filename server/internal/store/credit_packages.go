@@ -6,9 +6,27 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 )
+
+var ErrInvalidCreditPackage = errors.New("invalid credit package")
+
+func validateCreditPackage(credits float64, priceAmountMinor int64, enabled bool) error {
+	if math.IsNaN(credits) || math.IsInf(credits, 0) || credits < 0 || priceAmountMinor < 0 {
+		return ErrInvalidCreditPackage
+	}
+	micros, err := CreditsToMicros(credits)
+	if err != nil || credits > 0 && micros == 0 {
+		return ErrInvalidCreditPackage
+	}
+	return nil
+}
+
+func ValidateCreditPackage(p CreditPackage) error {
+	return validateCreditPackage(p.Credits, p.PriceAmountMinor, p.Enabled)
+}
 
 // CreditPackage is an administrator-defined permanent-credit top-up offer.
 // SettlementCurrency is attached by the API from the global setting and is not
@@ -98,6 +116,9 @@ func CreateCreditPackage(ctx context.Context, db *sql.DB, p CreditPackage) (*Cre
 	}
 	p.Name = strings.TrimSpace(p.Name)
 	p.Description = strings.TrimSpace(p.Description)
+	if err := validateCreditPackage(p.Credits, p.PriceAmountMinor, p.Enabled); err != nil {
+		return nil, err
+	}
 	now := time.Now().Unix()
 	if _, err := db.ExecContext(ctx,
 		`INSERT INTO credit_packages(id, name, description, credits, price_amount_minor, enabled, sort_order, created_at, updated_at)
@@ -109,6 +130,25 @@ func CreateCreditPackage(ctx context.Context, db *sql.DB, p CreditPackage) (*Cre
 }
 
 func UpdateCreditPackage(ctx context.Context, db *sql.DB, id string, p CreditPackagePatch) (*CreditPackage, error) {
+	current, err := GetCreditPackage(ctx, db, id)
+	if err != nil {
+		return nil, err
+	}
+	credits := current.Credits
+	price := current.PriceAmountMinor
+	enabled := current.Enabled
+	if p.Credits != nil {
+		credits = *p.Credits
+	}
+	if p.PriceAmountMinor != nil {
+		price = *p.PriceAmountMinor
+	}
+	if p.Enabled != nil {
+		enabled = *p.Enabled
+	}
+	if err := validateCreditPackage(credits, price, enabled); err != nil {
+		return nil, err
+	}
 	parts := []string{}
 	args := []any{}
 	set := func(column string, value any) {

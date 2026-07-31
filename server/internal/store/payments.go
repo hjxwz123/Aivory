@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -805,7 +806,10 @@ func CreatePaymentOrder(ctx context.Context, db *sql.DB, input PaymentOrderCreat
 		Currency:     paymentSettlementCurrency(ctx, tx),
 		Status:       PaymentOrderPending,
 	}
-	userQuery := `SELECT email, status, role, group_id, group_expires_at, previous_group_id FROM users WHERE id=?`
+	userQuery := `SELECT email, status, role, group_id, group_expires_at, previous_group_id,
+		CASE WHEN COALESCE(credits_permanent_micros,0)=0 AND COALESCE(credits_permanent,0)<>0
+		     THEN CAST(ROUND(credits_permanent*1000000) AS BIGINT) ELSE COALESCE(credits_permanent_micros,0) END
+		FROM users WHERE id=?`
 	if usePostgres {
 		userQuery += ` FOR UPDATE`
 	}
@@ -814,8 +818,10 @@ func CreatePaymentOrder(ctx context.Context, db *sql.DB, input PaymentOrderCreat
 	var currentUserGroupID string
 	var currentUserGroupExpiresAt int64
 	var currentUserPreviousGroupID string
+	var currentPermanentCreditsMicros int64
 	if err := tx.QueryRowContext(ctx, userQuery, input.UserID).Scan(
 		&order.UserEmail, &userStatus, &userRole, &currentUserGroupID, &currentUserGroupExpiresAt, &currentUserPreviousGroupID,
+		&currentPermanentCreditsMicros,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
@@ -844,6 +850,10 @@ func CreatePaymentOrder(ctx context.Context, db *sql.DB, input PaymentOrderCreat
 		}
 		if err != nil {
 			return nil, err
+		}
+		micros, convErr := CreditsToMicros(order.Credits)
+		if convErr != nil || micros <= 0 || currentPermanentCreditsMicros > 0 && micros > math.MaxInt64-currentPermanentCreditsMicros {
+			return nil, ErrInvalidPaymentProduct
 		}
 	case PaymentProductUserGroup:
 		if input.BillingCycle != PaymentBillingMonthly && input.BillingCycle != PaymentBillingYearly {
@@ -1814,13 +1824,13 @@ func FulfillPaymentOrder(ctx context.Context, db *sql.DB, input PaymentFulfillme
 		return nil, ErrPaymentOrderNotFulfillable
 	}
 
-	userLock := `SELECT group_id, group_expires_at, previous_group_id, COALESCE(credit_cycle_anchor,0) FROM users WHERE id=?`
+	userLock := `SELECT group_id, group_expires_at, previous_group_id, COALESCE(credit_cycle_anchor,0), COALESCE(quota_cycle_anchor,0) FROM users WHERE id=?`
 	if usePostgres {
 		userLock += ` FOR UPDATE`
 	}
 	var currentGroup, previousGroup string
-	var currentExpiry, currentCreditAnchor int64
-	if err := tx.QueryRowContext(ctx, userLock, order.UserID).Scan(&currentGroup, &currentExpiry, &previousGroup, &currentCreditAnchor); err != nil {
+	var currentExpiry, currentCreditAnchor, currentQuotaAnchor int64
+	if err := tx.QueryRowContext(ctx, userLock, order.UserID).Scan(&currentGroup, &currentExpiry, &previousGroup, &currentCreditAnchor, &currentQuotaAnchor); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -1832,14 +1842,15 @@ func FulfillPaymentOrder(ctx context.Context, db *sql.DB, input PaymentFulfillme
 		if order.Credits <= 0 || order.UserGroupID != "" || order.BillingCycle != "" {
 			return nil, ErrInvalidPaymentProduct
 		}
-		result, err := tx.ExecContext(ctx,
-			`UPDATE users SET credits_permanent=COALESCE(credits_permanent,0)+? WHERE id=?`,
-			order.Credits, order.UserID)
-		if err != nil {
-			return nil, err
+		creditMicros, convErr := CreditsToMicros(order.Credits)
+		if convErr != nil {
+			return nil, ErrInvalidPaymentProduct
 		}
-		if affected, _ := result.RowsAffected(); affected == 0 {
-			return nil, ErrNotFound
+		if err := addPermanentCreditsMicrosTx(ctx, tx, order.UserID, creditMicros); err != nil {
+			if errors.Is(err, ErrInvalidCreditAmount) {
+				return nil, ErrInvalidPaymentProduct
+			}
+			return nil, err
 		}
 	case PaymentProductUserGroup:
 		if order.UserGroupID == "" ||
@@ -1900,14 +1911,16 @@ func FulfillPaymentOrder(ctx context.Context, db *sql.DB, input PaymentFulfillme
 			}
 		}
 		newCreditAnchor := currentCreditAnchor
+		newQuotaAnchor := currentQuotaAnchor
 		if currentGroup != order.UserGroupID || currentExpiry > 0 && currentExpiry <= now {
 			newCreditAnchor = nextCreditCycleAnchor(currentCreditAnchor, now)
+			newQuotaAnchor = nextCreditCycleAnchor(currentQuotaAnchor, now)
 		}
 		result, err := tx.ExecContext(ctx,
 			`UPDATE users
-			    SET group_id=?, group_expires_at=?, previous_group_id=?, credit_cycle_anchor=?, token_ver=token_ver+1
+			    SET group_id=?, group_expires_at=?, previous_group_id=?, credit_cycle_anchor=?, quota_cycle_anchor=?, token_ver=token_ver+1
 			  WHERE id=?`,
-			order.UserGroupID, newExpiry, newPrevious, newCreditAnchor, order.UserID)
+			order.UserGroupID, newExpiry, newPrevious, newCreditAnchor, newQuotaAnchor, order.UserID)
 		if err != nil {
 			return nil, err
 		}

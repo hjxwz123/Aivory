@@ -283,6 +283,9 @@ func CreateModel(ctx context.Context, db *sql.DB, m Model) (*Model, error) {
 	if m.Currency == "" {
 		m.Currency = "USD"
 	}
+	if err := ValidateModelBilling(&m); err != nil {
+		return nil, err
+	}
 	if m.Kind == "" {
 		m.Kind = "chat"
 	}
@@ -361,6 +364,9 @@ func UpdateModel(ctx context.Context, db *sql.DB, id string, m Model) (*Model, e
 	m.Icon = strings.TrimSpace(m.Icon)
 	m.FallbackChannelID = strings.TrimSpace(m.FallbackChannelID)
 	m.SystemPrompt = strings.TrimSpace(m.SystemPrompt)
+	if err := ValidateModelBilling(&m); err != nil {
+		return nil, err
+	}
 	if extraParams, err := NormalizeModelExtraParams(m.ExtraParams); err != nil {
 		return nil, err
 	} else {

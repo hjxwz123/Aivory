@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+	"math"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -109,7 +111,7 @@ func TestDeletingUsageLogsDoesNotRefundCredits(t *testing.T) {
 	}
 }
 
-func TestConcurrentCreditDebitsRecordFullOverage(t *testing.T) {
+func TestConcurrentCreditDebitsCannotOverdrawBalance(t *testing.T) {
 	db, ctx := openCreditsTestDB(t)
 	seedCreditGroupsAndUser(t, ctx, db, 10, 10)
 
@@ -125,27 +127,117 @@ func TestConcurrentCreditDebitsRecordFullOverage(t *testing.T) {
 	}
 	wg.Wait()
 	close(errs)
+	var successes, insufficient int
 	for err := range errs {
-		if err != nil {
+		switch {
+		case err == nil:
+			successes++
+		case errors.Is(err, ErrInsufficientCredits):
+			insufficient++
+		default:
 			t.Fatalf("concurrent debit: %v", err)
+		}
+	}
+	if successes != 1 || insufficient != 1 {
+		t.Fatalf("concurrent results = success %d insufficient %d, want 1/1", successes, insufficient)
+	}
+	balance, err := GetCreditBalance(ctx, db, "u1")
+	if err != nil {
+		t.Fatalf("get balance: %v", err)
+	}
+	if balance.TimedUsed != 8 || balance.TimedRemaining != 2 || balance.Permanent != 0 || balance.Available != 2 {
+		t.Fatalf("balance = %+v, want timed used 8, remaining/available 2 and no debt", balance)
+	}
+}
+
+func TestConcurrentCreditReservationsCannotExceedBalance(t *testing.T) {
+	db, ctx := openCreditsTestDB(t)
+	seedCreditGroupsAndUser(t, ctx, db, 10, 10)
+
+	var wg sync.WaitGroup
+	results := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := ReserveCredits(ctx, db, "u1", 8, "test", fmt.Sprintf("reservation-%d", i), time.Hour)
+			results <- err
+		}()
+	}
+	wg.Wait()
+	close(results)
+	var successes, insufficient int
+	for err := range results {
+		if err == nil {
+			successes++
+		} else if errors.Is(err, ErrInsufficientCredits) {
+			insufficient++
+		} else {
+			t.Fatalf("reserve credits: %v", err)
+		}
+	}
+	if successes != 1 || insufficient != 1 {
+		t.Fatalf("reservation results = success %d insufficient %d, want 1/1", successes, insufficient)
+	}
+	balance, err := GetCreditBalance(ctx, db, "u1")
+	if err != nil {
+		t.Fatalf("get balance: %v", err)
+	}
+	if balance.Reserved != 8 || balance.Available != 2 {
+		t.Fatalf("reserved balance = %+v, want reserved 8 available 2", balance)
+	}
+}
+
+func TestCreditSettlementFailureKeepsReservation(t *testing.T) {
+	db, ctx := openCreditsTestDB(t)
+	seedCreditGroupsAndUser(t, ctx, db, 10, 10)
+	if _, err := ReserveCredits(ctx, db, "u1", 4, "test", "settlement-failure", time.Hour); err != nil {
+		t.Fatalf("reserve credits: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `CREATE TRIGGER fail_credit_ledger BEFORE INSERT ON credit_ledger BEGIN SELECT RAISE(FAIL, 'forced ledger failure'); END`); err != nil {
+		t.Fatalf("create failure trigger: %v", err)
+	}
+	if _, err := SettleCreditReservation(ctx, db, "test", "settlement-failure", 4); err == nil {
+		t.Fatal("settlement unexpectedly succeeded")
+	}
+	var status string
+	if err := db.QueryRowContext(ctx, `SELECT status FROM credit_reservations WHERE source_type='test' AND source_id='settlement-failure'`).Scan(&status); err != nil {
+		t.Fatalf("read reservation: %v", err)
+	}
+	if status != CreditReservationReserved {
+		t.Fatalf("reservation status = %q, want reserved", status)
+	}
+	balance, err := GetCreditBalance(ctx, db, "u1")
+	if err != nil {
+		t.Fatalf("get balance: %v", err)
+	}
+	if balance.Reserved != 4 || balance.Available != 6 {
+		t.Fatalf("balance after failed settlement = %+v, want held reservation", balance)
+	}
+}
+
+func TestCreditArithmeticUsesExactMicros(t *testing.T) {
+	db, ctx := openCreditsTestDB(t)
+	seedCreditGroupsAndUser(t, ctx, db, 0, 0)
+	if err := SetPermanentCredits(ctx, db, "u1", 0.3); err != nil {
+		t.Fatalf("set permanent credits: %v", err)
+	}
+	for i := 0; i < 3; i++ {
+		source := fmt.Sprintf("decimal-%d", i)
+		if _, err := ReserveCredits(ctx, db, "u1", 0.1, "test", source, time.Hour); err != nil {
+			t.Fatalf("reserve decimal %d: %v", i, err)
+		}
+		if _, err := SettleCreditReservation(ctx, db, "test", source, 0.1); err != nil {
+			t.Fatalf("settle decimal %d: %v", i, err)
 		}
 	}
 	balance, err := GetCreditBalance(ctx, db, "u1")
 	if err != nil {
 		t.Fatalf("get balance: %v", err)
 	}
-	if balance.TimedUsed != 10 || balance.TimedRemaining != 0 || balance.Permanent != -6 || balance.Available != 0 {
-		t.Fatalf("balance = %+v, want timed used 10, permanent -6, available 0", balance)
-	}
-	if err := AddPermanentCredits(ctx, db, "u1", 5); err != nil {
-		t.Fatalf("top up overage debt: %v", err)
-	}
-	balance, err = GetCreditBalance(ctx, db, "u1")
-	if err != nil {
-		t.Fatalf("get topped-up balance: %v", err)
-	}
-	if balance.Permanent != -1 || balance.Available != 0 {
-		t.Fatalf("partial top-up balance = %+v, want permanent -1 and available 0", balance)
+	if balance.Permanent != 0 || balance.Available != 0 {
+		t.Fatalf("decimal balance = %+v, want exact zero", balance)
 	}
 }
 
@@ -224,6 +316,11 @@ func TestCreditConfigChangeStartsFreshCycle(t *testing.T) {
 	}); !errors.Is(err, ErrInvalidCreditConfig) {
 		t.Fatalf("invalid credit config error = %v, want %v", err, ErrInvalidCreditConfig)
 	}
+	if _, err := CreateUserGroup(ctx, db, UserGroup{
+		ID: "ug_overflow", Name: "Overflow", CreditAllowance: math.MaxFloat64, CreditPeriodSeconds: 30 * 24 * 60 * 60,
+	}); !errors.Is(err, ErrInvalidCreditConfig) {
+		t.Fatalf("overflow credit config error = %v, want %v", err, ErrInvalidCreditConfig)
+	}
 }
 
 func TestGroupExpiryAndDeletionResetCreditCycles(t *testing.T) {
@@ -265,5 +362,48 @@ func TestGroupExpiryAndDeletionResetCreditCycles(t *testing.T) {
 	}
 	if groupID != DefaultGroupID || expiresAt != 0 || previousGroup != "" || anchor < beforeDelete {
 		t.Fatalf("deleted-group user = group %q expiry %d previous %q anchor %d", groupID, expiresAt, previousGroup, anchor)
+	}
+}
+
+func TestAddPermanentCreditsRejectsAggregateOverflow(t *testing.T) {
+	db, ctx := openCreditsTestDB(t)
+	initial := int64(math.MaxInt64 - 5)
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO users(id,email,password_hash,credits_permanent_micros) VALUES('overflow-topup','overflow-topup@example.test','hash',?)`,
+		initial); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	if err := AddPermanentCredits(ctx, db, "overflow-topup", 0.000010); !errors.Is(err, ErrInvalidCreditAmount) {
+		t.Fatalf("overflow top-up error = %v, want %v", err, ErrInvalidCreditAmount)
+	}
+	var got int64
+	if err := db.QueryRowContext(ctx,
+		`SELECT credits_permanent_micros FROM users WHERE id='overflow-topup'`).Scan(&got); err != nil {
+		t.Fatalf("read credits: %v", err)
+	}
+	if got != initial {
+		t.Fatalf("credits after rejected top-up = %d, want %d", got, initial)
+	}
+}
+
+func TestCreditBalanceSaturatesWhenAllowanceAndPermanentCreditsExceedInt64(t *testing.T) {
+	db, ctx := openCreditsTestDB(t)
+	anchor := time.Now().Unix()
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO user_groups(id,name,is_default,credit_allowance_micros,credit_period_seconds) VALUES('overflow-group','Overflow',0,?,604800)`,
+		int64(math.MaxInt64-10)); err != nil {
+		t.Fatalf("seed group: %v", err)
+	}
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO users(id,email,password_hash,group_id,credit_cycle_anchor,credits_permanent_micros) VALUES('overflow-user','overflow@example.test','hash','overflow-group',?,100)`,
+		anchor); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	balance, err := GetCreditBalance(ctx, db, "overflow-user")
+	if err != nil {
+		t.Fatalf("get balance: %v", err)
+	}
+	if balance.availableMicros != math.MaxInt64 || balance.Available <= 0 {
+		t.Fatalf("available balance = %d (%v), want saturated positive balance", balance.availableMicros, balance.Available)
 	}
 }

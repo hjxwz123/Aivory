@@ -634,6 +634,80 @@ func TestConfigImportNormalizesPaymentChannelsAndMethods(t *testing.T) {
 	}
 }
 
+func TestConfigImportRejectsInvalidBillingRowsAndRollsBack(t *testing.T) {
+	tests := []struct {
+		name string
+		rows map[string][]map[string]any
+	}{
+		{
+			name: "negative credits per usd",
+			rows: map[string][]map[string]any{
+				"settings": {
+					{"key": "quota_exceeded_message", "value": `"changed"`, "updated_at": 2},
+					{"key": "credits_per_usd", "value": `-1`, "updated_at": 2},
+				},
+			},
+		},
+		{
+			name: "negative group allowance",
+			rows: map[string][]map[string]any{
+				"settings": {{"key": "quota_exceeded_message", "value": `"changed"`, "updated_at": 2}},
+				"user_groups": {{
+					"id": "ug_bad", "name": "Bad", "credit_allowance": -1, "credit_period_seconds": 3600,
+				}},
+			},
+		},
+		{
+			name: "zero group period with allowance",
+			rows: map[string][]map[string]any{
+				"settings": {{"key": "quota_exceeded_message", "value": `"changed"`, "updated_at": 2}},
+				"user_groups": {{
+					"id": "ug_bad", "name": "Bad", "credit_allowance": 10, "credit_period_seconds": 0,
+				}},
+			},
+		},
+		{
+			name: "non usd model",
+			rows: map[string][]map[string]any{
+				"settings": {{"key": "quota_exceeded_message", "value": `"changed"`, "updated_at": 2}},
+				"models":   {{"id": "m_bad", "currency": "EUR", "price_input": 1}},
+			},
+		},
+		{
+			name: "negative model quota",
+			rows: map[string][]map[string]any{
+				"settings": {{"key": "quota_exceeded_message", "value": `"changed"`, "updated_at": 2}},
+				"model_group_quotas": {{
+					"model_id": "m_bad", "group_id": "ug_bad", "period_seconds": 3600,
+					"limit_type": "cost", "limit_value": -1,
+				}},
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			db := openMigrated(t, filepath.Join(t.TempDir(), "invalid-billing-config.db"))
+			defer db.Close()
+			if err := store.SetSetting(db, "quota_exceeded_message", "original"); err != nil {
+				t.Fatal(err)
+			}
+			d := Deps{DB: db, Config: config.Config{UploadDir: t.TempDir(), ArtifactDir: t.TempDir()}, Logger: log.New(io.Discard, "", 0)}
+			rec := importPaymentConfigArchiveForTest(t, d, paymentConfigArchiveForTest(t, tc.rows))
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("invalid billing import status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), errInvalidBillingConfigArchive.Error()) {
+				t.Fatalf("invalid billing error is not recognizable: %s", rec.Body.String())
+			}
+			var got string
+			mustQuery(t, db, `SELECT value FROM settings WHERE key='quota_exceeded_message'`).Scan(&got)
+			if got != `"original"` {
+				t.Fatalf("rejected config import did not roll back prior rows: %q", got)
+			}
+		})
+	}
+}
+
 func TestNormalizeLegacyUserGroupPriceArchiveRows(t *testing.T) {
 	input := strings.NewReader(strings.Join([]string{
 		`{"id":"ug_monthly","monthly_price_amount_minor":1499,"yearly_price_amount_minor":14999,"price_amount_minor":999}`,
@@ -1051,7 +1125,7 @@ func paymentConfigArchiveForTest(t *testing.T, rowsByTable map[string][]map[stri
 	zw := zip.NewWriter(&archive)
 	tables := make([]string, 0, len(rowsByTable))
 	counts := make(map[string]int64, len(rowsByTable))
-	for _, table := range []string{"settings", "payment_channels", "payment_methods"} {
+	for _, table := range store.ConfigTableOrder() {
 		rows, ok := rowsByTable[table]
 		if !ok {
 			continue

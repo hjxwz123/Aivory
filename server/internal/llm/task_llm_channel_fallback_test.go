@@ -140,6 +140,7 @@ func TestTaskLLMFallbackSuccessLogsPrimaryErrorAndFallbackUsage(t *testing.T) {
 	outerVisible := new(atomic.Bool)
 	outerVisible.Store(true)
 	ctx := contextWithProviderVisibleOutput(context.Background(), outerVisible)
+	ctx = withTaskBillingMessageID(ctx, "task-parent-message")
 	answer, err := newTaskChannelFallbackRunner(db).Run(ctx, TaskTitle, "hello", RunOpts{
 		ModelID: model.ID,
 		UserID:  taskFallbackTestUserID,
@@ -152,6 +153,14 @@ func TestTaskLLMFallbackSuccessLogsPrimaryErrorAndFallbackUsage(t *testing.T) {
 	}
 	if primaryHits.Load() != 1 || fallbackHits.Load() != 1 {
 		t.Fatalf("request counts primary/fallback = %d/%d, want 1/1", primaryHits.Load(), fallbackHits.Load())
+	}
+	var billingMessageID string
+	if err := db.QueryRow(`SELECT message_id FROM billing_usage WHERE user_id=? AND purpose=?`,
+		taskFallbackTestUserID, string(TaskTitle)).Scan(&billingMessageID); err != nil {
+		t.Fatalf("query durable task billing: %v", err)
+	}
+	if billingMessageID != "task-parent-message" {
+		t.Fatalf("durable task billing message = %q, want task-parent-message", billingMessageID)
 	}
 
 	usageRows := taskFallbackUsageRows(t, db, model.ID)

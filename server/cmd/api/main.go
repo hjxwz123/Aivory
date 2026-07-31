@@ -287,6 +287,7 @@ func (a taskRouterAdapter) RunJSON(ctx context.Context, kind, prompt string, out
 	return a.t.RunJSONString(ctx, kind, prompt, out, llm.RunOpts{
 		UserID:          opts.UserID,
 		ConversationID:  opts.ConversationID,
+		MessageID:       opts.MessageID,
 		JSONOutput:      true,
 		MaxOutputTokens: taskRouterMaxOutputTokens,
 	})

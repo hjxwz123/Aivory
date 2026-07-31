@@ -2,11 +2,11 @@ package llm
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
-	"strconv"
 	"time"
 
 	"aivory/server/internal/envcfg"
@@ -15,26 +15,10 @@ import (
 
 var dailyImageLimitResetWindow = envcfg.Dur("AIVORY_TOOLS_DAILY_IMAGE_LIMIT_RESET_WINDOW", 24*time.Hour)
 
-// Window cost is accumulated in integer micro-units so it can use the cache's
-// atomic IncrBy (§B3) — a float Get/modify/Set loses concurrent increments.
-func costToMicros(c float64) int64 { return int64(math.Round(c * 1e6)) }
-func microsToCost(m int64) float64 { return float64(m) / 1e6 }
-
 // Per-model, per-group usage quotas (§ user groups). A quota row grants that
 // group a free allowance. A missing row, including a model with no rows at all,
-// means the call is paid with credits. The window count/cost lives in the cache
-// (O(1) per request), seeded from usage_logs when the cache is cold, so the
-// check stays cheap at scale.
-
-// quotaWindow computes the fixed-window start + ttl for a period.
-func quotaWindow(periodSeconds int) (start int64, ttl time.Duration) {
-	p := int64(periodSeconds)
-	if p <= 0 {
-		p = 604800 // 7 days
-	}
-	now := time.Now().Unix()
-	return (now / p) * p, time.Duration(p) * time.Second
-}
+// means the call is paid with credits. quota_ledger is the authoritative,
+// concurrency-safe source for consumption within a membership-anchored cycle.
 
 // checkModelQuota decides whether the user may use the model and how it's paid
 // (§ credits). Returns (message, ok, useCredits):
@@ -54,11 +38,14 @@ func quotaWindow(periodSeconds int) (start int64, ttl time.Duration) {
 // so on its own a $2 request would ride on $1 of remaining allowance.
 func (o *Orchestrator) checkModelQuota(ctx context.Context, userID string, model *store.Model) (string, bool, bool, float64) {
 	// Admins are exempt from all usage quotas (§ admin).
-	if u, err := store.FindUserByID(ctx, o.db, userID); err == nil && u.Role == "admin" {
+	u, err := store.FindUserByID(ctx, o.db, userID)
+	if err != nil {
+		return o.quotaMessage(), false, false, -1
+	}
+	if u.Role == "admin" {
 		return "", true, false, -1
 	}
-	groupID := o.userGroupID(ctx, userID)
-	q, err := store.GetModelQuota(ctx, o.db, model.ID, groupID)
+	q, err := store.GetModelQuota(ctx, o.db, model.ID, u.GroupID)
 	if errors.Is(err, store.ErrNotFound) {
 		// No free allowance for this group. This also covers the all-toggles-off
 		// state, where the model has no quota rows at all.
@@ -66,25 +53,30 @@ func (o *Orchestrator) checkModelQuota(ctx context.Context, userID string, model
 		return msg, ok, useCredits, -1
 	}
 	if err != nil {
-		// §B11: fail OPEN on an unexpected DB error (availability over enforcement)
-		// but do not confuse it with the intentional no-free-allowance state above.
 		if o.logger != nil {
-			o.logger.Printf("quota: GetModelQuota(%s,%s) failed, allowing (fail-open): %v", model.ID, groupID, err)
+			o.logger.Printf("quota: GetModelQuota(%s,%s) failed: %v", model.ID, u.GroupID, err)
 		}
-		return "", true, false, -1
+		return o.quotaMessage(), false, false, -1
 	}
 	if q.LimitValue <= 0 {
 		return "", true, false, -1 // granted unlimited free
 	}
-	start, ttl := quotaWindow(q.PeriodSeconds)
-	cost, count := o.readQuota(ctx, userID, model.ID, q, start, ttl)
+	scope, err := store.GetUserQuotaScope(ctx, o.db, userID)
+	if err != nil {
+		return o.quotaMessage(), false, false, -1
+	}
+	start, _ := store.CreditCycleStart(scope.Anchor, q.PeriodSeconds, time.Now().Unix())
+	used, err := store.ModelQuotaUsage(ctx, o.db, userID, model.ID, scope.GroupID, store.QuotaScopeModelChat, scope.Anchor, start)
+	if err != nil {
+		return o.quotaMessage(), false, false, -1
+	}
 	withinFree := true
 	remaining := -1.0
 	if q.LimitType == "count" {
-		withinFree = count < int(q.LimitValue+0.5)
+		withinFree = used < q.LimitValue
 	} else {
-		withinFree = cost < q.LimitValue
-		remaining = q.LimitValue - cost // > 0 whenever withinFree holds
+		withinFree = used < q.LimitValue
+		remaining = q.LimitValue - used // > 0 whenever withinFree holds
 	}
 	if withinFree {
 		return "", true, false, remaining // free use within the group's per-cycle allotment
@@ -95,40 +87,50 @@ func (o *Orchestrator) checkModelQuota(ctx context.Context, userID string, model
 }
 
 // checkImageQuota is the image-model analogue of checkModelQuota (§4.20). It
-// reads the SHARED purpose='image' ledger (ImageUsageInWindow) so drawing-mode
-// and chat tool-call generations on the same model draw from one pool, and it
+// reads the shared quota ledger so drawing-mode and chat tool-call generations
+// on the same model draw from one pool, and it
 // follows the SAME free-allotment → credits → block flow as chat: within the
 // group's free image allotment is free; past it, charge credits (timed then
 // permanent) when the user can cover it; otherwise block. Counts images for a
 // count-limit, summed cost for a cost-limit. Admins are exempt.
 func (o *Orchestrator) checkImageQuota(ctx context.Context, userID string, model *store.Model, n int) (string, bool, bool) {
 	n = ClampImageGenerationCount(n)
-	if u, err := store.FindUserByID(ctx, o.db, userID); err == nil && u.Role == "admin" {
+	u, err := store.FindUserByID(ctx, o.db, userID)
+	if err != nil {
+		return o.quotaMessage(), false, false
+	}
+	if u.Role == "admin" {
 		return "", true, false
 	}
-	groupID := o.userGroupID(ctx, userID)
-	q, err := store.GetModelQuota(ctx, o.db, model.ID, groupID)
+	q, err := store.GetModelQuota(ctx, o.db, model.ID, u.GroupID)
 	if errors.Is(err, store.ErrNotFound) {
 		return o.checkPaidImageQuota(ctx, userID, model, n)
 	}
 	if err != nil {
 		if o.logger != nil {
-			o.logger.Printf("imagequota: GetModelQuota(%s,%s) failed, allowing (fail-open): %v", model.ID, groupID, err)
+			o.logger.Printf("imagequota: GetModelQuota(%s,%s) failed: %v", model.ID, u.GroupID, err)
 		}
-		return "", true, false
+		return o.quotaMessage(), false, false
 	}
 	if q.LimitValue <= 0 {
 		return "", true, false // granted unlimited free
 	}
-	start, _ := quotaWindow(q.PeriodSeconds)
-	cost, images, _ := store.ImageUsageInWindow(ctx, o.db, userID, model.ID, start)
+	scope, err := store.GetUserQuotaScope(ctx, o.db, userID)
+	if err != nil {
+		return o.quotaMessage(), false, false
+	}
+	start, _ := store.CreditCycleStart(scope.Anchor, q.PeriodSeconds, time.Now().Unix())
+	used, err := store.ModelQuotaUsage(ctx, o.db, userID, model.ID, scope.GroupID, store.QuotaScopeModelImage, scope.Anchor, start)
+	if err != nil {
+		return o.quotaMessage(), false, false
+	}
 	// Pre-project this request (n images) so the n-th image that crosses the free
 	// allotment is what flips to credits.
 	withinFree := true
 	if q.LimitType == "count" {
-		withinFree = images+n <= int(q.LimitValue+0.5)
+		withinFree = used+float64(n) <= q.LimitValue
 	} else {
-		withinFree = cost+float64(n)*model.PricePerImage <= q.LimitValue
+		withinFree = used+float64(n)*model.PricePerImage <= q.LimitValue
 	}
 	if withinFree {
 		return "", true, false // free use within the group's per-cycle allotment
@@ -151,6 +153,220 @@ func (o *Orchestrator) checkPaidImageQuota(ctx context.Context, userID string, m
 	return "", true, true
 }
 
+type billingAdmission struct {
+	UserID         string
+	Quota          *store.QuotaReservation
+	DailyTokens    *store.QuotaReservation
+	PayCredits     bool
+	CreditReserved bool
+	CreditSourceID string
+	SourceType     string
+	SourceID       string
+	KeepReserved   bool
+}
+
+func (o *Orchestrator) validatedCreditsPerUSD() (float64, error) {
+	raw, err := store.GetSetting(o.db, "credits_per_usd")
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	var ratio float64
+	if json.Unmarshal(raw, &ratio) != nil || math.IsNaN(ratio) || math.IsInf(ratio, 0) || ratio < 0 {
+		return 0, store.ErrInvalidCreditConfig
+	}
+	if micros, err := store.CreditsToMicros(ratio); err != nil || ratio > 0 && micros == 0 {
+		return 0, store.ErrInvalidCreditConfig
+	}
+	return ratio, nil
+}
+
+func (o *Orchestrator) reserveUsageBilling(ctx context.Context, userID string, model *store.Model, scopeType string, countValue, costUSD float64, estimatedTokens int, sourceType, sourceID string) (*billingAdmission, string, error) {
+	user, err := store.FindUserByID(ctx, o.db, userID)
+	if err != nil {
+		return nil, "", err
+	}
+	if user.Role == "admin" {
+		return &billingAdmission{UserID: userID}, "", nil
+	}
+	admission := &billingAdmission{UserID: userID, SourceType: sourceType, SourceID: sourceID}
+	if scopeType == store.QuotaScopeModelChat && estimatedTokens > 0 {
+		daily, allowed, reserveErr := store.ReserveDailyTokenQuota(ctx, o.db, userID, estimatedTokens)
+		if reserveErr != nil {
+			if errors.Is(reserveErr, store.ErrDailyTokenQuotaExceeded) {
+				return nil, reserveErr.Error(), nil
+			}
+			return nil, "", reserveErr
+		}
+		if !allowed {
+			return nil, store.ErrDailyTokenQuotaExceeded.Error(), nil
+		}
+		admission.DailyTokens = daily
+	}
+	releaseDaily := true
+	defer func() {
+		if releaseDaily && admission.DailyTokens != nil {
+			releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+			defer cancel()
+			_ = store.ReleaseQuotaReservation(releaseCtx, o.db, admission.DailyTokens.ID)
+		}
+	}()
+	q, err := store.GetModelQuota(ctx, o.db, model.ID, user.GroupID)
+	if err == nil && q.LimitValue > 0 {
+		requested := costUSD
+		if q.LimitType == "count" {
+			requested = countValue
+		}
+		reservation, allowed, reserveErr := store.ReserveModelQuota(
+			ctx, o.db, userID, model.ID, scopeType, *q, requested, q.LimitType == "cost",
+		)
+		if reserveErr != nil {
+			return nil, "", reserveErr
+		}
+		if allowed {
+			admission.Quota = reservation
+			if q.LimitType == "cost" && costUSD > reservation.ReservedValue {
+				ratio, ratioErr := o.validatedCreditsPerUSD()
+				if ratioErr != nil || ratio <= 0 {
+					_ = store.ReleaseQuotaReservation(ctx, o.db, reservation.ID)
+					if ratioErr != nil {
+						return nil, "", ratioErr
+					}
+					return nil, o.quotaMessage(), nil
+				}
+				admission.CreditSourceID = sourceID + ":quota-overage"
+				if _, reserveErr := store.ReserveCredits(
+					ctx, o.db, userID, (costUSD-reservation.ReservedValue)*ratio,
+					sourceType, admission.CreditSourceID, 24*time.Hour,
+				); reserveErr != nil {
+					if releaseErr := store.ReleaseQuotaReservation(ctx, o.db, reservation.ID); releaseErr != nil {
+						return nil, "", errors.Join(reserveErr, releaseErr)
+					}
+					if errors.Is(reserveErr, store.ErrInsufficientCredits) {
+						return nil, o.quotaMessage(), nil
+					}
+					return nil, "", reserveErr
+				}
+				admission.CreditReserved = true
+			}
+			releaseDaily = false
+			return admission, "", nil
+		}
+	} else if err == nil {
+		releaseDaily = false
+		return admission, "", nil
+	} else if !errors.Is(err, store.ErrNotFound) {
+		return nil, "", err
+	}
+
+	ratio, err := o.validatedCreditsPerUSD()
+	if err != nil {
+		return nil, "", err
+	}
+	if ratio <= 0 {
+		return nil, o.quotaMessage(), nil
+	}
+	admission.PayCredits = true
+	admission.CreditSourceID = sourceID
+	credits := costUSD * ratio
+	if credits <= 0 {
+		releaseDaily = false
+		return admission, "", nil
+	}
+	if _, err := store.ReserveCredits(ctx, o.db, userID, credits, sourceType, sourceID, 24*time.Hour); err != nil {
+		if errors.Is(err, store.ErrInsufficientCredits) {
+			return nil, o.quotaMessage(), nil
+		}
+		return nil, "", err
+	}
+	admission.CreditReserved = true
+	releaseDaily = false
+	return admission, "", nil
+}
+
+func (o *Orchestrator) settleUsageBilling(ctx context.Context, admission *billingAdmission, actualCount, actualCostUSD float64, actualTokens int) (store.CreditDebit, error) {
+	if admission == nil {
+		return store.CreditDebit{}, nil
+	}
+	admission.KeepReserved = true
+	if admission.DailyTokens != nil {
+		if _, err := store.FinalizeQuotaReservation(ctx, o.db, admission.DailyTokens.ID, float64(actualTokens)); err != nil {
+			return store.CreditDebit{}, err
+		}
+	}
+	if admission.Quota != nil {
+		actual := actualCostUSD
+		if admission.Quota.LimitType == "count" {
+			actual = actualCount
+		}
+		overageUSD, err := store.FinalizeQuotaReservation(ctx, o.db, admission.Quota.ID, actual)
+		if err != nil {
+			return store.CreditDebit{}, err
+		}
+		if overageUSD <= 0 {
+			if admission.CreditReserved {
+				if err := store.ReleaseCreditReservation(ctx, o.db, admission.SourceType, admission.CreditSourceID); err != nil {
+					return store.CreditDebit{}, err
+				}
+			}
+			return store.CreditDebit{}, nil
+		}
+		ratio, err := o.validatedCreditsPerUSD()
+		if err != nil || ratio <= 0 {
+			if err == nil {
+				err = store.ErrInsufficientCredits
+			}
+			return store.CreditDebit{}, err
+		}
+		overageSourceID := admission.CreditSourceID
+		if overageSourceID == "" {
+			overageSourceID = admission.SourceID + ":quota-overage"
+		}
+		if !admission.CreditReserved {
+			if _, err := store.ReserveCredits(ctx, o.db, admission.Quota.UserID, overageUSD*ratio, admission.SourceType, overageSourceID, 24*time.Hour); err != nil {
+				return store.CreditDebit{}, err
+			}
+		}
+		return store.SettleCreditReservation(ctx, o.db, admission.SourceType, overageSourceID, overageUSD*ratio)
+	}
+	if !admission.PayCredits {
+		return store.CreditDebit{}, nil
+	}
+	ratio, err := o.validatedCreditsPerUSD()
+	if err != nil {
+		return store.CreditDebit{}, err
+	}
+	actualCredits := actualCostUSD * ratio
+	if !admission.CreditReserved {
+		if actualCredits <= 0 {
+			return store.CreditDebit{}, nil
+		}
+		if _, err := store.ReserveCredits(ctx, o.db, admission.UserID, actualCredits, admission.SourceType, admission.SourceID, 24*time.Hour); err != nil {
+			return store.CreditDebit{}, err
+		}
+	}
+	return store.SettleCreditReservation(ctx, o.db, admission.SourceType, admission.SourceID, actualCredits)
+}
+
+func (o *Orchestrator) releaseUsageBilling(ctx context.Context, admission *billingAdmission) error {
+	if admission == nil || admission.KeepReserved {
+		return nil
+	}
+	var out error
+	if admission.Quota != nil {
+		out = errors.Join(out, store.ReleaseQuotaReservation(ctx, o.db, admission.Quota.ID))
+	}
+	if admission.DailyTokens != nil {
+		out = errors.Join(out, store.ReleaseQuotaReservation(ctx, o.db, admission.DailyTokens.ID))
+	}
+	if admission.CreditReserved {
+		out = errors.Join(out, store.ReleaseCreditReservation(ctx, o.db, admission.SourceType, admission.CreditSourceID))
+	}
+	return out
+}
+
 // CheckImageCredits / ChargeImageCredits implement the ImageBiller interface so
 // the image_generate tool (chat tool-call path) runs the SAME free→credits→block
 // decision + debit as drawing mode (§4.20). CheckImageCredits returns whether to
@@ -160,44 +376,77 @@ func (o *Orchestrator) CheckImageCredits(ctx context.Context, userID string, mod
 	return ok, payCredits, msg
 }
 
+func (o *Orchestrator) ReserveImageBilling(ctx context.Context, userID string, model *store.Model, n int, sourceID string) (*ImageBillingReservation, bool, string, error) {
+	n = ClampImageGenerationCount(n)
+	admission, message, err := o.reserveUsageBilling(
+		ctx, userID, model, store.QuotaScopeModelImage, float64(n), float64(n)*model.PricePerImage,
+		0, "image", sourceID,
+	)
+	if err != nil {
+		return nil, false, "", err
+	}
+	if admission == nil {
+		return nil, false, message, nil
+	}
+	return &ImageBillingReservation{admission: admission}, true, "", nil
+}
+
+func (o *Orchestrator) SettleImageBilling(ctx context.Context, reservation *ImageBillingReservation, images int, costUSD float64) (float64, float64, error) {
+	if reservation == nil {
+		return 0, 0, nil
+	}
+	debit, err := o.settleUsageBilling(ctx, reservation.admission, float64(images), costUSD, 0)
+	return debit.Timed, debit.Total, err
+}
+
+func (o *Orchestrator) ReleaseImageBilling(ctx context.Context, reservation *ImageBillingReservation) error {
+	if reservation == nil {
+		return nil
+	}
+	return o.releaseUsageBilling(ctx, reservation.admission)
+}
+
 // checkDailyImageLimit mirrors image_generate's deployment-wide daily boundary
 // for provider-hosted image tools, which never enter the local tool executor.
-func (o *Orchestrator) checkDailyImageLimit(ctx context.Context, userID string, n int) error {
+func (o *Orchestrator) checkDailyImageLimit(ctx context.Context, userID string, n int) (*store.QuotaReservation, error) {
 	limit := 30
 	if raw, err := store.GetSetting(o.db, "daily_image_limit"); err == nil {
-		_ = json.Unmarshal(raw, &limit)
+		if json.Unmarshal(raw, &limit) != nil || limit < 0 {
+			return nil, store.ErrInvalidCreditConfig
+		}
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
 	}
 	if limit <= 0 {
-		return nil
+		return nil, nil
 	}
 	n = ClampImageGenerationCount(n)
 	dayStart := time.Now().Truncate(dailyImageLimitResetWindow).Unix()
-	var used int
-	if err := o.db.QueryRowContext(ctx,
-		`SELECT COALESCE(SUM(images_count),0) FROM usage_logs WHERE user_id=? AND purpose='image' AND created_at>=?`,
-		userID, dayStart).Scan(&used); err != nil {
-		return err
+	reservation, allowed, err := store.ReserveFixedQuota(
+		ctx, o.db, userID, store.QuotaScopeDailyImage, n, limit, dayStart,
+		dayStart+int64(dailyImageLimitResetWindow/time.Second),
+	)
+	if err != nil {
+		return nil, err
 	}
-	if used+n > limit {
-		return fmt.Errorf("daily image limit reached (%d/%d)", used, limit)
+	if !allowed {
+		return nil, fmt.Errorf("daily image limit reached")
 	}
-	return nil
+	return reservation, nil
 }
 
-func (o *Orchestrator) ChargeImageCredits(ctx context.Context, userID string, costUSD float64) (float64, float64) {
+func (o *Orchestrator) ChargeImageCredits(ctx context.Context, userID string, costUSD float64) (float64, float64, error) {
 	return o.chargeTurnCredits(ctx, userID, costUSD)
 }
 
 // creditsPerUSD reads the global USD→credit conversion rate (§ credits). 0 = the
 // credit system is disabled platform-wide.
 func (o *Orchestrator) creditsPerUSD() float64 {
-	if raw, err := store.GetSetting(o.db, "credits_per_usd"); err == nil && len(raw) > 0 {
-		var v float64
-		if json.Unmarshal(raw, &v) == nil {
-			return v
-		}
+	ratio, err := o.validatedCreditsPerUSD()
+	if err != nil {
+		return 0
 	}
-	return 0
+	return ratio
 }
 
 // creditDecision checks whether the user can cover a credit-charged turn from
@@ -223,13 +472,13 @@ func (o *Orchestrator) creditDecision(ctx context.Context, userID string) (strin
 // chargeTurnCredits debits a credit-charged turn atomically: timed credits first,
 // then permanent. The ledger remains authoritative even if analytics usage logs
 // are deleted.
-func (o *Orchestrator) chargeTurnCredits(ctx context.Context, userID string, usdCost float64) (float64, float64) {
+func (o *Orchestrator) chargeTurnCredits(ctx context.Context, userID string, usdCost float64) (float64, float64, error) {
 	if usdCost <= 0 {
-		return 0, 0
+		return 0, 0, nil
 	}
 	ratio := o.creditsPerUSD()
 	if ratio <= 0 {
-		return 0, 0
+		return 0, 0, store.ErrInvalidCreditConfig
 	}
 	credits := usdCost * ratio
 	debit, err := store.DebitCredits(ctx, o.db, userID, credits, "llm", "")
@@ -237,9 +486,9 @@ func (o *Orchestrator) chargeTurnCredits(ctx context.Context, userID string, usd
 		if o.logger != nil {
 			o.logger.Printf("credit debit failed (user=%s, amount=%.4f): %v", userID, credits, err)
 		}
-		return 0, 0
+		return 0, 0, err
 	}
-	return debit.Timed, debit.Total
+	return debit.Timed, debit.Total, nil
 }
 
 // logUsage writes an analytics row. Credit debits are already durable in the
@@ -318,7 +567,7 @@ func (o *Orchestrator) preflightCredit(ctx context.Context, userID string, model
 	if !enabled {
 		return "", true
 	}
-	outputReserve := envcfg.Int("AIVORY_LLM_OUTPUT_RESERVE", 2000) // input + a fixed 2k output reserve (admin choice)
+	outputReserve := outputTokenReserve(req) // input + a fixed output reserve (admin choice)
 	estIn := estimateRequestTokens(req)
 	need := computeCost(*model, Usage{InputTokens: estIn, OutputTokens: outputReserve}) * o.creditsPerUSD()
 	have := o.availableCredits(ctx, userID)
@@ -328,92 +577,35 @@ func (o *Orchestrator) preflightCredit(ctx context.Context, userID string, model
 	return "", true
 }
 
-// freeQuotaOvershootGracePct: a turn admitted under the free allotment flips to
-// credits only when its estimated cost exceeds the REMAINING allowance by this
-// percentage (default 120 = 20% grace). The estimate (bytes/4 + CJK) is
-// approximate; the grace keeps borderline turns free instead of prematurely
-// charging credits, while still stopping a $2 request from riding on $0.01.
-var freeQuotaOvershootGracePct = envcfg.Int("AIVORY_LLM_FREE_QUOTA_OVERSHOOT_GRACE_PCT", 120)
-
 // estimateTurnUSD estimates a turn's upstream USD cost before sending: the
 // assembled request's estimated input tokens plus the same fixed output
 // reserve the credit pre-flight uses.
 func estimateTurnUSD(model store.Model, req UnifiedChatRequest) float64 {
-	outputReserve := envcfg.Int("AIVORY_LLM_OUTPUT_RESERVE", 2000)
-	return computeCost(model, Usage{InputTokens: estimateRequestTokens(req), OutputTokens: outputReserve})
+	return computeCost(model, Usage{InputTokens: estimateRequestTokens(req), OutputTokens: outputTokenReserve(req)})
 }
 
-// freeQuotaOvershoot reports whether an estimated turn cost blows past the
-// remaining free allowance (§ free-allowance overshoot). remaining < 0 means
-// no finite cost-type allowance applies, so there is nothing to overshoot.
-func freeQuotaOvershoot(estUSD, remainingUSD float64) bool {
-	return remainingUSD >= 0 && estUSD*100 > remainingUSD*float64(freeQuotaOvershootGracePct)
+func outputTokenReserve(req UnifiedChatRequest) int {
+	outputReserve := req.MaxOutputTokens
+	if outputReserve <= 0 {
+		outputReserve = envcfg.Int("AIVORY_LLM_OUTPUT_RESERVE", 2000)
+	}
+	if outputReserve <= 0 {
+		outputReserve = 2000
+	}
+	return outputReserve
 }
 
-// recordQuotaUsage updates the free-window counter after a successful turn.
-// Credit-paid turns are skipped — the window measures the FREE allotment, and
-// store.UsageInWindow (the cold-cache seed) excludes credits>0 rows the same
-// way, so a paid turn never burns the user's remaining free allowance.
-func (o *Orchestrator) recordQuotaUsage(ctx context.Context, userID string, model *store.Model, turnCost float64, paidWithCredits bool) {
-	if o.cache == nil || paidWithCredits {
-		return
+func estimateTurnTokens(req UnifiedChatRequest) int {
+	outputReserve := outputTokenReserve(req)
+	input := estimateRequestTokens(req)
+	maxInt := int(^uint(0) >> 1)
+	if input < 0 {
+		return maxInt
 	}
-	has, err := store.ModelHasAnyQuota(ctx, o.db, model.ID)
-	if err != nil || !has {
-		return
+	if input > maxInt-outputReserve {
+		return maxInt
 	}
-	q, err := store.GetModelQuota(ctx, o.db, model.ID, o.userGroupID(ctx, userID))
-	if err != nil || q.LimitValue <= 0 {
-		return
-	}
-	start, ttl := quotaWindow(q.PeriodSeconds)
-	key := quotaKey(userID, model.ID, start)
-	if q.LimitType == "count" {
-		o.cache.Incr(key, ttl)
-		return
-	}
-	// §B3: atomic add in micro-units (no Get→add→Set race under concurrent turns).
-	o.cache.IncrBy(key, costToMicros(turnCost), ttl)
-}
-
-// readQuota returns the current window cost/count, preferring the cache and
-// falling back to a usage_logs aggregate (which it then seeds into the cache).
-func (o *Orchestrator) readQuota(ctx context.Context, userID, modelID string, q *store.ModelGroupQuota, start int64, ttl time.Duration) (float64, int) {
-	key := quotaKey(userID, modelID, start)
-	if o.cache != nil {
-		if v, ok := o.cache.Get(key); ok {
-			if q.LimitType == "count" {
-				n, _ := strconv.Atoi(v)
-				return 0, n
-			}
-			micros, _ := strconv.ParseInt(v, 10, 64)
-			return microsToCost(micros), 0
-		}
-	}
-	cost, count, _ := store.UsageInWindow(ctx, o.db, userID, modelID, start)
-	if o.cache != nil {
-		if q.LimitType == "count" {
-			o.cache.Set(key, strconv.Itoa(count), ttl)
-		} else {
-			// Seed the cold cache with the authoritative usage_logs total, in micro-units.
-			o.cache.Set(key, strconv.FormatInt(costToMicros(cost), 10), ttl)
-		}
-	}
-	return cost, count
-}
-
-func quotaKey(userID, modelID string, windowStart int64) string {
-	// v2: cost is now stored in integer micro-units (§B3); the version prefix
-	// prevents reading a stale pre-upgrade float string as an int.
-	return fmt.Sprintf("quota:v2:%s:%s:%d", userID, modelID, windowStart)
-}
-
-// userGroupID resolves the user's group, defaulting to the free tier.
-func (o *Orchestrator) userGroupID(ctx context.Context, userID string) string {
-	if u, err := store.FindUserByID(ctx, o.db, userID); err == nil && u.GroupID != "" {
-		return u.GroupID
-	}
-	return store.DefaultGroupID
+	return input + outputReserve
 }
 
 // quotaMessage is the admin-configurable prompt shown when a model is locked for

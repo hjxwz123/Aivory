@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -32,6 +33,9 @@ func TestBackupRoundTrip(t *testing.T) {
 		{`INSERT INTO settings(key,value) VALUES('default_model_id','"m_x"')`, nil},
 		{`INSERT INTO users(id,email,password_hash,name,role) VALUES('u1','a@b.c','h','A','user')`, nil},
 		{`INSERT INTO credit_ledger(id,user_id,group_id,cycle_anchor,cycle_start,kind,amount) VALUES('cl1','u1','ug_free',100,100,'timed_debit',3.5)`, nil},
+		{`INSERT INTO credit_reservations(id,user_id,amount_micros,actual_micros,source_type,source_id,status,expires_at) VALUES('cr1','u1',2000000,1500000,'chat','msg1','settled',9999999999)`, nil},
+		{`INSERT INTO quota_ledger(id,user_id,scope_type,model_id,group_id,cycle_anchor,window_start,limit_type,reserved_micros,actual_micros,status,expires_at) VALUES('qr1','u1','model_chat','m1','ug_free',100,100,'count',1000000,1000000,'finalized',9999999999)`, nil},
+		{`INSERT INTO billing_usage(id,user_id,message_id,model_id,purpose,cost_micros,input_tokens,output_tokens,currency) VALUES('bu1','u1','msg1','m1','chat',125000,10,5,'USD')`, nil},
 		{`INSERT INTO credit_packages(id,name,credits,price_amount_minor) VALUES('cp1','Credits',10,100)`, nil},
 		{`INSERT INTO payment_channels(id,name,provider,config) VALUES('paych1','EPay','epay','{}')`, nil},
 		{`INSERT INTO payment_methods(id,channel_id,name,type,config) VALUES('paym1','paych1','Alipay','epay','{"type":"alipay"}')`, nil},
@@ -115,7 +119,8 @@ func TestBackupRoundTrip(t *testing.T) {
 
 	// Row counts.
 	for tbl, want := range map[string]int{
-		"users": 1, "credit_ledger": 1, "payment_orders": 1, "payment_order_attempts": 1, "payment_events": 1,
+		"users": 1, "credit_ledger": 1, "credit_reservations": 1, "quota_ledger": 1, "billing_usage": 1,
+		"payment_orders": 1, "payment_order_attempts": 1, "payment_events": 1,
 		"workspaces": 1, "workspace_members": 1, "conversations": 1, "messages": 2, "chunks": 1, "documents": 1,
 	} {
 		var n int
@@ -125,6 +130,44 @@ func TestBackupRoundTrip(t *testing.T) {
 		if n != want {
 			t.Fatalf("count %s = %d, want %d", tbl, n, want)
 		}
+	}
+}
+
+func TestRestoreLegacyCreditFloatsBackfillsMicros(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(filepath.Join(t.TempDir(), "legacy-credit-micros.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	rows := []struct {
+		table string
+		json  string
+	}{
+		{"users", `{"id":"u_legacy","email":"legacy@example.test","password_hash":"h","credits_permanent":12.345678}`},
+		{"user_groups", `{"id":"ug_legacy","name":"Legacy","credit_allowance":4.25,"credit_period_seconds":2592000}`},
+		{"credit_ledger", `{"id":"cl_legacy","user_id":"u_legacy","group_id":"ug_legacy","cycle_anchor":100,"cycle_start":100,"kind":"timed_debit","amount":0.125}`},
+	}
+	for _, row := range rows {
+		if n, err := RestoreTable(ctx, db, row.table, strings.NewReader(row.json)); err != nil || n != 1 {
+			t.Fatalf("restore legacy %s: count=%d err=%v", row.table, n, err)
+		}
+	}
+	var userMicros, groupMicros, ledgerMicros int64
+	if err := db.QueryRowContext(ctx, `SELECT credits_permanent_micros FROM users WHERE id='u_legacy'`).Scan(&userMicros); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT credit_allowance_micros FROM user_groups WHERE id='ug_legacy'`).Scan(&groupMicros); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT amount_micros FROM credit_ledger WHERE id='cl_legacy'`).Scan(&ledgerMicros); err != nil {
+		t.Fatal(err)
+	}
+	if userMicros != 12_345_678 || groupMicros != 4_250_000 || ledgerMicros != 125_000 {
+		t.Fatalf("restored micros = user:%d group:%d ledger:%d", userMicros, groupMicros, ledgerMicros)
 	}
 }
 

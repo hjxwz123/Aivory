@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/base64"
 	"errors"
 	"net"
@@ -346,21 +347,25 @@ func intToString(n int) string {
 
 // checkDailyTokenQuota enforces a per-user daily token ceiling (§8 hard rule).
 // Default is 0 (disabled); set settings.daily_token_limit to a positive int to
-// turn it on. Tokens are counted via usage_logs (input+output), summed for the
-// current UTC day.
+// turn it on. Tokens are counted via the durable billing ledger, so pruning
+// analytics rows cannot restore a user's allowance.
 func checkDailyTokenQuota(d Deps, userID string) bool {
 	limit := 0
 	if raw, err := store.GetSetting(d.DB, "daily_token_limit"); err == nil {
-		_ = jsonUnmarshalInt(raw, &limit)
+		if jsonUnmarshalInt(raw, &limit) != nil || limit < 0 {
+			return false
+		}
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return false
 	}
 	if limit <= 0 {
 		return true
 	}
 	dayStart := time.Now().Truncate(24 * time.Hour).Unix()
-	var used int
-	_ = d.DB.QueryRowContext(context.Background(),
-		`SELECT COALESCE(SUM(input_tokens+output_tokens),0) FROM usage_logs WHERE user_id=? AND created_at>=?`,
-		userID, dayStart).Scan(&used)
+	used, err := store.BillingTokensSince(context.Background(), d.DB, userID, dayStart)
+	if err != nil {
+		return false
+	}
 	return used < limit
 }
 

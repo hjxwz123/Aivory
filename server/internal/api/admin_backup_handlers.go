@@ -26,6 +26,7 @@ var (
 	configImportMultipartMemoryBuffer = envcfg.Int64("AIVORY_API_CONFIG_IMPORT_MULTIPART_MEMORY_BUFFER", 16<<20)
 	backupImportMultipartMemoryBuffer = envcfg.Int64("AIVORY_API_BACKUP_IMPORT_MULTIPART_MEMORY_BUFFER", 32<<20)
 	errInvalidPaymentConfigArchive    = errors.New("invalid payment configuration in config archive")
+	errInvalidBillingConfigArchive    = errors.New("invalid billing configuration in config archive")
 )
 
 // Database backup / migration (§ admin → data migration).
@@ -262,7 +263,6 @@ func exportConfigAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		}
 		counts[t] = n
 	}
-
 	if err := addDirToZip(zw, filepath.Join(d.Config.UploadDir, "icons"), configZipIcons); err != nil {
 		d.Logger.Printf("config export: icons: %v", err)
 	}
@@ -431,7 +431,7 @@ func importConfigAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	counts, err := mergeConfigArchive(ctx, d, zr, man)
 	if err != nil {
 		switch {
-		case errors.Is(err, errInvalidPaymentConfigArchive):
+		case errors.Is(err, errInvalidPaymentConfigArchive), errors.Is(err, errInvalidBillingConfigArchive):
 			writeError(w, http.StatusBadRequest, err)
 		case errors.Is(err, store.ErrPaymentChannelHasPending),
 			errors.Is(err, store.ErrPaymentChannelHasMethods),
@@ -533,7 +533,11 @@ func importBackupAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 
 	counts, err := restoreDatabase(ctx, d, zr, man)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Errorf("restore failed (no changes committed): %w", err))
+		if errors.Is(err, errInvalidBillingConfigArchive) {
+			writeError(w, http.StatusBadRequest, err)
+		} else {
+			writeError(w, http.StatusInternalServerError, fmt.Errorf("restore failed (no changes committed): %w", err))
+		}
 		return
 	}
 
@@ -682,6 +686,9 @@ func restoreInto(ctx context.Context, ex store.RowExecer, zr *zip.Reader, man ba
 	if err := store.MigrateLegacyCreditPackage(ctx, ex); err != nil {
 		return nil, fmt.Errorf("migrate legacy permanent-credit package: %w", err)
 	}
+	if err := validateBillingConfiguration(ctx, ex); err != nil {
+		return nil, fmt.Errorf("%w: %v", errInvalidBillingConfigArchive, err)
+	}
 	if store.IsPostgres() {
 		// Ancient data may carry genuinely dangling parent ids (pre-FK eras).
 		// Promote those replies to roots instead of failing the whole import.
@@ -816,6 +823,9 @@ func mergeConfigArchive(ctx context.Context, d Deps, zr *zip.Reader, man configM
 		reader, err := normalizeConfigArchiveTableReader(ctx, tx, t, rc)
 		if err != nil {
 			_ = rc.Close()
+			if t == "settings" || t == "user_groups" || t == "models" || t == "model_group_quotas" || t == "credit_packages" {
+				return nil, fmt.Errorf("%w: %v", errInvalidBillingConfigArchive, err)
+			}
 			return nil, err
 		}
 		n, err := store.UpsertTable(ctx, tx, t, reader)
@@ -830,6 +840,9 @@ func mergeConfigArchive(ctx context.Context, d Deps, zr *zip.Reader, man configM
 	}
 	if err := store.MigrateLegacyCreditPackage(ctx, tx); err != nil {
 		return nil, fmt.Errorf("migrate legacy permanent-credit package: %w", err)
+	}
+	if err := validateBillingConfiguration(ctx, tx); err != nil {
+		return nil, fmt.Errorf("%w: %v", errInvalidBillingConfigArchive, err)
 	}
 	if err := rewriteConfigSkillAssetPaths(ctx, tx, man, d); err != nil {
 		return nil, err
@@ -1260,6 +1273,10 @@ func normalizeArchiveTableReader(table string, r io.Reader) (io.Reader, error) {
 		return normalizeSettingsArchiveRows(r)
 	case "models":
 		return normalizeModelOfficialToolsArchiveRows(r)
+	case "model_group_quotas":
+		return normalizeModelQuotaArchiveRows(r)
+	case "credit_packages":
+		return normalizeCreditPackageArchiveRows(r)
 	case "conversations":
 		return normalizeConversationRAGModeArchiveRows(r)
 	case "user_groups":
@@ -1298,6 +1315,16 @@ func normalizeSettingsArchiveRows(r io.Reader) (io.Reader, error) {
 					normalized = json.RawMessage("[]")
 				}
 				row["value"], _ = json.Marshal(string(normalized))
+			}
+		}
+		if present && key == "credits_per_usd" {
+			value, valuePresent, err := backupStringField(row, "value")
+			if err != nil || !valuePresent {
+				return nil, fmt.Errorf("invalid settings.credits_per_usd")
+			}
+			var amount float64
+			if json.Unmarshal([]byte(value), &amount) != nil || math.IsNaN(amount) || math.IsInf(amount, 0) || amount < 0 {
+				return nil, fmt.Errorf("invalid settings.credits_per_usd")
 			}
 		}
 		if err := enc.Encode(row); err != nil {
@@ -1388,6 +1415,21 @@ func normalizeLegacyUserGroupPriceArchiveRows(r io.Reader) (io.Reader, error) {
 		} else {
 			row["yearly_price_amount_minor"] = json.RawMessage("0")
 		}
+		allowance, allowancePresent, err := backupFloat64Field(row, "credit_allowance")
+		if err != nil || allowancePresent && (math.IsNaN(allowance) || math.IsInf(allowance, 0) || allowance < 0) {
+			return nil, fmt.Errorf("invalid user_groups.credit_allowance")
+		}
+		period, periodPresent, err := backupInt64Field(row, "credit_period_seconds")
+		if err != nil || periodPresent && period < 0 || allowancePresent && periodPresent && allowance > 0 && period == 0 {
+			return nil, fmt.Errorf("invalid user_groups.credit_period_seconds")
+		}
+		if allowancePresent {
+			micros, err := store.CreditsToMicros(allowance)
+			if err != nil {
+				return nil, fmt.Errorf("invalid user_groups.credit_allowance")
+			}
+			row["credit_allowance_micros"], _ = json.Marshal(micros)
+		}
 		if err := enc.Encode(row); err != nil {
 			return nil, fmt.Errorf("encode user_groups row: %w", err)
 		}
@@ -1444,10 +1486,212 @@ func normalizeModelOfficialToolsArchiveRows(r io.Reader) (io.Reader, error) {
 				row["builtin_tools"] = cell
 			}
 		}
+		billing := store.Model{Currency: "USD"}
+		billingPresent := false
+		for key, target := range map[string]*float64{
+			"price_input": &billing.PriceInput, "price_output": &billing.PriceOutput,
+			"price_cache_read": &billing.PriceCacheRead, "price_cache_write": &billing.PriceCacheWrite,
+			"price_per_image": &billing.PricePerImage,
+		} {
+			value, present, err := backupFloat64Field(row, key)
+			if err != nil {
+				return nil, fmt.Errorf("invalid models.%s", key)
+			}
+			if present {
+				*target = value
+				billingPresent = true
+			}
+		}
+		if currency, present, err := backupStringField(row, "currency"); err != nil {
+			return nil, fmt.Errorf("invalid models.currency")
+		} else if present {
+			billing.Currency = currency
+			billingPresent = true
+		}
+		if billingPresent {
+			if err := store.ValidateModelBilling(&billing); err != nil {
+				return nil, fmt.Errorf("invalid models billing: %w", err)
+			}
+			row["currency"], _ = json.Marshal(billing.Currency)
+		}
 		if err := enc.Encode(row); err != nil {
 			return nil, fmt.Errorf("encode models row: %w", err)
 		}
 	}
+}
+
+func normalizeModelQuotaArchiveRows(r io.Reader) (io.Reader, error) {
+	return normalizeValidatedArchiveRows("model_group_quotas", r, func(row map[string]json.RawMessage) error {
+		period, present, err := backupInt64Field(row, "period_seconds")
+		if err != nil || present && period <= 0 {
+			return fmt.Errorf("invalid model_group_quotas.period_seconds")
+		}
+		limit, present, err := backupFloat64Field(row, "limit_value")
+		if err != nil || present && (math.IsNaN(limit) || math.IsInf(limit, 0) || limit < 0) {
+			return fmt.Errorf("invalid model_group_quotas.limit_value")
+		}
+		limitType, present, err := backupStringField(row, "limit_type")
+		if err != nil || present && limitType != "cost" && limitType != "count" {
+			return fmt.Errorf("invalid model_group_quotas.limit_type")
+		}
+		return nil
+	})
+}
+
+func normalizeCreditPackageArchiveRows(r io.Reader) (io.Reader, error) {
+	return normalizeValidatedArchiveRows("credit_packages", r, func(row map[string]json.RawMessage) error {
+		credits, creditsPresent, err := backupFloat64Field(row, "credits")
+		if err != nil || creditsPresent && (math.IsNaN(credits) || math.IsInf(credits, 0) || credits < 0) {
+			return fmt.Errorf("invalid credit_packages.credits")
+		}
+		price, pricePresent, err := backupInt64Field(row, "price_amount_minor")
+		if err != nil || pricePresent && price < 0 {
+			return fmt.Errorf("invalid credit_packages.price_amount_minor")
+		}
+		_, _, err = backupBoolField(row, "enabled")
+		if err != nil {
+			return fmt.Errorf("invalid credit_packages.enabled")
+		}
+		return nil
+	})
+}
+
+func normalizeValidatedArchiveRows(table string, r io.Reader, validate func(map[string]json.RawMessage) error) (io.Reader, error) {
+	var out bytes.Buffer
+	dec := json.NewDecoder(r)
+	enc := json.NewEncoder(&out)
+	for {
+		var row map[string]json.RawMessage
+		if err := dec.Decode(&row); err == io.EOF {
+			return bytes.NewReader(out.Bytes()), nil
+		} else if err != nil {
+			return nil, fmt.Errorf("decode %s row: %w", table, err)
+		}
+		if err := validate(row); err != nil {
+			return nil, err
+		}
+		if err := enc.Encode(row); err != nil {
+			return nil, fmt.Errorf("encode %s row: %w", table, err)
+		}
+	}
+}
+
+func backupFloat64Field(row map[string]json.RawMessage, key string) (float64, bool, error) {
+	raw, present := row[key]
+	if !present || strings.TrimSpace(string(raw)) == "null" {
+		return 0, false, nil
+	}
+	var value float64
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return 0, true, err
+	}
+	return value, true, nil
+}
+
+func backupInt64Field(row map[string]json.RawMessage, key string) (int64, bool, error) {
+	raw, present := row[key]
+	if !present || strings.TrimSpace(string(raw)) == "null" {
+		return 0, false, nil
+	}
+	var value int64
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return 0, true, err
+	}
+	return value, true, nil
+}
+
+func validateBillingConfiguration(ctx context.Context, ex store.RowExecer) error {
+	var creditsRaw string
+	if err := ex.QueryRowContext(ctx, `SELECT value FROM settings WHERE key='credits_per_usd'`).Scan(&creditsRaw); err == nil {
+		var amount float64
+		if json.Unmarshal([]byte(creditsRaw), &amount) != nil || math.IsNaN(amount) || math.IsInf(amount, 0) || amount < 0 {
+			return fmt.Errorf("invalid settings.credits_per_usd")
+		}
+		if micros, err := store.CreditsToMicros(amount); err != nil || amount > 0 && micros == 0 {
+			return fmt.Errorf("invalid settings.credits_per_usd")
+		}
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+
+	rows, err := ex.QueryContext(ctx, `SELECT price_input,price_output,price_cache_read,price_cache_write,price_per_image,currency FROM models`)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var model store.Model
+		if err := rows.Scan(&model.PriceInput, &model.PriceOutput, &model.PriceCacheRead, &model.PriceCacheWrite, &model.PricePerImage, &model.Currency); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		if err := store.ValidateModelBilling(&model); err != nil {
+			_ = rows.Close()
+			return err
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+
+	rows, err = ex.QueryContext(ctx, `SELECT monthly_price_amount_minor,yearly_price_amount_minor,max_projects,max_kbs,credit_allowance,credit_period_seconds,max_workspaces,max_storage_mb FROM user_groups`)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var group store.UserGroup
+		if err := rows.Scan(&group.MonthlyPriceAmountMinor, &group.YearlyPriceAmountMinor, &group.MaxProjects, &group.MaxKBs, &group.CreditAllowance, &group.CreditPeriodSeconds, &group.MaxWorkspaces, &group.MaxStorageMB); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		if err := store.ValidateUserGroupBilling(group); err != nil {
+			_ = rows.Close()
+			return err
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+
+	rows, err = ex.QueryContext(ctx, `SELECT credits,price_amount_minor,enabled FROM credit_packages`)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var pkg store.CreditPackage
+		var enabled int
+		if err := rows.Scan(&pkg.Credits, &pkg.PriceAmountMinor, &enabled); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		pkg.Enabled = enabled != 0
+		if err := store.ValidateCreditPackage(pkg); err != nil {
+			_ = rows.Close()
+			return err
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+
+	rows, err = ex.QueryContext(ctx, `SELECT period_seconds,limit_type,limit_value FROM model_group_quotas`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var period int
+		var limitType string
+		var limit float64
+		if err := rows.Scan(&period, &limitType, &limit); err != nil {
+			return err
+		}
+		if err := store.ValidateModelGroupQuota(store.ModelGroupQuota{
+			PeriodSeconds: period, LimitType: limitType, LimitValue: limit,
+		}); err != nil {
+			return fmt.Errorf("invalid model quota billing configuration")
+		}
+	}
+	return rows.Err()
 }
 
 func rewriteConfigSkillAssetPaths(ctx context.Context, ex store.RowExecer, man configManifest, d Deps) error {

@@ -143,6 +143,7 @@ type ToolContext struct {
 	// imgMu guards imageCredits — image_generate may run concurrently in a turn.
 	imgMu        sync.Mutex
 	imageCredits float64
+	imageBillSeq uint64
 	// OnArtifact lets a tool surface a produced file (sandbox output, image).
 	// The orchestrator persists it + streams an "artifact" SSE event.
 	OnArtifact func(ArtifactRef)
@@ -177,15 +178,23 @@ func (tc *ToolContext) ImageCreditsTotal() float64 {
 	return tc.imageCredits
 }
 
+func (tc *ToolContext) NextImageBillingSourceID() string {
+	tc.imgMu.Lock()
+	defer tc.imgMu.Unlock()
+	tc.imageBillSeq++
+	return fmt.Sprintf("%s:image:%d", tc.MessageID, tc.imageBillSeq)
+}
+
+type ImageBillingReservation struct {
+	admission *billingAdmission
+}
+
 // ImageBiller meters image generation against the credit system so the chat
 // tool-call path mirrors drawing mode (§4.20). Implemented by *Orchestrator.
 type ImageBiller interface {
-	// CheckImageCredits decides whether the user may generate n images on the
-	// model and whether they cost credits (free allotment → credits → block).
-	CheckImageCredits(ctx context.Context, userID string, model *store.Model, n int) (allow bool, payCredits bool, message string)
-	// ChargeImageCredits debits credits for the produced images (cost in USD),
-	// returning (timed, total) credits charged.
-	ChargeImageCredits(ctx context.Context, userID string, costUSD float64) (timed float64, total float64)
+	ReserveImageBilling(ctx context.Context, userID string, model *store.Model, n int, sourceID string) (reservation *ImageBillingReservation, allow bool, message string, err error)
+	SettleImageBilling(ctx context.Context, reservation *ImageBillingReservation, images int, costUSD float64) (timed float64, total float64, err error)
+	ReleaseImageBilling(ctx context.Context, reservation *ImageBillingReservation) error
 }
 
 // perTurnToolLimits caps how many times a single tool may run per message
@@ -1365,22 +1374,32 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	//     credits flow as chat; the tool's own hard cap is skipped in that path
 	//     (tc.SkipImageQuota) so the orchestrator's credit decision governs.
 	var msg string
-	var ok, payWithCredits bool
+	var ok bool
+	var turnBilling *billingAdmission
 	var imageRequestParams map[string]any
 	imageGenerationCount := imageModeForcedGenerationCount
-	// Remaining free allowance (USD) when admitted under a finite cost-type
-	// allotment; -1 otherwise. Re-checked against the assembled request below
-	// (§ free-allowance overshoot). Image turns already pre-project their cost
-	// (checkImageQuota counts n × price before deciding), so they don't need it.
-	freeRemainingUSD := -1.0
 	if model.Kind == "image" {
 		imageRequestParams = MergeParamControls(nil, model.ParamControls, req.ParamOverrides)
 		imageGenerationCount = imageGenerationCountFromParams(imageRequestParams)
-		msg, ok, payWithCredits = o.checkImageQuota(ctx, req.UserID, model, imageGenerationCount)
+		turnBilling, msg, err = o.reserveUsageBilling(
+			ctx, req.UserID, model, store.QuotaScopeModelImage, float64(imageGenerationCount),
+			float64(imageGenerationCount)*model.PricePerImage, 0, "image_turn", assistantMsg.ID+":direct",
+		)
+		if err != nil {
+			return nil, err
+		}
+		ok = turnBilling != nil
 	} else {
-		msg, ok, payWithCredits, freeRemainingUSD = o.checkModelQuota(ctx, req.UserID, model)
+		msg, ok, _, _ = o.checkModelQuota(ctx, req.UserID, model)
 	}
 	if !ok {
+		if ctx.Err() != nil {
+			_ = finishMessage(ctx, store.MessageFinishPatch{
+				Blocks: []byte("[]"), Citations: []byte("[]"), StopReason: "stopped", Status: "stopped",
+			})
+			onEvent(SseEvent{Type: "done", MessageID: assistantMsg.ID, StopReason: "stopped"})
+			return &RunResult{UserMessage: userMsg, AssistantMessage: assistantMsg}, nil
+		}
 		refusalBlocks, _ := json.Marshal([]UnifiedBlock{{Kind: "text", Text: msg}})
 		_ = finishMessage(ctx, store.MessageFinishPatch{
 			Blocks: refusalBlocks, Citations: []byte("[]"), StopReason: "quota_exceeded", Status: "complete",
@@ -1389,6 +1408,15 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		onEvent(SseEvent{Type: "done", MessageID: assistantMsg.ID, StopReason: "quota_exceeded"})
 		assistantMsg.Blocks = refusalBlocks
 		return &RunResult{UserMessage: userMsg, AssistantMessage: assistantMsg}, nil
+	}
+	if turnBilling != nil {
+		defer func() {
+			releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+			defer cancel()
+			if releaseErr := o.releaseUsageBilling(releaseCtx, turnBilling); releaseErr != nil && o.logger != nil {
+				o.logger.Printf("release turn billing reservation (msg=%s): %v", assistantMsg.ID, releaseErr)
+			}
+		}()
 	}
 	if model.Kind == "image" {
 		// Direct drawing and normal-chat image_generate must resolve the same image
@@ -1408,7 +1436,12 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	//     stop — generation never runs.
 	selectedUserSkillText := formatSelectedUserSkills(selectedUserSkills)
 	moderationText := req.UserText + selectedUserSkillText
-	if blocked, msg := o.moderatePrompt(ctx, model, moderationText, req.UserID, conv.ID, assistantMsg.ID); blocked {
+	blocked, moderationMessage, moderationErr := o.moderatePrompt(ctx, model, moderationText, req.UserID, conv.ID, assistantMsg.ID)
+	if moderationErr != nil {
+		return nil, moderationErr
+	}
+	if blocked {
+		msg := moderationMessage
 		refusalBlocks, _ := json.Marshal([]UnifiedBlock{{Kind: "text", Text: msg}})
 		_ = finishMessage(ctx, store.MessageFinishPatch{
 			Blocks: refusalBlocks, Citations: []byte("[]"), StopReason: "content_moderation", Status: "complete",
@@ -1426,7 +1459,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	//     assistant message. Chat tools (python/sandbox) stay available by
 	//     switching back to a chat model in the same conversation.
 	if model.Kind == "image" {
-		return o.runImageTurn(ctx, conv, model, userMsg, assistantMsg, req, imageRequestParams, imageGenerationCount, turnStart, payWithCredits, onEvent)
+		return o.runImageTurn(ctx, conv, model, userMsg, assistantMsg, req, imageRequestParams, imageGenerationCount, turnStart, turnBilling, onEvent)
 	}
 
 	// 3. Build context.
@@ -1504,10 +1537,12 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	useOfficial := officialMode && len(officialRequests) > 0
 	hostedImageOfficial := useOfficial && channel.Type == "openai" && channel.APIFormat == "responses" &&
 		responsesRequestHasToolType(MergeOfficialToolRequests(nil, officialRequests), "image_generation")
-	officialImagePayCredits := false
+	var officialImageBilling *billingAdmission
+	var officialDailyImageQuota *store.QuotaReservation
 	if hostedImageOfficial {
-		if dailyErr := o.checkDailyImageLimit(ctx, req.UserID, 1); dailyErr != nil {
-			message := dailyErr.Error()
+		officialDailyImageQuota, err = o.checkDailyImageLimit(ctx, req.UserID, 1)
+		if err != nil {
+			message := err.Error()
 			refusalBlocks, _ := json.Marshal([]UnifiedBlock{{Kind: "text", Text: message}})
 			_ = finishMessage(ctx, store.MessageFinishPatch{
 				Blocks: refusalBlocks, Citations: []byte("[]"), StopReason: "quota_exceeded", Status: "complete",
@@ -1517,18 +1552,31 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			assistantMsg.Blocks = refusalBlocks
 			return &RunResult{UserMessage: userMsg, AssistantMessage: assistantMsg}, nil
 		}
-		quotaMessage, imageAllowed, payImageCredits := o.checkImageQuota(ctx, req.UserID, model, 1)
-		if !imageAllowed {
-			refusalBlocks, _ := json.Marshal([]UnifiedBlock{{Kind: "text", Text: quotaMessage}})
+		defer func() {
+			releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+			defer cancel()
+			_ = o.releaseUsageBilling(releaseCtx, officialImageBilling)
+			if officialDailyImageQuota != nil {
+				_ = store.ReleaseQuotaReservation(releaseCtx, o.db, officialDailyImageQuota.ID)
+			}
+		}()
+		officialImageBilling, msg, err = o.reserveUsageBilling(
+			ctx, req.UserID, model, store.QuotaScopeModelImage, 1, model.PricePerImage, 0,
+			"hosted_image", assistantMsg.ID+":hosted-image",
+		)
+		if err != nil {
+			return nil, err
+		}
+		if officialImageBilling == nil {
+			refusalBlocks, _ := json.Marshal([]UnifiedBlock{{Kind: "text", Text: msg}})
 			_ = finishMessage(ctx, store.MessageFinishPatch{
 				Blocks: refusalBlocks, Citations: []byte("[]"), StopReason: "quota_exceeded", Status: "complete",
 			})
-			onEvent(SseEvent{Type: "refusal", MessageID: assistantMsg.ID, Message: quotaMessage})
+			onEvent(SseEvent{Type: "refusal", MessageID: assistantMsg.ID, Message: msg})
 			onEvent(SseEvent{Type: "done", MessageID: assistantMsg.ID, StopReason: "quota_exceeded"})
 			assistantMsg.Blocks = refusalBlocks
 			return &RunResult{UserMessage: userMsg, AssistantMessage: assistantMsg}, nil
 		}
-		officialImagePayCredits = payImageCredits
 	}
 	// An explicit Official choice can resolve to an empty set because the user
 	// unchecked every tool, selected stale names, or an administrator changed the
@@ -1622,6 +1670,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// ingested upload (chat-attached files are conversation-scoped, not in a KB).
 	ragScoped := len(kbIDs) > 0 || (o.rag != nil && store.ConversationHasReadyDocs(ctx, o.db, conv.ID))
 	if o.rag != nil && ragScoped && req.Mode != ModeDeepResearch {
+		ragCtx := rag.WithBillingMessageID(ctx, assistantMsg.ID)
 		recent := recentHistoryStrings(history, ragRouterRecentHistoryCount)
 		var snippets []rag.Snippet
 		var decision rag.RouteDecision
@@ -1630,16 +1679,19 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		// the context budget while improving recall on specific-reference questions.
 		var ragErr error
 		if ragMode == "inject" {
-			snippets, ragErr = o.rag.Retrieve(ctx, req.UserID, conv.ID, kbIDs, req.UserText, 8)
+			snippets, ragErr = o.rag.Retrieve(ragCtx, req.UserID, conv.ID, kbIDs, req.UserText, 8)
 			decision = rag.RouteDecision{Strategy: "retrieve"}
 		} else {
-			snippets, decision, ragErr = o.rag.RouteAndRetrieve(ctx, req.UserID, conv.ID, kbIDs, req.UserText, recent, 8)
+			snippets, decision, ragErr = o.rag.RouteAndRetrieve(ragCtx, req.UserID, conv.ID, kbIDs, req.UserText, recent, 8)
 		}
 		// Never SILENTLY swallow a retrieval failure (e.g. mixed embedding
 		// models/dims, embedder down). We still answer without RAG context — the
 		// turn shouldn't hard-fail — but the reason is now logged instead of
 		// vanishing into a "_", which previously looked like "RAG just found nothing".
 		if ragErr != nil {
+			if errors.Is(ragErr, rag.ErrBillingRecord) {
+				return nil, ragErr
+			}
 			o.logger.Printf("rag: retrieval failed for conv %s (kbs=%v): %v — answering without knowledge context", conv.ID, kbIDs, ragErr)
 		}
 		if decision.Strategy != "none" {
@@ -1706,7 +1758,8 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	if req.NoTools && req.ForceWebSearch && (builtinTools == nil || builtinTools["web_search"]) {
 		// Offset the search citations past any KB snippets already collected this
 		// turn so the two source sets don't both start at [1].
-		if searchText, searchCites := o.forcedWebSearch(ctx, req, conv, history, len(ragSnippets), builtinTools, onEvent); searchText != "" {
+		searchCtx := withTaskBillingMessageID(ctx, assistantMsg.ID)
+		if searchText, searchCites := o.forcedWebSearch(searchCtx, req, conv, history, len(ragSnippets), builtinTools, onEvent); searchText != "" {
 			if ragContext != "" {
 				ragContext += "\n\n"
 			}
@@ -1737,7 +1790,10 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	keep, summaryBlocks, compactAction := PlanCompaction(o.db, conv, history, injectedOverhead)
 	switch compactAction {
 	case compactInline:
-		if k, b, cerr := MaybeCompact(ctx, o.db, o.task, conv, history, injectedOverhead, req.UserID); cerr == nil {
+		compactCtx := withTaskBillingMessageID(ctx, assistantMsg.ID)
+		if k, b, cerr := MaybeCompact(compactCtx, o.db, o.task, conv, history, injectedOverhead, req.UserID); errors.Is(cerr, ErrTaskBillingRecord) {
+			return nil, cerr
+		} else if cerr == nil {
 			keep, summaryBlocks = k, b
 		}
 	case compactAsync:
@@ -1925,34 +1981,34 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		FallbackUsed:         fallbackFlag,
 	}
 
-	// § free-allowance overshoot: the free/credits decision above ran BEFORE the
-	// prompt existed, on accumulated usage alone — a $2 request would ride on $1
-	// of remaining allowance. Now that the real request is assembled, re-check:
-	// if the estimate clearly exceeds what's left (grace factor, default 120%),
-	// charge the WHOLE turn in credits instead; the unspent free remainder stays
-	// for later, smaller turns (paid turns don't burn the free window — see
-	// recordQuotaUsage / store.UsageInWindow). Only when credits are enabled:
-	// non-credit deployments keep the old overshootable behavior over blocking.
-	if !payWithCredits && freeRemainingUSD >= 0 && o.creditsPerUSD() > 0 &&
-		freeQuotaOvershoot(estimateTurnUSD(*model, provReq), freeRemainingUSD) {
-		payWithCredits = true
-	}
-
-	// §credits pre-flight: for a credit-charged turn, estimate the REAL upstream
-	// request size (system + tools + history incl. injected RAG/file) + a small
-	// output reserve, convert to credits, and refuse BEFORE calling the model if
-	// the user can't afford it. Free-allotment turns are unaffected.
-	if payWithCredits {
-		if pmsg, pok := o.preflightCredit(ctx, req.UserID, model, provReq); !pok {
-			refusalBlocks, _ := json.Marshal([]UnifiedBlock{{Kind: "text", Text: pmsg}})
+	// Reserve the model allowance or estimated credits against the fully assembled
+	// request. A preliminary gate above keeps obvious refusals cheap; this atomic
+	// reservation is authoritative under concurrent turns.
+	if model.Kind != "image" {
+		turnBilling, msg, err = o.reserveUsageBilling(
+			ctx, req.UserID, model, store.QuotaScopeModelChat, 1, estimateTurnUSD(*model, provReq),
+			estimateTurnTokens(provReq), "llm_turn", assistantMsg.ID+":chat",
+		)
+		if err != nil {
+			return nil, err
+		}
+		if turnBilling == nil {
+			refusalBlocks, _ := json.Marshal([]UnifiedBlock{{Kind: "text", Text: msg}})
 			_ = finishMessage(ctx, store.MessageFinishPatch{
 				Blocks: refusalBlocks, Citations: []byte("[]"), StopReason: "insufficient_credits", Status: "complete",
 			})
-			onEvent(SseEvent{Type: "refusal", MessageID: assistantMsg.ID, Message: pmsg})
+			onEvent(SseEvent{Type: "refusal", MessageID: assistantMsg.ID, Message: msg})
 			onEvent(SseEvent{Type: "done", MessageID: assistantMsg.ID, StopReason: "insufficient_credits"})
 			assistantMsg.Blocks = refusalBlocks
 			return &RunResult{UserMessage: userMsg, AssistantMessage: assistantMsg}, nil
 		}
+		defer func() {
+			releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+			defer cancel()
+			if releaseErr := o.releaseUsageBilling(releaseCtx, turnBilling); releaseErr != nil && o.logger != nil {
+				o.logger.Printf("release chat billing reservation (msg=%s): %v", assistantMsg.ID, releaseErr)
+			}
+		}()
 	}
 
 	// Image model the user pre-selected (§4.12-B), read from user settings.
@@ -2090,18 +2146,34 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	if hostedImageCount > 0 {
 		persistCtx := context.WithoutCancel(ctx)
 		imageCost := float64(hostedImageCount) * model.PricePerImage
-		var imageCredits float64
-		if officialImagePayCredits && imageCost > 0 {
-			_, total := o.ChargeImageCredits(persistCtx, req.UserID, imageCost)
-			imageCredits = total
-			runner.ctx.AddImageCredits(total)
+		if officialImageBilling != nil {
+			officialImageBilling.KeepReserved = true
 		}
-		o.logUsage(persistCtx, store.UsageLog{
+		if officialDailyImageQuota != nil {
+			if _, finalizeErr := store.FinalizeQuotaReservation(persistCtx, o.db, officialDailyImageQuota.ID, float64(hostedImageCount)); finalizeErr != nil {
+				err = errors.Join(err, fmt.Errorf("finalize hosted image daily quota: %w", finalizeErr))
+			}
+		}
+		usageRow := store.UsageLog{
 			UserID: req.UserID, WorkspaceID: conv.WorkspaceID, ConversationID: conv.ID,
 			MessageID: assistantMsg.ID, ModelID: model.ID, Purpose: "image",
-			ImagesCount: hostedImageCount, Cost: imageCost, Credits: imageCredits,
+			ImagesCount: hostedImageCount, Cost: imageCost,
 			Currency: model.Currency, ChannelID: servedChannelID, Fallback: usedFallback,
-		})
+		}
+		if billingErr := store.RecordBillingUsage(persistCtx, o.db, usageRow); billingErr != nil {
+			err = errors.Join(err, fmt.Errorf("record hosted image billing: %w", billingErr))
+		} else if officialImageBilling != nil {
+			_, total, settleErr := o.SettleImageBilling(persistCtx, &ImageBillingReservation{admission: officialImageBilling}, hostedImageCount, imageCost)
+			if settleErr != nil {
+				err = errors.Join(err, fmt.Errorf("settle hosted image billing: %w", settleErr))
+			} else {
+				usageRow.Credits = total
+				runner.ctx.AddImageCredits(total)
+			}
+		}
+		if analyticsErr := store.LogUsageAnalytics(persistCtx, o.db, usageRow); analyticsErr != nil {
+			err = errors.Join(err, fmt.Errorf("record hosted image analytics: %w", analyticsErr))
+		}
 	}
 	if err != nil {
 		// §6.2 stop-button semantics: when the user (or the kill switch) cancels
@@ -2144,8 +2216,51 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			stopChatCost := computeCost(*model, usage)
 			produced := usage.InputTokens > 0 || usage.OutputTokens > 0
 			var stopCredits float64
-			if payWithCredits && produced {
-				_, stopCredits = o.chargeTurnCredits(ctx, req.UserID, stopChatCost)
+			stopTurnTotal := stopChatCost
+			persistStoppedBillingFailure := func(cost float64, cause error) error {
+				const safeErr = "Billing settlement failed. Your partial result was saved, but this turn requires administrator review."
+				_ = finishMessage(ctx, store.MessageFinishPatch{
+					Blocks: partialJSON, Citations: citesJSON, StopReason: "stopped", Status: "error", Error: safeErr,
+					InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens,
+					CacheReadTokens: usage.CacheReadTokens, CacheWriteTokens: usage.CacheWriteTokens,
+					Cost: cost, GenMs: time.Since(turnStart).Milliseconds(),
+				})
+				onEvent(SseEvent{Type: "error", Message: safeErr})
+				return cause
+			}
+			if produced {
+				if turnBilling != nil {
+					turnBilling.KeepReserved = true
+				}
+				sideCosts, billingErr := store.TurnSideBillingCosts(ctx, o.db, assistantMsg.ID)
+				if billingErr != nil {
+					return nil, persistStoppedBillingFailure(stopTurnTotal, fmt.Errorf("read stopped-turn billing costs: %w", billingErr))
+				}
+				stopTurnTotal += sideCosts.Total
+				stopCreditBase := stopTurnTotal - sideCosts.Image
+				if stopCreditBase < 0 {
+					stopCreditBase = 0
+				}
+				for _, rr := range perRequestUsageRows(reqRecorder.snapshots(), model, usage, stopChatCost, 0, o.successRequestLoggingEnabled()) {
+					if billingErr := store.RecordBillingUsage(ctx, o.db, store.UsageLog{
+						UserID: req.UserID, WorkspaceID: conv.WorkspaceID, ConversationID: conv.ID,
+						MessageID: assistantMsg.ID, ModelID: model.ID, Purpose: "chat",
+						InputTokens: rr.Usage.InputTokens, OutputTokens: rr.Usage.OutputTokens,
+						CacheReadTokens: rr.Usage.CacheReadTokens, CacheWriteTokens: rr.Usage.CacheWriteTokens,
+						Cost: rr.Cost, Currency: model.Currency,
+					}); billingErr != nil {
+						return nil, persistStoppedBillingFailure(stopTurnTotal, fmt.Errorf("record stopped-turn billing: %w", billingErr))
+					}
+				}
+				settleCtx, settleCancel := context.WithTimeout(ctx, 15*time.Second)
+				debit, settleErr := o.settleUsageBilling(
+					settleCtx, turnBilling, 1, stopCreditBase, usage.InputTokens+usage.OutputTokens,
+				)
+				settleCancel()
+				if settleErr != nil {
+					return nil, persistStoppedBillingFailure(stopTurnTotal, fmt.Errorf("settle stopped-turn billing: %w", settleErr))
+				}
+				stopCredits = debit.Total
 			}
 			// Image credits (a tool that drew before the stop) are already debited by
 			// ImageBilling; fold them into the per-turn total the user sees.
@@ -2158,7 +2273,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 				OutputTokens:     usage.OutputTokens,
 				CacheReadTokens:  usage.CacheReadTokens,
 				CacheWriteTokens: usage.CacheWriteTokens,
-				Cost:             stopChatCost,
+				Cost:             stopTurnTotal,
 				Credits:          turnCredits,
 				Status:           "stopped",
 				GenMs:            time.Since(turnStart).Milliseconds(),
@@ -2172,7 +2287,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 				// rounds completed before the stop each keep their own row.
 				for _, rr := range perRequestUsageRows(reqRecorder.snapshots(), model, usage, stopChatCost, stopCredits, o.successRequestLoggingEnabled()) {
 					requestChannelID, requestFallback := requestUsageChannel(rr, model.ChannelID, fallbackChannelID, usedFallback)
-					o.logUsage(ctx, store.UsageLog{
+					if analyticsErr := store.LogUsageAnalytics(ctx, o.db, store.UsageLog{
 						UserID:            req.UserID,
 						WorkspaceID:       conv.WorkspaceID,
 						ConversationID:    conv.ID,
@@ -2193,9 +2308,10 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 						RequestURL:        rr.URL,
 						RequestHeaders:    rr.Header,
 						RequestBody:       rr.Body,
-					})
+					}); analyticsErr != nil && o.logger != nil {
+						o.logger.Printf("usage analytics write failed (msg=%s purpose=chat): %v", assistantMsg.ID, analyticsErr)
+					}
 				}
-				o.recordQuotaUsage(ctx, req.UserID, model, stopChatCost, payWithCredits)
 			}
 			onEvent(SseEvent{Type: "done", MessageID: assistantMsg.ID, StopReason: "stopped", Usage: &usage, Credits: turnCredits})
 			finalAssistant, _ := store.GetMessage(ctx, o.db, assistantMsg.ID)
@@ -2359,35 +2475,84 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		rawToStore = nil
 	}
 	chatCost := computeCost(*model, result.Usage)
+	if turnBilling != nil {
+		turnBilling.KeepReserved = true
+	}
 	// §verify: when Verify mode is on, a secondary auditor model fact-checks A's
 	// finished answer. Runs HERE — after the answer is final but BEFORE
 	// tallyTurnSideCosts — so its usage row (purpose='verify', pinned to this
 	// message) folds into the turn cost + credit charge below. Fail-open.
 	if req.Verify {
-		o.runVerify(ctx, conv, req.UserID, assistantMsg.ID, req.UserText, result, onEvent)
+		if verifyErr := o.runVerify(ctx, conv, req.UserID, assistantMsg.ID, req.UserText, result, onEvent); verifyErr != nil {
+			const safeErr = "Billing settlement failed. Your result was saved, but this turn requires administrator review."
+			_ = finishMessage(ctx, store.MessageFinishPatch{
+				Blocks: blocksJSON, Raw: rawToStore, Citations: citesJSON, Status: "error", Error: safeErr,
+				Cost: chatCost, GenMs: time.Since(turnStart).Milliseconds(),
+			})
+			onEvent(SseEvent{Type: "error", Message: safeErr})
+			return nil, verifyErr
+		}
 	}
+	billingCtx, billingCancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+	defer billingCancel()
 	// §8 cost rule: messages.cost is the FULL spend the user incurred for this
 	// turn — chat + any image_generate calls + any embedding queries inside
 	// the loop. The image/embedding rows are still logged separately so
 	// admin/usage breakdowns work.
-	sideCost := tallyTurnSideCosts(ctx, o.db, conv.ID, assistantMsg.ID)
-	turnTotal := chatCost + sideCost
+	sideCosts, billingErr := store.TurnSideBillingCosts(billingCtx, o.db, assistantMsg.ID)
+	if billingErr != nil {
+		const safeErr = "Billing settlement failed. Your result was saved, but this turn requires administrator review."
+		_ = finishMessage(ctx, store.MessageFinishPatch{
+			Blocks: blocksJSON, Raw: rawToStore, Citations: citesJSON, Status: "error", Error: safeErr,
+			Cost: chatCost, GenMs: time.Since(turnStart).Milliseconds(),
+		})
+		onEvent(SseEvent{Type: "error", Message: safeErr})
+		return nil, fmt.Errorf("read turn billing costs: %w", billingErr)
+	}
+	turnTotal := chatCost + sideCosts.Total
 	// §4.20: image_generate already metered its own cost against the image model's
 	// quota and charged any image credits via ImageBilling (free→credits→block),
 	// so EXCLUDE the image cost from the chat credit base to avoid double-charging.
 	// Image cost still counts in messages.cost (full spend) above.
-	imageCost := tallyImageCost(ctx, o.db, assistantMsg.ID)
-	chatCreditBase := turnTotal - imageCost
+	chatCreditBase := turnTotal - sideCosts.Image
 	if chatCreditBase < 0 {
 		chatCreditBase = 0
+	}
+	requestBillingRows := perRequestUsageRows(reqRecorder.snapshots(), model, result.Usage, chatCost, 0, o.successRequestLoggingEnabled())
+	for _, rr := range requestBillingRows {
+		if billingErr := store.RecordBillingUsage(billingCtx, o.db, store.UsageLog{
+			UserID: req.UserID, WorkspaceID: conv.WorkspaceID, ConversationID: conv.ID,
+			MessageID: assistantMsg.ID, ModelID: model.ID, Purpose: "chat",
+			InputTokens: rr.Usage.InputTokens, OutputTokens: rr.Usage.OutputTokens,
+			CacheReadTokens: rr.Usage.CacheReadTokens, CacheWriteTokens: rr.Usage.CacheWriteTokens,
+			Cost: rr.Cost, Currency: model.Currency,
+		}); billingErr != nil {
+			const safeErr = "Billing settlement failed. Your result was saved, but this turn requires administrator review."
+			_ = finishMessage(ctx, store.MessageFinishPatch{
+				Blocks: blocksJSON, Raw: rawToStore, Citations: citesJSON, Status: "error", Error: safeErr,
+				Cost: turnTotal, GenMs: time.Since(turnStart).Milliseconds(),
+			})
+			onEvent(SseEvent{Type: "error", Message: safeErr})
+			return nil, fmt.Errorf("record chat billing: %w", billingErr)
+		}
 	}
 	// §credits: when this turn is past the group's free allotment, convert the
 	// chat spend to credits and debit timed-first-then-permanent. Usage rows store
 	// the total charge so every credit-paid turn is excluded from free quota.
 	var chatCredits float64
-	if payWithCredits {
-		_, chatCredits = o.chargeTurnCredits(ctx, req.UserID, chatCreditBase)
+	chatDebit, settleErr := o.settleUsageBilling(
+		billingCtx, turnBilling, 1, chatCreditBase, result.Usage.InputTokens+result.Usage.OutputTokens,
+	)
+	if settleErr != nil {
+		const safeErr = "Billing settlement failed. Your result was saved, but this turn requires administrator review."
+		_ = finishMessage(ctx, store.MessageFinishPatch{
+			Blocks: blocksJSON, Raw: rawToStore, Citations: citesJSON, Status: "error", Error: safeErr,
+			Cost: turnTotal, GenMs: time.Since(turnStart).Milliseconds(),
+		})
+		onEvent(SseEvent{Type: "error", Message: safeErr})
+		return nil, fmt.Errorf("settle chat billing: %w", settleErr)
 	}
+	chatCredits = chatDebit.Total
 	// Total credits the user sees for this turn = chat credits + image credits the
 	// tool charged (ImageBilling), so a chat turn that drew an image shows both.
 	turnCredits := chatCredits + runner.ctx.ImageCreditsTotal()
@@ -2410,10 +2575,10 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// with its own tokens/cost and (when full request logging is on) its own
 	// request snapshot. Row sums equal the old single-row totals exactly, and
 	// they share message_id, so per-turn groupings and quota reseeds hold.
-	logProviderFailures(ctx)
+	logProviderFailures(billingCtx)
 	for _, rr := range perRequestUsageRows(reqRecorder.snapshots(), model, result.Usage, chatCost, chatCredits, o.successRequestLoggingEnabled()) {
 		requestChannelID, requestFallback := requestUsageChannel(rr, model.ChannelID, fallbackChannelID, usedFallback)
-		o.logUsage(ctx, store.UsageLog{
+		if analyticsErr := store.LogUsageAnalytics(billingCtx, o.db, store.UsageLog{
 			UserID:            req.UserID,
 			WorkspaceID:       conv.WorkspaceID,
 			ConversationID:    conv.ID,
@@ -2434,12 +2599,13 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			RequestURL:        rr.URL,
 			RequestHeaders:    rr.Header,
 			RequestBody:       rr.Body,
-		})
+		}); analyticsErr != nil && o.logger != nil {
+			o.logger.Printf("usage analytics write failed (msg=%s purpose=chat): %v", assistantMsg.ID, analyticsErr)
+		}
 	}
 	// Update the fixed-window FREE quota counter for this user+model (§ user
 	// groups). Credit-paid turns are skipped inside — they must not burn the
 	// remaining free allowance.
-	o.recordQuotaUsage(ctx, req.UserID, model, chatCost, payWithCredits)
 
 	// Non-streaming models: now that generation is complete, emit the full
 	// answer as a single text delta.
@@ -2461,7 +2627,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		onEvent(SseEvent{Type: "refusal", MessageID: assistantMsg.ID, Message: "The model declined to answer (content filtered)."})
 	}
 
-	finalAssistant, _ := store.GetMessage(ctx, o.db, assistantMsg.ID)
+	finalAssistant, _ := store.GetMessage(billingCtx, o.db, assistantMsg.ID)
 	usage := result.Usage
 	onEvent(SseEvent{
 		Type: "done", MessageID: assistantMsg.ID,
@@ -2508,7 +2674,7 @@ func (o *Orchestrator) runImageTurn(
 	imageRequestParams map[string]any,
 	imageGenerationCount int,
 	turnStart time.Time,
-	payWithCredits bool,
+	billing *billingAdmission,
 	onEvent func(SseEvent),
 ) (*RunResult, error) {
 	onEvent(SseEvent{Type: "image_status", MessageID: assistantMsg.ID, Status: "optimizing"})
@@ -2528,7 +2694,10 @@ func (o *Orchestrator) runImageTurn(
 			_ = store.SetConvProviderStateKey(ctx, o.db, conv.ID, "image_style", styleID)
 		}
 	}
-	finalPrompt := o.optimizeImagePrompt(ctx, req.UserID, conv.ID, assistantMsg.ID, req.UserText, styleHidden)
+	finalPrompt, optimizeErr := o.optimizeImagePrompt(ctx, req.UserID, conv.ID, assistantMsg.ID, req.UserText, styleHidden)
+	if optimizeErr != nil {
+		return nil, optimizeErr
+	}
 
 	// Reference images: the user's image attachments become input images (edit /
 	// image-to-image). loadInputImages resolves file ids too (§4.20).
@@ -2642,6 +2811,19 @@ func (o *Orchestrator) runImageTurn(
 			return nil, err
 		}
 	}
+	if err != nil && len(artBlocks) > 0 && ctx.Err() == nil {
+		if billing != nil {
+			billing.KeepReserved = true
+		}
+		blocksJSON, _ := json.Marshal(artBlocks)
+		const safeErr = "Billing settlement failed. Your generated image was saved, but this turn requires administrator review."
+		_ = finishMessage(store.MessageFinishPatch{
+			Blocks: blocksJSON, Citations: []byte("[]"), Status: "error", Error: safeErr,
+			GenMs: time.Since(turnStart).Milliseconds(),
+		})
+		onEvent(SseEvent{Type: "error", Message: safeErr})
+		return nil, err
+	}
 
 	// At least one image was produced (a late `err` on stop still keeps the image).
 	blocks := artBlocks
@@ -2649,15 +2831,37 @@ func (o *Orchestrator) runImageTurn(
 		blocks = append(blocks, UnifiedBlock{Kind: "text", Text: output})
 	}
 	blocksJSON, _ := json.Marshal(blocks)
+	if billing != nil {
+		billing.KeepReserved = true
+	}
 
 	// Cost: image_generate logged the image usage row; message.cost = the turn's
 	// side costs (image + any prompt-optimization). Credits debited when the
 	// group's free image allotment is exhausted (§4.20 — same flow as chat).
-	turnTotal := tallyTurnSideCosts(persistCtx, o.db, conv.ID, assistantMsg.ID)
-	var turnCredits float64
-	if payWithCredits && turnTotal > 0 {
-		_, turnCredits = o.chargeTurnCredits(persistCtx, req.UserID, turnTotal)
+	sideCosts, billingErr := store.TurnSideBillingCosts(persistCtx, o.db, assistantMsg.ID)
+	if billingErr != nil {
+		const safeErr = "Billing settlement failed. Your result was saved, but this turn requires administrator review."
+		_ = finishMessage(store.MessageFinishPatch{
+			Blocks: blocksJSON, Citations: []byte("[]"), Status: "error", Error: safeErr,
+			GenMs: time.Since(turnStart).Milliseconds(),
+		})
+		onEvent(SseEvent{Type: "error", Message: safeErr})
+		return nil, fmt.Errorf("read image-turn billing costs: %w", billingErr)
 	}
+	turnTotal := sideCosts.Total
+	settleCtx, settleCancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+	debit, settleErr := o.settleUsageBilling(settleCtx, billing, float64(len(artBlocks)), turnTotal, 0)
+	settleCancel()
+	if settleErr != nil {
+		const safeErr = "Billing settlement failed. Your result was saved, but this turn requires administrator review."
+		_ = finishMessage(store.MessageFinishPatch{
+			Blocks: blocksJSON, Citations: []byte("[]"), Status: "error", Error: safeErr,
+			Cost: turnTotal, GenMs: time.Since(turnStart).Milliseconds(),
+		})
+		onEvent(SseEvent{Type: "error", Message: safeErr})
+		return nil, fmt.Errorf("settle image-turn billing: %w", settleErr)
+	}
+	turnCredits := debit.Total
 	// The image cost row was written before the orchestrator knew the final credit
 	// charge. Add a zero-cost attribution row so the turn is still recognized as
 	// credit-paid without perturbing image counts or cost totals.
@@ -2698,11 +2902,11 @@ func (o *Orchestrator) runImageTurn(
 // (settings.image_prompt_model_id). When unset or on error it falls back to a
 // deterministic join so generation always proceeds. The hidden prompt is
 // composed here and NEVER returned to the client.
-func (o *Orchestrator) optimizeImagePrompt(ctx context.Context, userID, convID, msgID, userText, styleHidden string) string {
+func (o *Orchestrator) optimizeImagePrompt(ctx context.Context, userID, convID, msgID, userText, styleHidden string) (string, error) {
 	join := strings.TrimSpace(strings.TrimSpace(userText) + "\n" + styleHidden)
 	modelID := settingStr(o.db, "image_prompt_model_id")
 	if modelID == "" || o.task == nil {
-		return join
+		return join, nil
 	}
 	sys := "You rewrite a user's request into a single vivid, concrete image-generation prompt. " +
 		"Merge any STYLE DIRECTIVES naturally. Preserve the user's subject and intent. " +
@@ -2716,10 +2920,16 @@ func (o *Orchestrator) optimizeImagePrompt(ctx context.Context, userID, convID, 
 		UserID: userID, ConversationID: convID, MessageID: msgID,
 		MaxOutputTokens: imagePromptOptimizerOutputTokens,
 	})
-	if err != nil || strings.TrimSpace(out) == "" {
-		return join
+	if err != nil {
+		if errors.Is(err, ErrTaskBillingRecord) {
+			return "", err
+		}
+		return join, nil
 	}
-	return strings.TrimSpace(out)
+	if strings.TrimSpace(out) == "" {
+		return join, nil
+	}
+	return strings.TrimSpace(out), nil
 }
 
 // storeToUnified converts stored messages to the unified history shape.
@@ -3841,7 +4051,9 @@ func (o *Orchestrator) deriveSearchQueries(ctx context.Context, req RunRequest, 
 		Queries []string `json:"queries"`
 	}
 	if o.task != nil {
-		err := o.task.RunJSON(ctx, TaskSearchQueries, b.String(), &out, RunOpts{UserID: req.UserID, ConversationID: req.ConversationID})
+		err := o.task.RunJSON(ctx, TaskSearchQueries, b.String(), &out, RunOpts{
+			UserID: req.UserID, ConversationID: req.ConversationID,
+		})
 		if err == nil {
 			cleaned := make([]string, 0, len(out.Queries))
 			for _, q := range out.Queries {
@@ -4146,43 +4358,6 @@ func computeCost(m store.Model, u Usage) float64 {
 	cost += float64(u.CacheReadTokens) / 1_000_000 * m.PriceCacheRead
 	cost += float64(u.CacheWriteTokens) / 1_000_000 * m.PriceCacheWrite
 	return cost
-}
-
-// tallyTurnSideCosts sums usage_logs rows produced DURING the current assistant
-// turn (image_generate calls, RAG query embeddings) so we can roll the total
-// into messages.cost. We filter by message_id when the side-cost row pinned
-// it (image_generate does), and by conversation_id + a 60-second window
-// since the turn started otherwise. Returns 0 on any error.
-func tallyTurnSideCosts(ctx context.Context, db *sql.DB, convID, msgID string) float64 {
-	if db == nil {
-		return 0
-	}
-	var total sql.NullFloat64
-	// Include task.image_prompt and task.tool_route: both synchronous helper calls
-	// are pinned to this assistant message and are part of the turn's full cost
-	// (§8). Include 'verify' for the same reason.
-	_ = db.QueryRowContext(ctx,
-		`SELECT COALESCE(SUM(cost),0) FROM usage_logs
-			 WHERE message_id=? AND purpose IN ('image','embedding','task.image_prompt','task.tool_route','verify')`, msgID).Scan(&total)
-	if total.Valid {
-		return total.Float64
-	}
-	return 0
-}
-
-// tallyImageCost sums just the image-generation cost pinned to a message (§4.20),
-// so the chat credit base can exclude it (image_generate charges its own credits).
-func tallyImageCost(ctx context.Context, db *sql.DB, msgID string) float64 {
-	if db == nil {
-		return 0
-	}
-	var total sql.NullFloat64
-	_ = db.QueryRowContext(ctx,
-		`SELECT COALESCE(SUM(cost),0) FROM usage_logs WHERE message_id=? AND purpose='image'`, msgID).Scan(&total)
-	if total.Valid {
-		return total.Float64
-	}
-	return 0
 }
 
 // shouldGenerateTitle is true when the conversation still has its default title.
