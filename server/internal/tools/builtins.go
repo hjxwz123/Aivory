@@ -951,12 +951,12 @@ func (t *imageGenerateTool) Execute(ctx context.Context, input []byte, tc *llm.T
 
 	// §4.20: if the image model's free allotment is exhausted, charge the image
 	// cost in credits (same flow as drawing mode) via ImageBilling, and record the
-	// timed portion on the usage row so the credit window survives restarts.
+	// full charge so the turn is not misclassified as free quota usage.
 	imageCost := float64(len(images)) * model.PricePerImage
-	var imageTimedCredits float64
+	var imageCredits float64
 	if payImageCredits && imageCost > 0 && tc != nil && tc.ImageBilling != nil {
-		timed, total := tc.ImageBilling.ChargeImageCredits(persistCtx, tc.UserID, imageCost)
-		imageTimedCredits = timed
+		_, total := tc.ImageBilling.ChargeImageCredits(persistCtx, tc.UserID, imageCost)
+		imageCredits = total
 		tc.AddImageCredits(total)
 	}
 
@@ -971,7 +971,7 @@ func (t *imageGenerateTool) Execute(ctx context.Context, input []byte, tc *llm.T
 			Purpose:        "image",
 			ImagesCount:    len(images),
 			Cost:           imageCost,
-			Credits:        imageTimedCredits,
+			Credits:        imageCredits,
 			Currency:       model.Currency,
 		})
 	}
