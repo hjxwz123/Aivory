@@ -5,6 +5,9 @@ package store
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
+	"math"
+	"strings"
 	"time"
 )
 
@@ -190,6 +193,32 @@ type Model struct {
 	// Only meaningful for kind=image models.
 	ImageTimeoutSec int   `json:"image_timeout_sec"`
 	UpdatedAt       int64 `json:"updated_at"`
+}
+
+var ErrInvalidModelBilling = errors.New("invalid model billing configuration")
+
+// ValidateModelBilling keeps the cost engine's unit explicit. The application
+// has no FX-rate snapshot for provider usage, so accepting another currency and
+// later multiplying the number as USD would silently misbill users.
+func ValidateModelBilling(m *Model) error {
+	if m == nil {
+		return ErrInvalidModelBilling
+	}
+	prices := []float64{m.PriceInput, m.PriceOutput, m.PriceCacheRead, m.PriceCacheWrite, m.PricePerImage}
+	for _, price := range prices {
+		if math.IsNaN(price) || math.IsInf(price, 0) || price < 0 {
+			return ErrInvalidModelBilling
+		}
+	}
+	currency := strings.ToUpper(strings.TrimSpace(m.Currency))
+	if currency == "" {
+		currency = "USD"
+	}
+	if currency != "USD" {
+		return ErrInvalidModelBilling
+	}
+	m.Currency = currency
+	return nil
 }
 
 // OAuthProvider is an admin-configured social/OAuth login method. The

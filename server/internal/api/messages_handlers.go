@@ -700,13 +700,15 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer release()
-	if !checkDailyMessageLimit(d, u.ID) {
-		writeError(w, 429, errors.New("daily message limit reached"))
-		return
-	}
-	if !checkDailyTokenQuota(d, u.ID) {
-		writeError(w, 429, errors.New("daily token quota reached"))
-		return
+	if u.Role != "admin" {
+		if !checkDailyMessageLimit(d, u.ID) {
+			writeError(w, 429, errors.New("daily message limit reached"))
+			return
+		}
+		if !checkDailyTokenQuota(d, u.ID) {
+			writeError(w, 429, errors.New("daily token quota reached"))
+			return
+		}
 	}
 	if body.AssistantID == "" {
 		body.AssistantID = conv.ActiveLeafID

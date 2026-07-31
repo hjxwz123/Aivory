@@ -44,13 +44,20 @@ type recordingImageBiller struct {
 	total      float64
 }
 
-func (b *recordingImageBiller) CheckImageCredits(_ context.Context, _ string, _ *store.Model, n int) (bool, bool, string) {
+func (b *recordingImageBiller) ReserveImageBilling(_ context.Context, _ string, _ *store.Model, n int, _ string) (*llm.ImageBillingReservation, bool, string, error) {
 	b.checkedN = n
-	return true, b.payCredits, ""
+	return &llm.ImageBillingReservation{}, true, "", nil
 }
 
-func (b *recordingImageBiller) ChargeImageCredits(context.Context, string, float64) (float64, float64) {
-	return b.timed, b.total
+func (b *recordingImageBiller) SettleImageBilling(context.Context, *llm.ImageBillingReservation, int, float64) (float64, float64, error) {
+	if !b.payCredits {
+		return 0, 0, nil
+	}
+	return b.timed, b.total, nil
+}
+
+func (b *recordingImageBiller) ReleaseImageBilling(context.Context, *llm.ImageBillingReservation) error {
+	return nil
 }
 
 func TestImageGenerateToolUsesOneClampedCountForQuotaRequestAndUsage(t *testing.T) {

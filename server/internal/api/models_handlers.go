@@ -18,8 +18,7 @@ import (
 // modelFreeAllotmentQuotaWindowFallback is a hardcoded int64 second-count (not a
 // time.Duration) to match the PeriodSeconds math it feeds.
 var (
-	creditMultiplierDivisor               = envcfg.F64("AIVORY_API_CREDIT_MULTIPLIER", 5.0)
-	modelFreeAllotmentQuotaWindowFallback = int64(604800)
+	creditMultiplierDivisor = envcfg.F64("AIVORY_API_CREDIT_MULTIPLIER", 5.0)
 )
 
 // imageCreditCost is the per-image cost in CREDITS for an image model:
@@ -51,16 +50,20 @@ func modelUsesCredits(ctx context.Context, d Deps, userID string, m store.Model,
 	if q.LimitValue <= 0 {
 		return false // granted unlimited free
 	}
-	p := int64(q.PeriodSeconds)
-	if p <= 0 {
-		p = modelFreeAllotmentQuotaWindowFallback
+	if userID == "" || d.DB == nil {
+		return true
 	}
-	start := (time.Now().Unix() / p) * p
-	cost, count, _ := store.UsageInWindow(ctx, d.DB, userID, m.ID, start)
-	if q.LimitType == "count" {
-		return count >= int(q.LimitValue+0.5)
+	scope, err := store.GetUserQuotaScope(ctx, d.DB, userID)
+	if err != nil || scope.GroupID != q.GroupID {
+		return true
 	}
-	return cost >= q.LimitValue
+	start, _ := store.CreditCycleStart(scope.Anchor, q.PeriodSeconds, time.Now().Unix())
+	scopeType := store.QuotaScopeModelChat
+	if m.Kind == "image" {
+		scopeType = store.QuotaScopeModelImage
+	}
+	used, err := store.ModelQuotaUsage(ctx, d.DB, userID, m.ID, scope.GroupID, scopeType, scope.Anchor, start)
+	return err != nil || used >= q.LimitValue
 }
 
 // listModelsHandler returns chat models visible to all signed-in users.
