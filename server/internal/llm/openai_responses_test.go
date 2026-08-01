@@ -5,16 +5,77 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
 func TestHostedFileSearchUsesItsOwnToolName(t *testing.T) {
 	if got := hostedToolName("file_search_call"); got != "file_search" {
 		t.Fatalf("hostedToolName(file_search_call) = %q, want file_search", got)
+	}
+}
+
+func TestOpenAIResponsesRetriesUnexpectedEOFBeforeRoundEvents(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		if hits.Add(1) == 1 {
+			// Claim a longer body so net/http reports io.ErrUnexpectedEOF when
+			// this deliberately truncated stream closes.
+			w.Header().Set("Content-Length", "4096")
+			_, _ = io.WriteString(w, "data: {\"type\":\"response.created\"}\n\n")
+			return
+		}
+		_, _ = io.WriteString(w, strings.Join([]string{
+			`data: {"type":"response.output_text.delta","delta":"recovered"}`,
+			`data: {"type":"response.completed","response":{"usage":{"input_tokens":3,"output_tokens":1}}}`,
+			``,
+		}, "\n\n"))
+	}))
+	defer srv.Close()
+
+	result, err := (&OpenAIProvider{}).Stream(context.Background(), UnifiedChatRequest{
+		Model:   ModelInfo{RequestID: "gpt-test", BaseURL: srv.URL, APIKey: "k", APIFormat: "responses"},
+		History: []UnifiedMessage{{Role: "user", Blocks: []UnifiedBlock{{Kind: "text", Text: "hello"}}}},
+	}, nil, func(SseEvent) {})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	if hits.Load() != 2 {
+		t.Fatalf("requests = %d, want one retry", hits.Load())
+	}
+	if result == nil || len(result.Blocks) != 1 || result.Blocks[0].Text != "recovered" {
+		t.Fatalf("result = %+v, want recovered text", result)
+	}
+}
+
+func TestOpenAIResponsesDoesNotRetryUnexpectedEOFAfterRoundEvent(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Content-Length", "4096")
+		_, _ = io.WriteString(w, `data: {"type":"response.output_text.delta","delta":"partial"}`+"\n\n")
+	}))
+	defer srv.Close()
+
+	result, err := (&OpenAIProvider{}).Stream(context.Background(), UnifiedChatRequest{
+		Model:   ModelInfo{RequestID: "gpt-test", BaseURL: srv.URL, APIKey: "k", APIFormat: "responses"},
+		History: []UnifiedMessage{{Role: "user", Blocks: []UnifiedBlock{{Kind: "text", Text: "hello"}}}},
+	}, nil, func(SseEvent) {})
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("Stream error = %v, want unexpected EOF", err)
+	}
+	if hits.Load() != 1 {
+		t.Fatalf("requests = %d, visible partial stream must not retry", hits.Load())
+	}
+	if result == nil || len(result.Blocks) != 1 || result.Blocks[0].Text != "partial" {
+		t.Fatalf("result = %+v, want preserved partial text", result)
 	}
 }
 
