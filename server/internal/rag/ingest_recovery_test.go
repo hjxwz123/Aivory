@@ -3,6 +3,7 @@ package rag
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"io"
 	"log"
 	"path/filepath"
@@ -36,6 +37,24 @@ func TestCanceledIngestFinalizesDocumentWithFreshContext(t *testing.T) {
 	}
 	if got.Error == "" {
 		t.Fatal("failed document has no terminal error")
+	}
+}
+
+func TestDeletedDocumentCancelsIngestWithoutFailure(t *testing.T) {
+	ctx := context.Background()
+	db := openIngestRecoveryDB(t)
+	defer db.Close()
+	doc := createRecoveryDocument(t, ctx, db, "deleted", "pending")
+	if err := store.DeleteDocument(ctx, db, doc.ID); err != nil {
+		t.Fatalf("delete document: %v", err)
+	}
+
+	svc := New(db, &captureIngestQueue{}, log.New(io.Discard, "", 0))
+	if err := svc.runIngestWithRetries(ctx, doc.ID); err != nil {
+		t.Fatalf("deleted document should cancel ingest, got %v", err)
+	}
+	if _, err := store.GetDocument(ctx, db, doc.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("deleted document was unexpectedly recreated/finalized: %v", err)
 	}
 }
 
