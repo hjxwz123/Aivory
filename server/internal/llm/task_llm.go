@@ -28,7 +28,12 @@ import (
 )
 
 var (
-	taskDefaultMaxOutputTokens    = 512
+	taskDefaultMaxOutputTokens = 512
+	// Reasoning models can spend a small task's entire output budget on hidden
+	// reasoning and still return a protocol-successful response with no visible
+	// text. Retry that specific outcome once with enough headroom for both the
+	// reasoning and the short JSON/title the caller requested.
+	taskEmptyRetryMaxOutputTokens = 4096
 	titleGenerationWordCap        = 8
 	routerRetrievalQueryCap       = 3
 	researchValidateConfirmedCap  = 8
@@ -323,7 +328,33 @@ func (t *TaskLLM) Run(ctx context.Context, kind TaskKind, prompt string, opts Ru
 			return "", fmt.Errorf("%w: %v", ErrTaskBillingRecord, err)
 		}
 	}
+	if final == "" {
+		if maxTok < taskEmptyRetryMaxOutputTokens {
+			if t.logger != nil {
+				t.logger.Printf("task: %s returned no visible text; retrying with max_output_tokens=%d (model=%s stop_reason=%s output_tokens=%d)",
+					kind, taskEmptyRetryMaxOutputTokens, model.ID, resultStopReason(result), resultOutputTokens(result))
+			}
+			opts.MaxOutputTokens = taskEmptyRetryMaxOutputTokens
+			return t.Run(ctx, kind, prompt, opts)
+		}
+		return "", fmt.Errorf("task llm returned empty output (model=%s stop_reason=%s output_tokens=%d max_output_tokens=%d)",
+			model.ID, resultStopReason(result), resultOutputTokens(result), maxTok)
+	}
 	return final, nil
+}
+
+func resultStopReason(result *UnifiedResult) string {
+	if result == nil || strings.TrimSpace(result.StopReason) == "" {
+		return "unknown"
+	}
+	return result.StopReason
+}
+
+func resultOutputTokens(result *UnifiedResult) int {
+	if result == nil {
+		return 0
+	}
+	return result.Usage.OutputTokens
 }
 
 // RunJSON is a thin wrapper that asks for JSON-only output and decodes it.

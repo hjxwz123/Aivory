@@ -408,6 +408,15 @@ func (s *Service) runIngestWithRetries(ctx context.Context, docID string) error 
 		if err = s.runPipeline(ctx, docID, cache); err == nil {
 			return nil
 		}
+		// A conversation/file deletion deliberately cascades to its temporary
+		// document while OCR or embedding may still be running. That is a normal
+		// cancellation, not an ingest failure to retry or finalize.
+		if errors.Is(err, store.ErrNotFound) {
+			if s.logger != nil {
+				s.logger.Printf("rag: ingest canceled because document was deleted (doc=%s)", docID)
+			}
+			return nil
+		}
 		if s.logger != nil {
 			s.logger.Printf("rag: ingest %s attempt %d/%d failed: %v", docID, attempt, runIngestMaxAttempts, err)
 		}
@@ -796,6 +805,12 @@ func (s *Service) runPipeline(ctx context.Context, docID string, cache *parseCac
 	// One transactional batch write for the whole document.
 	stageStart = time.Now()
 	if err := store.CreateChunksBatch(ctx, s.db, inserts); err != nil {
+		// The document can disappear between the initial GetDocument and this
+		// transaction when the user removes an upload during OCR/embedding. Map
+		// the resulting FK error to the normal deletion-cancellation path.
+		if _, lookupErr := store.GetDocument(ctx, s.db, docID); errors.Is(lookupErr, store.ErrNotFound) {
+			return store.ErrNotFound
+		}
 		return err
 	}
 	if s.logger != nil {
