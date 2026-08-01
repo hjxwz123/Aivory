@@ -152,7 +152,7 @@ export function PaymentMethodDialog({
         aria-busy={busy || loading || undefined}
       >
         <DialogHeader className="px-4 pb-2 pt-4 pr-14 sm:px-5 sm:pt-5 sm:pr-14">
-          <DialogTitle className="text-[1rem] leading-6">{t('payment.title')}</DialogTitle>
+          <DialogTitle>{t('payment.title')}</DialogTitle>
           <DialogDescription className="mt-1 break-words text-[12.5px] leading-relaxed [overflow-wrap:anywhere]">
             {t('payment.description', { name: targetName })}
           </DialogDescription>
