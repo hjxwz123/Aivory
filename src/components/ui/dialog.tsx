@@ -75,7 +75,7 @@ export const DialogContent = forwardRef<
               'absolute right-3 top-3 inline-flex items-center justify-center size-8 rounded-[8px]',
               'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-bg-muted)]',
               'transition-colors duration-150',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+              'focus-visible:outline-none focus-visible:text-[var(--color-fg)] focus-visible:bg-[var(--color-bg-muted)]',
             )}
           >
             <X size={16} aria-hidden />
@@ -88,7 +88,7 @@ export const DialogContent = forwardRef<
 })
 
 export function DialogHeader({ className, ...rest }: HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn('shrink-0 px-6 pt-6 pb-3', className)} {...rest} />
+  return <div className={cn('shrink-0 px-6 pt-4 pb-3', className)} {...rest} />
 }
 
 export function DialogBody({ className, ...rest }: HTMLAttributes<HTMLDivElement>) {
