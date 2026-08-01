@@ -790,30 +790,51 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 			outputItems []map[string]any
 			generated   []GeneratedImage
 		)
-		err := doProviderParsedRequest(ctx, req.Model, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
-			hr, e := http.NewRequestWithContext(ctx, "POST", providerBaseURL(baseURL, "https://api.openai.com")+"/v1/responses", bytes.NewReader(raw))
-			if e != nil {
-				return nil, e
+		// A relay can accept a Responses request and then close the HTTP body
+		// before sending even one usable SSE event (commonly surfaced by Go as
+		// unexpected EOF). Replaying is safe only while THIS provider round has
+		// emitted nothing: no user-visible text/thinking and no tool event can be
+		// duplicated. This matters for post-tool continuation rounds, where the
+		// turn-scoped visible flag is already committed by the preceding tool call
+		// and therefore intentionally disables the normal channel fallback path.
+		roundEmitted := false
+		emitRound := func(ev SseEvent) {
+			roundEmitted = true
+			onEvent(ev)
+		}
+		runRequest := func() error {
+			return doProviderParsedRequest(ctx, req.Model, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
+				hr, e := http.NewRequestWithContext(ctx, "POST", providerBaseURL(baseURL, "https://api.openai.com")+"/v1/responses", bytes.NewReader(raw))
+				if e != nil {
+					return nil, e
+				}
+				hr.Header.Set("authorization", "Bearer "+apiKey)
+				hr.Header.Set("content-type", "application/json")
+				hr.Header.Set("accept", "text/event-stream")
+				return hr, nil
+			}, func(resp *http.Response, emit func(SseEvent)) error {
+				text, reasoning, u = "", "", Usage{}
+				calls, hosted, citations, outputItems, generated = nil, nil, nil, nil, nil
+				if statusErr := requireProviderSuccess(resp, "openai responses"); statusErr != nil {
+					return statusErr
+				}
+				var readErr error
+				text, reasoning, calls, hosted, citations, u, outputItems, readErr = readOpenAIResponsesStream(resp.Body, emit)
+				if readErr != nil {
+					return readErr
+				}
+				var imageErr error
+				hosted, generated, imageErr = decodeHostedGeneratedImages(hosted)
+				return imageErr
+			}, emitRound)
+		}
+		err := runRequest()
+		if errors.Is(err, io.ErrUnexpectedEOF) && !roundEmitted && ctx.Err() == nil {
+			if p.logger != nil {
+				p.logger.Printf("openai responses: upstream stream ended with unexpected EOF before any event; retrying once (model=%s)", req.Model.RequestID)
 			}
-			hr.Header.Set("authorization", "Bearer "+apiKey)
-			hr.Header.Set("content-type", "application/json")
-			hr.Header.Set("accept", "text/event-stream")
-			return hr, nil
-		}, func(resp *http.Response, emit func(SseEvent)) error {
-			text, reasoning, u = "", "", Usage{}
-			calls, hosted, citations, outputItems, generated = nil, nil, nil, nil, nil
-			if statusErr := requireProviderSuccess(resp, "openai responses"); statusErr != nil {
-				return statusErr
-			}
-			var readErr error
-			text, reasoning, calls, hosted, citations, u, outputItems, readErr = readOpenAIResponsesStream(resp.Body, emit)
-			if readErr != nil {
-				return readErr
-			}
-			var imageErr error
-			hosted, generated, imageErr = decodeHostedGeneratedImages(hosted)
-			return imageErr
-		}, onEvent)
+			err = runRequest()
+		}
 		allGeneratedImages = append(allGeneratedImages, generated...)
 		// §B5-per-request usage rows: pin this iteration's usage to its request.
 		attachProviderRequestUsage(ctx, u)
