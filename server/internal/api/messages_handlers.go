@@ -1032,13 +1032,12 @@ func editMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	// user-boundary redaction here: strip admin-only cost/raw, and §fast-mode blank
 	// the real model identity on a fast turn (a fast user row is stamped with the
 	// hidden fast model's id/label/provider — never return them).
-	if updated != nil {
-		updated.Cost, updated.Currency, updated.Raw = 0, "", nil
-		if updated.Fast {
-			updated.ModelID, updated.ModelLabel, updated.Provider = "", "", ""
-		}
+	if updated == nil {
+		writeJSON(w, 200, updated)
+		return
 	}
-	writeJSON(w, 200, updated)
+	hydrated := userMessageResponse(d, r, []store.Message{*updated})
+	writeJSON(w, 200, hydrated[0])
 }
 
 // replaceAssistantReplyText overwrites exactly the Markdown that MessageRow
@@ -1119,20 +1118,24 @@ func deleteMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	// getConversationHandler — otherwise the swapped-in path loses its `< n/m >`
 	// branch picker and leaks per-message cost to the user.
 	publishUserEvent(d, r, u.ID, "conversation.updated", convID)
-	writeJSON(w, 200, map[string]any{"ok": true, "active_leaf_id": newLeaf, "messages": redactCost(enrichWithAuthors(d, r, enrichWithSiblings(d, r, msgs)))})
+	writeJSON(w, 200, map[string]any{"ok": true, "active_leaf_id": newLeaf, "messages": userMessageResponse(d, r, msgs)})
 }
 
-// feedbackMessageHandler stores a like/dislike on an assistant message.
+// feedbackMessageHandler stores the authenticated user's rating of an assistant
+// message. Dislikes may carry optional structured reasons and a short note.
 func feedbackMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
 	convID := pathParam(r, "id")
 	msgID := pathParam(r, "msgId")
-	if _, err := store.GetConversation(r.Context(), d.DB, convID, u.ID); err != nil {
+	conv, err := store.GetConversation(r.Context(), d.DB, convID, u.ID)
+	if err != nil {
 		writeError(w, 404, errNotFound)
 		return
 	}
 	var body struct {
-		Feedback string `json:"feedback"`
+		Feedback string   `json:"feedback"`
+		Reasons  []string `json:"reasons"`
+		Comment  string   `json:"comment"`
 	}
 	if err := decodeJSON(r, &body); err != nil {
 		writeError(w, 400, errInvalidInput)
@@ -1142,14 +1145,57 @@ func feedbackMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errors.New("feedback must be 'like', 'dislike', or empty"))
 		return
 	}
+	body.Comment = strings.TrimSpace(body.Comment)
+	validatedReasons, err := store.NormalizeMessageFeedbackReasons(body.Reasons)
+	if err != nil {
+		writeError(w, 400, err)
+		return
+	}
+	body.Reasons = validatedReasons
+	if len([]rune(body.Comment)) > store.MessageFeedbackCommentMaxRunes {
+		writeError(w, 400, fmt.Errorf("feedback comment must be at most %d characters", store.MessageFeedbackCommentMaxRunes))
+		return
+	}
+	if body.Feedback != store.MessageFeedbackDislike {
+		body.Reasons = []string{}
+		body.Comment = ""
+	}
 	msg, err := store.GetMessage(r.Context(), d.DB, msgID)
 	if err != nil || msg.ConversationID != convID || msg.Role != "assistant" {
 		writeError(w, 404, errNotFound)
 		return
 	}
-	if err := store.SetMessageFeedback(r.Context(), d.DB, msgID, body.Feedback); err != nil {
+	channelID, err := store.MessageFeedbackChannelID(r.Context(), d.DB, msgID, msg.ModelID)
+	if err != nil {
 		writeError(w, 500, err)
 		return
 	}
-	writeJSON(w, 200, map[string]bool{"ok": true})
+	stored, err := store.SetMessageFeedbackForUser(r.Context(), d.DB, store.MessageFeedback{
+		MessageID:      msgID,
+		ConversationID: convID,
+		UserID:         u.ID,
+		WorkspaceID:    conv.WorkspaceID,
+		ModelID:        msg.ModelID,
+		ChannelID:      channelID,
+		Rating:         body.Feedback,
+		Reasons:        body.Reasons,
+		Comment:        body.Comment,
+	})
+	if err != nil {
+		writeError(w, 500, err)
+		return
+	}
+	msgcache.Bump(d.Cache, convID)
+	responseReasons := []string{}
+	comment := ""
+	if stored != nil {
+		responseReasons = stored.Reasons
+		comment = stored.Comment
+	}
+	writeJSON(w, 200, map[string]any{
+		"ok":               true,
+		"feedback":         body.Feedback,
+		"feedback_reasons": responseReasons,
+		"feedback_comment": comment,
+	})
 }

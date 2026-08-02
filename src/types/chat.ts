@@ -9,6 +9,27 @@ export type MessageRole = 'user' | 'assistant' | 'system'
 /** Stable backend/UI marker for a generation that failed after output became visible. */
 export const GENERATION_INTERRUPTED_ERROR_CODE = 'generation_interrupted'
 
+export const FEEDBACK_REASON_VALUES = [
+  'incorrect_fact',
+  'not_answered',
+  'instruction_ignored',
+  'outdated',
+  'citation_issue',
+  'tool_file_issue',
+  'incomplete',
+  'poor_format',
+  'unsafe',
+  'other',
+] as const
+
+export type FeedbackReason = (typeof FEEDBACK_REASON_VALUES)[number]
+
+export interface MessageFeedbackInput {
+  feedback: 'like' | 'dislike' | ''
+  reasons?: FeedbackReason[]
+  comment?: string
+}
+
 export interface ToolCall {
   id: string
   /** Symbolic tool name, e.g. "web_search", "code_interpreter" */
@@ -188,6 +209,9 @@ export interface Message {
   /** Reactions. */
   liked?: boolean
   disliked?: boolean
+  /** Optional structured context supplied after a dislike. */
+  feedbackReasons?: FeedbackReason[]
+  feedbackComment?: string
   /** Citations attached to this assistant turn. */
   citations?: Citation[]
   /** Verify mode (§verify): the secondary-auditor result for this assistant

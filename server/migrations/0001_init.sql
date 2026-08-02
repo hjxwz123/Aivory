@@ -158,6 +158,29 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_messages_parent ON messages(parent_id);
+CREATE INDEX IF NOT EXISTS idx_messages_role_created ON messages(role, created_at);
+CREATE INDEX IF NOT EXISTS idx_messages_model_role_created ON messages(model_id, role, created_at);
+
+CREATE TABLE IF NOT EXISTS message_feedback (
+  id              TEXT PRIMARY KEY,
+  message_id      TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+  conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  workspace_id    TEXT NOT NULL DEFAULT '',
+  model_id        TEXT NOT NULL DEFAULT '',
+  channel_id      TEXT NOT NULL DEFAULT '',
+  rating          TEXT NOT NULL CHECK(rating IN ('like','dislike')),
+  reasons         TEXT NOT NULL DEFAULT '[]',
+  comment         TEXT NOT NULL DEFAULT '',
+  created_at      INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+  updated_at      INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+  UNIQUE(message_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_message_feedback_updated ON message_feedback(updated_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_message_feedback_model_updated ON message_feedback(model_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_message_feedback_rating_updated ON message_feedback(rating, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_message_feedback_conversation ON message_feedback(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_message_feedback_user_message ON message_feedback(user_id, message_id);
 
 CREATE TABLE IF NOT EXISTS files (
   id              TEXT PRIMARY KEY,
@@ -248,6 +271,32 @@ CREATE TABLE IF NOT EXISTS usage_logs (
 );
 CREATE INDEX IF NOT EXISTS idx_usage_user_time ON usage_logs(user_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_usage_model_time ON usage_logs(model_id, created_at);
+
+CREATE TABLE IF NOT EXISTS usage_stats (
+  source_log_id       INTEGER PRIMARY KEY,
+  user_id             TEXT REFERENCES users(id) ON DELETE SET NULL,
+  conversation_id     TEXT,
+  message_id          TEXT,
+  model_id            TEXT NOT NULL,
+  purpose             TEXT NOT NULL,
+  input_tokens        INTEGER NOT NULL DEFAULT 0,
+  output_tokens       INTEGER NOT NULL DEFAULT 0,
+  cache_read_tokens   INTEGER NOT NULL DEFAULT 0,
+  cache_write_tokens  INTEGER NOT NULL DEFAULT 0,
+  images_count        INTEGER NOT NULL DEFAULT 0,
+  cost                REAL NOT NULL DEFAULT 0,
+  currency            TEXT NOT NULL DEFAULT 'USD',
+  credits             REAL NOT NULL DEFAULT 0,
+  workspace_id        TEXT NOT NULL DEFAULT '',
+  channel_id          TEXT NOT NULL DEFAULT '',
+  fallback            INTEGER NOT NULL DEFAULT 0,
+  ttft_fallback_model TEXT NOT NULL DEFAULT '',
+  created_at           INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_usage_stats_time ON usage_stats(created_at);
+CREATE INDEX IF NOT EXISTS idx_usage_stats_user_time ON usage_stats(user_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_usage_stats_model_time ON usage_stats(model_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_usage_stats_message ON usage_stats(message_id, purpose, source_log_id);
 
 CREATE TABLE IF NOT EXISTS artifacts (
   id           TEXT PRIMARY KEY,

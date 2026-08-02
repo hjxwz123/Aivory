@@ -9,7 +9,7 @@ import { useSettings } from '@/store/settings'
 import { toast } from '@/hooks/use-toast'
 import { protectedFirstRoundMessageIds } from '@/lib/message-state'
 
-import type { Attachment, Conversation } from '@/types/chat'
+import type { Attachment, Conversation, MessageFeedbackInput } from '@/types/chat'
 
 interface MessageListProps {
   conversation: Conversation
@@ -256,13 +256,8 @@ export function MessageList({ conversation, scrollToMessageId, jumpKey }: Messag
     [convId, fork, navigate, t],
   )
 
-  const handleLike = useCallback(
-    (id: string, liked: boolean) => void setFeedback(convId, id, liked ? 'like' : ''),
-    [convId, setFeedback],
-  )
-
-  const handleDislike = useCallback(
-    (id: string, disliked: boolean) => void setFeedback(convId, id, disliked ? 'dislike' : ''),
+  const handleFeedback = useCallback(
+    (id: string, input: MessageFeedbackInput) => setFeedback(convId, id, input),
     [convId, setFeedback],
   )
 
@@ -302,8 +297,7 @@ export function MessageList({ conversation, scrollToMessageId, jumpKey }: Messag
           onRegenerate={handleRegenerate}
           onEdit={handleEdit}
           onSaveEdit={handleSaveEdit}
-          onLike={handleLike}
-          onDislike={handleDislike}
+          onFeedback={handleFeedback}
           onBranchSwitch={handleBranchSwitch}
           onFork={handleFork}
           onDelete={

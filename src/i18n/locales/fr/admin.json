@@ -841,6 +841,11 @@
     "lead": "Tendances d'usage : global, par modèle, par utilisateur.",
     "empty": "Aucune utilisation sur cette période pour l'instant.",
     "unknownUser": "Utilisateur inconnu",
+    "view": {
+      "label": "Vue analytique",
+      "usage": "Tendances d’usage",
+      "feedback": "Avis sur les modèles"
+    },
     "metric": {
       "calls": "Appels",
       "tokens": "Tokens",
@@ -857,6 +862,105 @@
       "hourly": "Utilisation horaire",
       "byModel": "Par modèle",
       "byUser": "Par utilisateur"
+    },
+    "feedback": {
+      "lead": "Comparez la qualité des modèles et examinez les réponses jugées peu utiles. La période repose sur la date de génération des réponses.",
+      "filters": {
+        "rating": "Évaluation",
+        "model": "Modèle",
+        "reason": "Motif",
+        "allRatings": "Toutes les évaluations",
+        "dislikes": "Avis négatifs",
+        "likes": "Avis positifs",
+        "allModels": "Tous les modèles",
+        "allReasons": "Tous les motifs"
+      },
+      "stats": {
+        "evaluated": "Évaluations",
+        "likes": "Avis positifs",
+        "dislikes": "Avis négatifs",
+        "positiveRate": "Taux positif",
+        "coverage": "Couverture des avis",
+        "coverageDetail": "{{evaluated}} sur {{replies}} réponses"
+      },
+      "error": {
+        "title": "Impossible de charger les avis sur les modèles"
+      },
+      "rating": {
+        "like": "Positif",
+        "dislike": "Négatif"
+      },
+      "reasons": {
+        "incorrect_fact": "Erreur factuelle ou de calcul",
+        "not_answered": "Ne répond pas à la question",
+        "instruction_ignored": "Consignes non respectées",
+        "outdated": "Informations obsolètes",
+        "citation_issue": "Problème de citation ou de source",
+        "tool_file_issue": "Erreur de fichier ou d’outil",
+        "incomplete": "Réponse incomplète ou interrompue",
+        "poor_format": "Rédaction ou mise en forme médiocre",
+        "unsafe": "Contenu dangereux ou inapproprié",
+        "other": "Autre"
+      },
+      "quality": {
+        "title": "Qualité des modèles",
+        "lead": "Comparez les réponses évaluées par modèle. Le taux reste masqué tant que l’échantillon est insuffisant.",
+        "model": "Modèle",
+        "evaluated": "Évaluées",
+        "sentiment": "Positifs / négatifs",
+        "positiveRate": "Taux positif",
+        "topReason": "Principal motif négatif",
+        "sampleInsufficient": "Échantillon < {{count}}",
+        "evaluatedValue": "{{count}} évaluées",
+        "likesValue": "{{count}} positives",
+        "dislikesValue": "{{count}} négatives",
+        "topReasonValue": "Motif principal : {{reason}}",
+        "empty": "Aucune donnée par modèle ne correspond à ces filtres."
+      },
+      "list": {
+        "title": "Échantillons d’avis",
+        "dislikesTitle": "Réponses à examiner",
+        "count": "{{count}} résultats",
+        "lead": "Ouvrez une ligne pour voir le texte enregistré de la question et de la réponse, l’avis et les métadonnées.",
+        "noQuestion": "Question non enregistrée",
+        "noResponse": "Réponse non enregistrée",
+        "metrics": "{{latency}} · {{tokens}} jetons",
+        "empty": "Aucun avis ne correspond à ces filtres.",
+        "emptyDislikes": "Aucune réponse avec un avis négatif ne correspond à ces filtres."
+      },
+      "detail": {
+        "title": "Détail de l’avis",
+        "lead": "Le texte enregistré de l’échange et les métadonnées de génération de cette réponse.",
+        "question": "Question de l’utilisateur",
+        "response": "Réponse du modèle",
+        "comment": "Note de l’utilisateur",
+        "metadata": "Métadonnées de génération",
+        "conversation": "Conversation",
+        "model": "Modèle",
+        "channel": "Canal",
+        "provider": "Fournisseur",
+        "user": "Utilisateur",
+        "workspace": "Espace de travail",
+        "createdAt": "Avis créé",
+        "updatedAt": "Avis mis à jour",
+        "messageCreatedAt": "Réponse créée",
+        "timing": "Temps de génération",
+        "tokens": "Tokens d’entrée / sortie",
+        "totalTokens": "Total des tokens",
+        "cacheTokens": "Tokens de cache lus / écrits",
+        "cost": "Coût",
+        "credits": "Crédits",
+        "context": "Contexte de la réponse",
+        "hasTools": "Outils",
+        "hasFiles": "Fichiers",
+        "hasRag": "Base de connaissances",
+        "fallback": "Canal de secours",
+        "statusError": "Erreur de génération",
+        "statusSuccess": "Génération terminée",
+        "error": "Détail de l’erreur",
+        "notRecorded": "Non enregistré",
+        "openConversation": "Ouvrir la conversation"
+      }
     }
   },
   "announcement": {
@@ -1450,6 +1554,8 @@
     "title": "Fichiers",
     "lead": "Tous les fichiers téléversés dans les conversations et les bases de connaissances. La suppression retire les enregistrements, les vecteurs et le fichier sur disque.",
     "deleteSelected": "Supprimer la sélection ({{count}})",
+    "selectedCount": "{{count}} sélectionné(s)",
+    "clearSelection": "Effacer la sélection",
     "total": "{{count}} fichier(s)",
     "empty": "Aucun fichier ne correspond aux filtres.",
     "view": "Voir",
@@ -1459,6 +1565,7 @@
     "noInlinePreview": "Pas d'aperçu intégré pour ce type de fichier.",
     "unknownType": "type inconnu",
     "selectAll": "Tout sélectionner sur cette page",
+    "deselectAll": "Effacer la sélection de cette page",
     "selectOne": "Sélectionner {{name}}",
     "confirmTitle": "Supprimer {{count}} fichier(s) ?",
     "confirmBody": "Le fichier sur disque, ses enregistrements et ses vecteurs de recherche seront définitivement supprimés. Irréversible.",

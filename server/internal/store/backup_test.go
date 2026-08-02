@@ -366,6 +366,7 @@ func TestConfigTableOrderExcludesUserDataTables(t *testing.T) {
 		"chunks",
 		"memories",
 		"usage_logs",
+		"usage_stats",
 		"artifacts",
 		"refresh_tokens",
 		"oauth_identities",

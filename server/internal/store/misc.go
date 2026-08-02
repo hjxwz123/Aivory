@@ -520,7 +520,8 @@ func ListMemoriesActive(ctx context.Context, db *sql.DB, userID string) ([]Memor
 }
 
 // LogUsage writes a successful call to the durable billing ledger before the
-// deletable analytics row. Callers must handle the returned error for billable
+// deletable diagnostic row. The database mirrors successful diagnostics into
+// append-only usage_stats. Callers must handle the returned error for billable
 // provider calls; otherwise a delivered result could escape accounting.
 func LogUsage(ctx context.Context, db *sql.DB, u UsageLog) error {
 	status := u.Status
@@ -535,13 +536,14 @@ func LogUsage(ctx context.Context, db *sql.DB, u UsageLog) error {
 	return LogUsageAnalytics(ctx, db, u)
 }
 
-// LogUsageAnalytics writes only the deletable reporting row. It is used when a
+// LogUsageAnalytics writes the deletable diagnostic row (whose successful-call
+// fields are mirrored into usage_stats by a database trigger). It is used when a
 // caller must durably record provider cost before a later credit settlement.
 func LogUsageAnalytics(ctx context.Context, db *sql.DB, u UsageLog) error {
 	// usage_logs predates system-owned task calls and requires a concrete user
 	// foreign key. The durable billing ledger accepts a NULL owner, so preserve
 	// those provider costs there without manufacturing a fake user solely for
-	// deletable analytics.
+	// deletable diagnostics.
 	if u.UserID == "" {
 		return nil
 	}
@@ -558,13 +560,13 @@ func LogUsageAnalytics(ctx context.Context, db *sql.DB, u UsageLog) error {
 	return err
 }
 
-// CreditsUsedInWindow sums historical usage-log credits. It is retained only for
-// migrating deployments that predate credit_ledger; live balances never depend
-// on deletable analytics rows.
+// CreditsUsedInWindow sums durable historical usage credits. It is retained only
+// for migrating deployments that predate credit_ledger; live balances use the
+// ledger directly.
 func CreditsUsedInWindow(ctx context.Context, db *sql.DB, userID string, sinceUnix int64) (float64, error) {
 	var c sql.NullFloat64
 	err := db.QueryRowContext(ctx,
-		`SELECT COALESCE(SUM(credits),0) FROM usage_logs WHERE user_id=? AND created_at>=?`,
+		`SELECT COALESCE(SUM(credits),0) FROM usage_stats WHERE user_id=? AND created_at>=?`,
 		userID, sinceUnix).Scan(&c)
 	return c.Float64, err
 }
@@ -587,8 +589,8 @@ func SumUsageByUser(ctx context.Context, db *sql.DB, userID string, days int) (f
 	var count int
 	err := db.QueryRowContext(ctx,
 		`SELECT COALESCE(SUM(cost),0),
-		        COUNT(DISTINCT COALESCE(NULLIF(message_id,''), 'row:' || CAST(id AS TEXT)))
-		 FROM usage_logs WHERE user_id=? AND created_at>=? AND COALESCE(status,'ok')<>'error'`, userID, since,
+		        COUNT(DISTINCT COALESCE(NULLIF(message_id,''), 'row:' || CAST(source_log_id AS TEXT)))
+		 FROM usage_stats WHERE user_id=? AND created_at>=?`, userID, since,
 	).Scan(&cost, &count)
 	return cost, count, err
 }
@@ -732,8 +734,9 @@ func AdminUsageRecords(ctx context.Context, db *sql.DB, f UsageFilter, limit, of
 	return out, rows.Err()
 }
 
-// AdminUsageCount returns the total matching rows + summed cost (pagination +
-// page totals).
+// AdminUsageCount returns the retained diagnostic rows and their displayed cost
+// for list pagination. These values intentionally shrink when logs are pruned;
+// durable calls/costs for dashboards come from usage_stats.
 func AdminUsageCount(ctx context.Context, db *sql.DB, f UsageFilter) (int, float64, error) {
 	where, args := f.where()
 	q := `SELECT COUNT(*), COALESCE(SUM(u.cost),0) FROM usage_logs u
@@ -814,11 +817,9 @@ func AdminUsageTrend(ctx context.Context, db *sql.DB, days int) ([]UsageBucket, 
 		bucket = 3600 // hourly
 	}
 	rows, err := db.QueryContext(ctx,
-		// §usage errors: analytics counts SUCCESSFUL calls only, so Calls stays
-		// consistent with the token/cost sums (error rows carry zero of those).
 		`SELECT (created_at / ?) * ? AS b,
-		        SUM(input_tokens), SUM(output_tokens), COUNT(*), SUM(cost)
-		 FROM usage_logs WHERE created_at >= ? AND COALESCE(status,'ok') <> 'error'
+		        CAST(SUM(input_tokens) AS BIGINT), CAST(SUM(output_tokens) AS BIGINT), COUNT(*), SUM(cost)
+		 FROM usage_stats WHERE created_at >= ?
 		 GROUP BY b ORDER BY b ASC`, bucket, bucket, since)
 	if err != nil {
 		return nil, err
@@ -862,11 +863,9 @@ func AdminUsageTotals(ctx context.Context, db *sql.DB, days int) (UsageTotals, e
 	since := time.Now().Add(-time.Duration(days) * 24 * time.Hour).Unix()
 	var t UsageTotals
 	err := db.QueryRowContext(ctx,
-		// §usage errors: exclude failed requests so Calls / active-Users stay
-		// consistent with the token/cost sums (error rows contribute zero tokens/cost).
-		`SELECT COUNT(*), COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
+		`SELECT COUNT(*), COALESCE(CAST(SUM(input_tokens) AS BIGINT),0), COALESCE(CAST(SUM(output_tokens) AS BIGINT),0),
 		        COALESCE(SUM(cost),0), COUNT(DISTINCT user_id)
-		 FROM usage_logs WHERE created_at >= ? AND COALESCE(status,'ok') <> 'error'`, since).
+		 FROM usage_stats WHERE created_at >= ?`, since).
 		Scan(&t.Calls, &t.InputTokens, &t.OutputTokens, &t.Cost, &t.Users)
 	return t, err
 }
@@ -896,18 +895,18 @@ func AdminUsageBreakdown(ctx context.Context, db *sql.DB, days int, groupCol str
 		days = usageBreakdownWindow
 	}
 	since := time.Now().Add(-time.Duration(days) * 24 * time.Hour).Unix()
-	labelExpr, join, groupBy := "''", "", "u."+groupCol
+	labelExpr, join, groupBy, attributionWhere := "''", "", "u."+groupCol, ""
 	if groupCol == "user_id" {
 		labelExpr = "COALESCE(usr.email,'')"
 		join = "LEFT JOIN users usr ON usr.id = u.user_id"
 		groupBy = "u.user_id, usr.email"
+		attributionWhere = " AND u.user_id IS NOT NULL"
 	}
 	q := fmt.Sprintf(
-		// §usage errors: successful calls only, keeping Calls consistent with cost.
-		`SELECT u.%s, %s, SUM(u.input_tokens), SUM(u.output_tokens), COUNT(*), SUM(u.cost)
-		 FROM usage_logs u %s WHERE u.created_at >= ? AND COALESCE(u.status,'ok') <> 'error'
+		`SELECT u.%s, %s, CAST(SUM(u.input_tokens) AS BIGINT), CAST(SUM(u.output_tokens) AS BIGINT), COUNT(*), SUM(u.cost)
+		 FROM usage_stats u %s WHERE u.created_at >= ?%s
 		 GROUP BY %s ORDER BY SUM(u.cost) DESC, COUNT(*) DESC LIMIT ?`,
-		groupCol, labelExpr, join, groupBy)
+		groupCol, labelExpr, join, attributionWhere, groupBy)
 	rows, err := db.QueryContext(ctx, q, since, limit)
 	if err != nil {
 		return nil, err
@@ -956,9 +955,8 @@ func AdminUsageSeries(ctx context.Context, db *sql.DB, days int, groupCol string
 		args = append(args, k)
 	}
 	q := fmt.Sprintf(
-		// §usage errors: successful calls only, keeping Calls consistent with cost.
-		`SELECT (created_at / ?) * ? AS b, %s, SUM(input_tokens), SUM(output_tokens), COUNT(*), SUM(cost)
-		 FROM usage_logs WHERE created_at >= ? AND COALESCE(status,'ok') <> 'error' AND %s IN (%s)
+		`SELECT (created_at / ?) * ? AS b, %s, CAST(SUM(input_tokens) AS BIGINT), CAST(SUM(output_tokens) AS BIGINT), COUNT(*), SUM(cost)
+		 FROM usage_stats WHERE created_at >= ? AND %s IN (%s)
 		 GROUP BY b, %s ORDER BY b ASC`,
 		groupCol, groupCol, placeholders, groupCol)
 	rows, err := db.QueryContext(ctx, q, args...)

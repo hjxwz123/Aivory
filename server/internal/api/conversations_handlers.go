@@ -403,7 +403,7 @@ func getConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	// `< n/m >` branch picker on a fresh load or post-stream reconcile (§4.15).
 	writeJSON(w, 200, map[string]any{
 		"conversation": conv,
-		"messages":     redactCost(enrichWithAuthors(d, r, enrichWithSiblings(d, r, window))),
+		"messages":     userMessageResponse(d, r, window),
 		"has_more":     hasMore,
 		"next_before":  nextBefore,
 	})
@@ -545,7 +545,7 @@ func listMessagesHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		}
 		// Enrich each message with sibling indexes so the frontend can render
 		// branch pickers without a second roundtrip.
-		writeJSON(w, 200, redactCost(enrichWithAuthors(d, r, enrichWithSiblings(d, r, msgs))))
+		writeJSON(w, 200, userMessageResponse(d, r, msgs))
 		return
 	}
 	conv, _ := store.GetConversation(r.Context(), d.DB, id, u.ID)
@@ -570,7 +570,7 @@ func listMessagesHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	if nextBefore != "" {
 		w.Header().Set("X-Next-Before", nextBefore)
 	}
-	writeJSON(w, 200, redactCost(enrichWithAuthors(d, r, enrichWithSiblings(d, r, window))))
+	writeJSON(w, 200, userMessageResponse(d, r, window))
 }
 
 type enrichedMessage struct {
@@ -612,6 +612,47 @@ func enrichWithAuthors(d Deps, r *http.Request, ems []enrichedMessage) []enriche
 		}
 	}
 	return ems
+}
+
+// enrichWithFeedback overwrites the legacy message-level feedback mirror with
+// the authenticated user's own row. It runs after the shared path cache is read,
+// so two workspace members never see each other's rating and feedback updates do
+// not depend on cache expiry.
+func enrichWithFeedback(d Deps, r *http.Request, ems []enrichedMessage) []enrichedMessage {
+	u := authUser(r)
+	if u == nil {
+		return ems
+	}
+	ids := make([]string, 0, len(ems))
+	for i := range ems {
+		ems[i].Feedback = ""
+		ems[i].FeedbackReasons = []string{}
+		ems[i].FeedbackComment = ""
+		if ems[i].Role == "assistant" {
+			ids = append(ids, ems[i].ID)
+		}
+	}
+	feedback, err := store.ListMessageFeedbackForUser(r.Context(), d.DB, u.ID, ids)
+	if err != nil {
+		return ems
+	}
+	for i := range ems {
+		if row, ok := feedback[ems[i].ID]; ok {
+			ems[i].Feedback = row.Rating
+			ems[i].FeedbackReasons = row.Reasons
+			ems[i].FeedbackComment = row.Comment
+		}
+	}
+	return ems
+}
+
+// userMessageResponse is the single user-facing message hydration boundary:
+// branch/author metadata, current-user feedback, then cost/raw/model redaction.
+func userMessageResponse(d Deps, r *http.Request, msgs []store.Message) []enrichedMessage {
+	enriched := enrichWithSiblings(d, r, msgs)
+	enriched = enrichWithAuthors(d, r, enriched)
+	enriched = enrichWithFeedback(d, r, enriched)
+	return redactCost(enriched)
 }
 
 func enrichWithSiblings(d Deps, r *http.Request, msgs []store.Message) []enrichedMessage {
@@ -739,7 +780,7 @@ func setActiveLeafHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	stripServerConvFields(conv)
 	writeJSON(w, 200, map[string]any{
 		"conversation": conv,
-		"messages":     redactCost(enrichWithAuthors(d, r, enrichWithSiblings(d, r, msgs))),
+		"messages":     userMessageResponse(d, r, msgs),
 	})
 }
 

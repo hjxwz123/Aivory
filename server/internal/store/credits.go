@@ -475,7 +475,7 @@ func migrateCreditLedger(ctx context.Context, db *sql.DB) error {
 		anchor := (now / period) * period
 		var used float64
 		if err := tx.QueryRowContext(ctx,
-			`SELECT COALESCE(SUM(credits),0) FROM usage_logs WHERE user_id=? AND created_at>=?`,
+			`SELECT COALESCE(SUM(credits),0) FROM usage_stats WHERE user_id=? AND created_at>=?`,
 			u.id, anchor).Scan(&used); err != nil {
 			return err
 		}
@@ -491,7 +491,7 @@ func migrateCreditLedger(ctx context.Context, db *sql.DB) error {
 				`INSERT INTO credit_ledger(id,user_id,group_id,cycle_anchor,cycle_start,kind,amount,amount_micros,source_type,source_id,created_at)
 				 VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
 				genID("cl"), u.id, u.groupID, anchor, anchor, CreditLedgerTimedDebit,
-				creditsFromMicros(usedMicros), usedMicros, "migration", "usage_logs", now); err != nil {
+				creditsFromMicros(usedMicros), usedMicros, "migration", "usage_stats", now); err != nil {
 				return err
 			}
 		}

@@ -1130,8 +1130,9 @@ func parseUsageQuery(r *http.Request) (store.UsageFilter, int, int) {
 	return f, page, pageSize
 }
 
-// usageReportAdmin lists individual usage records (one per API call), filtered +
-// paginated, with the matching total count and summed cost.
+// usageReportAdmin lists retained diagnostic records, filtered and paginated,
+// with their matching inventory count and displayed cost. Durable analytics are
+// served separately from usage_stats by analyticsAdmin.
 func usageReportAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	f, page, pageSize := parseUsageQuery(r)
 	records, err := store.AdminUsageRecords(r.Context(), d.DB, f, pageSize, (page-1)*pageSize)

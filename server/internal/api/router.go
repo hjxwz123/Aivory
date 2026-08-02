@@ -454,6 +454,7 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("DELETE", "/api/admin/usage", requireAdmin(d, usageDeleteFilteredAdmin))
 	mux.handle("DELETE", "/api/admin/usage/:id", requireAdmin(d, usageDeleteOneAdmin))
 	mux.handle("GET", "/api/admin/analytics", requireAdmin(d, analyticsAdmin))
+	mux.handle("GET", "/api/admin/message-feedback", requireAdmin(d, listMessageFeedbackAdmin))
 	mux.handle("GET", "/api/admin/files", requireAdmin(d, listFilesAdmin))
 	mux.handle("POST", "/api/admin/files/delete", requireAdmin(d, deleteFilesAdmin))
 	mux.handle("GET", "/api/admin/files/content", requireAdmin(d, adminFileContentHandler))

@@ -841,6 +841,11 @@
     "lead": "利用傾向:全体・モデル別・ユーザー別。",
     "empty": "この期間の使用状況はまだありません。",
     "unknownUser": "不明なユーザー",
+    "view": {
+      "label": "分析ビュー",
+      "usage": "利用傾向",
+      "feedback": "モデル評価"
+    },
     "metric": {
       "calls": "呼び出し",
       "tokens": "トークン",
@@ -857,6 +862,105 @@
       "hourly": "時間別の使用状況",
       "byModel": "モデル別",
       "byUser": "ユーザー別"
+    },
+    "feedback": {
+      "lead": "モデルごとの回答品質を比較し、ユーザーが改善を求めた回答を特定します。期間は回答の生成日時を基準にします。",
+      "filters": {
+        "rating": "評価",
+        "model": "モデル",
+        "reason": "理由",
+        "allRatings": "すべての評価",
+        "dislikes": "低評価のみ",
+        "likes": "高評価のみ",
+        "allModels": "すべてのモデル",
+        "allReasons": "すべての理由"
+      },
+      "stats": {
+        "evaluated": "評価数",
+        "likes": "高評価",
+        "dislikes": "低評価",
+        "positiveRate": "高評価率",
+        "coverage": "評価カバー率",
+        "coverageDetail": "{{replies}} 件中 {{evaluated}} 件を評価"
+      },
+      "error": {
+        "title": "モデル評価を読み込めませんでした"
+      },
+      "rating": {
+        "like": "高評価",
+        "dislike": "低評価"
+      },
+      "reasons": {
+        "incorrect_fact": "事実または計算の誤り",
+        "not_answered": "質問に答えていない",
+        "instruction_ignored": "指示に従っていない",
+        "outdated": "情報が古い",
+        "citation_issue": "引用または出典の問題",
+        "tool_file_issue": "ファイルまたはツールのエラー",
+        "incomplete": "回答が不完全または途中で終了",
+        "poor_format": "表現または書式が不適切",
+        "unsafe": "安全でない、または不適切",
+        "other": "その他"
+      },
+      "quality": {
+        "title": "モデル品質",
+        "lead": "モデル別に評価済み回答を比較します。十分な標本数に達するまで高評価率は表示しません。",
+        "model": "モデル",
+        "evaluated": "評価数",
+        "sentiment": "高評価 / 低評価",
+        "positiveRate": "高評価率",
+        "topReason": "主な低評価理由",
+        "sampleInsufficient": "標本不足（<{{count}}）",
+        "evaluatedValue": "{{count}} 件の評価",
+        "likesValue": "高評価 {{count}} 件",
+        "dislikesValue": "低評価 {{count}} 件",
+        "topReasonValue": "主な理由：{{reason}}",
+        "empty": "この条件に一致するモデル評価データはありません。"
+      },
+      "list": {
+        "title": "評価サンプル",
+        "dislikesTitle": "確認が必要な回答",
+        "count": "{{count}} 件",
+        "lead": "行を開くと、記録された質問と回答のテキスト、ユーザー評価、生成メタデータを確認できます。",
+        "noQuestion": "質問は記録されていません",
+        "noResponse": "回答は記録されていません",
+        "metrics": "{{latency}}・{{tokens}}トークン",
+        "empty": "この条件に一致する評価はありません。",
+        "emptyDislikes": "この条件に一致する低評価の回答はありません。"
+      },
+      "detail": {
+        "title": "評価の詳細",
+        "lead": "記録されたやり取りのテキストと、この回答の生成メタデータです。",
+        "question": "ユーザーの質問",
+        "response": "モデルの回答",
+        "comment": "ユーザーの補足",
+        "metadata": "生成メタデータ",
+        "conversation": "会話",
+        "model": "モデル",
+        "channel": "チャネル",
+        "provider": "プロバイダー",
+        "user": "ユーザー",
+        "workspace": "ワークスペース",
+        "createdAt": "評価日時",
+        "updatedAt": "更新日時",
+        "messageCreatedAt": "回答の生成日時",
+        "timing": "生成時間",
+        "tokens": "入力 / 出力トークン",
+        "totalTokens": "合計トークン",
+        "cacheTokens": "キャッシュ読み取り / 書き込みトークン",
+        "cost": "コスト",
+        "credits": "クレジット",
+        "context": "回答のコンテキスト",
+        "hasTools": "ツール使用",
+        "hasFiles": "ファイルあり",
+        "hasRag": "ナレッジベース使用",
+        "fallback": "フォールバック",
+        "statusError": "生成エラー",
+        "statusSuccess": "生成完了",
+        "error": "生成エラーの詳細",
+        "notRecorded": "記録なし",
+        "openConversation": "会話の詳細を開く"
+      }
     }
   },
   "announcement": {
@@ -1450,6 +1554,8 @@
     "title": "ファイル",
     "lead": "会話とナレッジベースにアップロードされた全ファイル。削除するとデータベース記録・ベクトル・ディスク上のファイルがすべて除去されます。",
     "deleteSelected": "選択を削除({{count}})",
+    "selectedCount": "{{count}} 件選択中",
+    "clearSelection": "選択を解除",
     "total": "{{count}} 件のファイル",
     "empty": "条件に一致するファイルはありません。",
     "view": "表示",
@@ -1459,6 +1565,7 @@
     "noInlinePreview": "このファイル形式はインラインプレビューに対応していません。",
     "unknownType": "不明な形式",
     "selectAll": "このページを全選択",
+    "deselectAll": "このページの選択を解除",
     "selectOne": "{{name}} を選択",
     "confirmTitle": "{{count}} 件のファイルを削除しますか?",
     "confirmBody": "ディスク上のファイル、データベース記録、検索ベクトルが完全に削除されます。元に戻せません。",

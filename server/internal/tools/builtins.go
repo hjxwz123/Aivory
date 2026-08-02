@@ -825,7 +825,7 @@ func (t *imageGenerateTool) Execute(ctx context.Context, input []byte, tc *llm.T
 	}
 	in.N = llm.ClampImageGenerationCount(in.N)
 
-	// §8.2 每用户每日图像张数限额（按 usage_logs 当日累计）。 Resolve
+	// §8.2 每用户每日图像张数限额（由 quota_ledger 原子预留）。 Resolve
 	// n after model defaults so direct mode and chat tool calls project the same
 	// quantity before either reaches the provider.
 	var dailyReservation *store.QuotaReservation

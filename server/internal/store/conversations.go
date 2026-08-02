@@ -648,6 +648,7 @@ func scanMessage(s scanner) (Message, error) {
 		m.Raw = json.RawMessage(raw)
 	}
 	m.Attachments = json.RawMessage(orDefault(atts, "[]"))
+	m.FeedbackReasons = []string{}
 	m.SelectedUserSkillIDs = json.RawMessage(orDefault(selectedSkills, "[]"))
 	m.Citations = json.RawMessage(orDefault(cites, "[]"))
 	// Only set Verify when audited, so `omitempty` keeps it off the wire otherwise.
@@ -946,16 +947,34 @@ func UpdateMessageContent(ctx context.Context, db *sql.DB, id string, blocks jso
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	var convID string
+	var convID, role string
 	var createdAt int64
-	if err := tx.QueryRowContext(ctx, `SELECT conversation_id, created_at FROM messages WHERE id=?`, id).Scan(&convID, &createdAt); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT conversation_id, role, created_at FROM messages WHERE id=?`, id).Scan(&convID, &role, &createdAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		}
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE messages SET blocks=?, raw='', search_text=? WHERE id=?`, string(blocks), searchTextFromBlocks(blocks), id); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE messages SET blocks=?, raw='', search_text=?, feedback='' WHERE id=?`, string(blocks), searchTextFromBlocks(blocks), id); err != nil {
 		return err
+	}
+	// Feedback evaluates the exact question/answer text that was shown. An in-place
+	// edit invalidates that evidence: editing an answer clears its own evaluations;
+	// editing a question clears every direct assistant answer (including regenerate
+	// siblings). Keep the compatibility mirror and normalized rows in sync.
+	if role == "assistant" {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM message_feedback WHERE message_id=?`, id); err != nil {
+			return err
+		}
+	} else if role == "user" {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM message_feedback
+			WHERE message_id IN (SELECT id FROM messages WHERE parent_id=? AND role='assistant')`, id); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE messages SET feedback=''
+			WHERE parent_id=? AND role='assistant'`, id); err != nil {
+			return err
+		}
 	}
 	// A saved edit changes the historical truth for this message. Any summary
 	// block that already rolled it up now contains stale text, so prune it and let
@@ -964,13 +983,6 @@ func UpdateMessageContent(ctx context.Context, db *sql.DB, id string, blocks jso
 		return err
 	}
 	return tx.Commit()
-}
-
-// SetMessageFeedback stores a like/dislike on an assistant message.
-// Valid values: "like", "dislike", "" (clear).
-func SetMessageFeedback(ctx context.Context, db *sql.DB, id, feedback string) error {
-	_, err := db.ExecContext(ctx, `UPDATE messages SET feedback=? WHERE id=?`, feedback, id)
-	return err
 }
 
 // SetMessageVerify stores the secondary-auditor result (Verify mode, §verify) on

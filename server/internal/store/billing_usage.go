@@ -28,7 +28,7 @@ func billingCostToMicros(cost float64) (int64, error) {
 }
 
 // RecordBillingUsage stores provider consumption independently from usage_logs,
-// which administrators may prune as analytics data. Zero-cost token/image rows
+// which administrators may prune as diagnostic data. Zero-cost token/image rows
 // are retained because they enforce deployment-wide daily limits.
 func RecordBillingUsage(ctx context.Context, db *sql.DB, u UsageLog) error {
 	if db == nil {

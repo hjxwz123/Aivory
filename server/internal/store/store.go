@@ -423,12 +423,14 @@ func Migrate(db *sql.DB) error {
 	// O(1). If you add an ALTER above, add its column here.
 	columnChecks := map[string][]string{
 		"messages":            {"credits", "model_label", "search_text", "gen_ms", "feedback", "verify", "author_id", "fast", "selected_user_skill_ids"},
+		"message_feedback":    {"id", "message_id", "conversation_id", "user_id", "workspace_id", "model_id", "channel_id", "rating", "reasons", "comment", "created_at", "updated_at"},
 		"skills":              {"display_description"},
 		"prompts":             {"name", "description", "content", "enabled", "sort_order"},
 		"user_skills":         {"user_id", "name", "description", "icon", "instructions", "source_skill_id"},
 		"user_prompts":        {"user_id", "name", "description", "content", "source_prompt_id"},
 		"users":               {"group_id", "totp_secret", "totp_enabled", "group_expires_at", "previous_group_id", "password_set", "password_changed_at", "last_seen_at", "credits_permanent", "credits_permanent_micros", "credit_cycle_anchor", "quota_cycle_anchor", "sort_order"},
-		"usage_logs":          {"credits", "workspace_id", "channel_id", "fallback", "status", "error", "request_method", "request_url", "request_headers", "request_body"},
+		"usage_logs":          {"credits", "workspace_id", "channel_id", "fallback", "status", "error", "request_method", "request_url", "request_headers", "request_body", "ttft_fallback_model"},
+		"usage_stats":         {"source_log_id", "user_id", "conversation_id", "message_id", "model_id", "purpose", "input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "images_count", "cost", "currency", "credits", "workspace_id", "channel_id", "fallback", "ttft_fallback_model", "created_at"},
 		"user_groups":         {"monthly_price_amount_minor", "yearly_price_amount_minor", "max_projects", "max_kbs", "credit_allowance", "credit_allowance_micros", "credit_period_seconds", "max_workspaces", "is_public", "is_purchasable", "max_storage_mb"},
 		"credit_ledger":       {"amount", "amount_micros", "source_type", "source_id"},
 		"credit_reservations": {"user_id", "amount_micros", "actual_micros", "source_type", "source_id", "status", "expires_at"},
@@ -451,6 +453,12 @@ func Migrate(db *sql.DB) error {
 		if _, err := db.Exec(fmt.Sprintf(`SELECT %s FROM %s WHERE 1=0`, strings.Join(cols, ", "), table)); err != nil {
 			return fmt.Errorf("schema column check failed for %q (an additive migration may have silently failed): %w", table, err)
 		}
+	}
+	if err := EnableUsageStatsMirror(context.Background(), db); err != nil {
+		return err
+	}
+	if _, err := BackfillUsageStats(context.Background(), db); err != nil {
+		return err
 	}
 	if !paymentChannelEnvironmentExisted {
 		if err := backfillPaymentEnvironments(db); err != nil {
@@ -511,6 +519,16 @@ func Migrate(db *sql.DB) error {
 	if stBackfill == "" {
 		backfillSearchText(db)
 		_, _ = db.Exec(`INSERT INTO settings(key, value) VALUES('msg_search_text_backfill_v1', '1') ON CONFLICT(key) DO NOTHING`)
+	}
+	// Preserve legacy one-value message feedback by attributing it to the
+	// conversation owner. New writes use message_feedback and keep the old column
+	// only as a compatibility mirror for older clients.
+	var feedbackBackfill string
+	_ = db.QueryRow(`SELECT value FROM settings WHERE key=?`, messageFeedbackBackfillKey).Scan(&feedbackBackfill)
+	if feedbackBackfill == "" {
+		if _, err := BackfillLegacyMessageFeedback(context.Background(), db); err != nil {
+			return err
+		}
 	}
 	// One-time backfill: existing users predate admin-defined ordering, so
 	// preserve the old default order (newest created first) as explicit slots.
