@@ -160,6 +160,30 @@
     "openInNew": "在新标签页打开",
     "forkFailed": "分支失败，请重试"
   },
+  "feedback": {
+    "title": "哪里需要改进？",
+    "optional": "可选",
+    "reasonsLabel": "选择原因（可多选）",
+    "commentLabel": "补充说明（可选）",
+    "commentPlaceholder": "告诉我们具体哪里出了问题",
+    "skip": "跳过",
+    "submit": "提交反馈",
+    "saved": "已记录反馈",
+    "thanks": "感谢你的反馈",
+    "saveFailed": "无法保存反馈，请重试。",
+    "reasons": {
+      "incorrect_fact": "事实或计算错误",
+      "not_answered": "没有回答问题",
+      "instruction_ignored": "未遵循要求",
+      "outdated": "内容过时",
+      "citation_issue": "引用或来源有问题",
+      "tool_file_issue": "文件或工具处理错误",
+      "incomplete": "回复被截断或不完整",
+      "poor_format": "表达或格式不好",
+      "unsafe": "存在安全或不当内容",
+      "other": "其他"
+    }
+  },
   "message": {
     "refused": "模型拒绝回答此请求。",
     "stopped": "已停止生成。",

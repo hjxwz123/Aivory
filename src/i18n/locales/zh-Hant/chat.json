@@ -160,6 +160,30 @@
     "openInNew": "在新分頁開啟",
     "forkFailed": "分支失敗，請重試"
   },
+  "feedback": {
+    "title": "哪裡需要改進？",
+    "optional": "選填",
+    "reasonsLabel": "選擇原因（可複選）",
+    "commentLabel": "補充說明（選填）",
+    "commentPlaceholder": "告訴我們具體哪裡出了問題",
+    "skip": "略過",
+    "submit": "提交回饋",
+    "saved": "已記錄回饋",
+    "thanks": "感謝你的回饋",
+    "saveFailed": "無法儲存回饋，請重試。",
+    "reasons": {
+      "incorrect_fact": "事實或計算錯誤",
+      "not_answered": "沒有回答問題",
+      "instruction_ignored": "未遵循要求",
+      "outdated": "內容過時",
+      "citation_issue": "引用或來源有問題",
+      "tool_file_issue": "檔案或工具處理錯誤",
+      "incomplete": "回覆被截斷或不完整",
+      "poor_format": "表達或格式不佳",
+      "unsafe": "含有不安全或不當內容",
+      "other": "其他"
+    }
+  },
   "message": {
     "refused": "模型拒絕回答此請求。",
     "stopped": "已停止生成。",

@@ -14,6 +14,7 @@ import {
   Search,
   Trash2,
   UserRound,
+  X,
 } from 'lucide-react'
 import { adminApi, apiUrl, ApiError } from '@/api'
 import type { ApiAdminFile } from '@/api/types'
@@ -154,6 +155,9 @@ export default function AdminFiles() {
     const request = ++listRequestRef.current
     setLoading(true)
     setListError('')
+    // Selection is page-scoped. Clear it as soon as the page/filter request
+    // changes so stale rows cannot be deleted while the next page is loading.
+    setSelected(new Set())
     try {
       const response = await adminApi.files({
         search: searchDebounced,
@@ -285,6 +289,9 @@ export default function AdminFiles() {
       await load()
     } catch (error) {
       toast.error(error instanceof ApiError ? error.message : t('common:actions.failed', { defaultValue: 'Failed' }))
+      // The server processes batch items sequentially. A failed response may
+      // still have deleted earlier items, so reconcile the inventory before retrying.
+      await load()
     } finally {
       setBusy(false)
     }
@@ -389,37 +396,63 @@ export default function AdminFiles() {
           </div>
 
           <div className="flex min-h-0 flex-1 flex-col">
-            <div className="flex h-11 shrink-0 items-center border-b border-[var(--color-divider)] px-1.5 text-xs text-[var(--color-fg-subtle)]">
-              <label className="inline-flex size-10 shrink-0 cursor-pointer items-center justify-center rounded-[8px] hover:bg-[var(--color-bg-muted)]">
+            <div className="flex min-h-11 shrink-0 items-center gap-1 border-b border-[var(--color-divider)] px-1.5 text-xs text-[var(--color-fg-subtle)]">
+              <label
+                className={cn(
+                  'inline-flex h-10 min-w-0 cursor-pointer items-center rounded-[8px] hover:bg-[var(--color-bg-muted)] has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50',
+                  selectedRows.length > 0 ? 'w-10 shrink-0 justify-center' : 'flex-1 gap-2 px-2',
+                )}
+              >
                 <input
                   ref={selectAllRef}
                   type="checkbox"
-                  className="cursor-pointer accent-[var(--color-accent)]"
+                  className="size-4 shrink-0 cursor-pointer accent-[var(--color-accent)]"
                   checked={allChecked}
                   onChange={toggleAll}
-                  aria-label={t('admin:files.selectAll')}
+                  aria-label={t(allChecked ? 'admin:files.deselectAll' : 'admin:files.selectAll')}
+                  disabled={loading || busy || rows.length === 0}
                 />
+                {selectedRows.length === 0 ? (
+                  <span className="min-w-0 truncate">{t('admin:files.selectAll')}</span>
+                ) : null}
               </label>
-              <span className="min-w-0 flex-1 truncate">
-                {selectedRows.length > 0
-                  ? t('files:selection.selected', { defaultValue: 'Selected' }) + `: ${selectedRows.length}`
-                  : t('files:list.title')}
-              </span>
-              <span className="mr-1 shrink-0 tabular-nums">{t('admin:files.total', { count: total })}</span>
               {selectedRows.length > 0 ? (
-                <Tooltip content={t('admin:files.deleteSelected', { count: selectedRows.length })} side="left">
+                <>
+                  <span
+                    className="min-w-0 flex-1 truncate font-medium tabular-nums text-[var(--color-fg)]"
+                    role="status"
+                    aria-live="polite"
+                    aria-atomic="true"
+                  >
+                    {t('admin:files.selectedCount', { count: selectedRows.length })}
+                  </span>
+                  <Tooltip content={t('admin:files.clearSelection')} side="left">
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      className="shrink-0 [@media(pointer:coarse)]:size-11"
+                      aria-label={t('admin:files.clearSelection')}
+                      disabled={busy}
+                      onClick={() => setSelected(new Set())}
+                    >
+                      <X size={15} aria-hidden />
+                    </Button>
+                  </Tooltip>
                   <Button
-                    variant="ghost"
-                    size="icon"
-                    className="shrink-0 text-[var(--color-danger)]"
+                    variant="destructive"
+                    size="xs"
+                    className="shrink-0 [@media(pointer:coarse)]:h-11"
+                    leadingIcon={<Trash2 size={14} aria-hidden />}
                     aria-label={t('admin:files.deleteSelected', { count: selectedRows.length })}
                     disabled={busy}
                     onClick={() => setConfirmDelete(selectedRows)}
                   >
-                    <Trash2 size={15} aria-hidden />
+                    {t('common:actions.delete', { defaultValue: 'Delete' })}
                   </Button>
-                </Tooltip>
-              ) : null}
+                </>
+              ) : (
+                <span className="mr-1 shrink-0 tabular-nums">{t('admin:files.total', { count: total })}</span>
+              )}
             </div>
 
             {loading ? (
@@ -473,16 +506,21 @@ export default function AdminFiles() {
                       key={key}
                       className={cn(
                         'group/file flex min-h-20 items-stretch rounded-[8px] transition-colors',
-                        active ? 'bg-[var(--color-accent-soft)]' : 'hover:bg-[var(--color-bg-muted)]',
+                        active
+                          ? 'bg-[var(--color-accent-soft)]'
+                          : checked
+                            ? 'bg-[var(--color-bg-muted)] ring-1 ring-inset ring-[var(--color-border)]'
+                            : 'hover:bg-[var(--color-bg-muted)]',
                       )}
                     >
                       <label className="inline-flex w-11 shrink-0 cursor-pointer items-center justify-center rounded-l-[8px] focus-within:ring-2 focus-within:ring-inset focus-within:ring-[var(--color-ring)]">
                         <input
                           type="checkbox"
-                          className="cursor-pointer accent-[var(--color-accent)]"
+                          className="size-4 cursor-pointer accent-[var(--color-accent)]"
                           checked={checked}
                           onChange={() => toggleOne(file)}
                           aria-label={t('admin:files.selectOne', { name: file.filename })}
+                          disabled={busy}
                         />
                       </label>
                       <button
@@ -640,8 +678,8 @@ export default function AdminFiles() {
         </section>
       </div>
 
-      <Dialog open={confirmDelete !== null} onOpenChange={(open) => !open && setConfirmDelete(null)}>
-        <DialogContent size="sm">
+      <Dialog open={confirmDelete !== null} onOpenChange={(open) => !open && !busy && setConfirmDelete(null)}>
+        <DialogContent size="sm" className="max-sm:[&>button]:size-11">
           <DialogHeader>
             <DialogTitle>
               {t('admin:files.confirmTitle', { count: confirmDelete?.length ?? 0 })}
@@ -651,7 +689,11 @@ export default function AdminFiles() {
           <DialogBody>
             <ul className="max-h-40 space-y-1 overflow-y-auto text-sm text-[var(--color-fg-muted)]">
               {(confirmDelete ?? []).slice(0, 12).map((file) => (
-                <li key={rowKey(file)} className="truncate">
+                <li
+                  key={rowKey(file)}
+                  className="break-words [overflow-wrap:anywhere]"
+                  title={file.filename}
+                >
                   {file.filename}
                 </li>
               ))}
@@ -662,7 +704,7 @@ export default function AdminFiles() {
               ) : null}
             </ul>
           </DialogBody>
-          <DialogFooter>
+          <DialogFooter className="max-sm:[&_button]:!h-11">
             <Button variant="ghost" onClick={() => setConfirmDelete(null)} disabled={busy}>
               {t('common:actions.cancel', { defaultValue: 'Cancel' })}
             </Button>

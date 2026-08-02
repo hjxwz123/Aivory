@@ -2278,9 +2278,9 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 				Status:           "stopped",
 				GenMs:            time.Since(turnStart).Milliseconds(),
 			})
-			// Bill + count what the model produced before the stop. The usage_logs row
-			// and the window-quota increment go together so the cache counter and the
-			// usage_logs COUNT(*) cold-reseed stay in agreement (§B3).
+			// Bill + count what the model produced before the stop. The durable usage
+			// fact and the window-quota increment preserve reporting and admission
+			// state even when diagnostic logs are later pruned (§B3).
 			logProviderFailures(ctx)
 			if produced {
 				// §B5-per-request rows: same split as the success path — tool

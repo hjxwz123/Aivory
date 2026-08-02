@@ -7,7 +7,7 @@
  * chart. Charts are token-driven monochrome SVG/divs — no chart library, no
  * accent overuse.
  */
-import { useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useTranslation } from 'react-i18next'
 import { adminApi, ApiError } from '@/api'
 import type { ApiAnalytics, ApiUsageBreakdownRow, ApiUsageSeriesPoint } from '@/api/types'
@@ -16,9 +16,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { toast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
 import { PanelFallback } from '@/components/ui/panel-fallback'
+import { SegmentedControl } from '@/components/ui/segmented-control'
+import { AdminModelFeedback } from './AdminModelFeedback'
 
 const RANGE_IDS = ['1', '7', '30', '90'] as const
 type Metric = 'calls' | 'tokens' | 'cost'
+type AnalyticsView = 'usage' | 'feedback'
 const METRICS: Metric[] = ['calls', 'tokens', 'cost']
 
 interface MetricCarrier {
@@ -46,30 +49,43 @@ function fmtMetric(m: Metric, v: number): string {
 export default function AdminAnalytics() {
   const { t } = useTranslation(['admin', 'common'])
   const lang = useLanguage((s) => s.lang)
+  const [view, setView] = useState<AnalyticsView>('usage')
   const [days, setDays] = useState('30')
   const [metric, setMetric] = useState<Metric>('calls')
   const [data, setData] = useState<ApiAnalytics | null>(null)
   const [modelMap, setModelMap] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
+  const requestRef = useRef(0)
 
   async function load() {
+    const request = ++requestRef.current
     setLoading(true)
     try {
       const [a, models] = await Promise.all([adminApi.analytics(Number(days)), adminApi.models()])
+      if (request !== requestRef.current) return
       setData(a)
       const map: Record<string, string> = {}
       for (const m of models) map[m.id] = m.label
       setModelMap(map)
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : t('common.failed'))
+      if (request === requestRef.current) {
+        toast.error(e instanceof ApiError ? e.message : t('common.failed'))
+      }
     } finally {
-      setLoading(false)
+      if (request === requestRef.current) setLoading(false)
     }
   }
   useEffect(() => {
+    if (view !== 'usage') {
+      requestRef.current += 1
+      return
+    }
     void load()
+    return () => {
+      requestRef.current += 1
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [days])
+  }, [days, view])
 
   const buckets = useMemo(() => (data ? data.trend.map((p) => p.bucket_start) : []), [data])
   const hourly = (data?.bucket ?? 86400) <= 3600
@@ -98,11 +114,13 @@ export default function AdminAnalytics() {
           <h1 className="font-serif text-2xl tracking-tight text-[var(--color-fg)] sm:text-3xl">
             {t('analytics.title')}
           </h1>
-          <p className="mt-2 text-[var(--color-fg-muted)] text-sm max-w-2xl">{t('analytics.lead')}</p>
+          <p className="mt-2 max-w-2xl text-sm text-[var(--color-fg-muted)]">
+            {t(view === 'usage' ? 'analytics.lead' : 'analytics.feedback.lead')}
+          </p>
         </div>
         <div className="w-full sm:w-40">
           <Select value={days} onValueChange={setDays}>
-            <SelectTrigger>
+            <SelectTrigger aria-label={t('usage.filters.range')}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -116,78 +134,97 @@ export default function AdminAnalytics() {
         </div>
       </header>
 
-      {/* KPI cards */}
-      <section className="mt-6 grid grid-cols-2 gap-2.5 sm:gap-3 lg:grid-cols-4">
-        <Stat label={t('analytics.stats.calls')} value={totals ? compactNum(totals.calls) : '—'} />
-        <Stat
-          label={t('analytics.stats.tokens')}
-          value={totals ? compactNum(totals.input_tokens + totals.output_tokens) : '—'}
+      <div className="mt-5">
+        <SegmentedControl
+          label={t('analytics.view.label')}
+          value={view}
+          onChange={setView}
+          fullWidthOnMobile
+          options={[
+            { value: 'usage', label: t('analytics.view.usage') },
+            { value: 'feedback', label: t('analytics.view.feedback') },
+          ]}
         />
-        <Stat label={t('analytics.stats.cost')} value={totals ? '$' + totals.cost.toFixed(2) : '—'} />
-        <Stat label={t('analytics.stats.users')} value={totals ? String(totals.users) : '—'} />
-      </section>
-
-      {/* Metric toggle */}
-      <div className="mt-6 grid w-full grid-cols-3 items-stretch gap-1 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-1 sm:inline-grid sm:w-auto sm:p-0.5">
-        {METRICS.map((m) => (
-          <button
-            key={m}
-            type="button"
-            onClick={() => setMetric(m)}
-            aria-pressed={metric === m}
-            className={cn(
-              'min-w-0 min-h-11 rounded-[8px] px-1.5 text-xs font-medium leading-tight transition-colors interactive sm:min-h-8 sm:px-3.5 sm:text-sm',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-              metric === m
-                ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)]'
-                : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]',
-            )}
-          >
-            {t(`analytics.metric.${m}`)}
-          </button>
-        ))}
       </div>
 
-      {loading ? (
-        <PanelFallback />
-      ) : !data || data.trend.length === 0 ? (
-        <div className="mt-8 rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-10 text-center text-sm text-[var(--color-fg-muted)]">
-          {t('analytics.empty')}
-        </div>
-      ) : (
+      {view === 'usage' ? (
         <>
-          {/* Overall trend */}
-          <section className="mt-6 rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 sm:p-5">
-            <h2 className="text-sm font-medium text-[var(--color-fg)]">
-              {hourly ? t('analytics.sections.hourly') : t('analytics.sections.daily')}
-            </h2>
-            <div className="mt-4">
-              <TrendBars
-                values={trendValues}
-                labels={buckets.map(bucketLabel)}
-                format={(v) => fmtMetric(metric, v)}
-              />
-            </div>
+          {/* KPI cards */}
+          <section className="mt-6 grid grid-cols-2 gap-2.5 sm:gap-3 lg:grid-cols-4">
+            <Stat label={t('analytics.stats.calls')} value={totals ? compactNum(totals.calls) : '—'} />
+            <Stat
+              label={t('analytics.stats.tokens')}
+              value={totals ? compactNum(totals.input_tokens + totals.output_tokens) : '—'}
+            />
+            <Stat label={t('analytics.stats.cost')} value={totals ? '$' + totals.cost.toFixed(2) : '—'} />
+            <Stat label={t('analytics.stats.users')} value={totals ? String(totals.users) : '—'} />
           </section>
 
-          {/* Breakdowns */}
-          <section className="mt-6 grid gap-4 lg:grid-cols-2 lg:gap-6">
-            <Breakdown
-              title={t('analytics.sections.byModel')}
-              rows={data.by_model}
-              labelFor={(r) => modelMap[r.key] || r.key}
-              series={(key) => seriesFor(data.model_series, key)}
-              metric={metric}
-            />
-            <Breakdown
-              title={t('analytics.sections.byUser')}
-              rows={data.by_user}
-              labelFor={(r) => r.label || r.key || t('analytics.unknownUser')}
-              series={(key) => seriesFor(data.user_series, key)}
-              metric={metric}
-            />
-          </section>
+          {/* Metric toggle */}
+          <div className="mt-6 grid w-full grid-cols-3 items-stretch gap-1 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-1 sm:inline-grid sm:w-auto sm:p-0.5">
+            {METRICS.map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setMetric(m)}
+                aria-pressed={metric === m}
+                className={cn(
+                  'min-w-0 min-h-11 rounded-[8px] px-1.5 text-xs font-medium leading-tight transition-colors interactive sm:min-h-8 sm:px-3.5 sm:text-sm',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+                  metric === m
+                    ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)]'
+                    : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]',
+                )}
+              >
+                {t(`analytics.metric.${m}`)}
+              </button>
+            ))}
+          </div>
+
+          {loading ? (
+            <PanelFallback />
+          ) : !data || data.trend.length === 0 ? (
+            <div className="mt-8 rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-10 text-center text-sm text-[var(--color-fg-muted)]">
+              {t('analytics.empty')}
+            </div>
+          ) : (
+            <>
+              {/* Overall trend */}
+              <section className="mt-6 rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 sm:p-5">
+                <h2 className="text-sm font-medium text-[var(--color-fg)]">
+                  {hourly ? t('analytics.sections.hourly') : t('analytics.sections.daily')}
+                </h2>
+                <div className="mt-4">
+                  <TrendBars
+                    values={trendValues}
+                    labels={buckets.map(bucketLabel)}
+                    format={(v) => fmtMetric(metric, v)}
+                  />
+                </div>
+              </section>
+
+              {/* Breakdowns */}
+              <section className="mt-6 grid gap-4 lg:grid-cols-2 lg:gap-6">
+                <Breakdown
+                  title={t('analytics.sections.byModel')}
+                  rows={data.by_model}
+                  labelFor={(r) => modelMap[r.key] || r.key}
+                  series={(key) => seriesFor(data.model_series, key)}
+                  metric={metric}
+                />
+                <Breakdown
+                  title={t('analytics.sections.byUser')}
+                  rows={data.by_user}
+                  labelFor={(r) => r.label || r.key || t('analytics.unknownUser')}
+                  series={(key) => seriesFor(data.user_series, key)}
+                  metric={metric}
+                />
+              </section>
+            </>
+          )}
         </>
+      ) : (
+        <AdminModelFeedback days={Number(days)} />
       )}
     </div>
   )

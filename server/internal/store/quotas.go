@@ -417,11 +417,11 @@ func migrateDailyTokenQuotaLedger(ctx context.Context, db *sql.DB) error {
 	}
 	dayStart := time.Now().UTC().Truncate(24 * time.Hour).Unix()
 	rows, err := tx.QueryContext(ctx,
-		`SELECT l.user_id,u.group_id,COALESCE(u.quota_cycle_anchor,0),SUM(l.input_tokens+l.output_tokens)
-		   FROM usage_logs l JOIN users u ON u.id=l.user_id
-		  WHERE l.created_at>=? AND l.status<>'error'
-		  GROUP BY l.user_id,u.group_id,u.quota_cycle_anchor
-		 HAVING SUM(l.input_tokens+l.output_tokens)>0`, dayStart)
+		`SELECT s.user_id,u.group_id,COALESCE(u.quota_cycle_anchor,0),CAST(SUM(s.input_tokens+s.output_tokens) AS BIGINT)
+		   FROM usage_stats s JOIN users u ON u.id=s.user_id
+		  WHERE s.created_at>=?
+		  GROUP BY s.user_id,u.group_id,u.quota_cycle_anchor
+		 HAVING SUM(s.input_tokens+s.output_tokens)>0`, dayStart)
 	if err != nil {
 		return err
 	}

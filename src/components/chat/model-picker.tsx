@@ -70,9 +70,9 @@ export function ModelPicker({ value, onChange, fast, onFastChange, className }: 
         aria-label={isFast ? t('fastMode.label', { defaultValue: '快速' }) : t('modelPicker.label', { name: current?.label ?? 'Model' })}
       >
         {isFast ? (
-          <Zap size={13} aria-hidden />
+          <Zap size={16} aria-hidden />
         ) : (
-          <ModelIcon icon={current?.icon} size={13} />
+          <ModelIcon icon={current?.icon} size={16} />
         )}
         <span className="truncate">{isFast ? t('fastMode.label', { defaultValue: '快速' }) : current?.label ?? 'Model'}</span>
         <ChevronDown size={13} aria-hidden />

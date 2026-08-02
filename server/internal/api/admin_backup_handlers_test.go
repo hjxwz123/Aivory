@@ -139,6 +139,246 @@ func TestBackupExportImportEndToEnd(t *testing.T) {
 	assertCanonicalOfficialTools(t, tgtDB, "model_legacy", "web_search", "code_interpreter")
 }
 
+func TestBackupRestoreBackfillsLegacyMessageFeedbackOnlyWhenTableMissing(t *testing.T) {
+	baseRows := func(legacyRating string) map[string][]map[string]any {
+		return map[string][]map[string]any{
+			"users": {
+				{"id": "u_owner", "email": "owner@example.test", "password_hash": "h", "name": "Owner", "role": "user", "group_id": "ug_free"},
+				{"id": "u_eval", "email": "evaluator@example.test", "password_hash": "h", "name": "Evaluator", "role": "user", "group_id": "ug_free"},
+			},
+			"user_groups": {
+				{"id": "ug_free", "name": "Free", "is_default": 1},
+			},
+			"conversations": {
+				{"id": "conv_legacy", "user_id": "u_owner", "title": "Legacy feedback"},
+			},
+			"messages": {
+				{"id": "question_legacy", "conversation_id": "conv_legacy", "role": "user", "blocks": `[{"kind":"text","text":"Question"}]`, "created_at": 100},
+				{"id": "answer_legacy", "conversation_id": "conv_legacy", "parent_id": "question_legacy", "role": "assistant", "model_id": "model_snapshot", "model_label": "Snapshot model", "blocks": `[{"kind":"text","text":"Answer"}]`, "feedback": legacyRating, "created_at": 101},
+			},
+		}
+	}
+	depsFor := func(t *testing.T) Deps {
+		t.Helper()
+		root := t.TempDir()
+		db := openMigrated(t, filepath.Join(root, "restore.db"))
+		t.Cleanup(func() { _ = db.Close() })
+		return Deps{
+			DB: db,
+			Config: config.Config{
+				UploadDir:   filepath.Join(root, "uploads"),
+				ArtifactDir: filepath.Join(root, "artifacts"),
+			},
+			Logger: log.New(io.Discard, "", 0),
+		}
+	}
+
+	t.Run("legacy archive without normalized table", func(t *testing.T) {
+		d := depsFor(t)
+		zr, man := backupRowsArchiveForTest(t, baseRows("dislike"))
+		counts, err := restoreDatabase(t.Context(), d, zr, man)
+		if err != nil {
+			t.Fatalf("restore legacy backup: %v", err)
+		}
+		if counts["message_feedback"] != 1 {
+			t.Fatalf("backfilled feedback count = %d, want 1", counts["message_feedback"])
+		}
+		feedback, err := store.GetMessageFeedbackForUser(t.Context(), d.DB, "answer_legacy", "u_owner")
+		if err != nil {
+			t.Fatalf("load backfilled owner feedback: %v", err)
+		}
+		if feedback.ID != "mfb_legacy_answer_legacy" || feedback.Rating != "dislike" || feedback.UserID != "u_owner" || len(feedback.Reasons) != 0 {
+			t.Fatalf("backfilled feedback = %+v", feedback)
+		}
+		var marker string
+		if err := d.DB.QueryRowContext(t.Context(), `SELECT value FROM settings WHERE key='message_feedback_backfill_v1'`).Scan(&marker); err != nil || marker != "1" {
+			t.Fatalf("feedback backfill marker = %q, err=%v", marker, err)
+		}
+		if inserted, err := store.BackfillLegacyMessageFeedback(t.Context(), d.DB); err != nil || inserted != 0 {
+			t.Fatalf("idempotent backfill inserted=%d err=%v, want 0", inserted, err)
+		}
+	})
+
+	t.Run("current archive preserves per-user rows", func(t *testing.T) {
+		d := depsFor(t)
+		rows := baseRows("like")
+		rows["settings"] = []map[string]any{{"key": "message_feedback_backfill_v1", "value": "1"}}
+		rows["message_feedback"] = []map[string]any{{
+			"id": "mfb_current", "message_id": "answer_legacy", "conversation_id": "conv_legacy", "user_id": "u_eval",
+			"model_id": "model_snapshot", "rating": "dislike", "reasons": `["incorrect_fact"]`, "comment": "Wrong answer",
+			"created_at": 200, "updated_at": 201,
+		}}
+		zr, man := backupRowsArchiveForTest(t, rows)
+		counts, err := restoreDatabase(t.Context(), d, zr, man)
+		if err != nil {
+			t.Fatalf("restore current backup: %v", err)
+		}
+		if counts["message_feedback"] != 1 {
+			t.Fatalf("restored feedback count = %d, want 1", counts["message_feedback"])
+		}
+		feedback, err := store.GetMessageFeedbackForUser(t.Context(), d.DB, "answer_legacy", "u_eval")
+		if err != nil {
+			t.Fatalf("load restored evaluator feedback: %v", err)
+		}
+		if feedback.ID != "mfb_current" || feedback.Rating != "dislike" || len(feedback.Reasons) != 1 || feedback.Reasons[0] != "incorrect_fact" || feedback.Comment != "Wrong answer" {
+			t.Fatalf("restored evaluator feedback = %+v", feedback)
+		}
+		var total, ownerRows int
+		if err := d.DB.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM message_feedback`).Scan(&total); err != nil {
+			t.Fatalf("count restored feedback: %v", err)
+		}
+		if err := d.DB.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM message_feedback WHERE user_id='u_owner'`).Scan(&ownerRows); err != nil {
+			t.Fatalf("count synthesized owner feedback: %v", err)
+		}
+		var legacyMirror string
+		if err := d.DB.QueryRowContext(t.Context(), `SELECT feedback FROM messages WHERE id='answer_legacy'`).Scan(&legacyMirror); err != nil {
+			t.Fatalf("load legacy mirror: %v", err)
+		}
+		if total != 1 || ownerRows != 0 || legacyMirror != "like" {
+			t.Fatalf("current restore total=%d owner_rows=%d legacy_mirror=%q", total, ownerRows, legacyMirror)
+		}
+	})
+}
+
+func TestBackupRestoreUsageStatsCompatibility(t *testing.T) {
+	depsFor := func(t *testing.T) Deps {
+		t.Helper()
+		root := t.TempDir()
+		db := openMigrated(t, filepath.Join(root, "restore.db"))
+		t.Cleanup(func() { _ = db.Close() })
+		return Deps{
+			DB: db,
+			Config: config.Config{
+				UploadDir:   filepath.Join(root, "uploads"),
+				ArtifactDir: filepath.Join(root, "artifacts"),
+			},
+			Logger: log.New(io.Discard, "", 0),
+		}
+	}
+	userRows := []map[string]any{{
+		"id": "u_stats", "email": "stats@example.test", "password_hash": "h", "role": "user",
+	}}
+
+	t.Run("legacy archive backfills successful logs only", func(t *testing.T) {
+		d := depsFor(t)
+		rows := map[string][]map[string]any{
+			"users": userRows,
+			"usage_logs": {
+				{
+					"id": 4101, "user_id": "u_stats", "conversation_id": "conv_archived", "message_id": "msg_archived",
+					"model_id": "model_archived", "purpose": "chat", "input_tokens": 11, "output_tokens": 7,
+					"cache_read_tokens": 5, "cache_write_tokens": 3, "images_count": 2, "cost": 1.25,
+					"currency": "CNY", "credits": 0.75, "workspace_id": "ws_archived", "channel_id": "ch_archived",
+					"fallback": 1, "status": "ok", "ttft_fallback_model": "model_fallback", "created_at": 1710000001,
+				},
+				{
+					"id": 4102, "user_id": "u_stats", "model_id": "model_error", "purpose": "error-call",
+					"input_tokens": 99, "status": "error", "error": "upstream failed", "created_at": 1710000002,
+				},
+			},
+		}
+		zr, man := backupRowsArchiveForTest(t, rows)
+		counts, err := restoreDatabase(t.Context(), d, zr, man)
+		if err != nil {
+			t.Fatalf("restore legacy usage archive: %v", err)
+		}
+		if counts["usage_logs"] != 2 || counts["usage_stats"] != 1 {
+			t.Fatalf("restored counts = logs:%d stats:%d, want 2/1", counts["usage_logs"], counts["usage_stats"])
+		}
+
+		var (
+			sourceLogID                                              int64
+			userID, conversationID, messageID, modelID, purpose      string
+			currency, workspaceID, channelID, ttftFallbackModel      string
+			inputTokens, outputTokens, cacheRead, cacheWrite, images int64
+			cost, credits                                            float64
+			fallback, createdAt                                      int64
+		)
+		err = d.DB.QueryRowContext(t.Context(), `SELECT source_log_id, user_id, conversation_id, message_id,
+			model_id, purpose, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+			images_count, cost, currency, credits, workspace_id, channel_id, fallback,
+			ttft_fallback_model, created_at FROM usage_stats`).Scan(
+			&sourceLogID, &userID, &conversationID, &messageID, &modelID, &purpose,
+			&inputTokens, &outputTokens, &cacheRead, &cacheWrite, &images, &cost, &currency,
+			&credits, &workspaceID, &channelID, &fallback, &ttftFallbackModel, &createdAt,
+		)
+		if err != nil {
+			t.Fatalf("load backfilled usage stats: %v", err)
+		}
+		if sourceLogID != 4101 || userID != "u_stats" || conversationID != "conv_archived" || messageID != "msg_archived" ||
+			modelID != "model_archived" || purpose != "chat" || inputTokens != 11 || outputTokens != 7 ||
+			cacheRead != 5 || cacheWrite != 3 || images != 2 || cost != 1.25 || currency != "CNY" || credits != 0.75 ||
+			workspaceID != "ws_archived" || channelID != "ch_archived" || fallback != 1 ||
+			ttftFallbackModel != "model_fallback" || createdAt != 1710000001 {
+			t.Fatalf("backfilled usage stats mismatch: source=%d user=%q conversation=%q message=%q model=%q purpose=%q tokens=%d/%d cache=%d/%d images=%d cost=%v currency=%q credits=%v workspace=%q channel=%q fallback=%d ttft=%q created=%d",
+				sourceLogID, userID, conversationID, messageID, modelID, purpose, inputTokens, outputTokens,
+				cacheRead, cacheWrite, images, cost, currency, credits, workspaceID, channelID, fallback, ttftFallbackModel, createdAt)
+		}
+		var errorStats int
+		if err := d.DB.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM usage_stats WHERE source_log_id=4102 OR purpose='error-call'`).Scan(&errorStats); err != nil {
+			t.Fatalf("count error usage stats: %v", err)
+		}
+		if errorStats != 0 {
+			t.Fatalf("error log produced %d usage stats rows, want 0", errorStats)
+		}
+
+		mustExec(t, d.DB, `INSERT INTO usage_logs(id,user_id,model_id,purpose,input_tokens,output_tokens,status,created_at)
+			VALUES(4103,'u_stats','model_after_restore','post-restore',13,17,'ok',1710000003)`)
+		var mirroredModel string
+		if err := d.DB.QueryRowContext(t.Context(), `SELECT model_id FROM usage_stats WHERE source_log_id=4103`).Scan(&mirroredModel); err != nil {
+			t.Fatalf("load post-restore mirrored stats: %v", err)
+		}
+		if mirroredModel != "model_after_restore" {
+			t.Fatalf("post-restore mirrored model = %q, want model_after_restore", mirroredModel)
+		}
+	})
+
+	t.Run("current archive keeps explicit empty stats authoritative", func(t *testing.T) {
+		d := depsFor(t)
+		rows := map[string][]map[string]any{
+			"users": userRows,
+			"usage_logs": {
+				{
+					"id": 5101, "user_id": "u_stats", "model_id": "model_log_only", "purpose": "archived-log",
+					"input_tokens": 23, "output_tokens": 29, "status": "ok", "created_at": 1720000001,
+				},
+			},
+			"usage_stats": {},
+		}
+		zr, man := backupRowsArchiveForTest(t, rows)
+		counts, err := restoreDatabase(t.Context(), d, zr, man)
+		if err != nil {
+			t.Fatalf("restore current usage archive: %v", err)
+		}
+		if counts["usage_logs"] != 1 {
+			t.Fatalf("restored usage logs = %d, want 1", counts["usage_logs"])
+		}
+		if got, present := counts["usage_stats"]; !present || got != 0 {
+			t.Fatalf("restored explicit usage stats count = %d (present=%v), want 0/present", got, present)
+		}
+		var statsCount int
+		if err := d.DB.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM usage_stats`).Scan(&statsCount); err != nil {
+			t.Fatalf("count current archive usage stats: %v", err)
+		}
+		if statsCount != 0 {
+			t.Fatalf("current archive synthesized %d usage stats rows, want 0", statsCount)
+		}
+
+		mustExec(t, d.DB, `INSERT INTO usage_logs(id,user_id,model_id,purpose,input_tokens,output_tokens,status,created_at)
+			VALUES(5102,'u_stats','model_after_empty_restore','post-empty-restore',31,37,'ok',1720000002)`)
+		var total, archivedRows, newRows int
+		if err := d.DB.QueryRowContext(t.Context(), `SELECT COUNT(*),
+			COALESCE(SUM(CASE WHEN source_log_id=5101 THEN 1 ELSE 0 END),0),
+			COALESCE(SUM(CASE WHEN source_log_id=5102 THEN 1 ELSE 0 END),0)
+			FROM usage_stats`).Scan(&total, &archivedRows, &newRows); err != nil {
+			t.Fatalf("load stats after current restore insert: %v", err)
+		}
+		if total != 1 || archivedRows != 0 || newRows != 1 {
+			t.Fatalf("stats after current restore insert = total:%d archived:%d new:%d, want 1/0/1", total, archivedRows, newRows)
+		}
+	})
+}
+
 // TestBackupImportRequiresConfirm rejects an import without the confirm token.
 func TestBackupImportRequiresConfirm(t *testing.T) {
 	db := openMigrated(t, filepath.Join(t.TempDir(), "x.db"))
@@ -1179,6 +1419,45 @@ func assertConfigImportSettlementCurrency(t *testing.T, db *sql.DB, want string)
 	if got != want {
 		t.Fatalf("settlement currency after config import = %q, want %q", got, want)
 	}
+}
+
+func backupRowsArchiveForTest(t *testing.T, rowsByTable map[string][]map[string]any) (*zip.Reader, backupManifest) {
+	t.Helper()
+	var archive bytes.Buffer
+	zw := zip.NewWriter(&archive)
+	man := backupManifest{
+		Format:  "aivory-backup",
+		Version: store.BackupVersion,
+		Dialect: "sqlite",
+		Counts:  make(map[string]int64, len(rowsByTable)),
+	}
+	for _, table := range store.BackupTableOrder() {
+		rows, present := rowsByTable[table]
+		if !present {
+			continue
+		}
+		man.Tables = append(man.Tables, table)
+		man.Counts[table] = int64(len(rows))
+		entry, err := zw.Create("db/" + table + ".jsonl")
+		if err != nil {
+			t.Fatalf("create backup archive %s entry: %v", table, err)
+		}
+		enc := json.NewEncoder(entry)
+		for _, row := range rows {
+			if err := enc.Encode(row); err != nil {
+				t.Fatalf("encode backup archive %s row: %v", table, err)
+			}
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close backup rows archive: %v", err)
+	}
+	data := append([]byte(nil), archive.Bytes()...)
+	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		t.Fatalf("open backup rows archive: %v", err)
+	}
+	return zr, man
 }
 
 func multipartArchive(t *testing.T, archive []byte) (*bytes.Buffer, string) {

@@ -66,7 +66,7 @@ import { toastStorageQuotaFull } from '@/lib/quota-toast'
 import type { ApiAttachment, ApiConversationFile, ApiDocument, ApiUserPrompt, ApiUserSkill } from '@/api/types'
 import { toast } from '@/hooks/use-toast'
 import { cn, uid, modKey } from '@/lib/utils'
-import { fileIconFor } from '@/lib/file-icon'
+import { attachmentKindLabel, attachmentTileClass, fileIconFor } from '@/lib/file-icon'
 import {
   addSelectedUserSkill,
   selectedUserSkillIdsForRequest,
@@ -238,37 +238,6 @@ interface PendingAttachment extends Attachment {
    *  'embedding' the send button is blocked so the FIRST question always lands
    *  after the file is searchable (§ chat uploads). */
   ingest?: 'parsing' | 'embedding' | 'ready' | 'failed'
-}
-
-function attachmentKindLabel(a: Pick<Attachment, 'kind' | 'name'>): string {
-  const ext = a.name.includes('.') ? a.name.split('.').pop()?.toUpperCase() : ''
-  if (ext) return ext
-  switch (a.kind) {
-    case 'pdf':
-      return 'PDF'
-    case 'doc':
-      return 'DOC'
-    case 'sheet':
-      return 'SHEET'
-    case 'code':
-      return 'CODE'
-    case 'image':
-      return 'IMAGE'
-    default:
-      return 'FILE'
-  }
-}
-
-function attachmentTileClass(a: Pick<Attachment, 'kind' | 'name'>): string {
-  const ext = a.name.includes('.') ? a.name.split('.').pop()?.toLowerCase() : ''
-  if (a.kind === 'pdf' || ext === 'pdf') return 'bg-[var(--color-danger)] text-[var(--color-fg-inverted)]'
-  if (a.kind === 'sheet' || ['xls', 'xlsx', 'csv', 'tsv'].includes(ext ?? '')) {
-    return 'bg-[var(--color-success)] text-[var(--color-fg-inverted)]'
-  }
-  if (a.kind === 'doc' || ['doc', 'docx', 'ppt', 'pptx'].includes(ext ?? '')) {
-    return 'bg-[var(--color-info)] text-[var(--color-fg-inverted)]'
-  }
-  return 'bg-[var(--color-accent)] text-[var(--color-accent-fg)]'
 }
 
 function restoredAttachmentKind(kind: string): Attachment['kind'] {
@@ -2667,22 +2636,28 @@ export function Composer({
                     : t('composer.more', { defaultValue: 'More' })
                 }
                 className={cn(
-                  'relative inline-flex shrink-0 items-center justify-center size-11 rounded-full interactive',
-                  hasActiveTool
-                    ? 'bg-[var(--color-tool-selection)] text-[var(--color-tool-selection-fg)] ring-4 ring-[var(--color-tool-selection-soft)] hover:bg-[var(--color-tool-selection-hover)]'
-                    : 'bg-[var(--color-tool-idle)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]',
+                  'relative inline-flex size-11 shrink-0 items-center justify-center rounded-full interactive',
                   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
                 )}
               >
-                <Plus size={18} aria-hidden />
-                {officialToolBadgeCount > 0 ? (
-                  <span
-                    className="absolute -right-1 -top-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--color-danger)] px-1 text-[10.5px] font-bold leading-none text-[var(--color-fg-inverted)] ring-2 ring-[var(--color-surface)]"
-                    aria-hidden
-                  >
-                    {officialToolBadge}
-                  </span>
-                ) : null}
+                <span
+                  className={cn(
+                    'relative inline-flex size-8 items-center justify-center rounded-full',
+                    hasActiveTool
+                      ? 'bg-[var(--color-tool-selection)] text-[var(--color-tool-selection-fg)] ring-4 ring-[var(--color-tool-selection-soft)] hover:bg-[var(--color-tool-selection-hover)]'
+                      : 'bg-[var(--color-tool-idle)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]',
+                  )}
+                >
+                  <Plus size={16} aria-hidden />
+                  {officialToolBadgeCount > 0 ? (
+                    <span
+                      className="absolute -right-1.5 -top-1.5 inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-[var(--color-danger)] px-1 text-[10px] font-bold leading-none text-[var(--color-fg-inverted)] ring-2 ring-[var(--color-surface)]"
+                      aria-hidden
+                    >
+                      {officialToolBadge}
+                    </span>
+                  ) : null}
+                </span>
               </button>
             </PopoverTrigger>
             <PopoverContent

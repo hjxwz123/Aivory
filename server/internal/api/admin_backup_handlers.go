@@ -645,10 +645,18 @@ func restoreDatabase(ctx context.Context, d Deps, zr *zip.Reader, man backupMani
 // restoreInto performs the wipe + per-table reload + path rewrite against one
 // transaction handle.
 func restoreInto(ctx context.Context, ex store.RowExecer, zr *zip.Reader, man backupManifest, d Deps) (map[string]int64, error) {
+	// A current archive's usage_stats file is authoritative. Disable the
+	// usage_logs insert mirror during the load so restored logs cannot duplicate
+	// or synthesize facts; old archives are backfilled explicitly below.
+	if err := store.DisableUsageStatsMirror(ctx, ex); err != nil {
+		return nil, err
+	}
 	if err := store.WipeAll(ctx, ex); err != nil {
 		return nil, err
 	}
 	counts := make(map[string]int64)
+	hasUsageStatsArchive := findZipFile(zr, "db/usage_stats.jsonl") != nil
+	hasMessageFeedbackArchive := findZipFile(zr, "db/message_feedback.jsonl") != nil
 	// messages.parent_id is a self-referencing FK. Old archives (and any
 	// same-second creation ties) don't guarantee parents sort before children,
 	// so on Postgres the constraint is detached for the load and re-attached
@@ -679,6 +687,23 @@ func restoreInto(ctx context.Context, ex store.RowExecer, zr *zip.Reader, man ba
 			return nil, err
 		}
 		counts[t] = n
+	}
+	if !hasUsageStatsArchive {
+		n, err := store.BackfillUsageStats(ctx, ex)
+		if err != nil {
+			return nil, err
+		}
+		counts["usage_stats"] = n
+	}
+	if !hasMessageFeedbackArchive {
+		n, err := store.BackfillLegacyMessageFeedback(ctx, ex)
+		if err != nil {
+			return nil, err
+		}
+		counts["message_feedback"] = n
+	}
+	if err := store.EnableUsageStatsMirror(ctx, ex); err != nil {
+		return nil, err
 	}
 	if err := store.EnsureSettlementCurrencySetting(ctx, ex); err != nil {
 		return nil, fmt.Errorf("ensure settlement currency setting: %w", err)

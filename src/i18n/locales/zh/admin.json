@@ -845,6 +845,11 @@
     "lead": "整体使用趋势:总体、分模型、分用户。",
     "empty": "该时间段暂无使用记录。",
     "unknownUser": "未知用户",
+    "view": {
+      "label": "分析视图",
+      "usage": "用量趋势",
+      "feedback": "模型反馈"
+    },
     "metric": {
       "calls": "调用次数",
       "tokens": "令牌",
@@ -861,6 +866,105 @@
       "hourly": "按小时使用趋势",
       "byModel": "分模型使用",
       "byUser": "分用户使用"
+    },
+    "feedback": {
+      "lead": "对比各模型的回答质量，并定位用户认为需要改进的回复。时间范围按回复生成时间计算。",
+      "filters": {
+        "rating": "评价",
+        "model": "模型",
+        "reason": "原因",
+        "allRatings": "全部评价",
+        "dislikes": "仅点踩",
+        "likes": "仅点赞",
+        "allModels": "全部模型",
+        "allReasons": "全部原因"
+      },
+      "stats": {
+        "evaluated": "评价数",
+        "likes": "点赞",
+        "dislikes": "点踩",
+        "positiveRate": "好评率",
+        "coverage": "反馈覆盖率",
+        "coverageDetail": "{{replies}} 条回复中有 {{evaluated}} 条评价"
+      },
+      "error": {
+        "title": "无法加载模型反馈"
+      },
+      "rating": {
+        "like": "点赞",
+        "dislike": "点踩"
+      },
+      "reasons": {
+        "incorrect_fact": "事实或计算错误",
+        "not_answered": "没有回答问题",
+        "instruction_ignored": "未遵循要求",
+        "outdated": "内容过时",
+        "citation_issue": "引用或来源有问题",
+        "tool_file_issue": "文件或工具处理错误",
+        "incomplete": "回复被截断或不完整",
+        "poor_format": "表达或格式不好",
+        "unsafe": "存在安全或不当内容",
+        "other": "其他"
+      },
+      "quality": {
+        "title": "模型质量",
+        "lead": "按模型对比已评价回复；样本量足够后才展示好评率。",
+        "model": "模型",
+        "evaluated": "评价数",
+        "sentiment": "点赞 / 点踩",
+        "positiveRate": "好评率",
+        "topReason": "主要点踩原因",
+        "sampleInsufficient": "样本不足（<{{count}}）",
+        "evaluatedValue": "{{count}} 条评价",
+        "likesValue": "{{count}} 个点赞",
+        "dislikesValue": "{{count}} 个点踩",
+        "topReasonValue": "主要原因：{{reason}}",
+        "empty": "当前筛选条件下暂无模型反馈数据。"
+      },
+      "list": {
+        "title": "反馈样本",
+        "dislikesTitle": "待排查的差回答",
+        "count": "{{count}} 条结果",
+        "lead": "打开记录可查看已记录的问答文本、用户反馈和生成元数据。",
+        "noQuestion": "未记录用户问题",
+        "noResponse": "未记录模型回复",
+        "metrics": "{{latency}} · {{tokens}} 令牌",
+        "empty": "没有符合当前筛选条件的反馈。",
+        "emptyDislikes": "没有符合当前筛选条件的点踩回复。"
+      },
+      "detail": {
+        "title": "反馈详情",
+        "lead": "查看已记录的问答文本和该回复的生成元数据。",
+        "question": "用户问题",
+        "response": "模型回复",
+        "comment": "用户补充说明",
+        "metadata": "生成元数据",
+        "conversation": "会话",
+        "model": "模型",
+        "channel": "服务渠道",
+        "provider": "服务商",
+        "user": "用户",
+        "workspace": "工作区",
+        "createdAt": "反馈时间",
+        "updatedAt": "更新时间",
+        "messageCreatedAt": "回复生成时间",
+        "timing": "生成耗时",
+        "tokens": "输入 / 输出令牌",
+        "totalTokens": "总令牌数",
+        "cacheTokens": "缓存读取 / 写入令牌",
+        "cost": "费用",
+        "credits": "积分",
+        "context": "回复上下文",
+        "hasTools": "调用工具",
+        "hasFiles": "包含文件",
+        "hasRag": "使用知识库",
+        "fallback": "使用兜底渠道",
+        "statusError": "生成错误",
+        "statusSuccess": "生成完成",
+        "error": "生成错误详情",
+        "notRecorded": "未记录",
+        "openConversation": "打开会话详情"
+      }
     }
   },
   "announcement": {
@@ -1454,6 +1558,8 @@
     "title": "文件",
     "lead": "所有用户在对话与知识库中上传的文件。删除会同时清除数据库记录、向量索引与磁盘上的文件。",
     "deleteSelected": "删除所选({{count}})",
+    "selectedCount": "已选 {{count}} 项",
+    "clearSelection": "取消选择",
     "total": "共 {{count}} 个文件",
     "empty": "没有符合筛选条件的文件。",
     "view": "查看",
@@ -1463,6 +1569,7 @@
     "noInlinePreview": "该文件类型不支持在线预览。",
     "unknownType": "未知类型",
     "selectAll": "全选本页",
+    "deselectAll": "取消选择本页",
     "selectOne": "选择 {{name}}",
     "confirmTitle": "删除 {{count}} 个文件?",
     "confirmBody": "将永久删除磁盘文件、数据库记录与检索向量,不可恢复。",

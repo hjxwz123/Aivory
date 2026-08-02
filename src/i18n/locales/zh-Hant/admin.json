@@ -841,6 +841,11 @@
     "lead": "整體使用趨勢:總體、分模型、分使用者。",
     "empty": "該時間段暫無使用記錄。",
     "unknownUser": "未知使用者",
+    "view": {
+      "label": "分析檢視",
+      "usage": "用量趨勢",
+      "feedback": "模型回饋"
+    },
     "metric": {
       "calls": "呼叫次數",
       "tokens": "令牌",
@@ -857,6 +862,105 @@
       "hourly": "按小時使用趨勢",
       "byModel": "分模型使用",
       "byUser": "分使用者使用"
+    },
+    "feedback": {
+      "lead": "比較各模型的回答品質，並找出使用者認為需要改進的回覆。時間範圍依回覆生成時間計算。",
+      "filters": {
+        "rating": "評價",
+        "model": "模型",
+        "reason": "原因",
+        "allRatings": "全部評價",
+        "dislikes": "僅倒讚",
+        "likes": "僅按讚",
+        "allModels": "全部模型",
+        "allReasons": "全部原因"
+      },
+      "stats": {
+        "evaluated": "評價數",
+        "likes": "按讚",
+        "dislikes": "倒讚",
+        "positiveRate": "好評率",
+        "coverage": "回饋覆蓋率",
+        "coverageDetail": "{{replies}} 則回覆中有 {{evaluated}} 則評價"
+      },
+      "error": {
+        "title": "無法載入模型回饋"
+      },
+      "rating": {
+        "like": "按讚",
+        "dislike": "倒讚"
+      },
+      "reasons": {
+        "incorrect_fact": "事實或計算錯誤",
+        "not_answered": "沒有回答問題",
+        "instruction_ignored": "未遵循要求",
+        "outdated": "內容過時",
+        "citation_issue": "引用或來源有問題",
+        "tool_file_issue": "檔案或工具處理錯誤",
+        "incomplete": "回覆被截斷或不完整",
+        "poor_format": "表達或格式不佳",
+        "unsafe": "包含不安全或不當內容",
+        "other": "其他"
+      },
+      "quality": {
+        "title": "模型品質",
+        "lead": "按模型比較已評價回覆；樣本量足夠後才顯示好評率。",
+        "model": "模型",
+        "evaluated": "評價數",
+        "sentiment": "按讚 / 倒讚",
+        "positiveRate": "好評率",
+        "topReason": "主要倒讚原因",
+        "sampleInsufficient": "樣本不足（<{{count}}）",
+        "evaluatedValue": "{{count}} 則評價",
+        "likesValue": "{{count}} 個按讚",
+        "dislikesValue": "{{count}} 個倒讚",
+        "topReasonValue": "主要原因：{{reason}}",
+        "empty": "目前篩選條件下沒有模型回饋資料。"
+      },
+      "list": {
+        "title": "回饋樣本",
+        "dislikesTitle": "待檢查的不佳回答",
+        "count": "{{count}} 則結果",
+        "lead": "開啟記錄可查看已記錄的問答文字、使用者回饋與生成中繼資料。",
+        "noQuestion": "未記錄使用者問題",
+        "noResponse": "未記錄模型回覆",
+        "metrics": "{{latency}} · {{tokens}} 令牌",
+        "empty": "沒有符合目前篩選條件的回饋。",
+        "emptyDislikes": "沒有符合目前篩選條件的倒讚回覆。"
+      },
+      "detail": {
+        "title": "回饋詳情",
+        "lead": "查看已記錄的問答文字及該回覆的生成中繼資料。",
+        "question": "使用者問題",
+        "response": "模型回覆",
+        "comment": "使用者補充說明",
+        "metadata": "生成中繼資料",
+        "conversation": "對話",
+        "model": "模型",
+        "channel": "服務管道",
+        "provider": "服務商",
+        "user": "使用者",
+        "workspace": "工作區",
+        "createdAt": "回饋時間",
+        "updatedAt": "更新時間",
+        "messageCreatedAt": "回覆生成時間",
+        "timing": "生成耗時",
+        "tokens": "輸入 / 輸出令牌",
+        "totalTokens": "總令牌數",
+        "cacheTokens": "快取讀取 / 寫入令牌",
+        "cost": "費用",
+        "credits": "積分",
+        "context": "回覆上下文",
+        "hasTools": "呼叫工具",
+        "hasFiles": "包含檔案",
+        "hasRag": "使用知識庫",
+        "fallback": "使用備援管道",
+        "statusError": "生成錯誤",
+        "statusSuccess": "生成完成",
+        "error": "生成錯誤詳情",
+        "notRecorded": "未記錄",
+        "openConversation": "開啟對話詳情"
+      }
     }
   },
   "announcement": {
@@ -1450,6 +1554,8 @@
     "title": "檔案",
     "lead": "所有使用者在對話與知識庫中上傳的檔案。刪除會同時清除資料庫記錄、向量索引與磁碟上的檔案。",
     "deleteSelected": "刪除所選({{count}})",
+    "selectedCount": "已選 {{count}} 項",
+    "clearSelection": "取消選取",
     "total": "共 {{count}} 個檔案",
     "empty": "沒有符合篩選條件的檔案。",
     "view": "檢視",
@@ -1459,6 +1565,7 @@
     "noInlinePreview": "該檔案類型不支援線上預覽。",
     "unknownType": "未知類型",
     "selectAll": "全選本頁",
+    "deselectAll": "取消選取本頁",
     "selectOne": "選擇 {{name}}",
     "confirmTitle": "刪除 {{count}} 個檔案?",
     "confirmBody": "將永久刪除磁碟檔案、資料庫記錄與檢索向量,無法復原。",

@@ -5,6 +5,7 @@
  */
 import { api, apiUrl, getAccessToken, ApiError, apiUpload, type UploadProgress } from './client'
 import type {
+  ApiAdminMessageFeedbackPage,
   ApiAdminFile,
   ApiAdminLoginHistoryPage,
   ApiWorkspace,
@@ -56,6 +57,7 @@ import type {
   ApiUser,
 } from './types'
 import { envNum } from '@/lib/env-config'
+import type { FeedbackReason, MessageFeedbackInput } from '@/types/chat'
 
 // ----- Auth ----------------------------------------------------------------
 
@@ -503,10 +505,15 @@ export const conversationsApi = {
       `/conversations/${encodeURIComponent(id)}/messages/${encodeURIComponent(msgId)}`,
       { method: 'DELETE' },
     ),
-  feedback: (id: string, msgId: string, feedback: 'like' | 'dislike' | '') =>
-    api<{ ok: true }>(
+  feedback: (id: string, msgId: string, input: MessageFeedbackInput) =>
+    api<{
+      ok: true
+      feedback?: MessageFeedbackInput['feedback']
+      feedback_reasons?: FeedbackReason[]
+      feedback_comment?: string
+    }>(
       `/conversations/${encodeURIComponent(id)}/messages/${encodeURIComponent(msgId)}/feedback`,
-      { method: 'POST', body: { feedback } },
+      { method: 'POST', body: input },
     ),
   stop: (id: string, target?: { generation_id?: string; message_id?: string }) =>
     api<{ ok: true }>(`/conversations/${encodeURIComponent(id)}/stop`, { method: 'POST', body: target }),
@@ -961,6 +968,27 @@ export const adminApi = {
   },
   analytics: (days = envNum('VITE_AIVORY_ADMIN_API_ANALYTICS', 30)) =>
     api<ApiAnalytics>(`/admin/analytics?days=${days}`),
+  messageFeedback: (
+    params: {
+      days?: number
+      rating?: '' | 'like' | 'dislike'
+      modelId?: string
+      reason?: FeedbackReason
+      limit?: number
+      offset?: number
+    } = {},
+  ) => {
+    const qs = new URLSearchParams()
+    if (params.days) qs.set('days', String(params.days))
+    if (params.rating) qs.set('rating', params.rating)
+    if (params.modelId) qs.set('model_id', params.modelId)
+    if (params.reason) qs.set('reason', params.reason)
+    if (params.limit !== undefined) qs.set('limit', String(params.limit))
+    if (params.offset !== undefined) qs.set('offset', String(params.offset))
+    return api<ApiAdminMessageFeedbackPage>(
+      `/admin/message-feedback${qs.toString() ? `?${qs}` : ''}`,
+    )
+  },
 
   settings: () => api<Record<string, unknown>>('/admin/settings'),
   updateSettings: (patch: Record<string, unknown>) =>

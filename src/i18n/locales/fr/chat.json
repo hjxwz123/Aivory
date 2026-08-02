@@ -160,6 +160,30 @@
     "openInNew": "Ouvrir dans un nouvel onglet",
     "forkFailed": "Impossible de dupliquer la conversation"
   },
+  "feedback": {
+    "title": "Que faudrait-il améliorer ?",
+    "optional": "Facultatif",
+    "reasonsLabel": "Sélectionnez une ou plusieurs raisons",
+    "commentLabel": "Précisions supplémentaires (facultatif)",
+    "commentPlaceholder": "Indiquez-nous ce qui n'allait pas",
+    "skip": "Ignorer",
+    "submit": "Envoyer l’avis",
+    "saved": "Avis enregistré",
+    "thanks": "Merci pour votre avis",
+    "saveFailed": "Impossible d’enregistrer l’avis. Veuillez réessayer.",
+    "reasons": {
+      "incorrect_fact": "Erreur factuelle ou de calcul",
+      "not_answered": "Ne répond pas à la question",
+      "instruction_ignored": "Consignes non respectées",
+      "outdated": "Informations obsolètes",
+      "citation_issue": "Problème de citation ou de source",
+      "tool_file_issue": "Erreur de fichier ou d’outil",
+      "incomplete": "Réponse incomplète ou interrompue",
+      "poor_format": "Problème de rédaction ou de format",
+      "unsafe": "Contenu dangereux ou inapproprié",
+      "other": "Autre"
+    }
+  },
   "message": {
     "refused": "Le modèle a refusé de répondre à cette demande.",
     "stopped": "Génération arrêtée.",

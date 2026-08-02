@@ -160,6 +160,30 @@
     "openInNew": "Open in new tab",
     "forkFailed": "Could not fork the conversation"
   },
+  "feedback": {
+    "title": "What could be improved?",
+    "optional": "Optional",
+    "reasonsLabel": "Select one or more reasons",
+    "commentLabel": "Additional details (optional)",
+    "commentPlaceholder": "Tell us what went wrong",
+    "skip": "Skip",
+    "submit": "Submit feedback",
+    "saved": "Feedback recorded",
+    "thanks": "Thanks for your feedback",
+    "saveFailed": "Could not save feedback. Please try again.",
+    "reasons": {
+      "incorrect_fact": "Fact or calculation is wrong",
+      "not_answered": "Did not answer the question",
+      "instruction_ignored": "Did not follow instructions",
+      "outdated": "Information is outdated",
+      "citation_issue": "Citation or source issue",
+      "tool_file_issue": "File or tool error",
+      "incomplete": "Response is incomplete",
+      "poor_format": "Writing or formatting issue",
+      "unsafe": "Unsafe or inappropriate content",
+      "other": "Other"
+    }
+  },
   "message": {
     "refused": "The model declined to answer this request.",
     "stopped": "Generation stopped.",

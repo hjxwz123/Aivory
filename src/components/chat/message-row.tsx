@@ -1,4 +1,4 @@
-import { memo, useState, useRef, useEffect, useMemo, type ReactNode } from 'react'
+import { memo, useState, useRef, useEffect, useId, useMemo, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Copy,
@@ -17,8 +17,6 @@ import {
   GitBranchPlus,
   AlertTriangle,
   X,
-  FileText,
-  FileSpreadsheet,
   Sparkles,
   BookText,
   Coins,
@@ -28,7 +26,14 @@ import {
   Square,
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import { GENERATION_INTERRUPTED_ERROR_CODE, type Message, type Attachment } from '@/types/chat'
+import {
+  FEEDBACK_REASON_VALUES,
+  GENERATION_INTERRUPTED_ERROR_CODE,
+  type Attachment,
+  type FeedbackReason,
+  type Message,
+  type MessageFeedbackInput,
+} from '@/types/chat'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { LogoMark } from '@/components/brand/logo'
 import { ModelIcon } from '@/components/chat/model-icon'
@@ -76,6 +81,12 @@ import { FilePreview } from './file-preview'
 import { toast } from '@/hooks/use-toast'
 import { cn, safeHref } from '@/lib/utils'
 import { isEmptyStoppedMessage, messageHasActions } from '@/lib/message-state'
+import { attachmentKindLabel, attachmentTileClass, fileIconFor } from '@/lib/file-icon'
+import {
+  feedbackCommentLength,
+  MAX_FEEDBACK_COMMENT_LENGTH,
+  truncateFeedbackComment,
+} from '@/lib/message-feedback'
 
 /**
  * ThinkingLogo — the "still forming a reply" indicator shown before the first
@@ -107,8 +118,7 @@ interface MessageRowProps {
   onEdit?: (id: string, content: string, attachments?: Attachment[]) => void
   /** "Save" — overwrite the visible Markdown text in place. */
   onSaveEdit?: (id: string, content: string) => void | Promise<void>
-  onLike?: (id: string, liked: boolean) => void
-  onDislike?: (id: string, disliked: boolean) => void
+  onFeedback?: (id: string, input: MessageFeedbackInput) => Promise<void>
   /** Called when the user clicks `<` / `>` to switch between sibling
    *  branches. Receives the target message id. */
   onBranchSwitch?: (leafId: string) => void
@@ -150,7 +160,7 @@ function formatCredits(credits: number): string {
   return credits.toLocaleString(undefined, { maximumFractionDigits: 2 })
 }
 
-function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, onLike, onDislike, onBranchSwitch, onFork, onDelete, readOnly = false, userMessageMarkdown = false }: MessageRowProps) {
+function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, onFeedback, onBranchSwitch, onFork, onDelete, readOnly = false, userMessageMarkdown = false }: MessageRowProps) {
   const isUser = message.role === 'user'
   const userHasMath = useMemo(() => isUser && hasMathContent(message.content), [isUser, message.content])
   // §workspaces: in a shared conversation "own" = authored by ME — other
@@ -171,6 +181,14 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
   // them on tap) instead of an always-on row of tiny icons (§ mobile redesign).
   const isPhone = useMediaQuery(mediaQuery.phone)
   const [actionSheetOpen, setActionSheetOpen] = useState(false)
+  const mobileActionsRef = useRef<HTMLButtonElement>(null)
+  const dislikeButtonRef = useRef<HTMLButtonElement>(null)
+  const feedbackPanelId = useId()
+  const [feedbackPanelOpen, setFeedbackPanelOpen] = useState(false)
+  const [feedbackReasons, setFeedbackReasons] = useState<FeedbackReason[]>(message.feedbackReasons ?? [])
+  const [feedbackComment, setFeedbackComment] = useState(message.feedbackComment ?? '')
+  const [feedbackPending, setFeedbackPending] = useState(false)
+  const [feedbackSubmitted, setFeedbackSubmitted] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [editing, setEditing] = useState(false)
   const [savingEdit, setSavingEdit] = useState(false)
@@ -247,6 +265,41 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
     return () => clearTimeout(t)
   }, [editing, isUser])
 
+  // A phone dislike starts in the bottom action Sheet. Wait for that Sheet to
+  // release focus before moving focus into the newly revealed inline panel.
+  useEffect(() => {
+    if (!feedbackPanelOpen || feedbackPending) return
+    const timer = window.setTimeout(() => {
+      const panel = document.getElementById(feedbackPanelId)
+      panel?.querySelector<HTMLButtonElement>('[data-feedback-reason]')?.focus()
+    }, isPhone ? 180 : 0)
+    return () => window.clearTimeout(timer)
+  }, [feedbackPanelId, feedbackPanelOpen, feedbackPending, isPhone])
+
+  useEffect(() => {
+    if (!feedbackSubmitted) return
+    const timer = window.setTimeout(() => setFeedbackSubmitted(false), 4500)
+    return () => window.clearTimeout(timer)
+  }, [feedbackSubmitted])
+
+  // An in-place edit (or any authoritative external refresh) invalidates an
+  // old dislike. Clear the row-local draft only after the feedback mutation
+  // itself has settled, so the first optimistic dislike is not closed early.
+  useEffect(() => {
+    if (message.disliked || feedbackPending) return
+    if (feedbackPanelOpen) setFeedbackPanelOpen(false)
+    if (feedbackReasons.length > 0) setFeedbackReasons([])
+    if (feedbackComment) setFeedbackComment('')
+    if (feedbackSubmitted) setFeedbackSubmitted(false)
+  }, [
+    feedbackComment,
+    feedbackPanelOpen,
+    feedbackPending,
+    feedbackReasons.length,
+    feedbackSubmitted,
+    message.disliked,
+  ])
+
   function commitEdit() {
     const next = draft.trim()
     if (!next) return
@@ -286,7 +339,91 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
     setEditFormulaOpen(true)
   }
 
-  const visible = hovered || menuOpen || message.liked || message.disliked
+  async function persistFeedback(input: MessageFeedbackInput): Promise<boolean> {
+    if (feedbackPending || !onFeedback) return false
+    setFeedbackPending(true)
+    try {
+      await onFeedback(message.id, input)
+      return true
+    } catch {
+      toast.error(t('feedback.saveFailed'))
+      return false
+    } finally {
+      setFeedbackPending(false)
+    }
+  }
+
+  function restoreFeedbackTriggerFocus() {
+    window.requestAnimationFrame(() => {
+      const target = isPhone ? mobileActionsRef.current : dislikeButtonRef.current
+      target?.focus({ preventScroll: true })
+    })
+  }
+
+  async function toggleLike() {
+    setActionSheetOpen(false)
+    setFeedbackPanelOpen(false)
+    setFeedbackSubmitted(false)
+    const feedback = message.liked ? '' : 'like'
+    const saved = await persistFeedback({ feedback, reasons: [], comment: '' })
+    if (saved && feedback === 'like') toast.success(t('feedback.thanks'))
+  }
+
+  async function toggleDislike() {
+    // On phones this must happen before the inline panel is made visible; the
+    // modal Sheet would otherwise cover it and retain focus.
+    setActionSheetOpen(false)
+    setFeedbackSubmitted(false)
+
+    if (message.disliked) {
+      setFeedbackPanelOpen(false)
+      setFeedbackReasons([])
+      setFeedbackComment('')
+      await persistFeedback({ feedback: '', reasons: [], comment: '' })
+      return
+    }
+
+    setFeedbackReasons([])
+    setFeedbackComment('')
+    setFeedbackPanelOpen(true)
+    const saved = await persistFeedback({ feedback: 'dislike' })
+    if (!saved) setFeedbackPanelOpen(false)
+  }
+
+  async function submitFeedbackDetail() {
+    const saved = await persistFeedback({
+      feedback: 'dislike',
+      reasons: feedbackReasons,
+      comment: feedbackComment.trim(),
+    })
+    if (!saved) return
+    setFeedbackPanelOpen(false)
+    setFeedbackSubmitted(true)
+    restoreFeedbackTriggerFocus()
+  }
+
+  function skipFeedbackDetail() {
+    setFeedbackPanelOpen(false)
+    setFeedbackSubmitted(true)
+    restoreFeedbackTriggerFocus()
+  }
+
+  function toggleFeedbackReason(reason: FeedbackReason) {
+    setFeedbackReasons((current) =>
+      current.includes(reason)
+        ? current.filter((item) => item !== reason)
+        : [...current, reason],
+    )
+  }
+
+  const visible = hovered || menuOpen || message.liked || message.disliked || feedbackPanelOpen || feedbackSubmitted
+  const attachments = message.attachments ?? []
+  const imageAttachments = attachments.filter(
+    (attachment) => attachment.kind === 'image' && attachment.previewUrl && !brokenAtts.has(attachment.id),
+  )
+  const otherAttachments = attachments.filter(
+    (attachment) => attachment.kind !== 'image' || !attachment.previewUrl || brokenAtts.has(attachment.id),
+  )
 
   return (
     <div
@@ -464,52 +601,105 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
               'max-w-full',
             )}
           >
-            {message.attachments && message.attachments.length > 0 ? (
-              <div className="mb-2 flex flex-wrap gap-2">
-                {message.attachments.map((a) =>
-                  a.kind === 'image' && brokenAtts.has(a.id) ? (
-                    <span
-                      key={a.id}
-                      className="inline-flex items-center gap-1.5 rounded-[8px] border border-dashed border-[var(--color-border)] bg-[var(--color-bg-muted)] px-2 py-1 text-[11.5px] text-[var(--color-fg-subtle)] max-w-[18rem]"
-                      title={a.name}
-                    >
-                      <ImageOff size={13} aria-hidden />
-                      <span className="truncate">{a.name}</span>
-                      <span className="shrink-0">· {t('attachmentDeleted', { defaultValue: 'File deleted' })}</span>
-                    </span>
-                  ) : a.kind === 'image' && a.previewUrl ? (
-                    <button
-                      key={a.id}
-                      type="button"
-                      onClick={() => setLightbox({ src: a.previewUrl!, alt: a.name })}
-                      aria-label={t('actions.viewImage', { defaultValue: 'View image' })}
-                      className="block overflow-hidden rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] hover:opacity-90"
-                    >
-                      <img
-                        src={a.previewUrl}
-                        alt={a.name}
-                        className="max-h-56 max-w-[18rem] sm:max-w-[22rem] w-auto h-auto object-cover"
-                        draggable={false}
-                        onError={() => setBrokenAtts((prev) => new Set(prev).add(a.id))}
-                      />
-                    </button>
-                  ) : (
-                    <button
-                      key={a.id}
-                      type="button"
-                      onClick={() => setFilePreview({ name: a.name, url: a.previewUrl, kind: a.kind })}
-                      aria-label={t('actions.previewFile', { defaultValue: 'Preview file' })}
-                      className={cn(
-                        'inline-flex items-center gap-1.5 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 text-[11.5px] text-[var(--color-fg-muted)] max-w-[18rem]',
-                        'interactive hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
-                        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-                      )}
-                    >
-                      <KindIcon kind={a.kind} />
-                      <span className="truncate">{a.name}</span>
-                    </button>
-                  ),
-                )}
+            {attachments.length > 0 ? (
+              <div className="mb-2 grid min-w-0 gap-2">
+                {imageAttachments.length > 0 ? (
+                  <div
+                    className={cn(
+                      imageAttachments.length === 1
+                        ? 'flex'
+                        : 'flex w-[min(30rem,72vw)] max-w-full snap-x snap-mandatory gap-2 overflow-x-auto overscroll-x-contain pb-1 scrollbar-none',
+                    )}
+                  >
+                    {imageAttachments.map((attachment) => (
+                      <button
+                        key={attachment.id}
+                        type="button"
+                        onClick={() => setLightbox({ src: attachment.previewUrl!, alt: attachment.name })}
+                        aria-label={t('actions.viewImage', { defaultValue: 'View image' })}
+                        className={cn(
+                          'block shrink-0 overflow-hidden rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] hover:opacity-90',
+                          imageAttachments.length > 1 && 'snap-start',
+                        )}
+                      >
+                        <img
+                          src={attachment.previewUrl}
+                          alt={attachment.name}
+                          className={cn(
+                            'object-cover',
+                            imageAttachments.length === 1
+                              ? 'h-auto max-h-56 w-auto max-w-[18rem] sm:max-w-[22rem]'
+                              : 'size-24 sm:size-28',
+                          )}
+                          draggable={false}
+                          onError={() => setBrokenAtts((previous) => new Set(previous).add(attachment.id))}
+                        />
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+
+                {otherAttachments.length > 0 ? (
+                  <div className="grid min-w-0 gap-1.5">
+                    {otherAttachments.map((attachment) => {
+                      if (attachment.kind === 'image' && brokenAtts.has(attachment.id)) {
+                        return (
+                          <span
+                            key={attachment.id}
+                            className="inline-flex h-14 min-w-0 max-w-[22rem] items-center gap-2.5 rounded-[10px] border border-dashed border-[var(--color-border)] bg-[var(--color-surface-raised)] px-2.5 text-[var(--color-fg-subtle)]"
+                            title={attachment.name}
+                          >
+                            <span className="grid size-9 shrink-0 place-items-center rounded-[9px] bg-[var(--color-danger-soft)] text-[var(--color-danger)]">
+                              <ImageOff size={18} aria-hidden />
+                            </span>
+                            <span className="grid min-w-0 gap-0.5 text-left">
+                              <span className="truncate text-[0.8125rem] font-semibold leading-tight">
+                                {attachment.name}
+                              </span>
+                              <span className="text-[0.75rem] leading-tight">
+                                {t('attachmentDeleted', { defaultValue: 'File deleted' })}
+                              </span>
+                            </span>
+                          </span>
+                        )
+                      }
+
+                      return (
+                        <button
+                          key={attachment.id}
+                          type="button"
+                          onClick={() =>
+                            setFilePreview({
+                              name: attachment.name,
+                              url: attachment.previewUrl,
+                              kind: attachment.kind,
+                            })
+                          }
+                          aria-label={t('actions.previewFile', { defaultValue: 'Preview file' })}
+                          className="flex h-14 min-w-0 max-w-[22rem] items-center gap-2.5 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface-raised)] py-2 pl-2.5 pr-3 text-left shadow-[var(--shadow-xs)] interactive hover:border-[var(--color-border-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                        >
+                          <span
+                            className={cn(
+                              'grid size-9 shrink-0 place-items-center rounded-[9px]',
+                              attachmentTileClass(attachment),
+                            )}
+                            aria-hidden
+                          >
+                            <AttachmentTypeIcon attachment={attachment} />
+                          </span>
+                          <span className="grid min-w-0 flex-1 gap-0.5">
+                            <span className="truncate text-[0.8125rem] font-semibold leading-tight text-[var(--color-fg)]">
+                              {attachment.name}
+                            </span>
+                            <span className="truncate text-[0.75rem] leading-tight text-[var(--color-fg-subtle)]">
+                              {attachmentKindLabel(attachment)}
+                            </span>
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                ) : null}
                 {/* TODO(#8): when this conversation belongs to a project, offer an
                     "Add to project library" action here that calls
                     conversationsApi.promoteDoc(convId, a.id) then refreshes the
@@ -741,6 +931,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
           isPhone ? (
             <div className="mt-1.5 flex items-center gap-2">
               <button
+                ref={mobileActionsRef}
                 type="button"
                 onClick={() => setActionSheetOpen(true)}
                 aria-label={t('actions.more')}
@@ -758,7 +949,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
           ) : (
           <div
             className={cn(
-              'mt-2 inline-flex items-center gap-0.5 transition-opacity duration-[140ms] ease-out',
+              'mt-2 inline-flex items-center gap-0.5 transition-opacity duration-[140ms] ease-out focus-within:opacity-100 focus-within:pointer-events-auto',
               visible
                 ? 'opacity-100'
                 : 'opacity-0 pointer-events-none max-sm:opacity-100 max-sm:pointer-events-auto',
@@ -827,11 +1018,12 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
                     <Tooltip content={t('actions.helpful')}>
                       <button
                         type="button"
-                        onClick={() => onLike?.(message.id, !message.liked)}
+                        onClick={() => void toggleLike()}
+                        disabled={feedbackPending || !onFeedback}
                         aria-label={t('actions.helpful')}
                         aria-pressed={message.liked}
                         className={cn(
-                          'inline-flex items-center justify-center size-7 max-sm:size-9 rounded-[7px] interactive',
+                          'inline-flex items-center justify-center size-7 max-sm:size-9 rounded-[7px] interactive disabled:pointer-events-none disabled:opacity-50',
                           message.liked
                             ? 'text-[var(--color-success)] bg-[var(--color-success-soft)]'
                             : 'text-[var(--color-fg-subtle)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
@@ -843,12 +1035,16 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
                     </Tooltip>
                     <Tooltip content={t('actions.notHelpful')}>
                       <button
+                        ref={dislikeButtonRef}
                         type="button"
-                        onClick={() => onDislike?.(message.id, !message.disliked)}
+                        onClick={() => void toggleDislike()}
+                        disabled={feedbackPending || !onFeedback}
                         aria-label={t('actions.notHelpful')}
                         aria-pressed={message.disliked}
+                        aria-expanded={feedbackPanelOpen}
+                        aria-controls={feedbackPanelId}
                         className={cn(
-                          'inline-flex items-center justify-center size-7 max-sm:size-9 rounded-[7px] interactive',
+                          'inline-flex items-center justify-center size-7 max-sm:size-9 rounded-[7px] interactive disabled:pointer-events-none disabled:opacity-50',
                           message.disliked
                             ? 'text-[var(--color-danger)] bg-[var(--color-danger-soft)]'
                             : 'text-[var(--color-fg-subtle)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
@@ -936,6 +1132,40 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
           </div>
           )
         ) : null}
+        {!isUser && !editing && feedbackPanelOpen ? (
+          <FeedbackPanel
+            id={feedbackPanelId}
+            reasons={feedbackReasons}
+            comment={feedbackComment}
+            pending={feedbackPending}
+            onToggleReason={toggleFeedbackReason}
+            onCommentChange={setFeedbackComment}
+            onSkip={skipFeedbackDetail}
+            onSubmit={() => void submitFeedbackDetail()}
+          />
+        ) : null}
+        {!isUser && !editing && feedbackSubmitted && message.disliked ? (
+          <div
+            role="status"
+            className="mt-2 flex min-h-9 items-center gap-2 text-[12px] text-[var(--color-fg-muted)] max-sm:min-h-[var(--tap-min)]"
+          >
+            <Check size={14} className="text-[var(--color-success)]" aria-hidden />
+            <span>{t('feedback.saved')}</span>
+            {onRegenerate ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setFeedbackSubmitted(false)
+                  onRegenerate(message.id)
+                }}
+                className="ml-1 inline-flex min-h-8 items-center rounded-[7px] px-2 font-medium text-[var(--color-fg)] hover:bg-[var(--color-bg-muted)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-sm:min-h-[var(--tap-min)]"
+              >
+                <RefreshCw size={13} className="mr-1.5" aria-hidden />
+                {t('actions.regenerate')}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
         {isUser && (
           <span className="sr-only">
             {displayUserName}
@@ -992,13 +1222,23 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
                     icon={<ThumbsUp size={18} aria-hidden />}
                     label={t('actions.helpful')}
                     active={message.liked}
-                    onClick={() => onLike?.(message.id, !message.liked)}
+                    disabled={feedbackPending || !onFeedback}
+                    onClick={() => {
+                      setActionSheetOpen(false)
+                      void toggleLike()
+                    }}
                   />
                   <MsgActionRow
                     icon={<ThumbsDown size={18} aria-hidden />}
                     label={t('actions.notHelpful')}
                     active={message.disliked}
-                    onClick={() => onDislike?.(message.id, !message.disliked)}
+                    disabled={feedbackPending || !onFeedback}
+                    controls={feedbackPanelId}
+                    expanded={feedbackPanelOpen}
+                    onClick={() => {
+                      setActionSheetOpen(false)
+                      void toggleDislike()
+                    }}
                   />
                 </>
               ) : isOwn ? (
@@ -1086,27 +1326,151 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
 // exactly right here (message is a fresh object only when it truly changed).
 export const MessageRow = memo(MessageRowImpl)
 
+function FeedbackPanel({
+  id,
+  reasons,
+  comment,
+  pending,
+  onToggleReason,
+  onCommentChange,
+  onSkip,
+  onSubmit,
+}: {
+  id: string
+  reasons: FeedbackReason[]
+  comment: string
+  pending: boolean
+  onToggleReason: (reason: FeedbackReason) => void
+  onCommentChange: (comment: string) => void
+  onSkip: () => void
+  onSubmit: () => void
+}) {
+  const { t } = useTranslation('chat')
+  const titleId = `${id}-title`
+
+  return (
+    <section
+      id={id}
+      aria-labelledby={titleId}
+      className="mt-3 w-full max-w-[36rem] border-t border-[var(--color-divider)] pt-3"
+    >
+      <div className="mb-2.5 flex items-baseline gap-1.5">
+        <h3 id={titleId} className="text-[13px] font-medium text-[var(--color-fg)]">
+          {t('feedback.title')}
+        </h3>
+        <span className="text-[11px] text-[var(--color-fg-subtle)]">
+          {t('feedback.optional')}
+        </span>
+      </div>
+
+      <div
+        role="group"
+        aria-label={t('feedback.reasonsLabel')}
+        className="flex flex-wrap gap-1.5"
+      >
+        {FEEDBACK_REASON_VALUES.map((reason) => {
+          const selected = reasons.includes(reason)
+          return (
+            <button
+              key={reason}
+              type="button"
+              data-feedback-reason
+              aria-pressed={selected}
+              disabled={pending}
+              onClick={() => onToggleReason(reason)}
+              className={cn(
+                'inline-flex min-h-9 items-center rounded-[8px] border px-2.5 text-[12px] interactive max-sm:min-h-[var(--tap-min)] max-sm:px-3',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] disabled:pointer-events-none disabled:opacity-55',
+                selected
+                  ? 'border-[var(--color-border-strong)] bg-[var(--color-bg-muted)] text-[var(--color-fg)]'
+                  : 'border-[var(--color-border)] bg-transparent text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
+              )}
+            >
+              <Check
+                size={12}
+                className={cn('mr-1.5 shrink-0', selected ? 'opacity-100' : 'opacity-0')}
+                aria-hidden
+              />
+              {t(`feedback.reasons.${reason}`)}
+            </button>
+          )
+        })}
+      </div>
+
+      <label htmlFor={`${id}-comment`} className="mt-3 block text-[12px] font-medium text-[var(--color-fg-muted)]">
+        {t('feedback.commentLabel')}
+      </label>
+      <Textarea
+        id={`${id}-comment`}
+        value={comment}
+        rows={2}
+        disabled={pending}
+        onChange={(event) => onCommentChange(truncateFeedbackComment(event.target.value))}
+        placeholder={t('feedback.commentPlaceholder')}
+        className="mt-1.5 min-h-[68px] text-[13px]"
+      />
+
+      <div className="mt-2 flex items-center justify-between gap-3">
+        <span className="text-[11px] tabular-nums text-[var(--color-fg-subtle)]" aria-live="polite">
+          {feedbackCommentLength(comment)}/{MAX_FEEDBACK_COMMENT_LENGTH}
+        </span>
+        <div className="flex items-center gap-1.5">
+          <Button
+            size="sm"
+            variant="ghost"
+            className="max-sm:h-[var(--tap-min)]"
+            disabled={pending}
+            onClick={onSkip}
+          >
+            {t('feedback.skip')}
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            className="max-sm:h-[var(--tap-min)]"
+            loading={pending}
+            onClick={onSubmit}
+          >
+            {t('feedback.submit')}
+          </Button>
+        </div>
+      </div>
+    </section>
+  )
+}
+
 /** A 44px icon+label row inside the phone message action Sheet. */
 function MsgActionRow({
   icon,
   label,
   onClick,
   destructive = false,
-  active = false,
+  active,
+  disabled = false,
+  controls,
+  expanded,
 }: {
   icon: ReactNode
   label: string
   onClick: () => void
   destructive?: boolean
   active?: boolean
+  disabled?: boolean
+  controls?: string
+  expanded?: boolean
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      disabled={disabled}
+      aria-pressed={active}
+      aria-controls={controls}
+      aria-expanded={expanded}
       className={cn(
         'flex w-full items-center gap-3 min-h-[var(--tap-min)] px-3 text-left text-[15px] rounded-[10px] interactive',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+        'disabled:pointer-events-none disabled:opacity-50',
         destructive
           ? 'text-[var(--color-danger)] hover:bg-[var(--color-danger-soft)]'
           : active
@@ -1219,7 +1583,7 @@ function EditableFileChip({ att, onRemove }: { att: Attachment; onRemove: () => 
   const { t } = useTranslation('chat')
   return (
     <span className="inline-flex items-center gap-1.5 rounded-[10px] bg-[var(--color-bg-muted)] border border-[var(--color-border-subtle)] px-2 py-1 text-[11.5px] text-[var(--color-fg-muted)] max-w-[18rem]">
-      <KindIcon kind={att.kind} />
+      <AttachmentTypeIcon attachment={att} size={12} className="text-[var(--color-fg-subtle)]" />
       <span className="truncate">{att.name}</span>
       <button
         type="button"
@@ -1233,17 +1597,15 @@ function EditableFileChip({ att, onRemove }: { att: Attachment; onRemove: () => 
   )
 }
 
-/** KindIcon — small icon for non-image attachment chips. */
-function KindIcon({ kind }: { kind: Attachment['kind'] }) {
-  const iconClass = 'shrink-0 text-[var(--color-fg-subtle)]'
-  switch (kind) {
-    case 'sheet':
-      return <FileSpreadsheet size={12} className={iconClass} aria-hidden />
-    case 'pdf':
-    case 'doc':
-    case 'code':
-    case 'other':
-    default:
-      return <FileText size={12} className={iconClass} aria-hidden />
-  }
+function AttachmentTypeIcon({
+  attachment,
+  size = 18,
+  className,
+}: {
+  attachment: Pick<Attachment, 'kind' | 'name'>
+  size?: number
+  className?: string
+}) {
+  const Icon = fileIconFor(attachment.name, attachment.kind)
+  return <Icon size={size} strokeWidth={2} className={cn('shrink-0', className)} aria-hidden />
 }

@@ -403,10 +403,12 @@ type Message struct {
 	// Credits charged to the user for this turn (0 = free / credits disabled).
 	// Unlike Cost (USD spend, admin-only), credits ARE the user-facing currency,
 	// so this is surfaced to the user and not redacted.
-	Credits  float64 `json:"credits"`
-	Status   string  `json:"status"`
-	Error    string  `json:"error"`
-	Feedback string  `json:"feedback"` // "" | "like" | "dislike" (§ message feedback)
+	Credits         float64  `json:"credits"`
+	Status          string   `json:"status"`
+	Error           string   `json:"error"`
+	Feedback        string   `json:"feedback"`         // "" | "like" | "dislike" (§ message feedback)
+	FeedbackReasons []string `json:"feedback_reasons"` // current authenticated user's optional dislike reasons
+	FeedbackComment string   `json:"feedback_comment"` // current authenticated user's optional note
 	// GenMs is the wall-clock time the assistant turn took to generate (ms).
 	GenMs int64 `json:"gen_ms"`
 	// Verify holds the secondary-auditor result (Verify mode, §verify) for this

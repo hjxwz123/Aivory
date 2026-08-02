@@ -841,6 +841,11 @@
     "lead": "Usage trends: overall, by model, by user.",
     "empty": "No usage in this period yet.",
     "unknownUser": "Unknown user",
+    "view": {
+      "label": "Analytics view",
+      "usage": "Usage trends",
+      "feedback": "Model feedback"
+    },
     "metric": {
       "calls": "Calls",
       "tokens": "Tokens",
@@ -857,6 +862,105 @@
       "hourly": "Hourly usage",
       "byModel": "By model",
       "byUser": "By user"
+    },
+    "feedback": {
+      "lead": "Compare model quality and inspect responses users marked as unhelpful. The time range uses reply generation time.",
+      "filters": {
+        "rating": "Rating",
+        "model": "Model",
+        "reason": "Reason",
+        "allRatings": "All ratings",
+        "dislikes": "Dislikes",
+        "likes": "Likes",
+        "allModels": "All models",
+        "allReasons": "All reasons"
+      },
+      "stats": {
+        "evaluated": "Feedback ratings",
+        "likes": "Likes",
+        "dislikes": "Dislikes",
+        "positiveRate": "Positive rate",
+        "coverage": "Feedback coverage",
+        "coverageDetail": "{{evaluated}} of {{replies}} replies"
+      },
+      "error": {
+        "title": "Could not load model feedback"
+      },
+      "rating": {
+        "like": "Like",
+        "dislike": "Dislike"
+      },
+      "reasons": {
+        "incorrect_fact": "Fact or calculation error",
+        "not_answered": "Did not answer the question",
+        "instruction_ignored": "Did not follow instructions",
+        "outdated": "Outdated information",
+        "citation_issue": "Citation or source issue",
+        "tool_file_issue": "File or tool error",
+        "incomplete": "Incomplete or cut off",
+        "poor_format": "Poor writing or formatting",
+        "unsafe": "Unsafe or inappropriate",
+        "other": "Other"
+      },
+      "quality": {
+        "title": "Model quality",
+        "lead": "Compare rated replies by model. Rates are withheld until a model has enough samples.",
+        "model": "Model",
+        "evaluated": "Rated",
+        "sentiment": "Likes / dislikes",
+        "positiveRate": "Positive rate",
+        "topReason": "Top dislike reason",
+        "sampleInsufficient": "Sample < {{count}}",
+        "evaluatedValue": "{{count}} rated",
+        "likesValue": "{{count}} likes",
+        "dislikesValue": "{{count}} dislikes",
+        "topReasonValue": "Top reason: {{reason}}",
+        "empty": "No model-level feedback is available for these filters."
+      },
+      "list": {
+        "title": "Feedback samples",
+        "dislikesTitle": "Responses needing review",
+        "count": "{{count}} results",
+        "lead": "Open a row to inspect the recorded question and response text, feedback, and generation metadata.",
+        "noQuestion": "Question was not recorded",
+        "noResponse": "Response was not recorded",
+        "metrics": "{{latency}} · {{tokens}} tok.",
+        "empty": "No feedback matches these filters.",
+        "emptyDislikes": "No disliked responses match these filters."
+      },
+      "detail": {
+        "title": "Feedback detail",
+        "lead": "The recorded exchange text and generation metadata for this reply.",
+        "question": "User question",
+        "response": "Model response",
+        "comment": "User note",
+        "metadata": "Generation metadata",
+        "conversation": "Conversation",
+        "model": "Model",
+        "channel": "Channel",
+        "provider": "Provider",
+        "user": "User",
+        "workspace": "Workspace",
+        "createdAt": "Feedback created",
+        "updatedAt": "Feedback updated",
+        "messageCreatedAt": "Reply created",
+        "timing": "Generation time",
+        "tokens": "Input / output tokens",
+        "totalTokens": "Total tokens",
+        "cacheTokens": "Cache read / write tokens",
+        "cost": "Cost",
+        "credits": "Credits",
+        "context": "Reply context",
+        "hasTools": "Tools",
+        "hasFiles": "Files",
+        "hasRag": "Knowledge base",
+        "fallback": "Fallback",
+        "statusError": "Error",
+        "statusSuccess": "Completed",
+        "error": "Generation error",
+        "notRecorded": "Not recorded",
+        "openConversation": "Open conversation"
+      }
     }
   },
   "announcement": {
@@ -1450,6 +1554,8 @@
     "title": "Files",
     "lead": "Every upload across conversations and knowledge bases. Deleting removes the database rows, vectors, and the file on disk.",
     "deleteSelected": "Delete selected ({{count}})",
+    "selectedCount": "{{count}} selected",
+    "clearSelection": "Clear selection",
     "total": "{{count}} file(s)",
     "empty": "No files match the current filters.",
     "view": "View",
@@ -1459,6 +1565,7 @@
     "noInlinePreview": "No inline preview for this file type.",
     "unknownType": "unknown type",
     "selectAll": "Select all on this page",
+    "deselectAll": "Clear this page selection",
     "selectOne": "Select {{name}}",
     "confirmTitle": "Delete {{count}} file(s)?",
     "confirmBody": "This permanently removes the file from disk, its database records, and its search vectors. It cannot be undone.",

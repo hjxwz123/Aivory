@@ -4,6 +4,7 @@
  * code uses helpers in `lib/format.ts` to convert to display strings when
  * needed.
  */
+import type { FeedbackReason } from '@/types/chat'
 
 export interface ApiError {
   error: string
@@ -103,6 +104,82 @@ export interface ApiAnalytics {
   by_user: ApiUsageBreakdownRow[]
   model_series: ApiUsageSeriesPoint[]
   user_series: ApiUsageSeriesPoint[]
+}
+
+export type ApiMessageFeedbackRating = 'like' | 'dislike'
+
+export interface ApiAdminMessageFeedbackSummary {
+  total: number
+  likes: number
+  dislikes: number
+  positive_rate: number
+  assistant_messages: number
+  rated_messages: number
+  coverage: number
+}
+
+export interface ApiAdminMessageFeedbackModel {
+  model_id: string
+  model_label: string
+  total: number
+  likes: number
+  dislikes: number
+  positive_rate: number
+  top_reason: FeedbackReason | ''
+  sample_sufficient: boolean
+}
+
+export interface ApiAdminMessageFeedbackItem {
+  id: string
+  message_id: string
+  question_id: string
+  conversation_id: string
+  conversation_title: string
+  conversation_owner_id: string
+  user_id: string
+  user_name: string
+  user_email: string
+  workspace_id: string
+  workspace_name: string
+  model_id: string
+  model_label: string
+  channel_id: string
+  channel_name: string
+  rating: ApiMessageFeedbackRating
+  reasons: FeedbackReason[]
+  comment: string
+  question: string
+  response: string
+  provider: string
+  gen_ms: number
+  input_tokens: number
+  output_tokens: number
+  cache_read_tokens: number
+  cache_write_tokens: number
+  cost: number
+  currency: string
+  credits: number
+  has_tools: boolean
+  has_files: boolean
+  has_rag: boolean
+  tool_names?: string[]
+  file_names?: string[]
+  citation_titles?: string[]
+  fallback: boolean
+  status: string
+  error?: string
+  message_created_at: number
+  created_at: number
+  updated_at: number
+}
+
+export interface ApiAdminMessageFeedbackPage {
+  summary: ApiAdminMessageFeedbackSummary
+  by_model: ApiAdminMessageFeedbackModel[]
+  items: ApiAdminMessageFeedbackItem[]
+  total: number
+  limit: number
+  offset: number
 }
 
 /** One active sign-in (§ account → active sessions). `id` is the refresh-token
@@ -824,7 +901,10 @@ export interface ApiMessage {
   status: 'streaming' | 'complete' | 'error' | 'stopped'
   error: string
   /** User rating on an assistant message: "" | "like" | "dislike". */
-  feedback?: string
+  feedback?: '' | 'like' | 'dislike'
+  /** Optional structured context supplied with a dislike. */
+  feedback_reasons?: FeedbackReason[]
+  feedback_comment?: string
   /** Wall-clock generation time for the turn, in ms. */
   gen_ms?: number
   /** Verify mode (§verify): persisted secondary-auditor result (snake_case from

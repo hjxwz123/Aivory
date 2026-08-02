@@ -160,6 +160,30 @@
     "openInNew": "新しいタブで開く",
     "forkFailed": "分岐に失敗しました。もう一度お試しください"
   },
+  "feedback": {
+    "title": "改善が必要な点は？",
+    "optional": "任意",
+    "reasonsLabel": "理由を選択（複数可）",
+    "commentLabel": "補足（任意）",
+    "commentPlaceholder": "問題点を具体的に教えてください",
+    "skip": "スキップ",
+    "submit": "フィードバックを送信",
+    "saved": "フィードバックを記録しました",
+    "thanks": "フィードバックありがとうございます",
+    "saveFailed": "フィードバックを保存できませんでした。もう一度お試しください。",
+    "reasons": {
+      "incorrect_fact": "事実または計算が誤っている",
+      "not_answered": "質問に答えていない",
+      "instruction_ignored": "指示に従っていない",
+      "outdated": "情報が古い",
+      "citation_issue": "引用または出典に問題がある",
+      "tool_file_issue": "ファイルまたはツールの処理エラー",
+      "incomplete": "回答が途中または不完全",
+      "poor_format": "表現または形式がよくない",
+      "unsafe": "安全でない、または不適切な内容",
+      "other": "その他"
+    }
+  },
   "message": {
     "refused": "モデルはこのリクエストへの回答を控えました。",
     "stopped": "生成を停止しました。",
