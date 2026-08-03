@@ -141,6 +141,9 @@ export default function ForgotPassword() {
             components={{ strong: <span className="text-[var(--color-fg)] font-medium" /> }}
           />
         </motion.p>
+        <motion.p variants={fadeUp} className="mt-2 text-xs text-[var(--color-fg-subtle)]">
+          {t('emailDeliveryHint')}
+        </motion.p>
 
         <motion.form variants={stagger} className="mt-7 flex flex-col gap-4" onSubmit={(e) => void submitCode(e)}>
           {error ? (
