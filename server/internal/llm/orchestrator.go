@@ -1249,7 +1249,11 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	if userMsg == nil {
 		atts, _ := json.Marshal(req.Attachments)
 		selectedIDs, _ := json.Marshal(normalizedSelectedUserSkillIDs)
-		userBlocks, _ := json.Marshal([]UnifiedBlock{{Kind: "text", Text: req.UserText}})
+		userBlocksList := []UnifiedBlock{}
+		if strings.TrimSpace(req.UserText) != "" {
+			userBlocksList = append(userBlocksList, UnifiedBlock{Kind: "text", Text: req.UserText})
+		}
+		userBlocks, _ := json.Marshal(userBlocksList)
 		created, err := store.CreateMessage(ctx, o.db, store.Message{
 			ConversationID: conv.ID, ParentID: parentID, Role: "user",
 			Provider: channel.Type, ModelID: model.ID, Fast: fastMode,
@@ -1928,9 +1932,16 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	}
 	system := composeSystemPrompt(systemOpts)
 
-	// 11. Title generation (§6.3) — fire-and-forget the first time.
+	// 11. Title generation (§6.3) — fire-and-forget the first time. An image-only
+	// chat gets an immediate attachment-name fallback; after the answer completes,
+	// the title task upgrades it from the answer's semantic description.
+	upgradeImageOnlyTitle := shouldGenerateTitle(conv) && strings.TrimSpace(req.UserText) == "" && len(imageAttachmentIDs(req.Attachments)) > 0
 	if shouldGenerateTitle(conv) {
-		o.scheduleTitle(conv.ID, req.UserID, req.UserText, req.Locale)
+		if upgradeImageOnlyTitle {
+			o.persistGeneratedTitle(context.Background(), conv.ID, req.UserID, imageConversationTitle(req.Attachments, req.Locale))
+		} else {
+			o.scheduleTitle(conv.ID, req.UserID, req.UserText, req.Locale)
+		}
 	}
 
 	// §fallback channel: resolve the model's backup channel (if any) so a failed
@@ -2634,6 +2645,11 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		StopReason: result.StopReason, Usage: &usage,
 		Credits: turnCredits,
 	})
+	if upgradeImageOnlyTitle {
+		if source := imageOnlyTitleSource(renderBlocksAsText(result.Blocks)); source != "" {
+			o.scheduleTitleUpgrade(conv.ID, req.UserID, source, req.Locale)
+		}
+	}
 
 	// 13. Async memory extraction (§4.16) — runs after the user has the reply.
 	if o.memory != nil && o.queue != nil && conv.WorkspaceID == "" {
@@ -4368,15 +4384,25 @@ func shouldGenerateTitle(c *store.Conversation) bool {
 
 // scheduleTitle fires a TaskLLM call in the background to generate a real title.
 func (o *Orchestrator) scheduleTitle(convID, userID, userText, locale string) {
-	if o.queue == nil || o.task == nil {
-		// Fall back to deterministic clip so we always have something.
-		title := clipTitle(userText)
-		o.persistGeneratedTitle(context.Background(), convID, userID, title)
+	// First, set a deterministic clip so the sidebar updates immediately even
+	// when no task model/queue is configured.
+	first := clipTitle(userText)
+	if first != "" {
+		o.persistGeneratedTitle(context.Background(), convID, userID, first)
+	}
+	o.enqueueTitleTask(convID, userID, userText, locale)
+}
+
+// scheduleTitleUpgrade keeps the already-persisted image filename fallback
+// visible until the title task has produced a better semantic label.
+func (o *Orchestrator) scheduleTitleUpgrade(convID, userID, sourceText, locale string) {
+	o.enqueueTitleTask(convID, userID, sourceText, locale)
+}
+
+func (o *Orchestrator) enqueueTitleTask(convID, userID, sourceText, locale string) {
+	if o.queue == nil || o.task == nil || strings.TrimSpace(sourceText) == "" {
 		return
 	}
-	// First, set a deterministic clip so the sidebar updates immediately.
-	first := clipTitle(userText)
-	o.persistGeneratedTitle(context.Background(), convID, userID, first)
 	// Force the title language to the user's UI language. The task model is a
 	// separate, often language-biased model that ignores a soft "follow the user"
 	// hint, so we append an authoritative directive WRITTEN IN the target language
@@ -4388,7 +4414,7 @@ func (o *Orchestrator) scheduleTitle(convID, userID, userText, locale string) {
 		sys += " Write the title in the same language as the user's message."
 	}
 	o.queue.Enqueue("title.generate", func(ctx context.Context) error {
-		text, err := o.task.Run(ctx, TaskTitle, userText, RunOpts{
+		text, err := o.task.Run(ctx, TaskTitle, sourceText, RunOpts{
 			UserID:          userID,
 			ConversationID:  convID,
 			MaxOutputTokens: titleGenerationOutputTokens,
@@ -4413,6 +4439,43 @@ func (o *Orchestrator) scheduleTitle(convID, userID, userText, locale string) {
 		o.persistGeneratedTitle(ctx, convID, userID, title)
 		return nil
 	})
+}
+
+func imageConversationTitle(attachments []Attachment, locale string) string {
+	for _, attachment := range attachments {
+		if attachment.Kind != "image" && !strings.HasPrefix(strings.ToLower(strings.TrimSpace(attachment.MimeType)), "image/") {
+			continue
+		}
+		base := filepath.Base(strings.TrimSpace(attachment.Filename))
+		name := strings.TrimSuffix(base, filepath.Ext(base))
+		if title := clipTitle(name); title != "" {
+			return title
+		}
+	}
+	switch promptLocaleKey(locale) {
+	case "zh":
+		return "图片对话"
+	case "zh-Hant":
+		return "圖片對話"
+	case "ja":
+		return "画像の会話"
+	case "fr":
+		return "Conversation sur une image"
+	default:
+		return "Image conversation"
+	}
+}
+
+func imageOnlyTitleSource(answer string) string {
+	answer = strings.TrimSpace(answer)
+	if answer == "" {
+		return ""
+	}
+	runes := []rune(answer)
+	if len(runes) > 1200 {
+		runes = runes[:1200]
+	}
+	return "The user sent an image without accompanying text. Label the image topic described in this assistant response:\n" + string(runes)
 }
 
 // persistGeneratedTitle couples the asynchronous title write to the realtime

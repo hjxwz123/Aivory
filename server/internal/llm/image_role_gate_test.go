@@ -28,6 +28,96 @@ func historyWithAssistantOwnedImage() []UnifiedMessage {
 	}
 }
 
+func imageOnlyUserHistory() []UnifiedMessage {
+	return []UnifiedMessage{{
+		Role:   "user",
+		Blocks: []UnifiedBlock{{Kind: "image", Data: "aW1n", MimeType: "image/png"}},
+	}}
+}
+
+func assertImageOnlyParts(t *testing.T, parts []map[string]any, imageKey string) {
+	t.Helper()
+	if len(parts) != 1 {
+		t.Fatalf("image-only message parts = %#v, want exactly one image part", parts)
+	}
+	if _, ok := parts[0][imageKey]; !ok {
+		t.Fatalf("image-only message missing %q part: %#v", imageKey, parts)
+	}
+	if _, ok := parts[0]["text"]; ok {
+		t.Fatalf("image-only message contains an empty text part: %#v", parts)
+	}
+}
+
+func TestOpenAIChatSerializesImageOnlyUserWithoutEmptyText(t *testing.T) {
+	var captured struct {
+		Messages []struct {
+			Role    string           `json:"role"`
+			Content []map[string]any `json:"content"`
+		} `json:"messages"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(`data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}` + "\n\n"))
+	}))
+	defer srv.Close()
+
+	p := &OpenAIProvider{}
+	_, err := p.Stream(context.Background(), UnifiedChatRequest{
+		Model:   ModelInfo{RequestID: "gpt-test", BaseURL: srv.URL, APIKey: "k", Vision: true},
+		History: imageOnlyUserHistory(),
+	}, nil, func(SseEvent) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(captured.Messages) != 1 {
+		t.Fatalf("messages = %#v", captured.Messages)
+	}
+	assertImageOnlyParts(t, captured.Messages[0].Content, "image_url")
+}
+
+func TestOpenAIResponsesSerializesImageOnlyUserWithoutEmptyText(t *testing.T) {
+	var captured struct {
+		Input []struct {
+			Content []map[string]any `json:"content"`
+		} `json:"input"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(`data: {"type":"response.output_text.delta","delta":"ok"}` + "\n\n" +
+			`data: {"type":"response.completed","response":{"output":[]}}` + "\n\n"))
+	}))
+	defer srv.Close()
+
+	p := &OpenAIProvider{}
+	_, err := p.Stream(context.Background(), UnifiedChatRequest{
+		Model:   ModelInfo{RequestID: "gpt-test", BaseURL: srv.URL, APIKey: "k", APIFormat: "responses", Vision: true},
+		History: imageOnlyUserHistory(),
+	}, nil, func(SseEvent) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(captured.Input) != 1 {
+		t.Fatalf("input = %#v", captured.Input)
+	}
+	assertImageOnlyParts(t, captured.Input[0].Content, "image_url")
+}
+
+func TestAnthropicSerializesImageOnlyUserWithoutEmptyText(t *testing.T) {
+	parts := historyToAnthropic(imageOnlyUserHistory(), true)[0]["content"].([]map[string]any)
+	assertImageOnlyParts(t, parts, "source")
+}
+
+func TestGeminiSerializesImageOnlyUserWithoutEmptyText(t *testing.T) {
+	parts := historyToGemini(imageOnlyUserHistory(), true)[0]["parts"].([]map[string]any)
+	assertImageOnlyParts(t, parts, "inlineData")
+}
+
 // assertNoImagePartOnAnyRole fails if the outbound request body carries any
 // provider image content-part marker. With the only image sitting on the
 // assistant turn, a correctly role-gated serializer emits none of these — the
