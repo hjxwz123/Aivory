@@ -7,7 +7,7 @@ import { BlurText } from '@/components/landing/fx/blur-text'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Field } from '@/components/ui/label'
-import { Switch } from '@/components/ui/switch'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Separator } from '@/components/ui/separator'
 import { toast } from '@/hooks/use-toast'
 import { useAuth } from '@/store/auth'
@@ -370,9 +370,9 @@ export default function Register() {
             signupOpen ? 'cursor-pointer' : 'cursor-not-allowed opacity-60',
           )}
         >
-          <Switch
+          <Checkbox
             checked={agree}
-            onCheckedChange={(v) => setAgree(Boolean(v))}
+            onChange={(e) => setAgree(e.target.checked)}
             aria-invalid={!!errors.agree}
             disabled={!signupOpen}
           />
