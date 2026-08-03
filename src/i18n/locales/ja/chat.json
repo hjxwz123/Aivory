@@ -50,6 +50,7 @@
       }
     },
     "imageUnsupported": "現在のモデルは画像入力に対応していません。画像認識対応モデルを選択してください。",
+    "imagePromptRequired": "参照画像をどのように変更するか説明してください。",
     "more": "その他",
     "voice": "音声入力",
     "voiceStop": "録音を停止",
@@ -119,6 +120,7 @@
       "disable": "{{name}}をオフにする"
     }
   },
+  "imageConversationTitle": "画像の会話",
   "assistant": "Aivory",
   "thinking": "思考中",
   "reasoning": {

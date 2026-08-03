@@ -42,6 +42,28 @@ func TestClipTitleUsesReadableMathContent(t *testing.T) {
 	}
 }
 
+func TestImageConversationTitleUsesFilenameAndLocalizedFallback(t *testing.T) {
+	if got := imageConversationTitle([]Attachment{{Filename: "Quarterly dashboard.png", Kind: "image"}}, "en"); got != "Quarterly dashboard" {
+		t.Fatalf("filename title = %q", got)
+	}
+	if got := imageConversationTitle([]Attachment{{Filename: ".png", MimeType: "image/png"}}, "zh-CN"); got != "图片对话" {
+		t.Fatalf("localized fallback = %q", got)
+	}
+	if got := imageConversationTitle(nil, "fr-FR"); got != "Conversation sur une image" {
+		t.Fatalf("missing attachment fallback = %q", got)
+	}
+}
+
+func TestImageOnlyTitleSourceIsBounded(t *testing.T) {
+	if got := imageOnlyTitleSource("   "); got != "" {
+		t.Fatalf("empty answer source = %q", got)
+	}
+	source := imageOnlyTitleSource(strings.Repeat("界", 1300))
+	if !strings.HasSuffix(source, strings.Repeat("界", 1200)) || strings.Contains(source, strings.Repeat("界", 1201)) {
+		t.Fatalf("answer source was not bounded to 1200 runes")
+	}
+}
+
 func TestTitleMathContentToPlainTextMatchesComposerBoundaries(t *testing.T) {
 	tests := []struct {
 		name  string

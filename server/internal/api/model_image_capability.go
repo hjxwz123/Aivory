@@ -19,6 +19,8 @@ var (
 	errNoModelConfigured      = errors.New("no model configured")
 	errSelectedModelInvalid   = errors.New("selected model is unavailable")
 	errImageInputUnsupported  = errors.New("selected model does not support image input")
+	errMessageTextRequired    = errors.New("text or image required")
+	errImagePromptRequired    = errors.New("image generation prompt required")
 	errImageConversationScope = errors.New("conversation_id is required for image uploads")
 	errAttachmentIDRequired   = errors.New("attachment id is required")
 	errAttachmentUnavailable  = errors.New("attachment not found in conversation")
@@ -237,14 +239,7 @@ func ensureImageAttachmentsSupported(
 	if len(attachments) == 0 {
 		return nil
 	}
-	hasImage := false
-	for _, attachment := range attachments {
-		if attachment.Kind == "image" || strings.HasPrefix(normalizeStoredMIME(attachment.MimeType), "image/") {
-			hasImage = true
-			break
-		}
-	}
-	if !hasImage {
+	if !hasNormalizedImageAttachment(attachments) {
 		return nil
 	}
 	model, err := resolveEffectiveConversationModel(ctx, db, conv, requestedModelID, fast)
@@ -253,6 +248,44 @@ func ensureImageAttachmentsSupported(
 	}
 	if !modelSupportsImageInput(model) {
 		return errImageInputUnsupported
+	}
+	return nil
+}
+
+func hasNormalizedImageAttachment(attachments []llm.Attachment) bool {
+	for _, attachment := range attachments {
+		if attachment.Kind == "image" || strings.HasPrefix(normalizeStoredMIME(attachment.MimeType), "image/") {
+			return true
+		}
+	}
+	return false
+}
+
+// validateTurnContent runs only after attachment normalization, so an empty
+// text request cannot forge kind=image to bypass the text requirement. Vision
+// chat accepts image-only turns; image-generation models still require an
+// explicit edit/generation instruction because sending them incurs image cost.
+func validateTurnContent(
+	ctx context.Context,
+	db *sql.DB,
+	conv *store.Conversation,
+	requestedModelID string,
+	fast bool,
+	text string,
+	attachments []llm.Attachment,
+) error {
+	if strings.TrimSpace(text) != "" {
+		return nil
+	}
+	if !hasNormalizedImageAttachment(attachments) {
+		return errMessageTextRequired
+	}
+	model, err := resolveEffectiveConversationModel(ctx, db, conv, requestedModelID, fast)
+	if err != nil {
+		return err
+	}
+	if model.Kind == "image" {
+		return errImagePromptRequired
 	}
 	return nil
 }

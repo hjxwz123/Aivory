@@ -98,6 +98,7 @@ import {
 } from '@/lib/official-tools'
 import { modelHasBuiltinTools, modelSupportsBuiltinTool } from '@/lib/builtin-tools'
 import type { ApiOfficialToolDefinition } from '@/api/types'
+import { hasImageAttachment, hasSendableMessageContent } from '@/lib/chat-message-input'
 
 interface ComposerProps {
   modelId: string
@@ -1165,8 +1166,6 @@ export function Composer({
       setTranscribing(false)
     }
   }
-  const effectivePlaceholder = placeholder ?? t('composer.placeholder')
-
   const currentModel = useModels(
     (s) => s.models.find((m) => m.id === modelId) ?? s.imageModels.find((m) => m.id === modelId),
   )
@@ -1184,6 +1183,11 @@ export function Composer({
   // §4.20 image mode: when the selected model draws, the composer shows a style
   // picker and hides chat-only controls (research / knowledge bases).
   const isImageMode = currentModel?.kind === 'image'
+  const hasDraftImage = hasImageAttachment(attachments)
+  const imagePromptRequired = isImageMode && hasDraftImage && value.trim().length === 0
+  const effectivePlaceholder =
+    placeholder ??
+    (imagePromptRequired ? t('composer.imagePromptRequired') : t('composer.placeholder'))
   const [imageStyleId, setImageStyleId] = useState('')
   // Deep Research is both a per-group capability and a per-model exposure flag.
   // Admins bypass the group feature but still respect the current model's flag.
@@ -1307,7 +1311,7 @@ export function Composer({
   }, [hasUnsupportedImageAttachment, t])
   const voiceActive = recording || streamConnecting || transcribing || voiceStarting
   const canSubmit =
-    value.trim().length > 0 &&
+    hasSendableMessageContent(value, attachments, isImageMode) &&
     !voiceActive &&
     !streaming &&
     !uploading &&
@@ -1318,7 +1322,12 @@ export function Composer({
   async function handleSubmit() {
     if (submittingRef.current) return
     const text = value.trim()
-    if (!text || voiceActive || streaming || uploading || restoringAttachments || documentNotReady) return
+    if (voiceActive || streaming || uploading || restoringAttachments || documentNotReady) return
+    if (!text && isImageMode && hasImageAttachment(attachments)) {
+      toast.warning(t('composer.imagePromptRequired'))
+      return
+    }
+    if (!hasSendableMessageContent(text, attachments, isImageMode)) return
     if (hasUnsupportedImageAttachment) {
       toast.error(
         t('composer.imageUnsupported', {
@@ -2131,11 +2140,11 @@ export function Composer({
 
   // One primary action owns the right edge, matching the familiar ChatGPT
   // composer pattern: stop while generating, voice while the draft is empty,
-  // and send once text exists. Keep voice in control until live/recorded speech
+  // and send once text or a chat image exists. Keep voice in control until live/recorded speech
   // fully settles; a streaming transcript can populate `value` before the mic
   // has actually stopped, and must not strand the user without a stop action.
   const hasDraftText = value.trim().length > 0
-  const showVoiceAction = voiceActive || !hasDraftText
+  const showVoiceAction = voiceActive || (!hasDraftText && !hasDraftImage)
   const voiceStatusLabel = transcribing
     ? t('composer.voiceTranscribing')
     : recording
@@ -2217,7 +2226,7 @@ export function Composer({
       </button>
     </Tooltip>
   ) : (
-    <Tooltip content={t('composer.send', { kbd: modKey() })}>
+    <Tooltip content={imagePromptRequired ? t('composer.imagePromptRequired') : t('composer.send', { kbd: modKey() })}>
       <button
         type="button"
         onClick={handleSubmit}

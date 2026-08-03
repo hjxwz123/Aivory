@@ -50,6 +50,7 @@
       }
     },
     "imageUnsupported": "Le modèle actuel ne prend pas en charge les images. Choisissez un modèle compatible avec la vision.",
+    "imagePromptRequired": "Décrivez comment modifier l’image de référence.",
     "more": "Plus",
     "voice": "Saisie vocale",
     "voiceStop": "Arrêter l'enregistrement",
@@ -119,6 +120,7 @@
       "disable": "Désactiver {{name}}"
     }
   },
+  "imageConversationTitle": "Conversation sur une image",
   "assistant": "Aivory",
   "thinking": "Réflexion",
   "reasoning": {

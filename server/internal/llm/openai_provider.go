@@ -117,7 +117,11 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest,
 			}
 		}
 		if len(imgParts) > 0 {
-			content := append([]map[string]any{{"type": "text", "text": text}}, imgParts...)
+			content := make([]map[string]any, 0, len(imgParts)+1)
+			if text != "" {
+				content = append(content, map[string]any{"type": "text", "text": text})
+			}
+			content = append(content, imgParts...)
 			messages = append(messages, map[string]any{"role": m.Role, "content": content})
 		} else {
 			messages = append(messages, map[string]any{"role": m.Role, "content": text})
@@ -692,7 +696,10 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 		if m.Role == "assistant" {
 			ctype = "output_text"
 		}
-		parts := []map[string]any{{"type": ctype, "text": messageText}}
+		parts := []map[string]any{}
+		if messageText != "" {
+			parts = append(parts, map[string]any{"type": ctype, "text": messageText})
+		}
 		if m.Role == "user" && len(pendingGeneratedImages) > 0 {
 			parts = append(parts, pendingGeneratedImages...)
 			pendingGeneratedImages = nil
@@ -709,6 +716,9 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 					"image_url": "data:" + b.MimeType + ";base64," + b.Data,
 				})
 			}
+		}
+		if len(parts) == 0 {
+			parts = append(parts, map[string]any{"type": ctype, "text": ""})
 		}
 		input = append(input, map[string]any{
 			"role":    m.Role,

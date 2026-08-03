@@ -322,10 +322,6 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errors.New("invalid generation_id"))
 		return
 	}
-	if strings.TrimSpace(req.Text) == "" {
-		writeError(w, 400, errors.New("text required"))
-		return
-	}
 	_, normalizedSkillIDs, err := store.ResolveUserSkillSelection(r.Context(), d.DB, u.ID, req.SelectedUserSkillIDs, true)
 	if err != nil {
 		if errors.Is(err, store.ErrInvalidUserSkillSelection) {
@@ -358,6 +354,14 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	req.Attachments, err = normalizeConversationAttachments(r.Context(), d.DB, id, u.ID, req.Attachments)
 	if err != nil {
 		writeError(w, attachmentNormalizationErrorStatus(err), err)
+		return
+	}
+	if err := validateTurnContent(r.Context(), d.DB, conv, req.ModelID, req.Fast, req.Text, req.Attachments); err != nil {
+		status := imageCapabilityErrorStatus(err)
+		if errors.Is(err, errMessageTextRequired) || errors.Is(err, errImagePromptRequired) {
+			status = http.StatusBadRequest
+		}
+		writeError(w, status, err)
 		return
 	}
 	if err := ensureAttachedDocumentsReady(r.Context(), d.DB, id, req.Attachments); err != nil {

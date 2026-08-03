@@ -51,6 +51,7 @@ import i18n from '@/i18n'
 import { mathContentToPlainText } from '@/lib/math-content'
 import { normalizeSelectedUserSkillIds } from '@/lib/composer-commands'
 import { resolveNewConversationFastMode } from '@/lib/chat-defaults'
+import { initialConversationTitle } from '@/lib/chat-message-input'
 
 // resolveArmedTurnFlags snapshots the CURRENT composer feature toggles for turns
 // started OUTSIDE the composer's own submit — regenerate, edit-and-resend, and
@@ -1141,13 +1142,16 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
     // replayed when that branch is reopened.
     const abort = new AbortController()
     const conv0 = get().conversations.find((c) => c.id === input.conversationId)
-    const readableInputText = mathContentToPlainText(input.text)
-    const optimisticSeedTitle = readableInputText.replace(/\s+/g, ' ').trim().slice(0, 60).trim()
+    const optimisticSeedTitle = initialConversationTitle(
+      input.text,
+      input.attachments,
+      i18n.t('chat:imageConversationTitle', { defaultValue: 'Image conversation' }),
+    )
     const initialTitle = conv0?.title.trim() ?? ''
     const expectsGeneratedTitle =
       (conv0?.messages.length ?? 0) === 0 &&
       (!initialTitle || initialTitle === 'New conversation' || initialTitle === '新对话' || initialTitle === optimisticSeedTitle)
-    const generatedTitleFallback = deterministicServerTitle(input.text)
+    const generatedTitleFallback = deterministicServerTitle(optimisticSeedTitle)
     const requestParentId = persistedMessageReference(
       conv0?.messages ?? [],
       parentWasLocal ? undefined : input.parentId,
@@ -1272,7 +1276,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
           // a blank title) OR the placeholder, regardless of locale.
           title:
             c.messages.length === 0 && (!c.title.trim() || c.title === 'New conversation')
-              ? readableInputText.replace(/\s+/g, ' ').trim().slice(0, 60) || c.title
+              ? optimisticSeedTitle || c.title
               : c.title,
         }
       }),
