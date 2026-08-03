@@ -304,10 +304,16 @@ export function AdminModelFeedback({ days }: AdminModelFeedbackProps) {
                         {modelLabel(item)}
                       </span>
                       <span className="col-span-2 col-start-1 row-start-3 min-w-0 xl:col-span-1 xl:col-start-3 xl:row-start-1">
-                        <span className="block line-clamp-2 break-words text-[13px] leading-5 text-[var(--color-fg)] xl:line-clamp-1">
+                        <span
+                          className="block min-w-0 max-w-full truncate text-[13px] leading-5 text-[var(--color-fg)]"
+                          title={item.question || undefined}
+                        >
                           {item.question || t('analytics.feedback.list.noQuestion')}
                         </span>
-                        <span className="mt-0.5 block line-clamp-1 break-words text-[11.5px] leading-4 text-[var(--color-fg-muted)]">
+                        <span
+                          className="mt-0.5 block min-w-0 max-w-full truncate text-[11.5px] leading-4 text-[var(--color-fg-muted)]"
+                          title={item.response || undefined}
+                        >
                           {item.response || t('analytics.feedback.list.noResponse')}
                         </span>
                       </span>
