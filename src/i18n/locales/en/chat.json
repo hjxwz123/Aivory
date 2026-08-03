@@ -50,6 +50,7 @@
       }
     },
     "imageUnsupported": "The current model does not support image input. Choose a vision-capable model.",
+    "imagePromptRequired": "Describe how you want to change the reference image.",
     "more": "More",
     "voice": "Voice input",
     "voiceStop": "Stop recording",
@@ -119,6 +120,7 @@
       "disable": "Turn off {{name}}"
     }
   },
+  "imageConversationTitle": "Image conversation",
   "assistant": "Aivory",
   "thinking": "Thinking",
   "reasoning": {

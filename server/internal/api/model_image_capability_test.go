@@ -133,6 +133,24 @@ func TestEnsureImageAttachmentsSupportedUsesNormalizedServerMetadata(t *testing.
 	}
 }
 
+func TestValidateTurnContentAllowsOnlyVisionChatWithoutText(t *testing.T) {
+	fx := seedImageCapabilityFixture(t)
+	image := []llm.Attachment{{ID: "f_image", Filename: "photo.png", Kind: "image", MimeType: "image/png"}}
+
+	if err := validateTurnContent(context.Background(), fx.deps.DB, fx.conv, "m_vision", false, "", image); err != nil {
+		t.Fatalf("vision chat rejected image-only turn: %v", err)
+	}
+	if err := validateTurnContent(context.Background(), fx.deps.DB, fx.conv, "m_image", false, "", image); !errors.Is(err, errImagePromptRequired) {
+		t.Fatalf("image model error = %v, want image prompt required", err)
+	}
+	if err := validateTurnContent(context.Background(), fx.deps.DB, fx.conv, "m_vision", false, "", nil); !errors.Is(err, errMessageTextRequired) {
+		t.Fatalf("empty turn error = %v, want text or image required", err)
+	}
+	if err := validateTurnContent(context.Background(), fx.deps.DB, fx.conv, "m_image", false, "draw a variation", image); err != nil {
+		t.Fatalf("prompted image turn rejected: %v", err)
+	}
+}
+
 func TestNormalizeConversationAttachmentsRejectsSpoofingAndCrossConversationIDs(t *testing.T) {
 	fx := seedImageCapabilityFixture(t)
 	db := fx.deps.DB
