@@ -2209,12 +2209,13 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			if result != nil {
 				usage = result.Usage
 			}
+			usage, produced := stoppedTurnUsage(usage, provReq, partialBlocks, visibleOutput.Load(), reqRecorder.snapshots())
 			// §发出就算: a user-stopped turn is finalized like a completed one — the
 			// partial output is billed, burns the window quota, and (past the free
-			// allotment) is charged in credits for exactly what was produced. Only
+			// allotment) is charged in credits for what was produced. Providers that
+			// lose their terminal usage frame on cancel use a conservative estimate;
 			// true provider failures and pre-send refusals stay free.
 			stopChatCost := computeCost(*model, usage)
-			produced := usage.InputTokens > 0 || usage.OutputTokens > 0
 			var stopCredits float64
 			stopTurnTotal := stopChatCost
 			persistStoppedBillingFailure := func(cost float64, cause error) error {

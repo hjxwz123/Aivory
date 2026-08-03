@@ -74,6 +74,27 @@ type preTokenStopProvider struct {
 	calls int
 }
 
+type visibleStopWithoutUsageProvider struct {
+	started chan struct{}
+}
+
+func (p *visibleStopWithoutUsageProvider) ID() string { return "openai" }
+
+func (p *visibleStopWithoutUsageProvider) Stream(
+	ctx context.Context,
+	_ UnifiedChatRequest,
+	_ ToolRunner,
+	onEvent func(SseEvent),
+) (*UnifiedResult, error) {
+	onEvent(SseEvent{Type: "text_delta", Text: "partially generated answer"})
+	close(p.started)
+	<-ctx.Done()
+	return &UnifiedResult{
+		Blocks:     []UnifiedBlock{{Kind: "text", Text: "partially generated answer"}},
+		StopReason: "stopped",
+	}, ctx.Err()
+}
+
 type completeThenCancelProvider struct {
 	cancel context.CancelFunc
 }
@@ -191,6 +212,97 @@ func TestOrchestratorStopAfterMessageStartSettlesPlaceholderBeforeFirstToken(t *
 	}
 	if string(persisted.Blocks) != "[]" {
 		t.Fatalf("assistant blocks=%s, want []", persisted.Blocks)
+	}
+}
+
+func TestOrchestratorVisibleStopWithoutProviderUsageStillChargesCredits(t *testing.T) {
+	ctx := context.Background()
+	db, err := store.Open(filepath.Join(t.TempDir(), "visible-stop-billing.db"))
+	if err != nil {
+		t.Fatalf("open isolated database: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := store.Migrate(db); err != nil {
+		t.Fatalf("migrate isolated database: %v", err)
+	}
+	for _, query := range []string{
+		`INSERT INTO user_groups(id,name,is_default) VALUES('ug_paid_stop','Paid stop',0)`,
+		`INSERT INTO users(id,email,password_hash,role,group_id,credits_permanent) VALUES('u_paid_stop','paid-stop@example.com','h','user','ug_paid_stop',100)`,
+	} {
+		if _, err := db.Exec(query); err != nil {
+			t.Fatalf("seed %q: %v", query, err)
+		}
+	}
+	if err := store.SetSetting(db, "credits_per_usd", 100.0); err != nil {
+		t.Fatalf("set credits rate: %v", err)
+	}
+	channel, err := store.CreateChannel(ctx, db, "Visible stop", "openai", "chat", "https://example.invalid", "key")
+	if err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	model, err := store.CreateModel(ctx, db, store.Model{
+		ChannelID: channel.ID, Kind: "chat", RequestID: "visible-stop-model", Label: "Visible stop model",
+		Enabled: true, Stream: true, ToolMode: "native", PriceInput: 1, PriceOutput: 2, Currency: "USD",
+	})
+	if err != nil {
+		t.Fatalf("create model: %v", err)
+	}
+	conversation, err := store.CreateConversation(ctx, db, store.Conversation{
+		ID: "c_visible_stop_billing", UserID: "u_paid_stop", Title: "Visible stop billing", ModelID: model.ID,
+	})
+	if err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+
+	provider := &visibleStopWithoutUsageProvider{started: make(chan struct{})}
+	logger := log.New(io.Discard, "", 0)
+	registry := NewRegistry(logger)
+	registry.Register(provider)
+	orchestrator := NewOrchestrator(db, registry, stoppedEditBranchTools{}, nil, nil, nil, nil, nil, logger)
+	turnCtx, cancelTurn := context.WithCancel(ctx)
+	resultCh := make(chan *RunResult, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		result, runErr := orchestrator.Run(turnCtx, RunRequest{
+			UserID: "u_paid_stop", ConversationID: conversation.ID, UserText: "generate a paid partial answer",
+			ModelID: model.ID, ToolMode: ToolModeEnabled,
+		}, func(SseEvent) {})
+		resultCh <- result
+		errCh <- runErr
+	}()
+	select {
+	case <-provider.started:
+		cancelTurn()
+	case <-time.After(5 * time.Second):
+		t.Fatal("provider did not begin streaming")
+	}
+	result := <-resultCh
+	if runErr := <-errCh; runErr != nil {
+		t.Fatalf("run stopped turn: %v", runErr)
+	}
+	if result == nil || result.AssistantMessage.Status != "stopped" {
+		t.Fatalf("stopped result = %+v", result)
+	}
+	if result.AssistantMessage.InputTokens <= 0 || result.AssistantMessage.OutputTokens <= 0 || result.AssistantMessage.Credits <= 0 {
+		t.Fatalf("stopped message was not metered: %+v", result.AssistantMessage)
+	}
+
+	balance, err := store.GetCreditBalance(context.Background(), db, "u_paid_stop")
+	if err != nil {
+		t.Fatalf("load credit balance: %v", err)
+	}
+	if balance.Permanent >= 100 || balance.Available >= 100 {
+		t.Fatalf("stopped turn did not debit credits: %+v", balance)
+	}
+	var reservationStatus string
+	if err := db.QueryRowContext(context.Background(),
+		`SELECT status FROM credit_reservations WHERE source_type='llm_turn' AND source_id=?`,
+		result.AssistantMessage.ID+":chat",
+	).Scan(&reservationStatus); err != nil {
+		t.Fatalf("load stopped-turn reservation: %v", err)
+	}
+	if reservationStatus != store.CreditReservationSettled {
+		t.Fatalf("reservation status = %q, want %q", reservationStatus, store.CreditReservationSettled)
 	}
 }
 

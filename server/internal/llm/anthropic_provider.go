@@ -826,15 +826,23 @@ func readAnthropicStream(body io.Reader, onEvent func(SseEvent)) (string, []anth
 				}
 			}
 			if u, ok := ev["usage"].(map[string]any); ok {
-				usage.OutputTokens += intOf(u["output_tokens"])
-				usage.CacheReadTokens += intOf(u["cache_read_input_tokens"])
-				usage.CacheWriteTokens += intOf(u["cache_creation_input_tokens"])
+				if tokens := intOf(u["output_tokens"]); tokens > 0 {
+					usage.OutputTokens = tokens
+				}
+				if tokens := intOf(u["cache_read_input_tokens"]); tokens > 0 {
+					usage.CacheReadTokens = tokens
+				}
+				if tokens := intOf(u["cache_creation_input_tokens"]); tokens > 0 {
+					usage.CacheWriteTokens = tokens
+				}
 			}
 		case "message_start":
 			sawEvent = true
 			if msg, ok := ev["message"].(map[string]any); ok {
 				if u, ok := msg["usage"].(map[string]any); ok {
 					usage.InputTokens = intOf(u["input_tokens"])
+					usage.CacheReadTokens = intOf(u["cache_read_input_tokens"])
+					usage.CacheWriteTokens = intOf(u["cache_creation_input_tokens"])
 				}
 			}
 		case "message_stop":

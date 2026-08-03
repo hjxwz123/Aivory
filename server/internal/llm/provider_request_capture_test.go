@@ -41,6 +41,9 @@ func TestProviderRequestRecorderSanitizesHeadersBodyAndURL(t *testing.T) {
 	if strings.Contains(got.Body, "AAAA") || !strings.Contains(got.Body, "[redacted base64") {
 		t.Fatalf("body media not redacted: %s", got.Body)
 	}
+	if got.EstimatedInputTokens <= 0 {
+		t.Fatalf("input estimate = %d, want positive", got.EstimatedInputTokens)
+	}
 }
 
 func TestProviderRequestRecorderDoesNotRedactTokenCounts(t *testing.T) {
