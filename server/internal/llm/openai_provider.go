@@ -133,9 +133,10 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest,
 
 	for i := 0; i < maxIter; i++ {
 		body := map[string]any{
-			"model":    req.Model.RequestID,
-			"messages": messages,
-			"stream":   true,
+			"model":          req.Model.RequestID,
+			"messages":       messages,
+			"stream":         true,
+			"stream_options": map[string]any{"include_usage": true},
 		}
 		if req.MaxOutputTokens > 0 {
 			body["max_tokens"] = req.MaxOutputTokens

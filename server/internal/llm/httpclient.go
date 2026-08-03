@@ -146,7 +146,20 @@ func doProviderParsedRequest(
 		if resp.Body != nil {
 			defer resp.Body.Close()
 		}
-		err = consume(resp, emit)
+		var generated strings.Builder
+		trackGenerated := func(ev SseEvent) {
+			switch ev.Type {
+			case "text_delta", "thinking_delta":
+				generated.WriteString(ev.Text)
+			case "tool_start":
+				generated.WriteString(ev.Name)
+			case "tool_input":
+				generated.WriteString(ev.PartialJson)
+			}
+			emit(ev)
+		}
+		err = consume(resp, trackGenerated)
+		recordProviderRequestOutputEstimate(ctx, estimateTokens(generated.String()))
 		if err != nil {
 			recordProviderRequestFailure(ctx, fallback, err)
 		}

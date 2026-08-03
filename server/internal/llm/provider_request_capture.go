@@ -34,6 +34,12 @@ type providerRequestSnapshot struct {
 	Header  string
 	Body    string
 	Attempt int
+	// Estimates are internal billing fallbacks for a canceled stream whose
+	// provider never delivered usage for this exact request. They are derived
+	// from the sanitized request and emitted provider deltas, never exposed in
+	// admin request logs.
+	EstimatedInputTokens  int
+	EstimatedOutputTokens int
 	// Fallback identifies the channel credentials used for this exact upstream
 	// request. A turn may switch after one or more successful primary tool rounds,
 	// so attribution cannot be derived from a single turn-wide flag.
@@ -111,6 +117,14 @@ func attachProviderRequestUsage(ctx context.Context, u Usage) {
 	rec.attachUsage(u)
 }
 
+func recordProviderRequestOutputEstimate(ctx context.Context, tokens int) {
+	rec, _ := ctx.Value(providerRequestRecorderKey{}).(*providerRequestRecorder)
+	if rec == nil {
+		return
+	}
+	rec.attachOutputEstimate(tokens)
+}
+
 // recordProviderRequestFailure pins a non-cancellation transport, HTTP, or
 // response-parsing failure to the most recent sent request attempt.
 func recordProviderRequestFailure(ctx context.Context, fallback bool, err error) {
@@ -166,16 +180,18 @@ func (r *providerRequestRecorder) record(req *http.Request, fallbackAttempt ...b
 	}
 	fallback := len(fallbackAttempt) > 0 && fallbackAttempt[0]
 	body := snapshotRequestBody(req)
+	sanitizedBody := sanitizeProviderRequestBody(body)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.attempt++
 	r.last = providerRequestSnapshot{
-		Method:   req.Method,
-		URL:      sanitizeProviderRequestURL(req.URL),
-		Header:   sanitizeProviderRequestHeaders(req.Header),
-		Body:     sanitizeProviderRequestBody(body),
-		Attempt:  r.attempt,
-		Fallback: fallback,
+		Method:               req.Method,
+		URL:                  sanitizeProviderRequestURL(req.URL),
+		Header:               sanitizeProviderRequestHeaders(req.Header),
+		Body:                 sanitizedBody,
+		Attempt:              r.attempt,
+		Fallback:             fallback,
+		EstimatedInputTokens: estimateTokens(sanitizedBody),
 	}
 	if len(r.all) < maxProviderRequestSnapshots {
 		entry := r.last
@@ -208,6 +224,23 @@ func (r *providerRequestRecorder) attachUsage(u Usage) {
 	if n := len(r.all); n > 0 && r.all[n-1].Attempt == r.attempt {
 		r.all[n-1].Usage = u
 		r.all[n-1].HasUsage = true
+		r.last.Usage = u
+		r.last.HasUsage = true
+	}
+}
+
+func (r *providerRequestRecorder) attachOutputEstimate(tokens int) {
+	if r == nil || tokens <= 0 {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.last.Attempt != r.attempt {
+		return
+	}
+	r.last.EstimatedOutputTokens = tokens
+	if n := len(r.all); n > 0 && r.all[n-1].Attempt == r.attempt {
+		r.all[n-1].EstimatedOutputTokens = tokens
 	}
 }
 
