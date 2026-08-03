@@ -50,6 +50,7 @@
       }
     },
     "imageUnsupported": "目前模型不支援圖片輸入，請選擇支援視覺的模型。",
+    "imagePromptRequired": "請描述你希望如何修改這張參考圖。",
     "more": "更多",
     "voice": "語音輸入",
     "voiceStop": "停止錄音",
@@ -119,6 +120,7 @@
       "disable": "關閉{{name}}"
     }
   },
+  "imageConversationTitle": "圖片對話",
   "assistant": "Aivory",
   "thinking": "思考中",
   "reasoning": {
