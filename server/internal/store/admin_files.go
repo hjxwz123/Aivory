@@ -25,12 +25,23 @@ type AdminFile struct {
 	ConversationID string `json:"conversation_id"`
 	KBID           string `json:"kb_id"`
 	KBName         string `json:"kb_name"`
+	// BillingUserID is the quota principal. For committed workspace content it
+	// is the canonical workspace owner, which can differ from UserID (the
+	// uploader or container creator shown in the admin attribution columns).
+	BillingUserID string `json:"billing_user_id"`
 }
 
 // AdminFileFilter narrows ListAdminFiles / CountAdminFiles.
 type AdminFileFilter struct {
 	Search string // case-insensitive filename substring
 	UserID string // exact owner match
+	// BillingUserID selects rows charged to this quota principal. The user files
+	// page uses this rather than UserID so a workspace owner can inspect and
+	// clean shared committed content uploaded by members.
+	BillingUserID string
+	// AccessUserID adds the current personal/workspace container boundary used by
+	// the user files page. Admin inventory callers leave it empty.
+	AccessUserID string
 	// UserQ matches the owner by user_id exactly OR email/name substring
 	// (case-insensitive) — same semantics as the usage page's user filter, so
 	// the admin can type instead of scrolling a dropdown of every user.
@@ -47,19 +58,32 @@ const adminFilesBaseQuery = `
 SELECT f.id AS id, 'file' AS source, 'conversation' AS origin,
        f.user_id AS user_id, COALESCE(u.email,'') AS user_email, COALESCE(u.name,'') AS user_name,
        f.filename AS filename, f.mime_type AS mime_type, f.size_bytes AS size_bytes, f.created_at AS created_at,
-       COALESCE(f.conversation_id,'') AS conversation_id, '' AS kb_id, '' AS kb_name
+       COALESCE(f.conversation_id,'') AS conversation_id, '' AS kb_id, '' AS kb_name,
+       CASE
+         WHEN f.conversation_id IS NULL OR COALESCE(fc.workspace_id,'')='' OR f.draft=1 THEN f.user_id
+         ELSE COALESCE(fw.owner_id, f.user_id)
+       END AS billing_user_id
   FROM files f
   LEFT JOIN users u ON u.id = f.user_id
+  LEFT JOIN conversations fc ON fc.id=f.conversation_id
+  LEFT JOIN workspaces fw ON fw.id=fc.workspace_id
 UNION ALL
 SELECT d.id, 'document',
        CASE WHEN COALESCE(d.kb_id,'') <> '' THEN 'kb' ELSE 'conversation' END,
        COALESCE(k.user_id, c.user_id, ''), COALESCE(u2.email,''), COALESCE(u2.name,''),
        d.filename, d.mime_type, d.size_bytes, d.created_at,
-       COALESCE(d.conversation_id,''), COALESCE(d.kb_id,''), COALESCE(k.name,'')
+       COALESCE(d.conversation_id,''), COALESCE(d.kb_id,''), COALESCE(k.name,''),
+       CASE
+         WHEN COALESCE(k.workspace_id, c.workspace_id, '')<>''
+         THEN COALESCE(dw.owner_id, k.user_id, c.user_id, '')
+         ELSE COALESCE(k.user_id, c.user_id, '')
+       END
   FROM documents d
   LEFT JOIN knowledge_bases k ON k.id = d.kb_id
   LEFT JOIN conversations c ON c.id = d.conversation_id
   LEFT JOIN users u2 ON u2.id = COALESCE(k.user_id, c.user_id)
+  LEFT JOIN workspaces dw ON dw.id=CASE
+    WHEN COALESCE(k.workspace_id,'')<>'' THEN k.workspace_id ELSE c.workspace_id END
  WHERE NOT EXISTS (SELECT 1 FROM files f2 WHERE f2.storage_path = d.storage_path)
 `
 
@@ -140,6 +164,37 @@ func adminFilesWhere(f AdminFileFilter) (string, []any) {
 		conds = append(conds, "t.user_id = ?")
 		args = append(args, f.UserID)
 	}
+	if f.BillingUserID != "" {
+		conds = append(conds, "t.billing_user_id = ?")
+		args = append(args, f.BillingUserID)
+	}
+	if f.AccessUserID != "" {
+		conds = append(conds, `(
+			(t.source='file' AND (
+				t.conversation_id='' AND t.user_id=? OR EXISTS (
+					SELECT 1 FROM conversations inventory_file_conversation
+					 WHERE inventory_file_conversation.id=t.conversation_id
+					   AND `+workspaceResourceAccessPredicate("inventory_file_conversation")+`
+				)
+			)) OR
+			(t.source='document' AND (
+				(t.kb_id<>'' AND EXISTS (
+					SELECT 1 FROM knowledge_bases inventory_kb
+					 WHERE inventory_kb.id=t.kb_id
+					   AND `+workspaceResourceAccessPredicate("inventory_kb")+`
+				)) OR
+				(t.conversation_id<>'' AND EXISTS (
+					SELECT 1 FROM conversations inventory_document_conversation
+					 WHERE inventory_document_conversation.id=t.conversation_id
+					   AND `+workspaceResourceAccessPredicate("inventory_document_conversation")+`
+				))
+			))
+		)`)
+		args = append(args, f.AccessUserID)
+		args = append(args, workspaceResourceAccessArgs(f.AccessUserID)...)
+		args = append(args, workspaceResourceAccessArgs(f.AccessUserID)...)
+		args = append(args, workspaceResourceAccessArgs(f.AccessUserID)...)
+	}
 	if q := strings.TrimSpace(f.UserQ); q != "" {
 		like := "%" + strings.ToLower(q) + "%"
 		conds = append(conds, "(t.user_id = ? OR LOWER(t.user_email) LIKE ? OR LOWER(t.user_name) LIKE ?)")
@@ -188,7 +243,7 @@ func ListAdminFiles(ctx context.Context, db *sql.DB, filter AdminFileFilter, lim
 		var a AdminFile
 		if err := rows.Scan(&a.ID, &a.Source, &a.Origin, &a.UserID, &a.UserEmail, &a.UserName,
 			&a.Filename, &a.MimeType, &a.SizeBytes, &a.CreatedAt,
-			&a.ConversationID, &a.KBID, &a.KBName); err != nil {
+			&a.ConversationID, &a.KBID, &a.KBName, &a.BillingUserID); err != nil {
 			return nil, err
 		}
 		out = append(out, a)

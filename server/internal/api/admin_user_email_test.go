@@ -36,10 +36,7 @@ func TestSetUserEmailAdmin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("find admin: %v", err)
 	}
-	token, _, err := d.Auth.IssueAccess(admin.ID, admin.Role, admin.TokenVer)
-	if err != nil {
-		t.Fatalf("issue admin access token: %v", err)
-	}
+	token := issueBoundTestAccessToken(t, db, d.Auth, admin)
 	c.Set("seen:"+admin.ID, "1", time.Minute)
 
 	mx := newMux()

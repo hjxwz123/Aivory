@@ -426,6 +426,7 @@ func TestConfigImportCannotOverwriteLockedEmbeddingModelRow(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/config/import", body)
 	req.Header.Set("content-type", contentType)
+	req = authorizeConfigImportRequestForTest(t, db, req)
 	importConfigAdmin(d, rec, req)
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("config import status = %d, body=%s", rec.Code, rec.Body.String())

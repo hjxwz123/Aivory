@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -8,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"unicode/utf8"
 
 	"aivory/server/internal/envcfg"
 )
@@ -122,7 +124,14 @@ func writeError(w http.ResponseWriter, status int, err error) {
 func decodeJSON(r *http.Request, dst any) error {
 	r.Body = http.MaxBytesReader(nil, r.Body, jsonRequestBodySizeCap) // 4 MB
 	defer r.Body.Close()
-	dec := json.NewDecoder(r.Body)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		return err
+	}
+	if !utf8.Valid(body) {
+		return errors.New("JSON body must be valid UTF-8")
+	}
+	dec := json.NewDecoder(bytes.NewReader(body))
 	if err := dec.Decode(dst); err != nil {
 		if errors.Is(err, io.EOF) {
 			return nil

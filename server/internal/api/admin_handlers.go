@@ -19,13 +19,12 @@ import (
 // original hardcoded value when its AIVORY_* variable is unset.
 var (
 	adminUserListPageSizeCap          = envcfg.Int("AIVORY_API_ADMIN_USER_LIST_PAGE_SIZE_CAP", 50)
-	adminCreatedUserMinPasswordLength = envcfg.Int("AIVORY_API_ADMIN_CREATED_USER_MIN_PASSWORD_LENGTH", 8)
-	adminPasswordResetMinLength       = envcfg.Int("AIVORY_API_ADMIN_PASSWORD_RESET_MIN_LENGTH", 8)
+	adminCreatedUserMinPasswordLength = securityPasswordMinimum("AIVORY_API_ADMIN_CREATED_USER_MIN_PASSWORD_LENGTH", 8)
+	adminPasswordResetMinLength       = securityPasswordMinimum("AIVORY_API_ADMIN_PASSWORD_RESET_MIN_LENGTH", 8)
 	adminUserConversationsListingCap  = envcfg.Int("AIVORY_API_ADMIN_USER_CONVERSATIONS_LISTING_CAP", 500)
 	usageReportPageSizeCap            = envcfg.Int("AIVORY_API_USAGE_REPORT_PAGE_SIZE_CAP", 50)
 	analyticsWindow                   = envcfg.Int("AIVORY_API_ANALYTICS_WINDOW", 30)
 	analyticsWindow2                  = envcfg.Int("AIVORY_API_ANALYTICS_WINDOW_2", 365)
-	analyticsBreakdownTopN            = envcfg.Int("AIVORY_API_ANALYTICS_BREAKDOWN_TOP_N", 8)
 )
 
 // ===== Channels =====
@@ -751,15 +750,13 @@ func banUserAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errors.New("you cannot ban your own account"))
 		return
 	}
-	if target, terr := store.FindUserByID(r.Context(), d.DB, id); terr == nil && target.Role == "admin" {
-		if n, _ := store.ActiveAdminCount(r.Context(), d.DB); n <= 1 {
-			writeError(w, 400, errors.New("cannot ban the last remaining admin"))
-			return
-		}
-	}
 	// Guarded: refuses accounts mid-purge atomically, so a ban can never
 	// overwrite status='deleting' and break crash-resume (§async user delete).
 	ok, err := store.SetUserStatusGuarded(r.Context(), d.DB, id, "banned")
+	if errors.Is(err, store.ErrLastAdmin) {
+		writeError(w, 400, err)
+		return
+	}
 	if err != nil {
 		writeError(w, 500, err)
 		return
@@ -795,6 +792,10 @@ func deleteUserAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if errors.Is(err, store.ErrPaymentOrdersPendingForUser) {
+			writeError(w, http.StatusConflict, err)
+			return
+		}
+		if errors.Is(err, store.ErrWorkspaceOwnership) || errors.Is(err, store.ErrWorkspaceOwnerDeleting) {
 			writeError(w, http.StatusConflict, err)
 			return
 		}
@@ -837,13 +838,14 @@ func createUserAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errInvalidInput)
 		return
 	}
-	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
-	if req.Email == "" || !strings.Contains(req.Email, "@") {
+	email, err := store.NormalizeUserEmail(req.Email)
+	if err != nil {
 		writeError(w, 400, errors.New("valid email required"))
 		return
 	}
-	if len(req.Password) < adminCreatedUserMinPasswordLength {
-		writeError(w, 400, errors.New("password must be at least 8 characters"))
+	req.Email = email
+	if err := validateNewPassword(req.Password, max(minimumPasswordLength, adminCreatedUserMinPasswordLength)); err != nil {
+		writeError(w, 400, err)
 		return
 	}
 	if req.Role != "admin" {
@@ -906,8 +908,8 @@ func setUserPasswordAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errInvalidInput)
 		return
 	}
-	if len(req.NewPassword) < adminPasswordResetMinLength {
-		writeError(w, 400, errors.New("password must be at least 8 characters"))
+	if err := validateNewPassword(req.NewPassword, max(minimumPasswordLength, adminPasswordResetMinLength)); err != nil {
+		writeError(w, 400, err)
 		return
 	}
 	if _, err := store.FindUserByID(r.Context(), d.DB, id); err != nil {
@@ -947,20 +949,15 @@ func setUserRoleAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errors.New("role must be 'user' or 'admin'"))
 		return
 	}
-	target, err := store.FindUserByID(r.Context(), d.DB, id)
-	if err != nil {
-		writeError(w, 404, errNotFound)
-		return
-	}
-	// §D2: don't demote the last active admin to a regular user.
-	if req.Role == "user" && target.Role == "admin" {
-		if n, _ := store.ActiveAdminCount(r.Context(), d.DB); n <= 1 {
-			writeError(w, 400, errors.New("cannot demote the last remaining admin"))
-			return
-		}
-	}
 	if err := store.SetUserRole(r.Context(), d.DB, id, req.Role); err != nil {
-		writeError(w, 500, err)
+		switch {
+		case errors.Is(err, store.ErrNotFound):
+			writeError(w, 404, errNotFound)
+		case errors.Is(err, store.ErrLastAdmin):
+			writeError(w, 400, err)
+		default:
+			writeError(w, 500, err)
+		}
 		return
 	}
 	invalidateAuthUser(d, id)
@@ -1180,9 +1177,36 @@ func usageDeleteFilteredAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"deleted": n})
 }
 
-// analyticsAdmin powers the admin Analytics dashboard: the overall trend plus
-// per-model and per-user breakdowns and their time series (top keys only, so the
-// payload stays bounded).
+// analyticsAdmin powers the admin usage and billing workspace. Every aggregate
+// comes from append-only usage_stats; the previous period uses the adjacent,
+// equal-length half-open interval so comparisons never overlap.
+func parseUsageAnalyticsFilter(r *http.Request) store.UsageAnalyticsFilter {
+	query := r.URL.Query()
+	filter := store.UsageAnalyticsFilter{
+		UserQuery: strings.TrimSpace(query.Get("user")),
+		ModelID:   strings.TrimSpace(query.Get("model")),
+		Purpose:   strings.TrimSpace(query.Get("purpose")),
+	}
+	if workspaceID := strings.TrimSpace(query.Get("workspace")); workspaceID != "" {
+		if workspaceID == "__personal__" {
+			workspaceID = ""
+		}
+		filter.WorkspaceID = &workspaceID
+	}
+	if channelID := strings.TrimSpace(query.Get("channel")); channelID != "" {
+		if channelID == "__unattributed__" {
+			channelID = ""
+		}
+		filter.ChannelID = &channelID
+	}
+	return filter
+}
+
+func usageAnalyticsFilterActive(filter store.UsageAnalyticsFilter) bool {
+	return filter.UserQuery != "" || filter.ModelID != "" || filter.WorkspaceID != nil ||
+		filter.Purpose != "" || filter.ChannelID != nil
+}
+
 func analyticsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	days := analyticsWindow
 	if s := r.URL.Query().Get("days"); s != "" {
@@ -1191,34 +1215,76 @@ func analyticsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	ctx := r.Context()
-	totals, err := store.AdminUsageTotals(ctx, d.DB, days)
+	periodEnd := time.Now().Unix() + 1
+	window := int64(days) * 86400
+	periodStart := periodEnd - window
+	previousStart := periodStart - window
+	bucket := store.UsageBucketWidth(days)
+	filter := parseUsageAnalyticsFilter(r)
+
+	totals, err := store.AdminUsageTotalsBetween(ctx, d.DB, periodStart, periodEnd, filter)
 	if err != nil {
 		writeError(w, 500, err)
 		return
 	}
-	trend, _ := store.AdminUsageTrend(ctx, d.DB, days)
-	byModel, _ := store.AdminUsageBreakdown(ctx, d.DB, days, "model_id", analyticsBreakdownTopN)
-	byUser, _ := store.AdminUsageBreakdown(ctx, d.DB, days, "user_id", analyticsBreakdownTopN)
-	modelSeries, _ := store.AdminUsageSeries(ctx, d.DB, days, "model_id", breakdownKeys(byModel))
-	userSeries, _ := store.AdminUsageSeries(ctx, d.DB, days, "user_id", breakdownKeys(byUser))
-	writeJSON(w, 200, map[string]any{
-		"days":         days,
-		"bucket":       store.UsageBucketWidth(days),
-		"totals":       totals,
-		"trend":        trend,
-		"by_model":     byModel,
-		"by_user":      byUser,
-		"model_series": modelSeries,
-		"user_series":  userSeries,
-	})
-}
-
-func breakdownKeys(rows []store.UsageBreakdownRow) []string {
-	keys := make([]string, 0, len(rows))
-	for _, r := range rows {
-		keys = append(keys, r.Key)
+	previousTotals, err := store.AdminUsageTotalsBetween(ctx, d.DB, previousStart, periodStart, filter)
+	if err != nil {
+		writeError(w, 500, err)
+		return
 	}
-	return keys
+	trend, err := store.AdminUsageTrendBetween(ctx, d.DB, periodStart, periodEnd, bucket, filter)
+	if err != nil {
+		writeError(w, 500, err)
+		return
+	}
+	previousTrend, err := store.AdminUsageTrendBetween(ctx, d.DB, previousStart, periodStart, bucket, filter)
+	if err != nil {
+		writeError(w, 500, err)
+		return
+	}
+
+	breakdowns := make(map[string][]store.UsageBreakdownRow, 5)
+	for key, column := range map[string]string{
+		"model": "model_id", "user": "user_id", "workspace": "workspace_id",
+		"purpose": "purpose", "channel": "channel_id",
+	} {
+		rows, breakdownErr := store.AdminUsageBreakdownBetween(ctx, d.DB, periodStart, periodEnd, column, -1, filter)
+		if breakdownErr != nil {
+			writeError(w, 500, breakdownErr)
+			return
+		}
+		breakdowns[key] = rows
+	}
+	filterOptions := breakdowns
+	if usageAnalyticsFilterActive(filter) {
+		filterOptions = make(map[string][]store.UsageBreakdownRow, 5)
+		for key, column := range map[string]string{
+			"model": "model_id", "user": "user_id", "workspace": "workspace_id",
+			"purpose": "purpose", "channel": "channel_id",
+		} {
+			rows, breakdownErr := store.AdminUsageBreakdownBetween(ctx, d.DB, periodStart, periodEnd, column, -1)
+			if breakdownErr != nil {
+				writeError(w, 500, breakdownErr)
+				return
+			}
+			filterOptions[key] = rows
+		}
+	}
+	writeJSON(w, 200, map[string]any{
+		"days":                  days,
+		"bucket":                bucket,
+		"generated_at":          periodEnd - 1,
+		"period_start":          periodStart,
+		"period_end":            periodEnd,
+		"previous_period_start": previousStart,
+		"previous_period_end":   periodStart,
+		"totals":                totals,
+		"previous_totals":       previousTotals,
+		"trend":                 trend,
+		"previous_trend":        previousTrend,
+		"breakdowns":            breakdowns,
+		"filter_options":        filterOptions,
+	})
 }
 
 // ===== Settings =====

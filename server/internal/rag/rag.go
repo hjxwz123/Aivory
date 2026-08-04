@@ -24,6 +24,7 @@ import (
 	"unicode/utf8"
 
 	"aivory/server/internal/envcfg"
+	"aivory/server/internal/fileguard"
 	"aivory/server/internal/queue"
 	"aivory/server/internal/storage"
 	"aivory/server/internal/store"
@@ -100,6 +101,7 @@ type Service struct {
 	// upload and do not require sandbox_base_url.
 	sandboxURL string
 	sandboxKey string
+	uploadDir  string
 }
 
 // SetExternalConfig wires the optional embedding HTTP backend + MinerU parser.
@@ -135,8 +137,12 @@ type RouterOpts struct {
 // New builds the service. The vector backend defaults to Disabled; call
 // SetVectorStore to wire Qdrant. When no vector backend is available, retrieval
 // injects the full in-scope document text instead of keeping a DB vector copy.
-func New(db *sql.DB, q queue.Queue, logger *log.Logger) *Service {
-	return &Service{db: db, queue: q, logger: logger, vec: vector.NewDisabled()}
+func New(db *sql.DB, q queue.Queue, logger *log.Logger, storageRoots ...string) *Service {
+	uploadDir := ""
+	if len(storageRoots) > 0 {
+		uploadDir = storageRoots[0]
+	}
+	return &Service{db: db, queue: q, logger: logger, vec: vector.NewDisabled(), uploadDir: uploadDir}
 }
 
 // SetVectorStore wires the similarity-search backend (Qdrant in production).
@@ -343,6 +349,13 @@ func (s *Service) ingestQueueName(docID string) string {
 		}
 		return ragSlowQueueName
 	}
+	if strings.TrimSpace(d.StoragePath) != "" && strings.TrimSpace(s.uploadDir) != "" {
+		safePath, err := fileguard.ResolveExisting(d.StoragePath, s.uploadDir)
+		if err != nil {
+			return ragSlowQueueName
+		}
+		d.StoragePath = safePath
+	}
 	return ingestQueueNameForDocument(d)
 }
 
@@ -546,6 +559,15 @@ func (s *Service) runPipeline(ctx context.Context, docID string, cache *parseCac
 	d, err := store.GetDocument(ctx, s.db, docID)
 	if err != nil {
 		return err
+	}
+	if strings.TrimSpace(d.StoragePath) != "" && strings.TrimSpace(s.uploadDir) != "" {
+		safePath, resolveErr := fileguard.ResolveExisting(d.StoragePath, s.uploadDir)
+		if resolveErr != nil {
+			reason := "document storage path is outside the configured upload directory"
+			_ = store.UpdateDocumentStatus(ctx, s.db, docID, "failed", reason, 0)
+			return noRetryIngest(fmt.Errorf("rag: %s", reason))
+		}
+		d.StoragePath = safePath
 	}
 	if s.logger != nil {
 		s.logger.Printf("rag: ingest start doc=%s file=%q kb=%s conv=%s", docID, d.Filename, d.KBID, d.ConversationID)
@@ -1510,8 +1532,8 @@ func (s *Service) OnDocumentDeleted(ctx context.Context, documentID string) erro
 // with the conversation's (possibly different model/dim) embedder; keeping them
 // would silently break retrieval, so we drop them and re-run the pipeline, which
 // resolves the destination KB's embedder. Re-ingest is async (Ingest enqueues).
-func (s *Service) PromoteDocument(ctx context.Context, docID, kbID string) error {
-	if err := store.PromoteDocumentToKB(ctx, s.db, docID, kbID); err != nil {
+func (s *Service) PromoteDocument(ctx context.Context, docID, kbID, userID string) error {
+	if err := store.PromoteDocumentToKB(ctx, s.db, docID, kbID, userID); err != nil {
 		return err
 	}
 	_ = s.vec.DeleteByDocument(ctx, docID)

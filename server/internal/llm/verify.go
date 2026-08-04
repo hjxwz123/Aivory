@@ -122,7 +122,9 @@ func (o *Orchestrator) runVerify(ctx context.Context, conv *store.Conversation, 
 	rep.At = time.Now().Unix()
 
 	if blob, e := json.Marshal(rep); e == nil {
-		_ = store.SetMessageVerify(pctx, o.db, msgID, blob)
+		if err := store.SetMessageVerifyForUser(pctx, o.db, msgID, conv.ID, senderID, blob); err != nil {
+			return err
+		}
 	}
 
 	for i := range rep.Findings {

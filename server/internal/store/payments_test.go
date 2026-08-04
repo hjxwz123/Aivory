@@ -414,7 +414,7 @@ func TestEPayPaymentOrderSnapshotsCrossCurrencyConversion(t *testing.T) {
 	}
 }
 
-func TestEPayPaymentOrderAttemptsMapDistinctPaymentsToOneFulfillment(t *testing.T) {
+func TestEPayPaymentOrderAttemptReusesOutstandingReference(t *testing.T) {
 	db, ctx := openPaymentsTestDB(t)
 	createPaymentsTestUser(t, db, "u_epay_attempts", "attempts@example.test")
 	pkg, err := CreateCreditPackage(ctx, db, CreditPackage{
@@ -455,49 +455,55 @@ func TestEPayPaymentOrderAttemptsMapDistinctPaymentsToOneFulfillment(t *testing.
 	}
 	retry, err := CreatePaymentOrderAttempt(ctx, db, order.ID, "")
 	if err != nil {
-		t.Fatalf("create retry attempt: %v", err)
+		t.Fatalf("reuse retry attempt: %v", err)
 	}
-	conflicting, err := CreatePaymentOrderAttempt(ctx, db, order.ID, "")
+	explicitRetry, err := CreatePaymentOrderAttempt(ctx, db, order.ID, "pa_should_not_be_issued")
 	if err != nil {
-		t.Fatalf("create provider-id conflict attempt: %v", err)
+		t.Fatalf("reuse attempt with explicit candidate: %v", err)
 	}
-	if initial.MerchantOrderID != order.ID || retry.MerchantOrderID == order.ID ||
-		!strings.HasPrefix(retry.MerchantOrderID, "pa_") || retry.OrderID != order.ID {
-		t.Fatalf("EPay attempts = initial %+v retry %+v", initial, retry)
+	if initial.MerchantOrderID != order.ID || retry.MerchantOrderID != initial.MerchantOrderID ||
+		explicitRetry.MerchantOrderID != initial.MerchantOrderID || retry.OrderID != order.ID {
+		t.Fatalf("EPay outstanding attempt was not reused: initial=%+v retry=%+v explicit=%+v", initial, retry, explicitRetry)
+	}
+	var count int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM payment_order_attempts WHERE order_id=?`, order.ID).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("outstanding attempt count = %d, %v; want 1", count, err)
+	}
+	exec(t, db,
+		`INSERT INTO payment_order_attempts(merchant_order_id, order_id, provider, channel_id, status)
+		 VALUES(?, ?, ?, ?, ?)`,
+		"pa_legacy_duplicate", order.ID, paymentcore.ProviderEPay, channel.ID, PaymentOrderAttemptIssued,
+	)
+	if _, err := CreatePaymentOrderAttempt(ctx, db, order.ID, ""); !errors.Is(err, ErrPaymentOrderNotMutable) {
+		t.Fatalf("resume legacy order with multiple issued attempts error = %v, want %v", err, ErrPaymentOrderNotMutable)
+	}
+	exec(t, db, `DELETE FROM payment_order_attempts WHERE merchant_order_id=?`, "pa_legacy_duplicate")
+
+	exec(t, db, `UPDATE payment_order_attempts SET status='unknown' WHERE merchant_order_id=?`, initial.MerchantOrderID)
+	if _, err := CreatePaymentOrderAttempt(ctx, db, order.ID, ""); !errors.Is(err, ErrPaymentOrderNotMutable) {
+		t.Fatalf("replace ambiguous attempt error = %v, want %v", err, ErrPaymentOrderNotMutable)
+	}
+	exec(t, db, `UPDATE payment_order_attempts SET status='expired' WHERE merchant_order_id=?`, initial.MerchantOrderID)
+	if _, err := CreatePaymentOrderAttempt(ctx, db, order.ID, ""); !errors.Is(err, ErrPaymentOrderNotMutable) {
+		t.Fatalf("replace locally terminal attempt error = %v, want %v", err, ErrPaymentOrderNotMutable)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM payment_order_attempts WHERE order_id=?`, order.ID).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("attempt count after rejected replacement = %d, %v; want 1", count, err)
 	}
 
+	// Restore the fixture to the only state accepted by a verified payment.
+	exec(t, db, `UPDATE payment_order_attempts SET status=? WHERE merchant_order_id=?`, PaymentOrderAttemptIssued, initial.MerchantOrderID)
 	amount := order.AmountMinor
-	first, err := FulfillPaymentOrder(ctx, db, PaymentFulfillmentInput{
+	result, err := FulfillPaymentOrder(ctx, db, PaymentFulfillmentInput{
 		PaymentEventInput: PaymentEventInput{
 			Provider: paymentcore.ProviderEPay, ChannelID: channel.ID,
-			EventID: "epay-attempt-first:success", OrderID: order.ID, EventType: "payment_notification",
+			EventID: "epay-attempt-success", OrderID: order.ID, EventType: "payment_notification",
 		},
-		MerchantOrderID: retry.MerchantOrderID, ProviderOrderID: "epay-provider-first",
+		MerchantOrderID: initial.MerchantOrderID, ProviderOrderID: "epay-provider-success",
 		AmountMinor: &amount, PaidAmountMinor: &amount, Currency: order.Currency,
 	})
-	if err != nil || !first.Applied || first.Order.Status != PaymentOrderFulfilled {
-		t.Fatalf("first attempt fulfillment = %+v, %v", first, err)
-	}
-	if _, err := FulfillPaymentOrder(ctx, db, PaymentFulfillmentInput{
-		PaymentEventInput: PaymentEventInput{
-			Provider: paymentcore.ProviderEPay, ChannelID: channel.ID,
-			EventID: "epay-attempt-conflict:success", OrderID: order.ID, EventType: "payment_notification",
-		},
-		MerchantOrderID: conflicting.MerchantOrderID, ProviderOrderID: "epay-provider-first",
-		AmountMinor: &amount, PaidAmountMinor: &amount, Currency: order.Currency,
-	}); !errors.Is(err, ErrPaymentProviderOrderConflict) {
-		t.Fatalf("reuse provider order id error = %v, want %v", err, ErrPaymentProviderOrderConflict)
-	}
-	late, err := FulfillPaymentOrder(ctx, db, PaymentFulfillmentInput{
-		PaymentEventInput: PaymentEventInput{
-			Provider: paymentcore.ProviderEPay, ChannelID: channel.ID,
-			EventID: "epay-attempt-late:success", OrderID: order.ID, EventType: "payment_notification",
-		},
-		MerchantOrderID: initial.MerchantOrderID, ProviderOrderID: "epay-provider-late",
-		AmountMinor: &amount, PaidAmountMinor: &amount, Currency: order.Currency,
-	})
-	if err != nil || late.Applied || late.Order.Status != PaymentOrderFulfilled {
-		t.Fatalf("late attempt fulfillment = %+v, %v", late, err)
+	if err != nil || !result.Applied || result.Order.Status != PaymentOrderFulfilled {
+		t.Fatalf("reused attempt fulfillment = %+v, %v", result, err)
 	}
 
 	var credits float64
@@ -505,20 +511,7 @@ func TestEPayPaymentOrderAttemptsMapDistinctPaymentsToOneFulfillment(t *testing.
 		t.Fatalf("read fulfilled credits: %v", err)
 	}
 	if credits != pkg.Credits {
-		t.Fatalf("credits after two paid attempts = %v, want %v", credits, pkg.Credits)
-	}
-	for merchantOrderID, providerOrderID := range map[string]string{
-		retry.MerchantOrderID:   "epay-provider-first",
-		initial.MerchantOrderID: "epay-provider-late",
-	} {
-		attempt, getErr := GetPaymentOrderAttemptByMerchantID(ctx, db, paymentcore.ProviderEPay, channel.ID, merchantOrderID)
-		if getErr != nil || attempt.Status != PaymentOrderAttemptPaid || attempt.ProviderOrderID != providerOrderID || attempt.PaidAt == 0 {
-			t.Fatalf("paid attempt %q = %+v, %v", merchantOrderID, attempt, getErr)
-		}
-	}
-	conflicting, err = GetPaymentOrderAttemptByMerchantID(ctx, db, paymentcore.ProviderEPay, channel.ID, conflicting.MerchantOrderID)
-	if err != nil || conflicting.Status != PaymentOrderAttemptIssued || conflicting.ProviderOrderID != "" {
-		t.Fatalf("rolled-back conflicting attempt = %+v, %v", conflicting, err)
+		t.Fatalf("credits after fulfillment = %v, want %v", credits, pkg.Credits)
 	}
 	if _, err := CreatePaymentOrderAttempt(ctx, db, order.ID, ""); !errors.Is(err, ErrPaymentOrderNotMutable) {
 		t.Fatalf("create attempt for fulfilled order error = %v, want %v", err, ErrPaymentOrderNotMutable)
@@ -645,6 +638,100 @@ func TestPendingPaymentBlocksUserDeletionAndInactiveUserCheckout(t *testing.T) {
 		ProductType: PaymentProductCreditPackage, ProductID: pkg.ID,
 	}); order != nil || !errors.Is(err, ErrPaymentUserUnavailable) {
 		t.Fatalf("inactive-user checkout = %+v, %v; want nil/%v", order, err, ErrPaymentUserUnavailable)
+	}
+}
+
+func TestManualCloseOrderProtectsLateFulfillmentDependencies(t *testing.T) {
+	db, ctx := openPaymentsTestDB(t)
+	const userID = "u_manual_close_dependencies"
+	createPaymentsTestUser(t, db, userID, "manual-close-dependencies@example.test")
+	group, err := CreateUserGroup(ctx, db, UserGroup{
+		Name: "Manual close target", MonthlyPriceAmountMinor: 1800,
+		YearlyPriceAmountMinor: 18000, IsPublic: true,
+	})
+	if err != nil {
+		t.Fatalf("create target group: %v", err)
+	}
+	channelConfig, err := json.Marshal(paymentcore.EPayConfig{
+		GatewayURL: "https://epay.example.test", MerchantID: "manual-close-merchant",
+		MerchantKey: "manual-close-secret", Currency: "USD",
+	})
+	if err != nil {
+		t.Fatalf("marshal EPay config: %v", err)
+	}
+	channel, err := CreatePaymentChannel(ctx, db, PaymentChannel{
+		Name: "Manual close EPay", Provider: paymentcore.ProviderEPay, Config: channelConfig, Enabled: true,
+	})
+	if err != nil {
+		t.Fatalf("create EPay channel: %v", err)
+	}
+	method, err := CreatePaymentMethod(ctx, db, PaymentMethod{
+		ChannelID: channel.ID, Name: "Manual close Alipay", Type: paymentcore.ProviderEPay,
+		ProviderMethodConfig: json.RawMessage(`{"type":"alipay"}`), Enabled: true,
+	})
+	if err != nil {
+		t.Fatalf("create EPay method: %v", err)
+	}
+	order, err := CreatePaymentOrder(ctx, db, PaymentOrderCreateInput{
+		UserID: userID, PaymentMethodID: method.ID, ProductType: PaymentProductUserGroup,
+		ProductID: group.ID, BillingCycle: PaymentBillingMonthly,
+	})
+	if err != nil {
+		t.Fatalf("create EPay group order: %v", err)
+	}
+	attempt, err := CreatePaymentOrderAttempt(ctx, db, order.ID, order.ID)
+	if err != nil {
+		t.Fatalf("create EPay attempt: %v", err)
+	}
+	closed, err := CancelPaymentOrderByAdmin(ctx, db, order.ID, "locally closed")
+	if err != nil || closed.Status != PaymentOrderCancelled || closed.FailureCode != "admin_manual_close" {
+		t.Fatalf("manual close order = %+v, %v", closed, err)
+	}
+
+	if count, err := CountPendingPaymentOrdersByChannel(ctx, db, channel.ID); err != nil || count != 1 {
+		t.Fatalf("recoverable channel order count = %d, %v; want 1", count, err)
+	}
+	if pending, err := HasPendingPaymentOrdersForUserGroup(ctx, db, group.ID); err != nil || !pending {
+		t.Fatalf("recoverable group order guard = %v, %v; want true", pending, err)
+	}
+	if pending, err := HasPendingPaymentOrdersForUser(ctx, db, userID); err != nil || !pending {
+		t.Fatalf("recoverable user order guard = %v, %v; want true", pending, err)
+	}
+	changedConfig := json.RawMessage(`{"gateway_url":"https://changed.invalid","merchant_id":"changed","merchant_key":"changed","currency":"USD"}`)
+	if _, err := UpdatePaymentChannel(ctx, db, channel.ID, PaymentChannelPatch{Config: &changedConfig}); !errors.Is(err, ErrPaymentChannelHasPending) {
+		t.Fatalf("change channel with recoverable order error = %v, want %v", err, ErrPaymentChannelHasPending)
+	}
+	if err := DeletePaymentChannel(ctx, db, channel.ID); !errors.Is(err, ErrPaymentChannelHasPending) {
+		t.Fatalf("delete channel with recoverable order error = %v, want %v", err, ErrPaymentChannelHasPending)
+	}
+	if err := DeletePaymentMethod(ctx, db, method.ID); !errors.Is(err, ErrPaymentMethodHasPending) {
+		t.Fatalf("delete method with recoverable order error = %v, want %v", err, ErrPaymentMethodHasPending)
+	}
+	if err := DeleteUserGroup(ctx, db, group.ID); !errors.Is(err, ErrPaymentOrdersPendingForGroup) {
+		t.Fatalf("delete group with recoverable order error = %v, want %v", err, ErrPaymentOrdersPendingForGroup)
+	}
+	if changed, err := MarkUserDeleting(ctx, db, userID); changed || !errors.Is(err, ErrPaymentOrdersPendingForUser) {
+		t.Fatalf("mark user deleting with recoverable order = %v, %v; want false/%v", changed, err, ErrPaymentOrdersPendingForUser)
+	}
+	if err := DeleteUser(ctx, db, userID); !errors.Is(err, ErrPaymentOrdersPendingForUser) {
+		t.Fatalf("delete user with recoverable order error = %v, want %v", err, ErrPaymentOrdersPendingForUser)
+	}
+
+	amount := order.AmountMinor
+	fulfilled, err := FulfillPaymentOrder(ctx, db, PaymentFulfillmentInput{
+		PaymentEventInput: PaymentEventInput{
+			Provider: paymentcore.ProviderEPay, ChannelID: channel.ID,
+			EventID: "manual-close-late-payment", OrderID: order.ID, EventType: "payment_notification",
+		},
+		MerchantOrderID: attempt.MerchantOrderID, ProviderOrderID: "manual-close-late-trade",
+		AmountMinor: &amount, PaidAmountMinor: &amount, Currency: order.Currency,
+	})
+	if err != nil || !fulfilled.Applied || fulfilled.Order.Status != PaymentOrderFulfilled {
+		t.Fatalf("late fulfillment after protected dependencies = %+v, %v", fulfilled, err)
+	}
+	var currentGroup string
+	if err := db.QueryRowContext(ctx, `SELECT group_id FROM users WHERE id=?`, userID).Scan(&currentGroup); err != nil || currentGroup != group.ID {
+		t.Fatalf("late fulfillment user group = %q, %v; want %q", currentGroup, err, group.ID)
 	}
 }
 

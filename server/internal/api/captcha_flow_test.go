@@ -12,10 +12,8 @@ import (
 )
 
 // TestCaptchaVerifyThenConsume reproduces the backend captcha path the register
-// handler relies on: a verified slider mints a stateless signed pass that
-// register then verifies. The pass is HMAC-signed (not cache-backed), so it must
-// validate without any shared cache — which is what fixes "captcha_failed" when
-// the API restarts or runs across replicas between /captcha/verify and register.
+// handler relies on: a verified slider mints a signed, cache-backed pass that
+// register then atomically consumes exactly once.
 func TestCaptchaVerifyThenConsume(t *testing.T) {
 	d := Deps{
 		Cache:  cache.NewMemory(),
@@ -41,10 +39,12 @@ func TestCaptchaVerifyThenConsume(t *testing.T) {
 		t.Fatalf("verify did not mint a token: %+v", vr)
 	}
 
-	// A fresh, well-signed token validates (this is what register does) — and it
-	// validates statelessly, with no surviving cache entry from the verify call.
+	// A fresh, well-signed token validates exactly once (this is what register does).
 	if !consumeCaptchaPass(d, vr.Token) {
 		t.Fatal("consumeCaptchaPass=false for a fresh signed token → register would 400 captcha_failed")
+	}
+	if consumeCaptchaPass(d, vr.Token) {
+		t.Fatal("captcha pass was accepted more than once")
 	}
 	// Tampered / empty / wrong-secret tokens are rejected.
 	if consumeCaptchaPass(d, vr.Token+"x") {

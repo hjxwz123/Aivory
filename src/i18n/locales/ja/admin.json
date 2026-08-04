@@ -251,7 +251,7 @@
   },
   "oauth": {
     "title": "ログイン方法",
-    "lead": "外部ログイン(Google/GitHub/Apple/OIDC)。設定後にログイン画面に表示。",
+    "lead": "組み込みプロバイダー、汎用 OAuth 2.0、OIDC の外部ログイン。設定後にログイン画面に表示されます。",
     "new": "方法を追加",
     "empty": "ログイン方法はまだありません。ユーザーはメールアドレスとパスワードでサインインします。",
     "noClientId": "クライアントIDなし",
@@ -259,7 +259,8 @@
       "google": "Google",
       "github": "GitHub",
       "apple": "Apple",
-      "oidc": "カスタム（OAuth2 / OIDC）"
+      "oauth2": "汎用 OAuth 2.0",
+      "oidc": "汎用 OIDC"
     },
     "fields": {
       "kind": "プロバイダー",
@@ -271,11 +272,14 @@
       "clientSecret": "Client secret",
       "clientSecretApple": "秘密鍵（.p8）",
       "clientSecretHintEdit": "空欄にすると保存済みのシークレットを保持します。",
+      "issuerUrl": "Issuer URL",
+      "jwksUrl": "JWKS URL",
       "authUrl": "認可URL",
       "tokenUrl": "トークンURL",
       "userinfoUrl": "ユーザー情報URL",
       "scopes": "スコープ",
-      "scopesHint": "空白区切り。空欄で既定。",
+      "scopesHintOauth2": "プロバイダーのドキュメントに従って空白区切りで入力します。空欄でも構いません。",
+      "scopesHintOidc": "空白区切り。空欄の場合は openid email profile を使用します。",
       "teamId": "Team ID",
       "keyId": "Key ID",
       "enabled": "有効（ログイン画面に表示）",
@@ -286,7 +290,8 @@
       "google": "Google Cloud → 認証情報 で OAuth クライアントを作成。",
       "github": "GitHub → 開発者設定 → OAuth Apps で作成。",
       "apple": "Apple Developer で Services ID と AuthKey(.p8)を作成。",
-      "oidc": "クライアント資格情報と authorize / token / userinfo を入力。"
+      "oauth2": "プロバイダーの認可、トークン、UserInfo エンドポイントを使用します。",
+      "oidc": "検証済み ID Token と Issuer / JWKS メタデータを使用します。"
     },
     "editorTitle": "ログイン方法を編集",
     "newTitle": "ログイン方法を追加",
@@ -299,7 +304,9 @@
     "errors": {
       "nameRequired": "ボタンのラベルは必須です",
       "callbackLoadFailed": "リダイレクト URI を準備できませんでした。再試行してください。",
-      "idConflict": "このリダイレクト URI は使用済みです。フォームを閉じて開き直し、新しい URI を生成してください。"
+      "idConflict": "このリダイレクト URI は使用済みです。フォームを閉じて開き直し、新しい URI を生成してください。",
+      "providerChanged": "このプロバイダーは別の操作で変更されました。もう一度開き直してから保存してください。",
+      "secretReentryRequired": "セキュリティに関わる設定が変更されました。このプロバイダーの Client Secret を再入力してください。Apple の場合は .p8 秘密鍵を再入力し、種類を変更した場合は新しい種類に必要な認証情報を入力してください。"
     },
     "copied": "コピーしました"
   },
@@ -451,7 +458,8 @@
       "1": "過去1日",
       "7": "過去7日間",
       "30": "過去30日間",
-      "90": "過去90日間"
+      "90": "過去90日間",
+      "365": "過去365日間"
     },
     "stats": {
       "totalCost": "合計コスト",
@@ -837,32 +845,143 @@
     "save": "権限を保存"
   },
   "analytics": {
-    "title": "分析",
-    "lead": "利用傾向:全体・モデル別・ユーザー別。",
-    "empty": "この期間の使用状況はまだありません。",
+    "title": "利用量と課金",
+    "lead": "永続保存されたユーザー利用量とモデルコストを確認し、同じ長さの期間を比較して、ユーザー・モデル・ワークスペース・用途・チャネル別に消費を照合します。",
+    "empty": "この期間に計測された利用量はありません。",
     "unknownUser": "不明なユーザー",
+    "actions": {
+      "usageRecords": "利用記録を開く",
+      "refresh": "分析を更新"
+    },
     "view": {
       "label": "分析ビュー",
-      "usage": "利用傾向",
+      "usage": "利用量と課金",
       "feedback": "モデル評価"
     },
     "metric": {
-      "calls": "呼び出し",
+      "label": "推移の指標",
+      "calls": "計測操作",
+      "turns": "提供済みターン",
       "tokens": "トークン",
-      "cost": "コスト"
+      "cost": "モデルコスト",
+      "credits": "消費クレジット",
+      "users": "アクティブユーザー"
     },
     "stats": {
-      "calls": "合計呼び出し",
-      "tokens": "合計トークン",
-      "cost": "合計コスト",
-      "users": "アクティブユーザー"
+      "calls": "計測操作",
+      "turns": "提供済みターン",
+      "tokens": "入力 + 出力トークン",
+      "cost": "モデルコスト",
+      "credits": "消費クレジット",
+      "users": "アクティブユーザー",
+      "operations": "計測操作"
     },
     "sections": {
       "daily": "日別の使用状況",
       "hourly": "時間別の使用状況",
+      "weekly": "週の開始日",
       "byModel": "モデル別",
-      "byUser": "ユーザー別"
+      "byUser": "ユーザー別",
+      "trend": "期間推移",
+      "economics": "ユニットエコノミクス",
+      "tokenComposition": "トークン構成",
+      "breakdown": "詳細な内訳"
     },
+    "comparison": {
+      "previousPeriod": "直前の同じ長さの期間と比較します。",
+      "current": "現在の期間",
+      "previous": "前の期間",
+      "newActivity": "新規利用",
+      "delta": "前期比 {{value}}"
+    },
+    "trend": {
+      "empty": "この推移に表示できる利用データはありません。"
+    },
+    "details": {
+      "images": "画像",
+      "conversations": "会話",
+      "workspaces": "アクティブなワークスペース",
+      "inputTokens": "入力トークン",
+      "outputTokens": "出力トークン",
+      "cacheReadTokens": "キャッシュ読み取りトークン",
+      "cacheWriteTokens": "キャッシュ書き込みトークン"
+    },
+    "economics": {
+      "chargedTurnRate": "クレジット消費ターン比率",
+      "costCoverage": "クレジット消費ターンのコスト比率",
+      "includedCost": "無料枠ターンのコスト",
+      "costPerTurn": "ターンあたり平均コスト",
+      "costPerUser": "アクティブユーザーあたりコスト",
+      "creditsPerChargedTurn": "課金ターンあたりクレジット",
+      "operationsPerTurn": "ターンあたり計測操作",
+      "chargedUsers": "クレジットを消費したユーザー"
+    },
+    "notes": {
+      "billingDefinition": "モデルコストはプロバイダーへの米ドル建て支出です。クレジットはユーザーが消費する利用単位であり、売上ではありません。課金ターンは提供済みメッセージ単位で集約されるため、複数段階のモデル操作も1ターンとして数えます。",
+      "tokenDefinition": "上部のトークン利用量は入力と出力の合計です。キャッシュ読み取りと書き込みは、この構成内で個別に表示します。"
+    },
+    "dimension": {
+      "label": "内訳の軸",
+      "user": "ユーザー",
+      "model": "モデル",
+      "workspace": "ワークスペース",
+      "purpose": "用途",
+      "channel": "チャネル"
+    },
+    "filters": {
+      "user": "ユーザー",
+      "userPlaceholder": "メール、名前、または ID",
+      "model": "モデル",
+      "workspace": "ワークスペース",
+      "purpose": "用途",
+      "channel": "チャネル",
+      "allUsers": "すべてのユーザー",
+      "allModels": "すべてのモデル",
+      "allWorkspaces": "すべてのワークスペース",
+      "allPurposes": "すべての用途",
+      "allChannels": "すべてのチャネル",
+      "clear": "フィルターをクリア",
+      "active": "適用中のフィルター: {{count}}",
+      "personal": "個人",
+      "unattributed": "未割り当て"
+    },
+    "breakdown": {
+      "count": "{{count}} 件",
+      "search": "この内訳を検索",
+      "sort": "内訳の並び順",
+      "sortOptions": {
+        "cost": "モデルコスト",
+        "turns": "提供済みターン",
+        "calls": "計測操作",
+        "tokens": "トークン",
+        "credits": "消費クレジット"
+      },
+      "empty": "現在の条件に一致する内訳はありません。"
+    },
+    "labels": {
+      "unknown": "不明",
+      "deletedModel": "削除済みモデル（{{id}}）",
+      "deletedUser": "削除済みまたは匿名化されたユーザー",
+      "personal": "個人ワークスペース",
+      "unattributedChannel": "未割り当てのチャネル"
+    },
+    "table": {
+      "name": "名前",
+      "operations": "計測操作",
+      "turns": "提供済みターン",
+      "tokens": "トークン",
+      "cost": "モデルコスト",
+      "credits": "消費クレジット",
+      "chargedTurns": "課金ターン",
+      "avgCostTurn": "平均コスト / ターン",
+      "avgCostOperation": "平均コスト / 操作"
+    },
+    "error": {
+      "title": "利用分析を読み込めませんでした",
+      "retry": "再試行",
+      "stale": "更新に失敗しました。最後に正常に読み込んだデータを表示しています。"
+    },
+    "updatedAt": "更新日時: {{value}}",
     "feedback": {
       "lead": "モデルごとの回答品質を比較し、ユーザーが改善を求めた回答を特定します。期間は回答の生成日時を基準にします。",
       "filters": {

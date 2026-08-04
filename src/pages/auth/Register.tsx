@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Trans, useTranslation } from 'react-i18next'
 import { motion } from 'framer-motion'
 import { Mail, Lock, User, ArrowRight, ShieldCheck, Eye, EyeOff } from 'lucide-react'
@@ -34,7 +34,9 @@ export default function Register() {
   const captchaRequired = useAuth((s) => s.captchaRequired)
   const pendingVerification = useAuth((s) => s.pendingVerification)
   const pendingVerificationRetryAfter = useAuth((s) => s.pendingVerificationRetryAfter)
+  const startEmailVerification = useAuth((s) => s.startEmailVerification)
   const { providers } = useOAuthProviders()
+  const [searchParams, setSearchParams] = useSearchParams()
 
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
@@ -58,6 +60,16 @@ export default function Register() {
   const { remaining: resendCooldown, start: startResendCooldown } = useEmailCooldown(
     pendingVerification ? pendingVerificationRetryAfter : 0,
   )
+
+  useEffect(() => {
+    const verifyEmail = searchParams.get('verify_email')?.trim()
+    if (!verifyEmail) return
+    const retryAfter = Number.parseInt(searchParams.get('retry_after') ?? '0', 10)
+    startEmailVerification(verifyEmail, Number.isFinite(retryAfter) ? retryAfter : 0)
+    searchParams.delete('verify_email')
+    searchParams.delete('retry_after')
+    setSearchParams(searchParams, { replace: true })
+  }, [searchParams, setSearchParams, startEmailVerification])
 
   function submit(e: React.FormEvent) {
     e.preventDefault()
@@ -272,7 +284,7 @@ export default function Register() {
       {providers.length > 0 && signupOpen ? (
         <>
           <motion.div variants={fadeUp} className="mt-7 flex flex-col gap-2">
-            <OAuthButtons providers={providers} />
+            <OAuthButtons providers={providers} captchaRequired={captchaRequired} />
           </motion.div>
           <motion.div
             variants={fadeUp}

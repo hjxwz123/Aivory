@@ -25,6 +25,69 @@ end
 return n
 `)
 
+var takeScript = redis.NewScript(`
+local value = redis.call("GET", KEYS[1])
+if not value then
+  return false
+end
+redis.call("DEL", KEYS[1])
+return value
+`)
+
+var compareAndDeleteScript = redis.NewScript(`
+if redis.call("GET", KEYS[1]) == ARGV[1] then
+  return redis.call("DEL", KEYS[1])
+end
+return 0
+`)
+
+var streamAppendIfAllowedScript = redis.NewScript(`
+for index = 2, #KEYS do
+  if redis.call("EXISTS", KEYS[index]) == 1 then
+    return {0}
+  end
+end
+local id = redis.call("XADD", KEYS[1], "MAXLEN", "~", 50000, "*", "data", ARGV[1])
+if tonumber(ARGV[2]) > 0 then
+  redis.call("PEXPIRE", KEYS[1], ARGV[2])
+end
+return {1, id}
+`)
+
+var streamReadIfAllowedScript = redis.NewScript(`
+for index = 2, #KEYS do
+  if redis.call("EXISTS", KEYS[index]) == 1 then
+    return {0}
+  end
+end
+local rows = redis.call("XRANGE", KEYS[1], ARGV[1], "+", "COUNT", ARGV[2])
+local result = {1}
+for _, row in ipairs(rows) do
+  local data = ""
+  for field = 1, #row[2], 2 do
+    if row[2][field] == "data" then
+      data = row[2][field + 1]
+      break
+    end
+  end
+  if data ~= "" then
+    table.insert(result, row[1])
+    table.insert(result, data)
+  end
+end
+return result
+`)
+
+var streamRevokeScript = redis.NewScript(`
+if tonumber(ARGV[1]) > 0 then
+  redis.call("SET", KEYS[2], "1", "PX", ARGV[1])
+else
+  redis.call("SET", KEYS[2], "1")
+end
+redis.call("DEL", KEYS[1])
+return 1
+`)
+
 type redisCache struct {
 	rdb *redis.Client
 	ctx context.Context
@@ -57,10 +120,34 @@ func (c *redisCache) Get(key string) (string, bool) {
 	return v, true
 }
 
+func (c *redisCache) Take(key string) (string, bool) {
+	ctx, cancel := context.WithTimeout(c.ctx, redisOpTimeout)
+	defer cancel()
+	v, err := takeScript.Run(ctx, c.rdb, []string{key}).Text()
+	if err != nil {
+		return "", false
+	}
+	return v, true
+}
+
 func (c *redisCache) Set(key, value string, ttl time.Duration) {
 	ctx, cancel := context.WithTimeout(c.ctx, redisOpTimeout)
 	defer cancel()
 	_ = c.rdb.Set(ctx, key, value, ttl).Err()
+}
+
+func (c *redisCache) SetNX(key, value string, ttl time.Duration) bool {
+	ctx, cancel := context.WithTimeout(c.ctx, redisOpTimeout)
+	defer cancel()
+	ok, err := c.rdb.SetNX(ctx, key, value, ttl).Result()
+	return err == nil && ok
+}
+
+func (c *redisCache) CompareAndDelete(key, expected string) bool {
+	ctx, cancel := context.WithTimeout(c.ctx, redisOpTimeout)
+	defer cancel()
+	n, err := compareAndDeleteScript.Run(ctx, c.rdb, []string{key}, expected).Int64()
+	return err == nil && n == 1
 }
 
 func (c *redisCache) Delete(key string) {
@@ -233,4 +320,107 @@ func (c *redisCache) StreamRead(key, afterID string, limit int) ([]StreamEvent, 
 		out = append(out, StreamEvent{ID: row.ID, Value: v})
 	}
 	return out, true
+}
+
+func (c *redisCache) StreamAppendIfAllowed(key string, denyKeys []string, value string, ttl time.Duration) (string, bool, bool) {
+	keys := make([]string, 0, 1+len(denyKeys))
+	keys = append(keys, key)
+	for _, denyKey := range denyKeys {
+		if denyKey != "" {
+			keys = append(keys, denyKey)
+		}
+	}
+	ctx, cancel := context.WithTimeout(c.ctx, redisOpTimeout)
+	defer cancel()
+	raw, err := streamAppendIfAllowedScript.Run(ctx, c.rdb, keys, value, ttl.Milliseconds()).Result()
+	if err != nil {
+		return "", false, false
+	}
+	values, ok := raw.([]any)
+	if !ok || len(values) == 0 {
+		return "", false, false
+	}
+	if redisScriptInt(values[0]) == 0 {
+		return "", false, true
+	}
+	if len(values) != 2 {
+		return "", false, false
+	}
+	id, ok := redisScriptString(values[1])
+	if !ok || id == "" {
+		return "", false, false
+	}
+	return id, true, true
+}
+
+func (c *redisCache) StreamReadIfAllowed(key string, denyKeys []string, afterID string, limit int) ([]StreamEvent, bool, bool) {
+	if limit <= 0 {
+		limit = 100
+	}
+	keys := make([]string, 0, 1+len(denyKeys))
+	keys = append(keys, key)
+	for _, denyKey := range denyKeys {
+		if denyKey != "" {
+			keys = append(keys, denyKey)
+		}
+	}
+	start := "-"
+	if afterID != "" {
+		start = "(" + afterID
+	}
+	ctx, cancel := context.WithTimeout(c.ctx, redisOpTimeout)
+	defer cancel()
+	raw, err := streamReadIfAllowedScript.Run(ctx, c.rdb, keys, start, limit).Result()
+	if err != nil {
+		return nil, false, false
+	}
+	values, ok := raw.([]any)
+	if !ok || len(values) == 0 {
+		return nil, false, false
+	}
+	if redisScriptInt(values[0]) == 0 {
+		return nil, false, true
+	}
+	if (len(values)-1)%2 != 0 {
+		return nil, false, false
+	}
+	events := make([]StreamEvent, 0, (len(values)-1)/2)
+	for index := 1; index < len(values); index += 2 {
+		id, idOK := redisScriptString(values[index])
+		value, valueOK := redisScriptString(values[index+1])
+		if !idOK || !valueOK {
+			return nil, false, false
+		}
+		events = append(events, StreamEvent{ID: id, Value: value})
+	}
+	return events, true, true
+}
+
+func (c *redisCache) StreamRevoke(key, tombstoneKey string, ttl time.Duration) bool {
+	ctx, cancel := context.WithTimeout(c.ctx, redisOpTimeout)
+	defer cancel()
+	result, err := streamRevokeScript.Run(ctx, c.rdb, []string{key, tombstoneKey}, ttl.Milliseconds()).Int64()
+	return err == nil && result == 1
+}
+
+func redisScriptInt(value any) int64 {
+	switch typed := value.(type) {
+	case int64:
+		return typed
+	case int:
+		return int64(typed)
+	default:
+		return 0
+	}
+}
+
+func redisScriptString(value any) (string, bool) {
+	switch typed := value.(type) {
+	case string:
+		return typed, true
+	case []byte:
+		return string(typed), true
+	default:
+		return "", false
+	}
 }

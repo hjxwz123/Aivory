@@ -77,6 +77,29 @@ func TestIsCheckoutStateUnknownClassifiesAmbiguousTransportErrors(t *testing.T) 
 	}
 }
 
+func TestIsCheckoutStateUnknownClassifiesProviderServerErrors(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "Stripe 500", err: &stripe.Error{HTTPStatusCode: http.StatusInternalServerError}, want: true},
+		{name: "wrapped Stripe 503", err: fmt.Errorf("create checkout: %w", &stripe.Error{HTTPStatusCode: http.StatusServiceUnavailable}), want: true},
+		{name: "Stripe 400", err: &stripe.Error{HTTPStatusCode: http.StatusBadRequest}, want: false},
+		{name: "Waffo 500", err: &pancake.Error{Status: http.StatusInternalServerError}, want: true},
+		{name: "wrapped Waffo 502", err: fmt.Errorf("create checkout: %w", &pancake.Error{Status: http.StatusBadGateway}), want: true},
+		{name: "Waffo 422", err: &pancake.Error{Status: http.StatusUnprocessableEntity}, want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := IsCheckoutStateUnknown(tc.err); got != tc.want {
+				t.Fatalf("IsCheckoutStateUnknown(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestParseMinorAmountRejectsPrecisionAndSigns(t *testing.T) {
 	t.Parallel()
 	for _, value := range []string{"-1.00", "+1.00", "1.001", "1e2", ""} {

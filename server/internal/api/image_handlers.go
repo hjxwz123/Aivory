@@ -164,7 +164,7 @@ func listMyImages(d Deps, w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit, _ := strconv.Atoi(q.Get("limit"))
 	offset, _ := strconv.Atoi(q.Get("offset"))
-	imgs, err := store.ListUserImageArtifacts(r.Context(), d.DB, u.ID, limit, offset)
+	imgs, err := store.ListUserImageArtifactsForUser(r.Context(), d.DB, u.ID, limit, offset)
 	if err != nil {
 		writeError(w, 500, err)
 		return

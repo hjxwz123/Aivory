@@ -42,24 +42,24 @@ func seedImageWorkflow(t *testing.T, channelType, requestID string) (*imageGener
 			t.Fatalf("seed %q: %v", query, err)
 		}
 	}
-	return &imageGenerateTool{db: db, artifactDir: t.TempDir()}, "c_flow"
+	return &imageGenerateTool{db: db, uploadDir: t.TempDir(), artifactDir: t.TempDir()}, "c_flow"
 }
 
 func TestOpenAIImageContinuationUsesNearestBranchAndRegenerateIgnoresSibling(t *testing.T) {
 	tool, convID := seedImageWorkflow(t, "openai", "gpt-image-2")
 	for _, query := range []string{
 		`INSERT INTO messages(id,conversation_id,parent_id,role,model_id) VALUES('u_root','c_flow',NULL,'user','m_flow')`,
-		`INSERT INTO messages(id,conversation_id,parent_id,role,model_id) VALUES('a_old','c_flow','u_root','assistant','m_flow')`,
+		`INSERT INTO messages(id,conversation_id,parent_id,role,model_id,status) VALUES('a_old','c_flow','u_root','assistant','m_flow','complete')`,
 		`INSERT INTO messages(id,conversation_id,parent_id,role,model_id) VALUES('u_follow','c_flow','a_old','user','m_flow')`,
-		`INSERT INTO messages(id,conversation_id,parent_id,role,model_id) VALUES('a_follow','c_flow','u_follow','assistant','m_flow')`,
-		`INSERT INTO messages(id,conversation_id,parent_id,role,model_id) VALUES('a_regen','c_flow','u_root','assistant','m_flow')`,
+		`INSERT INTO messages(id,conversation_id,parent_id,role,model_id,author_id,status) VALUES('a_follow','c_flow','u_follow','assistant','m_flow','u_flow','streaming')`,
+		`INSERT INTO messages(id,conversation_id,parent_id,role,model_id,author_id,status) VALUES('a_regen','c_flow','u_root','assistant','m_flow','u_flow','streaming')`,
 	} {
 		if _, err := tool.db.Exec(query); err != nil {
 			t.Fatalf("seed message %q: %v", query, err)
 		}
 	}
 	priorImage := sizedPNG(t, 640, 360)
-	priorPath := filepath.Join(t.TempDir(), "prior.png")
+	priorPath := filepath.Join(tool.artifactDir, "prior.png")
 	if err := os.WriteFile(priorPath, priorImage, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +138,7 @@ func TestImageGenerateToolInheritsSavedModelParamsAndDefaultCount(t *testing.T) 
 	if _, err := tool.db.Exec(`UPDATE models SET param_controls=? WHERE id='m_flow'`, controls); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tool.db.Exec(`INSERT INTO messages(id,conversation_id,role,model_id) VALUES('a_saved','c_flow','assistant','m_flow')`); err != nil {
+	if _, err := tool.db.Exec(`INSERT INTO messages(id,conversation_id,role,model_id,author_id,status) VALUES('a_saved','c_flow','assistant','m_flow','u_flow','streaming')`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.UpdateUserSettings(context.Background(), tool.db, "u_flow", map[string]any{
@@ -187,7 +187,7 @@ func TestGeminiReferenceLimitsAreModelSpecificAndRejectOverflow(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, messageID := range []string{"a_gemini25", "a_gemini3"} {
-		if _, err := tool.db.Exec(`INSERT INTO messages(id,conversation_id,role,model_id) VALUES(?,'c_flow','assistant','m_flow')`, messageID); err != nil {
+		if _, err := tool.db.Exec(`INSERT INTO messages(id,conversation_id,role,model_id,author_id,status) VALUES(?,'c_flow','assistant','m_flow','u_flow','streaming')`, messageID); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -195,7 +195,7 @@ func TestGeminiReferenceLimitsAreModelSpecificAndRejectOverflow(t *testing.T) {
 	inputIDs := []string{}
 	for i := 1; i <= 4; i++ {
 		id := "f_ref_" + string(rune('0'+i))
-		path := filepath.Join(t.TempDir(), id+".png")
+		path := filepath.Join(tool.uploadDir, id+".png")
 		if err := os.WriteFile(path, imageData, 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -275,7 +275,7 @@ func TestProviderImageOutputMIMEUsesActualBytes(t *testing.T) {
 
 func TestArtifactPersistenceFailureReturnsErrorWithoutImageUsage(t *testing.T) {
 	tool, convID := seedImageWorkflow(t, "openai", "gpt-image-1.5")
-	if _, err := tool.db.Exec(`INSERT INTO messages(id,conversation_id,role,model_id) VALUES('a_fail','c_flow','assistant','m_flow')`); err != nil {
+	if _, err := tool.db.Exec(`INSERT INTO messages(id,conversation_id,role,model_id,author_id,status) VALUES('a_fail','c_flow','assistant','m_flow','u_flow','streaming')`); err != nil {
 		t.Fatal(err)
 	}
 	blocker := filepath.Join(t.TempDir(), "not-a-directory")

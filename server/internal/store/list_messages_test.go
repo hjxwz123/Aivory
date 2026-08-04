@@ -89,7 +89,7 @@ func TestCreateUserMessageCommitsDraftAttachments(t *testing.T) {
 	}
 	attachments := json.RawMessage(`[{"id":"f1","filename":"draft.pdf","kind":"pdf"}]`)
 	if _, err := CreateMessage(ctx, db, Message{
-		ID: "m1", ConversationID: "c1", Role: "user", Blocks: json.RawMessage(`[]`), Attachments: attachments,
+		ID: "m1", ConversationID: "c1", Role: "user", AuthorID: "u1", Blocks: json.RawMessage(`[]`), Attachments: attachments,
 	}); err != nil {
 		t.Fatalf("message: %v", err)
 	}

@@ -171,6 +171,32 @@ func TestRestoreLegacyCreditFloatsBackfillsMicros(t *testing.T) {
 	}
 }
 
+func TestRestoreLegacyRefreshTokenUsesJTIAsSessionFamily(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(filepath.Join(t.TempDir(), "legacy-refresh-family.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO users(id,email,password_hash,name,role) VALUES('u_refresh','refresh@example.test','h','Refresh','user')`); err != nil {
+		t.Fatal(err)
+	}
+	legacy := `{"jti":"legacy-refresh-jti","user_id":"u_refresh","expires_at":9999999999,"revoked":0,"created_at":100}`
+	if n, err := RestoreTable(ctx, db, "refresh_tokens", strings.NewReader(legacy)); err != nil || n != 1 {
+		t.Fatalf("restore legacy refresh: count=%d err=%v", n, err)
+	}
+	var sessionID string
+	if err := db.QueryRowContext(ctx, `SELECT session_id FROM refresh_tokens WHERE jti='legacy-refresh-jti'`).Scan(&sessionID); err != nil {
+		t.Fatal(err)
+	}
+	if sessionID != "legacy-refresh-jti" {
+		t.Fatalf("restored session_id=%q, want legacy JTI", sessionID)
+	}
+}
+
 func TestPaymentOrderBackupRestoresProviderSnapshotsAcrossVersions(t *testing.T) {
 	ctx := context.Background()
 	db, err := Open(filepath.Join(t.TempDir(), "payment-snapshots.db"))

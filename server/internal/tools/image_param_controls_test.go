@@ -67,7 +67,7 @@ func TestImageGenerateToolUsesOneClampedCountForQuotaRequestAndUsage(t *testing.
 		`INSERT INTO channels(id,name,type,base_url,api_key) VALUES('ch_image','Image Channel','openai','https://images.example.test','server-secret')`,
 		`INSERT INTO models(id,channel_id,kind,request_id,label,price_per_image) VALUES('m_image','ch_image','image','gpt-image-1','Image Model',0.25)`,
 		`INSERT INTO conversations(id,user_id,title,model_id) VALUES('c_image','u_image','Image','m_image')`,
-		`INSERT INTO messages(id,conversation_id,role,model_id) VALUES('msg_image','c_image','assistant','m_image')`,
+		`INSERT INTO messages(id,conversation_id,role,model_id,author_id,status) VALUES('msg_image','c_image','assistant','m_image','u_image','streaming')`,
 	} {
 		if _, err := db.Exec(query); err != nil {
 			t.Fatalf("seed %q: %v", query, err)
@@ -163,12 +163,13 @@ func TestImageGenerateToolFaithfullyEditsCurrentAttachmentWithModelDefaults(t *t
 	if _, err := db.Exec(`INSERT INTO conversations(id,user_id,title,model_id) VALUES('c_edit','u_edit','Edit','m_edit')`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`INSERT INTO messages(id,conversation_id,role,model_id) VALUES('msg_edit','c_edit','assistant','m_edit')`); err != nil {
+	if _, err := db.Exec(`INSERT INTO messages(id,conversation_id,role,model_id,author_id,status) VALUES('msg_edit','c_edit','assistant','m_edit','u_edit','streaming')`); err != nil {
 		t.Fatal(err)
 	}
 
 	inputData := sizedPNG(t, 1600, 900)
-	inputPath := filepath.Join(t.TempDir(), "terminal.png")
+	inputRoot := t.TempDir()
+	inputPath := filepath.Join(inputRoot, "terminal.png")
 	if err := os.WriteFile(inputPath, inputData, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +223,7 @@ func TestImageGenerateToolFaithfullyEditsCurrentAttachmentWithModelDefaults(t *t
 		return imageSuccessResponse(`{"data":[{"b64_json":"ZWRpdGVk"}]}`), nil
 	})
 
-	tool := &imageGenerateTool{db: db, artifactDir: t.TempDir()}
+	tool := &imageGenerateTool{db: db, uploadDir: inputRoot, artifactDir: t.TempDir()}
 	_, _, err := tool.Execute(
 		context.Background(),
 		[]byte(`{"prompt":"rewrite the whole terminal","n":1}`),

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"aivory/server/internal/envcfg"
+	"aivory/server/internal/fileguard"
 	"aivory/server/internal/sandbox"
 	"aivory/server/internal/storage"
 	"aivory/server/internal/store"
@@ -52,7 +53,29 @@ func cleanupOneStoragePath(ctx context.Context, d Deps, obj *storage.Client, p s
 		return true, nil
 	}
 	if looksLocalStoragePath(p) {
-		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+		// ResolveExisting performs the real (symlink-aware) check, but first
+		// establish lexical containment. An attacker-controlled absolute path
+		// that does not exist must still fail closed; treating every ENOENT as a
+		// harmless missing file would make the jail testable only for paths that
+		// happen to exist.
+		lexicalInside := false
+		for _, root := range []string{d.Config.UploadDir, d.Config.ArtifactDir} {
+			if _, relErr := fileguard.Relative(root, p); relErr == nil {
+				lexicalInside = true
+				break
+			}
+		}
+		if !lexicalInside {
+			return false, fileguard.ErrOutsideRoot
+		}
+		safePath, resolveErr := fileguard.ResolveExisting(p, d.Config.UploadDir, d.Config.ArtifactDir)
+		if resolveErr != nil {
+			if os.IsNotExist(resolveErr) {
+				return false, nil
+			}
+			return false, resolveErr
+		}
+		if err := os.Remove(safePath); err != nil && !os.IsNotExist(err) {
 			return false, err
 		}
 	}

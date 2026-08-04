@@ -83,8 +83,8 @@ func changePasswordHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errInvalidInput)
 		return
 	}
-	if len(req.New) < 8 {
-		writeError(w, 400, errors.New("password must be at least 8 characters"))
+	if err := validateNewPassword(req.New, minimumPasswordLength); err != nil {
+		writeError(w, 400, err)
 		return
 	}
 	hash, err := store.PasswordFor(r.Context(), d.DB, u.ID)
@@ -101,7 +101,11 @@ func changePasswordHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
-	if err := store.UpdateUserPassword(r.Context(), d.DB, u.ID, newHash); err != nil {
+	if err := store.UpdateUserPasswordIfCurrent(r.Context(), d.DB, u.ID, hash, newHash); err != nil {
+		if errors.Is(err, store.ErrPasswordChanged) {
+			writeError(w, http.StatusUnauthorized, errors.New("current password incorrect"))
+			return
+		}
 		writeError(w, 500, err)
 		return
 	}
@@ -132,8 +136,8 @@ func setPasswordHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errInvalidInput)
 		return
 	}
-	if len(req.New) < 8 {
-		writeError(w, 400, errors.New("password must be at least 8 characters"))
+	if err := validateNewPassword(req.New, minimumPasswordLength); err != nil {
+		writeError(w, 400, err)
 		return
 	}
 	newHash, err := store.HashPassword(req.New)
@@ -142,6 +146,10 @@ func setPasswordHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := store.SetInitialPassword(r.Context(), d.DB, u.ID, newHash); err != nil {
+		if errors.Is(err, store.ErrPasswordAlreadySet) {
+			writeError(w, http.StatusConflict, err)
+			return
+		}
 		writeError(w, 500, err)
 		return
 	}
@@ -279,6 +287,7 @@ func meUsageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 // confirmation string (OAuth-only accounts that have no password).
 func deleteMeHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
+	var expectedPasswordHash []string
 	var req struct {
 		Password string `json:"password"`
 		Confirm  string `json:"confirm"`
@@ -308,12 +317,21 @@ func deleteMeHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 			writeError(w, 401, errors.New("incorrect password"))
 			return
 		}
+		expectedPasswordHash = []string{hash}
 	}
 	// Heavy cleanup (bulk SQL, vectors, disk) runs in a background job; this
 	// request only locks the account out and returns. §async user delete.
-	if _, err := startUserDeletion(d, u.ID, u.Email); err != nil {
+	if _, err := startUserDeletion(d, u.ID, u.Email, expectedPasswordHash...); err != nil {
 		if errors.Is(err, store.ErrPaymentOrdersPendingForUser) {
 			writeError(w, http.StatusConflict, err)
+			return
+		}
+		if errors.Is(err, store.ErrWorkspaceOwnership) || errors.Is(err, store.ErrWorkspaceOwnerDeleting) {
+			writeError(w, http.StatusConflict, err)
+			return
+		}
+		if errors.Is(err, store.ErrUserCredentialsChanged) {
+			writeError(w, http.StatusUnauthorized, err)
 			return
 		}
 		writeError(w, 500, err)

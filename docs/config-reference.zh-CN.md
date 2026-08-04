@@ -4,10 +4,10 @@
 >
 > 版本 v2.0 · 2026-07-15 · 由整仓源码生成（对应本次改动：所有此前「硬编码但值得调整」的参数均已改为环境变量可覆盖）
 >
-> **这 300 个环境变量全部是可选的，未在 `.env.example` 中列出。** 不设置任何一个，Aivory 使用下表所列的默认值。只有当你需要调整某个具体参数时，才在部署环境里添加对应的变量。
+> **这 306 个环境变量全部是可选的，未在 `.env.example` 中列出。** 不设置任何一个，Aivory 使用下表所列的默认值。只有当你需要调整某个具体参数时，才在部署环境里添加对应的变量。
 > 如果需要调整，把用到的变量抄一份加进你自己的 `.env` 即可（`.env.example` 保持精简，不会自动包含这些高级选项）。
 >
-> **后端（Go）**：271 个，读取自进程环境变量，改动后**需重启 `aivory-api` 进程**生效。
+> **后端（Go）**：277 个，读取自进程环境变量，改动后**需重启 `aivory-api` 进程**生效。
 > **前端（Vite）**：23 个 `VITE_*` 变量，在**构建时**内联（`npm run build` / `vite build`），必须在构建环境设置，**运行时**改容器环境变量无效，需要重新构建产物。
 > **沙盒服务（Python）**：6 个 `SANDBOX_*` 变量（与已有的 `SANDBOX_*` 变量同一命名空间），读取自 `sandbox-service` 进程环境，改动后**需重启该进程**生效。
 > 类型：`duration`（Go 时长字符串，如 `90s`/`5m`/`2h`/`500ms`；对 Vite/Python 变量用纯数字，单位见默认值列）、`int`/`int64`、`float`、`bool`（`1/true/yes/on` 与 `0/false/no/off`）、`string`。
@@ -30,21 +30,21 @@
 
 ## 0. 总览
 
-共 **300** 个环境变量，按子系统分布：
+共 **306** 个环境变量，按子系统分布：
 
 | 子系统 | 变量数 |
 | --- | --- |
-| 1. LLM 对话 / 编排 / 内部模型调用 | 65 |
+| 1. LLM 对话 / 编排 / 内部模型调用 | 67 |
 | 2. RAG 文档解析 / 向量检索 | 60 |
 | 3. 沙盒代码执行 | 9 |
-| 4. 内置工具（搜索 / Python / 网络安全） | 14 |
+| 4. 内置工具（搜索 / Python / 网络安全） | 11 |
 | 5. 会话 / 消息 / 流式 API | 73 |
 | 6. 认证 / 会话 / 验证码 | 15 |
 | 7. 上传 / 文件 / 分享 | 18 |
-| 8. 管理后台任务（备份 / 向量维护 / 兑换码） | 20 |
+| 8. 管理后台任务（备份 / 向量维护 / 兑换码） | 27 |
 | 9. 服务器启动 / 配置加载 | 3 |
 | 10. 前端 | 23 |
-| **合计** | **300** |
+| **合计** | **306** |
 
 ---
 
@@ -88,6 +88,8 @@
 | `AIVORY_LLM_GEMINI_MAX_TOK` | `int` | `64000` | `llm/google_provider.go:78` | Gemini 流式循环中每次请求 generationConfig.maxOutputTokens 的默认值（除非请求覆盖）。 |
 | `AIVORY_LLM_GEMINI_MAX_TOK_2` | `int` | `64000` | `llm/google_provider.go:472` | Gemini 提示词工具模式调用中 generationConfig.maxOutputTokens 的默认值（除非请求覆盖）。 |
 | `AIVORY_LLM_CONF` | `float` | `0.7` | `llm/memory_worker.go:40` | 当提取器返回的置信度不在 (0,1] 范围内时，为抽取记忆赋予的回退置信度。 |
+| `AIVORY_STORE_M_CONFIDENCE` | `float` | `0.8` | `store/misc.go:18` | 仅当传给 CreateMemory 的置信度恰好为 0 时写入的回退值；它是默认值，不是置信度过滤或检索阈值。 |
+| `AIVORY_STORE_LIST_MEMORIES_ACTIVE` | `int` | `20` | `store/misc.go:19` | 注入系统提示词时返回的 ACTIVE 与 QUERY_DEPENDENT 记忆合计上限，按最近更新时间倒序选择。 |
 | `AIVORY_LLM_OFFICIAL_TOOL_SPEC` | `string` | `"medium"` | `store/official_tools.go` | 新建 OpenAI Responses 默认 `web_search` 定义或迁移旧字符串配置时使用的 `search_context_size`；此后管理员显式填写的请求 JSON 优先。 |
 | `AIVORY_LLM_MAX_ITER_2` | `int` | `20` | `llm/openai_provider.go:110` | OpenAI streamChat（Chat Completions）循环中原生工具调用轮次的硬性上限。 |
 | `AIVORY_LLM_MAX_ITER_3` | `int` | `20` | `llm/openai_provider.go:610` | OpenAI streamResponses（Responses API）循环中原生工具调用轮次的硬性上限。 |
@@ -397,7 +399,14 @@ SSE 心跳、流恢复窗口、生成时长上限、分页与搜索上限、消�
 | `AIVORY_API_USAGE_REPORT_PAGE_SIZE_CAP` | `int` | `50` | `api/admin_handlers.go:24` | 管理员用量记录报表在请求的 page_size 缺失或超出 1-200 范围时采用的默认每页条数。 |
 | `AIVORY_API_ANALYTICS_WINDOW` | `int` | `30` | `api/admin_handlers.go:25` | 管理员分析看板在未提供 days 查询参数时的默认回溯窗口（天）。 |
 | `AIVORY_API_ANALYTICS_WINDOW_2` | `int` | `365` | `api/admin_handlers.go:26` | 管理员分析窗口 days 查询参数可接受的天数上限，超出范围的值将被忽略。 |
-| `AIVORY_API_ANALYTICS_BREAKDOWN_TOP_N` | `int` | `8` | `api/admin_handlers.go:27` | 管理员分析中按模型和按用户细分及其时间序列所保留的头部键数量（Top-N）。 |
+| `AIVORY_STORE_ADMIN_USAGE_RECORDS_LIMIT` | `int` | `500` | `store/misc.go:20` | AdminUsageRecords 接受的最大正数分页 limit；超过该值时回退到 AIVORY_STORE_ADMIN_USAGE_RECORDS_LIMIT_2，而不是钳制到上限。 |
+| `AIVORY_STORE_ADMIN_USAGE_RECORDS_LIMIT_2` | `int` | `50` | `store/misc.go:21` | AdminUsageRecords 收到 limit 小于等于 0 或超过 AIVORY_STORE_ADMIN_USAGE_RECORDS_LIMIT 时使用的回退分页大小。 |
+| `AIVORY_STORE_USAGE_TREND_WINDOW` | `int` | `7` | `store/misc.go:22` | 仅当 days 小于等于 0 时 AdminUsageTrend 使用的默认回溯天数；调用 AdminUsageTrendBetween 时由调用方明确传入边界。 |
+| `AIVORY_STORE_USAGE_TREND_HOURLY_BUCKET_THRESHOLD` | `int` | `2` | `store/misc.go:23` | UsageBucketWidth 对小于等于该阈值的天数窗口按小时分桶；其余窗口中，超过 90 天按周分桶，剩余按天分桶。 |
+| `AIVORY_STORE_USAGE_TOTALS_WINDOW` | `int` | `7` | `store/misc.go:24` | 仅当 days 小于等于 0 时 AdminUsageTotals 使用的默认回溯天数；调用 AdminUsageTotalsBetween 时由调用方明确传入边界。 |
+| `AIVORY_STORE_USAGE_BREAKDOWN_TOP_N` | `int` | `8` | `store/misc.go:25` | 仅当 limit 等于 0 时 AdminUsageBreakdownBetween 使用的默认返回条数；负数 limit 返回全部。当前主管理员分析路由传入 -1，因此绕过此上限。 |
+| `AIVORY_STORE_USAGE_BREAKDOWN_WINDOW` | `int` | `7` | `store/misc.go:26` | 仅当 days 小于等于 0 时 AdminUsageBreakdown 使用的默认回溯天数；调用 AdminUsageBreakdownBetween 时由调用方明确传入边界。 |
+| `AIVORY_STORE_USAGE_SERIES_WINDOW` | `int` | `7` | `store/misc.go:27` | 仅当 days 小于等于 0 时 AdminUsageSeries 使用的默认回溯天数；当前主管理员分析路由不调用这一旧时间序列包装函数。 |
 | `AIVORY_API_BULK_REDEEM_CODE_GENERATION_QUANTITY` | `int` | `1000` | `api/admin_redeem_handlers.go:18` | 单次批量生成请求可铸造的最大兑换码数量。 |
 | `AIVORY_API_MAX_SKILL_ASSET_BYTES` | `int64` | `20*1024*1024` | `api/admin_skill_assets.go:24` | 单个技能资源文件（模板/脚本/小型数据）上传的最大字节数。 |
 | `AIVORY_API_VECTOR_MAINTENANCE_JOB_HISTORY_RETENTION` | `int` | `20` | `api/admin_vectors_handlers.go:18` | 向量维护任务历史在内存中保留的最近任务数，更早的会被丢弃。 |

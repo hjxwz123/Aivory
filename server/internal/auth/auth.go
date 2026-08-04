@@ -1,12 +1,14 @@
 // Package auth issues and verifies short-lived access tokens and rotates
 // refresh tokens, per design.md §8.1. Token rotation/realtime ban support is
 // kept simple but compatible with the design: every access token carries a
-// `tv` claim and the cache layer stores the user's current token version, so
-// bumping the version (via store.BumpTokenVersion) immediately invalidates
-// all outstanding tokens.
+// `tv` claim and a stable session-family `sid`; middleware compares both with
+// authoritative database state, so a version bump or per-device revoke takes
+// effect on the next request across every replica.
 package auth
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
 	"errors"
 	"strings"
 	"time"
@@ -17,24 +19,35 @@ import (
 	"github.com/google/uuid"
 )
 
+const (
+	accessTokenType  = "at+jwt"
+	refreshTokenType = "rt+jwt"
+	accessTokenUse   = "access"
+	refreshTokenUse  = "refresh"
+)
+
 // Claims is the access-token payload.
 type Claims struct {
 	jwt.RegisteredClaims
-	UID  string `json:"uid"`
-	Role string `json:"role"`
-	TV   int    `json:"tv"`
+	UID       string `json:"uid"`
+	Role      string `json:"role"`
+	TV        int    `json:"tv"`
+	SessionID string `json:"sid,omitempty"`
+	TokenUse  string `json:"token_use"`
 }
 
 // RefreshClaims is the refresh-token payload (sub == uid; jti = id).
 type RefreshClaims struct {
 	jwt.RegisteredClaims
-	UID string `json:"uid"`
+	UID      string `json:"uid"`
+	TV       int    `json:"tv"`
+	TokenUse string `json:"token_use"`
 }
 
-// Service signs/verifies tokens with a hot-path cache hook for token-version
-// invalidation.
+// Service signs and verifies purpose-separated access and refresh tokens.
 type Service struct {
-	secret     []byte
+	accessKey  []byte
+	refreshKey []byte
 	accessTTL  time.Duration
 	refreshTTL time.Duration
 	cache      cache.Cache
@@ -42,11 +55,33 @@ type Service struct {
 
 // New builds a new auth service.
 func New(secret string, accessTTL, refreshTTL time.Duration, c cache.Cache) *Service {
-	return &Service{secret: []byte(secret), accessTTL: accessTTL, refreshTTL: refreshTTL, cache: c}
+	master := []byte(secret)
+	return &Service{
+		accessKey:  deriveSigningKey(master, accessTokenUse),
+		refreshKey: deriveSigningKey(master, refreshTokenUse),
+		accessTTL:  accessTTL,
+		refreshTTL: refreshTTL,
+		cache:      c,
+	}
 }
 
-// IssueAccess returns a signed access token + its expiry.
-func (s *Service) IssueAccess(uid, role string, tokenVer int) (string, time.Time, error) {
+// deriveSigningKey cryptographically separates access and refresh signatures
+// while keeping one deployment secret in configuration. A token signed for one
+// purpose cannot validate under the other parser even if its claims are altered.
+func deriveSigningKey(master []byte, purpose string) []byte {
+	h := hmac.New(sha256.New, master)
+	_, _ = h.Write([]byte("aivory/jwt/" + purpose))
+	return h.Sum(nil)
+}
+
+// IssueAccessForSession binds an access token to a stable refresh-session
+// family. Revoking that family can then invalidate both its current refresh
+// token and its already-issued access token without affecting other devices.
+func (s *Service) IssueAccessForSession(uid, role string, tokenVer int, sessionID string) (string, time.Time, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return "", time.Time{}, errors.New("missing access-token session")
+	}
 	exp := time.Now().Add(s.accessTTL)
 	claims := Claims{
 		RegisteredClaims: jwt.RegisteredClaims{
@@ -55,12 +90,15 @@ func (s *Service) IssueAccess(uid, role string, tokenVer int) (string, time.Time
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 			ID:        uuid.NewString(),
 		},
-		UID:  uid,
-		Role: role,
-		TV:   tokenVer,
+		UID:       uid,
+		Role:      role,
+		TV:        tokenVer,
+		SessionID: sessionID,
+		TokenUse:  accessTokenUse,
 	}
 	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	signed, err := tok.SignedString(s.secret)
+	tok.Header["typ"] = accessTokenType
+	signed, err := tok.SignedString(s.accessKey)
 	if err != nil {
 		return "", time.Time{}, err
 	}
@@ -69,7 +107,7 @@ func (s *Service) IssueAccess(uid, role string, tokenVer int) (string, time.Time
 
 // IssueRefresh returns a signed refresh token, its expiry, and its jti so the
 // caller can record/revoke it in the DB.
-func (s *Service) IssueRefresh(uid string) (string, time.Time, string, error) {
+func (s *Service) IssueRefresh(uid string, tokenVer int) (string, time.Time, string, error) {
 	jti := uuid.NewString()
 	exp := time.Now().Add(s.refreshTTL)
 	claims := RefreshClaims{
@@ -79,10 +117,13 @@ func (s *Service) IssueRefresh(uid string) (string, time.Time, string, error) {
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 			ID:        jti,
 		},
-		UID: uid,
+		UID:      uid,
+		TV:       tokenVer,
+		TokenUse: refreshTokenUse,
 	}
 	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	signed, err := tok.SignedString(s.secret)
+	tok.Header["typ"] = refreshTokenType
+	signed, err := tok.SignedString(s.refreshKey)
 	if err != nil {
 		return "", time.Time{}, "", err
 	}
@@ -95,17 +136,17 @@ func (s *Service) ParseAccess(token string) (*Claims, error) {
 	if token == "" {
 		return nil, errors.New("missing token")
 	}
-	parsed, err := jwt.ParseWithClaims(token, &Claims{}, func(t *jwt.Token) (any, error) {
-		if t.Method.Alg() != jwt.SigningMethodHS256.Alg() {
-			return nil, errors.New("unexpected signing method")
-		}
-		return s.secret, nil
-	})
+	parsed, err := jwt.ParseWithClaims(token, &Claims{}, func(_ *jwt.Token) (any, error) {
+		return s.accessKey, nil
+	}, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}), jwt.WithExpirationRequired(), jwt.WithIssuedAt())
 	if err != nil {
 		return nil, err
 	}
 	claims, ok := parsed.Claims.(*Claims)
-	if !ok || !parsed.Valid {
+	if !ok || !parsed.Valid || parsed.Header["typ"] != accessTokenType ||
+		claims.TokenUse != accessTokenUse || claims.UID == "" ||
+		claims.Subject != claims.UID || claims.ID == "" || claims.IssuedAt == nil ||
+		strings.TrimSpace(claims.SessionID) == "" {
 		return nil, errors.New("invalid token")
 	}
 	return claims, nil
@@ -113,17 +154,20 @@ func (s *Service) ParseAccess(token string) (*Claims, error) {
 
 // ParseRefresh validates the refresh JWT and returns the claims.
 func (s *Service) ParseRefresh(token string) (*RefreshClaims, error) {
-	parsed, err := jwt.ParseWithClaims(token, &RefreshClaims{}, func(t *jwt.Token) (any, error) {
-		if t.Method.Alg() != jwt.SigningMethodHS256.Alg() {
-			return nil, errors.New("unexpected signing method")
-		}
-		return s.secret, nil
-	})
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return nil, errors.New("missing token")
+	}
+	parsed, err := jwt.ParseWithClaims(token, &RefreshClaims{}, func(_ *jwt.Token) (any, error) {
+		return s.refreshKey, nil
+	}, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}), jwt.WithExpirationRequired(), jwt.WithIssuedAt())
 	if err != nil {
 		return nil, err
 	}
 	claims, ok := parsed.Claims.(*RefreshClaims)
-	if !ok || !parsed.Valid {
+	if !ok || !parsed.Valid || parsed.Header["typ"] != refreshTokenType ||
+		claims.TokenUse != refreshTokenUse || claims.UID == "" ||
+		claims.Subject != claims.UID || claims.ID == "" || claims.IssuedAt == nil {
 		return nil, errors.New("invalid token")
 	}
 	return claims, nil

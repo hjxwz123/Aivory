@@ -42,6 +42,7 @@ export default function Login() {
   const clearPendingTwoFactor = useAuth((s) => s.clearPendingTwoFactor)
   const startTwoFactor = useAuth((s) => s.startTwoFactor)
   const loginCaptchaRequired = useAuth((s) => s.loginCaptchaRequired)
+  const registrationCaptchaRequired = useAuth((s) => s.captchaRequired)
   const { providers } = useOAuthProviders()
   const [searchParams, setSearchParams] = useSearchParams()
   const [email, setEmail] = useState('')
@@ -243,7 +244,7 @@ export default function Login() {
       {providers.length > 0 ? (
         <>
           <motion.div variants={fadeUp} className="mt-7 flex flex-col gap-2">
-            <OAuthButtons providers={providers} />
+            <OAuthButtons providers={providers} captchaRequired={registrationCaptchaRequired} />
           </motion.div>
 
           <motion.div

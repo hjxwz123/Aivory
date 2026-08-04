@@ -100,6 +100,9 @@ func TestPythonExecuteResetsInputsAndStagesOnlyNonImages(t *testing.T) {
 	write := func(name string, data []byte) string {
 		t.Helper()
 		path := filepath.Join(root, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", name, err)
+		}
 		if err := os.WriteFile(path, data, 0o600); err != nil {
 			t.Fatalf("write %s: %v", name, err)
 		}
@@ -111,8 +114,8 @@ func TestPythonExecuteResetsInputsAndStagesOnlyNonImages(t *testing.T) {
 		"image":         write("photo.png", png),
 		"forged":        write("payload.dat", png),
 		"imageArtifact": write("generated.png", png),
-		"skillText":     write("helper.py", []byte("print('ok')\n")),
-		"skillImage":    write("reference.bin", png),
+		"skillText":     write(filepath.Join("skill-assets", "helper.py"), []byte("print('ok')\n")),
+		"skillImage":    write(filepath.Join("skill-assets", "reference.bin"), png),
 	}
 
 	assets, err := json.Marshal([]map[string]any{
@@ -130,7 +133,7 @@ func TestPythonExecuteResetsInputsAndStagesOnlyNonImages(t *testing.T) {
 		{`INSERT INTO channels(id,name,type) VALUES('ch1','Channel','openai')`, nil},
 		{`INSERT INTO models(id,channel_id,request_id,label) VALUES('m1','ch1','model','Model')`, nil},
 		{`INSERT INTO conversations(id,user_id,title,model_id) VALUES('c1','u1','Test','m1')`, nil},
-		{`INSERT INTO messages(id,conversation_id,role) VALUES('msg1','c1','assistant')`, nil},
+		{`INSERT INTO messages(id,conversation_id,role,author_id,status) VALUES('msg1','c1','assistant','u1','streaming')`, nil},
 		{`INSERT INTO files(id,user_id,conversation_id,filename,mime_type,size_bytes,storage_path,kind) VALUES('f_csv','u1','c1','rows.csv','text/csv',?,?, 'sheet')`, []any{len("a,b\n1,2\n"), paths["csv"]}},
 		{`INSERT INTO files(id,user_id,conversation_id,filename,mime_type,size_bytes,storage_path,kind) VALUES('f_img','u1','c1','photo.png','image/png',?,?, 'image')`, []any{len(png), paths["image"]}},
 		{`INSERT INTO files(id,user_id,conversation_id,filename,mime_type,size_bytes,storage_path,kind) VALUES('f_forged','u1','c1','payload.dat','text/plain',?,?, 'text')`, []any{len(png), paths["forged"]}},
@@ -149,7 +152,7 @@ func TestPythonExecuteResetsInputsAndStagesOnlyNonImages(t *testing.T) {
 		Files:  []sandbox.File{{Name: "plot.png", MimeType: "image/png", Data: png}},
 	}}
 	var outputArtifact llm.ArtifactRef
-	tool := &pythonExecuteTool{sandbox: fake, artifactDir: filepath.Join(root, "artifacts"), logger: log.New(io.Discard, "", 0)}
+	tool := &pythonExecuteTool{sandbox: fake, uploadDir: root, artifactDir: filepath.Join(root, "artifacts"), logger: log.New(io.Discard, "", 0)}
 	_, _, err = tool.Execute(ctx, []byte(`{"code":"print('done')"}`), &llm.ToolContext{
 		UserID: "u1", ConvID: "c1", MessageID: "msg1", ModelID: "m1", DB: db,
 		BuiltinTools: map[string]bool{"python_execute": true, "use_skill": true},
@@ -187,7 +190,7 @@ func TestPythonExecuteResetsInputsAndStagesOnlyNonImages(t *testing.T) {
 	// that policy, ordinary uploads are still staged but model-bound skill files
 	// must not cross into the sandbox.
 	deniedFake := &recordingSandbox{execResult: &sandbox.Result{Stdout: "done\n"}}
-	deniedTool := &pythonExecuteTool{sandbox: deniedFake, artifactDir: filepath.Join(root, "artifacts"), logger: log.New(io.Discard, "", 0)}
+	deniedTool := &pythonExecuteTool{sandbox: deniedFake, uploadDir: root, artifactDir: filepath.Join(root, "artifacts"), logger: log.New(io.Discard, "", 0)}
 	_, _, err = deniedTool.Execute(ctx, []byte(`{"code":"print('done')"}`), &llm.ToolContext{
 		UserID: "u1", ConvID: "c1", MessageID: "msg1", ModelID: "m1", DB: db,
 		BuiltinTools: map[string]bool{"python_execute": true},
@@ -262,13 +265,54 @@ func TestImageGenerateReferenceUploadsAreVerifiedAndConversationScoped(t *testin
 		}
 	}
 
-	tool := &imageGenerateTool{db: db}
+	tool := &imageGenerateTool{db: db, uploadDir: root, artifactDir: root}
 	images, tooMany := tool.loadInputImages(ctx, &llm.ToolContext{DB: db, UserID: "u1", ConvID: "c1"}, []string{"same", "cross", "fake"}, 3)
 	if tooMany {
 		t.Fatal("unexpected reference-image truncation")
 	}
 	if len(images) != 1 || images[0].mime != "image/png" || string(images[0].data) != string(png) {
 		t.Fatalf("verified reference images = %+v, want only same-conversation PNG bytes", images)
+	}
+}
+
+func TestPythonExecuteRejectsOutOfRootAndSymlinkedDatabasePaths(t *testing.T) {
+	ctx := context.Background()
+	db := openToolsTestDB(t)
+	uploads := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "secret.csv")
+	if err := os.WriteFile(outside, []byte("secret,value\n1,2\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(uploads, "linked.csv")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	for _, query := range []string{
+		`INSERT INTO users(id,email,password_hash) VALUES('u_jail','jail@example.test','h')`,
+		`INSERT INTO conversations(id,user_id,title) VALUES('c_jail','u_jail','Jail')`,
+		`INSERT INTO messages(id,conversation_id,role,author_id,status) VALUES('msg_jail','c_jail','assistant','u_jail','streaming')`,
+	} {
+		if _, err := db.ExecContext(ctx, query); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, file := range []store.File{
+		{ID: "proc", UserID: "u_jail", ConversationID: "c_jail", Filename: "proc.csv", MimeType: "text/csv", Kind: "sheet", SizeBytes: 32, StoragePath: "/proc/self/environ"},
+		{ID: "link", UserID: "u_jail", ConversationID: "c_jail", Filename: "linked.csv", MimeType: "text/csv", Kind: "sheet", SizeBytes: 16, StoragePath: link},
+	} {
+		if _, err := store.CreateFile(ctx, db, file); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fake := &recordingSandbox{execResult: &sandbox.Result{Stdout: "done\n"}}
+	tool := &pythonExecuteTool{sandbox: fake, uploadDir: uploads, artifactDir: t.TempDir(), logger: log.New(io.Discard, "", 0)}
+	if _, _, err := tool.Execute(ctx, []byte(`{"code":"print('done')"}`), &llm.ToolContext{
+		UserID: "u_jail", ConvID: "c_jail", MessageID: "msg_jail", DB: db, BuiltinTools: map[string]bool{"python_execute": true},
+	}); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if len(fake.putFiles) != 0 {
+		t.Fatalf("unsafe DB paths reached sandbox: %+v", fake.putFiles)
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
+	"errors"
 	"image"
 	"image/color"
 	"image/png"
@@ -41,7 +42,7 @@ const (
 var capTol = envcfg.F64("AIVORY_API_CAP_TOL", 0.04)
 
 // captchaChallengeCacheTTL bounds how long an unsolved challenge stays valid.
-var captchaChallengeCacheTTL = envcfg.Dur("AIVORY_API_CAPTCHA_CHALLENGE_CACHE_TTL", 5*time.Minute)
+var captchaChallengeCacheTTL = securityDuration("AIVORY_API_CAPTCHA_CHALLENGE_CACHE_TTL", 5*time.Minute)
 
 // captchaHandler issues a fresh slider-puzzle challenge.
 func captchaHandler(d Deps, w http.ResponseWriter, _ *http.Request) {
@@ -70,6 +71,10 @@ func captchaHandler(d Deps, w http.ResponseWriter, _ *http.Request) {
 	}
 
 	id := randToken(12)
+	if id == "" {
+		writeError(w, http.StatusInternalServerError, errors.New("secure random source unavailable"))
+		return
+	}
 	track := float64(capW - capPiece)
 	gapFraction := float64(gapX) / track
 	d.Cache.Set("captcha:"+id, strconv.FormatFloat(gapFraction, 'f', 6, 64), captchaChallengeCacheTTL)
@@ -103,39 +108,57 @@ func captchaVerifyHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"ok": false})
 		return
 	}
-	writeJSON(w, 200, map[string]any{"ok": true, "token": mintCaptchaPass(d.Config.JWTSecret)})
+	token := mintCaptchaPass(d)
+	if token == "" {
+		writeError(w, http.StatusInternalServerError, errors.New("captcha pass unavailable"))
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true, "token": token})
 }
 
 // captchaPassTTL bounds how long a solved-captcha pass stays valid.
-var captchaPassTTL = envcfg.Dur("AIVORY_API_CAPTCHA_PASS_TTL", 10*time.Minute)
+var captchaPassTTL = securityDuration("AIVORY_API_CAPTCHA_PASS_TTL", 10*time.Minute)
 
-// mintCaptchaPass returns a STATELESS pass proving a captcha was just solved:
-// "<expiryUnix>.<HMAC>". It is signed with the server's JWT secret and carries no
-// server-side state — so, unlike the previous cache-backed token, it survives an
-// API restart and works across multiple API replicas WITHOUT a shared (Redis)
-// cache. With the in-memory cache, the old token lived in ONE process's memory,
-// so a restart between /captcha/verify and /api/auth/register — or a second
-// replica handling the register — lost it and the register 400'd "captcha_failed".
-func mintCaptchaPass(secret string) string {
-	payload := strconv.FormatInt(time.Now().Add(captchaPassTTL).Unix(), 10)
-	return payload + "." + captchaSig(payload, secret)
+// mintCaptchaPass returns a signed, cache-backed one-time credential. A shared
+// Redis cache is required for multi-replica deployments, just like the puzzle
+// challenge itself; retaining server-side state is what makes replay impossible.
+func mintCaptchaPass(d Deps) string {
+	if d.Cache == nil {
+		return ""
+	}
+	nonce := make([]byte, 24)
+	if _, err := rand.Read(nonce); err != nil {
+		return ""
+	}
+	payload := strconv.FormatInt(time.Now().Add(captchaPassTTL).Unix(), 10) + "." + base64.RawURLEncoding.EncodeToString(nonce)
+	token := payload + "." + captchaSig(payload, d.Config.JWTSecret)
+	d.Cache.Set(captchaPassKey(token), "1", captchaPassTTL)
+	return token
 }
 
-// consumeCaptchaPass verifies a stateless captcha pass (signature + not expired).
-// The name is kept for callers; statelessness trades strict single-use for
-// restart/multi-instance robustness — acceptable for a registration deterrent,
-// where the per-IP daily cap + rate limits are the real abuse backstop, and the
-// 10-minute TTL bounds replay.
+// consumeCaptchaPass verifies and atomically consumes a captcha pass.
 func consumeCaptchaPass(d Deps, token string) bool {
-	payload, sig, ok := strings.Cut(strings.TrimSpace(token), ".")
-	if !ok || payload == "" || sig == "" {
+	token = strings.TrimSpace(token)
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 || parts[0] == "" || parts[1] == "" || parts[2] == "" {
 		return false
 	}
+	payload := parts[0] + "." + parts[1]
+	sig := parts[2]
 	if subtle.ConstantTimeCompare([]byte(sig), []byte(captchaSig(payload, d.Config.JWTSecret))) != 1 {
 		return false
 	}
-	exp, err := strconv.ParseInt(payload, 10, 64)
-	return err == nil && time.Now().Unix() <= exp
+	exp, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil || time.Now().Unix() > exp || d.Cache == nil {
+		return false
+	}
+	_, ok := d.Cache.Take(captchaPassKey(token))
+	return ok
+}
+
+func captchaPassKey(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return "captcha:pass:" + base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
 // captchaSig is the HMAC-SHA256 of the pass payload, keyed by the server secret.
@@ -153,8 +176,7 @@ func verifyPuzzleCaptcha(d Deps, id, answer string) bool {
 		return false
 	}
 	key := "captcha:" + id
-	saved, ok := d.Cache.Get(key)
-	d.Cache.Delete(key)
+	saved, ok := d.Cache.Take(key)
 	if !ok {
 		return false
 	}

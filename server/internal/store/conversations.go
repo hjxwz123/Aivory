@@ -99,11 +99,19 @@ func ListConversations(ctx context.Context, db *sql.DB, userID, projectID, archi
 	return out, rows.Err()
 }
 
-// ListWorkspaceConversations lists EVERY member's conversations in a workspace
-// (§workspaces — shared history), newest first, enriched with each creator's
-// display name + avatar so the sidebar can attribute rows. Membership is the
-// CALLER's job (the handler validates before calling).
+// ListWorkspaceConversations is the unscoped administrator/maintenance view.
+// User-facing callers must use ListWorkspaceConversationsForUser.
 func ListWorkspaceConversations(ctx context.Context, db *sql.DB, workspaceID, projectID, archivedFilter string, limit, offset int) ([]Conversation, error) {
+	return listWorkspaceConversations(ctx, db, workspaceID, projectID, archivedFilter, "", limit, offset)
+}
+
+// ListWorkspaceConversationsForUser lists shared history only while userID is
+// the workspace's canonical owner or a current member.
+func ListWorkspaceConversationsForUser(ctx context.Context, db *sql.DB, workspaceID, projectID, archivedFilter, userID string, limit, offset int) ([]Conversation, error) {
+	return listWorkspaceConversations(ctx, db, workspaceID, projectID, archivedFilter, userID, limit, offset)
+}
+
+func listWorkspaceConversations(ctx context.Context, db *sql.DB, workspaceID, projectID, archivedFilter, userID string, limit, offset int) ([]Conversation, error) {
 	if limit <= 0 {
 		limit = listWorkspaceConversationsLimit
 	}
@@ -114,6 +122,10 @@ func ListWorkspaceConversations(ctx context.Context, db *sql.DB, workspaceID, pr
 	 FROM conversations c LEFT JOIN users u ON u.id = c.user_id
 	 WHERE c.workspace_id=? AND COALESCE(c.inline_source_conv,'')=''`
 	args := []any{workspaceID}
+	if userID != "" {
+		q += " AND " + workspaceResourceAccessPredicate("c")
+		args = append(args, workspaceResourceAccessArgs(userID)...)
+	}
 	if projectID == "_none_" {
 		q += " AND c.project_id IS NULL"
 	} else if projectID != "" {
@@ -188,10 +200,12 @@ func GetConversation(ctx context.Context, db *sql.DB, id, userID string) (*Conve
 	// otherwise a single-conversation fetch (loadOne on the client) returns a row
 	// with an empty creator and, when it replaces the list entry, blanks the
 	// sidebar's creator badge until a full reload (§workspaces).
+	args := []any{id}
+	args = append(args, workspaceResourceAccessArgs(userID)...)
 	row := db.QueryRowContext(ctx,
 		`SELECT c.id, c.user_id, COALESCE(c.project_id, ''), c.title, c.provider, c.model_id, c.fast, c.kb_ids, c.rag_mode, c.summary_blocks, COALESCE(c.active_leaf_id, ''), c.provider_state, c.pinned, c.archived, c.starred, c.created_at, c.updated_at, COALESCE(c.inline_source_conv, ''), COALESCE(c.inline_parent_id, ''), COALESCE(c.inline_quote, ''), COALESCE(c.workspace_id, ''), COALESCE(u.name,''), COALESCE(u.settings,'')
 		 FROM conversations c LEFT JOIN users u ON u.id = c.user_id
-		 WHERE c.id=? AND (c.user_id=? OR (COALESCE(c.workspace_id,'')<>'' AND c.workspace_id IN (SELECT workspace_id FROM workspace_members WHERE user_id=?)))`, id, userID, userID)
+		 WHERE c.id=? AND `+workspaceResourceAccessPredicate("c"), args...)
 	c, err := scanConversationWithCreator(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -287,15 +301,65 @@ func CreateConversation(ctx context.Context, db *sql.DB, c Conversation) (*Conve
 	} else {
 		projectID = c.ProjectID
 	}
-	_, err := db.ExecContext(ctx, `INSERT INTO conversations(
+	insertColumns := `INSERT INTO conversations(
 		id, user_id, project_id, title, provider, model_id, fast, kb_ids, rag_mode, summary_blocks, active_leaf_id, provider_state, pinned, archived, starred, created_at, updated_at, inline_source_conv, inline_parent_id, inline_quote, workspace_id
-	) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	)`
+	insertArgs := []any{
 		c.ID, c.UserID, projectID, c.Title, c.Provider, c.ModelID, boolInt(c.Fast),
 		string(c.KBIDs), c.RAGMode, string(c.SummaryBlocks), string(c.ProviderState),
 		boolInt(c.Pinned), boolInt(c.Archived), boolInt(c.Starred), now, now,
-		c.InlineSourceConv, c.InlineParentID, c.InlineQuote, c.WorkspaceID)
+		c.InlineSourceConv, c.InlineParentID, c.InlineQuote, c.WorkspaceID,
+	}
+	var (
+		res sql.Result
+		err error
+	)
+	if c.WorkspaceID == "" {
+		res, err = db.ExecContext(ctx, insertColumns+`
+			 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, insertArgs...)
+	} else {
+		tx, txErr := beginWorkspaceMutationTx(ctx, db, c.WorkspaceID)
+		if txErr != nil {
+			return nil, txErr
+		}
+		defer tx.Rollback() //nolint:errcheck
+		res, err = tx.ExecContext(ctx, insertColumns+`
+			 SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+			   FROM workspaces create_workspace
+			  WHERE create_workspace.id=?
+			    AND `+workspaceAcceptsResourceCreationPredicate("create_workspace")+`
+			    AND (
+			        create_workspace.owner_id=? OR EXISTS (
+			          SELECT 1 FROM workspace_members create_member
+			           WHERE create_member.workspace_id=create_workspace.id AND create_member.user_id=?
+			        )
+			  )`, append(insertArgs, c.WorkspaceID, c.UserID, c.UserID, c.UserID)...)
+		if err != nil {
+			return nil, err
+		}
+		if n, rowsErr := res.RowsAffected(); rowsErr != nil {
+			return nil, rowsErr
+		} else if n != 1 {
+			return nil, ErrNotFound
+		}
+		created, scanErr := scanConversationWithCreator(tx.QueryRowContext(ctx,
+			`SELECT c.id, c.user_id, COALESCE(c.project_id, ''), c.title, c.provider, c.model_id, c.fast, c.kb_ids, c.rag_mode, c.summary_blocks, COALESCE(c.active_leaf_id, ''), c.provider_state, c.pinned, c.archived, c.starred, c.created_at, c.updated_at, COALESCE(c.inline_source_conv, ''), COALESCE(c.inline_parent_id, ''), COALESCE(c.inline_quote, ''), COALESCE(c.workspace_id, ''), COALESCE(u.name,''), COALESCE(u.settings,'')
+			   FROM conversations c LEFT JOIN users u ON u.id=c.user_id WHERE c.id=?`, c.ID))
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
+		return &created, nil
+	}
 	if err != nil {
 		return nil, err
+	}
+	if n, rowsErr := res.RowsAffected(); rowsErr != nil {
+		return nil, rowsErr
+	} else if n != 1 {
+		return nil, ErrNotFound
 	}
 	return GetConversation(ctx, db, c.ID, c.UserID)
 }
@@ -378,16 +442,59 @@ func UpdateConversation(ctx context.Context, db *sql.DB, id, userID string, p Co
 	}
 	parts = append(parts, "updated_at=?")
 	args = append(args, time.Now().Unix())
-	args = append(args, id, userID, userID)
+	var workspaceID string
+	if err := db.QueryRowContext(ctx,
+		`SELECT COALESCE(workspace_id,'') FROM conversations WHERE id=?`, id,
+	).Scan(&workspaceID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	args = append(args, id)
+	args = append(args, workspaceResourceAccessArgs(userID)...)
 	// Same access predicate as GetConversation: the owner, or any member of the
 	// conversation's workspace (§workspaces — members switch branches, rename,
 	// attach KBs collaboratively). Deletion is NOT here; it stays creator-only.
 	q := "UPDATE conversations SET " + strings.Join(parts, ", ") +
-		" WHERE id=? AND (user_id=? OR (COALESCE(workspace_id,'')<>'' AND workspace_id IN (SELECT workspace_id FROM workspace_members WHERE user_id=?)))"
-	if _, err := db.ExecContext(ctx, q, args...); err != nil {
+		" WHERE id=? AND " + workspaceResourceAccessPredicate("conversations")
+	if workspaceID == "" {
+		res, err := db.ExecContext(ctx, q, args...)
+		if err != nil {
+			return nil, err
+		}
+		if n, rowsErr := res.RowsAffected(); rowsErr != nil {
+			return nil, rowsErr
+		} else if n != 1 {
+			return nil, ErrNotFound
+		}
+		return GetConversation(ctx, db, id, userID)
+	}
+
+	tx, err := beginWorkspaceMutationTx(ctx, db, workspaceID)
+	if err != nil {
 		return nil, err
 	}
-	return GetConversation(ctx, db, id, userID)
+	defer tx.Rollback() //nolint:errcheck
+	res, err := tx.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	if n, rowsErr := res.RowsAffected(); rowsErr != nil {
+		return nil, rowsErr
+	} else if n != 1 {
+		return nil, ErrNotFound
+	}
+	updated, err := scanConversationWithCreator(tx.QueryRowContext(ctx,
+		`SELECT c.id, c.user_id, COALESCE(c.project_id, ''), c.title, c.provider, c.model_id, c.fast, c.kb_ids, c.rag_mode, c.summary_blocks, COALESCE(c.active_leaf_id, ''), c.provider_state, c.pinned, c.archived, c.starred, c.created_at, c.updated_at, COALESCE(c.inline_source_conv, ''), COALESCE(c.inline_parent_id, ''), COALESCE(c.inline_quote, ''), COALESCE(c.workspace_id, ''), COALESCE(u.name,''), COALESCE(u.settings,'')
+		   FROM conversations c LEFT JOIN users u ON u.id=c.user_id WHERE c.id=?`, id))
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return &updated, nil
 }
 
 // inlineDescendants returns every inline sub-conversation transitively anchored
@@ -395,7 +502,7 @@ func UpdateConversation(ctx context.Context, db *sql.DB, id, userID string, p Co
 // can itself be a source for deeper threads, so this walks the whole subtree;
 // the visited set also guards against any accidental cycle. rootID is NOT
 // included in the result.
-func inlineDescendants(ctx context.Context, db *sql.DB, rootID string) ([]string, error) {
+func inlineDescendants(ctx context.Context, db conversationRowsQueryer, rootID string) ([]string, error) {
 	seen := map[string]bool{rootID: true}
 	var out []string
 	frontier := []string{rootID}
@@ -429,6 +536,46 @@ func inlineDescendants(ctx context.Context, db *sql.DB, rootID string) ([]string
 	return out, nil
 }
 
+// conversationIDsOwnedBy filters ids to rows owned by userID while preserving
+// the caller's traversal order. Both *sql.DB and *sql.Tx implement the query
+// surface, allowing user-scoped deletion to derive its complete worklist inside
+// the same transaction that performs the delete.
+func conversationIDsOwnedBy(ctx context.Context, q conversationRowsQueryer, ids []string, userID string) ([]string, error) {
+	ids = cleanIDs(ids)
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	args := anySlice(ids)
+	args = append(args, userID)
+	args = append(args, workspaceResourceAccessArgs(userID)...)
+	rows, err := q.QueryContext(ctx,
+		`SELECT id FROM conversations
+		  WHERE id IN (`+idPlaceholders(len(ids))+`) AND user_id=?
+		    AND `+workspaceResourceAccessPredicate("conversations"), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	owned := make(map[string]struct{}, len(ids))
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		owned[id] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(owned))
+	for _, id := range ids {
+		if _, ok := owned[id]; ok {
+			out = append(out, id)
+		}
+	}
+	return out, nil
+}
+
 // ConversationTreeIDs returns rootID plus every inline sub-conversation anchored
 // to it. Callers use this before deletion to collect side-state rows that SQL
 // cascades would otherwise hide (files/artifacts/storage refs).
@@ -440,47 +587,111 @@ func ConversationTreeIDs(ctx context.Context, db *sql.DB, rootID string) ([]stri
 	return append([]string{rootID}, children...), nil
 }
 
-// DeleteConversation removes a row and every inline sub-conversation anchored to
-// it (recursively), so deleting a conversation also discards the sub-threads
-// spawned from its text selections (§ text-selection threads). Returns the ids
-// of the additionally-deleted sub-conversations so the caller can clean up their
-// side state (e.g. RAG vectors).
-func DeleteConversation(ctx context.Context, db *sql.DB, id, userID string) ([]string, error) {
-	children, err := inlineDescendants(ctx, db, id)
-	if err != nil {
-		return nil, err
-	}
-	ids := append([]string{id}, children...)
+// ConversationDeletionState is the exact, transactionally-derived cleanup
+// worklist for a user-scoped conversation deletion. ConversationIDs contains the
+// root followed by only those descendants that the transaction actually deletes;
+// StoragePaths is restricted to that same set.
+type ConversationDeletionState struct {
+	ConversationIDs []string
+	StoragePaths    []string
+}
+
+// DeleteConversationWithState removes a user-owned conversation and every
+// user-owned inline descendant anchored to it. Inline threads owned by another
+// workspace member are deliberately preserved, including their files and cleanup
+// side state. The returned IDs and storage paths are computed in the deletion
+// transaction so API cleanup cannot run against a descendant that survived.
+func DeleteConversationWithState(ctx context.Context, db *sql.DB, id, userID string) (*ConversationDeletionState, error) {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback() //nolint:errcheck
-	var exists int
-	if err := tx.QueryRowContext(ctx, `SELECT 1 FROM conversations WHERE id=? AND user_id=?`, id, userID).Scan(&exists); err != nil {
+	var ownerID, workspaceID string
+	if err := tx.QueryRowContext(ctx,
+		`SELECT user_id, COALESCE(workspace_id,'') FROM conversations WHERE id=?`, id,
+	).Scan(&ownerID, &workspaceID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
 		return nil, err
 	}
+	if ownerID != userID {
+		return nil, ErrNotFound
+	}
+	// Membership revocation takes this same workspace lock. The authorization
+	// decision below therefore remains true until this transaction commits.
+	if workspaceID != "" {
+		if err := lockWorkspaceMembershipTx(ctx, tx, workspaceID); err != nil {
+			return nil, err
+		}
+	}
+	lockResult, err := tx.ExecContext(ctx, `UPDATE conversations SET id=id WHERE id=?`, id)
+	if err != nil {
+		return nil, err
+	}
+	if n, rowsErr := lockResult.RowsAffected(); rowsErr != nil {
+		return nil, rowsErr
+	} else if n != 1 {
+		return nil, ErrNotFound
+	}
+	authArgs := []any{id, userID}
+	authArgs = append(authArgs, workspaceResourceAccessArgs(userID)...)
+	var exists int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT 1 FROM conversations
+		  WHERE id=? AND user_id=? AND `+workspaceResourceAccessPredicate("conversations"), authArgs...,
+	).Scan(&exists); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	children, err := inlineDescendants(ctx, tx, id)
+	if err != nil {
+		return nil, err
+	}
+	children, err = conversationIDsOwnedBy(ctx, tx, children, userID)
+	if err != nil {
+		return nil, err
+	}
+	ids := append([]string{id}, children...)
+	storagePaths, err := storagePathsForConversationIDs(ctx, tx, ids)
+	if err != nil {
+		return nil, err
+	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM files WHERE conversation_id IN (`+idPlaceholders(len(ids))+`)`, anySlice(ids)...); err != nil {
 		return nil, err
 	}
-	res, err := tx.ExecContext(ctx, "DELETE FROM conversations WHERE id=? AND user_id=?", id, userID)
+	deleteArgs := anySlice(ids)
+	deleteArgs = append(deleteArgs, userID)
+	deleteArgs = append(deleteArgs, workspaceResourceAccessArgs(userID)...)
+	res, err := tx.ExecContext(ctx,
+		`DELETE FROM conversations
+		  WHERE id IN (`+idPlaceholders(len(ids))+`) AND user_id=?
+		    AND `+workspaceResourceAccessPredicate("conversations"), deleteArgs...)
 	if err != nil {
 		return nil, err
 	}
 	n, _ := res.RowsAffected()
-	if n == 0 {
+	if n != int64(len(ids)) {
 		return nil, ErrNotFound
-	}
-	for _, cid := range children {
-		_, _ = tx.ExecContext(ctx, "DELETE FROM conversations WHERE id=? AND user_id=?", cid, userID)
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	return children, nil
+	return &ConversationDeletionState{ConversationIDs: ids, StoragePaths: storagePaths}, nil
+}
+
+// DeleteConversation preserves the historical store API for callers that only
+// need descendant IDs. The slice now contains only descendants actually deleted
+// by the user-scoped transaction.
+func DeleteConversation(ctx context.Context, db *sql.DB, id, userID string) ([]string, error) {
+	state, err := DeleteConversationWithState(ctx, db, id, userID)
+	if err != nil {
+		return nil, err
+	}
+	return append([]string(nil), state.ConversationIDs[1:]...), nil
 }
 
 // DeleteConversationByID removes a conversation regardless of owner — admin
@@ -658,8 +869,22 @@ func scanMessage(s scanner) (Message, error) {
 	return m, nil
 }
 
-// CreateMessage inserts a new message (assistant placeholder uses status='streaming').
+// CreateMessage is the unscoped ingestion/maintenance primitive. User-triggered
+// generation must use CreateMessageForUser.
 func CreateMessage(ctx context.Context, db *sql.DB, m Message) (*Message, error) {
+	return createMessage(ctx, db, m, "")
+}
+
+// CreateMessageForUser serializes message persistence against membership
+// revocation and verifies the conversation boundary in the same transaction.
+func CreateMessageForUser(ctx context.Context, db *sql.DB, m Message, userID string) (*Message, error) {
+	if strings.TrimSpace(userID) == "" {
+		return nil, ErrNotFound
+	}
+	return createMessage(ctx, db, m, userID)
+}
+
+func createMessage(ctx context.Context, db *sql.DB, m Message, userID string) (*Message, error) {
 	if m.ID == "" {
 		m.ID = genID("msg")
 	}
@@ -684,6 +909,10 @@ func CreateMessage(ctx context.Context, db *sql.DB, m Message) (*Message, error)
 	if m.CreatedAt == 0 {
 		m.CreatedAt = time.Now().Unix()
 	}
+	var attachedFileIDs []string
+	if m.Role == "user" {
+		attachedFileIDs = attachmentFileIDs(m.Attachments)
+	}
 	var parent any
 	if m.ParentID == "" {
 		parent = nil
@@ -706,6 +935,80 @@ func CreateMessage(ctx context.Context, db *sql.DB, m Message) (*Message, error)
 		return nil, err
 	}
 	defer tx.Rollback() //nolint:errcheck
+	workspaceID := ""
+	workspaceBillingUserID := ""
+	if userID != "" {
+		// Every user-triggered row records the principal that initiated it. User
+		// rows expose authorship in shared conversations; assistant rows use the
+		// same field internally to bind later finalization to the generation owner.
+		if strings.TrimSpace(m.AuthorID) != userID {
+			return nil, ErrNotFound
+		}
+		if err := tx.QueryRowContext(ctx,
+			`SELECT COALESCE(workspace_id,'') FROM conversations WHERE id=?`, m.ConversationID,
+		).Scan(&workspaceID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, ErrNotFound
+			}
+			return nil, err
+		}
+		if workspaceID != "" {
+			if err := lockWorkspaceMembershipTx(ctx, tx, workspaceID); err != nil {
+				return nil, err
+			}
+			if err := tx.QueryRowContext(ctx,
+				`SELECT owner_id FROM workspaces WHERE id=?`, workspaceID,
+			).Scan(&workspaceBillingUserID); err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					return nil, ErrNotFound
+				}
+				return nil, err
+			}
+		}
+		lockResult, err := tx.ExecContext(ctx,
+			`UPDATE conversations SET id=id WHERE id=?`, m.ConversationID)
+		if err != nil {
+			return nil, err
+		}
+		if n, rowsErr := lockResult.RowsAffected(); rowsErr != nil {
+			return nil, rowsErr
+		} else if n != 1 {
+			return nil, ErrNotFound
+		}
+		accessArgs := []any{m.ConversationID}
+		accessArgs = append(accessArgs, workspaceResourceAccessArgs(userID)...)
+		var allowed int
+		if err := tx.QueryRowContext(ctx,
+			`SELECT 1 FROM conversations c
+			  WHERE c.id=? AND `+workspaceResourceAccessPredicate("c"), accessArgs...,
+		).Scan(&allowed); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, ErrNotFound
+			}
+			return nil, err
+		}
+		// Committing a member's workspace draft transfers its quota charge from
+		// the uploader to the canonical owner. Re-evaluate the exact transitioning
+		// bytes while both serialization locks are held by this transaction.
+		if m.Role == "user" && workspaceID != "" && workspaceBillingUserID != "" &&
+			strings.TrimSpace(m.AuthorID) != workspaceBillingUserID && len(attachedFileIDs) > 0 {
+			quotaArgs := []any{m.ConversationID}
+			quotaArgs = append(quotaArgs, anySlice(attachedFileIDs)...)
+			quotaArgs = append(quotaArgs, strings.TrimSpace(m.AuthorID))
+			var additional sql.NullInt64
+			if err := tx.QueryRowContext(ctx,
+				`SELECT COALESCE(SUM(size_bytes),0)
+				   FROM files
+				  WHERE conversation_id=? AND id IN (`+idPlaceholders(len(attachedFileIDs))+`)
+				    AND draft=1 AND user_id=? AND kind<>'image'`, quotaArgs...,
+			).Scan(&additional); err != nil {
+				return nil, err
+			}
+			if err := enforceStorageQuotaTx(ctx, tx, workspaceBillingUserID, additional.Int64); err != nil {
+				return nil, err
+			}
+		}
+	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO messages(
 		id, conversation_id, parent_id, role, provider, model_id, model_label, fast, blocks, raw, stop_reason, attachments, selected_user_skill_ids, citations,
 		input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost, currency, status, error, search_text, author_id, created_at
@@ -721,12 +1024,16 @@ func CreateMessage(ctx context.Context, db *sql.DB, m Message) (*Message, error)
 	// so a refresh can never observe a saved question whose attachments still look
 	// unsent (or an unsaved question whose files were prematurely committed).
 	if m.Role == "user" {
-		ids := attachmentFileIDs(m.Attachments)
-		if len(ids) > 0 {
+		if len(attachedFileIDs) > 0 {
 			args := []any{m.ConversationID}
-			args = append(args, anySlice(ids)...)
+			args = append(args, anySlice(attachedFileIDs)...)
+			// Only the uploader may transition a composer draft to committed.
+			// The API resolves attachment visibility before reaching this point,
+			// but keep the invariant in the transaction as well so a caller cannot
+			// commit another workspace member's draft by supplying its id.
+			args = append(args, strings.TrimSpace(m.AuthorID))
 			if _, err := tx.ExecContext(ctx,
-				`UPDATE files SET draft=0 WHERE conversation_id=? AND id IN (`+idPlaceholders(len(ids))+`)`, args...); err != nil {
+				`UPDATE files SET draft=0 WHERE conversation_id=? AND id IN (`+idPlaceholders(len(attachedFileIDs))+`) AND draft=1 AND user_id=?`, args...); err != nil {
 				return nil, err
 			}
 		}
@@ -922,41 +1229,233 @@ type MessageFinishPatch struct {
 	GenMs int64
 }
 
-func FinishMessage(ctx context.Context, db *sql.DB, id string, p MessageFinishPatch) error {
+// ErrConversationAccessRevoked means a generation lost access to its workspace
+// before terminal persistence. The streaming placeholder is scrubbed and marked
+// stopped before this error is returned.
+var ErrConversationAccessRevoked = errors.New("conversation access revoked during generation")
+
+type messageFinishExecer interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
+func execMessageFinish(ctx context.Context, ex messageFinishExecer, id string, p MessageFinishPatch, extraWhere string, extraArgs ...any) (sql.Result, error) {
 	var raw any
 	if len(p.Raw) > 0 {
 		raw = string(p.Raw)
 	} else {
 		raw = nil
 	}
-	_, err := db.ExecContext(ctx,
-		`UPDATE messages SET blocks=?, raw=?, citations=?, stop_reason=?, input_tokens=?, output_tokens=?, cache_read_tokens=?, cache_write_tokens=?, cost=?, credits=?, status=?, error=?, gen_ms=?, search_text=? WHERE id=?`,
+	args := []any{
 		string(p.Blocks), raw, string(p.Citations), p.StopReason,
-		p.InputTokens, p.OutputTokens, p.CacheReadTokens, p.CacheWriteTokens, p.Cost, p.Credits, p.Status, p.Error, p.GenMs, searchTextFromBlocks(p.Blocks), id)
+		p.InputTokens, p.OutputTokens, p.CacheReadTokens, p.CacheWriteTokens,
+		p.Cost, p.Credits, p.Status, p.Error, p.GenMs, searchTextFromBlocks(p.Blocks), id,
+	}
+	args = append(args, extraArgs...)
+	return ex.ExecContext(ctx,
+		`UPDATE messages SET blocks=?, raw=?, citations=?, stop_reason=?, input_tokens=?, output_tokens=?, cache_read_tokens=?, cache_write_tokens=?, cost=?, credits=?, status=?, error=?, gen_ms=?, search_text=? WHERE id=?`+extraWhere,
+		args...)
+}
+
+func FinishMessage(ctx context.Context, db *sql.DB, id string, p MessageFinishPatch) error {
+	_, err := execMessageFinish(ctx, db, id, p, "")
 	return err
 }
 
-// UpdateMessageContent overwrites a message's canonical blocks in place. Native
-// provider raw must be cleared at the same time: after a user edits an assistant
-// reply, replaying the original raw response would silently ignore that edit in
-// subsequent model turns. The caller must verify conversation access first.
-func UpdateMessageContent(ctx context.Context, db *sql.DB, id string, blocks json.RawMessage) error {
+// FinishMessageForUser is the user-generation finalizer. It shares the workspace
+// membership lock with kick/leave, verifies both the conversation boundary and
+// the assistant placeholder's initiating principal, and only then writes model
+// output. If revocation wins the lock, it terminalizes the placeholder with no
+// generated content so another member never inherits an answer produced after
+// the caller lost access.
+func FinishMessageForUser(ctx context.Context, db *sql.DB, id, expectedConvID, userID string, p MessageFinishPatch) error {
+	if strings.TrimSpace(id) == "" || strings.TrimSpace(expectedConvID) == "" || strings.TrimSpace(userID) == "" {
+		return ErrNotFound
+	}
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	var convID, role string
-	var createdAt int64
-	if err := tx.QueryRowContext(ctx, `SELECT conversation_id, role, created_at FROM messages WHERE id=?`, id).Scan(&convID, &role, &createdAt); err != nil {
+	var workspaceID, authorID, status string
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COALESCE(c.workspace_id,''), COALESCE(m.author_id,''), m.status
+		   FROM messages m JOIN conversations c ON c.id=m.conversation_id
+		  WHERE m.id=? AND m.conversation_id=? AND m.role='assistant'`, id, expectedConvID,
+	).Scan(&workspaceID, &authorID, &status); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		}
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE messages SET blocks=?, raw='', search_text=?, feedback='' WHERE id=?`, string(blocks), searchTextFromBlocks(blocks), id); err != nil {
+	if authorID != userID {
+		return ErrNotFound
+	}
+	if status != "streaming" {
+		return ErrConversationAccessRevoked
+	}
+	if workspaceID != "" {
+		if err := lockWorkspaceMembershipTx(ctx, tx, workspaceID); err != nil {
+			return err
+		}
+	}
+	lockResult, err := tx.ExecContext(ctx, `UPDATE conversations SET id=id WHERE id=?`, expectedConvID)
+	if err != nil {
 		return err
+	}
+	if n, rowsErr := lockResult.RowsAffected(); rowsErr != nil {
+		return rowsErr
+	} else if n != 1 {
+		return ErrNotFound
+	}
+
+	accessArgs := []any{id, expectedConvID, userID}
+	accessArgs = append(accessArgs, workspaceResourceAccessArgs(userID)...)
+	var allowed int
+	err = tx.QueryRowContext(ctx,
+		`SELECT 1
+		   FROM messages m JOIN conversations c ON c.id=m.conversation_id
+		  WHERE m.id=? AND m.conversation_id=? AND COALESCE(m.author_id,'')=?
+		    AND `+workspaceResourceAccessPredicate("c"), accessArgs...,
+	).Scan(&allowed)
+	if errors.Is(err, sql.ErrNoRows) {
+		// This row was created while access was valid. Revocation is allowed to
+		// terminalize only this caller's still-streaming assistant placeholder;
+		// content finalized before revocation won the workspace lock is preserved.
+		if _, scrubErr := tx.ExecContext(ctx,
+			`UPDATE messages
+			    SET blocks='[]', raw=NULL, citations='[]', stop_reason='stopped',
+			        input_tokens=0, output_tokens=0, cache_read_tokens=0, cache_write_tokens=0,
+			        cost=0, credits=0, status='stopped', error='', gen_ms=?, verify='', search_text=''
+			  WHERE id=? AND conversation_id=? AND role='assistant'
+			    AND COALESCE(author_id,'')=? AND status='streaming'`,
+			p.GenMs, id, expectedConvID, userID); scrubErr != nil {
+			return scrubErr
+		}
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+		return ErrConversationAccessRevoked
+	}
+	if err != nil {
+		return err
+	}
+
+	res, err := execMessageFinish(ctx, tx, id, p,
+		` AND conversation_id=? AND role='assistant' AND COALESCE(author_id,'')=? AND status='streaming'`, expectedConvID, userID)
+	if err != nil {
+		return err
+	}
+	if n, rowsErr := res.RowsAffected(); rowsErr != nil {
+		return rowsErr
+	} else if n != 1 {
+		return ErrConversationAccessRevoked
+	}
+	return tx.Commit()
+}
+
+// UpdateMessageContent is the unscoped maintenance/test primitive. User-facing
+// handlers must call UpdateMessageContentForUser so authorization and the write
+// share one transaction.
+func UpdateMessageContent(ctx context.Context, db *sql.DB, id string, blocks json.RawMessage) error {
+	return updateMessageContent(ctx, db, id, "", "", blocks)
+}
+
+// UpdateMessageContentForUser overwrites visible message content only while the
+// caller still has access to expectedConvID. User questions may be edited only
+// by their author; a legacy empty author belongs to the conversation creator.
+// Assistant replies remain collaboratively editable by current workspace
+// principals. Membership revocation shares the workspace lock acquired here.
+func UpdateMessageContentForUser(ctx context.Context, db *sql.DB, expectedConvID, userID, id string, blocks json.RawMessage) error {
+	if strings.TrimSpace(expectedConvID) == "" || strings.TrimSpace(userID) == "" {
+		return ErrNotFound
+	}
+	return updateMessageContent(ctx, db, id, expectedConvID, userID, blocks)
+}
+
+func updateMessageContent(ctx context.Context, db *sql.DB, id, expectedConvID, userID string, blocks json.RawMessage) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var convID, role, authorID string
+	var createdAt int64
+	if expectedConvID == "" {
+		if err := tx.QueryRowContext(ctx,
+			`SELECT conversation_id, role, created_at, COALESCE(author_id,'') FROM messages WHERE id=?`, id,
+		).Scan(&convID, &role, &createdAt, &authorID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrNotFound
+			}
+			return err
+		}
+	} else {
+		var ownerID, workspaceID string
+		if err := tx.QueryRowContext(ctx,
+			`SELECT m.conversation_id, m.role, m.created_at, COALESCE(m.author_id,''),
+			        c.user_id, COALESCE(c.workspace_id,'')
+			   FROM messages m JOIN conversations c ON c.id=m.conversation_id
+			  WHERE m.id=? AND m.conversation_id=?`, id, expectedConvID,
+		).Scan(&convID, &role, &createdAt, &authorID, &ownerID, &workspaceID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrNotFound
+			}
+			return err
+		}
+		if workspaceID != "" {
+			if err := lockWorkspaceMembershipTx(ctx, tx, workspaceID); err != nil {
+				return err
+			}
+		}
+		lockResult, err := tx.ExecContext(ctx, `UPDATE conversations SET id=id WHERE id=?`, convID)
+		if err != nil {
+			return err
+		}
+		if n, rowsErr := lockResult.RowsAffected(); rowsErr != nil {
+			return rowsErr
+		} else if n != 1 {
+			return ErrNotFound
+		}
+		accessArgs := []any{id, expectedConvID}
+		accessArgs = append(accessArgs, workspaceResourceAccessArgs(userID)...)
+		if err := tx.QueryRowContext(ctx,
+			`SELECT m.conversation_id, m.role, m.created_at, COALESCE(m.author_id,'')
+			   FROM messages m JOIN conversations c ON c.id=m.conversation_id
+			  WHERE m.id=? AND m.conversation_id=?
+			    AND `+workspaceResourceAccessPredicate("c"), accessArgs...,
+		).Scan(&convID, &role, &createdAt, &authorID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrNotFound
+			}
+			return err
+		}
+		if role != "user" && role != "assistant" {
+			return ErrNotFound
+		}
+		if role == "user" && ((authorID != "" && authorID != userID) || (authorID == "" && ownerID != userID)) {
+			return ErrNotFound
+		}
+	}
+	updateSQL := `UPDATE messages SET blocks=?, raw='', search_text=?, feedback='' WHERE id=?`
+	updateArgs := []any{string(blocks), searchTextFromBlocks(blocks), id}
+	if expectedConvID != "" {
+		updateSQL += ` AND conversation_id=? AND EXISTS (
+			SELECT 1 FROM conversations c
+			 WHERE c.id=messages.conversation_id AND ` + workspaceResourceAccessPredicate("c") + `
+		)`
+		updateArgs = append(updateArgs, expectedConvID)
+		updateArgs = append(updateArgs, workspaceResourceAccessArgs(userID)...)
+	}
+	res, err := tx.ExecContext(ctx, updateSQL, updateArgs...)
+	if err != nil {
+		return err
+	}
+	if n, rowsErr := res.RowsAffected(); rowsErr != nil {
+		return rowsErr
+	} else if n != 1 {
+		return ErrNotFound
 	}
 	// Feedback evaluates the exact question/answer text that was shown. An in-place
 	// edit invalidates that evidence: editing an answer clears its own evaluations;
@@ -991,6 +1490,58 @@ func UpdateMessageContent(ctx context.Context, db *sql.DB, id string, blocks jso
 func SetMessageVerify(ctx context.Context, db *sql.DB, id string, verify json.RawMessage) error {
 	_, err := db.ExecContext(ctx, `UPDATE messages SET verify=? WHERE id=?`, string(verify), id)
 	return err
+}
+
+// SetMessageVerifyForUser persists an audit only while the generation initiator
+// still has authoritative access to the exact conversation. Kick/leave takes the
+// same workspace lock, so a completed audit cannot be attached after revocation.
+func SetMessageVerifyForUser(ctx context.Context, db *sql.DB, id, expectedConvID, userID string, verify json.RawMessage) error {
+	if strings.TrimSpace(id) == "" || strings.TrimSpace(expectedConvID) == "" || strings.TrimSpace(userID) == "" {
+		return ErrNotFound
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var workspaceID, status string
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COALESCE(c.workspace_id,''), m.status
+		   FROM messages m JOIN conversations c ON c.id=m.conversation_id
+		  WHERE m.id=? AND m.conversation_id=? AND m.role='assistant'
+		    AND COALESCE(m.author_id,'')=?`, id, expectedConvID, userID,
+	).Scan(&workspaceID, &status); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	}
+	if status != "streaming" {
+		return ErrConversationAccessRevoked
+	}
+	if workspaceID != "" {
+		if err := lockWorkspaceMembershipTx(ctx, tx, workspaceID); err != nil {
+			return err
+		}
+	}
+	args := []any{string(verify), id, expectedConvID, userID}
+	args = append(args, workspaceResourceAccessArgs(userID)...)
+	res, err := tx.ExecContext(ctx,
+		`UPDATE messages SET verify=?
+		  WHERE id=? AND conversation_id=? AND role='assistant' AND COALESCE(author_id,'')=? AND status='streaming'
+		    AND EXISTS (
+		      SELECT 1 FROM conversations c
+		       WHERE c.id=messages.conversation_id AND `+workspaceResourceAccessPredicate("c")+`
+		    )`, args...)
+	if err != nil {
+		return err
+	}
+	if n, rowsErr := res.RowsAffected(); rowsErr != nil {
+		return rowsErr
+	} else if n != 1 {
+		return ErrConversationAccessRevoked
+	}
+	return tx.Commit()
 }
 
 // SiblingsOf returns ids of messages sharing the same parent and role (or the
@@ -1144,40 +1695,62 @@ func LatestAssistantInSubtree(ctx context.Context, db *sql.DB, convID, msgID str
 //
 // Returns the conversation's (possibly new) active leaf id.
 func DeleteRound(ctx context.Context, db *sql.DB, convID, userID, msgID string) (string, error) {
-	var owner, workspaceID string
-	if err := db.QueryRowContext(ctx, `SELECT user_id, COALESCE(workspace_id,'') FROM conversations WHERE id=?`, convID).Scan(&owner, &workspaceID); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return "", ErrNotFound
-		}
-		return "", err
-	}
-	// §workspaces: the creator may always delete. A non-creator member may only
-	// reach this point for a round the caller (deleteMessageHandler) already
-	// verified belongs to THEM — this check just admits workspace participants;
-	// it does not re-derive per-round authorship.
-	if owner != userID {
-		if workspaceID == "" {
-			return "", ErrNotFound
-		}
-		if role, err := IsWorkspaceMember(ctx, db, workspaceID, userID); err != nil {
-			return "", err
-		} else if role == "" {
-			return "", ErrNotFound
-		}
-	}
-	m, err := GetMessage(ctx, db, msgID)
-	if err != nil {
-		return "", err
-	}
-	if m.ConversationID != convID {
-		return "", ErrNotFound
-	}
-
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return "", err
 	}
 	defer func() { _ = tx.Rollback() }()
+
+	var owner, workspaceID string
+	if err := tx.QueryRowContext(ctx,
+		`SELECT user_id, COALESCE(workspace_id,'') FROM conversations WHERE id=?`, convID,
+	).Scan(&owner, &workspaceID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", ErrNotFound
+		}
+		return "", err
+	}
+	// Serialize membership revocation before locking the conversation row. The
+	// same ordering is used by conversation deletion and member removal, avoiding
+	// a Postgres window where a kick could commit after authorization but before
+	// this destructive transaction.
+	if workspaceID != "" {
+		if err := lockWorkspaceMembershipTx(ctx, tx, workspaceID); err != nil {
+			return "", err
+		}
+	}
+	lockResult, err := tx.ExecContext(ctx, `UPDATE conversations SET id=id WHERE id=?`, convID)
+	if err != nil {
+		return "", err
+	}
+	if affected, affectedErr := lockResult.RowsAffected(); affectedErr != nil {
+		return "", affectedErr
+	} else if affected == 0 {
+		return "", ErrNotFound
+	}
+	accessArgs := []any{convID}
+	accessArgs = append(accessArgs, workspaceResourceAccessArgs(userID)...)
+	if err := tx.QueryRowContext(ctx,
+		`SELECT user_id, COALESCE(workspace_id,'') FROM conversations
+		  WHERE id=? AND `+workspaceResourceAccessPredicate("conversations"), accessArgs...,
+	).Scan(&owner, &workspaceID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", ErrNotFound
+		}
+		return "", err
+	}
+	creator := owner == userID
+
+	var m Message
+	if err := tx.QueryRowContext(ctx,
+		`SELECT id, conversation_id, COALESCE(parent_id,''), role, created_at, COALESCE(author_id,'')
+		 FROM messages WHERE id=? AND conversation_id=?`, msgID, convID,
+	).Scan(&m.ID, &m.ConversationID, &m.ParentID, &m.Role, &m.CreatedAt, &m.AuthorID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", ErrNotFound
+		}
+		return "", err
+	}
 
 	var (
 		deletable     []string
@@ -1188,17 +1761,37 @@ func DeleteRound(ctx context.Context, db *sql.DB, convID, userID, msgID string) 
 	// Resolve the parent WITHIN the tx — a GetMessage on `db` here would grab a
 	// second pool connection and deadlock against this tx's SQLite write lock
 	// (single-writer). One read serves both the branch check and the round walk-up.
-	var pParent, pRole string
+	var pParent, pRole, pAuthor string
 	var pCreated int64
 	pFound := false
 	if m.ParentID != "" {
-		switch perr := tx.QueryRowContext(ctx, `SELECT COALESCE(parent_id,''), role, created_at FROM messages WHERE id=? AND conversation_id=?`, m.ParentID, convID).Scan(&pParent, &pRole, &pCreated); {
+		switch perr := tx.QueryRowContext(ctx,
+			`SELECT COALESCE(parent_id,''), role, created_at, COALESCE(author_id,'')
+			 FROM messages WHERE id=? AND conversation_id=?`, m.ParentID, convID,
+		).Scan(&pParent, &pRole, &pCreated, &pAuthor); {
 		case perr == nil:
 			pFound = true
 		case errors.Is(perr, sql.ErrNoRows):
 			// parent already gone — treat as a root
 		default:
 			return "", perr
+		}
+	}
+
+	// The HTTP handler performs the same check for a fast 404, but the store is
+	// the authority: derive the round's user turn under this transaction's lock.
+	// Legacy empty authors belong to the conversation creator and therefore fail
+	// closed for ordinary workspace members.
+	if !creator {
+		roundAuthor := ""
+		switch {
+		case m.Role == "user":
+			roundAuthor = m.AuthorID
+		case pFound && pRole == "user":
+			roundAuthor = pAuthor
+		}
+		if strings.TrimSpace(roundAuthor) != userID {
+			return "", ErrNotFound
 		}
 	}
 
@@ -1253,6 +1846,29 @@ func DeleteRound(ctx context.Context, db *sql.DB, convID, userID, msgID string) 
 			if err := reparentChildrenTx(ctx, tx, convID, uID, uParent); err != nil {
 				return "", err
 			}
+		}
+	}
+
+	// Deleting one regenerated assistant variant removes its complete downstream
+	// branch. In a shared conversation that branch may contain continuations
+	// authored by other members. A non-creator may remove only a branch whose user
+	// turns all belong to them; empty legacy authors fail closed as well.
+	if branch && !creator && len(deletable) > 0 {
+		args := []any{convID}
+		args = append(args, anySlice(deletable)...)
+		args = append(args, userID)
+		var foreignUserID string
+		err := tx.QueryRowContext(ctx,
+			`SELECT id FROM messages
+			 WHERE conversation_id=? AND id IN (`+idPlaceholders(len(deletable))+`)
+			   AND role='user' AND COALESCE(author_id,'')<>?
+			 LIMIT 1`, args...,
+		).Scan(&foreignUserID)
+		if err == nil {
+			return "", ErrNotFound
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return "", err
 		}
 	}
 	for _, id := range deletable {

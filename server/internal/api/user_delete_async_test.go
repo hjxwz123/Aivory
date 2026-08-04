@@ -2,14 +2,17 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"aivory/server/internal/cache"
+	"aivory/server/internal/config"
 	"aivory/server/internal/store"
 )
 
@@ -43,7 +46,7 @@ func TestAsyncUserDeletionEndToEnd(t *testing.T) {
 	mustExec(t, db, `INSERT INTO usage_logs(user_id,model_id,purpose,input_tokens,output_tokens,cost,created_at)
 	  VALUES('u9','m1','chat',10,5,0.01,100)`)
 
-	d := Deps{DB: db, Cache: cache.NewMemory()}
+	d := Deps{DB: db, Cache: cache.NewMemory(), Config: config.Config{UploadDir: dir}}
 
 	// Phase 1: the DELETE request — instant lockout, 202, no heavy work yet.
 	req := httptest.NewRequest("DELETE", "/api/admin/users/u9", nil)
@@ -122,6 +125,88 @@ func TestMarkUserDeletingLastAdminGuard(t *testing.T) {
 	}
 }
 
+func TestWorkspaceOwnerDeletionReturnsConflictWithoutQueuingJob(t *testing.T) {
+	ctx := context.Background()
+	db := openMigrated(t, filepath.Join(t.TempDir(), "workspace-owner-delete-guard.db"))
+	defer db.Close()
+	selfHash, err := store.HashPassword("self-password")
+	if err != nil {
+		t.Fatalf("hash password: %v", err)
+	}
+	for _, query := range []string{
+		`INSERT INTO users(id,email,name,password_hash,role) VALUES('admin-actor','admin@x.test','Admin','h','admin')`,
+		`INSERT INTO users(id,email,name,password_hash,role) VALUES('admin-target','target@x.test','Target','h','user')`,
+		`INSERT INTO users(id,email,name,password_hash,role) VALUES('admin-member','member-a@x.test','Member','h','user')`,
+		`INSERT INTO users(id,email,name,password_hash,role) VALUES('self-owner','self@x.test','Self',?,'user')`,
+		`INSERT INTO users(id,email,name,password_hash,role) VALUES('self-member','member-b@x.test','Member','h','user')`,
+		`INSERT INTO workspaces(id,name,owner_id,invite_token) VALUES('ws-admin-target','Admin target workspace','admin-target','invite-admin-target')`,
+		`INSERT INTO workspace_members(workspace_id,user_id,role) VALUES('ws-admin-target','admin-target','owner')`,
+		`INSERT INTO workspace_members(workspace_id,user_id,role) VALUES('ws-admin-target','admin-member','member')`,
+		`INSERT INTO workspaces(id,name,owner_id,invite_token) VALUES('ws-self-owner','Self workspace','self-owner','invite-self-owner')`,
+		`INSERT INTO workspace_members(workspace_id,user_id,role) VALUES('ws-self-owner','self-owner','owner')`,
+		`INSERT INTO workspace_members(workspace_id,user_id,role) VALUES('ws-self-owner','self-member','member')`,
+	} {
+		if strings.Contains(query, "VALUES('self-owner'") {
+			mustExec(t, db, query, selfHash)
+		} else {
+			mustExec(t, db, query)
+		}
+	}
+	d := Deps{DB: db, Cache: cache.NewMemory()}
+
+	adminReq := httptest.NewRequest(http.MethodDelete, "/api/admin/users/admin-target", nil)
+	adminReq = adminReq.WithContext(context.WithValue(adminReq.Context(), pathCtxKey{}, map[string]string{"id": "admin-target"}))
+	adminReq = adminReq.WithContext(context.WithValue(adminReq.Context(), userCtxKey{}, &store.User{ID: "admin-actor", Role: "admin", Status: "active"}))
+	adminRec := httptest.NewRecorder()
+	deleteUserAdmin(d, adminRec, adminReq)
+	if adminRec.Code != http.StatusConflict {
+		t.Fatalf("admin owner delete status=%d body=%s, want 409", adminRec.Code, adminRec.Body.String())
+	}
+
+	selfReq := httptest.NewRequest(http.MethodDelete, "/api/me", strings.NewReader(`{"password":"self-password"}`))
+	selfReq.Header.Set("Content-Type", "application/json")
+	selfReq = selfReq.WithContext(context.WithValue(selfReq.Context(), userCtxKey{}, &store.User{
+		ID: "self-owner", Email: "self@x.test", Role: "user", Status: "active", HasPassword: true,
+	}))
+	selfRec := httptest.NewRecorder()
+	deleteMeHandler(d, selfRec, selfReq)
+	if selfRec.Code != http.StatusConflict {
+		t.Fatalf("self owner delete status=%d body=%s, want 409", selfRec.Code, selfRec.Body.String())
+	}
+
+	for _, id := range []string{"admin-target", "self-owner"} {
+		var status string
+		if err := db.QueryRowContext(ctx, `SELECT status FROM users WHERE id=?`, id).Scan(&status); err != nil || status != "active" {
+			t.Fatalf("user %s status=%q err=%v, want active", id, status, err)
+		}
+		if userDeletionJobExists(id) {
+			t.Fatalf("rejected deletion created manager job for %s", id)
+		}
+	}
+	var pending int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pending_storage_cleanup`).Scan(&pending); err != nil || pending != 0 {
+		t.Fatalf("rejected deletion cleanup ledger rows=%d err=%v", pending, err)
+	}
+}
+
+func TestStartUserDeletionRejectsStalePasswordWithoutQueuingJob(t *testing.T) {
+	ctx := context.Background()
+	db := openMigrated(t, filepath.Join(t.TempDir(), "stale-password-delete.db"))
+	defer db.Close()
+	mustExec(t, db, `INSERT INTO users(id,email,name,password_hash,role) VALUES('stale-delete','stale@x.test','Stale','current-hash','user')`)
+	d := Deps{DB: db, Cache: cache.NewMemory()}
+	if started, err := startUserDeletion(d, "stale-delete", "stale@x.test", "previous-hash"); !errors.Is(err, store.ErrUserCredentialsChanged) || started {
+		t.Fatalf("start stale password changed=%v err=%v, want false/ErrUserCredentialsChanged", started, err)
+	}
+	var status string
+	if err := db.QueryRowContext(ctx, `SELECT status FROM users WHERE id='stale-delete'`).Scan(&status); err != nil || status != "active" {
+		t.Fatalf("status=%q err=%v, want active", status, err)
+	}
+	if userDeletionJobExists("stale-delete") {
+		t.Fatal("stale-password rejection polluted deletion manager")
+	}
+}
+
 func TestBanAndUnbanRefuseDeletingAccount(t *testing.T) {
 	ctx := context.Background()
 	db := openMigrated(t, filepath.Join(t.TempDir(), "ban-deleting.db"))
@@ -172,7 +257,7 @@ func TestStartupSweepFinishesOrphanedLedgerPaths(t *testing.T) {
 	mustExec(t, db, `INSERT INTO pending_storage_cleanup(path,user_id,created_at) VALUES(?,?,100)`, orphanPath, "gone")
 	mustExec(t, db, `INSERT INTO pending_storage_cleanup(path,user_id,created_at) VALUES(?,?,100)`, ownedPath, "u1")
 
-	sweepPendingStorageCleanup(Deps{DB: db, Cache: cache.NewMemory()})
+	sweepPendingStorageCleanup(Deps{DB: db, Cache: cache.NewMemory(), Config: config.Config{UploadDir: dir}})
 
 	if _, err := os.Stat(orphanPath); !os.IsNotExist(err) {
 		t.Fatal("orphaned path not removed by sweep")
@@ -243,4 +328,13 @@ func waitForDeletion(t *testing.T, userID string) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatalf("deletion job for %s did not finish in time", userID)
+}
+
+func userDeletionJobExists(userID string) bool {
+	for _, job := range userDeletions.list() {
+		if job.UserID == userID {
+			return true
+		}
+	}
+	return false
 }

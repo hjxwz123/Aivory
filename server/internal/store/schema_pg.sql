@@ -708,6 +708,7 @@ CREATE INDEX IF NOT EXISTS idx_artifacts_message ON artifacts(message_id);
 
 CREATE TABLE IF NOT EXISTS refresh_tokens (
   jti        TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL DEFAULT '',
   user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   expires_at BIGINT NOT NULL,
   revoked    INTEGER NOT NULL DEFAULT 0,
@@ -718,6 +719,8 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
   location   TEXT NOT NULL DEFAULT '',
   last_seen  BIGINT NOT NULL DEFAULT 0
 );
+CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user_id ON refresh_tokens(user_id);
+CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user_session ON refresh_tokens(user_id, session_id);
 
 -- OAuth / social login providers (see schema.sql for the full rationale).
 CREATE TABLE IF NOT EXISTS oauth_providers (
@@ -727,12 +730,15 @@ CREATE TABLE IF NOT EXISTS oauth_providers (
   icon          TEXT NOT NULL DEFAULT '',
   client_id     TEXT NOT NULL DEFAULT '',
   client_secret TEXT NOT NULL DEFAULT '',
+  issuer_url    TEXT NOT NULL DEFAULT '',
+  jwks_url      TEXT NOT NULL DEFAULT '',
   auth_url      TEXT NOT NULL DEFAULT '',
   token_url     TEXT NOT NULL DEFAULT '',
   userinfo_url  TEXT NOT NULL DEFAULT '',
   scopes        TEXT NOT NULL DEFAULT '',
   team_id       TEXT NOT NULL DEFAULT '',
   key_id        TEXT NOT NULL DEFAULT '',
+  subject_namespace TEXT NOT NULL DEFAULT '',
   enabled       INTEGER NOT NULL DEFAULT 1,
   sort_order    INTEGER NOT NULL DEFAULT 0,
   updated_at    BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)

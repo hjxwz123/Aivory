@@ -247,8 +247,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_orders_provider_order_unique
   ON payment_orders(provider, channel_id, provider_order_id) WHERE provider_order_id<>'';
 
 -- Provider-facing checkout attempts belonging to one commercial order. EPay
--- retries receive a fresh merchant_order_id while entitlement fulfillment
--- remains idempotent on payment_orders.
+-- resumes reuse the outstanding merchant_order_id. The integration does not
+-- issue a replacement without trusted proof that the gateway reference ended;
+-- ambiguous legacy orders with multiple references fail closed.
 CREATE TABLE IF NOT EXISTS payment_order_attempts (
   merchant_order_id TEXT PRIMARY KEY,
   order_id          TEXT NOT NULL REFERENCES payment_orders(id) ON DELETE CASCADE,
@@ -754,6 +755,7 @@ CREATE INDEX IF NOT EXISTS idx_artifacts_message ON artifacts(message_id);
 
 CREATE TABLE IF NOT EXISTS refresh_tokens (
   jti        TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL DEFAULT '',
   user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   expires_at INTEGER NOT NULL,
   revoked    INTEGER NOT NULL DEFAULT 0,
@@ -767,25 +769,30 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
 );
 
 CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user_id ON refresh_tokens(user_id);
+CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user_session ON refresh_tokens(user_id, session_id);
 
 -- OAuth / social login providers, configured by the admin. Built-in kinds
 -- (google | github | apple) fill their endpoints from code defaults; kind=oidc
--- is a generic OAuth2/OIDC provider whose endpoints come from the row. The
--- client_secret is plaintext like channel api_key; for Apple it holds the
+-- is generic OpenID Connect and kind=oauth2 is generic OAuth 2.0 UserInfo. Their
+-- endpoints come from the row. client_secret is plaintext like channel api_key;
+-- for Apple it holds the
 -- AuthKey .p8 private key used to mint the client-secret JWT.
 CREATE TABLE IF NOT EXISTS oauth_providers (
   id            TEXT PRIMARY KEY,                -- "oa_<hex>"
-  kind          TEXT NOT NULL,                   -- google | github | apple | oidc
+  kind          TEXT NOT NULL,                   -- google | github | apple | oidc | oauth2
   name          TEXT NOT NULL,                   -- label shown on the login button
   icon          TEXT NOT NULL DEFAULT '',        -- emoji / uploaded URL (custom providers)
   client_id     TEXT NOT NULL DEFAULT '',
   client_secret TEXT NOT NULL DEFAULT '',        -- apple: the .p8 private key
-  auth_url      TEXT NOT NULL DEFAULT '',        -- oidc only (built-ins use defaults)
+  issuer_url    TEXT NOT NULL DEFAULT '',        -- expected OIDC iss (generic providers)
+  jwks_url      TEXT NOT NULL DEFAULT '',        -- trusted signing-key set URL
+  auth_url      TEXT NOT NULL DEFAULT '',        -- oidc/oauth2 only (built-ins use defaults)
   token_url     TEXT NOT NULL DEFAULT '',
   userinfo_url  TEXT NOT NULL DEFAULT '',
   scopes        TEXT NOT NULL DEFAULT '',        -- space-separated override
   team_id       TEXT NOT NULL DEFAULT '',        -- apple
   key_id        TEXT NOT NULL DEFAULT '',        -- apple
+  subject_namespace TEXT NOT NULL DEFAULT '',    -- internal trust-domain generation
   enabled       INTEGER NOT NULL DEFAULT 1,
   sort_order    INTEGER NOT NULL DEFAULT 0,
   updated_at    INTEGER NOT NULL DEFAULT (strftime('%s','now'))

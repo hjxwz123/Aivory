@@ -171,10 +171,7 @@ func TestHTTPGenerationScopedStopDoesNotCancelConcurrentEditedBranch(t *testing.
 	toolRegistry := tools.NewRegistry(db, cfg, logger)
 	orchestrator := llm.NewOrchestrator(db, providers, toolRegistry, nil, memoryCache, nil, nil, nil, logger)
 	authService := authsvc.New(secret, cfg.AccessTTL, cfg.RefreshTTL, memoryCache)
-	token, _, err := authService.IssueAccess(user.ID, user.Role, user.TokenVer)
-	if err != nil {
-		t.Fatalf("issue access token: %v", err)
-	}
+	token := issueBoundTestAccessToken(t, db, authService, user)
 
 	d := Deps{
 		Config:       cfg,
@@ -419,6 +416,179 @@ func TestHTTPGenerationScopedStopDoesNotCancelConcurrentEditedBranch(t *testing.
 
 	if active, ok := memoryCache.Get("gen:active:" + user.ID); !ok || active != "0" {
 		t.Fatalf("active generation count = %q (present=%v), want 0", active, ok)
+	}
+	if strings.Contains(strings.ToLower(logs.String()), "foreign key") {
+		t.Fatalf("server logged a foreign-key error: %s", logs.String())
+	}
+}
+
+func TestHTTPConversationStopIsScopedToWorkspaceMember(t *testing.T) {
+	ctx := context.Background()
+	db := openMigrated(t, filepath.Join(t.TempDir(), "workspace-member-stop-http.db"))
+	t.Cleanup(func() { _ = db.Close() })
+	for _, user := range []struct{ id, email string }{
+		{"stop-member-a", "stop-member-a@example.test"},
+		{"stop-member-b", "stop-member-b@example.test"},
+	} {
+		mustExec(t, db, `INSERT INTO users(id,email,password_hash,name,role) VALUES(?,?,?,?,'admin')`,
+			user.id, user.email, "h", user.id)
+	}
+	memberA, err := store.FindUserByID(ctx, db, "stop-member-a")
+	if err != nil {
+		t.Fatalf("load member A: %v", err)
+	}
+	memberB, err := store.FindUserByID(ctx, db, "stop-member-b")
+	if err != nil {
+		t.Fatalf("load member B: %v", err)
+	}
+	workspace, err := store.CreateWorkspace(ctx, db, memberA.ID, "Stop isolation")
+	if err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := store.JoinWorkspace(ctx, db, workspace.ID, memberB.ID); err != nil {
+		t.Fatalf("join member B: %v", err)
+	}
+
+	channel, err := store.CreateChannel(ctx, db, "Workspace Stop HTTP", "openai", "chat", "https://example.invalid", "key")
+	if err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	model, err := store.CreateModel(ctx, db, store.Model{
+		ChannelID: channel.ID,
+		Kind:      "chat",
+		RequestID: "workspace-stop-model",
+		Label:     "Workspace stop model",
+		Enabled:   true,
+		Stream:    true,
+		ToolMode:  "native",
+	})
+	if err != nil {
+		t.Fatalf("create model: %v", err)
+	}
+	if err := store.SetFastModel(ctx, db, model.ID); err != nil {
+		t.Fatalf("set fast model: %v", err)
+	}
+	for key, value := range map[string]any{
+		"fallback_ttft_sec":          0,
+		"fallback_model_id":          "",
+		"disabled_tools":             []string{},
+		"max_concurrent_generations": 3,
+	} {
+		if err := store.SetSetting(db, key, value); err != nil {
+			t.Fatalf("set %s: %v", key, err)
+		}
+	}
+	conversation, err := store.CreateConversation(ctx, db, store.Conversation{
+		ID:          "workspace-member-stop-conversation",
+		UserID:      memberA.ID,
+		WorkspaceID: workspace.ID,
+		Title:       "Workspace member stop isolation",
+		ModelID:     model.ID,
+	})
+	if err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+
+	memoryCache := cache.NewMemory()
+	secret := "workspace-member-stop-http-secret-32"
+	cfg := config.Config{
+		JWTSecret:   secret,
+		AccessTTL:   time.Hour,
+		RefreshTTL:  24 * time.Hour,
+		UploadDir:   t.TempDir(),
+		ArtifactDir: t.TempDir(),
+	}
+	var logs bytes.Buffer
+	logger := log.New(&logs, "", 0)
+	providers := llm.NewRegistry(logger)
+	provider := newGenerationStopHTTPProvider()
+	providers.Register(provider)
+	toolRegistry := tools.NewRegistry(db, cfg, logger)
+	orchestrator := llm.NewOrchestrator(db, providers, toolRegistry, nil, memoryCache, nil, nil, nil, logger)
+	authService := authsvc.New(secret, cfg.AccessTTL, cfg.RefreshTTL, memoryCache)
+	tokenA := issueBoundTestAccessToken(t, db, authService, memberA)
+	tokenB := issueBoundTestAccessToken(t, db, authService, memberB)
+
+	d := Deps{
+		Config:       cfg,
+		DB:           db,
+		Cache:        memoryCache,
+		Auth:         authService,
+		Providers:    providers,
+		Tools:        toolRegistry,
+		Orchestrator: orchestrator,
+		Logger:       logger,
+	}
+	server := httptest.NewServer(NewRouter(d))
+	client := server.Client()
+	client.Timeout = 5 * time.Second
+	t.Cleanup(func() {
+		for call := 0; call < len(provider.release); call++ {
+			provider.releaseCall(call)
+		}
+		memoryCache.Publish("user:"+memberA.ID+":kill", "1")
+		memoryCache.Publish("user:"+memberB.ID+":kill", "1")
+		server.Close()
+	})
+
+	responseA := branchHTTPPostMessage(t, client, server.URL, tokenA, conversation.ID,
+		`{"text":"member A stays live","tool_mode":"enabled","fast":true}`)
+	waitGenerationStopProviderStarted(t, provider.started[0], "member A generation")
+	responseB := branchHTTPPostMessage(t, client, server.URL, tokenB, conversation.ID,
+		`{"text":"member B stops own generation","tool_mode":"enabled","fast":true}`)
+	waitGenerationStopProviderStarted(t, provider.started[1], "member B generation")
+
+	stopResponse := branchHTTPDoJSON(t, client, http.MethodPost,
+		server.URL+"/api/conversations/"+conversation.ID+"/stop", tokenB, ``)
+	stopBody, readErr := io.ReadAll(stopResponse.Body)
+	stopResponse.Body.Close()
+	if readErr != nil {
+		t.Fatalf("read member B stop response: %v", readErr)
+	}
+	if stopResponse.StatusCode != http.StatusOK || !strings.Contains(string(stopBody), `"ok":true`) {
+		t.Fatalf("member B stop status=%d body=%s", stopResponse.StatusCode, stopBody)
+	}
+
+	framesB := branchHTTPReadSSE(t, responseB, nil)
+	branchHTTPAssertTerminal(t, "member B stopped generation", framesB, "stopped")
+	select {
+	case <-provider.canceled[1]:
+	default:
+		t.Fatal("member B's provider context was not canceled")
+	}
+	select {
+	case <-provider.canceled[0]:
+		t.Fatal("member B's conversation stop canceled member A")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	provider.releaseCall(0)
+	framesA := branchHTTPReadSSE(t, responseA, nil)
+	branchHTTPAssertTerminal(t, "member A unaffected generation", framesA, "stop")
+	select {
+	case <-provider.canceled[0]:
+		t.Fatal("member A was canceled before successful completion")
+	default:
+	}
+
+	// A selector-less conversation stop is a live broadcast, not a durable intent.
+	// A later generation from member B must not inherit the previous cancellation.
+	laterB := branchHTTPPostMessage(t, client, server.URL, tokenB, conversation.ID,
+		`{"text":"member B later generation","tool_mode":"enabled","fast":true}`)
+	waitGenerationStopProviderStarted(t, provider.started[2], "member B later generation")
+	select {
+	case <-provider.canceled[2]:
+		t.Fatal("member B's earlier conversation stop canceled a later generation")
+	case <-time.After(200 * time.Millisecond):
+	}
+	provider.releaseCall(2)
+	laterFramesB := branchHTTPReadSSE(t, laterB, nil)
+	branchHTTPAssertTerminal(t, "member B later generation", laterFramesB, "stop")
+
+	for _, userID := range []string{memberA.ID, memberB.ID} {
+		if active, ok := memoryCache.Get("gen:active:" + userID); !ok || active != "0" {
+			t.Fatalf("active generation count for %s = %q (present=%v), want 0", userID, active, ok)
+		}
 	}
 	if strings.Contains(strings.ToLower(logs.String()), "foreign key") {
 		t.Fatalf("server logged a foreign-key error: %s", logs.String())

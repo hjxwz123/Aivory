@@ -143,11 +143,45 @@ func SetMessageFeedbackForUser(ctx context.Context, db *sql.DB, feedback Message
 		feedback.Comment = ""
 	}
 
-	tx, err := db.BeginTx(ctx, nil)
+	var workspaceID string
+	if err := db.QueryRowContext(ctx,
+		`SELECT COALESCE(c.workspace_id,'')
+		   FROM messages m JOIN conversations c ON c.id=m.conversation_id
+		  WHERE m.id=? AND m.conversation_id=? AND m.role='assistant'`,
+		feedback.MessageID, feedback.ConversationID,
+	).Scan(&workspaceID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	var tx *sql.Tx
+	if workspaceID != "" {
+		tx, err = beginWorkspaceMutationTx(ctx, db, workspaceID)
+	} else {
+		tx, err = db.BeginTx(ctx, nil)
+	}
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer tx.Rollback() //nolint:errcheck
+
+	accessArgs := []any{feedback.MessageID, feedback.ConversationID}
+	accessArgs = append(accessArgs, workspaceResourceAccessArgs(feedback.UserID)...)
+	var authoritativeWorkspaceID, authoritativeModelID string
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COALESCE(c.workspace_id,''), COALESCE(m.model_id,'')
+		   FROM messages m JOIN conversations c ON c.id=m.conversation_id
+		  WHERE m.id=? AND m.conversation_id=? AND m.role='assistant'
+		    AND `+workspaceResourceAccessPredicate("c"), accessArgs...,
+	).Scan(&authoritativeWorkspaceID, &authoritativeModelID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	feedback.WorkspaceID = authoritativeWorkspaceID
+	feedback.ModelID = authoritativeModelID
 
 	if feedback.Rating == "" {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM message_feedback WHERE message_id=? AND user_id=?`, feedback.MessageID, feedback.UserID); err != nil {

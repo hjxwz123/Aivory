@@ -28,7 +28,7 @@ func listProjectsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 			writeError(w, 404, errNotFound)
 			return
 		}
-		rows, err = store.ListWorkspaceProjects(r.Context(), d.DB, wsID)
+		rows, err = store.ListWorkspaceProjectsForUser(r.Context(), d.DB, wsID, u.ID)
 	} else {
 		rows, err = store.ListProjects(r.Context(), d.DB, u.ID)
 	}
@@ -92,22 +92,22 @@ func createProjectHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
-	// Enforce the group's project cap (§ user groups). 0 = unlimited.
-	if maxProjects, _ := groupCapFor(d, r, u.ID, u.GroupID); maxProjects > 0 {
-		if n, err := store.CountProjectsByUser(r.Context(), d.DB, u.ID); err == nil && n >= maxProjects {
-			writeError(w, 403, errProjectLimit)
-			return
-		}
-	}
+	// The store re-evaluates this cap while holding the creator row lock and
+	// inserts in the same transaction. 0 remains unlimited.
+	maxProjects, _ := groupCapFor(d, r, u.ID, u.GroupID)
 	// Find embedding model.
 	embeds, err := store.ListModels(r.Context(), d.DB, "embedding", true)
 	if err != nil || len(embeds) == 0 {
 		// Allow project without KB if no embedding model.
-		p, err := store.CreateProject(r.Context(), d.DB, store.Project{
+		p, err := store.CreateProjectWithLimit(r.Context(), d.DB, store.Project{
 			UserID: u.ID, Name: req.Name, Description: req.Description, Instructions: req.Instructions,
 			Accent: req.Accent, Emoji: req.Emoji, WorkspaceID: req.WorkspaceID,
-		})
+		}, maxProjects)
 		if err != nil {
+			if errors.Is(err, store.ErrProjectLimitExceeded) {
+				writeError(w, http.StatusForbidden, errProjectLimit)
+				return
+			}
 			if errors.Is(err, store.ErrProjectNameExists) {
 				writeError(w, 409, err)
 				return
@@ -118,27 +118,23 @@ func createProjectHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 201, p)
 		return
 	}
-	kb, err := store.CreateKB(r.Context(), d.DB, store.KnowledgeBase{
+	p, err := store.CreateProjectWithLibraryAndLimit(r.Context(), d.DB, store.Project{
+		UserID: u.ID, Name: req.Name, Description: req.Description, Instructions: req.Instructions,
+		Accent: req.Accent, Emoji: req.Emoji, WorkspaceID: req.WorkspaceID,
+	}, store.KnowledgeBase{
 		UserID: u.ID, Name: req.Name + " — project library",
 		EmbeddingModelID: embeds[0].ID, EmbeddingDim: embeds[0].Dim,
 		WorkspaceID: req.WorkspaceID,
-	})
+	}, maxProjects)
 	if err != nil {
-		if errors.Is(err, store.ErrKBNameExists) {
-			writeError(w, 409, store.ErrProjectNameExists)
+		if errors.Is(err, store.ErrProjectLimitExceeded) {
+			writeError(w, http.StatusForbidden, errProjectLimit)
 			return
 		}
-		writeError(w, 500, err)
-		return
-	}
-	p, err := store.CreateProject(r.Context(), d.DB, store.Project{
-		UserID: u.ID, Name: req.Name, Description: req.Description, Instructions: req.Instructions,
-		Accent: req.Accent, Emoji: req.Emoji, KBID: kb.ID, WorkspaceID: req.WorkspaceID,
-	})
-	if err != nil {
-		// Keep the two-step create from leaving an unattached project library if
-		// the project insert loses a concurrent unique-name race.
-		_ = store.DeleteKB(r.Context(), d.DB, kb.ID, u.ID)
+		if errors.Is(err, store.ErrKBNameExists) {
+			writeError(w, http.StatusConflict, store.ErrProjectNameExists)
+			return
+		}
 		if errors.Is(err, store.ErrProjectNameExists) {
 			writeError(w, 409, err)
 			return
@@ -160,7 +156,7 @@ func getProjectHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	docs := []store.Document{}
 	if p.KBID != "" {
-		docs, _ = store.ListDocuments(r.Context(), d.DB, "kb", p.KBID)
+		docs, _ = store.ListDocumentsForUser(r.Context(), d.DB, "kb", p.KBID, u.ID)
 	}
 	convs, _ := store.ListConversations(r.Context(), d.DB, u.ID, p.ID, "active", projectDetailConversationsPageSize, 0)
 	writeJSON(w, 200, map[string]any{
@@ -229,7 +225,7 @@ func listProjectDocsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, errNotFound)
 		return
 	}
-	docs, _ := store.ListDocuments(r.Context(), d.DB, "kb", p.KBID)
+	docs, _ := store.ListDocumentsForUser(r.Context(), d.DB, "kb", p.KBID, u.ID)
 	writeJSON(w, 200, docs)
 }
 
@@ -270,12 +266,15 @@ func deleteProjectDocHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, errNotFound)
 		return
 	}
-	doc, err := store.GetDocument(r.Context(), d.DB, docID)
+	doc, err := store.GetDocumentForUser(r.Context(), d.DB, docID, u.ID)
 	if err != nil || doc.KBID != p.KBID {
 		writeError(w, 404, errNotFound)
 		return
 	}
-	_ = store.DeleteDocument(r.Context(), d.DB, docID)
+	if err := store.DeleteDocumentForUser(r.Context(), d.DB, docID, "kb", p.KBID, u.ID); err != nil {
+		writeError(w, 404, errNotFound)
+		return
+	}
 	cleanupRAGDocument(r.Context(), d, docID, "delete project document "+docID)
 	cleanupStoragePaths(r.Context(), d, []string{doc.StoragePath}, "delete project document "+docID)
 	writeJSON(w, 200, map[string]bool{"ok": true})
@@ -291,7 +290,7 @@ func renameProjectDocHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, errNotFound)
 		return
 	}
-	doc, err := store.GetDocument(r.Context(), d.DB, docID)
+	doc, err := store.GetDocumentForUser(r.Context(), d.DB, docID, u.ID)
 	if err != nil || doc.KBID != p.KBID {
 		writeError(w, 404, errNotFound)
 		return
@@ -303,7 +302,11 @@ func renameProjectDocHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errInvalidInput)
 		return
 	}
-	if err := store.RenameDocument(r.Context(), d.DB, docID, body.Filename); err != nil {
+	if err := store.RenameDocumentForUser(r.Context(), d.DB, docID, "kb", p.KBID, u.ID, body.Filename); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, 404, errNotFound)
+			return
+		}
 		writeError(w, 500, err)
 		return
 	}

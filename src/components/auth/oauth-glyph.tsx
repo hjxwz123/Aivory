@@ -1,7 +1,7 @@
 /**
  * OAuthBrandGlyph — the icon for a login method. Google / GitHub / Apple use
- * built-in brand glyphs (no upload needed); a custom (oidc) provider renders its
- * admin-set icon (uploaded URL or emoji), falling back to a neutral glyph.
+ * built-in brand glyphs (no upload needed); generic OAuth2/OIDC providers render
+ * their admin-set icon (uploaded URL or emoji), falling back to a neutral glyph.
  *
  * Shared by the login buttons and the admin "Login methods" page so both render
  * the same mark.

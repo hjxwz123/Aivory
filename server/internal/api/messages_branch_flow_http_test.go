@@ -149,10 +149,7 @@ func TestMessagesHTTPStoppedRootEditBranchAllowsFollowUp(t *testing.T) {
 	toolRegistry := tools.NewRegistry(db, cfg, logger)
 	orchestrator := llm.NewOrchestrator(db, providers, toolRegistry, nil, memoryCache, nil, nil, nil, logger)
 	authService := authsvc.New(secret, cfg.AccessTTL, cfg.RefreshTTL, memoryCache)
-	token, _, err := authService.IssueAccess(user.ID, user.Role, user.TokenVer)
-	if err != nil {
-		t.Fatalf("issue access token: %v", err)
-	}
+	token := issueBoundTestAccessToken(t, db, authService, user)
 
 	d := Deps{
 		Config:       cfg,

@@ -232,9 +232,9 @@ func NewRouter(d Deps) http.Handler {
 	// duration (§ redeem codes). Tight rate limit so a stolen code can't be
 	// brute-force-typed by an attacker who knows the alphabet.
 	mux.handle("POST", "/api/me/redeem", rateLimitedIP(d, "redeem", rlRedeemCodeMax, rlRedeemCodeWindow, requireAuth(d, redeemCodeHandler)))
-	// Active sessions (§ account → active sessions). Registered under /api/auth
-	// so the refresh-token cookie (scoped to /api/auth) is sent — that's how we
-	// detect which session is the current one.
+	// Active sessions (§ account → active sessions). The current family is taken
+	// from the validated access-token sid (with the refresh cookie as fallback),
+	// so browser and Bearer clients get the same revoke semantics.
 	mux.handle("GET", "/api/auth/sessions", requireAuth(d, listSessionsHandler))
 	mux.handle("POST", "/api/auth/sessions/revoke-others", requireAuth(d, revokeOtherSessionsHandler))
 	mux.handle("POST", "/api/auth/sessions/:jti/revoke", requireAuth(d, revokeSessionHandler))

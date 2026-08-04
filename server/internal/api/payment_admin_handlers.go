@@ -62,7 +62,7 @@ func writePaymentError(w http.ResponseWriter, err error) {
 	case errors.Is(err, store.ErrNotFound):
 		writeError(w, http.StatusNotFound, errNotFound)
 	case errors.Is(err, store.ErrPaymentChannelNameExists), errors.Is(err, store.ErrPaymentChannelIDExists),
-		errors.Is(err, store.ErrPaymentMethodNameExists),
+		errors.Is(err, store.ErrPaymentMethodNameExists), errors.Is(err, store.ErrPaymentMethodHasPending),
 		errors.Is(err, store.ErrPaymentChannelHasMethods), errors.Is(err, store.ErrPaymentChannelHasPending),
 		errors.Is(err, store.ErrPaymentOrdersPendingForGroup), errors.Is(err, store.ErrPaymentOrdersPendingForUser),
 		errors.Is(err, store.ErrPaymentProviderOrderConflict), errors.Is(err, store.ErrPaymentOrderNotMutable),

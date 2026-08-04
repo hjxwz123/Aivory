@@ -67,43 +67,66 @@ export interface ApiUser {
 /** Admin analytics (§ admin → analytics). */
 export interface ApiUsageTotals {
   calls: number
+  turns: number
+  credit_charged_turns: number
   input_tokens: number
   output_tokens: number
+  cache_read_tokens: number
+  cache_write_tokens: number
+  images_count: number
   cost: number
+  credits: number
+  turn_cost: number
+  credit_charged_cost: number
   users: number
+  credit_charged_users: number
+  conversations: number
+  workspaces: number
 }
 export interface ApiUsageTrendPoint {
   bucket_start: number
   input_tokens: number
   output_tokens: number
+  cache_read_tokens: number
+  cache_write_tokens: number
+  images_count: number
   calls: number
+  turns: number
+  users: number
   cost: number
+  credits: number
 }
 export interface ApiUsageBreakdownRow {
   key: string
   label: string
   input_tokens: number
   output_tokens: number
+  cache_read_tokens: number
+  cache_write_tokens: number
+  images_count: number
   calls: number
+  turns: number
+  credit_charged_turns: number
+  users: number
+  conversations: number
   cost: number
+  credits: number
 }
-export interface ApiUsageSeriesPoint {
-  bucket_start: number
-  key: string
-  input_tokens: number
-  output_tokens: number
-  calls: number
-  cost: number
-}
+export type ApiAnalyticsDimension = 'model' | 'user' | 'workspace' | 'purpose' | 'channel'
 export interface ApiAnalytics {
   days: number
   bucket: number
+  generated_at: number
+  period_start: number
+  period_end: number
+  previous_period_start: number
+  previous_period_end: number
   totals: ApiUsageTotals
+  previous_totals: ApiUsageTotals
   trend: ApiUsageTrendPoint[]
-  by_model: ApiUsageBreakdownRow[]
-  by_user: ApiUsageBreakdownRow[]
-  model_series: ApiUsageSeriesPoint[]
-  user_series: ApiUsageSeriesPoint[]
+  previous_trend: ApiUsageTrendPoint[]
+  breakdowns: Record<ApiAnalyticsDimension, ApiUsageBreakdownRow[]>
+  filter_options: Record<ApiAnalyticsDimension, ApiUsageBreakdownRow[]>
 }
 
 export type ApiMessageFeedbackRating = 'like' | 'dislike'
@@ -182,8 +205,8 @@ export interface ApiAdminMessageFeedbackPage {
   offset: number
 }
 
-/** One active sign-in (§ account → active sessions). `id` is the refresh-token
- * jti, used as the opaque handle to revoke it. `location` is best-effort and may
+/** One active sign-in (§ account → active sessions). `id` is the stable
+ * refresh-session family id, used as the opaque handle to revoke it. `location` is best-effort and may
  * be empty when no geo-providing proxy is in front of the server. */
 export interface ApiSession {
   id: string
@@ -392,7 +415,7 @@ export interface ApiAuthResponse {
   expires_at: number
 }
 
-export type OAuthKind = 'google' | 'github' | 'apple' | 'oidc'
+export type OAuthKind = 'google' | 'github' | 'apple' | 'oauth2' | 'oidc'
 
 /** Full provider record (admin view). client_secret is never returned. */
 export interface ApiOAuthProvider {
@@ -402,6 +425,8 @@ export interface ApiOAuthProvider {
   icon: string
   client_id: string
   has_secret: boolean
+  issuer_url: string
+  jwks_url: string
   auth_url: string
   token_url: string
   userinfo_url: string
@@ -675,6 +700,17 @@ export interface ApiSkill {
   enabled: boolean
   sort_order: number
   updated_at: number
+}
+
+/** Enabled administrator skill metadata visible to signed-in users. This
+ * listing excludes trigger descriptions, instructions, and assets. */
+export interface ApiPublicSkill {
+  id: string
+  name: string
+  display_description: string
+  icon: string
+  enabled: boolean
+  sort_order: number
 }
 
 export interface ApiPrompt {

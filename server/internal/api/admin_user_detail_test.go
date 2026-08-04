@@ -42,10 +42,7 @@ func TestGetUserAdmin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("find admin: %v", err)
 	}
-	token, _, err := d.Auth.IssueAccess(admin.ID, admin.Role, admin.TokenVer)
-	if err != nil {
-		t.Fatalf("issue admin access token: %v", err)
-	}
+	token := issueBoundTestAccessToken(t, db, d.Auth, admin)
 	c.Set("seen:"+admin.ID, "1", time.Minute)
 	if _, err := store.DebitCredits(t.Context(), db, "u1", 37.25, "test", "admin-detail"); err != nil {
 		t.Fatalf("debit timed credits: %v", err)

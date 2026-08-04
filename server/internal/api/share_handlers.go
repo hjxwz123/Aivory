@@ -53,6 +53,15 @@ func createShareHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, errNotFound)
 		return
 	}
+	allowed, err := store.CanManageConversationShare(r.Context(), d.DB, conv.ID, u.ID)
+	if err != nil {
+		writeError(w, 500, err)
+		return
+	}
+	if !allowed {
+		writeError(w, 404, errNotFound)
+		return
+	}
 	msgs, err := store.ListMessages(r.Context(), d.DB, conv.ID, conv.ActiveLeafID)
 	if err != nil {
 		writeError(w, 500, err)
@@ -170,6 +179,10 @@ func createShareHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	payload, _ := json.Marshal(snap)
 	share, err := store.CreateShare(r.Context(), d.DB, u.ID, conv.ID, conv.Title, payload)
 	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, 404, errNotFound)
+			return
+		}
 		writeError(w, 500, err)
 		return
 	}
@@ -180,11 +193,24 @@ func createShareHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 func getShareHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
 	id := pathParam(r, "id")
+	allowed, err := store.CanManageConversationShare(r.Context(), d.DB, id, u.ID)
+	if err != nil {
+		writeError(w, 500, err)
+		return
+	}
+	if !allowed {
+		writeError(w, 404, errNotFound)
+		return
+	}
 	share, err := store.GetShareByConversation(r.Context(), d.DB, id, u.ID)
 	if err != nil {
-		// Not shared — return an explicit null so the client can distinguish
-		// "no share" from a transport error.
-		writeJSON(w, 200, map[string]any{"share": nil})
+		if errors.Is(err, store.ErrNotFound) {
+			// Not shared — return an explicit null so the client can distinguish
+			// "no share" from a transport error.
+			writeJSON(w, 200, map[string]any{"share": nil})
+			return
+		}
+		writeError(w, 500, err)
 		return
 	}
 	writeJSON(w, 200, map[string]any{"share": shareInfo{ID: share.ID, CreatedAt: share.CreatedAt}})
@@ -194,7 +220,20 @@ func getShareHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 func deleteShareHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
 	id := pathParam(r, "id")
+	allowed, err := store.CanManageConversationShare(r.Context(), d.DB, id, u.ID)
+	if err != nil {
+		writeError(w, 500, err)
+		return
+	}
+	if !allowed {
+		writeError(w, 404, errNotFound)
+		return
+	}
 	if err := store.DeleteShareByConversation(r.Context(), d.DB, id, u.ID); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, 404, errNotFound)
+			return
+		}
 		writeError(w, 500, err)
 		return
 	}
@@ -340,21 +379,65 @@ func privateAssetID(rawURL, prefix string) string {
 	return id
 }
 
-// shareSnapshotHasID reports whether a share's frozen snapshot references the
-// given asset id. This is the ACCESS CHECK for the public asset routes: a token
-// can only ever expose files/artifacts of the conversation it snapshots.
-//
-// A byte scan avoids re-parsing the whole snapshot per asset request, but it's
-// deliberately NARROWER than a raw contains: legit references always appear
-// either as a quoted JSON id ("id":"file_x", "file_ref":"art_x") or as a URL
-// path segment (/api/files/file_x) — requiring one of those shapes keeps an id
-// merely PASTED into the shared conversation's text from authorising a fetch of
-// someone else's file.
-func shareSnapshotHasID(snapshot []byte, id string) bool {
-	if len(id) < 8 {
+type shareAssetReference struct {
+	ID        string `json:"id"`
+	FileRef   string `json:"file_ref"`
+	URL       string `json:"url"`
+	Kind      string `json:"kind"`
+	Artifacts []struct {
+		ID  string `json:"id"`
+		URL string `json:"url"`
+	} `json:"artifacts"`
+}
+
+// shareSnapshotReferencesAsset only accepts references in the fields that the
+// server uses for attachments and artifact blocks. Message text, citations,
+// tool input/output, and unrelated JSON fields never grant access. The public
+// handlers pair this frozen structured reference with a database query scoped
+// to share.ConversationID, so a forged cross-conversation reference also fails.
+func shareSnapshotReferencesAsset(snapshot []byte, assetType, id string) bool {
+	if id == "" {
 		return false
 	}
-	return bytes.Contains(snapshot, []byte(`"`+id+`"`)) || bytes.Contains(snapshot, []byte("/"+id))
+	var messages []publicShareMessage
+	if err := json.Unmarshal(snapshot, &messages); err != nil {
+		return false
+	}
+	for _, message := range messages {
+		switch assetType {
+		case "file":
+			var attachments []shareAssetReference
+			if json.Unmarshal(message.Attachments, &attachments) != nil {
+				continue
+			}
+			for _, attachment := range attachments {
+				if attachment.ID == id || privateAssetID(attachment.URL, "/api/files/") == id {
+					return true
+				}
+			}
+		case "artifact":
+			var blocks []shareAssetReference
+			if json.Unmarshal(message.Blocks, &blocks) != nil {
+				continue
+			}
+			for _, block := range blocks {
+				if block.Kind != "artifact" {
+					continue
+				}
+				if block.ID == id || block.FileRef == id || privateAssetID(block.URL, "/api/artifacts/") == id {
+					return true
+				}
+				for _, artifact := range block.Artifacts {
+					if artifact.ID == id || privateAssetID(artifact.URL, "/api/artifacts/") == id {
+						return true
+					}
+				}
+			}
+		default:
+			return false
+		}
+	}
+	return false
 }
 
 // publicSharedFileHandler streams an uploaded attachment referenced by a share
@@ -369,11 +452,11 @@ func publicSharedFileHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, errNotFound)
 		return
 	}
-	if !shareSnapshotHasID(share.Snapshot, id) {
+	if !shareSnapshotReferencesAsset(share.Snapshot, "file", id) {
 		writeError(w, 404, errNotFound)
 		return
 	}
-	f, err := store.GetFile(r.Context(), d.DB, id, "") // any owner: snapshot membership authorises
+	f, err := store.GetSharedFile(r.Context(), d.DB, id, share.ConversationID)
 	if err != nil || f == nil {
 		writeError(w, 404, errNotFound)
 		return
@@ -391,11 +474,11 @@ func publicSharedArtifactHandler(d Deps, w http.ResponseWriter, r *http.Request)
 		writeError(w, 404, errNotFound)
 		return
 	}
-	if !shareSnapshotHasID(share.Snapshot, id) {
+	if !shareSnapshotReferencesAsset(share.Snapshot, "artifact", id) {
 		writeError(w, 404, errNotFound)
 		return
 	}
-	a, err := store.GetArtifact(r.Context(), d.DB, id, "") // any owner: snapshot membership authorises
+	a, err := store.GetSharedArtifact(r.Context(), d.DB, id, share.ConversationID)
 	if err != nil || a == nil {
 		writeError(w, 404, errNotFound)
 		return

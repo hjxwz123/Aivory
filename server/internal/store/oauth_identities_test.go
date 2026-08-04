@@ -5,7 +5,9 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"sync"
 	"testing"
+	"time"
 )
 
 // setupOAuthDB opens a migrated DB with two users and one enabled provider.
@@ -144,5 +146,195 @@ func TestUnbindOAuthIdentity(t *testing.T) {
 	// Unbinding again → nothing to delete.
 	if ok, _ := UnbindOAuthIdentity(ctx, db, "oa_google", "sub-1", "u1"); ok {
 		t.Fatal("second unbind reported a deletion")
+	}
+}
+
+func TestConcurrentUnbindPreservesLastOAuthLoginMethod(t *testing.T) {
+	ctx := context.Background()
+	db := setupOAuthDB(t)
+	exec(t, db, `UPDATE users SET password_set=0 WHERE id='u1'`)
+	if err := BindOAuthIdentity(ctx, db, "oa_google", "sub-a", "u1", "a@gmail.com"); err != nil {
+		t.Fatal(err)
+	}
+	if err := BindOAuthIdentity(ctx, db, "oa_google", "sub-b", "u1", "b@gmail.com"); err != nil {
+		t.Fatal(err)
+	}
+
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	var wg sync.WaitGroup
+	for _, subject := range []string{"sub-a", "sub-b"} {
+		wg.Add(1)
+		go func(subject string) {
+			defer wg.Done()
+			<-start
+			_, err := UnbindOAuthIdentity(ctx, db, "oa_google", subject, "u1")
+			results <- err
+		}(subject)
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+
+	succeeded, refused := 0, 0
+	for err := range results {
+		switch {
+		case err == nil:
+			succeeded++
+		case errors.Is(err, ErrOAuthLastLoginMethod):
+			refused++
+		default:
+			t.Fatalf("concurrent unbind error: %v", err)
+		}
+	}
+	if succeeded != 1 || refused != 1 {
+		t.Fatalf("concurrent results: succeeded=%d refused=%d", succeeded, refused)
+	}
+	if n, err := CountOAuthIdentitiesForUser(ctx, db, "u1"); err != nil || n != 1 {
+		t.Fatalf("remaining identities = %d, err=%v; want 1", n, err)
+	}
+}
+
+func TestCreateOAuthUserRollsBackWhenIdentityAlreadyExists(t *testing.T) {
+	ctx := context.Background()
+	db := setupOAuthDB(t)
+	if err := BindOAuthIdentity(ctx, db, "oa_google", "existing-subject", "u1", "a@gmail.com"); err != nil {
+		t.Fatal(err)
+	}
+	created, err := CreateOAuthUser(ctx, db, "oa_google", "existing-subject", "orphan@example.test", "Orphan", "active")
+	if created != nil || !errors.Is(err, ErrOAuthIdentityConflict) {
+		t.Fatalf("CreateOAuthUser = user %+v err %v, want identity conflict", created, err)
+	}
+	if u, err := FindUserByEmail(ctx, db, "orphan@example.test"); err == nil || u != nil {
+		t.Fatalf("identity conflict left orphan user %+v err=%v", u, err)
+	}
+	owner, err := FindOAuthIdentityUser(ctx, db, "oa_google", "existing-subject")
+	if err != nil || owner != "u1" {
+		t.Fatalf("identity owner = %q err=%v, want u1", owner, err)
+	}
+}
+
+func TestBindOAuthIdentityForSessionAcceptsCurrentSession(t *testing.T) {
+	ctx := context.Background()
+	db := setupOAuthDB(t)
+	const sessionID = "link-session-current"
+	if err := SaveRefreshToken(ctx, db, sessionID, "u1", time.Now().Add(time.Hour), SessionMeta{SessionID: sessionID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := BindOAuthIdentityForSession(
+		ctx, db, "oa_google", "session-subject", "u1", "linked@gmail.com", 0, sessionID,
+	); err != nil {
+		t.Fatalf("bind from current session: %v", err)
+	}
+	if owner, err := FindOAuthIdentityUser(ctx, db, "oa_google", "session-subject"); err != nil || owner != "u1" {
+		t.Fatalf("identity owner=%q err=%v, want u1", owner, err)
+	}
+}
+
+func TestBindOAuthIdentityForSessionRejectsPasswordResetState(t *testing.T) {
+	ctx := context.Background()
+	db := setupOAuthDB(t)
+	const sessionID = "link-session-reset"
+	if err := SaveRefreshToken(ctx, db, sessionID, "u1", time.Now().Add(time.Hour), SessionMeta{SessionID: sessionID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := UpdateUserPassword(ctx, db, "u1", "new-hash"); err != nil {
+		t.Fatal(err)
+	}
+	err := BindOAuthIdentityForSession(
+		ctx, db, "oa_google", "reset-stale-subject", "u1", "attacker@gmail.com", 0, sessionID,
+	)
+	if !errors.Is(err, ErrOAuthLinkSessionExpired) {
+		t.Fatalf("bind after password reset error=%v, want ErrOAuthLinkSessionExpired", err)
+	}
+	if owner, err := FindOAuthIdentityUser(ctx, db, "oa_google", "reset-stale-subject"); !errors.Is(err, ErrNotFound) || owner != "" {
+		t.Fatalf("password-reset-stale state bound owner=%q err=%v", owner, err)
+	}
+}
+
+func TestBindOAuthIdentityForSessionRejectsRevokedFamily(t *testing.T) {
+	ctx := context.Background()
+	db := setupOAuthDB(t)
+	const sessionID = "link-session-revoked"
+	if err := SaveRefreshToken(ctx, db, sessionID, "u1", time.Now().Add(time.Hour), SessionMeta{SessionID: sessionID}); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := RevokeUserSession(ctx, db, "u1", sessionID); err != nil || !ok {
+		t.Fatalf("revoke initiating session=(%v,%v), want true,nil", ok, err)
+	}
+	err := BindOAuthIdentityForSession(
+		ctx, db, "oa_google", "revoked-stale-subject", "u1", "attacker@gmail.com", 0, sessionID,
+	)
+	if !errors.Is(err, ErrOAuthLinkSessionExpired) {
+		t.Fatalf("bind after session revoke error=%v, want ErrOAuthLinkSessionExpired", err)
+	}
+	if owner, err := FindOAuthIdentityUser(ctx, db, "oa_google", "revoked-stale-subject"); !errors.Is(err, ErrNotFound) || owner != "" {
+		t.Fatalf("revoked-session state bound owner=%q err=%v", owner, err)
+	}
+}
+
+func TestBindOAuthIdentityForSessionLinearizesWithRevocation(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(context.Context, *sql.DB, string) error
+	}{
+		{
+			name: "password reset",
+			mutate: func(ctx context.Context, db *sql.DB, _ string) error {
+				return UpdateUserPassword(ctx, db, "u1", "new-hash")
+			},
+		},
+		{
+			name: "single session revoke",
+			mutate: func(ctx context.Context, db *sql.DB, sessionID string) error {
+				ok, err := RevokeUserSession(ctx, db, "u1", sessionID)
+				if err == nil && !ok {
+					return errors.New("session was not revoked")
+				}
+				return err
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			db := setupOAuthDB(t)
+			sessionID := "concurrent-" + tc.name
+			if err := SaveRefreshToken(ctx, db, sessionID, "u1", time.Now().Add(time.Hour), SessionMeta{SessionID: sessionID}); err != nil {
+				t.Fatal(err)
+			}
+
+			start := make(chan struct{})
+			bindResult := make(chan error, 1)
+			mutationResult := make(chan error, 1)
+			go func() {
+				<-start
+				bindResult <- BindOAuthIdentityForSession(
+					ctx, db, "oa_google", "concurrent-subject", "u1", "attacker@gmail.com", 0, sessionID,
+				)
+			}()
+			go func() {
+				<-start
+				mutationResult <- tc.mutate(ctx, db, sessionID)
+			}()
+			close(start)
+
+			bindErr := <-bindResult
+			if bindErr != nil && !errors.Is(bindErr, ErrOAuthLinkSessionExpired) {
+				t.Fatalf("concurrent bind error: %v", bindErr)
+			}
+			if err := <-mutationResult; err != nil {
+				t.Fatalf("concurrent revocation error: %v", err)
+			}
+
+			// Whichever transaction acquired the user lock first is allowed to win.
+			// Once the reset/revoke has committed, the old authorization state must
+			// be a permanent loser for every later identity subject.
+			err := BindOAuthIdentityForSession(
+				ctx, db, "oa_google", "post-revocation-subject", "u1", "attacker@gmail.com", 0, sessionID,
+			)
+			if !errors.Is(err, ErrOAuthLinkSessionExpired) {
+				t.Fatalf("post-revocation bind error=%v, want ErrOAuthLinkSessionExpired", err)
+			}
+		})
 	}
 }

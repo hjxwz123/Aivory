@@ -70,10 +70,7 @@ func TestMessageFeedbackHTTPFlowAndPerUserHydration(t *testing.T) {
 		if err != nil {
 			t.Fatalf("find %s: %v", userID, err)
 		}
-		token, _, err := d.Auth.IssueAccess(user.ID, user.Role, user.TokenVer)
-		if err != nil {
-			t.Fatalf("issue %s token: %v", userID, err)
-		}
+		token := issueBoundTestAccessToken(t, db, d.Auth, user)
 		feedbackCache.Set("seen:"+user.ID, "1", time.Minute)
 		return token
 	}

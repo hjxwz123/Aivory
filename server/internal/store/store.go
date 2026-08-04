@@ -117,6 +117,7 @@ func Migrate(db *sql.DB) error {
 	addFeedback := `ALTER TABLE messages ADD COLUMN feedback TEXT NOT NULL DEFAULT ''`
 	addGenMs := `ALTER TABLE messages ADD COLUMN gen_ms INTEGER NOT NULL DEFAULT 0`
 	// Active-sessions context on refresh tokens (§ account → active sessions).
+	addSessID := `ALTER TABLE refresh_tokens ADD COLUMN session_id TEXT NOT NULL DEFAULT ''`
 	addSessUA := `ALTER TABLE refresh_tokens ADD COLUMN user_agent TEXT NOT NULL DEFAULT ''`
 	addSessIP := `ALTER TABLE refresh_tokens ADD COLUMN ip TEXT NOT NULL DEFAULT ''`
 	addSessLoc := `ALTER TABLE refresh_tokens ADD COLUMN location TEXT NOT NULL DEFAULT ''`
@@ -241,6 +242,9 @@ func Migrate(db *sql.DB) error {
 	addPaymentCheckoutExpiresAt := `ALTER TABLE payment_orders ADD COLUMN checkout_expires_at INTEGER NOT NULL DEFAULT 0`
 	addPaymentLastReconciledAt := `ALTER TABLE payment_orders ADD COLUMN last_reconciled_at INTEGER NOT NULL DEFAULT 0`
 	addPaymentReconcileError := `ALTER TABLE payment_orders ADD COLUMN reconcile_error TEXT NOT NULL DEFAULT ''`
+	addOAuthIssuerURL := `ALTER TABLE oauth_providers ADD COLUMN issuer_url TEXT NOT NULL DEFAULT ''`
+	addOAuthJWKSURL := `ALTER TABLE oauth_providers ADD COLUMN jwks_url TEXT NOT NULL DEFAULT ''`
+	addOAuthSubjectNamespace := `ALTER TABLE oauth_providers ADD COLUMN subject_namespace TEXT NOT NULL DEFAULT ''`
 	if usePostgres {
 		schema = schemaPGSQL
 		addImageRef = `ALTER TABLE chunks ADD COLUMN IF NOT EXISTS image_ref TEXT`
@@ -251,6 +255,7 @@ func Migrate(db *sql.DB) error {
 		addTotpEnabled = `ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_enabled INTEGER NOT NULL DEFAULT 0`
 		addFeedback = `ALTER TABLE messages ADD COLUMN IF NOT EXISTS feedback TEXT NOT NULL DEFAULT ''`
 		addGenMs = `ALTER TABLE messages ADD COLUMN IF NOT EXISTS gen_ms BIGINT NOT NULL DEFAULT 0`
+		addSessID = `ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS session_id TEXT NOT NULL DEFAULT ''`
 		addSessUA = `ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS user_agent TEXT NOT NULL DEFAULT ''`
 		addSessIP = `ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS ip TEXT NOT NULL DEFAULT ''`
 		addSessLoc = `ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS location TEXT NOT NULL DEFAULT ''`
@@ -330,6 +335,9 @@ func Migrate(db *sql.DB) error {
 		addPaymentCheckoutExpiresAt = `ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS checkout_expires_at BIGINT NOT NULL DEFAULT 0`
 		addPaymentLastReconciledAt = `ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS last_reconciled_at BIGINT NOT NULL DEFAULT 0`
 		addPaymentReconcileError = `ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS reconcile_error TEXT NOT NULL DEFAULT ''`
+		addOAuthIssuerURL = `ALTER TABLE oauth_providers ADD COLUMN IF NOT EXISTS issuer_url TEXT NOT NULL DEFAULT ''`
+		addOAuthJWKSURL = `ALTER TABLE oauth_providers ADD COLUMN IF NOT EXISTS jwks_url TEXT NOT NULL DEFAULT ''`
+		addOAuthSubjectNamespace = `ALTER TABLE oauth_providers ADD COLUMN IF NOT EXISTS subject_namespace TEXT NOT NULL DEFAULT ''`
 	}
 	if err := dedupeSkillNames(db); err != nil {
 		return fmt.Errorf("dedupe skill names: %w", err)
@@ -346,7 +354,7 @@ func Migrate(db *sql.DB) error {
 	// EXISTS so it's a clean no-op.
 	for _, ddl := range []string{
 		addImageRef, addOfficialTools, addBuiltinTools, addGroupID, addTotpSecret, addTotpEnabled, addFeedback, addGenMs,
-		addSessUA, addSessIP, addSessLoc, addSessSeen,
+		addSessID, addSessUA, addSessIP, addSessLoc, addSessSeen,
 		addModEnabled, addModMode,
 		addResearchEnabled,
 		addGroupExpires, addPrevGroup, addPasswordSet, addPasswordChangedAt, addLastSeen,
@@ -368,8 +376,22 @@ func Migrate(db *sql.DB) error {
 		addPaymentPaidAmount, addPaymentTaxAmount, addPaymentProviderAmount, addPaymentProviderCurrency, addPaymentConversionRate,
 		addPaymentChannelEnvironment, addPaymentOrderEnvironment,
 		addPaymentProviderPaymentID, addPaymentCheckoutSessionID, addPaymentCheckoutURL, addPaymentCheckoutExpiresAt, addPaymentLastReconciledAt, addPaymentReconcileError,
+		addOAuthIssuerURL, addOAuthJWKSURL, addOAuthSubjectNamespace,
 	} {
 		_, _ = db.Exec(ddl)
+	}
+	// Before generic OIDC gained issuer/JWKS verification, custom UserInfo
+	// providers were persisted as kind=oidc. Only rows from that legacy shape
+	// have an empty generation marker; new OIDC drafts receive a marker when
+	// created and are therefore never reclassified on a later startup.
+	if err := MigrateLegacyOAuthProviderKinds(context.Background(), db); err != nil {
+		return fmt.Errorf("migrate legacy UserInfo OAuth providers: %w", err)
+	}
+	// Older databases and logical backups predate session families. Assigning the
+	// original JTI as the family handle preserves revocation semantics for those
+	// rows and prevents an empty family from becoming a shared catch-all.
+	if _, err := db.Exec(`UPDATE refresh_tokens SET session_id=jti WHERE trim(session_id)=''`); err != nil {
+		return fmt.Errorf("backfill refresh-token session families: %w", err)
 	}
 	// Orders created before provider-side snapshots existed always settled in the
 	// system currency. Preserve that exact meaning for upgraded databases.
@@ -383,7 +405,9 @@ func Migrate(db *sql.DB) error {
 	// exists once the ALTER has run). Kept out of the schema file for that reason.
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_conv_inline ON conversations(inline_source_conv)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user_id ON refresh_tokens(user_id)`)
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user_session ON refresh_tokens(user_id, session_id)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_files_conversation_id ON files(conversation_id)`)
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_files_storage_draft ON files(storage_path, draft)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_docs_ingest_state ON documents(status, ingest_updated_at)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_messages_conv_created ON messages(conversation_id, created_at)`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_conv_user_updated ON conversations(user_id, archived, pinned DESC, updated_at DESC)`)
@@ -437,7 +461,7 @@ func Migrate(db *sql.DB) error {
 		"quota_ledger":        {"user_id", "scope_type", "model_id", "group_id", "cycle_anchor", "window_start", "limit_type", "reserved_micros", "actual_micros", "status", "expires_at"},
 		"billing_usage":       {"user_id", "message_id", "model_id", "purpose", "cost_micros", "images_count", "input_tokens", "output_tokens", "currency"},
 		"models":              {"official_tools", "builtin_tools", "moderation_enabled", "moderation_mode", "tags", "extra_params", "image_timeout_sec", "research_enabled", "fallback_channel_id", "fast"},
-		"refresh_tokens":      {"user_agent", "ip", "location", "last_seen"},
+		"refresh_tokens":      {"session_id", "user_agent", "ip", "location", "last_seen"},
 		"conversations":       {"inline_source_conv", "inline_parent_id", "inline_quote", "workspace_id", "fast"},
 		"projects":            {"workspace_id"},
 		"knowledge_bases":     {"workspace_id"},
@@ -448,6 +472,7 @@ func Migrate(db *sql.DB) error {
 		"redeem_redemptions":  {"credits"},
 		"payment_channels":    {"environment"},
 		"payment_orders":      {"paid_amount_minor", "tax_amount_minor", "provider_amount_minor", "provider_currency", "conversion_rate", "environment", "provider_payment_id", "checkout_session_id", "checkout_url", "checkout_expires_at", "last_reconciled_at", "reconcile_error"},
+		"oauth_providers":     {"issuer_url", "jwks_url", "subject_namespace"},
 	}
 	for table, cols := range columnChecks {
 		if _, err := db.Exec(fmt.Sprintf(`SELECT %s FROM %s WHERE 1=0`, strings.Join(cols, ", "), table)); err != nil {

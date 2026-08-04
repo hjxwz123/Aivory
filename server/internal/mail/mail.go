@@ -52,30 +52,47 @@ func NewSMTPSender(db *sql.DB, logger *log.Logger) *SMTPSender {
 
 func (s *SMTPSender) loadConfig() (smtpConfig, error) {
 	var cfg smtpConfig
-	readStr := func(key string) string {
+	readStr := func(key string) (string, error) {
 		raw, err := store.GetSetting(s.DB, key)
 		if err != nil {
-			return ""
+			return "", fmt.Errorf("read %s: %w", key, err)
 		}
 		var v string
-		_ = json.Unmarshal(raw, &v)
-		return v
+		if err := json.Unmarshal(raw, &v); err != nil {
+			return "", fmt.Errorf("decode %s: %w", key, err)
+		}
+		return strings.TrimSpace(v), nil
 	}
-	readBool := func(key string) bool {
+	readBool := func(key string) (bool, error) {
 		raw, err := store.GetSetting(s.DB, key)
 		if err != nil {
-			return false
+			return false, fmt.Errorf("read %s: %w", key, err)
 		}
 		var v bool
-		_ = json.Unmarshal(raw, &v)
-		return v
+		if err := json.Unmarshal(raw, &v); err != nil {
+			return false, fmt.Errorf("decode %s: %w", key, err)
+		}
+		return v, nil
 	}
-	cfg.Host = readStr("smtp_host")
-	cfg.Port = readStr("smtp_port")
-	cfg.User = readStr("smtp_user")
-	cfg.Password = readStr("smtp_password")
-	cfg.From = readStr("smtp_from")
-	cfg.TLS = readBool("smtp_tls")
+	var err error
+	if cfg.Host, err = readStr("smtp_host"); err != nil {
+		return cfg, err
+	}
+	if cfg.Port, err = readStr("smtp_port"); err != nil {
+		return cfg, err
+	}
+	if cfg.User, err = readStr("smtp_user"); err != nil {
+		return cfg, err
+	}
+	if cfg.Password, err = readStr("smtp_password"); err != nil {
+		return cfg, err
+	}
+	if cfg.From, err = readStr("smtp_from"); err != nil {
+		return cfg, err
+	}
+	if cfg.TLS, err = readBool("smtp_tls"); err != nil {
+		return cfg, err
+	}
 	if cfg.Host == "" {
 		return cfg, fmt.Errorf("smtp_host is not configured")
 	}
@@ -93,8 +110,11 @@ func (s *SMTPSender) loadConfig() (smtpConfig, error) {
 func (s *SMTPSender) SendCode(to, code, purpose string) error {
 	cfg, err := s.loadConfig()
 	if err != nil {
-		s.Logger.Printf("[mail] SMTP not configured, logging code: %s → %s code=%s", purpose, to, code)
-		return nil // graceful fallback: don't block registration
+		// Never place a verification or reset secret in logs. In particular, a
+		// missing SMTP host must not turn the application log into a password-reset
+		// mailbox. Callers return a generic response where appropriate and can retry
+		// after an administrator fixes SMTP.
+		return fmt.Errorf("load SMTP configuration: %w", err)
 	}
 
 	subject := "Your verification code"
@@ -258,12 +278,18 @@ func renderEmail(data emailData) (string, error) {
 // CheckDomainWhitelist validates that the email's domain is in the admin-configured
 // whitelist. An empty whitelist means all domains are allowed.
 func CheckDomainWhitelist(db *sql.DB, email string) error {
+	email, err := store.NormalizeUserEmail(email)
+	if err != nil {
+		return fmt.Errorf("invalid email: %w", err)
+	}
 	raw, err := store.GetSetting(db, "email_domain_whitelist")
 	if err != nil {
-		return nil // no setting = allow all
+		return fmt.Errorf("read email domain whitelist: %w", err)
 	}
 	var whitelist string
-	_ = json.Unmarshal(raw, &whitelist)
+	if err := json.Unmarshal(raw, &whitelist); err != nil {
+		return fmt.Errorf("decode email domain whitelist: %w", err)
+	}
 	whitelist = strings.TrimSpace(whitelist)
 	if whitelist == "" {
 		return nil // empty = allow all
