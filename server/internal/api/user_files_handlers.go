@@ -2,7 +2,6 @@ package api
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -18,24 +17,12 @@ import (
 // machinery (store.ListAdminFiles et al.) locked to the caller's user id;
 // delete runs the same three-layer cleanup as everywhere else.
 
-var errStorageQuotaExceeded = errors.New("storage quota exceeded")
+var errStorageQuotaExceeded = store.ErrStorageQuotaExceeded
 
 // checkStorageQuota returns nil when a non-image upload of sizeBytes fits the
 // caller's group cap. Image uploads never count (§ user files page).
 func checkStorageQuota(r *http.Request, d Deps, userID string, sizeBytes int64) error {
-	quota, err := store.StorageQuotaBytes(r.Context(), d.DB, userID)
-	if err != nil || quota <= 0 {
-		return nil // unlimited, or fail-open on lookup errors — soft limit
-	}
-	used, err := store.UserStorageUsage(r.Context(), d.DB, userID)
-	if err != nil {
-		return nil
-	}
-	if used+sizeBytes > quota {
-		return fmt.Errorf("%w: %d MB in use of %d MB — free up space and retry",
-			errStorageQuotaExceeded, used/(1024*1024), quota/(1024*1024))
-	}
-	return nil
+	return store.CheckStorageQuota(r.Context(), d.DB, userID, sizeBytes)
 }
 
 // myStorageHandler reports the caller's storage meter.
@@ -67,12 +54,13 @@ func listMyFilesHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		limit = 200
 	}
 	filter := store.AdminFileFilter{
-		Search: q.Get("search"),
-		UserID: u.ID, // hard-locked to the caller
-		Origin: q.Get("origin"),
-		Type:   q.Get("type"),
-		Sort:   q.Get("sort"),
-		Order:  q.Get("order"),
+		Search:        q.Get("search"),
+		BillingUserID: u.ID, // hard-locked to the caller's quota principal
+		AccessUserID:  u.ID,
+		Origin:        q.Get("origin"),
+		Type:          q.Get("type"),
+		Sort:          q.Get("sort"),
+		Order:         q.Get("order"),
 	}
 	total, err := store.CountAdminFiles(r.Context(), d.DB, filter)
 	if err != nil {
@@ -87,30 +75,17 @@ func listMyFilesHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"files": rows, "total": total, "limit": limit, "offset": offset})
 }
 
-// ownsAdminFileRow reports whether the row belongs to the user, using the
-// same ownership derivation as the inventory view (files.user_id directly;
-// documents via their KB or conversation).
+// ownsAdminFileRow reports whether the row is billed to the user using the
+// same canonical-owner derivation as the inventory and quota meter.
 func ownsAdminFileRow(r *http.Request, d Deps, userID string, ref adminFileRef) bool {
-	switch ref.Source {
-	case "file":
-		f, err := store.GetFile(r.Context(), d.DB, ref.ID, "")
-		return err == nil && f != nil && f.UserID == userID
-	case "document":
-		var owner string
-		err := d.DB.QueryRowContext(r.Context(), `
-			SELECT COALESCE(k.user_id, c.user_id, '')
-			  FROM documents d2
-			  LEFT JOIN knowledge_bases k ON k.id = d2.kb_id
-			  LEFT JOIN conversations c ON c.id = d2.conversation_id
-			 WHERE d2.id=?`, ref.ID).Scan(&owner)
-		return err == nil && owner == userID
-	default:
-		return false
-	}
+	billingUserID, err := store.StorageItemBillingUser(r.Context(), d.DB, ref.Source, ref.ID, userID)
+	return err == nil && billingUserID == userID
 }
 
-// deleteMyFilesHandler removes the caller's own uploads — same three-layer
-// cleanup as the admin batch delete, with an ownership gate per item.
+// deleteMyFilesHandler removes rows billed to the caller. For workspace
+// committed content the caller is the canonical owner even when a member was
+// the uploader; member drafts remain private and can only be removed by that
+// uploader.
 func deleteMyFilesHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
 	var body struct {
@@ -133,7 +108,7 @@ func deleteMyFilesHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			storagePaths := []string{f.StoragePath}
-			docs, err := store.DocumentsByStoragePath(r.Context(), d.DB, f.StoragePath)
+			docs, err := store.DocumentsByStoragePathForUser(r.Context(), d.DB, f.StoragePath, u.ID)
 			if err != nil {
 				writeError(w, 500, err)
 				return
@@ -143,7 +118,12 @@ func deleteMyFilesHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 				docIDs = append(docIDs, doc.ID)
 				storagePaths = append(storagePaths, doc.StoragePath)
 			}
-			if err := store.AdminDeleteFile(r.Context(), d.DB, id); err != nil {
+			if f.ConversationID != "" {
+				err = store.DeleteConversationFileAndDocuments(r.Context(), d.DB, id, f.ConversationID, u.ID, docIDs)
+			} else {
+				err = store.DeleteStandaloneFileForUser(r.Context(), d.DB, id, u.ID)
+			}
+			if err != nil {
 				if errors.Is(err, store.ErrNotFound) {
 					continue
 				}
@@ -151,17 +131,20 @@ func deleteMyFilesHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			for _, docID := range docIDs {
-				_ = store.DeleteDocument(r.Context(), d.DB, docID)
 				cleanupRAGDocument(r.Context(), d, docID, "user delete file "+id)
 			}
 			cleanupStoragePaths(r.Context(), d, storagePaths, "user delete file "+id)
 			deleted++
 		case "document":
-			doc, err := store.GetDocument(r.Context(), d.DB, id)
+			doc, err := store.GetDocumentForUser(r.Context(), d.DB, id, u.ID)
 			if err != nil {
 				continue
 			}
-			if err := store.DeleteDocument(r.Context(), d.DB, id); err != nil {
+			scope, parentID := "conversation", doc.ConversationID
+			if doc.KBID != "" {
+				scope, parentID = "kb", doc.KBID
+			}
+			if err := store.DeleteDocumentForUser(r.Context(), d.DB, id, scope, parentID, u.ID); err != nil {
 				writeError(w, 500, err)
 				return
 			}
@@ -194,7 +177,7 @@ func myFileContentHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		}
 		serveStoredFile(d, w, f)
 	case "document":
-		doc, err := store.GetDocument(r.Context(), d.DB, id)
+		doc, err := store.GetDocumentForUser(r.Context(), d.DB, id, u.ID)
 		if err != nil {
 			writeError(w, 404, errNotFound)
 			return

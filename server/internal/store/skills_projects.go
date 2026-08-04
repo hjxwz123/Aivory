@@ -196,11 +196,62 @@ func ListSkillAssets(ctx context.Context, db *sql.DB, skillID string) ([]SkillAs
 }
 
 // ListProjects returns the user's projects.
-// CountProjectsByUser returns how many projects a user owns (§ user-group caps).
+// CountProjectsByUser returns how many projects count against a user's group
+// cap. Workspace projects created by the user count while the user is still an
+// authoritative principal of that workspace; a revoked creator cannot keep
+// consuming a cap for shared resources they can no longer access.
 func CountProjectsByUser(ctx context.Context, db *sql.DB, userID string) (int, error) {
+	return countProjectsByUser(ctx, db, userID)
+}
+
+type commercialCapQueryer interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func countProjectsByUser(ctx context.Context, q commercialCapQueryer, userID string) (int, error) {
 	var n int
-	err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM projects WHERE user_id=?`, userID).Scan(&n)
+	args := []any{userID}
+	args = append(args, workspaceResourceAccessArgs(userID)...)
+	err := q.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM projects
+		  WHERE user_id=? AND `+workspaceResourceAccessPredicate("projects"), args...).Scan(&n)
 	return n, err
+}
+
+// lockCommercialCapUserTx serializes all capped project/KB creates for one
+// creator, including creates targeting different workspaces. Workspace callers
+// must lock their workspace first to preserve the global workspace -> user lock
+// order used by membership, storage, and account-deletion mutations.
+func lockCommercialCapUserTx(ctx context.Context, tx *sql.Tx, userID string) error {
+	res, err := tx.ExecContext(ctx, `UPDATE users SET id=id WHERE id=?`, userID)
+	if err != nil {
+		return err
+	}
+	if n, rowsErr := res.RowsAffected(); rowsErr != nil {
+		return rowsErr
+	} else if n != 1 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func validateWorkspaceResourceCreationTx(ctx context.Context, tx *sql.Tx, workspaceID, userID string) error {
+	var one int
+	err := tx.QueryRowContext(ctx, `
+		SELECT 1
+		  FROM workspaces create_workspace
+		 WHERE create_workspace.id=?
+		   AND `+workspaceAcceptsResourceCreationPredicate("create_workspace")+`
+		   AND (
+		       create_workspace.owner_id=? OR EXISTS (
+		         SELECT 1 FROM workspace_members create_member
+		          WHERE create_member.workspace_id=create_workspace.id AND create_member.user_id=?
+		       )
+		   )`, workspaceID, userID, userID, userID).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	return err
 }
 
 func ListProjects(ctx context.Context, db *sql.DB, userID string) ([]Project, error) {
@@ -224,12 +275,30 @@ func ListProjects(ctx context.Context, db *sql.DB, userID string) ([]Project, er
 	return out, rows.Err()
 }
 
-// ListWorkspaceProjects lists a workspace's shared projects (§workspaces).
-// Membership is the handler's job.
+// ListWorkspaceProjects lists a workspace's shared projects without a caller
+// boundary. It is reserved for administrator/maintenance views. User-facing
+// callers must use ListWorkspaceProjectsForUser.
 func ListWorkspaceProjects(ctx context.Context, db *sql.DB, workspaceID string) ([]Project, error) {
+	return listWorkspaceProjects(ctx, db, workspaceID, "")
+}
+
+// ListWorkspaceProjectsForUser lists shared projects only while userID is the
+// canonical workspace owner or a current member.
+func ListWorkspaceProjectsForUser(ctx context.Context, db *sql.DB, workspaceID, userID string) ([]Project, error) {
+	return listWorkspaceProjects(ctx, db, workspaceID, userID)
+}
+
+func listWorkspaceProjects(ctx context.Context, db *sql.DB, workspaceID, userID string) ([]Project, error) {
+	q := `SELECT id, user_id, name, description, instructions, accent, emoji, pinned, kb_id, auto_add_uploads, created_at, updated_at, COALESCE(workspace_id,'')
+		 FROM projects WHERE workspace_id=?`
+	args := []any{workspaceID}
+	if userID != "" {
+		q += ` AND ` + workspaceResourceAccessPredicate("projects")
+		args = append(args, workspaceResourceAccessArgs(userID)...)
+	}
+	q += ` ORDER BY pinned DESC, updated_at DESC`
 	rows, err := db.QueryContext(ctx,
-		`SELECT id, user_id, name, description, instructions, accent, emoji, pinned, kb_id, auto_add_uploads, created_at, updated_at, COALESCE(workspace_id,'')
-		 FROM projects WHERE workspace_id=? ORDER BY pinned DESC, updated_at DESC`, workspaceID)
+		q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -245,12 +314,15 @@ func ListWorkspaceProjects(ctx context.Context, db *sql.DB, workspaceID string) 
 	return out, rows.Err()
 }
 
-// GetProject reads one row and checks ownership: the owner, or — for a
-// workspace project — any member of that workspace (§workspaces).
+// GetProject reads one row through the authoritative personal/workspace scope.
+// A workspace project's original creator has no access after membership is
+// revoked; the canonical workspace owner remains authoritative.
 func GetProject(ctx context.Context, db *sql.DB, id, userID string) (*Project, error) {
+	args := []any{id}
+	args = append(args, workspaceResourceAccessArgs(userID)...)
 	row := db.QueryRowContext(ctx,
 		`SELECT id, user_id, name, description, instructions, accent, emoji, pinned, kb_id, auto_add_uploads, created_at, updated_at, COALESCE(workspace_id,'')
-		 FROM projects WHERE id=? AND (user_id=? OR (COALESCE(workspace_id,'')<>'' AND workspace_id IN (SELECT workspace_id FROM workspace_members WHERE user_id=?)))`, id, userID, userID)
+		 FROM projects WHERE id=? AND `+workspaceResourceAccessPredicate("projects"), args...)
 	p, err := scanProject(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -265,7 +337,9 @@ func GetProject(ctx context.Context, db *sql.DB, id, userID string) (*Project, e
 func GetProjectByName(ctx context.Context, db *sql.DB, userID, name string) (*Project, error) {
 	row := db.QueryRowContext(ctx,
 		`SELECT id, user_id, name, description, instructions, accent, emoji, pinned, kb_id, auto_add_uploads, created_at, updated_at, COALESCE(workspace_id,'')
-		 FROM projects WHERE user_id=? AND lower(trim(name))=lower(trim(?)) LIMIT 1`,
+		 FROM projects
+		 WHERE user_id=? AND COALESCE(workspace_id,'')=''
+		   AND lower(trim(name))=lower(trim(?)) LIMIT 1`,
 		userID, name)
 	p, err := scanProject(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -310,11 +384,57 @@ func CreateProject(ctx context.Context, db *sql.DB, p Project) (*Project, error)
 	} else {
 		kbID = p.KBID
 	}
-	_, err := db.ExecContext(ctx, `INSERT INTO projects(
-		id, user_id, name, description, instructions, accent, emoji, pinned, kb_id, auto_add_uploads, created_at, updated_at, workspace_id
-	) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		p.ID, p.UserID, p.Name, p.Description, p.Instructions, p.Accent, p.Emoji,
-		boolInt(p.Pinned), kbID, boolInt(p.AutoAddUploads), now, now, p.WorkspaceID)
+	var err error
+	if p.WorkspaceID == "" {
+		_, err = db.ExecContext(ctx, `INSERT INTO projects(
+			id, user_id, name, description, instructions, accent, emoji, pinned, kb_id, auto_add_uploads, created_at, updated_at, workspace_id
+		) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			p.ID, p.UserID, p.Name, p.Description, p.Instructions, p.Accent, p.Emoji,
+			boolInt(p.Pinned), kbID, boolInt(p.AutoAddUploads), now, now, p.WorkspaceID)
+	} else {
+		tx, txErr := beginWorkspaceMutationTx(ctx, db, p.WorkspaceID)
+		if txErr != nil {
+			return nil, txErr
+		}
+		defer tx.Rollback() //nolint:errcheck
+		var result sql.Result
+		result, err = tx.ExecContext(ctx, `INSERT INTO projects(
+			id, user_id, name, description, instructions, accent, emoji, pinned, kb_id, auto_add_uploads, created_at, updated_at, workspace_id
+		) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+		    FROM workspaces create_workspace
+		   WHERE create_workspace.id=?
+		     AND `+workspaceAcceptsResourceCreationPredicate("create_workspace")+`
+		     AND (
+		         create_workspace.owner_id=? OR EXISTS (
+		           SELECT 1 FROM workspace_members create_member
+		            WHERE create_member.workspace_id=create_workspace.id AND create_member.user_id=?
+		         )
+		   )`,
+			p.ID, p.UserID, p.Name, p.Description, p.Instructions, p.Accent, p.Emoji,
+			boolInt(p.Pinned), kbID, boolInt(p.AutoAddUploads), now, now, p.WorkspaceID,
+			p.WorkspaceID, p.UserID, p.UserID, p.UserID)
+		if err != nil {
+			if isUniqueIndexErr(err, "idx_projects_user_name_unique", "projects.user_id") {
+				return nil, ErrProjectNameExists
+			}
+			return nil, err
+		}
+		if affected, rowsErr := result.RowsAffected(); rowsErr != nil {
+			return nil, rowsErr
+		} else if affected != 1 {
+			return nil, ErrNotFound
+		}
+		created, scanErr := scanProject(tx.QueryRowContext(ctx,
+			`SELECT id, user_id, name, description, instructions, accent, emoji, pinned, kb_id, auto_add_uploads, created_at, updated_at, COALESCE(workspace_id,'')
+			   FROM projects WHERE id=?`, p.ID))
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
+		return &created, nil
+	}
 	if err != nil {
 		if isUniqueIndexErr(err, "idx_projects_user_name_unique", "projects.user_id") {
 			return nil, ErrProjectNameExists
@@ -322,6 +442,201 @@ func CreateProject(ctx context.Context, db *sql.DB, p Project) (*Project, error)
 		return nil, err
 	}
 	return GetProject(ctx, db, p.ID, p.UserID)
+}
+
+// CreateProjectWithLimit atomically re-evaluates the creator's commercial cap
+// and inserts the project. The creator-user row is the cross-workspace
+// serialization point; a workspace row, when present, is locked first so
+// membership revocation and resource creation cannot pass each other.
+func CreateProjectWithLimit(ctx context.Context, db *sql.DB, p Project, maxProjects int) (*Project, error) {
+	return createProjectWithLimit(ctx, db, p, nil, maxProjects, nil)
+}
+
+// CreateProjectWithLibraryAndLimit creates a project and its dedicated KB in
+// one transaction. The library never becomes visible without its project, and
+// a workspace kick can only linearize before the authorization check or after
+// both rows commit.
+func CreateProjectWithLibraryAndLimit(ctx context.Context, db *sql.DB, p Project, library KnowledgeBase, maxProjects int) (*Project, error) {
+	return createProjectWithLimit(ctx, db, p, &library, maxProjects, nil)
+}
+
+func createProjectWithLimit(
+	ctx context.Context,
+	db *sql.DB,
+	p Project,
+	library *KnowledgeBase,
+	maxProjects int,
+	afterLibraryInsert func() error,
+) (*Project, error) {
+	if p.ID == "" {
+		p.ID = genID("pr")
+	}
+	p.UserID = strings.TrimSpace(p.UserID)
+	p.WorkspaceID = strings.TrimSpace(p.WorkspaceID)
+	p.Name = strings.TrimSpace(p.Name)
+	p.Description = strings.TrimSpace(p.Description)
+	p.Instructions = strings.TrimSpace(p.Instructions)
+	if p.Accent == "" {
+		p.Accent = "violet"
+	}
+
+	var projectLibrary *KnowledgeBase
+	if library != nil {
+		prepared := *library
+		if prepared.ID == "" {
+			prepared.ID = genID("kb")
+		}
+		prepared.UserID = strings.TrimSpace(prepared.UserID)
+		prepared.WorkspaceID = strings.TrimSpace(prepared.WorkspaceID)
+		prepared.ProjectID = strings.TrimSpace(prepared.ProjectID)
+		prepared.Name = strings.TrimSpace(prepared.Name)
+		prepared.Description = strings.TrimSpace(prepared.Description)
+		if prepared.UserID != p.UserID || prepared.WorkspaceID != p.WorkspaceID || prepared.ProjectID != "" {
+			return nil, errors.New("project library scope mismatch")
+		}
+		if p.KBID != "" && p.KBID != prepared.ID {
+			return nil, errors.New("project library id mismatch")
+		}
+		p.KBID = prepared.ID
+		projectLibrary = &prepared
+	}
+	now := time.Now().Unix()
+
+	var tx *sql.Tx
+	var err error
+	if p.WorkspaceID == "" {
+		tx, err = db.BeginTx(ctx, nil)
+	} else {
+		tx, err = beginWorkspaceMutationTx(ctx, db, p.WorkspaceID)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	if p.WorkspaceID != "" {
+		if err := validateWorkspaceResourceCreationTx(ctx, tx, p.WorkspaceID, p.UserID); err != nil {
+			return nil, err
+		}
+	}
+	if err := lockCommercialCapUserTx(ctx, tx, p.UserID); err != nil {
+		return nil, err
+	}
+	if maxProjects > 0 {
+		n, err := countProjectsByUser(ctx, tx, p.UserID)
+		if err != nil {
+			return nil, err
+		}
+		if n >= maxProjects {
+			return nil, ErrProjectLimitExceeded
+		}
+	}
+
+	if projectLibrary != nil {
+		if err := insertDedicatedProjectLibraryTx(ctx, tx, *projectLibrary, now); err != nil {
+			return nil, err
+		}
+		if afterLibraryInsert != nil {
+			if err := afterLibraryInsert(); err != nil {
+				return nil, err
+			}
+		}
+	}
+	if err := insertProjectWithScopeTx(ctx, tx, p, now); err != nil {
+		return nil, err
+	}
+	created, err := scanProject(tx.QueryRowContext(ctx,
+		`SELECT id, user_id, name, description, instructions, accent, emoji, pinned, kb_id, auto_add_uploads, created_at, updated_at, COALESCE(workspace_id,'')
+		   FROM projects WHERE id=?`, p.ID))
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return &created, nil
+}
+
+func insertDedicatedProjectLibraryTx(ctx context.Context, tx *sql.Tx, kb KnowledgeBase, now int64) error {
+	var err error
+	if kb.WorkspaceID == "" {
+		_, err = tx.ExecContext(ctx,
+			`INSERT INTO knowledge_bases(id, user_id, name, description, embedding_model_id, embedding_dim, project_id, created_at, workspace_id)
+			 VALUES(?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
+			kb.ID, kb.UserID, kb.Name, kb.Description, kb.EmbeddingModelID, kb.EmbeddingDim, now, kb.WorkspaceID)
+	} else {
+		var result sql.Result
+		result, err = tx.ExecContext(ctx,
+			`INSERT INTO knowledge_bases(id, user_id, name, description, embedding_model_id, embedding_dim, project_id, created_at, workspace_id)
+			 SELECT ?, ?, ?, ?, ?, ?, NULL, ?, ?
+			   FROM workspaces create_workspace
+			  WHERE create_workspace.id=?
+			    AND `+workspaceAcceptsResourceCreationPredicate("create_workspace")+`
+			    AND (
+			        create_workspace.owner_id=? OR EXISTS (
+			          SELECT 1 FROM workspace_members create_member
+			           WHERE create_member.workspace_id=create_workspace.id AND create_member.user_id=?
+			        )
+			  )`,
+			kb.ID, kb.UserID, kb.Name, kb.Description, kb.EmbeddingModelID, kb.EmbeddingDim, now, kb.WorkspaceID,
+			kb.WorkspaceID, kb.UserID, kb.UserID, kb.UserID)
+		if err == nil {
+			if affected, rowsErr := result.RowsAffected(); rowsErr != nil {
+				return rowsErr
+			} else if affected != 1 {
+				return ErrNotFound
+			}
+		}
+	}
+	if err != nil && isUniqueIndexErr(err, "idx_kbs_user_name_unique", "knowledge_bases.user_id") {
+		return ErrKBNameExists
+	}
+	return err
+}
+
+func insertProjectWithScopeTx(ctx context.Context, tx *sql.Tx, p Project, now int64) error {
+	var kbID any
+	if p.KBID == "" {
+		kbID = nil
+	} else {
+		kbID = p.KBID
+	}
+	var err error
+	if p.WorkspaceID == "" {
+		_, err = tx.ExecContext(ctx, `INSERT INTO projects(
+			id, user_id, name, description, instructions, accent, emoji, pinned, kb_id, auto_add_uploads, created_at, updated_at, workspace_id
+		) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			p.ID, p.UserID, p.Name, p.Description, p.Instructions, p.Accent, p.Emoji,
+			boolInt(p.Pinned), kbID, boolInt(p.AutoAddUploads), now, now, p.WorkspaceID)
+	} else {
+		var result sql.Result
+		result, err = tx.ExecContext(ctx, `INSERT INTO projects(
+			id, user_id, name, description, instructions, accent, emoji, pinned, kb_id, auto_add_uploads, created_at, updated_at, workspace_id
+		) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+		    FROM workspaces create_workspace
+		   WHERE create_workspace.id=?
+		     AND `+workspaceAcceptsResourceCreationPredicate("create_workspace")+`
+		     AND (
+		         create_workspace.owner_id=? OR EXISTS (
+		           SELECT 1 FROM workspace_members create_member
+		            WHERE create_member.workspace_id=create_workspace.id AND create_member.user_id=?
+		         )
+		   )`,
+			p.ID, p.UserID, p.Name, p.Description, p.Instructions, p.Accent, p.Emoji,
+			boolInt(p.Pinned), kbID, boolInt(p.AutoAddUploads), now, now, p.WorkspaceID,
+			p.WorkspaceID, p.UserID, p.UserID, p.UserID)
+		if err == nil {
+			if affected, rowsErr := result.RowsAffected(); rowsErr != nil {
+				return rowsErr
+			} else if affected != 1 {
+				return ErrNotFound
+			}
+		}
+	}
+	if err != nil && isUniqueIndexErr(err, "idx_projects_user_name_unique", "projects.user_id") {
+		return ErrProjectNameExists
+	}
+	return err
 }
 
 // UpdateProject writes selective fields. Use the patch shape.
@@ -371,31 +686,113 @@ func UpdateProject(ctx context.Context, db *sql.DB, id, userID string, patch Pro
 	}
 	parts = append(parts, "updated_at=?")
 	args = append(args, time.Now().Unix())
-	args = append(args, id, userID, userID)
-	// Owner or workspace member (§workspaces — members edit shared projects).
+	args = append(args, id)
+	args = append(args, workspaceResourceAccessArgs(userID)...)
 	q := "UPDATE projects SET " + strings.Join(parts, ", ") +
-		" WHERE id=? AND (user_id=? OR (COALESCE(workspace_id,'')<>'' AND workspace_id IN (SELECT workspace_id FROM workspace_members WHERE user_id=?)))"
-	if _, err := db.ExecContext(ctx, q, args...); err != nil {
+		" WHERE id=? AND " + workspaceResourceAccessPredicate("projects")
+	workspaceID, err := projectWorkspaceID(ctx, db, id)
+	if err != nil {
+		return nil, err
+	}
+	if workspaceID == "" {
+		res, err := db.ExecContext(ctx, q, args...)
+		if err != nil {
+			if isUniqueIndexErr(err, "idx_projects_user_name_unique", "projects.user_id") {
+				return nil, ErrProjectNameExists
+			}
+			return nil, err
+		}
+		if n, rowsErr := res.RowsAffected(); rowsErr != nil {
+			return nil, rowsErr
+		} else if n != 1 {
+			return nil, ErrNotFound
+		}
+		return GetProject(ctx, db, id, userID)
+	}
+
+	tx, err := beginWorkspaceMutationTx(ctx, db, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback() //nolint:errcheck
+	res, err := tx.ExecContext(ctx, q, args...)
+	if err != nil {
 		if isUniqueIndexErr(err, "idx_projects_user_name_unique", "projects.user_id") {
 			return nil, ErrProjectNameExists
 		}
 		return nil, err
 	}
-	return GetProject(ctx, db, id, userID)
+	if n, rowsErr := res.RowsAffected(); rowsErr != nil {
+		return nil, rowsErr
+	} else if n != 1 {
+		return nil, ErrNotFound
+	}
+	updated, err := scanProject(tx.QueryRowContext(ctx,
+		`SELECT id, user_id, name, description, instructions, accent, emoji, pinned, kb_id, auto_add_uploads, created_at, updated_at, COALESCE(workspace_id,'')
+		   FROM projects WHERE id=?`, id))
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return &updated, nil
 }
 
 // DeleteProject removes a row and unsets conversations.project_id via FK.
-// Owner or workspace member (§workspaces).
+// Personal owner or authoritative workspace principal (§workspaces).
 func DeleteProject(ctx context.Context, db *sql.DB, id, userID string) error {
-	res, err := db.ExecContext(ctx, "DELETE FROM projects WHERE id=? AND (user_id=? OR (COALESCE(workspace_id,'')<>'' AND workspace_id IN (SELECT workspace_id FROM workspace_members WHERE user_id=?)))", id, userID, userID)
+	workspaceID, err := projectWorkspaceID(ctx, db, id)
 	if err != nil {
 		return err
 	}
-	n, _ := res.RowsAffected()
+	args := []any{id}
+	args = append(args, workspaceResourceAccessArgs(userID)...)
+	q := "DELETE FROM projects WHERE id=? AND " + workspaceResourceAccessPredicate("projects")
+	if workspaceID == "" {
+		res, err := db.ExecContext(ctx, q, args...)
+		if err != nil {
+			return err
+		}
+		n, rowsErr := res.RowsAffected()
+		if rowsErr != nil {
+			return rowsErr
+		}
+		if n == 0 {
+			return ErrNotFound
+		}
+		return nil
+	}
+	tx, err := beginWorkspaceMutationTx(ctx, db, workspaceID)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck
+	res, err := tx.ExecContext(ctx, q, args...)
+	if err != nil {
+		return err
+	}
+	n, rowsErr := res.RowsAffected()
+	if rowsErr != nil {
+		return rowsErr
+	}
 	if n == 0 {
 		return ErrNotFound
 	}
-	return nil
+	return tx.Commit()
+}
+
+func projectWorkspaceID(ctx context.Context, db *sql.DB, id string) (string, error) {
+	var workspaceID string
+	if err := db.QueryRowContext(ctx,
+		`SELECT COALESCE(workspace_id,'') FROM projects WHERE id=?`, id,
+	).Scan(&workspaceID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", ErrNotFound
+		}
+		return "", err
+	}
+	return workspaceID, nil
 }
 
 // SetProjectKB attaches a knowledge base id to a project.

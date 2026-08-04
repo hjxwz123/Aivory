@@ -54,7 +54,17 @@ func seedMessageFeedbackTest(t *testing.T, ctx context.Context, db *sql.DB) feed
 	if err != nil {
 		t.Fatalf("create model: %v", err)
 	}
-	conv, err := CreateConversation(ctx, db, Conversation{ID: "conv_feedback", UserID: "u1", Title: "Feedback thread", ModelID: model.ID})
+	workspace, err := CreateWorkspace(ctx, db, "u1", "Feedback workspace")
+	if err != nil {
+		t.Fatalf("create feedback workspace: %v", err)
+	}
+	if err := JoinWorkspace(ctx, db, workspace.ID, "u2"); err != nil {
+		t.Fatalf("join feedback workspace: %v", err)
+	}
+	conv, err := CreateConversation(ctx, db, Conversation{
+		ID: "conv_feedback", UserID: "u1", WorkspaceID: workspace.ID,
+		Title: "Feedback thread", ModelID: model.ID,
+	})
 	if err != nil {
 		t.Fatalf("create conversation: %v", err)
 	}

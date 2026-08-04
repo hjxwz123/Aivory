@@ -6,6 +6,8 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"log"
 	"mime/multipart"
@@ -16,8 +18,10 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"aivory/server/internal/config"
+	"aivory/server/internal/oauth"
 	paymentcore "aivory/server/internal/payment"
 	"aivory/server/internal/store"
 )
@@ -76,7 +80,9 @@ func TestBackupExportImportEndToEnd(t *testing.T) {
 	tgtDB := openMigrated(t, filepath.Join(tgtRoot, "tgt.db"))
 	defer tgtDB.Close()
 	// Pre-existing junk that import must wipe.
-	mustExec(t, tgtDB, `INSERT INTO users(id,email,password_hash,role) VALUES('old','x@y.z','h','user')`)
+	mustExec(t, tgtDB, `INSERT INTO users(id,email,password_hash,name,role,status,password_set) VALUES('old','x@y.z','old-hash','Old','user','active',1)`)
+	mustExec(t, tgtDB, `INSERT INTO users(id,email,password_hash,name,role,status,password_set) VALUES('adm','admin@example.test','admin-hash','Admin','admin','active',1)`)
+	mustExec(t, tgtDB, `INSERT INTO refresh_tokens(jti,user_id,expires_at) VALUES('adm-refresh','adm',9999999999)`)
 
 	tgtDeps := Deps{
 		DB:     tgtDB,
@@ -88,6 +94,7 @@ func TestBackupExportImportEndToEnd(t *testing.T) {
 	body, contentType := multipartArchive(t, archive)
 	irec := httptest.NewRecorder()
 	ireq := httptest.NewRequest("POST", "/api/admin/backup/import", body)
+	ireq = ireq.WithContext(context.WithValue(ireq.Context(), userCtxKey{}, &store.User{ID: "adm", Role: "admin", Status: "active"}))
 	ireq.Header.Set("content-type", contentType)
 	importBackupAdmin(tgtDeps, irec, ireq)
 	if irec.Code != 200 {
@@ -101,7 +108,7 @@ func TestBackupExportImportEndToEnd(t *testing.T) {
 	if err := json.Unmarshal(irec.Body.Bytes(), &res); err != nil {
 		t.Fatalf("decode import response: %v (%s)", err, irec.Body.String())
 	}
-	if !res.OK || res.Tables["users"] != 1 || res.Tables["messages"] != 1 {
+	if !res.OK || res.Tables["users"] != 2 || res.Tables["messages"] != 1 {
 		t.Fatalf("unexpected import result: %+v", res)
 	}
 	if res.FilesRestored != 2 {
@@ -111,8 +118,8 @@ func TestBackupExportImportEndToEnd(t *testing.T) {
 	// The wiped junk is gone; the imported user is present.
 	var userCount int
 	mustQuery(t, tgtDB, "SELECT COUNT(*) FROM users").Scan(&userCount)
-	if userCount != 1 {
-		t.Fatalf("target users = %d, want 1 (junk should be wiped)", userCount)
+	if userCount != 2 {
+		t.Fatalf("target users = %d, want 2 (junk should be wiped, importing admin retained)", userCount)
 	}
 	var email string
 	mustQuery(t, tgtDB, "SELECT email FROM users WHERE id='u1'").Scan(&email)
@@ -176,7 +183,7 @@ func TestBackupRestoreBackfillsLegacyMessageFeedbackOnlyWhenTableMissing(t *test
 	t.Run("legacy archive without normalized table", func(t *testing.T) {
 		d := depsFor(t)
 		zr, man := backupRowsArchiveForTest(t, baseRows("dislike"))
-		counts, err := restoreDatabase(t.Context(), d, zr, man)
+		counts, err := restoreDatabase(t.Context(), d, zr, man, "")
 		if err != nil {
 			t.Fatalf("restore legacy backup: %v", err)
 		}
@@ -209,7 +216,7 @@ func TestBackupRestoreBackfillsLegacyMessageFeedbackOnlyWhenTableMissing(t *test
 			"created_at": 200, "updated_at": 201,
 		}}
 		zr, man := backupRowsArchiveForTest(t, rows)
-		counts, err := restoreDatabase(t.Context(), d, zr, man)
+		counts, err := restoreDatabase(t.Context(), d, zr, man, "")
 		if err != nil {
 			t.Fatalf("restore current backup: %v", err)
 		}
@@ -278,7 +285,7 @@ func TestBackupRestoreUsageStatsCompatibility(t *testing.T) {
 			},
 		}
 		zr, man := backupRowsArchiveForTest(t, rows)
-		counts, err := restoreDatabase(t.Context(), d, zr, man)
+		counts, err := restoreDatabase(t.Context(), d, zr, man, "")
 		if err != nil {
 			t.Fatalf("restore legacy usage archive: %v", err)
 		}
@@ -346,7 +353,7 @@ func TestBackupRestoreUsageStatsCompatibility(t *testing.T) {
 			"usage_stats": {},
 		}
 		zr, man := backupRowsArchiveForTest(t, rows)
-		counts, err := restoreDatabase(t.Context(), d, zr, man)
+		counts, err := restoreDatabase(t.Context(), d, zr, man, "")
 		if err != nil {
 			t.Fatalf("restore current usage archive: %v", err)
 		}
@@ -399,6 +406,76 @@ func TestBackupImportRequiresConfirm(t *testing.T) {
 	}
 }
 
+func TestArchiveImportsRejectManifestVersionsOutsideSupportedRange(t *testing.T) {
+	tests := []struct {
+		name       string
+		current    int
+		archive    func(*testing.T, int) []byte
+		invoke     func(Deps, http.ResponseWriter, *http.Request)
+		requestURL string
+	}{
+		{
+			name:    "config archive",
+			current: configArchiveVersion,
+			archive: func(t *testing.T, version int) []byte {
+				return manifestOnlyArchiveForTest(t, configManifest{
+					Format: "aivory-config", Version: version, MergeMode: "upsert",
+				})
+			},
+			invoke:     importConfigAdmin,
+			requestURL: "/api/admin/config/import",
+		},
+		{
+			name:    "full backup",
+			current: store.BackupVersion,
+			archive: func(t *testing.T, version int) []byte {
+				return manifestOnlyArchiveForTest(t, backupManifest{
+					Format: "aivory-backup", Version: version, Dialect: "sqlite",
+				})
+			},
+			invoke:     importBackupAdmin,
+			requestURL: "/api/admin/backup/import",
+		},
+	}
+
+	for _, tc := range tests {
+		for _, version := range []int{-1, 0, tc.current + 1} {
+			t.Run(fmt.Sprintf("%s/version_%d", tc.name, version), func(t *testing.T) {
+				body, contentType := multipartArchive(t, tc.archive(t, version))
+				req := httptest.NewRequest(http.MethodPost, tc.requestURL, body)
+				req.Header.Set("content-type", contentType)
+				rec := httptest.NewRecorder()
+				tc.invoke(Deps{Config: config.Config{}}, rec, req)
+				if rec.Code != http.StatusBadRequest {
+					t.Fatalf("import status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+				}
+				if !strings.Contains(rec.Body.String(), "supported versions: v1 through") {
+					t.Fatalf("import error does not report supported range: %s", rec.Body.String())
+				}
+			})
+		}
+	}
+}
+
+func TestFullBackupImportAcceptsVersion1Archive(t *testing.T) {
+	d := newBackupAdminFixture(t, false)
+	archive := manifestOnlyArchiveForTest(t, backupManifest{
+		Format: "aivory-backup", Version: 1, Dialect: "sqlite", Counts: map[string]int64{},
+	})
+	body, contentType := multipartArchive(t, archive)
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/backup/import", body)
+	req.Header.Set("content-type", contentType)
+	req = req.WithContext(context.WithValue(req.Context(), userCtxKey{}, &store.User{
+		ID: "adm", Role: "admin", Status: "active",
+	}))
+	rec := httptest.NewRecorder()
+	importBackupAdmin(d, rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("version-1 full backup import status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	assertOneRestoredAdmin(t, d.DB, "admin@example.test", "adm", "current-admin-hash")
+}
+
 func TestBackupExportImportRoundTripsQdrant(t *testing.T) {
 	qdrant := newFakeQdrant(t)
 	qdrant.setPoints("aivory_c2", []qdrantDumpPoint{{
@@ -435,6 +512,9 @@ func TestBackupExportImportRoundTripsQdrant(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read manifest: %v", err)
 	}
+	if man.Version != 2 {
+		t.Fatalf("backup manifest version=%d, want breaking namespace format v2", man.Version)
+	}
 	if !man.IncludesQdrant || man.QdrantPoints != 1 {
 		t.Fatalf("manifest qdrant = includes:%v points:%d, want true/1", man.IncludesQdrant, man.QdrantPoints)
 	}
@@ -446,6 +526,7 @@ func TestBackupExportImportRoundTripsQdrant(t *testing.T) {
 	tgtRoot := t.TempDir()
 	tgtDB := openMigrated(t, filepath.Join(tgtRoot, "tgt.db"))
 	defer tgtDB.Close()
+	mustExec(t, tgtDB, `INSERT INTO users(id,email,password_hash,name,role,status,password_set) VALUES('adm','admin@example.test','admin-hash','Admin','admin','active',1)`)
 	tgtDeps := Deps{
 		DB:     tgtDB,
 		Config: config.Config{UploadDir: t.TempDir(), ArtifactDir: t.TempDir(), QdrantURL: qdrant.url},
@@ -455,6 +536,7 @@ func TestBackupExportImportRoundTripsQdrant(t *testing.T) {
 	irec := httptest.NewRecorder()
 	ireq := httptest.NewRequest("POST", "/api/admin/backup/import", body)
 	ireq.Header.Set("content-type", contentType)
+	ireq = ireq.WithContext(context.WithValue(ireq.Context(), userCtxKey{}, &store.User{ID: "adm", Role: "admin", Status: "active"}))
 	importBackupAdmin(tgtDeps, irec, ireq)
 	if irec.Code != 200 {
 		t.Fatalf("import status = %d, body=%s", irec.Code, irec.Body.String())
@@ -523,6 +605,17 @@ func TestConfigExportImportMergesAdminConfigOnly(t *testing.T) {
 		t.Fatalf("config export content-type = %q", ct)
 	}
 	archive := rec.Body.Bytes()
+	configZip, err := zip.NewReader(bytes.NewReader(archive), int64(len(archive)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	configMan, err := readConfigManifest(configZip)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if configMan.Version != 2 {
+		t.Fatalf("config manifest version=%d, want breaking OAuth format v2", configMan.Version)
+	}
 
 	tgtRoot := t.TempDir()
 	tgtUploads := filepath.Join(tgtRoot, "uploads")
@@ -537,6 +630,7 @@ func TestConfigExportImportMergesAdminConfigOnly(t *testing.T) {
 	irec := httptest.NewRecorder()
 	ireq := httptest.NewRequest("POST", "/api/admin/config/import", body)
 	ireq.Header.Set("content-type", contentType)
+	ireq = authorizeConfigImportRequestForTest(t, tgtDB, ireq)
 	importConfigAdmin(tgtDeps, irec, ireq)
 	if irec.Code != 200 {
 		t.Fatalf("config import status = %d, body=%s", irec.Code, irec.Body.String())
@@ -623,6 +717,146 @@ func TestConfigExportImportMergesAdminConfigOnly(t *testing.T) {
 	}
 }
 
+func TestConfigOAuthProviderImportRotatesNamespaceWithoutReusingLegacyIdentity(t *testing.T) {
+	db := openMigrated(t, filepath.Join(t.TempDir(), "config-oauth-namespace.db"))
+	defer db.Close()
+	user, err := store.CreateUser(t.Context(), db, "owner@example.test", "Owner", "hash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldProvider := store.OAuthProvider{
+		ID: "oa_config_trust", Kind: "oidc", Name: "Config OIDC", ClientID: "client-id",
+		ClientSecret: "client-secret", IssuerURL: "https://issuer-a.example.test",
+		JWKSURL: "https://issuer-a.example.test/keys", AuthURL: "https://issuer-a.example.test/authorize",
+		TokenURL: "https://issuer-a.example.test/token", Enabled: true,
+	}
+	if _, err := store.CreateOAuthProvider(t.Context(), db, oldProvider); err != nil {
+		t.Fatal(err)
+	}
+	const rawSubject = "same-raw-subject"
+	if err := store.BindOAuthIdentity(t.Context(), db, oldProvider.ID, rawSubject, user.ID, user.Email); err != nil {
+		t.Fatal(err)
+	}
+	oldNamespace := oauth.Resolve(toOAuthConfig(&oldProvider)).SubjectNamespace()
+
+	archiveRow := map[string]any{
+		"id": oldProvider.ID, "issuer_url": "https://issuer-b.example.test",
+		"jwks_url":          "https://issuer-b.example.test/keys",
+		"subject_namespace": "oauth:v1:attacker-controlled:",
+	}
+	importRow := func() {
+		tx, err := db.BeginTx(t.Context(), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback()
+		var encoded bytes.Buffer
+		if err := json.NewEncoder(&encoded).Encode(archiveRow); err != nil {
+			t.Fatal(err)
+		}
+		normalized, err := normalizeConfigOAuthProviderRows(t.Context(), tx, &encoded)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n, err := store.UpsertTable(t.Context(), tx, "oauth_providers", normalized); err != nil || n != 1 {
+			t.Fatalf("upsert normalized OAuth provider count=%d err=%v", n, err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	importRow()
+	// Re-importing the same archive must be idempotent and must not prefix the
+	// already-migrated old identity a second time.
+	importRow()
+
+	stored, err := store.GetOAuthProvider(t.Context(), db, oldProvider.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newNamespace := oauth.Resolve(toOAuthConfig(stored)).SubjectNamespace()
+	if stored.SubjectNamespace != newNamespace || newNamespace == oldNamespace ||
+		stored.SubjectNamespace == "oauth:v1:attacker-controlled:" {
+		t.Fatalf("imported provider old=%q new=%q stored=%q", oldNamespace, newNamespace, stored.SubjectNamespace)
+	}
+	if owner, err := store.FindOAuthIdentityUser(t.Context(), db, oldProvider.ID, oldNamespace+rawSubject); err != nil || owner != user.ID {
+		t.Fatalf("old trust identity owner=%q err=%v", owner, err)
+	}
+	if owner, err := store.FindOAuthIdentityUser(t.Context(), db, oldProvider.ID, newNamespace+rawSubject); owner != "" || !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("new trust inherited old identity owner=%q err=%v", owner, err)
+	}
+	if owner, err := store.FindOAuthIdentityUser(t.Context(), db, oldProvider.ID, oldNamespace+oldNamespace+rawSubject); owner != "" || !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("config re-import double-prefixed identity owner=%q err=%v", owner, err)
+	}
+}
+
+func TestConfigOAuthProviderImportUpgradesVersion1UserInfoKind(t *testing.T) {
+	db := openMigrated(t, filepath.Join(t.TempDir(), "config-oauth-v1.db"))
+	defer db.Close()
+	target := store.OAuthProvider{
+		ID: "oa_legacy_config", Kind: "oidc", Name: "Target Strict OIDC", ClientID: "target-client",
+		ClientSecret: "target-secret", IssuerURL: "https://target.example.test",
+		JWKSURL: "https://target.example.test/keys", AuthURL: "https://target.example.test/authorize",
+		TokenURL: "https://target.example.test/token", Enabled: true,
+	}
+	target.SubjectNamespace = oauth.Resolve(toOAuthConfig(&target)).SubjectNamespace()
+	if _, err := store.CreateOAuthProvider(t.Context(), db, target); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := db.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	var encoded bytes.Buffer
+	if err := json.NewEncoder(&encoded).Encode(map[string]any{
+		"id": "oa_legacy_config", "kind": "oidc", "name": "Legacy UserInfo",
+		"client_id": "client-id", "client_secret": "legacy-secret",
+		"auth_url":  "https://legacy.example.test/authorize",
+		"token_url": "https://legacy.example.test/token", "userinfo_url": "https://legacy.example.test/me",
+		"enabled": true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	normalized, err := normalizeConfigOAuthProviderRows(t.Context(), tx, &encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertTable(t.Context(), tx, "oauth_providers", normalized); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := store.GetOAuthProvider(t.Context(), db, "oa_legacy_config")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantNamespace := oauth.Resolve(toOAuthConfig(stored)).SubjectNamespace()
+	if stored.Kind != "oauth2" || stored.SubjectNamespace != wantNamespace || stored.SubjectNamespace == "" ||
+		stored.Scopes != "openid email profile" {
+		t.Fatalf("v1 UserInfo provider kind=%q marker=%q scopes=%q want oauth2/%q/default scopes",
+			stored.Kind, stored.SubjectNamespace, stored.Scopes, wantNamespace)
+	}
+}
+
+func TestConfigImportAcceptsVersion1Archive(t *testing.T) {
+	db := openMigrated(t, filepath.Join(t.TempDir(), "config-v1-compatible.db"))
+	defer db.Close()
+	d := Deps{DB: db, Config: config.Config{UploadDir: t.TempDir(), ArtifactDir: t.TempDir()}, Logger: log.New(io.Discard, "", 0)}
+	archive := paymentConfigArchiveVersionForTest(t, 1, map[string][]map[string]any{
+		"settings": {{"key": "site_title", "value": `"Imported from v1"`}},
+	})
+	rec := importPaymentConfigArchiveForTest(t, d, archive)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("version-1 config import status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var value string
+	if err := db.QueryRow(`SELECT value FROM settings WHERE key='site_title'`).Scan(&value); err != nil || value != `"Imported from v1"` {
+		t.Fatalf("version-1 setting value=%q err=%v", value, err)
+	}
+}
+
 func TestConfigImportRejectsLegacyJSON(t *testing.T) {
 	db := openMigrated(t, filepath.Join(t.TempDir(), "config-json.db"))
 	defer db.Close()
@@ -657,6 +891,223 @@ func TestConfigImportRejectsLegacyJSON(t *testing.T) {
 	mustQuery(t, db, `SELECT value FROM settings WHERE key='search_api_key'`).Scan(&got)
 	if got != `"current-secret"` {
 		t.Fatalf("legacy JSON import changed settings: %q", got)
+	}
+}
+
+func TestConfigImportRechecksAdminAfterSlowUpload(t *testing.T) {
+	tests := []struct {
+		name   string
+		revoke string
+	}{
+		{name: "demoted", revoke: `UPDATE users SET role='user' WHERE id=?`},
+		{name: "banned", revoke: `UPDATE users SET status='banned' WHERE id=?`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			db := openMigrated(t, filepath.Join(t.TempDir(), "config-import-recheck.db"))
+			defer db.Close()
+			mustExec(t, db, `INSERT INTO settings(key,value) VALUES('search_api_key','"original-secret"')`)
+			uploadDir := t.TempDir()
+			d := Deps{DB: db, Config: config.Config{UploadDir: uploadDir, ArtifactDir: t.TempDir()}, Logger: log.New(io.Discard, "", 0)}
+
+			archive := paymentConfigArchiveForTest(t, map[string][]map[string]any{
+				"settings": {{"key": "search_api_key", "value": `"changed-secret"`, "updated_at": 2}},
+			}, configArchiveEntryForTest{
+				name: configZipSkillAssets + "revoked-admin.txt",
+				data: []byte("must not be restored"),
+			})
+			multipartBody, contentType := multipartArchive(t, archive)
+			started := make(chan struct{})
+			release := make(chan struct{})
+			slowBody := &gatedConfigUploadBody{
+				reader:  bytes.NewReader(append([]byte(nil), multipartBody.Bytes()...)),
+				started: started,
+				release: release,
+			}
+			req := httptest.NewRequest(http.MethodPost, "/api/admin/config/import", slowBody)
+			req.Header.Set("content-type", contentType)
+			req = authorizeConfigImportRequestForTest(t, db, req)
+			rec := httptest.NewRecorder()
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				importConfigAdmin(d, rec, req)
+			}()
+
+			select {
+			case <-started:
+			case <-time.After(5 * time.Second):
+				close(release)
+				t.Fatal("config import did not begin reading the slow upload")
+			}
+			mustExec(t, db, tc.revoke, configImportAdminForTestID)
+			close(release)
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				t.Fatal("config import did not finish after releasing the upload")
+			}
+
+			if rec.Code != http.StatusForbidden {
+				t.Fatalf("config import after admin was %s status=%d body=%s, want 403", tc.name, rec.Code, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), errConfigImportAdminUnauthorized.Error()) {
+				t.Fatalf("config import after admin was %s error=%s", tc.name, rec.Body.String())
+			}
+			var got string
+			mustQuery(t, db, `SELECT value FROM settings WHERE key='search_api_key'`).Scan(&got)
+			if got != `"original-secret"` {
+				t.Fatalf("config import after admin was %s changed secret setting to %q", tc.name, got)
+			}
+			if _, err := os.Stat(filepath.Join(uploadDir, skillAssetsSubdir, "revoked-admin.txt")); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("config import after admin was %s restored an asset, stat error=%v", tc.name, err)
+			}
+		})
+	}
+}
+
+func TestConfigImportHoldsAdminLockThroughAssetRestore(t *testing.T) {
+	db := openMigrated(t, filepath.Join(t.TempDir(), "config-import-assets-lock.db"))
+	defer db.Close()
+	mustExec(t, db, `INSERT INTO users(id,email,password_hash,name,role,status,password_set) VALUES(?, 'asset-admin@example.test', 'hash', 'Asset Admin', 'admin', 'active', 1)`, configImportAdminForTestID)
+	mustExec(t, db, `INSERT INTO users(id,email,password_hash,name,role,status,password_set) VALUES('asset-admin-backup', 'asset-admin-backup@example.test', 'hash', 'Backup Admin', 'admin', 'active', 1)`)
+	mustExec(t, db, `INSERT INTO settings(key,value) VALUES('search_api_key','"original-secret"')`)
+	uploadDir := t.TempDir()
+	d := Deps{DB: db, Config: config.Config{UploadDir: uploadDir, ArtifactDir: t.TempDir()}, Logger: log.New(io.Discard, "", 0)}
+	archive := paymentConfigArchiveForTest(t, map[string][]map[string]any{
+		"settings": {{"key": "search_api_key", "value": `"changed-secret"`, "updated_at": 2}},
+	}, configArchiveEntryForTest{
+		name: configZipSkillAssets + "locked-admin.txt",
+		data: []byte("restored before revocation returns"),
+	})
+	zr, err := zip.NewReader(bytes.NewReader(archive), int64(len(archive)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	man, err := readConfigManifest(zr)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	externalStarted := make(chan struct{})
+	releaseExternal := make(chan struct{})
+	externalFinished := make(chan struct{})
+	importDone := make(chan error, 1)
+	go func() {
+		_, mergeErr := mergeConfigArchive(t.Context(), d, zr, man, configImportAdminForTestID, func() error {
+			close(externalStarted)
+			<-releaseExternal
+			if restored := restoreConfigAssetsFromZip(d, zr); restored != 1 {
+				return fmt.Errorf("restored assets=%d, want 1", restored)
+			}
+			close(externalFinished)
+			return nil
+		})
+		importDone <- mergeErr
+	}()
+
+	select {
+	case <-externalStarted:
+	case <-time.After(5 * time.Second):
+		close(releaseExternal)
+		t.Fatal("config import did not reach the asset restore stage")
+	}
+	revokeDone := make(chan error, 1)
+	go func() {
+		revokeDone <- store.SetUserRole(t.Context(), db, configImportAdminForTestID, "user")
+	}()
+	select {
+	case err := <-revokeDone:
+		close(releaseExternal)
+		t.Fatalf("admin demotion returned before asset restore finished: %v", err)
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	close(releaseExternal)
+	if err := <-importDone; err != nil {
+		t.Fatalf("config import: %v", err)
+	}
+	if err := <-revokeDone; err != nil {
+		t.Fatalf("demote admin: %v", err)
+	}
+	select {
+	case <-externalFinished:
+	default:
+		t.Fatal("admin demotion returned before asset restoration completed")
+	}
+	assetPath := filepath.Join(uploadDir, skillAssetsSubdir, "locked-admin.txt")
+	if content, err := os.ReadFile(assetPath); err != nil || string(content) != "restored before revocation returns" {
+		t.Fatalf("restored asset after demotion: content=%q err=%v", string(content), err)
+	}
+	var role string
+	if err := db.QueryRow(`SELECT role FROM users WHERE id=?`, configImportAdminForTestID).Scan(&role); err != nil || role != "user" {
+		t.Fatalf("importing admin role=%q err=%v, want user", role, err)
+	}
+}
+
+func TestFullBackupRestoreHoldsAdminLockThroughFileRestore(t *testing.T) {
+	d := newBackupAdminFixture(t, false)
+	zr, man := backupRowsArchiveForTest(t, map[string][]map[string]any{
+		"users": {{"id": "restored-user", "email": "restored@example.test", "password_hash": "hash", "role": "user", "status": "active", "password_set": 1}},
+	}, configArchiveEntryForTest{
+		name: backupZipUploads + "locked-backup.txt",
+		data: []byte("restored before ban returns"),
+	})
+
+	externalStarted := make(chan struct{})
+	releaseExternal := make(chan struct{})
+	externalFinished := make(chan struct{})
+	restoreDone := make(chan error, 1)
+	go func() {
+		_, restoreErr := restoreDatabase(t.Context(), d, zr, man, "adm", func() error {
+			close(externalStarted)
+			<-releaseExternal
+			if restored := restoreFilesFromZip(d, zr); restored != 1 {
+				return fmt.Errorf("restored files=%d, want 1", restored)
+			}
+			close(externalFinished)
+			return nil
+		})
+		restoreDone <- restoreErr
+	}()
+
+	select {
+	case <-externalStarted:
+	case <-time.After(5 * time.Second):
+		close(releaseExternal)
+		t.Fatal("full restore did not reach the file restore stage")
+	}
+	banDone := make(chan error, 1)
+	go func() {
+		_, banErr := d.DB.ExecContext(t.Context(), `UPDATE users SET status='banned', token_ver=token_ver+1 WHERE id='adm'`)
+		banDone <- banErr
+	}()
+	select {
+	case err := <-banDone:
+		close(releaseExternal)
+		t.Fatalf("admin ban returned before file restore finished: %v", err)
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	close(releaseExternal)
+	if err := <-restoreDone; err != nil {
+		t.Fatalf("full restore: %v", err)
+	}
+	if err := <-banDone; err != nil {
+		t.Fatalf("ban admin: %v", err)
+	}
+	select {
+	case <-externalFinished:
+	default:
+		t.Fatal("admin ban returned before file restoration completed")
+	}
+	path := filepath.Join(d.Config.UploadDir, "locked-backup.txt")
+	if content, err := os.ReadFile(path); err != nil || string(content) != "restored before ban returns" {
+		t.Fatalf("restored backup file after ban: content=%q err=%v", string(content), err)
+	}
+	var status string
+	if err := d.DB.QueryRow(`SELECT status FROM users WHERE id='adm'`).Scan(&status); err != nil || status != "banned" {
+		t.Fatalf("restored admin status=%q err=%v, want banned", status, err)
 	}
 }
 
@@ -1065,7 +1516,7 @@ func TestRestoreLegacyPricingSettingsPersistsCurrencyAndCreatesPackage(t *testin
 		t.Fatalf("begin restore: %v", err)
 	}
 	deps := Deps{DB: db, Config: config.Config{UploadDir: t.TempDir(), ArtifactDir: t.TempDir()}}
-	if _, err := restoreInto(context.Background(), tx, zr, backupManifest{}, deps); err != nil {
+	if _, err := restoreInto(context.Background(), tx, zr, backupManifest{}, deps, nil); err != nil {
 		_ = tx.Rollback()
 		t.Fatalf("restore legacy pricing settings: %v", err)
 	}
@@ -1178,6 +1629,7 @@ func TestConfigImportCannotChangeLockedEmbeddingModel(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("POST", "/api/admin/config/import", &body)
 	req.Header.Set("content-type", mwForm.FormDataContentType())
+	req = authorizeConfigImportRequestForTest(t, db, req)
 	importConfigAdmin(d, rec, req)
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("config import status = %d, body=%s", rec.Code, rec.Body.String())
@@ -1359,7 +1811,16 @@ func paymentConfigArchiveJSONText(t *testing.T, value any) string {
 	return string(encoded)
 }
 
-func paymentConfigArchiveForTest(t *testing.T, rowsByTable map[string][]map[string]any) []byte {
+type configArchiveEntryForTest struct {
+	name string
+	data []byte
+}
+
+func paymentConfigArchiveForTest(t *testing.T, rowsByTable map[string][]map[string]any, extraEntries ...configArchiveEntryForTest) []byte {
+	return paymentConfigArchiveVersionForTest(t, configArchiveVersion, rowsByTable, extraEntries...)
+}
+
+func paymentConfigArchiveVersionForTest(t *testing.T, version int, rowsByTable map[string][]map[string]any, extraEntries ...configArchiveEntryForTest) []byte {
 	t.Helper()
 	var archive bytes.Buffer
 	zw := zip.NewWriter(&archive)
@@ -1383,13 +1844,22 @@ func paymentConfigArchiveForTest(t *testing.T, rowsByTable map[string][]map[stri
 			}
 		}
 	}
+	for _, extra := range extraEntries {
+		entry, err := zw.Create(extra.name)
+		if err != nil {
+			t.Fatalf("create config archive extra entry %s: %v", extra.name, err)
+		}
+		if _, err := entry.Write(extra.data); err != nil {
+			t.Fatalf("write config archive extra entry %s: %v", extra.name, err)
+		}
+	}
 	manifestEntry, err := zw.Create("manifest.json")
 	if err != nil {
 		t.Fatalf("create config archive manifest: %v", err)
 	}
 	if err := json.NewEncoder(manifestEntry).Encode(configManifest{
-		Format: "aivory-config", Version: configArchiveVersion, Tables: tables, Counts: counts,
-		MergeMode: "upsert", SecretsIncluded: true,
+		Format: "aivory-config", Version: version, Tables: tables, Counts: counts,
+		MergeMode: "upsert", SecretsIncluded: true, IncludesAssets: len(extraEntries) != 0,
 	}); err != nil {
 		t.Fatalf("encode config archive manifest: %v", err)
 	}
@@ -1407,10 +1877,40 @@ func importPaymentConfigArchiveForTest(t *testing.T, d Deps, archive []byte) *ht
 	body, contentType := multipartArchive(t, archive)
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/config/import", body)
 	req.Header.Set("content-type", contentType)
+	req = authorizeConfigImportRequestForTest(t, d.DB, req)
 	rec := httptest.NewRecorder()
 	importConfigAdmin(d, rec, req)
 	return rec
 }
+
+const configImportAdminForTestID = "config-import-admin"
+
+func authorizeConfigImportRequestForTest(t *testing.T, db *sql.DB, req *http.Request) *http.Request {
+	t.Helper()
+	mustExec(t, db, `
+		INSERT INTO users(id,email,password_hash,name,role,status,password_set)
+		VALUES(?, 'config-import-admin@example.test', 'hash', 'Config Import Admin', 'admin', 'active', 1)
+		ON CONFLICT(id) DO NOTHING`, configImportAdminForTestID)
+	ctx := context.WithValue(req.Context(), userCtxKey{}, &store.User{
+		ID: configImportAdminForTestID, Role: "admin", Status: "active",
+	})
+	return req.WithContext(ctx)
+}
+
+type gatedConfigUploadBody struct {
+	reader  io.Reader
+	started chan struct{}
+	release <-chan struct{}
+	once    sync.Once
+}
+
+func (b *gatedConfigUploadBody) Read(p []byte) (int, error) {
+	b.once.Do(func() { close(b.started) })
+	<-b.release
+	return b.reader.Read(p)
+}
+
+func (b *gatedConfigUploadBody) Close() error { return nil }
 
 func assertConfigImportSettlementCurrency(t *testing.T, db *sql.DB, want string) {
 	t.Helper()
@@ -1421,7 +1921,7 @@ func assertConfigImportSettlementCurrency(t *testing.T, db *sql.DB, want string)
 	}
 }
 
-func backupRowsArchiveForTest(t *testing.T, rowsByTable map[string][]map[string]any) (*zip.Reader, backupManifest) {
+func backupRowsArchiveForTest(t *testing.T, rowsByTable map[string][]map[string]any, extraEntries ...configArchiveEntryForTest) (*zip.Reader, backupManifest) {
 	t.Helper()
 	var archive bytes.Buffer
 	zw := zip.NewWriter(&archive)
@@ -1447,6 +1947,18 @@ func backupRowsArchiveForTest(t *testing.T, rowsByTable map[string][]map[string]
 			if err := enc.Encode(row); err != nil {
 				t.Fatalf("encode backup archive %s row: %v", table, err)
 			}
+		}
+	}
+	for _, extra := range extraEntries {
+		entry, err := zw.Create(extra.name)
+		if err != nil {
+			t.Fatalf("create backup archive extra entry %s: %v", extra.name, err)
+		}
+		if _, err := entry.Write(extra.data); err != nil {
+			t.Fatalf("write backup archive extra entry %s: %v", extra.name, err)
+		}
+		if strings.HasPrefix(extra.name, backupZipUploads) || strings.HasPrefix(extra.name, backupZipArtifacts) {
+			man.IncludesFiles = true
 		}
 	}
 	if err := zw.Close(); err != nil {
@@ -1478,6 +1990,23 @@ func multipartArchive(t *testing.T, archive []byte) (*bytes.Buffer, string) {
 	return &body, mw.FormDataContentType()
 }
 
+func manifestOnlyArchiveForTest(t *testing.T, manifest any) []byte {
+	t.Helper()
+	var archive bytes.Buffer
+	zw := zip.NewWriter(&archive)
+	entry, err := zw.Create("manifest.json")
+	if err != nil {
+		t.Fatalf("create manifest: %v", err)
+	}
+	if err := json.NewEncoder(entry).Encode(manifest); err != nil {
+		t.Fatalf("encode manifest: %v", err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close manifest archive: %v", err)
+	}
+	return append([]byte(nil), archive.Bytes()...)
+}
+
 // The product was renamed Aurelia -> Auven -> Aivory; archives from those
 // builds must keep importing (§ backup compatibility).
 func TestAcceptedArchiveFormatLegacyAliases(t *testing.T) {
@@ -1497,5 +2026,285 @@ func TestAcceptedArchiveFormatLegacyAliases(t *testing.T) {
 		if got := acceptedArchiveFormat(tc.got, tc.want); got != tc.ok {
 			t.Errorf("acceptedArchiveFormat(%q, %q) = %v, want %v", tc.got, tc.want, got, tc.ok)
 		}
+	}
+}
+
+func TestFullBackupRestoreReconcilesVerifiedAdminInsideTransaction(t *testing.T) {
+	t.Run("zero admins and banned matching account", func(t *testing.T) {
+		d := newBackupAdminFixture(t, true)
+		rows := map[string][]map[string]any{
+			"users": {
+				{"id": "imported", "email": "admin@example.test", "password_hash": "attacker-hash", "role": "user", "status": "banned", "password_set": 1},
+				{"id": "extra", "email": "extra@example.test", "password_hash": "h", "role": "admin", "status": "active", "password_set": 1},
+			},
+		}
+		zr, man := backupRowsArchiveForTest(t, rows)
+		if _, err := restoreDatabase(t.Context(), d, zr, man, "adm"); err != nil {
+			t.Fatalf("restore: %v", err)
+		}
+		assertOneRestoredAdmin(t, d.DB, "admin@example.test", "imported", "current-admin-hash")
+		var extraRole string
+		if err := d.DB.QueryRow(`SELECT role FROM users WHERE id='extra'`).Scan(&extraRole); err != nil || extraRole != "user" {
+			t.Fatalf("extra imported admin role=%q err=%v, want user", extraRole, err)
+		}
+	})
+
+	t.Run("id collision allocates a new administrator id", func(t *testing.T) {
+		d := newBackupAdminFixture(t, false)
+		rows := map[string][]map[string]any{
+			"users": {{"id": "adm", "email": "different@example.test", "password_hash": "h", "role": "user", "status": "active", "password_set": 1}},
+		}
+		zr, man := backupRowsArchiveForTest(t, rows)
+		if _, err := restoreDatabase(t.Context(), d, zr, man, "adm"); err != nil {
+			t.Fatalf("restore: %v", err)
+		}
+		assertOneRestoredAdmin(t, d.DB, "admin@example.test", "", "current-admin-hash")
+		var role string
+		if err := d.DB.QueryRow(`SELECT role FROM users WHERE id='adm'`).Scan(&role); err != nil || role != "user" {
+			t.Fatalf("id-conflicting imported row role=%q err=%v, want user", role, err)
+		}
+	})
+
+	t.Run("reconciliation failure rolls back the wipe", func(t *testing.T) {
+		d := newBackupAdminFixture(t, false)
+		mustExec(t, d.DB, `INSERT INTO settings(key,value) VALUES('restore-sentinel','keep')`)
+		rows := map[string][]map[string]any{
+			"users": {
+				{"id": "u1", "email": "ADMIN@example.test", "password_hash": "h", "role": "user", "status": "active", "password_set": 1},
+				{"id": "u2", "email": "admin@example.test", "password_hash": "h", "role": "user", "status": "active", "password_set": 1},
+			},
+		}
+		zr, man := backupRowsArchiveForTest(t, rows)
+		if _, err := restoreDatabase(t.Context(), d, zr, man, "adm"); !errors.Is(err, errBackupImportAdminUnauthorized) {
+			t.Fatalf("restore error=%v, want administrator reconciliation error", err)
+		}
+		var marker, email, hash string
+		if err := d.DB.QueryRow(`SELECT value FROM settings WHERE key='restore-sentinel'`).Scan(&marker); err != nil || marker != "keep" {
+			t.Fatalf("sentinel after failed restore=%q err=%v", marker, err)
+		}
+		if err := d.DB.QueryRow(`SELECT email,password_hash FROM users WHERE id='adm'`).Scan(&email, &hash); err != nil || email != "admin@example.test" || hash != "current-admin-hash" {
+			t.Fatalf("verified admin was not preserved after rollback: email=%q hash=%q err=%v", email, hash, err)
+		}
+	})
+}
+
+func TestFullBackupRestorePreservesOAuthOnlyAdministrator(t *testing.T) {
+	d := newBackupAdminFixture(t, false)
+	mustExec(t, d.DB, `UPDATE users SET password_set=0, password_hash='throwaway' WHERE id='adm'`)
+	provider := store.OAuthProvider{ID: "oa_admin", Kind: "google", Name: "Admin Google", ClientID: "cid", ClientSecret: "secret", Enabled: true}
+	provider.SubjectNamespace = oauth.Resolve(toOAuthConfig(&provider)).SubjectNamespace()
+	mustExec(t, d.DB, `INSERT INTO oauth_providers(id,kind,name,client_id,client_secret,subject_namespace,enabled) VALUES(?,?,?,?,?,?,1)`,
+		provider.ID, provider.Kind, provider.Name, provider.ClientID, provider.ClientSecret, provider.SubjectNamespace)
+	mustExec(t, d.DB, `INSERT INTO oauth_identities(provider_id,subject,user_id,email) VALUES(?,?,?,?)`,
+		provider.ID, provider.SubjectNamespace+"subject-1", "adm", "admin@example.test")
+	rows := map[string][]map[string]any{"users": {{"id": "u1", "email": "user@example.test", "password_hash": "h", "role": "user", "status": "active", "password_set": 1}}}
+	zr, man := backupRowsArchiveForTest(t, rows)
+	if _, err := restoreDatabase(t.Context(), d, zr, man, "adm"); err != nil {
+		t.Fatalf("restore OAuth-only admin: %v", err)
+	}
+	assertOneRestoredAdmin(t, d.DB, "admin@example.test", "adm", "throwaway")
+	var subject, secret, marker string
+	if err := d.DB.QueryRow(`SELECT i.subject,p.client_secret,p.subject_namespace FROM oauth_identities i JOIN oauth_providers p ON p.id=i.provider_id WHERE i.user_id='adm'`).Scan(&subject, &secret, &marker); err != nil ||
+		subject != provider.SubjectNamespace+"subject-1" || secret != "secret" || marker != provider.SubjectNamespace {
+		t.Fatalf("OAuth identity/provider not preserved: subject=%q secret=%q marker=%q err=%v", subject, secret, marker, err)
+	}
+}
+
+func TestVersion1FullBackupRestoreUpgradesLegacyUserInfoProvider(t *testing.T) {
+	d := newBackupAdminFixture(t, false)
+	rows := map[string][]map[string]any{
+		"users": {{
+			"id": "u1", "email": "user@example.test", "password_hash": "h",
+			"role": "user", "status": "active", "password_set": 1,
+		}},
+		"oauth_providers": {{
+			"id": "oa_legacy_v1", "kind": "oidc", "name": "Legacy UserInfo",
+			"client_id": "cid", "auth_url": "https://legacy.example.test/authorize",
+			"token_url": "https://legacy.example.test/token", "userinfo_url": "https://legacy.example.test/me",
+			"enabled": 1,
+		}},
+		"oauth_identities": {{
+			"provider_id": "oa_legacy_v1", "subject": "legacy-raw", "user_id": "u1",
+			"email": "user@example.test",
+		}},
+	}
+	zr, man := backupRowsArchiveForTest(t, rows)
+	man.Version = 1
+	if _, err := restoreDatabase(t.Context(), d, zr, man, ""); err != nil {
+		t.Fatalf("restore version-1 OAuth provider: %v", err)
+	}
+	var kind, scopes, marker, subject string
+	if err := d.DB.QueryRow(`SELECT kind,scopes,subject_namespace FROM oauth_providers WHERE id='oa_legacy_v1'`).Scan(&kind, &scopes, &marker); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.DB.QueryRow(`SELECT subject FROM oauth_identities WHERE provider_id='oa_legacy_v1'`).Scan(&subject); err != nil {
+		t.Fatal(err)
+	}
+	if kind != "oauth2" || scopes != "openid email profile" || marker != "" || subject != "legacy-raw" {
+		t.Fatalf("restored v1 provider kind=%q scopes=%q marker=%q subject=%q", kind, scopes, marker, subject)
+	}
+}
+
+func TestFullBackupRestoreRejectsOutOfTreeStoragePathsAndRollsBack(t *testing.T) {
+	cases := []struct {
+		name  string
+		table string
+		rows  map[string][]map[string]any
+	}{
+		{"files", "files", map[string][]map[string]any{
+			"users": {{"id": "u1", "email": "u1@example.test", "password_hash": "h"}},
+			"files": {{"id": "f1", "user_id": "u1", "filename": "x.txt", "storage_path": "/proc/self/environ"}},
+		}},
+		{"documents", "documents", map[string][]map[string]any{
+			"users":         {{"id": "u1", "email": "u1@example.test", "password_hash": "h"}},
+			"conversations": {{"id": "c1", "user_id": "u1", "title": "c"}},
+			"documents":     {{"id": "d1", "conversation_id": "c1", "filename": "x.txt", "mime_type": "text/plain", "size_bytes": 1, "status": "ready", "storage_path": "/proc/self/environ"}},
+		}},
+		{"artifacts", "artifacts", map[string][]map[string]any{
+			"users":         {{"id": "u1", "email": "u1@example.test", "password_hash": "h"}},
+			"conversations": {{"id": "c1", "user_id": "u1", "title": "c"}},
+			"messages":      {{"id": "m1", "conversation_id": "c1", "role": "assistant"}},
+			"artifacts":     {{"id": "a1", "message_id": "m1", "filename": "x.bin", "storage_path": "/proc/self/environ"}},
+		}},
+		{"skill-assets", "skills", map[string][]map[string]any{
+			"skills": {{"id": "sk1", "name": "Skill", "description": "test", "instructions": "test", "assets": `[{"filename":"x.py","storage_path":"/proc/self/environ"}]`}},
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			db := openMigrated(t, filepath.Join(root, "restore.db"))
+			defer db.Close()
+			mustExec(t, db, `INSERT INTO users(id,email,password_hash,role) VALUES('old','old@example.test','old-hash','user')`)
+			d := Deps{DB: db, Config: config.Config{UploadDir: filepath.Join(root, "uploads"), ArtifactDir: filepath.Join(root, "artifacts")}}
+			zr, man := backupRowsArchiveForTest(t, tc.rows)
+			man.SourceUploadDir = filepath.Join(root, "backup", "uploads")
+			man.SourceArtifactDir = filepath.Join(root, "backup", "artifacts")
+			if _, err := restoreDatabase(t.Context(), d, zr, man, ""); !errors.Is(err, errInvalidBackupStoragePath) {
+				t.Fatalf("restore error=%v, want invalid backup storage path", err)
+			}
+			var n int
+			if err := db.QueryRow(`SELECT COUNT(*) FROM users WHERE id='old'`).Scan(&n); err != nil || n != 1 {
+				t.Fatalf("old database was wiped after rejected %s path (n=%d err=%v)", tc.table, n, err)
+			}
+		})
+	}
+}
+
+func TestConfigImportRejectsOutOfTreeSkillAsset(t *testing.T) {
+	root := t.TempDir()
+	db := openMigrated(t, filepath.Join(root, "config.db"))
+	defer db.Close()
+	mustExec(t, db, `INSERT INTO skills(id,name,description,instructions,assets,enabled) VALUES('sk1','Existing','test','test','[]',1)`)
+	source := filepath.Join(root, "source", "uploads")
+	var archive bytes.Buffer
+	zw := zip.NewWriter(&archive)
+	entry, err := zw.Create("db/skills.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = json.NewEncoder(entry).Encode(map[string]any{"id": "sk1", "name": "Imported", "description": "test", "instructions": "test", "assets": `[{"filename":"x.py","storage_path":"/proc/self/environ"}]`, "enabled": 1})
+	manifest, err := zw.Create("manifest.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = json.NewEncoder(manifest).Encode(configManifest{Format: "aivory-config", Version: configArchiveVersion, SourceUploadDir: source, Tables: []string{"skills"}})
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	d := Deps{DB: db, Config: config.Config{UploadDir: filepath.Join(root, "target", "uploads"), ArtifactDir: filepath.Join(root, "artifacts")}, Logger: log.New(io.Discard, "", 0)}
+	rec := importPaymentConfigArchiveForTest(t, d, archive.Bytes())
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("config import status=%d body=%s, want 400", rec.Code, rec.Body.String())
+	}
+	var name, assets string
+	if err := db.QueryRow(`SELECT name,assets FROM skills WHERE id='sk1'`).Scan(&name, &assets); err != nil || name != "Existing" || assets != "[]" {
+		t.Fatalf("config import changed skill after rejected path: name=%q assets=%q err=%v", name, assets, err)
+	}
+}
+
+func TestBackupFilesystemCopyRejectsSymlinkEscapes(t *testing.T) {
+	t.Run("export skips symlinked files", func(t *testing.T) {
+		root := t.TempDir()
+		writeFile(t, filepath.Join(root, "inside.txt"), []byte("inside"))
+		outside := filepath.Join(t.TempDir(), "secret.txt")
+		writeFile(t, outside, []byte("secret"))
+		if err := os.Symlink(outside, filepath.Join(root, "leak.txt")); err != nil {
+			t.Skipf("symlink unavailable: %v", err)
+		}
+		var archive bytes.Buffer
+		zw := zip.NewWriter(&archive)
+		if err := addDirToZip(zw, root, backupZipUploads); err != nil {
+			t.Fatal(err)
+		}
+		if err := zw.Close(); err != nil {
+			t.Fatal(err)
+		}
+		zr, err := zip.NewReader(bytes.NewReader(archive.Bytes()), int64(archive.Len()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if findZipFile(zr, backupZipUploads+"inside.txt") == nil {
+			t.Fatal("ordinary in-root file missing from export")
+		}
+		if findZipFile(zr, backupZipUploads+"leak.txt") != nil {
+			t.Fatal("symlink target outside upload root was included in export")
+		}
+	})
+
+	t.Run("restore refuses symlink destination", func(t *testing.T) {
+		uploads := t.TempDir()
+		outside := filepath.Join(t.TempDir(), "outside.txt")
+		writeFile(t, outside, []byte("unchanged"))
+		if err := os.Symlink(outside, filepath.Join(uploads, "escape.txt")); err != nil {
+			t.Skipf("symlink unavailable: %v", err)
+		}
+		var archive bytes.Buffer
+		zw := zip.NewWriter(&archive)
+		entry, err := zw.Create(backupZipUploads + "escape.txt")
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = entry.Write([]byte("overwritten"))
+		if err := zw.Close(); err != nil {
+			t.Fatal(err)
+		}
+		zr, err := zip.NewReader(bytes.NewReader(archive.Bytes()), int64(archive.Len()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if restored := restoreFilesFromZip(Deps{Config: config.Config{UploadDir: uploads, ArtifactDir: t.TempDir()}}, zr); restored != 0 {
+			t.Fatalf("restored=%d, want 0 for symlink destination", restored)
+		}
+		if got, err := os.ReadFile(outside); err != nil || string(got) != "unchanged" {
+			t.Fatalf("outside symlink target changed: bytes=%q err=%v", got, err)
+		}
+	})
+}
+
+func newBackupAdminFixture(t *testing.T, withRefresh bool) Deps {
+	t.Helper()
+	root := t.TempDir()
+	db := openMigrated(t, filepath.Join(root, "restore.db"))
+	t.Cleanup(func() { _ = db.Close() })
+	mustExec(t, db, `INSERT INTO users(id,email,password_hash,name,role,status,token_ver,password_set,totp_secret,totp_enabled) VALUES('adm','admin@example.test','current-admin-hash','Current Admin','admin','active',7,1,'TOTPSECRET',1)`)
+	if withRefresh {
+		mustExec(t, db, `INSERT INTO refresh_tokens(jti,user_id,expires_at) VALUES('admin-refresh','adm',9999999999)`)
+	}
+	return Deps{DB: db, Config: config.Config{UploadDir: filepath.Join(root, "uploads"), ArtifactDir: filepath.Join(root, "artifacts")}, Logger: log.New(io.Discard, "", 0)}
+}
+
+func assertOneRestoredAdmin(t *testing.T, db *sql.DB, email, id, hash string) {
+	t.Helper()
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM users WHERE role='admin' AND status='active'`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("active admin count=%d err=%v, want 1", count, err)
+	}
+	var gotID, gotEmail, gotHash string
+	if err := db.QueryRow(`SELECT id,email,password_hash FROM users WHERE role='admin' AND status='active'`).Scan(&gotID, &gotEmail, &gotHash); err != nil {
+		t.Fatal(err)
+	}
+	if (id != "" && gotID != id) || gotEmail != email || gotHash != hash {
+		t.Fatalf("restored admin=%s/%s/%s, want %s/%s/%s", gotID, gotEmail, gotHash, id, email, hash)
 	}
 }

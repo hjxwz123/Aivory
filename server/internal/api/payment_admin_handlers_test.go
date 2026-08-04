@@ -630,7 +630,9 @@ func TestPaymentChannelsAdminProtectPendingAndProcessingOrders(t *testing.T) {
 			}
 
 			deleteMethod := fx.request(t, http.MethodDelete, "/api/admin/payment-methods/"+method.ID, nil)
-			decodePaymentAdminResponse[map[string]bool](t, deleteMethod, http.StatusOK)
+			if deleteMethod.Code != http.StatusConflict || !strings.Contains(deleteMethod.Body.String(), "payment_method_has_pending_orders") {
+				t.Fatalf("method delete with %s order status = %d, want 409; body=%s", status, deleteMethod.Code, deleteMethod.Body.String())
+			}
 			providerUpdate := fx.request(t, http.MethodPatch, "/api/admin/payment-channels/"+channel.ID, map[string]any{
 				"provider": paymentcore.ProviderEPay,
 				"config": map[string]any{

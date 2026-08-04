@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,7 +17,7 @@ import (
 	"aivory/server/internal/store"
 )
 
-func TestEPayResumeUsesOwnedOrderSnapshotAndFreshMerchantOrder(t *testing.T) {
+func TestEPayResumeUsesOwnedOrderSnapshotAndReusesMerchantOrder(t *testing.T) {
 	fx := newPaymentAPIFixture(t)
 	orderID, original := createEPayCheckoutForTest(t, fx)
 
@@ -40,8 +41,8 @@ func TestEPayResumeUsesOwnedOrderSnapshotAndFreshMerchantOrder(t *testing.T) {
 		t.Fatalf("resume response = %+v", response)
 	}
 	retryMerchantOrderID := response.Action.Fields["out_trade_no"]
-	if retryMerchantOrderID == "" || retryMerchantOrderID == orderID ||
-		retryMerchantOrderID == original.Fields["out_trade_no"] || response.Action.Fields["money"] != original.Fields["money"] ||
+	if retryMerchantOrderID == "" || retryMerchantOrderID != orderID ||
+		retryMerchantOrderID != original.Fields["out_trade_no"] || response.Action.Fields["money"] != original.Fields["money"] ||
 		response.Action.Fields["name"] != fx.pkg.Name {
 		t.Fatalf("resumed EPay fields do not use immutable order snapshot: %+v", response.Action.Fields)
 	}
@@ -60,8 +61,8 @@ func TestEPayResumeUsesOwnedOrderSnapshotAndFreshMerchantOrder(t *testing.T) {
 	).Scan(&count); err != nil {
 		t.Fatalf("count attempts after retry: %v", err)
 	}
-	if count != 2 {
-		t.Fatalf("attempts after retry submission = %d, want initial + retry", count)
+	if count != 1 {
+		t.Fatalf("attempts after retry submission = %d, want one reused attempt", count)
 	}
 	attempt, err := store.GetPaymentOrderAttemptByMerchantID(
 		context.Background(), fx.db, payment.ProviderEPay, fx.channel.ID, retryMerchantOrderID,
@@ -76,42 +77,37 @@ func TestEPayResumeUsesOwnedOrderSnapshotAndFreshMerchantOrder(t *testing.T) {
 	}
 }
 
-func TestEPayDistinctAttemptsBothSucceedButFulfillOrderOnce(t *testing.T) {
+func TestEPaySequentialResumesReuseMerchantOrderAndFulfillOnce(t *testing.T) {
 	fx := newPaymentAPIFixture(t)
 	orderID, original := createEPayCheckoutForTest(t, fx)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/payments/orders/"+orderID+"/resume", nil)
-	req = paymentAPIRequest(req, fx.user, map[string]string{"id": orderID})
-	rec := httptest.NewRecorder()
-	resumePaymentOrderHandler(fx.d, rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("resume EPay status = %d; body=%s", rec.Code, rec.Body.String())
-	}
-	var response struct {
-		Action payment.CheckoutAction `json:"action"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
-		t.Fatalf("decode resume response: %v", err)
-	}
-	retryMerchantOrderID := response.Action.Fields["out_trade_no"]
-	if retryMerchantOrderID == "" || retryMerchantOrderID == orderID {
-		t.Fatalf("retry merchant order id = %q", retryMerchantOrderID)
+	for attempt := 0; attempt < 2; attempt++ {
+		req := httptest.NewRequest(http.MethodPost, "/api/payments/orders/"+orderID+"/resume", nil)
+		req = paymentAPIRequest(req, fx.user, map[string]string{"id": orderID})
+		rec := httptest.NewRecorder()
+		resumePaymentOrderHandler(fx.d, rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("resume EPay attempt %d status = %d; body=%s", attempt+1, rec.Code, rec.Body.String())
+		}
+		var response struct {
+			Action payment.CheckoutAction `json:"action"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+			t.Fatalf("decode resume response %d: %v", attempt+1, err)
+		}
+		if got := response.Action.Fields["out_trade_no"]; got != orderID || got != original.Fields["out_trade_no"] {
+			t.Fatalf("resume %d merchant order id = %q, want reused %q", attempt+1, got, orderID)
+		}
 	}
 
-	callbacks := []map[string]string{
-		{
-			"pid": testEPayMerchantID, "type": "alipay", "out_trade_no": retryMerchantOrderID,
-			"trade_no": "epay_retry_paid_first", "trade_status": "TRADE_SUCCESS", "money": original.Fields["money"],
-		},
-		{
-			"pid": testEPayMerchantID, "type": "alipay", "out_trade_no": orderID,
-			"trade_no": "epay_initial_paid_late", "trade_status": "TRADE_SUCCESS", "money": original.Fields["money"],
-		},
+	params := map[string]string{
+		"pid": testEPayMerchantID, "type": "alipay", "out_trade_no": orderID,
+		"trade_no": "epay_reused_attempt_paid", "trade_status": "TRADE_SUCCESS", "money": original.Fields["money"],
 	}
-	for index, params := range callbacks {
-		callback := serveEPayCallback(t, fx, params)
+	for callbackNumber := 0; callbackNumber < 2; callbackNumber++ {
+		callback := serveEPayCallback(t, fx, cloneStringMap(params))
 		if callback.Code != http.StatusOK || strings.TrimSpace(callback.Body.String()) != "success" {
-			t.Fatalf("attempt callback %d = status %d body %q", index+1, callback.Code, callback.Body.String())
+			t.Fatalf("attempt callback %d = status %d body %q", callbackNumber+1, callback.Code, callback.Body.String())
 		}
 	}
 
@@ -128,20 +124,15 @@ func TestEPayDistinctAttemptsBothSucceedButFulfillOrderOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get fulfilled order: %v", err)
 	}
-	if order.Status != store.PaymentOrderFulfilled || order.ProviderOrderID != "epay_retry_paid_first" {
-		t.Fatalf("fulfilled order after two attempts = %+v", order)
+	if order.Status != store.PaymentOrderFulfilled || order.ProviderOrderID != "epay_reused_attempt_paid" {
+		t.Fatalf("fulfilled order after reused attempt = %+v", order)
 	}
-	for merchantOrderID, providerOrderID := range map[string]string{
-		retryMerchantOrderID: "epay_retry_paid_first",
-		orderID:              "epay_initial_paid_late",
-	} {
-		attempt, getErr := store.GetPaymentOrderAttemptByMerchantID(
-			context.Background(), fx.db, payment.ProviderEPay, fx.channel.ID, merchantOrderID,
-		)
-		if getErr != nil || attempt.Status != store.PaymentOrderAttemptPaid ||
-			attempt.ProviderOrderID != providerOrderID || attempt.PaidAt == 0 {
-			t.Fatalf("paid attempt %q = %+v, %v", merchantOrderID, attempt, getErr)
-		}
+	attempt, getErr := store.GetPaymentOrderAttemptByMerchantID(
+		context.Background(), fx.db, payment.ProviderEPay, fx.channel.ID, orderID,
+	)
+	if getErr != nil || attempt.Status != store.PaymentOrderAttemptPaid ||
+		attempt.ProviderOrderID != "epay_reused_attempt_paid" || attempt.PaidAt == 0 {
+		t.Fatalf("paid reused attempt = %+v, %v", attempt, getErr)
 	}
 	var eventCount int
 	if err := fx.db.QueryRowContext(context.Background(),
@@ -149,8 +140,61 @@ func TestEPayDistinctAttemptsBothSucceedButFulfillOrderOnce(t *testing.T) {
 	).Scan(&eventCount); err != nil {
 		t.Fatalf("count processed attempt events: %v", err)
 	}
-	if eventCount != 2 {
-		t.Fatalf("processed attempt events = %d, want 2", eventCount)
+	if eventCount != 1 {
+		t.Fatalf("processed attempt events = %d, want 1 idempotent event", eventCount)
+	}
+}
+
+func TestEPayConcurrentResumesReuseMerchantOrder(t *testing.T) {
+	fx := newPaymentAPIFixture(t)
+	orderID, original := createEPayCheckoutForTest(t, fx)
+
+	const workers = 12
+	type resumeResult struct {
+		status          int
+		merchantOrderID string
+		body            string
+		err             error
+	}
+	start := make(chan struct{})
+	results := make(chan resumeResult, workers)
+	var wg sync.WaitGroup
+	for index := 0; index < workers; index++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			req := httptest.NewRequest(http.MethodPost, "/api/payments/orders/"+orderID+"/resume", nil)
+			req = paymentAPIRequest(req, fx.user, map[string]string{"id": orderID})
+			rec := httptest.NewRecorder()
+			resumePaymentOrderHandler(fx.d, rec, req)
+			var response struct {
+				Action payment.CheckoutAction `json:"action"`
+			}
+			decodeErr := json.Unmarshal(rec.Body.Bytes(), &response)
+			results <- resumeResult{
+				status: rec.Code, merchantOrderID: response.Action.Fields["out_trade_no"],
+				body: rec.Body.String(), err: decodeErr,
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+
+	for result := range results {
+		if result.err != nil || result.status != http.StatusOK {
+			t.Fatalf("concurrent resume = status %d body=%s decodeErr=%v", result.status, result.body, result.err)
+		}
+		if result.merchantOrderID != orderID || result.merchantOrderID != original.Fields["out_trade_no"] {
+			t.Fatalf("concurrent resume merchant order id = %q, want %q", result.merchantOrderID, orderID)
+		}
+	}
+	var attempts int
+	if err := fx.db.QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM payment_order_attempts WHERE order_id=?`, orderID,
+	).Scan(&attempts); err != nil || attempts != 1 {
+		t.Fatalf("concurrent resume attempts = %d, %v; want 1", attempts, err)
 	}
 }
 
@@ -516,10 +560,7 @@ func TestPaymentOrderDeleteRouteRequiresAdminRole(t *testing.T) {
 	if err != nil {
 		t.Fatalf("find payment user: %v", err)
 	}
-	token, _, err := fx.d.Auth.IssueAccess(user.ID, user.Role, user.TokenVer)
-	if err != nil {
-		t.Fatalf("issue payment user token: %v", err)
-	}
+	token := issueBoundTestAccessToken(t, fx.db, fx.d.Auth, user)
 	c.Set("seen:"+user.ID, "1", time.Minute)
 	mx := newMux()
 	mx.handle(http.MethodDelete, "/api/admin/payment-orders/:id", requireAdmin(fx.d, deletePaymentOrderAdmin))

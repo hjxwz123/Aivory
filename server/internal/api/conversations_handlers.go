@@ -50,7 +50,7 @@ func listConversationsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 			writeError(w, 404, errNotFound)
 			return
 		}
-		rows, err = store.ListWorkspaceConversations(r.Context(), d.DB, wsID, projectID, archivedFilter, limit, offset)
+		rows, err = store.ListWorkspaceConversationsForUser(r.Context(), d.DB, wsID, projectID, archivedFilter, u.ID, limit, offset)
 	} else {
 		rows, err = store.ListConversations(r.Context(), d.DB, u.ID, projectID, archivedFilter, limit, offset)
 	}
@@ -505,25 +505,20 @@ func updateConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 func deleteConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
 	id := pathParam(r, "id")
-	ids, _ := store.ConversationTreeIDs(r.Context(), d.DB, id)
-	storagePaths, _ := store.StoragePathsForConversations(r.Context(), d.DB, ids)
-	children, err := store.DeleteConversation(r.Context(), d.DB, id, u.ID)
+	deletion, err := store.DeleteConversationWithState(r.Context(), d.DB, id, u.ID)
 	if err != nil {
 		writeError(w, 404, errNotFound)
 		return
-	}
-	if len(ids) == 0 {
-		ids = append([]string{id}, children...)
 	}
 	// Conversation uploads cascade-delete (documents.conversation_id ON DELETE
 	// CASCADE); files are physically deleted by DeleteConversation. Drop vectors
 	// and storage objects for the conversation and every inline sub-conversation
 	// that was removed with it.
-	for _, cid := range ids {
+	for _, cid := range deletion.ConversationIDs {
 		msgcache.Bump(d.Cache, cid)
 		cleanupRAGConversation(r.Context(), d, cid, "delete conversation "+id)
 	}
-	cleanupStoragePaths(r.Context(), d, storagePaths, "delete conversation "+id)
+	cleanupStoragePaths(r.Context(), d, deletion.StoragePaths, "delete conversation "+id)
 	publishUserEvent(d, r, u.ID, "conversation.deleted", id)
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
@@ -816,14 +811,22 @@ func forkConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	if title == "" {
 		title = conv.Title + " (fork)"
 	}
+	forkProjectID := conv.ProjectID
+	forkKBIDs := conv.KBIDs
+	if conv.WorkspaceID != "" {
+		// The fork is personal. Workspace project/KB ids must not cross that
+		// container boundary as dangling metadata on the new conversation.
+		forkProjectID = ""
+		forkKBIDs = json.RawMessage("[]")
+	}
 	newConv, err := store.CreateConversation(r.Context(), d.DB, store.Conversation{
 		UserID:    u.ID,
-		ProjectID: conv.ProjectID,
+		ProjectID: forkProjectID,
 		Title:     title,
 		Provider:  conv.Provider,
 		ModelID:   conv.ModelID,
 		Fast:      conv.Fast, // §fast-mode: a fork of a fast conversation stays fast
-		KBIDs:     conv.KBIDs,
+		KBIDs:     forkKBIDs,
 	})
 	if err != nil {
 		writeError(w, 500, err)
@@ -888,14 +891,18 @@ func promoteDocumentHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errors.New("project has no knowledge base"))
 		return
 	}
-	doc, err := store.GetDocument(r.Context(), d.DB, docID)
+	doc, err := store.GetDocumentForUser(r.Context(), d.DB, docID, u.ID)
 	if err != nil || doc.ConversationID != conv.ID {
 		writeError(w, 404, errNotFound)
 		return
 	}
 	// §C5: re-embed with the destination KB's locked embedder (not a raw chunk
 	// move) so the promoted document is actually retrievable in the KB.
-	if err := d.RAG.PromoteDocument(r.Context(), docID, p.KBID); err != nil {
+	if err := d.RAG.PromoteDocument(r.Context(), docID, p.KBID, u.ID); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, 404, errNotFound)
+			return
+		}
 		writeError(w, 500, err)
 		return
 	}
@@ -912,7 +919,7 @@ func listConversationDocsHandler(d Deps, w http.ResponseWriter, r *http.Request)
 		writeError(w, 404, errNotFound)
 		return
 	}
-	docs, err := store.ListDocuments(r.Context(), d.DB, "conversation", convID)
+	docs, err := store.ListDocumentsForUser(r.Context(), d.DB, "conversation", convID, u.ID)
 	if err != nil {
 		writeError(w, 500, err)
 		return
@@ -932,7 +939,7 @@ func retryConversationDocumentHandler(d Deps, w http.ResponseWriter, r *http.Req
 		writeError(w, 404, errNotFound)
 		return
 	}
-	doc, err := store.GetDocument(r.Context(), d.DB, docID)
+	doc, err := store.GetDocumentForUser(r.Context(), d.DB, docID, u.ID)
 	if err != nil || doc.ConversationID != conv.ID {
 		writeError(w, 404, errNotFound)
 		return
@@ -945,7 +952,11 @@ func retryConversationDocumentHandler(d Deps, w http.ResponseWriter, r *http.Req
 		writeError(w, 503, errors.New("rag service is unavailable"))
 		return
 	}
-	if err := store.UpdateDocumentStatus(r.Context(), d.DB, docID, "pending", "", 0); err != nil {
+	if err := store.RetryDocumentForUser(r.Context(), d.DB, docID, convID, u.ID); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, 404, errNotFound)
+			return
+		}
 		writeError(w, 500, err)
 		return
 	}
@@ -985,7 +996,7 @@ func listConversationFilesHandler(d Deps, w http.ResponseWriter, r *http.Request
 		return
 	}
 	draftOnly := r.URL.Query().Get("draft") == "1" || r.URL.Query().Get("draft") == "true"
-	docs, err := store.ListDocuments(r.Context(), d.DB, "conversation", convID)
+	docs, err := store.ListDocumentsForUser(r.Context(), d.DB, "conversation", convID, u.ID)
 	if err != nil {
 		writeError(w, 500, err)
 		return
@@ -1033,7 +1044,7 @@ func deleteConversationFileHandler(d Deps, w http.ResponseWriter, r *http.Reques
 		return
 	}
 	storagePaths := []string{f.StoragePath}
-	docs, err := store.DocumentsByStoragePath(r.Context(), d.DB, f.StoragePath)
+	docs, err := store.DocumentsByStoragePathForUser(r.Context(), d.DB, f.StoragePath, u.ID)
 	if err != nil {
 		writeError(w, 500, err)
 		return
@@ -1094,8 +1105,11 @@ func stopHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]bool{"ok": true})
 		return
 	}
-	// Backwards compatibility and explicit whole-conversation teardown (for
-	// example deleting a round while its visible path still has live writers).
-	d.Cache.Publish("conv:"+id+":stop", "1")
+	// Backwards compatibility for clients that do not know the generation/message
+	// selector. Scope the live broadcast to this caller: workspace members share a
+	// conversation, but must not be able to cancel one another's generations. This
+	// intentionally has no durable stop-intent marker, so it cannot affect a later
+	// generation that was not subscribed when Stop was requested.
+	d.Cache.Publish(conversationStopTopic(u.ID, id), "1")
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }

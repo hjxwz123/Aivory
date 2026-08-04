@@ -42,6 +42,7 @@ var (
 	errInvalidEmail           = errors.New("invalid_email")
 	errNameRequired           = errors.New("name_required")
 	errPasswordTooShort       = errors.New("password_too_short")
+	errPasswordTooLong        = errors.New("password_too_long")
 	errAlreadyInitialized     = errors.New("already_initialized")
 	errSetupRequired          = errors.New("setup_required")
 	errEmailDomainNotAllowed  = errors.New("email_domain_not_allowed")

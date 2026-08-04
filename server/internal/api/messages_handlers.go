@@ -41,6 +41,18 @@ var (
 
 const chatRunErrorMessage = "The message could not be processed. Please try again."
 
+func chatRunErrorEvent(err error, messageID string) llm.SseEvent {
+	if errors.Is(err, store.ErrStorageQuotaExceeded) {
+		return llm.SseEvent{
+			Type:      "error",
+			Message:   "Storage is full. Free up space in Files and try again.",
+			MessageID: messageID,
+			Code:      store.ErrStorageQuotaExceeded.Error(),
+		}
+	}
+	return llm.SseEvent{Type: "error", Message: chatRunErrorMessage, MessageID: messageID}
+}
+
 type chatRunErrorMetadata struct {
 	Operation       string
 	UserID          string
@@ -133,6 +145,144 @@ func validGenerationID(id string) bool {
 
 func generationStopTopic(userID, conversationID, generationID string) string {
 	return "user:" + userID + ":conv:" + conversationID + ":generation:" + generationID + ":stop"
+}
+
+func conversationStopTopic(userID, conversationID string) string {
+	return "user:" + userID + ":conv:" + conversationID + ":stop"
+}
+
+func workspaceGenerationRevocationTopic(workspaceID string) string {
+	return "workspace:" + workspaceID + ":generation-revoked"
+}
+
+func workspaceGenerationRevocationKey(workspaceID string) string {
+	return "workspace-generation-revoked:" + workspaceID
+}
+
+func generationStreamDenyKeys(workspaceID string) []string {
+	if strings.TrimSpace(workspaceID) == "" {
+		return nil
+	}
+	return []string{workspaceGenerationRevocationKey(workspaceID)}
+}
+
+func revokeMessageGenerationStreams(d Deps, messageIDs []string) error {
+	failed := false
+	for _, messageID := range messageIDs {
+		if strings.TrimSpace(messageID) == "" {
+			continue
+		}
+		if !genstream.Revoke(d.Cache, messageID) {
+			failed = true
+		}
+		// Publish even when the atomic cache mutation failed. Live subscribers can
+		// still stop immediately, while the handler reports failure instead of
+		// falsely acknowledging a revocation whose replay tombstone is uncertain.
+		d.Cache.Publish(genstream.RevocationTopic(messageID), "1")
+	}
+	if failed {
+		return errors.New("generation stream revocation unavailable")
+	}
+	return nil
+}
+
+func publishWorkspaceGenerationRevocation(d Deps, workspaceID string) bool {
+	if strings.TrimSpace(workspaceID) == "" {
+		return false
+	}
+	key := workspaceGenerationRevocationKey(workspaceID)
+	d.Cache.Set(key, "1", genstream.RevocationTTL())
+	if _, stored := d.Cache.Get(key); !stored {
+		return false
+	}
+	d.Cache.Publish(workspaceGenerationRevocationTopic(workspaceID), "1")
+	return true
+}
+
+func subscribePermanentRevocation(
+	d Deps, ctx context.Context, cancel context.CancelFunc, topic string, revoked func() bool,
+) func() {
+	if strings.TrimSpace(topic) == "" {
+		return func() {}
+	}
+	ch, unsubscribe := d.Cache.Subscribe(topic)
+	go func() {
+		ticker := time.NewTicker(250 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case _, ok := <-ch:
+				if !ok {
+					// Losing the shared revocation channel is security-significant
+					// for a detached workspace generation, so fail closed.
+					cancel()
+					return
+				}
+				cancel()
+				return
+			case <-ticker.C:
+				if revoked() {
+					cancel()
+					return
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	// Subscribe first, then inspect the permanent marker. A revoke on either side
+	// of setup is observed by at least one of the channel or tombstone.
+	if revoked() {
+		cancel()
+	}
+	return unsubscribe
+}
+
+type generationAccessRevocationWatcher struct {
+	d              Deps
+	ctx            context.Context
+	cancel         context.CancelFunc
+	workspaceUnsub func()
+	messageOnce    sync.Once
+	messageUnsub   func()
+}
+
+func newGenerationAccessRevocationWatcher(
+	d Deps, ctx context.Context, cancel context.CancelFunc, workspaceID string,
+) *generationAccessRevocationWatcher {
+	watcher := &generationAccessRevocationWatcher{d: d, ctx: ctx, cancel: cancel, workspaceUnsub: func() {}}
+	if strings.TrimSpace(workspaceID) != "" {
+		key := workspaceGenerationRevocationKey(workspaceID)
+		watcher.workspaceUnsub = subscribePermanentRevocation(
+			d, ctx, cancel, workspaceGenerationRevocationTopic(workspaceID),
+			func() bool { _, revoked := d.Cache.Get(key); return revoked },
+		)
+	}
+	return watcher
+}
+
+func (watcher *generationAccessRevocationWatcher) watchMessage(messageID string) {
+	if watcher == nil || strings.TrimSpace(messageID) == "" {
+		return
+	}
+	watcher.messageOnce.Do(func() {
+		watcher.messageUnsub = subscribePermanentRevocation(
+			watcher.d, watcher.ctx, watcher.cancel, genstream.RevocationTopic(messageID),
+			func() bool { return genstream.IsRevoked(watcher.d.Cache, messageID) },
+		)
+	})
+}
+
+func (watcher *generationAccessRevocationWatcher) close() {
+	if watcher == nil {
+		return
+	}
+	if watcher.messageUnsub != nil {
+		watcher.messageUnsub()
+	}
+	if watcher.workspaceUnsub != nil {
+		watcher.workspaceUnsub()
+	}
 }
 
 func messageStopTopic(userID, conversationID, messageID string) string {
@@ -364,7 +514,7 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, status, err)
 		return
 	}
-	if err := ensureAttachedDocumentsReady(r.Context(), d.DB, id, req.Attachments); err != nil {
+	if err := ensureAttachedDocumentsReadyForUser(r.Context(), d.DB, id, u.ID, req.Attachments); err != nil {
 		writeError(w, 409, err)
 		return
 	}
@@ -437,9 +587,11 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	// cancel it now.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), maxGenDuration)
 	defer cancel()
+	accessRevocation := newGenerationAccessRevocationWatcher(d, ctx, cancel, conv.WorkspaceID)
+	defer accessRevocation.close()
 	scopedStop := newGenerationStopWatcher(d, ctx, cancel, u.ID, id, req.GenerationID)
 	defer scopedStop.close()
-	stopCh, unsub := d.Cache.Subscribe("conv:" + id + ":stop")
+	stopCh, unsub := d.Cache.Subscribe(conversationStopTopic(u.ID, id))
 	defer unsub()
 	killCh, unsubKill := d.Cache.Subscribe("user:" + u.ID + ":kill")
 	defer unsubKill()
@@ -472,12 +624,19 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	streamMessageID := ""
 	terminalSent := false
 	sendEvent := func(ev llm.SseEvent) {
+		// A provider may ignore cancellation briefly or return buffered deltas after
+		// Stop/ban/workspace revocation. Never forward those late contents; only the
+		// synthetic stopped terminal is valid once the turn context is canceled.
+		if ctx.Err() != nil && (ev.Type != "done" || ev.StopReason != "stopped") {
+			return
+		}
 		if ev.Type == "message_start" && ev.MessageID != "" {
 			streamMessageID = ev.MessageID
 			// Install message-scoped cancellation before exposing the persisted id
 			// to the browser, so an immediate Stop cannot outrun the subscription.
 			scopedStop.watchMessage(streamMessageID)
 			scopedStop.activate()
+			accessRevocation.watchMessage(streamMessageID)
 		}
 		if streamMessageID != "" && ev.MessageID == "" {
 			ev.MessageID = streamMessageID
@@ -486,10 +645,29 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 			terminalSent = true
 		}
 		if streamMessageID != "" {
-			if eventID, ok := genstream.Append(d.Cache, streamMessageID, ev); ok {
+			eventID, appended, revoked := genstream.Append(
+				d.Cache, streamMessageID, ev, generationStreamDenyKeys(conv.WorkspaceID)...,
+			)
+			if revoked {
+				cancel()
+				if ev.Type == "done" && ev.StopReason == "stopped" {
+					_ = writer.Send(ev, ev.Type)
+				}
+				return
+			}
+			if appended {
 				_ = writer.SendID(ev, ev.Type, eventID)
 				return
 			}
+			// Workspace streams depend on shared cache revocation. If Redis is
+			// unavailable, direct-write fallback would bypass cross-replica kicks.
+			if conv.WorkspaceID != "" {
+				cancel()
+				return
+			}
+		}
+		if ctx.Err() != nil && (ev.Type != "done" || ev.StopReason != "stopped") {
+			return
 		}
 		_ = writer.Send(ev, ev.Type)
 	}
@@ -513,12 +691,12 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		ImageStyleID:         req.ImageStyleID,
 		Locale:               req.Locale,
 	}, sendEvent)
+	if ctx.Err() != nil && !terminalSent {
+		sendEvent(llm.SseEvent{Type: "done", Message: "", MessageID: streamMessageID, StopReason: "stopped"})
+		publishUserEvent(d, r, u.ID, "conversation.updated", id)
+		return
+	}
 	if err != nil && !terminalSent {
-		if ctx.Err() != nil {
-			sendEvent(llm.SseEvent{Type: "done", Message: "", MessageID: streamMessageID, StopReason: "stopped"})
-			publishUserEvent(d, r, u.ID, "conversation.updated", id)
-			return
-		}
 		parentID := req.ParentID
 		if parentID == "" && !req.Branch {
 			parentID = conv.ActiveLeafID
@@ -532,7 +710,7 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 			ParentID:        parentID,
 			AttachmentCount: len(req.Attachments),
 		}, err)
-		sendEvent(llm.SseEvent{Type: "error", Message: chatRunErrorMessage, MessageID: streamMessageID})
+		sendEvent(chatRunErrorEvent(err, streamMessageID))
 	}
 	// §23: the turn is over (success, stop, or error — the user message and any
 	// partial answer are persisted either way); nudge the user's other devices.
@@ -540,6 +718,14 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 }
 
 func ensureAttachedDocumentsReady(ctx context.Context, db *sql.DB, convID string, atts []llm.Attachment) error {
+	return ensureAttachedDocumentsReadyForUser(ctx, db, convID, "", atts)
+}
+
+// ensureAttachedDocumentsReadyForUser performs the same document readiness
+// checks while limiting the unsent-draft invariant to the current uploader.
+// In a shared conversation, another member's composer draft must not make this
+// request fail or become an attachment candidate.
+func ensureAttachedDocumentsReadyForUser(ctx context.Context, db *sql.DB, convID, userID string, atts []llm.Attachment) error {
 	docIDs := []string{}
 	fileIDs := []string{}
 	seen := map[string]bool{}
@@ -569,7 +755,13 @@ func ensureAttachedDocumentsReady(ctx context.Context, db *sql.DB, convID string
 	// server-side composer draft must be present in this turn; otherwise the user
 	// could refresh while parsing, send with attachments=[], and receive an answer
 	// that silently ignored the file.
-	drafts, err := store.ListDraftFilesForConversation(ctx, db, convID)
+	var drafts []store.File
+	var err error
+	if strings.TrimSpace(userID) == "" {
+		drafts, err = store.ListDraftFilesForConversation(ctx, db, convID)
+	} else {
+		drafts, err = store.ListDraftFilesForConversationForUser(ctx, db, convID, userID)
+	}
 	if err != nil {
 		return err
 	}
@@ -759,9 +951,11 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	// cancel it now.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), maxGenDuration)
 	defer cancel()
+	accessRevocation := newGenerationAccessRevocationWatcher(d, ctx, cancel, conv.WorkspaceID)
+	defer accessRevocation.close()
 	scopedStop := newGenerationStopWatcher(d, ctx, cancel, u.ID, id, body.GenerationID)
 	defer scopedStop.close()
-	stopCh, unsub := d.Cache.Subscribe("conv:" + id + ":stop")
+	stopCh, unsub := d.Cache.Subscribe(conversationStopTopic(u.ID, id))
 	defer unsub()
 	killCh, unsubKill := d.Cache.Subscribe("user:" + u.ID + ":kill")
 	defer unsubKill()
@@ -792,10 +986,14 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	streamMessageID := ""
 	terminalSent := false
 	sendEvent := func(ev llm.SseEvent) {
+		if ctx.Err() != nil && (ev.Type != "done" || ev.StopReason != "stopped") {
+			return
+		}
 		if ev.Type == "message_start" && ev.MessageID != "" {
 			streamMessageID = ev.MessageID
 			scopedStop.watchMessage(streamMessageID)
 			scopedStop.activate()
+			accessRevocation.watchMessage(streamMessageID)
 		}
 		if streamMessageID != "" && ev.MessageID == "" {
 			ev.MessageID = streamMessageID
@@ -804,10 +1002,27 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 			terminalSent = true
 		}
 		if streamMessageID != "" {
-			if eventID, ok := genstream.Append(d.Cache, streamMessageID, ev); ok {
+			eventID, appended, revoked := genstream.Append(
+				d.Cache, streamMessageID, ev, generationStreamDenyKeys(conv.WorkspaceID)...,
+			)
+			if revoked {
+				cancel()
+				if ev.Type == "done" && ev.StopReason == "stopped" {
+					_ = writer.Send(ev, ev.Type)
+				}
+				return
+			}
+			if appended {
 				_ = writer.SendID(ev, ev.Type, eventID)
 				return
 			}
+			if conv.WorkspaceID != "" {
+				cancel()
+				return
+			}
+		}
+		if ctx.Err() != nil && (ev.Type != "done" || ev.StopReason != "stopped") {
+			return
 		}
 		_ = writer.Send(ev, ev.Type)
 	}
@@ -828,12 +1043,12 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		ParamOverrides:           body.ParamOverrides,
 		Locale:                   body.Locale,
 	}, sendEvent)
+	if ctx.Err() != nil && !terminalSent {
+		sendEvent(llm.SseEvent{Type: "done", MessageID: streamMessageID, StopReason: "stopped"})
+		publishUserEvent(d, r, u.ID, "conversation.updated", id)
+		return
+	}
 	if err != nil && !terminalSent {
-		if ctx.Err() != nil {
-			sendEvent(llm.SseEvent{Type: "done", MessageID: streamMessageID, StopReason: "stopped"})
-			publishUserEvent(d, r, u.ID, "conversation.updated", id)
-			return
-		}
 		logChatRunError(d.Logger, chatRunErrorMetadata{
 			Operation:      "regenerate",
 			UserID:         u.ID,
@@ -843,7 +1058,7 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 			ParentID:       user.ID,
 			ReferenceID:    body.AssistantID,
 		}, err)
-		sendEvent(llm.SseEvent{Type: "error", Message: chatRunErrorMessage, MessageID: streamMessageID})
+		sendEvent(chatRunErrorEvent(err, streamMessageID))
 	}
 	// §23: regeneration finished — nudge the user's other devices.
 	publishUserEvent(d, r, u.ID, "conversation.updated", id)
@@ -856,7 +1071,8 @@ func streamMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
 	convID := pathParam(r, "id")
 	msgID := pathParam(r, "msgId")
-	if _, err := store.GetConversation(r.Context(), d.DB, convID, u.ID); err != nil {
+	conv, err := store.GetConversation(r.Context(), d.DB, convID, u.ID)
+	if err != nil {
 		writeError(w, 404, errNotFound)
 		return
 	}
@@ -870,17 +1086,28 @@ func streamMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, errors.New("streaming not supported"))
 		return
 	}
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+	accessRevocation := newGenerationAccessRevocationWatcher(d, ctx, cancel, conv.WorkspaceID)
+	defer accessRevocation.close()
+	accessRevocation.watchMessage(msgID)
 
 	lastID := r.Header.Get("Last-Event-ID")
 	if lastID == "" {
 		lastID = r.URL.Query().Get("last_id")
 	}
 	terminal := false
-	flush := func() bool {
-		events, ok := genstream.Read(d.Cache, msgID, lastID, streamReplayBatchSize)
-		if !ok {
+	flush := func() (done, revoked bool) {
+		events, available, streamRevoked := genstream.Read(
+			d.Cache, msgID, lastID, streamReplayBatchSize,
+			generationStreamDenyKeys(conv.WorkspaceID)...,
+		)
+		if streamRevoked {
+			return true, true
+		}
+		if !available {
 			_ = writer.Send(llm.SseEvent{Type: "error", MessageID: msgID, Message: "stream replay unavailable"}, "error")
-			return true
+			return true, false
 		}
 		for _, ev := range events {
 			lastID = ev.ID
@@ -889,9 +1116,12 @@ func streamMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 			}
 			_ = writer.SendID(ev.Value, ev.Value.Type, ev.ID)
 		}
-		return terminal
+		return terminal, false
 	}
-	if flush() {
+	if done, revoked := flush(); done {
+		if revoked {
+			_ = writer.Send(llm.SseEvent{Type: "done", MessageID: msgID, StopReason: "stopped"}, "done")
+		}
 		return
 	}
 	if msg.Status != "streaming" {
@@ -903,7 +1133,10 @@ func streamMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 
 	ch, unsub := d.Cache.Subscribe(genstream.Topic(msgID))
 	defer unsub()
-	if flush() {
+	if done, revoked := flush(); done {
+		if revoked {
+			_ = writer.Send(llm.SseEvent{Type: "done", MessageID: msgID, StopReason: "stopped"}, "done")
+		}
 		return
 	}
 	ping := time.NewTicker(ssePingHeartbeatStream)
@@ -912,19 +1145,28 @@ func streamMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	defer statusCheck.Stop()
 	for {
 		select {
-		case <-r.Context().Done():
+		case <-ctx.Done():
+			if r.Context().Err() == nil {
+				_ = writer.Send(llm.SseEvent{Type: "done", MessageID: msgID, StopReason: "stopped"}, "done")
+			}
 			return
 		case <-ch:
-			if flush() {
+			if done, revoked := flush(); done {
+				if revoked {
+					_ = writer.Send(llm.SseEvent{Type: "done", MessageID: msgID, StopReason: "stopped"}, "done")
+				}
 				return
 			}
 		case <-ping.C:
 			writer.Ping()
 		case <-statusCheck.C:
-			if flush() {
+			if done, revoked := flush(); done {
+				if revoked {
+					_ = writer.Send(llm.SseEvent{Type: "done", MessageID: msgID, StopReason: "stopped"}, "done")
+				}
 				return
 			}
-			fresh, ferr := store.GetMessage(r.Context(), d.DB, msgID)
+			fresh, ferr := store.GetMessage(ctx, d.DB, msgID)
 			if ferr == nil && fresh.Status != "streaming" {
 				if !terminal {
 					_ = writer.Send(llm.SseEvent{Type: "done", MessageID: msgID, StopReason: fresh.StopReason, Credits: fresh.Credits}, "done")
@@ -1009,9 +1251,9 @@ func editMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, errNotFound)
 		return
 	}
-	// §workspaces: in shared conversations only the AUTHOR may edit their own
-	// question (legacy rows with no author fall back to the conversation gate).
-	if msg.AuthorID != "" && msg.AuthorID != u.ID {
+	// Fast fail for explicit foreign user-message authors. The authoritative
+	// author/legacy-owner and current-membership checks run atomically in store.
+	if msg.Role == "user" && msg.AuthorID != "" && msg.AuthorID != u.ID {
 		writeError(w, 404, errNotFound)
 		return
 	}
@@ -1025,7 +1267,11 @@ func editMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	} else {
 		blocks, _ = json.Marshal([]llm.UnifiedBlock{{Kind: "text", Text: body.Text}})
 	}
-	if err := store.UpdateMessageContent(r.Context(), d.DB, msgID, blocks); err != nil {
+	if err := store.UpdateMessageContentForUser(r.Context(), d.DB, convID, u.ID, msgID, blocks); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, 404, errNotFound)
+			return
+		}
 		writeError(w, 500, err)
 		return
 	}

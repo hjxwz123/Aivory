@@ -150,14 +150,15 @@ func (g EPayGateway) CreateCheckout(_ context.Context, req CheckoutRequest) (Che
 	return CheckoutAction{Type: ActionFormPost, URL: base.String(), Fields: fields}, nil
 }
 
-// ResumeCheckout signs a new provider-facing merchant order reference while it
-// keeps the same local Aivory purchase snapshot. The EPay-compatible protocol
-// has no portable session retrieval API, so callers must present this as a
+// ResumeCheckout re-signs the one outstanding provider-facing merchant order
+// reference. The EPay-compatible protocol has no portable session retrieval or
+// cancellation API, so minting a new reference on every resume could leave
+// multiple independently chargeable forms alive. Callers present this as a
 // retry submission, not as restoration of a provider-hosted session.
 func (g EPayGateway) ResumeCheckout(ctx context.Context, req CheckoutResumeRequest) (CheckoutAction, error) {
 	merchantOrderID := strings.TrimSpace(req.MerchantOrderID)
-	if strings.TrimSpace(req.OrderID) == "" || merchantOrderID == "" || merchantOrderID == strings.TrimSpace(req.OrderID) {
-		return CheckoutAction{}, fmt.Errorf("%w: EPay retry requires a new merchant order reference", ErrCheckoutNotResumable)
+	if strings.TrimSpace(req.OrderID) == "" || merchantOrderID == "" {
+		return CheckoutAction{}, fmt.Errorf("%w: EPay retry requires an outstanding merchant order reference", ErrCheckoutNotResumable)
 	}
 	action, err := g.CreateCheckout(ctx, req.CheckoutRequest)
 	if err != nil {

@@ -141,9 +141,20 @@ func TestSuccessfulLoginHistoryMethodsAndRefreshExclusion(t *testing.T) {
 	})
 
 	t.Run("OAuth records source with and without 2FA", func(t *testing.T) {
+		provider, err := store.CreateOAuthProvider(t.Context(), db, store.OAuthProvider{
+			ID: "oa_login_history", Kind: "google", Name: "Login History OAuth", ClientID: "client-id",
+			SubjectNamespace: "oauth:v1:login-history:", Enabled: true,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		guard := store.NewOAuthProviderCallbackGuard(*provider)
 		plainUser, _ := createUser("oauth@example.test", false)
 		plainRec := httptest.NewRecorder()
-		completeOAuthLogin(d, plainRec, request(http.MethodGet, "https://app.example.test/api/auth/oauth/handoff", ""), plainUser, "https://app.example.test")
+		completeOAuthLoginWithGuard(
+			d, plainRec, request(http.MethodGet, "https://app.example.test/api/auth/oauth/handoff", ""),
+			plainUser, "https://app.example.test", &guard,
+		)
 		if plainRec.Code != http.StatusFound {
 			t.Fatalf("OAuth status=%d body=%s", plainRec.Code, plainRec.Body.String())
 		}
@@ -151,7 +162,10 @@ func TestSuccessfulLoginHistoryMethodsAndRefreshExclusion(t *testing.T) {
 
 		twoFAUser, secret := createUser("oauth-2fa@example.test", true)
 		first := httptest.NewRecorder()
-		completeOAuthLogin(d, first, request(http.MethodGet, "https://app.example.test/api/auth/oauth/handoff", ""), twoFAUser, "https://app.example.test")
+		completeOAuthLoginWithGuard(
+			d, first, request(http.MethodGet, "https://app.example.test/api/auth/oauth/handoff", ""),
+			twoFAUser, "https://app.example.test", &guard,
+		)
 		if first.Code != http.StatusFound {
 			t.Fatalf("OAuth 2FA handoff status=%d body=%s", first.Code, first.Body.String())
 		}

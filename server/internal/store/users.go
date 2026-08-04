@@ -10,6 +10,7 @@ import (
 	"math"
 	"net/mail"
 	"os"
+	"sort"
 	"strings"
 	"time"
 )
@@ -20,9 +21,26 @@ var ErrNotFound = errors.New("not found")
 // ErrUserEmailInvalid and ErrUserEmailExists distinguish invalid input from a
 // collision when an administrator changes an account's sign-in email.
 var (
-	ErrUserEmailInvalid = errors.New("invalid user email")
-	ErrUserEmailExists  = errors.New("user email already exists")
+	ErrUserEmailInvalid   = errors.New("invalid user email")
+	ErrUserEmailExists    = errors.New("user email already exists")
+	ErrAlreadyInitialized = errors.New("deployment already initialized")
+	ErrPasswordAlreadySet = errors.New("password already set")
 )
+
+// NormalizeUserEmail returns the canonical sign-in address accepted for every
+// account creation and email-change path. ParseAddress alone accepts display
+// names, so require its parsed address to match the trimmed input exactly.
+func NormalizeUserEmail(value string) (string, error) {
+	email := strings.ToLower(strings.TrimSpace(value))
+	if email == "" || len(email) > 320 {
+		return "", ErrUserEmailInvalid
+	}
+	address, err := mail.ParseAddress(email)
+	if err != nil || address.Address != email || !strings.Contains(email, "@") {
+		return "", ErrUserEmailInvalid
+	}
+	return email, nil
+}
 
 // Pagination defaults/caps.
 var (
@@ -79,6 +97,47 @@ func FindUserByID(ctx context.Context, db *sql.DB, id string) (*User, error) {
 	return &u, nil
 }
 
+// UserAuthState is the small, authoritative subset of a user row required on
+// every authenticated request. It intentionally bypasses application caches so
+// account blocks, role changes, and token-version revocations take effect on
+// every server replica as soon as the database transaction commits.
+type UserAuthState struct {
+	Role          string
+	Status        string
+	TokenVer      int
+	SessionActive bool
+}
+
+// GetUserAuthState loads the authorization-critical fields for one user.
+func GetUserAuthState(ctx context.Context, db *sql.DB, userID string) (UserAuthState, error) {
+	return GetUserAuthStateForSession(ctx, db, userID, "")
+}
+
+// GetUserAuthStateForSession also checks a stable refresh-session family when
+// sessionID is present in the access token. A per-device sign-out therefore
+// invalidates that device's access token immediately, not just its refresh token.
+func GetUserAuthStateForSession(ctx context.Context, db *sql.DB, userID, sessionID string) (UserAuthState, error) {
+	var state UserAuthState
+	var sessionActive int
+	err := db.QueryRowContext(ctx,
+		`SELECT u.role, u.status, u.token_ver,
+		        CASE WHEN ?=''
+		             OR EXISTS (
+		               SELECT 1 FROM refresh_tokens rt
+		               WHERE rt.user_id=u.id AND rt.revoked=0 AND rt.expires_at>?
+		                 AND CASE WHEN trim(rt.session_id)<>'' THEN rt.session_id ELSE rt.jti END=?
+		             )
+		             THEN 1 ELSE 0 END
+		 FROM users u WHERE u.id=?`,
+		sessionID, time.Now().Unix(), sessionID, userID,
+	).Scan(&state.Role, &state.Status, &state.TokenVer, &sessionActive)
+	if errors.Is(err, sql.ErrNoRows) {
+		return UserAuthState{}, ErrNotFound
+	}
+	state.SessionActive = sessionActive == 1
+	return state, err
+}
+
 // maybeExpireGroup downgrades the user's group when group_expires_at has passed.
 // Best-effort: if the DB write fails (concurrent expiry race), the in-memory
 // User still reflects the expired state so the caller sees the right tier.
@@ -124,20 +183,39 @@ func PasswordFor(ctx context.Context, db *sql.DB, userID string) (string, error)
 
 // CreateUser inserts a new user (default role=user, status=active).
 func CreateUser(ctx context.Context, db *sql.DB, email, name, pwHash string) (*User, error) {
-	return CreateUserWithRole(ctx, db, email, name, pwHash, "user")
+	return CreateUserWithState(ctx, db, email, name, pwHash, "user", "active", true)
 }
 
 // CreateUserWithRole inserts a new user with an explicit role ('user' |
 // 'admin'). Used by the admin "create user" flow; CreateUser delegates here
 // with role='user' for the normal registration path.
 func CreateUserWithRole(ctx context.Context, db *sql.DB, email, name, pwHash, role string) (*User, error) {
+	return CreateUserWithState(ctx, db, email, name, pwHash, role, "active", true)
+}
+
+// CreateUserWithState inserts the complete authentication state in one
+// statement. Registration and OAuth callers use this to create pending and/or
+// password-less accounts without a fail-open active-account window.
+func CreateUserWithState(ctx context.Context, db *sql.DB, email, name, pwHash, role, status string, passwordSet bool) (*User, error) {
+	id, err := createUserWithState(ctx, db, email, name, pwHash, role, status, passwordSet)
+	if err != nil {
+		return nil, err
+	}
+	return FindUserByID(ctx, db, id)
+}
+
+func createUserWithState(ctx context.Context, ex RowExecer, email, name, pwHash, role, status string, passwordSet bool) (string, error) {
 	id := genID("u")
-	email = strings.ToLower(strings.TrimSpace(email))
-	if email == "" {
-		return nil, errors.New("email required")
+	var err error
+	email, err = NormalizeUserEmail(email)
+	if err != nil {
+		return "", err
 	}
 	if role != "admin" {
 		role = "user"
+	}
+	if status != "active" && status != "pending" {
+		return "", errors.New("status must be 'active' or 'pending'")
 	}
 	if name == "" {
 		// Pick name from the part before "@" as a sensible default.
@@ -147,13 +225,58 @@ func CreateUserWithRole(ctx context.Context, db *sql.DB, email, name, pwHash, ro
 		}
 	}
 	sortOrder := 0
-	_ = db.QueryRowContext(ctx, `SELECT COALESCE(MAX(sort_order), -1) + 1 FROM users`).Scan(&sortOrder)
+	_ = ex.QueryRowContext(ctx, `SELECT COALESCE(MAX(sort_order), -1) + 1 FROM users`).Scan(&sortOrder)
 	// New accounts default long-term memory OFF (opt-in): the user turns it on in
 	// onboarding / Personalization if the global master switch allows. (§ memory)
-	_, err := db.ExecContext(ctx,
-		`INSERT INTO users(id, email, password_hash, name, role, settings, credit_cycle_anchor, quota_cycle_anchor, sort_order) VALUES(?, ?, ?, ?, ?, '{"memory_enabled":false}', ?, ?, ?)`,
-		id, email, pwHash, name, role, time.Now().Unix(), time.Now().Unix(), sortOrder)
+	passwordSetInt := 0
+	if passwordSet {
+		passwordSetInt = 1
+	}
+	now := time.Now().Unix()
+	_, err = ex.ExecContext(ctx,
+		`INSERT INTO users(id, email, password_hash, name, role, status, password_set, settings, credit_cycle_anchor, quota_cycle_anchor, sort_order)
+		 VALUES(?, ?, ?, ?, ?, ?, ?, '{"memory_enabled":false}', ?, ?, ?)`,
+		id, email, pwHash, name, role, status, passwordSetInt, now, now, sortOrder)
 	if err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+// CreateInitialAdmin atomically claims first-run setup and creates its sole
+// administrator. The unique settings key serializes concurrent setup attempts
+// on both SQLite and PostgreSQL; the claim rolls back if user creation fails.
+func CreateInitialAdmin(ctx context.Context, db *sql.DB, email, name, pwHash string) (*User, error) {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	res, err := tx.ExecContext(ctx,
+		`INSERT INTO settings(key, value) VALUES('_internal_setup_complete', 'true')
+		 ON CONFLICT(key) DO NOTHING`)
+	if err != nil {
+		return nil, err
+	}
+	if n, err := res.RowsAffected(); err != nil || n != 1 {
+		if err != nil {
+			return nil, err
+		}
+		return nil, ErrAlreadyInitialized
+	}
+	var count int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM users`).Scan(&count); err != nil {
+		return nil, err
+	}
+	if count != 0 {
+		return nil, ErrAlreadyInitialized
+	}
+	id, err := createUserWithState(ctx, tx, email, name, pwHash, "admin", "active", true)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	return FindUserByID(ctx, db, id)
@@ -166,10 +289,70 @@ func SetUserRole(ctx context.Context, db *sql.DB, userID, role string) error {
 	if role != "admin" && role != "user" {
 		return errors.New("role must be 'user' or 'admin'")
 	}
-	if _, err := db.ExecContext(ctx, `UPDATE users SET role=? WHERE id=?`, role, userID); err != nil {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
 		return err
 	}
-	return BumpTokenVersion(ctx, db, userID)
+	defer func() { _ = tx.Rollback() }()
+
+	activeAdminIDs, err := lockActiveAdminIDs(ctx, tx)
+	if err != nil {
+		return err
+	}
+	query := `SELECT role, status FROM users WHERE id=?`
+	if usePostgres {
+		query += ` FOR UPDATE`
+	}
+	var currentRole, currentStatus string
+	if err := tx.QueryRowContext(ctx, query, userID).Scan(&currentRole, &currentStatus); errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	} else if err != nil {
+		return err
+	}
+	if currentRole == "admin" && currentStatus == "active" && role == "user" && !hasOtherActiveAdmin(activeAdminIDs, userID) {
+		return ErrLastAdmin
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE users SET role=?, token_ver=token_ver+1 WHERE id=?`, role, userID)
+	if err != nil {
+		return err
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return ErrNotFound
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE refresh_tokens SET revoked=1 WHERE user_id=? AND revoked=0`, userID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func lockActiveAdminIDs(ctx context.Context, tx *sql.Tx) ([]string, error) {
+	query := `SELECT id FROM users WHERE role='admin' AND status='active' ORDER BY id`
+	if usePostgres {
+		query += ` FOR UPDATE`
+	}
+	rows, err := tx.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ids := make([]string, 0, 2)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+func hasOtherActiveAdmin(ids []string, userID string) bool {
+	for _, id := range ids {
+		if id != userID {
+			return true
+		}
+	}
+	return false
 }
 
 // BumpTokenVersion invalidates all outstanding access tokens for the user.
@@ -182,17 +365,26 @@ func BumpTokenVersion(ctx context.Context, db *sql.DB, userID string) error {
 // SetUserStatus updates the user's lifecycle status. Bumps token version when
 // flipping out of "active" so the change takes effect immediately (§8.1).
 func SetUserStatus(ctx context.Context, db *sql.DB, userID, status string) error {
-	if _, err := db.ExecContext(ctx, `UPDATE users SET status=? WHERE id=?`, status, userID); err != nil {
+	ok, err := SetUserStatusGuarded(ctx, db, userID, status)
+	if err != nil {
 		return err
 	}
-	if status != "active" {
-		if err := BumpTokenVersion(ctx, db, userID); err != nil {
-			return err
-		}
-		_, err := db.ExecContext(ctx, `UPDATE refresh_tokens SET revoked=1 WHERE user_id=?`, userID)
-		return err
+	if !ok {
+		return ErrNotFound
 	}
 	return nil
+}
+
+// ActivatePendingUser completes email verification without reviving an account
+// that an administrator concurrently banned or marked for deletion.
+func ActivatePendingUser(ctx context.Context, db *sql.DB, userID string) (bool, error) {
+	result, err := db.ExecContext(ctx,
+		`UPDATE users SET status='active' WHERE id=? AND status='pending'`, userID)
+	if err != nil {
+		return false, err
+	}
+	affected, err := result.RowsAffected()
+	return affected == 1, err
 }
 
 // MemoryEnabledGlobal reports the GLOBAL admin `memory_enabled` master switch
@@ -374,13 +566,10 @@ func UpdateUserProfile(ctx context.Context, db *sql.DB, userID string, name, ema
 // SetUserEmail changes only a user's sign-in email. The address is stored in a
 // canonical lowercase form so admin edits cannot create case-only duplicates.
 func SetUserEmail(ctx context.Context, db *sql.DB, userID, email string) error {
-	email = strings.ToLower(strings.TrimSpace(email))
-	if len(email) > 320 {
-		return ErrUserEmailInvalid
-	}
-	address, err := mail.ParseAddress(email)
-	if err != nil || address.Address != email || !strings.Contains(email, "@") {
-		return ErrUserEmailInvalid
+	var err error
+	email, err = NormalizeUserEmail(email)
+	if err != nil {
+		return err
 	}
 
 	var targetID string
@@ -424,23 +613,87 @@ func SetUserEmail(ctx context.Context, db *sql.DB, userID, email string) error {
 // stolen refresh token survives a password reset and can re-mint a session,
 // defeating the reset.
 func UpdateUserPassword(ctx context.Context, db *sql.DB, userID, newHash string) error {
-	if _, err := db.ExecContext(ctx, `UPDATE users SET password_hash=?, password_set=1, password_changed_at=? WHERE id=?`, newHash, time.Now().Unix(), userID); err != nil {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
 		return err
 	}
-	if _, err := db.ExecContext(ctx, `UPDATE refresh_tokens SET revoked=1 WHERE user_id=?`, userID); err != nil {
+	defer tx.Rollback()
+	res, err := tx.ExecContext(ctx,
+		`UPDATE users
+		 SET password_hash=?, password_set=1, password_changed_at=?, token_ver=token_ver+1
+		 WHERE id=?`, newHash, time.Now().Unix(), userID)
+	if err != nil {
 		return err
 	}
-	return BumpTokenVersion(ctx, db, userID)
+	if n, err := res.RowsAffected(); err != nil {
+		return err
+	} else if n != 1 {
+		return ErrNotFound
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE refresh_tokens SET revoked=1 WHERE user_id=? AND revoked=0`, userID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// UpdateUserPasswordIfCurrent is the self-service password-change primitive.
+// The handler may spend time verifying bcrypt before it gets here, so the old
+// hash comparison must be part of the UPDATE: two concurrent requests that
+// both verified the same old password cannot overwrite one another afterward.
+func UpdateUserPasswordIfCurrent(ctx context.Context, db *sql.DB, userID, expectedHash, newHash string) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	res, err := tx.ExecContext(ctx,
+		`UPDATE users
+		 SET password_hash=?, password_set=1, password_changed_at=?, token_ver=token_ver+1
+		 WHERE id=? AND password_hash=?`,
+		newHash, time.Now().Unix(), userID, expectedHash)
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return err
+	} else if n != 1 {
+		var exists int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE id=?`, userID).Scan(&exists); err != nil {
+			return err
+		}
+		if exists == 0 {
+			return ErrNotFound
+		}
+		return ErrPasswordChanged
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE refresh_tokens SET revoked=1 WHERE user_id=? AND revoked=0`, userID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // SetInitialPassword writes the first password for an account that never had one
 // (created via OAuth). Unlike UpdateUserPassword it does NOT rotate the token
 // version or revoke refresh tokens — the user is mid-session and we want them to
-// stay logged in and continue straight into the app. It is the caller's job to
-// verify the account currently has no password (password_set=0).
+// stay logged in and continue straight into the app. The conditional update is
+// authoritative so concurrent first-password requests cannot overwrite one another.
 func SetInitialPassword(ctx context.Context, db *sql.DB, userID, newHash string) error {
-	_, err := db.ExecContext(ctx, `UPDATE users SET password_hash=?, password_set=1, password_changed_at=? WHERE id=?`, newHash, time.Now().Unix(), userID)
-	return err
+	result, err := db.ExecContext(ctx,
+		`UPDATE users SET password_hash=?, password_set=1, password_changed_at=? WHERE id=? AND password_set=0`,
+		newHash, time.Now().Unix(), userID)
+	if err != nil {
+		return err
+	}
+	if affected, _ := result.RowsAffected(); affected == 1 {
+		return nil
+	}
+	var passwordSet int
+	if err := db.QueryRowContext(ctx, `SELECT password_set FROM users WHERE id=?`, userID).Scan(&passwordSet); errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	} else if err != nil {
+		return err
+	}
+	return ErrPasswordAlreadySet
 }
 
 // SetUserTotp stores the TOTP secret and enabled flag for a user (§ 2FA login).
@@ -736,26 +989,374 @@ func touch(ctx context.Context, db *sql.DB, table, id string) error {
 
 var _ = touch
 
-// DeleteUser permanently removes a user and all related data (conversations,
-// messages, memories, refresh tokens, usage logs, files, documents, artifacts).
-// All DB deletes run inside a single transaction. Disk files are removed
-// best-effort after the transaction commits so a partial disk failure never
-// leaves the database in an inconsistent state.
-func DeleteUser(ctx context.Context, db *sql.DB, userID string) error {
+type userDeletionWorkspace struct {
+	ID      string
+	OwnerID string
+}
+
+// userDeletionResourceScope is the authoritative scope for containers removed
+// with an account: the user's personal/orphaned rows plus every row in a
+// sole-member workspace owned by that user. Rows in another live workspace are
+// collaborative state and must be transferred instead of deleted.
+func userDeletionResourceScope(alias string) string {
+	return fmt.Sprintf(`(
+		(%[1]s.user_id=? AND (
+			COALESCE(%[1]s.workspace_id,'')=''
+			OR NOT EXISTS (
+				SELECT 1 FROM workspaces deletion_resource_workspace
+				 WHERE deletion_resource_workspace.id=%[1]s.workspace_id
+			)
+		))
+		OR EXISTS (
+			SELECT 1 FROM workspaces deletion_owned_workspace
+			 WHERE deletion_owned_workspace.id=%[1]s.workspace_id
+			   AND deletion_owned_workspace.owner_id=?
+			   AND NOT EXISTS (
+				 SELECT 1 FROM workspace_members deletion_other_member
+				  WHERE deletion_other_member.workspace_id=deletion_owned_workspace.id
+				    AND deletion_other_member.user_id<>?
+			   )
+		)
+	)`, alias)
+}
+
+func userDeletionResourceScopeArgs(userID string) []any {
+	return []any{userID, userID, userID}
+}
+
+// userDeletionFileScope includes files owned by the deleted account that are
+// personal, orphaned, or still-private drafts, plus every uploader's file in a
+// conversation that is itself being removed. A committed file in somebody
+// else's live workspace is deliberately outside this scope.
+func userDeletionFileScope(alias string) string {
+	return fmt.Sprintf(`(
+		(%[1]s.user_id=? AND (
+			%[1]s.draft=1
+			OR %[1]s.conversation_id IS NULL
+			OR EXISTS (
+				SELECT 1 FROM conversations deletion_file_container
+				 WHERE deletion_file_container.id=%[1]s.conversation_id
+				   AND (
+					COALESCE(deletion_file_container.workspace_id,'')=''
+					OR NOT EXISTS (
+						SELECT 1 FROM workspaces deletion_file_workspace
+						 WHERE deletion_file_workspace.id=deletion_file_container.workspace_id
+					)
+					OR EXISTS (
+						SELECT 1 FROM workspaces deletion_file_owned_workspace
+						 WHERE deletion_file_owned_workspace.id=deletion_file_container.workspace_id
+						   AND deletion_file_owned_workspace.owner_id=?
+						   AND NOT EXISTS (
+							 SELECT 1 FROM workspace_members deletion_file_other_member
+							  WHERE deletion_file_other_member.workspace_id=deletion_file_owned_workspace.id
+							    AND deletion_file_other_member.user_id<>?
+						   )
+					)
+				   )
+			)
+		))
+		OR EXISTS (
+			SELECT 1 FROM conversations deletion_file_conversation
+			 WHERE deletion_file_conversation.id=%[1]s.conversation_id
+			   AND %s
+		)
+	)`, alias, userDeletionResourceScope("deletion_file_conversation"))
+}
+
+func userDeletionFileScopeArgs(userID string) []any {
+	return []any{userID, userID, userID, userID, userID, userID}
+}
+
+func validateUserDeletionReadState(ctx context.Context, q RowExecer, userID string) error {
+	var count int
+	if err := q.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM workspaces deletion_workspace
+		 WHERE deletion_workspace.owner_id=?
+		   AND EXISTS (
+			 SELECT 1 FROM workspace_members deletion_member
+			  WHERE deletion_member.workspace_id=deletion_workspace.id
+			    AND deletion_member.user_id<>?
+		   )`, userID, userID).Scan(&count); err != nil {
+		return err
+	}
+	if count > 0 {
+		return ErrWorkspaceOwnership
+	}
+	if err := q.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		  FROM workspaces deletion_workspace
+		  JOIN users deletion_owner ON deletion_owner.id=deletion_workspace.owner_id
+		 WHERE deletion_workspace.owner_id<>?
+		   AND deletion_owner.status='deleting'
+		   AND (
+			 EXISTS (SELECT 1 FROM workspace_members m WHERE m.workspace_id=deletion_workspace.id AND m.user_id=?)
+			 OR EXISTS (SELECT 1 FROM conversations c WHERE c.workspace_id=deletion_workspace.id AND c.user_id=?)
+			 OR EXISTS (SELECT 1 FROM projects p WHERE p.workspace_id=deletion_workspace.id AND p.user_id=?)
+			 OR EXISTS (SELECT 1 FROM knowledge_bases k WHERE k.workspace_id=deletion_workspace.id AND k.user_id=?)
+			 OR EXISTS (
+				SELECT 1 FROM files f JOIN conversations c ON c.id=f.conversation_id
+				 WHERE c.workspace_id=deletion_workspace.id AND f.user_id=?
+			 )
+			 OR EXISTS (
+				SELECT 1 FROM conversation_shares s JOIN conversations c ON c.id=s.conversation_id
+				 WHERE c.workspace_id=deletion_workspace.id AND s.user_id=?
+			 )
+		   )`, userID, userID, userID, userID, userID, userID, userID).Scan(&count); err != nil {
+		return err
+	}
+	if count > 0 {
+		return ErrWorkspaceOwnerDeleting
+	}
+	return nil
+}
+
+// lockUserDeletionWorkspacesTx takes the same workspace-row lock used by join,
+// leave, kick, and workspace resource creation. Locks are acquired in stable ID
+// order before any user-row lock to keep concurrent member/owner deletion safe.
+func lockUserDeletionWorkspacesTx(ctx context.Context, tx *sql.Tx, userID string) ([]userDeletionWorkspace, error) {
+	rows, err := tx.QueryContext(ctx, `
+		SELECT deletion_workspace.id, deletion_workspace.owner_id
+		  FROM workspaces deletion_workspace
+		 WHERE deletion_workspace.owner_id=?
+		    OR EXISTS (SELECT 1 FROM workspace_members m WHERE m.workspace_id=deletion_workspace.id AND m.user_id=?)
+		    OR EXISTS (SELECT 1 FROM conversations c WHERE c.workspace_id=deletion_workspace.id AND c.user_id=?)
+		    OR EXISTS (SELECT 1 FROM projects p WHERE p.workspace_id=deletion_workspace.id AND p.user_id=?)
+		    OR EXISTS (SELECT 1 FROM knowledge_bases k WHERE k.workspace_id=deletion_workspace.id AND k.user_id=?)
+		    OR EXISTS (
+			 SELECT 1 FROM files f JOIN conversations c ON c.id=f.conversation_id
+			  WHERE c.workspace_id=deletion_workspace.id AND f.user_id=?
+		    )
+		    OR EXISTS (
+			 SELECT 1 FROM conversation_shares s JOIN conversations c ON c.id=s.conversation_id
+			  WHERE c.workspace_id=deletion_workspace.id AND s.user_id=?
+		    )
+		 ORDER BY deletion_workspace.id`, userID, userID, userID, userID, userID, userID, userID)
+	if err != nil {
+		return nil, err
+	}
+	workspaces := []userDeletionWorkspace{}
+	for rows.Next() {
+		var workspace userDeletionWorkspace
+		if err := rows.Scan(&workspace.ID, &workspace.OwnerID); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		workspaces = append(workspaces, workspace)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for _, workspace := range workspaces {
+		res, err := tx.ExecContext(ctx, `UPDATE workspaces SET id=id WHERE id=?`, workspace.ID)
+		if err != nil {
+			return nil, err
+		}
+		if affected, rowsErr := res.RowsAffected(); rowsErr != nil {
+			return nil, rowsErr
+		} else if affected != 1 {
+			return nil, ErrWorkspaceOwnerDeleting
+		}
+	}
+	return workspaces, nil
+}
+
+func lockUserDeletionUsersTx(ctx context.Context, tx *sql.Tx, userID string, workspaces []userDeletionWorkspace) (bool, error) {
+	ids := map[string]struct{}{userID: {}}
+	for _, workspace := range workspaces {
+		ids[workspace.OwnerID] = struct{}{}
+	}
+	ordered := keys(ids)
+	sort.Strings(ordered)
+	for _, id := range ordered {
+		res, err := tx.ExecContext(ctx, `UPDATE users SET id=id WHERE id=?`, id)
+		if err != nil {
+			return false, err
+		}
+		affected, err := res.RowsAffected()
+		if err != nil {
+			return false, err
+		}
+		if affected != 1 {
+			if id == userID {
+				return false, nil
+			}
+			return false, ErrWorkspaceOwnerDeleting
+		}
+	}
+	return true, nil
+}
+
+func validateLockedUserDeletionWorkspaces(ctx context.Context, tx *sql.Tx, userID string, workspaces []userDeletionWorkspace) error {
+	for _, workspace := range workspaces {
+		if workspace.OwnerID == userID {
+			var otherMembers int
+			if err := tx.QueryRowContext(ctx,
+				`SELECT COUNT(*) FROM workspace_members WHERE workspace_id=? AND user_id<>?`,
+				workspace.ID, userID).Scan(&otherMembers); err != nil {
+				return err
+			}
+			if otherMembers > 0 {
+				return ErrWorkspaceOwnership
+			}
+			continue
+		}
+		var ownerStatus string
+		if err := tx.QueryRowContext(ctx, `SELECT status FROM users WHERE id=?`, workspace.OwnerID).Scan(&ownerStatus); err != nil {
+			return ErrWorkspaceOwnerDeleting
+		}
+		if ownerStatus == "deleting" {
+			return ErrWorkspaceOwnerDeleting
+		}
+	}
+	return nil
+}
+
+type namedWorkspaceResourceTransfer struct {
+	ID          string
+	Name        string
+	WorkspaceID string
+	OwnerID     string
+}
+
+func transferNamedWorkspaceResourcesTx(ctx context.Context, tx *sql.Tx, table, userID string) error {
+	if table != "projects" && table != "knowledge_bases" {
+		return errors.New("unsupported named workspace resource")
+	}
+	query := fmt.Sprintf(`
+		SELECT deletion_resource.id, deletion_resource.name,
+		       deletion_resource.workspace_id, deletion_workspace.owner_id
+		  FROM %s deletion_resource
+		  JOIN workspaces deletion_workspace ON deletion_workspace.id=deletion_resource.workspace_id
+		 WHERE deletion_resource.user_id=? AND deletion_workspace.owner_id<>?
+		 ORDER BY deletion_resource.workspace_id, deletion_resource.id`, table)
+	rows, err := tx.QueryContext(ctx, query, userID, userID)
+	if err != nil {
+		return err
+	}
+	resources := []namedWorkspaceResourceTransfer{}
+	for rows.Next() {
+		var resource namedWorkspaceResourceTransfer
+		if err := rows.Scan(&resource.ID, &resource.Name, &resource.WorkspaceID, &resource.OwnerID); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		resources = append(resources, resource)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, resource := range resources {
+		candidate := resource.Name
+		for attempt := 0; ; attempt++ {
+			var conflicts int
+			conflictQuery := fmt.Sprintf(`
+				SELECT COUNT(*) FROM %s
+				 WHERE user_id=? AND COALESCE(workspace_id,'')=? AND id<>?
+				   AND lower(trim(name))=lower(trim(?))`, table)
+			if err := tx.QueryRowContext(ctx, conflictQuery,
+				resource.OwnerID, resource.WorkspaceID, resource.ID, candidate).Scan(&conflicts); err != nil {
+				return err
+			}
+			if conflicts == 0 {
+				break
+			}
+			base := strings.TrimSpace(resource.Name)
+			if attempt == 0 {
+				candidate = fmt.Sprintf("%s [%s]", base, resource.ID)
+			} else {
+				candidate = fmt.Sprintf("%s [%s-%d]", base, resource.ID, attempt+1)
+			}
+		}
+		updateQuery := fmt.Sprintf(`UPDATE %s SET user_id=?, name=? WHERE id=? AND user_id=?`, table)
+		res, err := tx.ExecContext(ctx, updateQuery, resource.OwnerID, candidate, resource.ID, userID)
+		if err != nil {
+			return err
+		}
+		if affected, rowsErr := res.RowsAffected(); rowsErr != nil {
+			return rowsErr
+		} else if affected != 1 {
+			return ErrWorkspaceOwnerDeleting
+		}
+	}
+	return nil
+}
+
+// transferUserWorkspaceResourcesTx anonymizes the departing creator while
+// preserving every committed collaborative resource under the workspace's
+// canonical owner. Workspace row locks make the name-conflict resolution and
+// bulk ownership updates atomic against concurrent creates and membership loss.
+func transferUserWorkspaceResourcesTx(ctx context.Context, tx *sql.Tx, userID string, workspaces []userDeletionWorkspace) error {
+	if err := validateLockedUserDeletionWorkspaces(ctx, tx, userID, workspaces); err != nil {
+		return err
+	}
+	if err := transferNamedWorkspaceResourcesTx(ctx, tx, "projects", userID); err != nil {
+		return err
+	}
+	if err := transferNamedWorkspaceResourcesTx(ctx, tx, "knowledge_bases", userID); err != nil {
+		return err
+	}
+	for _, query := range []string{
+		`UPDATE conversations
+		    SET user_id=(SELECT owner_id FROM workspaces WHERE id=conversations.workspace_id)
+		  WHERE user_id=? AND COALESCE(workspace_id,'')<>''
+		    AND EXISTS (SELECT 1 FROM workspaces w WHERE w.id=conversations.workspace_id AND w.owner_id<>?)`,
+		`UPDATE files
+		    SET user_id=(
+			SELECT w.owner_id FROM conversations c JOIN workspaces w ON w.id=c.workspace_id
+			 WHERE c.id=files.conversation_id
+		    )
+		  WHERE user_id=? AND draft=0
+		    AND EXISTS (
+			SELECT 1 FROM conversations c JOIN workspaces w ON w.id=c.workspace_id
+			 WHERE c.id=files.conversation_id AND w.owner_id<>?
+		    )`,
+		`UPDATE conversation_shares
+		    SET user_id=(
+			SELECT w.owner_id FROM conversations c JOIN workspaces w ON w.id=c.workspace_id
+			 WHERE c.id=conversation_shares.conversation_id
+		    )
+		  WHERE user_id=?
+		    AND EXISTS (
+			SELECT 1 FROM conversations c JOIN workspaces w ON w.id=c.workspace_id
+			 WHERE c.id=conversation_shares.conversation_id AND w.owner_id<>?
+		    )`,
+	} {
+		if _, err := tx.ExecContext(ctx, query, userID, userID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// DeleteUser permanently removes personal data and sole-owner workspaces while
+// preserving collaborative rows in somebody else's workspace. All SQL changes
+// run in one transaction; local storage cleanup is best-effort after commit.
+func DeleteUser(ctx context.Context, db *sql.DB, userID string, storageRoots ...string) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("delete user: begin tx: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck — intentional best-effort rollback
-	userLockQuery := `SELECT id FROM users WHERE id=?`
-	if usePostgres {
-		userLockQuery += ` FOR UPDATE`
+	defer tx.Rollback() //nolint:errcheck
+
+	workspaces, err := lockUserDeletionWorkspacesTx(ctx, tx, userID)
+	if err != nil {
+		return fmt.Errorf("delete user: lock workspaces: %w", err)
 	}
-	var lockedUserID string
-	if err := tx.QueryRowContext(ctx, userLockQuery, userID).Scan(&lockedUserID); errors.Is(err, sql.ErrNoRows) {
+	exists, err := lockUserDeletionUsersTx(ctx, tx, userID, workspaces)
+	if err != nil {
+		return fmt.Errorf("delete user: lock users: %w", err)
+	}
+	if !exists {
 		return nil
-	} else if err != nil {
-		return fmt.Errorf("delete user: lock user: %w", err)
+	}
+	if err := validateLockedUserDeletionWorkspaces(ctx, tx, userID, workspaces); err != nil {
+		return err
 	}
 	if pending, err := hasPendingPaymentOrdersForUser(ctx, tx, userID); err != nil {
 		return fmt.Errorf("delete user: inspect payment orders: %w", err)
@@ -763,119 +1364,88 @@ func DeleteUser(ctx context.Context, db *sql.DB, userID string) error {
 		return ErrPaymentOrdersPendingForUser
 	}
 
-	// Collect storage paths before deleting rows so we can clean up disk files
-	// after the transaction commits.
-	var diskPaths []string
-
-	// files table: directly user-owned.
-	fileRows, err := tx.QueryContext(ctx, `SELECT storage_path FROM files WHERE user_id=?`, userID)
+	plan, err := buildUserCleanupPlan(ctx, tx, userID)
 	if err != nil {
-		return fmt.Errorf("delete user: query files: %w", err)
+		return fmt.Errorf("delete user: build cleanup plan: %w", err)
 	}
-	for fileRows.Next() {
-		var p string
-		if fileRows.Scan(&p) == nil && p != "" {
-			diskPaths = append(diskPaths, p)
-		}
+	if err := transferUserWorkspaceResourcesTx(ctx, tx, userID, workspaces); err != nil {
+		return fmt.Errorf("delete user: transfer workspace resources: %w", err)
 	}
-	fileRows.Close()
 
-	// documents table: linked through conversations owned by the user.
-	docRows, err := tx.QueryContext(ctx,
-		`SELECT storage_path FROM documents WHERE conversation_id IN (SELECT id FROM conversations WHERE user_id=?)`,
-		userID)
-	if err != nil {
-		return fmt.Errorf("delete user: query documents: %w", err)
+	fileScope := userDeletionFileScope("deletion_file")
+	keeperScope := userDeletionFileScope("deletion_keeper_file")
+	documentArgs := append(userDeletionFileScopeArgs(userID), userDeletionFileScopeArgs(userID)...)
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM documents
+		 WHERE storage_path<>''
+		   AND EXISTS (
+			 SELECT 1 FROM files deletion_file
+			  WHERE deletion_file.storage_path=documents.storage_path AND `+fileScope+`
+		   )
+		   AND NOT EXISTS (
+			 SELECT 1 FROM files deletion_keeper_file
+			  WHERE deletion_keeper_file.storage_path=documents.storage_path AND NOT (`+keeperScope+`)
+		   )`, documentArgs...); err != nil {
+		return fmt.Errorf("delete user: delete file documents: %w", err)
 	}
-	for docRows.Next() {
-		var p string
-		if docRows.Scan(&p) == nil && p != "" {
-			diskPaths = append(diskPaths, p)
-		}
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM files WHERE `+userDeletionFileScope("files"),
+		userDeletionFileScopeArgs(userID)...); err != nil {
+		return fmt.Errorf("delete user: delete files: %w", err)
 	}
-	docRows.Close()
 
-	// documents table: linked through KBs owned by the user.
-	kbDocRows, err := tx.QueryContext(ctx,
-		`SELECT storage_path FROM documents WHERE kb_id IN (SELECT id FROM knowledge_bases WHERE user_id=?)`,
-		userID)
-	if err != nil {
-		return fmt.Errorf("delete user: query kb documents: %w", err)
+	resourceArgs := userDeletionResourceScopeArgs(userID)
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM messages WHERE conversation_id IN (
+			SELECT deletion_conversation.id FROM conversations deletion_conversation
+			 WHERE `+userDeletionResourceScope("deletion_conversation")+`
+		)`, resourceArgs...); err != nil {
+		return fmt.Errorf("delete user: delete messages: %w", err)
 	}
-	for kbDocRows.Next() {
-		var p string
-		if kbDocRows.Scan(&p) == nil && p != "" {
-			diskPaths = append(diskPaths, p)
-		}
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM conversations WHERE `+userDeletionResourceScope("conversations"),
+		resourceArgs...); err != nil {
+		return fmt.Errorf("delete user: delete conversations: %w", err)
 	}
-	kbDocRows.Close()
-
-	// documents table: conversation/KB docs created from this user's uploaded
-	// file bytes. This catches shared conversations whose owner is another user:
-	// deleting the uploader must still remove their file-derived RAG document.
-	fileDocRows, err := tx.QueryContext(ctx,
-		`SELECT DISTINCT d.storage_path FROM documents d JOIN files f ON f.storage_path=d.storage_path WHERE f.user_id=? AND d.storage_path<>''`,
-		userID)
-	if err != nil {
-		return fmt.Errorf("delete user: query file documents: %w", err)
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM knowledge_bases WHERE `+userDeletionResourceScope("knowledge_bases"),
+		resourceArgs...); err != nil {
+		return fmt.Errorf("delete user: delete knowledge bases: %w", err)
 	}
-	for fileDocRows.Next() {
-		var p string
-		if fileDocRows.Scan(&p) == nil && p != "" {
-			diskPaths = append(diskPaths, p)
-		}
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM projects WHERE `+userDeletionResourceScope("projects"),
+		resourceArgs...); err != nil {
+		return fmt.Errorf("delete user: delete projects: %w", err)
 	}
-	fileDocRows.Close()
-
-	// artifacts table: linked through messages → conversations owned by the user.
-	artRows, err := tx.QueryContext(ctx,
-		`SELECT storage_path FROM artifacts WHERE message_id IN (SELECT id FROM messages WHERE conversation_id IN (SELECT id FROM conversations WHERE user_id=?))`,
-		userID)
-	if err != nil {
-		return fmt.Errorf("delete user: query artifacts: %w", err)
+	if _, err := tx.ExecContext(ctx, `DELETE FROM workspaces WHERE owner_id=?`, userID); err != nil {
+		return fmt.Errorf("delete user: delete workspaces: %w", err)
 	}
-	for artRows.Next() {
-		var p string
-		if artRows.Scan(&p) == nil && p != "" {
-			diskPaths = append(diskPaths, p)
-		}
-	}
-	artRows.Close()
-
-	// Delete DB rows. Order matters: child rows before parent rows.
-	stmts := []string{
-		`DELETE FROM documents WHERE storage_path IN (SELECT storage_path FROM files WHERE user_id=? AND storage_path<>'')`,
-		`DELETE FROM messages WHERE conversation_id IN (SELECT id FROM conversations WHERE user_id=?)`,
-		`DELETE FROM conversations WHERE user_id=?`,
+	for _, query := range []string{
 		`DELETE FROM memories WHERE user_id=?`,
 		`DELETE FROM refresh_tokens WHERE user_id=?`,
 		`DELETE FROM usage_logs WHERE user_id=?`,
 		`DELETE FROM files WHERE user_id=?`,
 		`DELETE FROM users WHERE id=?`,
-	}
-	for _, q := range stmts {
-		if _, err := tx.ExecContext(ctx, q, userID); err != nil {
+	} {
+		if _, err := tx.ExecContext(ctx, query, userID); err != nil {
 			return fmt.Errorf("delete user: %w", err)
 		}
 	}
-
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("delete user: commit: %w", err)
 	}
 
-	// Best-effort disk cleanup after a successful commit. Log errors but do not
-	// fail — missing files are harmless (already cleaned up or never written).
-	for _, p := range diskPaths {
-		ref, rerr := StoragePathReferenced(context.Background(), db, p)
-		if rerr != nil {
-			log.Printf("delete user %s: check storage refs for %q: %v", userID, p, rerr)
+	for _, path := range plan.StoragePaths {
+		referenced, refErr := StoragePathReferenced(context.Background(), db, path)
+		if refErr != nil {
+			log.Printf("delete user %s: check storage refs for %q: %v", userID, path, refErr)
 			continue
 		}
-		if ref {
+		if referenced {
 			continue
 		}
-		if err := removeLocalStoragePath(p); err != nil && !os.IsNotExist(err) {
-			log.Printf("delete user %s: remove file %q: %v", userID, p, err)
+		if err := removeLocalStoragePath(path, storageRoots...); err != nil && !os.IsNotExist(err) {
+			log.Printf("delete user %s: remove file %q: %v", userID, path, err)
 		}
 	}
 	return nil
@@ -893,9 +1463,16 @@ type UserCleanupPlan struct {
 }
 
 func BuildUserCleanupPlan(ctx context.Context, db *sql.DB, userID string) (UserCleanupPlan, error) {
+	return buildUserCleanupPlan(ctx, db, userID)
+}
+
+func buildUserCleanupPlan(ctx context.Context, q RowExecer, userID string) (UserCleanupPlan, error) {
 	var plan UserCleanupPlan
-	collectIDs := func(q string) ([]string, error) {
-		rows, err := db.QueryContext(ctx, q, userID)
+	if err := validateUserDeletionReadState(ctx, q, userID); err != nil {
+		return plan, err
+	}
+	collectIDs := func(query string, args ...any) ([]string, error) {
+		rows, err := q.QueryContext(ctx, query, args...)
 		if err != nil {
 			return nil, err
 		}
@@ -911,18 +1488,54 @@ func BuildUserCleanupPlan(ctx context.Context, db *sql.DB, userID string) (UserC
 		return out, rows.Err()
 	}
 	var err error
-	if plan.ConversationIDs, err = collectIDs(`SELECT id FROM conversations WHERE user_id=?`); err != nil {
+	if plan.ConversationIDs, err = collectIDs(
+		`SELECT cleanup_conversation.id FROM conversations cleanup_conversation WHERE `+userDeletionResourceScope("cleanup_conversation")+` ORDER BY cleanup_conversation.id`,
+		userDeletionResourceScopeArgs(userID)...); err != nil {
 		return plan, err
 	}
-	if plan.KBIDs, err = collectIDs(`SELECT id FROM knowledge_bases WHERE user_id=?`); err != nil {
+	if plan.KBIDs, err = collectIDs(
+		`SELECT cleanup_kb.id FROM knowledge_bases cleanup_kb WHERE `+userDeletionResourceScope("cleanup_kb")+` ORDER BY cleanup_kb.id`,
+		userDeletionResourceScopeArgs(userID)...); err != nil {
 		return plan, err
 	}
-	if plan.DocumentIDs, err = collectIDs(`SELECT DISTINCT d.id FROM documents d JOIN files f ON f.storage_path=d.storage_path WHERE f.user_id=? AND d.storage_path<>''`); err != nil {
+	documentWhere := `(
+		EXISTS (
+			SELECT 1 FROM conversations cleanup_document_conversation
+			 WHERE cleanup_document_conversation.id=cleanup_document.conversation_id
+			   AND ` + userDeletionResourceScope("cleanup_document_conversation") + `
+		)
+		OR EXISTS (
+			SELECT 1 FROM knowledge_bases cleanup_document_kb
+			 WHERE cleanup_document_kb.id=cleanup_document.kb_id
+			   AND ` + userDeletionResourceScope("cleanup_document_kb") + `
+		)
+		OR (
+			cleanup_document.storage_path<>''
+			AND EXISTS (
+				SELECT 1 FROM files cleanup_document_file
+				 WHERE cleanup_document_file.storage_path=cleanup_document.storage_path
+				   AND ` + userDeletionFileScope("cleanup_document_file") + `
+			)
+			AND NOT EXISTS (
+				SELECT 1 FROM files cleanup_document_keeper
+				 WHERE cleanup_document_keeper.storage_path=cleanup_document.storage_path
+				   AND NOT (` + userDeletionFileScope("cleanup_document_keeper") + `)
+			)
+		)
+	)`
+	documentArgs := []any{}
+	documentArgs = append(documentArgs, userDeletionResourceScopeArgs(userID)...)
+	documentArgs = append(documentArgs, userDeletionResourceScopeArgs(userID)...)
+	documentArgs = append(documentArgs, userDeletionFileScopeArgs(userID)...)
+	documentArgs = append(documentArgs, userDeletionFileScopeArgs(userID)...)
+	if plan.DocumentIDs, err = collectIDs(
+		`SELECT DISTINCT cleanup_document.id FROM documents cleanup_document WHERE `+documentWhere+` ORDER BY cleanup_document.id`,
+		documentArgs...); err != nil {
 		return plan, err
 	}
 	paths := map[string]struct{}{}
-	addPaths := func(q string) error {
-		rows, err := db.QueryContext(ctx, q, userID)
+	addPaths := func(query string, args ...any) error {
+		rows, err := q.QueryContext(ctx, query, args...)
 		if err != nil {
 			return err
 		}
@@ -938,16 +1551,25 @@ func BuildUserCleanupPlan(ctx context.Context, db *sql.DB, userID string) (UserC
 		}
 		return rows.Err()
 	}
-	for _, q := range []string{
-		`SELECT storage_path FROM files WHERE user_id=? AND storage_path<>''`,
-		`SELECT storage_path FROM documents WHERE conversation_id IN (SELECT id FROM conversations WHERE user_id=?) AND storage_path<>''`,
-		`SELECT storage_path FROM documents WHERE kb_id IN (SELECT id FROM knowledge_bases WHERE user_id=?) AND storage_path<>''`,
-		`SELECT DISTINCT d.storage_path FROM documents d JOIN files f ON f.storage_path=d.storage_path WHERE f.user_id=? AND d.storage_path<>''`,
-		`SELECT a.storage_path FROM artifacts a JOIN messages m ON m.id=a.message_id WHERE m.conversation_id IN (SELECT id FROM conversations WHERE user_id=?) AND a.storage_path<>''`,
-	} {
-		if err := addPaths(q); err != nil {
-			return plan, err
-		}
+	if err := addPaths(
+		`SELECT cleanup_file.storage_path FROM files cleanup_file WHERE cleanup_file.storage_path<>'' AND `+userDeletionFileScope("cleanup_file"),
+		userDeletionFileScopeArgs(userID)...); err != nil {
+		return plan, err
+	}
+	if err := addPaths(
+		`SELECT DISTINCT cleanup_document.storage_path FROM documents cleanup_document WHERE cleanup_document.storage_path<>'' AND `+documentWhere,
+		documentArgs...); err != nil {
+		return plan, err
+	}
+	if err := addPaths(`
+		SELECT cleanup_artifact.storage_path
+		  FROM artifacts cleanup_artifact
+		  JOIN messages cleanup_message ON cleanup_message.id=cleanup_artifact.message_id
+		  JOIN conversations cleanup_conversation ON cleanup_conversation.id=cleanup_message.conversation_id
+		 WHERE cleanup_artifact.storage_path<>''
+		   AND `+userDeletionResourceScope("cleanup_conversation"),
+		userDeletionResourceScopeArgs(userID)...); err != nil {
+		return plan, err
 	}
 	plan.StoragePaths = keys(paths)
 	return plan, nil

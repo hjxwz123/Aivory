@@ -251,7 +251,7 @@
   },
   "oauth": {
     "title": "Méthodes de connexion",
-    "lead": "Connexion tierce (Google/GitHub/Apple/OIDC). Visible après configuration.",
+    "lead": "Connexion tierce via les fournisseurs intégrés, OAuth 2.0 générique ou OIDC. Visible après configuration.",
     "new": "Ajouter une méthode",
     "empty": "Aucune méthode de connexion pour l'instant — les utilisateurs se connectent avec e-mail + mot de passe.",
     "noClientId": "aucun client id",
@@ -259,7 +259,8 @@
       "google": "Google",
       "github": "GitHub",
       "apple": "Apple",
-      "oidc": "Personnalisé (OAuth2 / OIDC)"
+      "oauth2": "OAuth 2.0 générique",
+      "oidc": "OIDC générique"
     },
     "fields": {
       "kind": "Fournisseur",
@@ -271,11 +272,14 @@
       "clientSecret": "Secret client",
       "clientSecretApple": "Clé privée (.p8)",
       "clientSecretHintEdit": "Laissez vide pour conserver le secret enregistré.",
+      "issuerUrl": "URL de l’émetteur",
+      "jwksUrl": "URL JWKS",
       "authUrl": "URL d'autorisation",
       "tokenUrl": "URL du token",
       "userinfoUrl": "URL userinfo",
       "scopes": "Portées",
-      "scopesHint": "Séparés par espaces. Vide = défauts.",
+      "scopesHintOauth2": "Suivez la documentation du fournisseur. Séparez les valeurs par des espaces ; le champ peut rester vide.",
+      "scopesHintOidc": "Séparées par des espaces. Si le champ est vide, openid email profile est utilisé.",
       "teamId": "Team ID",
       "keyId": "Key ID",
       "enabled": "Activé (affiché sur l'écran de connexion)",
@@ -286,7 +290,8 @@
       "google": "Créez un client OAuth dans Google Cloud → Identifiants.",
       "github": "Créez-en un dans GitHub → Developer settings → OAuth Apps.",
       "apple": "Créez un Services ID + AuthKey (.p8) dans Apple Developer.",
-      "oidc": "Identifiants client + endpoints authorize / token / userinfo."
+      "oauth2": "Utilise les endpoints d'autorisation, de token et UserInfo du fournisseur.",
+      "oidc": "Utilise un ID Token vérifié avec les métadonnées émetteur et JWKS."
     },
     "editorTitle": "Modifier la méthode de connexion",
     "newTitle": "Ajouter une méthode de connexion",
@@ -299,7 +304,9 @@
     "errors": {
       "nameRequired": "Libellé du bouton requis",
       "callbackLoadFailed": "Impossible de préparer l'URI de redirection. Réessayez.",
-      "idConflict": "Cet URI de redirection est déjà utilisé. Fermez puis rouvrez le formulaire pour en générer un autre."
+      "idConflict": "Cet URI de redirection est déjà utilisé. Fermez puis rouvrez le formulaire pour en générer un autre.",
+      "providerChanged": "Ce fournisseur a été modifié par une autre opération. Rouvrez-le avant d'enregistrer à nouveau.",
+      "secretReentryRequired": "Des paramètres sensibles ont changé. Saisissez à nouveau le secret client de ce fournisseur. Pour Apple, saisissez à nouveau la clé privée .p8 ; après un changement de type, utilisez les identifiants requis par le nouveau type."
     },
     "copied": "Copié"
   },
@@ -451,7 +458,8 @@
       "1": "Dernier jour",
       "7": "7 derniers jours",
       "30": "30 derniers jours",
-      "90": "90 derniers jours"
+      "90": "90 derniers jours",
+      "365": "365 derniers jours"
     },
     "stats": {
       "totalCost": "Coût total",
@@ -837,32 +845,143 @@
     "save": "Enregistrer les permissions"
   },
   "analytics": {
-    "title": "Analytique",
-    "lead": "Tendances d'usage : global, par modèle, par utilisateur.",
-    "empty": "Aucune utilisation sur cette période pour l'instant.",
+    "title": "Usage et facturation",
+    "lead": "Analysez la consommation durable des utilisateurs et le coût des modèles, comparez des périodes égales et rapprochez l'usage par utilisateur, modèle, espace, objet ou canal.",
+    "empty": "Aucun usage comptabilisé sur cette période.",
     "unknownUser": "Utilisateur inconnu",
+    "actions": {
+      "usageRecords": "Ouvrir les relevés d'usage",
+      "refresh": "Actualiser l'analyse"
+    },
     "view": {
       "label": "Vue analytique",
-      "usage": "Tendances d’usage",
+      "usage": "Usage et facturation",
       "feedback": "Avis sur les modèles"
     },
     "metric": {
-      "calls": "Appels",
+      "label": "Indicateur de tendance",
+      "calls": "Opérations comptabilisées",
+      "turns": "Interactions livrées",
       "tokens": "Tokens",
-      "cost": "Coût"
+      "cost": "Coût des modèles",
+      "credits": "Crédits consommés",
+      "users": "Utilisateurs actifs"
     },
     "stats": {
-      "calls": "Total des appels",
-      "tokens": "Total des tokens",
-      "cost": "Coût total",
-      "users": "Utilisateurs actifs"
+      "calls": "Opérations comptabilisées",
+      "turns": "Interactions livrées",
+      "tokens": "Tokens d'entrée + sortie",
+      "cost": "Coût des modèles",
+      "credits": "Crédits consommés",
+      "users": "Utilisateurs actifs",
+      "operations": "Opérations comptabilisées"
     },
     "sections": {
       "daily": "Utilisation quotidienne",
       "hourly": "Utilisation horaire",
+      "weekly": "Semaine du",
       "byModel": "Par modèle",
-      "byUser": "Par utilisateur"
+      "byUser": "Par utilisateur",
+      "trend": "Tendance de la période",
+      "economics": "Économie unitaire",
+      "tokenComposition": "Composition des tokens",
+      "breakdown": "Ventilation détaillée"
     },
+    "comparison": {
+      "previousPeriod": "Comparaison avec la période précédente de même durée.",
+      "current": "Période actuelle",
+      "previous": "Période précédente",
+      "newActivity": "Nouvelle activité",
+      "delta": "{{value}} par rapport à la période précédente"
+    },
+    "trend": {
+      "empty": "Aucune donnée d'usage n'est disponible pour cette tendance."
+    },
+    "details": {
+      "images": "Images",
+      "conversations": "Conversations",
+      "workspaces": "Espaces actifs",
+      "inputTokens": "Tokens d'entrée",
+      "outputTokens": "Tokens de sortie",
+      "cacheReadTokens": "Tokens lus du cache",
+      "cacheWriteTokens": "Tokens écrits en cache"
+    },
+    "economics": {
+      "chargedTurnRate": "Part des interactions débitées",
+      "costCoverage": "Part du coût des interactions débitées",
+      "includedCost": "Coût des interactions incluses",
+      "costPerTurn": "Coût moyen par interaction",
+      "costPerUser": "Coût par utilisateur actif",
+      "creditsPerChargedTurn": "Crédits par interaction débitée",
+      "operationsPerTurn": "Opérations par interaction",
+      "chargedUsers": "Utilisateurs débités en crédits"
+    },
+    "notes": {
+      "billingDefinition": "Le coût des modèles correspond aux dépenses fournisseur en USD. Les crédits sont des unités consommées par les utilisateurs, pas du chiffre d'affaires. Une interaction débitée est regroupée par message livré : plusieurs opérations du modèle ne comptent qu'une fois.",
+      "tokenDefinition": "Le total principal additionne les tokens d'entrée et de sortie. Les lectures et écritures du cache sont présentées séparément dans cette composition."
+    },
+    "dimension": {
+      "label": "Axe de ventilation",
+      "user": "Utilisateurs",
+      "model": "Modèles",
+      "workspace": "Espaces de travail",
+      "purpose": "Objets",
+      "channel": "Canaux"
+    },
+    "filters": {
+      "user": "Utilisateur",
+      "userPlaceholder": "E-mail, nom ou ID",
+      "model": "Modèle",
+      "workspace": "Espace de travail",
+      "purpose": "Objet",
+      "channel": "Canal",
+      "allUsers": "Tous les utilisateurs",
+      "allModels": "Tous les modèles",
+      "allWorkspaces": "Tous les espaces",
+      "allPurposes": "Tous les objets",
+      "allChannels": "Tous les canaux",
+      "clear": "Effacer les filtres",
+      "active": "Filtres actifs : {{count}}",
+      "personal": "Personnel",
+      "unattributed": "Non attribué"
+    },
+    "breakdown": {
+      "count": "{{count}} éléments",
+      "search": "Rechercher dans cette ventilation",
+      "sort": "Trier la ventilation",
+      "sortOptions": {
+        "cost": "Coût des modèles",
+        "turns": "Interactions livrées",
+        "calls": "Opérations comptabilisées",
+        "tokens": "Tokens",
+        "credits": "Crédits consommés"
+      },
+      "empty": "Aucun élément ne correspond aux critères actuels."
+    },
+    "labels": {
+      "unknown": "Inconnu",
+      "deletedModel": "Modèle supprimé ({{id}})",
+      "deletedUser": "Utilisateur supprimé ou anonymisé",
+      "personal": "Espace personnel",
+      "unattributedChannel": "Canal non attribué"
+    },
+    "table": {
+      "name": "Nom",
+      "operations": "Opérations comptabilisées",
+      "turns": "Interactions livrées",
+      "tokens": "Tokens",
+      "cost": "Coût des modèles",
+      "credits": "Crédits consommés",
+      "chargedTurns": "Interactions débitées",
+      "avgCostTurn": "Coût moy. / interaction",
+      "avgCostOperation": "Coût moy. / opération"
+    },
+    "error": {
+      "title": "Impossible de charger l'analyse d'usage",
+      "retry": "Réessayer",
+      "stale": "L'actualisation a échoué. Les dernières données chargées avec succès restent affichées."
+    },
+    "updatedAt": "Mis à jour {{value}}",
     "feedback": {
       "lead": "Comparez la qualité des modèles et examinez les réponses jugées peu utiles. La période repose sur la date de génération des réponses.",
       "filters": {

@@ -95,7 +95,7 @@ func main() {
 	authSvc := auth.New(cfg.JWTSecret, cfg.AccessTTL, cfg.RefreshTTL, cacheLayer)
 
 	providers := llm.NewRegistry(logger)
-	ragSvc := rag.New(db, q, logger)
+	ragSvc := rag.New(db, q, logger, cfg.UploadDir)
 	ragSvc.SetExternalConfig(cfg.EmbeddingBaseURL, cfg.EmbeddingAPIKey, cfg.EmbeddingModel, cfg.EmbeddingDim, cfg.MinerUAPIURL, cfg.MinerUAPIKey)
 	// MinerU's upload-then-fetch flow needs the sandbox sidecar (which hosts
 	// /storage/put + /storage/delete). Admin settings override these at
@@ -172,7 +172,7 @@ func main() {
 	taskLLM := llm.NewTaskLLM(db, providers, logger)
 	memoryWorker := llm.NewMemoryWorker(db, taskLLM, logger)
 	ragSvc.SetTaskLLM(taskRouterAdapter{t: taskLLM})
-	orchestrator := llm.NewOrchestrator(db, providers, toolRegistry, ragSvc, cacheLayer, q, taskLLM, memoryWorker, logger)
+	orchestrator := llm.NewOrchestrator(db, providers, toolRegistry, ragSvc, cacheLayer, q, taskLLM, memoryWorker, logger, cfg.UploadDir, cfg.ArtifactDir)
 
 	router := api.NewRouter(api.Deps{
 		Config:       cfg,

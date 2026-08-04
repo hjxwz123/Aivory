@@ -34,6 +34,7 @@ import (
 
 	"aivory/server/internal/config"
 	"aivory/server/internal/envcfg"
+	"aivory/server/internal/fileguard"
 	"aivory/server/internal/llm"
 	"aivory/server/internal/sandbox"
 	"aivory/server/internal/store"
@@ -306,6 +307,7 @@ func lockConvSandbox(convID string) func() {
 // falls back to a safe-mode arithmetic evaluator so dev stays usable.
 type pythonExecuteTool struct {
 	sandbox     sandbox.Service
+	uploadDir   string
 	artifactDir string
 	logger      *log.Logger
 }
@@ -374,7 +376,7 @@ func (t *pythonExecuteTool) Execute(ctx context.Context, input []byte, tc *llm.T
 		}
 		sessionID = sid
 		if hasConv {
-			if perr := store.SetConvProviderStateKey(ctx, tc.DB, tc.ConvID, "sandbox_id", sessionID); perr != nil {
+			if perr := store.SetConvProviderStateKeyForUser(ctx, tc.DB, tc.ConvID, tc.MessageID, tc.UserID, "sandbox_id", sessionID); perr != nil {
 				// We created a container but couldn't durably record its id, so the
 				// next call would provision a SECOND session and leak this one until
 				// the 30-min reaper. Release it now and fail fast.
@@ -447,7 +449,11 @@ func (t *pythonExecuteTool) Execute(ctx context.Context, input []byte, tc *llm.T
 				if f.SizeBytes > pythonExecuteUploadStagingFileSize {
 					continue
 				}
-				data, err := os.ReadFile(f.StoragePath)
+				safePath, err := fileguard.ResolveExisting(f.StoragePath, t.uploadDir)
+				if err != nil {
+					continue
+				}
+				data, err := os.ReadFile(safePath)
 				if err != nil {
 					continue
 				}
@@ -483,7 +489,11 @@ func (t *pythonExecuteTool) Execute(ctx context.Context, input []byte, tc *llm.T
 						if isSandboxImageInput(a.Filename, a.MimeType, "", nil) {
 							continue
 						}
-						data, err := os.ReadFile(a.StoragePath)
+						safePath, err := fileguard.ResolveExisting(a.StoragePath, filepath.Join(t.uploadDir, "skill-assets"))
+						if err != nil {
+							continue
+						}
+						data, err := os.ReadFile(safePath)
 						if err != nil {
 							continue
 						}
@@ -528,7 +538,7 @@ func (t *pythonExecuteTool) Execute(ctx context.Context, input []byte, tc *llm.T
 						relock()
 						return "", nil, fmt.Errorf("sandbox session (rebuild): %w", sErr)
 					}
-					if perr := store.SetConvProviderStateKey(ctx, tc.DB, tc.ConvID, "sandbox_id", sid2); perr != nil {
+					if perr := store.SetConvProviderStateKeyForUser(ctx, tc.DB, tc.ConvID, tc.MessageID, tc.UserID, "sandbox_id", sid2); perr != nil {
 						_ = t.sandbox.Release(ctx, sid2)
 						relock()
 						return "", nil, fmt.Errorf("persist sandbox session (rebuild): %w", perr)
@@ -611,13 +621,13 @@ func saveArtifact(ctx context.Context, tc *llm.ToolContext, artifactDir, name, m
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		return nil, err
 	}
-	art, err := store.CreateArtifact(ctx, tc.DB, store.Artifact{
+	art, err := store.CreateArtifactForUser(ctx, tc.DB, store.Artifact{
 		MessageID:   tc.MessageID,
 		Filename:    safe,
 		StoragePath: path,
 		MimeType:    mime,
 		SizeBytes:   int64(len(data)),
-	})
+	}, tc.ConvID, tc.UserID)
 	if err != nil || art == nil {
 		_ = os.Remove(path)
 		if err == nil {
@@ -761,6 +771,7 @@ func isNumber(s string) bool {
 // model. Implemented in full below.
 type imageGenerateTool struct {
 	db          *sql.DB
+	uploadDir   string
 	artifactDir string
 }
 
@@ -1247,11 +1258,11 @@ func (t *imageGenerateTool) loadInputImages(ctx context.Context, tc *llm.ToolCon
 		var data []byte
 		var mime string
 		if art, err := store.GetArtifact(ctx, t.db, id, tc.UserID); err == nil && art != nil {
-			data, mime = readVerifiedImageInput(art.StoragePath, art.SizeBytes)
+			data, mime = readVerifiedImageInput(art.StoragePath, art.SizeBytes, t.artifactDir)
 		} else if f, err := store.GetFile(ctx, t.db, id, tc.UserID); err == nil && f != nil && f.ConversationID == tc.ConvID {
 			// User uploads are conversation-scoped. An owned file id from a
 			// different chat cannot be smuggled into this image-model request.
-			data, mime = readVerifiedImageInput(f.StoragePath, f.SizeBytes)
+			data, mime = readVerifiedImageInput(f.StoragePath, f.SizeBytes, t.uploadDir)
 		} else {
 			continue
 		}
@@ -1298,7 +1309,7 @@ func (t *imageGenerateTool) loadNearestBranchImage(ctx context.Context, tc *llm.
 	for messageID != "" && !seen[messageID] {
 		seen[messageID] = true
 		if artifact, err := store.FirstImageArtifactForMessage(ctx, tc.DB, messageID, tc.ConvID); err == nil && artifact != nil {
-			if data, mimeType := readVerifiedImageInput(artifact.StoragePath, artifact.SizeBytes); len(data) > 0 && mimeType != "" {
+			if data, mimeType := readVerifiedImageInput(artifact.StoragePath, artifact.SizeBytes, t.artifactDir); len(data) > 0 && mimeType != "" {
 				return &imageBytes{data: data, mime: mimeType}
 			}
 		}
@@ -1311,11 +1322,15 @@ func (t *imageGenerateTool) loadNearestBranchImage(ctx context.Context, tc *llm.
 	return nil
 }
 
-func readVerifiedImageInput(path string, storedSize int64) ([]byte, string) {
+func readVerifiedImageInput(path string, storedSize int64, roots ...string) ([]byte, string) {
 	if fetchRemoteImageDownloadCap <= 0 || storedSize > fetchRemoteImageDownloadCap {
 		return nil, ""
 	}
-	f, err := os.Open(path)
+	safePath, err := fileguard.ResolveExisting(path, roots...)
+	if err != nil {
+		return nil, ""
+	}
+	f, err := os.Open(safePath)
 	if err != nil {
 		return nil, ""
 	}

@@ -219,7 +219,7 @@ func TestWaffoResumeCheckoutRequiresFreshToken(t *testing.T) {
 	}
 }
 
-func TestEPayResumeCheckoutSignsFreshMerchantOrderAsRetry(t *testing.T) {
+func TestEPayResumeCheckoutReusesOutstandingMerchantOrder(t *testing.T) {
 	gateway := EPayGateway{
 		Config: EPayConfig{
 			GatewayURL: "https://pay.example.test", MerchantID: "1000", MerchantKey: "secret", Currency: "CNY",
@@ -236,7 +236,7 @@ func TestEPayResumeCheckoutSignsFreshMerchantOrderAsRetry(t *testing.T) {
 		t.Fatalf("create original EPay form: %v", err)
 	}
 	retryRequest := request
-	retryRequest.MerchantOrderID = "pa_epay_resume_retry"
+	retryRequest.MerchantOrderID = original.Fields["out_trade_no"]
 	resumed, err := gateway.ResumeCheckout(context.Background(), CheckoutResumeRequest{CheckoutRequest: retryRequest})
 	if err != nil {
 		t.Fatalf("regenerate EPay form: %v", err)
@@ -244,9 +244,8 @@ func TestEPayResumeCheckoutSignsFreshMerchantOrderAsRetry(t *testing.T) {
 	if resumed.ResumeMode != CheckoutResumeRetrySubmission || resumed.Type != ActionFormPost ||
 		resumed.SessionID != "" || resumed.ProviderOrderID != "" ||
 		resumed.Fields["out_trade_no"] != retryRequest.MerchantOrderID ||
-		resumed.Fields["out_trade_no"] == original.Fields["out_trade_no"] ||
 		resumed.Fields["money"] != original.Fields["money"] || resumed.Fields["name"] != original.Fields["name"] ||
-		resumed.URL != original.URL || resumed.Fields["sign"] == original.Fields["sign"] {
+		resumed.URL != original.URL || resumed.Fields["sign"] != original.Fields["sign"] {
 		t.Fatalf("EPay retry action = %+v, original = %+v", resumed, original)
 	}
 	if got, want := resumed.Fields["sign"], EPaySign(resumed.Fields, gateway.Config.MerchantKey); got != want {

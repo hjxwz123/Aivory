@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"net"
@@ -25,10 +26,10 @@ var maxCodeAttempts = envcfg.Int("AIVORY_API_MAX_CODE_ATTEMPTS", 5)
 
 // Tunable knobs — envcfg overrides; defaults preserve original behaviour.
 var (
-	codeFailureCounterTTL    = envcfg.Dur("AIVORY_API_CODE_FAILURE_COUNTER_TTL", 10*time.Minute)
-	minimumPasswordLength    = envcfg.Int("AIVORY_API_MINIMUM_PASSWORD_LENGTH", 8)
-	emailVerificationCodeTTL = envcfg.Dur("AIVORY_API_EMAIL_VERIFICATION_CODE_TTL", 10*time.Minute)
-	passwordResetCodeTTL     = envcfg.Dur("AIVORY_API_PASSWORD_RESET_CODE_TTL", 10*time.Minute)
+	codeFailureCounterTTL    = securityDuration("AIVORY_API_CODE_FAILURE_COUNTER_TTL", 10*time.Minute)
+	minimumPasswordLength    = securityPasswordMinimum("AIVORY_API_MINIMUM_PASSWORD_LENGTH", 8)
+	emailVerificationCodeTTL = securityDuration("AIVORY_API_EMAIL_VERIFICATION_CODE_TTL", 10*time.Minute)
+	passwordResetCodeTTL     = securityDuration("AIVORY_API_PASSWORD_RESET_CODE_TTL", 10*time.Minute)
 )
 
 const emailSendCooldown = 120 * time.Second
@@ -94,21 +95,51 @@ func codeMatches(saved, input string) bool {
 // fails; only its CPU cost matters.
 const dummyPasswordHash = "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy"
 
+func securityBoolSetting(d Deps, key string) (bool, error) {
+	raw, err := store.GetSetting(d.DB, key)
+	if err != nil {
+		return false, fmt.Errorf("read security setting %s: %w", key, err)
+	}
+	var value bool
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return false, fmt.Errorf("decode security setting %s: %w", key, err)
+	}
+	return value, nil
+}
+
+func securityNonNegativeIntSetting(d Deps, key string) (int, error) {
+	raw, err := store.GetSetting(d.DB, key)
+	if err != nil {
+		return 0, fmt.Errorf("read security setting %s: %w", key, err)
+	}
+	var value int
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return 0, fmt.Errorf("decode security setting %s: %w", key, err)
+	}
+	if value < 0 {
+		return 0, fmt.Errorf("security setting %s cannot be negative", key)
+	}
+	return value, nil
+}
+
 // signupOpenHandler reports whether new registrations are accepted, and whether
 // the registration form must solve the slider-puzzle captcha. The client reads
 // both up front so it can render the captcha only when needed.
 func signupOpenHandler(d Deps, w http.ResponseWriter, _ *http.Request) {
-	open := true
-	if raw, err := store.GetSetting(d.DB, "signup_open"); err == nil {
-		_ = json.Unmarshal(raw, &open)
+	open, err := securityBoolSetting(d, "signup_open")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
 	}
-	captcha := false
-	if raw, err := store.GetSetting(d.DB, "register_captcha_required"); err == nil {
-		_ = json.Unmarshal(raw, &captcha)
+	captcha, err := securityBoolSetting(d, "register_captcha_required")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
 	}
-	loginCaptcha := false
-	if raw, err := store.GetSetting(d.DB, "login_captcha_required"); err == nil {
-		_ = json.Unmarshal(raw, &loginCaptcha)
+	loginCaptcha, err := securityBoolSetting(d, "login_captcha_required")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
 	}
 	writeJSON(w, 200, map[string]bool{"open": open, "captcha_required": captcha, "login_captcha_required": loginCaptcha})
 }
@@ -132,32 +163,24 @@ func needsSetupHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 // account exists it 409s, so it can't be used to mint extra admins. The new
 // admin is active immediately (no email-verification gate) and is signed in.
 func setupHandler(d Deps, w http.ResponseWriter, r *http.Request) {
-	n, err := store.CountUsers(r.Context(), d.DB)
-	if err != nil {
-		writeError(w, 500, err)
-		return
-	}
-	if n > 0 {
-		writeError(w, 409, errAlreadyInitialized)
-		return
-	}
 	var req registerReq
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, 400, errInvalidInput)
 		return
 	}
-	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
-	req.Name = strings.TrimSpace(req.Name)
-	if req.Email == "" || !strings.Contains(req.Email, "@") {
+	email, err := store.NormalizeUserEmail(req.Email)
+	if err != nil {
 		writeError(w, 400, errInvalidEmail)
 		return
 	}
+	req.Email = email
+	req.Name = strings.TrimSpace(req.Name)
 	if req.Name == "" {
 		writeError(w, 400, errNameRequired)
 		return
 	}
-	if len(req.Password) < minimumPasswordLength {
-		writeError(w, 400, errPasswordTooShort)
+	if err := validateNewPassword(req.Password, minimumPasswordLength); err != nil {
+		writeError(w, 400, err)
 		return
 	}
 	hash, err := store.HashPassword(req.Password)
@@ -165,8 +188,12 @@ func setupHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
-	user, err := store.CreateUserWithRole(r.Context(), d.DB, req.Email, req.Name, hash, "admin")
+	user, err := store.CreateInitialAdmin(r.Context(), d.DB, req.Email, req.Name, hash)
 	if err != nil {
+		if errors.Is(err, store.ErrAlreadyInitialized) {
+			writeError(w, 409, errAlreadyInitialized)
+			return
+		}
 		writeError(w, 500, err)
 		return
 	}
@@ -197,13 +224,14 @@ func registerHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errInvalidInput)
 		return
 	}
-	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
-	if req.Email == "" || !strings.Contains(req.Email, "@") {
+	email, err := store.NormalizeUserEmail(req.Email)
+	if err != nil {
 		writeError(w, 400, errInvalidEmail)
 		return
 	}
-	if len(req.Password) < minimumPasswordLength {
-		writeError(w, 400, errPasswordTooShort)
+	req.Email = email
+	if err := validateNewPassword(req.Password, minimumPasswordLength); err != nil {
+		writeError(w, 400, err)
 		return
 	}
 
@@ -211,7 +239,12 @@ func registerHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	// first account through the setup flow (which makes it the admin), never via
 	// open registration — otherwise the first signup would be a plain user and the
 	// system would have no admin.
-	if n, err := store.CountUsers(r.Context(), d.DB); err == nil && n == 0 {
+	n, err := store.CountUsers(r.Context(), d.DB)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if n == 0 {
 		writeError(w, 409, errSetupRequired)
 		return
 	}
@@ -225,22 +258,31 @@ func registerHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check signup open.
-	raw, _ := store.GetSetting(d.DB, "signup_open")
-	open := true
-	if len(raw) > 0 {
-		_ = json.Unmarshal(raw, &open)
+	open, err := securityBoolSetting(d, "signup_open")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
 	}
 	if !open {
 		writeError(w, 403, errSignupClosed)
 		return
 	}
 
+	// Resolve the account's initial lifecycle state before INSERT. A malformed or
+	// unreadable security setting fails closed instead of creating an active user.
+	verifyRequired, err := securityBoolSetting(d, "email_verification_required")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
 	// Slider-captcha gate. The client solves the puzzle via /captcha/verify, which
 	// returns a single-use pass token; we consume it here (single-use whether or
 	// not it was valid, so a guessed token can't be hammered).
-	captchaRequired := false
-	if raw, _ := store.GetSetting(d.DB, "register_captcha_required"); len(raw) > 0 {
-		_ = json.Unmarshal(raw, &captchaRequired)
+	captchaRequired, err := securityBoolSetting(d, "register_captcha_required")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
 	}
 	if captchaRequired {
 		if !consumeCaptchaPass(d, req.CaptchaToken) {
@@ -258,21 +300,33 @@ func registerHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	// by incrementing the day-keyed counter up front; if the account isn't
 	// actually created below, the increment is rolled back so failed attempts
 	// don't burn the quota.
-	ipLimit := 0
-	if raw, _ := store.GetSetting(d.DB, "register_ip_daily_limit"); len(raw) > 0 {
-		_ = json.Unmarshal(raw, &ipLimit)
+	ipLimit, err := securityNonNegativeIntSetting(d, "register_ip_daily_limit")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
 	}
 	ip := clientIP(r)
 	regKey := "regquota:" + ip + ":" + time.Now().Format("2006-01-02")
-	if ipLimit > 0 && ip != "" {
-		if n := d.Cache.Incr(regKey, 25*time.Hour); int(n) > ipLimit {
+	quotaReserved := false
+	if ipLimit > 0 {
+		if ip == "" || d.Cache == nil {
+			writeError(w, http.StatusInternalServerError, errors.New("registration quota enforcement unavailable"))
+			return
+		}
+		n := d.Cache.Incr(regKey, 25*time.Hour)
+		if n <= 0 {
+			writeError(w, http.StatusInternalServerError, errors.New("registration quota enforcement unavailable"))
+			return
+		}
+		if int(n) > ipLimit {
 			d.Cache.Decr(regKey)
 			writeError(w, 429, errRegisterIPLimit)
 			return
 		}
+		quotaReserved = true
 	}
 	releaseQuota := func() {
-		if ipLimit > 0 && ip != "" {
+		if quotaReserved {
 			d.Cache.Decr(regKey)
 		}
 	}
@@ -283,20 +337,18 @@ func registerHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
-	user, err := store.CreateUser(r.Context(), d.DB, req.Email, req.Name, hash)
+	initialStatus := "active"
+	if verifyRequired {
+		initialStatus = "pending"
+	}
+	user, err := store.CreateUserWithState(r.Context(), d.DB, req.Email, req.Name, hash, "user", initialStatus, true)
 	if err != nil {
 		releaseQuota()
 		writeError(w, 500, err)
 		return
 	}
 
-	// Email verification check.
-	verifyRequired := false
-	if raw, _ := store.GetSetting(d.DB, "email_verification_required"); len(raw) > 0 {
-		_ = json.Unmarshal(raw, &verifyRequired)
-	}
 	if verifyRequired {
-		_ = store.SetUserStatus(r.Context(), d.DB, user.ID, "pending")
 		retryAfter, allowed := reserveEmailSend(d, req.Email, "verify")
 		if allowed {
 			code := genCode6()
@@ -392,16 +444,23 @@ func verifyEmailHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errInvalidOrExpiredCode)
 		return
 	}
-	d.Cache.Delete("verify:" + req.Email)
-	d.Cache.Delete("codefail:verify:" + req.Email)
-
 	user, err := store.FindUserByEmail(r.Context(), d.DB, req.Email)
 	if err != nil || user.Status != "pending" {
 		writeError(w, 400, errInvalidVerificationReq)
 		return
 	}
-	if err := store.SetUserStatus(r.Context(), d.DB, user.ID, "active"); err != nil {
+	if !d.Cache.CompareAndDelete("verify:"+req.Email, saved) {
+		writeError(w, 400, errInvalidOrExpiredCode)
+		return
+	}
+	d.Cache.Delete("codefail:verify:" + req.Email)
+	activated, err := store.ActivatePendingUser(r.Context(), d.DB, user.ID)
+	if err != nil {
 		writeError(w, 500, err)
+		return
+	}
+	if !activated {
+		writeError(w, 400, errInvalidVerificationReq)
 		return
 	}
 	user.Status = "active"
@@ -449,8 +508,8 @@ func resetPasswordHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
-	if len(req.NewPassword) < minimumPasswordLength {
-		writeError(w, 400, errPasswordTooShort)
+	if err := validateNewPassword(req.NewPassword, minimumPasswordLength); err != nil {
+		writeError(w, 400, err)
 		return
 	}
 
@@ -460,9 +519,6 @@ func resetPasswordHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errInvalidOrExpiredCode)
 		return
 	}
-	d.Cache.Delete("reset:" + req.Email)
-	d.Cache.Delete("codefail:reset:" + req.Email)
-
 	user, err := store.FindUserByEmail(r.Context(), d.DB, req.Email)
 	if err != nil {
 		writeError(w, 400, errAccountNotFound)
@@ -474,9 +530,18 @@ func resetPasswordHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
+	if !d.Cache.CompareAndDelete("reset:"+req.Email, saved) {
+		writeError(w, 400, errInvalidOrExpiredCode)
+		return
+	}
+	d.Cache.Delete("codefail:reset:" + req.Email)
 	if err := store.UpdateUserPassword(r.Context(), d.DB, user.ID, hash); err != nil {
 		writeError(w, 500, err)
 		return
+	}
+	invalidateAuthUser(d, user.ID)
+	if d.Cache != nil {
+		d.Cache.Publish("user:"+user.ID+":kill", "password_reset")
 	}
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
@@ -501,9 +566,10 @@ func loginHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	// Slider-captcha gate (admin-toggleable, off by default). Checked BEFORE any
 	// account lookup so a captcha-less credential-stuffing run never reaches the
 	// bcrypt-timed compare below — it's the cheapest possible reject.
-	loginCaptchaRequired := false
-	if raw, _ := store.GetSetting(d.DB, "login_captcha_required"); len(raw) > 0 {
-		_ = json.Unmarshal(raw, &loginCaptchaRequired)
+	loginCaptchaRequired, err := securityBoolSetting(d, "login_captcha_required")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
 	}
 	if loginCaptchaRequired {
 		if !consumeCaptchaPass(d, req.CaptchaToken) {
@@ -545,7 +611,7 @@ func loginHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	// a session — return a short-lived ticket the client redeems with a code via
 	// /auth/login/2fa.
 	if user.TotpEnabled {
-		ticket := issueTwofaTicket(d, user.ID, store.LoginMethodPassword)
+		ticket := issueTwofaTicket(d, user.ID, user.TokenVer, store.LoginMethodPassword)
 		if ticket == "" {
 			writeError(w, 500, errTwofaStartFailed)
 			return
@@ -560,7 +626,7 @@ func loginHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 func logoutHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie("refresh_token"); err == nil {
 		if claims, err := d.Auth.ParseRefresh(c.Value); err == nil {
-			_ = store.RevokeRefreshToken(r.Context(), d.DB, claims.ID)
+			_, _ = store.RevokeUserSession(r.Context(), d.DB, claims.UID, claims.ID)
 		}
 	}
 	clearCookie(w, "auth_token")
@@ -580,24 +646,42 @@ func refreshHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 401, errAuthRequired)
 		return
 	}
-	ok, err := store.IsRefreshTokenValid(r.Context(), d.DB, claims.ID, claims.UID)
-	if err != nil || !ok {
-		writeError(w, 401, errSessionExpired)
-		return
-	}
 	user, err := store.FindUserByID(r.Context(), d.DB, claims.UID)
 	if err != nil || user.Status != "active" {
 		writeError(w, 401, errAccountBlocked)
 		return
 	}
-	// §A2 refresh-token rotation: revoke the presented jti before minting the
-	// replacement so a captured refresh token is single-use and can't be replayed
-	// for its full 30-day TTL. (finaliseSession issues a fresh jti below.)
-	// Carry the original sign-in time forward so the session keeps one stable
-	// "signed in" timestamp across rotations instead of resetting every refresh.
-	createdAt := store.RefreshTokenCreatedAt(r.Context(), d.DB, claims.ID)
-	_ = store.RevokeRefreshToken(r.Context(), d.DB, claims.ID)
-	finaliseSession(d, w, r, user, createdAt)
+	if user.TokenVer != claims.TV {
+		writeError(w, 401, errSessionExpired)
+		return
+	}
+	refresh, refreshExp, jti, err := d.Auth.IssueRefresh(user.ID, user.TokenVer)
+	if err != nil {
+		writeError(w, 500, err)
+		return
+	}
+	sessionID, err := store.RotateRefreshToken(
+		r.Context(), d.DB, claims.ID, claims.UID, claims.TV,
+		jti, refreshExp, sessionMeta(r, 0),
+	)
+	if err != nil {
+		if errors.Is(err, store.ErrInvalidRefreshToken) {
+			writeError(w, 401, errSessionExpired)
+			return
+		}
+		writeError(w, 500, err)
+		return
+	}
+	access, exp, err := d.Auth.IssueAccessForSession(user.ID, user.Role, user.TokenVer, sessionID)
+	if err != nil {
+		_, _ = store.RevokeUserSession(r.Context(), d.DB, user.ID, jti)
+		writeError(w, 500, err)
+		return
+	}
+	invalidateAuthUser(d, user.ID)
+	setSessionCookies(w, r, access, exp, refresh, refreshExp)
+	attachGroupInfo(d, r, user)
+	writeJSON(w, 200, authResp{User: user, AccessToken: access, ExpiresAt: exp.Unix()})
 }
 
 func finaliseSession(d Deps, w http.ResponseWriter, r *http.Request, user *store.User, inheritCreatedAt int64) {
@@ -608,15 +692,45 @@ func finaliseSession(d Deps, w http.ResponseWriter, r *http.Request, user *store
 // Keeping the method explicit prevents refresh-token rotation (which calls
 // finaliseSession above) from creating duplicate login-history rows.
 func finaliseLoginSession(d Deps, w http.ResponseWriter, r *http.Request, user *store.User, method string) {
-	finaliseSessionResponse(d, w, r, user, 0, method)
+	finaliseSessionResponseWithOAuthGuard(
+		d, w, r, user, 0, method, nil, store.OAuthCallbackSessionWithout2FA,
+	)
+}
+
+func finaliseOAuthLoginSession(
+	d Deps,
+	w http.ResponseWriter,
+	r *http.Request,
+	user *store.User,
+	method string,
+	guard store.OAuthProviderCallbackGuard,
+) {
+	finaliseSessionResponseWithOAuthGuard(
+		d, w, r, user, 0, method, &guard, store.OAuthCallbackSessionWithVerified2FA,
+	)
 }
 
 func finaliseSessionResponse(d Deps, w http.ResponseWriter, r *http.Request, user *store.User, inheritCreatedAt int64, loginMethod string) {
+	finaliseSessionResponseWithOAuthGuard(
+		d, w, r, user, inheritCreatedAt, loginMethod, nil, store.OAuthCallbackSessionWithout2FA,
+	)
+}
+
+func finaliseSessionResponseWithOAuthGuard(
+	d Deps,
+	w http.ResponseWriter,
+	r *http.Request,
+	user *store.User,
+	inheritCreatedAt int64,
+	loginMethod string,
+	guard *store.OAuthProviderCallbackGuard,
+	authMode store.OAuthCallbackSessionAuthMode,
+) {
 	// A login/refresh is the moment that matters most for token_ver correctness:
 	// clear any stale hot auth entry before the browser starts its first burst of
 	// authenticated data requests with the newly minted access token.
 	invalidateAuthUser(d, user.ID)
-	access, exp, err := issueSessionCookies(d, w, r, user, inheritCreatedAt)
+	access, exp, err := issueSessionCookiesWithOAuthGuard(d, w, r, user, inheritCreatedAt, guard, authMode)
 	if err != nil {
 		writeError(w, 500, err)
 		return
@@ -646,21 +760,65 @@ func recordSuccessfulLogin(d Deps, r *http.Request, userID, method string) {
 // refresh rotation (0 = a fresh sign-in). Returns the access token and its
 // expiry so the JSON path can echo them.
 func issueSessionCookies(d Deps, w http.ResponseWriter, r *http.Request, user *store.User, inheritCreatedAt int64) (string, time.Time, error) {
-	access, exp, err := d.Auth.IssueAccess(user.ID, user.Role, user.TokenVer)
-	if err != nil {
-		return "", time.Time{}, err
-	}
-	refresh, refreshExp, jti, err := d.Auth.IssueRefresh(user.ID)
-	if err != nil {
-		return "", time.Time{}, err
-	}
-	_ = store.SaveRefreshToken(context.Background(), d.DB, jti, user.ID, refreshExp, sessionMeta(r, inheritCreatedAt))
+	return issueSessionCookiesWithOAuthGuard(
+		d, w, r, user, inheritCreatedAt, nil, store.OAuthCallbackSessionWithout2FA,
+	)
+}
 
+func issueSessionCookiesWithOAuthGuard(
+	d Deps,
+	w http.ResponseWriter,
+	r *http.Request,
+	user *store.User,
+	inheritCreatedAt int64,
+	guard *store.OAuthProviderCallbackGuard,
+	authMode store.OAuthCallbackSessionAuthMode,
+) (string, time.Time, error) {
+	refresh, refreshExp, jti, err := d.Auth.IssueRefresh(user.ID, user.TokenVer)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	meta := sessionMeta(r, inheritCreatedAt)
+	if guard != nil {
+		// Mint both signed values before the guarded INSERT. The INSERT is then the
+		// sole session-issuance linearization point: if an administrator provider
+		// write commits first it fails, while a write which waits for this transaction
+		// necessarily happens after the complete token pair was authorized.
+		access, exp, err := d.Auth.IssueAccessForSession(user.ID, user.Role, user.TokenVer, jti)
+		if err != nil {
+			return "", time.Time{}, err
+		}
+		expectedTotpSecret := ""
+		if authMode == store.OAuthCallbackSessionWithVerified2FA {
+			expectedTotpSecret = user.TotpSecret
+		}
+		if err := store.SaveRefreshTokenForOAuthCallback(
+			r.Context(), d.DB, *guard, jti, user.ID, user.TokenVer,
+			authMode, expectedTotpSecret, refreshExp, meta,
+		); err != nil {
+			return "", time.Time{}, err
+		}
+		setSessionCookies(w, r, access, exp, refresh, refreshExp)
+		return access, exp, nil
+	}
+	if err := store.SaveRefreshToken(r.Context(), d.DB, jti, user.ID, refreshExp, meta); err != nil {
+		return "", time.Time{}, err
+	}
+	access, exp, err := d.Auth.IssueAccessForSession(user.ID, user.Role, user.TokenVer, jti)
+	if err != nil {
+		_, _ = store.RevokeUserSession(r.Context(), d.DB, user.ID, jti)
+		return "", time.Time{}, err
+	}
+
+	setSessionCookies(w, r, access, exp, refresh, refreshExp)
+	return access, exp, nil
+}
+
+func setSessionCookies(w http.ResponseWriter, r *http.Request, access string, accessExp time.Time, refresh string, refreshExp time.Time) {
 	secure := secureCookie(r)
 	clearCookie(w, "auth_token")
-	setCookie(w, "auth_token", access, exp, false, secure)
+	setCookie(w, "auth_token", access, accessExp, false, secure)
 	setCookie(w, "refresh_token", refresh, refreshExp, true, secure)
-	return access, exp, nil
 }
 
 func sessionMeta(r *http.Request, createdAt int64) store.SessionMeta {

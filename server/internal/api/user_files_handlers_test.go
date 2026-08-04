@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"aivory/server/internal/config"
 	"aivory/server/internal/store"
 )
 
@@ -113,7 +114,7 @@ func TestDeleteMyFilesOwnershipGate(t *testing.T) {
 	req := httptest.NewRequest("POST", "/api/me/files/delete", body)
 	req = req.WithContext(context.WithValue(req.Context(), userCtxKey{}, &store.User{ID: "u1", Role: "user", Status: "active"}))
 	rec := httptest.NewRecorder()
-	deleteMyFilesHandler(Deps{DB: db}, rec, req)
+	deleteMyFilesHandler(Deps{DB: db, Config: config.Config{UploadDir: dir}}, rec, req)
 	if rec.Code != 200 {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
@@ -132,6 +133,84 @@ func TestDeleteMyFilesOwnershipGate(t *testing.T) {
 	}
 	if _, err := os.Stat(minePath); !os.IsNotExist(err) {
 		t.Fatal("own file bytes not removed")
+	}
+}
+
+func TestWorkspaceOwnerCanListAndDeleteBilledCommittedMemberFile(t *testing.T) {
+	ctx := context.Background()
+	db := openMigrated(t, filepath.Join(t.TempDir(), "workspace-owner-files.db"))
+	defer db.Close()
+	dir := t.TempDir()
+	committedPath := filepath.Join(dir, "committed.txt")
+	draftPath := filepath.Join(dir, "draft.txt")
+	writeFile(t, committedPath, []byte("committed"))
+	writeFile(t, draftPath, []byte("draft"))
+
+	mustExec(t, db, `INSERT INTO users(id,email,name,password_hash,role,status) VALUES('owner','owner@example.test','Owner','h','user','active')`)
+	mustExec(t, db, `INSERT INTO users(id,email,name,password_hash,role,status) VALUES('member','member@example.test','Member','h','user','active')`)
+	workspace, err := store.CreateWorkspace(ctx, db, "owner", "Storage")
+	if err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := store.JoinWorkspace(ctx, db, workspace.ID, "member"); err != nil {
+		t.Fatalf("join workspace: %v", err)
+	}
+	if _, err := store.CreateConversation(ctx, db, store.Conversation{
+		ID: "workspace-conversation", UserID: "member", WorkspaceID: workspace.ID, Title: "Shared",
+	}); err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+	mustExec(t, db, `INSERT INTO files(id,user_id,conversation_id,filename,mime_type,size_bytes,storage_path,kind,draft,created_at) VALUES
+		('member-committed','member','workspace-conversation','committed.txt','text/plain',9,?,'text',0,1),
+		('member-draft','member','workspace-conversation','draft.txt','text/plain',5,?,'text',1,2)`, committedPath, draftPath)
+	mustExec(t, db, `INSERT INTO documents(id,conversation_id,filename,mime_type,size_bytes,status,storage_path,created_at)
+		VALUES('committed-twin','workspace-conversation','committed.txt','text/plain',9,'ready',?,1)`, committedPath)
+
+	owner := &store.User{ID: "owner", Role: "user", Status: "active"}
+	listReq := httptest.NewRequest("GET", "/api/me/files", nil)
+	listReq = listReq.WithContext(context.WithValue(listReq.Context(), userCtxKey{}, owner))
+	listRec := httptest.NewRecorder()
+	listMyFilesHandler(Deps{DB: db}, listRec, listReq)
+	if listRec.Code != 200 {
+		t.Fatalf("owner list status=%d body=%s", listRec.Code, listRec.Body.String())
+	}
+	var listed struct {
+		Files []store.AdminFile `json:"files"`
+		Total int               `json:"total"`
+	}
+	if err := json.Unmarshal(listRec.Body.Bytes(), &listed); err != nil {
+		t.Fatalf("decode owner list: %v", err)
+	}
+	if listed.Total != 1 || len(listed.Files) != 1 || listed.Files[0].ID != "member-committed" || listed.Files[0].BillingUserID != "owner" {
+		t.Fatalf("owner billed inventory=%#v total=%d, want committed member file only", listed.Files, listed.Total)
+	}
+
+	deleteBody := strings.NewReader(`{"items":[{"source":"file","id":"member-committed"},{"source":"file","id":"member-draft"}]}`)
+	deleteReq := httptest.NewRequest("POST", "/api/me/files/delete", deleteBody)
+	deleteReq = deleteReq.WithContext(context.WithValue(deleteReq.Context(), userCtxKey{}, owner))
+	deleteRec := httptest.NewRecorder()
+	deleteMyFilesHandler(Deps{DB: db, Config: config.Config{UploadDir: dir}}, deleteRec, deleteReq)
+	if deleteRec.Code != 200 {
+		t.Fatalf("owner delete status=%d body=%s", deleteRec.Code, deleteRec.Body.String())
+	}
+	var deleted struct {
+		Deleted int `json:"deleted"`
+	}
+	if err := json.Unmarshal(deleteRec.Body.Bytes(), &deleted); err != nil || deleted.Deleted != 1 {
+		t.Fatalf("owner deleted=%d err=%v, want exactly committed file", deleted.Deleted, err)
+	}
+	var committedRows, draftRows, twinRows int
+	mustQuery(t, db, `SELECT COUNT(*) FROM files WHERE id='member-committed'`).Scan(&committedRows)
+	mustQuery(t, db, `SELECT COUNT(*) FROM files WHERE id='member-draft'`).Scan(&draftRows)
+	mustQuery(t, db, `SELECT COUNT(*) FROM documents WHERE id='committed-twin'`).Scan(&twinRows)
+	if committedRows != 0 || twinRows != 0 || draftRows != 1 {
+		t.Fatalf("rows after owner cleanup committed=%d twin=%d draft=%d, want 0/0/1", committedRows, twinRows, draftRows)
+	}
+	if _, err := os.Stat(committedPath); !os.IsNotExist(err) {
+		t.Fatalf("committed bytes still exist: %v", err)
+	}
+	if _, err := os.Stat(draftPath); err != nil {
+		t.Fatalf("member draft bytes were removed: %v", err)
 	}
 }
 

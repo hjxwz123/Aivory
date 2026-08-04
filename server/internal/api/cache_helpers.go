@@ -20,7 +20,7 @@ func cachedAuthUser(ctx context.Context, d Deps, userID string) (*store.User, er
 	key := authUserCacheKey(d, userID)
 	if raw, ok := d.Cache.Get(key); ok {
 		var u store.User
-		if json.Unmarshal([]byte(raw), &u) == nil {
+		if json.Unmarshal([]byte(raw), &u) == nil && u.ID == userID {
 			return &u, nil
 		}
 		d.Cache.Delete(key)
@@ -29,19 +29,10 @@ func cachedAuthUser(ctx context.Context, d Deps, userID string) (*store.User, er
 	if err != nil {
 		return nil, err
 	}
-	cacheAuthUser(d, u)
-	return u, nil
-}
-
-func refreshCachedAuthUser(ctx context.Context, d Deps, userID string) (*store.User, error) {
-	if d.Cache != nil {
-		d.Cache.Delete(authUserCacheKey(d, userID))
-	}
-	u, err := store.FindUserByID(ctx, d.DB, userID)
-	if err != nil {
-		return nil, err
-	}
-	cacheAuthUser(d, u)
+	// Keep the generation captured before the DB read. If a password reset,
+	// ban, or role change invalidates this user while the query is in flight,
+	// writing to the old generation cannot repopulate the new cache namespace.
+	cacheAuthUserAtKey(d, key, u)
 	return u, nil
 }
 
@@ -49,8 +40,15 @@ func cacheAuthUser(d Deps, u *store.User) {
 	if d.Cache == nil || u == nil {
 		return
 	}
+	cacheAuthUserAtKey(d, authUserCacheKey(d, u.ID), u)
+}
+
+func cacheAuthUserAtKey(d Deps, key string, u *store.User) {
+	if d.Cache == nil || key == "" || u == nil {
+		return
+	}
 	if b, err := json.Marshal(u); err == nil {
-		d.Cache.Set(authUserCacheKey(d, u.ID), string(b), authUserTTL(*u))
+		d.Cache.Set(key, string(b), authUserTTL(*u))
 	}
 }
 
@@ -72,17 +70,31 @@ func invalidateAuthUser(d Deps, userID string) {
 	if d.Cache == nil || userID == "" {
 		return
 	}
-	d.Cache.Delete(authUserCacheKey(d, userID))
+	oldKey := authUserCacheKey(d, userID)
+	// Advancing a persistent per-user generation closes the delete/refill race:
+	// an in-flight reader may still populate oldKey, but no later request will
+	// consult that generation. The counter intentionally has no TTL to avoid an
+	// ABA collision with an older cache entry that has not expired yet.
+	d.Cache.Incr(authUserCacheGenerationKey(userID), 0)
+	d.Cache.Delete(oldKey)
 }
 
 func authUserCacheKey(d Deps, userID string) string {
 	epoch := "0"
+	userGeneration := "0"
 	if d.Cache != nil {
 		if v, ok := d.Cache.Get("auth:epoch"); ok {
 			epoch = v
 		}
+		if v, ok := d.Cache.Get(authUserCacheGenerationKey(userID)); ok {
+			userGeneration = v
+		}
 	}
-	return "auth:user:" + epoch + ":" + userID
+	return "auth:user:" + epoch + ":" + userGeneration + ":" + userID
+}
+
+func authUserCacheGenerationKey(userID string) string {
+	return "auth:user-generation:" + userID
 }
 
 func bumpAuthCacheEpoch(d Deps) {

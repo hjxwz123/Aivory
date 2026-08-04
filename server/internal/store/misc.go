@@ -10,19 +10,22 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"aivory/server/internal/envcfg"
+	"aivory/server/internal/fileguard"
 )
 
 var (
-	mConfidence                     = 0.8
-	listMemoriesActive              = 20
-	adminUsageRecordsLimit          = 500
-	adminUsageRecordsLimit2         = 50
-	usageTrendWindow                = 7
-	usageTrendHourlyBucketThreshold = 2
-	usageTotalsWindow               = 7
-	usageBreakdownTopN              = 8
-	usageBreakdownWindow            = 7
-	usageSeriesWindow               = 7
+	mConfidence                     = envcfg.F64("AIVORY_STORE_M_CONFIDENCE", 0.8)
+	listMemoriesActive              = envcfg.Int("AIVORY_STORE_LIST_MEMORIES_ACTIVE", 20)
+	adminUsageRecordsLimit          = envcfg.Int("AIVORY_STORE_ADMIN_USAGE_RECORDS_LIMIT", 500)
+	adminUsageRecordsLimit2         = envcfg.Int("AIVORY_STORE_ADMIN_USAGE_RECORDS_LIMIT_2", 50)
+	usageTrendWindow                = envcfg.Int("AIVORY_STORE_USAGE_TREND_WINDOW", 7)
+	usageTrendHourlyBucketThreshold = envcfg.Int("AIVORY_STORE_USAGE_TREND_HOURLY_BUCKET_THRESHOLD", 2)
+	usageTotalsWindow               = envcfg.Int("AIVORY_STORE_USAGE_TOTALS_WINDOW", 7)
+	usageBreakdownTopN              = envcfg.Int("AIVORY_STORE_USAGE_BREAKDOWN_TOP_N", 8)
+	usageBreakdownWindow            = envcfg.Int("AIVORY_STORE_USAGE_BREAKDOWN_WINDOW", 7)
+	usageSeriesWindow               = envcfg.Int("AIVORY_STORE_USAGE_SERIES_WINDOW", 7)
 )
 
 // CreateFile inserts a file metadata row.
@@ -30,27 +33,140 @@ func CreateFile(ctx context.Context, db *sql.DB, f File) (*File, error) {
 	if f.ID == "" {
 		f.ID = genID("f")
 	}
-	var conv any
-	if f.ConversationID != "" {
-		conv = f.ConversationID
+	if f.SizeBytes < 0 {
+		return nil, errors.New("file size cannot be negative")
 	}
-	_, err := db.ExecContext(ctx,
-		`INSERT INTO files(id, user_id, conversation_id, filename, mime_type, size_bytes, storage_path, kind, draft, created_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		f.ID, f.UserID, conv, f.Filename, f.MimeType, f.SizeBytes, f.StoragePath, f.Kind, boolInt(f.Draft), time.Now().Unix())
+	now := time.Now().Unix()
+	workspaceID := ""
+	if f.ConversationID != "" {
+		if err := db.QueryRowContext(ctx,
+			`SELECT COALESCE(workspace_id,'') FROM conversations WHERE id=?`, f.ConversationID,
+		).Scan(&workspaceID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, ErrNotFound
+			}
+			return nil, err
+		}
+	}
+
+	var tx *sql.Tx
+	var err error
+	if workspaceID != "" {
+		tx, err = beginWorkspaceMutationTx(ctx, db, workspaceID)
+	} else {
+		tx, err = db.BeginTx(ctx, nil)
+	}
 	if err != nil {
 		return nil, err
 	}
-	return GetFile(ctx, db, f.ID, f.UserID)
+	defer tx.Rollback() //nolint:errcheck
+
+	additionalBytes := f.SizeBytes
+	if f.Kind == "image" {
+		additionalBytes = 0
+	}
+	billingUserID := f.UserID
+	if workspaceID != "" {
+		var ownerID string
+		if err := tx.QueryRowContext(ctx,
+			`SELECT owner_id FROM workspaces WHERE id=?`, workspaceID,
+		).Scan(&ownerID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, ErrNotFound
+			}
+			return nil, err
+		}
+		if f.Draft {
+			if err := enforceStorageQuotaTx(ctx, tx, f.UserID, additionalBytes); err != nil {
+				return nil, err
+			}
+			// Draft bytes are uploader-billed today, but commit transfers billing
+			// to the canonical owner. This advisory preflight avoids accepting a
+			// draft that can never be committed; CreateMessageForUser rechecks the
+			// aggregate atomically at the actual transfer point.
+			if ownerID != f.UserID {
+				if err := checkStorageQuotaForQueryer(ctx, tx, ownerID, additionalBytes); err != nil {
+					return nil, err
+				}
+			}
+			additionalBytes = 0 // uploader quota was already enforced above
+		} else {
+			billingUserID = ownerID
+		}
+	}
+	if err := enforceStorageQuotaTx(ctx, tx, billingUserID, additionalBytes); err != nil {
+		return nil, err
+	}
+
+	var result sql.Result
+	if f.ConversationID == "" {
+		result, err = tx.ExecContext(ctx,
+			`INSERT INTO files(id, user_id, conversation_id, filename, mime_type, size_bytes, storage_path, kind, draft, created_at) VALUES(?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)`,
+			f.ID, f.UserID, f.Filename, f.MimeType, f.SizeBytes, f.StoragePath, f.Kind, boolInt(f.Draft), now)
+	} else {
+		args := []any{
+			f.ID, f.UserID, f.ConversationID, f.Filename, f.MimeType,
+			f.SizeBytes, f.StoragePath, f.Kind, boolInt(f.Draft), now,
+			f.ConversationID,
+		}
+		args = append(args, workspaceResourceAccessArgs(f.UserID)...)
+		q := `INSERT INTO files(id, user_id, conversation_id, filename, mime_type, size_bytes, storage_path, kind, draft, created_at)
+			 SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+			   FROM conversations c
+			  WHERE c.id=? AND ` + workspaceResourceAccessPredicate("c")
+		if workspaceID != "" {
+			q += ` AND EXISTS (
+				SELECT 1 FROM workspaces create_workspace
+				 WHERE create_workspace.id=c.workspace_id
+				   AND ` + workspaceAcceptsResourceCreationPredicate("create_workspace") + `
+			)`
+			args = append(args, f.UserID)
+		}
+		result, err = tx.ExecContext(ctx, q, args...)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if affected, rowsErr := result.RowsAffected(); rowsErr != nil {
+		return nil, rowsErr
+	} else if affected != 1 {
+		return nil, ErrNotFound
+	}
+	var created File
+	var conversationID sql.NullString
+	var draft int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT id, user_id, conversation_id, filename, mime_type, size_bytes, storage_path, kind, draft, created_at
+		   FROM files WHERE id=?`, f.ID,
+	).Scan(&created.ID, &created.UserID, &conversationID, &created.Filename, &created.MimeType,
+		&created.SizeBytes, &created.StoragePath, &created.Kind, &draft, &created.CreatedAt); err != nil {
+		return nil, err
+	}
+	created.ConversationID = conversationID.String
+	created.Draft = draft != 0
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return &created, nil
 }
 
 // ListFilesByConversation returns a conversation's uploaded files (oldest
 // first) — used to stage data files into the sandbox /workspace/uploads (§4.5).
 func ListFilesByConversation(ctx context.Context, db *sql.DB, convID, userID string) ([]File, error) {
+	args := []any{convID}
+	args = append(args, workspaceResourceAccessArgs(userID)...)
+	args = append(args, userID)
 	rows, err := db.QueryContext(ctx,
 		`SELECT id, user_id, conversation_id, filename, mime_type, size_bytes, storage_path, kind, draft, created_at
-		 FROM files WHERE conversation_id=? AND (user_id=? OR conversation_id IN (
-		   SELECT c.id FROM conversations c JOIN workspace_members m ON m.workspace_id=c.workspace_id WHERE m.user_id=?
-		 )) ORDER BY created_at ASC`, convID, userID, userID)
+		 FROM files f
+		 WHERE f.conversation_id=?
+		   AND EXISTS (
+		     SELECT 1 FROM conversations c
+		      WHERE c.id=f.conversation_id
+		        AND `+workspaceResourceAccessPredicate("c")+`
+		   )
+		   AND (f.user_id=? OR f.draft=0)
+		 ORDER BY f.created_at ASC`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -82,12 +198,13 @@ func ConversationFilesByIDs(ctx context.Context, db *sql.DB, convID, userID stri
 	if convID == "" || userID == "" || len(fileIDs) == 0 {
 		return out, nil
 	}
-	args := make([]any, 0, len(fileIDs)+3)
+	args := make([]any, 0, len(fileIDs)+5)
 	args = append(args, convID)
 	for _, id := range fileIDs {
 		args = append(args, id)
 	}
-	args = append(args, userID, userID)
+	args = append(args, workspaceResourceAccessArgs(userID)...)
+	args = append(args, userID)
 	rows, err := db.QueryContext(ctx, `
 		SELECT f.id, f.user_id, f.conversation_id, f.filename, f.mime_type,
 		       f.size_bytes, f.storage_path, f.kind, f.draft, f.created_at,
@@ -99,15 +216,15 @@ func ConversationFilesByIDs(ctx context.Context, db *sql.DB, convID, userID stri
 		  FROM files f
 		 WHERE f.conversation_id=?
 		   AND f.id IN (`+idPlaceholders(len(fileIDs))+`)
-		   AND EXISTS (
-		     SELECT 1 FROM conversations c
-		      WHERE c.id=f.conversation_id
-		        AND (c.user_id=? OR (
-		          COALESCE(c.workspace_id,'')<>'' AND c.workspace_id IN (
-		            SELECT workspace_id FROM workspace_members WHERE user_id=?
-		          )
-		        ))
-		   )`, args...)
+			AND EXISTS (
+				  SELECT 1 FROM conversations c
+				   WHERE c.id=f.conversation_id
+				     AND `+workspaceResourceAccessPredicate("c")+`
+			   )
+		   -- A workspace member may collaborate on committed files, but a
+		   -- composer draft remains private to its uploader until that user
+		   -- sends the message carrying it.
+		   AND (f.user_id=? OR f.draft=0)`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -134,9 +251,32 @@ func ConversationFilesByIDs(ctx context.Context, db *sql.DB, convID, userID stri
 // committed to a user message. The conversation ownership check belongs to the
 // caller; this is also used by the message preflight after that check has run.
 func ListDraftFilesForConversation(ctx context.Context, db *sql.DB, convID string) ([]File, error) {
+	return listDraftFilesForConversation(ctx, db, convID, "")
+}
+
+// ListDraftFilesForConversationForUser returns only the caller's composer
+// drafts. Drafts are uploader-private even inside a shared workspace; callers
+// that need an administrative/all-drafts view should use the legacy
+// ListDraftFilesForConversation function explicitly.
+func ListDraftFilesForConversationForUser(ctx context.Context, db *sql.DB, convID, userID string) ([]File, error) {
+	return listDraftFilesForConversation(ctx, db, convID, userID)
+}
+
+func listDraftFilesForConversation(ctx context.Context, db *sql.DB, convID, userID string) ([]File, error) {
+	q := `SELECT id, user_id, conversation_id, filename, mime_type, size_bytes, storage_path, kind, draft, created_at
+		 FROM files WHERE conversation_id=? AND draft=1`
+	args := []any{convID}
+	if strings.TrimSpace(userID) != "" {
+		q += ` AND user_id=? AND EXISTS (
+			SELECT 1 FROM conversations c
+			 WHERE c.id=files.conversation_id AND ` + workspaceResourceAccessPredicate("c") + `
+		)`
+		args = append(args, userID)
+		args = append(args, workspaceResourceAccessArgs(userID)...)
+	}
+	q += ` ORDER BY created_at ASC`
 	rows, err := db.QueryContext(ctx,
-		`SELECT id, user_id, conversation_id, filename, mime_type, size_bytes, storage_path, kind, draft, created_at
-		 FROM files WHERE conversation_id=? AND draft=1 ORDER BY created_at ASC`, convID)
+		q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -159,39 +299,104 @@ func ListDraftFilesForConversation(ctx context.Context, db *sql.DB, convID strin
 // DeleteConversationFile removes a file row from a conversation (ownership
 // checked). The caller is responsible for cleaning storage after the DB commit.
 func DeleteConversationFile(ctx context.Context, db *sql.DB, fileID, convID, userID string) error {
-	res, err := db.ExecContext(ctx,
-		`DELETE FROM files WHERE id=? AND conversation_id=? AND user_id=?`,
-		fileID, convID, userID)
-	if err != nil {
-		return err
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return ErrNotFound
-	}
-	return nil
+	return DeleteConversationFileAndDocuments(ctx, db, fileID, convID, userID, nil)
 }
 
 // DeleteConversationFileAndDocuments atomically removes the file row and every
 // document row backed by the same stored object. This keeps the DB side
 // all-or-nothing; vector/storage cleanup happens after commit in the API layer.
 func DeleteConversationFileAndDocuments(ctx context.Context, db *sql.DB, fileID, convID, userID string, docIDs []string) error {
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
+	var workspaceID string
+	if err := db.QueryRowContext(ctx,
+		`SELECT COALESCE(c.workspace_id,'')
+		   FROM files f JOIN conversations c ON c.id=f.conversation_id
+		  WHERE f.id=? AND f.conversation_id=?`, fileID, convID,
+	).Scan(&workspaceID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
 		return err
+	}
+	var tx *sql.Tx
+	if workspaceID != "" {
+		var err error
+		tx, err = beginWorkspaceMutationTx(ctx, db, workspaceID)
+		if err != nil {
+			return err
+		}
+	} else {
+		var err error
+		tx, err = db.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
 	}
 	defer tx.Rollback() //nolint:errcheck
+
+	var storagePath string
+	pathArgs := []any{fileID, convID, userID, userID}
+	pathArgs = append(pathArgs, workspaceResourceAccessArgs(userID)...)
+	if err := tx.QueryRowContext(ctx,
+		`SELECT f.storage_path FROM files f
+		  WHERE f.id=? AND f.conversation_id=?
+		    AND (
+		      f.user_id=? OR (
+		        f.draft=0 AND EXISTS (
+		          SELECT 1 FROM conversations file_owner_conversation
+		          JOIN workspaces file_owner_workspace
+		            ON file_owner_workspace.id=file_owner_conversation.workspace_id
+		         WHERE file_owner_conversation.id=f.conversation_id
+		           AND file_owner_workspace.owner_id=?
+		        )
+		      )
+		    )
+		    AND EXISTS (
+		      SELECT 1 FROM conversations c
+		       WHERE c.id=f.conversation_id AND `+workspaceResourceAccessPredicate("c")+`
+		    )`, pathArgs...,
+	).Scan(&storagePath); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	}
+	args := []any{fileID, convID, userID, userID}
+	args = append(args, workspaceResourceAccessArgs(userID)...)
 	res, err := tx.ExecContext(ctx,
-		`DELETE FROM files WHERE id=? AND conversation_id=? AND user_id=?`,
-		fileID, convID, userID)
+		`DELETE FROM files
+		  WHERE id=? AND conversation_id=?
+		    AND (
+		      user_id=? OR (
+		        draft=0 AND EXISTS (
+		          SELECT 1 FROM conversations file_owner_conversation
+		          JOIN workspaces file_owner_workspace
+		            ON file_owner_workspace.id=file_owner_conversation.workspace_id
+		         WHERE file_owner_conversation.id=files.conversation_id
+		           AND file_owner_workspace.owner_id=?
+		        )
+		      )
+		    )
+		    AND EXISTS (
+		      SELECT 1 FROM conversations c
+		       WHERE c.id=files.conversation_id AND `+workspaceResourceAccessPredicate("c")+`
+		    )`, args...)
 	if err != nil {
 		return err
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
+	if n, rowsErr := res.RowsAffected(); rowsErr != nil {
+		return rowsErr
+	} else if n == 0 {
 		return ErrNotFound
 	}
 	docIDs = cleanIDs(docIDs)
 	if len(docIDs) > 0 {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM documents WHERE id IN (`+idPlaceholders(len(docIDs))+`)`, anySlice(docIDs)...); err != nil {
+		docArgs := anySlice(docIDs)
+		docArgs = append(docArgs, storagePath)
+		docArgs = append(docArgs, documentContainerAccessArgs(userID)...)
+		if _, err := tx.ExecContext(ctx,
+			`DELETE FROM documents
+			  WHERE id IN (`+idPlaceholders(len(docIDs))+`) AND storage_path=?
+			    AND `+documentContainerAccessPredicate("documents"), docArgs...); err != nil {
 			return err
 		}
 	}
@@ -203,9 +408,25 @@ func DeleteConversationFileAndDocuments(ctx context.Context, db *sql.DB, fileID,
 // plus auto-added project KB), so file deletion must clean all of them together
 // before the physical object is removed.
 func DocumentsByStoragePath(ctx context.Context, db *sql.DB, path string) ([]Document, error) {
+	return documentsByStoragePath(ctx, db, path, "")
+}
+
+// DocumentsByStoragePathForUser hides document twins whose KB/conversation is
+// outside the caller's current scope. Admin cleanup uses DocumentsByStoragePath.
+func DocumentsByStoragePathForUser(ctx context.Context, db *sql.DB, path, userID string) ([]Document, error) {
+	return documentsByStoragePath(ctx, db, path, userID)
+}
+
+func documentsByStoragePath(ctx context.Context, db *sql.DB, path, userID string) ([]Document, error) {
+	q := `SELECT d.id, COALESCE(d.kb_id,''), COALESCE(d.conversation_id,''), d.filename, d.mime_type, d.size_bytes, d.status, d.error, d.chunk_count, d.storage_path, d.created_at
+		 FROM documents d WHERE d.storage_path=?`
+	args := []any{path}
+	if userID != "" {
+		q += ` AND ` + documentUserAccessPredicate("d")
+		args = append(args, documentUserAccessArgs(userID)...)
+	}
 	rows, err := db.QueryContext(ctx,
-		`SELECT id, COALESCE(kb_id,''), COALESCE(conversation_id,''), filename, mime_type, size_bytes, status, error, chunk_count, storage_path, created_at
-		 FROM documents WHERE storage_path=?`, path)
+		q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -219,6 +440,20 @@ func DocumentsByStoragePath(ctx context.Context, db *sql.DB, path string) ([]Doc
 		out = append(out, d)
 	}
 	return out, rows.Err()
+}
+
+// DeleteStandaloneFileForUser removes a personal, non-conversation upload. It
+// is intentionally separate from the admin inventory delete primitive.
+func DeleteStandaloneFileForUser(ctx context.Context, db *sql.DB, id, userID string) error {
+	res, err := db.ExecContext(ctx,
+		`DELETE FROM files WHERE id=? AND user_id=? AND conversation_id IS NULL`, id, userID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // StoragePathsForConversations returns every persisted object path referenced by
@@ -254,7 +489,11 @@ func StoragePathReferenced(ctx context.Context, db *sql.DB, path string) (bool, 
 	return n > 0, nil
 }
 
-func storagePathsForConversationIDs(ctx context.Context, db *sql.DB, convIDs []string) ([]string, error) {
+type conversationRowsQueryer interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}
+
+func storagePathsForConversationIDs(ctx context.Context, db conversationRowsQueryer, convIDs []string) ([]string, error) {
 	ids := cleanIDs(convIDs)
 	if len(ids) == 0 {
 		return nil, nil
@@ -331,11 +570,28 @@ func keys(m map[string]struct{}) []string {
 	return out
 }
 
-func removeLocalStoragePath(path string) error {
+// removeLocalStoragePath removes a local object only when the caller supplies
+// the deployment's configured storage roots. Store-layer rows are
+// database-controlled metadata and the store package otherwise has no safe
+// way to distinguish an application file from an arbitrary host path. An
+// omitted root list therefore deliberately performs no physical deletion;
+// API callers pass their roots and the fileguard performs lexical and
+// symlink-aware containment checks.
+func removeLocalStoragePath(path string, roots ...string) error {
 	if !looksLocalStoragePath(path) {
 		return nil
 	}
-	return os.Remove(path)
+	if len(roots) == 0 {
+		return nil
+	}
+	safePath, err := fileguard.ResolveExisting(path, roots...)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	return os.Remove(safePath)
 }
 
 func looksLocalStoragePath(p string) bool {
@@ -355,15 +611,21 @@ func looksLocalStoragePath(p string) bool {
 func GetFile(ctx context.Context, db *sql.DB, id, userID string) (*File, error) {
 	var f File
 	var conv sql.NullString
-	q := `SELECT id, user_id, conversation_id, filename, mime_type, size_bytes, storage_path, kind, draft, created_at FROM files WHERE id=?`
+	q := `SELECT f.id, f.user_id, f.conversation_id, f.filename, f.mime_type, f.size_bytes, f.storage_path, f.kind, f.draft, f.created_at FROM files f WHERE f.id=?`
 	args := []any{id}
 	if userID != "" {
-		// Uploader, or any workspace member of the conversation the file lives in
-		// (§workspaces — members view each other's attachments).
-		q += ` AND (user_id=? OR conversation_id IN (
-		  SELECT c.id FROM conversations c JOIN workspace_members m ON m.workspace_id=c.workspace_id WHERE m.user_id=?
+		// Standalone uploads remain personal. Conversation uploads inherit the
+		// conversation's current scope; workspace creator/uploader identity cannot
+		// bypass a later kick. Drafts remain uploader-private inside that scope.
+		q += ` AND ((f.conversation_id IS NULL AND f.user_id=?) OR (
+		  f.conversation_id IS NOT NULL AND EXISTS (
+		    SELECT 1 FROM conversations c
+		     WHERE c.id=f.conversation_id AND ` + workspaceResourceAccessPredicate("c") + `
+		  ) AND (f.user_id=? OR f.draft=0)
 		))`
-		args = append(args, userID, userID)
+		args = append(args, userID)
+		args = append(args, workspaceResourceAccessArgs(userID)...)
+		args = append(args, userID)
 	}
 	var draft int
 	err := db.QueryRowContext(ctx, q, args...).
@@ -797,30 +1059,75 @@ func DeleteUsageByFilter(ctx context.Context, db *sql.DB, f UsageFilter) (int64,
 
 // UsageBucket is one time-bucket row of the usage trend (§8.3 admin charts).
 type UsageBucket struct {
-	BucketStart  int64   `json:"bucket_start"` // unix seconds
-	InputTokens  int     `json:"input_tokens"`
-	OutputTokens int     `json:"output_tokens"`
-	Calls        int     `json:"calls"`
-	Cost         float64 `json:"cost"`
+	BucketStart      int64   `json:"bucket_start"` // unix seconds
+	InputTokens      int     `json:"input_tokens"`
+	OutputTokens     int     `json:"output_tokens"`
+	CacheReadTokens  int     `json:"cache_read_tokens"`
+	CacheWriteTokens int     `json:"cache_write_tokens"`
+	ImagesCount      int     `json:"images_count"`
+	Calls            int     `json:"calls"`
+	Turns            int     `json:"turns"`
+	Users            int     `json:"users"`
+	Cost             float64 `json:"cost"`
+	Credits          float64 `json:"credits"`
 }
 
-// AdminUsageTrend returns hourly buckets when `days<=2`, otherwise daily, so a
-// "last 24h" view shows 24 points and a "last 30d" view shows 30. SQLite has
-// no date_trunc, so we floor to the bucket width with integer math.
+// AdminUsageTrend returns hourly buckets when `days<=2`, daily buckets through
+// 90 days, and weekly buckets for longer windows. SQLite has no date_trunc, so
+// we floor to the bucket width with integer math.
 func AdminUsageTrend(ctx context.Context, db *sql.DB, days int) ([]UsageBucket, error) {
 	if days <= 0 {
 		days = usageTrendWindow
 	}
-	since := time.Now().Add(-time.Duration(days) * 24 * time.Hour).Unix()
-	bucket := int64(86400) // daily
-	if days <= usageTrendHourlyBucketThreshold {
-		bucket = 3600 // hourly
+	end := time.Now().Unix() + 1
+	since := end - int64(days)*86400
+	return AdminUsageTrendBetween(ctx, db, since, end, UsageBucketWidth(days))
+}
+
+// AdminUsageTrendBetween returns durable usage buckets for the half-open
+// interval [since, before). A turn is a distinct delivered chat/image message;
+// provider/tool-loop rows remain separately visible through Calls.
+func AdminUsageTrendBetween(ctx context.Context, db *sql.DB, since, before, bucket int64, filters ...UsageAnalyticsFilter) ([]UsageBucket, error) {
+	if bucket <= 0 {
+		bucket = 86400
 	}
+	filter := firstUsageAnalyticsFilter(filters)
+	filterSQL, filterArgs := filter.where("u")
+	args := []any{since, before}
+	args = append(args, filterArgs...)
+	args = append(args, since, before, since, bucket, bucket, since)
 	rows, err := db.QueryContext(ctx,
-		`SELECT (created_at / ?) * ? AS b,
-		        CAST(SUM(input_tokens) AS BIGINT), CAST(SUM(output_tokens) AS BIGINT), COUNT(*), SUM(cost)
-		 FROM usage_stats WHERE created_at >= ?
-		 GROUP BY b ORDER BY b ASC`, bucket, bucket, since)
+		`WITH filtered_rows AS (
+			SELECT u.* FROM usage_stats u
+			WHERE u.created_at >= ? AND u.created_at < ?`+filterSQL+`
+		), delivered_messages AS (
+			SELECT DISTINCT message_id FROM usage_stats
+			WHERE created_at >= ? AND created_at < ?
+			  AND message_id IS NOT NULL AND message_id<>''
+			  AND purpose IN ('chat','image')
+		), filtered_turns AS (
+			SELECT filtered_rows.message_id, MIN(filtered_rows.created_at) AS first_created_at
+			FROM filtered_rows
+			JOIN delivered_messages ON delivered_messages.message_id=filtered_rows.message_id
+			WHERE filtered_rows.message_id IS NOT NULL AND filtered_rows.message_id<>''
+			GROUP BY filtered_rows.message_id
+		)
+		SELECT ((u.created_at - ?) / ?) * ? + ? AS b,
+		        COALESCE(CAST(SUM(input_tokens) AS BIGINT),0),
+		        COALESCE(CAST(SUM(output_tokens) AS BIGINT),0),
+		        COALESCE(CAST(SUM(cache_read_tokens) AS BIGINT),0),
+		        COALESCE(CAST(SUM(cache_write_tokens) AS BIGINT),0),
+		        COALESCE(CAST(SUM(images_count) AS BIGINT),0),
+		        COUNT(*),
+		        COUNT(DISTINCT CASE
+		          WHEN filtered_turns.message_id IS NOT NULL THEN u.message_id
+		        END),
+		        COUNT(DISTINCT u.user_id),
+		        COALESCE(SUM(u.cost),0), COALESCE(SUM(u.credits),0)
+		 FROM filtered_rows u
+		 LEFT JOIN filtered_turns
+		   ON filtered_turns.message_id=u.message_id AND filtered_turns.first_created_at=u.created_at
+		 GROUP BY b ORDER BY b ASC`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -828,7 +1135,11 @@ func AdminUsageTrend(ctx context.Context, db *sql.DB, days int) ([]UsageBucket, 
 	out := []UsageBucket{}
 	for rows.Next() {
 		var b UsageBucket
-		if err := rows.Scan(&b.BucketStart, &b.InputTokens, &b.OutputTokens, &b.Calls, &b.Cost); err != nil {
+		if err := rows.Scan(
+			&b.BucketStart, &b.InputTokens, &b.OutputTokens, &b.CacheReadTokens,
+			&b.CacheWriteTokens, &b.ImagesCount, &b.Calls, &b.Turns, &b.Users,
+			&b.Cost, &b.Credits,
+		); err != nil {
 			return nil, err
 		}
 		out = append(out, b)
@@ -836,11 +1147,14 @@ func AdminUsageTrend(ctx context.Context, db *sql.DB, days int) ([]UsageBucket, 
 	return out, rows.Err()
 }
 
-// UsageBucketWidth mirrors AdminUsageTrend's choice so trend + per-series points
-// share one time axis (hourly for ≤2-day windows, otherwise daily).
+// UsageBucketWidth keeps detailed windows readable: hourly through two days,
+// daily through 90 days, and weekly for longer annual views.
 func UsageBucketWidth(days int) int64 {
 	if days <= usageTrendHourlyBucketThreshold {
 		return 3600
+	}
+	if days > 90 {
+		return 7 * 86400
 	}
 	return 86400
 }
@@ -848,11 +1162,85 @@ func UsageBucketWidth(days int) int64 {
 // UsageTotals is the headline aggregate for the analytics dashboard (§ admin
 // analytics).
 type UsageTotals struct {
-	Calls        int     `json:"calls"`
-	InputTokens  int     `json:"input_tokens"`
-	OutputTokens int     `json:"output_tokens"`
-	Cost         float64 `json:"cost"`
-	Users        int     `json:"users"` // distinct active users in the window
+	Calls              int     `json:"calls"`
+	Turns              int     `json:"turns"`
+	CreditChargedTurns int     `json:"credit_charged_turns"`
+	InputTokens        int     `json:"input_tokens"`
+	OutputTokens       int     `json:"output_tokens"`
+	CacheReadTokens    int     `json:"cache_read_tokens"`
+	CacheWriteTokens   int     `json:"cache_write_tokens"`
+	ImagesCount        int     `json:"images_count"`
+	Cost               float64 `json:"cost"`
+	Credits            float64 `json:"credits"`
+	TurnCost           float64 `json:"turn_cost"`
+	CreditChargedCost  float64 `json:"credit_charged_cost"`
+	Users              int     `json:"users"`
+	CreditChargedUsers int     `json:"credit_charged_users"`
+	Conversations      int     `json:"conversations"`
+	Workspaces         int     `json:"workspaces"`
+}
+
+// UsageAnalyticsFilter is shared by every analytics aggregate so a dashboard
+// filter changes totals, comparisons, trends and breakdowns consistently.
+// WorkspaceID/ChannelID are pointers because an explicitly selected empty value
+// means personal/unattributed, while nil means no filter.
+type UsageAnalyticsFilter struct {
+	UserQuery   string
+	ModelID     string
+	WorkspaceID *string
+	Purpose     string
+	ChannelID   *string
+}
+
+func firstUsageAnalyticsFilter(filters []UsageAnalyticsFilter) UsageAnalyticsFilter {
+	if len(filters) == 0 {
+		return UsageAnalyticsFilter{}
+	}
+	return filters[0]
+}
+
+func (f UsageAnalyticsFilter) where(alias string) (string, []any) {
+	prefix := ""
+	if alias != "" {
+		prefix = alias + "."
+	}
+	clauses := []string{}
+	args := []any{}
+	if query := strings.TrimSpace(f.UserQuery); query != "" {
+		like := "%" + likeEscape(strings.ToLower(query)) + "%"
+		clauses = append(clauses, `(
+		  LOWER(COALESCE(`+prefix+`user_id,'')) LIKE ? ESCAPE '\'
+		  OR EXISTS (
+		    SELECT 1 FROM users analytics_user
+		    WHERE analytics_user.id=`+prefix+`user_id
+		      AND (
+		        LOWER(COALESCE(analytics_user.email,'')) LIKE ? ESCAPE '\'
+		        OR LOWER(COALESCE(analytics_user.name,'')) LIKE ? ESCAPE '\'
+		      )
+		  )
+		)`)
+		args = append(args, like, like, like)
+	}
+	if f.ModelID != "" {
+		clauses = append(clauses, prefix+"model_id=?")
+		args = append(args, f.ModelID)
+	}
+	if f.WorkspaceID != nil {
+		clauses = append(clauses, prefix+"workspace_id=?")
+		args = append(args, *f.WorkspaceID)
+	}
+	if f.Purpose != "" {
+		clauses = append(clauses, prefix+"purpose=?")
+		args = append(args, f.Purpose)
+	}
+	if f.ChannelID != nil {
+		clauses = append(clauses, prefix+"channel_id=?")
+		args = append(args, *f.ChannelID)
+	}
+	if len(clauses) == 0 {
+		return "", args
+	}
+	return " AND " + strings.Join(clauses, " AND "), args
 }
 
 // AdminUsageTotals returns the period totals plus the distinct active-user count.
@@ -860,54 +1248,206 @@ func AdminUsageTotals(ctx context.Context, db *sql.DB, days int) (UsageTotals, e
 	if days <= 0 {
 		days = usageTotalsWindow
 	}
-	since := time.Now().Add(-time.Duration(days) * 24 * time.Hour).Unix()
+	end := time.Now().Unix() + 1
+	return AdminUsageTotalsBetween(ctx, db, end-int64(days)*86400, end)
+}
+
+// AdminUsageTotalsBetween aggregates the half-open interval [since, before).
+// Cost is provider spend; Credits is the user-facing debit amount. Turn-level
+// billing is grouped by message_id so multi-request tool loops count once.
+func AdminUsageTotalsBetween(ctx context.Context, db *sql.DB, since, before int64, filters ...UsageAnalyticsFilter) (UsageTotals, error) {
+	filter := firstUsageAnalyticsFilter(filters)
+	filterSQL, filterArgs := filter.where("u")
+	args := []any{since, before}
+	args = append(args, filterArgs...)
 	var t UsageTotals
-	err := db.QueryRowContext(ctx,
-		`SELECT COUNT(*), COALESCE(CAST(SUM(input_tokens) AS BIGINT),0), COALESCE(CAST(SUM(output_tokens) AS BIGINT),0),
-		        COALESCE(SUM(cost),0), COUNT(DISTINCT user_id)
-		 FROM usage_stats WHERE created_at >= ?`, since).
-		Scan(&t.Calls, &t.InputTokens, &t.OutputTokens, &t.Cost, &t.Users)
-	return t, err
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*),
+		        COALESCE(CAST(SUM(input_tokens) AS BIGINT),0),
+		        COALESCE(CAST(SUM(output_tokens) AS BIGINT),0),
+		        COALESCE(CAST(SUM(cache_read_tokens) AS BIGINT),0),
+		        COALESCE(CAST(SUM(cache_write_tokens) AS BIGINT),0),
+		        COALESCE(CAST(SUM(images_count) AS BIGINT),0),
+		        COALESCE(SUM(cost),0), COALESCE(SUM(credits),0),
+		        COUNT(DISTINCT user_id),
+		        COUNT(DISTINCT CASE WHEN credits>0 THEN user_id END),
+		        COUNT(DISTINCT CASE
+		          WHEN conversation_id IS NOT NULL AND conversation_id<>'' THEN conversation_id
+		        END),
+		        COUNT(DISTINCT CASE WHEN workspace_id<>'' THEN workspace_id END)
+		 FROM usage_stats u WHERE u.created_at >= ? AND u.created_at < ?`+filterSQL, args...).
+		Scan(
+			&t.Calls, &t.InputTokens, &t.OutputTokens, &t.CacheReadTokens,
+			&t.CacheWriteTokens, &t.ImagesCount, &t.Cost, &t.Credits, &t.Users,
+			&t.CreditChargedUsers, &t.Conversations, &t.Workspaces,
+		); err != nil {
+		return t, err
+	}
+
+	// Filters select which facts contribute cost and credits. Delivery is resolved
+	// against the complete period, so filtering to a task/model row still retains
+	// the user turn when that same message has a chat or image delivery row.
+	turnArgs := []any{since, before}
+	turnArgs = append(turnArgs, filterArgs...)
+	turnArgs = append(turnArgs, since, before)
+	if err := db.QueryRowContext(ctx,
+		`WITH filtered_rows AS (
+		   SELECT u.* FROM usage_stats u
+		   WHERE u.created_at >= ? AND u.created_at < ?`+filterSQL+`
+		 ), turn_context AS (
+		   SELECT message_id, SUM(credits) AS context_credits,
+		          MAX(CASE WHEN purpose IN ('chat','image') THEN 1 ELSE 0 END) AS delivered
+		   FROM usage_stats
+		   WHERE created_at >= ? AND created_at < ?
+		     AND message_id IS NOT NULL AND message_id<>''
+		   GROUP BY message_id
+		 )
+		 SELECT COUNT(*),
+		        COALESCE(SUM(charged),0),
+		        COALESCE(SUM(turn_cost),0),
+		        COALESCE(SUM(CASE WHEN charged=1 THEN turn_cost ELSE 0 END),0),
+		        COUNT(DISTINCT CASE WHEN charged=1 THEN turn_user_id END)
+		 FROM (
+		   SELECT u.message_id, MAX(u.user_id) AS turn_user_id,
+		          SUM(u.cost) AS turn_cost,
+		          MAX(CASE WHEN turn_context.context_credits>0 THEN 1 ELSE 0 END) AS charged
+		   FROM filtered_rows u
+		   JOIN turn_context ON turn_context.message_id=u.message_id AND turn_context.delivered=1
+		   WHERE u.message_id IS NOT NULL AND u.message_id<>''
+		   GROUP BY u.message_id
+		 ) turns`, turnArgs...).
+		Scan(
+			&t.Turns, &t.CreditChargedTurns, &t.TurnCost,
+			&t.CreditChargedCost, &t.CreditChargedUsers,
+		); err != nil {
+		return t, err
+	}
+	return t, nil
 }
 
-// UsageBreakdownRow is one row of a by-model or by-user breakdown. Label holds
-// the user email for the by-user breakdown; model labels are resolved on the
-// frontend from the model list.
+// UsageBreakdownRow is one row of a whitelisted analytics dimension. Label is
+// resolved from the live catalog when available; Key remains the durable ID.
 type UsageBreakdownRow struct {
-	Key          string  `json:"key"`
-	Label        string  `json:"label"`
-	InputTokens  int     `json:"input_tokens"`
-	OutputTokens int     `json:"output_tokens"`
-	Calls        int     `json:"calls"`
-	Cost         float64 `json:"cost"`
+	Key                string  `json:"key"`
+	Label              string  `json:"label"`
+	InputTokens        int     `json:"input_tokens"`
+	OutputTokens       int     `json:"output_tokens"`
+	CacheReadTokens    int     `json:"cache_read_tokens"`
+	CacheWriteTokens   int     `json:"cache_write_tokens"`
+	ImagesCount        int     `json:"images_count"`
+	Calls              int     `json:"calls"`
+	Turns              int     `json:"turns"`
+	CreditChargedTurns int     `json:"credit_charged_turns"`
+	Users              int     `json:"users"`
+	Conversations      int     `json:"conversations"`
+	Cost               float64 `json:"cost"`
+	Credits            float64 `json:"credits"`
 }
 
-// AdminUsageBreakdown returns the top-`limit` keys for the dimension (groupCol
-// must be "model_id" or "user_id"), ordered by cost then call volume.
+type usageBreakdownDimension struct {
+	keyExpr   string
+	labelExpr string
+	join      string
+	groupBy   string
+}
+
+func usageBreakdownDimensionFor(groupCol string) (usageBreakdownDimension, error) {
+	switch groupCol {
+	case "model_id":
+		return usageBreakdownDimension{
+			keyExpr: "u.model_id", labelExpr: "COALESCE(item.label,'')",
+			join: "LEFT JOIN models item ON item.id=u.model_id", groupBy: "u.model_id, item.label",
+		}, nil
+	case "user_id":
+		return usageBreakdownDimension{
+			keyExpr: "COALESCE(u.user_id,'')", labelExpr: "COALESCE(item.email,'')",
+			join: "LEFT JOIN users item ON item.id=u.user_id", groupBy: "u.user_id, item.email",
+		}, nil
+	case "workspace_id":
+		return usageBreakdownDimension{
+			keyExpr: "u.workspace_id", labelExpr: "COALESCE(item.name,'')",
+			join: "LEFT JOIN workspaces item ON item.id=u.workspace_id", groupBy: "u.workspace_id, item.name",
+		}, nil
+	case "channel_id":
+		return usageBreakdownDimension{
+			keyExpr: "u.channel_id", labelExpr: "COALESCE(item.name,'')",
+			join: "LEFT JOIN channels item ON item.id=u.channel_id", groupBy: "u.channel_id, item.name",
+		}, nil
+	case "purpose":
+		return usageBreakdownDimension{
+			keyExpr: "u.purpose", labelExpr: "''", groupBy: "u.purpose",
+		}, nil
+	default:
+		return usageBreakdownDimension{}, fmt.Errorf("AdminUsageBreakdown: invalid group column %q", groupCol)
+	}
+}
+
+// AdminUsageBreakdown returns one aggregate row per whitelisted dimension key.
+// A negative limit returns the complete dimension; zero keeps the legacy top-N.
 func AdminUsageBreakdown(ctx context.Context, db *sql.DB, days int, groupCol string, limit int) ([]UsageBreakdownRow, error) {
-	if groupCol != "model_id" && groupCol != "user_id" {
-		return nil, fmt.Errorf("AdminUsageBreakdown: invalid group column %q", groupCol)
-	}
-	if limit <= 0 {
-		limit = usageBreakdownTopN
-	}
 	if days <= 0 {
 		days = usageBreakdownWindow
 	}
-	since := time.Now().Add(-time.Duration(days) * 24 * time.Hour).Unix()
-	labelExpr, join, groupBy, attributionWhere := "''", "", "u."+groupCol, ""
-	if groupCol == "user_id" {
-		labelExpr = "COALESCE(usr.email,'')"
-		join = "LEFT JOIN users usr ON usr.id = u.user_id"
-		groupBy = "u.user_id, usr.email"
-		attributionWhere = " AND u.user_id IS NOT NULL"
+	end := time.Now().Unix() + 1
+	return AdminUsageBreakdownBetween(ctx, db, end-int64(days)*86400, end, groupCol, limit)
+}
+
+func AdminUsageBreakdownBetween(ctx context.Context, db *sql.DB, since, before int64, groupCol string, limit int, filters ...UsageAnalyticsFilter) ([]UsageBreakdownRow, error) {
+	dimension, err := usageBreakdownDimensionFor(groupCol)
+	if err != nil {
+		return nil, err
+	}
+	filter := firstUsageAnalyticsFilter(filters)
+	filterSQL, filterArgs := filter.where("u")
+	args := []any{since, before}
+	args = append(args, filterArgs...)
+	args = append(args, since, before)
+	limitSQL := ""
+	if limit == 0 {
+		limit = usageBreakdownTopN
+	}
+	if limit > 0 {
+		limitSQL = " LIMIT ?"
+		args = append(args, limit)
 	}
 	q := fmt.Sprintf(
-		`SELECT u.%s, %s, CAST(SUM(u.input_tokens) AS BIGINT), CAST(SUM(u.output_tokens) AS BIGINT), COUNT(*), SUM(u.cost)
-		 FROM usage_stats u %s WHERE u.created_at >= ?%s
-		 GROUP BY %s ORDER BY SUM(u.cost) DESC, COUNT(*) DESC LIMIT ?`,
-		groupCol, labelExpr, join, attributionWhere, groupBy)
-	rows, err := db.QueryContext(ctx, q, since, limit)
+		`WITH filtered_rows AS (
+		   SELECT u.* FROM usage_stats u
+		   WHERE u.created_at >= ? AND u.created_at < ?`+filterSQL+`
+		 ), turn_context AS (
+		   SELECT message_id, SUM(credits) AS context_credits,
+		          MAX(CASE WHEN purpose IN ('chat','image') THEN 1 ELSE 0 END) AS delivered
+		   FROM usage_stats
+		   WHERE created_at >= ? AND created_at < ?
+		     AND message_id IS NOT NULL AND message_id<>''
+		   GROUP BY message_id
+		 )
+		 SELECT %s, %s,
+		        COALESCE(CAST(SUM(u.input_tokens) AS BIGINT),0),
+		        COALESCE(CAST(SUM(u.output_tokens) AS BIGINT),0),
+		        COALESCE(CAST(SUM(u.cache_read_tokens) AS BIGINT),0),
+		        COALESCE(CAST(SUM(u.cache_write_tokens) AS BIGINT),0),
+		        COALESCE(CAST(SUM(u.images_count) AS BIGINT),0),
+		        COUNT(*),
+		        COUNT(DISTINCT CASE
+		          WHEN turn_context.delivered=1 THEN u.message_id
+		        END),
+		        COUNT(DISTINCT CASE
+		          WHEN turn_context.delivered=1 AND turn_context.context_credits>0 THEN u.message_id
+		        END),
+		        COUNT(DISTINCT u.user_id),
+		        COUNT(DISTINCT CASE
+		          WHEN u.conversation_id IS NOT NULL AND u.conversation_id<>'' THEN u.conversation_id
+		        END),
+		        COALESCE(SUM(u.cost),0), COALESCE(SUM(u.credits),0)
+		 FROM filtered_rows u
+		 LEFT JOIN turn_context ON turn_context.message_id=u.message_id
+		 %s
+		 GROUP BY %s
+		 ORDER BY SUM(u.cost) DESC, COUNT(*) DESC, %s ASC%s`,
+		dimension.keyExpr, dimension.labelExpr, dimension.join, dimension.groupBy,
+		dimension.keyExpr, limitSQL)
+	rows, err := db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -915,7 +1455,11 @@ func AdminUsageBreakdown(ctx context.Context, db *sql.DB, days int, groupCol str
 	out := []UsageBreakdownRow{}
 	for rows.Next() {
 		var r UsageBreakdownRow
-		if err := rows.Scan(&r.Key, &r.Label, &r.InputTokens, &r.OutputTokens, &r.Calls, &r.Cost); err != nil {
+		if err := rows.Scan(
+			&r.Key, &r.Label, &r.InputTokens, &r.OutputTokens, &r.CacheReadTokens,
+			&r.CacheWriteTokens, &r.ImagesCount, &r.Calls, &r.Turns,
+			&r.CreditChargedTurns, &r.Users, &r.Conversations, &r.Cost, &r.Credits,
+		); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -980,45 +1524,136 @@ func AdminUsageSeries(ctx context.Context, db *sql.DB, days int, groupCol string
 // preserved across refresh rotation (0 means "now") so the "signed in" time
 // survives; LastSeen is always stamped to now on each issue.
 type SessionMeta struct {
+	SessionID string
 	IP        string
 	UserAgent string
 	Location  string
 	CreatedAt int64
 }
 
+// OAuthCallbackSessionAuthMode identifies which authentication state the
+// callback proved before its final, guarded session INSERT.
+type OAuthCallbackSessionAuthMode int
+
+const (
+	OAuthCallbackSessionWithout2FA OAuthCallbackSessionAuthMode = iota
+	OAuthCallbackSessionWithVerified2FA
+)
+
 // SaveRefreshToken records a non-revoked refresh token for the user along with
 // the device/network context in meta.
 func SaveRefreshToken(ctx context.Context, db *sql.DB, jti, userID string, expiresAt time.Time, meta SessionMeta) error {
+	return saveRefreshToken(ctx, db, jti, userID, expiresAt, meta)
+}
+
+// SaveRefreshTokenForOAuthCallback makes the provider-generation check and the
+// refresh-session insert one database transaction. This is the OAuth callback's
+// session-issuance linearization point.
+func SaveRefreshTokenForOAuthCallback(
+	ctx context.Context,
+	db *sql.DB,
+	guard OAuthProviderCallbackGuard,
+	jti, userID string,
+	expectedTokenVer int,
+	authMode OAuthCallbackSessionAuthMode,
+	expectedTotpSecret string,
+	expiresAt time.Time,
+	meta SessionMeta,
+) error {
+	if expectedTokenVer < 0 {
+		return ErrOAuthLoginStateChanged
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	// This conditional UPDATE is deliberately the transaction's first lock. It
+	// both matches configuration import's user -> provider order and atomically
+	// rejects a callback whose account, token generation, or 2FA state changed.
+	var locked sql.Result
+	switch authMode {
+	case OAuthCallbackSessionWithout2FA:
+		if expectedTotpSecret != "" {
+			return ErrOAuthLoginStateChanged
+		}
+		locked, err = tx.ExecContext(ctx,
+			`UPDATE users SET token_ver=token_ver
+			 WHERE id=? AND status='active' AND token_ver=? AND totp_enabled=0`,
+			userID, expectedTokenVer)
+	case OAuthCallbackSessionWithVerified2FA:
+		if expectedTotpSecret == "" {
+			return ErrOAuthLoginStateChanged
+		}
+		locked, err = tx.ExecContext(ctx,
+			`UPDATE users SET token_ver=token_ver
+			 WHERE id=? AND status='active' AND token_ver=?
+			   AND totp_enabled=1 AND totp_secret=?`,
+			userID, expectedTokenVer, expectedTotpSecret)
+	default:
+		return ErrOAuthLoginStateChanged
+	}
+	if err != nil {
+		return err
+	}
+	if n, err := locked.RowsAffected(); err != nil {
+		return err
+	} else if n != 1 {
+		return ErrOAuthLoginStateChanged
+	}
+	if err := validateOAuthProviderCallbackGuardTx(ctx, tx, guard); err != nil {
+		return err
+	}
+	if err := saveRefreshToken(ctx, tx, jti, userID, expiresAt, meta); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func saveRefreshToken(
+	ctx context.Context,
+	ex RowExecer,
+	jti, userID string,
+	expiresAt time.Time,
+	meta SessionMeta,
+) error {
 	now := time.Now().Unix()
+	sessionID := strings.TrimSpace(meta.SessionID)
+	if sessionID == "" {
+		sessionID = jti
+	}
 	created := meta.CreatedAt
 	if created == 0 {
 		created = now
 	}
-	_, err := db.ExecContext(ctx,
-		`INSERT INTO refresh_tokens(jti, user_id, expires_at, revoked, created_at, user_agent, ip, location, last_seen)
-		 VALUES(?, ?, ?, 0, ?, ?, ?, ?, ?)`,
-		jti, userID, expiresAt.Unix(), created, meta.UserAgent, meta.IP, meta.Location, now)
+	_, err := ex.ExecContext(ctx,
+		`INSERT INTO refresh_tokens(jti, session_id, user_id, expires_at, revoked, created_at, user_agent, ip, location, last_seen)
+		 VALUES(?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
+		jti, sessionID, userID, expiresAt.Unix(), created, meta.UserAgent, meta.IP, meta.Location, now)
 	return err
 }
 
-// RefreshTokenCreatedAt returns the original sign-in time of a refresh token so
-// rotation can preserve it across token swaps. Returns 0 when not found.
-func RefreshTokenCreatedAt(ctx context.Context, db *sql.DB, jti string) int64 {
-	var c int64
-	_ = db.QueryRowContext(ctx, `SELECT created_at FROM refresh_tokens WHERE jti=?`, jti).Scan(&c)
-	return c
-}
-
-// RevokeRefreshToken marks a single refresh token revoked.
+// RevokeRefreshToken revokes the whole session family containing jti. It keeps
+// the legacy signature for callers that only have a token JTI while preserving
+// the same rotation-safe semantics as RevokeUserSession.
 func RevokeRefreshToken(ctx context.Context, db *sql.DB, jti string) error {
-	_, err := db.ExecContext(ctx, `UPDATE refresh_tokens SET revoked=1 WHERE jti=?`, jti)
+	var userID string
+	err := db.QueryRowContext(ctx,
+		`SELECT user_id FROM refresh_tokens WHERE jti=?`, jti).Scan(&userID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	_, err = RevokeUserSession(ctx, db, userID, jti)
 	return err
 }
 
 // SessionInfo is the user-facing view of one active session (one non-revoked
 // refresh token = one signed-in device).
 type SessionInfo struct {
-	ID        string `json:"id"` // the jti — opaque handle used to revoke
+	ID        string `json:"id"` // stable session-family handle used to revoke
 	IP        string `json:"ip"`
 	UserAgent string `json:"user_agent"`
 	Location  string `json:"location"`
@@ -1032,7 +1667,8 @@ func ListUserSessions(ctx context.Context, db *sql.DB, userID string) ([]Session
 	// Tokens issued before this feature have last_seen=0; fall back to created_at
 	// so they don't render as a 1970 timestamp until their next refresh.
 	rows, err := db.QueryContext(ctx,
-		`SELECT jti, ip, user_agent, location, created_at,
+		`SELECT CASE WHEN trim(session_id)<>'' THEN session_id ELSE jti END,
+		        ip, user_agent, location, created_at,
 		        CASE WHEN last_seen > 0 THEN last_seen ELSE created_at END AS seen
 		 FROM refresh_tokens
 		 WHERE user_id=? AND revoked=0 AND expires_at > ?
@@ -1055,46 +1691,144 @@ func ListUserSessions(ctx context.Context, db *sql.DB, userID string) ([]Session
 // RevokeUserSession revokes one refresh token, scoped to its owner. Returns true
 // when a matching active row was revoked.
 func RevokeUserSession(ctx context.Context, db *sql.DB, userID, jti string) (bool, error) {
-	res, err := db.ExecContext(ctx,
-		`UPDATE refresh_tokens SET revoked=1 WHERE jti=? AND user_id=? AND revoked=0`, jti, userID)
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return false, err
 	}
-	n, _ := res.RowsAffected()
-	return n > 0, nil
-}
-
-// RevokeOtherUserSessions revokes every active session for the user except the
-// one identified by keepJTI (the caller's current session).
-func RevokeOtherUserSessions(ctx context.Context, db *sql.DB, userID, keepJTI string) error {
-	_, err := db.ExecContext(ctx,
-		`UPDATE refresh_tokens SET revoked=1 WHERE user_id=? AND jti<>? AND revoked=0`, userID, keepJTI)
-	return err
-}
-
-// IsRefreshTokenValid returns true when the jti exists, not revoked, not
-// expired.
-func IsRefreshTokenValid(ctx context.Context, db *sql.DB, jti, userID string) (bool, error) {
-	var (
-		exp int64
-		rev int
-	)
-	err := db.QueryRowContext(ctx,
-		`SELECT expires_at, revoked FROM refresh_tokens WHERE jti=? AND user_id=?`, jti, userID,
-	).Scan(&exp, &rev)
+	defer tx.Rollback()
+	if err := lockRefreshSessionUser(ctx, tx, userID); err != nil {
+		return false, err
+	}
+	sessionID, err := resolveRefreshSessionID(ctx, tx, userID, jti)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	if rev == 1 {
-		return false, nil
+	res, err := tx.ExecContext(ctx,
+		`UPDATE refresh_tokens SET revoked=1
+		 WHERE user_id=? AND revoked=0
+		   AND CASE WHEN trim(session_id)<>'' THEN session_id ELSE jti END=?`,
+		userID, sessionID)
+	if err != nil {
+		return false, err
 	}
-	if time.Now().Unix() > exp {
-		return false, nil
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
 	}
-	return true, nil
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
+// RevokeOtherUserSessions revokes every active session for the user except the
+// one identified by keepJTI (the caller's current session).
+func RevokeOtherUserSessions(ctx context.Context, db *sql.DB, userID, keepJTI string) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := lockRefreshSessionUser(ctx, tx, userID); err != nil {
+		return err
+	}
+	keepSessionID := ""
+	if strings.TrimSpace(keepJTI) != "" {
+		if keepSessionID, err = resolveRefreshSessionID(ctx, tx, userID, keepJTI); errors.Is(err, sql.ErrNoRows) {
+			keepSessionID = ""
+		} else if err != nil {
+			return err
+		}
+	}
+	if keepSessionID == "" {
+		_, err = tx.ExecContext(ctx,
+			`UPDATE refresh_tokens SET revoked=1 WHERE user_id=? AND revoked=0`, userID)
+	} else {
+		_, err = tx.ExecContext(ctx,
+			`UPDATE refresh_tokens SET revoked=1
+			 WHERE user_id=? AND revoked=0
+			   AND CASE WHEN trim(session_id)<>'' THEN session_id ELSE jti END<>?`,
+			userID, keepSessionID)
+	}
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// RevokeAllUserSessions revokes every refresh-session family for a user while
+// taking the same user-row lock as rotation. It is the safe primitive for
+// account-wide sign-out paths that do not need to update another user column.
+func RevokeAllUserSessions(ctx context.Context, db *sql.DB, userID string) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := lockRefreshSessionUser(ctx, tx, userID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE refresh_tokens SET revoked=1 WHERE user_id=? AND revoked=0`, userID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// ResolveUserSessionID maps a rotating refresh-token JTI to the stable handle
+// returned by ListUserSessions.
+func ResolveUserSessionID(ctx context.Context, db *sql.DB, userID, jti string) (string, error) {
+	return resolveRefreshSessionID(ctx, db, userID, jti)
+}
+
+type refreshSessionQueryer interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func resolveRefreshSessionID(ctx context.Context, q refreshSessionQueryer, userID, handle string) (string, error) {
+	var sessionID string
+	err := q.QueryRowContext(ctx,
+		`SELECT CASE WHEN trim(session_id)<>'' THEN session_id ELSE jti END
+		 FROM refresh_tokens
+		 WHERE user_id=? AND (jti=? OR session_id=?)
+		 ORDER BY revoked ASC, last_seen DESC
+		 LIMIT 1`, userID, handle, handle).Scan(&sessionID)
+	return sessionID, err
+}
+
+func lockRefreshSessionUser(ctx context.Context, tx *sql.Tx, userID string) error {
+	res, err := tx.ExecContext(ctx,
+		`UPDATE users SET token_ver=token_ver WHERE id=?`, userID)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// IsRefreshSessionValid returns true when any active, unexpired token belongs to
+// the family identified by jti/session ID.
+func IsRefreshSessionValid(ctx context.Context, db *sql.DB, userID, handle string) (bool, error) {
+	var one int
+	err := db.QueryRowContext(ctx,
+		`SELECT CASE WHEN EXISTS (
+			SELECT 1 FROM refresh_tokens
+			WHERE user_id=? AND revoked=0 AND expires_at>?
+			  AND CASE WHEN trim(session_id)<>'' THEN session_id ELSE jti END=?
+		) THEN 1 ELSE 0 END`, userID, time.Now().Unix(), handle).Scan(&one)
+	if err != nil {
+		return false, err
+	}
+	return one == 1, nil
 }
 
 // Artifact is a file produced by a tool and attached to one message.
@@ -1118,9 +1852,8 @@ func GetArtifact(ctx context.Context, db *sql.DB, id, userID string) (*Artifact,
 		 WHERE a.id=?`
 	args := []any{id}
 	if userID != "" {
-		// Owner, or any member of the conversation's workspace (§workspaces).
-		q += ` AND (c.user_id=? OR (COALESCE(c.workspace_id,'')<>'' AND c.workspace_id IN (SELECT workspace_id FROM workspace_members WHERE user_id=?)))`
-		args = append(args, userID, userID)
+		q += ` AND ` + workspaceResourceAccessPredicate("c")
+		args = append(args, workspaceResourceAccessArgs(userID)...)
 	}
 	err := db.QueryRowContext(ctx, q, args...).Scan(
 		&a.ID, &a.MessageID, &a.Filename, &a.StoragePath, &a.MimeType, &a.SizeBytes, &a.CreatedAt)
@@ -1159,15 +1892,18 @@ func FirstImageArtifactForMessage(ctx context.Context, db *sql.DB, messageID, co
 // ListImageArtifactsByConversation returns image artifacts (generated images)
 // produced anywhere in a conversation, oldest first. Used to stage generated
 // images into the sandbox so a follow-up python_execute can embed them
-// (e.g. into a PPTX). Scoped by owner.
+// (e.g. into a PPTX). Scoped to the personal owner or authoritative workspace
+// access; a former workspace creator cannot stage retained artifacts.
 func ListImageArtifactsByConversation(ctx context.Context, db *sql.DB, convID, userID string) ([]Artifact, error) {
+	args := []any{convID}
+	args = append(args, workspaceResourceAccessArgs(userID)...)
 	rows, err := db.QueryContext(ctx,
 		`SELECT a.id, a.message_id, a.filename, a.storage_path, a.mime_type, a.size_bytes, a.created_at
 		 FROM artifacts a
 		 JOIN messages m ON m.id = a.message_id
 		 JOIN conversations c ON c.id = m.conversation_id
-		 WHERE m.conversation_id=? AND c.user_id=? AND a.mime_type LIKE 'image/%'
-		 ORDER BY a.created_at ASC`, convID, userID)
+		 WHERE m.conversation_id=? AND `+workspaceResourceAccessPredicate("c")+` AND a.mime_type LIKE 'image/%'
+		 ORDER BY a.created_at ASC`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1183,21 +1919,100 @@ func ListImageArtifactsByConversation(ctx context.Context, db *sql.DB, convID, u
 	return out, rows.Err()
 }
 
-// CreateArtifact inserts a new artifact row (called by tool wrappers when
-// they write a file to ArtifactDir).
+// CreateArtifact inserts a new artifact row for maintenance/import callers.
+// User-triggered tool output must use CreateArtifactForUser.
 func CreateArtifact(ctx context.Context, db *sql.DB, a Artifact) (*Artifact, error) {
+	return createArtifact(ctx, db, a, "", "")
+}
+
+// CreateArtifactForUser serializes tool-output persistence against workspace
+// revocation and verifies that the target message belongs to the expected
+// conversation while the generating user still has access.
+func CreateArtifactForUser(ctx context.Context, db *sql.DB, a Artifact, expectedConvID, userID string) (*Artifact, error) {
+	if strings.TrimSpace(expectedConvID) == "" || strings.TrimSpace(userID) == "" || strings.TrimSpace(a.MessageID) == "" {
+		return nil, ErrNotFound
+	}
+	return createArtifact(ctx, db, a, expectedConvID, userID)
+}
+
+func createArtifact(ctx context.Context, db *sql.DB, a Artifact, expectedConvID, userID string) (*Artifact, error) {
 	if a.ID == "" {
 		a.ID = genID("art")
 	}
 	if a.MimeType == "" {
 		a.MimeType = "application/octet-stream"
 	}
-	_, err := db.ExecContext(ctx,
-		`INSERT INTO artifacts(id, message_id, filename, storage_path, mime_type, size_bytes, created_at) VALUES(?, ?, ?, ?, ?, ?, ?)`,
-		a.ID, a.MessageID, a.Filename, a.StoragePath, a.MimeType, a.SizeBytes, time.Now().Unix())
+	createdAt := time.Now().Unix()
+	if userID == "" {
+		_, err := db.ExecContext(ctx,
+			`INSERT INTO artifacts(id, message_id, filename, storage_path, mime_type, size_bytes, created_at) VALUES(?, ?, ?, ?, ?, ?, ?)`,
+			a.ID, a.MessageID, a.Filename, a.StoragePath, a.MimeType, a.SizeBytes, createdAt)
+		if err != nil {
+			return nil, err
+		}
+		a.CreatedAt = createdAt
+		return &a, nil
+	}
+
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
-	a.CreatedAt = time.Now().Unix()
+	defer func() { _ = tx.Rollback() }()
+	var workspaceID, authorID, status string
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COALESCE(c.workspace_id,''), COALESCE(m.author_id,''), m.status
+		   FROM messages m JOIN conversations c ON c.id=m.conversation_id
+		  WHERE m.id=? AND m.conversation_id=? AND m.role='assistant'`, a.MessageID, expectedConvID,
+	).Scan(&workspaceID, &authorID, &status); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	if authorID != userID {
+		return nil, ErrNotFound
+	}
+	if status != "streaming" {
+		return nil, ErrConversationAccessRevoked
+	}
+	if workspaceID != "" {
+		if err := lockWorkspaceMembershipTx(ctx, tx, workspaceID); err != nil {
+			return nil, err
+		}
+	}
+	lockResult, err := tx.ExecContext(ctx, `UPDATE conversations SET id=id WHERE id=?`, expectedConvID)
+	if err != nil {
+		return nil, err
+	}
+	if n, rowsErr := lockResult.RowsAffected(); rowsErr != nil {
+		return nil, rowsErr
+	} else if n != 1 {
+		return nil, ErrNotFound
+	}
+	accessArgs := []any{a.MessageID, expectedConvID, userID}
+	accessArgs = append(accessArgs, workspaceResourceAccessArgs(userID)...)
+	var allowed int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT 1
+		   FROM messages m JOIN conversations c ON c.id=m.conversation_id
+		  WHERE m.id=? AND m.conversation_id=? AND m.role='assistant'
+		    AND COALESCE(m.author_id,'')=? AND m.status='streaming'
+		    AND `+workspaceResourceAccessPredicate("c"), accessArgs...,
+	).Scan(&allowed); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrConversationAccessRevoked
+		}
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO artifacts(id, message_id, filename, storage_path, mime_type, size_bytes, created_at) VALUES(?, ?, ?, ?, ?, ?, ?)`,
+		a.ID, a.MessageID, a.Filename, a.StoragePath, a.MimeType, a.SizeBytes, createdAt); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	a.CreatedAt = createdAt
 	return &a, nil
 }

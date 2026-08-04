@@ -24,7 +24,7 @@ func listKBsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 			writeError(w, 404, errNotFound)
 			return
 		}
-		rows, err = store.ListWorkspaceKBs(r.Context(), d.DB, wsID)
+		rows, err = store.ListWorkspaceKBsForUser(r.Context(), d.DB, wsID, u.ID)
 	} else {
 		rows, err = store.ListKBs(r.Context(), d.DB, u.ID)
 	}
@@ -69,15 +69,9 @@ func createKBHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
-	// Enforce the group's knowledge-base cap (§ user groups). 0 = unlimited.
-	// Only standalone KBs count — project libraries are governed by the project
-	// cap.
-	if _, maxKBs := groupCapFor(d, r, u.ID, u.GroupID); maxKBs > 0 {
-		if n, err := store.CountStandaloneKBsByUser(r.Context(), d.DB, u.ID); err == nil && n >= maxKBs {
-			writeError(w, 403, errKBLimit)
-			return
-		}
-	}
+	// The store re-evaluates this standalone-KB cap while holding the creator
+	// row lock and inserts in the same transaction. 0 remains unlimited.
+	_, maxKBs := groupCapFor(d, r, u.ID, u.GroupID)
 	if req.EmbeddingModelID == "" {
 		embeds, _ := store.ListModels(r.Context(), d.DB, "embedding", true)
 		if len(embeds) == 0 {
@@ -91,15 +85,19 @@ func createKBHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errors.New("unknown embedding model"))
 		return
 	}
-	kb, err := store.CreateKB(r.Context(), d.DB, store.KnowledgeBase{
+	kb, err := store.CreateKBWithLimit(r.Context(), d.DB, store.KnowledgeBase{
 		UserID:           u.ID,
 		Name:             req.Name,
 		Description:      req.Description,
 		EmbeddingModelID: m.ID,
 		EmbeddingDim:     m.Dim,
 		WorkspaceID:      req.WorkspaceID,
-	})
+	}, maxKBs)
 	if err != nil {
+		if errors.Is(err, store.ErrKBLimitExceeded) {
+			writeError(w, http.StatusForbidden, errKBLimit)
+			return
+		}
 		if errors.Is(err, store.ErrKBNameExists) {
 			writeError(w, 409, err)
 			return
@@ -119,7 +117,7 @@ func deleteKBHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	for _, doc := range docs {
 		storagePaths = append(storagePaths, doc.StoragePath)
 	}
-	if err := store.DeleteKB(r.Context(), d.DB, id, u.ID); err != nil {
+	if err := store.DeleteKB(r.Context(), d.DB, id, u.ID, d.Config.UploadDir, d.Config.ArtifactDir); err != nil {
 		writeError(w, 404, errNotFound)
 		return
 	}
@@ -163,7 +161,7 @@ func listKBDocsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, errNotFound)
 		return
 	}
-	docs, err := store.ListDocuments(r.Context(), d.DB, "kb", id)
+	docs, err := store.ListDocumentsForUser(r.Context(), d.DB, "kb", id, u.ID)
 	if err != nil {
 		writeError(w, 500, err)
 		return
@@ -180,12 +178,15 @@ func deleteKBDocHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, errNotFound)
 		return
 	}
-	doc, err := store.GetDocument(r.Context(), d.DB, docID)
+	doc, err := store.GetDocumentForUser(r.Context(), d.DB, docID, u.ID)
 	if err != nil || doc.KBID != id {
 		writeError(w, 404, errNotFound)
 		return
 	}
-	_ = store.DeleteDocument(r.Context(), d.DB, docID)
+	if err := store.DeleteDocumentForUser(r.Context(), d.DB, docID, "kb", id, u.ID); err != nil {
+		writeError(w, 404, errNotFound)
+		return
+	}
 	cleanupRAGDocument(r.Context(), d, docID, "delete kb document "+docID)
 	cleanupStoragePaths(r.Context(), d, []string{doc.StoragePath}, "delete kb document "+docID)
 	writeJSON(w, 200, map[string]bool{"ok": true})

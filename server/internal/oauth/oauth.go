@@ -1,16 +1,17 @@
 // Package oauth implements the provider-agnostic Authorization Code flow used
 // by the social-login handlers. It special-cases the three built-in providers
-// (Google, GitHub, Apple) and supports a generic OIDC provider whose endpoints
-// are supplied by the admin.
+// (Google, GitHub, Apple), a generic OIDC provider, and a generic OAuth 2.0
+// provider whose endpoints are supplied by the admin.
 //
-// Trust model: the authorization code arrives via the browser redirect, but the
-// code→token exchange and every userinfo call are server-to-server over TLS
-// straight to the provider. We therefore trust the id_token's claims without a
-// separate JWKS signature check — TLS already authenticates the issuer for that
-// direct call (this is the standard server-side confidential-client posture).
+// ID tokens are authenticated independently of the token endpoint connection:
+// their signature, issuer, audience, authorized party, lifetime and nonce are
+// verified before any identity claim is used. GitHub and generic OAuth 2.0 do
+// not treat access tokens as ID tokens; they resolve identity through a fixed
+// HTTPS userinfo endpoint instead.
 package oauth
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/sha256"
@@ -21,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -30,6 +32,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 
 	"aivory/server/internal/envcfg"
+	"aivory/server/internal/netsafe"
 )
 
 // Config is the resolved settings for one provider. Build it from a stored
@@ -38,6 +41,8 @@ type Config struct {
 	Kind         string
 	ClientID     string
 	ClientSecret string // Apple: the AuthKey .p8 private key (PEM)
+	IssuerURL    string
+	JWKSURL      string
 	AuthURL      string
 	TokenURL     string
 	UserInfoURL  string
@@ -64,6 +69,19 @@ type UserInfo struct {
 var httpClientTimeout = 15 * time.Second
 var httpClient = &http.Client{Timeout: httpClientTimeout}
 
+// Generic OAuth endpoints are administrator supplied, so their server-side
+// requests use a DNS-rebinding-safe client and may not redirect away from the
+// configured token/userinfo URL. OAuth token and userinfo endpoints are
+// expected to answer directly; following redirects could move credentials or
+// bearer tokens to a different host.
+var genericOAuth2HTTPClient = func() *http.Client {
+	c := netsafe.PrivateBlockClient(httpClientTimeout)
+	c.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
+		return errors.New("generic oauth2 endpoint redirects are not allowed")
+	}
+	return c
+}()
+
 // oauthProviderResponseBodyCap bounds a provider token/userinfo response read.
 var oauthProviderResponseBodyCap = int64(1 << 20)
 
@@ -73,26 +91,39 @@ var appleClientSecretJwtExpiry = envcfg.Dur("AIVORY_OAUTH_APPLE_CLIENT_SECRET_JW
 // snippetMaxLen caps an error-body snippet included in error messages.
 var snippetMaxLen = 200
 
-// Resolve fills built-in endpoints/scopes for known kinds without overwriting
-// any explicit override already present on the Config.
+// Resolve pins built-in providers to their official trust and protocol
+// endpoints. Custom issuer/JWKS/auth/token hosts belong only to kind=oidc or
+// kind=oauth2; a stale or malicious stored override must never move a built-in
+// provider's signing-key trust root or authorization-code exchange to another
+// host.
 func Resolve(c Config) Config {
 	switch c.Kind {
 	case "google":
-		c.AuthURL = orStr(c.AuthURL, "https://accounts.google.com/o/oauth2/v2/auth")
-		c.TokenURL = orStr(c.TokenURL, "https://oauth2.googleapis.com/token")
-		c.UserInfoURL = orStr(c.UserInfoURL, "https://openidconnect.googleapis.com/v1/userinfo")
+		c.IssuerURL = "https://accounts.google.com"
+		c.JWKSURL = "https://www.googleapis.com/oauth2/v3/certs"
+		c.AuthURL = "https://accounts.google.com/o/oauth2/v2/auth"
+		c.TokenURL = "https://oauth2.googleapis.com/token"
+		c.UserInfoURL = "https://openidconnect.googleapis.com/v1/userinfo"
 		c.Scopes = orStr(c.Scopes, "openid email profile")
 	case "github":
-		c.AuthURL = orStr(c.AuthURL, "https://github.com/login/oauth/authorize")
-		c.TokenURL = orStr(c.TokenURL, "https://github.com/login/oauth/access_token")
-		c.UserInfoURL = orStr(c.UserInfoURL, "https://api.github.com/user")
+		c.IssuerURL = ""
+		c.JWKSURL = ""
+		c.AuthURL = "https://github.com/login/oauth/authorize"
+		c.TokenURL = "https://github.com/login/oauth/access_token"
+		c.UserInfoURL = "https://api.github.com/user"
 		c.Scopes = orStr(c.Scopes, "read:user user:email")
 	case "apple":
-		c.AuthURL = orStr(c.AuthURL, "https://appleid.apple.com/auth/authorize")
-		c.TokenURL = orStr(c.TokenURL, "https://appleid.apple.com/auth/token")
+		c.IssuerURL = "https://appleid.apple.com"
+		c.JWKSURL = "https://appleid.apple.com/auth/keys"
+		c.AuthURL = "https://appleid.apple.com/auth/authorize"
+		c.TokenURL = "https://appleid.apple.com/auth/token"
+		c.UserInfoURL = ""
 		c.Scopes = orStr(c.Scopes, "name email")
-	default: // oidc / generic — rely on the admin-supplied endpoints.
+	case "oidc": // Generic OIDC relies on the admin-supplied endpoints.
 		c.Scopes = orStr(c.Scopes, "openid email profile")
+	case "oauth2":
+		// OAuth 2.0 defines no standard identity scopes. Preserve exactly what
+		// the administrator configured instead of assuming OIDC's openid scope.
 	}
 	return c
 }
@@ -100,24 +131,53 @@ func Resolve(c Config) Config {
 // UsesPKCE reports whether the kind should run PKCE. Enabled for the standards
 // providers; GitHub's classic app flow and Apple's flow use state only.
 func UsesPKCE(kind string) bool {
-	return kind == "google" || kind == "oidc"
+	return kind == "google" || kind == "oidc" || kind == "oauth2"
 }
 
-// usesFormPost reports whether the provider posts the callback (Apple, because
-// we request the name/email scope).
-func UsesFormPost(kind string) bool { return kind == "apple" }
+// UsesFormPost reports whether the authorization response is a cross-site POST.
+// Apple always uses form_post. Generic OAuth/OIDC providers may declare the
+// same response mode in their fixed authorization endpoint query.
+func UsesFormPost(c Config) bool {
+	if c.Kind == "apple" {
+		return true
+	}
+	if c.Kind != "oidc" && c.Kind != "oauth2" {
+		return false
+	}
+	u, err := url.Parse(strings.TrimSpace(c.AuthURL))
+	if err != nil {
+		return false
+	}
+	for _, mode := range u.Query()["response_mode"] {
+		if strings.EqualFold(strings.TrimSpace(mode), "form_post") {
+			return true
+		}
+	}
+	return false
+}
+
+// UsesIDToken reports whether the provider is expected to return an OIDC ID
+// token. GitHub's classic OAuth App flow is intentionally excluded.
+func UsesIDToken(kind string) bool {
+	return kind == "google" || kind == "apple" || kind == "oidc"
+}
 
 // AuthCodeURL builds the provider authorize URL the browser is redirected to.
-func (c Config) AuthCodeURL(redirectURI, state, codeChallenge string) string {
+func (c Config) AuthCodeURL(redirectURI, state, codeChallenge, nonce string) string {
 	q := url.Values{}
 	q.Set("client_id", c.ClientID)
 	q.Set("redirect_uri", redirectURI)
 	q.Set("response_type", "code")
-	q.Set("scope", c.Scopes)
+	if strings.TrimSpace(c.Scopes) != "" {
+		q.Set("scope", c.Scopes)
+	}
 	q.Set("state", state)
 	if codeChallenge != "" {
 		q.Set("code_challenge", codeChallenge)
 		q.Set("code_challenge_method", "S256")
+	}
+	if UsesIDToken(c.Kind) && nonce != "" {
+		q.Set("nonce", nonce)
 	}
 	if c.Kind == "apple" {
 		// Apple requires form_post whenever name/email scope is requested.
@@ -171,7 +231,8 @@ func (c Config) Exchange(ctx context.Context, redirectURI, code, codeVerifier st
 	// Attempt 2 — client_secret_basic: credentials in an Authorization: Basic
 	// header. Only when the first attempt looks like a client-auth rejection.
 	if secret != "" && (status == http.StatusUnauthorized || isInvalidClient(err)) {
-		authz := "Basic " + base64.StdEncoding.EncodeToString([]byte(c.ClientID+":"+secret))
+		credentials := url.QueryEscape(c.ClientID) + ":" + url.QueryEscape(secret)
+		authz := "Basic " + base64.StdEncoding.EncodeToString([]byte(credentials))
 		if tok2, _, err2 := c.postToken(ctx, cloneValues(form), authz); err2 == nil {
 			return tok2, nil
 		}
@@ -182,6 +243,13 @@ func (c Config) Exchange(ctx context.Context, redirectURI, code, codeVerifier st
 // postToken performs one token-endpoint POST and parses the response. authHeader,
 // when non-empty, is sent as the Authorization header (client_secret_basic).
 func (c Config) postToken(ctx context.Context, form url.Values, authHeader string) (Tokens, int, error) {
+	client := httpClient
+	if c.Kind == "oauth2" || c.Kind == "oidc" {
+		if err := ValidateHTTPSProviderEndpoint(c.TokenURL); err != nil {
+			return Tokens{}, 0, fmt.Errorf("invalid custom OAuth token_url: %w", err)
+		}
+		client = genericOAuth2HTTPClient
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.TokenURL, strings.NewReader(form.Encode()))
 	if err != nil {
 		return Tokens{}, 0, err
@@ -191,7 +259,7 @@ func (c Config) postToken(ctx context.Context, form url.Values, authHeader strin
 	if authHeader != "" {
 		req.Header.Set("Authorization", authHeader)
 	}
-	resp, err := httpClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return Tokens{}, 0, err
 	}
@@ -232,32 +300,39 @@ func isInvalidClient(err error) bool {
 	return err != nil && strings.Contains(strings.ToLower(err.Error()), "invalid_client")
 }
 
-// FetchUserInfo normalises the provider's identity. GitHub uses its REST API;
-// every other provider prefers the id_token, falling back to the userinfo
-// endpoint.
-func (c Config) FetchUserInfo(ctx context.Context, tk Tokens) (UserInfo, error) {
-	if c.Kind == "github" {
+// FetchUserInfo normalises the provider's identity. GitHub uses its pinned REST
+// API, generic OAuth 2.0 uses its configured HTTPS userinfo API, and every OIDC
+// provider must return a signed ID token bound to this login's nonce.
+func (c Config) FetchUserInfo(ctx context.Context, tk Tokens, expectedNonce string) (UserInfo, error) {
+	switch c.Kind {
+	case "github":
 		return c.githubUser(ctx, tk.AccessToken)
-	}
-	if tk.IDToken != "" {
-		if info, ok := decodeIDToken(tk.IDToken); ok {
-			return info, nil
+	case "oauth2":
+		if strings.TrimSpace(tk.AccessToken) == "" {
+			return UserInfo{}, errors.New("token endpoint returned no access_token")
 		}
+		if err := ValidateHTTPSProviderEndpoint(c.UserInfoURL); err != nil {
+			return UserInfo{}, fmt.Errorf("invalid generic oauth2 userinfo_url: %w", err)
+		}
+		return c.oauth2UserInfo(ctx, tk.AccessToken)
+	case "google", "apple", "oidc":
+		if strings.TrimSpace(tk.IDToken) == "" {
+			return UserInfo{}, errors.New("token endpoint returned no id_token")
+		}
+		return c.verifyIDToken(ctx, tk.IDToken, expectedNonce)
+	default:
+		return UserInfo{}, errors.New("unsupported oauth provider kind")
 	}
-	if c.UserInfoURL == "" {
-		return UserInfo{}, errors.New("no id_token and no userinfo endpoint configured")
-	}
-	return c.oidcUserInfo(ctx, tk.AccessToken)
 }
 
-func (c Config) oidcUserInfo(ctx context.Context, accessToken string) (UserInfo, error) {
+func (c Config) oauth2UserInfo(ctx context.Context, accessToken string) (UserInfo, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.UserInfoURL, nil)
 	if err != nil {
 		return UserInfo{}, err
 	}
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	req.Header.Set("Accept", "application/json")
-	resp, err := httpClient.Do(req)
+	resp, err := genericOAuth2HTTPClient.Do(req)
 	if err != nil {
 		return UserInfo{}, err
 	}
@@ -267,8 +342,19 @@ func (c Config) oidcUserInfo(ctx context.Context, accessToken string) (UserInfo,
 		return UserInfo{}, fmt.Errorf("userinfo %d: %s", resp.StatusCode, snippet(body))
 	}
 	var m map[string]any
-	if err := json.Unmarshal(body, &m); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.UseNumber()
+	if err := decoder.Decode(&m); err != nil {
 		return UserInfo{}, err
+	}
+	// Match json.Unmarshal's single-value semantics. Decoder.Decode alone would
+	// accept a valid profile followed by a second JSON value.
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		if err == nil {
+			err = errors.New("multiple JSON values")
+		}
+		return UserInfo{}, fmt.Errorf("decode userinfo trailing data: %w", err)
 	}
 	info := UserInfo{
 		Subject:       str(m["sub"]),
@@ -284,6 +370,63 @@ func (c Config) oidcUserInfo(ctx context.Context, accessToken string) (UserInfo,
 		return UserInfo{}, errors.New("userinfo missing subject")
 	}
 	return info, nil
+}
+
+// SubjectNamespace identifies the exact trust domain behind one provider row.
+// It covers every supported kind, including pinned built-ins: switching a row
+// between built-in/custom kinds or changing an OIDC issuer/JWKS can therefore
+// never make an equal-looking raw subject inherit an older identity.
+func (c Config) SubjectNamespace() string {
+	c = Resolve(c)
+	// Only fields that participate in this kind's identity proof belong in its
+	// trust generation. OIDC identity comes exclusively from the signed ID token,
+	// while OAuth2 UserInfo has no issuer/JWKS relationship.
+	if c.Kind == "oidc" {
+		c.UserInfoURL = ""
+	}
+	if c.Kind == "oauth2" {
+		c.IssuerURL = ""
+		c.JWKSURL = ""
+	}
+	trust, _ := json.Marshal([]string{
+		"oauth-subject-namespace-v1",
+		strings.TrimSpace(c.Kind),
+		strings.TrimSpace(c.ClientID),
+		strings.TrimSpace(c.IssuerURL),
+		strings.TrimSpace(c.JWKSURL),
+		strings.TrimSpace(c.AuthURL),
+		strings.TrimSpace(c.TokenURL),
+		strings.TrimSpace(c.UserInfoURL),
+	})
+	digest := sha256.Sum256(trust)
+	return "oauth:v1:" + base64.RawURLEncoding.EncodeToString(digest[:]) + ":"
+}
+
+// NamespaceSubject binds a raw provider subject to SubjectNamespace.
+func (c Config) NamespaceSubject(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	return c.SubjectNamespace() + raw
+}
+
+// ValidateHTTPSProviderEndpoint validates an administrator-supplied OAuth/OIDC
+// endpoint without resolving DNS. The generic OAuth 2.0 HTTP client performs a
+// second dial-time resolved-IP check, which closes DNS-rebinding and redirect
+// routes to loopback, private networks, and cloud metadata services.
+func ValidateHTTPSProviderEndpoint(raw string) error {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.Opaque != "" || u.Fragment != "" {
+		return errors.New("must be an absolute https URL without credentials or fragment")
+	}
+	host := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(u.Hostname())), ".")
+	if host == "" || host == "localhost" || strings.HasSuffix(host, ".localhost") || strings.Contains(host, "%") {
+		return errors.New("must not target a local host")
+	}
+	if ip := net.ParseIP(host); ip != nil && !netsafe.IsPublicIP(ip) {
+		return errors.New("must not target a private or reserved IP address")
+	}
+	return nil
 }
 
 func (c Config) githubUser(ctx context.Context, accessToken string) (UserInfo, error) {
@@ -372,38 +515,6 @@ func appleClientSecret(c Config) (string, error) {
 	tok := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
 	tok.Header["kid"] = c.KeyID
 	return tok.SignedString(ecKey)
-}
-
-// decodeIDToken reads the JWT payload (no signature check — see package doc).
-func decodeIDToken(idToken string) (UserInfo, bool) {
-	parts := strings.Split(idToken, ".")
-	if len(parts) < 2 {
-		return UserInfo{}, false
-	}
-	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return UserInfo{}, false
-	}
-	var m map[string]any
-	if err := json.Unmarshal(payload, &m); err != nil {
-		return UserInfo{}, false
-	}
-	// §A7: reject an expired id_token (60s skew). This is NOT a substitute for
-	// JWKS signature verification — for fully-untrusted generic oidc token
-	// endpoints, verifying the RS256/ES256 signature against the provider's JWKS
-	// (and iss/aud) is the proper control; the account-takeover path is otherwise
-	// closed by requiring a VERIFIED email before linking (see resolveOAuthUser).
-	if exp, ok := m["exp"].(float64); ok && time.Now().Unix() > int64(exp)+60 {
-		return UserInfo{}, false
-	}
-	info := UserInfo{
-		Subject:       str(m["sub"]),
-		Email:         str(m["email"]),
-		EmailVerified: truthy(m["email_verified"]),
-		Name:          str(m["name"]),
-		AvatarURL:     str(m["picture"]),
-	}
-	return info, info.Subject != ""
 }
 
 // PKCEChallenge derives the S256 code_challenge for a verifier.

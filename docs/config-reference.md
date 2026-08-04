@@ -2,10 +2,10 @@
 
 > 版本 v2.0 · 2026-07-15 · 由整仓源码生成（对应本次改动：所有此前「硬编码但值得调整」的参数均已改为环境变量可覆盖）
 >
-> **这 300 个环境变量全部是可选的，未在 `.env.example` 中列出。** 不设置任何一个，Aivory 使用下表所列的默认值。只有当你需要调整某个具体参数时，才在部署环境里添加对应的变量。
+> **这 306 个环境变量全部是可选的，未在 `.env.example` 中列出。** 不设置任何一个，Aivory 使用下表所列的默认值。只有当你需要调整某个具体参数时，才在部署环境里添加对应的变量。
 > 如果需要调整，把用到的变量抄一份加进你自己的 `.env` 即可（`.env.example` 保持精简，不会自动包含这些高级选项）。
 >
-> **后端（Go）**：271 个，读取自进程环境变量，改动后**需重启 `aivory-api` 进程**生效。
+> **后端（Go）**：277 个，读取自进程环境变量，改动后**需重启 `aivory-api` 进程**生效。
 > **前端（Vite）**：23 个 `VITE_*` 变量，在**构建时**内联（`npm run build` / `vite build`），必须在构建环境设置，**运行时**改容器环境变量无效，需要重新构建产物。
 > **沙盒服务（Python）**：6 个 `SANDBOX_*` 变量（与已有的 `SANDBOX_*` 变量同一命名空间），读取自 `sandbox-service` 进程环境，改动后**需重启该进程**生效。
 > 类型：`duration`（Go 时长字符串，如 `90s`/`5m`/`2h`/`500ms`；对 Vite/Python 变量用纯数字，单位见默认值列）、`int`/`int64`、`float`、`bool`（`1/true/yes/on` 与 `0/false/no/off`）、`string`。
@@ -28,21 +28,21 @@
 
 ## 0. 总览
 
-共 **300** 个环境变量，按子系统分布：
+共 **306** 个环境变量，按子系统分布：
 
 | 子系统 | 变量数 |
 | --- | --- |
-| 1. LLM 对话 / 编排 / 内部模型调用 | 65 |
+| 1. LLM 对话 / 编排 / 内部模型调用 | 67 |
 | 2. RAG 文档解析 / 向量检索 | 60 |
 | 3. 沙盒代码执行 | 9 |
-| 4. 内置工具（搜索 / Python / 网络安全） | 14 |
+| 4. 内置工具（搜索 / Python / 网络安全） | 11 |
 | 5. 会话 / 消息 / 流式 API | 73 |
 | 6. 认证 / 会话 / 验证码 | 15 |
 | 7. 上传 / 文件 / 分享 | 18 |
-| 8. 管理后台任务（备份 / 向量维护 / 兑换码） | 20 |
+| 8. 管理后台任务（备份 / 向量维护 / 兑换码） | 27 |
 | 9. 服务器启动 / 配置加载 | 3 |
 | 10. 前端 | 23 |
-| **合计** | **300** |
+| **合计** | **306** |
 
 ---
 
@@ -86,6 +86,8 @@
 | `AIVORY_LLM_GEMINI_MAX_TOK` | `int` | `64000` | `llm/google_provider.go:78` | Default generationConfig.maxOutputTokens sent on each Gemini streaming request unless the request overrides it. |
 | `AIVORY_LLM_GEMINI_MAX_TOK_2` | `int` | `64000` | `llm/google_provider.go:472` | Default generationConfig.maxOutputTokens for the Gemini prompt-tool-mode call unless the request overrides it. |
 | `AIVORY_LLM_CONF` | `float` | `0.7` | `llm/memory_worker.go:40` | Fallback confidence assigned to an extracted memory when the extractor returns a value outside (0,1]. |
+| `AIVORY_STORE_M_CONFIDENCE` | `float` | `0.8` | `store/misc.go:18` | Fallback confidence written by CreateMemory only when the supplied confidence is exactly 0; this is a default, not a confidence filter or retrieval threshold. |
+| `AIVORY_STORE_LIST_MEMORIES_ACTIVE` | `int` | `20` | `store/misc.go:19` | Maximum combined ACTIVE and QUERY_DEPENDENT memories returned for system-prompt injection, ordered by most recently updated first. |
 | `AIVORY_LLM_OFFICIAL_TOOL_SPEC` | `string` | `"medium"` | `store/official_tools.go` | `search_context_size` used when creating the default OpenAI Responses `web_search` definition or migrating its legacy string entry. An explicit admin request JSON takes precedence thereafter. |
 | `AIVORY_LLM_MAX_ITER_2` | `int` | `20` | `llm/openai_provider.go:110` | Hard cap on native tool-use rounds (Chat Completions calls) in the OpenAI streamChat loop. |
 | `AIVORY_LLM_MAX_ITER_3` | `int` | `20` | `llm/openai_provider.go:610` | Hard cap on native tool-use rounds (Responses API calls) in the OpenAI streamResponses loop. |
@@ -395,7 +397,14 @@ SSE 心跳、流恢复窗口、生成时长上限、分页与搜索上限、消�
 | `AIVORY_API_USAGE_REPORT_PAGE_SIZE_CAP` | `int` | `50` | `api/admin_handlers.go:24` | Fallback page size for the admin usage-records report when the requested page_size is missing or outside 1-200. |
 | `AIVORY_API_ANALYTICS_WINDOW` | `int` | `30` | `api/admin_handlers.go:25` | Default look-back window (days) for the admin analytics dashboard when no days query param is supplied. |
 | `AIVORY_API_ANALYTICS_WINDOW_2` | `int` | `365` | `api/admin_handlers.go:26` | Upper bound (days) accepted for the admin analytics window query param; out-of-range values are ignored. |
-| `AIVORY_API_ANALYTICS_BREAKDOWN_TOP_N` | `int` | `8` | `api/admin_handlers.go:27` | Number of top keys (per-model and per-user) kept in the admin analytics breakdown and its time series. |
+| `AIVORY_STORE_ADMIN_USAGE_RECORDS_LIMIT` | `int` | `500` | `store/misc.go:20` | Largest positive page limit accepted by AdminUsageRecords; a larger value falls back to AIVORY_STORE_ADMIN_USAGE_RECORDS_LIMIT_2 rather than being clamped. |
+| `AIVORY_STORE_ADMIN_USAGE_RECORDS_LIMIT_2` | `int` | `50` | `store/misc.go:21` | Fallback page size used by AdminUsageRecords when limit is less than or equal to 0 or exceeds AIVORY_STORE_ADMIN_USAGE_RECORDS_LIMIT. |
+| `AIVORY_STORE_USAGE_TREND_WINDOW` | `int` | `7` | `store/misc.go:22` | Fallback look-back in days used by AdminUsageTrend only when days is less than or equal to 0; callers using AdminUsageTrendBetween supply explicit bounds. |
+| `AIVORY_STORE_USAGE_TREND_HOURLY_BUCKET_THRESHOLD` | `int` | `2` | `store/misc.go:23` | Day windows at or below this threshold are bucketed hourly by UsageBucketWidth; otherwise windows above 90 days are weekly and the remaining windows are daily. |
+| `AIVORY_STORE_USAGE_TOTALS_WINDOW` | `int` | `7` | `store/misc.go:24` | Fallback look-back in days used by AdminUsageTotals only when days is less than or equal to 0; callers using AdminUsageTotalsBetween supply explicit bounds. |
+| `AIVORY_STORE_USAGE_BREAKDOWN_TOP_N` | `int` | `8` | `store/misc.go:25` | Default row cap applied by AdminUsageBreakdownBetween only when limit equals 0; a negative limit returns all rows. The current main admin analytics route passes -1 and bypasses this cap. |
+| `AIVORY_STORE_USAGE_BREAKDOWN_WINDOW` | `int` | `7` | `store/misc.go:26` | Fallback look-back in days used by AdminUsageBreakdown only when days is less than or equal to 0; callers using AdminUsageBreakdownBetween supply explicit bounds. |
+| `AIVORY_STORE_USAGE_SERIES_WINDOW` | `int` | `7` | `store/misc.go:27` | Fallback look-back in days used by AdminUsageSeries only when days is less than or equal to 0; the current main admin analytics route does not call this legacy series wrapper. |
 | `AIVORY_API_BULK_REDEEM_CODE_GENERATION_QUANTITY` | `int` | `1000` | `api/admin_redeem_handlers.go:18` | Maximum number of redeem codes a single bulk-generation request may mint. |
 | `AIVORY_API_MAX_SKILL_ASSET_BYTES` | `int64` | `20*1024*1024` | `api/admin_skill_assets.go:24` | Maximum byte size for a single uploaded skill asset file (templates/scripts/small data). |
 | `AIVORY_API_VECTOR_MAINTENANCE_JOB_HISTORY_RETENTION` | `int` | `20` | `api/admin_vectors_handlers.go:18` | Number of most-recent vector-maintenance jobs kept in the in-memory job history; older ones are dropped. |

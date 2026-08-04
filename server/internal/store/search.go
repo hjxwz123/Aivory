@@ -109,18 +109,20 @@ func SearchConversations(ctx context.Context, db *sql.DB, userID, workspaceID, q
 	}
 	like := "%" + likeEscape(q) + "%"
 	scope := `user_id=? AND COALESCE(workspace_id,'')=''`
-	scopeArg := userID
+	scopeArgs := []any{userID}
 	if workspaceID != "" {
-		scope = `workspace_id=?`
-		scopeArg = workspaceID
+		scope = `workspace_id=? AND ` + workspaceResourceAccessPredicate("conversations")
+		scopeArgs = []any{workspaceID}
+		scopeArgs = append(scopeArgs, workspaceResourceAccessArgs(userID)...)
 	}
 
 	// Title hits.
 	titles = []SearchHit{}
+	titleArgs := append(append([]any{}, scopeArgs...), like, titleLimit)
 	tRows, err := db.QueryContext(ctx,
 		`SELECT id, title, updated_at FROM conversations
 		 WHERE `+scope+` AND archived=0 AND inline_source_conv='' AND LOWER(title) LIKE ? ESCAPE '\'
-		 ORDER BY updated_at DESC LIMIT ?`, scopeArg, like, titleLimit)
+		 ORDER BY updated_at DESC LIMIT ?`, titleArgs...)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -140,14 +142,18 @@ func SearchConversations(ctx context.Context, db *sql.DB, userID, workspaceID, q
 	// Content hits — scan the small search_text column.
 	messages = []SearchHit{}
 	mScope := `c.user_id=? AND COALESCE(c.workspace_id,'')=''`
+	mScopeArgs := []any{userID}
 	if workspaceID != "" {
-		mScope = `c.workspace_id=?`
+		mScope = `c.workspace_id=? AND ` + workspaceResourceAccessPredicate("c")
+		mScopeArgs = []any{workspaceID}
+		mScopeArgs = append(mScopeArgs, workspaceResourceAccessArgs(userID)...)
 	}
+	messageArgs := append(append([]any{}, mScopeArgs...), like, msgLimit)
 	mRows, err := db.QueryContext(ctx,
 		`SELECT m.conversation_id, c.title, m.id, m.role, m.search_text, m.created_at, c.updated_at
 		 FROM messages m JOIN conversations c ON m.conversation_id=c.id
 		 WHERE `+mScope+` AND c.archived=0 AND c.inline_source_conv='' AND m.search_text<>'' AND LOWER(m.search_text) LIKE ? ESCAPE '\'
-		 ORDER BY c.updated_at DESC, m.created_at DESC LIMIT ?`, scopeArg, like, msgLimit)
+		 ORDER BY c.updated_at DESC, m.created_at DESC LIMIT ?`, messageArgs...)
 	if err != nil {
 		return nil, nil, err
 	}

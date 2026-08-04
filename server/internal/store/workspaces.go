@@ -37,6 +37,89 @@ type WorkspaceMember struct {
 	AvatarURL string `json:"avatar_url"`
 }
 
+// workspaceResourceAccessPredicate is the authoritative access boundary for a
+// row that carries user_id + workspace_id. Personal rows belong to their user;
+// workspace rows belong to the workspace, so their original creator must still
+// be the canonical workspace owner or a current member. The owner check keeps
+// legacy databases safe when their redundant owner membership row is missing.
+//
+// alias is a trusted SQL identifier supplied by store code (for example "c").
+// Callers must append workspaceResourceAccessArgs(userID) in predicate order.
+func workspaceResourceAccessPredicate(alias string) string {
+	prefix := ""
+	if alias != "" {
+		prefix = alias + "."
+	}
+	return `((COALESCE(` + prefix + `workspace_id,'')='' AND ` + prefix + `user_id=?) OR (` +
+		`COALESCE(` + prefix + `workspace_id,'')<>'' AND EXISTS (` +
+		`SELECT 1 FROM workspaces resource_workspace ` +
+		`WHERE resource_workspace.id=` + prefix + `workspace_id AND (` +
+		`resource_workspace.owner_id=? OR EXISTS (` +
+		`SELECT 1 FROM workspace_members resource_member ` +
+		`WHERE resource_member.workspace_id=resource_workspace.id AND resource_member.user_id=?` +
+		`)` +
+		`)` +
+		`)` +
+		`))`
+}
+
+func workspaceResourceAccessArgs(userID string) []any {
+	return []any{userID, userID, userID}
+}
+
+// workspaceResourceManagerPredicate is the stricter share-management boundary:
+// a personal resource's creator; or, in a workspace, its canonical owner or the
+// resource creator while that creator is still a current member. Other ordinary
+// members may collaborate on content but may not publish or revoke its share.
+func workspaceResourceManagerPredicate(alias string) string {
+	prefix := ""
+	if alias != "" {
+		prefix = alias + "."
+	}
+	return `((COALESCE(` + prefix + `workspace_id,'')='' AND ` + prefix + `user_id=?) OR (` +
+		`COALESCE(` + prefix + `workspace_id,'')<>'' AND EXISTS (` +
+		`SELECT 1 FROM workspaces resource_workspace ` +
+		`WHERE resource_workspace.id=` + prefix + `workspace_id AND (` +
+		`resource_workspace.owner_id=? OR (` + prefix + `user_id=? AND EXISTS (` +
+		`SELECT 1 FROM workspace_members resource_manager_member ` +
+		`WHERE resource_manager_member.workspace_id=resource_workspace.id AND resource_manager_member.user_id=?` +
+		`)` +
+		`)` +
+		`)` +
+		`)` +
+		`))`
+}
+
+func workspaceResourceManagerArgs(userID string) []any {
+	return []any{userID, userID, userID, userID}
+}
+
+// workspaceAcceptsResourceCreationPredicate blocks new shared resources once
+// either the canonical owner or the creating user has entered account deletion.
+// alias is a trusted workspaces-table alias; the single placeholder is the
+// creating user's id.
+func workspaceAcceptsResourceCreationPredicate(alias string) string {
+	return `EXISTS (
+		SELECT 1 FROM users creation_owner
+		 WHERE creation_owner.id=` + alias + `.owner_id AND creation_owner.status='active'
+	) AND EXISTS (
+		SELECT 1 FROM users creation_user
+		 WHERE creation_user.id=? AND creation_user.status='active'
+	)`
+}
+
+func beginWorkspaceMutationTx(ctx context.Context, db *sql.DB, workspaceID string) (*sql.Tx, error) {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	if err := lockWorkspaceMembershipTx(ctx, tx, workspaceID); err != nil {
+		_ = tx.Rollback()
+		return nil, err
+	}
+	return tx, nil
+}
+
 // avatarFromSettings extracts settings.avatar_url from the users.settings JSON
 // blob (the same field the sidebar reads client-side).
 func avatarFromSettings(settings string) string {
@@ -107,14 +190,19 @@ func GetWorkspace(ctx context.Context, db *sql.DB, id string) (*Workspace, error
 	return &w, nil
 }
 
-// GetWorkspaceForMember returns the workspace only when userID is a member.
+// GetWorkspaceForMember returns the workspace only when userID is a member or
+// its canonical owner. The owner fallback supports legacy rows missing from
+// workspace_members without letting an ordinary former member back in.
 // This is the standard access gate for workspace endpoints.
 func GetWorkspaceForMember(ctx context.Context, db *sql.DB, id, userID string) (*Workspace, error) {
 	var w Workspace
 	err := db.QueryRowContext(ctx,
-		`SELECT w.id, w.name, w.owner_id, w.invite_token, w.created_at, m.role
-		   FROM workspaces w JOIN workspace_members m ON m.workspace_id = w.id
-		  WHERE w.id=? AND m.user_id=?`, id, userID,
+		`SELECT w.id, w.name, w.owner_id, w.invite_token, w.created_at,
+		        CASE WHEN w.owner_id=? THEN 'owner' ELSE COALESCE(m.role,'') END
+		   FROM workspaces w
+		   LEFT JOIN workspace_members m ON m.workspace_id=w.id AND m.user_id=?
+		  WHERE w.id=? AND (w.owner_id=? OR m.user_id=?)`,
+		userID, userID, id, userID, userID,
 	).Scan(&w.ID, &w.Name, &w.OwnerID, &w.InviteToken, &w.CreatedAt, &w.Role)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -133,8 +221,8 @@ func GetWorkspaceByInviteToken(ctx context.Context, db *sql.DB, token string) (*
 		`SELECT w.id, w.name, w.owner_id, w.created_at,
 		        (SELECT COUNT(*) FROM workspace_members m WHERE m.workspace_id=w.id),
 		        COALESCE(u.name, '')
-		   FROM workspaces w LEFT JOIN users u ON u.id = w.owner_id
-		  WHERE w.invite_token=?`, token,
+		   FROM workspaces w JOIN users u ON u.id = w.owner_id
+		  WHERE w.invite_token=? AND u.status='active'`, token,
 	).Scan(&w.ID, &w.Name, &w.OwnerID, &w.CreatedAt, &w.MemberCount, &w.OwnerName)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -151,10 +239,13 @@ func GetWorkspaceByInviteToken(ctx context.Context, db *sql.DB, token string) (*
 // anyway by joining flow, but least-privilege costs nothing).
 func ListWorkspacesForUser(ctx context.Context, db *sql.DB, userID string) ([]Workspace, error) {
 	rows, err := db.QueryContext(ctx,
-		`SELECT w.id, w.name, w.owner_id, w.invite_token, w.created_at, m.role,
+		`SELECT w.id, w.name, w.owner_id, w.invite_token, w.created_at,
+		        CASE WHEN w.owner_id=? THEN 'owner' ELSE COALESCE(m.role,'') END,
 		        (SELECT COUNT(*) FROM workspace_members mm WHERE mm.workspace_id=w.id)
-		   FROM workspaces w JOIN workspace_members m ON m.workspace_id = w.id
-		  WHERE m.user_id=? ORDER BY w.created_at ASC`, userID)
+		   FROM workspaces w
+		   LEFT JOIN workspace_members m ON m.workspace_id=w.id AND m.user_id=?
+		  WHERE w.owner_id=? OR m.user_id=? ORDER BY w.created_at ASC`,
+		userID, userID, userID, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -180,11 +271,17 @@ func CountOwnedWorkspaces(ctx context.Context, db *sql.DB, userID string) (int, 
 	return n, err
 }
 
-// IsWorkspaceMember reports membership + role (” when not a member).
+// IsWorkspaceMember reports membership + role ("" when not a member). The
+// canonical owner remains authoritative even if a legacy owner membership row
+// is missing.
 func IsWorkspaceMember(ctx context.Context, db *sql.DB, workspaceID, userID string) (string, error) {
 	var role string
 	err := db.QueryRowContext(ctx,
-		`SELECT role FROM workspace_members WHERE workspace_id=? AND user_id=?`, workspaceID, userID,
+		`SELECT CASE WHEN w.owner_id=? THEN 'owner' ELSE COALESCE(m.role,'') END
+		   FROM workspaces w
+		   LEFT JOIN workspace_members m ON m.workspace_id=w.id AND m.user_id=?
+		  WHERE w.id=? AND (w.owner_id=? OR m.user_id=?)`,
+		userID, userID, workspaceID, userID, userID,
 	).Scan(&role)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
@@ -217,7 +314,81 @@ func ListWorkspaceMembers(ctx context.Context, db *sql.DB, workspaceID string) (
 
 // JoinWorkspace adds userID as a member (idempotent — re-joining is a no-op).
 func JoinWorkspace(ctx context.Context, db *sql.DB, workspaceID, userID string) error {
-	_, err := db.ExecContext(ctx,
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck
+	if err := lockWorkspaceMembershipTx(ctx, tx, workspaceID); err != nil {
+		return err
+	}
+	if err := joinWorkspaceTx(ctx, tx, workspaceID, userID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// JoinWorkspaceByInviteToken consumes the capability under the same workspace
+// lock used by kick/token rotation. Rechecking the token after acquiring that
+// lock prevents a request that resolved the old token just before a kick from
+// re-adding the removed member afterwards.
+func JoinWorkspaceByInviteToken(ctx context.Context, db *sql.DB, token, userID string) (*Workspace, error) {
+	var workspaceID string
+	if err := db.QueryRowContext(ctx,
+		`SELECT id FROM workspaces WHERE invite_token=?`, token,
+	).Scan(&workspaceID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	tx, err := beginWorkspaceMutationTx(ctx, db, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback() //nolint:errcheck
+	var workspace Workspace
+	if err := tx.QueryRowContext(ctx,
+		`SELECT w.id, w.name, w.owner_id, w.created_at
+		   FROM workspaces w JOIN users owner ON owner.id=w.owner_id
+		  WHERE w.id=? AND w.invite_token=? AND owner.status='active'`, workspaceID, token,
+	).Scan(&workspace.ID, &workspace.Name, &workspace.OwnerID, &workspace.CreatedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	if err := joinWorkspaceTx(ctx, tx, workspaceID, userID); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	workspace.Role = "member"
+	if workspace.OwnerID == userID {
+		workspace.Role = "owner"
+	}
+	return &workspace, nil
+}
+
+func joinWorkspaceTx(ctx context.Context, tx *sql.Tx, workspaceID, userID string) error {
+	var ownerStatus, joiningStatus string
+	if err := tx.QueryRowContext(ctx,
+		`SELECT owner.status, joining_user.status
+		   FROM workspaces w
+		   JOIN users owner ON owner.id=w.owner_id
+		   JOIN users joining_user ON joining_user.id=?
+		  WHERE w.id=?`, userID, workspaceID,
+	).Scan(&ownerStatus, &joiningStatus); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	}
+	if ownerStatus != "active" || joiningStatus != "active" {
+		return ErrNotFound
+	}
+	_, err := tx.ExecContext(ctx,
 		`INSERT INTO workspace_members(workspace_id, user_id, role) VALUES(?, ?, 'member')
 		 ON CONFLICT(workspace_id, user_id) DO NOTHING`, workspaceID, userID)
 	return err
@@ -226,27 +397,202 @@ func JoinWorkspace(ctx context.Context, db *sql.DB, workspaceID, userID string) 
 // LeaveWorkspace removes a member. The owner cannot leave — they must delete
 // the workspace instead (there is no ownership transfer).
 func LeaveWorkspace(ctx context.Context, db *sql.DB, workspaceID, userID string) error {
-	res, err := db.ExecContext(ctx,
-		`DELETE FROM workspace_members WHERE workspace_id=? AND user_id=? AND role<>'owner'`,
-		workspaceID, userID)
+	_, err := LeaveWorkspaceWithRevokedGenerations(ctx, db, workspaceID, userID)
+	return err
+}
+
+// LeaveWorkspaceWithRevokedGenerations returns the assistant message ids that
+// were terminalized in the membership transaction. The API uses those ids as
+// immutable generation epochs: their cache streams are tombstoned before the
+// leave response is acknowledged, and a later rejoin cannot revive them.
+func LeaveWorkspaceWithRevokedGenerations(ctx context.Context, db *sql.DB, workspaceID, userID string) ([]string, error) {
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return nil, err
+	}
+	defer tx.Rollback() //nolint:errcheck
+	if err := lockWorkspaceMembershipTx(ctx, tx, workspaceID); err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM conversation_shares
+		  WHERE user_id=? AND EXISTS (
+		    SELECT 1 FROM conversations c
+		     WHERE c.id=conversation_shares.conversation_id AND c.workspace_id=?
+		  )`, userID, workspaceID); err != nil {
+		return nil, err
+	}
+	revokedMessageIDs, err := scrubWorkspaceUserStreamingMessagesTx(ctx, tx, workspaceID, userID)
+	if err != nil {
+		return nil, err
+	}
+	res, err := tx.ExecContext(ctx,
+		`DELETE FROM workspace_members
+		  WHERE workspace_id=? AND user_id=? AND role<>'owner'
+		    AND NOT EXISTS (
+		      SELECT 1 FROM workspaces w
+		       WHERE w.id=workspace_members.workspace_id AND w.owner_id=workspace_members.user_id
+		    )`, workspaceID, userID)
+	if err != nil {
+		return nil, err
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		return ErrNotFound
+		return nil, ErrNotFound
 	}
-	return nil
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return revokedMessageIDs, nil
 }
 
 // RemoveWorkspaceMember is the owner's kick. The owner row itself is protected.
 func RemoveWorkspaceMember(ctx context.Context, db *sql.DB, workspaceID, memberID string) error {
-	res, err := db.ExecContext(ctx,
-		`DELETE FROM workspace_members WHERE workspace_id=? AND user_id=? AND role<>'owner'`,
+	_, err := RemoveWorkspaceMemberWithRevokedGenerations(ctx, db, workspaceID, memberID)
+	return err
+}
+
+// RemoveWorkspaceMemberWithRevokedGenerations is the cache-aware owner kick.
+// See LeaveWorkspaceWithRevokedGenerations for the returned id contract.
+func RemoveWorkspaceMemberWithRevokedGenerations(ctx context.Context, db *sql.DB, workspaceID, memberID string) ([]string, error) {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback() //nolint:errcheck
+	if err := lockWorkspaceMembershipTx(ctx, tx, workspaceID); err != nil {
+		return nil, err
+	}
+	// A kicked member typically still knows the old capability URL. Rotate it in
+	// this transaction so revocation cannot be bypassed by immediately rejoining.
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE workspaces SET invite_token=? WHERE id=?`, "wsi_"+genToken(), workspaceID); err != nil {
+		return nil, err
+	}
+	// Public capability links published by the departing creator stay revoked even
+	// if that account later receives a fresh invitation and rejoins.
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM conversation_shares
+		  WHERE user_id=? AND EXISTS (
+		    SELECT 1 FROM conversations c
+		     WHERE c.id=conversation_shares.conversation_id AND c.workspace_id=?
+		  )`, memberID, workspaceID); err != nil {
+		return nil, err
+	}
+	revokedMessageIDs, err := scrubWorkspaceUserStreamingMessagesTx(ctx, tx, workspaceID, memberID)
+	if err != nil {
+		return nil, err
+	}
+	res, err := tx.ExecContext(ctx,
+		`DELETE FROM workspace_members
+		  WHERE workspace_id=? AND user_id=? AND role<>'owner'
+		    AND NOT EXISTS (
+		      SELECT 1 FROM workspaces w
+		       WHERE w.id=workspace_members.workspace_id AND w.owner_id=workspace_members.user_id
+		    )`,
 		workspaceID, memberID)
+	if err != nil {
+		return nil, err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return nil, ErrNotFound
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return revokedMessageIDs, nil
+}
+
+// scrubWorkspaceUserStreamingMessagesTx makes membership revocation durable
+// across a later legitimate rejoin. Current membership alone cannot distinguish
+// a fresh generation from one started under the previous membership epoch, so
+// kick/leave terminalizes every still-streaming placeholder authored by the
+// departing principal before removing the membership row.
+func scrubWorkspaceUserStreamingMessagesTx(ctx context.Context, tx *sql.Tx, workspaceID, userID string) ([]string, error) {
+	return scrubWorkspaceStreamingMessagesTx(ctx, tx, workspaceID, userID)
+}
+
+// ScrubWorkspaceStreamingMessages terminalizes every active generation before
+// workspace teardown and returns the message ids whose cache streams must be
+// independently revoked. The workspace lock also serializes this sweep with
+// scoped generation persistence on PostgreSQL.
+func ScrubWorkspaceStreamingMessages(ctx context.Context, db *sql.DB, workspaceID string) ([]string, error) {
+	tx, err := beginWorkspaceMutationTx(ctx, db, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback() //nolint:errcheck
+	messageIDs, err := scrubWorkspaceStreamingMessagesTx(ctx, tx, workspaceID, "")
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return messageIDs, nil
+}
+
+func scrubWorkspaceStreamingMessagesTx(ctx context.Context, tx *sql.Tx, workspaceID, userID string) ([]string, error) {
+	query := `SELECT messages.id
+		  FROM messages JOIN conversations revoked_generation_conversation
+		    ON revoked_generation_conversation.id=messages.conversation_id
+		 WHERE messages.role='assistant' AND messages.status='streaming'
+		   AND revoked_generation_conversation.workspace_id=?`
+	args := []any{workspaceID}
+	if userID != "" {
+		query += ` AND COALESCE(messages.author_id,'')=?`
+		args = append(args, userID)
+	}
+	query += ` ORDER BY messages.id`
+	rows, err := tx.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	messageIDs := []string{}
+	for rows.Next() {
+		var messageID string
+		if err := rows.Scan(&messageID); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		messageIDs = append(messageIDs, messageID)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(messageIDs) == 0 {
+		return messageIDs, nil
+	}
+	updateArgs := anySlice(messageIDs)
+	_, err = tx.ExecContext(ctx,
+		`UPDATE messages
+		    SET blocks='[]', raw=NULL, citations='[]', stop_reason='stopped',
+		        input_tokens=0, output_tokens=0, cache_read_tokens=0, cache_write_tokens=0,
+		        cost=0, credits=0, status='stopped', error='', gen_ms=0,
+		        verify='', search_text=''
+		  WHERE id IN (`+idPlaceholders(len(messageIDs))+`)
+		    AND role='assistant' AND status='streaming'`, updateArgs...)
+	if err != nil {
+		return nil, err
+	}
+	return messageIDs, nil
+}
+
+// lockWorkspaceMembershipTx is the serialization point shared by membership
+// revocation and multi-statement workspace mutations. An operation that obtains
+// this lock before a kick is allowed to finish; one that obtains it afterwards
+// observes the revoked membership and fails closed. This is needed on Postgres,
+// where SQLite's database-wide writer lock is not available.
+func lockWorkspaceMembershipTx(ctx context.Context, tx *sql.Tx, workspaceID string) error {
+	res, err := tx.ExecContext(ctx, `UPDATE workspaces SET id=id WHERE id=?`, workspaceID)
 	if err != nil {
 		return err
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
+	if n, rowsErr := res.RowsAffected(); rowsErr != nil {
+		return rowsErr
+	} else if n != 1 {
 		return ErrNotFound
 	}
 	return nil

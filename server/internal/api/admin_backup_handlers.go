@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"aivory/server/internal/envcfg"
+	"aivory/server/internal/fileguard"
+	"aivory/server/internal/oauth"
 	"aivory/server/internal/store"
 )
 
@@ -26,7 +28,11 @@ var (
 	configImportMultipartMemoryBuffer = envcfg.Int64("AIVORY_API_CONFIG_IMPORT_MULTIPART_MEMORY_BUFFER", 16<<20)
 	backupImportMultipartMemoryBuffer = envcfg.Int64("AIVORY_API_BACKUP_IMPORT_MULTIPART_MEMORY_BUFFER", 32<<20)
 	errInvalidPaymentConfigArchive    = errors.New("invalid payment configuration in config archive")
+	errInvalidOAuthConfigArchive      = errors.New("invalid OAuth configuration in config archive")
 	errInvalidBillingConfigArchive    = errors.New("invalid billing configuration in config archive")
+	errInvalidBackupStoragePath       = errors.New("invalid storage path in backup archive")
+	errBackupImportAdminUnauthorized  = errors.New("backup import requires a current active administrator")
+	errConfigImportAdminUnauthorized  = errors.New("config import requires a current active administrator")
 )
 
 // Database backup / migration (§ admin → data migration).
@@ -52,6 +58,13 @@ func acceptedArchiveFormat(got, want string) bool {
 	return got == "aurelia"+suffix || got == "auven"+suffix
 }
 
+func validateArchiveVersion(label string, version, current int) error {
+	if version < 1 || version > current {
+		return fmt.Errorf("%s format v%d is unsupported (supported versions: v1 through v%d)", label, version, current)
+	}
+	return nil
+}
+
 // backupManifest is the archive's self-description (manifest.json).
 type backupManifest struct {
 	Format            string           `json:"format"` // always "aivory-backup"
@@ -66,6 +79,38 @@ type backupManifest struct {
 	QdrantPoints      int64            `json:"qdrant_points"`
 	SourceUploadDir   string           `json:"source_upload_dir"`
 	SourceArtifactDir string           `json:"source_artifact_dir"`
+}
+
+type backupImportOAuthIdentity struct {
+	ProviderID string
+	Subject    string
+	Email      string
+	CreatedAt  int64
+}
+
+type backupImportAdminSnapshot struct {
+	ID                string
+	Email             string
+	PasswordHash      string
+	Name              string
+	TokenVer          int
+	Settings          string
+	GroupID           string
+	GroupExpiresAt    int64
+	PreviousGroupID   string
+	TotpSecret        string
+	TotpEnabled       int
+	PasswordSet       int
+	PasswordChangedAt int64
+	LastSeenAt        int64
+	CreditsPermanent  float64
+	CreditsMicros     int64
+	CreditCycleAnchor int64
+	QuotaCycleAnchor  int64
+	SortOrder         int
+	CreatedAt         int64
+	Identities        []backupImportOAuthIdentity
+	Providers         map[string]store.OAuthProvider
 }
 
 // configManifest describes the lighter admin-configuration archive. It carries
@@ -89,7 +134,7 @@ const backupZipUploads = "files/uploads/"
 const backupZipArtifacts = "files/artifacts/"
 const configZipIcons = "assets/icons/"
 const configZipSkillAssets = "assets/skill-assets/"
-const configArchiveVersion = 1
+const configArchiveVersion = 2
 
 type backupArchiveOptions struct {
 	IncludeFiles  bool
@@ -358,7 +403,7 @@ func addDirToZip(zw *zip.Writer, root, prefix string) error {
 		return nil
 	}
 	return filepath.WalkDir(root, func(p string, de fs.DirEntry, walkErr error) error {
-		if walkErr != nil || de.IsDir() {
+		if walkErr != nil || de.IsDir() || de.Type()&os.ModeSymlink != 0 {
 			return nil // skip unreadable entries rather than abort the whole export
 		}
 		rel, err := filepath.Rel(root, p)
@@ -369,7 +414,11 @@ func addDirToZip(zw *zip.Writer, root, prefix string) error {
 		if err != nil {
 			return err
 		}
-		f, err := os.Open(p)
+		safePath, err := fileguard.ResolveExisting(p, root)
+		if err != nil {
+			return nil
+		}
+		f, err := os.Open(safePath)
 		if err != nil {
 			return nil
 		}
@@ -416,8 +465,8 @@ func importConfigAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("unrecognized config archive (missing aivory-config manifest)"))
 		return
 	}
-	if man.Version > configArchiveVersion {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("config archive format v%d is newer than this server supports (v%d)", man.Version, configArchiveVersion))
+	if err := validateArchiveVersion("config archive", man.Version, configArchiveVersion); err != nil {
+		writeError(w, http.StatusBadRequest, err)
 		return
 	}
 	if err := validateConfigArchiveEmbeddingModelLock(zr, d); err != nil {
@@ -428,11 +477,33 @@ func importConfigAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	counts, err := mergeConfigArchive(ctx, d, zr, man)
+	// The request context is only a pre-upload snapshot. Keep the caller id, then
+	// re-authorize it under the config merge transaction's database row lock.
+	// This closes the window where a slow upload outlives an admin demotion/ban.
+	importingAdmin := authUser(r)
+	if importingAdmin == nil || strings.TrimSpace(importingAdmin.ID) == "" {
+		writeError(w, http.StatusForbidden, errConfigImportAdminUnauthorized)
+		return
+	}
+	// Assets are restored before the merge commits so the authorization lock
+	// remains held until the last persistent write has completed.
+	assetsRestored := 0
+	counts, err := mergeConfigArchive(ctx, d, zr, man, importingAdmin.ID, func() error {
+		if man.IncludesAssets {
+			assetsRestored = restoreConfigAssetsFromZip(d, zr)
+		}
+		return nil
+	})
 	if err != nil {
 		switch {
-		case errors.Is(err, errInvalidPaymentConfigArchive), errors.Is(err, errInvalidBillingConfigArchive):
+		case errors.Is(err, errConfigImportAdminUnauthorized):
+			writeError(w, http.StatusForbidden, err)
+		case errors.Is(err, errInvalidPaymentConfigArchive), errors.Is(err, errInvalidOAuthConfigArchive),
+			errors.Is(err, errInvalidBillingConfigArchive), errors.Is(err, errInvalidBackupStoragePath),
+			errors.Is(err, errOAuthClientSecretReentryRequired):
 			writeError(w, http.StatusBadRequest, err)
+		case errors.Is(err, store.ErrOAuthProviderChanged):
+			writeError(w, http.StatusConflict, err)
 		case errors.Is(err, store.ErrPaymentChannelHasPending),
 			errors.Is(err, store.ErrPaymentChannelHasMethods),
 			errors.Is(err, store.ErrPaymentChannelNameExists),
@@ -442,10 +513,6 @@ func importConfigAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, fmt.Errorf("config import failed (no changes committed): %w", err))
 		}
 		return
-	}
-	assetsRestored := 0
-	if man.IncludesAssets {
-		assetsRestored = restoreConfigAssetsFromZip(d, zr)
 	}
 	broadcastConfigInvalidate(d)
 	d.Logger.Printf("config import: merged %d tables, %d assets (source dialect=%s)", len(counts), assetsRestored, man.Dialect)
@@ -522,18 +589,38 @@ func importBackupAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("unrecognized archive (missing aivory-backup manifest)"))
 		return
 	}
-	if man.Version > store.BackupVersion {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("archive format v%d is newer than this server supports (v%d)", man.Version, store.BackupVersion))
+	if err := validateArchiveVersion("archive", man.Version, store.BackupVersion); err != nil {
+		writeError(w, http.StatusBadRequest, err)
 		return
 	}
 
-	// Record the importing admin's identity BEFORE the wipe — this is how we
-	// track which account to protect during privilege reconciliation (§ FIX-6).
+	// Keep only the subject id from the request context here. The authoritative
+	// role/status/security snapshot is loaded again inside the restore
+	// transaction, after taking a database write lock, so a concurrent ban or
+	// demotion cannot turn a valid pre-check into a destructive unauthorised wipe.
 	importingAdmin := authUser(r)
+	if importingAdmin == nil || strings.TrimSpace(importingAdmin.ID) == "" {
+		writeError(w, http.StatusForbidden, errBackupImportAdminUnauthorized)
+		return
+	}
 
-	counts, err := restoreDatabase(ctx, d, zr, man)
+	// Keep filesystem and Qdrant restoration inside the authorization-locked
+	// database transaction. A concurrent demotion/ban cannot return first and
+	// then observe this request continuing to write external state.
+	filesRestored := 0
+	var qdrantRestored int64
+	qdrantErr := ""
+	counts, err := restoreDatabase(ctx, d, zr, man, importingAdmin.ID, func() error {
+		if man.IncludesFiles {
+			filesRestored = restoreFilesFromZip(d, zr)
+		}
+		qdrantRestored, qdrantErr = restoreQdrantFromZip(ctx, d, zr)
+		return nil
+	})
 	if err != nil {
-		if errors.Is(err, errInvalidBillingConfigArchive) {
+		if errors.Is(err, errBackupImportAdminUnauthorized) {
+			writeError(w, http.StatusForbidden, err)
+		} else if errors.Is(err, errInvalidBillingConfigArchive) || errors.Is(err, errInvalidBackupStoragePath) {
 			writeError(w, http.StatusBadRequest, err)
 		} else {
 			writeError(w, http.StatusInternalServerError, fmt.Errorf("restore failed (no changes committed): %w", err))
@@ -541,25 +628,6 @@ func importBackupAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Privilege escalation guard: a malicious backup could introduce extra admin
-	// accounts. After restore, downgrade any admin whose email is not the
-	// importing admin's email — they were not pre-authorized (§ FIX-6).
-	// Best-effort: a failure here is logged but doesn't abort — the DB is already
-	// committed and we'd rather have a partial restriction than a broken restore.
-	if importingAdmin != nil {
-		if _, err := d.DB.ExecContext(ctx,
-			`UPDATE users SET role='user' WHERE role='admin' AND email != ?`,
-			importingAdmin.Email,
-		); err != nil {
-			d.Logger.Printf("backup import: privilege reconciliation failed: %v", err)
-		}
-	}
-
-	filesRestored := 0
-	if man.IncludesFiles {
-		filesRestored = restoreFilesFromZip(d, zr)
-	}
-	qdrantRestored, qdrantErr := restoreQdrantFromZip(ctx, d, zr)
 	if qdrantErr != "" {
 		d.Logger.Printf("backup import: qdrant restore warning: %s", qdrantErr)
 	}
@@ -595,18 +663,28 @@ func humanBackupBytes(n int64) string {
 // a no-op inside a transaction, and the import order alone can't satisfy the
 // messages self-reference under every edit history). On Postgres the FK-safe
 // table order keeps constraints satisfied, and serial sequences are realigned.
-func restoreDatabase(ctx context.Context, d Deps, zr *zip.Reader, man backupManifest) (map[string]int64, error) {
+func restoreDatabase(ctx context.Context, d Deps, zr *zip.Reader, man backupManifest, importingAdminID string, beforeCommit ...func() error) (map[string]int64, error) {
 	if store.IsPostgres() {
 		tx, err := d.DB.BeginTx(ctx, nil)
 		if err != nil {
 			return nil, err
 		}
 		defer func() { _ = tx.Rollback() }()
-		counts, err := restoreInto(ctx, tx, zr, man, d)
+		var admin *backupImportAdminSnapshot
+		if strings.TrimSpace(importingAdminID) != "" {
+			admin, err = loadBackupImportAdmin(ctx, tx, importingAdminID)
+			if err != nil {
+				return nil, err
+			}
+		}
+		counts, err := restoreInto(ctx, tx, zr, man, d, admin)
 		if err != nil {
 			return nil, err
 		}
 		if err := store.ResetSerialSequences(ctx, tx); err != nil {
+			return nil, err
+		}
+		if err := runImportBeforeCommit(beforeCommit); err != nil {
 			return nil, err
 		}
 		if err := tx.Commit(); err != nil {
@@ -631,8 +709,20 @@ func restoreDatabase(ctx context.Context, d Deps, zr *zip.Reader, man backupMani
 	if err != nil {
 		return nil, err
 	}
-	counts, err := restoreInto(ctx, tx, zr, man, d)
+	var admin *backupImportAdminSnapshot
+	if strings.TrimSpace(importingAdminID) != "" {
+		admin, err = loadBackupImportAdmin(ctx, tx, importingAdminID)
+		if err != nil {
+			_ = tx.Rollback()
+			return nil, err
+		}
+	}
+	counts, err := restoreInto(ctx, tx, zr, man, d, admin)
 	if err != nil {
+		_ = tx.Rollback()
+		return nil, err
+	}
+	if err := runImportBeforeCommit(beforeCommit); err != nil {
 		_ = tx.Rollback()
 		return nil, err
 	}
@@ -644,7 +734,7 @@ func restoreDatabase(ctx context.Context, d Deps, zr *zip.Reader, man backupMani
 
 // restoreInto performs the wipe + per-table reload + path rewrite against one
 // transaction handle.
-func restoreInto(ctx context.Context, ex store.RowExecer, zr *zip.Reader, man backupManifest, d Deps) (map[string]int64, error) {
+func restoreInto(ctx context.Context, ex store.RowExecer, zr *zip.Reader, man backupManifest, d Deps, importingAdmin *backupImportAdminSnapshot) (map[string]int64, error) {
 	// A current archive's usage_stats file is authoritative. Disable the
 	// usage_logs insert mirror during the load so restored logs cannot duplicate
 	// or synthesize facts; old archives are backfilled explicitly below.
@@ -688,6 +778,9 @@ func restoreInto(ctx context.Context, ex store.RowExecer, zr *zip.Reader, man ba
 		}
 		counts[t] = n
 	}
+	if err := store.MigrateLegacyOAuthProviderKinds(ctx, ex); err != nil {
+		return nil, fmt.Errorf("migrate restored legacy UserInfo OAuth providers: %w", err)
+	}
 	if !hasUsageStatsArchive {
 		n, err := store.BackfillUsageStats(ctx, ex)
 		if err != nil {
@@ -729,7 +822,382 @@ func restoreInto(ctx context.Context, ex store.RowExecer, zr *zip.Reader, man ba
 	if err := rewriteStoragePaths(ctx, ex, man, d); err != nil {
 		return nil, err
 	}
+	if importingAdmin != nil {
+		if err := reconcileBackupImportAdmin(ctx, ex, importingAdmin); err != nil {
+			return nil, err
+		}
+		// The reconciliation may have retained the verified admin in addition to
+		// rows from the archive, so report the committed user count accurately.
+		var n int64
+		if err := ex.QueryRowContext(ctx, `SELECT COUNT(*) FROM users`).Scan(&n); err == nil {
+			counts["users"] = n
+		}
+	}
 	return counts, nil
+}
+
+// loadBackupImportAdmin takes the security snapshot while the restore
+// transaction owns a write lock on the caller's row. The request's cached
+// role is deliberately ignored: this query is the last authorization check
+// before WipeAll.
+func loadBackupImportAdmin(ctx context.Context, ex store.RowExecer, userID string) (*backupImportAdminSnapshot, error) {
+	userID = strings.TrimSpace(userID)
+	active, err := lockActiveImportAdmin(ctx, ex, userID)
+	if err != nil {
+		return nil, err
+	}
+	if !active {
+		return nil, errBackupImportAdminUnauthorized
+	}
+
+	s := &backupImportAdminSnapshot{ID: userID, Providers: map[string]store.OAuthProvider{}}
+	var totpEnabled, passwordSet int
+	err = ex.QueryRowContext(ctx, `
+		SELECT id, email, password_hash, name, token_ver, settings, group_id,
+		       group_expires_at, previous_group_id, totp_secret, totp_enabled,
+		       password_set, password_changed_at, last_seen_at,
+		       COALESCE(credits_permanent,0), COALESCE(credits_permanent_micros,0),
+		       credit_cycle_anchor, quota_cycle_anchor, sort_order, created_at
+		  FROM users WHERE id=?`, userID).Scan(
+		&s.ID, &s.Email, &s.PasswordHash, &s.Name, &s.TokenVer, &s.Settings, &s.GroupID,
+		&s.GroupExpiresAt, &s.PreviousGroupID, &s.TotpSecret, &totpEnabled, &passwordSet,
+		&s.PasswordChangedAt, &s.LastSeenAt, &s.CreditsPermanent, &s.CreditsMicros,
+		&s.CreditCycleAnchor, &s.QuotaCycleAnchor, &s.SortOrder, &s.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, errBackupImportAdminUnauthorized
+	}
+	if err != nil {
+		return nil, err
+	}
+	s.TotpEnabled = totpEnabled
+	s.PasswordSet = passwordSet
+	if strings.TrimSpace(s.Settings) == "" {
+		s.Settings = "{}"
+	}
+
+	rows, err := ex.QueryContext(ctx, `
+		SELECT i.provider_id, i.subject, i.email, i.created_at,
+		       p.id, p.kind, p.name, p.icon, p.client_id, p.client_secret,
+		       p.issuer_url, p.jwks_url, p.auth_url, p.token_url, p.userinfo_url,
+		       p.scopes, p.team_id, p.key_id, p.subject_namespace, p.enabled,
+		       p.sort_order, p.updated_at
+		  FROM oauth_identities i
+		  JOIN oauth_providers p ON p.id=i.provider_id
+		 WHERE i.user_id=?`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var identity backupImportOAuthIdentity
+		var provider store.OAuthProvider
+		var enabled int
+		if err := rows.Scan(
+			&identity.ProviderID, &identity.Subject, &identity.Email, &identity.CreatedAt,
+			&provider.ID, &provider.Kind, &provider.Name, &provider.Icon, &provider.ClientID, &provider.ClientSecret,
+			&provider.IssuerURL, &provider.JWKSURL, &provider.AuthURL, &provider.TokenURL, &provider.UserInfoURL,
+			&provider.Scopes, &provider.TeamID, &provider.KeyID, &provider.SubjectNamespace,
+			&enabled, &provider.SortOrder, &provider.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		provider.Enabled = enabled != 0
+		provider.HasSecret = provider.ClientSecret != ""
+		s.Identities = append(s.Identities, identity)
+		s.Providers[provider.ID] = provider
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	usablePassword := s.PasswordSet != 0 && strings.TrimSpace(s.PasswordHash) != ""
+	usableOAuth := false
+	for _, identity := range s.Identities {
+		if strings.TrimSpace(identity.Subject) == "" {
+			continue
+		}
+		if provider, ok := s.Providers[identity.ProviderID]; ok && provider.Enabled {
+			usableOAuth = true
+			break
+		}
+	}
+	if !usablePassword && !usableOAuth {
+		// Do this before WipeAll. A password-less administrator with no surviving
+		// enabled provider would otherwise make a successful restore permanently
+		// un-loginable.
+		return nil, fmt.Errorf("%w: importing administrator has no usable login identity", errBackupImportAdminUnauthorized)
+	}
+	return s, nil
+}
+
+// lockActiveImportAdmin establishes the authorization linearization point for
+// destructive or secret-bearing imports. PostgreSQL locks every active admin in
+// the same stable order as the role/status guards; SQLite's conditional write
+// obtains its database write lock. Both locks live until this transaction ends.
+func lockActiveImportAdmin(ctx context.Context, ex store.RowExecer, userID string) (bool, error) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return false, nil
+	}
+	if store.IsPostgres() {
+		// Match the lock order used by SetUserRole/SetUserStatusGuarded. Full
+		// restore later deletes every user row; locking only the caller first could
+		// otherwise deadlock with a guard that already locked an earlier admin id.
+		rows, err := ex.QueryContext(ctx,
+			`SELECT id FROM users WHERE role='admin' AND status='active' ORDER BY id FOR UPDATE`)
+		if err != nil {
+			return false, err
+		}
+		defer rows.Close()
+		active := false
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return false, err
+			}
+			if id == userID {
+				active = true
+			}
+		}
+		if err := rows.Err(); err != nil {
+			return false, err
+		}
+		return active, nil
+	}
+	locked, err := ex.ExecContext(ctx,
+		`UPDATE users SET token_ver=token_ver WHERE id=? AND role='admin' AND status='active'`, userID)
+	if err != nil {
+		return false, err
+	}
+	n, err := locked.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n == 1, nil
+}
+
+// runImportBeforeCommit executes persistent non-SQL writes at the end of the
+// transaction, while its active-admin authorization locks are still held.
+func runImportBeforeCommit(writes []func() error) error {
+	for _, write := range writes {
+		if write == nil {
+			continue
+		}
+		if err := write(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func reconcileBackupImportAdmin(ctx context.Context, ex store.RowExecer, snap *backupImportAdminSnapshot) error {
+	if snap == nil || strings.TrimSpace(snap.Email) == "" {
+		return errBackupImportAdminUnauthorized
+	}
+	// Invalidate imported administrator sessions before lowering their roles.
+	// Both updates are inside the restore transaction, so no extra admin can
+	// remain usable if a later step fails.
+	if _, err := ex.ExecContext(ctx, `UPDATE refresh_tokens SET revoked=1 WHERE user_id IN (SELECT id FROM users WHERE role='admin')`); err != nil {
+		return err
+	}
+	if _, err := ex.ExecContext(ctx, `UPDATE users SET role='user', token_ver=token_ver+1 WHERE role='admin'`); err != nil {
+		return err
+	}
+
+	type candidate struct {
+		id       string
+		tokenVer int
+	}
+	rows, err := ex.QueryContext(ctx,
+		`SELECT id, token_ver FROM users WHERE lower(trim(email))=lower(trim(?))`, snap.Email)
+	if err != nil {
+		return err
+	}
+	var candidates []candidate
+	for rows.Next() {
+		var c candidate
+		if err := rows.Scan(&c.id, &c.tokenVer); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		candidates = append(candidates, c)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	_ = rows.Close()
+	if len(candidates) > 1 {
+		return fmt.Errorf("%w: backup contains duplicate administrator email", errBackupImportAdminUnauthorized)
+	}
+
+	chosenID := ""
+	importedTokenVer := 0
+	if len(candidates) == 1 {
+		chosenID = candidates[0].id
+		importedTokenVer = candidates[0].tokenVer
+	} else {
+		var exists int
+		if err := ex.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE id=?`, snap.ID).Scan(&exists); err != nil {
+			return err
+		}
+		chosenID = snap.ID
+		if exists != 0 {
+			// The original id belongs to a different imported user. Keep that
+			// user's data and allocate a fresh id for the verified administrator.
+			for attempt := 0; attempt < 8; attempt++ {
+				candidateID := "backup_admin_" + randomHexStringForRestore()
+				var n int
+				if err := ex.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE id=?`, candidateID).Scan(&n); err != nil {
+					return err
+				}
+				if n == 0 {
+					chosenID = candidateID
+					break
+				}
+			}
+			if chosenID == snap.ID {
+				return errors.New("allocate restored administrator id")
+			}
+		}
+	}
+
+	newTokenVer := snap.TokenVer + 1
+	if importedTokenVer >= newTokenVer {
+		newTokenVer = importedTokenVer + 1
+	}
+	if len(candidates) == 1 {
+		if _, err := ex.ExecContext(ctx, `UPDATE users SET
+			email=?, name=?, password_hash=?, role='admin', status='active', token_ver=?,
+			settings=?, group_id=?, group_expires_at=?, previous_group_id=?,
+			totp_secret=?, totp_enabled=?, password_set=?, password_changed_at=?, last_seen_at=?,
+			credits_permanent=?, credits_permanent_micros=?, credit_cycle_anchor=?, quota_cycle_anchor=?,
+			sort_order=?, created_at=? WHERE id=?`,
+			snap.Email, snap.Name, snap.PasswordHash, newTokenVer,
+			snap.Settings, snap.GroupID, snap.GroupExpiresAt, snap.PreviousGroupID,
+			snap.TotpSecret, snap.TotpEnabled, snap.PasswordSet, snap.PasswordChangedAt, snap.LastSeenAt,
+			snap.CreditsPermanent, snap.CreditsMicros, snap.CreditCycleAnchor, snap.QuotaCycleAnchor,
+			snap.SortOrder, snap.CreatedAt, chosenID); err != nil {
+			return err
+		}
+	} else {
+		groupID := strings.TrimSpace(snap.GroupID)
+		if groupID == "" {
+			groupID = store.DefaultGroupID
+		}
+		createdAt := snap.CreatedAt
+		if createdAt <= 0 {
+			createdAt = time.Now().Unix()
+		}
+		if _, err := ex.ExecContext(ctx, `INSERT INTO users(
+			id, email, password_hash, name, role, status, token_ver, settings, group_id,
+			group_expires_at, previous_group_id, totp_secret, totp_enabled, password_set,
+			password_changed_at, last_seen_at, credits_permanent, credits_permanent_micros,
+			credit_cycle_anchor, quota_cycle_anchor, sort_order, created_at)
+			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			chosenID, snap.Email, snap.PasswordHash, snap.Name, "admin", "active", newTokenVer,
+			snap.Settings, groupID, snap.GroupExpiresAt, snap.PreviousGroupID, snap.TotpSecret,
+			snap.TotpEnabled, snap.PasswordSet, snap.PasswordChangedAt, snap.LastSeenAt,
+			snap.CreditsPermanent, snap.CreditsMicros, snap.CreditCycleAnchor, snap.QuotaCycleAnchor,
+			snap.SortOrder, createdAt); err != nil {
+			return err
+		}
+	}
+
+	// Never retain identities that came from the untrusted backup for the
+	// account we are elevating. Only the pre-verified snapshot identities below
+	// are restored.
+	if _, err := ex.ExecContext(ctx, `DELETE FROM oauth_identities WHERE user_id=?`, chosenID); err != nil {
+		return err
+	}
+	for _, provider := range snap.Providers {
+		// Preserve the original provider id for callback compatibility, but never
+		// delete or mutate an unrelated imported provider to make room. A name
+		// collision makes the archive irreconcilable and rolls the restore back.
+		var nameConflicts int
+		if err := ex.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM oauth_providers WHERE lower(trim(name))=lower(trim(?)) AND id<>?`, provider.Name, provider.ID).Scan(&nameConflicts); err != nil {
+			return err
+		}
+		if nameConflicts != 0 {
+			return fmt.Errorf("%w: OAuth provider name conflicts with importing administrator identity", errBackupImportAdminUnauthorized)
+		}
+		if _, err := ex.ExecContext(ctx, `INSERT INTO oauth_providers(
+			id, kind, name, icon, client_id, client_secret, issuer_url, jwks_url,
+			auth_url, token_url, userinfo_url, scopes, team_id, key_id, subject_namespace,
+			enabled, sort_order, updated_at)
+			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+			ON CONFLICT(id) DO UPDATE SET kind=excluded.kind, name=excluded.name,
+			icon=excluded.icon, client_id=excluded.client_id, client_secret=excluded.client_secret,
+			issuer_url=excluded.issuer_url, jwks_url=excluded.jwks_url, auth_url=excluded.auth_url,
+			token_url=excluded.token_url, userinfo_url=excluded.userinfo_url, scopes=excluded.scopes,
+			team_id=excluded.team_id, key_id=excluded.key_id, subject_namespace=excluded.subject_namespace,
+			enabled=excluded.enabled,
+			sort_order=excluded.sort_order, updated_at=excluded.updated_at`,
+			provider.ID, provider.Kind, provider.Name, provider.Icon, provider.ClientID, provider.ClientSecret,
+			provider.IssuerURL, provider.JWKSURL, provider.AuthURL, provider.TokenURL, provider.UserInfoURL,
+			provider.Scopes, provider.TeamID, provider.KeyID, provider.SubjectNamespace,
+			boolToInt(provider.Enabled), provider.SortOrder, time.Now().Unix()); err != nil {
+			return err
+		}
+	}
+	for _, identity := range snap.Identities {
+		var existingOwner string
+		err := ex.QueryRowContext(ctx,
+			`SELECT user_id FROM oauth_identities WHERE provider_id=? AND subject=?`, identity.ProviderID, identity.Subject).Scan(&existingOwner)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if err == nil && existingOwner != chosenID {
+			return fmt.Errorf("%w: OAuth identity belongs to a different imported user", errBackupImportAdminUnauthorized)
+		}
+		if _, err := ex.ExecContext(ctx, `DELETE FROM oauth_identities WHERE provider_id=? AND subject=? AND user_id=?`,
+			identity.ProviderID, identity.Subject, chosenID); err != nil {
+			return err
+		}
+		if _, err := ex.ExecContext(ctx, `INSERT INTO oauth_identities(provider_id, subject, user_id, email)
+			VALUES(?,?,?,?)`,
+			identity.ProviderID, identity.Subject, chosenID, strings.ToLower(strings.TrimSpace(identity.Email))); err != nil {
+			return err
+		}
+	}
+	if _, err := ex.ExecContext(ctx, `UPDATE refresh_tokens SET revoked=1 WHERE user_id=?`, chosenID); err != nil {
+		return err
+	}
+
+	var activeAdmins int
+	if err := ex.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE role='admin' AND status='active'`).Scan(&activeAdmins); err != nil {
+		return err
+	}
+	if activeAdmins < 1 {
+		return fmt.Errorf("%w: restore produced no active administrator", errBackupImportAdminUnauthorized)
+	}
+	if snap.PasswordSet == 0 {
+		var usable int
+		if err := ex.QueryRowContext(ctx, `SELECT COUNT(*) FROM oauth_identities i JOIN oauth_providers p ON p.id=i.provider_id WHERE i.user_id=? AND p.enabled=1`, chosenID).Scan(&usable); err != nil {
+			return err
+		}
+		if usable == 0 {
+			return fmt.Errorf("%w: restored administrator has no enabled OAuth identity", errBackupImportAdminUnauthorized)
+		}
+	}
+	return nil
+}
+
+func randomHexStringForRestore() string {
+	// randomHex is defined in admin_skill_assets.go and uses crypto/rand. Keep a
+	// small wrapper here so the reconciliation code is self-documenting.
+	if value, err := randomHex(16); err == nil && value != "" {
+		return value
+	}
+	return fmt.Sprintf("%d", time.Now().UnixNano())
+}
+
+func boolToInt(v bool) int {
+	if v {
+		return 1
+	}
+	return 0
 }
 
 // rewriteStoragePaths repoints files/documents/artifacts storage_path values
@@ -743,9 +1211,6 @@ func rewriteStoragePaths(ctx context.Context, ex store.RowExecer, man backupMani
 		{"artifacts", man.SourceArtifactDir, filepath.Clean(d.Config.ArtifactDir)},
 	}
 	for _, s := range specs {
-		if s.src == "" || s.src == s.dst {
-			continue // nothing to remap
-		}
 		rows, err := ex.QueryContext(ctx, "SELECT id, storage_path FROM "+s.table) //nolint:gosec // literal table
 		if err != nil {
 			return err
@@ -761,11 +1226,12 @@ func rewriteStoragePaths(ctx context.Context, ex store.RowExecer, man backupMani
 			if p == "" {
 				continue
 			}
-			rel, err := filepath.Rel(s.src, filepath.Clean(p))
-			if err != nil || strings.HasPrefix(rel, "..") {
-				continue // path outside the source dir — leave it untouched
+			next, err := fileguard.Remap(s.src, s.dst, p)
+			if err != nil {
+				_ = rows.Close()
+				return fmt.Errorf("%w: %s.%s: %v", errInvalidBackupStoragePath, s.table, id, err)
 			}
-			ups = append(ups, upd{id, filepath.Join(s.dst, rel)})
+			ups = append(ups, upd{id, next})
 		}
 		if err := rows.Err(); err != nil {
 			_ = rows.Close()
@@ -778,13 +1244,84 @@ func rewriteStoragePaths(ctx context.Context, ex store.RowExecer, man backupMani
 			}
 		}
 	}
+	// Full archives carry skill assets in the same upload tree, but the paths
+	// are nested under a dedicated subdirectory and were historically omitted
+	// from this rewrite. Validate and remap them just like files/documents;
+	// malformed JSON is a restore error, never a reason to retain an attacker-
+	// supplied path.
+	rows, err := ex.QueryContext(ctx, `SELECT id, assets FROM skills`)
+	if err != nil {
+		return err
+	}
+	type skillUpdate struct{ id, assets string }
+	var skillUpdates []skillUpdate
+	skillSource := ""
+	skillTarget := ""
+	if strings.TrimSpace(man.SourceUploadDir) != "" {
+		skillSource = filepath.Join(filepath.Clean(man.SourceUploadDir), skillAssetsSubdir)
+		skillTarget = filepath.Join(filepath.Clean(d.Config.UploadDir), skillAssetsSubdir)
+	}
+	for rows.Next() {
+		var id, raw string
+		if err := rows.Scan(&id, &raw); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		trimmed := strings.TrimSpace(raw)
+		if trimmed == "" || trimmed == "null" || trimmed == "[]" {
+			continue
+		}
+		var assets []skillAssetRow
+		if err := json.Unmarshal([]byte(raw), &assets); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("%w: skills.%s.assets: invalid JSON: %v", errInvalidBackupStoragePath, id, err)
+		}
+		changed := false
+		for i := range assets {
+			if strings.TrimSpace(assets[i].StoragePath) == "" {
+				continue
+			}
+			if skillSource == "" {
+				_ = rows.Close()
+				return fmt.Errorf("%w: skills.%s.assets[%d]: manifest source upload root is empty", errInvalidBackupStoragePath, id, i)
+			}
+			next, err := fileguard.Remap(skillSource, skillTarget, assets[i].StoragePath)
+			if err != nil {
+				_ = rows.Close()
+				return fmt.Errorf("%w: skills.%s.assets[%d]: %v", errInvalidBackupStoragePath, id, i, err)
+			}
+			if next != assets[i].StoragePath {
+				assets[i].StoragePath = next
+				changed = true
+			}
+		}
+		if changed {
+			encoded, err := json.Marshal(assets)
+			if err != nil {
+				_ = rows.Close()
+				return err
+			}
+			skillUpdates = append(skillUpdates, skillUpdate{id: id, assets: string(encoded)})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	_ = rows.Close()
+	for _, update := range skillUpdates {
+		if _, err := ex.ExecContext(ctx, `UPDATE skills SET assets=? WHERE id=?`, update.assets, update.id); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
 // restoreFilesFromZip extracts the bundled uploads/artifacts back onto disk
 // under the configured dirs. Best-effort: a failed file is logged-by-omission
-// and skipped rather than aborting an already-committed DB restore. Returns the
-// number of files written. Guards against path traversal in archive entries.
+// and skipped. The caller runs this before committing the locked DB restore, so
+// authorization revocation cannot complete while files are still being written.
+// Returns the number of files written. Guards against path traversal entries.
 func restoreFilesFromZip(d Deps, zr *zip.Reader) int {
 	n := 0
 	for _, f := range zr.File {
@@ -800,40 +1337,27 @@ func restoreFilesFromZip(d Deps, zr *zip.Reader) int {
 		if rel == "" || strings.HasSuffix(f.Name, "/") {
 			continue
 		}
-		dest := filepath.Join(base, filepath.FromSlash(rel))
-		baseClean := filepath.Clean(base) + string(filepath.Separator)
-		if !strings.HasPrefix(filepath.Clean(dest)+string(filepath.Separator), baseClean) &&
-			filepath.Clean(dest) != filepath.Clean(base) {
-			continue // path traversal — refuse to escape the target dir
-		}
-		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-			continue
-		}
-		rc, err := f.Open()
-		if err != nil {
-			continue
-		}
-		out, err := os.Create(dest)
-		if err != nil {
-			_ = rc.Close()
-			continue
-		}
-		_, cerr := io.Copy(out, rc)
-		_ = out.Close()
-		_ = rc.Close()
-		if cerr == nil {
+		if restoreZipEntry(base, filepath.FromSlash(rel), f) {
 			n++
 		}
 	}
 	return n
 }
 
-func mergeConfigArchive(ctx context.Context, d Deps, zr *zip.Reader, man configManifest) (map[string]int64, error) {
+func mergeConfigArchive(ctx context.Context, d Deps, zr *zip.Reader, man configManifest, importingAdminID string, beforeCommit ...func() error) (map[string]int64, error) {
 	tx, err := d.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
+
+	active, err := lockActiveImportAdmin(ctx, tx, importingAdminID)
+	if err != nil {
+		return nil, err
+	}
+	if !active {
+		return nil, errConfigImportAdminUnauthorized
+	}
 
 	counts := make(map[string]int64)
 	for _, t := range store.ConfigTableOrder() {
@@ -872,6 +1396,9 @@ func mergeConfigArchive(ctx context.Context, d Deps, zr *zip.Reader, man configM
 	if err := rewriteConfigSkillAssetPaths(ctx, tx, man, d); err != nil {
 		return nil, err
 	}
+	if err := runImportBeforeCommit(beforeCommit); err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
@@ -884,6 +1411,8 @@ func mergeConfigArchive(ctx context.Context, d Deps, zr *zip.Reader, man configM
 // entire archive, including tables merged before the payment tables.
 func normalizeConfigArchiveTableReader(ctx context.Context, tx *sql.Tx, table string, r io.Reader) (io.Reader, error) {
 	switch table {
+	case "oauth_providers":
+		return normalizeConfigOAuthProviderRows(ctx, tx, r)
 	case "payment_channels":
 		return normalizeConfigPaymentChannelRows(ctx, tx, r)
 	case "payment_methods":
@@ -891,6 +1420,154 @@ func normalizeConfigArchiveTableReader(ctx context.Context, tx *sql.Tx, table st
 	default:
 		return normalizeArchiveTableReader(table, r)
 	}
+}
+
+func normalizeConfigOAuthProviderRows(ctx context.Context, tx *sql.Tx, r io.Reader) (io.Reader, error) {
+	var out bytes.Buffer
+	dec := json.NewDecoder(r)
+	enc := json.NewEncoder(&out)
+	seenIDs := map[string]bool{}
+	for {
+		var row map[string]json.RawMessage
+		if err := dec.Decode(&row); err == io.EOF {
+			return bytes.NewReader(out.Bytes()), nil
+		} else if err != nil {
+			return nil, invalidOAuthConfigArchivef("decode oauth_providers row: %v", err)
+		}
+
+		id, present, err := backupStringField(row, "id")
+		if err != nil || !present || id == "" {
+			return nil, invalidOAuthConfigArchivef("oauth_providers row has an invalid id")
+		}
+		if seenIDs[id] {
+			return nil, invalidOAuthConfigArchivef("oauth_providers contains duplicate id %s", id)
+		}
+		seenIDs[id] = true
+		_, archiveMarkerPresent := row["subject_namespace"]
+		incomingKind, kindPresent, kindErr := backupStringField(row, "kind")
+		incomingUserInfo, userInfoPresent, userInfoErr := backupStringField(row, "userinfo_url")
+		incomingIssuer, issuerPresent, issuerErr := backupStringField(row, "issuer_url")
+		incomingJWKS, jwksPresent, jwksErr := backupStringField(row, "jwks_url")
+		if kindErr != nil || userInfoErr != nil || issuerErr != nil || jwksErr != nil {
+			return nil, invalidOAuthConfigArchivef("oauth_providers[%s] has malformed trust fields", id)
+		}
+		legacyUserInfoRow := !archiveMarkerPresent && kindPresent && incomingKind == "oidc" &&
+			userInfoPresent && incomingUserInfo != "" &&
+			(!issuerPresent || incomingIssuer == "") && (!jwksPresent || incomingJWKS == "")
+
+		current, err := store.GetOAuthProviderForUpdate(ctx, tx, id)
+		exists := err == nil
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return nil, err
+		}
+		final := store.OAuthProvider{ID: id, Enabled: true}
+		var currentEffective store.OAuthProvider
+		if exists {
+			currentEffective = effectiveOAuthProvider(*current)
+			currentNamespace := oauth.Resolve(toOAuthConfig(&currentEffective)).SubjectNamespace()
+			current, err = store.InitializeOAuthProviderSubjectNamespaceTx(
+				ctx, tx, *current, currentNamespace,
+			)
+			if err != nil {
+				return nil, err
+			}
+			final = *current
+		}
+
+		applyString := func(key string, dst *string) error {
+			value, fieldPresent, fieldErr := backupStringField(row, key)
+			if fieldErr != nil {
+				return invalidOAuthConfigArchivef("oauth_providers[%s].%s: %v", id, key, fieldErr)
+			}
+			if fieldPresent {
+				*dst = value
+			}
+			return nil
+		}
+		for _, field := range []struct {
+			name string
+			dst  *string
+		}{
+			{"kind", &final.Kind}, {"name", &final.Name}, {"icon", &final.Icon},
+			{"client_id", &final.ClientID}, {"issuer_url", &final.IssuerURL},
+			{"jwks_url", &final.JWKSURL}, {"auth_url", &final.AuthURL},
+			{"token_url", &final.TokenURL}, {"userinfo_url", &final.UserInfoURL},
+			{"scopes", &final.Scopes}, {"team_id", &final.TeamID}, {"key_id", &final.KeyID},
+		} {
+			if err := applyString(field.name, field.dst); err != nil {
+				return nil, err
+			}
+		}
+		secretPresent := false
+		if raw, ok := row["client_secret"]; ok {
+			secretPresent = true
+			if err := json.Unmarshal(raw, &final.ClientSecret); err != nil {
+				return nil, invalidOAuthConfigArchivef("oauth_providers[%s].client_secret: %v", id, err)
+			}
+		}
+		if enabled, fieldPresent, err := backupBoolField(row, "enabled"); err != nil {
+			return nil, invalidOAuthConfigArchivef("oauth_providers[%s].enabled: %v", id, err)
+		} else if fieldPresent {
+			final.Enabled = enabled
+		}
+
+		if legacyUserInfoRow {
+			// Version-1 config archives used kind=oidc for generic OAuth UserInfo
+			// providers. A missing marker distinguishes that legacy shape from a
+			// newly-created, intentionally incomplete OIDC draft.
+			final.Kind = "oauth2"
+			final.IssuerURL = ""
+			final.JWKSURL = ""
+			if strings.TrimSpace(final.Scopes) == "" {
+				final.Scopes = "openid email profile"
+			}
+		}
+		if err := validateOAuthKind(final.Kind); err != nil {
+			return nil, invalidOAuthConfigArchivef("oauth_providers[%s].kind: %v", id, err)
+		}
+		final.Name = strings.TrimSpace(final.Name)
+		if final.Name == "" {
+			return nil, invalidOAuthConfigArchivef("oauth_providers[%s].name is required", id)
+		}
+		final = effectiveOAuthProvider(final)
+		if exists && !secretPresent && oauthClientSecretReentryRequired(currentEffective, final, nil) {
+			// Match the admin PATCH contract: a partial archive cannot silently
+			// retain or clear a credential across a different trust boundary.
+			return nil, fmt.Errorf("%w: oauth_providers[%s]", errOAuthClientSecretReentryRequired, id)
+		}
+		if err := validateOAuthProviderTrust(final); err != nil {
+			return nil, invalidOAuthConfigArchivef("oauth_providers[%s]: %v", id, err)
+		}
+		final.SubjectNamespace = oauth.Resolve(toOAuthConfig(&final)).SubjectNamespace()
+
+		setConfigArchiveString(row, "id", final.ID)
+		setConfigArchiveString(row, "kind", final.Kind)
+		setConfigArchiveString(row, "name", final.Name)
+		setConfigArchiveString(row, "icon", final.Icon)
+		setConfigArchiveString(row, "client_id", final.ClientID)
+		setConfigArchiveString(row, "client_secret", final.ClientSecret)
+		setConfigArchiveString(row, "issuer_url", final.IssuerURL)
+		setConfigArchiveString(row, "jwks_url", final.JWKSURL)
+		setConfigArchiveString(row, "auth_url", final.AuthURL)
+		setConfigArchiveString(row, "token_url", final.TokenURL)
+		setConfigArchiveString(row, "userinfo_url", final.UserInfoURL)
+		setConfigArchiveString(row, "scopes", final.Scopes)
+		setConfigArchiveString(row, "team_id", final.TeamID)
+		setConfigArchiveString(row, "key_id", final.KeyID)
+		setConfigArchiveString(row, "subject_namespace", final.SubjectNamespace)
+		if final.Enabled {
+			row["enabled"] = json.RawMessage("1")
+		} else {
+			row["enabled"] = json.RawMessage("0")
+		}
+		if err := enc.Encode(row); err != nil {
+			return nil, invalidOAuthConfigArchivef("encode oauth_providers[%s]: %v", id, err)
+		}
+	}
+}
+
+func invalidOAuthConfigArchivef(format string, args ...any) error {
+	return fmt.Errorf("%w: %s", errInvalidOAuthConfigArchive, fmt.Sprintf(format, args...))
 }
 
 type configPaymentChannelState struct {
@@ -1720,9 +2397,6 @@ func validateBillingConfiguration(ctx context.Context, ex store.RowExecer) error
 }
 
 func rewriteConfigSkillAssetPaths(ctx context.Context, ex store.RowExecer, man configManifest, d Deps) error {
-	if strings.TrimSpace(man.SourceUploadDir) == "" {
-		return nil
-	}
 	rows, err := ex.QueryContext(ctx, `SELECT id, assets FROM skills`)
 	if err != nil {
 		return err
@@ -1735,7 +2409,7 @@ func rewriteConfigSkillAssetPaths(ctx context.Context, ex store.RowExecer, man c
 			_ = rows.Close()
 			return err
 		}
-		if strings.TrimSpace(raw) == "" || strings.TrimSpace(raw) == "[]" {
+		if strings.TrimSpace(raw) == "" || strings.TrimSpace(raw) == "null" || strings.TrimSpace(raw) == "[]" {
 			continue
 		}
 		var assets []skillAssetRow
@@ -1745,8 +2419,15 @@ func rewriteConfigSkillAssetPaths(ctx context.Context, ex store.RowExecer, man c
 		}
 		changed := false
 		for i := range assets {
-			next := remapConfigSkillAssetPath(assets[i].StoragePath, man.SourceUploadDir, d.Config.UploadDir)
-			if next != "" && next != assets[i].StoragePath {
+			if strings.TrimSpace(assets[i].StoragePath) == "" {
+				continue
+			}
+			next, err := remapConfigSkillAssetPath(assets[i].StoragePath, man.SourceUploadDir, d.Config.UploadDir)
+			if err != nil {
+				_ = rows.Close()
+				return fmt.Errorf("%w: config skills.%s.assets[%d]: %v", errInvalidBackupStoragePath, id, i, err)
+			}
+			if next != assets[i].StoragePath {
 				assets[i].StoragePath = next
 				changed = true
 			}
@@ -1773,22 +2454,17 @@ func rewriteConfigSkillAssetPaths(ctx context.Context, ex store.RowExecer, man c
 	return nil
 }
 
-func remapConfigSkillAssetPath(path, sourceUploadDir, targetUploadDir string) string {
+func remapConfigSkillAssetPath(path, sourceUploadDir, targetUploadDir string) (string, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
-		return ""
+		return "", nil
+	}
+	if strings.TrimSpace(sourceUploadDir) == "" {
+		return "", fileguard.ErrOutsideRoot
 	}
 	srcBase := filepath.Join(filepath.Clean(sourceUploadDir), skillAssetsSubdir)
 	dstBase := filepath.Join(filepath.Clean(targetUploadDir), skillAssetsSubdir)
-	clean := filepath.Clean(path)
-	if rel, err := filepath.Rel(srcBase, clean); err == nil && rel != "." && rel != "" && !strings.HasPrefix(rel, "..") && !filepath.IsAbs(rel) {
-		return filepath.Join(dstBase, rel)
-	}
-	base := filepath.Base(clean)
-	if base == "." || base == string(filepath.Separator) {
-		return ""
-	}
-	return filepath.Join(dstBase, base)
+	return fileguard.Remap(srcBase, dstBase, path)
 }
 
 func restoreConfigAssetsFromZip(d Deps, zr *zip.Reader) int {
@@ -1808,32 +2484,56 @@ func restoreZipPrefix(zr *zip.Reader, prefix, base string) int {
 		if rel == "" || strings.HasSuffix(f.Name, "/") {
 			continue
 		}
-		dest := filepath.Join(base, filepath.FromSlash(rel))
-		baseClean := filepath.Clean(base) + string(filepath.Separator)
-		if !strings.HasPrefix(filepath.Clean(dest)+string(filepath.Separator), baseClean) &&
-			filepath.Clean(dest) != filepath.Clean(base) {
-			continue
-		}
-		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-			continue
-		}
-		rc, err := f.Open()
-		if err != nil {
-			continue
-		}
-		out, err := os.Create(dest)
-		if err != nil {
-			_ = rc.Close()
-			continue
-		}
-		_, cerr := io.Copy(out, rc)
-		_ = out.Close()
-		_ = rc.Close()
-		if cerr == nil {
+		if restoreZipEntry(base, filepath.FromSlash(rel), f) {
 			n++
 		}
 	}
 	return n
+}
+
+func restoreZipEntry(base, rel string, entry *zip.File) bool {
+	if strings.TrimSpace(base) == "" || strings.TrimSpace(rel) == "" || filepath.IsAbs(rel) {
+		return false
+	}
+	dest, err := fileguard.PrepareWrite(base, filepath.Join(base, rel))
+	if err != nil {
+		return false
+	}
+	rc, err := entry.Open()
+	if err != nil {
+		return false
+	}
+	defer rc.Close()
+	tmp, err := os.CreateTemp(filepath.Dir(dest), ".aivory-restore-*")
+	if err != nil {
+		return false
+	}
+	tmpName := tmp.Name()
+	committed := false
+	defer func() {
+		_ = tmp.Close()
+		if !committed {
+			_ = os.Remove(tmpName)
+		}
+	}()
+	if _, err := io.Copy(tmp, rc); err != nil {
+		return false
+	}
+	if err := tmp.Close(); err != nil {
+		return false
+	}
+	// Re-check the destination immediately before rename. Rename replaces a
+	// regular destination atomically and never follows a final-component
+	// symlink; PrepareWrite rejects a symlink target or parent chain.
+	safeDest, err := fileguard.PrepareWrite(base, dest)
+	if err != nil || safeDest != dest {
+		return false
+	}
+	if err := os.Rename(tmpName, dest); err != nil {
+		return false
+	}
+	committed = true
+	return true
 }
 
 func readConfigManifest(zr *zip.Reader) (configManifest, error) {

@@ -44,6 +44,7 @@ var (
 	ErrPaymentChannelHasPending       = errors.New("payment_channel_has_pending_orders")
 	ErrInvalidPaymentMethod           = errors.New("invalid_payment_method")
 	ErrPaymentMethodNameExists        = errors.New("payment_method_name_exists")
+	ErrPaymentMethodHasPending        = errors.New("payment_method_has_pending_orders")
 	ErrPaymentMethodUnavailable       = errors.New("payment_method_unavailable")
 	ErrInvalidPaymentProduct          = errors.New("invalid_payment_product")
 	ErrPaymentProductUnavailable      = errors.New("payment_product_unavailable")
@@ -269,9 +270,8 @@ func UpdatePaymentChannel(ctx context.Context, db *sql.DB, id string, patch Paym
 		}
 	}
 	if providerChanged || configChanged || environmentChanged {
-		var pending int
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM payment_orders WHERE channel_id=? AND status IN (?, ?)`,
-			id, PaymentOrderPending, PaymentOrderProcessing).Scan(&pending); err != nil {
+		pending, err := countPaymentOrdersThatMayStillFulfill(ctx, tx, paymentOrderDependencyChannel, id)
+		if err != nil {
 			return nil, err
 		}
 		if pending > 0 {
@@ -330,9 +330,8 @@ func DeletePaymentChannel(ctx context.Context, db *sql.DB, id string) error {
 	} else if err != nil {
 		return err
 	}
-	var pending int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM payment_orders WHERE channel_id=? AND status IN (?, ?)`,
-		id, PaymentOrderPending, PaymentOrderProcessing).Scan(&pending); err != nil {
+	pending, err := countPaymentOrdersThatMayStillFulfill(ctx, tx, paymentOrderDependencyChannel, id)
+	if err != nil {
 		return err
 	}
 	if pending > 0 {
@@ -594,14 +593,40 @@ func ReorderPaymentMethods(ctx context.Context, db *sql.DB, ids []string) error 
 }
 
 func DeletePaymentMethod(ctx context.Context, db *sql.DB, id string) error {
-	result, err := db.ExecContext(ctx, `DELETE FROM payment_methods WHERE id=?`, id)
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return ErrNotFound
+	}
+	tx, err := db.BeginTx(ctx, paymentAdminWriteTxOptions())
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	// A no-op write is a row lock on PostgreSQL and acquires SQLite's writer
+	// slot. It serializes this guard with checkout creation before we inspect
+	// the immutable method_id snapshots.
+	lock, err := tx.ExecContext(ctx, `UPDATE payment_methods SET updated_at=updated_at WHERE id=?`, id)
+	if err != nil {
+		return err
+	}
+	if affected, _ := lock.RowsAffected(); affected != 1 {
+		return ErrNotFound
+	}
+	pending, err := countPaymentOrdersThatMayStillFulfill(ctx, tx, paymentOrderDependencyMethod, id)
+	if err != nil {
+		return err
+	}
+	if pending > 0 {
+		return ErrPaymentMethodHasPending
+	}
+	result, err := tx.ExecContext(ctx, `DELETE FROM payment_methods WHERE id=?`, id)
 	if err != nil {
 		return err
 	}
 	if affected, _ := result.RowsAffected(); affected == 0 {
 		return ErrNotFound
 	}
-	return nil
+	return tx.Commit()
 }
 
 // PaymentOrder contains immutable purchase snapshots and mutable processing
@@ -725,6 +750,49 @@ func scanPaymentOrder(s scanner) (PaymentOrder, error) {
 
 type paymentRowQueryer interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+// paymentOrderMayStillFulfillSQL is the authoritative persisted-state
+// predicate for orders that can still produce a verified payment and require
+// entitlement delivery. A manual close is local-only: until the gateway is
+// explicitly known to be final, its signed callback remains recoverable.
+// Keep paymentOrderMayStillFulfill in sync for already-loaded rows.
+const paymentOrderMayStillFulfillSQL = `(status IN ('pending','processing') OR (status='cancelled' AND failure_code='admin_manual_close'))`
+
+type paymentOrderDependency string
+
+const (
+	paymentOrderDependencyChannel   paymentOrderDependency = "channel_id"
+	paymentOrderDependencyMethod    paymentOrderDependency = "method_id"
+	paymentOrderDependencyUserGroup paymentOrderDependency = "user_group_id"
+	paymentOrderDependencyUser      paymentOrderDependency = "user_id"
+)
+
+func countPaymentOrdersThatMayStillFulfill(ctx context.Context, q paymentRowQueryer, dependency paymentOrderDependency, id string) (int, error) {
+	column := ""
+	switch dependency {
+	case paymentOrderDependencyChannel:
+		column = "channel_id"
+	case paymentOrderDependencyMethod:
+		column = "method_id"
+	case paymentOrderDependencyUserGroup:
+		column = "user_group_id"
+	case paymentOrderDependencyUser:
+		column = "user_id"
+	default:
+		return 0, errors.New("unknown payment order dependency")
+	}
+	var count int
+	err := q.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM payment_orders WHERE `+column+`=? AND `+paymentOrderMayStillFulfillSQL,
+		strings.TrimSpace(id),
+	).Scan(&count)
+	return count, err
+}
+
+func paymentOrderMayStillFulfill(order PaymentOrder) bool {
+	return order.Status == PaymentOrderPending || order.Status == PaymentOrderProcessing ||
+		(order.Status == PaymentOrderCancelled && order.FailureCode == "admin_manual_close")
 }
 
 func paymentOrderByID(ctx context.Context, q paymentRowQueryer, id string, lock bool) (PaymentOrder, error) {
@@ -972,8 +1040,10 @@ func GetPaymentOrderForUser(ctx context.Context, db *sql.DB, id, userID string) 
 }
 
 // PaymentOrderAttempt maps one provider-facing merchant order reference to the
-// immutable Aivory purchase order. EPay retries create a new attempt because
-// the compatible protocol cannot reopen a provider checkout session reliably.
+// immutable Aivory purchase order. An issued EPay reference is reused for every
+// resume so two concurrently valid forms cannot charge the same commercial
+// order twice. No replacement is issued without a trusted gateway-side terminal
+// result; the current EPay integration has no portable way to obtain one.
 type PaymentOrderAttempt struct {
 	MerchantOrderID string `json:"merchant_order_id"`
 	OrderID         string `json:"order_id"`
@@ -1030,45 +1100,37 @@ func paymentOrderAttemptByID(ctx context.Context, q paymentRowQueryer, merchantO
 	return attempt, err
 }
 
-// CreatePaymentOrderAttempt atomically reserves an EPay merchant order number
-// only while the parent order can still accept payment. Passing an empty
-// merchantOrderID mints a fresh 128-bit reference for a retry submission.
+// CreatePaymentOrderAttempt atomically gets or creates the one outstanding EPay
+// merchant order reference while the parent order can still accept payment.
+// Sequential and concurrent calls reuse an issued attempt. Once any attempt has
+// existed, an unexpected local status fails closed instead of being treated as
+// proof that issuing another independently chargeable reference is safe.
 func CreatePaymentOrderAttempt(ctx context.Context, db *sql.DB, orderID, merchantOrderID string) (*PaymentOrderAttempt, error) {
 	orderID = strings.TrimSpace(orderID)
 	merchantOrderID = strings.TrimSpace(merchantOrderID)
 	if orderID == "" {
 		return nil, ErrNotFound
 	}
-	generatedMerchantOrderID := merchantOrderID == ""
-	if generatedMerchantOrderID {
-		var err error
-		merchantOrderID, err = newPaymentOrderAttemptID()
-		if err != nil {
-			return nil, fmt.Errorf("generate payment attempt id: %w", err)
-		}
-	}
-	now := time.Now().Unix()
-	result, err := db.ExecContext(ctx,
-		`INSERT INTO payment_order_attempts(
-		   merchant_order_id, order_id, provider, channel_id, provider_order_id, status, paid_at, created_at, updated_at
-		 )
-		 SELECT ?, id, provider, channel_id, '', ?, 0, ?, ?
-		   FROM payment_orders
-		  WHERE id=? AND provider=? AND status IN (?, ?)`,
-		merchantOrderID, PaymentOrderAttemptIssued, now, now, orderID, paymentcore.ProviderEPay,
-		PaymentOrderPending, PaymentOrderProcessing,
-	)
+
+	// Read Committed is intentional on PostgreSQL: a concurrent caller waits on
+	// this no-op row update, then sees the attempt committed by the lock holder.
+	// Serializable would instead surface a routine same-order resume as a
+	// serialization failure. SQLite uses its single writer slot for the same
+	// ordering guarantee.
+	tx, err := db.BeginTx(ctx, paymentAdminWriteTxOptions())
 	if err != nil {
-		if !generatedMerchantOrderID {
-			if existing, getErr := paymentOrderAttemptByID(ctx, db, merchantOrderID); getErr == nil &&
-				existing.OrderID == orderID && existing.Provider == paymentcore.ProviderEPay {
-				return &existing, nil
-			}
-		}
 		return nil, err
 	}
-	if affected, _ := result.RowsAffected(); affected != 1 {
-		order, getErr := GetPaymentOrder(ctx, db, orderID)
+	defer func() { _ = tx.Rollback() }()
+	lock, err := tx.ExecContext(ctx,
+		`UPDATE payment_orders SET updated_at=updated_at
+		  WHERE id=? AND provider=? AND status IN (?, ?)`,
+		orderID, paymentcore.ProviderEPay, PaymentOrderPending, PaymentOrderProcessing)
+	if err != nil {
+		return nil, err
+	}
+	if affected, _ := lock.RowsAffected(); affected != 1 {
+		order, getErr := paymentOrderByID(ctx, tx, orderID, false)
 		if getErr != nil {
 			return nil, getErr
 		}
@@ -1077,11 +1139,82 @@ func CreatePaymentOrderAttempt(ctx context.Context, db *sql.DB, orderID, merchan
 		}
 		return nil, ErrPaymentOrderNotMutable
 	}
-	attempt, err := paymentOrderAttemptByID(ctx, db, merchantOrderID)
-	if err != nil {
+
+	var channelID string
+	if err := tx.QueryRowContext(ctx, `SELECT channel_id FROM payment_orders WHERE id=?`, orderID).Scan(&channelID); err != nil {
 		return nil, err
 	}
-	return &attempt, nil
+	var attemptCount, nonIssuedCount int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COUNT(*), COUNT(CASE WHEN status<>? THEN 1 END)
+		   FROM payment_order_attempts WHERE order_id=?`,
+		PaymentOrderAttemptIssued, orderID,
+	).Scan(&attemptCount, &nonIssuedCount); err != nil {
+		return nil, err
+	}
+	if nonIssuedCount > 0 || attemptCount > 1 {
+		return nil, ErrPaymentOrderNotMutable
+	}
+	if attemptCount > 0 {
+		existing, getErr := scanPaymentOrderAttempt(tx.QueryRowContext(ctx,
+			`SELECT `+paymentOrderAttemptCols+` FROM payment_order_attempts
+			  WHERE order_id=? AND status=?`,
+			orderID, PaymentOrderAttemptIssued))
+		if getErr != nil {
+			return nil, getErr
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
+		return &existing, nil
+	}
+
+	generatedMerchantOrderID := merchantOrderID == ""
+	for attemptNumber := 0; attemptNumber < 8; attemptNumber++ {
+		candidate := merchantOrderID
+		if generatedMerchantOrderID {
+			candidate, err = newPaymentOrderAttemptID()
+			if err != nil {
+				return nil, fmt.Errorf("generate payment attempt id: %w", err)
+			}
+		}
+		now := time.Now().Unix()
+		result, insertErr := tx.ExecContext(ctx,
+			`INSERT INTO payment_order_attempts(
+			   merchant_order_id, order_id, provider, channel_id, provider_order_id, status, paid_at, created_at, updated_at
+			 ) VALUES(?, ?, ?, ?, '', ?, 0, ?, ?)
+			 ON CONFLICT(merchant_order_id) DO NOTHING`,
+			candidate, orderID, paymentcore.ProviderEPay, channelID, PaymentOrderAttemptIssued, now, now)
+		if insertErr != nil {
+			return nil, insertErr
+		}
+		if affected, _ := result.RowsAffected(); affected == 1 {
+			created, getErr := paymentOrderAttemptByID(ctx, tx, candidate)
+			if getErr != nil {
+				return nil, getErr
+			}
+			if err := tx.Commit(); err != nil {
+				return nil, err
+			}
+			return &created, nil
+		}
+
+		collision, getErr := paymentOrderAttemptByID(ctx, tx, candidate)
+		if getErr != nil {
+			return nil, getErr
+		}
+		if collision.OrderID == orderID && collision.Provider == paymentcore.ProviderEPay &&
+			collision.ChannelID == channelID && collision.Status == PaymentOrderAttemptIssued {
+			if err := tx.Commit(); err != nil {
+				return nil, err
+			}
+			return &collision, nil
+		}
+		if !generatedMerchantOrderID {
+			return nil, ErrPaymentEventConflict
+		}
+	}
+	return nil, errors.New("could not allocate a unique payment attempt id")
 }
 
 func GetPaymentOrderAttemptByMerchantID(ctx context.Context, db *sql.DB, provider, channelID, merchantOrderID string) (*PaymentOrderAttempt, error) {
@@ -1198,11 +1331,7 @@ func ListPaymentOrdersForUser(ctx context.Context, db *sql.DB, userID string, li
 }
 
 func CountPendingPaymentOrdersByChannel(ctx context.Context, db *sql.DB, channelID string) (int, error) {
-	var count int
-	err := db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM payment_orders WHERE channel_id=? AND status IN (?, ?)`,
-		channelID, PaymentOrderPending, PaymentOrderProcessing).Scan(&count)
-	return count, err
+	return countPaymentOrdersThatMayStillFulfill(ctx, db, paymentOrderDependencyChannel, channelID)
 }
 
 func HasPendingPaymentOrdersByChannel(ctx context.Context, db *sql.DB, channelID string) (bool, error) {
@@ -1211,14 +1340,8 @@ func HasPendingPaymentOrdersByChannel(ctx context.Context, db *sql.DB, channelID
 }
 
 func hasPendingPaymentOrdersForUserGroup(ctx context.Context, q paymentRowQueryer, groupID string) (bool, error) {
-	var exists int
-	err := q.QueryRowContext(ctx,
-		`SELECT CASE WHEN EXISTS(
-		   SELECT 1 FROM payment_orders
-		    WHERE user_group_id=? AND status IN (?, ?)
-		 ) THEN 1 ELSE 0 END`,
-		groupID, PaymentOrderPending, PaymentOrderProcessing).Scan(&exists)
-	return exists != 0, err
+	count, err := countPaymentOrdersThatMayStillFulfill(ctx, q, paymentOrderDependencyUserGroup, groupID)
+	return count > 0, err
 }
 
 func HasPendingPaymentOrdersForUserGroup(ctx context.Context, db *sql.DB, groupID string) (bool, error) {
@@ -1226,14 +1349,8 @@ func HasPendingPaymentOrdersForUserGroup(ctx context.Context, db *sql.DB, groupI
 }
 
 func hasPendingPaymentOrdersForUser(ctx context.Context, q paymentRowQueryer, userID string) (bool, error) {
-	var exists int
-	err := q.QueryRowContext(ctx,
-		`SELECT CASE WHEN EXISTS(
-		   SELECT 1 FROM payment_orders
-		    WHERE user_id=? AND status IN (?, ?)
-		 ) THEN 1 ELSE 0 END`,
-		userID, PaymentOrderPending, PaymentOrderProcessing).Scan(&exists)
-	return exists != 0, err
+	count, err := countPaymentOrdersThatMayStillFulfill(ctx, q, paymentOrderDependencyUser, userID)
+	return count > 0, err
 }
 
 func HasPendingPaymentOrdersForUser(ctx context.Context, db *sql.DB, userID string) (bool, error) {
@@ -1817,10 +1934,9 @@ func FulfillPaymentOrder(ctx context.Context, db *sql.DB, input PaymentFulfillme
 		}
 		return &PaymentFulfillmentResult{Order: order, Event: event}, nil
 	}
-	// EPay manual close is local-only. A later verified payment must still grant
+	// A manual close is local-only. A later verified payment must still grant
 	// the purchased entitlement so a buyer is never charged without delivery.
-	recoverableManualClose := order.Status == PaymentOrderCancelled && order.FailureCode == "admin_manual_close"
-	if order.Status != PaymentOrderPending && order.Status != PaymentOrderProcessing && !recoverableManualClose {
+	if !paymentOrderMayStillFulfill(order) {
 		return nil, ErrPaymentOrderNotFulfillable
 	}
 
@@ -1944,10 +2060,8 @@ func FulfillPaymentOrder(ctx context.Context, db *sql.DB, input PaymentFulfillme
 		    SET provider_order_id=?, provider_payment_id=?, status=?, paid_amount_minor=?, tax_amount_minor=?, failure_code='', failure_message='',
 		        paid_at=CASE WHEN paid_at=0 THEN ? ELSE paid_at END,
 		        fulfilled_at=?, updated_at=?
-		  WHERE id=?
-		    AND (status IN (?, ?) OR (status=? AND failure_code='admin_manual_close'))`,
-		providerOrderID, providerPaymentID, PaymentOrderFulfilled, paidAmount, taxAmount, now, now, now, order.ID,
-		PaymentOrderPending, PaymentOrderProcessing, PaymentOrderCancelled)
+		  WHERE id=? AND `+paymentOrderMayStillFulfillSQL,
+		providerOrderID, providerPaymentID, PaymentOrderFulfilled, paidAmount, taxAmount, now, now, now, order.ID)
 	if err != nil {
 		if isUniqueIndexErr(err, "idx_payment_orders_provider_order_unique", "payment_orders.provider_order_id") ||
 			isUniqueIndexErr(err, "idx_payment_orders_provider_payment_unique", "payment_orders.provider_payment_id") {

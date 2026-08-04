@@ -181,6 +181,7 @@ func TestDeleteRoundWorkspaceMember(t *testing.T) {
 
 	// member sends U1, gets an assistant reply A1.
 	insMsg(t, db, "U1", "", "user", 1000)
+	exec(t, db, `UPDATE messages SET author_id='member' WHERE id='U1'`)
 	insMsg(t, db, "A1", "U1", "assistant", 1001)
 	exec(t, db, `UPDATE conversations SET active_leaf_id='A1' WHERE id='c1'`)
 
@@ -198,6 +199,83 @@ func TestDeleteRoundWorkspaceMember(t *testing.T) {
 		t.Fatalf("non-member: want ErrNotFound, got %v", err)
 	}
 	assertParent(t, db, "U2", "") // untouched
+}
+
+func TestDeleteRoundWorkspaceMemberCannotDeleteForeignBranchDescendants(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(filepath.Join(t.TempDir(), "delete-round-authors.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer db.Close()
+	if err := Migrate(db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	for _, user := range []struct{ id, email string }{
+		{"owner", "owner@example.test"},
+		{"member-a", "a@example.test"},
+		{"member-b", "b@example.test"},
+	} {
+		exec(t, db, `INSERT INTO users(id,email,password_hash,role) VALUES(?,?,?,'user')`, user.id, user.email, "h")
+	}
+	exec(t, db, `INSERT INTO workspaces(id,name,owner_id,invite_token) VALUES('ws-authors','WS','owner','tok-authors')`)
+	for _, member := range []struct{ id, role string }{{"owner", "owner"}, {"member-a", "member"}, {"member-b", "member"}} {
+		exec(t, db, `INSERT INTO workspace_members(workspace_id,user_id,role) VALUES('ws-authors',?,?)`, member.id, member.role)
+	}
+	exec(t, db, `INSERT INTO conversations(id,user_id,title,workspace_id) VALUES('c1','owner','Shared','ws-authors')`)
+
+	// member-a owns the root question and each regenerated assistant variant.
+	// The first variant contains member-b's continuation, the second contains a
+	// legacy unattributed continuation, and the third contains only member-a rows.
+	insMsgAuthor(t, db, "Q", "", "user", "member-a", 1000)
+	insMsgAuthor(t, db, "A-foreign", "Q", "assistant", "", 1001)
+	insMsgAuthor(t, db, "A-legacy", "Q", "assistant", "", 1002)
+	insMsgAuthor(t, db, "A-own", "Q", "assistant", "", 1003)
+	insMsgAuthor(t, db, "B-Q", "A-foreign", "user", "member-b", 1004)
+	insMsgAuthor(t, db, "B-A", "B-Q", "assistant", "", 1005)
+	insMsgAuthor(t, db, "legacy-Q", "A-legacy", "user", "", 1006)
+	insMsgAuthor(t, db, "legacy-A", "legacy-Q", "assistant", "", 1007)
+	insMsgAuthor(t, db, "A-Q", "A-own", "user", "member-a", 1008)
+	insMsgAuthor(t, db, "A-A", "A-Q", "assistant", "", 1009)
+	exec(t, db, `UPDATE conversations SET active_leaf_id='B-A' WHERE id='c1'`)
+
+	// Selecting member-a's own assistant branch used to pass the handler's root
+	// author check and then cascade through member-b's continuation.
+	if _, err := DeleteRound(ctx, db, "c1", "member-a", "A-foreign"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("delete branch containing another member: got %v, want ErrNotFound", err)
+	}
+	for _, id := range []string{"Q", "A-foreign", "B-Q", "B-A"} {
+		assertPresent(t, db, id)
+	}
+	assertParent(t, db, "B-Q", "A-foreign")
+
+	// Direct user/assistant selectors are independently bound to the round author.
+	for _, id := range []string{"B-Q", "B-A"} {
+		if _, err := DeleteRound(ctx, db, "c1", "member-a", id); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("delete member-b round via %s: got %v, want ErrNotFound", id, err)
+		}
+	}
+	assertPresent(t, db, "B-Q")
+	assertPresent(t, db, "B-A")
+
+	// Empty legacy authors are creator-owned and fail closed for a member.
+	if _, err := DeleteRound(ctx, db, "c1", "member-a", "A-legacy"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("delete branch containing legacy user: got %v, want ErrNotFound", err)
+	}
+	assertPresent(t, db, "A-legacy")
+	assertPresent(t, db, "legacy-Q")
+
+	// A branch whose complete user-authored subtree belongs to the caller remains
+	// deletable. Other members' and legacy branches are untouched.
+	if _, err := DeleteRound(ctx, db, "c1", "member-a", "A-own"); err != nil {
+		t.Fatalf("delete own branch: %v", err)
+	}
+	for _, id := range []string{"A-own", "A-Q", "A-A"} {
+		assertGone(t, db, id)
+	}
+	for _, id := range []string{"A-foreign", "B-Q", "B-A", "A-legacy", "legacy-Q", "legacy-A"} {
+		assertPresent(t, db, id)
+	}
 }
 
 // TestUpdateMessageContentPrunesCoveredSummaryBlocks locks in the compaction
@@ -273,13 +351,17 @@ func exec(t *testing.T, db *sql.DB, q string, args ...any) {
 }
 
 func insMsg(t *testing.T, db *sql.DB, id, parent, role string, ts int64) {
+	insMsgAuthor(t, db, id, parent, role, "", ts)
+}
+
+func insMsgAuthor(t *testing.T, db *sql.DB, id, parent, role, author string, ts int64) {
 	t.Helper()
 	var p any
 	if parent != "" {
 		p = parent
 	}
-	exec(t, db, `INSERT INTO messages(id,conversation_id,parent_id,role,created_at) VALUES(?,?,?,?,?)`,
-		id, "c1", p, role, ts)
+	exec(t, db, `INSERT INTO messages(id,conversation_id,parent_id,role,author_id,created_at) VALUES(?,?,?,?,?,?)`,
+		id, "c1", p, role, author, ts)
 }
 
 func assertGone(t *testing.T, db *sql.DB, id string) {
@@ -288,6 +370,14 @@ func assertGone(t *testing.T, db *sql.DB, id string) {
 	err := db.QueryRowContext(context.Background(), `SELECT id FROM messages WHERE id=?`, id).Scan(&x)
 	if !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("message %s should be deleted (err=%v)", id, err)
+	}
+}
+
+func assertPresent(t *testing.T, db *sql.DB, id string) {
+	t.Helper()
+	var got string
+	if err := db.QueryRowContext(context.Background(), `SELECT id FROM messages WHERE id=?`, id).Scan(&got); err != nil {
+		t.Fatalf("message %s should remain: %v", id, err)
 	}
 }
 

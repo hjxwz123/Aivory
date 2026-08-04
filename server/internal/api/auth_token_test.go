@@ -25,7 +25,7 @@ func TestReadAccessTokenPrefersBearerOverCookie(t *testing.T) {
 	}
 }
 
-func TestRequireAuthRefreshesStaleTokenVersionCache(t *testing.T) {
+func TestRequireAuthUsesDatabaseAuthStateAcrossIndependentCaches(t *testing.T) {
 	db, err := store.Open(filepath.Join(t.TempDir(), "auth.db"))
 	if err != nil {
 		t.Fatalf("open db: %v", err)
@@ -42,44 +42,147 @@ func TestRequireAuthRefreshesStaleTokenVersionCache(t *testing.T) {
 		t.Fatalf("create user: %v", err)
 	}
 
-	c := cache.NewMemory()
-	d := Deps{
+	cacheA := cache.NewMemory()
+	cacheB := cache.NewMemory()
+	dA := Deps{
 		DB:    db,
-		Cache: c,
-		Auth:  authsvc.New("test-secret-at-least-32-chars-long!!", time.Hour, 24*time.Hour, c),
+		Cache: cacheA,
+		Auth:  authsvc.New("test-secret-at-least-32-chars-long!!", time.Hour, 24*time.Hour, cacheA),
 	}
+	dB := dA
+	dB.Cache = cacheB
+	dB.Auth = authsvc.New("test-secret-at-least-32-chars-long!!", time.Hour, 24*time.Hour, cacheB)
 	stale := *u
 	if b, err := json.Marshal(&stale); err == nil {
-		c.Set(authUserCacheKey(d, u.ID), string(b), time.Minute)
+		cacheB.Set(authUserCacheKey(dB, u.ID), string(b), time.Minute)
 	} else {
 		t.Fatalf("marshal stale user: %v", err)
 	}
+	oldToken := issueBoundTestAccessToken(t, db, dA.Auth, u)
 	if err := store.BumpTokenVersion(context.Background(), db, u.ID); err != nil {
 		t.Fatalf("bump token version: %v", err)
 	}
-	fresh, err := store.FindUserByID(context.Background(), db, u.ID)
-	if err != nil {
-		t.Fatalf("read fresh user: %v", err)
+
+	called := false
+	h := requireAuth(dB, func(_ Deps, w http.ResponseWriter, _ *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusNoContent)
+	})
+	req := httptest.NewRequest("GET", "/api/me", nil)
+	req.Header.Set("Authorization", "Bearer "+oldToken)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized || called {
+		t.Fatalf("requireAuth status=%d called=%v body=%s", rec.Code, called, rec.Body.String())
 	}
-	token, _, err := d.Auth.IssueAccess(fresh.ID, fresh.Role, fresh.TokenVer)
+}
+
+func TestRequireAdminUsesDatabaseRoleAcrossIndependentCaches(t *testing.T) {
+	dA := newAuthSecurityDeps(t, "cross-replica-role.db")
+	user, err := store.CreateUserWithRole(t.Context(), dA.DB, "cross-role@example.test", "Cross Role", "hash", "admin")
+	if err != nil {
+		t.Fatalf("create admin: %v", err)
+	}
+	if _, err := store.CreateUserWithRole(t.Context(), dA.DB, "remaining-admin@example.test", "Remaining Admin", "hash", "admin"); err != nil {
+		t.Fatalf("create remaining admin: %v", err)
+	}
+
+	dB := dA
+	dB.Cache = cache.NewMemory()
+	dB.Auth = authsvc.New("auth-security-regression-secret", time.Hour, 24*time.Hour, dB.Cache)
+	if raw, err := json.Marshal(user); err != nil {
+		t.Fatalf("marshal cached admin: %v", err)
+	} else {
+		dB.Cache.Set(authUserCacheKey(dB, user.ID), string(raw), time.Minute)
+	}
+	if err := store.SetUserRole(t.Context(), dA.DB, user.ID, "user"); err != nil {
+		t.Fatalf("demote admin: %v", err)
+	}
+	fresh, err := store.FindUserByID(t.Context(), dA.DB, user.ID)
+	if err != nil {
+		t.Fatalf("reload demoted user: %v", err)
+	}
+	token := issueBoundTestAccessToken(t, dA.DB, dA.Auth, fresh)
+
+	called := false
+	h := requireAdmin(dB, func(_ Deps, w http.ResponseWriter, _ *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusNoContent)
+	})
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/users", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden || called {
+		t.Fatalf("requireAdmin status=%d called=%v body=%s", rec.Code, called, rec.Body.String())
+	}
+}
+
+func TestRevokedSessionFamilyImmediatelyInvalidatesBoundAccessToken(t *testing.T) {
+	d := newAuthSecurityDeps(t, "access-session-family.db")
+	user, err := store.CreateUser(t.Context(), d.DB, "session-bound@example.test", "Session Bound", "hash")
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	const sessionID = "stable-session-family"
+	if err := store.SaveRefreshToken(
+		t.Context(), d.DB, "current-refresh-jti", user.ID, time.Now().Add(time.Hour),
+		store.SessionMeta{SessionID: sessionID},
+	); err != nil {
+		t.Fatalf("save refresh token: %v", err)
+	}
+	access, _, err := d.Auth.IssueAccessForSession(user.ID, user.Role, user.TokenVer, sessionID)
 	if err != nil {
 		t.Fatalf("issue access: %v", err)
 	}
 
 	called := false
-	h := requireAuth(d, func(_ Deps, w http.ResponseWriter, r *http.Request) {
+	h := requireAuth(d, func(_ Deps, w http.ResponseWriter, _ *http.Request) {
 		called = true
-		if got := authUser(r).TokenVer; got != fresh.TokenVer {
-			t.Fatalf("auth user token_ver = %d, want %d", got, fresh.TokenVer)
-		}
 		w.WriteHeader(http.StatusNoContent)
 	})
-	req := httptest.NewRequest("GET", "/api/me", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	request := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/api/me", nil)
+		req.Header.Set("Authorization", "Bearer "+access)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := request(); rec.Code != http.StatusNoContent || !called {
+		t.Fatalf("active family status=%d called=%v body=%s", rec.Code, called, rec.Body.String())
+	}
+	called = false
+	if ok, err := store.RevokeUserSession(t.Context(), d.DB, user.ID, sessionID); err != nil || !ok {
+		t.Fatalf("revoke family=(%v,%v), want true,nil", ok, err)
+	}
+	if rec := request(); rec.Code != http.StatusUnauthorized || called {
+		t.Fatalf("revoked family status=%d called=%v body=%s", rec.Code, called, rec.Body.String())
+	}
+}
 
-	if rec.Code != http.StatusNoContent || !called {
-		t.Fatalf("requireAuth status=%d called=%v body=%s", rec.Code, called, rec.Body.String())
+func TestCachedAuthUserRejectsMismatchedIdentity(t *testing.T) {
+	d := newAuthSecurityDeps(t, "cache-identity.db")
+	wanted, err := store.CreateUser(t.Context(), d.DB, "wanted@example.test", "Wanted", "hash")
+	if err != nil {
+		t.Fatalf("create wanted user: %v", err)
+	}
+	other, err := store.CreateUser(t.Context(), d.DB, "other@example.test", "Other", "hash")
+	if err != nil {
+		t.Fatalf("create other user: %v", err)
+	}
+	raw, err := json.Marshal(other)
+	if err != nil {
+		t.Fatalf("marshal other user: %v", err)
+	}
+	d.Cache.Set(authUserCacheKey(d, wanted.ID), string(raw), time.Minute)
+
+	got, err := cachedAuthUser(t.Context(), d, wanted.ID)
+	if err != nil {
+		t.Fatalf("load cached auth user: %v", err)
+	}
+	if got.ID != wanted.ID {
+		t.Fatalf("cached auth user id=%q, want %q", got.ID, wanted.ID)
 	}
 }

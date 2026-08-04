@@ -255,7 +255,7 @@
   },
   "oauth": {
     "title": "登录方式",
-    "lead": "第三方登录(Google/GitHub/Apple/OIDC)。配置后出现在登录页。",
+    "lead": "支持内置平台、通用 OAuth 2.0 与 OIDC 第三方登录，配置后出现在登录页。",
     "new": "添加登录方式",
     "empty": "暂无第三方登录方式 — 用户使用邮箱 + 密码登录。",
     "noClientId": "未填 client id",
@@ -263,7 +263,8 @@
       "google": "Google",
       "github": "GitHub",
       "apple": "Apple",
-      "oidc": "自定义(OAuth2 / OIDC)"
+      "oauth2": "通用 OAuth 2.0",
+      "oidc": "通用 OIDC"
     },
     "fields": {
       "kind": "登录方式",
@@ -275,11 +276,14 @@
       "clientSecret": "Client Secret",
       "clientSecretApple": "私钥(.p8)",
       "clientSecretHintEdit": "留空保留原密钥。",
+      "issuerUrl": "签发者地址(Issuer URL)",
+      "jwksUrl": "签名密钥地址(JWKS URL)",
       "authUrl": "授权地址(Authorize URL)",
       "tokenUrl": "令牌地址(Token URL)",
       "userinfoUrl": "用户信息地址(Userinfo URL)",
       "scopes": "Scopes",
-      "scopesHint": "空格分隔。留空用默认。",
+      "scopesHintOauth2": "按提供商文档填写，空格分隔，可留空。",
+      "scopesHintOidc": "空格分隔。留空时使用 openid email profile。",
       "teamId": "Team ID",
       "keyId": "Key ID",
       "enabled": "启用(在登录页显示)",
@@ -290,7 +294,8 @@
       "google": "在 Google Cloud → 凭据 创建 OAuth 客户端。",
       "github": "在 GitHub → 开发者设置 → OAuth Apps 创建。",
       "apple": "在 Apple Developer 创建 Services ID 与 AuthKey(.p8)。",
-      "oidc": "填客户端凭据与授权/令牌/用户信息端点。"
+      "oauth2": "使用平台提供的授权、令牌与用户信息端点。",
+      "oidc": "使用经验证的 ID Token，并校验 Issuer 与 JWKS。"
     },
     "editorTitle": "编辑登录方式",
     "newTitle": "添加登录方式",
@@ -303,7 +308,9 @@
     "errors": {
       "nameRequired": "请填写按钮文字",
       "callbackLoadFailed": "无法生成回调地址，请重试。",
-      "idConflict": "该回调地址已被占用，请关闭并重新打开表单以生成新地址。"
+      "idConflict": "该回调地址已被占用，请关闭并重新打开表单以生成新地址。",
+      "providerChanged": "该 Provider 配置已被其他操作修改，请重新打开后再保存。",
+      "secretReentryRequired": "安全相关配置已变更。请重新输入此 Provider 的 Client Secret；Apple 请重新输入 .p8 私钥，切换类型后请输入新类型所需的密钥。"
     },
     "copied": "已复制"
   },
@@ -455,7 +462,8 @@
       "1": "最近 1 天",
       "7": "最近 7 天",
       "30": "最近 30 天",
-      "90": "最近 90 天"
+      "90": "最近 90 天",
+      "365": "最近 365 天"
     },
     "stats": {
       "totalCost": "总费用",
@@ -841,32 +849,143 @@
     "save": "保存权限"
   },
   "analytics": {
-    "title": "分析",
-    "lead": "整体使用趋势:总体、分模型、分用户。",
-    "empty": "该时间段暂无使用记录。",
+    "title": "用量与计费",
+    "lead": "查看持久保存的用户用量和模型成本，对比等长周期，并按用户、模型、工作区、用途或渠道核对消耗。",
+    "empty": "该时间段暂无计量用量。",
     "unknownUser": "未知用户",
+    "actions": {
+      "usageRecords": "打开用量记录",
+      "refresh": "刷新分析"
+    },
     "view": {
       "label": "分析视图",
-      "usage": "用量趋势",
+      "usage": "用量与计费",
       "feedback": "模型反馈"
     },
     "metric": {
-      "calls": "调用次数",
+      "label": "趋势指标",
+      "calls": "计量操作",
+      "turns": "已交付轮次",
       "tokens": "令牌",
-      "cost": "费用"
+      "cost": "模型成本",
+      "credits": "消耗积分",
+      "users": "活跃用户"
     },
     "stats": {
-      "calls": "总调用次数",
-      "tokens": "总令牌数",
-      "cost": "总费用",
-      "users": "活跃用户"
+      "calls": "计量操作",
+      "turns": "已交付轮次",
+      "tokens": "输入 + 输出令牌",
+      "cost": "模型成本",
+      "credits": "消耗积分",
+      "users": "活跃用户",
+      "operations": "计量操作"
     },
     "sections": {
       "daily": "按天使用趋势",
       "hourly": "按小时使用趋势",
+      "weekly": "周起始日",
       "byModel": "分模型使用",
-      "byUser": "分用户使用"
+      "byUser": "分用户使用",
+      "trend": "周期趋势",
+      "economics": "单位经济",
+      "tokenComposition": "令牌构成",
+      "breakdown": "详细拆分"
     },
+    "comparison": {
+      "previousPeriod": "与紧邻的上一等长周期对比。",
+      "current": "当前周期",
+      "previous": "上一周期",
+      "newActivity": "新增用量",
+      "delta": "较上期 {{value}}"
+    },
+    "trend": {
+      "empty": "该趋势暂无用量数据。"
+    },
+    "details": {
+      "images": "图片",
+      "conversations": "会话",
+      "workspaces": "活跃工作区",
+      "inputTokens": "输入令牌",
+      "outputTokens": "输出令牌",
+      "cacheReadTokens": "缓存读取令牌",
+      "cacheWriteTokens": "缓存写入令牌"
+    },
+    "economics": {
+      "chargedTurnRate": "扣积分轮次占比",
+      "costCoverage": "扣积分轮次成本占比",
+      "includedCost": "免费额度轮次成本",
+      "costPerTurn": "每轮次平均成本",
+      "costPerUser": "每活跃用户成本",
+      "creditsPerChargedTurn": "每扣积分轮次消耗积分",
+      "operationsPerTurn": "每轮次计量操作",
+      "chargedUsers": "扣积分用户"
+    },
+    "notes": {
+      "billingDefinition": "模型成本是平台向服务商支付的美元成本。积分是用户消耗的用量单位，不代表收入。扣积分轮次按已交付消息归并，多步模型操作只计为一个轮次。",
+      "tokenDefinition": "顶部令牌用量为输入令牌与输出令牌之和；缓存读取和缓存写入令牌在此构成中单独展示。"
+    },
+    "dimension": {
+      "label": "拆分维度",
+      "user": "用户",
+      "model": "模型",
+      "workspace": "工作区",
+      "purpose": "用途",
+      "channel": "渠道"
+    },
+    "filters": {
+      "user": "用户",
+      "userPlaceholder": "邮箱、名称或 ID",
+      "model": "模型",
+      "workspace": "工作区",
+      "purpose": "用途",
+      "channel": "渠道",
+      "allUsers": "全部用户",
+      "allModels": "全部模型",
+      "allWorkspaces": "全部工作区",
+      "allPurposes": "全部用途",
+      "allChannels": "全部渠道",
+      "clear": "清除筛选",
+      "active": "已启用筛选：{{count}} 项",
+      "personal": "个人空间",
+      "unattributed": "未归因"
+    },
+    "breakdown": {
+      "count": "{{count}} 项",
+      "search": "搜索当前拆分",
+      "sort": "拆分排序",
+      "sortOptions": {
+        "cost": "模型成本",
+        "turns": "已交付轮次",
+        "calls": "计量操作",
+        "tokens": "令牌",
+        "credits": "消耗积分"
+      },
+      "empty": "没有符合当前条件的拆分项。"
+    },
+    "labels": {
+      "unknown": "未知",
+      "deletedModel": "已删除模型（{{id}}）",
+      "deletedUser": "已删除或匿名用户",
+      "personal": "个人工作区",
+      "unattributedChannel": "未归因渠道"
+    },
+    "table": {
+      "name": "名称",
+      "operations": "计量操作",
+      "turns": "已交付轮次",
+      "tokens": "令牌",
+      "cost": "模型成本",
+      "credits": "消耗积分",
+      "chargedTurns": "扣积分轮次",
+      "avgCostTurn": "平均成本 / 轮次",
+      "avgCostOperation": "平均成本 / 操作"
+    },
+    "error": {
+      "title": "无法加载用量分析",
+      "retry": "重试",
+      "stale": "刷新失败，当前显示上次成功加载的数据。"
+    },
+    "updatedAt": "更新于 {{value}}",
     "feedback": {
       "lead": "对比各模型的回答质量，并定位用户认为需要改进的回复。时间范围按回复生成时间计算。",
       "filters": {

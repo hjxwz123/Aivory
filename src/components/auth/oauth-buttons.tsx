@@ -7,16 +7,26 @@
  * Renders nothing when no providers are configured; callers gate the
  * surrounding divider on `providers.length` so the section disappears cleanly.
  */
+import { useState } from 'react'
 import { apiUrl } from '@/api'
 import type { ApiPublicOAuthProvider } from '@/api/types'
 import { Button } from '@/components/ui/button'
+import { oauthStartPath } from '@/lib/oauth'
+import { PuzzleCaptchaDialog } from './puzzle-captcha-dialog'
 import { OAuthBrandGlyph } from './oauth-glyph'
 
 interface OAuthButtonsProps {
   providers: ApiPublicOAuthProvider[]
+  captchaRequired?: boolean
 }
 
-export function OAuthButtons({ providers }: OAuthButtonsProps) {
+export function OAuthButtons({ providers, captchaRequired = false }: OAuthButtonsProps) {
+  const [pendingProvider, setPendingProvider] = useState<ApiPublicOAuthProvider | null>(null)
+
+  function start(provider: ApiPublicOAuthProvider, captchaToken?: string) {
+    window.location.href = apiUrl(oauthStartPath(provider.id, captchaToken))
+  }
+
   if (providers.length === 0) return null
   return (
     <>
@@ -27,13 +37,28 @@ export function OAuthButtons({ providers }: OAuthButtonsProps) {
           variant="secondary"
           size="lg"
           onClick={() => {
-            window.location.href = apiUrl(`/auth/oauth/${encodeURIComponent(p.id)}/start`)
+            if (captchaRequired) {
+              setPendingProvider(p)
+              return
+            }
+            start(p)
           }}
         >
           <OAuthBrandGlyph kind={p.kind} icon={p.icon} />
           {p.name}
         </Button>
       ))}
+      <PuzzleCaptchaDialog
+        open={pendingProvider !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingProvider(null)
+        }}
+        onSolved={(token) => {
+          const provider = pendingProvider
+          setPendingProvider(null)
+          if (provider) start(provider, token)
+        }}
+      />
     </>
   )
 }

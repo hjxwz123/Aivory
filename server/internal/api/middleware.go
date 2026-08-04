@@ -70,31 +70,33 @@ func requireAuth(d Deps, h handler) http.HandlerFunc {
 			writeError(w, http.StatusUnauthorized, errAuthRequired)
 			return
 		}
+		state, err := store.GetUserAuthStateForSession(r.Context(), d.DB, claims.UID, claims.SessionID)
+		if err != nil {
+			writeError(w, http.StatusUnauthorized, errAuthRequired)
+			return
+		}
+		if state.Status != "active" {
+			writeError(w, http.StatusForbidden, errAccountBlocked)
+			return
+		}
+		if state.TokenVer != claims.TV {
+			writeError(w, http.StatusUnauthorized, errSessionExpired)
+			return
+		}
+		if !state.SessionActive {
+			writeError(w, http.StatusUnauthorized, errSessionExpired)
+			return
+		}
 		user, err := cachedAuthUser(r.Context(), d, claims.UID)
 		if err != nil {
 			writeError(w, http.StatusUnauthorized, errAuthRequired)
 			return
 		}
-		if user.Status != "active" || user.TokenVer != claims.TV {
-			// The auth user is cached because every protected request needs status
-			// and token_ver. A stale cache entry must not turn a freshly refreshed
-			// token into a fake "session expired", so verify once against the DB
-			// before rejecting.
-			fresh, err := refreshCachedAuthUser(r.Context(), d, claims.UID)
-			if err != nil {
-				writeError(w, http.StatusUnauthorized, errAuthRequired)
-				return
-			}
-			user = fresh
-		}
-		if user.Status != "active" {
-			writeError(w, http.StatusForbidden, errAccountBlocked)
-			return
-		}
-		if user.TokenVer != claims.TV {
-			writeError(w, http.StatusUnauthorized, errSessionExpired)
-			return
-		}
+		// Profile data may be cached, but these fields are authorization inputs and
+		// must always reflect the database read above.
+		user.Role = state.Role
+		user.Status = state.Status
+		user.TokenVer = state.TokenVer
 		// Online status (§ admin → users): record activity at most once per minute
 		// per user (cache-throttled) so it's a single cheap UPDATE, off the
 		// request path. user.LastSeenAt reflects the value before this touch.
@@ -125,10 +127,11 @@ func requireAdmin(d Deps, h handler) http.HandlerFunc {
 // csrfOK guards cookie-authenticated, state-changing requests (§A3). Returns
 // true (allow) for: safe methods (GET/HEAD/OPTIONS); requests without an
 // auth_token cookie (Bearer-only — a cross-site page can't set the header);
-// requests with no Origin (non-browser clients); same-origin requests
-// (Origin host == Host); and requests whose Origin is in the configured
-// allow-list. Everything else (a present, foreign, non-allowed Origin on a
-// cookie-authenticated mutation) is blocked.
+// requests with no browser cross-site signal; same-origin requests; and
+// requests whose Origin is in the configured allow-list. Everything else is
+// blocked. Same-origin compares scheme as well as host: an http page on the
+// same hostname is not an https origin and must not be able to drive a
+// cookie-authenticated mutation.
 func csrfOK(allowed []string, r *http.Request) bool {
 	switch r.Method {
 	case http.MethodGet, http.MethodHead, http.MethodOptions:
@@ -139,9 +142,9 @@ func csrfOK(allowed []string, r *http.Request) bool {
 	}
 	origin := strings.TrimRight(r.Header.Get("Origin"), "/")
 	if origin == "" {
-		return true
+		return !strings.EqualFold(strings.TrimSpace(r.Header.Get("Sec-Fetch-Site")), "cross-site")
 	}
-	if u, err := url.Parse(origin); err == nil && u.Host == r.Host {
+	if sameRequestOrigin(origin, r) {
 		return true
 	}
 	for _, a := range allowed {
@@ -150,6 +153,24 @@ func csrfOK(allowed []string, r *http.Request) bool {
 		}
 	}
 	return false
+}
+
+func sameRequestOrigin(origin string, r *http.Request) bool {
+	supplied, err := url.Parse(origin)
+	if err != nil || supplied.User != nil || supplied.Host == "" ||
+		(supplied.Path != "" && supplied.Path != "/") || supplied.RawQuery != "" || supplied.Fragment != "" {
+		return false
+	}
+	expected, err := url.Parse(externalBaseURL(r))
+	if err != nil || expected.User != nil || expected.Host == "" {
+		return false
+	}
+	if (supplied.Scheme != "http" && supplied.Scheme != "https") ||
+		(expected.Scheme != "http" && expected.Scheme != "https") {
+		return false
+	}
+	return strings.EqualFold(supplied.Scheme, expected.Scheme) &&
+		strings.EqualFold(supplied.Host, expected.Host)
 }
 
 func readAccessToken(r *http.Request) string {

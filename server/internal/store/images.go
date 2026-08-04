@@ -147,25 +147,47 @@ type AdminImageArtifact struct {
 	URL string `json:"url,omitempty"`
 }
 
-// ListUserImageArtifacts returns a user's image artifacts newest-first, paged.
-// Covers EVERY image the user generated — drawing-mode turns and chat tool-call
-// image_generate alike — since both persist as image artifacts.
+// ListUserImageArtifacts returns the image artifacts attributed to a user for
+// the admin audit gallery. It intentionally does not require the target user to
+// retain access to the source workspace: administrators must be able to inspect
+// historical output after a member is removed. The conversation owner fallback
+// is limited to legacy messages that predate author_id.
 func ListUserImageArtifacts(ctx context.Context, db *sql.DB, userID string, limit, offset int) ([]AdminImageArtifact, error) {
+	return listUserImageArtifacts(ctx, db,
+		`COALESCE(NULLIF(m.author_id,''),c.user_id)=?`,
+		[]any{userID}, limit, offset)
+}
+
+// ListUserImageArtifactsForUser returns the signed-in user's own generated
+// images, restricted to conversations they can currently access. This prevents
+// workspace owners from claiming another member's output and former members
+// from enumerating workspace artifact metadata after removal.
+func ListUserImageArtifactsForUser(ctx context.Context, db *sql.DB, userID string, limit, offset int) ([]AdminImageArtifact, error) {
+	args := []any{userID}
+	args = append(args, workspaceResourceAccessArgs(userID)...)
+	return listUserImageArtifacts(ctx, db,
+		`COALESCE(NULLIF(m.author_id,''),c.user_id)=? AND `+workspaceResourceAccessPredicate("c"),
+		args, limit, offset)
+}
+
+func listUserImageArtifacts(ctx context.Context, db *sql.DB, predicate string, args []any, limit, offset int) ([]AdminImageArtifact, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 60
 	}
 	if offset < 0 {
 		offset = 0
 	}
+	args = append(args, limit, offset)
 	rows, err := db.QueryContext(ctx,
 		`SELECT a.id, m.conversation_id, COALESCE(c.title,''), a.message_id, a.filename, a.mime_type, a.size_bytes, a.created_at
 		 FROM artifacts a
 		 JOIN messages m ON m.id = a.message_id
 		 JOIN conversations c ON c.id = m.conversation_id
-		 WHERE c.user_id = ? AND a.mime_type LIKE 'image/%'
+		 WHERE `+predicate+`
+		   AND a.mime_type LIKE 'image/%'
 		 ORDER BY a.created_at DESC, a.id DESC
 		 LIMIT ? OFFSET ?`,
-		userID, limit, offset)
+		args...)
 	if err != nil {
 		return nil, err
 	}

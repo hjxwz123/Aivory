@@ -136,12 +136,8 @@ func listLibraryCatalogHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	safeSkills := make([]catalogSkill, 0, len(skills))
 	for _, skill := range skills {
 		displayDescription := strings.TrimSpace(skill.DisplayDescription)
-		effectiveDescription := displayDescription
-		if effectiveDescription == "" {
-			effectiveDescription = strings.TrimSpace(skill.Description)
-		}
 		safeSkills = append(safeSkills, catalogSkill{
-			ID: skill.ID, Name: skill.Name, Description: effectiveDescription,
+			ID: skill.ID, Name: skill.Name, Description: displayDescription,
 			DisplayDescription: displayDescription, Icon: skill.Icon, Source: "admin", Added: addedSkills[skill.ID],
 		})
 	}

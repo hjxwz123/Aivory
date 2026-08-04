@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -91,13 +92,19 @@ func workspaceMembersHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 func kickWorkspaceMemberHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
 	id := pathParam(r, "id")
+	memberID := pathParam(r, "uid")
 	ws, err := store.GetWorkspaceForMember(r.Context(), d.DB, id, u.ID)
 	if err != nil || ws.OwnerID != u.ID {
 		writeError(w, 404, errNotFound)
 		return
 	}
-	if err := store.RemoveWorkspaceMember(r.Context(), d.DB, id, pathParam(r, "uid")); err != nil {
+	revokedMessageIDs, err := store.RemoveWorkspaceMemberWithRevokedGenerations(r.Context(), d.DB, id, memberID)
+	if err != nil {
 		writeError(w, 404, errNotFound)
+		return
+	}
+	if err := revokeMessageGenerationStreams(d, revokedMessageIDs); err != nil {
+		writeError(w, http.StatusServiceUnavailable, err)
 		return
 	}
 	writeJSON(w, 200, map[string]bool{"ok": true})
@@ -108,8 +115,13 @@ func kickWorkspaceMemberHandler(d Deps, w http.ResponseWriter, r *http.Request) 
 func leaveWorkspaceHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
 	id := pathParam(r, "id")
-	if err := store.LeaveWorkspace(r.Context(), d.DB, id, u.ID); err != nil {
+	revokedMessageIDs, err := store.LeaveWorkspaceWithRevokedGenerations(r.Context(), d.DB, id, u.ID)
+	if err != nil {
 		writeError(w, 404, errNotFound)
+		return
+	}
+	if err := revokeMessageGenerationStreams(d, revokedMessageIDs); err != nil {
+		writeError(w, http.StatusServiceUnavailable, err)
 		return
 	}
 	writeJSON(w, 200, map[string]bool{"ok": true})
@@ -153,13 +165,9 @@ func workspaceInviteInfoHandler(d Deps, w http.ResponseWriter, r *http.Request) 
 func joinWorkspaceHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
 	token := pathParam(r, "token")
-	ws, err := store.GetWorkspaceByInviteToken(r.Context(), d.DB, token)
+	ws, err := store.JoinWorkspaceByInviteToken(r.Context(), d.DB, token, u.ID)
 	if err != nil {
 		writeError(w, 404, errNotFound)
-		return
-	}
-	if err := store.JoinWorkspace(r.Context(), d.DB, ws.ID, u.ID); err != nil {
-		writeError(w, 500, err)
 		return
 	}
 	writeJSON(w, 200, map[string]any{"id": ws.ID, "name": ws.Name})
@@ -189,7 +197,25 @@ func deleteWorkspaceHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 // workspace row itself. Acts AS THE OWNER (a member) so the member-aware
 // deleters admit the operation regardless of which authorized caller (owner or
 // admin) triggered it.
-func teardownWorkspace(d Deps, r *http.Request, ws *store.Workspace) error {
+func teardownWorkspace(d Deps, r *http.Request, ws *store.Workspace) (returnErr error) {
+	revokedMessageIDs, err := store.ScrubWorkspaceStreamingMessages(r.Context(), d.DB, ws.ID)
+	if err != nil {
+		return err
+	}
+	if !publishWorkspaceGenerationRevocation(d, ws.ID) {
+		return errors.New("workspace generation revocation unavailable")
+	}
+	// If a later teardown step fails, restore the workspace for new turns. The
+	// per-message tombstones remain, so generations scrubbed above never revive.
+	teardownComplete := false
+	defer func() {
+		if !teardownComplete {
+			d.Cache.Delete(workspaceGenerationRevocationKey(ws.ID))
+		}
+	}()
+	if err := revokeMessageGenerationStreams(d, revokedMessageIDs); err != nil {
+		return err
+	}
 	convIDs, projectIDs, kbIDs, err := store.WorkspaceContentIDs(r.Context(), d.DB, ws.ID)
 	if err != nil {
 		return err
@@ -217,7 +243,7 @@ func teardownWorkspace(d Deps, r *http.Request, ws *store.Workspace) error {
 		for _, doc := range docs {
 			storagePaths = append(storagePaths, doc.StoragePath)
 		}
-		if err := store.DeleteKB(r.Context(), d.DB, kid, ws.OwnerID); err != nil {
+		if err := store.DeleteKB(r.Context(), d.DB, kid, ws.OwnerID, d.Config.UploadDir, d.Config.ArtifactDir); err != nil {
 			d.Logger.Printf("workspace %s teardown: kb %s: %v", ws.ID, kid, err)
 			continue
 		}
@@ -229,7 +255,11 @@ func teardownWorkspace(d Deps, r *http.Request, ws *store.Workspace) error {
 			d.Logger.Printf("workspace %s teardown: project %s: %v", ws.ID, pid, err)
 		}
 	}
-	return store.DeleteWorkspaceRow(r.Context(), d.DB, ws.ID)
+	if err := store.DeleteWorkspaceRow(r.Context(), d.DB, ws.ID); err != nil {
+		return err
+	}
+	teardownComplete = true
+	return nil
 }
 
 // --- Admin (§workspaces 管理端) -------------------------------------------

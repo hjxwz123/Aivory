@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -20,6 +21,33 @@ import (
 var eventsTestCache = cache.NewMemory()
 
 func eventsTestDeps() Deps { return Deps{Cache: eventsTestCache} }
+
+type synchronizedResponseRecorder struct {
+	*httptest.ResponseRecorder
+	mu sync.RWMutex
+}
+
+func newSynchronizedResponseRecorder() *synchronizedResponseRecorder {
+	return &synchronizedResponseRecorder{ResponseRecorder: httptest.NewRecorder()}
+}
+
+func (r *synchronizedResponseRecorder) Write(p []byte) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.ResponseRecorder.Write(p)
+}
+
+func (r *synchronizedResponseRecorder) Flush() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.ResponseRecorder.Flush()
+}
+
+func (r *synchronizedResponseRecorder) bodyString() string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.Body.String()
+}
 
 // waitEvent polls a connection channel with a deadline so tests never hang.
 func waitEvent(t *testing.T, ch chan string, within time.Duration) string {
@@ -106,7 +134,7 @@ func TestEventsStreamHandlerStreamsHelloAndEvents(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	req := httptest.NewRequest("GET", "/api/events", nil)
 	req = req.WithContext(context.WithValue(ctx, userCtxKey{}, &store.User{ID: "user-stream"}))
-	rec := httptest.NewRecorder()
+	rec := newSynchronizedResponseRecorder()
 
 	done := make(chan struct{})
 	go func() {
@@ -117,19 +145,19 @@ func TestEventsStreamHandlerStreamsHelloAndEvents(t *testing.T) {
 	// Wait for the hello frame, then publish an event to this user.
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if strings.Contains(rec.Body.String(), `{"type":"hello"}`) {
+		if strings.Contains(rec.bodyString(), `{"type":"hello"}`) {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if !strings.Contains(rec.Body.String(), `{"type":"hello"}`) {
+	if !strings.Contains(rec.bodyString(), `{"type":"hello"}`) {
 		cancel()
 		t.Fatal("hello frame never written")
 	}
 	publishUserEvent(d, nil, "user-stream", "conversation.updated", "c9")
 	deadline = time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if strings.Contains(rec.Body.String(), "conversation.updated") {
+		if strings.Contains(rec.bodyString(), "conversation.updated") {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -141,7 +169,7 @@ func TestEventsStreamHandlerStreamsHelloAndEvents(t *testing.T) {
 		t.Fatal("handler did not exit on context cancel")
 	}
 
-	body := rec.Body.String()
+	body := rec.bodyString()
 	if !strings.Contains(body, `data: {"type":"hello"}`) {
 		t.Errorf("missing hello frame:\n%s", body)
 	}

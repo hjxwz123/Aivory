@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"aivory/server/internal/config"
 )
 
 func TestAdminFilesListFilterAndDedupe(t *testing.T) {
@@ -109,7 +111,7 @@ func TestAdminFilesBatchDeleteRemovesRowsAndBytes(t *testing.T) {
 	body := strings.NewReader(`{"items":[{"source":"file","id":"f1"},{"source":"document","id":"d2"},{"source":"file","id":"missing"}]}`)
 	req := httptest.NewRequest("POST", "/api/admin/files/delete", body)
 	rec := httptest.NewRecorder()
-	deleteFilesAdmin(Deps{DB: db}, rec, req)
+	deleteFilesAdmin(Deps{DB: db, Config: config.Config{UploadDir: dir}}, rec, req)
 	if rec.Code != 200 {
 		t.Fatalf("delete status=%d body=%s", rec.Code, rec.Body.String())
 	}

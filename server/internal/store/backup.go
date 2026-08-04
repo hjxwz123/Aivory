@@ -24,7 +24,7 @@ import (
 // BackupVersion is the archive format version embedded in the manifest. Bump
 // it only on a breaking change to the on-disk shape; the importer refuses
 // archives newer than the version it understands.
-const BackupVersion = 1
+const BackupVersion = 2
 
 // backupTableOrder lists every table in FK-safe INSERT order (parents before
 // children). Restore inserts in this order and wipes in reverse, so foreign
@@ -243,6 +243,7 @@ func RestoreTable(ctx context.Context, ex RowExecer, table string, r io.Reader) 
 		}
 		applyLegacyPaymentOrderSnapshotDefaults(table, raw)
 		applyLegacyCreditMicrosDefaults(table, raw)
+		applyLegacyRefreshSessionDefaults(table, raw)
 		cols := make([]string, 0, len(liveCols))
 		args := make([]any, 0, len(liveCols))
 		for _, c := range liveCols { // stable, schema-defined order
@@ -316,6 +317,24 @@ func applyLegacyCreditMicrosDefaults(table string, row map[string]json.RawMessag
 		return
 	}
 	row[microsColumn], _ = json.Marshal(micros)
+}
+
+// applyLegacyRefreshSessionDefaults gives pre-session-family exports a stable
+// one-token family. Empty values are treated the same as an omitted column so a
+// partially migrated archive cannot make all legacy tokens share one family.
+func applyLegacyRefreshSessionDefaults(table string, row map[string]json.RawMessage) {
+	if table != "refresh_tokens" {
+		return
+	}
+	jti, ok := row["jti"]
+	if !ok {
+		return
+	}
+	session, present := row["session_id"]
+	var sessionID string
+	if !present || json.Unmarshal(session, &sessionID) != nil || strings.TrimSpace(sessionID) == "" {
+		row["session_id"] = jti
+	}
 }
 
 var tablePrimaryKeys = map[string][]string{
@@ -397,6 +416,7 @@ func UpsertTable(ctx context.Context, ex RowExecer, table string, r io.Reader) (
 			return n, fmt.Errorf("decode %s row: %w", table, err)
 		}
 		applyLegacyCreditMicrosDefaults(table, raw)
+		applyLegacyRefreshSessionDefaults(table, raw)
 		cols := make([]string, 0, len(liveCols))
 		args := make([]any, 0, len(liveCols))
 		colSet := make(map[string]bool, len(liveCols))

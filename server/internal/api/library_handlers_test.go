@@ -123,7 +123,7 @@ func TestPrivateSkillRejectsFileAndPathFieldsRegardlessOfCaseOrNesting(t *testin
 	}
 }
 
-func TestLibraryCatalogPrefersDisplayDescriptionAndFallsBackToWhenToUseWithoutPrivateContent(t *testing.T) {
+func TestLibraryCatalogExposesOnlyExplicitDisplayDescriptionWithoutPrivateContent(t *testing.T) {
 	db := openMigrated(t, filepath.Join(t.TempDir(), "catalog-redaction.db"))
 	defer db.Close()
 	mustExec(t, db, `INSERT INTO users(id,email,password_hash) VALUES('u1','u1@example.test','h')`)
@@ -136,7 +136,7 @@ func TestLibraryCatalogPrefersDisplayDescriptionAndFallsBackToWhenToUseWithoutPr
 		t.Fatal(err)
 	}
 	_, err = store.CreateSkill(ctx, db, store.Skill{
-		Name: "legacy-skill", Description: "Use when legacy work is requested",
+		Name: "legacy-skill", Description: "LEGACY_TRIGGER_SECRET",
 		Icon: "WandSparkles", Instructions: "LEGACY_INSTRUCTION_SECRET", Enabled: true,
 	})
 	if err != nil {
@@ -154,7 +154,7 @@ func TestLibraryCatalogPrefersDisplayDescriptionAndFallsBackToWhenToUseWithoutPr
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	for _, secret := range []string{"TRIGGER_SECRET", "INSTRUCTION_SECRET", "LEGACY_INSTRUCTION_SECRET", "ASSET_SECRET", "PROMPT_CONTENT_SECRET", "storage_path", "instructions", "content"} {
+	for _, secret := range []string{"TRIGGER_SECRET", "LEGACY_TRIGGER_SECRET", "INSTRUCTION_SECRET", "LEGACY_INSTRUCTION_SECRET", "ASSET_SECRET", "PROMPT_CONTENT_SECRET", "storage_path", "instructions", "content"} {
 		if strings.Contains(body, secret) {
 			t.Fatalf("catalog leaked %q: %s", secret, body)
 		}
@@ -177,7 +177,7 @@ func TestLibraryCatalogPrefersDisplayDescriptionAndFallsBackToWhenToUseWithoutPr
 		t.Fatalf("configured catalog skill=%+v", configured)
 	}
 	legacy := byName["legacy-skill"]
-	if legacy.DisplayDescription != "" || legacy.Description != "Use when legacy work is requested" || legacy.Icon != "WandSparkles" {
+	if legacy.DisplayDescription != "" || legacy.Description != "" || legacy.Icon != "WandSparkles" {
 		t.Fatalf("legacy catalog skill=%+v", legacy)
 	}
 	if !strings.Contains(body, "Prompt summary") {

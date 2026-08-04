@@ -34,14 +34,14 @@ import (
 // account, so no new sessions or requests can appear mid-deletion.
 
 var (
-	userDeleteJobRuntime    = envcfg.Dur("AIVORY_API_USER_DELETE_JOB_RUNTIME", 2*time.Hour)
+	userDeleteJobRuntime = envcfg.Dur("AIVORY_API_USER_DELETE_JOB_RUNTIME", 2*time.Hour)
 	// Physical cleanup gets its own budget so an exhausted job context can
 	// never silently skip the disk/object-storage phase.
 	userDeleteFinalCleanupTimeout = envcfg.Dur("AIVORY_API_USER_DELETE_FINAL_CLEANUP_TIMEOUT", 1*time.Hour)
-	userDeleteConvBatch     = envcfg.Int("AIVORY_API_USER_DELETE_CONV_BATCH", 200)
-	userDeleteUsageBatch    = envcfg.Int("AIVORY_API_USER_DELETE_USAGE_BATCH", 10000)
-	userDeleteJobRetention  = envcfg.Int("AIVORY_API_USER_DELETE_JOB_HISTORY_RETENTION", 20)
-	userDeleteProgressEvery = envcfg.Int("AIVORY_API_USER_DELETE_PROGRESS_EVERY", 50)
+	userDeleteConvBatch           = envcfg.Int("AIVORY_API_USER_DELETE_CONV_BATCH", 200)
+	userDeleteUsageBatch          = envcfg.Int("AIVORY_API_USER_DELETE_USAGE_BATCH", 10000)
+	userDeleteJobRetention        = envcfg.Int("AIVORY_API_USER_DELETE_JOB_HISTORY_RETENTION", 20)
+	userDeleteProgressEvery       = envcfg.Int("AIVORY_API_USER_DELETE_PROGRESS_EVERY", 50)
 )
 
 type userDeletionJob struct {
@@ -124,18 +124,21 @@ func (m *userDeletionManager) list() []userDeletionJob {
 // startUserDeletion locks the account out and spawns the background job.
 // Callers must have run their own permission guards (self-delete, last-admin,
 // password confirmation) first. Returns false when a job is already running.
-func startUserDeletion(d Deps, userID, email string) (bool, error) {
-	if !userDeletions.start(userID, email) {
-		return false, nil
-	}
+func startUserDeletion(d Deps, userID, email string, expectedPasswordHash ...string) (bool, error) {
 	// MarkUserDeleting flips the status atomically with the last-admin guard
 	// folded into the UPDATE (closes the two-admins-delete-each-other TOCTOU)
 	// and performs the same instant lockout a ban does: token_ver bump plus
 	// refresh-token revocation. Already-deleting rows are a no-op so resume
 	// and admin-retry paths stay idempotent.
-	if _, err := store.MarkUserDeleting(context.Background(), d.DB, userID); err != nil {
-		userDeletions.finish(userID, "failed", err.Error())
+	if _, err := store.MarkUserDeleting(context.Background(), d.DB, userID, expectedPasswordHash...); err != nil {
 		return false, err
+	}
+	// Register the in-memory job only after the durable transition succeeds. A
+	// rejected owner deletion or stale-password request must not leave a bogus
+	// failed job in the admin UI. Concurrent successful callers still converge on
+	// this manager's single-flight entry.
+	if !userDeletions.start(userID, email) {
+		return false, nil
 	}
 	invalidateAuthUser(d, userID)
 	d.Cache.Publish("user:"+userID+":kill", "1") // drop live streams immediately
@@ -207,7 +210,7 @@ func runUserDeletionJob(d Deps, userID string) {
 		if len(ids) == 0 {
 			break
 		}
-		if err := store.DeleteConversationRows(ctx, d.DB, ids); err != nil {
+		if err := store.DeleteConversationRows(ctx, d.DB, userID, ids); err != nil {
 			userDeletions.finish(userID, "failed", err.Error())
 			return
 		}
@@ -233,7 +236,7 @@ func runUserDeletionJob(d Deps, userID string) {
 	// Final sweep: files, documents, memories, tokens, the users row and its
 	// cascades. The big tables are already empty, so this transaction is small.
 	userDeletions.progress(userID, "finalizing")
-	if err := store.DeleteUser(ctx, d.DB, userID); err != nil {
+	if err := store.DeleteUser(ctx, d.DB, userID, d.Config.UploadDir, d.Config.ArtifactDir); err != nil {
 		userDeletions.finish(userID, "failed", err.Error())
 		return
 	}

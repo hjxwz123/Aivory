@@ -226,21 +226,26 @@ func ValidateModelBilling(m *Model) error {
 // the admin UI whether a secret is on file without leaking it.
 type OAuthProvider struct {
 	ID           string `json:"id"`
-	Kind         string `json:"kind"` // google | github | apple | oidc
+	Kind         string `json:"kind"` // google | github | apple | oidc | oauth2
 	Name         string `json:"name"`
 	Icon         string `json:"icon"`
 	ClientID     string `json:"client_id"`
 	ClientSecret string `json:"-"`
 	HasSecret    bool   `json:"has_secret"`
+	IssuerURL    string `json:"issuer_url"`
+	JWKSURL      string `json:"jwks_url"`
 	AuthURL      string `json:"auth_url"`
 	TokenURL     string `json:"token_url"`
 	UserInfoURL  string `json:"userinfo_url"`
 	Scopes       string `json:"scopes"`
 	TeamID       string `json:"team_id"`
 	KeyID        string `json:"key_id"`
-	Enabled      bool   `json:"enabled"`
-	SortOrder    int    `json:"sort_order"`
-	UpdatedAt    int64  `json:"updated_at"`
+	// SubjectNamespace is an internal trust-domain generation marker. It is
+	// never exposed to clients; callbacks compare it with the effective config.
+	SubjectNamespace string `json:"-"`
+	Enabled          bool   `json:"enabled"`
+	SortOrder        int    `json:"sort_order"`
+	UpdatedAt        int64  `json:"updated_at"`
 }
 
 // OAuthIdentity is one third-party identity bound to a local user (an

@@ -1,9 +1,10 @@
 /**
  * AdminOAuth — configure social / OAuth login providers. Built-in kinds
- * (Google, GitHub, Apple) only need client credentials; the generic OIDC kind
- * also takes the authorize / token / userinfo endpoints. The client_secret is
- * write-only — it's never returned, and an empty field on edit keeps the saved
- * value (mirrors the channel api_key policy).
+ * (Google, GitHub, Apple) only need client credentials; generic OAuth2 and OIDC
+ * providers take custom authorize / token endpoints. OAuth2 also takes a
+ * UserInfo endpoint, while OIDC requires issuer and JWKS metadata. The
+ * client_secret is write-only — it's never returned, and an empty field on edit
+ * keeps the saved value.
  */
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -31,10 +32,13 @@ import { IconUploader } from '@/components/admin/icon-uploader'
 import { OAuthBrandGlyph } from '@/components/auth/oauth-glyph'
 import { PanelFallback } from '@/components/ui/panel-fallback'
 import { AdminSortableList } from '@/components/admin/AdminSortableList'
+import {
+  getOAuthProviderFormCapabilities,
+  oauthProviderErrorTranslationKey,
+  OAUTH_PROVIDER_KINDS,
+} from '@/lib/oauth'
 
 type Editable = Partial<ApiOAuthProvider> & { client_secret?: string }
-
-const KINDS: OAuthKind[] = ['google', 'github', 'apple', 'oidc']
 
 export default function AdminOAuth() {
   const { t } = useTranslation(['admin', 'common'])
@@ -142,8 +146,9 @@ export default function AdminOAuth() {
       setEditor({ ...editor, open: false })
       await load()
     } catch (e) {
-      if (e instanceof ApiError && e.message === 'oauth_provider_id_exists') {
-        toast.error(t('admin:oauth.errors.idConflict'))
+      const oauthErrorKey = e instanceof ApiError ? oauthProviderErrorTranslationKey(e.message) : null
+      if (oauthErrorKey) {
+        toast.error(t(oauthErrorKey))
       } else if (e instanceof ApiError && e.status === 409) {
         toast.error(t('admin:common.nameExists', { defaultValue: 'A record with this name already exists.' }))
       } else {
@@ -185,8 +190,13 @@ export default function AdminOAuth() {
   }
 
   const kind = editor.draft.kind ?? 'google'
-  const isApple = kind === 'apple'
-  const isOidc = kind === 'oidc'
+  const {
+    usesAppleCredentials: isApple,
+    usesCustomIcon,
+    showsCustomEndpoints,
+    showsOidcMetadata,
+    showsUserInfoEndpoint,
+  } = getOAuthProviderFormCapabilities(kind)
 
   return (
     <div>
@@ -286,7 +296,7 @@ export default function AdminOAuth() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {KINDS.map((k) => (
+                      {OAUTH_PROVIDER_KINDS.map((k) => (
                         <SelectItem key={k} value={k}>
                           {t(`admin:oauth.kinds.${k}`)}
                         </SelectItem>
@@ -355,7 +365,7 @@ export default function AdminOAuth() {
                 </p>
               </div>
 
-              {isOidc ? (
+              {usesCustomIcon ? (
                 <Field label={t('admin:oauth.fields.icon')}>
                   <IconUploader
                     value={editor.draft.icon ?? ''}
@@ -427,8 +437,28 @@ export default function AdminOAuth() {
                 </div>
               ) : null}
 
-              {isOidc ? (
+              {showsCustomEndpoints ? (
                 <>
+                  {showsOidcMetadata ? (
+                    <>
+                      <Field label={t('admin:oauth.fields.issuerUrl')} htmlFor="oa-issuer">
+                        <Input
+                          id="oa-issuer"
+                          value={editor.draft.issuer_url ?? ''}
+                          onChange={(e) => setDraft({ issuer_url: e.target.value })}
+                          placeholder="https://id.example.com"
+                        />
+                      </Field>
+                      <Field label={t('admin:oauth.fields.jwksUrl')} htmlFor="oa-jwks">
+                        <Input
+                          id="oa-jwks"
+                          value={editor.draft.jwks_url ?? ''}
+                          onChange={(e) => setDraft({ jwks_url: e.target.value })}
+                          placeholder="https://id.example.com/.well-known/jwks.json"
+                        />
+                      </Field>
+                    </>
+                  ) : null}
                   <Field label={t('admin:oauth.fields.authUrl')} htmlFor="oa-auth">
                     <Input
                       id="oa-auth"
@@ -445,20 +475,28 @@ export default function AdminOAuth() {
                       placeholder="https://id.example.com/token"
                     />
                   </Field>
-                  <Field label={t('admin:oauth.fields.userinfoUrl')} htmlFor="oa-userinfo">
-                    <Input
-                      id="oa-userinfo"
-                      value={editor.draft.userinfo_url ?? ''}
-                      onChange={(e) => setDraft({ userinfo_url: e.target.value })}
-                      placeholder="https://id.example.com/userinfo"
-                    />
-                  </Field>
-                  <Field label={t('admin:oauth.fields.scopes')} htmlFor="oa-scopes" hint={t('admin:oauth.fields.scopesHint')}>
+                  {showsUserInfoEndpoint ? (
+                    <Field label={t('admin:oauth.fields.userinfoUrl')} htmlFor="oa-userinfo">
+                      <Input
+                        id="oa-userinfo"
+                        value={editor.draft.userinfo_url ?? ''}
+                        onChange={(e) => setDraft({ userinfo_url: e.target.value })}
+                        placeholder="https://id.example.com/userinfo"
+                      />
+                    </Field>
+                  ) : null}
+                  <Field
+                    label={t('admin:oauth.fields.scopes')}
+                    htmlFor="oa-scopes"
+                    hint={t(showsOidcMetadata
+                      ? 'admin:oauth.fields.scopesHintOidc'
+                      : 'admin:oauth.fields.scopesHintOauth2')}
+                  >
                     <Input
                       id="oa-scopes"
                       value={editor.draft.scopes ?? ''}
                       onChange={(e) => setDraft({ scopes: e.target.value })}
-                      placeholder="openid email profile"
+                      placeholder={showsOidcMetadata ? 'openid email profile' : 'email profile'}
                     />
                   </Field>
                 </>

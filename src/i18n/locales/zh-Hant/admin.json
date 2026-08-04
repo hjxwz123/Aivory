@@ -251,7 +251,7 @@
   },
   "oauth": {
     "title": "登入方式",
-    "lead": "第三方登入(Google/GitHub/Apple/OIDC)。設定後出現在登入頁。",
+    "lead": "支援內建平台、通用 OAuth 2.0 與 OIDC 第三方登入，設定後出現在登入頁。",
     "new": "新增登入方式",
     "empty": "暫無第三方登入方式 — 使用者使用郵箱 + 密碼登入。",
     "noClientId": "未填 client id",
@@ -259,7 +259,8 @@
       "google": "Google",
       "github": "GitHub",
       "apple": "Apple",
-      "oidc": "自定義(OAuth2 / OIDC)"
+      "oauth2": "通用 OAuth 2.0",
+      "oidc": "通用 OIDC"
     },
     "fields": {
       "kind": "登入方式",
@@ -271,11 +272,14 @@
       "clientSecret": "Client Secret",
       "clientSecretApple": "私鑰(.p8)",
       "clientSecretHintEdit": "留空保留原金鑰。",
+      "issuerUrl": "簽發者地址(Issuer URL)",
+      "jwksUrl": "簽名金鑰地址(JWKS URL)",
       "authUrl": "授權地址(Authorize URL)",
       "tokenUrl": "令牌地址(Token URL)",
       "userinfoUrl": "使用者資訊地址(Userinfo URL)",
       "scopes": "Scopes",
-      "scopesHint": "空格分隔。留空用預設。",
+      "scopesHintOauth2": "依服務提供商文件填寫，以空格分隔，可留空。",
+      "scopesHintOidc": "以空格分隔。留空時使用 openid email profile。",
       "teamId": "Team ID",
       "keyId": "Key ID",
       "enabled": "啟用(在登入頁顯示)",
@@ -286,7 +290,8 @@
       "google": "在 Google Cloud → 憑證 建立 OAuth 用戶端。",
       "github": "在 GitHub → 開發者設定 → OAuth Apps 建立。",
       "apple": "在 Apple Developer 建立 Services ID 與 AuthKey(.p8)。",
-      "oidc": "填用戶端憑據與授權/權杖/使用者資訊端點。"
+      "oauth2": "使用平台提供的授權、權杖與使用者資訊端點。",
+      "oidc": "使用經驗證的 ID Token，並驗證 Issuer 與 JWKS。"
     },
     "editorTitle": "編輯登入方式",
     "newTitle": "新增登入方式",
@@ -299,7 +304,9 @@
     "errors": {
       "nameRequired": "請填寫按鈕文字",
       "callbackLoadFailed": "無法產生回呼網址，請重試。",
-      "idConflict": "該回呼網址已被占用，請關閉並重新開啟表單以產生新網址。"
+      "idConflict": "該回呼網址已被占用，請關閉並重新開啟表單以產生新網址。",
+      "providerChanged": "該 Provider 設定已被其他操作修改，請重新開啟後再儲存。",
+      "secretReentryRequired": "安全相關設定已變更。請重新輸入此提供商的 Client Secret；Apple 請重新輸入 .p8 私鑰，切換類型後請輸入新類型所需的憑據。"
     },
     "copied": "已複製"
   },
@@ -451,7 +458,8 @@
       "1": "最近 1 天",
       "7": "最近 7 天",
       "30": "最近 30 天",
-      "90": "最近 90 天"
+      "90": "最近 90 天",
+      "365": "最近 365 天"
     },
     "stats": {
       "totalCost": "總費用",
@@ -837,32 +845,143 @@
     "save": "儲存許可權"
   },
   "analytics": {
-    "title": "分析",
-    "lead": "整體使用趨勢:總體、分模型、分使用者。",
-    "empty": "該時間段暫無使用記錄。",
+    "title": "用量與計費",
+    "lead": "查看持久保存的使用者用量與模型成本，比較等長期間，並依使用者、模型、工作區、用途或渠道核對消耗。",
+    "empty": "此期間尚無計量用量。",
     "unknownUser": "未知使用者",
+    "actions": {
+      "usageRecords": "開啟用量記錄",
+      "refresh": "重新整理分析"
+    },
     "view": {
       "label": "分析檢視",
-      "usage": "用量趨勢",
+      "usage": "用量與計費",
       "feedback": "模型回饋"
     },
     "metric": {
-      "calls": "呼叫次數",
+      "label": "趨勢指標",
+      "calls": "計量操作",
+      "turns": "已交付回合",
       "tokens": "令牌",
-      "cost": "費用"
+      "cost": "模型成本",
+      "credits": "消耗積分",
+      "users": "活躍使用者"
     },
     "stats": {
-      "calls": "總呼叫次數",
-      "tokens": "總令牌數",
-      "cost": "總費用",
-      "users": "活躍使用者"
+      "calls": "計量操作",
+      "turns": "已交付回合",
+      "tokens": "輸入 + 輸出令牌",
+      "cost": "模型成本",
+      "credits": "消耗積分",
+      "users": "活躍使用者",
+      "operations": "計量操作"
     },
     "sections": {
       "daily": "按天使用趨勢",
       "hourly": "按小時使用趨勢",
+      "weekly": "週起始日",
       "byModel": "分模型使用",
-      "byUser": "分使用者使用"
+      "byUser": "分使用者使用",
+      "trend": "期間趨勢",
+      "economics": "單位經濟",
+      "tokenComposition": "令牌構成",
+      "breakdown": "詳細拆分"
     },
+    "comparison": {
+      "previousPeriod": "與緊鄰的上一個等長期間比較。",
+      "current": "目前期間",
+      "previous": "上一期間",
+      "newActivity": "新增用量",
+      "delta": "較上期 {{value}}"
+    },
+    "trend": {
+      "empty": "此趨勢尚無用量資料。"
+    },
+    "details": {
+      "images": "圖片",
+      "conversations": "對話",
+      "workspaces": "活躍工作區",
+      "inputTokens": "輸入令牌",
+      "outputTokens": "輸出令牌",
+      "cacheReadTokens": "快取讀取令牌",
+      "cacheWriteTokens": "快取寫入令牌"
+    },
+    "economics": {
+      "chargedTurnRate": "扣積分回合占比",
+      "costCoverage": "扣積分回合成本占比",
+      "includedCost": "免費額度回合成本",
+      "costPerTurn": "每回合平均成本",
+      "costPerUser": "每位活躍使用者成本",
+      "creditsPerChargedTurn": "每個扣積分回合消耗積分",
+      "operationsPerTurn": "每回合計量操作",
+      "chargedUsers": "扣積分使用者"
+    },
+    "notes": {
+      "billingDefinition": "模型成本是平台向服務商支付的美元成本。積分是使用者消耗的用量單位，不代表收入。扣積分回合依已交付訊息歸併，多步模型操作只計為一個回合。",
+      "tokenDefinition": "頂部令牌用量為輸入與輸出令牌之和；快取讀取與快取寫入令牌會在此構成中分開顯示。"
+    },
+    "dimension": {
+      "label": "拆分維度",
+      "user": "使用者",
+      "model": "模型",
+      "workspace": "工作區",
+      "purpose": "用途",
+      "channel": "渠道"
+    },
+    "filters": {
+      "user": "使用者",
+      "userPlaceholder": "電子郵件、名稱或 ID",
+      "model": "模型",
+      "workspace": "工作區",
+      "purpose": "用途",
+      "channel": "渠道",
+      "allUsers": "全部使用者",
+      "allModels": "全部模型",
+      "allWorkspaces": "全部工作區",
+      "allPurposes": "全部用途",
+      "allChannels": "全部渠道",
+      "clear": "清除篩選條件",
+      "active": "已啟用篩選條件：{{count}} 項",
+      "personal": "個人空間",
+      "unattributed": "未歸因"
+    },
+    "breakdown": {
+      "count": "{{count}} 項",
+      "search": "搜尋目前拆分",
+      "sort": "拆分排序",
+      "sortOptions": {
+        "cost": "模型成本",
+        "turns": "已交付回合",
+        "calls": "計量操作",
+        "tokens": "令牌",
+        "credits": "消耗積分"
+      },
+      "empty": "沒有符合目前條件的拆分項目。"
+    },
+    "labels": {
+      "unknown": "未知",
+      "deletedModel": "已刪除模型（{{id}}）",
+      "deletedUser": "已刪除或匿名使用者",
+      "personal": "個人工作區",
+      "unattributedChannel": "未歸因渠道"
+    },
+    "table": {
+      "name": "名稱",
+      "operations": "計量操作",
+      "turns": "已交付回合",
+      "tokens": "令牌",
+      "cost": "模型成本",
+      "credits": "消耗積分",
+      "chargedTurns": "扣積分回合",
+      "avgCostTurn": "平均成本 / 回合",
+      "avgCostOperation": "平均成本 / 操作"
+    },
+    "error": {
+      "title": "無法載入用量分析",
+      "retry": "重試",
+      "stale": "重新整理失敗，目前顯示上次成功載入的資料。"
+    },
+    "updatedAt": "更新於 {{value}}",
     "feedback": {
       "lead": "比較各模型的回答品質，並找出使用者認為需要改進的回覆。時間範圍依回覆生成時間計算。",
       "filters": {

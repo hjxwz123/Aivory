@@ -12,11 +12,9 @@
  * so dialogs never stack.
  */
 import { useEffect, useRef, useState } from 'react'
-import { useTranslation } from 'react-i18next'
 import { authApi } from '@/api'
 import { useAuth } from '@/store/auth'
-import { Dialog, DialogContent, DialogFooter, DialogTitle } from '@/components/ui/dialog'
-import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { sanitizeHtml } from '@/lib/markdown'
 import { cn } from '@/lib/utils'
 
@@ -31,7 +29,6 @@ interface AnnouncementData {
 const DISMISS_KEY = 'aivory.announcement.dismissed'
 
 export function AnnouncementPopup() {
-  const { t } = useTranslation('common')
   const user = useAuth((s) => s.user)
   const status = useAuth((s) => s.status)
   const onboarded = Boolean((user?.settings as Record<string, unknown> | undefined)?.onboarded)
@@ -93,7 +90,7 @@ export function AnnouncementPopup() {
       <DialogContent size={hasImage ? 'xl' : 'md'} className="overflow-hidden p-0">
         {!title ? (
           /* Legacy announcements without a configured title retain an a11y-only heading. */
-          <DialogTitle className="sr-only">{t('common.gotIt', { defaultValue: 'Announcement' })}</DialogTitle>
+          <DialogTitle className="sr-only">Announcement</DialogTitle>
         ) : null}
         <div className="flex flex-col sm:flex-row max-h-[85vh]">
           {hasImage ? (
@@ -101,7 +98,7 @@ export function AnnouncementPopup() {
               <img src={data.image_url} alt="" className="h-48 w-full object-cover sm:h-full" draggable={false} />
             </div>
           ) : null}
-          <div className="flex-1 min-w-0 flex flex-col">
+          <div className="flex-1 min-w-0">
             <div className="flex-1 overflow-y-auto px-7 py-7">
               {title ? <DialogTitle className="break-words pr-7">{title}</DialogTitle> : null}
               {data.body.trim() ? (
@@ -123,11 +120,6 @@ export function AnnouncementPopup() {
                 />
               ) : null}
             </div>
-            <DialogFooter className="px-7">
-              <Button size="sm" onClick={close}>
-                {t('common.gotIt', { defaultValue: 'Got it' })}
-              </Button>
-            </DialogFooter>
           </div>
         </div>
       </DialogContent>

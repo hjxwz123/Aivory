@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"aivory/server/internal/envcfg"
+	"aivory/server/internal/fileguard"
 	"aivory/server/internal/store"
 )
 
@@ -125,6 +126,10 @@ func uploadDestPath(d Deps, userID, kindPrefix, safeName string) (string, error)
 // Returns the persisted store.Document, ready for RAG ingestion.
 func receiveDocument(d Deps, r *http.Request, kbID, convID string) (*store.Document, error) {
 	u := authUser(r)
+	billingUserID, err := store.StorageBillingUserForContainer(r.Context(), d.DB, kbID, convID, u.ID)
+	if err != nil {
+		return nil, err
+	}
 	// mime.ParseMediaType handles uppercase, parameters, and whitespace per
 	// RFC 7231. We previously hand-rolled a `ct[:16] == "application/json"`
 	// check that rejected `APPLICATION/JSON` outright; that was a correctness
@@ -154,7 +159,7 @@ func receiveDocument(d Deps, r *http.Request, kbID, convID string) (*store.Docum
 			return nil, verr
 		}
 		// § user files page: documents always count against the storage quota.
-		if err := checkStorageQuota(r, d, u.ID, int64(len(body.Content))); err != nil {
+		if err := checkStorageQuota(r, d, billingUserID, int64(len(body.Content))); err != nil {
 			return nil, err
 		}
 		path, err := uploadDestPath(d, u.ID, "d", safe)
@@ -169,7 +174,12 @@ func receiveDocument(d Deps, r *http.Request, kbID, convID string) (*store.Docum
 			MimeType: body.MimeType, SizeBytes: int64(len(body.Content)),
 			Status: "pending", StoragePath: path,
 		}
-		return store.CreateDocument(r.Context(), d.DB, doc)
+		created, err := store.CreateDocumentForUser(r.Context(), d.DB, doc, u.ID)
+		if err != nil {
+			_ = os.Remove(path)
+			return nil, err
+		}
+		return created, nil
 	}
 
 	// Multipart path — for real uploads.
@@ -186,7 +196,7 @@ func receiveDocument(d Deps, r *http.Request, kbID, convID string) (*store.Docum
 		return nil, verr
 	}
 	// § user files page: documents always count against the storage quota.
-	if err := checkStorageQuota(r, d, u.ID, header.Size); err != nil {
+	if err := checkStorageQuota(r, d, billingUserID, header.Size); err != nil {
 		return nil, err
 	}
 	path, err := uploadDestPath(d, u.ID, "d", safe)
@@ -214,7 +224,13 @@ func receiveDocument(d Deps, r *http.Request, kbID, convID string) (*store.Docum
 		MimeType: header.Header.Get("Content-Type"), SizeBytes: n,
 		Status: "pending", StoragePath: path,
 	}
-	return store.CreateDocument(r.Context(), d.DB, doc)
+	created, err := store.CreateDocumentForUser(r.Context(), d.DB, doc, u.ID)
+	if err != nil {
+		_ = out.Close()
+		_ = os.Remove(path)
+		return nil, err
+	}
+	return created, nil
 }
 
 // uploadFileHandler stores a file in /uploads and returns the metadata. Used
@@ -333,9 +349,37 @@ func uploadFileHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 413, uploadTooLargeError(kind, limit))
 		return
 	}
+	draft := conv != "" && (r.URL.Query().Get("draft") == "1" || r.URL.Query().Get("draft") == "true")
+	// Workspace committed content is billed to the canonical owner. Composer
+	// drafts remain billed to the uploader, but preflight the owner's prospective
+	// charge too so an obviously-full workspace fails before bytes hit disk; the
+	// message commit repeats that owner check atomically.
+	storageBillingUsers := []string{u.ID}
+	if scopeConv != nil && scopeConv.WorkspaceID != "" {
+		ownerID, err := store.StorageBillingUserForContainer(r.Context(), d.DB, "", conv, u.ID)
+		if err != nil {
+			writeError(w, http.StatusNotFound, errors.New("conversation not found"))
+			return
+		}
+		if draft {
+			if ownerID != u.ID {
+				storageBillingUsers = append(storageBillingUsers, ownerID)
+			}
+		} else {
+			storageBillingUsers = []string{ownerID}
+		}
+	}
+	checkUploadQuota := func(size int64) error {
+		for _, billingUserID := range storageBillingUsers {
+			if err := checkStorageQuota(r, d, billingUserID, size); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 	// § user files page: group storage quota — non-image uploads only.
 	if kind != "image" {
-		if err := checkStorageQuota(r, d, u.ID, header.Size); err != nil {
+		if err := checkUploadQuota(header.Size); err != nil {
 			writeError(w, http.StatusInsufficientStorage, err)
 			return
 		}
@@ -362,11 +406,19 @@ func uploadFileHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 413, uploadTooLargeError(kind, limit))
 		return
 	}
+	if kind != "image" {
+		if err := checkUploadQuota(n); err != nil {
+			_ = out.Close()
+			_ = os.Remove(path)
+			writeError(w, http.StatusInsufficientStorage, err)
+			return
+		}
+	}
 	f, err := store.CreateFile(r.Context(), d.DB, store.File{
 		UserID: u.ID, ConversationID: conv, Filename: safe,
 		MimeType: mimeType, SizeBytes: n,
 		Kind: kind, StoragePath: path,
-		Draft: conv != "" && (r.URL.Query().Get("draft") == "1" || r.URL.Query().Get("draft") == "true"),
+		Draft: draft,
 	})
 	if err != nil {
 		// The row never landed — don't leave the copied bytes orphaned on disk.
@@ -376,6 +428,10 @@ func uploadFileHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		// rather than an opaque FK 500.
 		if isForeignKeyErr(err) {
 			writeError(w, 404, errors.New("conversation not found"))
+			return
+		}
+		if errors.Is(err, store.ErrStorageQuotaExceeded) {
+			writeError(w, http.StatusInsufficientStorage, err)
 			return
 		}
 		writeError(w, 500, err)
@@ -389,10 +445,10 @@ func uploadFileHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	if scopeConv != nil && isDocKind(f.Kind) {
 		if c := scopeConv; c.ProjectID != "" {
 			if p, err := store.GetProject(r.Context(), d.DB, c.ProjectID, u.ID); err == nil && p.AutoAddUploads && p.KBID != "" {
-				if doc, derr := store.CreateDocument(r.Context(), d.DB, store.Document{
+				if doc, derr := store.CreateDocumentForUser(r.Context(), d.DB, store.Document{
 					KBID: p.KBID, Filename: f.Filename, MimeType: f.MimeType,
 					SizeBytes: f.SizeBytes, Status: "pending", StoragePath: f.StoragePath,
-				}); derr == nil && doc != nil {
+				}, u.ID); derr == nil && doc != nil {
 					d.RAG.Ingest(doc.ID)
 				}
 			}
@@ -406,10 +462,10 @@ func uploadFileHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	// delete via FK), so they don't pollute the project KB.
 	wantRAG := r.URL.Query().Get("rag")
 	if conv != "" && isDocKind(f.Kind) && (wantRAG == "1" || wantRAG == "true") {
-		if doc, derr := store.CreateDocument(r.Context(), d.DB, store.Document{
+		if doc, derr := store.CreateDocumentForUser(r.Context(), d.DB, store.Document{
 			ConversationID: conv, Filename: f.Filename, MimeType: f.MimeType,
 			SizeBytes: f.SizeBytes, Status: "pending", StoragePath: f.StoragePath,
-		}); derr == nil && doc != nil {
+		}, u.ID); derr == nil && doc != nil {
 			// Surface the doc id so the client can poll its ingest status and
 			// block the first send until it's 'ready' (§ chat uploads).
 			f.DocumentID = doc.ID
@@ -661,13 +717,9 @@ func downloadArtifactHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 // headers. ACCESS CONTROL IS THE CALLER'S JOB — owner/admin auth on the private
 // route, share-snapshot membership on the public share route (§ sharing).
 func serveStoredArtifact(d Deps, w http.ResponseWriter, a *store.Artifact) {
-	// Resolve a safe absolute path inside ArtifactDir.
 	cleanName := filepath.Base(a.Filename)
-	full := filepath.Clean(a.StoragePath)
-	artDir := filepath.Clean(d.Config.ArtifactDir) + string(filepath.Separator)
-	if full == "" || !strings.HasPrefix(full, artDir) {
-		// Reject path traversal — only files under the configured artifact dir
-		// can be served.
+	full, err := fileguard.ResolveExisting(a.StoragePath, d.Config.ArtifactDir)
+	if err != nil {
 		writeError(w, 404, errNotFound)
 		return
 	}
@@ -731,11 +783,9 @@ func downloadFileHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 // headers. ACCESS CONTROL IS THE CALLER'S JOB — owner/admin auth on the private
 // route, share-snapshot membership on the public share route (§ sharing).
 func serveStoredFile(d Deps, w http.ResponseWriter, f *store.File) {
-	// Resolve a safe absolute path inside UploadDir.
 	cleanName := filepath.Base(f.Filename)
-	full := filepath.Clean(f.StoragePath)
-	upDir := filepath.Clean(d.Config.UploadDir) + string(filepath.Separator)
-	if full == "" || !strings.HasPrefix(full, upDir) {
+	full, err := fileguard.ResolveExisting(f.StoragePath, d.Config.UploadDir)
+	if err != nil {
 		writeError(w, 404, errNotFound)
 		return
 	}

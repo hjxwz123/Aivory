@@ -196,6 +196,7 @@ CREATE TABLE IF NOT EXISTS files (
   created_at      INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 );
 CREATE INDEX IF NOT EXISTS idx_files_user ON files(user_id);
+CREATE INDEX IF NOT EXISTS idx_files_storage_draft ON files(storage_path, draft);
 
 CREATE TABLE IF NOT EXISTS documents (
   id              TEXT PRIMARY KEY,
@@ -311,6 +312,7 @@ CREATE INDEX IF NOT EXISTS idx_artifacts_message ON artifacts(message_id);
 
 CREATE TABLE IF NOT EXISTS refresh_tokens (
   jti        TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL DEFAULT '',
   user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   expires_at INTEGER NOT NULL,
   revoked    INTEGER NOT NULL DEFAULT 0,

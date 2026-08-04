@@ -21,6 +21,7 @@ import (
 
 	"aivory/server/internal/cache"
 	"aivory/server/internal/envcfg"
+	"aivory/server/internal/fileguard"
 	"aivory/server/internal/msgcache"
 	"aivory/server/internal/queue"
 	"aivory/server/internal/rag"
@@ -54,15 +55,17 @@ var (
 // finalise the assistant message, record usage, and trigger the async
 // memory extraction worker (§4.16).
 type Orchestrator struct {
-	db     *sql.DB
-	reg    *Registry
-	tools  ToolRegistry
-	rag    *rag.Service
-	cache  cache.Cache
-	queue  queue.Queue
-	task   *TaskLLM
-	memory *MemoryWorker
-	logger *log.Logger
+	db          *sql.DB
+	reg         *Registry
+	tools       ToolRegistry
+	rag         *rag.Service
+	cache       cache.Cache
+	queue       queue.Queue
+	task        *TaskLLM
+	memory      *MemoryWorker
+	logger      *log.Logger
+	uploadDir   string
+	artifactDir string
 	// onConversationUpdated is installed by the API layer during startup. Async
 	// work such as title generation uses it after a durable metadata write so
 	// open clients re-fetch the committed conversation row.
@@ -393,10 +396,19 @@ func NewOrchestrator(
 	task *TaskLLM,
 	memory *MemoryWorker,
 	logger *log.Logger,
+	storageRoots ...string,
 ) *Orchestrator {
+	uploadDir, artifactDir := "", ""
+	if len(storageRoots) > 0 {
+		uploadDir = storageRoots[0]
+	}
+	if len(storageRoots) > 1 {
+		artifactDir = storageRoots[1]
+	}
 	return &Orchestrator{
 		db: db, reg: reg, tools: tools, rag: ragSvc,
 		cache: c, queue: q, task: task, memory: memory, logger: logger,
+		uploadDir: uploadDir, artifactDir: artifactDir,
 	}
 }
 
@@ -1254,12 +1266,12 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			userBlocksList = append(userBlocksList, UnifiedBlock{Kind: "text", Text: req.UserText})
 		}
 		userBlocks, _ := json.Marshal(userBlocksList)
-		created, err := store.CreateMessage(ctx, o.db, store.Message{
+		created, err := store.CreateMessageForUser(ctx, o.db, store.Message{
 			ConversationID: conv.ID, ParentID: parentID, Role: "user",
 			Provider: channel.Type, ModelID: model.ID, Fast: fastMode,
 			Blocks: userBlocks, Attachments: atts, SelectedUserSkillIDs: selectedIDs,
 			AuthorID: req.UserID, // §workspaces: shared conversations attribute each question
-		})
+		}, req.UserID)
 		if err != nil {
 			// The parent can be deleted after the validation above but before this
 			// transaction wins the race. Preserve the domain contract even in that
@@ -1271,11 +1283,11 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	}
 	// Turn start — used to record per-reply generation time (gen_ms, shown in UI).
 	turnStart := time.Now()
-	assistantMsg, err := store.CreateMessage(ctx, o.db, store.Message{
+	assistantMsg, err := store.CreateMessageForUser(ctx, o.db, store.Message{
 		ConversationID: conv.ID, ParentID: assistantParent, Role: "assistant",
 		Provider: channel.Type, ModelID: model.ID, Fast: fastMode,
-		Blocks: []byte("[]"), Status: "streaming",
-	})
+		Blocks: []byte("[]"), Status: "streaming", AuthorID: req.UserID,
+	}, req.UserID)
 	if err != nil {
 		// A concurrent round/conversation deletion can remove assistantParent after
 		// the user row was validated or inserted. Apply the same domain mapping as
@@ -1284,6 +1296,14 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	}
 	msgcache.Bump(o.cache, conv.ID)
 	onEvent(SseEvent{Type: "message_start", MessageID: assistantMsg.ID})
+	var generationAccessRevoked atomic.Bool
+	emitEvent := onEvent
+	onEvent = func(event SseEvent) {
+		if generationAccessRevoked.Load() {
+			return
+		}
+		emitEvent(event)
+	}
 	messageTerminal := false
 	providerCompleted := false
 	finishMessage := func(writeCtx context.Context, p store.MessageFinishPatch) error {
@@ -1306,7 +1326,13 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		// replace a full answer with empty stopped blocks.
 		persistCtx, persistCancel := context.WithTimeout(context.WithoutCancel(writeCtx), 10*time.Second)
 		defer persistCancel()
-		err := store.FinishMessage(persistCtx, o.db, assistantMsg.ID, p)
+		err := store.FinishMessageForUser(persistCtx, o.db, assistantMsg.ID, conv.ID, req.UserID, p)
+		if errors.Is(err, store.ErrConversationAccessRevoked) {
+			generationAccessRevoked.Store(true)
+			// The store committed a scrubbed stopped row before returning the
+			// sentinel, so the deferred placeholder repair has nothing left to do.
+			messageTerminal = true
+		}
 		if err == nil {
 			msgcache.Bump(o.cache, conv.ID)
 			if p.Status != "" && p.Status != "streaming" {
@@ -1506,7 +1532,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// in the conversation's persistent sandbox requires real file/data handling,
 	// so auto enables tools directly instead of spending a task-model call merely
 	// to rediscover that requirement.
-	sandboxFiles := listSandboxFiles(ctx, o.db, conv.ID, req.UserID)
+	sandboxFiles := listSandboxFiles(ctx, o.db, conv.ID, req.UserID, o.uploadDir)
 	builtinTools := modelBuiltinToolSet(model.BuiltinTools)
 	globalDisabledTools := o.disabledToolSet()
 	memoryEnabled := store.MemoryEnabledForUser(ctx, o.db, req.UserID)
@@ -2694,6 +2720,14 @@ func (o *Orchestrator) runImageTurn(
 	billing *billingAdmission,
 	onEvent func(SseEvent),
 ) (*RunResult, error) {
+	var generationAccessRevoked atomic.Bool
+	emitEvent := onEvent
+	onEvent = func(event SseEvent) {
+		if generationAccessRevoked.Load() {
+			return
+		}
+		emitEvent(event)
+	}
 	onEvent(SseEvent{Type: "image_status", MessageID: assistantMsg.ID, Status: "optimizing"})
 
 	// Style: the composer sends image_style_id on a fresh turn. Regenerate doesn't
@@ -2708,7 +2742,7 @@ func (o *Orchestrator) runImageTurn(
 	if styleID != "" {
 		if st, err := store.GetImageStyle(ctx, o.db, styleID); err == nil && st.Enabled {
 			styleHidden = strings.TrimSpace(st.HiddenPrompt)
-			_ = store.SetConvProviderStateKey(ctx, o.db, conv.ID, "image_style", styleID)
+			_ = store.SetConvProviderStateKeyForUser(ctx, o.db, conv.ID, assistantMsg.ID, req.UserID, "image_style", styleID)
 		}
 	}
 	finalPrompt, optimizeErr := o.optimizeImagePrompt(ctx, req.UserID, conv.ID, assistantMsg.ID, req.UserText, styleHidden)
@@ -2766,7 +2800,10 @@ func (o *Orchestrator) runImageTurn(
 	// spins forever). Mirror the chat path's context.WithoutCancel guard.
 	persistCtx := context.WithoutCancel(ctx)
 	finishMessage := func(p store.MessageFinishPatch) error {
-		err := store.FinishMessage(persistCtx, o.db, assistantMsg.ID, p)
+		err := store.FinishMessageForUser(persistCtx, o.db, assistantMsg.ID, conv.ID, req.UserID, p)
+		if errors.Is(err, store.ErrConversationAccessRevoked) {
+			generationAccessRevoked.Store(true)
+		}
 		if err == nil {
 			msgcache.Bump(o.cache, conv.ID)
 		}
@@ -3193,7 +3230,7 @@ func (o *Orchestrator) resolveAttachments(ctx context.Context, userID, convID st
 				continue
 			}
 
-			data, imageMIME, imageState := readVerifiedProviderImage(f)
+			data, imageMIME, imageState := readVerifiedProviderImage(f, o.uploadDir)
 			switch imageState {
 			case verifiedAttachmentImage:
 				if !visionCapable {
@@ -3264,7 +3301,11 @@ func (o *Orchestrator) resolveImageArtifactBlocks(ctx context.Context, userID st
 			if err != nil || artifact == nil || artifact.SizeBytes <= 0 || artifact.SizeBytes > attachmentImageInlineBytes {
 				continue
 			}
-			file, err := os.Open(artifact.StoragePath)
+			safePath, err := resolveLLMStoragePath(artifact.StoragePath, o.artifactDir)
+			if err != nil {
+				continue
+			}
+			file, err := os.Open(safePath)
 			if err != nil {
 				continue
 			}
@@ -3327,7 +3368,7 @@ const (
 // readVerifiedProviderImage reads at most one bounded file and classifies it
 // from bytes, not attachment or database claims. The size check happens both
 // before and during the read because legacy metadata may be stale.
-func readVerifiedProviderImage(file *store.File) ([]byte, string, verifiedAttachmentImageState) {
+func readVerifiedProviderImage(file *store.File, roots ...string) ([]byte, string, verifiedAttachmentImageState) {
 	if file == nil || attachmentImageInlineBytes <= 0 {
 		return nil, "", notAttachmentImage
 	}
@@ -3340,7 +3381,11 @@ func readVerifiedProviderImage(file *store.File) ([]byte, string, verifiedAttach
 		}
 		return nil, "", notAttachmentImage
 	}
-	f, err := os.Open(file.StoragePath)
+	safePath, err := resolveLLMStoragePath(file.StoragePath, roots...)
+	if err != nil {
+		return nil, "", notAttachmentImage
+	}
+	f, err := os.Open(safePath)
 	if err != nil {
 		return nil, "", notAttachmentImage
 	}
@@ -4161,7 +4206,7 @@ func (o *Orchestrator) forcedWebSearch(ctx context.Context, req RunRequest, conv
 // kinds tools.pythonExecuteTool stages: sheet/text/code). Shared by the
 // system-prompt listing and the no-tools forced read. Filename detection keeps
 // older rows usable when their stored kind predates the sheet classifier.
-func listSandboxFiles(ctx context.Context, db *sql.DB, convID, userID string) []ProjectFileSummary {
+func listSandboxFiles(ctx context.Context, db *sql.DB, convID, userID string, roots ...string) []ProjectFileSummary {
 	out := []ProjectFileSummary{}
 	convFiles, err := store.ListFilesByConversation(ctx, db, convID, userID)
 	if err != nil {
@@ -4171,7 +4216,7 @@ func listSandboxFiles(ctx context.Context, db *sql.DB, convID, userID string) []
 		// New uploads have authoritative kind/MIME metadata; the bounded prefix
 		// check also covers legacy rows whose image was renamed to data.csv before
 		// server-side byte classification existed.
-		if storedSandboxFileLooksLikeImage(f) {
+		if storedSandboxFileLooksLikeImage(f, roots...) {
 			continue
 		}
 		if isSandboxSpreadsheetFilename(f.Filename) {
@@ -4186,13 +4231,17 @@ func listSandboxFiles(ctx context.Context, db *sql.DB, convID, userID string) []
 	return out
 }
 
-func storedSandboxFileLooksLikeImage(file store.File) bool {
+func storedSandboxFileLooksLikeImage(file store.File, roots ...string) bool {
 	if strings.EqualFold(strings.TrimSpace(file.Kind), "image") ||
 		strings.HasPrefix(strings.ToLower(strings.TrimSpace(file.MimeType)), "image/") ||
 		providerImageFilename(file.Filename) {
 		return true
 	}
-	f, err := os.Open(file.StoragePath)
+	safePath, err := resolveLLMStoragePath(file.StoragePath, roots...)
+	if err != nil {
+		return false
+	}
+	f, err := os.Open(safePath)
 	if err != nil {
 		return false
 	}
@@ -4254,7 +4303,11 @@ func (o *Orchestrator) previewSpreadsheetFiles(ctx context.Context, userID, conv
 		if f.Kind != "sheet" && !isSandboxSpreadsheetFilename(f.Filename) {
 			continue
 		}
-		text, perr := rag.SpreadsheetPreview(f.StoragePath, f.Filename, spreadsheetPreviewRows, spreadsheetPreviewCols)
+		safePath, err := resolveLLMStoragePath(f.StoragePath, o.uploadDir)
+		if err != nil {
+			continue
+		}
+		text, perr := rag.SpreadsheetPreview(safePath, f.Filename, spreadsheetPreviewRows, spreadsheetPreviewCols)
 		if perr != nil || strings.TrimSpace(text) == "" {
 			if o.logger != nil {
 				o.logger.Printf("spreadsheet preview skipped file=%q: %v", f.Filename, perr)
@@ -4272,6 +4325,17 @@ func (o *Orchestrator) previewSpreadsheetFiles(ctx context.Context, userID, conv
 		preview = string(r[:spreadsheetPreviewInjectionCap]) + "\n…(truncated)"
 	}
 	return "<uploaded-data-preview>\n" + preview + "\n</uploaded-data-preview>"
+}
+
+// resolveLLMStoragePath keeps legacy unit fixtures usable when no deployment
+// roots are supplied, while the production constructor always passes both
+// configured roots. Remote/object-storage URIs are not accepted by these local
+// readers and therefore fail closed.
+func resolveLLMStoragePath(path string, roots ...string) (string, error) {
+	if len(roots) == 0 || strings.TrimSpace(roots[0]) == "" {
+		return path, nil
+	}
+	return fileguard.ResolveExisting(path, roots...)
 }
 
 // remapCitationMarkers rewrites a searcher's local inline citation markers

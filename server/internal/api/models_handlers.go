@@ -114,15 +114,31 @@ func listEmbeddingModelsHandler(d Deps, w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, 200, modelsResponse(d, r, models))
 }
 
-// listSkillsPublicHandler returns enabled skills (read-only listing for
-// surfacing in the composer / picker; admin endpoint is /api/admin/skills).
+type publicSkill struct {
+	ID                 string `json:"id"`
+	Name               string `json:"name"`
+	DisplayDescription string `json:"display_description"`
+	Icon               string `json:"icon"`
+	Enabled            bool   `json:"enabled"`
+	SortOrder          int    `json:"sort_order"`
+}
+
+// listSkillsPublicHandler returns enabled skill display metadata. It excludes
+// execution instructions, model-facing trigger descriptions, and asset paths.
 func listSkillsPublicHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	skills, err := store.ListSkills(r.Context(), d.DB, true)
 	if err != nil {
 		writeError(w, 500, err)
 		return
 	}
-	writeJSON(w, 200, skills)
+	items := make([]publicSkill, 0, len(skills))
+	for _, skill := range skills {
+		items = append(items, publicSkill{
+			ID: skill.ID, Name: skill.Name, DisplayDescription: strings.TrimSpace(skill.DisplayDescription),
+			Icon: skill.Icon, Enabled: skill.Enabled, SortOrder: skill.SortOrder,
+		})
+	}
+	writeJSON(w, 200, items)
 }
 
 // modelsResponse hides upstream credentials and only exports user-safe model

@@ -19,7 +19,15 @@ var (
 // pub-sub for kill signals and config invalidation.
 type Cache interface {
 	Get(key string) (string, bool)
+	// Take atomically returns and deletes a value. It is the only safe primitive
+	// for one-time credentials that must not be consumed by two concurrent requests.
+	Take(key string) (string, bool)
 	Set(key, value string, ttl time.Duration)
+	// SetNX atomically stores a value only when the key does not already exist.
+	SetNX(key, value string, ttl time.Duration) bool
+	// CompareAndDelete atomically deletes key only when its current value matches.
+	// This lets a caller validate a credential before consuming exactly that value.
+	CompareAndDelete(key, expected string) bool
 	Delete(key string)
 	// TTL returns the remaining lifetime of an expiring key. The boolean is
 	// false when the key is missing, expired, or has no expiry.
@@ -35,6 +43,16 @@ type Cache interface {
 	Subscribe(topic string) (chan string, func())
 	StreamAppend(key, value string, ttl time.Duration) (string, bool)
 	StreamRead(key, afterID string, limit int) ([]StreamEvent, bool)
+	// StreamAppendIfAllowed atomically checks every deny key and appends only
+	// when none exists. allowed=false, ok=true is an intentional revocation;
+	// ok=false is a cache failure. Generation streams use this distinction to
+	// fail closed after access revocation without treating an outage as a revoke.
+	StreamAppendIfAllowed(key string, denyKeys []string, value string, ttl time.Duration) (id string, allowed, ok bool)
+	// StreamReadIfAllowed provides the matching atomic read boundary. A revoke
+	// cannot land between checking its tombstone and reading already-buffered data.
+	StreamReadIfAllowed(key string, denyKeys []string, afterID string, limit int) (events []StreamEvent, allowed, ok bool)
+	// StreamRevoke atomically creates a tombstone and deletes all buffered events.
+	StreamRevoke(key, tombstoneKey string, ttl time.Duration) bool
 }
 
 type memoryEntry struct {
@@ -91,6 +109,20 @@ func (m *memory) Get(key string) (string, bool) {
 	return e.value, true
 }
 
+func (m *memory) Take(key string) (string, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	e, ok := m.store[key]
+	if !ok {
+		return "", false
+	}
+	delete(m.store, key)
+	if e.exp > 0 && time.Now().UnixNano() > e.exp {
+		return "", false
+	}
+	return e.value, true
+}
+
 func (m *memory) Set(key, value string, ttl time.Duration) {
 	exp := int64(0)
 	if ttl > 0 {
@@ -99,6 +131,39 @@ func (m *memory) Set(key, value string, ttl time.Duration) {
 	m.mu.Lock()
 	m.store[key] = memoryEntry{value: value, exp: exp}
 	m.mu.Unlock()
+}
+
+func (m *memory) SetNX(key, value string, ttl time.Duration) bool {
+	now := time.Now()
+	exp := int64(0)
+	if ttl > 0 {
+		exp = now.Add(ttl).UnixNano()
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if current, ok := m.store[key]; ok && (current.exp == 0 || now.UnixNano() <= current.exp) {
+		return false
+	}
+	m.store[key] = memoryEntry{value: value, exp: exp}
+	return true
+}
+
+func (m *memory) CompareAndDelete(key, expected string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	e, ok := m.store[key]
+	if !ok {
+		return false
+	}
+	if e.exp > 0 && time.Now().UnixNano() > e.exp {
+		delete(m.store, key)
+		return false
+	}
+	if e.value != expected {
+		return false
+	}
+	delete(m.store, key)
+	return true
 }
 
 func (m *memory) Delete(key string) {
@@ -303,4 +368,96 @@ func (m *memory) StreamRead(key, afterID string, limit int) ([]StreamEvent, bool
 	}
 	out := append([]StreamEvent(nil), s.events[start:end]...)
 	return out, true
+}
+
+func (m *memory) StreamAppendIfAllowed(key string, denyKeys []string, value string, ttl time.Duration) (string, bool, bool) {
+	now := time.Now()
+	exp := int64(0)
+	if ttl > 0 {
+		exp = now.Add(ttl).UnixNano()
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, denyKey := range denyKeys {
+		if denyKey == "" {
+			continue
+		}
+		if entry, exists := m.store[denyKey]; exists {
+			if entry.exp == 0 || now.UnixNano() <= entry.exp {
+				return "", false, true
+			}
+			delete(m.store, denyKey)
+		}
+	}
+	m.streamSeq++
+	id := formatInt(now.UnixMilli()) + "-" + formatInt(m.streamSeq)
+	stream := m.streams[key]
+	if stream.exp > 0 && now.UnixNano() > stream.exp {
+		stream = memoryStream{}
+	}
+	stream.events = append(stream.events, StreamEvent{ID: id, Value: value})
+	if len(stream.events) > memoryStreamEventRetentionCap {
+		stream.events = append([]StreamEvent(nil), stream.events[len(stream.events)-memoryStreamEventRetentionCap:]...)
+	}
+	stream.exp = exp
+	m.streams[key] = stream
+	return id, true, true
+}
+
+func (m *memory) StreamReadIfAllowed(key string, denyKeys []string, afterID string, limit int) ([]StreamEvent, bool, bool) {
+	if limit <= 0 {
+		limit = memoryStreamReadPageLimit
+	}
+	now := time.Now()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, denyKey := range denyKeys {
+		if denyKey == "" {
+			continue
+		}
+		if entry, exists := m.store[denyKey]; exists {
+			if entry.exp == 0 || now.UnixNano() <= entry.exp {
+				return nil, false, true
+			}
+			delete(m.store, denyKey)
+		}
+	}
+	stream, exists := m.streams[key]
+	if !exists {
+		return nil, true, true
+	}
+	if stream.exp > 0 && now.UnixNano() > stream.exp {
+		delete(m.streams, key)
+		return nil, true, true
+	}
+	start := 0
+	if afterID != "" {
+		start = len(stream.events)
+		for index, event := range stream.events {
+			if event.ID == afterID {
+				start = index + 1
+				break
+			}
+		}
+	}
+	if start >= len(stream.events) {
+		return []StreamEvent{}, true, true
+	}
+	end := start + limit
+	if end > len(stream.events) {
+		end = len(stream.events)
+	}
+	return append([]StreamEvent(nil), stream.events[start:end]...), true, true
+}
+
+func (m *memory) StreamRevoke(key, tombstoneKey string, ttl time.Duration) bool {
+	exp := int64(0)
+	if ttl > 0 {
+		exp = time.Now().Add(ttl).UnixNano()
+	}
+	m.mu.Lock()
+	m.store[tombstoneKey] = memoryEntry{value: "1", exp: exp}
+	delete(m.streams, key)
+	m.mu.Unlock()
+	return true
 }

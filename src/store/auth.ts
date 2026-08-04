@@ -76,6 +76,7 @@ interface AuthState {
   setUser: (user: ApiUser | null) => void
   setSignupOpen: (open: boolean) => void
   clearPendingVerification: () => void
+  startEmailVerification: (email: string, retryAfter: number) => void
   clearPendingTwoFactor: () => void
   /** Resume a 2FA challenge from a ticket (e.g. an OAuth redirect). */
   startTwoFactor: (ticket: string) => void
@@ -110,6 +111,14 @@ export const useAuth = create<AuthState>((set, get) => ({
   },
   clearPendingVerification() {
     set({ pendingVerification: null, pendingVerificationRetryAfter: 0 })
+  },
+  startEmailVerification(email, retryAfter) {
+    set({
+      pendingVerification: email,
+      pendingVerificationRetryAfter: Math.max(0, retryAfter),
+      status: 'unauthenticated',
+      error: null,
+    })
   },
   clearPendingTwoFactor() {
     set({ pendingTwoFactor: null })

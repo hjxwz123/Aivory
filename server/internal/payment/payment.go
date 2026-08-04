@@ -5,8 +5,12 @@ import (
 	"errors"
 	"io"
 	"net"
+	"net/http"
 	"net/url"
 	"syscall"
+
+	"github.com/stripe/stripe-go/v86"
+	pancake "github.com/waffo-com/waffo-pancake-sdk-go"
 )
 
 var ErrCheckoutStateUnknown = errors.New("payment provider checkout state is unknown")
@@ -32,6 +36,18 @@ func IsCheckoutStateUnknown(err error) bool {
 	}
 	var urlErr *url.Error
 	if errors.As(err, &urlErr) {
+		return true
+	}
+	// A provider-side 5xx is also indeterminate: the checkout may have been
+	// committed before the provider failed to return a successful response.
+	// Keep the local order reconcilable instead of allowing a new order (and a
+	// new provider idempotency key) to create a duplicate charge.
+	var stripeErr *stripe.Error
+	if errors.As(err, &stripeErr) && stripeErr.HTTPStatusCode >= http.StatusInternalServerError {
+		return true
+	}
+	var waffoErr *pancake.Error
+	if errors.As(err, &waffoErr) && waffoErr.Status >= http.StatusInternalServerError {
 		return true
 	}
 	var netErr net.Error

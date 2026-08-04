@@ -5,8 +5,8 @@
 </p>
 
 <p align="center">
-  <strong>A self-hosted AI chat platform that actually competes with the hosted products.</strong><br>
-  Multi-model · Interleaved tool calls · Persistent Python sandbox · RAG · Team workspaces · Deep Research · Full admin backend.
+  <strong>A production-ready, self-hosted multi-model AI platform for individuals and teams.</strong><br>
+  Interleaved tool calls · RAG & knowledge bases · Persistent sandbox · Team workspaces · Subscriptions · Full admin backend.
 </p>
 
 <p align="center">
@@ -23,41 +23,37 @@
   <a href="./LICENSE"><img alt="Apache 2.0" src="https://img.shields.io/badge/license-Apache%202.0-blue"></a>
 </p>
 
+<p align="center">
+  <img src="docs/screenshots/aivory-architecture-poster.png" alt="Aivory coordinates models, tools, knowledge, sandbox execution, and data in one workspace" width="100%">
+</p>
+
 ---
 
-## Why Aivory
+## A complete AI workspace
 
-Most self-hosted AI frontends are thin proxies — one model, one message, one response. Aivory is built as a production platform: the same depth you expect from Claude.ai or ChatGPT, with the control of running it yourself.
+Most self-hosted AI frontends stop at forwarding messages to a model. Aivory combines multi-model chat, autonomous tool execution, document intelligence, isolated computation, team collaboration, subscriptions, and day-to-day operations in one deployable platform.
 
 <p align="center">
   <img src="docs/screenshots/hero.png" alt="Aivory multi-model AI chat workspace" width="100%">
 </p>
 
-## Feature highlights
+## Core capabilities
 
 | | Feature | What you get |
 |---|---|---|
-| 🔀 | **Multi-model** | Claude / GPT / Gemini behind one UI; per-message model attribution; tag-filtered picker; any OpenAI-compatible endpoint |
-| 🛠 | **Interleaved tool calls** | Up to **48 tool calls across 12 provider cycles in one turn** — search → fetch → compute → plot, chained autonomously; native function calling with a prompt-protocol fallback for models without it |
-| 🐍 | **Python sandbox** | Self-hosted sandbox cluster with **per-conversation persistent files**; eligible non-image data uploads staged in, artifacts (plots, CSVs) streamed back inline; browser-side Pyodide runner too |
-| 📚 | **RAG & knowledge bases** | Query router (intent → full-text / retrieve / none), hierarchical chunking, hybrid retrieval + RRF, similarity-based dynamic top-K, cited answers; text-layer PDFs parse locally in ms, scanned docs go to MinerU OCR |
-| 👥 | **Team workspaces** | Fully-isolated shared spaces: invite-link membership, shared conversations/projects/KBs, per-sender billing, author-attributed bubbles, owner moderation, admin oversight |
-| 🌳 | **Conversation tree** | Edit/retry creates real branches with `< 2/3 >` switching that never interrupts streaming; draggable outline window with a zoomable node graph; a minimap rail for long chats |
-| ✅ | **Verify mode** | A second model adversarially fact-checks each reply and pins structured findings (quote + issue + severity) with a trust badge |
-| 🔬 | **Deep Research** | Multi-round plan → search → read → verify pipeline with a live progress panel and cited synthesis |
-| 🎨 | **Image generation** | Drawing mode with admin-curated styles, credit metering, a personal gallery, and image models managed like any other channel |
-| 🧠 | **Memory** | Async fact extraction across conversations with supersedence tracking — never in shared workspaces (privacy) |
-| 📦 | **Projects & skills** | Project containers with shared libraries + instructions; admin-managed skill packs progressively loaded at runtime |
-| 🗜 | **Long-context compaction** | Keep-N verbatim + rolling task-model summaries, cache-stable prefixes, inline compaction on real token spikes |
-| 💳 | **Credits & tiers** | User groups with timed allowances + permanent credits, per-model quotas, pre-flight cost gating, redeem codes, subscription-page visibility control |
-| 🛡 | **Security** | Backend-proxied keys, per-request HMAC signing, capability-token shares/invites, sandboxed HTML preview, upload validation, rate limits everywhere |
-| 🌍 | **Polish** | 5 languages (en / 简中 / 繁中 / 日 / fr), installable PWA, mobile-first redesign, light/dark, editorial design system |
+| 🔀 | **Multi-model AI chat** | Claude, GPT, Gemini, image models, and any OpenAI-compatible endpoint behind one consistent UI, with per-message model attribution and admin-defined model controls |
+| 🛠 | **Interleaved tool calls** | Up to **48 tool calls across 12 provider cycles in one turn**; search, fetch, Python, files, memory, and image tools can form one autonomous workflow |
+| 📚 | **RAG & knowledge bases** | Managed document libraries, query routing, structure-aware chunking, hybrid retrieval with RRF, dynamic top-K, full-document fallback, and cited answers |
+| 🐍 | **Persistent Python sandbox** | Isolated, per-conversation workspaces for data analysis and file generation; eligible uploads are staged in and generated artifacts stream back to the chat |
+| 👥 | **Team workspaces** | Isolated shared conversations, projects, files, and knowledge bases with invite links, member attribution, owner controls, and admin oversight |
+| 💳 | **Subscriptions & quotas** | User tiers, timed allowances, permanent credits, per-model limits, redeem codes, credit packages, and optional payment checkout |
+| 🛡 | **Full admin backend** | Operate providers, models, tools, users, workspaces, knowledge, subscriptions, payments, storage, usage, security, backups, and system settings without editing config files |
 
 ---
 
-## Tool calls & Python sandbox
+## Interleaved tools & Python sandbox
 
-This is where Aivory diverges most from the rest. The orchestrator runs **up to 48 tool calls across 12 provider cycles in a single turn**. Tools chain freely — the output of one call becomes the input for the next, with no manual handoff required.
+The orchestrator runs **up to 48 tool calls across 12 provider cycles in a single turn**. Tools chain freely: results from web searches, fetched pages, Python, and generated files become context for the next call without user handoffs. RAG is routed separately by the orchestrator and injected automatically when relevant.
 
 ### Multi-step pipeline in one turn
 
@@ -65,7 +61,7 @@ This is where Aivory diverges most from the rest. The orchestrator runs **up to 
   <img src="docs/screenshots/tool-calls-1.jpg" alt="Tool-call pipeline: skill load, web searches, World Bank API fetch, then Python data-crunching and PowerPoint generation — all from one user message" width="100%">
 </p>
 
-The screenshot above shows a single user prompt — *"Retrieve global GDP data for 2025 and generate a PowerPoint presentation"* — triggering a multi-step pipeline without any user intervention:
+One prompt — *"Retrieve global GDP data for 2025 and generate a PowerPoint presentation"* — triggers the complete pipeline:
 
 1. `use_skill` → load the `document-generation` skill pack
 2. `web_search` → locate authoritative 2025 GDP sources (IMF / World Bank)
@@ -77,7 +73,7 @@ The screenshot above shows a single user prompt — *"Retrieve global GDP data f
   <img src="docs/screenshots/tool-calls-2.jpg" alt="Result: an 8-slide PowerPoint ready to download, four charts rendered inline, 20 sources cited" width="100%">
 </p>
 
-The result: an 8-slide deck plus a supporting data workbook, both offered as download cards, with four charts rendered inline and 20 sources cited. No intermediate prompts. No "please attach the file." The model drives the whole pipeline.
+The result is an 8-slide deck and supporting workbook, returned as download cards alongside four charts and 20 cited sources. The model drives the workflow end to end.
 
 ### How it works
 
@@ -89,15 +85,11 @@ web_search  ─┤→ python_execute (clean data) → web_fetch → python_execu
              └─ (results merged as one batch)
 ```
 
-Because the sandbox shares a filesystem session across all calls in the conversation, data from a previous turn is still there when the model comes back minutes later.
+The sandbox keeps the same filesystem session across calls and conversation turns, so later work can reuse earlier data and artifacts.
 
 ### Persistent Python sandbox
 
-Every conversation has its own isolated sandbox container. Files persist between turns — the model can write a CSV in turn 1 and reference it in turn 5. If the sidecar is reaped (container restart, deploy), the runner detects the 404, provisions a fresh session, re-stages all eligible uploaded files, and retries transparently.
-
-Conversation uploads are staged into Python up to **40 MiB per file** by default (`AIVORY_TOOLS_PYTHON_EXECUTE_UPLOAD_STAGING_FILE_SIZE`). When `python_execute` is not exposed to the model, including when tools are disabled and in Fast mode, CSV/XLSX files use a bounded in-process preview capped at **30 MiB per file** by default (`AIVORY_RAG_SPREADSHEET_PREVIEW_MAX_FILE_BYTES`). Both values are byte counts and require an API restart after changes.
-
-Only eligible non-image data files (such as CSV, spreadsheets, text, and code) enter `/workspace/uploads`; non-image skill assets enter `/workspace/skills`. The server clears those input directories before every Python run and never copies user-uploaded images, generated image artifacts, or web images into the sandbox. Vision-capable models receive images through their provider's native multimodal API. Python may still generate plots and other images under `/workspace/outputs` as normal artifacts.
+Every conversation has an isolated sandbox session. If an idle sandbox is recycled, Aivory provisions a new session, re-stages eligible files, and retries transparently. CSV, spreadsheets, text, and code may enter `/workspace/uploads`; user and generated images never enter the sandbox and are sent only through a vision model's native multimodal API.
 
 - Full Python standard library + preinstalled packages (pandas, matplotlib, python-pptx, …); runner networking is always disabled
 - `stdout` / `stderr` stream line-by-line while the code runs — you see progress, not just results
@@ -122,81 +114,75 @@ HTML code blocks open a **live preview panel** alongside the chat as the assista
 | `save_memory` | Persist a user fact for injection in future conversations |
 | `use_skill` | Execute an admin-defined skill (prompt + asset bundle) |
 
-Per-turn budget:
+Default per-turn ceiling:
 
-| Tool | Standard | Deep Research |
-|------|----------|---------------|
-| `web_search` | 16 | 40 |
-| `web_fetch` | 12 | 25 |
-| `image_generate` | 8 | 4 |
-| `python_execute` | 16 | 8 |
-| **Total calls** | **48** | **150** |
-
----
-
-## Other features
-
-### Team workspaces
-
-Create a workspace from the avatar menu and share an invite link — members see the same conversations, projects and knowledge bases, completely isolated from everyone's personal space. Anyone can continue any conversation (each sender pays from their own quota); bubbles attribute every question to its author, and only creators can delete their conversations. Owners moderate members and can rotate the invite link or delete the space (cascade). Admins get a dedicated Workspaces page with full drill-down, including read-only transcript viewing.
-
-### Verify mode
-
-Toggle Verify on a turn and a second, admin-configured model audits the primary answer — quoting the exact sentences it disputes, with severity levels, surfaced as a trust badge on the reply ("Verified" or "N issues found").
-
-### Image generation
-
-A dedicated drawing mode with admin-curated style presets: prompts are optimized by a task model, generation is credit-metered per image model, and results land in a personal gallery. Reference images allow edit/variation workflows.
-
-### Conversation branching
-
-Every edit and every regeneration opens a sibling branch — no history is ever overwritten. Navigate branches with `‹ N/M ›` controls on any message, or fork any branch into a new conversation.
-
-The **Conversation Outline** panel (top-right toolbar) gives a bird's-eye view of the whole thread: numbered user questions, truncated to two lines. Click any item to jump there instantly. The panel floats, is draggable, resizable, and zoomable.
-
-### Deep Research mode
-
-A separate multi-round engine: the model generates a research plan, fans out up to **40 web searches and 25 page reads in parallel**, verifies claims across sources, and composes a cited final report. Progress streams live as the plan unfolds — you see what's being searched, not just the finished answer.
-
-### Document QA and RAG
-
-- **Hierarchical chunking**: small-to-big, ~12% overlap, structure-aware (code / tables / math never split mid-block)
-- **Heading breadcrumbs** on every chunk so the model always knows context
-- **Hybrid retrieval**: Qdrant dense vectors + PostgreSQL BM25, fused with Reciprocal Rank Fusion
-- **Query routing**: a task LLM classifies each query — `retrieve`, `full_doc`, or `none` — before retrieval
-- **MinerU integration**: scanned PDFs, DOCX, PPTX, XLSX, and images run through cloud OCR; your files stay in your own S3 / Aliyun OSS bucket
-
-### Memory across conversations
-
-After each turn, a background worker extracts durable facts about the user ("prefers terse answers", "based in Tokyo"). On the next conversation, relevant memories are injected into the system prompt automatically. Users manage their own memory store at `/settings/memory`. Extraction runs async — it never slows the response.
-
-### Thinking / chain-of-thought
-
-Native reasoning support for Claude (extended thinking) and Gemini (chain-of-thought). Thinking blocks stream in a collapsible panel above the response so you can follow the model's reasoning without it cluttering the conversation.
+| Tool | Calls |
+|------|------:|
+| `web_search` | 16 |
+| `web_fetch` | 12 |
+| `image_generate` | 8 |
+| `python_execute` | 16 |
+| **All tools combined** | **48** |
 
 ---
 
-## Admin backend
+## RAG & knowledge bases
+
+Knowledge bases turn uploaded files into reusable context for conversations and team workspaces. Users can organize multiple libraries, track each document from parsing through embedding, attach the right library to a chat, and let the query router choose full-document context, retrieval, or no retrieval.
+
+- **Broad document support**: text, PDF, DOCX, PPTX, XLSX, and images, with fast local parsing for text-layer documents and optional MinerU OCR for scanned content
+- **Structure-aware ingestion**: hierarchical chunks, heading breadcrumbs, overlap, and preservation of code, tables, and math blocks
+- **Hybrid retrieval**: Qdrant vectors and PostgreSQL BM25 fused with Reciprocal Rank Fusion, plus similarity-driven top-K
+- **Query routing**: a task model selects `retrieve`, `full_doc`, or `none` before context is assembled
+- **Document operations**: file status, preview, filtering, replacement, deletion, and storage through local files or S3-compatible object storage
+
+---
+
+## Team workspaces
+
+Create an isolated workspace and invite members with a link. Conversations, projects, files, and knowledge bases are shared inside the workspace while remaining separate from every member's personal data. Messages retain author identity, each sender consumes their own allowance, and workspace owners manage membership and invitation links.
+
+Administrators can inspect workspace membership and resources, review shared conversations, and manage the platform without joining the workspace as an ordinary member.
+
+---
+
+## Subscriptions, credits & quotas
+
+Administrators define user tiers with visible plan descriptions, feature access, timed allowances, permanent credit pools, and per-model count or cost limits. Users can compare available plans, inspect balances and usage, redeem codes, and purchase configured credit packages.
+
+Payment checkout is optional and operator-configured. Aivory supports multiple payment channels and methods, auditable payment orders, webhook processing, and reconciliation without coupling the rest of the platform to a payment provider.
+
+---
+
+## Full admin backend
 
 <p align="center">
-  <img src="docs/screenshots/admin.jpg" alt="Admin backend: model catalogue with per-model pricing, toggle, and settings" width="100%">
+  <img src="docs/screenshots/admin.jpg" alt="Aivory admin backend with model, user, usage, storage, and system controls" width="100%">
 </p>
 
-| Section | What you manage |
-|---------|-----------------|
-| Channels | Provider URL + API key per channel. Multiple channels of the same provider type are allowed. |
-| Models | Enable / disable, display name, context window, per-model knobs, Deep Research exposure, image fallback chain, in/out pricing. |
-| Model Tags | Admin-defined labels ("Fast", "Vision", "Coding") shown as filter chips in the model picker. |
-| User Groups | Named tiers with feature flags — extra tools, higher context, custom branding, group quotas. |
-| Users | Role assignment, real-time ban (JWT token-version bump), conversation drill-down (read-only). |
-| Skills | Prompt templates + asset bundles callable via `use_skill`. |
-| Usage | Per-user, per-model, per-purpose (chat / task / image / embedding) usage and cost reports. |
-| Knowledge Bases | Per-account KBs with document management and embedding status. |
-| Settings | Sandbox, S3/OSS, SearXNG, upload allowlist, MinerU, compaction — all live-reloaded, no restart. |
-| Backup | Full logical backup (every table as JSONL in a ZIP, optional bundled files). SQLite ↔ PostgreSQL portable. |
-| Sandbox Inspector | Browse and clear files in any user's sandbox workspace. |
+| Area | What administrators manage |
+|------|----------------------------|
+| Providers & models | Channel URLs and keys, model availability, pricing, context windows, model controls, tags, fallbacks, and tool capability policies |
+| Tools & knowledge | Built-in and official tools, RAG settings, document libraries, embedding state, image styles, skills, and prompt templates |
+| Users & workspaces | Roles, user groups, quotas, login history, moderation, memories, files, shared workspaces, and read-only conversation inspection |
+| Subscriptions & payments | Public plans, timed and permanent credits, model quotas, credit packages, redeem codes, payment channels and methods, order audit, and reconciliation |
+| Usage & operations | Per-user/model/purpose analytics, cost reports, announcements, email, OAuth, registration, legal content, logging, and model feedback |
+| Infrastructure | Sandbox, object storage, SearXNG, MinerU, upload policy, backup and migration, and live system settings |
 
-Every setting takes effect on the next request — no restart, no SSH.
+Most runtime configuration takes effect on the next request, without editing environment files or restarting the application.
+
+---
+
+## Additional capabilities
+
+| Capability | Summary |
+|------------|---------|
+| Conversation branches | Edit or regenerate without overwriting history, switch between sibling answers, and navigate long conversations from an outline |
+| Deep Research & Verify | Run multi-step cited research when needed, or ask a second configured model to audit an answer |
+| Memory | Extract and reuse durable user preferences across personal conversations, with user controls and workspace privacy isolation |
+| Image generation | Generate or edit images with model-specific controls, curated styles, usage metering, and a personal gallery |
+| Projects, skills & prompts | Group conversations and files under project instructions; install administrator resources or create personal reusable skills and prompts |
+| Experience & security | Streaming reasoning, long-context compaction, sharing, PWA, five languages, responsive themes, backend-only keys, HMAC signing, upload validation, and rate limits |
 
 ---
 
@@ -253,11 +239,7 @@ Open `http://localhost:5173`. First launch shows the setup screen.
 
 ---
 
-## Architecture
-
-<p align="center">
-  <img src="docs/screenshots/aivory-architecture-poster.png" alt="Aivory architecture — models, tools, knowledge, sandbox, and data coordinated through one workspace" width="100%">
-</p>
+## Technical architecture
 
 ```mermaid
 graph TB
