@@ -7,7 +7,9 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strconv"
 	"testing"
+	"time"
 )
 
 func openUsageStatsTestDB(t *testing.T) (*sql.DB, context.Context) {
@@ -209,26 +211,27 @@ type usageAnalyticsSnapshot struct {
 	DurableStatRows int
 }
 
-func takeUsageAnalyticsSnapshot(t *testing.T, ctx context.Context, db *sql.DB) usageAnalyticsSnapshot {
+func takeUsageAnalyticsSnapshot(t *testing.T, ctx context.Context, db *sql.DB, periodEnd int64) usageAnalyticsSnapshot {
 	t.Helper()
 	var snapshot usageAnalyticsSnapshot
 	var err error
+	periodStart := periodEnd - 86400
 	if snapshot.User1Cost, snapshot.User1Messages, err = SumUsageByUser(ctx, db, "usage-u1", 1); err != nil {
 		t.Fatalf("sum usage-u1: %v", err)
 	}
 	if snapshot.User2Cost, snapshot.User2Messages, err = SumUsageByUser(ctx, db, "usage-u2", 1); err != nil {
 		t.Fatalf("sum usage-u2: %v", err)
 	}
-	if snapshot.Totals, err = AdminUsageTotals(ctx, db, 1); err != nil {
+	if snapshot.Totals, err = AdminUsageTotalsBetween(ctx, db, periodStart, periodEnd); err != nil {
 		t.Fatalf("admin usage totals: %v", err)
 	}
-	if snapshot.Trend, err = AdminUsageTrend(ctx, db, 1); err != nil {
+	if snapshot.Trend, err = AdminUsageTrendBetween(ctx, db, periodStart, periodEnd, 3600); err != nil {
 		t.Fatalf("admin usage trend: %v", err)
 	}
-	if snapshot.ByModel, err = AdminUsageBreakdown(ctx, db, 1, "model_id", 100); err != nil {
+	if snapshot.ByModel, err = AdminUsageBreakdownBetween(ctx, db, periodStart, periodEnd, "model_id", 100); err != nil {
 		t.Fatalf("admin model breakdown: %v", err)
 	}
-	if snapshot.ByUser, err = AdminUsageBreakdown(ctx, db, 1, "user_id", 100); err != nil {
+	if snapshot.ByUser, err = AdminUsageBreakdownBetween(ctx, db, periodStart, periodEnd, "user_id", 100); err != nil {
 		t.Fatalf("admin user breakdown: %v", err)
 	}
 	if snapshot.ModelSeries, err = AdminUsageSeries(ctx, db, 1, "model_id", []string{"model-a", "model-b", "model-c"}); err != nil {
@@ -295,7 +298,8 @@ func TestUsageAnalyticsSurviveSingleBulkAndAllLogDeletion(t *testing.T) {
 		t.Fatalf("initial usage log inventory = %d, want 6", got)
 	}
 
-	baseline := takeUsageAnalyticsSnapshot(t, ctx, db)
+	periodEnd := time.Now().Unix() + 1
+	baseline := takeUsageAnalyticsSnapshot(t, ctx, db, periodEnd)
 	if baseline.Totals.Calls != 5 || baseline.Totals.InputTokens != 100 || baseline.Totals.OutputTokens != 50 ||
 		baseline.Totals.Users != 2 || math.Abs(baseline.Totals.Cost-1.10) > 1e-12 {
 		t.Fatalf("baseline totals = %+v, want calls/tokens/users/cost 5/100/50/2/1.10", baseline.Totals)
@@ -317,7 +321,7 @@ func TestUsageAnalyticsSurviveSingleBulkAndAllLogDeletion(t *testing.T) {
 	if got := usageLogInventoryCount(t, ctx, db); got != 5 {
 		t.Fatalf("inventory after single delete = %d, want 5", got)
 	}
-	assertUsageAnalyticsSnapshot(t, "single delete", baseline, takeUsageAnalyticsSnapshot(t, ctx, db))
+	assertUsageAnalyticsSnapshot(t, "single delete", baseline, takeUsageAnalyticsSnapshot(t, ctx, db, periodEnd))
 
 	deleted, err := DeleteUsageByFilter(ctx, db, UsageFilter{ModelID: "model-a"})
 	if err != nil {
@@ -329,7 +333,7 @@ func TestUsageAnalyticsSurviveSingleBulkAndAllLogDeletion(t *testing.T) {
 	if got := usageLogInventoryCount(t, ctx, db); got != 3 {
 		t.Fatalf("inventory after bulk delete = %d, want 3", got)
 	}
-	assertUsageAnalyticsSnapshot(t, "filtered bulk delete", baseline, takeUsageAnalyticsSnapshot(t, ctx, db))
+	assertUsageAnalyticsSnapshot(t, "filtered bulk delete", baseline, takeUsageAnalyticsSnapshot(t, ctx, db, periodEnd))
 
 	deleted, err = DeleteUsageByFilter(ctx, db, UsageFilter{})
 	if err != nil {
@@ -341,7 +345,287 @@ func TestUsageAnalyticsSurviveSingleBulkAndAllLogDeletion(t *testing.T) {
 	if got := usageLogInventoryCount(t, ctx, db); got != 0 {
 		t.Fatalf("inventory after deleting all logs = %d, want 0", got)
 	}
-	assertUsageAnalyticsSnapshot(t, "delete all", baseline, takeUsageAnalyticsSnapshot(t, ctx, db))
+	assertUsageAnalyticsSnapshot(t, "delete all", baseline, takeUsageAnalyticsSnapshot(t, ctx, db, periodEnd))
+}
+
+func TestUsageAnalyticsFiltersComposeAndMatchEmptyAttribution(t *testing.T) {
+	db, ctx := openUsageStatsTestDB(t)
+	seedUsageStatsUser(t, ctx, db, "alice-user", "alice@example.test")
+	seedUsageStatsUser(t, ctx, db, "bob-user", "bob@example.test")
+	if _, err := db.ExecContext(ctx, `UPDATE users SET name='Alice Analyst' WHERE id='alice-user'`); err != nil {
+		t.Fatalf("set analytics user name: %v", err)
+	}
+
+	type fact struct {
+		userID, modelID, workspaceID, purpose, channelID string
+		cost                                             float64
+	}
+	facts := []fact{
+		{userID: "alice-user", modelID: "model-a", workspaceID: "workspace-a", purpose: "chat", channelID: "channel-a", cost: 0.11},
+		{userID: "alice-user", modelID: "model-a", workspaceID: "", purpose: "chat", channelID: "channel-a", cost: 0.22},
+		{userID: "alice-user", modelID: "model-a", workspaceID: "workspace-a", purpose: "chat", channelID: "", cost: 0.33},
+		{userID: "alice-user", modelID: "model-b", workspaceID: "workspace-a", purpose: "chat", channelID: "channel-a", cost: 0.44},
+		{userID: "bob-user", modelID: "model-a", workspaceID: "workspace-a", purpose: "chat", channelID: "channel-a", cost: 0.55},
+		{userID: "alice-user", modelID: "model-a", workspaceID: "workspace-a", purpose: "image", channelID: "channel-a", cost: 0.66},
+	}
+	for i, row := range facts {
+		if _, err := db.ExecContext(ctx, `INSERT INTO usage_stats(
+			source_log_id, user_id, conversation_id, message_id, model_id, purpose,
+			input_tokens, output_tokens, cost, currency, credits, workspace_id, channel_id, created_at
+		) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			i+1, row.userID, "conversation-"+strconv.Itoa(i), "message-"+strconv.Itoa(i),
+			row.modelID, row.purpose, 10+i, 5+i, row.cost, "USD", row.cost*2,
+			row.workspaceID, row.channelID, 1500,
+		); err != nil {
+			t.Fatalf("insert analytics fact %d: %v", i, err)
+		}
+	}
+
+	workspaceID := "workspace-a"
+	channelID := "channel-a"
+	filter := UsageAnalyticsFilter{
+		UserQuery:   "ALICE ANALYST",
+		ModelID:     "model-a",
+		WorkspaceID: &workspaceID,
+		Purpose:     "chat",
+		ChannelID:   &channelID,
+	}
+	totals, err := AdminUsageTotalsBetween(ctx, db, 1000, 2000, filter)
+	if err != nil {
+		t.Fatalf("filtered usage totals: %v", err)
+	}
+	if totals.Calls != 1 || totals.Turns != 1 || math.Abs(totals.Cost-0.11) > 1e-12 {
+		t.Fatalf("composed filter totals = %+v, want only the 0.11 matching call", totals)
+	}
+	trend, err := AdminUsageTrendBetween(ctx, db, 1000, 2000, 100, filter)
+	if err != nil {
+		t.Fatalf("filtered usage trend: %v", err)
+	}
+	if len(trend) != 1 || trend[0].Calls != 1 || math.Abs(trend[0].Cost-0.11) > 1e-12 {
+		t.Fatalf("composed filter trend = %+v, want one matching call", trend)
+	}
+	for dimension, wantKey := range map[string]string{
+		"model_id": "model-a", "user_id": "alice-user", "workspace_id": "workspace-a",
+		"purpose": "chat", "channel_id": "channel-a",
+	} {
+		rows, breakdownErr := AdminUsageBreakdownBetween(ctx, db, 1000, 2000, dimension, -1, filter)
+		if breakdownErr != nil {
+			t.Fatalf("filtered %s breakdown: %v", dimension, breakdownErr)
+		}
+		if len(rows) != 1 || rows[0].Key != wantKey || rows[0].Calls != 1 {
+			t.Fatalf("filtered %s breakdown = %+v, want one %q call", dimension, rows, wantKey)
+		}
+	}
+
+	for _, query := range []string{"ALICE-USER", "ALICE@EXAMPLE.TEST", "ALICE ANALYST"} {
+		matched, queryErr := AdminUsageTotalsBetween(ctx, db, 1000, 2000, UsageAnalyticsFilter{UserQuery: query})
+		if queryErr != nil {
+			t.Fatalf("user search %q: %v", query, queryErr)
+		}
+		if matched.Calls != 5 {
+			t.Fatalf("user search %q calls = %d, want all 5 Alice calls", query, matched.Calls)
+		}
+	}
+	for _, query := range []string{"%", "_"} {
+		matched, queryErr := AdminUsageTotalsBetween(ctx, db, 1000, 2000, UsageAnalyticsFilter{UserQuery: query})
+		if queryErr != nil {
+			t.Fatalf("literal wildcard user search %q: %v", query, queryErr)
+		}
+		if matched.Calls != 0 {
+			t.Fatalf("literal wildcard user search %q calls = %d, want 0", query, matched.Calls)
+		}
+	}
+
+	empty := ""
+	personal, err := AdminUsageTotalsBetween(ctx, db, 1000, 2000, UsageAnalyticsFilter{WorkspaceID: &empty})
+	if err != nil || personal.Calls != 1 || math.Abs(personal.Cost-0.22) > 1e-12 {
+		t.Fatalf("personal workspace totals = %+v, err=%v; want only the 0.22 call", personal, err)
+	}
+	unattributed, err := AdminUsageTotalsBetween(ctx, db, 1000, 2000, UsageAnalyticsFilter{ChannelID: &empty})
+	if err != nil || unattributed.Calls != 1 || math.Abs(unattributed.Cost-0.33) > 1e-12 {
+		t.Fatalf("unattributed channel totals = %+v, err=%v; want only the 0.33 call", unattributed, err)
+	}
+}
+
+func TestUsageAnalyticsFiltersRetainDeliveredMessageContext(t *testing.T) {
+	db, ctx := openUsageStatsTestDB(t)
+	seedUsageStatsUser(t, ctx, db, "context-user", "context@example.test")
+
+	facts := []struct {
+		modelID, purpose, channelID string
+		cost, credits               float64
+		createdAt                   int64
+	}{
+		{modelID: "model-chat", purpose: "chat", channelID: "channel-chat", cost: 0.10, credits: 2, createdAt: 1100},
+		{modelID: "model-side", purpose: "task.router", channelID: "channel-side", cost: 0.20, createdAt: 1150},
+		// Cross a trend bucket boundary to ensure the same delivered message is
+		// assigned to one bucket rather than counted once in every matching bucket.
+		{modelID: "model-side", purpose: "embedding", channelID: "channel-side", cost: 0.30, createdAt: 1250},
+	}
+	for i, row := range facts {
+		if _, err := db.ExecContext(ctx, `INSERT INTO usage_stats(
+			source_log_id, user_id, conversation_id, message_id, model_id, purpose,
+			cost, currency, credits, channel_id, created_at
+		) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+			i+1, "context-user", "context-conversation", "context-message",
+			row.modelID, row.purpose, row.cost, "USD", row.credits, row.channelID, row.createdAt,
+		); err != nil {
+			t.Fatalf("insert delivered-context fact %d: %v", i, err)
+		}
+	}
+
+	assertFiltered := func(name string, filter UsageAnalyticsFilter, wantCalls int, wantCost float64) {
+		t.Helper()
+		totals, err := AdminUsageTotalsBetween(ctx, db, 1000, 2000, filter)
+		if err != nil {
+			t.Fatalf("%s totals: %v", name, err)
+		}
+		if totals.Calls != wantCalls || totals.Turns != 1 || math.Abs(totals.TurnCost-wantCost) > 1e-12 {
+			t.Fatalf("%s totals = %+v, want calls/turns/turn_cost %d/1/%.2f", name, totals, wantCalls, wantCost)
+		}
+		if totals.CreditChargedTurns != 1 || math.Abs(totals.CreditChargedCost-wantCost) > 1e-12 {
+			t.Fatalf(
+				"%s charged turn metrics = %+v, want one charged turn with %.2f filtered cost",
+				name, totals, wantCost,
+			)
+		}
+		if totals.Credits != 0 {
+			t.Fatalf("%s filtered credits = %v, want 0 because credits stay on the chat attribution row", name, totals.Credits)
+		}
+		trend, trendErr := AdminUsageTrendBetween(ctx, db, 1000, 2000, 100, filter)
+		if trendErr != nil {
+			t.Fatalf("%s trend: %v", name, trendErr)
+		}
+		turns := 0
+		for _, point := range trend {
+			turns += point.Turns
+		}
+		if turns != 1 {
+			t.Fatalf("%s trend turns = %d, want 1 delivered message", name, turns)
+		}
+	}
+	assertFiltered("model filter", UsageAnalyticsFilter{ModelID: "model-side"}, 2, 0.50)
+	assertFiltered("purpose filter", UsageAnalyticsFilter{Purpose: "task.router"}, 1, 0.20)
+	channelID := "channel-side"
+	assertFiltered("channel filter", UsageAnalyticsFilter{ChannelID: &channelID}, 2, 0.50)
+
+	rows, err := AdminUsageBreakdownBetween(
+		ctx, db, 1000, 2000, "purpose", -1,
+		UsageAnalyticsFilter{Purpose: "task.router"},
+	)
+	if err != nil {
+		t.Fatalf("filtered purpose breakdown: %v", err)
+	}
+	if len(rows) != 1 || rows[0].Turns != 1 || rows[0].CreditChargedTurns != 1 {
+		t.Fatalf("filtered purpose breakdown = %+v, want one delivered, charged turn", rows)
+	}
+}
+
+func TestAdminUsageTrendBetweenAnchorsBucketsToPeriodStart(t *testing.T) {
+	db, ctx := openUsageStatsTestDB(t)
+	seedUsageStatsUser(t, ctx, db, "bucket-user", "bucket@example.test")
+
+	for i, createdAt := range []int64{1000, 1699, 1700, 2399} {
+		if _, err := db.ExecContext(ctx, `INSERT INTO usage_stats(
+			source_log_id, user_id, message_id, model_id, purpose, currency, created_at
+		) VALUES(?,?,?,?,?,?,?)`,
+			i+1, "bucket-user", "bucket-message-"+strconv.Itoa(i), "bucket-model", "chat", "USD", createdAt,
+		); err != nil {
+			t.Fatalf("insert anchored bucket fact %d: %v", i, err)
+		}
+	}
+
+	trend, err := AdminUsageTrendBetween(ctx, db, 1000, 2400, 700)
+	if err != nil {
+		t.Fatalf("anchored usage trend: %v", err)
+	}
+	if len(trend) != 2 || trend[0].BucketStart != 1000 || trend[0].Calls != 2 ||
+		trend[1].BucketStart != 1700 || trend[1].Calls != 2 {
+		t.Fatalf("anchored usage trend = %+v, want buckets 1000/1700 with two calls each", trend)
+	}
+}
+
+func TestAdminUsageTotalsUsesDeliveredMessageTurnSemantics(t *testing.T) {
+	db, ctx := openUsageStatsTestDB(t)
+	seedUsageStatsUser(t, ctx, db, "turn-user", "turns@example.test")
+	seedUsageStatsUser(t, ctx, db, "side-user", "side@example.test")
+
+	type fact struct {
+		userID    string
+		messageID any
+		purpose   string
+		cost      float64
+		credits   float64
+	}
+	facts := []fact{
+		// Every provider row associated with one delivered message contributes to
+		// that turn's cost, while the message still counts as only one turn.
+		{messageID: "chat-turn", purpose: "chat", cost: 0.10, credits: 1},
+		{messageID: "chat-turn", purpose: "task", cost: 0.20},
+		{messageID: "chat-turn", purpose: "embedding", cost: 0.30},
+		{messageID: "chat-turn", purpose: "image", cost: 0.40},
+		// A zero-cost credit settlement belongs to the same image turn and must
+		// mark that turn charged without creating a second charged turn.
+		{messageID: "image-turn", purpose: "image", cost: 0.50},
+		{messageID: "image-turn", purpose: "credit_adjustment", credits: 2},
+		{messageID: "free-turn", purpose: "chat", cost: 0.25},
+		// Side calls without a delivered message, whether unattributed or attached
+		// only to a task message, remain calls/cost but are not user turns.
+		{userID: "side-user", messageID: nil, purpose: "embedding", cost: 0.75, credits: 4},
+		{userID: "side-user", messageID: "side-only", purpose: "task", cost: 0.35, credits: 1},
+	}
+	for i, row := range facts {
+		userID := row.userID
+		if userID == "" {
+			userID = "turn-user"
+		}
+		if _, err := db.ExecContext(ctx, `INSERT INTO usage_stats(
+			source_log_id, user_id, conversation_id, message_id, model_id, purpose,
+			cost, currency, credits, created_at
+		) VALUES(?,?,?,?,?,?,?,?,?,?)`,
+			i+1, userID, "turn-conversation", row.messageID, "turn-model", row.purpose,
+			row.cost, "USD", row.credits, 1500,
+		); err != nil {
+			t.Fatalf("insert turn fact %d: %v", i, err)
+		}
+	}
+
+	totals, err := AdminUsageTotalsBetween(ctx, db, 1000, 2000)
+	if err != nil {
+		t.Fatalf("turn-semantic totals: %v", err)
+	}
+	if totals.Calls != 9 || math.Abs(totals.Cost-2.85) > 1e-12 {
+		t.Fatalf("all usage totals = %+v, want 9 calls costing 2.85", totals)
+	}
+	if totals.Turns != 3 {
+		t.Fatalf("turns = %d, want chat-turn, image-turn and free-turn only", totals.Turns)
+	}
+	if totals.CreditChargedTurns != 2 {
+		t.Fatalf("credit-charged turns = %d, want chat-turn and image-turn only", totals.CreditChargedTurns)
+	}
+	if math.Abs(totals.TurnCost-1.75) > 1e-12 {
+		t.Fatalf("turn cost = %.12f, want 1.75 including all rows of delivered messages", totals.TurnCost)
+	}
+	if math.Abs(totals.CreditChargedCost-1.50) > 1e-12 {
+		t.Fatalf("credit-charged cost = %.12f, want 1.50 for the two charged turns", totals.CreditChargedCost)
+	}
+	if totals.CreditChargedUsers != 1 {
+		t.Fatalf("credit-charged users = %d, want only the user with delivered charged turns", totals.CreditChargedUsers)
+	}
+	byUser, err := AdminUsageBreakdownBetween(ctx, db, 1000, 2000, "user_id", -1)
+	if err != nil {
+		t.Fatalf("turn-semantic user breakdown: %v", err)
+	}
+	rowsByUser := make(map[string]UsageBreakdownRow, len(byUser))
+	for _, row := range byUser {
+		rowsByUser[row.Key] = row
+	}
+	if row := rowsByUser["turn-user"]; row.Turns != 3 || row.CreditChargedTurns != 2 {
+		t.Fatalf("delivered user breakdown = %+v, want 3 turns / 2 charged", row)
+	}
+	if row := rowsByUser["side-user"]; row.Turns != 0 || row.CreditChargedTurns != 0 {
+		t.Fatalf("side-only user breakdown = %+v, want no delivered or charged turns", row)
+	}
 }
 
 func TestMessageFeedbackUsageMetadataSurvivesLogDeletion(t *testing.T) {

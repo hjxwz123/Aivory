@@ -59,6 +59,15 @@ import type {
 import { envNum } from '@/lib/env-config'
 import type { FeedbackReason, MessageFeedbackInput } from '@/types/chat'
 
+export interface AdminAnalyticsParams {
+  days?: number
+  user?: string
+  model?: string
+  workspace?: string
+  purpose?: string
+  channel?: string
+}
+
 // ----- Auth ----------------------------------------------------------------
 
 export const authApi = {
@@ -966,8 +975,16 @@ export const adminApi = {
     if (!res.ok) throw new ApiError(res.status, `preview failed (${res.status})`, null)
     return res.blob()
   },
-  analytics: (days = envNum('VITE_AIVORY_ADMIN_API_ANALYTICS', 30)) =>
-    api<ApiAnalytics>(`/admin/analytics?days=${days}`),
+  analytics: (params: AdminAnalyticsParams = {}) => {
+    const qs = new URLSearchParams()
+    qs.set('days', String(params.days ?? envNum('VITE_AIVORY_ADMIN_API_ANALYTICS', 30)))
+    if (params.user) qs.set('user', params.user)
+    if (params.model) qs.set('model', params.model)
+    if (params.workspace) qs.set('workspace', params.workspace)
+    if (params.purpose) qs.set('purpose', params.purpose)
+    if (params.channel) qs.set('channel', params.channel)
+    return api<ApiAnalytics>(`/admin/analytics?${qs}`)
+  },
   messageFeedback: (
     params: {
       days?: number

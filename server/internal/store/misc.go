@@ -797,30 +797,75 @@ func DeleteUsageByFilter(ctx context.Context, db *sql.DB, f UsageFilter) (int64,
 
 // UsageBucket is one time-bucket row of the usage trend (§8.3 admin charts).
 type UsageBucket struct {
-	BucketStart  int64   `json:"bucket_start"` // unix seconds
-	InputTokens  int     `json:"input_tokens"`
-	OutputTokens int     `json:"output_tokens"`
-	Calls        int     `json:"calls"`
-	Cost         float64 `json:"cost"`
+	BucketStart      int64   `json:"bucket_start"` // unix seconds
+	InputTokens      int     `json:"input_tokens"`
+	OutputTokens     int     `json:"output_tokens"`
+	CacheReadTokens  int     `json:"cache_read_tokens"`
+	CacheWriteTokens int     `json:"cache_write_tokens"`
+	ImagesCount      int     `json:"images_count"`
+	Calls            int     `json:"calls"`
+	Turns            int     `json:"turns"`
+	Users            int     `json:"users"`
+	Cost             float64 `json:"cost"`
+	Credits          float64 `json:"credits"`
 }
 
-// AdminUsageTrend returns hourly buckets when `days<=2`, otherwise daily, so a
-// "last 24h" view shows 24 points and a "last 30d" view shows 30. SQLite has
-// no date_trunc, so we floor to the bucket width with integer math.
+// AdminUsageTrend returns hourly buckets when `days<=2`, daily buckets through
+// 90 days, and weekly buckets for longer windows. SQLite has no date_trunc, so
+// we floor to the bucket width with integer math.
 func AdminUsageTrend(ctx context.Context, db *sql.DB, days int) ([]UsageBucket, error) {
 	if days <= 0 {
 		days = usageTrendWindow
 	}
-	since := time.Now().Add(-time.Duration(days) * 24 * time.Hour).Unix()
-	bucket := int64(86400) // daily
-	if days <= usageTrendHourlyBucketThreshold {
-		bucket = 3600 // hourly
+	end := time.Now().Unix() + 1
+	since := end - int64(days)*86400
+	return AdminUsageTrendBetween(ctx, db, since, end, UsageBucketWidth(days))
+}
+
+// AdminUsageTrendBetween returns durable usage buckets for the half-open
+// interval [since, before). A turn is a distinct delivered chat/image message;
+// provider/tool-loop rows remain separately visible through Calls.
+func AdminUsageTrendBetween(ctx context.Context, db *sql.DB, since, before, bucket int64, filters ...UsageAnalyticsFilter) ([]UsageBucket, error) {
+	if bucket <= 0 {
+		bucket = 86400
 	}
+	filter := firstUsageAnalyticsFilter(filters)
+	filterSQL, filterArgs := filter.where("u")
+	args := []any{since, before}
+	args = append(args, filterArgs...)
+	args = append(args, since, before, since, bucket, bucket, since)
 	rows, err := db.QueryContext(ctx,
-		`SELECT (created_at / ?) * ? AS b,
-		        CAST(SUM(input_tokens) AS BIGINT), CAST(SUM(output_tokens) AS BIGINT), COUNT(*), SUM(cost)
-		 FROM usage_stats WHERE created_at >= ?
-		 GROUP BY b ORDER BY b ASC`, bucket, bucket, since)
+		`WITH filtered_rows AS (
+			SELECT u.* FROM usage_stats u
+			WHERE u.created_at >= ? AND u.created_at < ?`+filterSQL+`
+		), delivered_messages AS (
+			SELECT DISTINCT message_id FROM usage_stats
+			WHERE created_at >= ? AND created_at < ?
+			  AND message_id IS NOT NULL AND message_id<>''
+			  AND purpose IN ('chat','image')
+		), filtered_turns AS (
+			SELECT filtered_rows.message_id, MIN(filtered_rows.created_at) AS first_created_at
+			FROM filtered_rows
+			JOIN delivered_messages ON delivered_messages.message_id=filtered_rows.message_id
+			WHERE filtered_rows.message_id IS NOT NULL AND filtered_rows.message_id<>''
+			GROUP BY filtered_rows.message_id
+		)
+		SELECT ((u.created_at - ?) / ?) * ? + ? AS b,
+		        COALESCE(CAST(SUM(input_tokens) AS BIGINT),0),
+		        COALESCE(CAST(SUM(output_tokens) AS BIGINT),0),
+		        COALESCE(CAST(SUM(cache_read_tokens) AS BIGINT),0),
+		        COALESCE(CAST(SUM(cache_write_tokens) AS BIGINT),0),
+		        COALESCE(CAST(SUM(images_count) AS BIGINT),0),
+		        COUNT(*),
+		        COUNT(DISTINCT CASE
+		          WHEN filtered_turns.message_id IS NOT NULL THEN u.message_id
+		        END),
+		        COUNT(DISTINCT u.user_id),
+		        COALESCE(SUM(u.cost),0), COALESCE(SUM(u.credits),0)
+		 FROM filtered_rows u
+		 LEFT JOIN filtered_turns
+		   ON filtered_turns.message_id=u.message_id AND filtered_turns.first_created_at=u.created_at
+		 GROUP BY b ORDER BY b ASC`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -828,7 +873,11 @@ func AdminUsageTrend(ctx context.Context, db *sql.DB, days int) ([]UsageBucket, 
 	out := []UsageBucket{}
 	for rows.Next() {
 		var b UsageBucket
-		if err := rows.Scan(&b.BucketStart, &b.InputTokens, &b.OutputTokens, &b.Calls, &b.Cost); err != nil {
+		if err := rows.Scan(
+			&b.BucketStart, &b.InputTokens, &b.OutputTokens, &b.CacheReadTokens,
+			&b.CacheWriteTokens, &b.ImagesCount, &b.Calls, &b.Turns, &b.Users,
+			&b.Cost, &b.Credits,
+		); err != nil {
 			return nil, err
 		}
 		out = append(out, b)
@@ -836,11 +885,14 @@ func AdminUsageTrend(ctx context.Context, db *sql.DB, days int) ([]UsageBucket, 
 	return out, rows.Err()
 }
 
-// UsageBucketWidth mirrors AdminUsageTrend's choice so trend + per-series points
-// share one time axis (hourly for ≤2-day windows, otherwise daily).
+// UsageBucketWidth keeps detailed windows readable: hourly through two days,
+// daily through 90 days, and weekly for longer annual views.
 func UsageBucketWidth(days int) int64 {
 	if days <= usageTrendHourlyBucketThreshold {
 		return 3600
+	}
+	if days > 90 {
+		return 7 * 86400
 	}
 	return 86400
 }
@@ -848,11 +900,85 @@ func UsageBucketWidth(days int) int64 {
 // UsageTotals is the headline aggregate for the analytics dashboard (§ admin
 // analytics).
 type UsageTotals struct {
-	Calls        int     `json:"calls"`
-	InputTokens  int     `json:"input_tokens"`
-	OutputTokens int     `json:"output_tokens"`
-	Cost         float64 `json:"cost"`
-	Users        int     `json:"users"` // distinct active users in the window
+	Calls              int     `json:"calls"`
+	Turns              int     `json:"turns"`
+	CreditChargedTurns int     `json:"credit_charged_turns"`
+	InputTokens        int     `json:"input_tokens"`
+	OutputTokens       int     `json:"output_tokens"`
+	CacheReadTokens    int     `json:"cache_read_tokens"`
+	CacheWriteTokens   int     `json:"cache_write_tokens"`
+	ImagesCount        int     `json:"images_count"`
+	Cost               float64 `json:"cost"`
+	Credits            float64 `json:"credits"`
+	TurnCost           float64 `json:"turn_cost"`
+	CreditChargedCost  float64 `json:"credit_charged_cost"`
+	Users              int     `json:"users"`
+	CreditChargedUsers int     `json:"credit_charged_users"`
+	Conversations      int     `json:"conversations"`
+	Workspaces         int     `json:"workspaces"`
+}
+
+// UsageAnalyticsFilter is shared by every analytics aggregate so a dashboard
+// filter changes totals, comparisons, trends and breakdowns consistently.
+// WorkspaceID/ChannelID are pointers because an explicitly selected empty value
+// means personal/unattributed, while nil means no filter.
+type UsageAnalyticsFilter struct {
+	UserQuery   string
+	ModelID     string
+	WorkspaceID *string
+	Purpose     string
+	ChannelID   *string
+}
+
+func firstUsageAnalyticsFilter(filters []UsageAnalyticsFilter) UsageAnalyticsFilter {
+	if len(filters) == 0 {
+		return UsageAnalyticsFilter{}
+	}
+	return filters[0]
+}
+
+func (f UsageAnalyticsFilter) where(alias string) (string, []any) {
+	prefix := ""
+	if alias != "" {
+		prefix = alias + "."
+	}
+	clauses := []string{}
+	args := []any{}
+	if query := strings.TrimSpace(f.UserQuery); query != "" {
+		like := "%" + likeEscape(strings.ToLower(query)) + "%"
+		clauses = append(clauses, `(
+		  LOWER(COALESCE(`+prefix+`user_id,'')) LIKE ? ESCAPE '\'
+		  OR EXISTS (
+		    SELECT 1 FROM users analytics_user
+		    WHERE analytics_user.id=`+prefix+`user_id
+		      AND (
+		        LOWER(COALESCE(analytics_user.email,'')) LIKE ? ESCAPE '\'
+		        OR LOWER(COALESCE(analytics_user.name,'')) LIKE ? ESCAPE '\'
+		      )
+		  )
+		)`)
+		args = append(args, like, like, like)
+	}
+	if f.ModelID != "" {
+		clauses = append(clauses, prefix+"model_id=?")
+		args = append(args, f.ModelID)
+	}
+	if f.WorkspaceID != nil {
+		clauses = append(clauses, prefix+"workspace_id=?")
+		args = append(args, *f.WorkspaceID)
+	}
+	if f.Purpose != "" {
+		clauses = append(clauses, prefix+"purpose=?")
+		args = append(args, f.Purpose)
+	}
+	if f.ChannelID != nil {
+		clauses = append(clauses, prefix+"channel_id=?")
+		args = append(args, *f.ChannelID)
+	}
+	if len(clauses) == 0 {
+		return "", args
+	}
+	return " AND " + strings.Join(clauses, " AND "), args
 }
 
 // AdminUsageTotals returns the period totals plus the distinct active-user count.
@@ -860,54 +986,206 @@ func AdminUsageTotals(ctx context.Context, db *sql.DB, days int) (UsageTotals, e
 	if days <= 0 {
 		days = usageTotalsWindow
 	}
-	since := time.Now().Add(-time.Duration(days) * 24 * time.Hour).Unix()
+	end := time.Now().Unix() + 1
+	return AdminUsageTotalsBetween(ctx, db, end-int64(days)*86400, end)
+}
+
+// AdminUsageTotalsBetween aggregates the half-open interval [since, before).
+// Cost is provider spend; Credits is the user-facing debit amount. Turn-level
+// billing is grouped by message_id so multi-request tool loops count once.
+func AdminUsageTotalsBetween(ctx context.Context, db *sql.DB, since, before int64, filters ...UsageAnalyticsFilter) (UsageTotals, error) {
+	filter := firstUsageAnalyticsFilter(filters)
+	filterSQL, filterArgs := filter.where("u")
+	args := []any{since, before}
+	args = append(args, filterArgs...)
 	var t UsageTotals
-	err := db.QueryRowContext(ctx,
-		`SELECT COUNT(*), COALESCE(CAST(SUM(input_tokens) AS BIGINT),0), COALESCE(CAST(SUM(output_tokens) AS BIGINT),0),
-		        COALESCE(SUM(cost),0), COUNT(DISTINCT user_id)
-		 FROM usage_stats WHERE created_at >= ?`, since).
-		Scan(&t.Calls, &t.InputTokens, &t.OutputTokens, &t.Cost, &t.Users)
-	return t, err
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*),
+		        COALESCE(CAST(SUM(input_tokens) AS BIGINT),0),
+		        COALESCE(CAST(SUM(output_tokens) AS BIGINT),0),
+		        COALESCE(CAST(SUM(cache_read_tokens) AS BIGINT),0),
+		        COALESCE(CAST(SUM(cache_write_tokens) AS BIGINT),0),
+		        COALESCE(CAST(SUM(images_count) AS BIGINT),0),
+		        COALESCE(SUM(cost),0), COALESCE(SUM(credits),0),
+		        COUNT(DISTINCT user_id),
+		        COUNT(DISTINCT CASE WHEN credits>0 THEN user_id END),
+		        COUNT(DISTINCT CASE
+		          WHEN conversation_id IS NOT NULL AND conversation_id<>'' THEN conversation_id
+		        END),
+		        COUNT(DISTINCT CASE WHEN workspace_id<>'' THEN workspace_id END)
+		 FROM usage_stats u WHERE u.created_at >= ? AND u.created_at < ?`+filterSQL, args...).
+		Scan(
+			&t.Calls, &t.InputTokens, &t.OutputTokens, &t.CacheReadTokens,
+			&t.CacheWriteTokens, &t.ImagesCount, &t.Cost, &t.Credits, &t.Users,
+			&t.CreditChargedUsers, &t.Conversations, &t.Workspaces,
+		); err != nil {
+		return t, err
+	}
+
+	// Filters select which facts contribute cost and credits. Delivery is resolved
+	// against the complete period, so filtering to a task/model row still retains
+	// the user turn when that same message has a chat or image delivery row.
+	turnArgs := []any{since, before}
+	turnArgs = append(turnArgs, filterArgs...)
+	turnArgs = append(turnArgs, since, before)
+	if err := db.QueryRowContext(ctx,
+		`WITH filtered_rows AS (
+		   SELECT u.* FROM usage_stats u
+		   WHERE u.created_at >= ? AND u.created_at < ?`+filterSQL+`
+		 ), turn_context AS (
+		   SELECT message_id, SUM(credits) AS context_credits,
+		          MAX(CASE WHEN purpose IN ('chat','image') THEN 1 ELSE 0 END) AS delivered
+		   FROM usage_stats
+		   WHERE created_at >= ? AND created_at < ?
+		     AND message_id IS NOT NULL AND message_id<>''
+		   GROUP BY message_id
+		 )
+		 SELECT COUNT(*),
+		        COALESCE(SUM(charged),0),
+		        COALESCE(SUM(turn_cost),0),
+		        COALESCE(SUM(CASE WHEN charged=1 THEN turn_cost ELSE 0 END),0),
+		        COUNT(DISTINCT CASE WHEN charged=1 THEN turn_user_id END)
+		 FROM (
+		   SELECT u.message_id, MAX(u.user_id) AS turn_user_id,
+		          SUM(u.cost) AS turn_cost,
+		          MAX(CASE WHEN turn_context.context_credits>0 THEN 1 ELSE 0 END) AS charged
+		   FROM filtered_rows u
+		   JOIN turn_context ON turn_context.message_id=u.message_id AND turn_context.delivered=1
+		   WHERE u.message_id IS NOT NULL AND u.message_id<>''
+		   GROUP BY u.message_id
+		 ) turns`, turnArgs...).
+		Scan(
+			&t.Turns, &t.CreditChargedTurns, &t.TurnCost,
+			&t.CreditChargedCost, &t.CreditChargedUsers,
+		); err != nil {
+		return t, err
+	}
+	return t, nil
 }
 
-// UsageBreakdownRow is one row of a by-model or by-user breakdown. Label holds
-// the user email for the by-user breakdown; model labels are resolved on the
-// frontend from the model list.
+// UsageBreakdownRow is one row of a whitelisted analytics dimension. Label is
+// resolved from the live catalog when available; Key remains the durable ID.
 type UsageBreakdownRow struct {
-	Key          string  `json:"key"`
-	Label        string  `json:"label"`
-	InputTokens  int     `json:"input_tokens"`
-	OutputTokens int     `json:"output_tokens"`
-	Calls        int     `json:"calls"`
-	Cost         float64 `json:"cost"`
+	Key                string  `json:"key"`
+	Label              string  `json:"label"`
+	InputTokens        int     `json:"input_tokens"`
+	OutputTokens       int     `json:"output_tokens"`
+	CacheReadTokens    int     `json:"cache_read_tokens"`
+	CacheWriteTokens   int     `json:"cache_write_tokens"`
+	ImagesCount        int     `json:"images_count"`
+	Calls              int     `json:"calls"`
+	Turns              int     `json:"turns"`
+	CreditChargedTurns int     `json:"credit_charged_turns"`
+	Users              int     `json:"users"`
+	Conversations      int     `json:"conversations"`
+	Cost               float64 `json:"cost"`
+	Credits            float64 `json:"credits"`
 }
 
-// AdminUsageBreakdown returns the top-`limit` keys for the dimension (groupCol
-// must be "model_id" or "user_id"), ordered by cost then call volume.
+type usageBreakdownDimension struct {
+	keyExpr   string
+	labelExpr string
+	join      string
+	groupBy   string
+}
+
+func usageBreakdownDimensionFor(groupCol string) (usageBreakdownDimension, error) {
+	switch groupCol {
+	case "model_id":
+		return usageBreakdownDimension{
+			keyExpr: "u.model_id", labelExpr: "COALESCE(item.label,'')",
+			join: "LEFT JOIN models item ON item.id=u.model_id", groupBy: "u.model_id, item.label",
+		}, nil
+	case "user_id":
+		return usageBreakdownDimension{
+			keyExpr: "COALESCE(u.user_id,'')", labelExpr: "COALESCE(item.email,'')",
+			join: "LEFT JOIN users item ON item.id=u.user_id", groupBy: "u.user_id, item.email",
+		}, nil
+	case "workspace_id":
+		return usageBreakdownDimension{
+			keyExpr: "u.workspace_id", labelExpr: "COALESCE(item.name,'')",
+			join: "LEFT JOIN workspaces item ON item.id=u.workspace_id", groupBy: "u.workspace_id, item.name",
+		}, nil
+	case "channel_id":
+		return usageBreakdownDimension{
+			keyExpr: "u.channel_id", labelExpr: "COALESCE(item.name,'')",
+			join: "LEFT JOIN channels item ON item.id=u.channel_id", groupBy: "u.channel_id, item.name",
+		}, nil
+	case "purpose":
+		return usageBreakdownDimension{
+			keyExpr: "u.purpose", labelExpr: "''", groupBy: "u.purpose",
+		}, nil
+	default:
+		return usageBreakdownDimension{}, fmt.Errorf("AdminUsageBreakdown: invalid group column %q", groupCol)
+	}
+}
+
+// AdminUsageBreakdown returns one aggregate row per whitelisted dimension key.
+// A negative limit returns the complete dimension; zero keeps the legacy top-N.
 func AdminUsageBreakdown(ctx context.Context, db *sql.DB, days int, groupCol string, limit int) ([]UsageBreakdownRow, error) {
-	if groupCol != "model_id" && groupCol != "user_id" {
-		return nil, fmt.Errorf("AdminUsageBreakdown: invalid group column %q", groupCol)
-	}
-	if limit <= 0 {
-		limit = usageBreakdownTopN
-	}
 	if days <= 0 {
 		days = usageBreakdownWindow
 	}
-	since := time.Now().Add(-time.Duration(days) * 24 * time.Hour).Unix()
-	labelExpr, join, groupBy, attributionWhere := "''", "", "u."+groupCol, ""
-	if groupCol == "user_id" {
-		labelExpr = "COALESCE(usr.email,'')"
-		join = "LEFT JOIN users usr ON usr.id = u.user_id"
-		groupBy = "u.user_id, usr.email"
-		attributionWhere = " AND u.user_id IS NOT NULL"
+	end := time.Now().Unix() + 1
+	return AdminUsageBreakdownBetween(ctx, db, end-int64(days)*86400, end, groupCol, limit)
+}
+
+func AdminUsageBreakdownBetween(ctx context.Context, db *sql.DB, since, before int64, groupCol string, limit int, filters ...UsageAnalyticsFilter) ([]UsageBreakdownRow, error) {
+	dimension, err := usageBreakdownDimensionFor(groupCol)
+	if err != nil {
+		return nil, err
+	}
+	filter := firstUsageAnalyticsFilter(filters)
+	filterSQL, filterArgs := filter.where("u")
+	args := []any{since, before}
+	args = append(args, filterArgs...)
+	args = append(args, since, before)
+	limitSQL := ""
+	if limit == 0 {
+		limit = usageBreakdownTopN
+	}
+	if limit > 0 {
+		limitSQL = " LIMIT ?"
+		args = append(args, limit)
 	}
 	q := fmt.Sprintf(
-		`SELECT u.%s, %s, CAST(SUM(u.input_tokens) AS BIGINT), CAST(SUM(u.output_tokens) AS BIGINT), COUNT(*), SUM(u.cost)
-		 FROM usage_stats u %s WHERE u.created_at >= ?%s
-		 GROUP BY %s ORDER BY SUM(u.cost) DESC, COUNT(*) DESC LIMIT ?`,
-		groupCol, labelExpr, join, attributionWhere, groupBy)
-	rows, err := db.QueryContext(ctx, q, since, limit)
+		`WITH filtered_rows AS (
+		   SELECT u.* FROM usage_stats u
+		   WHERE u.created_at >= ? AND u.created_at < ?`+filterSQL+`
+		 ), turn_context AS (
+		   SELECT message_id, SUM(credits) AS context_credits,
+		          MAX(CASE WHEN purpose IN ('chat','image') THEN 1 ELSE 0 END) AS delivered
+		   FROM usage_stats
+		   WHERE created_at >= ? AND created_at < ?
+		     AND message_id IS NOT NULL AND message_id<>''
+		   GROUP BY message_id
+		 )
+		 SELECT %s, %s,
+		        COALESCE(CAST(SUM(u.input_tokens) AS BIGINT),0),
+		        COALESCE(CAST(SUM(u.output_tokens) AS BIGINT),0),
+		        COALESCE(CAST(SUM(u.cache_read_tokens) AS BIGINT),0),
+		        COALESCE(CAST(SUM(u.cache_write_tokens) AS BIGINT),0),
+		        COALESCE(CAST(SUM(u.images_count) AS BIGINT),0),
+		        COUNT(*),
+		        COUNT(DISTINCT CASE
+		          WHEN turn_context.delivered=1 THEN u.message_id
+		        END),
+		        COUNT(DISTINCT CASE
+		          WHEN turn_context.delivered=1 AND turn_context.context_credits>0 THEN u.message_id
+		        END),
+		        COUNT(DISTINCT u.user_id),
+		        COUNT(DISTINCT CASE
+		          WHEN u.conversation_id IS NOT NULL AND u.conversation_id<>'' THEN u.conversation_id
+		        END),
+		        COALESCE(SUM(u.cost),0), COALESCE(SUM(u.credits),0)
+		 FROM filtered_rows u
+		 LEFT JOIN turn_context ON turn_context.message_id=u.message_id
+		 %s
+		 GROUP BY %s
+		 ORDER BY SUM(u.cost) DESC, COUNT(*) DESC, %s ASC%s`,
+		dimension.keyExpr, dimension.labelExpr, dimension.join, dimension.groupBy,
+		dimension.keyExpr, limitSQL)
+	rows, err := db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -915,7 +1193,11 @@ func AdminUsageBreakdown(ctx context.Context, db *sql.DB, days int, groupCol str
 	out := []UsageBreakdownRow{}
 	for rows.Next() {
 		var r UsageBreakdownRow
-		if err := rows.Scan(&r.Key, &r.Label, &r.InputTokens, &r.OutputTokens, &r.Calls, &r.Cost); err != nil {
+		if err := rows.Scan(
+			&r.Key, &r.Label, &r.InputTokens, &r.OutputTokens, &r.CacheReadTokens,
+			&r.CacheWriteTokens, &r.ImagesCount, &r.Calls, &r.Turns,
+			&r.CreditChargedTurns, &r.Users, &r.Conversations, &r.Cost, &r.Credits,
+		); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
