@@ -720,7 +720,6 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
   last_seen  BIGINT NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user_id ON refresh_tokens(user_id);
-CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user_session ON refresh_tokens(user_id, session_id);
 
 -- OAuth / social login providers (see schema.sql for the full rationale).
 CREATE TABLE IF NOT EXISTS oauth_providers (
