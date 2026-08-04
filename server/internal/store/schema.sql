@@ -769,7 +769,6 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
 );
 
 CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user_id ON refresh_tokens(user_id);
-CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user_session ON refresh_tokens(user_id, session_id);
 
 -- OAuth / social login providers, configured by the admin. Built-in kinds
 -- (google | github | apple) fill their endpoints from code defaults; kind=oidc
