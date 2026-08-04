@@ -4,7 +4,7 @@ import { ExternalLink, Github, FileText, Mail, ShieldCheck, Tag } from 'lucide-r
 import { Logo } from '@/components/brand/logo'
 import { useLegalConfig } from '@/hooks/use-legal-config'
 
-const APP_VERSION = '2.2.6'
+const APP_VERSION = '2.2.7'
 const GITHUB_URL = 'https://github.com/hjxwz123/Aivory'
 const LICENSE_URL = 'https://github.com/hjxwz123/Aivory/blob/main/LICENSE'
 
