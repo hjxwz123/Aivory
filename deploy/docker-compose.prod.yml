@@ -1,22 +1,15 @@
 # Aivory — production stack: Postgres + Redis + Qdrant + bundled sandbox + a
 # single `app` container that serves both the SPA and the /api backend.
 #
-# Two ways to bring this up:
-#
-#   1) Pull prebuilt images from ghcr.io (recommended for deploys):
+# Pull prebuilt images from ghcr.io:
 #        cd deploy
 #        cp .env.example .env          # then edit secrets
 #        docker compose -f docker-compose.prod.yml pull
 #        docker compose -f docker-compose.prod.yml up -d
 #
-#   2) Build locally from source (recommended for development / CI smoke tests):
-#        cd deploy
-#        cp .env.example .env
-#        docker compose -f docker-compose.prod.yml up -d --build
-#
-# The app service declares BOTH `image:` and `build:`. Compose picks the image
-# when present, falls back to build otherwise — so the same file serves both
-# flows without duplicating the topology.
+# This production file is deliberately image-only: IMAGE_TAG must resolve to the
+# exact prebuilt app release requested by the operator; current source can never
+# silently replace a pinned release.
 #
 # The production stack wires all backends by default: postgres:// → Postgres,
 # REDIS_URL → Redis, QDRANT_URL → Qdrant. Qdrant is part of the default Docker
@@ -82,10 +75,7 @@ services:
   # SECURITY: the mounted docker.sock is root-equivalent on the host; keeping
   # the service internal-only (no ports) is what contains that blast radius.
   sandbox:
-    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-hjxwz123}/aivory-sandbox-sidecar:${IMAGE_TAG:-latest}
-    build:
-      context: ../sandbox-service
-      dockerfile: Dockerfile.sidecar
+    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-hjxwz123}/aivory-sandbox-sidecar:${SANDBOX_IMAGE_TAG:-${IMAGE_TAG:-latest}}
     restart: unless-stopped
     environment:
       # Shared internal default — must match the api's SANDBOX_API_KEY above.
@@ -95,7 +85,7 @@ services:
       # can leave it un-cached). The `sandbox-image-keepalive` service below is what
       # reliably PINS it locally — so `compose pull` fetches it and a host
       # prune/cron can't evict it (no cold-pull 500s).
-      SANDBOX_IMAGE: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-hjxwz123}/aivory-sandbox:${IMAGE_TAG:-latest}
+      SANDBOX_IMAGE: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-hjxwz123}/aivory-sandbox:${SANDBOX_IMAGE_TAG:-${IMAGE_TAG:-latest}}
       SANDBOX_PULL_ON_START: "1"
       SANDBOX_MEMORY: ${SANDBOX_MEMORY:-2g}
       SANDBOX_CPUS: ${SANDBOX_CPUS:-1}
@@ -153,7 +143,7 @@ services:
   # MAX_SESSIONS counter ignore it. Bonus: as a service, the runtime image now
   # rides `docker compose pull` — no separate pre-pull step needed.
   sandbox-image-keepalive:
-    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-hjxwz123}/aivory-sandbox:${IMAGE_TAG:-latest}
+    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-hjxwz123}/aivory-sandbox:${SANDBOX_IMAGE_TAG:-${IMAGE_TAG:-latest}}
     command: ["sleep", "infinity"]
     restart: unless-stopped
     network_mode: none
@@ -170,9 +160,6 @@ services:
     # Prebuilt image from the docker-images.yml workflow. Override IMAGE_OWNER
     # in .env if you forked into a different account.
     image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-hjxwz123}/aivory-app:${IMAGE_TAG:-latest}
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile.app
     restart: unless-stopped
     # NOTE: app does NOT depend_on the sandbox. The sandbox is a soft, per-request
     # HTTP dependency (only code execution needs it) — making it a startup

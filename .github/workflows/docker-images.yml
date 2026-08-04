@@ -9,7 +9,7 @@ name: Build & push app image
 #
 # Tagging strategy (handled by docker/metadata-action):
 #   - push to main          → :latest        + :sha-<short>
-#   - push tag v1.2.3       → :1.2.3 + :1.2 + :1 + :latest
+#   - push tag v1.2.3       → :1.2.3 + :1.2 + :1
 #   - PR                    → :pr-<n>        (image is NOT pushed)
 #
 # Multi-arch: linux/amd64 + linux/arm64. ARM build uses QEMU under the hood,

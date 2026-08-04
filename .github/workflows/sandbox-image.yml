@@ -7,14 +7,15 @@ name: Build & push sandbox images
 #
 # These are bundled into the main stack (deploy/docker-compose.prod.yml ships a
 # `sandbox` service that pulls them), so they must be published for a turnkey
-# deploy. Trigger: any push touching sandbox-service/, or manually via the
-# Actions tab. Images land at:
+# deploy. Trigger: any main push touching sandbox-service/, every semver release
+# tag, or manually via the Actions tab. Images land at:
 #   ghcr.io/<account>/aivory-sandbox:latest
 #   ghcr.io/<account>/aivory-sandbox-sidecar:latest
 
 on:
   push:
     branches: [main]
+    tags: ['v*.*.*']
     paths:
       - 'sandbox-service/**'
       - '.github/workflows/sandbox-image.yml'
@@ -57,6 +58,18 @@ jobs:
         id: vars
         run: echo "owner=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
 
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ steps.vars.outputs.owner }}/${{ matrix.name }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha,prefix=,format=long
+            type=raw,value=latest,enable={{is_default_branch}}
+
       - name: Build and push ${{ matrix.name }}
         uses: docker/build-push-action@v6
         with:
@@ -64,8 +77,7 @@ jobs:
           file: ${{ matrix.dockerfile }}
           platforms: ${{ env.PLATFORMS }}
           push: true
-          tags: |
-            ${{ env.REGISTRY }}/${{ steps.vars.outputs.owner }}/${{ matrix.name }}:latest
-            ${{ env.REGISTRY }}/${{ steps.vars.outputs.owner }}/${{ matrix.name }}:${{ github.sha }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

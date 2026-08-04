@@ -13,7 +13,7 @@
 | `redis` | `redis:7-alpine` | 缓存、限流计数器、跨进程停止流式输出 pub/sub。 |
 | `qdrant` | `qdrant/qdrant:v1.12.4` | RAG 向量检索。 |
 | `sandbox` | `ghcr.io/hjxwz123/aivory-sandbox-sidecar` | 内置代码执行沙箱，仅供内网访问。 |
-| `app` | `ghcr.io/hjxwz123/aivory-app`（也可通过 `Dockerfile.app` 本地构建） | 同一个容器同时提供构建后的 SPA 和 `/api` 后端，二者同源。 |
+| `app` | `ghcr.io/hjxwz123/aivory-app` | 同一个容器同时提供构建后的 SPA 和 `/api` 后端，二者同源。 |
 
 完整项目介绍见[根目录 README](../README.zh-CN.md)。本文档只作为部署速查。
 
@@ -29,7 +29,7 @@
 
 分块向量只写入 Qdrant。关系型数据库只保存分块文本和检索元数据，检索时会用数据库校验 Qdrant 命中；当 Qdrant 不可用或为空时，RAG 会注入完整上下文兜底。删除文档、知识库或对话时，也会删除 Qdrant 中对应的点。
 
-## 首次部署（预构建镜像）
+## Docker 快速部署
 
 ```bash
 cd deploy
@@ -52,17 +52,45 @@ docker compose -f docker-compose.prod.yml up -d
 
 `store.Migrate()` 会在启动时自动运行，并在表不存在时创建 Postgres schema（`schema_pg.sql`）。不需要手动执行 SQL。
 
-## 本地构建镜像
+## 按版本号部署或回滚
 
-当你在代码库上迭代，或使用官方镜像未覆盖的架构时，可以本地构建：
+`IMAGE_TAG` 会同时选择应用、沙箱运行时和沙箱 sidecar 的发布版本。发布 tag 时三张镜像都会生成相同的语义版本标签，因此以后即使更新了沙箱，`3.0.0` 这类版本也只需填写一个值。
+
+编辑实际部署使用的 `deploy/.env`（不是已经复制过的 `.env.example`）：
+
+```dotenv
+# Git tag v3.0.0 对应的镜像 tag 是 3.0.0，不能写 v3.0.0。
+IMAGE_TAG=3.0.0
+```
+
+拉取前先检查 Compose 最终解析出的镜像，确认三张 Aivory 镜像都带上目标版本：
 
 ```bash
 cd deploy
-cp .env.example .env
-docker compose -f docker-compose.prod.yml up -d --build
+docker compose --env-file .env -f docker-compose.prod.yml config --images
+docker compose --env-file .env -f docker-compose.prod.yml pull
+docker compose --env-file .env -f docker-compose.prod.yml up -d --no-build
+docker compose --env-file .env -f docker-compose.prod.yml images
 ```
 
-compose 文件同时声明了 `image:` 和 `build:`：存在预构建镜像时 Compose 会优先使用镜像；需要时会回退到本地构建。
+预期至少包含：
+
+```text
+ghcr.io/hjxwz123/aivory-app:3.0.0
+ghcr.io/hjxwz123/aivory-sandbox:3.0.0
+ghcr.io/hjxwz123/aivory-sandbox-sidecar:3.0.0
+```
+
+请在三张发布镜像全部生成后再部署。如果某次发布未完成，`pull` 会直接失败，不会静默混用不同版本。回滚方式相同：选择一个完整发布过的旧版本，再重新执行 `pull` 和 `up`。
+
+`2.2.6` 等历史版本早于沙箱语义版本镜像。部署这类旧版本时，使用可选兼容覆盖：
+
+```dotenv
+IMAGE_TAG=2.2.6
+SANDBOX_IMAGE_TAG=latest
+```
+
+如果改了标签仍没有变化，先执行 `config --images`。它能直接发现两类常见问题：修改的是 `.env.example` 而实际 `.env` 仍为 `latest`，或者从仓库根目录运行导致没有读取预期 env 文件。显式传入 `--env-file .env` 可以避免后者。
 
 ## Embedding 维度
 

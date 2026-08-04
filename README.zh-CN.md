@@ -12,7 +12,6 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/hjxwz123/Aivory/actions/workflows/docker-images.yml"><img alt="构建状态" src="https://github.com/hjxwz123/Aivory/actions/workflows/docker-images.yml/badge.svg"></a>
   <a href="https://github.com/hjxwz123/Aivory/pkgs/container/aivory-app"><img alt="镜像" src="https://img.shields.io/badge/ghcr.io-aivory--app-blue?logo=docker"></a>
   <img alt="Go" src="https://img.shields.io/badge/Go-1.22-00ADD8?logo=go">
   <img alt="React" src="https://img.shields.io/badge/React-19-61DAFB?logo=react">
@@ -183,6 +182,8 @@ docker compose -f docker-compose.prod.yml pull
 docker compose -f docker-compose.prod.yml up -d
 ```
 
+按版本部署时，修改实际的 `deploy/.env`，例如 `IMAGE_TAG=3.0.0`（镜像标签不带 Git tag 的 `v` 前缀）；应用和两张沙箱镜像会自动使用同一版本。`2.2.6` 等缺少沙箱版本镜像的历史版本需要额外设置 `SANDBOX_IMAGE_TAG=latest`。先运行 `docker compose --env-file .env -f docker-compose.prod.yml config --images` 核对最终镜像，再执行 `pull` 和 `up -d --no-build`。完整说明见 [`deploy/README.zh-CN.md`](deploy/README.zh-CN.md#按版本号部署或回滚)。
+
 完成后访问 `http://localhost`（默认映射主机 80 端口；如被占用，改 `docker-compose.prod.yml` 里的 `"80:8787"` 映射即可，无需任何环境变量）。前端与 `/api` 同源,**解析到哪个域名哪个域名就能用**,不需要配 `PUBLIC_ORIGIN` / `ALLOWED_ORIGINS`。
 
 **首次启动**：进入初始化页面，填写昵称、邮箱和密码，该账号成为管理员。随后去 `/admin/channels` 添加第一个 Provider key，并创建模型。
@@ -247,7 +248,7 @@ Aivory 的绝大多数配置项**通过管理后台实时改**，不依赖环境
 
 | 分组 | 键 | 用途 |
 |------|----|----|
-| **镜像** | `IMAGE_OWNER`、`IMAGE_TAG` | 从哪个 GHCR 命名空间拉镜像 / 拉哪个 tag |
+| **镜像** | `IMAGE_OWNER`、`IMAGE_TAG`、`SANDBOX_IMAGE_TAG` | GHCR 命名空间、统一发布版本和历史沙箱兼容覆盖（可选） |
 | **网络** | *（无）* | 前端与 `/api` 同源，任意域名自适应；主机端口在 compose 的 `80:8787` 映射里改，无需域名/CORS 变量 |
 | **Postgres** | `POSTGRES_USER/PASSWORD/DB` | 数据库凭据 |
 | **Redis** | `REDIS_PASSWORD` | 必填，启用 `requirepass` |
@@ -266,55 +267,27 @@ Aivory 的绝大多数配置项**通过管理后台实时改**，不依赖环境
 这些变量**故意不写进** `.env.example`——保持它精简，不需要时不要动它。每个变量的默认值就是当前的硬编码值，一个都不设置，行为与改动前完全一致。需要哪个，从参考文档里抄一条加进你自己的 `.env` 即可：
 
 - 后端（Go）变量：改动后重启 `aivory-api` 进程生效。
-- 前端 `VITE_*` 变量：在**构建期**内联（`npm run build` / 前端 Docker 构建时），必须在构建环境设置；运行时改容器环境变量无效，需要重新构建产物。
+- 前端 `VITE_*` 变量：执行 `npm run build` 时内联，必须在编译环境设置；运行时修改环境变量无效，需要重新编译前端产物。
 - `SANDBOX_*` 变量：属于 `sandbox-service` 进程，改动后重启该进程生效。
 
 ---
 
-## 从源码自行构建镜像
+## 编译部署（适合本地开发）
+
+本地编译不需要 Docker、Postgres、Redis 或 Qdrant。前端先构建到 `dist/`，Go API 使用 SQLite 和内存缓存，并通过 `STATIC_DIR` 在 `8787` 端口同时提供 SPA 与 `/api`。
 
 ```bash
-cd deploy
-cp .env.example .env
-docker compose -f docker-compose.prod.yml up -d --build
-```
+# 在仓库根目录编译前端
+npm ci
+npm run build
 
-`api` 与 `web` 服务都同时声明 `image:` 和 `build:`，Compose 优先用已有镜像，缺了就本地构建。
-
----
-
-## 本地开发（不用 Docker）
-
-Go API 自带 SQLite 驱动 + 哈希袋兜底嵌入器，不装任何外部服务就能跑起来。
-
-```bash
-# 后端
+# 编译并运行后端；工作目录保持在 server/
 cd server
-go run ./cmd/api                  # 监听 :8787
-
-# 前端（另开终端）
-cd ..
-npm install
-npm run dev                       # Vite :5173，代理 /api → :8787
+go build -o aivory ./cmd/api
+STATIC_DIR=../dist ./aivory
 ```
 
-打开 `http://localhost:5173`，首次启动进入初始化页面——创建的第一个账号（昵称 + 邮箱 + 密码）即为管理员。随后在 `/admin` 配置渠道与模型即可开始聊天。
-
----
-
-## GitHub Actions：自动构建镜像
-
-| Workflow | 触发条件 | 产物 |
-|----------|---------|------|
-| **`docker-images.yml`** | push 到 `main`、`v*.*.*` tag、手动 dispatch | `ghcr.io/<owner>/aivory-app`——多架构（amd64 + arm64） |
-
-打 tag 规则：
-
-- push 到 `main`    → `:latest` + `:sha-<short>`
-- push tag `v1.2.3` → `:1.2.3` + `:1.2` + `:1` + `:latest`
-- pull request      → 只构建，不推送（冒烟测试）
-
-workflow 只需要 `GITHUB_TOKEN`（GitHub 自动注入）。首次成功跑完后，repo 的 Packages 侧栏会出现 `aivory-app`。Fork 后记得把 `deploy/.env` 里的 `IMAGE_OWNER` 改成你的小写 GitHub 用户名。
+打开 `http://localhost:8787`。本地开发未设置 `JWT_SECRET` 时会在每次启动生成随机密钥，因此重启后已有登录会话失效；数据默认保存在 `server/data/`。首次启动进入初始化页面，创建的第一个账号成为管理员。
 
 ---
 
@@ -349,10 +322,8 @@ workflow 只需要 `GITHUB_TOKEN`（GitHub 自动注入）。首次成功跑完�
 │       └── storage/          S3 / OSS 上传 + 预签名 HTTP 客户端
 ├── deploy/                   生产部署
 │   ├── docker-compose.prod.yml
-│   ├── Dockerfile.app        多阶段：Vite 构建 + Go 构建 → 单运行时（同源托管前端 + /api）
 │   └── .env.example          环境变量模板
-├── docs/                     设计笔记、规约
-└── .github/workflows/        镜像构建 CI
+└── docs/                     设计笔记、规约
 ```
 
 ---
