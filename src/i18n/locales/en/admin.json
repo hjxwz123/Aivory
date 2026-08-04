@@ -451,7 +451,8 @@
       "1": "Last day",
       "7": "Last 7 days",
       "30": "Last 30 days",
-      "90": "Last 90 days"
+      "90": "Last 90 days",
+      "365": "Last 365 days"
     },
     "stats": {
       "totalCost": "Total cost",
@@ -837,32 +838,143 @@
     "save": "Save permissions"
   },
   "analytics": {
-    "title": "Analytics",
-    "lead": "Usage trends: overall, by model, by user.",
-    "empty": "No usage in this period yet.",
+    "title": "Usage & billing",
+    "lead": "Review durable user consumption and model spend, compare equal periods, and reconcile usage by user, model, workspace, purpose, or channel.",
+    "empty": "No metered usage was recorded in this period.",
     "unknownUser": "Unknown user",
+    "actions": {
+      "usageRecords": "Open usage records",
+      "refresh": "Refresh analytics"
+    },
     "view": {
       "label": "Analytics view",
-      "usage": "Usage trends",
+      "usage": "Usage & billing",
       "feedback": "Model feedback"
     },
     "metric": {
-      "calls": "Calls",
+      "label": "Trend metric",
+      "calls": "Metered operations",
+      "turns": "Delivered turns",
       "tokens": "Tokens",
-      "cost": "Cost"
+      "cost": "Model cost",
+      "credits": "Credits consumed",
+      "users": "Active users"
     },
     "stats": {
-      "calls": "Total calls",
-      "tokens": "Total tokens",
-      "cost": "Total cost",
-      "users": "Active users"
+      "calls": "Metered operations",
+      "turns": "Delivered turns",
+      "tokens": "Input + output tokens",
+      "cost": "Model cost",
+      "credits": "Credits consumed",
+      "users": "Active users",
+      "operations": "Metered operations"
     },
     "sections": {
       "daily": "Daily usage",
       "hourly": "Hourly usage",
+      "weekly": "Week starting",
       "byModel": "By model",
-      "byUser": "By user"
+      "byUser": "By user",
+      "trend": "Period trend",
+      "economics": "Unit economics",
+      "tokenComposition": "Token composition",
+      "breakdown": "Detailed breakdown"
     },
+    "comparison": {
+      "previousPeriod": "Compared with the immediately preceding period of the same length.",
+      "current": "Current period",
+      "previous": "Previous period",
+      "newActivity": "New activity",
+      "delta": "{{value}} vs previous"
+    },
+    "trend": {
+      "empty": "No usage data is available for this trend."
+    },
+    "details": {
+      "images": "Images",
+      "conversations": "Conversations",
+      "workspaces": "Active workspaces",
+      "inputTokens": "Input tokens",
+      "outputTokens": "Output tokens",
+      "cacheReadTokens": "Cache read tokens",
+      "cacheWriteTokens": "Cache write tokens"
+    },
+    "economics": {
+      "chargedTurnRate": "Credit-charged turn share",
+      "costCoverage": "Cost share from credit-charged turns",
+      "includedCost": "Cost of included turns",
+      "costPerTurn": "Average cost per turn",
+      "costPerUser": "Cost per active user",
+      "creditsPerChargedTurn": "Credits per charged turn",
+      "operationsPerTurn": "Metered operations per turn",
+      "chargedUsers": "Users charged credits"
+    },
+    "notes": {
+      "billingDefinition": "Model cost is provider spend in USD. Credits are user consumption units, not revenue. A charged turn is grouped by delivered message, so multi-step model operations count once.",
+      "tokenDefinition": "Headline token usage is input plus output tokens. Cache read and cache write tokens are shown separately in this composition."
+    },
+    "dimension": {
+      "label": "Breakdown dimension",
+      "user": "Users",
+      "model": "Models",
+      "workspace": "Workspaces",
+      "purpose": "Purposes",
+      "channel": "Channels"
+    },
+    "filters": {
+      "user": "User",
+      "userPlaceholder": "Email, name, or ID",
+      "model": "Model",
+      "workspace": "Workspace",
+      "purpose": "Purpose",
+      "channel": "Channel",
+      "allUsers": "All users",
+      "allModels": "All models",
+      "allWorkspaces": "All workspaces",
+      "allPurposes": "All purposes",
+      "allChannels": "All channels",
+      "clear": "Clear filters",
+      "active": "Active filters: {{count}}",
+      "personal": "Personal",
+      "unattributed": "Unattributed"
+    },
+    "breakdown": {
+      "count": "{{count}} entries",
+      "search": "Search this breakdown",
+      "sort": "Sort breakdown",
+      "sortOptions": {
+        "cost": "Model cost",
+        "turns": "Delivered turns",
+        "calls": "Metered operations",
+        "tokens": "Tokens",
+        "credits": "Credits consumed"
+      },
+      "empty": "No entries match this breakdown."
+    },
+    "labels": {
+      "unknown": "Unknown",
+      "deletedModel": "Deleted model ({{id}})",
+      "deletedUser": "Deleted or anonymized user",
+      "personal": "Personal workspace",
+      "unattributedChannel": "Unattributed channel"
+    },
+    "table": {
+      "name": "Name",
+      "operations": "Metered operations",
+      "turns": "Delivered turns",
+      "tokens": "Tokens",
+      "cost": "Model cost",
+      "credits": "Credits consumed",
+      "chargedTurns": "Charged turns",
+      "avgCostTurn": "Avg. cost / turn",
+      "avgCostOperation": "Avg. cost / operation"
+    },
+    "error": {
+      "title": "Could not load usage analytics",
+      "retry": "Try again",
+      "stale": "Refresh failed. Showing the last successfully loaded data."
+    },
+    "updatedAt": "Updated {{value}}",
     "feedback": {
       "lead": "Compare model quality and inspect responses users marked as unhelpful. The time range uses reply generation time.",
       "filters": {

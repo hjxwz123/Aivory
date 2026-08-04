@@ -451,7 +451,8 @@
       "1": "過去1日",
       "7": "過去7日間",
       "30": "過去30日間",
-      "90": "過去90日間"
+      "90": "過去90日間",
+      "365": "過去365日間"
     },
     "stats": {
       "totalCost": "合計コスト",
@@ -837,32 +838,143 @@
     "save": "権限を保存"
   },
   "analytics": {
-    "title": "分析",
-    "lead": "利用傾向:全体・モデル別・ユーザー別。",
-    "empty": "この期間の使用状況はまだありません。",
+    "title": "利用量と課金",
+    "lead": "永続保存されたユーザー利用量とモデルコストを確認し、同じ長さの期間を比較して、ユーザー・モデル・ワークスペース・用途・チャネル別に消費を照合します。",
+    "empty": "この期間に計測された利用量はありません。",
     "unknownUser": "不明なユーザー",
+    "actions": {
+      "usageRecords": "利用記録を開く",
+      "refresh": "分析を更新"
+    },
     "view": {
       "label": "分析ビュー",
-      "usage": "利用傾向",
+      "usage": "利用量と課金",
       "feedback": "モデル評価"
     },
     "metric": {
-      "calls": "呼び出し",
+      "label": "推移の指標",
+      "calls": "計測操作",
+      "turns": "提供済みターン",
       "tokens": "トークン",
-      "cost": "コスト"
+      "cost": "モデルコスト",
+      "credits": "消費クレジット",
+      "users": "アクティブユーザー"
     },
     "stats": {
-      "calls": "合計呼び出し",
-      "tokens": "合計トークン",
-      "cost": "合計コスト",
-      "users": "アクティブユーザー"
+      "calls": "計測操作",
+      "turns": "提供済みターン",
+      "tokens": "入力 + 出力トークン",
+      "cost": "モデルコスト",
+      "credits": "消費クレジット",
+      "users": "アクティブユーザー",
+      "operations": "計測操作"
     },
     "sections": {
       "daily": "日別の使用状況",
       "hourly": "時間別の使用状況",
+      "weekly": "週の開始日",
       "byModel": "モデル別",
-      "byUser": "ユーザー別"
+      "byUser": "ユーザー別",
+      "trend": "期間推移",
+      "economics": "ユニットエコノミクス",
+      "tokenComposition": "トークン構成",
+      "breakdown": "詳細な内訳"
     },
+    "comparison": {
+      "previousPeriod": "直前の同じ長さの期間と比較します。",
+      "current": "現在の期間",
+      "previous": "前の期間",
+      "newActivity": "新規利用",
+      "delta": "前期比 {{value}}"
+    },
+    "trend": {
+      "empty": "この推移に表示できる利用データはありません。"
+    },
+    "details": {
+      "images": "画像",
+      "conversations": "会話",
+      "workspaces": "アクティブなワークスペース",
+      "inputTokens": "入力トークン",
+      "outputTokens": "出力トークン",
+      "cacheReadTokens": "キャッシュ読み取りトークン",
+      "cacheWriteTokens": "キャッシュ書き込みトークン"
+    },
+    "economics": {
+      "chargedTurnRate": "クレジット消費ターン比率",
+      "costCoverage": "クレジット消費ターンのコスト比率",
+      "includedCost": "無料枠ターンのコスト",
+      "costPerTurn": "ターンあたり平均コスト",
+      "costPerUser": "アクティブユーザーあたりコスト",
+      "creditsPerChargedTurn": "課金ターンあたりクレジット",
+      "operationsPerTurn": "ターンあたり計測操作",
+      "chargedUsers": "クレジットを消費したユーザー"
+    },
+    "notes": {
+      "billingDefinition": "モデルコストはプロバイダーへの米ドル建て支出です。クレジットはユーザーが消費する利用単位であり、売上ではありません。課金ターンは提供済みメッセージ単位で集約されるため、複数段階のモデル操作も1ターンとして数えます。",
+      "tokenDefinition": "上部のトークン利用量は入力と出力の合計です。キャッシュ読み取りと書き込みは、この構成内で個別に表示します。"
+    },
+    "dimension": {
+      "label": "内訳の軸",
+      "user": "ユーザー",
+      "model": "モデル",
+      "workspace": "ワークスペース",
+      "purpose": "用途",
+      "channel": "チャネル"
+    },
+    "filters": {
+      "user": "ユーザー",
+      "userPlaceholder": "メール、名前、または ID",
+      "model": "モデル",
+      "workspace": "ワークスペース",
+      "purpose": "用途",
+      "channel": "チャネル",
+      "allUsers": "すべてのユーザー",
+      "allModels": "すべてのモデル",
+      "allWorkspaces": "すべてのワークスペース",
+      "allPurposes": "すべての用途",
+      "allChannels": "すべてのチャネル",
+      "clear": "フィルターをクリア",
+      "active": "適用中のフィルター: {{count}}",
+      "personal": "個人",
+      "unattributed": "未割り当て"
+    },
+    "breakdown": {
+      "count": "{{count}} 件",
+      "search": "この内訳を検索",
+      "sort": "内訳の並び順",
+      "sortOptions": {
+        "cost": "モデルコスト",
+        "turns": "提供済みターン",
+        "calls": "計測操作",
+        "tokens": "トークン",
+        "credits": "消費クレジット"
+      },
+      "empty": "現在の条件に一致する内訳はありません。"
+    },
+    "labels": {
+      "unknown": "不明",
+      "deletedModel": "削除済みモデル（{{id}}）",
+      "deletedUser": "削除済みまたは匿名化されたユーザー",
+      "personal": "個人ワークスペース",
+      "unattributedChannel": "未割り当てのチャネル"
+    },
+    "table": {
+      "name": "名前",
+      "operations": "計測操作",
+      "turns": "提供済みターン",
+      "tokens": "トークン",
+      "cost": "モデルコスト",
+      "credits": "消費クレジット",
+      "chargedTurns": "課金ターン",
+      "avgCostTurn": "平均コスト / ターン",
+      "avgCostOperation": "平均コスト / 操作"
+    },
+    "error": {
+      "title": "利用分析を読み込めませんでした",
+      "retry": "再試行",
+      "stale": "更新に失敗しました。最後に正常に読み込んだデータを表示しています。"
+    },
+    "updatedAt": "更新日時: {{value}}",
     "feedback": {
       "lead": "モデルごとの回答品質を比較し、ユーザーが改善を求めた回答を特定します。期間は回答の生成日時を基準にします。",
       "filters": {

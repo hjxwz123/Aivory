@@ -67,43 +67,66 @@ export interface ApiUser {
 /** Admin analytics (§ admin → analytics). */
 export interface ApiUsageTotals {
   calls: number
+  turns: number
+  credit_charged_turns: number
   input_tokens: number
   output_tokens: number
+  cache_read_tokens: number
+  cache_write_tokens: number
+  images_count: number
   cost: number
+  credits: number
+  turn_cost: number
+  credit_charged_cost: number
   users: number
+  credit_charged_users: number
+  conversations: number
+  workspaces: number
 }
 export interface ApiUsageTrendPoint {
   bucket_start: number
   input_tokens: number
   output_tokens: number
+  cache_read_tokens: number
+  cache_write_tokens: number
+  images_count: number
   calls: number
+  turns: number
+  users: number
   cost: number
+  credits: number
 }
 export interface ApiUsageBreakdownRow {
   key: string
   label: string
   input_tokens: number
   output_tokens: number
+  cache_read_tokens: number
+  cache_write_tokens: number
+  images_count: number
   calls: number
+  turns: number
+  credit_charged_turns: number
+  users: number
+  conversations: number
   cost: number
+  credits: number
 }
-export interface ApiUsageSeriesPoint {
-  bucket_start: number
-  key: string
-  input_tokens: number
-  output_tokens: number
-  calls: number
-  cost: number
-}
+export type ApiAnalyticsDimension = 'model' | 'user' | 'workspace' | 'purpose' | 'channel'
 export interface ApiAnalytics {
   days: number
   bucket: number
+  generated_at: number
+  period_start: number
+  period_end: number
+  previous_period_start: number
+  previous_period_end: number
   totals: ApiUsageTotals
+  previous_totals: ApiUsageTotals
   trend: ApiUsageTrendPoint[]
-  by_model: ApiUsageBreakdownRow[]
-  by_user: ApiUsageBreakdownRow[]
-  model_series: ApiUsageSeriesPoint[]
-  user_series: ApiUsageSeriesPoint[]
+  previous_trend: ApiUsageTrendPoint[]
+  breakdowns: Record<ApiAnalyticsDimension, ApiUsageBreakdownRow[]>
+  filter_options: Record<ApiAnalyticsDimension, ApiUsageBreakdownRow[]>
 }
 
 export type ApiMessageFeedbackRating = 'like' | 'dislike'
