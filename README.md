@@ -15,7 +15,6 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/hjxwz123/Aivory/actions/workflows/docker-images.yml"><img alt="Build" src="https://github.com/hjxwz123/Aivory/actions/workflows/docker-images.yml/badge.svg"></a>
   <a href="https://github.com/hjxwz123/Aivory/pkgs/container/aivory-app"><img alt="App image" src="https://img.shields.io/badge/ghcr.io-aivory--app-blue?logo=docker"></a>
   <img alt="Go 1.22" src="https://img.shields.io/badge/Go-1.22-00ADD8?logo=go">
   <img alt="React 19" src="https://img.shields.io/badge/React-19-61DAFB?logo=react">
@@ -204,6 +203,13 @@ docker compose -f docker-compose.prod.yml pull
 docker compose -f docker-compose.prod.yml up -d
 ```
 
+For a versioned deployment, edit the real `deploy/.env`, for example
+`IMAGE_TAG=3.0.0` (image tags omit the Git tag's leading `v`). The app and both
+sandbox images use that version automatically. Historical releases such as
+`2.2.6` need the compatibility override `SANDBOX_IMAGE_TAG=latest`. Run
+`docker compose --env-file .env -f docker-compose.prod.yml config --images`
+before `pull` and `up -d --no-build`; see [the deployment guide](deploy/README.md#deploy-or-roll-back-by-version).
+
 Open `http://localhost`. The setup screen appears on first launch — the first account you create becomes the administrator. Go to `/admin/channels` to add a provider key and create a model.
 
 Five containers come up:
@@ -220,22 +226,27 @@ Postgres / Redis / Qdrant use named volumes (`pgdata`, `redisdata`, `qdrantdata`
 
 ---
 
-## Local development
+## Compile and run locally (development)
 
-The Go API ships with an embedded SQLite driver and a full-context RAG fallback, so everything runs without external services for development. Docker Compose still starts Qdrant by default for production-like vector retrieval.
+The local build needs no Docker, Postgres, Redis, or Qdrant. Build the SPA into
+`dist/`, then let the Go API use SQLite and in-memory cache while serving both
+the SPA and `/api` on port 8787 through `STATIC_DIR`.
 
 ```bash
-# Backend
-cd server
-go run ./cmd/api          # listens on :8787
+# Build the frontend from the repository root.
+npm ci
+npm run build
 
-# Frontend (separate terminal)
-cd ..
-npm install
-npm run dev               # Vite at :5173, proxies /api to :8787
+# Build and run the backend; keep server/ as the working directory.
+cd server
+go build -o aivory ./cmd/api
+STATIC_DIR=../dist ./aivory
 ```
 
-Open `http://localhost:5173`. First launch shows the setup screen.
+Open `http://localhost:8787`. Without `JWT_SECRET`, local development generates
+a random key at each start, so existing login sessions expire after a restart.
+Data defaults to `server/data/`; the first account created on an empty database
+becomes the administrator.
 
 ---
 
@@ -285,7 +296,7 @@ The env file only holds boot-time essentials:
 
 | Group | Keys | Purpose |
 |-------|------|---------|
-| **Image** | `IMAGE_OWNER`, `IMAGE_TAG` | GHCR namespace / tag to pull |
+| **Image** | `IMAGE_OWNER`, `IMAGE_TAG`, `SANDBOX_IMAGE_TAG` | GHCR namespace, shared release version, and optional historical sandbox override |
 | **Network** | *(none)* | App serves SPA + `/api` on one origin; host port is the `80:8787` mapping in compose. No domain/CORS env. |
 | **Postgres** | `POSTGRES_USER/PASSWORD/DB` | Database credentials |
 | **Redis** | `REDIS_PASSWORD` | Cache auth |
@@ -340,23 +351,9 @@ These are intentionally **not** listed in `.env.example` — leave it alone unle
 │       └── storage/          S3 / OSS presign client
 ├── deploy/                   Production Docker stack
 │   ├── docker-compose.prod.yml
-│   ├── Dockerfile.app          Multi-stage: SPA build + Go build → one runtime
 │   └── .env.example
 └── docs/screenshots/         Screenshots referenced in this README
 ```
-
----
-
-## GitHub Actions
-
-| Workflow | Trigger | Output |
-|----------|---------|--------|
-| `docker-images.yml` | push to `main`, `v*.*.*` tags, manual dispatch | `ghcr.io/<owner>/aivory-app` — multi-arch (amd64 + arm64) |
-
-- `main` → `:latest` + `:sha-<short>`
-- `v1.2.3` → `:1.2.3` + `:1.2` + `:1` + `:latest`
-
-The workflow only needs `GITHUB_TOKEN`.
 
 ---
 

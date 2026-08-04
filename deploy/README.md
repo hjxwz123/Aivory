@@ -13,7 +13,7 @@ This folder deploys the full stack with Docker Compose:
 | `redis`    | `redis:7-alpine`           | Cache, rate-limit counters, cross-process stop-stream pub/sub. |
 | `qdrant`   | `qdrant/qdrant:v1.12.4`    | Vector search for RAG.                  |
 | `sandbox`  | `ghcr.io/hjxwz123/aivory-sandbox-sidecar` | Bundled code-execution sandbox (internal-only). |
-| `app`      | `ghcr.io/hjxwz123/aivory-app` *(or local build via `Dockerfile.app`)* | One container serving BOTH the built SPA and the `/api` backend on the same origin. |
+| `app`      | `ghcr.io/hjxwz123/aivory-app` | One container serving BOTH the built SPA and the `/api` backend on the same origin. |
 
 See the [root README](../README.md) for the full project overview; this file is
 just the deployment cheat-sheet.
@@ -38,7 +38,7 @@ text and retrieval metadata, which lets the retriever validate Qdrant hits and
 fall back to full-context injection if Qdrant is unavailable or empty. Deleting
 a document/KB/conversation removes its points from Qdrant too.
 
-## First deploy (prebuilt images)
+## Quick deploy with Docker
 
 ```bash
 cd deploy
@@ -68,19 +68,56 @@ API keys are stored in the database).
 `store.Migrate()` runs automatically on boot and creates the Postgres schema
 (`schema_pg.sql`) if the tables don't exist — no manual SQL step.
 
-## Build the images locally
+## Deploy or roll back by version
 
-When iterating on the codebase, or on an architecture not covered by the
-official images:
+`IMAGE_TAG` selects one release for the app, sandbox runtime, and sandbox
+sidecar. Release tags publish all three images with the same semver tag, so a
+future version such as `3.0.0` needs only one value even when sandbox code has
+changed.
+
+Edit the real `deploy/.env` used by Compose, not `.env.example` after it has
+already been copied:
+
+```dotenv
+# Git tag v3.0.0 produces image tag 3.0.0; do not include the leading v.
+IMAGE_TAG=3.0.0
+```
+
+Render the image list before pulling so the selected release is explicit:
 
 ```bash
 cd deploy
-cp .env.example .env
-docker compose -f docker-compose.prod.yml up -d --build
+docker compose --env-file .env -f docker-compose.prod.yml config --images
+docker compose --env-file .env -f docker-compose.prod.yml pull
+docker compose --env-file .env -f docker-compose.prod.yml up -d --no-build
+docker compose --env-file .env -f docker-compose.prod.yml images
 ```
 
-The compose file declares both `image:` and `build:`, so Compose prefers the
-prebuilt image when present and falls back to a local build otherwise.
+The rendered list should include at least:
+
+```text
+ghcr.io/hjxwz123/aivory-app:3.0.0
+ghcr.io/hjxwz123/aivory-sandbox:3.0.0
+ghcr.io/hjxwz123/aivory-sandbox-sidecar:3.0.0
+```
+
+Wait until all release images have finished publishing before deploying. A
+failed or incomplete release will then fail during `pull` instead of silently
+mixing versions. Rollback is the same operation: select an older complete tag,
+then repeat `pull` and `up`.
+
+Historical releases such as `2.2.6` predate matching sandbox semver images. To
+deploy one, use the optional compatibility override:
+
+```dotenv
+IMAGE_TAG=2.2.6
+SANDBOX_IMAGE_TAG=latest
+```
+
+If changing the tag appears to do nothing, `config --images` exposes the usual
+causes immediately: `.env.example` was edited while the existing `.env` still
+says `latest`, or Compose was launched from a directory that loaded a different
+env file. Passing `--env-file .env` removes the latter ambiguity.
 
 ## Embedding dimension
 

@@ -6,7 +6,7 @@
 # nginx tier, no cross-origin, and any domain the container is reached on works
 # without configuring PUBLIC_ORIGIN / ALLOWED_ORIGINS.
 #
-# Build context is the repository root (see docker-compose.prod.yml -> build.context: ..).
+# Build context is the repository root.
 #
 #   docker build -f deploy/Dockerfile.app -t aivory-app:latest .
 #
