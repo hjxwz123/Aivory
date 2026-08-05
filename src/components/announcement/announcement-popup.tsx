@@ -4,17 +4,19 @@
  * Config comes from GET /api/announcement. An image makes it an image
  * announcement (image left, text right); without one it's a clean text card with
  * a thin accent rule. A configured plain-text title is shown above the sanitized
- * HTML body; legacy announcements keep an a11y-only title. Dismissal is remembered
- * per-version (the notice's updated_at) in localStorage when remember_dismiss is
- * set; otherwise it re-appears every visit.
+ * HTML body; legacy announcements keep an a11y-only title. When the admin allows
+ * remembered dismissals, the footer offers a dedicated action that hides only
+ * this version on future visits; a newly updated announcement appears again.
  *
  * Held back until the mandatory flows (set-password, onboarding wizard) are done
  * so dialogs never stack.
  */
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { authApi } from '@/api'
 import { useAuth } from '@/store/auth'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
 import { sanitizeHtml } from '@/lib/markdown'
 import { cn } from '@/lib/utils'
 
@@ -29,6 +31,7 @@ interface AnnouncementData {
 const DISMISS_KEY = 'aivory.announcement.dismissed'
 
 export function AnnouncementPopup() {
+  const { t } = useTranslation('common')
   const user = useAuth((s) => s.user)
   const status = useAuth((s) => s.status)
   const onboarded = Boolean((user?.settings as Record<string, unknown> | undefined)?.onboarded)
@@ -37,11 +40,9 @@ export function AnnouncementPopup() {
 
   const [data, setData] = useState<AnnouncementData | null>(null)
   const [open, setOpen] = useState(false)
-  const fetchedRef = useRef(false)
 
   useEffect(() => {
-    if (!eligible || fetchedRef.current) return
-    fetchedRef.current = true
+    if (!eligible) return
     let cancelled = false
     authApi
       .announcement()
@@ -70,7 +71,10 @@ export function AnnouncementPopup() {
   }, [eligible])
 
   function close() {
-    // Remember the dismissal (by version) only when the admin asked us to.
+    setOpen(false)
+  }
+
+  function dismissVersion() {
     if (data?.remember_dismiss) {
       try {
         localStorage.setItem(DISMISS_KEY, String(data.updated_at))
@@ -78,7 +82,7 @@ export function AnnouncementPopup() {
         /* ignore quota / privacy-mode errors */
       }
     }
-    setOpen(false)
+    close()
   }
 
   if (!data) return null
@@ -87,19 +91,25 @@ export function AnnouncementPopup() {
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) close() }}>
-      <DialogContent size={hasImage ? 'xl' : 'md'} className="overflow-hidden p-0">
+      <DialogContent
+        size={hasImage ? 'xl' : 'md'}
+        aria-describedby={undefined}
+        className="overflow-hidden p-0"
+      >
         {!title ? (
           /* Legacy announcements without a configured title retain an a11y-only heading. */
-          <DialogTitle className="sr-only">Announcement</DialogTitle>
+          <DialogTitle className="sr-only">
+            {t('announcement.title', { defaultValue: 'Announcement' })}
+          </DialogTitle>
         ) : null}
-        <div className="flex flex-col sm:flex-row max-h-[85vh]">
+        <div className="flex min-h-0 max-h-[85dvh] flex-col sm:flex-row">
           {hasImage ? (
             <div className="sm:w-[42%] shrink-0 bg-[var(--color-bg-muted)]">
               <img src={data.image_url} alt="" className="h-48 w-full object-cover sm:h-full" draggable={false} />
             </div>
           ) : null}
-          <div className="flex-1 min-w-0">
-            <div className="flex-1 overflow-y-auto px-7 py-7">
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+            <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6 sm:px-7 sm:py-7">
               {title ? <DialogTitle className="break-words pr-7">{title}</DialogTitle> : null}
               {data.body.trim() ? (
                 <div
@@ -118,6 +128,20 @@ export function AnnouncementPopup() {
                   )}
                   dangerouslySetInnerHTML={{ __html: sanitizeHtml(data.body) }}
                 />
+              ) : null}
+            </div>
+            <div className="flex shrink-0 flex-col gap-2 border-t border-[var(--color-divider)] px-4 py-3 sm:flex-row sm:items-center sm:justify-end sm:px-6">
+              <Button
+                variant={data.remember_dismiss ? 'secondary' : 'primary'}
+                className="w-full sm:w-auto"
+                onClick={close}
+              >
+                {t('actions.close')}
+              </Button>
+              {data.remember_dismiss ? (
+                <Button className="w-full sm:w-auto" onClick={dismissVersion}>
+                  {t('announcement.dontShowAgain', { defaultValue: "Don't show this again" })}
+                </Button>
               ) : null}
             </div>
           </div>

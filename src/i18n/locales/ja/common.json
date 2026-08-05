@@ -68,6 +68,10 @@
     "next": "次へ",
     "page": "{{page}} / {{total}}"
   },
+  "announcement": {
+    "title": "お知らせ",
+    "dontShowAgain": "次回から表示しない"
+  },
   "aria": {
     "close": "閉じる",
     "dismiss": "閉じる",
