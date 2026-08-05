@@ -125,7 +125,8 @@
       "time": "Time",
       "amount": "Amount",
       "method": "Payment method",
-      "status": "Status"
+      "status": "Status",
+      "details": "Details"
     },
     "target": {
       "credit_package": "Permanent credits",
@@ -147,6 +148,33 @@
       "description": "A new payment request will be created for \"{{name}}\".",
       "warning": "The previous checkout will not close automatically. Continue only after confirming that the earlier payment was not completed; paying both checkouts may result in duplicate charges.",
       "confirm": "Start payment again"
+    },
+    "details": {
+      "action": "Details",
+      "title": "Order details",
+      "description": "Order {{id}}",
+      "loading": "Loading order details…",
+      "loadError": "Couldn’t load the order details.",
+      "retry": "Reload details",
+      "notAvailable": "—",
+      "fields": {
+        "orderId": "Order ID",
+        "product": "Product",
+        "targetType": "Product type",
+        "billingCycle": "Billing cycle",
+        "status": "Status",
+        "amount": "Order amount",
+        "tax": "Tax",
+        "currency": "Currency",
+        "paymentMethod": "Payment method",
+        "provider": "Payment provider",
+        "methodType": "Payment method type",
+        "createdAt": "Created at",
+        "paidAt": "Paid at",
+        "fulfilledAt": "Benefits fulfilled at",
+        "checkoutExpiresAt": "Checkout expires at",
+        "failureReason": "Failure reason"
+      }
     },
     "empty": "No payment history yet.",
     "loadError": "Couldn’t load your payment history.",

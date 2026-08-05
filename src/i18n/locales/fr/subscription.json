@@ -125,7 +125,8 @@
       "time": "Date",
       "amount": "Montant",
       "method": "Moyen de paiement",
-      "status": "Statut"
+      "status": "Statut",
+      "details": "Détails"
     },
     "target": {
       "credit_package": "Crédits permanents",
@@ -147,6 +148,33 @@
       "description": "Une nouvelle demande de paiement sera créée pour « {{name}} ».",
       "warning": "L’ancienne session de paiement ne sera pas fermée automatiquement. Continuez uniquement après avoir vérifié que le paiement précédent n’a pas abouti ; payer les deux sessions peut entraîner un double débit.",
       "confirm": "Relancer le paiement"
+    },
+    "details": {
+      "action": "Détails",
+      "title": "Détails de la commande",
+      "description": "Commande {{id}}",
+      "loading": "Chargement des détails…",
+      "loadError": "Impossible de charger les détails de la commande.",
+      "retry": "Recharger les détails",
+      "notAvailable": "—",
+      "fields": {
+        "orderId": "N° de commande",
+        "product": "Produit",
+        "targetType": "Type de produit",
+        "billingCycle": "Cycle de facturation",
+        "status": "Statut",
+        "amount": "Montant de la commande",
+        "tax": "Taxes",
+        "currency": "Devise",
+        "paymentMethod": "Moyen de paiement",
+        "provider": "Prestataire de paiement",
+        "methodType": "Type de moyen de paiement",
+        "createdAt": "Créée le",
+        "paidAt": "Payée le",
+        "fulfilledAt": "Avantages crédités le",
+        "checkoutExpiresAt": "Expiration du paiement",
+        "failureReason": "Motif de l’échec"
+      }
     },
     "empty": "Aucun paiement pour le moment.",
     "loadError": "Impossible de charger votre historique des paiements.",

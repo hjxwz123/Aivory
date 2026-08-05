@@ -391,6 +391,7 @@ export default function ChatThread() {
               onChange={handleModelChange}
               fast={conversation.fast}
               onFastChange={handleFastChange}
+              menuAlign="center"
               className="h-auto min-w-0 max-w-[62vw] gap-1 px-1.5 py-0.5 text-[11.5px] rounded-[7px]"
             />
           </div>

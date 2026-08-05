@@ -316,8 +316,8 @@ export const paymentsApi = {
     }),
   /** Returns only the current user's order; server-side status names are
    * normalized for the buyer-facing flow. */
-  order: (id: string) =>
-    api<ApiUserPaymentOrder>(`/payments/orders/${encodeURIComponent(id)}`),
+  order: (id: string, signal?: AbortSignal) =>
+    api<ApiUserPaymentOrder>(`/payments/orders/${encodeURIComponent(id)}`, { signal }),
   /** Resume a valid provider session, or create a new EPay merchant attempt
    * that still belongs to the same unfinished Aivory order. */
   resumeOrder: (id: string, signal?: AbortSignal) =>
