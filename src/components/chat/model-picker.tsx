@@ -20,6 +20,8 @@ interface ModelPickerProps {
   /** §fast-mode: pick 快速 (true) — picking an advanced model via onChange resets it. */
   onFastChange?: (fast: boolean) => void
   className?: string
+  /** Align the menu to the trigger. Mobile title bars use `center`. */
+  menuAlign?: 'start' | 'center' | 'end'
 }
 
 /**
@@ -28,7 +30,14 @@ interface ModelPickerProps {
  * "快速" (never its real name); "进阶" opens the concrete model list. When no fast
  * model is configured the picker degrades to the plain model list.
  */
-export function ModelPicker({ value, onChange, fast, onFastChange, className }: ModelPickerProps) {
+export function ModelPicker({
+  value,
+  onChange,
+  fast,
+  onFastChange,
+  className,
+  menuAlign = 'end',
+}: ModelPickerProps) {
   const models = useModels((s) => s.models)
   const imageModels = useModels((s) => s.imageModels)
   const tags = useModels((s) => s.tags)
@@ -79,7 +88,7 @@ export function ModelPicker({ value, onChange, fast, onFastChange, className }: 
       </DropdownMenuTrigger>
       <DropdownMenuContent
         side="top"
-        align="end"
+        align={menuAlign}
         // collisionPadding keeps the menu ≥12px from every viewport edge and makes
         // Radix subtract that gap from --radix-popper-available-height — the exact
         // vertical space left on whichever side the menu opens. Capping max-height

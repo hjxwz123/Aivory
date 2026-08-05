@@ -68,6 +68,10 @@
     "next": "Suivant",
     "page": "{{page}} / {{total}}"
   },
+  "announcement": {
+    "title": "Annonce",
+    "dontShowAgain": "Ne plus afficher cette annonce"
+  },
   "aria": {
     "close": "Fermer",
     "dismiss": "Ignorer",

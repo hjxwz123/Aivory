@@ -68,6 +68,10 @@
     "next": "下一頁",
     "page": "{{page}} / {{total}}"
   },
+  "announcement": {
+    "title": "公告",
+    "dontShowAgain": "下次不再提示"
+  },
   "aria": {
     "close": "關閉",
     "dismiss": "關閉",

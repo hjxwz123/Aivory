@@ -6,6 +6,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock,
+  Loader2,
   ReceiptText,
   RefreshCw,
   Sparkles,
@@ -79,6 +80,10 @@ export default function Subscription() {
   const [paymentHistoryReloadKey, setPaymentHistoryReloadKey] = useState(0)
   const [resumingPaymentOrderId, setResumingPaymentOrderId] = useState('')
   const [retryPaymentOrder, setRetryPaymentOrder] = useState<ApiUserPaymentOrder | null>(null)
+  const [selectedPaymentOrder, setSelectedPaymentOrder] = useState<ApiUserPaymentOrder | null>(null)
+  const [paymentOrderDetail, setPaymentOrderDetail] = useState<ApiUserPaymentOrder | null>(null)
+  const [paymentOrderDetailLoading, setPaymentOrderDetailLoading] = useState(false)
+  const [paymentOrderDetailError, setPaymentOrderDetailError] = useState(false)
   const [catalogTab, setCatalogTab] = useState<CatalogTab>('groups')
   const [billingCycle, setBillingCycle] = useState<BillingCycle>('monthly')
   const [purchaseTarget, setPurchaseTarget] = useState<PurchaseTarget | null>(null)
@@ -95,6 +100,7 @@ export default function Subscription() {
     date: string
   } | null>(null)
   const paymentResumeAbortRef = useRef<AbortController | null>(null)
+  const paymentOrderDetailAbortRef = useRef<AbortController | null>(null)
   const paymentResumeRunnerRef = useRef<PaymentCheckoutActionRunner | null>(null)
   const paymentRecoveryCoordinatorRef = useRef<PaymentOrderRecoveryCoordinator<ApiUserPaymentOrder> | null>(null)
   if (!paymentResumeRunnerRef.current) {
@@ -190,7 +196,14 @@ export default function Subscription() {
     }
   }, [paymentHistoryPage, paymentHistoryReloadKey])
 
-  useEffect(() => () => paymentResumeAbortRef.current?.abort('unmounted'), [])
+  useEffect(
+    () => () => {
+      paymentResumeAbortRef.current?.abort('unmounted')
+      paymentOrderDetailAbortRef.current?.abort('unmounted')
+      paymentOrderDetailAbortRef.current = null
+    },
+    [],
+  )
 
   useEffect(() => {
     const url = new URL(window.location.href)
@@ -457,6 +470,42 @@ export default function Subscription() {
     })
   }
 
+  async function loadPaymentOrderDetail(order: ApiUserPaymentOrder) {
+    paymentOrderDetailAbortRef.current?.abort('superseded')
+    const controller = new AbortController()
+    paymentOrderDetailAbortRef.current = controller
+    setSelectedPaymentOrder(order)
+    setPaymentOrderDetail(null)
+    setPaymentOrderDetailLoading(true)
+    setPaymentOrderDetailError(false)
+
+    try {
+      const detail = await paymentsApi.order(order.id, controller.signal)
+      if (!controller.signal.aborted) setPaymentOrderDetail(detail)
+    } catch {
+      if (!controller.signal.aborted) setPaymentOrderDetailError(true)
+    } finally {
+      if (paymentOrderDetailAbortRef.current === controller) {
+        paymentOrderDetailAbortRef.current = null
+        setPaymentOrderDetailLoading(false)
+      }
+    }
+  }
+
+  function closePaymentOrderDetail() {
+    paymentOrderDetailAbortRef.current?.abort('closed')
+    paymentOrderDetailAbortRef.current = null
+    setSelectedPaymentOrder(null)
+    setPaymentOrderDetail(null)
+    setPaymentOrderDetailLoading(false)
+    setPaymentOrderDetailError(false)
+  }
+
+  function resumeFromPaymentOrderDetail(order: ApiUserPaymentOrder) {
+    closePaymentOrderDetail()
+    requestPaymentOrderResume(order)
+  }
+
   const creditsOn = Boolean(credits?.enabled)
   const showCreditsPanel = creditsLoading || creditsLoadError || creditsOn
   const hasCurrentGroup = Boolean(currentGroupName)
@@ -699,6 +748,7 @@ export default function Subscription() {
             resumingOrderId={resumingPaymentOrderId}
             onRetry={() => setPaymentHistoryReloadKey((value) => value + 1)}
             onResume={requestPaymentOrderResume}
+            onViewDetails={(order) => void loadPaymentOrderDetail(order)}
             onPageChange={setPaymentHistoryPage}
             t={t}
           />
@@ -715,6 +765,24 @@ export default function Subscription() {
           billingCycle={purchaseTarget.type === 'user_group' ? purchaseTarget.billingCycle : undefined}
         />
       ) : null}
+
+      <PaymentOrderDetailsDialog
+        open={Boolean(selectedPaymentOrder)}
+        order={paymentOrderDetail}
+        selectedOrder={selectedPaymentOrder}
+        loading={paymentOrderDetailLoading}
+        error={paymentOrderDetailError}
+        locale={i18n.resolvedLanguage}
+        resuming={Boolean(paymentOrderDetail && resumingPaymentOrderId === paymentOrderDetail.id)}
+        onOpenChange={(open) => {
+          if (!open) closePaymentOrderDetail()
+        }}
+        onRetry={() => {
+          if (selectedPaymentOrder) void loadPaymentOrderDetail(selectedPaymentOrder)
+        }}
+        onResume={resumeFromPaymentOrderDetail}
+        t={t}
+      />
 
       <Dialog
         open={Boolean(retryPaymentOrder)}
@@ -1045,6 +1113,7 @@ function PaymentHistory({
   resumingOrderId,
   onRetry,
   onResume,
+  onViewDetails,
   onPageChange,
   t,
 }: {
@@ -1057,6 +1126,7 @@ function PaymentHistory({
   resumingOrderId: string
   onRetry: () => void
   onResume: (order: ApiUserPaymentOrder) => void
+  onViewDetails: (order: ApiUserPaymentOrder) => void
   onPageChange: (page: number) => void
   t: TFn
 }) {
@@ -1129,11 +1199,12 @@ function PaymentHistory({
               <caption className="sr-only">{t('subscription:history.title')}</caption>
               <thead className="border-b border-[var(--color-divider)] bg-[var(--color-bg-muted)] text-[11px] text-[var(--color-fg-muted)]">
                 <tr>
-                  <th className="w-[25%] px-3 py-2 font-medium">{t('subscription:history.columns.name')}</th>
-                  <th className="w-[17%] px-3 py-2 font-medium">{t('subscription:history.columns.time')}</th>
-                  <th className="w-[14%] px-3 py-2 font-medium">{t('subscription:history.columns.amount')}</th>
-                  <th className="w-[20%] px-3 py-2 font-medium">{t('subscription:history.columns.method')}</th>
-                  <th className="w-[24%] px-3 py-2 text-right font-medium">{t('subscription:history.columns.status')}</th>
+                  <th className="w-[22%] px-3 py-2 font-medium">{t('subscription:history.columns.name')}</th>
+                  <th className="w-[16%] px-3 py-2 font-medium">{t('subscription:history.columns.time')}</th>
+                  <th className="w-[13%] px-3 py-2 font-medium">{t('subscription:history.columns.amount')}</th>
+                  <th className="w-[18%] px-3 py-2 font-medium">{t('subscription:history.columns.method')}</th>
+                  <th className="w-[22%] px-3 py-2 text-right font-medium">{t('subscription:history.columns.status')}</th>
+                  <th className="w-[9%] px-3 py-2 text-right font-medium">{t('subscription:history.columns.details')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[var(--color-divider)]">
@@ -1168,6 +1239,17 @@ function PaymentHistory({
                         onResume={onResume}
                         t={t}
                       />
+                    </td>
+                    <td className="px-3 py-2.5 text-right align-top">
+                      <Button
+                        className="h-7 rounded-[8px] px-2 text-[11px]"
+                        size="xs"
+                        variant="ghost"
+                        trailingIcon={<ChevronRight size={12} aria-hidden />}
+                        onClick={() => onViewDetails(order)}
+                      >
+                        {t('subscription:history.details.action')}
+                      </Button>
                     </td>
                   </tr>
                 ))}
@@ -1222,6 +1304,15 @@ function PaymentHistory({
                       </dd>
                     </div>
                   </dl>
+                  <Button
+                    className="mt-2 min-h-11 w-full justify-between rounded-[8px] px-2 text-[12px] sm:min-h-10"
+                    size="sm"
+                    variant="ghost"
+                    trailingIcon={<ChevronRight size={14} aria-hidden />}
+                    onClick={() => onViewDetails(order)}
+                  >
+                    {t('subscription:history.details.action')}
+                  </Button>
                 </li>
               ))}
             </ul>
@@ -1259,6 +1350,205 @@ function PaymentHistory({
         )}
       </div>
     </section>
+  )
+}
+
+function PaymentOrderDetailsDialog({
+  open,
+  order,
+  selectedOrder,
+  loading,
+  error,
+  locale,
+  resuming,
+  onOpenChange,
+  onRetry,
+  onResume,
+  t,
+}: {
+  open: boolean
+  order: ApiUserPaymentOrder | null
+  selectedOrder: ApiUserPaymentOrder | null
+  loading: boolean
+  error: boolean
+  locale?: string
+  resuming: boolean
+  onOpenChange: (open: boolean) => void
+  onRetry: () => void
+  onResume: (order: ApiUserPaymentOrder) => void
+  t: TFn
+}) {
+  const displayOrder = order ?? selectedOrder
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent size="lg" className="rounded-[8px] font-sans max-sm:[&>button]:size-11">
+        <DialogHeader className="px-5 pt-5 pb-3 max-sm:pr-16 sm:px-6">
+          <DialogTitle>{t('subscription:history.details.title')}</DialogTitle>
+          <DialogDescription className="mt-1 break-all font-mono text-[12px] leading-5 tracking-normal">
+            {displayOrder
+              ? t('subscription:history.details.description', { id: displayOrder.id })
+              : t('subscription:history.details.title')}
+          </DialogDescription>
+        </DialogHeader>
+        <DialogBody className="px-5 pb-5 sm:px-6">
+          {loading ? (
+            <div
+              className="flex min-h-48 flex-col items-center justify-center gap-2 text-[13px] text-[var(--color-fg-muted)]"
+              role="status"
+            >
+              <Loader2 className="size-5 animate-spin" aria-hidden />
+              <span>{t('subscription:history.details.loading')}</span>
+            </div>
+          ) : error ? (
+            <div
+              className="flex min-h-48 flex-col items-center justify-center gap-3 px-3 text-center"
+              role="alert"
+            >
+              <p className="text-[13px] text-[var(--color-danger)]">
+                {t('subscription:history.details.loadError')}
+              </p>
+              <Button
+                className="min-h-11 rounded-[8px] sm:min-h-8"
+                size="sm"
+                variant="secondary"
+                leadingIcon={<RefreshCw size={13} aria-hidden />}
+                onClick={onRetry}
+              >
+                {t('subscription:history.details.retry')}
+              </Button>
+            </div>
+          ) : order ? (
+            <PaymentOrderDetailFields order={order} locale={locale} t={t} />
+          ) : null}
+        </DialogBody>
+        <DialogFooter className="max-sm:[&_button]:!h-11">
+          <Button className="rounded-[8px]" variant="ghost" onClick={() => onOpenChange(false)}>
+            {t('common:actions.close')}
+          </Button>
+          {order && canResumePaymentOrder(order) ? (
+            <Button
+              className="rounded-[8px]"
+              variant="primary"
+              trailingIcon={<ArrowRight size={13} aria-hidden />}
+              loading={resuming}
+              disabled={resuming}
+              onClick={() => onResume(order)}
+            >
+              {paymentOrderResumeKind(order) === 'retry'
+                ? t('subscription:history.actions.retry')
+                : t('subscription:history.actions.continue')}
+            </Button>
+          ) : null}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function PaymentOrderDetailFields({
+  order,
+  locale,
+  t,
+}: {
+  order: ApiUserPaymentOrder
+  locale?: string
+  t: TFn
+}) {
+  const fields: Array<{ label: string; value: string; wide?: boolean; mono?: boolean; danger?: boolean }> = [
+    {
+      label: t('subscription:history.details.fields.orderId'),
+      value: order.id,
+      wide: true,
+      mono: true,
+    },
+    { label: t('subscription:history.details.fields.product'), value: order.target_name },
+    {
+      label: t('subscription:history.details.fields.targetType'),
+      value: t(`subscription:history.target.${order.target_type}`),
+    },
+    ...(order.target_type === 'user_group' && order.billing_cycle
+      ? [{
+          label: t('subscription:history.details.fields.billingCycle'),
+          value: t(`subscription:billing.${order.billing_cycle}`),
+        }]
+      : []),
+    {
+      label: t('subscription:history.details.fields.status'),
+      value: t(`subscription:history.status.${order.status}`),
+    },
+    {
+      label: t('subscription:history.details.fields.amount'),
+      value: formatCurrencyMinor(order.amount_minor, order.currency, locale),
+    },
+    ...(typeof order.tax_amount_minor === 'number' && order.tax_amount_minor > 0
+      ? [{
+          label: t('subscription:history.details.fields.tax'),
+          value: formatCurrencyMinor(order.tax_amount_minor, order.currency, locale),
+        }]
+      : []),
+    { label: t('subscription:history.details.fields.currency'), value: order.currency.toUpperCase() },
+    { label: t('subscription:history.details.fields.paymentMethod'), value: order.method_name },
+    { label: t('subscription:history.details.fields.provider'), value: paymentProviderLabel(order.provider) },
+    {
+      label: t('subscription:history.details.fields.methodType'),
+      value: order.method_type || t('subscription:history.details.notAvailable'),
+    },
+    {
+      label: t('subscription:history.details.fields.createdAt'),
+      value: formatPaymentOrderTimestamp(order.created_at, locale),
+    },
+    ...(order.paid_at
+      ? [{
+          label: t('subscription:history.details.fields.paidAt'),
+          value: formatPaymentOrderTimestamp(order.paid_at, locale),
+        }]
+      : []),
+    ...(order.fulfilled_at
+      ? [{
+          label: t('subscription:history.details.fields.fulfilledAt'),
+          value: formatPaymentOrderTimestamp(order.fulfilled_at, locale),
+        }]
+      : []),
+    ...(order.checkout_expires_at
+      ? [{
+          label: t('subscription:history.details.fields.checkoutExpiresAt'),
+          value: formatPaymentOrderTimestamp(order.checkout_expires_at, locale),
+        }]
+      : []),
+    ...(order.failure_reason
+      ? [{
+          label: t('subscription:history.details.fields.failureReason'),
+          value: order.failure_reason,
+          wide: true,
+          danger: true,
+        }]
+      : []),
+  ]
+
+  return (
+    <dl className="grid grid-cols-1 border-y border-[var(--color-divider)] sm:grid-cols-2">
+      {fields.map((field) => (
+        <div
+          key={field.label}
+          className={cn(
+            'min-w-0 border-b border-[var(--color-divider)] py-3 last:border-b-0 sm:px-3 sm:first:pl-0',
+            field.wide && 'sm:col-span-2',
+          )}
+        >
+          <dt className="text-[11px] leading-4 text-[var(--color-fg-subtle)]">{field.label}</dt>
+          <dd
+            className={cn(
+              'mt-1 break-words text-[13px] leading-5 text-[var(--color-fg)] [overflow-wrap:anywhere]',
+              field.mono && 'font-mono text-[12px] tracking-normal',
+              field.danger && 'text-[var(--color-danger)]',
+            )}
+          >
+            {field.value}
+          </dd>
+        </div>
+      ))}
+    </dl>
   )
 }
 
@@ -1317,10 +1607,11 @@ function PaymentHistorySkeleton({ t }: { t: TFn }) {
       {Array.from({ length: 3 }).map((_, index) => (
         <div
           key={index}
-          className="grid grid-cols-[minmax(0,1fr)_5rem] gap-4 border-b border-[var(--color-divider)] py-3 last:border-b-0 xl:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,0.8fr)_minmax(0,1fr)_4rem]"
+          className="grid grid-cols-[minmax(0,1fr)_5rem] gap-4 border-b border-[var(--color-divider)] py-3 last:border-b-0 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.9fr)_minmax(0,0.7fr)_minmax(0,1fr)_minmax(0,1.1fr)_4rem]"
         >
           <div className="h-3.5 w-32 max-w-full rounded bg-[var(--color-bg-muted)]" />
           <div className="h-3.5 w-full rounded bg-[var(--color-bg-muted)]" />
+          <div className="hidden h-3.5 w-full rounded bg-[var(--color-bg-muted)] xl:block" />
           <div className="hidden h-3.5 w-full rounded bg-[var(--color-bg-muted)] xl:block" />
           <div className="hidden h-3.5 w-full rounded bg-[var(--color-bg-muted)] xl:block" />
           <div className="hidden h-3.5 w-full rounded bg-[var(--color-bg-muted)] xl:block" />
@@ -1340,6 +1631,10 @@ function formatPaymentHistoryDate(order: ApiUserPaymentOrder, locale?: string): 
   return new Intl.DateTimeFormat(locale, { dateStyle: 'short', timeStyle: 'short' }).format(
     (order.paid_at || order.created_at) * 1000,
   )
+}
+
+function formatPaymentOrderTimestamp(timestamp: number, locale?: string): string {
+  return new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'medium' }).format(timestamp * 1000)
 }
 
 function paymentProviderLabel(provider: ApiUserPaymentOrder['provider']): string {

@@ -99,8 +99,10 @@ export function CommandMenu() {
         .then((res) => {
           // Ignore out-of-order responses (a newer keystroke already fired).
           if (mine !== seq.current) return
-          setMsgHits(res.messages)
-          setTitleHits(res.titles)
+          // Older deployments and intermediary API layers may encode empty
+          // slices as null. Keep the render state on the declared array shape.
+          setMsgHits(Array.isArray(res.messages) ? res.messages : [])
+          setTitleHits(Array.isArray(res.titles) ? res.titles : [])
           setSearching(false)
         })
         .catch(() => {
@@ -266,79 +268,79 @@ export function CommandMenu() {
                 ))}
               </CommandGroup>
 
-              {conversations.length > 0 && (
-                <>
-                  <CommandSeparator />
-                  <CommandGroup heading={t('chat:commandMenu.groups.conversations')}>
-                    {conversations.slice(0, 8).map((c) => (
-                      <CommandItem
-                        key={c.id}
-                        value={`${c.title} ${c.id}`}
-                        onSelect={() => run(() => navigate(`/chat/${c.id}`))}
-                      >
-                        <Sparkles size={14} className="text-[var(--color-secondary)]" aria-hidden />
-                        {truncate(c.title, 60)}
-                        <ArrowRight size={12} className="ml-auto text-[var(--color-fg-subtle)]" aria-hidden />
-                      </CommandItem>
-                    ))}
-                  </CommandGroup>
-                </>
-              )}
+              {conversations.length > 0 ? <CommandSeparator /> : null}
+              {/* Keep dynamic groups mounted while cmdk filters. cmdk 1.1.1 can
+                  otherwise retain a removed group ID for one sorting pass and
+                  call forEach on its already-deleted item Set. */}
+              <CommandGroup
+                heading={t('chat:commandMenu.groups.conversations')}
+                className={conversations.length === 0 ? 'hidden' : undefined}
+              >
+                {conversations.slice(0, 8).map((c) => (
+                  <CommandItem
+                    key={c.id}
+                    value={`${c.title} ${c.id}`}
+                    onSelect={() => run(() => navigate(`/chat/${c.id}`))}
+                  >
+                    <Sparkles size={14} className="text-[var(--color-secondary)]" aria-hidden />
+                    {truncate(c.title, 60)}
+                    <ArrowRight size={12} className="ml-auto text-[var(--color-fg-subtle)]" aria-hidden />
+                  </CommandItem>
+                ))}
+              </CommandGroup>
 
-              {extraTitleHits.length > 0 && (
-                <>
-                  <CommandSeparator />
-                  <CommandGroup heading={t('chat:commandMenu.groups.conversations')}>
-                    {extraTitleHits.slice(0, 8).map((h) => (
-                      <CommandItem
-                        // Query embedded in value so cmdk's local filter keeps it.
-                        key={`title-${h.conversation_id}`}
-                        value={`title ${query} ${h.title} ${h.conversation_id}`}
-                        onSelect={() => run(() => navigate(`/chat/${h.conversation_id}`))}
-                      >
-                        <Sparkles size={14} className="text-[var(--color-secondary)]" aria-hidden />
-                        {truncate(h.title, 60)}
-                        <ArrowRight size={12} className="ml-auto text-[var(--color-fg-subtle)]" aria-hidden />
-                      </CommandItem>
-                    ))}
-                  </CommandGroup>
-                </>
-              )}
+              {extraTitleHits.length > 0 ? <CommandSeparator /> : null}
+              <CommandGroup
+                heading={t('chat:commandMenu.groups.conversations')}
+                className={extraTitleHits.length === 0 ? 'hidden' : undefined}
+              >
+                {extraTitleHits.slice(0, 8).map((h) => (
+                  <CommandItem
+                    // Query embedded in value so cmdk's local filter keeps it.
+                    key={`title-${h.conversation_id}`}
+                    value={`title ${query} ${h.title} ${h.conversation_id}`}
+                    onSelect={() => run(() => navigate(`/chat/${h.conversation_id}`))}
+                  >
+                    <Sparkles size={14} className="text-[var(--color-secondary)]" aria-hidden />
+                    {truncate(h.title, 60)}
+                    <ArrowRight size={12} className="ml-auto text-[var(--color-fg-subtle)]" aria-hidden />
+                  </CommandItem>
+                ))}
+              </CommandGroup>
 
-              {msgHits.length > 0 && (
-                <>
-                  <CommandSeparator />
-                  <CommandGroup heading={t('chat:commandMenu.groups.messages')}>
-                    {msgHits.slice(0, 8).map((h) => (
-                      <CommandItem
-                        // The query is embedded in `value` so cmdk's local filter
-                        // never hides a content hit whose title doesn't match the
-                        // typed text.
-                        key={`msg-${h.message_id}`}
-                        value={`msg ${query} ${h.title} ${h.snippet ?? ''} ${h.message_id}`}
-                        onSelect={() =>
-                          run(() =>
-                            // `j` nonce makes re-selecting the SAME result re-jump
-                            // (otherwise the unchanged ?m= URL is a no-op).
-                            navigate(
-                              `/chat/${h.conversation_id}?m=${encodeURIComponent(h.message_id ?? '')}&j=${Date.now()}`,
-                            ),
-                          )
-                        }
-                      >
-                        <TextSearch size={14} className="shrink-0 text-[var(--color-secondary)]" aria-hidden />
-                        <span className="flex min-w-0 flex-col">
-                          <span className="truncate text-[var(--color-fg)]">{truncate(h.title, 50)}</span>
-                          {h.snippet ? (
-                            <span className="truncate text-[12px] text-[var(--color-fg-muted)]">{h.snippet}</span>
-                          ) : null}
-                        </span>
-                        <ArrowRight size={12} className="ml-auto shrink-0 text-[var(--color-fg-subtle)]" aria-hidden />
-                      </CommandItem>
-                    ))}
-                  </CommandGroup>
-                </>
-              )}
+              {msgHits.length > 0 ? <CommandSeparator /> : null}
+              <CommandGroup
+                heading={t('chat:commandMenu.groups.messages')}
+                className={msgHits.length === 0 ? 'hidden' : undefined}
+              >
+                {msgHits.slice(0, 8).map((h) => (
+                  <CommandItem
+                    // The query is embedded in `value` so cmdk's local filter
+                    // never hides a content hit whose title doesn't match the
+                    // typed text.
+                    key={`msg-${h.message_id}`}
+                    value={`msg ${query} ${h.title} ${h.snippet ?? ''} ${h.message_id}`}
+                    onSelect={() =>
+                      run(() =>
+                        // `j` nonce makes re-selecting the SAME result re-jump
+                        // (otherwise the unchanged ?m= URL is a no-op).
+                        navigate(
+                          `/chat/${h.conversation_id}?m=${encodeURIComponent(h.message_id ?? '')}&j=${Date.now()}`,
+                        ),
+                      )
+                    }
+                  >
+                    <TextSearch size={14} className="shrink-0 text-[var(--color-secondary)]" aria-hidden />
+                    <span className="flex min-w-0 flex-col">
+                      <span className="truncate text-[var(--color-fg)]">{truncate(h.title, 50)}</span>
+                      {h.snippet ? (
+                        <span className="truncate text-[12px] text-[var(--color-fg-muted)]">{h.snippet}</span>
+                      ) : null}
+                    </span>
+                    <ArrowRight size={12} className="ml-auto shrink-0 text-[var(--color-fg-subtle)]" aria-hidden />
+                  </CommandItem>
+                ))}
+              </CommandGroup>
 
               <CommandSeparator />
               <CommandGroup heading={t('chat:commandMenu.groups.help')}>

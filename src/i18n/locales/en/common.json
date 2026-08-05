@@ -68,6 +68,10 @@
     "next": "Next",
     "page": "{{page}} / {{total}}"
   },
+  "announcement": {
+    "title": "Announcement",
+    "dontShowAgain": "Don't show this again"
+  },
   "aria": {
     "close": "Close",
     "dismiss": "Dismiss",

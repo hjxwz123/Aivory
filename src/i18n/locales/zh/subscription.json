@@ -125,7 +125,8 @@
       "time": "时间",
       "amount": "金额",
       "method": "支付方式",
-      "status": "状态"
+      "status": "状态",
+      "details": "详情"
     },
     "target": {
       "credit_package": "永久积分",
@@ -147,6 +148,33 @@
       "description": "系统将为「{{name}}」创建新的支付请求。",
       "warning": "旧支付会话不会自动关闭。请仅在确认旧支付尚未完成时继续；同时支付旧会话和新会话可能造成重复扣款。",
       "confirm": "确认重新发起"
+    },
+    "details": {
+      "action": "详情",
+      "title": "订单详情",
+      "description": "订单 {{id}}",
+      "loading": "正在加载订单详情…",
+      "loadError": "无法加载订单详情。",
+      "retry": "重新加载详情",
+      "notAvailable": "—",
+      "fields": {
+        "orderId": "订单号",
+        "product": "商品",
+        "targetType": "商品类型",
+        "billingCycle": "计费周期",
+        "status": "状态",
+        "amount": "订单金额",
+        "tax": "税费",
+        "currency": "币种",
+        "paymentMethod": "支付方式",
+        "provider": "支付服务商",
+        "methodType": "支付方式类型",
+        "createdAt": "创建时间",
+        "paidAt": "支付时间",
+        "fulfilledAt": "到账时间",
+        "checkoutExpiresAt": "支付会话过期时间",
+        "failureReason": "失败原因"
+      }
     },
     "empty": "暂无支付记录。",
     "loadError": "无法加载支付记录。",

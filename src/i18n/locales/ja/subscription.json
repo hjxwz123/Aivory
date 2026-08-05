@@ -125,7 +125,8 @@
       "time": "日時",
       "amount": "金額",
       "method": "お支払い方法",
-      "status": "状態"
+      "status": "状態",
+      "details": "詳細"
     },
     "target": {
       "credit_package": "永久クレジット",
@@ -147,6 +148,33 @@
       "description": "「{{name}}」の新しい決済リクエストを作成します。",
       "warning": "以前の決済セッションは自動的に閉じられません。以前の支払いが完了していないことを確認した場合のみ続行してください。両方のセッションで支払うと、二重に請求される可能性があります。",
       "confirm": "支払いをやり直す"
+    },
+    "details": {
+      "action": "詳細",
+      "title": "注文の詳細",
+      "description": "注文 {{id}}",
+      "loading": "注文の詳細を読み込んでいます…",
+      "loadError": "注文の詳細を読み込めませんでした。",
+      "retry": "詳細を再読み込み",
+      "notAvailable": "—",
+      "fields": {
+        "orderId": "注文 ID",
+        "product": "商品",
+        "targetType": "商品タイプ",
+        "billingCycle": "請求サイクル",
+        "status": "状態",
+        "amount": "注文金額",
+        "tax": "税額",
+        "currency": "通貨",
+        "paymentMethod": "お支払い方法",
+        "provider": "決済サービス",
+        "methodType": "支払い方法の種類",
+        "createdAt": "作成日時",
+        "paidAt": "支払日時",
+        "fulfilledAt": "付与日時",
+        "checkoutExpiresAt": "決済の有効期限",
+        "failureReason": "失敗理由"
+      }
     },
     "empty": "お支払い履歴はまだありません。",
     "loadError": "お支払い履歴を読み込めませんでした。",

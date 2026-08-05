@@ -125,7 +125,8 @@
       "time": "時間",
       "amount": "金額",
       "method": "付款方式",
-      "status": "狀態"
+      "status": "狀態",
+      "details": "詳情"
     },
     "target": {
       "credit_package": "永久積分",
@@ -147,6 +148,33 @@
       "description": "系統將為「{{name}}」建立新的付款請求。",
       "warning": "舊付款工作階段不會自動關閉。請僅在確認舊付款尚未完成時繼續；同時支付舊工作階段與新工作階段可能造成重複扣款。",
       "confirm": "確認重新發起"
+    },
+    "details": {
+      "action": "詳情",
+      "title": "訂單詳情",
+      "description": "訂單 {{id}}",
+      "loading": "正在載入訂單詳情…",
+      "loadError": "無法載入訂單詳情。",
+      "retry": "重新載入詳情",
+      "notAvailable": "—",
+      "fields": {
+        "orderId": "訂單號",
+        "product": "商品",
+        "targetType": "商品類型",
+        "billingCycle": "計費週期",
+        "status": "狀態",
+        "amount": "訂單金額",
+        "tax": "稅費",
+        "currency": "幣別",
+        "paymentMethod": "付款方式",
+        "provider": "付款服務商",
+        "methodType": "付款方式類型",
+        "createdAt": "建立時間",
+        "paidAt": "付款時間",
+        "fulfilledAt": "到帳時間",
+        "checkoutExpiresAt": "付款工作階段到期時間",
+        "failureReason": "失敗原因"
+      }
     },
     "empty": "暫無付款記錄。",
     "loadError": "無法載入付款記錄。",
