@@ -381,7 +381,7 @@ func geminiRawCallsAllSigned(turns []map[string]any) bool {
 //   - visible text (parts[].text where thought!=true)
 //   - thinking text (parts[].thought_summary / parts[].text where thought==true)
 //   - functionCall items (parts[].functionCall)
-//   - usageMetadata (only present in the final chunk)
+//   - usageMetadata (cumulative metadata that may appear on multiple chunks)
 //
 // and emit text_delta / thinking_delta as they arrive so the UI updates live.
 // Returns: (visible text, thinking text, function calls, raw model parts, usage).
@@ -411,6 +411,19 @@ func readGeminiStream(body io.Reader, onEvent func(SseEvent)) (string, string, [
 		if payload == "[DONE]" {
 			terminal = true
 			break
+		}
+		// A completed candidate may be followed by a usage-only frame. Consume that
+		// accounting while ignoring unrelated gateway noise after the model has
+		// already reached a semantic terminal state.
+		if terminal {
+			var trailer map[string]any
+			if json.Unmarshal([]byte(payload), &trailer) == nil {
+				if u, ok := trailer["usageMetadata"].(map[string]any); ok {
+					usage.InputTokens = intOf(u["promptTokenCount"])
+					usage.OutputTokens = intOf(u["candidatesTokenCount"])
+				}
+			}
+			continue
 		}
 		var parsed map[string]any
 		if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
@@ -472,18 +485,16 @@ func readGeminiStream(body io.Reader, onEvent func(SseEvent)) (string, string, [
 		}
 		if u, ok := parsed["usageMetadata"].(map[string]any); ok {
 			sawEvent = true
-			terminal = true
 			usage.InputTokens = intOf(u["promptTokenCount"])
 			usage.OutputTokens = intOf(u["candidatesTokenCount"])
 		}
-		if parsed["promptFeedback"] != nil {
-			// A safety/block response is a valid terminal model decision, not a
-			// broken payment/provider channel that should be retried elsewhere.
+		if feedback, ok := parsed["promptFeedback"].(map[string]any); ok {
 			sawEvent = true
-			terminal = true
-		}
-		if terminal {
-			break
+			// promptFeedback can carry non-blocking safety ratings. Only an explicit
+			// blockReason is a terminal model decision.
+			if blockReason, _ := feedback["blockReason"].(string); strings.TrimSpace(blockReason) != "" {
+				terminal = true
+			}
 		}
 	}
 	if err := scanner.Err(); err != nil && !terminal {

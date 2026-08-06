@@ -153,6 +153,82 @@ func TestProviderStreamReadersValidateProtocol(t *testing.T) {
 	}
 }
 
+func TestReadGeminiStreamConsumesCumulativeAndTrailingUsage(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"candidates":[{"content":{"parts":[{"text":"first "}]}}],"usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":2}}`,
+		`data: {"promptFeedback":{"safetyRatings":[]},"candidates":[{"content":{"parts":[{"text":"second "}]}}],"usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":4}}`,
+		`data: {"candidates":[{"content":{"parts":[{"text":"third"}]} ,"finishReason":"STOP"}]}`,
+		`data: {"usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":6}}`,
+		`data: [DONE]`,
+		``,
+	}, "\n\n")
+
+	var deltas strings.Builder
+	text, _, _, _, usage, err := readGeminiStream(strings.NewReader(stream), func(ev SseEvent) {
+		if ev.Type == "text_delta" {
+			deltas.WriteString(ev.Text)
+		}
+	})
+	if err != nil {
+		t.Fatalf("readGeminiStream: %v", err)
+	}
+	if text != "first second third" || deltas.String() != text {
+		t.Fatalf("text/deltas = %q/%q, want complete multi-chunk answer", text, deltas.String())
+	}
+	if usage.InputTokens != 7 || usage.OutputTokens != 6 {
+		t.Fatalf("usage = %+v, want final cumulative usage 7/6", usage)
+	}
+}
+
+func TestReadGeminiStreamUsageIsNotTerminal(t *testing.T) {
+	stream := `data: {"candidates":[{"content":{"parts":[{"text":"partial"}]}}],"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":1}}` + "\n\n"
+
+	text, _, _, _, usage, err := readGeminiStream(strings.NewReader(stream), func(SseEvent) {})
+	if err == nil || !strings.Contains(err.Error(), "response ended before a terminal event") {
+		t.Fatalf("error = %v, want premature EOF protocol error", err)
+	}
+	if text != "partial" || usage.InputTokens != 3 || usage.OutputTokens != 1 {
+		t.Fatalf("partial text/usage = %q/%+v, want preserved partial response", text, usage)
+	}
+}
+
+func TestReadAnthropicStreamContinuesPastMessageDelta(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"type":"message_start","message":{"usage":{"input_tokens":2}}}`,
+		`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":3}}`,
+		`data: {"type":"error","error":{"type":"api_error","message":"stream failed before message_stop"}}`,
+		``,
+	}, "\n\n")
+
+	_, _, _, _, _, usage, err := readAnthropicStream(strings.NewReader(stream), func(SseEvent) {})
+	if err == nil || !strings.Contains(err.Error(), "stream failed before message_stop") {
+		t.Fatalf("error = %v, want trailing Anthropic stream error", err)
+	}
+	if usage.InputTokens != 2 || usage.OutputTokens != 3 {
+		t.Fatalf("usage = %+v, want usage preserved before stream error", usage)
+	}
+}
+
+func TestReadOpenAIChatStreamConsumesUsageAfterFinishReason(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"choices":[{"delta":{"content":"complete"},"finish_reason":"stop"}]}`,
+		`data: {"choices":[],"usage":{"prompt_tokens":5,"completion_tokens":2}}`,
+		`data: [DONE]`,
+		``,
+	}, "\n\n")
+
+	text, _, _, finish, usage, err := readOpenAIChatStream(strings.NewReader(stream), func(SseEvent) {})
+	if err != nil {
+		t.Fatalf("readOpenAIChatStream: %v", err)
+	}
+	if text != "complete" || finish != "stop" {
+		t.Fatalf("text/finish = %q/%q, want complete/stop", text, finish)
+	}
+	if usage.InputTokens != 5 || usage.OutputTokens != 2 {
+		t.Fatalf("usage = %+v, want trailing usage 5/2", usage)
+	}
+}
+
 func TestProvidersFallBackAfterExplicitSSEError(t *testing.T) {
 	tests := []struct {
 		name           string

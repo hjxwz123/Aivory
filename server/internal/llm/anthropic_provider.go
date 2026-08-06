@@ -691,6 +691,7 @@ func readAnthropicStream(body io.Reader, onEvent func(SseEvent)) (string, []anth
 	usage := Usage{}
 	sawEvent := false
 	terminal := false
+	streamEnded := false
 
 	var currentTool *anthropicToolCall
 	var partialJSON strings.Builder
@@ -848,8 +849,9 @@ func readAnthropicStream(body io.Reader, onEvent func(SseEvent)) (string, []anth
 		case "message_stop":
 			sawEvent = true
 			terminal = true
+			streamEnded = true
 		}
-		if terminal {
+		if streamEnded {
 			break
 		}
 	}
