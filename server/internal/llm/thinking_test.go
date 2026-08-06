@@ -299,7 +299,7 @@ func anthropicTextStream(text string) string {
 }
 
 func geminiTextStream(text string) string {
-	return `data: {"candidates":[{"content":{"parts":[{"text":` + jsonQuote(text) + `}]}}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1}}` + "\n\n"
+	return `data: {"candidates":[{"content":{"parts":[{"text":` + jsonQuote(text) + `}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1}}` + "\n\n"
 }
 
 func jsonQuote(s string) string {
@@ -361,7 +361,7 @@ func TestReadAnthropicStreamThinking(t *testing.T) {
 func TestReadGeminiStreamThinking(t *testing.T) {
 	stream := strings.Join([]string{
 		`data: {"candidates":[{"content":{"role":"model","parts":[{"text":"Pondering...","thought":true}]}}]}`,
-		`data: {"candidates":[{"content":{"role":"model","parts":[{"text":"Final answer."}]}}],"usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":3}}`,
+		`data: {"candidates":[{"content":{"role":"model","parts":[{"text":"Final answer."}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":3}}`,
 		"",
 	}, "\n")
 
