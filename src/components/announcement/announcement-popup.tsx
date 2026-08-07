@@ -7,12 +7,14 @@
  * HTML body; legacy announcements keep an a11y-only title. When the admin allows
  * remembered dismissals, the footer offers a dedicated action that hides only
  * this version on future visits; a newly updated announcement appears again.
+ * Mandatory announcements lock every dismissal path for five seconds.
  *
  * Held back until the mandatory flows (set-password, onboarding wizard) are done
  * so dialogs never stack.
  */
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { Clock3 } from 'lucide-react'
 import { authApi } from '@/api'
 import { useAuth } from '@/store/auth'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
@@ -25,10 +27,12 @@ interface AnnouncementData {
   body: string
   image_url: string
   remember_dismiss: boolean
+  require_read: boolean
   updated_at: number
 }
 
 const DISMISS_KEY = 'aivory.announcement.dismissed'
+const REQUIRED_READ_SECONDS = 5
 
 export function AnnouncementPopup() {
   const { t } = useTranslation('common')
@@ -40,6 +44,8 @@ export function AnnouncementPopup() {
 
   const [data, setData] = useState<AnnouncementData | null>(null)
   const [open, setOpen] = useState(false)
+  const [unlockAt, setUnlockAt] = useState<number | null>(null)
+  const [secondsRemaining, setSecondsRemaining] = useState(0)
 
   useEffect(() => {
     if (!eligible) return
@@ -53,13 +59,17 @@ export function AnnouncementPopup() {
           const dismissed = localStorage.getItem(DISMISS_KEY)
           if (dismissed && Number(dismissed) === a.updated_at) return
         }
+        const requireRead = Boolean(a.require_read)
         setData({
           title: a.title ?? '',
           body: a.body ?? '',
           image_url: a.image_url ?? '',
           remember_dismiss: a.remember_dismiss,
+          require_read: requireRead,
           updated_at: a.updated_at,
         })
+        setSecondsRemaining(requireRead ? REQUIRED_READ_SECONDS : 0)
+        setUnlockAt(requireRead ? Date.now() + REQUIRED_READ_SECONDS * 1000 : null)
         setOpen(true)
       })
       .catch(() => {
@@ -69,6 +79,21 @@ export function AnnouncementPopup() {
       cancelled = true
     }
   }, [eligible])
+
+  useEffect(() => {
+    if (!open || unlockAt === null) return
+
+    const updateCountdown = () => {
+      setSecondsRemaining(Math.max(0, Math.ceil((unlockAt - Date.now()) / 1000)))
+    }
+    updateCountdown()
+    const timer = window.setInterval(() => {
+      const remaining = Math.max(0, Math.ceil((unlockAt - Date.now()) / 1000))
+      setSecondsRemaining(remaining)
+      if (remaining === 0) window.clearInterval(timer)
+    }, 250)
+    return () => window.clearInterval(timer)
+  }, [open, unlockAt])
 
   function close() {
     setOpen(false)
@@ -88,12 +113,20 @@ export function AnnouncementPopup() {
   if (!data) return null
   const hasImage = Boolean(data.image_url.trim())
   const title = data.title.trim()
+  const closeLocked = data.require_read && secondsRemaining > 0
 
   return (
-    <Dialog open={open} onOpenChange={(o) => { if (!o) close() }}>
+    <Dialog open={open} onOpenChange={(o) => { if (!o && !closeLocked) close() }}>
       <DialogContent
         size={hasImage ? 'xl' : 'md'}
         aria-describedby={undefined}
+        closeDisabled={closeLocked}
+        onEscapeKeyDown={(event) => {
+          if (closeLocked) event.preventDefault()
+        }}
+        onInteractOutside={(event) => {
+          if (closeLocked) event.preventDefault()
+        }}
         className="overflow-hidden p-0"
       >
         {!title ? (
@@ -131,15 +164,26 @@ export function AnnouncementPopup() {
               ) : null}
             </div>
             <div className="flex shrink-0 flex-col gap-2 border-t border-[var(--color-divider)] px-4 py-3 sm:flex-row sm:items-center sm:justify-end sm:px-6">
+              {closeLocked ? (
+                <span
+                  className="flex min-h-8 items-center gap-1.5 text-[12.5px] text-[var(--color-fg-muted)] sm:mr-auto"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <Clock3 size={14} aria-hidden className="shrink-0" />
+                  {t('announcement.requiredCountdown', { count: secondsRemaining })}
+                </span>
+              ) : null}
               <Button
                 variant={data.remember_dismiss ? 'secondary' : 'primary'}
                 className="w-full sm:w-auto"
+                disabled={closeLocked}
                 onClick={close}
               >
                 {t('actions.close')}
               </Button>
               {data.remember_dismiss ? (
-                <Button className="w-full sm:w-auto" onClick={dismissVersion}>
+                <Button className="w-full sm:w-auto" disabled={closeLocked} onClick={dismissVersion}>
                   {t('announcement.dontShowAgain', { defaultValue: "Don't show this again" })}
                 </Button>
               ) : null}

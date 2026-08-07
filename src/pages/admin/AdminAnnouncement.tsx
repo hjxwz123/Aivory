@@ -27,6 +27,7 @@ interface AnnouncementConfig {
   body: string
   image_url: string
   remember_dismiss: boolean
+  require_read: boolean
   updated_at: number
   // Pinned top bar (independent of the popup).
   bar_enabled: boolean
@@ -41,6 +42,7 @@ export default function AdminAnnouncement() {
   const [body, setBody] = useState('')
   const [imageUrl, setImageUrl] = useState('')
   const [remember, setRemember] = useState(true)
+  const [requireRead, setRequireRead] = useState(false)
   // Pinned top bar.
   const [barEnabled, setBarEnabled] = useState(false)
   const [barHtml, setBarHtml] = useState('')
@@ -63,6 +65,7 @@ export default function AdminAnnouncement() {
       setBody(typeof a.body === 'string' ? a.body : '')
       setImageUrl(typeof a.image_url === 'string' ? a.image_url : '')
       setRemember(a.remember_dismiss !== false)
+      setRequireRead(Boolean(a.require_read))
       const bEnabled = Boolean(a.bar_enabled)
       const bHtml = typeof a.bar_html === 'string' ? a.bar_html : ''
       setBarEnabled(bEnabled)
@@ -109,6 +112,7 @@ export default function AdminAnnouncement() {
         body: body.trim(),
         image_url: imageUrl.trim(),
         remember_dismiss: remember,
+        require_read: requireRead,
         // Bump the version so an edited notice re-shows for users who dismissed
         // the previous one.
         updated_at: now,
@@ -144,6 +148,15 @@ export default function AdminAnnouncement() {
               <span className="mt-0.5 block text-[12.5px] text-[var(--color-fg-muted)]">{t('admin:announcement.enabledHint')}</span>
             </span>
             <Switch checked={enabled} onCheckedChange={setEnabled} />
+          </label>
+
+          {/* Mandatory reading delay. */}
+          <label className="flex items-center justify-between gap-4 rounded-[12px] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3.5">
+            <span className="min-w-0">
+              <span className="block text-sm font-medium text-[var(--color-fg)]">{t('admin:announcement.requireReadLabel')}</span>
+              <span className="mt-0.5 block text-[12.5px] text-[var(--color-fg-muted)]">{t('admin:announcement.requireReadHint')}</span>
+            </span>
+            <Switch checked={requireRead} onCheckedChange={setRequireRead} />
           </label>
 
           {/* Remember dismiss */}

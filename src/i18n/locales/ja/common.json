@@ -70,7 +70,8 @@
   },
   "announcement": {
     "title": "お知らせ",
-    "dontShowAgain": "次回から表示しない"
+    "dontShowAgain": "次回から表示しない",
+    "requiredCountdown": "あと{{count}}秒で閉じられます"
   },
   "aria": {
     "close": "閉じる",

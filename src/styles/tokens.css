@@ -281,17 +281,19 @@
    * env()/44px/px-4. Desktop never reads these except where noted; the phone
    * @media block below overrides the responsive ones. */
   /* Device safe areas — the ', 0px' fallback is mandatory so calc()/max() never
-   * break on non-notch browsers (env() is empty there). */
+   * break on non-notch browsers (env() is empty there). We intentionally do not
+   * reserve the iPhone home-indicator inset: mobile controls use regular visual
+   * padding and run to the bottom edge. */
   --safe-top: env(safe-area-inset-top, 0px);
-  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-bottom: 0px;
   --safe-left: env(safe-area-inset-left, 0px);
   --safe-right: env(safe-area-inset-right, 0px);
   --tap-min: 2.75rem;
   /* 44 — minimum mobile touch target */
   --layout-topbar-h-mobile: 3rem;
   /* 48 — slim mobile app bar */
-  --layout-drawer-w: min(86vw, 22rem);
-  /* nav slide-over: always leaves a scrim */
+  --layout-drawer-w: min(76vw, 17rem);
+  /* compact phone nav slide-over; always leaves a scrim */
   --layout-gutter-mobile: 1rem;
   /* 16 — shared mobile content edge */
   --layout-thread-gap: 2rem;

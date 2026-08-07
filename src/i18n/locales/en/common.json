@@ -70,7 +70,8 @@
   },
   "announcement": {
     "title": "Announcement",
-    "dontShowAgain": "Don't show this again"
+    "dontShowAgain": "Don't show this again",
+    "requiredCountdown": "Available to close in {{count}}s"
   },
   "aria": {
     "close": "Close",

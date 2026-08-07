@@ -1091,6 +1091,8 @@
     "lead": "用户打开应用时显示的全局公告。",
     "enabledLabel": "显示公告",
     "enabledHint": "关闭后不显示任何公告。",
+    "requireReadLabel": "必须阅读",
+    "requireReadHint": "开启后，用户必须等待 5 秒才能关闭公告或选择下次不再提示。",
     "rememberLabel": "允许用户选择不再弹出",
     "rememberHint": "开启后公告底部显示“下次不再提示”；关闭后每次访问都会再次显示。",
     "titleLabel": "标题（可选）",

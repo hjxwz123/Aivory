@@ -70,7 +70,8 @@
   },
   "announcement": {
     "title": "Annonce",
-    "dontShowAgain": "Ne plus afficher cette annonce"
+    "dontShowAgain": "Ne plus afficher cette annonce",
+    "requiredCountdown": "Fermeture disponible dans {{count}} s"
   },
   "aria": {
     "close": "Fermer",
