@@ -20,15 +20,13 @@ interface SheetContentProps extends ComponentPropsWithoutRef<typeof DialogPrimit
   label?: string
 }
 
-// Sheets PORTAL to document.body — outside ChatLayout's safe-area inset — so each
-// sheet insets itself, keeping content (drawer footer, bottom-sheet rows) clear of
-// the notch / home indicator. env() returns 0 in a normal tab, so this is a no-op
-// there. (§ mobile redesign)
+// Sheets portal to document.body, outside ChatLayout's top/side inset. Bottom
+// padding is intentionally omitted so mobile surfaces run to the visual edge.
 const safeClass: Record<Side, string> = {
-  left: 'pt-[var(--safe-top)] pb-[var(--safe-bottom)] pl-[var(--safe-left)]',
-  right: 'pt-[var(--safe-top)] pb-[var(--safe-bottom)] pr-[var(--safe-right)]',
+  left: 'pt-[var(--safe-top)] pl-[var(--safe-left)]',
+  right: 'pt-[var(--safe-top)] pr-[var(--safe-right)]',
   top: 'pt-[var(--safe-top)] px-[var(--safe-left)]',
-  bottom: 'pb-[var(--safe-bottom)] px-[var(--safe-left)]',
+  bottom: 'px-[var(--safe-left)]',
 }
 
 const sideClass: Record<Side, string> = {

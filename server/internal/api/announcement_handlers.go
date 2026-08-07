@@ -10,14 +10,16 @@ import (
 // announcement is the wire shape of the global notice (§ announcement). Title is
 // optional so announcement JSON saved before titles were introduced remains valid.
 // image_url non-empty → render as an image announcement (image left, text right).
-// When remember_dismiss is false the client re-shows it every visit; updated_at
-// doubles as the dismiss version so editing the notice re-shows it.
+// When remember_dismiss is false the client re-shows it every visit. RequireRead
+// locks every dismissal path for five seconds; updated_at doubles as the dismiss
+// version so editing the notice re-shows it.
 type announcement struct {
 	Enabled         bool   `json:"enabled"`
 	Title           string `json:"title"`
 	Body            string `json:"body"`
 	ImageURL        string `json:"image_url"`
 	RememberDismiss bool   `json:"remember_dismiss"`
+	RequireRead     bool   `json:"require_read"`
 	UpdatedAt       int64  `json:"updated_at"`
 	// Pinned top bar (§ announcement bar) — a thin strip pinned to the top of the
 	// app, independent of the popup. BarHTML is sanitized client-side before

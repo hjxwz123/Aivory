@@ -39,7 +39,6 @@ export default function ChatLayout() {
   // Home ('/') and the chat thread ('/chat', '/chat/:id') are one section so
   // creating a conversation (/ → /chat/:id) doesn't flash a transition.
   const routeKeys = chatRouteKeys(pathname)
-  const isHome = pathname === '/'
 
   useEffect(() => syncSystem(), [syncSystem])
 
@@ -58,16 +57,10 @@ export default function ChatLayout() {
     <div
       className={cn(
         'flex flex-col h-svh w-full overflow-hidden bg-[var(--color-bg)] text-[var(--color-fg)]',
-        // Inset the whole app shell by the device safe areas so that, when
-        // launched as an installed PWA (fullscreen/standalone), the header,
-        // sidebar and bottom composer never slide under the notch or home
-        // indicator. env() is 0 in a normal browser tab, so this is a no-op
-        // there. box-border keeps total height at 100svh.
-        // The home screen has no bottom-docked control (the composer sits
-        // inline, vertically centered) — reserving the home-indicator gap
-        // there just wastes space, so it's skipped for that route only.
+        // Keep the top/side notch inset, but intentionally let phone layouts
+        // run to the visual bottom edge. The composer owns a small regular
+        // padding instead of reserving iPhone's home-indicator safe area.
         'pt-[var(--safe-top)]',
-        !isHome && 'pb-[var(--safe-bottom)]',
         'pl-[var(--safe-left)] pr-[var(--safe-right)]',
       )}
     >

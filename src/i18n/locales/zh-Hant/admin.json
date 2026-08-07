@@ -1087,6 +1087,8 @@
     "lead": "使用者開啟應用時顯示的全域公告。",
     "enabledLabel": "顯示公告",
     "enabledHint": "關閉後不顯示任何公告。",
+    "requireReadLabel": "必須閱讀",
+    "requireReadHint": "開啟後，使用者必須等待 5 秒才能關閉公告或選擇下次不再提示。",
     "rememberLabel": "允許使用者選擇不再顯示",
     "rememberHint": "開啟後公告底部顯示「下次不再提示」；關閉後每次造訪都會再次顯示。",
     "titleLabel": "標題（選填）",

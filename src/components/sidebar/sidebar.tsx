@@ -376,7 +376,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
           (§workspaces spec: sidebar 上方原先显示 aivory 的地方显示工作空间名称).
           Keyed on the active space so switching replays a fade-in (§ workspace
           switch animation) instead of the name jump-cutting. */}
-      <div className="flex items-center justify-between px-3 h-[56px] shrink-0">
+      <div className="flex h-[56px] shrink-0 items-center justify-between px-3 max-sm:h-12 max-sm:px-2">
         {!collapsed ? (
           activeWorkspace ? (
             <div key={activeWorkspace.id} className="page-enter flex min-w-0 items-center gap-1.5">
@@ -445,7 +445,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
             type="button"
             onClick={onClose}
             aria-label={tCommon('actions.close', { defaultValue: 'Close' })}
-            className="inline-flex items-center justify-center size-[var(--tap-min)] rounded-[10px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+            className="inline-flex size-[var(--tap-min)] items-center justify-center rounded-[10px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-sm:size-9 max-sm:rounded-[8px]"
           >
             <X size={18} aria-hidden />
           </button>
@@ -453,14 +453,14 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
       </div>
 
       {/* Actions */}
-      <div className={cn('flex flex-col gap-0.5 px-3', collapsed && 'items-center')}>
+      <div className={cn('flex flex-col gap-0.5 px-3 max-sm:gap-px max-sm:px-2', collapsed && 'items-center')}>
         <Tooltip content={collapsed ? t('sidebar.newChat') : ''} side="right">
           <button
             type="button"
             onClick={() => void startNewChat()}
             aria-current={newChatActive ? 'page' : undefined}
             className={cn(
-              'inline-flex items-center gap-2 h-9 max-lg:h-[var(--tap-min)] rounded-[10px] text-sm font-medium',
+              'inline-flex h-9 items-center gap-2 rounded-[10px] text-sm font-medium max-lg:h-[var(--tap-min)] max-sm:!h-9 max-sm:gap-1.5 max-sm:rounded-[8px] max-sm:text-[13px]',
               // Filled "selected" look ONLY on the new-chat home; a plain nav row
               // everywhere else so it never reads as selected on /chat, /projects…
               newChatActive
@@ -468,7 +468,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
                 : 'border border-transparent text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
               'interactive',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-              collapsed ? 'w-9 justify-center px-0' : 'w-full justify-between px-3',
+              collapsed ? 'w-9 justify-center px-0' : 'w-full justify-between px-3 max-sm:px-2.5',
             )}
           >
             <span className="inline-flex items-center gap-2">
@@ -484,10 +484,10 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
             type="button"
             onClick={() => setOpen(true)}
             className={cn(
-              'inline-flex items-center gap-2 h-9 max-lg:h-[var(--tap-min)] rounded-[10px] text-sm',
+              'inline-flex h-9 items-center gap-2 rounded-[10px] text-sm max-lg:h-[var(--tap-min)] max-sm:!h-9 max-sm:gap-1.5 max-sm:rounded-[8px] max-sm:text-[13px]',
               'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-              collapsed ? 'w-9 justify-center px-0' : 'w-full justify-between px-3',
+              collapsed ? 'w-9 justify-center px-0' : 'w-full justify-between px-3 max-sm:px-2.5',
             )}
           >
             <span className="inline-flex items-center gap-2">
@@ -506,13 +506,13 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
               onClick={onClose}
               aria-current={drawActive ? 'page' : undefined}
               className={cn(
-                'inline-flex items-center gap-2 h-9 max-lg:h-[var(--tap-min)] rounded-[10px] text-sm',
+                'inline-flex h-9 items-center gap-2 rounded-[10px] text-sm max-lg:h-[var(--tap-min)] max-sm:!h-9 max-sm:gap-1.5 max-sm:rounded-[8px] max-sm:text-[13px]',
                 drawActive
                   ? 'bg-[var(--color-bg-muted)] text-[var(--color-fg)] font-medium'
                   : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
                 'interactive',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-                collapsed ? 'w-9 justify-center px-0' : 'w-full justify-start px-3',
+                collapsed ? 'w-9 justify-center px-0' : 'w-full justify-start px-3 max-sm:px-2.5',
               )}
             >
               <ImagePlus size={15} aria-hidden />
@@ -531,12 +531,12 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
               onClick={onClose}
               aria-current={filesActive ? 'page' : undefined}
               className={cn(
-                'inline-flex items-center gap-2 h-9 max-lg:h-[var(--tap-min)] rounded-[10px] text-sm interactive',
+                'inline-flex h-9 items-center gap-2 rounded-[10px] text-sm interactive max-lg:h-[var(--tap-min)] max-sm:!h-9 max-sm:gap-1.5 max-sm:rounded-[8px] max-sm:text-[13px]',
                 filesActive
                   ? 'bg-[var(--color-bg-muted)] text-[var(--color-fg)] font-medium'
                   : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-                collapsed ? 'w-9 justify-center px-0' : 'w-full justify-start px-3',
+                collapsed ? 'w-9 justify-center px-0' : 'w-full justify-start px-3 max-sm:px-2.5',
               )}
             >
               <FolderOpen size={15} aria-hidden />
@@ -554,12 +554,12 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
             onClick={onClose}
             aria-current={skillsActive ? 'page' : undefined}
             className={cn(
-              'inline-flex items-center gap-2 h-9 max-lg:h-[var(--tap-min)] rounded-[10px] text-sm interactive',
+              'inline-flex h-9 items-center gap-2 rounded-[10px] text-sm interactive max-lg:h-[var(--tap-min)] max-sm:!h-9 max-sm:gap-1.5 max-sm:rounded-[8px] max-sm:text-[13px]',
               skillsActive
                 ? 'bg-[var(--color-bg-muted)] text-[var(--color-fg)] font-medium'
                 : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-              collapsed ? 'w-9 justify-center px-0' : 'w-full justify-start px-3',
+              collapsed ? 'w-9 justify-center px-0' : 'w-full justify-start px-3 max-sm:px-2.5',
             )}
           >
             <LibraryBig size={15} aria-hidden />
@@ -572,7 +572,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
           fades out and a spinner takes its place instead of flashing the old
           (or momentarily empty) space's rows (§ workspace switch animation). */}
       {!collapsed && (
-        <div className="relative mt-2 flex-1 min-h-0">
+        <div className="relative mt-2 flex-1 min-h-0 max-sm:mt-1">
           <div
             ref={listScrollRef}
             className={cn(
@@ -580,9 +580,9 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
               switching && 'opacity-0 pointer-events-none',
             )}
           >
-            <section className="py-1.5">
+            <section className="py-1.5 max-sm:py-1">
               <div className="flex items-center pr-2">
-                <h3 className="min-w-0 flex-1 px-4 py-1 text-[10px] font-medium uppercase tracking-wider text-[var(--color-fg-subtle)] max-lg:py-1.5 max-lg:text-[11px]">
+                <h3 className="min-w-0 flex-1 px-4 py-1 text-[10px] font-medium uppercase tracking-wider text-[var(--color-fg-subtle)] max-lg:py-1.5 max-lg:text-[11px] max-sm:px-3 max-sm:py-0.5">
                   <Link
                     to="/projects"
                     onClick={onClose}
@@ -597,7 +597,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
                     type="button"
                     onClick={() => setNewProjectOpen(true)}
                     aria-label={tProjects('nav.newProject')}
-                    className="inline-flex size-6 shrink-0 items-center justify-center rounded-[6px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-bg)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-lg:size-10"
+                    className="inline-flex size-6 shrink-0 items-center justify-center rounded-[6px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-bg)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-lg:size-10 max-sm:!size-8"
                   >
                     <Plus size={12} aria-hidden />
                   </button>
@@ -620,7 +620,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
                       <li key={project.id}>
                         <div
                           className={cn(
-                            'group/project mx-1 flex min-h-8 items-center rounded-[8px] interactive max-lg:min-h-[var(--tap-min)]',
+                            'group/project mx-1 flex min-h-8 items-center rounded-[8px] interactive max-lg:min-h-[var(--tap-min)] max-sm:!min-h-9',
                             projectActive ? 'bg-[var(--color-bg)]' : 'hover:bg-[var(--color-bg)]',
                           )}
                         >
@@ -630,7 +630,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
                             aria-expanded={expanded}
                             aria-controls={childListId}
                             onClick={() => toggleProject(project.id, expanded)}
-                            className="inline-flex size-8 shrink-0 items-center justify-center rounded-[7px] text-[var(--color-fg-faint)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-lg:size-[var(--tap-min)]"
+                            className="inline-flex size-8 shrink-0 items-center justify-center rounded-[7px] text-[var(--color-fg-faint)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-lg:size-[var(--tap-min)] max-sm:!size-9"
                           >
                             <ChevronRight
                               size={13}
@@ -647,7 +647,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
                             aria-label={project.name}
                             aria-current={location.pathname === `/projects/${project.id}` ? 'page' : undefined}
                             title={project.name}
-                            className="flex min-h-8 min-w-0 flex-1 items-center gap-2 rounded-[7px] py-1.5 pl-0.5 pr-2 text-[13px] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-lg:min-h-[var(--tap-min)]"
+                            className="flex min-h-8 min-w-0 flex-1 items-center gap-2 rounded-[7px] py-1.5 pl-0.5 pr-2 text-[13px] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-lg:min-h-[var(--tap-min)] max-sm:!min-h-9 max-sm:gap-1.5 max-sm:py-1"
                           >
                             <span
                               className={cn(
@@ -691,6 +691,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
                                   onSelect={onClose}
                                   t={t}
                                   nested
+                                  dense={variant === 'sheet'}
                                 />
                               ))}
                               {!loadingProjectIds.has(project.id) &&
@@ -711,12 +712,12 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
             </section>
 
             {starred.length > 0 && (
-              <Group label={t('sidebar.starred')} items={starred} currentId={currentId} onSelect={onClose} t={t} />
+              <Group label={t('sidebar.starred')} items={starred} currentId={currentId} onSelect={onClose} t={t} dense={variant === 'sheet'} />
             )}
             {groupOrder.map(
               (g) =>
                 grouped[g].length > 0 && (
-                  <Group key={g} label={t(`buckets.${g}`)} items={grouped[g]} currentId={currentId} onSelect={onClose} t={t} />
+                  <Group key={g} label={t(`buckets.${g}`)} items={grouped[g]} currentId={currentId} onSelect={onClose} t={t} dense={variant === 'sheet'} />
                 ),
             )}
             {hasMore && (
@@ -745,7 +746,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
           flat picker (personal + every workspace) shown whenever the user has
           any workspace, so it works both in the personal space (pick one to
           enter) and inside a workspace (§workspaces 头像旁切换按钮). */}
-      <div className={cn('mt-auto p-2', collapsed && 'flex items-center justify-center')}>
+      <div className={cn('mt-auto p-2 max-sm:p-1.5', collapsed && 'flex items-center justify-center')}>
         <div className={cn('flex items-center gap-1', collapsed && 'flex-col')}>
           <div className="min-w-0 flex-1">
             <UserMenu collapsed={collapsed} />
@@ -777,21 +778,23 @@ function Group({
   currentId,
   onSelect,
   t,
+  dense = false,
 }: {
   label: string
   items: ReturnType<typeof useConversations.getState>['conversations']
   currentId: string | undefined
   onSelect?: () => void
   t: TFunction<'chat'>
+  dense?: boolean
 }) {
   return (
-    <div className="py-1.5">
-      <h3 className="px-4 py-1 max-lg:py-1.5 text-[10px] max-lg:text-[11px] font-medium uppercase tracking-wider text-[var(--color-fg-subtle)]">
+    <div className={cn('py-1.5', dense && 'py-1')}>
+      <h3 className={cn('px-4 py-1 max-lg:py-1.5 text-[10px] max-lg:text-[11px] font-medium uppercase tracking-wider text-[var(--color-fg-subtle)]', dense && 'px-3 py-0.5')}>
         {label}
       </h3>
       <ul>
         {items.map((c) => (
-          <ConversationItem key={c.id} conversation={c} active={c.id === currentId} onSelect={onSelect} t={t} />
+          <ConversationItem key={c.id} conversation={c} active={c.id === currentId} onSelect={onSelect} t={t} dense={dense} />
         ))}
       </ul>
     </div>
@@ -873,12 +876,14 @@ function ConversationItem({
   onSelect,
   t,
   nested = false,
+  dense = false,
 }: {
   conversation: ReturnType<typeof useConversations.getState>['conversations'][number]
   active: boolean
   onSelect?: () => void
   t: TFunction<'chat'>
   nested?: boolean
+  dense?: boolean
 }) {
   const meId = useAuth((s) => s.user?.id)
   const rename = useConversations((s) => s.renameConversation)
@@ -913,7 +918,7 @@ function ConversationItem({
       <div
         className={cn(
           'group/conv relative my-px rounded-[10px] interactive',
-          nested ? 'ml-9 mr-1' : 'mx-2',
+          nested ? (dense ? 'ml-7 mr-0.5' : 'ml-9 mr-1') : dense ? 'mx-1.5' : 'mx-2',
           active ? 'bg-[var(--color-surface)] shadow-[var(--shadow-xs)]' : 'hover:bg-[var(--color-bg)]',
         )}
       >
@@ -921,15 +926,15 @@ function ConversationItem({
           to={`/chat/${conversation.id}`}
           onClick={onSelect}
           className={cn(
-            'block rounded-[10px] px-2.5 pr-9 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-lg:pr-12',
-            nested ? 'py-1.5 max-lg:py-2.5' : 'py-2 max-lg:py-2.5',
+            'block rounded-[10px] px-2.5 pr-9 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+            dense ? 'py-1.5 pr-8' : cn('max-lg:pr-12', nested ? 'py-1.5 max-lg:py-2.5' : 'py-2 max-lg:py-2.5'),
           )}
         >
           <span className="flex items-center gap-2">
             <span
               className={cn(
-                'min-w-0 flex-1 truncate leading-snug max-lg:text-[15px]',
-                nested ? 'text-[12.5px]' : 'text-[13.5px]',
+                'min-w-0 flex-1 truncate leading-snug',
+                dense ? 'text-[12.5px]' : cn('max-lg:text-[15px]', nested ? 'text-[12.5px]' : 'text-[13.5px]'),
                 active ? 'text-[var(--color-fg)] font-medium' : 'text-[var(--color-fg-muted)]',
               )}
             >
@@ -958,7 +963,10 @@ function ConversationItem({
               <button
                 type="button"
                 aria-label={t('sidebar.actions')}
-                className="inline-flex items-center justify-center size-6 max-lg:size-10 max-lg:opacity-100 rounded-[6px] opacity-0 group-hover/conv:opacity-100 data-[state=open]:opacity-100 text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                className={cn(
+                  'inline-flex items-center justify-center rounded-[6px] opacity-0 group-hover/conv:opacity-100 data-[state=open]:opacity-100 text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+                  dense ? 'size-7 opacity-100' : 'size-6 max-lg:size-10 max-lg:opacity-100',
+                )}
               >
                 <MoreHorizontal size={13} aria-hidden />
               </button>

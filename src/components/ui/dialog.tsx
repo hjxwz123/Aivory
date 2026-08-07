@@ -33,6 +33,7 @@ export interface DialogContentProps
   extends ComponentPropsWithoutRef<typeof DialogPrimitive.Content> {
   size?: DialogSize
   showClose?: boolean
+  closeDisabled?: boolean
 }
 
 const sizeMap: Record<DialogSize, string> = {
@@ -46,7 +47,7 @@ const sizeMap: Record<DialogSize, string> = {
 export const DialogContent = forwardRef<
   ElementRef<typeof DialogPrimitive.Content>,
   DialogContentProps
->(function DialogContent({ className, size = 'md', showClose = true, children, ...rest }, ref) {
+>(function DialogContent({ className, size = 'md', showClose = true, closeDisabled = false, children, ...rest }, ref) {
   const { t } = useTranslation('common')
   return (
     <DialogPortal>
@@ -71,11 +72,13 @@ export const DialogContent = forwardRef<
         {showClose && (
           <DialogPrimitive.Close
             aria-label={t('aria.close')}
+            disabled={closeDisabled}
             className={cn(
               'absolute right-3 top-3 inline-flex items-center justify-center size-8 rounded-[8px]',
               'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-bg-muted)]',
               'transition-colors duration-150',
               'focus-visible:outline-none focus-visible:text-[var(--color-fg)] focus-visible:bg-[var(--color-bg-muted)]',
+              'disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-40',
             )}
           >
             <X size={16} aria-hidden />
