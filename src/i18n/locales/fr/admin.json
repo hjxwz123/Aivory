@@ -1087,6 +1087,8 @@
     "lead": "Un avis global affiché à l'ouverture de l'app.",
     "enabledLabel": "Afficher l'annonce",
     "enabledHint": "Désactivé, aucune annonce ne s'affiche.",
+    "requireReadLabel": "Imposer un temps de lecture",
+    "requireReadHint": "Les utilisateurs doivent attendre 5 secondes avant de fermer l’annonce ou de choisir de ne plus l’afficher.",
     "rememberLabel": "Autoriser le masquage définitif",
     "rememberHint": "Ajoute l’option « Ne plus afficher cette annonce ». Désactivé = réaffiché à chaque visite.",
     "titleLabel": "Titre (facultatif)",

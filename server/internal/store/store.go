@@ -947,8 +947,8 @@ func Seed(db *sql.DB, cfg config.Config) error {
 		// § announcement: a single global notice shown to users on load. title is
 		// optional; image_url non-empty → image announcement (image left, text right).
 		// remember_dismiss false → re-show every visit; updated_at doubles as the
-		// dismiss version.
-		"announcement": `{"enabled":false,"title":"","body":"","image_url":"","remember_dismiss":true,"updated_at":0}`,
+		// dismiss version. require_read adds a five-second dismissal delay.
+		"announcement": `{"enabled":false,"title":"","body":"","image_url":"","remember_dismiss":true,"require_read":false,"updated_at":0}`,
 	} {
 		if _, err := db.Exec(`INSERT INTO settings(key, value) VALUES(?, ?)
 			ON CONFLICT(key) DO NOTHING`, k, v); err != nil {

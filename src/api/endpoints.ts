@@ -173,6 +173,7 @@ export const authApi = {
       body: string
       image_url: string
       remember_dismiss: boolean
+      require_read: boolean
       updated_at: number
       bar_enabled: boolean
       bar_html: string

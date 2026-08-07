@@ -399,23 +399,63 @@ export default function ChatHome() {
   }
 
   return (
-    <div ref={root} className="relative flex-1 flex flex-col overflow-y-auto overflow-x-hidden">
-      {/* Mobile: no title bar on the home screen — this light floating button is
-          the only way to reach the sidebar drawer here (§ mobile home redesign). */}
+    <div
+      ref={root}
+      className={cn(
+        'relative flex-1 flex flex-col overflow-hidden sm:overflow-y-auto sm:overflow-x-hidden',
+        // Drawing keeps its existing scrollable gallery on phones. The normal
+        // chat home below is a fixed-height mobile workspace instead.
+        drawMode && 'max-sm:overflow-y-auto',
+      )}
+    >
+      {/* Mobile home: a compact, direct way to reach the navigation drawer. */}
       <button
         type="button"
         aria-label={t('commandMenu.actions.toggleSidebar')}
         onClick={() => useUI.getState().setNavOpen(true)}
-        className="lg:hidden absolute left-3 top-3 z-20 inline-flex items-center justify-center size-[var(--tap-min)] rounded-[10px] bg-[var(--color-bg)]/85 backdrop-blur-sm text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+        className="lg:hidden absolute left-3 top-3 z-20 inline-flex size-[var(--tap-min)] items-center justify-center rounded-[10px] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-sm:left-2 max-sm:top-2 max-sm:size-10 max-sm:rounded-[8px]"
       >
-        <Menu size={18} aria-hidden />
+        <Menu size={17} aria-hidden />
       </button>
-      {/* Ambient warmth behind the greeting — faint, blurred, slowly breathing. */}
+      {/* Desktop-only ambient depth; the phone layout stays deliberately direct. */}
       <div
-        className="home-glow pointer-events-none absolute left-1/2 top-[14%] -z-0 size-[20rem] sm:size-[34rem] max-w-[88vw] -translate-x-1/2 rounded-full bg-[var(--color-accent)] opacity-[0.07] blur-[90px]"
+        className="home-glow pointer-events-none absolute left-1/2 top-[14%] -z-0 hidden size-[34rem] max-w-[88vw] -translate-x-1/2 rounded-full bg-[var(--color-accent)] opacity-[0.07] blur-[90px] sm:block"
         aria-hidden
       />
-      <div className="relative z-10 mx-auto flex min-h-full w-full max-w-[var(--layout-message-max-w)] flex-col px-[var(--layout-gutter-mobile)] sm:px-8">
+
+      {/* Phone chat home: welcome copy occupies the available center space while
+          the composer remains in a dedicated bottom work area. */}
+      {!drawMode && (
+        <div className="relative z-10 flex min-h-0 flex-1 flex-col px-3 sm:hidden">
+          <header className="flex min-h-0 flex-1 flex-col items-center justify-center pb-8 pt-12 text-center">
+            <h1 className="home-rise max-w-[18rem] text-balance font-sans text-[1.6rem] font-semibold leading-[1.14] tracking-tight text-[var(--color-fg)]">
+              {greeting}{' '}
+              <span className="font-normal text-[var(--color-fg-muted)]">{subtitle}</span>
+            </h1>
+          </header>
+          <div className="home-rise shrink-0 pb-2">
+            <Composer
+              modelId={modelId}
+              onModelChange={setPickedModelId}
+              fast={fast}
+              onFastChange={setPickedFast}
+              onSubmit={(text, atts, opts) => void startNew(text, atts, opts)}
+              draftScope={draftScope}
+              conversationId={pendingConversationId}
+              ensureConversationId={ensureConversation}
+              onAttachmentsDrained={discardDraftConversation}
+              autoFocus
+            />
+          </div>
+        </div>
+      )}
+
+      <div
+        className={cn(
+          'relative z-10 mx-auto min-h-full w-full max-w-[var(--layout-message-max-w)] flex-col px-[var(--layout-gutter-mobile)] sm:px-8',
+          drawMode ? 'flex' : 'hidden sm:flex',
+        )}
+      >
         {/* HERO — greeting + composer, vertically centered in the first screenful
             (both chat and drawing mode, PC and mobile). In drawing mode it caps at
             ~one viewport so the gallery sits just below the fold. */}

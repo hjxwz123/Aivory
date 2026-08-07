@@ -34,6 +34,13 @@ func TestAnnouncementSeedIncludesOptionalTitle(t *testing.T) {
 	if title != "" {
 		t.Fatalf("seeded title = %q, want empty", title)
 	}
+	var requireRead bool
+	if err := json.Unmarshal(got["require_read"], &requireRead); err != nil {
+		t.Fatalf("decode seeded require_read: %v", err)
+	}
+	if requireRead {
+		t.Fatal("seeded require_read = true, want false")
+	}
 }
 
 func TestAnnouncementHandlerReturnsConfiguredTitle(t *testing.T) {
@@ -47,6 +54,7 @@ func TestAnnouncementHandlerReturnsConfiguredTitle(t *testing.T) {
 		"body":             "Service will be briefly unavailable.",
 		"image_url":        "/api/icons/maintenance.png",
 		"remember_dismiss": true,
+		"require_read":     true,
 		"updated_at":       int64(1234),
 	}); err != nil {
 		t.Fatalf("set announcement: %v", err)
@@ -56,7 +64,7 @@ func TestAnnouncementHandlerReturnsConfiguredTitle(t *testing.T) {
 	if !got.Enabled || got.Title != "Scheduled maintenance" || got.Body != "Service will be briefly unavailable." {
 		t.Fatalf("announcement = %+v", got)
 	}
-	if got.ImageURL != "/api/icons/maintenance.png" || !got.RememberDismiss || got.UpdatedAt != 1234 {
+	if got.ImageURL != "/api/icons/maintenance.png" || !got.RememberDismiss || !got.RequireRead || got.UpdatedAt != 1234 {
 		t.Fatalf("announcement metadata = %+v", got)
 	}
 }
@@ -72,7 +80,7 @@ func TestAnnouncementHandlerAcceptsLegacyConfigWithoutTitle(t *testing.T) {
 	}
 
 	got := readAnnouncement(t, d)
-	if !got.Enabled || got.Title != "" || got.Body != "Legacy notice" || !got.RememberDismiss || got.UpdatedAt != 42 {
+	if !got.Enabled || got.Title != "" || got.Body != "Legacy notice" || !got.RememberDismiss || got.RequireRead || got.UpdatedAt != 42 {
 		t.Fatalf("legacy announcement = %+v", got)
 	}
 }

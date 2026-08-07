@@ -1087,6 +1087,8 @@
     "lead": "A global notice shown when users open the app.",
     "enabledLabel": "Show announcement",
     "enabledHint": "When off, no notice is shown.",
+    "requireReadLabel": "Require reading time",
+    "requireReadHint": "Users must wait 5 seconds before they can close the announcement or choose not to see it again.",
     "rememberLabel": "Allow users to hide it permanently",
     "rememberHint": "Adds a “Don't show this again” option to the announcement. Off = shows again on every visit.",
     "titleLabel": "Title (optional)",

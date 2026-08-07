@@ -70,7 +70,8 @@
   },
   "announcement": {
     "title": "公告",
-    "dontShowAgain": "下次不再提示"
+    "dontShowAgain": "下次不再提示",
+    "requiredCountdown": "{{count}} 秒後可關閉"
   },
   "aria": {
     "close": "關閉",
