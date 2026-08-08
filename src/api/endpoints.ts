@@ -6,6 +6,7 @@
 import { api, apiUrl, getAccessToken, ApiError, apiUpload, type UploadProgress } from './client'
 import type {
   ApiAdminMessageFeedbackPage,
+  ApiAdminUserFeedbackPage,
   ApiAdminFile,
   ApiAdminLoginHistoryPage,
   ApiWorkspace,
@@ -607,6 +608,36 @@ export const memoriesApi = {
   remove: (id: string) => api<{ ok: true }>(`/me/memories/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 }
 
+// ----- Product issue feedback --------------------------------------------
+
+export interface IssueFeedbackInput {
+  messageId: string
+  description: string
+  pagePath: string
+  viewportWidth: number
+  viewportHeight: number
+  screenshot?: Blob
+}
+
+export const issueFeedbackApi = {
+  submit: (input: IssueFeedbackInput) => {
+    const form = new FormData()
+    form.append('message_id', input.messageId)
+    form.append('description', input.description)
+    form.append('page_path', input.pagePath)
+    form.append('viewport_width', String(input.viewportWidth))
+    form.append('viewport_height', String(input.viewportHeight))
+    if (input.screenshot) {
+      const extension = input.screenshot.type === 'image/png' ? 'png' : 'jpg'
+      form.append('screenshot', input.screenshot, `page-screenshot.${extension}`)
+    }
+    return api<{ ok: true; id: string; created_at: number }>('/user-feedback', {
+      method: 'POST',
+      body: form,
+    })
+  },
+}
+
 // ----- Admin --------------------------------------------------------------
 
 export const adminApi = {
@@ -1007,6 +1038,26 @@ export const adminApi = {
     return api<ApiAdminMessageFeedbackPage>(
       `/admin/message-feedback${qs.toString() ? `?${qs}` : ''}`,
     )
+  },
+  userFeedback: (params: { q?: string; limit?: number; offset?: number } = {}) => {
+    const qs = new URLSearchParams()
+    if (params.q) qs.set('q', params.q)
+    if (params.limit !== undefined) qs.set('limit', String(params.limit))
+    if (params.offset !== undefined) qs.set('offset', String(params.offset))
+    return api<ApiAdminUserFeedbackPage>(
+      `/admin/user-feedback${qs.toString() ? `?${qs}` : ''}`,
+    )
+  },
+  userFeedbackScreenshotBlob: async (id: string, signal?: AbortSignal): Promise<Blob> => {
+    const token = getAccessToken()
+    const res = await fetch(apiUrl(`/admin/user-feedback/${encodeURIComponent(id)}/screenshot`), {
+      credentials: 'include',
+      headers: token ? { authorization: `Bearer ${token}` } : {},
+      signal,
+      cache: 'no-store',
+    })
+    if (!res.ok) throw new ApiError(res.status, `screenshot failed (${res.status})`, null)
+    return res.blob()
   },
 
   settings: () => api<Record<string, unknown>>('/admin/settings'),

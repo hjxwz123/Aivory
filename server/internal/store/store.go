@@ -448,6 +448,7 @@ func Migrate(db *sql.DB) error {
 	columnChecks := map[string][]string{
 		"messages":            {"credits", "model_label", "search_text", "gen_ms", "feedback", "verify", "author_id", "fast", "selected_user_skill_ids"},
 		"message_feedback":    {"id", "message_id", "conversation_id", "user_id", "workspace_id", "model_id", "channel_id", "rating", "reasons", "comment", "created_at", "updated_at"},
+		"user_feedback":       {"id", "user_id", "message_id", "conversation_id", "conversation_title", "description", "page_path", "user_agent", "viewport_width", "viewport_height", "screenshot", "screenshot_mime", "screenshot_width", "screenshot_height", "created_at"},
 		"skills":              {"display_description"},
 		"prompts":             {"name", "description", "content", "enabled", "sort_order"},
 		"user_skills":         {"user_id", "name", "description", "icon", "instructions", "source_skill_id"},
