@@ -17,7 +17,14 @@ import { useTranslation } from 'react-i18next'
 import { Clock3 } from 'lucide-react'
 import { authApi } from '@/api'
 import { useAuth } from '@/store/auth'
-import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { sanitizeHtml } from '@/lib/markdown'
 import { cn } from '@/lib/utils'
@@ -129,26 +136,23 @@ export function AnnouncementPopup() {
         }}
         className="overflow-hidden p-0"
       >
-        {!title ? (
-          /* Legacy announcements without a configured title retain an a11y-only heading. */
-          <DialogTitle className="sr-only">
-            {t('announcement.title', { defaultValue: 'Announcement' })}
-          </DialogTitle>
-        ) : null}
-        <div className="flex min-h-0 max-h-[85dvh] flex-col sm:flex-row">
+        <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
           {hasImage ? (
-            <div className="sm:w-[42%] shrink-0 bg-[var(--color-bg-muted)]">
+            <div className="shrink-0 bg-[var(--color-bg-muted)] sm:w-[42%]">
               <img src={data.image_url} alt="" className="h-48 w-full object-cover sm:h-full" draggable={false} />
             </div>
           ) : null}
           <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-            <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6 sm:px-7 sm:py-7">
-              {title ? <DialogTitle className="break-words pr-7">{title}</DialogTitle> : null}
+            <DialogHeader className={cn(!title && 'sr-only')}>
+              <DialogTitle className="break-words pr-10">
+                {title || t('announcement.title', { defaultValue: 'Announcement' })}
+              </DialogTitle>
+            </DialogHeader>
+            <DialogBody className={cn('min-w-0 overflow-x-hidden', !title && 'pt-5 pr-14')}>
               {data.body.trim() ? (
                 <div
                   className={cn(
                     'text-[14.5px] leading-relaxed text-[var(--color-fg)]',
-                    title && 'mt-3',
                     // Themed styling for the admin's HTML body.
                     'prose-announcement break-words',
                     '[&_h1]:font-serif [&_h1]:text-xl [&_h1]:tracking-tight [&_h1]:mb-2',
@@ -162,8 +166,8 @@ export function AnnouncementPopup() {
                   dangerouslySetInnerHTML={{ __html: sanitizeHtml(data.body) }}
                 />
               ) : null}
-            </div>
-            <div className="flex shrink-0 flex-col gap-2 border-t border-[var(--color-divider)] px-4 py-3 sm:flex-row sm:items-center sm:justify-end sm:px-6">
+            </DialogBody>
+            <DialogFooter className="max-sm:flex-col max-sm:items-stretch">
               {closeLocked ? (
                 <span
                   className="flex min-h-8 items-center gap-1.5 text-[12.5px] text-[var(--color-fg-muted)] sm:mr-auto"
@@ -176,18 +180,17 @@ export function AnnouncementPopup() {
               ) : null}
               <Button
                 variant={data.remember_dismiss ? 'secondary' : 'primary'}
-                className="w-full sm:w-auto"
                 disabled={closeLocked}
                 onClick={close}
               >
                 {t('actions.close')}
               </Button>
               {data.remember_dismiss ? (
-                <Button className="w-full sm:w-auto" disabled={closeLocked} onClick={dismissVersion}>
+                <Button disabled={closeLocked} onClick={dismissVersion}>
                   {t('announcement.dontShowAgain', { defaultValue: "Don't show this again" })}
                 </Button>
               ) : null}
-            </div>
+            </DialogFooter>
           </div>
         </div>
       </DialogContent>
