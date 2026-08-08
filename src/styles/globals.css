@@ -1345,6 +1345,8 @@ body {
 .aivory-formula-mathfield {
   display: block;
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
   min-height: 4.5rem;
   border: 0;
   outline: 0;
@@ -1393,8 +1395,13 @@ body {
 
 @media (max-width: 639px), (max-height: 520px) {
   .formula-editor-dialog {
-    inset: var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left);
+    top: var(--safe-top);
+    right: var(--safe-right);
+    bottom: var(--safe-bottom);
+    left: var(--safe-left);
     width: auto;
+    min-width: 0;
+    max-width: none;
     height: auto;
     max-height: none;
     translate: none;
@@ -1406,9 +1413,7 @@ body {
     width: var(--tap-min);
     height: var(--tap-min);
   }
-}
 
-@media (max-height: 520px) {
   .formula-editor-dialog .formula-symbol-button,
   .formula-editor-dialog [role='tab'],
   .formula-editor-dialog .formula-editor-retry,
