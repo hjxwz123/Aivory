@@ -181,6 +181,7 @@
 | `AIVORY_RAG_MAP_REDUCE_SUMMARISE` | `int` | `200` | `rag/rag.go:73` | map-reduce 分组摘要提示中向任务模型要求的中文字数上限（≤N 字）。 |
 | `AIVORY_RAG_COLLECT_DOC_HINTS` | `int` | `120` | `rag/rag.go:74` | 路由器文档提示行中为消解指代而保留的每个文档正文的前导字节数。 |
 | `AIVORY_RAG_COLLECT_DOC_HINTS_2` | `int` | `12` | `rag/rag.go:75` | 为检索路由器收集的每文档提示行的最大数量。 |
+| `AIVORY_RAG_RETRIEVAL_NEIGHBOR_CHUNKS` | `int` | `1` | `rag/rag.go:77` | 每个检索命中的子块，从同一父块按文档顺序额外带入的相邻子块数量。 |
 | `AIVORY_RAG_FUSE_RECIPROCAL_RANK` | `int` | `60` | `rag/rag.go:1427` | 融合向量与关键词两路检索的倒数排名融合公式 1/(rank+k) 中的排名常数 k。 |
 | `AIVORY_RAG_RETRIEVED_SNIPPET_CHARS` | `int` | `2000` | `rag/rag.go:1520` | expandHit 在注入前围绕每个检索命中块构建的上下文窗口字节预算。 |
 | `AIVORY_RAG_CHILD_TARGET_CHARS` | `int` | `2000` | `rag/rag.go:1757` | 合并切分原子单元时每个嵌入子块所趋向的目标字节长度。 |

@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -252,6 +253,8 @@ func docExt(filename, docPath string) string {
 // officeXMLZipEntryReadCap bounds a single DOCX/PPTX zip-entry read.
 var officeXMLZipEntryReadCap = envcfg.Int64("AIVORY_RAG_OFFICE_XML_ZIP_ENTRY_READ_CAP", 16*1024*1024)
 
+var errZipEntryTooLarge = errors.New("zip entry exceeds configured read cap")
+
 // extractOfficeXML pulls plain text out of a DOCX/PPTX (both are ZIP+XML) using
 // the standard library only, and reports whether the archive embeds any images
 // (a media/ entry). Since §4.11-C latency-first the image flag no longer routes
@@ -288,7 +291,10 @@ func extractOfficeXML(docPath, ext string) (text string, hasImages bool, ok bool
 		}
 		raw, rerr := readZipEntry(f, officeXMLZipEntryReadCap)
 		if rerr != nil {
-			continue
+			// Never continue with only the entries read before a capped XML
+			// entry. That would mark a DOCX/PPTX as successfully extracted while
+			// silently dropping content after the cap.
+			return "", hasImages, false
 		}
 		if s := stripOfficeXML(string(raw)); strings.TrimSpace(s) != "" {
 			bodyParts = append(bodyParts, s)
@@ -303,7 +309,19 @@ func readZipEntry(f *zip.File, max int64) ([]byte, error) {
 		return nil, err
 	}
 	defer rc.Close()
-	return io.ReadAll(io.LimitReader(rc, max))
+	if max <= 0 {
+		return io.ReadAll(rc)
+	}
+	// Read one extra byte so hitting the cap is distinguishable from an entry
+	// that legitimately ends at exactly max bytes.
+	b, err := io.ReadAll(io.LimitReader(rc, max+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(b)) > max {
+		return nil, errZipEntryTooLarge
+	}
+	return b, nil
 }
 
 // officeBreakRe matches the block/cell boundaries we turn into whitespace so
@@ -900,11 +918,17 @@ func minerUDownloadAndUnpack(ctx context.Context, zipURL string) (*MinerUResult,
 			if err != nil {
 				continue
 			}
-			b, err := io.ReadAll(io.LimitReader(rc, fullMdReadCapInsideZip))
+			// Read one byte beyond the cap and reject the result instead of
+			// passing truncated Markdown to chunking and retrieval.
+			b, err := io.ReadAll(io.LimitReader(rc, fullMdReadCapInsideZip+1))
 			rc.Close()
-			if err == nil {
-				markdown = string(b)
+			if err != nil {
+				return nil, err
 			}
+			if int64(len(b)) > fullMdReadCapInsideZip {
+				return nil, fmt.Errorf("mineru: full.md exceeds configured read cap (%d bytes)", fullMdReadCapInsideZip)
+			}
+			markdown = string(b)
 		case strings.HasPrefix(lower, "images/") || strings.Contains(lower, "/images/"):
 			images = append(images, imgEntry{basename: base, mimeType: guessImageMime(base)})
 		}
