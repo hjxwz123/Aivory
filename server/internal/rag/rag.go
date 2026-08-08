@@ -74,6 +74,7 @@ var (
 	mapReduceSummaryChars       = envcfg.Int("AIVORY_RAG_MAP_REDUCE_SUMMARISE", 200)
 	docHintFirstContentCap      = envcfg.Int("AIVORY_RAG_COLLECT_DOC_HINTS", 120)
 	docHintsMaxCount            = envcfg.Int("AIVORY_RAG_COLLECT_DOC_HINTS_2", 12)
+	retrievalNeighborChunks     = envcfg.Int("AIVORY_RAG_RETRIEVAL_NEIGHBOR_CHUNKS", 1)
 )
 
 var ErrBillingRecord = errors.New("rag billing record failed")
@@ -1181,45 +1182,69 @@ func (s *Service) Retrieve(ctx context.Context, userID, convID string, kbIDs []s
 
 	cfg := s.ragSettings()
 	ranked := fuseReciprocalRank(cands)
+	maxResults := 0
+	if !cfg.DynamicTopK {
+		maxResults = cfg.TopK
+		if maxResults <= 0 {
+			maxResults = topK
+		}
+	}
 	if cfg.DynamicTopK {
-		// Inject EVERY hit whose cosine similarity clears the cutoff — no fixed K,
-		// no cap (§admin RAG). Keyword-only hits (sim 0) don't qualify here.
+		// Inject every semantic hit whose cosine similarity clears the cutoff — no
+		// fixed K, no cap (§admin RAG). Keep an explicit keyword-only hit as well:
+		// short source references can be absent from the dense leg (or a legacy
+		// Qdrant text index) while still being an unambiguous document match.
 		cut := float32(cfg.SimThreshold)
 		kept := make([]retrievalCandidate, 0, len(ranked))
 		for _, c := range ranked {
-			if c.sim >= cut {
+			if c.sim >= cut || (c.lexicalMatch && c.bm > 0) {
 				kept = append(kept, c)
 			}
 		}
 		ranked = kept
-	} else {
-		k := cfg.TopK
-		if k <= 0 {
-			k = topK
-		}
-		if k > 0 && len(ranked) > k {
-			ranked = ranked[:k]
-		}
 	}
 
+	// Keep the full ranked candidate pool until windows are assembled. A fixed-K
+	// slice taken before expansion could spend all slots on siblings from one
+	// parent and prevent a later exact child from contributing its context.
+	scopeRows, err := store.ListChunksInScope(ctx, s.db, kbIDs, convID)
+	if err != nil {
+		return nil, err
+	}
+	childGroups := groupChildChunks(scopeRows)
+
 	result := []Snippet{}
-	seenParent := map[string]bool{}
+	seenChildren := map[string]bool{}
 	for _, c := range ranked {
-		// Small-to-big: inject a parent-window that is guaranteed to include the
-		// matched child. Parent chunks are capped at ingest time, so blindly using
-		// the parent head can hide a hit that lives deep in a long section; if the
-		// child is outside the stored parent window, expandHit falls back to the
-		// child itself. One snippet per parent keeps distinct sections from being
-		// crowded out.
+		if seenChildren[c.chunkID] {
+			continue
+		}
+		if maxResults > 0 && len(result) >= maxResults {
+			break
+		}
+
+		// A match often lands at a structural boundary, such as prose next to its
+		// display equation. Include a small contiguous child window from the same
+		// parent so the model receives
+		// the complete local argument instead of one isolated fragment. We mark
+		// only the child IDs actually included, allowing a later non-adjacent hit
+		// from the same parent to remain eligible.
+		window := childWindow(childGroups[childGroupKey(c.documentID, c.parentID)], c.chunkID, retrievalNeighborChunks)
 		snippet := c.content
-		if c.parentID != "" {
-			if seenParent[c.parentID] {
-				continue
-			}
-			seenParent[c.parentID] = true
+		includedIDs := []string{c.chunkID}
+		if len(window) > 0 {
+			snippet = joinChildWindow(window)
+			includedIDs = includedChunkIDs(window)
+		} else if c.parentID != "" {
+			// Keep the old focused-parent fallback for legacy rows that cannot be
+			// associated with a sibling window. The child itself remains the source
+			// of truth when the parent is truncated before the hit.
 			if parent, _ := store.GetChunkContent(ctx, s.db, c.parentID); strings.TrimSpace(parent) != "" {
 				snippet = expandHit(parent, c.content, retrievedSnippetChars)
 			}
+		}
+		for _, id := range includedIDs {
+			seenChildren[id] = true
 		}
 		result = append(result, Snippet{
 			ID:      c.chunkID,
@@ -1231,6 +1256,85 @@ func (s *Service) Retrieve(ctx context.Context, userID, convID string, kbIDs []s
 		})
 	}
 	return result, nil
+}
+
+// childGroupKey keeps parent IDs document-local. Parent IDs are currently
+// globally unique, but including the document makes this helper robust across
+// legacy imports and easier to reason about in mixed KB/conversation scopes.
+func childGroupKey(documentID, parentID string) string {
+	if parentID == "" {
+		return ""
+	}
+	return documentID + "\x00" + parentID
+}
+
+func groupChildChunks(rows []store.Chunk) map[string][]store.Chunk {
+	groups := map[string][]store.Chunk{}
+	for _, row := range rows {
+		if row.ChunkType == "parent" || row.ParentID == "" {
+			continue
+		}
+		key := childGroupKey(row.DocumentID, row.ParentID)
+		groups[key] = append(groups[key], row)
+	}
+	for key := range groups {
+		sort.SliceStable(groups[key], func(i, j int) bool {
+			return groups[key][i].Seq < groups[key][j].Seq
+		})
+	}
+	return groups
+}
+
+// childWindow returns the matched child plus up to radius adjacent children in
+// document order. It never crosses a parent boundary.
+func childWindow(rows []store.Chunk, chunkID string, radius int) []store.Chunk {
+	if len(rows) == 0 {
+		return nil
+	}
+	if radius < 0 {
+		radius = 0
+	}
+	center := -1
+	for i := range rows {
+		if rows[i].ID == chunkID {
+			center = i
+			break
+		}
+	}
+	if center < 0 {
+		return nil
+	}
+	start, end := center-radius, center+radius+1
+	if start < 0 {
+		start = 0
+	}
+	if end > len(rows) {
+		end = len(rows)
+	}
+	return rows[start:end]
+}
+
+func includedChunkIDs(rows []store.Chunk) []string {
+	ids := make([]string, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.ID)
+	}
+	return ids
+}
+
+func joinChildWindow(rows []store.Chunk) string {
+	var b strings.Builder
+	for _, row := range rows {
+		text := strings.TrimSpace(row.Content)
+		if text == "" {
+			continue
+		}
+		if b.Len() > 0 {
+			b.WriteString("\n\n")
+		}
+		b.WriteString(text)
+	}
+	return b.String()
 }
 
 // keywordOnlyUnembedded returns in-scope CHILD chunks that were intentionally not
@@ -1260,16 +1364,39 @@ func (s *Service) keywordOnlyUnembedded(ctx context.Context, kbIDs []string, con
 			continue
 		}
 		out = append(out, retrievalCandidate{
-			chunkID:    r.ID,
-			documentID: r.DocumentID,
-			parentID:   r.ParentID,
-			filename:   r.Filename,
-			content:    r.Content,
-			sim:        0,
-			bm:         bm,
+			chunkID:      r.ID,
+			documentID:   r.DocumentID,
+			parentID:     r.ParentID,
+			filename:     r.Filename,
+			content:      r.Content,
+			sim:          0,
+			bm:           bm,
+			lexicalMatch: true,
 		})
 	}
-	return out
+	return limitLexicalCandidates(out)
+}
+
+// limitLexicalCandidates bounds the relational fallback to the same order of
+// magnitude as the Qdrant keyword leg. Without a text index, a common token
+// could otherwise turn a dynamic-topK query into an unbounded full-context
+// injection. Exact references still win because the candidates are sorted by
+// their lexical overlap before the cap.
+func limitLexicalCandidates(cands []retrievalCandidate) []retrievalCandidate {
+	limit := keywordSearchLegLimit
+	if limit <= 0 {
+		limit = 30
+	}
+	sort.SliceStable(cands, func(i, j int) bool {
+		if cands[i].bm != cands[j].bm {
+			return cands[i].bm > cands[j].bm
+		}
+		return cands[i].chunkID < cands[j].chunkID
+	})
+	if len(cands) > limit {
+		return cands[:limit]
+	}
+	return cands
 }
 
 func (s *Service) vectorScopeHasEmbeddedChunks(ctx context.Context, scope vector.Scope) bool {
@@ -1344,14 +1471,16 @@ func (s *Service) searchScope(ctx context.Context, userID, convID string, em Emb
 		if !ok || strings.TrimSpace(row.EmbeddingModel) != emName {
 			continue
 		}
+		bm := keywordScore(terms, row.Content)
 		merged[row.ID] = retrievalCandidate{
-			chunkID:    row.ID,
-			documentID: row.DocumentID,
-			parentID:   row.ParentID,
-			filename:   row.Filename,
-			content:    row.Content,
-			sim:        h.Score,
-			bm:         keywordScore(terms, row.Content),
+			chunkID:      row.ID,
+			documentID:   row.DocumentID,
+			parentID:     row.ParentID,
+			filename:     row.Filename,
+			content:      row.Content,
+			sim:          h.Score,
+			bm:           bm,
+			lexicalMatch: bm > 0,
 		}
 	}
 	for _, h := range kwHits {
@@ -1361,18 +1490,48 @@ func (s *Service) searchScope(ctx context.Context, userID, convID string, em Emb
 		}
 		if cur, ok := merged[row.ID]; ok {
 			cur.bm += keywordScore(terms, row.Content)
+			cur.lexicalMatch = true
 			merged[row.ID] = cur
 			continue
 		}
+		bm := keywordScore(terms, row.Content)
 		merged[row.ID] = retrievalCandidate{
-			chunkID:    row.ID,
-			documentID: row.DocumentID,
-			parentID:   row.ParentID,
-			filename:   row.Filename,
-			content:    row.Content,
-			sim:        0,
-			bm:         keywordScore(terms, row.Content),
+			chunkID:      row.ID,
+			documentID:   row.DocumentID,
+			parentID:     row.ParentID,
+			filename:     row.Filename,
+			content:      row.Content,
+			sim:          0,
+			bm:           bm,
+			lexicalMatch: true,
 		}
+	}
+	// Qdrant's text index is best-effort (and older collections may not have
+	// one); make exact lexical references reliable even when that leg returns
+	// nothing. We already loaded the live chunk rows for the consistency check,
+	// so this scan adds no database round-trip. Only add chunks absent from both
+	// Qdrant legs to avoid double-counting their keyword score.
+	lexicalFallback := []retrievalCandidate{}
+	for _, row := range live {
+		if _, ok := merged[row.ID]; ok {
+			continue
+		}
+		bm := keywordScore(terms, row.Content)
+		if bm <= 0 {
+			continue
+		}
+		lexicalFallback = append(lexicalFallback, retrievalCandidate{
+			chunkID:      row.ID,
+			documentID:   row.DocumentID,
+			parentID:     row.ParentID,
+			filename:     row.Filename,
+			content:      row.Content,
+			bm:           bm,
+			lexicalMatch: true,
+		})
+	}
+	for _, c := range limitLexicalCandidates(lexicalFallback) {
+		merged[c.chunkID] = c
 	}
 	out := make([]retrievalCandidate, 0, len(merged))
 	for _, c := range merged {
@@ -1482,13 +1641,14 @@ func appendUniqueCandidates(dst, src []retrievalCandidate) []retrievalCandidate 
 // Retrieve. Qdrant dense and keyword legs both produce these so the fusion +
 // small-to-big expansion runs identically.
 type retrievalCandidate struct {
-	chunkID    string
-	documentID string
-	parentID   string
-	filename   string
-	content    string
-	sim        float32 // raw vector similarity (higher = closer)
-	bm         float32 // keyword overlap score
+	chunkID      string
+	documentID   string
+	parentID     string
+	filename     string
+	content      string
+	sim          float32 // raw vector similarity (higher = closer)
+	bm           float32 // keyword overlap score
+	lexicalMatch bool    // candidate has positive lexical evidence from stored content or a keyword leg
 }
 
 // fuseReciprocalRank re-orders candidates by reciprocal-rank fusion of the
@@ -1503,16 +1663,46 @@ func fuseReciprocalRank(cands []retrievalCandidate) []retrievalCandidate {
 	}
 	fused := make([]float32, n)
 	// Vector leg: rank by similarity, accumulate 1/(rank+k).
-	sort.SliceStable(idx, func(a, b int) bool { return cands[idx[a]].sim > cands[idx[b]].sim })
+	sort.SliceStable(idx, func(a, b int) bool {
+		left, right := cands[idx[a]], cands[idx[b]]
+		if left.sim != right.sim {
+			return left.sim > right.sim
+		}
+		if left.bm != right.bm {
+			return left.bm > right.bm
+		}
+		return left.chunkID < right.chunkID
+	})
 	for rank, i := range idx {
 		fused[i] += 1 / float32(rank+k)
 	}
 	// Keyword leg: rank by BM-ish score, accumulate 1/(rank+k).
-	sort.SliceStable(idx, func(a, b int) bool { return cands[idx[a]].bm > cands[idx[b]].bm })
+	sort.SliceStable(idx, func(a, b int) bool {
+		left, right := cands[idx[a]], cands[idx[b]]
+		if left.bm != right.bm {
+			return left.bm > right.bm
+		}
+		if left.sim != right.sim {
+			return left.sim > right.sim
+		}
+		return left.chunkID < right.chunkID
+	})
 	for rank, i := range idx {
 		fused[i] += 1 / float32(rank+k)
 	}
-	sort.SliceStable(idx, func(a, b int) bool { return fused[idx[a]] > fused[idx[b]] })
+	sort.SliceStable(idx, func(a, b int) bool {
+		left, right := cands[idx[a]], cands[idx[b]]
+		if fused[idx[a]] != fused[idx[b]] {
+			return fused[idx[a]] > fused[idx[b]]
+		}
+		if left.bm != right.bm {
+			return left.bm > right.bm
+		}
+		if left.sim != right.sim {
+			return left.sim > right.sim
+		}
+		return left.chunkID < right.chunkID
+	})
 	out := make([]retrievalCandidate, n)
 	for pos, i := range idx {
 		out[pos] = cands[i]
@@ -1594,8 +1784,8 @@ var retrievedSnippetChars = envcfg.Int("AIVORY_RAG_RETRIEVED_SNIPPET_CHARS", 200
 // chunk, with surrounding section context when available. The old small-to-big
 // path returned snippetOf(parent, …) — i.e. always the SECTION HEAD — so a hit
 // located deep in a long section, or past the parent's truncation, was dropped
-// from what the model saw (it "matched 案例98 but couldn't answer"). Here we find
-// the child inside its parent section and center a budget-sized window on it;
+// from what the model saw. Here we find the child inside its parent section and
+// center a budget-sized window on it;
 // when the child lies beyond the parent's truncation we return the child itself.
 func expandHit(parent, child string, budget int) string {
 	child = strings.TrimSpace(child)
@@ -1663,13 +1853,11 @@ func breadcrumbOf(s string) string {
 // embeddings are byte-for-byte unchanged), but spaceless CJK is segmented into
 // overlapping bigrams (plus any embedded digits/Latin).
 //
-// Why: the old `[\p{L}\p{N}_]+` regex collapsed an entire Chinese phrase into ONE
-// token (Han chars are \p{L} with no spaces between them). `keywordScore` then did
-// `strings.Count(doc, term)` with that whole-phrase term, which never matched, and
-// the FNV-hashed embedder put the whole phrase in one bucket — so a reference
-// buried inside the phrase, e.g. "案例98" inside "讲解案例98及相关知识点", was
-// unretrievable. Bigram segmentation makes "案例"/"98"/"知识"… matchable units that
-// a query and a document share. (§4.11 CJK retrieval)
+// Why: the old `[\p{L}\p{N}_]+` regex collapsed an entire spaceless CJK phrase
+// into one token. `keywordScore` then searched for that whole phrase, which
+// often did not match a shorter reference, and the FNV-hashed embedder put the
+// phrase in one bucket. Bigram segmentation makes pieces of mixed-script text
+// matchable units that a query and a document can share. (§4.11 CJK retrieval)
 func tokenize(s string) []string {
 	re := regexp.MustCompile(`[\p{L}\p{N}_]+`)
 	runs := re.FindAllString(s, -1)
@@ -1729,8 +1917,8 @@ func countLines(s string) int {
 }
 
 // cjkGrams segments a mixed CJK run: maximal CJK spans become overlapping bigrams
-// (a lone CJK char → itself), and ASCII/Latin/digit spans are kept whole (so an
-// id like "98" inside "案例98" survives as its own matchable token).
+// (a lone CJK char → itself), and ASCII/Latin/digit spans are kept whole so an
+// identifier inside a mixed CJK run remains independently matchable.
 func cjkGrams(run string) []string {
 	runes := []rune(run)
 	out := []string{}
@@ -1948,7 +2136,7 @@ type atom struct {
 var (
 	fenceRe = regexp.MustCompile("(?ms)^(\\s{0,3}```[^\n]*\\n.*?```)")
 	tableRe = regexp.MustCompile(`(?m)^\|.*\|\s*$`)
-	mathRe  = regexp.MustCompile(`(?ms)^\\\$\\\$.*?\\\$\\\$`)
+	mathRe  = regexp.MustCompile(`(?ms)\$\$.*?\$\$`)
 	imageRe = regexp.MustCompile(`!\[[^\]]*\]\([^)]+\)`)
 )
 
@@ -2366,6 +2554,20 @@ func (s *Service) RouteAndRetrieve(ctx context.Context, userID, convID string, k
 	}
 	switch decision.Strategy {
 	case "none":
+		// A router can incorrectly classify a short follow-up as unrelated. If
+		// the user's words occur in an in-scope chunk, prefer deterministic lexical
+		// evidence over that classification so an explicit source reference cannot
+		// make the document disappear from the prompt.
+		if lexicalDocumentMatch(scope, userText) {
+			out, rerr := s.Retrieve(ctx, userID, convID, kbIDs, userText, cfg.TopK)
+			if rerr != nil {
+				return withPinned(out), decision, rerr
+			}
+			if len(out) > 0 {
+				decision.Strategy = "retrieve"
+				return withPinned(out), decision, nil
+			}
+		}
 		// Even when the router sees no need to retrieve, the pinned (small,
 		// always-on) docs are still injected — the user uploaded them on purpose.
 		return withPinned(nil), decision, nil
@@ -2377,33 +2579,123 @@ func (s *Service) RouteAndRetrieve(ctx context.Context, userID, convID string, k
 		// retrieve: run each rewritten query, merge + dedupe. With dynamic top-K
 		// the per-query result is already similarity-bounded, so don't cap the
 		// merge; with fixed K, cap the merged set at K.
-		seen := map[string]struct{}{}
-		merged := []Snippet{}
 		queries := decision.Queries
 		if len(queries) == 0 {
 			queries = []string{userText}
+		} else if lexicalDocumentMatch(scope, userText) {
+			// Preserve an exact user reference ahead of paraphrases when the
+			// source text itself is present in the document. This matters when
+			// TopK=1: a broad rewrite must not occupy the only result slot.
+			queries = prioritizeQuery(queries, userText)
 		}
+		subsets := make([][]Snippet, 0, len(queries))
+		var firstErr error
 		for _, q := range queries {
 			subset, err := s.Retrieve(ctx, userID, convID, kbIDs, q, cfg.TopK)
 			if err != nil {
+				if firstErr == nil {
+					firstErr = err
+				}
 				continue
 			}
+			subsets = append(subsets, subset)
+		}
+		// Run every rewritten query before applying the fixed-K cap. A broad first
+		// rewrite can fill TopK with weak or adjacent sections; round-robin merging
+		// reserves room for a later exact rewrite instead of letting the first query
+		// crowd it out.
+		merged := mergeRetrievedSnippets(subsets, cfg.TopK, cfg.DynamicTopK)
+		return withPinned(merged), decision, firstErr
+	}
+}
+
+// mergeRetrievedSnippets deduplicates rewritten-query results while preserving
+// a little breadth across queries. Fixed-K mode uses round-robin ranks so an
+// exact later rewrite gets a slot even when an earlier broad rewrite is full of
+// adjacent sections. The loop is exhaustion-based: an overlapping rank may add
+// nothing while a later rank still contains a unique hit.
+func mergeRetrievedSnippets(subsets [][]Snippet, topK int, dynamic bool) []Snippet {
+	seen := map[string]struct{}{}
+	merged := []Snippet{}
+	appendOne := func(sn Snippet) {
+		if _, ok := seen[sn.ID]; ok {
+			return
+		}
+		seen[sn.ID] = struct{}{}
+		merged = append(merged, sn)
+	}
+
+	if dynamic {
+		for _, subset := range subsets {
 			for _, sn := range subset {
-				if _, ok := seen[sn.ID]; ok {
-					continue
-				}
-				seen[sn.ID] = struct{}{}
-				merged = append(merged, sn)
+				appendOne(sn)
 			}
-			if !cfg.DynamicTopK && len(merged) >= cfg.TopK {
+		}
+		return merged
+	}
+
+	for rank := 0; ; rank++ {
+		exhausted := true
+		for _, subset := range subsets {
+			if rank >= len(subset) {
+				continue
+			}
+			exhausted = false
+			appendOne(subset[rank])
+			if topK > 0 && len(merged) >= topK {
 				break
 			}
 		}
-		if !cfg.DynamicTopK && len(merged) > cfg.TopK {
-			merged = merged[:cfg.TopK]
+		if (topK > 0 && len(merged) >= topK) || exhausted {
+			break
 		}
-		return withPinned(merged), decision, nil
 	}
+	return merged
+}
+
+// lexicalDocumentMatch is the conservative router safety net: it only returns
+// true when at least one non-parent chunk shares a token with the latest user
+// message. This keeps ordinary unrelated questions on the router's `none` path
+// while preventing a false negative from hiding an explicit source reference.
+func lexicalDocumentMatch(scope []store.Chunk, userText string) bool {
+	terms := tokenize(strings.ToLower(userText))
+	if len(terms) == 0 {
+		return false
+	}
+	for _, c := range scope {
+		if c.ChunkType == "parent" {
+			continue
+		}
+		if keywordScore(terms, c.Content) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func prioritizeQuery(queries []string, want string) []string {
+	want = strings.TrimSpace(want)
+	if want == "" {
+		return queries
+	}
+	match := -1
+	for i, q := range queries {
+		if strings.EqualFold(strings.TrimSpace(q), want) {
+			match = i
+			break
+		}
+	}
+	if match == 0 {
+		return queries
+	}
+	out := make([]string, 0, len(queries)+1)
+	out = append(out, want)
+	for i, q := range queries {
+		if i != match {
+			out = append(out, q)
+		}
+	}
+	return out
 }
 
 // fullTextSnippets returns the scope's child chunks in document order, each in

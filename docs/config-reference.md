@@ -179,6 +179,7 @@
 | `AIVORY_RAG_MAP_REDUCE_SUMMARISE` | `int` | `200` | `rag/rag.go:73` | Chinese-character cap (<=N zi) requested in the map-reduce per-group summarization prompt sent to the task model. |
 | `AIVORY_RAG_COLLECT_DOC_HINTS` | `int` | `120` | `rag/rag.go:74` | Leading bytes of each document's content kept in the router's doc-hint line for reference resolution. |
 | `AIVORY_RAG_COLLECT_DOC_HINTS_2` | `int` | `12` | `rag/rag.go:75` | Maximum number of per-document hint lines collected for the retrieval router. |
+| `AIVORY_RAG_RETRIEVAL_NEIGHBOR_CHUNKS` | `int` | `1` | `rag/rag.go:77` | Number of adjacent child chunks from the same parent included around each retrieved child. |
 | `AIVORY_RAG_FUSE_RECIPROCAL_RANK` | `int` | `60` | `rag/rag.go:1427` | Rank constant k in the 1/(rank+k) reciprocal-rank fusion blending the vector and keyword retrieval legs. |
 | `AIVORY_RAG_RETRIEVED_SNIPPET_CHARS` | `int` | `2000` | `rag/rag.go:1520` | Byte budget for the context window expandHit builds around each retrieved chunk before injection. |
 | `AIVORY_RAG_CHILD_TARGET_CHARS` | `int` | `2000` | `rag/rag.go:1757` | Target byte length each embedded child chunk is grown toward when merging split atoms. |

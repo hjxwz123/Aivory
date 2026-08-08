@@ -45,8 +45,8 @@ func TestEstimateTokensCJK(t *testing.T) {
 	if got := estimateTokens(en); got < 5 || got > 8 {
 		t.Fatalf("ASCII estimate = %d, want ~6", got)
 	}
-	// Mixed: 2 CJK runes (案例) + "98 case" (7 ASCII bytes / 4 = 1) = 3.
-	if got := estimateTokens("案例98 case"); got != 3 {
+	// Mixed: 2 CJK runes plus "98 case" (7 ASCII bytes / 4 = 1) = 3.
+	if got := estimateTokens("甲乙98 case"); got != 3 {
 		t.Fatalf("mixed estimate = %d, want 3", got)
 	}
 }
@@ -67,6 +67,19 @@ func TestChunkerSplitsLongUnpunctuatedParagraph(t *testing.T) {
 		if len(child) > childTargetChars+chunkOverlapChars+8 {
 			t.Fatalf("child %d too large: %d", i, len(child))
 		}
+	}
+}
+
+func TestDisplayMathInsideParagraphRemainsAtomic(t *testing.T) {
+	content := "leading text\n$$\nx^2 + y^2 = z^2\n$$\ntrailing text"
+	atoms := splitProtectedAtoms(content)
+	if len(atoms) != 1 || !atoms[0].atomic {
+		t.Fatalf("display math paragraph was not protected: %+v", atoms)
+	}
+
+	children := mergeAtomsIntoChildren(atoms, 12)
+	if len(children) != 1 || children[0] != content {
+		t.Fatalf("protected display math was split: %#v", children)
 	}
 }
 
