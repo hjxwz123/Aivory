@@ -73,6 +73,11 @@
     "dontShowAgain": "次回から表示しない",
     "requiredCountdown": "あと{{count}}秒で閉じられます"
   },
+  "creditAdjustment": {
+    "title": "永久クレジットの調整",
+    "add": "永久クレジットが {{amount}} 追加されました",
+    "remove": "永久クレジットが {{amount}} 減額されました"
+  },
   "aria": {
     "close": "閉じる",
     "dismiss": "閉じる",

@@ -39,6 +39,18 @@ CREATE TABLE IF NOT EXISTS users (
   created_at    BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
 );
 
+CREATE TABLE IF NOT EXISTS credit_adjustment_notifications (
+  id            TEXT PRIMARY KEY,
+  user_id       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  direction     TEXT NOT NULL CHECK(direction IN ('add','remove')),
+  amount_micros BIGINT NOT NULL CHECK(amount_micros > 0),
+  reason        TEXT NOT NULL DEFAULT '',
+  created_at    BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint),
+  claimed_at    BIGINT NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_credit_adjustment_notifications_user_pending
+  ON credit_adjustment_notifications(user_id, claimed_at, created_at, id);
+
 -- Immutable successful-login audit trail (see schema.sql).
 CREATE TABLE IF NOT EXISTS login_histories (
   id         TEXT PRIMARY KEY,
