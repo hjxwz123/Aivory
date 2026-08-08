@@ -18,11 +18,10 @@ export const SelectTrigger = forwardRef<
         'inline-flex items-center justify-between gap-2 h-10 px-3.5 rounded-[10px]',
         'bg-[var(--color-surface-sunken)] border border-[var(--color-border)]',
         'text-sm text-[var(--color-fg)]',
-        'transition-[border-color,box-shadow] duration-150',
-        // focus-VISIBLE only: a mouse click leaves the trigger focused, and a
-        // 3px glow ring on plain :focus looked like a permanent "selected"
-        // outline. Keyboard users still get the ring (§2.6 a11y).
-        'focus:outline-none focus-visible:border-[var(--color-border-strong)] focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+        'transition-[border-color,background-color] duration-150',
+        // Keep the same quiet focus treatment as text inputs: the border
+        // carries the state, without an outer glow around the control.
+        'focus:outline-none focus:border-[var(--color-border-strong)] focus:bg-[var(--color-surface)]',
         'data-[placeholder]:text-[var(--color-fg-faint)]',
         'data-[disabled]:opacity-50 data-[disabled]:cursor-not-allowed',
         'w-full',

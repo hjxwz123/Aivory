@@ -251,7 +251,7 @@ export function InlineThreadLayer({ conversationId, scrollRef }: InlineThreadLay
                 }
               }}
               placeholder={t('inline.placeholder', { defaultValue: 'Ask about this…' })}
-              className="flex-1 min-w-0 resize-none rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg)] px-2.5 py-1.5 text-[13px] text-[var(--color-fg)] placeholder:text-[var(--color-fg-faint)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+              className="flex-1 min-w-0 resize-none rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg)] px-2.5 py-1.5 text-[13px] text-[var(--color-fg)] placeholder:text-[var(--color-fg-faint)] outline-none focus:border-[var(--color-border-strong)] focus:bg-[var(--color-surface)]"
             />
             <button
               type="button"

@@ -96,12 +96,12 @@ export function PuzzleCaptcha({ data, loading, status, onChange, onRefresh }: Pu
 
   const hint =
     status === 'verifying'
-      ? t('register.captchaVerifying', { defaultValue: '验证中…' })
+      ? t('register.captchaLoading')
       : status === 'success'
-        ? t('register.captchaSuccess', { defaultValue: '验证成功' })
+        ? t('register.captchaSuccess')
         : status === 'error'
-          ? t('register.captchaWrong', { defaultValue: '验证失败，请重试' })
-          : t('register.captchaSlideHint', { defaultValue: '拖动滑块完成拼图' })
+          ? t('register.captchaWrong')
+          : t('register.captchaSlide')
 
   return (
     <div className="flex flex-col gap-3">
@@ -141,7 +141,7 @@ export function PuzzleCaptcha({ data, loading, status, onChange, onRefresh }: Pu
           type="button"
           onClick={onRefresh}
           disabled={loading || status === 'verifying'}
-          aria-label={t('register.captchaRefresh', { defaultValue: 'Refresh' })}
+          aria-label={t('register.captchaRefresh')}
           className="absolute right-2 top-2 inline-flex size-9 items-center justify-center rounded-[10px] bg-black/45 text-white backdrop-blur-sm hover:bg-black/60 interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 disabled:opacity-60"
         >
           <RefreshCw size={15} aria-hidden className={cn(loading && 'animate-[spin_0.8s_linear_infinite]')} />
@@ -180,7 +180,7 @@ export function PuzzleCaptcha({ data, loading, status, onChange, onRefresh }: Pu
           aria-valuemin={0}
           aria-valuemax={100}
           aria-valuenow={Math.round(fraction * 100)}
-          aria-label={t('register.captchaSlideHint', { defaultValue: '拖动滑块完成拼图' })}
+          aria-label={t('register.captchaSlide')}
           disabled={!data || locked}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}

@@ -2258,10 +2258,8 @@ export function Composer({
       className={cn(
         'group/composer relative min-w-0 w-full max-w-full',
         'rounded-popup border-0 bg-[var(--color-surface)]',
-        'shadow-[var(--shadow-sm)] transition-[box-shadow] duration-200',
-        dragOver
-          ? 'ring-2 ring-[var(--color-tool-selection)] shadow-[var(--shadow-md)]'
-          : 'focus-within:shadow-[var(--shadow-md)]',
+        'shadow-[var(--shadow-sm)]',
+        dragOver && 'ring-2 ring-[var(--color-tool-selection)] shadow-[var(--shadow-md)]',
       )}
     >
       {/* Full-screen drag-and-drop overlay — shown while a file is dragged

@@ -421,9 +421,9 @@ export function FormulaEditorDialog({
             ref={fallbackFocusRef}
             tabIndex={-1}
             className={cn(
-              'formula-mathfield-host relative min-h-[6rem] rounded-[10px] bg-[var(--color-surface-sunken)] p-3',
-              'ring-1 ring-inset ring-[var(--color-border)] focus-within:ring-2 focus-within:ring-[var(--color-ring)]',
-              error && 'ring-[var(--color-danger)] focus-within:ring-[var(--color-danger)]',
+              'formula-mathfield-host relative min-h-[6rem] rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface-sunken)] p-3',
+              'transition-[border-color,background-color] duration-150 focus-within:border-[var(--color-border-strong)] focus-within:bg-[var(--color-surface)]',
+              error && 'border-[var(--color-danger)] focus-within:border-[var(--color-danger)]',
             )}
             aria-busy={loading || undefined}
             aria-label={t('composer.formula.inputLabel')}
