@@ -34,6 +34,21 @@ CREATE TABLE IF NOT EXISTS users (
   created_at    INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 );
 
+-- One-time notices created by administrator permanent-credit adjustments.
+-- claimed_at is set atomically when the signed-in user fetches the notice, so
+-- refreshes and other devices cannot display the same adjustment twice.
+CREATE TABLE IF NOT EXISTS credit_adjustment_notifications (
+  id            TEXT PRIMARY KEY,
+  user_id       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  direction     TEXT NOT NULL CHECK(direction IN ('add','remove')),
+  amount_micros INTEGER NOT NULL CHECK(amount_micros > 0),
+  reason        TEXT NOT NULL DEFAULT '',
+  created_at    INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+  claimed_at    INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_credit_adjustment_notifications_user_pending
+  ON credit_adjustment_notifications(user_id, claimed_at, created_at, id);
+
 -- Immutable successful-login audit trail. Unlike refresh_tokens, these rows
 -- survive logout/session rotation so administrators can review account access.
 CREATE TABLE IF NOT EXISTS login_histories (

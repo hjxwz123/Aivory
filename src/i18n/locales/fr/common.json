@@ -73,6 +73,11 @@
     "dontShowAgain": "Ne plus afficher cette annonce",
     "requiredCountdown": "Fermeture disponible dans {{count}} s"
   },
+  "creditAdjustment": {
+    "title": "Ajustement des crédits permanents",
+    "add": "{{amount}} crédits permanents ont été ajoutés à votre compte",
+    "remove": "{{amount}} crédits permanents ont été retirés de votre compte"
+  },
   "aria": {
     "close": "Fermer",
     "dismiss": "Ignorer",

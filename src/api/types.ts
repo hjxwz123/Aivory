@@ -45,7 +45,7 @@ export interface ApiUser {
   password_changed_at?: number
   /** Unix seconds of last authenticated activity. Drives admin online status. */
   last_seen_at?: number
-  /** Non-expiring credit balance (§ credits) — admin-editable on the users page. */
+  /** Non-expiring credit balance (§ credits) — admin-adjustable on the users page. */
   credits_permanent?: number
   /** Live timed-credit balance. Populated by the admin user-detail endpoint,
    *  not by the paginated users list. */
@@ -822,6 +822,14 @@ export interface ApiCredits {
   /** Total amount that can be spent now; never negative. */
   available?: number
   settlement_currency: string
+}
+
+export interface ApiCreditAdjustmentNotification {
+  id: string
+  direction: 'add' | 'remove'
+  amount: number
+  reason: string
+  created_at: number
 }
 
 /** A file referenced by a conversation (§ conversation files drawer). */

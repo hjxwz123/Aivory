@@ -21,6 +21,9 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
+import { SegmentedControl } from '@/components/ui/segmented-control'
+import { Switch } from '@/components/ui/switch'
+import { Textarea } from '@/components/ui/textarea'
 import { Pagination } from '@/components/ui/pagination'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { initials } from '@/components/ui/avatar.utils'
@@ -47,6 +50,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 const ONLINE_WINDOW_S = envNum('VITE_AIVORY_ONLINE_WINDOW_S', 300)
 
 type Role = 'user' | 'admin'
+type CreditOperation = 'add' | 'remove'
 
 export default function AdminUsers() {
   const { t } = useTranslation(['admin', 'common'])
@@ -76,7 +80,10 @@ export default function AdminUsers() {
   // Membership expiry as a yyyy-mm-dd date input value ('' = permanent).
   const [editExpiry, setEditExpiry] = useState('')
   const [editPassword, setEditPassword] = useState('')
-  const [editCredits, setEditCredits] = useState(0)
+  const [editCreditsOperation, setEditCreditsOperation] = useState<CreditOperation>('add')
+  const [editCreditsAmount, setEditCreditsAmount] = useState('')
+  const [editCreditsNotify, setEditCreditsNotify] = useState(false)
+  const [editCreditsReason, setEditCreditsReason] = useState('')
   const [saving, setSaving] = useState(false)
   // Reset-2FA button inside the edit dialog — the dialog stays open after
   // success, so guard against re-clicks that would fire duplicate calls/toasts.
@@ -279,7 +286,10 @@ export default function AdminUsers() {
     setEditGroup(u.group_id || (groups.find((g) => g.is_default)?.id ?? ''))
     setEditExpiry(expiryToInput(u.group_expires_at ?? 0))
     setEditPassword('')
-    setEditCredits(u.credits_permanent ?? 0)
+    setEditCreditsOperation('add')
+    setEditCreditsAmount('')
+    setEditCreditsNotify(false)
+    setEditCreditsReason('')
   }
 
   function closeInfo() {
@@ -333,6 +343,22 @@ export default function AdminUsers() {
       toast.error(t('admin:users.errors.passwordShort'))
       return
     }
+    const creditAmountText = editCreditsAmount.trim()
+    const creditAmount = Number(creditAmountText)
+    if (creditAmountText && (
+      !Number.isFinite(creditAmount) || creditAmount <= 0 || Math.round(creditAmount * 1_000_000) <= 0
+    )) {
+      toast.error(t('admin:users.errors.creditAmountRequired'))
+      return
+    }
+    if (editCreditsNotify && !creditAmountText) {
+      toast.error(t('admin:users.errors.creditAmountRequired'))
+      return
+    }
+    if (editCreditsNotify && !editCreditsReason.trim()) {
+      toast.error(t('admin:users.errors.creditReasonRequired'))
+      return
+    }
     setSaving(true)
     try {
       if (normalizedEmail !== editRow.email.trim().toLowerCase()) {
@@ -352,9 +378,16 @@ export default function AdminUsers() {
         await adminApi.setUserPassword(editRow.id, editPassword)
         toast.success(t('admin:users.passwordSet'))
       }
-      if (editCredits !== (editRow.credits_permanent ?? 0)) {
-        await adminApi.setUserCredits(editRow.id, Math.max(0, editCredits))
-        toast.success(t('admin:users.creditsSaved'))
+      if (creditAmountText) {
+        const adjustment = await adminApi.adjustUserCredits(editRow.id, {
+          operation: editCreditsOperation,
+          amount: creditAmount,
+          notify_user: editCreditsNotify,
+          reason: editCreditsNotify ? editCreditsReason.trim() : '',
+        })
+        toast.success(t(editCreditsOperation === 'add' ? 'admin:users.creditsAdded' : 'admin:users.creditsRemoved', {
+          amount: formatCredits(adjustment.amount),
+        }))
       }
       setEditRow(null)
       await reload()
@@ -363,6 +396,10 @@ export default function AdminUsers() {
         toast.error(t('admin:users.errors.emailExists'))
       } else if (e instanceof ApiError && e.message === 'invalid_email') {
         toast.error(t('admin:users.errors.emailRequired'))
+      } else if (e instanceof ApiError && e.message === 'insufficient permanent credits') {
+        toast.error(t('admin:users.errors.insufficientPermanentCredits'))
+      } else if (e instanceof ApiError && e.message === 'invalid credit notification') {
+        toast.error(t('admin:users.errors.creditReasonRequired'))
       } else {
         toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
       }
@@ -752,19 +789,74 @@ export default function AdminUsers() {
                   autoComplete="new-password"
                 />
               </Field>
-              <Field
-                label={t('admin:users.fields.permanentCredits')}
-                htmlFor="e-credits"
-                hint={t('admin:users.fields.permanentCreditsHint')}
-              >
-                <Input
-                  id="e-credits"
-                  type="number"
-                  min={0}
-                  value={String(editCredits)}
-                  onChange={(e) => setEditCredits(Math.max(0, Number(e.target.value) || 0))}
+              <div className="flex flex-col gap-1.5">
+                <p className="text-sm font-medium leading-tight text-[var(--color-fg)]">
+                  {t('admin:users.fields.permanentCredits')}
+                </p>
+                <p className="text-xs text-[var(--color-fg-subtle)]">
+                  {t('admin:users.fields.creditCurrent', {
+                    amount: formatCredits(editRow?.credits_permanent ?? 0),
+                  })}
+                </p>
+              </div>
+              <Field label={t('admin:users.fields.creditOperation')}>
+                <SegmentedControl
+                  label={t('admin:users.fields.creditOperation')}
+                  value={editCreditsOperation}
+                  options={[
+                    { value: 'add', label: t('admin:users.fields.creditAdd') },
+                    { value: 'remove', label: t('admin:users.fields.creditRemove') },
+                  ]}
+                  onChange={setEditCreditsOperation}
+                  fullWidthOnMobile
                 />
               </Field>
+              <Field
+                label={t('admin:users.fields.creditAmount')}
+                htmlFor="e-credits-amount"
+                hint={t('admin:users.fields.creditAmountHint')}
+              >
+                <Input
+                  id="e-credits-amount"
+                  type="number"
+                  min="0.000001"
+                  step="any"
+                  inputMode="decimal"
+                  value={editCreditsAmount}
+                  onChange={(e) => setEditCreditsAmount(e.target.value)}
+                />
+              </Field>
+              <div className="flex items-center justify-between gap-4 border-t border-[var(--color-divider)] pt-4">
+                <label htmlFor="e-credits-notify" className="min-w-0 cursor-pointer">
+                  <span className="block text-sm font-medium leading-tight text-[var(--color-fg)]">
+                    {t('admin:users.fields.creditNotify')}
+                  </span>
+                  <span className="mt-1 block text-xs leading-relaxed text-[var(--color-fg-subtle)]">
+                    {t('admin:users.fields.creditNotifyHint')}
+                  </span>
+                </label>
+                <Switch
+                  id="e-credits-notify"
+                  checked={editCreditsNotify}
+                  onCheckedChange={setEditCreditsNotify}
+                  aria-label={t('admin:users.fields.creditNotify')}
+                />
+              </div>
+              {editCreditsNotify ? (
+                <Field
+                  label={t('admin:users.fields.creditReason')}
+                  htmlFor="e-credits-reason"
+                  hint={t('admin:users.fields.creditReasonHint')}
+                >
+                  <Textarea
+                    id="e-credits-reason"
+                    rows={3}
+                    maxLength={500}
+                    value={editCreditsReason}
+                    onChange={(e) => setEditCreditsReason(e.target.value)}
+                  />
+                </Field>
+              ) : null}
             </div>
           </DialogBody>
           <DialogFooter>
