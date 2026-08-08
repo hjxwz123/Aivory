@@ -105,6 +105,23 @@ func TestExtractOfficeXML_PPTX(t *testing.T) {
 	}
 }
 
+func TestExtractOfficeXMLRejectsTruncatedEntry(t *testing.T) {
+	oldCap := officeXMLZipEntryReadCap
+	officeXMLZipEntryReadCap = 32
+	t.Cleanup(func() { officeXMLZipEntryReadCap = oldCap })
+
+	// The body is deliberately larger than the configured cap. Extraction must
+	// fail as a whole; returning the prefix would make later content disappear
+	// while still marking the document as ready.
+	p := writeZip(t, "large.docx", map[string]string{
+		"word/document.xml": "<w:document>" + strings.Repeat("<w:p><w:r><w:t>前段内容。后段内容。</w:t></w:r></w:p>", 4) + "</w:document>",
+	})
+	text, _, ok := extractOfficeXML(p, "docx")
+	if ok || text != "" {
+		t.Fatalf("oversized XML entry returned partial extraction: ok=%v text=%q", ok, text)
+	}
+}
+
 func TestIsProbablyText(t *testing.T) {
 	const ooxmlWord = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 	const ooxmlPpt = "application/vnd.openxmlformats-officedocument.presentationml.presentation"

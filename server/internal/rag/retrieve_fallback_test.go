@@ -166,6 +166,92 @@ func TestRetrieveWithEmptyQdrantVectorInjectsFullContext(t *testing.T) {
 	}
 }
 
+func TestRetrieveUsesDBLexicalFallbackWhenQdrantKeywordLegMisses(t *testing.T) {
+	ctx := context.Background()
+	db := seedEmbeddedConversationDoc(t, ctx)
+	defer db.Close()
+	if _, err := db.ExecContext(ctx, `UPDATE chunks SET content='甲乙4：前一段内容' WHERE id='ch1'`); err != nil {
+		t.Fatalf("update first reference: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE chunks SET content='甲乙5：后一段完整内容' WHERE id='ch2'`); err != nil {
+		t.Fatalf("update second reference: %v", err)
+	}
+
+	svc := New(db, nil, log.New(io.Discard, "", 0))
+	// Simulate an existing/healthy vector collection whose text index returns
+	// no matches, as with an older collection without the multilingual payload
+	// index. The relational chunk text must still recall the exact reference.
+	svc.SetVectorStore(testVectorStore{
+		existingIDs: map[string]bool{"ch1": true, "ch2": true},
+	})
+	got, err := svc.Retrieve(ctx, "u1", "c1", nil, "甲乙5", 8)
+	if err != nil {
+		t.Fatalf("retrieve: %v", err)
+	}
+	if len(got) == 0 || !strings.Contains(got[0].Snippet, "甲乙5") {
+		t.Fatalf("lexical fallback missed the exact reference: %+v", got)
+	}
+}
+
+func TestRetrieveKeepsLexicalFallbackWithDynamicTopK(t *testing.T) {
+	ctx := context.Background()
+	db := seedEmbeddedConversationDoc(t, ctx)
+	defer db.Close()
+	// GetSetting uses a process-local cache keyed by setting name. Clear it
+	// after this test so the per-test database's dynamic flag cannot leak into
+	// the following route-merge tests.
+	t.Cleanup(store.InvalidateConfig)
+	if err := store.SetSetting(db, "rag_dynamic_topk", true); err != nil {
+		t.Fatalf("enable dynamic top k: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE chunks SET content='甲乙4：前一段内容' WHERE id='ch1'`); err != nil {
+		t.Fatalf("update first reference: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE chunks SET content='甲乙5：后一段完整内容' WHERE id='ch2'`); err != nil {
+		t.Fatalf("update second reference: %v", err)
+	}
+
+	svc := New(db, nil, log.New(io.Discard, "", 0))
+	// No dense or Qdrant keyword hit: the DB lexical fallback is the only
+	// evidence. Dynamic mode must retain it despite its synthetic sim=0.
+	svc.SetVectorStore(testVectorStore{
+		existingIDs: map[string]bool{"ch1": true, "ch2": true},
+	})
+	got, err := svc.Retrieve(ctx, "u1", "c1", nil, "甲乙5", 8)
+	if err != nil {
+		t.Fatalf("retrieve: %v", err)
+	}
+	if len(got) == 0 || got[0].ID != "ch2" || !strings.Contains(got[0].Snippet, "甲乙5") {
+		t.Fatalf("dynamic top-k dropped the exact lexical hit: %+v", got)
+	}
+}
+
+func TestRetrieveKeepsLexicalEvidenceOnAWeakDenseHit(t *testing.T) {
+	ctx := context.Background()
+	db := seedEmbeddedConversationDoc(t, ctx)
+	defer db.Close()
+	t.Cleanup(store.InvalidateConfig)
+	if err := store.SetSetting(db, "rag_dynamic_topk", true); err != nil {
+		t.Fatalf("enable dynamic top k: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE chunks SET content='甲乙5：目标内容' WHERE id='ch2'`); err != nil {
+		t.Fatalf("update target chunk: %v", err)
+	}
+
+	svc := New(db, nil, log.New(io.Discard, "", 0))
+	svc.SetVectorStore(testVectorStore{
+		hits:        []vector.Hit{{Score: 0.01, Payload: vector.Payload{ChunkID: "ch2", DocumentID: "d1"}}},
+		existingIDs: map[string]bool{"ch1": true, "ch2": true},
+	})
+	got, err := svc.Retrieve(ctx, "u1", "c1", nil, "甲乙5", 8)
+	if err != nil {
+		t.Fatalf("retrieve: %v", err)
+	}
+	if len(got) == 0 || got[0].ID != "ch2" {
+		t.Fatalf("weak dense hit with lexical evidence was filtered: %+v", got)
+	}
+}
+
 func TestRetrieveWithParentHitIncludesMatchedChild(t *testing.T) {
 	ctx := context.Background()
 	db := seedEmbeddedConversationDoc(t, ctx)
@@ -197,6 +283,52 @@ func TestRetrieveWithParentHitIncludesMatchedChild(t *testing.T) {
 	}
 	if got[0].Snippet == parent {
 		t.Fatalf("snippet should be a focused parent window, not the full stored parent")
+	}
+}
+
+func TestRetrieveKeepsSameParentHitsAndIncludesAdjacentChildren(t *testing.T) {
+	ctx := context.Background()
+	db := seedEmbeddedConversationDoc(t, ctx)
+	defer db.Close()
+
+	for _, q := range []string{
+		`UPDATE chunks SET parent_id='p1', content='far matching segment' WHERE id='ch1'`,
+		`UPDATE chunks SET parent_id='p1', content='left boundary context' WHERE id='ch2'`,
+		`INSERT INTO chunks(id,document_id,conversation_id,seq,parent_id,chunk_type,content,embedding_model) VALUES('ch3','d1','c1',3,'p1','text','focused target segment','aivory-local-embed')`,
+		`INSERT INTO chunks(id,document_id,conversation_id,seq,parent_id,chunk_type,content,embedding_model) VALUES('ch4','d1','c1',4,'p1','text','right boundary context','aivory-local-embed')`,
+	} {
+		if _, err := db.ExecContext(ctx, q); err != nil {
+			t.Fatalf("prepare sibling chunks: %v", err)
+		}
+	}
+
+	svc := New(db, nil, log.New(io.Discard, "", 0))
+	svc.SetVectorStore(testVectorStore{
+		hits: []vector.Hit{
+			{Score: 0.99, Payload: vector.Payload{ChunkID: "ch1", DocumentID: "d1"}},
+			{Score: 0.98, Payload: vector.Payload{ChunkID: "ch3", DocumentID: "d1"}},
+		},
+		existingIDs: map[string]bool{"ch1": true, "ch2": true, "ch3": true, "ch4": true},
+	})
+
+	got, err := svc.Retrieve(ctx, "u1", "c1", nil, "focused target", 8)
+	if err != nil {
+		t.Fatalf("retrieve: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("same-parent hits collapsed: got %+v", got)
+	}
+
+	joined := got[0].Snippet + "\n" + got[1].Snippet
+	for _, want := range []string{
+		"far matching segment",
+		"left boundary context",
+		"focused target segment",
+		"right boundary context",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("retrieval window omitted %q: %+v", want, got)
+		}
 	}
 }
 
@@ -302,6 +434,133 @@ func TestRouteAndRetrieveKeepsRouterForKBOnlyScope(t *testing.T) {
 	}
 }
 
+func TestRouteAndRetrieveRecoversLexicalMatchWhenRouterSaysNone(t *testing.T) {
+	ctx := context.Background()
+	db := seedEmbeddedConversationDoc(t, ctx)
+	defer db.Close()
+	if err := store.SetSetting(db, "rag_full_text_threshold", 1); err != nil {
+		t.Fatalf("set threshold: %v", err)
+	}
+
+	router := &recordingRouter{decision: RouteDecision{Strategy: "none"}}
+	svc := New(db, nil, log.New(io.Discard, "", 0))
+	svc.SetTaskLLM(router)
+	svc.SetVectorStore(testVectorStore{
+		hits: []vector.Hit{{
+			Score:   0.99,
+			Payload: vector.Payload{ChunkID: "ch1", DocumentID: "d1"},
+		}},
+		existingIDs: map[string]bool{"ch1": true, "ch2": true},
+	})
+
+	got, decision, err := svc.RouteAndRetrieve(ctx, "u1", "c1", nil, "first full chunk", nil, 8)
+	if err != nil {
+		t.Fatalf("route retrieve: %v", err)
+	}
+	if decision.Strategy != "retrieve" || len(got) == 0 || got[0].ID != "ch1" {
+		t.Fatalf("lexical router fallback = decision %q snippets %+v", decision.Strategy, got)
+	}
+}
+
+func TestRouteAndRetrieveRunsAllRewrittenQueriesBeforeTopKCap(t *testing.T) {
+	ctx := context.Background()
+	db := seedEmbeddedConversationDoc(t, ctx)
+	defer db.Close()
+	if err := store.SetSetting(db, "rag_full_text_threshold", 1); err != nil {
+		t.Fatalf("set threshold: %v", err)
+	}
+	if err := store.SetSetting(db, "rag_top_k", 2); err != nil {
+		t.Fatalf("set top k: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO chunks(id,document_id,conversation_id,seq,chunk_type,content,embedding_model) VALUES('ch3','d1','c1',3,'text','third exact reference','aivory-local-embed')`); err != nil {
+		t.Fatalf("insert third chunk: %v", err)
+	}
+
+	router := &recordingRouter{decision: RouteDecision{
+		Strategy: "retrieve",
+		Queries:  []string{"broad section query", "exact reference query"},
+	}}
+	queries := []string{}
+	svc := New(db, nil, log.New(io.Discard, "", 0))
+	svc.SetTaskLLM(router)
+	svc.SetVectorStore(testVectorStore{
+		existingIDs: map[string]bool{"ch1": true, "ch2": true, "ch3": true},
+		keywordHitsByQuery: map[string][]vector.Hit{
+			"broad section query": {
+				{Score: 2, Payload: vector.Payload{ChunkID: "ch1", DocumentID: "d1"}},
+				{Score: 1, Payload: vector.Payload{ChunkID: "ch2", DocumentID: "d1"}},
+			},
+			"exact reference query": {
+				{Score: 2, Payload: vector.Payload{ChunkID: "ch3", DocumentID: "d1"}},
+			},
+		},
+		queryLog: &queries,
+	})
+
+	got, _, err := svc.RouteAndRetrieve(ctx, "u1", "c1", nil, "unseen source identifier", nil, 8)
+	if err != nil {
+		t.Fatalf("route retrieve: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %+v, want two capped results", got)
+	}
+	if got[0].ID == "ch3" || got[1].ID != "ch3" {
+		t.Fatalf("round-robin merge should retain the later exact-query hit: %+v", got)
+	}
+	if len(queries) != 2 || queries[0] != "broad section query" || queries[1] != "exact reference query" {
+		t.Fatalf("retrieval queries = %v, want all rewritten queries in order", queries)
+	}
+}
+
+func TestRouteAndRetrievePrioritizesExactUserQueryForTopKOne(t *testing.T) {
+	ctx := context.Background()
+	db := seedEmbeddedConversationDoc(t, ctx)
+	defer db.Close()
+	for _, setting := range []struct {
+		key   string
+		value any
+	}{
+		{"rag_full_text_threshold", 1},
+		{"rag_top_k", 1},
+	} {
+		if err := store.SetSetting(db, setting.key, setting.value); err != nil {
+			t.Fatalf("set %s: %v", setting.key, err)
+		}
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE chunks SET content='甲乙4：前一段内容' WHERE id='ch1'`); err != nil {
+		t.Fatalf("update first reference: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE chunks SET content='甲乙5：精确命中的内容' WHERE id='ch2'`); err != nil {
+		t.Fatalf("update second reference: %v", err)
+	}
+
+	router := &recordingRouter{decision: RouteDecision{
+		Strategy: "retrieve",
+		Queries:  []string{"broad rewritten query", "甲乙5"},
+	}}
+	queries := []string{}
+	svc := New(db, nil, log.New(io.Discard, "", 0))
+	svc.SetTaskLLM(router)
+	svc.SetVectorStore(testVectorStore{
+		existingIDs: map[string]bool{"ch1": true, "ch2": true},
+		keywordHitsByQuery: map[string][]vector.Hit{
+			"甲乙5": {{Score: 2, Payload: vector.Payload{ChunkID: "ch2", DocumentID: "d1"}}},
+		},
+		queryLog: &queries,
+	})
+
+	got, _, err := svc.RouteAndRetrieve(ctx, "u1", "c1", nil, "甲乙5", nil, 8)
+	if err != nil {
+		t.Fatalf("route retrieve: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != "ch2" {
+		t.Fatalf("topK=1 lost exact user query: %+v", got)
+	}
+	if len(queries) == 0 || queries[0] != "甲乙5" {
+		t.Fatalf("exact user query was not prioritized: %v", queries)
+	}
+}
+
 func seedEmbeddedConversationDoc(t *testing.T, ctx context.Context) *sql.DB {
 	t.Helper()
 	db, err := store.Open(filepath.Join(t.TempDir(), "rag.db"))
@@ -372,10 +631,12 @@ func (r *recordingRouter) RunJSON(_ context.Context, _ string, _ string, out any
 }
 
 type testVectorStore struct {
-	hits        []vector.Hit
-	keywordHits []vector.Hit
-	existingIDs map[string]bool
-	statuses    map[string]vector.ChunkVectorStatus
+	hits               []vector.Hit
+	keywordHits        []vector.Hit
+	keywordHitsByQuery map[string][]vector.Hit
+	existingIDs        map[string]bool
+	statuses           map[string]vector.ChunkVectorStatus
+	queryLog           *[]string
 }
 
 func (testVectorStore) Enabled() bool { return true }
@@ -385,7 +646,13 @@ func (testVectorStore) Upsert(context.Context, int, []vector.Point) error {
 func (v testVectorStore) Search(context.Context, int, []float32, vector.Scope, int) ([]vector.Hit, error) {
 	return v.hits, nil
 }
-func (v testVectorStore) SearchKeyword(context.Context, int, string, vector.Scope, int) ([]vector.Hit, error) {
+func (v testVectorStore) SearchKeyword(_ context.Context, _ int, query string, _ vector.Scope, _ int) ([]vector.Hit, error) {
+	if v.queryLog != nil {
+		*v.queryLog = append(*v.queryLog, query)
+	}
+	if v.keywordHitsByQuery != nil {
+		return v.keywordHitsByQuery[query], nil
+	}
 	return v.keywordHits, nil
 }
 func (v testVectorStore) ExistingChunkIDs(context.Context, int, vector.Scope) (map[string]bool, error) {

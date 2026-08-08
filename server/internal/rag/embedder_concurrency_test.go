@@ -270,7 +270,7 @@ func TestEmbeddingRequestErrorIncludesBatchDiagnostics(t *testing.T) {
 	defer srv.Close()
 
 	e := &httpEmbedder{baseURL: srv.URL, apiKey: "sk", model: "text-embedding-v4", dim: 1024}
-	_, err := e.Embed(context.Background(), []string{"alpha", "案例98"})
+	_, err := e.Embed(context.Background(), []string{"alpha", "甲乙98"})
 	if err == nil {
 		t.Fatal("Embed unexpectedly succeeded")
 	}
