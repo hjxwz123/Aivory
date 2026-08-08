@@ -316,13 +316,13 @@ export function PdfNativePreview({ data, name, className, labels, onError }: Pdf
             </Button>
           </Tooltip>
 
-          <div className="flex h-7 items-center gap-0.5 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg)] px-1.5 text-xs tabular-nums [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:px-2 [@media(pointer:coarse)]:text-sm">
+          <div className="flex h-7 items-center gap-0.5 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-bg)] px-1.5 text-xs tabular-nums transition-[border-color,background-color] duration-150 focus-within:border-[var(--color-border-strong)] focus-within:bg-[var(--color-surface)] [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:px-2 [@media(pointer:coarse)]:text-sm">
             <label className="sr-only" htmlFor={pageInputId}>
               {labels.page(pageNumber)}
             </label>
             <input
               id={pageInputId}
-              className="w-8 rounded-[5px] bg-transparent text-center text-[var(--color-fg)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] [@media(pointer:coarse)]:w-10"
+              className="w-8 rounded-[5px] bg-transparent text-center text-[var(--color-fg)] outline-none [@media(pointer:coarse)]:w-10"
               type="text"
               inputMode="numeric"
               pattern="[0-9]*"

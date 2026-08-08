@@ -188,7 +188,7 @@ function ThreadBody({ quote, childId, onClose }: { quote: string; childId: strin
               }
             }}
             placeholder={t('inline.placeholder', { defaultValue: 'Ask about this…' })}
-            className="flex-1 min-w-0 resize-none max-h-32 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-[13.5px] text-[var(--color-fg)] placeholder:text-[var(--color-fg-faint)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+            className="flex-1 min-w-0 resize-none max-h-32 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-[13.5px] text-[var(--color-fg)] placeholder:text-[var(--color-fg-faint)] outline-none focus:border-[var(--color-border-strong)] focus:bg-[var(--color-surface)]"
           />
           <button
             type="button"

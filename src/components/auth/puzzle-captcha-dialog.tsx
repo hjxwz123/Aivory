@@ -75,7 +75,7 @@ export function PuzzleCaptchaDialog({ open, onOpenChange, onSolved }: PuzzleCapt
       <DialogContent size="sm">
         <DialogHeader className="pb-2">
           <DialogTitle>
-            {t('register.captchaTitle', { defaultValue: '请完成安全验证' })}
+            {t('register.captchaTitle')}
           </DialogTitle>
         </DialogHeader>
         <div className="px-6 pb-6">
