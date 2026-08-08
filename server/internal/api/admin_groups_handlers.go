@@ -199,34 +199,58 @@ func setUserGroupAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
-// setUserCreditsAdmin overwrites a user's permanent (non-expiring) credit balance
-// (§ credits) — the admin edits it on the users page.
-func setUserCreditsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
+// adjustUserCreditsAdmin applies a positive or negative delta to only the
+// user's permanent (non-expiring) credit balance.
+func adjustUserCreditsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	id := pathParam(r, "id")
 	var req struct {
-		CreditsPermanent float64 `json:"credits_permanent"`
+		Operation  string  `json:"operation"`
+		Amount     float64 `json:"amount"`
+		NotifyUser bool    `json:"notify_user"`
+		Reason     string  `json:"reason"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, 400, errInvalidInput)
 		return
 	}
-	if math.IsNaN(req.CreditsPermanent) || math.IsInf(req.CreditsPermanent, 0) {
+	req.Operation = strings.ToLower(strings.TrimSpace(req.Operation))
+	if (req.Operation != "add" && req.Operation != "remove") ||
+		math.IsNaN(req.Amount) || math.IsInf(req.Amount, 0) || req.Amount <= 0 {
 		writeError(w, 400, errInvalidInput)
 		return
 	}
-	if req.CreditsPermanent < 0 {
-		req.CreditsPermanent = 0
+	delta := req.Amount
+	if req.Operation == "remove" {
+		delta = -req.Amount
 	}
-	if _, err := store.FindUserByID(r.Context(), d.DB, id); err != nil {
-		writeError(w, 404, errNotFound)
-		return
-	}
-	if err := store.SetPermanentCredits(r.Context(), d.DB, id, req.CreditsPermanent); err != nil {
-		writeError(w, 500, err)
+	adjustment, err := store.AdjustPermanentCredits(
+		r.Context(), d.DB, id, delta, req.NotifyUser, req.Reason,
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, store.ErrNotFound):
+			writeError(w, 404, errNotFound)
+		case errors.Is(err, store.ErrInsufficientPermanentCredits):
+			writeError(w, http.StatusConflict, err)
+		case errors.Is(err, store.ErrInvalidCreditAmount), errors.Is(err, store.ErrInvalidCreditNotification):
+			writeError(w, 400, err)
+		default:
+			writeError(w, 500, err)
+		}
 		return
 	}
 	invalidateAuthUser(d, id)
-	writeJSON(w, 200, map[string]any{"ok": true, "credits_permanent": req.CreditsPermanent})
+	response := map[string]any{
+		"ok":                true,
+		"operation":         req.Operation,
+		"amount":            math.Abs(adjustment.Delta),
+		"delta":             adjustment.Delta,
+		"credits_permanent": adjustment.After,
+	}
+	if adjustment.NotificationID != "" {
+		response["notification_id"] = adjustment.NotificationID
+	}
+	writeJSON(w, 200, response)
 }
 
 // ===== Per-model group quotas =====

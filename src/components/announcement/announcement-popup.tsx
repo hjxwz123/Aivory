@@ -12,7 +12,7 @@
  * Held back until the mandatory flows (set-password, onboarding wizard) are done
  * so dialogs never stack.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Clock3 } from 'lucide-react'
 import { authApi } from '@/api'
@@ -28,6 +28,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { sanitizeHtml } from '@/lib/markdown'
 import { cn } from '@/lib/utils'
+import { acquireStartupDialog } from '@/lib/startup-dialog-queue'
 
 interface AnnouncementData {
   title: string
@@ -40,6 +41,7 @@ interface AnnouncementData {
 
 const DISMISS_KEY = 'aivory.announcement.dismissed'
 const REQUIRED_READ_SECONDS = 5
+const DIALOG_EXIT_MS = 180
 
 export function AnnouncementPopup() {
   const { t } = useTranslation('common')
@@ -53,6 +55,7 @@ export function AnnouncementPopup() {
   const [open, setOpen] = useState(false)
   const [unlockAt, setUnlockAt] = useState<number | null>(null)
   const [secondsRemaining, setSecondsRemaining] = useState(0)
+  const releaseRef = useRef<(() => void) | null>(null)
 
   useEffect(() => {
     if (!eligible) return
@@ -67,17 +70,25 @@ export function AnnouncementPopup() {
           if (dismissed && Number(dismissed) === a.updated_at) return
         }
         const requireRead = Boolean(a.require_read)
-        setData({
+        const nextData = {
           title: a.title ?? '',
           body: a.body ?? '',
           image_url: a.image_url ?? '',
           remember_dismiss: a.remember_dismiss,
           require_read: requireRead,
           updated_at: a.updated_at,
+        }
+        void acquireStartupDialog().then((release) => {
+          if (cancelled) {
+            release()
+            return
+          }
+          releaseRef.current = release
+          setData(nextData)
+          setSecondsRemaining(requireRead ? REQUIRED_READ_SECONDS : 0)
+          setUnlockAt(requireRead ? Date.now() + REQUIRED_READ_SECONDS * 1000 : null)
+          setOpen(true)
         })
-        setSecondsRemaining(requireRead ? REQUIRED_READ_SECONDS : 0)
-        setUnlockAt(requireRead ? Date.now() + REQUIRED_READ_SECONDS * 1000 : null)
-        setOpen(true)
       })
       .catch(() => {
         /* a missing/blocked announcement just shows nothing */
@@ -85,6 +96,19 @@ export function AnnouncementPopup() {
     return () => {
       cancelled = true
     }
+  }, [eligible])
+
+  useEffect(() => () => {
+    releaseRef.current?.()
+    releaseRef.current = null
+  }, [])
+
+  useEffect(() => {
+    if (eligible) return
+    setOpen(false)
+    setData(null)
+    releaseRef.current?.()
+    releaseRef.current = null
   }, [eligible])
 
   useEffect(() => {
@@ -104,6 +128,9 @@ export function AnnouncementPopup() {
 
   function close() {
     setOpen(false)
+    const release = releaseRef.current
+    releaseRef.current = null
+    window.setTimeout(() => release?.(), DIALOG_EXIT_MS)
   }
 
   function dismissVersion() {

@@ -7,6 +7,7 @@ import { CommandMenu } from '@/components/command-menu/command-menu'
 import { WelcomeCard } from '@/components/welcome/welcome-card'
 import { SetPasswordGate } from '@/components/welcome/set-password-gate'
 import { AnnouncementPopup } from '@/components/announcement/announcement-popup'
+import { CreditAdjustmentNotice } from '@/components/credits/credit-adjustment-notice'
 import { AuthGate } from '@/components/auth/auth-gate'
 import SettingsDialog from '@/pages/settings/SettingsLayout'
 import { useCommandMenu } from '@/hooks/use-command-menu'
@@ -305,6 +306,7 @@ export default function App() {
         <SetPasswordGate />
         <WelcomeCard />
         <AnnouncementPopup />
+        <CreditAdjustmentNotice />
         <Toaster />
       </AuthGate>
     </TooltipProvider>

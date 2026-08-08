@@ -73,6 +73,11 @@
     "dontShowAgain": "下次不再提示",
     "requiredCountdown": "{{count}} 秒后可关闭"
   },
+  "creditAdjustment": {
+    "title": "永久积分调整",
+    "add": "已为您添加 {{amount}} 个永久积分",
+    "remove": "已为您减少 {{amount}} 个永久积分"
+  },
   "aria": {
     "close": "关闭",
     "dismiss": "关闭",

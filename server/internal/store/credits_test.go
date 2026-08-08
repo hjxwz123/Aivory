@@ -386,6 +386,92 @@ func TestAddPermanentCreditsRejectsAggregateOverflow(t *testing.T) {
 	}
 }
 
+func TestAdjustPermanentCreditsAndClaimNotificationOnce(t *testing.T) {
+	db, ctx := openCreditsTestDB(t)
+	seedCreditGroupsAndUser(t, ctx, db, 10, 10)
+	if err := SetPermanentCredits(ctx, db, "u1", 5); err != nil {
+		t.Fatalf("seed permanent credits: %v", err)
+	}
+
+	adjustment, err := AdjustPermanentCredits(ctx, db, "u1", 2.25, true, "  Service recovery credit  ")
+	if err != nil {
+		t.Fatalf("add permanent credits: %v", err)
+	}
+	if adjustment.Before != 5 || adjustment.After != 7.25 || adjustment.Delta != 2.25 || adjustment.NotificationID == "" {
+		t.Fatalf("add adjustment = %+v, want before=5 after=7.25 delta=2.25 with notification", adjustment)
+	}
+	balance, err := GetCreditBalance(ctx, db, "u1")
+	if err != nil {
+		t.Fatalf("get balance after add: %v", err)
+	}
+	if balance.Permanent != 7.25 || balance.TimedRemaining != 10 {
+		t.Fatalf("balance after add = permanent %.2f timed %.2f, want 7.25 and 10", balance.Permanent, balance.TimedRemaining)
+	}
+
+	notice, err := ClaimCreditAdjustmentNotification(ctx, db, "u1")
+	if err != nil {
+		t.Fatalf("claim notification: %v", err)
+	}
+	if notice == nil || notice.ID != adjustment.NotificationID || notice.Direction != "add" || notice.Amount != 2.25 || notice.Reason != "Service recovery credit" {
+		t.Fatalf("claimed notification = %+v", notice)
+	}
+	again, err := ClaimCreditAdjustmentNotification(ctx, db, "u1")
+	if err != nil {
+		t.Fatalf("claim notification again: %v", err)
+	}
+	if again != nil {
+		t.Fatalf("second claim = %+v, want nil", again)
+	}
+
+	adjustment, err = AdjustPermanentCredits(ctx, db, "u1", -3, false, "ignored")
+	if err != nil {
+		t.Fatalf("remove permanent credits: %v", err)
+	}
+	if adjustment.Before != 7.25 || adjustment.After != 4.25 || adjustment.Delta != -3 || adjustment.NotificationID != "" {
+		t.Fatalf("remove adjustment = %+v, want before=7.25 after=4.25 delta=-3", adjustment)
+	}
+	balance, err = GetCreditBalance(ctx, db, "u1")
+	if err != nil {
+		t.Fatalf("get balance after remove: %v", err)
+	}
+	if balance.Permanent != 4.25 || balance.TimedRemaining != 10 {
+		t.Fatalf("balance after remove = permanent %.2f timed %.2f, want 4.25 and 10", balance.Permanent, balance.TimedRemaining)
+	}
+
+	if _, err := AdjustPermanentCredits(ctx, db, "u1", -5, true, "Should not be committed"); !errors.Is(err, ErrInsufficientPermanentCredits) {
+		t.Fatalf("over-removal error = %v, want %v", err, ErrInsufficientPermanentCredits)
+	}
+	balance, err = GetCreditBalance(ctx, db, "u1")
+	if err != nil {
+		t.Fatalf("get balance after rejected removal: %v", err)
+	}
+	if balance.Permanent != 4.25 || balance.TimedRemaining != 10 {
+		t.Fatalf("balance after rejected removal = permanent %.2f timed %.2f, want unchanged", balance.Permanent, balance.TimedRemaining)
+	}
+	if notice, err := ClaimCreditAdjustmentNotification(ctx, db, "u1"); err != nil || notice != nil {
+		t.Fatalf("notification after rejected removal = %+v, err=%v; want nil", notice, err)
+	}
+}
+
+func TestAdjustPermanentCreditsRequiresReasonWhenNotifying(t *testing.T) {
+	db, ctx := openCreditsTestDB(t)
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO users(id,email,password_hash) VALUES('u-notify','notify@example.test','hash')`); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+
+	if _, err := AdjustPermanentCredits(ctx, db, "u-notify", 1, true, " \n\t "); !errors.Is(err, ErrInvalidCreditNotification) {
+		t.Fatalf("empty reason error = %v, want %v", err, ErrInvalidCreditNotification)
+	}
+	tooLong := strings.Repeat("理", CreditAdjustmentReasonMaxRunes+1)
+	if _, err := AdjustPermanentCredits(ctx, db, "u-notify", 1, true, tooLong); !errors.Is(err, ErrInvalidCreditNotification) {
+		t.Fatalf("long reason error = %v, want %v", err, ErrInvalidCreditNotification)
+	}
+	if got, err := PermanentCredits(ctx, db, "u-notify"); err != nil || got != 0 {
+		t.Fatalf("balance after invalid notifications = %v, err=%v; want 0", got, err)
+	}
+}
+
 func TestCreditBalanceSaturatesWhenAllowanceAndPermanentCreditsExceedInt64(t *testing.T) {
 	db, ctx := openCreditsTestDB(t)
 	anchor := time.Now().Unix()

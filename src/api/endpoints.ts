@@ -18,6 +18,7 @@ import type {
   ApiConversation,
   ApiConversationFile,
   ApiCreditPackage,
+  ApiCreditAdjustmentNotification,
   ApiCredits,
   ApiDocument,
   ApiKnowledgeBase,
@@ -124,6 +125,9 @@ export const authApi = {
   },
   /** Credit balance (timed pool + permanent pool) for the subscription page. */
   credits: () => api<ApiCredits>('/me/credits'),
+  /** Atomically claim the oldest permanent-credit adjustment notice. */
+  claimCreditAdjustmentNotification: () =>
+    api<{ notification: ApiCreditAdjustmentNotification | null }>('/me/credit-adjustments/claim', { method: 'POST' }),
   login: (email: string, password: string, captchaToken?: string) =>
     api<ApiAuthResponse | { totp_required: true; ticket: string }>('/auth/login', {
       method: 'POST',
@@ -823,11 +827,26 @@ export const adminApi = {
       method: 'POST',
       body: { group_id, group_expires_at },
     }),
-  /** Overwrite a user's permanent (non-expiring) credit balance (§ credits). */
-  setUserCredits: (id: string, credits_permanent: number) =>
-    api<{ ok: true; credits_permanent: number }>(`/admin/users/${encodeURIComponent(id)}/credits`, {
+  /** Add to or remove from a user's permanent (non-expiring) credit balance. */
+  adjustUserCredits: (
+    id: string,
+    body: {
+      operation: 'add' | 'remove'
+      amount: number
+      notify_user: boolean
+      reason: string
+    },
+  ) =>
+    api<{
+      ok: true
+      operation: 'add' | 'remove'
+      amount: number
+      delta: number
+      credits_permanent: number
+      notification_id?: string
+    }>(`/admin/users/${encodeURIComponent(id)}/credits`, {
       method: 'POST',
-      body: { credits_permanent },
+      body,
     }),
   modelQuotas: (id: string) => api<ApiModelQuota[]>(`/admin/models/${encodeURIComponent(id)}/quotas`),
   setModelQuotas: (id: string, quotas: ApiModelQuota[]) =>

@@ -73,6 +73,11 @@
     "dontShowAgain": "Don't show this again",
     "requiredCountdown": "Available to close in {{count}}s"
   },
+  "creditAdjustment": {
+    "title": "Permanent credit adjustment",
+    "add": "Added {{amount}} permanent credits to your account",
+    "remove": "Removed {{amount}} permanent credits from your account"
+  },
   "aria": {
     "close": "Close",
     "dismiss": "Dismiss",
