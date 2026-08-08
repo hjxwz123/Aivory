@@ -394,7 +394,7 @@ export function FormulaEditorDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         size="lg"
-        className="formula-editor-dialog max-sm:h-[calc(100dvh-var(--safe-top)-var(--safe-bottom))] max-sm:max-h-none max-sm:w-full max-sm:rounded-none"
+        className="formula-editor-dialog min-w-0 overflow-hidden"
         data-keyboard-open={keyboardInset > 0 ? 'true' : undefined}
         style={{ paddingBottom: keyboardInset > 0 ? `${keyboardInset}px` : undefined }}
         onOpenAutoFocus={(event) => {
@@ -416,12 +416,12 @@ export function FormulaEditorDialog({
           <DialogDescription className="sr-only">{t('composer.formula.description')}</DialogDescription>
         </DialogHeader>
 
-        <DialogBody className="formula-editor-body flex min-h-0 flex-col gap-3 px-4 pb-3 sm:px-5">
+        <DialogBody className="formula-editor-body flex min-h-0 min-w-0 flex-col gap-3 overflow-x-hidden px-4 pb-3 sm:px-5">
           <div
             ref={fallbackFocusRef}
             tabIndex={-1}
             className={cn(
-              'formula-mathfield-host relative min-h-[6rem] rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface-sunken)] p-3',
+              'formula-mathfield-host relative min-h-[6rem] min-w-0 max-w-full overflow-x-auto rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface-sunken)] p-3',
               'transition-[border-color,background-color] duration-150 focus-within:border-[var(--color-border-strong)] focus-within:bg-[var(--color-surface)]',
               error && 'border-[var(--color-danger)] focus-within:border-[var(--color-danger)]',
             )}
@@ -429,7 +429,7 @@ export function FormulaEditorDialog({
             aria-label={t('composer.formula.inputLabel')}
             aria-describedby={errorId}
           >
-            <div ref={setHostElement} className="min-h-[4.5rem]" />
+            <div ref={setHostElement} className="min-h-[4.5rem] min-w-0 max-w-full" />
             {loading ? (
               <div
                 className="pointer-events-none absolute inset-3 h-[4.5rem] animate-pulse rounded-[8px] bg-[var(--color-bg-muted)]"
@@ -438,10 +438,10 @@ export function FormulaEditorDialog({
             ) : null}
           </div>
 
-          <div id={errorId} className="formula-editor-error min-h-5" aria-live="polite" role={loadFailed ? 'alert' : undefined}>
+          <div id={errorId} className="formula-editor-error min-h-5 min-w-0" aria-live="polite" role={loadFailed ? 'alert' : undefined}>
             {error ? (
-              <div className="flex items-center justify-between gap-3 text-[0.8125rem] text-[var(--color-danger)]">
-                <p>{error}</p>
+              <div className="flex min-w-0 items-center justify-between gap-3 text-[0.8125rem] text-[var(--color-danger)]">
+                <p className="min-w-0 break-words">{error}</p>
                 {loadFailed ? (
                   <button
                     type="button"
@@ -455,8 +455,8 @@ export function FormulaEditorDialog({
             ) : null}
           </div>
 
-          <Tabs defaultValue="basic" className="formula-template-library flex min-h-0 flex-1 flex-col">
-            <div className="overflow-x-auto overscroll-x-contain scrollbar-thin pb-1">
+          <Tabs defaultValue="basic" className="formula-template-library flex min-h-0 min-w-0 flex-1 flex-col">
+            <div className="min-w-0 max-w-full overflow-x-auto overscroll-x-contain scrollbar-thin pb-1">
               <TabsList
                 variant="segmented"
                 aria-label={t('composer.formula.description')}
@@ -473,11 +473,11 @@ export function FormulaEditorDialog({
               <TabsContent
                 key={category}
                 value={category}
-                className="mt-2 min-h-0 flex-1 overflow-y-auto rounded-[10px] bg-[var(--color-bg-muted)] p-1.5"
+                className="mt-2 min-h-0 min-w-0 max-w-full flex-1 overflow-x-auto overflow-y-auto rounded-[10px] bg-[var(--color-bg-muted)] p-1.5"
               >
                 <div
                   className={cn(
-                    'grid gap-1',
+                    'grid min-w-0 gap-1',
                     category === 'matrices'
                       ? 'grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))]'
                       : category === 'calculus'
