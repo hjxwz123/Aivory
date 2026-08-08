@@ -117,6 +117,7 @@ export const ADMIN_NAV_GROUPS: readonly AdminNavGroup[] = [
       { to: '/admin/analytics', labelKey: 'admin:analytics.title', defaultLabel: 'Analytics' },
       { to: '/admin/usage', labelKey: 'admin:usage.title', defaultLabel: 'Usage records' },
       { to: '/admin/files', labelKey: 'admin:files.title', defaultLabel: 'Files' },
+      { to: '/admin/feedback', labelKey: 'admin:menu.userFeedback', defaultLabel: 'User feedback' },
     ],
   },
   {

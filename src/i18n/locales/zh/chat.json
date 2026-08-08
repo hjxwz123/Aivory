@@ -160,7 +160,26 @@
     "previewFile": "预览文件",
     "delete": "删除",
     "openInNew": "在新标签页打开",
-    "forkFailed": "分支失败，请重试"
+    "forkFailed": "分支失败，请重试",
+    "viewSubscription": "查看订阅",
+    "reportIssue": "反馈问题"
+  },
+  "issueFeedback": {
+    "title": "反馈问题",
+    "subtitle": "请描述这条消息遇到的问题。",
+    "screenshot": "页面截图",
+    "screenshotAlt": "当前页面截图",
+    "capturing": "正在截图…",
+    "captureFailed": "截图创建失败，仍可以只提交文字描述。",
+    "retryCapture": "重新截图",
+    "removeScreenshot": "删除截图",
+    "screenshotRemoved": "未附加截图",
+    "description": "问题描述",
+    "descriptionPlaceholder": "请描述发生了什么，以及你原本期待的结果。",
+    "descriptionRequired": "请填写问题描述。",
+    "submit": "提交反馈",
+    "submitted": "感谢反馈，问题已提交。",
+    "submitFailed": "提交失败，请稍后重试。"
   },
   "feedback": {
     "title": "哪里需要改进？",

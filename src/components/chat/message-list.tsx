@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { Loader2 } from 'lucide-react'
 import { MessageRow } from './message-row'
+import { IssueFeedbackDialog } from './issue-feedback-dialog'
 import { useAuth } from '@/store/auth'
 import { useConversations, MSG_PAGE, resolveArmedTurnFlags } from '@/store/conversations'
 import { useSettings } from '@/store/settings'
@@ -49,9 +50,11 @@ export function MessageList({ conversation, scrollToMessageId, jumpKey }: Messag
   const hasOlder = Boolean(conversation.hasOlder)
   const convId = conversation.id
   const [visible, setVisible] = useState(() => Math.min(INITIAL_WINDOW, total))
+  const [reportMessageId, setReportMessageId] = useState('')
   // Reset the window whenever we switch conversations.
   useEffect(() => {
     setVisible(Math.min(INITIAL_WINDOW, conversation.messages.length))
+    setReportMessageId('')
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversation.id])
   // Grow the window if new messages arrive at the tail (so streaming/regenerate
@@ -266,6 +269,10 @@ export function MessageList({ conversation, scrollToMessageId, jumpKey }: Messag
     [convId, deleteMessage],
   )
 
+  const handleReport = useCallback((id: string) => {
+    setReportMessageId(id)
+  }, [])
+
   // §first-exchange: the opening question and its answer anchor the conversation
   // and must never be deletable. Deletion is round-based — removing EITHER the
   // question or its answer drops the whole exchange — so both the first user turn
@@ -298,6 +305,7 @@ export function MessageList({ conversation, scrollToMessageId, jumpKey }: Messag
           onEdit={handleEdit}
           onSaveEdit={handleSaveEdit}
           onFeedback={handleFeedback}
+          onReport={handleReport}
           onBranchSwitch={handleBranchSwitch}
           onFork={handleFork}
           onDelete={
@@ -316,6 +324,13 @@ export function MessageList({ conversation, scrollToMessageId, jumpKey }: Messag
           userMessageMarkdown={userMessageMarkdown}
         />
       ))}
+      <IssueFeedbackDialog
+        open={Boolean(reportMessageId)}
+        messageId={reportMessageId}
+        onOpenChange={(open) => {
+          if (!open) setReportMessageId('')
+        }}
+      />
     </div>
   )
 }
