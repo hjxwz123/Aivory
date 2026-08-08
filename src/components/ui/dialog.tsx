@@ -34,6 +34,8 @@ export interface DialogContentProps
   size?: DialogSize
   showClose?: boolean
   closeDisabled?: boolean
+  /** Exclude this dialog and its overlay from page-feedback screenshots. */
+  captureIgnore?: boolean
 }
 
 const sizeMap: Record<DialogSize, string> = {
@@ -47,13 +49,14 @@ const sizeMap: Record<DialogSize, string> = {
 export const DialogContent = forwardRef<
   ElementRef<typeof DialogPrimitive.Content>,
   DialogContentProps
->(function DialogContent({ className, size = 'md', showClose = true, closeDisabled = false, children, ...rest }, ref) {
+>(function DialogContent({ className, size = 'md', showClose = true, closeDisabled = false, captureIgnore = false, children, ...rest }, ref) {
   const { t } = useTranslation('common')
   return (
     <DialogPortal>
-      <DialogOverlay />
+      <DialogOverlay data-feedback-capture-ignore={captureIgnore ? '' : undefined} />
       <DialogPrimitive.Content
         ref={ref}
+        data-feedback-capture-ignore={captureIgnore ? '' : undefined}
         className={cn(
           'fixed left-1/2 top-1/2 z-[60] -translate-x-1/2 -translate-y-1/2 w-[min(96vw,calc(100vw-2rem))]',
           sizeMap[size],

@@ -160,7 +160,26 @@
     "previewFile": "Aperçu du fichier",
     "delete": "Supprimer",
     "openInNew": "Ouvrir dans un nouvel onglet",
-    "forkFailed": "Impossible de dupliquer la conversation"
+    "forkFailed": "Impossible de dupliquer la conversation",
+    "viewSubscription": "Voir l’abonnement",
+    "reportIssue": "Signaler un problème"
+  },
+  "issueFeedback": {
+    "title": "Signaler un problème",
+    "subtitle": "Décrivez le problème rencontré avec ce message.",
+    "screenshot": "Capture de la page",
+    "screenshotAlt": "Capture de la page actuelle",
+    "capturing": "Création de la capture…",
+    "captureFailed": "La capture n’a pas pu être créée. Vous pouvez envoyer uniquement une description.",
+    "retryCapture": "Reprendre la capture",
+    "removeScreenshot": "Supprimer la capture",
+    "screenshotRemoved": "Aucune capture jointe",
+    "description": "Description du problème",
+    "descriptionPlaceholder": "Décrivez ce qui s’est passé et le résultat attendu.",
+    "descriptionRequired": "Décrivez le problème.",
+    "submit": "Envoyer le rapport",
+    "submitted": "Merci — votre rapport a été envoyé.",
+    "submitFailed": "Impossible d’envoyer le rapport. Réessayez."
   },
   "feedback": {
     "title": "Que faudrait-il améliorer ?",

@@ -160,7 +160,26 @@
     "previewFile": "Preview file",
     "delete": "Delete",
     "openInNew": "Open in new tab",
-    "forkFailed": "Could not fork the conversation"
+    "forkFailed": "Could not fork the conversation",
+    "viewSubscription": "View subscription",
+    "reportIssue": "Report a problem"
+  },
+  "issueFeedback": {
+    "title": "Report a problem",
+    "subtitle": "Tell us what went wrong with this message.",
+    "screenshot": "Page screenshot",
+    "screenshotAlt": "Screenshot of the current page",
+    "capturing": "Taking a screenshot…",
+    "captureFailed": "The screenshot could not be created. You can still send a description.",
+    "retryCapture": "Try screenshot again",
+    "removeScreenshot": "Remove screenshot",
+    "screenshotRemoved": "No screenshot attached",
+    "description": "What happened?",
+    "descriptionPlaceholder": "Describe the problem and what you expected to happen.",
+    "descriptionRequired": "Please describe the problem.",
+    "submit": "Send report",
+    "submitted": "Thanks — your report was sent.",
+    "submitFailed": "Could not send the report. Please try again."
   },
   "feedback": {
     "title": "What could be improved?",

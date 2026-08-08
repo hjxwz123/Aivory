@@ -160,7 +160,26 @@
     "previewFile": "ファイルをプレビュー",
     "delete": "削除",
     "openInNew": "新しいタブで開く",
-    "forkFailed": "分岐に失敗しました。もう一度お試しください"
+    "forkFailed": "分岐に失敗しました。もう一度お試しください",
+    "viewSubscription": "サブスクリプションを見る",
+    "reportIssue": "問題を報告"
+  },
+  "issueFeedback": {
+    "title": "問題を報告",
+    "subtitle": "このメッセージで起きた問題を説明してください。",
+    "screenshot": "ページのスクリーンショット",
+    "screenshotAlt": "現在のページのスクリーンショット",
+    "capturing": "スクリーンショットを作成中…",
+    "captureFailed": "スクリーンショットを作成できませんでした。説明だけでも送信できます。",
+    "retryCapture": "もう一度撮影",
+    "removeScreenshot": "スクリーンショットを削除",
+    "screenshotRemoved": "スクリーンショットなし",
+    "description": "問題の説明",
+    "descriptionPlaceholder": "何が起きたか、期待していた結果を説明してください。",
+    "descriptionRequired": "問題の説明を入力してください。",
+    "submit": "レポートを送信",
+    "submitted": "ありがとうございます。レポートを送信しました。",
+    "submitFailed": "レポートを送信できませんでした。もう一度お試しください。"
   },
   "feedback": {
     "title": "改善が必要な点は？",

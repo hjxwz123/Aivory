@@ -20,6 +20,7 @@ import {
   Sparkles,
   BookText,
   Coins,
+  Flag,
   ImageOff,
   Zap,
   Sigma,
@@ -126,6 +127,8 @@ interface MessageRowProps {
   onFork?: (leafId: string) => void
   /** Delete this whole round (the question + all its answers). Branch-safe. */
   onDelete?: (id: string) => void
+  /** Open the product issue reporter for this message. */
+  onReport?: (id: string) => void
   /**
    * Read-only render (admin transcript inspection / triage). Renders the message
    * body identically to the live chat but suppresses the hover action bar and
@@ -160,7 +163,7 @@ function formatCredits(credits: number): string {
   return credits.toLocaleString(undefined, { maximumFractionDigits: 2 })
 }
 
-function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, onFeedback, onBranchSwitch, onFork, onDelete, readOnly = false, userMessageMarkdown = false }: MessageRowProps) {
+function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, onFeedback, onBranchSwitch, onFork, onDelete, onReport, readOnly = false, userMessageMarkdown = false }: MessageRowProps) {
   const isUser = message.role === 'user'
   const userHasMath = useMemo(() => isUser && hasMathContent(message.content), [isUser, message.content])
   // §workspaces: in a shared conversation "own" = authored by ME — other
@@ -940,10 +943,15 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
                 <MoreHorizontal size={18} aria-hidden />
               </button>
               {!isUser && message.credits && message.credits > 0 ? (
-                <span className="inline-flex items-center gap-1 text-[11px] text-[var(--color-secondary)] tabular-nums">
-                  <Coins size={11} aria-hidden />
-                  {t('actions.creditsUsed', { credits: formatCredits(message.credits) })}
-                </span>
+                <Tooltip content={t('actions.viewSubscription')}>
+                  <Link
+                    to="/subscription"
+                    className="inline-flex min-h-7 items-center gap-1 rounded-[6px] px-1 text-[11px] text-[var(--color-secondary)] tabular-nums interactive hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                  >
+                    <Coins size={11} aria-hidden />
+                    {t('actions.creditsUsed', { credits: formatCredits(message.credits) })}
+                  </Link>
+                </Tooltip>
               ) : null}
             </div>
           ) : (
@@ -1083,6 +1091,19 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
                   </Tooltip>
                 )}
 
+                {onReport ? (
+                  <Tooltip content={t('actions.reportIssue')}>
+                    <button
+                      type="button"
+                      onClick={() => onReport(message.id)}
+                      aria-label={t('actions.reportIssue')}
+                      className="inline-flex items-center justify-center size-7 max-sm:size-9 rounded-[7px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                    >
+                      <Flag size={13} aria-hidden />
+                    </button>
+                  </Tooltip>
+                ) : null}
+
                 <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
                   <Tooltip content={t('actions.more')}>
                     <DropdownMenuTrigger asChild>
@@ -1124,10 +1145,15 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
                 {/* Credits spent on this turn — shown after the action icons for
                     credit-charged replies (§ credits). Sage = an AI-status moment. */}
                 {!isUser && message.credits && message.credits > 0 ? (
-                  <span className="ml-1.5 inline-flex items-center gap-1 text-[11px] text-[var(--color-secondary)] tabular-nums">
-                    <Coins size={11} aria-hidden />
-                    {t('actions.creditsUsed', { credits: formatCredits(message.credits) })}
-                  </span>
+                  <Tooltip content={t('actions.viewSubscription')}>
+                    <Link
+                      to="/subscription"
+                      className="ml-1.5 inline-flex min-h-7 items-center gap-1 rounded-[6px] px-1 text-[11px] text-[var(--color-secondary)] tabular-nums interactive hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                    >
+                      <Coins size={11} aria-hidden />
+                      {t('actions.creditsUsed', { credits: formatCredits(message.credits) })}
+                    </Link>
+                  </Tooltip>
                 ) : null}
           </div>
           )
@@ -1269,6 +1295,16 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
                     onClick={() => { setActionSheetOpen(false); setConfirmDelete(true) }}
                   />
                 </>
+              ) : null}
+              {onReport ? (
+                <MsgActionRow
+                  icon={<Flag size={18} aria-hidden />}
+                  label={t('actions.reportIssue')}
+                  onClick={() => {
+                    setActionSheetOpen(false)
+                    window.setTimeout(() => onReport(message.id), 200)
+                  }}
+                />
               ) : null}
             </div>
           </SheetContent>

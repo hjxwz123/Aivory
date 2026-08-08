@@ -555,6 +555,29 @@ CREATE INDEX IF NOT EXISTS idx_message_feedback_rating_updated ON message_feedba
 CREATE INDEX IF NOT EXISTS idx_message_feedback_conversation ON message_feedback(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_message_feedback_user_message ON message_feedback(user_id, message_id);
 
+-- User-submitted product issue reports, separate from model-quality ratings.
+-- The optional raster screenshot is kept in BYTEA so local and object-storage
+-- deployments have identical retention and backup behavior.
+CREATE TABLE IF NOT EXISTS user_feedback (
+  id                 TEXT PRIMARY KEY,
+  user_id            TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  message_id         TEXT REFERENCES messages(id) ON DELETE SET NULL,
+  conversation_id    TEXT REFERENCES conversations(id) ON DELETE SET NULL,
+  conversation_title TEXT NOT NULL DEFAULT '',
+  description        TEXT NOT NULL,
+  page_path           TEXT NOT NULL DEFAULT '',
+  user_agent          TEXT NOT NULL DEFAULT '',
+  viewport_width      INTEGER NOT NULL DEFAULT 0,
+  viewport_height     INTEGER NOT NULL DEFAULT 0,
+  screenshot          BYTEA,
+  screenshot_mime     TEXT NOT NULL DEFAULT '',
+  screenshot_width    INTEGER NOT NULL DEFAULT 0,
+  screenshot_height   INTEGER NOT NULL DEFAULT 0,
+  created_at          BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
+);
+CREATE INDEX IF NOT EXISTS idx_user_feedback_created ON user_feedback(created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_user_feedback_user_created ON user_feedback(user_id, created_at DESC);
+
 -- Public read-only conversation shares (cost-stripped snapshot; revoke = delete).
 CREATE TABLE IF NOT EXISTS conversation_shares (
   id              TEXT PRIMARY KEY,

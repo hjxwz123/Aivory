@@ -593,6 +593,30 @@ CREATE INDEX IF NOT EXISTS idx_message_feedback_rating_updated ON message_feedba
 CREATE INDEX IF NOT EXISTS idx_message_feedback_conversation ON message_feedback(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_message_feedback_user_message ON message_feedback(user_id, message_id);
 
+-- User-submitted product issue reports. Unlike message_feedback (model-quality
+-- ratings), these records carry a required description and an optional page
+-- screenshot for support triage. Conversation metadata is snapshotted so a
+-- later message/thread deletion does not make the report unintelligible.
+CREATE TABLE IF NOT EXISTS user_feedback (
+  id                 TEXT PRIMARY KEY,
+  user_id            TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  message_id         TEXT REFERENCES messages(id) ON DELETE SET NULL,
+  conversation_id    TEXT REFERENCES conversations(id) ON DELETE SET NULL,
+  conversation_title TEXT NOT NULL DEFAULT '',
+  description        TEXT NOT NULL,
+  page_path           TEXT NOT NULL DEFAULT '',
+  user_agent          TEXT NOT NULL DEFAULT '',
+  viewport_width      INTEGER NOT NULL DEFAULT 0,
+  viewport_height     INTEGER NOT NULL DEFAULT 0,
+  screenshot          BLOB,
+  screenshot_mime     TEXT NOT NULL DEFAULT '',
+  screenshot_width    INTEGER NOT NULL DEFAULT 0,
+  screenshot_height   INTEGER NOT NULL DEFAULT 0,
+  created_at          INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+);
+CREATE INDEX IF NOT EXISTS idx_user_feedback_created ON user_feedback(created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_user_feedback_user_created ON user_feedback(user_id, created_at DESC);
+
 -- Public read-only conversation shares. id is the public token used in the
 -- /share/:id link. snapshot is a frozen, cost-stripped JSON copy of the active
 -- message path at share time, so revoking (deleting the row) fully cuts access

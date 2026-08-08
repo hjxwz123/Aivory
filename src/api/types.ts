@@ -996,6 +996,35 @@ export interface ApiAdminFile {
   kb_name: string
 }
 
+/** A user-submitted product issue report. Screenshot bytes are fetched lazily. */
+export interface ApiAdminUserFeedback {
+  id: string
+  user_id: string
+  user_email: string
+  user_name: string
+  message_id: string
+  conversation_id: string
+  conversation_title: string
+  description: string
+  page_path: string
+  user_agent: string
+  viewport_width: number
+  viewport_height: number
+  screenshot_mime: string
+  screenshot_width: number
+  screenshot_height: number
+  screenshot_size: number
+  has_screenshot: boolean
+  created_at: number
+}
+
+export interface ApiAdminUserFeedbackPage {
+  items: ApiAdminUserFeedback[]
+  total: number
+  limit: number
+  offset: number
+}
+
 // A single usage_logs row (one API call) for the admin usage list.
 export interface ApiUsageRecord {
   id: number
