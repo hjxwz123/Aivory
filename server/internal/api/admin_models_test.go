@@ -181,9 +181,10 @@ func TestAdminModelOfficialToolsDefaultsValidationAndPublicMasking(t *testing.T)
 	}
 	var public struct {
 		Models []struct {
-			ID            string                       `json:"id"`
-			Enabled       bool                         `json:"enabled"`
-			OfficialTools []map[string]json.RawMessage `json:"official_tools"`
+			ID             string                       `json:"id"`
+			Enabled        bool                         `json:"enabled"`
+			ToolsAvailable bool                         `json:"tools_available"`
+			OfficialTools  []map[string]json.RawMessage `json:"official_tools"`
 		} `json:"models"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &public); err != nil {
@@ -198,17 +199,11 @@ func TestAdminModelOfficialToolsDefaultsValidationAndPublicMasking(t *testing.T)
 		if !model.Enabled {
 			t.Fatal("public model omitted its enabled state, so the client cannot honor the configured default")
 		}
-		if len(model.OfficialTools) != 1 {
-			t.Fatalf("public official tools = %+v", model.OfficialTools)
+		if !model.ToolsAvailable {
+			t.Fatal("public model did not expose the unified tool capability")
 		}
-		if _, leaked := model.OfficialTools[0]["request"]; leaked {
-			t.Fatalf("public model leaked request JSON: %+v", model.OfficialTools[0])
-		}
-		if _, ok := model.OfficialTools[0]["name"]; !ok {
-			t.Fatalf("public model omitted tool name: %+v", model.OfficialTools[0])
-		}
-		if _, ok := model.OfficialTools[0]["icon"]; !ok {
-			t.Fatalf("public model omitted tool icon: %+v", model.OfficialTools[0])
+		if model.OfficialTools != nil {
+			t.Fatalf("public model exposed administrator hosted-tool definitions: %+v", model.OfficialTools)
 		}
 	}
 	if !found {

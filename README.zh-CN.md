@@ -51,6 +51,8 @@
 
 编排器在一次对话中最多执行 **48 次工具调用，跨越 12 个模型循环**。网络搜索、网页内容、Python 结果和生成文件都可以成为下一次调用的输入，无需用户在中间手动接力。RAG 由编排器单独路由，并在相关时自动注入知识库内容。
 
+自动工具模式会先在本地处理明确 URL、数据附件、指定文件或技能、工具调用续问以及较小的工具声明。其余模糊请求才会交给管理员在**模型策略**中指定的专用低延迟模型，且不携带对话历史和工具 schema；未配置、超时或输出无效时按 fail-open 规则把管理员配置的工具交给对话模型判断。
+
 ### 单次提问完成完整任务
 
 <p align="center">
@@ -60,7 +62,7 @@
 例如，一条“检索 2025 年全球 GDP 数据并制作 PowerPoint”的消息可以自动完成：
 
 1. `use_skill`：加载文档生成技能
-2. `web_search`：定位 IMF、世界银行等权威来源
+2. `aivory_web_search`：定位 IMF、世界银行等权威来源
 3. `web_fetch`：获取原始数据
 4. `python_execute`：清洗数据并计算指标
 5. `python_execute`：绘制图表并生成演示文稿
@@ -85,7 +87,7 @@
 
 | 工具 | 功能 |
 |------|------|
-| `web_search` | 通过 SearXNG（自部署）或任何 Serper 兼容后端进行全文网络搜索。 |
+| `aivory_web_search` | 通过 Aivory 配置的 SearXNG（自部署）、Serper 或 Brave 后端进行全文网络搜索。 |
 | `web_fetch` | 抓取指定 URL 并提取正文，遵守 robots.txt 与内容安全过滤。 |
 | `python_execute` | 在无网络的隔离沙箱中运行 Python 代码。支持完整标准库、预装依赖和文件 I/O。 |
 | `image_generate` | 调用配置的图像模型（Gemini Imagen、OpenAI DALL-E 等）生成图片并保存为产物。 |
@@ -96,7 +98,7 @@
 
 | 工具 | 次数 |
 |------|-----:|
-| `web_search` | 16 |
+| `aivory_web_search` | 16 |
 | `web_fetch` | 12 |
 | `image_generate` | 8 |
 | `python_execute` | 16 |
@@ -213,7 +215,7 @@ graph TB
         API["Go API — REST + SSE<br/>JWT 鉴权 · 每请求 HMAC 签名 · 限速"]
         subgraph ORCH["编排器 Orchestrator"]
             PROV["Provider 注册表<br/>Anthropic · OpenAI · Gemini · Mock<br/>(任意 OpenAI 兼容端点)"]
-            TOOLS["工具层 — 单轮 ≤48 次调用<br/>web_search · web_fetch · python_execute<br/>image_generate · save_memory · use_skill"]
+            TOOLS["工具层 — 单轮 ≤48 次调用<br/>aivory_web_search · web_fetch · python_execute<br/>image_generate · save_memory · use_skill"]
             TASK["任务 LLM<br/>标题 · RAG 路由 · 压缩 · 审校 · 审核"]
             RAGP["RAG 流水线<br/>解析 → 分块 → 嵌入 → 路由 → 检索"]
             MEMW["记忆 Worker<br/>每轮异步提取"]
@@ -313,7 +315,7 @@ STATIC_DIR=../dist ./aivory
 │   └── internal/
 │       ├── api/              HTTP handler、路由、上传安全
 │       ├── llm/              Provider 适配 + 编排器 + 任务 LLM + 记忆 Worker
-│       ├── tools/            web_search / web_fetch / python_execute / image_generate /
+│       ├── tools/            aivory_web_search / web_fetch / python_execute / image_generate /
 │       │                     save_memory / use_skill
 │       ├── rag/              解析 → 切块 → 嵌入 → 查询路由 → 检索
 │       ├── vector/           Qdrant 客户端（+ PG 兜底）

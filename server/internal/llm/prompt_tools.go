@@ -138,10 +138,19 @@ func SplitTextAndCall(text string) (visible string, call *PromptToolCall, parseE
 // loop logic lives in one place.
 //
 // `runOnce(history, system)` should: configure stop_sequences = []string{"</tool_call>"}
-// when not nil, send the upstream request, and return the assistant text +
-// usage. The loop calls `runOnce` up to 6 times, executes tools, and feeds
-// the results back as user messages.
-type PromptToolRunner func(ctx context.Context, history []UnifiedMessage, system string) (text string, usage Usage, err error)
+// when supported, send the upstream request, and return the assistant text plus
+// any provider-hosted results. Hosted blocks/citations/images are carried through
+// to the final UnifiedResult but are never dispatched through the local registry.
+type PromptToolRound struct {
+	Text                 string
+	Blocks               []UnifiedBlock
+	Usage                Usage
+	Citations            []Citation
+	GeneratedImages      []GeneratedImage
+	UsageAlreadyAttached bool
+}
+
+type PromptToolRunner func(ctx context.Context, history []UnifiedMessage, system string) (PromptToolRound, error)
 
 // RunPromptToolLoop executes a complete prompt-mode tool loop. Returns the
 // final assistant text after the loop exits (when the model returns plain
@@ -155,25 +164,55 @@ func RunPromptToolLoop(
 	runner PromptToolRunner,
 	toolRunner ToolRunner,
 	onEvent func(SseEvent),
-) (string, []UnifiedBlock, Usage, []Citation, error) {
+) (string, []UnifiedBlock, Usage, []Citation, []GeneratedImage, error) {
 	preamble := PromptToolPreamble(tools)
 	sys := system + preamble
 	usage := Usage{}
 	citations := []Citation{}
+	generatedImages := []GeneratedImage{}
 	blocks := []UnifiedBlock{}
 	full := strings.Builder{}
 	parseRetries := 0
 
 	for i := 0; i < promptMaxIter; i++ {
-		text, u, err := runner(ctx, history, sys)
+		round, err := runner(ctx, history, sys)
+		text := round.Text
+		u := round.Usage
 		// §B5-per-request usage rows: one attach per prompt-protocol round —
 		// covers every provider's prompt mode from this single loop, including a
-		// failed stream that reported partial usage.
-		attachProviderRequestUsage(ctx, u)
+		// failed stream that reported partial usage. Rich hosted-tool runners use
+		// the provider's normal loop, which already attached each upstream request.
+		if !round.UsageAlreadyAttached {
+			attachProviderRequestUsage(ctx, u)
+		}
 		usage.InputTokens += u.InputTokens
 		usage.OutputTokens += u.OutputTokens
 		usage.CacheReadTokens += u.CacheReadTokens
 		usage.CacheWriteTokens += u.CacheWriteTokens
+		for _, block := range round.Blocks {
+			if block.Kind == "text" {
+				continue
+			}
+			blocks = append(blocks, block)
+			switch block.Kind {
+			case "thinking":
+				if block.Text != "" {
+					onEvent(SseEvent{Type: "thinking_delta", Text: block.Text})
+				}
+			case "tool_call":
+				onEvent(SseEvent{Type: "tool_start", ID: block.ToolID, Name: block.ToolName, Input: block.Input})
+				if block.Summary != "" {
+					onEvent(SseEvent{Type: "tool_result", ID: block.ToolID, Name: block.ToolName, Summary: block.Summary, Status: "complete"})
+				}
+			}
+		}
+		citationStart := len(citations)
+		citations = mergeCitationsByURL(citations, round.Citations)
+		for i := citationStart; i < len(citations); i++ {
+			citation := citations[i]
+			onEvent(SseEvent{Type: "citation", Citation: &citation})
+		}
+		generatedImages = append(generatedImages, round.GeneratedImages...)
 		if err != nil {
 			// Raw provider deltas are hidden in prompt mode until their protocol
 			// envelope can be stripped. Surface and persist only the safe prefix
@@ -186,7 +225,7 @@ func RunPromptToolLoop(
 			if full.Len() > 0 {
 				blocks = append(blocks, UnifiedBlock{Kind: "text", Text: full.String()})
 			}
-			return full.String(), blocks, usage, citations, err
+			return full.String(), blocks, usage, citations, generatedImages, err
 		}
 
 		visible, call, parseErr := SplitTextAndCall(text)
@@ -217,14 +256,14 @@ func RunPromptToolLoop(
 			}
 			// Retries exhausted — treat the text as the final answer.
 			blocks = append(blocks, UnifiedBlock{Kind: "text", Text: full.String()})
-			return full.String(), blocks, usage, citations, nil
+			return full.String(), blocks, usage, citations, generatedImages, nil
 		}
 		parseRetries = 0
 
 		if call == nil {
 			// No tool call → conversation complete. Emit visible text only.
 			blocks = append(blocks, UnifiedBlock{Kind: "text", Text: full.String()})
-			return full.String(), blocks, usage, citations, nil
+			return full.String(), blocks, usage, citations, generatedImages, nil
 		}
 
 		// Got a tool call — emit events and execute. A stable per-round id pairs
@@ -277,7 +316,27 @@ func RunPromptToolLoop(
 		final = "I tried several tools but couldn't reach a conclusion within the budget."
 	}
 	blocks = append(blocks, UnifiedBlock{Kind: "text", Text: final})
-	return final, blocks, usage, citations, nil
+	return final, blocks, usage, citations, generatedImages, nil
+}
+
+func promptRoundText(blocks []UnifiedBlock) string {
+	var text strings.Builder
+	for _, block := range blocks {
+		if block.Kind == "text" {
+			text.WriteString(block.Text)
+		}
+	}
+	return text.String()
+}
+
+func withPromptStopSequence(extra json.RawMessage, fragment map[string]any) json.RawMessage {
+	base := map[string]any{}
+	if len(extra) > 0 {
+		_ = json.Unmarshal(extra, &base)
+	}
+	deepMerge(base, fragment)
+	raw, _ := json.Marshal(base)
+	return json.RawMessage(raw)
 }
 
 func mustMarshal(v any) string {

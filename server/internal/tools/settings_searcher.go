@@ -12,7 +12,7 @@ import (
 
 // settingsSearcher is a thin Searcher that re-resolves provider + base URL +
 // api key from admin settings on every call (§4.4). Mirrors settingsSandbox:
-// admin edits take effect on the very next web_search invocation, no restart.
+// admin edits take effect on the very next aivory_web_search invocation, no restart.
 //
 // Resolution priority:
 //  1. admin settings (`search_provider` / `search_base_url` / `search_api_key`)
@@ -55,7 +55,7 @@ func (s *settingsSearcher) Search(ctx context.Context, query string, topK int) (
 			[]llm.Citation{{
 				ID: "w1", Index: 1, Title: "Aivory local-only mode",
 				URL:     "https://example.com/aivory-local-mode",
-				Snippet: "No search backend configured. Set provider + base URL / api key in admin settings to enable real web_search results.",
+				Snippet: "No search backend configured. Set provider + base URL / api key in admin settings to enable real aivory_web_search results.",
 				Source:  "web",
 			}}, nil
 	}

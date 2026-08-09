@@ -26,11 +26,11 @@ import (
 	"aivory/server/internal/queue"
 	"aivory/server/internal/rag"
 	"aivory/server/internal/store"
+	"aivory/server/internal/toolnames"
 )
 
-// Env-overridable tuning knobs for inline literals used below. Each defaults to
-// the previous hardcoded value when its AIVORY_* variable is unset (see
-// docs/config-reference.md).
+// Env-overridable tuning knobs for inline literals used below. Defaults and
+// operator-facing semantics are documented in docs/config-reference.md.
 var (
 	inlineQuoteSourceInjectionCap    = envcfg.Int("AIVORY_LLM_INLINE_QUOTE_SOURCE_INJECTION_CAP", 8000)
 	imageModeForcedGenerationCount   = 1
@@ -43,6 +43,8 @@ var (
 	// requested <=8-word label.
 	titleGenerationOutputTokens     = 256
 	attachmentImageInlineBytes      = envcfg.Int64("AIVORY_LLM_ATTACHMENT_IMAGE_INLINE_BYTES", 20*1024*1024)
+	toolRouteTimeout                = envcfg.Dur("AIVORY_LLM_TOOL_ROUTE_TIMEOUT", 5*time.Second)
+	toolRouteSchemaTokenThreshold   = envcfg.Int("AIVORY_LLM_TOOL_ROUTE_SCHEMA_TOKEN_THRESHOLD", 512)
 	sandboxExecTimeoutClampRangeMax = envcfg.Int("AIVORY_LLM_SANDBOX_EXEC_TIMEOUT_CLAMP_RANGE_MAX", 600)
 	sandboxExecTimeoutClampRangeMin = envcfg.Int("AIVORY_LLM_SANDBOX_EXEC_TIMEOUT_CLAMP_RANGE_MIN", 10)
 	sandboxExecCtxSafetyMargin      = envcfg.Dur("AIVORY_LLM_SANDBOX_EXEC_CTX_SAFETY_MARGIN", 150*time.Second)
@@ -203,19 +205,19 @@ type ImageBiller interface {
 // perTurnToolLimits caps how many times a single tool may run per message
 // (§4.4 — prevents a model from exhausting search/fetch budget). 0 = unlimited.
 var perTurnToolLimits = map[string]int{
-	"web_search":     envcfg.Int("AIVORY_LLM_PER_TURN_TOOL_LIMITS_WEB_SEARCH", 16),
-	"web_fetch":      envcfg.Int("AIVORY_LLM_PER_TURN_TOOL_LIMITS_WEB_FETCH", 12),
-	"image_generate": envcfg.Int("AIVORY_LLM_PER_TURN_TOOL_LIMITS_IMAGE_GENERATE", 8),
-	"python_execute": envcfg.Int("AIVORY_LLM_PER_TURN_TOOL_LIMITS_PYTHON_EXECUTE", 16), // §F10: cap sandbox executions/turn (each up to 120s) to bound abuse/DoS
+	toolnames.AivoryWebSearch: envcfg.Int("AIVORY_LLM_PER_TURN_TOOL_LIMITS_WEB_SEARCH", 16),
+	"web_fetch":               envcfg.Int("AIVORY_LLM_PER_TURN_TOOL_LIMITS_WEB_FETCH", 12),
+	"image_generate":          envcfg.Int("AIVORY_LLM_PER_TURN_TOOL_LIMITS_IMAGE_GENERATE", 8),
+	"python_execute":          envcfg.Int("AIVORY_LLM_PER_TURN_TOOL_LIMITS_PYTHON_EXECUTE", 16), // §F10: cap sandbox executions/turn (each up to 120s) to bound abuse/DoS
 }
 
 // deepResearchToolLimits are the much higher per-turn caps used while the Deep
 // Research engine runs — it deliberately fans out many searches + source reads.
 var deepResearchToolLimits = map[string]int{
-	"web_search":     envcfg.Int("AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_WEB_SEARCH", 40),
-	"web_fetch":      envcfg.Int("AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_WEB_FETCH", 25),
-	"image_generate": envcfg.Int("AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_IMAGE_GENERATE", 4),
-	"python_execute": envcfg.Int("AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_PYTHON_EXECUTE", 8),
+	toolnames.AivoryWebSearch: envcfg.Int("AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_WEB_SEARCH", 40),
+	"web_fetch":               envcfg.Int("AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_WEB_FETCH", 25),
+	"image_generate":          envcfg.Int("AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_IMAGE_GENERATE", 4),
+	"python_execute":          envcfg.Int("AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_PYTHON_EXECUTE", 8),
 }
 
 // per-turn GLOBAL tool-call ceiling (§B4): bounds a single message's total
@@ -321,8 +323,8 @@ func (o *Orchestrator) disabledToolSet() map[string]bool {
 	if err != nil || len(raw) == 0 {
 		return nil
 	}
-	var names []string
-	if json.Unmarshal(raw, &names) != nil || len(names) == 0 {
+	names, _, err := store.ParseBuiltinTools(raw)
+	if err != nil || len(names) == 0 {
 		return nil
 	}
 	deny := make(map[string]bool, len(names))
@@ -445,13 +447,13 @@ type RunRequest struct {
 	// answer finalizes, a secondary auditor model fact-checks it. Honoured only
 	// when an admin has configured `verify_model_id`; otherwise a no-op.
 	Verify bool
-	// ToolMode is the per-turn tool policy: auto | disabled | enabled | official. Empty keeps
+	// ToolMode is the per-turn tool policy: auto | disabled | enabled. Empty keeps
 	// backwards compatibility with callers that only set NoTools (true maps to
 	// disabled; false maps to enabled). Fast and Deep Research force enabled.
 	ToolMode string
-	// OfficialToolNames is the explicit per-turn selection used only when
-	// ToolMode is "official". The orchestrator intersects it with the resolved
-	// model's configured official-tool definitions before any provider sees it.
+	// OfficialToolNames is accepted only for compatibility with callers predating
+	// the unified tool policy. It is ignored: hosted tools are administrator-owned
+	// model configuration and users cannot select, remove, or reorder them.
 	OfficialToolNames []string
 	// SelectedUserSkillIDs names private, user-owned Agent Skills explicitly
 	// selected for this turn. They are persisted on the user message and injected
@@ -492,10 +494,11 @@ const (
 	ToolModeAuto = "auto"
 	// ToolModeDisabled exposes no tools and activates the server-side fallbacks.
 	ToolModeDisabled = "disabled"
-	// ToolModeEnabled preserves the resolved model's configured tool support.
+	// ToolModeEnabled exposes the resolved model's complete administrator-
+	// configured tool collection (local Functions and provider-hosted tools).
 	ToolModeEnabled = "enabled"
-	// ToolModeOfficial exposes only the selected admin-defined upstream tools.
-	// It never exposes or executes the system's self-built tools.
+	// ToolModeOfficial is a legacy wire value. New callers never emit it and the
+	// resolver normalizes it to ToolModeEnabled.
 	ToolModeOfficial = "official"
 )
 
@@ -538,8 +541,10 @@ func resolveRunToolMode(req RunRequest) (string, error) {
 		return ToolModeEnabled, nil
 	}
 	switch req.ToolMode {
-	case ToolModeAuto, ToolModeDisabled, ToolModeEnabled, ToolModeOfficial:
+	case ToolModeAuto, ToolModeDisabled, ToolModeEnabled:
 		return req.ToolMode, nil
+	case ToolModeOfficial:
+		return ToolModeEnabled, nil
 	default:
 		return "", fmt.Errorf("invalid tool mode %q", req.ToolMode)
 	}
@@ -657,33 +662,50 @@ func (o *Orchestrator) buildFallbackRequest(ctx context.Context, base UnifiedCha
 		fallbackToolMode = "native"
 	}
 	// A model configured with tool_mode=none is an administrator-level ceiling
-	// over both platform and provider-hosted tools. A fallback must never broaden
-	// that policy merely because the primary request used Official mode.
-	fallbackOfficialMode := base.ToolModeOfficial && fallbackToolMode != "none"
-	req.ToolModeOfficial = fallbackOfficialMode
-	if fallbackOfficialMode {
-		// Keep the user's explicit official selection, but re-gate it against the
-		// fallback model's own allowlist and request definitions.
-		req.OfficialToolNames, req.OfficialToolRequests = selectOfficialToolRequests(m.OfficialTools, base.OfficialToolNames)
-		req.Tools = nil
-		req.ToolModePrompt = false
-	} else {
-		req.OfficialToolNames = nil
-		req.OfficialToolRequests = nil
-		if fallbackToolMode == "none" || len(base.Tools) == 0 {
-			req.Tools = nil
-		} else {
-			// Re-resolve the fallback model's registry surface and apply its own
-			// allowlist. Intersect with the primary request so turn-level restrictions
-			// such as fast mode cannot be loosened during a TTFT switch.
-			fallbackTools := filterModelBuiltinTools(o.filterDisabledTools(o.tools.List(m.ID)), fallbackBuiltinTools)
-			req.Tools = intersectToolDefs(fallbackTools, base.Tools)
+	// over the unified collection. Otherwise, a turn whose policy enabled tools is
+	// rebuilt from the fallback model's own complete administrator configuration.
+	baseToolsEnabled := base.ToolsEnabled || len(base.Tools) > 0 || len(base.OfficialToolRequests) > 0
+	req.ToolsEnabled = baseToolsEnabled && fallbackToolMode != "none"
+	req.Tools = nil
+	req.OfficialToolNames = nil
+	req.OfficialToolRequests = nil
+	req.ToolModePrompt = false
+	if req.ToolsEnabled {
+		req.Tools = filterModelBuiltinTools(o.filterDisabledTools(o.tools.List(m.ID)), fallbackBuiltinTools)
+		if !store.MemoryEnabledForUser(ctx, o.db, base.UserID) {
+			req.Tools = filterToolDefsByName(req.Tools, map[string]bool{"save_memory": true})
 		}
+		if req.Fast {
+			req.Tools = filterToolDefsByName(req.Tools, map[string]bool{"python_execute": true})
+		}
+		req.OfficialToolNames, req.OfficialToolRequests = configuredOfficialToolRequests(m.OfficialTools, req.Fast)
 		req.ToolModePrompt = fallbackToolMode == "prompt" && len(req.Tools) > 0
-		// The primary history may contain native/canonical calls that the fallback
-		// does not declare. Remove those before switching providers; execution is
-		// independently bound to the same exact set below.
-		req.History = stripDisallowedBuiltinToolBlocks(req.History, toolDefNameSet(req.Tools))
+	}
+	// The primary history may contain calls that the fallback model does not
+	// declare. Keep calls from either configured category and remove the rest.
+	req.History = stripDisallowedBuiltinToolBlocks(
+		req.History,
+		unifiedToolNameSet(req.Tools, req.OfficialToolNames, req.OfficialToolRequests),
+	)
+	// Native Raw is tied to both the provider family and its wire format. The
+	// primary request has already been converted with storeToUnified, so its Raw
+	// may be valid for the primary channel even though the TTFT model is a
+	// different provider (or OpenAI Chat vs Responses). Do not let a fallback
+	// provider attempt to decode another vendor's exchange; the canonical blocks
+	// below remain usable and preserve the visible conversation/tool trace.
+	if !nativeHistoryCompatible(base.Model, ch.Type, ch.APIFormat) {
+		for index := range req.History {
+			req.History[index].Raw = nil
+		}
+	}
+	// The base request may have been assembled for a native primary model and
+	// therefore still carry provider Raw. A prompt-mode fallback exposes its local
+	// Functions only through text, even when it also has hosted tools, so none of
+	// that native exchange is legal to replay on the fallback request.
+	if req.ToolModePrompt {
+		for index := range req.History {
+			req.History[index].Raw = nil
+		}
 	}
 	if base.SystemPromptOptions != nil {
 		fallbackOpts := *base.SystemPromptOptions
@@ -691,7 +713,7 @@ func (o *Orchestrator) buildFallbackRequest(ctx context.Context, base UnifiedCha
 		// admin behavior prompt (including the masked Fast label). Only capability-
 		// dependent guidance is rebuilt for the model that will actually serve it.
 		fallbackOpts.ToolMode = "none"
-		if !fallbackOfficialMode && len(req.Tools) > 0 {
+		if len(req.Tools) > 0 {
 			fallbackOpts.ToolMode = fallbackToolMode
 		}
 		fallbackOpts.ToolNames = toolDefNames(req.Tools)
@@ -730,23 +752,91 @@ func (o *Orchestrator) buildFallbackRequest(ctx context.Context, base UnifiedCha
 	return req, prov, name, nil
 }
 
-func intersectToolDefs(candidates, ceiling []ToolDef) []ToolDef {
-	allowed := toolDefNameSet(ceiling)
-	out := make([]ToolDef, 0, len(candidates))
-	for _, definition := range candidates {
-		if allowed[definition.Name] {
-			out = append(out, definition)
-		}
-	}
-	return out
-}
-
 func toolDefNameSet(definitions []ToolDef) map[string]bool {
 	set := make(map[string]bool, len(definitions))
 	for _, definition := range definitions {
 		set[definition.Name] = true
 	}
 	return set
+}
+
+// nativeHistoryCompatible reports whether provider-native assistant Raw can be
+// replayed after a TTFT model switch. Raw is not merely JSON: each provider
+// expects a different message grammar, and OpenAI has two incompatible
+// grammars behind the same provider id (Chat Completions and Responses).
+// Unknown primary metadata is treated as incompatible so a fallback never
+// guesses at a vendor-specific exchange.
+func nativeHistoryCompatible(primary ModelInfo, fallbackProvider, fallbackFormat string) bool {
+	primaryProvider := providerIDForChannelType(primary.Provider)
+	resolvedFallbackProvider := providerIDForChannelType(fallbackProvider)
+	if primaryProvider == "" || resolvedFallbackProvider == "" || primaryProvider != resolvedFallbackProvider {
+		return false
+	}
+	return normalizeNativeAPIFormat(primaryProvider, primary.APIFormat) ==
+		normalizeNativeAPIFormat(resolvedFallbackProvider, fallbackFormat)
+}
+
+func normalizeNativeAPIFormat(provider, format string) string {
+	format = strings.ToLower(strings.TrimSpace(format))
+	// OpenAI channels historically defaulted to Chat Completions when the column
+	// was empty. Treat that legacy value as "chat" for compatibility checks.
+	if provider == "openai" && format == "" {
+		return "chat"
+	}
+	return format
+}
+
+func unifiedToolNameSet(definitions []ToolDef, hostedNames []string, hostedRequests []json.RawMessage) map[string]bool {
+	set := toolDefNameSet(definitions)
+	for _, name := range hostedNames {
+		if name = strings.TrimSpace(name); name != "" {
+			set[name] = true
+		}
+	}
+	// Hosted output items use provider tool types, which need not match the
+	// administrator's definition label. Preserve those exact provider names on
+	// later turns without aliasing them to Aivory's local Function namespace.
+	merged := MergeOfficialToolRequests(nil, hostedRequests)
+	if tools, ok := jsonArrayItems(merged["tools"]); ok {
+		for _, value := range tools {
+			tool, ok := value.(map[string]any)
+			if !ok {
+				continue
+			}
+			// Anthropic server tools commonly use a versioned `type` alongside
+			// the unversioned runtime `name` emitted by server_tool_use. Keep both:
+			// the administrator-facing definition label is not required to equal
+			// either provider field.
+			toolName, _ := tool["name"].(string)
+			if toolName = strings.TrimSpace(toolName); toolName != "" {
+				set[toolName] = true
+			}
+			toolType, _ := tool["type"].(string)
+			toolType = strings.TrimSpace(toolType)
+			if toolType == "" {
+				continue
+			}
+			set[toolType] = true
+			switch toolType {
+			case "web_search_preview", "web_search_preview_2025_03_11", "web_search_2025_08_26":
+				set["web_search"] = true
+			}
+		}
+	}
+	return set
+}
+
+func filterToolDefsByName(definitions []ToolDef, excluded map[string]bool) []ToolDef {
+	if len(definitions) == 0 || len(excluded) == 0 {
+		return definitions
+	}
+	filtered := make([]ToolDef, 0, len(definitions))
+	for _, definition := range definitions {
+		if !excluded[definition.Name] {
+			filtered = append(filtered, definition)
+		}
+	}
+	return filtered
 }
 
 func toolDefNames(definitions []ToolDef) []string {
@@ -1150,11 +1240,9 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		turnToolMode = ToolModeEnabled
 	}
 	req.ToolMode = turnToolMode
-	if turnToolMode != ToolModeOfficial {
-		// A selection sent with auto/enabled/disabled must not change those modes'
-		// established system-tool semantics.
-		req.OfficialToolNames = nil
-	}
+	// Per-user hosted-tool selections were retired. Ignore the compatibility
+	// field for every mode; administrator model configuration is authoritative.
+	req.OfficialToolNames = nil
 	req.NoTools = turnToolMode == ToolModeDisabled
 	if !req.NoTools {
 		// Forced web search is the explicit-disabled fallback, not an additional
@@ -1528,18 +1616,16 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	if err != nil {
 		return nil, err
 	}
-	// Resolve staged files before automatic tool routing. A spreadsheet anywhere
-	// in the conversation's persistent sandbox requires real file/data handling,
-	// so auto enables tools directly instead of spending a task-model call merely
-	// to rediscover that requirement.
+	// Resolve staged files before automatic tool routing. The route model receives
+	// only a presence bit; exact file names are used solely by deterministic local
+	// fast paths and never leave this process.
 	sandboxFiles := listSandboxFiles(ctx, o.db, conv.ID, req.UserID, o.uploadDir)
 	builtinTools := modelBuiltinToolSet(model.BuiltinTools)
 	globalDisabledTools := o.disabledToolSet()
 	memoryEnabled := store.MemoryEnabledForUser(ctx, o.db, req.UserID)
-	// Load bound skill metadata before automatic routing. A request such as "use
-	// the release-notes skill" cannot be classified from the generic use_skill
-	// tool description alone; the router needs the actual enabled skill names and
-	// descriptions. Full instructions remain private to the main prompt.
+	// Load bound skill metadata before automatic routing. Exact skill names are
+	// checked locally; descriptions and full instructions never enter the route
+	// request.
 	availableSkillIdx := []SkillIndex{}
 	availableSkillFull := []SkillFull{}
 	skillsAllowed := (builtinTools == nil || builtinTools["use_skill"]) && !globalDisabledTools["use_skill"]
@@ -1550,27 +1636,62 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// 5. Resolve tools for this model BEFORE composing the system prompt so the
 	//    tool-guidance segment (and the §4.13 prompt preamble) match the real,
 	//    enabled tool list instead of a hardcoded set.
-	// Official mode is explicit per turn, but tool_mode=none remains the model's
-	// administrator-level deny-all ceiling. Intersect the requested names with the
-	// resolved model's configured definitions, preserving model configuration
-	// order so scalar override precedence cannot be reordered by a client.
+	// tool_mode=none is the administrator-level deny-all ceiling. Otherwise load
+	// both configured categories up front: local Function definitions from the
+	// registry and every provider-hosted request fragment in administrator order.
 	toolMode := model.ToolMode
 	if toolMode == "" {
 		toolMode = "native"
 	}
-	officialMode := req.ToolMode == ToolModeOfficial && toolMode != "none"
-	officialTools, officialRequests := selectOfficialToolRequests(model.OfficialTools, req.OfficialToolNames)
-	if !officialMode {
-		officialTools = nil
-		officialRequests = nil
+	hostedToolNames := []string(nil)
+	hostedToolRequests := []json.RawMessage(nil)
+	toolDefs := []ToolDef{}
+	if toolMode != "none" {
+		hostedToolNames, hostedToolRequests = configuredOfficialToolRequests(model.OfficialTools, fastMode)
+		toolDefs = filterModelBuiltinTools(o.filterDisabledTools(o.tools.List(model.ID)), builtinTools)
+		if !memoryEnabled {
+			toolDefs = filterToolDefsByName(toolDefs, map[string]bool{"save_memory": true})
+		}
+		// §fast-mode withholds python_execute (no sandbox on a fast turn) — drop it
+		// from local Functions and the hosted code interpreter from provider tools.
+		// Tool budgets are also quartered via ToolContext.Fast (charge()).
+		if fastMode {
+			toolDefs = filterToolDefsByName(toolDefs, map[string]bool{"python_execute": true})
+		}
 	}
-	useOfficial := officialMode && len(officialRequests) > 0
-	hostedImageOfficial := useOfficial && channel.Type == "openai" && channel.APIFormat == "responses" &&
-		responsesRequestHasToolType(MergeOfficialToolRequests(nil, officialRequests), "image_generation")
-	var officialImageBilling *billingAdmission
-	var officialDailyImageQuota *store.QuotaReservation
-	if hostedImageOfficial {
-		officialDailyImageQuota, err = o.checkDailyImageLimit(ctx, req.UserID, 1)
+	if req.ToolMode == ToolModeAuto {
+		// An effective deny-all policy has nothing the classifier could enable.
+		// Enter the same no-tools pipeline immediately and avoid a wasted task-model
+		// round trip.
+		if len(toolDefs) == 0 && len(hostedToolRequests) == 0 {
+			req.NoTools = true
+		} else {
+			req.NoTools = !o.autoTurnNeedsTools(
+				ctx, req, history, toolDefs, hostedToolNames, hostedToolRequests,
+				sandboxFiles, availableSkillIdx, len(selectedUserSkills) > 0,
+				conv.WorkspaceID, assistantMsg.ID,
+			)
+		}
+	}
+	// The explicit disabled policy and an auto=false verdict share exactly the
+	// same no-tools behavior: no provider/hosted declarations, no tool guidance,
+	// no skills, and server-side RAG/search/spreadsheet fallbacks below.
+	if req.NoTools {
+		toolMode = "none"
+		hostedToolNames = nil
+		hostedToolRequests = nil
+		toolDefs = nil
+	}
+	toolsEnabled := !req.NoTools && toolMode != "none"
+	useHostedTools := len(hostedToolRequests) > 0
+	hostedImageEnabled := useHostedTools && channel.Type == "openai" && channel.APIFormat == "responses" &&
+		responsesRequestHasToolType(MergeOfficialToolRequests(nil, hostedToolRequests), "image_generation")
+	var hostedImageBilling *billingAdmission
+	var hostedDailyImageQuota *store.QuotaReservation
+	// Automatic routing is resolved before admission so an auto=false turn never
+	// reserves image quota or credits for a hosted tool it will not receive.
+	if hostedImageEnabled {
+		hostedDailyImageQuota, err = o.checkDailyImageLimit(ctx, req.UserID, 1)
 		if err != nil {
 			message := err.Error()
 			refusalBlocks, _ := json.Marshal([]UnifiedBlock{{Kind: "text", Text: message}})
@@ -1585,19 +1706,19 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		defer func() {
 			releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
 			defer cancel()
-			_ = o.releaseUsageBilling(releaseCtx, officialImageBilling)
-			if officialDailyImageQuota != nil {
-				_ = store.ReleaseQuotaReservation(releaseCtx, o.db, officialDailyImageQuota.ID)
+			_ = o.releaseUsageBilling(releaseCtx, hostedImageBilling)
+			if hostedDailyImageQuota != nil {
+				_ = store.ReleaseQuotaReservation(releaseCtx, o.db, hostedDailyImageQuota.ID)
 			}
 		}()
-		officialImageBilling, msg, err = o.reserveUsageBilling(
+		hostedImageBilling, msg, err = o.reserveUsageBilling(
 			ctx, req.UserID, model, store.QuotaScopeModelImage, 1, model.PricePerImage, 0,
 			"hosted_image", assistantMsg.ID+":hosted-image",
 		)
 		if err != nil {
 			return nil, err
 		}
-		if officialImageBilling == nil {
+		if hostedImageBilling == nil {
 			refusalBlocks, _ := json.Marshal([]UnifiedBlock{{Kind: "text", Text: msg}})
 			_ = finishMessage(ctx, store.MessageFinishPatch{
 				Blocks: refusalBlocks, Citations: []byte("[]"), StopReason: "quota_exceeded", Status: "complete",
@@ -1607,72 +1728,6 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			assistantMsg.Blocks = refusalBlocks
 			return &RunResult{UserMessage: userMsg, AssistantMessage: assistantMsg}, nil
 		}
-	}
-	// An explicit Official choice can resolve to an empty set because the user
-	// unchecked every tool, selected stale names, or an administrator changed the
-	// model configuration between selection and send. Treat that as the same
-	// effective no-tools policy as Disabled. Merely retaining the official-mode
-	// marker would suppress local declarations but skip skill clearing and history
-	// cleanup.
-	if officialMode && !useOfficial {
-		req.NoTools = true
-	}
-	toolDefs := []ToolDef{}
-	if toolMode != "none" && !officialMode {
-		toolDefs = filterModelBuiltinTools(o.filterDisabledTools(o.tools.List(model.ID)), builtinTools)
-		if !memoryEnabled {
-			kept := toolDefs[:0]
-			for _, definition := range toolDefs {
-				if definition.Name != "save_memory" {
-					kept = append(kept, definition)
-				}
-			}
-			toolDefs = kept
-		}
-		// §fast-mode withholds python_execute (no sandbox on a fast turn) — drop it
-		// from the offered tools so the model never even sees it. Its budget is also
-		// quartered via ToolContext.Fast (charge()).
-		if fastMode {
-			kept := toolDefs[:0]
-			for _, d := range toolDefs {
-				if d.Name != "python_execute" {
-					kept = append(kept, d)
-				}
-			}
-			toolDefs = kept
-		}
-	}
-	if req.ToolMode == ToolModeAuto {
-		// An effective deny-all policy has nothing the classifier could enable.
-		// Enter the same no-tools pipeline immediately and avoid a wasted task-model
-		// round trip.
-		if len(toolDefs) == 0 {
-			req.NoTools = true
-		} else if sandboxFilesHaveSheet(sandboxFiles) {
-			req.NoTools = false
-		} else {
-			candidates := append([]ToolDef(nil), toolDefs...)
-			if toolDefsContain(toolDefs, "use_skill") {
-				for _, skill := range availableSkillIdx {
-					candidates = append(candidates, ToolDef{
-						Name:        "skill:" + skill.Name,
-						Description: skill.When,
-					})
-				}
-			}
-			req.NoTools = !o.autoTurnNeedsTools(ctx, req, history, candidates, sandboxFiles, conv.WorkspaceID, assistantMsg.ID)
-		}
-	}
-	// The explicit disabled policy and an auto=false verdict share exactly the
-	// same no-tools behavior: no provider/hosted declarations, no tool guidance,
-	// no skills, and server-side RAG/search/spreadsheet fallbacks below.
-	if req.NoTools {
-		toolMode = "none"
-		officialMode = false
-		useOfficial = false
-		officialTools = nil
-		officialRequests = nil
-		toolDefs = nil
 	}
 	toolNames := make([]string, 0, len(toolDefs))
 	skillToolAvailable := false
@@ -1731,7 +1786,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			c := Citation{ID: s.ID, Index: s.Index, Title: s.Title, URL: s.URL, Snippet: s.Snippet, Source: s.Source}
 			ragSnippets = append(ragSnippets, c)
 			// Stream each retrieved source as a citation event (§6.2) so the UI
-			// shows provenance live, same as web_search results.
+			// shows provenance live, same as web-search results.
 			cc := c
 			onEvent(SseEvent{Type: "citation", Citation: &cc})
 		}
@@ -1785,7 +1840,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// rides the same message-layer injection as RAG. Citations join the turn's
 	// source list. Kept OUT of formatRAGContext so they aren't double-wrapped as
 	// KB context.
-	if req.NoTools && req.ForceWebSearch && (builtinTools == nil || builtinTools["web_search"]) {
+	if req.NoTools && req.ForceWebSearch && (builtinTools == nil || builtinTools[toolnames.AivoryWebSearch]) {
 		// Offset the search citations past any KB snippets already collected this
 		// turn so the two source sets don't both start at [1].
 		searchCtx := withTaskBillingMessageID(ctx, assistantMsg.ID)
@@ -1849,20 +1904,23 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			})
 		}
 	}
-	// §4.13-B / §2.3-C: only a request that actually declares native tools may
-	// splice the stored native tool exchange (raw) back into the history — a
-	// none/prompt/disable-tools turn would 400 upstream on tool blocks without
-	// a tools param.
+	// §4.13-B / §2.3-C: only a native-mode request may splice the stored native
+	// tool exchange (raw) back into history. A prompt-mode request can still carry
+	// provider-hosted tools, but its local Functions use the text protocol and are
+	// deliberately absent from the provider declaration. Replaying a prior native
+	// Function call in that mixed request would therefore make the upstream reject
+	// the history even though the hosted declaration itself is valid.
 	// Fast mode cannot safely replay a provider-native exchange: Raw may contain
 	// python_execute/code_interpreter calls even though this turn no longer
 	// declares either tool. Fall back to canonical blocks for every provider, then
 	// remove the prohibited code-tool blocks below.
-	nativeToolReplay := !fastMode && (useOfficial || (toolMode == "native" && len(toolDefs) > 0))
+	nativeToolReplay := shouldReplayNativeToolHistory(fastMode, toolMode, len(toolDefs), useHostedTools)
 	uHist := storeToUnified(keep, channel.Type, nativeToolReplay)
 	uHist = stripRetiredKnowledgeSearchToolBlocks(uHist)
-	if !officialMode {
-		uHist = stripDisallowedBuiltinToolBlocks(uHist, toolDefNameSet(toolDefs))
-	}
+	uHist = stripDisallowedBuiltinToolBlocks(
+		uHist,
+		unifiedToolNameSet(toolDefs, hostedToolNames, hostedToolRequests),
+	)
 	if fastMode {
 		uHist = stripFastModeCodeBlocks(uHist)
 	}
@@ -1890,7 +1948,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		uHist = stripImageBlocks(uHist)
 	}
 	o.resolveAttachments(ctx, req.UserID, conv.ID, uHist, model, onEvent)
-	if hostedImageOfficial {
+	if hostedImageEnabled {
 		o.resolveImageArtifactBlocks(ctx, req.UserID, uHist)
 	}
 
@@ -2005,10 +2063,11 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			Fallback:  fallbackCreds,
 		},
 		Tools:                toolDefs,
-		OfficialToolNames:    officialTools,
-		OfficialToolRequests: officialRequests,
-		ToolModeOfficial:     officialMode,
-		ToolModePrompt:       toolMode == "prompt" && !officialMode && len(toolDefs) > 0,
+		OfficialToolNames:    hostedToolNames,
+		OfficialToolRequests: hostedToolRequests,
+		ToolsEnabled:         toolsEnabled,
+		Fast:                 fastMode,
+		ToolModePrompt:       toolMode == "prompt" && len(toolDefs) > 0,
 		ProjectFiles:         projectFiles,
 		RAGSnippets:          ragSnippets,
 		ParamOverrides:       req.ParamOverrides,
@@ -2093,14 +2152,10 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			},
 		},
 	}
-	providerRunner := ToolRunner(runner)
-	if provReq.ToolModeOfficial {
-		// Official request fragments execute upstream. An unsolicited/local-looking
-		// function call must never reach the system tool registry in this mode.
-		providerRunner = officialModeToolRunner{}
-	} else {
-		providerRunner = toolDefAllowlistRunner{next: runner, allowed: toolDefNameSet(provReq.Tools)}
-	}
+	// Provider-hosted calls execute upstream, while Function calls still use the
+	// local registry. Bind that local execution path to exactly the Function
+	// declarations sent in this unified request.
+	providerRunner := ToolRunner(toolDefAllowlistRunner{next: runner, allowed: toolDefNameSet(provReq.Tools)})
 
 	// Non-streaming models (§4.3): suppress incremental text deltas and emit
 	// the full answer once after generation. Tool / artifact / rag events still
@@ -2183,11 +2238,11 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	if hostedImageCount > 0 {
 		persistCtx := context.WithoutCancel(ctx)
 		imageCost := float64(hostedImageCount) * model.PricePerImage
-		if officialImageBilling != nil {
-			officialImageBilling.KeepReserved = true
+		if hostedImageBilling != nil {
+			hostedImageBilling.KeepReserved = true
 		}
-		if officialDailyImageQuota != nil {
-			if _, finalizeErr := store.FinalizeQuotaReservation(persistCtx, o.db, officialDailyImageQuota.ID, float64(hostedImageCount)); finalizeErr != nil {
+		if hostedDailyImageQuota != nil {
+			if _, finalizeErr := store.FinalizeQuotaReservation(persistCtx, o.db, hostedDailyImageQuota.ID, float64(hostedImageCount)); finalizeErr != nil {
 				err = errors.Join(err, fmt.Errorf("finalize hosted image daily quota: %w", finalizeErr))
 			}
 		}
@@ -2199,8 +2254,8 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		}
 		if billingErr := store.RecordBillingUsage(persistCtx, o.db, usageRow); billingErr != nil {
 			err = errors.Join(err, fmt.Errorf("record hosted image billing: %w", billingErr))
-		} else if officialImageBilling != nil {
-			_, total, settleErr := o.SettleImageBilling(persistCtx, &ImageBillingReservation{admission: officialImageBilling}, hostedImageCount, imageCost)
+		} else if hostedImageBilling != nil {
+			_, total, settleErr := o.SettleImageBilling(persistCtx, &ImageBillingReservation{admission: hostedImageBilling}, hostedImageCount, imageCost)
 			if settleErr != nil {
 				err = errors.Join(err, fmt.Errorf("settle hosted image billing: %w", settleErr))
 			} else {
@@ -3051,6 +3106,10 @@ func storeToUnified(msgs []store.Message, currentProvider string, nativeToolRepl
 	return out
 }
 
+func shouldReplayNativeToolHistory(fast bool, toolMode string, localToolCount int, hostedTools bool) bool {
+	return !fast && toolMode == "native" && (localToolCount > 0 || hostedTools)
+}
+
 const fastModeCodeHistoryPlaceholder = "[A previous code-analysis step was omitted in Fast mode.]"
 
 const unsupportedToolHistoryPlaceholder = "[A previous tool step was omitted because this model does not support that tool.]"
@@ -3680,7 +3739,7 @@ func composeSystemPrompt(o systemPromptOpts) string {
 
 	// ①.1 ground the model in real time. Without this it falls back to its
 	// training-era date, so "today" / "latest" — and the queries it hands to
-	// web_search — silently target the wrong year. Server-local time; operators
+	// a web-search tool — silently target the wrong year. Server-local time; operators
 	// set TZ to their zone. English keeps the weekday; other locales use the ISO
 	// date to avoid an English weekday inside a localized sentence.
 	now := time.Now()
@@ -3739,7 +3798,7 @@ func composeSystemPrompt(o systemPromptOpts) string {
 			// usage is already mandated by the "## Skills available" section.
 			b.WriteString("\n\n")
 			b.WriteString(l.toolHeader)
-			if has["web_search"] {
+			if has[toolnames.AivoryWebSearch] {
 				b.WriteString(l.toolCite)
 			}
 			b.WriteString(l.toolMultiRound)
@@ -3748,7 +3807,7 @@ func composeSystemPrompt(o systemPromptOpts) string {
 			// tool ONLY from this section, so list every enabled one. use_skill is
 			// excluded (prompt/none mode inlines skills in segment ③).
 			guidance := []struct{ name, line string }{
-				{"web_search", l.toolWebSearch},
+				{toolnames.AivoryWebSearch, l.toolWebSearch},
 				{"python_execute", l.toolPython},
 				{"image_generate", l.toolImage},
 				{"save_memory", l.toolSaveMemory},
@@ -3926,162 +3985,349 @@ func injectSummaryIntoHistory(msgs []UnifiedMessage, text string) []UnifiedMessa
 }
 
 const (
-	toolRouteHistoryTurns    = 6
-	toolRouteHistoryTextCap  = 600
-	toolRouteDescriptionCap  = 800
-	toolRouteFileCountCap    = 20
-	toolRouteFileNameCap     = 200
-	toolRouteMaxOutputTokens = 32
-	toolRouteTimeout         = 12 * time.Second
+	toolRouteMaxOutputTokens = 2
+	toolRouteInputRuneCap    = 240
+	toolRouteInputHeadRunes  = 150
+	toolRouteCustomNameCap   = 24
 )
 
-type toolRouteTurn struct {
-	Role string `json:"role"`
-	Text string `json:"text"`
-}
-
-type toolRouteTool struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-}
-
-type toolRouteFile struct {
-	Name string `json:"name"`
-	Kind string `json:"kind"`
-}
-
-type toolRoutePrompt struct {
-	Conversation []toolRouteTurn `json:"conversation"`
-	Available    []toolRouteTool `json:"available_tools"`
-	StagedFiles  []toolRouteFile `json:"staged_files,omitempty"`
-}
-
-// selectOfficialToolRequests intersects a per-turn name selection with the
-// model's configured definitions. Configuration order is authoritative because
-// later request fragments override earlier scalar/object leaves; clients may
-// choose a subset, but may not reorder that precedence.
-func selectOfficialToolRequests(raw json.RawMessage, selected []string) ([]string, []json.RawMessage) {
-	if len(selected) == 0 {
-		return nil, nil
-	}
-	wanted := make(map[string]bool, len(selected))
-	for _, name := range selected {
-		if name = strings.TrimSpace(name); name != "" {
-			wanted[name] = true
-		}
-	}
-	if len(wanted) == 0 {
-		return nil, nil
-	}
+// configuredOfficialToolRequests returns every administrator-configured hosted
+// tool in configuration order. The historical name mirrors the persisted
+// `official_tools` field; there is deliberately no user-supplied selection.
+func configuredOfficialToolRequests(raw json.RawMessage, fast bool) ([]string, []json.RawMessage) {
 	definitions, err := store.ParseOfficialTools(raw)
 	if err != nil {
 		return nil, nil
 	}
 	names := make([]string, 0, len(definitions))
 	requests := make([]json.RawMessage, 0, len(definitions))
-	seen := make(map[string]bool, len(definitions))
 	for _, definition := range definitions {
 		name := strings.TrimSpace(definition.Name)
-		if name == "" || !wanted[name] || seen[name] {
+		isHostedCodeTool := responsesRequestHasToolType(
+			MergeOfficialToolRequests(nil, []json.RawMessage{definition.Request}),
+			"code_interpreter",
+		)
+		if name == "" || (fast && (name == "code_interpreter" || isHostedCodeTool)) {
 			continue
 		}
-		seen[name] = true
 		names = append(names, name)
 		requests = append(requests, append(json.RawMessage(nil), definition.Request...))
 	}
 	return names, requests
 }
 
-// autoTurnNeedsTools asks the configured task model for one boolean decision.
-// Failures are fail-open: exposing tools is the least destructive fallback
-// because the main model can still choose not to call them, while fail-closed
-// can make current data, files, or user-requested actions impossible.
+// autoTurnNeedsTools resolves cheap, deterministic positive signals first. If
+// the real provider declarations are small, sending them directly to the main
+// model is cheaper and faster than adding another network round trip. Only the
+// remaining ambiguous turns reach the dedicated route model, with no history,
+// file names, schemas, request fragments, skill descriptions, or instructions.
+// Failures are fail-open because the main model can still decline every tool.
 func (o *Orchestrator) autoTurnNeedsTools(
 	ctx context.Context,
 	req RunRequest,
 	history []store.Message,
-	candidates []ToolDef,
+	localTools []ToolDef,
+	hostedNames []string,
+	hostedRequests []json.RawMessage,
 	files []ProjectFileSummary,
+	skills []SkillIndex,
+	selectedUserSkill bool,
 	workspaceID, messageID string,
 ) bool {
+	capabilities, capabilitySet := toolRouteCapabilities(localTools, hostedNames, hostedRequests)
+	attachmentKinds := toolRouteAttachmentKinds(req.Attachments)
+	if selectedUserSkill ||
+		(toolRouteCurrentAttachmentNeedsFileTool(req.Attachments) && (capabilitySet["code"] || capabilitySet["file"])) ||
+		(capabilitySet["web"] && toolRouteInputHasURL(req.UserText)) ||
+		((capabilitySet["code"] || capabilitySet["file"]) && toolRouteMentionsFile(req.UserText, files)) ||
+		(capabilitySet["skill"] && toolRouteMentionsSkill(req.UserText, skills)) ||
+		(toolRouteIsContinuation(req.UserText) && toolRoutePreviousAssistantUsedTool(history)) {
+		return true
+	}
+
+	if toolRouteSchemaTokenThreshold > 0 &&
+		estimateToolDeclarationTokens(localTools, hostedRequests) <= toolRouteSchemaTokenThreshold {
+		return true
+	}
+
 	if o.task == nil {
 		if o.logger != nil {
-			o.logger.Printf("tool route: task model unavailable, enabling tools (conv=%s)", req.ConversationID)
+			o.logger.Printf("tool route: dedicated model unavailable, enabling tools (conv=%s)", req.ConversationID)
 		}
 		return true
 	}
 
-	payload := toolRoutePrompt{
-		Conversation: make([]toolRouteTurn, 0, toolRouteHistoryTurns),
-		Available:    make([]toolRouteTool, 0, len(candidates)),
-		StagedFiles:  make([]toolRouteFile, 0, min(len(files), toolRouteFileCountCap)),
-	}
-	start := 0
-	if len(history) > toolRouteHistoryTurns {
-		start = len(history) - toolRouteHistoryTurns
-	}
-	for _, message := range history[start:] {
-		if message.Role != "user" && message.Role != "assistant" {
-			continue
-		}
-		var blocks []UnifiedBlock
-		_ = json.Unmarshal(message.Blocks, &blocks)
-		text := strings.TrimSpace(renderBlocksAsText(blocks))
-		if text != "" {
-			payload.Conversation = append(payload.Conversation, toolRouteTurn{
-				Role: message.Role,
-				Text: truncate(text, toolRouteHistoryTextCap),
-			})
-		}
-	}
-	for _, tool := range candidates {
-		if strings.TrimSpace(tool.Name) == "" {
-			continue
-		}
-		payload.Available = append(payload.Available, toolRouteTool{
-			Name:        tool.Name,
-			Description: truncate(strings.TrimSpace(tool.Description), toolRouteDescriptionCap),
-		})
-	}
-	for _, file := range files {
-		if len(payload.StagedFiles) >= toolRouteFileCountCap {
-			break
-		}
-		payload.StagedFiles = append(payload.StagedFiles, toolRouteFile{
-			Name: truncate(file.Name, toolRouteFileNameCap),
-			Kind: file.Kind,
-		})
-	}
-	prompt, err := json.Marshal(payload)
-	if err != nil {
-		if o.logger != nil {
-			o.logger.Printf("tool route: build request failed, enabling tools (conv=%s): %v", req.ConversationID, err)
-		}
-		return true
-	}
-
-	var decision struct {
-		UseTools *bool `json:"use_tools"`
-	}
+	prompt := formatToolRoutePrompt(capabilities, attachmentKinds, len(files) > 0, req.UserText)
 	routeCtx, cancel := context.WithTimeout(ctx, toolRouteTimeout)
 	defer cancel()
-	err = o.task.RunJSON(routeCtx, TaskToolRoute, string(prompt), &decision, RunOpts{
+	decision, err := o.task.Run(routeCtx, TaskToolRoute, prompt, RunOpts{
 		UserID:          req.UserID,
 		ConversationID:  req.ConversationID,
 		MessageID:       messageID,
 		WorkspaceID:     workspaceID,
 		MaxOutputTokens: toolRouteMaxOutputTokens,
 	})
-	if err != nil || decision.UseTools == nil {
-		if err == nil {
-			err = errors.New("task model omitted use_tools")
-		}
+	if err != nil {
 		if o.logger != nil {
 			o.logger.Printf("tool route: decision failed, enabling tools (conv=%s): %v", req.ConversationID, err)
 		}
 		return true
 	}
-	return *decision.UseTools
+	decision = strings.TrimSpace(decision)
+	if strings.HasPrefix(decision, "0") {
+		return false
+	}
+	if !strings.HasPrefix(decision, "1") && o.logger != nil {
+		o.logger.Printf("tool route: invalid decision %q, enabling tools (conv=%s)", truncate(decision, 80), req.ConversationID)
+	}
+	return true
+}
+
+func estimateToolDeclarationTokens(localTools []ToolDef, hostedRequests []json.RawMessage) int {
+	tokens := 0
+	if len(localTools) > 0 {
+		if raw, err := json.Marshal(localTools); err == nil {
+			tokens += estimateToolJSONTokens(raw)
+		}
+	}
+	if len(hostedRequests) > 0 {
+		if raw, err := json.Marshal(MergeOfficialToolRequests(nil, hostedRequests)); err == nil {
+			tokens += estimateToolJSONTokens(raw)
+		}
+	}
+	return tokens
+}
+
+func estimateToolJSONTokens(raw []byte) int {
+	byBytes := (len(raw) + 3) / 4
+	if byContent := estimateTokens(string(raw)); byContent > byBytes {
+		return byContent
+	}
+	return byBytes
+}
+
+func toolRouteCapabilities(localTools []ToolDef, hostedNames []string, hostedRequests []json.RawMessage) ([]string, map[string]bool) {
+	set := map[string]bool{}
+	custom := []string{}
+	addCustom := func(name string) {
+		capability := toolRouteCustomCapability(name)
+		if !set[capability] {
+			set[capability] = true
+			custom = append(custom, capability)
+		}
+	}
+	addKnown := func(name string) bool {
+		capabilities := toolRouteKnownCapabilities(name)
+		for _, capability := range capabilities {
+			set[capability] = true
+		}
+		return len(capabilities) > 0
+	}
+
+	for _, tool := range localTools {
+		if name := strings.TrimSpace(tool.Name); name != "" && !addKnown(name) {
+			addCustom(name)
+		}
+	}
+	for index, name := range hostedNames {
+		known := addKnown(name)
+		if index < len(hostedRequests) {
+			for requestName := range unifiedToolNameSet(nil, nil, []json.RawMessage{hostedRequests[index]}) {
+				known = addKnown(requestName) || known
+			}
+		}
+		if !known {
+			addCustom(name)
+		}
+	}
+
+	ordered := make([]string, 0, len(set))
+	for _, capability := range []string{"web", "code", "file", "image", "memory", "skill"} {
+		if set[capability] {
+			ordered = append(ordered, capability)
+		}
+	}
+	ordered = append(ordered, custom...)
+	return ordered, set
+}
+
+func toolRouteKnownCapabilities(name string) []string {
+	name = strings.ToLower(strings.TrimSpace(name))
+	switch {
+	case name == toolnames.AivoryWebSearch,
+		name == "web_fetch",
+		name == "web_search",
+		strings.HasPrefix(name, "web_search_"),
+		name == "google_search",
+		name == "googlesearch",
+		name == "url_context",
+		name == "computer_use":
+		return []string{"web"}
+	case name == "python_execute", name == "code_interpreter", name == "shell", name == "bash":
+		return []string{"code", "file"}
+	case name == "file_search", strings.HasPrefix(name, "file_search_"):
+		return []string{"file"}
+	case name == "image_generate", name == "image_generation":
+		return []string{"image"}
+	case name == "save_memory":
+		return []string{"memory"}
+	case name == "use_skill", strings.HasPrefix(name, "skill:"):
+		return []string{"skill"}
+	default:
+		return nil
+	}
+}
+
+func toolRouteCustomCapability(name string) string {
+	name = strings.ToLower(strings.TrimSpace(name))
+	var b strings.Builder
+	for _, r := range name {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
+			b.WriteRune(r)
+			if b.Len() >= toolRouteCustomNameCap {
+				break
+			}
+		}
+	}
+	if b.Len() == 0 {
+		b.WriteString("tool")
+	}
+	return "custom:" + b.String()
+}
+
+func toolRouteAttachmentKinds(attachments []Attachment) []string {
+	set := map[string]bool{}
+	for _, attachment := range attachments {
+		kind := strings.ToLower(strings.TrimSpace(attachment.Kind))
+		switch {
+		case attachmentIsImage(attachment):
+			set["image"] = true
+		case kind == "sheet" || isSandboxSpreadsheetFilename(attachment.Filename):
+			set["sheet"] = true
+		case kind == "code":
+			set["code"] = true
+		case kind == "pdf":
+			set["pdf"] = true
+		case kind == "doc":
+			set["doc"] = true
+		case kind == "text":
+			set["text"] = true
+		default:
+			set["file"] = true
+		}
+	}
+	ordered := []string{}
+	for _, kind := range []string{"sheet", "code", "pdf", "doc", "text", "image", "file"} {
+		if set[kind] {
+			ordered = append(ordered, kind)
+		}
+	}
+	return ordered
+}
+
+func toolRouteCurrentAttachmentNeedsFileTool(attachments []Attachment) bool {
+	for _, attachment := range attachments {
+		kind := strings.ToLower(strings.TrimSpace(attachment.Kind))
+		if kind == "sheet" || kind == "code" || isSandboxSpreadsheetFilename(attachment.Filename) {
+			return true
+		}
+		switch strings.ToLower(filepath.Ext(strings.TrimSpace(attachment.Filename))) {
+		case ".parquet", ".arrow", ".feather", ".jsonl", ".ndjson", ".sqlite", ".sqlite3", ".db", ".sql":
+			return true
+		}
+	}
+	return false
+}
+
+func toolRouteInputHasURL(input string) bool {
+	input = strings.ToLower(input)
+	return strings.Contains(input, "https://") || strings.Contains(input, "http://")
+}
+
+func toolRouteMentionsFile(input string, files []ProjectFileSummary) bool {
+	input = strings.ToLower(input)
+	for _, file := range files {
+		name := strings.ToLower(strings.TrimSpace(file.Name))
+		if name != "" && strings.Contains(input, name) {
+			return true
+		}
+	}
+	return false
+}
+
+func toolRouteMentionsSkill(input string, skills []SkillIndex) bool {
+	input = strings.ToLower(input)
+	for _, skill := range skills {
+		name := strings.ToLower(strings.TrimSpace(skill.Name))
+		if name != "" && strings.Contains(input, name) {
+			return true
+		}
+	}
+	return false
+}
+
+func toolRoutePreviousAssistantUsedTool(history []store.Message) bool {
+	for index := len(history) - 1; index >= 0; index-- {
+		message := history[index]
+		if message.Role != "assistant" {
+			continue
+		}
+		var blocks []UnifiedBlock
+		if json.Unmarshal(message.Blocks, &blocks) != nil {
+			return false
+		}
+		for _, block := range blocks {
+			if block.Kind == "tool_call" || block.Kind == "tool_output" {
+				return true
+			}
+		}
+		return false
+	}
+	return false
+}
+
+func toolRouteIsContinuation(input string) bool {
+	input = strings.ToLower(strings.TrimSpace(input))
+	if input == "" || len([]rune(input)) > 160 {
+		return false
+	}
+	for _, prefix := range []string{
+		"continue", "go on", "keep going", "proceed", "do it", "run it", "try again", "retry", "again", "next", "more", "use that",
+		"继续", "接着", "往下", "下一步", "再试", "重试", "再来", "就按这个", "按这个", "用这个", "然后呢", "再查", "再运行",
+		"続け", "再試行", "poursuis", "continuer", "encore",
+	} {
+		if strings.HasPrefix(input, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func formatToolRoutePrompt(capabilities, attachmentKinds []string, hasFiles bool, input string) string {
+	if len(capabilities) == 0 {
+		capabilities = []string{"none"}
+	}
+	if len(attachmentKinds) == 0 {
+		attachmentKinds = []string{"none"}
+	}
+	files := "0"
+	if hasFiles {
+		files = "1"
+	}
+	return "CAP=" + strings.Join(capabilities, ",") +
+		"\nATT=" + strings.Join(attachmentKinds, ",") +
+		"\nFILES=" + files +
+		"\nINPUT=" + truncateToolRouteInput(input)
+}
+
+func truncateToolRouteInput(input string) string {
+	input = strings.Join(strings.Fields(strings.TrimSpace(input)), " ")
+	runes := []rune(input)
+	if len(runes) <= toolRouteInputRuneCap {
+		return input
+	}
+	tailRunes := toolRouteInputRuneCap - toolRouteInputHeadRunes
+	return string(runes[:toolRouteInputHeadRunes]) + " ... " + string(runes[len(runes)-tailRunes:])
 }
 
 // forcedSearchHistoryTurns caps how many recent messages feed the search-query
@@ -4139,49 +4385,49 @@ func (o *Orchestrator) deriveSearchQueries(ctx context.Context, req RunRequest, 
 
 // forcedWebSearch runs a NON-tool web search for a no-tools + web-search turn
 // (§4.4-B): a task model turns the conversation into queries, the configured
-// searcher runs them, progress streams to the reply area as web_search rounds,
+// searcher runs them, progress streams as aivory_web_search rounds,
 // and the results become a <web-search-result> block for prompt injection.
 // Returns (contextText, citations); ("", nil) when search is unconfigured or
 // yields nothing. Best-effort — a failure never blocks the turn.
 func (o *Orchestrator) forcedWebSearch(ctx context.Context, req RunRequest, conv *store.Conversation, history []store.Message, baseIndex int, allowedTools map[string]bool, onEvent func(SseEvent)) (string, []Citation) {
-	// Respect the admin platform kill-switch: if web_search is globally
+	// Respect the admin platform kill-switch: if aivory_web_search is globally
 	// disabled, the forced-search path must not run it either (it would
 	// otherwise be a back door around `disabled_tools`).
-	if o.disabledToolSet()["web_search"] {
+	if o.disabledToolSet()[toolnames.AivoryWebSearch] {
 		return "", nil
 	}
-	if allowedTools != nil && !allowedTools["web_search"] {
+	if allowedTools != nil && !allowedTools[toolnames.AivoryWebSearch] {
 		return "", nil
 	}
 	queries := o.deriveSearchQueries(ctx, req, history)
 	if len(queries) == 0 {
 		return "", nil
 	}
-	searchTimeout := toolCallTimeout("web_search")
+	searchTimeout := toolCallTimeout(toolnames.AivoryWebSearch)
 	tc := &ToolContext{UserID: req.UserID, ConvID: req.ConversationID, WorkspaceID: conv.WorkspaceID, ModelID: req.ModelID, BuiltinTools: allowedTools}
 	var cites []Citation
 	var b strings.Builder
 	for i, q := range queries {
 		id := fmt.Sprintf("fws_%d", i+1)
 		input, _ := json.Marshal(map[string]any{"query": q})
-		onEvent(SseEvent{Type: "tool_start", Name: "web_search", ID: id, Input: input})
+		onEvent(SseEvent{Type: "tool_start", Name: toolnames.AivoryWebSearch, ID: id, Input: input})
 		// Bound each search with the same per-call timeout orchToolRunner applies
 		// (§4.3) so a stalled search backend can't hang the turn pre-first-token.
 		sctx, cancel := context.WithTimeout(ctx, searchTimeout)
-		out, qcites, err := o.tools.Run(sctx, "web_search", input, tc)
+		out, qcites, err := o.tools.Run(sctx, toolnames.AivoryWebSearch, input, tc)
 		cancel()
 		if err != nil {
-			onEvent(SseEvent{Type: "tool_result", Name: "web_search", ID: id, Summary: "search failed", Status: "error"})
+			onEvent(SseEvent{Type: "tool_result", Name: toolnames.AivoryWebSearch, ID: id, Summary: "search failed", Status: "error"})
 			continue
 		}
 		// The searcher returns this exact sentence when no backend is configured
 		// (settings + env both empty). Injecting that placeholder would only add
 		// noise — stop and let the model answer from training knowledge.
 		if strings.HasPrefix(out, "Search not yet configured") {
-			onEvent(SseEvent{Type: "tool_result", Name: "web_search", ID: id, Summary: "search not configured", Status: "error"})
+			onEvent(SseEvent{Type: "tool_result", Name: toolnames.AivoryWebSearch, ID: id, Summary: "search not configured", Status: "error"})
 			return "", nil
 		}
-		onEvent(SseEvent{Type: "tool_result", Name: "web_search", ID: id, Summary: truncate(out, 400), Status: "complete"})
+		onEvent(SseEvent{Type: "tool_result", Name: toolnames.AivoryWebSearch, ID: id, Summary: truncate(out, 400), Status: "complete"})
 		// The searcher numbers its inline [n] markers 1..k locally (per query),
 		// but the citation RECORDS are renumbered globally with an offset so the
 		// KB + web source lists never collide. Remap the injected text's markers
@@ -4621,12 +4867,6 @@ type orchToolRunner struct {
 	onEvent func(SseEvent)
 }
 
-type officialModeToolRunner struct{}
-
-func (officialModeToolRunner) Run(_ context.Context, name string, _ []byte) (string, []Citation, error) {
-	return "", nil, fmt.Errorf("system tool %q is unavailable in official mode", name)
-}
-
 // toolDefAllowlistRunner binds execution to the exact definitions sent in the
 // current provider request. It blocks unsolicited or stale calls even when a
 // broader persisted model policy would otherwise allow the tool.
@@ -4688,10 +4928,10 @@ func toolRunnerForModelRequest(runner ToolRunner, modelID string, definitions []
 // toolTimeouts bounds a single tool invocation per tool type (§4.3: search
 // 10s / sandbox 120s / image 60s) so one slow tool can't stall the turn.
 var toolTimeouts = map[string]time.Duration{
-	"web_search":     envcfg.Dur("AIVORY_LLM_TOOL_TIMEOUTS", 10*time.Second),
-	"web_fetch":      envcfg.Dur("AIVORY_LLM_TOOL_TIMEOUTS_2", 15*time.Second),
-	"python_execute": 120 * time.Second,
-	"image_generate": envcfg.Dur("AIVORY_LLM_TOOL_TIMEOUTS_3", 600*time.Second), // slow third-party image gateways need a wide window
+	toolnames.AivoryWebSearch: envcfg.Dur("AIVORY_LLM_TOOL_TIMEOUTS", 10*time.Second),
+	"web_fetch":               envcfg.Dur("AIVORY_LLM_TOOL_TIMEOUTS_2", 15*time.Second),
+	"python_execute":          120 * time.Second,
+	"image_generate":          envcfg.Dur("AIVORY_LLM_TOOL_TIMEOUTS_3", 600*time.Second), // slow third-party image gateways need a wide window
 }
 
 var toolTimeoutDefault = envcfg.Dur("AIVORY_LLM_TOOL_TIMEOUT_DEFAULT", 100*time.Second)

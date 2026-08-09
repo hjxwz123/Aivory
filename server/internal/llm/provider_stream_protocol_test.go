@@ -63,7 +63,7 @@ func TestProviderStreamReadersValidateProtocol(t *testing.T) {
 				``,
 			}, "\n\n"),
 			read: func(body io.Reader, emit func(SseEvent)) (string, error) {
-				_, _, text, _, _, _, err := readAnthropicStream(body, emit)
+				_, _, _, text, _, _, _, _, err := readAnthropicStream(body, emit)
 				return text, err
 			},
 		},
@@ -77,7 +77,7 @@ func TestProviderStreamReadersValidateProtocol(t *testing.T) {
 				``,
 			}, "\n\n"),
 			read: func(body io.Reader, emit func(SseEvent)) (string, error) {
-				text, _, _, _, _, err := readGeminiStream(body, emit)
+				text, _, _, _, _, _, err := readGeminiStream(body, emit)
 				return text, err
 			},
 		},
@@ -164,7 +164,7 @@ func TestReadGeminiStreamConsumesCumulativeAndTrailingUsage(t *testing.T) {
 	}, "\n\n")
 
 	var deltas strings.Builder
-	text, _, _, _, usage, err := readGeminiStream(strings.NewReader(stream), func(ev SseEvent) {
+	text, _, _, _, _, usage, err := readGeminiStream(strings.NewReader(stream), func(ev SseEvent) {
 		if ev.Type == "text_delta" {
 			deltas.WriteString(ev.Text)
 		}
@@ -183,7 +183,7 @@ func TestReadGeminiStreamConsumesCumulativeAndTrailingUsage(t *testing.T) {
 func TestReadGeminiStreamUsageIsNotTerminal(t *testing.T) {
 	stream := `data: {"candidates":[{"content":{"parts":[{"text":"partial"}]}}],"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":1}}` + "\n\n"
 
-	text, _, _, _, usage, err := readGeminiStream(strings.NewReader(stream), func(SseEvent) {})
+	text, _, _, _, _, usage, err := readGeminiStream(strings.NewReader(stream), func(SseEvent) {})
 	if err == nil || !strings.Contains(err.Error(), "response ended before a terminal event") {
 		t.Fatalf("error = %v, want premature EOF protocol error", err)
 	}
@@ -200,7 +200,7 @@ func TestReadAnthropicStreamContinuesPastMessageDelta(t *testing.T) {
 		``,
 	}, "\n\n")
 
-	_, _, _, _, _, usage, err := readAnthropicStream(strings.NewReader(stream), func(SseEvent) {})
+	_, _, _, _, _, _, _, usage, err := readAnthropicStream(strings.NewReader(stream), func(SseEvent) {})
 	if err == nil || !strings.Contains(err.Error(), "stream failed before message_stop") {
 		t.Fatalf("error = %v, want trailing Anthropic stream error", err)
 	}

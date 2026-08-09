@@ -105,7 +105,6 @@ function ThreadBody({ quote, childId, onClose }: { quote: string; childId: strin
       verify: armed.verify,
       toolMode: armed.toolMode,
       webSearch: armed.webSearch,
-      officialToolNames: armed.officialToolNames,
     })
   }
 

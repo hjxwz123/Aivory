@@ -34,7 +34,7 @@ func TestGoogleProviderWireFormatCamelCase(t *testing.T) {
 		SystemPrompt: "sys",
 		Model:        ModelInfo{RequestID: "gemini-2.5-flash", BaseURL: srv.URL, APIKey: "k", Vision: true},
 		History:      multimodalHistoryWithDocument(),
-		Tools:        []ToolDef{{Name: "web_search", Description: "d", InputSchema: json.RawMessage(`{"type":"object"}`)}},
+		Tools:        []ToolDef{{Name: "aivory_web_search", Description: "d", InputSchema: json.RawMessage(`{"type":"object"}`)}},
 	}
 	if _, err := p.Stream(context.Background(), req, nil, func(SseEvent) {}); err != nil {
 		t.Fatal(err)

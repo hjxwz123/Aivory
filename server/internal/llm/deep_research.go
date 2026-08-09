@@ -7,7 +7,7 @@
 //	            and decomposes the topic into 2-4 dimension-diverse sub-questions
 //	            with strategy-built queries (year-qualified, vs-structured,
 //	            counter-evidence, bilingual for tech) — Phase 1
-//	RESEARCH  — multi-round web_search + web_fetch (concurrent); candidate
+//	RESEARCH  — multi-round aivory_web_search + web_fetch (concurrent); candidate
 //	            sources are credibility-graded A-D and read in priority order
 //	            (official/academic first, forums last) — Phases 2+3
 //	VERIFY    — TaskLLM audits coverage (2+ independent sources per sub-question,
@@ -41,6 +41,7 @@ import (
 
 	"aivory/server/internal/envcfg"
 	"aivory/server/internal/store"
+	"aivory/server/internal/toolnames"
 )
 
 var (
@@ -323,7 +324,7 @@ func (rs *researcher) researchLoop(ctx context.Context, plan researchPlan) {
 	// Deep Research normally calls the registry directly rather than through the
 	// provider's function-call loop. Respect the model policy before creating any
 	// internal search work; synthesis can still return a no-evidence response.
-	if !rs.tc.AllowsBuiltinTool("web_search") {
+	if !rs.tc.AllowsBuiltinTool(toolnames.AivoryWebSearch) {
 		for _, task := range rs.state.Tasks {
 			rs.setTaskStatus(task.ID, "done", 0)
 		}
@@ -380,7 +381,7 @@ func (rs *researcher) researchLoop(ctx context.Context, plan researchPlan) {
 		specs := make([]toolCallSpec, len(queued))
 		for i, qs := range queued {
 			in, _ := json.Marshal(map[string]any{"query": qs.query, "top_k": drSearchTopK})
-			specs[i] = toolCallSpec{ID: fmt.Sprintf("dr_s_%d_%d", round, i), Name: "web_search", Input: in}
+			specs[i] = toolCallSpec{ID: fmt.Sprintf("dr_s_%d_%d", round, i), Name: toolnames.AivoryWebSearch, Input: in}
 		}
 		searchResults := rs.execToolsConcurrent(ctx, specs)
 
@@ -700,7 +701,7 @@ func (rs *researcher) write(ctx context.Context, plan researchPlan) (*UnifiedRes
 	writerReq.Tools = nil
 	writerReq.OfficialToolNames = nil
 	writerReq.OfficialToolRequests = nil
-	writerReq.ToolModeOfficial = false
+	writerReq.ToolsEnabled = false
 	writerReq.ToolModePrompt = false
 	writerReq.Stream = true
 	if len(rs.evidence) == 0 {

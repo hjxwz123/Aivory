@@ -37,20 +37,20 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 		req.History = stripImageBlocks(req.History)
 	}
 	// §4.13 prompt-mode: drive the text protocol loop.
-	if req.ToolModePrompt && !officialToolModeEnabled(req) {
-		_, blocks, usage, cites, err := RunPromptToolLoop(
+	if req.ToolModePrompt {
+		_, blocks, usage, cites, images, err := RunPromptToolLoop(
 			ctx, req.SystemPrompt, req.History, req.Tools,
 			p.promptRunOnce(req), tools, onEvent,
 		)
 		if err != nil {
-			return promptToolErrorResult(ctx, blocks, usage, cites, err)
+			return promptToolErrorResult(ctx, blocks, usage, cites, images, err)
 		}
-		return &UnifiedResult{Blocks: blocks, StopReason: "end_turn", Usage: usage, Citations: cites}, nil
+		return &UnifiedResult{Blocks: blocks, StopReason: "end_turn", Usage: usage, Citations: cites, GeneratedImages: images}, nil
 	}
 
 	contents := historyToGemini(req.History, req.Model.Vision)
 	var toolsDecl []map[string]any
-	if len(req.Tools) > 0 && !officialToolModeEnabled(req) {
+	if len(req.Tools) > 0 {
 		decls := []map[string]any{}
 		for _, t := range req.Tools {
 			decls = append(decls, map[string]any{
@@ -72,6 +72,7 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 	historyLen := len(contents)
 	allText := strings.Builder{}
 	allBlocks := []UnifiedBlock{}
+	allCitations := []Citation{}
 	totalUsage := Usage{}
 
 	for i := 0; i < maxIter; i++ {
@@ -104,6 +105,7 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 			thinkingText string
 			calls        []geminiCall
 			modelParts   []map[string]any
+			citations    []Citation
 			u            Usage
 		)
 		err := doProviderParsedRequest(ctx, req.Model, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
@@ -118,12 +120,12 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 			return hr, nil
 		}, func(resp *http.Response, emit func(SseEvent)) error {
 			text, thinkingText, u = "", "", Usage{}
-			calls, modelParts = nil, nil
+			calls, modelParts, citations = nil, nil, nil
 			if statusErr := requireProviderSuccess(resp, "google"); statusErr != nil {
 				return statusErr
 			}
 			var readErr error
-			text, thinkingText, calls, modelParts, u, readErr = readGeminiStream(resp.Body, emit)
+			text, thinkingText, calls, modelParts, citations, u, readErr = readGeminiStream(resp.Body, emit)
 			return readErr
 		}, onEvent)
 		// §B5-per-request usage rows: pin this iteration's usage to its request.
@@ -146,6 +148,7 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 			partialUsage.OutputTokens += u.OutputTokens
 			partialUsage.CacheReadTokens += u.CacheReadTokens
 			partialUsage.CacheWriteTokens += u.CacheWriteTokens
+			partialCitations := mergeCitationsByURL(append([]Citation{}, allCitations...), citations)
 
 			partialContents := append([]map[string]any{}, contents...)
 			partialModelParts := make([]map[string]any, 0, len(modelParts))
@@ -162,11 +165,11 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 			partialRaw, _ := json.Marshal(partialContents[historyLen:])
 			// Stop button / kill: preserve the partial (§6.2).
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				return &UnifiedResult{Blocks: partialBlocks, Raw: partialRaw, StopReason: "stopped", Usage: partialUsage}, err
+				return &UnifiedResult{Blocks: partialBlocks, Raw: partialRaw, StopReason: "stopped", Usage: partialUsage, Citations: partialCitations}, err
 			}
 			visible := providerVisibleOutputFromContext(ctx)
-			if len(partialBlocks) > 0 || usageHasValue(partialUsage) || (visible != nil && visible.Load()) {
-				return &UnifiedResult{Blocks: partialBlocks, Raw: partialRaw, StopReason: "error", Usage: partialUsage}, err
+			if len(partialBlocks) > 0 || len(partialCitations) > len(allCitations) || usageHasValue(partialUsage) || (visible != nil && visible.Load()) {
+				return &UnifiedResult{Blocks: partialBlocks, Raw: partialRaw, StopReason: "error", Usage: partialUsage, Citations: partialCitations}, err
 			}
 			return nil, err
 		}
@@ -179,6 +182,7 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 		}
 		totalUsage.InputTokens += u.InputTokens
 		totalUsage.OutputTokens += u.OutputTokens
+		allCitations = mergeCitationsByURL(allCitations, citations)
 
 		// Append the model turn (text + any functionCall parts) to history.
 		contents = append(contents, map[string]any{"role": "model", "parts": modelParts})
@@ -190,6 +194,7 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 				Raw:        raw,
 				StopReason: "end_turn",
 				Usage:      totalUsage,
+				Citations:  allCitations,
 			}, nil
 		}
 
@@ -231,7 +236,35 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 		Raw:        raw,
 		StopReason: "max_iterations",
 		Usage:      totalUsage,
+		Citations:  allCitations,
 	}, nil
+}
+
+func mergeCitationsByURL(existing []Citation, incoming []Citation) []Citation {
+	seen := make(map[string]bool, len(existing)+len(incoming))
+	seenIDs := make(map[string]bool, len(existing)+len(incoming))
+	for _, citation := range existing {
+		if url := strings.TrimSpace(citation.URL); url != "" {
+			seen[url] = true
+		}
+		if citation.ID != "" {
+			seenIDs[citation.ID] = true
+		}
+	}
+	for _, citation := range incoming {
+		url := strings.TrimSpace(citation.URL)
+		if url == "" || seen[url] {
+			continue
+		}
+		seen[url] = true
+		if citation.ID == "" || seenIDs[citation.ID] {
+			citation.ID = fmt.Sprintf("cite%d", len(existing)+1)
+		}
+		seenIDs[citation.ID] = true
+		citation.Index = len(existing) + 1
+		existing = append(existing, citation)
+	}
+	return existing
 }
 
 // stripGoogleEndpointParams keeps endpoint-owned request identity and
@@ -381,17 +414,41 @@ func geminiRawCallsAllSigned(turns []map[string]any) bool {
 //   - visible text (parts[].text where thought!=true)
 //   - thinking text (parts[].thought_summary / parts[].text where thought==true)
 //   - functionCall items (parts[].functionCall)
+//   - candidate.groundingMetadata web sources from provider-hosted Google Search
 //   - usageMetadata (cumulative metadata that may appear on multiple chunks)
 //
 // and emit text_delta / thinking_delta as they arrive so the UI updates live.
-// Returns: (visible text, thinking text, function calls, raw model parts, usage).
-func readGeminiStream(body io.Reader, onEvent func(SseEvent)) (string, string, []geminiCall, []map[string]any, Usage, error) {
+// Returns: (visible text, thinking text, function calls, raw model parts,
+// citations, usage).
+func readGeminiStream(body io.Reader, onEvent func(SseEvent)) (string, string, []geminiCall, []map[string]any, []Citation, Usage, error) {
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 	text := strings.Builder{}
 	thinking := strings.Builder{}
 	calls := []geminiCall{}
 	modelParts := []map[string]any{}
+	citations := []Citation{}
+	seenCitations := map[string]bool{}
+	addGroundingCitations := func(metadata map[string]any) {
+		chunks, _ := metadata["groundingChunks"].([]any)
+		for _, chunk := range chunks {
+			chunkMap, _ := chunk.(map[string]any)
+			web, _ := chunkMap["web"].(map[string]any)
+			url, _ := web["uri"].(string)
+			url = strings.TrimSpace(url)
+			if url == "" || seenCitations[url] {
+				continue
+			}
+			seenCitations[url] = true
+			title, _ := web["title"].(string)
+			citation := Citation{
+				ID: fmt.Sprintf("gmc%d", len(citations)+1), Index: len(citations) + 1,
+				Title: strings.TrimSpace(title), URL: url, Source: "web",
+			}
+			citations = append(citations, citation)
+			onEvent(SseEvent{Type: "citation", Citation: &citation})
+		}
+	}
 	usage := Usage{}
 	sawEvent := false
 	terminal := false
@@ -427,11 +484,11 @@ func readGeminiStream(body io.Reader, onEvent func(SseEvent)) (string, string, [
 		}
 		var parsed map[string]any
 		if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
-			return text.String(), thinking.String(), calls, modelParts, usage,
+			return text.String(), thinking.String(), calls, modelParts, citations, usage,
 				fmt.Errorf("google stream invalid JSON: %w", err)
 		}
 		if streamErr := providerEventError("google", parsed); streamErr != nil {
-			return text.String(), thinking.String(), calls, modelParts, usage, streamErr
+			return text.String(), thinking.String(), calls, modelParts, citations, usage, streamErr
 		}
 		cs, _ := parsed["candidates"].([]any)
 		if len(cs) > 0 {
@@ -439,6 +496,9 @@ func readGeminiStream(body io.Reader, onEvent func(SseEvent)) (string, string, [
 		}
 		for _, c := range cs {
 			cm, _ := c.(map[string]any)
+			if grounding, _ := cm["groundingMetadata"].(map[string]any); grounding != nil {
+				addGroundingCitations(grounding)
+			}
 			if finishReason, _ := cm["finishReason"].(string); finishReason != "" {
 				terminal = true
 			}
@@ -446,11 +506,13 @@ func readGeminiStream(body io.Reader, onEvent func(SseEvent)) (string, string, [
 			parts, _ := content["parts"].([]any)
 			for _, pr := range parts {
 				prm, _ := pr.(map[string]any)
+				handled := false
 				if sig := geminiPartSig(prm); sig != "" {
 					lastSig = sig
 				}
 				isThought, _ := prm["thought"].(bool)
 				if t, _ := prm["text"].(string); t != "" {
+					handled = true
 					if isThought {
 						thinking.WriteString(t)
 						onEvent(SseEvent{Type: "thinking_delta", Text: t})
@@ -471,6 +533,7 @@ func readGeminiStream(body io.Reader, onEvent func(SseEvent)) (string, string, [
 					onEvent(SseEvent{Type: "thinking_delta", Text: ts})
 				}
 				if fc, ok := prm["functionCall"].(map[string]any); ok {
+					handled = true
 					name, _ := fc["name"].(string)
 					args, _ := json.Marshal(fc["args"])
 					if len(args) == 0 || string(args) == "null" {
@@ -480,6 +543,13 @@ func readGeminiStream(body io.Reader, onEvent func(SseEvent)) (string, string, [
 					modelParts = append(modelParts, geminiFunctionCallPart(prm, fc, lastSig))
 					onEvent(SseEvent{Type: "tool_start", Name: name, ID: name})
 					onEvent(SseEvent{Type: "tool_input", Name: name, ID: name, PartialJson: string(args)})
+				}
+				// Provider-hosted Gemini tools use their own part types (for example
+				// executableCode/codeExecutionResult), never functionCall. Preserve
+				// those parts for same-provider replay without adding them to calls,
+				// which is the client Function list executed by Aivory below.
+				if !handled && len(prm) > 0 {
+					modelParts = append(modelParts, prm)
 				}
 			}
 		}
@@ -498,18 +568,18 @@ func readGeminiStream(body io.Reader, onEvent func(SseEvent)) (string, string, [
 		}
 	}
 	if err := scanner.Err(); err != nil && !terminal {
-		return text.String(), thinking.String(), calls, modelParts, usage, err
+		return text.String(), thinking.String(), calls, modelParts, citations, usage, err
 	}
 	if !sawEvent {
-		return text.String(), thinking.String(), calls, modelParts, usage, invalidProviderStream("google", "empty response")
+		return text.String(), thinking.String(), calls, modelParts, citations, usage, invalidProviderStream("google", "empty response")
 	}
 	if !terminal {
-		return text.String(), thinking.String(), calls, modelParts, usage, invalidProviderStream("google", "response ended before a terminal event")
+		return text.String(), thinking.String(), calls, modelParts, citations, usage, invalidProviderStream("google", "response ended before a terminal event")
 	}
 	if len(modelParts) == 0 {
 		modelParts = append(modelParts, map[string]any{"text": ""})
 	}
-	return text.String(), thinking.String(), calls, modelParts, usage, nil
+	return text.String(), thinking.String(), calls, modelParts, citations, usage, nil
 }
 
 // parseGeminiCandidate extracts visible text, functionCall requests, and the
@@ -526,14 +596,17 @@ func parseGeminiCandidate(parsed map[string]any) (string, []geminiCall, []map[st
 		parts, _ := content["parts"].([]any)
 		for _, pr := range parts {
 			prm, _ := pr.(map[string]any)
+			handled := false
 			if sig := geminiPartSig(prm); sig != "" {
 				candSig = sig
 			}
 			if t, _ := prm["text"].(string); t != "" {
+				handled = true
 				text += t
 				modelParts = append(modelParts, map[string]any{"text": t})
 			}
 			if fc, ok := prm["functionCall"].(map[string]any); ok {
+				handled = true
 				name, _ := fc["name"].(string)
 				args, _ := json.Marshal(fc["args"])
 				if len(args) == 0 || string(args) == "null" {
@@ -541,6 +614,9 @@ func parseGeminiCandidate(parsed map[string]any) (string, []geminiCall, []map[st
 				}
 				calls = append(calls, geminiCall{Name: name, Args: args})
 				modelParts = append(modelParts, geminiFunctionCallPart(prm, fc, candSig))
+			}
+			if !handled && len(prm) > 0 {
+				modelParts = append(modelParts, prm)
 			}
 		}
 	}
@@ -553,7 +629,34 @@ func parseGeminiCandidate(parsed map[string]any) (string, []geminiCall, []map[st
 // promptRunOnce returns a PromptToolRunner performing ONE generateContent call
 // (stop sequence on </tool_call>) for §4.13 prompt-mode.
 func (p *GoogleProvider) promptRunOnce(req UnifiedChatRequest) PromptToolRunner {
-	return func(ctx context.Context, history []UnifiedMessage, system string) (string, Usage, error) {
+	return func(ctx context.Context, history []UnifiedMessage, system string) (PromptToolRound, error) {
+		if len(req.OfficialToolRequests) > 0 {
+			round := req
+			round.SystemPrompt = system
+			round.History = history
+			round.Tools = nil
+			round.ToolModePrompt = false
+			round.ExtraParams = withPromptStopSequence(req.ExtraParams, map[string]any{
+				"generationConfig": map[string]any{
+					"stopSequences": []string{PromptToolStopSequence()},
+				},
+			})
+			result, err := p.Stream(
+				ctx,
+				round,
+				toolDefAllowlistRunner{allowed: map[string]bool{}},
+				func(SseEvent) {},
+			)
+			if result == nil {
+				return PromptToolRound{}, err
+			}
+			return PromptToolRound{
+				Text: promptRoundText(result.Blocks), Blocks: result.Blocks, Usage: result.Usage,
+				Citations: result.Citations, GeneratedImages: result.GeneratedImages,
+				UsageAlreadyAttached: true,
+			}, err
+		}
+
 		contents := []map[string]any{}
 		for _, m := range history {
 			role := "user"
@@ -640,6 +743,6 @@ func (p *GoogleProvider) promptRunOnce(req UnifiedChatRequest) PromptToolRunner 
 			}
 			return nil
 		}, func(SseEvent) {})
-		return text, usage, err
+		return PromptToolRound{Text: text, Usage: usage}, err
 	}
 }

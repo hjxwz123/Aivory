@@ -22,7 +22,6 @@ function resetPrefs() {
     toolMode: 'auto',
     forceWebSearch: false,
     defaultToolMode: 'auto',
-    officialToolNamesByModel: {},
     paramValuesByModel: {},
     draftsByScope: {},
   })
@@ -84,43 +83,15 @@ describe('composer tool mode', () => {
     expect(resolveArmedTurnFlags().webSearch).toBeUndefined()
   })
 
-  it('keeps official selections isolated by model and preserves an explicit empty selection', () => {
-    const prefs = useComposerPrefs.getState()
-    prefs.setOfficialToolNames('model-a', ['web_search', 'web_search', ' code_interpreter '])
-    useComposerPrefs.getState().setOfficialToolNames('model-b', ['image_generation'])
-
-    expect(useComposerPrefs.getState().officialToolNamesByModel).toEqual({
-      'model-a': ['web_search', 'code_interpreter'],
-      'model-b': ['image_generation'],
-    })
-
-    useComposerPrefs.getState().setOfficialToolNames('model-a', [])
-    expect(useComposerPrefs.getState().officialToolNamesByModel).toEqual({
-      'model-a': [],
-      'model-b': ['image_generation'],
-    })
-  })
-
-  it('persists an explicit empty selection and uses undefined to restore inheritance', () => {
+  it('does not persist a user-owned hosted-tool selection', () => {
     const setItem = vi.fn()
     vi.stubGlobal('window', {})
     vi.stubGlobal('localStorage', { setItem })
 
-    useComposerPrefs.getState().setOfficialToolNames(' model-a ', [])
+    useComposerPrefs.getState().setToolMode('enabled')
 
-    expect(useComposerPrefs.getState().officialToolNamesByModel).toEqual({ 'model-a': [] })
-    expect(setItem).toHaveBeenLastCalledWith(
-      'aivory.composer-prefs.v1',
-      expect.stringContaining('"officialToolNamesByModel":{"model-a":[]}'),
-    )
-
-    useComposerPrefs.getState().setOfficialToolNames('model-a', undefined)
-
-    expect(useComposerPrefs.getState().officialToolNamesByModel).toEqual({})
-    expect(setItem).toHaveBeenLastCalledWith(
-      'aivory.composer-prefs.v1',
-      expect.stringContaining('"officialToolNamesByModel":{}'),
-    )
+    expect(useComposerPrefs.getState()).not.toHaveProperty('officialToolNamesByModel')
+    expect(setItem).toHaveBeenLastCalledWith('aivory.composer-prefs.v1', expect.not.stringContaining('officialToolNamesByModel'))
   })
 })
 
@@ -136,45 +107,22 @@ describe('model tool capability', () => {
   })
 
   it('treats a model-level none policy as authoritative over every tool family', () => {
-    expect(resolveModelToolModeCapabilities('none', { builtin: true, official: true })).toEqual({
-      builtin: false,
-      official: false,
-    })
-    expect(resolveModelToolModeCapabilities('native', { builtin: true, official: true })).toEqual({
-      builtin: true,
-      official: true,
-    })
+    expect(resolveModelToolModeCapabilities('none', { available: true })).toEqual({ available: false })
+    expect(resolveModelToolModeCapabilities('native', { available: true })).toEqual({ available: true })
   })
 
   it('keeps a stable order while omitting unsupported modes from the menu', () => {
-    expect(TOOL_MODE_MENU_ORDER).toEqual(['auto', 'official', 'disabled', 'enabled'])
-    expect(toolModeAvailable('auto', { builtin: false, official: false })).toBe(true)
-    expect(toolModeAvailable('disabled', { builtin: false, official: false })).toBe(true)
-    expect(toolModeAvailable('official', { builtin: true, official: false })).toBe(false)
-    expect(toolModeAvailable('enabled', { builtin: false, official: true })).toBe(false)
-    expect(visibleToolModes({ builtin: true, official: true })).toEqual([
-      'auto',
-      'official',
-      'disabled',
-      'enabled',
-    ])
-    expect(visibleToolModes({ builtin: true, official: false })).toEqual([
-      'auto',
-      'disabled',
-      'enabled',
-    ])
-    expect(visibleToolModes({ builtin: false, official: true })).toEqual([
-      'auto',
-      'official',
-      'disabled',
-    ])
-    expect(visibleToolModes({ builtin: false, official: false })).toEqual(['auto', 'disabled'])
+    expect(TOOL_MODE_MENU_ORDER).toEqual(['auto', 'enabled', 'disabled'])
+    expect(toolModeAvailable('auto', { available: false })).toBe(true)
+    expect(toolModeAvailable('disabled', { available: false })).toBe(true)
+    expect(toolModeAvailable('enabled', { available: false })).toBe(false)
+    expect(visibleToolModes({ available: true })).toEqual(['auto', 'enabled', 'disabled'])
+    expect(visibleToolModes({ available: false })).toEqual(['auto', 'disabled'])
   })
 
   it('falls an unsupported persisted selection back to automatic', () => {
-    expect(normalizeToolModeForCapabilities('enabled', { builtin: false, official: true })).toBe('auto')
-    expect(normalizeToolModeForCapabilities('official', { builtin: true, official: false })).toBe('auto')
-    expect(normalizeToolModeForCapabilities('disabled', { builtin: false, official: false })).toBe('disabled')
+    expect(normalizeToolModeForCapabilities('enabled', { available: false })).toBe('auto')
+    expect(normalizeToolModeForCapabilities('disabled', { available: false })).toBe('disabled')
   })
 })
 
@@ -183,7 +131,7 @@ describe('tool mode migration', () => {
     expect(resolveDefaultToolMode({ tool_mode_default: 'auto', disable_tools_default: true })).toBe('auto')
     expect(resolveDefaultToolMode({ tool_mode_default: 'disabled', disable_tools_default: false })).toBe('disabled')
     expect(resolveDefaultToolMode({ tool_mode_default: 'enabled', disable_tools_default: true })).toBe('enabled')
-    expect(resolveDefaultToolMode({ tool_mode_default: 'official', disable_tools_default: true })).toBe('official')
+    expect(resolveDefaultToolMode({ tool_mode_default: 'official', disable_tools_default: true })).toBe('enabled')
   })
 
   it('preserves explicit legacy account choices', () => {
@@ -213,14 +161,13 @@ describe('tool mode migration', () => {
       verify: true,
       toolMode: 'auto',
       defaultToolMode: 'auto',
-      officialToolNamesByModel: {},
       forceWebSearch: false,
       paramValuesByModel: { model_1: { temperature: 0.4, thinking: true } },
       draftsByScope: { 'new-chat': 'unfinished question' },
     })
   })
 
-  it('keeps explicit empty official selections when loading persisted preferences', () => {
+  it('ignores retired user-owned hosted-tool selections when loading preferences', () => {
     const migrated = parsePersistedComposerPrefs({
       officialToolNamesByModel: {
         model_1: [],
@@ -229,19 +176,15 @@ describe('tool mode migration', () => {
       },
     })
 
-    expect(migrated.officialToolNamesByModel).toEqual({
-      model_1: [],
-      model_2: ['web_search'],
-    })
+    expect(migrated).not.toHaveProperty('officialToolNamesByModel')
   })
 })
 
 describe('turn tool policy propagation', () => {
-  it('keeps all four explicit policies distinct', () => {
+  it('keeps all three explicit policies distinct', () => {
     expect(resolveTurnToolMode('auto')).toBe('auto')
     expect(resolveTurnToolMode('disabled')).toBe('disabled')
     expect(resolveTurnToolMode('enabled')).toBe('enabled')
-    expect(resolveTurnToolMode('official')).toBe('official')
   })
 
   it('normalizes legacy/internal omissions to an explicit automatic policy', () => {
@@ -268,32 +211,4 @@ describe('turn tool policy propagation', () => {
     })
   })
 
-  it('serializes selected official names only with official mode', () => {
-    expect(
-      resolveToolRequestFlags('official', {
-        officialToolNames: ['web_search', 'web_search', ' code_interpreter ', ''],
-      }),
-    ).toEqual({
-      toolMode: 'official',
-      webSearch: undefined,
-      officialToolNames: ['web_search', 'code_interpreter'],
-    })
-    expect(resolveToolRequestFlags('enabled', { officialToolNames: ['web_search'] })).toEqual({
-      toolMode: 'enabled',
-      webSearch: undefined,
-    })
-  })
-
-  it('keeps an empty official selection explicit instead of falling back to defaults', () => {
-    expect(resolveToolRequestFlags('official')).toEqual({
-      toolMode: 'official',
-      webSearch: undefined,
-      officialToolNames: [],
-    })
-    expect(resolveToolRequestFlags('official', { officialToolNames: [] })).toEqual({
-      toolMode: 'official',
-      webSearch: undefined,
-      officialToolNames: [],
-    })
-  })
 })

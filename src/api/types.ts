@@ -600,8 +600,8 @@ export interface ApiModelTag {
   created_at: number
 }
 
-/** Admin-defined provider-native tool request fragment. Public model responses
- * omit `request`; users only need the stable name and icon for selection. */
+/** Admin-defined provider-hosted tool request fragment. This shape is returned
+ * only by admin model endpoints; public model responses expose tools_available. */
 export interface ApiOfficialToolDefinition {
   name: string
   icon: string
@@ -642,10 +642,13 @@ export interface ApiModel {
    * for all registered tools (including future additions) and `[]` for none;
    * public model responses always return the resolved effective `string[]`. */
   builtin_tools?: string[] | null
+  /** Unified public capability bit. True when the administrator configured at
+   * least one available local Function or provider-hosted tool. */
+  tools_available?: boolean
   /** Optional chat-model JSON object merged into the upstream provider request. */
   extra_params?: Record<string, unknown>
-  /** Provider-native tools offered by this model. Admin responses include each
-   * request fragment; public responses expose only name/icon. */
+  /** Provider-hosted tools offered by this model. Present only in admin model
+   * responses; public responses expose the unified tools_available bit. */
   official_tools?: ApiOfficialToolDefinition[]
   /** model_tags ids assigned to this model — drives the picker's tag filter (§ model tags). */
   tags?: string[]

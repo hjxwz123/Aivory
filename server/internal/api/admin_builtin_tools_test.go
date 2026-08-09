@@ -87,7 +87,7 @@ func TestListBuiltinToolsAdminMarksGlobalAvailability(t *testing.T) {
 	if availability["python_execute"] || availability["save_memory"] {
 		t.Fatalf("disabled tools reported available: %+v", availability)
 	}
-	if !availability["web_search"] {
+	if !availability["aivory_web_search"] {
 		t.Fatalf("enabled tool reported unavailable: %+v", availability)
 	}
 }
@@ -220,19 +220,19 @@ func TestPublicModelsExposeResolvedBuiltinToolCapabilities(t *testing.T) {
 	}
 	var payload struct {
 		Models []struct {
-			ID            string           `json:"id"`
-			BuiltinTools  []string         `json:"builtin_tools"`
-			OfficialTools []map[string]any `json:"official_tools"`
+			ID             string   `json:"id"`
+			BuiltinTools   []string `json:"builtin_tools"`
+			ToolsAvailable bool     `json:"tools_available"`
 		} `json:"models"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
 	}
 	got := make(map[string][]string, len(payload.Models))
-	gotOfficial := make(map[string][]map[string]any, len(payload.Models))
+	gotAvailable := make(map[string]bool, len(payload.Models))
 	for _, model := range payload.Models {
 		got[model.ID] = model.BuiltinTools
-		gotOfficial[model.ID] = model.OfficialTools
+		gotAvailable[model.ID] = model.ToolsAvailable
 	}
 
 	expectedDefault := []string{}
@@ -244,19 +244,22 @@ func TestPublicModelsExposeResolvedBuiltinToolCapabilities(t *testing.T) {
 	if strings.Join(got[defaultModel.ID], ",") != strings.Join(expectedDefault, ",") {
 		t.Fatalf("default-all capabilities=%v want=%v", got[defaultModel.ID], expectedDefault)
 	}
-	if strings.Join(got[customModel.ID], ",") != "web_search" {
-		t.Fatalf("custom capabilities=%v want=[web_search]", got[customModel.ID])
+	if strings.Join(got[customModel.ID], ",") != "aivory_web_search" {
+		t.Fatalf("custom capabilities=%v want=[aivory_web_search]", got[customModel.ID])
 	}
 	for _, id := range []string{noneModel.ID, modeNoneModel.ID} {
 		if tools, exists := got[id]; !exists || tools == nil || len(tools) != 0 {
 			t.Fatalf("deny-all capabilities for %s=%v exists=%v, want non-nil []", id, tools, exists)
 		}
 	}
-	if tools := gotOfficial[modeNoneModel.ID]; tools == nil || len(tools) != 0 {
-		t.Fatalf("tool_mode=none official capabilities=%v, want non-nil []", tools)
+	if gotAvailable[modeNoneModel.ID] {
+		t.Fatal("tool_mode=none advertised unified tools")
 	}
-	if tools := gotOfficial[nativeOfficialModel.ID]; len(tools) != 1 || tools[0]["name"] != "hosted_search" {
-		t.Fatalf("native official capabilities=%v, want hosted_search", tools)
+	if !gotAvailable[nativeOfficialModel.ID] {
+		t.Fatal("hosted-only model did not advertise unified tool availability")
+	}
+	if gotAvailable[noneModel.ID] {
+		t.Fatal("model with neither configured category advertised tools")
 	}
 }
 
@@ -288,7 +291,7 @@ func TestModelArchiveNormalizationPreservesBuiltinToolPolicy(t *testing.T) {
 	if value, present, isNull, err := backupNullableStringField(rows[1], "builtin_tools"); err != nil || !present || isNull || value != "[]" {
 		t.Fatalf("deny-all archive value=%q present=%v null=%v err=%v", value, present, isNull, err)
 	}
-	if value, present, isNull, err := backupNullableStringField(rows[2], "builtin_tools"); err != nil || !present || isNull || value != `["web_search"]` {
+	if value, present, isNull, err := backupNullableStringField(rows[2], "builtin_tools"); err != nil || !present || isNull || value != `["aivory_web_search"]` {
 		t.Fatalf("custom archive value=%q present=%v null=%v err=%v", value, present, isNull, err)
 	}
 	if _, exists := rows[3]["builtin_tools"]; exists {

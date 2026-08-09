@@ -46,7 +46,6 @@ import { useAuth } from '@/store/auth'
 import { useComposerPrefs, type ComposerMode } from '@/store/composer-prefs'
 import { useModels } from '@/store/models'
 import type { ToolMode } from '@/lib/tool-mode'
-import { filterOfficialToolNames, sanitizeOfficialToolNames } from '@/lib/official-tools'
 import i18n from '@/i18n'
 import { mathContentToPlainText } from '@/lib/math-content'
 import { normalizeSelectedUserSkillIds } from '@/lib/composer-commands'
@@ -60,28 +59,20 @@ import { initialConversationTitle } from '@/lib/chat-message-input'
 // triggered, instead of silently reverting to defaults. verify is gated on
 // availability. Deep Research is normalized to enabled because its pipeline
 // always needs tools and must bypass the automatic classifier.
-export function resolveArmedTurnFlags(modelId?: string): {
+export function resolveArmedTurnFlags(_modelId?: string): {
   mode?: ComposerMode
   verify?: boolean
   toolMode: ToolMode
   webSearch?: boolean
-  officialToolNames?: string[]
 } {
   const p = useComposerPrefs.getState()
   const mode = p.mode !== 'default' ? p.mode : undefined
   const toolMode = resolveTurnToolMode(p.toolMode, { mode })
-  const models = useModels.getState()
-  const resolvedModelId = modelId || models.defaultId
-  const model = resolvedModelId ? models.getById(resolvedModelId) : undefined
   return {
     mode,
     verify: p.verify && useModels.getState().verifyAvailable ? true : undefined,
     toolMode,
     webSearch: toolMode === 'disabled' && p.forceWebSearch ? true : undefined,
-    officialToolNames:
-      toolMode === 'official' && resolvedModelId
-        ? filterOfficialToolNames(model, p.officialToolNamesByModel[resolvedModelId])
-        : undefined,
   }
 }
 
@@ -101,18 +92,12 @@ export function resolveTurnToolMode(
 /** Pure wire-policy resolver shared by normal sends and regeneration. */
 export function resolveToolRequestFlags(
   toolMode: ToolMode | undefined,
-  options: { fast?: boolean; mode?: ComposerMode; webSearch?: boolean; officialToolNames?: string[] } = {},
-): { toolMode: ToolMode; webSearch?: true; officialToolNames?: string[] } {
+  options: { fast?: boolean; mode?: ComposerMode; webSearch?: boolean } = {},
+): { toolMode: ToolMode; webSearch?: true } {
   const resolved = resolveTurnToolMode(toolMode, options)
   return {
     toolMode: resolved,
     webSearch: resolved === 'disabled' && options.webSearch ? true : undefined,
-    // Preserve an explicit empty selection on the wire. Omitting the field in
-    // official mode makes an empty user choice indistinguishable from a legacy
-    // client asking the server to choose its defaults during a rolling deploy.
-    ...(resolved === 'official'
-      ? { officialToolNames: sanitizeOfficialToolNames(options.officialToolNames) }
-      : {}),
   }
 }
 
@@ -301,8 +286,6 @@ interface ConversationStore {
     toolMode?: ToolMode
     /** §4.4-B: forced non-tool web search (only meaningful in disabled mode). */
     webSearch?: boolean
-    /** Provider-native tool subset, serialized only with toolMode=official. */
-    officialToolNames?: string[]
     /** User-owned skill ids selected explicitly for this turn. */
     selectedUserSkillIds?: string[]
     /** §fast-mode: run this turn in fast mode (model resolved server-side + masked;
@@ -1167,20 +1150,13 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
       return
     }
     const persistedLeafBeforeTurn = previousPersistedLeaf(conv0?.messages ?? [])
-    const requestModelId = input.fast ? undefined : input.modelId || conv0?.modelId || useModels.getState().defaultId
-    const requestModel = requestModelId ? useModels.getState().getById(requestModelId) : undefined
-    const requestedOfficialToolNames =
-      input.officialToolNames ??
-      (requestModelId ? useComposerPrefs.getState().officialToolNamesByModel[requestModelId] : undefined)
     const {
       toolMode: requestToolMode,
       webSearch: requestWebSearch,
-      officialToolNames: requestOfficialToolNames,
     } = resolveToolRequestFlags(input.toolMode, {
       fast: input.fast,
       mode: input.mode,
       webSearch: input.webSearch,
-      officialToolNames: filterOfficialToolNames(requestModel, requestedOfficialToolNames),
     })
     const userId = uid('m')
     generatedLocalMessageIds.add(userId)
@@ -1378,10 +1354,9 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
           mode: input.mode,
           // §verify: enable the secondary-auditor pass for this turn.
           verify: input.verify,
-          // Explicit four-state policy; only disabled mode may request the legacy
+          // Explicit three-state policy; only disabled mode may request the legacy
           // server-run search injection.
           tool_mode: requestToolMode,
-          official_tool_names: requestOfficialToolNames,
           selected_user_skill_ids: normalizeSelectedUserSkillIds(input.selectedUserSkillIds),
           web_search: requestWebSearch,
           // §fast-mode: run this turn on the admin's hidden fast model.
@@ -1738,11 +1713,10 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
     // 进阶 first makes the retry use the real model.
     const fast = conv?.fast === true
     const verify = fast ? false : armed.verify
-    const { toolMode, webSearch, officialToolNames } = resolveToolRequestFlags(armed.toolMode, {
+    const { toolMode, webSearch } = resolveToolRequestFlags(armed.toolMode, {
       fast,
       mode,
       webSearch: armed.webSearch,
-      officialToolNames: armed.officialToolNames,
     })
     const placeholderId = uid('m')
     const generationId = createGenerationId()
@@ -1817,7 +1791,6 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
           mode,
           verify,
           tool_mode: toolMode,
-          official_tool_names: officialToolNames,
           web_search: webSearch,
           fast,
           // Fast turns must not inherit parameter overrides cached from the
@@ -2901,12 +2874,17 @@ function safeDomain(u: string): string {
 function prettyToolLabel(name: string): string {
   switch (name) {
     case 'web_search':
+    case 'aivory_web_search':
       return 'Searching the web'
     case 'web_fetch':
       return 'Reading a web page'
     case 'python_execute':
       return 'Running Python'
+    case 'code_interpreter':
+      return 'Running code interpreter'
     case 'image_generate':
+      return 'Generating an image'
+    case 'image_generation':
       return 'Generating an image'
     case 'use_skill':
       return 'Loading a skill'

@@ -94,7 +94,7 @@ func TestAnthropicThinkingIsExplicitParamControl(t *testing.T) {
 						"temperature": 0.7,
 						"top_p": 0.9,
 						"top_k": 40,
-						"tool_choice": {"type": "tool", "name": "web_search"}
+						"tool_choice": {"type": "tool", "name": "aivory_web_search"}
 					}
 				}
 			}
@@ -336,7 +336,7 @@ func TestReadAnthropicStreamThinking(t *testing.T) {
 	}, "\n")
 
 	var thinkingDeltas string
-	_, _, text, thinkingBlocks, _, _, err := readAnthropicStream(strings.NewReader(stream), func(ev SseEvent) {
+	_, _, _, text, thinkingBlocks, _, _, _, err := readAnthropicStream(strings.NewReader(stream), func(ev SseEvent) {
 		if ev.Type == "thinking_delta" {
 			thinkingDeltas += ev.Text
 		}
@@ -366,7 +366,7 @@ func TestReadGeminiStreamThinking(t *testing.T) {
 	}, "\n")
 
 	var thinkingDeltas, textDeltas string
-	text, thinking, _, _, _, err := readGeminiStream(strings.NewReader(stream), func(ev SseEvent) {
+	text, thinking, _, _, _, _, err := readGeminiStream(strings.NewReader(stream), func(ev SseEvent) {
 		switch ev.Type {
 		case "thinking_delta":
 			thinkingDeltas += ev.Text

@@ -34,6 +34,7 @@ interface ReasoningTraceProps {
 
 const TOOL_ICON: Record<string, ComponentType<{ size?: number; className?: string }>> = {
   web_search: Search,
+  aivory_web_search: Search,
   web_fetch: Globe,
   python_execute: Terminal,
   use_skill: BookOpen,
@@ -43,7 +44,7 @@ const TOOL_ICON: Record<string, ComponentType<{ size?: number; className?: strin
 
 /**
  * ReasoningTrace — the unified "thinking" panel (§1.1 / §7.1-4). It folds the
- * model's extended-thinking text AND its tool rounds (web_search, python_execute,
+ * model's extended-thinking text AND its tool rounds (web_search, aivory_web_search, python_execute,
  * image_generate, …) into ONE collapsible trace instead
  * of a separate thinking block + a stack of tool cards.
  *
@@ -255,7 +256,7 @@ function formatElapsed(ms: number): string {
 
 function pickSubtitle(name: string, input: ToolCall['input']): string | null {
   const inp = (input ?? {}) as Record<string, unknown>
-  if (name === 'web_search' && typeof inp.query === 'string') {
+  if ((name === 'web_search' || name === 'aivory_web_search') && typeof inp.query === 'string') {
     return inp.query
   }
   if (name === 'web_fetch' && typeof inp.url === 'string') return inp.url

@@ -61,7 +61,7 @@ import { PanelFallback } from '@/components/ui/panel-fallback'
 const KINDS = ['chat', 'image', 'embedding'] as const
 const TOOL_MODES = ['native', 'prompt', 'none'] as const
 const BUILTIN_TOOL_ICONS: Record<string, typeof Wrench> = {
-  web_search: Search,
+  aivory_web_search: Search,
   web_fetch: Globe,
   python_execute: SquareTerminal,
   image_generate: ImageIcon,
@@ -442,7 +442,21 @@ export default function AdminModelEdit() {
   }
 
   const hasOfficialImageGeneration =
-    draft?.official_tools_draft.some((tool) => tool.name === 'image_generation') ?? false
+    draft?.official_tools_draft.some((tool) => {
+      const parsed = parseExtraParams(tool.request_text)
+      if (!parsed.valid) return false
+      const tools = parsed.value.tools
+      return (
+        Array.isArray(tools) &&
+        tools.some(
+          (item) =>
+            item !== null &&
+            typeof item === 'object' &&
+            !Array.isArray(item) &&
+            (item as Record<string, unknown>).type === 'image_generation',
+        )
+      )
+    }) ?? false
 
   return (
     <div>

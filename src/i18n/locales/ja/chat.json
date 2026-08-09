@@ -103,20 +103,14 @@
       "noTools": "ツールを無効化",
       "noToolsDesc": "ツールを一切呼び出さず直接回答します — 高速・低コスト。",
       "toolMode": "ツール利用",
-      "toolModeDesc": "自動、公式、オフ、組み込みからツール利用方法を選択します。",
+      "toolModeDesc": "ツールを自動、オン、オフから選択します。",
       "toolModeAuto": "自動",
       "toolModeAutoDesc": "ツール呼び出しが必要かどうかを自動的に判断します。",
       "toolModeDisabled": "オフ",
       "toolModeDisabledDesc": "ツールを提供せず、そのまま回答します。",
-      "toolModeEnabled": "組み込み",
-      "toolModeEnabledDesc": "組み込みツール呼び出しを使用します。",
-      "toolModeOfficial": "公式",
-      "toolModeOfficialDesc": "選択したプロバイダー公式ツールのみを使用します。",
-      "officialTools": "公式ツール",
-      "officialToolsSelected": "選択済み {{selected}}/{{total}}",
-      "officialToolsEmpty": "このモデルには公式ツールが設定されていません。",
+      "toolModeEnabled": "オン",
+      "toolModeEnabledDesc": "ツール呼び出しをオンにします。",
       "webSearch": "ウェブ検索",
-      "webSearchDesc": "毎ターンウェブを検索し、結果をプロンプトに追加します（ツール呼び出しなし）。",
       "disable": "{{name}}をオフにする"
     }
   },
@@ -233,12 +227,14 @@
   },
   "tools": {
     "web_search": "ウェブ検索",
+    "aivory_web_search": "Aivory ウェブ検索",
     "code_interpreter": "コードインタープリター",
     "image_generation": "画像生成",
     "deep_research": "ディープリサーチ"
   },
   "toolDescriptions": {
     "web_search": "ウェブから最新情報を検索します",
+    "aivory_web_search": "Aivory で設定されたバックエンドを使用してウェブを検索します",
     "code_interpreter": "コードを実行してファイルを分析します",
     "image_generation": "画像を生成または編集します"
   },

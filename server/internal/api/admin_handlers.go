@@ -1290,7 +1290,7 @@ func analyticsAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 // ===== Settings =====
 
 var settingsKeys = []string{
-	"default_model_id", "task_model_id", "embedding_model_id",
+	"default_model_id", "task_model_id", "tool_route_model_id", "embedding_model_id",
 	"keep_recent_rounds", "summary_max_tokens", "compaction_enabled",
 	"compaction_token_trigger",
 	"memory_enabled", "daily_message_limit", "daily_image_limit", "signup_open",

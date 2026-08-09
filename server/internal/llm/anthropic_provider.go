@@ -234,15 +234,15 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 	}
 	// §4.13 prompt-mode: the model has no native function calling, so drive the
 	// text-protocol loop instead of the native tool_use loop.
-	if req.ToolModePrompt && !officialToolModeEnabled(req) {
-		_, blocks, usage, cites, err := RunPromptToolLoop(
+	if req.ToolModePrompt {
+		_, blocks, usage, cites, images, err := RunPromptToolLoop(
 			ctx, req.SystemPrompt, req.History, req.Tools,
 			p.promptRunOnce(req), tools, onEvent,
 		)
 		if err != nil {
-			return promptToolErrorResult(ctx, blocks, usage, cites, err)
+			return promptToolErrorResult(ctx, blocks, usage, cites, images, err)
 		}
-		return &UnifiedResult{Blocks: blocks, StopReason: "end_turn", Usage: usage, Citations: cites}, nil
+		return &UnifiedResult{Blocks: blocks, StopReason: "end_turn", Usage: usage, Citations: cites, GeneratedImages: images}, nil
 	}
 
 	maxIter := envcfg.Int("AIVORY_LLM_MAX_ITER", 20)
@@ -278,17 +278,17 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 				"system":     anthropicSystemBlocks(req.SystemPrompt),
 				"messages":   messages,
 			}
-			if len(req.Tools) > 0 && !req.ToolModePrompt && !officialToolModeEnabled(req) {
+			if len(req.Tools) > 0 && !req.ToolModePrompt {
 				body["tools"] = toAnthropicTools(req.Tools)
 			}
-			if req.ToolModePrompt && !officialToolModeEnabled(req) {
+			if req.ToolModePrompt {
 				body["stop_sequences"] = []string{PromptToolStopSequence()}
 			}
 			// Apply the model's param_controls (thinking/effort/etc). Claude
 			// extended thinking is opt-in: if admins do not explicitly merge a
 			// `thinking` object, the provider sends no thinking field.
 			body = MergeRequestParams(body, req.ExtraParams, req.ParamControls, req.ParamOverrides)
-			body = StripToolFields(body, len(req.Tools) > 0 && !req.ToolModePrompt && !officialToolModeEnabled(req))
+			body = StripToolFields(body, len(req.Tools) > 0 && !req.ToolModePrompt)
 			body = MergeOfficialToolRequests(body, req.OfficialToolRequests)
 			// §4.3-B: once a strip-thinking retry has fired this turn, every
 			// subsequent request drops the thinking param too (the response then
@@ -304,17 +304,21 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 		var (
 			stopReason     string
 			toolCalls      []anthropicToolCall
+			hostedCalls    []anthropicHostedToolCall
 			text           string
 			thinkingBlocks []anthropicThinkingBlock
 			citations      []Citation
+			nativeContent  []map[string]any
 			usage          Usage
 		)
 		send := func(buf []byte) error {
 			stopReason = ""
 			toolCalls = nil
+			hostedCalls = nil
 			text = ""
 			thinkingBlocks = nil
 			citations = nil
+			nativeContent = nil
 			usage = Usage{}
 			return doProviderParsedRequest(ctx, req.Model, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
 				hr, e := http.NewRequestWithContext(ctx, "POST", providerBaseURL(baseURL, "https://api.anthropic.com")+"/v1/messages", bytes.NewReader(buf))
@@ -328,12 +332,12 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 				return hr, nil
 			}, func(resp *http.Response, emit func(SseEvent)) error {
 				stopReason, text, usage = "", "", Usage{}
-				toolCalls, thinkingBlocks, citations = nil, nil, nil
+				toolCalls, hostedCalls, thinkingBlocks, citations = nil, nil, nil, nil
 				if statusErr := requireProviderSuccess(resp, "anthropic"); statusErr != nil {
 					return statusErr
 				}
 				var readErr error
-				stopReason, toolCalls, text, thinkingBlocks, citations, usage, readErr = readAnthropicStream(resp.Body, emit)
+				stopReason, toolCalls, hostedCalls, text, thinkingBlocks, citations, nativeContent, usage, readErr = readAnthropicStream(resp.Body, emit)
 				return readErr
 			}, onEvent)
 		}
@@ -363,6 +367,7 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 			if thinkingText != "" {
 				partialBlocks = append(partialBlocks, UnifiedBlock{Kind: "thinking", Text: thinkingText})
 			}
+			partialBlocks = mergeAnthropicHostedUnifiedBlocks(partialBlocks, hostedCalls)
 			if text != "" {
 				partialBlocks = append(partialBlocks, UnifiedBlock{Kind: "text", Text: text})
 			}
@@ -379,7 +384,7 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 			partialUsage.CacheWriteTokens += usage.CacheWriteTokens
 
 			partialMessages := append([]map[string]any{}, messages...)
-			currentTurn := buildAssistantTurn(text, thinkingBlocks, nil)
+			currentTurn := buildAssistantTurn(text, thinkingBlocks, completedAnthropicHostedCalls(hostedCalls), nil)
 			if content, ok := currentTurn["content"].([]map[string]any); ok && len(content) > 0 {
 				// A provider error after tool_start must not leave a native tool_use
 				// without its required tool_result in replay history. The canonical
@@ -408,6 +413,7 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 		if thinkingText != "" {
 			allBlocks = append(allBlocks, UnifiedBlock{Kind: "thinking", Text: thinkingText})
 		}
+		allBlocks = mergeAnthropicHostedUnifiedBlocks(allBlocks, hostedCalls)
 		if text != "" {
 			allBlocks = append(allBlocks, UnifiedBlock{Kind: "text", Text: text})
 		}
@@ -420,7 +426,21 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 		// Append assistant turn (with thinking + tool_use blocks if any) to
 		// messages. Thinking blocks must carry their signature or the next
 		// iteration's request fails (§4.3 — Claude verifies its own chain).
-		messages = append(messages, buildAssistantTurn(text, thinkingBlocks, toolCalls))
+		assistantTurn := buildAssistantTurn(text, thinkingBlocks, hostedCalls, toolCalls)
+		if len(nativeContent) > 0 {
+			// Anthropic requires a paused assistant message to be sent back
+			// unchanged. The captured native blocks also preserve ordering and
+			// response-only fields more faithfully for ordinary local tool loops.
+			assistantTurn = map[string]any{"role": "assistant", "content": nativeContent}
+		}
+		messages = append(messages, assistantTurn)
+
+		if stopReason == "pause_turn" {
+			// Provider-hosted tools can pause a long-running server-side loop. No
+			// client tool result is needed; replay the exact assistant content in
+			// the next request and let Anthropic resume its own tool execution.
+			continue
+		}
 
 		if stopReason != "tool_use" || len(toolCalls) == 0 {
 			// Raw (§2.3-C): the run's full native exchange beyond the supplied
@@ -478,7 +498,32 @@ func (p *AnthropicProvider) Stream(ctx context.Context, req UnifiedChatRequest, 
 // Text deltas are swallowed here because RunPromptToolLoop emits the visible
 // (markup-stripped) portion itself.
 func (p *AnthropicProvider) promptRunOnce(req UnifiedChatRequest) PromptToolRunner {
-	return func(ctx context.Context, history []UnifiedMessage, system string) (string, Usage, error) {
+	return func(ctx context.Context, history []UnifiedMessage, system string) (PromptToolRound, error) {
+		if len(req.OfficialToolRequests) > 0 {
+			round := req
+			round.SystemPrompt = system
+			round.History = history
+			round.Tools = nil
+			round.ToolModePrompt = false
+			round.ExtraParams = withPromptStopSequence(req.ExtraParams, map[string]any{
+				"stop_sequences": []string{PromptToolStopSequence()},
+			})
+			result, err := p.Stream(
+				ctx,
+				round,
+				toolDefAllowlistRunner{allowed: map[string]bool{}},
+				func(SseEvent) {},
+			)
+			if result == nil {
+				return PromptToolRound{}, err
+			}
+			return PromptToolRound{
+				Text: promptRoundText(result.Blocks), Blocks: result.Blocks, Usage: result.Usage,
+				Citations: result.Citations, GeneratedImages: result.GeneratedImages,
+				UsageAlreadyAttached: true,
+			}, err
+		}
+
 		maxTok := envcfg.Int("AIVORY_LLM_MAX_TOK_2", 64000)
 		if req.MaxOutputTokens > 0 {
 			maxTok = req.MaxOutputTokens
@@ -518,10 +563,10 @@ func (p *AnthropicProvider) promptRunOnce(req UnifiedChatRequest) PromptToolRunn
 				return statusErr
 			}
 			var readErr error
-			_, _, text, _, _, usage, readErr = readAnthropicStream(resp.Body, emit)
+			_, _, _, text, _, _, _, usage, readErr = readAnthropicStream(resp.Body, emit)
 			return readErr
 		}, func(SseEvent) {})
-		return text, usage, err
+		return PromptToolRound{Text: text, Usage: usage}, err
 	}
 }
 
@@ -554,9 +599,12 @@ func anthropicSystemBlocks(system string) any {
 }
 
 // setMessagesCacheBreakpoint clears any existing cache_control markers and sets
-// exactly one on the last content block of the last message — the incremental
-// conversation-cache breakpoint (§4.9). Clearing first guarantees we never
-// exceed the 4-breakpoint limit as the tool loop appends messages.
+// exactly one on the last content block of the newest user message — the
+// incremental conversation-cache breakpoint (§4.9). Choosing a user message is
+// also required for pause_turn: Anthropic says the paused assistant content must
+// be sent back unchanged, so a request-only cache marker must not be injected
+// into that native response. Clearing first guarantees we never exceed the
+// 4-breakpoint limit as the tool loop appends messages.
 //
 // History coming from raw-replay arrives as []any (each blk is map[string]any);
 // blocks we just built in this loop are []map[string]any. We handle both.
@@ -578,10 +626,16 @@ func setMessagesCacheBreakpoint(messages []map[string]any) {
 			}
 		}
 	}
-	if len(messages) == 0 {
+	var last map[string]any
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i]["role"] == "user" {
+			last = messages[i]
+			break
+		}
+	}
+	if last == nil {
 		return
 	}
-	last := messages[len(messages)-1]
 	setCC := func(blk map[string]any) {
 		blk["cache_control"] = map[string]any{"type": "ephemeral"}
 	}
@@ -663,6 +717,97 @@ type anthropicToolCall struct {
 	Input json.RawMessage
 }
 
+// anthropicHostedToolCall is a provider-executed server tool round. Anthropic
+// distinguishes these from client Functions on the wire: server_tool_use is
+// executed by Anthropic, while tool_use must be executed by Aivory. Keeping a
+// separate type prevents an official web_search from ever reaching the local
+// registry as if it were aivory_web_search.
+type anthropicHostedToolCall struct {
+	ID           string
+	Name         string
+	Input        json.RawMessage
+	Status       string
+	Summary      string
+	ResultBlocks []map[string]any
+}
+
+func anthropicToolInput(value any) json.RawMessage {
+	if value == nil {
+		return json.RawMessage("{}")
+	}
+	raw, err := json.Marshal(value)
+	if err != nil || !json.Valid(raw) {
+		return json.RawMessage("{}")
+	}
+	return json.RawMessage(raw)
+}
+
+func anthropicHostedResultMeta(name string, block map[string]any) (string, string) {
+	status := "complete"
+	if isError, _ := block["is_error"].(bool); isError {
+		status = "error"
+	}
+	if raw, err := json.Marshal(block["content"]); err == nil {
+		lower := strings.ToLower(string(raw))
+		if strings.Contains(lower, "error_code") || strings.Contains(lower, "tool_result_error") {
+			status = "error"
+		}
+	}
+	if status == "error" {
+		return status, name + " failed"
+	}
+	return status, name + " completed"
+}
+
+func anthropicHostedUnifiedBlocks(calls []anthropicHostedToolCall) []UnifiedBlock {
+	blocks := make([]UnifiedBlock, 0, len(calls))
+	for _, call := range calls {
+		blocks = append(blocks, UnifiedBlock{
+			Kind: "tool_call", ToolName: call.Name, ToolID: call.ID,
+			Input: append(json.RawMessage(nil), call.Input...), Summary: call.Summary,
+		})
+	}
+	return blocks
+}
+
+// mergeAnthropicHostedUnifiedBlocks folds a later result-only continuation into
+// the server-tool block emitted by an earlier pause_turn response. Anthropic can
+// return server_tool_use in one assistant message and its *_tool_result in the
+// next; persisting both as separate canonical cards would duplicate one hosted
+// call after reload even though the native history correctly contains two turns.
+func mergeAnthropicHostedUnifiedBlocks(blocks []UnifiedBlock, calls []anthropicHostedToolCall) []UnifiedBlock {
+	for _, incoming := range anthropicHostedUnifiedBlocks(calls) {
+		merged := false
+		for i := len(blocks) - 1; i >= 0; i-- {
+			if blocks[i].Kind != "tool_call" || blocks[i].ToolID != incoming.ToolID || blocks[i].ToolName != incoming.ToolName {
+				continue
+			}
+			if len(incoming.Input) > 0 && string(incoming.Input) != "{}" {
+				blocks[i].Input = incoming.Input
+			}
+			if incoming.Summary != "" {
+				blocks[i].Summary = incoming.Summary
+			}
+			merged = true
+			break
+		}
+		if !merged {
+			blocks = append(blocks, incoming)
+		}
+	}
+	return blocks
+}
+
+func completedAnthropicHostedCalls(calls []anthropicHostedToolCall) []anthropicHostedToolCall {
+	completed := make([]anthropicHostedToolCall, 0, len(calls))
+	for _, call := range calls {
+		if call.Status != "" && len(call.ResultBlocks) > 0 {
+			completed = append(completed, call)
+		}
+	}
+	return completed
+}
+
 // anthropicThinkingBlock captures a thinking block as it streams in so we can
 // replay it verbatim in the next loop turn (§4.3 — extended thinking + tools
 // REQUIRES the thinking block AND its signature in the assistant turn or the
@@ -672,13 +817,14 @@ type anthropicThinkingBlock struct {
 	Signature string
 }
 
-// readAnthropicStream consumes the SSE response, forwards text/thinking deltas
-// as canonical events, and returns the recovered text + thinking + tool calls.
+// readAnthropicStream consumes the SSE response, forwards text/thinking/tool
+// deltas as canonical events, and returns visible content plus separate local
+// Function and provider-hosted call collections.
 //
 // Returns thinking as a structured slice (each redacted/normal block with its
 // signature) so the next tool-loop iteration can replay them in the assistant
 // turn.
-func readAnthropicStream(body io.Reader, onEvent func(SseEvent)) (string, []anthropicToolCall, string, []anthropicThinkingBlock, []Citation, Usage, error) {
+func readAnthropicStream(body io.Reader, onEvent func(SseEvent)) (string, []anthropicToolCall, []anthropicHostedToolCall, string, []anthropicThinkingBlock, []Citation, []map[string]any, Usage, error) {
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, anthropicScannerBufInit), anthropicScannerBufMax)
 	stopReason := "end_turn"
@@ -687,13 +833,19 @@ func readAnthropicStream(body io.Reader, onEvent func(SseEvent)) (string, []anth
 	currentThinking := strings.Builder{}
 	currentThinkingActive := false
 	toolCalls := []anthropicToolCall{}
+	hostedCalls := []anthropicHostedToolCall{}
+	hostedIndexByID := map[string]int{}
 	citations := []Citation{}
+	seenCitations := map[string]bool{}
+	nativeBlocks := map[int]map[string]any{}
+	nativeOrder := []int{}
 	usage := Usage{}
 	sawEvent := false
 	terminal := false
 	streamEnded := false
 
 	var currentTool *anthropicToolCall
+	currentHostedIndex := -1
 	var partialJSON strings.Builder
 	snapshotToolCalls := func() []anthropicToolCall {
 		out := append([]anthropicToolCall{}, toolCalls...)
@@ -705,6 +857,16 @@ func readAnthropicStream(body io.Reader, onEvent func(SseEvent)) (string, []anth
 			partial.Input = json.RawMessage(input)
 		}
 		return append(out, partial)
+	}
+	snapshotHostedCalls := func() []anthropicHostedToolCall {
+		out := append([]anthropicHostedToolCall{}, hostedCalls...)
+		if currentHostedIndex < 0 || currentHostedIndex >= len(out) {
+			return out
+		}
+		if input := partialJSON.String(); json.Valid([]byte(input)) {
+			out[currentHostedIndex].Input = json.RawMessage(input)
+		}
+		return out
 	}
 	snapshotThinkingBlocks := func() []anthropicThinkingBlock {
 		out := append([]anthropicThinkingBlock{}, thinkingBlocks...)
@@ -718,6 +880,15 @@ func readAnthropicStream(body io.Reader, onEvent func(SseEvent)) (string, []anth
 		}
 		if len(out) == 0 || out[len(out)-1].Text != current {
 			out = append(out, anthropicThinkingBlock{Text: current})
+		}
+		return out
+	}
+	snapshotNativeContent := func() []map[string]any {
+		out := make([]map[string]any, 0, len(nativeOrder))
+		for _, index := range nativeOrder {
+			if block := nativeBlocks[index]; block != nil {
+				out = append(out, block)
+			}
 		}
 		return out
 	}
@@ -738,38 +909,100 @@ func readAnthropicStream(body io.Reader, onEvent func(SseEvent)) (string, []anth
 		}
 		var ev map[string]any
 		if err := json.Unmarshal([]byte(payload), &ev); err != nil {
-			return stopReason, snapshotToolCalls(), text.String(), snapshotThinkingBlocks(), citations, usage,
+			return stopReason, snapshotToolCalls(), snapshotHostedCalls(), text.String(), snapshotThinkingBlocks(), citations, snapshotNativeContent(), usage,
 				fmt.Errorf("anthropic stream invalid JSON: %w", err)
 		}
 		if streamErr := providerEventError("anthropic", ev); streamErr != nil {
-			return stopReason, snapshotToolCalls(), text.String(), snapshotThinkingBlocks(), citations, usage, streamErr
+			return stopReason, snapshotToolCalls(), snapshotHostedCalls(), text.String(), snapshotThinkingBlocks(), citations, snapshotNativeContent(), usage, streamErr
 		}
 		switch ev["type"] {
 		case "content_block_start":
 			sawEvent = true
 			block, _ := ev["content_block"].(map[string]any)
-			if t, _ := block["type"].(string); t == "tool_use" {
+			blockIndex := intOf(ev["index"])
+			if block != nil {
+				if _, exists := nativeBlocks[blockIndex]; !exists {
+					nativeOrder = append(nativeOrder, blockIndex)
+				}
+				nativeBlocks[blockIndex] = block
+			}
+			t, _ := block["type"].(string)
+			if t == "tool_use" {
 				id, _ := block["id"].(string)
 				name, _ := block["name"].(string)
-				currentTool = &anthropicToolCall{ID: id, Name: name}
+				currentTool = &anthropicToolCall{ID: id, Name: name, Input: anthropicToolInput(block["input"])}
+				currentHostedIndex = -1
 				partialJSON.Reset()
 				onEvent(SseEvent{Type: "tool_start", Name: name, ID: id})
+			} else if t == "server_tool_use" {
+				id, _ := block["id"].(string)
+				name, _ := block["name"].(string)
+				hostedCalls = append(hostedCalls, anthropicHostedToolCall{
+					ID: id, Name: name, Input: anthropicToolInput(block["input"]),
+				})
+				currentHostedIndex = len(hostedCalls) - 1
+				if id != "" {
+					hostedIndexByID[id] = currentHostedIndex
+				}
+				currentTool = nil
+				partialJSON.Reset()
+				onEvent(SseEvent{Type: "tool_start", Name: name, ID: id})
+			} else if strings.HasSuffix(t, "_tool_result") {
+				toolUseID, _ := block["tool_use_id"].(string)
+				index, ok := hostedIndexByID[toolUseID]
+				if !ok {
+					name := strings.TrimSuffix(t, "_tool_result")
+					hostedCalls = append(hostedCalls, anthropicHostedToolCall{ID: toolUseID, Name: name})
+					index = len(hostedCalls) - 1
+					hostedIndexByID[toolUseID] = index
+					onEvent(SseEvent{Type: "tool_start", Name: name, ID: toolUseID})
+				}
+				hosted := &hostedCalls[index]
+				hosted.ResultBlocks = append(hosted.ResultBlocks, block)
+				hosted.Status, hosted.Summary = anthropicHostedResultMeta(hosted.Name, block)
+				onEvent(SseEvent{
+					Type: "tool_result", Name: hosted.Name, ID: hosted.ID,
+					Status: hosted.Status, Summary: hosted.Summary,
+				})
+				currentTool = nil
+				currentHostedIndex = -1
+				partialJSON.Reset()
 			} else if t == "thinking" || t == "redacted_thinking" {
+				currentTool = nil
+				currentHostedIndex = -1
 				currentThinking.Reset()
+				if initial, _ := block["thinking"].(string); initial != "" {
+					currentThinking.WriteString(initial)
+					onEvent(SseEvent{Type: "thinking_delta", Text: initial})
+				}
 				currentThinkingActive = true
+			} else if t == "text" {
+				if initial, _ := block["text"].(string); initial != "" {
+					text.WriteString(initial)
+					onEvent(SseEvent{Type: "text_delta", Text: initial})
+				}
 			}
 		case "content_block_delta":
 			sawEvent = true
 			delta, _ := ev["delta"].(map[string]any)
+			nativeBlock := nativeBlocks[intOf(ev["index"])]
 			switch delta["type"] {
 			case "text_delta":
 				if s, _ := delta["text"].(string); s != "" {
 					text.WriteString(s)
+					if nativeBlock != nil {
+						current, _ := nativeBlock["text"].(string)
+						nativeBlock["text"] = current + s
+					}
 					onEvent(SseEvent{Type: "text_delta", Text: s})
 				}
 			case "thinking_delta":
 				if s, _ := delta["thinking"].(string); s != "" {
 					currentThinking.WriteString(s)
+					if nativeBlock != nil {
+						current, _ := nativeBlock["thinking"].(string)
+						nativeBlock["thinking"] = current + s
+					}
 					onEvent(SseEvent{Type: "thinking_delta", Text: s})
 				}
 			case "signature_delta":
@@ -777,6 +1010,10 @@ func readAnthropicStream(body io.Reader, onEvent func(SseEvent)) (string, []anth
 				// thinking block we're currently reading. Without it the next
 				// turn's request is rejected as tampered.
 				if s, _ := delta["signature"].(string); s != "" {
+					if nativeBlock != nil {
+						current, _ := nativeBlock["signature"].(string)
+						nativeBlock["signature"] = current + s
+					}
 					if currentThinkingActive {
 						if len(thinkingBlocks) == 0 || thinkingBlocks[len(thinkingBlocks)-1].Signature != "" {
 							thinkingBlocks = append(thinkingBlocks, anthropicThinkingBlock{Text: currentThinking.String(), Signature: s})
@@ -788,24 +1025,71 @@ func readAnthropicStream(body io.Reader, onEvent func(SseEvent)) (string, []anth
 				}
 			case "input_json_delta":
 				if s, _ := delta["partial_json"].(string); s != "" {
+					if currentTool == nil && (currentHostedIndex < 0 || currentHostedIndex >= len(hostedCalls)) {
+						break
+					}
 					partialJSON.WriteString(s)
 					ev := SseEvent{Type: "tool_input", PartialJson: s}
 					if currentTool != nil {
 						ev.Name = currentTool.Name
 						ev.ID = currentTool.ID
+					} else {
+						ev.Name = hostedCalls[currentHostedIndex].Name
+						ev.ID = hostedCalls[currentHostedIndex].ID
 					}
 					onEvent(ev)
+				}
+			case "citations_delta":
+				citation, _ := delta["citation"].(map[string]any)
+				if nativeBlock != nil && citation != nil {
+					existing, _ := nativeBlock["citations"].([]any)
+					nativeBlock["citations"] = append(existing, citation)
+				}
+				url, _ := citation["url"].(string)
+				if url == "" {
+					url, _ = citation["uri"].(string)
+				}
+				url = strings.TrimSpace(url)
+				if url != "" && !seenCitations[url] {
+					seenCitations[url] = true
+					title, _ := citation["title"].(string)
+					snippet, _ := citation["cited_text"].(string)
+					item := Citation{
+						ID: fmt.Sprintf("ac%d", len(citations)+1), Index: len(citations) + 1,
+						Title: strings.TrimSpace(title), URL: url, Snippet: strings.TrimSpace(snippet), Source: "web",
+					}
+					citations = append(citations, item)
+					onEvent(SseEvent{Type: "citation", Citation: &item})
 				}
 			}
 		case "content_block_stop":
 			sawEvent = true
+			blockIndex := intOf(ev["index"])
+			if input := partialJSON.String(); json.Valid([]byte(input)) {
+				var decoded any
+				if json.Unmarshal([]byte(input), &decoded) == nil && nativeBlocks[blockIndex] != nil {
+					nativeBlocks[blockIndex]["input"] = decoded
+				}
+			}
 			if currentTool != nil {
-				currentTool.Input = json.RawMessage(partialJSON.String())
-				if len(currentTool.Input) == 0 {
+				if input := partialJSON.String(); json.Valid([]byte(input)) {
+					currentTool.Input = json.RawMessage(input)
+				}
+				if len(currentTool.Input) == 0 || !json.Valid(currentTool.Input) {
 					currentTool.Input = json.RawMessage("{}")
 				}
 				toolCalls = append(toolCalls, *currentTool)
 				currentTool = nil
+				partialJSON.Reset()
+			}
+			if currentHostedIndex >= 0 && currentHostedIndex < len(hostedCalls) {
+				if input := partialJSON.String(); json.Valid([]byte(input)) {
+					hostedCalls[currentHostedIndex].Input = json.RawMessage(input)
+				}
+				if len(hostedCalls[currentHostedIndex].Input) == 0 {
+					hostedCalls[currentHostedIndex].Input = json.RawMessage("{}")
+				}
+				currentHostedIndex = -1
 				partialJSON.Reset()
 			}
 			if currentThinkingActive {
@@ -858,18 +1142,18 @@ func readAnthropicStream(body io.Reader, onEvent func(SseEvent)) (string, []anth
 	if err := scanner.Err(); err != nil && !terminal {
 		// Return whatever was accumulated before the error (e.g. on context cancel)
 		// rather than discarding it — partial text must survive a stop signal.
-		return stopReason, snapshotToolCalls(), text.String(), snapshotThinkingBlocks(), citations, usage, err
+		return stopReason, snapshotToolCalls(), snapshotHostedCalls(), text.String(), snapshotThinkingBlocks(), citations, snapshotNativeContent(), usage, err
 	}
 	if !sawEvent {
-		return stopReason, toolCalls, text.String(), thinkingBlocks, citations, usage, invalidProviderStream("anthropic", "empty response")
+		return stopReason, toolCalls, hostedCalls, text.String(), thinkingBlocks, citations, snapshotNativeContent(), usage, invalidProviderStream("anthropic", "empty response")
 	}
 	if !terminal {
-		return stopReason, snapshotToolCalls(), text.String(), snapshotThinkingBlocks(), citations, usage, invalidProviderStream("anthropic", "response ended before a terminal event")
+		return stopReason, snapshotToolCalls(), snapshotHostedCalls(), text.String(), snapshotThinkingBlocks(), citations, snapshotNativeContent(), usage, invalidProviderStream("anthropic", "response ended before a terminal event")
 	}
-	return stopReason, toolCalls, text.String(), thinkingBlocks, citations, usage, nil
+	return stopReason, toolCalls, hostedCalls, text.String(), thinkingBlocks, citations, snapshotNativeContent(), usage, nil
 }
 
-func buildAssistantTurn(text string, thinkingBlocks []anthropicThinkingBlock, calls []anthropicToolCall) map[string]any {
+func buildAssistantTurn(text string, thinkingBlocks []anthropicThinkingBlock, hosted []anthropicHostedToolCall, calls []anthropicToolCall) map[string]any {
 	content := []map[string]any{}
 	// §4.3 thinking-with-tools: the thinking block MUST come first in the
 	// content array and carry its signature, or Anthropic rejects the next
@@ -884,6 +1168,19 @@ func buildAssistantTurn(text string, thinkingBlocks []anthropicThinkingBlock, ca
 			"thinking":  t.Text,
 			"signature": t.Signature,
 		})
+	}
+	// Provider-hosted server tools and their results belong to the assistant
+	// content returned by Anthropic. Preserve them before any client tool_use so
+	// a mixed hosted+Function turn can be replayed verbatim enough for the next
+	// local tool-loop request without asking Aivory to execute the server tool.
+	for _, hostedCall := range hosted {
+		input := map[string]any{}
+		_ = json.Unmarshal(hostedCall.Input, &input)
+		content = append(content, map[string]any{
+			"type": "server_tool_use", "id": hostedCall.ID,
+			"name": hostedCall.Name, "input": input,
+		})
+		content = append(content, hostedCall.ResultBlocks...)
 	}
 	if strings.TrimSpace(text) != "" {
 		content = append(content, map[string]any{"type": "text", "text": text})

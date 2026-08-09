@@ -1,6 +1,5 @@
 import { create } from 'zustand'
 import { isToolMode, type ToolMode } from '@/lib/tool-mode'
-import { sanitizeOfficialToolNames } from '@/lib/official-tools'
 
 export type ComposerMode = 'default' | 'deep-research' | 'canvas'
 
@@ -14,15 +13,12 @@ export interface PersistedComposerPrefs {
   // this to enabled; the setters keep that invariant in persisted state.
   toolMode: ToolMode
   // Forced non-tool web search is only meaningful in disabled mode; switching
-  // to auto/enabled/official clears it automatically.
+  // to auto/enabled clears it automatically.
   forceWebSearch: boolean
   // Account-level default mirrored from `tool_mode_default`. New conversations
   // reset the live toolMode to this complete value (including auto/enabled), so
   // a prior conversation's override cannot leak into the next one.
   defaultToolMode: ToolMode
-  // Provider-native selections are model-scoped because each model owns a
-  // different administrator-defined allowlist.
-  officialToolNamesByModel: Record<string, string[]>
   paramValuesByModel: Record<string, ComposerParamValues>
   draftsByScope: Record<string, string>
 }
@@ -33,7 +29,6 @@ interface ComposerPrefsStore extends PersistedComposerPrefs {
   setToolMode: (toolMode: ToolMode) => void
   // Update the mirror of the server-side default tool policy.
   setDefaultToolMode: (toolMode: ToolMode) => void
-  setOfficialToolNames: (modelId: string, names: string[] | undefined) => void
   setForceWebSearch: (on: boolean) => void
   setParamValues: (modelId: string, values: Record<string, unknown>) => void
   setDraft: (scope: string, value: string) => void
@@ -49,7 +44,6 @@ const DEFAULT_PREFS: PersistedComposerPrefs = {
   toolMode: 'auto',
   forceWebSearch: false,
   defaultToolMode: 'auto',
-  officialToolNamesByModel: {},
   paramValuesByModel: {},
   draftsByScope: {},
 }
@@ -89,17 +83,6 @@ function sanitizeParamValuesByModel(raw: unknown): Record<string, ComposerParamV
   return out
 }
 
-function sanitizeOfficialToolNamesByModel(raw: unknown): Record<string, string[]> {
-  if (!isRecord(raw)) return {}
-  const out: Record<string, string[]> = {}
-  for (const [modelId, value] of Object.entries(raw)) {
-    const id = modelId.trim()
-    if (!id || !Array.isArray(value)) continue
-    out[id] = sanitizeOfficialToolNames(value)
-  }
-  return out
-}
-
 function sanitizeDraftsByScope(raw: unknown): Record<string, string> {
   if (!isRecord(raw)) return {}
   const out: Record<string, string> = {}
@@ -118,15 +101,25 @@ export function parsePersistedComposerPrefs(parsed: unknown): PersistedComposerP
   // cannot distinguish an explicit user choice from the retired implicit
   // default. Auth hydration resolves explicit legacy account settings; a
   // missing new local value intentionally starts at the new default, auto.
-  const toolMode = isToolMode(parsed.toolMode) ? parsed.toolMode : DEFAULT_PREFS.toolMode
+  const toolMode =
+    parsed.toolMode === 'official'
+      ? 'enabled'
+      : isToolMode(parsed.toolMode)
+        ? parsed.toolMode
+        : DEFAULT_PREFS.toolMode
+  const defaultToolMode =
+    parsed.defaultToolMode === 'official'
+      ? 'enabled'
+      : isToolMode(parsed.defaultToolMode)
+        ? parsed.defaultToolMode
+        : DEFAULT_PREFS.defaultToolMode
   return {
     mode: isMode(parsed.mode) ? parsed.mode : DEFAULT_PREFS.mode,
     verify: parsed.verify === true,
     toolMode,
     // forced search only exists inside an explicitly disabled-tools turn
     forceWebSearch: toolMode === 'disabled' && parsed.forceWebSearch === true,
-    defaultToolMode: isToolMode(parsed.defaultToolMode) ? parsed.defaultToolMode : DEFAULT_PREFS.defaultToolMode,
-    officialToolNamesByModel: sanitizeOfficialToolNamesByModel(parsed.officialToolNamesByModel),
+    defaultToolMode,
     paramValuesByModel: sanitizeParamValuesByModel(parsed.paramValuesByModel),
     draftsByScope: sanitizeDraftsByScope(parsed.draftsByScope),
   }
@@ -153,7 +146,6 @@ function persistedFrom(state: PersistedComposerPrefs, patch: Partial<PersistedCo
     toolMode: state.toolMode,
     forceWebSearch: state.forceWebSearch,
     defaultToolMode: state.defaultToolMode,
-    officialToolNamesByModel: state.officialToolNamesByModel,
     paramValuesByModel: state.paramValuesByModel,
     draftsByScope: state.draftsByScope,
     ...patch,
@@ -199,17 +191,6 @@ export const useComposerPrefs = create<ComposerPrefsStore>((set) => {
       // Mirror-only: callers apply the live mode through setToolMode so the
       // Deep Research / forced-search invariants run in one place.
       commit({ defaultToolMode: toolMode })
-    },
-    setOfficialToolNames(modelId, names) {
-      const id = modelId.trim()
-      if (!id) return
-      set((state) => {
-        const officialToolNamesByModel = { ...state.officialToolNamesByModel }
-        if (names === undefined) delete officialToolNamesByModel[id]
-        else officialToolNamesByModel[id] = sanitizeOfficialToolNames(names)
-        persistPrefs(persistedFrom(state, { officialToolNamesByModel }))
-        return { officialToolNamesByModel }
-      })
     },
     setForceWebSearch(on) {
       // Only togglable while tools are explicitly disabled (the UI gates it too).

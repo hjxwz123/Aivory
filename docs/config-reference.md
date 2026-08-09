@@ -93,21 +93,22 @@
 | `AIVORY_LLM_MAX_ITER_3` | `int` | `20` | `llm/openai_provider.go:610` | Hard cap on native tool-use rounds (Responses API calls) in the OpenAI streamResponses loop. |
 | `AIVORY_LLM_INLINE_QUOTE_SOURCE_INJECTION_CAP` | `int` | `8000` | `llm/orchestrator.go:30` | Max runes of the source message text injected alongside a highlighted excerpt in an inline-quote sub-conversation before truncation. |
 | `AIVORY_LLM_ATTACHMENT_IMAGE_INLINE_BYTES` | `int64` | `20*1024*1024` | `llm/orchestrator.go` | Independent hard cap for one verified image attachment before it is base64-inlined into a provider request. The file is also bounded while reading, so stale size metadata cannot bypass it. |
-| `AIVORY_LLM_TOOL_ROUTE_TIMEOUT` | `duration` | `12*time.Second` | `llm/orchestrator.go:38` | Maximum time auto tool mode waits for the configured task model's routing decision before failing open with tools enabled. |
+| `AIVORY_LLM_TOOL_ROUTE_TIMEOUT` | `duration` | `5*time.Second` | `llm/orchestrator.go` | End-to-end latency budget for the dedicated Auto tool-routing model; timeout fails open with tools enabled. |
+| `AIVORY_LLM_TOOL_ROUTE_SCHEMA_TOKEN_THRESHOLD` | `int` | `512` | `llm/orchestrator.go` | Tool-declaration size at or below which Auto skips the extra routing request and lets the main model decide natively. Set to 0 to always classify ambiguous turns. |
 | `AIVORY_LLM_SANDBOX_EXEC_TIMEOUT_CLAMP_RANGE_MAX` | `int` | `600` | `llm/orchestrator.go:39` | Upper bound (seconds) the admin sandbox_exec_timeout_sec is clamped to when sizing the python_execute call context. |
 | `AIVORY_LLM_SANDBOX_EXEC_TIMEOUT_CLAMP_RANGE_MIN` | `int` | `10` | `llm/orchestrator.go:40` | Lower bound (seconds) the admin sandbox_exec_timeout_sec is clamped to when sizing the python_execute call context. |
 | `AIVORY_LLM_SANDBOX_EXEC_CTX_SAFETY_MARGIN` | `duration` | `150*time.Second` | `llm/orchestrator.go:41` | Margin added to the clamped sandbox exec timeout when sizing the python_execute context so it outlasts the sandbox HTTP client. |
-| `AIVORY_LLM_PER_TURN_TOOL_LIMITS_WEB_SEARCH` | `int` | `16` | `llm/orchestrator.go:147` | Max web_search calls allowed per message in normal mode; exceeding it fails the call. |
+| `AIVORY_LLM_PER_TURN_TOOL_LIMITS_WEB_SEARCH` | `int` | `16` | `llm/orchestrator.go:147` | Max `aivory_web_search` calls allowed per message in normal mode; exceeding it fails the call. |
 | `AIVORY_LLM_PER_TURN_TOOL_LIMITS_WEB_FETCH` | `int` | `12` | `llm/orchestrator.go:148` | Max web_fetch calls allowed per message in normal mode; exceeding it fails the call. |
 | `AIVORY_LLM_PER_TURN_TOOL_LIMITS_IMAGE_GENERATE` | `int` | `8` | `llm/orchestrator.go:150` | Max image_generate calls allowed per message in normal mode; exceeding it fails the call. |
 | `AIVORY_LLM_PER_TURN_TOOL_LIMITS_PYTHON_EXECUTE` | `int` | `16` | `llm/orchestrator.go:151` | Max python_execute sandbox runs allowed per message in normal mode; exceeding it fails the call. |
-| `AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_WEB_SEARCH` | `int` | `40` | `llm/orchestrator.go:157` | Max web_search calls allowed per message while Deep Research runs; exceeding it fails the call. |
+| `AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_WEB_SEARCH` | `int` | `40` | `llm/orchestrator.go:157` | Max `aivory_web_search` calls allowed per message while Deep Research runs; exceeding it fails the call. |
 | `AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_WEB_FETCH` | `int` | `25` | `llm/orchestrator.go:158` | Max web_fetch calls allowed per message while Deep Research runs; exceeding it fails the call. |
 | `AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_IMAGE_GENERATE` | `int` | `4` | `llm/orchestrator.go:160` | Max image_generate calls allowed per message while Deep Research runs; exceeding it fails the call. |
 | `AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_PYTHON_EXECUTE` | `int` | `8` | `llm/orchestrator.go:161` | Max python_execute sandbox runs allowed per message while Deep Research runs; exceeding it fails the call. |
 | `AIVORY_LLM_MAX_TOOL_CALLS_PER_TURN` | `int` | `48` | `llm/orchestrator.go:169` | Global ceiling on total tool calls across all tools per message in normal mode, on top of the per-tool caps. |
 | `AIVORY_LLM_MAX_TOOL_CALLS_PER_TURN_DEEP` | `int` | `150` | `llm/orchestrator.go:170` | Global ceiling on total tool calls across all tools per message while Deep Research runs. |
-| `AIVORY_LLM_TOOL_TIMEOUTS` | `duration` | `10*time.Second` | `llm/orchestrator.go:2326` | Per-invocation timeout bounding a single web_search tool call. |
+| `AIVORY_LLM_TOOL_TIMEOUTS` | `duration` | `10*time.Second` | `llm/orchestrator.go:2326` | Per-invocation timeout bounding a single `aivory_web_search` tool call. |
 | `AIVORY_LLM_TOOL_TIMEOUTS_2` | `duration` | `15*time.Second` | `llm/orchestrator.go:2327` | Per-invocation timeout bounding a single web_fetch tool call. |
 | `AIVORY_LLM_TOOL_TIMEOUTS_3` | `duration` | `600*time.Second` | `llm/orchestrator.go:2329` | Per-invocation timeout bounding a single image_generate tool call (wide for slow third-party image gateways). |
 | `AIVORY_LLM_TOOL_TIMEOUT_DEFAULT` | `duration` | `100*time.Second` | `llm/orchestrator.go:2332` | Fallback per-invocation timeout for any tool not listed in the per-type toolTimeouts map. |
@@ -218,11 +219,11 @@
 
 ### 4. 内置工具（搜索 / Python / 网络安全）
 
-web_search 结果条数与超时、Python 安全模式、SSRF / 网络安全护栏等。
+`aivory_web_search` 结果条数与超时、Python 安全模式、SSRF / 网络安全护栏等。
 
 | 环境变量 | 类型 | 默认值 | 位置 | 说明 |
 | --- | --- | --- | --- | --- |
-| `AIVORY_TOOLS_IN_TOP_K` | `int` | `5` | `tools/builtins.go:37` | Default result count for the web_search tool when the model's call omits top_k. |
+| `AIVORY_TOOLS_IN_TOP_K` | `int` | `5` | `tools/builtins.go:37` | Default result count for the `aivory_web_search` tool when the model's call omits top_k. |
 | `AIVORY_TOOLS_WEB_FETCH_RESPONSE_BODY_READ_CAP` | `int64` | `256*1024` | `tools/builtins.go:38` | Byte cap on the HTTP response body web_fetch reads before stripping HTML. |
 | `AIVORY_TOOLS_WEB_FETCH_EXTRACTED_TEXT_CHAR_CAP` | `int` | `32000` | `tools/builtins.go:39` | Character cap on web_fetch's HTML-stripped text before it is truncated with an ellipsis marker. |
 | `AIVORY_TOOLS_PYTHON_EXECUTE_UPLOAD_STAGING_FILE_SIZE` | `int64` | `40*1024*1024` | `tools/builtins.go:40` | Per-file size ceiling above which a conversation upload is skipped when staging files into the python sandbox. Keep the sidecar's `SANDBOX_MAX_UPLOAD_BYTES` and `SANDBOX_MAX_BODY_BYTES` at least large enough when raising it. |

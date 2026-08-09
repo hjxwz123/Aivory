@@ -524,10 +524,16 @@ func NewRouter(d Deps) http.Handler {
 	return errorResponseLoggingMiddleware(d.Logger, recoverMiddleware(handler))
 }
 
+const (
+	immutableAssetCacheControl = "public, max-age=31536000, immutable"
+	noStoreCacheControl        = "no-cache, no-store, must-revalidate"
+	revalidateCacheControl     = "no-cache, must-revalidate"
+)
+
 // spaHandler serves the built SPA from dir and routes /api/* to the API. Any
-// path that doesn't resolve to a real file falls back to index.html so the
-// client-side router (deep links, refreshes) keeps working. Fingerprinted build
-// assets under /assets/ get a long immutable cache; index.html stays fresh.
+// non-asset path that doesn't resolve to a real file falls back to index.html
+// so client-side router deep links keep working. Vite-fingerprinted assets are
+// cached permanently; documents and deployment metadata always stay fresh.
 func spaHandler(dir string, api http.Handler) http.Handler {
 	indexPath := filepath.Join(dir, "index.html")
 	fileServer := http.FileServer(http.Dir(dir))
@@ -540,25 +546,32 @@ func spaHandler(dir string, api http.Handler) http.Handler {
 		rel := path.Clean("/" + r.URL.Path)
 		fp := filepath.Join(dir, filepath.FromSlash(rel))
 		if info, err := os.Stat(fp); err == nil && !info.IsDir() {
-			if strings.HasPrefix(rel, "/assets/") {
-				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-			}
-			// §23 version probe: must never be cached anywhere (browser, proxy,
-			// CDN) or open tabs keep seeing the old version and never refresh.
-			if rel == "/version.json" {
-				w.Header().Set("Cache-Control", "no-store")
-			}
-			// A cached stale index.html after a deploy would make the version
-			// check arm→reload→still-stale (loop breaker caps it, but fix the
-			// cause too). The SPA-fallback branch below already sends this.
-			if rel == "/index.html" {
-				w.Header().Set("Cache-Control", "no-cache")
+			switch {
+			case strings.HasPrefix(rel, "/assets/"):
+				// Vite changes the content hash whenever an asset changes, so this
+				// URL can live in browser and CDN caches indefinitely.
+				w.Header().Set("Cache-Control", immutableAssetCacheControl)
+			case rel == "/index.html", rel == "/version.json", rel == "/sw.js":
+				// These files select or detect the current deployment. Storing any
+				// of them can keep a browser on asset URLs from an old build.
+				w.Header().Set("Cache-Control", noStoreCacheControl)
+			default:
+				// Files copied verbatim from public/ have no content hash. They may
+				// be stored locally, but must be revalidated before reuse.
+				w.Header().Set("Cache-Control", revalidateCacheControl)
 			}
 			fileServer.ServeHTTP(w, r)
 			return
 		}
+		// A missing old chunk must be a real 404. Returning index.html here
+		// produces a JavaScript MIME error and can hide the deployment drift.
+		if rel == "/assets" || strings.HasPrefix(rel, "/assets/") {
+			w.Header().Set("Cache-Control", noStoreCacheControl)
+			http.NotFound(w, r)
+			return
+		}
 		// SPA fallback — serve index.html for unknown (client-routed) paths.
-		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Cache-Control", noStoreCacheControl)
 		http.ServeFile(w, r, indexPath)
 	})
 }

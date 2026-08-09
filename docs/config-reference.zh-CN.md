@@ -95,21 +95,22 @@
 | `AIVORY_LLM_MAX_ITER_3` | `int` | `20` | `llm/openai_provider.go:610` | OpenAI streamResponses（Responses API）循环中原生工具调用轮次的硬性上限。 |
 | `AIVORY_LLM_INLINE_QUOTE_SOURCE_INJECTION_CAP` | `int` | `8000` | `llm/orchestrator.go:30` | 内联引用子对话中，随高亮摘录一并注入的来源消息文本在截断前的最大字符（rune）数。 |
 | `AIVORY_LLM_ATTACHMENT_IMAGE_INLINE_BYTES` | `int64` | `20*1024*1024` | `llm/orchestrator.go` | 单个已验证图片附件在以 base64 写入渠道请求前的独立硬上限；读取过程同样受限，旧的错误大小元数据无法绕过。 |
-| `AIVORY_LLM_TOOL_ROUTE_TIMEOUT` | `duration` | `12*time.Second` | `llm/orchestrator.go:38` | 自动工具模式等待后台任务模型给出路由判断的最长时间；超时后按 fail-open 规则开启工具。 |
+| `AIVORY_LLM_TOOL_ROUTE_TIMEOUT` | `duration` | `5*time.Second` | `llm/orchestrator.go` | 自动工具模式等待专用路由模型的端到端时延预算；超时后按 fail-open 规则开启工具。 |
+| `AIVORY_LLM_TOOL_ROUTE_SCHEMA_TOKEN_THRESHOLD` | `int` | `512` | `llm/orchestrator.go` | 工具声明不超过此估算 token 数时，自动模式跳过额外路由请求，直接交给主模型原生判断。设为 0 可让所有模糊请求都经过分类。 |
 | `AIVORY_LLM_SANDBOX_EXEC_TIMEOUT_CLAMP_RANGE_MAX` | `int` | `600` | `llm/orchestrator.go:39` | 为 python_execute 调用上下文计时时，管理员配置的 sandbox_exec_timeout_sec 被钳制的上限（秒）。 |
 | `AIVORY_LLM_SANDBOX_EXEC_TIMEOUT_CLAMP_RANGE_MIN` | `int` | `10` | `llm/orchestrator.go:40` | 为 python_execute 调用上下文计时时，管理员配置的 sandbox_exec_timeout_sec 被钳制的下限（秒）。 |
 | `AIVORY_LLM_SANDBOX_EXEC_CTX_SAFETY_MARGIN` | `duration` | `150*time.Second` | `llm/orchestrator.go:41` | 为 python_execute 上下文计时时，在钳制后的沙箱执行超时之上额外增加的余量，使上下文比沙箱 HTTP 客户端更晚超时。 |
-| `AIVORY_LLM_PER_TURN_TOOL_LIMITS_WEB_SEARCH` | `int` | `16` | `llm/orchestrator.go:147` | 普通模式下每条消息允许的 web_search 调用次数上限；超出即令该调用失败。 |
+| `AIVORY_LLM_PER_TURN_TOOL_LIMITS_WEB_SEARCH` | `int` | `16` | `llm/orchestrator.go:147` | 普通模式下每条消息允许的 `aivory_web_search` 调用次数上限；超出即令该调用失败。 |
 | `AIVORY_LLM_PER_TURN_TOOL_LIMITS_WEB_FETCH` | `int` | `12` | `llm/orchestrator.go:148` | 普通模式下每条消息允许的 web_fetch 调用次数上限；超出即令该调用失败。 |
 | `AIVORY_LLM_PER_TURN_TOOL_LIMITS_IMAGE_GENERATE` | `int` | `8` | `llm/orchestrator.go:150` | 普通模式下每条消息允许的 image_generate 调用次数上限；超出即令该调用失败。 |
 | `AIVORY_LLM_PER_TURN_TOOL_LIMITS_PYTHON_EXECUTE` | `int` | `16` | `llm/orchestrator.go:151` | 普通模式下每条消息允许的 python_execute 沙箱执行次数上限；超出即令该调用失败。 |
-| `AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_WEB_SEARCH` | `int` | `40` | `llm/orchestrator.go:157` | 深度研究运行时每条消息允许的 web_search 调用次数上限；超出即令该调用失败。 |
+| `AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_WEB_SEARCH` | `int` | `40` | `llm/orchestrator.go:157` | 深度研究运行时每条消息允许的 `aivory_web_search` 调用次数上限；超出即令该调用失败。 |
 | `AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_WEB_FETCH` | `int` | `25` | `llm/orchestrator.go:158` | 深度研究运行时每条消息允许的 web_fetch 调用次数上限；超出即令该调用失败。 |
 | `AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_IMAGE_GENERATE` | `int` | `4` | `llm/orchestrator.go:160` | 深度研究运行时每条消息允许的 image_generate 调用次数上限；超出即令该调用失败。 |
 | `AIVORY_LLM_DEEP_RESEARCH_TOOL_LIMITS_PYTHON_EXECUTE` | `int` | `8` | `llm/orchestrator.go:161` | 深度研究运行时每条消息允许的 python_execute 沙箱执行次数上限；超出即令该调用失败。 |
 | `AIVORY_LLM_MAX_TOOL_CALLS_PER_TURN` | `int` | `48` | `llm/orchestrator.go:169` | 普通模式下每条消息跨所有工具的工具调用总数全局上限，叠加在各工具单独上限之上。 |
 | `AIVORY_LLM_MAX_TOOL_CALLS_PER_TURN_DEEP` | `int` | `150` | `llm/orchestrator.go:170` | 深度研究运行时每条消息跨所有工具的工具调用总数全局上限。 |
-| `AIVORY_LLM_TOOL_TIMEOUTS` | `duration` | `10*time.Second` | `llm/orchestrator.go:2326` | 单次 web_search 工具调用的每次调用超时上限。 |
+| `AIVORY_LLM_TOOL_TIMEOUTS` | `duration` | `10*time.Second` | `llm/orchestrator.go:2326` | 单次 `aivory_web_search` 工具调用的每次调用超时上限。 |
 | `AIVORY_LLM_TOOL_TIMEOUTS_2` | `duration` | `15*time.Second` | `llm/orchestrator.go:2327` | 单次 web_fetch 工具调用的每次调用超时上限。 |
 | `AIVORY_LLM_TOOL_TIMEOUTS_3` | `duration` | `600*time.Second` | `llm/orchestrator.go:2329` | 单次 image_generate 工具调用的每次调用超时上限（为迟缓的第三方图像网关留出较宽窗口）。 |
 | `AIVORY_LLM_TOOL_TIMEOUT_DEFAULT` | `duration` | `100*time.Second` | `llm/orchestrator.go:2332` | 未在按类型配置的 toolTimeouts 映射中列出的工具所用的每次调用回退超时。 |
@@ -220,11 +221,11 @@
 
 ### 4. 内置工具（搜索 / Python / 网络安全）
 
-web_search 结果条数与超时、Python 安全模式、SSRF / 网络安全护栏等。
+`aivory_web_search` 结果条数与超时、Python 安全模式、SSRF / 网络安全护栏等。
 
 | 环境变量 | 类型 | 默认值 | 位置 | 说明 |
 | --- | --- | --- | --- | --- |
-| `AIVORY_TOOLS_IN_TOP_K` | `int` | `5` | `tools/builtins.go:37` | 模型调用未指定 top_k 时 web_search 工具的默认结果数量。 |
+| `AIVORY_TOOLS_IN_TOP_K` | `int` | `5` | `tools/builtins.go:37` | 模型调用未指定 top_k 时 `aivory_web_search` 工具的默认结果数量。 |
 | `AIVORY_TOOLS_WEB_FETCH_RESPONSE_BODY_READ_CAP` | `int64` | `256*1024` | `tools/builtins.go:38` | web_fetch 在剥离 HTML 前读取的 HTTP 响应体字节上限。 |
 | `AIVORY_TOOLS_WEB_FETCH_EXTRACTED_TEXT_CHAR_CAP` | `int` | `32000` | `tools/builtins.go:39` | web_fetch 剥离 HTML 后的文本在以省略标记截断前的字符上限。 |
 | `AIVORY_TOOLS_PYTHON_EXECUTE_UPLOAD_STAGING_FILE_SIZE` | `int64` | `40*1024*1024` | `tools/builtins.go:40` | 向 python 沙箱暂存文件时，超过该值则跳过某个会话上传文件的单文件大小上限。调高时还需确保 sidecar 的 `SANDBOX_MAX_UPLOAD_BYTES` 与 `SANDBOX_MAX_BODY_BYTES` 足够大。 |

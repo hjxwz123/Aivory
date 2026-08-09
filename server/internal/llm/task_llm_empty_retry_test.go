@@ -67,7 +67,7 @@ func TestTaskLLMRetriesEmptyVisibleOutputWithLargerBudget(t *testing.T) {
 	var decision struct {
 		UseTools bool `json:"use_tools"`
 	}
-	if err := task.RunJSON(context.Background(), TaskToolRoute, "route", &decision, RunOpts{
+	if err := task.RunJSON(context.Background(), TaskRouter, "route", &decision, RunOpts{
 		ModelID: modelID, MaxOutputTokens: 32,
 	}); err != nil {
 		t.Fatalf("RunJSON: %v", err)
@@ -77,6 +77,41 @@ func TestTaskLLMRetriesEmptyVisibleOutputWithLargerBudget(t *testing.T) {
 	}
 	if len(provider.maxOutputTokens) != 2 || provider.maxOutputTokens[0] != 32 || provider.maxOutputTokens[1] != taskEmptyRetryMaxOutputTokens {
 		t.Fatalf("max output token attempts = %v", provider.maxOutputTokens)
+	}
+}
+
+func TestTaskLLMToolRouteDoesNotRetryEmptyVisibleOutput(t *testing.T) {
+	provider := &emptyThenTextTaskProvider{alwaysEmpty: true}
+	task, modelID := newEmptyRetryTaskLLM(t, provider)
+	_, err := task.Run(context.Background(), TaskToolRoute, "route", RunOpts{
+		ModelID: modelID, MaxOutputTokens: toolRouteMaxOutputTokens,
+	})
+	if err == nil || !strings.Contains(err.Error(), "task llm returned empty output") {
+		t.Fatalf("tool route empty output error = %v", err)
+	}
+	if len(provider.maxOutputTokens) != 1 || provider.maxOutputTokens[0] != toolRouteMaxOutputTokens {
+		t.Fatalf("tool route attempts = %v, want one %d-token call", provider.maxOutputTokens, toolRouteMaxOutputTokens)
+	}
+}
+
+func TestToolRouteTaskParamsSuppressConfiguredReasoning(t *testing.T) {
+	tests := []struct {
+		name      string
+		provider  string
+		requestID string
+		want      string
+	}{
+		{name: "openai compatible", provider: "openai", requestID: "grok-fast", want: `{"temperature":0}`},
+		{name: "anthropic alias", provider: "claude", requestID: "claude-haiku", want: `{"temperature":0}`},
+		{name: "gemini 2.5", provider: "gemini", requestID: "gemini-2.5-flash-lite", want: `{"generationConfig":{"temperature":0,"thinkingConfig":{"thinkingBudget":0}}}`},
+		{name: "gemini 3", provider: "google", requestID: "gemini-3-flash", want: `{"generationConfig":{"temperature":0,"thinkingConfig":{"thinkingLevel":"minimal"}}}`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := string(toolRouteTaskParams(test.provider, test.requestID)); got != test.want {
+				t.Fatalf("toolRouteTaskParams(%q, %q) = %s, want %s", test.provider, test.requestID, got, test.want)
+			}
+		})
 	}
 }
 
