@@ -14,9 +14,15 @@ import (
 	"testing"
 )
 
-func TestHostedFileSearchUsesItsOwnToolName(t *testing.T) {
-	if got := hostedToolName("file_search_call"); got != "file_search" {
-		t.Fatalf("hostedToolName(file_search_call) = %q, want file_search", got)
+func TestHostedToolsKeepProviderNamesSeparateFromLocalFunctions(t *testing.T) {
+	for input, want := range map[string]string{
+		"file_search_call":      "file_search",
+		"code_interpreter_call": "code_interpreter",
+		"image_generation_call": "image_generation",
+	} {
+		if got := hostedToolName(input); got != want {
+			t.Errorf("hostedToolName(%q) = %q, want %q", input, got, want)
+		}
 	}
 }
 
@@ -109,7 +115,6 @@ func TestOpenAIResponsesHostedImageLargeEventReturnsBinaryWithoutRawBase64(t *te
 		History:              []UnifiedMessage{{Role: "user", Blocks: []UnifiedBlock{{Kind: "text", Text: "draw"}}}},
 		OfficialToolNames:    []string{"image_generation"},
 		OfficialToolRequests: []json.RawMessage{json.RawMessage(`{"tools":[{"type":"image_generation"}]}`)},
-		ToolModeOfficial:     true,
 	}, nil, func(SseEvent) {})
 	if err != nil {
 		t.Fatalf("Stream: %v", err)
@@ -166,7 +171,7 @@ func TestResponsesHostedImageCompletedWithoutUsableResultFails(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, images, err := decodeHostedGeneratedImages([]hostedToolCall{{
-				ID: "ig_bad", Name: "image_generate", Status: "completed", ImageBase64: tc.encoded,
+				ID: "ig_bad", Name: "image_generation", Status: "completed", ImageBase64: tc.encoded,
 			}})
 			if err == nil || len(images) != 0 {
 				t.Fatalf("images=%#v err=%v, want a decoding failure", images, err)
@@ -229,6 +234,96 @@ func TestResponsesWebSearchCitations(t *testing.T) {
 	}
 	if emitted != 2 {
 		t.Errorf("expected 2 live citation events, got %d", emitted)
+	}
+}
+
+func TestResponsesPromptModePreservesHostedSearchAndImageResults(t *testing.T) {
+	imageData := testPNGBytes(32)
+	encoded := base64.StdEncoding.EncodeToString(imageData)
+	stream := strings.Join([]string{
+		`data: {"type":"response.output_item.added","item":{"id":"ws_prompt","type":"web_search_call"}}`,
+		`data: {"type":"response.output_item.done","item":{"id":"ws_prompt","type":"web_search_call","status":"completed","action":{"sources":[{"url":"https://prompt.test","title":"Prompt source"}]}}}`,
+		`data: {"type":"response.output_item.added","item":{"id":"ig_prompt","type":"image_generation_call"}}`,
+		`data: {"type":"response.output_item.done","item":{"id":"ig_prompt","type":"image_generation_call","status":"completed","result":"` + encoded + `"}}`,
+		`data: {"type":"response.output_text.delta","delta":"Hosted answer"}`,
+		`data: {"type":"response.completed","response":{"usage":{"input_tokens":7,"output_tokens":3},"output":[{"id":"ws_prompt","type":"web_search_call","status":"completed","action":{"sources":[{"url":"https://prompt.test","title":"Prompt source"}]}},{"id":"ig_prompt","type":"image_generation_call","status":"completed","result":"` + encoded + `"}]}}`,
+		`data: [DONE]`,
+		``,
+	}, "\n\n")
+
+	var requestBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		w.Header().Set("content-type", "text/event-stream")
+		_, _ = io.WriteString(w, stream)
+	}))
+	defer server.Close()
+
+	var events []SseEvent
+	result, err := (&OpenAIProvider{}).Stream(context.Background(), UnifiedChatRequest{
+		Model:          ModelInfo{RequestID: "gpt-test", BaseURL: server.URL, APIKey: "k", APIFormat: "responses"},
+		History:        []UnifiedMessage{{Role: "user", Blocks: []UnifiedBlock{{Kind: "text", Text: "search and draw"}}}},
+		Tools:          []ToolDef{{Name: "aivory_web_search", InputSchema: json.RawMessage(`{"type":"object"}`)}},
+		ToolModePrompt: true,
+		OfficialToolRequests: []json.RawMessage{
+			json.RawMessage(`{"tools":[{"type":"web_search"}]}`),
+			json.RawMessage(`{"tools":[{"type":"image_generation"}]}`),
+		},
+	}, nil, func(event SseEvent) {
+		events = append(events, event)
+	})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	if len(result.Citations) != 1 || result.Citations[0].URL != "https://prompt.test" {
+		t.Fatalf("prompt hosted citations = %+v", result.Citations)
+	}
+	if len(result.GeneratedImages) != 1 || !bytes.Equal(result.GeneratedImages[0].Data, imageData) {
+		t.Fatalf("prompt hosted images = %#v", result.GeneratedImages)
+	}
+	toolNames := map[string]bool{}
+	for _, block := range result.Blocks {
+		if block.Kind == "tool_call" {
+			toolNames[block.ToolName] = true
+		}
+	}
+	if !toolNames["web_search"] || !toolNames["image_generation"] || toolNames["aivory_web_search"] {
+		t.Fatalf("prompt hosted/local block separation = %+v", result.Blocks)
+	}
+	wireTools, _ := requestBody["tools"].([]any)
+	if len(wireTools) != 2 {
+		t.Fatalf("prompt wire tools = %#v, want only two administrator-hosted tools", requestBody["tools"])
+	}
+	for _, eventType := range []string{"tool_start", "tool_result", "citation", "text_delta"} {
+		if !hasSSEEvent(events, eventType) {
+			t.Errorf("prompt hosted events missing %s: %+v", eventType, events)
+		}
+	}
+}
+
+func TestResponsesHostedAndAivoryToolNamesStaySeparate(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"type":"response.output_item.added","item":{"id":"ws_1","type":"web_search_call"}}`,
+		`data: {"type":"response.output_item.done","item":{"id":"ws_1","type":"web_search_call","status":"completed"}}`,
+		`data: {"type":"response.output_item.added","item":{"id":"fn_1","type":"function_call","call_id":"fn_1","name":"aivory_web_search","arguments":""}}`,
+		`data: {"type":"response.function_call_arguments.done","item_id":"fn_1","arguments":"{\"query\":\"local\"}"}`,
+		`data: {"type":"response.output_item.done","item":{"id":"fn_1","type":"function_call","call_id":"fn_1","name":"aivory_web_search","arguments":"{\"query\":\"local\"}"}}`,
+		`data: {"type":"response.completed","response":{"output":[{"id":"ws_1","type":"web_search_call","status":"completed"},{"id":"fn_1","type":"function_call","call_id":"fn_1","name":"aivory_web_search","arguments":"{\"query\":\"local\"}"}]}}`,
+		`data: [DONE]`,
+		``,
+	}, "\n\n")
+
+	_, _, local, hosted, _, _, _, err := readOpenAIResponsesStream(strings.NewReader(stream), func(SseEvent) {})
+	if err != nil {
+		t.Fatalf("read responses stream: %v", err)
+	}
+	if len(local) != 1 || local[0].Name != "aivory_web_search" || string(local[0].Input) != `{"query":"local"}` {
+		t.Fatalf("local calls = %+v, want only aivory_web_search", local)
+	}
+	if len(hosted) != 1 || hosted[0].Name != "web_search" || hosted[0].ID != "ws_1" {
+		t.Fatalf("hosted calls = %+v, want official web_search", hosted)
 	}
 }
 
@@ -359,7 +454,6 @@ func TestOpenAIResponsesOfficialToolsSurviveExtraParamsMerge(t *testing.T) {
 		History:              []UnifiedMessage{{Role: "user", Blocks: []UnifiedBlock{{Kind: "text", Text: "search"}}}},
 		OfficialToolNames:    []string{"custom_search"},
 		OfficialToolRequests: []json.RawMessage{json.RawMessage(`{"tools":[{"type":"web_search","search_context_size":"medium"}]}`)},
-		ToolModeOfficial:     true,
 		ExtraParams:          json.RawMessage(`{"tools":[{"type":"function","name":"extra_tool"}],"include":["custom.include"]}`),
 	}, nil, func(SseEvent) {})
 	if err != nil {

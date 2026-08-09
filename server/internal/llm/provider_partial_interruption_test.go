@@ -58,7 +58,7 @@ func TestAnthropicUsageEventsDoNotDoubleCountCumulativeCacheTokens(t *testing.T)
 		`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":7,"cache_read_input_tokens":3,"cache_creation_input_tokens":2}}`,
 		``,
 	}, "\n\n")
-	_, _, _, _, _, usage, err := readAnthropicStream(strings.NewReader(stream), func(SseEvent) {})
+	_, _, _, _, _, _, _, usage, err := readAnthropicStream(strings.NewReader(stream), func(SseEvent) {})
 	if err != nil {
 		t.Fatalf("read stream: %v", err)
 	}
@@ -258,15 +258,15 @@ func (partialPromptToolRunner) Run(context.Context, string, []byte) (string, []C
 func TestPromptToolLoopPreservesSafeVisiblePrefixAndUsageOnStreamError(t *testing.T) {
 	round := 0
 	var events []SseEvent
-	text, blocks, usage, _, err := RunPromptToolLoop(
+	text, blocks, usage, _, _, err := RunPromptToolLoop(
 		context.Background(), "system", nil,
 		[]ToolDef{{Name: "lookup", InputSchema: []byte(`{"type":"object"}`)}},
-		func(context.Context, []UnifiedMessage, string) (string, Usage, error) {
+		func(context.Context, []UnifiedMessage, string) (PromptToolRound, error) {
 			round++
 			if round == 1 {
-				return `before tool<tool_call>{"name":"lookup","arguments":{"q":"docs"}}</tool_call>`, Usage{InputTokens: 2, OutputTokens: 3}, nil
+				return PromptToolRound{Text: `before tool<tool_call>{"name":"lookup","arguments":{"q":"docs"}}</tool_call>`, Usage: Usage{InputTokens: 2, OutputTokens: 3}}, nil
 			}
-			return "partial final answer", Usage{InputTokens: 4, OutputTokens: 5}, errors.New("stream interrupted")
+			return PromptToolRound{Text: "partial final answer", Usage: Usage{InputTokens: 4, OutputTokens: 5}}, errors.New("stream interrupted")
 		},
 		partialPromptToolRunner{},
 		func(event SseEvent) { events = append(events, event) },

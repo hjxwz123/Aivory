@@ -333,7 +333,7 @@ export function Sidebar({ variant = 'desktop', onClose }: SidebarProps) {
   }, [activeConversations, collapsed, currentId, expandedProjectIds, reducedMotion])
 
   function startNewChat() {
-    // A new chat starts from the account's exact four-state default, even when
+    // A new chat starts from the account's exact three-state default, even when
     // the previous conversation used a per-turn override.
     resetComposerToolModeToDefault()
     // Go to the empty home screen — the conversation is created only when the

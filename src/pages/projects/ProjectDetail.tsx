@@ -390,7 +390,6 @@ export default function ProjectDetail() {
       verify?: boolean
       toolMode: ToolMode
       webSearch?: boolean
-      officialToolNames?: string[]
       selectedUserSkillIds?: string[]
       fast?: boolean
     },
@@ -425,7 +424,6 @@ export default function ProjectDetail() {
       verify: opts.verify,
       toolMode: opts.toolMode,
       webSearch: opts.webSearch,
-      officialToolNames: opts.officialToolNames,
       selectedUserSkillIds: opts.selectedUserSkillIds,
       fast: opts.fast,
     })

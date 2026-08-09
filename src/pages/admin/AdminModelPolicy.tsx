@@ -14,6 +14,7 @@ type Settings = Record<string, unknown>
 const OWNED_KEYS = [
   'default_model_id',
   'task_model_id',
+  'tool_route_model_id',
   'verify_model_id',
   'fallback_model_id',
   'fallback_ttft_sec',
@@ -106,6 +107,31 @@ export default function AdminModelPolicy() {
                 <SelectValue placeholder={t('admin:settings.fields.pickModel')} />
               </SelectTrigger>
               <SelectContent>
+                {models.map((model) => (
+                  <SelectItem key={model.id} value={model.id}>
+                    {model.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+
+          <Field
+            label={t('admin:settings.fields.toolRouteModel')}
+            htmlFor="tool-route-model"
+            hint={t('admin:settings.fields.toolRouteModelHint')}
+          >
+            <Select
+              value={readString('tool_route_model_id') || 'none'}
+              onValueChange={(value) =>
+                setDraft((current) => ({ ...current, tool_route_model_id: value === 'none' ? '' : value }))
+              }
+            >
+              <SelectTrigger id="tool-route-model">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">{t('admin:settings.fields.fallbackNone')}</SelectItem>
                 {models.map((model) => (
                   <SelectItem key={model.id} value={model.id}>
                     {model.label}

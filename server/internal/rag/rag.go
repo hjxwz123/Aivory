@@ -997,7 +997,7 @@ type Snippet struct {
 // uploads ∪ attached KBs (project KBs included via the orchestrator).
 //
 // Returns up to topK Snippets carrying the snippet and the filename so the
-// frontend can render them with the same component as web_search citations.
+// frontend can render them with the same component as web-search citations.
 //
 // §4.11-B2 embedding lock: when one or more KBs are in scope, the FIRST KB's
 // locked embedding model is used. We refuse cross-model fan-out (multiple KBs

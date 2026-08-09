@@ -62,7 +62,7 @@ func (p *OpenAIProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 }
 
 func officialImageGenerationEnabled(req UnifiedChatRequest) bool {
-	if !officialToolModeEnabled(req) {
+	if !hostedToolsConfigured(req) {
 		return false
 	}
 	body := MergeOfficialToolRequests(nil, req.OfficialToolRequests)
@@ -71,15 +71,15 @@ func officialImageGenerationEnabled(req UnifiedChatRequest) bool {
 
 func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest, tools ToolRunner, onEvent func(SseEvent)) (*UnifiedResult, error) {
 	// §4.13 prompt-mode: no native function calling — drive the text protocol.
-	if req.ToolModePrompt && !officialToolModeEnabled(req) {
-		_, blocks, usage, cites, err := RunPromptToolLoop(
+	if req.ToolModePrompt {
+		_, blocks, usage, cites, images, err := RunPromptToolLoop(
 			ctx, req.SystemPrompt, req.History, req.Tools,
 			p.promptRunOnce(req), tools, onEvent,
 		)
 		if err != nil {
-			return promptToolErrorResult(ctx, blocks, usage, cites, err)
+			return promptToolErrorResult(ctx, blocks, usage, cites, images, err)
 		}
-		return &UnifiedResult{Blocks: blocks, StopReason: "end_turn", Usage: usage, Citations: cites}, nil
+		return &UnifiedResult{Blocks: blocks, StopReason: "end_turn", Usage: usage, Citations: cites, GeneratedImages: images}, nil
 	}
 
 	messages := []map[string]any{}
@@ -145,7 +145,7 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest,
 		if req.MaxOutputTokens > 0 {
 			body["max_tokens"] = req.MaxOutputTokens
 		}
-		if len(req.Tools) > 0 && !req.ToolModePrompt && !officialToolModeEnabled(req) {
+		if len(req.Tools) > 0 && !req.ToolModePrompt {
 			openAITools := []map[string]any{}
 			for _, t := range req.Tools {
 				openAITools = append(openAITools, map[string]any{
@@ -159,11 +159,11 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest,
 			}
 			body["tools"] = openAITools
 		}
-		if req.ToolModePrompt && !officialToolModeEnabled(req) {
+		if req.ToolModePrompt {
 			body["stop"] = []string{PromptToolStopSequence()}
 		}
 		body = MergeRequestParams(body, req.ExtraParams, req.ParamControls, req.ParamOverrides)
-		body = StripToolFields(body, len(req.Tools) > 0 && !req.ToolModePrompt && !officialToolModeEnabled(req))
+		body = StripToolFields(body, len(req.Tools) > 0 && !req.ToolModePrompt)
 		body = MergeOfficialToolRequests(body, req.OfficialToolRequests)
 		raw, _ := json.Marshal(body)
 		var (
@@ -303,7 +303,7 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest,
 // promptRunOnce returns a PromptToolRunner performing ONE Chat Completions
 // call (no native tools, stop on </tool_call>) for §4.13 prompt-mode.
 func (p *OpenAIProvider) promptRunOnce(req UnifiedChatRequest) PromptToolRunner {
-	return func(ctx context.Context, history []UnifiedMessage, system string) (string, Usage, error) {
+	return func(ctx context.Context, history []UnifiedMessage, system string) (PromptToolRound, error) {
 		messages := []map[string]any{}
 		if system != "" {
 			messages = append(messages, map[string]any{"role": "system", "content": system})
@@ -356,7 +356,35 @@ func (p *OpenAIProvider) promptRunOnce(req UnifiedChatRequest) PromptToolRunner 
 			text, _, _, _, u, readErr = readOpenAIChatStream(resp.Body, emit)
 			return readErr
 		}, func(SseEvent) {})
-		return text, u, err
+		return PromptToolRound{Text: text, Usage: u}, err
+	}
+}
+
+// promptResponsesRunOnce performs one Responses-format round for a model whose
+// local Functions use the text protocol. Hosted tools remain in the upstream
+// request and execute provider-side; local Function declarations are withheld so
+// only RunPromptToolLoop can dispatch them through the application registry.
+func (p *OpenAIProvider) promptResponsesRunOnce(req UnifiedChatRequest) PromptToolRunner {
+	return func(ctx context.Context, history []UnifiedMessage, system string) (PromptToolRound, error) {
+		round := req
+		round.SystemPrompt = system
+		round.History = history
+		round.Tools = nil
+		round.ToolModePrompt = false
+		result, err := p.streamResponses(
+			ctx,
+			round,
+			toolDefAllowlistRunner{allowed: map[string]bool{}},
+			func(SseEvent) {},
+		)
+		if result == nil {
+			return PromptToolRound{}, err
+		}
+		return PromptToolRound{
+			Text: promptRoundText(result.Blocks), Blocks: result.Blocks, Usage: result.Usage,
+			Citations: result.Citations, GeneratedImages: result.GeneratedImages,
+			UsageAlreadyAttached: true,
+		}, err
 	}
 }
 
@@ -418,20 +446,11 @@ func (s *responseLineScanner) Err() error {
 	return s.err
 }
 
-// hostedToolName maps a Responses hosted-tool output item type (e.g.
-// "web_search_call") to the system tool name the frontend already has an icon
-// and label for, so hosted rounds render identically to self-built ones.
+// hostedToolName removes the Responses output-item suffix while preserving the
+// provider's own tool namespace. In particular, code_interpreter and
+// image_generation must not be renamed to Aivory's local python_execute and
+// image_generate Functions; those are separate tools with separate policy.
 func hostedToolName(itemType string) string {
-	switch itemType {
-	case "web_search_call":
-		return "web_search"
-	case "code_interpreter_call":
-		return "python_execute"
-	case "image_generation_call":
-		return "image_generate"
-	case "file_search_call":
-		return "file_search"
-	}
 	return strings.TrimSuffix(itemType, "_call")
 }
 
@@ -664,8 +683,15 @@ func readOpenAIChatStream(body io.Reader, onEvent func(SseEvent)) (string, strin
 //     are emitted as `thinking_delta` events so the UI's collapsed-thinking
 //     pane updates live.
 func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatRequest, tools ToolRunner, onEvent func(SseEvent)) (*UnifiedResult, error) {
-	if req.ToolModePrompt && !officialToolModeEnabled(req) {
-		return p.streamChat(ctx, req, tools, onEvent)
+	if req.ToolModePrompt {
+		_, blocks, usage, cites, images, err := RunPromptToolLoop(
+			ctx, req.SystemPrompt, req.History, req.Tools,
+			p.promptResponsesRunOnce(req), tools, onEvent,
+		)
+		if err != nil {
+			return promptToolErrorResult(ctx, blocks, usage, cites, images, err)
+		}
+		return &UnifiedResult{Blocks: blocks, StopReason: "end_turn", Usage: usage, Citations: cites, GeneratedImages: images}, nil
 	}
 
 	// Build the input list from history. Hosted image output is persisted as an
@@ -737,16 +763,13 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 	}
 
 	var respTools []map[string]any
-	officialMode := officialToolModeEnabled(req)
-	if !officialMode {
-		for _, t := range req.Tools {
-			respTools = append(respTools, map[string]any{
-				"type":        "function",
-				"name":        t.Name,
-				"description": t.Description,
-				"parameters":  json.RawMessage(t.InputSchema),
-			})
-		}
+	for _, t := range req.Tools {
+		respTools = append(respTools, map[string]any{
+			"type":        "function",
+			"name":        t.Name,
+			"description": t.Description,
+			"parameters":  json.RawMessage(t.InputSchema),
+		})
 	}
 
 	maxIter := envcfg.Int("AIVORY_LLM_MAX_ITER_3", 20)
@@ -992,7 +1015,7 @@ func decodeHostedGeneratedImages(hosted []hostedToolCall) ([]hostedToolCall, []G
 	images := make([]GeneratedImage, 0, len(hosted))
 	var decodeErrors []error
 	for i := range hosted {
-		if hosted[i].Name != "image_generate" {
+		if hosted[i].Name != "image_generation" {
 			continue
 		}
 		encoded := hosted[i].ImageBase64

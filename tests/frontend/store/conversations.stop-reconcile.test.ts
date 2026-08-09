@@ -1033,25 +1033,14 @@ describe('stopped turn optimistic-id reconciliation', () => {
     }
   })
 
-  it('defaults to every official tool while preserving customized and explicit empty selections on the wire', async () => {
+  it('serializes only the unified three-state tool policy', async () => {
     useModels.setState({
       models: [
-        {
-          id: 'model_1',
-          official_tools: [
-            { name: 'web_search', icon: 'search' },
-            { name: 'image_generation', icon: 'image' },
-          ],
-        } as ApiModel,
+        { id: 'model_1', tools_available: true } as ApiModel,
       ],
       defaultId: 'model_1',
     })
-    useComposerPrefs.setState({
-      toolMode: 'official',
-      officialToolNamesByModel: {
-        model_1: ['image_generation', 'removed_tool', 'web_search'],
-      },
-    })
+    useComposerPrefs.setState({ toolMode: 'enabled' })
     const requestBodies: Array<Record<string, unknown>> = []
     apiMocks.streamSSE.mockImplementation((_path: string, body: Record<string, unknown>) => {
       requestBodies.push(body)
@@ -1060,47 +1049,40 @@ describe('stopped turn optimistic-id reconciliation', () => {
 
     await useConversations.getState().sendMessage({
       conversationId: 'conv_stop',
-      text: 'use my saved tools',
+      text: 'use configured tools',
       modelId: 'model_1',
-      toolMode: 'official',
+      toolMode: 'enabled',
     })
 
     resetStore()
     await useConversations.getState().sendMessage({
       conversationId: 'conv_stop',
-      text: 'use no official tools',
+      text: 'disable tools',
       modelId: 'model_1',
-      toolMode: 'official',
-      officialToolNames: [],
+      toolMode: 'disabled',
     })
 
     resetStore()
-    useComposerPrefs.setState({
-      toolMode: 'official',
-      officialToolNamesByModel: {},
-    })
+    useComposerPrefs.setState({ toolMode: 'auto' })
     await useConversations.getState().sendMessage({
       conversationId: 'conv_stop',
-      text: 'use every official tool by default',
+      text: 'automatically choose tools',
       modelId: 'model_1',
-      toolMode: 'official',
+      toolMode: 'auto',
     })
 
     expect(requestBodies).toHaveLength(3)
     expect(requestBodies[0]).toMatchObject({
       model_id: 'model_1',
-      tool_mode: 'official',
-      official_tool_names: ['web_search', 'image_generation'],
+      tool_mode: 'enabled',
     })
     expect(requestBodies[1]).toMatchObject({
       model_id: 'model_1',
-      tool_mode: 'official',
-      official_tool_names: [],
+      tool_mode: 'disabled',
     })
     expect(requestBodies[2]).toMatchObject({
       model_id: 'model_1',
-      tool_mode: 'official',
-      official_tool_names: ['web_search', 'image_generation'],
+      tool_mode: 'auto',
     })
   })
 })

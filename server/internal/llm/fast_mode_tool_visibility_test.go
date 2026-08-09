@@ -46,10 +46,17 @@ func TestFastModeProviderRequestHidesPythonExecuteFromEveryToolSurface(t *testin
 			}
 
 			request := provider.mainRequests[0]
-			if !requestHasTool(request, "web_search") {
-				t.Fatalf("fast request lost web_search: tools=%+v official=%v", request.Tools, request.OfficialToolNames)
+			if !requestHasTool(request, "aivory_web_search") {
+				t.Fatalf("fast request lost aivory_web_search: tools=%+v official=%v", request.Tools, request.OfficialToolNames)
 			}
-			if len(request.Tools) == 0 || len(request.OfficialToolNames) != 0 {
+			wantHosted := 0
+			if tc.official {
+				wantHosted = 1 // web_search remains; code_interpreter is a fast-mode code tool
+				if !requestHasTool(request, "web_search") {
+					t.Fatalf("fast request lost official web_search: tools=%+v official=%v", request.Tools, request.OfficialToolNames)
+				}
+			}
+			if len(request.Tools) == 0 || len(request.OfficialToolNames) != wantHosted {
 				t.Fatalf("fast enabled mode used wrong tool surface: tools=%+v official=%v", request.Tools, request.OfficialToolNames)
 			}
 

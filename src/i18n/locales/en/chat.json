@@ -103,20 +103,14 @@
       "noTools": "Disable tools",
       "noToolsDesc": "Answer directly without calling any tool — faster and cheaper.",
       "toolMode": "Tool use",
-      "toolModeDesc": "Choose automatic, official, off, or built-in tool use.",
+      "toolModeDesc": "Choose automatic, on, or off for tools.",
       "toolModeAuto": "Automatic",
       "toolModeAutoDesc": "Automatically decide whether tool calls are needed.",
       "toolModeDisabled": "Off",
       "toolModeDisabledDesc": "Answer directly without making tools available.",
-      "toolModeEnabled": "Built-in",
-      "toolModeEnabledDesc": "Use built-in tool calls.",
-      "toolModeOfficial": "Official",
-      "toolModeOfficialDesc": "Use only the provider-native tools you select.",
-      "officialTools": "Official tools",
-      "officialToolsSelected": "Selected {{selected}}/{{total}}",
-      "officialToolsEmpty": "This model has no official tools configured.",
+      "toolModeEnabled": "On",
+      "toolModeEnabledDesc": "Turn on tool calling.",
       "webSearch": "Web search",
-      "webSearchDesc": "Search the web every turn and add the results to the prompt (no tool call).",
       "disable": "Turn off {{name}}"
     }
   },
@@ -233,12 +227,14 @@
   },
   "tools": {
     "web_search": "Web search",
+    "aivory_web_search": "Aivory web search",
     "code_interpreter": "Code interpreter",
     "image_generation": "Image generation",
     "deep_research": "Deep research"
   },
   "toolDescriptions": {
     "web_search": "Search the latest information on the web",
+    "aivory_web_search": "Search the web through Aivory's configured backend",
     "code_interpreter": "Run code and analyze files",
     "image_generation": "Generate or edit images"
   },

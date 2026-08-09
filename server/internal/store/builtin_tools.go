@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"aivory/server/internal/toolnames"
 )
 
 // ErrBuiltinToolsInvalid is returned when a model's local-tool allowlist is
@@ -37,6 +39,11 @@ func ParseBuiltinTools(raw json.RawMessage) (names []string, configured bool, er
 		if name == retiredKnowledgeBaseSearchTool {
 			continue
 		}
+		// This alias is intentionally scoped to builtin_tools. Provider-hosted
+		// OpenAI tools keep their official `web_search` name.
+		if name == toolnames.LegacyAivoryWebSearch {
+			name = toolnames.AivoryWebSearch
+		}
 		if seen[name] {
 			continue
 		}
@@ -46,10 +53,10 @@ func ParseBuiltinTools(raw json.RawMessage) (names []string, configured bool, er
 	return names, true, nil
 }
 
-// migrateRetiredKnowledgeBaseSearchTool removes the former model-driven RAG
-// tool from persisted policies. It is deliberately idempotent so old database
-// files and restored backups are cleaned on every startup.
-func migrateRetiredKnowledgeBaseSearchTool(db *sql.DB) error {
+// migrateBuiltinToolPolicies removes retired local tools and renames legacy
+// local tool identifiers. It is deliberately idempotent so old database files
+// and restored backups are normalized on every startup.
+func migrateBuiltinToolPolicies(db *sql.DB) error {
 	if _, err := db.Exec(`UPDATE conversations SET rag_mode='auto' WHERE lower(trim(rag_mode))=?`, "tool"); err != nil {
 		return err
 	}
@@ -58,7 +65,7 @@ func migrateRetiredKnowledgeBaseSearchTool(db *sql.DB) error {
 		id  string
 		raw string
 	}
-	rows, err := db.Query(`SELECT id, builtin_tools FROM models WHERE builtin_tools IS NOT NULL AND builtin_tools LIKE ?`, "%"+retiredKnowledgeBaseSearchTool+"%")
+	rows, err := db.Query(`SELECT id, builtin_tools FROM models WHERE builtin_tools IS NOT NULL`)
 	if err != nil {
 		return err
 	}
@@ -99,21 +106,16 @@ func migrateRetiredKnowledgeBaseSearchTool(db *sql.DB) error {
 	if err != nil {
 		return err
 	}
-	var disabled []string
-	if json.Unmarshal([]byte(raw), &disabled) != nil {
+	disabled, configured, err := ParseBuiltinTools(json.RawMessage(raw))
+	if err != nil || !configured {
 		return nil
 	}
-	filtered := make([]string, 0, len(disabled))
-	changed := false
-	for _, name := range disabled {
-		if strings.TrimSpace(name) == retiredKnowledgeBaseSearchTool {
-			changed = true
-			continue
-		}
-		filtered = append(filtered, name)
+	normalized, err := json.Marshal(disabled)
+	if err != nil {
+		return err
 	}
-	if changed {
-		return SetSetting(db, "disabled_tools", filtered)
+	if string(normalized) != raw {
+		return SetSetting(db, "disabled_tools", disabled)
 	}
 	return nil
 }

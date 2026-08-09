@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"aivory/server/internal/store"
@@ -20,8 +19,7 @@ func listBuiltinToolsAdmin(d Deps, w http.ResponseWriter, _ *http.Request) {
 	memoryEnabled := true
 	if d.DB != nil {
 		if raw, err := store.GetSetting(d.DB, "disabled_tools"); err == nil && len(raw) > 0 {
-			var names []string
-			if json.Unmarshal(raw, &names) == nil {
+			if names, _, parseErr := store.ParseBuiltinTools(raw); parseErr == nil {
 				for _, name := range names {
 					disabled[name] = true
 				}

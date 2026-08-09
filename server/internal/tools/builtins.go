@@ -38,6 +38,7 @@ import (
 	"aivory/server/internal/llm"
 	"aivory/server/internal/sandbox"
 	"aivory/server/internal/store"
+	"aivory/server/internal/toolnames"
 )
 
 // Env-overridable defaults (see docs/config-reference.md). Each falls back to
@@ -64,7 +65,7 @@ type webSearchTool struct {
 	searcher Searcher
 }
 
-func (t *webSearchTool) Name() string { return "web_search" }
+func (t *webSearchTool) Name() string { return toolnames.AivoryWebSearch }
 func (t *webSearchTool) Description() string {
 	return "Search the public web for current information. Use when the answer depends on news, prices, recent events, or anything time-sensitive. Returns a list of titled snippets with URLs."
 }
@@ -89,7 +90,7 @@ func (t *webSearchTool) Execute(ctx context.Context, input []byte, _ *llm.ToolCo
 	if t.searcher == nil {
 		// Fallback "result" so the model can still respond gracefully.
 		fake := []llm.Citation{
-			{ID: "w1", Index: 1, Title: "Aivory local-only mode", URL: "https://example.com/aivory-local-mode", Snippet: "No SEARCH_API_KEY configured. Configure one to enable real web_search results.", Source: "web"},
+			{ID: "w1", Index: 1, Title: "Aivory local-only mode", URL: "https://example.com/aivory-local-mode", Snippet: "No SEARCH_API_KEY configured. Configure one to enable real aivory_web_search results.", Source: "web"},
 		}
 		return "Search not yet configured. Reply based on training knowledge or ask the user to configure SEARCH_API_KEY.", fake, nil
 	}
@@ -101,7 +102,7 @@ type webFetchTool struct{}
 
 func (t *webFetchTool) Name() string { return "web_fetch" }
 func (t *webFetchTool) Description() string {
-	return "Fetch the main text content of a URL. Use after web_search to read a specific page. SSRF-guarded: internal IPs blocked."
+	return "Fetch the main text content of a URL. Use after aivory_web_search to read a specific page. SSRF-guarded: internal IPs blocked."
 }
 func (t *webFetchTool) InputSchema() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{"url":{"type":"string"}},"required":["url"]}`)

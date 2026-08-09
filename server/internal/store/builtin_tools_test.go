@@ -25,17 +25,17 @@ func TestBuiltinToolsPolicyDistinguishesDefaultAllFromExplicitNone(t *testing.T)
 		t.Fatalf("explicit none normalized to %q, err=%v", normalized, err)
 	}
 	names, configured, err := ParseBuiltinTools(normalized)
-	if err != nil || !configured || len(names) != 0 || BuiltinToolAllowed(normalized, "web_search") {
-		t.Fatalf("explicit none = names=%v configured=%v allowed=%v err=%v", names, configured, BuiltinToolAllowed(normalized, "web_search"), err)
+	if err != nil || !configured || len(names) != 0 || BuiltinToolAllowed(normalized, "aivory_web_search") {
+		t.Fatalf("explicit none = names=%v configured=%v allowed=%v err=%v", names, configured, BuiltinToolAllowed(normalized, "aivory_web_search"), err)
 	}
 }
 
 func TestNormalizeBuiltinToolsCanonicalizesAndRejectsInvalidValues(t *testing.T) {
 	normalized, err := NormalizeBuiltinTools(json.RawMessage(`[" web_search ","search_knowledge_base","python_execute","web_search"]`))
-	if err != nil || string(normalized) != `["web_search","python_execute"]` {
+	if err != nil || string(normalized) != `["aivory_web_search","python_execute"]` {
 		t.Fatalf("normalized = %s, err=%v", normalized, err)
 	}
-	if !BuiltinToolAllowed(normalized, "web_search") || BuiltinToolAllowed(normalized, "save_memory") ||
+	if !BuiltinToolAllowed(normalized, "aivory_web_search") || BuiltinToolAllowed(normalized, "web_search") || BuiltinToolAllowed(normalized, "save_memory") ||
 		BuiltinToolAllowed(json.RawMessage(`["search_knowledge_base"]`), "search_knowledge_base") {
 		t.Fatalf("canonical policy allowed the wrong tools: %s", normalized)
 	}
@@ -50,7 +50,7 @@ func TestNormalizeBuiltinToolsCanonicalizesAndRejectsInvalidValues(t *testing.T)
 	}
 }
 
-func TestMigrateRemovesRetiredKnowledgeBaseSearchTool(t *testing.T) {
+func TestMigrateNormalizesLegacyBuiltinToolPolicies(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "retired-kb-tool.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -78,10 +78,13 @@ func TestMigrateRemovesRetiredKnowledgeBaseSearchTool(t *testing.T) {
 	if _, err := db.Exec(`UPDATE conversations SET rag_mode='tool' WHERE id=?`, conversation.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`UPDATE models SET builtin_tools=? WHERE id=?`, `["web_search","search_knowledge_base"]`, model.ID); err != nil {
+	if _, err := db.Exec(`UPDATE models SET builtin_tools=? WHERE id=?`, `[" web_search ","search_knowledge_base"]`, model.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := SetSetting(db, "disabled_tools", []string{"search_knowledge_base", "python_execute"}); err != nil {
+	if _, err := db.Exec(`UPDATE models SET official_tools=? WHERE id=?`, `[{"name":"web_search","icon":"search","request":{"tools":[{"type":"web_search"}]}}]`, model.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetSetting(db, "disabled_tools", []string{"search_knowledge_base", "web_search", "python_execute"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -92,15 +95,23 @@ func TestMigrateRemovesRetiredKnowledgeBaseSearchTool(t *testing.T) {
 	if err := db.QueryRow(`SELECT rag_mode FROM conversations WHERE id=?`, conversation.ID).Scan(&ragMode); err != nil || ragMode != "auto" {
 		t.Fatalf("migrated rag_mode=%q err=%v", ragMode, err)
 	}
-	if err := db.QueryRow(`SELECT builtin_tools FROM models WHERE id=?`, model.ID).Scan(&builtinTools); err != nil || builtinTools != `["web_search"]` {
+	if err := db.QueryRow(`SELECT builtin_tools FROM models WHERE id=?`, model.ID).Scan(&builtinTools); err != nil || builtinTools != `["aivory_web_search"]` {
 		t.Fatalf("migrated builtin_tools=%q err=%v", builtinTools, err)
+	}
+	var officialToolsRaw string
+	if err := db.QueryRow(`SELECT official_tools FROM models WHERE id=?`, model.ID).Scan(&officialToolsRaw); err != nil {
+		t.Fatal(err)
+	}
+	officialTools, err := ParseOfficialTools(json.RawMessage(officialToolsRaw))
+	if err != nil || len(officialTools) != 1 || officialTools[0].Name != "web_search" {
+		t.Fatalf("migrated official_tools=%q parsed=%+v err=%v; provider name must remain official", officialToolsRaw, officialTools, err)
 	}
 	raw, err := GetSetting(db, "disabled_tools")
 	if err != nil {
 		t.Fatal(err)
 	}
 	var disabled []string
-	if err := json.Unmarshal(raw, &disabled); err != nil || len(disabled) != 1 || disabled[0] != "python_execute" {
+	if err := json.Unmarshal(raw, &disabled); err != nil || len(disabled) != 2 || disabled[0] != "aivory_web_search" || disabled[1] != "python_execute" {
 		t.Fatalf("migrated disabled_tools=%s decoded=%v err=%v", raw, disabled, err)
 	}
 

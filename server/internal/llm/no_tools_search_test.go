@@ -18,7 +18,7 @@ import (
 // set), while a normal turn with tools keeps it.
 func TestComposeSystemPromptNoToolsDropsToolGuidance(t *testing.T) {
 	withTools := composeSystemPrompt(systemPromptOpts{
-		ModelLabel: "GPT-X", ToolMode: "native", ToolNames: []string{"web_search", "python_execute"},
+		ModelLabel: "GPT-X", ToolMode: "native", ToolNames: []string{"aivory_web_search", "python_execute"},
 	})
 	if !strings.Contains(withTools, "Tool guidance") {
 		t.Fatalf("native turn should include tool guidance:\n%s", withTools)
@@ -30,8 +30,8 @@ func TestComposeSystemPromptNoToolsDropsToolGuidance(t *testing.T) {
 	if strings.Contains(none, "Tool guidance") {
 		t.Fatalf("no-tools turn must NOT include tool guidance:\n%s", none)
 	}
-	if strings.Contains(none, "web_search for time-sensitive") {
-		t.Fatalf("no-tools turn must NOT advertise web_search:\n%s", none)
+	if strings.Contains(none, "aivory_web_search for time-sensitive") {
+		t.Fatalf("no-tools turn must NOT advertise aivory_web_search:\n%s", none)
 	}
 	// Identity + trust boundary still present (they are tool-independent).
 	if !strings.Contains(none, "You are GPT-X") || !strings.Contains(none, "Trust boundary") {
@@ -45,12 +45,12 @@ func TestComposeSystemPromptNoToolsDropsToolGuidance(t *testing.T) {
 // results). Prompt mode has no schema, so it MUST list every enabled tool.
 func TestToolGuidanceNativeVsPrompt(t *testing.T) {
 	native := composeSystemPrompt(systemPromptOpts{
-		ModelLabel: "X", ToolMode: "native", ToolNames: []string{"web_search", "python_execute"},
+		ModelLabel: "X", ToolMode: "native", ToolNames: []string{"aivory_web_search", "python_execute"},
 	})
 	if !strings.Contains(native, "## Tool guidance") {
 		t.Fatalf("native turn missing tool-guidance header:\n%s", native)
 	}
-	if strings.Contains(native, "Use web_search for time-sensitive") || strings.Contains(native, "Use python_execute for") {
+	if strings.Contains(native, "Use aivory_web_search for time-sensitive") || strings.Contains(native, "Use python_execute for") {
 		t.Errorf("native mode must NOT duplicate per-tool descriptions:\n%s", native)
 	}
 	if !strings.Contains(native, "Cite your sources") || !strings.Contains(native, "call tools multiple times") {
@@ -58,9 +58,9 @@ func TestToolGuidanceNativeVsPrompt(t *testing.T) {
 	}
 	// Prompt mode: no schema, so each enabled tool is listed.
 	prompt := composeSystemPrompt(systemPromptOpts{
-		ModelLabel: "X", ToolMode: "prompt", ToolNames: []string{"web_search", "python_execute"},
+		ModelLabel: "X", ToolMode: "prompt", ToolNames: []string{"aivory_web_search", "python_execute"},
 	})
-	if !strings.Contains(prompt, "Use web_search for time-sensitive") || !strings.Contains(prompt, "Use python_execute for") {
+	if !strings.Contains(prompt, "Use aivory_web_search for time-sensitive") || !strings.Contains(prompt, "Use python_execute for") {
 		t.Errorf("prompt mode must list each enabled tool:\n%s", prompt)
 	}
 }
@@ -86,7 +86,7 @@ func TestNoneModeInlinesSkillsUnlessCleared(t *testing.T) {
 	}
 }
 
-// fakeSearchRegistry implements llm.ToolRegistry, returning canned web_search
+// fakeSearchRegistry implements llm.ToolRegistry, returning canned aivory_web_search
 // output so forcedWebSearch can be exercised without a live searcher.
 type fakeSearchRegistry struct {
 	out   string
@@ -96,7 +96,7 @@ type fakeSearchRegistry struct {
 
 func (f *fakeSearchRegistry) List(string) []ToolDef { return nil }
 func (f *fakeSearchRegistry) Run(_ context.Context, name string, input []byte, _ *ToolContext) (string, []Citation, error) {
-	if name != "web_search" {
+	if name != "aivory_web_search" {
 		return "", nil, nil
 	}
 	var in struct {
@@ -137,9 +137,9 @@ func TestForcedWebSearchInjectsResults(t *testing.T) {
 	for _, e := range events {
 		switch e.Type {
 		case "tool_start":
-			start = e.Name == "web_search"
+			start = e.Name == "aivory_web_search"
 		case "tool_result":
-			result = e.Name == "web_search" && e.Status == "complete"
+			result = e.Name == "aivory_web_search" && e.Status == "complete"
 		case "citation":
 			cite = e.Citation != nil
 		}
@@ -193,6 +193,8 @@ func TestForcedWebSearchRespectsDisabledTools(t *testing.T) {
 	if err := store.Migrate(db); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
+	// A pre-rename value can still arrive from an old database or backup after
+	// startup; runtime policy parsing must deny the renamed local tool as well.
 	if err := store.SetSetting(db, "disabled_tools", []string{"web_search"}); err != nil {
 		t.Fatalf("set: %v", err)
 	}
@@ -208,10 +210,10 @@ func TestForcedWebSearchRespectsDisabledTools(t *testing.T) {
 		func(SseEvent) {},
 	)
 	if text != "" || cites != nil {
-		t.Fatalf("disabled web_search must inject nothing, got text=%q cites=%+v", text, cites)
+		t.Fatalf("disabled aivory_web_search must inject nothing, got text=%q cites=%+v", text, cites)
 	}
 	if len(reg.calls) != 0 {
-		t.Fatalf("searcher must not be invoked when web_search is disabled: %+v", reg.calls)
+		t.Fatalf("searcher must not be invoked when aivory_web_search is disabled: %+v", reg.calls)
 	}
 }
 
@@ -265,7 +267,7 @@ func TestPerRequestUsageRowsNoOvershootOnPartialTotal(t *testing.T) {
 // never populated) — and with empty Tools, NONE of the four provider wire
 // formats may emit a tool-calling field in the upstream request body.
 func TestEmptyToolsCarriesNoToolFieldsOnWire(t *testing.T) {
-	toolFields := []string{`"tools"`, `"tool_choice"`, `"functions"`, `"function_call"`, `"parallel_tool_calls"`, `"toolConfig"`, `"tool_config"`}
+	toolFields := []string{`"tools"`, `"tool_choice"`, `"functions"`, `"function_call"`, `"parallel_tool_calls"`, `"toolConfig"`, `"tool_config"`, `"web_search_options"`, `"webSearchOptions"`}
 	assertNoToolFields := func(t *testing.T, body []byte) {
 		t.Helper()
 		for _, f := range toolFields {
@@ -293,7 +295,9 @@ func TestEmptyToolsCarriesNoToolFieldsOnWire(t *testing.T) {
 		"function_call":"auto",
 		"parallel_tool_calls":true,
 		"toolConfig":{"functionCallingConfig":{"mode":"ANY"}},
-		"tool_config":{"tool_choice":"auto"}
+		"tool_config":{"tool_choice":"auto"},
+		"web_search_options":{"search_context_size":"low"},
+		"webSearchOptions":{"searchContextSize":"low"}
 	}`)
 	openAIChatStream := `data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}` + "\n\n"
 	openAIRespStream := `data: {"type":"response.output_text.delta","delta":"ok"}` + "\n\n" +
@@ -348,7 +352,7 @@ func TestEmptyToolsCarriesNoToolFieldsOnWire(t *testing.T) {
 		req := UnifiedChatRequest{
 			Model:   ModelInfo{RequestID: "claude-test", BaseURL: srv.URL, APIKey: "k"},
 			History: history,
-			Tools:   []ToolDef{{Name: "web_search", Description: "d", InputSchema: json.RawMessage(`{"type":"object"}`)}},
+			Tools:   []ToolDef{{Name: "aivory_web_search", Description: "d", InputSchema: json.RawMessage(`{"type":"object"}`)}},
 		}
 		if _, err := p.Stream(context.Background(), req, nil, func(SseEvent) {}); err != nil {
 			t.Fatal(err)
@@ -364,11 +368,11 @@ func TestEmptyToolsCarriesNoToolFieldsOnWire(t *testing.T) {
 // providers 400 on tool_use/tool_result blocks without a tools param. The tool
 // rounds instead degrade to their text trace via the block path.
 func TestStoreToUnifiedStripsRawWithoutNativeTools(t *testing.T) {
-	raw := json.RawMessage(`[{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"web_search","input":{"query":"q"}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"result"}]},{"role":"assistant","content":[{"type":"text","text":"answer"}]}]`)
+	raw := json.RawMessage(`[{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"aivory_web_search","input":{"query":"q"}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"result"}]},{"role":"assistant","content":[{"type":"text","text":"answer"}]}]`)
 	msgs := []store.Message{
 		{Role: "user", Blocks: json.RawMessage(`[{"kind":"text","text":"question"}]`), Status: "complete"},
 		{Role: "assistant", Provider: "anthropic", Raw: raw, Status: "complete",
-			Blocks: json.RawMessage(`[{"kind":"tool_call","tool_name":"web_search","summary":"searched the web"},{"kind":"text","text":"answer"}]`)},
+			Blocks: json.RawMessage(`[{"kind":"tool_call","tool_name":"aivory_web_search","summary":"searched the web"},{"kind":"text","text":"answer"}]`)},
 	}
 
 	// Native tools declared → raw replays verbatim (unchanged behavior).
@@ -395,12 +399,38 @@ func TestStoreToUnifiedStripsRawWithoutNativeTools(t *testing.T) {
 			t.Fatalf("no-native-tools history leaked %s: %s", banned, body)
 		}
 	}
-	if !strings.Contains(string(body), "web_search") || !strings.Contains(string(body), "answer") {
+	if !strings.Contains(string(body), "aivory_web_search") || !strings.Contains(string(body), "answer") {
 		t.Fatalf("tool round must degrade to a text trace: %s", body)
 	}
 	// The caller's slice must not be mutated by the strip.
 	if len(msgs[1].Raw) == 0 {
 		t.Fatal("storeToUnified must not mutate the caller's messages")
+	}
+}
+
+func TestNativeToolHistoryReplayRequiresNativeMode(t *testing.T) {
+	tests := []struct {
+		name        string
+		fast        bool
+		toolMode    string
+		localCount  int
+		hostedTools bool
+		want        bool
+	}{
+		{name: "native local", toolMode: "native", localCount: 1, want: true},
+		{name: "native hosted", toolMode: "native", hostedTools: true, want: true},
+		{name: "native mixed", toolMode: "native", localCount: 1, hostedTools: true, want: true},
+		{name: "prompt local", toolMode: "prompt", localCount: 1, want: false},
+		{name: "prompt mixed", toolMode: "prompt", localCount: 1, hostedTools: true, want: false},
+		{name: "none", toolMode: "none", hostedTools: true, want: false},
+		{name: "fast", fast: true, toolMode: "native", localCount: 1, hostedTools: true, want: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := shouldReplayNativeToolHistory(test.fast, test.toolMode, test.localCount, test.hostedTools); got != test.want {
+				t.Fatalf("shouldReplayNativeToolHistory() = %v, want %v", got, test.want)
+			}
+		})
 	}
 }
 

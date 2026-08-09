@@ -151,15 +151,16 @@ func MergeRequestParams(native map[string]any, extraParams, controls json.RawMes
 	return store.DeepMergeJSONObjects(body, native)
 }
 
-func officialToolModeEnabled(req UnifiedChatRequest) bool {
-	return req.ToolModeOfficial || len(req.OfficialToolNames) > 0 || len(req.OfficialToolRequests) > 0
+func hostedToolsConfigured(req UnifiedChatRequest) bool {
+	return len(req.OfficialToolRequests) > 0
 }
 
-// MergeOfficialToolRequests overlays the selected official-tool request
-// fragments in order. Objects recurse, scalar/type conflicts use the later
-// fragment, and arrays append. Array concatenation is essential for top-level
-// provider `tools` arrays: selecting multiple hosted tools must retain every
-// declaration instead of letting the last definition replace the earlier ones.
+// MergeOfficialToolRequests overlays the administrator-configured hosted-tool
+// request fragments in order. Objects recurse, scalar/type conflicts use the
+// later fragment, and arrays append. Array concatenation is essential for
+// top-level provider `tools` arrays: multiple configured hosted tools must
+// retain every declaration instead of letting the last definition replace the
+// earlier ones.
 // Malformed legacy rows are ignored at runtime; admin normalization rejects
 // them on write.
 func MergeOfficialToolRequests(target map[string]any, requests []json.RawMessage) map[string]any {
@@ -258,7 +259,7 @@ func StripToolFields(body map[string]any, nativeToolsEnabled bool) map[string]an
 	}
 	for _, key := range []string{
 		"tools", "tool_choice", "toolChoice", "functions", "function_call", "functionCall",
-		"parallel_tool_calls", "tool_config", "toolConfig",
+		"parallel_tool_calls", "tool_config", "toolConfig", "web_search_options", "webSearchOptions",
 	} {
 		delete(body, key)
 	}

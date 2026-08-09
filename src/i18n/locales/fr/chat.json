@@ -103,20 +103,14 @@
       "noTools": "Désactiver les outils",
       "noToolsDesc": "Répond directement sans appeler d'outil — plus rapide et moins cher.",
       "toolMode": "Utilisation des outils",
-      "toolModeDesc": "Choisissez le mode automatique, officiel, désactivé ou intégré.",
+      "toolModeDesc": "Choisissez le mode automatique, activé ou désactivé pour les outils.",
       "toolModeAuto": "Automatique",
       "toolModeAutoDesc": "Détermine automatiquement si des appels d’outils sont nécessaires.",
       "toolModeDisabled": "Désactivé",
       "toolModeDisabledDesc": "Répond directement sans mettre d’outils à disposition.",
-      "toolModeEnabled": "Intégrés",
-      "toolModeEnabledDesc": "Utilise les appels d’outils intégrés.",
-      "toolModeOfficial": "Officiels",
-      "toolModeOfficialDesc": "Utilise uniquement les outils natifs du fournisseur que vous sélectionnez.",
-      "officialTools": "Outils officiels",
-      "officialToolsSelected": "Sélection : {{selected}}/{{total}}",
-      "officialToolsEmpty": "Aucun outil officiel n’est configuré pour ce modèle.",
+      "toolModeEnabled": "Activés",
+      "toolModeEnabledDesc": "Active les appels d’outils.",
       "webSearch": "Recherche web",
-      "webSearchDesc": "Cherche sur le web à chaque tour et ajoute les résultats au prompt (sans appel d'outil).",
       "disable": "Désactiver {{name}}"
     }
   },
@@ -233,12 +227,14 @@
   },
   "tools": {
     "web_search": "Recherche web",
+    "aivory_web_search": "Recherche web Aivory",
     "code_interpreter": "Interpréteur de code",
     "image_generation": "Génération d’images",
     "deep_research": "Recherche approfondie"
   },
   "toolDescriptions": {
     "web_search": "Rechercher les informations les plus récentes sur le web",
+    "aivory_web_search": "Rechercher sur le web via le moteur configuré dans Aivory",
     "code_interpreter": "Exécuter du code et analyser des fichiers",
     "image_generation": "Générer ou modifier des images"
   },

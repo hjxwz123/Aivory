@@ -73,7 +73,7 @@ func TestStripThinkingFromMessages(t *testing.T) {
 		{"role": "assistant", "content": []any{
 			map[string]any{"type": "thinking", "thinking": "reason", "signature": "sig"},
 			map[string]any{"type": "text", "text": "let me search"},
-			map[string]any{"type": "tool_use", "id": "t1", "name": "web_search", "input": map[string]any{"query": "x"}},
+			map[string]any{"type": "tool_use", "id": "t1", "name": "aivory_web_search", "input": map[string]any{"query": "x"}},
 		}},
 		// history[2]: user tool_result
 		{"role": "user", "content": []any{map[string]any{"type": "tool_result", "tool_use_id": "t1", "content": "none"}}},
@@ -145,7 +145,7 @@ func TestStreamStripsThinkingAndRetriesOn400(t *testing.T) {
 		{"role": "assistant", "content": []any{
 			map[string]any{"type": "thinking", "thinking": "", "signature": "sig"},
 			map[string]any{"type": "text", "text": "let me search"},
-			map[string]any{"type": "tool_use", "id": "t1", "name": "web_search", "input": map[string]any{"query": "news"}},
+			map[string]any{"type": "tool_use", "id": "t1", "name": "aivory_web_search", "input": map[string]any{"query": "news"}},
 		}},
 		{"role": "user", "content": []any{
 			map[string]any{"type": "tool_result", "tool_use_id": "t1", "content": "No web results found."},

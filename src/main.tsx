@@ -51,7 +51,7 @@ createRoot(root).render(
 // public/sw.js), so there is no stale-build risk after a deploy.
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch(() => {
+    navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' }).catch(() => {
       // Installability is a progressive enhancement — ignore failures.
     })
   })

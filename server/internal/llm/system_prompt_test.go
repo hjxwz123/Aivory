@@ -63,7 +63,7 @@ func TestComposeSystemPromptDocGenSkill(t *testing.T) {
 	// No python_execute → neither inline recipes nor the index entry.
 	s3 := composeSystemPrompt(systemPromptOpts{
 		ToolMode:           "native",
-		ToolNames:          []string{"web_search", "use_skill"},
+		ToolNames:          []string{"aivory_web_search", "use_skill"},
 		SkillToolAvailable: true,
 		SkillsAllowed:      true,
 	})

@@ -145,10 +145,6 @@ func listSkillsPublicHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 // fields. The default model id from settings is also returned so the
 // frontend's model picker can default to it.
 func modelsResponse(d Deps, r *http.Request, models []store.Model) map[string]any {
-	type officialToolItem struct {
-		Name string `json:"name"`
-		Icon string `json:"icon"`
-	}
 	type item struct {
 		ID              string `json:"id"`
 		Label           string `json:"label"`
@@ -163,16 +159,16 @@ func modelsResponse(d Deps, r *http.Request, models []store.Model) map[string]an
 		// BuiltinTools is the resolved, user-safe capability set. Unlike the
 		// nullable admin policy, this always contains only live registry tools that
 		// survive both the model allowlist and the global disabled_tools switch.
-		BuiltinTools  []string        `json:"builtin_tools"`
-		ParamControls json.RawMessage `json:"param_controls"`
-		ChannelID     string          `json:"channel_id"`
-		SortOrder     int             `json:"sort_order"`
-		Currency      string          `json:"currency"`
-		Tags          json.RawMessage `json:"tags"`
-		// OfficialTools intentionally omits each definition's upstream request
-		// JSON. Users need names/icons for the per-turn picker, while provider wire
-		// configuration remains admin-only.
-		OfficialTools []officialToolItem `json:"official_tools"`
+		BuiltinTools []string `json:"builtin_tools"`
+		// ToolsAvailable is the unified user-facing capability bit. The public API
+		// deliberately does not expose hosted definitions because users no longer
+		// select either tool category.
+		ToolsAvailable bool            `json:"tools_available"`
+		ParamControls  json.RawMessage `json:"param_controls"`
+		ChannelID      string          `json:"channel_id"`
+		SortOrder      int             `json:"sort_order"`
+		Currency       string          `json:"currency"`
+		Tags           json.RawMessage `json:"tags"`
 		// UsesCredits is true when this model has NO free allotment left for the
 		// caller's group (none configured, or the per-cycle count is used up) —
 		// the picker shows the credit multiplier instead of a lock (§ credits).
@@ -215,8 +211,7 @@ func modelsResponse(d Deps, r *http.Request, models []store.Model) map[string]an
 	}
 	disabledBuiltinTools := map[string]bool{}
 	if raw, err := store.GetSetting(d.DB, "disabled_tools"); err == nil && len(raw) > 0 {
-		var names []string
-		if json.Unmarshal(raw, &names) == nil {
+		if names, _, parseErr := store.ParseBuiltinTools(raw); parseErr == nil {
 			for _, name := range names {
 				disabledBuiltinTools[name] = true
 			}
@@ -241,25 +236,21 @@ func modelsResponse(d Deps, r *http.Request, models []store.Model) map[string]an
 		if usesCredits {
 			creditsPerImage = imageCreditCost(m, creditsPerUSD)
 		}
-		officialTools := []officialToolItem{}
-		// tool_mode=none is the administrator-level deny-all policy. Keep the
-		// saved definitions available in the admin API for later re-enabling, but
-		// do not advertise unusable official tools to user-facing clients.
+		builtinTools := effectivePublicBuiltinTools(m, registeredBuiltinTools, disabledBuiltinTools)
+		hostedToolsAvailable := false
 		if m.ToolMode != "none" {
 			if definitions, err := store.ParseOfficialTools(m.OfficialTools); err == nil {
-				for _, definition := range definitions {
-					officialTools = append(officialTools, officialToolItem{Name: definition.Name, Icon: definition.Icon})
-				}
+				hostedToolsAvailable = len(definitions) > 0
 			}
 		}
 		items = append(items, item{
 			ID: m.ID, Label: m.Label, Description: m.Description, Icon: m.Icon,
 			Kind: m.Kind, Enabled: m.Enabled, Vision: m.Vision, Stream: m.Stream, ResearchEnabled: m.ResearchEnabled, ToolMode: m.ToolMode,
-			BuiltinTools:  effectivePublicBuiltinTools(m, registeredBuiltinTools, disabledBuiltinTools),
-			ParamControls: m.ParamControls, ChannelID: m.ChannelID, SortOrder: m.SortOrder,
+			BuiltinTools:   builtinTools,
+			ToolsAvailable: len(builtinTools) > 0 || hostedToolsAvailable,
+			ParamControls:  m.ParamControls, ChannelID: m.ChannelID, SortOrder: m.SortOrder,
 			Currency:        m.Currency,
 			Tags:            tags,
-			OfficialTools:   officialTools,
 			UsesCredits:     usesCredits,
 			Multiplier:      creditMultiplier(m),
 			CreditsPerImage: creditsPerImage,

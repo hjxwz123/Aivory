@@ -59,12 +59,8 @@
         "body": "Answer directly without making tools available to the response model."
       },
       "enabled": {
-        "label": "Built-in",
-        "body": "Use built-in tool calls."
-      },
-      "official": {
-        "label": "Official",
-        "body": "Use only the provider-native tools you select for the default model."
+        "label": "On",
+        "body": "Use the tools configured by the administrator for this model."
       }
     },
     "memoryTitle": "Memory",

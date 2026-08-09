@@ -36,7 +36,7 @@ func (p *spreadsheetCaptureProvider) Stream(
 type spreadsheetTestTools struct{}
 
 func (spreadsheetTestTools) List(string) []ToolDef {
-	return []ToolDef{{Name: "python_execute"}, {Name: "web_search"}}
+	return []ToolDef{{Name: "python_execute"}, {Name: "aivory_web_search"}}
 }
 
 func (spreadsheetTestTools) Run(context.Context, string, []byte, *ToolContext) (string, []Citation, error) {
@@ -240,7 +240,7 @@ func TestFastModeInjectsXLSXPreviewIntoProviderHistory(t *testing.T) {
 		if tool.Name == "python_execute" {
 			t.Fatal("fast provider request must not expose python_execute")
 		}
-		if tool.Name == "web_search" {
+		if tool.Name == "aivory_web_search" {
 			webSearchAvailable = true
 		}
 	}

@@ -103,20 +103,14 @@
       "noTools": "禁用工具，更节省额度",
       "noToolsDesc": "不自动调用任何工具，直接回答——更快更省。",
       "toolMode": "工具调用",
-      "toolModeDesc": "选择自动、官方、关闭或内置工具模式。",
+      "toolModeDesc": "选择自动、开启或关闭工具。",
       "toolModeAuto": "自动",
       "toolModeAutoDesc": "自动判断是否需要工具调用。",
       "toolModeDisabled": "关闭",
       "toolModeDisabledDesc": "不提供工具，直接生成回答。",
-      "toolModeEnabled": "内置",
-      "toolModeEnabledDesc": "使用内置工具调用。",
-      "toolModeOfficial": "官方",
-      "toolModeOfficialDesc": "仅使用你选择的服务商原生工具。",
-      "officialTools": "官方工具",
-      "officialToolsSelected": "已选 {{selected}}/{{total}}",
-      "officialToolsEmpty": "当前模型尚未配置官方工具。",
+      "toolModeEnabled": "开启",
+      "toolModeEnabledDesc": "开启工具调用。",
       "webSearch": "联网搜索",
-      "webSearchDesc": "每次都联网搜索并把结果拼接进提示词（不走工具调用）。",
       "disable": "关闭{{name}}"
     }
   },
@@ -233,12 +227,14 @@
   },
   "tools": {
     "web_search": "网页搜索",
+    "aivory_web_search": "Aivory 网页搜索",
     "code_interpreter": "代码解释器",
     "image_generation": "图片生成",
     "deep_research": "深度研究"
   },
   "toolDescriptions": {
     "web_search": "实时检索全网最新资讯",
+    "aivory_web_search": "通过 Aivory 配置的搜索后端检索网页",
     "code_interpreter": "运行代码并分析文件",
     "image_generation": "生成或编辑图片"
   },

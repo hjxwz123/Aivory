@@ -60,22 +60,19 @@ func TestUpdateMeSettingsValidatesToolModeDefault(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &settings); err != nil {
 		t.Fatalf("decode settings: %v", err)
 	}
-	if settings["tool_mode_default"] != "official" {
-		t.Fatalf("saved default = %#v, want official", settings["tool_mode_default"])
+	if settings["tool_mode_default"] != "enabled" {
+		t.Fatalf("saved default = %#v, want legacy official normalized to enabled", settings["tool_mode_default"])
 	}
 	if settings["disable_tools_default"] != false {
-		t.Fatalf("legacy default = %#v, want false for official fallback", settings["disable_tools_default"])
+		t.Fatalf("legacy default = %#v, want false for enabled fallback", settings["disable_tools_default"])
 	}
-	names, ok := settings["official_tool_names_default"].([]any)
-	if !ok || len(names) != 2 || names[0] != "web_search" || names[1] != "image_generation" {
-		t.Fatalf("saved official defaults = %#v, want deduplicated ordered names", settings["official_tool_names_default"])
+	if _, exists := settings["official_tool_names_default"]; exists {
+		t.Fatalf("retired user tool selection was persisted: %#v", settings["official_tool_names_default"])
 	}
 
 	for _, body := range []string{
 		`{"tool_mode_default":"sometimes"}`,
 		`{"tool_mode_default":true}`,
-		`{"official_tool_names_default":"web_search"}`,
-		`{"official_tool_names_default":[""]}`,
 	} {
 		t.Run(body, func(t *testing.T) {
 			rec := httptest.NewRecorder()
@@ -98,7 +95,7 @@ func TestNormalizeToolModeSettingsPatchKeepsLegacyClientsCoherent(t *testing.T) 
 		{name: "new auto", patch: map[string]any{"tool_mode_default": "auto"}, wantMode: "auto", wantLegacy: false},
 		{name: "new disabled", patch: map[string]any{"tool_mode_default": "disabled"}, wantMode: "disabled", wantLegacy: true},
 		{name: "new enabled", patch: map[string]any{"tool_mode_default": "enabled"}, wantMode: "enabled", wantLegacy: false},
-		{name: "new official", patch: map[string]any{"tool_mode_default": "official"}, wantMode: "official", wantLegacy: false},
+		{name: "legacy official normalizes", patch: map[string]any{"tool_mode_default": "official"}, wantMode: "enabled", wantLegacy: false},
 		{name: "new wins over contradictory legacy", patch: map[string]any{"tool_mode_default": "auto", "disable_tools_default": true}, wantMode: "auto", wantLegacy: false},
 		{name: "legacy true promotes", patch: map[string]any{"disable_tools_default": true}, wantMode: "disabled", wantLegacy: true},
 		{name: "legacy false promotes", patch: map[string]any{"disable_tools_default": false}, wantMode: "enabled", wantLegacy: false},

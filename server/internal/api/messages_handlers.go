@@ -96,16 +96,13 @@ type postMessageReq struct {
 	// answer. No-op unless an admin configured `verify_model_id`.
 	Verify bool `json:"verify"`
 	// ToolMode is the per-turn tool policy: auto asks the configured task model,
-	// disabled exposes no tools, enabled preserves the model's system tools, and
-	// official exposes only OfficialToolNames. RawMessage distinguishes an omitted
+	// disabled exposes no tools, and enabled exposes the complete administrator-
+	// configured collection. RawMessage distinguishes an omitted
 	// legacy request from explicitly invalid values such as null, an empty string,
 	// or a non-string. NoTools
 	// remains a backwards-compatible alias; an explicit ToolMode always wins.
 	ToolMode json.RawMessage `json:"tool_mode"`
 	NoTools  bool            `json:"no_tools"`
-	// OfficialToolNames selects a subset of the resolved model's admin-defined
-	// official tools. It is honored only with tool_mode="official".
-	OfficialToolNames []string `json:"official_tool_names"`
 	// SelectedUserSkillIDs applies up to five private, user-owned Agent Skills to
 	// this turn. The handler resolves ownership before opening SSE; the
 	// orchestrator re-validates and persists the normalized ids.
@@ -414,13 +411,13 @@ func (watcher *generationStopWatcher) close() {
 
 func validTurnToolMode(mode string) bool {
 	switch mode {
-	case llm.ToolModeAuto, llm.ToolModeDisabled, llm.ToolModeEnabled, llm.ToolModeOfficial:
+	case llm.ToolModeAuto, llm.ToolModeDisabled, llm.ToolModeEnabled:
 		return true
 	}
 	return false
 }
 
-// resolveTurnToolMode maps the legacy no_tools boolean onto the four-state
+// resolveTurnToolMode maps the legacy no_tools boolean onto the three-state
 // protocol. An omitted/false legacy flag means enabled so old clients retain
 // their previous behavior; new clients send tool_mode explicitly (normally
 // auto). Invalid explicit values are rejected instead of silently changing how
@@ -433,8 +430,17 @@ func resolveTurnToolMode(explicit json.RawMessage, legacyNoTools bool) (string, 
 		return llm.ToolModeEnabled, nil
 	}
 	var mode string
-	if err := json.Unmarshal(explicit, &mode); err != nil || !validTurnToolMode(mode) {
-		return "", errors.New("tool_mode must be one of: auto, disabled, enabled, official")
+	if err := json.Unmarshal(explicit, &mode); err != nil {
+		return "", errors.New("tool_mode must be one of: auto, disabled, enabled")
+	}
+	// Rolling-upgrade compatibility: the retired user-selectable hosted-only mode
+	// now means the unified enabled collection. Any accompanying legacy selection
+	// field is ignored by JSON decoding.
+	if mode == llm.ToolModeOfficial {
+		return llm.ToolModeEnabled, nil
+	}
+	if !validTurnToolMode(mode) {
+		return "", errors.New("tool_mode must be one of: auto, disabled, enabled")
 	}
 	return mode, nil
 }
@@ -541,7 +547,6 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		req.Mode = ""
 		req.Verify = false
 		toolMode = llm.ToolModeEnabled
-		req.OfficialToolNames = nil
 		req.WebSearch = false
 	}
 	if req.Mode == "deep-research" && u.Role != "admin" && !userGroupHasFeature(r.Context(), d, u.GroupID, "research") {
@@ -683,7 +688,6 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		Mode:                 req.Mode,
 		Verify:               req.Verify,
 		ToolMode:             toolMode,
-		OfficialToolNames:    req.OfficialToolNames,
 		SelectedUserSkillIDs: req.SelectedUserSkillIDs,
 		ForceWebSearch:       req.WebSearch,
 		Fast:                 req.Fast,
@@ -841,18 +845,17 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
 	id := pathParam(r, "id")
 	var body struct {
-		AssistantID       string          `json:"assistant_id"`
-		GenerationID      string          `json:"generation_id"`
-		ModelID           string          `json:"model_id"`
-		Mode              string          `json:"mode"`
-		Verify            bool            `json:"verify"`
-		ToolMode          json.RawMessage `json:"tool_mode"`
-		NoTools           bool            `json:"no_tools"`
-		OfficialToolNames []string        `json:"official_tool_names"`
-		WebSearch         bool            `json:"web_search"`
-		Fast              bool            `json:"fast"` // §fast-mode: honour the CURRENT picker (regenerate follows the live toggle)
-		ParamOverrides    map[string]any  `json:"params"`
-		Locale            string          `json:"locale"`
+		AssistantID    string          `json:"assistant_id"`
+		GenerationID   string          `json:"generation_id"`
+		ModelID        string          `json:"model_id"`
+		Mode           string          `json:"mode"`
+		Verify         bool            `json:"verify"`
+		ToolMode       json.RawMessage `json:"tool_mode"`
+		NoTools        bool            `json:"no_tools"`
+		WebSearch      bool            `json:"web_search"`
+		Fast           bool            `json:"fast"` // §fast-mode: honour the CURRENT picker (regenerate follows the live toggle)
+		ParamOverrides map[string]any  `json:"params"`
+		Locale         string          `json:"locale"`
 	}
 	if err := decodeJSON(r, &body); err != nil {
 		writeError(w, 400, errInvalidInput)
@@ -877,7 +880,6 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		body.Mode = ""
 		body.Verify = false
 		toolMode = llm.ToolModeEnabled
-		body.OfficialToolNames = nil
 		body.WebSearch = false
 	}
 	// Keep regenerate aligned with the normal send path: users without the
@@ -1037,7 +1039,6 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		Mode:                     body.Mode,
 		Verify:                   body.Verify,
 		ToolMode:                 toolMode,
-		OfficialToolNames:        body.OfficialToolNames,
 		ForceWebSearch:           body.WebSearch,
 		Fast:                     body.Fast,
 		ParamOverrides:           body.ParamOverrides,

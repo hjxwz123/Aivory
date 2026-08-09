@@ -54,6 +54,8 @@ Most self-hosted AI frontends stop at forwarding messages to a model. Aivory com
 
 The orchestrator runs **up to 48 tool calls across 12 provider cycles in a single turn**. Tools chain freely: results from web searches, fetched pages, Python, and generated files become context for the next call without user handoffs. RAG is routed separately by the orchestrator and injected automatically when relevant.
 
+Auto tool mode first handles explicit URLs, data attachments, named files/skills, continuations, and small tool schemas locally. Ambiguous turns use the dedicated low-latency model selected under **Admin -> Model policy** with no conversation history or tool schemas; an unset, timed-out, or invalid router fails open and sends the administrator-configured tools to the chat model.
+
 ### Multi-step pipeline in one turn
 
 <p align="center">
@@ -63,7 +65,7 @@ The orchestrator runs **up to 48 tool calls across 12 provider cycles in a singl
 One prompt — *"Retrieve global GDP data for 2025 and generate a PowerPoint presentation"* — triggers the complete pipeline:
 
 1. `use_skill` → load the `document-generation` skill pack
-2. `web_search` → locate authoritative 2025 GDP sources (IMF / World Bank)
+2. `aivory_web_search` → locate authoritative 2025 GDP sources (IMF / World Bank)
 3. `web_fetch` → pull the numbers straight from the World Bank Open Data API
 4. `python_execute` → clean the data and compute regional shares & growth
 5. `python_execute` → render the charts and build a polished slide deck with python-pptx
@@ -79,9 +81,9 @@ The result is an 8-slide deck and supporting workbook, returned as download card
 The orchestrator loops through provider cycles until the model stops emitting tool calls or the per-turn budget is reached. Within each cycle, independent tool calls run in parallel; results are fed back as a batch. Files written to `/workspace/` in one call are immediately available to the next:
 
 ```
-web_search  ─┐
-web_search  ─┤→ python_execute (clean data) → web_fetch → python_execute (build .pptx)
-             └─ (results merged as one batch)
+aivory_web_search  ─┐
+aivory_web_search  ─┤→ python_execute (clean data) → web_fetch → python_execute (build .pptx)
+                    └─ (results merged as one batch)
 ```
 
 The sandbox keeps the same filesystem session across calls and conversation turns, so later work can reuse earlier data and artifacts.
@@ -106,7 +108,7 @@ HTML code blocks open a **live preview panel** alongside the chat as the assista
 
 | Tool | What it does |
 |------|--------------|
-| `web_search` | Full-text web search via SearXNG (self-hosted) or Serper / Brave |
+| `aivory_web_search` | Full-text web search through Aivory via SearXNG (self-hosted) or Serper / Brave |
 | `web_fetch` | Fetch and extract a URL — respects robots.txt |
 | `python_execute` | Run Python in the persistent sandbox; full stdlib, packages, real file I/O |
 | `image_generate` | Call a configured image model and save the result as an artifact |
@@ -117,7 +119,7 @@ Default per-turn ceiling:
 
 | Tool | Calls |
 |------|------:|
-| `web_search` | 16 |
+| `aivory_web_search` | 16 |
 | `web_fetch` | 12 |
 | `image_generate` | 8 |
 | `python_execute` | 16 |
@@ -261,7 +263,7 @@ graph TB
         API["Go API — REST + SSE<br/>JWT auth · per-request HMAC signing · rate limits"]
         subgraph ORCH["Orchestrator"]
             PROV["Provider registry<br/>Anthropic · OpenAI · Gemini · Mock<br/>(any OpenAI-compatible endpoint)"]
-            TOOLS["Tool layer — ≤48 calls / turn<br/>web_search · web_fetch · python_execute<br/>image_generate · save_memory · use_skill"]
+            TOOLS["Tool layer — ≤48 calls / turn<br/>aivory_web_search · web_fetch · python_execute<br/>image_generate · save_memory · use_skill"]
             TASK["Task LLM<br/>title · RAG router · compaction · verify · moderation"]
             RAGP["RAG pipeline<br/>parse → chunk → embed → route → retrieve"]
             MEMW["Memory worker<br/>async per-turn extraction"]

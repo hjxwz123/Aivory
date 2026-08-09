@@ -524,8 +524,8 @@ func Migrate(db *sql.DB) error {
 	if err := migrateOfficialToolDefinitions(db); err != nil {
 		return fmt.Errorf("migrate official tool definitions: %w", err)
 	}
-	if err := migrateRetiredKnowledgeBaseSearchTool(db); err != nil {
-		return fmt.Errorf("remove retired knowledge-base search tool: %w", err)
+	if err := migrateBuiltinToolPolicies(db); err != nil {
+		return fmt.Errorf("migrate builtin tool policies: %w", err)
 	}
 	// One-time backfill: accounts that exist only because of an OAuth login were
 	// created with a random password they never chose, so mark them as
@@ -881,6 +881,7 @@ func Seed(db *sql.DB, cfg config.Config) error {
 	for k, v := range map[string]string{
 		"default_model_id":      `""`,
 		"task_model_id":         `""`,
+		"tool_route_model_id":   `""`,
 		"image_prompt_model_id": `""`,
 		"verify_model_id":       `""`,
 		// §4.11-B RAG injection knobs (admin → Documents). A conversation doc at/below

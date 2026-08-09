@@ -42,7 +42,7 @@ type Attachment struct {
 	URL        string `json:"url"`
 }
 
-// Citation is the cross-source citation type used by web_search and RAG.
+// Citation is the cross-source citation type used by web search tools and RAG.
 type Citation struct {
 	ID      string `json:"id"`
 	Index   int    `json:"index"`
@@ -76,16 +76,19 @@ type UnifiedChatRequest struct {
 	History      []UnifiedMessage
 	Model        ModelInfo
 	Tools        []ToolDef
-	// OfficialToolNames is the model-allowed subset explicitly selected for this
-	// turn. OfficialToolRequests holds the matching admin-defined request
-	// fragments in model configuration order. Providers merge those fragments
-	// into their native request body; they never execute the system's local tools.
+	// OfficialToolNames and OfficialToolRequests are the complete administrator-
+	// configured provider-hosted tool set for the resolved model, in configuration
+	// order. The historical field names are retained internally to match the stored
+	// `official_tools` column; users cannot select or reorder this collection.
 	OfficialToolNames    []string
 	OfficialToolRequests []json.RawMessage
-	// ToolModeOfficial is true only when at least one selected definition survives
-	// model filtering. An empty effective selection enters the unified no-tools
-	// pipeline before a provider request is built.
-	ToolModeOfficial bool
+	// ToolsEnabled records the resolved turn policy independently of whether the
+	// primary model happens to configure any tools. TTFT fallback uses it to rebuild
+	// the fallback model's complete administrator-configured tool collection.
+	ToolsEnabled bool
+	// Fast preserves the fixed fast-mode safety restrictions when rebuilding a
+	// request for a TTFT fallback model.
+	Fast bool
 	// ToolModePrompt is true when §4.13 prompt-injection mode is on.
 	ToolModePrompt bool
 	ProjectFiles   []ProjectFileSummary

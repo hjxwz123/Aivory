@@ -35,3 +35,14 @@ Precise, capable, and calm. The product should feel trustworthy under heavy use,
 ## Accessibility & Inclusion
 
 Target WCAG 2.1 AA contrast and keyboard operability across the product. Respect reduced-motion preferences, maintain visible focus states, avoid color-only status communication, support light and dark themes, and keep all user-facing workflows available in the product's five supported languages.
+
+
+  SELECT
+    seq,
+    chunk_type,
+    left(content, 800) AS excerpt
+  FROM chunks
+  WHERE document_id = 'doc_6a6e67ce9175'
+    AND chunk_type <> 'parent'
+    AND content LIKE '%例题4%'
+  ORDER BY seq;

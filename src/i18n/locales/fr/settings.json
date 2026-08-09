@@ -59,12 +59,8 @@
         "body": "Répond directement sans mettre d’outils à la disposition du modèle de réponse."
       },
       "enabled": {
-        "label": "Intégrés",
-        "body": "Utilise les appels d’outils intégrés."
-      },
-      "official": {
-        "label": "Officiels",
-        "body": "Utilise uniquement les outils natifs du fournisseur sélectionnés pour le modèle par défaut."
+        "label": "Activés",
+        "body": "Utilise les outils configurés par l’administrateur pour ce modèle."
       }
     },
     "memoryTitle": "Mémoire",

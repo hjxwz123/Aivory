@@ -17,7 +17,7 @@ func TestReplaceAssistantReplyTextPreservesNonAnswerBlocks(t *testing.T) {
 	raw := json.RawMessage(`[
 		{"kind":"thinking","text":"private reasoning"},
 		{"kind":"text","text":"I will check."},
-		{"kind":"tool_call","tool_name":"web_search","tool_id":"t1","summary":"result"},
+		{"kind":"tool_call","tool_name":"aivory_web_search","tool_id":"t1","summary":"result"},
 		{"kind":"artifact","file_ref":"a1","title":"report.pdf"},
 		{"kind":"text","text":"old "},
 		{"kind":"text","text":"answer"}
@@ -68,7 +68,7 @@ func TestEditMessageHandlerAllowsWorkspaceAssistantButProtectsUserAuthorship(t *
 	}
 	answer, err := store.CreateMessage(t.Context(), db, store.Message{
 		ID: "edit-answer", ConversationID: conversation.ID, ParentID: question.ID, Role: "assistant",
-		Blocks: json.RawMessage(`[{"kind":"tool_call","tool_name":"web_search","tool_id":"t1","summary":"kept"},{"kind":"text","text":"old answer"}]`),
+		Blocks: json.RawMessage(`[{"kind":"tool_call","tool_name":"aivory_web_search","tool_id":"t1","summary":"kept"},{"kind":"text","text":"old answer"}]`),
 		Raw:    json.RawMessage(`[{"role":"assistant","content":"old answer"}]`),
 	})
 	if err != nil {
