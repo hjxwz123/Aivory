@@ -585,6 +585,35 @@ func TestNativeHistoryCompatibilityAcrossTTFTFallback(t *testing.T) {
 	}
 }
 
+func TestNativeHistoryModelCompatibility(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		primary, fallback string
+		want              bool
+	}{
+		{name: "same model", primary: "model-a", fallback: "model-a", want: true},
+		{name: "different models", primary: "model-a", fallback: "model-b", want: false},
+		{name: "missing primary", fallback: "model-b", want: false},
+		{name: "missing fallback", primary: "model-a", want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := nativeHistoryModelCompatible(tc.primary, tc.fallback); got != tc.want {
+				t.Fatalf("nativeHistoryModelCompatible(%q, %q) = %v, want %v", tc.primary, tc.fallback, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestNativeRawForPersistedModelDropsTTFTFallbackExchange(t *testing.T) {
+	raw := json.RawMessage(`[{"type":"reasoning","encrypted_content":"secret"}]`)
+	if got := nativeRawForPersistedModel(raw, ""); string(got) != string(raw) {
+		t.Fatalf("primary-model raw = %s, want %s", got, raw)
+	}
+	if got := nativeRawForPersistedModel(raw, "Fallback model"); len(got) != 0 {
+		t.Fatalf("TTFT fallback raw was retained: %s", got)
+	}
+}
+
 func TestBuildFallbackRequestDropsIncompatibleNativeRaw(t *testing.T) {
 	orchestrator, _, model, _, _, db := setupToolRouteTest(t)
 	responsesChannel, err := store.CreateChannel(context.Background(), db, "Responses fallback", "openai", "responses", "https://example.invalid", "key")
@@ -615,6 +644,37 @@ func TestBuildFallbackRequestDropsIncompatibleNativeRaw(t *testing.T) {
 	}
 	if got.History[0].Blocks[0].Text != "canonical" {
 		t.Fatalf("fallback lost canonical history while dropping Raw: %+v", got.History[0].Blocks)
+	}
+}
+
+func TestBuildFallbackRequestDropsNativeRawWhenModelChangesOnSameResponsesChannel(t *testing.T) {
+	orchestrator, _, primary, _, _, db := setupToolRouteTest(t)
+	responsesChannel, err := store.CreateChannel(context.Background(), db, "Responses same-channel fallback", "openai", "responses", "https://example.invalid", "key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fallback, err := store.CreateModel(context.Background(), db, store.Model{
+		ChannelID: responsesChannel.ID, Kind: "chat", RequestID: "responses-fallback-model", Label: "Responses fallback model",
+		Enabled: true, Stream: true, ToolMode: "native",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := json.RawMessage(`[{"type":"reasoning","encrypted_content":"model-a-secret"},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"native"}]}]`)
+	base := UnifiedChatRequest{
+		Model:   ModelInfo{ID: primary.ID, Provider: "openai", APIFormat: "responses"},
+		History: []UnifiedMessage{{Role: "assistant", Blocks: []UnifiedBlock{{Kind: "text", Text: "canonical"}}, Raw: raw}},
+	}
+
+	got, _, _, err := orchestrator.buildFallbackRequest(context.Background(), base, fallback.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.History) != 1 || len(got.History[0].Raw) != 0 {
+		t.Fatalf("same-channel model switch replayed encrypted native raw: %+v", got.History)
+	}
+	if got.History[0].Blocks[0].Text != "canonical" {
+		t.Fatalf("canonical history was lost: %+v", got.History[0].Blocks)
 	}
 }
 

@@ -693,7 +693,12 @@ func (o *Orchestrator) buildFallbackRequest(ctx context.Context, base UnifiedCha
 	// different provider (or OpenAI Chat vs Responses). Do not let a fallback
 	// provider attempt to decode another vendor's exchange; the canonical blocks
 	// below remain usable and preserve the visible conversation/tool trace.
-	if !nativeHistoryCompatible(base.Model, ch.Type, ch.APIFormat) {
+	// Responses encrypted reasoning is bound to the model that produced it, not
+	// merely to the provider/channel and wire format. A TTFT fallback can use a
+	// different model on the same OpenAI Responses channel, so its history must
+	// also pass the model-identity gate below.
+	if !nativeHistoryCompatible(base.Model, ch.Type, ch.APIFormat) ||
+		!nativeHistoryModelCompatible(base.Model.ID, m.ID) {
 		for index := range req.History {
 			req.History[index].Raw = nil
 		}
@@ -774,6 +779,29 @@ func nativeHistoryCompatible(primary ModelInfo, fallbackProvider, fallbackFormat
 	}
 	return normalizeNativeAPIFormat(primaryProvider, primary.APIFormat) ==
 		normalizeNativeAPIFormat(resolvedFallbackProvider, fallbackFormat)
+}
+
+// nativeHistoryModelCompatible reports whether provider-native history may be
+// replayed between two model records. Native exchanges are model-scoped even
+// when provider and API format match: OpenAI Responses reasoning items carry
+// encrypted_content that a different model cannot decrypt. Missing identity is
+// fail-closed because replaying an un-attributed encrypted exchange is unsafe.
+func nativeHistoryModelCompatible(primaryModelID, fallbackModelID string) bool {
+	primaryModelID = strings.TrimSpace(primaryModelID)
+	fallbackModelID = strings.TrimSpace(fallbackModelID)
+	return primaryModelID != "" && fallbackModelID != "" && primaryModelID == fallbackModelID
+}
+
+// nativeRawForPersistedModel keeps a provider-native exchange only when the
+// message row identifies the model that actually produced it. TTFT fallback
+// replies are intentionally billed/stored under the primary model, so their Raw
+// cannot be safely attributed or replayed on a later turn. Canonical blocks
+// remain persisted and preserve the visible answer/tool trace.
+func nativeRawForPersistedModel(raw json.RawMessage, ttftFallbackModel string) json.RawMessage {
+	if strings.TrimSpace(ttftFallbackModel) != "" {
+		return nil
+	}
+	return raw
 }
 
 func normalizeNativeAPIFormat(provider, format string) string {
@@ -1915,7 +1943,11 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// declares either tool. Fall back to canonical blocks for every provider, then
 	// remove the prohibited code-tool blocks below.
 	nativeToolReplay := shouldReplayNativeToolHistory(fastMode, toolMode, len(toolDefs), useHostedTools)
-	uHist := storeToUnified(keep, channel.Type, nativeToolReplay)
+	// Raw provider exchanges are replayable only for the model that produced
+	// them. In particular, OpenAI Responses encrypted reasoning cannot be sent
+	// to a different model on the same channel; storeToUnified drops those Raw
+	// values while retaining canonical text/tool blocks for the new model.
+	uHist := storeToUnified(keep, channel.Type, model.ID, nativeToolReplay)
 	uHist = stripRetiredKnowledgeSearchToolBlocks(uHist)
 	uHist = stripDisallowedBuiltinToolBlocks(
 		uHist,
@@ -2467,7 +2499,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		if result != nil {
 			errCites = append(errCites, result.Citations...)
 			errUsage = result.Usage
-			errRaw = result.Raw
+			errRaw = nativeRawForPersistedModel(result.Raw, ttftFallbackModel)
 		}
 		for i := range errCites {
 			errCites[i].Index = i + 1
@@ -2556,7 +2588,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// drop raw, avoiding a second near-duplicate copy of the answer in the DB.
 	// Conservative gate: keep raw if ANY block is not plain text/thinking
 	// (tool_call / artifact / research / image / …), so no tool turn ever loses it.
-	rawToStore := result.Raw
+	rawToStore := nativeRawForPersistedModel(result.Raw, ttftFallbackModel)
 	turnUsedTools := false
 	for _, b := range result.Blocks {
 		if b.Kind != "text" && b.Kind != "thinking" {
@@ -3043,29 +3075,31 @@ func (o *Orchestrator) optimizeImagePrompt(ctx context.Context, userID, convID, 
 
 // storeToUnified converts stored messages to the unified history shape.
 //
-// §2.3-C/D: when an assistant message was produced by the SAME provider we
-// attach its raw native exchange (providers replay it verbatim for full
-// fidelity). When it came from a DIFFERENT vendor, the tool process is
-// downgraded — block renderers compress each tool round into a one-line
-// summary and thinking blocks are dropped (handled by renderBlocksAsText).
-func storeToUnified(msgs []store.Message, currentProvider string, nativeToolReplay bool) []UnifiedMessage {
+// §2.3-C/D: when an assistant message was produced by the SAME provider and
+// model we attach its raw native exchange (providers replay it verbatim for full
+// fidelity). A different/unknown model or provider is downgraded to canonical
+// blocks: tool rounds become one-line summaries and thinking blocks are dropped
+// by renderBlocksAsText.
+func storeToUnified(msgs []store.Message, currentProvider, currentModelID string, nativeToolReplay bool) []UnifiedMessage {
+	currentModelID = strings.TrimSpace(currentModelID)
 	// §4.13-B / §2.3-C: raw replay re-sends the provider-native exchange
-	// verbatim — including tool_use / tool_result / functionCall blocks. A
-	// request that declares NO native tools (per-turn disable-tools, tool_mode
-	// none or prompt, every tool disabled for the model) must not splice those
-	// in: providers reject tool blocks when the request has no tools param.
-	// Blank Raw up front — on a defensive copy, the caller's slice is shared —
-	// so both the empty-turn dropper below and the replay gate see the
-	// block-derived view; prior tool rounds degrade to their text trace via
-	// renderBlocksAsText ("[已执行 …]").
-	if !nativeToolReplay {
-		cp := make([]store.Message, len(msgs))
-		copy(cp, msgs)
-		for i := range cp {
+	// verbatim — including encrypted reasoning, tool_use / tool_result, and
+	// functionCall blocks. Filter Raw up front on a defensive copy so the empty-
+	// turn dropper below sees the exact block-derived view the provider will see.
+	// This handles both no-native-tools turns and provider/model switches; prior
+	// tool rounds degrade to their readable text trace via renderBlocksAsText.
+	cp := make([]store.Message, len(msgs))
+	copy(cp, msgs)
+	for i := range cp {
+		sameNativeModel := cp[i].Role == "assistant" &&
+			cp[i].Provider == currentProvider &&
+			currentModelID != "" &&
+			strings.TrimSpace(cp[i].ModelID) == currentModelID
+		if !nativeToolReplay || !sameNativeModel {
 			cp[i].Raw = nil
 		}
-		msgs = cp
 	}
+	msgs = cp
 	// §workspaces concurrent turns: a shared conversation is one linear thread, so
 	// when B asks while A's answer is still generating, B's question chains directly
 	// under A's assistant PLACEHOLDER (status="streaming", empty blocks — streamed
@@ -3098,7 +3132,7 @@ func storeToUnified(msgs []store.Message, currentProvider string, nativeToolRepl
 			_ = json.Unmarshal(m.Attachments, &atts)
 			um.Attachments = atts
 		}
-		if m.Role == "assistant" && m.Provider == currentProvider && len(m.Raw) > 2 {
+		if m.Role == "assistant" && len(m.Raw) > 2 {
 			um.Raw = m.Raw
 		}
 		out = append(out, um)
