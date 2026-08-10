@@ -371,12 +371,12 @@ func TestStoreToUnifiedStripsRawWithoutNativeTools(t *testing.T) {
 	raw := json.RawMessage(`[{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"aivory_web_search","input":{"query":"q"}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"result"}]},{"role":"assistant","content":[{"type":"text","text":"answer"}]}]`)
 	msgs := []store.Message{
 		{Role: "user", Blocks: json.RawMessage(`[{"kind":"text","text":"question"}]`), Status: "complete"},
-		{Role: "assistant", Provider: "anthropic", Raw: raw, Status: "complete",
+		{Role: "assistant", Provider: "anthropic", ModelID: "model-a", Raw: raw, Status: "complete",
 			Blocks: json.RawMessage(`[{"kind":"tool_call","tool_name":"aivory_web_search","summary":"searched the web"},{"kind":"text","text":"answer"}]`)},
 	}
 
 	// Native tools declared → raw replays verbatim (unchanged behavior).
-	with := storeToUnified(msgs, "anthropic", true)
+	with := storeToUnified(msgs, "anthropic", "model-a", true)
 	if len(with) != 2 || len(with[1].Raw) == 0 {
 		t.Fatalf("native-tool turn must keep raw replay: %+v", with)
 	}
@@ -386,7 +386,7 @@ func TestStoreToUnifiedStripsRawWithoutNativeTools(t *testing.T) {
 
 	// No native tools → raw stripped, wire history has NO tool blocks, and the
 	// tool round survives as readable text.
-	without := storeToUnified(msgs, "anthropic", false)
+	without := storeToUnified(msgs, "anthropic", "", false)
 	if len(without) != 2 {
 		t.Fatalf("stripped history lost a turn: %+v", without)
 	}

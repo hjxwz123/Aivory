@@ -24,7 +24,7 @@ func TestStoreToUnifiedDropsInflightPair(t *testing.T) {
 		{Role: "assistant", Blocks: json.RawMessage("[]"), Status: "streaming"},
 		{Role: "user", Blocks: textBlocks("B's question"), Status: "complete"},
 	}
-	out := storeToUnified(msgs, "anthropic", true)
+	out := storeToUnified(msgs, "anthropic", "", true)
 
 	wantRoles := []string{"user", "assistant", "user"}
 	if len(out) != len(wantRoles) {
@@ -54,7 +54,7 @@ func TestStoreToUnifiedDropsEmptyCompletedPair(t *testing.T) {
 		{Role: "user", Blocks: textBlocks("orphaned"), Status: "complete"},
 		{Role: "assistant", Blocks: json.RawMessage("[]"), Status: "complete"},
 	}
-	out := storeToUnified(msgs, "anthropic", true)
+	out := storeToUnified(msgs, "anthropic", "", true)
 	if len(out) != 2 {
 		t.Fatalf("want 2 messages, got %d", len(out))
 	}
@@ -70,8 +70,55 @@ func TestStoreToUnifiedKeepsCompleteHistory(t *testing.T) {
 		{Role: "assistant", Blocks: textBlocks("A1"), Status: "complete"},
 		{Role: "user", Blocks: textBlocks("Q2"), Status: "complete"},
 	}
-	if out := storeToUnified(msgs, "anthropic", true); len(out) != 3 {
+	if out := storeToUnified(msgs, "anthropic", "", true); len(out) != 3 {
 		t.Fatalf("want 3 messages, got %d", len(out))
+	}
+}
+
+func TestStoreToUnifiedDropsNativeRawFromDifferentModel(t *testing.T) {
+	raw := json.RawMessage(`[{"type":"reasoning","encrypted_content":"model-a-secret"},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"answer"}]}]`)
+	msgs := []store.Message{
+		{Role: "user", Blocks: textBlocks("question"), Status: "complete"},
+		{Role: "assistant", Provider: "openai", ModelID: "model-a", Raw: raw, Blocks: textBlocks("answer"), Status: "complete"},
+	}
+
+	sameModel := storeToUnified(msgs, "openai", "model-a", true)
+	if len(sameModel) != 2 || len(sameModel[1].Raw) == 0 {
+		t.Fatalf("same-model native history was dropped: %+v", sameModel)
+	}
+
+	switchedModel := storeToUnified(msgs, "openai", "model-b", true)
+	if len(switchedModel) != 2 || len(switchedModel[1].Raw) != 0 {
+		t.Fatalf("different-model native history was replayed: %+v", switchedModel)
+	}
+	if got := renderBlocksAsText(switchedModel[1].Blocks); got != "answer" {
+		t.Fatalf("canonical answer was not retained after model switch: %q", got)
+	}
+	if len(msgs[1].Raw) == 0 {
+		t.Fatal("storeToUnified mutated stored raw history")
+	}
+
+	legacy := append([]store.Message(nil), msgs...)
+	legacy[1].ModelID = ""
+	legacyHistory := storeToUnified(legacy, "openai", "model-b", true)
+	if len(legacyHistory) != 2 || len(legacyHistory[1].Raw) != 0 {
+		t.Fatalf("unattributed legacy native history was replayed: %+v", legacyHistory)
+	}
+}
+
+func TestStoreToUnifiedDropsTurnThatBecomesEmptyAfterModelSwitch(t *testing.T) {
+	raw := json.RawMessage(`[{"type":"reasoning","encrypted_content":"model-a-secret"}]`)
+	thinkingOnly, _ := json.Marshal([]UnifiedBlock{{Kind: "thinking", Text: "hidden"}})
+	msgs := []store.Message{
+		{Role: "user", Blocks: textBlocks("earlier question"), Status: "complete"},
+		{Role: "assistant", Blocks: textBlocks("earlier answer"), Status: "complete"},
+		{Role: "user", Blocks: textBlocks("reason about this"), Status: "complete"},
+		{Role: "assistant", Provider: "openai", ModelID: "model-a", Raw: raw, Blocks: thinkingOnly, Status: "complete"},
+	}
+
+	history := storeToUnified(msgs, "openai", "model-b", true)
+	if len(history) != 2 || renderBlocksAsText(history[1].Blocks) != "earlier answer" {
+		t.Fatalf("model switch retained an empty assistant turn: %+v", history)
 	}
 }
 
@@ -84,7 +131,7 @@ func TestStoreToUnifiedKeepsImageOnlyAssistant(t *testing.T) {
 		{Role: "assistant", Blocks: img, Status: "complete"},
 		{Role: "user", Blocks: textBlocks("now a dog"), Status: "complete"},
 	}
-	if out := storeToUnified(msgs, "anthropic", true); len(out) != 3 {
+	if out := storeToUnified(msgs, "anthropic", "", true); len(out) != 3 {
 		t.Fatalf("image-only assistant was dropped; want 3, got %d", len(out))
 	}
 }
