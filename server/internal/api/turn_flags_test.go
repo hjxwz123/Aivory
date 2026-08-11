@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 
 	"aivory/server/internal/llm"
@@ -33,6 +34,46 @@ func TestNormalizeTurnFlags(t *testing.T) {
 			if gotMode != c.wantMode || gotWeb != c.wantWebSearch {
 				t.Fatalf("normalizeTurnFlags(%q,%q,%v) = (%q,%v), want (%q,%v)",
 					c.mode, c.toolMode, c.webSearch, gotMode, gotWeb, c.wantMode, c.wantWebSearch)
+			}
+		})
+	}
+}
+
+func TestParseSelectedToolIDsOmittedEmptyAndValidation(t *testing.T) {
+	tests := []struct {
+		name           string
+		raw            json.RawMessage
+		wantIDs        []string
+		wantConfigured bool
+		wantErr        bool
+	}{
+		{name: "omitted means all", raw: nil, wantConfigured: false},
+		{name: "explicit empty means none", raw: json.RawMessage(`[]`), wantConfigured: true},
+		{
+			name: "normalizes whitespace and duplicates",
+			raw:  json.RawMessage(`[" builtin:aivory_web_search ","mcp:rail","mcp:rail","hosted:web_search"]`),
+			wantIDs: []string{
+				"builtin:aivory_web_search", "mcp:rail", "hosted:web_search",
+			},
+			wantConfigured: true,
+		},
+		{name: "null is not omission", raw: json.RawMessage(`null`), wantConfigured: true, wantErr: true},
+		{name: "object is invalid", raw: json.RawMessage(`{}`), wantConfigured: true, wantErr: true},
+		{name: "unknown namespace is invalid", raw: json.RawMessage(`["plugin:test"]`), wantConfigured: true, wantErr: true},
+		{name: "missing key is invalid", raw: json.RawMessage(`["mcp:"]`), wantConfigured: true, wantErr: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			gotIDs, gotConfigured, err := parseSelectedToolIDs(test.raw)
+			if (err != nil) != test.wantErr {
+				t.Fatalf("error=%v, wantErr=%v", err, test.wantErr)
+			}
+			if gotConfigured != test.wantConfigured {
+				t.Fatalf("configured=%v, want=%v", gotConfigured, test.wantConfigured)
+			}
+			if !test.wantErr && !reflect.DeepEqual(gotIDs, test.wantIDs) {
+				t.Fatalf("ids=%v, want=%v", gotIDs, test.wantIDs)
 			}
 		})
 	}

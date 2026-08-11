@@ -17,6 +17,10 @@ import { toast as _sseToast } from '@/hooks/use-toast'
 import { getDeviceId } from '@/lib/device-id'
 import { blockReload } from '@/lib/sync-guards'
 import { hmacSha256 } from '@/lib/hmac-sha256'
+import {
+  withRequestActivity,
+  type RequestActivityMode,
+} from '@/lib/request-activity'
 
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? '/api'
@@ -111,6 +115,8 @@ interface ApiOptions {
   signal?: AbortSignal
   /** Override headers. */
   headers?: Record<string, string>
+  /** Background polling stays out of the administrator's foreground status. */
+  activity?: RequestActivityMode
 }
 
 export interface UploadProgress {
@@ -124,18 +130,20 @@ interface UploadOptions {
   signal?: AbortSignal
   headers?: Record<string, string>
   onProgress?: (progress: UploadProgress) => void
+  /** Background polling stays out of the administrator's foreground status. */
+  activity?: RequestActivityMode
 }
 
 /** Core fetch wrapper. */
 export async function api<T = unknown>(path: string, opts: ApiOptions = {}): Promise<T> {
-  return apiRequest<T>(path, opts, false)
+  return withRequestActivity(() => apiRequest<T>(path, opts, false), opts.activity)
 }
 
 /** Multipart upload wrapper with browser upload progress. `fetch()` still does
  * not expose upload progress events, so file uploads use XHR while keeping the
  * same credentials, bearer token and request-signature behavior as api(). */
 export async function apiUpload<T = unknown>(path: string, body: FormData, opts: UploadOptions = {}): Promise<T> {
-  return apiUploadRequest<T>(path, body, opts, false)
+  return withRequestActivity(() => apiUploadRequest<T>(path, body, opts, false), opts.activity)
 }
 
 // isAuthPath: the auth endpoints (login / refresh / register / logout) must NEVER

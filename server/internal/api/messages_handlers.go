@@ -107,6 +107,9 @@ type postMessageReq struct {
 	// this turn. The handler resolves ownership before opening SSE; the
 	// orchestrator re-validates and persists the normalized ids.
 	SelectedUserSkillIDs []string `json:"selected_user_skill_ids"`
+	// SelectedToolIDs is omitted for the backwards-compatible all-tools policy;
+	// an explicit [] is a real deny-all candidate subset.
+	SelectedToolIDs json.RawMessage `json:"selected_tool_ids"`
 	// WebSearch forces a server-side non-tool web search and is only meaningful
 	// when tools are explicitly disabled.
 	WebSearch bool `json:"web_search"`
@@ -445,6 +448,37 @@ func resolveTurnToolMode(explicit json.RawMessage, legacyNoTools bool) (string, 
 	return mode, nil
 }
 
+func parseSelectedToolIDs(raw json.RawMessage) (ids []string, configured bool, err error) {
+	if len(raw) == 0 {
+		return nil, false, nil
+	}
+	var values []string
+	if unmarshalErr := json.Unmarshal(raw, &values); unmarshalErr != nil || values == nil {
+		return nil, true, errors.New("selected_tool_ids must be an array of tool ids")
+	}
+	if len(values) > 256 {
+		return nil, true, errors.New("selected_tool_ids contains too many items")
+	}
+	seen := make(map[string]bool, len(values))
+	for _, value := range values {
+		id := strings.TrimSpace(value)
+		separator := strings.IndexByte(id, ':')
+		if len(id) > 160 || separator <= 0 || separator == len(id)-1 {
+			return nil, true, errors.New("selected_tool_ids contains an invalid tool id")
+		}
+		switch id[:separator] {
+		case "builtin", "hosted", "mcp":
+		default:
+			return nil, true, errors.New("selected_tool_ids contains an invalid tool id")
+		}
+		if !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+	return ids, true, nil
+}
+
 // normalizeTurnFlags enforces feature mutual exclusion server-side. Deep
 // Research always needs tools; forced web search is the explicit-disabled
 // fallback and cannot be combined with auto/enabled policies.
@@ -535,6 +569,11 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	toolMode, err := resolveTurnToolMode(req.ToolMode, req.NoTools)
 	if err != nil {
 		writeError(w, 400, err)
+		return
+	}
+	selectedToolIDs, selectedToolsConfigured, err := parseSelectedToolIDs(req.SelectedToolIDs)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
 		return
 	}
 	// Deep Research is a per-group capability (§ user groups). If the user's
@@ -678,22 +717,24 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, err = d.Orchestrator.Run(ctx, llm.RunRequest{
-		UserID:               u.ID,
-		ConversationID:       id,
-		ModelID:              req.ModelID,
-		UserText:             req.Text,
-		Attachments:          req.Attachments,
-		ParentID:             req.ParentID,
-		Branch:               req.Branch,
-		Mode:                 req.Mode,
-		Verify:               req.Verify,
-		ToolMode:             toolMode,
-		SelectedUserSkillIDs: req.SelectedUserSkillIDs,
-		ForceWebSearch:       req.WebSearch,
-		Fast:                 req.Fast,
-		ParamOverrides:       req.ParamOverrides,
-		ImageStyleID:         req.ImageStyleID,
-		Locale:               req.Locale,
+		UserID:                  u.ID,
+		ConversationID:          id,
+		ModelID:                 req.ModelID,
+		UserText:                req.Text,
+		Attachments:             req.Attachments,
+		ParentID:                req.ParentID,
+		Branch:                  req.Branch,
+		Mode:                    req.Mode,
+		Verify:                  req.Verify,
+		ToolMode:                toolMode,
+		SelectedUserSkillIDs:    req.SelectedUserSkillIDs,
+		SelectedToolIDs:         selectedToolIDs,
+		SelectedToolsConfigured: selectedToolsConfigured,
+		ForceWebSearch:          req.WebSearch,
+		Fast:                    req.Fast,
+		ParamOverrides:          req.ParamOverrides,
+		ImageStyleID:            req.ImageStyleID,
+		Locale:                  req.Locale,
 	}, sendEvent)
 	if ctx.Err() != nil && !terminalSent {
 		sendEvent(llm.SseEvent{Type: "done", Message: "", MessageID: streamMessageID, StopReason: "stopped"})
@@ -845,17 +886,18 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
 	id := pathParam(r, "id")
 	var body struct {
-		AssistantID    string          `json:"assistant_id"`
-		GenerationID   string          `json:"generation_id"`
-		ModelID        string          `json:"model_id"`
-		Mode           string          `json:"mode"`
-		Verify         bool            `json:"verify"`
-		ToolMode       json.RawMessage `json:"tool_mode"`
-		NoTools        bool            `json:"no_tools"`
-		WebSearch      bool            `json:"web_search"`
-		Fast           bool            `json:"fast"` // §fast-mode: honour the CURRENT picker (regenerate follows the live toggle)
-		ParamOverrides map[string]any  `json:"params"`
-		Locale         string          `json:"locale"`
+		AssistantID     string          `json:"assistant_id"`
+		GenerationID    string          `json:"generation_id"`
+		ModelID         string          `json:"model_id"`
+		Mode            string          `json:"mode"`
+		Verify          bool            `json:"verify"`
+		ToolMode        json.RawMessage `json:"tool_mode"`
+		NoTools         bool            `json:"no_tools"`
+		WebSearch       bool            `json:"web_search"`
+		SelectedToolIDs json.RawMessage `json:"selected_tool_ids"`
+		Fast            bool            `json:"fast"` // §fast-mode: honour the CURRENT picker (regenerate follows the live toggle)
+		ParamOverrides  map[string]any  `json:"params"`
+		Locale          string          `json:"locale"`
 	}
 	if err := decodeJSON(r, &body); err != nil {
 		writeError(w, 400, errInvalidInput)
@@ -873,6 +915,11 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	toolMode, err := resolveTurnToolMode(body.ToolMode, body.NoTools)
 	if err != nil {
 		writeError(w, 400, err)
+		return
+	}
+	selectedToolIDs, selectedToolsConfigured, err := parseSelectedToolIDs(body.SelectedToolIDs)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
 		return
 	}
 	// §fast-mode overrides all other turn flags (see postMessageHandler).
@@ -1039,6 +1086,8 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		Mode:                     body.Mode,
 		Verify:                   body.Verify,
 		ToolMode:                 toolMode,
+		SelectedToolIDs:          selectedToolIDs,
+		SelectedToolsConfigured:  selectedToolsConfigured,
 		ForceWebSearch:           body.WebSearch,
 		Fast:                     body.Fast,
 		ParamOverrides:           body.ParamOverrides,

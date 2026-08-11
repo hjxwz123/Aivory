@@ -112,6 +112,28 @@
       "toolModeEnabledDesc": "ツール呼び出しをオンにします。",
       "webSearch": "ウェブ検索",
       "disable": "{{name}}をオフにする"
+    },
+    "toolSelection": {
+      "entry": "ツールを選択",
+      "entryDescription": "自動・オンモードで使えるツールを選択したものに限定します。",
+      "summaryAll": "すべて",
+      "summaryCount": "{{count}} 件選択",
+      "selectedChip": "{{count}} 件のツール",
+      "reset": "利用可能なすべてのツールを使用",
+      "title": "ツールを選択",
+      "description": "自動・オンモードでは、ここで選択したツールのみ使用します。",
+      "search": "ツールを検索",
+      "selectAll": "すべて選択",
+      "clear": "クリア",
+      "loading": "ツールを読み込み中",
+      "loadFailed": "ツールを読み込めませんでした。",
+      "retry": "再試行",
+      "noResults": "一致するツールはありません。",
+      "empty": "このモデルで利用できるツールはありません。",
+      "allSelected": "全 {{count}} 件のツールを選択中",
+      "selectedCount": "{{count}} 件のツールを選択中",
+      "cancel": "キャンセル",
+      "done": "完了"
     }
   },
   "imageConversationTitle": "画像の会話",
@@ -230,13 +252,23 @@
     "aivory_web_search": "Aivory ウェブ検索",
     "code_interpreter": "コードインタープリター",
     "image_generation": "画像生成",
+    "web_fetch": "ウェブページを読む",
+    "python_execute": "Python インタープリター",
+    "image_generate": "画像生成",
+    "use_skill": "スキルを使用",
+    "save_memory": "メモリに保存",
     "deep_research": "ディープリサーチ"
   },
   "toolDescriptions": {
     "web_search": "ウェブから最新情報を検索します",
     "aivory_web_search": "Aivory で設定されたバックエンドを使用してウェブを検索します",
     "code_interpreter": "コードを実行してファイルを分析します",
-    "image_generation": "画像を生成または編集します"
+    "image_generation": "画像を生成または編集します",
+    "web_fetch": "指定したウェブページの主要コンテンツを読み取ります",
+    "python_execute": "Python を実行して分析、計算、ファイル処理を行います",
+    "image_generate": "設定済みの画像モデルで画像を生成または編集します",
+    "use_skill": "利用可能なスキルの詳細な指示を読み込みます",
+    "save_memory": "今後の会話に役立つ情報を保存します"
   },
   "sources": {
     "label": "ソース",

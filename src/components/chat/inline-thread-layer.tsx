@@ -205,6 +205,7 @@ export function InlineThreadLayer({ conversationId, scrollRef }: InlineThreadLay
       verify: armed.verify,
       toolMode: armed.toolMode,
       webSearch: armed.webSearch,
+      selectedToolIds: armed.selectedToolIds,
     })
   }
 

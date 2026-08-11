@@ -1,6 +1,11 @@
 {
   "title": "Administration",
   "backToChat": "Retour au chat",
+  "activity": {
+    "loading": "Chargement…",
+    "navigating": "Ouverture de la page…",
+    "stillWaiting": "Le serveur met plus de temps à répondre. Toujours en attente…"
+  },
   "common": {
     "edit": "Modifier",
     "delete": "Supprimer",
@@ -584,7 +589,72 @@
     "lead": "Services externes appelés par l'assistant pendant une conversation.",
     "availabilityTitle": "Disponibilité globale des outils",
     "availabilityLead": "Un outil désactivé est retiré de tous les modèles, même de ceux qui l’autorisent explicitement.",
-    "availabilityEmpty": "Aucun outil de plateforme n’est enregistré."
+    "availabilityEmpty": "Aucun outil de plateforme n’est enregistré.",
+    "mcpAvailabilityTitle": "Disponibilité des outils MCP",
+    "mcpAvailabilityLead": "Choisissez les services MCP configurés que les utilisateurs et les modèles peuvent utiliser.",
+    "mcpAvailabilityEmpty": "Aucun service MCP n’est configuré.",
+    "mcpUnavailable": "La dernière tentative de connexion a échoué.",
+    "manageMCP": "Gérer MCP"
+  },
+  "mcp": {
+    "title": "Services MCP",
+    "lead": "Connectez des services Streamable HTTP et rendez leurs outils détectés disponibles dans les conversations.",
+    "new": "Nouveau service MCP",
+    "listLabel": "Services MCP",
+    "emptyTitle": "Aucun service MCP",
+    "emptyBody": "Ajoutez un endpoint Streamable HTTP, puis testez la connexion et synchronisez ses outils.",
+    "editorTitle": "Modifier le service MCP",
+    "newTitle": "Nouveau service MCP",
+    "editorDescriptionNew": "Enregistrez la connexion avant de la tester et d’en détecter les outils.",
+    "editorDescriptionEdit": "Modifiez la connexion. Laissez les valeurs masquées inchangées pour conserver les secrets enregistrés.",
+    "removeTitle": "Supprimer le service MCP ?",
+    "removeBody": "Supprime « {{name}} » et retire tous ses outils des prochaines conversations.",
+    "created": "Service MCP créé",
+    "updated": "Service MCP mis à jour",
+    "removed": "Service MCP supprimé",
+    "testSucceeded": "Connexion réussie",
+    "syncSucceeded": "Outils synchronisés",
+    "toolCount": "{{count}} détectés",
+    "lastSynced": "Dernière synchronisation : {{time}}",
+    "fields": {
+      "name": "Nom",
+      "namePlaceholder": "Recherche de trains 12306",
+      "icon": "Icône",
+      "description": "Description de l’outil",
+      "descriptionPlaceholder": "Rechercher les horaires, les gares et les places disponibles.",
+      "url": "URL Streamable HTTP",
+      "urlHint": "L’endpoint doit accepter les requêtes MCP JSON-RPC via Streamable HTTP.",
+      "headers": "En-têtes de requête",
+      "headersHint": "En-têtes facultatifs envoyés avec chaque requête MCP. Les secrets enregistrés peuvent être masqués.",
+      "noHeaders": "Aucun en-tête supplémentaire.",
+      "headerNameLabel": "Nom de l’en-tête {{index}}",
+      "headerValueLabel": "Valeur de l’en-tête {{index}}",
+      "headerNamePlaceholder": "Authorization",
+      "headerValuePlaceholder": "Bearer token",
+      "enabled": "Disponible pour les utilisateurs",
+      "enabledHint": "Activez le service après avoir testé la connexion et synchronisé ses outils."
+    },
+    "actions": {
+      "test": "Tester",
+      "sync": "Synchroniser",
+      "addHeader": "Ajouter un en-tête",
+      "removeHeader": "Supprimer l’en-tête {{index}}",
+      "showHeader": "Afficher la valeur",
+      "hideHeader": "Masquer la valeur"
+    },
+    "status": {
+      "connected": "Connecté",
+      "error": "Erreur de connexion",
+      "notTested": "Non testé",
+      "enabled": "Activé",
+      "disabled": "Désactivé"
+    },
+    "errors": {
+      "missingFields": "Le nom, l’icône, la description et l’URL sont obligatoires.",
+      "invalidUrl": "Saisissez une URL HTTP ou HTTPS valide.",
+      "invalidHeader": "Saisissez un nom d’en-tête HTTP valide.",
+      "duplicateHeader": "L’en-tête « {{name}} » est en double."
+    }
   },
   "audio": {
     "title": "Voix",

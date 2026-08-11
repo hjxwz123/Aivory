@@ -64,6 +64,7 @@ export function resolveArmedTurnFlags(_modelId?: string): {
   verify?: boolean
   toolMode: ToolMode
   webSearch?: boolean
+  selectedToolIds?: string[]
 } {
   const p = useComposerPrefs.getState()
   const mode = p.mode !== 'default' ? p.mode : undefined
@@ -73,6 +74,7 @@ export function resolveArmedTurnFlags(_modelId?: string): {
     verify: p.verify && useModels.getState().verifyAvailable ? true : undefined,
     toolMode,
     webSearch: toolMode === 'disabled' && p.forceWebSearch ? true : undefined,
+    selectedToolIds: _modelId ? p.selectedToolIdsByModel[_modelId] : undefined,
   }
 }
 
@@ -290,6 +292,8 @@ interface ConversationStore {
     webSearch?: boolean
     /** User-owned skill ids selected explicitly for this turn. */
     selectedUserSkillIds?: string[]
+    /** Explicit candidate subset; undefined means every available tool. */
+    selectedToolIds?: string[]
     /** §fast-mode: run this turn in fast mode (model resolved server-side + masked;
      *  verify/DR forced off; fixed enabled policy, quartered budget, no Python). */
     fast?: boolean
@@ -1383,6 +1387,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
           // server-run search injection.
           tool_mode: requestToolMode,
           selected_user_skill_ids: normalizeSelectedUserSkillIds(input.selectedUserSkillIds),
+          selected_tool_ids: input.selectedToolIds,
           web_search: requestWebSearch,
           // §fast-mode: run this turn on the admin's hidden fast model.
           fast: input.fast,
@@ -1816,6 +1821,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
           mode,
           verify,
           tool_mode: toolMode,
+          selected_tool_ids: armed.selectedToolIds,
           web_search: webSearch,
           fast,
           // Fast turns must not inherit parameter overrides cached from the

@@ -39,7 +39,7 @@ if (!root) throw new Error('Root element not found')
 
 createRoot(root).render(
   <StrictMode>
-    <BrowserRouter>
+    <BrowserRouter useTransitions={false}>
       <App />
     </BrowserRouter>
   </StrictMode>,

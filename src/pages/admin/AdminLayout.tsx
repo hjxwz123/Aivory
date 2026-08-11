@@ -2,7 +2,7 @@
  * AdminLayout keeps broad task areas in the rail and exposes the current area's
  * destinations as a route-aware tab row above the page.
  */
-import { Suspense, useEffect, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { Link, Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import {
@@ -30,6 +30,10 @@ import {
   type AdminNavGroupKey,
 } from '@/lib/admin-navigation'
 import { cn } from '@/lib/utils'
+import { useRequestActivity } from '@/lib/request-activity'
+
+const NAVIGATION_MIN_VISIBLE_MS = 180
+const NAVIGATION_WATCHDOG_MS = 10_000
 
 const GROUP_ICONS = {
   ai: Cpu,
@@ -47,12 +51,77 @@ export default function AdminLayout() {
   const status = useAuth((s) => s.status)
   const { t } = useTranslation(['admin', 'nav', 'common'])
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [navigationTarget, setNavigationTarget] = useState<string | null>(null)
   const contentScrollRef = useRef<HTMLDivElement>(null)
+  const navigationStartedAtRef = useRef(0)
+  const navigationPendingRef = useRef(false)
+  const navigationFinishTimerRef = useRef<number | null>(null)
+  const navigationWatchdogRef = useRef<number | null>(null)
+  const requestActivity = useRequestActivity()
+
+  const clearNavigationActivity = useCallback(() => {
+    navigationPendingRef.current = false
+    setNavigationTarget(null)
+    if (navigationFinishTimerRef.current !== null) {
+      window.clearTimeout(navigationFinishTimerRef.current)
+      navigationFinishTimerRef.current = null
+    }
+    if (navigationWatchdogRef.current !== null) {
+      window.clearTimeout(navigationWatchdogRef.current)
+      navigationWatchdogRef.current = null
+    }
+  }, [])
+
+  const beginNavigationActivity = useCallback((target: string) => {
+    if (navigationFinishTimerRef.current !== null) {
+      window.clearTimeout(navigationFinishTimerRef.current)
+      navigationFinishTimerRef.current = null
+    }
+    if (navigationWatchdogRef.current !== null) {
+      window.clearTimeout(navigationWatchdogRef.current)
+    }
+    navigationStartedAtRef.current = Date.now()
+    navigationPendingRef.current = true
+    setNavigationTarget(target)
+    navigationWatchdogRef.current = window.setTimeout(clearNavigationActivity, NAVIGATION_WATCHDOG_MS)
+  }, [clearNavigationActivity])
+
+  function handleAdminNavigationClick(event: ReactMouseEvent<HTMLDivElement>): void {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+    if (!(event.target instanceof Element)) return
+
+    const anchor = event.target.closest<HTMLAnchorElement>('a[href]')
+    if (!anchor || anchor.hasAttribute('download') || (anchor.target && anchor.target !== '_self')) return
+
+    const target = new URL(anchor.href, window.location.href)
+    if (target.origin !== window.location.origin || !underAdminPath(target.pathname, '/admin')) return
+
+    const current = `${location.pathname}${location.search}${location.hash}`
+    const next = `${target.pathname}${target.search}${target.hash}`
+    if (current === next) return
+    beginNavigationActivity(`${target.pathname}${target.search}`)
+  }
 
   useEffect(() => {
     setMobileOpen(false)
     contentScrollRef.current?.scrollTo(0, 0)
   }, [location.pathname])
+
+  useEffect(() => {
+    if (!navigationPendingRef.current) return
+    const elapsed = Date.now() - navigationStartedAtRef.current
+    const remaining = Math.max(0, NAVIGATION_MIN_VISIBLE_MS - elapsed)
+    navigationFinishTimerRef.current = window.setTimeout(clearNavigationActivity, remaining)
+  }, [clearNavigationActivity, location.key, location.pathname, location.search])
+
+  useEffect(() => () => {
+    if (navigationFinishTimerRef.current !== null) {
+      window.clearTimeout(navigationFinishTimerRef.current)
+    }
+    if (navigationWatchdogRef.current !== null) {
+      window.clearTimeout(navigationWatchdogRef.current)
+    }
+  }, [])
 
   if (user) {
     if (user.role !== 'admin') return <Navigate to="/" replace />
@@ -65,6 +134,25 @@ export default function AdminLayout() {
   const path = location.pathname
   const currentGroup = adminNavGroupForPath(path)
   const filesWorkspace = underAdminPath(path, '/admin/files')
+  const activityVisible = navigationTarget !== null || requestActivity.active
+  const activityMessage = navigationTarget !== null
+    ? t('admin:activity.navigating')
+    : requestActivity.slow
+      ? t('admin:activity.stillWaiting')
+      : t('admin:activity.loading')
+
+  function navigationSpinner(target: string) {
+    const pending = navigationTarget === target || navigationTarget?.startsWith(`${target}?`) === true
+    return (
+      <span
+        aria-hidden
+        className={cn(
+          'ml-auto inline-block size-3 shrink-0 rounded-full border-2 border-current border-r-transparent',
+          pending ? 'animate-[spin_700ms_linear_infinite] opacity-70' : 'opacity-0',
+        )}
+      />
+    )
+  }
 
   function renderNavItems() {
     const overviewActive = adminNavItemActive(path, ADMIN_OVERVIEW)
@@ -73,6 +161,7 @@ export default function AdminLayout() {
         <Link
           to={ADMIN_OVERVIEW.to}
           aria-current={overviewActive ? 'page' : undefined}
+          aria-busy={navigationTarget === ADMIN_OVERVIEW.to || undefined}
           onClick={() => setMobileOpen(false)}
           className={cn(
             'flex h-11 items-center gap-2.5 rounded-[8px] px-3 text-[13px] interactive md:h-9',
@@ -85,6 +174,7 @@ export default function AdminLayout() {
           <span className="truncate">
             {t(ADMIN_OVERVIEW.labelKey, { defaultValue: ADMIN_OVERVIEW.defaultLabel })}
           </span>
+          {navigationSpinner(ADMIN_OVERVIEW.to)}
         </Link>
 
         {ADMIN_NAV_GROUPS.map((group) => {
@@ -95,6 +185,7 @@ export default function AdminLayout() {
               key={group.key}
               to={group.to}
               aria-current={active ? 'location' : undefined}
+              aria-busy={navigationTarget === group.to || undefined}
               onClick={() => setMobileOpen(false)}
               className={cn(
                 'flex h-11 items-center gap-2.5 rounded-[8px] px-3 text-[13px] interactive md:h-9',
@@ -107,6 +198,7 @@ export default function AdminLayout() {
               <span className="truncate">
                 {t(group.labelKey, { defaultValue: group.defaultLabel })}
               </span>
+              {navigationSpinner(group.to)}
             </Link>
           )
         })}
@@ -134,6 +226,7 @@ export default function AdminLayout() {
                 key={item.to}
                 to={item.to}
                 aria-current={active ? 'page' : undefined}
+                aria-busy={navigationTarget === item.to || navigationTarget?.startsWith(`${item.to}?`) || undefined}
                 className={cn(
                   '-mb-px inline-flex h-11 shrink-0 items-center whitespace-nowrap border-b-2 px-3 text-[13px] interactive sm:h-9 sm:px-3.5',
                   active
@@ -142,6 +235,7 @@ export default function AdminLayout() {
                 )}
               >
                 {t(item.labelKey, { defaultValue: item.defaultLabel })}
+                {navigationSpinner(item.to)}
               </Link>
             )
           })}
@@ -151,7 +245,10 @@ export default function AdminLayout() {
   }
 
   return (
-    <div className="flex h-full w-full overflow-hidden bg-[var(--color-bg)] text-[var(--color-fg)]">
+    <div
+      className="flex h-full w-full overflow-hidden bg-[var(--color-bg)] text-[var(--color-fg)]"
+      onClickCapture={handleAdminNavigationClick}
+    >
       <aside className="hidden w-[16rem] flex-col border-r border-[var(--color-divider)] bg-[var(--color-bg-muted)]/40 md:flex">
         <button
           type="button"
@@ -168,11 +265,32 @@ export default function AdminLayout() {
       </aside>
 
       <main
+        aria-busy={activityVisible || undefined}
         className={cn(
           'relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden',
           filesWorkspace && 'overscroll-y-contain',
         )}
       >
+        {activityVisible ? (
+          <div className="pointer-events-none absolute inset-x-0 top-0 z-50">
+            <div className="h-0.5 overflow-hidden bg-[var(--color-accent-soft)]">
+              <span className="block h-full w-1/3 bg-[var(--color-accent)] animate-[indeterminate_1200ms_ease-in-out_infinite]" />
+            </div>
+            <div
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+              aria-busy="true"
+              className="fixed bottom-[max(0.75rem,var(--safe-bottom))] left-1/2 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-2 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface-raised)] px-3 py-2 text-[12px] font-medium text-[var(--color-fg-muted)] shadow-[var(--shadow-md)] md:absolute md:bottom-auto md:top-3"
+            >
+              <span
+                aria-hidden
+                className="inline-block size-3.5 shrink-0 rounded-full border-2 border-[var(--color-accent)] border-r-transparent animate-[spin_700ms_linear_infinite]"
+              />
+              <span className="min-w-0 whitespace-normal text-center">{activityMessage}</span>
+            </div>
+          </div>
+        ) : null}
         <div className="flex h-[calc(var(--layout-topbar-h-mobile)+var(--safe-top))] shrink-0 items-center gap-2 border-b border-[var(--color-divider)] pl-[max(.5rem,var(--safe-left))] pr-[max(.5rem,var(--safe-right))] pt-[var(--safe-top)] md:hidden">
           <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
             <SheetTrigger asChild>

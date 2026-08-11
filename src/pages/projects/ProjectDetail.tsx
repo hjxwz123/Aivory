@@ -391,6 +391,7 @@ export default function ProjectDetail() {
       toolMode: ToolMode
       webSearch?: boolean
       selectedUserSkillIds?: string[]
+      selectedToolIds?: string[]
       fast?: boolean
     },
   ) {
@@ -425,6 +426,7 @@ export default function ProjectDetail() {
       toolMode: opts.toolMode,
       webSearch: opts.webSearch,
       selectedUserSkillIds: opts.selectedUserSkillIds,
+      selectedToolIds: opts.selectedToolIds,
       fast: opts.fast,
     })
   }

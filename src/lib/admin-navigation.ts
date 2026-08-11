@@ -65,6 +65,7 @@ export const ADMIN_NAV_GROUPS: readonly AdminNavGroup[] = [
       { to: '/admin/skills', labelKey: 'admin:skills.title', defaultLabel: 'Skills' },
       { to: '/admin/prompts', labelKey: 'admin:prompts.title', defaultLabel: 'Prompt library' },
       { to: '/admin/tools', labelKey: 'admin:tools.title', defaultLabel: 'Tools' },
+      { to: '/admin/mcp', labelKey: 'admin:mcp.title', defaultLabel: 'MCP services' },
       { to: '/admin/documents', labelKey: 'admin:documents.title', defaultLabel: 'Documents & knowledge' },
       { to: '/admin/image-styles', labelKey: 'admin:imageStyles.title', defaultLabel: 'Image generation' },
       { to: '/admin/audio', labelKey: 'admin:audio.title', defaultLabel: 'Speech' },

@@ -680,6 +680,15 @@ export interface ApiModel {
   credits_per_image?: number
 }
 
+/** User-safe tool metadata for the per-model tool picker. The backend keeps
+ * implementation/source details private so every tool is presented uniformly. */
+export interface ApiSelectableTool {
+  id: string
+  name: string
+  description: string
+  icon: string
+}
+
 /** One file bundled with a skill (§4.17). use_skill stages these into the
  *  sandbox at /workspace/skills/<name>/. storage_path is server-controlled
  *  (returned by the upload endpoint) — the client only echoes it back on save. */

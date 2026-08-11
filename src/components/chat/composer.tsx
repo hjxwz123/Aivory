@@ -89,6 +89,7 @@ import {
   type RichComposerEditorHandle,
 } from './rich-composer-editor'
 import { FormulaEditorDialog } from './formula-editor-dialog'
+import { ToolSelectionDialog } from './tool-selection-dialog'
 import { modelHasBuiltinTools, modelSupportsBuiltinTool } from '@/lib/builtin-tools'
 import { hasImageAttachment, hasSendableMessageContent } from '@/lib/chat-message-input'
 
@@ -114,6 +115,8 @@ interface ComposerProps {
       webSearch?: boolean
       /** User-owned skills explicitly selected for this turn. */
       selectedUserSkillIds?: string[]
+      /** Per-model candidate tool subset. undefined preserves the default-all policy. */
+      selectedToolIds?: string[]
       /** §fast-mode: run this turn in fast mode. */
       fast?: boolean
     },
@@ -307,6 +310,8 @@ interface FeatureItem {
   enter?: boolean
   /** Accessible label for the active chip's clear action. */
   clearLabel?: string
+  /** Optional compact text rendered beside the icon in the active chip. */
+  chipText?: string
   toggle: () => void
 }
 
@@ -368,6 +373,14 @@ interface ToolModeOption {
 
 type ToolModePanel = 'root' | 'modes'
 
+interface ToolSelectionAction {
+  label: string
+  description: string
+  summary: string
+  custom: boolean
+  onOpen: () => void
+}
+
 /** A stable drill-down: root features -> available unified tool policies. */
 function ToolModeSelector({
   label,
@@ -378,6 +391,7 @@ function ToolModeSelector({
   researchActive,
   menuOpen,
   rootItems,
+  toolSelection,
   onPanelChange,
   onAfter,
 }: {
@@ -389,6 +403,7 @@ function ToolModeSelector({
   researchActive: boolean
   menuOpen: boolean
   rootItems: FeatureItem[]
+  toolSelection?: ToolSelectionAction
   onPanelChange?: (panel: ToolModePanel) => void
   onAfter?: () => void
 }) {
@@ -477,6 +492,56 @@ function ToolModeSelector({
           </span>
           <ChevronRight size={14} className="mt-1 shrink-0 text-[var(--color-fg-subtle)]" aria-hidden />
         </button>
+        {toolSelection ? (
+          <button
+            type="button"
+            onClick={() => {
+              onAfter?.()
+              toolSelection.onOpen()
+            }}
+            aria-label={`${toolSelection.label}: ${toolSelection.summary}`}
+            className={cn(
+              'flex w-full min-w-0 max-w-full items-start gap-2.5 overflow-hidden rounded-[12px] border px-2.5 py-2 text-left interactive',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+              toolSelection.custom
+                ? 'border-[var(--color-tool-selection-border)] bg-[var(--color-tool-selection-soft)]'
+                : 'border-transparent hover:bg-[var(--color-bg-muted)]',
+            )}
+          >
+            <span
+              className={cn(
+                'mt-0.5 inline-flex shrink-0',
+                toolSelection.custom
+                  ? 'text-[var(--color-tool-selection-text)]'
+                  : 'text-[var(--color-fg-muted)]',
+              )}
+              aria-hidden
+            >
+              <Wrench size={16} />
+            </span>
+            <span className="min-w-0 max-w-full flex-1">
+              <span className="flex min-w-0 items-center gap-2">
+                <span className="truncate text-[13px] font-medium text-[var(--color-fg)]">
+                  {toolSelection.label}
+                </span>
+                <span
+                  className={cn(
+                    'ml-auto shrink-0 text-[11.5px]',
+                    toolSelection.custom
+                      ? 'text-[var(--color-tool-selection-text)]'
+                      : 'text-[var(--color-fg-subtle)]',
+                  )}
+                >
+                  {toolSelection.summary}
+                </span>
+              </span>
+              <span className="mt-0.5 block max-w-full break-words [overflow-wrap:anywhere] text-[11.5px] leading-snug text-[var(--color-fg-subtle)]">
+                {toolSelection.description}
+              </span>
+            </span>
+            <ChevronRight size={14} className="mt-1 shrink-0 text-[var(--color-fg-subtle)]" aria-hidden />
+          </button>
+        ) : null}
       </div>
     )
   }
@@ -585,6 +650,10 @@ export function Composer({
   const setToolMode = useComposerPrefs((s) => s.setToolMode)
   const forceWebSearch = useComposerPrefs((s) => s.forceWebSearch)
   const setForceWebSearch = useComposerPrefs((s) => s.setForceWebSearch)
+  const selectedToolIds = useComposerPrefs((s) =>
+    modelId ? s.selectedToolIdsByModel[modelId] : undefined,
+  )
+  const setSelectedToolIds = useComposerPrefs((s) => s.setSelectedToolIds)
   const cachedParamValues = useComposerPrefs((s) => (modelId ? s.paramValuesByModel[modelId] : undefined))
   const setCachedParamValues = useComposerPrefs((s) => s.setParamValues)
   const cachedDraft = useComposerPrefs((s) => (draftScope ? s.draftsByScope[draftScope] : undefined))
@@ -633,6 +702,11 @@ export function Composer({
   // Turn-feature menu (the "+" left of attach): research / verify / tool policy
   // / web-search in one shared mobile/desktop surface.
   const [featuresOpen, setFeaturesOpen] = useState(false)
+  const [toolSelectionOpen, setToolSelectionOpen] = useState(false)
+  const handleSelectedToolIdsChange = useCallback(
+    (ids: string[] | undefined) => setSelectedToolIds(modelId, ids),
+    [modelId, setSelectedToolIds],
+  )
   const loadKBList = async () => {
     try {
       const rows = await kbsApi.list(activeWorkspaceId())
@@ -1243,6 +1317,7 @@ export function Composer({
         toolMode: effectiveToolMode,
         webSearch: effectiveWebSearch ? true : undefined,
         selectedUserSkillIds: selectedUserSkillIdsForRequest(selectedSkills),
+        selectedToolIds,
         fast: effectiveFast ? true : undefined,
       })
       updateValue('')
@@ -1725,6 +1800,13 @@ export function Composer({
   const toolModeOptions = visibleToolModes(toolModeCapabilities).map((value) => toolModeOptionsByValue[value])
   const autoToolModeLabel = toolModeOptions.find((option) => option.value === 'auto')?.label ?? 'Auto'
   const selectedToolMode = toolModeOptions.find((option) => option.value === availableToolMode) ?? toolModeOptions[0]
+  const hasCustomToolSelection = selectedToolIds !== undefined
+  const toolSelectionSummary = hasCustomToolSelection
+    ? t('composer.toolSelection.summaryCount', {
+        count: selectedToolIds.length,
+        defaultValue: '{{count}} selected',
+      })
+    : t('composer.toolSelection.summaryAll', { defaultValue: 'All' })
 
   const webSearchItem: FeatureItem | undefined =
     showToolModeSelector && supportsWebSearch && availableToolMode === 'disabled'
@@ -1758,6 +1840,25 @@ export function Composer({
         }
       : undefined
 
+  const toolSelectionOverride: FeatureItem | undefined =
+    showToolModeSelector && hasCustomToolSelection
+      ? {
+          key: 'tool-selection',
+          icon: <Wrench size={16} aria-hidden />,
+          label: t('composer.toolSelection.selectedChip', {
+            count: selectedToolIds.length,
+            defaultValue: '{{count}} tools',
+          }),
+          chipText: String(selectedToolIds.length),
+          desc: t('composer.toolSelection.entryDescription', {
+            defaultValue: 'Limit automatic and on modes to a chosen set.',
+          }),
+          active: true,
+          clearLabel: t('composer.toolSelection.reset', { defaultValue: 'Use all available tools' }),
+          toggle: () => handleSelectedToolIdsChange(undefined),
+        }
+      : undefined
+
   const featureList = (onAfter?: () => void) => (
     <div className="flex flex-col gap-0.5">
       {showToolModeSelector ? (
@@ -1772,6 +1873,19 @@ export function Composer({
           researchActive={researchActive}
           menuOpen={isMobile ? moreOpen : featuresOpen}
           rootItems={[...featureItems, ...(webSearchItem ? [webSearchItem] : [])]}
+          toolSelection={{
+            label: t('composer.toolSelection.entry', { defaultValue: 'Choose tools' }),
+            description: t('composer.toolSelection.entryDescription', {
+              defaultValue: 'Limit automatic and on modes to a chosen set.',
+            }),
+            summary: toolSelectionSummary,
+            custom: hasCustomToolSelection,
+            onOpen: () => {
+              setMoreOpen(false)
+              setFeaturesOpen(false)
+              setToolSelectionOpen(true)
+            },
+          }}
           onPanelChange={setToolModePanel}
           onAfter={onAfter}
         />
@@ -1787,6 +1901,7 @@ export function Composer({
     ...featureItems.filter((it) => it.active),
     ...(webSearchItem?.active ? [webSearchItem] : []),
     ...(toolModeOverride ? [toolModeOverride] : []),
+    ...(toolSelectionOverride ? [toolSelectionOverride] : []),
   ]
   const anyFeatureActive = activeChips.length > 0
   const featureMenuAvailable = showToolModeSelector || featureItems.length > 0
@@ -2726,6 +2841,11 @@ export function Composer({
                     <span className="inline-flex shrink-0" aria-hidden>
                       {chip.icon}
                     </span>
+                    {chip.chipText ? (
+                      <span className="min-w-[1ch] pr-0.5 text-[11px] font-semibold tabular-nums">
+                        {chip.chipText}
+                      </span>
+                    ) : null}
                     <button
                       type="button"
                       onClick={chip.toggle}
@@ -2759,6 +2879,13 @@ export function Composer({
           ref.current?.setFormula(latex, formulaTarget, formulaSelectionRef.current)
           formulaSelectionRef.current = null
         }}
+      />
+      <ToolSelectionDialog
+        open={toolSelectionOpen}
+        onOpenChange={setToolSelectionOpen}
+        modelId={modelId}
+        selectedIds={selectedToolIds}
+        onChange={handleSelectedToolIdsChange}
       />
     </div>
   )

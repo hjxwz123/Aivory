@@ -152,14 +152,14 @@ export default function AdminBackup() {
   const [importingConfig, setImportingConfig] = useState(false)
 
   const refreshExportState = useCallback(async () => {
-    const state = normalizeBackupState(await adminApi.backupExportState())
+    const state = normalizeBackupState(await adminApi.backupExportState('background'))
     setRunningExport(state.running)
     setArchives(state.archives)
     setRecentJobs(state.jobs)
   }, [])
 
   const refreshVectorState = useCallback(async () => {
-    const state = normalizeVectorState(await adminApi.vectorMaintenanceState())
+    const state = normalizeVectorState(await adminApi.vectorMaintenanceState('background'))
     setRunningVector(state.running)
     setVectorJobs(state.jobs)
   }, [])

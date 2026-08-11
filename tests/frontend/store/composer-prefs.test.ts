@@ -22,6 +22,7 @@ function resetPrefs() {
     toolMode: 'auto',
     forceWebSearch: false,
     defaultToolMode: 'auto',
+    selectedToolIdsByModel: {},
     paramValuesByModel: {},
     draftsByScope: {},
   })
@@ -92,6 +93,35 @@ describe('composer tool mode', () => {
 
     expect(useComposerPrefs.getState()).not.toHaveProperty('officialToolNamesByModel')
     expect(setItem).toHaveBeenLastCalledWith('aivory.composer-prefs.v1', expect.not.stringContaining('officialToolNamesByModel'))
+  })
+
+  it('persists explicit per-model tool subsets while preserving all-versus-none', () => {
+    useComposerPrefs.getState().setSelectedToolIds('model_1', [' builtin:web ', 'builtin:web', 'mcp:rail'])
+    useComposerPrefs.getState().setSelectedToolIds('model_2', [])
+
+    expect(useComposerPrefs.getState().selectedToolIdsByModel).toEqual({
+      model_1: ['builtin:web', 'mcp:rail'],
+      model_2: [],
+    })
+
+    useComposerPrefs.getState().setSelectedToolIds('model_1', undefined)
+    expect(useComposerPrefs.getState().selectedToolIdsByModel).toEqual({ model_2: [] })
+  })
+
+  it('snapshots omitted, empty, and non-empty selections for the requested model', () => {
+    useComposerPrefs.setState({
+      selectedToolIdsByModel: {
+        model_empty: [],
+        model_subset: ['builtin:web_fetch', 'mcp:rail'],
+      },
+    })
+
+    expect(resolveArmedTurnFlags('model_default').selectedToolIds).toBeUndefined()
+    expect(resolveArmedTurnFlags('model_empty').selectedToolIds).toEqual([])
+    expect(resolveArmedTurnFlags('model_subset').selectedToolIds).toEqual([
+      'builtin:web_fetch',
+      'mcp:rail',
+    ])
   })
 })
 
@@ -177,6 +207,21 @@ describe('tool mode migration', () => {
     })
 
     expect(migrated).not.toHaveProperty('officialToolNamesByModel')
+  })
+
+  it('sanitizes persisted tool subsets without collapsing an explicit empty set', () => {
+    const migrated = parsePersistedComposerPrefs({
+      selectedToolIdsByModel: {
+        model_1: [' builtin:web ', 'builtin:web', 7, 'mcp:rail'],
+        model_2: [],
+        invalid: 'builtin:web',
+      },
+    })
+
+    expect(migrated.selectedToolIdsByModel).toEqual({
+      model_1: ['builtin:web', 'mcp:rail'],
+      model_2: [],
+    })
   })
 })
 

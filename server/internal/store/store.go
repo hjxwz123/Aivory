@@ -467,6 +467,7 @@ func Migrate(db *sql.DB) error {
 		"quota_ledger":        {"user_id", "scope_type", "model_id", "group_id", "cycle_anchor", "window_start", "limit_type", "reserved_micros", "actual_micros", "status", "expires_at"},
 		"billing_usage":       {"user_id", "message_id", "model_id", "purpose", "cost_micros", "images_count", "input_tokens", "output_tokens", "currency"},
 		"models":              {"official_tools", "builtin_tools", "moderation_enabled", "moderation_mode", "tags", "extra_params", "image_timeout_sec", "research_enabled", "fallback_channel_id", "fast"},
+		"mcp_servers":         {"id", "name", "icon", "description", "url", "headers", "enabled", "discovered_tools", "protocol_version", "last_error", "last_synced_at", "created_at", "updated_at"},
 		"refresh_tokens":      {"session_id", "user_agent", "ip", "location", "last_seen"},
 		"conversations":       {"inline_source_conv", "inline_parent_id", "inline_quote", "workspace_id", "is_public", "fast"},
 		"projects":            {"workspace_id"},

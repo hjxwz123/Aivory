@@ -19,6 +19,9 @@ export interface PersistedComposerPrefs {
   // reset the live toolMode to this complete value (including auto/enabled), so
   // a prior conversation's override cannot leak into the next one.
   defaultToolMode: ToolMode
+  /** Per-model explicit tool subsets. A missing model key means all currently
+   * available tools; a present empty array means the user selected none. */
+  selectedToolIdsByModel: Record<string, string[]>
   paramValuesByModel: Record<string, ComposerParamValues>
   draftsByScope: Record<string, string>
 }
@@ -30,6 +33,7 @@ interface ComposerPrefsStore extends PersistedComposerPrefs {
   // Update the mirror of the server-side default tool policy.
   setDefaultToolMode: (toolMode: ToolMode) => void
   setForceWebSearch: (on: boolean) => void
+  setSelectedToolIds: (modelId: string, ids: string[] | undefined) => void
   setParamValues: (modelId: string, values: Record<string, unknown>) => void
   setDraft: (scope: string, value: string) => void
   clearDraft: (scope: string) => void
@@ -44,6 +48,7 @@ const DEFAULT_PREFS: PersistedComposerPrefs = {
   toolMode: 'auto',
   forceWebSearch: false,
   defaultToolMode: 'auto',
+  selectedToolIdsByModel: {},
   paramValuesByModel: {},
   draftsByScope: {},
 }
@@ -93,6 +98,32 @@ function sanitizeDraftsByScope(raw: unknown): Record<string, string> {
   return out
 }
 
+function sanitizeToolIds(raw: unknown): string[] | null {
+  if (!Array.isArray(raw)) return null
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const value of raw) {
+    if (typeof value !== 'string') continue
+    const id = value.trim()
+    if (!id || id.length > 160 || seen.has(id)) continue
+    seen.add(id)
+    out.push(id)
+    if (out.length >= 256) break
+  }
+  return out
+}
+
+function sanitizeSelectedToolIdsByModel(raw: unknown): Record<string, string[]> {
+  if (!isRecord(raw)) return {}
+  const out: Record<string, string[]> = {}
+  for (const [modelId, values] of Object.entries(raw)) {
+    if (!modelId || modelId.length > 160) continue
+    const ids = sanitizeToolIds(values)
+    if (ids !== null) out[modelId] = ids
+  }
+  return out
+}
+
 /** Sanitizes the localStorage payload and migrates the retired boolean policy. */
 export function parsePersistedComposerPrefs(parsed: unknown): PersistedComposerPrefs {
   if (!isRecord(parsed)) return DEFAULT_PREFS
@@ -120,6 +151,7 @@ export function parsePersistedComposerPrefs(parsed: unknown): PersistedComposerP
     // forced search only exists inside an explicitly disabled-tools turn
     forceWebSearch: toolMode === 'disabled' && parsed.forceWebSearch === true,
     defaultToolMode,
+    selectedToolIdsByModel: sanitizeSelectedToolIdsByModel(parsed.selectedToolIdsByModel),
     paramValuesByModel: sanitizeParamValuesByModel(parsed.paramValuesByModel),
     draftsByScope: sanitizeDraftsByScope(parsed.draftsByScope),
   }
@@ -146,6 +178,7 @@ function persistedFrom(state: PersistedComposerPrefs, patch: Partial<PersistedCo
     toolMode: state.toolMode,
     forceWebSearch: state.forceWebSearch,
     defaultToolMode: state.defaultToolMode,
+    selectedToolIdsByModel: state.selectedToolIdsByModel,
     paramValuesByModel: state.paramValuesByModel,
     draftsByScope: state.draftsByScope,
     ...patch,
@@ -199,6 +232,20 @@ export const useComposerPrefs = create<ComposerPrefsStore>((set) => {
         const patch = { forceWebSearch: on }
         persistPrefs(persistedFrom(state, patch))
         return patch
+      })
+    },
+    setSelectedToolIds(modelId, ids) {
+      const id = modelId.trim()
+      if (!id) return
+      set((state) => {
+        const selectedToolIdsByModel = { ...state.selectedToolIdsByModel }
+        if (ids === undefined) {
+          delete selectedToolIdsByModel[id]
+        } else {
+          selectedToolIdsByModel[id] = sanitizeToolIds(ids) ?? []
+        }
+        persistPrefs(persistedFrom(state, { selectedToolIdsByModel }))
+        return { selectedToolIdsByModel }
       })
     },
     setParamValues(modelId, values) {

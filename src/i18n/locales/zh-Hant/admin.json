@@ -1,6 +1,11 @@
 {
   "title": "管理後臺",
   "backToChat": "返回聊天",
+  "activity": {
+    "loading": "載入中…",
+    "navigating": "正在開啟頁面…",
+    "stillWaiting": "伺服器回應較慢，仍在等待…"
+  },
   "common": {
     "edit": "編輯",
     "delete": "刪除",
@@ -584,7 +589,72 @@
     "lead": "對話過程中助手會呼叫的外部服務。",
     "availabilityTitle": "全域工具可用性",
     "availabilityLead": "停用後，該工具會從所有模型中移除，包括已明確允許它的模型。",
-    "availabilityEmpty": "目前沒有已註冊的平台工具。"
+    "availabilityEmpty": "目前沒有已註冊的平台工具。",
+    "mcpAvailabilityTitle": "MCP 工具可用性",
+    "mcpAvailabilityLead": "選擇哪些已設定的 MCP 服務可供使用者和模型使用。",
+    "mcpAvailabilityEmpty": "尚未設定 MCP 服務。",
+    "mcpUnavailable": "最近一次連線嘗試失敗。",
+    "manageMCP": "管理 MCP"
+  },
+  "mcp": {
+    "title": "MCP 服務",
+    "lead": "連接 Streamable HTTP 服務，並在對話中提供其探索到的工具。",
+    "new": "新增 MCP 服務",
+    "listLabel": "MCP 服務清單",
+    "emptyTitle": "尚無 MCP 服務",
+    "emptyBody": "新增 Streamable HTTP 端點，然後測試連線並同步工具。",
+    "editorTitle": "編輯 MCP 服務",
+    "newTitle": "新增 MCP 服務",
+    "editorDescriptionNew": "儲存連線後即可測試並探索其中的工具。",
+    "editorDescriptionEdit": "修改連線設定。保留遮罩形式的請求標頭值即可繼續使用已儲存的金鑰。",
+    "removeTitle": "刪除 MCP 服務？",
+    "removeBody": "將刪除「{{name}}」，並從後續對話中移除它的全部工具。",
+    "created": "MCP 服務已建立",
+    "updated": "MCP 服務已更新",
+    "removed": "MCP 服務已刪除",
+    "testSucceeded": "連線成功",
+    "syncSucceeded": "工具已同步",
+    "toolCount": "已探索 {{count}} 個",
+    "lastSynced": "上次同步於 {{time}}",
+    "fields": {
+      "name": "名稱",
+      "namePlaceholder": "12306 火車查詢",
+      "icon": "圖示",
+      "description": "工具描述",
+      "descriptionPlaceholder": "查詢列車時刻、車站和餘票資訊。",
+      "url": "Streamable HTTP URL",
+      "urlHint": "端點必須透過 Streamable HTTP 接收 MCP JSON-RPC 請求。",
+      "headers": "請求標頭",
+      "headersHint": "隨每次 MCP 請求傳送的選用標頭。已儲存的敏感值可能顯示為遮罩。",
+      "noHeaders": "不需要額外請求標頭。",
+      "headerNameLabel": "第 {{index}} 個請求標頭名稱",
+      "headerValueLabel": "第 {{index}} 個請求標頭值",
+      "headerNamePlaceholder": "Authorization",
+      "headerValuePlaceholder": "Bearer token",
+      "enabled": "對使用者可用",
+      "enabledHint": "建議先測試連線並同步工具，再啟用此服務。"
+    },
+    "actions": {
+      "test": "測試",
+      "sync": "同步工具",
+      "addHeader": "新增請求標頭",
+      "removeHeader": "移除第 {{index}} 個請求標頭",
+      "showHeader": "顯示請求標頭值",
+      "hideHeader": "隱藏請求標頭值"
+    },
+    "status": {
+      "connected": "連線正常",
+      "error": "連線錯誤",
+      "notTested": "未測試",
+      "enabled": "已啟用",
+      "disabled": "已停用"
+    },
+    "errors": {
+      "missingFields": "名稱、圖示、描述和 URL 均為必填欄位。",
+      "invalidUrl": "請輸入有效的 HTTP 或 HTTPS URL。",
+      "invalidHeader": "請輸入有效的 HTTP 請求標頭名稱。",
+      "duplicateHeader": "請求標頭「{{name}}」重複。"
+    }
   },
   "audio": {
     "title": "語音",

@@ -4,6 +4,7 @@
  * the call sites stay readable.
  */
 import { api, apiUrl, getAccessToken, ApiError, apiUpload, type UploadProgress } from './client'
+import { withRequestActivity, type RequestActivityMode } from '@/lib/request-activity'
 import type {
   ApiAdminMessageFeedbackPage,
   ApiAdminUserFeedbackPage,
@@ -25,6 +26,7 @@ import type {
   ApiMemory,
   ApiMessage,
   ApiModel,
+  ApiSelectableTool,
   ApiModelTag,
   ApiModelQuota,
   ApiImageStyle,
@@ -70,6 +72,38 @@ export interface AdminAnalyticsParams {
   purpose?: string
   channel?: string
 }
+
+/** Admin-only metadata for one method discovered from a Streamable HTTP MCP server. */
+export interface ApiMCPTool {
+  name: string
+  title?: string
+  description?: string
+  inputSchema?: Record<string, unknown>
+}
+
+/** An administrator-managed Streamable HTTP MCP connection. Request headers
+ * may contain masked values in read responses; they are never exposed by the
+ * signed-in user tool catalog. */
+export interface ApiMCPServer {
+  id: string
+  name: string
+  icon: string
+  description: string
+  url: string
+  headers: Record<string, string>
+  enabled: boolean
+  protocol_version?: string
+  discovered_tools?: ApiMCPTool[]
+  last_error?: string
+  last_synced_at?: number
+  created_at?: number
+  updated_at?: number
+}
+
+export type ApiMCPServerInput = Pick<
+  ApiMCPServer,
+  'name' | 'icon' | 'description' | 'url' | 'headers' | 'enabled'
+>
 
 // ----- Auth ----------------------------------------------------------------
 
@@ -244,6 +278,11 @@ export const modelsApi = {
   listEmbedding: () => api<{ models: ApiModel[]; default_id: string }>('/embedding-models'),
   /** Model tags for the picker's filter chips (§ model tags). */
   tags: () => api<ApiModelTag[]>('/model-tags'),
+}
+
+export const toolsApi = {
+  list: (modelId: string) =>
+    api<ApiSelectableTool[]>(`/tools?model_id=${encodeURIComponent(modelId)}`),
 }
 
 // ----- Image generation (§4.20) --------------------------------------------
@@ -722,6 +761,17 @@ export const adminApi = {
   models: (kind?: 'chat' | 'image' | 'embedding') =>
     api<ApiModel[]>(`/admin/models${kind ? `?kind=${encodeURIComponent(kind)}` : ''}`),
   builtinTools: () => api<ApiBuiltinTool[]>('/admin/tools/builtins'),
+  mcpServers: () => api<ApiMCPServer[]>('/admin/mcp'),
+  createMCPServer: (body: ApiMCPServerInput) =>
+    api<ApiMCPServer>('/admin/mcp', { method: 'POST', body }),
+  updateMCPServer: (id: string, body: Partial<ApiMCPServerInput>) =>
+    api<ApiMCPServer>(`/admin/mcp/${encodeURIComponent(id)}`, { method: 'PATCH', body }),
+  removeMCPServer: (id: string) =>
+    api<{ ok: true }>(`/admin/mcp/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  testMCPServer: (id: string) =>
+    api<ApiMCPServer | { ok: true }>(`/admin/mcp/${encodeURIComponent(id)}/test`, { method: 'POST' }),
+  syncMCPServer: (id: string) =>
+    api<ApiMCPServer | { ok: true }>(`/admin/mcp/${encodeURIComponent(id)}/sync`, { method: 'POST' }),
   createModel: (body: Partial<ApiModel>) => api<ApiModel>('/admin/models', { method: 'POST', body }),
   // Persist a new model order: `ids` is the full list in the desired order.
   reorderModels: (ids: string[]) =>
@@ -896,12 +946,14 @@ export const adminApi = {
     search = '',
     limit = envNum('VITE_AIVORY_ADMIN_API_USERS_LIMIT', 50),
     offset = 0,
+    activity: RequestActivityMode = 'foreground',
   ) =>
     api<{ users: ApiUser[]; total: number; limit: number; offset: number }>(
       `/admin/users?search=${encodeURIComponent(search)}&limit=${limit}&offset=${offset}`,
+      { activity },
     ),
-  user: (id: string) =>
-    api<ApiUser>(`/admin/users/${encodeURIComponent(id)}`),
+  user: (id: string, activity: RequestActivityMode = 'foreground') =>
+    api<ApiUser>(`/admin/users/${encodeURIComponent(id)}`, { activity }),
   /** Successful sign-in audit trail for one user (newest first). */
   userLoginHistory: (id: string, limit = 50, offset = 0) =>
     api<ApiAdminLoginHistoryPage>(
@@ -927,9 +979,10 @@ export const adminApi = {
   deleteUser: (id: string) =>
     api<{ ok: true; status?: string }>(`/admin/users/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   /** Background deletion jobs (§async user delete) — poll while a purge runs. */
-  userDeletions: () =>
+  userDeletions: (activity: RequestActivityMode = 'foreground') =>
     api<{ jobs: Array<{ user_id: string; email: string; status: string; progress: string; error?: string }> }>(
       '/admin/users/deletions',
+      { activity },
     ),
   /** Reset (turn off) a user's 2FA — recovery for a lost authenticator (§ 2FA). */
   disableUser2fa: (id: string) =>
@@ -1017,16 +1070,17 @@ export const adminApi = {
     api<{ deleted: number }>('/admin/files/delete', { method: 'POST', body: { items } }),
   // Raw bytes for the preview dialog. The object URL created by the caller
   // cannot carry an auth header, so the authenticated fetch happens first.
-  fileContentBlob: async (source: 'file' | 'document', id: string, signal?: AbortSignal): Promise<Blob> => {
-    const token = getAccessToken()
-    const res = await fetch(apiUrl(`/admin/files/content?source=${source}&id=${encodeURIComponent(id)}`), {
-      credentials: 'include',
-      headers: token ? { authorization: `Bearer ${token}` } : {},
-      signal,
-    })
-    if (!res.ok) throw new ApiError(res.status, `preview failed (${res.status})`, null)
-    return res.blob()
-  },
+  fileContentBlob: (source: 'file' | 'document', id: string, signal?: AbortSignal): Promise<Blob> =>
+    withRequestActivity(async () => {
+      const token = getAccessToken()
+      const res = await fetch(apiUrl(`/admin/files/content?source=${source}&id=${encodeURIComponent(id)}`), {
+        credentials: 'include',
+        headers: token ? { authorization: `Bearer ${token}` } : {},
+        signal,
+      })
+      if (!res.ok) throw new ApiError(res.status, `preview failed (${res.status})`, null)
+      return res.blob()
+    }),
   analytics: (params: AdminAnalyticsParams = {}) => {
     const qs = new URLSearchParams()
     qs.set('days', String(params.days ?? envNum('VITE_AIVORY_ADMIN_API_ANALYTICS', 30)))
@@ -1067,17 +1121,18 @@ export const adminApi = {
       `/admin/user-feedback${qs.toString() ? `?${qs}` : ''}`,
     )
   },
-  userFeedbackScreenshotBlob: async (id: string, signal?: AbortSignal): Promise<Blob> => {
-    const token = getAccessToken()
-    const res = await fetch(apiUrl(`/admin/user-feedback/${encodeURIComponent(id)}/screenshot`), {
-      credentials: 'include',
-      headers: token ? { authorization: `Bearer ${token}` } : {},
-      signal,
-      cache: 'no-store',
-    })
-    if (!res.ok) throw new ApiError(res.status, `screenshot failed (${res.status})`, null)
-    return res.blob()
-  },
+  userFeedbackScreenshotBlob: (id: string, signal?: AbortSignal): Promise<Blob> =>
+    withRequestActivity(async () => {
+      const token = getAccessToken()
+      const res = await fetch(apiUrl(`/admin/user-feedback/${encodeURIComponent(id)}/screenshot`), {
+        credentials: 'include',
+        headers: token ? { authorization: `Bearer ${token}` } : {},
+        signal,
+        cache: 'no-store',
+      })
+      if (!res.ok) throw new ApiError(res.status, `screenshot failed (${res.status})`, null)
+      return res.blob()
+    }),
 
   settings: () => api<Record<string, unknown>>('/admin/settings'),
   updateSettings: (patch: Record<string, unknown>) =>
@@ -1097,48 +1152,51 @@ export const adminApi = {
   // .zip the browser saves; import uploads one and REPLACES all data. The blob
   // path can't use the JSON `api()` helper, so it hand-rolls the fetch (still
   // sending the cookie + Bearer the rest of the client uses).
-  backupExport: async (includeFiles: boolean): Promise<Blob> => {
-    const token = getAccessToken()
-    const res = await fetch(apiUrl(`/admin/backup/export${includeFiles ? '?files=1' : ''}`), {
-      credentials: 'include',
-      headers: token ? { authorization: `Bearer ${token}` } : {},
-    })
-    if (!res.ok) {
-      let msg = `export failed (${res.status})`
-      try {
-        const j = (await res.json()) as { error?: string }
-        if (j?.error) msg = j.error
-      } catch {
-        /* non-JSON error body */
+  backupExport: (includeFiles: boolean): Promise<Blob> =>
+    withRequestActivity(async () => {
+      const token = getAccessToken()
+      const res = await fetch(apiUrl(`/admin/backup/export${includeFiles ? '?files=1' : ''}`), {
+        credentials: 'include',
+        headers: token ? { authorization: `Bearer ${token}` } : {},
+      })
+      if (!res.ok) {
+        let msg = `export failed (${res.status})`
+        try {
+          const j = (await res.json()) as { error?: string }
+          if (j?.error) msg = j.error
+        } catch {
+          /* non-JSON error body */
+        }
+        throw new ApiError(res.status, msg, null)
       }
-      throw new ApiError(res.status, msg, null)
-    }
-    return res.blob()
-  },
+      return res.blob()
+    }),
   backupExportStart: (includeFiles: boolean) =>
     api<BackupExportState>('/admin/backup/export-jobs', {
       method: 'POST',
       body: { include_files: includeFiles },
     }),
-  backupExportState: () => api<BackupExportState>('/admin/backup/export-jobs'),
-  backupArchiveDownload: async (name: string): Promise<Blob> => {
-    const token = getAccessToken()
-    const res = await fetch(apiUrl(`/admin/backup/archives/${encodeURIComponent(name)}`), {
-      credentials: 'include',
-      headers: token ? { authorization: `Bearer ${token}` } : {},
-    })
-    if (!res.ok) {
-      let msg = `download failed (${res.status})`
-      try {
-        const j = (await res.json()) as { error?: string }
-        if (j?.error) msg = j.error
-      } catch {
-        /* non-JSON error body */
+  backupExportState: (activity: RequestActivityMode = 'foreground') =>
+    api<BackupExportState>('/admin/backup/export-jobs', { activity }),
+  backupArchiveDownload: (name: string): Promise<Blob> =>
+    withRequestActivity(async () => {
+      const token = getAccessToken()
+      const res = await fetch(apiUrl(`/admin/backup/archives/${encodeURIComponent(name)}`), {
+        credentials: 'include',
+        headers: token ? { authorization: `Bearer ${token}` } : {},
+      })
+      if (!res.ok) {
+        let msg = `download failed (${res.status})`
+        try {
+          const j = (await res.json()) as { error?: string }
+          if (j?.error) msg = j.error
+        } catch {
+          /* non-JSON error body */
+        }
+        throw new ApiError(res.status, msg, null)
       }
-      throw new ApiError(res.status, msg, null)
-    }
-    return res.blob()
-  },
+      return res.blob()
+    }),
   backupArchiveDelete: (name: string) =>
     api<{ deleted: string }>(`/admin/backup/archives/${encodeURIComponent(name)}`, { method: 'DELETE' }),
   backupImport: (file: File) => {
@@ -1153,24 +1211,25 @@ export const adminApi = {
   // OAuth providers, groups, image styles) plus admin assets, and imports by
   // upsert, leaving users, conversations, user uploads, KBs, sessions,
   // workspaces, and logs untouched.
-  configExport: async (): Promise<Blob> => {
-    const token = getAccessToken()
-    const res = await fetch(apiUrl('/admin/config/export'), {
-      credentials: 'include',
-      headers: token ? { authorization: `Bearer ${token}` } : {},
-    })
-    if (!res.ok) {
-      let msg = `export failed (${res.status})`
-      try {
-        const j = (await res.json()) as { error?: string }
-        if (j?.error) msg = j.error
-      } catch {
-        /* non-JSON error body */
+  configExport: (): Promise<Blob> =>
+    withRequestActivity(async () => {
+      const token = getAccessToken()
+      const res = await fetch(apiUrl('/admin/config/export'), {
+        credentials: 'include',
+        headers: token ? { authorization: `Bearer ${token}` } : {},
+      })
+      if (!res.ok) {
+        let msg = `export failed (${res.status})`
+        try {
+          const j = (await res.json()) as { error?: string }
+          if (j?.error) msg = j.error
+        } catch {
+          /* non-JSON error body */
+        }
+        throw new ApiError(res.status, msg, null)
       }
-      throw new ApiError(res.status, msg, null)
-    }
-    return res.blob()
-  },
+      return res.blob()
+    }),
   configImport: (file: File) => {
     const fd = new FormData()
     fd.append('file', file)
@@ -1179,7 +1238,8 @@ export const adminApi = {
 
   // Vector index maintenance. Checks DB chunks against Qdrant and can rebuild
   // missing/empty vectors asynchronously.
-  vectorMaintenanceState: () => api<VectorMaintenanceState>('/admin/vectors/jobs'),
+  vectorMaintenanceState: (activity: RequestActivityMode = 'foreground') =>
+    api<VectorMaintenanceState>('/admin/vectors/jobs', { activity }),
   vectorCheckStart: () => api<VectorMaintenanceState>('/admin/vectors/check', { method: 'POST' }),
   vectorRebuildMissingStart: () =>
     api<VectorMaintenanceState>('/admin/vectors/rebuild-missing', { method: 'POST' }),

@@ -1,6 +1,11 @@
 {
   "title": "管理后台",
   "backToChat": "返回聊天",
+  "activity": {
+    "loading": "加载中…",
+    "navigating": "正在打开页面…",
+    "stillWaiting": "服务器响应较慢，仍在等待…"
+  },
   "common": {
     "edit": "编辑",
     "delete": "删除",
@@ -588,7 +593,72 @@
     "lead": "对话过程中助手会调用的外部服务。",
     "availabilityTitle": "全局工具可用性",
     "availabilityLead": "停用后，该工具会从所有模型中移除，包括已明确允许它的模型。",
-    "availabilityEmpty": "当前没有已注册的平台工具。"
+    "availabilityEmpty": "当前没有已注册的平台工具。",
+    "mcpAvailabilityTitle": "MCP 工具可用性",
+    "mcpAvailabilityLead": "选择哪些已配置的 MCP 服务可供用户和模型使用。",
+    "mcpAvailabilityEmpty": "尚未配置 MCP 服务。",
+    "mcpUnavailable": "最近一次连接尝试失败。",
+    "manageMCP": "管理 MCP"
+  },
+  "mcp": {
+    "title": "MCP 服务",
+    "lead": "连接 Streamable HTTP 服务，并在对话中提供其发现的工具。",
+    "new": "新建 MCP 服务",
+    "listLabel": "MCP 服务列表",
+    "emptyTitle": "尚无 MCP 服务",
+    "emptyBody": "添加 Streamable HTTP 端点，然后测试连接并同步工具。",
+    "editorTitle": "编辑 MCP 服务",
+    "newTitle": "新建 MCP 服务",
+    "editorDescriptionNew": "保存连接后即可测试并发现其中的工具。",
+    "editorDescriptionEdit": "修改连接设置。保留掩码形式的请求头值即可继续使用已保存的密钥。",
+    "removeTitle": "删除 MCP 服务？",
+    "removeBody": "将删除“{{name}}”，并从后续对话中移除它的全部工具。",
+    "created": "MCP 服务已创建",
+    "updated": "MCP 服务已更新",
+    "removed": "MCP 服务已删除",
+    "testSucceeded": "连接成功",
+    "syncSucceeded": "工具已同步",
+    "toolCount": "已发现 {{count}} 个",
+    "lastSynced": "上次同步于 {{time}}",
+    "fields": {
+      "name": "名称",
+      "namePlaceholder": "12306 火车查询",
+      "icon": "图标",
+      "description": "工具描述",
+      "descriptionPlaceholder": "查询列车时刻、车站和余票信息。",
+      "url": "Streamable HTTP URL",
+      "urlHint": "端点必须通过 Streamable HTTP 接收 MCP JSON-RPC 请求。",
+      "headers": "请求头",
+      "headersHint": "随每次 MCP 请求发送的可选请求头。已保存的敏感值可能显示为掩码。",
+      "noHeaders": "无需额外请求头。",
+      "headerNameLabel": "第 {{index}} 个请求头名称",
+      "headerValueLabel": "第 {{index}} 个请求头值",
+      "headerNamePlaceholder": "Authorization",
+      "headerValuePlaceholder": "Bearer token",
+      "enabled": "对用户可用",
+      "enabledHint": "建议先测试连接并同步工具，再开启此服务。"
+    },
+    "actions": {
+      "test": "测试",
+      "sync": "同步工具",
+      "addHeader": "添加请求头",
+      "removeHeader": "移除第 {{index}} 个请求头",
+      "showHeader": "显示请求头值",
+      "hideHeader": "隐藏请求头值"
+    },
+    "status": {
+      "connected": "连接正常",
+      "error": "连接错误",
+      "notTested": "未测试",
+      "enabled": "已启用",
+      "disabled": "已停用"
+    },
+    "errors": {
+      "missingFields": "名称、图标、描述和 URL 均为必填项。",
+      "invalidUrl": "请输入有效的 HTTP 或 HTTPS URL。",
+      "invalidHeader": "请输入有效的 HTTP 请求头名称。",
+      "duplicateHeader": "请求头“{{name}}”重复。"
+    }
   },
   "audio": {
     "title": "语音",
