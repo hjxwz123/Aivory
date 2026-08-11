@@ -1,6 +1,11 @@
 {
   "title": "管理",
   "backToChat": "チャットに戻る",
+  "activity": {
+    "loading": "読み込み中…",
+    "navigating": "ページを開いています…",
+    "stillWaiting": "サーバーの応答に時間がかかっています。引き続き待機中です…"
+  },
   "common": {
     "edit": "編集",
     "delete": "削除",
@@ -584,7 +589,72 @@
     "lead": "会話中にアシスタントが呼び出す外部サービス。",
     "availabilityTitle": "グローバルツールの可用性",
     "availabilityLead": "無効にしたツールは、明示的に許可したモデルを含むすべてのモデルから除外されます。",
-    "availabilityEmpty": "登録済みのプラットフォームツールはありません。"
+    "availabilityEmpty": "登録済みのプラットフォームツールはありません。",
+    "mcpAvailabilityTitle": "MCP ツールの可用性",
+    "mcpAvailabilityLead": "設定済みの MCP サービスから、ユーザーとモデルが利用できるものを選択します。",
+    "mcpAvailabilityEmpty": "MCP サービスは設定されていません。",
+    "mcpUnavailable": "直近の接続試行に失敗しました。",
+    "manageMCP": "MCP を管理"
+  },
+  "mcp": {
+    "title": "MCP サービス",
+    "lead": "Streamable HTTP サービスに接続し、検出したツールを会話で利用できるようにします。",
+    "new": "MCP サービスを追加",
+    "listLabel": "MCP サービス一覧",
+    "emptyTitle": "MCP サービスはまだありません",
+    "emptyBody": "Streamable HTTP エンドポイントを追加し、接続テスト後にツールを同期してください。",
+    "editorTitle": "MCP サービスを編集",
+    "newTitle": "MCP サービスを追加",
+    "editorDescriptionNew": "接続を保存すると、テストとツール検出を実行できます。",
+    "editorDescriptionEdit": "接続設定を更新します。マスクされたヘッダー値はそのままにすると、保存済みのシークレットが維持されます。",
+    "removeTitle": "MCP サービスを削除しますか？",
+    "removeBody": "「{{name}}」を削除し、そのすべてのツールを今後の会話から除外します。",
+    "created": "MCP サービスを作成しました",
+    "updated": "MCP サービスを更新しました",
+    "removed": "MCP サービスを削除しました",
+    "testSucceeded": "接続に成功しました",
+    "syncSucceeded": "ツールを同期しました",
+    "toolCount": "{{count}} 件を検出",
+    "lastSynced": "最終同期: {{time}}",
+    "fields": {
+      "name": "名前",
+      "namePlaceholder": "12306 列車検索",
+      "icon": "アイコン",
+      "description": "ツールの説明",
+      "descriptionPlaceholder": "列車の時刻、駅、空席情報を検索します。",
+      "url": "Streamable HTTP URL",
+      "urlHint": "エンドポイントは Streamable HTTP 経由の MCP JSON-RPC リクエストを受け付ける必要があります。",
+      "headers": "リクエストヘッダー",
+      "headersHint": "すべての MCP リクエストに付加する任意のヘッダーです。保存済みの機密値はマスク表示される場合があります。",
+      "noHeaders": "追加のリクエストヘッダーはありません。",
+      "headerNameLabel": "ヘッダー {{index}} の名前",
+      "headerValueLabel": "ヘッダー {{index}} の値",
+      "headerNamePlaceholder": "Authorization",
+      "headerValuePlaceholder": "Bearer token",
+      "enabled": "ユーザーが利用可能",
+      "enabledHint": "接続をテストしてツールを同期した後に有効にしてください。"
+    },
+    "actions": {
+      "test": "テスト",
+      "sync": "ツールを同期",
+      "addHeader": "ヘッダーを追加",
+      "removeHeader": "ヘッダー {{index}} を削除",
+      "showHeader": "ヘッダー値を表示",
+      "hideHeader": "ヘッダー値を隠す"
+    },
+    "status": {
+      "connected": "接続済み",
+      "error": "接続エラー",
+      "notTested": "未テスト",
+      "enabled": "有効",
+      "disabled": "無効"
+    },
+    "errors": {
+      "missingFields": "名前、アイコン、説明、URL は必須です。",
+      "invalidUrl": "有効な HTTP または HTTPS URL を入力してください。",
+      "invalidHeader": "有効な HTTP ヘッダー名を入力してください。",
+      "duplicateHeader": "ヘッダー「{{name}}」が重複しています。"
+    }
   },
   "audio": {
     "title": "音声",

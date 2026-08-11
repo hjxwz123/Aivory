@@ -8,8 +8,11 @@
  */
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { adminApi, ApiError } from '@/api'
+import { Link } from 'react-router-dom'
+import { Settings2 } from 'lucide-react'
+import { adminApi, ApiError, type ApiMCPServer } from '@/api'
 import type { ApiBuiltinTool } from '@/api/types'
+import { LucideGlyph } from '@/components/ui/lucide-icon'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Field } from '@/components/ui/label'
@@ -35,18 +38,22 @@ export default function AdminTools() {
   const { t } = useTranslation(['admin', 'common'])
   const [draft, setDraft] = useState<Settings>({})
   const [builtinTools, setBuiltinTools] = useState<ApiBuiltinTool[]>([])
+  const [mcpServers, setMcpServers] = useState<ApiMCPServer[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [togglingMCPID, setTogglingMCPID] = useState('')
 
   async function load() {
     setLoading(true)
     try {
-      const [s, tools] = await Promise.all([
+      const [s, tools, mcp] = await Promise.all([
         adminApi.settings(),
         adminApi.builtinTools().catch(() => [] as ApiBuiltinTool[]),
+        adminApi.mcpServers(),
       ])
       setDraft(s)
       setBuiltinTools(tools)
+      setMcpServers(mcp)
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
     } finally {
@@ -89,6 +96,21 @@ export default function AdminTools() {
     if (enabled) disabled.delete(name)
     else disabled.add(name)
     setDraft({ ...draft, disabled_tools: [...disabled] })
+  }
+
+  async function setMCPEnabled(server: ApiMCPServer, enabled: boolean) {
+    if (togglingMCPID) return
+    setTogglingMCPID(server.id)
+    setMcpServers((current) => current.map((row) => row.id === server.id ? { ...row, enabled } : row))
+    try {
+      const updated = await adminApi.updateMCPServer(server.id, { enabled })
+      setMcpServers((current) => current.map((row) => row.id === server.id ? updated : row))
+    } catch (error) {
+      setMcpServers((current) => current.map((row) => row.id === server.id ? server : row))
+      toast.error(error instanceof ApiError ? error.message : t('admin:common.failed'))
+    } finally {
+      setTogglingMCPID('')
+    }
   }
 
   const searchProvider = readString('search_provider')
@@ -135,6 +157,58 @@ export default function AdminTools() {
                     </label>
                   )
                 })}
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-5">
+            <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <h2 className="font-serif text-lg text-[var(--color-fg)]">
+                  {t('admin:tools.mcpAvailabilityTitle')}
+                </h2>
+                <p className="mt-1 max-w-2xl text-xs text-[var(--color-fg-subtle)]">
+                  {t('admin:tools.mcpAvailabilityLead')}
+                </p>
+              </div>
+              <Button
+                asChild
+                size="sm"
+                variant="secondary"
+                leadingIcon={<Settings2 size={13} aria-hidden />}
+                className="shrink-0 max-sm:min-h-[var(--tap-min)]"
+              >
+                <Link to="/admin/mcp">{t('admin:tools.manageMCP')}</Link>
+              </Button>
+            </div>
+            {mcpServers.length === 0 ? (
+              <p className="mt-4 text-sm text-[var(--color-fg-muted)]">{t('admin:tools.mcpAvailabilityEmpty')}</p>
+            ) : (
+              <div className="mt-4 divide-y divide-[var(--color-divider)] border-y border-[var(--color-divider)]">
+                {mcpServers.map((server) => (
+                  <label key={server.id} htmlFor={`tool-mcp-${server.id}`} className="flex min-h-14 items-center gap-3 py-2.5">
+                    <span className="grid size-8 shrink-0 place-items-center rounded-[8px] bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)]">
+                      <LucideGlyph name={server.icon || 'Blocks'} size={15} aria-hidden />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-[13px] font-medium text-[var(--color-fg)]">{server.name}</span>
+                      <span className="mt-0.5 block text-[12px] leading-4 text-[var(--color-fg-subtle)]">
+                        {server.description}
+                      </span>
+                      {server.last_error ? (
+                        <span className="mt-0.5 block text-[11px] leading-4 text-[var(--color-danger)]">
+                          {t('admin:tools.mcpUnavailable')}
+                        </span>
+                      ) : null}
+                    </span>
+                    <Switch
+                      id={`tool-mcp-${server.id}`}
+                      checked={server.enabled}
+                      disabled={Boolean(togglingMCPID)}
+                      onCheckedChange={(value) => void setMCPEnabled(server, value)}
+                    />
+                  </label>
+                ))}
               </div>
             )}
           </div>

@@ -203,6 +203,7 @@ export function MessageList({ conversation, scrollToMessageId, jumpKey }: Messag
         verify: fastMode ? undefined : armed.verify,
         toolMode: fastMode ? 'enabled' : armed.toolMode,
         webSearch: fastMode ? undefined : armed.webSearch,
+        selectedToolIds: armed.selectedToolIds,
         fast: fastMode,
       })
     },

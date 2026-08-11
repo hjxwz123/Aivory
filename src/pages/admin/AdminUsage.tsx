@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { Trash2 } from 'lucide-react'
+import { LoaderCircle, Trash2 } from 'lucide-react'
 import { adminApi, ApiError } from '@/api'
 import type { ApiUsageRecord } from '@/api/types'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -70,6 +70,7 @@ export default function AdminUsage() {
   const [page, setPage] = useState(1)
   const [confirmBulk, setConfirmBulk] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [busyId, setBusyId] = useState<number | null>(null)
   // The failed-request record whose upstream error detail is being viewed (§usage errors).
   const [errorDetail, setErrorDetail] = useState<ApiUsageRecord | null>(null)
 
@@ -147,7 +148,8 @@ export default function AdminUsage() {
   }
 
   async function deleteOne(id: number) {
-    setBusy(true)
+    if (busy || busyId !== null) return
+    setBusyId(id)
     try {
       await adminApi.deleteUsageRecord(id)
       // Optimistically drop the row; reload to keep the page full + totals fresh.
@@ -156,11 +158,12 @@ export default function AdminUsage() {
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t('common.failed'))
     } finally {
-      setBusy(false)
+      setBusyId(null)
     }
   }
 
   async function deleteFiltered() {
+    if (busy || busyId !== null) return
     setBusy(true)
     try {
       const r = await adminApi.deleteUsageFiltered(queryParams)
@@ -187,7 +190,7 @@ export default function AdminUsage() {
         <Button
           variant="destructive"
           leadingIcon={<Trash2 size={13} aria-hidden />}
-          disabled={total === 0 || loading}
+          disabled={total === 0 || loading || busy || busyId !== null}
           onClick={() => setConfirmBulk(true)}
           className="w-full sm:w-auto"
         >
@@ -404,11 +407,16 @@ export default function AdminUsage() {
                       <button
                         type="button"
                         onClick={() => void deleteOne(r.id)}
-                        disabled={busy}
+                        disabled={busy || busyId !== null}
+                        aria-busy={busyId === r.id || undefined}
                         aria-label={t('usage.deleteRow', { defaultValue: 'Delete record' })}
                         className="inline-flex items-center justify-center size-7 rounded-[7px] text-[var(--color-fg-subtle)] hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] disabled:opacity-40"
                       >
-                        <Trash2 size={13} aria-hidden />
+                        {busyId === r.id ? (
+                          <LoaderCircle size={13} className="animate-spin" aria-hidden />
+                        ) : (
+                          <Trash2 size={13} aria-hidden />
+                        )}
                       </button>
                     </td>
                   </tr>
@@ -449,11 +457,16 @@ export default function AdminUsage() {
                   <button
                     type="button"
                     onClick={() => void deleteOne(r.id)}
-                    disabled={busy}
+                    disabled={busy || busyId !== null}
+                    aria-busy={busyId === r.id || undefined}
                     aria-label={t('usage.deleteRow', { defaultValue: 'Delete record' })}
                     className="inline-flex size-10 shrink-0 items-center justify-center rounded-[8px] text-[var(--color-fg-subtle)] interactive hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] disabled:opacity-40"
                   >
-                    <Trash2 size={15} aria-hidden />
+                    {busyId === r.id ? (
+                      <LoaderCircle size={15} className="animate-spin" aria-hidden />
+                    ) : (
+                      <Trash2 size={15} aria-hidden />
+                    )}
                   </button>
                 </div>
 
@@ -554,7 +567,7 @@ export default function AdminUsage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={confirmBulk} onOpenChange={setConfirmBulk}>
+      <Dialog open={confirmBulk} onOpenChange={(open) => !busy && setConfirmBulk(open)}>
         <DialogContent size="sm">
           <DialogHeader>
             <DialogTitle>{t('usage.deleteConfirm.title', { defaultValue: 'Delete these usage records?' })}</DialogTitle>

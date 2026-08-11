@@ -224,6 +224,7 @@ func modelsResponse(d Deps, r *http.Request, models []store.Model) map[string]an
 	if !memoryEnabled {
 		disabledBuiltinTools["save_memory"] = true
 	}
+	mcpToolsAvailable := d.Tools != nil && len(d.Tools.ListMCP("")) > 0
 
 	items := []item{}
 	for _, m := range models {
@@ -247,7 +248,7 @@ func modelsResponse(d Deps, r *http.Request, models []store.Model) map[string]an
 			ID: m.ID, Label: m.Label, Description: m.Description, Icon: m.Icon,
 			Kind: m.Kind, Enabled: m.Enabled, Vision: m.Vision, Stream: m.Stream, ResearchEnabled: m.ResearchEnabled, ToolMode: m.ToolMode,
 			BuiltinTools:   builtinTools,
-			ToolsAvailable: len(builtinTools) > 0 || hostedToolsAvailable,
+			ToolsAvailable: len(builtinTools) > 0 || hostedToolsAvailable || (m.ToolMode != "none" && mcpToolsAvailable),
 			ParamControls:  m.ParamControls, ChannelID: m.ChannelID, SortOrder: m.SortOrder,
 			Currency:        m.Currency,
 			Tags:            tags,

@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useRef } from 'react'
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import { useOpenSettings } from '@/hooks/use-open-settings'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { Toaster } from '@/components/ui/toaster'
@@ -72,6 +73,7 @@ const AdminFeedback = lazy(() => import('@/pages/admin/AdminFeedback'))
 const UserFiles = lazy(() => import('@/pages/files/UserFiles'))
 const SkillsPrompts = lazy(() => import('@/pages/library/SkillsPrompts'))
 const AdminTools = lazy(() => import('@/pages/admin/AdminTools'))
+const AdminMCP = lazy(() => import('@/pages/admin/AdminMCP'))
 const AdminAudio = lazy(() => import('@/pages/admin/AdminAudio'))
 const AdminOAuth = lazy(() => import('@/pages/admin/AdminOAuth'))
 const AdminRedeemCodes = lazy(() => import('@/pages/admin/AdminRedeemCodes'))
@@ -120,9 +122,21 @@ function GlobalShortcuts() {
 }
 
 function RouteFallback() {
+  const { t } = useTranslation('common')
+
   return (
-    <div className="min-h-svh w-full flex items-center justify-center text-[var(--color-fg-subtle)] text-sm">
-      <span className="inline-block size-4 rounded-full border-2 border-[var(--color-fg-faint)] border-r-transparent animate-[spin_900ms_linear_infinite]" />
+    <div
+      className="min-h-svh w-full flex flex-col items-center justify-center gap-3 text-[var(--color-fg-subtle)] text-sm"
+      role="status"
+      aria-live="polite"
+      aria-busy="true"
+      aria-atomic="true"
+    >
+      <span
+        aria-hidden
+        className="inline-block size-4 rounded-full border-2 border-[var(--color-fg-faint)] border-r-transparent animate-[spin_900ms_linear_infinite]"
+      />
+      <span className="text-[13px]">{t('common.loading', { defaultValue: 'Loading…' })}</span>
     </div>
   )
 }
@@ -278,6 +292,7 @@ export default function App() {
               <Route path="files" element={<AdminFiles />} />
               <Route path="feedback" element={<AdminFeedback />} />
               <Route path="tools" element={<AdminTools />} />
+              <Route path="mcp" element={<AdminMCP />} />
               <Route path="audio" element={<AdminAudio />} />
               <Route path="oauth" element={<AdminOAuth />} />
               <Route path="moderation" element={<AdminModeration />} />

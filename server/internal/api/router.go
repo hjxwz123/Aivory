@@ -241,6 +241,7 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("POST", "/api/auth/sessions/:jti/revoke", requireAuth(d, revokeSessionHandler))
 
 	mux.handle("GET", "/api/models", requireAuth(d, listModelsHandler))
+	mux.handle("GET", "/api/tools", requireAuth(d, listSelectableToolsHandler))
 	mux.handle("GET", "/api/image-models", requireAuth(d, listImageModelsHandler))
 	mux.handle("GET", "/api/embedding-models", requireAuth(d, listEmbeddingModelsHandler))
 	mux.handle("GET", "/api/skills", requireAuth(d, listSkillsPublicHandler))
@@ -358,6 +359,12 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("GET", "/api/admin/models", requireAdmin(d, listModelsAdmin))
 	mux.handle("POST", "/api/admin/models", requireAdmin(d, createModelAdmin))
 	mux.handle("GET", "/api/admin/tools/builtins", requireAdmin(d, listBuiltinToolsAdmin))
+	mux.handle("GET", "/api/admin/mcp", requireAdmin(d, listMCPServersAdmin))
+	mux.handle("POST", "/api/admin/mcp", requireAdmin(d, createMCPServerAdmin))
+	mux.handle("PATCH", "/api/admin/mcp/:id", requireAdmin(d, updateMCPServerAdmin))
+	mux.handle("DELETE", "/api/admin/mcp/:id", requireAdmin(d, deleteMCPServerAdmin))
+	mux.handle("POST", "/api/admin/mcp/:id/test", requireAdmin(d, testMCPServerAdmin))
+	mux.handle("POST", "/api/admin/mcp/:id/sync", requireAdmin(d, syncMCPServerAdmin))
 	// Must precede the /:id PATCH — both are 4-segment PATCH routes and the mux
 	// picks the first match, so /reorder would otherwise hit updateModelAdmin.
 	mux.handle("PATCH", "/api/admin/models/reorder", requireAdmin(d, reorderModelsAdmin))

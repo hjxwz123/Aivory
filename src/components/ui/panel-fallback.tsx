@@ -17,6 +17,8 @@ export function PanelFallback() {
       className="w-full flex flex-col items-center justify-center gap-3 py-24 text-[var(--color-fg-subtle)]"
       role="status"
       aria-live="polite"
+      aria-busy="true"
+      aria-atomic="true"
     >
       <span
         aria-hidden

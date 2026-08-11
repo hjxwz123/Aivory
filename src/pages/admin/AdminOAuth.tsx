@@ -185,7 +185,7 @@ export default function AdminOAuth() {
       setCopied(true)
       setTimeout(() => setCopied(false), 1800)
     } catch {
-      /* clipboard blocked — the field is selectable as a fallback */
+      toast.error(t('admin:common.failed'))
     }
   }
 

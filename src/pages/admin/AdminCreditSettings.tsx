@@ -73,7 +73,8 @@ export default function AdminCreditSettings() {
   }>({ open: false, draft: {} })
   const [packageSaving, setPackageSaving] = useState(false)
   const packageSavingRef = useRef(false)
-  const [packageBusyId, setPackageBusyId] = useState<string | null>(null)
+  const [packageBusyIds, setPackageBusyIds] = useState<Set<string>>(() => new Set())
+  const packageBusyIdsRef = useRef(new Set<string>())
   const [confirmPackageDelete, setConfirmPackageDelete] = useState<ApiCreditPackage | null>(null)
   const [packageDeleting, setPackageDeleting] = useState(false)
   const packageDeletingRef = useRef(false)
@@ -254,15 +255,23 @@ export default function AdminCreditSettings() {
   }
 
   async function togglePackage(row: ApiCreditPackage, enabled: boolean) {
-    if (packageBusyId) return
-    setPackageBusyId(row.id)
+    if (packageBusyIdsRef.current.has(row.id)) return
+    packageBusyIdsRef.current.add(row.id)
+    setPackageBusyIds(new Set(packageBusyIdsRef.current))
+    setCreditPackages((items) => items.map((item) => (
+      item.id === row.id ? { ...item, enabled } : item
+    )))
     try {
       const updated = await adminApi.updateCreditPackage(row.id, { enabled })
       setCreditPackages((items) => items.map((item) => (item.id === updated.id ? updated : item)))
     } catch (error) {
+      setCreditPackages((items) => items.map((item) => (
+        item.id === row.id ? { ...item, enabled: row.enabled } : item
+      )))
       toast.error(error instanceof ApiError ? error.message : t('admin:common.failed'))
     } finally {
-      setPackageBusyId(null)
+      packageBusyIdsRef.current.delete(row.id)
+      setPackageBusyIds(new Set(packageBusyIdsRef.current))
     }
   }
 
@@ -497,56 +506,60 @@ export default function AdminCreditSettings() {
                 mobileDragOnly
                 listClassName="mt-4"
                 rowClassName="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-2 gap-y-1.5 px-3 py-3 md:grid-cols-[auto_auto_minmax(0,1fr)_auto] md:gap-3 md:px-4"
-                renderItem={(item) => (
-                  <>
-                    <div className="min-w-0">
-                      <div className="flex min-w-0 items-center gap-2">
-                        <span className="truncate text-sm font-medium text-[var(--color-fg)]">{item.name}</span>
-                        {!item.enabled ? (
-                          <Badge size="xs" variant="neutral">{t('admin:groups.creditPackages.disabled')}</Badge>
-                        ) : null}
+                renderItem={(item) => {
+                  const toggling = packageBusyIds.has(item.id)
+                  return (
+                    <>
+                      <div className="min-w-0">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className="truncate text-sm font-medium text-[var(--color-fg)]">{item.name}</span>
+                          {!item.enabled ? (
+                            <Badge size="xs" variant="neutral">{t('admin:groups.creditPackages.disabled')}</Badge>
+                          ) : null}
+                        </div>
+                        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[12px] text-[var(--color-fg-subtle)]">
+                          <span>
+                            {t('admin:groups.creditPackages.creditCount', {
+                              count: item.credits.toLocaleString(i18n.resolvedLanguage),
+                            })}
+                          </span>
+                          <span aria-hidden>·</span>
+                          <span className="tabular-nums">
+                            {formatCurrencyMinor(item.price_amount_minor, packageCurrency, i18n.resolvedLanguage)}
+                          </span>
+                          {item.description ? <span className="basis-full truncate">{item.description}</span> : null}
+                        </div>
                       </div>
-                      <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[12px] text-[var(--color-fg-subtle)]">
-                        <span>
-                          {t('admin:groups.creditPackages.creditCount', {
-                            count: item.credits.toLocaleString(i18n.resolvedLanguage),
-                          })}
-                        </span>
-                        <span aria-hidden>·</span>
-                        <span className="tabular-nums">
-                          {formatCurrencyMinor(item.price_amount_minor, packageCurrency, i18n.resolvedLanguage)}
-                        </span>
-                        {item.description ? <span className="basis-full truncate">{item.description}</span> : null}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-1 max-md:col-start-2 max-md:w-full max-md:justify-between">
-                      <Switch
-                        checked={item.enabled}
-                        disabled={packageBusyId === item.id}
-                        onCheckedChange={(enabled) => void togglePackage(item, enabled)}
-                        aria-label={t('admin:groups.creditPackages.enabledLabel', { name: item.name })}
-                      />
-                      <div className="flex items-center gap-1">
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          className="max-md:size-11"
-                          leadingIcon={<Pencil size={14} aria-hidden />}
-                          onClick={() => openEditPackage(item)}
-                          aria-label={`${t('admin:common.edit')}: ${item.name}`}
+                      <div className="flex items-center gap-1 max-md:col-start-2 max-md:w-full max-md:justify-between">
+                        <Switch
+                          checked={item.enabled}
+                          disabled={toggling}
+                          aria-busy={toggling || undefined}
+                          onCheckedChange={(enabled) => void togglePackage(item, enabled)}
+                          aria-label={t('admin:groups.creditPackages.enabledLabel', { name: item.name })}
                         />
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          leadingIcon={<Trash2 size={14} aria-hidden />}
-                          onClick={() => setConfirmPackageDelete(item)}
-                          aria-label={`${t('admin:common.remove')}: ${item.name}`}
-                          className="text-[var(--color-fg-subtle)] hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)] max-md:size-11"
-                        />
+                        <div className="flex items-center gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            className="max-md:size-11"
+                            leadingIcon={<Pencil size={14} aria-hidden />}
+                            onClick={() => openEditPackage(item)}
+                            aria-label={`${t('admin:common.edit')}: ${item.name}`}
+                          />
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            leadingIcon={<Trash2 size={14} aria-hidden />}
+                            onClick={() => setConfirmPackageDelete(item)}
+                            aria-label={`${t('admin:common.remove')}: ${item.name}`}
+                            className="text-[var(--color-fg-subtle)] hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)] max-md:size-11"
+                          />
+                        </div>
                       </div>
-                    </div>
-                  </>
-                )}
+                    </>
+                  )
+                }}
               />
             )}
           </section>

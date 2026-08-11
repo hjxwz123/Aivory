@@ -112,6 +112,28 @@
       "toolModeEnabledDesc": "Active les appels d’outils.",
       "webSearch": "Recherche web",
       "disable": "Désactiver {{name}}"
+    },
+    "toolSelection": {
+      "entry": "Choisir les outils",
+      "entryDescription": "Limiter les modes automatique et activé aux outils choisis.",
+      "summaryAll": "Tous",
+      "summaryCount": "{{count}} sélectionné(s)",
+      "selectedChip": "{{count}} outil(s)",
+      "reset": "Utiliser tous les outils disponibles",
+      "title": "Choisir les outils",
+      "description": "Les modes automatique et activé utiliseront uniquement les outils sélectionnés ici.",
+      "search": "Rechercher des outils",
+      "selectAll": "Tout sélectionner",
+      "clear": "Effacer",
+      "loading": "Chargement des outils",
+      "loadFailed": "Impossible de charger les outils.",
+      "retry": "Réessayer",
+      "noResults": "Aucun outil correspondant.",
+      "empty": "Aucun outil n’est disponible pour ce modèle.",
+      "allSelected": "Tous les outils sont sélectionnés ({{count}})",
+      "selectedCount": "{{count}} outil(s) sélectionné(s)",
+      "cancel": "Annuler",
+      "done": "Terminé"
     }
   },
   "imageConversationTitle": "Conversation sur une image",
@@ -230,13 +252,23 @@
     "aivory_web_search": "Recherche web Aivory",
     "code_interpreter": "Interpréteur de code",
     "image_generation": "Génération d’images",
+    "web_fetch": "Lire une page web",
+    "python_execute": "Interpréteur Python",
+    "image_generate": "Génération d’images",
+    "use_skill": "Utiliser une compétence",
+    "save_memory": "Enregistrer en mémoire",
     "deep_research": "Recherche approfondie"
   },
   "toolDescriptions": {
     "web_search": "Rechercher les informations les plus récentes sur le web",
     "aivory_web_search": "Rechercher sur le web via le moteur configuré dans Aivory",
     "code_interpreter": "Exécuter du code et analyser des fichiers",
-    "image_generation": "Générer ou modifier des images"
+    "image_generation": "Générer ou modifier des images",
+    "web_fetch": "Lire le contenu principal d’une page web",
+    "python_execute": "Exécuter Python pour l’analyse, le calcul et les fichiers",
+    "image_generate": "Générer ou modifier des images avec le modèle configuré",
+    "use_skill": "Charger les instructions d’une compétence disponible",
+    "save_memory": "Mémoriser des informations utiles pour les prochaines conversations"
   },
   "sources": {
     "label": "Sources",

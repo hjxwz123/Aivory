@@ -89,6 +89,10 @@ type ToolRegistry interface {
 	Run(ctx context.Context, name string, input []byte, tc *ToolContext) (output string, citations []Citation, err error)
 }
 
+type mcpToolRegistry interface {
+	ListMCP(modelID string) []MCPToolDef
+}
+
 // providerArtifactRegistry is optionally implemented by the concrete tools
 // registry. It lets provider-hosted tools persist binary output through the same
 // storage path and OnArtifact callback as local tools.
@@ -304,6 +308,77 @@ func filterModelBuiltinTools(defs []ToolDef, allowed map[string]bool) []ToolDef 
 	return out
 }
 
+func selectedToolIDSet(ids []string, configured bool) map[string]bool {
+	if !configured {
+		return nil
+	}
+	selected := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		if id = strings.TrimSpace(id); id != "" {
+			selected[id] = true
+		}
+	}
+	return selected
+}
+
+func filterBuiltinToolsBySelection(defs []ToolDef, selected map[string]bool) []ToolDef {
+	if selected == nil {
+		return defs
+	}
+	out := make([]ToolDef, 0, len(defs))
+	for _, definition := range defs {
+		if selected["builtin:"+definition.Name] {
+			out = append(out, definition)
+		}
+	}
+	return out
+}
+
+func filterMCPToolsBySelection(defs []MCPToolDef, selected map[string]bool) []MCPToolDef {
+	if selected == nil {
+		return defs
+	}
+	out := make([]MCPToolDef, 0, len(defs))
+	for _, definition := range defs {
+		if selected["mcp:"+definition.ServerID] {
+			out = append(out, definition)
+		}
+	}
+	return out
+}
+
+func flattenMCPToolDefs(defs []MCPToolDef) []ToolDef {
+	out := make([]ToolDef, 0, len(defs))
+	for _, definition := range defs {
+		out = append(out, definition.ToolDef)
+	}
+	return out
+}
+
+func filterHostedToolsBySelection(names []string, requests []json.RawMessage, selected map[string]bool) ([]string, []json.RawMessage) {
+	if selected == nil {
+		return names, requests
+	}
+	outNames := make([]string, 0, len(names))
+	outRequests := make([]json.RawMessage, 0, len(requests))
+	for index, name := range names {
+		if index >= len(requests) || !selected["hosted:"+name] {
+			continue
+		}
+		outNames = append(outNames, name)
+		outRequests = append(outRequests, requests[index])
+	}
+	return outNames, outRequests
+}
+
+func (o *Orchestrator) listMCPTools(modelID string) []MCPToolDef {
+	registry, ok := o.tools.(mcpToolRegistry)
+	if !ok {
+		return nil
+	}
+	return registry.ListMCP(modelID)
+}
+
 func toolDefsContain(defs []ToolDef, name string) bool {
 	for _, definition := range defs {
 		if definition.Name == name {
@@ -452,9 +527,13 @@ type RunRequest struct {
 	// disabled; false maps to enabled). Fast and Deep Research force enabled.
 	ToolMode string
 	// OfficialToolNames is accepted only for compatibility with callers predating
-	// the unified tool policy. It is ignored: hosted tools are administrator-owned
-	// model configuration and users cannot select, remove, or reorder them.
+	// the unified tool policy. It is ignored: clients select from the safe unified
+	// catalog through SelectedToolIDs and cannot submit hosted request fragments.
 	OfficialToolNames []string
+	// SelectedToolIDs is a unified service/tool catalog subset. Omitted means all
+	// currently available candidates; an explicit empty array means none.
+	SelectedToolIDs         []string
+	SelectedToolsConfigured bool
 	// SelectedUserSkillIDs names private, user-owned Agent Skills explicitly
 	// selected for this turn. They are persisted on the user message and injected
 	// at user-message authority, never into composeSystemPrompt.
@@ -671,14 +750,21 @@ func (o *Orchestrator) buildFallbackRequest(ctx context.Context, base UnifiedCha
 	req.OfficialToolRequests = nil
 	req.ToolModePrompt = false
 	if req.ToolsEnabled {
-		req.Tools = filterModelBuiltinTools(o.filterDisabledTools(o.tools.List(m.ID)), fallbackBuiltinTools)
+		selectedTools := selectedToolIDSet(base.SelectedToolIDs, base.SelectedToolsConfigured)
+		builtinDefs := filterModelBuiltinTools(o.filterDisabledTools(o.tools.List(m.ID)), fallbackBuiltinTools)
 		if !store.MemoryEnabledForUser(ctx, o.db, base.UserID) {
-			req.Tools = filterToolDefsByName(req.Tools, map[string]bool{"save_memory": true})
+			builtinDefs = filterToolDefsByName(builtinDefs, map[string]bool{"save_memory": true})
 		}
 		if req.Fast {
-			req.Tools = filterToolDefsByName(req.Tools, map[string]bool{"python_execute": true})
+			builtinDefs = filterToolDefsByName(builtinDefs, map[string]bool{"python_execute": true})
 		}
+		builtinDefs = filterBuiltinToolsBySelection(builtinDefs, selectedTools)
+		mcpDefs := filterMCPToolsBySelection(o.listMCPTools(m.ID), selectedTools)
+		req.Tools = append(builtinDefs, flattenMCPToolDefs(mcpDefs)...)
 		req.OfficialToolNames, req.OfficialToolRequests = configuredOfficialToolRequests(m.OfficialTools, req.Fast)
+		req.OfficialToolNames, req.OfficialToolRequests = filterHostedToolsBySelection(
+			req.OfficialToolNames, req.OfficialToolRequests, selectedTools,
+		)
 		req.ToolModePrompt = fallbackToolMode == "prompt" && len(req.Tools) > 0
 	}
 	// The primary history may contain calls that the fallback model does not
@@ -732,7 +818,9 @@ func (o *Orchestrator) buildFallbackRequest(ctx context.Context, base UnifiedCha
 		// primary/global/per-turn policy that excluded use_skill.
 		fallbackOpts.Skills = nil
 		fallbackOpts.SkillsFull = nil
-		fallbackAllowsSkills := fallbackBuiltinTools == nil || fallbackBuiltinTools["use_skill"]
+		selectedTools := selectedToolIDSet(base.SelectedToolIDs, base.SelectedToolsConfigured)
+		fallbackAllowsSkills := (fallbackBuiltinTools == nil || fallbackBuiltinTools["use_skill"]) &&
+			(selectedTools == nil || selectedTools["builtin:use_skill"])
 		if fallbackOpts.SkillsAllowed && fallbackAllowsSkills && !globalDisabledTools["use_skill"] {
 			fallbackOpts.Skills, fallbackOpts.SkillsFull = loadEnabledModelSkills(ctx, o.db, m.ID)
 		}
@@ -1650,13 +1738,16 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	sandboxFiles := listSandboxFiles(ctx, o.db, conv.ID, req.UserID, o.uploadDir)
 	builtinTools := modelBuiltinToolSet(model.BuiltinTools)
 	globalDisabledTools := o.disabledToolSet()
+	selectedTools := selectedToolIDSet(req.SelectedToolIDs, req.SelectedToolsConfigured)
 	memoryEnabled := store.MemoryEnabledForUser(ctx, o.db, req.UserID)
 	// Load bound skill metadata before automatic routing. Exact skill names are
 	// checked locally; descriptions and full instructions never enter the route
 	// request.
 	availableSkillIdx := []SkillIndex{}
 	availableSkillFull := []SkillFull{}
-	skillsAllowed := (builtinTools == nil || builtinTools["use_skill"]) && !globalDisabledTools["use_skill"]
+	skillsAllowed := (builtinTools == nil || builtinTools["use_skill"]) &&
+		!globalDisabledTools["use_skill"] &&
+		(selectedTools == nil || selectedTools["builtin:use_skill"])
 	if skillsAllowed {
 		availableSkillIdx, availableSkillFull = loadEnabledModelSkills(ctx, o.db, model.ID)
 	}
@@ -1676,16 +1767,20 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	toolDefs := []ToolDef{}
 	if toolMode != "none" {
 		hostedToolNames, hostedToolRequests = configuredOfficialToolRequests(model.OfficialTools, fastMode)
-		toolDefs = filterModelBuiltinTools(o.filterDisabledTools(o.tools.List(model.ID)), builtinTools)
+		hostedToolNames, hostedToolRequests = filterHostedToolsBySelection(hostedToolNames, hostedToolRequests, selectedTools)
+		builtinDefs := filterModelBuiltinTools(o.filterDisabledTools(o.tools.List(model.ID)), builtinTools)
 		if !memoryEnabled {
-			toolDefs = filterToolDefsByName(toolDefs, map[string]bool{"save_memory": true})
+			builtinDefs = filterToolDefsByName(builtinDefs, map[string]bool{"save_memory": true})
 		}
 		// §fast-mode withholds python_execute (no sandbox on a fast turn) — drop it
 		// from local Functions and the hosted code interpreter from provider tools.
 		// Tool budgets are also quartered via ToolContext.Fast (charge()).
 		if fastMode {
-			toolDefs = filterToolDefsByName(toolDefs, map[string]bool{"python_execute": true})
+			builtinDefs = filterToolDefsByName(builtinDefs, map[string]bool{"python_execute": true})
 		}
+		builtinDefs = filterBuiltinToolsBySelection(builtinDefs, selectedTools)
+		mcpDefs := filterMCPToolsBySelection(o.listMCPTools(model.ID), selectedTools)
+		toolDefs = append(builtinDefs, flattenMCPToolDefs(mcpDefs)...)
 	}
 	if req.ToolMode == ToolModeAuto {
 		// An effective deny-all policy has nothing the classifier could enable.
@@ -2094,19 +2189,21 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			APIFormat: channel.APIFormat,
 			Fallback:  fallbackCreds,
 		},
-		Tools:                toolDefs,
-		OfficialToolNames:    hostedToolNames,
-		OfficialToolRequests: hostedToolRequests,
-		ToolsEnabled:         toolsEnabled,
-		Fast:                 fastMode,
-		ToolModePrompt:       toolMode == "prompt" && len(toolDefs) > 0,
-		ProjectFiles:         projectFiles,
-		RAGSnippets:          ragSnippets,
-		ParamOverrides:       req.ParamOverrides,
-		ParamControls:        model.ParamControls,
-		ExtraParams:          extraParams,
-		Stream:               model.Stream,
-		FallbackUsed:         fallbackFlag,
+		Tools:                   toolDefs,
+		OfficialToolNames:       hostedToolNames,
+		OfficialToolRequests:    hostedToolRequests,
+		SelectedToolIDs:         append([]string(nil), req.SelectedToolIDs...),
+		SelectedToolsConfigured: req.SelectedToolsConfigured,
+		ToolsEnabled:            toolsEnabled,
+		Fast:                    fastMode,
+		ToolModePrompt:          toolMode == "prompt" && len(toolDefs) > 0,
+		ProjectFiles:            projectFiles,
+		RAGSnippets:             ragSnippets,
+		ParamOverrides:          req.ParamOverrides,
+		ParamControls:           model.ParamControls,
+		ExtraParams:             extraParams,
+		Stream:                  model.Stream,
+		FallbackUsed:            fallbackFlag,
 	}
 
 	// Reserve the model allowance or estimated credits against the fully assembled

@@ -1085,4 +1085,77 @@ describe('stopped turn optimistic-id reconciliation', () => {
       tool_mode: 'auto',
     })
   })
+
+  it('preserves omitted, empty, and non-empty tool subsets on normal sends', async () => {
+    const requestBodies: Array<Record<string, unknown>> = []
+    apiMocks.streamSSE.mockImplementation((_path: string, body: Record<string, unknown>) => {
+      requestBodies.push(body)
+      return oneEvent({ type: 'error', message: 'test terminal error' })
+    })
+
+    await useConversations.getState().sendMessage({
+      conversationId: 'conv_stop',
+      text: 'use the default tool catalog',
+      modelId: 'model_1',
+      toolMode: 'auto',
+    })
+
+    resetStore()
+    await useConversations.getState().sendMessage({
+      conversationId: 'conv_stop',
+      text: 'use no candidate tools',
+      modelId: 'model_1',
+      toolMode: 'auto',
+      selectedToolIds: [],
+    })
+
+    resetStore()
+    await useConversations.getState().sendMessage({
+      conversationId: 'conv_stop',
+      text: 'use this tool subset',
+      modelId: 'model_1',
+      toolMode: 'enabled',
+      selectedToolIds: ['builtin:web_fetch', 'mcp:rail'],
+    })
+
+    const wireBodies = requestBodies.map((body) => JSON.parse(JSON.stringify(body)) as Record<string, unknown>)
+    expect(wireBodies[0]).not.toHaveProperty('selected_tool_ids')
+    expect(wireBodies[1].selected_tool_ids).toEqual([])
+    expect(wireBodies[2].selected_tool_ids).toEqual(['builtin:web_fetch', 'mcp:rail'])
+  })
+
+  it('preserves an explicit empty tool selection when regenerating', async () => {
+    const sourceUser: Message = {
+      id: 'msg_tool_subset_user',
+      role: 'user',
+      content: 'question',
+      createdAt: 1,
+    }
+    const sourceAssistant: Message = {
+      id: 'msg_tool_subset_assistant',
+      parentId: sourceUser.id,
+      role: 'assistant',
+      content: 'old answer',
+      createdAt: 2,
+    }
+    resetStore([sourceUser, sourceAssistant])
+    useComposerPrefs.setState({
+      toolMode: 'auto',
+      selectedToolIdsByModel: { model_1: [] },
+    })
+    let requestBody: Record<string, unknown> | undefined
+    apiMocks.streamSSE.mockImplementation((_path: string, body: Record<string, unknown>) => {
+      requestBody = body
+      return events(
+        { type: 'message_start', message_id: 'msg_tool_subset_regenerated' },
+        { type: 'error', message: 'test terminal error' },
+      )
+    })
+
+    await useConversations
+      .getState()
+      .regenerate('conv_stop', sourceAssistant.id, 'model_1')
+
+    expect(requestBody?.selected_tool_ids).toEqual([])
+  })
 })

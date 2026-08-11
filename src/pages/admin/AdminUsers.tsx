@@ -125,14 +125,15 @@ export default function AdminUsers() {
     if (!opts?.silent) setLoading(true)
     try {
       const offset = (p - 1) * PAGE_SIZE
+      const activity = opts?.silent ? 'background' : 'foreground'
       if (!groupsLoadedRef.current) {
-        const [resp, gs] = await Promise.all([adminApi.users(search, PAGE_SIZE, offset), adminApi.userGroups()])
+        const [resp, gs] = await Promise.all([adminApi.users(search, PAGE_SIZE, offset, activity), adminApi.userGroups()])
         setRows(resp.users)
         setTotal(resp.total)
         setGroups(gs)
         groupsLoadedRef.current = true
       } else {
-        const resp = await adminApi.users(search, PAGE_SIZE, offset)
+        const resp = await adminApi.users(search, PAGE_SIZE, offset, activity)
         setRows(resp.users)
         setTotal(resp.total)
       }
@@ -162,7 +163,7 @@ export default function AdminUsers() {
     const tick = async () => {
       await load(committedQuery, page, { silent: true })
       try {
-        const resp = await adminApi.userDeletions()
+        const resp = await adminApi.userDeletions('background')
         setDeletionProgress(
           Object.fromEntries(resp.jobs.map((j) => [j.user_id, j.status === 'failed' ? `failed: ${j.error ?? ''}` : j.progress])),
         )
@@ -313,7 +314,7 @@ export default function AdminUsers() {
       setInfoLoadFailed(false)
     }
     try {
-      const detail = await adminApi.user(u.id)
+      const detail = await adminApi.user(u.id, silent ? 'background' : 'foreground')
       if (requestID !== infoRequestRef.current) return
       setInfoDetails(detail)
     } catch {

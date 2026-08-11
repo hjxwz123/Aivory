@@ -16,7 +16,7 @@ import {
   UserRound,
   X,
 } from 'lucide-react'
-import { adminApi, apiUrl, ApiError } from '@/api'
+import { adminApi, ApiError } from '@/api'
 import type { ApiAdminFile } from '@/api/types'
 import { DocumentPreview } from '@/components/files/document-preview'
 import { FileFiltersPopover } from '@/components/files/file-filters-popover'
@@ -76,11 +76,6 @@ function rowKey(file: ApiAdminFile): string {
   return `${file.source}:${file.id}`
 }
 
-function fileContentUrl(file: ApiAdminFile): string {
-  const query = new URLSearchParams({ source: file.source, id: file.id })
-  return apiUrl(`/admin/files/content?${query}`)
-}
-
 interface PreviewState {
   key: string
   file: ApiAdminFile
@@ -117,11 +112,13 @@ export default function AdminFiles() {
   const [confirmDelete, setConfirmDelete] = useState<ApiAdminFile[] | null>(null)
   const [busy, setBusy] = useState(false)
   const [preview, setPreview] = useState<PreviewState | null>(null)
+  const [downloadingKey, setDownloadingKey] = useState('')
 
   const listRequestRef = useRef(0)
   const previewRequestRef = useRef(0)
   const previewUrlRef = useRef<string | null>(null)
   const previewAbortRef = useRef<AbortController | null>(null)
+  const downloadingKeyRef = useRef('')
   const selectAllRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
@@ -150,6 +147,38 @@ export default function AdminFiles() {
     releasePreviewResources()
     setPreview(null)
   }, [releasePreviewResources])
+
+  async function downloadFile(file: ApiAdminFile): Promise<void> {
+    const key = rowKey(file)
+    if (downloadingKeyRef.current) return
+    downloadingKeyRef.current = key
+    setDownloadingKey(key)
+
+    let temporaryUrl = ''
+    try {
+      let url = preview?.key === key ? preview.url : undefined
+      if (!url) {
+        const blob = preview?.key === key && preview.data
+          ? new Blob([preview.data], { type: file.mime_type })
+          : await adminApi.fileContentBlob(file.source, file.id)
+        temporaryUrl = URL.createObjectURL(blob)
+        url = temporaryUrl
+      }
+
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = file.filename
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+    } catch (error) {
+      toast.error(error instanceof ApiError ? error.message : t('admin:common.failed'))
+    } finally {
+      if (temporaryUrl) URL.revokeObjectURL(temporaryUrl)
+      downloadingKeyRef.current = ''
+      setDownloadingKey('')
+    }
+  }
 
   const load = useCallback(async () => {
     const request = ++listRequestRef.current
@@ -628,15 +657,16 @@ export default function AdminFiles() {
                 </div>
                 <Tooltip content={t('admin:files.download')}>
                   <Button
-                    asChild
                     variant="ghost"
                     size="icon-sm"
                     className="[@media(pointer:coarse)]:size-11"
                     aria-label={t('admin:files.download')}
+                    leadingIcon={<Download size={17} aria-hidden />}
+                    loading={downloadingKey === preview.key}
+                    disabled={preview.loading || Boolean(downloadingKey)}
+                    onClick={() => void downloadFile(preview.file)}
                   >
-                    <a href={preview.url ?? fileContentUrl(preview.file)} download={preview.file.filename}>
-                      <Download size={17} aria-hidden />
-                    </a>
+                    <span className="sr-only">{t('admin:files.download')}</span>
                   </Button>
                 </Tooltip>
                 <Tooltip content={t('common:actions.delete', { defaultValue: 'Delete' })}>

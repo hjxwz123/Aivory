@@ -112,6 +112,32 @@
       "toolModeEnabledDesc": "Turn on tool calling.",
       "webSearch": "Web search",
       "disable": "Turn off {{name}}"
+    },
+    "toolSelection": {
+      "entry": "Choose tools",
+      "entryDescription": "Limit automatic and on modes to a chosen set.",
+      "summaryAll": "All",
+      "summaryCount_one": "{{count}} selected",
+      "summaryCount_other": "{{count}} selected",
+      "selectedChip_one": "{{count}} tool",
+      "selectedChip_other": "{{count}} tools",
+      "reset": "Use all available tools",
+      "title": "Choose tools",
+      "description": "Automatic and on modes will only use tools selected here.",
+      "search": "Search tools",
+      "selectAll": "Select all",
+      "clear": "Clear",
+      "loading": "Loading tools",
+      "loadFailed": "Tools could not be loaded.",
+      "retry": "Try again",
+      "noResults": "No matching tools.",
+      "empty": "No tools are available for this model.",
+      "allSelected_one": "All {{count}} tool selected",
+      "allSelected_other": "All {{count}} tools selected",
+      "selectedCount_one": "{{count}} tool selected",
+      "selectedCount_other": "{{count}} tools selected",
+      "cancel": "Cancel",
+      "done": "Done"
     }
   },
   "imageConversationTitle": "Image conversation",
@@ -230,13 +256,23 @@
     "aivory_web_search": "Aivory web search",
     "code_interpreter": "Code interpreter",
     "image_generation": "Image generation",
+    "web_fetch": "Read web page",
+    "python_execute": "Python interpreter",
+    "image_generate": "Image generation",
+    "use_skill": "Use skill",
+    "save_memory": "Save memory",
     "deep_research": "Deep research"
   },
   "toolDescriptions": {
     "web_search": "Search the latest information on the web",
     "aivory_web_search": "Search the web through Aivory's configured backend",
     "code_interpreter": "Run code and analyze files",
-    "image_generation": "Generate or edit images"
+    "image_generation": "Generate or edit images",
+    "web_fetch": "Read the main content of a web page",
+    "python_execute": "Run Python for analysis, calculations, and files",
+    "image_generate": "Generate or edit images with the configured image model",
+    "use_skill": "Load the instructions of an available skill",
+    "save_memory": "Remember useful information for future conversations"
   },
   "sources": {
     "label": "Sources",

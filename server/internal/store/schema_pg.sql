@@ -325,6 +325,26 @@ CREATE TABLE IF NOT EXISTS channels (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_channels_name_unique ON channels(lower(trim(name)));
 
+-- Administrator-managed MCP Streamable HTTP services (see schema.sql for the
+-- credential-masking and discovery-snapshot contract).
+CREATE TABLE IF NOT EXISTS mcp_servers (
+  id               TEXT PRIMARY KEY,
+  name             TEXT NOT NULL,
+  icon             TEXT NOT NULL DEFAULT '',
+  description      TEXT NOT NULL DEFAULT '',
+  url              TEXT NOT NULL,
+  headers          TEXT NOT NULL DEFAULT '{}',
+  enabled          INTEGER NOT NULL DEFAULT 0,
+  discovered_tools TEXT NOT NULL DEFAULT '[]',
+  protocol_version TEXT NOT NULL DEFAULT '',
+  last_error       TEXT NOT NULL DEFAULT '',
+  last_synced_at   BIGINT NOT NULL DEFAULT 0,
+  created_at       BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint),
+  updated_at       BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mcp_servers_name_unique ON mcp_servers(lower(trim(name)));
+CREATE INDEX IF NOT EXISTS idx_mcp_servers_enabled ON mcp_servers(enabled, name);
+
 CREATE TABLE IF NOT EXISTS models (
   id                TEXT PRIMARY KEY,
   channel_id        TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,

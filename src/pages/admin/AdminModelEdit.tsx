@@ -11,7 +11,7 @@
  * which is cheap (admin model lists are small) and stays consistent with how
  * the list page reads.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import {
@@ -19,6 +19,7 @@ import {
   Check,
   Globe,
   Image as ImageIcon,
+  LoaderCircle,
   Plus,
   RefreshCw,
   Search,
@@ -191,6 +192,8 @@ export default function AdminModelEdit() {
   const [loading, setLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [fastToggling, setFastToggling] = useState(false)
+  const fastTogglingRef = useRef(false)
 
   useEffect(() => {
     let cancelled = false
@@ -428,6 +431,9 @@ export default function AdminModelEdit() {
   // forces Deep Research off, and refuses to leave the advanced picker empty —
   // the backend's validation error surfaces via the toast.
   async function handleFastToggle(v: boolean) {
+    if (fastTogglingRef.current || saving) return
+    fastTogglingRef.current = true
+    setFastToggling(true)
     try {
       await adminApi.setFastModel(id, v)
       patch(v ? { fast: true, research_enabled: false } : { fast: false })
@@ -438,6 +444,9 @@ export default function AdminModelEdit() {
       )
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
+    } finally {
+      fastTogglingRef.current = false
+      setFastToggling(false)
     }
   }
 
@@ -916,7 +925,22 @@ export default function AdminModelEdit() {
                           })}
                         </p>
                       </div>
-                      <Switch checked={draft.fast ?? false} onCheckedChange={handleFastToggle} />
+                      <span className="inline-flex shrink-0 items-center gap-2">
+                        {fastToggling ? (
+                          <span role="status" className="inline-flex text-[var(--color-fg-subtle)]">
+                            <LoaderCircle size={14} className="animate-spin" aria-hidden />
+                            <span className="sr-only">
+                              {t('common:common.loading', { defaultValue: 'Loading...' })}
+                            </span>
+                          </span>
+                        ) : null}
+                        <Switch
+                          checked={draft.fast ?? false}
+                          disabled={fastToggling || saving}
+                          aria-busy={fastToggling || undefined}
+                          onCheckedChange={(value) => void handleFastToggle(value)}
+                        />
+                      </span>
                     </label>
                   )}
                 </div>
@@ -1244,10 +1268,10 @@ export default function AdminModelEdit() {
 
           {/* Sticky save bar */}
           <div className="mt-6 flex items-center justify-end gap-2">
-            <Button variant="ghost" onClick={() => navigate('/admin/models')} disabled={saving}>
+            <Button variant="ghost" onClick={() => navigate('/admin/models')} disabled={saving || fastToggling}>
               {t('common:actions.cancel')}
             </Button>
-            <Button onClick={() => void save()} loading={saving}>
+            <Button onClick={() => void save()} loading={saving} disabled={fastToggling}>
               {t('common:actions.save')}
             </Button>
           </div>

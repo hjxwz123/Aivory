@@ -248,6 +248,26 @@ type OAuthProvider struct {
 	UpdatedAt        int64  `json:"updated_at"`
 }
 
+// MCPServer is an administrator-managed Streamable HTTP MCP endpoint.
+// Headers may contain bearer tokens or other credentials and are deliberately
+// excluded from JSON; API handlers must construct a masked response DTO.
+// DiscoveredTools is the latest successful tools/list response snapshot.
+type MCPServer struct {
+	ID              string            `json:"id"`
+	Name            string            `json:"name"`
+	Icon            string            `json:"icon"`
+	Description     string            `json:"description"`
+	URL             string            `json:"url"`
+	Headers         map[string]string `json:"-"`
+	Enabled         bool              `json:"enabled"`
+	DiscoveredTools json.RawMessage   `json:"discovered_tools"`
+	ProtocolVersion string            `json:"protocol_version"`
+	LastError       string            `json:"last_error"`
+	LastSyncedAt    int64             `json:"last_synced_at"`
+	CreatedAt       int64             `json:"created_at"`
+	UpdatedAt       int64             `json:"updated_at"`
+}
+
 // OAuthIdentity is one third-party identity bound to a local user (an
 // oauth_identities row joined with its provider row), returned to the account
 // page's "identity sources" section (§ identity linking). ClientSecret and the

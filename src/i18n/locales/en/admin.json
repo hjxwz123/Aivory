@@ -1,6 +1,11 @@
 {
   "title": "Administration",
   "backToChat": "Back to chat",
+  "activity": {
+    "loading": "Loading…",
+    "navigating": "Opening page…",
+    "stillWaiting": "The server is taking longer to respond. Still waiting…"
+  },
   "common": {
     "edit": "Edit",
     "delete": "Delete",
@@ -584,7 +589,72 @@
     "lead": "External services the assistant calls during a conversation.",
     "availabilityTitle": "Global tool availability",
     "availabilityLead": "A disabled tool is removed from every model, including models that explicitly allow it.",
-    "availabilityEmpty": "No platform tools are registered."
+    "availabilityEmpty": "No platform tools are registered.",
+    "mcpAvailabilityTitle": "MCP tool availability",
+    "mcpAvailabilityLead": "Choose which configured MCP services can be offered to users and models.",
+    "mcpAvailabilityEmpty": "No MCP services have been configured.",
+    "mcpUnavailable": "The most recent connection attempt failed.",
+    "manageMCP": "Manage MCP"
+  },
+  "mcp": {
+    "title": "MCP services",
+    "lead": "Connect Streamable HTTP services and make their discovered tools available in conversations.",
+    "new": "New MCP service",
+    "listLabel": "MCP services",
+    "emptyTitle": "No MCP services yet",
+    "emptyBody": "Add a Streamable HTTP endpoint, then test the connection and sync its tools.",
+    "editorTitle": "Edit MCP service",
+    "newTitle": "New MCP service",
+    "editorDescriptionNew": "Save the connection before testing it and discovering its tools.",
+    "editorDescriptionEdit": "Update the connection settings. Leave masked header values unchanged to keep the saved secrets.",
+    "removeTitle": "Delete MCP service?",
+    "removeBody": "Deletes “{{name}}” and removes all of its tools from future conversations.",
+    "created": "MCP service created",
+    "updated": "MCP service updated",
+    "removed": "MCP service deleted",
+    "testSucceeded": "Connection successful",
+    "syncSucceeded": "Tools synchronized",
+    "toolCount": "{{count}} discovered",
+    "lastSynced": "Last synchronized {{time}}",
+    "fields": {
+      "name": "Name",
+      "namePlaceholder": "12306 train search",
+      "icon": "Icon",
+      "description": "Tool description",
+      "descriptionPlaceholder": "Search train schedules, stations, and ticket availability.",
+      "url": "Streamable HTTP URL",
+      "urlHint": "The endpoint must accept MCP JSON-RPC requests over Streamable HTTP.",
+      "headers": "Request headers",
+      "headersHint": "Optional headers sent with every MCP request. Saved secret values may be shown as masks.",
+      "noHeaders": "No additional request headers.",
+      "headerNameLabel": "Header {{index}} name",
+      "headerValueLabel": "Header {{index}} value",
+      "headerNamePlaceholder": "Authorization",
+      "headerValuePlaceholder": "Bearer token",
+      "enabled": "Available to users",
+      "enabledHint": "Enable after the connection has been tested and its tools have been synchronized."
+    },
+    "actions": {
+      "test": "Test",
+      "sync": "Sync tools",
+      "addHeader": "Add header",
+      "removeHeader": "Remove header {{index}}",
+      "showHeader": "Show header value",
+      "hideHeader": "Hide header value"
+    },
+    "status": {
+      "connected": "Connected",
+      "error": "Connection error",
+      "notTested": "Not tested",
+      "enabled": "Enabled",
+      "disabled": "Disabled"
+    },
+    "errors": {
+      "missingFields": "Name, icon, description, and URL are required.",
+      "invalidUrl": "Enter a valid HTTP or HTTPS URL.",
+      "invalidHeader": "Enter a valid HTTP header name.",
+      "duplicateHeader": "Header “{{name}}” is duplicated."
+    }
   },
   "audio": {
     "title": "Voice",

@@ -217,6 +217,7 @@ export default function ChatThread() {
       toolMode: ToolMode
       webSearch?: boolean
       selectedUserSkillIds?: string[]
+      selectedToolIds?: string[]
       fast?: boolean
     },
   ) {
@@ -233,6 +234,7 @@ export default function ChatThread() {
       toolMode: opts.toolMode,
       webSearch: opts.webSearch,
       selectedUserSkillIds: opts.selectedUserSkillIds,
+      selectedToolIds: opts.selectedToolIds,
       fast: opts.fast,
     })
     // Force the view to the freshly appended turn now — don't rely on the

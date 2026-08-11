@@ -76,12 +76,17 @@ type UnifiedChatRequest struct {
 	History      []UnifiedMessage
 	Model        ModelInfo
 	Tools        []ToolDef
-	// OfficialToolNames and OfficialToolRequests are the complete administrator-
-	// configured provider-hosted tool set for the resolved model, in configuration
-	// order. The historical field names are retained internally to match the stored
-	// `official_tools` column; users cannot select or reorder this collection.
+	// OfficialToolNames and OfficialToolRequests are the selected subset of the
+	// resolved model's administrator-configured provider-hosted tools, retained in
+	// administrator order. The historical field names match `official_tools`; no
+	// client-supplied request fragment reaches this collection.
 	OfficialToolNames    []string
 	OfficialToolRequests []json.RawMessage
+	// SelectedToolIDs preserves the user's per-model candidate subset across a
+	// transparent TTFT fallback. SelectedToolsConfigured distinguishes omitted
+	// (all available tools) from an explicit empty selection.
+	SelectedToolIDs         []string
+	SelectedToolsConfigured bool
 	// ToolsEnabled records the resolved turn policy independently of whether the
 	// primary model happens to configure any tools. TTFT fallback uses it to rebuild
 	// the fallback model's complete administrator-configured tool collection.
@@ -163,6 +168,17 @@ type ToolDef struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description"`
 	InputSchema json.RawMessage `json:"input_schema"`
+}
+
+// MCPToolDef is one executable Function discovered from an administrator-
+// configured MCP service. ServerID groups multiple remote methods behind the
+// single service-level item presented in the user tool picker.
+type MCPToolDef struct {
+	ToolDef
+	ServerID           string
+	DisplayName        string
+	DisplayDescription string
+	Icon               string
 }
 
 // SseEvent is the on-the-wire shape per §6.2. Always lowercase, snake_case.

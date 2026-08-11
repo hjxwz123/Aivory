@@ -369,6 +369,28 @@ CREATE TABLE IF NOT EXISTS channels (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_channels_name_unique ON channels(lower(trim(name)));
 
+-- Administrator-managed MCP Streamable HTTP services. Request headers may
+-- contain credentials and are therefore stored verbatim but only exposed by
+-- the administrator API in masked form. discovered_tools is the last
+-- successful tools/list snapshot used by the runtime registry.
+CREATE TABLE IF NOT EXISTS mcp_servers (
+  id               TEXT PRIMARY KEY,
+  name             TEXT NOT NULL,
+  icon             TEXT NOT NULL DEFAULT '',
+  description      TEXT NOT NULL DEFAULT '',
+  url              TEXT NOT NULL,
+  headers          TEXT NOT NULL DEFAULT '{}',
+  enabled          INTEGER NOT NULL DEFAULT 0,
+  discovered_tools TEXT NOT NULL DEFAULT '[]',
+  protocol_version TEXT NOT NULL DEFAULT '',
+  last_error       TEXT NOT NULL DEFAULT '',
+  last_synced_at   INTEGER NOT NULL DEFAULT 0,
+  created_at       INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+  updated_at       INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mcp_servers_name_unique ON mcp_servers(lower(trim(name)));
+CREATE INDEX IF NOT EXISTS idx_mcp_servers_enabled ON mcp_servers(enabled, name);
+
 CREATE TABLE IF NOT EXISTS models (
   id                TEXT PRIMARY KEY,
   channel_id        TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,

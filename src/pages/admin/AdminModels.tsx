@@ -71,6 +71,8 @@ export default function AdminModels() {
   const [confirmDelete, setConfirmDelete] = useState<ApiModel | null>(null)
   const [deleting, setDeleting] = useState(false)
   const deletingRef = useRef(false)
+  const [togglingModelIds, setTogglingModelIds] = useState<Set<string>>(() => new Set())
+  const togglingModelIdsRef = useRef(new Set<string>())
 
   async function load() {
     setLoading(true)
@@ -170,6 +172,9 @@ export default function AdminModels() {
 
   // Quick show/hide: flip `enabled` inline (optimistic + revert on error).
   async function toggleEnabled(m: ApiModel) {
+    if (togglingModelIdsRef.current.has(m.id)) return
+    togglingModelIdsRef.current.add(m.id)
+    setTogglingModelIds(new Set(togglingModelIdsRef.current))
     const next = !m.enabled
     setModels((list) => list.map((x) => (x.id === m.id ? { ...x, enabled: next } : x)))
     try {
@@ -177,6 +182,9 @@ export default function AdminModels() {
     } catch (e) {
       setModels((list) => list.map((x) => (x.id === m.id ? { ...x, enabled: m.enabled } : x)))
       toast.error(e instanceof ApiError ? e.message : t('admin:common.failed'))
+    } finally {
+      togglingModelIdsRef.current.delete(m.id)
+      setTogglingModelIds(new Set(togglingModelIdsRef.current))
     }
   }
 
@@ -221,6 +229,7 @@ export default function AdminModels() {
             rowClassName="grid grid-cols-[2.75rem_auto_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-2 px-2 py-3.5 md:grid-cols-[auto_auto_auto_minmax(0,1fr)_auto_auto_auto] md:gap-2 md:px-5 md:py-4"
             renderItem={(m) => {
               const ch = channels.find((c) => c.id === m.channel_id)
+              const toggling = togglingModelIds.has(m.id)
               return (
                 <>
                   <div className="col-start-2 row-start-1 grid size-9 shrink-0 place-items-center rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-muted)] md:col-start-auto md:row-start-auto">
@@ -242,7 +251,13 @@ export default function AdminModels() {
                   </div>
                   <Tooltip content={t('admin:models.visibleToggle', { defaultValue: m.enabled ? 'Visible to users' : 'Hidden from users' })}>
                     <span className="col-start-4 row-start-1 shrink-0 md:col-start-auto md:row-start-auto">
-                      <Switch checked={m.enabled} onCheckedChange={() => void toggleEnabled(m)} aria-label={t('admin:models.visibleToggle', { defaultValue: 'Show in app' })} />
+                      <Switch
+                        checked={m.enabled}
+                        disabled={toggling}
+                        aria-busy={toggling || undefined}
+                        onCheckedChange={() => void toggleEnabled(m)}
+                        aria-label={t('admin:models.visibleToggle', { defaultValue: 'Show in app' })}
+                      />
                     </span>
                   </Tooltip>
                   <div className="col-span-4 row-start-2 flex items-center justify-end gap-1 md:contents">

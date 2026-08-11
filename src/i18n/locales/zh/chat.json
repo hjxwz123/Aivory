@@ -112,6 +112,28 @@
       "toolModeEnabledDesc": "开启工具调用。",
       "webSearch": "联网搜索",
       "disable": "关闭{{name}}"
+    },
+    "toolSelection": {
+      "entry": "工具选择",
+      "entryDescription": "限定自动和开启模式可使用的工具。",
+      "summaryAll": "全部",
+      "summaryCount": "已选 {{count}} 个",
+      "selectedChip": "{{count}} 个工具",
+      "reset": "使用全部可用工具",
+      "title": "选择工具",
+      "description": "自动和开启模式只会使用你在这里选择的工具。",
+      "search": "搜索工具",
+      "selectAll": "全选",
+      "clear": "清空",
+      "loading": "正在加载工具",
+      "loadFailed": "无法加载工具。",
+      "retry": "重试",
+      "noResults": "没有匹配的工具。",
+      "empty": "当前模型暂无可用工具。",
+      "allSelected": "已选择全部 {{count}} 个工具",
+      "selectedCount": "已选择 {{count}} 个工具",
+      "cancel": "取消",
+      "done": "完成"
     }
   },
   "imageConversationTitle": "图片对话",
@@ -230,13 +252,23 @@
     "aivory_web_search": "Aivory 网页搜索",
     "code_interpreter": "代码解释器",
     "image_generation": "图片生成",
+    "web_fetch": "读取网页",
+    "python_execute": "Python 解释器",
+    "image_generate": "图片生成",
+    "use_skill": "使用技能",
+    "save_memory": "保存记忆",
     "deep_research": "深度研究"
   },
   "toolDescriptions": {
     "web_search": "实时检索全网最新资讯",
     "aivory_web_search": "通过 Aivory 配置的搜索后端检索网页",
     "code_interpreter": "运行代码并分析文件",
-    "image_generation": "生成或编辑图片"
+    "image_generation": "生成或编辑图片",
+    "web_fetch": "读取指定网页的主要内容",
+    "python_execute": "运行 Python 进行分析、计算和文件处理",
+    "image_generate": "使用已配置的图片模型生成或编辑图片",
+    "use_skill": "按需载入可用技能的完整说明",
+    "save_memory": "保存对后续对话有帮助的信息"
   },
   "sources": {
     "label": "来源",
