@@ -428,6 +428,21 @@
     "jumpToLatest": "Jump to latest",
     "deleteUndone": "This can't be undone."
   },
+  "visibility": {
+    "public": "Public",
+    "private": "Private",
+    "publicTooltip": "Visible to everyone in this workspace",
+    "privateTooltip": "Visible only to you",
+    "creatorOnly": "Only the conversation creator can change visibility",
+    "makePublic": "Make public",
+    "makePrivate": "Make private",
+    "madePublic": "Conversation is now public",
+    "madePrivate": "Conversation is now private",
+    "updateFailed": "Could not change conversation visibility",
+    "privateConfirmTitle": "Make this conversation private?",
+    "privateConfirmBody": "Other workspace members will no longer be able to view this conversation or its history. Messages they already sent will remain visible to you.",
+    "confirmPrivate": "Make private"
+  },
   "buckets": {
     "today": "Today",
     "yesterday": "Yesterday",

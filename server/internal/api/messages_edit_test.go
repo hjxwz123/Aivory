@@ -54,7 +54,7 @@ func TestEditMessageHandlerAllowsWorkspaceAssistantButProtectsUserAuthorship(t *
 	}
 	mustExec(t, db, `INSERT INTO workspace_members(workspace_id,user_id,role) VALUES(?, 'member', 'member')`, workspace.ID)
 	conversation, err := store.CreateConversation(t.Context(), db, store.Conversation{
-		ID: "edit-conversation", UserID: "owner", Title: "Edit", WorkspaceID: workspace.ID,
+		ID: "edit-conversation", UserID: "owner", Title: "Edit", WorkspaceID: workspace.ID, IsPublic: true,
 	})
 	if err != nil {
 		t.Fatalf("create conversation: %v", err)

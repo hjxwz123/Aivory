@@ -25,6 +25,7 @@ import {
   LibraryBig,
   CircleHelp,
   FileText,
+  UserRound,
 } from 'lucide-react'
 import { Logo, LogoMark } from '@/components/brand/logo'
 import { useWorkspaces } from '@/store/workspaces'
@@ -941,7 +942,16 @@ function ConversationItem({
               {conversation.starred ? '☆ ' : ''}
               {conversation.title || t('untitled')}
             </span>
-            {conversation.workspaceId && conversation.creatorName ? (
+            {conversation.workspaceId && !conversation.isPublic ? (
+              <Tooltip content={t('visibility.privateTooltip')}>
+                <span
+                  className="inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)]"
+                  aria-label={t('visibility.private')}
+                >
+                  <UserRound size={12} aria-hidden />
+                </span>
+              </Tooltip>
+            ) : conversation.workspaceId && conversation.creatorName ? (
               <span
                 className="flex max-w-[45%] shrink-0 items-center gap-1 text-[11px] text-[var(--color-fg-subtle)]"
                 title={conversation.creatorName}

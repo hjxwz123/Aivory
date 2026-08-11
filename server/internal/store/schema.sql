@@ -535,6 +535,9 @@ CREATE TABLE IF NOT EXISTS conversations (
   inline_source_conv TEXT NOT NULL DEFAULT '',
   inline_parent_id   TEXT NOT NULL DEFAULT '',
   inline_quote       TEXT NOT NULL DEFAULT '',
+  -- Workspace conversations are private to their creator by default. Personal
+  -- conversations ignore this flag and remain owner-scoped.
+  is_public      INTEGER NOT NULL DEFAULT 0,
   created_at      INTEGER NOT NULL DEFAULT (strftime('%s','now')),
   updated_at      INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 );
@@ -876,7 +879,7 @@ CREATE INDEX IF NOT EXISTS idx_image_styles_sort ON image_styles(sort_order);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_image_styles_name_unique ON image_styles(lower(trim(name)));
 
 -- 工作空间(§workspaces):完全独立的协作空间。个人数据 workspace_id=''(空串);
--- 空间内的 conversations/projects/knowledge_bases 记 workspace_id,所有成员共享可见。
+-- 空间内的 conversations 默认仅创建者可见，可显式公开给成员；projects/knowledge_bases 仍为成员共享。
 -- invite_token 是 192-bit 能力令牌(仅通过邀请链接加入);轮换即作废旧链接。
 CREATE TABLE IF NOT EXISTS workspaces (
   id           TEXT PRIMARY KEY,

@@ -30,7 +30,7 @@ func TestWorkspaceStorageUsageFollowsCanonicalBillingPrincipal(t *testing.T) {
 		t.Fatalf("join workspace: %v", err)
 	}
 	if _, err := CreateConversation(ctx, db, Conversation{
-		ID: "workspace-conversation", UserID: "member", WorkspaceID: workspace.ID, Title: "Shared",
+		ID: "workspace-conversation", UserID: "member", WorkspaceID: workspace.ID, IsPublic: true, Title: "Shared",
 	}); err != nil {
 		t.Fatalf("create workspace conversation: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestConcurrentWorkspaceDraftCommitCannotExceedOwnerStorageQuota(t *testing.
 		t.Fatalf("join workspace: %v", err)
 	}
 	if _, err := CreateConversation(ctx, db, Conversation{
-		ID: "quota-conversation", UserID: "member", WorkspaceID: workspace.ID, Title: "Shared",
+		ID: "quota-conversation", UserID: "member", WorkspaceID: workspace.ID, IsPublic: true, Title: "Shared",
 	}); err != nil {
 		t.Fatalf("create conversation: %v", err)
 	}
@@ -198,7 +198,7 @@ func TestWorkspaceDocumentCreationUsesOwnerQuotaAndFileTwinDoesNotDoubleCount(t 
 		t.Fatalf("join workspace: %v", err)
 	}
 	if _, err := CreateConversation(ctx, db, Conversation{
-		ID: "document-conversation", UserID: "member", WorkspaceID: workspace.ID, Title: "Shared",
+		ID: "document-conversation", UserID: "member", WorkspaceID: workspace.ID, IsPublic: true, Title: "Shared",
 	}); err != nil {
 		t.Fatalf("create conversation: %v", err)
 	}

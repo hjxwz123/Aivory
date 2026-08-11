@@ -876,6 +876,8 @@ export interface ApiConversation {
   inline_quote?: string
   /** §workspaces */
   workspace_id?: string
+  /** Optional for rolling upgrades and cached responses from older servers. */
+  is_public?: boolean
   creator_name?: string
   creator_avatar?: string
 }

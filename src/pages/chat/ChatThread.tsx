@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { MoreHorizontal, Pencil, Share2, Star, Trash2, Archive, ArrowDown, FolderKanban, Loader2, Menu, Files, GitBranch } from 'lucide-react'
+import { MoreHorizontal, Pencil, Share2, Star, Trash2, Archive, ArrowDown, FolderKanban, Loader2, Menu, Files, GitBranch, Globe2, LockKeyhole } from 'lucide-react'
 import { Composer } from '@/components/chat/composer'
 import { MessageList } from '@/components/chat/message-list'
 import { InlineThreadLayer } from '@/components/chat/inline-thread-layer'
@@ -25,6 +25,7 @@ import { useModels } from '@/store/models'
 import { useProjects } from '@/store/projects'
 import { useUI } from '@/store/ui'
 import { useWorkspaces } from '@/store/workspaces'
+import { useAuth } from '@/store/auth'
 import { useConversationFiles } from '@/store/conversation-files'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { toast } from '@/hooks/use-toast'
@@ -54,11 +55,13 @@ export default function ChatThread() {
   const setFast = useConversations((s) => s.setFast)
   const setKBs = useConversations((s) => s.setKBs)
   const rename = useConversations((s) => s.renameConversation)
+  const setConversationPublic = useConversations((s) => s.setConversationPublic)
   const star = useConversations((s) => s.toggleStar)
   const remove = useConversations((s) => s.deleteConversation)
   const archive = useConversations((s) => s.archiveConversation)
   const sendMessage = useConversations((s) => s.sendMessage)
   const abortStream = useConversations((s) => s.abortStream)
+  const meId = useAuth((s) => s.user?.id)
   const project = useProjects((s) =>
     conversation?.projectId ? s.projects.find((p) => p.id === conversation.projectId) : undefined,
   )
@@ -92,6 +95,8 @@ export default function ChatThread() {
   const [renameDraft, setRenameDraft] = useState('')
   const [renameError, setRenameError] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [confirmPrivate, setConfirmPrivate] = useState(false)
+  const [visibilityBusy, setVisibilityBusy] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
   const [outlineOpen, setOutlineOpen] = useState(false)
   // Mobile: the thread's secondary actions (outline / files / rename / share /
@@ -279,6 +284,43 @@ export default function ChatThread() {
     void setFast(conversation.id, next)
   }
 
+  async function changeVisibility(nextPublic: boolean) {
+    if (!conversation || visibilityBusy || conversation.creatorId !== meId) return
+    setVisibilityBusy(true)
+    const changed = await setConversationPublic(conversation.id, nextPublic)
+    setVisibilityBusy(false)
+    if (!changed) {
+      toast.error(t('chat:visibility.updateFailed'))
+      return
+    }
+    setConfirmPrivate(false)
+    toast.success(nextPublic ? t('chat:visibility.madePublic') : t('chat:visibility.madePrivate'))
+  }
+
+  function requestVisibilityToggle() {
+    if (!conversation || visibilityBusy || conversation.creatorId !== meId) return
+    if (conversation.isPublic) {
+      setConfirmPrivate(true)
+      return
+    }
+    void changeVisibility(true)
+  }
+
+  const canChangeVisibility = conversation.creatorId === meId
+  const visibilityLabel = conversation.isPublic
+    ? t('chat:visibility.public')
+    : t('chat:visibility.private')
+  const visibilityActionLabel = canChangeVisibility
+    ? conversation.isPublic
+      ? t('chat:visibility.makePrivate')
+      : t('chat:visibility.makePublic')
+    : t('chat:visibility.creatorOnly')
+  const visibilityTooltip = canChangeVisibility
+    ? conversation.isPublic
+      ? t('chat:visibility.publicTooltip')
+      : t('chat:visibility.privateTooltip')
+    : t('chat:visibility.creatorOnly')
+
   return (
     <div className="flex-1 flex flex-col min-h-0">
       {/* Topbar — desktop keeps the full inline toolbar; mobile is a calm
@@ -303,6 +345,17 @@ export default function ChatThread() {
               </Link>
             ) : null}
           </div>
+          {conversation.workspaceId ? (
+            <WorkspaceVisibilityButton
+              isPublic={conversation.isPublic === true}
+              canChange={canChangeVisibility}
+              busy={visibilityBusy}
+              label={visibilityLabel}
+              actionLabel={visibilityActionLabel}
+              tooltip={visibilityTooltip}
+              onToggle={requestVisibilityToggle}
+            />
+          ) : null}
           <ModelPicker value={conversation.modelId} onChange={handleModelChange} fast={conversation.fast} onFastChange={handleFastChange} />
           <Tooltip content={t('chat:topbar.outlineTooltip', { defaultValue: 'Conversation outline' })}>
             <button
@@ -384,14 +437,28 @@ export default function ChatThread() {
             </h1>
             {/* Model name as a tappable under-label (ChatGPT pattern) — opens the
                 model list. The dropdown trigger is restyled small via className. */}
-            <ModelPicker
-              value={conversation.modelId}
-              onChange={handleModelChange}
-              fast={conversation.fast}
-              onFastChange={handleFastChange}
-              menuAlign="center"
-              className="h-auto min-w-0 max-w-[62vw] gap-1 px-1.5 py-0.5 text-[11.5px] rounded-[7px]"
-            />
+            <div className="flex max-w-full items-center justify-center gap-1">
+              <ModelPicker
+                value={conversation.modelId}
+                onChange={handleModelChange}
+                fast={conversation.fast}
+                onFastChange={handleFastChange}
+                menuAlign="center"
+                className="h-auto min-w-0 max-w-[52vw] gap-1 px-1.5 py-0.5 text-[11.5px] rounded-[7px]"
+              />
+              {conversation.workspaceId ? (
+                <WorkspaceVisibilityButton
+                  compact
+                  isPublic={conversation.isPublic === true}
+                  canChange={canChangeVisibility}
+                  busy={visibilityBusy}
+                  label={visibilityLabel}
+                  actionLabel={visibilityActionLabel}
+                  tooltip={visibilityTooltip}
+                  onToggle={requestVisibilityToggle}
+                />
+              ) : null}
+            </div>
           </div>
           <button
             type="button"
@@ -530,6 +597,23 @@ export default function ChatThread() {
         </DialogContent>
       </Dialog>
 
+      <Dialog open={confirmPrivate} onOpenChange={(open) => { if (!visibilityBusy) setConfirmPrivate(open) }}>
+        <DialogContent size="sm">
+          <DialogHeader>
+            <DialogTitle>{t('chat:visibility.privateConfirmTitle')}</DialogTitle>
+            <DialogDescription>{t('chat:visibility.privateConfirmBody')}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" disabled={visibilityBusy} onClick={() => setConfirmPrivate(false)}>
+              {t('common:actions.cancel')}
+            </Button>
+            <Button loading={visibilityBusy} onClick={() => void changeVisibility(false)}>
+              {t('chat:visibility.confirmPrivate')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {outlineOpen ? (
         <ConversationOutline
           conversation={conversation}
@@ -563,6 +647,13 @@ export default function ChatThread() {
               label={conversation.starred ? t('common:actions.unstar') : t('common:actions.star')}
               onClick={() => { setActionsOpen(false); void star(conversation.id) }}
             />
+            {conversation.workspaceId && canChangeVisibility ? (
+              <ThreadActionRow
+                icon={conversation.isPublic ? <LockKeyhole size={18} aria-hidden /> : <Globe2 size={18} aria-hidden />}
+                label={conversation.isPublic ? t('chat:visibility.makePrivate') : t('chat:visibility.makePublic')}
+                onClick={() => { setActionsOpen(false); requestVisibilityToggle() }}
+              />
+            ) : null}
             <ThreadActionRow
               icon={<Share2 size={18} aria-hidden />}
               label={t('chat:sidebar.share')}
@@ -597,6 +688,59 @@ export default function ChatThread() {
         onOpenChange={setShareOpen}
       />
     </div>
+  )
+}
+
+function WorkspaceVisibilityButton({
+  isPublic,
+  canChange,
+  busy,
+  label,
+  actionLabel,
+  tooltip,
+  onToggle,
+  compact = false,
+}: {
+  isPublic: boolean
+  canChange: boolean
+  busy: boolean
+  label: string
+  actionLabel: string
+  tooltip: string
+  onToggle: () => void
+  compact?: boolean
+}) {
+  const icon = busy ? (
+    <Loader2 size={compact ? 12 : 14} className="animate-spin" aria-hidden />
+  ) : isPublic ? (
+    <Globe2 size={compact ? 12 : 14} aria-hidden />
+  ) : (
+    <LockKeyhole size={compact ? 12 : 14} aria-hidden />
+  )
+
+  return (
+    <Tooltip content={tooltip}>
+      {/* Disabled buttons do not emit hover/focus events; the wrapper keeps the
+          creator-only explanation discoverable for other workspace members. */}
+      <span className="inline-flex shrink-0">
+        <button
+          type="button"
+          disabled={!canChange || busy}
+          aria-label={actionLabel}
+          aria-pressed={isPublic}
+          onClick={onToggle}
+          className={cn(
+            'inline-flex items-center justify-center gap-1.5 interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+            'bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]',
+            'disabled:cursor-default disabled:opacity-70',
+            compact ? 'size-6 rounded-[6px]' : 'h-8 rounded-[8px] px-2 text-[12px] font-medium',
+          )}
+        >
+          {icon}
+          {compact ? <span className="sr-only">{label}</span> : <span>{label}</span>}
+        </button>
+      </span>
+    </Tooltip>
   )
 }
 

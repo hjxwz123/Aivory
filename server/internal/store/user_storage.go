@@ -163,7 +163,7 @@ func StorageBillingUserForContainer(ctx context.Context, db *sql.DB, kbID, conve
 			       THEN COALESCE(w.owner_id, c.user_id) ELSE c.user_id END
 			  FROM conversations c
 			  LEFT JOIN workspaces w ON w.id=c.workspace_id
-			 WHERE c.id=? AND `+workspaceResourceAccessPredicate("c"), args...).Scan(&billingUserID)
+			 WHERE c.id=? AND `+conversationResourceAccessPredicate("c"), args...).Scan(&billingUserID)
 	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", ErrNotFound
@@ -194,7 +194,7 @@ func StorageItemBillingUser(ctx context.Context, db *sql.DB, source, id, accessU
 			  LEFT JOIN workspaces w ON w.id=c.workspace_id
 			 WHERE f.id=?
 			   AND (f.conversation_id IS NULL AND f.user_id=? OR
-			        f.conversation_id IS NOT NULL AND (f.user_id=? OR f.draft=0) AND `+workspaceResourceAccessPredicate("c")+`)`,
+			        f.conversation_id IS NOT NULL AND (f.user_id=? OR f.draft=0) AND `+conversationResourceAccessPredicate("c")+`)`,
 			args...).Scan(&billingUserID)
 	case "document":
 		args := []any{id}

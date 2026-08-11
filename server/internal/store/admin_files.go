@@ -174,7 +174,7 @@ func adminFilesWhere(f AdminFileFilter) (string, []any) {
 				t.conversation_id='' AND t.user_id=? OR EXISTS (
 					SELECT 1 FROM conversations inventory_file_conversation
 					 WHERE inventory_file_conversation.id=t.conversation_id
-					   AND `+workspaceResourceAccessPredicate("inventory_file_conversation")+`
+					   AND `+conversationResourceAccessPredicate("inventory_file_conversation")+`
 				)
 			)) OR
 			(t.source='document' AND (
@@ -186,7 +186,7 @@ func adminFilesWhere(f AdminFileFilter) (string, []any) {
 				(t.conversation_id<>'' AND EXISTS (
 					SELECT 1 FROM conversations inventory_document_conversation
 					 WHERE inventory_document_conversation.id=t.conversation_id
-					   AND `+workspaceResourceAccessPredicate("inventory_document_conversation")+`
+					   AND `+conversationResourceAccessPredicate("inventory_document_conversation")+`
 				))
 			))
 		)`)

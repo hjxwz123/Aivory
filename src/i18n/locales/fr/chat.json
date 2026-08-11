@@ -428,6 +428,21 @@
     "jumpToLatest": "Aller au plus récent",
     "deleteUndone": "Cette action est irréversible."
   },
+  "visibility": {
+    "public": "Public",
+    "private": "Privé",
+    "publicTooltip": "Visible par tous les membres de cet espace de travail",
+    "privateTooltip": "Visible uniquement par vous",
+    "creatorOnly": "Seul le créateur de la conversation peut modifier sa visibilité",
+    "makePublic": "Rendre public",
+    "makePrivate": "Rendre privé",
+    "madePublic": "La conversation est maintenant publique",
+    "madePrivate": "La conversation est maintenant privée",
+    "updateFailed": "Impossible de modifier la visibilité de la conversation",
+    "privateConfirmTitle": "Rendre cette conversation privée ?",
+    "privateConfirmBody": "Les autres membres de l'espace de travail ne pourront plus consulter cette conversation ni son historique. Les messages qu'ils ont déjà envoyés seront conservés et resteront visibles pour vous.",
+    "confirmPrivate": "Rendre privé"
+  },
   "buckets": {
     "today": "Aujourd'hui",
     "yesterday": "Hier",

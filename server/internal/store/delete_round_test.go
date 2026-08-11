@@ -177,7 +177,7 @@ func TestDeleteRoundWorkspaceMember(t *testing.T) {
 	exec(t, db, `INSERT INTO workspaces(id,name,owner_id,invite_token) VALUES('ws1','WS','owner','tok1')`)
 	exec(t, db, `INSERT INTO workspace_members(workspace_id,user_id,role) VALUES('ws1','owner','owner')`)
 	exec(t, db, `INSERT INTO workspace_members(workspace_id,user_id,role) VALUES('ws1','member','member')`)
-	exec(t, db, `INSERT INTO conversations(id,user_id,title,workspace_id) VALUES('c1','owner','T','ws1')`)
+	exec(t, db, `INSERT INTO conversations(id,user_id,title,workspace_id,is_public) VALUES('c1','owner','T','ws1',1)`)
 
 	// member sends U1, gets an assistant reply A1.
 	insMsg(t, db, "U1", "", "user", 1000)
@@ -222,7 +222,7 @@ func TestDeleteRoundWorkspaceMemberCannotDeleteForeignBranchDescendants(t *testi
 	for _, member := range []struct{ id, role string }{{"owner", "owner"}, {"member-a", "member"}, {"member-b", "member"}} {
 		exec(t, db, `INSERT INTO workspace_members(workspace_id,user_id,role) VALUES('ws-authors',?,?)`, member.id, member.role)
 	}
-	exec(t, db, `INSERT INTO conversations(id,user_id,title,workspace_id) VALUES('c1','owner','Shared','ws-authors')`)
+	exec(t, db, `INSERT INTO conversations(id,user_id,title,workspace_id,is_public) VALUES('c1','owner','Shared','ws-authors',1)`)
 
 	// member-a owns the root question and each regenerated assistant variant.
 	// The first variant contains member-b's continuation, the second contains a

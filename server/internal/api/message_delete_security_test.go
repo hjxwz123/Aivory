@@ -33,7 +33,7 @@ func TestDeleteMessageHandlerRejectsWorkspaceBranchWithForeignDescendants(t *tes
 		}
 	}
 	conversation, err := store.CreateConversation(t.Context(), db, store.Conversation{
-		ID: "delete-security-conversation", UserID: "owner", WorkspaceID: workspace.ID, Title: "Shared",
+		ID: "delete-security-conversation", UserID: "owner", WorkspaceID: workspace.ID, IsPublic: true, Title: "Shared",
 	})
 	if err != nil {
 		t.Fatalf("create conversation: %v", err)

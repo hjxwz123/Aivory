@@ -26,7 +26,7 @@ func TestRetrieveExcludesDraftBackedConversationAndKBDocuments(t *testing.T) {
 		`INSERT INTO workspaces(id,name,owner_id,invite_token) VALUES('ws1','Shared','owner','invite')`,
 		`INSERT INTO workspace_members(workspace_id,user_id,role) VALUES('ws1','owner','owner')`,
 		`INSERT INTO workspace_members(workspace_id,user_id,role) VALUES('ws1','member','member')`,
-		`INSERT INTO conversations(id,user_id,title,workspace_id) VALUES('c1','owner','Shared','ws1')`,
+		`INSERT INTO conversations(id,user_id,title,workspace_id,is_public) VALUES('c1','owner','Shared','ws1',1)`,
 		`INSERT INTO channels(id,name,type) VALUES('ch1','Embedding','openai')`,
 		`INSERT INTO models(id,channel_id,kind,request_id,label,dim) VALUES('emb1','ch1','embedding','emb','Embedding',3)`,
 		`INSERT INTO knowledge_bases(id,user_id,name,embedding_model_id,embedding_dim,workspace_id) VALUES('kb1','owner','Project KB','emb1',3,'ws1')`,

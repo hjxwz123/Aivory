@@ -166,7 +166,7 @@ func ListUserImageArtifactsForUser(ctx context.Context, db *sql.DB, userID strin
 	args := []any{userID}
 	args = append(args, workspaceResourceAccessArgs(userID)...)
 	return listUserImageArtifacts(ctx, db,
-		`COALESCE(NULLIF(m.author_id,''),c.user_id)=? AND `+workspaceResourceAccessPredicate("c"),
+		`COALESCE(NULLIF(m.author_id,''),c.user_id)=? AND `+conversationResourceAccessPredicate("c"),
 		args, limit, offset)
 }
 

@@ -428,6 +428,21 @@
     "jumpToLatest": "跳到最新",
     "deleteUndone": "此操作無法撤銷。"
   },
+  "visibility": {
+    "public": "公開",
+    "private": "私密",
+    "publicTooltip": "工作空間內的所有成員都可查看",
+    "privateTooltip": "僅自己可見",
+    "creatorOnly": "只有對話建立者可以變更公開狀態",
+    "makePublic": "設為公開",
+    "makePrivate": "設為私密",
+    "madePublic": "對話已設為公開",
+    "madePrivate": "對話已設為私密",
+    "updateFailed": "無法變更對話的公開狀態",
+    "privateConfirmTitle": "將這段對話設為私密？",
+    "privateConfirmBody": "其他工作空間成員將無法再查看這段對話及其歷史記錄。他們先前傳送的訊息會保留，並繼續對你可見。",
+    "confirmPrivate": "設為私密"
+  },
   "buckets": {
     "today": "今天",
     "yesterday": "昨天",

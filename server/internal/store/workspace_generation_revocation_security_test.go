@@ -30,7 +30,7 @@ func TestWorkspaceGenerationWritesStopAtMembershipRevocation(t *testing.T) {
 	}
 	conversation, err := CreateConversation(ctx, db, Conversation{
 		ID: "generation-revocation-conversation", UserID: "generation-owner",
-		WorkspaceID: workspace.ID, Title: "Generation revocation",
+		WorkspaceID: workspace.ID, IsPublic: true, Title: "Generation revocation",
 	})
 	if err != nil {
 		t.Fatalf("create conversation: %v", err)

@@ -173,7 +173,7 @@ func SetMessageFeedbackForUser(ctx context.Context, db *sql.DB, feedback Message
 		`SELECT COALESCE(c.workspace_id,''), COALESCE(m.model_id,'')
 		   FROM messages m JOIN conversations c ON c.id=m.conversation_id
 		  WHERE m.id=? AND m.conversation_id=? AND m.role='assistant'
-		    AND `+workspaceResourceAccessPredicate("c"), accessArgs...,
+		    AND `+conversationResourceAccessPredicate("c"), accessArgs...,
 	).Scan(&authoritativeWorkspaceID, &authoritativeModelID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound

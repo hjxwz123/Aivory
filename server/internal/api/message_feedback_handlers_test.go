@@ -39,7 +39,7 @@ func TestMessageFeedbackHTTPFlowAndPerUserHydration(t *testing.T) {
 		t.Fatalf("create model: %v", err)
 	}
 	conv, err := store.CreateConversation(t.Context(), db, store.Conversation{
-		ID: "feedback_http_conv", UserID: "u1", WorkspaceID: workspace.ID, Title: "Shared ratings", ModelID: model.ID,
+		ID: "feedback_http_conv", UserID: "u1", WorkspaceID: workspace.ID, IsPublic: true, Title: "Shared ratings", ModelID: model.ID,
 	})
 	if err != nil {
 		t.Fatalf("create conversation: %v", err)

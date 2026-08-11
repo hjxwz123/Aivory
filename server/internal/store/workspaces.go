@@ -67,6 +67,31 @@ func workspaceResourceAccessArgs(userID string) []any {
 	return []any{userID, userID, userID}
 }
 
+// conversationResourceAccessPredicate adds per-conversation visibility to the
+// standard personal/workspace boundary without adding SQL parameters. Public
+// workspace rows are visible to every current member; private rows only match
+// when the current owner/member is also conversations.user_id. Keeping the same
+// three-argument shape lets document/file/message subqueries share the existing
+// authorization plumbing.
+func conversationResourceAccessPredicate(alias string) string {
+	prefix := ""
+	if alias != "" {
+		prefix = alias + "."
+	}
+	return `((COALESCE(` + prefix + `workspace_id,'')='' AND ` + prefix + `user_id=?) OR (` +
+		`COALESCE(` + prefix + `workspace_id,'')<>'' AND EXISTS (` +
+		`SELECT 1 FROM workspaces conversation_workspace ` +
+		`WHERE conversation_workspace.id=` + prefix + `workspace_id AND (` +
+		`(conversation_workspace.owner_id=? AND (` + prefix + `is_public=1 OR ` + prefix + `user_id=conversation_workspace.owner_id)) OR EXISTS (` +
+		`SELECT 1 FROM workspace_members conversation_member ` +
+		`WHERE conversation_member.workspace_id=conversation_workspace.id AND conversation_member.user_id=? ` +
+		`AND (` + prefix + `is_public=1 OR ` + prefix + `user_id=conversation_member.user_id)` +
+		`)` +
+		`)` +
+		`)` +
+		`))`
+}
+
 // workspaceResourceManagerPredicate is the stricter share-management boundary:
 // a personal resource's creator; or, in a workspace, its canonical owner or the
 // resource creator while that creator is still a current member. Other ordinary
