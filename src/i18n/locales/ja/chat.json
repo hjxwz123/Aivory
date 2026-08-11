@@ -428,6 +428,21 @@
     "jumpToLatest": "最新へ移動",
     "deleteUndone": "この操作は取り消せません。"
   },
+  "visibility": {
+    "public": "公開",
+    "private": "非公開",
+    "publicTooltip": "このワークスペースの全メンバーが閲覧できます",
+    "privateTooltip": "自分だけが閲覧できます",
+    "creatorOnly": "公開範囲を変更できるのは会話の作成者だけです",
+    "makePublic": "公開にする",
+    "makePrivate": "非公開にする",
+    "madePublic": "会話を公開しました",
+    "madePrivate": "会話を非公開にしました",
+    "updateFailed": "会話の公開範囲を変更できませんでした",
+    "privateConfirmTitle": "この会話を非公開にしますか？",
+    "privateConfirmBody": "他のワークスペースメンバーは、この会話と履歴を閲覧できなくなります。他のメンバーが以前に送信したメッセージは保持され、引き続きあなたには表示されます。",
+    "confirmPrivate": "非公開にする"
+  },
   "buckets": {
     "today": "今日",
     "yesterday": "昨日",

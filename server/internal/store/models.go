@@ -371,9 +371,11 @@ type Conversation struct {
 	InlineSourceConv string `json:"inline_source_conv"`
 	InlineParentID   string `json:"inline_parent_id"`
 	InlineQuote      string `json:"inline_quote"`
-	// Workspace linkage (§workspaces). '' = personal conversation; set = shared
-	// with every member of that workspace (user_id stays the CREATOR).
+	// Workspace linkage (§workspaces). '' = personal conversation; user_id stays
+	// the creator when set. Workspace conversations are creator-private unless
+	// IsPublic is enabled explicitly.
 	WorkspaceID string `json:"workspace_id"`
+	IsPublic    bool   `json:"is_public"`
 	// Enriched for workspace listings (not columns): creator display identity so
 	// the sidebar can label who started each shared conversation.
 	CreatorName   string `json:"creator_name,omitempty"`

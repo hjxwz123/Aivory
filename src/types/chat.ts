@@ -269,6 +269,9 @@ export interface Conversation {
   hasOlder?: boolean
   /** §workspaces: set when the conversation lives in a workspace. */
   workspaceId?: string
+  /** Workspace visibility. False/undefined is creator-private; personal
+   *  conversations remain owner-only regardless of this field. */
+  isPublic?: boolean
   /** §workspaces: creator display identity for shared-history rows. */
   creatorName?: string
   creatorAvatar?: string

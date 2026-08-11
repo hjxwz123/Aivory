@@ -36,7 +36,7 @@ func TestWorkspaceMembershipRevocationRemovesCreatorAccessEverywhere(t *testing.
 	exec(t, db, `INSERT INTO models(id,channel_id,kind,request_id,label,dim) VALUES('rev-emb','rev-ch','embedding','emb','Embedding',3)`)
 
 	conversation, err := CreateConversation(ctx, db, Conversation{
-		ID: "rev-conv", UserID: "creator", WorkspaceID: workspace.ID,
+		ID: "rev-conv", UserID: "creator", WorkspaceID: workspace.ID, IsPublic: true,
 		Title: "Revocation secret",
 	})
 	if err != nil {
@@ -139,7 +139,7 @@ func TestWorkspaceMembershipRevocationRemovesCreatorAccessEverywhere(t *testing.
 	}
 
 	leaveConversation, err := CreateConversation(ctx, db, Conversation{
-		ID: "leave-conv", UserID: "leaver", WorkspaceID: workspace.ID, Title: "Leave secret",
+		ID: "leave-conv", UserID: "leaver", WorkspaceID: workspace.ID, IsPublic: true, Title: "Leave secret",
 	})
 	if err != nil {
 		t.Fatalf("create leave conversation: %v", err)
@@ -399,7 +399,7 @@ func TestWorkspaceKickSerializesAgainstInviteJoin(t *testing.T) {
 		t.Fatalf("initial join: %v", err)
 	}
 	conversation, err := CreateConversation(ctx, db, Conversation{
-		ID: "race-conv", UserID: "member", WorkspaceID: workspace.ID, Title: "Race",
+		ID: "race-conv", UserID: "member", WorkspaceID: workspace.ID, IsPublic: true, Title: "Race",
 	})
 	if err != nil {
 		t.Fatalf("create race conversation: %v", err)

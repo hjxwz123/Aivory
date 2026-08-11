@@ -6,7 +6,7 @@
  * the normal authorized endpoints and merges the result into the conversations
  * store WITHOUT flashing any loading state:
  *
- *   conversation.created / .deleted / .updated  → silent sidebar-list merge
+ *   conversation.created / .deleted / .hidden / .updated → silent sidebar-list merge
  *   conversation.updated (open, non-streaming)  → refresh that transcript
  *   hello (connect / reconnect)                 → version check + compensation
  *
@@ -130,6 +130,10 @@ function handleEvent(ev: RealtimeEvent): void {
       if (ev.conversation_id) applyRemoteDelete(ev.conversation_id)
       scheduleListSync(false)
       break
+    case 'conversation.hidden':
+      if (ev.conversation_id) applyRemoteHide(ev.conversation_id)
+      scheduleListSync(false)
+      break
     case 'conversation.created':
       scheduleListSync(false)
       break
@@ -167,6 +171,14 @@ function applyRemoteDelete(id: string): void {
   markConversationsDeleted(doomed)
   useConversations.setState((s) => ({
     conversations: s.conversations.filter((c) => !doomed.has(c.id)),
+  }))
+}
+
+function applyRemoteHide(id: string): void {
+  // Visibility can be restored later, so unlike a real delete this must not
+  // tombstone the id. A later conversation.created event can reinsert it.
+  useConversations.setState((s) => ({
+    conversations: s.conversations.filter((conversation) => conversation.id !== id),
   }))
 }
 

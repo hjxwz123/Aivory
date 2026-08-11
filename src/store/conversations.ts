@@ -237,6 +237,8 @@ interface ConversationStore {
   adoptConversation: (row: ApiConversation) => Conversation
   deleteConversation: (id: string) => Promise<void>
   renameConversation: (id: string, title: string) => Promise<void>
+  /** Change a workspace conversation's creator-controlled visibility. */
+  setConversationPublic: (id: string, isPublic: boolean) => Promise<boolean>
   togglePin: (id: string) => Promise<void>
   toggleStar: (id: string) => Promise<void>
   archiveConversation: (id: string) => Promise<void>
@@ -826,6 +828,29 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
     } catch (e) {
       set({ conversations: prevConversations })
       toast.error(errorMessage(e, 'Failed to rename conversation'))
+    }
+  },
+
+  async setConversationPublic(id, isPublic) {
+    try {
+      const row = await conversationsApi.update(id, { is_public: isPublic })
+      const committed = toLocalConversation(row)
+      set((s) => ({
+        conversations: s.conversations.map((conversation) =>
+          conversation.id === id
+            ? {
+                ...committed,
+                messages: conversation.messages,
+                lastParams: conversation.lastParams,
+                hasOlder: conversation.hasOlder,
+                olderCursor: conversation.olderCursor,
+              }
+            : conversation,
+        ),
+      }))
+      return true
+    } catch {
+      return false
     }
   },
 
@@ -2413,6 +2438,7 @@ export function toLocalConversation(c: ApiConversation): Conversation {
   return {
     id: c.id,
     workspaceId: c.workspace_id || undefined,
+    isPublic: c.is_public === true,
     creatorName: c.creator_name || undefined,
     creatorAvatar: c.creator_avatar || undefined,
     creatorId: c.user_id || undefined,
@@ -2945,6 +2971,7 @@ export function sameConvListShape(a: Conversation[], b: Conversation[]): boolean
       x.starred !== y.starred ||
       x.archived !== y.archived ||
       x.projectId !== y.projectId ||
+      x.isPublic !== y.isPublic ||
       Boolean(x.inline) !== Boolean(y.inline) ||
       x.messages.some((m) => m.streaming) !== y.messages.some((m) => m.streaming)
     ) {

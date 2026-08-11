@@ -460,7 +460,7 @@ func TestWorkspaceShareManagementAuthorization(t *testing.T) {
 	mustExec(t, db, `INSERT INTO workspace_members(workspace_id,user_id,role) VALUES('ws-share','workspace-owner','owner')`)
 	mustExec(t, db, `INSERT INTO workspace_members(workspace_id,user_id,role) VALUES('ws-share','conversation-owner','member')`)
 	mustExec(t, db, `INSERT INTO workspace_members(workspace_id,user_id,role) VALUES('ws-share','member','member')`)
-	mustExec(t, db, `INSERT INTO conversations(id,user_id,title,workspace_id) VALUES('workspace-conv','conversation-owner','Workspace conversation','ws-share')`)
+	mustExec(t, db, `INSERT INTO conversations(id,user_id,title,workspace_id,is_public) VALUES('workspace-conv','conversation-owner','Workspace conversation','ws-share',1)`)
 	if _, err := store.CreateMessage(t.Context(), db, store.Message{
 		ID:             "workspace-message",
 		ConversationID: "workspace-conv",
@@ -611,7 +611,7 @@ func TestWorkspaceShareConcurrentRotationPreservesAuthorizationAndSingleToken(t 
 	mustExec(t, db, `INSERT INTO workspace_members(workspace_id,user_id,role) VALUES('ws-share','workspace-owner','owner')`)
 	mustExec(t, db, `INSERT INTO workspace_members(workspace_id,user_id,role) VALUES('ws-share','conversation-owner','member')`)
 	mustExec(t, db, `INSERT INTO workspace_members(workspace_id,user_id,role) VALUES('ws-share','member','member')`)
-	mustExec(t, db, `INSERT INTO conversations(id,user_id,title,workspace_id) VALUES('workspace-conv','conversation-owner','Workspace conversation','ws-share')`)
+	mustExec(t, db, `INSERT INTO conversations(id,user_id,title,workspace_id,is_public) VALUES('workspace-conv','conversation-owner','Workspace conversation','ws-share',1)`)
 	if _, err := store.CreateMessage(t.Context(), db, store.Message{
 		ID:             "workspace-message",
 		ConversationID: "workspace-conv",

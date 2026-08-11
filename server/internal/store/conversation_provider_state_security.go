@@ -56,7 +56,7 @@ func SetConvProviderStateKeyForUser(ctx context.Context, db *sql.DB, convID, mes
 		   FROM messages m JOIN conversations c ON c.id=m.conversation_id
 		  WHERE m.id=? AND m.conversation_id=? AND m.role='assistant'
 		    AND COALESCE(m.author_id,'')=? AND m.status='streaming'
-		    AND `+workspaceResourceAccessPredicate("c"), accessArgs...,
+		    AND `+conversationResourceAccessPredicate("c"), accessArgs...,
 	).Scan(&raw); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrConversationAccessRevoked
@@ -75,7 +75,7 @@ func SetConvProviderStateKeyForUser(ctx context.Context, db *sql.DB, convID, mes
 	updateArgs = append(updateArgs, messageID, userID)
 	res, err := tx.ExecContext(ctx,
 		`UPDATE conversations SET provider_state=?, updated_at=?
-		  WHERE id=? AND `+workspaceResourceAccessPredicate("conversations")+`
+		  WHERE id=? AND `+conversationResourceAccessPredicate("conversations")+`
 		    AND EXISTS (
 		      SELECT 1 FROM messages provider_state_message
 		       WHERE provider_state_message.id=?

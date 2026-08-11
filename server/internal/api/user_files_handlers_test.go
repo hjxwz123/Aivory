@@ -156,7 +156,7 @@ func TestWorkspaceOwnerCanListAndDeleteBilledCommittedMemberFile(t *testing.T) {
 		t.Fatalf("join workspace: %v", err)
 	}
 	if _, err := store.CreateConversation(ctx, db, store.Conversation{
-		ID: "workspace-conversation", UserID: "member", WorkspaceID: workspace.ID, Title: "Shared",
+		ID: "workspace-conversation", UserID: "member", WorkspaceID: workspace.ID, IsPublic: true, Title: "Shared",
 	}); err != nil {
 		t.Fatalf("create conversation: %v", err)
 	}

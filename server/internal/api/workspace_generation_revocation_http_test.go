@@ -122,7 +122,7 @@ func TestHTTPWorkspaceKickCancelsAndScrubsActiveMemberGeneration(t *testing.T) {
 	}
 	conversation, err := store.CreateConversation(ctx, db, store.Conversation{
 		ID: "workspace-generation-kick-conversation", UserID: owner.ID,
-		WorkspaceID: workspace.ID, Title: "Generation kick", ModelID: model.ID,
+		WorkspaceID: workspace.ID, IsPublic: true, Title: "Generation kick", ModelID: model.ID,
 	})
 	if err != nil {
 		t.Fatalf("create conversation: %v", err)
@@ -316,7 +316,7 @@ func TestHTTPWorkspaceDeleteRevokesPreopenedGenerationStream(t *testing.T) {
 	}
 	conversation, err := store.CreateConversation(ctx, db, store.Conversation{
 		ID: "workspace-generation-delete-conversation", UserID: owner.ID,
-		WorkspaceID: workspace.ID, Title: "Delete generation",
+		WorkspaceID: workspace.ID, IsPublic: true, Title: "Delete generation",
 	})
 	if err != nil {
 		t.Fatalf("create conversation: %v", err)

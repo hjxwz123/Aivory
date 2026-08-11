@@ -18,6 +18,7 @@ import (
 //
 //	{"type":"conversation.updated","conversation_id":"c_1","origin":"d-x"}
 //	{"type":"conversation.created", ...} / {"type":"conversation.deleted", ...}
+//	{"type":"conversation.hidden", ...} (workspace visibility revoked, not deleted)
 //	{"type":"hello"}   — sent once on connect; the client uses it to (re)check
 //	                     the app version and run reconnect compensation.
 //

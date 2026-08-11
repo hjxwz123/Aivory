@@ -244,6 +244,7 @@ func RestoreTable(ctx context.Context, ex RowExecer, table string, r io.Reader) 
 		applyLegacyPaymentOrderSnapshotDefaults(table, raw)
 		applyLegacyCreditMicrosDefaults(table, raw)
 		applyLegacyRefreshSessionDefaults(table, raw)
+		applyLegacyConversationVisibilityDefaults(table, raw)
 		cols := make([]string, 0, len(liveCols))
 		args := make([]any, 0, len(liveCols))
 		for _, c := range liveCols { // stable, schema-defined order
@@ -271,6 +272,20 @@ func RestoreTable(ctx context.Context, ex RowExecer, table string, r io.Reader) 
 		n++
 	}
 	return n, nil
+}
+
+// applyLegacyConversationVisibilityDefaults preserves the behavior of
+// workspace conversations exported before per-conversation visibility existed:
+// those conversations were shared with every workspace member. Personal
+// conversations ignore this flag, so applying the default to every legacy row
+// also keeps version detection independent of workspace_id representation.
+func applyLegacyConversationVisibilityDefaults(table string, row map[string]json.RawMessage) {
+	if table != "conversations" {
+		return
+	}
+	if _, present := row["is_public"]; !present {
+		row["is_public"] = json.RawMessage("1")
+	}
 }
 
 func applyLegacyPaymentOrderSnapshotDefaults(table string, row map[string]json.RawMessage) {

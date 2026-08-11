@@ -729,7 +729,7 @@ func documentContainerAccessPredicate(alias string) string {
 		`WHERE document_kb.id=` + prefix + `kb_id AND ` + workspaceResourceAccessPredicate("document_kb") +
 		`)) OR (COALESCE(` + prefix + `conversation_id,'')<>'' AND EXISTS (` +
 		`SELECT 1 FROM conversations document_conversation ` +
-		`WHERE document_conversation.id=` + prefix + `conversation_id AND ` + workspaceResourceAccessPredicate("document_conversation") +
+		`WHERE document_conversation.id=` + prefix + `conversation_id AND ` + conversationResourceAccessPredicate("document_conversation") +
 		`)))`
 }
 
@@ -914,7 +914,7 @@ func CreateDocumentForUser(ctx context.Context, db *sql.DB, d Document, userID s
 			`INSERT INTO documents(id, kb_id, conversation_id, filename, mime_type, size_bytes, status, storage_path, ingest_updated_at, created_at)
 			 SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 			   FROM conversations document_create_conversation
-			  WHERE document_create_conversation.id=? AND `+workspaceResourceAccessPredicate("document_create_conversation")+
+			  WHERE document_create_conversation.id=? AND `+conversationResourceAccessPredicate("document_create_conversation")+
 				workspaceDocumentCreationPredicate("document_create_conversation", workspaceID),
 			appendWorkspaceDocumentCreationArgs(args, workspaceID, userID)...)
 	}
@@ -973,7 +973,7 @@ func documentBillingUserTx(ctx context.Context, tx *sql.Tx, scope, parentID, acc
 		query = `SELECT CASE WHEN COALESCE(c.workspace_id,'')<>''
 			THEN COALESCE(w.owner_id, c.user_id) ELSE c.user_id END
 			FROM conversations c LEFT JOIN workspaces w ON w.id=c.workspace_id
-			WHERE c.id=? AND ` + workspaceResourceAccessPredicate("c")
+			WHERE c.id=? AND ` + conversationResourceAccessPredicate("c")
 	default:
 		return "", ErrNotFound
 	}

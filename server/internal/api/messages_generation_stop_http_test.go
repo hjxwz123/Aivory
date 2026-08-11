@@ -482,6 +482,7 @@ func TestHTTPConversationStopIsScopedToWorkspaceMember(t *testing.T) {
 		ID:          "workspace-member-stop-conversation",
 		UserID:      memberA.ID,
 		WorkspaceID: workspace.ID,
+		IsPublic:    true,
 		Title:       "Workspace member stop isolation",
 		ModelID:     model.ID,
 	})

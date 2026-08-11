@@ -26,7 +26,7 @@ func TestWorkspaceDraftHTTPBoundaries(t *testing.T) {
 	mustExec(t, db, `INSERT INTO workspaces(id,name,owner_id,invite_token) VALUES('ws1','Shared','owner','invite')`)
 	mustExec(t, db, `INSERT INTO workspace_members(workspace_id,user_id,role) VALUES('ws1','owner','owner')`)
 	mustExec(t, db, `INSERT INTO workspace_members(workspace_id,user_id,role) VALUES('ws1','member','member')`)
-	mustExec(t, db, `INSERT INTO conversations(id,user_id,title,workspace_id) VALUES('c1','owner','Shared chat','ws1')`)
+	mustExec(t, db, `INSERT INTO conversations(id,user_id,title,workspace_id,is_public) VALUES('c1','owner','Shared chat','ws1',1)`)
 	mustExec(t, db, `INSERT INTO channels(id,name,type) VALUES('ch1','Embedding','openai')`)
 	mustExec(t, db, `INSERT INTO models(id,channel_id,kind,request_id,label,dim) VALUES('emb1','ch1','embedding','emb','Embedding',3)`)
 	mustExec(t, db, `INSERT INTO knowledge_bases(id,user_id,name,embedding_model_id,embedding_dim,workspace_id) VALUES('kb1','owner','Project KB','emb1',3,'ws1')`)

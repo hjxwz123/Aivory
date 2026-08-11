@@ -113,7 +113,7 @@ func CreateFile(ctx context.Context, db *sql.DB, f File) (*File, error) {
 		q := `INSERT INTO files(id, user_id, conversation_id, filename, mime_type, size_bytes, storage_path, kind, draft, created_at)
 			 SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 			   FROM conversations c
-			  WHERE c.id=? AND ` + workspaceResourceAccessPredicate("c")
+			  WHERE c.id=? AND ` + conversationResourceAccessPredicate("c")
 		if workspaceID != "" {
 			q += ` AND EXISTS (
 				SELECT 1 FROM workspaces create_workspace
@@ -163,7 +163,7 @@ func ListFilesByConversation(ctx context.Context, db *sql.DB, convID, userID str
 		   AND EXISTS (
 		     SELECT 1 FROM conversations c
 		      WHERE c.id=f.conversation_id
-		        AND `+workspaceResourceAccessPredicate("c")+`
+		        AND `+conversationResourceAccessPredicate("c")+`
 		   )
 		   AND (f.user_id=? OR f.draft=0)
 		 ORDER BY f.created_at ASC`, args...)
@@ -219,7 +219,7 @@ func ConversationFilesByIDs(ctx context.Context, db *sql.DB, convID, userID stri
 			AND EXISTS (
 				  SELECT 1 FROM conversations c
 				   WHERE c.id=f.conversation_id
-				     AND `+workspaceResourceAccessPredicate("c")+`
+				     AND `+conversationResourceAccessPredicate("c")+`
 			   )
 		   -- A workspace member may collaborate on committed files, but a
 		   -- composer draft remains private to its uploader until that user
@@ -269,7 +269,7 @@ func listDraftFilesForConversation(ctx context.Context, db *sql.DB, convID, user
 	if strings.TrimSpace(userID) != "" {
 		q += ` AND user_id=? AND EXISTS (
 			SELECT 1 FROM conversations c
-			 WHERE c.id=files.conversation_id AND ` + workspaceResourceAccessPredicate("c") + `
+			 WHERE c.id=files.conversation_id AND ` + conversationResourceAccessPredicate("c") + `
 		)`
 		args = append(args, userID)
 		args = append(args, workspaceResourceAccessArgs(userID)...)
@@ -352,7 +352,7 @@ func DeleteConversationFileAndDocuments(ctx context.Context, db *sql.DB, fileID,
 		    )
 		    AND EXISTS (
 		      SELECT 1 FROM conversations c
-		       WHERE c.id=f.conversation_id AND `+workspaceResourceAccessPredicate("c")+`
+		       WHERE c.id=f.conversation_id AND `+conversationResourceAccessPredicate("c")+`
 		    )`, pathArgs...,
 	).Scan(&storagePath); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -378,7 +378,7 @@ func DeleteConversationFileAndDocuments(ctx context.Context, db *sql.DB, fileID,
 		    )
 		    AND EXISTS (
 		      SELECT 1 FROM conversations c
-		       WHERE c.id=files.conversation_id AND `+workspaceResourceAccessPredicate("c")+`
+		       WHERE c.id=files.conversation_id AND `+conversationResourceAccessPredicate("c")+`
 		    )`, args...)
 	if err != nil {
 		return err
@@ -620,7 +620,7 @@ func GetFile(ctx context.Context, db *sql.DB, id, userID string) (*File, error) 
 		q += ` AND ((f.conversation_id IS NULL AND f.user_id=?) OR (
 		  f.conversation_id IS NOT NULL AND EXISTS (
 		    SELECT 1 FROM conversations c
-		     WHERE c.id=f.conversation_id AND ` + workspaceResourceAccessPredicate("c") + `
+		     WHERE c.id=f.conversation_id AND ` + conversationResourceAccessPredicate("c") + `
 		  ) AND (f.user_id=? OR f.draft=0)
 		))`
 		args = append(args, userID)
@@ -1852,7 +1852,7 @@ func GetArtifact(ctx context.Context, db *sql.DB, id, userID string) (*Artifact,
 		 WHERE a.id=?`
 	args := []any{id}
 	if userID != "" {
-		q += ` AND ` + workspaceResourceAccessPredicate("c")
+		q += ` AND ` + conversationResourceAccessPredicate("c")
 		args = append(args, workspaceResourceAccessArgs(userID)...)
 	}
 	err := db.QueryRowContext(ctx, q, args...).Scan(
@@ -1902,7 +1902,7 @@ func ListImageArtifactsByConversation(ctx context.Context, db *sql.DB, convID, u
 		 FROM artifacts a
 		 JOIN messages m ON m.id = a.message_id
 		 JOIN conversations c ON c.id = m.conversation_id
-		 WHERE m.conversation_id=? AND `+workspaceResourceAccessPredicate("c")+` AND a.mime_type LIKE 'image/%'
+		 WHERE m.conversation_id=? AND `+conversationResourceAccessPredicate("c")+` AND a.mime_type LIKE 'image/%'
 		 ORDER BY a.created_at ASC`, args...)
 	if err != nil {
 		return nil, err
@@ -1998,7 +1998,7 @@ func createArtifact(ctx context.Context, db *sql.DB, a Artifact, expectedConvID,
 		   FROM messages m JOIN conversations c ON c.id=m.conversation_id
 		  WHERE m.id=? AND m.conversation_id=? AND m.role='assistant'
 		    AND COALESCE(m.author_id,'')=? AND m.status='streaming'
-		    AND `+workspaceResourceAccessPredicate("c"), accessArgs...,
+		    AND `+conversationResourceAccessPredicate("c"), accessArgs...,
 	).Scan(&allowed); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrConversationAccessRevoked

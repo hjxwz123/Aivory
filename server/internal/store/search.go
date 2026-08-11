@@ -111,7 +111,7 @@ func SearchConversations(ctx context.Context, db *sql.DB, userID, workspaceID, q
 	scope := `user_id=? AND COALESCE(workspace_id,'')=''`
 	scopeArgs := []any{userID}
 	if workspaceID != "" {
-		scope = `workspace_id=? AND ` + workspaceResourceAccessPredicate("conversations")
+		scope = `workspace_id=? AND ` + conversationResourceAccessPredicate("conversations")
 		scopeArgs = []any{workspaceID}
 		scopeArgs = append(scopeArgs, workspaceResourceAccessArgs(userID)...)
 	}
@@ -144,7 +144,7 @@ func SearchConversations(ctx context.Context, db *sql.DB, userID, workspaceID, q
 	mScope := `c.user_id=? AND COALESCE(c.workspace_id,'')=''`
 	mScopeArgs := []any{userID}
 	if workspaceID != "" {
-		mScope = `c.workspace_id=? AND ` + workspaceResourceAccessPredicate("c")
+		mScope = `c.workspace_id=? AND ` + conversationResourceAccessPredicate("c")
 		mScopeArgs = []any{workspaceID}
 		mScopeArgs = append(mScopeArgs, workspaceResourceAccessArgs(userID)...)
 	}

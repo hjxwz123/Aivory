@@ -178,6 +178,10 @@ func Migrate(db *sql.DB) error {
 	// shared conversations attribute each user turn; usage rows carry the
 	// workspace for the usage pages; per-group cap on owned workspaces.
 	addConvWorkspace := `ALTER TABLE conversations ADD COLUMN workspace_id TEXT NOT NULL DEFAULT ''`
+	// Existing workspace conversations were shared before visibility controls
+	// existed, so the additive migration keeps them public. Fresh schemas declare
+	// DEFAULT 0, and every application create writes the value explicitly.
+	addConvIsPublic := `ALTER TABLE conversations ADD COLUMN is_public INTEGER NOT NULL DEFAULT 1`
 	addProjWorkspace := `ALTER TABLE projects ADD COLUMN workspace_id TEXT NOT NULL DEFAULT ''`
 	addKBWorkspace := `ALTER TABLE knowledge_bases ADD COLUMN workspace_id TEXT NOT NULL DEFAULT ''`
 	addMsgAuthor := `ALTER TABLE messages ADD COLUMN author_id TEXT NOT NULL DEFAULT ''`
@@ -293,6 +297,7 @@ func Migrate(db *sql.DB) error {
 		addImageTimeout = `ALTER TABLE models ADD COLUMN IF NOT EXISTS image_timeout_sec INTEGER NOT NULL DEFAULT 0`
 		addMsgVerify = `ALTER TABLE messages ADD COLUMN IF NOT EXISTS verify TEXT NOT NULL DEFAULT ''`
 		addConvWorkspace = `ALTER TABLE conversations ADD COLUMN IF NOT EXISTS workspace_id TEXT NOT NULL DEFAULT ''`
+		addConvIsPublic = `ALTER TABLE conversations ADD COLUMN IF NOT EXISTS is_public INTEGER NOT NULL DEFAULT 1`
 		addProjWorkspace = `ALTER TABLE projects ADD COLUMN IF NOT EXISTS workspace_id TEXT NOT NULL DEFAULT ''`
 		addKBWorkspace = `ALTER TABLE knowledge_bases ADD COLUMN IF NOT EXISTS workspace_id TEXT NOT NULL DEFAULT ''`
 		addMsgAuthor = `ALTER TABLE messages ADD COLUMN IF NOT EXISTS author_id TEXT NOT NULL DEFAULT ''`
@@ -366,7 +371,7 @@ func Migrate(db *sql.DB) error {
 		addMsgModelLabel, addMsgSearchText,
 		addImageTimeout,
 		addMsgVerify,
-		addConvWorkspace, addProjWorkspace, addKBWorkspace, addMsgAuthor, addUsageWorkspace, addGroupMaxWorkspaces, addGroupMaxStorage, addGroupIsPublic, addGroupIsPurchasable,
+		addConvWorkspace, addConvIsPublic, addProjWorkspace, addKBWorkspace, addMsgAuthor, addUsageWorkspace, addGroupMaxWorkspaces, addGroupMaxStorage, addGroupIsPublic, addGroupIsPurchasable,
 		addModelFallbackChannel, addUsageChannel, addUsageFallback, addUsageStatus, addUsageError,
 		addUsageRequestMethod, addUsageRequestURL, addUsageRequestHeaders, addUsageRequestBody, addUsageTTFTFallback,
 		addFileDraft, addDocumentIngestUpdatedAt,
@@ -463,7 +468,7 @@ func Migrate(db *sql.DB) error {
 		"billing_usage":       {"user_id", "message_id", "model_id", "purpose", "cost_micros", "images_count", "input_tokens", "output_tokens", "currency"},
 		"models":              {"official_tools", "builtin_tools", "moderation_enabled", "moderation_mode", "tags", "extra_params", "image_timeout_sec", "research_enabled", "fallback_channel_id", "fast"},
 		"refresh_tokens":      {"session_id", "user_agent", "ip", "location", "last_seen"},
-		"conversations":       {"inline_source_conv", "inline_parent_id", "inline_quote", "workspace_id", "fast"},
+		"conversations":       {"inline_source_conv", "inline_parent_id", "inline_quote", "workspace_id", "is_public", "fast"},
 		"projects":            {"workspace_id"},
 		"knowledge_bases":     {"workspace_id"},
 		"chunks":              {"image_ref"},

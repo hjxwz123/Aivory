@@ -31,7 +31,7 @@ func TestListUserImageArtifactsSeparatesSelfServiceAndAdminScopes(t *testing.T) 
 	}
 	conversation, err := CreateConversation(ctx, db, Conversation{
 		ID: "gallery-member-conversation", UserID: "gallery-member",
-		WorkspaceID: workspace.ID, Title: "Former creator metadata",
+		WorkspaceID: workspace.ID, IsPublic: true, Title: "Former creator metadata",
 	})
 	if err != nil {
 		t.Fatalf("create conversation: %v", err)

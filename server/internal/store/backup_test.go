@@ -172,6 +172,46 @@ func TestRestoreLegacyCreditFloatsBackfillsMicros(t *testing.T) {
 	}
 }
 
+func TestRestoreLegacyConversationVisibilityDefaultsToPublic(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(filepath.Join(t.TempDir(), "legacy-conversation-visibility.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO users(id,email,password_hash,name,role) VALUES('u_visibility','visibility@example.test','h','Visibility','user')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO workspaces(id,name,owner_id,invite_token) VALUES('ws_visibility','Visibility','u_visibility','invite_visibility')`); err != nil {
+		t.Fatal(err)
+	}
+
+	dump := strings.Join([]string{
+		`{"id":"c_legacy_public","user_id":"u_visibility","title":"Legacy shared","workspace_id":"ws_visibility"}`,
+		`{"id":"c_explicit_private","user_id":"u_visibility","title":"Explicit private","workspace_id":"ws_visibility","is_public":0}`,
+	}, "\n")
+	if n, err := RestoreTable(ctx, db, "conversations", strings.NewReader(dump)); err != nil || n != 2 {
+		t.Fatalf("restore conversations: count=%d err=%v", n, err)
+	}
+
+	var legacyPublic, explicitPrivate int
+	if err := db.QueryRowContext(ctx, `SELECT is_public FROM conversations WHERE id='c_legacy_public'`).Scan(&legacyPublic); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT is_public FROM conversations WHERE id='c_explicit_private'`).Scan(&explicitPrivate); err != nil {
+		t.Fatal(err)
+	}
+	if legacyPublic != 1 {
+		t.Fatalf("legacy conversation is_public=%d, want 1", legacyPublic)
+	}
+	if explicitPrivate != 0 {
+		t.Fatalf("explicit private conversation is_public=%d, want 0", explicitPrivate)
+	}
+}
+
 func TestRestoreLegacyRefreshTokenUsesJTIAsSessionFamily(t *testing.T) {
 	ctx := context.Background()
 	db, err := Open(filepath.Join(t.TempDir(), "legacy-refresh-family.db"))

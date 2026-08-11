@@ -453,6 +453,19 @@ func updateConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errInvalidInput)
 		return
 	}
+	visibilityChanged := false
+	visibilityWorkspaceID := ""
+	if p.IsPublic != nil {
+		cur, err := store.GetConversation(r.Context(), d.DB, id, u.ID)
+		// Workspace visibility belongs exclusively to the conversation creator.
+		// A uniform 404 avoids exposing private conversation ids to other members.
+		if err != nil || cur.WorkspaceID == "" || cur.UserID != u.ID {
+			writeError(w, 404, errNotFound)
+			return
+		}
+		visibilityChanged = cur.IsPublic != *p.IsPublic
+		visibilityWorkspaceID = cur.WorkspaceID
+	}
 	// §C1: never let a user attach a KB they don't own — filter kb_ids to the
 	// owned subset at write time (the orchestrator re-filters at read time too).
 	// The scope follows the CONVERSATION's space (§workspaces): a workspace
@@ -498,7 +511,39 @@ func updateConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	msgcache.Bump(d.Cache, id)
 	stripServerConvFields(conv)
 	publishUserEvent(d, r, u.ID, "conversation.updated", id)
+	if visibilityChanged {
+		publishWorkspaceConversationVisibility(d, r, visibilityWorkspaceID, u.ID, id, conv.IsPublic)
+	}
 	writeJSON(w, 200, conv)
+}
+
+// publishWorkspaceConversationVisibility reconciles other members immediately:
+// a newly-private conversation disappears without a deletion tombstone (it may
+// be made public again), while a newly-public row enters their authorized list.
+// Authorization remains database-enforced if this best-effort notification is
+// missed or a client is offline.
+func publishWorkspaceConversationVisibility(d Deps, r *http.Request, workspaceID, actorID, conversationID string, isPublic bool) {
+	recipients := map[string]struct{}{}
+	if members, err := store.ListWorkspaceMembers(r.Context(), d.DB, workspaceID); err == nil {
+		for _, member := range members {
+			recipients[member.UserID] = struct{}{}
+		}
+	}
+	// Legacy workspaces may be missing the redundant owner membership row.
+	if workspace, err := store.GetWorkspaceForMember(r.Context(), d.DB, workspaceID, actorID); err == nil {
+		recipients[workspace.OwnerID] = struct{}{}
+	}
+	eventType := "conversation.hidden"
+	if isPublic {
+		eventType = "conversation.created"
+	}
+	for userID := range recipients {
+		if userID == "" || userID == actorID {
+			continue
+		}
+		// The actor's device id is not meaningful for another user's tabs.
+		publishUserEvent(d, nil, userID, eventType, conversationID)
+	}
 }
 
 // deleteConversationHandler removes a conversation.
@@ -811,22 +856,18 @@ func forkConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	if title == "" {
 		title = conv.Title + " (fork)"
 	}
-	forkProjectID := conv.ProjectID
-	forkKBIDs := conv.KBIDs
-	if conv.WorkspaceID != "" {
-		// The fork is personal. Workspace project/KB ids must not cross that
-		// container boundary as dangling metadata on the new conversation.
-		forkProjectID = ""
-		forkKBIDs = json.RawMessage("[]")
-	}
 	newConv, err := store.CreateConversation(r.Context(), d.DB, store.Conversation{
-		UserID:    u.ID,
-		ProjectID: forkProjectID,
-		Title:     title,
-		Provider:  conv.Provider,
-		ModelID:   conv.ModelID,
-		Fast:      conv.Fast, // §fast-mode: a fork of a fast conversation stays fast
-		KBIDs:     forkKBIDs,
+		UserID:      u.ID,
+		ProjectID:   conv.ProjectID,
+		Title:       title,
+		Provider:    conv.Provider,
+		ModelID:     conv.ModelID,
+		Fast:        conv.Fast, // §fast-mode: a fork of a fast conversation stays fast
+		KBIDs:       conv.KBIDs,
+		WorkspaceID: conv.WorkspaceID,
+		// Forks are new conversations, so workspace forks follow the new
+		// creator-private default instead of inheriting the source's visibility.
+		IsPublic: false,
 	})
 	if err != nil {
 		writeError(w, 500, err)
@@ -838,6 +879,12 @@ func forkConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	// clicked again, forking twice.
 	copies := make([]store.Message, 0, len(path))
 	for _, m := range path {
+		authorID := m.AuthorID
+		if conv.WorkspaceID != "" && m.Role == "user" && authorID == "" {
+			// Legacy user turns implied the source conversation creator. Once the
+			// fork has a different creator, make that attribution explicit.
+			authorID = conv.UserID
+		}
 		copies = append(copies, store.Message{
 			ConversationID: newConv.ID,
 			Role:           m.Role,
@@ -860,6 +907,7 @@ func forkConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 			Cost:                 m.Cost,
 			Currency:             m.Currency,
 			Status:               "complete",
+			AuthorID:             authorID,
 		})
 	}
 	if len(copies) > 0 {
