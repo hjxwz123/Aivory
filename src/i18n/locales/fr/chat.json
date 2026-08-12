@@ -21,7 +21,17 @@
     "drawLead": "Décrivez ce que vous voulez créer — votre galerie est ci-dessous."
   },
   "composer": {
-    "placeholder": "Posez une question — / affiche les compétences et invites.",
+    "commands": {
+      "compactDescription": "Résumer les anciens échanges et conserver le contexte récent",
+      "compacting": "Compactage du contexte de la conversation…",
+      "compacted": "Contexte compacté ({{count}} messages résumés)",
+      "nothingToCompact": "Il n’y a pas assez d’anciens échanges à compacter",
+      "noConversation": "Il n’y a pas encore de conversation à compacter",
+      "disabled": "Le compactage du contexte est désactivé par l’administrateur",
+      "inProgress": "Attendez la fin de la réponse en cours avant de compacter",
+      "failed": "Impossible de compacter le contexte de la conversation"
+    },
+    "placeholder": "Posez une question — / affiche les compétences, commandes et invites.",
     "attach": "Joindre des fichiers",
     "dropHint": "Déposez les fichiers à joindre",
     "dropAnywhere": "Déposez n'importe où pour joindre",

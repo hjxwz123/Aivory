@@ -58,8 +58,9 @@
   },
   "command": {
     "skills": "スキル",
+    "commands": "コマンド",
     "prompts": "プロンプト",
-    "empty": "一致するスキルやプロンプトはありません",
+    "empty": "一致するスキル、コマンド、プロンプトはありません",
     "loading": "読み込み中…",
     "removeSkill": "スキル {{name}} を外す"
   }

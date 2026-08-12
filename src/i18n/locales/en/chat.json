@@ -21,7 +21,17 @@
     "drawLead": "Describe what you want to create — your gallery is below."
   },
   "composer": {
-    "placeholder": "Ask anything — type / for skills and prompts.",
+    "placeholder": "Ask anything — type / for skills, commands, and prompts.",
+    "commands": {
+      "compactDescription": "Summarize earlier turns and keep recent context",
+      "compacting": "Compacting conversation context…",
+      "compacted": "Context compacted ({{count}} messages summarized)",
+      "nothingToCompact": "There are not enough earlier turns to compact",
+      "noConversation": "There is no conversation to compact yet",
+      "disabled": "Context compaction is disabled by the administrator",
+      "inProgress": "Wait for the current response to finish before compacting",
+      "failed": "Could not compact the conversation context"
+    },
     "attach": "Attach files",
     "dropHint": "Drop files to attach",
     "dropAnywhere": "Drop anywhere to attach",

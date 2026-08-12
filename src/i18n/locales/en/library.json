@@ -58,8 +58,9 @@
   },
   "command": {
     "skills": "Skills",
+    "commands": "Commands",
     "prompts": "Prompts",
-    "empty": "No matching skills or prompts",
+    "empty": "No matching skills, commands, or prompts",
     "loading": "Loading…",
     "removeSkill": "Remove skill {{name}}"
   }
