@@ -44,6 +44,7 @@
       "apiFormatHint": "Modèles de chat uniquement.",
       "baseUrl": "URL de base",
       "baseUrlHint": "Laissez vide pour utiliser la valeur par défaut du fournisseur.",
+      "openAIBaseUrlHint": "Les URL OpenAI doivent se terminer par /v1, par exemple https://api.openai.com/v1. Laissez vide pour utiliser la valeur par défaut.",
       "apiKey": "Clé d'API",
       "apiKeyHintNew": "",
       "apiKeyHintEdit": "Laissez vide pour conserver la clé enregistrée.",
@@ -59,7 +60,8 @@
     "updated": "Canal mis à jour",
     "removed": "Canal retiré",
     "errors": {
-      "nameRequired": "Nom requis"
+      "nameRequired": "Nom requis",
+      "openAIBaseUrlV1Required": "L’URL de base OpenAI doit être une URL HTTP(S) complète se terminant par /v1."
     },
     "labels": {
       "noKey": "clé non définie",

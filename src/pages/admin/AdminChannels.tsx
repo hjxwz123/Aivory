@@ -27,6 +27,7 @@ import {
 import { toast } from '@/hooks/use-toast'
 import { Badge } from '@/components/ui/badge'
 import { PanelFallback } from '@/components/ui/panel-fallback'
+import { normalizeOpenAIBaseUrl } from '@/lib/channel-base-url'
 
 type Editable = Partial<ApiChannel> & { api_key?: string }
 
@@ -44,6 +45,7 @@ export default function AdminChannels() {
   const savingRef = useRef(false)
   const [deleting, setDeleting] = useState(false)
   const deletingRef = useRef(false)
+  const [showBaseUrlError, setShowBaseUrlError] = useState(false)
 
   async function load() {
     setLoading(true)
@@ -62,10 +64,12 @@ export default function AdminChannels() {
   }, [])
 
   function openNew() {
+    setShowBaseUrlError(false)
     setEditor({ open: true, draft: { type: 'openai', api_format: 'chat', enabled: true, name: '', base_url: '' } })
   }
 
   function openEdit(row: ApiChannel) {
+    setShowBaseUrlError(false)
     setEditor({ open: true, row, draft: { ...row, api_key: '' } })
   }
 
@@ -76,14 +80,22 @@ export default function AdminChannels() {
       toast.error(t('admin:channels.errors.nameRequired'))
       return
     }
+    const normalizedBaseUrl = d.type === 'openai'
+      ? normalizeOpenAIBaseUrl(d.base_url ?? '')
+      : (d.base_url ?? '').trim()
+    if (normalizedBaseUrl === null) {
+      setShowBaseUrlError(true)
+      return
+    }
+    const payload = { ...d, name: d.name.trim(), base_url: normalizedBaseUrl }
     savingRef.current = true
     setSaving(true)
     try {
       if (editor.row) {
-        await adminApi.updateChannel(editor.row.id, d)
+        await adminApi.updateChannel(editor.row.id, payload)
         toast.success(t('admin:channels.updated'))
       } else {
-        await adminApi.createChannel(d)
+        await adminApi.createChannel(payload)
         toast.success(t('admin:channels.created'))
       }
       setEditor({ ...editor, open: false })
@@ -222,6 +234,7 @@ export default function AdminChannels() {
                     onValueChange={(v) => {
                       const type = v as ApiChannel['type']
                       // api_format only applies to OpenAI; clear it for others.
+                      setShowBaseUrlError(false)
                       setEditor({
                         ...editor,
                         draft: {
@@ -261,12 +274,27 @@ export default function AdminChannels() {
                   </Field>
                 ) : null}
               </div>
-              <Field label={t('admin:channels.fields.baseUrl')} htmlFor="ch-url" hint={t('admin:channels.fields.baseUrlHint')}>
+              <Field
+                label={t('admin:channels.fields.baseUrl')}
+                htmlFor="ch-url"
+                hint={t(editor.draft.type === 'openai'
+                  ? 'admin:channels.fields.openAIBaseUrlHint'
+                  : 'admin:channels.fields.baseUrlHint')}
+                error={editor.draft.type === 'openai'
+                  && showBaseUrlError
+                  && normalizeOpenAIBaseUrl(editor.draft.base_url ?? '') === null
+                  ? t('admin:channels.errors.openAIBaseUrlV1Required')
+                  : undefined}
+              >
                 <Input
                   id="ch-url"
                   value={editor.draft.base_url ?? ''}
                   onChange={(e) => setEditor({ ...editor, draft: { ...editor.draft, base_url: e.target.value } })}
-                  placeholder="https://api.openai.com"
+                  onBlur={() => editor.draft.type === 'openai' && setShowBaseUrlError(true)}
+                  invalid={editor.draft.type === 'openai'
+                    && showBaseUrlError
+                    && normalizeOpenAIBaseUrl(editor.draft.base_url ?? '') === null}
+                  placeholder={editor.draft.type === 'openai' ? 'https://api.openai.com/v1' : 'https://api.example.com'}
                 />
               </Field>
               <Field

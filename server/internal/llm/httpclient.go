@@ -23,6 +23,17 @@ func providerBaseURL(baseURL, vendorDefault string) string {
 	return vendorDefault
 }
 
+// OpenAIBaseURL returns the versioned API root expected in channel settings.
+// Appending /v1 for legacy host-only rows keeps existing installations working
+// while new and edited channels are required to store the explicit version.
+func OpenAIBaseURL(baseURL string) string {
+	base := providerBaseURL(baseURL, "https://api.openai.com/v1")
+	if strings.HasSuffix(base, "/v1") {
+		return base
+	}
+	return base + "/v1"
+}
+
 // providerHTTPClient is the shared client for all upstream model-provider calls
 // (§B2). It deliberately has NO overall Timeout — generation responses stream
 // for a long time and the request *context* bounds the total. Instead it bounds
