@@ -1,4 +1,5 @@
 export interface ComposerCommandQuery {
+  trigger: '/' | '@'
   query: string
   from: number
   to: number
@@ -7,9 +8,10 @@ export interface ComposerCommandQuery {
 export const MAX_SELECTED_USER_SKILLS = 5
 
 /**
- * Finds the slash token immediately before a collapsed cursor. Positions are
- * ProseMirror document positions; textBeforeCursor is the current textblock's
- * text, with inline atoms represented by one replacement character.
+ * Finds a slash-command or knowledge-base mention immediately before a
+ * collapsed cursor. Positions are ProseMirror document positions;
+ * textBeforeCursor is the current textblock's text, with inline atoms
+ * represented by one replacement character.
  */
 export function findComposerCommandQuery(
   textBeforeCursor: string,
@@ -18,13 +20,16 @@ export function findComposerCommandQuery(
 ): ComposerCommandQuery | null {
   if (!Number.isInteger(textblockStart) || !Number.isInteger(cursorPosition)) return null
   if (textblockStart < 0 || cursorPosition < textblockStart) return null
-  const match = textBeforeCursor.match(/(?:^|\s)\/([^\s/]*)$/)
+  const match = textBeforeCursor.match(/(?:^|\s)([/@])([^\s]*)$/)
   if (!match) return null
-  const query = match[1] ?? ''
-  const slashOffset = textBeforeCursor.length - query.length - 1
+  const trigger = match[1] as ComposerCommandQuery['trigger']
+  const query = match[2] ?? ''
+  if (query.includes(trigger)) return null
+  const triggerOffset = textBeforeCursor.length - query.length - 1
   return {
+    trigger,
     query,
-    from: textblockStart + slashOffset,
+    from: textblockStart + triggerOffset,
     to: cursorPosition,
   }
 }

@@ -7,9 +7,10 @@ import {
   selectedUserSkillIdsForRequest,
 } from '@/lib/composer-commands'
 
-describe('composer slash commands', () => {
+describe('composer commands', () => {
   it('identifies the exact slash range at the start of a text block', () => {
     expect(findComposerCommandQuery('/prompt', 1, 8)).toEqual({
+      trigger: '/',
       query: 'prompt',
       from: 1,
       to: 8,
@@ -18,6 +19,7 @@ describe('composer slash commands', () => {
 
   it('identifies a slash range after whitespace without consuming the whitespace', () => {
     expect(findComposerCommandQuery('Ask this /deck', 12, 26)).toEqual({
+      trigger: '/',
       query: 'deck',
       from: 21,
       to: 26,
@@ -25,12 +27,56 @@ describe('composer slash commands', () => {
   })
 
   it('supports the empty command that opens the menu immediately after slash', () => {
-    expect(findComposerCommandQuery('hello /', 1, 8)).toEqual({ query: '', from: 7, to: 8 })
+    expect(findComposerCommandQuery('hello /', 1, 8)).toEqual({
+      trigger: '/',
+      query: '',
+      from: 7,
+      to: 8,
+    })
   })
 
   it('rejects slash characters inside words or commands containing another slash', () => {
     expect(findComposerCommandQuery('hello/prompt', 1, 13)).toBeNull()
     expect(findComposerCommandQuery('hello /prompt/more', 1, 19)).toBeNull()
+  })
+
+  it('opens the knowledge-base menu for an empty at-sign mention', () => {
+    expect(findComposerCommandQuery('@', 1, 2)).toEqual({
+      trigger: '@',
+      query: '',
+      from: 1,
+      to: 2,
+    })
+  })
+
+  it('identifies a Chinese knowledge-base query after whitespace', () => {
+    expect(findComposerCommandQuery('请参考 @产品资料', 4, 13)).toEqual({
+      trigger: '@',
+      query: '产品资料',
+      from: 8,
+      to: 13,
+    })
+  })
+
+  it('does not treat email addresses or inline at-signs as knowledge-base mentions', () => {
+    expect(findComposerCommandQuery('me@example.com', 1, 15)).toBeNull()
+    expect(findComposerCommandQuery('ask@product', 1, 12)).toBeNull()
+    expect(findComposerCommandQuery('hello @product@other', 1, 21)).toBeNull()
+  })
+
+  it('allows the other trigger character inside a query without changing slash behavior', () => {
+    expect(findComposerCommandQuery('/owner@example', 1, 15)).toEqual({
+      trigger: '/',
+      query: 'owner@example',
+      from: 1,
+      to: 15,
+    })
+    expect(findComposerCommandQuery('@HR/Policy', 1, 11)).toEqual({
+      trigger: '@',
+      query: 'HR/Policy',
+      from: 1,
+      to: 11,
+    })
   })
 })
 

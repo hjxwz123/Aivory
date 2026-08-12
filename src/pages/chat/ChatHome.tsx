@@ -232,9 +232,14 @@ export default function ChatHome() {
   // mode (image models) is always advanced.
   const fastAvailable = useModels((s) => s.fastAvailable)
   const [pickedFast, setPickedFast] = useState<boolean | null>(null)
+  const [selectedKnowledgeBaseIds, setSelectedKnowledgeBaseIds] = useState<string[]>([])
   const fast =
     !drawMode &&
     (pickedFast ?? resolveNewConversationFastMode(user?.settings, fastAvailable, drawMode))
+
+  useEffect(() => {
+    setSelectedKnowledgeBaseIds([])
+  }, [draftScope, workspaceId])
 
   // When the user attaches a file BEFORE sending, we must create the
   // conversation up front so the upload is scoped + RAG-ingested (§4.11.2).
@@ -484,6 +489,7 @@ export default function ChatHome() {
       // §fast-mode: skip this for a fast turn — setModel would clear conv.fast; the
       // send's fast flag drives the (hidden) model server-side instead.
       if (!opts.fast && modelId && conv.modelId !== modelId) void setModel(conv.id, modelId)
+      void useConversations.getState().setKBs(conv.id, selectedKnowledgeBaseIds)
       clearComposerDraft(draftScope)
       navigate(`/chat/${conv.id}`)
       void sendMessage({
@@ -509,7 +515,12 @@ export default function ChatHome() {
     // the cache, and swap the id in the URL. So the user lands on the thread the
     // moment they hit send — never staring at the home screen during the create
     // round-trip (and never re-clicking because "nothing happened").
-    const tempId = beginOptimisticConversation(text, modelId, opts.fast === true)
+    const tempId = beginOptimisticConversation(
+      text,
+      modelId,
+      opts.fast === true,
+      selectedKnowledgeBaseIds,
+    )
     clearComposerDraft(draftScope)
     navigate(`/chat/${tempId}`)
     void sendMessage({
@@ -585,6 +596,8 @@ export default function ChatHome() {
               conversationId={pendingConversationId}
               ensureConversationId={ensureConversation}
               onAttachmentsDrained={discardDraftConversation}
+              kbIds={selectedKnowledgeBaseIds}
+              onKBChange={setSelectedKnowledgeBaseIds}
               autoFocus
             />
           </div>
@@ -635,6 +648,8 @@ export default function ChatHome() {
                 conversationId={pendingConversationId}
                 ensureConversationId={ensureConversation}
                 onAttachmentsDrained={discardDraftConversation}
+                kbIds={selectedKnowledgeBaseIds}
+                onKBChange={setSelectedKnowledgeBaseIds}
                 autoFocus
               />
             </div>
