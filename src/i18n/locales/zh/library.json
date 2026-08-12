@@ -58,8 +58,9 @@
   },
   "command": {
     "skills": "技能",
+    "commands": "命令",
     "prompts": "提示词",
-    "empty": "没有匹配的技能或提示词",
+    "empty": "没有匹配的技能、命令或提示词",
     "loading": "正在加载…",
     "removeSkill": "移除技能 {{name}}"
   }

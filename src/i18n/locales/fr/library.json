@@ -58,8 +58,9 @@
   },
   "command": {
     "skills": "Compétences",
+    "commands": "Commandes",
     "prompts": "Invites",
-    "empty": "Aucune compétence ou invite correspondante",
+    "empty": "Aucune compétence, commande ou invite correspondante",
     "loading": "Chargement…",
     "removeSkill": "Retirer la compétence {{name}}"
   }

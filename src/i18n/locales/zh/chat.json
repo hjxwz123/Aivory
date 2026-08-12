@@ -21,7 +21,17 @@
     "drawLead": "描述你想画的画面——你的作品在下方。"
   },
   "composer": {
-    "placeholder": "随便问点什么——输入 / 唤出技能与提示词。",
+    "commands": {
+      "compactDescription": "摘要较早的对话并保留最近上下文",
+      "compacting": "正在压缩对话上下文…",
+      "compacted": "上下文已压缩（已摘要 {{count}} 条消息）",
+      "nothingToCompact": "没有足够的较早对话可供压缩",
+      "noConversation": "当前还没有可压缩的对话",
+      "disabled": "管理员已关闭上下文压缩",
+      "inProgress": "请等待当前回复完成后再压缩",
+      "failed": "无法压缩对话上下文"
+    },
+    "placeholder": "随便问点什么——输入 / 唤出技能、命令与提示词。",
     "attach": "添加附件",
     "dropHint": "拖放文件以上传",
     "dropAnywhere": "拖放到任意位置即可添加",

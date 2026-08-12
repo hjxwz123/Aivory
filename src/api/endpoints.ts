@@ -498,6 +498,14 @@ export const searchApi = {
 
 // ----- Conversations + messages -------------------------------------------
 
+export interface ConversationCompactionResult {
+  compacted: boolean
+  reason: 'compacted' | 'nothing_to_compact' | 'disabled' | 'generation_in_progress'
+  dropped_messages: number
+  kept_messages: number
+  summary_tokens: number
+}
+
 export const conversationsApi = {
   list: (
     projectId?: string,
@@ -526,6 +534,8 @@ export const conversationsApi = {
   },
   create: (body: { model_id?: string; project_id?: string; title?: string; workspace_id?: string; fast?: boolean }) =>
     api<ApiConversation>('/conversations', { method: 'POST', body }),
+  compact: (id: string) =>
+    api<ConversationCompactionResult>(`/conversations/${encodeURIComponent(id)}/compact`, { method: 'POST' }),
   // Bulk-import conversation trees from another platform's export OR our own
   // privacy-page "Export all data" file. History + titles (+ model for our own
   // format) only; the server bypasses the orchestrator (no model calls / quota).

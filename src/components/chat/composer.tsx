@@ -36,6 +36,7 @@ import {
   ArrowLeft,
   ChevronRight,
   FileText,
+  PackageOpen,
 } from 'lucide-react'
 import type { Attachment } from '@/types/chat'
 import {
@@ -68,7 +69,7 @@ import type {
   ApiUserPrompt,
   ApiUserSkill,
 } from '@/api/types'
-import { toast } from '@/hooks/use-toast'
+import { toast, useToastStore } from '@/hooks/use-toast'
 import { cn, uid, modKey } from '@/lib/utils'
 import { attachmentKindLabel, attachmentTileClass, fileIconFor } from '@/lib/file-icon'
 import {
@@ -325,6 +326,7 @@ interface FeatureItem {
 
 type ComposerCommandItem =
   | { kind: 'skill'; id: string; name: string; description: string; skill: ApiUserSkill }
+  | { kind: 'command'; id: 'compact'; name: string; description: string }
   | { kind: 'prompt'; id: string; name: string; description: string; prompt: ApiUserPrompt }
   | {
       kind: 'knowledge-base'
@@ -627,6 +629,7 @@ export function Composer({
   const [selectedSkills, setSelectedSkills] = useState<ApiUserSkill[]>([])
   const [commandQuery, setCommandQuery] = useState<ComposerCommandQuery | null>(null)
   const [commandIndex, setCommandIndex] = useState(0)
+  const [executingCommand, setExecutingCommand] = useState<'compact' | null>(null)
   const [dismissedCommandKey, setDismissedCommandKey] = useState('')
   const commandMenuRef = useRef<HTMLDivElement>(null)
   const composerRootRef = useRef<HTMLDivElement>(null)
@@ -1242,6 +1245,16 @@ export function Composer({
   async function handleSubmit() {
     if (submittingRef.current) return
     const text = value.trim()
+    if (text === '/compact' && attachments.length === 0) {
+      if (!conversationId) {
+        toast.info(t('composer.commands.noConversation'))
+        return
+      }
+      updateValue('')
+      setCommandQuery(null)
+      await runCompactCommand()
+      return
+    }
     if (voiceActive || streaming || uploading || restoringAttachments || documentNotReady) return
     if (!text && isImageMode && hasImageAttachment(attachments)) {
       toast.warning(t('composer.imagePromptRequired'))
@@ -2011,12 +2024,20 @@ export function Composer({
         description: prompt.description,
         prompt,
       }))
-    const limit = 10
-    if (skillItems.length > 0 && promptItems.length > 0) {
-      const perKind = Math.floor(limit / 2)
-      return [...skillItems.slice(0, perKind), ...promptItems.slice(0, perKind)]
+    const compactItem: ComposerCommandItem = {
+      kind: 'command',
+      id: 'compact',
+      name: '/compact',
+      description: t('composer.commands.compactDescription'),
     }
-    return [...skillItems, ...promptItems].slice(0, limit)
+    const matchedCommands = conversationId && matches(compactItem.name, compactItem.description) ? [compactItem] : []
+    const limit = 10
+    // A matching command always owns one slot, so a full skill catalog cannot
+    // hide /compact. Remaining rows keep the requested skill -> command -> prompt order.
+    const libraryLimit = Math.max(0, limit - matchedCommands.length)
+    const visibleSkills = skillItems.slice(0, libraryLimit)
+    const visiblePrompts = promptItems.slice(0, libraryLimit - visibleSkills.length)
+    return [...visibleSkills, ...matchedCommands, ...visiblePrompts]
   }, [
     commandQuery,
     libraryPrompts,
@@ -2024,6 +2045,8 @@ export function Composer({
     selectableKnowledgeBases,
     selectedKnowledgeBaseIds,
     selectedSkills,
+    conversationId,
+    t,
   ])
 
   const enabledCommandIndices = useMemo(
@@ -2101,6 +2124,47 @@ export function Composer({
     active?.scrollIntoView({ block: 'nearest' })
   }, [commandIndex])
 
+  async function runCompactCommand() {
+    if (!conversationId) {
+      toast.info(t('composer.commands.noConversation'))
+      return
+    }
+    if (streaming || executingCommand) {
+      if (streaming) toast.warning(t('composer.commands.inProgress'))
+      return
+    }
+    setExecutingCommand('compact')
+    const progressToast = toast.custom({
+      title: t('composer.commands.compacting'),
+      variant: 'info',
+      duration: 0,
+    })
+    try {
+      const result = await conversationsApi.compact(conversationId)
+      if (result.compacted) {
+        toast.success(t('composer.commands.compacted', { count: result.dropped_messages }))
+      } else {
+        toast.info(t('composer.commands.nothingToCompact'))
+      }
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 409) {
+        const reason = (error.body as { reason?: string } | null)?.reason
+        toast.warning(
+          reason === 'disabled'
+            ? t('composer.commands.disabled')
+            : reason === 'generation_in_progress'
+              ? t('composer.commands.inProgress')
+              : t('composer.commands.failed'),
+        )
+      } else {
+        toast.error(t('composer.commands.failed'))
+      }
+    } finally {
+      useToastStore.getState().dismiss(progressToast)
+      setExecutingCommand(null)
+    }
+  }
+
   function chooseCommand(item: ComposerCommandItem) {
     const query = commandQuery
     if (!query) return
@@ -2108,6 +2172,10 @@ export function Composer({
       ref.current?.replaceRange(query.from, query.to, '')
       setSelectedSkills((current) => addSelectedUserSkill(current, item.skill))
       setDismissedCommandKey('')
+    } else if (item.kind === 'command') {
+      ref.current?.replaceRange(query.from, query.to, '')
+      setDismissedCommandKey('')
+      void runCompactCommand()
     } else if (item.kind === 'prompt') {
       ref.current?.replaceRange(query.from, query.to, item.prompt.content)
       setDismissedCommandKey(commandKey)
@@ -2357,22 +2425,18 @@ export function Composer({
                     {t('composer.retryKnowledgeBases')}
                   </button>
                 </div>
-              ) : commandQuery?.trigger === '/' && libraryLoading ? (
-                <div className="flex items-center gap-2 px-2.5 py-2 text-[13px] text-[var(--color-fg-muted)]">
-                  <Loader2 size={14} className="animate-spin" aria-hidden />
-                  {t('library:command.loading')}
-                </div>
-              ) : commandItems.length === 0 ? (
+              ) : commandItems.length === 0 && !(commandQuery?.trigger === '/' && libraryLoading) ? (
                 <p className="px-2.5 py-2 text-[13px] text-[var(--color-fg-muted)]">
                   {commandQuery?.trigger === '@'
                     ? t('composer.knowledgeBaseMentionEmpty')
                     : t('library:command.empty')}
                 </p>
               ) : (
-                (commandQuery?.trigger === '@'
-                  ? (['knowledge-base'] as const)
-                  : (['skill', 'prompt'] as const)
-                ).map((kind) => {
+                <>
+                  {(commandQuery?.trigger === '@'
+                    ? (['knowledge-base'] as const)
+                    : (['skill', 'command', 'prompt'] as const)
+                  ).map((kind) => {
                   const items = commandItems
                     .map((item, index) => ({ item, index }))
                     .filter(({ item }) => item.kind === kind)
@@ -2386,7 +2450,9 @@ export function Composer({
                       >
                         {kind === 'knowledge-base'
                           ? t('composer.knowledgeBaseMentionLabel')
-                          : t(`library:command.${kind === 'skill' ? 'skills' : 'prompts'}`)}
+                          : kind === 'command'
+                            ? t('library:command.commands')
+                            : t(`library:command.${kind === 'skill' ? 'skills' : 'prompts'}`)}
                       </p>
                       {items.map(({ item, index }) => {
                         const active = index === commandIndex
@@ -2414,7 +2480,9 @@ export function Composer({
                                   ? 'text-[var(--color-accent)]'
                                   : item.kind === 'knowledge-base'
                                     ? 'text-[var(--color-tool-selection-text)]'
-                                  : 'text-[var(--color-secondary)]',
+                                    : item.kind === 'command'
+                                      ? 'text-[var(--color-fg-muted)]'
+                                      : 'text-[var(--color-secondary)]',
                               )}
                               data-command-icon
                             >
@@ -2422,6 +2490,12 @@ export function Composer({
                                 <SkillIcon name={item.skill.icon} size={16} aria-hidden />
                               ) : item.kind === 'knowledge-base' ? (
                                 <BookOpen size={16} aria-hidden />
+                              ) : item.kind === 'command' ? (
+                                executingCommand === item.id ? (
+                                  <Loader2 size={16} className="animate-spin" aria-hidden />
+                                ) : (
+                                  <PackageOpen size={16} aria-hidden />
+                                )
                               ) : (
                                 <FileText size={16} aria-hidden />
                               )}
@@ -2448,7 +2522,18 @@ export function Composer({
                       })}
                     </div>
                   )
-                })
+                  })}
+                  {commandQuery?.trigger === '/' && libraryLoading ? (
+                    <div
+                      role="status"
+                      aria-live="polite"
+                      className="flex items-center gap-2 px-2.5 py-2 text-[13px] text-[var(--color-fg-muted)]"
+                    >
+                      <Loader2 size={14} className="animate-spin" aria-hidden />
+                      {t('library:command.loading')}
+                    </div>
+                  ) : null}
+                </>
               )}
             </div>,
             document.body,

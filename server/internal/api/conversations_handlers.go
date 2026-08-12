@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"aivory/server/internal/envcfg"
+	"aivory/server/internal/llm"
 	"aivory/server/internal/msgcache"
 	"aivory/server/internal/store"
 )
@@ -75,6 +76,30 @@ func listConversationsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 // summarised content. Mutates in place; the store layer keeps the real value.
 func stripServerConvFields(c *store.Conversation) {
 	c.SummaryBlocks = json.RawMessage("[]")
+}
+
+func compactConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	u := authUser(r)
+	id := pathParam(r, "id")
+	if d.Orchestrator == nil {
+		writeError(w, http.StatusServiceUnavailable, errors.New("context compaction is unavailable"))
+		return
+	}
+	result, err := d.Orchestrator.CompactConversation(r.Context(), u.ID, id)
+	if err != nil {
+		switch {
+		case errors.Is(err, llm.ErrCompactionDisabled):
+			writeJSON(w, http.StatusConflict, result)
+		case errors.Is(err, llm.ErrCompactionInFlight):
+			writeJSON(w, http.StatusConflict, result)
+		case errors.Is(err, store.ErrNotFound):
+			writeError(w, http.StatusNotFound, errNotFound)
+		default:
+			writeError(w, http.StatusInternalServerError, err)
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 // searchHandler runs full-text search over the user's own conversation titles
