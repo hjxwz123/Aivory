@@ -16,6 +16,7 @@
       "What are you curious about?"
     ],
     "lead": "Ask anything. Outlines, code, decisions, reading — Aivory will think alongside you.",
+    "changeSubtitle": "Show another opening question",
     "disclaimer": "Aivory can make mistakes. Check anything important.",
     "drawLead": "Describe what you want to create — your gallery is below."
   },
