@@ -336,6 +336,7 @@ func NewRouter(d Deps) http.Handler {
 
 	mux.handle("POST", "/api/files", requireAuth(d, uploadFileHandler))
 	mux.handle("GET", "/api/files/:id", requireAuth(d, downloadFileHandler))
+	mux.handle("GET", "/api/documents/:id/content", requireAuth(d, documentContentHandler))
 	// User files page (§ user files page): inventory, meter, delete, preview.
 	mux.handle("GET", "/api/me/files", requireAuth(d, listMyFilesHandler))
 	mux.handle("POST", "/api/me/files/delete", requireAuth(d, deleteMyFilesHandler))
@@ -348,6 +349,7 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("DELETE", "/api/kbs/:id", requireAuth(d, deleteKBHandler))
 	mux.handle("POST", "/api/kbs/:id/documents", requireAuth(d, uploadKBDocHandler))
 	mux.handle("GET", "/api/kbs/:id/documents", requireAuth(d, listKBDocsHandler))
+	mux.handle("POST", "/api/kbs/:id/documents/:docId/retry", requireAuth(d, retryKBDocHandler))
 	mux.handle("DELETE", "/api/kbs/:id/documents/:docId", requireAuth(d, deleteKBDocHandler))
 
 	// Admin endpoints.

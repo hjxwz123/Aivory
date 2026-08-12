@@ -5,6 +5,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log"
+	"os"
 	"strings"
 	"time"
 )
@@ -258,7 +261,9 @@ func ListProjects(ctx context.Context, db *sql.DB, userID string) ([]Project, er
 	// Personal listing only — workspace projects are isolated (§workspaces) and
 	// listed via ListWorkspaceProjects.
 	rows, err := db.QueryContext(ctx,
-		`SELECT id, user_id, name, description, instructions, accent, emoji, pinned, kb_id, auto_add_uploads, created_at, updated_at, COALESCE(workspace_id,'')
+		`SELECT id, user_id, name, description, instructions, accent, emoji, pinned, kb_id, auto_add_uploads, created_at, updated_at, COALESCE(workspace_id,''),
+		        COALESCE((SELECT embedding_model_id FROM knowledge_bases WHERE id=projects.kb_id),''),
+		        COALESCE((SELECT embedding_dim FROM knowledge_bases WHERE id=projects.kb_id),0)
 		 FROM projects WHERE user_id=? AND COALESCE(workspace_id,'')='' ORDER BY pinned DESC, updated_at DESC`, userID)
 	if err != nil {
 		return nil, err
@@ -289,7 +294,9 @@ func ListWorkspaceProjectsForUser(ctx context.Context, db *sql.DB, workspaceID, 
 }
 
 func listWorkspaceProjects(ctx context.Context, db *sql.DB, workspaceID, userID string) ([]Project, error) {
-	q := `SELECT id, user_id, name, description, instructions, accent, emoji, pinned, kb_id, auto_add_uploads, created_at, updated_at, COALESCE(workspace_id,'')
+	q := `SELECT id, user_id, name, description, instructions, accent, emoji, pinned, kb_id, auto_add_uploads, created_at, updated_at, COALESCE(workspace_id,''),
+	             COALESCE((SELECT embedding_model_id FROM knowledge_bases WHERE id=projects.kb_id),''),
+	             COALESCE((SELECT embedding_dim FROM knowledge_bases WHERE id=projects.kb_id),0)
 		 FROM projects WHERE workspace_id=?`
 	args := []any{workspaceID}
 	if userID != "" {
@@ -321,7 +328,9 @@ func GetProject(ctx context.Context, db *sql.DB, id, userID string) (*Project, e
 	args := []any{id}
 	args = append(args, workspaceResourceAccessArgs(userID)...)
 	row := db.QueryRowContext(ctx,
-		`SELECT id, user_id, name, description, instructions, accent, emoji, pinned, kb_id, auto_add_uploads, created_at, updated_at, COALESCE(workspace_id,'')
+		`SELECT id, user_id, name, description, instructions, accent, emoji, pinned, kb_id, auto_add_uploads, created_at, updated_at, COALESCE(workspace_id,''),
+		        COALESCE((SELECT embedding_model_id FROM knowledge_bases WHERE id=projects.kb_id),''),
+		        COALESCE((SELECT embedding_dim FROM knowledge_bases WHERE id=projects.kb_id),0)
 		 FROM projects WHERE id=? AND `+workspaceResourceAccessPredicate("projects"), args...)
 	p, err := scanProject(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -336,7 +345,9 @@ func GetProject(ctx context.Context, db *sql.DB, id, userID string) (*Project, e
 // GetProjectByName returns a user's project by case-insensitive, trimmed name.
 func GetProjectByName(ctx context.Context, db *sql.DB, userID, name string) (*Project, error) {
 	row := db.QueryRowContext(ctx,
-		`SELECT id, user_id, name, description, instructions, accent, emoji, pinned, kb_id, auto_add_uploads, created_at, updated_at, COALESCE(workspace_id,'')
+		`SELECT id, user_id, name, description, instructions, accent, emoji, pinned, kb_id, auto_add_uploads, created_at, updated_at, COALESCE(workspace_id,''),
+		        COALESCE((SELECT embedding_model_id FROM knowledge_bases WHERE id=projects.kb_id),''),
+		        COALESCE((SELECT embedding_dim FROM knowledge_bases WHERE id=projects.kb_id),0)
 		 FROM projects
 		 WHERE user_id=? AND COALESCE(workspace_id,'')=''
 		   AND lower(trim(name))=lower(trim(?)) LIMIT 1`,
@@ -355,7 +366,7 @@ func scanProject(s scanner) (Project, error) {
 	var p Project
 	var pinned, autoAdd int
 	var kbID sql.NullString
-	if err := s.Scan(&p.ID, &p.UserID, &p.Name, &p.Description, &p.Instructions, &p.Accent, &p.Emoji, &pinned, &kbID, &autoAdd, &p.CreatedAt, &p.UpdatedAt, &p.WorkspaceID); err != nil {
+	if err := s.Scan(&p.ID, &p.UserID, &p.Name, &p.Description, &p.Instructions, &p.Accent, &p.Emoji, &pinned, &kbID, &autoAdd, &p.CreatedAt, &p.UpdatedAt, &p.WorkspaceID, &p.KBEmbeddingModelID, &p.KBEmbeddingDim); err != nil {
 		return p, err
 	}
 	p.Pinned = pinned == 1
@@ -425,7 +436,9 @@ func CreateProject(ctx context.Context, db *sql.DB, p Project) (*Project, error)
 			return nil, ErrNotFound
 		}
 		created, scanErr := scanProject(tx.QueryRowContext(ctx,
-			`SELECT id, user_id, name, description, instructions, accent, emoji, pinned, kb_id, auto_add_uploads, created_at, updated_at, COALESCE(workspace_id,'')
+			`SELECT id, user_id, name, description, instructions, accent, emoji, pinned, kb_id, auto_add_uploads, created_at, updated_at, COALESCE(workspace_id,''),
+			        COALESCE((SELECT embedding_model_id FROM knowledge_bases WHERE id=projects.kb_id),''),
+			        COALESCE((SELECT embedding_dim FROM knowledge_bases WHERE id=projects.kb_id),0)
 			   FROM projects WHERE id=?`, p.ID))
 		if scanErr != nil {
 			return nil, scanErr
@@ -494,6 +507,11 @@ func createProjectWithLimit(
 		if prepared.UserID != p.UserID || prepared.WorkspaceID != p.WorkspaceID || prepared.ProjectID != "" {
 			return nil, errors.New("project library scope mismatch")
 		}
+		// knowledge_bases.project_id is the durable ownership marker used by the
+		// standalone KB boundary. The reverse projects.kb_id relation remains the
+		// runtime attachment, but relying on it alone made legacy project libraries
+		// indistinguishable from ordinary KBs in listing and deletion paths.
+		prepared.ProjectID = p.ID
 		if p.KBID != "" && p.KBID != prepared.ID {
 			return nil, errors.New("project library id mismatch")
 		}
@@ -546,7 +564,9 @@ func createProjectWithLimit(
 		return nil, err
 	}
 	created, err := scanProject(tx.QueryRowContext(ctx,
-		`SELECT id, user_id, name, description, instructions, accent, emoji, pinned, kb_id, auto_add_uploads, created_at, updated_at, COALESCE(workspace_id,'')
+		`SELECT id, user_id, name, description, instructions, accent, emoji, pinned, kb_id, auto_add_uploads, created_at, updated_at, COALESCE(workspace_id,''),
+		        COALESCE((SELECT embedding_model_id FROM knowledge_bases WHERE id=projects.kb_id),''),
+		        COALESCE((SELECT embedding_dim FROM knowledge_bases WHERE id=projects.kb_id),0)
 		   FROM projects WHERE id=?`, p.ID))
 	if err != nil {
 		return nil, err
@@ -562,13 +582,13 @@ func insertDedicatedProjectLibraryTx(ctx context.Context, tx *sql.Tx, kb Knowled
 	if kb.WorkspaceID == "" {
 		_, err = tx.ExecContext(ctx,
 			`INSERT INTO knowledge_bases(id, user_id, name, description, embedding_model_id, embedding_dim, project_id, created_at, workspace_id)
-			 VALUES(?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
-			kb.ID, kb.UserID, kb.Name, kb.Description, kb.EmbeddingModelID, kb.EmbeddingDim, now, kb.WorkspaceID)
+			 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			kb.ID, kb.UserID, kb.Name, kb.Description, kb.EmbeddingModelID, kb.EmbeddingDim, kb.ProjectID, now, kb.WorkspaceID)
 	} else {
 		var result sql.Result
 		result, err = tx.ExecContext(ctx,
 			`INSERT INTO knowledge_bases(id, user_id, name, description, embedding_model_id, embedding_dim, project_id, created_at, workspace_id)
-			 SELECT ?, ?, ?, ?, ?, ?, NULL, ?, ?
+			 SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?
 			   FROM workspaces create_workspace
 			  WHERE create_workspace.id=?
 			    AND `+workspaceAcceptsResourceCreationPredicate("create_workspace")+`
@@ -578,7 +598,7 @@ func insertDedicatedProjectLibraryTx(ctx context.Context, tx *sql.Tx, kb Knowled
 			           WHERE create_member.workspace_id=create_workspace.id AND create_member.user_id=?
 			        )
 			  )`,
-			kb.ID, kb.UserID, kb.Name, kb.Description, kb.EmbeddingModelID, kb.EmbeddingDim, now, kb.WorkspaceID,
+			kb.ID, kb.UserID, kb.Name, kb.Description, kb.EmbeddingModelID, kb.EmbeddingDim, kb.ProjectID, now, kb.WorkspaceID,
 			kb.WorkspaceID, kb.UserID, kb.UserID, kb.UserID)
 		if err == nil {
 			if affected, rowsErr := result.RowsAffected(); rowsErr != nil {
@@ -728,7 +748,9 @@ func UpdateProject(ctx context.Context, db *sql.DB, id, userID string, patch Pro
 		return nil, ErrNotFound
 	}
 	updated, err := scanProject(tx.QueryRowContext(ctx,
-		`SELECT id, user_id, name, description, instructions, accent, emoji, pinned, kb_id, auto_add_uploads, created_at, updated_at, COALESCE(workspace_id,'')
+		`SELECT id, user_id, name, description, instructions, accent, emoji, pinned, kb_id, auto_add_uploads, created_at, updated_at, COALESCE(workspace_id,''),
+		        COALESCE((SELECT embedding_model_id FROM knowledge_bases WHERE id=projects.kb_id),''),
+		        COALESCE((SELECT embedding_dim FROM knowledge_bases WHERE id=projects.kb_id),0)
 		   FROM projects WHERE id=?`, id))
 	if err != nil {
 		return nil, err
@@ -739,47 +761,208 @@ func UpdateProject(ctx context.Context, db *sql.DB, id, userID string, patch Pro
 	return &updated, nil
 }
 
-// DeleteProject removes a row and unsets conversations.project_id via FK.
-// Personal owner or authoritative workspace principal (§workspaces).
-func DeleteProject(ctx context.Context, db *sql.DB, id, userID string) error {
+// ProjectDeletionState is the exact, transactionally-derived external cleanup
+// worklist for a project deletion. KnowledgeBaseIDs includes both durable
+// project_id markers and the legacy projects.kb_id reverse relationship.
+type ProjectDeletionState struct {
+	KnowledgeBaseIDs []string
+	StoragePaths     []string
+}
+
+// DeleteProject preserves the historical store API for callers that do not
+// need the external vector/object-storage cleanup worklist.
+func DeleteProject(ctx context.Context, db *sql.DB, id, userID string, storageRoots ...string) error {
+	_, err := DeleteProjectWithState(ctx, db, id, userID, storageRoots...)
+	return err
+}
+
+// DeleteProjectWithState removes a project and every knowledge base owned by
+// it. The project and KB rows are deleted in one transaction; documents/chunks
+// cascade through their FKs and stale conversation KB selections are removed
+// explicitly. Personal owner or authoritative workspace principal (§workspaces).
+//
+// storageRoots are optional for backwards-compatible store callers. Physical
+// cleanup is skipped when they are omitted; API handlers should pass the
+// configured upload and artifact roots explicitly.
+func DeleteProjectWithState(ctx context.Context, db *sql.DB, id, userID string, storageRoots ...string) (*ProjectDeletionState, error) {
 	workspaceID, err := projectWorkspaceID(ctx, db, id)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	args := []any{id}
-	args = append(args, workspaceResourceAccessArgs(userID)...)
-	q := "DELETE FROM projects WHERE id=? AND " + workspaceResourceAccessPredicate("projects")
+
+	var tx *sql.Tx
 	if workspaceID == "" {
-		res, err := db.ExecContext(ctx, q, args...)
-		if err != nil {
-			return err
-		}
-		n, rowsErr := res.RowsAffected()
-		if rowsErr != nil {
-			return rowsErr
-		}
-		if n == 0 {
-			return ErrNotFound
-		}
-		return nil
+		tx, err = db.BeginTx(ctx, nil)
+	} else {
+		tx, err = beginWorkspaceMutationTx(ctx, db, workspaceID)
 	}
-	tx, err := beginWorkspaceMutationTx(ctx, db, workspaceID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer tx.Rollback() //nolint:errcheck
-	res, err := tx.ExecContext(ctx, q, args...)
+
+	// Authorize inside the mutation transaction. Ordinary workspace members can
+	// use a shared project, but only the workspace owner or its current creator
+	// may destroy it.
+	managerArgs := []any{id}
+	managerArgs = append(managerArgs, workspaceResourceManagerArgs(userID)...)
+	var projectUserID, authoritativeWorkspaceID, legacyKBID string
+	err = tx.QueryRowContext(ctx,
+		`SELECT user_id, COALESCE(workspace_id,''), COALESCE(kb_id,'')
+		   FROM projects
+		  WHERE id=? AND `+workspaceResourceManagerPredicate("projects"),
+		managerArgs...,
+	).Scan(&projectUserID, &authoritativeWorkspaceID, &legacyKBID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
 	if err != nil {
-		return err
+		return nil, err
 	}
-	n, rowsErr := res.RowsAffected()
-	if rowsErr != nil {
-		return rowsErr
+
+	// New project libraries carry knowledge_bases.project_id. Older rows are
+	// identified only by projects.kb_id, so include both forms while constraining
+	// ownership and workspace scope to avoid widening a malformed relationship.
+	kbRows, err := tx.QueryContext(ctx, `
+		SELECT id
+		  FROM knowledge_bases
+		 WHERE user_id=?
+		   AND COALESCE(workspace_id,'')=?
+		   AND (project_id=? OR id=?)
+		 ORDER BY id`, projectUserID, authoritativeWorkspaceID, id, legacyKBID)
+	if err != nil {
+		return nil, err
 	}
-	if n == 0 {
-		return ErrNotFound
+	var kbIDs []string
+	for kbRows.Next() {
+		var kbID string
+		if err := kbRows.Scan(&kbID); err != nil {
+			_ = kbRows.Close()
+			return nil, err
+		}
+		kbIDs = append(kbIDs, kbID)
 	}
-	return tx.Commit()
+	if err := kbRows.Err(); err != nil {
+		_ = kbRows.Close()
+		return nil, err
+	}
+	if err := kbRows.Close(); err != nil {
+		return nil, err
+	}
+
+	// Collect local paths before the cascading delete. Database cleanup remains
+	// strict and atomic; physical storage cleanup is best-effort after commit.
+	diskPathSet := make(map[string]struct{})
+	if len(kbIDs) > 0 {
+		pathRows, err := tx.QueryContext(ctx,
+			`SELECT storage_path FROM documents WHERE kb_id IN (`+idPlaceholders(len(kbIDs))+`) AND storage_path<>''`,
+			anySlice(kbIDs)...,
+		)
+		if err != nil {
+			return nil, err
+		}
+		for pathRows.Next() {
+			var path string
+			if err := pathRows.Scan(&path); err != nil {
+				_ = pathRows.Close()
+				return nil, err
+			}
+			if path = strings.TrimSpace(path); path != "" {
+				diskPathSet[path] = struct{}{}
+			}
+		}
+		if err := pathRows.Err(); err != nil {
+			_ = pathRows.Close()
+			return nil, err
+		}
+		if err := pathRows.Close(); err != nil {
+			return nil, err
+		}
+	}
+
+	deleteArgs := []any{id}
+	deleteArgs = append(deleteArgs, workspaceResourceManagerArgs(userID)...)
+	res, err := tx.ExecContext(ctx,
+		`DELETE FROM projects WHERE id=? AND `+workspaceResourceManagerPredicate("projects"),
+		deleteArgs...,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if n, rowsErr := res.RowsAffected(); rowsErr != nil {
+		return nil, rowsErr
+	} else if n != 1 {
+		return nil, ErrNotFound
+	}
+
+	if len(kbIDs) > 0 {
+		kbDeleteArgs := anySlice(kbIDs)
+		kbDeleteArgs = append(kbDeleteArgs, projectUserID, authoritativeWorkspaceID, id, legacyKBID)
+		res, err = tx.ExecContext(ctx,
+			`DELETE FROM knowledge_bases
+			  WHERE id IN (`+idPlaceholders(len(kbIDs))+`)
+			    AND user_id=?
+			    AND COALESCE(workspace_id,'')=?
+			    AND (project_id=? OR id=?)`,
+			kbDeleteArgs...,
+		)
+		if err != nil {
+			return nil, err
+		}
+		if n, rowsErr := res.RowsAffected(); rowsErr != nil {
+			return nil, rowsErr
+		} else if n != int64(len(kbIDs)) {
+			return nil, fmt.Errorf("delete project %s libraries: deleted %d of %d", id, n, len(kbIDs))
+		}
+
+		for _, kbID := range kbIDs {
+			if IsPostgres() {
+				_, err = tx.ExecContext(ctx, `
+					UPDATE conversations
+					SET kb_ids = COALESCE(
+						(SELECT json_agg(value ORDER BY ordinality)
+						 FROM json_array_elements_text(kb_ids::json) WITH ORDINALITY
+						 WHERE value != $1),
+						'[]'::json
+					)::text
+					WHERE kb_ids LIKE '%' || $1 || '%'
+				`, kbID)
+			} else {
+				_, err = tx.ExecContext(ctx, `
+					UPDATE conversations
+					SET kb_ids = (
+						SELECT COALESCE(json_group_array(value), '[]')
+						FROM json_each(kb_ids)
+						WHERE value != ?
+					)
+					WHERE json_type(kb_ids) = 'array' AND kb_ids LIKE '%' || ? || '%'
+				`, kbID, kbID)
+			}
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	diskPaths := make([]string, 0, len(diskPathSet))
+	for path := range diskPathSet {
+		diskPaths = append(diskPaths, path)
+		referenced, refErr := StoragePathReferenced(context.Background(), db, path)
+		if refErr != nil {
+			log.Printf("delete project %s: check storage refs for %q: %v", id, path, refErr)
+			continue
+		}
+		if referenced {
+			continue
+		}
+		if removeErr := removeLocalStoragePath(path, storageRoots...); removeErr != nil && !os.IsNotExist(removeErr) {
+			log.Printf("delete project %s: remove file %q: %v", id, path, removeErr)
+		}
+	}
+	return &ProjectDeletionState{KnowledgeBaseIDs: kbIDs, StoragePaths: diskPaths}, nil
 }
 
 func projectWorkspaceID(ctx context.Context, db *sql.DB, id string) (string, error) {

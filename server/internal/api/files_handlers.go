@@ -779,6 +779,23 @@ func downloadFileHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	serveStoredFile(d, w, f)
 }
 
+// documentContentHandler streams the original file behind an authorized RAG
+// document. Knowledge-base citations use this route so their document IDs never
+// become an authorization shortcut: personal/workspace scope and draft
+// visibility are all enforced by GetDocumentForUser before bytes are served.
+func documentContentHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	u := authUser(r)
+	doc, err := store.GetDocumentForUser(r.Context(), d.DB, pathParam(r, "id"), u.ID)
+	if err != nil || doc == nil {
+		writeError(w, http.StatusNotFound, errNotFound)
+		return
+	}
+	serveStoredFile(d, w, &store.File{
+		Filename:    doc.Filename,
+		StoragePath: doc.StoragePath,
+	})
+}
+
 // serveStoredFile streams an uploaded file row's bytes with the standard safety
 // headers. ACCESS CONTROL IS THE CALLER'S JOB — owner/admin auth on the private
 // route, share-snapshot membership on the public share route (§ sharing).

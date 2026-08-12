@@ -169,6 +169,41 @@ func listKBDocsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, docs)
 }
 
+// retryKBDocHandler requeues a failed knowledge-base document in the existing
+// ingest pipeline. It does not create a second parser or duplicate the upload.
+func retryKBDocHandler(d Deps, w http.ResponseWriter, r *http.Request) {
+	u := authUser(r)
+	kbID := pathParam(r, "id")
+	docID := pathParam(r, "docId")
+	if _, err := store.GetKB(r.Context(), d.DB, kbID, u.ID); err != nil {
+		writeError(w, 404, errNotFound)
+		return
+	}
+	doc, err := store.GetDocumentForUser(r.Context(), d.DB, docID, u.ID)
+	if err != nil || doc.KBID != kbID {
+		writeError(w, 404, errNotFound)
+		return
+	}
+	if doc.Status != "failed" {
+		writeError(w, 409, errors.New("document is not failed"))
+		return
+	}
+	if d.RAG == nil {
+		writeError(w, 503, errors.New("rag service is unavailable"))
+		return
+	}
+	if err := store.RetryKBDocumentForUser(r.Context(), d.DB, docID, kbID, u.ID); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, 404, errNotFound)
+			return
+		}
+		writeError(w, 500, err)
+		return
+	}
+	d.RAG.IngestNow(docID)
+	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
 // deleteKBDocHandler removes a single document.
 func deleteKBDocHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)

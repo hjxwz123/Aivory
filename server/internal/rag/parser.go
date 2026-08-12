@@ -110,8 +110,10 @@ func parseDocument(
 	// MinerU (paid cloud OCR, minutes of queue+poll during which the composer
 	// stays gated on "indexing"). Everything else (images, legacy .doc/.ppt,
 	// html) goes to MinerU when configured, otherwise a one-line placeholder so
-	// ingest still completes. CSV/XLS(X) never reach here — runPipeline
-	// short-circuits spreadsheets to the code sandbox instead of parsing/embedding.
+	// ingest still completes. Conversation-scoped spreadsheets never reach here:
+	// runPipeline leaves them for the code sandbox. Knowledge-base CSV/TSV/XLSX/
+	// XLSM files use SpreadsheetIndexText; legacy .xls can still reach this path
+	// so an existing MinerU configuration gets a chance to extract it.
 	ext := docExt(filename, docPath)
 	// MinerU OCR needs API creds and an object store URL it can fetch. Source
 	// files are uploaded directly by the Go backend to S3/OSS; the sandbox
@@ -1056,9 +1058,9 @@ func truncateAtN(s string, n int) string {
 	return s[:n] + "…"
 }
 
-// isSpreadsheetData reports whether a document is a spreadsheet / tabular data
-// file that should be handed to the code sandbox (python_execute reads it from
-// /workspace/uploads with pandas/openpyxl) rather than parsed and embedded.
+// isSpreadsheetData reports whether a document is spreadsheet/tabular data.
+// runPipeline uses document scope to choose the consumer: conversation uploads
+// go to the code sandbox, while knowledge-base uploads are parsed and indexed.
 func isSpreadsheetData(filename, mime string) bool {
 	switch docExt(filename, filename) {
 	case "csv", "tsv", "xlsx", "xls", "xlsm":
@@ -1086,7 +1088,8 @@ var tokenGatedProseExts = map[string]bool{
 	"rtf": true, "tex": true, "adoc": true, "asciidoc": true, "org": true, "srt": true, "vtt": true,
 	// binary-parsed document formats (content arrives as extracted/OCR'd prose)
 	"pdf": true, "docx": true, "doc": true, "pptx": true, "ppt": true,
-	// spreadsheets never reach the gate (sandbox path) — listed defensively
+	// spreadsheets never reach the gate (conversation sandbox or KB-specific
+	// indexing path) — listed defensively
 	"xlsx": true, "xls": true, "xlsm": true, "csv": true, "tsv": true,
 	// images (KB-only; content is MinerU OCR prose) — listed defensively
 	"png": true, "jpg": true, "jpeg": true, "jpe": true, "jfif": true, "gif": true,

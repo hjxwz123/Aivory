@@ -114,9 +114,14 @@ func deleteMyFilesHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			docIDs := make([]string, 0, len(docs))
-			for _, doc := range docs {
-				docIDs = append(docIDs, doc.ID)
-				storagePaths = append(storagePaths, doc.StoragePath)
+			if f.ConversationID != "" {
+				for _, doc := range docs {
+					if doc.ConversationID != f.ConversationID {
+						continue
+					}
+					docIDs = append(docIDs, doc.ID)
+					storagePaths = append(storagePaths, doc.StoragePath)
+				}
 			}
 			if f.ConversationID != "" {
 				err = store.DeleteConversationFileAndDocuments(r.Context(), d.DB, id, f.ConversationID, u.ID, docIDs)

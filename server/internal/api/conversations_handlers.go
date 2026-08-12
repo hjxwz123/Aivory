@@ -453,53 +453,78 @@ func updateConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, errInvalidInput)
 		return
 	}
-	visibilityChanged := false
-	visibilityWorkspaceID := ""
-	if p.IsPublic != nil {
-		cur, err := store.GetConversation(r.Context(), d.DB, id, u.ID)
-		// Workspace visibility belongs exclusively to the conversation creator.
-		// A uniform 404 avoids exposing private conversation ids to other members.
-		if err != nil || cur.WorkspaceID == "" || cur.UserID != u.ID {
+	var current *store.Conversation
+	if p.IsPublic != nil || p.KBIDs != nil || p.ProjectID != nil {
+		var err error
+		current, err = store.GetConversation(r.Context(), d.DB, id, u.ID)
+		if err != nil {
 			writeError(w, 404, errNotFound)
 			return
 		}
-		visibilityChanged = cur.IsPublic != *p.IsPublic
-		visibilityWorkspaceID = cur.WorkspaceID
+	}
+	visibilityChanged := false
+	visibilityWorkspaceID := ""
+	if p.IsPublic != nil {
+		// Workspace visibility belongs exclusively to the conversation creator.
+		// A uniform 404 avoids exposing private conversation ids to other members.
+		if current.WorkspaceID == "" || current.UserID != u.ID {
+			writeError(w, 404, errNotFound)
+			return
+		}
+		visibilityChanged = current.IsPublic != *p.IsPublic
+		visibilityWorkspaceID = current.WorkspaceID
 	}
 	// §C1: never let a user attach a KB they don't own — filter kb_ids to the
 	// owned subset at write time (the orchestrator re-filters at read time too).
 	// The scope follows the CONVERSATION's space (§workspaces): a workspace
 	// conversation may only attach that workspace's shared KBs, and a personal
 	// one only personal KBs.
-	if len(p.KBIDs) > 0 {
+	selectedKBIDs := []string{}
+	if p.KBIDs != nil {
 		var ids []string
 		if json.Unmarshal(p.KBIDs, &ids) == nil {
-			ws := ""
-			if conv, err := store.GetConversation(r.Context(), d.DB, id, u.ID); err == nil {
-				ws = conv.WorkspaceID
-			}
-			owned := store.OwnedKBIDs(r.Context(), d.DB, u.ID, ws, ids)
-			b, _ := json.Marshal(owned)
+			selectedKBIDs = store.OwnedKBIDs(r.Context(), d.DB, u.ID, current.WorkspaceID, ids)
+			b, _ := json.Marshal(selectedKBIDs)
 			p.KBIDs = b
 		} else {
 			p.KBIDs = json.RawMessage("[]")
 		}
+	} else if p.ProjectID != nil {
+		// A project change can make the unchanged explicit KB selection
+		// incompatible, so include the currently persisted selection below.
+		_ = json.Unmarshal(current.KBIDs, &selectedKBIDs)
+		selectedKBIDs = store.OwnedKBIDs(r.Context(), d.DB, u.ID, current.WorkspaceID, selectedKBIDs)
 	}
 	// Mirror the create path: a moved conversation must point at a project the
 	// caller owns — don't trust a client-supplied project_id (an empty string
 	// detaches, which is always allowed).
-	if p.ProjectID != nil && *p.ProjectID != "" {
-		proj, err := store.GetProject(r.Context(), d.DB, *p.ProjectID, u.ID)
-		if err != nil {
-			writeError(w, 404, errors.New("project not found"))
-			return
+	var selectedProject *store.Project
+	if p.KBIDs != nil || p.ProjectID != nil {
+		projectID := current.ProjectID
+		if p.ProjectID != nil {
+			projectID = strings.TrimSpace(*p.ProjectID)
+			p.ProjectID = &projectID
 		}
-		// §workspaces: a conversation may only attach to a project in the SAME
-		// space — mirror the create path (a member-accessible workspace project
-		// must not bind to a personal conversation or vice versa).
-		cur, err := store.GetConversation(r.Context(), d.DB, id, u.ID)
-		if err != nil || proj.WorkspaceID != cur.WorkspaceID {
-			writeError(w, 404, errors.New("project not found"))
+		if projectID != "" {
+			proj, err := store.GetProject(r.Context(), d.DB, projectID, u.ID)
+			if err != nil || proj.WorkspaceID != current.WorkspaceID {
+				writeError(w, 404, errors.New("project not found"))
+				return
+			}
+			selectedProject = proj
+		}
+	}
+	if p.KBIDs != nil || p.ProjectID != nil {
+		compatibilityIDs := append([]string(nil), selectedKBIDs...)
+		if selectedProject != nil && selectedProject.KBID != "" {
+			compatibilityIDs = append(compatibilityIDs, selectedProject.KBID)
+		}
+		if err := store.ValidateKBEmbeddingCompatibility(r.Context(), d.DB, compatibilityIDs); err != nil {
+			if errors.Is(err, store.ErrMixedKBEmbeddingModels) {
+				writeError(w, http.StatusConflict, err)
+				return
+			}
+			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
 	}
@@ -1075,9 +1100,10 @@ func listConversationFilesHandler(d Deps, w http.ResponseWriter, r *http.Request
 }
 
 // deleteConversationFileHandler permanently removes a file from the
-// conversation's referenced set (§ conversation files), its file row, every RAG
-// document backed by the same stored bytes, the corresponding Qdrant vectors,
-// and finally the physical storage object when no DB row still references it.
+// conversation's referenced set (§ conversation files), its file row, and the
+// conversation-scoped RAG documents backed by the same bytes. An auto-added
+// project-KB document is a shared-library copy and survives this operation, as do
+// its vectors and physical bytes.
 func deleteConversationFileHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
 	convID := pathParam(r, "id")
@@ -1099,6 +1125,9 @@ func deleteConversationFileHandler(d Deps, w http.ResponseWriter, r *http.Reques
 	}
 	docIDs := make([]string, 0, len(docs))
 	for _, doc := range docs {
+		if doc.ConversationID != convID {
+			continue
+		}
 		docIDs = append(docIDs, doc.ID)
 		storagePaths = append(storagePaths, doc.StoragePath)
 	}

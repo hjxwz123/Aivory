@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -220,11 +221,19 @@ func teardownWorkspace(d Deps, r *http.Request, ws *store.Workspace) (returnErr 
 	if err != nil {
 		return err
 	}
+	var teardownErr error
+	recordTeardownError := func(kind, id string, err error) {
+		wrapped := fmt.Errorf("%s %s: %w", kind, id, err)
+		teardownErr = errors.Join(teardownErr, wrapped)
+		if d.Logger != nil {
+			d.Logger.Printf("workspace %s teardown: %v", ws.ID, wrapped)
+		}
+	}
 	for _, cid := range convIDs {
 		ids, _ := store.ConversationTreeIDs(r.Context(), d.DB, cid)
 		storagePaths, _ := store.StoragePathsForConversations(r.Context(), d.DB, ids)
 		if _, err := store.DeleteConversationByID(r.Context(), d.DB, cid); err != nil {
-			d.Logger.Printf("workspace %s teardown: conversation %s: %v", ws.ID, cid, err)
+			recordTeardownError("conversation", cid, err)
 			continue
 		}
 		if len(ids) == 0 {
@@ -244,16 +253,28 @@ func teardownWorkspace(d Deps, r *http.Request, ws *store.Workspace) (returnErr 
 			storagePaths = append(storagePaths, doc.StoragePath)
 		}
 		if err := store.DeleteKB(r.Context(), d.DB, kid, ws.OwnerID, d.Config.UploadDir, d.Config.ArtifactDir); err != nil {
-			d.Logger.Printf("workspace %s teardown: kb %s: %v", ws.ID, kid, err)
+			recordTeardownError("knowledge base", kid, err)
 			continue
 		}
 		cleanupRAGKB(r.Context(), d, kid, "workspace "+ws.ID+" kb "+kid)
 		cleanupStoragePaths(r.Context(), d, storagePaths, "workspace "+ws.ID+" kb "+kid)
 	}
 	for _, pid := range projectIDs {
-		if err := store.DeleteProject(r.Context(), d.DB, pid, ws.OwnerID); err != nil {
-			d.Logger.Printf("workspace %s teardown: project %s: %v", ws.ID, pid, err)
+		deletion, err := store.DeleteProjectWithState(r.Context(), d.DB, pid, ws.OwnerID, d.Config.UploadDir, d.Config.ArtifactDir)
+		if err != nil {
+			recordTeardownError("project", pid, err)
+			continue
 		}
+		for _, kbID := range deletion.KnowledgeBaseIDs {
+			cleanupRAGKB(r.Context(), d, kbID, "workspace "+ws.ID+" project "+pid)
+		}
+		cleanupStoragePaths(r.Context(), d, deletion.StoragePaths, "workspace "+ws.ID+" project "+pid)
+	}
+	// workspace_id is intentionally additive on the content tables and has no
+	// FK back to workspaces. Never remove the parent row after a child DB delete
+	// failed, otherwise the remaining content becomes orphaned and unmanageable.
+	if teardownErr != nil {
+		return fmt.Errorf("workspace %s teardown incomplete: %w", ws.ID, teardownErr)
 	}
 	if err := store.DeleteWorkspaceRow(r.Context(), d.DB, ws.ID); err != nil {
 		return err

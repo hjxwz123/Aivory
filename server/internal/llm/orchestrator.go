@@ -160,6 +160,62 @@ type ToolContext struct {
 	// budgetMu guards counts; charged centrally by the runner before each call.
 	budgetMu sync.Mutex
 	counts   map[string]int
+	// citationIndexes is non-nil only when a KB is attached. This preserves the
+	// exact legacy tool output for every no-KB conversation.
+	citationIndexes *citationIndexAllocator
+}
+
+type citationIndexAllocator struct {
+	mu       sync.Mutex
+	next     int
+	assigned map[string]int
+}
+
+func (a *citationIndexAllocator) allocate(count int) int {
+	if a == nil || count <= 0 {
+		return 0
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	offset := a.next
+	a.next += count
+	return offset
+}
+
+func (a *citationIndexAllocator) normalize(citation Citation) Citation {
+	if a == nil || citation.GlobalIndex {
+		return citation
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	key := citationIdentity(citation)
+	if key != "" {
+		if index, ok := a.assigned[key]; ok {
+			citation.Index = index
+			citation.GlobalIndex = true
+			return citation
+		}
+	}
+	a.next++
+	citation.Index = a.next
+	citation.GlobalIndex = true
+	if key != "" {
+		if a.assigned == nil {
+			a.assigned = map[string]int{}
+		}
+		a.assigned[key] = citation.Index
+	}
+	return citation
+}
+
+func citationIdentity(citation Citation) string {
+	if value := strings.TrimSpace(citation.URL); value != "" {
+		return "url:" + value
+	}
+	if value := strings.TrimSpace(citation.ID); value != "" {
+		return "id:" + value
+	}
+	return ""
 }
 
 // AllowsBuiltinTool is the final execution-boundary policy check. Keeping it
@@ -505,6 +561,13 @@ type RunRequest struct {
 	Attachments    []Attachment
 	ParentID       string
 	ParamOverrides map[string]any
+	// KnowledgeBaseIDs is the explicit KB selection captured when this turn was
+	// submitted. The companion flag distinguishes an intentional empty selection
+	// (detach every optional KB for this turn) from an older caller that omitted
+	// the field and should continue using the conversation's persisted kb_ids.
+	// Project libraries remain implicit and are added below from conv.ProjectID.
+	KnowledgeBaseIDs                 []string
+	KnowledgeBaseSelectionConfigured bool
 	// Branch is true when the user edits a past question into a NEW sibling
 	// branch. It stops Run from falling back to the active leaf when ParentID is
 	// empty (i.e. editing the ROOT question), so the edit opens a sibling root
@@ -1294,6 +1357,10 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	if err != nil {
 		return nil, err
 	}
+	turnKBIDs, err := resolveConversationKnowledgeBaseSelection(ctx, o.db, conv, req)
+	if err != nil {
+		return nil, fmt.Errorf("resolve knowledge-base selection: %w", err)
+	}
 	// §fast-mode: a fast turn resolves the model server-side from the admin's
 	// single fast model and never uses the client's ModelID. If none is configured
 	// (or it's disabled), fall back to normal resolution so the turn still runs —
@@ -1714,18 +1781,11 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			}
 		}
 	}
-	if len(conv.KBIDs) > 0 {
-		var extra []string
-		if err := json.Unmarshal(conv.KBIDs, &extra); err == nil {
-			kbIDs = append(kbIDs, extra...)
-		}
-	}
-	// §C1 cross-user isolation: a conversation's kb_ids are user-supplied (PATCH
-	// /conversations/:id writes them verbatim) and the retrieval layer scopes only
-	// by kb_id — so drop any KB the user doesn't own BEFORE it reaches inline RAG.
-	if len(kbIDs) > 0 {
-		kbIDs = store.OwnedKBIDs(ctx, o.db, req.UserID, conv.WorkspaceID, kbIDs)
-	}
+	// Explicit per-turn selections were strictly resolved before this turn wrote
+	// messages or reserved billing. Persisted selections retain their historical
+	// fail-closed filtering behavior. The project library is authorized by the
+	// project lookup above and remains implicit rather than client-selectable.
+	kbIDs = append(kbIDs, turnKBIDs...)
 
 	// 4. Load full path history (the RAG router + compaction both need it).
 	history, err := msgcache.ListMessages(ctx, o.cache, o.db, conv.ID, userMsg.ID)
@@ -1871,6 +1931,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	//    otherwise unknown values degrade to auto so documents are never hidden.
 	ragSnippets := []Citation{}
 	ragMode := store.NormalizeConversationRAGMode(conv.RAGMode)
+	hasAttachedKnowledgeBase := len(kbIDs) > 0
 	// Chat uploads are rejected by the HTTP handler until their document_id is
 	// status='ready'. Do not wait-and-skip here: skipping pending docs is exactly
 	// what made the model fall back to python-side PDF parsing.
@@ -1879,6 +1940,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	ragScoped := len(kbIDs) > 0 || (o.rag != nil && store.ConversationHasReadyDocs(ctx, o.db, conv.ID))
 	if o.rag != nil && ragScoped && req.Mode != ModeDeepResearch {
 		ragCtx := rag.WithBillingMessageID(ctx, assistantMsg.ID)
+		ragCtx = rag.WithBillingWorkspaceID(ragCtx, conv.WorkspaceID)
 		recent := recentHistoryStrings(history, ragRouterRecentHistoryCount)
 		var snippets []rag.Snippet
 		var decision rag.RouteDecision
@@ -1886,7 +1948,31 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		// tight top-5 even when correctly ranked; 8 parent sections stay well within
 		// the context budget while improving recall on specific-reference questions.
 		var ragErr error
-		if ragMode == "inject" {
+		if hasAttachedKnowledgeBase {
+			onEvent(SseEvent{Type: "rag", Status: "searching"})
+			iterative, iterativeErr := o.rag.RouteAndRetrieveIterative(
+				ragCtx,
+				req.UserID,
+				conv.ID,
+				kbIDs,
+				req.UserText,
+				recent,
+				8,
+				rag.IterativeRetrievalOptions{
+					ForceRetrieve: ragMode == "inject",
+					OnProgress: func(progress rag.IterativeRetrievalProgress) {
+						onEvent(SseEvent{Type: "rag", Status: string(progress)})
+					},
+				},
+			)
+			snippets, decision, ragErr = iterative.Snippets, iterative.Decision, iterativeErr
+			status := iterative.Status
+			if ragErr != nil {
+				status = rag.IterativeRetrievalError
+			}
+			sourceCount := len(snippets)
+			onEvent(SseEvent{Type: "rag", Status: string(status), SourceCount: &sourceCount})
+		} else if ragMode == "inject" {
 			snippets, ragErr = o.rag.Retrieve(ragCtx, req.UserID, conv.ID, kbIDs, req.UserText, 8)
 			decision = rag.RouteDecision{Strategy: "retrieve"}
 		} else {
@@ -1902,15 +1988,32 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			}
 			o.logger.Printf("rag: retrieval failed for conv %s (kbs=%v): %v — answering without knowledge context", conv.ID, kbIDs, ragErr)
 		}
-		if decision.Strategy != "none" {
+		if !hasAttachedKnowledgeBase && decision.Strategy != "none" {
 			onEvent(SseEvent{Type: "rag", Status: decision.Strategy, Summary: fmt.Sprintf("%d sources", len(snippets))})
 		}
 		for _, s := range snippets {
 			c := Citation{ID: s.ID, Index: s.Index, Title: s.Title, URL: s.URL, Snippet: s.Snippet, Source: s.Source}
 			ragSnippets = append(ragSnippets, c)
-			// Stream each retrieved source as a citation event (§6.2) so the UI
-			// shows provenance live, same as web-search results.
-			cc := c
+			// Existing conversation-only document RAG keeps its immediate citation
+			// events. With an attached KB, defer them until the answer is complete so
+			// unused candidates never flash in the UI or survive in message storage.
+			if !hasAttachedKnowledgeBase || c.Source == "document" {
+				cc := c
+				onEvent(SseEvent{Type: "citation", Citation: &cc})
+			}
+		}
+	}
+	deferredKBCitationsEmitted := false
+	emitDeferredKBCitations := func(blocks []UnifiedBlock) {
+		if !hasAttachedKnowledgeBase || deferredKBCitationsEmitted {
+			return
+		}
+		deferredKBCitationsEmitted = true
+		for _, citation := range resolvedTurnCitations(ragSnippets, nil, blocks, true) {
+			if !isKnowledgeBaseCitation(citation) {
+				continue
+			}
+			cc := citation
 			onEvent(SseEvent{Type: "citation", Citation: &cc})
 		}
 	}
@@ -2272,6 +2375,12 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			// tools state, and prevents an unsolicited provider call from bypassing
 			// declaration filtering.
 			BuiltinTools: toolDefNameSet(toolDefs),
+			citationIndexes: func() *citationIndexAllocator {
+				if !hasAttachedKnowledgeBase {
+					return nil
+				}
+				return &citationIndexAllocator{next: maxCitationIndex(ragSnippets)}
+			}(),
 
 			OnArtifact: func(a ArtifactRef) {
 				artMu.Lock()
@@ -2298,6 +2407,16 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			onEvent(ev)
 		}
 	}
+	providerEvents := streamToUser
+	if runner.ctx.citationIndexes != nil {
+		providerEvents = func(ev SseEvent) {
+			if ev.Type == "citation" && ev.Citation != nil {
+				citation := runner.ctx.citationIndexes.normalize(*ev.Citation)
+				ev.Citation = &citation
+			}
+			streamToUser(ev)
+		}
+	}
 
 	reqRecorder := newProviderRequestRecorder()
 	// §B5-per-request rows: keep sanitized header/body on EVERY captured request
@@ -2317,9 +2436,14 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		// Deep Research: plan → multi-round web search + source reading → verify
 		// → comprehensive cited report. Returns the same UnifiedResult shape, so
 		// all finalize/persist/usage/done logic below is path-agnostic.
-		result, err = o.runDeepResearch(providerCtx, provReq, runner, provider, streamToUser, conv, assistantMsg)
+		result, err = o.runDeepResearch(providerCtx, provReq, runner, provider, providerEvents, conv, assistantMsg)
 	} else {
-		result, err = o.streamWithFallback(providerCtx, provReq, providerRunner, provider, model.ID, streamToUser, &ttftFallbackModel)
+		result, err = o.streamWithFallback(providerCtx, provReq, providerRunner, provider, model.ID, providerEvents, &ttftFallbackModel)
+	}
+	if result != nil && runner.ctx.citationIndexes != nil {
+		for i := range result.Citations {
+			result.Citations[i] = runner.ctx.citationIndexes.normalize(result.Citations[i])
+		}
 	}
 	providerCompleted = err == nil && result != nil
 	// OpenAI Responses executes image_generation upstream, outside the local tool
@@ -2420,11 +2544,9 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			partialJSON, _ := json.Marshal(partialBlocks)
 			citesJSON := []byte("[]")
 			if result != nil {
-				allCites := append(append([]Citation{}, ragSnippets...), result.Citations...)
-				for i := range allCites {
-					allCites[i].Index = i + 1
-				}
+				allCites := resolvedTurnCitations(ragSnippets, result.Citations, partialBlocks, hasAttachedKnowledgeBase)
 				citesJSON, _ = json.Marshal(allCites)
+				emitDeferredKBCitations(partialBlocks)
 			}
 			usage := Usage{}
 			if result != nil {
@@ -2590,18 +2712,17 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			})
 		}
 		errBlocksJSON, _ := json.Marshal(errBlocks)
-		errCites := append([]Citation{}, ragSnippets...)
 		errUsage := Usage{}
 		var errRaw json.RawMessage
+		var errResultCitations []Citation
 		if result != nil {
-			errCites = append(errCites, result.Citations...)
 			errUsage = result.Usage
 			errRaw = nativeRawForPersistedModel(result.Raw, ttftFallbackModel)
+			errResultCitations = result.Citations
 		}
-		for i := range errCites {
-			errCites[i].Index = i + 1
-		}
+		errCites := resolvedTurnCitations(ragSnippets, errResultCitations, errBlocks, hasAttachedKnowledgeBase)
 		errCitesJSON, _ := json.Marshal(errCites)
+		emitDeferredKBCitations(errBlocks)
 		// §B5: the raw error may embed upstream response bodies (org/request ids,
 		// echoed prompt fragments). Log that error server-side and expose only a
 		// generic message; result.Raw contains the partial model exchange, not the
@@ -2668,12 +2789,10 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	}
 	// Persist the inject-path RAG sources alongside tool citations so reloads
 	// render the same source list the user saw live (§4.11-B).
-	allCites := append(append([]Citation{}, ragSnippets...), result.Citations...)
-	for i := range allCites {
-		allCites[i].Index = i + 1
-	}
+	allCites := resolvedTurnCitations(ragSnippets, result.Citations, result.Blocks, hasAttachedKnowledgeBase)
 	blocksJSON, _ := json.Marshal(result.Blocks)
 	citesJSON, _ := json.Marshal(allCites)
+	emitDeferredKBCitations(result.Blocks)
 	// §2.3-C storage: `raw` (the provider-native exchange) only needs to persist
 	// for turns that used TOOLS. Its sole reader is same-vendor replay, where it
 	// preserves what `blocks` drops: tool-call IDs and tool-scoped thinking/
@@ -2871,6 +2990,36 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	}
 
 	return &RunResult{UserMessage: userMsg, AssistantMessage: finalAssistant}, nil
+}
+
+func conversationKnowledgeBaseSelection(conv *store.Conversation, req RunRequest) []string {
+	if req.KnowledgeBaseSelectionConfigured {
+		return append([]string(nil), req.KnowledgeBaseIDs...)
+	}
+	if conv == nil || len(conv.KBIDs) == 0 {
+		return nil
+	}
+	var selected []string
+	if json.Unmarshal(conv.KBIDs, &selected) != nil {
+		return nil
+	}
+	return selected
+}
+
+func resolveConversationKnowledgeBaseSelection(
+	ctx context.Context,
+	db *sql.DB,
+	conv *store.Conversation,
+	req RunRequest,
+) ([]string, error) {
+	selected := conversationKnowledgeBaseSelection(conv, req)
+	if len(selected) == 0 {
+		return selected, nil
+	}
+	if req.KnowledgeBaseSelectionConfigured {
+		return store.ResolveOwnedKBIDs(ctx, db, req.UserID, conv.WorkspaceID, selected)
+	}
+	return store.OwnedKBIDs(ctx, db, req.UserID, conv.WorkspaceID, selected), nil
 }
 
 func imageAttachmentIDs(attachments []Attachment) []string {
@@ -4093,10 +4242,136 @@ func formatRAGContext(snips []Citation, locale string) string {
 	b.WriteString("\n\n<context-from-knowledge-base>\n")
 	b.WriteString(promptL10nFor(locale).ragIntro)
 	for i, c := range snips {
-		fmt.Fprintf(&b, "[%d] %s\n%s\n\n", i+1, c.Title, c.Snippet)
+		index := c.Index
+		if index <= 0 {
+			index = i + 1
+		}
+		fmt.Fprintf(&b, "[%d] %s\n%s\n\n", index, c.Title, c.Snippet)
 	}
 	b.WriteString("</context-from-knowledge-base>\n")
 	return b.String()
+}
+
+// resolvedTurnCitations preserves the historical append-and-renumber behavior
+// unless this turn actually attached a knowledge base. In that branch, the
+// answer model has already seen stable [n] labels, so unused KB sources are
+// removed without closing numbering gaps; web/tool sources are retained.
+func resolvedTurnCitations(ragCitations, providerCitations []Citation, blocks []UnifiedBlock, pruneUnusedKB bool) []Citation {
+	if !pruneUnusedKB {
+		out := append(append([]Citation{}, ragCitations...), providerCitations...)
+		for i := range out {
+			out[i].Index = i + 1
+		}
+		return out
+	}
+
+	normalizedRAG := append([]Citation(nil), ragCitations...)
+	maxIndex := 0
+	for i := range normalizedRAG {
+		if normalizedRAG[i].Index <= 0 {
+			normalizedRAG[i].Index = i + 1
+		}
+		if normalizedRAG[i].Index > maxIndex {
+			maxIndex = normalizedRAG[i].Index
+		}
+	}
+	out := append([]Citation(nil), normalizedRAG...)
+	for _, citation := range providerCitations {
+		if citation.GlobalIndex && citation.Index > 0 {
+			if citation.Index > maxIndex {
+				maxIndex = citation.Index
+			}
+		} else {
+			maxIndex++
+			citation.Index = maxIndex
+		}
+		out = append(out, citation)
+	}
+
+	used := citationMarkersInBlocks(blocks)
+	kept := out[:0]
+	for _, citation := range out {
+		if isKnowledgeBaseCitation(citation) {
+			if _, ok := used[citation.Index]; !ok {
+				continue
+			}
+		}
+		kept = append(kept, citation)
+	}
+	return kept
+}
+
+func maxCitationIndex(citations []Citation) int {
+	maxIndex := 0
+	for _, citation := range citations {
+		if citation.Index > maxIndex {
+			maxIndex = citation.Index
+		}
+	}
+	return maxIndex
+}
+
+func isKnowledgeBaseCitation(citation Citation) bool {
+	return citation.Source == "kb"
+}
+
+func citationMarkersInBlocks(blocks []UnifiedBlock) map[int]struct{} {
+	used := map[int]struct{}{}
+	for _, block := range blocks {
+		if block.Kind != "text" || block.Text == "" {
+			continue
+		}
+		for index := range citationMarkersOutsideCode(block.Text) {
+			used[index] = struct{}{}
+		}
+	}
+	return used
+}
+
+// citationMarkersOutsideCode mirrors the frontend citation renderer's most
+// important boundary: markers inside inline/fenced code are examples, not
+// evidence references. Escaped markers are likewise left literal.
+func citationMarkersOutsideCode(text string) map[int]struct{} {
+	used := map[int]struct{}{}
+	for i := 0; i < len(text); {
+		if text[i] == '`' {
+			runEnd := i + 1
+			for runEnd < len(text) && text[runEnd] == '`' {
+				runEnd++
+			}
+			delimiter := text[i:runEnd]
+			if closeAt := strings.Index(text[runEnd:], delimiter); closeAt >= 0 {
+				i = runEnd + closeAt + len(delimiter)
+				continue
+			}
+			// An unmatched code delimiter makes the remainder literal markdown.
+			break
+		}
+		if text[i] != '[' || (i > 0 && (text[i-1] == '\\' || text[i-1] == '!')) {
+			i++
+			continue
+		}
+		end := i + 1
+		for end < len(text) && end-i <= 3 && text[end] >= '0' && text[end] <= '9' {
+			end++
+		}
+		if end == i+1 || end >= len(text) || text[end] != ']' {
+			i++
+			continue
+		}
+		// A normal Markdown link label such as [1](https://example.test) is not
+		// transformed into a citation marker by the frontend either.
+		if end+1 < len(text) && text[end+1] == '(' {
+			i = end + 1
+			continue
+		}
+		index, err := strconv.Atoi(text[i+1 : end])
+		if err == nil && index > 0 {
+			used[index] = struct{}{}
+		}
+		i = end + 1
+	}
+	return used
 }
 
 // injectSummaryIntoHistory prepends the rolled-up summary to the FIRST user
@@ -5050,6 +5325,7 @@ func toolRunnerForModelRequest(runner ToolRunner, modelID string, definitions []
 			ImageBilling:       source.ImageBilling,
 			OnArtifact:         source.OnArtifact,
 			counts:             map[string]int{},
+			citationIndexes:    source.citationIndexes,
 		}
 		base = &orchToolRunner{orch: current.orch, ctx: fallbackContext, onEvent: current.onEvent}
 	}
@@ -5114,6 +5390,14 @@ func (r *orchToolRunner) Run(ctx context.Context, name string, input []byte) (st
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	out, cites, err := r.orch.tools.Run(ctx, name, input, r.ctx)
+	if err == nil && len(cites) > 0 && r.ctx != nil && r.ctx.citationIndexes != nil {
+		offset := r.ctx.citationIndexes.allocate(len(cites))
+		out = remapCitationMarkers(out, len(cites), offset)
+		for i := range cites {
+			cites[i].Index = offset + i + 1
+			cites[i].GlobalIndex = true
+		}
+	}
 	// Stream tool-sourced citations live (§6.2) from this single choke point so
 	// every provider (native + prompt mode) gets them without per-provider code.
 	if r.onEvent != nil {

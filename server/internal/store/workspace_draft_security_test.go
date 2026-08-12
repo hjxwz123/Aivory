@@ -258,6 +258,66 @@ func TestWorkspaceDraftFilesAreUploaderPrivate(t *testing.T) {
 	}
 }
 
+func TestDeleteConversationFileAndDocumentsPreservesKnowledgeBaseTwin(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(filepath.Join(t.TempDir(), "conversation-file-kb-twin.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer db.Close()
+	if err := Migrate(db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	for _, user := range []string{"owner", "member"} {
+		exec(t, db, `INSERT INTO users(id,email,password_hash,role) VALUES(?,?, 'h','user')`, user, user+"@example.test")
+	}
+	exec(t, db, `INSERT INTO workspaces(id,name,owner_id,invite_token) VALUES('ws1','Shared','owner','invite')`)
+	exec(t, db, `INSERT INTO workspace_members(workspace_id,user_id,role) VALUES
+		('ws1','owner','owner'), ('ws1','member','member')`)
+	exec(t, db, `INSERT INTO conversations(id,user_id,title,workspace_id,is_public) VALUES('c1','owner','Shared','ws1',1)`)
+	exec(t, db, `INSERT INTO channels(id,name,type) VALUES('ch1','Embedding','openai')`)
+	exec(t, db, `INSERT INTO models(id,channel_id,kind,request_id,label,dim) VALUES('emb1','ch1','embedding','emb','Embedding',3)`)
+	exec(t, db, `INSERT INTO knowledge_bases(id,user_id,name,embedding_model_id,embedding_dim,workspace_id)
+		VALUES('kb1','owner','Project KB','emb1',3,'ws1')`)
+	exec(t, db, `INSERT INTO files(id,user_id,conversation_id,filename,mime_type,size_bytes,storage_path,kind,draft)
+		VALUES('f1','member','c1','shared.txt','text/plain',10,'/tmp/shared-auto-add','text',0)`)
+	exec(t, db, `INSERT INTO documents(id,conversation_id,filename,mime_type,size_bytes,status,storage_path)
+		VALUES('doc-conv','c1','shared.txt','text/plain',10,'ready','/tmp/shared-auto-add')`)
+	exec(t, db, `INSERT INTO documents(id,kb_id,filename,mime_type,size_bytes,status,storage_path)
+		VALUES('doc-kb','kb1','shared.txt','text/plain',10,'ready','/tmp/shared-auto-add')`)
+	exec(t, db, `INSERT INTO chunks(id,document_id,conversation_id,seq,content,embedding_model)
+		VALUES('chunk-conv','doc-conv','c1',0,'conversation copy','emb1')`)
+	exec(t, db, `INSERT INTO chunks(id,document_id,kb_id,seq,content,embedding_model)
+		VALUES('chunk-kb','doc-kb','kb1',0,'knowledge-base copy','emb1')`)
+
+	// Pass both ids deliberately: the store boundary must reject a KB id even if
+	// a future caller forgets to filter its same-path cleanup list.
+	if err := DeleteConversationFileAndDocuments(ctx, db, "f1", "c1", "member", []string{"doc-conv", "doc-kb"}); err != nil {
+		t.Fatalf("delete conversation file: %v", err)
+	}
+
+	for _, check := range []struct {
+		name  string
+		query string
+		want  int
+	}{
+		{name: "file", query: `SELECT COUNT(*) FROM files WHERE id='f1'`, want: 0},
+		{name: "conversation document", query: `SELECT COUNT(*) FROM documents WHERE id='doc-conv'`, want: 0},
+		{name: "conversation chunk", query: `SELECT COUNT(*) FROM chunks WHERE id='chunk-conv'`, want: 0},
+		{name: "knowledge-base document", query: `SELECT COUNT(*) FROM documents WHERE id='doc-kb'`, want: 1},
+		{name: "knowledge-base chunk", query: `SELECT COUNT(*) FROM chunks WHERE id='chunk-kb'`, want: 1},
+	} {
+		var got int
+		if err := db.QueryRowContext(ctx, check.query).Scan(&got); err != nil || got != check.want {
+			t.Fatalf("%s count=%d err=%v, want %d", check.name, got, err, check.want)
+		}
+	}
+	if referenced, err := StoragePathReferenced(ctx, db, "/tmp/shared-auto-add"); err != nil || !referenced {
+		t.Fatalf("shared storage reference=%v err=%v, want retained KB reference", referenced, err)
+	}
+}
+
 // TestWorkspaceMembersCannotCommitDraftsConcurrently makes the ownership
 // predicate observable under contention: no number of member-side message
 // transactions may transition another user's draft.

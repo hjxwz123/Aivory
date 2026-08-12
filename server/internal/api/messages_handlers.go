@@ -92,6 +92,10 @@ type postMessageReq struct {
 	Branch       bool   `json:"branch"`
 	Mode         string `json:"mode"`
 	GenerationID string `json:"generation_id"`
+	// KBIDs is a per-turn snapshot of the composer's current selection. Raw JSON
+	// preserves the important difference between an omitted field (legacy client:
+	// use the conversation setting) and [] (explicitly use no optional KBs).
+	KBIDs json.RawMessage `json:"kb_ids"`
 	// Verify enables Verify mode (§verify) — a secondary auditor model checks the
 	// answer. No-op unless an admin configured `verify_model_id`.
 	Verify bool `json:"verify"`
@@ -479,6 +483,53 @@ func parseSelectedToolIDs(raw json.RawMessage) (ids []string, configured bool, e
 	return ids, true, nil
 }
 
+// resolveTurnKnowledgeBaseSelection validates a request-scoped KB snapshot.
+// The conversation PATCH remains the durable preference, but generation must
+// not depend on whether that separate request happened to win a network race.
+// Project libraries are deliberately excluded from the returned explicit ids;
+// the orchestrator attaches them from conv.ProjectID on every project turn.
+func resolveTurnKnowledgeBaseSelection(
+	ctx context.Context,
+	db *sql.DB,
+	userID string,
+	conv *store.Conversation,
+	raw json.RawMessage,
+) (ids []string, configured bool, err error) {
+	if len(raw) == 0 {
+		return nil, false, nil
+	}
+	var requested []string
+	if json.Unmarshal(raw, &requested) != nil || requested == nil {
+		return nil, true, fmt.Errorf("%w: kb_ids must be an array of knowledge-base ids", errInvalidInput)
+	}
+	if len(requested) > 64 {
+		return nil, true, fmt.Errorf("%w: kb_ids contains too many items", errInvalidInput)
+	}
+	for _, id := range requested {
+		if value := strings.TrimSpace(id); value == "" || len(value) > 160 {
+			return nil, true, fmt.Errorf("%w: kb_ids contains an invalid knowledge-base id", errInvalidInput)
+		}
+	}
+	ids, err = store.ResolveOwnedKBIDs(ctx, db, userID, conv.WorkspaceID, requested)
+	if err != nil {
+		return nil, true, err
+	}
+	compatibilityIDs := append([]string(nil), ids...)
+	if conv.ProjectID != "" {
+		project, projectErr := store.GetProject(ctx, db, conv.ProjectID, userID)
+		if projectErr != nil {
+			return nil, true, projectErr
+		}
+		if project.KBID != "" {
+			compatibilityIDs = append(compatibilityIDs, project.KBID)
+		}
+	}
+	if compatibilityErr := store.ValidateKBEmbeddingCompatibility(ctx, db, compatibilityIDs); compatibilityErr != nil {
+		return nil, true, compatibilityErr
+	}
+	return ids, true, nil
+}
+
 // normalizeTurnFlags enforces feature mutual exclusion server-side. Deep
 // Research always needs tools; forced web search is the explicit-disabled
 // fallback and cannot be combined with auto/enabled policies.
@@ -510,6 +561,22 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	if req.GenerationID != "" && !validGenerationID(req.GenerationID) {
 		writeError(w, 400, errors.New("invalid generation_id"))
+		return
+	}
+	turnKBIDs, turnKBSelectionConfigured, err := resolveTurnKnowledgeBaseSelection(
+		r.Context(), d.DB, u.ID, conv, req.KBIDs,
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, errInvalidInput):
+			writeError(w, http.StatusBadRequest, err)
+		case errors.Is(err, store.ErrMixedKBEmbeddingModels):
+			writeError(w, http.StatusConflict, err)
+		case errors.Is(err, store.ErrNotFound):
+			writeError(w, http.StatusNotFound, errNotFound)
+		default:
+			writeError(w, http.StatusInternalServerError, err)
+		}
 		return
 	}
 	_, normalizedSkillIDs, err := store.ResolveUserSkillSelection(r.Context(), d.DB, u.ID, req.SelectedUserSkillIDs, true)
@@ -717,24 +784,26 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, err = d.Orchestrator.Run(ctx, llm.RunRequest{
-		UserID:                  u.ID,
-		ConversationID:          id,
-		ModelID:                 req.ModelID,
-		UserText:                req.Text,
-		Attachments:             req.Attachments,
-		ParentID:                req.ParentID,
-		Branch:                  req.Branch,
-		Mode:                    req.Mode,
-		Verify:                  req.Verify,
-		ToolMode:                toolMode,
-		SelectedUserSkillIDs:    req.SelectedUserSkillIDs,
-		SelectedToolIDs:         selectedToolIDs,
-		SelectedToolsConfigured: selectedToolsConfigured,
-		ForceWebSearch:          req.WebSearch,
-		Fast:                    req.Fast,
-		ParamOverrides:          req.ParamOverrides,
-		ImageStyleID:            req.ImageStyleID,
-		Locale:                  req.Locale,
+		UserID:                           u.ID,
+		ConversationID:                   id,
+		ModelID:                          req.ModelID,
+		UserText:                         req.Text,
+		Attachments:                      req.Attachments,
+		ParentID:                         req.ParentID,
+		Branch:                           req.Branch,
+		Mode:                             req.Mode,
+		Verify:                           req.Verify,
+		ToolMode:                         toolMode,
+		SelectedUserSkillIDs:             req.SelectedUserSkillIDs,
+		SelectedToolIDs:                  selectedToolIDs,
+		SelectedToolsConfigured:          selectedToolsConfigured,
+		ForceWebSearch:                   req.WebSearch,
+		Fast:                             req.Fast,
+		ParamOverrides:                   req.ParamOverrides,
+		ImageStyleID:                     req.ImageStyleID,
+		Locale:                           req.Locale,
+		KnowledgeBaseIDs:                 turnKBIDs,
+		KnowledgeBaseSelectionConfigured: turnKBSelectionConfigured,
 	}, sendEvent)
 	if ctx.Err() != nil && !terminalSent {
 		sendEvent(llm.SseEvent{Type: "done", Message: "", MessageID: streamMessageID, StopReason: "stopped"})
@@ -895,6 +964,7 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		NoTools         bool            `json:"no_tools"`
 		WebSearch       bool            `json:"web_search"`
 		SelectedToolIDs json.RawMessage `json:"selected_tool_ids"`
+		KBIDs           json.RawMessage `json:"kb_ids"`
 		Fast            bool            `json:"fast"` // §fast-mode: honour the CURRENT picker (regenerate follows the live toggle)
 		ParamOverrides  map[string]any  `json:"params"`
 		Locale          string          `json:"locale"`
@@ -910,6 +980,22 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	conv, err := store.GetConversation(r.Context(), d.DB, id, u.ID)
 	if err != nil {
 		writeError(w, 404, errNotFound)
+		return
+	}
+	turnKBIDs, turnKBSelectionConfigured, err := resolveTurnKnowledgeBaseSelection(
+		r.Context(), d.DB, u.ID, conv, body.KBIDs,
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, errInvalidInput):
+			writeError(w, http.StatusBadRequest, err)
+		case errors.Is(err, store.ErrMixedKBEmbeddingModels):
+			writeError(w, http.StatusConflict, err)
+		case errors.Is(err, store.ErrNotFound):
+			writeError(w, http.StatusNotFound, errNotFound)
+		default:
+			writeError(w, http.StatusInternalServerError, err)
+		}
 		return
 	}
 	toolMode, err := resolveTurnToolMode(body.ToolMode, body.NoTools)
@@ -1077,21 +1163,23 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, err = d.Orchestrator.Run(ctx, llm.RunRequest{
-		UserID:                   u.ID,
-		ConversationID:           id,
-		ModelID:                  body.ModelID,
-		UserText:                 text,
-		ParentID:                 user.ID, // assistant sibling under SAME user — §4.15
-		ReuseExistingUserMessage: true,
-		Mode:                     body.Mode,
-		Verify:                   body.Verify,
-		ToolMode:                 toolMode,
-		SelectedToolIDs:          selectedToolIDs,
-		SelectedToolsConfigured:  selectedToolsConfigured,
-		ForceWebSearch:           body.WebSearch,
-		Fast:                     body.Fast,
-		ParamOverrides:           body.ParamOverrides,
-		Locale:                   body.Locale,
+		UserID:                           u.ID,
+		ConversationID:                   id,
+		ModelID:                          body.ModelID,
+		UserText:                         text,
+		ParentID:                         user.ID, // assistant sibling under SAME user — §4.15
+		ReuseExistingUserMessage:         true,
+		Mode:                             body.Mode,
+		Verify:                           body.Verify,
+		ToolMode:                         toolMode,
+		SelectedToolIDs:                  selectedToolIDs,
+		SelectedToolsConfigured:          selectedToolsConfigured,
+		ForceWebSearch:                   body.WebSearch,
+		Fast:                             body.Fast,
+		ParamOverrides:                   body.ParamOverrides,
+		Locale:                           body.Locale,
+		KnowledgeBaseIDs:                 turnKBIDs,
+		KnowledgeBaseSelectionConfigured: turnKBSelectionConfigured,
 	}, sendEvent)
 	if ctx.Err() != nil && !terminalSent {
 		sendEvent(llm.SseEvent{Type: "done", MessageID: streamMessageID, StopReason: "stopped"})

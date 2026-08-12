@@ -49,7 +49,10 @@ type Citation struct {
 	Title   string `json:"title"`
 	URL     string `json:"url"`
 	Snippet string `json:"snippet"`
-	Source  string `json:"source"` // web | kb
+	Source  string `json:"source"` // web | kb | document
+	// GlobalIndex marks citations whose inline markers already use the turn-wide
+	// namespace. It is transient orchestration metadata and is never persisted.
+	GlobalIndex bool `json:"-"`
 }
 
 // SystemPart lets the orchestrator pass extra structured context (project
@@ -202,6 +205,9 @@ type SseEvent struct {
 	Code        string          `json:"code,omitempty"`
 	ToolID      string          `json:"tool_id,omitempty"`
 	Status      string          `json:"status,omitempty"`
+	// SourceCount is structured RAG progress metadata. It is localized by the
+	// client instead of embedding an English "N sources" string in the event.
+	SourceCount *int `json:"source_count,omitempty"`
 	// Credits charged for this turn (emitted on the `done` event so the UI can
 	// show "credits used"). 0 = free / credits disabled.
 	Credits float64 `json:"credits,omitempty"`
