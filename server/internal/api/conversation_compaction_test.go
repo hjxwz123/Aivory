@@ -105,3 +105,42 @@ func TestCompactConversationHandlerRejectsStreamingConversation(t *testing.T) {
 		t.Fatalf("result=%+v", result)
 	}
 }
+
+func TestCompactConversationHandlerReportsNothingForShortConversation(t *testing.T) {
+	d, user, conv := compactionHandlerFixture(t, 2)
+	req := httptest.NewRequest(http.MethodPost, "/api/conversations/"+conv.ID+"/compact", nil)
+	req = req.WithContext(context.WithValue(req.Context(), userCtxKey{}, user))
+	req = req.WithContext(context.WithValue(req.Context(), pathCtxKey{}, map[string]string{"id": conv.ID}))
+	rec := httptest.NewRecorder()
+	compactConversationHandler(d, rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var result llm.ManualCompactionResult
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Reason != "nothing_to_compact" || result.Compacted || result.DroppedMessages != 0 {
+		t.Fatalf("result=%+v", result)
+	}
+}
+
+func TestCompactConversationHandlerRejectsWorkspaceCollaborator(t *testing.T) {
+	d, _, conv := compactionHandlerFixture(t, 4)
+	mustExec(t, d.DB, `INSERT INTO users(id,email,password_hash,role) VALUES('u2','collaborator@example.test','h','user')`)
+	mustExec(t, d.DB, `INSERT INTO workspaces(id,name,owner_id,invite_token) VALUES('w1','Shared','u1','invite-w1')`)
+	mustExec(t, d.DB, `INSERT INTO workspace_members(workspace_id,user_id,role) VALUES('w1','u2','member')`)
+	mustExec(t, d.DB, `UPDATE conversations SET workspace_id='w1', is_public=1 WHERE id=?`, conv.ID)
+	collaborator, err := store.FindUserByID(context.Background(), d.DB, "u2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/conversations/"+conv.ID+"/compact", nil)
+	req = req.WithContext(context.WithValue(req.Context(), userCtxKey{}, collaborator))
+	req = req.WithContext(context.WithValue(req.Context(), pathCtxKey{}, map[string]string{"id": conv.ID}))
+	rec := httptest.NewRecorder()
+	compactConversationHandler(d, rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}

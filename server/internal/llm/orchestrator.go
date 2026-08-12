@@ -580,6 +580,12 @@ func (o *Orchestrator) CompactConversation(ctx context.Context, userID, conversa
 	if err != nil {
 		return result, err
 	}
+	if conv.UserID != userID {
+		// Shared workspace conversations are readable/replyable by members, but a
+		// compaction checkpoint changes the context seen by every collaborator.
+		// Keep that conversation-wide mutation with its creator.
+		return result, store.ErrNotFound
+	}
 	var inFlight int
 	if err := o.db.QueryRowContext(ctx,
 		`SELECT COUNT(1) FROM messages WHERE conversation_id=? AND role='assistant' AND status='streaming'`,
@@ -608,6 +614,7 @@ func (o *Orchestrator) CompactConversation(ctx context.Context, userID, conversa
 	if result.DroppedMessages == 0 {
 		return result, nil
 	}
+	msgcache.Bump(o.cache, conv.ID)
 	result.Compacted = true
 	result.Reason = "compacted"
 	return result, nil
