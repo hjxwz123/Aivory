@@ -635,6 +635,8 @@ export const kbsApi = {
   listDocs: (id: string) => api<ApiDocument[]>(`/kbs/${encodeURIComponent(id)}/documents`),
   addDoc: (id: string, body: { filename: string; content: string; mime_type?: string }) =>
     api<ApiDocument>(`/kbs/${encodeURIComponent(id)}/documents`, { method: 'POST', body }),
+  retryDoc: (id: string, docId: string) =>
+    api<{ ok: true }>(`/kbs/${encodeURIComponent(id)}/documents/${encodeURIComponent(docId)}/retry`, { method: 'POST' }),
   removeDoc: (id: string, docId: string) =>
     api<{ ok: true }>(`/kbs/${encodeURIComponent(id)}/documents/${encodeURIComponent(docId)}`, { method: 'DELETE' }),
 }

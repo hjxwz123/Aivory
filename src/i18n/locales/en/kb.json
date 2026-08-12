@@ -25,13 +25,16 @@
   "detail": {
     "uploadButton": "Upload document",
     "noDocs": "No documents yet",
-    "noDocsBody": "Upload a PDF, Markdown or text file and Aivory indexes it for retrieval.",
+    "noDocsBody": "Upload PDF, Office, Markdown, text, or spreadsheet files and Aivory indexes them for retrieval.",
     "rename": "Rename library",
     "delete": "Delete library",
     "deleteConfirm": "Delete this library and all its documents?",
     "uploaded": "Document uploaded",
     "uploadFailed": "Upload failed",
-    "failedReason": "Indexing failed. Remove the document and upload it again.",
+    "failedReason": "Indexing failed. You can retry after fixing the related configuration.",
+    "retry": "Retry",
+    "retryQueued": "Indexing queued again",
+    "retryFailed": "Retry failed",
     "status": {
       "pending": "Queued",
       "parsing": "Parsing",

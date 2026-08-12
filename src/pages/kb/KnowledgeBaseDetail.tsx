@@ -6,7 +6,7 @@ import { activeWorkspaceId } from '@/store/workspaces'
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { Plus, Trash2, Upload, FileText, AlertTriangle, MoreHorizontal } from 'lucide-react'
+import { Plus, Trash2, Upload, FileText, AlertTriangle, MoreHorizontal, RefreshCw } from 'lucide-react'
 import { ApiError, kbsApi } from '@/api'
 import type { ApiDocument, ApiKnowledgeBase } from '@/api/types'
 import { apiUpload } from '@/api/client'
@@ -59,7 +59,7 @@ export default function KnowledgeBaseDetail() {
   const [confirmDeleteKB, setConfirmDeleteKB] = useState(false)
   const [deletingKB, setDeletingKB] = useState(false)
   // Per-row delete guard + single-flight guard for the paste-tab Save.
-  const [busyDocId, setBusyDocId] = useState<string | null>(null)
+  const [busyDoc, setBusyDoc] = useState<{ id: string; action: 'retry' | 'delete' } | null>(null)
   const [saving, setSaving] = useState(false)
   const savingRef = useRef(false)
 
@@ -173,8 +173,8 @@ export default function KnowledgeBaseDetail() {
   }
 
   async function remove(d: ApiDocument) {
-    if (!id || busyDocId) return
-    setBusyDocId(d.id)
+    if (!id || busyDoc) return
+    setBusyDoc({ id: d.id, action: 'delete' })
     try {
       await kbsApi.removeDoc(id, d.id)
       toast.success(t('kb:detail.removed'))
@@ -182,7 +182,24 @@ export default function KnowledgeBaseDetail() {
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t('common:common.error'))
     } finally {
-      setBusyDocId(null)
+      setBusyDoc(null)
+    }
+  }
+
+  async function retry(d: ApiDocument) {
+    if (!id || busyDoc || d.status !== 'failed') return
+    setBusyDoc({ id: d.id, action: 'retry' })
+    try {
+      await kbsApi.retryDoc(id, d.id)
+      setDocs((current) => current.map((doc) => (
+        doc.id === d.id ? { ...doc, status: 'pending', error: '', chunk_count: 0 } : doc
+      )))
+      toast.success(t('kb:detail.retryQueued'))
+      await load(true)
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : t('kb:detail.retryFailed'))
+    } finally {
+      setBusyDoc(null)
     }
   }
 
@@ -284,16 +301,30 @@ export default function KnowledgeBaseDetail() {
                       </div>
                     ) : null}
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    leadingIcon={<Trash2 size={13} aria-hidden />}
-                    loading={busyDocId === d.id}
-                    disabled={busyDocId === d.id}
-                    onClick={() => void remove(d)}
-                  >
-                    {t('common:actions.delete')}
-                  </Button>
+                  <div className="flex items-center gap-1">
+                    {d.status === 'failed' ? (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        leadingIcon={<RefreshCw size={13} aria-hidden />}
+                        loading={busyDoc?.id === d.id && busyDoc.action === 'retry'}
+                        disabled={busyDoc?.id === d.id}
+                        onClick={() => void retry(d)}
+                      >
+                        {t('kb:detail.retry')}
+                      </Button>
+                    ) : null}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      leadingIcon={<Trash2 size={13} aria-hidden />}
+                      loading={busyDoc?.id === d.id && busyDoc.action === 'delete'}
+                      disabled={busyDoc?.id === d.id}
+                      onClick={() => void remove(d)}
+                    >
+                      {t('common:actions.delete')}
+                    </Button>
+                  </div>
                 </li>
               ))}
             </ul>
