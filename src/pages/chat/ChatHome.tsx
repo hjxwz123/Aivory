@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { type PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { gsap } from 'gsap'
@@ -28,6 +28,147 @@ import type { ToolMode } from '@/lib/tool-mode'
 import { resolveNewConversationFastMode } from '@/lib/chat-defaults'
 
 gsap.registerPlugin(useGSAP)
+
+const PROMPT_POINTER_COOLDOWN_MS = 650
+const PROMPT_POINTER_DISTANCE_PX = 48
+
+function initialPromptIndex(variants: string[]): number {
+  // The third localized variant is "What can I help you with?". Keep that
+  // recognizable line as the initial banner, then let interaction reveal the
+  // rest of the set.
+  return Math.min(2, Math.max(variants.length - 1, 0))
+}
+
+function RotatingHomePrompt({ variants, label }: { variants: string[]; label: string }) {
+  const root = useRef<HTMLButtonElement>(null)
+  const currentTextRef = useRef<HTMLSpanElement>(null)
+  const incomingTextRef = useRef<HTMLSpanElement>(null)
+  const [currentIndex, setCurrentIndex] = useState(() => initialPromptIndex(variants))
+  const [incomingIndex, setIncomingIndex] = useState<number | null>(null)
+  const currentIndexRef = useRef(currentIndex)
+  const transitionRunningRef = useRef(false)
+  const lastRotationAtRef = useRef(Number.NEGATIVE_INFINITY)
+  const pointerAnchorRef = useRef<{ x: number; y: number } | null>(null)
+
+  const safeCurrentIndex = variants.length > 0 ? currentIndex % variants.length : 0
+  currentIndexRef.current = safeCurrentIndex
+
+  const showNext = () => {
+    if (variants.length < 2 || transitionRunningRef.current) return
+    const nextIndex = (currentIndexRef.current + 1) % variants.length
+    const reducedMotion =
+      typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    if (reducedMotion) {
+      currentIndexRef.current = nextIndex
+      setCurrentIndex(nextIndex)
+      return
+    }
+    transitionRunningRef.current = true
+    setIncomingIndex(nextIndex)
+  }
+
+  useGSAP(
+    () => {
+      if (incomingIndex === null || !currentTextRef.current || !incomingTextRef.current) return
+      const current = currentTextRef.current
+      const incoming = incomingTextRef.current
+      gsap.set(incoming, { yPercent: 58, autoAlpha: 0 })
+      const timeline = gsap.timeline({
+        onComplete: () => {
+          currentIndexRef.current = incomingIndex
+          setCurrentIndex(incomingIndex)
+          setIncomingIndex(null)
+          transitionRunningRef.current = false
+        },
+      })
+      timeline
+        .to(current, { yPercent: -46, autoAlpha: 0, duration: 0.16, ease: 'power2.in' }, 0)
+        .to(incoming, { yPercent: 0, autoAlpha: 1, duration: 0.24, ease: 'power3.out' }, 0.05)
+      return () => timeline.kill()
+    },
+    { scope: root, dependencies: [incomingIndex], revertOnUpdate: true },
+  )
+
+  const handlePointerEnter = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (event.pointerType !== 'mouse') return
+    pointerAnchorRef.current = { x: event.clientX, y: event.clientY }
+    const now = performance.now()
+    if (now - lastRotationAtRef.current < PROMPT_POINTER_COOLDOWN_MS) return
+    lastRotationAtRef.current = now
+    showNext()
+  }
+
+  const handlePointerMove = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (event.pointerType !== 'mouse') return
+    const anchor = pointerAnchorRef.current
+    if (!anchor) {
+      pointerAnchorRef.current = { x: event.clientX, y: event.clientY }
+      return
+    }
+    const distance = Math.hypot(event.clientX - anchor.x, event.clientY - anchor.y)
+    const now = performance.now()
+    if (distance < PROMPT_POINTER_DISTANCE_PX || now - lastRotationAtRef.current < PROMPT_POINTER_COOLDOWN_MS) return
+    pointerAnchorRef.current = { x: event.clientX, y: event.clientY }
+    lastRotationAtRef.current = now
+    showNext()
+  }
+
+  const handleClick = () => {
+    const now = performance.now()
+    // Pointer entry already changed the line. Ignore the immediate synthetic
+    // click, while retaining click/tap and keyboard activation as fallbacks.
+    if (now - lastRotationAtRef.current < PROMPT_POINTER_COOLDOWN_MS) return
+    lastRotationAtRef.current = now
+    showNext()
+  }
+
+  const currentText = variants[safeCurrentIndex] ?? ''
+  const incomingText = incomingIndex === null ? null : variants[incomingIndex] ?? ''
+
+  return (
+    <button
+      ref={root}
+      type="button"
+      aria-label={`${currentText}. ${label}`}
+      onPointerEnter={handlePointerEnter}
+      onPointerMove={handlePointerMove}
+      onPointerLeave={() => {
+        pointerAnchorRef.current = null
+      }}
+      onClick={handleClick}
+      className="inline-flex max-w-full cursor-pointer align-baseline rounded-[6px] font-normal text-[var(--color-fg-muted)] interactive hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg)]"
+    >
+      <span className="inline-grid max-w-full overflow-hidden text-balance">
+        {variants.map((variant, index) => (
+          <span
+            key={`${index}:${variant}`}
+            aria-hidden
+            className="invisible pointer-events-none col-start-1 row-start-1"
+          >
+            {variant}
+          </span>
+        ))}
+        <span
+          ref={currentTextRef}
+          aria-live="polite"
+          aria-atomic="true"
+          className="col-start-1 row-start-1 will-change-transform"
+        >
+          {currentText}
+        </span>
+        {incomingText !== null ? (
+          <span
+            ref={incomingTextRef}
+            aria-hidden
+            className="col-start-1 row-start-1 will-change-transform"
+          >
+            {incomingText}
+          </span>
+        ) : null}
+      </span>
+    </button>
+  )
+}
 
 function fisherYatesPick<T>(arr: T[], count: number): T[] {
   const a = [...arr]
@@ -233,12 +374,12 @@ export default function ChatHome() {
     () => `${t(`greeting.${greetingKey()}`)}, ${firstName}.`,
     [t, firstName],
   )
-  // The trailing question is no longer fixed — pick a fresh variant each time the
-  // home screen mounts (and on language change) so the prompt feels alive.
-  const subtitle = useMemo(() => {
+  // The prompt banner starts with the familiar help question, then cycles
+  // through the localized alternatives when the user moves across it.
+  const subtitleVariants = useMemo(() => {
     const raw = t('empty.subtitleVariants', { returnObjects: true }) as unknown
     const pool = Array.isArray(raw) && raw.length > 0 ? (raw as string[]) : [t('empty.subtitle')]
-    return pool[Math.floor(Math.random() * pool.length)]
+    return pool
   }, [t])
   const cards = useMemo(() => fisherYatesPick(SUGGESTIONS, 6), [])
 
@@ -430,7 +571,7 @@ export default function ChatHome() {
           <header className="flex min-h-0 flex-1 flex-col items-center justify-center pb-8 pt-12 text-center">
             <h1 className="home-rise max-w-[18rem] text-balance font-sans text-[1.6rem] font-semibold leading-[1.14] tracking-tight text-[var(--color-fg)]">
               {greeting}{' '}
-              <span className="font-normal text-[var(--color-fg-muted)]">{subtitle}</span>
+              <RotatingHomePrompt variants={subtitleVariants} label={t('empty.changeSubtitle')} />
             </h1>
           </header>
           <div className="home-rise shrink-0 pb-2">
@@ -464,7 +605,7 @@ export default function ChatHome() {
             <header className="text-center">
               <h1 className="home-rise font-sans font-semibold tracking-tight text-[1.6rem] sm:text-[2.5rem] leading-[1.14] sm:leading-[1.12] text-[var(--color-fg)] text-balance">
                 {greeting}{' '}
-                <span className="text-[var(--color-fg-muted)] font-normal">{subtitle}</span>
+                <RotatingHomePrompt variants={subtitleVariants} label={t('empty.changeSubtitle')} />
               </h1>
               <p
                 className={cn(
