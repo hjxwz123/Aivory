@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"encoding/csv"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -27,6 +28,19 @@ import (
 const (
 	spreadsheetMaxFileBytesEnv     = "AIVORY_RAG_SPREADSHEET_PREVIEW_MAX_FILE_BYTES"
 	defaultSpreadsheetMaxFileBytes = int64(30 << 20) // 30 MiB
+
+	spreadsheetIndexMaxFileBytesEnv = "AIVORY_RAG_SPREADSHEET_INDEX_MAX_FILE_BYTES"
+	spreadsheetIndexMaxRowsEnv      = "AIVORY_RAG_SPREADSHEET_INDEX_MAX_ROWS"
+	spreadsheetIndexMaxColsEnv      = "AIVORY_RAG_SPREADSHEET_INDEX_MAX_COLS"
+	spreadsheetIndexMaxSheetsEnv    = "AIVORY_RAG_SPREADSHEET_INDEX_MAX_SHEETS"
+	spreadsheetIndexMaxTextBytesEnv = "AIVORY_RAG_SPREADSHEET_INDEX_MAX_TEXT_BYTES"
+
+	defaultSpreadsheetIndexMaxFileBytes = int64(30 << 20) // 30 MiB
+	defaultSpreadsheetIndexMaxRows      = 2_000
+	defaultSpreadsheetIndexMaxCols      = 128
+	defaultSpreadsheetIndexMaxSheets    = 32
+	defaultSpreadsheetIndexMaxTextBytes = 4 << 20 // 4 MiB
+
 	// spreadsheetEntryReadCap bounds decompressed bytes read per zip entry — a
 	// zip-bomb guard so a tiny xlsx can't expand to gigabytes in memory.
 	spreadsheetEntryReadCap = 64 << 20 // 64 MiB
@@ -39,8 +53,28 @@ const (
 // lower the ceiling independently of the upload and python-sandbox staging caps.
 var spreadsheetMaxFileBytes = loadSpreadsheetMaxFileBytes()
 
+// Index limits are deliberately independent of SpreadsheetPreview. Knowledge-base
+// ingestion needs substantially more rows than a chat preview, but still has to
+// bound memory, XML work, embedding input, and the number of generated chunks.
+var (
+	spreadsheetIndexMaxFileBytes = loadSpreadsheetIndexMaxFileBytes()
+	spreadsheetIndexMaxRows      = envcfg.Int(spreadsheetIndexMaxRowsEnv, defaultSpreadsheetIndexMaxRows)
+	spreadsheetIndexMaxCols      = envcfg.Int(spreadsheetIndexMaxColsEnv, defaultSpreadsheetIndexMaxCols)
+	spreadsheetIndexMaxSheets    = envcfg.Int(spreadsheetIndexMaxSheetsEnv, defaultSpreadsheetIndexMaxSheets)
+	spreadsheetIndexMaxTextBytes = envcfg.Int(spreadsheetIndexMaxTextBytesEnv, defaultSpreadsheetIndexMaxTextBytes)
+)
+
+// ErrLegacyXLSUnsupported reports that the legacy BIFF format must be converted to XLSX.
+var ErrLegacyXLSUnsupported = errors.New("legacy .xls (BIFF) is not supported")
+
+const spreadsheetIndexTruncationNotice = "... (knowledge-base index text limit reached; remaining rows or worksheets omitted)\n"
+
 func loadSpreadsheetMaxFileBytes() int64 {
 	return envcfg.Int64(spreadsheetMaxFileBytesEnv, defaultSpreadsheetMaxFileBytes)
+}
+
+func loadSpreadsheetIndexMaxFileBytes() int64 {
+	return envcfg.Int64(spreadsheetIndexMaxFileBytesEnv, defaultSpreadsheetIndexMaxFileBytes)
 }
 
 // SpreadsheetPreview reads a csv/tsv/xlsx/xlsm file from disk and returns a
@@ -67,7 +101,7 @@ func SpreadsheetPreview(path, filename string, maxRows, maxCols int) (string, er
 	case "xlsx", "xlsm":
 		return xlsxPreview(path, filename, maxRows, maxCols)
 	case "xls":
-		return "", fmt.Errorf("legacy .xls (BIFF) is not supported for inline preview; re-save as .xlsx")
+		return "", fmt.Errorf("%w for inline preview; re-save as .xlsx", ErrLegacyXLSUnsupported)
 	default:
 		// Unknown extension — try the zip (xlsx) container first, then plain text.
 		if s, xerr := xlsxPreview(path, filename, maxRows, maxCols); xerr == nil {
@@ -77,9 +111,93 @@ func SpreadsheetPreview(path, filename string, maxRows, maxCols int) (string, er
 	}
 }
 
+// SpreadsheetIndexText extracts bounded, model-readable text for knowledge-base
+// ingestion. Unlike SpreadsheetPreview it keeps enough rows for useful search,
+// but it still caps rows, columns, worksheets, decompressed entries, source file
+// size, and final text size. Truncation is explicit so an answer model never
+// mistakes a partial workbook for the complete source.
+func SpreadsheetIndexText(path, filename string) (string, error) {
+	maxRows := positiveOrDefault(spreadsheetIndexMaxRows, defaultSpreadsheetIndexMaxRows)
+	maxCols := positiveOrDefault(spreadsheetIndexMaxCols, defaultSpreadsheetIndexMaxCols)
+	maxSheets := positiveOrDefault(spreadsheetIndexMaxSheets, defaultSpreadsheetIndexMaxSheets)
+	maxTextBytes := positiveOrDefault(spreadsheetIndexMaxTextBytes, defaultSpreadsheetIndexMaxTextBytes)
+	maxFileBytes := spreadsheetIndexMaxFileBytes
+	if maxFileBytes <= 0 {
+		maxFileBytes = defaultSpreadsheetIndexMaxFileBytes
+	}
+
+	fi, err := os.Stat(path)
+	if err != nil {
+		return "", err
+	}
+	if fi.Size() > maxFileBytes {
+		return "", fmt.Errorf("spreadsheet too large for knowledge-base indexing (%d bytes)", fi.Size())
+	}
+
+	displayName := strings.TrimSpace(filename)
+	if displayName == "" {
+		displayName = filepath.Base(path)
+	}
+	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(displayName), "."))
+	if ext == "" {
+		ext = strings.ToLower(strings.TrimPrefix(filepath.Ext(path), "."))
+	}
+	switch ext {
+	case "csv", "tsv":
+		text, err := csvText(path, displayName, maxRows, maxCols, true, 0)
+		if err != nil {
+			return "", err
+		}
+		return truncateSpreadsheetIndexText(text, maxTextBytes), nil
+	case "xlsx", "xlsm":
+		return xlsxIndexText(path, displayName, maxRows, maxCols, maxSheets, maxTextBytes)
+	case "xls":
+		return "", fmt.Errorf("%w for knowledge-base indexing; re-save as .xlsx", ErrLegacyXLSUnsupported)
+	default:
+		if ext == "" {
+			ext = "unknown"
+		}
+		return "", fmt.Errorf("unsupported spreadsheet format %q for knowledge-base indexing", ext)
+	}
+}
+
+func positiveOrDefault(value, fallback int) int {
+	if value <= 0 {
+		return fallback
+	}
+	return value
+}
+
+// truncateSpreadsheetIndexText preserves complete rows wherever possible and
+// reserves room for an explicit omission notice. The returned string never
+// exceeds maxBytes when maxBytes is positive.
+func truncateSpreadsheetIndexText(text string, maxBytes int) string {
+	if maxBytes <= 0 || len(text) <= maxBytes {
+		return text
+	}
+	if maxBytes <= len(spreadsheetIndexTruncationNotice) {
+		return spreadsheetIndexTruncationNotice[:maxBytes]
+	}
+	contentLimit := maxBytes - len(spreadsheetIndexTruncationNotice)
+	prefix := text[:contentLimit]
+	if newline := strings.LastIndexByte(prefix, '\n'); newline >= 0 {
+		prefix = prefix[:newline+1]
+	} else {
+		prefix = ""
+	}
+	return prefix + spreadsheetIndexTruncationNotice
+}
+
 // ---- CSV / TSV ----
 
 func csvPreview(path, filename string, maxRows, maxCols int) (string, error) {
+	return csvText(path, filename, maxRows, maxCols, false, 80)
+}
+
+// csvText is shared by chat preview and KB indexing. Preview mode preserves
+// the historical malformed-tail tolerance and short cells; strict index mode
+// rejects partial parses and relies on the overall text cap instead.
+func csvText(path, filename string, maxRows, maxCols int, strict bool, cellRuneLimit int) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return "", err
@@ -93,7 +211,7 @@ func csvPreview(path, filename string, maxRows, maxCols int) (string, error) {
 	}
 	r := csv.NewReader(br)
 	r.FieldsPerRecord = -1 // ragged rows are fine for a preview
-	r.LazyQuotes = true
+	r.LazyQuotes = !strict
 	if strings.HasSuffix(strings.ToLower(filename), ".tsv") {
 		r.Comma = '\t'
 	}
@@ -106,8 +224,10 @@ func csvPreview(path, filename string, maxRows, maxCols int) (string, error) {
 			break
 		}
 		if rerr != nil {
-			// Tolerate a malformed tail — keep whatever prefix we parsed rather
-			// than failing the whole preview.
+			if strict {
+				return "", fmt.Errorf("parse spreadsheet row %d: %w", total+1, rerr)
+			}
+			// Chat preview remains best-effort: keep the readable prefix.
 			break
 		}
 		total++
@@ -127,7 +247,7 @@ func csvPreview(path, filename string, maxRows, maxCols int) (string, error) {
 	if total == 0 {
 		return "", fmt.Errorf("empty or unreadable csv")
 	}
-	return formatSheet(filename, "", rows, total, maxColSeen, maxRows, maxCols), nil
+	return formatSheet(filename, "", rows, total, maxColSeen, maxRows, maxCols, cellRuneLimit), nil
 }
 
 // ---- XLSX / XLSM (Office Open XML — a zip of XML parts) ----
@@ -166,9 +286,9 @@ func xlsxPreview(path, filename string, maxRows, maxCols int) (string, error) {
 		files[f.Name] = f
 	}
 
-	shared := parseSharedStrings(files["xl/sharedStrings.xml"])
-	dateStyles := parseDateStyles(files["xl/styles.xml"])
-	sheets := parseWorkbookSheets(files)
+	shared, _ := parseSharedStrings(files["xl/sharedStrings.xml"])
+	dateStyles, _ := parseDateStyles(files["xl/styles.xml"])
+	sheets, _ := parseWorkbookSheets(files, false)
 	if len(sheets) == 0 {
 		return "", fmt.Errorf("no worksheets found in xlsx")
 	}
@@ -179,8 +299,8 @@ func xlsxPreview(path, filename string, maxRows, maxCols int) (string, error) {
 		if wf == nil {
 			continue
 		}
-		rows, total, maxColSeen := parseWorksheet(wf, shared, dateStyles, maxRows, maxCols)
-		b.WriteString(formatSheet(filename, sh.name, rows, total, maxColSeen, maxRows, maxCols))
+		rows, total, maxColSeen, _ := parseWorksheet(wf, shared, dateStyles, maxRows, maxCols)
+		b.WriteString(formatSheet(filename, sh.name, rows, total, maxColSeen, maxRows, maxCols, 80))
 		b.WriteString("\n")
 	}
 	out := strings.TrimRight(b.String(), "\n")
@@ -190,13 +310,144 @@ func xlsxPreview(path, filename string, maxRows, maxCols int) (string, error) {
 	return out, nil
 }
 
-func parseSharedStrings(f *zip.File) []string {
+func xlsxIndexText(path, filename string, maxRows, maxCols, maxSheets, maxTextBytes int) (string, error) {
+	zr, err := zip.OpenReader(path)
+	if err != nil {
+		return "", err
+	}
+	defer zr.Close()
+
+	files := make(map[string]*zip.File, len(zr.File))
+	for _, f := range zr.File {
+		files[f.Name] = f
+	}
+
+	shared, err := parseSharedStrings(files["xl/sharedStrings.xml"])
+	if err != nil {
+		return "", fmt.Errorf("parse xlsx shared strings: %w", err)
+	}
+	dateStyles, err := parseDateStyles(files["xl/styles.xml"])
+	if err != nil {
+		return "", fmt.Errorf("parse xlsx styles: %w", err)
+	}
+	sheets, err := parseWorkbookSheets(files, true)
+	if err != nil {
+		return "", err
+	}
+	if len(sheets) == 0 {
+		return "", fmt.Errorf("no worksheets found in xlsx")
+	}
+
+	sheetCount := len(sheets)
+	if sheetCount > maxSheets {
+		sheetCount = maxSheets
+	}
+	var b strings.Builder
+	readableSheets := 0
+	outputTruncated := false
+	for _, sh := range sheets[:sheetCount] {
+		wf := files[sh.target]
+		if wf == nil {
+			continue
+		}
+		rows, total, maxColSeen, parseErr := parseWorksheet(wf, shared, dateStyles, maxRows, maxCols)
+		if parseErr != nil {
+			return "", fmt.Errorf("parse worksheet %q: %w", sh.name, parseErr)
+		}
+		part := formatSheet(filename, sh.name, rows, total, maxColSeen, maxRows, maxCols, 0)
+		if !appendSpreadsheetIndexPart(&b, part, maxTextBytes) {
+			outputTruncated = true
+			break
+		}
+		readableSheets++
+	}
+	if readableSheets == 0 && !outputTruncated {
+		return "", fmt.Errorf("xlsx produced no readable rows")
+	}
+	if len(sheets) > sheetCount && !outputTruncated {
+		appendSpreadsheetIndexNotice(&b, maxTextBytes)
+	}
+	out := strings.TrimRight(b.String(), "\n")
+	if strings.TrimSpace(out) == "" {
+		return "", fmt.Errorf("xlsx produced no readable rows")
+	}
+	return out, nil
+}
+
+func appendSpreadsheetIndexPart(b *strings.Builder, part string, maxBytes int) bool {
+	separator := ""
+	if b.Len() > 0 {
+		separator = "\n"
+	}
+	if maxBytes <= 0 || b.Len()+len(separator)+len(part) <= maxBytes {
+		b.WriteString(separator)
+		b.WriteString(part)
+		return true
+	}
+
+	contentLimit := maxBytes - len(spreadsheetIndexTruncationNotice)
+	if contentLimit <= 0 {
+		b.Reset()
+		b.WriteString(spreadsheetIndexTruncationNotice[:maxBytes])
+		return false
+	}
+	existing := b.String()
+	if len(existing) > contentLimit {
+		existing = spreadsheetLinePrefix(existing, contentLimit)
+	}
+	remaining := contentLimit - len(existing)
+	pending := separator + part
+	if remaining > 0 {
+		existing += spreadsheetLinePrefix(pending, remaining)
+	}
+	b.Reset()
+	b.Grow(len(existing) + len(spreadsheetIndexTruncationNotice))
+	b.WriteString(existing)
+	b.WriteString(spreadsheetIndexTruncationNotice)
+	return false
+}
+
+func appendSpreadsheetIndexNotice(b *strings.Builder, maxBytes int) {
+	if strings.HasSuffix(b.String(), spreadsheetIndexTruncationNotice) {
+		return
+	}
+	if maxBytes <= len(spreadsheetIndexTruncationNotice) {
+		b.Reset()
+		b.WriteString(spreadsheetIndexTruncationNotice[:maxBytes])
+		return
+	}
+	contentLimit := maxBytes - len(spreadsheetIndexTruncationNotice)
+	prefix := b.String()
+	if len(prefix) > contentLimit {
+		prefix = spreadsheetLinePrefix(prefix, contentLimit)
+	}
+	b.Reset()
+	b.Grow(len(prefix) + len(spreadsheetIndexTruncationNotice))
+	b.WriteString(prefix)
+	b.WriteString(spreadsheetIndexTruncationNotice)
+}
+
+func spreadsheetLinePrefix(text string, maxBytes int) string {
+	if maxBytes <= 0 {
+		return ""
+	}
+	if len(text) <= maxBytes {
+		return text
+	}
+	prefix := text[:maxBytes]
+	if newline := strings.LastIndexByte(prefix, '\n'); newline >= 0 {
+		return prefix[:newline+1]
+	}
+	return ""
+}
+
+func parseSharedStrings(f *zip.File) ([]string, error) {
 	if f == nil {
-		return nil
+		return nil, nil
 	}
 	rc, err := f.Open()
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	defer rc.Close()
 	var doc struct {
@@ -208,7 +459,7 @@ func parseSharedStrings(f *zip.File) []string {
 		} `xml:"si"`
 	}
 	if err := xml.NewDecoder(io.LimitReader(rc, spreadsheetEntryReadCap)).Decode(&doc); err != nil {
-		return nil
+		return nil, err
 	}
 	out := make([]string, len(doc.SI))
 	for i, si := range doc.SI {
@@ -222,19 +473,19 @@ func parseSharedStrings(f *zip.File) []string {
 			out[i] = si.T
 		}
 	}
-	return out
+	return out, nil
 }
 
 // parseDateStyles returns cellXf index → whether that style is a date/time
 // number-format, so numeric cells carrying a date serial render as a real date.
-func parseDateStyles(f *zip.File) map[int]bool {
+func parseDateStyles(f *zip.File) (map[int]bool, error) {
 	res := map[int]bool{}
 	if f == nil {
-		return res
+		return res, nil
 	}
 	rc, err := f.Open()
 	if err != nil {
-		return res
+		return res, err
 	}
 	defer rc.Close()
 	var doc struct {
@@ -251,7 +502,7 @@ func parseDateStyles(f *zip.File) map[int]bool {
 		} `xml:"cellXfs"`
 	}
 	if err := xml.NewDecoder(io.LimitReader(rc, spreadsheetEntryReadCap)).Decode(&doc); err != nil {
-		return res
+		return res, err
 	}
 	custom := map[int]bool{}
 	for _, nf := range doc.NumFmts.NumFmt {
@@ -260,7 +511,7 @@ func parseDateStyles(f *zip.File) map[int]bool {
 	for i, xf := range doc.CellXfs.Xf {
 		res[i] = isDateNumFmt(xf.NumFmtID, custom)
 	}
-	return res
+	return res, nil
 }
 
 // isDateNumFmt covers the OOXML builtin date/time format ids plus any custom
@@ -284,10 +535,13 @@ func looksLikeDateFormat(code string) bool {
 	return strings.ContainsAny(c, "yd") || strings.ContainsAny(c, "hs")
 }
 
-func parseWorkbookSheets(files map[string]*zip.File) []xlsxSheetRef {
+func parseWorkbookSheets(files map[string]*zip.File, strict bool) ([]xlsxSheetRef, error) {
 	wb := files["xl/workbook.xml"]
 	if wb == nil {
-		return fallbackSheets(files)
+		if strict {
+			return nil, errors.New("xlsx workbook.xml is missing")
+		}
+		return fallbackSheets(files), nil
 	}
 	var wbDoc struct {
 		Sheets struct {
@@ -298,9 +552,20 @@ func parseWorkbookSheets(files map[string]*zip.File) []xlsxSheetRef {
 			} `xml:"sheet"`
 		} `xml:"sheets"`
 	}
-	if rc, err := wb.Open(); err == nil {
-		_ = xml.NewDecoder(io.LimitReader(rc, spreadsheetEntryReadCap)).Decode(&wbDoc)
-		rc.Close()
+	rc, err := wb.Open()
+	if err != nil {
+		if strict {
+			return nil, fmt.Errorf("open xlsx workbook: %w", err)
+		}
+		return fallbackSheets(files), nil
+	}
+	decodeErr := xml.NewDecoder(io.LimitReader(rc, spreadsheetEntryReadCap)).Decode(&wbDoc)
+	rc.Close()
+	if decodeErr != nil {
+		if strict {
+			return nil, fmt.Errorf("parse xlsx workbook: %w", decodeErr)
+		}
+		return fallbackSheets(files), nil
 	}
 
 	relMap := map[string]string{}
@@ -311,27 +576,46 @@ func parseWorkbookSheets(files map[string]*zip.File) []xlsxSheetRef {
 				Target string `xml:"Target,attr"`
 			} `xml:"Relationship"`
 		}
-		if rc, err := rels.Open(); err == nil {
-			_ = xml.NewDecoder(io.LimitReader(rc, spreadsheetEntryReadCap)).Decode(&relDoc)
-			rc.Close()
+		rc, openErr := rels.Open()
+		if openErr != nil {
+			if strict {
+				return nil, fmt.Errorf("open xlsx workbook relationships: %w", openErr)
+			}
+			return fallbackSheets(files), nil
+		}
+		decodeErr := xml.NewDecoder(io.LimitReader(rc, spreadsheetEntryReadCap)).Decode(&relDoc)
+		rc.Close()
+		if decodeErr != nil {
+			if strict {
+				return nil, fmt.Errorf("parse xlsx workbook relationships: %w", decodeErr)
+			}
+			return fallbackSheets(files), nil
 		}
 		for _, r := range relDoc.Rel {
 			relMap[r.ID] = r.Target
 		}
+	} else if strict {
+		return nil, errors.New("xlsx workbook relationships are missing")
 	}
 
 	var out []xlsxSheetRef
 	for _, s := range wbDoc.Sheets.Sheet {
 		target := normalizeSheetTarget(relMap[s.RID])
 		if files[target] == nil {
+			if strict {
+				return nil, fmt.Errorf("worksheet %q target %q is missing", s.Name, target)
+			}
 			continue
 		}
 		out = append(out, xlsxSheetRef{name: s.Name, target: target})
 	}
 	if len(out) == 0 {
-		return fallbackSheets(files)
+		if strict {
+			return nil, errors.New("xlsx contains no readable worksheet relationships")
+		}
+		return fallbackSheets(files), nil
 	}
-	return out
+	return out, nil
 }
 
 // normalizeSheetTarget resolves a workbook-relative rels target (e.g.
@@ -364,10 +648,10 @@ func fallbackSheets(files map[string]*zip.File) []xlsxSheetRef {
 	return out
 }
 
-func parseWorksheet(f *zip.File, shared []string, dateStyles map[int]bool, maxRows, maxCols int) ([][]string, int, int) {
+func parseWorksheet(f *zip.File, shared []string, dateStyles map[int]bool, maxRows, maxCols int) ([][]string, int, int, error) {
 	rc, err := f.Open()
 	if err != nil {
-		return nil, 0, 0
+		return nil, 0, 0, err
 	}
 	defer rc.Close()
 
@@ -376,8 +660,11 @@ func parseWorksheet(f *zip.File, shared []string, dateStyles map[int]bool, maxRo
 	total, maxColSeen := 0, 0
 	for {
 		tok, terr := dec.Token()
-		if terr != nil {
+		if terr == io.EOF {
 			break
+		}
+		if terr != nil {
+			return rows, total, maxColSeen, terr
 		}
 		se, ok := tok.(xml.StartElement)
 		if !ok || se.Name.Local != "row" {
@@ -389,12 +676,14 @@ func parseWorksheet(f *zip.File, shared []string, dateStyles map[int]bool, maxRo
 		}
 		// Once we've kept enough rows, keep counting but skip decoding the body.
 		if len(rows) >= maxRows+1 {
-			_ = dec.Skip()
+			if err := dec.Skip(); err != nil {
+				return rows, total, maxColSeen, err
+			}
 			continue
 		}
 		var row xlsxRow
 		if err := dec.DecodeElement(&row, &se); err != nil {
-			continue
+			return rows, total, maxColSeen, err
 		}
 		cells := map[int]string{}
 		rowWidth := 0
@@ -424,7 +713,7 @@ func parseWorksheet(f *zip.File, shared []string, dateStyles map[int]bool, maxRo
 		}
 		rows = append(rows, rec)
 	}
-	return rows, total, maxColSeen
+	return rows, total, maxColSeen, nil
 }
 
 // colIndex parses the column letters of a cell ref ("AB12" → column AB) into a
@@ -508,7 +797,7 @@ func excelSerialToDate(v string) string {
 
 // formatSheet renders one sheet's kept rows as tab-separated lines, prefixed with
 // its true dimensions and suffixed with "… (N more rows/columns)" when truncated.
-func formatSheet(filename, sheet string, rows [][]string, total, maxColSeen, maxRows, maxCols int) string {
+func formatSheet(filename, sheet string, rows [][]string, total, maxColSeen, maxRows, maxCols, cellRuneLimit int) string {
 	var b strings.Builder
 	title := filename
 	if sheet != "" {
@@ -525,8 +814,8 @@ func formatSheet(filename, sheet string, rows [][]string, total, maxColSeen, max
 		for j, v := range r {
 			v = strings.ReplaceAll(v, "\n", " ")
 			v = strings.ReplaceAll(v, "\t", " ")
-			if rr := []rune(v); len(rr) > 80 {
-				v = string(rr[:80]) + "…"
+			if rr := []rune(v); cellRuneLimit > 0 && len(rr) > cellRuneLimit {
+				v = string(rr[:cellRuneLimit]) + "…"
 			}
 			cells[j] = v
 		}

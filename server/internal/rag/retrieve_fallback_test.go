@@ -29,6 +29,11 @@ func TestRetrieveWithoutVectorStoreInjectsFullContext(t *testing.T) {
 	if got[0].Snippet != "first full chunk" || got[1].Snippet != "second full chunk" {
 		t.Fatalf("unexpected full-context snippets: %+v", got)
 	}
+	for _, snippet := range got {
+		if snippet.Source != "document" {
+			t.Fatalf("conversation citation source=%q, want document: %+v", snippet.Source, snippet)
+		}
+	}
 }
 
 func TestRetrieveFullContextFallbackDoesNotTruncate(t *testing.T) {
@@ -111,7 +116,8 @@ func TestRetrieveWithLiveVectorHitUsesCurrentDBChunk(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("got %d snippets, want one live vector hit: %+v", len(got), got)
 	}
-	if got[0].ID != "ch1" || got[0].Snippet != "first full chunk" || got[0].URL != "doc://d1" {
+	if got[0].ID != "ch1" || got[0].Snippet != "first full chunk" ||
+		got[0].URL != "doc://d1" || got[0].Source != "document" {
 		t.Fatalf("retrieval should render the current DB chunk, not stale Qdrant payload: %+v", got)
 	}
 }
@@ -366,6 +372,72 @@ func TestRouteAndRetrieveUsesRouterForConversationUploads(t *testing.T) {
 	}
 }
 
+func TestRouteAndRetrieveConversationRouterQueriesRemainUnbounded(t *testing.T) {
+	ctx := context.Background()
+	db := seedEmbeddedConversationDoc(t, ctx)
+	defer db.Close()
+	t.Cleanup(store.InvalidateConfig)
+	if err := store.SetSetting(db, "rag_full_text_threshold", 1); err != nil {
+		t.Fatalf("set threshold: %v", err)
+	}
+
+	longQuery := "  " + strings.Repeat("长", iterativeMaxQueryRunes+25) + "  "
+	routerQueries := []string{longQuery, "second", "third", "fourth"}
+	router := &recordingRouter{decision: RouteDecision{Strategy: "retrieve", Queries: routerQueries}}
+	queries := []string{}
+	svc := New(db, nil, log.New(io.Discard, "", 0))
+	svc.SetTaskLLM(router)
+	svc.SetVectorStore(testVectorStore{
+		existingIDs: map[string]bool{"ch1": true, "ch2": true},
+		queryLog:    &queries,
+	})
+
+	_, decision, err := svc.RouteAndRetrieve(ctx, "u1", "c1", nil, longQuery, nil, 8)
+	if err != nil {
+		t.Fatalf("route retrieve: %v", err)
+	}
+	if !equalStrings(decision.Queries, routerQueries) {
+		t.Fatalf("conversation router queries=%q, want unchanged %q", decision.Queries, routerQueries)
+	}
+	if !equalStrings(queries, routerQueries) {
+		t.Fatalf("executed conversation queries=%q, want all unchanged %q", queries, routerQueries)
+	}
+}
+
+func TestRouteAndRetrieveConversationFullDocStillInjectsWholeDocument(t *testing.T) {
+	ctx := context.Background()
+	db := seedEmbeddedConversationDoc(t, ctx)
+	defer db.Close()
+	t.Cleanup(store.InvalidateConfig)
+	if err := store.SetSetting(db, "rag_full_text_threshold", 1); err != nil {
+		t.Fatalf("set threshold: %v", err)
+	}
+
+	router := &recordingRouter{decision: RouteDecision{Strategy: "full_doc"}}
+	svc := New(db, nil, log.New(io.Discard, "", 0))
+	svc.SetTaskLLM(router)
+	svc.SetVectorStore(testVectorStore{existingIDs: map[string]bool{"ch1": true, "ch2": true}})
+
+	got, decision, err := svc.RouteAndRetrieve(ctx, "u1", "c1", nil, "summarize everything", nil, 8)
+	if err != nil {
+		t.Fatalf("route full doc: %v", err)
+	}
+	if router.calls != 1 {
+		t.Fatalf("conversation full_doc made %d task calls, want router only (no map-reduce)", router.calls)
+	}
+	if decision.Strategy != "full_doc" || len(got) != 2 {
+		t.Fatalf("conversation full_doc decision=%+v snippets=%+v", decision, got)
+	}
+	if got[0].Snippet != "first full chunk" || got[1].Snippet != "second full chunk" {
+		t.Fatalf("conversation full_doc did not preserve whole text: %+v", got)
+	}
+	for _, snippet := range got {
+		if snippet.Source != "document" {
+			t.Fatalf("conversation full_doc source=%q, want document", snippet.Source)
+		}
+	}
+}
+
 func TestRouteAndRetrievePrependsPinnedConversationDocs(t *testing.T) {
 	ctx := context.Background()
 	db := seedEmbeddedConversationDoc(t, ctx)
@@ -478,7 +550,7 @@ func TestRouteAndRetrieveRunsAllRewrittenQueriesBeforeTopKCap(t *testing.T) {
 
 	router := &recordingRouter{decision: RouteDecision{
 		Strategy: "retrieve",
-		Queries:  []string{"broad section query", "exact reference query"},
+		Queries:  []string{"full chunk", "exact reference query"},
 	}}
 	queries := []string{}
 	svc := New(db, nil, log.New(io.Discard, "", 0))
@@ -486,7 +558,7 @@ func TestRouteAndRetrieveRunsAllRewrittenQueriesBeforeTopKCap(t *testing.T) {
 	svc.SetVectorStore(testVectorStore{
 		existingIDs: map[string]bool{"ch1": true, "ch2": true, "ch3": true},
 		keywordHitsByQuery: map[string][]vector.Hit{
-			"broad section query": {
+			"full chunk": {
 				{Score: 2, Payload: vector.Payload{ChunkID: "ch1", DocumentID: "d1"}},
 				{Score: 1, Payload: vector.Payload{ChunkID: "ch2", DocumentID: "d1"}},
 			},
@@ -507,7 +579,7 @@ func TestRouteAndRetrieveRunsAllRewrittenQueriesBeforeTopKCap(t *testing.T) {
 	if got[0].ID == "ch3" || got[1].ID != "ch3" {
 		t.Fatalf("round-robin merge should retain the later exact-query hit: %+v", got)
 	}
-	if len(queries) != 2 || queries[0] != "broad section query" || queries[1] != "exact reference query" {
+	if len(queries) != 2 || queries[0] != "full chunk" || queries[1] != "exact reference query" {
 		t.Fatalf("retrieval queries = %v, want all rewritten queries in order", queries)
 	}
 }

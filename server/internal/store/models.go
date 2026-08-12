@@ -344,18 +344,20 @@ type UserPrompt struct {
 
 // Project — §4.14.
 type Project struct {
-	ID             string `json:"id"`
-	UserID         string `json:"user_id"`
-	Name           string `json:"name"`
-	Description    string `json:"description"`
-	Instructions   string `json:"instructions"`
-	Accent         string `json:"accent"`
-	Emoji          string `json:"emoji"`
-	Pinned         bool   `json:"pinned"`
-	KBID           string `json:"kb_id"`
-	AutoAddUploads bool   `json:"auto_add_uploads"`
-	CreatedAt      int64  `json:"created_at"`
-	UpdatedAt      int64  `json:"updated_at"`
+	ID                 string `json:"id"`
+	UserID             string `json:"user_id"`
+	Name               string `json:"name"`
+	Description        string `json:"description"`
+	Instructions       string `json:"instructions"`
+	Accent             string `json:"accent"`
+	Emoji              string `json:"emoji"`
+	Pinned             bool   `json:"pinned"`
+	KBID               string `json:"kb_id"`
+	KBEmbeddingModelID string `json:"kb_embedding_model_id,omitempty"`
+	KBEmbeddingDim     int    `json:"kb_embedding_dim,omitempty"`
+	AutoAddUploads     bool   `json:"auto_add_uploads"`
+	CreatedAt          int64  `json:"created_at"`
+	UpdatedAt          int64  `json:"updated_at"`
 	// '' = personal; set = shared with the workspace's members (§workspaces).
 	WorkspaceID string `json:"workspace_id"`
 }

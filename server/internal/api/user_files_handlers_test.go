@@ -155,6 +155,11 @@ func TestWorkspaceOwnerCanListAndDeleteBilledCommittedMemberFile(t *testing.T) {
 	if err := store.JoinWorkspace(ctx, db, workspace.ID, "member"); err != nil {
 		t.Fatalf("join workspace: %v", err)
 	}
+	mustExec(t, db, `INSERT INTO channels(id,name,type) VALUES('ch1','Embedding','openai')`)
+	mustExec(t, db, `INSERT INTO models(id,channel_id,kind,request_id,label,dim)
+		VALUES('emb1','ch1','embedding','emb','Embedding',3)`)
+	mustExec(t, db, `INSERT INTO knowledge_bases(id,user_id,name,embedding_model_id,embedding_dim,workspace_id)
+		VALUES('kb1','owner','Project KB','emb1',3,?)`, workspace.ID)
 	if _, err := store.CreateConversation(ctx, db, store.Conversation{
 		ID: "workspace-conversation", UserID: "member", WorkspaceID: workspace.ID, IsPublic: true, Title: "Shared",
 	}); err != nil {
@@ -165,6 +170,10 @@ func TestWorkspaceOwnerCanListAndDeleteBilledCommittedMemberFile(t *testing.T) {
 		('member-draft','member','workspace-conversation','draft.txt','text/plain',5,?,'text',1,2)`, committedPath, draftPath)
 	mustExec(t, db, `INSERT INTO documents(id,conversation_id,filename,mime_type,size_bytes,status,storage_path,created_at)
 		VALUES('committed-twin','workspace-conversation','committed.txt','text/plain',9,'ready',?,1)`, committedPath)
+	mustExec(t, db, `INSERT INTO documents(id,kb_id,filename,mime_type,size_bytes,status,storage_path,created_at)
+		VALUES('committed-kb-twin','kb1','committed.txt','text/plain',9,'ready',?,1)`, committedPath)
+	mustExec(t, db, `INSERT INTO chunks(id,document_id,kb_id,seq,content,embedding_model)
+		VALUES('committed-kb-chunk','committed-kb-twin','kb1',0,'shared evidence','emb1')`)
 
 	owner := &store.User{ID: "owner", Role: "user", Status: "active"}
 	listReq := httptest.NewRequest("GET", "/api/me/files", nil)
@@ -199,15 +208,17 @@ func TestWorkspaceOwnerCanListAndDeleteBilledCommittedMemberFile(t *testing.T) {
 	if err := json.Unmarshal(deleteRec.Body.Bytes(), &deleted); err != nil || deleted.Deleted != 1 {
 		t.Fatalf("owner deleted=%d err=%v, want exactly committed file", deleted.Deleted, err)
 	}
-	var committedRows, draftRows, twinRows int
+	var committedRows, draftRows, twinRows, kbTwinRows, kbChunkRows int
 	mustQuery(t, db, `SELECT COUNT(*) FROM files WHERE id='member-committed'`).Scan(&committedRows)
 	mustQuery(t, db, `SELECT COUNT(*) FROM files WHERE id='member-draft'`).Scan(&draftRows)
 	mustQuery(t, db, `SELECT COUNT(*) FROM documents WHERE id='committed-twin'`).Scan(&twinRows)
-	if committedRows != 0 || twinRows != 0 || draftRows != 1 {
-		t.Fatalf("rows after owner cleanup committed=%d twin=%d draft=%d, want 0/0/1", committedRows, twinRows, draftRows)
+	mustQuery(t, db, `SELECT COUNT(*) FROM documents WHERE id='committed-kb-twin'`).Scan(&kbTwinRows)
+	mustQuery(t, db, `SELECT COUNT(*) FROM chunks WHERE id='committed-kb-chunk'`).Scan(&kbChunkRows)
+	if committedRows != 0 || twinRows != 0 || draftRows != 1 || kbTwinRows != 1 || kbChunkRows != 1 {
+		t.Fatalf("rows after owner cleanup committed=%d conversation_twin=%d draft=%d kb_twin=%d kb_chunk=%d, want 0/0/1/1/1", committedRows, twinRows, draftRows, kbTwinRows, kbChunkRows)
 	}
-	if _, err := os.Stat(committedPath); !os.IsNotExist(err) {
-		t.Fatalf("committed bytes still exist: %v", err)
+	if _, err := os.Stat(committedPath); err != nil {
+		t.Fatalf("KB-backed committed bytes were removed: %v", err)
 	}
 	if _, err := os.Stat(draftPath); err != nil {
 		t.Fatalf("member draft bytes were removed: %v", err)

@@ -667,7 +667,10 @@ func WorkspaceContentIDs(ctx context.Context, db *sql.DB, workspaceID string) (c
 	if projectIDs, err = collect(`SELECT id FROM projects WHERE workspace_id=?`); err != nil {
 		return
 	}
-	kbIDs, err = collect(`SELECT id FROM knowledge_bases WHERE workspace_id=?`)
+	// Project libraries are deleted through DeleteProjectWithState so its exact
+	// vector and storage cleanup worklist is preserved. The standalone loop must
+	// not try (and fail) to delete them through DeleteKB first.
+	kbIDs, err = collect(`SELECT id FROM knowledge_bases WHERE workspace_id=? AND ` + standaloneKnowledgeBasePredicate("knowledge_bases"))
 	return
 }
 

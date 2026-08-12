@@ -11,6 +11,8 @@ import (
 	"time"
 )
 
+var ErrMixedKBEmbeddingModels = errors.New("selected knowledge bases use different embedding models")
+
 // ListKBs returns the user's knowledge bases.
 // CountStandaloneKBsByUser counts a user's standalone knowledge bases -- those
 // not backing a project (§ user-group caps). Workspace KBs created by the user
@@ -37,9 +39,14 @@ func countStandaloneKBsByUser(ctx context.Context, q commercialCapQueryer, userI
 
 func ListKBs(ctx context.Context, db *sql.DB, userID string) ([]KnowledgeBase, error) {
 	// Personal listing only — workspace KBs are isolated (§workspaces) and listed
-	// via ListWorkspaceKBs.
+	// via ListWorkspaceKBs. A project's dedicated library is managed exclusively
+	// through the project API and must never appear as a standalone KB.
 	rows, err := db.QueryContext(ctx,
-		`SELECT id, user_id, name, description, embedding_model_id, embedding_dim, COALESCE(project_id, ''), created_at, COALESCE(workspace_id,'') FROM knowledge_bases WHERE user_id=? AND COALESCE(workspace_id,'')='' ORDER BY created_at DESC`, userID)
+		`SELECT id, user_id, name, description, embedding_model_id, embedding_dim, COALESCE(project_id, ''), created_at, COALESCE(workspace_id,'')
+		   FROM knowledge_bases
+		  WHERE user_id=? AND COALESCE(workspace_id,'')=''
+		    AND `+standaloneKnowledgeBasePredicate("knowledge_bases")+`
+		  ORDER BY created_at DESC`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -70,7 +77,8 @@ func ListWorkspaceKBsForUser(ctx context.Context, db *sql.DB, workspaceID, userI
 
 func listWorkspaceKBs(ctx context.Context, db *sql.DB, workspaceID, userID string) ([]KnowledgeBase, error) {
 	q := `SELECT id, user_id, name, description, embedding_model_id, embedding_dim, COALESCE(project_id, ''), created_at, COALESCE(workspace_id,'')
-		 FROM knowledge_bases WHERE workspace_id=?`
+			 FROM knowledge_bases WHERE workspace_id=?
+			   AND ` + standaloneKnowledgeBasePredicate("knowledge_bases")
 	args := []any{workspaceID}
 	if userID != "" {
 		q += ` AND ` + workspaceResourceAccessPredicate("knowledge_bases")
@@ -92,6 +100,16 @@ func listWorkspaceKBs(ctx context.Context, db *sql.DB, workspaceID, userID strin
 		out = append(out, kb)
 	}
 	return out, rows.Err()
+}
+
+// standaloneKnowledgeBasePredicate keeps project-owned libraries behind the
+// project boundary. New rows carry project_id; the reverse projects.kb_id check
+// also protects legacy libraries created before that marker was persisted.
+func standaloneKnowledgeBasePredicate(alias string) string {
+	return `COALESCE(` + alias + `.project_id,'')='' AND NOT EXISTS (
+		SELECT 1 FROM projects standalone_project_library
+		 WHERE standalone_project_library.kb_id=` + alias + `.id
+	)`
 }
 
 // OwnedKBIDs filters ids down to the ones the user may retrieve from (§C1 — the
@@ -131,6 +149,114 @@ func OwnedKBIDs(ctx context.Context, db *sql.DB, userID, workspaceID string, ids
 		}
 	}
 	return owned
+}
+
+// ResolveOwnedKBIDs strictly resolves an explicit knowledge-base selection.
+// Unlike OwnedKBIDs, it returns database errors and rejects the whole selection
+// when any id is missing, inaccessible, or belongs to a project. Returned ids
+// are trimmed, deduplicated, and kept in the caller's order.
+func ResolveOwnedKBIDs(ctx context.Context, db *sql.DB, userID, workspaceID string, ids []string) ([]string, error) {
+	normalized := make([]string, 0, len(ids))
+	seen := make(map[string]bool, len(ids))
+	for _, raw := range ids {
+		id := strings.TrimSpace(raw)
+		if id == "" {
+			return nil, ErrNotFound
+		}
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		normalized = append(normalized, id)
+	}
+	if len(normalized) == 0 {
+		return []string{}, nil
+	}
+
+	ph := make([]string, len(normalized))
+	args := make([]any, 0, len(normalized)+4)
+	for i, id := range normalized {
+		ph[i] = "?"
+		args = append(args, id)
+	}
+	scope := `knowledge_bases.user_id=? AND COALESCE(knowledge_bases.workspace_id,'')=''`
+	if workspaceID != "" {
+		scope = `knowledge_bases.workspace_id=? AND ` + workspaceResourceAccessPredicate("knowledge_bases")
+		args = append(args, workspaceID)
+		args = append(args, workspaceResourceAccessArgs(userID)...)
+	} else {
+		args = append(args, userID)
+	}
+	rows, err := db.QueryContext(ctx,
+		`SELECT id FROM knowledge_bases
+		  WHERE id IN (`+strings.Join(ph, ",")+`)
+		    AND `+standaloneKnowledgeBasePredicate("knowledge_bases")+`
+		    AND `+scope,
+		args...,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	allowed := make(map[string]bool, len(normalized))
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		allowed[id] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for _, id := range normalized {
+		if !allowed[id] {
+			return nil, ErrNotFound
+		}
+	}
+	return normalized, nil
+}
+
+// ValidateKBEmbeddingCompatibility rejects a selection whose indexes cannot be
+// queried with one embedding vector. The caller must pass an already
+// access-filtered list (for example OwnedKBIDs); both model identity and actual
+// stored dimension are part of the vector-space signature.
+func ValidateKBEmbeddingCompatibility(ctx context.Context, db *sql.DB, ids []string) error {
+	if len(ids) < 2 {
+		return nil
+	}
+	ph := make([]string, len(ids))
+	args := make([]any, 0, len(ids))
+	for i, id := range ids {
+		ph[i] = "?"
+		args = append(args, id)
+	}
+	rows, err := db.QueryContext(ctx,
+		`SELECT embedding_model_id, embedding_dim FROM knowledge_bases WHERE id IN (`+strings.Join(ph, ",")+`)`,
+		args...,
+	)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	modelID := ""
+	dim := 0
+	seen := 0
+	for rows.Next() {
+		var currentModel string
+		var currentDim int
+		if err := rows.Scan(&currentModel, &currentDim); err != nil {
+			return err
+		}
+		if seen == 0 {
+			modelID, dim = currentModel, currentDim
+		} else if currentModel != modelID || currentDim != dim {
+			return ErrMixedKBEmbeddingModels
+		}
+		seen++
+	}
+	return rows.Err()
 }
 
 // GetKB reads one row through the authoritative personal/workspace scope. A
@@ -385,11 +511,19 @@ func DeleteKB(ctx context.Context, db *sql.DB, id, userID string, storageRoots .
 		}
 		rows.Close()
 	}
-	// Personal owner or authoritative workspace principal. The membership check is
-	// part of the DELETE so a concurrent kick cannot be bypassed by the handler.
+	// Personal owner, workspace owner, or the KB creator while they remain a
+	// member. Other workspace members may query and upload, but cannot destroy a
+	// shared library. The manager check is part of the DELETE so a concurrent kick
+	// cannot be bypassed by the handler.
 	args := []any{id}
-	args = append(args, workspaceResourceAccessArgs(userID)...)
-	res, err := mutationDB.ExecContext(ctx, `DELETE FROM knowledge_bases WHERE id=? AND `+workspaceResourceAccessPredicate("knowledge_bases"), args...)
+	args = append(args, workspaceResourceManagerArgs(userID)...)
+	res, err := mutationDB.ExecContext(ctx,
+		`DELETE FROM knowledge_bases
+		  WHERE id=?
+		    AND `+standaloneKnowledgeBasePredicate("knowledge_bases")+`
+		    AND `+workspaceResourceManagerPredicate("knowledge_bases"),
+		args...,
+	)
 	if err != nil {
 		return err
 	}
@@ -1076,19 +1210,36 @@ func UpdateDocumentStatus(ctx context.Context, db *sql.DB, id, status, errMsg st
 	return err
 }
 
-// RetryDocumentForUser atomically consumes the user-visible failed state. For
-// workspace documents it shares the membership serialization lock with kick
-// and leave, so a revoked user cannot requeue work after revocation returns.
+// RetryDocumentForUser atomically consumes a failed conversation document.
 func RetryDocumentForUser(ctx context.Context, db *sql.DB, id, conversationID, userID string) error {
-	workspaceID, err := documentWorkspaceID(ctx, db, id, "conversation", conversationID)
+	return retryScopedDocumentForUser(ctx, db, id, "conversation", conversationID, userID)
+}
+
+// RetryKBDocumentForUser atomically consumes a failed knowledge-base document.
+// Both retry entry points share the same access and workspace-membership fence.
+func RetryKBDocumentForUser(ctx context.Context, db *sql.DB, id, kbID, userID string) error {
+	return retryScopedDocumentForUser(ctx, db, id, "kb", kbID, userID)
+}
+
+func retryScopedDocumentForUser(ctx context.Context, db *sql.DB, id, scope, parentID, userID string) error {
+	workspaceID, err := documentWorkspaceID(ctx, db, id, scope, parentID)
 	if err != nil {
 		return err
 	}
-	args := []any{time.Now().Unix(), id, conversationID}
+	containerColumn := ""
+	switch scope {
+	case "conversation":
+		containerColumn = "conversation_id"
+	case "kb":
+		containerColumn = "kb_id"
+	default:
+		return ErrNotFound
+	}
+	args := []any{time.Now().Unix(), id, parentID}
 	args = append(args, documentUserAccessArgs(userID)...)
 	q := `UPDATE documents
 		SET status='pending', error='', chunk_count=0, ingest_updated_at=?
-		WHERE id=? AND conversation_id=? AND status='failed'
+		WHERE id=? AND ` + containerColumn + `=? AND status='failed'
 		  AND ` + documentUserAccessPredicate("documents")
 	if workspaceID == "" {
 		res, err := db.ExecContext(ctx, q, args...)
@@ -1189,14 +1340,22 @@ func DeleteDocumentForUser(ctx context.Context, db *sql.DB, id, scope, parentID,
 	switch scope {
 	case "kb":
 		q += ` AND kb_id=?`
+		args = append(args, parentID)
+		q += ` AND EXISTS (
+			SELECT 1 FROM knowledge_bases document_delete_kb
+			 WHERE document_delete_kb.id=documents.kb_id
+			   AND ` + workspaceResourceManagerPredicate("document_delete_kb") + `
+		) AND ` + documentDraftVisibilityPredicate("documents")
+		args = append(args, workspaceResourceManagerArgs(userID)...)
+		args = append(args, userID)
 	case "conversation":
 		q += ` AND conversation_id=?`
+		args = append(args, parentID)
+		q += ` AND ` + documentUserAccessPredicate("documents")
+		args = append(args, documentUserAccessArgs(userID)...)
 	default:
 		return ErrNotFound
 	}
-	args = append(args, parentID)
-	q += ` AND ` + documentUserAccessPredicate("documents")
-	args = append(args, documentUserAccessArgs(userID)...)
 	if workspaceID == "" {
 		res, err := db.ExecContext(ctx, q, args...)
 		if err != nil {

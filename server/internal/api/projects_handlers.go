@@ -206,10 +206,17 @@ func updateProjectHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 func deleteProjectHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
 	id := pathParam(r, "id")
-	if err := store.DeleteProject(r.Context(), d.DB, id, u.ID); err != nil {
+	deletion, err := store.DeleteProjectWithState(r.Context(), d.DB, id, u.ID, d.Config.UploadDir, d.Config.ArtifactDir)
+	if err != nil {
 		writeError(w, 404, errNotFound)
 		return
 	}
+	// DeleteProject atomically removes the project's dedicated KB and its DB
+	// chunks. Keep the external vector/object stores in sync after that commit.
+	for _, kbID := range deletion.KnowledgeBaseIDs {
+		cleanupRAGKB(r.Context(), d, kbID, "delete project "+id)
+	}
+	cleanupStoragePaths(r.Context(), d, deletion.StoragePaths, "delete project "+id)
 	// §23: conversations silently lost their project grouping — a generic
 	// (id-less) event makes other devices re-sync their sidebar list.
 	publishUserEvent(d, r, u.ID, "conversation.updated", "")

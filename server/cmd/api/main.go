@@ -284,11 +284,16 @@ type taskRouterAdapter struct {
 
 // RunJSON satisfies rag.TaskRouter.
 func (a taskRouterAdapter) RunJSON(ctx context.Context, kind, prompt string, out any, opts rag.RouterOpts) error {
-	return a.t.RunJSONString(ctx, kind, prompt, out, llm.RunOpts{
+	err := a.t.RunJSONString(ctx, kind, prompt, out, llm.RunOpts{
 		UserID:          opts.UserID,
 		ConversationID:  opts.ConversationID,
 		MessageID:       opts.MessageID,
+		WorkspaceID:     opts.WorkspaceID,
 		JSONOutput:      true,
 		MaxOutputTokens: taskRouterMaxOutputTokens,
 	})
+	if (kind == "task.rag_evidence_judge" || kind == "task.rag_map_reduce") && errors.Is(err, llm.ErrTaskBillingRecord) {
+		return errors.Join(rag.ErrBillingRecord, err)
+	}
+	return err
 }

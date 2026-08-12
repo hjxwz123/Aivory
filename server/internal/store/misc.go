@@ -302,9 +302,11 @@ func DeleteConversationFile(ctx context.Context, db *sql.DB, fileID, convID, use
 	return DeleteConversationFileAndDocuments(ctx, db, fileID, convID, userID, nil)
 }
 
-// DeleteConversationFileAndDocuments atomically removes the file row and every
-// document row backed by the same stored object. This keeps the DB side
-// all-or-nothing; vector/storage cleanup happens after commit in the API layer.
+// DeleteConversationFileAndDocuments atomically removes the file row and the
+// conversation-scoped document rows backed by the same stored object. A project
+// auto-add may create a knowledge-base document that shares the storage path;
+// that shared-library copy is intentionally retained. Vector/storage cleanup
+// happens after commit in the API layer.
 func DeleteConversationFileAndDocuments(ctx context.Context, db *sql.DB, fileID, convID, userID string, docIDs []string) error {
 	var workspaceID string
 	if err := db.QueryRowContext(ctx,
@@ -392,10 +394,12 @@ func DeleteConversationFileAndDocuments(ctx context.Context, db *sql.DB, fileID,
 	if len(docIDs) > 0 {
 		docArgs := anySlice(docIDs)
 		docArgs = append(docArgs, storagePath)
+		docArgs = append(docArgs, convID)
 		docArgs = append(docArgs, documentContainerAccessArgs(userID)...)
 		if _, err := tx.ExecContext(ctx,
 			`DELETE FROM documents
 			  WHERE id IN (`+idPlaceholders(len(docIDs))+`) AND storage_path=?
+			    AND conversation_id=?
 			    AND `+documentContainerAccessPredicate("documents"), docArgs...); err != nil {
 			return err
 		}
@@ -405,8 +409,8 @@ func DeleteConversationFileAndDocuments(ctx context.Context, db *sql.DB, fileID,
 
 // DocumentsByStoragePath returns every document row that points at path. A file
 // upload can create several document views over the same bytes (conversation RAG
-// plus auto-added project KB), so file deletion must clean all of them together
-// before the physical object is removed.
+// plus an auto-added project KB); callers must preserve the KB view when only the
+// conversation attachment is being removed.
 func DocumentsByStoragePath(ctx context.Context, db *sql.DB, path string) ([]Document, error) {
 	return documentsByStoragePath(ctx, db, path, "")
 }
