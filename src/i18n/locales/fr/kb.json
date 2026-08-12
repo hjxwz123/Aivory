@@ -25,13 +25,16 @@
   "detail": {
     "uploadButton": "Importer un document",
     "noDocs": "Aucun document pour l'instant",
-    "noDocsBody": "Importez un fichier PDF, Markdown ou texte, et Aivory l'indexe pour la recherche.",
+    "noDocsBody": "Importez des fichiers PDF, Office, Markdown, texte ou tableur ; Aivory les indexe pour la recherche.",
     "rename": "Renommer la bibliothèque",
     "delete": "Supprimer la bibliothèque",
     "deleteConfirm": "Supprimer cette bibliothèque et tous ses documents ?",
     "uploaded": "Document importé",
     "uploadFailed": "Échec de l'importation",
-    "failedReason": "Échec de l'indexation. Supprimez le document et importez-le à nouveau.",
+    "failedReason": "Échec de l'indexation. Vous pouvez réessayer après avoir corrigé la configuration concernée.",
+    "retry": "Réessayer",
+    "retryQueued": "Indexation remise en file d'attente",
+    "retryFailed": "Échec de la nouvelle tentative",
     "status": {
       "pending": "En file d'attente",
       "parsing": "Analyse",

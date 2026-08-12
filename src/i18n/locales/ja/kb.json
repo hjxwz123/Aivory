@@ -25,13 +25,16 @@
   "detail": {
     "uploadButton": "ドキュメントをアップロード",
     "noDocs": "ドキュメントがまだありません",
-    "noDocsBody": "PDF、Markdown、またはテキストファイルをアップロードすると、Aivory が検索用にインデックスします。",
+    "noDocsBody": "PDF、Office、Markdown、テキスト、表計算ファイルをアップロードすると、Aivory が検索用にインデックスします。",
     "rename": "ライブラリの名前を変更",
     "delete": "ライブラリを削除",
     "deleteConfirm": "このライブラリとすべてのドキュメントを削除しますか？",
     "uploaded": "ドキュメントをアップロードしました",
     "uploadFailed": "アップロードに失敗しました",
-    "failedReason": "インデックスに失敗しました。ドキュメントを削除して、もう一度アップロードしてください。",
+    "failedReason": "インデックスに失敗しました。関連する設定を修正した後に再試行できます。",
+    "retry": "再試行",
+    "retryQueued": "インデックスを再度キューに追加しました",
+    "retryFailed": "再試行に失敗しました",
     "status": {
       "pending": "待機中",
       "parsing": "解析中",
