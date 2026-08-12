@@ -248,6 +248,8 @@ export interface CiteRef {
   title: string
   domain: string
   isDoc: boolean
+  /** Present only when the owning React surface can open an authenticated preview. */
+  documentID?: string
 }
 
 // Skip protected regions so a `[n]` inside code, a code block, or an existing
@@ -257,9 +259,9 @@ const PROTECTED_HTML = /<(code|pre|a)\b[^>]*>[\s\S]*?<\/\1>|<[^>]+>/gi
 /**
  * linkifyCitations turns `[n]` markers in sanitized inline HTML into small
  * superscript citation references pointing at the numbered sources (§ citations).
- * Web sources become links; KB documents (no browsable URL) become a
- * non-clickable marker with the document name as a tooltip. Only `[n]` where n
- * is a valid 1-based source index is rewritten, and never inside code/links.
+ * Web sources become links; KB documents become buttons when the owning React
+ * surface can open their authenticated preview. Only `[n]` where n is a valid
+ * 1-based source index is rewritten, and never inside code/links.
  */
 export function linkifyCitations(html: string, cites: CiteRef[]): string {
   if (!cites || cites.length === 0) return html
@@ -275,6 +277,10 @@ export function linkifyCitations(html: string, cites: CiteRef[]): string {
       if (isWeb) {
         const tip = escapeAttr((c.domain ? c.domain + ' — ' : '') + c.title)
         return `<sup class="cite-marker"><a href="${escapeAttr(c.url)}" target="_blank" rel="noopener noreferrer" title="${tip}">${n}</a></sup>`
+      }
+      if (c.isDoc && c.documentID) {
+        const title = escapeAttr(c.title)
+        return `<sup class="cite-marker cite-doc"><button type="button" data-doc-citation-index="${n}" title="${title}" aria-label="${title}">${n}</button></sup>`
       }
       return `<sup class="cite-marker cite-doc" title="${escapeAttr(c.title)}">${n}</sup>`
     })

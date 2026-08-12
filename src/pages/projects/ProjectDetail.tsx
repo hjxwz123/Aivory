@@ -514,6 +514,9 @@ export default function ProjectDetail() {
                 }}
                 onSubmit={(text, atts, opts) => void startProjectChat(text, atts, opts)}
                 conversationId={pendingConversationId}
+                projectKBId={project.kbId}
+                projectKBEmbeddingModelId={project.kbEmbeddingModelId}
+                projectKBEmbeddingDim={project.kbEmbeddingDim}
                 ensureConversationId={ensureProjectConversation}
                 onAttachmentsDrained={discardDraftConversation}
               />

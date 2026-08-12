@@ -80,10 +80,29 @@ export interface Citation {
   url: string
   domain: string
   snippet?: string
-  /** Origin of the citation: 'web' for an external page, 'kb' for one of the
-   *  user's own indexed documents (rendered as a non-link document chip). */
-  source?: 'web' | 'kb'
+  /** Origin of the citation: 'web' for an external page, 'kb' for an attached
+   *  knowledge base, and 'document' for a file uploaded directly to a chat. */
+  source?: 'web' | 'kb' | 'document'
 }
+
+/** Retrieval lifecycle values emitted by both the legacy document path and the
+ * knowledge-base multi-round path. The string escape hatch preserves forward
+ * compatibility with newer servers while keeping known states discoverable. */
+export type RagInjectionStrategy =
+  | 'retrieve'
+  | 'full_text'
+  | 'full_doc'
+  | 'none'
+  | 'warning'
+  | 'indexing'
+  | 'indexing_done'
+  | 'searching'
+  | 'expanding'
+  | 'found'
+  | 'partial'
+  | 'no_hit'
+  | 'error'
+  | (string & {})
 
 /** Live (and persisted) state of a Deep Research turn (§ deep-research mode). */
 export interface ResearchTask {
@@ -219,7 +238,12 @@ export interface Message {
   verify?: VerifyResult
   /** RAG retrieval lifecycle event surfaced live during streaming so the UI
    *  can render "📚 retrieved 4 sources from KB" or "Injected full document". */
-  ragInjection?: { strategy: string; summary: string; at: number }
+  ragInjection?: {
+    strategy: RagInjectionStrategy
+    summary: string
+    sourceCount?: number
+    at: number
+  }
   /** Cost the user spent on this assistant turn (chat + tools + images). §8.3 */
   cost?: number
   /** Credits charged for this assistant turn (user-facing; undefined = none). */

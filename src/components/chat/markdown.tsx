@@ -1,10 +1,15 @@
-import { memo, useDeferredValue, useEffect, useMemo, useState } from 'react'
+import { memo, useCallback, useDeferredValue, useEffect, useMemo, useState, type MouseEvent } from 'react'
 import { tokenizeMarkdown, inlineMarkdownToHtml, blockMarkdownToHtml, type CiteRef } from '@/lib/markdown'
 import { CodeBlock } from './code-block'
 import { MermaidDiagram } from './mermaid-diagram'
 import { cn, safeHref } from '@/lib/utils'
 
 import type { Citation } from '@/types/chat'
+import {
+  documentIdFromCitationUrl,
+  isDocumentCitation,
+  isKnowledgeBaseCitation,
+} from '@/lib/citations'
 
 interface MarkdownProps {
   content: string
@@ -15,6 +20,8 @@ interface MarkdownProps {
   blockKeyPrefix?: string
   /** Citations for this turn — inline `[n]` markers become source links. */
   citations?: Citation[]
+  /** Opens an authenticated preview for an inline knowledge-base citation. */
+  onOpenDocumentCitation?: (citation: Citation) => void
   /**
    * Render a single newline as a hard line break (<br>). Off by default so
    * assistant markdown follows standard rendering (soft `\n` = space). Turn ON
@@ -61,7 +68,15 @@ function useThrottledContent(content: string, intervalMs = 50): string {
   return snap
 }
 
-export const Markdown = memo(function Markdown({ content, className, live = false, blockKeyPrefix, citations, breaks = false }: MarkdownProps) {
+export const Markdown = memo(function Markdown({
+  content,
+  className,
+  live = false,
+  blockKeyPrefix,
+  citations,
+  onOpenDocumentCitation,
+  breaks = false,
+}: MarkdownProps) {
   const throttled = useThrottledContent(content)
   const blocks = useMemo(() => tokenizeMarkdown(throttled, breaks), [throttled, breaks])
   // Map citations to the lib's CiteRef shape once; `inline`/`block` helpers thread
@@ -73,9 +88,29 @@ export const Markdown = memo(function Markdown({ content, className, live = fals
         url: c.url,
         title: c.title,
         domain: c.domain,
-        isDoc: c.source === 'kb' || c.url.trim().toLowerCase().startsWith('doc:') || !safeHref(c.url),
+        isDoc: isDocumentCitation(c) || !safeHref(c.url),
+        documentID:
+          onOpenDocumentCitation && isKnowledgeBaseCitation(c)
+            ? documentIdFromCitationUrl(c.url)
+            : undefined,
       })),
-    [citations],
+    [citations, onOpenDocumentCitation],
+  )
+  const handleCitationClick = useCallback(
+    (event: MouseEvent<HTMLDivElement>) => {
+      if (!onOpenDocumentCitation || !(event.target instanceof Element)) return
+      const trigger = event.target.closest<HTMLButtonElement>('button[data-doc-citation-index]')
+      if (!trigger || !event.currentTarget.contains(trigger)) return
+      const index = Number(trigger.dataset.docCitationIndex)
+      const citation = citations?.find((item) => item.index === index)
+      if (
+        !citation ||
+        !isKnowledgeBaseCitation(citation) ||
+        !documentIdFromCitationUrl(citation.url)
+      ) return
+      onOpenDocumentCitation(citation)
+    },
+    [citations, onOpenDocumentCitation],
   )
   if (!content) return null
 
@@ -89,11 +124,11 @@ export const Markdown = memo(function Markdown({ content, className, live = fals
   const blockAnim = live ? 'animate-[fade-in_500ms_var(--ease-out)_backwards]' : undefined
 
   return (
-    <div className={cn('prose-aivory', className)}>
+    <div className={cn('prose-aivory', className)} onClick={handleCitationClick}>
       {blocks.map((b, i) => {
         switch (b.type) {
           case 'heading':
-            return <HeadingTag key={i} depth={b.depth ?? 2} html={inlineMarkdownToHtml(b.content, undefined, breaks)} className={blockAnim} />
+            return <HeadingTag key={i} depth={b.depth ?? 2} html={inlineMarkdownToHtml(b.content, cites, breaks)} className={blockAnim} />
           case 'paragraph':
             return (
               <p

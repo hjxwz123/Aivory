@@ -25,17 +25,16 @@ import {
   ShieldCheck,
   X,
   Loader2,
+  RefreshCw,
   BookOpen,
   Check,
   AlertTriangle,
   Plus,
-  Ban,
   Wrench,
   Globe,
   Sigma,
   ArrowLeft,
   ChevronRight,
-  Sparkles,
   FileText,
 } from 'lucide-react'
 import type { Attachment } from '@/types/chat'
@@ -45,7 +44,6 @@ import {
   resolveModelToolModeCapabilities,
   type ToolMode,
   type ToolModeCapabilities,
-  visibleToolModes,
 } from '@/lib/tool-mode'
 import { Tooltip } from '@/components/ui/tooltip'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -62,7 +60,14 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { api, apiUpload, ApiError } from '@/api/client'
 import { blockReload } from '@/lib/sync-guards'
 import { toastStorageQuotaFull } from '@/lib/quota-toast'
-import type { ApiAttachment, ApiConversationFile, ApiDocument, ApiUserPrompt, ApiUserSkill } from '@/api/types'
+import type {
+  ApiAttachment,
+  ApiConversationFile,
+  ApiDocument,
+  ApiKnowledgeBase,
+  ApiUserPrompt,
+  ApiUserSkill,
+} from '@/api/types'
 import { toast } from '@/hooks/use-toast'
 import { cn, uid, modKey } from '@/lib/utils'
 import { attachmentKindLabel, attachmentTileClass, fileIconFor } from '@/lib/file-icon'
@@ -92,6 +97,10 @@ import { FormulaEditorDialog } from './formula-editor-dialog'
 import { ToolSelectionDialog } from './tool-selection-dialog'
 import { modelHasBuiltinTools, modelSupportsBuiltinTool } from '@/lib/builtin-tools'
 import { hasImageAttachment, hasSendableMessageContent } from '@/lib/chat-message-input'
+import {
+  knowledgeBaseSelectionContext,
+  knowledgeBasesHaveCompatibleEmbeddings,
+} from '@/lib/knowledge-base-selection'
 
 interface ComposerProps {
   modelId: string
@@ -150,6 +159,11 @@ interface ComposerProps {
   onAttachmentsDrained?: () => void
   /** Knowledge bases bound to the conversation (§7.2-7 📚 selector). */
   kbIds?: string[]
+  /** Project-owned KB, implicitly attached and therefore not user-removable. */
+  projectKBId?: string
+  /** Embedding signature for a project KB omitted from the ordinary KB list. */
+  projectKBEmbeddingModelId?: string
+  projectKBEmbeddingDim?: number
   /** When provided, the 📚 selector is shown and changes flow up here. */
   onKBChange?: (kbIds: string[]) => void
   /** True when a model picker already lives in the page header (e.g. ChatThread).
@@ -364,14 +378,7 @@ function FeatureRow({ item, onAfter }: { item: FeatureItem; onAfter?: () => void
   )
 }
 
-interface ToolModeOption {
-  value: ToolMode
-  label: string
-  desc: string
-  icon: ReactNode
-}
-
-type ToolModePanel = 'root' | 'modes'
+type ToolUsePanel = 'root' | 'tools'
 
 interface ToolSelectionAction {
   label: string
@@ -381,14 +388,10 @@ interface ToolSelectionAction {
   onOpen: () => void
 }
 
-/** A stable drill-down: root features -> available unified tool policies. */
-function ToolModeSelector({
+/** A stable drill-down: root features -> tool use -> tool selection dialog. */
+function ToolUseSelector({
   label,
   description,
-  value,
-  options,
-  onChange,
-  researchActive,
   menuOpen,
   rootItems,
   toolSelection,
@@ -397,29 +400,16 @@ function ToolModeSelector({
 }: {
   label: string
   description: string
-  value: ToolMode
-  options: readonly ToolModeOption[]
-  onChange: (value: ToolMode) => void
-  researchActive: boolean
   menuOpen: boolean
   rootItems: FeatureItem[]
-  toolSelection?: ToolSelectionAction
-  onPanelChange?: (panel: ToolModePanel) => void
+  toolSelection: ToolSelectionAction
+  onPanelChange?: (panel: ToolUsePanel) => void
   onAfter?: () => void
 }) {
-  const [panel, setPanel] = useState<ToolModePanel>('root')
+  const [panel, setPanel] = useState<ToolUsePanel>('root')
   const previousPanelRef = useRef(panel)
   const rootToolRef = useRef<HTMLButtonElement>(null)
-  const modesBackRef = useRef<HTMLButtonElement>(null)
-  const selectedOption = options.find((option) => option.value === value) ?? options[0]
-  const visibleOptions = researchActive
-    ? options.filter((option) => option.value === 'enabled')
-    : options
-  const toolModeIsOverride = value !== 'auto' && !researchActive
-
-  useEffect(() => {
-    if (researchActive) setPanel('root')
-  }, [researchActive])
+  const toolsBackRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
     onPanelChange?.(panel)
@@ -433,8 +423,8 @@ function ToolModeSelector({
     }
     if (previousPanelRef.current === panel) return
     previousPanelRef.current = panel
-    if (panel === 'modes') {
-      modesBackRef.current?.focus()
+    if (panel === 'tools') {
+      toolsBackRef.current?.focus()
     } else {
       rootToolRef.current?.focus()
     }
@@ -449,12 +439,12 @@ function ToolModeSelector({
         <button
           ref={rootToolRef}
           type="button"
-          onClick={() => setPanel('modes')}
-          aria-label={`${label}: ${selectedOption?.label ?? ''}`}
+          onClick={() => setPanel('tools')}
+          aria-label={`${label}: ${toolSelection.summary}`}
           className={cn(
             'flex w-full min-w-0 max-w-full items-start gap-2.5 overflow-hidden rounded-[12px] border px-2.5 py-2 text-left interactive',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-            toolModeIsOverride
+            toolSelection.custom
               ? 'border-[var(--color-tool-selection-border)] bg-[var(--color-tool-selection-soft)]'
               : 'border-transparent hover:bg-[var(--color-bg-muted)]',
           )}
@@ -462,7 +452,7 @@ function ToolModeSelector({
           <span
             className={cn(
               'mt-0.5 inline-flex shrink-0',
-              toolModeIsOverride
+              toolSelection.custom
                 ? 'text-[var(--color-tool-selection-text)]'
                 : 'text-[var(--color-fg-muted)]',
             )}
@@ -478,12 +468,12 @@ function ToolModeSelector({
               <span
                 className={cn(
                   'ml-auto shrink-0 text-[11.5px]',
-                  toolModeIsOverride
+                  toolSelection.custom
                     ? 'text-[var(--color-tool-selection-text)]'
                     : 'text-[var(--color-fg-subtle)]',
                 )}
               >
-                {selectedOption?.label}
+                {toolSelection.summary}
               </span>
             </span>
             <span className="mt-0.5 block max-w-full break-words [overflow-wrap:anywhere] text-[11.5px] leading-snug text-[var(--color-fg-subtle)]">
@@ -492,56 +482,6 @@ function ToolModeSelector({
           </span>
           <ChevronRight size={14} className="mt-1 shrink-0 text-[var(--color-fg-subtle)]" aria-hidden />
         </button>
-        {toolSelection ? (
-          <button
-            type="button"
-            onClick={() => {
-              onAfter?.()
-              toolSelection.onOpen()
-            }}
-            aria-label={`${toolSelection.label}: ${toolSelection.summary}`}
-            className={cn(
-              'flex w-full min-w-0 max-w-full items-start gap-2.5 overflow-hidden rounded-[12px] border px-2.5 py-2 text-left interactive',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-              toolSelection.custom
-                ? 'border-[var(--color-tool-selection-border)] bg-[var(--color-tool-selection-soft)]'
-                : 'border-transparent hover:bg-[var(--color-bg-muted)]',
-            )}
-          >
-            <span
-              className={cn(
-                'mt-0.5 inline-flex shrink-0',
-                toolSelection.custom
-                  ? 'text-[var(--color-tool-selection-text)]'
-                  : 'text-[var(--color-fg-muted)]',
-              )}
-              aria-hidden
-            >
-              <Wrench size={16} />
-            </span>
-            <span className="min-w-0 max-w-full flex-1">
-              <span className="flex min-w-0 items-center gap-2">
-                <span className="truncate text-[13px] font-medium text-[var(--color-fg)]">
-                  {toolSelection.label}
-                </span>
-                <span
-                  className={cn(
-                    'ml-auto shrink-0 text-[11.5px]',
-                    toolSelection.custom
-                      ? 'text-[var(--color-tool-selection-text)]'
-                      : 'text-[var(--color-fg-subtle)]',
-                  )}
-                >
-                  {toolSelection.summary}
-                </span>
-              </span>
-              <span className="mt-0.5 block max-w-full break-words [overflow-wrap:anywhere] text-[11.5px] leading-snug text-[var(--color-fg-subtle)]">
-                {toolSelection.description}
-              </span>
-            </span>
-            <ChevronRight size={14} className="mt-1 shrink-0 text-[var(--color-fg-subtle)]" aria-hidden />
-          </button>
-        ) : null}
       </div>
     )
   }
@@ -559,59 +499,65 @@ function ToolModeSelector({
       }}
     >
       <button
-        ref={modesBackRef}
+        ref={toolsBackRef}
         type="button"
         onClick={() => setPanel('root')}
         className="flex min-h-9 w-full items-center gap-2 rounded-[8px] px-2 py-1.5 text-left text-[12.5px] font-medium text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
       >
         <ArrowLeft size={14} aria-hidden />
         <span className="truncate">{label}</span>
-        <span className="ml-auto text-[11px] text-[var(--color-fg-subtle)]">{selectedOption?.label}</span>
+        <span className="ml-auto text-[11px] text-[var(--color-fg-subtle)]">{toolSelection.summary}</span>
       </button>
       <div className="my-1 h-px bg-[var(--color-divider)]" aria-hidden />
-      {visibleOptions.map((option) => {
-        const checked = option.value === value
-        return (
-          <button
-            key={option.value}
-            type="button"
-            aria-pressed={checked}
-            aria-label={`${option.label}: ${option.desc}`}
-            onClick={() => {
-              if (!checked) onChange(option.value)
-              setPanel('root')
-            }}
-            className={cn(
-              'flex w-full min-w-0 max-w-full items-start gap-2.5 overflow-hidden rounded-[12px] border px-2.5 py-2 text-left interactive',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
-              checked
-                ? 'border-[var(--color-tool-selection-border)] bg-[var(--color-tool-selection-soft)]'
-                : 'border-transparent hover:bg-[var(--color-bg-muted)]',
-            )}
-          >
+      <button
+        type="button"
+        aria-haspopup="dialog"
+        aria-label={`${toolSelection.label}: ${toolSelection.summary}`}
+        onClick={() => {
+          onAfter?.()
+          toolSelection.onOpen()
+        }}
+        className={cn(
+          'flex w-full min-w-0 max-w-full items-start gap-2.5 overflow-hidden rounded-[12px] border px-2.5 py-2 text-left interactive',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+          toolSelection.custom
+            ? 'border-[var(--color-tool-selection-border)] bg-[var(--color-tool-selection-soft)]'
+            : 'border-transparent hover:bg-[var(--color-bg-muted)]',
+        )}
+      >
+        <span
+          className={cn(
+            'mt-0.5 inline-flex shrink-0',
+            toolSelection.custom
+              ? 'text-[var(--color-tool-selection-text)]'
+              : 'text-[var(--color-fg-muted)]',
+          )}
+          aria-hidden
+        >
+          <Wrench size={16} />
+        </span>
+        <span className="min-w-0 max-w-full flex-1">
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="truncate text-[13px] font-medium text-[var(--color-fg)]">
+              {toolSelection.label}
+            </span>
             <span
               className={cn(
-                'mt-0.5 inline-flex shrink-0',
-                checked ? 'text-[var(--color-tool-selection-text)]' : 'text-[var(--color-fg-muted)]',
+                'ml-auto shrink-0 text-[11.5px]',
+                toolSelection.custom
+                  ? 'text-[var(--color-tool-selection-text)]'
+                  : 'text-[var(--color-fg-subtle)]',
               )}
-              aria-hidden
             >
-              {option.icon}
+              {toolSelection.summary}
             </span>
-            <span className="min-w-0 max-w-full flex-1">
-              <span className="block text-[13px] font-medium text-[var(--color-fg)]">
-                {option.label}
-              </span>
-              <span className="mt-0.5 block max-w-full break-words [overflow-wrap:anywhere] text-[11.5px] leading-snug text-[var(--color-fg-subtle)]">
-                {option.desc}
-              </span>
-            </span>
-            {checked ? (
-              <Check size={14} className="mt-1 shrink-0 text-[var(--color-tool-selection-text)]" aria-hidden />
-            ) : null}
-          </button>
-        )
-      })}
+          </span>
+          <span className="mt-0.5 block max-w-full break-words [overflow-wrap:anywhere] text-[11.5px] leading-snug text-[var(--color-fg-subtle)]">
+            {toolSelection.description}
+          </span>
+        </span>
+        <ChevronRight size={14} className="mt-1 shrink-0 text-[var(--color-fg-subtle)]" aria-hidden />
+      </button>
     </div>
   )
 }
@@ -633,6 +579,9 @@ export function Composer({
   ensureConversationId,
   onAttachmentsDrained,
   kbIds,
+  projectKBId,
+  projectKBEmbeddingModelId,
+  projectKBEmbeddingDim,
   onKBChange,
   modelPickerInHeader = false,
 }: ComposerProps) {
@@ -644,8 +593,8 @@ export function Composer({
   // §verify: when on, the answer is fact-checked by a second model this turn.
   const verify = useComposerPrefs((s) => s.verify)
   const setVerify = useComposerPrefs((s) => s.setVerify)
-  // Three-state tool policy + forced non-tool web search. Deep Research forces
-  // enabled mode; forced search only exists inside disabled mode.
+  // The persisted tool policy still drives request routing, while the composer
+  // presents tool selection as the single user-facing tool-use control.
   const toolMode = useComposerPrefs((s) => s.toolMode)
   const setToolMode = useComposerPrefs((s) => s.setToolMode)
   const forceWebSearch = useComposerPrefs((s) => s.forceWebSearch)
@@ -666,7 +615,12 @@ export function Composer({
   const attachmentsRef = useRef<PendingAttachment[]>([])
   const attachmentScopeRef = useRef(conversationId)
   const [restoringAttachments, setRestoringAttachments] = useState(Boolean(conversationId))
-  const [kbList, setKBList] = useState<{ id: string; name: string }[]>([])
+  const [kbList, setKBList] = useState<ApiKnowledgeBase[]>([])
+  const [kbLoading, setKBLoading] = useState(false)
+  const [kbLoaded, setKBLoaded] = useState(false)
+  const [kbLoadFailed, setKBLoadFailed] = useState(false)
+  const [kbPopoverOpen, setKBPopoverOpen] = useState(false)
+  const kbLoadRequestRef = useRef(0)
   const [librarySkills, setLibrarySkills] = useState<ApiUserSkill[]>([])
   const [libraryPrompts, setLibraryPrompts] = useState<ApiUserPrompt[]>([])
   const [libraryLoading, setLibraryLoading] = useState(true)
@@ -698,8 +652,8 @@ export function Composer({
   // stay large. 639px = Tailwind's `sm` breakpoint minus 1.
   const isMobile = useMediaQuery('(max-width: 639px)')
   const [moreOpen, setMoreOpen] = useState(false)
-  const [toolModePanel, setToolModePanel] = useState<ToolModePanel>('root')
-  // Turn-feature menu (the "+" left of attach): research / verify / tool policy
+  const [toolUsePanel, setToolUsePanel] = useState<ToolUsePanel>('root')
+  // Turn-feature menu (the "+" left of attach): research / verify / tool use
   // / web-search in one shared mobile/desktop surface.
   const [featuresOpen, setFeaturesOpen] = useState(false)
   const [toolSelectionOpen, setToolSelectionOpen] = useState(false)
@@ -707,14 +661,23 @@ export function Composer({
     (ids: string[] | undefined) => setSelectedToolIds(modelId, ids),
     [modelId, setSelectedToolIds],
   )
-  const loadKBList = async () => {
+  const loadKBList = useCallback(async () => {
+    const requestID = ++kbLoadRequestRef.current
+    setKBLoading(true)
+    setKBLoadFailed(false)
     try {
       const rows = await kbsApi.list(activeWorkspaceId())
-      setKBList(rows.map((kb) => ({ id: kb.id, name: kb.name })))
+      if (requestID !== kbLoadRequestRef.current) return
+      setKBList(rows)
+      setKBLoaded(true)
     } catch {
-      /* ignore */
+      if (requestID !== kbLoadRequestRef.current) return
+      setKBLoadFailed(true)
+      setKBLoaded(true)
+    } finally {
+      if (requestID === kbLoadRequestRef.current) setKBLoading(false)
     }
-  }
+  }, [])
   const ref = useRef<RichComposerEditorHandle>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const imageFileRef = useRef<HTMLInputElement>(null)
@@ -1746,7 +1709,7 @@ export function Composer({
   const researchActive = effectiveMode === 'deep-research'
   const featureItems: FeatureItem[] = []
   const showTurnFeatures = !isImageMode && !effectiveFast
-  const showToolModeSelector = showTurnFeatures && toolModeSelectionAllowed
+  const showToolUseSelector = showTurnFeatures && toolModeSelectionAllowed
   if (showTurnFeatures) {
     if (researchEnabled) {
       featureItems.push({
@@ -1771,35 +1734,6 @@ export function Composer({
   }
 
   const toolModeLabel = t('composer.features.toolMode', { defaultValue: 'Tool use' })
-  const toolModeOptionsByValue: Record<ToolMode, ToolModeOption> = {
-    auto: {
-      value: 'auto',
-      label: t('composer.features.toolModeAuto', { defaultValue: 'Auto' }),
-      desc: t('composer.features.toolModeAutoDesc', {
-        defaultValue: 'Automatically decide whether tool calls are needed.',
-      }),
-      icon: <Sparkles size={16} aria-hidden />,
-    },
-    disabled: {
-      value: 'disabled',
-      label: t('composer.features.toolModeDisabled', { defaultValue: 'Off' }),
-      desc: t('composer.features.toolModeDisabledDesc', {
-        defaultValue: 'Answer directly without calling tools.',
-      }),
-      icon: <Ban size={16} aria-hidden />,
-    },
-    enabled: {
-      value: 'enabled',
-      label: t('composer.features.toolModeEnabled', { defaultValue: 'On' }),
-      desc: t('composer.features.toolModeEnabledDesc', {
-        defaultValue: 'Turn on tool calling.',
-      }),
-      icon: <Wrench size={16} aria-hidden />,
-    },
-  }
-  const toolModeOptions = visibleToolModes(toolModeCapabilities).map((value) => toolModeOptionsByValue[value])
-  const autoToolModeLabel = toolModeOptions.find((option) => option.value === 'auto')?.label ?? 'Auto'
-  const selectedToolMode = toolModeOptions.find((option) => option.value === availableToolMode) ?? toolModeOptions[0]
   const hasCustomToolSelection = selectedToolIds !== undefined
   const toolSelectionSummary = hasCustomToolSelection
     ? t('composer.toolSelection.summaryCount', {
@@ -1809,7 +1743,7 @@ export function Composer({
     : t('composer.toolSelection.summaryAll', { defaultValue: 'All' })
 
   const webSearchItem: FeatureItem | undefined =
-    showToolModeSelector && supportsWebSearch && availableToolMode === 'disabled'
+    showToolUseSelector && supportsWebSearch && availableToolMode === 'disabled'
       ? {
           key: 'web-search',
           icon: <Globe size={16} aria-hidden />,
@@ -1820,63 +1754,42 @@ export function Composer({
         }
       : undefined
 
-  // Auto is the neutral default and should not permanently light up the "+"
-  // trigger. Explicit disabled/enabled choices are visible as removable overrides.
-  const toolModeOverride: FeatureItem | undefined =
-    showToolModeSelector && availableToolMode !== 'auto' && !researchActive
+  // Tool policy and tool selection are one composer concept. Keep a single
+  // removable chip even when an older persisted policy is still non-default.
+  const toolUseOverride: FeatureItem | undefined =
+    showToolUseSelector &&
+    (hasCustomToolSelection || (availableToolMode !== 'auto' && !researchActive))
       ? {
-          key: `tool-mode-${availableToolMode}`,
-          icon:
-            availableToolMode === 'disabled' ? (
-              <Ban size={16} aria-hidden />
-            ) : (
-              <Wrench size={16} aria-hidden />
-            ),
-          label: selectedToolMode.label,
-          desc: selectedToolMode.desc,
-          active: true,
-          clearLabel: `${toolModeLabel}: ${autoToolModeLabel}`,
-          toggle: () => setToolMode('auto'),
-        }
-      : undefined
-
-  const toolSelectionOverride: FeatureItem | undefined =
-    showToolModeSelector && hasCustomToolSelection
-      ? {
-          key: 'tool-selection',
+          key: 'tool-use',
           icon: <Wrench size={16} aria-hidden />,
-          label: t('composer.toolSelection.selectedChip', {
-            count: selectedToolIds.length,
-            defaultValue: '{{count}} tools',
-          }),
-          chipText: String(selectedToolIds.length),
-          desc: t('composer.toolSelection.entryDescription', {
-            defaultValue: 'Limit automatic and on modes to a chosen set.',
+          label: toolModeLabel,
+          chipText: hasCustomToolSelection ? String(selectedToolIds.length) : undefined,
+          desc: t('composer.features.toolModeDesc', {
+            defaultValue: 'Configure the tools available for this turn.',
           }),
           active: true,
-          clearLabel: t('composer.toolSelection.reset', { defaultValue: 'Use all available tools' }),
-          toggle: () => handleSelectedToolIdsChange(undefined),
+          clearLabel: t('composer.toolSelection.resetToolUse', { defaultValue: 'Reset tool use' }),
+          toggle: () => {
+            if (!researchActive && availableToolMode !== 'auto') setToolMode('auto')
+            if (hasCustomToolSelection) handleSelectedToolIdsChange(undefined)
+          },
         }
       : undefined
 
   const featureList = (onAfter?: () => void) => (
     <div className="flex flex-col gap-0.5">
-      {showToolModeSelector ? (
-        <ToolModeSelector
+      {showToolUseSelector ? (
+        <ToolUseSelector
           label={toolModeLabel}
           description={t('composer.features.toolModeDesc', {
-            defaultValue: 'Choose automatic, on, or off for tools.',
+            defaultValue: 'Configure the tools available for this turn.',
           })}
-          value={availableToolMode}
-          options={toolModeOptions}
-          onChange={setToolMode}
-          researchActive={researchActive}
           menuOpen={isMobile ? moreOpen : featuresOpen}
           rootItems={[...featureItems, ...(webSearchItem ? [webSearchItem] : [])]}
           toolSelection={{
             label: t('composer.toolSelection.entry', { defaultValue: 'Choose tools' }),
             description: t('composer.toolSelection.entryDescription', {
-              defaultValue: 'Limit automatic and on modes to a chosen set.',
+              defaultValue: 'Choose which tools are available for this turn.',
             }),
             summary: toolSelectionSummary,
             custom: hasCustomToolSelection,
@@ -1886,7 +1799,7 @@ export function Composer({
               setToolSelectionOpen(true)
             },
           }}
-          onPanelChange={setToolModePanel}
+          onPanelChange={setToolUsePanel}
           onAfter={onAfter}
         />
       ) : (
@@ -1900,11 +1813,10 @@ export function Composer({
   const activeChips = [
     ...featureItems.filter((it) => it.active),
     ...(webSearchItem?.active ? [webSearchItem] : []),
-    ...(toolModeOverride ? [toolModeOverride] : []),
-    ...(toolSelectionOverride ? [toolSelectionOverride] : []),
+    ...(toolUseOverride ? [toolUseOverride] : []),
   ]
   const anyFeatureActive = activeChips.length > 0
-  const featureMenuAvailable = showToolModeSelector || featureItems.length > 0
+  const featureMenuAvailable = showToolUseSelector || featureItems.length > 0
   const hasActiveParamControl = useMemo(
     () =>
       parseControls(visibleParamControls).some((control) => {
@@ -1927,43 +1839,126 @@ export function Composer({
 
   // The mobile "+" turns blue whenever a persistent choice inside it is active.
   // Hidden KB/tool policies must not leak into image or fast turns.
+  const {
+    options: selectableKnowledgeBases,
+    anchors: selectedKnowledgeBases,
+    selectedIds: selectedKnowledgeBaseIds,
+  } = knowledgeBaseSelectionContext(
+    kbList,
+    kbIds ?? [],
+    projectKBId,
+    projectKBEmbeddingModelId !== undefined && projectKBEmbeddingDim !== undefined
+      ? {
+          embedding_model_id: projectKBEmbeddingModelId,
+          embedding_dim: projectKBEmbeddingDim,
+        }
+      : undefined,
+  )
   const hasActiveTool =
     anyFeatureActive ||
     hasActiveParamControl ||
-    (!isImageMode && Boolean(onKBChange) && (kbIds?.length ?? 0) > 0)
+    (!isImageMode && Boolean(onKBChange) && selectedKnowledgeBaseIds.length > 0)
+
+  const openKnowledgeBaseManager = () => {
+    setMoreOpen(false)
+    setKBPopoverOpen(false)
+    navigate('/kb')
+  }
 
   // KB checklist — shared by the desktop popover and the mobile "+" menu.
+  // Keep selected rows actionable even if legacy data is incompatible so the
+  // user can always recover by deselecting one of them.
   const kbChecklist =
-    kbList.length === 0 ? (
-      <p className="px-2 py-2 text-sm text-[var(--color-fg-muted)]">{t('composer.noKnowledgeBases')}</p>
+    kbLoading || !kbLoaded ? (
+      <div
+        role="status"
+        aria-live="polite"
+        className="flex min-h-16 items-center gap-2 px-2 py-3 text-sm text-[var(--color-fg-muted)]"
+      >
+        <Loader2 size={15} aria-hidden className="shrink-0 animate-spin" />
+        <span>{t('composer.knowledgeBasesLoading')}</span>
+      </div>
+    ) : kbLoadFailed ? (
+      <div role="alert" className="px-2 py-2">
+        <div className="flex items-start gap-2 text-sm leading-snug text-[var(--color-danger)]">
+          <AlertTriangle size={15} aria-hidden className="mt-0.5 shrink-0" />
+          <span>{t('composer.knowledgeBasesLoadFailed')}</span>
+        </div>
+        <button
+          type="button"
+          onClick={() => void loadKBList()}
+          className="mt-2 inline-flex h-8 items-center gap-1.5 rounded-[8px] px-2 text-xs font-medium text-[var(--color-fg-muted)] interactive hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+        >
+          <RefreshCw size={13} aria-hidden />
+          {t('composer.retryKnowledgeBases')}
+        </button>
+      </div>
+    ) : selectableKnowledgeBases.length === 0 ? (
+      <div className="px-2 py-2">
+        <p className="text-sm text-[var(--color-fg-muted)]">{t('composer.noKnowledgeBases')}</p>
+        <button
+          type="button"
+          onClick={openKnowledgeBaseManager}
+          className="mt-2 inline-flex h-8 items-center gap-1.5 rounded-[8px] px-2 text-xs font-medium text-[var(--color-accent)] interactive hover:bg-[var(--color-accent-soft)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+        >
+          <Plus size={13} aria-hidden />
+          {t('composer.manageKnowledgeBases')}
+        </button>
+      </div>
     ) : (
-      kbList.map((kb) => {
-        const checked = kbIds?.includes(kb.id) ?? false
-        return (
-          <button
-            key={kb.id}
-            type="button"
-            role="checkbox"
-            aria-checked={checked}
-            onClick={() =>
-              onKBChange?.(checked ? (kbIds ?? []).filter((x) => x !== kb.id) : [...(kbIds ?? []), kb.id])
-            }
-            className="flex w-full items-center gap-2 rounded-[8px] px-2 py-1.5 text-left text-sm text-[var(--color-fg)] hover:bg-[var(--color-bg-muted)]"
-          >
-            <span
+      <div className="max-h-64 overflow-y-auto overscroll-contain scrollbar-thin">
+        {selectableKnowledgeBases.map((kb) => {
+          const checked = selectedKnowledgeBaseIds.includes(kb.id)
+          const incompatible =
+            !checked &&
+            selectedKnowledgeBases.some(
+              (selected) => !knowledgeBasesHaveCompatibleEmbeddings(selected, kb),
+            )
+          const incompatibilityReason = t('composer.incompatibleKnowledgeBase')
+          return (
+            <button
+              key={kb.id}
+              type="button"
+              role="checkbox"
+              aria-checked={checked}
+              aria-label={incompatible ? `${kb.name}. ${incompatibilityReason}` : kb.name}
+              disabled={incompatible}
+              onClick={() =>
+                onKBChange?.(
+                  checked
+                    ? selectedKnowledgeBaseIds.filter((id) => id !== kb.id)
+                    : [...selectedKnowledgeBaseIds, kb.id],
+                )
+              }
               className={cn(
-                'inline-flex size-4 items-center justify-center rounded border',
-                checked
-                  ? 'border-[var(--color-tool-selection)] bg-[var(--color-tool-selection)] text-[var(--color-tool-selection-fg)]'
-                  : 'border-[var(--color-border-strong)]',
+                'flex w-full items-start gap-2 rounded-[8px] px-2 py-1.5 text-left text-sm interactive',
+                incompatible
+                  ? 'cursor-not-allowed text-[var(--color-fg-subtle)] opacity-60'
+                  : 'text-[var(--color-fg)] hover:bg-[var(--color-bg-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
               )}
             >
-              {checked ? <Check size={11} aria-hidden /> : null}
-            </span>
-            <span className="truncate">{kb.name}</span>
-          </button>
-        )
-      })
+              <span
+                className={cn(
+                  'mt-0.5 inline-flex size-4 shrink-0 items-center justify-center rounded border',
+                  checked
+                    ? 'border-[var(--color-tool-selection)] bg-[var(--color-tool-selection)] text-[var(--color-tool-selection-fg)]'
+                    : 'border-[var(--color-border-strong)]',
+                )}
+              >
+                {checked ? <Check size={11} aria-hidden /> : null}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate">{kb.name}</span>
+                {incompatible ? (
+                  <span className="mt-0.5 block text-[11px] leading-snug text-[var(--color-fg-subtle)]">
+                    {incompatibilityReason}
+                  </span>
+                ) : null}
+              </span>
+            </button>
+          )
+        })}
+      </div>
     )
 
   const commandKey = commandQuery
@@ -2589,7 +2584,7 @@ export function Composer({
             open={moreOpen}
             onOpenChange={(o) => {
               setMoreOpen(o)
-              if (!o) setToolModePanel('root')
+              if (!o) setToolUsePanel('root')
               if (o && onKBChange) void loadKBList()
             }}
           >
@@ -2626,7 +2621,7 @@ export function Composer({
                 maxHeight: 'min(62dvh, var(--radix-popover-content-available-height), calc(100dvh - var(--safe-top) - var(--safe-bottom) - 1.5rem))',
               }}
             >
-              {toolModePanel === 'root' ? (
+              {toolUsePanel === 'root' ? (
                 <>
                   <button
                     type="button"
@@ -2667,12 +2662,12 @@ export function Composer({
               ) : null}
               {featureMenuAvailable ? (
                 <>
-                  {toolModePanel === 'root' ? <div className="my-1 h-px bg-[var(--color-divider)]" aria-hidden /> : null}
+                  {toolUsePanel === 'root' ? <div className="my-1 h-px bg-[var(--color-divider)]" aria-hidden /> : null}
                   {featureList()}
                 </>
               ) : null}
 
-              {toolModePanel === 'root' && onKBChange && !isImageMode ? (
+              {toolUsePanel === 'root' && onKBChange && !isImageMode ? (
                 <>
                   <div className="my-1 h-px bg-[var(--color-divider)]" aria-hidden />
                   <p className="px-2.5 pb-1 pt-0.5 text-[11px] font-medium uppercase tracking-wider text-[var(--color-fg-subtle)]">
@@ -2682,7 +2677,7 @@ export function Composer({
                 </>
               ) : null}
 
-              {toolModePanel === 'root' && visibleParamControls ? (
+              {toolUsePanel === 'root' && visibleParamControls ? (
                 <>
                   <div className="my-1 h-px bg-[var(--color-divider)]" aria-hidden />
                   <div className="px-1.5 py-1">
@@ -2800,7 +2795,13 @@ export function Composer({
 
             {/* §7.2-7 📚 知识库选择器 — 绑定 kb_ids 到当前会话 */}
             {onKBChange && !isImageMode ? (
-              <Popover>
+              <Popover
+                open={kbPopoverOpen}
+                onOpenChange={(open) => {
+                  setKBPopoverOpen(open)
+                  if (open) void loadKBList()
+                }}
+              >
                 <Tooltip content={t('composer.knowledgeBases')}>
                   <PopoverTrigger asChild>
                     <button
@@ -2808,18 +2809,20 @@ export function Composer({
                       aria-label={t('composer.knowledgeBases')}
                       className={cn(
                         'inline-flex items-center gap-1.5 h-8 px-2 rounded-[8px] text-[12px] font-medium interactive',
-                        (kbIds?.length ?? 0) > 0
+                        selectedKnowledgeBaseIds.length > 0
                           ? 'bg-[var(--color-tool-selection-soft)] text-[var(--color-tool-selection-text)]'
                           : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)]',
                         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
                       )}
                     >
                       <BookOpen size={14} aria-hidden />
-                      {(kbIds?.length ?? 0) > 0 ? <span className="text-[11px]">{kbIds?.length}</span> : null}
+                      {selectedKnowledgeBaseIds.length > 0 ? (
+                        <span className="text-[11px]">{selectedKnowledgeBaseIds.length}</span>
+                      ) : null}
                     </button>
                   </PopoverTrigger>
                 </Tooltip>
-                <PopoverContent align="start" className="w-64 p-2" onOpenAutoFocus={() => void loadKBList()}>
+                <PopoverContent align="start" className="w-72 p-2">
                   <p className="px-2 pb-1 pt-0.5 text-[11px] font-medium uppercase tracking-wider text-[var(--color-fg-subtle)]">
                     {t('composer.knowledgeBases')}
                   </p>

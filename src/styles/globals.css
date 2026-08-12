@@ -994,7 +994,7 @@
 }
 
 /* Inline citation markers (§ citations). A small sage superscript [n] placed
-   right after the cited text; web sources link out, KB docs show a tooltip. */
+   right after the cited text; web sources link out, KB docs open a preview. */
 .prose-aivory .cite-marker {
   font-size: 0.68em;
   line-height: 0;
@@ -1012,7 +1012,8 @@
 }
 
 .prose-aivory .cite-marker a,
-.prose-aivory .cite-marker.cite-doc {
+.prose-aivory .cite-marker.cite-doc,
+.prose-aivory .cite-marker button {
   color: var(--color-secondary);
   text-decoration: none;
   cursor: pointer;
@@ -1022,9 +1023,25 @@
   cursor: help;
 }
 
-.prose-aivory .cite-marker a:hover {
+.prose-aivory .cite-marker button {
+  border: 0;
+  border-radius: 3px;
+  background: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+}
+
+.prose-aivory .cite-marker a:hover,
+.prose-aivory .cite-marker button:hover {
   color: var(--color-accent);
   text-decoration: underline;
+}
+
+.prose-aivory .cite-marker button:focus-visible {
+  outline: 2px solid var(--color-ring);
+  outline-offset: 2px;
 }
 
 /* Text-selection sub-conversation markers (§ inline threads). A sage tint +

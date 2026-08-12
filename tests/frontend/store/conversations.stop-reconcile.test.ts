@@ -5,6 +5,7 @@ import type { Conversation, Message } from '@/types/chat'
 const apiMocks = vi.hoisted(() => ({
   create: vi.fn(),
   get: vi.fn(),
+  update: vi.fn(),
   stop: vi.fn(),
   streamSSE: vi.fn(),
   streamSSEGet: vi.fn(),
@@ -27,6 +28,7 @@ vi.mock('@/api', () => {
     conversationsApi: {
       create: apiMocks.create,
       get: apiMocks.get,
+      update: apiMocks.update,
       stop: apiMocks.stop,
     },
     streamSSE: apiMocks.streamSSE,
@@ -773,6 +775,49 @@ describe('stopped turn optimistic-id reconciliation', () => {
     expect(apiMocks.get).not.toHaveBeenCalled()
   })
 
+  it('applies RAG lifecycle events while regenerating and preserves source counts', async () => {
+    const sourceUser: Message = {
+      id: 'msg_rag_regen_user',
+      role: 'user',
+      content: 'question',
+      createdAt: 1,
+    }
+    const sourceAssistant: Message = {
+      id: 'msg_rag_regen_source',
+      parentId: sourceUser.id,
+      role: 'assistant',
+      content: 'old answer',
+      createdAt: 2,
+    }
+    resetStore([sourceUser, sourceAssistant])
+    apiMocks.streamSSE.mockReturnValue(
+      events(
+        { type: 'message_start', message_id: 'msg_rag_regenerated' },
+        {
+          type: 'rag',
+          status: 'found',
+          summary: 'Found 3 sources',
+          source_count: 3,
+        },
+        { type: 'error', message: 'test stream end' },
+      ),
+    )
+
+    await useConversations
+      .getState()
+      .regenerate('conv_stop', sourceAssistant.id, 'model_1')
+
+    expect(useConversations.getState().conversations[0].messages.at(-1)).toMatchObject({
+      id: 'msg_rag_regenerated',
+      ragInjection: {
+        strategy: 'found',
+        summary: 'Found 3 sources',
+        sourceCount: 3,
+      },
+    })
+    expect(apiMocks.get).not.toHaveBeenCalled()
+  })
+
   it('keeps the interruption marker when a resumed stream replays an error', async () => {
     resetStore([
       {
@@ -1157,5 +1202,186 @@ describe('stopped turn optimistic-id reconciliation', () => {
       .regenerate('conv_stop', sourceAssistant.id, 'model_1')
 
     expect(requestBody?.selected_tool_ids).toEqual([])
+  })
+})
+describe('knowledge-base selection ordering', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    resetStore()
+    apiMocks.stop.mockResolvedValue({ ok: true })
+    apiMocks.get.mockResolvedValue({
+      conversation: apiConversation(''),
+      messages: [],
+      has_more: false,
+      next_before: undefined,
+    })
+    apiMocks.streamSSE.mockReturnValue(events({ type: 'done' }))
+  })
+
+  it('serializes rapid selection PATCHes while sending the latest click as the turn snapshot', async () => {
+    let resolveFirst: ((value: ApiConversation) => void) | undefined
+    apiMocks.update
+      .mockReturnValueOnce(
+        new Promise<ApiConversation>((resolve) => {
+          resolveFirst = resolve
+        }),
+      )
+      .mockResolvedValueOnce({
+        ...apiConversation(''),
+        kb_ids: ['kb_a', 'kb_b'],
+      })
+
+    const first = useConversations.getState().setKBs('conv_stop', ['kb_a'])
+    const second = useConversations.getState().setKBs('conv_stop', ['kb_a', 'kb_b'])
+
+    await vi.waitFor(() => expect(apiMocks.update).toHaveBeenCalledTimes(1))
+    expect(apiMocks.update).toHaveBeenNthCalledWith(1, 'conv_stop', {
+      kb_ids: ['kb_a'],
+    })
+
+    await useConversations.getState().sendMessage({
+      conversationId: 'conv_stop',
+      text: 'use the selected sources',
+      modelId: 'model_1',
+      toolMode: 'auto',
+    })
+
+    expect(apiMocks.streamSSE).toHaveBeenCalledWith(
+      '/conversations/conv_stop/messages',
+      expect.objectContaining({ kb_ids: ['kb_a', 'kb_b'] }),
+      expect.any(AbortSignal),
+    )
+
+    resolveFirst?.({ ...apiConversation(''), kb_ids: ['kb_a'] })
+    await first
+    await second
+
+    expect(apiMocks.update).toHaveBeenCalledTimes(2)
+    expect(apiMocks.update).toHaveBeenNthCalledWith(2, 'conv_stop', {
+      kb_ids: ['kb_a', 'kb_b'],
+    })
+    expect(useConversations.getState().conversations[0].kbIds).toEqual(['kb_a', 'kb_b'])
+  })
+
+  it('sends an explicit empty snapshot when a selected KB is removed before its PATCH settles', async () => {
+    resetStore()
+    useConversations.setState((state) => ({
+      conversations: state.conversations.map((conversation) => ({
+        ...conversation,
+        kbIds: ['kb_old'],
+      })),
+    }))
+
+    let resolveUpdate: ((value: ApiConversation) => void) | undefined
+    apiMocks.update.mockReturnValue(
+      new Promise<ApiConversation>((resolve) => {
+        resolveUpdate = resolve
+      }),
+    )
+    const saving = useConversations.getState().setKBs('conv_stop', [])
+    await vi.waitFor(() => expect(apiMocks.update).toHaveBeenCalledTimes(1))
+
+    await useConversations.getState().sendMessage({
+      conversationId: 'conv_stop',
+      text: 'continue without the library',
+      modelId: 'model_1',
+      toolMode: 'auto',
+    })
+
+    expect(apiMocks.streamSSE).toHaveBeenCalledWith(
+      '/conversations/conv_stop/messages',
+      expect.objectContaining({ kb_ids: [] }),
+      expect.any(AbortSignal),
+    )
+
+    resolveUpdate?.({ ...apiConversation(''), kb_ids: [] })
+    await saving
+    expect(useConversations.getState().conversations[0].kbIds).toEqual([])
+  })
+
+  it('rolls back only KB state when saving fails, preserving newer conversation changes', async () => {
+    resetStore()
+    useConversations.setState((state) => ({
+      conversations: state.conversations.map((conversation) => ({
+        ...conversation,
+        kbIds: ['kb_committed'],
+      })),
+    }))
+
+    let rejectUpdate: ((reason: Error) => void) | undefined
+    apiMocks.update.mockReturnValue(
+      new Promise<ApiConversation>((_resolve, reject) => {
+        rejectUpdate = reject
+      }),
+    )
+    const saving = useConversations.getState().setKBs('conv_stop', ['kb_new'])
+    await vi.waitFor(() => expect(apiMocks.update).toHaveBeenCalledTimes(1))
+    useConversations.setState((state) => ({
+      conversations: state.conversations.map((conversation) =>
+        conversation.id === 'conv_stop' ? { ...conversation, title: 'Changed while saving' } : conversation,
+      ),
+    }))
+
+    rejectUpdate?.(new Error('network unavailable'))
+    await saving
+
+    expect(useConversations.getState().conversations[0]).toMatchObject({
+      title: 'Changed while saving',
+      kbIds: ['kb_committed'],
+    })
+    expect(apiMocks.toastError).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not let a stale conversation reload overwrite a pending selection', async () => {
+    let resolveUpdate: ((value: ApiConversation) => void) | undefined
+    apiMocks.update.mockReturnValue(
+      new Promise<ApiConversation>((resolve) => {
+        resolveUpdate = resolve
+      }),
+    )
+    apiMocks.get.mockResolvedValue({
+      conversation: { ...apiConversation(''), kb_ids: [] },
+      messages: [],
+      has_more: false,
+      next_before: undefined,
+    })
+
+    const saving = useConversations.getState().setKBs('conv_stop', ['kb_pending'])
+    await vi.waitFor(() => expect(apiMocks.update).toHaveBeenCalledTimes(1))
+    await useConversations.getState().loadOne('conv_stop')
+
+    expect(useConversations.getState().conversations[0].kbIds).toEqual(['kb_pending'])
+
+    resolveUpdate?.({ ...apiConversation(''), kb_ids: ['kb_pending'] })
+    await saving
+  })
+
+  it('does not let a reload issued before the selection overwrite it after PATCH settles', async () => {
+    let resolveGet: ((value: ReturnType<typeof pathResponse>) => void) | undefined
+    apiMocks.get.mockReturnValue(
+      new Promise<ReturnType<typeof pathResponse>>((resolve) => {
+        resolveGet = resolve
+      }),
+    )
+    apiMocks.update.mockReset().mockResolvedValue({
+      ...apiConversation(''),
+      kb_ids: ['kb_confirmed'],
+    })
+
+    const loading = useConversations.getState().loadOne('conv_stop')
+    await vi.waitFor(() => expect(apiMocks.get).toHaveBeenCalledTimes(1))
+
+    await useConversations.getState().setKBs('conv_stop', ['kb_confirmed'])
+    expect(useConversations.getState().conversations[0].kbIds).toEqual(['kb_confirmed'])
+
+    resolveGet?.({
+      conversation: { ...apiConversation(''), kb_ids: [] },
+      messages: [],
+      has_more: false,
+      next_before: undefined,
+    })
+    await loading
+
+    expect(useConversations.getState().conversations[0].kbIds).toEqual(['kb_confirmed'])
   })
 })
