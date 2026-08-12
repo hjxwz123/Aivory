@@ -376,6 +376,7 @@ CREATE TABLE IF NOT EXISTS models (
   price_per_image   DOUBLE PRECISION NOT NULL DEFAULT 0,
   currency          TEXT NOT NULL DEFAULT 'USD',
   dim               INTEGER NOT NULL DEFAULT 0,
+  compaction_token_threshold INTEGER NOT NULL DEFAULT 0,
   image_timeout_sec INTEGER NOT NULL DEFAULT 0,
   updated_at        BIGINT NOT NULL DEFAULT (extract(epoch from now())::bigint)
 );
@@ -546,6 +547,7 @@ CREATE TABLE IF NOT EXISTS messages (
   selected_user_skill_ids TEXT NOT NULL DEFAULT '[]', -- private skill ids applied to this user turn
   citations          TEXT NOT NULL DEFAULT '[]',
   input_tokens       BIGINT NOT NULL DEFAULT 0,
+  context_tokens     BIGINT NOT NULL DEFAULT 0,
   output_tokens      BIGINT NOT NULL DEFAULT 0,
   cache_read_tokens  BIGINT NOT NULL DEFAULT 0,
   cache_write_tokens BIGINT NOT NULL DEFAULT 0,

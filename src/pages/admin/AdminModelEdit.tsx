@@ -718,6 +718,23 @@ export default function AdminModelEdit() {
                   </Select>
                 </Field>
                 <Field
+                  label={t('admin:models.fields.compactionTokenThreshold')}
+                  htmlFor="m-compaction-token-threshold"
+                  hint={t('admin:models.fields.compactionTokenThresholdHint')}
+                >
+                  <Input
+                    id="m-compaction-token-threshold"
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={String(draft.compaction_token_threshold ?? 0)}
+                    onChange={(event) => {
+                      const value = Number(event.target.value)
+                      patch({ compaction_token_threshold: Number.isFinite(value) && value > 0 ? Math.floor(value) : 0 })
+                    }}
+                  />
+                </Field>
+                <Field
                   label={t('admin:models.fields.builtinToolsLabel', { defaultValue: 'Built-in tools' })}
                   hint={t('admin:models.fields.builtinToolsHint', {
                     defaultValue:

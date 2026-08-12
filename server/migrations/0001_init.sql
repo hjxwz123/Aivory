@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS models (
   price_per_image   REAL NOT NULL DEFAULT 0,
   currency          TEXT NOT NULL DEFAULT 'USD',
   dim               INTEGER NOT NULL DEFAULT 0,
+  compaction_token_threshold INTEGER NOT NULL DEFAULT 0,
   updated_at        INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 );
 
@@ -147,6 +148,7 @@ CREATE TABLE IF NOT EXISTS messages (
   attachments        TEXT NOT NULL DEFAULT '[]',
   citations          TEXT NOT NULL DEFAULT '[]',
   input_tokens       INTEGER NOT NULL DEFAULT 0,
+  context_tokens     INTEGER NOT NULL DEFAULT 0,
   output_tokens      INTEGER NOT NULL DEFAULT 0,
   cache_read_tokens  INTEGER NOT NULL DEFAULT 0,
   cache_write_tokens INTEGER NOT NULL DEFAULT 0,

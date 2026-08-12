@@ -171,6 +171,12 @@ func Migrate(db *sql.DB) error {
 	addMsgSearchText := `ALTER TABLE messages ADD COLUMN search_text TEXT NOT NULL DEFAULT ''`
 	// §4.20 per-model image generation timeout (seconds; 0 = default).
 	addImageTimeout := `ALTER TABLE models ADD COLUMN image_timeout_sec INTEGER NOT NULL DEFAULT 0`
+	// Optional model-specific automatic-compaction trigger. 0 uses the global
+	// threshold; the global cap is applied when a positive override is used.
+	addModelCompactionTokenThreshold := `ALTER TABLE models ADD COLUMN compaction_token_threshold INTEGER NOT NULL DEFAULT 0`
+	// Actual prompt footprint of the final successful upstream request. 0 means
+	// the provider did not return usage for the turn.
+	addMsgContextTokens := `ALTER TABLE messages ADD COLUMN context_tokens INTEGER NOT NULL DEFAULT 0`
 	// §verify: per-message auditor (Verify mode) result JSON ('' = never audited).
 	addMsgVerify := `ALTER TABLE messages ADD COLUMN verify TEXT NOT NULL DEFAULT ''`
 	// Workspaces (§workspaces): '' = personal. Conversations/projects/KBs inside
@@ -295,6 +301,8 @@ func Migrate(db *sql.DB) error {
 		addMsgModelLabel = `ALTER TABLE messages ADD COLUMN IF NOT EXISTS model_label TEXT NOT NULL DEFAULT ''`
 		addMsgSearchText = `ALTER TABLE messages ADD COLUMN IF NOT EXISTS search_text TEXT NOT NULL DEFAULT ''`
 		addImageTimeout = `ALTER TABLE models ADD COLUMN IF NOT EXISTS image_timeout_sec INTEGER NOT NULL DEFAULT 0`
+		addModelCompactionTokenThreshold = `ALTER TABLE models ADD COLUMN IF NOT EXISTS compaction_token_threshold INTEGER NOT NULL DEFAULT 0`
+		addMsgContextTokens = `ALTER TABLE messages ADD COLUMN IF NOT EXISTS context_tokens BIGINT NOT NULL DEFAULT 0`
 		addMsgVerify = `ALTER TABLE messages ADD COLUMN IF NOT EXISTS verify TEXT NOT NULL DEFAULT ''`
 		addConvWorkspace = `ALTER TABLE conversations ADD COLUMN IF NOT EXISTS workspace_id TEXT NOT NULL DEFAULT ''`
 		addConvIsPublic = `ALTER TABLE conversations ADD COLUMN IF NOT EXISTS is_public INTEGER NOT NULL DEFAULT 1`
@@ -370,6 +378,7 @@ func Migrate(db *sql.DB) error {
 		addUserPermCredits, addUserPermCreditsMicros, addUserCreditCycleAnchor, addUserQuotaCycleAnchor, addCreditLedgerAmountMicros, addUserSortOrder, addUsageCredits, addMsgCredits,
 		addMsgModelLabel, addMsgSearchText,
 		addImageTimeout,
+		addModelCompactionTokenThreshold, addMsgContextTokens,
 		addMsgVerify,
 		addConvWorkspace, addConvIsPublic, addProjWorkspace, addKBWorkspace, addMsgAuthor, addUsageWorkspace, addGroupMaxWorkspaces, addGroupMaxStorage, addGroupIsPublic, addGroupIsPurchasable,
 		addModelFallbackChannel, addUsageChannel, addUsageFallback, addUsageStatus, addUsageError,
@@ -451,7 +460,7 @@ func Migrate(db *sql.DB) error {
 	// fatal) instead of surfacing as broken reads later. WHERE 1=0 makes each probe
 	// O(1). If you add an ALTER above, add its column here.
 	columnChecks := map[string][]string{
-		"messages":            {"credits", "model_label", "search_text", "gen_ms", "feedback", "verify", "author_id", "fast", "selected_user_skill_ids"},
+		"messages":            {"credits", "model_label", "search_text", "gen_ms", "feedback", "verify", "author_id", "fast", "selected_user_skill_ids", "context_tokens"},
 		"message_feedback":    {"id", "message_id", "conversation_id", "user_id", "workspace_id", "model_id", "channel_id", "rating", "reasons", "comment", "created_at", "updated_at"},
 		"user_feedback":       {"id", "user_id", "message_id", "conversation_id", "conversation_title", "description", "page_path", "user_agent", "viewport_width", "viewport_height", "screenshot", "screenshot_mime", "screenshot_width", "screenshot_height", "created_at"},
 		"skills":              {"display_description"},
@@ -466,7 +475,7 @@ func Migrate(db *sql.DB) error {
 		"credit_reservations": {"user_id", "amount_micros", "actual_micros", "source_type", "source_id", "status", "expires_at"},
 		"quota_ledger":        {"user_id", "scope_type", "model_id", "group_id", "cycle_anchor", "window_start", "limit_type", "reserved_micros", "actual_micros", "status", "expires_at"},
 		"billing_usage":       {"user_id", "message_id", "model_id", "purpose", "cost_micros", "images_count", "input_tokens", "output_tokens", "currency"},
-		"models":              {"official_tools", "builtin_tools", "moderation_enabled", "moderation_mode", "tags", "extra_params", "image_timeout_sec", "research_enabled", "fallback_channel_id", "fast"},
+		"models":              {"official_tools", "builtin_tools", "moderation_enabled", "moderation_mode", "tags", "extra_params", "image_timeout_sec", "research_enabled", "fallback_channel_id", "fast", "compaction_token_threshold"},
 		"mcp_servers":         {"id", "name", "icon", "description", "url", "headers", "enabled", "discovered_tools", "protocol_version", "last_error", "last_synced_at", "created_at", "updated_at"},
 		"refresh_tokens":      {"session_id", "user_agent", "ip", "location", "last_seen"},
 		"conversations":       {"inline_source_conv", "inline_parent_id", "inline_quote", "workspace_id", "is_public", "fast"},
@@ -885,11 +894,12 @@ func Seed(db *sql.DB, cfg config.Config) error {
 
 	// Default global settings.
 	for k, v := range map[string]string{
-		"default_model_id":      `""`,
-		"task_model_id":         `""`,
-		"tool_route_model_id":   `""`,
-		"image_prompt_model_id": `""`,
-		"verify_model_id":       `""`,
+		"default_model_id":            `""`,
+		"task_model_id":               `""`,
+		"context_compaction_model_id": `""`,
+		"tool_route_model_id":         `""`,
+		"image_prompt_model_id":       `""`,
+		"verify_model_id":             `""`,
 		// §4.11-B RAG injection knobs (admin → Documents). A conversation doc at/below
 		// rag_full_text_threshold (est. tokens) is injected in full; above it, it's
 		// vectorised and only chunks are retrieved (rag_top_k of them, or — when
@@ -900,19 +910,24 @@ func Seed(db *sql.DB, cfg config.Config) error {
 		"rag_similarity_threshold": `0.5`,
 		// §credits pre-flight: on a credit-charged turn, estimate the assembled
 		// prompt's tokens before generating and refuse if the user can't afford it.
-		"credit_preflight_enabled":    `true`,
-		"keep_recent_rounds":          `6`,
-		"summary_max_tokens":          `8192`,
-		"compaction_token_trigger":    `32000`,
-		"compaction_enabled":          `true`,
-		"memory_enabled":              `true`,
-		"daily_message_limit":         fmt.Sprintf("%d", cfg.DailyMessages),
-		"daily_image_limit":           fmt.Sprintf("%d", cfg.DailyImages),
-		"daily_token_limit":           `0`,
-		"max_concurrent_generations":  `3`,
-		"signup_open":                 `true`,
-		"email_verification_required": `false`,
-		"email_domain_whitelist":      `""`,
+		"credit_preflight_enabled":        `true`,
+		"keep_recent_rounds":              `6`,
+		"summary_max_tokens":              `8192`,
+		"summary_target_percent":          `30`,
+		"summary_merge_max_tokens":        `8192`,
+		"context_compaction_prompt":       `""`,
+		"compaction_token_trigger":        `32000`,
+		"compaction_token_cap":            `80000`,
+		"compaction_retention_percentage": `40`,
+		"compaction_enabled":              `true`,
+		"memory_enabled":                  `true`,
+		"daily_message_limit":             fmt.Sprintf("%d", cfg.DailyMessages),
+		"daily_image_limit":               fmt.Sprintf("%d", cfg.DailyImages),
+		"daily_token_limit":               `0`,
+		"max_concurrent_generations":      `3`,
+		"signup_open":                     `true`,
+		"email_verification_required":     `false`,
+		"email_domain_whitelist":          `""`,
 		// Anti-abuse registration controls. register_ip_daily_limit caps how many
 		// accounts one client IP may create per calendar day (0 = unlimited).
 		// register_captcha_required gates signup behind the arithmetic captcha

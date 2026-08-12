@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -148,6 +149,8 @@ func TestMaybeCompactTokenTriggerDeepens(t *testing.T) {
 // below a prior summary's anchor (e.g. keep_recent_rounds was raised). The
 // already-summarised range must NOT be rolled up again into a duplicate block.
 func TestMaybeCompactCutShrinkNoDuplicate(t *testing.T) {
+	store.InvalidateConfig()
+	t.Cleanup(store.InvalidateConfig)
 	db, err := sql.Open("sqlite3", ":memory:")
 	if err != nil {
 		t.Fatal(err)
@@ -443,8 +446,246 @@ func TestCJKFallbacksClipByTokens(t *testing.T) {
 	if len(merged) != 1 {
 		t.Fatalf("merge fallback produced %d blocks, want 1", len(merged))
 	}
-	if estimateTokens(merged[0].Text) > 128 {
-		t.Fatalf("merge fallback CJK estimate = %d, want <= 128", estimateTokens(merged[0].Text))
+	if estimateTokens(merged[0].Text) > 256 {
+		t.Fatalf("merge fallback CJK estimate = %d, want <= 256", estimateTokens(merged[0].Text))
+	}
+}
+
+func TestMergeOldestBlocksRetriesMateriallyShortSummary(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "short-merge-retry.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := store.Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	provider := &compactionTestProvider{texts: []string{
+		"Too brief.",
+		strings.Repeat("Retained earlier requirement and outcome. ", 140),
+	}}
+	task := newCompactionTask(t, db, provider)
+	longA := strings.Repeat("alpha requirement decision path result ", 700)
+	longB := strings.Repeat("beta requirement decision path result ", 700)
+	blocks := []SummaryBlock{
+		{Level: 1, FromMessageID: "m0", AnchorMessageID: "m1", Text: longA, Tokens: estimateTokens(longA)},
+		{Level: 2, FromMessageID: "m2", AnchorMessageID: "m3", Text: longB, Tokens: estimateTokens(longB)},
+	}
+	merged, err := mergeOldestBlocks(context.Background(), task, &store.Conversation{ID: "c1"}, "", blocks, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(provider.reqs) != 2 {
+		t.Fatalf("merge requests = %d, want 2", len(provider.reqs))
+	}
+	if len(merged) != 1 || merged[0].Text != strings.TrimSpace(provider.texts[1]) {
+		t.Fatalf("merged blocks = %+v, want revised summary", merged)
+	}
+	if !strings.Contains(provider.reqs[1].History[0].Blocks[0].Text, "EARLIER SUMMARIES") {
+		t.Fatalf("retry prompt omitted source summaries: %s", provider.reqs[1].History[0].Blocks[0].Text)
+	}
+}
+
+func TestCompactionSummaryTargetScalesWithSourceAndHonorsCap(t *testing.T) {
+	short := buildHistory(2)
+	if got := compactionSummaryTarget(short, 8192, 30); got != summaryTargetMinTokens {
+		t.Fatalf("short source target = %d, want floor %d", got, summaryTargetMinTokens)
+	}
+
+	fatBlocks, _ := json.Marshal([]UnifiedBlock{{Kind: "text", Text: strings.Repeat("detail ", 6000)}})
+	fat := []store.Message{
+		{ID: "u1", Role: "user", Blocks: fatBlocks},
+		{ID: "a1", Role: "assistant", Blocks: fatBlocks},
+	}
+	got := compactionSummaryTarget(fat, 8192, 30)
+	if got <= summaryTargetMinTokens {
+		t.Fatalf("large source target = %d, want above floor %d", got, summaryTargetMinTokens)
+	}
+	if capped := compactionSummaryTarget(fat, 700, 30); capped != 700 {
+		t.Fatalf("large source target under admin cap = %d, want 700", capped)
+	}
+	if outputCap := compactionSummaryOutputCap(got, 8192); outputCap < got || outputCap > 8192 {
+		t.Fatalf("output cap = %d, want target<=cap<=8192 (target=%d)", outputCap, got)
+	}
+}
+
+func TestAppendCompactionSourceIncludesToolInputsOutputsAndReferences(t *testing.T) {
+	blocks, _ := json.Marshal([]UnifiedBlock{
+		{Kind: "text", Text: "visible answer"},
+		{Kind: "tool_call", ToolName: "lookup", Input: json.RawMessage(`{"query":"invoice 42"}`), Summary: "searched"},
+		{Kind: "tool_output", ToolID: "call-1", Text: "total=123.45", Summary: "found invoice"},
+		{Kind: "citation", Title: "Invoice", URL: "https://example.test/42", Text: "reference text"},
+		{Kind: "artifact", Title: "report.csv", FileRef: "artifact-7", Summary: "generated report"},
+	})
+	var prompt strings.Builder
+	appendCompactionSource(&prompt, []store.Message{{Role: "assistant", Blocks: blocks}})
+	got := prompt.String()
+	for _, want := range []string{
+		"[assistant]", "visible answer", `name="lookup"`, `invoice 42`,
+		"[tool_output] total=123.45", "found invoice", "https://example.test/42",
+		"report.csv", "artifact-7", "generated report",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("compaction source omitted %q:\n%s", want, got)
+		}
+	}
+}
+
+type compactionTestProvider struct {
+	text  string
+	texts []string
+	req   UnifiedChatRequest
+	reqs  []UnifiedChatRequest
+}
+
+func (p *compactionTestProvider) ID() string { return "openai" }
+
+func (p *compactionTestProvider) Stream(_ context.Context, req UnifiedChatRequest, _ ToolRunner, onEvent func(SseEvent)) (*UnifiedResult, error) {
+	p.req = req
+	p.reqs = append(p.reqs, req)
+	responseText := p.text
+	if len(p.texts) > 0 {
+		responseText = p.texts[min(len(p.reqs)-1, len(p.texts)-1)]
+	}
+	if responseText != "" {
+		onEvent(SseEvent{Type: "text_delta", Text: responseText})
+	}
+	return &UnifiedResult{
+		Blocks:     []UnifiedBlock{{Kind: "text", Text: responseText}},
+		StopReason: "end_turn",
+		Usage:      Usage{InputTokens: 100, OutputTokens: estimateTokens(responseText)},
+	}, nil
+}
+
+func newCompactionTask(t *testing.T, db *sql.DB, provider *compactionTestProvider) *TaskLLM {
+	t.Helper()
+	channel, err := store.CreateChannel(context.Background(), db, "Compaction", provider.ID(), "chat", "https://example.invalid", "key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	model, err := store.CreateModel(context.Background(), db, store.Model{
+		ChannelID: channel.ID, Kind: "chat", RequestID: "compaction-model", Label: "Compaction", Enabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetSetting(db, "task_model_id", model.ID); err != nil {
+		t.Fatal(err)
+	}
+	reg := NewRegistry(nil)
+	reg.Register(provider)
+	return NewTaskLLM(db, reg, nil)
+}
+
+func TestMaybeCompactUsesAdaptiveTargetInPromptAndOutputCap(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "adaptive-summary.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := store.Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetSetting(db, "keep_recent_rounds", 6); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetSetting(db, "summary_max_tokens", 8192); err != nil {
+		t.Fatal(err)
+	}
+
+	provider := &compactionTestProvider{text: "Detailed durable summary"}
+	task := newCompactionTask(t, db, provider)
+	if _, err := db.Exec(`INSERT INTO users(id,email,password_hash,role) VALUES('u1','u1@example.test','hash','admin')`); err != nil {
+		t.Fatal(err)
+	}
+	conv, err := store.CreateConversation(context.Background(), db, store.Conversation{UserID: "u1", Title: "Adaptive"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hist := buildHistory(16)
+	for _, m := range hist {
+		m.ConversationID = conv.ID
+		if _, err := db.Exec(`INSERT INTO messages(id,conversation_id,parent_id,role,blocks,attachments,citations,status,created_at) VALUES(?,?,NULL,?,?, '[]','[]','complete',1)`, m.ID, conv.ID, m.Role, string(m.Blocks)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	target := compactionSummaryTarget(hist[:4], 8192, 30)
+	_, blocks, err := MaybeCompact(context.Background(), db, task, conv, hist, 0, "u1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(blocks) != 1 || blocks[0].Text != provider.text {
+		t.Fatalf("summary blocks = %+v", blocks)
+	}
+	if provider.req.MaxOutputTokens != compactionSummaryOutputCap(target, 8192) {
+		t.Fatalf("max output tokens = %d, want %d", provider.req.MaxOutputTokens, compactionSummaryOutputCap(target, 8192))
+	}
+	if !strings.Contains(provider.req.History[0].Blocks[0].Text, fmt.Sprintf("Aim for about %d tokens", target)) {
+		t.Fatalf("adaptive target missing from prompt: %s", provider.req.History[0].Blocks[0].Text)
+	}
+}
+
+func TestMaybeCompactRetriesMateriallyShortSummaryOnce(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "short-summary-retry.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := store.Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetSetting(db, "keep_recent_rounds", 6); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetSetting(db, "summary_max_tokens", 8192); err != nil {
+		t.Fatal(err)
+	}
+
+	firstDraft := "Too brief."
+	revisedDraft := strings.Repeat("Preserved concrete fact and decision. ", 240)
+	provider := &compactionTestProvider{texts: []string{firstDraft, revisedDraft}}
+	task := newCompactionTask(t, db, provider)
+	if _, err := db.Exec(`INSERT INTO users(id,email,password_hash,role) VALUES('u1','u1@example.test','hash','admin')`); err != nil {
+		t.Fatal(err)
+	}
+	conv, err := store.CreateConversation(context.Background(), db, store.Conversation{UserID: "u1", Title: "Short retry"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hist := buildHistory(16)
+	longSource, _ := json.Marshal([]UnifiedBlock{{Kind: "text", Text: strings.Repeat("requirement decision path value ", 1800)}})
+	for i := range hist {
+		hist[i].ConversationID = conv.ID
+		if i < 4 {
+			hist[i].Blocks = longSource
+		}
+		if _, err := db.Exec(`INSERT INTO messages(id,conversation_id,parent_id,role,blocks,attachments,citations,status,created_at) VALUES(?,?,NULL,?,?, '[]','[]','complete',1)`, hist[i].ID, conv.ID, hist[i].Role, string(hist[i].Blocks)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	target := compactionSummaryTarget(hist[:4], 8192, 30)
+	_, blocks, err := MaybeCompact(context.Background(), db, task, conv, hist, 0, "u1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(provider.reqs) != 2 {
+		t.Fatalf("compaction requests = %d, want 2", len(provider.reqs))
+	}
+	if len(blocks) != 1 || blocks[0].Text != strings.TrimSpace(revisedDraft) {
+		t.Fatalf("summary blocks = %+v, want revised draft", blocks)
+	}
+	for i, req := range provider.reqs {
+		wantCap := compactionSummaryOutputCap(target, 8192)
+		if req.MaxOutputTokens != wantCap {
+			t.Fatalf("request %d max output tokens = %d, want %d", i+1, req.MaxOutputTokens, wantCap)
+		}
+	}
+	retryPrompt := provider.reqs[1].History[0].Blocks[0].Text
+	for _, want := range []string{"incomplete draft", firstDraft, "ORIGINAL CONVERSATION SOURCE", fmt.Sprintf("about %d tokens", target)} {
+		if !strings.Contains(retryPrompt, want) {
+			t.Fatalf("retry prompt omitted %q: %s", want, retryPrompt)
+		}
 	}
 }
 
@@ -607,6 +848,18 @@ func TestPlanCompactionHotPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
+	if _, err := db.Exec(`CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT, updated_at INTEGER)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetSetting(db, "compaction_enabled", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetSetting(db, "keep_recent_rounds", 6); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetSetting(db, "compaction_token_trigger", 32000); err != nil {
+		t.Fatal(err)
+	}
 	conv := &store.Conversation{ID: "c1", UserID: "u1", SummaryBlocks: json.RawMessage("[]")}
 
 	// Short conversation (< keepMsgs=12) → nothing to summarise.
@@ -734,24 +987,25 @@ func TestContextTokensCountsInjectedOverhead(t *testing.T) {
 	hist := []store.Message{
 		{Role: "user", Blocks: json.RawMessage(`[{"kind":"text","text":"hi"}]`)},
 	}
-	base, exact := contextTokens(hist, nil, 0)
+	base, exact, _ := contextTokens(hist, nil, 0)
 	if exact {
 		t.Fatal("expected fallback (no prior input_tokens) to report exact=false")
 	}
-	if withFile, _ := contextTokens(hist, nil, 5000); withFile != base+5000 {
+	if withFile, _, _ := contextTokens(hist, nil, 5000); withFile != base+5000 {
 		t.Fatalf("injected overhead not counted on fallback: base=%d withFile=%d (want %d)", base, withFile, base+5000)
 	}
 
-	// Exact path: a prior assistant turn recorded only 1000 input tokens, but THIS
-	// turn injects 5000 of new file content → the larger estimate must win so the
-	// trigger doesn't lag a turn behind the upload.
+	// A prior assistant turn recorded only 1000 input tokens, but THIS turn injects
+	// 5000 estimated file tokens. The larger estimate must win so the trigger does
+	// not lag a turn behind the upload. It is no longer marked exact because only
+	// the newly assembled request estimate can safely drive the inline path.
 	hist2 := []store.Message{
 		{Role: "assistant", InputTokens: 1000},
 		{Role: "user", Blocks: json.RawMessage(`[{"kind":"text","text":"hi"}]`)},
 	}
-	got, exact2 := contextTokens(hist2, nil, 5000)
-	if !exact2 {
-		t.Fatal("expected exact=true when a prior assistant input_tokens exists")
+	got, exact2, _ := contextTokens(hist2, nil, 5000)
+	if exact2 {
+		t.Fatal("estimated current-turn overhead must not be reported as an exact full request")
 	}
 	if got < 5000 {
 		t.Fatalf("injected overhead ignored on exact path: got=%d, want ≥5000", got)
@@ -762,7 +1016,7 @@ func TestContextTokensCountsInjectedOverhead(t *testing.T) {
 		{Role: "assistant", InputTokens: 80000, CacheReadTokens: 0},
 		{Role: "user", Blocks: json.RawMessage(`[{"kind":"text","text":"hi"}]`)},
 	}
-	if got, _ := contextTokens(hist3, nil, 500); got != 80000 {
+	if got, _, _ := contextTokens(hist3, nil, 500); got != 80000 {
 		t.Fatalf("real last-turn count should dominate a small overhead: got=%d, want 80000", got)
 	}
 }
@@ -784,7 +1038,7 @@ func TestContextTokensFrontierAware(t *testing.T) {
 		{ID: "k2", Role: "user", Blocks: fat},
 	}
 	blocks := []SummaryBlock{{AnchorMessageID: "old9", FromMessageID: "old0", Text: "recap", Tokens: 60}}
-	got, exact := contextTokens(kept, blocks, 0)
+	got, exact, _ := contextTokens(kept, blocks, 0)
 	if !exact {
 		t.Fatal("expected exact=true with a recorded last-turn count")
 	}
@@ -793,6 +1047,261 @@ func TestContextTokensFrontierAware(t *testing.T) {
 	// exceeded it and been returned instead.
 	if got != 3000 {
 		t.Fatalf("frontier-aware estimate should let the real count dominate: got=%d, want 3000", got)
+	}
+}
+
+func TestEffectiveCompactionTokenTriggerUsesModelOverrideAndGlobalCap(t *testing.T) {
+	for _, tc := range []struct {
+		name                      string
+		globalTrigger, cap, model int
+		want                      int
+	}{
+		{name: "global default", globalTrigger: 32000, cap: 80000, want: 32000},
+		{name: "model override", globalTrigger: 32000, cap: 80000, model: 64000, want: 64000},
+		{name: "cap model override", globalTrigger: 32000, cap: 48000, model: 64000, want: 48000},
+		{name: "cap global default", globalTrigger: 96000, cap: 80000, want: 80000},
+		{name: "disabled global without model", globalTrigger: 0, cap: 80000, want: 0},
+		{name: "disabled globally", globalTrigger: 0, cap: 80000, model: 64000, want: 0},
+		{name: "no cap", globalTrigger: 32000, cap: 0, model: 96000, want: 96000},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := effectiveCompactionTokenTrigger(tc.globalTrigger, tc.cap, tc.model); got != tc.want {
+				t.Fatalf("effective trigger = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestResolveCompactionModelIDPriority(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "compaction-model-priority.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := store.Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	channel, err := store.CreateChannel(context.Background(), db, "Models", "openai", "chat", "https://example.invalid", "key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	createModel := func(label string) string {
+		t.Helper()
+		model, createErr := store.CreateModel(context.Background(), db, store.Model{
+			ChannelID: channel.ID, Kind: "chat", RequestID: label, Label: label, Enabled: true,
+		})
+		if createErr != nil {
+			t.Fatal(createErr)
+		}
+		return model.ID
+	}
+	defaultID := createModel("default")
+	conversationID := createModel("conversation")
+	taskID := createModel("task")
+	dedicatedID := createModel("dedicated")
+	if err := store.SetSetting(db, "default_model_id", defaultID); err != nil {
+		t.Fatal(err)
+	}
+
+	assertResolved := func(want string) {
+		t.Helper()
+		got, resolveErr := resolveCompactionModelID(context.Background(), db, conversationID)
+		if resolveErr != nil {
+			t.Fatal(resolveErr)
+		}
+		if got != want {
+			t.Fatalf("resolved compaction model = %q, want %q", got, want)
+		}
+	}
+	assertResolved(conversationID)
+	if err := store.SetSetting(db, "task_model_id", taskID); err != nil {
+		t.Fatal(err)
+	}
+	assertResolved(taskID)
+	if err := store.SetSetting(db, "context_compaction_model_id", dedicatedID); err != nil {
+		t.Fatal(err)
+	}
+	assertResolved(dedicatedID)
+}
+
+func TestCompactionKeepCountRetainsPercentageWithRoundFloor(t *testing.T) {
+	if got := compactionKeepCount(20, 6, 40); got != 12 {
+		t.Fatalf("20 messages: keep = %d, want round floor 12", got)
+	}
+	if got := compactionKeepCount(100, 6, 40); got != 40 {
+		t.Fatalf("100 messages: keep = %d, want 40%% = 40", got)
+	}
+	if got := compactionKeepCount(100, 30, 10); got != 60 {
+		t.Fatalf("large round floor: keep = %d, want 60", got)
+	}
+	if got := compactionKeepCount(3, 6, 40); got != 3 {
+		t.Fatalf("short conversation: keep = %d, want all 3", got)
+	}
+}
+
+func TestCompactConversationNowBypassesAutomaticThresholdAndKeepsLatestTurn(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	conv := &store.Conversation{ID: "c1", UserID: "u1", SummaryBlocks: json.RawMessage("[]")}
+	history := buildHistory(6)
+	keep, blocks, err := CompactConversationNow(context.Background(), db, nil, conv, history, "", "u1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(keep) != 2 || keep[0].ID != "m4" || keep[1].ID != "m5" {
+		t.Fatalf("manual compact kept %+v, want latest complete round m4..m5", keep)
+	}
+	if len(blocks) != 1 || blocks[0].FromMessageID != "m0" || blocks[0].AnchorMessageID != "m3" {
+		t.Fatalf("manual compact blocks = %+v, want m0..m3", blocks)
+	}
+}
+
+func TestCompactConversationNowReportsNothingForSingleTurn(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	conv := &store.Conversation{ID: "c1", UserID: "u1", SummaryBlocks: json.RawMessage("[]")}
+	keep, blocks, err := CompactConversationNow(context.Background(), db, nil, conv, buildHistory(2), "", "u1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(keep) != 2 || len(blocks) != 0 {
+		t.Fatalf("single-turn manual compact keep=%d blocks=%d, want 2/0", len(keep), len(blocks))
+	}
+}
+
+func TestRebasedCompactionRequestTokensUsesFreshRenderedHistory(t *testing.T) {
+	nonHistory := 900
+	plannedRenderedTokens := 240
+	plannedTokens := nonHistory + plannedRenderedTokens
+	// This value deliberately represents the fully transformed fresh Unified
+	// history, not raw store messages. It may be smaller after NoTools/Fast/Raw
+	// filtering or larger because new messages arrived while the job was queued.
+	freshRenderedTokens := 510
+	got := RebasedCompactionRequestTokens(plannedTokens, plannedRenderedTokens, freshRenderedTokens)
+	want := nonHistory + freshRenderedTokens
+	if got != want {
+		t.Fatalf("rebased request tokens = %d, want %d", got, want)
+	}
+}
+
+func TestMaybeCompactForRequestPreservesCurrentNonHistoryOverhead(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT, updated_at INTEGER)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetSetting(db, "keep_recent_rounds", 100); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetSetting(db, "compaction_token_trigger", 1200); err != nil {
+		t.Fatal(err)
+	}
+
+	history := buildHistory(16)
+	for i := range history {
+		fat, _ := json.Marshal([]UnifiedBlock{{Kind: "text", Text: strings.Repeat("history ", 120)}})
+		history[i].Blocks = fat
+	}
+	renderedHistoryTokens := 600
+	requestTokens := renderedHistoryTokens + 900 // system/RAG/MCP overhead
+	keep, blocks, err := MaybeCompactForRequest(
+		context.Background(), db, nil,
+		&store.Conversation{ID: "c1", UserID: "u1", SummaryBlocks: json.RawMessage("[]")},
+		history, requestTokens, renderedHistoryTokens, 0, "", "u1",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(blocks) == 0 || len(keep) >= len(history) {
+		t.Fatalf("complete request overhead did not deepen compaction: keep=%d blocks=%d", len(keep), len(blocks))
+	}
+}
+
+func TestCompactionHistoryForRequestMatchesToolAndFastFiltering(t *testing.T) {
+	raw := json.RawMessage(`{"provider":"native-envelope"}`)
+	blocks, _ := json.Marshal([]UnifiedBlock{
+		{Kind: "text", Text: "visible"},
+		{Kind: "tool_call", ToolName: "python_execute", Input: json.RawMessage(`{"code":"print(1)"}`)},
+		{Kind: "tool_output", ToolName: "python_execute", Text: "1"},
+	})
+	history := []store.Message{{ID: "a1", Role: "assistant", Provider: "openai", ModelID: "m1", Raw: raw, Blocks: blocks}}
+
+	got := compactionHistoryForRequest(history, "openai", "m1", true, map[string]bool{}, true, true)
+	if len(got) != 1 {
+		t.Fatalf("transformed history length = %d, want 1", len(got))
+	}
+	if len(got[0].Raw) != 0 {
+		t.Fatalf("fast/no-tools transformed history retained native raw: %s", got[0].Raw)
+	}
+	if len(got[0].Blocks) != 1 || got[0].Blocks[0].Kind != "text" || got[0].Blocks[0].Text != "visible" {
+		t.Fatalf("transformed blocks = %+v, want visible text only", got[0].Blocks)
+	}
+}
+
+func TestPlanCompactionForRequestIgnoresFilteredRawHistorySize(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT, updated_at INTEGER)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetSetting(db, "compaction_enabled", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetSetting(db, "keep_recent_rounds", 100); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetSetting(db, "compaction_token_trigger", 1200); err != nil {
+		t.Fatal(err)
+	}
+
+	history := buildHistory(4)
+	for i := range history {
+		// This provider-native envelope represents data that NoTools, fast mode,
+		// or a model switch removed from the request. It must not compete with the
+		// caller's complete estimate of the transformed upstream body.
+		history[i].Raw = json.RawMessage(`{"provider_payload":"` + strings.Repeat("discarded ", 2400) + `"}`)
+	}
+	request := UnifiedChatRequest{History: []UnifiedMessage{
+		{Role: "user", Blocks: []UnifiedBlock{{Kind: "text", Text: "visible question"}}},
+		{Role: "assistant", Blocks: []UnifiedBlock{{Kind: "text", Text: "visible answer"}}},
+	}}
+	requestTokens := estimateRequestTokens(request)
+	if requestTokens >= 1200 {
+		t.Fatalf("test request estimate = %d, want below trigger", requestTokens)
+	}
+
+	keep, blocks, action := PlanCompactionForRequest(
+		db,
+		&store.Conversation{ID: "c1", UserID: "u1", SummaryBlocks: json.RawMessage("[]")},
+		history,
+		requestTokens,
+		0,
+	)
+	if action != compactNone || len(keep) != len(history) || len(blocks) != 0 {
+		t.Fatalf("filtered raw history triggered compaction: action=%d keep=%d blocks=%d", action, len(keep), len(blocks))
+	}
+}
+
+func TestEstimateRequestTokensAddsUnifiedMessageStructure(t *testing.T) {
+	req := UnifiedChatRequest{History: []UnifiedMessage{
+		{Role: "user", Blocks: []UnifiedBlock{{Kind: "text", Text: "alpha"}}},
+		{Role: "assistant", Blocks: []UnifiedBlock{{Kind: "text", Text: "beta"}}},
+	}}
+	want := estimateTokens("alpha") + estimateTokens("beta") + 2*msgStructuralOverhead
+	if got := estimateRequestTokens(req); got != want {
+		t.Fatalf("request tokens = %d, want %d", got, want)
 	}
 }
 

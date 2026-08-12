@@ -666,6 +666,9 @@ export interface ApiModel {
   price_per_image: number
   currency: string
   dim: number
+  /** Optional automatic-compaction trigger for this chat model. 0/absent uses
+   * the global threshold, and positive overrides remain bounded by its cap. */
+  compaction_token_threshold?: number
   /** §4.20 per-image-model: seconds cap for one generation/edit request. 0 = default. */
   image_timeout_sec?: number
   updated_at: number
