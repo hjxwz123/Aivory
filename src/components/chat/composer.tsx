@@ -11,7 +11,7 @@
  *   3. Stop / send button states.
  *   4. IME-aware Enter handling for CJK input.
  */
-import { activeWorkspaceId } from '@/store/workspaces'
+import { useWorkspaces } from '@/store/workspaces'
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
@@ -332,6 +332,14 @@ interface FeatureItem {
 type ComposerCommandItem =
   | { kind: 'skill'; id: string; name: string; description: string; skill: ApiUserSkill }
   | { kind: 'prompt'; id: string; name: string; description: string; prompt: ApiUserPrompt }
+  | {
+      kind: 'knowledge-base'
+      id: string
+      name: string
+      description: string
+      knowledgeBase: ApiKnowledgeBase
+      disabled: boolean
+    }
 
 function FeatureRow({ item, onAfter }: { item: FeatureItem; onAfter?: () => void }) {
   return (
@@ -588,6 +596,7 @@ export function Composer({
   const { t } = useTranslation(['chat', 'library'])
   const navigate = useNavigate()
   const { pathname } = useLocation()
+  const workspaceId = useWorkspaces((state) => state.activeId ?? undefined)
   const mode = useComposerPrefs((s) => s.mode)
   const setMode = useComposerPrefs((s) => s.setMode)
   // §verify: when on, the answer is fact-checked by a second model this turn.
@@ -666,7 +675,7 @@ export function Composer({
     setKBLoading(true)
     setKBLoadFailed(false)
     try {
-      const rows = await kbsApi.list(activeWorkspaceId())
+      const rows = await kbsApi.list(workspaceId)
       if (requestID !== kbLoadRequestRef.current) return
       setKBList(rows)
       setKBLoaded(true)
@@ -677,7 +686,20 @@ export function Composer({
     } finally {
       if (requestID === kbLoadRequestRef.current) setKBLoading(false)
     }
-  }, [])
+  }, [workspaceId])
+
+  useEffect(() => {
+    // KB visibility is workspace-scoped. Invalidate both cached rows and any
+    // older request so a late response from the previous space cannot populate
+    // the mention menu after a workspace switch.
+    kbLoadRequestRef.current += 1
+    setKBList([])
+    setKBLoading(false)
+    setKBLoaded(false)
+    setKBLoadFailed(false)
+    setKBPopoverOpen(false)
+    setCommandQuery(null)
+  }, [workspaceId])
   const ref = useRef<RichComposerEditorHandle>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const imageFileRef = useRef<HTMLInputElement>(null)
@@ -896,6 +918,7 @@ export function Composer({
     value.trim().length > 0 ||
     attachments.length > 0 ||
     selectedSkills.length > 0 ||
+    (kbIds ?? []).some((id) => id && id !== projectKBId) ||
     recording ||
     transcribing ||
     streamConnecting ||
@@ -1839,20 +1862,38 @@ export function Composer({
 
   // The mobile "+" turns blue whenever a persistent choice inside it is active.
   // Hidden KB/tool policies must not leak into image or fast turns.
+  const knowledgeBaseSelection = useMemo(
+    () =>
+      knowledgeBaseSelectionContext(
+        kbList,
+        kbIds ?? [],
+        projectKBId,
+        projectKBEmbeddingModelId !== undefined && projectKBEmbeddingDim !== undefined
+          ? {
+              embedding_model_id: projectKBEmbeddingModelId,
+              embedding_dim: projectKBEmbeddingDim,
+            }
+          : undefined,
+      ),
+    [
+      kbIds,
+      kbList,
+      projectKBEmbeddingDim,
+      projectKBEmbeddingModelId,
+      projectKBId,
+    ],
+  )
   const {
     options: selectableKnowledgeBases,
     anchors: selectedKnowledgeBases,
     selectedIds: selectedKnowledgeBaseIds,
-  } = knowledgeBaseSelectionContext(
-    kbList,
-    kbIds ?? [],
-    projectKBId,
-    projectKBEmbeddingModelId !== undefined && projectKBEmbeddingDim !== undefined
-      ? {
-          embedding_model_id: projectKBEmbeddingModelId,
-          embedding_dim: projectKBEmbeddingDim,
-        }
-      : undefined,
+  } = knowledgeBaseSelection
+  const selectedKnowledgeBaseRows = useMemo(
+    () =>
+      selectedKnowledgeBaseIds
+        .map((id) => kbList.find((knowledgeBase) => knowledgeBase.id === id))
+        .filter((knowledgeBase): knowledgeBase is ApiKnowledgeBase => Boolean(knowledgeBase)),
+    [kbList, selectedKnowledgeBaseIds],
   )
   const hasActiveTool =
     anyFeatureActive ||
@@ -1962,14 +2003,40 @@ export function Composer({
     )
 
   const commandKey = commandQuery
-    ? `${commandQuery.from}:${commandQuery.to}:${commandQuery.query}`
+    ? `${commandQuery.trigger}:${commandQuery.from}:${commandQuery.to}:${commandQuery.query}`
     : ''
-  const commandOpen = Boolean(commandQuery && commandKey !== dismissedCommandKey)
+  const commandOpen = Boolean(
+    commandQuery &&
+      commandKey !== dismissedCommandKey &&
+      (commandQuery.trigger === '/' || (!isImageMode && Boolean(onKBChange))),
+  )
   const commandItems = useMemo<ComposerCommandItem[]>(() => {
     if (!commandQuery) return []
     const query = commandQuery.query.trim().toLocaleLowerCase()
     const matches = (name: string, description: string) =>
       !query || name.toLocaleLowerCase().includes(query) || description.toLocaleLowerCase().includes(query)
+    if (commandQuery.trigger === '@') {
+      return selectableKnowledgeBases
+        .filter((knowledgeBase) => !selectedKnowledgeBaseIds.includes(knowledgeBase.id))
+        .filter((knowledgeBase) => matches(knowledgeBase.name, knowledgeBase.description))
+        .map((knowledgeBase) => {
+          const disabled = selectedKnowledgeBases.some(
+            (selected) => !knowledgeBasesHaveCompatibleEmbeddings(selected, knowledgeBase),
+          )
+          return {
+            kind: 'knowledge-base' as const,
+            id: knowledgeBase.id,
+            name: knowledgeBase.name,
+            description: disabled
+              ? t('composer.incompatibleKnowledgeBase')
+              : knowledgeBase.description,
+            knowledgeBase,
+            disabled,
+          }
+        })
+        .sort((left, right) => Number(left.disabled) - Number(right.disabled))
+        .slice(0, 10)
+    }
     const skillItems: ComposerCommandItem[] = librarySkills
       .filter((skill) => !selectedSkills.some((selected) => selected.id === skill.id))
       .filter((skill) => matches(skill.name, skillDisplayDescription(skill)))
@@ -1995,11 +2062,45 @@ export function Composer({
       return [...skillItems.slice(0, perKind), ...promptItems.slice(0, perKind)]
     }
     return [...skillItems, ...promptItems].slice(0, limit)
-  }, [commandQuery, libraryPrompts, librarySkills, selectedSkills])
+  }, [
+    commandQuery,
+    libraryPrompts,
+    librarySkills,
+    selectableKnowledgeBases,
+    selectedKnowledgeBaseIds,
+    selectedKnowledgeBases,
+    selectedSkills,
+    t,
+  ])
+
+  const enabledCommandIndices = useMemo(
+    () =>
+      commandItems
+        .map((item, index) => ({ item, index }))
+        .filter(({ item }) => item.kind !== 'knowledge-base' || !item.disabled)
+        .map(({ index }) => index),
+    [commandItems],
+  )
 
   useEffect(() => {
-    setCommandIndex(0)
-  }, [commandKey])
+    setCommandIndex(enabledCommandIndices[0] ?? -1)
+  }, [commandKey, enabledCommandIndices])
+
+  useEffect(() => {
+    const shouldLoadForMention = commandQuery?.trigger === '@' && !isImageMode && Boolean(onKBChange)
+    const shouldLoadSelectedNames = !isImageMode && Boolean(onKBChange) && selectedKnowledgeBaseIds.length > 0
+    if ((shouldLoadForMention || shouldLoadSelectedNames) && !kbLoaded && !kbLoading) {
+      void loadKBList()
+    }
+  }, [
+    commandQuery?.trigger,
+    isImageMode,
+    kbLoaded,
+    kbLoading,
+    loadKBList,
+    onKBChange,
+    selectedKnowledgeBaseIds.length,
+  ])
 
   useEffect(() => {
     if (!commandOpen) {
@@ -2054,12 +2155,18 @@ export function Composer({
   function chooseCommand(item: ComposerCommandItem) {
     const query = commandQuery
     if (!query) return
+    if (item.kind === 'knowledge-base' && item.disabled) return
     if (item.kind === 'skill') {
       ref.current?.replaceRange(query.from, query.to, '')
       setSelectedSkills((current) => addSelectedUserSkill(current, item.skill))
-    } else {
+      setDismissedCommandKey('')
+    } else if (item.kind === 'prompt') {
       ref.current?.replaceRange(query.from, query.to, item.prompt.content)
       setDismissedCommandKey(commandKey)
+    } else {
+      ref.current?.replaceRange(query.from, query.to, '')
+      onKBChange?.([...selectedKnowledgeBaseIds, item.knowledgeBase.id])
+      setDismissedCommandKey('')
     }
     setCommandQuery(null)
   }
@@ -2068,20 +2175,35 @@ export function Composer({
     if (!commandOpen) return false
     if (event.key === 'ArrowDown') {
       event.preventDefault()
-      setCommandIndex((current) => (commandItems.length > 0 ? (current + 1) % commandItems.length : 0))
+      setCommandIndex((current) => {
+        if (enabledCommandIndices.length === 0) return 0
+        const position = enabledCommandIndices.indexOf(current)
+        return enabledCommandIndices[(position + 1 + enabledCommandIndices.length) % enabledCommandIndices.length]
+      })
       return true
     }
     if (event.key === 'ArrowUp') {
       event.preventDefault()
-      setCommandIndex((current) =>
-        commandItems.length > 0 ? (current - 1 + commandItems.length) % commandItems.length : 0,
-      )
+      setCommandIndex((current) => {
+        if (enabledCommandIndices.length === 0) return 0
+        const position = enabledCommandIndices.indexOf(current)
+        const previous = position < 0 ? enabledCommandIndices.length - 1 : position - 1
+        return enabledCommandIndices[(previous + enabledCommandIndices.length) % enabledCommandIndices.length]
+      })
       return true
     }
     if (event.key === 'Enter' || event.key === 'Tab') {
-      event.preventDefault()
       const item = commandItems[commandIndex]
-      if (item) chooseCommand(item)
+      if (!item) {
+        if (event.key === 'Enter') {
+          event.preventDefault()
+          return true
+        }
+        setDismissedCommandKey(commandKey)
+        return false
+      }
+      event.preventDefault()
+      chooseCommand(item)
       return true
     }
     if (event.key === 'Escape') {
@@ -2242,7 +2364,11 @@ export function Composer({
             <div
               ref={commandMenuRef}
               role="listbox"
-              aria-label={t('library:title')}
+              aria-label={
+                commandQuery?.trigger === '@'
+                  ? t('composer.knowledgeBaseMentionLabel')
+                  : t('library:title')
+              }
               data-command-placement={commandPosition.placement}
               className={cn(
                 'fixed z-[var(--z-popover)] overflow-y-auto overscroll-contain rounded-popup bg-[var(--color-surface-raised)] p-1 shadow-[var(--shadow-md)] scrollbar-thin',
@@ -2258,17 +2384,47 @@ export function Composer({
                 maxHeight: commandPosition.maxHeight,
               }}
             >
-              {libraryLoading ? (
+              {commandQuery?.trigger === '@' && (kbLoading || !kbLoaded) ? (
+                <div
+                  role="status"
+                  aria-live="polite"
+                  className="flex items-center gap-2 px-2.5 py-2 text-[13px] text-[var(--color-fg-muted)]"
+                >
+                  <Loader2 size={14} className="animate-spin" aria-hidden />
+                  {t('composer.knowledgeBasesLoading')}
+                </div>
+              ) : commandQuery?.trigger === '@' && kbLoadFailed ? (
+                <div role="alert" className="px-2.5 py-2">
+                  <div className="flex items-start gap-2 text-[13px] leading-snug text-[var(--color-danger)]">
+                    <AlertTriangle size={14} aria-hidden className="mt-0.5 shrink-0" />
+                    <span>{t('composer.knowledgeBasesLoadFailed')}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => void loadKBList()}
+                    className="mt-2 inline-flex h-8 items-center gap-1.5 rounded-[8px] px-2 text-xs font-medium text-[var(--color-fg-muted)] interactive hover:bg-[var(--color-bg-muted)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                  >
+                    <RefreshCw size={13} aria-hidden />
+                    {t('composer.retryKnowledgeBases')}
+                  </button>
+                </div>
+              ) : commandQuery?.trigger === '/' && libraryLoading ? (
                 <div className="flex items-center gap-2 px-2.5 py-2 text-[13px] text-[var(--color-fg-muted)]">
                   <Loader2 size={14} className="animate-spin" aria-hidden />
                   {t('library:command.loading')}
                 </div>
               ) : commandItems.length === 0 ? (
                 <p className="px-2.5 py-2 text-[13px] text-[var(--color-fg-muted)]">
-                  {t('library:command.empty')}
+                  {commandQuery?.trigger === '@'
+                    ? t('composer.knowledgeBaseMentionEmpty')
+                    : t('library:command.empty')}
                 </p>
               ) : (
-                (['skill', 'prompt'] as const).map((kind) => {
+                (commandQuery?.trigger === '@'
+                  ? (['knowledge-base'] as const)
+                  : (['skill', 'prompt'] as const)
+                ).map((kind) => {
                   const items = commandItems
                     .map((item, index) => ({ item, index }))
                     .filter(({ item }) => item.kind === kind)
@@ -2280,7 +2436,9 @@ export function Composer({
                         id={labelId}
                         className="px-2.5 pb-0.5 pt-1 text-[10.5px] font-medium tracking-normal text-[var(--color-fg-subtle)]"
                       >
-                        {t(`library:command.${kind === 'skill' ? 'skills' : 'prompts'}`)}
+                        {kind === 'knowledge-base'
+                          ? t('composer.knowledgeBaseMentionLabel')
+                          : t(`library:command.${kind === 'skill' ? 'skills' : 'prompts'}`)}
                       </p>
                       {items.map(({ item, index }) => {
                         const active = index === commandIndex
@@ -2290,13 +2448,23 @@ export function Composer({
                             type="button"
                             role="option"
                             aria-selected={active}
+                            aria-disabled={item.kind === 'knowledge-base' ? item.disabled : undefined}
+                            disabled={item.kind === 'knowledge-base' && item.disabled}
                             data-command-index={index}
                             onMouseDown={(event) => event.preventDefault()}
-                            onMouseEnter={() => setCommandIndex(index)}
+                            onMouseEnter={() => {
+                              if (item.kind !== 'knowledge-base' || !item.disabled) {
+                                setCommandIndex(index)
+                              }
+                            }}
                             onClick={() => chooseCommand(item)}
                             className={cn(
                               'flex min-h-9 w-full min-w-0 items-center gap-2 rounded-[10px] px-2.5 py-1.5 text-left interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-sm:min-h-10',
-                              active ? 'bg-[var(--color-bg-muted)]' : 'hover:bg-[var(--color-bg-muted)]',
+                              item.kind === 'knowledge-base' && item.disabled
+                                ? 'cursor-not-allowed opacity-55'
+                                : active
+                                  ? 'bg-[var(--color-bg-muted)]'
+                                  : 'hover:bg-[var(--color-bg-muted)]',
                             )}
                           >
                             <span
@@ -2304,12 +2472,16 @@ export function Composer({
                                 'inline-flex size-5 shrink-0 items-center justify-center',
                                 item.kind === 'skill'
                                   ? 'text-[var(--color-accent)]'
+                                  : item.kind === 'knowledge-base'
+                                    ? 'text-[var(--color-tool-selection-text)]'
                                   : 'text-[var(--color-secondary)]',
                               )}
                               data-command-icon
                             >
                               {item.kind === 'skill' ? (
                                 <SkillIcon name={item.skill.icon} size={16} aria-hidden />
+                              ) : item.kind === 'knowledge-base' ? (
+                                <BookOpen size={16} aria-hidden />
                               ) : (
                                 <FileText size={16} aria-hidden />
                               )}
@@ -2494,11 +2666,11 @@ export function Composer({
         </div>
       )}
 
-      {selectedSkills.length > 0 ? (
+      {selectedSkills.length > 0 || selectedKnowledgeBaseRows.length > 0 ? (
         <div className="flex items-center gap-1.5 overflow-x-auto px-3 pb-1 pt-2.5 scrollbar-none">
           {selectedSkills.map((skill) => (
             <span
-              key={skill.id}
+              key={`skill:${skill.id}`}
               className="inline-flex h-7 max-w-[15rem] shrink-0 items-center gap-1.5 px-0.5 text-[12px] font-medium text-[var(--color-accent)]"
             >
               <SkillIcon name={skill.icon} size={13} className="shrink-0" aria-hidden />
@@ -2507,6 +2679,27 @@ export function Composer({
                 type="button"
                 onClick={() => setSelectedSkills((current) => current.filter((item) => item.id !== skill.id))}
                 aria-label={t('library:command.removeSkill', { name: skill.name })}
+                className="inline-flex size-6 shrink-0 items-center justify-center rounded-full text-[var(--color-fg-faint)] interactive hover:text-[var(--color-fg-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-sm:size-8"
+              >
+                <X size={12} aria-hidden />
+              </button>
+            </span>
+          ))}
+          {selectedKnowledgeBaseRows.map((knowledgeBase) => (
+            <span
+              key={`knowledge-base:${knowledgeBase.id}`}
+              className="inline-flex h-7 max-w-[15rem] shrink-0 items-center gap-1.5 px-0.5 text-[12px] font-medium text-[var(--color-tool-selection-text)]"
+            >
+              <BookOpen size={13} className="shrink-0" aria-hidden />
+              <span className="truncate">{knowledgeBase.name}</span>
+              <button
+                type="button"
+                onClick={() =>
+                  onKBChange?.(
+                    selectedKnowledgeBaseIds.filter((id) => id !== knowledgeBase.id),
+                  )
+                }
+                aria-label={t('composer.removeKnowledgeBase', { name: knowledgeBase.name })}
                 className="inline-flex size-6 shrink-0 items-center justify-center rounded-full text-[var(--color-fg-faint)] interactive hover:text-[var(--color-fg-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-sm:size-8"
               >
                 <X size={12} aria-hidden />

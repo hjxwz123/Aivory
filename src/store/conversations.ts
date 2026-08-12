@@ -364,7 +364,12 @@ interface ConversationStore {
   /** Insert an OPTIMISTIC (client-only, temp id) conversation so the home page
    *  can navigate to its thread instantly; the real one is created on send via
    *  sendMessage({ createFirst }). Returns the temp id. */
-  beginOptimisticConversation: (text: string, modelId?: string, fast?: boolean) => string
+  beginOptimisticConversation: (
+    text: string,
+    modelId?: string,
+    fast?: boolean,
+    kbIds?: string[],
+  ) => string
   regenerate: (conversationId: string, assistantId: string, modelId?: string) => Promise<void>
   resumeStreamingMessages: (conversationId: string, opts?: { replaceExisting?: boolean }) => void
   /** Edit a user question or assistant reply IN PLACE. User questions may be
@@ -397,6 +402,10 @@ const streamHandoffs = new WeakSet<AbortController>()
 // explicit registry rather than a prefix test: imported/server ids are opaque
 // and may legally resemble `uid('m')` output.
 const generatedLocalMessageIds = new Set<string>()
+// Home-first conversations exist only in the client until sendMessage's
+// createFirst path receives the server row. Conversation mutations made in
+// that window must stay local and be replayed after the temp id is re-keyed.
+const optimisticConversationIds = new Set<string>()
 
 // An explicit stop can abort the POST reader before its `message_start` frame
 // reaches the browser even though the backend is still committing the stopped
@@ -837,8 +846,9 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
     return conv
   },
 
-  beginOptimisticConversation(text, modelId, fast) {
+  beginOptimisticConversation(text, modelId, fast, kbIds) {
     const id = uid('c')
+    optimisticConversationIds.add(id)
     const now = Date.now()
     const models = useModels.getState()
     const resolvedFast =
@@ -857,6 +867,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
       updatedAt: now,
       modelId: modelId ?? '',
       fast: resolvedFast,
+      kbIds: Array.from(new Set((kbIds ?? []).map((kbId) => kbId.trim()).filter(Boolean))),
       // Tag the active space so the sidebar (which filters by workspace) shows
       // the new chat immediately; the create + re-key confirms it server-side.
       workspaceId: activeWorkspaceId() || undefined,
@@ -1163,6 +1174,14 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
 
   async setKBs(id, kbIds) {
     const desired = Array.from(new Set(kbIds.map((kbId) => kbId.trim()).filter(Boolean)))
+    if (optimisticConversationIds.has(id)) {
+      set((state) => ({
+        conversations: state.conversations.map((conversation) =>
+          conversation.id === id ? { ...conversation, kbIds: desired } : conversation,
+        ),
+      }))
+      return
+    }
     const current = get().conversations.find((conversation) => conversation.id === id)
     let sync = knowledgeBaseSelectionSync.get(id)
     if (!sync) {
@@ -1439,6 +1458,9 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
       }
       const tempId = input.conversationId
       const realId = created.id
+      const latestKnowledgeBaseIds = [
+        ...(get().conversations.find((conversation) => conversation.id === tempId)?.kbIds ?? []),
+      ]
       // Re-key the cache entry to the real id AND fold in the server row's
       // metadata (workspace_id, project_id, model, …) — keeping the optimistic
       // messages + first-message title — so the sidebar filter (workspace) and
@@ -1452,12 +1474,25 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
           .filter((c) => c.id !== realId)
           .map((c) =>
             c.id === tempId
-              ? { ...meta, messages: c.messages, title: c.title || meta.title, updatedAt: Math.max(c.updatedAt, meta.updatedAt) }
+              ? {
+                  ...meta,
+                  messages: c.messages,
+                  title: c.title || meta.title,
+                  updatedAt: Math.max(c.updatedAt, meta.updatedAt),
+                }
               : c,
           ),
       }))
+      optimisticConversationIds.delete(tempId)
       moveStoppedPathBarrier(tempId, realId)
       input.conversationId = realId
+      if (latestKnowledgeBaseIds.length > 0) {
+        // The create endpoint intentionally starts with no optional KBs. Persist
+        // the latest optimistic selection against the real id. The first turn
+        // still uses its already-captured snapshot, so a toggle after Send belongs
+        // to the next turn and neither operation targets the client-only temp id.
+        void get().setKBs(realId, latestKnowledgeBaseIds)
+      }
       if (streamConversationIds.get(assistantId) === tempId) {
         streamConversationIds.set(assistantId, realId)
       }

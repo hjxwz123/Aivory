@@ -120,6 +120,7 @@ export default function ProjectDetail() {
   const setGlobalDefaultModel = useModels((s) => s.setDefaultId)
   const [projectComposerModelId, setProjectComposerModelId] = useState('')
   const [pickedFast, setPickedFast] = useState<boolean | null>(null)
+  const [selectedKnowledgeBaseIds, setSelectedKnowledgeBaseIds] = useState<string[]>([])
   const [loadingProjectChats, setLoadingProjectChats] = useState(Boolean(id))
   const effectiveProjectModelId = projectComposerModelId || defaultModelId
   const projectFast =
@@ -195,6 +196,7 @@ export default function ProjectDetail() {
     pendingConsumedRef.current = false
     setPendingConversationId(readPendingConversation(pendingStorageKey))
     setProjectComposerModelId('')
+    setSelectedKnowledgeBaseIds([])
   }, [pendingStorageKey])
 
   // Project composers use the same durable draft handoff as the chat home.
@@ -414,6 +416,7 @@ export default function ProjectDetail() {
     if (!opts.fast && effectiveProjectModelId && conv.modelId !== effectiveProjectModelId) {
       void useConversations.getState().setModel(conv.id, effectiveProjectModelId)
     }
+    void useConversations.getState().setKBs(conv.id, selectedKnowledgeBaseIds)
     navigate(`/chat/${conv.id}`)
     void useConversations.getState().sendMessage({
       conversationId: conv.id,
@@ -514,9 +517,11 @@ export default function ProjectDetail() {
                 }}
                 onSubmit={(text, atts, opts) => void startProjectChat(text, atts, opts)}
                 conversationId={pendingConversationId}
+                kbIds={selectedKnowledgeBaseIds}
                 projectKBId={project.kbId}
                 projectKBEmbeddingModelId={project.kbEmbeddingModelId}
                 projectKBEmbeddingDim={project.kbEmbeddingDim}
+                onKBChange={setSelectedKnowledgeBaseIds}
                 ensureConversationId={ensureProjectConversation}
                 onAttachmentsDrained={discardDraftConversation}
               />

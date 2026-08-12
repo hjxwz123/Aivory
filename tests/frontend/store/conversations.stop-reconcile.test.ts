@@ -1218,6 +1218,102 @@ describe('knowledge-base selection ordering', () => {
     apiMocks.streamSSE.mockReturnValue(events({ type: 'done' }))
   })
 
+  it('keeps and persists an optimistic first-chat selection after the real id is created', async () => {
+    useConversations.setState({ conversations: [] })
+    const created = { ...apiConversation(''), id: 'conv_real', active_leaf_id: '' }
+    apiMocks.create.mockResolvedValue(created)
+    apiMocks.update.mockResolvedValue({ ...created, kb_ids: ['kb_a', 'kb_b'] })
+    apiMocks.get.mockResolvedValue({
+      conversation: { ...created, kb_ids: ['kb_a', 'kb_b'] },
+      messages: [],
+      has_more: false,
+      next_before: undefined,
+    })
+
+    const tempId = useConversations
+      .getState()
+      .beginOptimisticConversation('use the sources', 'model_1', false, [
+        ' kb_a ',
+        'kb_a',
+        'kb_b',
+      ])
+
+    expect(
+      useConversations.getState().conversations.find((conversation) => conversation.id === tempId)
+        ?.kbIds,
+    ).toEqual(['kb_a', 'kb_b'])
+
+    await useConversations.getState().sendMessage({
+      conversationId: tempId,
+      createFirst: true,
+      text: 'use the sources',
+      modelId: 'model_1',
+      toolMode: 'auto',
+    })
+
+    expect(apiMocks.update).toHaveBeenCalledWith('conv_real', {
+      kb_ids: ['kb_a', 'kb_b'],
+    })
+    expect(apiMocks.update).not.toHaveBeenCalledWith(tempId, expect.anything())
+    expect(apiMocks.streamSSE).toHaveBeenCalledWith(
+      '/conversations/conv_real/messages',
+      expect.objectContaining({ kb_ids: ['kb_a', 'kb_b'] }),
+      expect.any(AbortSignal),
+    )
+    expect(
+      useConversations.getState().conversations.find((conversation) => conversation.id === 'conv_real')
+        ?.kbIds,
+    ).toEqual(['kb_a', 'kb_b'])
+  })
+
+  it('keeps a post-send KB change local until createFirst re-keys the conversation', async () => {
+    useConversations.setState({ conversations: [] })
+    let resolveCreate: ((conversation: ApiConversation) => void) | undefined
+    apiMocks.create.mockReturnValue(
+      new Promise<ApiConversation>((resolve) => {
+        resolveCreate = resolve
+      }),
+    )
+    const created = { ...apiConversation(''), id: 'conv_real', active_leaf_id: '' }
+    apiMocks.update.mockResolvedValue({ ...created, kb_ids: ['kb_next'] })
+    apiMocks.get.mockResolvedValue({
+      conversation: { ...created, kb_ids: ['kb_next'] },
+      messages: [],
+      has_more: false,
+      next_before: undefined,
+    })
+
+    const tempId = useConversations
+      .getState()
+      .beginOptimisticConversation('use the original source', 'model_1', false, ['kb_turn'])
+    const sending = useConversations.getState().sendMessage({
+      conversationId: tempId,
+      createFirst: true,
+      text: 'use the original source',
+      modelId: 'model_1',
+      toolMode: 'auto',
+    })
+
+    await vi.waitFor(() => expect(apiMocks.create).toHaveBeenCalledTimes(1))
+    await useConversations.getState().setKBs(tempId, ['kb_next'])
+    expect(apiMocks.update).not.toHaveBeenCalled()
+
+    resolveCreate?.(created)
+    await sending
+
+    expect(apiMocks.update).toHaveBeenCalledWith('conv_real', { kb_ids: ['kb_next'] })
+    expect(apiMocks.update).not.toHaveBeenCalledWith(tempId, expect.anything())
+    expect(apiMocks.streamSSE).toHaveBeenCalledWith(
+      '/conversations/conv_real/messages',
+      expect.objectContaining({ kb_ids: ['kb_turn'] }),
+      expect.any(AbortSignal),
+    )
+    expect(
+      useConversations.getState().conversations.find((conversation) => conversation.id === 'conv_real')
+        ?.kbIds,
+    ).toEqual(['kb_next'])
+  })
+
   it('serializes rapid selection PATCHes while sending the latest click as the turn snapshot', async () => {
     let resolveFirst: ((value: ApiConversation) => void) | undefined
     apiMocks.update
