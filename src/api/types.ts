@@ -795,6 +795,9 @@ export interface ApiProject {
   emoji: string
   pinned: boolean
   kb_id: string
+  /** Embedding signature for the project-owned KB, which is hidden from /kbs. */
+  kb_embedding_model_id?: string
+  kb_embedding_dim?: number
   auto_add_uploads: boolean
   created_at: number
   updated_at: number
@@ -929,7 +932,7 @@ export interface ApiCitation {
   title: string
   url: string
   snippet: string
-  source: 'web' | 'kb'
+  source: 'web' | 'kb' | 'document'
 }
 
 export interface ApiMessage {
@@ -1141,7 +1144,7 @@ export type ApiSseEvent =
   // §4.20 image mode: drawing-phase status ('optimizing' | 'generating') driving
   // the dedicated generating UI.
   | { type: 'image_status'; message_id?: string; status?: string }
-  | { type: 'rag'; status?: string; summary?: string }
+  | { type: 'rag'; status?: string; summary?: string; source_count?: number }
   | { type: 'refusal'; message_id?: string; message?: string }
   | { type: 'error'; message: string; code?: string }
   | { type: 'done'; stop_reason?: string; usage?: { input_tokens: number; output_tokens: number }; credits?: number }

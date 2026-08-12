@@ -1,31 +1,31 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ChevronDown, ExternalLink, FileText } from 'lucide-react'
+import { ChevronDown, ExternalLink, FileSearch, FileText } from 'lucide-react'
 import type { Citation } from '@/types/chat'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { cn, safeHref } from '@/lib/utils'
+import {
+  boundedCitationSnippet,
+  citationsInDisplayOrder,
+  documentCitationContentUrl,
+  isDocumentCitation,
+  isKnowledgeBaseCitation,
+} from '@/lib/citations'
 
 interface CitationChipProps {
   citation: Citation
   className?: string
+  onOpenDocument?: (citation: Citation) => void
 }
 
-/**
- * A citation points at one of the user's own indexed documents (RAG) rather
- * than a public web page when the backend marks it source:'kb' or hands back a
- * `doc://<id>` URL. Those have no browsable URL — `safeHref` rejects `doc:` and
- * `safeDomain` would surface the raw doc id — so we render them as a
- * non-clickable document chip instead of a dead link.
- */
-function isDocCitation(c: Citation): boolean {
-  return c.source === 'kb' || c.url.trim().toLowerCase().startsWith('doc:')
-}
-
-export function CitationChip({ citation, className }: CitationChipProps) {
+export function CitationChip({ citation, className, onOpenDocument }: CitationChipProps) {
   const { t } = useTranslation('chat')
-  const isDoc = isDocCitation(citation)
+  const [open, setOpen] = useState(false)
+  const isDoc = isDocumentCitation(citation)
+  const isKnowledgeBase = isKnowledgeBaseCitation(citation)
+  const canOpenDocument = Boolean(onOpenDocument && documentCitationContentUrl(citation))
   return (
-    <Popover>
+    <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <button
           type="button"
@@ -66,8 +66,23 @@ export function CitationChip({ citation, className }: CitationChipProps) {
               </p>
               {citation.snippet ? (
                 <p className="mt-2 text-xs text-[var(--color-fg-muted)] leading-relaxed [overflow-wrap:anywhere]">
-                  {citation.snippet}
+                  {isKnowledgeBase
+                    ? boundedCitationSnippet(citation.snippet)
+                    : citation.snippet}
                 </p>
+              ) : null}
+              {canOpenDocument ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpen(false)
+                    onOpenDocument?.(citation)
+                  }}
+                  className="mt-3 inline-flex items-center gap-1.5 text-[11px] text-[var(--color-accent)] interactive hover:text-[var(--color-accent-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] rounded-[4px]"
+                >
+                  {t('sources.openDocument')}
+                  <FileSearch size={11} aria-hidden />
+                </button>
               ) : null}
             </>
           ) : (
@@ -107,12 +122,14 @@ export function CitationChip({ citation, className }: CitationChipProps) {
 
 interface CitationListProps {
   citations: Citation[]
+  onOpenDocument?: (citation: Citation) => void
 }
 
-export function CitationList({ citations }: CitationListProps) {
+export function CitationList({ citations, onOpenDocument }: CitationListProps) {
   const { t } = useTranslation('chat')
   const [open, setOpen] = useState(false)
   if (citations.length === 0) return null
+  const orderedCitations = citationsInDisplayOrder(citations)
   return (
     <div className="mt-5 border-t border-[var(--color-divider)] pt-3.5">
       <button
@@ -143,21 +160,60 @@ export function CitationList({ citations }: CitationListProps) {
       >
         <div className="overflow-hidden">
           <ol className="space-y-1.5 pt-2.5">
-            {citations.map((c) =>
-              isDocCitation(c) ? (
-                // KB document source — no browsable URL, so render a static row
-                // (filename + "from your documents") instead of a dead link.
-                <li key={c.id} className="flex items-start gap-2.5 text-xs">
-                  <CitationChip citation={c} />
-                  <span className="min-w-0 flex-1 leading-relaxed text-[var(--color-fg-muted)] [overflow-wrap:anywhere]">
-                    <span className="inline-flex max-w-full items-center gap-1 font-medium text-[var(--color-fg)]">
-                      <FileText size={11} aria-hidden className="shrink-0 text-[var(--color-fg-subtle)]" />
-                      <span className="[overflow-wrap:anywhere]">{c.title}</span>
+            {orderedCitations.map((c) => {
+              if (isKnowledgeBaseCitation(c)) {
+                const snippet = boundedCitationSnippet(c.snippet)
+                const canOpen = Boolean(onOpenDocument && documentCitationContentUrl(c))
+                const content = (
+                  <>
+                    <span className="block leading-relaxed text-[var(--color-fg-muted)] [overflow-wrap:anywhere]">
+                      <span className="inline-flex max-w-full items-center gap-1 font-medium text-[var(--color-fg)]">
+                        <FileText size={11} aria-hidden className="shrink-0 text-[var(--color-fg-subtle)]" />
+                        <span className="[overflow-wrap:anywhere]">{c.title}</span>
+                      </span>
+                      <span className="ml-1.5 text-[var(--color-fg-subtle)]">{t('sources.fromDocuments')}</span>
                     </span>
-                    <span className="ml-1.5 text-[var(--color-fg-subtle)]">{t('sources.fromDocuments')}</span>
-                  </span>
-                </li>
-              ) : (
+                    {snippet ? (
+                      <span className="mt-1 block line-clamp-3 text-[11.5px] leading-relaxed text-[var(--color-fg-subtle)] [overflow-wrap:anywhere]">
+                        {snippet}
+                      </span>
+                    ) : null}
+                  </>
+                )
+                return (
+                  <li key={c.id} className="flex items-start gap-2.5 text-xs">
+                    <CitationChip citation={c} onOpenDocument={onOpenDocument} />
+                    {canOpen ? (
+                      <button
+                        type="button"
+                        onClick={() => onOpenDocument?.(c)}
+                        className="min-w-0 flex-1 rounded-[5px] text-left interactive hover:text-[var(--color-accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+                      >
+                        {content}
+                      </button>
+                    ) : (
+                      <span className="min-w-0 flex-1">{content}</span>
+                    )}
+                  </li>
+                )
+              }
+
+              if (isDocumentCitation(c)) {
+                return (
+                  <li key={c.id} className="flex items-start gap-2.5 text-xs">
+                    <CitationChip citation={c} />
+                    <span className="min-w-0 flex-1 leading-relaxed text-[var(--color-fg-muted)] [overflow-wrap:anywhere]">
+                      <span className="inline-flex max-w-full items-center gap-1 font-medium text-[var(--color-fg)]">
+                        <FileText size={11} aria-hidden className="shrink-0 text-[var(--color-fg-subtle)]" />
+                        <span className="[overflow-wrap:anywhere]">{c.title}</span>
+                      </span>
+                      <span className="ml-1.5 text-[var(--color-fg-subtle)]">{t('sources.fromDocuments')}</span>
+                    </span>
+                  </li>
+                )
+              }
+
+              return (
                 <li key={c.id} className="flex items-start gap-2.5 text-xs">
                   <CitationChip citation={c} />
                   <a
@@ -170,8 +226,8 @@ export function CitationList({ citations }: CitationListProps) {
                     <span className="ml-1.5">{c.domain}</span>
                   </a>
                 </li>
-              ),
-            )}
+              )
+            })}
           </ol>
         </div>
       </div>

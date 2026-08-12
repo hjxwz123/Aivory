@@ -1,4 +1,4 @@
-import { memo, useState, useRef, useEffect, useId, useMemo, type ReactNode } from 'react'
+import { memo, useState, useRef, useEffect, useId, useMemo, useCallback, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Copy,
@@ -19,6 +19,7 @@ import {
   X,
   Sparkles,
   BookText,
+  Loader2,
   Coins,
   Flag,
   ImageOff,
@@ -31,6 +32,7 @@ import {
   FEEDBACK_REASON_VALUES,
   GENERATION_INTERRUPTED_ERROR_CODE,
   type Attachment,
+  type Citation,
   type FeedbackReason,
   type Message,
   type MessageFeedbackInput,
@@ -82,6 +84,7 @@ import { FilePreview } from './file-preview'
 import { toast } from '@/hooks/use-toast'
 import { cn, safeHref } from '@/lib/utils'
 import { isEmptyStoppedMessage, messageHasActions } from '@/lib/message-state'
+import { documentCitationContentUrl } from '@/lib/citations'
 import { attachmentKindLabel, attachmentTileClass, fileIconFor } from '@/lib/file-icon'
 import {
   feedbackCommentLength,
@@ -103,6 +106,92 @@ function ThinkingLogo() {
     >
       <span className="absolute inset-0 rounded-full border border-[var(--color-border)] [border-top-color:var(--color-secondary)] animate-[spin_1200ms_cubic-bezier(0.6,0.1,0.4,0.9)_infinite]" />
       <LogoMark size={24} className="animate-[core-breathe_2400ms_ease-in-out_infinite]" />
+    </div>
+  )
+}
+
+function RagInjectionStatus({ injection }: { injection: NonNullable<Message['ragInjection']> }) {
+  const { t } = useTranslation('chat')
+  const active = injection.strategy === 'searching' || injection.strategy === 'expanding'
+  const failed = injection.strategy === 'error'
+  const kbSettled =
+    injection.strategy === 'found' ||
+    injection.strategy === 'partial' ||
+    injection.strategy === 'no_hit'
+  const knowledgeBaseLifecycle = active || failed || kbSettled
+  const label = (() => {
+    switch (injection.strategy) {
+      case 'indexing':
+        return t('message.ragIndexing')
+      case 'indexing_done':
+        return t('message.ragIndexingDone')
+      case 'warning':
+        return t('message.ragWarning')
+      case 'full_text':
+        return t('message.ragFullText')
+      case 'full_doc':
+        return t('message.ragFullDoc')
+      case 'none':
+        return t('message.ragNone')
+      case 'searching':
+        return t('message.ragSearching')
+      case 'expanding':
+        return t('message.ragExpanding')
+      case 'found':
+        return t('message.ragFound')
+      case 'partial':
+        return t('message.ragPartial')
+      case 'no_hit':
+        return t('message.ragNoHit')
+      case 'error':
+        return t('message.ragError')
+      default:
+        return t('message.ragDefault')
+    }
+  })()
+  const Icon = active ? Loader2 : failed ? AlertTriangle : BookText
+
+  return (
+    <div
+      role={failed ? 'alert' : active || kbSettled ? 'status' : undefined}
+      aria-live={active ? 'polite' : undefined}
+      className={cn(
+        'mb-2.5 inline-flex max-w-full items-center gap-1.5 text-[11.5px] text-[var(--color-fg-subtle)]',
+        failed && 'text-[var(--color-danger)]',
+      )}
+    >
+      <Icon
+        size={13}
+        strokeWidth={1.5}
+        aria-hidden
+        className={cn(
+          'shrink-0',
+          active ? 'animate-spin text-[var(--color-secondary)]' : failed ? 'text-[var(--color-danger)]' : 'text-[var(--color-secondary)]',
+        )}
+      />
+      <span
+        className={cn(
+          failed ? 'text-[var(--color-danger)]' : 'text-[var(--color-fg-muted)]',
+          knowledgeBaseLifecycle ? 'min-w-0 truncate' : 'shrink-0',
+        )}
+      >
+        {label}
+      </span>
+      {knowledgeBaseLifecycle && injection.sourceCount !== undefined ? (
+        <span
+          className={cn(
+            'shrink-0 whitespace-nowrap',
+            failed ? 'text-[var(--color-danger)]/80' : 'text-[var(--color-fg-faint)]',
+          )}
+        >
+          · {t('message.ragSourceCount', { count: injection.sourceCount })}
+        </span>
+      ) : null}
+      {!knowledgeBaseLifecycle && injection.summary ? (
+        <span className="min-w-0 truncate text-[var(--color-fg-faint)]">
+          · {injection.summary}
+        </span>
+      ) : null}
     </div>
   )
 }
@@ -210,6 +299,11 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
   // Non-image attachment preview (pdf / docx / text / fallback) — opens a modal
   // instead of letting the click download the file.
   const [filePreview, setFilePreview] = useState<{ name: string; url?: string; kind: Attachment['kind'] } | null>(null)
+  const openDocumentCitation = useCallback((citation: Citation) => {
+    const url = documentCitationContentUrl(citation)
+    if (!url) return
+    setFilePreview({ name: citation.title, url, kind: 'other' })
+  }, [])
   const editRef = useRef<RichComposerEditorHandle>(null)
   const assistantEditRef = useRef<HTMLTextAreaElement>(null)
   const [editFormulaOpen, setEditFormulaOpen] = useState(false)
@@ -741,31 +835,7 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
               settled={Boolean(message.content)}
             />
 
-            {message.ragInjection ? (
-              <div className="mb-2.5 inline-flex max-w-full items-center gap-1.5 text-[11.5px] text-[var(--color-fg-subtle)]">
-                <BookText size={13} strokeWidth={1.5} aria-hidden className="shrink-0 text-[var(--color-secondary)]" />
-                <span className="truncate">
-                  <span className="text-[var(--color-fg-muted)]">
-                    {message.ragInjection.strategy === 'indexing'
-                      ? t('message.ragIndexing')
-                      : message.ragInjection.strategy === 'indexing_done'
-                        ? t('message.ragIndexingDone')
-                        : message.ragInjection.strategy === 'warning'
-                          ? t('message.ragWarning')
-                          : message.ragInjection.strategy === 'full_text'
-                            ? t('message.ragFullText')
-                            : message.ragInjection.strategy === 'full_doc'
-                              ? t('message.ragFullDoc')
-                              : message.ragInjection.strategy === 'none'
-                                ? t('message.ragNone')
-                                : t('message.ragDefault')}
-                  </span>
-                  {message.ragInjection.summary ? (
-                    <span className="text-[var(--color-fg-faint)]"> · {message.ragInjection.summary}</span>
-                  ) : null}
-                </span>
-              </div>
-            ) : null}
+            {message.ragInjection ? <RagInjectionStatus injection={message.ragInjection} /> : null}
 
             {/* §4.20 image mode: dedicated drawing surface (distinct from the
                 chat thinking/tool-call trace) while no image artifact exists yet. */}
@@ -818,7 +888,14 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
                   </div>
                 ) : null}
                 <div data-inline-msg={message.id} data-inline-role={message.role}>
-                  <Markdown content={message.content} live={Boolean(message.streaming)} blockKeyPrefix={message.id} citations={message.citations} className="prose-full" />
+                  <Markdown
+                    content={message.content}
+                    live={Boolean(message.streaming)}
+                    blockKeyPrefix={message.id}
+                    citations={message.citations}
+                    onOpenDocumentCitation={readOnly ? undefined : openDocumentCitation}
+                    className="prose-full"
+                  />
                 </div>
                 {message.streaming ? (
                   <span
@@ -851,7 +928,10 @@ function MessageRowImpl({ message, userName, onRegenerate, onEdit, onSaveEdit, o
                   </div>
                 ) : null}
                 {message.citations && message.citations.length > 0 ? (
-                  <CitationList citations={message.citations} />
+                  <CitationList
+                    citations={message.citations}
+                    onOpenDocument={readOnly ? undefined : openDocumentCitation}
+                  />
                 ) : null}
                 {/* §verify: secondary-auditor trust badge + findings report. */}
                 {message.verify ? <VerifyBadge verify={message.verify} /> : null}

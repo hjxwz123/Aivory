@@ -51,6 +51,7 @@ import { mathContentToPlainText } from '@/lib/math-content'
 import { normalizeSelectedUserSkillIds } from '@/lib/composer-commands'
 import { resolveNewConversationFastMode } from '@/lib/chat-defaults'
 import { initialConversationTitle } from '@/lib/chat-message-input'
+import { ragInjectionFromEvent } from '@/lib/rag-injection'
 
 // resolveArmedTurnFlags snapshots the CURRENT composer feature toggles for turns
 // started OUTSIDE the composer's own submit — regenerate, edit-and-resend, and
@@ -122,6 +123,60 @@ const CONV_PAGE = envNum('VITE_AIVORY_CONV_PAGE', 200)
 let convServerOffset = 0
 // Monotonic token identifying which space the in-flight list requests belong to.
 let convLoadEpoch = 0
+
+interface KnowledgeBaseSelectionSync {
+  tail: Promise<void>
+  committed: string[]
+  revision: number
+  pending: boolean
+}
+
+export interface KnowledgeBaseSelectionRequestGuard {
+  revision: number
+  pending: boolean
+}
+
+// KB selection is persisted by a separate conversation PATCH. Keep changes for
+// one conversation in click order so a slow earlier request cannot overwrite a
+// later selection. `committed` is the last server-confirmed value and is used for
+// a field-only rollback; restoring an old whole-store snapshot could otherwise
+// erase messages that were appended while the PATCH was in flight.
+const knowledgeBaseSelectionSync = new Map<string, KnowledgeBaseSelectionSync>()
+
+export function captureKnowledgeBaseSelectionGuard(
+  conversationId: string,
+): KnowledgeBaseSelectionRequestGuard {
+  const sync = knowledgeBaseSelectionSync.get(conversationId)
+  return { revision: sync?.revision ?? 0, pending: sync?.pending ?? false }
+}
+
+function captureKnowledgeBaseSelectionGuards(
+  conversations: Conversation[],
+): Map<string, KnowledgeBaseSelectionRequestGuard> {
+  return new Map(
+    conversations.map((conversation) => [
+      conversation.id,
+      captureKnowledgeBaseSelectionGuard(conversation.id),
+    ]),
+  )
+}
+
+// Exported for realtime/list reconciliation. A response that was issued before
+// the user's latest KB click must not overwrite the optimistic selection while
+// its ordered PATCH queue is still active.
+export function preservePendingKnowledgeBaseSelection(
+  incoming: Conversation,
+  current: Conversation | undefined,
+  requestGuard?: KnowledgeBaseSelectionRequestGuard,
+): Conversation {
+  const sync = knowledgeBaseSelectionSync.get(incoming.id)
+  const requestPredatesSelection = Boolean(
+    requestGuard &&
+      (requestGuard.pending || (sync?.revision ?? 0) !== requestGuard.revision),
+  )
+  if (!current || (!sync?.pending && !requestPredatesSelection)) return incoming
+  return { ...incoming, kbIds: [...(current.kbIds ?? [])] }
+}
 
 // Realtime notifications are intentionally best-effort. A title task can finish
 // after the answer stream and its thin conversation.updated event can be missed
@@ -564,6 +619,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
     // overwrite the new space's list.
     const ws = activeWorkspaceId()
     const epoch = ++convLoadEpoch
+    const kbSelectionGuards = captureKnowledgeBaseSelectionGuards(get().conversations)
     set({ loading: true, error: null })
     try {
       const { conversations: rows, has_more } = await conversationsApi.list(undefined, CONV_PAGE, 0, ws)
@@ -571,7 +627,11 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
       const conversations = rows.map(toLocalConversation)
       convServerOffset = rows.length
       set((s) => ({
-        conversations: mergeStreamingSummaries(s.conversations, conversations),
+        conversations: mergeStreamingSummaries(
+          s.conversations,
+          conversations,
+          kbSelectionGuards,
+        ),
         loaded: true,
         loading: false,
         hasMore: has_more,
@@ -614,6 +674,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
     const normalizedProjectId = projectId.trim()
     if (!normalizedProjectId) return false
     const ws = activeWorkspaceId()
+    const kbSelectionGuards = captureKnowledgeBaseSelectionGuards(get().conversations)
     try {
       const { conversations: rows } = await conversationsApi.list(
         normalizedProjectId,
@@ -627,6 +688,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
       const incoming = mergeStreamingSummaries(
         get().conversations,
         rows.map(toLocalConversation),
+        kbSelectionGuards,
       )
       set((state) => {
         let conversations = state.conversations
@@ -645,6 +707,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
 
   async loadOne(id, opts) {
     try {
+      const kbSelectionGuard = captureKnowledgeBaseSelectionGuard(id)
       const hadStreaming = Boolean(
         get()
           .conversations.find((c) => c.id === id)
@@ -681,9 +744,17 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
             hasOlder: existing.hasOlder,
             olderCursor: existing.olderCursor,
           }
-          return { conversations: replaceOrPrepend(s.conversations, merged) }
+          return {
+            conversations: replaceOrPrepend(
+              s.conversations,
+              merged,
+              kbSelectionGuard,
+            ),
+          }
         }
-        return { conversations: replaceOrPrepend(s.conversations, conv) }
+        return {
+          conversations: replaceOrPrepend(s.conversations, conv, kbSelectionGuard),
+        }
       })
       if (!hadStreaming) get().resumeStreamingMessages(id)
       return conv
@@ -1091,16 +1162,61 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
   },
 
   async setKBs(id, kbIds) {
-    const prevConversations = get().conversations
-    set((s) => ({
-      conversations: s.conversations.map((c) => (c.id === id ? { ...c, kbIds } : c)),
-    }))
-    try {
-      await conversationsApi.update(id, { kb_ids: kbIds })
-    } catch (e) {
-      set({ conversations: prevConversations })
-      toast.error(errorMessage(e, 'Failed to update knowledge bases'))
+    const desired = Array.from(new Set(kbIds.map((kbId) => kbId.trim()).filter(Boolean)))
+    const current = get().conversations.find((conversation) => conversation.id === id)
+    let sync = knowledgeBaseSelectionSync.get(id)
+    if (!sync) {
+      sync = {
+        tail: Promise.resolve(),
+        committed: [...(current?.kbIds ?? [])],
+        revision: 0,
+        pending: false,
+      }
+      knowledgeBaseSelectionSync.set(id, sync)
+    } else if (!sync.pending) {
+      // A realtime update may have changed the committed selection since this
+      // tab's last mutation. Start a new queue from the value currently shown.
+      sync.committed = [...(current?.kbIds ?? [])]
     }
+    const revision = ++sync.revision
+    sync.pending = true
+    set((s) => ({
+      conversations: s.conversations.map((c) => (c.id === id ? { ...c, kbIds: desired } : c)),
+    }))
+    const previous = sync.tail
+    const operation = previous
+      .catch(() => undefined)
+      .then(async () => {
+        try {
+          const updated = await conversationsApi.update(id, { kb_ids: desired })
+          sync!.committed = [...(updated.kb_ids ?? desired)]
+          if (sync!.revision === revision) {
+            set((state) => ({
+              conversations: state.conversations.map((conversation) =>
+                conversation.id === id
+                  ? { ...conversation, kbIds: [...sync!.committed] }
+                  : conversation,
+              ),
+            }))
+          }
+        } catch (e) {
+          if (sync!.revision === revision) {
+            set((state) => ({
+              conversations: state.conversations.map((conversation) =>
+                conversation.id === id
+                  ? { ...conversation, kbIds: [...sync!.committed] }
+                  : conversation,
+              ),
+            }))
+          }
+          toast.error(errorMessage(e, 'Failed to update knowledge bases'))
+        }
+      })
+      .finally(() => {
+        if (sync!.tail === operation) sync!.pending = false
+      })
+    sync.tail = operation
+    await operation
   },
 
   resumeStreamingMessages(conversationId, opts) {
@@ -1137,6 +1253,12 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
   },
 
   async sendMessage(input) {
+    // Capture selection before any stop/path reconciliation await. The request
+    // carries this exact turn snapshot, so a KB toggle made after Send belongs
+    // to the next turn and a slow conversation PATCH cannot invert the scope.
+    const turnKnowledgeBaseIds = [
+      ...(get().conversations.find((conversation) => conversation.id === input.conversationId)?.kbIds ?? []),
+    ]
     // A stop may have closed the POST reader before its server ids arrived. Wait
     // for the bounded canonical-path reconcile before reading the current leaf or
     // creating another optimistic turn. The composer does not await this action,
@@ -1371,6 +1493,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
         {
           text: input.text,
           generation_id: generationId,
+          kb_ids: turnKnowledgeBaseIds,
           // §fast-mode: a fast turn omits model_id (the server resolves + hides the
           // fast model). Advanced turns send the picked model.
           model_id: input.fast ? undefined : input.modelId,
@@ -1475,17 +1598,12 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
             }))
             break
           case 'rag': {
-            // §6.2 retrieval lifecycle: the orchestrator emits one rag event
-            // each time it decides to inject context (status=retrieve|full_text
-            // |full_doc) or returns a warning. Surface it as a transient
-            // "ragInjection" line that the UI can render above citations.
+            // §6.2 retrieval lifecycle: legacy injection states and KB
+            // searching/expanding/found/partial/no_hit/error all reduce into the
+            // same transient line above citations.
             updateAssistant(set, input.conversationId, serverAssistantId, (m) => ({
               ...m,
-              ragInjection: {
-                strategy: (ev.status as string | undefined) ?? '',
-                summary: ev.summary ?? '',
-                at: Date.now(),
-              },
+              ragInjection: ragInjectionFromEvent(ev, Date.now()),
             }))
             break
           }
@@ -1701,6 +1819,9 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
   },
 
   async regenerate(conversationId, assistantId, modelId) {
+    const turnKnowledgeBaseIds = [
+      ...(get().conversations.find((conversation) => conversation.id === conversationId)?.kbIds ?? []),
+    ]
     const assistantWasLocal = isKnownLocalMessageId(
       get().conversations.find((c) => c.id === conversationId)?.messages ?? [],
       assistantId,
@@ -1817,6 +1938,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
         {
           assistant_id: assistantId,
           generation_id: generationId,
+          kb_ids: turnKnowledgeBaseIds,
           model_id: fast ? undefined : modelId,
           mode,
           verify,
@@ -1933,6 +2055,12 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
             updateAssistant(set, conversationId, serverAssistantId, (m) => ({
               ...m,
               reasoning: appendThinkingDelta(m.reasoning ?? [], ev.text ?? ''),
+            }))
+            break
+          case 'rag':
+            updateAssistant(set, conversationId, serverAssistantId, (m) => ({
+              ...m,
+              ragInjection: ragInjectionFromEvent(ev, Date.now()),
             }))
             break
           case 'research_plan':
@@ -2334,11 +2462,7 @@ function applyReplayEvent(
     case 'rag':
       updateAssistant(set, conversationId, assistantId, (m) => ({
         ...m,
-        ragInjection: {
-          strategy: (ev.status as string | undefined) ?? '',
-          summary: ev.summary ?? '',
-          at: Date.now(),
-        },
+        ragInjection: ragInjectionFromEvent(ev, Date.now()),
       }))
       break
     case 'research_plan':
@@ -2848,11 +2972,15 @@ function truncateToParent(messages: Message[], parentId: string | undefined): Me
   return messages.slice(0, idx + 1)
 }
 
-function replaceOrPrepend(list: Conversation[], next: Conversation): Conversation[] {
+function replaceOrPrepend(
+  list: Conversation[],
+  next: Conversation,
+  kbSelectionGuard?: KnowledgeBaseSelectionRequestGuard,
+): Conversation[] {
   const idx = list.findIndex((c) => c.id === next.id)
   if (idx < 0) return [next, ...list]
   const out = list.slice()
-  out[idx] = next
+  out[idx] = preservePendingKnowledgeBaseSelection(next, list[idx], kbSelectionGuard)
   return out
 }
 
@@ -2873,10 +3001,20 @@ export function collectDoomedConversationIds(list: Conversation[], id: string): 
   return doomed
 }
 
-function mergeStreamingSummaries(existing: Conversation[], incoming: Conversation[]): Conversation[] {
+function mergeStreamingSummaries(
+  existing: Conversation[],
+  incoming: Conversation[],
+  kbSelectionGuards?: Map<string, KnowledgeBaseSelectionRequestGuard>,
+): Conversation[] {
   const byID = new Map(existing.map((c) => [c.id, c]))
-  return incoming.map((next) => {
+  return incoming.map((remote) => {
+    let next = remote
     const cur = byID.get(next.id)
+    next = preservePendingKnowledgeBaseSelection(
+      next,
+      cur,
+      kbSelectionGuards?.get(next.id),
+    )
     if (!cur || cur.messages.length === 0) return next
     const streaming = cur.messages.some((m) => m.streaming)
     return {

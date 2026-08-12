@@ -133,7 +133,7 @@ export function ToolSelectionDialog({
           <DialogTitle>{t('composer.toolSelection.title', { defaultValue: 'Choose tools' })}</DialogTitle>
           <DialogDescription>
             {t('composer.toolSelection.description', {
-              defaultValue: 'Automatic and on modes will only use tools selected here.',
+              defaultValue: 'The model will only use tools selected here.',
             })}
           </DialogDescription>
         </DialogHeader>

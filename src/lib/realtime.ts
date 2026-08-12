@@ -38,11 +38,14 @@ import {
   useConversations,
   toLocalConversation,
   collectDoomedConversationIds,
+  captureKnowledgeBaseSelectionGuard,
+  preservePendingKnowledgeBaseSelection,
   MSG_PAGE,
 } from '@/store/conversations'
 import { activeWorkspaceId } from '@/store/workspaces'
 import { envNum } from '@/lib/env-config'
 import type { Conversation } from '@/types/chat'
+import type { KnowledgeBaseSelectionRequestGuard } from '@/store/conversations'
 
 const SYNC_THROTTLE_MS = envNum('VITE_AIVORY_REALTIME_SYNC_THROTTLE_MS', 800)
 const RECONNECT_MAX_MS = 30_000
@@ -224,6 +227,9 @@ async function runListSync(): Promise<void> {
   // the await would pass even when the whole identity changed underneath us.
   const uid = currentUserId
   if (!uid) return
+  const kbSelectionGuards = new Map(
+    useConversations.getState().conversations.map((conversation) => [conversation.id, captureKnowledgeBaseSelectionGuard(conversation.id)]),
+  )
   syncing = true
   try {
     const ws = activeWorkspaceId()
@@ -233,7 +239,7 @@ async function runListSync(): Promise<void> {
     if (ws !== activeWorkspaceId() || currentUserId !== uid || useAuth.getState().user?.id !== uid) return
     const incoming = rows.map(toLocalConversation)
     useConversations.setState((s) => ({
-      conversations: mergeRemoteList(s.conversations, incoming),
+      conversations: mergeRemoteList(s.conversations, incoming, kbSelectionGuards),
     }))
     await refreshMissingMeta(incoming, uid, ws)
   } catch {
@@ -264,13 +270,20 @@ async function refreshMissingMeta(incoming: Conversation[], uid: string, ws: str
   pendingMetaIds.clear()
   for (const id of missing.slice(0, META_REFRESH_MAX)) {
     try {
+      const kbSelectionGuard = captureKnowledgeBaseSelectionGuard(id)
       const resp = await conversationsApi.get(id, { limit: 1 })
       if (ws !== activeWorkspaceId() || currentUserId !== uid) return
       const meta = toLocalConversation(resp.conversation)
       useConversations.setState((s) => ({
         conversations: s.conversations.map((c) =>
           c.id === id
-            ? { ...meta, messages: c.messages, lastParams: c.lastParams, hasOlder: c.hasOlder, olderCursor: c.olderCursor }
+            ? {
+                ...preservePendingKnowledgeBaseSelection(meta, c, kbSelectionGuard),
+                messages: c.messages,
+                lastParams: c.lastParams,
+                hasOlder: c.hasOlder,
+                olderCursor: c.olderCursor,
+              }
             : c,
         ),
       }))
@@ -287,7 +300,11 @@ async function refreshMissingMeta(incoming: Conversation[], uid: string, ws: str
  * sort bump. Rows beyond the synced page are left untouched; tombstoned ids
  * (deleted while this page was in flight) are never re-inserted.
  */
-function mergeRemoteList(existing: Conversation[], incoming: Conversation[]): Conversation[] {
+function mergeRemoteList(
+  existing: Conversation[],
+  incoming: Conversation[],
+  kbSelectionGuards?: Map<string, KnowledgeBaseSelectionRequestGuard>,
+): Conversation[] {
   const merged = new Map<string, Conversation>(existing.map((c) => [c.id, c]))
   for (const next of incoming) {
     if (isConversationTombstoned(next.id)) continue
@@ -297,8 +314,9 @@ function mergeRemoteList(existing: Conversation[], incoming: Conversation[]): Co
       continue
     }
     const streaming = cur.messages.some((m) => m.streaming)
+    const protectedNext = preservePendingKnowledgeBaseSelection(next, cur, kbSelectionGuards?.get(next.id))
     merged.set(next.id, {
-      ...next,
+      ...protectedNext,
       messages: cur.messages,
       lastParams: cur.lastParams,
       hasOlder: cur.hasOlder,

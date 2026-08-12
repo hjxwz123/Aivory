@@ -531,6 +531,9 @@ export default function ChatThread() {
             autoFocus
             conversationId={conversation.id}
             kbIds={conversation.kbIds}
+            projectKBId={project?.kbId}
+            projectKBEmbeddingModelId={project?.kbEmbeddingModelId}
+            projectKBEmbeddingDim={project?.kbEmbeddingDim}
             onKBChange={(ids) => void setKBs(conversation.id, ids)}
             modelPickerInHeader
           />
