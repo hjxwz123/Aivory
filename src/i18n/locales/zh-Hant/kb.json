@@ -3,24 +3,23 @@
   "lead": "長期保留的知識庫,所有對話都可以檢索。文件上傳一次,各處都能引用。",
   "new": "新建知識庫",
   "emptyTitle": "暫無知識庫",
-  "emptyBody": "知識庫把一組文件繫結到一個嵌入模型。先建一個開始使用。",
+  "emptyBody": "知識庫會保存文件，供各個對話使用。先建立一個開始使用。",
   "createFirst": "建立第一個知識庫",
   "stats": {
-    "dim": "{{dim}} 維向量",
+    "dim": "{{dim}} 項索引資料",
     "created": "建立於 {{when}}"
   },
   "dialog": {
     "title": "新建知識庫",
-    "body": "嵌入模型在你上傳第一個文件後鎖定 — 它決定向量空間。",
+    "body": "文件上傳一次後，任何對話都可以使用這個知識庫。",
     "name": "名稱",
     "namePlaceholder": "公司寫作風格指南",
     "description": "描述",
-    "embeddingModel": "嵌入模型",
-    "pickModel": "選擇一個模型",
     "create": "建立",
     "created": "知識庫已建立",
     "nameRequired": "請填寫名稱",
-    "nameExists": "已存在同名知識庫。"
+    "nameExists": "已存在同名知識庫。",
+    "unavailable": "知識庫暫時無法使用，請聯絡管理員或稍後再試。"
   },
   "detail": {
     "uploadButton": "上傳文件",
@@ -38,7 +37,7 @@
     "status": {
       "pending": "排隊中",
       "parsing": "解析中",
-      "embedding": "嵌入中",
+      "embedding": "索引中",
       "ready": "就緒",
       "failed": "失敗"
     },
@@ -60,5 +59,5 @@
   "deleted": "知識庫已刪除",
   "deleteAction": "刪除知識庫",
   "deleteTitle": "刪除知識庫？",
-  "deleteBody": "將永久刪除「{{name}}」及其全部文件與向量。引用它的對話會自動取消引用。此操作無法復原。"
+  "deleteBody": "將永久刪除「{{name}}」及其全部文件與索引資料。引用它的對話會自動取消引用。此操作無法復原。"
 }

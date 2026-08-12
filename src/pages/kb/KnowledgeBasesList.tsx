@@ -6,13 +6,12 @@ import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { Plus, Database, MoreHorizontal, Trash2 } from 'lucide-react'
-import { ApiError, kbsApi, modelsApi } from '@/api'
-import type { ApiKnowledgeBase, ApiModel } from '@/api/types'
+import { ApiError, kbsApi } from '@/api'
+import type { ApiKnowledgeBase } from '@/api/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Field } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ContentHeader } from '@/components/layout/content-header'
@@ -41,11 +40,10 @@ export default function KnowledgeBasesList() {
   const activeWsId = useWorkspaces((s) => s.activeId)
   const wsSwitching = useWorkspaces((s) => s.switching)
   const [rows, setRows] = useState<ApiKnowledgeBase[]>([])
-  const [models, setModels] = useState<ApiModel[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [open, setOpen] = useState(false)
-  const [draft, setDraft] = useState({ name: '', description: '', embedding_model_id: '' })
+  const [draft, setDraft] = useState({ name: '', description: '' })
   const [creating, setCreating] = useState(false)
   const creatingRef = useRef(false)
   // Delete-KB confirmation (removes the KB + its documents/vectors, and
@@ -62,13 +60,9 @@ export default function KnowledgeBasesList() {
     setLoading(true)
     setLoadError('')
     try {
-      const [kb, em] = await Promise.all([kbsApi.list(activeWorkspaceId()), modelsApi.listEmbedding()])
+      const kb = await kbsApi.list(activeWorkspaceId())
       if (epoch !== loadEpochRef.current) return // superseded by a space switch
       setRows(kb)
-      setModels(em.models)
-      if (em.models.length > 0 && !draft.embedding_model_id) {
-        setDraft((d) => ({ ...d, embedding_model_id: em.default_id || em.models[0].id }))
-      }
     } catch (e) {
       if (epoch !== loadEpochRef.current) return
       const message = e instanceof ApiError ? e.message : t('common:common.error')
@@ -112,7 +106,7 @@ export default function KnowledgeBasesList() {
       await kbsApi.create({ ...draft, workspace_id: activeWorkspaceId() })
       toast.success(t('kb:dialog.created'))
       setOpen(false)
-      setDraft({ name: '', description: '', embedding_model_id: draft.embedding_model_id })
+      setDraft({ name: '', description: '' })
       await load()
     } catch (e) {
       const msg = e instanceof ApiError ? e.message : t('common:common.error')
@@ -121,7 +115,9 @@ export default function KnowledgeBasesList() {
           ? t('kb:limitReached', { defaultValue: 'You’ve reached your plan’s knowledge-base limit.' })
           : msg === 'name_exists'
             ? t('kb:dialog.nameExists', { defaultValue: 'A knowledge base with this name already exists.' })
-          : msg,
+            : msg === 'knowledge_base_unavailable'
+              ? t('kb:dialog.unavailable')
+              : msg,
       )
     } finally {
       creatingRef.current = false
@@ -261,23 +257,6 @@ export default function KnowledgeBasesList() {
                   onChange={(e) => setDraft({ ...draft, description: e.target.value })}
                 />
               </Field>
-              <Field label={t('kb:dialog.embeddingModel')} htmlFor="kb-em">
-                <Select
-                  value={draft.embedding_model_id}
-                  onValueChange={(v) => setDraft({ ...draft, embedding_model_id: v })}
-                >
-                  <SelectTrigger id="kb-em">
-                    <SelectValue placeholder={t('kb:dialog.pickModel')} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {models.map((m) => (
-                      <SelectItem key={m.id} value={m.id}>
-                        {m.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
             </div>
           </DialogBody>
           <DialogFooter>
@@ -304,7 +283,7 @@ export default function KnowledgeBasesList() {
               {t('kb:deleteBody', {
                 name: toDelete?.name ?? '',
                 defaultValue:
-                  'This permanently deletes “{{name}}”, all its documents and their embeddings. Conversations that reference it will be unlinked. This cannot be undone.',
+                  'This permanently deletes “{{name}}” and all its documents and index data. Conversations that reference it will be unlinked. This cannot be undone.',
               })}
             </DialogDescription>
           </DialogHeader>

@@ -9,7 +9,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { FolderClosed, Library, ChevronDown, FileText, ImageIcon } from 'lucide-react'
 import { adminApi, ApiError } from '@/api'
-import type { ApiProject, ApiKnowledgeBase, ApiDocument, ApiUser, ApiAdminImage } from '@/api/types'
+import type { ApiProject, ApiAdminKnowledgeBase, ApiDocument, ApiUser, ApiAdminImage } from '@/api/types'
 import { AdminDetailHeader } from '@/components/admin/admin-detail-header'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -43,7 +43,7 @@ export default function AdminUserLibrary() {
   const { id = '' } = useParams<{ id: string }>()
   const [user, setUser] = useState<ApiUser | null>(null)
   const [projects, setProjects] = useState<ApiProject[]>([])
-  const [kbs, setKbs] = useState<ApiKnowledgeBase[]>([])
+  const [kbs, setKbs] = useState<ApiAdminKnowledgeBase[]>([])
   const [images, setImages] = useState<ApiAdminImage[]>([])
   const [imagesMore, setImagesMore] = useState(false)
   const [imagesLoadingMore, setImagesLoadingMore] = useState(false)

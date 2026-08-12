@@ -519,8 +519,6 @@ export default function ProjectDetail() {
                 conversationId={pendingConversationId}
                 kbIds={selectedKnowledgeBaseIds}
                 projectKBId={project.kbId}
-                projectKBEmbeddingModelId={project.kbEmbeddingModelId}
-                projectKBEmbeddingDim={project.kbEmbeddingDim}
                 onKBChange={setSelectedKnowledgeBaseIds}
                 ensureConversationId={ensureProjectConversation}
                 onAttachmentsDrained={discardDraftConversation}

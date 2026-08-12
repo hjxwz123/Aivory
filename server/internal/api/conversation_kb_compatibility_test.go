@@ -94,8 +94,11 @@ func TestUpdateConversationRejectsIncompatibleKnowledgeBases(t *testing.T) {
 			if rec.Code != http.StatusConflict {
 				t.Fatalf("status=%d body=%s, want 409", rec.Code, rec.Body.String())
 			}
-			if !strings.Contains(rec.Body.String(), store.ErrMixedKBEmbeddingModels.Error()) {
-				t.Fatalf("body=%s, want compatibility error", rec.Body.String())
+			if !strings.Contains(rec.Body.String(), errKnowledgeBaseSelectionIncompatible.Error()) {
+				t.Fatalf("body=%s, want generic compatibility error", rec.Body.String())
+			}
+			if strings.Contains(rec.Body.String(), "embedding") {
+				t.Fatalf("body=%s exposes retrieval implementation details", rec.Body.String())
 			}
 			if got := storedKBIDs(); len(got) != 0 {
 				t.Fatalf("rejected patch changed kb_ids to %v", got)
@@ -147,6 +150,59 @@ func TestUpdateConversationRejectsIncompatibleKnowledgeBases(t *testing.T) {
 			t.Fatalf("stored kb_ids=%v, want only authorized kb-a", got)
 		}
 	})
+}
+
+func TestMessageEndpointsHideKnowledgeBaseCompatibilityDetails(t *testing.T) {
+	db := openMigrated(t, filepath.Join(t.TempDir(), "message-kb-compatibility-response.db"))
+	defer db.Close()
+
+	mustExec(t, db, `INSERT INTO users(id,email,password_hash,role,status) VALUES('u1','u1@example.test','h','user','active')`)
+	mustExec(t, db, `INSERT INTO channels(id,name,type) VALUES('ch1','Embedding','openai')`)
+	mustExec(t, db, `INSERT INTO models(id,channel_id,kind,request_id,label,dim) VALUES
+		('index-a','ch1','embedding','index-a','Index A',3),
+		('index-b','ch1','embedding','index-b','Index B',3)`)
+	mustExec(t, db, `INSERT INTO conversations(id,user_id,title) VALUES('c1','u1','Conversation')`)
+	mustExec(t, db, `INSERT INTO knowledge_bases(id,user_id,name,embedding_model_id,embedding_dim) VALUES
+		('kb-a','u1','A','index-a',3),
+		('kb-b','u1','B','index-b',3)`)
+
+	user := &store.User{ID: "u1", Role: "user", Status: "active"}
+	request := func(target, body string, endpoint handler) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, target, strings.NewReader(body))
+		req.Header.Set("content-type", "application/json")
+		ctx := context.WithValue(req.Context(), pathCtxKey{}, map[string]string{"id": "c1"})
+		ctx = context.WithValue(ctx, userCtxKey{}, user)
+		req = req.WithContext(ctx)
+		rec := httptest.NewRecorder()
+		endpoint(Deps{DB: db}, rec, req)
+		return rec
+	}
+	assertGenericConflict := func(rec *httptest.ResponseRecorder) {
+		t.Helper()
+		if rec.Code != http.StatusConflict {
+			t.Fatalf("status=%d body=%s, want 409", rec.Code, rec.Body.String())
+		}
+		if body := rec.Body.String(); !strings.Contains(body, errKnowledgeBaseSelectionIncompatible.Error()) || strings.Contains(body, "embedding") {
+			t.Fatalf("response exposes retrieval implementation: %s", body)
+		}
+	}
+
+	assertGenericConflict(request(
+		"/api/conversations/c1/messages",
+		`{"text":"Question","kb_ids":["kb-a","kb-b"]}`,
+		postMessageHandler,
+	))
+	assertGenericConflict(request(
+		"/api/conversations/c1/regenerate",
+		`{"assistant_id":"assistant-1","kb_ids":["kb-a","kb-b"]}`,
+		regenerateHandler,
+	))
+
+	var messageCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM messages WHERE conversation_id='c1'`).Scan(&messageCount); err != nil || messageCount != 0 {
+		t.Fatalf("rejected requests persisted %d messages, err=%v", messageCount, err)
+	}
 }
 
 func stringSet(values []string) map[string]bool {

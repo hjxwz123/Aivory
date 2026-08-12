@@ -571,7 +571,7 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, errInvalidInput):
 			writeError(w, http.StatusBadRequest, err)
 		case errors.Is(err, store.ErrMixedKBEmbeddingModels):
-			writeError(w, http.StatusConflict, err)
+			writeError(w, http.StatusConflict, errKnowledgeBaseSelectionIncompatible)
 		case errors.Is(err, store.ErrNotFound):
 			writeError(w, http.StatusNotFound, errNotFound)
 		default:
@@ -990,7 +990,7 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, errInvalidInput):
 			writeError(w, http.StatusBadRequest, err)
 		case errors.Is(err, store.ErrMixedKBEmbeddingModels):
-			writeError(w, http.StatusConflict, err)
+			writeError(w, http.StatusConflict, errKnowledgeBaseSelectionIncompatible)
 		case errors.Is(err, store.ErrNotFound):
 			writeError(w, http.StatusNotFound, errNotFound)
 		default:

@@ -105,6 +105,9 @@ func TestConcurrentProjectWithLibraryHTTPCreateLeavesNoOrphan(t *testing.T) {
 	mustExec(t, db, `INSERT INTO users(id,email,password_hash,role,status,group_id) VALUES('project-library-user','project-library-user@example.test','h','user','active','project-library-capped')`)
 	mustExec(t, db, `INSERT INTO channels(id,name,type) VALUES('project-library-channel','Embedding','openai')`)
 	mustExec(t, db, `INSERT INTO models(id,channel_id,kind,request_id,label,enabled,dim) VALUES('project-library-embed','project-library-channel','embedding','embed','Embedding',1,3)`)
+	if err := store.SetSetting(db, "embedding_model_id", "project-library-embed"); err != nil {
+		t.Fatalf("configure project library index: %v", err)
+	}
 
 	d := Deps{DB: db}
 	user := &store.User{ID: "project-library-user", Role: "user", Status: "active", GroupID: "project-library-capped"}
@@ -152,13 +155,16 @@ func TestConcurrentKBHTTPCreateMapsAtomicCommercialLimit(t *testing.T) {
 	mustExec(t, db, `INSERT INTO users(id,email,password_hash,role,status,group_id) VALUES('kb-user','kb-user@example.test','h','user','active','kb-capped')`)
 	mustExec(t, db, `INSERT INTO channels(id,name,type) VALUES('kb-cap-channel','Embedding','openai')`)
 	mustExec(t, db, `INSERT INTO models(id,channel_id,kind,request_id,label,enabled,dim) VALUES('kb-cap-embed','kb-cap-channel','embedding','embed','Embedding',1,3)`)
+	if err := store.SetSetting(db, "embedding_model_id", "kb-cap-embed"); err != nil {
+		t.Fatalf("configure knowledge-base index: %v", err)
+	}
 
 	d := Deps{DB: db}
 	user := &store.User{ID: "kb-user", Role: "user", Status: "active", GroupID: "kb-capped"}
 	create := func(name string) func() commercialCreateHTTPResult {
 		return func() commercialCreateHTTPResult {
 			rec := httptest.NewRecorder()
-			body := `{"name":"` + name + `","embedding_model_id":"kb-cap-embed"}`
+			body := `{"name":"` + name + `"}`
 			createKBHandler(d, rec, commercialCreateRequest(t, "/api/kbs", body, user))
 			return commercialCreateHTTPResult{status: rec.Code, body: rec.Body.String()}
 		}

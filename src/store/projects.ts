@@ -246,8 +246,6 @@ async function toLocalProject(p: ApiProject, docs: ApiDocument[]): Promise<Proje
   return {
     id: p.id,
     kbId: p.kb_id || undefined,
-    kbEmbeddingModelId: p.kb_embedding_model_id || undefined,
-    kbEmbeddingDim: p.kb_embedding_dim || undefined,
     name: p.name,
     description: p.description,
     instructions: p.instructions,

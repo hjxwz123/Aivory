@@ -94,7 +94,7 @@
     "retryKnowledgeBases": "重新載入",
     "noKnowledgeBases": "還沒有知識庫。",
     "manageKnowledgeBases": "管理知識庫",
-    "incompatibleKnowledgeBase": "與已選知識庫的向量模型不相容",
+    "incompatibleKnowledgeBase": "此知識庫暫時無法與目前選擇一起使用",
     "knowledgeBaseMentionLabel": "附加知識庫",
     "knowledgeBaseMentionEmpty": "沒有符合的知識庫",
     "removeKnowledgeBase": "移除知識庫 {{name}}",

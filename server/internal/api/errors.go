@@ -24,6 +24,12 @@ var (
 	errProjectLimit = errors.New("project_limit_reached")
 	errKBLimit      = errors.New("kb_limit_reached")
 
+	// Knowledge-base retrieval is configured by administrators. User-facing
+	// APIs deliberately expose stable capability errors instead of model names,
+	// dimensions, or other indexing implementation details.
+	errKnowledgeBaseUnavailable           = errors.New("knowledge_base_unavailable")
+	errKnowledgeBaseSelectionIncompatible = errors.New("knowledge_base_selection_incompatible")
+
 	// Workspaces (§workspaces). Stable machine codes: creation gated off for the
 	// group / owned-workspace cap reached. Deliberately NOT "account_suspended" —
 	// the client force-logs-out on that one.

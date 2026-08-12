@@ -521,7 +521,7 @@ func updateConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		}
 		if err := store.ValidateKBEmbeddingCompatibility(r.Context(), d.DB, compatibilityIDs); err != nil {
 			if errors.Is(err, store.ErrMixedKBEmbeddingModels) {
-				writeError(w, http.StatusConflict, err)
+				writeError(w, http.StatusConflict, errKnowledgeBaseSelectionIncompatible)
 				return
 			}
 			writeError(w, http.StatusInternalServerError, err)
@@ -997,7 +997,7 @@ func listConversationDocsHandler(d Deps, w http.ResponseWriter, r *http.Request)
 		writeError(w, 500, err)
 		return
 	}
-	writeJSON(w, 200, docs)
+	writeJSON(w, 200, userDocuments(docs))
 }
 
 // retryConversationDocumentHandler requeues a failed conversation-scoped

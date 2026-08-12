@@ -16,6 +16,42 @@ var (
 	projectDocUploadRateLimit          = envcfg.Int("AIVORY_API_RATE_LIMIT_USER_2", 20)
 )
 
+// projectResponse omits the project library's retrieval implementation. The
+// knowledge-base id remains public because it is the stable attachment scope;
+// its index model and dimensions never need to leave the server.
+type projectResponse struct {
+	ID             string `json:"id"`
+	UserID         string `json:"user_id"`
+	Name           string `json:"name"`
+	Description    string `json:"description"`
+	Instructions   string `json:"instructions"`
+	Accent         string `json:"accent"`
+	Emoji          string `json:"emoji"`
+	Pinned         bool   `json:"pinned"`
+	KBID           string `json:"kb_id"`
+	AutoAddUploads bool   `json:"auto_add_uploads"`
+	CreatedAt      int64  `json:"created_at"`
+	UpdatedAt      int64  `json:"updated_at"`
+	WorkspaceID    string `json:"workspace_id,omitempty"`
+}
+
+func userProject(p store.Project) projectResponse {
+	return projectResponse{
+		ID: p.ID, UserID: p.UserID, Name: p.Name, Description: p.Description,
+		Instructions: p.Instructions, Accent: p.Accent, Emoji: p.Emoji, Pinned: p.Pinned,
+		KBID: p.KBID, AutoAddUploads: p.AutoAddUploads, CreatedAt: p.CreatedAt,
+		UpdatedAt: p.UpdatedAt, WorkspaceID: p.WorkspaceID,
+	}
+}
+
+func userProjects(rows []store.Project) []projectResponse {
+	items := make([]projectResponse, 0, len(rows))
+	for _, project := range rows {
+		items = append(items, userProject(project))
+	}
+	return items
+}
+
 // listProjectsHandler returns the user's projects.
 func listProjectsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
@@ -36,7 +72,7 @@ func listProjectsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
-	writeJSON(w, 200, rows)
+	writeJSON(w, 200, userProjects(rows))
 }
 
 type createProjectReq struct {
@@ -95,9 +131,11 @@ func createProjectHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	// The store re-evaluates this cap while holding the creator row lock and
 	// inserts in the same transaction. 0 remains unlimited.
 	maxProjects, _ := groupCapFor(d, r, u.ID, u.GroupID)
-	// Find embedding model.
-	embeds, err := store.ListModels(r.Context(), d.DB, "embedding", true)
-	if err != nil || len(embeds) == 0 {
+	// Project libraries use the same administrator-selected embedding model as
+	// standalone knowledge bases. The model identity remains server-side; a
+	// user cannot choose or override it through the project request.
+	embed, err := configuredEmbeddingModel(r.Context(), d)
+	if err != nil {
 		// Allow project without KB if no embedding model.
 		p, err := store.CreateProjectWithLimit(r.Context(), d.DB, store.Project{
 			UserID: u.ID, Name: req.Name, Description: req.Description, Instructions: req.Instructions,
@@ -115,7 +153,7 @@ func createProjectHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 			writeError(w, 500, err)
 			return
 		}
-		writeJSON(w, 201, p)
+		writeJSON(w, 201, userProject(*p))
 		return
 	}
 	p, err := store.CreateProjectWithLibraryAndLimit(r.Context(), d.DB, store.Project{
@@ -123,7 +161,7 @@ func createProjectHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		Accent: req.Accent, Emoji: req.Emoji, WorkspaceID: req.WorkspaceID,
 	}, store.KnowledgeBase{
 		UserID: u.ID, Name: req.Name + " — project library",
-		EmbeddingModelID: embeds[0].ID, EmbeddingDim: embeds[0].Dim,
+		EmbeddingModelID: embed.ID, EmbeddingDim: embed.Dim,
 		WorkspaceID: req.WorkspaceID,
 	}, maxProjects)
 	if err != nil {
@@ -142,7 +180,7 @@ func createProjectHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
-	writeJSON(w, 201, p)
+	writeJSON(w, 201, userProject(*p))
 }
 
 // getProjectHandler returns one project + its docs and conversations.
@@ -160,8 +198,8 @@ func getProjectHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 	convs, _ := store.ListConversations(r.Context(), d.DB, u.ID, p.ID, "active", projectDetailConversationsPageSize, 0)
 	writeJSON(w, 200, map[string]any{
-		"project":       p,
-		"documents":     docs,
+		"project":       userProject(*p),
+		"documents":     userDocuments(docs),
 		"conversations": convs,
 	})
 }
@@ -199,7 +237,7 @@ func updateProjectHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, errNotFound)
 		return
 	}
-	writeJSON(w, 200, upd)
+	writeJSON(w, 200, userProject(*upd))
 }
 
 // deleteProjectHandler removes the project.
@@ -233,7 +271,7 @@ func listProjectDocsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	docs, _ := store.ListDocumentsForUser(r.Context(), d.DB, "kb", p.KBID, u.ID)
-	writeJSON(w, 200, docs)
+	writeJSON(w, 200, userDocuments(docs))
 }
 
 // uploadProjectDocHandler ingests a new document into the project KB.
@@ -260,7 +298,7 @@ func uploadProjectDocHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.RAG.Ingest(doc.ID)
-	writeJSON(w, 201, doc)
+	writeJSON(w, 201, userDocument(doc))
 }
 
 // deleteProjectDocHandler removes a document from the project KB.

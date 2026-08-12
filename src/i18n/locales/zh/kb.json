@@ -3,24 +3,23 @@
   "lead": "长期保留的知识库,所有对话都可以检索。文档上传一次,各处都能引用。",
   "new": "新建知识库",
   "emptyTitle": "暂无知识库",
-  "emptyBody": "知识库把一组文档绑定到一个嵌入模型。先建一个开始使用。",
+  "emptyBody": "知识库会保存文档，供各个对话使用。先创建一个开始使用。",
   "createFirst": "创建第一个知识库",
   "stats": {
-    "dim": "{{dim}} 维向量",
+    "dim": "{{dim}} 项索引数据",
     "created": "创建于 {{when}}"
   },
   "dialog": {
     "title": "新建知识库",
-    "body": "嵌入模型在你上传第一个文档后锁定 — 它决定向量空间。",
+    "body": "文档上传一次后，任何对话都可以使用这个知识库。",
     "name": "名称",
     "namePlaceholder": "公司写作风格指南",
     "description": "描述",
-    "embeddingModel": "嵌入模型",
-    "pickModel": "选择一个模型",
     "create": "创建",
     "created": "知识库已创建",
     "nameRequired": "请填写名称",
-    "nameExists": "已存在同名知识库。"
+    "nameExists": "已存在同名知识库。",
+    "unavailable": "知识库暂时不可用，请联系管理员或稍后重试。"
   },
   "detail": {
     "uploadButton": "上传文档",
@@ -38,7 +37,7 @@
     "status": {
       "pending": "排队中",
       "parsing": "解析中",
-      "embedding": "嵌入中",
+      "embedding": "索引中",
       "ready": "就绪",
       "failed": "失败"
     },
@@ -60,5 +59,5 @@
   "deleted": "知识库已删除",
   "deleteAction": "删除知识库",
   "deleteTitle": "删除知识库？",
-  "deleteBody": "将永久删除「{{name}}」及其全部文档与向量。引用它的对话会自动取消引用。此操作不可恢复。"
+  "deleteBody": "将永久删除「{{name}}」及其全部文档与索引数据。引用它的对话会自动取消引用。此操作不可恢复。"
 }

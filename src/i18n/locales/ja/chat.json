@@ -94,7 +94,7 @@
     "retryKnowledgeBases": "再試行",
     "noKnowledgeBases": "ナレッジベースはまだありません。",
     "manageKnowledgeBases": "ナレッジベースを管理",
-    "incompatibleKnowledgeBase": "選択済みのものと異なる埋め込みモデルを使用しています",
+    "incompatibleKnowledgeBase": "このライブラリは現在の選択と一緒に使用できません",
     "knowledgeBaseMentionLabel": "ナレッジベースを添付",
     "knowledgeBaseMentionEmpty": "一致するナレッジベースがありません",
     "removeKnowledgeBase": "ナレッジベース {{name}} を削除",

@@ -94,7 +94,7 @@
     "retryKnowledgeBases": "Réessayer",
     "noKnowledgeBases": "Aucune base de connaissances pour l'instant.",
     "manageKnowledgeBases": "Gérer les bases de connaissances",
-    "incompatibleKnowledgeBase": "Utilise un autre modèle d'embedding",
+    "incompatibleKnowledgeBase": "Cette bibliothèque ne peut pas être utilisée avec la sélection actuelle",
     "knowledgeBaseMentionLabel": "Joindre une base de connaissances",
     "knowledgeBaseMentionEmpty": "Aucune base de connaissances correspondante",
     "removeKnowledgeBase": "Retirer la base de connaissances {{name}}",
