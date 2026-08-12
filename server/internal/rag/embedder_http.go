@@ -305,7 +305,7 @@ func (e *httpEmbedder) embedOne(ctx context.Context, texts []string) ([][]float3
 func (e *httpEmbedder) endpoint() string {
 	base := strings.TrimRight(e.baseURL, "/")
 	if base == "" {
-		base = "https://api.openai.com"
+		base = "https://api.openai.com/v1"
 	}
 	if strings.Contains(base, "dashscope.aliyuncs.com/compatible-mode") {
 		// DashScope compatible embedding models are served from the Bailian

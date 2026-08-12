@@ -44,6 +44,7 @@
       "apiFormatHint": "Chat models only.",
       "baseUrl": "Base URL",
       "baseUrlHint": "Leave blank to use the vendor default.",
+      "openAIBaseUrlHint": "OpenAI URLs must end in /v1, for example https://api.openai.com/v1. Leave blank to use the default.",
       "apiKey": "API key",
       "apiKeyHintNew": "",
       "apiKeyHintEdit": "Leave blank to keep the saved key.",
@@ -59,7 +60,8 @@
     "updated": "Channel updated",
     "removed": "Channel removed",
     "errors": {
-      "nameRequired": "Name required"
+      "nameRequired": "Name required",
+      "openAIBaseUrlV1Required": "The OpenAI Base URL must be a complete HTTP(S) URL ending in /v1."
     },
     "labels": {
       "noKey": "key not set",

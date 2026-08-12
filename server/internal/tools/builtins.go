@@ -1436,10 +1436,7 @@ func geminiGenerateImages(ctx context.Context, baseURL, apiKey, requestID string
 // /v1/images/generations, or — when input images are supplied — image editing
 // via the multipart /v1/images/edits endpoint.
 func openaiGenerateImages(ctx context.Context, baseURL, apiKey, requestID string, in imgInput, inputImgs []imageBytes, requestParams map[string]any) ([]imageBytes, error) {
-	base := strings.TrimRight(baseURL, "/")
-	if base == "" {
-		base = "https://api.openai.com"
-	}
+	base := llm.OpenAIBaseURL(baseURL)
 
 	// gpt-image-1 returns b64_json natively and REJECTS the response_format
 	// param; only the DALL·E models accept it. Send it only for dall-e and parse
@@ -1525,7 +1522,7 @@ func openaiGenerateImages(ctx context.Context, baseURL, apiKey, requestID string
 		if err := mw.Close(); err != nil {
 			return nil, err
 		}
-		req, err = http.NewRequestWithContext(ctx, "POST", base+"/v1/images/edits", &buf)
+		req, err = http.NewRequestWithContext(ctx, "POST", base+"/images/edits", &buf)
 		if err != nil {
 			return nil, err
 		}
@@ -1535,7 +1532,7 @@ func openaiGenerateImages(ctx context.Context, baseURL, apiKey, requestID string
 		if marshalErr != nil {
 			return nil, marshalErr
 		}
-		req, err = http.NewRequestWithContext(ctx, "POST", base+"/v1/images/generations", bytes.NewReader(raw))
+		req, err = http.NewRequestWithContext(ctx, "POST", base+"/images/generations", bytes.NewReader(raw))
 		if err != nil {
 			return nil, err
 		}

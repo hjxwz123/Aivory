@@ -81,6 +81,25 @@ func TestProviderBaseURL(t *testing.T) {
 	}
 }
 
+func TestOpenAIBaseURL(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "default", want: "https://api.openai.com/v1"},
+		{name: "versioned", in: "https://proxy.example.com/openai/v1", want: "https://proxy.example.com/openai/v1"},
+		{name: "trailing slash", in: "https://proxy.example.com/openai/v1/", want: "https://proxy.example.com/openai/v1"},
+		{name: "legacy host root", in: "https://proxy.example.com", want: "https://proxy.example.com/v1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := OpenAIBaseURL(tc.in); got != tc.want {
+				t.Fatalf("OpenAIBaseURL(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestDoProviderRequestFallback drives the retry end-to-end against two test
 // servers: a failing primary and a healthy fallback.
 func TestDoProviderRequestFallback(t *testing.T) {

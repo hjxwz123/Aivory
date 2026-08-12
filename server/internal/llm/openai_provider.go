@@ -174,7 +174,7 @@ func (p *OpenAIProvider) streamChat(ctx context.Context, req UnifiedChatRequest,
 			u         Usage
 		)
 		err := doProviderParsedRequest(ctx, req.Model, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
-			hr, e := http.NewRequestWithContext(ctx, "POST", providerBaseURL(baseURL, "https://api.openai.com")+"/v1/chat/completions", bytes.NewReader(raw))
+			hr, e := http.NewRequestWithContext(ctx, "POST", OpenAIBaseURL(baseURL)+"/chat/completions", bytes.NewReader(raw))
 			if e != nil {
 				return nil, e
 			}
@@ -339,7 +339,7 @@ func (p *OpenAIProvider) promptRunOnce(req UnifiedChatRequest) PromptToolRunner 
 			u    Usage
 		)
 		err := doProviderParsedRequest(ctx, req.Model, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
-			hr, e := http.NewRequestWithContext(ctx, "POST", providerBaseURL(baseURL, "https://api.openai.com")+"/v1/chat/completions", bytes.NewReader(raw))
+			hr, e := http.NewRequestWithContext(ctx, "POST", OpenAIBaseURL(baseURL)+"/chat/completions", bytes.NewReader(raw))
 			if e != nil {
 				return nil, e
 			}
@@ -838,7 +838,7 @@ func (p *OpenAIProvider) streamResponses(ctx context.Context, req UnifiedChatReq
 		}
 		runRequest := func() error {
 			return doProviderParsedRequest(ctx, req.Model, req.FallbackUsed, func(baseURL, apiKey string) (*http.Request, error) {
-				hr, e := http.NewRequestWithContext(ctx, "POST", providerBaseURL(baseURL, "https://api.openai.com")+"/v1/responses", bytes.NewReader(raw))
+				hr, e := http.NewRequestWithContext(ctx, "POST", OpenAIBaseURL(baseURL)+"/responses", bytes.NewReader(raw))
 				if e != nil {
 					return nil, e
 				}

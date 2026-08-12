@@ -7,6 +7,7 @@ import (
 	"errors"
 	"math"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -75,6 +76,14 @@ func createChannelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, err)
 		return
 	}
+	if req.Type == "openai" {
+		baseURL, err := normalizeOpenAIChannelBaseURL(req.BaseURL)
+		if err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		req.BaseURL = baseURL
+	}
 	c, err := store.CreateChannel(r.Context(), d.DB, req.Name, req.Type, req.APIFormat, req.BaseURL, req.APIKey)
 	if err != nil {
 		if errors.Is(err, store.ErrChannelNameExists) {
@@ -124,6 +133,12 @@ func updateChannelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	if p.APIFormat != nil {
 		effFmt = *p.APIFormat
 	}
+	effBaseURL := existing.BaseURL
+	if p.BaseURL != nil {
+		baseURL := strings.TrimSpace(*p.BaseURL)
+		p.BaseURL = &baseURL
+		effBaseURL = baseURL
+	}
 	// Non-OpenAI channels don't use api_format — force it empty rather than
 	// rejecting a stale value carried over from the form (§2.3-B).
 	if effType != "openai" {
@@ -134,6 +149,19 @@ func updateChannelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	if err := validateChannelType(effType, effFmt); err != nil {
 		writeError(w, 400, err)
 		return
+	}
+	// Legacy OpenAI rows may still contain a host-only URL. Keep unrelated
+	// partial updates working, but require the version root whenever the channel
+	// type or base URL is being configured.
+	if effType == "openai" && (p.Type != nil || p.BaseURL != nil) {
+		baseURL, err := normalizeOpenAIChannelBaseURL(effBaseURL)
+		if err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		if p.BaseURL != nil || baseURL != existing.BaseURL {
+			p.BaseURL = &baseURL
+		}
 	}
 	if p.Name != nil {
 		name := strings.TrimSpace(*p.Name)
@@ -180,6 +208,33 @@ func validateChannelType(typ, apiFormat string) error {
 		return errors.New("api_format only applies to openai channels")
 	}
 	return nil
+}
+
+var errOpenAIBaseURLV1Required = errors.New("openai base_url must be an absolute HTTP(S) URL ending in /v1")
+
+// normalizeOpenAIChannelBaseURL keeps the documented empty-value default, but
+// requires configured URLs to stop at the version root. Provider code appends
+// resource paths such as /chat/completions and /images/generations.
+func normalizeOpenAIChannelBaseURL(raw string) (string, error) {
+	baseURL := strings.TrimSpace(raw)
+	if baseURL == "" {
+		return "", nil
+	}
+	if strings.ContainsAny(baseURL, " \t\r\n") {
+		return "", errOpenAIBaseURLV1Required
+	}
+
+	parsed, err := url.Parse(baseURL)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Hostname() == "" ||
+		parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", errOpenAIBaseURLV1Required
+	}
+	parsed.Path = strings.TrimRight(parsed.Path, "/")
+	parsed.RawPath = ""
+	if !strings.HasSuffix(parsed.Path, "/v1") {
+		return "", errOpenAIBaseURLV1Required
+	}
+	return parsed.String(), nil
 }
 
 func deleteChannelAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
