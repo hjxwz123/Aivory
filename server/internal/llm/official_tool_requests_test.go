@@ -72,6 +72,23 @@ func TestEstimateRequestTokensCountsHostedAndLocalToolRequests(t *testing.T) {
 	}
 }
 
+func TestEstimateRequestTokensCountsMergedExtraParameters(t *testing.T) {
+	base := UnifiedChatRequest{SystemPrompt: "system"}
+	req := base
+	req.ExtraParams = json.RawMessage(`{"metadata":{"large":"` + strings.Repeat("context ", 400) + `"},"temperature":0.2}`)
+	req.ParamControls = json.RawMessage(`[{"key":"detail","options":[{"value":"high","params":{"vendor":{"instructions":"` + strings.Repeat("preserve ", 300) + `"}}}]}]`)
+	req.ParamOverrides = map[string]any{"detail": "high"}
+
+	merged, err := json.Marshal(MergeRequestParams(nil, req.ExtraParams, req.ParamControls, req.ParamOverrides))
+	if err != nil {
+		t.Fatalf("marshal merged parameters: %v", err)
+	}
+	want := estimateRequestTokens(base) + estimateTokens(string(merged))
+	if got := estimateRequestTokens(req); got != want {
+		t.Fatalf("extra parameter token estimate = %d, want %d", got, want)
+	}
+}
+
 func TestConfiguredHostedToolsUseRequestTypeForFastFilteringAndHistoryAliases(t *testing.T) {
 	raw := json.RawMessage(`[
 		{"name":"renamed_code_tool","icon":"terminal","request":{"tools":[{"type":"code_interpreter"}]}},

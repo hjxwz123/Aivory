@@ -60,6 +60,11 @@ type providerRequestRecorder struct {
 	last    providerRequestSnapshot
 	all     []providerRequestSnapshot
 	attempt int
+	// provider is the normalized wire-family for this turn. Provider usage APIs
+	// do not share one cache-token convention: Anthropic reports cache read/write
+	// outside input_tokens, while OpenAI and Google report prompt/input totals
+	// that already include cached portions.
+	provider string
 	// captureAll keeps the sanitized header/body on EVERY list entry (admin
 	// enabled full success-request logging). Off, successful entries keep only
 	// method/URL/usage; attachFailure restores full diagnostics for error entries.
@@ -68,8 +73,12 @@ type providerRequestRecorder struct {
 
 type providerRequestRecorderKey struct{}
 
-func newProviderRequestRecorder() *providerRequestRecorder {
-	return &providerRequestRecorder{}
+func newProviderRequestRecorder(provider ...string) *providerRequestRecorder {
+	recorder := &providerRequestRecorder{}
+	if len(provider) > 0 {
+		recorder.provider = providerIDForChannelType(provider[0])
+	}
+	return recorder
 }
 
 func contextWithProviderRequestRecorder(ctx context.Context, rec *providerRequestRecorder) context.Context {
@@ -172,6 +181,33 @@ func (r *providerRequestRecorder) snapshots() []providerRequestSnapshot {
 	out := make([]providerRequestSnapshot, len(r.all))
 	copy(out, r.all)
 	return out
+}
+
+// maxContextTokens returns the largest prompt footprint of any successful
+// upstream request in a turn. Tool loops report cumulative billing usage at the
+// turn level, but compaction pressure is determined by one request at a time.
+// Cache-token accounting is provider-specific. Anthropic's input_tokens
+// excludes cache reads and newly-created cache entries, so both are added.
+// OpenAI and Google input/prompt totals already include cached portions and
+// must not have a cache detail added again.
+func (r *providerRequestRecorder) maxContextTokens() int {
+	maxTokens := 0
+	for _, snapshot := range r.snapshots() {
+		if strings.TrimSpace(snapshot.Error) != "" {
+			continue
+		}
+		contextTokens := snapshot.EstimatedInputTokens
+		if snapshot.HasUsage {
+			contextTokens = snapshot.Usage.InputTokens
+			if r.provider == "anthropic" {
+				contextTokens += snapshot.Usage.CacheReadTokens + snapshot.Usage.CacheWriteTokens
+			}
+		}
+		if contextTokens > maxTokens {
+			maxTokens = contextTokens
+		}
+	}
+	return maxTokens
 }
 
 func (r *providerRequestRecorder) record(req *http.Request, fallbackAttempt ...bool) {

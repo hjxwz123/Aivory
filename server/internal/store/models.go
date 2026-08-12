@@ -188,6 +188,9 @@ type Model struct {
 	PricePerImage     float64 `json:"price_per_image"`
 	Currency          string  `json:"currency"`
 	Dim               int     `json:"dim"`
+	// CompactionTokenThreshold overrides the global automatic-compaction trigger
+	// for this model, subject to the global cap. 0 uses the global default.
+	CompactionTokenThreshold int `json:"compaction_token_threshold"`
 	// ImageTimeoutSec caps a single image generation/edit request (§4.20). 0 =
 	// use the default (no per-model cap; bounded only by the turn context).
 	// Only meaningful for kind=image models.
@@ -417,18 +420,21 @@ type Message struct {
 	// Fast marks a turn that ran in fast mode (§fast-mode). The row keeps the REAL
 	// model_id/model_label/provider (for billing + admin drill-down); the user
 	// boundary (redactCost) blanks that identity and the client renders "快速".
-	Fast             bool            `json:"fast"`
-	Blocks           json.RawMessage `json:"blocks"`
-	Raw              json.RawMessage `json:"raw,omitempty"`
-	StopReason       string          `json:"stop_reason"`
-	Attachments      json.RawMessage `json:"attachments"`
-	Citations        json.RawMessage `json:"citations"`
-	InputTokens      int             `json:"input_tokens"`
-	OutputTokens     int             `json:"output_tokens"`
-	CacheReadTokens  int             `json:"cache_read_tokens"`
-	CacheWriteTokens int             `json:"cache_write_tokens"`
-	Cost             float64         `json:"cost"`
-	Currency         string          `json:"currency"`
+	Fast        bool            `json:"fast"`
+	Blocks      json.RawMessage `json:"blocks"`
+	Raw         json.RawMessage `json:"raw,omitempty"`
+	StopReason  string          `json:"stop_reason"`
+	Attachments json.RawMessage `json:"attachments"`
+	Citations   json.RawMessage `json:"citations"`
+	InputTokens int             `json:"input_tokens"`
+	// ContextTokens is the final successful upstream request's prompt footprint,
+	// including cache-read tokens. 0 means the provider did not report usage.
+	ContextTokens    int     `json:"context_tokens"`
+	OutputTokens     int     `json:"output_tokens"`
+	CacheReadTokens  int     `json:"cache_read_tokens"`
+	CacheWriteTokens int     `json:"cache_write_tokens"`
+	Cost             float64 `json:"cost"`
+	Currency         string  `json:"currency"`
 	// Credits charged to the user for this turn (0 = free / credits disabled).
 	// Unlike Cost (USD spend, admin-only), credits ARE the user-facing currency,
 	// so this is surfaced to the user and not redacted.

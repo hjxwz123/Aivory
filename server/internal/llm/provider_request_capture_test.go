@@ -71,6 +71,28 @@ func TestProviderRequestRecorderDoesNotRedactTokenCounts(t *testing.T) {
 	}
 }
 
+func TestProviderRequestRecorderContextTokensFollowProviderCacheSemantics(t *testing.T) {
+	usage := Usage{InputTokens: 100, CacheReadTokens: 40, CacheWriteTokens: 20}
+	for _, tc := range []struct {
+		name, provider string
+		want           int
+	}{
+		{name: "anthropic", provider: "anthropic", want: 160},
+		{name: "anthropic alias", provider: "claude", want: 160},
+		{name: "openai cached details already included", provider: "openai", want: 100},
+		{name: "google prompt total already included", provider: "gemini", want: 100},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := newProviderRequestRecorder(tc.provider)
+			rec.record(mustHTTPRequest(t, "https://api.example/v1/chat", `{"messages":[]}`))
+			rec.attachUsage(usage)
+			if got := rec.maxContextTokens(); got != tc.want {
+				t.Fatalf("context tokens = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestProviderRequestRecorderRedactsLargeJSONBeforeTruncating(t *testing.T) {
 	rec := newProviderRequestRecorder()
 	ctx := contextWithProviderRequestRecorder(context.Background(), rec)

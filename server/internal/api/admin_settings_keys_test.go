@@ -36,6 +36,11 @@ func TestAdminSettingsRejectNegativeNumericValues(t *testing.T) {
 	d := Deps{DB: db}
 
 	for _, key := range []string{
+		"keep_recent_rounds",
+		"summary_max_tokens",
+		"summary_merge_max_tokens",
+		"compaction_token_trigger",
+		"compaction_token_cap",
 		"daily_message_limit",
 		"daily_image_limit",
 		"daily_token_limit",
@@ -54,6 +59,86 @@ func TestAdminSettingsRejectNegativeNumericValues(t *testing.T) {
 				t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
 			}
 		})
+	}
+}
+
+func TestAdminSettingsRejectOutOfRangeCompactionPercentages(t *testing.T) {
+	db := openMigrated(t, filepath.Join(t.TempDir(), "compaction-percentage-admin-settings.db"))
+	defer db.Close()
+	d := Deps{DB: db}
+
+	for key, values := range map[string][]int{
+		"summary_target_percent":          {4, 81},
+		"compaction_retention_percentage": {9, 51},
+	} {
+		for _, value := range values {
+			req := httptest.NewRequest(http.MethodPatch, "/api/admin/settings", strings.NewReader(fmt.Sprintf(`{"%s":%d}`, key, value)))
+			req.Header.Set("content-type", "application/json")
+			rec := httptest.NewRecorder()
+			adminSettingsSet(d, rec, req)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("%s=%d: status = %d, want %d; body=%s", key, value, rec.Code, http.StatusBadRequest, rec.Body.String())
+			}
+		}
+	}
+}
+
+func TestAdminSettingsRejectCompactionValuesThatRuntimeWouldReplace(t *testing.T) {
+	db := openMigrated(t, filepath.Join(t.TempDir(), "compaction-runtime-clamp-settings.db"))
+	defer db.Close()
+	d := Deps{DB: db}
+
+	for key, values := range map[string][]int{
+		"keep_recent_rounds":       {0},
+		"summary_max_tokens":       {0, 255},
+		"summary_merge_max_tokens": {0, 255},
+	} {
+		for _, value := range values {
+			req := httptest.NewRequest(http.MethodPatch, "/api/admin/settings", strings.NewReader(fmt.Sprintf(`{"%s":%d}`, key, value)))
+			req.Header.Set("content-type", "application/json")
+			rec := httptest.NewRecorder()
+			adminSettingsSet(d, rec, req)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("%s=%d: status = %d, want %d; body=%s", key, value, rec.Code, http.StatusBadRequest, rec.Body.String())
+			}
+		}
+	}
+}
+
+func TestAdminSettingsAcceptCompactionConfiguration(t *testing.T) {
+	db := openMigrated(t, filepath.Join(t.TempDir(), "compaction-admin-settings.db"))
+	defer db.Close()
+	d := Deps{DB: db}
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/admin/settings", strings.NewReader(`{
+		"context_compaction_model_id":"summary-model",
+		"compaction_token_trigger":32000,
+		"compaction_token_cap":80000,
+		"compaction_retention_percentage":40,
+		"summary_max_tokens":8192,
+		"summary_target_percent":35,
+		"summary_merge_max_tokens":8192,
+		"context_compaction_prompt":"Preserve decisions and pending work."
+	}`))
+	req.Header.Set("content-type", "application/json")
+	rec := httptest.NewRecorder()
+	adminSettingsSet(d, rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	for key, want := range map[string]string{
+		"compaction_token_cap":            "80000",
+		"compaction_retention_percentage": "40",
+		"summary_target_percent":          "35",
+		"summary_merge_max_tokens":        "8192",
+	} {
+		var got string
+		if err := db.QueryRow(`SELECT value FROM settings WHERE key=?`, key).Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Fatalf("%s = %q, want %q", key, got, want)
+		}
 	}
 }
 

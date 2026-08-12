@@ -21,19 +21,23 @@ func TestModelResearchEnabledDefaultsAndUpdates(t *testing.T) {
 	}
 
 	created, err := CreateModel(ctx, db, Model{
-		ChannelID: "ch1",
-		Kind:      "chat",
-		RequestID: "gpt-research",
-		Label:     "GPT Research",
-		Enabled:   true,
-		Vision:    true,
-		Stream:    true,
+		ChannelID:                "ch1",
+		Kind:                     "chat",
+		RequestID:                "gpt-research",
+		Label:                    "GPT Research",
+		Enabled:                  true,
+		Vision:                   true,
+		Stream:                   true,
+		CompactionTokenThreshold: 64000,
 	})
 	if err != nil {
 		t.Fatalf("create model: %v", err)
 	}
 	if !created.ResearchEnabled {
 		t.Fatal("expected new chat models to expose Deep Research by default")
+	}
+	if created.CompactionTokenThreshold != 64000 {
+		t.Fatalf("compaction threshold = %d, want 64000", created.CompactionTokenThreshold)
 	}
 
 	disabledOnCreate, err := CreateModel(ctx, db, Model{
@@ -53,12 +57,16 @@ func TestModelResearchEnabledDefaultsAndUpdates(t *testing.T) {
 	}
 
 	created.ResearchEnabled = false
+	created.CompactionTokenThreshold = 48000
 	updated, err := UpdateModel(ctx, db, created.ID, *created)
 	if err != nil {
 		t.Fatalf("update model: %v", err)
 	}
 	if updated.ResearchEnabled {
 		t.Fatal("expected update to persist disabled Deep Research exposure")
+	}
+	if updated.CompactionTokenThreshold != 48000 {
+		t.Fatalf("updated compaction threshold = %d, want 48000", updated.CompactionTokenThreshold)
 	}
 
 	got, err := GetModel(ctx, db, created.ID)
@@ -67,5 +75,8 @@ func TestModelResearchEnabledDefaultsAndUpdates(t *testing.T) {
 	}
 	if got.ResearchEnabled {
 		t.Fatal("expected disabled Deep Research exposure after reload")
+	}
+	if got.CompactionTokenThreshold != 48000 {
+		t.Fatalf("reloaded compaction threshold = %d, want 48000", got.CompactionTokenThreshold)
 	}
 }

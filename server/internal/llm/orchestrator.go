@@ -552,6 +552,92 @@ func (o *Orchestrator) SetConversationUpdatedHandler(fn func(userID, conversatio
 	o.onConversationUpdated = fn
 }
 
+// ManualCompactionResult describes one explicit /compact attempt.
+type ManualCompactionResult struct {
+	Compacted       bool   `json:"compacted"`
+	Reason          string `json:"reason"`
+	DroppedMessages int    `json:"dropped_messages"`
+	KeptMessages    int    `json:"kept_messages"`
+	SummaryTokens   int    `json:"summary_tokens"`
+}
+
+// CompactConversation explicitly advances the active branch's summary while
+// reusing the same model routing, persistence and race guards as auto-compaction.
+func (o *Orchestrator) CompactConversation(ctx context.Context, userID, conversationID string) (ManualCompactionResult, error) {
+	result := ManualCompactionResult{Reason: "nothing_to_compact"}
+	if o == nil || o.db == nil || o.task == nil {
+		return result, errors.New("context compaction is unavailable")
+	}
+	enabled := true
+	if raw, err := store.GetSetting(o.db, "compaction_enabled"); err == nil {
+		_ = json.Unmarshal(raw, &enabled)
+	}
+	if !enabled {
+		result.Reason = "disabled"
+		return result, ErrCompactionDisabled
+	}
+	conv, err := store.GetConversation(ctx, o.db, conversationID, userID)
+	if err != nil {
+		return result, err
+	}
+	var inFlight int
+	if err := o.db.QueryRowContext(ctx,
+		`SELECT COUNT(1) FROM messages WHERE conversation_id=? AND role='assistant' AND status='streaming'`,
+		conv.ID,
+	).Scan(&inFlight); err != nil {
+		return result, err
+	}
+	if inFlight > 0 {
+		result.Reason = "generation_in_progress"
+		return result, ErrCompactionInFlight
+	}
+	history, err := msgcache.ListMessages(ctx, o.cache, o.db, conv.ID, conv.ActiveLeafID)
+	if err != nil {
+		return result, err
+	}
+	beforeBlocks := filterBlocksForPath(LoadSummaryBlocks(conv.SummaryBlocks), history)
+	beforeFrontier := summarizedFrontier(beforeBlocks, history)
+	keep, blocks, err := CompactConversationNow(ctx, o.db, o.task, conv, history, conv.ModelID, userID)
+	if err != nil {
+		return result, err
+	}
+	afterFrontier := summarizedFrontier(blocks, history)
+	result.KeptMessages = len(keep)
+	result.DroppedMessages = max(0, afterFrontier-beforeFrontier)
+	result.SummaryTokens = summaryTokens(blocks)
+	if result.DroppedMessages == 0 {
+		return result, nil
+	}
+	result.Compacted = true
+	result.Reason = "compacted"
+	return result, nil
+}
+
+// compactionHistoryForRequest applies the same provider/tool visibility rules
+// used by the live request before adding per-turn injections such as private
+// skills, the persisted summary, and RAG. Keeping this transformation in one
+// place is important for asynchronous rebasing: stable non-history overhead
+// must be subtracted from the same history representation that was originally
+// estimated, rather than from raw database messages.
+func compactionHistoryForRequest(
+	history []store.Message,
+	currentProvider, currentModelID string,
+	nativeToolReplay bool,
+	allowedTools map[string]bool,
+	fastMode, vision bool,
+) []UnifiedMessage {
+	unified := storeToUnified(history, currentProvider, currentModelID, nativeToolReplay)
+	unified = stripRetiredKnowledgeSearchToolBlocks(unified)
+	unified = stripDisallowedBuiltinToolBlocks(unified, allowedTools)
+	if fastMode {
+		unified = stripFastModeCodeBlocks(unified)
+	}
+	if !vision {
+		unified = stripImageBlocks(unified)
+	}
+	return unified
+}
+
 // RunRequest is the input the API hands to Run().
 type RunRequest struct {
 	UserID         string
@@ -2050,16 +2136,10 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		skillFull = availableSkillFull
 	}
 
-	// 9. Long-context compaction (§4.7) — never breaks the request path. The hot
-	//    path only PLANS (render prior summaries + keep the recent tail verbatim);
-	//    generating a NEW summary is a task-model round-trip, so it runs OFF the hot
-	//    path (async, like memory.process) and never stalls first token. Only a
-	//    large cold-start backlog (fresh import) is summarised inline to bound the
-	//    first prompt.
-	// The RAG/uploaded-file text injected THIS turn is per-turn overhead that lives
-	// OUTSIDE `history`; render it now so the compaction trigger can count it —
-	// otherwise the first turn after an upload is blind to the file (§4.7). 0 when
-	// nothing was retrieved.
+	// 9. Build the current-turn injected message context. Long-context compaction
+	//    is planned after the system prompt and provider tool declarations are also
+	//    ready, so its trigger can reuse the complete UnifiedChatRequest estimate
+	//    instead of maintaining a smaller, drifting accounting path.
 	ragContext := formatRAGContext(ragSnippets, req.Locale)
 	// §4.4-B forced non-tool web search (a no-tools turn with web search on):
 	// server-run search, results injected as a <web-search-result> block that
@@ -2096,40 +2176,6 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			ragContext += sheetText
 		}
 	}
-	injectedOverhead := estimateTokens(ragContext) + estimateTokens(selectedUserSkillText)
-
-	keep, summaryBlocks, compactAction := PlanCompaction(o.db, conv, history, injectedOverhead)
-	switch compactAction {
-	case compactInline:
-		compactCtx := withTaskBillingMessageID(ctx, assistantMsg.ID)
-		if k, b, cerr := MaybeCompact(compactCtx, o.db, o.task, conv, history, injectedOverhead, req.UserID); errors.Is(cerr, ErrTaskBillingRecord) {
-			return nil, cerr
-		} else if cerr == nil {
-			keep, summaryBlocks = k, b
-		}
-	case compactAsync:
-		if o.queue != nil && o.task != nil {
-			convID, userID, leafID, overhead := conv.ID, req.UserID, userMsg.ID, injectedOverhead
-			o.queue.Enqueue("compaction.advance", func(ctx context.Context) error {
-				fresh, gerr := store.GetConversation(ctx, o.db, convID, userID)
-				if gerr != nil {
-					return gerr
-				}
-				// Re-read the path at execution time instead of summarising the
-				// turn's snapshot: a concurrent turn's in-flight answer may have
-				// FINISHED by now (its blocks were empty in the snapshot — rolling
-				// that up would record an empty summary and hide the real answer
-				// behind the frontier forever), and rounds may have been deleted.
-				// Same leaf as the snapshot, so it is the same path, fresh state.
-				histNow, herr := msgcache.ListMessages(ctx, o.cache, o.db, convID, leafID)
-				if herr != nil {
-					return herr
-				}
-				_, _, cerr := MaybeCompact(ctx, o.db, o.task, fresh, histNow, overhead, userID)
-				return cerr
-			})
-		}
-	}
 	// §4.13-B / §2.3-C: only a native-mode request may splice the stored native
 	// tool exchange (raw) back into history. A prompt-mode request can still carry
 	// provider-hosted tools, but its local Functions use the text protocol and are
@@ -2145,15 +2191,16 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	// them. In particular, OpenAI Responses encrypted reasoning cannot be sent
 	// to a different model on the same channel; storeToUnified drops those Raw
 	// values while retaining canonical text/tool blocks for the new model.
-	uHist := storeToUnified(keep, channel.Type, model.ID, nativeToolReplay)
-	uHist = stripRetiredKnowledgeSearchToolBlocks(uHist)
-	uHist = stripDisallowedBuiltinToolBlocks(
-		uHist,
-		unifiedToolNameSet(toolDefs, hostedToolNames, hostedToolRequests),
-	)
-	if fastMode {
-		uHist = stripFastModeCodeBlocks(uHist)
+	summaryBlocks := filterBlocksForPath(LoadSummaryBlocks(conv.SummaryBlocks), history)
+	frontier := summarizedFrontier(summaryBlocks, history)
+	if frontier < 0 || frontier > len(history) {
+		frontier = 0
 	}
+	keep := history[frontier:]
+	allowedHistoryTools := unifiedToolNameSet(toolDefs, hostedToolNames, hostedToolRequests)
+	uHist := compactionHistoryForRequest(
+		keep, channel.Type, model.ID, nativeToolReplay, allowedHistoryTools, fastMode, model.Vision,
+	)
 	// Private skills are user-authored instructions and therefore belong in the
 	// message layer. Apply them to the LAST user entry before any provider-specific
 	// history conversion; every OpenAI/Anthropic/Gemini serializer sees the same
@@ -2174,9 +2221,6 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 	//     §4.6 vision gating: strip legacy image blocks/attachments before any
 	//     provider resolution. This changes only the request copy; stored history
 	//     remains available if the user later switches back to a vision model.
-	if !model.Vision {
-		uHist = stripImageBlocks(uHist)
-	}
 	o.resolveAttachments(ctx, req.UserID, conv.ID, uHist, model, onEvent)
 	if hostedImageEnabled {
 		o.resolveImageArtifactBlocks(ctx, req.UserID, uHist)
@@ -2245,6 +2289,88 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		SkillsAllowed:       skillsAllowed && !req.NoTools,
 	}
 	system := composeSystemPrompt(systemOpts)
+
+	// 10b. Plan compaction from the same request ingredients that will be sent
+	// upstream: system prompt, local/MCP tools, hosted tool fragments, resolved
+	// attachments, summaries, RAG, private skills, project context, persona and
+	// memories. This closes the first-turn gap for large tools and injected context.
+	compactionEstimateReq := UnifiedChatRequest{
+		SystemPrompt:         system,
+		History:              uHist,
+		Tools:                toolDefs,
+		OfficialToolRequests: hostedToolRequests,
+		ParamOverrides:       req.ParamOverrides,
+		ParamControls:        model.ParamControls,
+		ExtraParams:          model.ExtraParams,
+	}
+	requestTokens := estimateRequestTokens(compactionEstimateReq)
+	renderedHistoryTokens := estimateRequestTokens(UnifiedChatRequest{History: compactionHistoryForRequest(
+		keep, channel.Type, model.ID, nativeToolReplay, allowedHistoryTools, fastMode, model.Vision,
+	)}) + summaryTokens(summaryBlocks)
+	keep, summaryBlocks, compactAction := PlanCompactionForRequest(
+		o.db, conv, history, requestTokens, model.CompactionTokenThreshold,
+	)
+	if compactAction == compactInline {
+		compactCtx := withTaskBillingMessageID(ctx, assistantMsg.ID)
+		if k, b, cerr := MaybeCompactForRequest(
+			compactCtx, o.db, o.task, conv, history, requestTokens, renderedHistoryTokens,
+			model.CompactionTokenThreshold, model.ID, req.UserID,
+		); errors.Is(cerr, ErrTaskBillingRecord) {
+			return nil, cerr
+		} else if cerr == nil {
+			keep, summaryBlocks = k, b
+		}
+	} else if compactAction == compactAsync && o.queue != nil && o.task != nil {
+		convID, userID, leafID := conv.ID, req.UserID, userMsg.ID
+		modelThreshold, compactionModelID := model.CompactionTokenThreshold, model.ID
+		plannedBaseHistory := compactionHistoryForRequest(
+			keep, channel.Type, model.ID, nativeToolReplay, allowedHistoryTools, fastMode, model.Vision,
+		)
+		plannedRenderedHistoryTokens := estimateRequestTokens(UnifiedChatRequest{History: plannedBaseHistory}) + summaryTokens(summaryBlocks)
+		o.queue.Enqueue("compaction.advance", func(ctx context.Context) error {
+			fresh, gerr := store.GetConversation(ctx, o.db, convID, userID)
+			if gerr != nil {
+				return gerr
+			}
+			// Re-read the same branch at execution time. requestTokens remains the
+			// authoritative complete-request snapshot that triggered this pass.
+			histNow, herr := msgcache.ListMessages(ctx, o.cache, o.db, convID, leafID)
+			if herr != nil {
+				return herr
+			}
+			freshBlocks := filterBlocksForPath(LoadSummaryBlocks(fresh.SummaryBlocks), histNow)
+			freshFrontier := summarizedFrontier(freshBlocks, histNow)
+			if freshFrontier < 0 || freshFrontier > len(histNow) {
+				freshFrontier = 0
+			}
+			freshBaseHistory := compactionHistoryForRequest(
+				histNow[freshFrontier:], channel.Type, model.ID, nativeToolReplay,
+				allowedHistoryTools, fastMode, model.Vision,
+			)
+			freshRequestTokens := RebasedCompactionRequestTokens(
+				requestTokens, plannedRenderedHistoryTokens,
+				estimateRequestTokens(UnifiedChatRequest{History: freshBaseHistory})+summaryTokens(freshBlocks),
+			)
+			_, _, cerr := MaybeCompactForRequest(
+				ctx, o.db, o.task, fresh, histNow, freshRequestTokens,
+				estimateRequestTokens(UnifiedChatRequest{History: freshBaseHistory})+summaryTokens(freshBlocks),
+				modelThreshold, compactionModelID, userID,
+			)
+			return cerr
+		})
+	}
+	// Rebuild only the history-dependent request copy after compaction. All other
+	// fields above are stable and already contributed to requestTokens.
+	uHist = compactionHistoryForRequest(
+		keep, channel.Type, model.ID, nativeToolReplay, allowedHistoryTools, fastMode, model.Vision,
+	)
+	uHist = injectSelectedUserSkillsIntoHistory(uHist, selectedUserSkills)
+	uHist = injectSummaryIntoHistory(uHist, ApplySummaryBlocks(summaryBlocks))
+	uHist = injectRAGIntoHistory(uHist, ragContext)
+	o.resolveAttachments(ctx, req.UserID, conv.ID, uHist, model, nil)
+	if hostedImageEnabled {
+		o.resolveImageArtifactBlocks(ctx, req.UserID, uHist)
+	}
 
 	// 11. Title generation (§6.3) — fire-and-forget the first time. An image-only
 	// chat gets an immediate attachment-name fallback; after the answer completes,
@@ -2418,7 +2544,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		}
 	}
 
-	reqRecorder := newProviderRequestRecorder()
+	reqRecorder := newProviderRequestRecorder(channel.Type)
 	// §B5-per-request rows: keep sanitized header/body on EVERY captured request
 	// only when the admin opted into full success-request logging; `last` always
 	// keeps the full snapshot for the error row either way.
@@ -2565,7 +2691,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 				const safeErr = "Billing settlement failed. Your partial result was saved, but this turn requires administrator review."
 				_ = finishMessage(ctx, store.MessageFinishPatch{
 					Blocks: partialJSON, Citations: citesJSON, StopReason: "stopped", Status: "error", Error: safeErr,
-					InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens,
+					InputTokens: usage.InputTokens, ContextTokens: reqRecorder.maxContextTokens(), OutputTokens: usage.OutputTokens,
 					CacheReadTokens: usage.CacheReadTokens, CacheWriteTokens: usage.CacheWriteTokens,
 					Cost: cost, GenMs: time.Since(turnStart).Milliseconds(),
 				})
@@ -2614,6 +2740,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 				Citations:        citesJSON,
 				StopReason:       "stopped",
 				InputTokens:      usage.InputTokens,
+				ContextTokens:    reqRecorder.maxContextTokens(),
 				OutputTokens:     usage.OutputTokens,
 				CacheReadTokens:  usage.CacheReadTokens,
 				CacheWriteTokens: usage.CacheWriteTokens,
@@ -2738,6 +2865,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 			Citations:        errCitesJSON,
 			StopReason:       "generation_interrupted",
 			InputTokens:      errUsage.InputTokens,
+			ContextTokens:    reqRecorder.maxContextTokens(),
 			OutputTokens:     errUsage.OutputTokens,
 			CacheReadTokens:  errUsage.CacheReadTokens,
 			CacheWriteTokens: errUsage.CacheWriteTokens,
@@ -2903,6 +3031,7 @@ func (o *Orchestrator) Run(ctx context.Context, req RunRequest, onEvent func(Sse
 		Citations:        citesJSON,
 		StopReason:       result.StopReason,
 		InputTokens:      result.Usage.InputTokens,
+		ContextTokens:    reqRecorder.maxContextTokens(),
 		OutputTokens:     result.Usage.OutputTokens,
 		CacheReadTokens:  result.Usage.CacheReadTokens,
 		CacheWriteTokens: result.Usage.CacheWriteTokens,

@@ -94,6 +94,22 @@ func TestTaskLLMToolRouteDoesNotRetryEmptyVisibleOutput(t *testing.T) {
 	}
 }
 
+func TestTaskLLMEmptyRetryHonorsExplicitBudget(t *testing.T) {
+	provider := &emptyThenTextTaskProvider{alwaysEmpty: true}
+	task, modelID := newEmptyRetryTaskLLM(t, provider)
+	_, err := task.Run(context.Background(), TaskCompact, "compact", RunOpts{
+		ModelID:                   modelID,
+		MaxOutputTokens:           600,
+		EmptyRetryMaxOutputTokens: 600,
+	})
+	if err == nil || !strings.Contains(err.Error(), "max_output_tokens=600") {
+		t.Fatalf("bounded compact retry error = %v", err)
+	}
+	if len(provider.maxOutputTokens) != 2 || provider.maxOutputTokens[0] != 600 || provider.maxOutputTokens[1] != 600 {
+		t.Fatalf("bounded compact retry attempts = %v, want [600 600]", provider.maxOutputTokens)
+	}
+}
+
 func TestToolRouteTaskParamsSuppressConfiguredReasoning(t *testing.T) {
 	tests := []struct {
 		name      string

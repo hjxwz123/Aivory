@@ -508,6 +508,16 @@ func (o *Orchestrator) logUsage(ctx context.Context, log store.UsageLog) {
 // Used by the §credits pre-flight gate.
 func estimateRequestTokens(req UnifiedChatRequest) int {
 	t := estimateTokens(req.SystemPrompt)
+	// Admin defaults and the user's selected parameter-control fragments are
+	// serialized into the upstream request alongside the native provider body.
+	// Most deployments keep these tiny, but both fields intentionally accept
+	// arbitrary JSON objects, so omitting them can hide a large prompt-adjacent
+	// payload from context-compaction and credit preflight decisions.
+	if params := MergeRequestParams(nil, req.ExtraParams, req.ParamControls, req.ParamOverrides); len(params) > 0 {
+		if b, err := json.Marshal(params); err == nil {
+			t += estimateTokens(string(b))
+		}
+	}
 	if len(req.OfficialToolRequests) > 0 {
 		// Official request fragments are part of the real upstream body and may
 		// carry large provider tool schemas. Count the final merged shape so the
@@ -523,6 +533,7 @@ func estimateRequestTokens(req UnifiedChatRequest) int {
 		}
 	}
 	for _, m := range req.History {
+		t += msgStructuralOverhead
 		if len(m.Raw) > 2 {
 			t += estimateTokens(string(m.Raw))
 			continue
