@@ -1,6 +1,8 @@
 package api
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -11,6 +13,68 @@ import (
 )
 
 var kbDocUploadRateLimit = envcfg.Int("AIVORY_API_RATE_LIMIT_USER", 20)
+
+// knowledgeBaseResponse is the ordinary user-facing shape. Retrieval model
+// identities and vector dimensions stay server-side and remain available to
+// administrators through their dedicated endpoints.
+type knowledgeBaseResponse struct {
+	ID          string `json:"id"`
+	UserID      string `json:"user_id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	ProjectID   string `json:"project_id"`
+	CreatedAt   int64  `json:"created_at"`
+	WorkspaceID string `json:"workspace_id,omitempty"`
+}
+
+func userKnowledgeBase(kb store.KnowledgeBase) knowledgeBaseResponse {
+	return knowledgeBaseResponse{
+		ID: kb.ID, UserID: kb.UserID, Name: kb.Name, Description: kb.Description,
+		ProjectID: kb.ProjectID, CreatedAt: kb.CreatedAt, WorkspaceID: kb.WorkspaceID,
+	}
+}
+
+func userKnowledgeBases(rows []store.KnowledgeBase) []knowledgeBaseResponse {
+	items := make([]knowledgeBaseResponse, 0, len(rows))
+	for _, kb := range rows {
+		items = append(items, userKnowledgeBase(kb))
+	}
+	return items
+}
+
+// userDocuments removes internal ingest diagnostics from ordinary user
+// responses. Administrators retain the original store.Document payload through
+// their dedicated drill-down endpoints.
+func userDocuments(rows []store.Document) []store.Document {
+	items := make([]store.Document, len(rows))
+	copy(items, rows)
+	for i := range items {
+		items[i].Error = ""
+	}
+	return items
+}
+
+func userDocument(doc *store.Document) *store.Document {
+	if doc == nil {
+		return nil
+	}
+	item := *doc
+	item.Error = ""
+	return &item
+}
+
+func configuredEmbeddingModel(ctx context.Context, d Deps) (*store.Model, error) {
+	var modelID string
+	raw, err := store.GetSetting(d.DB, "embedding_model_id")
+	if err != nil || json.Unmarshal(raw, &modelID) != nil || strings.TrimSpace(modelID) == "" {
+		return nil, errKnowledgeBaseUnavailable
+	}
+	model, err := store.GetModel(ctx, d.DB, strings.TrimSpace(modelID))
+	if err != nil || model == nil || !model.Enabled || model.Kind != "embedding" {
+		return nil, errKnowledgeBaseUnavailable
+	}
+	return model, nil
+}
 
 // listKBsHandler returns the user's knowledge bases.
 func listKBsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
@@ -32,18 +96,19 @@ func listKBsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
-	writeJSON(w, 200, rows)
+	writeJSON(w, 200, userKnowledgeBases(rows))
 }
 
 type createKBReq struct {
-	Name             string `json:"name"`
-	Description      string `json:"description"`
-	EmbeddingModelID string `json:"embedding_model_id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
 	// '' = personal; set = shared workspace KB (§workspaces).
 	WorkspaceID string `json:"workspace_id"`
 }
 
-// createKBHandler creates a new KB pinned to one embedding model.
+// createKBHandler creates a new KB pinned to the administrator-configured
+// embedding model. Unknown request fields are ignored for backwards
+// compatibility and cannot override the administrator setting.
 func createKBHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	u := authUser(r)
 	var req createKBReq
@@ -72,17 +137,9 @@ func createKBHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	// The store re-evaluates this standalone-KB cap while holding the creator
 	// row lock and inserts in the same transaction. 0 remains unlimited.
 	_, maxKBs := groupCapFor(d, r, u.ID, u.GroupID)
-	if req.EmbeddingModelID == "" {
-		embeds, _ := store.ListModels(r.Context(), d.DB, "embedding", true)
-		if len(embeds) == 0 {
-			writeError(w, 400, errors.New("no embedding model configured"))
-			return
-		}
-		req.EmbeddingModelID = embeds[0].ID
-	}
-	m, err := store.GetModel(r.Context(), d.DB, req.EmbeddingModelID)
+	m, err := configuredEmbeddingModel(r.Context(), d)
 	if err != nil {
-		writeError(w, 400, errors.New("unknown embedding model"))
+		writeError(w, http.StatusConflict, errKnowledgeBaseUnavailable)
 		return
 	}
 	kb, err := store.CreateKBWithLimit(r.Context(), d.DB, store.KnowledgeBase{
@@ -105,7 +162,7 @@ func createKBHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
-	writeJSON(w, 201, kb)
+	writeJSON(w, 201, userKnowledgeBase(*kb))
 }
 
 // deleteKBHandler removes the KB and cascades to docs and chunks.
@@ -150,7 +207,7 @@ func uploadKBDocHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.RAG.Ingest(doc.ID)
-	writeJSON(w, 201, doc)
+	writeJSON(w, 201, userDocument(doc))
 }
 
 // listKBDocsHandler returns documents within a KB.
@@ -166,7 +223,7 @@ func listKBDocsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
-	writeJSON(w, 200, docs)
+	writeJSON(w, 200, userDocuments(docs))
 }
 
 // retryKBDocHandler requeues a failed knowledge-base document in the existing

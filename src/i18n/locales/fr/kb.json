@@ -3,24 +3,23 @@
   "lead": "Des bibliothèques durables que n'importe quelle conversation peut consulter. Importez vos documents une fois, interrogez-les partout.",
   "new": "Nouvelle bibliothèque",
   "emptyTitle": "Aucune bibliothèque pour l'instant",
-  "emptyBody": "Une bibliothèque associe un ensemble de documents à un seul modèle d'embeddings. Créez-en une pour commencer.",
+  "emptyBody": "Une bibliothèque conserve vos documents pour les conversations. Créez-en une pour commencer.",
   "createFirst": "Créez votre première bibliothèque",
   "stats": {
-    "dim": "Embeddings à {{dim}} dimensions",
+    "dim": "{{dim}} éléments indexés",
     "created": "créée {{when}}"
   },
   "dialog": {
     "title": "Nouvelle bibliothèque de connaissances",
-    "body": "Le modèle d'embeddings est verrouillé dès que vous importez le premier document — il détermine l'espace vectoriel.",
+    "body": "Importez vos documents une fois, puis utilisez cette bibliothèque dans n'importe quelle conversation.",
     "name": "Nom",
     "namePlaceholder": "Guide de style maison",
     "description": "Description",
-    "embeddingModel": "Modèle d'embeddings",
-    "pickModel": "Choisir un modèle",
     "create": "Créer",
     "created": "Base de connaissances créée",
     "nameRequired": "Nom requis",
-    "nameExists": "Une base de connaissances portant ce nom existe déjà."
+    "nameExists": "Une base de connaissances portant ce nom existe déjà.",
+    "unavailable": "Les bases de connaissances sont temporairement indisponibles. Contactez l’administrateur ou réessayez plus tard."
   },
   "detail": {
     "uploadButton": "Importer un document",
@@ -38,7 +37,7 @@
     "status": {
       "pending": "En file d'attente",
       "parsing": "Analyse",
-      "embedding": "Vectorisation",
+      "embedding": "Indexation",
       "ready": "Prêt",
       "failed": "Échec"
     },
@@ -60,5 +59,5 @@
   "deleted": "Base de connaissances supprimée",
   "deleteAction": "Supprimer la base de connaissances",
   "deleteTitle": "Supprimer la base de connaissances ?",
-  "deleteBody": "Cela supprime définitivement « {{name}} », tous ses documents et leurs vecteurs. Les conversations qui la référencent seront dissociées. Cette action est irréversible."
+  "deleteBody": "Cela supprime définitivement « {{name}} » et ses données d’index. Les conversations qui la référencent seront dissociées. Cette action est irréversible."
 }

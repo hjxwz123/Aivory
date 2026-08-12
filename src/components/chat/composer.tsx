@@ -97,10 +97,7 @@ import { FormulaEditorDialog } from './formula-editor-dialog'
 import { ToolSelectionDialog } from './tool-selection-dialog'
 import { modelHasBuiltinTools, modelSupportsBuiltinTool } from '@/lib/builtin-tools'
 import { hasImageAttachment, hasSendableMessageContent } from '@/lib/chat-message-input'
-import {
-  knowledgeBaseSelectionContext,
-  knowledgeBasesHaveCompatibleEmbeddings,
-} from '@/lib/knowledge-base-selection'
+import { knowledgeBaseSelectionContext } from '@/lib/knowledge-base-selection'
 
 interface ComposerProps {
   modelId: string
@@ -161,9 +158,6 @@ interface ComposerProps {
   kbIds?: string[]
   /** Project-owned KB, implicitly attached and therefore not user-removable. */
   projectKBId?: string
-  /** Embedding signature for a project KB omitted from the ordinary KB list. */
-  projectKBEmbeddingModelId?: string
-  projectKBEmbeddingDim?: number
   /** When provided, the 📚 selector is shown and changes flow up here. */
   onKBChange?: (kbIds: string[]) => void
   /** True when a model picker already lives in the page header (e.g. ChatThread).
@@ -338,7 +332,6 @@ type ComposerCommandItem =
       name: string
       description: string
       knowledgeBase: ApiKnowledgeBase
-      disabled: boolean
     }
 
 function FeatureRow({ item, onAfter }: { item: FeatureItem; onAfter?: () => void }) {
@@ -588,8 +581,6 @@ export function Composer({
   onAttachmentsDrained,
   kbIds,
   projectKBId,
-  projectKBEmbeddingModelId,
-  projectKBEmbeddingDim,
   onKBChange,
   modelPickerInHeader = false,
 }: ComposerProps) {
@@ -1447,7 +1438,7 @@ export function Composer({
             done = true
           } else if (doc.status === 'failed') {
             setAttachments((s) => s.map((a) => (a.id === attId ? { ...a, ingest: 'failed' } : a)))
-            toast.error(t('composer.ingestFailed', { defaultValue: 'Could not read this file' }), doc.error || undefined)
+            toast.error(t('composer.ingestFailed', { defaultValue: 'Could not read this file' }))
             done = true
           } else {
             const ing: 'embedding' | 'parsing' = doc.status === 'embedding' ? 'embedding' : 'parsing'
@@ -1868,24 +1859,11 @@ export function Composer({
         kbList,
         kbIds ?? [],
         projectKBId,
-        projectKBEmbeddingModelId !== undefined && projectKBEmbeddingDim !== undefined
-          ? {
-              embedding_model_id: projectKBEmbeddingModelId,
-              embedding_dim: projectKBEmbeddingDim,
-            }
-          : undefined,
       ),
-    [
-      kbIds,
-      kbList,
-      projectKBEmbeddingDim,
-      projectKBEmbeddingModelId,
-      projectKBId,
-    ],
+    [kbIds, kbList, projectKBId],
   )
   const {
     options: selectableKnowledgeBases,
-    anchors: selectedKnowledgeBases,
     selectedIds: selectedKnowledgeBaseIds,
   } = knowledgeBaseSelection
   const selectedKnowledgeBaseRows = useMemo(
@@ -1907,8 +1885,8 @@ export function Composer({
   }
 
   // KB checklist — shared by the desktop popover and the mobile "+" menu.
-  // Keep selected rows actionable even if legacy data is incompatible so the
-  // user can always recover by deselecting one of them.
+  // Retrieval compatibility is authoritative server behavior. The user-facing
+  // selector only handles library identity and selection.
   const kbChecklist =
     kbLoading || !kbLoaded ? (
       <div
@@ -1950,20 +1928,13 @@ export function Composer({
       <div className="max-h-64 overflow-y-auto overscroll-contain scrollbar-thin">
         {selectableKnowledgeBases.map((kb) => {
           const checked = selectedKnowledgeBaseIds.includes(kb.id)
-          const incompatible =
-            !checked &&
-            selectedKnowledgeBases.some(
-              (selected) => !knowledgeBasesHaveCompatibleEmbeddings(selected, kb),
-            )
-          const incompatibilityReason = t('composer.incompatibleKnowledgeBase')
           return (
             <button
               key={kb.id}
               type="button"
               role="checkbox"
               aria-checked={checked}
-              aria-label={incompatible ? `${kb.name}. ${incompatibilityReason}` : kb.name}
-              disabled={incompatible}
+              aria-label={kb.name}
               onClick={() =>
                 onKBChange?.(
                   checked
@@ -1973,9 +1944,7 @@ export function Composer({
               }
               className={cn(
                 'flex w-full items-start gap-2 rounded-[8px] px-2 py-1.5 text-left text-sm interactive',
-                incompatible
-                  ? 'cursor-not-allowed text-[var(--color-fg-subtle)] opacity-60'
-                  : 'text-[var(--color-fg)] hover:bg-[var(--color-bg-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+                'text-[var(--color-fg)] hover:bg-[var(--color-bg-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
               )}
             >
               <span
@@ -1990,11 +1959,6 @@ export function Composer({
               </span>
               <span className="min-w-0 flex-1">
                 <span className="block truncate">{kb.name}</span>
-                {incompatible ? (
-                  <span className="mt-0.5 block text-[11px] leading-snug text-[var(--color-fg-subtle)]">
-                    {incompatibilityReason}
-                  </span>
-                ) : null}
               </span>
             </button>
           )
@@ -2019,22 +1983,13 @@ export function Composer({
       return selectableKnowledgeBases
         .filter((knowledgeBase) => !selectedKnowledgeBaseIds.includes(knowledgeBase.id))
         .filter((knowledgeBase) => matches(knowledgeBase.name, knowledgeBase.description))
-        .map((knowledgeBase) => {
-          const disabled = selectedKnowledgeBases.some(
-            (selected) => !knowledgeBasesHaveCompatibleEmbeddings(selected, knowledgeBase),
-          )
-          return {
+        .map((knowledgeBase) => ({
             kind: 'knowledge-base' as const,
             id: knowledgeBase.id,
             name: knowledgeBase.name,
-            description: disabled
-              ? t('composer.incompatibleKnowledgeBase')
-              : knowledgeBase.description,
+            description: knowledgeBase.description,
             knowledgeBase,
-            disabled,
-          }
-        })
-        .sort((left, right) => Number(left.disabled) - Number(right.disabled))
+          }))
         .slice(0, 10)
     }
     const skillItems: ComposerCommandItem[] = librarySkills
@@ -2068,17 +2023,11 @@ export function Composer({
     librarySkills,
     selectableKnowledgeBases,
     selectedKnowledgeBaseIds,
-    selectedKnowledgeBases,
     selectedSkills,
-    t,
   ])
 
   const enabledCommandIndices = useMemo(
-    () =>
-      commandItems
-        .map((item, index) => ({ item, index }))
-        .filter(({ item }) => item.kind !== 'knowledge-base' || !item.disabled)
-        .map(({ index }) => index),
+    () => commandItems.map((_, index) => index),
     [commandItems],
   )
 
@@ -2155,7 +2104,6 @@ export function Composer({
   function chooseCommand(item: ComposerCommandItem) {
     const query = commandQuery
     if (!query) return
-    if (item.kind === 'knowledge-base' && item.disabled) return
     if (item.kind === 'skill') {
       ref.current?.replaceRange(query.from, query.to, '')
       setSelectedSkills((current) => addSelectedUserSkill(current, item.skill))
@@ -2448,23 +2396,15 @@ export function Composer({
                             type="button"
                             role="option"
                             aria-selected={active}
-                            aria-disabled={item.kind === 'knowledge-base' ? item.disabled : undefined}
-                            disabled={item.kind === 'knowledge-base' && item.disabled}
                             data-command-index={index}
                             onMouseDown={(event) => event.preventDefault()}
-                            onMouseEnter={() => {
-                              if (item.kind !== 'knowledge-base' || !item.disabled) {
-                                setCommandIndex(index)
-                              }
-                            }}
+                            onMouseEnter={() => setCommandIndex(index)}
                             onClick={() => chooseCommand(item)}
                             className={cn(
                               'flex min-h-9 w-full min-w-0 items-center gap-2 rounded-[10px] px-2.5 py-1.5 text-left interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-sm:min-h-10',
-                              item.kind === 'knowledge-base' && item.disabled
-                                ? 'cursor-not-allowed opacity-55'
-                                : active
-                                  ? 'bg-[var(--color-bg-muted)]'
-                                  : 'hover:bg-[var(--color-bg-muted)]',
+                              active
+                                ? 'bg-[var(--color-bg-muted)]'
+                                : 'hover:bg-[var(--color-bg-muted)]',
                             )}
                           >
                             <span

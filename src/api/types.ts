@@ -795,9 +795,6 @@ export interface ApiProject {
   emoji: string
   pinned: boolean
   kb_id: string
-  /** Embedding signature for the project-owned KB, which is hidden from /kbs. */
-  kb_embedding_model_id?: string
-  kb_embedding_dim?: number
   auto_add_uploads: boolean
   created_at: number
   updated_at: number
@@ -810,10 +807,14 @@ export interface ApiKnowledgeBase {
   user_id: string
   name: string
   description: string
-  embedding_model_id: string
-  embedding_dim: number
   project_id: string
   created_at: number
+}
+
+/** Full knowledge-base record returned only by administrator drill-down APIs. */
+export interface ApiAdminKnowledgeBase extends ApiKnowledgeBase {
+  embedding_model_id: string
+  embedding_dim: number
 }
 
 export interface ApiDocument {

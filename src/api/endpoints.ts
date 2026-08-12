@@ -23,6 +23,7 @@ import type {
   ApiCredits,
   ApiDocument,
   ApiKnowledgeBase,
+  ApiAdminKnowledgeBase,
   ApiMemory,
   ApiMessage,
   ApiModel,
@@ -275,7 +276,6 @@ export const modelsApi = {
       fast_vision?: boolean
     }>('/models'),
   listImage: () => api<{ models: ApiModel[]; default_id: string }>('/image-models'),
-  listEmbedding: () => api<{ models: ApiModel[]; default_id: string }>('/embedding-models'),
   /** Model tags for the picker's filter chips (§ model tags). */
   tags: () => api<ApiModelTag[]>('/model-tags'),
 }
@@ -629,7 +629,7 @@ export const sharedApi = {
 export const kbsApi = {
   list: (workspaceId?: string) =>
     api<ApiKnowledgeBase[]>(`/kbs${workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : ''}`),
-  create: (body: { name: string; description?: string; embedding_model_id?: string; workspace_id?: string }) =>
+  create: (body: { name: string; description?: string; workspace_id?: string }) =>
     api<ApiKnowledgeBase>('/kbs', { method: 'POST', body }),
   remove: (id: string) => api<{ ok: true }>(`/kbs/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   listDocs: (id: string) => api<ApiDocument[]>(`/kbs/${encodeURIComponent(id)}/documents`),
@@ -1004,7 +1004,7 @@ export const adminApi = {
     offset = 0,
   ) => api<ApiAdminImage[]>(`/admin/users/${encodeURIComponent(id)}/images?limit=${limit}&offset=${offset}`),
   userKbs: (id: string) =>
-    api<ApiKnowledgeBase[]>(`/admin/users/${encodeURIComponent(id)}/kbs`),
+    api<ApiAdminKnowledgeBase[]>(`/admin/users/${encodeURIComponent(id)}/kbs`),
   /** Read-only long-term memory inventory for one user (admin drill-down). */
   userMemories: (id: string) =>
     api<ApiMemory[]>(`/admin/users/${encodeURIComponent(id)}/memories`),

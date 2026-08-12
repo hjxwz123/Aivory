@@ -3,24 +3,23 @@
   "lead": "Long-lived libraries that any conversation can call into. Upload documents once, ask anywhere.",
   "new": "New library",
   "emptyTitle": "No libraries yet",
-  "emptyBody": "A library binds a set of documents to one embedding model. Create one to get started.",
+  "emptyBody": "A library keeps your documents available to conversations. Create one to get started.",
   "createFirst": "Create your first library",
   "stats": {
-    "dim": "{{dim}}-dim embeddings",
+    "dim": "{{dim}} indexed items",
     "created": "created {{when}}"
   },
   "dialog": {
     "title": "New knowledge library",
-    "body": "The embedding model is locked once you upload the first document — it determines the vector space.",
+    "body": "Add documents once and use this library from any conversation.",
     "name": "Name",
     "namePlaceholder": "House style guide",
     "description": "Description",
-    "embeddingModel": "Embedding model",
-    "pickModel": "Pick a model",
     "create": "Create",
     "created": "Knowledge base created",
     "nameRequired": "Name required",
-    "nameExists": "A knowledge base with this name already exists."
+    "nameExists": "A knowledge base with this name already exists.",
+    "unavailable": "Knowledge bases are temporarily unavailable. Contact the administrator or try again later."
   },
   "detail": {
     "uploadButton": "Upload document",
@@ -38,7 +37,7 @@
     "status": {
       "pending": "Queued",
       "parsing": "Parsing",
-      "embedding": "Embedding",
+      "embedding": "Indexing",
       "ready": "Ready",
       "failed": "Failed"
     },
@@ -60,5 +59,5 @@
   "deleted": "Knowledge base deleted",
   "deleteAction": "Delete knowledge base",
   "deleteTitle": "Delete knowledge base?",
-  "deleteBody": "This permanently deletes “{{name}}”, all its documents and their embeddings. Conversations that reference it will be unlinked. This cannot be undone."
+  "deleteBody": "This permanently deletes “{{name}}” and all its documents and index data. Conversations that reference it will be unlinked. This cannot be undone."
 }

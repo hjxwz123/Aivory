@@ -3101,7 +3101,12 @@ function prettyToolLabel(name: string): string {
 }
 
 function errorMessage(e: unknown, fallback = 'Something went wrong'): string {
-  if (e instanceof ApiError) return e.message
+  if (e instanceof ApiError) {
+    if (e.message === 'knowledge_base_selection_incompatible') {
+      return i18n.t('chat:composer.incompatibleKnowledgeBase')
+    }
+    return e.message
+  }
   if (e instanceof Error) return e.message
   return fallback
 }

@@ -292,7 +292,7 @@ export default function KnowledgeBaseDetail() {
                     {d.status === 'failed' ? (
                       <p className="mt-1.5 flex items-start gap-1.5 text-[12px] text-[var(--color-danger)] leading-snug">
                         <AlertTriangle size={12} className="mt-px shrink-0" aria-hidden />
-                        <span>{d.error || t('kb:detail.failedReason')}</span>
+                        <span>{t('kb:detail.failedReason')}</span>
                       </p>
                     ) : null}
                     {(d.status === 'parsing' || d.status === 'embedding') ? (
@@ -445,7 +445,7 @@ export default function KnowledgeBaseDetail() {
               {t('kb:deleteBody', {
                 name: kb?.name ?? '',
                 defaultValue:
-                  'This permanently deletes “{{name}}”, all its documents and their embeddings. Conversations that reference it will be unlinked. This cannot be undone.',
+                  'This permanently deletes “{{name}}” and all its documents and index data. Conversations that reference it will be unlinked. This cannot be undone.',
               })}
             </DialogDescription>
           </DialogHeader>

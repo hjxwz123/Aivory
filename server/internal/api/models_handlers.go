@@ -104,16 +104,6 @@ func listImageModelsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, modelsResponse(d, r, models))
 }
 
-// listEmbeddingModelsHandler returns enabled embedding models for KB creation.
-func listEmbeddingModelsHandler(d Deps, w http.ResponseWriter, r *http.Request) {
-	models, err := store.ListModels(r.Context(), d.DB, "embedding", true)
-	if err != nil {
-		writeError(w, 500, err)
-		return
-	}
-	writeJSON(w, 200, modelsResponse(d, r, models))
-}
-
 type publicSkill struct {
 	ID                 string `json:"id"`
 	Name               string `json:"name"`

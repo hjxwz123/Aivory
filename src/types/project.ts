@@ -33,9 +33,6 @@ export interface Project {
   id: string
   /** Knowledge base implicitly attached to every conversation in this project. */
   kbId?: string
-  /** Embedding signature used to validate additional conversation KBs. */
-  kbEmbeddingModelId?: string
-  kbEmbeddingDim?: number
   name: string
   description?: string
   /** Custom instructions applied to every chat in this project. */

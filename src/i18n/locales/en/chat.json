@@ -94,7 +94,7 @@
     "retryKnowledgeBases": "Try again",
     "noKnowledgeBases": "No knowledge bases yet.",
     "manageKnowledgeBases": "Manage knowledge bases",
-    "incompatibleKnowledgeBase": "Uses a different embedding model",
+    "incompatibleKnowledgeBase": "This library cannot be used with the current selection",
     "knowledgeBaseMentionLabel": "Attach a knowledge base",
     "knowledgeBaseMentionEmpty": "No matching knowledge bases",
     "removeKnowledgeBase": "Remove knowledge base {{name}}",

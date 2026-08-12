@@ -243,7 +243,6 @@ func NewRouter(d Deps) http.Handler {
 	mux.handle("GET", "/api/models", requireAuth(d, listModelsHandler))
 	mux.handle("GET", "/api/tools", requireAuth(d, listSelectableToolsHandler))
 	mux.handle("GET", "/api/image-models", requireAuth(d, listImageModelsHandler))
-	mux.handle("GET", "/api/embedding-models", requireAuth(d, listEmbeddingModelsHandler))
 	mux.handle("GET", "/api/skills", requireAuth(d, listSkillsPublicHandler))
 	// User skill/prompt library. The catalog exposes display metadata only;
 	// copying an item creates an independent user-owned row.
