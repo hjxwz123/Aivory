@@ -140,6 +140,9 @@ interface ComposerProps {
   draftScope?: string
   /** Conversation id (so uploads carry the right scope). */
   conversationId?: string
+  /** Existing thread surface. Home may pre-create an empty conversation only
+   * to scope uploads; chat commands must not be offered there. */
+  commandsEnabled?: boolean
   /**
    * Home screen only: there is no conversation yet when the user attaches a
    * file. Provide this to lazily create one BEFORE the first upload so the file
@@ -579,6 +582,7 @@ export function Composer({
   autoFocus = false,
   draftScope,
   conversationId,
+  commandsEnabled = false,
   ensureConversationId,
   onAttachmentsDrained,
   kbIds,
@@ -1240,13 +1244,14 @@ export function Composer({
     !uploading &&
     !restoringAttachments &&
     !documentNotReady &&
-    !hasUnsupportedImageAttachment
+    !hasUnsupportedImageAttachment &&
+    !executingCommand
 
   async function handleSubmit() {
     if (submittingRef.current) return
     const text = value.trim()
     if (text === '/compact' && attachments.length === 0) {
-      if (!conversationId) {
+      if (!commandsEnabled || !conversationId) {
         toast.info(t('composer.commands.noConversation'))
         return
       }
@@ -1255,7 +1260,7 @@ export function Composer({
       await runCompactCommand()
       return
     }
-    if (voiceActive || streaming || uploading || restoringAttachments || documentNotReady) return
+    if (voiceActive || streaming || uploading || restoringAttachments || documentNotReady || executingCommand) return
     if (!text && isImageMode && hasImageAttachment(attachments)) {
       toast.warning(t('composer.imagePromptRequired'))
       return
@@ -2030,7 +2035,7 @@ export function Composer({
       name: '/compact',
       description: t('composer.commands.compactDescription'),
     }
-    const matchedCommands = conversationId && matches(compactItem.name, compactItem.description) ? [compactItem] : []
+    const matchedCommands = commandsEnabled && conversationId && matches(compactItem.name, compactItem.description) ? [compactItem] : []
     const limit = 10
     // A matching command always owns one slot, so a full skill catalog cannot
     // hide /compact. Remaining rows keep the requested skill -> command -> prompt order.
@@ -2045,6 +2050,7 @@ export function Composer({
     selectableKnowledgeBases,
     selectedKnowledgeBaseIds,
     selectedSkills,
+    commandsEnabled,
     conversationId,
     t,
   ])
@@ -2125,7 +2131,7 @@ export function Composer({
   }, [commandIndex])
 
   async function runCompactCommand() {
-    if (!conversationId) {
+    if (!commandsEnabled || !conversationId) {
       toast.info(t('composer.commands.noConversation'))
       return
     }
@@ -2338,7 +2344,7 @@ export function Composer({
               : 'bg-[var(--color-bg-muted)] text-[var(--color-fg-faint)]',
           )}
         >
-          {uploading ? <Loader2 size={15} className="animate-spin" aria-hidden /> : <ArrowUp size={15} aria-hidden />}
+          {uploading || executingCommand ? <Loader2 size={15} className="animate-spin" aria-hidden /> : <ArrowUp size={15} aria-hidden />}
         </span>
       </button>
     </Tooltip>
@@ -2466,8 +2472,11 @@ export function Composer({
                             onMouseDown={(event) => event.preventDefault()}
                             onMouseEnter={() => setCommandIndex(index)}
                             onClick={() => chooseCommand(item)}
+                            disabled={item.kind === 'command' && Boolean(executingCommand)}
+                            aria-busy={item.kind === 'command' && executingCommand === item.id ? true : undefined}
                             className={cn(
                               'flex min-h-9 w-full min-w-0 items-center gap-2 rounded-[10px] px-2.5 py-1.5 text-left interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] max-sm:min-h-10',
+                              item.kind === 'command' && executingCommand && 'cursor-wait opacity-60',
                               active
                                 ? 'bg-[var(--color-bg-muted)]'
                                 : 'hover:bg-[var(--color-bg-muted)]',

@@ -530,6 +530,7 @@ export default function ChatThread() {
             streaming={Boolean(streaming)}
             autoFocus
             conversationId={conversation.id}
+            commandsEnabled
             kbIds={conversation.kbIds}
             projectKBId={project?.kbId}
             onKBChange={(ids) => void setKBs(conversation.id, ids)}
