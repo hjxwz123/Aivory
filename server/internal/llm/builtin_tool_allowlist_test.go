@@ -271,6 +271,130 @@ func TestPromptModePreambleAndForgedCallUseFilteredDefinitions(t *testing.T) {
 	}
 }
 
+func TestPromptModePersistsBoundedCanonicalToolOutput(t *testing.T) {
+	definitions := []ToolDef{{Name: "lookup"}}
+	underlying := &recordingToolRunner{}
+	round := 0
+	_, blocks, _, _, _, err := RunPromptToolLoop(
+		context.Background(), "system", nil, definitions,
+		func(_ context.Context, _ []UnifiedMessage, _ string) (PromptToolRound, error) {
+			round++
+			if round == 1 {
+				return PromptToolRound{Text: `<tool_call>{"name":"lookup","arguments":{}}</tool_call>`}, nil
+			}
+			return PromptToolRound{Text: "done"}, nil
+		},
+		underlying,
+		func(SseEvent) {},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(blocks) < 3 || blocks[0].Kind != "tool_call" || blocks[1].Kind != "tool_output" {
+		t.Fatalf("prompt-mode blocks = %+v", blocks)
+	}
+	if blocks[1].ToolID != blocks[0].ToolID || blocks[1].Text != "ran lookup" {
+		t.Fatalf("canonical tool output = %+v, call = %+v", blocks[1], blocks[0])
+	}
+}
+
+func TestPromptModeRawEnvelopeKeepsCompleteMiddleToolEvidence(t *testing.T) {
+	const evidence = "PROMPT_MIDDLE_EVIDENCE accession=PMC123 decision=approved"
+	output := "prompt head " + strings.Repeat("filler ", 900) + evidence + strings.Repeat(" tail-filler", 900) + " prompt tail"
+	rounds := 0
+	_, blocks, _, _, _, raw, err := RunPromptToolLoopWithRaw(
+		context.Background(), "system", nil, []ToolDef{{Name: "lookup"}},
+		func(context.Context, []UnifiedMessage, string) (PromptToolRound, error) {
+			rounds++
+			if rounds == 1 {
+				return PromptToolRound{Text: `<tool_call>{"name":"lookup","arguments":{}}</tool_call>`}, nil
+			}
+			return PromptToolRound{Text: "done"}, nil
+		},
+		&staticPromptOutputRunner{output: output},
+		func(SseEvent) {},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(blocks) < 2 || blocks[1].Kind != "tool_output" || !strings.Contains(blocks[1].Text, "[middle omitted]") {
+		t.Fatalf("canonical prompt output was not bounded: %+v", blocks)
+	}
+	if !isPromptToolRawEnvelope(raw) {
+		t.Fatalf("raw result is not the internal prompt envelope: %s", raw)
+	}
+	messageBlocks, _ := json.Marshal(blocks)
+	var source strings.Builder
+	if err := appendCompactionSourceChecked(&source, []store.Message{{
+		ID: "prompt-envelope", Role: "assistant", Blocks: messageBlocks, Raw: raw,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(source.String(), evidence) || strings.Contains(source.String(), "[middle omitted]") {
+		t.Fatalf("compaction did not recover complete prompt result: %s", source.String())
+	}
+}
+
+func TestPromptRawEnvelopeIsProviderNeutralAndNeverNativeReplay(t *testing.T) {
+	raw := marshalPromptToolRawEnvelope([]promptToolRawOutput{{
+		Name: "lookup", ID: "pt_0", Output: "complete prompt result", Status: "complete",
+	}})
+	history := []UnifiedMessage{{
+		Role: "assistant", Blocks: []UnifiedBlock{{Kind: "text", Text: "visible answer"}}, Raw: raw,
+	}}
+
+	if got := historyToAnthropic(history, false); len(got) != 1 || got[0]["role"] != "assistant" {
+		t.Fatalf("Anthropic did not use canonical prompt history: %+v", got)
+	}
+	if got := historyToGemini(history, false); len(got) != 1 || got[0]["role"] != "model" {
+		t.Fatalf("Gemini did not use canonical prompt history: %+v", got)
+	}
+	if got := nativeRawForPersistedModel(raw, "ttft-fallback"); string(got) != string(raw) {
+		t.Fatalf("provider-neutral envelope was discarded on TTFT fallback: %s", got)
+	}
+
+	blocksJSON, _ := json.Marshal(history[0].Blocks)
+	stored := []store.Message{{
+		ID: "a1", Role: "assistant", Provider: "openai", ModelID: "old-model",
+		Blocks: blocksJSON, Raw: raw, Status: "complete",
+	}}
+	unified := storeToUnified(stored, "anthropic", "new-model", false)
+	if len(unified) != 1 || string(unified[0].Raw) != string(raw) {
+		t.Fatalf("model/provider switch discarded compaction envelope: %+v", unified)
+	}
+}
+
+func TestPromptRawEnvelopeFiltersDisallowedToolOutputs(t *testing.T) {
+	raw := marshalPromptToolRawEnvelope([]promptToolRawOutput{
+		{Name: "python_execute", ID: "denied", Output: "secret denied output"},
+		{Name: "aivory_web_search", ID: "allowed", Output: "allowed search output"},
+	})
+	history := []UnifiedMessage{{
+		Role: "assistant",
+		Blocks: []UnifiedBlock{
+			{Kind: "tool_call", ToolName: "python_execute", ToolID: "denied"},
+			{Kind: "tool_output", ToolName: "python_execute", ToolID: "denied", Text: "denied preview"},
+			{Kind: "tool_call", ToolName: "aivory_web_search", ToolID: "allowed"},
+			{Kind: "tool_output", ToolName: "aivory_web_search", ToolID: "allowed", Text: "allowed preview"},
+		},
+		Raw: raw,
+	}}
+	filtered := stripDisallowedBuiltinToolBlocks(history, map[string]bool{"aivory_web_search": true})
+	envelope, ok := parsePromptToolRawEnvelope(filtered[0].Raw)
+	if !ok || len(envelope.Outputs) != 1 || envelope.Outputs[0].Name != "aivory_web_search" {
+		t.Fatalf("filtered prompt envelope = %+v ok=%v", envelope, ok)
+	}
+	if strings.Contains(string(filtered[0].Raw), "secret denied output") {
+		t.Fatalf("disallowed complete output survived in Raw: %s", filtered[0].Raw)
+	}
+}
+
+type staticPromptOutputRunner struct{ output string }
+
+func (r *staticPromptOutputRunner) Run(context.Context, string, []byte) (string, []Citation, error) {
+	return r.output, nil, nil
+}
+
 func TestPromptModeWithEmptyBuiltinAllowlistUsesPlainSingleTurnRequest(t *testing.T) {
 	orchestrator, provider, model, conversation, _, db := setupToolRouteTest(t)
 	if _, err := db.Exec(`UPDATE models SET tool_mode='prompt', builtin_tools='[]' WHERE id=?`, model.ID); err != nil {

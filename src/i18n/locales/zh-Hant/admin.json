@@ -250,13 +250,21 @@
     "disabledTag": "已停用",
     "editorTitle": "編輯提示詞",
     "newTitle": "新增提示詞",
-    "fields": { "name": "名稱", "description": "展示描述", "content": "提示詞內容", "enabled": "啟用" },
+    "fields": {
+      "name": "名稱",
+      "description": "展示描述",
+      "content": "提示詞內容",
+      "enabled": "啟用"
+    },
     "removeTitle": "刪除提示詞？",
     "removeBody": "將刪除「{{name}}」。已加入使用者個人庫的副本不受影響。",
     "created": "提示詞已建立",
     "updated": "提示詞已更新",
     "removed": "提示詞已刪除",
-    "errors": { "missingFields": "請填寫名稱、描述和提示詞內容。", "nameExists": "已存在同名提示詞。" }
+    "errors": {
+      "missingFields": "請填寫名稱、描述和提示詞內容。",
+      "nameExists": "已存在同名提示詞。"
+    }
   },
   "oauth": {
     "title": "登入方式",
@@ -727,17 +735,19 @@
       "summaryTargetPercentHint": "摘要相對於來源 token 的目標長度。範圍：5–80%，最終仍受摘要 token 預算限制。",
       "summaryMergeTokens": "合併摘要預算",
       "summaryMergeTokensHint": "舊摘要區塊開始合併前允許的摘要累計上限，最小為 256。",
+      "compactionRequestTokens": "壓縮請求 token 預算",
+      "compactionRequestTokensHint": "每次摘要請求的估算輸入與預留輸出總上限。更長歷史會自動分批處理，最小為 8192。",
       "compactionPrompt": "自訂摘要指令",
       "compactionPromptHint": "選填，會放在 Aivory 內建的延續摘要提示詞之前。",
       "compactionPromptPlaceholder": "留空以使用內建摘要指令。",
-      "compactionRangeError": "至少保留 1 輪；訊息比例須為 10–50%，摘要目標須為 5–80%，兩個摘要預算均不得低於 256 token。",
+      "compactionRangeError": "至少保留 1 輪；訊息比例須為 10–50%，摘要目標須為 5–80%，兩個摘要預算不得低於 256 token，請求預算不得低於 8192 token。",
       "compactionModel": "摘要模型",
-      "compactionModelHint": "選填。使用此對話模型壓縮上下文；未指定時依序使用任務模型與目前對話模型。",
-      "compactionModelInherited": "使用任務／對話模型",
+      "compactionModelHint": "選填。使用此對話模型壓縮上下文；未指定時依序使用目前對話模型與任務模型。",
+      "compactionModelInherited": "使用對話／任務模型",
       "compactionModelUnavailable": "無法使用的模型（{{id}}）",
       "compactionModelsLoading": "正在載入對話模型…",
       "compactionModelsLoadFailed": "無法載入對話模型，其他壓縮設定仍可使用。",
-      "compactionModelsEmpty": "尚未設定對話模型，將使用任務模型或目前對話模型。",
+      "compactionModelsEmpty": "尚未設定對話模型，將使用目前對話模型或任務模型。",
       "compactionEnabled": "啟用壓縮",
       "memoryEnabled": "啟用記憶",
       "signupOpen": "開放新註冊",

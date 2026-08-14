@@ -127,6 +127,16 @@ func NewRouter(d Deps) http.Handler {
 		d.Orchestrator.SetConversationUpdatedHandler(func(userID, conversationID string) {
 			publishUserEvent(d, nil, userID, "conversation.updated", conversationID)
 		})
+		// Automatic compaction normally happens after a response has started (or
+		// from a queue worker), so it has no request-scoped SSE stream of its own.
+		// Relay only its lifecycle to the user's realtime stream; manual /compact
+		// returns synchronously and deliberately does not invoke this callback.
+		d.Orchestrator.SetCompactionStatusHandler(func(userID, conversationID, operationID, status string) {
+			switch status {
+			case "started", "completed", "failed":
+				publishCompactionEvent(d, userID, conversationID, operationID, status)
+			}
+		})
 	}
 
 	// Resume account deletions stranded in status='deleting' by a previous

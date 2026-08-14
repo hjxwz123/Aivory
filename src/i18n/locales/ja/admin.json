@@ -250,13 +250,21 @@
     "disabledTag": "無効",
     "editorTitle": "プロンプトを編集",
     "newTitle": "新しいプロンプト",
-    "fields": { "name": "名前", "description": "表示用の説明", "content": "プロンプト本文", "enabled": "有効" },
+    "fields": {
+      "name": "名前",
+      "description": "表示用の説明",
+      "content": "プロンプト本文",
+      "enabled": "有効"
+    },
     "removeTitle": "プロンプトを削除しますか？",
     "removeBody": "「{{name}}」を削除します。すでに個人ライブラリへ追加されたコピーには影響しません。",
     "created": "プロンプトを作成しました",
     "updated": "プロンプトを更新しました",
     "removed": "プロンプトを削除しました",
-    "errors": { "missingFields": "名前、説明、プロンプト本文を入力してください。", "nameExists": "同じ名前のプロンプトがすでにあります。" }
+    "errors": {
+      "missingFields": "名前、説明、プロンプト本文を入力してください。",
+      "nameExists": "同じ名前のプロンプトがすでにあります。"
+    }
   },
   "oauth": {
     "title": "ログイン方法",
@@ -727,17 +735,19 @@
       "summaryTargetPercentHint": "元のトークン数に対する要約の目標長です。範囲：5～80%。要約トークン予算が最終上限です。",
       "summaryMergeTokens": "統合要約の予算",
       "summaryMergeTokensHint": "古い要約ブロックを統合する前に許容する累積要約サイズの上限です。最小値は 256 です。",
+      "compactionRequestTokens": "圧縮リクエストのトークン予算",
+      "compactionRequestTokensHint": "各要約リクエストの推定入力と予約出力の合計上限です。長い履歴は分割処理されます。最小値は 8192 です。",
       "compactionPrompt": "要約のカスタム指示",
       "compactionPromptHint": "Aivory の組み込み継続要約プロンプトの前に追加する任意の指示です。",
       "compactionPromptPlaceholder": "空欄の場合は組み込みの要約指示を使用します。",
-      "compactionRangeError": "少なくとも 1 ラウンドを保持し、メッセージは 10～50%、要約目標は 5～80%、両方の要約予算は 256 token 以上にしてください。",
+      "compactionRangeError": "少なくとも 1 ラウンドを保持し、メッセージは 10～50%、要約目標は 5～80%、両方の要約予算は 256 token 以上、リクエスト予算は 8192 token 以上にしてください。",
       "compactionModel": "要約モデル",
-      "compactionModelHint": "任意。このチャットモデルでコンテキストを圧縮します。未指定の場合はタスクモデル、次に現在の会話モデルを使用します。",
-      "compactionModelInherited": "タスク／会話モデルを使用",
+      "compactionModelHint": "任意。このチャットモデルでコンテキストを圧縮します。未指定の場合は現在の会話モデル、次にタスクモデルを使用します。",
+      "compactionModelInherited": "会話／タスクモデルを使用",
       "compactionModelUnavailable": "利用できないモデル（{{id}}）",
       "compactionModelsLoading": "チャットモデルを読み込み中…",
       "compactionModelsLoadFailed": "チャットモデルを読み込めませんでした。他の圧縮設定は引き続き利用できます。",
-      "compactionModelsEmpty": "チャットモデルが設定されていません。タスクモデルまたは現在の会話モデルを使用します。",
+      "compactionModelsEmpty": "チャットモデルが設定されていません。現在の会話モデルまたはタスクモデルを使用します。",
       "compactionEnabled": "圧縮を有効化",
       "memoryEnabled": "メモリーを有効化",
       "signupOpen": "新規サインアップを開放",

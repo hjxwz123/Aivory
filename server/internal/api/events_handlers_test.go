@@ -109,6 +109,22 @@ func TestPublishUserEventOmitsEmptyFields(t *testing.T) {
 	}
 }
 
+func TestPublishCompactionEventIncludesOperationID(t *testing.T) {
+	d := eventsTestDeps()
+	conn := eventsHub.register("compaction-user")
+	defer eventsHub.unregister("compaction-user", conn)
+
+	publishCompactionEvent(d, "compaction-user", "conversation-1", "cmp-1", "started")
+	payload := waitEvent(t, conn.ch, 2*time.Second)
+	var event map[string]string
+	if err := json.Unmarshal([]byte(payload), &event); err != nil {
+		t.Fatal(err)
+	}
+	if event["type"] != "compaction.started" || event["conversation_id"] != "conversation-1" || event["operation_id"] != "cmp-1" {
+		t.Fatalf("event=%v", event)
+	}
+}
+
 func TestPublishGlobalEventDeliversToEveryConnectedUser(t *testing.T) {
 	d := eventsTestDeps()
 	connA := eventsHub.registerForGroup("global-user-a", "global-group-a")

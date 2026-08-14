@@ -38,14 +38,14 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 	}
 	// §4.13 prompt-mode: drive the text protocol loop.
 	if req.ToolModePrompt {
-		_, blocks, usage, cites, images, err := RunPromptToolLoop(
+		_, blocks, usage, cites, images, raw, err := RunPromptToolLoopWithRaw(
 			ctx, req.SystemPrompt, req.History, req.Tools,
 			p.promptRunOnce(req), tools, onEvent,
 		)
 		if err != nil {
-			return promptToolErrorResult(ctx, blocks, usage, cites, images, err)
+			return promptToolErrorResult(ctx, blocks, raw, usage, cites, images, err)
 		}
-		return &UnifiedResult{Blocks: blocks, StopReason: "end_turn", Usage: usage, Citations: cites, GeneratedImages: images}, nil
+		return &UnifiedResult{Blocks: blocks, Raw: raw, StopReason: "end_turn", Usage: usage, Citations: cites, GeneratedImages: images}, nil
 	}
 
 	contents := historyToGemini(req.History, req.Model.Vision)
@@ -126,10 +126,11 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 			}
 			var readErr error
 			text, thinkingText, calls, modelParts, citations, u, readErr = readGeminiStream(resp.Body, emit)
+			// Preserve usage for this exact channel attempt before a transparent
+			// fallback resets the shared response variables.
+			attachProviderRequestUsage(ctx, u)
 			return readErr
 		}, onEvent)
-		// §B5-per-request usage rows: pin this iteration's usage to its request.
-		attachProviderRequestUsage(ctx, u)
 		if err != nil {
 			partialBlocks := append([]UnifiedBlock{}, allBlocks...)
 			if thinkingText != "" {
@@ -163,12 +164,13 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 				partialContents = append(partialContents, map[string]any{"role": "model", "parts": partialModelParts})
 			}
 			partialRaw, _ := json.Marshal(partialContents[historyLen:])
+			completedToolResult := len(extractCompactionRawToolOutputs(partialRaw)) > 0
 			// Stop button / kill: preserve the partial (§6.2).
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return &UnifiedResult{Blocks: partialBlocks, Raw: partialRaw, StopReason: "stopped", Usage: partialUsage, Citations: partialCitations}, err
 			}
 			visible := providerVisibleOutputFromContext(ctx)
-			if len(partialBlocks) > 0 || len(partialCitations) > len(allCitations) || usageHasValue(partialUsage) || (visible != nil && visible.Load()) {
+			if len(partialBlocks) > 0 || completedToolResult || len(partialCitations) > len(allCitations) || usageHasValue(partialUsage) || (visible != nil && visible.Load()) {
 				return &UnifiedResult{Blocks: partialBlocks, Raw: partialRaw, StopReason: "error", Usage: partialUsage, Citations: partialCitations}, err
 			}
 			return nil, err
@@ -221,6 +223,7 @@ func (p *GoogleProvider) Stream(ctx context.Context, req UnifiedChatRequest, too
 				Kind: "tool_call", ToolName: c.Name, ToolID: c.Name,
 				Input: c.Args, Summary: truncate(out, 240),
 			})
+			allBlocks = append(allBlocks, canonicalToolOutputBlock(c.Name, c.Name, out, status))
 			respParts = append(respParts, map[string]any{
 				"functionResponse": map[string]any{
 					"name":     c.Name,
@@ -292,7 +295,7 @@ func historyToGemini(h []UnifiedMessage, vision bool) []map[string]any {
 		}
 		// Same-vendor raw replay (§2.3-C): stored model/user (functionResponse)
 		// turns from the original Gemini exchange.
-		if m.Role == "assistant" && len(m.Raw) > 2 {
+		if m.Role == "assistant" && len(m.Raw) > 2 && !isPromptToolRawEnvelope(m.Raw) {
 			var turns []map[string]any
 			if err := json.Unmarshal(m.Raw, &turns); err == nil && len(turns) > 0 && turns[0]["parts"] != nil {
 				// Gemini 3 hard-rejects (400 "missing thought_signature in
@@ -653,6 +656,7 @@ func (p *GoogleProvider) promptRunOnce(req UnifiedChatRequest) PromptToolRunner 
 			return PromptToolRound{
 				Text: promptRoundText(result.Blocks), Blocks: result.Blocks, Usage: result.Usage,
 				Citations: result.Citations, GeneratedImages: result.GeneratedImages,
+				Raw:                  result.Raw,
 				UsageAlreadyAttached: true,
 			}, err
 		}
@@ -665,9 +669,17 @@ func (p *GoogleProvider) promptRunOnce(req UnifiedChatRequest) PromptToolRunner 
 			}
 			parts := []map[string]any{}
 			for _, b := range m.Blocks {
+				if req.Model.Vision && m.Role == "user" && b.Kind == "image" && b.Data != "" {
+					parts = append(parts, map[string]any{
+						"inlineData": map[string]any{"mimeType": b.MimeType, "data": b.Data},
+					})
+				}
 				if b.Kind == "text" {
 					parts = append(parts, map[string]any{"text": b.Text})
 				}
+			}
+			if len(parts) == 0 {
+				parts = append(parts, map[string]any{"text": ""})
 			}
 			contents = append(contents, map[string]any{"role": role, "parts": parts})
 		}

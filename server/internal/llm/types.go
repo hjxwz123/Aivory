@@ -14,7 +14,7 @@ import (
 
 // UnifiedBlock is the canonical message-block shape stored in DB (§2.3-C).
 type UnifiedBlock struct {
-	Kind     string          `json:"kind"` // text | thinking | tool_call | tool_output | citation | image | document | artifact
+	Kind     string          `json:"kind"` // text | thinking | tool_call | tool_output | citation | image | document | artifact | research
 	Text     string          `json:"text,omitempty"`
 	ToolName string          `json:"tool_name,omitempty"`
 	ToolID   string          `json:"tool_id,omitempty"`
@@ -120,6 +120,11 @@ type UnifiedChatRequest struct {
 	// MaxOutputTokens overrides the provider's default max_tokens cap.
 	// Used by TaskLLM for short internal calls.
 	MaxOutputTokens int
+	// StrictMaxOutputTokens prevents provider-specific features from raising the
+	// wire-level output limit above MaxOutputTokens. Context compaction enables
+	// this because its administrator-configured request budget is a hard bound,
+	// including inherited model thinking/reasoning defaults.
+	StrictMaxOutputTokens bool
 	// FallbackUsed, when non-nil, is set by the provider the first time it serves
 	// ANY request in this turn — including a tool-loop round — through
 	// Model.Fallback. Once set, later rounds stay on that channel. The

@@ -87,19 +87,48 @@ func compactConversationHandler(d Deps, w http.ResponseWriter, r *http.Request) 
 	}
 	result, err := d.Orchestrator.CompactConversation(r.Context(), u.ID, id)
 	if err != nil {
-		switch {
-		case errors.Is(err, llm.ErrCompactionDisabled):
-			writeJSON(w, http.StatusConflict, result)
-		case errors.Is(err, llm.ErrCompactionInFlight):
-			writeJSON(w, http.StatusConflict, result)
-		case errors.Is(err, store.ErrNotFound):
-			writeError(w, http.StatusNotFound, errNotFound)
-		default:
-			writeError(w, http.StatusInternalServerError, err)
-		}
+		writeCompactConversationError(r.Context(), w, result, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+func writeCompactConversationError(requestCtx context.Context, w http.ResponseWriter, result llm.ManualCompactionResult, err error) {
+	switch {
+	case requestCtx != nil && requestCtx.Err() != nil &&
+		(errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)):
+		// The caller is gone, so there is no response surface left to update.
+		// In particular, do not misreport an intentional disconnect as a 500.
+		return
+	case errors.Is(err, context.DeadlineExceeded):
+		result.Reason = "timed_out"
+		writeJSON(w, http.StatusGatewayTimeout, result)
+	case errors.Is(err, context.Canceled):
+		// A provider may return context.Canceled without the HTTP request being
+		// canceled. That is a real compaction failure, not an empty successful API
+		// response.
+		result.Reason = "compaction_failed"
+		writeJSON(w, http.StatusInternalServerError, result)
+	case errors.Is(err, llm.ErrCompactionDisabled):
+		result.Reason = "disabled"
+		writeJSON(w, http.StatusConflict, result)
+	case errors.Is(err, llm.ErrCompactionInFlight):
+		result.Reason = "generation_in_progress"
+		writeJSON(w, http.StatusConflict, result)
+	case errors.Is(err, llm.ErrCompactionChanged):
+		result.Reason = "conversation_changed"
+		writeJSON(w, http.StatusConflict, result)
+	case errors.Is(err, llm.ErrCompactionPersist):
+		result.Reason = "persistence_failed"
+		writeJSON(w, http.StatusInternalServerError, result)
+	case errors.Is(err, llm.ErrCompactionFailed), errors.Is(err, llm.ErrTaskBillingRecord):
+		result.Reason = "compaction_failed"
+		writeJSON(w, http.StatusInternalServerError, result)
+	case errors.Is(err, store.ErrNotFound):
+		writeError(w, http.StatusNotFound, errNotFound)
+	default:
+		writeError(w, http.StatusInternalServerError, err)
+	}
 }
 
 // searchHandler runs full-text search over the user's own conversation titles
@@ -832,6 +861,12 @@ func redactCost(ems []enrichedMessage) []enrichedMessage {
 		// for end users. Strip it on every user-facing path; admin endpoints that
 		// intentionally skip redaction still expose it.
 		ems[i].Raw = nil
+		// tool_output contains the bounded, canonical tool result retained solely so
+		// server-side context compaction can summarize more than the short UI preview.
+		// It may still hold sensitive tool data and is not a display block, so remove it
+		// at the same user-facing boundary as provider Raw. Admin diagnostics bypass
+		// redactCost and keep the complete persisted representation.
+		ems[i].Blocks = redactInternalMessageBlocks(ems[i].Blocks)
 		// §fast-mode: a fast turn's real model must never reach the user. Blank the
 		// identity (model_id / model_label / provider); `fast:true` stays on the wire
 		// so the client renders the localized "快速" label + a generic icon. This is
@@ -846,6 +881,37 @@ func redactCost(ems []enrichedMessage) []enrichedMessage {
 		ems[i].Attachments = backfillAttachmentURLs(ems[i].Attachments)
 	}
 	return ems
+}
+
+func redactInternalMessageBlocks(raw json.RawMessage) json.RawMessage {
+	if len(raw) <= 2 {
+		return raw
+	}
+	var blocks []llm.UnifiedBlock
+	if json.Unmarshal(raw, &blocks) != nil {
+		// The user API has no reason to return an unparseable persisted payload:
+		// it could contain a malformed internal tool_output record which cannot be
+		// selectively redacted. Fail closed rather than leaking opaque server-only
+		// data. Admin diagnostics deliberately bypass this user-facing redaction.
+		return json.RawMessage("[]")
+	}
+	filtered := make([]llm.UnifiedBlock, 0, len(blocks))
+	changed := false
+	for _, block := range blocks {
+		if block.Kind == "tool_output" {
+			changed = true
+			continue
+		}
+		filtered = append(filtered, block)
+	}
+	if !changed {
+		return raw
+	}
+	encoded, err := json.Marshal(filtered)
+	if err != nil {
+		return json.RawMessage("[]")
+	}
+	return encoded
 }
 
 // backfillAttachmentURLs walks the attachments JSON blob and, for any item

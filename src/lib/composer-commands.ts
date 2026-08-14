@@ -7,6 +7,53 @@ export interface ComposerCommandQuery {
 
 export const MAX_SELECTED_USER_SKILLS = 5
 
+export interface ScopedCommandRun {
+  scope: string
+  token: number
+}
+
+export interface ScopedCommandStart {
+  run: ScopedCommandRun
+  replaced: ScopedCommandRun | null
+}
+
+/**
+ * Synchronous ownership gate for async composer commands. React state updates
+ * are intentionally not used for exclusion because two handlers can run in the
+ * same tick before the first state update is committed.
+ */
+export function createScopedCommandGate() {
+  let sequence = 0
+  let active: ScopedCommandRun | null = null
+  return {
+    begin(scope: string): ScopedCommandStart | null {
+      if (active?.scope === scope) return null
+      const replaced = active
+      active = { scope, token: ++sequence }
+      return { run: active, replaced }
+    },
+    owns(run: ScopedCommandRun): boolean {
+      return active?.scope === run.scope && active.token === run.token
+    },
+    release(run: ScopedCommandRun): boolean {
+      if (active?.scope !== run.scope || active.token !== run.token) return false
+      active = null
+      return true
+    },
+    invalidateExcept(scope: string | undefined): ScopedCommandRun | null {
+      if (!active || active.scope === scope) return null
+      const invalidated = active
+      active = null
+      return invalidated
+    },
+    clear(): ScopedCommandRun | null {
+      const invalidated = active
+      active = null
+      return invalidated
+    },
+  }
+}
+
 /**
  * Finds a slash-command or knowledge-base mention immediately before a
  * collapsed cursor. Positions are ProseMirror document positions;

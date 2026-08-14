@@ -806,7 +806,7 @@ func TestProviderDoesNotFallbackAfterVisibleToolRound(t *testing.T) {
 	if !visible.Load() {
 		t.Fatal("tool events did not commit visible output")
 	}
-	if result == nil || len(result.Blocks) != 1 || result.Blocks[0].Kind != "tool_call" {
+	if result == nil || len(result.Blocks) != 2 || result.Blocks[0].Kind != "tool_call" || result.Blocks[1].Kind != "tool_output" {
 		t.Fatalf("result blocks = %+v, want the completed tool round as partial output", result)
 	}
 }

@@ -250,13 +250,21 @@
     "disabledTag": "Disabled",
     "editorTitle": "Edit prompt",
     "newTitle": "New prompt",
-    "fields": { "name": "Name", "description": "Display description", "content": "Prompt content", "enabled": "Enabled" },
+    "fields": {
+      "name": "Name",
+      "description": "Display description",
+      "content": "Prompt content",
+      "enabled": "Enabled"
+    },
     "removeTitle": "Delete prompt?",
     "removeBody": "“{{name}}” will be deleted. Copies already added to personal libraries are unchanged.",
     "created": "Prompt created",
     "updated": "Prompt updated",
     "removed": "Prompt deleted",
-    "errors": { "missingFields": "Enter a name, description, and prompt content.", "nameExists": "A prompt with this name already exists." }
+    "errors": {
+      "missingFields": "Enter a name, description, and prompt content.",
+      "nameExists": "A prompt with this name already exists."
+    }
   },
   "oauth": {
     "title": "Login methods",
@@ -727,17 +735,19 @@
       "summaryTargetPercentHint": "Target summary length as a share of source tokens. Range: 5–80%; still limited by the summary token budget.",
       "summaryMergeTokens": "Merged summary budget",
       "summaryMergeTokensHint": "Maximum accumulated summary size before older summary blocks are folded together. Minimum: 256.",
+      "compactionRequestTokens": "Compaction request budget",
+      "compactionRequestTokensHint": "Maximum estimated input plus reserved output for each summary request. Larger histories are processed in bounded batches. Minimum: 8192.",
       "compactionPrompt": "Custom summary instructions",
       "compactionPromptHint": "Optional instructions placed before Aivory's built-in continuation-summary prompt.",
       "compactionPromptPlaceholder": "Leave empty to use the built-in summary instructions.",
-      "compactionRangeError": "Keep at least 1 round; retained messages must be 10–50%, the summary target 5–80%, and both summary budgets at least 256 tokens.",
+      "compactionRangeError": "Keep at least 1 round; retained messages must be 10–50%, the summary target 5–80%, both summary budgets at least 256 tokens, and the request budget at least 8192 tokens.",
       "compactionModel": "Summary model",
-      "compactionModelHint": "Optional. Uses this chat model for context compaction; otherwise uses the task model, then the current conversation model.",
-      "compactionModelInherited": "Use task/conversation model",
+      "compactionModelHint": "Optional. Uses this chat model for context compaction; otherwise uses the current conversation model, then the task model.",
+      "compactionModelInherited": "Use conversation/task model",
       "compactionModelUnavailable": "Unavailable model ({{id}})",
       "compactionModelsLoading": "Loading chat models…",
       "compactionModelsLoadFailed": "Could not load chat models. Other compaction settings remain available.",
-      "compactionModelsEmpty": "No chat models are configured. The task or current conversation model will be used.",
+      "compactionModelsEmpty": "No chat models are configured. The current conversation or task model will be used.",
       "compactionEnabled": "Compaction enabled",
       "memoryEnabled": "Memories enabled",
       "signupOpen": "New signups open",

@@ -14,20 +14,13 @@ import (
 	"time"
 
 	"aivory/server/internal/envcfg"
+	"aivory/server/internal/generationcfg"
 	"aivory/server/internal/genstream"
 	"aivory/server/internal/llm"
 	"aivory/server/internal/msgcache"
 	"aivory/server/internal/sse"
 	"aivory/server/internal/store"
 )
-
-// maxGenDuration caps a detached generation. Generation is deliberately NOT
-// tied to the HTTP request anymore (so closing the page doesn't lose the reply),
-// so this is the backstop that prevents a stuck turn from running forever and
-// holding a concurrency slot. Reasoning/tool-heavy turns can run well past ten
-// minutes, so keep this wide and let per-tool/admin TTFT limits handle the
-// narrower failure modes.
-var maxGenDuration = envcfg.Dur("AIVORY_API_MAX_GEN_DURATION", 90*time.Minute)
 
 // SSE heartbeat and stream-replay tunables (env-overridable; defaults preserve
 // prior hardcoded behavior).
@@ -645,10 +638,7 @@ func scopedStopIntentKey(topic string) string {
 }
 
 func scopedStopIntentTTL() time.Duration {
-	if maxGenDuration > 0 {
-		return maxGenDuration + time.Minute
-	}
-	return 90*time.Minute + time.Minute
+	return generationcfg.ProtectedDuration()
 }
 
 func publishScopedStop(d Deps, topic string) {
@@ -1113,7 +1103,7 @@ func postMessageHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	// (and loses) the answer — it finishes server-side and is persisted, ready
 	// when the user returns. Only an explicit stop/kill or the hard time cap can
 	// cancel it now.
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), maxGenDuration)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), generationcfg.MaxDuration())
 	defer cancel()
 	accessRevocation := newGenerationAccessRevocationWatcher(
 		d, ctx, cancel, id, conv.WorkspaceID, &permissionSnapshot, knowledgeBaseAccess,
@@ -1559,7 +1549,7 @@ func regenerateHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 	// (and loses) the answer — it finishes server-side and is persisted, ready
 	// when the user returns. Only an explicit stop/kill or the hard time cap can
 	// cancel it now.
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), maxGenDuration)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), generationcfg.MaxDuration())
 	defer cancel()
 	accessRevocation := newGenerationAccessRevocationWatcher(
 		d, ctx, cancel, id, conv.WorkspaceID, &permissionSnapshot, knowledgeBaseAccess,

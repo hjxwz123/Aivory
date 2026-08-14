@@ -46,6 +46,7 @@ func TestBackupRoundTrip(t *testing.T) {
 		{`INSERT INTO workspaces(id,name,owner_id,invite_token) VALUES('ws1','Team','u1','invite1')`, nil},
 		{`INSERT INTO workspace_members(workspace_id,user_id,role) VALUES('ws1','u1','owner')`, nil},
 		{`INSERT INTO conversations(id,user_id,title,workspace_id) VALUES('c1','u1','T','ws1')`, nil},
+		{`INSERT INTO conversation_compaction_leases(conversation_id,owner_token,expires_at) VALUES('c1','active-worker',999999999999999999)`, nil},
 		{`INSERT INTO messages(id,conversation_id,parent_id,role,input_tokens,cost) VALUES('m1','c1',NULL,'user',1234567,0)`, nil},
 		{`INSERT INTO messages(id,conversation_id,parent_id,role,input_tokens,cost) VALUES('m2','c1','m1','assistant',42,0.0125)`, nil},
 		{`INSERT INTO documents(id,conversation_id,filename,mime_type,size_bytes,status) VALUES('d1','c1','f.txt','text/plain',10,'ready')`, nil},
@@ -122,7 +123,7 @@ func TestBackupRoundTrip(t *testing.T) {
 	for tbl, want := range map[string]int{
 		"users": 1, "credit_adjustment_notifications": 1, "credit_ledger": 1, "credit_reservations": 1, "quota_ledger": 1, "billing_usage": 1,
 		"payment_orders": 1, "payment_order_attempts": 1, "payment_events": 1,
-		"workspaces": 1, "workspace_members": 1, "conversations": 1, "messages": 2, "chunks": 1, "documents": 1,
+		"workspaces": 1, "workspace_members": 1, "conversations": 1, "conversation_compaction_leases": 0, "messages": 2, "chunks": 1, "documents": 1,
 	} {
 		var n int
 		if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+tbl).Scan(&n); err != nil {

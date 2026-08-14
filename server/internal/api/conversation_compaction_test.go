@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"aivory/server/internal/cache"
 	"aivory/server/internal/llm"
@@ -106,6 +107,61 @@ func TestCompactConversationHandlerRejectsStreamingConversation(t *testing.T) {
 	}
 }
 
+func TestCompactConversationHandlerIgnoresStaleStreamingConversation(t *testing.T) {
+	d, user, conv := compactionHandlerFixture(t, 2)
+	blocks := json.RawMessage(`[{"kind":"text","text":"abandoned partial"}]`)
+	stale, err := store.CreateMessage(context.Background(), d.DB, store.Message{
+		ConversationID: conv.ID, ParentID: conv.ActiveLeafID, Role: "assistant", AuthorID: user.ID,
+		Blocks: blocks, Attachments: json.RawMessage("[]"), Citations: json.RawMessage("[]"), Status: "streaming",
+		CreatedAt: time.Now().Add(-3 * time.Hour).Unix(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.DB.Exec(`UPDATE conversations SET active_leaf_id=? WHERE id=?`, stale.ID, conv.ID); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/conversations/"+conv.ID+"/compact", nil)
+	req = req.WithContext(context.WithValue(req.Context(), userCtxKey{}, user))
+	req = req.WithContext(context.WithValue(req.Context(), pathCtxKey{}, map[string]string{"id": conv.ID}))
+	rec := httptest.NewRecorder()
+	compactConversationHandler(d, rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("stale streaming row blocked compaction: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestCompactConversationHandlerProtectsLongRunningGeneration(t *testing.T) {
+	d, user, conv := compactionHandlerFixture(t, 2)
+	blocks := json.RawMessage(`[{"kind":"text","text":"long-running partial"}]`)
+	streaming, err := store.CreateMessage(context.Background(), d.DB, store.Message{
+		ConversationID: conv.ID, ParentID: conv.ActiveLeafID, Role: "assistant", AuthorID: user.ID,
+		Blocks: blocks, Attachments: json.RawMessage("[]"), Citations: json.RawMessage("[]"), Status: "streaming",
+		CreatedAt: time.Now().Add(-time.Hour).Unix(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.DB.Exec(`UPDATE conversations SET active_leaf_id=? WHERE id=?`, streaming.ID, conv.ID); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/conversations/"+conv.ID+"/compact", nil)
+	req = req.WithContext(context.WithValue(req.Context(), userCtxKey{}, user))
+	req = req.WithContext(context.WithValue(req.Context(), pathCtxKey{}, map[string]string{"id": conv.ID}))
+	rec := httptest.NewRecorder()
+	compactConversationHandler(d, rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("long-running generation was not protected: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var result llm.ManualCompactionResult
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Reason != "generation_in_progress" {
+		t.Fatalf("result=%+v", result)
+	}
+}
+
 func TestCompactConversationHandlerReportsNothingForShortConversation(t *testing.T) {
 	d, user, conv := compactionHandlerFixture(t, 2)
 	req := httptest.NewRequest(http.MethodPost, "/api/conversations/"+conv.ID+"/compact", nil)
@@ -142,5 +198,63 @@ func TestCompactConversationHandlerRejectsWorkspaceCollaborator(t *testing.T) {
 	compactConversationHandler(d, rec, req)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestCompactConversationErrorResponses(t *testing.T) {
+	tests := []struct {
+		name       string
+		err        error
+		wantStatus int
+		wantReason string
+	}{
+		{name: "disabled", err: llm.ErrCompactionDisabled, wantStatus: http.StatusConflict, wantReason: "disabled"},
+		{name: "generation in progress", err: llm.ErrCompactionInFlight, wantStatus: http.StatusConflict, wantReason: "generation_in_progress"},
+		{name: "conversation changed", err: llm.ErrCompactionChanged, wantStatus: http.StatusConflict, wantReason: "conversation_changed"},
+		{name: "summary failed", err: llm.ErrCompactionFailed, wantStatus: http.StatusInternalServerError, wantReason: "compaction_failed"},
+		{name: "billing persistence failed", err: llm.ErrTaskBillingRecord, wantStatus: http.StatusInternalServerError, wantReason: "compaction_failed"},
+		{name: "summary persistence failed", err: llm.ErrCompactionPersist, wantStatus: http.StatusInternalServerError, wantReason: "persistence_failed"},
+		{name: "timed out", err: context.DeadlineExceeded, wantStatus: http.StatusGatewayTimeout, wantReason: "timed_out"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			writeCompactConversationError(context.Background(), rec, llm.ManualCompactionResult{Reason: "nothing_to_compact"}, tt.err)
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("status=%d body=%s, want %d", rec.Code, rec.Body.String(), tt.wantStatus)
+			}
+			var result llm.ManualCompactionResult
+			if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+				t.Fatalf("response is not a compaction result: %v (body=%s)", err, rec.Body.String())
+			}
+			if result.Reason != tt.wantReason || result.Compacted {
+				t.Fatalf("result=%+v, want reason %q and compacted=false", result, tt.wantReason)
+			}
+		})
+	}
+}
+
+func TestCompactConversationCanceledRequestWritesNoErrorResponse(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	rec := httptest.NewRecorder()
+	writeCompactConversationError(ctx, rec, llm.ManualCompactionResult{}, context.Canceled)
+	if rec.Body.Len() != 0 {
+		t.Fatalf("canceled request wrote a response: %q", rec.Body.String())
+	}
+}
+
+func TestCompactConversationProviderCancellationIsStructuredFailure(t *testing.T) {
+	rec := httptest.NewRecorder()
+	writeCompactConversationError(context.Background(), rec, llm.ManualCompactionResult{}, context.Canceled)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status=%d body=%s, want 500", rec.Code, rec.Body.String())
+	}
+	var result llm.ManualCompactionResult
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Reason != "compaction_failed" || result.Compacted {
+		t.Fatalf("result=%+v", result)
 	}
 }

@@ -99,6 +99,118 @@ type TaskLLM struct {
 	logger *log.Logger
 }
 
+// compactionModelAttemptError marks failures discovered before a provider turn
+// starts. Those failures are configuration/availability problems (for example
+// a removed channel or an unregistered provider) and may safely move to the
+// next compaction candidate. Provider response failures are intentionally not
+// marked retryable: replaying a partially consumed summary would double spend
+// and can hide a genuine upstream outage.
+type compactionModelAttemptError struct {
+	err       error
+	retryable bool
+}
+
+func (e *compactionModelAttemptError) Error() string { return e.err.Error() }
+
+func (e *compactionModelAttemptError) Unwrap() error { return e.err }
+
+func wrapCompactionModelAttempt(err error, retryable bool) error {
+	if err == nil {
+		return nil
+	}
+	return &compactionModelAttemptError{err: err, retryable: retryable}
+}
+
+func compactionModelFallbackAllowed(err error) bool {
+	var attemptErr *compactionModelAttemptError
+	if !errors.As(err, &attemptErr) || !attemptErr.retryable {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, ErrTaskBillingRecord) || errors.Is(err, store.ErrDailyTokenQuotaExceeded) ||
+		errors.Is(err, store.ErrInsufficientCredits) || errors.Is(err, ErrCompactionFailed) {
+		return false
+	}
+	var statusErr *providerStatusError
+	if errors.As(err, &statusErr) {
+		// Authentication/authorization and model/endpoint validation failures
+		// are deterministic for this configured model. A rate limit or 5xx is
+		// deliberately terminal so a transient outage is not turned into a
+		// second billable summary call.
+		switch statusErr.StatusCode {
+		case 401, 403, 404, 422:
+			return true
+		case 400:
+			return compactionErrorMentionsConfiguration(statusErr.Body)
+		}
+	}
+	// A fallback model is for stale administrator configuration, not for hiding
+	// an upstream outage or a transient provider error. Keep the retry set narrow
+	// and explicit: these errors prove that this candidate cannot serve the task
+	// in the current process/configuration and another configured candidate may.
+	message := strings.ToLower(strings.TrimSpace(err.Error()))
+	for _, marker := range []string{
+		"provider registry is not initialised",
+		"provider is not registered",
+		"unknown provider",
+		"no api key configured",
+		"model is disabled",
+		"channel is disabled",
+		"is not a chat model",
+		"model not found",
+		"model does not exist",
+		"invalid api key",
+		"invalid endpoint",
+		"invalid configuration",
+		"configuration error",
+		"unauthorized",
+		"forbidden",
+		"permission denied",
+		"authentication failed",
+		"unsupported model",
+	} {
+		if strings.Contains(message, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func compactionErrorMentionsConfiguration(body string) bool {
+	message := strings.ToLower(strings.TrimSpace(body))
+	if message == "" {
+		return false
+	}
+	for _, marker := range []string{
+		"invalid api key", "invalid model", "model not found", "model does not exist",
+		"invalid endpoint", "unsupported model", "unauthorized", "forbidden",
+		"permission denied", "authentication", "configuration",
+	} {
+		if strings.Contains(message, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func compactionProviderFailureRetryable(kind TaskKind, final string, usage Usage, snapshots []providerRequestSnapshot) bool {
+	if kind != TaskCompact || strings.TrimSpace(final) != "" || usageHasValue(usage) {
+		return false
+	}
+	// A recorder snapshot with an output estimate proves that the upstream
+	// request consumed work even when it omitted terminal usage. Do not replay
+	// such an attempt on another model; the caller's billing path will account
+	// for it conservatively. compactionModelFallbackAllowed then narrows this to
+	// explicit credential/model/endpoint configuration failures; generic provider
+	// and 5xx errors remain terminal.
+	for _, snapshot := range snapshots {
+		if _, billable := providerRequestSnapshotUsage(snapshot); billable {
+			return false
+		}
+	}
+	return true
+}
+
 // NewTaskLLM constructs a TaskLLM helper.
 func NewTaskLLM(db *sql.DB, reg *Registry, logger *log.Logger) *TaskLLM {
 	return &TaskLLM{db: db, reg: reg, logger: logger}
@@ -126,6 +238,10 @@ type RunOpts struct {
 	// output budget, such as context compaction, should set this explicitly so
 	// the retry cannot silently exceed their cap.
 	EmptyRetryMaxOutputTokens int
+	// MaxInputTokens rejects an oversized fully assembled task request before
+	// billing admission or provider I/O. Zero leaves the generic task behavior
+	// unchanged; context compaction sets it for every map/reduce call.
+	MaxInputTokens int
 	// ModelID, when set, overrides the resolved task model — used to run a
 	// specific model (e.g. the dedicated moderation model) for this call.
 	ModelID string
@@ -137,6 +253,14 @@ type RunOpts struct {
 }
 
 type taskBillingMessageContextKey struct{}
+
+type standaloneCompactionBillingContextKey struct{}
+
+type standaloneCompactionBilling struct {
+	orchestrator *Orchestrator
+	operationID  string
+	sequence     atomic.Uint64
+}
 
 func withTaskBillingMessageID(ctx context.Context, messageID string) context.Context {
 	if messageID == "" {
@@ -150,6 +274,24 @@ func taskBillingMessageID(ctx context.Context) string {
 	return messageID
 }
 
+// withStandaloneCompactionBilling gives every explicit or automatic compaction
+// an independent billing lifecycle. The operation ID is also used as the task
+// usage message ID, so compaction costs cannot be mistaken for the surrounding
+// chat turn or charged a second time during chat settlement.
+func withStandaloneCompactionBilling(ctx context.Context, orchestrator *Orchestrator, operationID string) context.Context {
+	if orchestrator == nil || strings.TrimSpace(operationID) == "" {
+		return ctx
+	}
+	billing := &standaloneCompactionBilling{orchestrator: orchestrator, operationID: strings.TrimSpace(operationID)}
+	ctx = context.WithValue(ctx, standaloneCompactionBillingContextKey{}, billing)
+	return withTaskBillingMessageID(ctx, billing.operationID)
+}
+
+func standaloneCompactionBillingFromContext(ctx context.Context) *standaloneCompactionBilling {
+	billing, _ := ctx.Value(standaloneCompactionBillingContextKey{}).(*standaloneCompactionBilling)
+	return billing
+}
+
 // Run issues a single non-streaming task model call and returns the raw text
 // response. The call is logged to usage_logs with the kind as `purpose`.
 //
@@ -160,6 +302,51 @@ func taskBillingMessageID(ctx context.Context) string {
 func (t *TaskLLM) Run(ctx context.Context, kind TaskKind, prompt string, opts RunOpts) (string, error) {
 	if t == nil || t.db == nil {
 		return "", errors.New("task llm not initialised")
+	}
+	// Compaction is the one task whose model is explicitly administrator
+	// configurable and whose work can continue after the conversation model has
+	// been disabled or its provider configuration has gone stale. Resolve the
+	// complete ordered candidate list once, then retry only the candidates after
+	// an attempt that failed before producing usable output. Other task kinds keep
+	// their existing single-model semantics.
+	if kind == TaskCompact && strings.TrimSpace(opts.ModelID) == "" {
+		candidates, err := resolveCompactionModelCandidates(ctx, t.db, opts.FallbackModelID)
+		if err != nil {
+			return "", err
+		}
+		var lastErr error
+		for i, modelID := range candidates {
+			attemptOpts := opts
+			attemptOpts.ModelID = modelID
+			text, runErr := t.runOnce(ctx, kind, prompt, attemptOpts)
+			if runErr == nil {
+				return text, nil
+			}
+			lastErr = runErr
+			if i == len(candidates)-1 || !compactionModelFallbackAllowed(runErr) {
+				return "", runErr
+			}
+			if t.logger != nil {
+				t.logger.Printf("task: context compaction model %q failed before producing a usable summary; trying fallback model: %v", modelID, runErr)
+			}
+		}
+		return "", lastErr
+	}
+	return t.runOnce(ctx, kind, prompt, opts)
+}
+
+// runOnce performs one concrete task-model attempt. Keeping this separate from
+// Run makes model fallback explicit and prevents a retry from accidentally
+// re-resolving a changed administrator setting halfway through one compaction.
+func (t *TaskLLM) runOnce(ctx context.Context, kind TaskKind, prompt string, opts RunOpts) (string, error) {
+	if t == nil || t.db == nil {
+		return "", errors.New("task llm not initialised")
+	}
+	if t.reg == nil {
+		return "", wrapCompactionModelAttempt(
+			fmt.Errorf("%w: provider registry is not initialised", ErrUnknownProvider),
+			kind == TaskCompact,
+		)
 	}
 	toolRoute := kind == TaskToolRoute
 	if opts.MessageID == "" {
@@ -181,18 +368,27 @@ func (t *TaskLLM) Run(ctx context.Context, kind TaskKind, prompt string, opts Ru
 	}
 	model, err := store.GetModel(ctx, t.db, modelID)
 	if err != nil {
-		return "", fmt.Errorf("load task model %q: %w", modelID, err)
+		return "", wrapCompactionModelAttempt(fmt.Errorf("load task model %q: %w", modelID, err), kind == TaskCompact)
 	}
 	if !model.Enabled {
-		return "", fmt.Errorf("task model %q is disabled", modelID)
+		return "", wrapCompactionModelAttempt(fmt.Errorf("task model %q is disabled", modelID), kind == TaskCompact)
+	}
+	if kind == TaskCompact && model.Kind != "chat" {
+		return "", wrapCompactionModelAttempt(fmt.Errorf("compaction model %q is not a chat model", modelID), true)
 	}
 	channel, err := store.GetChannel(ctx, t.db, model.ChannelID)
 	if err != nil {
-		return "", err
+		return "", wrapCompactionModelAttempt(err, kind == TaskCompact)
+	}
+	if kind == TaskCompact && !channel.Enabled {
+		return "", wrapCompactionModelAttempt(fmt.Errorf("compaction model channel %q is disabled", channel.ID), true)
 	}
 	provider, err := t.reg.Get(channel.Type)
 	if err != nil {
-		return "", err
+		return "", wrapCompactionModelAttempt(err, kind == TaskCompact)
+	}
+	if provider == nil {
+		return "", wrapCompactionModelAttempt(fmt.Errorf("%w: provider for channel %q is unavailable", ErrUnknownProvider, channel.Type), kind == TaskCompact)
 	}
 	var fallbackCreds *ChannelCreds
 	var fallbackChannelID string
@@ -239,14 +435,56 @@ func (t *TaskLLM) Run(ctx context.Context, kind TaskKind, prompt string, opts Ru
 		Tools:           nil,
 		ExtraParams:     extraParams,
 		MaxOutputTokens: maxTok,
-		Stream:          false,
-		FallbackUsed:    &fallbackFlag,
+		// A compaction request has already reserved maxTok inside the complete
+		// request budget. Providers must not enlarge that reservation to satisfy an
+		// inherited thinking configuration.
+		StrictMaxOutputTokens: kind == TaskCompact,
+		Stream:                false,
+		FallbackUsed:          &fallbackFlag,
+	}
+	if opts.MaxInputTokens > 0 {
+		inputTokens := estimateRequestTokens(req)
+		if inputTokens > opts.MaxInputTokens {
+			return "", fmt.Errorf("task input exceeds configured limit: estimated %d > %d tokens", inputTokens, opts.MaxInputTokens)
+		}
+	}
+	var standaloneAdmission *billingAdmission
+	standaloneBilling := standaloneCompactionBillingFromContext(ctx)
+	if kind == TaskCompact && standaloneBilling != nil {
+		sourceID := fmt.Sprintf("%s:%d", standaloneBilling.operationID, standaloneBilling.sequence.Add(1))
+		// A short-summary retry is a separate provider call but belongs to the same
+		// logical compaction operation. Use a fresh reservation source for each call
+		// and settle every actual usage result independently.
+		var admissionMessage string
+		standaloneAdmission, admissionMessage, err = standaloneBilling.orchestrator.reserveUsageBilling(
+			ctx, opts.UserID, model, store.QuotaScopeModelChat, 1, estimateTurnUSD(*model, req),
+			0, "context_compaction", sourceID,
+		)
+		if err != nil {
+			return "", err
+		}
+		if standaloneAdmission == nil {
+			if strings.TrimSpace(admissionMessage) == "" {
+				admissionMessage = "context compaction billing admission was rejected"
+			}
+			return "", fmt.Errorf("%w: %s", store.ErrInsufficientCredits, admissionMessage)
+		}
+		defer func() {
+			releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+			defer cancel()
+			_ = standaloneBilling.orchestrator.releaseUsageBilling(releaseCtx, standaloneAdmission)
+		}()
 	}
 	dailyTokens, allowed, err := store.ReserveDailyTokenQuota(ctx, t.db, opts.UserID, estimateTurnTokens(req))
 	if err != nil {
 		return "", err
 	}
 	if !allowed {
+		if standaloneAdmission != nil {
+			releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+			_ = standaloneBilling.orchestrator.releaseUsageBilling(releaseCtx, standaloneAdmission)
+			cancel()
+		}
 		return "", store.ErrDailyTokenQuotaExceeded
 	}
 	dailyFinalized := false
@@ -287,6 +525,7 @@ func (t *TaskLLM) Run(ctx context.Context, kind TaskKind, prompt string, opts Ru
 			captured.WriteString(ev.Text)
 		}
 	})
+	providerErr := err
 	usedFallback := fallbackFlag.Load()
 	servedChannelID := model.ChannelID
 	if usedFallback {
@@ -303,7 +542,7 @@ func (t *TaskLLM) Run(ctx context.Context, kind TaskKind, prompt string, opts Ru
 			_ = store.LogUsage(logCtx, t.db, row)
 		}
 	}
-	if err != nil {
+	if providerErr != nil {
 		// Task-model failures were previously invisible: no usage row, no log —
 		// callers like compaction silently fall back (deterministic clip) and the
 		// only symptom is degraded quality. Log + record a status=error usage row
@@ -312,18 +551,6 @@ func (t *TaskLLM) Run(ctx context.Context, kind TaskKind, prompt string, opts Ru
 		if t.logger != nil {
 			t.logger.Printf("task: %s call failed (model=%s user=%s conv=%s): %v", kind, model.ID, opts.UserID, opts.ConversationID, err)
 		}
-		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-			logProviderFailures(ctx)
-			if !providerFailureCaptured(requestRecorder.snapshots(), err) {
-				row := failureBase
-				row.ChannelID = servedChannelID
-				row.Fallback = usedFallback
-				row.Status = "error"
-				row.Error = truncErr(err.Error())
-				_ = store.LogUsage(ctx, t.db, row)
-			}
-		}
-		return "", err
 	}
 	// Some providers emit deltas, others not; pick the longer.
 	final := captured.String()
@@ -350,38 +577,136 @@ func (t *TaskLLM) Run(ctx context.Context, kind TaskKind, prompt string, opts Ru
 	}
 	billingCtx, billingCancel := context.WithTimeout(billingParent, 15*time.Second)
 	defer billingCancel()
-	logProviderFailures(billingCtx)
+	if providerErr != nil && !errors.Is(providerErr, context.Canceled) && !errors.Is(providerErr, context.DeadlineExceeded) {
+		logProviderFailures(billingCtx)
+		if !providerFailureCaptured(requestRecorder.snapshots(), providerErr) {
+			row := failureBase
+			row.ChannelID = servedChannelID
+			row.Fallback = usedFallback
+			row.Status = "error"
+			row.Error = truncErr(providerErr.Error())
+			_ = store.LogUsage(billingCtx, t.db, row)
+		}
+	} else if providerErr == nil {
+		// A recovered primary failure remains visible even though the fallback made
+		// the overall task successful.
+		logProviderFailures(billingCtx)
+	}
+	consumedUsage := Usage{}
 	if result != nil {
+		consumedUsage = result.Usage
+	}
+	// Per-attempt snapshots retain consumed primary usage that a transparent
+	// fallback can hide from the provider-level result. Reconcile them without
+	// double-counting a cumulative provider total.
+	consumedUsage = mergeProviderRequestUsage(consumedUsage, requestRecorder.snapshots())
+	if result != nil && !usageHasValue(consumedUsage) && (providerErr != nil || kind == TaskCompact) {
+		// Some streams omit terminal usage on interruption, and some OpenAI-compatible
+		// relays omit it even on success. A compaction result can become durable
+		// context, so account conservatively from the assembled input and returned
+		// blocks instead of releasing every reservation as if no call happened.
+		consumedUsage, _ = stoppedTurnUsage(consumedUsage, req, result.Blocks, true, requestRecorder.snapshots())
+	}
+	if usageHasValue(consumedUsage) {
+		actualTokens := consumedUsage.InputTokens + consumedUsage.OutputTokens
+		if standaloneAdmission != nil {
+			// From this point the provider has consumed resources. Any later accounting
+			// failure must leave the admission reserved for reconciliation instead of
+			// making the request appear free during deferred cleanup.
+			standaloneAdmission.KeepReserved = true
+		}
 		if dailyTokens != nil {
 			// The provider already consumed tokens. Keep the reservation if the
 			// durable finalize fails; releasing it would reopen the daily limit.
 			dailyFinalized = true
 			_, settleErr := store.FinalizeQuotaReservation(
-				billingCtx, t.db, dailyTokens.ID, float64(result.Usage.InputTokens+result.Usage.OutputTokens),
+				billingCtx, t.db, dailyTokens.ID, float64(actualTokens),
 			)
 			if settleErr != nil {
-				return "", fmt.Errorf("%w: %v", ErrTaskBillingRecord, settleErr)
+				billingErr := fmt.Errorf("%w: %v", ErrTaskBillingRecord, settleErr)
+				if providerErr != nil {
+					return "", errors.Join(providerErr, billingErr)
+				}
+				return "", billingErr
 			}
 		}
-		cost := computeCost(*model, result.Usage)
-		if err := store.LogUsage(billingCtx, t.db, store.UsageLog{
+		cost := computeCost(*model, consumedUsage)
+		usageLog := store.UsageLog{
 			WorkspaceID:      opts.WorkspaceID,
 			UserID:           opts.UserID,
 			ConversationID:   opts.ConversationID,
 			MessageID:        opts.MessageID,
 			ModelID:          model.ID,
 			Purpose:          string(kind),
-			InputTokens:      result.Usage.InputTokens,
-			OutputTokens:     result.Usage.OutputTokens,
-			CacheReadTokens:  result.Usage.CacheReadTokens,
-			CacheWriteTokens: result.Usage.CacheWriteTokens,
+			InputTokens:      consumedUsage.InputTokens,
+			OutputTokens:     consumedUsage.OutputTokens,
+			CacheReadTokens:  consumedUsage.CacheReadTokens,
+			CacheWriteTokens: consumedUsage.CacheWriteTokens,
 			Cost:             cost,
 			Currency:         model.Currency,
 			ChannelID:        servedChannelID,
 			Fallback:         usedFallback,
-		}); err != nil {
-			return "", fmt.Errorf("%w: %v", ErrTaskBillingRecord, err)
 		}
+		if standaloneAdmission != nil {
+			// Provider consumption must be durable before credit settlement. The
+			// diagnostic row is written afterward with the exact debited credits.
+			if billingErr := store.RecordBillingUsage(billingCtx, t.db, usageLog); billingErr != nil {
+				billingErr = fmt.Errorf("%w: %v", ErrTaskBillingRecord, billingErr)
+				if providerErr != nil {
+					return "", errors.Join(providerErr, billingErr)
+				}
+				return "", billingErr
+			}
+			debit, settleErr := standaloneBilling.orchestrator.settleUsageBilling(
+				billingCtx, standaloneAdmission, 1, cost, actualTokens,
+			)
+			if settleErr != nil {
+				billingErr := fmt.Errorf("%w: %v", ErrTaskBillingRecord, settleErr)
+				if providerErr != nil {
+					return "", errors.Join(providerErr, billingErr)
+				}
+				return "", billingErr
+			}
+			usageLog.Credits = debit.Total
+			if analyticsErr := t.logTaskUsageAnalytics(
+				billingCtx, usageLog, model, requestRecorder.snapshots(), fallbackChannelID, usedFallback,
+			); analyticsErr != nil {
+				billingErr := fmt.Errorf("%w: %v", ErrTaskBillingRecord, analyticsErr)
+				if providerErr != nil {
+					return "", errors.Join(providerErr, billingErr)
+				}
+				return "", billingErr
+			}
+		} else {
+			if billingErr := store.RecordBillingUsage(billingCtx, t.db, usageLog); billingErr != nil {
+				billingErr = fmt.Errorf("%w: %v", ErrTaskBillingRecord, billingErr)
+				if providerErr != nil {
+					return "", errors.Join(providerErr, billingErr)
+				}
+				return "", billingErr
+			}
+			if analyticsErr := t.logTaskUsageAnalytics(
+				billingCtx, usageLog, model, requestRecorder.snapshots(), fallbackChannelID, usedFallback,
+			); analyticsErr != nil {
+				billingErr := fmt.Errorf("%w: %v", ErrTaskBillingRecord, analyticsErr)
+				if providerErr != nil {
+					return "", errors.Join(providerErr, billingErr)
+				}
+				return "", billingErr
+			}
+		}
+	}
+	if providerErr != nil {
+		// A compaction model may be reachable at the database layer but fail at
+		// runtime (missing credentials, unsupported endpoint, malformed response,
+		// or a provider instance removed during a reload). Only retry another
+		// candidate when this attempt produced no usable visible summary.
+		// A provider response error is deliberately terminal for this attempt. The
+		// provider may have consumed tokens even when it returned no final text;
+		// replaying the same source on another model would create a second billable
+		// summary and can mask an upstream outage. Structural availability failures
+		// are handled before provider.Stream and remain retryable above.
+		return "", wrapCompactionModelAttempt(providerErr, compactionProviderFailureRetryable(kind, final, consumedUsage, requestRecorder.snapshots()))
 	}
 	if final == "" {
 		retryMaxTok := taskEmptyRetryMaxOutputTokens
@@ -401,10 +726,65 @@ func (t *TaskLLM) Run(ctx context.Context, kind TaskKind, prompt string, opts Ru
 			opts.emptyRetryAttempted = true
 			return t.Run(ctx, kind, prompt, opts)
 		}
-		return "", fmt.Errorf("task llm returned empty output (model=%s stop_reason=%s output_tokens=%d max_output_tokens=%d)",
-			model.ID, resultStopReason(result), resultOutputTokens(result), maxTok)
+		return "", wrapCompactionModelAttempt(
+			fmt.Errorf("task llm returned empty output (model=%s stop_reason=%s output_tokens=%d max_output_tokens=%d)",
+				model.ID, resultStopReason(result), resultOutputTokens(result), maxTok),
+			// A nil provider error means the provider completed normally. A
+			// thinking-only/no-visible response is eligible for the bounded retry
+			// above on this same model, but it is not a configuration failure and
+			// must never silently switch to (and bill) another model.
+			false,
+		)
 	}
 	return final, nil
+}
+
+// logTaskUsageAnalytics attributes every consumed upstream attempt to the
+// channel that served it while leaving billing_usage as one aggregate ledger
+// entry. Hidden tasks may consume tokens on a primary stream before a parsing
+// failure is recovered by the fallback channel. Such an attempt keeps its
+// separate zero-cost error diagnostic and also participates in these consumed
+// usage rows, so the aggregate cost is neither lost nor assigned wholesale to
+// the fallback channel.
+func (t *TaskLLM) logTaskUsageAnalytics(
+	ctx context.Context,
+	base store.UsageLog,
+	model *store.Model,
+	snapshots []providerRequestSnapshot,
+	fallbackChannelID string,
+	usedFallback bool,
+) error {
+	billableSnapshots := providerRequestBillingSnapshots(snapshots)
+	rows := perRequestUsageRows(
+		billableSnapshots, model,
+		Usage{
+			InputTokens:      base.InputTokens,
+			OutputTokens:     base.OutputTokens,
+			CacheReadTokens:  base.CacheReadTokens,
+			CacheWriteTokens: base.CacheWriteTokens,
+		},
+		base.Cost, base.Credits, false,
+	)
+	for _, requestRow := range rows {
+		row := base
+		row.InputTokens = requestRow.Usage.InputTokens
+		row.OutputTokens = requestRow.Usage.OutputTokens
+		row.CacheReadTokens = requestRow.Usage.CacheReadTokens
+		row.CacheWriteTokens = requestRow.Usage.CacheWriteTokens
+		row.Cost = requestRow.Cost
+		row.Credits = requestRow.Credits
+		row.RequestMethod = requestRow.Method
+		row.RequestURL = requestRow.URL
+		row.RequestHeaders = requestRow.Header
+		row.RequestBody = requestRow.Body
+		row.ChannelID, row.Fallback = requestUsageChannel(
+			requestRow, model.ChannelID, fallbackChannelID, usedFallback,
+		)
+		if err := store.LogUsageAnalytics(ctx, t.db, row); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func resultStopReason(result *UnifiedResult) string {
@@ -460,28 +840,68 @@ func resolveTaskModelID(db *sql.DB) (string, error) {
 
 // resolveCompactionModelID lets administrators isolate long-chat summaries on
 // a model chosen for context capacity and summarisation quality. Leaving it
-// blank uses the configured task model, then the conversation's model, with the
-// global default retained as a final compatibility fallback.
+// blank uses the conversation's own model, then the configured task model, with
+// the global default retained as a final compatibility fallback.
 func resolveCompactionModelID(ctx context.Context, db *sql.DB, conversationModelID string) (string, error) {
-	var id string
-	if raw, err := store.GetSetting(db, "context_compaction_model_id"); err == nil {
-		_ = json.Unmarshal(raw, &id)
+	candidates, err := resolveCompactionModelCandidates(ctx, db, conversationModelID)
+	if err != nil {
+		return "", err
 	}
-	if strings.TrimSpace(id) != "" {
-		return strings.TrimSpace(id), nil
+	return candidates[0], nil
+}
+
+// resolveCompactionModelCandidates returns the administrator/session fallback
+// chain in deterministic order. Database-level validation filters stale IDs;
+// provider availability is checked by TaskLLM.runOnce because it depends on
+// the live registry and can change independently of the database.
+func resolveCompactionModelCandidates(ctx context.Context, db *sql.DB, conversationModelID string) ([]string, error) {
+	if db == nil {
+		return nil, errors.New("task llm not initialised")
 	}
-	if raw, err := store.GetSetting(db, "task_model_id"); err == nil {
-		_ = json.Unmarshal(raw, &id)
+	settingModelID := func(key string) string {
+		var id string
+		if raw, err := store.GetSetting(db, key); err == nil {
+			_ = json.Unmarshal(raw, &id)
+		}
+		return strings.TrimSpace(id)
 	}
-	if strings.TrimSpace(id) != "" {
-		return strings.TrimSpace(id), nil
+	usable := func(candidate string) bool {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			return false
+		}
+		model, err := store.GetModel(ctx, db, candidate)
+		if err != nil || !model.Enabled || model.Kind != "chat" {
+			return false
+		}
+		channel, err := store.GetChannel(ctx, db, model.ChannelID)
+		return err == nil && channel.Enabled && providerIDForChannelType(channel.Type) != ""
 	}
-	if candidate := strings.TrimSpace(conversationModelID); candidate != "" {
-		if model, err := store.GetModel(ctx, db, candidate); err == nil && model.Enabled && model.Kind == "chat" {
-			return candidate, nil
+
+	candidates := []string{
+		settingModelID("context_compaction_model_id"),
+		strings.TrimSpace(conversationModelID),
+		settingModelID("task_model_id"),
+		settingModelID("default_model_id"),
+	}
+	out := make([]string, 0, len(candidates))
+	seen := make(map[string]struct{}, len(candidates))
+	for _, candidate := range candidates {
+		if candidate == "" {
+			continue
+		}
+		if _, ok := seen[candidate]; ok {
+			continue
+		}
+		seen[candidate] = struct{}{}
+		if usable(candidate) {
+			out = append(out, candidate)
 		}
 	}
-	return resolveTaskModelID(db)
+	if len(out) == 0 {
+		return nil, errors.New("no enabled chat model is available for context compaction")
+	}
+	return out, nil
 }
 
 // resolveToolRouteModelID deliberately has no default-model fallback. Automatic

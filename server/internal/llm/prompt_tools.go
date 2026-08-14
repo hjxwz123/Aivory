@@ -32,6 +32,8 @@ import (
 
 const promptStopToken = "</tool_call>"
 
+const promptToolRawEnvelopeType = "aivory_prompt_tool_outputs_v1"
+
 var (
 	promptMaxIter                     = envcfg.Int("AIVORY_LLM_PROMPT_MAX_ITER", 10)
 	promptMaxRetry                    = envcfg.Int("AIVORY_LLM_PROMPT_MAX_RETRY", 2)
@@ -142,12 +144,73 @@ func SplitTextAndCall(text string) (visible string, call *PromptToolCall, parseE
 // any provider-hosted results. Hosted blocks/citations/images are carried through
 // to the final UnifiedResult but are never dispatched through the local registry.
 type PromptToolRound struct {
-	Text                 string
-	Blocks               []UnifiedBlock
+	Text   string
+	Blocks []UnifiedBlock
+	// Raw is provider-native output from a nested hosted-tool round. Prompt
+	// protocol output itself is provider-neutral, but a provider may execute an
+	// administrator-selected hosted tool while the local loop is active. Keep the
+	// raw value long enough to extract its complete result into the internal
+	// compaction envelope; adapters never replay the envelope upstream.
+	Raw                  json.RawMessage
 	Usage                Usage
 	Citations            []Citation
 	GeneratedImages      []GeneratedImage
 	UsageAlreadyAttached bool
+}
+
+// promptToolRawEnvelope is an application-internal persistence shape. It keeps
+// complete prompt-protocol tool results available to context compaction without
+// pretending to be replayable OpenAI, Anthropic, or Gemini history. Provider
+// adapters explicitly reject this object and fall back to canonical blocks.
+type promptToolRawEnvelope struct {
+	Type    string                `json:"type"`
+	Outputs []promptToolRawOutput `json:"outputs"`
+}
+
+type promptToolRawOutput struct {
+	Name   string `json:"name,omitempty"`
+	ID     string `json:"id,omitempty"`
+	Output string `json:"output"`
+	Status string `json:"status,omitempty"`
+}
+
+func parsePromptToolRawEnvelope(raw json.RawMessage) (promptToolRawEnvelope, bool) {
+	var envelope promptToolRawEnvelope
+	if len(raw) == 0 || json.Unmarshal(raw, &envelope) != nil ||
+		envelope.Type != promptToolRawEnvelopeType || len(envelope.Outputs) == 0 {
+		return promptToolRawEnvelope{}, false
+	}
+	return envelope, true
+}
+
+func isPromptToolRawEnvelope(raw json.RawMessage) bool {
+	_, ok := parsePromptToolRawEnvelope(raw)
+	return ok
+}
+
+func marshalPromptToolRawEnvelope(outputs []promptToolRawOutput) json.RawMessage {
+	if len(outputs) == 0 {
+		return nil
+	}
+	raw, err := json.Marshal(promptToolRawEnvelope{Type: promptToolRawEnvelopeType, Outputs: outputs})
+	if err != nil {
+		return nil
+	}
+	return json.RawMessage(raw)
+}
+
+func filterPromptToolRawEnvelope(raw json.RawMessage, allowed func(string) bool) json.RawMessage {
+	envelope, ok := parsePromptToolRawEnvelope(raw)
+	if !ok || allowed == nil {
+		return nil
+	}
+	filtered := make([]promptToolRawOutput, 0, len(envelope.Outputs))
+	for _, output := range envelope.Outputs {
+		if allowed(strings.TrimSpace(output.Name)) {
+			filtered = append(filtered, output)
+		}
+	}
+	return marshalPromptToolRawEnvelope(filtered)
 }
 
 type PromptToolRunner func(ctx context.Context, history []UnifiedMessage, system string) (PromptToolRound, error)
@@ -165,17 +228,40 @@ func RunPromptToolLoop(
 	toolRunner ToolRunner,
 	onEvent func(SseEvent),
 ) (string, []UnifiedBlock, Usage, []Citation, []GeneratedImage, error) {
+	text, blocks, usage, citations, images, _, err := RunPromptToolLoopWithRaw(
+		ctx, system, history, tools, runner, toolRunner, onEvent,
+	)
+	return text, blocks, usage, citations, images, err
+}
+
+// RunPromptToolLoopWithRaw is RunPromptToolLoop plus the internal, provider-
+// neutral tool-result envelope used by context compaction.
+func RunPromptToolLoopWithRaw(
+	ctx context.Context,
+	system string,
+	history []UnifiedMessage,
+	tools []ToolDef,
+	runner PromptToolRunner,
+	toolRunner ToolRunner,
+	onEvent func(SseEvent),
+) (string, []UnifiedBlock, Usage, []Citation, []GeneratedImage, json.RawMessage, error) {
 	preamble := PromptToolPreamble(tools)
 	sys := system + preamble
 	usage := Usage{}
 	citations := []Citation{}
 	generatedImages := []GeneratedImage{}
 	blocks := []UnifiedBlock{}
+	rawOutputs := []promptToolRawOutput{}
 	full := strings.Builder{}
 	parseRetries := 0
 
 	for i := 0; i < promptMaxIter; i++ {
 		round, err := runner(ctx, history, sys)
+		// Hosted-tool prompt rounds are delegated to the provider's native path.
+		// That path can return complete result payloads even though its canonical
+		// blocks intentionally contain only a bounded display summary. Recover the
+		// recognized result text before handling an error or a final answer.
+		rawOutputs = appendPromptToolRawOutputs(rawOutputs, round.Raw)
 		text := round.Text
 		u := round.Usage
 		// §B5-per-request usage rows: one attach per prompt-protocol round —
@@ -225,7 +311,7 @@ func RunPromptToolLoop(
 			if full.Len() > 0 {
 				blocks = append(blocks, UnifiedBlock{Kind: "text", Text: full.String()})
 			}
-			return full.String(), blocks, usage, citations, generatedImages, err
+			return full.String(), blocks, usage, citations, generatedImages, marshalPromptToolRawEnvelope(rawOutputs), err
 		}
 
 		visible, call, parseErr := SplitTextAndCall(text)
@@ -256,14 +342,14 @@ func RunPromptToolLoop(
 			}
 			// Retries exhausted — treat the text as the final answer.
 			blocks = append(blocks, UnifiedBlock{Kind: "text", Text: full.String()})
-			return full.String(), blocks, usage, citations, generatedImages, nil
+			return full.String(), blocks, usage, citations, generatedImages, marshalPromptToolRawEnvelope(rawOutputs), nil
 		}
 		parseRetries = 0
 
 		if call == nil {
 			// No tool call → conversation complete. Emit visible text only.
 			blocks = append(blocks, UnifiedBlock{Kind: "text", Text: full.String()})
-			return full.String(), blocks, usage, citations, generatedImages, nil
+			return full.String(), blocks, usage, citations, generatedImages, marshalPromptToolRawEnvelope(rawOutputs), nil
 		}
 
 		// Got a tool call — emit events and execute. A stable per-round id pairs
@@ -299,6 +385,10 @@ func RunPromptToolLoop(
 			Input:    call.Arguments,
 			Summary:  truncate(output, promptModeToolResultSummaryLength),
 		})
+		blocks = append(blocks, canonicalToolOutputBlock(call.Name, toolID, output, summaryStatus))
+		rawOutputs = append(rawOutputs, promptToolRawOutput{
+			Name: call.Name, ID: toolID, Output: output, Status: summaryStatus,
+		})
 
 		// Append assistant + tool_result rounds to history.
 		history = append(history, UnifiedMessage{
@@ -316,7 +406,54 @@ func RunPromptToolLoop(
 		final = "I tried several tools but couldn't reach a conclusion within the budget."
 	}
 	blocks = append(blocks, UnifiedBlock{Kind: "text", Text: final})
-	return final, blocks, usage, citations, generatedImages, nil
+	return final, blocks, usage, citations, generatedImages, marshalPromptToolRawEnvelope(rawOutputs), nil
+}
+
+// appendPromptToolRawOutputs converts a nested provider exchange into the same
+// provider-neutral envelope used for local prompt-protocol tools. Keep one
+// result per stable tool id (or exact name/output when a provider has no id),
+// because hosted pause/resume responses may repeat the completed item.
+func appendPromptToolRawOutputs(existing []promptToolRawOutput, raw json.RawMessage) []promptToolRawOutput {
+	if len(raw) == 0 {
+		return existing
+	}
+	for _, output := range extractCompactionRawToolOutputs(raw) {
+		existing = appendPromptToolRawOutput(existing, promptToolRawOutput{
+			Name: output.Name, ID: output.ID, Output: output.Text, Status: "complete",
+		})
+	}
+	return existing
+}
+
+func appendPromptToolRawOutput(outputs []promptToolRawOutput, candidate promptToolRawOutput) []promptToolRawOutput {
+	candidate.Name = strings.TrimSpace(candidate.Name)
+	candidate.ID = strings.TrimSpace(candidate.ID)
+	candidate.Output = strings.TrimSpace(candidate.Output)
+	if candidate.Output == "" {
+		return outputs
+	}
+	for i, existing := range outputs {
+		// Provider pause/resume responses can repeat the same stable call id. Keep
+		// one entry and let the later provider snapshot replace an earlier partial
+		// result, while retaining metadata omitted by the later snapshot.
+		if candidate.ID != "" && strings.TrimSpace(existing.ID) == candidate.ID {
+			if candidate.Name == "" {
+				candidate.Name = strings.TrimSpace(existing.Name)
+			}
+			if candidate.Status == "" {
+				candidate.Status = strings.TrimSpace(existing.Status)
+			}
+			outputs[i] = candidate
+			return outputs
+		}
+		// Gemini hosted code execution has no call id. Its native turn may still
+		// be repeated verbatim by a continuation, so dedupe an exact result.
+		if candidate.ID == "" && strings.TrimSpace(existing.ID) == "" &&
+			strings.TrimSpace(existing.Name) == candidate.Name && strings.TrimSpace(existing.Output) == candidate.Output {
+			return outputs
+		}
+	}
+	return append(outputs, candidate)
 }
 
 func promptRoundText(blocks []UnifiedBlock) string {

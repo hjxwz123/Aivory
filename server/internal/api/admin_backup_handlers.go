@@ -30,6 +30,7 @@ var (
 	errInvalidPaymentConfigArchive    = errors.New("invalid payment configuration in config archive")
 	errInvalidOAuthConfigArchive      = errors.New("invalid OAuth configuration in config archive")
 	errInvalidBillingConfigArchive    = errors.New("invalid billing configuration in config archive")
+	errInvalidCompactionConfigArchive = errors.New("invalid context compaction configuration in archive")
 	errInvalidBackupStoragePath       = errors.New("invalid storage path in backup archive")
 	errBackupImportAdminUnauthorized  = errors.New("backup import requires a current active administrator")
 	errConfigImportAdminUnauthorized  = errors.New("config import requires a current active administrator")
@@ -499,7 +500,8 @@ func importConfigAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, errConfigImportAdminUnauthorized):
 			writeError(w, http.StatusForbidden, err)
 		case errors.Is(err, errInvalidPaymentConfigArchive), errors.Is(err, errInvalidOAuthConfigArchive),
-			errors.Is(err, errInvalidBillingConfigArchive), errors.Is(err, errInvalidBackupStoragePath),
+			errors.Is(err, errInvalidBillingConfigArchive), errors.Is(err, errInvalidCompactionConfigArchive),
+			errors.Is(err, errInvalidBackupStoragePath),
 			errors.Is(err, errOAuthClientSecretReentryRequired):
 			writeError(w, http.StatusBadRequest, err)
 		case errors.Is(err, store.ErrOAuthProviderChanged):
@@ -620,7 +622,7 @@ func importBackupAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(err, errBackupImportAdminUnauthorized) {
 			writeError(w, http.StatusForbidden, err)
-		} else if errors.Is(err, errInvalidBillingConfigArchive) || errors.Is(err, errInvalidBackupStoragePath) {
+		} else if errors.Is(err, errInvalidBillingConfigArchive) || errors.Is(err, errInvalidCompactionConfigArchive) || errors.Is(err, errInvalidBackupStoragePath) {
 			writeError(w, http.StatusBadRequest, err)
 		} else {
 			writeError(w, http.StatusInternalServerError, fmt.Errorf("restore failed (no changes committed): %w", err))
@@ -633,7 +635,7 @@ func importBackupAdmin(d Deps, w http.ResponseWriter, r *http.Request) {
 	}
 
 	// The settings cache (and the admin's own session) now reflect wiped data.
-	store.InvalidateConfig()
+	broadcastConfigInvalidate(d)
 	bumpAuthCacheEpoch(d)
 	d.Logger.Printf("backup import: restored %d tables, %d files, %d qdrant points (source dialect=%s)", len(counts), filesRestored, qdrantRestored, man.Dialect)
 
@@ -777,6 +779,9 @@ func restoreInto(ctx context.Context, ex store.RowExecer, zr *zip.Reader, man ba
 			return nil, err
 		}
 		counts[t] = n
+	}
+	if err := validateImportedContextCompactionModel(ctx, ex); err != nil {
+		return nil, err
 	}
 	if err := store.MigrateLegacyOAuthProviderKinds(ctx, ex); err != nil {
 		return nil, fmt.Errorf("migrate restored legacy UserInfo OAuth providers: %w", err)
@@ -1372,6 +1377,9 @@ func mergeConfigArchive(ctx context.Context, d Deps, zr *zip.Reader, man configM
 		reader, err := normalizeConfigArchiveTableReader(ctx, tx, t, rc)
 		if err != nil {
 			_ = rc.Close()
+			if errors.Is(err, errInvalidCompactionConfigArchive) {
+				return nil, err
+			}
 			if t == "settings" || t == "user_groups" || t == "models" || t == "model_group_quotas" || t == "credit_packages" {
 				return nil, fmt.Errorf("%w: %v", errInvalidBillingConfigArchive, err)
 			}
@@ -1383,6 +1391,13 @@ func mergeConfigArchive(ctx context.Context, d Deps, zr *zip.Reader, man configM
 			return nil, err
 		}
 		counts[t] = n
+	}
+	// Validate the transaction's final state even when the archive did not
+	// include the setting itself. A config import can still disable or mutate
+	// the currently selected model/channel and would otherwise leave a broken
+	// compaction model reference behind.
+	if err := validateImportedContextCompactionModel(ctx, tx); err != nil {
+		return nil, err
 	}
 	if err := store.EnsureSettlementCurrencySetting(ctx, tx); err != nil {
 		return nil, fmt.Errorf("ensure settlement currency setting: %w", err)
@@ -2029,10 +2044,166 @@ func normalizeSettingsArchiveRows(r io.Reader) (io.Reader, error) {
 				return nil, fmt.Errorf("invalid settings.credits_per_usd")
 			}
 		}
+		if present {
+			if err := normalizeCompactionArchiveSetting(row, key); err != nil {
+				return nil, err
+			}
+		}
 		if err := enc.Encode(row); err != nil {
 			return nil, fmt.Errorf("encode settings row: %w", err)
 		}
 	}
+}
+
+// normalizeCompactionArchiveSetting applies the same strict types, ranges and
+// canonical storage representation as the admin settings PATCH endpoint. A
+// settings.value cell is a database TEXT value, so it contains a second JSON
+// document that must be decoded and validated independently.
+func normalizeCompactionArchiveSetting(row map[string]json.RawMessage, key string) error {
+	switch key {
+	case "context_compaction_prompt", "context_compaction_model_id", "compaction_enabled",
+		"keep_recent_rounds", "summary_max_tokens", "summary_merge_max_tokens",
+		"summary_target_percent", "compaction_retention_percentage",
+		"compaction_token_trigger", "compaction_token_cap", "compaction_request_max_tokens":
+		// Handled below.
+	default:
+		return nil
+	}
+
+	raw, present, err := backupStringField(row, "value")
+	if err != nil || !present {
+		return fmt.Errorf("%w: %s must contain a JSON value", errInvalidCompactionConfigArchive, key)
+	}
+
+	switch key {
+	case "context_compaction_prompt":
+		prompt, err := decodeArchiveSettingString(raw)
+		if err != nil {
+			return fmt.Errorf("%w: context_compaction_prompt must be a JSON string", errInvalidCompactionConfigArchive)
+		}
+		prompt = strings.TrimSpace(prompt)
+		if len(prompt) > contextCompactionPromptMaxBytes {
+			return fmt.Errorf("%w: context_compaction_prompt exceeds %d bytes", errInvalidCompactionConfigArchive, contextCompactionPromptMaxBytes)
+		}
+		setArchiveSettingValue(row, prompt)
+		return nil
+	case "context_compaction_model_id":
+		modelID, err := decodeArchiveSettingString(raw)
+		if err != nil {
+			return fmt.Errorf("%w: context_compaction_model_id must be a JSON string", errInvalidCompactionConfigArchive)
+		}
+		setArchiveSettingValue(row, strings.TrimSpace(modelID))
+		return nil
+	case "compaction_enabled":
+		enabled, err := decodeArchiveSettingBool(raw)
+		if err != nil {
+			return fmt.Errorf("%w: compaction_enabled must be a JSON boolean", errInvalidCompactionConfigArchive)
+		}
+		setArchiveSettingValue(row, enabled)
+		return nil
+	}
+
+	value, err := decodeArchiveSettingInt(raw)
+	if err != nil {
+		return fmt.Errorf("%w: %s must be a JSON integer", errInvalidCompactionConfigArchive, key)
+	}
+	min, max, hasMax := 0, 0, false
+	switch key {
+	case "keep_recent_rounds":
+		min = 1
+	case "summary_max_tokens", "summary_merge_max_tokens":
+		min = 256
+	case "summary_target_percent":
+		min, max, hasMax = 5, 80, true
+	case "compaction_retention_percentage":
+		min, max, hasMax = 10, 50, true
+	case "compaction_request_max_tokens":
+		min = 8192
+	case "compaction_token_trigger", "compaction_token_cap":
+		// Zero disables the corresponding limit, matching the PATCH endpoint.
+	default:
+		return fmt.Errorf("%w: unsupported context compaction setting %s", errInvalidCompactionConfigArchive, key)
+	}
+	if value < min || hasMax && value > max {
+		if hasMax {
+			return fmt.Errorf("%w: %s must be between %d and %d", errInvalidCompactionConfigArchive, key, min, max)
+		}
+		return fmt.Errorf("%w: %s must be at least %d", errInvalidCompactionConfigArchive, key, min)
+	}
+	setArchiveSettingValue(row, value)
+	return nil
+}
+
+func setArchiveSettingValue(row map[string]json.RawMessage, value any) {
+	normalized, _ := json.Marshal(value) // bool, int and string cannot fail to marshal.
+	row["value"], _ = json.Marshal(string(normalized))
+}
+
+func decodeArchiveSettingString(raw string) (string, error) {
+	var value *string
+	if err := json.Unmarshal([]byte(raw), &value); err != nil || value == nil {
+		return "", errInvalidInput
+	}
+	return *value, nil
+}
+
+func decodeArchiveSettingBool(raw string) (bool, error) {
+	var value *bool
+	if err := json.Unmarshal([]byte(raw), &value); err != nil || value == nil {
+		return false, errInvalidInput
+	}
+	return *value, nil
+}
+
+func decodeArchiveSettingInt(raw string) (int, error) {
+	var value *int
+	if err := json.Unmarshal([]byte(raw), &value); err != nil || value == nil {
+		return 0, errInvalidInput
+	}
+	return *value, nil
+}
+
+// validateImportedContextCompactionModel runs after all archive tables have
+// been restored/upserted. Settings precede channels and models in both archive
+// orders, so validating earlier would reject a valid setting that references a
+// model created later by the same transaction.
+func validateImportedContextCompactionModel(ctx context.Context, ex store.RowExecer) error {
+	var raw string
+	err := ex.QueryRowContext(ctx, `SELECT value FROM settings WHERE key='context_compaction_model_id'`).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	modelID, err := decodeArchiveSettingString(raw)
+	if err != nil {
+		return fmt.Errorf("%w: context_compaction_model_id must be a JSON string", errInvalidCompactionConfigArchive)
+	}
+	modelID = strings.TrimSpace(modelID)
+	if modelID == "" {
+		return nil
+	}
+	var kind, channelType string
+	var modelEnabled, channelEnabled int
+	err = ex.QueryRowContext(ctx, `
+		SELECT m.kind, m.enabled, c.type, c.enabled
+		  FROM models m
+		  JOIN channels c ON c.id=m.channel_id
+		 WHERE m.id=?`, modelID).Scan(&kind, &modelEnabled, &channelType, &channelEnabled)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("%w: context compaction model %q does not exist with a channel", errInvalidCompactionConfigArchive, modelID)
+	}
+	if err != nil {
+		return err
+	}
+	if modelEnabled != 1 || kind != "chat" {
+		return fmt.Errorf("%w: context compaction model %q must be an enabled chat model", errInvalidCompactionConfigArchive, modelID)
+	}
+	if channelEnabled != 1 || !isSupportedContextCompactionChannelType(channelType) {
+		return fmt.Errorf("%w: context compaction model %q must use an enabled supported channel", errInvalidCompactionConfigArchive, modelID)
+	}
+	return nil
 }
 
 // normalizeConversationRAGModeArchiveRows prevents a legacy full backup from

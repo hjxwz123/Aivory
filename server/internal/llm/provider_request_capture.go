@@ -45,8 +45,9 @@ type providerRequestSnapshot struct {
 	// so attribution cannot be derived from a single turn-wide flag.
 	Fallback bool
 	// Usage of the stream this request produced, attached by the provider once
-	// the response has been read (§B5-per-request usage rows). HasUsage marks
-	// requests that completed a stream — only those become usage rows.
+	// the response has been read (§B5-per-request usage rows). HasUsage marks a
+	// provider-reported count. A failed stream without HasUsage can still produce
+	// a conservative consumption row when emitted deltas prove output occurred.
 	Usage    Usage
 	HasUsage bool
 	// Error is populated for any failed upstream attempt, whether a later channel
@@ -115,15 +116,131 @@ func recordProviderRequestAttempt(ctx context.Context, req *http.Request, fallba
 
 // attachProviderRequestUsage pins one stream's parsed usage onto the most
 // recent recorded request (§B5-per-request usage rows). Providers call it right
-// after reading each iteration's response stream; requests that never complete
-// a stream (transport error, HTTP 4xx/5xx) stay usage-less and don't become
-// success rows.
+// after reading each iteration's response stream. Requests without parsed usage
+// remain usage-less here; billing may still conservatively estimate a failed
+// attempt when its recorded deltas prove that it emitted output.
 func attachProviderRequestUsage(ctx context.Context, u Usage) {
 	rec, _ := ctx.Value(providerRequestRecorderKey{}).(*providerRequestRecorder)
 	if rec == nil {
 		return
 	}
 	rec.attachUsage(u)
+}
+
+// providerRequestSnapshotUsage returns the conservative usage attributable to
+// one upstream attempt. Providers normally attach terminal usage, but a stream
+// can emit output and then fail before its terminal usage frame. In that case
+// the recorder has an output estimate from the emitted deltas; count that
+// attempt as consumed while using the request estimate only for the missing
+// input field. A request with no output estimate remains non-billable, even if
+// its body was sent, so plain HTTP/connection failures do not become phantom
+// token charges.
+func providerRequestSnapshotUsage(snapshot providerRequestSnapshot) (Usage, bool) {
+	usage := snapshot.Usage
+	if snapshot.HasUsage {
+		// A provider's terminal usage is authoritative. Do not merge the rough
+		// delta estimate into a populated field: doing so can double-count output
+		// when a provider reports fewer tokens than the estimator. A partially read
+		// stream can, however, have input/cache usage without a completion count;
+		// fill only that missing output field from emitted deltas.
+		if usage.OutputTokens == 0 && snapshot.EstimatedOutputTokens > 0 {
+			usage.OutputTokens = snapshot.EstimatedOutputTokens
+		}
+		if usage.InputTokens == 0 && usage.OutputTokens > 0 {
+			usage.InputTokens = snapshot.EstimatedInputTokens
+		}
+		return usage, usageHasValue(usage)
+	}
+	// A request without terminal usage is billable only when it emitted output.
+	// This keeps pure HTTP/connection failures as zero-cost diagnostics.
+	if snapshot.EstimatedOutputTokens > 0 {
+		usage = Usage{OutputTokens: snapshot.EstimatedOutputTokens}
+		if usage.InputTokens == 0 {
+			usage.InputTokens = snapshot.EstimatedInputTokens
+		}
+		return usage, true
+	}
+	return Usage{}, false
+}
+
+// providerRequestBillingSnapshots returns successful and conservatively
+// estimated consumed attempts in request order. Error text is cleared on the
+// returned copies because the original failure snapshots are still emitted as
+// separate zero-cost diagnostics.
+func providerRequestBillingSnapshots(snapshots []providerRequestSnapshot) []providerRequestSnapshot {
+	out := make([]providerRequestSnapshot, 0, len(snapshots))
+	for _, snapshot := range snapshots {
+		usage, billable := providerRequestSnapshotUsage(snapshot)
+		if !billable {
+			continue
+		}
+		snapshot.Usage = usage
+		snapshot.HasUsage = true
+		snapshot.Error = ""
+		out = append(out, snapshot)
+	}
+	return out
+}
+
+// providerRequestUsageTotal returns the upstream usage already attached to
+// individual attempts plus conservative estimates for attempts that emitted
+// output before failing. Failed attempts are included: a primary channel may
+// consume tokens before a hidden task transparently succeeds on its fallback.
+func providerRequestUsageTotal(snapshots []providerRequestSnapshot) Usage {
+	total := Usage{}
+	for _, snapshot := range providerRequestBillingSnapshots(snapshots) {
+		total.InputTokens += snapshot.Usage.InputTokens
+		total.OutputTokens += snapshot.Usage.OutputTokens
+		total.CacheReadTokens += snapshot.Usage.CacheReadTokens
+		total.CacheWriteTokens += snapshot.Usage.CacheWriteTokens
+	}
+	return total
+}
+
+func usageEqual(a, b Usage) bool {
+	return a.InputTokens == b.InputTokens &&
+		a.OutputTokens == b.OutputTokens &&
+		a.CacheReadTokens == b.CacheReadTokens &&
+		a.CacheWriteTokens == b.CacheWriteTokens
+}
+
+// mergeProviderRequestUsage reconciles the provider-level result with the
+// recorder's per-attempt total. A transparent fallback can return only the
+// fallback attempt's usage, while the recorder also contains consumed primary
+// usage. Conversely, a provider loop can return a cumulative total that is
+// already equal to the snapshots (or include an unretained residual). Prefer
+// the exact snapshot sum when it differs in the presence of an error attempt;
+// otherwise retain any larger provider-level residual without double-counting.
+func mergeProviderRequestUsage(result Usage, snapshots []providerRequestSnapshot) Usage {
+	requestUsage := providerRequestUsageTotal(snapshots)
+	if !usageHasValue(requestUsage) {
+		return result
+	}
+	if usageEqual(result, requestUsage) {
+		return result
+	}
+	consumedFailedAttempt := false
+	consumedFallbackAttempt := false
+	for _, snapshot := range snapshots {
+		_, billable := providerRequestSnapshotUsage(snapshot)
+		if !billable {
+			continue
+		}
+		if strings.TrimSpace(snapshot.Error) != "" {
+			consumedFailedAttempt = true
+		}
+		if snapshot.Fallback {
+			consumedFallbackAttempt = true
+		}
+	}
+	if consumedFailedAttempt && consumedFallbackAttempt {
+		return requestUsage
+	}
+	result.InputTokens = maxInt(result.InputTokens, requestUsage.InputTokens)
+	result.OutputTokens = maxInt(result.OutputTokens, requestUsage.OutputTokens)
+	result.CacheReadTokens = maxInt(result.CacheReadTokens, requestUsage.CacheReadTokens)
+	result.CacheWriteTokens = maxInt(result.CacheWriteTokens, requestUsage.CacheWriteTokens)
+	return result
 }
 
 func recordProviderRequestOutputEstimate(ctx context.Context, tokens int) {
