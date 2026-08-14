@@ -1170,7 +1170,8 @@ func (s *Service) embedQueryCached(ctx context.Context, em Embedder, emName, que
 }
 
 type retrieveOptions struct {
-	strict bool
+	strict      bool
+	documentIDs []string
 }
 
 // Retrieve preserves the established fail-open behaviour used by a single
@@ -1179,6 +1180,12 @@ type retrieveOptions struct {
 // instead of injecting the whole scope.
 func (s *Service) Retrieve(ctx context.Context, userID, convID string, kbIDs []string, query string, topK int) ([]Snippet, error) {
 	return s.retrieve(ctx, userID, convID, kbIDs, query, topK, retrieveOptions{})
+}
+
+// RetrieveDocuments restricts conversation-upload evidence to documents
+// attached to the current user turn. Knowledge-base IDs remain in scope.
+func (s *Service) RetrieveDocuments(ctx context.Context, userID, convID string, kbIDs, documentIDs []string, query string, topK int) ([]Snippet, error) {
+	return s.retrieve(ctx, userID, convID, kbIDs, query, topK, retrieveOptions{documentIDs: fixedDocumentScope(documentIDs)})
 }
 
 // retrieveStrict is reserved for the KB iterative API. In that path an index
@@ -1200,13 +1207,20 @@ func (s *Service) retrieve(ctx context.Context, userID, convID string, kbIDs []s
 	if topK <= 0 {
 		topK = retrieveDefaultTopK
 	}
-	fullContext := func() ([]Snippet, error) {
+	listScope := func() ([]store.Chunk, error) {
 		scope, err := store.ListChunksInScope(ctx, s.db, kbIDs, convID)
 		if err != nil {
 			return nil, err
 		}
+		return filterChunksByDocuments(scope, opts.documentIDs), nil
+	}
+	fullContext := func() ([]Snippet, error) {
+		scope, err := listScope()
+		if err != nil {
+			return nil, err
+		}
 		cfg := s.ragSettings()
-		if isConversationAggregateOverflow(scope, convID, cfg.FullTextThreshold) {
+		if len(kbIDs) == 0 && scopeContentTokens(scope) > cfg.FullTextThreshold {
 			return boundedConversationFallback(scope, terms, cfg.TopK, cfg.DynamicTopK, cfg.FullTextThreshold), nil
 		}
 		return fullTextSnippets(scope), nil
@@ -1262,7 +1276,7 @@ func (s *Service) retrieve(ctx context.Context, userID, convID string, kbIDs []s
 				return fullContext()
 			}
 			cands = kbCands
-			convScope := vector.Scope{ConversationID: convID}
+			convScope := vector.Scope{ConversationID: convID, DocumentIDs: opts.documentIDs}
 			if convCands, cerr := s.searchScope(ctx, userID, convID, gEm, gName, gDim, convScope, query, terms); cerr == nil {
 				if !opts.strict && len(convCands) == 0 && s.vectorScopeHasEmbeddedChunks(ctx, convScope) {
 					return fullContext()
@@ -1284,7 +1298,7 @@ func (s *Service) retrieve(ctx context.Context, userID, convID string, kbIDs []s
 		} else {
 			// One model across KBs (+ the conversation when its model matches): a
 			// single combined-scope search — exactly the prior behaviour.
-			scope := vector.Scope{KBIDs: kbIDs, ConversationID: convID}
+			scope := vector.Scope{KBIDs: kbIDs, ConversationID: convID, DocumentIDs: opts.documentIDs}
 			cands, err = s.searchScope(ctx, userID, convID, kbEm, kbName, kbDim, scope, query, terms)
 			if err != nil {
 				if errors.Is(err, errVectorBackendUnavailable) {
@@ -1302,7 +1316,7 @@ func (s *Service) retrieve(ctx context.Context, userID, convID string, kbIDs []s
 	} else {
 		gEm, gName, gDim := s.resolveEmbedder(ctx)
 		var err error
-		scope := vector.Scope{ConversationID: convID}
+		scope := vector.Scope{ConversationID: convID, DocumentIDs: opts.documentIDs}
 		cands, err = s.searchScope(ctx, userID, convID, gEm, gName, gDim, scope, query, terms)
 		if err != nil {
 			if errors.Is(err, errVectorBackendUnavailable) {
@@ -1329,6 +1343,9 @@ func (s *Service) retrieve(ctx context.Context, userID, convID string, kbIDs []s
 			seen[c.chunkID] = true
 		}
 		for _, c := range s.keywordOnlyUnembedded(ctx, kbIDs, convID, terms) {
+			if !documentAllowed(c.documentID, opts.documentIDs) {
+				continue
+			}
 			if !seen[c.chunkID] {
 				cands = append(cands, c)
 			}
@@ -1364,7 +1381,7 @@ func (s *Service) retrieve(ctx context.Context, userID, convID string, kbIDs []s
 	// Keep the full ranked candidate pool until windows are assembled. A fixed-K
 	// slice taken before expansion could spend all slots on siblings from one
 	// parent and prevent a later exact child from contributing its context.
-	scopeRows, err := store.ListChunksInScope(ctx, s.db, kbIDs, convID)
+	scopeRows, err := listScope()
 	if err != nil {
 		return nil, err
 	}
@@ -2626,8 +2643,9 @@ func soleMineruImageMarker(chunk string) (string, bool) {
 
 // RouteDecision is the structured output of the query router (§4.11-B).
 type RouteDecision struct {
-	Strategy string   `json:"strategy"` // retrieve | full_doc | none
-	Queries  []string `json:"queries"`
+	Strategy    string   `json:"strategy"` // retrieve | full_doc | none
+	DocumentIDs []string `json:"document_ids,omitempty"`
+	Queries     []string `json:"queries"`
 }
 
 // IterativeRetrievalStatus is the evidence outcome exposed to the orchestrator.
@@ -2656,7 +2674,10 @@ const (
 // Retrieve directly and can never be routed to none.
 type IterativeRetrievalOptions struct {
 	ForceRetrieve bool
-	OnProgress    func(IterativeRetrievalProgress)
+	// DocumentIDs narrows the conversation-upload side of a mixed KB + chat-file
+	// scope to files attached to the current user turn.
+	DocumentIDs []string
+	OnProgress  func(IterativeRetrievalProgress)
 }
 
 // IterativeRetrievalResult contains both the evidence and enough control-plane
@@ -2772,6 +2793,13 @@ func (s *Service) RouteAndRetrieve(ctx context.Context, userID, convID string, k
 	return s.routeAndRetrieve(ctx, userID, convID, kbIDs, userText, history, topK, retrieveOptions{})
 }
 
+// RouteAndRetrieveDocuments supplies current-turn attachment IDs as routing
+// metadata. The router may select full_doc targets from the whole conversation;
+// retrieve always searches the whole conversation document scope.
+func (s *Service) RouteAndRetrieveDocuments(ctx context.Context, userID, convID string, kbIDs, documentIDs []string, userText string, history []string, topK int) ([]Snippet, RouteDecision, error) {
+	return s.routeAndRetrieve(ctx, userID, convID, kbIDs, userText, history, topK, retrieveOptions{documentIDs: fixedDocumentScope(documentIDs)})
+}
+
 func (s *Service) routeAndRetrieve(ctx context.Context, userID, convID string, kbIDs []string, userText string, history []string, topK int, retrieveOpts retrieveOptions) ([]Snippet, RouteDecision, error) {
 	kbIDs = fixedKnowledgeBaseScope(kbIDs)
 	hasKnowledgeBase := len(kbIDs) > 0
@@ -2785,7 +2813,7 @@ func (s *Service) routeAndRetrieve(ctx context.Context, userID, convID string, k
 	}
 	cfg := s.ragSettings()
 
-	// Step 0: size check + pinned docs. "Pinned" = in-scope child chunks with no
+	// Build the complete visible scope before routing. "Pinned" = in-scope child chunks with no
 	// embedding — small conversation docs we intentionally did NOT vectorise (see
 	// runPipeline). They are normally injected in full. For a multi-attachment
 	// scope above the shared budget, query-matching evidence takes priority and the
@@ -2808,9 +2836,8 @@ func (s *Service) routeAndRetrieve(ctx context.Context, userID, convID string, k
 			embeddedTokens += estimateTokens(c.Content)
 		}
 	}
-	// Whole scope fits → inject everything in full. The previous
-	// `embeddedTokens == 0` shortcut made an arbitrarily large collection of
-	// individually-small historical uploads bypass the cumulative budget.
+	// Fast path: when every visible document fits together, avoid the task-model
+	// routing round trip and inject the complete conversation document scope.
 	if len(scope) > 0 && pinnedTokens+embeddedTokens <= cfg.FullTextThreshold {
 		decision.Strategy = "full_text"
 		return fullTextSnippets(scope), decision, nil
@@ -2862,25 +2889,15 @@ func (s *Service) routeAndRetrieve(ctx context.Context, userID, convID string, k
 		}
 		return merged
 	}
-	if len(scope) > 0 && !s.vec.Enabled() {
-		if retrieveOpts.strict {
-			return nil, decision, errVectorBackendUnavailable
-		}
-		if !aggregateConversationOverflow {
-			decision.Strategy = "full_text"
-			return fullTextSnippets(scope), decision, nil
-		}
-	}
-
-	// Build a list of (filename, ~first sentence) so the router can resolve
-	// pronouns like "this report" / "the second doc" (§4.11-B router prompt).
-	docHints := s.collectDocHints(ctx, kbIDs, convID)
+	docHints := buildDocumentRouteHints(scope, retrieveOpts.documentIDs)
+	allScopeOpts := retrieveOpts
+	allScopeOpts.documentIDs = nil
 
 	if s.task == nil {
-		out, err := s.retrieve(ctx, userID, convID, kbIDs, initialQuery, cfg.TopK, retrieveOpts)
+		out, err := s.retrieve(ctx, userID, convID, kbIDs, initialQuery, cfg.TopK, allScopeOpts)
 		return withPinned(out), decision, err
 	}
-	prompt := buildRouterPrompt(userText, history, docHints)
+	prompt := buildRouterPrompt(userText, docHints)
 	var d RouteDecision
 	// The router is a small-model JSON call on the FIRST-TOKEN hot path — bound
 	// it. A slow or hung task-model channel must degrade to plain retrieval with
@@ -2892,22 +2909,14 @@ func (s *Service) routeAndRetrieve(ctx context.Context, userID, convID string, k
 	})
 	cancelRouter()
 	if err == nil {
-		if !hasKnowledgeBase {
-			// Preserve the original conversation-document router contract. The stricter
-			// strategy validation below belongs only to the attached-KB retriever.
-			if d.Strategy != "" {
-				decision = d
-			}
-		} else {
-			switch d.Strategy {
-			case "retrieve", "full_doc", "none":
-				decision = d
-			case "":
-				// Keep the deterministic retrieve fallback.
-			default:
-				if s.logger != nil {
-					s.logger.Printf("rag: router returned invalid strategy %q (falling back to retrieve)", d.Strategy)
-				}
+		switch d.Strategy {
+		case "retrieve", "full_doc", "none":
+			decision = d
+		case "":
+			// Keep the deterministic retrieve fallback.
+		default:
+			if s.logger != nil {
+				s.logger.Printf("rag: router returned invalid strategy %q (falling back to retrieve)", d.Strategy)
 			}
 		}
 	} else if s.logger != nil {
@@ -2915,43 +2924,44 @@ func (s *Service) routeAndRetrieve(ctx context.Context, userID, convID string, k
 	}
 	switch decision.Strategy {
 	case "none":
-		// A router can incorrectly classify a short follow-up as unrelated. If
-		// the user's words occur in an in-scope chunk, prefer deterministic lexical
-		// evidence over that classification so an explicit source reference cannot
-		// make the document disappear from the prompt.
-		if lexicalDocumentMatch(scope, userText) {
-			out, rerr := s.retrieve(ctx, userID, convID, kbIDs, initialQuery, cfg.TopK, retrieveOpts)
-			if rerr != nil {
-				return withPinned(out), decision, rerr
-			}
-			if len(out) > 0 {
-				decision.Strategy = "retrieve"
-				return withPinned(out), decision, nil
-			}
-		}
-		// Even when the router sees no need to retrieve, the pinned (small,
-		// always-on) docs are still injected — the user uploaded them on purpose.
-		return withPinned(nil), decision, nil
+		return nil, decision, nil
 	case "full_doc":
+		selectedIDs := validatedFullDocumentIDs(decision.DocumentIDs, retrieveOpts.documentIDs, scope)
+		selectedScope := filterChunksToDocumentIDs(scope, selectedIDs)
+		if len(selectedScope) == 0 {
+			selectedScope = scope
+		}
+		selectedTokens := scopeContentTokens(selectedScope)
 		if !hasKnowledgeBase {
-			if aggregateConversationOverflow {
-				// A router's whole-document request must not re-open the cumulative
-				// attachment overflow. Use the same bounded relational fallback as
-				// Retrieve/inject mode, while retaining the router decision for callers.
-				return boundedConversationFallback(scope, tokenize(strings.ToLower(initialQuery)), cfg.TopK, cfg.DynamicTopK, cfg.FullTextThreshold), decision, nil
+			if selectedTokens > cfg.FullTextThreshold {
+				// A whole-document request is semantically different from retrieval.
+				// When the selected conversation documents exceed the direct context
+				// budget, cover the complete corpus with map-reduce summaries instead
+				// of silently converting the request into keyword-focused excerpts.
+				summaries, summaryErr := s.mapReduceSummarise(ctx, userID, convID, selectedScope, userText)
+				if summaryErr == nil && len(summaries) > 0 {
+					return summaries, decision, nil
+				}
+				if errors.Is(summaryErr, ErrBillingRecord) {
+					return nil, decision, summaryErr
+				}
+				if s.logger != nil {
+					s.logger.Printf("rag: conversation full_doc summarisation failed (falling back to bounded retrieval): %v", summaryErr)
+				}
+				return boundedConversationFallback(selectedScope, tokenize(strings.ToLower(initialQuery)), cfg.TopK, cfg.DynamicTopK, cfg.FullTextThreshold), decision, nil
 			}
 			// A single conversation upload keeps its established whole-document
 			// injection. Multi-attachment overflow returned through the bounded path
 			// above.
-			return fullTextSnippets(scope), decision, nil
+			return fullTextSnippets(selectedScope), decision, nil
 		}
 		// A whole-document request can itself exceed the per-turn RAG budget. Use
 		// the existing bounded map-reduce path instead of injecting an unbounded
 		// corpus. If the task model cannot produce every group summary, fall back
 		// to ordinary retrieval; keep the full_doc decision so the iterative API
 		// never mistakes that fallback for permission to start another round.
-		if pinnedTokens+embeddedTokens > cfg.FullTextThreshold {
-			summaries, summaryErr := s.mapReduceSummarise(ctx, userID, convID, scope, userText)
+		if selectedTokens > cfg.FullTextThreshold {
+			summaries, summaryErr := s.mapReduceSummarise(ctx, userID, convID, selectedScope, userText)
 			if summaryErr == nil && len(summaries) > 0 {
 				return summaries, decision, nil
 			}
@@ -2961,10 +2971,10 @@ func (s *Service) routeAndRetrieve(ctx context.Context, userID, convID string, k
 			if s.logger != nil {
 				s.logger.Printf("rag: full_doc summarisation failed (falling back to retrieval): %v", summaryErr)
 			}
-			out, retrieveErr := s.retrieve(ctx, userID, convID, kbIDs, initialQuery, cfg.TopK, retrieveOpts)
+			out, retrieveErr := s.retrieve(ctx, userID, convID, kbIDs, initialQuery, cfg.TopK, allScopeOpts)
 			return withPinned(out), decision, retrieveErr
 		}
-		return fullTextSnippets(scope), decision, nil
+		return fullTextSnippets(selectedScope), decision, nil
 	default:
 		// retrieve: run each rewritten query, merge + dedupe. With dynamic top-K
 		// the per-query result is already similarity-bounded, so don't cap the
@@ -2988,7 +2998,7 @@ func (s *Service) routeAndRetrieve(ctx context.Context, userID, convID string, k
 		subsets := make([][]Snippet, 0, len(queries))
 		var firstErr error
 		for _, q := range queries {
-			subset, err := s.retrieve(ctx, userID, convID, kbIDs, q, cfg.TopK, retrieveOpts)
+			subset, err := s.retrieve(ctx, userID, convID, kbIDs, q, cfg.TopK, allScopeOpts)
 			if err != nil {
 				if firstErr == nil {
 					firstErr = err
@@ -3035,6 +3045,7 @@ func (s *Service) RouteAndRetrieveIterative(
 	cfg := s.ragSettings()
 	limit := iterativeCandidateLimit(topK, cfg.TopK)
 	fixedUserID, fixedConvID := userID, convID
+	retrieveOpts := retrieveOptions{strict: true, documentIDs: fixedDocumentScope(opts.DocumentIDs)}
 
 	var (
 		first    []Snippet
@@ -3044,10 +3055,10 @@ func (s *Service) RouteAndRetrieveIterative(
 	if opts.ForceRetrieve {
 		initialQuery := strings.TrimSpace(truncateRunes(userText, iterativeMaxQueryRunes))
 		decision = RouteDecision{Strategy: "retrieve", Queries: []string{initialQuery}}
-		first, err = s.retrieveStrict(ctx, fixedUserID, fixedConvID, fixedKBIDs, initialQuery, limit)
+		first, err = s.retrieve(ctx, fixedUserID, fixedConvID, fixedKBIDs, initialQuery, limit, retrieveOpts)
 	} else {
 		first, decision, err = s.routeAndRetrieve(
-			ctx, fixedUserID, fixedConvID, fixedKBIDs, userText, history, limit, retrieveOptions{strict: true},
+			ctx, fixedUserID, fixedConvID, fixedKBIDs, userText, history, limit, retrieveOpts,
 		)
 	}
 	result.Decision = decision
@@ -3135,7 +3146,7 @@ func (s *Service) RouteAndRetrieveIterative(
 				result.Status = IterativeRetrievalError
 				return result, err
 			}
-			subset, retrieveErr := s.retrieveStrict(ctx, fixedUserID, fixedConvID, fixedKBIDs, query, limit)
+			subset, retrieveErr := s.retrieve(ctx, fixedUserID, fixedConvID, fixedKBIDs, query, limit, retrieveOpts)
 			if retrieveErr != nil {
 				if firstRetrieveErr == nil {
 					firstRetrieveErr = retrieveErr
@@ -3180,6 +3191,60 @@ func fixedKnowledgeBaseScope(kbIDs []string) []string {
 		out = append(out, id)
 	}
 	return out
+}
+
+func fixedDocumentScope(documentIDs []string) []string {
+	out := make([]string, 0, len(documentIDs))
+	seen := make(map[string]struct{}, len(documentIDs))
+	for _, raw := range documentIDs {
+		id := strings.TrimSpace(raw)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
+}
+
+func documentAllowed(documentID string, documentIDs []string) bool {
+	if len(documentIDs) == 0 {
+		return true
+	}
+	for _, allowed := range documentIDs {
+		if documentID == allowed {
+			return true
+		}
+	}
+	return false
+}
+
+func filterChunksByDocuments(chunks []store.Chunk, documentIDs []string) []store.Chunk {
+	if len(documentIDs) == 0 {
+		return chunks
+	}
+	out := make([]store.Chunk, 0, len(chunks))
+	for _, chunk := range chunks {
+		// KB evidence is independent of chat attachments. Only the conversation
+		// upload branch is narrowed to the current turn's documents.
+		if chunk.KBID != "" || documentAllowed(chunk.DocumentID, documentIDs) {
+			out = append(out, chunk)
+		}
+	}
+	return out
+}
+
+func scopeContentTokens(chunks []store.Chunk) int {
+	total := 0
+	for _, chunk := range chunks {
+		if chunk.ChunkType != "parent" {
+			total += estimateTokens(chunk.Content)
+		}
+	}
+	return total
 }
 
 func iterativeCandidateLimit(requested, configured int) int {
@@ -3797,23 +3862,14 @@ func (s *Service) mapReduceSummarise(ctx context.Context, userID, convID string,
 	return out, nil
 }
 
-func buildRouterPrompt(userText string, history []string, docHints []string) string {
+func buildRouterPrompt(userText string, docHints []string) string {
 	b := strings.Builder{}
-	b.WriteString("Decide whether the user's question needs retrieval from their uploaded documents.\n\n")
+	b.WriteString("Choose how to use the current conversation's uploaded documents for the latest question.\n\n")
 	if len(docHints) > 0 {
-		b.WriteString("Documents in scope (filename — first words):\n")
+		b.WriteString("Documents in scope (trusted metadata):\n")
 		for _, d := range docHints {
 			b.WriteString("- ")
 			b.WriteString(d)
-			b.WriteString("\n")
-		}
-		b.WriteString("\n")
-	}
-	if len(history) > 0 {
-		b.WriteString("Recent conversation:\n")
-		for _, h := range history {
-			b.WriteString("- ")
-			b.WriteString(h)
 			b.WriteString("\n")
 		}
 		b.WriteString("\n")
@@ -3823,10 +3879,87 @@ func buildRouterPrompt(userText string, history []string, docHints []string) str
 	b.WriteString("\n\n")
 	b.WriteString(`Rules:
 - Use "none" when the question is unrelated to the documents (general chit-chat, math, code unrelated to files).
-- Use "retrieve" for fact-finding inside the documents — return 2-4 rewritten queries that disambiguate pronouns ("this report" → use the filename) and split compound questions.
-- Use "full_doc" when the user asks for a summary, an overview, or a high-level comparison spanning the WHOLE document(s).
-Reply with strict JSON: {"strategy":"retrieve|full_doc|none","queries":["<rewritten query 1>","<rewritten query 2>"]}`)
+- Use "retrieve" for targeted evidence. Retrieval searches every conversation document; return useful rewritten queries and an empty document_ids array.
+- Use "full_doc" when complete-document coverage is required. Return exactly the document_ids that need complete coverage.
+- current_turn marks files attached to the latest message and helps resolve references in the latest question.
+Reply with strict JSON: {"strategy":"retrieve|full_doc|none","document_ids":["document-id"],"queries":["query"]}`)
 	return b.String()
+}
+
+func buildDocumentRouteHints(scope []store.Chunk, currentDocumentIDs []string) []string {
+	type routeHint struct {
+		DocumentID  string `json:"document_id"`
+		Filename    string `json:"filename"`
+		CurrentTurn bool   `json:"current_turn"`
+		Indexed     bool   `json:"indexed"`
+	}
+	current := make(map[string]bool, len(currentDocumentIDs))
+	for _, id := range fixedDocumentScope(currentDocumentIDs) {
+		current[id] = true
+	}
+	order := []string{}
+	byID := map[string]*routeHint{}
+	for _, chunk := range scope {
+		if chunk.ChunkType == "parent" {
+			continue
+		}
+		hint := byID[chunk.DocumentID]
+		if hint == nil {
+			hint = &routeHint{DocumentID: chunk.DocumentID, Filename: chunk.Filename, CurrentTurn: current[chunk.DocumentID]}
+			byID[chunk.DocumentID] = hint
+			order = append(order, chunk.DocumentID)
+		}
+		hint.Indexed = hint.Indexed || strings.TrimSpace(chunk.EmbeddingModel) != ""
+	}
+	out := make([]string, 0, len(order))
+	for _, id := range order {
+		raw, _ := json.Marshal(byID[id])
+		out = append(out, string(raw))
+	}
+	return out
+}
+
+func validatedFullDocumentIDs(requested, current []string, scope []store.Chunk) []string {
+	allowed := map[string]bool{}
+	ordered := []string{}
+	for _, chunk := range scope {
+		if chunk.DocumentID != "" && !allowed[chunk.DocumentID] {
+			allowed[chunk.DocumentID] = true
+			ordered = append(ordered, chunk.DocumentID)
+		}
+	}
+	validate := func(ids []string) []string {
+		out := []string{}
+		seen := map[string]bool{}
+		for _, id := range fixedDocumentScope(ids) {
+			if allowed[id] && !seen[id] {
+				seen[id] = true
+				out = append(out, id)
+			}
+		}
+		return out
+	}
+	if selected := validate(requested); len(selected) > 0 {
+		return selected
+	}
+	if selected := validate(current); len(selected) > 0 {
+		return selected
+	}
+	return ordered
+}
+
+func filterChunksToDocumentIDs(chunks []store.Chunk, documentIDs []string) []store.Chunk {
+	allowed := map[string]bool{}
+	for _, id := range fixedDocumentScope(documentIDs) {
+		allowed[id] = true
+	}
+	out := make([]store.Chunk, 0, len(chunks))
+	for _, chunk := range chunks {
+		if allowed[chunk.DocumentID] {
+			out = append(out, chunk)
+		}
+	}
+	return out
 }
 
 // collectDocHints returns up to ~12 "filename — first ~120 chars" lines so the

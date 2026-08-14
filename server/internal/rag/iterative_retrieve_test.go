@@ -801,7 +801,10 @@ func iterativeHit(chunkID string, score float32) vector.Hit {
 }
 
 func cloneVectorScope(scope vector.Scope) vector.Scope {
-	return vector.Scope{KBIDs: append([]string(nil), scope.KBIDs...), ConversationID: scope.ConversationID}
+	return vector.Scope{
+		KBIDs: append([]string(nil), scope.KBIDs...), ConversationID: scope.ConversationID,
+		DocumentIDs: append([]string(nil), scope.DocumentIDs...),
+	}
 }
 
 func cloneVectorStatuses(in map[string]vector.ChunkVectorStatus) map[string]vector.ChunkVectorStatus {

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"os"
@@ -25,16 +26,19 @@ type stagedSandboxFile struct {
 }
 
 type recordingSandbox struct {
-	resetCalls int
-	resetErr   error
-	putFiles   []stagedSandboxFile
-	execCalls  int
-	execResult *sandbox.Result
+	resetCalls  int
+	resetErr    error
+	resetErrors []error
+	newSessions int
+	putFiles    []stagedSandboxFile
+	execCalls   int
+	execResult  *sandbox.Result
 }
 
 func (s *recordingSandbox) Enabled() bool { return true }
 func (s *recordingSandbox) NewSession(context.Context, string) (string, error) {
-	return "sandbox-1", nil
+	s.newSessions++
+	return fmt.Sprintf("sandbox-%d", s.newSessions), nil
 }
 func (s *recordingSandbox) Exec(context.Context, string, string) (*sandbox.Result, error) {
 	s.execCalls++
@@ -49,6 +53,11 @@ func (s *recordingSandbox) PutFile(_ context.Context, _ string, path string, dat
 }
 func (s *recordingSandbox) ResetInputs(context.Context, string) error {
 	s.resetCalls++
+	if len(s.resetErrors) > 0 {
+		err := s.resetErrors[0]
+		s.resetErrors = s.resetErrors[1:]
+		return err
+	}
 	return s.resetErr
 }
 func (s *recordingSandbox) GetFile(context.Context, string, string) ([]byte, error) {
@@ -116,6 +125,7 @@ func TestPythonExecuteResetsInputsAndStagesOnlyNonImages(t *testing.T) {
 		"imageArtifact": write("generated.png", png),
 		"skillText":     write(filepath.Join("skill-assets", "helper.py"), []byte("print('ok')\n")),
 		"skillImage":    write(filepath.Join("skill-assets", "reference.bin"), png),
+		"deniedSkill":   write(filepath.Join("skill-assets", "denied.py"), []byte("print('denied')\n")),
 	}
 
 	assets, err := json.Marshal([]map[string]any{
@@ -124,6 +134,12 @@ func TestPythonExecuteResetsInputsAndStagesOnlyNonImages(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("marshal assets: %v", err)
+	}
+	deniedAssets, err := json.Marshal([]map[string]any{{
+		"filename": "denied.py", "storage_path": paths["deniedSkill"], "mime_type": "text/x-python", "size_bytes": 16,
+	}})
+	if err != nil {
+		t.Fatalf("marshal denied assets: %v", err)
 	}
 	seed := []struct {
 		query string
@@ -139,7 +155,9 @@ func TestPythonExecuteResetsInputsAndStagesOnlyNonImages(t *testing.T) {
 		{`INSERT INTO files(id,user_id,conversation_id,filename,mime_type,size_bytes,storage_path,kind) VALUES('f_forged','u1','c1','payload.dat','text/plain',?,?, 'text')`, []any{len(png), paths["forged"]}},
 		{`INSERT INTO artifacts(id,message_id,filename,storage_path,mime_type,size_bytes) VALUES('art1','msg1','generated.png',?,'image/png',?)`, []any{paths["imageArtifact"], len(png)}},
 		{`INSERT INTO skills(id,name,description,instructions,assets,enabled) VALUES('sk1','Data helper','desc','instructions',?,1)`, []any{string(assets)}},
+		{`INSERT INTO skills(id,name,description,instructions,assets,enabled) VALUES('sk2','Denied helper','desc','denied instructions',?,1)`, []any{string(deniedAssets)}},
 		{`INSERT INTO model_skills(model_id,skill_id) VALUES('m1','sk1')`, nil},
+		{`INSERT INTO model_skills(model_id,skill_id) VALUES('m1','sk2')`, nil},
 	}
 	for _, row := range seed {
 		if _, err := db.ExecContext(ctx, row.query, row.args...); err != nil {
@@ -168,8 +186,9 @@ func TestPythonExecuteResetsInputsAndStagesOnlyNonImages(t *testing.T) {
 		t.Fatalf("Exec calls = %d, want 1", fake.execCalls)
 	}
 	wantPaths := map[string]bool{
-		"/workspace/uploads/rows.csv":             true,
-		"/workspace/skills/Data helper/helper.py": true,
+		"/workspace/uploads/rows.csv":               true,
+		"/workspace/skills/Data helper/helper.py":   true,
+		"/workspace/skills/Denied helper/denied.py": true,
 	}
 	if len(fake.putFiles) != len(wantPaths) {
 		t.Fatalf("staged paths = %+v, want only non-image data and skill files", fake.putFiles)
@@ -184,6 +203,25 @@ func TestPythonExecuteResetsInputsAndStagesOnlyNonImages(t *testing.T) {
 	}
 	if outputArtifact.MimeType != "image/png" {
 		t.Fatalf("Python image output was not preserved as an artifact: %+v", outputArtifact)
+	}
+
+	// A selected group policy must stage only the permitted model-bound skill.
+	selectedFake := &recordingSandbox{execResult: &sandbox.Result{Stdout: "done\n"}}
+	selectedTool := &pythonExecuteTool{sandbox: selectedFake, uploadDir: root, artifactDir: filepath.Join(root, "artifacts"), logger: log.New(io.Discard, "", 0)}
+	_, _, err = selectedTool.Execute(ctx, []byte(`{"code":"print('done')"}`), &llm.ToolContext{
+		UserID: "u1", ConvID: "c1", MessageID: "msg1", ModelID: "m1", DB: db,
+		BuiltinTools:  map[string]bool{"python_execute": true, "use_skill": true},
+		AdminSkillIDs: map[string]bool{"sk1": true},
+	})
+	if err != nil {
+		t.Fatalf("Execute with selected skill policy: %v", err)
+	}
+	selectedPaths := map[string]bool{}
+	for _, staged := range selectedFake.putFiles {
+		selectedPaths[staged.path] = true
+	}
+	if !selectedPaths["/workspace/skills/Data helper/helper.py"] || selectedPaths["/workspace/skills/Denied helper/denied.py"] {
+		t.Fatalf("selected skill policy staged the wrong assets: %+v", selectedFake.putFiles)
 	}
 
 	// The Python tool itself can remain enabled while use_skill is denied. In
@@ -212,6 +250,24 @@ func TestPythonExecuteFailsClosedWhenPersistentInputsCannotBeReset(t *testing.T)
 	}
 	if fake.execCalls != 0 {
 		t.Fatalf("Exec ran %d time(s) despite reset failure", fake.execCalls)
+	}
+}
+
+func TestPythonExecuteRebuildsSessionWhenInitialResetFindsReapedSandbox(t *testing.T) {
+	fake := &recordingSandbox{
+		resetErrors: []error{errors.New(`sandbox 404: {"detail":"session not found or not running"}`), nil},
+		execResult:  &sandbox.Result{Stdout: "ok\n"},
+	}
+	tool := &pythonExecuteTool{sandbox: fake, logger: log.New(io.Discard, "", 0)}
+	output, _, err := tool.Execute(context.Background(), []byte(`{"code":"print('ok')"}`), &llm.ToolContext{})
+	if err != nil {
+		t.Fatalf("Execute after reset 404: %v", err)
+	}
+	if output != "stdout:\nok\n\n" {
+		t.Fatalf("output=%q, want rebuilt session result", output)
+	}
+	if fake.newSessions != 2 || fake.resetCalls != 2 || fake.execCalls != 1 {
+		t.Fatalf("calls new=%d reset=%d exec=%d, want 2/2/1", fake.newSessions, fake.resetCalls, fake.execCalls)
 	}
 }
 

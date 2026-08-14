@@ -470,6 +470,9 @@ func (t *pythonExecuteTool) Execute(ctx context.Context, input []byte, tc *llm.T
 		if tc.DB != nil && tc.ModelID != "" && tc.AllowsBuiltinTool("use_skill") {
 			if skillIDs, err := store.SkillsForModel(ctx, tc.DB, tc.ModelID); err == nil {
 				for _, sid2 := range skillIDs {
+					if !tc.AllowsAdminSkill(sid2) {
+						continue
+					}
 					sk, err := store.GetSkill(ctx, tc.DB, sid2)
 					if err != nil || sk == nil || !sk.Enabled {
 						continue
@@ -513,7 +516,43 @@ func (t *pythonExecuteTool) Execute(ctx context.Context, input []byte, tc *llm.T
 		return nil
 	}
 	if err := stageFiles(sessionID); err != nil {
-		return "", nil, err
+		// The reaper may remove an idle container while its durable sandbox_id is
+		// still stored on the conversation. ResetInputs is the first sidecar call,
+		// so recover here as well as in the Exec path below.
+		if !isSandboxSessionGone(err) {
+			return "", nil, err
+		}
+		rebuilt := ""
+		if hasConv {
+			relock := lockConvSandbox(tc.ConvID)
+			cur, _ := store.GetConvProviderStateKey(ctx, tc.DB, tc.ConvID, "sandbox_id")
+			if cur != "" && cur != sessionID {
+				rebuilt = cur
+			} else {
+				sid2, sErr := t.sandbox.NewSession(ctx, tc.ConvID)
+				if sErr != nil {
+					relock()
+					return "", nil, fmt.Errorf("sandbox session (rebuild): %w", sErr)
+				}
+				if perr := store.SetConvProviderStateKeyForUser(ctx, tc.DB, tc.ConvID, tc.MessageID, tc.UserID, "sandbox_id", sid2); perr != nil {
+					_ = t.sandbox.Release(ctx, sid2)
+					relock()
+					return "", nil, fmt.Errorf("persist sandbox session (rebuild): %w", perr)
+				}
+				rebuilt = sid2
+			}
+			relock()
+		} else {
+			sid2, sErr := t.sandbox.NewSession(ctx, "")
+			if sErr != nil {
+				return "", nil, fmt.Errorf("sandbox session (rebuild): %w", sErr)
+			}
+			rebuilt = sid2
+		}
+		sessionID = rebuilt
+		if err := stageFiles(sessionID); err != nil {
+			return "", nil, err
+		}
 	}
 
 	res, err := t.sandbox.Exec(ctx, sessionID, in.Code)
@@ -1861,6 +1900,14 @@ func (t *useSkillTool) Execute(ctx context.Context, input []byte, tc *llm.ToolCo
 	if in.Name == "" {
 		return "", nil, errors.New("name required")
 	}
+	var currentSkillPolicy *store.ResourceAccessPolicy
+	if tc != nil && strings.TrimSpace(tc.UserID) != "" {
+		permissions, err := store.UserGroupPermissionsForUser(ctx, t.db, tc.UserID)
+		if err != nil {
+			return "", nil, err
+		}
+		currentSkillPolicy = &permissions.Skills
+	}
 	// Only load a skill bound to the current model (model_skills, §4.17) — the same
 	// set advertised in the system-prompt index. Without a model in context, fall
 	// back to all enabled skills so non-orchestrated callers still work.
@@ -1871,6 +1918,12 @@ func (t *useSkillTool) Execute(ctx context.Context, input []byte, tc *llm.ToolCo
 			return "", nil, err
 		}
 		for _, id := range ids {
+			if !tc.AllowsAdminSkill(id) {
+				continue
+			}
+			if currentSkillPolicy != nil && !store.ResourcePolicyAllows(*currentSkillPolicy, id) {
+				continue
+			}
 			if sk, err := store.GetSkill(ctx, t.db, id); err == nil && sk != nil && sk.Enabled {
 				skills = append(skills, *sk)
 			}
@@ -1888,10 +1941,12 @@ func (t *useSkillTool) Execute(ctx context.Context, input []byte, tc *llm.ToolCo
 		}
 	}
 	// Built-in document-generation skill (§4.5.1): served from code, not the
-	// skills table, so it can't be deleted in the admin panel. Checked AFTER
-	// the DB skills so an admin skill with the same name shadows it, matching
-	// the system-prompt index in composeSystemPrompt.
-	if strings.EqualFold(in.Name, llm.DocGenSkillName) {
+	// skills table, so it can't be deleted in the admin panel. It has no catalog
+	// ID; therefore selected/none group policies must fail closed instead of
+	// allowing a direct name lookup to bypass the administrator's skill list.
+	currentPolicyAllowsBuiltin := currentSkillPolicy == nil || currentSkillPolicy.Mode == store.ResourceAccessAll
+	snapshotAllowsBuiltin := tc == nil || tc.AdminSkillIDs == nil
+	if strings.EqualFold(in.Name, llm.DocGenSkillName) && currentPolicyAllowsBuiltin && snapshotAllowsBuiltin {
 		return "Skill: " + llm.DocGenSkillName + "\n\n" + llm.DocGenRecipes, nil, nil
 	}
 	return "Skill not found: " + in.Name, nil, nil

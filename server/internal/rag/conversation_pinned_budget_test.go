@@ -39,6 +39,24 @@ func TestConversationDocumentsShareCumulativePinnedBudget(t *testing.T) {
 		t.Fatal("second document remained pinned after cumulative budget was exhausted")
 	}
 	assertConversationPinnedTokensAtMost(t, ctx, db, "c1", 12)
+
+	// A+B exceeds the cumulative pin budget, so B is embedded at ingest time.
+	// That must not force a later B-only turn into retrieval: B itself still fits
+	// the full-text threshold when the router selects B for complete coverage.
+	router := &recordingRouter{decision: RouteDecision{Strategy: "full_doc", DocumentIDs: []string{second.ID}}}
+	svc.SetTaskLLM(router)
+	currentOnly, decision, err := svc.RouteAndRetrieveDocuments(
+		ctx, "u1", "c1", nil, []string{second.ID}, "summarize this document", nil, 8,
+	)
+	if err != nil {
+		t.Fatalf("route current attachment: %v", err)
+	}
+	if decision.Strategy != "full_doc" || len(currentOnly) != 1 {
+		t.Fatalf("current attachment decision=%+v snippets=%+v", decision, currentOnly)
+	}
+	if currentOnly[0].URL != "doc://"+second.ID || !strings.Contains(currentOnly[0].Snippet, "bravo") || strings.Contains(currentOnly[0].Snippet, "alpha") {
+		t.Fatalf("current attachment injected the wrong document: %+v", currentOnly)
+	}
 }
 
 func TestConcurrentConversationIngestDoesNotOversubscribePinnedBudget(t *testing.T) {
@@ -222,17 +240,24 @@ func TestConversationAggregateOverflowUsesBoundedRelationalFallback(t *testing.T
 	}
 	assertBoundedHit("auto route", auto)
 
-	router := &recordingRouter{decision: RouteDecision{Strategy: "full_doc"}}
+	router := &recordingRouter{decision: RouteDecision{Strategy: "full_doc"}, summary: "complete document summary"}
 	fullDocService := New(db, nil, log.New(io.Discard, "", 0))
 	fullDocService.SetTaskLLM(router)
 	fullDoc, decision, err := fullDocService.RouteAndRetrieve(ctx, "u1", "c1", nil, "late_document_target", nil, 8)
 	if err != nil {
 		t.Fatalf("full_doc route: %v", err)
 	}
-	if router.calls != 1 || decision.Strategy != "full_doc" {
+	if router.calls != 3 || decision.Strategy != "full_doc" {
 		t.Fatalf("full_doc routing = calls %d, decision %+v", router.calls, decision)
 	}
-	assertBoundedHit("full_doc route", fullDoc)
+	if len(fullDoc) != 2 {
+		t.Fatalf("full_doc route returned %d summaries, want one per document: %+v", len(fullDoc), fullDoc)
+	}
+	for _, snippet := range fullDoc {
+		if snippet.Snippet != router.summary || snippet.Source != "document" {
+			t.Fatalf("full_doc route did not use map-reduce summary: %+v", fullDoc)
+		}
+	}
 }
 
 func openPinnedBudgetTestDB(t *testing.T, ctx context.Context) *sql.DB {
