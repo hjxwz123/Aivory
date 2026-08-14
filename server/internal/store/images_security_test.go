@@ -54,9 +54,17 @@ func TestListUserImageArtifactsSeparatesSelfServiceAndAdminScopes(t *testing.T) 
 		if _, createErr = CreateArtifact(ctx, db, Artifact{
 			ID: fixture.artifactID, MessageID: message.ID, Filename: fixture.artifactID + ".png",
 			StoragePath: "/tmp/" + fixture.artifactID, MimeType: "image/png", SizeBytes: 10,
+			Source: ArtifactSourceImageGenerate,
 		}); createErr != nil {
 			t.Fatalf("create %s: %v", fixture.artifactID, createErr)
 		}
+	}
+	if _, err := CreateArtifact(ctx, db, Artifact{
+		ID: "gallery-member-python-chart", MessageID: "gallery-member-message", Filename: "chart.png",
+		StoragePath: "/tmp/gallery-member-python-chart", MimeType: "image/png", SizeBytes: 10,
+		Source: ArtifactSourcePythonExecute,
+	}); err != nil {
+		t.Fatalf("create python chart: %v", err)
 	}
 
 	assertGallery := func(list func(context.Context, *sql.DB, string, int, int) ([]AdminImageArtifact, error), scope, userID string, wantIDs ...string) {

@@ -1836,6 +1836,12 @@ func IsRefreshSessionValid(ctx context.Context, db *sql.DB, userID, handle strin
 }
 
 // Artifact is a file produced by a tool and attached to one message.
+const (
+	ArtifactSourcePythonExecute         = "python_execute"
+	ArtifactSourceImageGenerate         = "image_generate"
+	ArtifactSourceHostedImageGeneration = "image_generation"
+)
+
 type Artifact struct {
 	ID          string `json:"id"`
 	MessageID   string `json:"message_id"`
@@ -1843,6 +1849,7 @@ type Artifact struct {
 	StoragePath string `json:"-"`
 	MimeType    string `json:"mime_type"`
 	SizeBytes   int64  `json:"size_bytes"`
+	Source      string `json:"-"`
 	CreatedAt   int64  `json:"created_at"`
 }
 
@@ -1850,7 +1857,7 @@ type Artifact struct {
 // owner" — for admin triage of another user's conversation (A12).
 func GetArtifact(ctx context.Context, db *sql.DB, id, userID string) (*Artifact, error) {
 	var a Artifact
-	q := `SELECT a.id, a.message_id, a.filename, a.storage_path, a.mime_type, a.size_bytes, a.created_at
+	q := `SELECT a.id, a.message_id, a.filename, a.storage_path, a.mime_type, a.size_bytes, a.source, a.created_at
 		 FROM artifacts a JOIN messages m ON m.id = a.message_id
 		 JOIN conversations c ON c.id = m.conversation_id
 		 WHERE a.id=?`
@@ -1860,7 +1867,7 @@ func GetArtifact(ctx context.Context, db *sql.DB, id, userID string) (*Artifact,
 		args = append(args, workspaceResourceAccessArgs(userID)...)
 	}
 	err := db.QueryRowContext(ctx, q, args...).Scan(
-		&a.ID, &a.MessageID, &a.Filename, &a.StoragePath, &a.MimeType, &a.SizeBytes, &a.CreatedAt)
+		&a.ID, &a.MessageID, &a.Filename, &a.StoragePath, &a.MimeType, &a.SizeBytes, &a.Source, &a.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -1877,13 +1884,13 @@ func GetArtifact(ctx context.Context, db *sql.DB, id, userID string) (*Artifact,
 func FirstImageArtifactForMessage(ctx context.Context, db *sql.DB, messageID, conversationID string) (*Artifact, error) {
 	var a Artifact
 	err := db.QueryRowContext(ctx,
-		`SELECT a.id, a.message_id, a.filename, a.storage_path, a.mime_type, a.size_bytes, a.created_at
+		`SELECT a.id, a.message_id, a.filename, a.storage_path, a.mime_type, a.size_bytes, a.source, a.created_at
 		 FROM artifacts a
 		 JOIN messages m ON m.id=a.message_id
 		 WHERE a.message_id=? AND m.conversation_id=? AND a.mime_type LIKE 'image/%'
 		 ORDER BY a.filename ASC, a.created_at ASC, a.id ASC
 		 LIMIT 1`, messageID, conversationID).Scan(
-		&a.ID, &a.MessageID, &a.Filename, &a.StoragePath, &a.MimeType, &a.SizeBytes, &a.CreatedAt)
+		&a.ID, &a.MessageID, &a.Filename, &a.StoragePath, &a.MimeType, &a.SizeBytes, &a.Source, &a.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -1902,7 +1909,7 @@ func ListImageArtifactsByConversation(ctx context.Context, db *sql.DB, convID, u
 	args := []any{convID}
 	args = append(args, workspaceResourceAccessArgs(userID)...)
 	rows, err := db.QueryContext(ctx,
-		`SELECT a.id, a.message_id, a.filename, a.storage_path, a.mime_type, a.size_bytes, a.created_at
+		`SELECT a.id, a.message_id, a.filename, a.storage_path, a.mime_type, a.size_bytes, a.source, a.created_at
 		 FROM artifacts a
 		 JOIN messages m ON m.id = a.message_id
 		 JOIN conversations c ON c.id = m.conversation_id
@@ -1915,7 +1922,7 @@ func ListImageArtifactsByConversation(ctx context.Context, db *sql.DB, convID, u
 	out := []Artifact{}
 	for rows.Next() {
 		var a Artifact
-		if err := rows.Scan(&a.ID, &a.MessageID, &a.Filename, &a.StoragePath, &a.MimeType, &a.SizeBytes, &a.CreatedAt); err != nil {
+		if err := rows.Scan(&a.ID, &a.MessageID, &a.Filename, &a.StoragePath, &a.MimeType, &a.SizeBytes, &a.Source, &a.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, a)
@@ -1949,8 +1956,8 @@ func createArtifact(ctx context.Context, db *sql.DB, a Artifact, expectedConvID,
 	createdAt := time.Now().Unix()
 	if userID == "" {
 		_, err := db.ExecContext(ctx,
-			`INSERT INTO artifacts(id, message_id, filename, storage_path, mime_type, size_bytes, created_at) VALUES(?, ?, ?, ?, ?, ?, ?)`,
-			a.ID, a.MessageID, a.Filename, a.StoragePath, a.MimeType, a.SizeBytes, createdAt)
+			`INSERT INTO artifacts(id, message_id, filename, storage_path, mime_type, size_bytes, source, created_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
+			a.ID, a.MessageID, a.Filename, a.StoragePath, a.MimeType, a.SizeBytes, a.Source, createdAt)
 		if err != nil {
 			return nil, err
 		}
@@ -2010,8 +2017,8 @@ func createArtifact(ctx context.Context, db *sql.DB, a Artifact, expectedConvID,
 		return nil, err
 	}
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO artifacts(id, message_id, filename, storage_path, mime_type, size_bytes, created_at) VALUES(?, ?, ?, ?, ?, ?, ?)`,
-		a.ID, a.MessageID, a.Filename, a.StoragePath, a.MimeType, a.SizeBytes, createdAt); err != nil {
+		`INSERT INTO artifacts(id, message_id, filename, storage_path, mime_type, size_bytes, source, created_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
+		a.ID, a.MessageID, a.Filename, a.StoragePath, a.MimeType, a.SizeBytes, a.Source, createdAt); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {

@@ -14,5 +14,6 @@
   "allProjects": "すべてのプロジェクト",
   "draw": "画像生成",
   "files": "ファイル",
-  "skillsPrompts": "スキルとプロンプト"
+  "knowledgeBases": "ナレッジ",
+  "resources": "ライブラリ"
 }

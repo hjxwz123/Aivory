@@ -2610,12 +2610,38 @@ export function Composer({
     <div
       ref={composerRootRef}
       className={cn(
-        'group/composer relative min-w-0 w-full max-w-full',
+        'group/composer relative isolate min-w-0 w-full max-w-full',
         'rounded-popup border-0 bg-[var(--color-surface)]',
         'shadow-[var(--shadow-sm)]',
+        'transition-[transform,box-shadow] duration-[var(--duration-base)] ease-[var(--ease-out)]',
+        'focus-within:-translate-y-px focus-within:shadow-[var(--shadow-md)]',
+        'motion-reduce:transform-none motion-reduce:transition-none',
         dragOver && 'ring-2 ring-[var(--color-tool-selection)] shadow-[var(--shadow-md)]',
       )}
     >
+      {/* Focus behaves like a small light below the working surface: a broad,
+          low-energy pool plus an offset contact highlight. Keeping both behind
+          the shell avoids the harsh full-perimeter glow common to focus rings. */}
+      <span
+        aria-hidden
+        className={cn(
+          'pointer-events-none absolute left-1/2 top-[calc(100%+0.125rem)] -z-10 h-4 w-[64%] -translate-x-1/2 rounded-[50%]',
+          'bg-[var(--color-accent)] opacity-0 blur-[10px]',
+          'transition-opacity duration-[var(--duration-base)] ease-[var(--ease-out)]',
+          'group-focus-within/composer:opacity-[0.16] dark:group-focus-within/composer:opacity-[0.24]',
+          'motion-reduce:transition-none',
+        )}
+      />
+      <span
+        aria-hidden
+        className={cn(
+          'pointer-events-none absolute left-[46%] top-[calc(100%-0.125rem)] -z-10 h-1.5 w-[26%] -translate-x-1/2 rounded-full',
+          'bg-[var(--color-accent)] opacity-0 blur-[3px]',
+          'transition-opacity duration-[var(--duration-fast)] ease-[var(--ease-out)]',
+          'group-focus-within/composer:opacity-[0.22] dark:group-focus-within/composer:opacity-[0.32]',
+          'motion-reduce:transition-none',
+        )}
+      />
       {/* Full-screen drag-and-drop overlay — shown while a file is dragged
           anywhere over the window. Portalled to <body> so it stays viewport-fixed
           even when an ancestor (e.g. ChatHome's GSAP-animated wrapper) carries an

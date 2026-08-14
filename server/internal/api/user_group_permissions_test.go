@@ -379,6 +379,7 @@ func TestDrawingPermissionHidesExistingImageGallery(t *testing.T) {
 	artifact, err := store.CreateArtifact(ctx, db, store.Artifact{
 		ID: "drawing_artifact", MessageID: message.ID, Filename: "existing.png",
 		StoragePath: "/tmp/existing.png", MimeType: "image/png", SizeBytes: 10,
+		Source: store.ArtifactSourceImageGenerate,
 	})
 	if err != nil {
 		t.Fatal(err)

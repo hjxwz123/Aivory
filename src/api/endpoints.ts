@@ -9,7 +9,15 @@ import type {
   ApiAdminMessageFeedbackPage,
   ApiAdminUserFeedbackPage,
   ApiAdminFile,
+  ApiAdminGeneratedImagePage,
+  ApiAdminGeneratedImageResource,
+  ApiAdminKnowledgeBaseResource,
+  ApiAdminKnowledgeBaseResourceDetail,
   ApiAdminLoginHistoryPage,
+  ApiAdminProjectConversation,
+  ApiAdminProjectResource,
+  ApiAdminProjectResourceDetail,
+  ApiAdminResourcePage,
   ApiWorkspace,
   ApiWorkspaceMember,
   ApiWorkspaceMemberPermissions,
@@ -1079,6 +1087,58 @@ export const adminApi = {
   ) => api<ApiAdminImage[]>(`/admin/users/${encodeURIComponent(id)}/images?limit=${limit}&offset=${offset}`),
   userKbs: (id: string) =>
     api<ApiAdminKnowledgeBase[]>(`/admin/users/${encodeURIComponent(id)}/kbs`),
+  adminKnowledgeBases: (
+    params: { search?: string; user?: string; limit?: number; offset?: number } = {},
+  ) => {
+    const qs = new URLSearchParams()
+    if (params.search) qs.set('search', params.search)
+    if (params.user) qs.set('user', params.user)
+    if (params.limit !== undefined) qs.set('limit', String(params.limit))
+    if (params.offset !== undefined) qs.set('offset', String(params.offset))
+    return api<ApiAdminResourcePage<ApiAdminKnowledgeBaseResource>>(
+      `/admin/resources/knowledge-bases${qs.toString() ? `?${qs}` : ''}`,
+    )
+  },
+  adminKnowledgeBase: (id: string) =>
+    api<{ item: ApiAdminKnowledgeBaseResourceDetail }>(
+      `/admin/resources/knowledge-bases/${encodeURIComponent(id)}`,
+    ),
+  adminProjects: (
+    params: { search?: string; user?: string; limit?: number; offset?: number } = {},
+  ) => {
+    const qs = new URLSearchParams()
+    if (params.search) qs.set('search', params.search)
+    if (params.user) qs.set('user', params.user)
+    if (params.limit !== undefined) qs.set('limit', String(params.limit))
+    if (params.offset !== undefined) qs.set('offset', String(params.offset))
+    return api<ApiAdminResourcePage<ApiAdminProjectResource>>(
+      `/admin/resources/projects${qs.toString() ? `?${qs}` : ''}`,
+    )
+  },
+  adminProject: (id: string) =>
+    api<{ item: ApiAdminProjectResourceDetail }>(
+      `/admin/resources/projects/${encodeURIComponent(id)}`,
+    ),
+  adminProjectConversations: (id: string, limit = 50, offset = 0) => {
+    const qs = new URLSearchParams({ limit: String(limit), offset: String(offset) })
+    return api<ApiAdminResourcePage<ApiAdminProjectConversation>>(
+      `/admin/resources/projects/${encodeURIComponent(id)}/conversations?${qs}`,
+    )
+  },
+  adminGeneratedImages: (
+    params: { user?: string; model_id?: string; limit?: number; offset?: number } = {},
+  ) => {
+    const qs = new URLSearchParams()
+    if (params.user) qs.set('user', params.user)
+    if (params.model_id) qs.set('model_id', params.model_id)
+    if (params.limit !== undefined) qs.set('limit', String(params.limit))
+    if (params.offset !== undefined) qs.set('offset', String(params.offset))
+    return api<ApiAdminGeneratedImagePage>(
+      `/admin/resources/images${qs.toString() ? `?${qs}` : ''}`,
+    )
+  },
+  adminGeneratedImage: (id: string) =>
+    api<ApiAdminGeneratedImageResource>(`/admin/resources/images/${encodeURIComponent(id)}`),
   /** Read-only long-term memory inventory for one user (admin drill-down). */
   userMemories: (id: string) =>
     api<ApiMemory[]>(`/admin/users/${encodeURIComponent(id)}/memories`),

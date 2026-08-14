@@ -838,6 +838,7 @@ CREATE TABLE IF NOT EXISTS artifacts (
   storage_path TEXT NOT NULL,
   mime_type    TEXT NOT NULL DEFAULT 'application/octet-stream',
   size_bytes   INTEGER NOT NULL DEFAULT 0,
+  source       TEXT NOT NULL DEFAULT '',
   created_at   INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 );
 CREATE INDEX IF NOT EXISTS idx_artifacts_message ON artifacts(message_id);

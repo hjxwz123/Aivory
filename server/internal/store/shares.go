@@ -307,11 +307,11 @@ func GetSharedFile(ctx context.Context, db *sql.DB, id, convID string) (*File, e
 func GetSharedArtifact(ctx context.Context, db *sql.DB, id, convID string) (*Artifact, error) {
 	var a Artifact
 	err := db.QueryRowContext(ctx,
-		`SELECT a.id, a.message_id, a.filename, a.storage_path, a.mime_type, a.size_bytes, a.created_at
+		`SELECT a.id, a.message_id, a.filename, a.storage_path, a.mime_type, a.size_bytes, a.source, a.created_at
 		   FROM artifacts a
 		   JOIN messages m ON m.id=a.message_id
 		  WHERE a.id=? AND m.conversation_id=?`, id, convID,
-	).Scan(&a.ID, &a.MessageID, &a.Filename, &a.StoragePath, &a.MimeType, &a.SizeBytes, &a.CreatedAt)
+	).Scan(&a.ID, &a.MessageID, &a.Filename, &a.StoragePath, &a.MimeType, &a.SizeBytes, &a.Source, &a.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
