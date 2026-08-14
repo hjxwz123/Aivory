@@ -22,8 +22,7 @@ import { initRealtime } from '@/lib/realtime'
 
 const Landing = lazy(() => import('@/pages/Landing'))
 const ChatLayout = lazy(() => import('@/pages/chat/ChatLayout'))
-const ChatHome = lazy(() => import('@/pages/chat/ChatHome'))
-const ChatThread = lazy(() => import('@/pages/chat/ChatThread'))
+const ChatRoute = lazy(() => import('@/pages/chat/ChatRoute'))
 const ProjectsList = lazy(() => import('@/pages/projects/ProjectsList'))
 const ProjectDetail = lazy(() => import('@/pages/projects/ProjectDetail'))
 const KnowledgeBasesList = lazy(() => import('@/pages/kb/KnowledgeBasesList'))
@@ -230,12 +229,12 @@ export default function App() {
             <Route path="/share/:token" element={<SharedConversation />} />
             <Route path="/workspace/join/:token" element={<JoinWorkspace />} />
             <Route path="/" element={<ChatLayout />}>
-              <Route index element={<ChatHome />} />
-              <Route path="chat/:id" element={<ChatThread />} />
+              <Route index element={<ChatRoute page="home" />} />
+              <Route path="chat/:id" element={<ChatRoute page="thread" />} />
             </Route>
             <Route path="/chat" element={<ChatLayout />}>
-              <Route index element={<ChatHome />} />
-              <Route path=":id" element={<ChatThread />} />
+              <Route index element={<ChatRoute page="home" />} />
+              <Route path=":id" element={<ChatRoute page="thread" />} />
             </Route>
             <Route path="/projects" element={<ChatLayout />}>
               <Route index element={<ProjectsList />} />

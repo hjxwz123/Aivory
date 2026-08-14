@@ -357,6 +357,10 @@ interface ConversationStore {
      *  its id, then stream. Lets the home page navigate to the thread the moment
      *  the user hits send instead of waiting on the create round-trip. */
     createFirst?: boolean
+    /** Optional server conversation already reserved by the home composer for
+     *  attachment ownership. It is awaited only after the optimistic turn is
+     *  visible; undefined falls back to the normal create request. */
+    preparedConversation?: Promise<ApiConversation | undefined>
     /** Fires with the real conversation id once `createFirst` has created it, so
      *  the caller can swap the temp id in the URL (navigate replace). */
     onConversationId?: (realId: string) => void
@@ -715,6 +719,9 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
   },
 
   async loadOne(id, opts) {
+    if (optimisticConversationIds.has(id)) {
+      return get().conversations.find((conversation) => conversation.id === id)
+    }
     try {
       const kbSelectionGuard = captureKnowledgeBaseSelectionGuard(id)
       const hadStreaming = Boolean(
@@ -1090,6 +1097,7 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
   },
 
   async loadInlineThreads(sourceConvId) {
+    if (optimisticConversationIds.has(sourceConvId)) return
     try {
       const rows = await conversationsApi.inlineThreads(sourceConvId)
       const threads = rows.map(toLocalConversation)
@@ -1445,13 +1453,20 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
     // mutating input.conversationId. Done BEFORE the stream starts so the id is
     // stable for the whole SSE loop — no mid-stream re-key.
     if (input.createFirst) {
-      let created
+      let created: ApiConversation | undefined
+      let reusedPreparedConversation = false
       try {
-        created = await conversationsApi.create({
-          model_id: input.modelId || undefined,
-          workspace_id: activeWorkspaceId(),
-          fast: input.fast === true,
-        })
+        if (input.preparedConversation) {
+          created = await input.preparedConversation.catch(() => undefined)
+          reusedPreparedConversation = Boolean(created)
+        }
+        if (!created) {
+          created = await conversationsApi.create({
+            model_id: input.modelId || undefined,
+            workspace_id: activeWorkspaceId(),
+            fast: input.fast === true,
+          })
+        }
       } catch {
         // Create failed — settle the optimistic turn as an error (the SSE would
         // 404 against the temp id anyway) and stop. The user keeps their message
@@ -1490,6 +1505,10 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
                   messages: c.messages,
                   title: c.title || meta.title,
                   updatedAt: Math.max(c.updatedAt, meta.updatedAt),
+                  modelId: c.modelId || meta.modelId,
+                  fast: c.fast,
+                  kbIds: [...(c.kbIds ?? [])],
+                  lastParams: c.lastParams,
                 }
               : c,
           ),
@@ -1497,11 +1516,23 @@ export const useConversations = createWithEqualityFn<ConversationStore>((set, ge
       optimisticConversationIds.delete(tempId)
       moveStoppedPathBarrier(tempId, realId)
       input.conversationId = realId
-      if (latestKnowledgeBaseIds.length > 0) {
+      if (reusedPreparedConversation) {
+        // An attachment draft may have been reserved before the user changed
+        // model/mode. Keep its server metadata aligned with the picker while the
+        // first request itself continues to use the explicit turn snapshot.
+        if (input.fast === true && created.fast !== true) {
+          void get().setFast(realId, true)
+        } else if (input.fast !== true && input.modelId && (created.model_id !== input.modelId || created.fast === true)) {
+          void get().setModel(realId, input.modelId)
+        } else if (input.fast !== true && created.fast === true) {
+          void get().setFast(realId, false)
+        }
+      }
+      if (reusedPreparedConversation || latestKnowledgeBaseIds.length > 0) {
         // The create endpoint intentionally starts with no optional KBs. Persist
-        // the latest optimistic selection against the real id. The first turn
-        // still uses its already-captured snapshot, so a toggle after Send belongs
-        // to the next turn and neither operation targets the client-only temp id.
+        // the latest optimistic selection against the real id. A reused draft is
+        // updated even when the selection is empty so stale draft metadata cannot
+        // leak into this turn. The first turn still uses its captured snapshot.
         void get().setKBs(realId, latestKnowledgeBaseIds)
       }
       if (streamConversationIds.get(assistantId) === tempId) {

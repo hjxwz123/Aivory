@@ -1,4 +1,5 @@
 import { type PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from 'react'
+import { flushSync } from 'react-dom'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { gsap } from 'gsap'
@@ -27,6 +28,7 @@ import type { ApiConversation } from '@/api/types'
 import type { ToolMode } from '@/lib/tool-mode'
 import { resolveNewConversationFastMode } from '@/lib/chat-defaults'
 import { userCan } from '@/lib/user-permissions'
+import { enterOptimisticConversation } from '@/lib/optimistic-conversation-start'
 
 gsap.registerPlugin(useGSAP)
 
@@ -194,7 +196,6 @@ export default function ChatHome() {
   const { t } = useTranslation('chat')
   const beginOptimisticConversation = useConversations((s) => s.beginOptimisticConversation)
   const sendMessage = useConversations((s) => s.sendMessage)
-  const setModel = useConversations((s) => s.setModel)
   const defaultModelId = useModels((s) => s.defaultId)
   const imageModels = useModels((s) => s.imageModels)
   const user = useAuth((s) => s.user)
@@ -254,10 +255,11 @@ export default function ChatHome() {
   // Stash it here so the eventual send reuses the SAME conversation instead of
   // spawning a second empty one. Created OUTSIDE the store on purpose: the
   // draft stays off the sidebar (no "Untitled" row from merely attaching) and
-  // only enters the cache on send (adoptConversation). Its id is persisted so
-  // a refresh can reclaim the draft without exposing it in the sidebar.
+  // only enters the cache when the optimistic send adopts its server id. Its id
+  // is persisted so a refresh can reclaim the draft without exposing it in the
+  // sidebar.
   const pendingConvRef = useRef<ApiConversation | null>(null)
-  const pendingCreateRef = useRef<Promise<string | undefined> | null>(null)
+  const pendingCreateRef = useRef<Promise<ApiConversation | undefined> | null>(null)
   const pendingConsumedRef = useRef(false)
   // Set when the composer drains its last attachment while the lazy create is
   // still in flight — the create then discards its own conversation on landing
@@ -274,7 +276,6 @@ export default function ChatHome() {
   // Guards startNew against a double fire (rapid re-click, two suggestion cards)
   // spawning duplicate conversations + sends.
   const startedRef = useRef(false)
-  const adoptConversation = useConversations((s) => s.adoptConversation)
 
   useEffect(() => {
     mountedRef.current = true
@@ -302,10 +303,14 @@ export default function ChatHome() {
           if (!cancelled) setPendingConversationId(undefined)
           return undefined
         }
-        if (cancelled) return savedID
-        pendingConvRef.current = loaded.conversation
-        setPendingConversationId(savedID)
-        return savedID
+        // A send can claim this recovery promise before the request settles.
+        // Return the row to that background handoff without reinstalling the
+        // draft state or storage entry after the home route has gone away.
+        if (!cancelled && !pendingConsumedRef.current) {
+          pendingConvRef.current = loaded.conversation
+          setPendingConversationId(savedID)
+        }
+        return loaded.conversation
       } catch {
         clearPendingConversation(pendingStorageKey)
         if (!cancelled) setPendingConversationId(undefined)
@@ -345,15 +350,19 @@ export default function ChatHome() {
           // create is in flight. A mode/workspace switch also invalidates this
           // scope before any upload starts. So does removing every attachment
           // before the create lands (draft abandoned).
-          if (pendingConsumedRef.current || draftAbandonedRef.current || pendingStorageKeyRef.current !== storageKey) {
+          if (draftAbandonedRef.current || pendingStorageKeyRef.current !== storageKey) {
             void conversationsApi.remove(created.id).catch(() => {})
             return undefined
           }
+          // startNew claimed this in-flight reservation. Hand the row to the
+          // optimistic send, but do not recreate a pending-draft storage entry
+          // after navigation has already consumed it.
+          if (pendingConsumedRef.current) return created
           writePendingConversation(storageKey, created.id)
-          if (!mountedRef.current) return created.id
+          if (!mountedRef.current) return created
           pendingConvRef.current = created
           setPendingConversationId(created.id)
-          return created.id
+          return created
         } catch {
           return undefined
         }
@@ -363,7 +372,7 @@ export default function ChatHome() {
         if (pendingCreateRef.current === creation) pendingCreateRef.current = null
       })
     }
-    return pendingCreateRef.current
+    return pendingCreateRef.current.then((conversation) => conversation?.id)
   }
 
   // The composer removed its LAST attachment: the draft conversation existed
@@ -459,7 +468,7 @@ export default function ChatHome() {
     { scope: root },
   )
 
-  async function startNew(
+  function startNew(
     text: string,
     attachments: Attachment[],
     opts: {
@@ -476,32 +485,37 @@ export default function ChatHome() {
   ) {
     if (startedRef.current) return
     startedRef.current = true
-    if (!pendingConvRef.current && pendingCreateRef.current) {
-      await pendingCreateRef.current
-    }
-    // Mark any attachment draft as consumed so an overlapping lazy create does
-    // not install a second conversation.
-    pendingConsumedRef.current = true
 
-    // Attachment flow: the conversation was already created server-side on
-    // attach (so uploads were scoped/ingested). Adopt it into the store, then
-    // send. This path already navigates instantly (no create round-trip here).
+    // Claim the attachment/recovery reservation synchronously, but wait for it
+    // only inside sendMessage after the optimistic route is already visible.
+    // A resolved draft is reused so uploaded files keep their original owner;
+    // an invalid/failed reservation falls back to creating a fresh conversation.
     const pending = pendingConvRef.current
-    if (pending) {
-      pendingConvRef.current = null
-      setPendingConversationId(undefined)
-      clearPendingConversation(pendingStorageKey)
-      const conv = adoptConversation(pending)
-      // The picker is the source of truth: a conversation created earlier for an
-      // attachment may carry a stale model, so persist the picked one first.
-      // §fast-mode: skip this for a fast turn — setModel would clear conv.fast; the
-      // send's fast flag drives the (hidden) model server-side instead.
-      if (!opts.fast && modelId && conv.modelId !== modelId) void setModel(conv.id, modelId)
-      void useConversations.getState().setKBs(conv.id, selectedKnowledgeBaseIds)
-      clearComposerDraft(draftScope)
-      navigate(`/chat/${conv.id}`)
-      void sendMessage({
-        conversationId: conv.id,
+    const preparedConversation = pending
+      ? Promise.resolve(pending)
+      : pendingCreateRef.current ?? undefined
+    pendingConsumedRef.current = true
+    pendingConvRef.current = null
+    setPendingConversationId(undefined)
+    clearPendingConversation(pendingStorageKey)
+
+    enterOptimisticConversation({
+      createConversation: () =>
+        beginOptimisticConversation(
+          text,
+          modelId,
+          opts.fast === true,
+          selectedKnowledgeBaseIds,
+        ),
+      beforeNavigate: () => clearComposerDraft(draftScope),
+      // Commit the already-loaded thread before background conversation work
+      // starts. This is the one transition where a visible response in the same
+      // click matters more than React's normal event-batch deferral.
+      navigate: (tempId) => flushSync(() => navigate(`/chat/${tempId}`)),
+      startBackgroundWork: (tempId) => sendMessage({
+        conversationId: tempId,
+        createFirst: true,
+        preparedConversation,
         text,
         modelId,
         attachments,
@@ -514,47 +528,16 @@ export default function ChatHome() {
         selectedUserSkillIds: opts.selectedUserSkillIds,
         selectedToolIds: opts.selectedToolIds,
         fast: opts.fast,
-      })
-      return
-    }
-
-    // No attachment: navigate to the thread INSTANTLY on an optimistic (temp-id)
-    // conversation, and let sendMessage create the real one server-side, re-key
-    // the cache, and swap the id in the URL. So the user lands on the thread the
-    // moment they hit send — never staring at the home screen during the create
-    // round-trip (and never re-clicking because "nothing happened").
-    const tempId = beginOptimisticConversation(
-      text,
-      modelId,
-      opts.fast === true,
-      selectedKnowledgeBaseIds,
-    )
-    clearComposerDraft(draftScope)
-    navigate(`/chat/${tempId}`)
-    void sendMessage({
-      conversationId: tempId,
-      createFirst: true,
-      text,
-      modelId,
-      attachments,
-      mode: opts.mode,
-      params: opts.params,
-      imageStyleId: opts.imageStyleId,
-      verify: opts.verify,
-      toolMode: opts.toolMode,
-      webSearch: opts.webSearch,
-      selectedUserSkillIds: opts.selectedUserSkillIds,
-      selectedToolIds: opts.selectedToolIds,
-      fast: opts.fast,
-      // Swap temp→real id in the URL only if the user is STILL on the optimistic
-      // thread. If they navigated elsewhere during the create round-trip, leave
-      // them be — the stream still lands in the (re-keyed) real conversation,
-      // reachable from the sidebar; yanking them would be worse than a stale URL.
-      onConversationId: (realId) => {
-        if (window.location.pathname === `/chat/${tempId}`) {
-          navigate(`/chat/${realId}`, { replace: true })
-        }
-      },
+        // Swap temp→real id in the URL only if the user is STILL on the optimistic
+        // thread. If they navigated elsewhere during the create round-trip, leave
+        // them be — the stream still lands in the (re-keyed) real conversation,
+        // reachable from the sidebar; yanking them would be worse than a stale URL.
+        onConversationId: (realId) => {
+          if (window.location.pathname === `/chat/${tempId}`) {
+            navigate(`/chat/${realId}`, { replace: true })
+          }
+        },
+      }),
     })
   }
 

@@ -7,6 +7,7 @@ const apiMocks = vi.hoisted(() => ({
   get: vi.fn(),
   update: vi.fn(),
   stop: vi.fn(),
+  inlineThreads: vi.fn(),
   streamSSE: vi.fn(),
   streamSSEGet: vi.fn(),
   toastInfo: vi.fn(),
@@ -30,6 +31,7 @@ vi.mock('@/api', () => {
       get: apiMocks.get,
       update: apiMocks.update,
       stop: apiMocks.stop,
+      inlineThreads: apiMocks.inlineThreads,
     },
     streamSSE: apiMocks.streamSSE,
     streamSSEGet: apiMocks.streamSSEGet,
@@ -1479,5 +1481,95 @@ describe('knowledge-base selection ordering', () => {
     await loading
 
     expect(useConversations.getState().conversations[0].kbIds).toEqual(['kb_confirmed'])
+  })
+})
+
+describe('optimistic first-conversation preparation', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    useConversations.setState({
+      conversations: [],
+      loaded: true,
+      loading: false,
+      loadingMore: false,
+      hasMore: false,
+      error: null,
+    })
+    apiMocks.stop.mockResolvedValue({ ok: true })
+    apiMocks.inlineThreads.mockResolvedValue([])
+    apiMocks.streamSSE.mockReturnValue(events({ type: 'error', message: 'test complete' }))
+  })
+
+  it('shows the optimistic turn while an attachment-owned conversation is unresolved', async () => {
+    let resolvePrepared: ((conversation: ApiConversation) => void) | undefined
+    const preparedConversation = new Promise<ApiConversation>((resolve) => {
+      resolvePrepared = resolve
+    })
+    const prepared = {
+      ...apiConversation(''),
+      id: 'conv_attachment_draft',
+      active_leaf_id: '',
+    }
+    apiMocks.update.mockResolvedValue(prepared)
+
+    const tempId = useConversations
+      .getState()
+      .beginOptimisticConversation('read the attachment', 'model_1', false)
+    const sending = useConversations.getState().sendMessage({
+      conversationId: tempId,
+      createFirst: true,
+      preparedConversation,
+      text: 'read the attachment',
+      modelId: 'model_1',
+      toolMode: 'auto',
+      attachments: [
+        {
+          id: 'file_1',
+          name: 'paper.pdf',
+          kind: 'pdf',
+          size: 1024,
+          documentId: 'doc_1',
+        },
+      ],
+    })
+
+    expect(
+      useConversations
+        .getState()
+        .conversations.find((conversation) => conversation.id === tempId)
+        ?.messages.map((message) => message.role),
+    ).toEqual(['user', 'assistant'])
+    expect(apiMocks.create).not.toHaveBeenCalled()
+    expect(apiMocks.streamSSE).not.toHaveBeenCalled()
+
+    resolvePrepared?.(prepared)
+    await sending
+
+    expect(apiMocks.create).not.toHaveBeenCalled()
+    expect(apiMocks.streamSSE).toHaveBeenCalledWith(
+      '/conversations/conv_attachment_draft/messages',
+      expect.objectContaining({
+        attachments: [expect.objectContaining({ id: 'file_1', document_id: 'doc_1' })],
+      }),
+      expect.any(AbortSignal),
+    )
+    expect(
+      useConversations
+        .getState()
+        .conversations.some((conversation) => conversation.id === 'conv_attachment_draft'),
+    ).toBe(true)
+    expect(useConversations.getState().conversations.some((conversation) => conversation.id === tempId)).toBe(false)
+  })
+
+  it('does not fetch a client-only temporary route from the server', async () => {
+    const tempId = useConversations
+      .getState()
+      .beginOptimisticConversation('open immediately', 'model_1', false)
+
+    await useConversations.getState().loadOne(tempId)
+    await useConversations.getState().loadInlineThreads(tempId)
+
+    expect(apiMocks.get).not.toHaveBeenCalled()
+    expect(apiMocks.inlineThreads).not.toHaveBeenCalled()
   })
 })
