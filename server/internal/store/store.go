@@ -111,6 +111,7 @@ func Migrate(db *sql.DB) error {
 	addImageRef := `ALTER TABLE chunks ADD COLUMN image_ref TEXT`
 	addOfficialTools := `ALTER TABLE models ADD COLUMN official_tools TEXT NOT NULL DEFAULT '[]'`
 	addBuiltinTools := `ALTER TABLE models ADD COLUMN builtin_tools TEXT DEFAULT NULL`
+	addMCPServerIDs := `ALTER TABLE models ADD COLUMN mcp_server_ids TEXT DEFAULT NULL`
 	addGroupID := `ALTER TABLE users ADD COLUMN group_id TEXT NOT NULL DEFAULT 'ug_free'`
 	addTotpSecret := `ALTER TABLE users ADD COLUMN totp_secret TEXT NOT NULL DEFAULT ''`
 	addTotpEnabled := `ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0`
@@ -271,6 +272,7 @@ func Migrate(db *sql.DB) error {
 		addImageRef = `ALTER TABLE chunks ADD COLUMN IF NOT EXISTS image_ref TEXT`
 		addOfficialTools = `ALTER TABLE models ADD COLUMN IF NOT EXISTS official_tools TEXT NOT NULL DEFAULT '[]'`
 		addBuiltinTools = `ALTER TABLE models ADD COLUMN IF NOT EXISTS builtin_tools TEXT DEFAULT NULL`
+		addMCPServerIDs = `ALTER TABLE models ADD COLUMN IF NOT EXISTS mcp_server_ids TEXT DEFAULT NULL`
 		addGroupID = `ALTER TABLE users ADD COLUMN IF NOT EXISTS group_id TEXT NOT NULL DEFAULT 'ug_free'`
 		addTotpSecret = `ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_secret TEXT NOT NULL DEFAULT ''`
 		addTotpEnabled = `ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_enabled INTEGER NOT NULL DEFAULT 0`
@@ -384,7 +386,7 @@ func Migrate(db *sql.DB) error {
 	// duplicate-column error is expected and ignored; Postgres uses IF NOT
 	// EXISTS so it's a clean no-op.
 	for _, ddl := range []string{
-		addImageRef, addOfficialTools, addBuiltinTools, addGroupID, addTotpSecret, addTotpEnabled, addFeedback, addGenMs,
+		addImageRef, addOfficialTools, addBuiltinTools, addMCPServerIDs, addGroupID, addTotpSecret, addTotpEnabled, addFeedback, addGenMs,
 		addSessID, addSessUA, addSessIP, addSessLoc, addSessSeen,
 		addModEnabled, addModMode,
 		addResearchEnabled,
@@ -504,7 +506,7 @@ func Migrate(db *sql.DB) error {
 		"credit_reservations":             {"user_id", "amount_micros", "actual_micros", "source_type", "source_id", "status", "expires_at"},
 		"quota_ledger":                    {"user_id", "scope_type", "model_id", "group_id", "cycle_anchor", "window_start", "limit_type", "reserved_micros", "actual_micros", "status", "expires_at"},
 		"billing_usage":                   {"user_id", "message_id", "model_id", "purpose", "cost_micros", "images_count", "input_tokens", "output_tokens", "currency"},
-		"models":                          {"official_tools", "builtin_tools", "moderation_enabled", "moderation_mode", "tags", "extra_params", "image_timeout_sec", "research_enabled", "fallback_channel_id", "fast", "compaction_token_threshold"},
+		"models":                          {"official_tools", "builtin_tools", "mcp_server_ids", "moderation_enabled", "moderation_mode", "tags", "extra_params", "image_timeout_sec", "research_enabled", "fallback_channel_id", "fast", "compaction_token_threshold"},
 		"mcp_servers":                     {"id", "name", "icon", "description", "url", "headers", "enabled", "discovered_tools", "protocol_version", "last_error", "last_synced_at", "created_at", "updated_at"},
 		"refresh_tokens":                  {"session_id", "user_agent", "ip", "location", "last_seen"},
 		"conversations":                   {"inline_source_conv", "inline_parent_id", "inline_quote", "workspace_id", "is_public", "fast"},

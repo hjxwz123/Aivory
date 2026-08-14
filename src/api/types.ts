@@ -728,8 +728,13 @@ export interface ApiModel {
    * registered tools (including future additions) by default and `[]` for none;
    * public responses return defaults after global and group policy filtering. */
   builtin_tools?: string[] | null
+  /** MCP service defaults. Admin responses use `null`/omitted to select every
+   * currently available service (including future additions) by default and
+   * `[]` for none. Explicit arrays retain unavailable IDs so a temporary outage
+   * or global disable never silently rewrites the administrator's policy. */
+  mcp_server_ids?: string[] | null
   /** Unified public capability bit. True when the administrator configured at
-   * least one available local Function or provider-hosted tool. */
+   * least one available local Function, provider-hosted tool, or MCP service. */
   tools_available?: boolean
   /** Optional chat-model JSON object merged into the upstream provider request. */
   extra_params?: Record<string, unknown>

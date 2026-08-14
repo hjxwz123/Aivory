@@ -28,7 +28,7 @@ import {
   Trash2,
   Wrench,
 } from 'lucide-react'
-import { adminApi, ApiError } from '@/api'
+import { adminApi, ApiError, type ApiMCPServer } from '@/api'
 import type {
   ApiBuiltinTool,
   ApiChannel,
@@ -49,12 +49,21 @@ import { IconUploader } from '@/components/admin/icon-uploader'
 import { ParamControlsEditor } from '@/components/admin/param-controls-editor'
 import { ModelQuotaEditor } from '@/components/admin/model-quota-editor'
 import { AdminSortableList } from '@/components/admin/AdminSortableList'
+import { Badge } from '@/components/ui/badge'
+import { LucideGlyph } from '@/components/ui/lucide-icon'
 import { toast } from '@/hooks/use-toast'
 import {
   replaceVisibleBuiltinToolNames,
   resolveBuiltinToolNames,
   toggleBuiltinToolName,
 } from '@/lib/builtin-tools'
+import {
+  isSelectableMCPServer,
+  materializeModelMCPServerIDs,
+  replaceAvailableModelMCPServerIDs,
+  resolveModelMCPServerIDs,
+  toggleModelMCPServerID,
+} from '@/lib/model-mcp-tools'
 import { showsDedicatedImageControls } from '@/lib/admin-model-sections'
 import { cn } from '@/lib/utils'
 import { PanelFallback } from '@/components/ui/panel-fallback'
@@ -188,6 +197,9 @@ export default function AdminModelEdit() {
   const [builtinTools, setBuiltinTools] = useState<ApiBuiltinTool[]>([])
   const [builtinToolsLoading, setBuiltinToolsLoading] = useState(true)
   const [builtinToolsError, setBuiltinToolsError] = useState(false)
+  const [mcpServers, setMCPServers] = useState<ApiMCPServer[]>([])
+  const [mcpServersLoading, setMCPServersLoading] = useState(true)
+  const [mcpServersError, setMCPServersError] = useState(false)
   const [draft, setDraft] = useState<Draft | null>(null)
   const [loading, setLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
@@ -201,8 +213,10 @@ export default function AdminModelEdit() {
       setLoading(true)
       setBuiltinToolsLoading(true)
       setBuiltinToolsError(false)
+      setMCPServersLoading(true)
+      setMCPServersError(false)
       try {
-        const [c, m, tg, sk, bt] = await Promise.all([
+        const [c, m, tg, sk, bt, mcp] = await Promise.all([
           adminApi.channels(),
           adminApi.models(),
           adminApi.modelTags().catch(() => [] as ApiModelTag[]),
@@ -214,6 +228,10 @@ export default function AdminModelEdit() {
             .builtinTools()
             .then((tools) => ({ tools, failed: false }))
             .catch(() => ({ tools: [] as ApiBuiltinTool[], failed: true })),
+          adminApi
+            .mcpServers()
+            .then((servers) => ({ servers, failed: false }))
+            .catch(() => ({ servers: [] as ApiMCPServer[], failed: true })),
         ])
         if (cancelled) return
         setChannels(c)
@@ -221,6 +239,8 @@ export default function AdminModelEdit() {
         setAllSkills(sk)
         setBuiltinTools(bt.tools)
         setBuiltinToolsError(bt.failed)
+        setMCPServers(mcp.servers)
+        setMCPServersError(mcp.failed)
         const found = m.find((row) => row.id === id)
         if (!found) {
           setNotFound(true)
@@ -234,6 +254,7 @@ export default function AdminModelEdit() {
       } finally {
         if (!cancelled) {
           setBuiltinToolsLoading(false)
+          setMCPServersLoading(false)
           setLoading(false)
         }
       }
@@ -291,6 +312,21 @@ export default function AdminModelEdit() {
     }
   }
 
+  async function retryMCPServers() {
+    if (mcpServersLoading) return
+    setMCPServersLoading(true)
+    try {
+      const servers = await adminApi.mcpServers()
+      setMCPServers(servers)
+      setMCPServersError(false)
+    } catch (e) {
+      setMCPServersError(true)
+      toast.error(e instanceof ApiError ? e.message : t('admin:models.fields.mcpToolsLoadFailed'))
+    } finally {
+      setMCPServersLoading(false)
+    }
+  }
+
   const channel = channels.find((c) => c.id === draft?.channel_id)
   const extraParamsValidation = draft?.kind === 'chat' ? parseExtraParams(draft.extra_params_text) : null
   const extraParamsError =
@@ -317,6 +353,33 @@ export default function AdminModelEdit() {
   const selectedBuiltinToolNames = resolveBuiltinToolNames(draft?.builtin_tools, availableBuiltinToolNames)
   const selectedBuiltinToolSet = new Set(selectedBuiltinToolNames)
   const builtinToolsUseDefault = draft?.builtin_tools == null
+  const availableMCPServers = mcpServers.filter(isSelectableMCPServer)
+  const availableMCPServerIDs = availableMCPServers.map((server) => server.id)
+  const registeredMCPServerIDs = new Set(mcpServers.map((server) => server.id))
+  const selectedMCPServerIDs = resolveModelMCPServerIDs(draft?.mcp_server_ids, availableMCPServerIDs)
+  const selectedMCPServerSet = new Set(selectedMCPServerIDs)
+  const selectedAvailableMCPCount = availableMCPServerIDs.filter((serverID) => selectedMCPServerSet.has(serverID)).length
+  const missingMCPServerIDs = selectedMCPServerIDs.filter((serverID) => !registeredMCPServerIDs.has(serverID))
+  const displayedMCPServers: Array<ApiMCPServer & { missing?: boolean }> = [
+    ...mcpServers,
+    ...missingMCPServerIDs.map((serverID) => ({
+      id: serverID,
+      name: t('admin:models.fields.mcpToolsMissingName', {
+        id: serverID,
+        defaultValue: `Unavailable MCP service (${serverID})`,
+      }),
+      icon: 'Blocks',
+      description: t('admin:models.fields.mcpToolsMissingDescription', {
+        defaultValue: 'This saved service no longer exists. Remove it from the model defaults or restore the service.',
+      }),
+      url: '',
+      headers: {},
+      enabled: false,
+      discovered_tools: [],
+      missing: true,
+    })),
+  ]
+  const mcpToolsUseDefault = draft?.mcp_server_ids == null
 
   function replaceVisibleBuiltinTools(selectedNames: string[]) {
     setDraft((current) =>
@@ -328,6 +391,32 @@ export default function AdminModelEdit() {
               registeredBuiltinToolNames,
               availableBuiltinToolNames,
               selectedNames,
+            ),
+          }
+        : current,
+    )
+  }
+
+  function toggleMCPServer(serverID: string) {
+    setDraft((current) =>
+      current
+        ? {
+            ...current,
+            mcp_server_ids: toggleModelMCPServerID(current.mcp_server_ids, availableMCPServerIDs, serverID),
+          }
+        : current,
+    )
+  }
+
+  function replaceAvailableMCPServers(selectedIDs: string[]) {
+    setDraft((current) =>
+      current
+        ? {
+            ...current,
+            mcp_server_ids: replaceAvailableModelMCPServerIDs(
+              current.mcp_server_ids,
+              availableMCPServerIDs,
+              selectedIDs,
             ),
           }
         : current,
@@ -390,6 +479,7 @@ export default function AdminModelEdit() {
         official_tools_dirty: officialToolsDirty,
         official_tools: _omitOfficialTools,
         builtin_tools: builtinToolsConfig,
+        mcp_server_ids: mcpServerIDsConfig,
         skills: skillIds,
         ...rest
       } = draft
@@ -405,7 +495,10 @@ export default function AdminModelEdit() {
         // clear an earlier chat-model value instead of merely omitting the key.
         extra_params: parsedExtraParams?.valid ? parsedExtraParams.value : {},
       }
-      if (draft.kind === 'chat') payload.builtin_tools = builtinToolsConfig ?? null
+      if (draft.kind === 'chat') {
+        payload.builtin_tools = builtinToolsConfig ?? null
+        payload.mcp_server_ids = mcpServerIDsConfig ?? null
+      }
       if (officialToolsDirty) payload.official_tools = officialTools
       const updated = await adminApi.updateModel(id, payload)
       if (draft.kind === 'chat') {
@@ -896,6 +989,211 @@ export default function AdminModelEdit() {
                                   className={cn(
                                     'mt-0.5 shrink-0',
                                     builtinToolsUseDefault
+                                      ? 'text-[var(--color-fg-subtle)]'
+                                      : 'text-[var(--color-secondary)]',
+                                  )}
+                                />
+                              ) : null}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </Field>
+                <Field
+                  label={t('admin:models.fields.mcpToolsLabel', { defaultValue: 'MCP tools' })}
+                  hint={t('admin:models.fields.mcpToolsHint', {
+                    defaultValue:
+                      'Choose the MCP services selected by default for this model. Users may adjust them in chat; only enabled services with synchronized tools can run.',
+                  })}
+                  className="min-w-0 sm:col-span-2"
+                >
+                  <div className="overflow-hidden rounded-[10px] border border-[var(--color-border)] bg-[var(--color-bg-muted)]">
+                    <div className="flex flex-col gap-2 border-b border-[var(--color-divider)] px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="inline-flex w-fit items-center gap-1 rounded-[9px] border border-[var(--color-border-subtle)] bg-[var(--color-surface)] p-0.5">
+                        <button
+                          type="button"
+                          aria-pressed={mcpToolsUseDefault}
+                          onClick={() => patch({ mcp_server_ids: null })}
+                          className={cn(
+                            'h-7 rounded-[7px] px-2.5 text-[12px] font-medium interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+                            mcpToolsUseDefault
+                              ? 'bg-[var(--color-fg)] text-[var(--color-fg-inverted)]'
+                              : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]',
+                          )}
+                        >
+                          {t('admin:models.fields.mcpToolsDefaultAll', { defaultValue: 'Default all' })}
+                        </button>
+                        <button
+                          type="button"
+                          aria-pressed={!mcpToolsUseDefault}
+                          disabled={mcpServersLoading || mcpServersError}
+                          onClick={() => patch({
+                            mcp_server_ids: materializeModelMCPServerIDs(
+                              draft.mcp_server_ids,
+                              availableMCPServerIDs,
+                            ),
+                          })}
+                          className={cn(
+                            'h-7 rounded-[7px] px-2.5 text-[12px] font-medium interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+                            mcpServersLoading || mcpServersError
+                              ? 'cursor-not-allowed opacity-40'
+                              : !mcpToolsUseDefault
+                                ? 'bg-[var(--color-fg)] text-[var(--color-fg-inverted)]'
+                                : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]',
+                          )}
+                        >
+                          {t('admin:models.fields.mcpToolsCustom', { defaultValue: 'Custom' })}
+                        </button>
+                      </div>
+                      <div className="flex min-w-0 items-center gap-1.5">
+                        <span className="mr-auto truncate text-[11.5px] tabular-nums text-[var(--color-fg-subtle)] sm:mr-1">
+                          {t('admin:models.fields.mcpToolsSelected', {
+                            selected: selectedAvailableMCPCount,
+                            total: availableMCPServers.length,
+                            defaultValue: '{{selected}}/{{total}} available selected',
+                          })}
+                        </span>
+                        {!mcpToolsUseDefault ? (
+                          <>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              disabled={mcpServersLoading || mcpServersError}
+                              onClick={() => replaceAvailableMCPServers(availableMCPServerIDs)}
+                            >
+                              {t('admin:models.fields.mcpToolsSelectAll', { defaultValue: 'Select all' })}
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              disabled={mcpServersLoading || mcpServersError}
+                              onClick={() => patch({ mcp_server_ids: [] })}
+                            >
+                              {t('admin:models.fields.mcpToolsClear', { defaultValue: 'Clear' })}
+                            </Button>
+                          </>
+                        ) : null}
+                      </div>
+                    </div>
+                    {mcpServersError ? (
+                      <div
+                        className="flex flex-col items-start gap-2 px-3 py-4 sm:flex-row sm:items-center sm:justify-between"
+                        role="alert"
+                      >
+                        <p className="text-sm text-[var(--color-danger)]">
+                          {t('admin:models.fields.mcpToolsLoadFailed', {
+                            defaultValue: 'Could not load MCP services. The saved policy has not been changed.',
+                          })}
+                        </p>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          loading={mcpServersLoading}
+                          onClick={() => void retryMCPServers()}
+                        >
+                          {t('common:actions.tryAgain', { defaultValue: 'Try again' })}
+                        </Button>
+                      </div>
+                    ) : mcpServersLoading ? (
+                      <div className="grid grid-cols-1 gap-1 p-1 md:grid-cols-2" role="status" aria-label={t('common:common.loading')}>
+                        {[0, 1].map((item) => (
+                          <div key={item} className="flex items-center gap-2.5 rounded-[8px] px-2.5 py-2">
+                            <span className="size-8 shrink-0 animate-pulse rounded-[8px] bg-[var(--color-surface)]" />
+                            <span className="min-w-0 flex-1">
+                              <span className="block h-3 w-2/5 animate-pulse rounded bg-[var(--color-surface)]" />
+                              <span className="mt-1.5 block h-2.5 w-4/5 animate-pulse rounded bg-[var(--color-surface)]" />
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : displayedMCPServers.length === 0 ? (
+                      <div className="flex flex-col items-start gap-2 px-3 py-4 sm:flex-row sm:items-center sm:justify-between">
+                        <p className="text-sm text-[var(--color-fg-muted)]">
+                          {t('admin:models.fields.mcpToolsEmpty', {
+                            defaultValue: 'No MCP services are configured. Add and synchronize one before selecting it here.',
+                          })}
+                        </p>
+                        <Button type="button" variant="secondary" size="sm" onClick={() => navigate('/admin/mcp')}>
+                          {t('admin:models.fields.mcpToolsManage', { defaultValue: 'Manage MCP' })}
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 gap-0.5 p-1 md:grid-cols-2">
+                        {displayedMCPServers.map((server) => {
+                          const checked = selectedMCPServerSet.has(server.id)
+                          const selectable = isSelectableMCPServer(server)
+                          const canToggle = !mcpToolsUseDefault && (selectable || checked)
+                          const hasSnapshot = (server.discovered_tools?.length ?? 0) > 0
+                          return (
+                            <button
+                              key={server.id}
+                              type="button"
+                              role="checkbox"
+                              aria-checked={checked}
+                              aria-disabled={!canToggle}
+                              disabled={!canToggle}
+                              onClick={() => toggleMCPServer(server.id)}
+                              className={cn(
+                                'flex min-w-0 items-start gap-2.5 rounded-[8px] px-2.5 py-2 text-left',
+                                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]',
+                                canToggle ? 'interactive' : 'cursor-default',
+                                checked
+                                  ? mcpToolsUseDefault
+                                    ? 'bg-[var(--color-surface)]/70'
+                                    : 'bg-[var(--color-secondary-soft)]'
+                                  : canToggle
+                                    ? 'hover:bg-[var(--color-surface)]'
+                                    : 'opacity-65',
+                              )}
+                            >
+                              <span className="grid size-8 shrink-0 place-items-center rounded-[8px] bg-[var(--color-surface)] text-[var(--color-fg-muted)]">
+                                <LucideGlyph name={server.icon || 'Blocks'} size={15} aria-hidden />
+                              </span>
+                              <span className="min-w-0 flex-1">
+                                <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+                                  <span
+                                    className={cn(
+                                      'min-w-0 truncate text-[12.5px] font-medium',
+                                      checked ? 'text-[var(--color-fg)]' : 'text-[var(--color-fg-muted)]',
+                                    )}
+                                    title={server.name}
+                                  >
+                                    {server.name}
+                                  </span>
+                                  {server.missing ? (
+                                    <Badge size="xs" variant="danger">
+                                      {t('admin:models.fields.mcpToolsMissing', { defaultValue: 'Missing' })}
+                                    </Badge>
+                                  ) : !server.enabled ? (
+                                    <Badge size="xs" variant="neutral">
+                                      {t('admin:models.fields.mcpToolsDisabled', { defaultValue: 'Disabled' })}
+                                    </Badge>
+                                  ) : !hasSnapshot ? (
+                                    <Badge size="xs" variant="warning">
+                                      {t('admin:models.fields.mcpToolsNotReady', { defaultValue: 'Not synchronized' })}
+                                    </Badge>
+                                  ) : server.last_error ? (
+                                    <Badge size="xs" variant="warning" title={server.last_error}>
+                                      {t('admin:models.fields.mcpToolsSavedSnapshot', { defaultValue: 'Saved snapshot' })}
+                                    </Badge>
+                                  ) : null}
+                                </span>
+                                <span className="mt-0.5 block line-clamp-2 text-[11px] leading-snug text-[var(--color-fg-subtle)]">
+                                  {server.description}
+                                </span>
+                              </span>
+                              {checked ? (
+                                <Check
+                                  size={14}
+                                  aria-hidden
+                                  className={cn(
+                                    'mt-0.5 shrink-0',
+                                    mcpToolsUseDefault
                                       ? 'text-[var(--color-fg-subtle)]'
                                       : 'text-[var(--color-secondary)]',
                                   )}

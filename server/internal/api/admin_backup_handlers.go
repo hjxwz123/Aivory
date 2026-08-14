@@ -2310,7 +2310,7 @@ func normalizeLegacyUserGroupPriceArchiveRows(r io.Reader) (io.Reader, error) {
 }
 
 // normalizeModelOfficialToolsArchiveRows upgrades legacy hosted-tool arrays and
-// validates/canonicalizes the nullable built-in-tool policy before either
+// validates/canonicalizes nullable local and MCP default policies before either
 // importer writes model rows. The historical function name is retained to keep
 // this compatibility path stable.
 func normalizeModelOfficialToolsArchiveRows(r io.Reader) (io.Reader, error) {
@@ -2357,6 +2357,25 @@ func normalizeModelOfficialToolsArchiveRows(r io.Reader) (io.Reader, error) {
 					return nil, fmt.Errorf("encode models.builtin_tools: %w", err)
 				}
 				row["builtin_tools"] = cell
+			}
+		}
+		mcpRaw, mcpPresent, mcpNull, err := backupNullableStringField(row, "mcp_server_ids")
+		if err != nil {
+			return nil, fmt.Errorf("invalid models.mcp_server_ids: %w", err)
+		}
+		if mcpPresent && !mcpNull {
+			normalized, err := store.NormalizeMCPServerIDs(json.RawMessage(mcpRaw))
+			if err != nil {
+				return nil, fmt.Errorf("invalid models.mcp_server_ids: %w", err)
+			}
+			if normalized == nil {
+				row["mcp_server_ids"] = json.RawMessage("null")
+			} else {
+				cell, err := json.Marshal(string(normalized))
+				if err != nil {
+					return nil, fmt.Errorf("encode models.mcp_server_ids: %w", err)
+				}
+				row["mcp_server_ids"] = cell
 			}
 		}
 		billing := store.Model{Currency: "USD"}
@@ -2786,6 +2805,9 @@ func validateConfigArchiveLockedEmbeddingModelRow(zr *zip.Reader, d Deps) error 
 		if err := validateConfigArchiveModelBuiltinTools(row); err != nil {
 			return err
 		}
+		if err := validateConfigArchiveModelMCPServerIDs(row); err != nil {
+			return err
+		}
 		if err := ensureLockedEmbeddingModelArchiveRowCanChange(d, row); err != nil {
 			return err
 		}
@@ -2820,9 +2842,21 @@ func validateConfigArchiveModelBuiltinTools(row map[string]json.RawMessage) erro
 	return err
 }
 
+func validateConfigArchiveModelMCPServerIDs(row map[string]json.RawMessage) error {
+	raw, present, isNull, err := backupNullableStringField(row, "mcp_server_ids")
+	if err != nil {
+		return fmt.Errorf("invalid models.mcp_server_ids: %w", err)
+	}
+	if !present || isNull {
+		return nil
+	}
+	_, err = store.NormalizeMCPServerIDs(json.RawMessage(raw))
+	return err
+}
+
 // backupNullableStringField reads an exported nullable TEXT cell. It differs
 // from backupStringField because JSON null is a meaningful default-all policy
-// for models.builtin_tools rather than malformed input.
+// for nullable model tool defaults rather than malformed input.
 func backupNullableStringField(row map[string]json.RawMessage, key string) (value string, present, isNull bool, err error) {
 	raw, ok := row[key]
 	if !ok {

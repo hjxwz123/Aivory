@@ -89,6 +89,13 @@ func listSelectableToolsHandler(d Deps, w http.ResponseWriter, r *http.Request) 
 	for _, name := range effectivePublicBuiltinTools(*model, registered, disabled) {
 		defaultBuiltinTools[name] = true
 	}
+	defaultMCPServerIDs := map[string]bool{}
+	configuredMCPServerIDs, mcpDefaultsConfigured, mcpDefaultsErr := store.ParseMCPServerIDs(model.MCPServerIDs)
+	if mcpDefaultsErr == nil {
+		for _, id := range configuredMCPServerIDs {
+			defaultMCPServerIDs[id] = true
+		}
+	}
 	for _, name := range registered {
 		if disabled[name] {
 			continue
@@ -141,7 +148,8 @@ func listSelectableToolsHandler(d Deps, w http.ResponseWriter, r *http.Request) 
 		items = append(items, selectableToolResponse{
 			ID: id, Name: definition.DisplayName,
 			Description: definition.DisplayDescription, Icon: definition.Icon,
-			Allowed: toolPolicyAllowsID(permissions, id), DefaultSelected: true,
+			Allowed:         toolPolicyAllowsID(permissions, id),
+			DefaultSelected: mcpDefaultsErr == nil && (!mcpDefaultsConfigured || defaultMCPServerIDs[definition.ServerID]),
 		})
 	}
 

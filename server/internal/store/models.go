@@ -176,6 +176,10 @@ type Model struct {
 	// nil/null selects all registered tools; an explicit [] selects none. Global
 	// and group policy still cap availability when chat orchestration consumes it.
 	BuiltinTools json.RawMessage `json:"builtin_tools"`
+	// MCPServerIDs controls which administrator-managed MCP services are selected
+	// by default. nil/null selects every currently eligible service; [] selects
+	// none. Stored ids survive temporary disable/removal from the live catalog.
+	MCPServerIDs json.RawMessage `json:"mcp_server_ids"`
 	// Tags is a JSON array of model_tags ids assigned to this model — used by the
 	// model picker's tag filter (§ model tags). Empty = untagged.
 	Tags json.RawMessage `json:"tags"`
