@@ -47,6 +47,7 @@ import { userCan } from '@/lib/user-permissions'
 import { Switch } from '@/components/ui/switch'
 import { subscribeAccessInvalidation } from '@/lib/access-events'
 import { knowledgeBaseErrorText, knowledgeBaseOperationErrorText } from '@/lib/knowledge-base-errors'
+import { normalizeExactUserEmailQuery } from '@/lib/user-email-search'
 
 const kbDocStatusPollInterval = envNum('VITE_AIVORY_KB_DOC_STATUS_POLL_INTERVAL', 2200)
 
@@ -971,6 +972,7 @@ function KnowledgeBaseShareDialog({
   const operationEpochRef = useRef(0)
   const openRef = useRef(open)
   openRef.current = open
+  const normalizedEmailQuery = normalizeExactUserEmailQuery(query)
 
   // Sharing can be changed from another tab or by a workspace/account
   // permission update. Keep an open dialog authoritative instead of leaving
@@ -993,6 +995,13 @@ function KnowledgeBaseShareDialog({
     operationEpochRef.current += 1
     busyIDRef.current = null
     setBusyID(null)
+    if (!open) {
+      searchEpochRef.current += 1
+      setQuery('')
+      setCandidates([])
+      setCandidatesLoading(false)
+      setCandidatesLoadFailed(false)
+    }
   }, [kb.id, open])
 
   useEffect(() => {
@@ -1016,13 +1025,19 @@ function KnowledgeBaseShareDialog({
   }, [kb.id, onOperationError, open, sharesLoadAttempt, t])
 
   useEffect(() => {
-    if (!open) return
+    if (!open || !normalizedEmailQuery) {
+      searchEpochRef.current += 1
+      setCandidates([])
+      setCandidatesLoading(false)
+      setCandidatesLoadFailed(false)
+      return
+    }
     const epoch = ++searchEpochRef.current
     setCandidatesLoading(true)
     setCandidatesLoadFailed(false)
     setCandidates([])
     const handle = window.setTimeout(() => {
-      void kbsApi.shareCandidates(kb.id, query).then((rows) => {
+      void kbsApi.shareCandidates(kb.id, normalizedEmailQuery).then((rows) => {
         if (epoch === searchEpochRef.current) setCandidates(rows)
       }).catch((error) => {
         if (epoch !== searchEpochRef.current) return
@@ -1037,24 +1052,15 @@ function KnowledgeBaseShareDialog({
       window.clearTimeout(handle)
       if (searchEpochRef.current === epoch) searchEpochRef.current = epoch + 1
     }
-  }, [candidatesLoadAttempt, kb.id, onOperationError, open, query, t])
+  }, [candidatesLoadAttempt, kb.id, normalizedEmailQuery, onOperationError, open, t])
 
-  const rows = useMemo(() => {
-    const normalizedQuery = query.trim().toLocaleLowerCase()
-    const matchesQuery = (row: ApiKnowledgeBaseShare) =>
-      !normalizedQuery ||
-      row.name.toLocaleLowerCase().includes(normalizedQuery) ||
-      row.email.toLocaleLowerCase().includes(normalizedQuery)
+  const candidateRows = useMemo(() => {
     const sharesByID = new Map(shares.map((share) => [share.user_id, share]))
-    const byID = new Map<string, ApiKnowledgeBaseShare>()
-    for (const row of shares) {
-      if (matchesQuery(row)) byID.set(row.user_id, row)
-    }
-    for (const row of candidates) {
-      byID.set(row.user_id, { ...row, role: sharesByID.get(row.user_id)?.role ?? row.role })
-    }
-    return [...byID.values()]
-  }, [candidates, query, shares])
+    return candidates.map((candidate) => ({
+      ...candidate,
+      role: sharesByID.get(candidate.user_id)?.role ?? candidate.role,
+    }))
+  }, [candidates, shares])
 
   async function setRole(row: ApiKnowledgeBaseShare, role: 'read' | 'write') {
     if (busyIDRef.current) return
@@ -1063,7 +1069,7 @@ function KnowledgeBaseShareDialog({
     busyIDRef.current = row.user_id
     setBusyID(row.user_id)
     try {
-      const updated = await kbsApi.upsertShare(kbID, { user_id: row.user_id, role })
+      const updated = await kbsApi.upsertShare(kbID, { email: row.email, role })
       if (!openRef.current || kb.id !== kbID || operationEpochRef.current !== epoch) return
       setShares((current) => [...current.filter((share) => share.user_id !== row.user_id), updated])
       setCandidates((current) => current.map((candidate) => candidate.user_id === row.user_id ? { ...candidate, role } : candidate))
@@ -1100,6 +1106,20 @@ function KnowledgeBaseShareDialog({
     }
   }
 
+  const changeQuery = (value: string) => {
+    const nextEmail = normalizeExactUserEmailQuery(value)
+    if (nextEmail !== normalizedEmailQuery) {
+      // Hide a previous exact match in the same input event. The epoch guard
+      // also prevents its in-flight response from resurfacing after the user
+      // has moved on to another address.
+      searchEpochRef.current += 1
+      setCandidates([])
+      setCandidatesLoadFailed(false)
+      setCandidatesLoading(Boolean(open && nextEmail))
+    }
+    setQuery(value)
+  }
+
   const changeOpen = (next: boolean) => {
     if (!next && busyIDRef.current) return
     onOpenChange(next)
@@ -1114,33 +1134,89 @@ function KnowledgeBaseShareDialog({
       >
         <DialogHeader>
           <DialogTitle>{t('kb:share.title', { defaultValue: 'Share knowledge base' })}</DialogTitle>
-          <DialogDescription>{t('kb:share.description', { defaultValue: 'Give people read-only access or allow them to upload and manage their own files.' })}</DialogDescription>
+          <DialogDescription>{t('kb:share.description', { defaultValue: "Enter someone's full email address, then give them read-only or upload access." })}</DialogDescription>
         </DialogHeader>
         <DialogBody className="min-h-0">
           <div className="relative mb-3">
             <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-fg-faint)]" aria-hidden />
             <Input
+              type="email"
+              inputMode="email"
+              autoComplete="off"
+              autoCapitalize="none"
+              spellCheck={false}
+              maxLength={320}
               value={query}
-              onChange={(event) => setQuery(event.target.value)}
+              onChange={(event) => changeQuery(event.target.value)}
               className="pl-9"
-              placeholder={t('kb:share.search', { defaultValue: 'Search people' })}
-              aria-label={t('kb:share.search', { defaultValue: 'Search people' })}
+              placeholder={t('kb:share.search', { defaultValue: 'Full email address' })}
+              aria-label={t('kb:share.search', { defaultValue: 'Full email address' })}
             />
           </div>
-          {candidatesLoadFailed && shares.length > 0 ? (
-            <div
-              role="alert"
-              className="mb-3 flex flex-col items-start gap-2 rounded-[8px] bg-[var(--color-bg-muted)] px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between"
-            >
-              <p className="text-[12px] text-[var(--color-fg-muted)]">
-                {t('kb:share.searchFailed', { defaultValue: 'Could not search for people.' })}
+          <div aria-live="polite" className="mb-4 min-h-16 rounded-[8px] bg-[var(--color-bg-muted)] px-3 py-2.5">
+            {!query.trim() ? (
+              <p className="flex min-h-11 items-center text-[12px] leading-relaxed text-[var(--color-fg-muted)]">
+                {t('kb:share.searchHint', { defaultValue: 'Enter the complete email address before searching.' })}
               </p>
-              <Button size="xs" variant="secondary" onClick={() => setCandidatesLoadAttempt((attempt) => attempt + 1)}>
-                {t('common:actions.tryAgain')}
-              </Button>
-            </div>
-          ) : null}
-          <div className="max-h-[min(25rem,55dvh)] overflow-y-auto border-y border-[var(--color-divider)] scrollbar-thin">
+            ) : !normalizedEmailQuery ? (
+              <p className="flex min-h-11 items-center text-[12px] leading-relaxed text-[var(--color-fg-muted)]">
+                {t('kb:share.incompleteEmail', { defaultValue: 'Enter a complete email address.' })}
+              </p>
+            ) : candidatesLoading ? (
+              <Skeleton className="h-11 w-full" />
+            ) : candidatesLoadFailed ? (
+              <div role="alert" className="flex min-h-11 flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-[12px] text-[var(--color-fg-muted)]">
+                  {t('kb:share.searchFailed', { defaultValue: 'Could not search for that email.' })}
+                </p>
+                <Button size="xs" variant="secondary" onClick={() => setCandidatesLoadAttempt((attempt) => attempt + 1)}>
+                  {t('common:actions.tryAgain')}
+                </Button>
+              </div>
+            ) : candidateRows.length === 0 ? (
+              <p className="flex min-h-11 items-center text-[12px] leading-relaxed text-[var(--color-fg-muted)]">
+                {t('kb:share.empty', { defaultValue: 'No user was found for that email.' })}
+              </p>
+            ) : candidateRows.map((row) => {
+              const shared = row.role === 'read' || row.role === 'write'
+              return (
+                <div key={row.user_id} className="grid min-h-11 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3">
+                  <Avatar size="sm">
+                    {row.avatar_url ? <AvatarImage src={row.avatar_url} alt={row.name || row.email} /> : null}
+                    <AvatarFallback>{initials(row.name || row.email)}</AvatarFallback>
+                  </Avatar>
+                  <div className="min-w-0">
+                    <div className="truncate text-[13px] font-medium text-[var(--color-fg)]">{row.name || row.email}</div>
+                    <div className="truncate text-[11.5px] text-[var(--color-fg-subtle)]">{row.email}</div>
+                  </div>
+                  {shared ? (
+                    <Badge variant="neutral">{t('kb:share.alreadyShared', { defaultValue: 'Already shared' })}</Badge>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      leadingIcon={<UserPlus size={13} aria-hidden />}
+                      loading={busyID === row.user_id}
+                      disabled={busyID !== null}
+                      onClick={() => void setRole(row, 'read')}
+                    >
+                      {t('kb:share.add', { defaultValue: 'Share' })}
+                    </Button>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <h3 className="text-[12px] font-medium text-[var(--color-fg)]">
+              {t('kb:share.current', { defaultValue: 'People with access' })}
+            </h3>
+            {!sharesLoading && !sharesLoadFailed ? (
+              <span className="text-[11px] tabular-nums text-[var(--color-fg-subtle)]">{shares.length}</span>
+            ) : null}
+          </div>
+          <div className="max-h-[min(20rem,42dvh)] overflow-y-auto border-y border-[var(--color-divider)] scrollbar-thin">
             {sharesLoading ? (
               <div className="space-y-2 py-3">{[0, 1, 2].map((row) => <Skeleton key={row} className="h-12 w-full" />)}</div>
             ) : sharesLoadFailed ? (
@@ -1152,21 +1228,11 @@ function KnowledgeBaseShareDialog({
                   {t('common:actions.tryAgain')}
                 </Button>
               </div>
-            ) : candidatesLoading && shares.length === 0 ? (
-              <div className="space-y-2 py-3">{[0, 1, 2].map((row) => <Skeleton key={row} className="h-12 w-full" />)}</div>
-            ) : candidatesLoadFailed && shares.length === 0 ? (
-              <div role="alert" className="flex min-h-40 flex-col items-center justify-center gap-3 px-4 py-8 text-center">
-                <p className="text-sm text-[var(--color-fg-muted)]">
-                  {t('kb:share.searchFailed', { defaultValue: 'Could not search for people.' })}
-                </p>
-                <Button size="sm" variant="secondary" onClick={() => setCandidatesLoadAttempt((attempt) => attempt + 1)}>
-                  {t('common:actions.tryAgain')}
-                </Button>
+            ) : shares.length === 0 ? (
+              <div className="py-10 text-center text-sm text-[var(--color-fg-muted)]">
+                {t('kb:share.currentEmpty', { defaultValue: 'This knowledge base has not been shared with anyone yet.' })}
               </div>
-            ) : rows.length === 0 ? (
-              <div className="py-10 text-center text-sm text-[var(--color-fg-muted)]">{t('kb:share.empty', { defaultValue: 'No matching people.' })}</div>
-            ) : rows.map((row) => {
-              const shared = shares.some((share) => share.user_id === row.user_id)
+            ) : shares.map((row) => {
               return (
                 <div key={row.user_id} className="grid min-h-16 grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-2 px-1 py-2.5 sm:grid-cols-[auto_minmax(0,1fr)_auto]">
                   <Avatar size="sm">
@@ -1178,24 +1244,23 @@ function KnowledgeBaseShareDialog({
                     <div className="truncate text-[11.5px] text-[var(--color-fg-subtle)]">{row.email}</div>
                   </div>
                   <div className="col-span-2 flex min-w-0 items-center justify-end gap-1 sm:col-span-1">
-                    {shared ? (
-                      <Select value={row.role} onValueChange={(value) => void setRole(row, value as 'read' | 'write')} disabled={busyID !== null}>
-                        <SelectTrigger className="h-8 w-32 px-2.5 text-xs"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="read">{t('kb:access.read', { defaultValue: 'Read only' })}</SelectItem>
-                          <SelectItem value="write">{t('kb:access.write', { defaultValue: 'Can upload' })}</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    ) : (
-                      <Button size="sm" variant="secondary" leadingIcon={<UserPlus size={13} aria-hidden />} disabled={busyID !== null} onClick={() => void setRole(row, 'read')}>
-                        {t('kb:share.add', { defaultValue: 'Share' })}
-                      </Button>
-                    )}
-                    {shared ? (
-                      <Button size="icon" variant="ghost" aria-label={t('kb:share.remove', { defaultValue: 'Remove access' })} disabled={busyID !== null} onClick={() => void removeShare(row)}>
-                        <UserMinus size={14} aria-hidden />
-                      </Button>
-                    ) : null}
+                    <Select value={row.role} onValueChange={(value) => void setRole(row, value as 'read' | 'write')} disabled={busyID !== null}>
+                      <SelectTrigger className="h-8 w-32 px-2.5 text-xs"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="read">{t('kb:access.read', { defaultValue: 'Read only' })}</SelectItem>
+                        <SelectItem value="write">{t('kb:access.write', { defaultValue: 'Can upload' })}</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      aria-label={t('kb:share.remove', { defaultValue: 'Remove access' })}
+                      loading={busyID === row.user_id}
+                      disabled={busyID !== null}
+                      onClick={() => void removeShare(row)}
+                    >
+                      {busyID === row.user_id ? null : <UserMinus size={14} aria-hidden />}
+                    </Button>
                   </div>
                 </div>
               )

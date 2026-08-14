@@ -334,7 +334,7 @@ func TestPersonalKnowledgeBaseWriteRevocationBlocksEveryMutation(t *testing.T) {
 			name: "write share downgraded to read",
 			changeRole: func(t *testing.T, db *sql.DB) {
 				t.Helper()
-				if _, err := UpsertKnowledgeBaseShare(context.Background(), db, "personal-kb", "creator", "outsider", "read"); err != nil {
+				if _, err := UpsertKnowledgeBaseShare(context.Background(), db, "personal-kb", "creator", "outsider@example.test", "read"); err != nil {
 					t.Fatalf("downgrade write share: %v", err)
 				}
 			},
@@ -449,7 +449,7 @@ func TestWorkspaceKnowledgeBaseCreatorKeepsManagementCapabilities(t *testing.T) 
 func TestWorkspaceKnowledgeBaseCannotUsePersonalSharing(t *testing.T) {
 	db := openKBPermissionTestDB(t)
 	ctx := context.Background()
-	if _, err := UpsertKnowledgeBaseShare(ctx, db, "workspace-kb", "creator", "outsider", "read"); !errors.Is(err, ErrNotFound) {
+	if _, err := UpsertKnowledgeBaseShare(ctx, db, "workspace-kb", "creator", "outsider@example.test", "read"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("workspace share error=%v, want ErrNotFound", err)
 	}
 	if _, err := ListKnowledgeBaseShares(ctx, db, "workspace-kb", "creator"); !errors.Is(err, ErrNotFound) {

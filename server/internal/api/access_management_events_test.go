@@ -70,7 +70,7 @@ func TestKnowledgeBaseShareUpdateNotifiesMemberAndOwner(t *testing.T) {
 	t.Cleanup(func() { eventsHub.unregister("event-share-member", memberConn) })
 
 	req := httptest.NewRequest(http.MethodPut, "/api/kbs/"+kb.ID+"/shares", strings.NewReader(`{
-		"user_id":"event-share-member","role":"read"
+		"email":"member@example.test","role":"read"
 	}`))
 	req = req.WithContext(context.WithValue(req.Context(), userCtxKey{}, owner))
 	req = req.WithContext(context.WithValue(req.Context(), pathCtxKey{}, map[string]string{"id": kb.ID}))

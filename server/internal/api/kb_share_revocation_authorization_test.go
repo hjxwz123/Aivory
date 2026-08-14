@@ -29,7 +29,7 @@ func TestUnauthorizedKnowledgeBaseShareDeleteHasNoRevocationSideEffects(t *testi
 		t.Fatal(err)
 	}
 	if _, err := store.UpsertKnowledgeBaseShare(
-		context.Background(), db, kb.ID, "share-owner", "share-member", "read",
+		context.Background(), db, kb.ID, "share-owner", "share-member@example.test", "read",
 	); err != nil {
 		t.Fatal(err)
 	}

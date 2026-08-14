@@ -72,9 +72,16 @@ func CanRevokeKnowledgeBaseShare(ctx context.Context, db *sql.DB, kbID, ownerID,
 	return allowed == 1, nil
 }
 
-func UpsertKnowledgeBaseShare(ctx context.Context, db *sql.DB, kbID, ownerID, userID, role string) (*KnowledgeBaseShare, error) {
+// UpsertKnowledgeBaseShare resolves the target from a complete account email.
+// Accepting an opaque user id here would let API callers bypass the exact-email
+// discovery boundary and disclose another account's identity in the response.
+func UpsertKnowledgeBaseShare(ctx context.Context, db *sql.DB, kbID, ownerID, targetEmail, role string) (*KnowledgeBaseShare, error) {
 	role, err := validateKnowledgeBaseShareRole(role)
-	if err != nil || strings.TrimSpace(userID) == "" || userID == ownerID {
+	if err != nil {
+		return nil, ErrInvalidKnowledgeBaseShare
+	}
+	targetEmail, err = NormalizeUserEmail(targetEmail)
+	if err != nil {
 		return nil, ErrInvalidKnowledgeBaseShare
 	}
 	tx, err := beginKnowledgeBaseMutationTx(ctx, db, kbID, "")
@@ -86,10 +93,12 @@ func UpsertKnowledgeBaseShare(ctx context.Context, db *sql.DB, kbID, ownerID, us
 	res, err := tx.ExecContext(ctx, `
 		INSERT INTO knowledge_base_shares(kb_id,user_id,role,created_at,updated_at)
 		SELECT k.id, target.id, ?, ?, ?
-		  FROM knowledge_bases k JOIN users target ON target.id=? AND target.status='active'
-		 WHERE k.id=? AND k.user_id=? AND COALESCE(k.workspace_id,'')='' AND `+standaloneKnowledgeBasePredicate("k")+`
+		  FROM knowledge_bases k
+		  JOIN users target ON LOWER(TRIM(target.email))=? AND target.status='active'
+		 WHERE k.id=? AND k.user_id=? AND target.id<>?
+		   AND COALESCE(k.workspace_id,'')='' AND `+standaloneKnowledgeBasePredicate("k")+`
 		ON CONFLICT(kb_id,user_id) DO UPDATE SET role=excluded.role, updated_at=excluded.updated_at`,
-		role, now, now, userID, kbID, ownerID)
+		role, now, now, targetEmail, kbID, ownerID, ownerID)
 	if err != nil {
 		return nil, err
 	}
@@ -103,7 +112,7 @@ func UpsertKnowledgeBaseShare(ctx context.Context, db *sql.DB, kbID, ownerID, us
 	err = tx.QueryRowContext(ctx, `
 		SELECT s.kb_id,s.user_id,s.role,COALESCE(u.name,''),u.email,COALESCE(u.settings,''),s.created_at,s.updated_at
 		  FROM knowledge_base_shares s JOIN users u ON u.id=s.user_id
-		 WHERE s.kb_id=? AND s.user_id=?`, kbID, userID).
+		 WHERE s.kb_id=? AND LOWER(TRIM(u.email))=?`, kbID, targetEmail).
 		Scan(&share.KBID, &share.UserID, &share.Role, &share.Name, &share.Email, &settings, &share.CreatedAt, &share.UpdatedAt)
 	if err != nil {
 		return nil, err
@@ -167,10 +176,14 @@ func DeleteKnowledgeBaseShare(ctx context.Context, db *sql.DB, kbID, ownerID, us
 }
 
 // SearchKnowledgeBaseShareCandidates returns only display identity fields and
-// only after proving the caller owns a shareable personal knowledge base.
+// only after proving the caller owns a shareable personal knowledge base. User
+// discovery is deliberately exact-email-only: an empty, partial, name-based,
+// or otherwise invalid query must never degrade into an account directory.
 func SearchKnowledgeBaseShareCandidates(ctx context.Context, db *sql.DB, kbID, ownerID, search string, limit int) ([]KnowledgeBaseShare, error) {
-	if limit <= 0 || limit > 50 {
-		limit = 20
+	// Account emails are unique. Keep the database boundary at one row even if
+	// legacy case variants exist, so this endpoint can never become a directory.
+	if limit <= 0 || limit > 1 {
+		limit = 1
 	}
 	var allowed int
 	if err := db.QueryRowContext(ctx, `SELECT 1 FROM knowledge_bases k
@@ -180,19 +193,16 @@ func SearchKnowledgeBaseShareCandidates(ctx context.Context, db *sql.DB, kbID, o
 		}
 		return nil, err
 	}
-	search = strings.TrimSpace(search)
+	email, err := NormalizeUserEmail(search)
+	if err != nil {
+		return []KnowledgeBaseShare{}, nil
+	}
 	query := `SELECT u.id,COALESCE(u.name,''),u.email,COALESCE(u.settings,''),COALESCE(s.role,'')
 		FROM users u LEFT JOIN knowledge_base_shares s ON s.kb_id=? AND s.user_id=u.id
-		WHERE u.id<>? AND u.status='active'`
-	args := []any{kbID, ownerID}
-	if search != "" {
-		like := "%" + strings.ToLower(search) + "%"
-		query += ` AND (LOWER(u.name) LIKE ? OR LOWER(u.email) LIKE ?)`
-		args = append(args, like, like)
-	}
-	query += ` ORDER BY CASE WHEN s.user_id IS NULL THEN 1 ELSE 0 END, LOWER(u.name), LOWER(u.email) LIMIT ?`
-	args = append(args, limit)
-	rows, err := db.QueryContext(ctx, query, args...)
+		WHERE u.id<>? AND u.status='active' AND LOWER(TRIM(u.email))=?
+		ORDER BY CASE WHEN s.user_id IS NULL THEN 1 ELSE 0 END, LOWER(u.name), LOWER(u.email)
+		LIMIT ?`
+	rows, err := db.QueryContext(ctx, query, kbID, ownerID, email, limit)
 	if err != nil {
 		return nil, err
 	}
