@@ -677,7 +677,9 @@ export const kbsApi = {
     api<ApiKnowledgeBaseShare[]>(
       `/kbs/${encodeURIComponent(id)}/share-candidates?search=${encodeURIComponent(search)}`,
     ),
-  upsertShare: (id: string, body: { user_id: string; role: 'read' | 'write' }) =>
+  // The server resolves the target by complete email; user_id is intentionally
+  // not accepted for share mutations to prevent bypassing account discovery.
+  upsertShare: (id: string, body: { email: string; role: 'read' | 'write' }) =>
     api<ApiKnowledgeBaseShare>(`/kbs/${encodeURIComponent(id)}/shares`, { method: 'PUT', body }),
   removeShare: (id: string, userId: string) =>
     api<{ ok: true }>(`/kbs/${encodeURIComponent(id)}/shares/${encodeURIComponent(userId)}`, { method: 'DELETE' }),

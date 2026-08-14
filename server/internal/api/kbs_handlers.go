@@ -318,7 +318,7 @@ func listKBShareCandidatesHandler(d Deps, w http.ResponseWriter, r *http.Request
 		return
 	}
 	rows, err := store.SearchKnowledgeBaseShareCandidates(
-		r.Context(), d.DB, pathParam(r, "id"), u.ID, r.URL.Query().Get("search"), 20,
+		r.Context(), d.DB, pathParam(r, "id"), u.ID, r.URL.Query().Get("search"), 1,
 	)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
@@ -377,14 +377,14 @@ func upsertKBShareHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		UserID string `json:"user_id"`
-		Role   string `json:"role"`
+		Email string `json:"email"`
+		Role  string `json:"role"`
 	}
 	if err := decodeJSON(r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, errInvalidInput)
 		return
 	}
-	share, err := store.UpsertKnowledgeBaseShare(r.Context(), d.DB, pathParam(r, "id"), u.ID, body.UserID, body.Role)
+	share, err := store.UpsertKnowledgeBaseShare(r.Context(), d.DB, pathParam(r, "id"), u.ID, body.Email, body.Role)
 	if err != nil {
 		switch {
 		case errors.Is(err, store.ErrInvalidKnowledgeBaseShare):
@@ -396,7 +396,7 @@ func upsertKBShareHandler(d Deps, w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	publishKnowledgeBaseAccessEvent(d, r, pathParam(r, "id"), u.ID, body.UserID)
+	publishKnowledgeBaseAccessEvent(d, r, pathParam(r, "id"), u.ID, share.UserID)
 	writeJSON(w, http.StatusOK, share)
 }
 

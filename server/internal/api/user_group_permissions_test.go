@@ -131,7 +131,7 @@ func TestKnowledgeBaseGroupPermissionOverridesExistingShareImmediately(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.UpsertKnowledgeBaseShare(ctx, db, kb.ID, "owner", "member", "read"); err != nil {
+	if _, err := store.UpsertKnowledgeBaseShare(ctx, db, kb.ID, "owner", "member@example.test", "read"); err != nil {
 		t.Fatal(err)
 	}
 

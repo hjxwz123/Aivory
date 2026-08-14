@@ -148,7 +148,7 @@ func TestHTTPKnowledgeBaseShareRevocationScrubsLateProviderOutputAndAllowsReshar
 	if err != nil {
 		t.Fatalf("create knowledge base: %v", err)
 	}
-	if _, err := store.UpsertKnowledgeBaseShare(ctx, db, kb.ID, owner.ID, member.ID, "read"); err != nil {
+	if _, err := store.UpsertKnowledgeBaseShare(ctx, db, kb.ID, owner.ID, member.Email, "read"); err != nil {
 		t.Fatalf("share knowledge base: %v", err)
 	}
 	conversation, err := store.CreateConversation(ctx, db, store.Conversation{
@@ -257,7 +257,7 @@ func TestHTTPKnowledgeBaseShareRevocationScrubsLateProviderOutputAndAllowsReshar
 
 	reshare := branchHTTPDoJSON(t, client, http.MethodPut,
 		server.URL+"/api/kbs/"+kb.ID+"/shares", ownerToken,
-		`{"user_id":"`+member.ID+`","role":"read"}`)
+		`{"email":"`+member.Email+`","role":"read"}`)
 	reshareBody, readErr := io.ReadAll(reshare.Body)
 	reshare.Body.Close()
 	if readErr != nil {
